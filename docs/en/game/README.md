@@ -12,6 +12,7 @@ here; the code that uses them is described in [apps](../architecture/apps.md).
 | [Map catalogue](maps/README.md) | Cards of specific maps: [Moorlands Route](maps/moorlands-route.md) |
 | [Units](units/README.md) | State indicators, fields, states, missile range, commands, deployment, evidence |
 | [Unit catalogue](units/catalog/README.md) | [Empire](units/catalog/empire.md): identifiers, cost, static stats |
+| [Readout catalogue](readouts.md) | Everything readable about units and the battle: tracked and not yet; run profiles |
 | [Visual atlas](atlas.md) | The key research images |
 
 ## Data available through Lua

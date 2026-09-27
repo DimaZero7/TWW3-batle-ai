@@ -1,0 +1,1463 @@
+{
+  "schema_version": 1,
+  "description": "Every unit/battle readout we know of. status: tracked = collected and answered in game; available = in the game's API, not yet tested. access: own = own units only; enemy = also visible enemies; public = battle-wide; truth = full summary only, never an AI input.",
+  "sources": [
+    "documentation/script/battle/*.html (installed game)",
+    "ui/metadata.json (CCO spec, installed game)",
+    "docs/*/game/units (our in-game measurements)"
+  ],
+  "groups": {
+    "identity": {
+      "ru": "Что это за отряд",
+      "en": "What the unit is"
+    },
+    "strength": {
+      "ru": "Численность и сила",
+      "en": "Numbers and strength"
+    },
+    "health": {
+      "ru": "Здоровье и щиты",
+      "en": "Health and shields"
+    },
+    "morale": {
+      "ru": "Мораль",
+      "en": "Morale"
+    },
+    "fatigue": {
+      "ru": "Усталость",
+      "en": "Fatigue"
+    },
+    "movement": {
+      "ru": "Движение и положение",
+      "en": "Movement and position"
+    },
+    "orders": {
+      "ru": "Приказы и управление",
+      "en": "Orders and control"
+    },
+    "combat": {
+      "ru": "Бой: кто кого бьёт",
+      "en": "Combat: who hits whom"
+    },
+    "ranged": {
+      "ru": "Стрельба и боезапас",
+      "en": "Shooting and ammo"
+    },
+    "abilities": {
+      "ru": "Способности и магия",
+      "en": "Abilities and magic"
+    },
+    "visibility": {
+      "ru": "Видимость и скрытность",
+      "en": "Visibility and hiding"
+    },
+    "army": {
+      "ru": "Армия и стороны",
+      "en": "Army and sides"
+    },
+    "battlefield": {
+      "ru": "Поле боя",
+      "en": "Battlefield"
+    },
+    "events": {
+      "ru": "События боя",
+      "en": "Battle events"
+    },
+    "map": {
+      "ru": "Карта",
+      "en": "Map"
+    }
+  },
+  "readouts": [
+    {
+      "id": "unit.type",
+      "group": "identity",
+      "ru": "Тип отряда (ключ из базы игры)",
+      "en": "Unit type (game DB key)",
+      "api": "unit:type()",
+      "status": "tracked",
+      "module": "entries.unit_readout (profile)",
+      "access": "enemy"
+    },
+    {
+      "id": "unit.name",
+      "group": "identity",
+      "ru": "Имя отряда из сценария",
+      "en": "Script name from the scenario",
+      "api": "unit:name()",
+      "status": "tracked",
+      "module": "apps.battle.adapter",
+      "access": "enemy"
+    },
+    {
+      "id": "unit.id",
+      "group": "identity",
+      "ru": "Уникальный номер отряда в бою",
+      "en": "Unique unit id in the battle",
+      "api": "unit:unique_ui_id()",
+      "status": "tracked",
+      "module": "apps.telemetry.sampler_adapter",
+      "access": "truth"
+    },
+    {
+      "id": "unit.commanding",
+      "group": "identity",
+      "ru": "Это генерал армии",
+      "en": "Is the army general",
+      "api": "unit:is_commanding_unit()",
+      "status": "tracked",
+      "module": "entries.unit_readout (profile)",
+      "access": "enemy"
+    },
+    {
+      "id": "unit.class",
+      "group": "identity",
+      "ru": "Класс отряда (пехота, кавалерия…)",
+      "en": "Unit class (infantry, cavalry…)",
+      "api": "unit:unit_class()",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "unit.kind_flags",
+      "group": "identity",
+      "ru": "Вид: пехота, конница, копейщики против конницы, колесница, звери, слоны, артиллерия, боевая машина",
+      "en": "Kind: infantry, cavalry, anti-cavalry, chariot, beasts, elephants, artillery, war machine",
+      "api": "unit:is_infantry/is_cavalry/is_pikemen/is_anti_cavalry_infantry/is_lancers/is_chariot/is_war_beasts/is_elephants/is_artillery/is_war_machine()",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "unit.is_character",
+      "group": "identity",
+      "ru": "Герой или генерал (персонаж)",
+      "en": "Character (hero or general)",
+      "api": "CCO IsCharacter / IsGeneral",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "unit.renown",
+      "group": "identity",
+      "ru": "Полк славы (особый отряд)",
+      "en": "Regiment of Renown",
+      "api": "CCO IsRenown",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "unit.spawned",
+      "group": "identity",
+      "ru": "Появился во время боя (призван способностью)",
+      "en": "Spawned during the battle (by an ability)",
+      "api": "CCO IsSpawnedUnit",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "unit.attributes",
+      "group": "identity",
+      "ru": "Особые свойства: прячется в лесу, прячется везде, защита от натиска, отражение натиска, воодушевляет",
+      "en": "Attributes: hide in forest, stalk, charge defence, charge reflection, encourages",
+      "api": "unit:has_attribute(key)",
+      "status": "tracked",
+      "module": "entries.unit_readout (profile)",
+      "access": "own"
+    },
+    {
+      "id": "unit.behaviours_available",
+      "group": "identity",
+      "ru": "Какие режимы доступны: оборона, перестрелка, свободный огонь, плотность строя",
+      "en": "Available behaviours: defend, skirmish, fire at will, spacing",
+      "api": "unit:can_use_behaviour(key)",
+      "status": "tracked",
+      "module": "entries.unit_readout (profile)",
+      "access": "own"
+    },
+    {
+      "id": "unit.card_stats",
+      "group": "identity",
+      "ru": "Все характеристики с карточки: атака, защита, броня, натиск, урон и т. д.",
+      "en": "All card stats: attack, defence, armour, charge, damage…",
+      "api": "CCO UnitDetailsContext.StatList / BaseStatValueFromKey",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "unit.card_morale",
+      "group": "identity",
+      "ru": "Дисциплина (мораль) с карточки",
+      "en": "Leadership from the card",
+      "api": "CCO UnitDetailsContext.StatList stat_morale",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "unit.mass",
+      "group": "identity",
+      "ru": "Масса отряда (сила удара при натиске)",
+      "en": "Unit mass (charge impact)",
+      "api": "CCO UnitDetailsContext.Mass",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "unit.experience_level",
+      "group": "identity",
+      "ru": "Уровень опыта",
+      "en": "Experience level",
+      "api": "CCO ExperienceLevel",
+      "status": "tracked",
+      "module": "entries.unit_readout (profile)",
+      "access": "own"
+    },
+    {
+      "id": "unit.experience_progress",
+      "group": "identity",
+      "ru": "Сколько осталось до следующего уровня опыта",
+      "en": "Progress to the next experience level",
+      "api": "CCO ExperiencePercent",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "unit.character_rank",
+      "group": "identity",
+      "ru": "Уровень героя",
+      "en": "Character rank",
+      "api": "CCO CharacterRank / HasCharacterRank",
+      "status": "tracked",
+      "module": "entries.unit_readout (profile)",
+      "access": "own"
+    },
+    {
+      "id": "native.number_of_men_alive",
+      "group": "strength",
+      "ru": "Сколько бойцов живо",
+      "en": "Men alive",
+      "api": "unit:number_of_men_alive()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.initial_number_of_men",
+      "group": "strength",
+      "ru": "Сколько бойцов было в начале",
+      "en": "Men at start",
+      "api": "unit:initial_number_of_men()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.unary_of_men_alive",
+      "group": "strength",
+      "ru": "Доля живых бойцов",
+      "en": "Share of men alive",
+      "api": "unit:unary_of_men_alive()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.NumEntities",
+      "group": "strength",
+      "ru": "Сколько бойцов (по интерфейсу)",
+      "en": "Entities now (UI)",
+      "api": "CCO NumEntities",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.NumEntitiesInitial",
+      "group": "strength",
+      "ru": "Сколько бойцов было (по интерфейсу)",
+      "en": "Entities at start (UI)",
+      "api": "CCO NumEntitiesInitial",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "unit.strategic_value",
+      "group": "strength",
+      "ru": "Оценка силы отряда от игры (одно число)",
+      "en": "Game's strength estimate (one number)",
+      "api": "unit:strategic_value()",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "cco.PercentCasualtiesRecently",
+      "group": "strength",
+      "ru": "Доля бойцов, погибших за последние 4 секунды",
+      "en": "Share of men lost in the last 4 s",
+      "api": "CCO PercentCasualtiesRecently",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "native.unary_hitpoints",
+      "group": "health",
+      "ru": "Доля здоровья от начального",
+      "en": "Health as share of start",
+      "api": "unit:unary_hitpoints()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.HealthValue",
+      "group": "health",
+      "ru": "Здоровье (число)",
+      "en": "Health (raw)",
+      "api": "CCO HealthValue",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.HealthMax",
+      "group": "health",
+      "ru": "Максимум здоровья",
+      "en": "Max health",
+      "api": "CCO HealthMax",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.HealthPercent",
+      "group": "health",
+      "ru": "Здоровье в процентах (как в интерфейсе)",
+      "en": "Health percent (UI)",
+      "api": "CCO HealthPercent",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.PercentHpLostRecently",
+      "group": "health",
+      "ru": "Сколько здоровья потеряно за 4 секунды",
+      "en": "Health lost in the last 4 s",
+      "api": "CCO PercentHpLostRecently",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.IsTakingDamage",
+      "group": "health",
+      "ru": "Получает урон прямо сейчас",
+      "en": "Taking damage right now",
+      "api": "CCO IsTakingDamage",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "health.delayed",
+      "group": "health",
+      "ru": "«Отложенное» здоровье (полоска интерфейса)",
+      "en": "Delayed health (UI bar)",
+      "api": "CCO DelayedHealthPercent",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "health.barrier",
+      "group": "health",
+      "ru": "Магический щит: сколько осталось, заряжается ли, когда восстановится",
+      "en": "Barrier: remaining, recharging, time to recharge",
+      "api": "CCO BarrierHp / BarrierMaxHp / BarrierHpPercent / IsBarrierCharging / BarrierSecsUntilRecharge",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "health.healing",
+      "group": "health",
+      "ru": "Лечение: сила и сколько можно восстановить",
+      "en": "Healing: power and how much can be restored",
+      "api": "CCO HealingPower / HealthReplenishRateBase / MaxHealthPercentCanReplenish",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "health.wounded",
+      "group": "health",
+      "ru": "Ранен (особое состояние)",
+      "en": "Wounded state",
+      "api": "CCO IsWounded",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "health.invulnerable",
+      "group": "health",
+      "ru": "Неуязвим",
+      "en": "Invulnerable",
+      "api": "unit:is_invulnerable() / CCO IsInvincible",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "native.is_wavering",
+      "group": "morale",
+      "ru": "Колеблется (на грани бегства)",
+      "en": "Wavering",
+      "api": "unit:is_wavering()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.is_routing",
+      "group": "morale",
+      "ru": "Бежит",
+      "en": "Routing",
+      "api": "unit:is_routing()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.is_shattered",
+      "group": "morale",
+      "ru": "Рассеян (уже не вернётся)",
+      "en": "Shattered",
+      "api": "unit:is_shattered()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.MoralePercent",
+      "group": "morale",
+      "ru": "Мораль в процентах",
+      "en": "Morale percent",
+      "api": "CCO MoralePercent",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.MoraleState",
+      "group": "morale",
+      "ru": "Состояние морали (число)",
+      "en": "Morale state (number)",
+      "api": "CCO MoraleState",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.MoraleName",
+      "group": "morale",
+      "ru": "Состояние морали (текст)",
+      "en": "Morale state (text)",
+      "api": "CCO MoraleName",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.MoraleGreatestEffect",
+      "group": "morale",
+      "ru": "Что сильнее всего влияет на мораль",
+      "en": "Biggest morale factor",
+      "api": "CCO MoraleGreatestEffect",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.IsRouting",
+      "group": "morale",
+      "ru": "Бежит (по интерфейсу)",
+      "en": "Routing (UI)",
+      "api": "CCO IsRouting",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.IsShattered",
+      "group": "morale",
+      "ru": "Рассеян (по интерфейсу)",
+      "en": "Shattered (UI)",
+      "api": "CCO IsShattered",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.IsWavering",
+      "group": "morale",
+      "ru": "Колеблется (по интерфейсу)",
+      "en": "Wavering (UI)",
+      "api": "CCO IsWavering",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.IsInLastStand",
+      "group": "morale",
+      "ru": "Последний рубеж (некуда бежать)",
+      "en": "Last stand",
+      "api": "CCO IsInLastStand",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.IsOutOfControl",
+      "group": "morale",
+      "ru": "Вне контроля",
+      "en": "Out of control",
+      "api": "CCO IsOutOfControl",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.IsAwaitingOrderAfterRally",
+      "group": "morale",
+      "ru": "Вернулся после бегства и ждёт приказа",
+      "en": "Rallied, awaiting orders",
+      "api": "CCO IsAwaitingOrderAfterRally",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "morale.terrified",
+      "group": "morale",
+      "ru": "В ужасе от страшного врага",
+      "en": "Terrified",
+      "api": "CCO IsTerrified",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "morale.rampaging",
+      "group": "morale",
+      "ru": "В неистовстве (не слушается, лезет в драку)",
+      "en": "Rampaging",
+      "api": "unit:is_rampaging() / CCO IsForceRampage",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "morale.undead",
+      "group": "morale",
+      "ru": "Нежить/демоны: рассыпается, нестабилен",
+      "en": "Undead/daemons: crumbling, unstable",
+      "api": "unit:is_crumbling() / is_unstable() / CCO IsUndead",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "native.fatigue_state",
+      "group": "fatigue",
+      "ru": "Усталость (состояние)",
+      "en": "Fatigue state",
+      "api": "unit:fatigue_state()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.FatigueState",
+      "group": "fatigue",
+      "ru": "Усталость (число)",
+      "en": "Fatigue (number)",
+      "api": "CCO FatigueState",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.FatigueName",
+      "group": "fatigue",
+      "ru": "Усталость (текст)",
+      "en": "Fatigue (text)",
+      "api": "CCO FatigueName",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.position",
+      "group": "movement",
+      "ru": "Где стоит отряд",
+      "en": "Unit position",
+      "api": "unit:position()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "enemy"
+    },
+    {
+      "id": "native.ordered_position",
+      "group": "movement",
+      "ru": "Куда отряду приказано идти",
+      "en": "Ordered position",
+      "api": "unit:ordered_position()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.bearing",
+      "group": "movement",
+      "ru": "Куда повёрнут отряд",
+      "en": "Facing",
+      "api": "unit:bearing()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.ordered_bearing",
+      "group": "movement",
+      "ru": "Куда приказано повернуться",
+      "en": "Ordered facing",
+      "api": "unit:ordered_bearing()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.ordered_width",
+      "group": "movement",
+      "ru": "Приказанная ширина строя",
+      "en": "Ordered width",
+      "api": "unit:ordered_width()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.is_moving",
+      "group": "movement",
+      "ru": "Двигается",
+      "en": "Moving",
+      "api": "unit:is_moving()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.is_moving_fast",
+      "group": "movement",
+      "ru": "Бежит бегом",
+      "en": "Moving fast",
+      "api": "unit:is_moving_fast()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.is_idle",
+      "group": "movement",
+      "ru": "Стоит без приказа",
+      "en": "Idle",
+      "api": "unit:is_idle()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.is_leaving_battle",
+      "group": "movement",
+      "ru": "Покидает поле",
+      "en": "Leaving the battle",
+      "api": "unit:is_leaving_battle()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.slow_speed",
+      "group": "movement",
+      "ru": "Скорость шагом",
+      "en": "Walking speed",
+      "api": "unit:slow_speed()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.fast_speed",
+      "group": "movement",
+      "ru": "Скорость бегом",
+      "en": "Running speed",
+      "api": "unit:fast_speed()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.IsWithdrawing",
+      "group": "movement",
+      "ru": "Отступает с поля",
+      "en": "Withdrawing",
+      "api": "CCO IsWithdrawing",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "move.walk_run",
+      "group": "movement",
+      "ru": "Идёт шагом или бежит (по интерфейсу)",
+      "en": "Walking or running (UI)",
+      "api": "CCO IsWalking / IsRunning",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "move.flying",
+      "group": "movement",
+      "ru": "Умеет летать, летит сейчас, можно ли переключить",
+      "en": "Can fly, flying now, can toggle",
+      "api": "unit:can_fly() / is_currently_flying() / CCO CanToggleFlying",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "move.officer_position",
+      "group": "movement",
+      "ru": "Где стоит командир отряда",
+      "en": "Officer position",
+      "api": "unit:position_of_officer()",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "move.soldier_positions",
+      "group": "movement",
+      "ru": "Где стоит каждый боец (реальная форма строя)",
+      "en": "Every soldier's position (real formation)",
+      "api": "CCO ManList / EntityList -> Position",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "move.buildings_walls",
+      "group": "movement",
+      "ru": "В здании, на стене, лезет по лестнице",
+      "en": "In a building, on a wall, climbing a ladder",
+      "api": "unit:is_currently_garrisoned() / is_on_top_of_wall() / is_climbing_ladder()",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "move.radar_position",
+      "group": "movement",
+      "ru": "Положение на мини-карте",
+      "en": "Minimap position",
+      "api": "CCO RadarPosition",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "nav.can_reach",
+      "group": "movement",
+      "ru": "Может ли отряд дойти до точки",
+      "en": "Can the unit reach a point",
+      "api": "unit:can_reach_position(p)",
+      "status": "tracked",
+      "module": "apps.navigation.adapter",
+      "access": "own"
+    },
+    {
+      "id": "nav.deploy_state",
+      "group": "movement",
+      "ru": "Расставляется / расставлен",
+      "en": "Deploying / deployed",
+      "api": "unit:is_deploying() / is_deployed()",
+      "status": "tracked",
+      "module": "apps.navigation.diagnostics_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.is_script_controlled",
+      "group": "orders",
+      "ru": "Под управлением скрипта",
+      "en": "Script controlled",
+      "api": "unit:is_script_controlled()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.is_controllable",
+      "group": "orders",
+      "ru": "Можно отдавать приказы",
+      "en": "Controllable",
+      "api": "unit:is_controllable()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.behaviours_active",
+      "group": "orders",
+      "ru": "Какие режимы включены: оборона, перестрелка, свободный огонь, плотность",
+      "en": "Active behaviours: defend, skirmish, fire at will, spacing",
+      "api": "unit:is_behaviour_active(key)",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "orders.controller",
+      "group": "orders",
+      "ru": "Кто управляет отрядом: ИИ или игрок",
+      "en": "Who controls the unit: AI or player",
+      "api": "unit:is_ai_controlled() / is_player_controlled()",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "army.player_controlled",
+      "group": "orders",
+      "ru": "Армия под управлением игрока",
+      "en": "Army is player controlled",
+      "api": "army:is_player_controlled()",
+      "status": "tracked",
+      "module": "entries.ai_vs_ai",
+      "access": "public"
+    },
+    {
+      "id": "native.is_in_melee",
+      "group": "combat",
+      "ru": "В рукопашной",
+      "en": "In melee",
+      "api": "unit:is_in_melee()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.current_target",
+      "group": "combat",
+      "ru": "Кого атакует (только если цель видна)",
+      "en": "Current target (only if visible)",
+      "api": "unit:current_target()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.flank_threats",
+      "group": "combat",
+      "ru": "Угроза с левого/правого фланга и с тыла, и кто угрожает",
+      "en": "Left/right/rear flank threat and by whom",
+      "api": "unit:is_*_flank_threatened() / left_flank_threat() / right_flank_threat() / rear_threat()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.DamageInflictedRecently",
+      "group": "combat",
+      "ru": "Урон, нанесённый за 4 секунды",
+      "en": "Damage dealt in the last 4 s",
+      "api": "CCO DamageInflictedRecently",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.NumKills",
+      "group": "combat",
+      "ru": "Сколько врагов убил",
+      "en": "Kills",
+      "api": "CCO NumKills",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "combat.kills_native",
+      "group": "combat",
+      "ru": "Сколько врагов убил (по движку)",
+      "en": "Kills (engine)",
+      "api": "unit:number_of_enemies_killed()",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "combat.threat_of_unit",
+      "group": "combat",
+      "ru": "Насколько опасен для отряда конкретный враг",
+      "en": "How dangerous a given enemy is for the unit",
+      "api": "CCO ThreatPercentOfUnit(unit)",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "combat.execution",
+      "group": "combat",
+      "ru": "Может ли вражеский герой добить отряд одним ударом",
+      "en": "Can an enemy hero execute the unit",
+      "api": "CCO CanBeExecutedByNearbyEnemy / CanNearlyBeExecutedByNearbyEnemy",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "combat.capturing",
+      "group": "combat",
+      "ru": "Захватывает точку, сила захвата",
+      "en": "Capturing a point, capture power",
+      "api": "CCO IsCapturing / CapturePower",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "combat.pair_distance",
+      "group": "combat",
+      "ru": "Расстояние между двумя отрядами (с учётом размеров)",
+      "en": "Distance between two units (with footprints)",
+      "api": "unit:unit_distance(other)",
+      "status": "tracked",
+      "module": "apps.units.range_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.ammo_left",
+      "group": "ranged",
+      "ru": "Сколько осталось стрел/патронов",
+      "en": "Ammo left",
+      "api": "unit:ammo_left()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.starting_ammo",
+      "group": "ranged",
+      "ru": "Сколько боеприпасов было",
+      "en": "Starting ammo",
+      "api": "unit:starting_ammo()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.PrimaryAmmoPercent",
+      "group": "ranged",
+      "ru": "Боезапас в процентах",
+      "en": "Ammo percent",
+      "api": "CCO PrimaryAmmoPercent",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "native.is_under_missile_attack",
+      "group": "ranged",
+      "ru": "Под обстрелом",
+      "en": "Under missile fire",
+      "api": "unit:is_under_missile_attack() / CCO IsUnderMissileAttack",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "cco.IsFiringMissiles",
+      "group": "ranged",
+      "ru": "Стреляет сейчас",
+      "en": "Firing now",
+      "api": "CCO IsFiringMissiles",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "range.missile_range",
+      "group": "ranged",
+      "ru": "Дальность стрельбы (движок и карточка)",
+      "en": "Missile range (engine and card)",
+      "api": "unit:missile_range() / CCO scalar_missile_range",
+      "status": "tracked",
+      "module": "apps.units.range_adapter",
+      "access": "own"
+    },
+    {
+      "id": "range.in_range",
+      "group": "ranged",
+      "ru": "Цель в радиусе стрельбы",
+      "en": "Target in range",
+      "api": "unit:unit_in_range(target)",
+      "status": "tracked",
+      "module": "apps.units.range_adapter",
+      "access": "own"
+    },
+    {
+      "id": "ranged.reload",
+      "group": "ranged",
+      "ru": "Перезарядка: сколько осталось до выстрела",
+      "en": "Reload: time to next shot",
+      "api": "CCO ReloadPercentMax; per soldier IsReloading / ReloadPercent / ReloadRemainingTime",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "ranged.projectile",
+      "group": "ranged",
+      "ru": "Каким снарядом стреляет сейчас",
+      "en": "Current projectile type",
+      "api": "CCO ActiveProjectileContext",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "ranged.fire_at_will",
+      "group": "ranged",
+      "ru": "Включён свободный огонь (по интерфейсу)",
+      "en": "Fire at will on (UI)",
+      "api": "CCO IsFiringAtWill",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "ranged.secondary_ammo",
+      "group": "ranged",
+      "ru": "Второй вид боеприпасов, бесконечные боеприпасы",
+      "en": "Secondary ammo, infinite ammo",
+      "api": "CCO SecondaryAmmoPercent / HasInfinitePrimaryAmmo / HasInfiniteSecondaryAmmo",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "abilities.owned",
+      "group": "abilities",
+      "ru": "Какие способности есть у отряда",
+      "en": "Abilities the unit owns",
+      "api": "unit:owned_passive_special_abilities() / owned_non_passive_special_abilities()",
+      "status": "tracked",
+      "module": "entries.unit_readout (profile)",
+      "access": "own"
+    },
+    {
+      "id": "abilities.can_perform",
+      "group": "abilities",
+      "ru": "Можно ли применить способность сейчас",
+      "en": "Can perform an ability now",
+      "api": "unit:can_perform_special_ability(key)",
+      "status": "tracked",
+      "module": "research (unit-state)",
+      "access": "own"
+    },
+    {
+      "id": "abilities.state",
+      "group": "abilities",
+      "ru": "Состояние способностей: перезарядка, осталось применений, активна, радиус, мана, шанс сбоя",
+      "en": "Ability state: recharge, uses left, active, range, mana, miscast chance",
+      "api": "CCO BattleAbilityList",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "abilities.effects_count",
+      "group": "abilities",
+      "ru": "Сколько эффектов действует на отряд",
+      "en": "Number of active effects",
+      "api": "CCO ActiveEffectList.Size",
+      "status": "tracked",
+      "module": "entries.unit_readout (profile)",
+      "access": "own"
+    },
+    {
+      "id": "abilities.effects",
+      "group": "abilities",
+      "ru": "Какие эффекты действуют (свои усиления, вражеские заклинания) и сколько им осталось",
+      "en": "Which effects are active and time left",
+      "api": "CCO ActiveEffectList -> Name / TimeRemainingSeconds",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "cco.StatusList",
+      "group": "abilities",
+      "ru": "Значки состояний отряда: готов к натиску, скрыт, стреляет, в бою…",
+      "en": "Status icons: braced, hidden, firing, melee…",
+      "api": "CCO StatusList",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "magic.winds",
+      "group": "abilities",
+      "ru": "Запас магии армии и скорость восстановления",
+      "en": "Army winds of magic and recharge",
+      "api": "CCO WindsOfMagicPoolContext / army:winds_of_magic_current()",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "magic.can_use",
+      "group": "abilities",
+      "ru": "Отряд умеет колдовать",
+      "en": "Unit can use magic",
+      "api": "unit:can_use_magic()",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "vis.visible_to_side",
+      "group": "visibility",
+      "ru": "Видит ли сторона отряд",
+      "en": "Is the unit visible to a side",
+      "api": "unit:is_visible_to_alliance(a)",
+      "status": "tracked",
+      "module": "apps.intel.adapter",
+      "access": "enemy"
+    },
+    {
+      "id": "vis.last_seen",
+      "group": "visibility",
+      "ru": "Где противника видели последний раз и когда",
+      "en": "Where and when an enemy was last seen",
+      "api": "apps.intel.services memory",
+      "status": "tracked",
+      "module": "apps.intel.services",
+      "access": "enemy"
+    },
+    {
+      "id": "native.is_hidden",
+      "group": "visibility",
+      "ru": "Отряд скрыт (лес, высокая трава, скрытность)",
+      "en": "Unit is hidden",
+      "api": "unit:is_hidden()",
+      "status": "tracked",
+      "module": "apps.units.state_adapter",
+      "access": "own"
+    },
+    {
+      "id": "vis.unspottable",
+      "group": "visibility",
+      "ru": "Невидим по своей природе",
+      "en": "Unspottable by nature",
+      "api": "CCO IsUnspottable",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "vis.guerrilla",
+      "group": "visibility",
+      "ru": "Может расставиться за пределами своей зоны",
+      "en": "Can deploy outside its zone",
+      "api": "CCO CanGuerrillaDeploy / CanGuerrillaDeployCurrently",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "army.role",
+      "group": "army",
+      "ru": "Атакующий или обороняющийся",
+      "en": "Attacker or defender",
+      "api": "alliance:is_attacker()",
+      "status": "tracked",
+      "module": "apps.battle.adapter",
+      "access": "public"
+    },
+    {
+      "id": "army.counts",
+      "group": "army",
+      "ru": "Армия: сколько отрядов и бойцов осталось, сколько погибло, подкрепления",
+      "en": "Army: units and men left, men died, reinforcements",
+      "api": "CCO CcoBattleArmy NumUnits / NumEntities / NumMenDied / NumReinforcements",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "army.general_alive",
+      "group": "army",
+      "ru": "Жив ли генерал армии",
+      "en": "Is the army general alive",
+      "api": "army:is_commander_alive()",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "army.score",
+      "group": "army",
+      "ru": "Очки армии",
+      "en": "Army score",
+      "api": "CCO CcoBattleArmy Score",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "battle.balance_of_power",
+      "group": "army",
+      "ru": "Баланс сил сторон (полоска вверху экрана)",
+      "en": "Balance of power (top bar)",
+      "api": "CCO BattleRoot.BalanceOfPowerPercent",
+      "status": "available",
+      "module": "",
+      "access": "public"
+    },
+    {
+      "id": "alliance.timeout_winner",
+      "group": "army",
+      "ru": "Кто победит, если время выйдет",
+      "en": "Who wins on timeout",
+      "api": "CCO CcoBattleAlliance WillWinOnTimeout",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "battle.phase",
+      "group": "battlefield",
+      "ru": "Фаза боя: расстановка, бой, итоги",
+      "en": "Battle phase",
+      "api": "bm:get_current_phase_name()",
+      "status": "tracked",
+      "module": "apps.battle / entries",
+      "access": "public"
+    },
+    {
+      "id": "battle.time",
+      "group": "battlefield",
+      "ru": "Время боя",
+      "en": "Battle time",
+      "api": "bm:time_elapsed_ms()",
+      "status": "tracked",
+      "module": "entries",
+      "access": "public"
+    },
+    {
+      "id": "battle.time_left",
+      "group": "battlefield",
+      "ru": "Сколько времени осталось до лимита",
+      "en": "Time left until the limit",
+      "api": "bm:remaining_conflict_time()",
+      "status": "available",
+      "module": "",
+      "access": "public"
+    },
+    {
+      "id": "battle.outcome",
+      "group": "battlefield",
+      "ru": "Исход решён, кто победил",
+      "en": "Outcome decided, winner",
+      "api": "bm:battle_outcome_decided() / victorious_alliance()",
+      "status": "tracked",
+      "module": "entries",
+      "access": "public"
+    },
+    {
+      "id": "battle.speed",
+      "group": "battlefield",
+      "ru": "Скорость игры",
+      "en": "Game speed",
+      "api": "bm:current_battle_speed()",
+      "status": "tracked",
+      "module": "apps.battle.adapter",
+      "access": "public"
+    },
+    {
+      "id": "battle.kind",
+      "group": "battlefield",
+      "ru": "Тип боя: кампания, мультиплеер, осада, засада…",
+      "en": "Battle kind: campaign, multiplayer, siege, ambush…",
+      "api": "bm:is_from_campaign() … / battle_type()",
+      "status": "tracked",
+      "module": "apps.battle.adapter",
+      "access": "public"
+    },
+    {
+      "id": "battle.boundaries",
+      "group": "battlefield",
+      "ru": "Граница поля, за которую нельзя выходить",
+      "en": "Playable area boundary",
+      "api": "bm:battle_boundaries()",
+      "status": "available",
+      "module": "",
+      "access": "public"
+    },
+    {
+      "id": "battle.weather",
+      "group": "battlefield",
+      "ru": "Погода, климат, время года",
+      "en": "Weather, climate, season",
+      "api": "CCO BattleRoot WeatherRecordContext / ClimateRecordContext / SeasonRecordContext",
+      "status": "available",
+      "module": "",
+      "access": "public"
+    },
+    {
+      "id": "battle.capture_points",
+      "group": "battlefield",
+      "ru": "Точки захвата: чья, прогресс, кто оспаривает",
+      "en": "Capture points: owner, progress, contested by",
+      "api": "CCO BattleRoot.CapturePointList",
+      "status": "available",
+      "module": "",
+      "access": "public"
+    },
+    {
+      "id": "battle.reinforcements",
+      "group": "battlefield",
+      "ru": "Подкрепления и их валюта",
+      "en": "Reinforcements and their currency",
+      "api": "CCO BattleRoot reinforcement pool / currency",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "map.radar_frame",
+      "group": "map",
+      "ru": "Рамка мини-карты (размер поля)",
+      "en": "Minimap frame (field size)",
+      "api": "BattleRadarPosition",
+      "status": "tracked",
+      "module": "apps.map.adapter",
+      "access": "public"
+    },
+    {
+      "id": "map.height",
+      "group": "map",
+      "ru": "Высота земли в точке",
+      "en": "Terrain height",
+      "api": "bm:get_terrain_height(x, z)",
+      "status": "tracked",
+      "module": "apps.map.adapter",
+      "access": "public"
+    },
+    {
+      "id": "map.ground",
+      "group": "map",
+      "ru": "Тип земли: трава, лес, вода…",
+      "en": "Ground type: grass, forest, water…",
+      "api": "bm:ground_type(p)",
+      "status": "tracked",
+      "module": "apps.map.adapter",
+      "access": "public"
+    },
+    {
+      "id": "map.clear",
+      "group": "map",
+      "ru": "Свободна ли площадка",
+      "en": "Is an area clear",
+      "api": "bm:is_area_clear(p)",
+      "status": "tracked",
+      "module": "apps.map.adapter",
+      "access": "public"
+    },
+    {
+      "id": "map.buildings",
+      "group": "map",
+      "ru": "Здания и сооружения: где, какие, здоровье, мост ли",
+      "en": "Buildings: where, type, health, bridge",
+      "api": "bm:buildings() / CCO BuildingsList",
+      "status": "tracked",
+      "module": "apps.map.adapter",
+      "access": "public"
+    },
+    {
+      "id": "event.entity_hit",
+      "group": "events",
+      "ru": "Попадание снаряда: в кого, артиллерия ли",
+      "en": "Projectile hit: which unit, artillery or not",
+      "api": "command handler 'Entity Hit'",
+      "status": "available",
+      "module": "apps.telemetry.sampler_adapter (parser only)",
+      "access": "truth"
+    },
+    {
+      "id": "event.orders",
+      "group": "events",
+      "ru": "Отданные приказы: атака кого, движение, способность, смена снаряда, отход, стоп",
+      "en": "Issued orders: attack whom, move, ability, shot type, withdraw, halt",
+      "api": "command handler 'Attack Unit' / 'Move' / 'Special Ability' / …",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "event.routs",
+      "group": "events",
+      "ru": "Отряд побежал, генерал побежал",
+      "en": "Unit routed, general routed",
+      "api": "BattleUnitRouts / BattleCommandingUnitRouts",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "event.left_battlefield",
+      "group": "events",
+      "ru": "Отряд ушёл с поля",
+      "en": "Unit left the battlefield",
+      "api": "command handler 'Unit Left Battlefield'",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    },
+    {
+      "id": "event.armies_engaging",
+      "group": "events",
+      "ru": "Армии сошлись в бою",
+      "en": "Armies engaged",
+      "api": "ScriptEventBattleArmiesEngaging",
+      "status": "available",
+      "module": "",
+      "access": "own"
+    }
+  ]
+}

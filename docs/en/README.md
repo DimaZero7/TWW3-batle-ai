@@ -39,6 +39,7 @@
 ## Game knowledge
 
 - [What is verified in WH3](game/README.md) — map, units, map catalogue.
+- [Readout catalogue](game/readouts.md) — what can be collected about units and the battle, what we already collect.
 - [Visual atlas](game/atlas.md) — the key research images.
 
 ## Research

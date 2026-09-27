@@ -42,6 +42,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -T
   [telemetry](docs/ru/apps/telemetry.md) · [точки входа](docs/ru/apps/entries.md)
 - **Знания об игре**
   - [Что проверено в WH3](docs/ru/game/README.md) — карта, отряды, каталог карт
+  - [Каталог показателей](docs/ru/game/readouts.md) — что собираем и что ещё можно
   - [Визуальный атлас](docs/ru/game/atlas.md)
 - **Исследования**
   - [Архив исследований и доказательств](docs/ru/research/README.md)
@@ -92,6 +93,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -T
   [telemetry](docs/en/apps/telemetry.md) · [entries](docs/en/apps/entries.md)
 - **Game knowledge**
   - [What is verified in WH3](docs/en/game/README.md) — map, units, map catalogue
+  - [Readout catalogue](docs/en/game/readouts.md) — what we collect and what else is available
   - [Visual atlas](docs/en/game/atlas.md)
 - **Research**
   - [Research and evidence archive](docs/en/research/README.md)

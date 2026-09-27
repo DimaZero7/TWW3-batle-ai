@@ -1,0 +1,23 @@
+{
+  "description": "Example: a lean run for melee/ranged tactics — who hits whom, losses, morale, ammo.",
+  "track": [
+    "unit.type",
+    "native.position",
+    "native.number_of_men_alive",
+    "native.unary_hitpoints",
+    "cco.PercentHpLostRecently",
+    "cco.DamageInflictedRecently",
+    "native.is_in_melee",
+    "native.current_target",
+    "native.flank_threats",
+    "native.is_under_missile_attack",
+    "native.ammo_left",
+    "cco.MoralePercent",
+    "native.is_routing",
+    "native.fatigue_state",
+    "combat.threat_of_unit",
+    "event.entity_hit",
+    "vis.visible_to_side",
+    "vis.last_seen"
+  ]
+}
