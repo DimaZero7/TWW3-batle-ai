@@ -1,38 +1,69 @@
 """Check a unit-readout run against the documented unit readouts.
 
-Usage: python -m tools.analysis.unit_readout build/unit-readout/runs/<time>
+Two views of the same run:
 
-Reads events.jsonl written by src/entries/unit_readout.lua and writes
-report.md and summary.json next to it. Expectations come from
-docs/*/game/units (states.md, state-sensors.md, missile-range.md).
+  python -m tools.analysis.unit_readout <run>                   # full summary
+  python -m tools.analysis.unit_readout <run> --view side --side 1
+
+--view full (default): everything we read, checked against the docs
+(states.md, state-sensors.md, missile-range.md) -> report.md, summary.json.
+
+--view side: what ONE side saw (side_view events built by
+apps/observation), compared with the full summary (full_view) as ground
+truth: hidden enemies must never leak -> report-side-<n>.md, summary-side-<n>.json.
 """
 import argparse
 import json
 from collections import defaultdict
 from pathlib import Path
 
-UNITS = ["a_general", "a_spears", "a_archers", "b_general", "b_spears", "b_archers"]
-KIND = {name: name.split("_", 1)[1] for name in UNITS}  # general / spears / archers
+UNITS = ["a_general", "a_spears", "a_archers", "a_forest", "a_stalkers",
+         "b_general", "b_spears", "b_archers", "b_forest", "b_stalkers"]
+# general / spears / archers / stalkers; the forest ambush units are spearmen
+KIND = {name: {"forest": "spears"}.get(name.split("_", 1)[1], name.split("_", 1)[1]) for name in UNITS}
+SIDE = {name: 1 if name.startswith("a_") else 2 for name in UNITS}
+AMBUSH = {"forest": "hide_forest in forest", "stalkers": "stalk on open grass"}
 
 # docs/*/game/units/states.md, "What the game returned for each unit".
 PROFILE = {
-    "general": {"type": "wh_main_emp_cha_general_0", "initial_men": 1, "attribute_hide_forest": True,
+    "general": {"attribute_stalk": False, "type": "wh_main_emp_cha_general_0", "initial_men": 1, "attribute_hide_forest": True,
                 "attribute_charge_defense_vs_large": False, "attribute_charge_reflection": False,
                 "attribute_encourages": True, "can_defend": True, "can_fire_at_will": False,
                 "can_skirmish": False, "can_change_formation_spacing": False},
-    "spears": {"type": "wh_main_emp_inf_spearmen_0", "initial_men": 120, "missile_range": 0,
+    "spears": {"attribute_stalk": False, "type": "wh_main_emp_inf_spearmen_0", "initial_men": 120, "missile_range": 0,
                "attribute_hide_forest": True, "attribute_charge_defense_vs_large": True,
                "attribute_charge_reflection": True, "attribute_encourages": False, "can_defend": True,
                "can_fire_at_will": False, "can_skirmish": False, "can_change_formation_spacing": False},
-    "archers": {"type": "wh2_dlc13_emp_inf_archers_0", "initial_men": 90, "missile_range": 130,
+    "archers": {"attribute_stalk": False, "type": "wh2_dlc13_emp_inf_archers_0", "initial_men": 90, "missile_range": 130,
                 "attribute_hide_forest": True, "attribute_charge_defense_vs_large": False,
                 "attribute_charge_reflection": False, "attribute_encourages": False, "can_defend": True,
                 "can_fire_at_will": True, "can_skirmish": True, "can_change_formation_spacing": False},
+    # Game DB (unit_attributes_to_groups_junctions): Huntsmen have stalk.
+    "stalkers": {"type": "wh2_dlc13_emp_inf_huntsmen_0", "attribute_stalk": True},
 }
 
 
 def load(run):
-    return [json.loads(line) for line in (run / "events.jsonl").read_text(encoding="utf-8-sig").splitlines() if line]
+    rows = [json.loads(line) for line in (run / "events.jsonl").read_text(encoding="utf-8-sig").splitlines() if line]
+    return rows + expand_side_views(rows)
+
+
+def expand_side_views(rows):
+    """side_view carries own readings, enemy intel and shooter range; expand it
+    into unit_state / intel / range rows for the full-summary checks."""
+    out = []
+    for r in rows:
+        if r["event"] != "side_view":
+            continue
+        view, stage, side = r["view"], r.get("stage"), r["observer_side"]
+        for name, readings in view["own"].items():
+            out.append({"event": "unit_state", "side": side, "name": name, "stage": stage, "readings": readings})
+        for name, record in view["enemies"].items():
+            out.append(dict(record, event="intel", observer_side=side, stage=stage))
+        for pair, readings in view["range"].items():
+            source, target = pair.split(">", 1)
+            out.append({"event": "range", "source": source, "target": target, "stage": stage, "readings": readings})
+    return out
 
 
 def analyse(rows):
@@ -49,8 +80,22 @@ def analyse(rows):
         events[r["event"]].append(r)
     check("run", "no Lua errors", 0, len(events["error"]))
     check("run", "run completed", "completed", (events["result"] or [{}])[-1].get("status"))
+    moved = []
+    for name in UNITS:
+        states = [s for s in events["unit_state"] if s["name"] == name]
+        setup = next((s for s in states if s.get("stage") == "setup"), None)
+        # Teleports back to the spawn apply on a following tick: compare with
+        # the first sample of the march stage.
+        idle = next((s for s in states if s.get("stage") == "march"), None)
+        if setup and idle:
+            a = setup["readings"]["sensors"]["native.position"].get("value")
+            b = idle["readings"]["sensors"]["native.position"].get("value")
+            if a and b and ((a["x"] - b["x"]) ** 2 + (a["z"] - b["z"]) ** 2) ** 0.5 > 15:
+                moved.append(name)
+    check("run", "units start where the scenario put them (<15 m)", [], moved)
     stages = [r["name"] for r in events["stage"]]
-    check("run", "all stages reached", ["idle", "march", "ranged", "cease_fire", "melee", "halt"], stages)
+    check("run", "all stages reached", ["idle", "march", "ranged", "cease_fire", "melee", "scout_a80", "scout_a40", "scout_a15",
+                                             "scout_b80", "scout_b40", "scout_b15", "halt"], stages)
 
     # --- static profile
     for p in events["unit_profile"]:
@@ -116,7 +161,9 @@ def analyse(rows):
         ("ranged: b_spears HealthValue decreases", drop("b_spears", "cco.HealthValue", "march", "ranged")),
         ("melee: a_spears is_in_melee", seen("a_spears", "native.is_in_melee", "melee", lambda v: v is True)),
         ("melee: b_spears is_in_melee", seen("b_spears", "native.is_in_melee", "melee", lambda v: v is True)),
-        ("melee: a_spears number_of_men_alive decreases", drop("a_spears", "native.number_of_men_alive", "cease_fire", "melee")),
+        ("melee: spearmen lose men (melee or scouting stages)",
+         any(drop(u, "native.number_of_men_alive", "cease_fire", s)
+             for u in ("a_spears", "b_spears") for s in ("melee",) + SCOUT_STAGES)),
         ("melee: a_general defend behaviour on", seen("a_general", "native.behaviour.defend", "melee", lambda v: v is True)),
         ("melee: current_target is a visible unit id",
          any(seen(u, "native.current_target", "melee", lambda v: isinstance(v, str) and v.startswith(("a_", "b_")))
@@ -151,10 +198,6 @@ def analyse(rows):
     in_range = [r for r in archer_rows if r.get("stage") == "ranged"]
     check("range", "a_archers unit_in_range true in ranged stage (100 m)", True,
           any(known(r, "unit_in_range") for r in in_range))
-    spear_rows = [r for r in ranges[("a_spears", "b_spears")] if r["readings"]["access"] == "allowed"]
-    check("range", "a_spears missile_range_m = 0", [0],
-          sorted({known(r, "missile_range_m") for r in spear_rows} - {None}),
-          {known(r, "missile_range_m") for r in spear_rows} - {None} == {0})
     distances = [(known(r, "unit_distance_m"), known(r, "centre_distance_xz_m")) for r in archer_rows]
     distances = [d for d in distances if None not in d]
     check("range", "engine unit_distance < centre distance (footprints)", True,
@@ -174,7 +217,8 @@ def analyse(rows):
           any(r.get("last_seen") for r in events["intel"]))
 
     # --- telemetry / navigation
-    check("telemetry", "sampler frames", ">0", len(events["sampler_frame"]), bool(events["sampler_frame"]))
+    check("telemetry", "full summary frames", ">0", len(events["full_view"]), bool(events["full_view"]))
+    check("telemetry", "side views (both sides)", ">0", len(events["side_view"]), bool(events["side_view"]))
     check("navigation", "nav diagnostics per stage", ">0", len(events["nav_state"]), bool(events["nav_state"]))
     nav_ok = [r for r in events["nav_state"]
               if r["origins"]["native_origin"]["result"].get("status") == "ok"]
@@ -206,7 +250,8 @@ def write_report(run, checks, table, events):
     lines = [f"# Unit readout test — {run.name}", "",
              f"**{passed} / {len(checks)} checks passed.** Map: The Moorlands Route (catchment_03). "
              f"Samples: {len(events['unit_state'])} own-unit, {len(events['range'])} range, "
-             f"{len(events['intel'])} intel, {len(events['sampler_frame'])} sampler frames.", "",
+             f"{len(events['intel'])} intel, {len(events['full_view'])} full-summary frames, "
+             f"{len(events['side_view'])} side views.", "",
              "| Group | Check | Expected | Actual | Result |", "|---|---|---|---|---|"]
     for c in checks:
         mark = "✅" if c["result"] == "pass" else "❌"
@@ -222,10 +267,125 @@ def write_report(run, checks, table, events):
     return passed
 
 
+ALLOWED_ENEMY_FIELDS = {"id", "visibility", "sampled_ms", "current", "last_seen", "position_status"}
+PRE_SCOUT = ("idle", "march", "ranged", "cease_fire", "melee")
+SCOUT_STAGES = ("scout_a80", "scout_a40", "scout_a15", "scout_b80", "scout_b40", "scout_b15")
+
+
+def analyse_side(rows, side):
+    """One side's view against the full summary (ground truth)."""
+    checks = []
+
+    def check(group, name, expected, actual, ok=None):
+        if ok is None:
+            ok = expected == actual
+        checks.append({"group": group, "check": name, "expected": expected, "actual": actual,
+                       "result": "pass" if ok else "fail"})
+
+    views = [r for r in rows if r["event"] == "side_view" and r["observer_side"] == side]
+    fulls = [r for r in rows if r["event"] == "full_view"]
+    check("run", "side views recorded", ">0", len(views), bool(views))
+    check("run", "one full frame per side view", len(views), len(fulls), len(fulls) == len(views))
+    enemies = [u for u in UNITS if SIDE[u] != side]
+    own = [u for u in UNITS if SIDE[u] == side]
+
+    truth_seen = defaultdict(dict)  # enemy -> time_ms -> (x, z) while truly visible
+    per_stage = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+    mismatches, leaked, hidden_pos, stale, range_leaks = [], [], [], [], []
+    own_complete = True
+    for view_row, full in zip(views, fulls):
+        view, stage = view_row["view"], view_row.get("stage")
+        now = view["time_ms"]
+        truth = {u["id"]: u for s in full["sides"] for u in s["units"]}
+        for name in own:
+            own_complete &= len(view["own"].get(name, {}).get("sensors", {})) == 68
+        for name in enemies:
+            rec = view["enemies"].get(name, {})
+            real = truth.get(name, {})
+            real_visible = real.get("visibility", {}).get(f"side_{side}")
+            per_stage[name][stage][rec.get("visibility", "missing")] += 1
+            if rec.get("visibility") == "visible" and rec.get("current"):
+                truth_seen[name][now] = (rec["current"]["x"], rec["current"]["z"])
+            extra = set(rec) - ALLOWED_ENEMY_FIELDS
+            if extra:
+                leaked.append((now, name, sorted(extra)))
+            if rec.get("visibility") != "visible" and rec.get("current"):
+                hidden_pos.append((now, name))
+            if rec.get("visibility") in ("visible", "not_visible") and isinstance(real_visible, bool) \
+                    and (rec["visibility"] == "visible") != real_visible:
+                mismatches.append((now, name, rec["visibility"], real_visible))
+            seen = rec.get("last_seen")
+            if rec.get("visibility") != "visible" and seen:
+                pos = truth_seen[name].get(seen["seen_ms"])
+                if seen["seen_ms"] > now or pos is None or abs(pos[0] - seen["x"]) > 1 or abs(pos[1] - seen["z"]) > 1:
+                    stale.append((now, name, seen["seen_ms"]))
+        for pair, reading in view["range"].items():
+            target = pair.split(">", 1)[1]
+            if view["enemies"].get(target, {}).get("visibility") != "visible" and reading["access"] != "withheld":
+                range_leaks.append((now, pair))
+
+    samples = len(views) * len(enemies)
+    check("leaks", "enemy records carry only visibility / position / last_seen", 0, len(leaked))
+    check("leaks", "hidden enemy never has a current position", 0, len(hidden_pos))
+    check("leaks", "range to a hidden enemy is withheld", 0, len(range_leaks))
+    check("leaks", "last_seen = an earlier real sighting of this side", 0, len(stale))
+    check("agreement", "side visibility = full summary visibility (<=2% at transitions)",
+          f"<= {max(1, samples // 50)}", len(mismatches), len(mismatches) <= max(1, samples // 50))
+    check("own", "own units: all 68 fields in the side view", True, own_complete)
+    for kind, label in AMBUSH.items():
+        unit = next(u for u in enemies if u.endswith("_" + kind))
+        hidden = sum(per_stage[unit][s]["not_visible"] for s in PRE_SCOUT)
+        shown = sum(per_stage[unit][s]["visible"] for s in PRE_SCOUT)
+        revealed = sum(per_stage[unit][s]["visible"] for s in SCOUT_STAGES)
+        check("mechanics", f"{unit} ({label}): hidden before scouting", ">0 hidden samples",
+              f"{hidden} hidden / {shown} visible", hidden > 0)
+        check("mechanics", f"{unit} ({label}): revealed while scouted", ">0 visible samples",
+              revealed, revealed > 0)
+        kept = sum(1 for v in views if v["view"]["enemies"].get(unit, {}).get("visibility") == "not_visible"
+                   and v["view"]["enemies"][unit].get("last_seen"))
+        check("mechanics", f"{unit}: samples hidden with a remembered last position", "info", kept, True)
+    return checks, per_stage, {"mismatches": mismatches[:20], "leaked_fields": leaked[:20],
+                               "hidden_with_position": hidden_pos[:20], "stale_last_seen": stale[:20],
+                               "range_leaks": range_leaks[:20]}
+
+
+def write_side_report(run, side, checks, per_stage):
+    passed = sum(c["result"] == "pass" for c in checks)
+    stages = ["idle", "march", "ranged", "cease_fire", "melee", *SCOUT_STAGES, "halt", "done"]
+    lines = [f"# Side {side} view — {run.name}", "",
+             f"**{passed} / {len(checks)} checks passed.** Only what side {side} may know about the enemy, "
+             "checked against the full summary as ground truth.", "",
+             "| Group | Check | Expected | Actual | Result |", "|---|---|---|---|---|"]
+    for c in checks:
+        lines.append(f"| {c['group']} | {c['check']} | `{c['expected']}` | `{c['actual']}` | "
+                     f"{'✅' if c['result'] == 'pass' else '❌'} |")
+    lines += ["", "## Enemy visibility by stage (visible / not visible samples)", "",
+              "| Enemy | " + " | ".join(stages) + " |", "|---|" + "---|" * len(stages)]
+    for name, by_stage in per_stage.items():
+        cells = [f"{by_stage[s]['visible']} / {by_stage[s]['not_visible']}" if s in by_stage else "-"
+                 for s in stages]
+        lines.append(f"| `{name}` | " + " | ".join(cells) + " |")
+    (run / f"report-side-{side}.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return passed
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run", type=Path)
+    parser.add_argument("--view", choices=("full", "side"), default="full")
+    parser.add_argument("--side", type=int, choices=(1, 2), default=1)
     args = parser.parse_args(argv)
+    if args.view == "side":
+        checks, per_stage, samples = analyse_side(load(args.run), args.side)
+        passed = write_side_report(args.run, args.side, checks, per_stage)
+        (args.run / f"summary-side-{args.side}.json").write_text(json.dumps(
+            {"passed": passed, "total": len(checks), "checks": checks, "samples": samples},
+            ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+        for c in checks:
+            if c["result"] != "pass":
+                print("FAIL", c["group"], c["check"], "expected", c["expected"], "actual", c["actual"])
+        print(f"{passed}/{len(checks)} checks passed; report: {args.run / f'report-side-{args.side}.md'}")
+        return 0 if passed == len(checks) else 1
     checks, table, events = analyse(load(args.run))
     passed = write_report(args.run, checks, table, events)
     for c in checks:

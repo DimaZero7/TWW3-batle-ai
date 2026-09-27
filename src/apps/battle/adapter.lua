@@ -86,6 +86,34 @@ function M.speed_guard(bm, speed, on_restore, name)
     return stop
 end
 
+-- Wall-clock safety net: calls on_expire once after real_ms of real time,
+-- whatever the battle speed or phase, so a test battle can never run
+-- forever. Returns cancel().
+function M.deadline(bm, real_ms, on_expire, name)
+    name = name or 'tww3_bai_deadline'
+    local cancelled = false
+    bm:real_callback(function()
+        if not cancelled then on_expire() end
+    end, real_ms, name)
+    return function()
+        cancelled = true
+        pcall(function() bm:remove_real_callback(name) end)
+    end
+end
+
+-- Sum of men alive and hit points of the given units, rounded so that
+-- floating-point noise is not mistaken for damage. Unreadable units count 0.
+function M.health_signature(units)
+    local men, hp = 0, 0
+    for _, u in ipairs(units) do
+        local ok_men, m = pcall(function() return u:number_of_men_alive() end)
+        local ok_hp, h = pcall(function() return u:unary_hitpoints() end)
+        if ok_men and type(m) == 'number' then men = men + m end
+        if ok_hp and type(h) == 'number' and h == h then hp = hp + h end
+    end
+    return men * 100000 + math.floor(hp * 10000 + 0.5)
+end
+
 -- Finds a unit by its XML script_name on the given side.
 function M.find_by_name(side_info, script_name)
     for _, unit in ipairs(side_info.units) do

@@ -43,6 +43,28 @@ function M.sink(path, stamp)
     end
 end
 
+-- Same rows as sink(), but kept in memory until flush(): one file open per
+-- flush instead of per row. Use for high-volume diagnostics and flush once
+-- per tick; flush on finish/error too, or buffered rows are lost.
+function M.buffered_sink(path, stamp)
+    local buffer = {}
+    local function emit(event, fields)
+        local row = fields or {}
+        row.event = event
+        row.wall_iso = clock.iso_utc()
+        if stamp then stamp(row) end
+        buffer[#buffer + 1] = json.encode(row)
+        return row
+    end
+    local function flush()
+        if #buffer == 0 then return end
+        local text = table.concat(buffer, '\n') .. '\n'
+        buffer = {}
+        M.append(path, text)
+    end
+    return emit, flush
+end
+
 -- Monotonic counter kept on disk; prevents same-second batch ids
 -- without consuming the game's random numbers.
 function M.next_sequence(path)

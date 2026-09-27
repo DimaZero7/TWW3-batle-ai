@@ -31,6 +31,7 @@
 | [orders](apps/orders.md) | Command contract and verified order calls |
 | [deployment](apps/deployment.md) | Initial placement `deployment-placement-v2` |
 | [ai](apps/ai.md) | Profiles, decision contract, policies |
+| [observation](apps/observation.md) | One side's view — AI input without hidden data |
 | [sandbox](apps/sandbox.md) | Restricted loading of external policies |
 | [telemetry](apps/telemetry.md) | JSONL events, state files, post-battle samples |
 | [Entries](apps/entries.md) | `duel`, `arena`, `map_capture` — apps wired into a battle |

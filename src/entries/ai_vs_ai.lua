@@ -4,6 +4,7 @@
 -- "attack the enemy force" (orders.planner_adapter), re-issued periodically
 -- like generated battles do. Scenario: scenarios/ai_vs_ai.xml.
 local battle = require('apps.battle.adapter')
+local battle_services = require('apps.battle.services')
 local clock = require('apps.core.clock')
 local errors = require('apps.core.errors')
 local telemetry = require('apps.telemetry.adapter')
@@ -79,6 +80,7 @@ function M.main(bm, config)
 
     local function finish(status, winner)
         if state.finished then return end
+        if state.cancel_deadline then state.cancel_deadline() end
         snapshot('final_unit')
         local row = side_summary()
         row.status, row.winner = status, winner or 0
@@ -92,6 +94,12 @@ function M.main(bm, config)
 
     local function tick()
         if not state.active then return end
+        -- No damage to anyone for stall_ms of game time: end the battle.
+        if state.stall.update(bm:time_elapsed_ms(), battle.health_signature(state.all_units)) then
+            finish('stalled', 0)
+            bm:force_battle_end(0, 'stalled', true)
+            return
+        end
         if bm:battle_outcome_decided() then
             local winner = bm:victorious_alliance()
             if winner ~= 0 then finish('completed', winner) return end
@@ -132,7 +140,12 @@ function M.main(bm, config)
                 controller = info.planner and info.planner.mode or 'general_battle_ai'})
         end
         last_reissue = bm:time_elapsed_ms()
-        emit('start', {speed = config.speed, timeout_ms = config.timeout_ms})
+        state.stall = battle_services.new_stall_detector(config.stall_ms)
+        emit('start', {speed = config.speed, timeout_ms = config.timeout_ms, deadline_s = config.deadline_s})
+        state.cancel_deadline = battle.deadline(bm, config.deadline_s * 1000, guarded(function()
+            finish('deadline', 0)
+            bm:force_battle_end(0, 'deadline', true)
+        end), 'tww3_bai_ai_vs_ai_deadline')
         bm:add_infotext('BAI: VANILLA AI vs VANILLA AI (observer)')
         state.active = true
         bm:repeat_callback(guarded(tick), config.tick_ms, TIMER)
@@ -153,6 +166,10 @@ function M.main(bm, config)
             info.player_controlled = ok and player == true
             info.player_controlled_status = ok and 'known' or 'unknown'
             state.sides[side] = info
+        end
+        state.all_units = {}
+        for _, info in ipairs(state.sides) do
+            for _, u in ipairs(info.units) do state.all_units[#state.all_units + 1] = u end
         end
         state.batch = clock.batch_stamp() .. '-aivai-' .. telemetry.next_sequence('tww3_bai_sequence.txt')
         state.run_id = state.batch .. '-r1'

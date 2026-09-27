@@ -3,6 +3,7 @@
 -- Wires apps together; decisions come from an ai policy, orders from
 -- orders.adapter, events go to tww3_bai_events.jsonl.
 local battle = require('apps.battle.adapter')
+local battle_services = require('apps.battle.services')
 local clock = require('apps.core.clock')
 local errors = require('apps.core.errors')
 local telemetry = require('apps.telemetry.adapter')
@@ -148,6 +149,7 @@ function M.main(bm, config)
 
     local function finish(status, winner)
         if state.finished then return end
+        if state.cancel_deadline then state.cancel_deadline() end
         for _, item in ipairs(state.units) do snapshot(item, 'final_unit') end
         emit('result', {status = status, winner = winner or 0,
             duration_model_ms = bm:time_elapsed_ms() - started_ms,
@@ -182,6 +184,12 @@ function M.main(bm, config)
     local function tick()
         if not state.active then return end
         if check_result() then return end
+        -- No damage to anyone for stall_ms of game time: end the battle.
+        if state.stall.update(bm:time_elapsed_ms(), battle.health_signature({state.units[1].unit, state.units[2].unit})) then
+            finish('stalled', 0)
+            bm:force_battle_end(0, 'stalled', true)
+            return
+        end
         local now = bm:time_elapsed_ms()
         if now - started_ms >= config.timeout_ms then
             finish('timeout', 0)
@@ -233,6 +241,7 @@ function M.main(bm, config)
     local function start()
         if state.active then return end
         started_ms, started_wall = bm:time_elapsed_ms(), clock.wall_seconds()
+        state.stall = battle_services.new_stall_detector(config.stall_ms)
         local external = load_external_policy()
         if external then policy = external end
         emit('start', {policy_source = external and 'external' or 'bundled',
@@ -248,6 +257,10 @@ function M.main(bm, config)
             orders.prepare_melee(item.controller, item.unit)
             emit('control_requested', {side = item.side})
         end
+        state.cancel_deadline = battle.deadline(bm, config.deadline_s * 1000, guarded(function()
+            finish('deadline', 0)
+            bm:force_battle_end(0, 'deadline', true)
+        end), 'tww3_bai_duel_deadline')
         bm:add_infotext('BAI ACTIVE: SCRIPT CONTROL / FORCED MELEE')
         state.active = true
         tick()

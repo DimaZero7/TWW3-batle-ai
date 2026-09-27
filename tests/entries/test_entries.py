@@ -33,7 +33,7 @@ class TestDuel:
             bm = fake.manager({{a}, {b}})
             find_uicomponent = function() return nil end
             local duel = require('entries.duel')
-            local state = duel.main(bm, {build='test', runs=1, speed=20, timeout_ms=60000, tick_ms=1000})
+            local state = duel.main(bm, {build='test', runs=1, speed=20, timeout_ms=60000, tick_ms=1000, deadline_s=60, stall_ms=600000})
             bm:pump()             -- deployment -> end phase -> start
             bm:tick(); bm:tick()  -- decisions
             bm.outcome, bm.winner = true, 1
@@ -95,7 +95,7 @@ class TestAiVsAi:
                     release = function() end}
             end}
             bm.get_scriptunit_for_unit = function(_, u) return {unit = u} end
-            local state = require('entries.ai_vs_ai').main(bm, {build='t', speed=3, timeout_ms=600000, tick_ms=1000})
+            local state = require('entries.ai_vs_ai').main(bm, {build='t', speed=3, timeout_ms=600000, tick_ms=1000, deadline_s=60, stall_ms=600000})
             bm:pump()
             for _ = 1, 16 do bm:tick() end
             bm.speed = 1              -- the engine slows down once units flee
@@ -130,23 +130,68 @@ class TestUnitReadout:
     def test_all_stages_run_and_report_is_built(self, lua, tmp_path):
         lua.execute("""
             local sides = {{}, {}}
-            for _, n in ipairs({'a_general', 'a_spears', 'a_archers'}) do table.insert(sides[1], fake.unit(n, n, 50, 0)) end
-            for _, n in ipairs({'b_general', 'b_spears', 'b_archers'}) do table.insert(sides[2], fake.unit(n, n, -50, 0)) end
+            for _, n in ipairs({'a_general', 'a_spears', 'a_archers', 'a_forest', 'a_stalkers'}) do table.insert(sides[1], fake.unit(n, n, 50, 0)) end
+            for _, n in ipairs({'b_general', 'b_spears', 'b_archers', 'b_forest', 'b_stalkers'}) do table.insert(sides[2], fake.unit(n, n, -50, 0)) end
             bm = fake.manager(sides)
-            local state = require('entries.unit_readout').main(bm, {build='t', speed=3, tick_ms=1000},
+            local state = require('entries.unit_readout').main(bm, {build='t', speed=3, tick_ms=1000, deadline_s=60, stall_ms=600000},
                 {common = fake.common, battle_vector = fake.vector_type})
             bm:pump()
-            for _ = 1, 160 do bm:tick() end
+            for _ = 1, 220 do bm:tick() end
             assert(state.finished, 'readout did not finish')
+            assert(bm.ended, 'battle must end, not run forever')
         """)
         rows = events(tmp_path / "tww3_bai_events.jsonl")
         kinds = {r["event"] for r in rows}
         assert "error" not in kinds, [r for r in rows if r["event"] == "error"]
-        assert {"unit_profile", "unit_state", "enemy_gate", "range", "intel", "sampler_frame",
+        assert {"unit_profile", "enemy_gate", "full_view", "side_view",
                 "nav_state", "stage", "result"} <= kinds
-        assert [r["name"] for r in rows if r["event"] == "stage"] == ["idle", "march", "ranged", "cease_fire", "melee", "halt"]
+        assert [r["name"] for r in rows if r["event"] == "stage"] == ["idle", "march", "ranged", "cease_fire", "melee", "scout_a80", "scout_a40", "scout_a15",
+                 "scout_b80", "scout_b40", "scout_b15", "halt"]
         # The report must build from the log (the fake cannot satisfy game checks).
         from tools.analysis import unit_readout
         (tmp_path / "events.jsonl").write_text((tmp_path / "tww3_bai_events.jsonl").read_text(encoding="utf-8"), encoding="utf-8")
         checks, table, _ = unit_readout.analyse(unit_readout.load(tmp_path))
         assert len(table) == 68 and checks
+        side_checks, _, _ = unit_readout.analyse_side(unit_readout.load(tmp_path), 1)
+        leaks = [c for c in side_checks if c["group"] == "leaks"]
+        assert leaks and all(c["result"] == "pass" for c in leaks)
+
+
+class TestDeadline:
+    def test_readout_ends_itself_when_the_deadline_expires(self, lua, tmp_path):
+        lua.execute("""
+            local sides = {{}, {}}
+            for _, n in ipairs({'a_general', 'a_spears', 'a_archers', 'a_forest', 'a_stalkers'}) do table.insert(sides[1], fake.unit(n, n, 50, 0)) end
+            for _, n in ipairs({'b_general', 'b_spears', 'b_archers', 'b_forest', 'b_stalkers'}) do table.insert(sides[2], fake.unit(n, n, -50, 0)) end
+            bm = fake.manager(sides)
+            local state = require('entries.unit_readout').main(bm, {build='t', speed=3, tick_ms=1000, deadline_s=5, stall_ms=600000},
+                {common = fake.common, battle_vector = fake.vector_type})
+            bm:pump()          -- deployment ends, battle starts, deadline is queued
+            for _ = 1, 3 do bm:tick() end
+            bm:fire_timers()   -- wall-clock deadline expires
+            assert(state.finished and bm.ended, 'deadline did not end the battle')
+        """)
+        result = [r for r in events(tmp_path / "tww3_bai_events.jsonl") if r["event"] == "result"]
+        assert [r["status"] for r in result] == ["deadline"]
+
+
+class TestStall:
+    def test_ai_vs_ai_ends_when_nobody_takes_damage(self, lua, tmp_path):
+        lua.execute("""
+            local a = fake.unit('bai_a_kossars_1', 'kossars', 100, 0)
+            local b = fake.unit('bai_b_kossars_1', 'kossars', -100, 0)
+            bm = fake.manager({{a}, {b}})
+            bm:alliances():item(1):armies():item(1).is_player_controlled = function() return false end
+            bm:alliances():item(2):armies():item(1).is_player_controlled = function() return false end
+            local state = require('entries.ai_vs_ai').main(bm,
+                {build='t', speed=20, timeout_ms=3600000, tick_ms=1000, deadline_s=600, stall_ms=30000})
+            bm:pump()
+            for _ = 1, 20 do bm:tick() end
+            a.men = 110                        -- damage resets the quiet period
+            for _ = 1, 25 do bm:tick() end
+            assert(not state.finished, 'stalled too early')
+            for _ = 1, 10 do bm:tick() end
+            assert(state.finished, 'stall not detected')
+        """)
+        result = [r for r in events(tmp_path / "tww3_bai_events.jsonl") if r["event"] == "result"]
+        assert [r["status"] for r in result] == ["stalled"]

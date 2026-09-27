@@ -63,6 +63,15 @@ TARGETS = {
 
 SCENARIO_LUA = b"load_script_libraries()\n"
 
+# Scripted length of unit-readout (entries/unit_readout.lua, M.STAGES 'done').
+READOUT_MODEL_S = 196
+
+
+def deadline_seconds(model_s, speed):
+    """Real-time limit for one battle: the model time at the requested speed
+    (engines reach ~x19 of x20), doubled, plus a minute for slow-downs."""
+    return int(model_s / speed * 2) + 60
+
 
 def sha256(data):
     return hashlib.sha256(data).hexdigest()
@@ -133,6 +142,10 @@ def main(argv=None):
     parser.add_argument("--timeout", type=int, default=600, help="model seconds, 30..1800")
     parser.add_argument("--tick-ms", type=int, default=1000)
     parser.add_argument("--step", type=int, choices=(1, 2, 3, 5), default=5, help="map-capture: cell size, m")
+    parser.add_argument("--deadline", type=int, help="real seconds per battle before the script ends it "
+                        "(default: from the scripted length and speed)")
+    parser.add_argument("--stall-minutes", type=float, default=10,
+                        help="end the battle when nobody takes damage for this much GAME time")
     parser.add_argument("--features", action="store_true",
                         help="map-capture: also read objects and reachability after deployment")
     args = parser.parse_args(argv)
@@ -145,6 +158,9 @@ def main(argv=None):
         run_config = {"runs": args.runs if args.target == "duel" else 1, "speed": args.speed,
                       "timeout_ms": args.timeout * 1000, "tick_ms": args.tick_ms,
                       "scenario": TARGETS[args.target]["scenario"].removesuffix(".xml")}
+        model_s = READOUT_MODEL_S if args.target == "unit-readout" else args.timeout
+        run_config["deadline_s"] = args.deadline or deadline_seconds(model_s, args.speed)
+        run_config["stall_ms"] = int(args.stall_minutes * 60000)
     manifest = build(args.target, run_config)
     print(json.dumps(manifest, indent=2))
     return 0

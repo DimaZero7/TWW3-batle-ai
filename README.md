@@ -38,7 +38,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -T
   [map](docs/ru/apps/map.md) · [navigation](docs/ru/apps/navigation.md) ·
   [units](docs/ru/apps/units.md) · [intel](docs/ru/apps/intel.md) ·
   [orders](docs/ru/apps/orders.md) · [deployment](docs/ru/apps/deployment.md) ·
-  [ai](docs/ru/apps/ai.md) · [sandbox](docs/ru/apps/sandbox.md) ·
+  [ai](docs/ru/apps/ai.md) · [observation](docs/ru/apps/observation.md) · [sandbox](docs/ru/apps/sandbox.md) ·
   [telemetry](docs/ru/apps/telemetry.md) · [точки входа](docs/ru/apps/entries.md)
 - **Знания об игре**
   - [Что проверено в WH3](docs/ru/game/README.md) — карта, отряды, каталог карт
@@ -88,7 +88,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -T
   [map](docs/en/apps/map.md) · [navigation](docs/en/apps/navigation.md) ·
   [units](docs/en/apps/units.md) · [intel](docs/en/apps/intel.md) ·
   [orders](docs/en/apps/orders.md) · [deployment](docs/en/apps/deployment.md) ·
-  [ai](docs/en/apps/ai.md) · [sandbox](docs/en/apps/sandbox.md) ·
+  [ai](docs/en/apps/ai.md) · [observation](docs/en/apps/observation.md) · [sandbox](docs/en/apps/sandbox.md) ·
   [telemetry](docs/en/apps/telemetry.md) · [entries](docs/en/apps/entries.md)
 - **Game knowledge**
   - [What is verified in WH3](docs/en/game/README.md) — map, units, map catalogue

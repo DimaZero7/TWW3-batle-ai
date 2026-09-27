@@ -31,6 +31,7 @@
 | [orders](apps/orders.md) | Контракт команд и проверенные вызовы приказов |
 | [deployment](apps/deployment.md) | Начальная расстановка `deployment-placement-v2` |
 | [ai](apps/ai.md) | Профили, контракт решений, политики |
+| [observation](apps/observation.md) | Сводка одной стороны — вход ИИ без скрытых данных |
 | [sandbox](apps/sandbox.md) | Загрузка внешних политик с ограничениями |
 | [telemetry](apps/telemetry.md) | JSONL-события, файлы состояния, послебоевые снимки |
 | [Точки входа](apps/entries.md) | `duel`, `arena`, `map_capture` — сборка приложений в бой |

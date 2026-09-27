@@ -20,6 +20,7 @@ checks unchanged and pass. The original sources are kept in
 | [orders](../apps/orders.md) | `contract`, `adapter`, `planner_adapter` | Command shape and validation, order calls verified in battle | `validate` from `policy_host.lua`, calls from `harness`/`arena` and `commands.md` |
 | [deployment](../apps/deployment.md) | `contract`, `services`, `adapter` | Placement contract v2, "collect → validate → apply → verify" transaction | `runtime/deployment_v2.lua` |
 | [ai](../apps/ai.md) | `contract`, `services`, `policies/` | Army profiles, decision contract, duel policies | `profile` from `policy_host.lua`, `policy.lua`, `delayed_melee.lua` |
+| [observation](../apps/observation.md) | `adapter`, `services` | One side's view: own units in full, only permitted enemy data; leak self-check | new |
 | [sandbox](../apps/sandbox.md) | `services` | Loads third-party policies into a restricted environment with an instruction budget | `policy_host.lua` |
 | [telemetry](../apps/telemetry.md) | `adapter`, `sampler_adapter` | JSONL events, state files, post-battle samples of both sides | `emit` from harness, `runtime/post_battle_telemetry.lua` |
 

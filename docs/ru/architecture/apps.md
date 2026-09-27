@@ -20,6 +20,7 @@
 | [orders](../apps/orders.md) | `contract`, `adapter`, `planner_adapter` | Форма и проверка команд, проверенные в бою вызовы приказов | `validate` из `policy_host.lua`, вызовы из `harness`/`arena` и `commands.md` |
 | [deployment](../apps/deployment.md) | `contract`, `services`, `adapter` | Контракт расстановки v2, транзакция «собрать → проверить → применить → сверить» | `runtime/deployment_v2.lua` |
 | [ai](../apps/ai.md) | `contract`, `services`, `policies/` | Профили армий, контракт решения, политики дуэли | `profile` из `policy_host.lua`, `policy.lua`, `delayed_melee.lua` |
+| [observation](../apps/observation.md) | `adapter`, `services` | Сводка одной стороны: свои целиком, о врагах только разрешённое; самопроверка на утечки | новое |
 | [sandbox](../apps/sandbox.md) | `services` | Загрузка чужих политик в урезанное окружение с лимитом инструкций | `policy_host.lua` |
 | [telemetry](../apps/telemetry.md) | `adapter`, `sampler_adapter` | JSONL-события, файлы состояния, послебоевые снимки обеих сторон | `emit` из harness, `runtime/post_battle_telemetry.lua` |
 

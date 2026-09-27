@@ -11,7 +11,7 @@
 #  * results are copied to build/<target>/runs/<time>/ before cleanup.
 param(
     [Parameter(Mandatory = $true)][ValidateSet('duel', 'arena', 'ai-vs-ai', 'unit-readout', 'map-capture')][string]$Target,
-    [int]$TimeoutSeconds = 1200,
+    [int]$TimeoutSeconds = 0,
     [switch]$KeepGameOpen
 )
 $ErrorActionPreference = 'Stop'
@@ -51,6 +51,12 @@ if ($Target -eq 'map-capture') {
 }
 $expectedDone = 1
 if ($Target -eq 'duel') { $expectedDone = [int]$manifest.config.runs }
+# Default wait: 4 minutes for loading plus the in-game deadline of every battle.
+if ($TimeoutSeconds -le 0) {
+    if ($manifest.config.deadline_s) { $TimeoutSeconds = 240 + [int]$manifest.config.deadline_s * $expectedDone }
+    else { $TimeoutSeconds = 1200 }
+}
+Write-Output ("Launcher timeout: {0} s" -f $TimeoutSeconds)
 
 if (Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue) { throw 'WH3 is already running; not interrupting it.' }
 if ((Test-Path -LiteralPath $installedPack) -or (Test-Path -LiteralPath $modList)) {
@@ -123,16 +129,21 @@ try {
         $crash = Get-ChildItem -LiteralPath "$env:APPDATA\The Creative Assembly\Warhammer3\crash_report" -Filter '*.stack.txt' -ErrorAction SilentlyContinue |
             Where-Object { $_.LastWriteTime -gt $started } | Select-Object -First 1
         if ($crash) { Copy-Item -LiteralPath $crash.FullName -Destination $run; $status = 'crash_report'; break }
-        foreach ($line in (Read-JsonlLines -State $reader -Path $eventLog)) {
-            Add-Content -LiteralPath $runLog -Value $line -Encoding utf8
-            $row = $line | ConvertFrom-Json
-            $event = $row.event
-            if ($event -in @('ready', 'start', 'result', 'error', 'frame', 'grid_done', 'probe_done', 'probe_error', 'arena_complete', 'skipped')) { Write-Output $line }
-            if ($event -in $failEvents -or $event -eq 'skipped') { $status = 'lua_error' }
-            if ($event -in $doneEvents) {
-                $done++
-                # A duel result other than 'completed' (timeout, incomplete) ends the series.
-                if ($Target -eq 'duel' -and $row.status -ne 'completed') { $done = $expectedDone }
+        # Fast path: runs can write tens of thousands of large rows. Lines are
+        # appended in one call per poll and only key events are parsed.
+        $lines = @(Read-JsonlLines -State $reader -Path $eventLog)
+        if ($lines.Count -gt 0) {
+            [IO.File]::AppendAllLines($runLog, [string[]]$lines, [Text.UTF8Encoding]::new($false))
+            foreach ($line in $lines) {
+                if ($line -notmatch '"event":"(ready|start|result|error|frame|grid_done|probe_done|probe_error|arena_complete|skipped|speed_restored)"') { continue }
+                $event = $Matches[1]
+                Write-Output $line
+                if ($event -in $failEvents -or $event -eq 'skipped') { $status = 'lua_error' }
+                if ($event -in $doneEvents) {
+                    $done++
+                    # A duel result other than 'completed' (timeout, deadline) ends the series.
+                    if ($Target -eq 'duel' -and $line -notmatch '"status":"completed"') { $done = $expectedDone }
+                }
             }
         }
         if ($status -eq 'lua_error') { break }

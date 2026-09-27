@@ -63,32 +63,38 @@ had 147 men and one unit (the game was closed before `result`).
 
 <a id="unit_readout"></a>
 
-## unit_readout — check of every unit readout
+## unit_readout — every unit readout and visibility
 
 Build: `python -m tools.build unit-readout --speed 20`. Scenario
 `unit_readout.xml` on **The Moorlands Route** (`catchment_03`): Empire vs
-Empire, a general, spearmen and archers per side. Each side's archers stand
-100 m from the enemy spearmen.
+Empire; each side has a general, spearmen, archers, a spearmen ambush in the
+northern forest and stalk Huntsmen on open grass.
 
-Stages in model time: idle (0 s) → march (8 s) → ranged (30 s) → cease fire
-(75 s) → melee and generals on guard (85 s) → halt (140 s) → done (150 s).
-All 6 units are read every second:
+Stages (game seconds): idle 0 → march 8 → ranged 30 → cease fire 75 → melee 85
+→ side 1 scouts at 80/40/15 m (140/148/156) → side 2 scouts (164/172/180) →
+halt 188 → done 196. Every second:
 
-| Event | What it checks |
+| Event | What it is |
 |---|---|
-| `unit_profile` | Type, men, range, attributes, behaviours, abilities, CCO rank |
-| `unit_state` | All 68 fields of [units.state_adapter](units.md) |
-| `enemy_gate` | The enemy's view: visibility only, everything else withheld |
-| `range` | [units.range_adapter](units.md) for every unit pair |
-| `intel` | Visibility and last position for each side |
-| `sampler_frame`, `nav_state` | Post-battle samples, reachability diagnostics |
+| `side_view` ×2 | [Side view](observation.md): own units in full, only permitted enemy data, own shooters' range |
+| `full_view` | Full summary (ground truth, sees hidden units) |
+| `enemy_gate` (every 5 s) | State sensor from the enemy's side: visibility only |
+| `unit_profile` (once) | Type, men, range, attributes (incl. `stalk`), behaviours, abilities, rank |
 
-Report: `python -m tools.analysis.unit_readout build/unit-readout/runs/<time>` —
-`report.md` (check → expectation from the docs → actual) and a table of all 68
-fields per unit.
+Rows are buffered and written with one file open per tick (~1,100 rows per
+battle instead of ~16,000 in the first version, which slowed the game and the
+launcher down).
 
-Result on 2026-09-27 with True Sight: **121 / 121 checks** at both ×3 and ×20
-(150 s of model time ≈ 8 s real at ×20).
+Reports:
+
+```bash
+.venv/Scripts/python -m tools.analysis.unit_readout build/unit-readout/runs/<time>
+.venv/Scripts/python -m tools.analysis.unit_readout build/unit-readout/runs/<time> --view side --side 1
+```
+
+Result on 2026-09-27 (`20260927-142521`, True Sight, ×20, 196 game s ≈ 10 s real):
+full summary **168 / 168**, side 1 view **14 / 14**, side 2 **14 / 14**.
+Hiding measurements: [visibility](../game/units/visibility.md).
 
 <a id="map_capture"></a>
 
@@ -110,6 +116,13 @@ Process the grid without the game with [tools/analysis](../../../tools/analysis/
 `heightmap.py`, `slopes.py`, `passages.py`. Method: [map](../game/map/README.md).
 
 ## Common
+
+- **A battle always ends by itself.** Three safety nets: a real-time
+  `deadline_s` (`battle.deadline`, result `deadline`); a stall — nobody takes
+  damage for `stall_ms` of game time, 10 minutes by default
+  (`battle.services.new_stall_detector`, result `stalled`); the launcher limit
+  = 240 s for loading + every battle's deadline. Build options: `--deadline`,
+  `--stall-minutes`.
 
 - **Speed.** Once the outcome is decided and units flee, the engine drops the
   speed to ×1 by itself. `battle.speed_guard` restores the requested speed

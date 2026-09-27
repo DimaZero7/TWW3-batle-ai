@@ -2,6 +2,7 @@
 -- Experimental isolation: pairs share army morale and are only separated by
 -- distance. Scenario: scenarios/triple_melee.xml.
 local battle = require('apps.battle.adapter')
+local battle_services = require('apps.battle.services')
 local clock = require('apps.core.clock')
 local errors = require('apps.core.errors')
 local value = require('apps.core.value')
@@ -95,13 +96,19 @@ function M.main(bm, config)
         for _, item in ipairs(pair.units) do orders.halt(item.controller) end
     end
 
-    local function finish_arena()
+    local finish_arena
+    local function deadline_expired()
+        for _, pair in ipairs(state.pairs) do finish_pair(pair, 'deadline', 0, 'wall_clock_deadline') end
+        finish_arena()
+    end
+    finish_arena = function()
         local completed, warnings = 0, 0
         for _, pair in ipairs(state.pairs) do
             if pair.status == 'completed' then completed = completed + 1 end
             if pair.contaminated then warnings = warnings + 1 end
         end
         state.finished = true
+        if state.cancel_deadline then state.cancel_deadline() end
         emit('arena_complete', nil, {status = completed == 3 and 'completed' or 'incomplete',
             completed_pairs = completed, map_loads = 1, proximity_warning_pairs = warnings,
             duration_model_ms = bm:time_elapsed_ms() - started_ms, shared_army_morale = true})
@@ -142,6 +149,12 @@ function M.main(bm, config)
 
     local function tick()
         if not state.active then return end
+        -- No damage to anyone for stall_ms of game time: end the battle.
+        if state.stall.update(bm:time_elapsed_ms(), battle.health_signature(state.all_units)) then
+            for _, pair in ipairs(state.pairs) do finish_pair(pair, 'stalled', 0, 'no_damage') end
+            finish_arena()
+            return
+        end
         local now = bm:time_elapsed_ms()
         for _, item in ipairs(state.units) do
             if not item.control_confirmed then
@@ -206,6 +219,7 @@ function M.main(bm, config)
             policy = ai_contract.check_duel_policy(chunk())
         end
         started_ms, started_wall = bm:time_elapsed_ms(), clock.wall_seconds()
+        state.stall = battle_services.new_stall_detector(config.stall_ms)
         bm:modify_battle_speed(config.speed)
         state.stop_speed_guard = battle.speed_guard(bm, config.speed, function(from)
             emit('speed_restored', nil, {from_speed = from, to_speed = config.speed})
@@ -221,6 +235,8 @@ function M.main(bm, config)
             end
         end
         state.active = true
+        state.cancel_deadline = battle.deadline(bm, config.deadline_s * 1000, guarded(deadline_expired),
+            'tww3_bai_arena_deadline')
         bm:add_infotext('BAI: 3 PARALLEL DUELS / x20 / ONE MAP')
         bm:repeat_callback(guarded(tick), config.tick_ms, TIMER)
     end
@@ -258,6 +274,8 @@ function M.main(bm, config)
                 assert(found, 'unrecognised arena unit: ' .. u:name())
             end
         end
+        state.all_units = {}
+        for _, it in ipairs(state.units) do state.all_units[#state.all_units + 1] = it.unit end
         -- Take ownership before auto-deployment, not only after Deployed.
         for _, item in ipairs(state.units) do
             item.controller = orders.take_control(item.army, item.unit)

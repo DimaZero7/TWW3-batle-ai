@@ -96,11 +96,21 @@ function F.manager(sides)
         for _, fn in ipairs(self.phase_callbacks[phase] or {}) do fn() end
     end
     function bm:callback(fn) table.insert(self.queue, fn) end
-    function bm:real_callback(fn) table.insert(self.queue, fn) end
+    -- Short real-time callbacks run on pump(); long ones (deadlines, >= 5 s)
+    -- wait until the test calls fire_timers().
+    bm.timers = {}
+    function bm:real_callback(fn, ms, name)
+        if (ms or 0) >= 5000 then self.timers[name or fn] = fn else table.insert(self.queue, fn) end
+    end
+    function bm:fire_timers()
+        local due = self.timers
+        self.timers = {}
+        for _, fn in pairs(due) do fn() end
+    end
     bm.repeating = {}
     function bm:repeat_callback(fn, _, name) self.repeating[name or fn] = fn end
     function bm:remove_process(name) self.repeating[name] = nil end
-    function bm:remove_real_callback() end
+    function bm:remove_real_callback(name) self.timers[name] = nil end
     function bm:end_current_battle_phase() self:set_phase('Deployed') end
     function bm:current_battle_speed() return self.speed end
     function bm:modify_battle_speed(s) self.speed = s end
