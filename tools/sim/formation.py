@@ -9,7 +9,9 @@ the enemy anchor. The enemy is drawn with the "wall and arc" roles and layout,
 for the picture only (in battle the game AI places it). Then src/apps/vision
 sees the enemy (soldiers laid out evenly in each unit's rectangle, strength from
 apps.assessment) and finds the groups of both sides; src/apps/battlefield
-builds the field between the two main groups (axis, front lines, 40 m margin).
+builds the field between the two main groups (axis, front lines, 40 m margin);
+src/apps/alignment turns and shifts our army onto the axis when it is clearly
+off (config own.bearing sets a deliberately crooked start).
 
 Output (default research/analysis/formation/<army>/):
   plan.json  the Lua result for both sides, overlaps
@@ -114,6 +116,13 @@ class Planner:
                 return require('apps.core.json').encode(require('apps.battlefield.services').frame(input))
             end
         """)
+        self._align = self.lua.eval("""
+            function(field, current, enemy)
+                local al = require('apps.alignment.services')
+                return require('apps.core.json').encode({check = al.check(field, current, enemy),
+                    target = al.target(field, current, enemy), overhang = al.overhang(field)})
+            end
+        """)
         self._strength = self.lua.eval("function(u) return require('apps.assessment.services').strength(u) end")
 
     def strength(self, unit):
@@ -122,6 +131,14 @@ class Planner:
     def groups(self, units, total=None):
         """apps.vision.groups on {id, points, strength} units."""
         return json.loads(self._groups(self.lua.table_from(units, recursive=True), total))
+
+    def align(self, field, anchor, bearing, enemy_main=None):
+        """apps.alignment: {check, target, overhang}; enemy_main = their main group from apps.vision."""
+        current = {"anchor": {"x": anchor[0], "z": anchor[1]}, "bearing": bearing}
+        enemy = {k: enemy_main[k] for k in ("centre", "facing") if enemy_main and k in enemy_main}
+        return json.loads(self._align(self.lua.table_from(field, recursive=True),
+                                      self.lua.table_from(current, recursive=True),
+                                      self.lua.table_from(enemy, recursive=True)))
 
     def battlefield(self, own_points, own_centre, enemy_points, enemy_centre):
         """apps.battlefield.frame between the two main groups."""
@@ -175,7 +192,7 @@ def soldier_points(p, men):
 def seen_units(planner, placements, units_by_id):
     """{id, points, strength} for apps.vision from simulated placements."""
     return [{"id": p["id"], "points": soldier_points(p, units_by_id[p["id"]]["men"]),
-             "strength": planner.strength(units_by_id[p["id"]])} for p in placements]
+             "strength": planner.strength(units_by_id[p["id"]]), "bearing": p["bearing"]} for p in placements]
 
 
 def see_battle(planner, own_placements, own_by_id, enemy_placements, enemy_by_id):
@@ -225,6 +242,9 @@ def draw(path, sides, units_by_id, title):
                     f'ширина {2 * h:.0f} м (запас {field["margin_m"]:.0f} м)',
                     (min(q["x"] for q in c), min(q["z"] for q in c)), fontsize=8, xytext=(4, 4),
                     textcoords="offset points", color="#9467bd")
+    if sides.get("own_before"):
+        for p in sides["own_before"]["placements"]:
+            ax.add_patch(Polygon(corners(p), closed=True, fill=False, ec="#7f7f7f", lw=0.8, ls="--"))
     for side in ("own", "enemy"):
         plan = sides[side]
         for p in plan["placements"]:
@@ -282,21 +302,39 @@ def simulate(army, planner=None, params=None):
     enemy_by_id = {u["id"]: u for u in enemy_units}
     # The enemy first: our lord needs to know where the enemy lord stands.
     sides = {"enemy": planner.picture(army["enemy"]["anchor"],
-                                      planner.facing(army["enemy"]["anchor"], army["own"]["anchor"]),
+                                      army["enemy"].get("bearing",
+                                                        planner.facing(army["enemy"]["anchor"], army["own"]["anchor"])),
                                       [dict(u, shapes=[dict(s) for s in u["shapes"]]) for u in enemy_units])}
     lords = [p for p in sides["enemy"]["placements"] if p["role"] == "lord"]
-    plan = planner.start(army["own"].get("role"), army["own"]["anchor"],
-                         planner.facing(army["own"]["anchor"], army["enemy"]["anchor"]), own_units,
-                         enemy_units, (lords[0]["x"], lords[0]["z"]) if lords else None, params)
-    own = plan.get("formation") or {"placements": [], "options": [], "overlaps": [], "unplaced": []}
-    own.update(status=plan["status"], strategy=plan["decision"]["strategy"], features=plan["features"],
-               decision=plan["decision"])
-    sides["own"] = own
-    # How we see the battle: groups of both sides and their main armies (apps.vision).
+    enemy_lord = (lords[0]["x"], lords[0]["z"]) if lords else None
     own_by_id = {u["id"]: u for u in own_units}
-    picture, field = see_battle(planner, own["placements"], own_by_id, sides["enemy"]["placements"], enemy_by_id)
+
+    def place(anchor, bearing):
+        plan = planner.start(army["own"].get("role"), anchor, bearing, [dict(u, shapes=[dict(s) for s in u["shapes"]])
+                                                                         for u in own_units],
+                             enemy_units, enemy_lord, params)
+        own = plan.get("formation") or {"placements": [], "options": [], "overlaps": [], "unplaced": []}
+        own.update(status=plan["status"], strategy=plan["decision"]["strategy"], features=plan["features"],
+                   decision=plan["decision"], anchor=list(anchor), bearing=bearing)
+        # How we see the battle: groups of both sides and their main armies (apps.vision).
+        picture, field = see_battle(planner, own["placements"], own_by_id, sides["enemy"]["placements"], enemy_by_id)
+        return own, picture, field
+
+    # Start where the config says; own.bearing may set a deliberately crooked start.
+    anchor = army["own"]["anchor"]
+    bearing = army["own"].get("bearing", planner.facing(anchor, army["enemy"]["anchor"]))
+    own, picture, field = place(anchor, bearing)
+    alignment = None
+    if field and own["placements"]:
+        alignment = planner.align(field, anchor, bearing, picture["enemy"].get("main"))
+        if alignment["check"]["needed"]:
+            target = alignment["target"]
+            sides["own_before"] = own
+            own, picture, field = place((target["anchor"]["x"], target["anchor"]["z"]), target["bearing"])
+            alignment["after"] = planner.align(field, own["anchor"], own["bearing"], picture["enemy"].get("main"))
+    sides["own"] = own
     sides["own"]["vision"], sides["enemy"]["vision"] = picture["own"], picture["enemy"]
-    sides["battlefield"] = field
+    sides["battlefield"], sides["alignment"] = field, alignment
     return sides, own_by_id
 
 
@@ -330,10 +368,13 @@ def probe(army, speed, settle_ms, planner=None):
             # Lua config literals have no null: unknown fields are left out.
             units = [{k: v for k, v in u.items() if v is not None} for u in units]
             config["own"] = {"anchor": {"x": ax, "z": az}, "units": units}
+            if "bearing" in army["own"]:
+                config["own"]["start_bearing"] = army["own"]["bearing"]
             config["role"] = army["own"].get("role")
         else:
             config["enemy"] = {"anchor": {"x": ax, "z": az},
-                               "units": [{k: v for k, v in u.items() if v is not None} for u in units],
+                               "units": [{k: v for k, v in dict(u, id=names[u["id"]]).items() if v is not None}
+                                         for u in units],
                                "placements": [
                 {"script_name": names[p["id"]], "role": p["role"], "x": p["x"], "z": p["z"], "bearing": p["bearing"],
                  "width": p.get("width") or 5} for p in sides["enemy"]["placements"]]}
@@ -391,7 +432,16 @@ def main(argv=None):
         print(json.dumps({"status": own["status"], "decision": own["decision"]}, ensure_ascii=False, indent=1))
         return 0
     c = own["choice"]
-    title = (f'{own["strategy"]}: {own["status"]}. Стена {c["wall_width"]} м ({c["wall_front_m"]:.0f}×{c["wall_depth_m"]:.0f}), '
+    al = sides.get("alignment")
+    if al:
+        ch = al["check"]
+        oh = (al.get("after") or al)["overhang"]
+        aligned = (f'выравнивание: было {ch["angle_off_deg"]:+.0f}° и {ch["offset_m"]:+.0f} м вбок → '
+                   + ("выровнено (серый пунктир — где стояли)" if ch["needed"] else "не нужно") +
+                   f'\nих фронт нависает над нашим: слева {oh["left_m"]:.0f} м, справа {oh["right_m"]:.0f} м\n')
+    else:
+        aligned = ""
+    title = aligned + (f'{own["strategy"]}: {own["status"]}. Стена {c["wall_width"]} м ({c["wall_front_m"]:.0f}×{c["wall_depth_m"]:.0f}), '
              f'лучники {c["archer_width"]} м в {c["rows"]} ряд(а), запас дальности {c["min_reach_m"]:.0f} м\n'
              f'пунктир — место для разворота лучников; бледные — враг (для картинки)')
     draw(out / "plan.png", sides, units_by_id, title)

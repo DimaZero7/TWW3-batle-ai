@@ -54,10 +54,11 @@ function M.gap(a, b, limit)
     return math.sqrt(best)
 end
 
--- units: {{id, points = {x1, z1, ...} (metres), strength}}, visible enemies only.
+-- units: {{id, points = {x1, z1, ...} (metres), strength, bearing?}}, visible enemies only.
+-- bearing (optional): where the unit faces; the player sees it, so it is fair.
 -- total_strength (optional): strength of the whole enemy army (its roster is
 -- known before the battle), for the share of it we see.
--- Returns {groups = {{ids, strength, centre, bounds, radius_m}} strongest first,
+-- Returns {groups = {{ids, strength, centre, facing?, bounds, radius_m}} strongest first,
 --          main = groups[1] or nil, seen_share}.
 function M.groups(units, params, total_strength)
     local p = {}
@@ -69,7 +70,7 @@ function M.groups(units, params, total_strength)
         assert(type(u.points) == 'table' and #u.points >= 2 and #u.points % 2 == 0,
             'Unit ' .. tostring(u.id) .. ' has no soldier points')
         assert(finite(u.strength) and u.strength >= 0, 'Unit ' .. tostring(u.id) .. ' has no strength')
-        items[#items + 1] = {id = u.id, points = u.points, strength = u.strength,
+        items[#items + 1] = {id = u.id, points = u.points, strength = u.strength, bearing = u.bearing,
             bounds = bounds(u.points), middle = middle(u.points)}
     end
     -- Chain linking (union-find over all pairs).
@@ -107,6 +108,15 @@ function M.groups(units, params, total_strength)
             sx, sz, w = sx + it.middle.x * weight, sz + it.middle.z * weight, w + weight
         end
         h.centre = {x = sx / w, z = sz / w}
+        -- Facing: mean direction of the units' bearings, weighted like the centre.
+        local fs, fc = 0, 0
+        for _, it in ipairs(h.members) do
+            if finite(it.bearing) then
+                local weight = h.strength > 0 and it.strength or 1
+                fs, fc = fs + math.sin(math.rad(it.bearing)) * weight, fc + math.cos(math.rad(it.bearing)) * weight
+            end
+        end
+        if fs ~= 0 or fc ~= 0 then h.facing = math.deg(math.atan2(fs, fc)) % 360 end
         local b, radius = nil, 0
         for _, it in ipairs(h.members) do
             local ub = it.bounds

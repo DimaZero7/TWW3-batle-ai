@@ -35,3 +35,21 @@ def test_simulation_builds_the_battlefield():
     assert field["status"] == "ok" and min(field["bearing"], 360 - field["bearing"]) < 5
     assert 250 < field["centres_m"] < 350 and field["gap_m"] > 200
     assert field["half_width_m"] >= 40 + field["enemy"]["width_m"] / 2 - 1
+
+
+def test_crooked_army_is_aligned_opposite_the_enemy():
+    army, _ = formation.load_army("first_attack_crooked")
+    sides, _ = formation.simulate(army)
+    a = sides["alignment"]
+    # Started 25 degrees off and ~54 m aside of the line the enemy looks along.
+    assert a["check"]["needed"] and set(a["check"]["reasons"]) == {"angle", "offset"}
+    assert a["check"]["source"] == "enemy_facing" and abs(a["check"]["offset_m"]) > 40
+    after = a["after"]["check"]
+    assert not after["needed"] and abs(after["angle_off_deg"]) < 1 and abs(after["offset_m"]) < 1
+    assert sides["own_before"]["placements"] and not sides["own"]["overlaps"]
+
+
+def test_aligned_army_is_left_alone():
+    army, _ = formation.load_army("first_attack")
+    sides, _ = formation.simulate(army)
+    assert not sides["alignment"]["check"]["needed"] and "own_before" not in sides

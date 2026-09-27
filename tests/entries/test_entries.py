@@ -334,7 +334,7 @@ class TestFormationProbe:
             return {id = id, class = 'inf_mel', men = 120, commanding = false, range_m = 0, health = 8280,
                 armour = 30, melee_attack = 20, melee_defence = 34, shapes = {{ordered_m = 40, front_m = 39, depth_m = 8}}}
         end
-        CONFIG = {build = 'test', speed = 20, tick_ms = 1000, deadline_s = 100, stall_ms = 900000,
+        CONFIG = {build = 'test', speed = 20, tick_ms = 1000, deadline_s = 100, stall_ms = 900000, align_timeout_s = 30,
             settle_ms = 3000, stage_timeout_s = 20, hold_s = 10, role = 'attack',
             own = {anchor = {x = 0, z = -150}, units = {spear('own_1'),
                 {id = 'own_2', class = 'inf_mis', men = 90, commanding = false, fire = 'arc', range_m = 130,
@@ -342,7 +342,16 @@ class TestFormationProbe:
             enemy = {anchor = {x = 0, z = 150}, units = {spear('enemy_1'), spear('enemy_2')}, placements = {
                 {script_name = 'enemy_1', role = 'wall', x = 0, z = 150, bearing = 180, width = 30},
                 {script_name = 'enemy_2', role = 'wall', x = 30, z = 150, bearing = 180, width = 30}}}}
-        GLOBALS = {common = fake.common, battle_vector = fake.vector_type}
+        -- Two soldiers per unit around its position, so each side has its own place.
+        local by_id = {uid_own_1 = spears, uid_own_2 = archers, uid_enemy_1 = e1, uid_enemy_2 = e2}
+        local common = {game_version = fake.common.game_version, get_context_value = function(key, id, field)
+            local u = by_id[id]
+            if u and field == 'ManList.Size' then return 2 end
+            local i = u and field and field:match('^ManList%.At%((%d+)%)%.Position$')
+            if i then return u.pos.x + tonumber(i) * 2, 0, u.pos.z end
+            return fake.common.get_context_value(key, id, field)
+        end}
+        GLOBALS = {common = common, battle_vector = fake.vector_type}
     """
 
     def test_plan_is_applied_and_stages_run(self, lua, tmp_path):
@@ -360,7 +369,7 @@ class TestFormationProbe:
         assert plan["strategy"] == "wall_and_arc" and plan["plan"]["layout"] == "line_and_blocks"
         stages = [r["stage"] for r in rows if r["event"] == "stage_snapshot"]
         assert len([r for r in rows if r["event"] == "hold_sample"]) >= 10
-        assert stages == ["placed", "hold", "turn_right", "back_from_right", "turn_left", "back_from_left",
+        assert stages == ["placed", "align", "hold", "turn_right", "back_from_right", "turn_left", "back_from_left",
                           "turn_right_in_place", "back_right_in_place", "turn_left_in_place", "back_left_in_place"]
         assert any(r["event"] == "turn_sample" for r in rows)
         assert rows[-1]["event"] == "result" and rows[-1]["status"] == "completed"
@@ -374,7 +383,7 @@ class TestFormationProbe:
             assert(state.finished)
         """)
         rows = events(tmp_path / "tww3_bai_events.jsonl")
-        assert [r["stage"] for r in rows if r["event"] == "stage_snapshot"] == ["placed", "hold"]
+        assert [r["stage"] for r in rows if r["event"] == "stage_snapshot"] == ["placed", "align", "hold"]
         assert not any(r["event"] == "turn_sample" for r in rows)
         assert rows[-1]["orders_after_placed"] == 0 and rows[-1]["status"] == "completed"
 

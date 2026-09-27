@@ -11,6 +11,8 @@ strength (`apps.assessment.strength`).
 
 | Function | What it does |
 |---|---|
+Each group also has `facing` (mean bearing of its units, weighted like the centre) when bearings are given.
+
 | `gap(a, b, limit?)` | Gap between two formations: the closest soldiers; stops early at `limit` |
 | `picture({own, enemy, enemy_total?})` | The battle picture: groups of **both** sides by one rule (ours in full, the enemy as seen), for group-against-group decisions |
 | `groups(units, params?, total_strength?)` | Units are linked when the edge gap ≤ `link_gap_m`, links chain, a lone unit is a group; groups strongest first, `main` = the enemy's main army; `seen_share` if the total is given |

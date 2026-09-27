@@ -5,8 +5,16 @@
 --   2. our army is planned in battle by apps.plan (assessment -> strategy ->
 --      formation) from both rosters, facing the visible enemy (or the
 --      configured enemy anchor), and teleported there;
---   3. stages: placed -> hold (config.hold_s of game time, no orders at all:
---      without an enemy assessment the army must not move or re-form);
+--   3. stages: placed -> align -> hold. align: apps.vision (groups of both
+--      sides from our side's view) -> apps.battlefield -> apps.alignment; if
+--      our army is clearly off (config.own.start_bearing / anchor can start it
+--      crooked), the formation is planned again opposite the enemy and the
+--      units WALK there by orders; then it is checked again on real soldiers.
+--      Every alignment goes through the governor (apps.alignment: tolerance,
+--      not while moving, every 20 s at most, give up if it does not help).
+--      hold: config.hold_s of game time, no orders at all (no rushing); every
+--      5 s the governor is asked on real soldiers and its answer is only
+--      logged ('governor'): it must not want to realign again and again;
 --      with config.turn_test also: archers turn right/left, engine rotate and ours.
 -- stage_snapshot: every own unit's movement and soldiers when a stage ends;
 -- hold_sample: every own unit's movement every tick of the hold;
@@ -22,6 +30,10 @@ local map = require('apps.map.adapter')
 local formation = require('apps.formation.services')
 local plan_services = require('apps.plan.services')
 local unit_motion = require('apps.units.formation_adapter')
+local assessment = require('apps.assessment.services')
+local vision = require('apps.vision.services')
+local battlefield = require('apps.battlefield.services')
+local alignment = require('apps.alignment.services')
 
 local M = {}
 
@@ -30,19 +42,21 @@ local TIMER = 'tww3_bai_formation_probe_tick'
 M.LORD_WIDTH = 5
 -- stage name, turn of the archers (degrees), how: 'rotate' = the engine's
 -- relative rotate (pivots on the front rank), 'in_place' = our turn around the middle.
-M.BASE_STAGES = {{'placed', 0}, {'hold', 0, 'hold'}}
+M.BASE_STAGES = {{'placed', 0}, {'align', 0, 'align'}, {'hold', 0, 'hold'}}
 M.TURN_STAGES = {{'turn_right', 90, 'rotate'}, {'back_from_right', -90, 'rotate'},
     {'turn_left', -90, 'rotate'}, {'back_from_left', 90, 'rotate'},
     {'turn_right_in_place', 90, 'in_place'}, {'back_right_in_place', -90, 'in_place'},
     {'turn_left_in_place', -90, 'in_place'}, {'back_left_in_place', 90, 'in_place'}}
 
 -- config: build, speed, tick_ms, deadline_s, stall_ms, settle_ms, stage_timeout_s, hold_s, turn_test,
+-- align_timeout_s, own.start_bearing (optional crooked start),
 -- role ('attack' | 'defend'), own = {anchor, units (roster input, id = script name)},
 -- enemy = {anchor, units (roster input), placements}, formation_params (overrides, tests only).
 function M.main(bm, config, globals)
     if _G.tww3_bai_formation_probe then return end
     local state = {active = false, finished = false, batch = '', run_id = 'bootstrap', ticks = 0,
-        own = {}, enemy = {}, by_name = {}, stage_index = 0, orders_after_placed = 0, stages = {}}
+        own = {}, enemy = {}, by_name = {}, stage_index = 0, orders_after_placed = 0, orders_alignment = 0,
+        stages = {}, governor = alignment.new_governor()}
     for _, s in ipairs(M.BASE_STAGES) do state.stages[#state.stages + 1] = s end
     if config.turn_test then
         for _, s in ipairs(M.TURN_STAGES) do state.stages[#state.stages + 1] = s end
@@ -88,6 +102,123 @@ function M.main(bm, config, globals)
     end
     local function is_archer(it) return it.role == 'arc' end
 
+    local function strength_of(id, list)
+        for _, u in ipairs(list) do
+            if u.id == id then return assessment.strength(u) end
+        end
+        return 1
+    end
+
+    local function points_of(u)
+        local men = unit_motion.soldiers(cco, u)
+        if men.status ~= 'ok' then return nil end
+        local pts = {}
+        for i, v in ipairs(men.xz_dm) do pts[i] = v / 10 end
+        return pts
+    end
+
+    -- The AI's own view: our units in full, the enemy only as our side sees it.
+    local function battle_picture()
+        local own, enemy, total = {}, {}, 0
+        for _, it in ipairs(state.own) do
+            local pts = points_of(it.unit)
+            if pts then
+                own[#own + 1] = {id = it.name, points = pts, strength = strength_of(it.name, config.own.units),
+                    bearing = it.unit:bearing()}
+            end
+        end
+        for _, it in ipairs(state.enemy) do
+            local s = strength_of(it.name, config.enemy.units)
+            total = total + s
+            local ok, seen = pcall(function() return it.unit:is_visible_to_alliance(state.alliance) end)
+            if ok and seen then
+                local pts = points_of(it.unit)
+                if pts then enemy[#enemy + 1] = {id = it.name, points = pts, strength = s, bearing = it.unit:bearing()} end
+            end
+        end
+        local picture = vision.picture({own = own, enemy = enemy, enemy_total = total})
+        if not (picture.own.main and picture.enemy.main) then return picture, nil end
+        local function group_points(units, group)
+            local ids, pts = {}, {}
+            for _, id in ipairs(group.ids) do ids[id] = true end
+            for _, u in ipairs(units) do
+                if ids[u.id] then for _, v in ipairs(u.points) do pts[#pts + 1] = v end end
+            end
+            return pts
+        end
+        local field = battlefield.frame({
+            own = {points = group_points(own, picture.own.main), centre = picture.own.main.centre},
+            enemy = {points = group_points(enemy, picture.enemy.main), centre = picture.enemy.main.centre}})
+        return picture, field
+    end
+
+    local function enemy_of(picture)
+        local main = picture.enemy.main
+        return {centre = main.centre, facing = main.facing}
+    end
+
+    -- Align stage: decide from our side's view and walk there if needed. While
+    -- the enemy is not seen there is nothing to align with: try again next tick
+    -- (finding an unseen enemy is backlog #11). Returns true once decided.
+    local function align()
+        local picture, field = battle_picture()
+        if not field then
+            state.align_waits = (state.align_waits or 0) + 1
+            return false
+        end
+        local current = {anchor = state.placed.anchor, bearing = state.placed.bearing}
+        local check = alignment.check(field, current, enemy_of(picture))
+        local now = bm:time_elapsed_ms()
+        local decision = state.governor.decide(now, check, false)
+        local row = {check = check, overhang = alignment.overhang(field), field = field, decision = decision}
+        if decision == 'align' then
+            state.governor.record_order(now, check)
+            local target = alignment.target(field, current, enemy_of(picture))
+            local result = plan_services.start({role = config.role, bearing = target.bearing,
+                own = {anchor = target.anchor, units = config.own.units},
+                enemy = {units = config.enemy.units, lord = state.placed.lord}, formation_params = config.formation_params})
+            assert(result.formation, 'No strategy when aligning')
+            for _, p in ipairs(result.formation.placements) do
+                local it = state.by_name[p.id]
+                it.placement = p
+                orders.move_formation(it.uc, vec(p.x, p.z), p.bearing, p.width or M.LORD_WIDTH, false)
+                state.orders_alignment = state.orders_alignment + 1
+            end
+            row.target, row.plan = target, result.formation
+        end
+        row.waited_ticks = state.align_waits or 0
+        emit('alignment', row)
+        return true
+    end
+
+    -- The same check on the real soldiers (our group's centre and facing).
+    local function measured_check()
+        local picture, field = battle_picture()
+        if not field then return nil end
+        local own = picture.own.main
+        local current = {anchor = own.centre, bearing = own.facing or state.placed.bearing}
+        return alignment.check(field, current, enemy_of(picture)), field
+    end
+
+    local function check_aligned()
+        local check, field = measured_check()
+        if not check then return end
+        emit('alignment_after', {check = check, overhang = alignment.overhang(field), field = field,
+            orders = state.orders_alignment})
+    end
+
+    -- During the hold: what the governor would do now (logged only, no orders).
+    local function ask_governor(elapsed)
+        local check = measured_check()
+        if not check then return end
+        local moving = false
+        for _, it in ipairs(state.own) do
+            if it.unit:is_moving() then moving = true end
+        end
+        emit('governor', {t_ms = elapsed, decision = state.governor.decide(bm:time_elapsed_ms(), check, moving),
+            check = check})
+    end
+
     local function finish(status)
         if state.finished then return end
         state.active = false
@@ -95,7 +226,7 @@ function M.main(bm, config, globals)
         pcall(function() bm:remove_process(TIMER) end)
         if state.cancel_deadline then state.cancel_deadline() end
         emit('result', {status = status, stages_done = state.stage_index, stages = #state.stages, ticks = state.ticks,
-            orders_after_placed = state.orders_after_placed})
+            orders_after_placed = state.orders_after_placed, orders_alignment = state.orders_alignment})
         for _, it in ipairs(state.own) do orders.halt(it.uc) end
         for _, it in ipairs(state.enemy) do orders.halt(it.uc) end
         flush()
@@ -105,6 +236,7 @@ function M.main(bm, config, globals)
     local function begin_stage(index)
         state.stage_index, state.stage_ms, state.still = index, bm:time_elapsed_ms(), 0
         local stage = state.stages[index]
+        if stage[3] == 'align' then state.align_done = align() end
         if stage[2] ~= 0 then
             for _, it in ipairs(state.own) do
                 if is_archer(it) then state.orders_after_placed = state.orders_after_placed + 1 end
@@ -134,12 +266,17 @@ function M.main(bm, config, globals)
         if stage[2] ~= 0 then
             emit('turn_sample', {stage = stage[1], t_ms = elapsed, units = units_row(is_archer)})
         end
+        if stage[3] == 'align' and not state.align_done then
+            state.align_done = align()
+            state.still = 0  -- orders may have just been given
+        end
         if stage[3] == 'hold' then
             local rows = {}
             for _, it in ipairs(state.own) do
                 rows[#rows + 1] = {script_name = it.name, motion = unit_motion.motion(it.unit)}
             end
             emit('hold_sample', {t_ms = elapsed, orders_after_placed = state.orders_after_placed, units = rows})
+            if state.ticks % 5 == 0 then ask_governor(elapsed) end
         end
         local moving = false
         for _, it in ipairs(state.own) do
@@ -149,10 +286,20 @@ function M.main(bm, config, globals)
         local done
         if stage[3] == 'hold' then
             done = elapsed >= config.hold_s * 1000
+        elseif stage[3] == 'align' then
+            -- Walking takes a while; the first ticks may still be standing.
+            done = (elapsed >= config.settle_ms and state.still >= 3) or elapsed >= config.align_timeout_s * 1000
         else
             done = (elapsed >= config.settle_ms and state.still >= 2) or elapsed >= config.stage_timeout_s * 1000
         end
+        if stage[3] == 'align' and not state.align_done then
+            done = elapsed >= config.align_timeout_s * 1000
+        end
         if done then
+            if stage[3] == 'align' and not state.align_done then
+                emit('alignment', {decision = 'enemy_not_seen', waited_ticks = state.align_waits or 0})
+            end
+            if stage[3] == 'align' then check_aligned() end
             emit('stage_snapshot', {stage = stage[1], t_ms = elapsed, settled = state.still >= 2,
                 units = units_row()})
             if state.stage_index < #state.stages then begin_stage(state.stage_index + 1) else finish('completed') end
@@ -179,7 +326,8 @@ function M.main(bm, config, globals)
 
     local function place_own()
         local centre, lord, source, seen = enemy_view()
-        local bearing = formation.facing(config.own.anchor, centre)
+        local bearing = config.own.start_bearing or formation.facing(config.own.anchor, centre)
+        state.placed = {anchor = config.own.anchor, bearing = bearing, lord = lord}
         -- The enemy roster (unit types) is known before the battle, as to the player.
         local result = plan_services.start({role = config.role, bearing = bearing,
             own = {anchor = config.own.anchor, units = config.own.units},

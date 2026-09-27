@@ -142,3 +142,16 @@ def test_picture_has_both_sides(lua):
     assert r["own"]["seen_share"] == 1 and r["enemy"]["seen_share"] == pytest.approx(0.5)
     with pytest.raises(Exception, match="Both sides required"):
         lua.globals().vision.picture(lua.table_from({"own": {}}))
+
+
+def test_group_facing_is_the_mean_bearing(lua):
+    a = dict(block("a", 0, 0), bearing=350)
+    b = dict(block("b", 15, 0), bearing=10)
+    r = heaps_or_groups(lua, [a, b])
+    assert r["main"]["facing"] == pytest.approx(0, abs=1e-6) or r["main"]["facing"] == pytest.approx(360)
+    assert "facing" not in heaps_or_groups(lua, [block("c", 0, 0)])["main"]
+
+
+def heaps_or_groups(lua, units):
+    encode = lua.eval("function(t) return require('apps.core.json').encode(t) end")
+    return json.loads(encode(lua.globals().vision.groups(lua.table_from(units, recursive=True), None, None)))

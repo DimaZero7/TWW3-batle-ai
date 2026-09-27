@@ -143,6 +143,12 @@ with `--turn-test`: right and left with the engine's `rotate` and with our turn 
 Events: `plan`, `stage_snapshot`, `turn_sample`.
 Analysis: `tools/analysis/formation_probe.py`.
 
+After placing, stage `align`: [vision](vision.md) → [battlefield](battlefield.md) →
+[alignment](alignment.md) from our side's view; if the army is off, the formation is
+planned again opposite the enemy and the units **walk** there (`alignment`,
+`alignment_after`). While the enemy is unseen it waits. During the hold the
+governor only answers every 5 s (`governor`).
+
 <a id="enemy_layout"></a>
 
 ## enemy_layout — how the game AI stands

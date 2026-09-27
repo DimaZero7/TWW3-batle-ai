@@ -117,6 +117,8 @@ FORMATION_SETTLE_MS = 3000
 FORMATION_STAGE_S = 20
 # enemy-layout: game time the game AI army is watched after deployment.
 ENEMY_LAYOUT_HOLD_S = 90
+# formation-probe: longest walk to the aligned place (walking pace 1.5 m/s).
+FORMATION_ALIGN_S = 120
 # formation-probe: the army stands this long after placing and must not move.
 FORMATION_HOLD_S = 60
 
@@ -263,8 +265,9 @@ def main(argv=None):
             xml, probe_config, _ = sim.probe(army, args.speed, FORMATION_SETTLE_MS)
             (project.SCENARIOS / "formation_probe.xml").write_text(xml, encoding="utf-8")
             run_config.update(probe_config, stage_timeout_s=FORMATION_STAGE_S, army=args.army,
-                              hold_s=FORMATION_HOLD_S, turn_test=args.turn_test)
-            model_s = FORMATION_STAGE_S + FORMATION_HOLD_S + (8 * FORMATION_STAGE_S if args.turn_test else 0) + 15
+                              hold_s=FORMATION_HOLD_S, turn_test=args.turn_test, align_timeout_s=FORMATION_ALIGN_S)
+            model_s = (FORMATION_STAGE_S + FORMATION_ALIGN_S + FORMATION_HOLD_S
+                       + (8 * FORMATION_STAGE_S if args.turn_test else 0) + 15)
             stall_ms = max(stall_ms, int((model_s + 120) * 1000))
         if args.target == "enemy-layout":
             from tools import enemy_layout

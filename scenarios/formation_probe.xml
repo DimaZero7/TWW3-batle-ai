@@ -13,33 +13,33 @@
       <camera_target_position x="100" y="530" z="-120"/>
       <unit num_soldiers="1" script_name="own_1">
         <unit_type type="wh_main_emp_cha_general_0"/>
-        <position x="42.5" y="-200"/><orientation radians="0"/><width metres="10"/>
+        <position x="172.5" y="-320"/><orientation radians="0"/><width metres="10"/>
         <unit_experience level="0"/>
         <general><name>own</name><star_rating level="1"/></general>
       </unit>
       <unit num_soldiers="120" script_name="own_2">
         <unit_type type="wh_main_emp_inf_spearmen_0"/>
-        <position x="57.5" y="-200"/><orientation radians="0"/><width metres="10"/>
+        <position x="187.5" y="-320"/><orientation radians="0"/><width metres="10"/>
         <unit_experience level="0"/>
       </unit>
       <unit num_soldiers="90" script_name="own_3">
         <unit_type type="wh2_dlc13_emp_inf_archers_0"/>
-        <position x="72.5" y="-200"/><orientation radians="0"/><width metres="10"/>
+        <position x="202.5" y="-320"/><orientation radians="0"/><width metres="10"/>
         <unit_experience level="0"/>
       </unit>
       <unit num_soldiers="90" script_name="own_4">
         <unit_type type="wh2_dlc13_emp_inf_archers_0"/>
-        <position x="87.5" y="-200"/><orientation radians="0"/><width metres="10"/>
+        <position x="217.5" y="-320"/><orientation radians="0"/><width metres="10"/>
         <unit_experience level="0"/>
       </unit>
       <unit num_soldiers="90" script_name="own_5">
         <unit_type type="wh2_dlc13_emp_inf_archers_0"/>
-        <position x="102.5" y="-200"/><orientation radians="0"/><width metres="10"/>
+        <position x="232.5" y="-320"/><orientation radians="0"/><width metres="10"/>
         <unit_experience level="0"/>
       </unit>
       <unit num_soldiers="90" script_name="own_6">
         <unit_type type="wh2_dlc13_emp_inf_archers_0"/>
-        <position x="117.5" y="-200"/><orientation radians="0"/><width metres="10"/>
+        <position x="247.5" y="-320"/><orientation radians="0"/><width metres="10"/>
         <unit_experience level="0"/>
       </unit>
     </army>
@@ -56,28 +56,28 @@
       <camera_target_position x="100" y="530" z="-120"/>
       <unit num_soldiers="1" script_name="enemy_1">
         <unit_type type="wh_main_emp_cha_general_0"/>
-        <position x="42.5" y="160"/><orientation radians="0"/><width metres="10"/>
+        <position x="122.5" y="40"/><orientation radians="0"/><width metres="10"/>
         <unit_experience level="0"/>
         <general><name>enemy</name><star_rating level="1"/></general>
       </unit>
       <unit num_soldiers="120" script_name="enemy_2">
         <unit_type type="wh_main_emp_inf_spearmen_0"/>
-        <position x="57.5" y="160"/><orientation radians="0"/><width metres="10"/>
+        <position x="137.5" y="40"/><orientation radians="0"/><width metres="10"/>
         <unit_experience level="0"/>
       </unit>
       <unit num_soldiers="120" script_name="enemy_3">
         <unit_type type="wh_main_emp_inf_spearmen_0"/>
-        <position x="72.5" y="160"/><orientation radians="0"/><width metres="10"/>
+        <position x="152.5" y="40"/><orientation radians="0"/><width metres="10"/>
         <unit_experience level="0"/>
       </unit>
       <unit num_soldiers="90" script_name="enemy_4">
         <unit_type type="wh2_dlc13_emp_inf_archers_0"/>
-        <position x="87.5" y="160"/><orientation radians="0"/><width metres="10"/>
+        <position x="167.5" y="40"/><orientation radians="0"/><width metres="10"/>
         <unit_experience level="0"/>
       </unit>
       <unit num_soldiers="90" script_name="enemy_5">
         <unit_type type="wh2_dlc13_emp_inf_archers_0"/>
-        <position x="102.5" y="160"/><orientation radians="0"/><width metres="10"/>
+        <position x="182.5" y="40"/><orientation radians="0"/><width metres="10"/>
         <unit_experience level="0"/>
       </unit>
     </army>

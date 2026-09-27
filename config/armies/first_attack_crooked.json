@@ -1,0 +1,47 @@
+{
+  "description": "The first example started crooked on purpose, to check alignment (apps.alignment): our anchor 50 m to the side of the line the enemy looks along and our front turned 25 degrees; the enemy faces straight south (180). Placed where both sides see each other (terrain at least 2 m below the line of sight, 3 m grid): between the anchors of first_attack a ridge hides the enemy from the crooked start.",
+  "own": {
+    "role": "attack",
+    "anchor": [
+      210,
+      -290
+    ],
+    "bearing": 25,
+    "units": [
+      {
+        "key": "wh_main_emp_cha_general_0",
+        "count": 1
+      },
+      {
+        "key": "wh_main_emp_inf_spearmen_0",
+        "count": 1
+      },
+      {
+        "key": "wh2_dlc13_emp_inf_archers_0",
+        "count": 4
+      }
+    ]
+  },
+  "enemy": {
+    "role": "defend",
+    "anchor": [
+      160,
+      10
+    ],
+    "bearing": 180,
+    "units": [
+      {
+        "key": "wh_main_emp_cha_general_0",
+        "count": 1
+      },
+      {
+        "key": "wh_main_emp_inf_spearmen_0",
+        "count": 2
+      },
+      {
+        "key": "wh2_dlc13_emp_inf_archers_0",
+        "count": 2
+      }
+    ]
+  }
+}

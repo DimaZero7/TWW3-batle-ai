@@ -63,11 +63,15 @@ STABLE_ORDER_M = 0.5
 def stability(rows):
     """Hold stage: soldiers' middle before/after, order point, is_moving ticks, orders we gave."""
     samples = [r for r in rows if r["event"] == "hold_sample"]
-    snaps = {r["stage"]: r for r in rows if r["event"] == "stage_snapshot"}
-    if not samples or "placed" not in snaps or "hold" not in snaps:
+    ordered = [r for r in rows if r["event"] == "stage_snapshot"]
+    names = [r["stage"] for r in ordered]
+    if not samples or "hold" not in names or names.index("hold") == 0:
         return None
-    before = {u["script_name"]: u for u in snaps["placed"]["units"]}
-    after = {u["script_name"]: u for u in snaps["hold"]["units"]}
+    # From the start of the hold: the snapshot of the stage before it (placed, or
+    # align when the army was aligned first), to the end of the hold.
+    start = ordered[names.index("hold") - 1]
+    before = {u["script_name"]: u for u in start["units"]}
+    after = {u["script_name"]: u for u in ordered[names.index("hold")]["units"]}
     first = {u["script_name"]: u["motion"] for u in samples[0]["units"]}
     units = {}
     for name, m0 in first.items():
@@ -107,6 +111,35 @@ def main(argv=None):
     turns = [r for r in rows if r["event"] == "turn_sample"]
 
     placed = next(s for s in snapshots if s["stage"] == "placed")
+
+    def placement_errors(snapshot, by_id):
+        units = {}
+        for u in snapshot["units"]:
+            p = by_id[u["script_name"]]
+            m = measured(u, p["bearing"])
+            units[u["script_name"]] = {
+                "role": p["role"],
+                "front_centre_error_m": round(float(np.hypot(*(m["front_centre"] - [p["x"], p["z"]]))), 1),
+                "planned_front_x_depth_m": [round(p["front_m"], 1), round(p["depth_m"], 1)],
+                "real_front_x_depth_m": [round(m["front_m"], 1), round(m["depth_m"], 1)],
+                "bearing_error_deg": round(((u["motion"]["bearing"] - p["bearing"] + 180) % 360) - 180, 1),
+            }
+        return units
+
+    # After an alignment the army walks to a new plan; stages after it are checked against that one.
+    aligned_row = next((r for r in rows if r["event"] == "alignment" and r.get("plan")), None)
+    aligned = {p["id"]: p for p in aligned_row["plan"]["placements"]} if aligned_row else None
+    after_row = next((r for r in rows if r["event"] == "alignment_after"), None)
+    alignment_summary = None
+    if aligned_row or after_row:
+        align_snap = next((s for s in snapshots if s["stage"] == "align"), None)
+        alignment_summary = {
+            "before": aligned_row and {k: aligned_row["check"][k] for k in ("angle_off_deg", "offset_m", "reasons")},
+            "after": after_row and {k: after_row["check"][k] for k in ("angle_off_deg", "offset_m", "needed")},
+            "orders": after_row and after_row["orders"], "walk_s": align_snap and align_snap["t_ms"] / 1000,
+            "overhang_after": after_row and after_row["overhang"],
+            "units_after_walking": placement_errors(align_snap, aligned) if (aligned and align_snap) else None,
+            "governor": [r["decision"] for r in rows if r["event"] == "governor"]}
     units = {}
     for u in placed["units"]:
         p = placements[u["script_name"]]
@@ -138,14 +171,16 @@ def main(argv=None):
             during[t["stage"]] = dict(c, t_s=t["t_ms"] / 1000)
     summary = {"facing_source": plan_row["facing_source"], "enemies_seen": plan_row["enemies_seen"],
                "bearing": round(plan_row["bearing"], 1), "status": plan["status"], "choice": plan["choice"],
-               "units_after_placing": units, "stability": stability(rows), "stages": stages,
+               "units_after_placing": units, "alignment": alignment_summary, "stability": stability(rows),
+               "stages": stages,
                "archers_while_turning": during}
     args.output.mkdir(parents=True, exist_ok=True)
     (args.output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     fig, axes = plt.subplots(1, len(snapshots), figsize=(4.2 * len(snapshots), 5.5))
     for ax, snap in zip(np.atleast_1d(axes), snapshots):
-        for p in plan["placements"]:
+        shown = aligned if (aligned and snap["stage"] != "placed") else placements
+        for p in shown.values():
             ax.add_patch(Polygon(corners(p), closed=True, fill=False, ec=COLORS[p["role"]], lw=1, ls="--"))
         for u in snap["units"]:
             if u.get("soldiers_dm"):
@@ -156,7 +191,7 @@ def main(argv=None):
                      fontsize=9)
         ax.set_aspect("equal")
         ax.grid(alpha=0.3)
-    fig.suptitle("пунктир — план, точки — бойцы в игре")
+    fig.suptitle("пунктир — план (после выравнивания — новый план), точки — бойцы в игре")
     fig.tight_layout()
     fig.savefig(args.output / "stages.png", dpi=100)
     plt.close(fig)
