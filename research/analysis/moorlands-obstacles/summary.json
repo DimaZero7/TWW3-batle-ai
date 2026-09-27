@@ -1,0 +1,692 @@
+{
+  "grid": {
+    "origin": -512.0,
+    "step_m": 3.0,
+    "shape": [
+      342,
+      342
+    ],
+    "inside_cells": 116281
+  },
+  "obstacle_definition": "inside the radar frame and is_area_clear() == false; NOT verified passability",
+  "obstacles": {
+    "cells": 2268,
+    "area_m2": 20412.0,
+    "clusters": 10,
+    "single_cell_clusters": 0,
+    "clusters_ge_10_cells": 10,
+    "largest_cells": 481,
+    "with_objects_nearby": 10,
+    "without_objects_nearby": 0
+  },
+  "forest_cells_inside": 30225,
+  "slopes": {
+    "over_15_deg": 37178,
+    "over_25_deg": 4144,
+    "over_35_deg": 279,
+    "over_45_deg": 135,
+    "steep_over_35_but_clear": 1,
+    "note": "is_area_clear does not mark steep slopes; passability on slopes unknown"
+  },
+  "gaps": {
+    "total": 0,
+    "narrow": 0,
+    "medium": 0,
+    "wide": 0
+  },
+  "clearance_m": {
+    "free_cells_under_5m": 779,
+    "free_cells_under_10m": 2076
+  },
+  "fence_lines": {
+    "section_m": 5.8,
+    "count": 292,
+    "lines": [
+      {
+        "sections": 31,
+        "center": [
+          -116.4,
+          -0.9
+        ],
+        "length_m": 56.4
+      },
+      {
+        "sections": 23,
+        "center": [
+          70.1,
+          -202.6
+        ],
+        "length_m": 60.6
+      },
+      {
+        "sections": 19,
+        "center": [
+          -251.3,
+          -61.1
+        ],
+        "length_m": 57.7
+      },
+      {
+        "sections": 18,
+        "center": [
+          -314.2,
+          -5.7
+        ],
+        "length_m": 64.1
+      },
+      {
+        "sections": 18,
+        "center": [
+          -480.9,
+          -10.9
+        ],
+        "length_m": 60.0
+      },
+      {
+        "sections": 18,
+        "center": [
+          9.8,
+          -158.5
+        ],
+        "length_m": 51.1
+      },
+      {
+        "sections": 17,
+        "center": [
+          -363.7,
+          -51.6
+        ],
+        "length_m": 53.5
+      },
+      {
+        "sections": 14,
+        "center": [
+          453.5,
+          1.7
+        ],
+        "length_m": 54.8
+      },
+      {
+        "sections": 11,
+        "center": [
+          307.5,
+          -11.7
+        ],
+        "length_m": 35.4
+      },
+      {
+        "sections": 10,
+        "center": [
+          166.9,
+          -151.1
+        ],
+        "length_m": 30.3
+      },
+      {
+        "sections": 10,
+        "center": [
+          331.3,
+          -1.9
+        ],
+        "length_m": 57.5
+      },
+      {
+        "sections": 9,
+        "center": [
+          26.9,
+          -20.7
+        ],
+        "length_m": 34.1
+      },
+      {
+        "sections": 8,
+        "center": [
+          -2.4,
+          -22.3
+        ],
+        "length_m": 33.5
+      },
+      {
+        "sections": 8,
+        "center": [
+          78.8,
+          -5.2
+        ],
+        "length_m": 28.1
+      },
+      {
+        "sections": 6,
+        "center": [
+          -38.4,
+          26.9
+        ],
+        "length_m": 31.2
+      },
+      {
+        "sections": 6,
+        "center": [
+          -47.7,
+          35.7
+        ],
+        "length_m": 33.1
+      },
+      {
+        "sections": 6,
+        "center": [
+          114.1,
+          6.9
+        ],
+        "length_m": 35.6
+      },
+      {
+        "sections": 6,
+        "center": [
+          122.2,
+          -5.4
+        ],
+        "length_m": 34.8
+      },
+      {
+        "sections": 6,
+        "center": [
+          195.0,
+          -180.5
+        ],
+        "length_m": 33.1
+      },
+      {
+        "sections": 6,
+        "center": [
+          330.8,
+          -18.6
+        ],
+        "length_m": 33.2
+      },
+      {
+        "sections": 5,
+        "center": [
+          -75.6,
+          -88.4
+        ],
+        "length_m": 22.2
+      },
+      {
+        "sections": 5,
+        "center": [
+          424.8,
+          -30.7
+        ],
+        "length_m": 21.6
+      },
+      {
+        "sections": 5,
+        "center": [
+          441.3,
+          -24.0
+        ],
+        "length_m": 26.4
+      },
+      {
+        "sections": 5,
+        "center": [
+          -496.7,
+          -20.9
+        ],
+        "length_m": 26.9
+      },
+      {
+        "sections": 5,
+        "center": [
+          -158.2,
+          -52.0
+        ],
+        "length_m": 27.6
+      },
+      {
+        "sections": 5,
+        "center": [
+          -6.1,
+          -1.6
+        ],
+        "length_m": 29.3
+      },
+      {
+        "sections": 4,
+        "center": [
+          27.8,
+          -0.8
+        ],
+        "length_m": 23.6
+      },
+      {
+        "sections": 3,
+        "center": [
+          83.9,
+          138.7
+        ],
+        "length_m": 14.2
+      },
+      {
+        "sections": 3,
+        "center": [
+          -162.8,
+          -43.5
+        ],
+        "length_m": 16.8
+      }
+    ],
+    "gaps": [
+      {
+        "width_m": 3.6,
+        "mid": [
+          12.7,
+          -32.4
+        ]
+      },
+      {
+        "width_m": 3.7,
+        "mid": [
+          321.6,
+          -4.3
+        ]
+      },
+      {
+        "width_m": 3.9,
+        "mid": [
+          -168.8,
+          -50.3
+        ]
+      },
+      {
+        "width_m": 4.1,
+        "mid": [
+          345.3,
+          -10.0
+        ]
+      },
+      {
+        "width_m": 4.2,
+        "mid": [
+          -30.6,
+          38.4
+        ]
+      },
+      {
+        "width_m": 4.2,
+        "mid": [
+          31.7,
+          -6.2
+        ]
+      },
+      {
+        "width_m": 4.4,
+        "mid": [
+          -482.6,
+          -23.2
+        ]
+      },
+      {
+        "width_m": 4.5,
+        "mid": [
+          303.9,
+          -2.0
+        ]
+      },
+      {
+        "width_m": 4.7,
+        "mid": [
+          -18.3,
+          -8.9
+        ]
+      },
+      {
+        "width_m": 5.0,
+        "mid": [
+          123.9,
+          1.5
+        ]
+      },
+      {
+        "width_m": 5.6,
+        "mid": [
+          -152.5,
+          -44.2
+        ]
+      },
+      {
+        "width_m": 6.0,
+        "mid": [
+          441.5,
+          -9.2
+        ]
+      },
+      {
+        "width_m": 6.1,
+        "mid": [
+          436.7,
+          -37.3
+        ]
+      },
+      {
+        "width_m": 6.2,
+        "mid": [
+          -54.0,
+          27.6
+        ]
+      },
+      {
+        "width_m": 6.4,
+        "mid": [
+          313.5,
+          -20.8
+        ]
+      },
+      {
+        "width_m": 6.6,
+        "mid": [
+          -507.0,
+          -10.1
+        ]
+      },
+      {
+        "width_m": 7.1,
+        "mid": [
+          177.6,
+          -169.7
+        ]
+      },
+      {
+        "width_m": 7.3,
+        "mid": [
+          12.3,
+          -0.4
+        ]
+      },
+      {
+        "width_m": 7.5,
+        "mid": [
+          91.4,
+          135.5
+        ]
+      },
+      {
+        "width_m": 7.9,
+        "mid": [
+          94.6,
+          1.6
+        ]
+      }
+    ],
+    "note": "is_area_clear barely marks fences; whether they block units is unverified"
+  },
+  "candidates": {
+    "gap_narrow": [],
+    "gap_medium": [],
+    "gap_wide": [],
+    "fence_gap": [
+      {
+        "mid_x": 12.7,
+        "mid_z": -32.4,
+        "width_m": 3.6
+      },
+      {
+        "mid_x": 321.6,
+        "mid_z": -4.3,
+        "width_m": 3.7
+      },
+      {
+        "mid_x": -168.8,
+        "mid_z": -50.3,
+        "width_m": 3.9
+      }
+    ],
+    "corner": [
+      {
+        "cluster": 7,
+        "center": [
+          264.4,
+          35.1
+        ],
+        "span_m": 72.0,
+        "concavity": 0.37,
+        "objects": [
+          "chs_rockskull_01",
+          "wh3_glb_cliffpiece_01",
+          "wh3_glb_cliffpillar_02",
+          "wh3_glb_rubble_04"
+        ]
+      },
+      {
+        "cluster": 9,
+        "center": [
+          216.1,
+          180.3
+        ],
+        "span_m": 81.0,
+        "concavity": 0.343,
+        "objects": [
+          "emp_mtn_rock_a",
+          "emp_rocksml_01",
+          "emp_stone_a",
+          "emp_stone_b"
+        ]
+      },
+      {
+        "cluster": 4,
+        "center": [
+          -221.1,
+          -102.8
+        ],
+        "span_m": 66.0,
+        "concavity": 0.316,
+        "objects": [
+          "wh3_glb_cliffpiece_01",
+          "wh3_glb_cliffpillar_02",
+          "wh3_glb_rubble_04"
+        ]
+      }
+    ]
+  },
+  "largest_clusters": [
+    {
+      "id": 8,
+      "cells": 481,
+      "area_m2": 4329.0,
+      "span_m": 114.0,
+      "center": [
+        -227.54573804573803,
+        122.39397089397089
+      ],
+      "concavity": 0.086,
+      "objects": [
+        "chs_rockskull_01",
+        "emp_mtn_rock_a",
+        "emp_rocksml_01",
+        "emp_stone_a",
+        "emp_stone_b",
+        "emp_stone_c",
+        "emp_stone_d",
+        "emp_stone_e"
+      ]
+    },
+    {
+      "id": 2,
+      "cells": 361,
+      "area_m2": 3249.0,
+      "span_m": 66.0,
+      "center": [
+        -484.5803324099723,
+        -362.4695290858726
+      ],
+      "concavity": 0.046,
+      "objects": [
+        "wh3_glb_cliffblock_01",
+        "wh3_glb_cliffblock_02",
+        "wh3_glb_cliffrock_01",
+        "wh3_glb_cliffrock_02",
+        "wh3_glb_cliffrock_04",
+        "wh3_glb_cliffrock_06",
+        "wh3_glb_cliffrock_07",
+        "wh3_glb_rubble_04"
+      ]
+    },
+    {
+      "id": 1,
+      "cells": 315,
+      "area_m2": 2835.0,
+      "span_m": 69.0,
+      "center": [
+        122.18571428571428,
+        -468.0047619047619
+      ],
+      "concavity": 0.064,
+      "objects": [
+        "glb_ruin_tower_01",
+        "glb_ruin_windows_03",
+        "wh3_glb_cliffblock_02",
+        "wh3_glb_cliffpiece_01",
+        "wh3_glb_cliffpillar_01",
+        "wh3_glb_cliffpillar_02",
+        "wh3_glb_rubble_04",
+        "wh3_glb_sharprock_01"
+      ]
+    },
+    {
+      "id": 5,
+      "cells": 248,
+      "area_m2": 2232.0,
+      "span_m": 63.0,
+      "center": [
+        -83.89516129032258,
+        -71.36290322580645
+      ],
+      "concavity": 0.069,
+      "objects": [
+        "chs_rockskull_01",
+        "emp_rural_02",
+        "emp_rural_03",
+        "emp_rural_04",
+        "emp_rural_05",
+        "emp_rural_07",
+        "emp_rural_08",
+        "emp_rural_09"
+      ]
+    },
+    {
+      "id": 9,
+      "cells": 218,
+      "area_m2": 1962.0,
+      "span_m": 81.0,
+      "center": [
+        216.13302752293578,
+        180.3394495412844
+      ],
+      "concavity": 0.343,
+      "objects": [
+        "emp_mtn_rock_a",
+        "emp_rocksml_01",
+        "emp_stone_a",
+        "emp_stone_b",
+        "emp_stone_c",
+        "emp_stone_d",
+        "emp_stone_e",
+        "emp_stone_f"
+      ]
+    },
+    {
+      "id": 7,
+      "cells": 190,
+      "area_m2": 1710.0,
+      "span_m": 72.0,
+      "center": [
+        264.4,
+        35.136842105263156
+      ],
+      "concavity": 0.37,
+      "objects": [
+        "chs_rockskull_01",
+        "wh3_glb_cliffpiece_01",
+        "wh3_glb_cliffpillar_02",
+        "wh3_glb_rubble_04"
+      ]
+    },
+    {
+      "id": 6,
+      "cells": 134,
+      "area_m2": 1206.0,
+      "span_m": 72.0,
+      "center": [
+        117.86567164179104,
+        -25.21641791044776
+      ],
+      "concavity": 0.289,
+      "objects": [
+        "chs_rockskull_01",
+        "wh3_glb_cliffblock_02",
+        "wh3_glb_cliffpiece_01",
+        "wh3_glb_cliffpillar_01",
+        "wh3_glb_cliffpillar_02",
+        "wh3_glb_rubble_02",
+        "wh3_glb_rubble_04",
+        "wh3_glb_sharprock_01"
+      ]
+    },
+    {
+      "id": 4,
+      "cells": 133,
+      "area_m2": 1197.0,
+      "span_m": 66.0,
+      "center": [
+        -221.14661654135338,
+        -102.79323308270676
+      ],
+      "concavity": 0.316,
+      "objects": [
+        "wh3_glb_cliffpiece_01",
+        "wh3_glb_cliffpillar_02",
+        "wh3_glb_rubble_04"
+      ]
+    },
+    {
+      "id": 3,
+      "cells": 130,
+      "area_m2": 1170.0,
+      "span_m": 57.0,
+      "center": [
+        499.9230769230769,
+        -129.5
+      ],
+      "concavity": 0.075,
+      "objects": [
+        "chs_rockskull_01",
+        "wh3_glb_cliffblock_02",
+        "wh3_glb_cliffpiece_01",
+        "wh3_glb_cliffpillar_01",
+        "wh3_glb_cliffpillar_02",
+        "wh3_glb_rubble_04",
+        "wh3_glb_sharprock_01"
+      ]
+    },
+    {
+      "id": 10,
+      "cells": 58,
+      "area_m2": 522.0,
+      "span_m": 42.0,
+      "center": [
+        -505.17241379310343,
+        214.10344827586206
+      ],
+      "concavity": 0.057,
+      "objects": [
+        "brt_boldermed_01",
+        "brt_menhir_03",
+        "brt_stone_b",
+        "emp_death_statue_01",
+        "emp_death_statue_03",
+        "emp_rocksml_01",
+        "emp_seacliff_formation_03",
+        "emp_stone_b"
+      ]
+    }
+  ]
+}
