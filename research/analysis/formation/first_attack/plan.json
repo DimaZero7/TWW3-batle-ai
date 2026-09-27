@@ -307,7 +307,55 @@
       "wall": 2
     },
     "status": "ok",
-    "unplaced": {}
+    "unplaced": {},
+    "vision": {
+      "groups": [
+        {
+          "bounds": {
+            "max_x": 102.61811886406,
+            "max_z": 168.7,
+            "min_x": 57.381881135945,
+            "min_z": 130
+          },
+          "centre": {
+            "x": 76.228987308068,
+            "z": 145.12808200941
+          },
+          "ids": [
+            "wh_main_emp_inf_spearmen_0#1",
+            "wh_main_emp_inf_spearmen_0#2",
+            "wh2_dlc13_emp_inf_archers_0#1",
+            "wh2_dlc13_emp_inf_archers_0#2",
+            "wh_main_emp_cha_general_0#1"
+          ],
+          "radius_m": 35.383916996771,
+          "strength": 20280.6
+        }
+      ],
+      "link_gap_m": 30,
+      "main": {
+        "bounds": {
+          "max_x": 102.61811886406,
+          "max_z": 168.7,
+          "min_x": 57.381881135945,
+          "min_z": 130
+        },
+        "centre": {
+          "x": 76.228987308068,
+          "z": 145.12808200941
+        },
+        "ids": [
+          "wh_main_emp_inf_spearmen_0#1",
+          "wh_main_emp_inf_spearmen_0#2",
+          "wh2_dlc13_emp_inf_archers_0#1",
+          "wh2_dlc13_emp_inf_archers_0#2",
+          "wh_main_emp_cha_general_0#1"
+        ],
+        "radius_m": 35.383916996771,
+        "strength": 20280.6
+      },
+      "seen_share": 1
+    }
   },
   "own": {
     "choice": {
@@ -734,6 +782,100 @@
         "wh_main_emp_inf_spearmen_0#1": "wall"
       },
       "strategy": "wall_and_arc"
+    },
+    "vision": {
+      "groups": [
+        {
+          "bounds": {
+            "max_x": 102.61811886406,
+            "max_z": -170,
+            "min_x": 57.381881135945,
+            "min_z": -226.35623772811
+          },
+          "centre": {
+            "x": 76.69796435403,
+            "z": -192.75928782324
+          },
+          "ids": [
+            "wh_main_emp_inf_spearmen_0#1",
+            "wh2_dlc13_emp_inf_archers_0#1",
+            "wh2_dlc13_emp_inf_archers_0#2",
+            "wh2_dlc13_emp_inf_archers_0#3",
+            "wh2_dlc13_emp_inf_archers_0#4",
+            "wh_main_emp_cha_general_0#1"
+          ],
+          "radius_m": 42.433588732679,
+          "strength": 23079.6
+        }
+      ],
+      "link_gap_m": 30,
+      "main": {
+        "bounds": {
+          "max_x": 102.61811886406,
+          "max_z": -170,
+          "min_x": 57.381881135945,
+          "min_z": -226.35623772811
+        },
+        "centre": {
+          "x": 76.69796435403,
+          "z": -192.75928782324
+        },
+        "ids": [
+          "wh_main_emp_inf_spearmen_0#1",
+          "wh2_dlc13_emp_inf_archers_0#1",
+          "wh2_dlc13_emp_inf_archers_0#2",
+          "wh2_dlc13_emp_inf_archers_0#3",
+          "wh2_dlc13_emp_inf_archers_0#4",
+          "wh_main_emp_cha_general_0#1"
+        ],
+        "radius_m": 42.433588732679,
+        "strength": 23079.6
+      },
+      "seen_share": 1
     }
+  },
+  "battlefield": {
+    "bearing": 359.92047531051,
+    "centres_m": 337.88769529519,
+    "corners": [
+      {
+        "x": 10.322886500802,
+        "z": -226.48434060882
+      },
+      {
+        "x": 143.16640491583,
+        "z": -226.29995798193
+      },
+      {
+        "x": 142.61799318949,
+        "z": 168.81830504366
+      },
+      {
+        "x": 9.7744747744594,
+        "z": 168.63392241677
+      }
+    ],
+    "enemy": {
+      "back_m": 361.48574974628,
+      "front_m": 322.78048759933,
+      "left_m": -18.836578444099,
+      "right_m": 26.421823186807,
+      "width_m": 45.258401630906
+    },
+    "gap_m": 300.00054381224,
+    "half_width_m": 66.421823186807,
+    "margin_m": 40,
+    "origin": {
+      "x": 76.69796435403,
+      "z": -192.75928782324
+    },
+    "own": {
+      "back_m": -33.632893868244,
+      "front_m": 22.779943787086,
+      "left_m": -19.362696077557,
+      "right_m": 25.93325872448,
+      "width_m": 45.295954802037
+    },
+    "status": "ok"
   }
 }

@@ -1,0 +1,44 @@
+{
+  "description": "How the game AI deploys and stands in defence with different army proportions (enemy-layout runs, tools/enemy_layout.py). Our army is held by script in the south zone; the enemy is the game AI in the north zone. Unit keys refer to data/roster. Zones are squares (centre, side in metres) on The Moorlands Route (catchment_03).",
+  "faction": "wh_main_emp_empire",
+  "own": {
+    "zone": {"x": 80, "z": -250, "side": 300},
+    "units": [
+      {"key": "wh_main_emp_cha_general_0", "count": 1},
+      {"key": "wh_main_emp_inf_spearmen_0", "count": 1},
+      {"key": "wh2_dlc13_emp_inf_archers_0", "count": 4}
+    ]
+  },
+  "enemy_zone": {"x": 80, "z": 200, "side": 300},
+  "layouts": {
+    "balanced_5": [
+      {"key": "wh_main_emp_cha_general_0", "count": 1},
+      {"key": "wh_main_emp_inf_spearmen_0", "count": 2},
+      {"key": "wh2_dlc13_emp_inf_archers_0", "count": 2}
+    ],
+    "infantry_heavy_6": [
+      {"key": "wh_main_emp_cha_general_0", "count": 1},
+      {"key": "wh_main_emp_inf_spearmen_0", "count": 4},
+      {"key": "wh2_dlc13_emp_inf_archers_0", "count": 1}
+    ],
+    "archer_heavy_6": [
+      {"key": "wh_main_emp_cha_general_0", "count": 1},
+      {"key": "wh_main_emp_inf_spearmen_0", "count": 1},
+      {"key": "wh2_dlc13_emp_inf_archers_0", "count": 4}
+    ],
+    "infantry_only_9": [
+      {"key": "wh_main_emp_cha_general_0", "count": 1},
+      {"key": "wh_main_emp_inf_spearmen_0", "count": 8}
+    ],
+    "big_13": [
+      {"key": "wh_main_emp_cha_general_0", "count": 1},
+      {"key": "wh_main_emp_inf_spearmen_0", "count": 6},
+      {"key": "wh2_dlc13_emp_inf_archers_0", "count": 6}
+    ],
+    "full_20": [
+      {"key": "wh_main_emp_cha_general_0", "count": 1},
+      {"key": "wh_main_emp_inf_spearmen_0", "count": 10},
+      {"key": "wh2_dlc13_emp_inf_archers_0", "count": 9}
+    ]
+  }
+}

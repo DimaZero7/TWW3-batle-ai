@@ -390,3 +390,56 @@ class TestFormationProbe:
         plan = next(r for r in rows if r["event"] == "plan")
         assert plan["status"] == "no_strategy" and plan["strategy"] == "none"
         assert any(r["event"] == "error" and "No strategy" in r["message"] for r in rows)
+
+
+class TestEnemyLayout:
+    def test_game_ai_side_is_watched_not_commanded(self, lua, tmp_path):
+        lua.execute("""
+            local own = fake.unit('own_1', 'wh_main_emp_inf_spearmen_0', 0, -250)
+            local enemy = fake.unit('enemy_1', 'wh_main_emp_inf_spearmen_0', 0, 200)
+            bm = fake.manager({{own}, {enemy}})
+            local state = require('entries.enemy_layout').main(bm, {build = 'test', speed = 20, tick_ms = 1000,
+                deadline_s = 100, stall_ms = 900000, hold_s = 5, layout = 'test'},
+                {common = fake.common, battle_vector = fake.vector_type})
+            bm:pump()
+            for _ = 1, 10 do bm:tick() end
+            assert(state.finished and bm.ended)
+            assert(own:is_script_controlled() and not enemy:is_script_controlled())
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows]
+        assert [r["stage"] for r in rows if r["event"] == "enemy_snapshot"] == ["deployment", "deployed", "end"]
+        sample = next(r for r in rows if r["event"] == "enemy_sample")
+        assert sample["units"][0]["seen"] is True and sample["layout"] == "test"
+        assert rows[-1]["status"] == "completed"
+
+    def test_battle_picture_from_our_side_view(self, lua, tmp_path):
+        lua.execute("""
+            local own = fake.unit('own_1', 'wh_main_emp_inf_spearmen_0', 0, -250)
+            local seen = fake.unit('enemy_1', 'wh_main_emp_inf_spearmen_0', 0, 200)
+            local hidden = fake.unit('enemy_2', 'wh_main_emp_inf_spearmen_0', 600, 200)
+            function hidden:is_visible_to_alliance() return false end
+            local by_id = {uid_own_1 = own, uid_enemy_1 = seen, uid_enemy_2 = hidden}
+            -- Two soldiers per unit, around the unit's position.
+            local common = {game_version = fake.common.game_version, get_context_value = function(key, id, field)
+                local u = by_id[id]
+                if u and field == 'ManList.Size' then return 2 end
+                local i = u and field and field:match('^ManList%.At%((%d+)%)%.Position$')
+                if i then return u.pos.x + tonumber(i) * 2, 0, u.pos.z end
+                return fake.common.get_context_value(key, id, field)
+            end}
+            bm = fake.manager({{own}, {seen, hidden}})
+            local spec = {class = 'inf_mel', men = 120, range_m = 0, health = 8280, melee_attack = 20, melee_defence = 34}
+            local state = require('entries.enemy_layout').main(bm, {build = 'test', speed = 20, tick_ms = 1000,
+                deadline_s = 100, stall_ms = 900000, hold_s = 5, layout = 'test', picture_every = 1,
+                roster = {wh_main_emp_inf_spearmen_0 = spec}}, {common = common, battle_vector = fake.vector_type})
+            bm:pump()
+            for _ = 1, 3 do bm:tick() end
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        pic = next(r for r in rows if r["event"] == "battlefield")
+        # The hidden unit is not in the picture; its strength still counts in the enemy total.
+        assert pic["seen"] == 1 and pic["enemy"]["groups"][0]["ids"] == ["enemy_1"]
+        assert pic["enemy"]["seen_share"] == 0.5
+        assert pic["field"]["status"] == "ok" and abs(pic["field"]["centres_m"] - 450) < 1

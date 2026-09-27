@@ -52,6 +52,14 @@ library the adapter calls that planner directly. Returns
 `{mode, attack(), release()}`: `attack()` means "attack the enemy force" and
 is re-issued by the entry.
 
+### The game AI with an objective (27.09.2026)
+
+In battle `script_ai_planner` has, among others: `attack_force`, `attack_unit`,
+`defend_force`, `defend_position`, `move_to_position`, `move_to_force`,
+`rush_position`, `set_patrol_defend_radius`, `release`. `defend_position(position,
+radius)` is verified: the game AI holds the place. In our XML battles the engine
+counts both sides as attackers; without an objective the game AI attacks.
+
 ## Worth knowing
 
 - An accepted call is not proof of execution. Check the result through unit

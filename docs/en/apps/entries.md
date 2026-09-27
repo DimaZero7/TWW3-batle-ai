@@ -143,6 +143,20 @@ with `--turn-test`: right and left with the engine's `rotate` and with our turn 
 Events: `plan`, `stage_snapshot`, `turn_sample`.
 Analysis: `tools/analysis/formation_probe.py`.
 
+<a id="enemy_layout"></a>
+
+## enemy_layout — how the game AI stands
+
+Build: `python -m tools.build enemy-layout --layout <name> [--enemy-mode native|defend]`;
+scenario from `config/armies/defender_layouts.json` (`tools/enemy_layout.py`). Our
+army is held; the enemy is the game AI. In `defend` mode (default) it gets
+`script_ai_planner:defend_position` after deployment (where it stands, 80 m
+radius). For 90 s: `enemy_sample` every tick, `enemy_snapshot` with every
+soldier. Research data; the AI itself uses only what it sees. Every
+`picture_every` ticks [vision](vision.md) and [battlefield](battlefield.md) build
+the groups and the field from our side's view: event `battlefield`. Analysis:
+`tools/analysis/enemy_layout.py`.
+
 <a id="manual"></a>
 
 ## manual_record — manual battle with recording

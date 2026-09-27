@@ -19,6 +19,8 @@
 | [strategy](../apps/strategy.md) | `services`, `contract` | Список стратегий, условия, роли, выбор с журналом | новое |
 | [formation](../apps/formation.md) | `services` | Расстановки строя по ролям: `line_and_blocks` по данным ростера | новое |
 | [plan](../apps/plan.md) | `services` | Цепочка начала боя: оценка → стратегия → строй | новое |
+| [vision](../apps/vision.md) | `services` | Группы видимых врагов, основная армия — самая сильная группа | новое |
+| [battlefield](../apps/battlefield.md) | `services` | Поле боя между основными группами: ось, передние линии, запас 40 м | новое |
 | [units](../apps/units.md) | `state_adapter`, `range_adapter`, `card_adapter`, `formation_adapter`, `contract` | 68 полей состояния своего отряда, дальность стрельбы, карточка и профиль отряда, движение и бойцы, границы ширины строя | `units/state.lua`, `units/range.lua` |
 | [intel](../apps/intel.md) | `adapter`, `services` | Видимость врага, память последней известной позиции | `visibility/reader.lua` |
 | [orders](../apps/orders.md) | `contract`, `adapter`, `planner_adapter` | Форма и проверка команд, проверенные в бою вызовы приказов | `validate` из `policy_host.lua`, вызовы из `harness`/`arena` и `commands.md` |
@@ -39,6 +41,7 @@
 | [move_probe](../apps/entries.md#move_probe) | `move-probe` | `move_probe.xml` | Один отряд по плану заходов: строй и обычные приказы, позиции бойцов |
 | [roster_capture](../apps/entries.md#roster_capture) | `roster-capture` | `roster_capture.xml` | Карточки и строй отрядов для ростера |
 | [formation_probe](../apps/entries.md#formation_probe) | `formation-probe` | `formation_probe.xml` | Строй армии в бою по плану `apps.formation`, повороты лучников |
+| [enemy_layout](../apps/entries.md#enemy_layout) | `enemy-layout` | `enemy_layout.xml` | Как стоит штатный ИИ в обороне при разных составах |
 | [manual_record](../apps/entries.md#manual) | `manual` | `manual_hamlet.xml` | Ручной бой игрока с записью |
 | [map_capture](../apps/entries.md#map_capture) | `map-capture` | `map_capture.xml` | Сетка карты, объекты и достижимость в CSV/JSONL |
 

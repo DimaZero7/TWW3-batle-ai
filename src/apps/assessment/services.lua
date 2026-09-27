@@ -31,6 +31,14 @@ function M.ranged_power(u)
     return u.men * (finite(u.missile_damage) and u.missile_damage or 1)
 end
 
+-- One number for "how strong is this unit": melee strength of anyone, plus
+-- missile strength of a shooter. Used to find the strongest enemy group.
+function M.strength(u)
+    local s = M.melee_power(u)
+    if M.category(u) == 'shooter' then s = s + M.ranged_power(u) end
+    return s
+end
+
 function M.side(units)
     local s = {count = {lord = 0, shooter = 0, infantry = 0, other = 0}, melee_power = 0, ranged_power = 0,
         arc_shooters = 0}

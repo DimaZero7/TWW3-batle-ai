@@ -9,6 +9,7 @@ Usage:
     python -m tools.build manual --deadline 3600 --stall-minutes 30
     python -m tools.build roster-capture        # scenario from config/roster/capture.json
     python -m tools.build formation-probe --army first_attack
+    python -m tools.build enemy-layout --layout balanced_5
 
 Output: build/<target>/ with the .pack, the bundled script and manifest.json.
 Install and launch with tools/launcher/launch.ps1.
@@ -79,6 +80,14 @@ TARGETS = {
         "scenario": "formation_probe.xml",
         "packed_scenario": "formation_probe.xml",
     },
+    "enemy-layout": {
+        "entry": "entries.enemy_layout",
+        "pack": "tww3_bai_enemy_layout.pack",
+        "script": "tww3_bai_enemy_layout",
+        "folder": "tww3_bai",
+        "scenario": "enemy_layout.xml",
+        "packed_scenario": "enemy_layout.xml",
+    },
     "manual": {
         "entry": "entries.manual_record",
         "pack": "tww3_bai_manual.pack",
@@ -106,6 +115,8 @@ MOVE_SETTLE_MS = 2000
 # formation-probe: least time per stage and its limit (entries/formation_probe.lua, 9 stages).
 FORMATION_SETTLE_MS = 3000
 FORMATION_STAGE_S = 20
+# enemy-layout: game time the game AI army is watched after deployment.
+ENEMY_LAYOUT_HOLD_S = 90
 # formation-probe: the army stands this long after placing and must not move.
 FORMATION_HOLD_S = 60
 
@@ -214,6 +225,9 @@ def main(argv=None):
                         help="map-capture: capture only this area")
     parser.add_argument("--plan", default="hamlet", help="move-probe: plan in config/move-plans/")
     parser.add_argument("--army", default="first_attack", help="formation-probe: army in config/armies/")
+    parser.add_argument("--layout", default="balanced_5", help="enemy-layout: layout in config/armies/defender_layouts.json")
+    parser.add_argument("--enemy-mode", choices=("native", "defend"), default="defend",
+                        help="enemy-layout: game AI as set by the battle, or told to defend where it deployed")
     parser.add_argument("--turn-test", action="store_true", help="formation-probe: also turn the archers right/left")
     parser.add_argument("--features", action="store_true",
                         help="map-capture: also read objects and reachability after deployment")
@@ -251,6 +265,13 @@ def main(argv=None):
             run_config.update(probe_config, stage_timeout_s=FORMATION_STAGE_S, army=args.army,
                               hold_s=FORMATION_HOLD_S, turn_test=args.turn_test)
             model_s = FORMATION_STAGE_S + FORMATION_HOLD_S + (8 * FORMATION_STAGE_S if args.turn_test else 0) + 15
+            stall_ms = max(stall_ms, int((model_s + 120) * 1000))
+        if args.target == "enemy-layout":
+            from tools import enemy_layout
+            enemy_layout.write_scenario(args.layout)
+            run_config.update(layout=args.layout, hold_s=ENEMY_LAYOUT_HOLD_S, enemy_mode=args.enemy_mode,
+                              picture_every=5, roster=enemy_layout.roster_inputs(args.layout))
+            model_s = ENEMY_LAYOUT_HOLD_S + 10
             stall_ms = max(stall_ms, int((model_s + 120) * 1000))
         if args.target == "manual":
             # The player sets the pace: no forced speed, an hour by default.

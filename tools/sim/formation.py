@@ -6,7 +6,10 @@
 from data/roster (measured card and formation). Our side goes through the same
 chain as in battle, src/apps/plan: assessment -> strategy -> formation, facing
 the enemy anchor. The enemy is drawn with the "wall and arc" roles and layout,
-for the picture only (in battle the game AI places it).
+for the picture only (in battle the game AI places it). Then src/apps/vision
+sees the enemy (soldiers laid out evenly in each unit's rectangle, strength from
+apps.assessment) and finds the groups of both sides; src/apps/battlefield
+builds the field between the two main groups (axis, front lines, 40 m margin).
 
 Output (default research/analysis/formation/<army>/):
   plan.json  the Lua result for both sides, overlaps
@@ -96,6 +99,42 @@ class Planner:
             end
         """)
         self._facing = self.lua.eval("function(a, b) return require('apps.formation.services').facing(a, b) end")
+        self._groups = self.lua.eval("""
+            function(units, total)
+                return require('apps.core.json').encode(require('apps.vision.services').groups(units, nil, total))
+            end
+        """)
+        self._battle_picture = self.lua.eval("""
+            function(input)
+                return require('apps.core.json').encode(require('apps.vision.services').picture(input))
+            end
+        """)
+        self._battlefield = self.lua.eval("""
+            function(input)
+                return require('apps.core.json').encode(require('apps.battlefield.services').frame(input))
+            end
+        """)
+        self._strength = self.lua.eval("function(u) return require('apps.assessment.services').strength(u) end")
+
+    def strength(self, unit):
+        return self._strength(self.lua.table_from(unit, recursive=True))
+
+    def groups(self, units, total=None):
+        """apps.vision.groups on {id, points, strength} units."""
+        return json.loads(self._groups(self.lua.table_from(units, recursive=True), total))
+
+    def battlefield(self, own_points, own_centre, enemy_points, enemy_centre):
+        """apps.battlefield.frame between the two main groups."""
+        data = {"own": {"points": own_points, "centre": own_centre},
+                "enemy": {"points": enemy_points, "centre": enemy_centre}}
+        return json.loads(self._battlefield(self.lua.table_from(data, recursive=True)))
+
+    def battle_picture(self, own, enemy, enemy_total=None):
+        """apps.vision.picture: {own, enemy} groups."""
+        data = {"own": own, "enemy": enemy}
+        if enemy_total:
+            data["enemy_total"] = enemy_total
+        return json.loads(self._battle_picture(self.lua.table_from(data, recursive=True)))
 
     def facing(self, a, b):
         return self._facing(self.lua.table_from({"x": a[0], "z": a[1]}), self.lua.table_from({"x": b[0], "z": b[1]}))
@@ -115,6 +154,46 @@ class Planner:
         return json.loads(self._picture(self.lua.table_from(data, recursive=True)))
 
 
+def soldier_points(p, men):
+    """Soldiers laid out evenly in a placement's rectangle (the simulation has no real soldiers)."""
+    if men <= 1:
+        return [p["x"], p["z"]]
+    front, depth = max(p["front_m"], 0.1), max(p["depth_m"], 0.1)
+    cols = max(1, round(math.sqrt(men * front / depth)))
+    rows = math.ceil(men / cols)
+    b = math.radians(p["bearing"])
+    f, r = (math.sin(b), math.cos(b)), (math.cos(b), -math.sin(b))
+    pts = []
+    for k in range(men):
+        i, j = k % cols, k // cols
+        along = -front / 2 + front * (i + 0.5) / cols
+        back = depth * (j + 0.5) / rows
+        pts += [p["x"] + r[0] * along - f[0] * back, p["z"] + r[1] * along - f[1] * back]
+    return pts
+
+
+def seen_units(planner, placements, units_by_id):
+    """{id, points, strength} for apps.vision from simulated placements."""
+    return [{"id": p["id"], "points": soldier_points(p, units_by_id[p["id"]]["men"]),
+             "strength": planner.strength(units_by_id[p["id"]])} for p in placements]
+
+
+def see_battle(planner, own_placements, own_by_id, enemy_placements, enemy_by_id):
+    """apps.vision for both simulated sides (all of the enemy is seen here), then
+    apps.battlefield between the two main groups. Returns (picture, field)."""
+    own = seen_units(planner, own_placements, own_by_id)
+    enemy = seen_units(planner, enemy_placements, enemy_by_id)
+    picture = planner.battle_picture(own, enemy, sum(u["strength"] for u in enemy))
+    field = None
+    if picture["own"].get("main") and picture["enemy"].get("main"):
+        def points(units, group):
+            ids = set(group["ids"])
+            return [v for u in units if u["id"] in ids for v in u["points"]]
+        field = planner.battlefield(points(own, picture["own"]["main"]), picture["own"]["main"]["centre"],
+                                    points(enemy, picture["enemy"]["main"]), picture["enemy"]["main"]["centre"])
+    return picture, field
+
+
 def corners(p):
     """Rectangle of a placement: front rank centre, width along 'right', depth backwards."""
     b = math.radians(p["bearing"])
@@ -129,7 +208,25 @@ def corners(p):
 
 def draw(path, sides, units_by_id, title):
     fig, ax = plt.subplots(figsize=(10, 11))
-    for side, plan in sides.items():
+    field = sides.get("battlefield")
+    if field:
+        c = field["corners"]
+        ax.add_patch(Polygon([(q["x"], q["z"]) for q in c], closed=True, fill=False, ec="#9467bd", lw=1.2, ls="-."))
+        b = math.radians(field["bearing"])
+        f, r = (math.sin(b), math.cos(b)), (math.cos(b), -math.sin(b))
+        o, h = field["origin"], field["half_width_m"]
+        ax.plot([o["x"] + f[0] * field["own"]["back_m"], o["x"] + f[0] * field["enemy"]["back_m"]],
+                [o["z"] + f[1] * field["own"]["back_m"], o["z"] + f[1] * field["enemy"]["back_m"]],
+                c="#9467bd", lw=0.8, ls="--")
+        for along in (field["own"]["front_m"], field["enemy"]["front_m"]):
+            ax.plot([o["x"] + f[0] * along - r[0] * h, o["x"] + f[0] * along + r[0] * h],
+                    [o["z"] + f[1] * along - r[1] * h, o["z"] + f[1] * along + r[1] * h], c="#9467bd", lw=0.6)
+        ax.annotate(f'поле боя: между передними линиями {field["gap_m"]:.0f} м, '
+                    f'ширина {2 * h:.0f} м (запас {field["margin_m"]:.0f} м)',
+                    (min(q["x"] for q in c), min(q["z"] for q in c)), fontsize=8, xytext=(4, 4),
+                    textcoords="offset points", color="#9467bd")
+    for side in ("own", "enemy"):
+        plan = sides[side]
         for p in plan["placements"]:
             ax.add_patch(Polygon(corners(p), closed=True, fc=COLORS[p["role"]], ec="k", lw=0.5,
                                  alpha=0.85 if side == "own" else 0.35))
@@ -145,13 +242,26 @@ def draw(path, sides, units_by_id, title):
                 centre = math.degrees(math.atan2(math.cos(b), math.sin(b)))
                 ax.add_patch(Wedge((cx, cz), u["range_m"], centre - 30, centre + 30, fill=False,
                                    ec=COLORS["arc"], lw=0.6, alpha=0.6))
-    for side, plan in sides.items():
-        for p in plan["placements"]:
+    for side in ("own", "enemy"):
+        for p in sides[side]["placements"]:
             if p["role"] == "lord":
                 ax.scatter([p["x"]], [p["z"]], marker="*", s=260, c=COLORS["lord"], ec="k", zorder=5,
                            alpha=1 if side == "own" else 0.45)
                 ax.annotate("наш лорд" if side == "own" else "лорд врага", (p["x"], p["z"]), fontsize=8,
                             xytext=(6, 6), textcoords="offset points")
+    for side, label in (("own", "мы"), ("enemy", "враг")):
+        vision = sides[side].get("vision")
+        if not vision or not vision.get("main"):
+            continue
+        for n, h in enumerate(vision["groups"]):
+            b = h["bounds"]
+            ax.add_patch(plt.Rectangle((b["min_x"] - 3, b["min_z"] - 3), b["max_x"] - b["min_x"] + 6,
+                                       b["max_z"] - b["min_z"] + 6, fill=False, ls=":", lw=1.2,
+                                       ec="k" if n == 0 else "#7f7f7f"))
+        main = vision["main"]
+        ax.scatter([main["centre"]["x"]], [main["centre"]["z"]], marker="X", s=120, c="k", zorder=6)
+        ax.annotate(f'{label}: основная армия ({len(main["ids"])} отр.)', (main["centre"]["x"], main["centre"]["z"]),
+                    fontsize=8, xytext=(8, -12), textcoords="offset points")
     ax.set_aspect("equal")
     ax.autoscale_view()
     ax.set(xlabel="X, m", ylabel="Z, m", title=title)
@@ -169,6 +279,7 @@ def simulate(army, planner=None, params=None):
     planner = planner or Planner()
     entries = roster.load_roster()
     own_units, enemy_units = roster_units(army["own"], entries), roster_units(army["enemy"], entries)
+    enemy_by_id = {u["id"]: u for u in enemy_units}
     # The enemy first: our lord needs to know where the enemy lord stands.
     sides = {"enemy": planner.picture(army["enemy"]["anchor"],
                                       planner.facing(army["enemy"]["anchor"], army["own"]["anchor"]),
@@ -181,7 +292,12 @@ def simulate(army, planner=None, params=None):
     own.update(status=plan["status"], strategy=plan["decision"]["strategy"], features=plan["features"],
                decision=plan["decision"])
     sides["own"] = own
-    return sides, {u["id"]: u for u in own_units}
+    # How we see the battle: groups of both sides and their main armies (apps.vision).
+    own_by_id = {u["id"]: u for u in own_units}
+    picture, field = see_battle(planner, own["placements"], own_by_id, sides["enemy"]["placements"], enemy_by_id)
+    sides["own"]["vision"], sides["enemy"]["vision"] = picture["own"], picture["enemy"]
+    sides["battlefield"] = field
+    return sides, own_by_id
 
 
 def probe(army, speed, settle_ms, planner=None):

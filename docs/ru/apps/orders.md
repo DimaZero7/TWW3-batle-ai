@@ -52,6 +52,15 @@ CA (`lib_battle_script_ai_planner.lua`) — тот же механизм, кот
 этому планировщику напрямую. Возвращает `{mode, attack(), release()}`:
 `attack()` — «атаковать вражескую армию», повторяется точкой входа.
 
+### Штатный ИИ с задачей (27.09.2026)
+
+У `script_ai_planner` в бою есть, среди прочего: `attack_force`, `attack_unit`,
+`defend_force`, `defend_position`, `move_to_position`, `move_to_force`,
+`rush_position`, `set_patrol_defend_radius`, `release`. Проверен
+`defend_position(позиция, радиус)`: штатный ИИ держит место
+([как он стоит](../../../research/analysis/enemy-layout/README.md)). В наших
+XML-боях движок считает нападающими обе стороны, и без задачи штатный ИИ атакует.
+
 ## Что важно знать
 
 - Принятый вызов — не доказательство выполнения. Результат проверяем по

@@ -141,6 +141,20 @@
 `plan`, `stage_snapshot` (все бойцы на каждом этапе), `turn_sample` (лучники
 во время поворота). Разбор — `tools/analysis/formation_probe.py`.
 
+<a id="enemy_layout"></a>
+
+## enemy_layout — как стоит штатный ИИ
+
+Сборка: `python -m tools.build enemy-layout --layout <имя> [--enemy-mode native|defend]` —
+сценарий из `config/armies/defender_layouts.json` (`tools/enemy_layout.py`). Наша
+армия стоит, скрипт её держит; врагом управляет штатный ИИ. В режиме `defend`
+(по умолчанию) после расстановки он получает `script_ai_planner:defend_position`
+(место, где встал, радиус 80 м). 90 с игры: `enemy_sample` каждый тик (движение,
+видит ли его наша сторона), `enemy_snapshot` со всеми бойцами. Это данные для
+исследования — ИИ пользуется только видимым. Каждые `picture_every` тиков модули
+[vision](vision.md) и [battlefield](battlefield.md) строят группы и поле боя по
+виду нашей стороны — событие `battlefield` (сила — по ростеру, `config.roster`). Разбор — `tools/analysis/enemy_layout.py`.
+
 <a id="manual"></a>
 
 ## manual_record — ручной бой с записью

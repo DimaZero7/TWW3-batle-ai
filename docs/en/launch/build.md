@@ -21,6 +21,7 @@ Building never touches the game; it only writes `build/<target>/`.
 | `move-probe` | `entries.move_probe` | `scenarios/move_probe.xml` | `tww3_bai_move_probe.pack` |
 | `manual` | `entries.manual_record` | `scenarios/manual_hamlet.xml` | `tww3_bai_manual.pack` |
 | `formation-probe` | `entries.formation_probe` | `scenarios/formation_probe.xml` (from `config/armies/`) | `tww3_bai_formation_probe.pack` |
+| `enemy-layout` | `entries.enemy_layout` | `scenarios/enemy_layout.xml` (from `config/armies/defender_layouts.json`) | `tww3_bai_enemy_layout.pack` |
 | `roster-capture` | `entries.roster_capture` | `scenarios/roster_capture.xml` (from `config/roster/capture.json`) | `tww3_bai_roster_capture.pack` |
 | `map-capture` | `entries.map_capture` | `scenarios/map_capture.xml` | `tww3_bai_map_capture.pack` |
 
@@ -35,6 +36,7 @@ Building never touches the game; it only writes `build/<target>/`.
 | `--step 1/2/3/5` | map-capture | Grid cell size, m |
 | `--features` | map-capture | After deployment also read objects and cell reachability |
 | `--army` | formation-probe | Army from `config/armies/<name>.json` (default `first_attack`) |
+| `--layout`, `--enemy-mode` | enemy-layout | Enemy layout; the game AI as is or told to defend (default) |
 | `--turn-test` | formation-probe | Also turn the archers right and left |
 | `--plan` | move-probe | Plan from `config/move-plans/<name>.json` (default `hamlet`) |
 | `--scenario` | all | Another file from `scenarios/` instead of the target's scenario |

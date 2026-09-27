@@ -11,6 +11,7 @@ only read them. Code: `src/apps/assessment/`.
 | `category(u)` | `lord`, `shooter`, `infantry`, `other` |
 | `melee_power(u)` | Infantry strength: health × (attack + defence) / 100 |
 | `ranged_power(u)` | Shooter strength: men × missile damage |
+| `strength(u)` | One number for how strong a unit is: melee plus missile strength; used by [vision](vision.md) |
 | `side(units)` | Counts by kind, infantry and shooter strength, arc-fire share, mean infantry armour |
 | `assess({role, own, enemy})` | Both sides and `melee_ratio`, `ranged_ratio` |
 

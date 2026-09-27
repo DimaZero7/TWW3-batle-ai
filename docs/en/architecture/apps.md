@@ -19,6 +19,8 @@ checks unchanged and pass. The original sources are kept in
 | [strategy](../apps/strategy.md) | `services`, `contract` | Strategy catalogue, conditions, roles, choice with its reasons | new |
 | [formation](../apps/formation.md) | `services` | Formation layouts by role: `line_and_blocks` from roster data | new |
 | [plan](../apps/plan.md) | `services` | Start-of-battle chain: assessment → strategy → formation | new |
+| [vision](../apps/vision.md) | `services` | Groups of visible enemies; the main army is the strongest group | new |
+| [battlefield](../apps/battlefield.md) | `services` | Battlefield between the main groups: axis, front lines, 40 m margin | new |
 | [units](../apps/units.md) | `state_adapter`, `range_adapter`, `card_adapter`, `formation_adapter`, `contract` | 68 own-unit state fields, missile range, unit card and profile, movement and soldiers, formation width bounds | `units/state.lua`, `units/range.lua` |
 | [intel](../apps/intel.md) | `adapter`, `services` | Enemy visibility, last known position memory | `visibility/reader.lua` |
 | [orders](../apps/orders.md) | `contract`, `adapter`, `planner_adapter` | Command shape and validation, order calls verified in battle | `validate` from `policy_host.lua`, calls from `harness`/`arena` and `commands.md` |
@@ -39,6 +41,7 @@ checks unchanged and pass. The original sources are kept in
 | [move_probe](../apps/entries.md#move_probe) | `move-probe` | `move_probe.xml` | One unit through a plan of legs: formation and plain orders, soldier positions |
 | [roster_capture](../apps/entries.md#roster_capture) | `roster-capture` | `roster_capture.xml` | Unit cards and formation for the roster |
 | [formation_probe](../apps/entries.md#formation_probe) | `formation-probe` | `formation_probe.xml` | Army formation in battle from `apps.formation`, archer turns |
+| [enemy_layout](../apps/entries.md#enemy_layout) | `enemy-layout` | `enemy_layout.xml` | How the game AI stands in defence with different armies |
 | [manual_record](../apps/entries.md#manual) | `manual` | `manual_hamlet.xml` | Player's manual battle with recording |
 | [map_capture](../apps/entries.md#map_capture) | `map-capture` | `map_capture.xml` | Map grid, objects and reachability to CSV/JSONL |
 
