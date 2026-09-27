@@ -30,6 +30,7 @@
 | [duel](../apps/entries.md#duel) | `duel` | `ranged_melee.xml` | Один отряд на сторону, принудительная рукопашная, серия боёв с автопереигровкой |
 | [arena](../apps/entries.md#arena) | `arena` | `triple_melee.xml` | Три пары одновременно на одной карте |
 | [ai_vs_ai](../apps/entries.md#ai_vs_ai) | `ai-vs-ai` | `ai_vs_ai.xml` | Обе армии под штатным ИИ игры, наш код только наблюдает |
+| [unit_readout](../apps/entries.md#unit_readout) | `unit-readout` | `unit_readout.xml` | Проверка в бою всех задокументированных показателей отрядов |
 | [map_capture](../apps/entries.md#map_capture) | `map-capture` | `map_capture.xml` | Сетка карты, объекты и достижимость в CSV/JSONL |
 
 ## Инструменты вне игры (`tools`)

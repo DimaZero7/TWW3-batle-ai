@@ -43,6 +43,14 @@ TARGETS = {
         "scenario": "ai_vs_ai.xml",
         "packed_scenario": "ai_vs_ai.xml",
     },
+    "unit-readout": {
+        "entry": "entries.unit_readout",
+        "pack": "tww3_bai_unit_readout.pack",
+        "script": "tww3_bai_unit_readout",
+        "folder": "tww3_bai",
+        "scenario": "unit_readout.xml",
+        "packed_scenario": "unit_readout.xml",
+    },
     "map-capture": {
         "entry": "entries.map_capture",
         "pack": "tww3_bai_map_capture.pack",

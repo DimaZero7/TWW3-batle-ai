@@ -46,6 +46,7 @@ function M.main(bm, config)
 
     local function cleanup()
         state.active = false
+        if state.stop_speed_guard then state.stop_speed_guard() end
         bm:remove_process(TIMER)
         bm:remove_process('tww3_bai_arena_start')
         for _, item in ipairs(state.units) do
@@ -206,6 +207,9 @@ function M.main(bm, config)
         end
         started_ms, started_wall = bm:time_elapsed_ms(), clock.wall_seconds()
         bm:modify_battle_speed(config.speed)
+        state.stop_speed_guard = battle.speed_guard(bm, config.speed, function(from)
+            emit('speed_restored', nil, {from_speed = from, to_speed = config.speed})
+        end)
         bm:change_victory_countdown_limit(-1)
         for _, pair in ipairs(state.pairs) do
             emit('start', pair, {speed = config.speed, policy_source = external and 'external' or 'bundled',

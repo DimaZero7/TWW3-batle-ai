@@ -42,6 +42,14 @@ function F.unit(name, kind, x, z)
     function u:is_commanding_unit() return false end
     function u:is_infantry() return true end
     function u:can_reach_position() return true end
+    function u:unique_ui_id() return 'uid_' .. self.script_name end
+    function u:has_attribute() return false end
+    function u:is_commanding_unit() return false end
+    function u:missile_range() return 0 end
+    function u:owned_non_passive_special_abilities() return {} end
+    function u:owned_passive_special_abilities() return {} end
+    function u:unit_distance() return 50 end
+    function u:unit_in_range() return false end
     return u
 end
 
@@ -56,6 +64,8 @@ local function controller(log)
     function uc:halt() log[#log + 1] = 'halt' end
     function uc:attack_unit(target) self.unit.attacked = self.unit.attacked + 1; log[#log + 1] = 'attack' end
     function uc:teleport_to_location() end
+    function uc:goto_location() self.unit.moving = true end
+    function uc:rotate() end
     return uc
 end
 
@@ -87,8 +97,9 @@ function F.manager(sides)
     end
     function bm:callback(fn) table.insert(self.queue, fn) end
     function bm:real_callback(fn) table.insert(self.queue, fn) end
-    function bm:repeat_callback(fn) self.repeating = fn end
-    function bm:remove_process() self.repeating = nil end
+    bm.repeating = {}
+    function bm:repeat_callback(fn, _, name) self.repeating[name or fn] = fn end
+    function bm:remove_process(name) self.repeating[name] = nil end
     function bm:remove_real_callback() end
     function bm:end_current_battle_phase() self:set_phase('Deployed') end
     function bm:current_battle_speed() return self.speed end
@@ -116,7 +127,11 @@ function F.manager(sides)
     end
     function bm:tick(ms)
         self.now = self.now + (ms or 1000)
-        if self.repeating then self.repeating() end
+        local names = {}
+        for name in pairs(self.repeating) do names[#names + 1] = name end
+        for _, name in ipairs(names) do
+            if self.repeating[name] then self.repeating[name]() end
+        end
     end
     return bm
 end

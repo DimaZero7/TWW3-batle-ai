@@ -17,6 +17,7 @@ Building never touches the game; it only writes `build/<target>/`.
 | `duel` | `entries.duel` | `scenarios/ranged_melee.xml` | `tww3_bai_duel.pack` |
 | `arena` | `entries.arena` | `scenarios/triple_melee.xml` | `tww3_bai_arena.pack` |
 | `ai-vs-ai` | `entries.ai_vs_ai` | `scenarios/ai_vs_ai.xml` | `tww3_bai_ai_vs_ai.pack` |
+| `unit-readout` | `entries.unit_readout` | `scenarios/unit_readout.xml` | `tww3_bai_unit_readout.pack` |
 | `map-capture` | `entries.map_capture` | `scenarios/map_capture.xml` | `tww3_bai_map_capture.pack` |
 
 ## Options
@@ -24,7 +25,7 @@ Building never touches the game; it only writes `build/<target>/`.
 | Option | Targets | Meaning |
 |---|---|---|
 | `--runs 1..10` | duel | Battles in a row in one game process (automatic rematch) |
-| `--speed 1/3/10/20` | duel, arena, ai-vs-ai | Battle speed |
+| `--speed 1/3/10/20` | duel, arena, ai-vs-ai, unit-readout | Battle speed |
 | `--timeout 30..1800` | duel, arena, ai-vs-ai | Model-time limit per battle, seconds |
 | `--tick-ms` | duel, arena | Decision period, ms (default 1000) |
 | `--step 1/2/3/5` | map-capture | Grid cell size, m |

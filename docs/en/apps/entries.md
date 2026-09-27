@@ -61,6 +61,35 @@ First run on 2026-09-27 (before True Sight was required): ~30 s load, both
 armies engaged on their own; at 237 s side 1 had 258 men and 4 units, side 2
 had 147 men and one unit (the game was closed before `result`).
 
+<a id="unit_readout"></a>
+
+## unit_readout — check of every unit readout
+
+Build: `python -m tools.build unit-readout --speed 20`. Scenario
+`unit_readout.xml` on **The Moorlands Route** (`catchment_03`): Empire vs
+Empire, a general, spearmen and archers per side. Each side's archers stand
+100 m from the enemy spearmen.
+
+Stages in model time: idle (0 s) → march (8 s) → ranged (30 s) → cease fire
+(75 s) → melee and generals on guard (85 s) → halt (140 s) → done (150 s).
+All 6 units are read every second:
+
+| Event | What it checks |
+|---|---|
+| `unit_profile` | Type, men, range, attributes, behaviours, abilities, CCO rank |
+| `unit_state` | All 68 fields of [units.state_adapter](units.md) |
+| `enemy_gate` | The enemy's view: visibility only, everything else withheld |
+| `range` | [units.range_adapter](units.md) for every unit pair |
+| `intel` | Visibility and last position for each side |
+| `sampler_frame`, `nav_state` | Post-battle samples, reachability diagnostics |
+
+Report: `python -m tools.analysis.unit_readout build/unit-readout/runs/<time>` —
+`report.md` (check → expectation from the docs → actual) and a table of all 68
+fields per unit.
+
+Result on 2026-09-27 with True Sight: **121 / 121 checks** at both ×3 and ×20
+(150 s of model time ≈ 8 s real at ×20).
+
 <a id="map_capture"></a>
 
 ## map_capture — map collection
@@ -81,6 +110,11 @@ Process the grid without the game with [tools/analysis](../../../tools/analysis/
 `heightmap.py`, `slopes.py`, `passages.py`. Method: [map](../game/map/README.md).
 
 ## Common
+
+- **Speed.** Once the outcome is decided and units flee, the engine drops the
+  speed to ×1 by itself. `battle.speed_guard` restores the requested speed
+  every 0.5 s until the `Complete` phase and writes `speed_restored` (verified
+  on 2026-09-27 at ×20: 1 → 20 right after `result`). A pause (speed 0) is left alone.
 
 - Reload guard: a global flag (`tww3_bai_duel`, `tww3_bai_arena`,
   `tww3_bai_map_capture`).

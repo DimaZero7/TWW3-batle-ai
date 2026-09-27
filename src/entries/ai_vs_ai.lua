@@ -119,6 +119,9 @@ function M.main(bm, config)
         if state.active then return end
         started_ms, started_wall = bm:time_elapsed_ms(), clock.wall_seconds()
         bm:modify_battle_speed(config.speed)
+        battle.speed_guard(bm, config.speed, function(from)
+            emit('speed_restored', {from_speed = from, to_speed = config.speed})
+        end)
         for _, info in ipairs(state.sides) do
             if info.player_controlled then
                 local enemy = state.sides[3 - info.side]

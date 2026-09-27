@@ -13,6 +13,7 @@
 | `unsupported_reason(bm)` | Первый неподдерживаемый тип боя (`is_from_campaign`, `is_multiplayer`, `is_replay`, `is_quest_battle`, `is_tutorial`, `is_siege_battle`, `is_ambush_battle`) или `nil` |
 | `read_sides(bm, expected_units?)` | `{side, alliance, army, units}` для двух сторон; проверяет одну армию на сторону и, если задано, число отрядов |
 | `find_by_name(side, script_name)` | Отряд по `script_name` из XML |
+| `speed_guard(bm, speed, on_restore?)` | Держит заданную скорость до фазы `Complete`: движок сбрасывает её, когда исход решён. Возвращает `stop()` |
 | `read_roles(bm, record?)` | Атакующий/защитник по `alliance:is_attacker()`; никогда не выводится из индекса или места появления |
 
 ## services

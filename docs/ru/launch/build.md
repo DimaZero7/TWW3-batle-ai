@@ -17,6 +17,7 @@
 | `duel` | `entries.duel` | `scenarios/ranged_melee.xml` | `tww3_bai_duel.pack` |
 | `arena` | `entries.arena` | `scenarios/triple_melee.xml` | `tww3_bai_arena.pack` |
 | `ai-vs-ai` | `entries.ai_vs_ai` | `scenarios/ai_vs_ai.xml` | `tww3_bai_ai_vs_ai.pack` |
+| `unit-readout` | `entries.unit_readout` | `scenarios/unit_readout.xml` | `tww3_bai_unit_readout.pack` |
 | `map-capture` | `entries.map_capture` | `scenarios/map_capture.xml` | `tww3_bai_map_capture.pack` |
 
 ## Параметры
@@ -24,7 +25,7 @@
 | Параметр | Цели | Значение |
 |---|---|---|
 | `--runs 1..10` | duel | Боёв подряд в одном процессе игры (автопереигровка) |
-| `--speed 1/3/10/20` | duel, arena, ai-vs-ai | Скорость боя |
+| `--speed 1/3/10/20` | duel, arena, ai-vs-ai, unit-readout | Скорость боя |
 | `--timeout 30..1800` | duel, arena, ai-vs-ai | Лимит модельного времени боя, секунды |
 | `--tick-ms` | duel, arena | Период решений, мс (по умолчанию 1000) |
 | `--step 1/2/3/5` | map-capture | Размер клетки сетки, м |

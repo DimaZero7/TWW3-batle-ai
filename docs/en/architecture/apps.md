@@ -30,6 +30,7 @@ checks unchanged and pass. The original sources are kept in
 | [duel](../apps/entries.md#duel) | `duel` | `ranged_melee.xml` | One unit per side, forced melee, a series with automatic rematches |
 | [arena](../apps/entries.md#arena) | `arena` | `triple_melee.xml` | Three pairs at once on one map |
 | [ai_vs_ai](../apps/entries.md#ai_vs_ai) | `ai-vs-ai` | `ai_vs_ai.xml` | Both armies under the game's AI, our code only observes |
+| [unit_readout](../apps/entries.md#unit_readout) | `unit-readout` | `unit_readout.xml` | Live check of every documented unit readout |
 | [map_capture](../apps/entries.md#map_capture) | `map-capture` | `map_capture.xml` | Map grid, objects and reachability to CSV/JSONL |
 
 ## Tools outside the game (`tools`)

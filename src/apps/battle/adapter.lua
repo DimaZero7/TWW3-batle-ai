@@ -61,6 +61,31 @@ function M.read_sides(bm, expected_units)
     return sides
 end
 
+-- Keeps the requested battle speed until stop() is called or the battle
+-- reaches Complete. The engine lowers the speed by itself once the outcome
+-- is decided (units flee, VictoryCountdown); the guard sets it back.
+-- on_restore(from_speed) is called for each correction.
+function M.speed_guard(bm, speed, on_restore, name)
+    name = name or 'tww3_bai_speed_guard'
+    local stopped = false
+    local function stop()
+        stopped = true
+        pcall(function() bm:remove_process(name) end)
+    end
+    local function check()
+        if stopped then return end
+        local ok, current = pcall(function() return bm:current_battle_speed() end)
+        if ok and current ~= speed and current ~= 0 then
+            bm:modify_battle_speed(speed)
+            if on_restore then on_restore(current) end
+        end
+    end
+    bm:repeat_callback(check, 500, name)
+    bm:register_phase_change_callback('VictoryCountdown', check)
+    bm:register_phase_change_callback('Complete', stop)
+    return stop
+end
+
 -- Finds a unit by its XML script_name on the given side.
 function M.find_by_name(side_info, script_name)
     for _, unit in ipairs(side_info.units) do

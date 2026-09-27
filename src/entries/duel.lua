@@ -53,6 +53,7 @@ function M.main(bm, config)
             if item.controller then orders.release(item.controller) end
         end
         if speed_changed and restore_speed ~= false then
+            if state.stop_speed_guard then state.stop_speed_guard() end
             pcall(function() bm:modify_battle_speed(state.original_speed) end)
             speed_changed = false
         end
@@ -239,6 +240,9 @@ function M.main(bm, config)
         state.original_speed = bm:current_battle_speed()
         speed_changed = true
         bm:modify_battle_speed(config.speed)
+        state.stop_speed_guard = battle.speed_guard(bm, config.speed, function(from)
+            emit('speed_restored', {from_speed = from, to_speed = config.speed})
+        end)
         for _, item in ipairs(state.units) do
             item.controller = orders.take_control(item.army, item.unit)
             orders.prepare_melee(item.controller, item.unit)

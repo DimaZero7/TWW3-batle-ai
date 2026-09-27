@@ -12,6 +12,7 @@ Battle context: sides, armies, units and roles. The only place that walks
 | `unsupported_reason(bm)` | The first unsupported battle kind (`is_from_campaign`, `is_multiplayer`, `is_replay`, `is_quest_battle`, `is_tutorial`, `is_siege_battle`, `is_ambush_battle`) or `nil` |
 | `read_sides(bm, expected_units?)` | `{side, alliance, army, units}` for both sides; asserts one army per side and, if given, the unit count |
 | `find_by_name(side, script_name)` | A unit by its XML `script_name` |
+| `speed_guard(bm, speed, on_restore?)` | Keeps the requested speed until `Complete`: the engine lowers it once the outcome is decided. Returns `stop()` |
 | `read_roles(bm, record?)` | Attacker/defender from `alliance:is_attacker()`; never inferred from index or spawn |
 
 ## services

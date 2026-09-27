@@ -6,7 +6,7 @@
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -Target duel
 ```
 
-Options: `-Target duel|arena|ai-vs-ai|map-capture` (required), `-TimeoutSeconds`
+Options: `-Target duel|arena|ai-vs-ai|unit-readout|map-capture` (required), `-TimeoutSeconds`
 (default 1200, including game load), `-KeepGameOpen` (leave the game running
 after completion).
 

@@ -98,9 +98,19 @@ class TestAiVsAi:
             local state = require('entries.ai_vs_ai').main(bm, {build='t', speed=3, timeout_ms=600000, tick_ms=1000})
             bm:pump()
             for _ = 1, 16 do bm:tick() end
+            bm.speed = 1              -- the engine slows down once units flee
+            bm:tick()
+            assert(bm.speed == 3, 'speed guard did not restore x3')
             bm.outcome, bm.winner = true, 2
             bm:tick()
             assert(state.finished and attacks >= 2, 'planner not used or not re-issued: ' .. attacks)
+            bm.speed = 1              -- victory countdown after the result: still restored
+            bm:tick()
+            assert(bm.speed == 3, 'speed not kept after the result')
+            bm:set_phase('Complete')
+            bm.speed = 1
+            bm:tick()
+            assert(bm.speed == 1, 'guard must stop at Complete')
         """)
         rows = events(tmp_path / "tww3_bai_events.jsonl")
         kinds = [r["event"] for r in rows]
@@ -112,3 +122,31 @@ class TestAiVsAi:
         result = next(r for r in rows if r["event"] == "result")
         assert result["status"] == "completed" and result["winner"] == 2
         assert "progress" in kinds
+        restored = [r for r in rows if r["event"] == "speed_restored"]
+        assert len(restored) == 2 and restored[0]["from_speed"] == 1 and restored[0]["to_speed"] == 3
+
+
+class TestUnitReadout:
+    def test_all_stages_run_and_report_is_built(self, lua, tmp_path):
+        lua.execute("""
+            local sides = {{}, {}}
+            for _, n in ipairs({'a_general', 'a_spears', 'a_archers'}) do table.insert(sides[1], fake.unit(n, n, 50, 0)) end
+            for _, n in ipairs({'b_general', 'b_spears', 'b_archers'}) do table.insert(sides[2], fake.unit(n, n, -50, 0)) end
+            bm = fake.manager(sides)
+            local state = require('entries.unit_readout').main(bm, {build='t', speed=3, tick_ms=1000},
+                {common = fake.common, battle_vector = fake.vector_type})
+            bm:pump()
+            for _ = 1, 160 do bm:tick() end
+            assert(state.finished, 'readout did not finish')
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        kinds = {r["event"] for r in rows}
+        assert "error" not in kinds, [r for r in rows if r["event"] == "error"]
+        assert {"unit_profile", "unit_state", "enemy_gate", "range", "intel", "sampler_frame",
+                "nav_state", "stage", "result"} <= kinds
+        assert [r["name"] for r in rows if r["event"] == "stage"] == ["idle", "march", "ranged", "cease_fire", "melee", "halt"]
+        # The report must build from the log (the fake cannot satisfy game checks).
+        from tools.analysis import unit_readout
+        (tmp_path / "events.jsonl").write_text((tmp_path / "tww3_bai_events.jsonl").read_text(encoding="utf-8"), encoding="utf-8")
+        checks, table, _ = unit_readout.analyse(unit_readout.load(tmp_path))
+        assert len(table) == 68 and checks
