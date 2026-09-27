@@ -48,3 +48,16 @@ class TestGrid:
             assert(cx == 0 and cz == 0)
             assert(not pcall(map.cell_center, grid, grid.columns, 0))
         """)
+
+
+class TestWindow:
+    def test_window_grid_is_clipped_and_offset(self, lua):
+        lua.execute("""
+            local frame = map.build_frame(radar)
+            local grid = map.new_grid(frame, 1, {min_x = -160, max_x = -30, min_z = -130, max_z = 20})
+            assert(grid.columns == 130 and grid.rows == 150, grid.columns .. 'x' .. grid.rows)
+            local x, z = map.cell_center(grid, 0, 0)
+            assert(math.abs(x + 159.5) < 1e-9 and math.abs(z + 129.5) < 1e-9)
+            assert(math.abs(grid.radar_max_x - 500) < 1e-6)
+            assert(not pcall(map.new_grid, frame, 1, {min_x = 600, max_x = 700, min_z = 0, max_z = 10}))
+        """)

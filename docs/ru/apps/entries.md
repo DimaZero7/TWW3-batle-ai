@@ -95,6 +95,63 @@
 времени): полная сводка **168 / 168**, сводка стороны 1 **14 / 14**, стороны 2
 **14 / 14**. Замеры скрытности — [видимость](../game/units/visibility.md).
 
+<a id="move_probe"></a>
+
+## move_probe — движение одного отряда
+
+Сборка: `python -m tools.build move-probe --plan hamlet`. Сценарий
+`move_probe.xml` на **The Moorlands Route** (`catchment_03`): отряд
+`probe_spears` (копейщики Империи) и далёкий генерал `far_general`, которого
+держит скрипт. Задача — [обход препятствий](../architecture/tasks/obstacles.md).
+
+План `config/move-plans/<имя>.json` — список заходов:
+
+- `shape` — перестроиться на месте в другую ширину;
+- `traverse` — один обычный приказ в дальнюю точку.
+
+Заход: телепорт в старт, 2 с на успокоение, один
+`goto_location_angle_width`, затем каждую секунду `move_sample` (движение
+отряда и позиции всех бойцов в дециметрах) до `leg_end` с причиной
+`arrived`, `stopped`, `stuck` или `timeout` (`apps.navigation.services`).
+
+Разбор: `tools/analysis/move_probe.py`; итоги — [хутор](../../../research/analysis/hamlet/README.md).
+
+<a id="roster_capture"></a>
+
+## roster_capture — сбор ростера
+
+Сборка: `python -m tools.build roster-capture` — сценарий `roster_capture.xml`
+строится из `config/roster/capture.json`. В расстановке для каждого отряда
+пишется `unit_card` (карточка, профиль); затем все отряды больше чем из одного
+бойца одновременно перестраиваются на своих местах в каждую ширину из списка —
+`shape_result` с позициями бойцов и временем. Итог — `tools/roster.py update`,
+см. [ростер отрядов](../game/units/roster.md).
+
+<a id="formation_probe"></a>
+
+## formation_probe — строй в бою
+
+Сборка: `python -m tools.build formation-probe --army first_attack` — сценарий и
+данные из `config/armies/` и ростера (`tools/sim/formation.py`). После
+расстановки враг ставится по симуляции и стоит; наш строй считает в бою
+`apps.formation` по видимым врагам и ставит телепортом.
+После расстановки армия стоит `hold_s` (60 с) без приказов — проверка «не метаться»
+(`hold_sample` каждый тик, вердикт `stability` в разборе). Повороты лучников — только
+с `--turn-test`: вправо и влево движковым `rotate` и нашим поворотом на месте.
+`plan`, `stage_snapshot` (все бойцы на каждом этапе), `turn_sample` (лучники
+во время поворота). Разбор — `tools/analysis/formation_probe.py`.
+
+<a id="manual"></a>
+
+## manual_record — ручной бой с записью
+
+Сборка: `python -m tools.build manual --deadline 3600 --stall-minutes 30`.
+Сценарий `manual_hamlet.xml`: 6 отрядов копейщиков под управлением игрока у
+хутора. Скрипт не командует ими, только пишет: каждую секунду `own_sample`
+(движение и бойцы всех отрядов), при смене заданной точки — `order_seen`,
+конец приказа — `order_end` (`arrived`, `stopped`, `stuck`, `timeout`).
+Бой заканчивает игрок; иначе — через час или после 30 минут игры без урона.
+
 <a id="map_capture"></a>
 
 ## map_capture — сбор карты

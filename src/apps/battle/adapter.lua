@@ -101,8 +101,10 @@ function M.deadline(bm, real_ms, on_expire, name)
     end
 end
 
--- Sum of men alive and hit points of the given units, rounded so that
--- floating-point noise is not mistaken for damage. Unreadable units count 0.
+-- Men alive and hit points of the given units as a string, hit points rounded
+-- so that floating-point noise is not mistaken for damage. A string, not one
+-- number: game Lua numbers are single precision and a combined sum above 2^24
+-- would drop small damage. Unreadable units count 0.
 function M.health_signature(units)
     local men, hp = 0, 0
     for _, u in ipairs(units) do
@@ -111,7 +113,7 @@ function M.health_signature(units)
         if ok_men and type(m) == 'number' then men = men + m end
         if ok_hp and type(h) == 'number' and h == h then hp = hp + h end
     end
-    return men * 100000 + math.floor(hp * 10000 + 0.5)
+    return string.format('%d:%d', men, math.floor(hp * 10000 + 0.5))
 end
 
 -- Finds a unit by its XML script_name on the given side.

@@ -18,6 +18,10 @@
 | `arena` | `entries.arena` | `scenarios/triple_melee.xml` | `tww3_bai_arena.pack` |
 | `ai-vs-ai` | `entries.ai_vs_ai` | `scenarios/ai_vs_ai.xml` | `tww3_bai_ai_vs_ai.pack` |
 | `unit-readout` | `entries.unit_readout` | `scenarios/unit_readout.xml` | `tww3_bai_unit_readout.pack` |
+| `move-probe` | `entries.move_probe` | `scenarios/move_probe.xml` | `tww3_bai_move_probe.pack` |
+| `manual` | `entries.manual_record` | `scenarios/manual_hamlet.xml` | `tww3_bai_manual.pack` |
+| `formation-probe` | `entries.formation_probe` | `scenarios/formation_probe.xml` (из `config/armies/`) | `tww3_bai_formation_probe.pack` |
+| `roster-capture` | `entries.roster_capture` | `scenarios/roster_capture.xml` (из `config/roster/capture.json`) | `tww3_bai_roster_capture.pack` |
 | `map-capture` | `entries.map_capture` | `scenarios/map_capture.xml` | `tww3_bai_map_capture.pack` |
 
 ## Параметры
@@ -25,11 +29,18 @@
 | Параметр | Цели | Значение |
 |---|---|---|
 | `--runs 1..10` | duel | Боёв подряд в одном процессе игры (автопереигровка) |
-| `--speed 1/3/10/20` | duel, arena, ai-vs-ai, unit-readout | Скорость боя |
+| `--speed 1/3/10/20` | duel, arena, ai-vs-ai, unit-readout, move-probe | Скорость боя |
 | `--timeout 30..1800` | duel, arena, ai-vs-ai | Лимит модельного времени боя, секунды |
 | `--tick-ms` | duel, arena | Период решений, мс (по умолчанию 1000) |
 | `--step 1/2/3/5` | map-capture | Размер клетки сетки, м |
 | `--features` | map-capture | После расстановки прочитать объекты и достижимость клеток |
+| `--army` | formation-probe | Армия из `config/armies/<имя>.json` (по умолчанию `first_attack`) |
+| `--turn-test` | formation-probe | Добавить повороты лучников вправо и влево |
+| `--plan` | move-probe | План из `config/move-plans/<имя>.json` (по умолчанию `hamlet`) |
+| `--scenario` | все | Другой файл из `scenarios/` вместо сценария цели |
+| `--window MIN_X MAX_X MIN_Z MAX_Z` | map-capture | Снять только этот участок карты |
+| `--deadline` | все, кроме map-capture | Лимит реального времени на бой, с (по умолчанию из длины сценария и скорости) |
+| `--stall-minutes` | все, кроме map-capture | Завершить бой, если никто не получает урон столько минут игры (10). В move-probe не меньше длины плана + 2 мин |
 
 ## Что лежит в `build/<цель>/`
 

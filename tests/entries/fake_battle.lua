@@ -50,6 +50,13 @@ function F.unit(name, kind, x, z)
     function u:owned_passive_special_abilities() return {} end
     function u:unit_distance() return 50 end
     function u:unit_in_range() return false end
+    function u:bearing() return 0 end
+    function u:ordered_bearing() return 0 end
+    function u:ordered_width() return 30 end
+    function u:ordered_position() return self.pos end
+    function u:is_moving_fast() return false end
+    function u:slow_speed() return 4 end
+    function u:fast_speed() return 6 end
     return u
 end
 
@@ -65,6 +72,8 @@ local function controller(log)
     function uc:attack_unit(target) self.unit.attacked = self.unit.attacked + 1; log[#log + 1] = 'attack' end
     function uc:teleport_to_location() end
     function uc:goto_location() self.unit.moving = true end
+    -- Arrives at once: entry tests check wiring, not movement.
+    function uc:goto_location_angle_width(p) self.unit.pos = vec(p:get_x(), p:get_y(), p:get_z()) end
     function uc:rotate() end
     return uc
 end
@@ -148,7 +157,18 @@ end
 
 -- Unrotated radar over x in [-100, 100], z in [-100, 100].
 F.common = {
-    get_context_value = function(key)
+    get_context_value = function(key, _, field)
+        -- Two soldiers per unit; Position returns three numbers like the engine.
+        if key == 'CcoBattleUnit' and field == 'ManList.Size' then return 2 end
+        -- A two-row unit card.
+        if key == 'CcoBattleUnit' and field == 'UnitDetailsContext.StatList.Size' then return 2 end
+        if key == 'CcoBattleUnit' and field == 'UnitDetailsContext.StatList.At(0).Key' then return 'stat_armour' end
+        if key == 'CcoBattleUnit' and field == 'UnitDetailsContext.StatList.At(1).Key' then return 'stat_morale' end
+        if key == 'CcoBattleUnit' and field and field:match('^UnitDetailsContext%.StatList%.At%(%d%)%.Value$') then return 30 end
+        if key == 'CcoBattleUnit' and field == 'UnitDetailsContext.Mass' then return 60 end
+        if key == 'CcoBattleUnit' and field and field:match('^ManList%.At%(%d+%)%.Position$') then
+            return 1.25, 0, -2.5
+        end
         local x, z = key:match('ToVector4%(([%-%d%.]+),0,([%-%d%.]+),0%)')
         if x then return (tonumber(x) + 100) / 200, (100 - tonumber(z)) / 200 end
         if key == 'BattleRoot.BuildingsList.Size' then return 0 end

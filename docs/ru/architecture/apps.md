@@ -14,8 +14,12 @@
 | [core](../apps/core.md) | `value`, `json`, `errors`, `clock` | Безопасное чтение значений, JSON для телеметрии, коды ошибок, защита колбэков | Функции, продублированные в `state`, `range`, `visibility`, `post_battle_telemetry`, `harness`, `arena`, `capture` |
 | [battle](../apps/battle.md) | `adapter`, `services` | Стороны, армии, отряды, неподдерживаемые типы боя, роли атакующего/защитника | `runtime/battle_role.lua`, начало `harness.lua` |
 | [map](../apps/map.md) | `adapter`, `services` | Рамка радара, сетка, высота, грунт, проходимость клетки, здания и сооружения CCO | `map/reader.lua`, `map/objects.lua` |
-| [navigation](../apps/navigation.md) | `adapter`, `diagnostics_adapter` | Достижимость клеток для отряда, диагностика `can_reach_position` | `map/reachability.lua`, `runtime/reach_observation.lua` |
-| [units](../apps/units.md) | `state_adapter`, `range_adapter`, `contract` | 68 полей состояния своего отряда, дальность стрельбы, границы ширины строя | `units/state.lua`, `units/range.lua` |
+| [navigation](../apps/navigation.md) | `adapter`, `diagnostics_adapter`, `services` | Достижимость клеток для отряда, диагностика `can_reach_position` | `map/reachability.lua`, `runtime/reach_observation.lua` |
+| [assessment](../apps/assessment.md) | `services` | Оценка сил по составу армий: признаки для стратегий | новое |
+| [strategy](../apps/strategy.md) | `services`, `contract` | Список стратегий, условия, роли, выбор с журналом | новое |
+| [formation](../apps/formation.md) | `services` | Расстановки строя по ролям: `line_and_blocks` по данным ростера | новое |
+| [plan](../apps/plan.md) | `services` | Цепочка начала боя: оценка → стратегия → строй | новое |
+| [units](../apps/units.md) | `state_adapter`, `range_adapter`, `card_adapter`, `formation_adapter`, `contract` | 68 полей состояния своего отряда, дальность стрельбы, карточка и профиль отряда, движение и бойцы, границы ширины строя | `units/state.lua`, `units/range.lua` |
 | [intel](../apps/intel.md) | `adapter`, `services` | Видимость врага, память последней известной позиции | `visibility/reader.lua` |
 | [orders](../apps/orders.md) | `contract`, `adapter`, `planner_adapter` | Форма и проверка команд, проверенные в бою вызовы приказов | `validate` из `policy_host.lua`, вызовы из `harness`/`arena` и `commands.md` |
 | [deployment](../apps/deployment.md) | `contract`, `services`, `adapter` | Контракт расстановки v2, транзакция «собрать → проверить → применить → сверить» | `runtime/deployment_v2.lua` |
@@ -32,6 +36,10 @@
 | [arena](../apps/entries.md#arena) | `arena` | `triple_melee.xml` | Три пары одновременно на одной карте |
 | [ai_vs_ai](../apps/entries.md#ai_vs_ai) | `ai-vs-ai` | `ai_vs_ai.xml` | Обе армии под штатным ИИ игры, наш код только наблюдает |
 | [unit_readout](../apps/entries.md#unit_readout) | `unit-readout` | `unit_readout.xml` | Проверка в бою всех задокументированных показателей отрядов |
+| [move_probe](../apps/entries.md#move_probe) | `move-probe` | `move_probe.xml` | Один отряд по плану заходов: строй и обычные приказы, позиции бойцов |
+| [roster_capture](../apps/entries.md#roster_capture) | `roster-capture` | `roster_capture.xml` | Карточки и строй отрядов для ростера |
+| [formation_probe](../apps/entries.md#formation_probe) | `formation-probe` | `formation_probe.xml` | Строй армии в бою по плану `apps.formation`, повороты лучников |
+| [manual_record](../apps/entries.md#manual) | `manual` | `manual_hamlet.xml` | Ручной бой игрока с записью |
 | [map_capture](../apps/entries.md#map_capture) | `map-capture` | `map_capture.xml` | Сетка карты, объекты и достижимость в CSV/JSONL |
 
 ## Инструменты вне игры (`tools`)

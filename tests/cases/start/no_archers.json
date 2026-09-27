@@ -1,0 +1,40 @@
+{
+  "description": "Nothing to shoot with.",
+  "own": {
+    "role": "attack",
+    "units": [
+      {
+        "key": "wh_main_emp_cha_general_0",
+        "count": 1
+      },
+      {
+        "key": "wh_main_emp_inf_spearmen_0",
+        "count": 3
+      }
+    ]
+  },
+  "enemy": {
+    "role": "defend",
+    "units": [
+      {
+        "key": "wh_main_emp_cha_general_0",
+        "count": 1
+      },
+      {
+        "key": "wh_main_emp_inf_spearmen_0",
+        "count": 2
+      },
+      {
+        "key": "wh2_dlc13_emp_inf_archers_0",
+        "count": 2
+      }
+    ]
+  },
+  "expect": {
+    "strategy": "none",
+    "failed": [
+      "more_archers",
+      "arc_fire"
+    ]
+  }
+}

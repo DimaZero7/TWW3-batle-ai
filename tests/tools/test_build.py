@@ -1,4 +1,6 @@
 """tools.pack and tools.build: pack format, bundling and every build target."""
+import json
+
 import pytest
 from lupa.lua51 import LuaRuntime
 
@@ -61,3 +63,23 @@ class TestRequiredMods:
         assert dependencies == ("true_sight.pack",)
         assert manifest["mod_profile"] == "true-sight-v1"
         assert manifest["dependencies"][0]["sha256"] == project.required_mods()[0]["sha256"]
+
+
+class TestMovePlan:
+    def test_hamlet_plan_loads_and_stall_rule_covers_it(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(project, "BUILD", tmp_path)
+        assert build.main(["move-probe", "--plan", "hamlet"]) == 0
+        config = json.loads((tmp_path / "move-probe" / "manifest.json").read_text(encoding="utf-8"))["config"]
+        model_s = build.move_plan_model_s(config["plan"])
+        assert config["stall_ms"] >= (model_s + 120) * 1000
+        assert config["deadline_s"] == build.deadline_seconds(model_s, 20)
+        assert {leg["kind"] for leg in config["plan"]["legs"]} == {"shape", "traverse"}
+
+    def test_incomplete_leg_is_rejected(self, tmp_path, monkeypatch):
+        (tmp_path / "move-plans").mkdir()
+        (tmp_path / "move-plans" / "bad.json").write_text(json.dumps({"legs": [
+            {"name": "x", "kind": "shape", "run": False, "timeout_s": 5,
+             "start": {"x": 0, "z": 0, "facing": 0}, "target": {"x": 0, "z": 0, "facing": 0, "width": 5}}]}))
+        monkeypatch.setattr(project, "CONFIG_DIR", tmp_path)
+        with pytest.raises(KeyError):
+            build.load_move_plan("bad")

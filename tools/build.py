@@ -5,6 +5,10 @@ Usage:
     python -m tools.build arena
     python -m tools.build ai-vs-ai --speed 3
     python -m tools.build map-capture --step 3 --features
+    python -m tools.build move-probe --plan hamlet
+    python -m tools.build manual --deadline 3600 --stall-minutes 30
+    python -m tools.build roster-capture        # scenario from config/roster/capture.json
+    python -m tools.build formation-probe --army first_attack
 
 Output: build/<target>/ with the .pack, the bundled script and manifest.json.
 Install and launch with tools/launcher/launch.ps1.
@@ -51,6 +55,38 @@ TARGETS = {
         "scenario": "unit_readout.xml",
         "packed_scenario": "unit_readout.xml",
     },
+    "move-probe": {
+        "entry": "entries.move_probe",
+        "pack": "tww3_bai_move_probe.pack",
+        "script": "tww3_bai_move_probe",
+        "folder": "tww3_bai",
+        "scenario": "move_probe.xml",
+        "packed_scenario": "move_probe.xml",
+    },
+    "roster-capture": {
+        "entry": "entries.roster_capture",
+        "pack": "tww3_bai_roster_capture.pack",
+        "script": "tww3_bai_roster_capture",
+        "folder": "tww3_bai",
+        "scenario": "roster_capture.xml",
+        "packed_scenario": "roster_capture.xml",
+    },
+    "formation-probe": {
+        "entry": "entries.formation_probe",
+        "pack": "tww3_bai_formation_probe.pack",
+        "script": "tww3_bai_formation_probe",
+        "folder": "tww3_bai",
+        "scenario": "formation_probe.xml",
+        "packed_scenario": "formation_probe.xml",
+    },
+    "manual": {
+        "entry": "entries.manual_record",
+        "pack": "tww3_bai_manual.pack",
+        "script": "tww3_bai_manual",
+        "folder": "tww3_bai",
+        "scenario": "manual_hamlet.xml",
+        "packed_scenario": "manual_hamlet.xml",
+    },
     "map-capture": {
         "entry": "entries.map_capture",
         "pack": "tww3_bai_map_capture.pack",
@@ -65,6 +101,30 @@ SCENARIO_LUA = b"load_script_libraries()\n"
 
 # Scripted length of unit-readout (entries/unit_readout.lua, M.STAGES 'done').
 READOUT_MODEL_S = 196
+# move-probe: model time between legs (teleport, then the formation settles).
+MOVE_SETTLE_MS = 2000
+# formation-probe: least time per stage and its limit (entries/formation_probe.lua, 9 stages).
+FORMATION_SETTLE_MS = 3000
+FORMATION_STAGE_S = 20
+# formation-probe: the army stands this long after placing and must not move.
+FORMATION_HOLD_S = 60
+
+
+def load_move_plan(name):
+    """config/move-plans/<name>.json; every leg must be complete."""
+    plan = json.loads((project.CONFIG_DIR / "move-plans" / f"{name}.json").read_text(encoding="utf-8"))
+    assert plan.get("legs"), f"move plan {name} has no legs"
+    for leg in plan["legs"]:
+        assert leg["kind"] in ("shape", "traverse"), leg
+        assert leg["timeout_s"] > 0 and isinstance(leg["run"], bool), leg
+        for point in (leg["start"], leg["target"]):
+            assert all(isinstance(point[k], (int, float)) for k in ("x", "z", "facing", "width")), leg
+    return plan
+
+
+def move_plan_model_s(plan):
+    """Longest scripted length of a plan: every leg to its timeout."""
+    return sum(leg["timeout_s"] + MOVE_SETTLE_MS / 1000 for leg in plan["legs"])
 
 
 def deadline_seconds(model_s, speed):
@@ -87,11 +147,14 @@ def check_syntax(script):
     return True
 
 
-def build(target, run_config, dependencies=None):
-    """dependencies defaults to the required mods; every battle loads them."""
+def build(target, run_config, dependencies=None, scenario=None):
+    """dependencies defaults to the required mods; every battle loads them.
+    scenario overrides the target's scenario file (a name in scenarios/)."""
     if dependencies is None:
         dependencies = project.required_mods()
-    spec = TARGETS[target]
+    spec = dict(TARGETS[target])
+    if scenario:
+        spec["scenario"] = scenario
     scenario_xml = (project.SCENARIOS / spec["scenario"]).read_bytes()
     # The build id covers every input, so telemetry rows name the exact code.
     probe_script, modules = bundle.bundle(project.SRC, spec["entry"], run_config)
@@ -146,6 +209,12 @@ def main(argv=None):
                         "(default: from the scripted length and speed)")
     parser.add_argument("--stall-minutes", type=float, default=10,
                         help="end the battle when nobody takes damage for this much GAME time")
+    parser.add_argument("--scenario", help="scenario file in scenarios/ instead of the target's default")
+    parser.add_argument("--window", type=float, nargs=4, metavar=("MIN_X", "MAX_X", "MIN_Z", "MAX_Z"),
+                        help="map-capture: capture only this area")
+    parser.add_argument("--plan", default="hamlet", help="move-probe: plan in config/move-plans/")
+    parser.add_argument("--army", default="first_attack", help="formation-probe: army in config/armies/")
+    parser.add_argument("--turn-test", action="store_true", help="formation-probe: also turn the archers right/left")
     parser.add_argument("--features", action="store_true",
                         help="map-capture: also read objects and reachability after deployment")
     args = parser.parse_args(argv)
@@ -154,14 +223,42 @@ def main(argv=None):
 
     if args.target == "map-capture":
         run_config = {"step": args.step, "features": args.features}
+        if args.window:
+            run_config["window"] = dict(zip(("min_x", "max_x", "min_z", "max_z"), args.window))
     else:
         run_config = {"runs": args.runs if args.target == "duel" else 1, "speed": args.speed,
                       "timeout_ms": args.timeout * 1000, "tick_ms": args.tick_ms,
                       "scenario": TARGETS[args.target]["scenario"].removesuffix(".xml")}
         model_s = READOUT_MODEL_S if args.target == "unit-readout" else args.timeout
-        run_config["deadline_s"] = args.deadline or deadline_seconds(model_s, args.speed)
-        run_config["stall_ms"] = int(args.stall_minutes * 60000)
-    manifest = build(args.target, run_config)
+        stall_ms = int(args.stall_minutes * 60000)
+        if args.target == "move-probe":
+            plan = load_move_plan(args.plan)
+            model_s = move_plan_model_s(plan)
+            run_config.update(plan=plan, settle_ms=MOVE_SETTLE_MS)
+            # Nobody takes damage in this probe: the stall rule must not cut the plan.
+            stall_ms = max(stall_ms, int((model_s + 120) * 1000))
+        if args.target == "roster-capture":
+            from tools import roster
+            spec = roster.write_scenario()
+            capture, model_s = roster.run_config(spec, args.speed, MOVE_SETTLE_MS)
+            run_config.update(capture)
+            stall_ms = max(stall_ms, int((model_s + 120) * 1000))
+        if args.target == "formation-probe":
+            from tools.sim import formation as sim
+            army, _ = sim.load_army(args.army)
+            xml, probe_config, _ = sim.probe(army, args.speed, FORMATION_SETTLE_MS)
+            (project.SCENARIOS / "formation_probe.xml").write_text(xml, encoding="utf-8")
+            run_config.update(probe_config, stage_timeout_s=FORMATION_STAGE_S, army=args.army,
+                              hold_s=FORMATION_HOLD_S, turn_test=args.turn_test)
+            model_s = FORMATION_STAGE_S + FORMATION_HOLD_S + (8 * FORMATION_STAGE_S if args.turn_test else 0) + 15
+            stall_ms = max(stall_ms, int((model_s + 120) * 1000))
+        if args.target == "manual":
+            # The player sets the pace: no forced speed, an hour by default.
+            run_config.pop("speed")
+            model_s = None
+        run_config["deadline_s"] = args.deadline or (3600 if model_s is None else deadline_seconds(model_s, args.speed))
+        run_config["stall_ms"] = stall_ms
+    manifest = build(args.target, run_config, scenario=args.scenario)
     print(json.dumps(manifest, indent=2))
     return 0
 

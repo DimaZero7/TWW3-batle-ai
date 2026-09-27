@@ -16,7 +16,8 @@ M.PREFIX = 'tww3_bai_map_capture_'
 local BATCH_CELLS = 4096
 local BATCH_REACH = 1024
 
--- config: step (metres, one of 1/2/3/5), features (boolean).
+-- config: step (metres, one of 1/2/3/5), features (boolean),
+-- window (optional {min_x, max_x, min_z, max_z}: capture only that area).
 function M.main(bm, config, globals)
     if _G.tww3_bai_map_capture then return end
     _G.tww3_bai_map_capture = true
@@ -158,7 +159,7 @@ function M.main(bm, config, globals)
         emit('frame', {min_x = frame.min_x, max_x = frame.max_x, min_z = frame.min_z, max_z = frame.max_z,
             width = frame.width, depth = frame.depth, kind = frame.kind, movement_boundary_verified = false})
         for i, c in ipairs(frame.corners) do emit('corner', {id = i, x = c.x, z = c.z, u = c.u, v = c.v}) end
-        local grid = map_services.new_grid(frame, config.step)
+        local grid = map_services.new_grid(frame, config.step, config.window)
         emit('grid_begin', grid)
         telemetry.write_file(grid_file, 'ix,iz,x,z,height,clear,ground,inside_radar\n')
         local next_id, batches, blocked = 0, 0, 0

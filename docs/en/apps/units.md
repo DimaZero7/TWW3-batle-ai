@@ -32,6 +32,26 @@ local r = state.observe(unit, {
 visible enemy. Otherwise `access = 'withheld'` and **no** range, position or
 CCO read happens. Details: [missile range](../game/units/missile-range.md).
 
+## card_adapter — unit card and profile
+
+| Function | What it does |
+|---|---|
+| `stats(cco, unit)` | The whole `UnitDetailsContext.StatList` in card order: `{key, Value, DisplayedValue, ValueBase}` |
+| `details(cco, unit)` | `UnitDetailsContext.Mass`, `Name` and unit fields `HealthMax`, `NumEntitiesInitial` |
+| `profile(unit)` | Type, commander, class, kind flags, men, speeds, range, ammunition, abilities |
+
+Unknown values are written as `'unknown:<reason>'`. Used by the
+[roster capture](../game/units/roster.md).
+
+## formation_adapter — own unit movement and soldiers
+
+| Function | What it does |
+|---|---|
+| `motion(unit)` | Position, ordered position, bearing, ordered bearing and width, men alive, movement flags. Unreadable values are left out; no position is an error |
+| `soldiers(cco, unit)` | CCO `ManList.At(i).Position` of every soldier → `{status = 'ok', count, xz_dm = {x1, z1, ...}}` in whole decimetres, or `{status = 'unavailable', reason}` |
+
+Own units only: enemy soldier positions would reveal hidden men.
+
 ## contract
 
 | Function | What it does |

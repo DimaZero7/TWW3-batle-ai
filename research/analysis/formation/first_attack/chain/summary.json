@@ -1,0 +1,185 @@
+{
+  "facing_source": "visible_enemy",
+  "enemies_seen": 4,
+  "bearing": 358.7,
+  "status": "ok",
+  "choice": {
+    "archer_aspect": 1.1222223043442,
+    "archer_front_m": 47.256240844727,
+    "archer_gap_m": 6.856237411499,
+    "archer_row_gap_m": 9.0562381744385,
+    "archer_width": 20,
+    "failed": {},
+    "min_reach_m": 81.643760681152,
+    "row_back_m": [
+      12.300000190735,
+      39.356239318848
+    ],
+    "rows": 2,
+    "score": 1011.643737793,
+    "wall_depth_m": 9.3000001907349,
+    "wall_front_m": 28.39999961853,
+    "wall_width": 30
+  },
+  "units_after_placing": {
+    "own_1": {
+      "role": "lord",
+      "front_centre_error_m": 0.0,
+      "planned_front_x_depth_m": [
+        1,
+        1
+      ],
+      "real_front_x_depth_m": [
+        0.0,
+        0.0
+      ],
+      "bearing_error_deg": 0.0
+    },
+    "own_2": {
+      "role": "wall",
+      "front_centre_error_m": 0.7,
+      "planned_front_x_depth_m": [
+        28.4,
+        9.3
+      ],
+      "real_front_x_depth_m": [
+        28.2,
+        8.8
+      ],
+      "bearing_error_deg": -1.5
+    },
+    "own_3": {
+      "role": "arc",
+      "front_centre_error_m": 2.0,
+      "planned_front_x_depth_m": [
+        20.2,
+        18
+      ],
+      "real_front_x_depth_m": [
+        19.5,
+        19.3
+      ],
+      "bearing_error_deg": -1.9
+    },
+    "own_4": {
+      "role": "arc",
+      "front_centre_error_m": 2.2,
+      "planned_front_x_depth_m": [
+        20.2,
+        18
+      ],
+      "real_front_x_depth_m": [
+        19.4,
+        19.3
+      ],
+      "bearing_error_deg": -5.3
+    },
+    "own_5": {
+      "role": "arc",
+      "front_centre_error_m": 1.8,
+      "planned_front_x_depth_m": [
+        20.2,
+        18
+      ],
+      "real_front_x_depth_m": [
+        19.8,
+        19.2
+      ],
+      "bearing_error_deg": -1.8
+    },
+    "own_6": {
+      "role": "arc",
+      "front_centre_error_m": 1.5,
+      "planned_front_x_depth_m": [
+        20.2,
+        18
+      ],
+      "real_front_x_depth_m": [
+        19.7,
+        18.5
+      ],
+      "bearing_error_deg": -1.6
+    }
+  },
+  "stability": {
+    "verdict": "PASS",
+    "hold_s": 60.0,
+    "orders_after_placed": 0,
+    "limits": {
+      "soldiers_middle_m": 0.5,
+      "order_point_m": 0.5,
+      "moving_ticks": 0
+    },
+    "units": {
+      "own_1": {
+        "soldiers_middle_moved_m": 0.0,
+        "soldier_moved_max_m": 0.0,
+        "order_point_moved_m": 0.0,
+        "moving_ticks": 0,
+        "native_position_jump_m": 0.0
+      },
+      "own_2": {
+        "soldiers_middle_moved_m": 0.03,
+        "soldier_moved_max_m": 0.51,
+        "order_point_moved_m": 0.0,
+        "moving_ticks": 0,
+        "native_position_jump_m": 1.6
+      },
+      "own_3": {
+        "soldiers_middle_moved_m": 0.31,
+        "soldier_moved_max_m": 1.2,
+        "order_point_moved_m": 0.0,
+        "moving_ticks": 0,
+        "native_position_jump_m": 0.0
+      },
+      "own_4": {
+        "soldiers_middle_moved_m": 0.31,
+        "soldier_moved_max_m": 1.21,
+        "order_point_moved_m": 0.0,
+        "moving_ticks": 0,
+        "native_position_jump_m": 1.28
+      },
+      "own_5": {
+        "soldiers_middle_moved_m": 0.26,
+        "soldier_moved_max_m": 0.98,
+        "order_point_moved_m": 0.0,
+        "moving_ticks": 0,
+        "native_position_jump_m": 0.0
+      },
+      "own_6": {
+        "soldiers_middle_moved_m": 0.32,
+        "soldier_moved_max_m": 1.08,
+        "order_point_moved_m": 0.0,
+        "moving_ticks": 0,
+        "native_position_jump_m": 0.0
+      }
+    }
+  },
+  "stages": {
+    "placed": {
+      "closest_m": 3.0,
+      "pair": [
+        "own_2",
+        "own_3"
+      ],
+      "settled": true,
+      "t_s": 3.0,
+      "archers_to_archers": 7.01,
+      "archers_to_wall": 3.0,
+      "archer_middle_shift_m": 0.0
+    },
+    "hold": {
+      "closest_m": 3.0,
+      "pair": [
+        "own_2",
+        "own_3"
+      ],
+      "settled": true,
+      "t_s": 60.0,
+      "archers_to_archers": 7.06,
+      "archers_to_wall": 3.0,
+      "archer_middle_shift_m": 0.3
+    }
+  },
+  "archers_while_turning": {}
+}

@@ -76,3 +76,17 @@ Rules:
 | Policy sandbox | `tests/apps/sandbox/test_sandbox.py` |
 | Whole duel and map capture | `tests/entries/test_entries.py` |
 | PFH5, bundler, all build targets | `tests/tools/test_build.py` |
+
+## Test levels
+
+Rule of 27.09.2026: small modules are tested on their own; above them only
+that they are called correctly. The failing level shows where the fault is.
+
+| Level | What | Where |
+|---|---|---|
+| 1. Functions | A small function does its job | `tests/apps/<app>/test_services.py` |
+| 2. Module contract | On given armies a module decides as expected (strategy chosen or rejected by the right conditions; formation without overlaps) | `tests/cases/start/*.json` + `tests/apps/strategy/test_cases.py`; a new case is a new file |
+| 3. Chain wiring | Modules called in order and passing their data; modules replaced by spies | `tests/apps/plan/`, entries on the fake battle |
+| 4. Engine checks | Game facts the AI relies on | In-game runs with verdicts, on game updates and new engine facts |
+
+Level 2 checks properties, not exact numbers, so tuning does not break tests.

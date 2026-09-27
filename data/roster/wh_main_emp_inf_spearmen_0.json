@@ -1,0 +1,154 @@
+{
+  "key": "wh_main_emp_inf_spearmen_0",
+  "card": {
+    "date": "2026-09-27",
+    "game_version": "v9.0.1  Build 50381.4347557 (modded)",
+    "build": "9311677532973b64",
+    "run": "20260927T170740-roster-29",
+    "profile": {
+      "commanding": false,
+      "fast_speed": 3,
+      "flags": {
+        "is_anti_cavalry_infantry": false,
+        "is_artillery": false,
+        "is_cavalry": false,
+        "is_chariot": false,
+        "is_elephants": false,
+        "is_infantry": true,
+        "is_lancers": false,
+        "is_pikemen": false,
+        "is_war_beasts": false,
+        "is_war_machine": false
+      },
+      "initial_number_of_men": 120,
+      "missile_range": 0,
+      "owned_non_passive_special_abilities": {},
+      "owned_passive_special_abilities": {},
+      "slow_speed": 1.5,
+      "starting_ammo": 0,
+      "type": "wh_main_emp_inf_spearmen_0",
+      "unit_class": "inf_mel"
+    },
+    "details": {
+      "HealthMax": 8280,
+      "Mass": 100,
+      "Name": "Копейщики",
+      "NumEntitiesInitial": 120
+    },
+    "stats": {
+      "stat_armour": {
+        "value": 30,
+        "displayed": 30,
+        "base": 30
+      },
+      "stat_morale": {
+        "value": 0,
+        "displayed": 0,
+        "base": 0
+      },
+      "scalar_speed": {
+        "value": 30,
+        "displayed": 30,
+        "base": 30
+      },
+      "stat_melee_attack": {
+        "value": 20,
+        "displayed": 20,
+        "base": 20
+      },
+      "stat_melee_defence": {
+        "value": 34,
+        "displayed": 34,
+        "base": 34
+      },
+      "stat_weapon_damage": {
+        "value": 25,
+        "displayed": 25,
+        "base": 25
+      },
+      "stat_charge_bonus": {
+        "value": 4,
+        "displayed": 4,
+        "base": 4
+      }
+    }
+  },
+  "formation": {
+    "date": "2026-09-27",
+    "game_version": "v9.0.1  Build 50381.4347557 (modded)",
+    "build": "9311677532973b64",
+    "run": "20260927T170740-roster-29",
+    "widths": [
+      {
+        "ordered_m": 80,
+        "front_m": 78.4,
+        "depth_m": 5.5,
+        "reform_s": 20.0,
+        "ended": "arrived",
+        "men": 120
+      },
+      {
+        "ordered_m": 60,
+        "front_m": 57.9,
+        "depth_m": 6.0,
+        "reform_s": 13.0,
+        "ended": "arrived",
+        "men": 120
+      },
+      {
+        "ordered_m": 40,
+        "front_m": 38.6,
+        "depth_m": 7.7,
+        "reform_s": 7.0,
+        "ended": "arrived",
+        "men": 120
+      },
+      {
+        "ordered_m": 30,
+        "front_m": 28.4,
+        "depth_m": 9.3,
+        "reform_s": 4.0,
+        "ended": "arrived",
+        "men": 120
+      },
+      {
+        "ordered_m": 20,
+        "front_m": 18.4,
+        "depth_m": 14.9,
+        "reform_s": 8.0,
+        "ended": "stopped",
+        "men": 120
+      },
+      {
+        "ordered_m": 15,
+        "front_m": 14.3,
+        "depth_m": 18.7,
+        "reform_s": 11.0,
+        "ended": "stopped",
+        "men": 120
+      },
+      {
+        "ordered_m": 10,
+        "front_m": 8.9,
+        "depth_m": 30.7,
+        "reform_s": 21.0,
+        "ended": "stopped",
+        "men": 120
+      },
+      {
+        "ordered_m": 8,
+        "front_m": 7.8,
+        "depth_m": 37.0,
+        "reform_s": 25.0,
+        "ended": "stopped",
+        "men": 120
+      }
+    ]
+  },
+  "ours": {
+    "fire": null,
+    "roles": [],
+    "notes": ""
+  },
+  "battle": {}
+}

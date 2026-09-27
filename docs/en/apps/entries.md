@@ -96,6 +96,65 @@ Result on 2026-09-27 (`20260927-142521`, True Sight, ×20, 196 game s ≈ 10 s r
 full summary **168 / 168**, side 1 view **14 / 14**, side 2 **14 / 14**.
 Hiding measurements: [visibility](../game/units/visibility.md).
 
+<a id="move_probe"></a>
+
+## move_probe — movement of one unit
+
+Build: `python -m tools.build move-probe --plan hamlet`. Scenario
+`move_probe.xml` on **The Moorlands Route** (`catchment_03`): unit
+`probe_spears` (Empire spearmen) and a far general `far_general` held by the
+script. Task: obstacle avoidance (card in Russian: [obstacles](../../ru/architecture/tasks/obstacles.md)).
+
+The plan `config/move-plans/<name>.json` is a list of legs:
+
+- `shape` — reform in place at another width;
+- `traverse` — one plain order to a far point.
+
+A leg: teleport to the start, 2 s to settle, one `goto_location_angle_width`,
+then every second `move_sample` (unit movement and every soldier's position
+in decimetres) until `leg_end` with reason `arrived`, `stopped`, `stuck` or
+`timeout` (`apps.navigation.services`).
+
+Analysis: `tools/analysis/move_probe.py`; results — [hamlet](../../../research/analysis/hamlet/README.md) (in Russian).
+
+<a id="roster_capture"></a>
+
+## roster_capture — roster capture
+
+Build: `python -m tools.build roster-capture`; the scenario `roster_capture.xml`
+is generated from `config/roster/capture.json`. In deployment every unit
+writes `unit_card` (card, profile); then every unit with more than one man
+reforms in place at its own slot for each width in the list, all at once —
+`shape_result` with soldier positions and timing. Result: `tools/roster.py
+update`, see [unit roster](../game/units/roster.md).
+
+<a id="formation_probe"></a>
+
+## formation_probe — formation in battle
+
+Build: `python -m tools.build formation-probe --army first_attack`; scenario and
+data come from `config/armies/` and the roster (`tools/sim/formation.py`). After
+deployment the enemy is placed at its simulated plan and held; our formation is
+planned in battle by `apps.formation` from the visible enemy and placed by
+teleport.
+After placing, the army stands for `hold_s` (60 s) without orders — the "no rushing"
+check (`hold_sample` every tick, `stability` verdict in the analysis). Archer turns only
+with `--turn-test`: right and left with the engine's `rotate` and with our turn in place.
+Events: `plan`, `stage_snapshot`, `turn_sample`.
+Analysis: `tools/analysis/formation_probe.py`.
+
+<a id="manual"></a>
+
+## manual_record — manual battle with recording
+
+Build: `python -m tools.build manual --deadline 3600 --stall-minutes 30`.
+Scenario `manual_hamlet.xml`: six spearmen units near the hamlet under the
+player's command. The script never commands them, it only records:
+`own_sample` every second (movement and soldiers of all units), `order_seen`
+when the ordered point changes, `order_end` (`arrived`, `stopped`, `stuck`,
+`timeout`). The player ends the battle; otherwise after an hour or 30 game
+minutes without damage.
+
 <a id="map_capture"></a>
 
 ## map_capture — map collection

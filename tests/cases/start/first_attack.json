@@ -1,0 +1,44 @@
+{
+  "description": "The first example: we attack with more archers, the enemy has more infantry.",
+  "own": {
+    "role": "attack",
+    "units": [
+      {
+        "key": "wh_main_emp_cha_general_0",
+        "count": 1
+      },
+      {
+        "key": "wh_main_emp_inf_spearmen_0",
+        "count": 1
+      },
+      {
+        "key": "wh2_dlc13_emp_inf_archers_0",
+        "count": 4
+      }
+    ]
+  },
+  "enemy": {
+    "role": "defend",
+    "units": [
+      {
+        "key": "wh_main_emp_cha_general_0",
+        "count": 1
+      },
+      {
+        "key": "wh_main_emp_inf_spearmen_0",
+        "count": 2
+      },
+      {
+        "key": "wh2_dlc13_emp_inf_archers_0",
+        "count": 2
+      }
+    ]
+  },
+  "expect": {
+    "strategy": "wall_and_arc",
+    "formation": {
+      "status": "ok",
+      "overlaps": 0
+    }
+  }
+}

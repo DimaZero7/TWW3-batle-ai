@@ -6,7 +6,7 @@ Everything readable about units and the battle: what we already collect and what
 
 **Status:** ✅ tracked and verified in game · ⬜ in the game's API, not tested. **AI access:** own only · own and visible enemies · public · full summary only (never an AI input).
 
-Total 139: tracked 85, not yet tested 54.
+Total 139: tracked 89, not yet tested 50.
 
 ## What the unit is
 
@@ -16,16 +16,16 @@ Total 139: tracked 85, not yet tested 54.
 | `unit.name` | Script name from the scenario | ✅ tracked | own and visible enemies |
 | `unit.id` | Unique unit id in the battle | ✅ tracked | full summary only |
 | `unit.commanding` | Is the army general | ✅ tracked | own and visible enemies |
-| `unit.class` | Unit class (infantry, cavalry…) | ⬜ in the game | own only |
-| `unit.kind_flags` | Kind: infantry, cavalry, anti-cavalry, chariot, beasts, elephants, artillery, war machine | ⬜ in the game | own only |
+| `unit.class` | Unit class (infantry, cavalry…) | ✅ tracked | own only |
+| `unit.kind_flags` | Kind: infantry, cavalry, anti-cavalry, chariot, beasts, elephants, artillery, war machine | ✅ tracked | own only |
 | `unit.is_character` | Character (hero or general) | ⬜ in the game | own only |
 | `unit.renown` | Regiment of Renown | ⬜ in the game | own only |
 | `unit.spawned` | Spawned during the battle (by an ability) | ⬜ in the game | own only |
 | `unit.attributes` | Attributes: hide in forest, stalk, charge defence, charge reflection, encourages | ✅ tracked | own only |
 | `unit.behaviours_available` | Available behaviours: defend, skirmish, fire at will, spacing | ✅ tracked | own only |
-| `unit.card_stats` | All card stats: attack, defence, armour, charge, damage… | ⬜ in the game | own only |
+| `unit.card_stats` | All card stats: attack, defence, armour, charge, damage… | ✅ tracked | own only |
 | `unit.card_morale` | Leadership from the card | ✅ tracked | own only |
-| `unit.mass` | Unit mass (charge impact) | ⬜ in the game | own only |
+| `unit.mass` | Unit mass (charge impact) | ✅ tracked | own only |
 | `unit.experience_level` | Experience level | ✅ tracked | own only |
 | `unit.experience_progress` | Progress to the next experience level | ⬜ in the game | own only |
 | `unit.character_rank` | Character rank | ✅ tracked | own only |
@@ -230,16 +230,16 @@ Total 139: tracked 85, not yet tested 54.
 | `unit.name` | `unit:name()` | apps.battle.adapter |
 | `unit.id` | `unit:unique_ui_id()` | apps.telemetry.sampler_adapter |
 | `unit.commanding` | `unit:is_commanding_unit()` | entries.unit_readout (profile) |
-| `unit.class` | `unit:unit_class()` | — |
-| `unit.kind_flags` | `unit:is_infantry/is_cavalry/is_pikemen/is_anti_cavalry_infantry/is_lancers/is_chariot/is_war_beasts/is_elephants/is_artillery/is_war_machine()` | — |
+| `unit.class` | `unit:unit_class()` | apps.units.card_adapter |
+| `unit.kind_flags` | `unit:is_infantry/is_cavalry/is_pikemen/is_anti_cavalry_infantry/is_lancers/is_chariot/is_war_beasts/is_elephants/is_artillery/is_war_machine()` | apps.units.card_adapter |
 | `unit.is_character` | `CCO IsCharacter / IsGeneral` | — |
 | `unit.renown` | `CCO IsRenown` | — |
 | `unit.spawned` | `CCO IsSpawnedUnit` | — |
 | `unit.attributes` | `unit:has_attribute(key)` | entries.unit_readout (profile) |
 | `unit.behaviours_available` | `unit:can_use_behaviour(key)` | entries.unit_readout (profile) |
-| `unit.card_stats` | `CCO UnitDetailsContext.StatList / BaseStatValueFromKey` | — |
+| `unit.card_stats` | `CCO UnitDetailsContext.StatList / BaseStatValueFromKey` | apps.units.card_adapter |
 | `unit.card_morale` | `CCO UnitDetailsContext.StatList stat_morale` | apps.units.state_adapter |
-| `unit.mass` | `CCO UnitDetailsContext.Mass` | — |
+| `unit.mass` | `CCO UnitDetailsContext.Mass` | apps.units.card_adapter |
 | `unit.experience_level` | `CCO ExperienceLevel` | entries.unit_readout (profile) |
 | `unit.experience_progress` | `CCO ExperiencePercent` | — |
 | `unit.character_rank` | `CCO CharacterRank / HasCharacterRank` | entries.unit_readout (profile) |

@@ -1,0 +1,43 @@
+{
+  "name": "hamlet",
+  "description": "Obstacle task, one infantry unit (Moorlands Route, catchment_03). shape: reform in place at another width. traverse: one plain engine order past or into the hamlet block (x -110.5..-52.5, z -96.5..-49.5). Bearing 0 = +Z, 90 = +X.",
+  "monitor": {
+    "arrive_m": 5,
+    "stop_samples": 3,
+    "min_ms": 3000,
+    "stuck_window_ms": 10000,
+    "stuck_move_m": 2
+  },
+  "legs": [
+    {"name": "shape_w60", "kind": "shape", "run": false, "timeout_s": 25,
+     "start": {"x": -84, "z": -170, "facing": 0, "width": 30}, "target": {"x": -84, "z": -170, "facing": 0, "width": 60}},
+    {"name": "shape_w40", "kind": "shape", "run": false, "timeout_s": 25,
+     "start": {"x": -84, "z": -170, "facing": 0, "width": 30}, "target": {"x": -84, "z": -170, "facing": 0, "width": 40}},
+    {"name": "shape_w30", "kind": "shape", "run": false, "timeout_s": 25,
+     "start": {"x": -84, "z": -170, "facing": 0, "width": 30}, "target": {"x": -84, "z": -170, "facing": 0, "width": 30}},
+    {"name": "shape_w20", "kind": "shape", "run": false, "timeout_s": 25,
+     "start": {"x": -84, "z": -170, "facing": 0, "width": 30}, "target": {"x": -84, "z": -170, "facing": 0, "width": 20}},
+    {"name": "shape_w15", "kind": "shape", "run": false, "timeout_s": 25,
+     "start": {"x": -84, "z": -170, "facing": 0, "width": 30}, "target": {"x": -84, "z": -170, "facing": 0, "width": 15}},
+    {"name": "shape_w10", "kind": "shape", "run": false, "timeout_s": 25,
+     "start": {"x": -84, "z": -170, "facing": 0, "width": 30}, "target": {"x": -84, "z": -170, "facing": 0, "width": 10}},
+    {"name": "shape_w8", "kind": "shape", "run": false, "timeout_s": 25,
+     "start": {"x": -84, "z": -170, "facing": 0, "width": 30}, "target": {"x": -84, "z": -170, "facing": 0, "width": 8}},
+    {"name": "shape_w5", "kind": "shape", "run": false, "timeout_s": 25,
+     "start": {"x": -84, "z": -170, "facing": 0, "width": 30}, "target": {"x": -84, "z": -170, "facing": 0, "width": 5}},
+    {"name": "through_w20", "kind": "traverse", "run": true, "timeout_s": 70,
+     "start": {"x": -84, "z": -150, "facing": 0, "width": 20}, "target": {"x": -84, "z": 0, "facing": 0, "width": 20}},
+    {"name": "through_w30", "kind": "traverse", "run": true, "timeout_s": 70,
+     "start": {"x": -84, "z": -150, "facing": 0, "width": 30}, "target": {"x": -84, "z": 0, "facing": 0, "width": 30}},
+    {"name": "through_w40", "kind": "traverse", "run": true, "timeout_s": 70,
+     "start": {"x": -84, "z": -150, "facing": 0, "width": 40}, "target": {"x": -84, "z": 0, "facing": 0, "width": 40}},
+    {"name": "through_w30_walk", "kind": "traverse", "run": false, "timeout_s": 90,
+     "start": {"x": -84, "z": -150, "facing": 0, "width": 30}, "target": {"x": -84, "z": 0, "facing": 0, "width": 30}},
+    {"name": "west_east_w30", "kind": "traverse", "run": true, "timeout_s": 70,
+     "start": {"x": -160, "z": -73, "facing": 90, "width": 30}, "target": {"x": -10, "z": -73, "facing": 90, "width": 30}},
+    {"name": "corner_w30", "kind": "traverse", "run": true, "timeout_s": 70,
+     "start": {"x": -140, "z": -130, "facing": 40, "width": 30}, "target": {"x": -30, "z": 0, "facing": 40, "width": 30}},
+    {"name": "into_block_w30", "kind": "traverse", "run": true, "timeout_s": 50,
+     "start": {"x": -84, "z": -150, "facing": 0, "width": 30}, "target": {"x": -82, "z": -73, "facing": 0, "width": 30}}
+  ]
+}

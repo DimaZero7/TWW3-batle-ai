@@ -14,8 +14,12 @@ checks unchanged and pass. The original sources are kept in
 | [core](../apps/core.md) | `value`, `json`, `errors`, `clock` | Safe value reads, telemetry JSON, error codes, guarded callbacks | Helpers duplicated in `state`, `range`, `visibility`, `post_battle_telemetry`, `harness`, `arena`, `capture` |
 | [battle](../apps/battle.md) | `adapter`, `services` | Sides, armies, units, unsupported battle kinds, attacker/defender roles | `runtime/battle_role.lua`, start of `harness.lua` |
 | [map](../apps/map.md) | `adapter`, `services` | Radar frame, grid, height, ground, cell clearance, buildings and CCO structures | `map/reader.lua`, `map/objects.lua` |
-| [navigation](../apps/navigation.md) | `adapter`, `diagnostics_adapter` | Cell reachability for a unit, `can_reach_position` diagnostics | `map/reachability.lua`, `runtime/reach_observation.lua` |
-| [units](../apps/units.md) | `state_adapter`, `range_adapter`, `contract` | 68 own-unit state fields, missile range, formation width bounds | `units/state.lua`, `units/range.lua` |
+| [navigation](../apps/navigation.md) | `adapter`, `diagnostics_adapter`, `services` | Cell reachability for a unit, `can_reach_position` diagnostics | `map/reachability.lua`, `runtime/reach_observation.lua` |
+| [assessment](../apps/assessment.md) | `services` | Force assessment from both armies: features for strategies | new |
+| [strategy](../apps/strategy.md) | `services`, `contract` | Strategy catalogue, conditions, roles, choice with its reasons | new |
+| [formation](../apps/formation.md) | `services` | Formation layouts by role: `line_and_blocks` from roster data | new |
+| [plan](../apps/plan.md) | `services` | Start-of-battle chain: assessment → strategy → formation | new |
+| [units](../apps/units.md) | `state_adapter`, `range_adapter`, `card_adapter`, `formation_adapter`, `contract` | 68 own-unit state fields, missile range, unit card and profile, movement and soldiers, formation width bounds | `units/state.lua`, `units/range.lua` |
 | [intel](../apps/intel.md) | `adapter`, `services` | Enemy visibility, last known position memory | `visibility/reader.lua` |
 | [orders](../apps/orders.md) | `contract`, `adapter`, `planner_adapter` | Command shape and validation, order calls verified in battle | `validate` from `policy_host.lua`, calls from `harness`/`arena` and `commands.md` |
 | [deployment](../apps/deployment.md) | `contract`, `services`, `adapter` | Placement contract v2, "collect → validate → apply → verify" transaction | `runtime/deployment_v2.lua` |
@@ -32,6 +36,10 @@ checks unchanged and pass. The original sources are kept in
 | [arena](../apps/entries.md#arena) | `arena` | `triple_melee.xml` | Three pairs at once on one map |
 | [ai_vs_ai](../apps/entries.md#ai_vs_ai) | `ai-vs-ai` | `ai_vs_ai.xml` | Both armies under the game's AI, our code only observes |
 | [unit_readout](../apps/entries.md#unit_readout) | `unit-readout` | `unit_readout.xml` | Live check of every documented unit readout |
+| [move_probe](../apps/entries.md#move_probe) | `move-probe` | `move_probe.xml` | One unit through a plan of legs: formation and plain orders, soldier positions |
+| [roster_capture](../apps/entries.md#roster_capture) | `roster-capture` | `roster_capture.xml` | Unit cards and formation for the roster |
+| [formation_probe](../apps/entries.md#formation_probe) | `formation-probe` | `formation_probe.xml` | Army formation in battle from `apps.formation`, archer turns |
+| [manual_record](../apps/entries.md#manual) | `manual` | `manual_hamlet.xml` | Player's manual battle with recording |
 | [map_capture](../apps/entries.md#map_capture) | `map-capture` | `map_capture.xml` | Map grid, objects and reachability to CSV/JSONL |
 
 ## Tools outside the game (`tools`)

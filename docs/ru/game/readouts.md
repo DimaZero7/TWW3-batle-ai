@@ -6,7 +6,7 @@
 
 **Статус:** ✅ собираем и проверено в игре · ⬜ есть в API игры, не проверено. **Доступ для ИИ:** только свои · свои и видимые враги · общее для всех · только полная сводка (никогда не вход ИИ).
 
-Всего 139: собираем 85, ещё не проверено 54.
+Всего 139: собираем 89, ещё не проверено 50.
 
 ## Что это за отряд
 
@@ -16,16 +16,16 @@
 | `unit.name` | Имя отряда из сценария | ✅ собираем | свои и видимые враги |
 | `unit.id` | Уникальный номер отряда в бою | ✅ собираем | только полная сводка |
 | `unit.commanding` | Это генерал армии | ✅ собираем | свои и видимые враги |
-| `unit.class` | Класс отряда (пехота, кавалерия…) | ⬜ есть в игре | только свои |
-| `unit.kind_flags` | Вид: пехота, конница, копейщики против конницы, колесница, звери, слоны, артиллерия, боевая машина | ⬜ есть в игре | только свои |
+| `unit.class` | Класс отряда (пехота, кавалерия…) | ✅ собираем | только свои |
+| `unit.kind_flags` | Вид: пехота, конница, копейщики против конницы, колесница, звери, слоны, артиллерия, боевая машина | ✅ собираем | только свои |
 | `unit.is_character` | Герой или генерал (персонаж) | ⬜ есть в игре | только свои |
 | `unit.renown` | Полк славы (особый отряд) | ⬜ есть в игре | только свои |
 | `unit.spawned` | Появился во время боя (призван способностью) | ⬜ есть в игре | только свои |
 | `unit.attributes` | Особые свойства: прячется в лесу, прячется везде, защита от натиска, отражение натиска, воодушевляет | ✅ собираем | только свои |
 | `unit.behaviours_available` | Какие режимы доступны: оборона, перестрелка, свободный огонь, плотность строя | ✅ собираем | только свои |
-| `unit.card_stats` | Все характеристики с карточки: атака, защита, броня, натиск, урон и т. д. | ⬜ есть в игре | только свои |
+| `unit.card_stats` | Все характеристики с карточки: атака, защита, броня, натиск, урон и т. д. | ✅ собираем | только свои |
 | `unit.card_morale` | Дисциплина (мораль) с карточки | ✅ собираем | только свои |
-| `unit.mass` | Масса отряда (сила удара при натиске) | ⬜ есть в игре | только свои |
+| `unit.mass` | Масса отряда (сила удара при натиске) | ✅ собираем | только свои |
 | `unit.experience_level` | Уровень опыта | ✅ собираем | только свои |
 | `unit.experience_progress` | Сколько осталось до следующего уровня опыта | ⬜ есть в игре | только свои |
 | `unit.character_rank` | Уровень героя | ✅ собираем | только свои |
@@ -230,16 +230,16 @@
 | `unit.name` | `unit:name()` | apps.battle.adapter |
 | `unit.id` | `unit:unique_ui_id()` | apps.telemetry.sampler_adapter |
 | `unit.commanding` | `unit:is_commanding_unit()` | entries.unit_readout (profile) |
-| `unit.class` | `unit:unit_class()` | — |
-| `unit.kind_flags` | `unit:is_infantry/is_cavalry/is_pikemen/is_anti_cavalry_infantry/is_lancers/is_chariot/is_war_beasts/is_elephants/is_artillery/is_war_machine()` | — |
+| `unit.class` | `unit:unit_class()` | apps.units.card_adapter |
+| `unit.kind_flags` | `unit:is_infantry/is_cavalry/is_pikemen/is_anti_cavalry_infantry/is_lancers/is_chariot/is_war_beasts/is_elephants/is_artillery/is_war_machine()` | apps.units.card_adapter |
 | `unit.is_character` | `CCO IsCharacter / IsGeneral` | — |
 | `unit.renown` | `CCO IsRenown` | — |
 | `unit.spawned` | `CCO IsSpawnedUnit` | — |
 | `unit.attributes` | `unit:has_attribute(key)` | entries.unit_readout (profile) |
 | `unit.behaviours_available` | `unit:can_use_behaviour(key)` | entries.unit_readout (profile) |
-| `unit.card_stats` | `CCO UnitDetailsContext.StatList / BaseStatValueFromKey` | — |
+| `unit.card_stats` | `CCO UnitDetailsContext.StatList / BaseStatValueFromKey` | apps.units.card_adapter |
 | `unit.card_morale` | `CCO UnitDetailsContext.StatList stat_morale` | apps.units.state_adapter |
-| `unit.mass` | `CCO UnitDetailsContext.Mass` | — |
+| `unit.mass` | `CCO UnitDetailsContext.Mass` | apps.units.card_adapter |
 | `unit.experience_level` | `CCO ExperienceLevel` | entries.unit_readout (profile) |
 | `unit.experience_progress` | `CCO ExperiencePercent` | — |
 | `unit.character_rank` | `CCO CharacterRank / HasCharacterRank` | entries.unit_readout (profile) |

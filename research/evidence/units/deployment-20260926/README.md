@@ -1,6 +1,6 @@
 # Deployment evidence — 26 September 2026
 
-[English guide](../../en/deployment.md) · [Русское описание](../../ru/deployment.md)
+[English guide](../../../../docs/en/game/units/deployment.md) · [Русское описание](../../../../docs/ru/game/units/deployment.md)
 
 Author/operator: battle-operator. Publication reviewer: coordinator. Five controlled diagnostics, synthetic public test policies only; no fighter submission or competitive strategy is included. WH3 v9.0.0 build 50218.4334952, official Moorlands Route, 15 Empire units per side, minimum graphics and Ultra. The final attempt completed 10 simulated combat seconds at x7. All five owned processes were closed. This evidence supports an engineering mechanism, not complete deployment geometry, campaign integration or competitive admission.
 

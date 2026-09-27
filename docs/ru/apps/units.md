@@ -33,6 +33,26 @@ local r = state.observe(unit, {
 союзник или видимый враг. Иначе `access = 'withheld'` и **ни одного** чтения
 дальности, позиции или CCO. Подробно — [дальность стрельбы](../game/units/missile-range.md).
 
+## card_adapter — карточка и профиль отряда
+
+| Функция | Что делает |
+|---|---|
+| `stats(cco, unit)` | Вся карточка `UnitDetailsContext.StatList` по порядку: `{key, Value, DisplayedValue, ValueBase}` |
+| `details(cco, unit)` | `UnitDetailsContext.Mass`, `Name` и поля отряда `HealthMax`, `NumEntitiesInitial` |
+| `profile(unit)` | Тип, командир, класс, вид отряда (пехота, конница…), бойцов, скорости, дальность, стрелы, способности |
+
+Неизвестное пишется как `'unknown:<причина>'`. Используется прогоном
+[сбора ростера](../game/units/roster.md).
+
+## formation_adapter — движение и бойцы своего отряда
+
+| Функция | Что делает |
+|---|---|
+| `motion(unit)` | Позиция, заданная позиция, направление, заданные направление и ширина, число бойцов, флаги движения. Нечитаемое пропускается; без позиции — ошибка |
+| `soldiers(cco, unit)` | CCO `ManList.At(i).Position` каждого бойца → `{status = 'ok', count, xz_dm = {x1, z1, ...}}` в целых дециметрах или `{status = 'unavailable', reason}` |
+
+Только для своих отрядов: позиции бойцов врага выдали бы скрытых.
+
 ## contract
 
 | Функция | Что делает |

@@ -43,6 +43,49 @@ With guard enabled, units moved only **0.01–1.66 m** after their target was fo
 
 `defend` is not a command to dig trenches or add armour. The `braced` state appeared with guard disabled too. See [states](states.md).
 
+## Order point and unreachable points
+
+Measured on 27.09.2026 with Empire spearmen, 120 men
+([hamlet](../../../../research/analysis/hamlet/README.md), in Russian):
+
+- The point of `goto_location_angle_width` is the **centre of the front rank**.
+  `unit:position()` is the middle of the soldiers. At 10 m width the middle
+  stands ≈ 15 m behind the order point, so arrival is checked on the front rank
+  or corrected by half the formation depth.
+- **An order to an unreachable point is silently dropped.** The call does not
+  fail, `ordered_position` keeps its old value and the unit stays `is_idle`.
+  Check `unit:can_reach_position(p)` before the order and that
+  `ordered_position` changed after it.
+- Widths of 5–60 m are accepted as given (`ordered_width` equals the order).
+  The real front is 1–2 m narrower. Narrowing from 30 to 10 m took 22 s; to 8
+  and 5 m, more than 25 s.
+
+## Turning in place
+
+Measured on 27.09.2026 with 19 × 18 m archer blocks:
+
+- `uc:rotate(90)` turns the unit **around the centre of its front rank**, not
+  around its middle. A square block shifts ≈ 12 m sideways and forwards on a 90°
+  turn. Archers standing 3 m behind their infantry ran into it (0.7–1.0 m
+  between soldiers of different units). The turn took 14–17 s.
+- Turning in place: `goto_location_angle_width` to "middle + half the depth
+  along the new facing" with the same width (`apps.formation.services.turn_in_place`):
+  1.4–1.7 m shift, 2–3 m to the infantry, 7–8 s. Computed from the current middle
+  each time, the shift adds up (3.9 m after four turns); use the unit's remembered slot.
+
+## Unit position is not the soldiers' middle
+
+During a minute of standing without orders (27.09.2026) `unit:position()` of a
+spearmen wall jumped 2.1 m and of archers 0.9 m, while the soldiers' middle from
+`ManList` moved at most 0.3 m and `is_moving` was never `true`. To tell whether a
+unit stands still, and for exact geometry, use soldier positions.
+
+## Numbers in the game's Lua
+
+- Numbers are **single precision**: `1/3` → `0.33333334`, `16777217` → `16777216`.
+  Integers above 2^24 lose precision; sums of large numbers lose low digits.
+- `math.huge` is `nil`. Use `nil` for "no value yet".
+
 ## Withdrawal and abilities: current API details
 
 The tested withdrawal fixture explicitly uses `<can_withdraw>true</can_withdraw>` in both armies. Its General is declared with `<general><name>Unit action diagnostic</name><star_rating level="1"/></general>`. Earlier fixtures without these declarations accepted `withdraw(true/false)` but did not depart; the declarations were changed together, so the experiment does not isolate each one's individual causal effect.

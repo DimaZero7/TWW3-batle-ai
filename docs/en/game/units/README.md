@@ -15,6 +15,7 @@ This is a practical interface for a classical tactical algorithm. It is not an A
 | [States and passive effects](states.md) | Braced, fatigue, forest hiding, general support and ability availability |
 | [Experiments and evidence](evidence.md) | Conditions, measured comparisons, raw logs, limitations and reproduction |
 | [Unit catalogue by faction](catalog/README.md) | Short unit cards, exact keys and links to detailed information |
+| [Unit roster](roster.md) | Per-type data for the AI: battle card, formation by width, fire type; how to add a unit |
 
 Test units: **120 shieldless Spearmen**, **90 Archers**, **one foot General of the Empire**. Unit experience is zero, Ultra unit size, requested battle speed ×20, minimum graphics. Only the diagnostic script pack is loaded; unit DB records are unchanged. The final general setup is explicitly commanding, character rank 1, unit experience 0; these are separate runtime fields.
 

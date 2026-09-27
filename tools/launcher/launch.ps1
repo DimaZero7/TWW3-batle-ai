@@ -10,7 +10,7 @@
 #  * removes only its own pack and mod list, and only if unchanged;
 #  * results are copied to build/<target>/runs/<time>/ before cleanup.
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('duel', 'arena', 'ai-vs-ai', 'unit-readout', 'map-capture')][string]$Target,
+    [Parameter(Mandatory = $true)][ValidateSet('duel', 'arena', 'ai-vs-ai', 'unit-readout', 'move-probe', 'manual', 'roster-capture', 'formation-probe', 'map-capture')][string]$Target,
     [int]$TimeoutSeconds = 0,
     [switch]$KeepGameOpen
 )

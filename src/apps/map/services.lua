@@ -48,17 +48,25 @@ function M.world_to_radar(frame, x, z)
     return frame.a * x + frame.b * z + frame.u0, frame.c * x + frame.d * z + frame.v0
 end
 
-function M.new_grid(frame, step)
+-- window (optional) = {min_x, max_x, min_z, max_z}: capture only that part of
+-- the frame. Cells still report inside_radar against the full frame.
+function M.new_grid(frame, step, window)
     assert(finite(step) and step > 0, 'Step must be positive')
     assert(finite(frame.min_x) and finite(frame.max_x) and frame.max_x > frame.min_x
         and finite(frame.min_z) and finite(frame.max_z) and frame.max_z > frame.min_z,
         'Invalid frame dimensions')
-    local columns = math.ceil((frame.max_x - frame.min_x) / step)
-    local rows = math.ceil((frame.max_z - frame.min_z) / step)
-    return {min_x = frame.min_x, min_z = frame.min_z, radar_max_x = frame.max_x,
+    local min_x, max_x, min_z, max_z = frame.min_x, frame.max_x, frame.min_z, frame.max_z
+    if window then
+        min_x, max_x = math.max(min_x, window.min_x), math.min(max_x, window.max_x)
+        min_z, max_z = math.max(min_z, window.min_z), math.min(max_z, window.max_z)
+        assert(max_x > min_x and max_z > min_z, 'Window outside the radar frame')
+    end
+    local columns = math.ceil((max_x - min_x) / step)
+    local rows = math.ceil((max_z - min_z) / step)
+    return {min_x = min_x, min_z = min_z, radar_max_x = frame.max_x,
         radar_max_z = frame.max_z, step = step, columns = columns, rows = rows,
-        count = columns * rows, query_max_x = frame.min_x + columns * step,
-        query_max_z = frame.min_z + rows * step}
+        count = columns * rows, query_max_x = min_x + columns * step,
+        query_max_z = min_z + rows * step, window = window}
 end
 
 function M.cell_center(grid, ix, iz)

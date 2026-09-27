@@ -195,3 +195,198 @@ class TestStall:
         """)
         result = [r for r in events(tmp_path / "tww3_bai_events.jsonl") if r["event"] == "result"]
         assert [r["status"] for r in result] == ["stalled"]
+
+
+class TestMoveProbe:
+    PLAN = """{name = 'test', monitor = {arrive_m = 5},
+        legs = {
+            {name = 'shape_w10', kind = 'shape', run = false, timeout_s = 25,
+             start = {x = 0, z = 0, facing = 0, width = 30}, target = {x = 0, z = 0, facing = 0, width = 10}},
+            {name = 'through', kind = 'traverse', run = true, timeout_s = 70,
+             start = {x = 0, z = -50, facing = 0, width = 30}, target = {x = 0, z = 60, facing = 0, width = 30}},
+        }}"""
+
+    def test_legs_run_in_order_and_soldiers_are_logged(self, lua, tmp_path):
+        lua.execute(f"""
+            local a = fake.unit('probe_spears', 'wh_main_emp_inf_spearmen_0', 0, -50)
+            local b = fake.unit('far_general', 'wh_main_emp_cha_general_0', 300, -400)
+            bm = fake.manager({{{{a}}, {{b}}}})
+            local state = require('entries.move_probe').main(bm, {{build = 'test', speed = 20, tick_ms = 1000,
+                deadline_s = 100, stall_ms = 900000, settle_ms = 2000, plan = {self.PLAN}}},
+                {{common = fake.common, battle_vector = fake.vector_type}})
+            bm:pump()
+            for _ = 1, 20 do bm:tick() end
+            assert(state.finished, 'probe did not finish')
+            assert(bm.ended, 'battle was not ended')
+            assert(a:position():get_z() == 60)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        kinds = [r["event"] for r in rows]
+        assert "error" not in kinds, [r for r in rows if r["event"] == "error"]
+        ends = [r for r in rows if r["event"] == "leg_end"]
+        assert [(e["leg"], e["reason"]) for e in ends] == [("shape_w10", "arrived"), ("through", "arrived")]
+        sample = next(r for r in rows if r["event"] == "move_sample")
+        assert sample["soldiers_dm"] == [13, -25, 13, -25] and sample["motion"]["ordered_width"] == 30
+        result = next(r for r in rows if r["event"] == "result")
+        assert result["status"] == "completed" and result["legs_done"] == 2
+
+    def test_deadline_ends_the_probe(self, lua, tmp_path):
+        lua.execute(f"""
+            local a = fake.unit('probe_spears', 'inf', 0, -50)
+            local b = fake.unit('far_general', 'lord', 300, -400)
+            bm = fake.manager({{{{a}}, {{b}}}})
+            local state = require('entries.move_probe').main(bm, {{build = 'test', speed = 20, tick_ms = 1000,
+                deadline_s = 100, stall_ms = 900000, settle_ms = 2000, plan = {self.PLAN}}},
+                {{common = fake.common, battle_vector = fake.vector_type}})
+            bm:pump()
+            bm:tick()
+            bm:fire_timers()
+            assert(state.finished and bm.ended)
+        """)
+        result = next(r for r in events(tmp_path / "tww3_bai_events.jsonl") if r["event"] == "result")
+        assert result["status"] == "deadline" and result["legs_done"] == 0
+
+
+class TestManualRecord:
+    def run(self, lua, body):
+        lua.execute("""
+            units = {}
+            for i = 1, 6 do units[i] = fake.unit('spears_' .. i, 'wh_main_emp_inf_spearmen_0', -84 + i * 10, -160) end
+            general = fake.unit('far_general', 'lord', 300, -400)
+            bm = fake.manager({units, {general}})
+            state = require('entries.manual_record').main(bm, {build = 'test', tick_ms = 1000,
+                deadline_s = 3600, stall_ms = 1800000}, {common = fake.common, battle_vector = fake.vector_type})
+            bm:pump()
+        """ + body)
+
+    def test_records_player_orders_without_controlling_them(self, lua, tmp_path):
+        self.run(lua, """
+            assert(bm.phase == 'Deployment', 'deployment must stay with the player')
+            bm:set_phase('Deployed')
+            bm:tick()
+            local target = fake.vector_type.new(); target:set_x(-84); target:set_z(-40)
+            units[1].ordered_position = function() return target end
+            for _ = 1, 5 do bm:tick() end
+            assert(not units[1]:is_script_controlled() and general:is_script_controlled())
+            bm:set_phase('Complete')
+            assert(state.finished and not bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        kinds = [r["event"] for r in rows]
+        assert "error" not in kinds, [r for r in rows if r["event"] == "error"]
+        order = next(r for r in rows if r["event"] == "order_seen")
+        assert order["unit"] == "spears_1" and order["z"] == -40
+        assert next(r for r in rows if r["event"] == "order_end")["reason"] == "stopped"
+        sample = next(r for r in rows if r["event"] == "own_sample")
+        assert len(sample["units"]) == 6 and sample["units"][0]["soldiers_dm"]
+        assert rows[-1]["event"] == "result" and rows[-1]["status"] == "battle_ended"
+
+    def test_deadline_ends_the_battle(self, lua, tmp_path):
+        self.run(lua, """
+            bm:set_phase('Deployed')
+            bm:tick()
+            bm:fire_timers()
+            assert(state.finished and bm.ended)
+        """)
+        assert events(tmp_path / "tww3_bai_events.jsonl")[-1]["status"] == "deadline"
+
+
+class TestRosterCapture:
+    def test_cards_and_shapes_are_logged(self, lua, tmp_path):
+        lua.execute("""
+            local lord = fake.unit('roster_1', 'wh_main_emp_cha_general_0', 0, -100)
+            function lord:initial_number_of_men() return 1 end
+            local spears = fake.unit('roster_2', 'wh_main_emp_inf_spearmen_0', 100, -200)
+            local general = fake.unit('far_general', 'lord', 300, -400)
+            bm = fake.manager({{lord, spears}, {general}})
+            local state = require('entries.roster_capture').main(bm, {build = 'test', speed = 20, tick_ms = 1000,
+                deadline_s = 100, stall_ms = 900000, settle_ms = 2000, widths = {40, 10}, baseline_width = 30,
+                shape_timeout_s = 40, units = {
+                    {script_name = 'roster_1', key = 'wh_main_emp_cha_general_0', slot = {x = 0, z = -100}},
+                    {script_name = 'roster_2', key = 'wh_main_emp_inf_spearmen_0', slot = {x = 100, z = -200}}}},
+                {common = fake.common, battle_vector = fake.vector_type})
+            bm:pump()
+            for _ = 1, 20 do bm:tick() end
+            assert(state.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        cards = [r for r in rows if r["event"] == "unit_card"]
+        assert [c["key"] for c in cards] == ["wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0"]
+        assert cards[1]["stats"]["list"][0] == {"key": "stat_armour", "Value": 30, "DisplayedValue": "unknown:nil",
+                                                "ValueBase": "unknown:nil"}
+        assert cards[1]["details"]["Mass"] == 60 and cards[1]["profile"]["slow_speed"] == 4
+        shapes = [(r["key"], r["width"]) for r in rows if r["event"] == "shape_result"]
+        assert shapes == [("wh_main_emp_inf_spearmen_0", 40), ("wh_main_emp_inf_spearmen_0", 10)]
+        assert rows[-1]["event"] == "result" and rows[-1]["status"] == "completed"
+
+
+class TestFormationProbe:
+    # Our spearmen and archers against two enemy spearmen: "wall and arc" fits
+    # (the enemy has more infantry, we have the only archers, we attack).
+    SETUP = """
+        local spears = fake.unit('own_1', 'wh_main_emp_inf_spearmen_0', 0, -200)
+        local archers = fake.unit('own_2', 'wh2_dlc13_emp_inf_archers_0', 20, -200)
+        local e1 = fake.unit('enemy_1', 'wh_main_emp_inf_spearmen_0', 0, 100)
+        local e2 = fake.unit('enemy_2', 'wh_main_emp_inf_spearmen_0', 30, 100)
+        bm = fake.manager({{spears, archers}, {e1, e2}})
+        local function spear(id)
+            return {id = id, class = 'inf_mel', men = 120, commanding = false, range_m = 0, health = 8280,
+                armour = 30, melee_attack = 20, melee_defence = 34, shapes = {{ordered_m = 40, front_m = 39, depth_m = 8}}}
+        end
+        CONFIG = {build = 'test', speed = 20, tick_ms = 1000, deadline_s = 100, stall_ms = 900000,
+            settle_ms = 3000, stage_timeout_s = 20, hold_s = 10, role = 'attack',
+            own = {anchor = {x = 0, z = -150}, units = {spear('own_1'),
+                {id = 'own_2', class = 'inf_mis', men = 90, commanding = false, fire = 'arc', range_m = 130,
+                 health = 6210, missile_damage = 19, shapes = {{ordered_m = 20, front_m = 19, depth_m = 18}}}}},
+            enemy = {anchor = {x = 0, z = 150}, units = {spear('enemy_1'), spear('enemy_2')}, placements = {
+                {script_name = 'enemy_1', role = 'wall', x = 0, z = 150, bearing = 180, width = 30},
+                {script_name = 'enemy_2', role = 'wall', x = 30, z = 150, bearing = 180, width = 30}}}}
+        GLOBALS = {common = fake.common, battle_vector = fake.vector_type}
+    """
+
+    def test_plan_is_applied_and_stages_run(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            CONFIG.turn_test = true
+            local state = require('entries.formation_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 80 do bm:tick() end
+            assert(state.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        plan = next(r for r in rows if r["event"] == "plan")
+        assert plan["facing_source"] == "visible_enemy" and plan["plan"]["status"] == "ok"
+        assert plan["strategy"] == "wall_and_arc" and plan["plan"]["layout"] == "line_and_blocks"
+        stages = [r["stage"] for r in rows if r["event"] == "stage_snapshot"]
+        assert len([r for r in rows if r["event"] == "hold_sample"]) >= 10
+        assert stages == ["placed", "hold", "turn_right", "back_from_right", "turn_left", "back_from_left",
+                          "turn_right_in_place", "back_right_in_place", "turn_left_in_place", "back_left_in_place"]
+        assert any(r["event"] == "turn_sample" for r in rows)
+        assert rows[-1]["event"] == "result" and rows[-1]["status"] == "completed"
+
+    def test_default_run_only_places_and_holds_without_orders(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            CONFIG.hold_s = 5
+            local state = require('entries.formation_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 20 do bm:tick() end
+            assert(state.finished)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert [r["stage"] for r in rows if r["event"] == "stage_snapshot"] == ["placed", "hold"]
+        assert not any(r["event"] == "turn_sample" for r in rows)
+        assert rows[-1]["orders_after_placed"] == 0 and rows[-1]["status"] == "completed"
+
+    def test_no_fitting_strategy_is_an_error_not_a_guess(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            CONFIG.role = 'defend'
+            local state = require('entries.formation_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            bm:tick()
+            assert(state.finished and not state.active)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        plan = next(r for r in rows if r["event"] == "plan")
+        assert plan["status"] == "no_strategy" and plan["strategy"] == "none"
+        assert any(r["event"] == "error" and "No strategy" in r["message"] for r in rows)

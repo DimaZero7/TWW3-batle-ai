@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Map capture around the hamlet on The Moorlands Route (catchment_03) for
+     the obstacle task. Side 1: Empire spearmen outside the hamlet (their
+     can_reach_position per cell = where infantry can go). Side 2: a general
+     far away, only because a battle needs two armies. -->
+<battle>
+  <alliance id="0">
+    <army>
+      <faction>wh_main_emp_empire</faction>
+      <deployment_area>
+        <centre x="0" y="0"/><width metres="900"/><height metres="900"/><orientation radians="4.71"/>
+      </deployment_area>
+      <camera_start_position x="-84" y="700" z="-250"/>
+      <camera_target_position x="-84" y="530" z="-70"/>
+      <unit num_soldiers="120" script_name="obstacle_spears">
+        <unit_type type="wh_main_emp_inf_spearmen_0"/>
+        <position x="-84" y="-150"/><orientation radians="0"/><width metres="30"/>
+        <unit_experience level="0"/>
+      </unit>
+    </army>
+    <victory_condition><kill_or_rout_enemy_ignore_reinforcements/></victory_condition>
+    <rout_position x="600" y="0"/>
+  </alliance>
+  <alliance id="1">
+    <army>
+      <faction>wh_main_emp_empire</faction>
+      <deployment_area>
+        <centre x="0" y="0"/><width metres="900"/><height metres="900"/><orientation radians="1.57"/>
+      </deployment_area>
+      <camera_start_position x="-84" y="700" z="-250"/>
+      <camera_target_position x="-84" y="530" z="-70"/>
+      <unit num_soldiers="1" script_name="far_general">
+        <unit_type type="wh_main_emp_cha_general_0"/>
+        <position x="300" y="-400"/><orientation radians="1.57079632679"/><width metres="5"/>
+        <unit_experience level="0"/>
+        <general><name>Far away</name><star_rating level="1"/></general>
+      </unit>
+    </army>
+    <victory_condition><kill_or_rout_enemy_ignore_reinforcements/></victory_condition>
+    <rout_position x="-600" y="0"/>
+  </alliance>
+  <battle_description>
+    <time_of_day>day</time_of_day>
+    <season>Spring</season>
+    <precipitation_type>dry</precipitation_type>
+    <battle_script prepare_for_fade_in="false">script/battle/tww3_bai_map_capture/scenario.lua</battle_script>
+    <type>classic</type>
+    <duration>86400</duration>
+    <los_visibility_enabled>true</los_visibility_enabled>
+  </battle_description>
+  <weather>
+    <prevailing_wind x="1" y="0"/>
+    <environment_key>weather/battle/wh_day_desert_02.environment</environment_key>
+  </weather>
+  <sea_surface_name>wind_level_0</sea_surface_name>
+  <battle_map_definition>
+    <name>terrain\battles\wh3_dlc21_macro_emp_grasslands_01\</name>
+    <catchment_area>catchment_03</catchment_area>
+    <tile_map_position x="0.5" y="0.5"/>
+  </battle_map_definition>
+</battle>
