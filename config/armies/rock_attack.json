@@ -1,0 +1,48 @@
+{
+  "description": "The first example with a rock between the armies on The Moorlands Route, for the stepwise approach (apps.approach): the rock stands on the approach lane; start and end are open ground (3 m grid).",
+  "own": {
+    "role": "attack",
+    "anchor": [
+      -240,
+      0
+    ],
+    "units": [
+      {
+        "key": "wh_main_emp_cha_general_0",
+        "count": 1
+      },
+      {
+        "key": "wh_main_emp_inf_spearmen_0",
+        "count": 1
+      },
+      {
+        "key": "wh2_dlc13_emp_inf_archers_0",
+        "count": 4
+      }
+    ]
+  },
+  "enemy": {
+    "role": "defend",
+    "anchor": [
+      -240,
+      300
+    ],
+    "bearing": 180,
+    "units": [
+      {
+        "key": "wh_main_emp_cha_general_0",
+        "count": 1
+      },
+      {
+        "key": "wh_main_emp_inf_spearmen_0",
+        "count": 2
+      },
+      {
+        "key": "wh2_dlc13_emp_inf_archers_0",
+        "count": 2
+      }
+    ]
+  },
+  "map": "moorlands-route",
+  "approach": true
+}

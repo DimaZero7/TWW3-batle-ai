@@ -14,7 +14,10 @@ src/apps/alignment turns and shifts our army onto the axis when it is clearly
 off (config own.bearing sets a deliberately crooked start). With config "map",
 src/apps/mask builds the "can we stand here?" mask over the battlefield from
 the captured map (tools/sim/mapgrid.py) and checks our units fit and the lane
-straight ahead is free.
+straight ahead is free. With config "approach": true, the army then
+approaches in 50 m steps (src/apps/approach: one manoeuvre at a time,
+alignment first, stop 20 m short of the first shooters' reach, every step
+checked on the mask); every decision is kept in sides["approach"].
 
 Output (default research/analysis/formation/<army>/):
   plan.json  the Lua result for both sides, overlaps
@@ -143,6 +146,32 @@ class Planner:
                     code = m.encode(mask), fits = fits, lane = lane})
             end
         """)
+        self._path = self.lua.eval("""
+            function(field, reader, placements, advance, max_advance)
+                local m = require('apps.mask.services')
+                local ap = require('apps.approach.services')
+                local mask = m.new(m.grid(field))
+                m.fill(mask, reader)
+                local function fits_at(a)
+                    for _, p in ipairs(placements) do
+                        local b = math.rad(p.bearing)
+                        local moved = {x = p.x + math.sin(b) * a, z = p.z + math.cos(b) * a,
+                            bearing = p.bearing, front_m = p.front_m, depth_m = p.depth_m}
+                        if not m.fits(mask, moved).ok then return false end
+                    end
+                    return true
+                end
+                local function lane_free_at(a)
+                    return m.lane(mask, 0, field.own.width_m, field.own.front_m, field.own.front_m + a).free
+                end
+                -- Simple variant without the enemy army: search up to 20 m short of their front.
+                local limit = field.gap_m - ap.DEFAULTS.margin_m
+                return require('apps.core.json').encode(ap.choose_advance(advance, max_advance, fits_at, lane_free_at,
+                    3, limit))
+            end
+        """)
+        self.approach = self.lua.eval("require('apps.approach.services')")
+        self.alignment = self.lua.eval("require('apps.alignment.services')")
         self._strength = self.lua.eval("function(u) return require('apps.assessment.services').strength(u) end")
 
     def strength(self, unit):
@@ -164,6 +193,12 @@ class Planner:
         """apps.mask over the battlefield, read from a captured map."""
         return json.loads(self._mask(self.lua.table_from(field, recursive=True), grid.reader,
                                      self.lua.table_from(placements, recursive=True)))
+
+    def path(self, field, grid, placements, advance, max_advance):
+        """apps.approach.choose_advance on the mask: where the step ends (past an obstacle if needed)."""
+        reader = grid.reader if grid else (lambda x, z: (True, True))
+        return json.loads(self._path(self.lua.table_from(field, recursive=True), reader,
+                                     self.lua.table_from(placements, recursive=True), advance, max_advance))
 
     def battlefield(self, own_points, own_centre, enemy_points, enemy_centre):
         """apps.battlefield.frame between the two main groups."""
@@ -220,11 +255,16 @@ def seen_units(planner, placements, units_by_id):
              "strength": planner.strength(units_by_id[p["id"]]), "bearing": p["bearing"]} for p in placements]
 
 
-def see_battle(planner, own_placements, own_by_id, enemy_placements, enemy_by_id):
+def see_battle(planner, own_placements, own_by_id, enemy_placements, enemy_by_id, goal=None):
     """apps.vision for both simulated sides (all of the enemy is seen here), then
-    apps.battlefield between the two main groups. Returns (picture, field)."""
+    apps.battlefield between the two main groups. Returns (picture, field).
+    goal (x, z): march to a point instead (the enemy army is not considered):
+    the point stands in for the enemy's main group."""
     own = seen_units(planner, own_placements, own_by_id)
-    enemy = seen_units(planner, enemy_placements, enemy_by_id)
+    if goal:
+        enemy = [{"id": "goal", "points": [goal[0], goal[1]], "strength": 1}]
+    else:
+        enemy = seen_units(planner, enemy_placements, enemy_by_id)
     picture = planner.battle_picture(own, enemy, sum(u["strength"] for u in enemy))
     field = None
     if picture["own"].get("main") and picture["enemy"].get("main"):
@@ -250,6 +290,9 @@ def corners(p):
 
 def draw(path, sides, units_by_id, title):
     fig, ax = plt.subplots(figsize=(10, 11))
+    if sides.get("map_blocked"):
+        bx, bz = zip(*sides["map_blocked"])
+        ax.scatter(bx, bz, s=6, marker="s", c="#8c564b", alpha=0.35, lw=0)
     mask = sides.get("mask")
     if mask:
         g = mask["grid"]
@@ -282,6 +325,9 @@ def draw(path, sides, units_by_id, title):
                     f'ширина {2 * h:.0f} м (запас {field["margin_m"]:.0f} м)',
                     (min(q["x"] for q in c), min(q["z"] for q in c)), fontsize=8, xytext=(4, 4),
                     textcoords="offset points", color="#9467bd")
+    for placements in (sides.get("approach") or {}).get("trail", []):
+        for p in placements:
+            ax.add_patch(Polygon(corners(p), closed=True, fill=False, ec="#9467bd", lw=0.5, ls=":"))
     if sides.get("own_before"):
         for p in sides["own_before"]["placements"]:
             ax.add_patch(Polygon(corners(p), closed=True, fill=False, ec="#7f7f7f", lw=0.8, ls="--"))
@@ -324,7 +370,8 @@ def draw(path, sides, units_by_id, title):
                     fontsize=8, xytext=(8, -12), textcoords="offset points")
     ax.set_aspect("equal")
     ax.autoscale_view()
-    ax.set(xlabel="X, m", ylabel="Z, m", title=title)
+    ax.set(xlabel="X, m", ylabel="Z, m")
+    ax.set_title(title, fontsize=8)
     ax.grid(alpha=0.3)
     handles = [plt.Line2D([], [], color=c, lw=6, label=l) for l, c in
                (("стена (пехота)", COLORS["wall"]), ("стрелки навесом", COLORS["arc"]), ("лорд", COLORS["lord"]))]
@@ -357,7 +404,8 @@ def simulate(army, planner=None, params=None):
         own.update(status=plan["status"], strategy=plan["decision"]["strategy"], features=plan["features"],
                    decision=plan["decision"], anchor=list(anchor), bearing=bearing)
         # How we see the battle: groups of both sides and their main armies (apps.vision).
-        picture, field = see_battle(planner, own["placements"], own_by_id, sides["enemy"]["placements"], enemy_by_id)
+        picture, field = see_battle(planner, own["placements"], own_by_id, sides["enemy"]["placements"], enemy_by_id,
+                                    army.get("goal"))
         return own, picture, field
 
     # Start where the config says; own.bearing may set a deliberately crooked start.
@@ -375,9 +423,89 @@ def simulate(army, planner=None, params=None):
     sides["own"] = own
     sides["own"]["vision"], sides["enemy"]["vision"] = picture["own"], picture["enemy"]
     sides["battlefield"], sides["alignment"] = field, alignment
-    if field and army.get("map"):
-        sides["mask"] = planner.mask(field, MapGrid(army["map"]), own["placements"])
+    grid = MapGrid(army["map"]) if army.get("map") else None
+    if field and army.get("approach"):
+        own, picture, field = approach(planner, sides, own, picture, field, place, own_by_id, enemy_by_id, grid,
+                                       goal=army.get("goal"))
+        sides["own"] = own
+        sides["own"]["vision"], sides["enemy"]["vision"] = picture["own"], picture["enemy"]
+        sides["battlefield"] = field
+    if field and grid:
+        sides["mask"] = planner.mask(field, grid, own["placements"])
+        sides["map_blocked"] = grid.blocked_near(
+            [p for ps in [own["placements"], sides["enemy"]["placements"]] + (sides.get("approach") or {}).get("trail", [])
+             for p in ps], margin=60)
     return sides, own_by_id
+
+
+def _along(field, x, z):
+    b = math.radians(field["bearing"])
+    return (x - field["origin"]["x"]) * math.sin(b) + (z - field["origin"]["z"]) * math.cos(b)
+
+
+def _shooters(field, placements, by_id):
+    """{along, range_m} of every archer block (its middle) in the battlefield frame."""
+    out = []
+    for p in placements:
+        if p["role"] != "arc":
+            continue
+        b = math.radians(p["bearing"])
+        mx, mz = p["x"] - math.sin(b) * p["depth_m"] / 2, p["z"] - math.cos(b) * p["depth_m"] / 2
+        out.append({"along": _along(field, mx, mz), "range_m": by_id[p["id"]]["range_m"]})
+    return out
+
+
+WALK_MPS = 1.5  # walking pace of our infantry (roster), for the simulated clock
+
+
+def approach(planner, sides, own, picture, field, place, own_by_id, enemy_by_id, grid, max_decisions=30, goal=None):
+    """The commander loop of apps.approach in the simulation. Each manoeuvre ends
+    at once (placements are re-planned at the target) and the clock moves on by
+    its walking time, so the alignment governor's 20 s cooldown is respected."""
+    ap, al, lua = planner.approach, planner.alignment, planner.lua
+    commander, governor = ap.new_commander(), al.new_governor()
+    now, log, trail = 0, [], []
+    for _ in range(max_decisions):
+        own_sh = [] if goal else _shooters(field, own["placements"], own_by_id)
+        # Marching to a goal point: the enemy army is not considered (no reach).
+        enemy_sh = [] if goal else _shooters(field, sides["enemy"]["placements"], enemy_by_id)
+        own_reach = ap.reach_past_front(lua.table_from(own_sh, recursive=True), field["own"]["front_m"], 1)
+        enemy_reach = ap.reach_past_front(lua.table_from(enemy_sh, recursive=True), field["enemy"]["front_m"], -1)
+        stop = ap.stop_gap(own_reach, enemy_reach)
+        step = ap.next_step(field["gap_m"], stop)
+        check = planner.align(field, own["anchor"], own["bearing"], picture["enemy"].get("main"))["check"]
+        gov = governor.decide(now, lua.table_from(check, recursive=True), False)
+        path = None
+        if step.action == "step":
+            path = planner.path(field, grid, own["placements"], step.advance_m, field["gap_m"] - stop)
+        decision, reason = commander.decide(lua.table_from({
+            "align": check, "governor": gov, "path": path or {"ok": False, "reason": "no_step"},
+            "step": {"action": step.action, "advance_m": step.advance_m}}, recursive=True))
+        log.append({"t_s": now / 1000, "decision": decision, "reason": reason, "gap_m": round(field["gap_m"], 1),
+                    "stop_gap_m": round(stop, 1), "own_reach_m": round(own_reach, 1),
+                    "enemy_reach_m": round(enemy_reach, 1), "advance_m": step.advance_m,
+                    "path": path, "align": {k: check[k] for k in ("angle_off_deg", "offset_m", "needed")}})
+        if decision in ("hold", "blocked"):
+            break
+        if decision == "wait":
+            now += 5000
+            continue
+        trail.append(own["placements"])
+        if decision == "align":
+            target = planner.align(field, own["anchor"], own["bearing"], picture["enemy"].get("main"))["target"]
+            governor.record_order(now, lua.table_from(check, recursive=True))
+            anchor, bearing, walk = (target["anchor"]["x"], target["anchor"]["z"]), target["bearing"], 30
+        else:
+            b = math.radians(own["bearing"])
+            advance = path["advance_m"]
+            anchor = (own["anchor"][0] + math.sin(b) * advance, own["anchor"][1] + math.cos(b) * advance)
+            bearing, walk = own["bearing"], advance / WALK_MPS
+        commander.start(decision, now, None)
+        own, picture, field = place(anchor, bearing)
+        now += walk * 1000
+        commander.finish(now, "stopped")
+    sides["approach"] = {"log": log, "trail": trail, "final": log[-1] if log else None}
+    return own, picture, field
 
 
 def probe(army, speed, settle_ms, planner=None):
@@ -412,6 +540,9 @@ def probe(army, speed, settle_ms, planner=None):
             config["own"] = {"anchor": {"x": ax, "z": az}, "units": units}
             if "bearing" in army["own"]:
                 config["own"]["start_bearing"] = army["own"]["bearing"]
+            if army.get("goal"):
+                config["goal"] = {"x": army["goal"][0], "z": army["goal"][1]}
+            config["approach"] = bool(army.get("approach"))
             config["role"] = army["own"].get("role")
         else:
             config["enemy"] = {"anchor": {"x": ax, "z": az},
@@ -483,6 +614,17 @@ def main(argv=None):
                    f'\nих фронт нависает над нашим: слева {oh["left_m"]:.0f} м, справа {oh["right_m"]:.0f} м\n')
     else:
         aligned = ""
+    appr = sides.get("approach")
+    if appr and appr["final"]:
+        f = appr["final"]
+        steps = sum(1 for r in appr["log"] if r["decision"] == "approach")
+        detours = sum(1 for r in appr["log"] if r["decision"] == "approach" and (r["path"] or {}).get("detour"))
+        what = {"hold": "стоим на рубеже", "blocked": f'стоп: {f["reason"]}'}.get(f["decision"], f["decision"])
+        if detours:
+            what += f'; обходов препятствия: {detours} (обходит движок)'
+        aligned += (f'сближение скачками по 50 м: {steps} скачков, {what}; между фронтами {f["gap_m"]:.0f} м, '
+                    f'рубеж {f["stop_gap_m"]:.0f} м (лучники достают: наши {f["own_reach_m"]:.0f}, '
+                    f'их {f["enemy_reach_m"]:.0f} + 20)\n')
     mask = sides.get("mask")
     if mask:
         bad = [f["id"] for f in mask["fits"] if not f["ok"]]

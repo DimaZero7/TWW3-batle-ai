@@ -1,0 +1,1356 @@
+{
+  "enemy": {
+    "choice": {
+      "archer_aspect": 1.1222222222222,
+      "archer_front_m": 47.25623772811,
+      "archer_gap_m": 6.8562377281099,
+      "archer_row_gap_m": 9.0562377281099,
+      "archer_width": 20,
+      "failed": {},
+      "min_reach_m": 99.3,
+      "row_back_m": [
+        21.7
+      ],
+      "rows": 1,
+      "score": 1969.3,
+      "wall_depth_m": 18.7,
+      "wall_front_m": 29.6,
+      "wall_width": 15
+    },
+    "layout": "line_and_blocks",
+    "lord_side": 1,
+    "lord_side_reason": "default",
+    "options": [
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 47.25623772811,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": {},
+        "min_reach_m": 99.3,
+        "row_back_m": [
+          21.7
+        ],
+        "rows": 1,
+        "score": 1969.3,
+        "wall_depth_m": 18.7,
+        "wall_front_m": 29.6,
+        "wall_width": 15
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 47.25623772811,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": {},
+        "min_reach_m": 103.1,
+        "row_back_m": [
+          17.9
+        ],
+        "rows": 1,
+        "score": 1593.1,
+        "wall_depth_m": 14.9,
+        "wall_front_m": 37.8,
+        "wall_width": 20
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 47.25623772811,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": {},
+        "min_reach_m": 108.7,
+        "row_back_m": [
+          12.3
+        ],
+        "rows": 1,
+        "score": 1038.7,
+        "wall_depth_m": 9.3,
+        "wall_front_m": 57.8,
+        "wall_width": 30
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 20.2,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": {},
+        "min_reach_m": 81.64376227189,
+        "row_back_m": [
+          12.3,
+          39.35623772811
+        ],
+        "rows": 2,
+        "score": 1011.6437622719,
+        "wall_depth_m": 9.3,
+        "wall_front_m": 57.8,
+        "wall_width": 30
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 47.25623772811,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": {},
+        "min_reach_m": 110.3,
+        "row_back_m": [
+          10.7
+        ],
+        "rows": 1,
+        "score": 880.3,
+        "wall_depth_m": 7.7,
+        "wall_front_m": 78.2,
+        "wall_width": 40
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 20.2,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": {},
+        "min_reach_m": 83.24376227189,
+        "row_back_m": [
+          10.7,
+          37.75623772811
+        ],
+        "rows": 2,
+        "score": 853.24376227189,
+        "wall_depth_m": 7.7,
+        "wall_front_m": 78.2,
+        "wall_width": 40
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 47.25623772811,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": {},
+        "min_reach_m": 112,
+        "row_back_m": [
+          9
+        ],
+        "rows": 1,
+        "score": 712,
+        "wall_depth_m": 6,
+        "wall_front_m": 116.8,
+        "wall_width": 60
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 20.2,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": {},
+        "min_reach_m": 84.94376227189,
+        "row_back_m": [
+          9,
+          36.05623772811
+        ],
+        "rows": 2,
+        "score": 684.94376227189,
+        "wall_depth_m": 6,
+        "wall_front_m": 116.8,
+        "wall_width": 60
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 47.25623772811,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": {},
+        "min_reach_m": 112.5,
+        "row_back_m": [
+          8.5
+        ],
+        "rows": 1,
+        "score": 662.5,
+        "wall_depth_m": 5.5,
+        "wall_front_m": 157.8,
+        "wall_width": 80
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 20.2,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": {},
+        "min_reach_m": 85.44376227189,
+        "row_back_m": [
+          8.5,
+          35.55623772811
+        ],
+        "rows": 2,
+        "score": 635.44376227189,
+        "wall_depth_m": 5.5,
+        "wall_front_m": 157.8,
+        "wall_width": 80
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 47.25623772811,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": [
+          "archers_wider_than_wall"
+        ],
+        "min_reach_m": 81,
+        "row_back_m": [
+          40
+        ],
+        "rows": 1,
+        "score": 3781,
+        "wall_depth_m": 37,
+        "wall_front_m": 16.6,
+        "wall_width": 8
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 20.2,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": [
+          "reach_too_short"
+        ],
+        "min_reach_m": 53.94376227189,
+        "row_back_m": [
+          40,
+          67.05623772811
+        ],
+        "rows": 2,
+        "score": 3753.9437622719,
+        "wall_depth_m": 37,
+        "wall_front_m": 16.6,
+        "wall_width": 8
+      }
+    ],
+    "placements": [
+      {
+        "along_m": -7.65,
+        "back_m": 0,
+        "bearing": 180,
+        "depth_m": 18.7,
+        "front_m": 14.3,
+        "id": "wh_main_emp_inf_spearmen_0#1",
+        "role": "wall",
+        "row": 0,
+        "width": 15,
+        "x": 87.65,
+        "z": 130
+      },
+      {
+        "along_m": 7.65,
+        "back_m": 0,
+        "bearing": 180,
+        "depth_m": 18.7,
+        "front_m": 14.3,
+        "id": "wh_main_emp_inf_spearmen_0#2",
+        "role": "wall",
+        "row": 0,
+        "width": 15,
+        "x": 72.35,
+        "z": 130
+      },
+      {
+        "along_m": -13.528118864055,
+        "back_m": 21.7,
+        "bearing": 180,
+        "depth_m": 18,
+        "front_m": 20.2,
+        "id": "wh2_dlc13_emp_inf_archers_0#1",
+        "role": "arc",
+        "row": 1,
+        "width": 20,
+        "x": 93.528118864055,
+        "z": 151.7
+      },
+      {
+        "along_m": 13.528118864055,
+        "back_m": 21.7,
+        "bearing": 180,
+        "depth_m": 18,
+        "front_m": 20.2,
+        "id": "wh2_dlc13_emp_inf_archers_0#2",
+        "role": "arc",
+        "row": 1,
+        "width": 20,
+        "x": 66.471881135945,
+        "z": 151.7
+      },
+      {
+        "along_m": 18.8,
+        "back_m": 0,
+        "bearing": 180,
+        "depth_m": 1,
+        "front_m": 1,
+        "id": "wh_main_emp_cha_general_0#1",
+        "role": "lord",
+        "row": 0,
+        "x": 61.2,
+        "z": 130
+      }
+    ],
+    "roles": {
+      "arc": 2,
+      "lord": 1,
+      "wall": 2
+    },
+    "status": "ok",
+    "unplaced": {},
+    "vision": {
+      "groups": [
+        {
+          "bounds": {
+            "max_x": 102.61811886406,
+            "max_z": 168.7,
+            "min_x": 57.381881135945,
+            "min_z": 130
+          },
+          "centre": {
+            "x": 76.228987308068,
+            "z": 145.12808200941
+          },
+          "facing": 180,
+          "ids": [
+            "wh_main_emp_inf_spearmen_0#1",
+            "wh_main_emp_inf_spearmen_0#2",
+            "wh2_dlc13_emp_inf_archers_0#1",
+            "wh2_dlc13_emp_inf_archers_0#2",
+            "wh_main_emp_cha_general_0#1"
+          ],
+          "radius_m": 35.383916996771,
+          "strength": 20280.6
+        }
+      ],
+      "link_gap_m": 30,
+      "main": {
+        "bounds": {
+          "max_x": 102.61811886406,
+          "max_z": 168.7,
+          "min_x": 57.381881135945,
+          "min_z": 130
+        },
+        "centre": {
+          "x": 76.228987308068,
+          "z": 145.12808200941
+        },
+        "facing": 180,
+        "ids": [
+          "wh_main_emp_inf_spearmen_0#1",
+          "wh_main_emp_inf_spearmen_0#2",
+          "wh2_dlc13_emp_inf_archers_0#1",
+          "wh2_dlc13_emp_inf_archers_0#2",
+          "wh_main_emp_cha_general_0#1"
+        ],
+        "radius_m": 35.383916996771,
+        "strength": 20280.6
+      },
+      "seen_share": 1
+    }
+  },
+  "own": {
+    "choice": {
+      "archer_aspect": 1.1222222222222,
+      "archer_front_m": 47.25623772811,
+      "archer_gap_m": 6.8562377281099,
+      "archer_row_gap_m": 9.0562377281099,
+      "archer_width": 20,
+      "failed": {},
+      "min_reach_m": 81.64376227189,
+      "row_back_m": [
+        12.3,
+        39.35623772811
+      ],
+      "rows": 2,
+      "score": 1011.6437622719,
+      "wall_depth_m": 9.3,
+      "wall_front_m": 28.4,
+      "wall_width": 30
+    },
+    "layout": "line_and_blocks",
+    "lord_side": -1,
+    "lord_side_reason": "enemy_lord",
+    "options": [
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 47.25623772811,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": {},
+        "min_reach_m": 81.64376227189,
+        "row_back_m": [
+          12.3,
+          39.35623772811
+        ],
+        "rows": 2,
+        "score": 1011.6437622719,
+        "wall_depth_m": 9.3,
+        "wall_front_m": 28.4,
+        "wall_width": 30
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 47.25623772811,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": {},
+        "min_reach_m": 83.24376227189,
+        "row_back_m": [
+          10.7,
+          37.75623772811
+        ],
+        "rows": 2,
+        "score": 853.24376227189,
+        "wall_depth_m": 7.7,
+        "wall_front_m": 38.6,
+        "wall_width": 40
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 47.25623772811,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": {},
+        "min_reach_m": 84.94376227189,
+        "row_back_m": [
+          9,
+          36.05623772811
+        ],
+        "rows": 2,
+        "score": 684.94376227189,
+        "wall_depth_m": 6,
+        "wall_front_m": 57.9,
+        "wall_width": 60
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 47.25623772811,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": {},
+        "min_reach_m": 85.44376227189,
+        "row_back_m": [
+          8.5,
+          35.55623772811
+        ],
+        "rows": 2,
+        "score": 635.44376227189,
+        "wall_depth_m": 5.5,
+        "wall_front_m": 78.4,
+        "wall_width": 80
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 101.36871318433,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": [
+          "archers_wider_than_wall"
+        ],
+        "min_reach_m": 81,
+        "row_back_m": [
+          40
+        ],
+        "rows": 1,
+        "score": 3781,
+        "wall_depth_m": 37,
+        "wall_front_m": 7.8,
+        "wall_width": 8
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 101.36871318433,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": [
+          "archers_wider_than_wall"
+        ],
+        "min_reach_m": 87.3,
+        "row_back_m": [
+          33.7
+        ],
+        "rows": 1,
+        "score": 3157.3,
+        "wall_depth_m": 30.7,
+        "wall_front_m": 8.9,
+        "wall_width": 10
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 101.36871318433,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": [
+          "archers_wider_than_wall"
+        ],
+        "min_reach_m": 99.3,
+        "row_back_m": [
+          21.7
+        ],
+        "rows": 1,
+        "score": 1969.3,
+        "wall_depth_m": 18.7,
+        "wall_front_m": 14.3,
+        "wall_width": 15
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 101.36871318433,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": [
+          "archers_wider_than_wall"
+        ],
+        "min_reach_m": 103.1,
+        "row_back_m": [
+          17.9
+        ],
+        "rows": 1,
+        "score": 1593.1,
+        "wall_depth_m": 14.9,
+        "wall_front_m": 18.4,
+        "wall_width": 20
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 101.36871318433,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": [
+          "archers_wider_than_wall"
+        ],
+        "min_reach_m": 108.7,
+        "row_back_m": [
+          12.3
+        ],
+        "rows": 1,
+        "score": 1038.7,
+        "wall_depth_m": 9.3,
+        "wall_front_m": 28.4,
+        "wall_width": 30
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 101.36871318433,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": [
+          "archers_wider_than_wall"
+        ],
+        "min_reach_m": 110.3,
+        "row_back_m": [
+          10.7
+        ],
+        "rows": 1,
+        "score": 880.3,
+        "wall_depth_m": 7.7,
+        "wall_front_m": 38.6,
+        "wall_width": 40
+      },
+      {
+        "archer_aspect": 1.1222222222222,
+        "archer_front_m": 101.36871318433,
+        "archer_gap_m": 6.8562377281099,
+        "archer_row_gap_m": 9.0562377281099,
+        "archer_width": 20,
+        "failed": [
+          "archers_wider_than_wall"
+        ],
+        "min_reach_m": 112,
+        "row_back_m": [
+          9
+        ],
+        "rows": 1,
+        "score": 712,
+        "wall_depth_m": 6,
+        "wall_front_m": 57.9,
+        "wall_width": 60
+      },
+      {
+        "archer_aspect": 2.3359375,
+        "archer_front_m": 62.424606069867,
+        "archer_gap_m": 2.6246060698666,
+        "archer_row_gap_m": 19.724606069867,
+        "archer_width": 30,
+        "failed": [
+          "archers_not_square"
+        ],
+        "min_reach_m": 82.075393930133,
+        "row_back_m": [
+          9,
+          41.524606069867
+        ],
+        "rows": 2,
+        "score": 682.07539393013,
+        "wall_depth_m": 6,
+        "wall_front_m": 57.9,
+        "wall_width": 60
+      }
+    ],
+    "overlaps": {},
+    "placements": [
+      {
+        "along_m": 0,
+        "back_m": 0,
+        "bearing": 0,
+        "depth_m": 9.3,
+        "front_m": 28.4,
+        "id": "wh_main_emp_inf_spearmen_0#1",
+        "role": "wall",
+        "row": 0,
+        "width": 30,
+        "x": 80,
+        "z": 1.3126252381819
+      },
+      {
+        "along_m": -13.528118864055,
+        "back_m": 12.3,
+        "bearing": 0,
+        "depth_m": 18,
+        "front_m": 20.2,
+        "id": "wh2_dlc13_emp_inf_archers_0#1",
+        "role": "arc",
+        "row": 1,
+        "width": 20,
+        "x": 66.471881135945,
+        "z": -10.987374761818
+      },
+      {
+        "along_m": 13.528118864055,
+        "back_m": 12.3,
+        "bearing": 0,
+        "depth_m": 18,
+        "front_m": 20.2,
+        "id": "wh2_dlc13_emp_inf_archers_0#2",
+        "role": "arc",
+        "row": 1,
+        "width": 20,
+        "x": 93.528118864055,
+        "z": -10.987374761818
+      },
+      {
+        "along_m": -13.528118864055,
+        "back_m": 39.35623772811,
+        "bearing": 0,
+        "depth_m": 18,
+        "front_m": 20.2,
+        "id": "wh2_dlc13_emp_inf_archers_0#3",
+        "role": "arc",
+        "row": 2,
+        "width": 20,
+        "x": 66.471881135945,
+        "z": -38.043612489928
+      },
+      {
+        "along_m": 13.528118864055,
+        "back_m": 39.35623772811,
+        "bearing": 0,
+        "depth_m": 18,
+        "front_m": 20.2,
+        "id": "wh2_dlc13_emp_inf_archers_0#4",
+        "role": "arc",
+        "row": 2,
+        "width": 20,
+        "x": 93.528118864055,
+        "z": -38.043612489928
+      },
+      {
+        "along_m": -18.2,
+        "back_m": 0,
+        "bearing": 0,
+        "depth_m": 1,
+        "front_m": 1,
+        "id": "wh_main_emp_cha_general_0#1",
+        "role": "lord",
+        "row": 0,
+        "x": 61.8,
+        "z": 1.3126252381819
+      }
+    ],
+    "roles": {
+      "arc": 4,
+      "lord": 1,
+      "wall": 1
+    },
+    "status": "ok",
+    "unplaced": {},
+    "strategy": "wall_and_arc",
+    "features": {
+      "enemy": {
+        "arc_share": 1,
+        "arc_shooters": 2,
+        "count": {
+          "infantry": 2,
+          "lord": 1,
+          "other": 0,
+          "shooter": 2
+        },
+        "infantry_armour": 30,
+        "melee_power": 8942.4,
+        "ranged_power": 3420
+      },
+      "melee_ratio": 0.5,
+      "own": {
+        "arc_share": 1,
+        "arc_shooters": 4,
+        "count": {
+          "infantry": 1,
+          "lord": 1,
+          "other": 0,
+          "shooter": 4
+        },
+        "infantry_armour": 30,
+        "melee_power": 4471.2,
+        "ranged_power": 6840
+      },
+      "ranged_ratio": 2,
+      "role": "attack"
+    },
+    "decision": {
+      "candidates": [
+        {
+          "conditions": [
+            {
+              "id": "enemy_infantry_stronger",
+              "ok": true,
+              "value": {
+                "enemy": 8942.4,
+                "own": 4471.2
+              }
+            },
+            {
+              "id": "own_infantry_to_hold",
+              "ok": true,
+              "value": 1
+            },
+            {
+              "id": "more_archers",
+              "ok": true,
+              "value": {
+                "enemy": 3420,
+                "own": 6840
+              }
+            },
+            {
+              "id": "archers_pierce",
+              "ok": true,
+              "value": 30
+            },
+            {
+              "id": "arc_fire",
+              "ok": true,
+              "value": 1
+            },
+            {
+              "id": "we_attack",
+              "ok": true,
+              "value": "attack"
+            }
+          ],
+          "failed": {},
+          "key": "wall_and_arc",
+          "score": 2
+        }
+      ],
+      "formation_params": {},
+      "layout": "line_and_blocks",
+      "roles": {
+        "wh2_dlc13_emp_inf_archers_0#1": "arc",
+        "wh2_dlc13_emp_inf_archers_0#2": "arc",
+        "wh2_dlc13_emp_inf_archers_0#3": "arc",
+        "wh2_dlc13_emp_inf_archers_0#4": "arc",
+        "wh_main_emp_cha_general_0#1": "lord",
+        "wh_main_emp_inf_spearmen_0#1": "wall"
+      },
+      "strategy": "wall_and_arc"
+    },
+    "anchor": [
+      80.0,
+      1.3126252381818517
+    ],
+    "bearing": 0,
+    "vision": {
+      "groups": [
+        {
+          "bounds": {
+            "max_x": 102.61811886406,
+            "max_z": 1.3126252381819,
+            "min_x": 57.381881135945,
+            "min_z": -55.043612489928
+          },
+          "centre": {
+            "x": 76.69796435403,
+            "z": -21.446662585055
+          },
+          "facing": 0,
+          "ids": [
+            "wh_main_emp_inf_spearmen_0#1",
+            "wh2_dlc13_emp_inf_archers_0#1",
+            "wh2_dlc13_emp_inf_archers_0#2",
+            "wh2_dlc13_emp_inf_archers_0#3",
+            "wh2_dlc13_emp_inf_archers_0#4",
+            "wh_main_emp_cha_general_0#1"
+          ],
+          "radius_m": 42.433588732679,
+          "strength": 23079.6
+        }
+      ],
+      "link_gap_m": 30,
+      "main": {
+        "bounds": {
+          "max_x": 102.61811886406,
+          "max_z": 1.3126252381819,
+          "min_x": 57.381881135945,
+          "min_z": -55.043612489928
+        },
+        "centre": {
+          "x": 76.69796435403,
+          "z": -21.446662585055
+        },
+        "facing": 0,
+        "ids": [
+          "wh_main_emp_inf_spearmen_0#1",
+          "wh2_dlc13_emp_inf_archers_0#1",
+          "wh2_dlc13_emp_inf_archers_0#2",
+          "wh2_dlc13_emp_inf_archers_0#3",
+          "wh2_dlc13_emp_inf_archers_0#4",
+          "wh_main_emp_cha_general_0#1"
+        ],
+        "radius_m": 42.433588732679,
+        "strength": 23079.6
+      },
+      "seen_share": 1
+    }
+  },
+  "battlefield": {
+    "bearing": 359.83868902521,
+    "centres_m": 166.57540477568,
+    "corners": [
+      {
+        "x": 10.337630360045,
+        "z": -55.30342036779
+      },
+      {
+        "x": 143.24788647869,
+        "z": -54.929222829956
+      },
+      {
+        "x": 142.61760176876,
+        "z": 168.93997393224
+      },
+      {
+        "x": 9.7073456501088,
+        "z": 168.56577639441
+      }
+    ],
+    "enemy": {
+      "back_m": 190.2002915611,
+      "front_m": 151.48969539239,
+      "left_m": -18.82571346867,
+      "right_m": 26.455391439148,
+      "width_m": 45.281104907819
+    },
+    "gap_m": 128.68855398297,
+    "half_width_m": 66.455391439148,
+    "margin_m": 40,
+    "origin": {
+      "x": 76.69796435403,
+      "z": -21.446662585055
+    },
+    "own": {
+      "back_m": -33.669792455874,
+      "front_m": 22.801141409418,
+      "left_m": -19.41059564761,
+      "right_m": 25.946683497706,
+      "width_m": 45.357279145316
+    },
+    "status": "ok"
+  },
+  "alignment": {
+    "check": {
+      "angle_off_deg": 0,
+      "max_angle_deg": 10,
+      "max_offset_m": 15,
+      "needed": false,
+      "offset_m": 3.771012691932,
+      "reasons": {},
+      "source": "enemy_facing"
+    },
+    "overhang": {
+      "left_m": -0.526117633458,
+      "right_m": 0.488564462327
+    },
+    "target": {
+      "along_m": -315.12808200941,
+      "anchor": {
+        "x": 76.228987308068,
+        "z": -170
+      },
+      "bearing": 0,
+      "source": "enemy_facing"
+    }
+  },
+  "approach": {
+    "log": [
+      {
+        "t_s": 0.0,
+        "decision": "approach",
+        "reason": "step",
+        "gap_m": 300.0,
+        "stop_gap_m": 128.7,
+        "own_reach_m": 108.7,
+        "enemy_reach_m": 99.3,
+        "advance_m": 50,
+        "path": {
+          "does_not_fit": {},
+          "lane": {
+            "free": true
+          },
+          "ok": true
+        },
+        "align": {
+          "angle_off_deg": 0,
+          "offset_m": 3.771012691932,
+          "needed": false
+        }
+      },
+      {
+        "t_s": 33.333333333333336,
+        "decision": "approach",
+        "reason": "step",
+        "gap_m": 250.0,
+        "stop_gap_m": 128.7,
+        "own_reach_m": 108.7,
+        "enemy_reach_m": 99.4,
+        "advance_m": 50,
+        "path": {
+          "does_not_fit": {},
+          "lane": {
+            "free": true
+          },
+          "ok": true
+        },
+        "align": {
+          "angle_off_deg": 0,
+          "offset_m": 3.771012691932,
+          "needed": false
+        }
+      },
+      {
+        "t_s": 66.66666666666667,
+        "decision": "approach",
+        "reason": "step",
+        "gap_m": 200.0,
+        "stop_gap_m": 128.7,
+        "own_reach_m": 108.7,
+        "enemy_reach_m": 99.4,
+        "advance_m": 50,
+        "path": {
+          "does_not_fit": {},
+          "lane": {
+            "free": true
+          },
+          "ok": true
+        },
+        "align": {
+          "angle_off_deg": 0,
+          "offset_m": 3.771012691932,
+          "needed": false
+        }
+      },
+      {
+        "t_s": 100.0,
+        "decision": "approach",
+        "reason": "step",
+        "gap_m": 150.0,
+        "stop_gap_m": 128.7,
+        "own_reach_m": 108.7,
+        "enemy_reach_m": 99.4,
+        "advance_m": 21.31262523818185,
+        "path": {
+          "does_not_fit": {},
+          "lane": {
+            "free": true
+          },
+          "ok": true
+        },
+        "align": {
+          "angle_off_deg": 0,
+          "offset_m": 3.771012691932,
+          "needed": false
+        }
+      },
+      {
+        "t_s": 114.20841682545456,
+        "decision": "hold",
+        "reason": "at_stop_line",
+        "gap_m": 128.7,
+        "stop_gap_m": 128.7,
+        "own_reach_m": 108.7,
+        "enemy_reach_m": 99.4,
+        "advance_m": null,
+        "path": null,
+        "align": {
+          "angle_off_deg": 0,
+          "offset_m": 3.771012691932,
+          "needed": false
+        }
+      }
+    ],
+    "trail": [
+      [
+        {
+          "along_m": 0,
+          "back_m": 0,
+          "bearing": 0,
+          "depth_m": 9.3,
+          "front_m": 28.4,
+          "id": "wh_main_emp_inf_spearmen_0#1",
+          "role": "wall",
+          "row": 0,
+          "width": 30,
+          "x": 80,
+          "z": -170
+        },
+        {
+          "along_m": -13.528118864055,
+          "back_m": 12.3,
+          "bearing": 0,
+          "depth_m": 18,
+          "front_m": 20.2,
+          "id": "wh2_dlc13_emp_inf_archers_0#1",
+          "role": "arc",
+          "row": 1,
+          "width": 20,
+          "x": 66.471881135945,
+          "z": -182.3
+        },
+        {
+          "along_m": 13.528118864055,
+          "back_m": 12.3,
+          "bearing": 0,
+          "depth_m": 18,
+          "front_m": 20.2,
+          "id": "wh2_dlc13_emp_inf_archers_0#2",
+          "role": "arc",
+          "row": 1,
+          "width": 20,
+          "x": 93.528118864055,
+          "z": -182.3
+        },
+        {
+          "along_m": -13.528118864055,
+          "back_m": 39.35623772811,
+          "bearing": 0,
+          "depth_m": 18,
+          "front_m": 20.2,
+          "id": "wh2_dlc13_emp_inf_archers_0#3",
+          "role": "arc",
+          "row": 2,
+          "width": 20,
+          "x": 66.471881135945,
+          "z": -209.35623772811
+        },
+        {
+          "along_m": 13.528118864055,
+          "back_m": 39.35623772811,
+          "bearing": 0,
+          "depth_m": 18,
+          "front_m": 20.2,
+          "id": "wh2_dlc13_emp_inf_archers_0#4",
+          "role": "arc",
+          "row": 2,
+          "width": 20,
+          "x": 93.528118864055,
+          "z": -209.35623772811
+        },
+        {
+          "along_m": -18.2,
+          "back_m": 0,
+          "bearing": 0,
+          "depth_m": 1,
+          "front_m": 1,
+          "id": "wh_main_emp_cha_general_0#1",
+          "role": "lord",
+          "row": 0,
+          "x": 61.8,
+          "z": -170
+        }
+      ],
+      [
+        {
+          "along_m": 0,
+          "back_m": 0,
+          "bearing": 0,
+          "depth_m": 9.3,
+          "front_m": 28.4,
+          "id": "wh_main_emp_inf_spearmen_0#1",
+          "role": "wall",
+          "row": 0,
+          "width": 30,
+          "x": 80,
+          "z": -120
+        },
+        {
+          "along_m": -13.528118864055,
+          "back_m": 12.3,
+          "bearing": 0,
+          "depth_m": 18,
+          "front_m": 20.2,
+          "id": "wh2_dlc13_emp_inf_archers_0#1",
+          "role": "arc",
+          "row": 1,
+          "width": 20,
+          "x": 66.471881135945,
+          "z": -132.3
+        },
+        {
+          "along_m": 13.528118864055,
+          "back_m": 12.3,
+          "bearing": 0,
+          "depth_m": 18,
+          "front_m": 20.2,
+          "id": "wh2_dlc13_emp_inf_archers_0#2",
+          "role": "arc",
+          "row": 1,
+          "width": 20,
+          "x": 93.528118864055,
+          "z": -132.3
+        },
+        {
+          "along_m": -13.528118864055,
+          "back_m": 39.35623772811,
+          "bearing": 0,
+          "depth_m": 18,
+          "front_m": 20.2,
+          "id": "wh2_dlc13_emp_inf_archers_0#3",
+          "role": "arc",
+          "row": 2,
+          "width": 20,
+          "x": 66.471881135945,
+          "z": -159.35623772811
+        },
+        {
+          "along_m": 13.528118864055,
+          "back_m": 39.35623772811,
+          "bearing": 0,
+          "depth_m": 18,
+          "front_m": 20.2,
+          "id": "wh2_dlc13_emp_inf_archers_0#4",
+          "role": "arc",
+          "row": 2,
+          "width": 20,
+          "x": 93.528118864055,
+          "z": -159.35623772811
+        },
+        {
+          "along_m": -18.2,
+          "back_m": 0,
+          "bearing": 0,
+          "depth_m": 1,
+          "front_m": 1,
+          "id": "wh_main_emp_cha_general_0#1",
+          "role": "lord",
+          "row": 0,
+          "x": 61.8,
+          "z": -120
+        }
+      ],
+      [
+        {
+          "along_m": 0,
+          "back_m": 0,
+          "bearing": 0,
+          "depth_m": 9.3,
+          "front_m": 28.4,
+          "id": "wh_main_emp_inf_spearmen_0#1",
+          "role": "wall",
+          "row": 0,
+          "width": 30,
+          "x": 80,
+          "z": -70
+        },
+        {
+          "along_m": -13.528118864055,
+          "back_m": 12.3,
+          "bearing": 0,
+          "depth_m": 18,
+          "front_m": 20.2,
+          "id": "wh2_dlc13_emp_inf_archers_0#1",
+          "role": "arc",
+          "row": 1,
+          "width": 20,
+          "x": 66.471881135945,
+          "z": -82.3
+        },
+        {
+          "along_m": 13.528118864055,
+          "back_m": 12.3,
+          "bearing": 0,
+          "depth_m": 18,
+          "front_m": 20.2,
+          "id": "wh2_dlc13_emp_inf_archers_0#2",
+          "role": "arc",
+          "row": 1,
+          "width": 20,
+          "x": 93.528118864055,
+          "z": -82.3
+        },
+        {
+          "along_m": -13.528118864055,
+          "back_m": 39.35623772811,
+          "bearing": 0,
+          "depth_m": 18,
+          "front_m": 20.2,
+          "id": "wh2_dlc13_emp_inf_archers_0#3",
+          "role": "arc",
+          "row": 2,
+          "width": 20,
+          "x": 66.471881135945,
+          "z": -109.35623772811
+        },
+        {
+          "along_m": 13.528118864055,
+          "back_m": 39.35623772811,
+          "bearing": 0,
+          "depth_m": 18,
+          "front_m": 20.2,
+          "id": "wh2_dlc13_emp_inf_archers_0#4",
+          "role": "arc",
+          "row": 2,
+          "width": 20,
+          "x": 93.528118864055,
+          "z": -109.35623772811
+        },
+        {
+          "along_m": -18.2,
+          "back_m": 0,
+          "bearing": 0,
+          "depth_m": 1,
+          "front_m": 1,
+          "id": "wh_main_emp_cha_general_0#1",
+          "role": "lord",
+          "row": 0,
+          "x": 61.8,
+          "z": -70
+        }
+      ],
+      [
+        {
+          "along_m": 0,
+          "back_m": 0,
+          "bearing": 0,
+          "depth_m": 9.3,
+          "front_m": 28.4,
+          "id": "wh_main_emp_inf_spearmen_0#1",
+          "role": "wall",
+          "row": 0,
+          "width": 30,
+          "x": 80,
+          "z": -20
+        },
+        {
+          "along_m": -13.528118864055,
+          "back_m": 12.3,
+          "bearing": 0,
+          "depth_m": 18,
+          "front_m": 20.2,
+          "id": "wh2_dlc13_emp_inf_archers_0#1",
+          "role": "arc",
+          "row": 1,
+          "width": 20,
+          "x": 66.471881135945,
+          "z": -32.3
+        },
+        {
+          "along_m": 13.528118864055,
+          "back_m": 12.3,
+          "bearing": 0,
+          "depth_m": 18,
+          "front_m": 20.2,
+          "id": "wh2_dlc13_emp_inf_archers_0#2",
+          "role": "arc",
+          "row": 1,
+          "width": 20,
+          "x": 93.528118864055,
+          "z": -32.3
+        },
+        {
+          "along_m": -13.528118864055,
+          "back_m": 39.35623772811,
+          "bearing": 0,
+          "depth_m": 18,
+          "front_m": 20.2,
+          "id": "wh2_dlc13_emp_inf_archers_0#3",
+          "role": "arc",
+          "row": 2,
+          "width": 20,
+          "x": 66.471881135945,
+          "z": -59.35623772811
+        },
+        {
+          "along_m": 13.528118864055,
+          "back_m": 39.35623772811,
+          "bearing": 0,
+          "depth_m": 18,
+          "front_m": 20.2,
+          "id": "wh2_dlc13_emp_inf_archers_0#4",
+          "role": "arc",
+          "row": 2,
+          "width": 20,
+          "x": 93.528118864055,
+          "z": -59.35623772811
+        },
+        {
+          "along_m": -18.2,
+          "back_m": 0,
+          "bearing": 0,
+          "depth_m": 1,
+          "front_m": 1,
+          "id": "wh_main_emp_cha_general_0#1",
+          "role": "lord",
+          "row": 0,
+          "x": 61.8,
+          "z": -20
+        }
+      ]
+    ],
+    "final": {
+      "t_s": 114.20841682545456,
+      "decision": "hold",
+      "reason": "at_stop_line",
+      "gap_m": 128.7,
+      "stop_gap_m": 128.7,
+      "own_reach_m": 108.7,
+      "enemy_reach_m": 99.4,
+      "advance_m": null,
+      "path": null,
+      "align": {
+        "angle_off_deg": 0,
+        "offset_m": 3.771012691932,
+        "needed": false
+      }
+    }
+  }
+}

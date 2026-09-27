@@ -149,6 +149,11 @@ planned again opposite the enemy and the units **walk** there (`alignment`,
 `alignment_after`). While the enemy is unseen it waits. During the hold the
 governor only answers every 5 s (`governor`).
 
+With `approach` in the army: stage `approach`, the [approach](approach.md)
+commander (one action at a time, alignment first, 50 m steps, a place past an
+obstacle); events `approach_decision`, `approach_sample`, `approach_manoeuvre`.
+With `goal`: march to a point instead of the enemy.
+
 <a id="enemy_layout"></a>
 
 ## enemy_layout — how the game AI stands

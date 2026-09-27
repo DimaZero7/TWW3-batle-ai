@@ -23,6 +23,7 @@
 | [battlefield](../apps/battlefield.md) | `services` | Поле боя между основными группами: ось, передние линии, запас 40 м | новое |
 | [alignment](../apps/alignment.md) | `services` | Выравнивание армии напротив основной группы врага (без сближения) | новое |
 | [mask](../apps/mask.md) | `services`, `adapter` | Маска «можно ли тут встать» на поле боя, клетка 3 м | новое |
+| [approach](../apps/approach.md) | `services` | Сближение скачками по 50 м до рубежа; одно действие за раз, выравнивание прежде | новое |
 | [units](../apps/units.md) | `state_adapter`, `range_adapter`, `card_adapter`, `formation_adapter`, `contract` | 68 полей состояния своего отряда, дальность стрельбы, карточка и профиль отряда, движение и бойцы, границы ширины строя | `units/state.lua`, `units/range.lua` |
 | [intel](../apps/intel.md) | `adapter`, `services` | Видимость врага, память последней известной позиции | `visibility/reader.lua` |
 | [orders](../apps/orders.md) | `contract`, `adapter`, `planner_adapter` | Форма и проверка команд, проверенные в бою вызовы приказов | `validate` из `policy_host.lua`, вызовы из `harness`/`arena` и `commands.md` |

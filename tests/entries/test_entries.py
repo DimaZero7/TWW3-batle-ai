@@ -454,3 +454,22 @@ class TestEnemyLayout:
         assert pic["seen"] == 1 and pic["enemy"]["groups"][0]["ids"] == ["enemy_1"]
         assert pic["enemy"]["seen_share"] == 0.5
         assert pic["field"]["status"] == "ok" and abs(pic["field"]["centres_m"] - 450) < 1
+
+
+def test_formation_probe_approach_to_a_goal_one_manoeuvre_at_a_time(lua, tmp_path):
+    lua.execute(TestFormationProbe.SETUP + """
+        CONFIG.approach, CONFIG.goal = true, {x = 0, z = 60}
+        CONFIG.manoeuvre_timeout_s, CONFIG.approach_timeout_s, CONFIG.hold_s = 60, 300, 3
+        local state = require('entries.formation_probe').main(bm, CONFIG, GLOBALS)
+        bm:pump()
+        for _ = 1, 200 do bm:tick() end
+        assert(state.finished)
+    """)
+    rows = events(tmp_path / "tww3_bai_events.jsonl")
+    assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+    decisions = [r["decision"] for r in rows if r["event"] == "approach_decision"]
+    assert decisions and decisions[-1] == "hold"
+    # A new decision only after the manoeuvre before it ended.
+    kinds = [r["event"] for r in rows if r["event"] in ("approach_decision", "approach_manoeuvre")]
+    assert all(not (a == b == "approach_decision") for a, b in zip(kinds, kinds[1:]))
+    assert [r["stage"] for r in rows if r["event"] == "stage_snapshot"][-2:] == ["approach", "hold"]

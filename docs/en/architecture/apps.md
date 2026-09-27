@@ -23,6 +23,7 @@ checks unchanged and pass. The original sources are kept in
 | [battlefield](../apps/battlefield.md) | `services` | Battlefield between the main groups: axis, front lines, 40 m margin | new |
 | [alignment](../apps/alignment.md) | `services` | Aligning the army opposite the enemy's main group (no approach) | new |
 | [mask](../apps/mask.md) | `services`, `adapter` | "Can we stand here?" mask over the battlefield, 3 m cells | new |
+| [approach](../apps/approach.md) | `services` | Approach in 50 m steps to the stop line; one action at a time, alignment first | new |
 | [units](../apps/units.md) | `state_adapter`, `range_adapter`, `card_adapter`, `formation_adapter`, `contract` | 68 own-unit state fields, missile range, unit card and profile, movement and soldiers, formation width bounds | `units/state.lua`, `units/range.lua` |
 | [intel](../apps/intel.md) | `adapter`, `services` | Enemy visibility, last known position memory | `visibility/reader.lua` |
 | [orders](../apps/orders.md) | `contract`, `adapter`, `planner_adapter` | Command shape and validation, order calls verified in battle | `validate` from `policy_host.lua`, calls from `harness`/`arena` and `commands.md` |

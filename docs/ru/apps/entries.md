@@ -147,6 +147,11 @@
 `alignment_after`). Пока врага не видно — ждёт. Во время стояния регулятор
 каждые 5 с только отвечает (`governor`).
 
+С `approach` в армии — этап `approach`: командир [сближения](approach.md)
+(одно действие за раз, выравнивание прежде, скачки по 50 м, место за
+препятствием); `approach_decision`, `approach_sample`, `approach_manoeuvre`.
+С `goal` в армии — поход к точке вместо врага.
+
 <a id="enemy_layout"></a>
 
 ## enemy_layout — как стоит штатный ИИ

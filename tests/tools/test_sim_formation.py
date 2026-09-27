@@ -65,3 +65,37 @@ def test_mask_shows_the_hamlet_and_the_lane_it_blocks():
     assert all(f["ok"] for f in mask["fits"])
     # Our front (with the lord) is wide enough to clip the hamlet's east corner on the way.
     assert not mask["lane"]["free"] and 100 < mask["lane"]["first_blocked_along"] < 200
+
+
+def test_approach_finds_a_place_past_the_rock():
+    army, _ = formation.load_army("rock_attack")
+    sides, _ = formation.simulate(army)
+    log = sides["approach"]["log"]
+    assert [r["decision"] for r in log] == ["approach", "approach", "hold"]
+    past = log[1]["path"]
+    # The 50 m target lies on the rock: the next place where the whole formation fits is past it;
+    # the engine walks the units around (detour), the stop line is crossed (enemy not considered yet).
+    assert past["advance_m"] > 50 and past["detour"] and past["beyond_stop_line"]
+    # The rock (z 86..161, a diagonal band) is behind the wall and nobody stands on it.
+    wall = next(p for p in sides["own"]["placements"] if p["role"] == "wall")
+    assert wall["z"] > 161 and all(f["ok"] for f in sides["mask"]["fits"])
+
+
+def test_long_wall_also_goes_past_the_rock():
+    army, _ = formation.load_army("rock_attack_wide")
+    sides, _ = formation.simulate(army)
+    decisions = [r["decision"] for r in sides["approach"]["log"]]
+    assert decisions[-1] == "hold" and decisions.count("approach") == 2
+    assert len(sides["own"]["placements"]) == 16 and not sides["own"]["overlaps"]
+
+
+def test_approach_in_open_field_holds_at_the_stop_line():
+    army, _ = formation.load_army("first_attack")
+    army["approach"] = True  # no map: every cell counts as standable
+    sides, _ = formation.simulate(army)
+    log = sides["approach"]["log"]
+    steps = [r for r in log if r["decision"] == "approach"]
+    assert log[-1]["decision"] == "hold" and all(r["advance_m"] <= 50 for r in steps)
+    assert abs(log[-1]["gap_m"] - log[-1]["stop_gap_m"]) <= 2
+    # Each step waits for the one before: one manoeuvre at a time.
+    assert all(b["t_s"] > a["t_s"] for a, b in zip(log, log[1:]))

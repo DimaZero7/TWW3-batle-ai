@@ -14,6 +14,12 @@
 --      not while moving, every 20 s at most, give up if it does not help).
 --      mask: apps.mask over the battlefield from the engine (is_area_clear +
 --      can_reach_position of our infantry), mask_batch cells per tick -> 'mask';
+--      approach (config.approach): apps.approach commander in battle — one
+--      manoeuvre at a time, alignment first, 50 m steps, a place past an
+--      obstacle (the engine walks around it); 'approach_decision' for every
+--      decision, 'approach_sample' every 2 ticks while units move,
+--      'approach_manoeuvre' with every soldier when a manoeuvre ends.
+--      config.goal: march to a point (the enemy army is not considered);
 --      hold: config.hold_s of game time, no orders at all (no rushing); every
 --      5 s the governor is asked on real soldiers and its answer is only
 --      logged ('governor'): it must not want to realign again and again;
@@ -38,6 +44,7 @@ local battlefield = require('apps.battlefield.services')
 local alignment = require('apps.alignment.services')
 local mask_services = require('apps.mask.services')
 local mask_adapter = require('apps.mask.adapter')
+local approach = require('apps.approach.services')
 
 local M = {}
 
@@ -61,8 +68,11 @@ function M.main(bm, config, globals)
     if _G.tww3_bai_formation_probe then return end
     local state = {active = false, finished = false, batch = '', run_id = 'bootstrap', ticks = 0,
         own = {}, enemy = {}, by_name = {}, stage_index = 0, orders_after_placed = 0, orders_alignment = 0,
-        stages = {}, governor = alignment.new_governor()}
-    for _, s in ipairs(M.BASE_STAGES) do state.stages[#state.stages + 1] = s end
+        stages = {}, governor = alignment.new_governor(), commander = approach.new_commander()}
+    for _, s in ipairs(M.BASE_STAGES) do
+        if s[3] == 'hold' and config.approach then state.stages[#state.stages + 1] = {'approach', 0, 'approach'} end
+        state.stages[#state.stages + 1] = s
+    end
     if config.turn_test then
         for _, s in ipairs(M.TURN_STAGES) do state.stages[#state.stages + 1] = s end
     end
@@ -132,7 +142,12 @@ function M.main(bm, config, globals)
                     bearing = it.unit:bearing()}
             end
         end
-        for _, it in ipairs(state.enemy) do
+        if config.goal then
+            -- Marching to a point: it stands in for the enemy's main group.
+            enemy[1] = {id = 'goal', points = {config.goal.x, config.goal.z}, strength = 1}
+            total = 1
+        end
+        for _, it in ipairs(config.goal and {} or state.enemy) do
             local s = strength_of(it.name, config.enemy.units)
             total = total + s
             local ok, seen = pcall(function() return it.unit:is_visible_to_alliance(state.alliance) end)
@@ -190,6 +205,7 @@ function M.main(bm, config, globals)
                 state.orders_alignment = state.orders_alignment + 1
             end
             row.target, row.plan = target, result.formation
+            state.placed.anchor, state.placed.bearing = target.anchor, target.bearing
         end
         row.waited_ticks = state.align_waits or 0
         emit('alignment', row)
@@ -257,6 +273,140 @@ function M.main(bm, config, globals)
         return done
     end
 
+    local function any_moving()
+        for _, it in ipairs(state.own) do
+            if it.unit:is_moving() then return true end
+        end
+        return false
+    end
+
+    local function roster_of(id)
+        for _, u in ipairs(config.own.units) do
+            if u.id == id then return u end
+        end
+        return {}
+    end
+
+    -- Where our (or visible enemy) archers are along the battlefield axis.
+    local function shooters(field)
+        local own, enemy = {}, {}
+        if config.goal then return own, enemy end
+        for _, it in ipairs(state.own) do
+            local u = roster_of(it.name)
+            if (u.range_m or 0) > 0 then
+                local p = it.unit:position()
+                own[#own + 1] = {along = battlefield.to_frame(field, {x = p:get_x(), z = p:get_z()}).along,
+                    range_m = u.range_m}
+            end
+        end
+        for _, it in ipairs(state.enemy) do
+            local spec
+            for _, u in ipairs(config.enemy.units) do if u.id == it.name then spec = u end end
+            local ok, seen = pcall(function() return it.unit:is_visible_to_alliance(state.alliance) end)
+            if spec and (spec.range_m or 0) > 0 and ok and seen then
+                local p = it.unit:position()
+                enemy[#enemy + 1] = {along = battlefield.to_frame(field, {x = p:get_x(), z = p:get_z()}).along,
+                    range_m = spec.range_m}
+            end
+        end
+        return own, enemy
+    end
+
+    -- Give the whole formation its new place (planned again at anchor/bearing).
+    local function order_formation(anchor, bearing)
+        local result = plan_services.start({role = config.role, bearing = bearing,
+            own = {anchor = anchor, units = config.own.units},
+            enemy = {units = config.enemy.units, lord = state.placed.lord}, formation_params = config.formation_params})
+        assert(result.formation, 'No strategy when moving')
+        for _, p in ipairs(result.formation.placements) do
+            local it = state.by_name[p.id]
+            it.placement = p
+            orders.move_formation(it.uc, vec(p.x, p.z), p.bearing, p.width or M.LORD_WIDTH, false)
+            state.orders_approach = (state.orders_approach or 0) + 1
+        end
+        state.placed.anchor, state.placed.bearing = anchor, bearing
+        return result.formation
+    end
+
+    -- One tick of the approach commander; true when the stage is over.
+    local function approach_tick(now, elapsed)
+        local c = state.commander
+        if c.current then
+            state.appr_still = any_moving() and 0 or (state.appr_still or 0) + 1
+            if state.ticks % 2 == 0 then
+                local rows = {}
+                for _, it in ipairs(state.own) do rows[#rows + 1] = {script_name = it.name, motion = unit_motion.motion(it.unit)} end
+                emit('approach_sample', {kind = c.current.kind, t_ms = now - c.current.started_ms, units = rows})
+            end
+            local took = now - c.current.started_ms
+            local timeout = took >= config.manoeuvre_timeout_s * 1000
+            if (took >= config.settle_ms and state.appr_still >= 3) or timeout then
+                local kind = c.current.kind
+                c.finish(now, timeout and 'timeout' or 'stopped')
+                emit('approach_manoeuvre', {kind = kind, t_ms = took, reason = timeout and 'timeout' or 'stopped',
+                    units = units_row()})
+            end
+            return false
+        end
+        local picture, field = battle_picture()
+        if not field then return elapsed >= config.approach_timeout_s * 1000 end
+        local m = mask_services.new(mask_services.grid(field))
+        local reach_unit
+        for _, it in ipairs(state.own) do if it.role == 'wall' then reach_unit = it.unit; break end end
+        mask_services.fill(m, mask_adapter.reader(bm, vector_type, reach_unit or state.own[1].unit, m.grid.step))
+        local own_sh, enemy_sh = shooters(field)
+        local own_reach = approach.reach_past_front(own_sh, field.own.front_m, 1)
+        local enemy_reach = approach.reach_past_front(enemy_sh, field.enemy.front_m, -1)
+        local stop = approach.stop_gap(own_reach, enemy_reach)
+        local step = approach.next_step(field.gap_m, stop)
+        local check = alignment.check(field, {anchor = state.placed.anchor, bearing = state.placed.bearing},
+            enemy_of(picture))
+        local gov = state.governor.decide(now, check, false)
+        local path = {ok = false, reason = 'no_step'}
+        if step.action == 'step' then
+            local function fits_at(a)
+                for _, it in ipairs(state.own) do
+                    local p = it.placement
+                    if p then
+                        local b = math.rad(p.bearing)
+                        local moved = {x = p.x + math.sin(b) * a, z = p.z + math.cos(b) * a, bearing = p.bearing,
+                            front_m = p.front_m, depth_m = p.depth_m}
+                        if not mask_services.fits(m, moved).ok then return false end
+                    end
+                end
+                return true
+            end
+            local function lane_free_at(a)
+                return mask_services.lane(m, 0, field.own.width_m, field.own.front_m, field.own.front_m + a).free
+            end
+            path = approach.choose_advance(step.advance_m, field.gap_m - stop, fits_at, lane_free_at, 3,
+                field.gap_m - approach.DEFAULTS.margin_m)
+        end
+        local decision, reason = c.decide({align = check, governor = gov, step = step, path = path})
+        emit('approach_decision', {decision = decision, reason = reason, gap_m = field.gap_m, stop_gap_m = stop,
+            own_reach_m = own_reach, enemy_reach_m = enemy_reach, step = step, path = path,
+            align = {angle_off_deg = check.angle_off_deg, offset_m = check.offset_m, needed = check.needed},
+            mask = mask_services.summary(m)})
+        if decision == 'approach' then
+            local b = math.rad(state.placed.bearing)
+            local a = path.advance_m
+            order_formation({x = state.placed.anchor.x + math.sin(b) * a, z = state.placed.anchor.z + math.cos(b) * a},
+                state.placed.bearing)
+            c.start('approach', now, nil)
+            state.appr_still = 0
+        elseif decision == 'align' then
+            local target = alignment.target(field, {anchor = state.placed.anchor, bearing = state.placed.bearing},
+                enemy_of(picture))
+            state.governor.record_order(now, check)
+            order_formation(target.anchor, target.bearing)
+            c.start('align', now, nil)
+            state.appr_still = 0
+        elseif decision == 'hold' or decision == 'blocked' then
+            return true
+        end
+        return elapsed >= config.approach_timeout_s * 1000
+    end
+
     local function finish(status)
         if state.finished then return end
         state.active = false
@@ -264,7 +414,8 @@ function M.main(bm, config, globals)
         pcall(function() bm:remove_process(TIMER) end)
         if state.cancel_deadline then state.cancel_deadline() end
         emit('result', {status = status, stages_done = state.stage_index, stages = #state.stages, ticks = state.ticks,
-            orders_after_placed = state.orders_after_placed, orders_alignment = state.orders_alignment})
+            orders_after_placed = state.orders_after_placed, orders_alignment = state.orders_alignment,
+            orders_approach = state.orders_approach or 0})
         for _, it in ipairs(state.own) do orders.halt(it.uc) end
         for _, it in ipairs(state.enemy) do orders.halt(it.uc) end
         flush()
@@ -309,6 +460,9 @@ function M.main(bm, config, globals)
             state.still = 0  -- orders may have just been given
         end
         if stage[3] == 'mask' and not state.mask_done then state.mask_done = mask_step() end
+        if stage[3] == 'approach' and not state.approach_done then
+            state.approach_done = approach_tick(now, elapsed)
+        end
         if stage[3] == 'hold' then
             local rows = {}
             for _, it in ipairs(state.own) do
@@ -325,6 +479,8 @@ function M.main(bm, config, globals)
         local done
         if stage[3] == 'hold' then
             done = elapsed >= config.hold_s * 1000
+        elseif stage[3] == 'approach' then
+            done = state.approach_done
         elseif stage[3] == 'mask' then
             done = state.mask_done or elapsed >= config.align_timeout_s * 1000
         elseif stage[3] == 'align' then
