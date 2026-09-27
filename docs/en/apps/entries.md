@@ -41,6 +41,26 @@ positions. A pair ends at the first rout or death. A unit of another pair
 within 120 m raises `isolation_warning`. Army morale is shared by all pairs;
 every result says so.
 
+<a id="ai_vs_ai"></a>
+
+## ai_vs_ai — two game AIs
+
+Build: `python -m tools.build ai-vs-ai --speed 3`. Scenario `ai_vs_ai.xml`:
+4 Kislev units per side (2 Kossars, Tzar Guard, Winged Lancers). Our code
+gives no unit orders.
+
+- The army the engine treats as AI stays with the **general battle AI**.
+- The army the engine treats as the player's (`army:is_player_controlled()`)
+  goes to the game's AI planner ([planner_adapter](orders.md)) with "attack the
+  enemy force", re-issued every 15 s.
+- Who controls what: the `ai_assigned` event (`general_battle_ai` / `script_ai_planner`).
+- Every 5 ticks: per-unit `snapshot` and `progress` (men and standing units
+  per side); at the end `final_unit` and `result`.
+
+First run on 2026-09-27 (before True Sight was required): ~30 s load, both
+armies engaged on their own; at 237 s side 1 had 258 men and 4 units, side 2
+had 147 men and one unit (the game was closed before `result`).
+
 <a id="map_capture"></a>
 
 ## map_capture — map collection

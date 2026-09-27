@@ -17,7 +17,7 @@
 | [navigation](../apps/navigation.md) | `adapter`, `diagnostics_adapter` | Достижимость клеток для отряда, диагностика `can_reach_position` | `map/reachability.lua`, `runtime/reach_observation.lua` |
 | [units](../apps/units.md) | `state_adapter`, `range_adapter`, `contract` | 68 полей состояния своего отряда, дальность стрельбы, границы ширины строя | `units/state.lua`, `units/range.lua` |
 | [intel](../apps/intel.md) | `adapter`, `services` | Видимость врага, память последней известной позиции | `visibility/reader.lua` |
-| [orders](../apps/orders.md) | `contract`, `adapter` | Форма и проверка команд, проверенные в бою вызовы приказов | `validate` из `policy_host.lua`, вызовы из `harness`/`arena` и `commands.md` |
+| [orders](../apps/orders.md) | `contract`, `adapter`, `planner_adapter` | Форма и проверка команд, проверенные в бою вызовы приказов | `validate` из `policy_host.lua`, вызовы из `harness`/`arena` и `commands.md` |
 | [deployment](../apps/deployment.md) | `contract`, `services`, `adapter` | Контракт расстановки v2, транзакция «собрать → проверить → применить → сверить» | `runtime/deployment_v2.lua` |
 | [ai](../apps/ai.md) | `contract`, `services`, `policies/` | Профили армий, контракт решения, политики дуэли | `profile` из `policy_host.lua`, `policy.lua`, `delayed_melee.lua` |
 | [sandbox](../apps/sandbox.md) | `services` | Загрузка чужих политик в урезанное окружение с лимитом инструкций | `policy_host.lua` |
@@ -29,6 +29,7 @@
 |---|---|---|---|
 | [duel](../apps/entries.md#duel) | `duel` | `ranged_melee.xml` | Один отряд на сторону, принудительная рукопашная, серия боёв с автопереигровкой |
 | [arena](../apps/entries.md#arena) | `arena` | `triple_melee.xml` | Три пары одновременно на одной карте |
+| [ai_vs_ai](../apps/entries.md#ai_vs_ai) | `ai-vs-ai` | `ai_vs_ai.xml` | Обе армии под штатным ИИ игры, наш код только наблюдает |
 | [map_capture](../apps/entries.md#map_capture) | `map-capture` | `map_capture.xml` | Сетка карты, объекты и достижимость в CSV/JSONL |
 
 ## Инструменты вне игры (`tools`)

@@ -70,7 +70,10 @@ def check_syntax(script):
     return True
 
 
-def build(target, run_config, dependencies=()):
+def build(target, run_config, dependencies=None):
+    """dependencies defaults to the required mods; every battle loads them."""
+    if dependencies is None:
+        dependencies = project.required_mods()
     spec = TARGETS[target]
     scenario_xml = (project.SCENARIOS / spec["scenario"]).read_bytes()
     # The build id covers every input, so telemetry rows name the exact code.
@@ -105,6 +108,7 @@ def build(target, run_config, dependencies=()):
         "pack_sha256": sha256(blob),
         "entries": list(files),
         "scenario": f"script/battle/{folder}/{spec['packed_scenario']}",
+        "mod_profile": project.mod_profile(),
         "dependencies": list(dependencies),
         "syntax_checked": syntax_checked,
         "engine_tested": False,
@@ -133,7 +137,7 @@ def main(argv=None):
         run_config = {"runs": args.runs if args.target == "duel" else 1, "speed": args.speed,
                       "timeout_ms": args.timeout * 1000, "tick_ms": args.tick_ms,
                       "scenario": TARGETS[args.target]["scenario"].removesuffix(".xml")}
-    manifest = build(args.target, run_config, project.load().get("dependencies", []))
+    manifest = build(args.target, run_config)
     print(json.dumps(manifest, indent=2))
     return 0
 

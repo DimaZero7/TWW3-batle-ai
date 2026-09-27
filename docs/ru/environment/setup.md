@@ -11,6 +11,10 @@
 
 Сама игра, её файлы и сторонние моды в репозиторий не входят.
 
+**Обязательно подпишитесь в Steam Workshop на мод
+[True Sight](https://steamcommunity.com/sharedfiles/filedetails/?id=3628832922):
+без него бои не запускаются ([подробнее](../launch/run.md#обязательный-мод-true-sight)).**
+
 ## Python-окружение
 
 ```bash
@@ -42,7 +46,6 @@ cp config/local.example.json config/local.json
 |---|---|
 | `game_dir` | Папка игры с `Warhammer3.exe` |
 | `workshop_dir` | Папка Workshop-модов `...\workshop\content\1142710` |
-| `dependencies` | Моды, которые launcher подключает перед нашим pack. По умолчанию пусто (ванильная игра). Пример с True Sight — в `local.example.json` |
 
 ## Кириллица в пути
 

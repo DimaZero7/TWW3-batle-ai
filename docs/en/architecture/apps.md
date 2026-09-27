@@ -17,7 +17,7 @@ checks unchanged and pass. The original sources are kept in
 | [navigation](../apps/navigation.md) | `adapter`, `diagnostics_adapter` | Cell reachability for a unit, `can_reach_position` diagnostics | `map/reachability.lua`, `runtime/reach_observation.lua` |
 | [units](../apps/units.md) | `state_adapter`, `range_adapter`, `contract` | 68 own-unit state fields, missile range, formation width bounds | `units/state.lua`, `units/range.lua` |
 | [intel](../apps/intel.md) | `adapter`, `services` | Enemy visibility, last known position memory | `visibility/reader.lua` |
-| [orders](../apps/orders.md) | `contract`, `adapter` | Command shape and validation, order calls verified in battle | `validate` from `policy_host.lua`, calls from `harness`/`arena` and `commands.md` |
+| [orders](../apps/orders.md) | `contract`, `adapter`, `planner_adapter` | Command shape and validation, order calls verified in battle | `validate` from `policy_host.lua`, calls from `harness`/`arena` and `commands.md` |
 | [deployment](../apps/deployment.md) | `contract`, `services`, `adapter` | Placement contract v2, "collect → validate → apply → verify" transaction | `runtime/deployment_v2.lua` |
 | [ai](../apps/ai.md) | `contract`, `services`, `policies/` | Army profiles, decision contract, duel policies | `profile` from `policy_host.lua`, `policy.lua`, `delayed_melee.lua` |
 | [sandbox](../apps/sandbox.md) | `services` | Loads third-party policies into a restricted environment with an instruction budget | `policy_host.lua` |
@@ -29,6 +29,7 @@ checks unchanged and pass. The original sources are kept in
 |---|---|---|---|
 | [duel](../apps/entries.md#duel) | `duel` | `ranged_melee.xml` | One unit per side, forced melee, a series with automatic rematches |
 | [arena](../apps/entries.md#arena) | `arena` | `triple_melee.xml` | Three pairs at once on one map |
+| [ai_vs_ai](../apps/entries.md#ai_vs_ai) | `ai-vs-ai` | `ai_vs_ai.xml` | Both armies under the game's AI, our code only observes |
 | [map_capture](../apps/entries.md#map_capture) | `map-capture` | `map_capture.xml` | Map grid, objects and reachability to CSV/JSONL |
 
 ## Tools outside the game (`tools`)

@@ -6,13 +6,12 @@
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -Target duel
 ```
 
-Options: `-Target duel|arena|map-capture` (required), `-TimeoutSeconds`
+Options: `-Target duel|arena|ai-vs-ai|map-capture` (required), `-TimeoutSeconds`
 (default 1200, including game load), `-KeepGameOpen` (leave the game running
 after completion).
 
-> **Status:** the launcher is assembled from the verified logic of the
-> research scripts but has not yet started the game in this project. The
-> first run is a test of the stand itself.
+> **Status:** the launcher was verified in game on 2026-09-27 with the
+> `ai-vs-ai` target: load, events, result copy and cleanup of its own files worked.
 
 ## What the launcher does
 
@@ -25,7 +24,7 @@ after completion).
 5. Starts `Warhammer3.exe game_startup_mode battle <scenario>; <mods>;` and
    records the PID.
 6. Reads the event log while the game writes it and prints key lines.
-7. Waits for completion: `result` (duel, per battle), `arena_complete`,
+7. Waits for completion: `result` (duel per battle, ai-vs-ai once), `arena_complete`,
    `probe_done`. Stops on `error` / `probe_error` / `skipped`, process exit,
    a new crash report or timeout.
 8. Copies results and stops **only its own** process (same PID, path and
@@ -49,18 +48,24 @@ The duel/arena log in the game folder (`tww3_bai_events.jsonl`) is shared
 and appended; the launcher copies only the new part. `tww3_bai_pending.txt`
 and `tww3_bai_sequence.txt` hold the duel series state and are kept.
 
-## Required mods
+## Required mod: True Sight
 
-By default the game runs without third-party mods. To enable **True Sight:
-Improved Line of Sight** (Workshop 3628832922) use the example in
-`config/local.example.json`. The launcher:
+**Every battle of the project runs with [True Sight: Improved Line of Sight](https://steamcommunity.com/sharedfiles/filedetails/?id=3628832922)**
+(Workshop 3628832922, by GunPawDa). There is no vanilla mode.
 
-- takes `true_sight.pack` from the Workshop folder and checks its SHA-256;
-- copies it into `data` if absent; never overwrites a different file;
-- lists it before our pack;
-- removes only its own copy after the run.
+- The version is pinned in [config/mod-dependencies.json](../../../config/mod-dependencies.json):
+  `true_sight.pack`, 1065 bytes, SHA-256 `790c54d3…ac511`, profile `true-sight-v1`.
+- Every build writes `true_sight.pack` into our pack header and into
+  `manifest.json` (`mod_profile`, `dependencies`).
+- The launcher refuses a build without the mod, and stops when the mod is not
+  downloaded or its hash changed.
+- Before a run the launcher copies `true_sight.pack` from the Workshop folder
+  into `data` if absent, never overwrites a different file, lists it before
+  our pack and removes only its own copy afterwards.
 
-The pinned mod version: [config/mod-dependencies.json](../../../config/mod-dependencies.json).
+Subscribe to the mod in Steam Workshop once. If the author releases an
+update, the hash no longer matches and runs stop: review the new version and
+record it in `mod-dependencies.json`.
 Decision history (Russian): [dependency research](../../ru/research/launch/dependencies.md).
 
 ## Timing

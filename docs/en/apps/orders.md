@@ -42,6 +42,16 @@ Only recipes from [commands verified in battle](../game/units/commands.md):
 | `teleport(uc, p, bearing, width)` | `teleport_to_location` |
 | `apply(command, ctx)` | Executes one validated command |
 
+## planner_adapter — hand units to the game's AI
+
+`hand_over(bm, name, alliance, units, enemies)` gives units to the game's
+tactical AI instead of our orders. It uses CA's `script_ai_planner`
+(`lib_battle_script_ai_planner.lua`) — the mechanism generated battles use
+for AI armies. It wraps `alliance:create_ai_unit_planner()`; without the
+library the adapter calls that planner directly. Returns
+`{mode, attack(), release()}`: `attack()` means "attack the enemy force" and
+is re-issued by the entry.
+
 ## Worth knowing
 
 - An accepted call is not proof of execution. Check the result through unit

@@ -16,6 +16,7 @@
 |---|---|---|---|
 | `duel` | `entries.duel` | `scenarios/ranged_melee.xml` | `tww3_bai_duel.pack` |
 | `arena` | `entries.arena` | `scenarios/triple_melee.xml` | `tww3_bai_arena.pack` |
+| `ai-vs-ai` | `entries.ai_vs_ai` | `scenarios/ai_vs_ai.xml` | `tww3_bai_ai_vs_ai.pack` |
 | `map-capture` | `entries.map_capture` | `scenarios/map_capture.xml` | `tww3_bai_map_capture.pack` |
 
 ## Параметры
@@ -23,8 +24,8 @@
 | Параметр | Цели | Значение |
 |---|---|---|
 | `--runs 1..10` | duel | Боёв подряд в одном процессе игры (автопереигровка) |
-| `--speed 1/3/10/20` | duel, arena | Скорость боя |
-| `--timeout 30..1800` | duel, arena | Лимит модельного времени боя, секунды |
+| `--speed 1/3/10/20` | duel, arena, ai-vs-ai | Скорость боя |
+| `--timeout 30..1800` | duel, arena, ai-vs-ai | Лимит модельного времени боя, секунды |
 | `--tick-ms` | duel, arena | Период решений, мс (по умолчанию 1000) |
 | `--step 1/2/3/5` | map-capture | Размер клетки сетки, м |
 | `--features` | map-capture | После расстановки прочитать объекты и достижимость клеток |
@@ -67,8 +68,8 @@ script\battle\<папка>\<сценарий>.xml    XML боя
 ```
 
 Формат — PFH5 без сжатия (`tools/pack/pfh5.py`, по описанию RPFM). Записи
-отсортированы, одинаковые входы дают одинаковые байты. Зависимости из
-`config` попадают в заголовок pack.
+отсортированы, одинаковые входы дают одинаковые байты. Обязательный мод
+`true_sight.pack` из `config/mod-dependencies.json` всегда попадает в заголовок pack.
 
 Поскольку скрипт из `script\battle\mod\` загружается в любом бою, **не
 добавляйте тестовый pack в список модов кампании**. Launcher ставит его

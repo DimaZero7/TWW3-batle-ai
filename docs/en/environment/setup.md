@@ -11,6 +11,10 @@
 
 The game, its files and third-party mods are not part of the repository.
 
+**Subscribe to the
+[True Sight](https://steamcommunity.com/sharedfiles/filedetails/?id=3628832922)
+mod in Steam Workshop: battles do not run without it ([details](../launch/run.md#required-mod-true-sight)).**
+
 ## Python environment
 
 ```bash
@@ -42,7 +46,6 @@ cp config/local.example.json config/local.json
 |---|---|
 | `game_dir` | Game folder containing `Warhammer3.exe` |
 | `workshop_dir` | Workshop folder `...\workshop\content\1142710` |
-| `dependencies` | Mods the launcher lists before our pack. Empty by default (vanilla). A True Sight example is in `local.example.json` |
 
 ## Non-ASCII paths
 

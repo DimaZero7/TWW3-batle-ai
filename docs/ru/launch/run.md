@@ -6,13 +6,12 @@
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -Target duel
 ```
 
-Параметры: `-Target duel|arena|map-capture` (обязательный),
+Параметры: `-Target duel|arena|ai-vs-ai|map-capture` (обязательный),
 `-TimeoutSeconds` (по умолчанию 1200, включая загрузку игры),
 `-KeepGameOpen` (не закрывать игру после завершения).
 
-> **Статус:** launcher собран из проверенной логики исследовательских
-> скриптов, но в этом проекте игру ещё не запускал. Первый запуск — проверка
-> самого стенда.
+> **Статус:** launcher проверен в игре 27.09.2026 на цели `ai-vs-ai`: загрузка,
+> события, копирование результатов и уборка своих файлов сработали.
 
 ## Что делает launcher
 
@@ -25,7 +24,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -T
 5. Запускает `Warhammer3.exe game_startup_mode battle <сценарий>; <mods>;`
    и сохраняет PID.
 6. Читает журнал событий, пока игра пишет, и выводит ключевые строки.
-7. Ждёт завершения: `result` (дуэль, по числу боёв), `arena_complete`,
+7. Ждёт завершения: `result` (дуэль — по числу боёв, ai-vs-ai — один), `arena_complete`,
    `probe_done`. Останавливается на `error` / `probe_error` / `skipped`,
    выходе процесса, новом отчёте о падении или тайм-ауте.
 8. Копирует результаты и закрывает **только свой** процесс (тот же PID,
@@ -50,18 +49,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -T
 `tww3_bai_pending.txt` и `tww3_bai_sequence.txt` — состояние серии дуэлей,
 их не удаляем.
 
-## Обязательные моды
+## Обязательный мод: True Sight
 
-По умолчанию игра запускается без сторонних модов. Чтобы подключить
-**True Sight: Improved Line of Sight** (Workshop 3628832922), возьмите
-пример из `config/local.example.json`. Launcher:
+**Все бои проекта запускаются с [True Sight: Improved Line of Sight](https://steamcommunity.com/sharedfiles/filedetails/?id=3628832922)**
+(Workshop 3628832922, автор GunPawDa). Ванильного режима нет.
 
-- берёт `true_sight.pack` из папки Workshop и сверяет SHA-256;
-- копирует его в `data`, если там его нет; чужой отличающийся файл не перезаписывает;
-- пишет его в список модов перед нашим pack;
-- после запуска удаляет только свою копию.
+- Версия зафиксирована в [config/mod-dependencies.json](../../../config/mod-dependencies.json):
+  `true_sight.pack`, 1065 байт, SHA-256 `790c54d3…ac511`, профиль `true-sight-v1`.
+- Сборка всегда прописывает `true_sight.pack` в заголовок нашего pack и в
+  `manifest.json` (`mod_profile`, `dependencies`).
+- Launcher отказывается запускать сборку без этого мода, если мод не скачан
+  или его хэш изменился.
+- Перед запуском launcher копирует `true_sight.pack` из папки Workshop в
+  `data`, если там его нет. Чужой отличающийся файл не перезаписывает.
+  Мод ставится в список модов перед нашим pack, после боя удаляется только
+  своя копия.
 
-Зафиксированная версия мода — [config/mod-dependencies.json](../../../config/mod-dependencies.json).
+Мод нужно один раз подписать в Steam Workshop. Если автор выпустит
+обновление, хэш не совпадёт и запуск остановится: новую версию нужно
+проверить и записать в `mod-dependencies.json`.
 История решения — [исследование зависимостей](../research/launch/dependencies.md).
 
 ## Время

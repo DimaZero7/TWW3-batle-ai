@@ -50,3 +50,14 @@ class TestTargets:
         entries, _ = pfh5.read_pack((tmp_path / target / manifest["pack"]).read_bytes())
         assert any(name.endswith(".xml") for name in entries)
         assert manifest["config"]["build"] == manifest["build"]
+
+
+class TestRequiredMods:
+    def test_every_build_depends_on_true_sight(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(project, "BUILD", tmp_path)
+        manifest = build.build("ai-vs-ai", {"runs": 1, "speed": 3, "timeout_ms": 60000,
+                                            "tick_ms": 1000, "scenario": "ai_vs_ai"})
+        _, dependencies = pfh5.read_pack((tmp_path / "ai-vs-ai" / manifest["pack"]).read_bytes())
+        assert dependencies == ("true_sight.pack",)
+        assert manifest["mod_profile"] == "true-sight-v1"
+        assert manifest["dependencies"][0]["sha256"] == project.required_mods()[0]["sha256"]

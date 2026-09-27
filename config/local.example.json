@@ -1,11 +1,4 @@
 {
   "game_dir": "D:\\SteamLibrary\\steamapps\\common\\Total War WARHAMMER III",
-  "workshop_dir": "D:\\SteamLibrary\\steamapps\\workshop\\content\\1142710",
-  "dependencies": [
-    {
-      "pack": "true_sight.pack",
-      "workshop_id": "3628832922",
-      "sha256": "790c54d3600d2335c746c5093d30b33431182c3ba373152def4aa4d4186ac511"
-    }
-  ]
+  "workshop_dir": "D:\\SteamLibrary\\steamapps\\workshop\\content\\1142710"
 }

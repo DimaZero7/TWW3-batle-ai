@@ -64,13 +64,21 @@ $run = Join-Path $buildDir ('runs\' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 New-Item -ItemType Directory -Path $run | Out-Null
 Copy-Item -LiteralPath (Join-Path $buildDir 'manifest.json') -Destination $run
 
-# Dependencies (config "dependencies"): the Workshop pack is copied into data/
+# Required mods come from config/mod-dependencies.json and must be baked into
+# the build: every battle runs with them, there is no vanilla fallback.
+$pinned = Get-Content -LiteralPath (Join-Path $repo 'config\mod-dependencies.json') -Raw | ConvertFrom-Json
+foreach ($mod in $pinned.mods) {
+    $inBuild = @($manifest.dependencies | Where-Object { $_.pack -eq $mod.pack_name -and $_.sha256 -eq $mod.sha256 })
+    if ($inBuild.Count -eq 0) { throw "Build lacks required mod $($mod.pack_name) ($($pinned.profile)). Rebuild with python -m tools.build $Target." }
+}
+
+# Dependencies (from the build manifest): the Workshop pack is copied into data/
 # after a SHA-256 check and listed before our pack. A matching file already in
 # data/ is kept; a different one is never overwritten. Only our copies are removed.
 # All checks run before anything is written to the game folder.
 $lines = @()
 $toCopy = @()
-foreach ($dependency in $settings.dependencies) {
+foreach ($dependency in $manifest.dependencies) {
     $workshopPack = Join-Path (Join-Path $settings.workshop_dir $dependency.workshop_id) $dependency.pack
     if (-not (Test-Path -LiteralPath $workshopPack)) { throw "Dependency not downloaded: $workshopPack" }
     if ((Get-FileHash -LiteralPath $workshopPack).Hash.ToLowerInvariant() -ne $dependency.sha256) { throw "Dependency hash differs: $workshopPack" }
