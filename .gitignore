@@ -1,0 +1,23 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Build output and local runs
+build/
+
+# Machine-specific settings (see config/default.json)
+config/local.json
+
+# IDE
+.idea/
+.vscode/
+
+# Raw research data (grids, logs, arrays, summaries): kept on the local disk,
+# not in Git. Images and descriptions stay in the repository.
+research/evidence/**
+!research/evidence/**/
+!research/evidence/**/*.png
+!research/evidence/**/*.svg
+!research/evidence/**/*.md

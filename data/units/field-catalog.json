@@ -1,0 +1,1429 @@
+{
+  "scope": "Own readings only; not an exhaustive game-wide enumeration. First-run threat-wrapper type errors excluded here, retained in raw evidence.",
+  "samples": {
+    "basic": 6750,
+    "charge": 363,
+    "charge-extended": 813
+  },
+  "fields": {
+    "cco.DamageInflictedRecently": {
+      "types": [
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        0,
+        430,
+        661
+      ],
+      "boolean_values": [],
+      "min": 0,
+      "max": 831
+    },
+    "cco.FatigueName": {
+      "types": [
+        "str"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        "[[col:green]]Свежие[[/col]]",
+        "[[col:green]]Активные[[/col]]",
+        "[[col:fatigue_winded]]Измотанные[[/col]]"
+      ],
+      "boolean_values": []
+    },
+    "cco.FatigueState": {
+      "types": [
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        0,
+        1,
+        2
+      ],
+      "boolean_values": [],
+      "min": 0,
+      "max": 4
+    },
+    "cco.HealthMax": {
+      "types": [
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        8280,
+        6210,
+        4068
+      ],
+      "boolean_values": [],
+      "min": 4068,
+      "max": 8280
+    },
+    "cco.HealthPercent": {
+      "types": [
+        "float",
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        1,
+        0.99645733833313,
+        0.97552335262299
+      ],
+      "boolean_values": [],
+      "min": 0.0017713365377858,
+      "max": 1
+    },
+    "cco.HealthValue": {
+      "types": [
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        8280,
+        6188,
+        4068
+      ],
+      "boolean_values": [],
+      "min": 0,
+      "max": 8280
+    },
+    "cco.IsAlive": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        true,
+        false
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "cco.IsAwaitingOrderAfterRally": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false
+      ],
+      "boolean_values": [
+        false
+      ]
+    },
+    "cco.IsFiringMissiles": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false,
+        true
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "cco.IsInLastStand": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false
+      ],
+      "boolean_values": [
+        false
+      ]
+    },
+    "cco.IsOutOfControl": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false
+      ],
+      "boolean_values": [
+        false
+      ]
+    },
+    "cco.IsRouting": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false,
+        true
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "cco.IsShattered": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false,
+        true
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "cco.IsTakingDamage": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false,
+        true
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "cco.IsUnderMissileAttack": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false
+      ],
+      "boolean_values": [
+        false
+      ]
+    },
+    "cco.IsWavering": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false,
+        true
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "cco.IsWithdrawing": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false,
+        true
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "cco.MoraleGreatestEffect": {
+      "types": [
+        "str"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        "[[col:green]]Фланги прикрыты[[/col]]",
+        "",
+        "[[col:green]]На возвышенности[[/col]]"
+      ],
+      "boolean_values": []
+    },
+    "cco.MoraleName": {
+      "types": [
+        "str"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        "[[col:green]]Жаждут боя[[/col]]",
+        "[[col:green]]{{tr:confident}}[[/col]]",
+        "[[col:green]]{{tr:steady}}[[/col]]"
+      ],
+      "boolean_values": []
+    },
+    "cco.MoralePercent": {
+      "types": [
+        "float",
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        1.0499999523163,
+        1.0599999427795,
+        1.042857170105
+      ],
+      "boolean_values": [],
+      "min": -1.7799999713898,
+      "max": 1.460000038147
+    },
+    "cco.MoraleState": {
+      "types": [
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        1,
+        2,
+        3
+      ],
+      "boolean_values": [],
+      "min": 1,
+      "max": 7
+    },
+    "cco.NumEntities": {
+      "types": [
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        120,
+        90,
+        1
+      ],
+      "boolean_values": [],
+      "min": 0,
+      "max": 120
+    },
+    "cco.NumEntitiesInitial": {
+      "types": [
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        120,
+        90,
+        1
+      ],
+      "boolean_values": [],
+      "min": 1,
+      "max": 120
+    },
+    "cco.NumKills": {
+      "types": [
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        0,
+        2,
+        3
+      ],
+      "boolean_values": [],
+      "min": 0,
+      "max": 68
+    },
+    "cco.PercentHpLostRecently": {
+      "types": [
+        "float",
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        0,
+        0.0035426730755717,
+        0.020933978259563
+      ],
+      "boolean_values": [],
+      "min": 0,
+      "max": 0.1922705322504
+    },
+    "cco.PrimaryAmmoPercent": {
+      "types": [
+        "float",
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        0,
+        1,
+        0.98222219944
+      ],
+      "boolean_values": [],
+      "min": 0,
+      "max": 1
+    },
+    "cco.StatusList.Keys": {
+      "types": [
+        "dict"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        {
+          "1": "braced"
+        },
+        {
+          "1": "melee"
+        },
+        {
+          "1": "braced",
+          "2": "melee"
+        }
+      ],
+      "boolean_values": []
+    },
+    "cco.StatusList.Size": {
+      "types": [
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        1,
+        2,
+        0
+      ],
+      "boolean_values": [],
+      "min": 0,
+      "max": 4
+    },
+    "cco.card.stat_morale.DisplayedValue": {
+      "types": [
+        "int"
+      ],
+      "known": 1176,
+      "unknown": {},
+      "per_type": {
+        "spears": 392,
+        "archers": 392,
+        "general": 392
+      },
+      "examples": [
+        60,
+        50,
+        74
+      ],
+      "boolean_values": [],
+      "min": -55,
+      "max": 75
+    },
+    "cco.card.stat_morale.Value": {
+      "types": [
+        "int"
+      ],
+      "known": 1176,
+      "unknown": {},
+      "per_type": {
+        "spears": 392,
+        "archers": 392,
+        "general": 392
+      },
+      "examples": [
+        60,
+        50,
+        74
+      ],
+      "boolean_values": [],
+      "min": -72,
+      "max": 75
+    },
+    "cco.card.stat_morale.ValueBase": {
+      "types": [
+        "int"
+      ],
+      "known": 1176,
+      "unknown": {},
+      "per_type": {
+        "spears": 392,
+        "archers": 392,
+        "general": 392
+      },
+      "examples": [
+        60,
+        50,
+        74
+      ],
+      "boolean_values": [],
+      "min": -72,
+      "max": 75
+    },
+    "native.ammo_left": {
+      "types": [
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        0,
+        1800,
+        1785
+      ],
+      "boolean_values": [],
+      "min": 0,
+      "max": 1800
+    },
+    "native.bearing": {
+      "types": [
+        "float",
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        92.8125,
+        92.763061523438,
+        90
+      ],
+      "boolean_values": [],
+      "min": 0,
+      "max": 359.99450683594
+    },
+    "native.behaviour.change_formation_spacing": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false
+      ],
+      "boolean_values": [
+        false
+      ]
+    },
+    "native.behaviour.defend": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false,
+        true
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "native.behaviour.fire_at_will": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false,
+        true
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "native.behaviour.skirmish": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false
+      ],
+      "boolean_values": [
+        false
+      ]
+    },
+    "native.current_target": {
+      "types": [
+        "str"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        "",
+        "target2",
+        "target1"
+      ],
+      "boolean_values": []
+    },
+    "native.fast_speed": {
+      "types": [
+        "float",
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        3,
+        3.2999999523163,
+        3.4000000953674
+      ],
+      "boolean_values": [],
+      "min": 3,
+      "max": 3.4000000953674
+    },
+    "native.fatigue_state": {
+      "types": [
+        "str"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        "threshold_fresh",
+        "threshold_active",
+        "threshold_winded"
+      ],
+      "boolean_values": []
+    },
+    "native.initial_number_of_men": {
+      "types": [
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        120,
+        90,
+        1
+      ],
+      "boolean_values": [],
+      "min": 1,
+      "max": 120
+    },
+    "native.is_controllable": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        true,
+        false
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "native.is_hidden": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false
+      ],
+      "boolean_values": [
+        false
+      ]
+    },
+    "native.is_idle": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        true,
+        false
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "native.is_in_melee": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false,
+        true
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "native.is_leaving_battle": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false,
+        true
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "native.is_left_flank_threatened": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false,
+        true
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "native.is_moving": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false,
+        true
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "native.is_moving_fast": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false,
+        true
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "native.is_rear_flank_threatened": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false,
+        true
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "native.is_right_flank_threatened": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false,
+        true
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "native.is_routing": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false,
+        true
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "native.is_script_controlled": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        true
+      ],
+      "boolean_values": [
+        true
+      ]
+    },
+    "native.is_shattered": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false,
+        true
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "native.is_under_missile_attack": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false
+      ],
+      "boolean_values": [
+        false
+      ]
+    },
+    "native.is_wavering": {
+      "types": [
+        "bool"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        false,
+        true
+      ],
+      "boolean_values": [
+        false,
+        true
+      ]
+    },
+    "native.left_flank_threat": {
+      "types": [
+        "str"
+      ],
+      "known": 1176,
+      "unknown": {},
+      "per_type": {
+        "spears": 392,
+        "archers": 392,
+        "general": 392
+      },
+      "examples": [
+        "",
+        "target3",
+        "target2"
+      ],
+      "boolean_values": []
+    },
+    "native.number_of_men_alive": {
+      "types": [
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        120,
+        90,
+        1
+      ],
+      "boolean_values": [],
+      "min": 0,
+      "max": 120
+    },
+    "native.ordered_bearing": {
+      "types": [
+        "float",
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        90,
+        89.807739257813,
+        89.796752929688
+      ],
+      "boolean_values": [],
+      "min": 0,
+      "max": 359.82421875
+    },
+    "native.ordered_position": {
+      "types": [
+        "dict"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        {
+          "x": 150,
+          "y": 531.74713134766,
+          "z": -350
+        },
+        {
+          "x": 150,
+          "y": 510.94396972656,
+          "z": -200
+        },
+        {
+          "x": 150,
+          "y": 507.13931274414,
+          "z": 250
+        }
+      ],
+      "boolean_values": []
+    },
+    "native.ordered_width": {
+      "types": [
+        "float",
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        29.420000076294,
+        29.200000762939,
+        1.3999999761581
+      ],
+      "boolean_values": [],
+      "min": 1.3999999761581,
+      "max": 50
+    },
+    "native.position": {
+      "types": [
+        "dict"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        {
+          "x": 146.79998779297,
+          "y": 531.56323242188,
+          "z": -350.73999023438
+        },
+        {
+          "x": 144.13333129883,
+          "y": 510.43603515625,
+          "z": -199.81799316406
+        },
+        {
+          "x": 150,
+          "y": 507.13931274414,
+          "z": 250
+        }
+      ],
+      "boolean_values": []
+    },
+    "native.rear_threat": {
+      "types": [
+        "str"
+      ],
+      "known": 1176,
+      "unknown": {},
+      "per_type": {
+        "spears": 392,
+        "archers": 392,
+        "general": 392
+      },
+      "examples": [
+        "",
+        "target3",
+        "target2"
+      ],
+      "boolean_values": []
+    },
+    "native.right_flank_threat": {
+      "types": [
+        "str"
+      ],
+      "known": 1176,
+      "unknown": {},
+      "per_type": {
+        "spears": 392,
+        "archers": 392,
+        "general": 392
+      },
+      "examples": [
+        "",
+        "target3",
+        "target2"
+      ],
+      "boolean_values": []
+    },
+    "native.slow_speed": {
+      "types": [
+        "float"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        1.5
+      ],
+      "boolean_values": [],
+      "min": 1.5,
+      "max": 1.5
+    },
+    "native.starting_ammo": {
+      "types": [
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        0,
+        1800
+      ],
+      "boolean_values": [],
+      "min": 0,
+      "max": 1800
+    },
+    "native.unary_hitpoints": {
+      "types": [
+        "float",
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        1,
+        0.99645733833313,
+        0.97552335262299
+      ],
+      "boolean_values": [],
+      "min": 0,
+      "max": 1
+    },
+    "native.unary_of_men_alive": {
+      "types": [
+        "float",
+        "int"
+      ],
+      "known": 7926,
+      "unknown": {},
+      "per_type": {
+        "spears": 2642,
+        "archers": 2642,
+        "general": 2642
+      },
+      "examples": [
+        1,
+        0.98888885974884,
+        0.97777777910233
+      ],
+      "boolean_values": [],
+      "min": 0,
+      "max": 1
+    }
+  },
+  "observed_status_keys": [
+    "braced",
+    "firing",
+    "hidden",
+    "melee",
+    "moving",
+    "moving_fast",
+    "routing",
+    "shaken",
+    "shattered",
+    "wavering",
+    "withdraw"
+  ],
+  "observed_enum_name_pairs": {
+    "morale": {
+      "1": [
+        "[[col:green]]Жаждут боя[[/col]]"
+      ],
+      "2": [
+        "[[col:green]]{{tr:confident}}[[/col]]"
+      ],
+      "3": [
+        "[[col:green]]{{tr:steady}}[[/col]]"
+      ],
+      "4": [
+        "[[col:red]]Колеблются[[/col]]"
+      ],
+      "5": [
+        "[[col:red]]{{tr:wavering}}[[/col]]"
+      ],
+      "6": [
+        "[[col:red]]Сломленные[[/col]]"
+      ],
+      "7": [
+        "[[col:red]]Сокрушенные[[/col]]"
+      ]
+    },
+    "fatigue": {
+      "0": [
+        "threshold_active",
+        "threshold_fresh"
+      ],
+      "1": [
+        "threshold_active",
+        "threshold_fresh"
+      ],
+      "2": [
+        "threshold_active",
+        "threshold_tired",
+        "threshold_winded"
+      ],
+      "3": [
+        "threshold_tired",
+        "threshold_winded"
+      ],
+      "4": [
+        "threshold_tired",
+        "threshold_very_tired"
+      ]
+    }
+  }
+}

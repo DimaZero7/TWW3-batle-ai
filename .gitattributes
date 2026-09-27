@@ -1,0 +1,14 @@
+# Source and docs: LF in the repository.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+
+# Research evidence and data are hashed by their manifests: keep bytes exact.
+research/** -text
+data/** -text
+
+# Binary formats
+*.png binary
+*.npz binary
+*.npy binary
+*.gz binary
+*.pack binary

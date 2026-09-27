@@ -1,0 +1,7 @@
+# Tests: Lua 5.1 inside Python
+lupa==2.8
+pytest==9.1.1
+
+# tools/analysis (height maps, slopes, passages)
+numpy==2.2.6
+matplotlib==3.10.9

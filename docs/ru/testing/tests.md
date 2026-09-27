@@ -1,0 +1,78 @@
+# Тесты без игры
+
+[Документация](../README.md) · [English](../../en/testing/tests.md)
+
+```bash
+.venv/Scripts/python -m pytest
+.venv/Scripts/python -m pytest tests/apps/units -v
+```
+
+Тесты запускают **тот же Lua 5.1**, что и WH3, через `lupa`. Они проверяют
+контракты, сервисы, адаптеры на поддельных объектах и связку приложений в
+точках входа. Механику боя WH3 они не моделируют: поведение движка
+проверяется только запуском игры ([запуск](../launch/run.md)).
+
+## Структура
+
+Как в photo-fixing, тесты повторяют структуру кода:
+
+```text
+tests/
+├── lua_runtime.py          Lua-среда: require('apps.x.y') грузит src/apps/x/y.lua
+├── apps/<приложение>/      тесты сервисов, контрактов и адаптеров
+├── entries/                smoke-тесты точек входа на поддельном bm
+│   └── fake_battle.lua     минимальная подделка battle manager
+└── tools/                  формат pack, бандлер, сборка всех целей
+```
+
+## Как писать тест
+
+```python
+import pytest
+from tests.lua_runtime import load, new_runtime
+
+
+@pytest.fixture
+def lua():
+    runtime = new_runtime()
+    runtime.globals().orders = load(runtime, "apps.orders.contract")
+    return runtime
+
+
+class TestValidate:
+    def test_hidden_target_is_rejected(self, lua):
+        lua.execute("""
+            local own = {spears = {alive = true, position = {x=0, z=0}, kind = 'spearmen'}}
+            local enemies = {hidden = {visibility = 'not_visible'}}
+            local ok, err = pcall(orders.validate,
+                {{unit_id='spears', action='attack', target_id='hidden', mode='melee'}}, own, enemies, 14)
+            assert(not ok and err:find('target not visible', 1, true))
+        """)
+```
+
+Правила:
+
+- **Проверки пишутся на Lua** внутри `lua.execute`: так тест видит те же
+  типы, `nil` и `0/0`, что и игра.
+- **Адаптер тестируется поддельным объектом**: таблица с нужными методами.
+  Для проверки «скрытое не читаем» подделка считает вызовы или бросает
+  ошибку при запрещённом чтении (см. `tests/apps/units/test_range_adapter.py`).
+- **Точка входа** проверяется через `tests/entries/fake_battle.lua`: колбэки
+  копятся в очереди, тест прокручивает их `bm:pump()` и `bm:tick()`.
+- Новый метод движка в точке входа → добавить его в `fake_battle.lua`.
+
+## Что покрыто
+
+| Область | Файл |
+|---|---|
+| Сенсор состояния (перенесён из kit) | `tests/apps/units/test_state_adapter.py` |
+| Сенсор дальности (перенесён из kit) | `tests/apps/units/test_range_adapter.py` |
+| `core`: чтение, JSON, ошибки | `tests/apps/core/test_core.py` |
+| Рамка радара и сетка | `tests/apps/map/test_services.py` |
+| Память видимости | `tests/apps/intel/test_intel.py` |
+| Политики и контракт ИИ | `tests/apps/ai/test_policies.py` |
+| Проверка команд | `tests/apps/orders/test_contract.py` |
+| Расстановка v2 | `tests/apps/deployment/test_deployment.py` |
+| Песочница политик | `tests/apps/sandbox/test_sandbox.py` |
+| Дуэль и захват карты целиком | `tests/entries/test_entries.py` |
+| PFH5, бандлер, все цели сборки | `tests/tools/test_build.py` |

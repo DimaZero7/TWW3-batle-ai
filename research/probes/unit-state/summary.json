@@ -1,0 +1,371 @@
+{
+  "run_name": "basic",
+  "source_run": "C:\\Users\\dima\\Desktop\\Файлы\\Программы\\TWW3-batle-ai\\build\\map-capture\\run-20260926-115720",
+  "events": {
+    "unit_capabilities": 8,
+    "conditions": 1,
+    "fixture_teleport": 19,
+    "step_begin": 33,
+    "state_sample": 13404,
+    "card_stat_keys": 6,
+    "card_stat": 13404,
+    "step_end": 32,
+    "probe_done": 1
+  },
+  "samples_by_type": {
+    "spears": 2250,
+    "archers": 2250,
+    "general": 2250
+  },
+  "field_count": {
+    "spears": 65,
+    "archers": 65,
+    "general": 65
+  },
+  "unknown_counts": {
+    "native.left_flank_threat:nil": 6718,
+    "native.rear_threat:nil": 6672,
+    "native.right_flank_threat:nil": 6720,
+    "native.right_flank_threat:type_userdata": 30,
+    "native.rear_threat:type_userdata": 78,
+    "native.left_flank_threat:type_userdata": 32
+  },
+  "comparisons": {
+    "spears": {
+      "samples": 2250,
+      "max_fraction_error": 0.92898553609848,
+      "max_native_cco_error": 0.004830896854399969,
+      "max_ammo_fraction_error": 0
+    },
+    "archers": {
+      "samples": 2250,
+      "max_fraction_error": 2.789228414901146e-08,
+      "max_native_cco_error": 0.006763279438010028,
+      "max_ammo_fraction_error": 0.008333333333333304
+    },
+    "general": {
+      "samples": 2250,
+      "max_fraction_error": 0.98770892620087,
+      "max_native_cco_error": 0.003195703029630015,
+      "max_ammo_fraction_error": 0
+    }
+  },
+  "damage_without_death_counts": {
+    "damage_without_death_archers": 28,
+    "damage_without_death_spears": 13,
+    "damage_without_death_general": 5
+  },
+  "damage_without_death_examples": [
+    {
+      "name": "archers",
+      "stage": "melee_charge",
+      "from_ms": 392500,
+      "to_ms": 393000,
+      "hp_before": 6188,
+      "hp_after": 6058,
+      "men": 90
+    },
+    {
+      "name": "archers",
+      "stage": "melee_charge",
+      "from_ms": 393000,
+      "to_ms": 393500,
+      "hp_before": 6058,
+      "hp_after": 6015,
+      "men": 90
+    },
+    {
+      "name": "archers",
+      "stage": "melee_charge",
+      "from_ms": 395500,
+      "to_ms": 396000,
+      "hp_before": 5920,
+      "hp_after": 5875,
+      "men": 88
+    },
+    {
+      "name": "spears",
+      "stage": "melee_charge",
+      "from_ms": 396500,
+      "to_ms": 397000,
+      "hp_before": 8280,
+      "hp_after": 8240,
+      "men": 120
+    },
+    {
+      "name": "spears",
+      "stage": "melee_charge",
+      "from_ms": 398500,
+      "to_ms": 399000,
+      "hp_before": 8240,
+      "hp_after": 8193,
+      "men": 120
+    },
+    {
+      "name": "spears",
+      "stage": "melee_charge",
+      "from_ms": 401000,
+      "to_ms": 401500,
+      "hp_before": 8193,
+      "hp_after": 8147,
+      "men": 120
+    },
+    {
+      "name": "general",
+      "stage": "melee_charge",
+      "from_ms": 401500,
+      "to_ms": 402000,
+      "hp_before": 4068,
+      "hp_after": 4055,
+      "men": 1
+    },
+    {
+      "name": "general",
+      "stage": "melee_charge",
+      "from_ms": 409000,
+      "to_ms": 409500,
+      "hp_before": 4055,
+      "hp_after": 4048,
+      "men": 1
+    },
+    {
+      "name": "general",
+      "stage": "melee_charge",
+      "from_ms": 413000,
+      "to_ms": 413500,
+      "hp_before": 4048,
+      "hp_after": 4032,
+      "men": 1
+    }
+  ],
+  "enemy_gate_counts": {
+    "{'status': 'known', 'value': True}": 6559,
+    "{'status': 'known', 'value': False}": 191
+  },
+  "fixture_events": [
+    {
+      "bearing": 90,
+      "event": "fixture_teleport",
+      "ms": 3500,
+      "name": "spears",
+      "wall": "2026-09-26T08:57:50Z",
+      "width": 30,
+      "x": 150,
+      "z": -350
+    },
+    {
+      "bearing": 270,
+      "event": "fixture_teleport",
+      "ms": 3500,
+      "name": "target1",
+      "wall": "2026-09-26T08:57:50Z",
+      "width": 30,
+      "x": 360,
+      "z": -350
+    },
+    {
+      "bearing": 90,
+      "event": "fixture_teleport",
+      "ms": 3500,
+      "name": "archers",
+      "wall": "2026-09-26T08:57:50Z",
+      "width": 30,
+      "x": 150,
+      "z": -200
+    },
+    {
+      "bearing": 270,
+      "event": "fixture_teleport",
+      "ms": 3500,
+      "name": "target2",
+      "wall": "2026-09-26T08:57:50Z",
+      "width": 30,
+      "x": 360,
+      "z": -200
+    },
+    {
+      "bearing": 90,
+      "event": "fixture_teleport",
+      "ms": 3500,
+      "name": "general",
+      "wall": "2026-09-26T08:57:50Z",
+      "width": 5,
+      "x": 150,
+      "z": 250
+    },
+    {
+      "bearing": 270,
+      "event": "fixture_teleport",
+      "ms": 3500,
+      "name": "target3",
+      "wall": "2026-09-26T08:57:50Z",
+      "width": 30,
+      "x": 360,
+      "z": 250
+    },
+    {
+      "bearing": 90,
+      "event": "fixture_teleport",
+      "ms": 3500,
+      "name": "reserve",
+      "wall": "2026-09-26T08:57:50Z",
+      "width": 30,
+      "x": -350,
+      "z": 350
+    },
+    {
+      "bearing": 90,
+      "event": "fixture_teleport",
+      "ms": 3500,
+      "name": "enemyreserve",
+      "wall": "2026-09-26T08:57:50Z",
+      "width": 5,
+      "x": -350,
+      "z": -450
+    },
+    {
+      "bearing": 90,
+      "event": "fixture_teleport",
+      "ms": 225500,
+      "name": "archers",
+      "wall": "2026-09-26T08:58:01Z",
+      "width": 30,
+      "x": 200,
+      "z": -200
+    },
+    {
+      "bearing": 270,
+      "event": "fixture_teleport",
+      "ms": 225500,
+      "name": "target2",
+      "wall": "2026-09-26T08:58:01Z",
+      "width": 30,
+      "x": 300,
+      "z": -200
+    },
+    {
+      "bearing": 90,
+      "event": "fixture_teleport",
+      "ms": 368500,
+      "name": "spears",
+      "wall": "2026-09-26T08:58:08Z",
+      "width": 30,
+      "x": 200,
+      "z": -350
+    },
+    {
+      "bearing": 270,
+      "event": "fixture_teleport",
+      "ms": 368500,
+      "name": "target1",
+      "wall": "2026-09-26T08:58:08Z",
+      "width": 30,
+      "x": 260,
+      "z": -350
+    },
+    {
+      "bearing": 90,
+      "event": "fixture_teleport",
+      "ms": 368500,
+      "name": "archers",
+      "wall": "2026-09-26T08:58:08Z",
+      "width": 30,
+      "x": 200,
+      "z": -200
+    },
+    {
+      "bearing": 270,
+      "event": "fixture_teleport",
+      "ms": 368500,
+      "name": "target2",
+      "wall": "2026-09-26T08:58:08Z",
+      "width": 30,
+      "x": 260,
+      "z": -200
+    },
+    {
+      "bearing": 90,
+      "event": "fixture_teleport",
+      "ms": 368500,
+      "name": "general",
+      "wall": "2026-09-26T08:58:08Z",
+      "width": 30,
+      "x": 200,
+      "z": 250
+    },
+    {
+      "bearing": 270,
+      "event": "fixture_teleport",
+      "ms": 368500,
+      "name": "target3",
+      "wall": "2026-09-26T08:58:08Z",
+      "width": 30,
+      "x": 260,
+      "z": 250
+    },
+    {
+      "bearing": 270,
+      "event": "fixture_teleport",
+      "ms": 456500,
+      "name": "target1",
+      "wall": "2026-09-26T08:58:12Z",
+      "width": 30,
+      "x": 360,
+      "z": -350
+    },
+    {
+      "bearing": 270,
+      "event": "fixture_teleport",
+      "ms": 456500,
+      "name": "target2",
+      "wall": "2026-09-26T08:58:12Z",
+      "width": 30,
+      "x": 360,
+      "z": -200
+    },
+    {
+      "bearing": 270,
+      "event": "fixture_teleport",
+      "ms": 456500,
+      "name": "target3",
+      "wall": "2026-09-26T08:58:12Z",
+      "width": 30,
+      "x": 360,
+      "z": 250
+    }
+  ],
+  "module_sha256": "01f16c83d70429dce624f6a343ea332ddaf84a0dd7997c81a3cc48bafdfc1b7c",
+  "manifest": {
+    "mode": "basic",
+    "step": 0,
+    "sha256": "6917fbd140209b72b56e1816bd0f17dd01e00d872ddf0e0f090fd9014a5c3317",
+    "capture_sha256": "c0d945356ad44b0a10ee111854f96a8b85cc70c22951d7ffd95e184ad69def67",
+    "module_sha256": "01f16c83d70429dce624f6a343ea332ddaf84a0dd7997c81a3cc48bafdfc1b7c",
+    "scenario_sha256": "ab1cd00781ef78cc7dfb1fa15c4719a4801d1ed0c2d9b0f95e73e298e25fa6e4",
+    "suite_sha256": "8347d86902d9b3a92eaa13ef396187d53a5de1d7705acd19140bae91ca43d832",
+    "classification": "state_sensor_diagnostic",
+    "field": "chokepoint_badlands_river"
+  },
+  "cleanup": {
+    "private_files_removed": true,
+    "closed_utc": "2026-09-26T08:58:46.6790882Z",
+    "closed_pid": 11584,
+    "outputs_verified_and_preserved": true
+  },
+  "status": {
+    "status": "probe_done",
+    "pid": 11584,
+    "game_paused": false,
+    "elapsed_including_load_s": 85.3581817,
+    "game_left_running": false,
+    "peak_working_set_bytes": 4899987456
+  },
+  "limits": [
+    "Diagnostic fixtures include teleports; movements, damage and morale otherwise follow the selected suite unless a fixture event explicitly says forced.",
+    "Observed values/transitions do not enumerate every possible state.",
+    "0/false is preserved; unknown is not interpreted as an absent mechanic.",
+    "CCO morale card values and percent require interpretation; no assumed conversion.",
+    "Sampled damage indicators do not establish complete MATCH-IDLE-001 telemetry.",
+    "This module is own-unit readout only and not admitted in policy API v1."
+  ]
+}

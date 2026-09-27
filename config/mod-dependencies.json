@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "profile": "true-sight-v1",
+  "steam_app_id": "1142710",
+  "policy": "required; no vanilla fallback; explicit review required for updates",
+  "mods": [
+    {
+      "workshop_id": "3628832922",
+      "title": "True Sight: Improved Line of Sight",
+      "author": "GunPawDa",
+      "url": "https://steamcommunity.com/sharedfiles/filedetails/?id=3628832922",
+      "pack_name": "true_sight.pack",
+      "sha256": "790c54d3600d2335c746c5093d30b33431182c3ba373152def4aa4d4186ac511",
+      "size_bytes": 1065
+    }
+  ]
+}

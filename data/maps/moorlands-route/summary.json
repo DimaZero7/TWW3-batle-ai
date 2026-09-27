@@ -1,0 +1,126 @@
+{
+  "status": "verified_capture_of_requested_scenario",
+  "map_key": "wh3_dlc21_emp_grasslands_01_03",
+  "requested_catchment": "catchment_03",
+  "resource": "terrain\\battles\\wh3_dlc21_macro_emp_grasslands_01\\",
+  "loaded_tile_position": {
+    "x": "0.453125",
+    "y": "0.40625"
+  },
+  "loaded_tile_upgrades": [
+    "faction:",
+    "sound",
+    "settlement_towers_default",
+    "quest_battle_default",
+    "attacker_direction_north",
+    "attacker_direction_north"
+  ],
+  "identity_limit": "Export confirms terrain and resolved tile position; engine export omits catchment name. Input, manifest and process provenance retained. No independent catchment-resource decoder used.",
+  "frame": {
+    "depth": 1024,
+    "event": "frame",
+    "kind": "radar_frame",
+    "max_x": 512,
+    "max_z": 512,
+    "min_x": -512,
+    "min_z": -512,
+    "movement_boundary_verified": false,
+    "wall": "2026-09-26T08:25:09Z",
+    "width": 1024
+  },
+  "grid": {
+    "columns": 342,
+    "count": 116964,
+    "event": "grid_begin",
+    "min_x": -512,
+    "min_z": -512,
+    "query_max_x": 514,
+    "query_max_z": 514,
+    "radar_max_x": 512,
+    "radar_max_z": 512,
+    "rows": 342,
+    "step": 3,
+    "wall": "2026-09-26T08:25:09Z"
+  },
+  "inside_samples": 116281,
+  "outside_center_samples": 683,
+  "ground_counts_inside": {
+    "grass": 79379,
+    "mud": 3687,
+    "sharp_stones": 2990,
+    "forest": 30225
+  },
+  "forest_samples_inside": 30225,
+  "water_ground_samples_inside": 0,
+  "restricted_area_samples_inside": 2268,
+  "height_min_inside_m": 516.490967,
+  "height_max_inside_m": 624.861023,
+  "native_objects": 904,
+  "native_object_origins_inside": 887,
+  "cco_structures": 0,
+  "array_order": "[iz,ix]; row 0 at minimum Z; -1/NaN = outside-centre edge strip, unknown inside clipped sliver",
+  "timing": {
+    "grid_done": {
+      "batches": 29,
+      "blocked": 2287,
+      "cells": 116964,
+      "clock_elapsed_s": 0.87599945068359,
+      "event": "grid_done",
+      "wall": "2026-09-26T08:25:10Z"
+    },
+    "navigation_done": {
+      "cells": 116964,
+      "clock_elapsed_s": 2.3789978027344,
+      "event": "navigation_done",
+      "phase": "Deployed",
+      "reachable_side_1": 114391,
+      "reachable_side_2": 114391,
+      "speed": 0,
+      "wall": "2026-09-26T08:25:13Z"
+    },
+    "feature_conditions": {
+      "battle_type": "land_normal",
+      "event": "feature_conditions",
+      "is_siege": false,
+      "phase": "Deployed",
+      "speed": 0,
+      "version": "v9.0.0  Build 50218.4334952 (modded)",
+      "wall": "2026-09-26T08:25:11Z"
+    },
+    "launch": {
+      "game_left_running": false,
+      "status": "probe_done",
+      "elapsed_including_load_s": 35.5434067,
+      "peak_working_set_bytes": 4747472896,
+      "pid": 9788,
+      "game_paused": false
+    }
+  },
+  "cleanup": {
+    "outputs_verified_and_preserved": true,
+    "closed_utc": "2026-09-26T08:25:15.0620596Z",
+    "private_files_removed": true,
+    "closed_pid": 9788
+  },
+  "limits": [
+    "Radar frame is not proven movement walls.",
+    "Cell centres do not describe every point in a cell.",
+    "No shallow_water/deep_water centre sample is not proof of absence of narrow water features.",
+    "Objects are native origins, not collision outlines or complete tree enumeration.",
+    "Diagnostic unit reachability/coordinates excluded from terrain-only exports; not Empire-unit reachability.",
+    "One successful capture after a startup crash; no independent repeatability claim.",
+    "Full original XML and logs reside in operator capture folder; share terrain-only directory."
+  ],
+  "source_hashes": {
+    "capture.lua": "557b89732be3196af134d8c5e83d798d9fd413c69cc5437deec5907d211e1354",
+    "cleanup.json": "fda59424cbf92be27a86af2c10c56514dda7b9eb19d1e8d363089850d2f4e04a",
+    "launch.json": "0bf004d88f98e4f64156435589c6bf9aa491083a5163221e7604a07984db7e4b",
+    "manifest.json": "68e11b76a9a17ca7f93da654acfb6a0b5dac9ff5c3113336157355d4661904f5",
+    "map_probe.xml": "2a213ead1df05f4ed16011950bcec9b6ffe0b4baf36ea132842d9208a51430fb",
+    "reader.lua": "a664108d55057aacbd88a24fd65dc6875144d351b257a62c355572c65fd1ff42",
+    "status.json": "8ddef78c9fb60d13c0a5c41027f61bc0274c65f6d2b197b1f80743bd466dca9e",
+    "tww3_bai_map_capture_events.jsonl": "00e725ef099cc782625814c542f5f73f4c37eb08bb424bfe77d69a1c0566887a",
+    "tww3_bai_map_capture_grid.csv": "6c80fc8b46ea00efebb08231490642608c2e32a5200aed9669d5fe3d0a870e67",
+    "tww3_bai_map_capture_ready.xml": "fa3621e22aadabf864ecdc748ee29165ce2cf2df5c90dd6767d7a4150945b29e"
+  }
+}
