@@ -12,6 +12,8 @@
 --      units WALK there by orders; then it is checked again on real soldiers.
 --      Every alignment goes through the governor (apps.alignment: tolerance,
 --      not while moving, every 20 s at most, give up if it does not help).
+--      mask: apps.mask over the battlefield from the engine (is_area_clear +
+--      can_reach_position of our infantry), mask_batch cells per tick -> 'mask';
 --      hold: config.hold_s of game time, no orders at all (no rushing); every
 --      5 s the governor is asked on real soldiers and its answer is only
 --      logged ('governor'): it must not want to realign again and again;
@@ -34,6 +36,8 @@ local assessment = require('apps.assessment.services')
 local vision = require('apps.vision.services')
 local battlefield = require('apps.battlefield.services')
 local alignment = require('apps.alignment.services')
+local mask_services = require('apps.mask.services')
+local mask_adapter = require('apps.mask.adapter')
 
 local M = {}
 
@@ -42,7 +46,8 @@ local TIMER = 'tww3_bai_formation_probe_tick'
 M.LORD_WIDTH = 5
 -- stage name, turn of the archers (degrees), how: 'rotate' = the engine's
 -- relative rotate (pivots on the front rank), 'in_place' = our turn around the middle.
-M.BASE_STAGES = {{'placed', 0}, {'align', 0, 'align'}, {'hold', 0, 'hold'}}
+M.BASE_STAGES = {{'placed', 0}, {'align', 0, 'align'}, {'mask', 0, 'mask'}, {'hold', 0, 'hold'}}
+M.MASK_BATCH = 500
 M.TURN_STAGES = {{'turn_right', 90, 'rotate'}, {'back_from_right', -90, 'rotate'},
     {'turn_left', -90, 'rotate'}, {'back_from_left', 90, 'rotate'},
     {'turn_right_in_place', 90, 'in_place'}, {'back_right_in_place', -90, 'in_place'},
@@ -219,6 +224,39 @@ function M.main(bm, config, globals)
             check = check})
     end
 
+    -- Mask stage: read the next batch of cells from the engine; true when complete.
+    local function mask_step()
+        if not state.mask then
+            local _, field = battle_picture()
+            if not field then return false end
+            local reach_unit
+            for _, it in ipairs(state.own) do
+                if it.role == 'wall' then reach_unit = it.unit; break end
+            end
+            state.mask = {mask = mask_services.new(mask_services.grid(field)), next = 1, field = field,
+                reader = mask_adapter.reader(bm, vector_type, reach_unit or state.own[1].unit, mask_services.DEFAULTS.step_m),
+                clock = 0}
+        end
+        local m = state.mask
+        local started = os.clock and os.clock() or 0
+        local done
+        m.next, done = mask_services.fill(m.mask, m.reader, m.next, config.mask_batch or M.MASK_BATCH)
+        m.clock = m.clock + ((os.clock and os.clock() or 0) - started)
+        if done then
+            local fits = {}
+            for _, it in ipairs(state.own) do
+                if it.placement then
+                    local r = mask_services.fits(m.mask, it.placement)
+                    fits[#fits + 1] = {id = it.name, ok = r.ok, blocked = r.blocked, unknown = r.unknown}
+                end
+            end
+            emit('mask', {grid = m.mask.grid, summary = mask_services.summary(m.mask), code = mask_services.encode(m.mask),
+                fits = fits, lane = mask_services.lane(m.mask, 0, m.field.own.width_m, m.field.own.front_m,
+                    m.field.enemy.front_m), clock_s = m.clock})
+        end
+        return done
+    end
+
     local function finish(status)
         if state.finished then return end
         state.active = false
@@ -270,6 +308,7 @@ function M.main(bm, config, globals)
             state.align_done = align()
             state.still = 0  -- orders may have just been given
         end
+        if stage[3] == 'mask' and not state.mask_done then state.mask_done = mask_step() end
         if stage[3] == 'hold' then
             local rows = {}
             for _, it in ipairs(state.own) do
@@ -286,6 +325,8 @@ function M.main(bm, config, globals)
         local done
         if stage[3] == 'hold' then
             done = elapsed >= config.hold_s * 1000
+        elseif stage[3] == 'mask' then
+            done = state.mask_done or elapsed >= config.align_timeout_s * 1000
         elseif stage[3] == 'align' then
             -- Walking takes a while; the first ticks may still be standing.
             done = (elapsed >= config.settle_ms and state.still >= 3) or elapsed >= config.align_timeout_s * 1000

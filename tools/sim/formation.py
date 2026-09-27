@@ -11,7 +11,10 @@ sees the enemy (soldiers laid out evenly in each unit's rectangle, strength from
 apps.assessment) and finds the groups of both sides; src/apps/battlefield
 builds the field between the two main groups (axis, front lines, 40 m margin);
 src/apps/alignment turns and shifts our army onto the axis when it is clearly
-off (config own.bearing sets a deliberately crooked start).
+off (config own.bearing sets a deliberately crooked start). With config "map",
+src/apps/mask builds the "can we stand here?" mask over the battlefield from
+the captured map (tools/sim/mapgrid.py) and checks our units fit and the lane
+straight ahead is free.
 
 Output (default research/analysis/formation/<army>/):
   plan.json  the Lua result for both sides, overlaps
@@ -32,6 +35,7 @@ from matplotlib.patches import Polygon, Wedge  # noqa: E402
 from tools import config as project  # noqa: E402
 from tools import roster  # noqa: E402
 from tools.lua_runtime import new_runtime  # noqa: E402
+from tools.sim.mapgrid import MapGrid  # noqa: E402
 
 LORD_SHAPE = [{"ordered_m": 5, "front_m": 1.0, "depth_m": 1.0}]
 COLORS = {"wall": "#1f77b4", "arc": "#2ca02c", "lord": "#d62728", "other": "#7f7f7f"}
@@ -123,6 +127,22 @@ class Planner:
                     target = al.target(field, current, enemy), overhang = al.overhang(field)})
             end
         """)
+        self._mask = self.lua.eval("""
+            function(field, reader, placements)
+                local m = require('apps.mask.services')
+                local mask = m.new(m.grid(field))
+                m.fill(mask, reader)
+                local fits = {}
+                for _, p in ipairs(placements) do
+                    local r = m.fits(mask, p)
+                    fits[#fits + 1] = {id = p.id, ok = r.ok, blocked = r.blocked, unknown = r.unknown}
+                end
+                -- The lane straight ahead: our front width, from our front line to theirs.
+                local lane = m.lane(mask, 0, field.own.width_m, field.own.front_m, field.enemy.front_m)
+                return require('apps.core.json').encode({grid = mask.grid, summary = m.summary(mask),
+                    code = m.encode(mask), fits = fits, lane = lane})
+            end
+        """)
         self._strength = self.lua.eval("function(u) return require('apps.assessment.services').strength(u) end")
 
     def strength(self, unit):
@@ -139,6 +159,11 @@ class Planner:
         return json.loads(self._align(self.lua.table_from(field, recursive=True),
                                       self.lua.table_from(current, recursive=True),
                                       self.lua.table_from(enemy, recursive=True)))
+
+    def mask(self, field, grid, placements):
+        """apps.mask over the battlefield, read from a captured map."""
+        return json.loads(self._mask(self.lua.table_from(field, recursive=True), grid.reader,
+                                     self.lua.table_from(placements, recursive=True)))
 
     def battlefield(self, own_points, own_centre, enemy_points, enemy_centre):
         """apps.battlefield.frame between the two main groups."""
@@ -225,6 +250,21 @@ def corners(p):
 
 def draw(path, sides, units_by_id, title):
     fig, ax = plt.subplots(figsize=(10, 11))
+    mask = sides.get("mask")
+    if mask:
+        g = mask["grid"]
+        b = math.radians(g["frame"]["bearing"])
+        fx, fz, rx, rz = math.sin(b), math.cos(b), math.cos(b), -math.sin(b)
+        o = g["frame"]["origin"]
+        xs, zs = [], []
+        for r, row in enumerate(mask["code"].split("/")):
+            along = g["along0"] + (r + 0.5) * g["step"]
+            for c, ch in enumerate(row):
+                if ch == "#":
+                    across = g["across0"] + (c + 0.5) * g["step"]
+                    xs.append(o["x"] + fx * along + rx * across)
+                    zs.append(o["z"] + fz * along + rz * across)
+        ax.scatter(xs, zs, s=9, marker="s", c="#404040", alpha=0.6, lw=0)
     field = sides.get("battlefield")
     if field:
         c = field["corners"]
@@ -335,6 +375,8 @@ def simulate(army, planner=None, params=None):
     sides["own"] = own
     sides["own"]["vision"], sides["enemy"]["vision"] = picture["own"], picture["enemy"]
     sides["battlefield"], sides["alignment"] = field, alignment
+    if field and army.get("map"):
+        sides["mask"] = planner.mask(field, MapGrid(army["map"]), own["placements"])
     return sides, own_by_id
 
 
@@ -441,6 +483,13 @@ def main(argv=None):
                    f'\nих фронт нависает над нашим: слева {oh["left_m"]:.0f} м, справа {oh["right_m"]:.0f} м\n')
     else:
         aligned = ""
+    mask = sides.get("mask")
+    if mask:
+        bad = [f["id"] for f in mask["fits"] if not f["ok"]]
+        lane = "свободна" if mask["lane"]["free"] else f'занята с {mask["lane"]["first_blocked_along"]:.0f} м'
+        aligned += (f'маска 3 м: нельзя встать {mask["summary"]["blocked"]} из {mask["summary"]["cells"]} клеток '
+                    f'(тёмное); наши отряды {"все помещаются" if not bad else "не помещаются: " + ", ".join(bad)}; '
+                    f'полоса вперёд {lane}\n')
     title = aligned + (f'{own["strategy"]}: {own["status"]}. Стена {c["wall_width"]} м ({c["wall_front_m"]:.0f}×{c["wall_depth_m"]:.0f}), '
              f'лучники {c["archer_width"]} м в {c["rows"]} ряд(а), запас дальности {c["min_reach_m"]:.0f} м\n'
              f'пунктир — место для разворота лучников; бледные — враг (для картинки)')

@@ -1,0 +1,59 @@
+{
+  "summary": {
+    "blocked": 249,
+    "cells": 6120,
+    "known": 6120,
+    "stand": 5871
+  },
+  "compare": {
+    "agree_stand": 5865,
+    "agree_blocked": 243,
+    "game_blocked_map_stand": 6,
+    "game_stand_map_blocked": 6,
+    "unknown": 0
+  },
+  "agreement": 0.998,
+  "lane": {
+    "first_blocked_along": 144.03576660156,
+    "free": false
+  },
+  "fits": [
+    {
+      "blocked": 0,
+      "id": "own_1",
+      "ok": true,
+      "unknown": 0
+    },
+    {
+      "blocked": 0,
+      "id": "own_2",
+      "ok": true,
+      "unknown": 0
+    },
+    {
+      "blocked": 0,
+      "id": "own_3",
+      "ok": true,
+      "unknown": 0
+    },
+    {
+      "blocked": 0,
+      "id": "own_4",
+      "ok": true,
+      "unknown": 0
+    },
+    {
+      "blocked": 0,
+      "id": "own_5",
+      "ok": true,
+      "unknown": 0
+    },
+    {
+      "blocked": 0,
+      "id": "own_6",
+      "ok": true,
+      "unknown": 0
+    }
+  ],
+  "clock_s": 0.032001495361328
+}

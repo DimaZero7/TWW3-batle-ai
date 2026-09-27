@@ -359,7 +359,7 @@ class TestFormationProbe:
             CONFIG.turn_test = true
             local state = require('entries.formation_probe').main(bm, CONFIG, GLOBALS)
             bm:pump()
-            for _ = 1, 80 do bm:tick() end
+            for _ = 1, 140 do bm:tick() end
             assert(state.finished and bm.ended)
         """)
         rows = events(tmp_path / "tww3_bai_events.jsonl")
@@ -369,7 +369,7 @@ class TestFormationProbe:
         assert plan["strategy"] == "wall_and_arc" and plan["plan"]["layout"] == "line_and_blocks"
         stages = [r["stage"] for r in rows if r["event"] == "stage_snapshot"]
         assert len([r for r in rows if r["event"] == "hold_sample"]) >= 10
-        assert stages == ["placed", "align", "hold", "turn_right", "back_from_right", "turn_left", "back_from_left",
+        assert stages == ["placed", "align", "mask", "hold", "turn_right", "back_from_right", "turn_left", "back_from_left",
                           "turn_right_in_place", "back_right_in_place", "turn_left_in_place", "back_left_in_place"]
         assert any(r["event"] == "turn_sample" for r in rows)
         assert rows[-1]["event"] == "result" and rows[-1]["status"] == "completed"
@@ -379,11 +379,13 @@ class TestFormationProbe:
             CONFIG.hold_s = 5
             local state = require('entries.formation_probe').main(bm, CONFIG, GLOBALS)
             bm:pump()
-            for _ = 1, 20 do bm:tick() end
+            for _ = 1, 60 do bm:tick() end
             assert(state.finished)
         """)
         rows = events(tmp_path / "tww3_bai_events.jsonl")
-        assert [r["stage"] for r in rows if r["event"] == "stage_snapshot"] == ["placed", "align", "hold"]
+        assert [r["stage"] for r in rows if r["event"] == "stage_snapshot"] == ["placed", "align", "mask", "hold"]
+        mask = next(r for r in rows if r["event"] == "mask")
+        assert mask["summary"]["known"] == mask["summary"]["cells"] and mask["summary"]["cells"] > 0
         assert not any(r["event"] == "turn_sample" for r in rows)
         assert rows[-1]["orders_after_placed"] == 0 and rows[-1]["status"] == "completed"
 

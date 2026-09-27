@@ -53,3 +53,15 @@ def test_aligned_army_is_left_alone():
     army, _ = formation.load_army("first_attack")
     sides, _ = formation.simulate(army)
     assert not sides["alignment"]["check"]["needed"] and "own_before" not in sides
+
+
+def test_mask_shows_the_hamlet_and_the_lane_it_blocks():
+    army, _ = formation.load_army("hamlet_attack")
+    sides, _ = formation.simulate(army)
+    mask = sides["mask"]
+    s = mask["summary"]
+    # The hamlet is one solid block (~1880 m2 at 1 m): a couple of hundred 3 m cells inside the field.
+    assert s["known"] == s["cells"] and 150 < s["blocked"] < 400
+    assert all(f["ok"] for f in mask["fits"])
+    # Our front (with the lord) is wide enough to clip the hamlet's east corner on the way.
+    assert not mask["lane"]["free"] and 100 < mask["lane"]["first_blocked_along"] < 200
