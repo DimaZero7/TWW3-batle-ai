@@ -73,3 +73,42 @@ class TestMapCapture:
         assert grid[0] == "ix,iz,x,z,height,clear,ground,inside_radar,reach_side_1,reach_side_2"
         assert len(grid) == 1 + 10 * 10
         assert grid[1].endswith(',1,"grass",1,1,1')
+
+
+class TestAiVsAi:
+    def test_player_side_goes_to_ai_planner_and_result_is_recorded(self, lua, tmp_path):
+        lua.execute("""
+            local a1 = fake.unit('bai_a_kossars_1', 'kossars', 100, 0)
+            local a2 = fake.unit('bai_a_lancers', 'lancers', 150, 0)
+            local b1 = fake.unit('bai_b_kossars_1', 'kossars', -100, 0)
+            bm = fake.manager({{a1, a2}, {b1}})
+            -- side 1 is the player's army, side 2 already belongs to the battle AI
+            local armies = {}
+            for i = 1, 2 do armies[i] = bm:alliances():item(i):armies():item(1) end
+            armies[1].is_player_controlled = function() return true end
+            armies[2].is_player_controlled = function() return false end
+            -- CA library fake: records what the planner was told
+            attacks = 0
+            script_ai_planner = {new = function(_, name, sunits)
+                assert(#sunits == 2, 'own units expected')
+                return {attack_force = function(_, foes) assert(#foes == 1); attacks = attacks + 1 end,
+                    release = function() end}
+            end}
+            bm.get_scriptunit_for_unit = function(_, u) return {unit = u} end
+            local state = require('entries.ai_vs_ai').main(bm, {build='t', speed=3, timeout_ms=600000, tick_ms=1000})
+            bm:pump()
+            for _ = 1, 16 do bm:tick() end
+            bm.outcome, bm.winner = true, 2
+            bm:tick()
+            assert(state.finished and attacks >= 2, 'planner not used or not re-issued: ' .. attacks)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        kinds = [r["event"] for r in rows]
+        assert "error" not in kinds, rows[-1]
+        ready = next(r for r in rows if r["event"] == "ready")
+        assert ready["side_1_player_controlled"] is True and ready["side_2_player_controlled"] is False
+        assigned = {r["side"]: r["controller"] for r in rows if r["event"] == "ai_assigned"}
+        assert assigned == {1: "script_ai_planner", 2: "general_battle_ai"}
+        result = next(r for r in rows if r["event"] == "result")
+        assert result["status"] == "completed" and result["winner"] == 2
+        assert "progress" in kinds

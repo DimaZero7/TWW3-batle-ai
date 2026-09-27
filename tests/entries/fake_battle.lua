@@ -38,6 +38,7 @@ function F.unit(name, kind, x, z)
     function u:is_valid_target() return true end
     function u:is_visible_to_alliance() return true end
     function u:is_idle() return true end
+    function u:is_moving() return false end
     function u:is_commanding_unit() return false end
     function u:is_infantry() return true end
     function u:can_reach_position() return true end

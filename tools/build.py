@@ -3,6 +3,7 @@
 Usage:
     python -m tools.build duel --runs 3 --speed 20 --timeout 300
     python -m tools.build arena
+    python -m tools.build ai-vs-ai --speed 3
     python -m tools.build map-capture --step 3 --features
 
 Output: build/<target>/ with the .pack, the bundled script and manifest.json.
@@ -33,6 +34,14 @@ TARGETS = {
         "folder": "tww3_bai",
         "scenario": "triple_melee.xml",
         "packed_scenario": "triple_melee.xml",
+    },
+    "ai-vs-ai": {
+        "entry": "entries.ai_vs_ai",
+        "pack": "tww3_bai_ai_vs_ai.pack",
+        "script": "tww3_bai_ai_vs_ai",
+        "folder": "tww3_bai",
+        "scenario": "ai_vs_ai.xml",
+        "packed_scenario": "ai_vs_ai.xml",
     },
     "map-capture": {
         "entry": "entries.map_capture",
@@ -121,7 +130,7 @@ def main(argv=None):
     if args.target == "map-capture":
         run_config = {"step": args.step, "features": args.features}
     else:
-        run_config = {"runs": 1 if args.target == "arena" else args.runs, "speed": args.speed,
+        run_config = {"runs": args.runs if args.target == "duel" else 1, "speed": args.speed,
                       "timeout_ms": args.timeout * 1000, "tick_ms": args.tick_ms,
                       "scenario": TARGETS[args.target]["scenario"].removesuffix(".xml")}
     manifest = build(args.target, run_config, project.load().get("dependencies", []))
