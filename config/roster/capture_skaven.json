@@ -1,0 +1,53 @@
+{
+  "description": "Roster capture of Skaven units (user, 27.09.2026: Skaven have more soldiers per unit; queues past obstacles). Same widths as config/roster/capture.json.",
+  "faction": "wh2_main_skv_skaven",
+  "units": [
+    {
+      "key": "wh2_main_skv_cha_warlord_0",
+      "men": 1,
+      "general": true
+    },
+    {
+      "key": "wh2_main_skv_inf_clanrat_spearmen_0",
+      "men": 160
+    },
+    {
+      "key": "wh2_main_skv_inf_skavenslave_spearmen_0",
+      "men": 180
+    }
+  ],
+  "slots": [
+    [
+      0,
+      -100
+    ],
+    [
+      100,
+      -200
+    ],
+    [
+      210,
+      -120
+    ],
+    [
+      370,
+      -50
+    ],
+    [
+      -80,
+      -140
+    ]
+  ],
+  "widths": [
+    80,
+    60,
+    40,
+    30,
+    20,
+    15,
+    10,
+    8
+  ],
+  "baseline_width": 30,
+  "shape_timeout_s": 40
+}

@@ -15,8 +15,15 @@ M.MODULES = {assessment = assessment, strategy = strategy, contract = strategy_c
 function M.start(input, modules)
     local m = modules or M.MODULES
     local features = m.assessment.assess({role = input.role, own = input.own.units, enemy = input.enemy.units})
-    local decision = m.strategy.decide(features, input.own.units, m.assessment.category)
-    m.contract.check_decision(decision, input.own.units)
+    local decision
+    if input.roles then
+        -- Tests only: roles given outright (e.g. spearmen in two lines to test
+        -- movement), laid out like "wall and arc" without choosing a strategy.
+        decision = {strategy = 'test_roles', layout = 'line_and_blocks', roles = input.roles}
+    else
+        decision = m.strategy.decide(features, input.own.units, m.assessment.category)
+        m.contract.check_decision(decision, input.own.units)
+    end
     local result = {features = features, decision = decision}
     if decision.strategy == 'none' then
         result.status = 'no_strategy'

@@ -45,7 +45,7 @@ SCENARIO_HEAD = """<?xml version="1.0" encoding="utf-8"?>
   </alliance>
   <alliance id="1">
     <army>
-      <faction>{faction}</faction>
+      <faction>wh_main_emp_empire</faction>
       <deployment_area>
         <centre x="0" y="0"/><width metres="900"/><height metres="900"/><orientation radians="1.57"/>
       </deployment_area>

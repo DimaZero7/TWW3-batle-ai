@@ -1,0 +1,93 @@
+{
+  "key": "wh2_main_skv_cha_warlord_0",
+  "card": {
+    "date": "2026-09-27",
+    "game_version": "v9.0.1  Build 50381.4347557 (modded)",
+    "build": "ed6db434d8414818",
+    "run": "20260927T212729-roster-56",
+    "profile": {
+      "commanding": true,
+      "fast_speed": 4,
+      "flags": {
+        "is_anti_cavalry_infantry": false,
+        "is_artillery": false,
+        "is_cavalry": false,
+        "is_chariot": false,
+        "is_elephants": false,
+        "is_infantry": true,
+        "is_lancers": false,
+        "is_pikemen": false,
+        "is_war_beasts": false,
+        "is_war_machine": false
+      },
+      "initial_number_of_men": 1,
+      "missile_range": 0,
+      "owned_non_passive_special_abilities": [
+        "wh_main_character_abilities_deadly_onslaught",
+        "wh2_main_character_abilities_verminous_valour",
+        "wh_main_character_abilities_rally"
+      ],
+      "owned_passive_special_abilities": [
+        "wh2_main_unit_passive_scurry_away",
+        "wh3_main_unit_passive_single_entity"
+      ],
+      "slow_speed": 1.5,
+      "starting_ammo": 0,
+      "type": "wh2_main_skv_cha_warlord_0",
+      "unit_class": "com"
+    },
+    "details": {
+      "HealthMax": 4068,
+      "Mass": 650,
+      "Name": "Roster",
+      "NumEntitiesInitial": 1
+    },
+    "stats": {
+      "stat_armour": {
+        "value": 90,
+        "displayed": 90,
+        "base": 90
+      },
+      "stat_morale": {
+        "value": 0,
+        "displayed": 0,
+        "base": 0
+      },
+      "scalar_speed": {
+        "value": 40,
+        "displayed": 40,
+        "base": 40
+      },
+      "stat_melee_attack": {
+        "value": 50,
+        "displayed": 50,
+        "base": 50
+      },
+      "stat_melee_defence": {
+        "value": 55,
+        "displayed": 55,
+        "base": 55
+      },
+      "stat_weapon_damage": {
+        "value": 400,
+        "displayed": 400,
+        "base": 400
+      },
+      "stat_charge_bonus": {
+        "value": 35,
+        "displayed": 35,
+        "base": 35
+      }
+    }
+  },
+  "formation": {
+    "widths": [],
+    "note": "single entity: no ranks"
+  },
+  "ours": {
+    "fire": null,
+    "roles": [],
+    "notes": ""
+  },
+  "battle": {}
+}

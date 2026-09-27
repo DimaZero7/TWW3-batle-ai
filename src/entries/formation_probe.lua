@@ -20,6 +20,13 @@
 --      decision, 'approach_sample' every 2 ticks while units move,
 --      'approach_manoeuvre' with every soldier when a manoeuvre ends.
 --      config.goal: march to a point (the enemy army is not considered);
+--      config.logistics: a step that walks round an obstacle goes by
+--      apps.logistics — who goes which side, in which order and width, and
+--      when each unit sets off (a queue); 'logistics_plan' once, then
+--      'logistics_order' for every order it gives; the manoeuvre ends when
+--      every unit has had its last order and all stand. approach_sample then
+--      also carries crowding (soldiers of two units closer than 1 m) and,
+--      every 6th tick, every soldier;
 --      hold: config.hold_s of game time, no orders at all (no rushing); every
 --      5 s the governor is asked on real soldiers and its answer is only
 --      logged ('governor'): it must not want to realign again and again;
@@ -45,6 +52,7 @@ local alignment = require('apps.alignment.services')
 local mask_services = require('apps.mask.services')
 local mask_adapter = require('apps.mask.adapter')
 local approach = require('apps.approach.services')
+local logistics = require('apps.logistics.services')
 
 local M = {}
 
@@ -68,7 +76,7 @@ function M.main(bm, config, globals)
     if _G.tww3_bai_formation_probe then return end
     local state = {active = false, finished = false, batch = '', run_id = 'bootstrap', ticks = 0,
         own = {}, enemy = {}, by_name = {}, stage_index = 0, orders_after_placed = 0, orders_alignment = 0,
-        stages = {}, governor = alignment.new_governor(), commander = approach.new_commander()}
+        stages = {}, governor = alignment.new_governor(), commander = approach.new_commander(), holder = {}}
     for _, s in ipairs(M.BASE_STAGES) do
         if s[3] == 'hold' and config.approach then state.stages[#state.stages + 1] = {'approach', 0, 'approach'} end
         state.stages[#state.stages + 1] = s
@@ -194,7 +202,7 @@ function M.main(bm, config, globals)
         if decision == 'align' then
             state.governor.record_order(now, check)
             local target = alignment.target(field, current, enemy_of(picture))
-            local result = plan_services.start({role = config.role, bearing = target.bearing,
+            local result = plan_services.start({role = config.role, roles = config.roles, bearing = target.bearing,
                 own = {anchor = target.anchor, units = config.own.units},
                 enemy = {units = config.enemy.units, lord = state.placed.lord}, formation_params = config.formation_params})
             assert(result.formation, 'No strategy when aligning')
@@ -314,12 +322,13 @@ function M.main(bm, config, globals)
 
     -- Give the whole formation its new place (planned again at anchor/bearing).
     local function order_formation(anchor, bearing)
-        local result = plan_services.start({role = config.role, bearing = bearing,
+        local result = plan_services.start({role = config.role, roles = config.roles, bearing = bearing,
             own = {anchor = anchor, units = config.own.units},
             enemy = {units = config.enemy.units, lord = state.placed.lord}, formation_params = config.formation_params})
         assert(result.formation, 'No strategy when moving')
         for _, p in ipairs(result.formation.placements) do
-            local it = state.by_name[p.id]
+            -- A place that changed hands in a queue stays with its new holder.
+            local it = state.by_name[state.holder[p.id] or p.id]
             it.placement = p
             orders.move_formation(it.uc, vec(p.x, p.z), p.bearing, p.width or M.LORD_WIDTH, false)
             state.orders_approach = (state.orders_approach or 0) + 1
@@ -328,26 +337,131 @@ function M.main(bm, config, globals)
         return result.formation
     end
 
+    -- The logistics dispatcher's orders for this tick (apps.logistics).
+    local function logistics_tick(now)
+        local lg = state.logistics
+        local positions = {}
+        for _, it in ipairs(state.own) do
+            local p = it.unit:position()
+            local f = battlefield.to_frame(lg.field, {x = p:get_x(), z = p:get_z()})
+            f.still = not it.unit:is_moving()
+            positions[it.name] = f
+        end
+        for _, o in ipairs(state.dispatch.update(now / 1000, positions)) do
+            local it = state.by_name[o.id]
+            local row = lg.plan.units[o.id]
+            if o.final then
+                local q = lg.after_by_id[row.place]
+                orders.move_formation(it.uc, vec(q.x, q.z), q.bearing, q.width or M.LORD_WIDTH, false)
+            else
+                local w = battlefield.to_world(lg.field, o.along, o.across)
+                orders.move_formation(it.uc, vec(w.x, w.z), lg.field.bearing + (o.heading_deg or 0),
+                    o.width or M.LORD_WIDTH, false)
+            end
+            state.orders_approach = (state.orders_approach or 0) + 1
+            lg.orders = lg.orders + 1
+            emit('logistics_order', {id = o.id, leg = o.leg, final = o.final, t_ms = now - lg.started_ms,
+                along = o.along, across = o.across, width = o.width})
+        end
+    end
+
+    -- A step round an obstacle by apps.logistics: plan the queue and start it.
+    local function start_logistics(field, m, anchor, bearing, now)
+        local before, shapes = {}, {}
+        for _, it in ipairs(state.own) do
+            local q = it.placement
+            if q then
+                before[#before + 1] = {id = it.name, x = q.x, z = q.z, bearing = q.bearing, front_m = q.front_m,
+                    depth_m = q.depth_m, width = q.width, role = q.role}
+            end
+        end
+        for _, u in ipairs(config.own.units) do shapes[u.id] = u.shapes end
+        local result = plan_services.start({role = config.role, roles = config.roles, bearing = bearing,
+            own = {anchor = anchor, units = config.own.units},
+            enemy = {units = config.enemy.units, lord = state.placed.lord}, formation_params = config.formation_params})
+        assert(result.formation, 'No strategy when moving')
+        local after, after_by_id = result.formation.placements, {}
+        for _, q in ipairs(after) do after_by_id[q.id] = q end
+        local units = logistics.units_from(field, before, after, shapes)
+        local e = logistics.extent(units)
+        local band = logistics.band(m, e.from, e.to, config.logistics_params, e.left, e.right)
+        local started = os.clock and os.clock() or 0
+        local plan = logistics.plan(units, band, config.logistics_params)
+        local clock_s = (os.clock and os.clock() or 0) - started
+        local depths = {}
+        for _, u in ipairs(units) do depths[u.id] = u.depth_m end
+        state.dispatch = logistics.new_dispatch(plan, depths, config.logistics_params)
+        state.logistics = {plan = plan, field = field, after_by_id = after_by_id, started_ms = now, orders = 0}
+        -- Places of identical units may have changed hands (and stay so).
+        local holder = {}
+        for id, row in pairs(plan.units) do
+            state.by_name[id].placement = after_by_id[row.place]
+            holder[row.place] = id
+        end
+        state.holder = holder
+        state.placed.anchor, state.placed.bearing = anchor, bearing
+        local rows = {}
+        for id, row in pairs(plan.units) do
+            rows[#rows + 1] = {id = id, kind = row.kind, side = row.side, slot = row.slot, place = row.place,
+                release = row.release, route = row.route, finish_s = row.finish_s, enter_s = row.enter_s}
+        end
+        emit('logistics_plan', {band = band, makespan_s = plan.makespan_s,
+            splits_tried = plan.splits_tried, split = plan.split, swapped = plan.swapped == true, clock_s = clock_s,
+            units = rows, order = plan.order, before = before, after = after, field = field})
+        logistics_tick(now)
+    end
+
+    local function crowd_now(with_soldiers)
+        local list, rows = {}, {}
+        for _, it in ipairs(state.own) do
+            local men = unit_motion.soldiers(cco, it.unit)
+            if men.status == 'ok' then
+                local pts = {}
+                for i, v in ipairs(men.xz_dm) do pts[i] = v / 10 end
+                list[#list + 1] = {id = it.name, points = pts}
+                if with_soldiers then rows[it.name] = men.xz_dm end
+            end
+        end
+        local c = logistics.crowding(list)
+        return {soldiers = c.soldiers, pairs = c.pairs}, with_soldiers and rows or nil
+    end
+
     -- One tick of the approach commander; true when the stage is over.
     local function approach_tick(now, elapsed)
         local c = state.commander
         if c.current then
+            if state.dispatch then logistics_tick(now) end
             state.appr_still = any_moving() and 0 or (state.appr_still or 0) + 1
             if state.ticks % 2 == 0 then
                 local rows = {}
                 for _, it in ipairs(state.own) do rows[#rows + 1] = {script_name = it.name, motion = unit_motion.motion(it.unit)} end
-                emit('approach_sample', {kind = c.current.kind, t_ms = now - c.current.started_ms, units = rows})
+                -- Reading every soldier is costly (a test measure, not the AI): every 4th tick, all soldiers every 20th.
+                local crowd, soldiers, crowd_clock
+                if state.ticks % 4 == 0 then
+                    local started = os.clock and os.clock() or 0
+                    crowd, soldiers = crowd_now(state.ticks % 20 == 0)
+                    crowd_clock = (os.clock and os.clock() or 0) - started
+                end
+                emit('approach_sample', {kind = c.current.kind, t_ms = now - c.current.started_ms, units = rows,
+                    crowd = crowd, soldiers_dm = soldiers, crowd_clock_s = crowd_clock, logistics = state.dispatch ~= nil})
             end
             local took = now - c.current.started_ms
             local timeout = took >= config.manoeuvre_timeout_s * 1000
-            if (took >= config.settle_ms and state.appr_still >= 3) or timeout then
+            local dispatched = not state.dispatch or state.dispatch.done()
+            if (took >= config.settle_ms and state.appr_still >= 3 and dispatched) or timeout then
                 local kind = c.current.kind
                 c.finish(now, timeout and 'timeout' or 'stopped')
-                emit('approach_manoeuvre', {kind = kind, t_ms = took, reason = timeout and 'timeout' or 'stopped',
-                    units = units_row()})
+                local row = {kind = kind, t_ms = took, reason = timeout and 'timeout' or 'stopped', units = units_row(),
+                    logistics = state.dispatch ~= nil}
+                if state.dispatch then
+                    row.dispatch_log, row.logistics_orders = state.dispatch.log, state.logistics.orders
+                    state.dispatch = nil
+                end
+                emit('approach_manoeuvre', row)
             end
             return false
         end
+        local decide_started = os.clock and os.clock() or 0
         local picture, field = battle_picture()
         if not field then return elapsed >= config.approach_timeout_s * 1000 end
         local m = mask_services.new(mask_services.grid(field))
@@ -383,15 +497,20 @@ function M.main(bm, config, globals)
                 field.gap_m - approach.DEFAULTS.margin_m)
         end
         local decision, reason = c.decide({align = check, governor = gov, step = step, path = path})
+        local decide_clock = (os.clock and os.clock() or 0) - decide_started
         emit('approach_decision', {decision = decision, reason = reason, gap_m = field.gap_m, stop_gap_m = stop,
             own_reach_m = own_reach, enemy_reach_m = enemy_reach, step = step, path = path,
             align = {angle_off_deg = check.angle_off_deg, offset_m = check.offset_m, needed = check.needed},
-            mask = mask_services.summary(m)})
+            mask = mask_services.summary(m), clock_s = decide_clock})
         if decision == 'approach' then
             local b = math.rad(state.placed.bearing)
             local a = path.advance_m
-            order_formation({x = state.placed.anchor.x + math.sin(b) * a, z = state.placed.anchor.z + math.cos(b) * a},
-                state.placed.bearing)
+            local anchor = {x = state.placed.anchor.x + math.sin(b) * a, z = state.placed.anchor.z + math.cos(b) * a}
+            if config.logistics and path.detour then
+                start_logistics(field, m, anchor, state.placed.bearing, now)
+            else
+                order_formation(anchor, state.placed.bearing)
+            end
             c.start('approach', now, nil)
             state.appr_still = 0
         elseif decision == 'align' then
@@ -444,6 +563,7 @@ function M.main(bm, config, globals)
 
     local function tick()
         if not state.active then return end
+        local tick_started = os.clock and os.clock() or 0
         state.ticks = state.ticks + 1
         local now = bm:time_elapsed_ms()
         if state.stall.update(now, battle.health_signature(state.all_units)) then
@@ -498,10 +618,17 @@ function M.main(bm, config, globals)
             end
             if stage[3] == 'align' then check_aligned() end
             emit('stage_snapshot', {stage = stage[1], t_ms = elapsed, settled = state.still >= 2,
-                units = units_row()})
+                units = units_row(), tick_clock_max_s = state.tick_clock_max, tick_clock_sum_s = state.tick_clock_sum,
+                ticks = state.stage_ticks})
+            state.tick_clock_max, state.tick_clock_sum, state.stage_ticks = 0, 0, 0
             if state.stage_index < #state.stages then begin_stage(state.stage_index + 1) else finish('completed') end
         end
         flush()
+        -- How long the script takes per tick (the game waits for it).
+        local took = (os.clock and os.clock() or 0) - tick_started
+        state.tick_clock_max = math.max(state.tick_clock_max or 0, took)
+        state.tick_clock_sum = (state.tick_clock_sum or 0) + took
+        state.stage_ticks = (state.stage_ticks or 0) + 1
     end
 
     -- Where the enemy is, from our side's view only.
@@ -526,7 +653,7 @@ function M.main(bm, config, globals)
         local bearing = config.own.start_bearing or formation.facing(config.own.anchor, centre)
         state.placed = {anchor = config.own.anchor, bearing = bearing, lord = lord}
         -- The enemy roster (unit types) is known before the battle, as to the player.
-        local result = plan_services.start({role = config.role, bearing = bearing,
+        local result = plan_services.start({role = config.role, roles = config.roles, bearing = bearing,
             own = {anchor = config.own.anchor, units = config.own.units},
             enemy = {units = config.enemy.units, lord = lord}, formation_params = config.formation_params})
         emit('plan', {facing_source = source, enemies_seen = seen, enemy_centre = centre, bearing = bearing,

@@ -17,6 +17,7 @@ Install and launch with tools/launcher/launch.ps1.
 import argparse
 import hashlib
 import json
+from pathlib import Path
 import sys
 
 from tools import config as project
@@ -118,8 +119,8 @@ FORMATION_STAGE_S = 20
 # enemy-layout: game time the game AI army is watched after deployment.
 ENEMY_LAYOUT_HOLD_S = 90
 # formation-probe approach: one manoeuvre at most, the whole approach at most.
-FORMATION_MANOEUVRE_S = 240
-FORMATION_APPROACH_S = 600
+FORMATION_MANOEUVRE_S = 360
+FORMATION_APPROACH_S = 900
 # formation-probe: longest walk to the aligned place (walking pace 1.5 m/s).
 FORMATION_ALIGN_S = 120
 # formation-probe: the army stands this long after placing and must not move.
@@ -229,11 +230,14 @@ def main(argv=None):
     parser.add_argument("--window", type=float, nargs=4, metavar=("MIN_X", "MAX_X", "MIN_Z", "MAX_Z"),
                         help="map-capture: capture only this area")
     parser.add_argument("--plan", default="hamlet", help="move-probe: plan in config/move-plans/")
+    parser.add_argument("--capture", type=Path, help="roster-capture: capture list instead of config/roster/capture.json")
     parser.add_argument("--army", default="first_attack", help="formation-probe: army in config/armies/")
     parser.add_argument("--layout", default="balanced_5", help="enemy-layout: layout in config/armies/defender_layouts.json")
     parser.add_argument("--enemy-mode", choices=("native", "defend"), default="defend",
                         help="enemy-layout: game AI as set by the battle, or told to defend where it deployed")
     parser.add_argument("--turn-test", action="store_true", help="formation-probe: also turn the archers right/left")
+    parser.add_argument("--engine-only", action="store_true",
+                        help="formation-probe: no queues past obstacles (apps.logistics off), the engine alone")
     parser.add_argument("--features", action="store_true",
                         help="map-capture: also read objects and reachability after deployment")
     args = parser.parse_args(argv)
@@ -258,7 +262,7 @@ def main(argv=None):
             stall_ms = max(stall_ms, int((model_s + 120) * 1000))
         if args.target == "roster-capture":
             from tools import roster
-            spec = roster.write_scenario()
+            spec = roster.write_scenario(roster.load_capture(args.capture) if args.capture else None)
             capture, model_s = roster.run_config(spec, args.speed, MOVE_SETTLE_MS)
             run_config.update(capture)
             stall_ms = max(stall_ms, int((model_s + 120) * 1000))
@@ -270,6 +274,8 @@ def main(argv=None):
             run_config.update(probe_config, stage_timeout_s=FORMATION_STAGE_S, army=args.army,
                               hold_s=FORMATION_HOLD_S, turn_test=args.turn_test, align_timeout_s=FORMATION_ALIGN_S,
                               manoeuvre_timeout_s=FORMATION_MANOEUVRE_S, approach_timeout_s=FORMATION_APPROACH_S)
+            if args.engine_only:
+                run_config["logistics"] = False
             # placed + align + mask (same limit) + hold.
             model_s = (FORMATION_STAGE_S + 2 * FORMATION_ALIGN_S + FORMATION_HOLD_S
                        + (FORMATION_APPROACH_S if probe_config.get("approach") else 0)

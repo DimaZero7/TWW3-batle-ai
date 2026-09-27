@@ -56,6 +56,19 @@ CARD_STATS = {"armour": "stat_armour", "melee_attack": "stat_melee_attack", "mel
               "missile_damage": "stat_missile_damage_over_time", "ammo": "stat_ammo"}
 
 
+def test_roles(army, units):
+    """Tests only: army "roles" = {unit key: [role per instance]} laid out without a strategy."""
+    spec = army["own"].get("roles")
+    if not spec:
+        return None
+    seen, roles = {}, {}
+    for u in units:
+        k = u["key"]
+        seen[k] = seen.get(k, 0) + 1
+        roles[u["id"]] = spec[k][seen[k] - 1]
+    return roles
+
+
 def _number(v):
     return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
@@ -68,7 +81,8 @@ def roster_units(spec, entries):
         entry = by_key.get(item["key"])
         assert entry, f'{item["key"]} is not in data/roster (python -m tools.roster update ...)'
         profile, stats = entry["card"]["profile"], entry["card"]["stats"]
-        shapes = [{"ordered_m": w["ordered_m"], "front_m": w["front_m"], "depth_m": w["depth_m"]}
+        shapes = [{"ordered_m": w["ordered_m"], "front_m": w["front_m"], "depth_m": w["depth_m"],
+                   "reform_s": w.get("reform_s")}
                   for w in entry["formation"].get("widths", []) if "front_m" in w]
         card = {name: _number((stats.get(key) or {}).get("value")) for name, key in CARD_STATS.items()}
         for i in range(item["count"]):
@@ -216,10 +230,12 @@ class Planner:
     def facing(self, a, b):
         return self._facing(self.lua.table_from({"x": a[0], "z": a[1]}), self.lua.table_from({"x": b[0], "z": b[1]}))
 
-    def start(self, role, anchor, bearing, units, enemy_units, enemy_lord=None, formation_params=None):
+    def start(self, role, anchor, bearing, units, enemy_units, enemy_lord=None, formation_params=None, roles=None):
         """apps.plan.start: {status, features, decision, formation}."""
         data = {"role": role, "bearing": bearing, "own": {"anchor": {"x": anchor[0], "z": anchor[1]}, "units": units},
                 "enemy": {"units": enemy_units}}
+        if roles:
+            data["roles"] = roles
         if enemy_lord:
             data["enemy"]["lord"] = {"x": enemy_lord[0], "z": enemy_lord[1]}
         if formation_params:
@@ -399,7 +415,7 @@ def simulate(army, planner=None, params=None):
     def place(anchor, bearing):
         plan = planner.start(army["own"].get("role"), anchor, bearing, [dict(u, shapes=[dict(s) for s in u["shapes"]])
                                                                          for u in own_units],
-                             enemy_units, enemy_lord, params)
+                             enemy_units, enemy_lord, params or army.get("formation_params"), test_roles(army, own_units))
         own = plan.get("formation") or {"placements": [], "options": [], "overlaps": [], "unplaced": []}
         own.update(status=plan["status"], strategy=plan["decision"]["strategy"], features=plan["features"],
                    decision=plan["decision"], anchor=list(anchor), bearing=bearing)
@@ -464,7 +480,7 @@ def approach(planner, sides, own, picture, field, place, own_by_id, enemy_by_id,
     its walking time, so the alignment governor's 20 s cooldown is respected."""
     ap, al, lua = planner.approach, planner.alignment, planner.lua
     commander, governor = ap.new_commander(), al.new_governor()
-    now, log, trail = 0, [], []
+    now, log, trail, moves = 0, [], [], []
     for _ in range(max_decisions):
         own_sh = [] if goal else _shooters(field, own["placements"], own_by_id)
         # Marching to a goal point: the enemy army is not considered (no reach).
@@ -501,10 +517,13 @@ def approach(planner, sides, own, picture, field, place, own_by_id, enemy_by_id,
             anchor = (own["anchor"][0] + math.sin(b) * advance, own["anchor"][1] + math.cos(b) * advance)
             bearing, walk = own["bearing"], advance / WALK_MPS
         commander.start(decision, now, None)
+        before_field = field
         own, picture, field = place(anchor, bearing)
+        moves.append({"decision": decision, "field": before_field, "before": trail[-1], "after": own["placements"],
+                      "detour": bool((path or {}).get("detour")) and decision == "approach"})
         now += walk * 1000
         commander.finish(now, "stopped")
-    sides["approach"] = {"log": log, "trail": trail, "final": log[-1] if log else None}
+    sides["approach"] = {"log": log, "trail": trail, "moves": moves, "final": log[-1] if log else None}
     return own, picture, field
 
 
@@ -543,6 +562,11 @@ def probe(army, speed, settle_ms, planner=None):
             if army.get("goal"):
                 config["goal"] = {"x": army["goal"][0], "z": army["goal"][1]}
             config["approach"] = bool(army.get("approach"))
+            config["logistics"] = bool(army.get("logistics"))
+            if army["own"].get("roles"):
+                config["roles"] = test_roles(army, units)
+            if army.get("formation_params"):
+                config["formation_params"] = army["formation_params"]
             config["role"] = army["own"].get("role")
         else:
             config["enemy"] = {"anchor": {"x": ax, "z": az},
@@ -551,7 +575,7 @@ def probe(army, speed, settle_ms, planner=None):
                                "placements": [
                 {"script_name": names[p["id"]], "role": p["role"], "x": p["x"], "z": p["z"], "bearing": p["bearing"],
                  "width": p.get("width") or 5} for p in sides["enemy"]["placements"]]}
-    return probe_xml(xml_sides), config, sides
+    return probe_xml(xml_sides, army["own"].get("faction", "wh_main_emp_empire")), config, sides
 
 
 PROBE_UNIT = """      <unit num_soldiers="{men}" script_name="{script_name}">
@@ -562,7 +586,7 @@ PROBE_UNIT = """      <unit num_soldiers="{men}" script_name="{script_name}">
 """
 
 
-def probe_xml(xml_sides, faction="wh_main_emp_empire"):
+def probe_xml(xml_sides, faction="wh_main_emp_empire", enemy_faction="wh_main_emp_empire"):
     head = roster.SCENARIO_HEAD
     # Reuse the roster scenario frame; swap its fixed enemy army for ours.
     start = head.index('  <alliance id="1">')
@@ -574,6 +598,7 @@ def probe_xml(xml_sides, faction="wh_main_emp_empire"):
             general=f'        <general><name>{side}</name><star_rating level="1"/></general>\n' if u["general"] else "")
             for u in units)
     enemy_alliance = head[head.index('  <alliance id="0">'):head.index('  <alliance id="1">')]
+    enemy_alliance = enemy_alliance.replace("<faction>{faction}</faction>", "<faction>{enemy_faction}</faction>")
     enemy_alliance = enemy_alliance.replace('<alliance id="0">', '<alliance id="1">') \
         .replace('<orientation radians="4.71"/>', '<orientation radians="1.57"/>') \
         .replace('<rout_position x="600" y="0"/>', '<rout_position x="-600" y="0"/>') \
@@ -586,7 +611,7 @@ def probe_xml(xml_sides, faction="wh_main_emp_empire"):
                         "Generated by tools/sim/formation.py from config/armies/. Side 1: our\n"
                         "     army, placed by src/apps/formation in battle (src/entries/formation_probe.lua).\n"
                         "     Side 2: the enemy, teleported to its simulated plan and held.")
-    return text.format(faction=faction, units=blocks["own"])
+    return text.format(faction=faction, enemy_faction=enemy_faction, units=blocks["own"])
 
 
 def main(argv=None):

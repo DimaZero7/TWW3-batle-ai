@@ -21,3 +21,10 @@ research/evidence/**
 !research/evidence/**/*.png
 !research/evidence/**/*.svg
 !research/evidence/**/*.md
+# Analysis output is the same: data stays local, only pictures and write-ups
+# are committed (user, 27.09.2026: analysis data is never committed).
+research/analysis/**
+!research/analysis/**/
+!research/analysis/**/*.png
+!research/analysis/**/*.svg
+!research/analysis/**/*.md
