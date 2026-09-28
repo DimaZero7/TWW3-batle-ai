@@ -1,6 +1,6 @@
 # Game knowledge
 
-[Documentation](../README.md) · [Русский](../../ru/game/README.md)
+[← Back](../README.md) · [Documentation](../README.md) · [Русский](../../ru/game/README.md)
 
 What is verified in Total War: WARHAMMER III (v9.0.0, build 50218.4334952,
 September 2026) and how it was measured. Only game facts and methods live

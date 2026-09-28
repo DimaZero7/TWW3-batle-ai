@@ -1,6 +1,6 @@
 # map
 
-[Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/map.md)
+[← Назад](README.md) · [Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/map.md)
 
 Чтение карты: рамка мини-карты (радара), сетка клеток, высота, грунт,
 проходимость клетки, здания и сооружения. Код: `src/apps/map/`.

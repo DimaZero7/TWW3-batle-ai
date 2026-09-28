@@ -1,6 +1,6 @@
 # Common unit state sensors
 
-[Units](README.md) · [Русский](../../../ru/game/units/state-sensors.md) · [Complete field table](state-fields.md)
+[← Back](README.md) · [Units](README.md) · [Русский](../../../ru/game/units/state-sensors.md) · [Complete field table](state-fields.md)
 
 This is shared infrastructure knowledge: how to read a unit's changing condition. Faction tactics, unit balance statistics, abilities, equipment and special racial mechanics belong to separate research. Test subjects were the existing shieldless Spearmen, basic Archers and rank-1 foot Empire General; their fixture values are examples, not constants for algorithms.
 

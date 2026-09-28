@@ -1,6 +1,6 @@
 # core
 
-[Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/core.md)
+[← Назад](README.md) · [Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/core.md)
 
 Общие утилиты без движка и без зависимостей от других приложений.
 Код: `src/apps/core/`.

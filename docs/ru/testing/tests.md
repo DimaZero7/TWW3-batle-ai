@@ -1,6 +1,6 @@
 # Тесты без игры
 
-[Документация](../README.md) · [English](../../en/testing/tests.md)
+[← Назад](README.md) · [Документация](../README.md) · [English](../../en/testing/tests.md)
 
 ```bash
 .venv/Scripts/python -m pytest

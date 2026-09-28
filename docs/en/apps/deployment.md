@@ -1,6 +1,6 @@
 # deployment
 
-[Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/deployment.md)
+[← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/deployment.md)
 
 Initial placement under the `deployment-placement-v2` contract.
 Code: `src/apps/deployment/`. Measurements: [deployment](../game/units/deployment.md).

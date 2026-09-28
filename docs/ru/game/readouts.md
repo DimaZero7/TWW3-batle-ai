@@ -1,6 +1,6 @@
 # Каталог показателей
 
-[Знания об игре](README.md) · [English](../../en/game/readouts.md)
+[← Назад](README.md) · [Знания об игре](README.md) · [English](../../en/game/readouts.md)
 
 Всё, что можно прочитать об отрядах и бое: и то, что мы уже собираем, и то, что есть в игре, но ещё не проверено. Для каждого прогона выбираем профиль — список того, что собирать ([config/readouts](../../../config/readouts/)). Страница создана из [data/readouts/catalog.json](../../../data/readouts/catalog.json) командой `python -m tools.readouts docs`; правьте JSON, а не эту страницу.
 

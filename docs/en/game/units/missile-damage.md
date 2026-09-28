@@ -1,6 +1,6 @@
 # Missile damage on infantry
 
-[English](missile-damage.md) | [Русский](../../../ru/game/units/missile-damage.md) · [Units](README.md)
+[← Back](README.md) · [English](missile-damage.md) | [Русский](../../../ru/game/units/missile-damage.md) · [Units](README.md)
 
 Measured 28.09.2026, three runs (`archer-range --range-mode damage`, distances
 moved between lanes): Empire archers (90 men, 20 arrows each, missile damage 19),

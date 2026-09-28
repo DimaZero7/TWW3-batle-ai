@@ -1,6 +1,6 @@
 # core
 
-[Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/core.md)
+[← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/core.md)
 
 Shared helpers with no engine access and no dependency on other apps.
 Code: `src/apps/core/`.

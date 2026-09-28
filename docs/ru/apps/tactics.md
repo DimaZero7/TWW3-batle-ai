@@ -1,6 +1,8 @@
 # tactics
 
-[Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/tactics.md)
+[← Назад](README.md) · [Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/tactics.md)
+
+**Узлы дерева:** [Сближение до окна](../tree/approach.md) · [Обход не под стрелками](../tree/safe_detour.md) · [Стоп под обстрелом](../tree/under_fire_stop.md)
 
 Ствол тактического уровня — фаза 2 (сближение до окна) с ветками `align`,
 `safe_detour`, `under_fire_stop` ([tree](tree.md)). **Одни и те же решения в игре и в

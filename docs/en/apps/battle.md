@@ -1,6 +1,6 @@
 # battle
 
-[Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/battle.md)
+[← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/battle.md)
 
 Battle context: sides, armies, units and roles. The only place that walks
 `bm:alliances()`; other apps receive plain lists. Code: `src/apps/battle/`.

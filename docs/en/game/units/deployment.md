@@ -1,6 +1,6 @@
 # Starting deployment
 
-[Units](README.md) · [Русский](../../../ru/game/units/deployment.md) · [Current policy contract](../../apps/deployment.md)
+[← Back](README.md) · [Units](README.md) · [Русский](../../../ru/game/units/deployment.md) · [Current policy contract](../../apps/deployment.md)
 
 Verified on 26 September 2026 in five controlled diagnostic launches on [The Moorlands Route](../maps/moorlands-route.md), using 15 Empire units per side (General, eight shieldless Spearmen, six Archers), rank 1, XP 0, Ultra. All owned games were closed. The fifth run completed deployment and 10 simulated combat seconds at x7; these were synthetic test policies, not a fighter competition. [Evidence and limitations](../../../../research/evidence/units/deployment-20260926/README.md).
 

@@ -1,6 +1,6 @@
 # Ошибки и неизвестные значения
 
-[Документация](../README.md) · [English](../../en/architecture/error_handling.md)
+[← Назад](README.md) · [Документация](../README.md) · [English](../../en/architecture/error_handling.md)
 
 В бою ошибка скрипта не должна молча превратиться в поведение ванильного ИИ.
 Поэтому в проекте три правила.

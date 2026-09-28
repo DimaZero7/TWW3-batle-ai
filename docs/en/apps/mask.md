@@ -1,6 +1,6 @@
 # mask
 
-[Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/mask.md)
+[← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/mask.md)
 
 "Can we stand here?" mask over the [battlefield](battlefield.md): a grid in the
 battlefield frame, 3 m cells (user's decision). A cell is standable when the area

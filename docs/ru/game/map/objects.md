@@ -1,6 +1,6 @@
 # Физические объекты и эффекты сооружений
 
-[Инструкция по карте](README.md) · [English](../../../en/game/map/objects.md) · [Доступность точек](passages.md)
+[← Назад](README.md) · [Инструкция по карте](README.md) · [English](../../../en/game/map/objects.md) · [Доступность точек](passages.md)
 
 ## Полученный список объектов
 

@@ -1,6 +1,6 @@
 # Запуск боя и результаты
 
-[Документация](../README.md) · [Сборка](build.md) · [English](../../en/launch/run.md)
+[← Назад](README.md) · [Документация](../README.md) · [Сборка](build.md) · [English](../../en/launch/run.md)
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -Target duel

@@ -1,6 +1,6 @@
 # observation
 
-[Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/observation.md)
+[← Назад](README.md) · [Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/observation.md)
 
 **Сводка одной стороны** — единственное, что сторона ИИ имеет право получить.
 Код: `src/apps/observation/`.

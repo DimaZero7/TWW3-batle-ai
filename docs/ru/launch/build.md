@@ -1,6 +1,6 @@
 # Сборка pack
 
-[Документация](../README.md) · [Запуск](run.md) · [English](../../en/launch/build.md)
+[← Назад](README.md) · [Документация](../README.md) · [Запуск](run.md) · [English](../../en/launch/build.md)
 
 Сборка не трогает игру: она только создаёт файлы в `build/<цель>/`.
 

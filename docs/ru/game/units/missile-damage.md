@@ -1,6 +1,6 @@
 # Урон стрелами по пехоте
 
-[English](../../../en/game/units/missile-damage.md) | [Русский](missile-damage.md) · [Отряды](README.md)
+[← Назад](README.md) · [English](../../../en/game/units/missile-damage.md) | [Русский](missile-damage.md) · [Отряды](README.md)
 
 Замер 28.09.2026, три прогона (`python -m tools.build archer-range --range-mode damage
 --damage-rotate 0|2|1 --speed 20`): в четырёх полосах по 200 м друг от друга

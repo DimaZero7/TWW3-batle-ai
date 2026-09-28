@@ -1,6 +1,38 @@
 # Documentation
 
-[Project](../../README.md) · **English** | [Русский](../ru/README.md)
+[← Back](../../README.md) · [Project](../../README.md) · **English** | [Русский](../ru/README.md)
+
+## The AI tree — start here
+
+Everything the battle AI does, by phases and branches, with diagrams and examples — **[The AI tree](tree/README.md)**.
+
+<!-- generated:tree:trunk -->
+```mermaid
+flowchart BT
+  classDef done fill:#E1F5EE,stroke:#0F6E56,color:#04342C
+  classDef started fill:#FAEEDA,stroke:#854F0B,color:#412402
+  classDef planned fill:#F1EFE8,stroke:#888780,color:#444441
+  base["Base<br/>18 modules"]:::done
+  deploy["1 · Deployment<br/><i>Strategic</i>"]:::done
+  approach["2 · Approach to the window<br/><i>Tactical</i>"]:::done
+  fire["3 · Fire from the window<br/><i>Combat</i>"]:::started
+  their_archers["4 · Their archers hit our wall<br/><i>Combat</i>"]:::started
+  infantry_attack["5 · Infantry attacks<br/><i>Combat</i>"]:::planned
+  echelon_step["6 · Echelon to their archers<br/><i>Combat</i>"]:::planned
+  breakthroughs["7 · Breakthroughs<br/><i>Combat</i>"]:::planned
+  finish["8 · Finish and withdrawal<br/><i>Combat</i>"]:::planned
+  base --> deploy
+  deploy --> approach
+  approach --> fire
+  fire --> their_archers
+  their_archers --> infantry_attack
+  infantry_attack --> echelon_step
+  echelon_step --> breakthroughs
+  breakthroughs --> finish
+```
+<!-- /generated -->
+
+- [All nodes and switches](tree/README.md#all-nodes) · [Module map by level](tree/modules.md) · [How to keep the docs](architecture/documentation.md)
 
 ## Architecture
 

@@ -1,6 +1,6 @@
 # Live experiments and reproducibility
 
-[Units](README.md) · [Русский](../../../ru/game/units/evidence.md)
+[← Back](README.md) · [Units](README.md) · [Русский](../../../ru/game/units/evidence.md)
 
 Ten completed automatic runs, **55,356 samples**, with raw orders/state transitions and verified cleanup records. Every promoted run has `probe_done`, no `probe_error`, and its game was closed. Development failures are not used as successful capability evidence.
 

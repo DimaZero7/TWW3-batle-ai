@@ -1,6 +1,6 @@
 # Bridge identification and the height-layer check
 
-[Map guide](README.md) · [Русский](../../../ru/game/map/bridges.md) · [Objects](objects.md) · [Verified fords](passages.md)
+[← Back](README.md) · [Map guide](README.md) · [Русский](../../../ru/game/map/bridges.md) · [Objects](objects.md) · [Verified fords](passages.md)
 
 ## Identify the object
 

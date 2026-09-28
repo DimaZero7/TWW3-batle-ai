@@ -1,6 +1,6 @@
 # Видимость и скрытность
 
-[Отряды](README.md) · [English](../../../en/game/units/visibility.md)
+[← Назад](README.md) · [Отряды](README.md) · [English](../../../en/game/units/visibility.md)
 
 Проверено 27.09.2026 в игре на карте The Moorlands Route (`catchment_03`),
 с модом True Sight, ×20. Прогон `20260927-142521`, режим [unit_readout](../../apps/entries.md#unit_readout).

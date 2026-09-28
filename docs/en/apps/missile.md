@@ -1,6 +1,6 @@
 # missile
 
-[Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/missile.md)
+[← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/missile.md)
 
 Missile damage: HP a second a shooting block takes off its target, and a step of a missile
 exchange for the simulation. Pure code, the same model for both sides. Code: `src/apps/missile/`.

@@ -1,6 +1,6 @@
 # assessment
 
-[Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/assessment.md)
+[← Назад](README.md) · [Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/assessment.md)
 
 Оценка сил в начале боя. Чистый код: по составу обеих армий (данные
 [ростера](../game/units/roster.md)) считает один набор признаков. Стратегии

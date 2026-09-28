@@ -1,6 +1,6 @@
 # Lua map reader and capture tools
 
-[Map guide](README.md) · [Русский](../../../ru/game/map/tools.md)
+[← Back](README.md) · [Map guide](README.md) · [Русский](../../../ru/game/map/tools.md)
 
 ## Components
 

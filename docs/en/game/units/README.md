@@ -1,6 +1,6 @@
 # Verified unit controls
 
-[English](README.md) | [Русский](../../../ru/game/units/README.md) · [Project](../../../../README.md)
+[← Back](../README.md) · [English](README.md) | [Русский](../../../ru/game/units/README.md) · [Project](../../../../README.md)
 
 Live experiments, 26 September 2026, WH3 **v9.0.0, build 50218.4334952**.
 This is a practical interface for a classical tactical algorithm. It is not an AI implementation.

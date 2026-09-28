@@ -778,7 +778,8 @@ def main(argv=None):
     fit = sides.get("start_fit")
     if fit:
         how = {"as_planned": "помещается как задумано", "width": f'другая ширина (вариант {fit.get("option")})',
-               "shift": "сдвинут: {side_m:+.0f} м вбок, {back_m:.0f} м назад".format(**(fit.get("shift") or {})),
+               "shift": "сдвинут: {side_m:+.0f} м вбок, {back_m:.0f} м назад".format(
+                   **(fit.get("shift") or {"side_m": 0, "back_m": 0})),
                "turn": f'повёрнут на {fit.get("turn_deg")}°', "none": "места не нашлось"}.get(fit.get("how"), fit.get("how"))
         aligned = f'по карте в начале: {how}\n' + aligned
     appr = sides.get("approach")

@@ -1,6 +1,6 @@
 # Running a battle and results
 
-[Documentation](../README.md) · [Build](build.md) · [Русский](../../ru/launch/run.md)
+[← Back](README.md) · [Documentation](../README.md) · [Build](build.md) · [Русский](../../ru/launch/run.md)
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -Target duel

@@ -1,6 +1,6 @@
 # Radar frame: how we recover the boundary candidate
 
-[Map guide](README.md) · [Русский](../../../ru/game/map/boundaries.md)
+[← Back](README.md) · [Map guide](README.md) · [Русский](../../../ru/game/map/boundaries.md)
 
 The verified result is a **radar frame**, not a universal playable-area getter.
 The game exposes a world-to-radar transformation:

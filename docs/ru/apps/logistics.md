@@ -1,6 +1,8 @@
 # logistics — очереди у препятствия
 
-[Архитектура ИИ](../architecture/ai-design.md) · [Сближение](approach.md) · [Маска](mask.md)
+[← Назад](README.md) · [Архитектура ИИ](../architecture/ai-design.md) · [Сближение](approach.md) · [Маска](mask.md)
+
+**Узлы дерева:** [Логистика у препятствия](../tree/logistics.md)
 
 `src/apps/logistics/services.lua` — чистый модуль. Когда шаг [сближения](approach.md)
 ведёт строй в обход препятствия, модуль решает логистику: кто обходит, какой

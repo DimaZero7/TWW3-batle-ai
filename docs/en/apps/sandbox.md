@@ -1,6 +1,6 @@
 # sandbox
 
-[Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/sandbox.md)
+[← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/sandbox.md)
 
 Loads API v1 policies into a restricted environment. Needed when running
 someone else's policy code. Code: `src/apps/sandbox/services.lua`.

@@ -1,6 +1,6 @@
 # Commands tested in battle
 
-[Units](README.md) · [Русский](../../../ru/game/units/commands.md) · [Evidence](evidence.md)
+[← Back](README.md) · [Units](README.md) · [Русский](../../../ru/game/units/commands.md) · [Evidence](evidence.md)
 
 Create one controller per unit so that commands do not accidentally affect an entire group:
 

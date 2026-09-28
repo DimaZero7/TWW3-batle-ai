@@ -1,6 +1,6 @@
 # Вода и модификаторы поверхности
 
-[Инструкция по карте](README.md) · [English](../../../en/game/map/water-ground.md) · [Движение и переправы](passages.md)
+[← Назад](README.md) · [Инструкция по карте](README.md) · [English](../../../en/game/map/water-ground.md) · [Движение и переправы](passages.md)
 
 ## Что удалось получить
 

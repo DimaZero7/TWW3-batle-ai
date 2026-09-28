@@ -1,6 +1,6 @@
 # telemetry
 
-[Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/telemetry.md)
+[← Назад](README.md) · [Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/telemetry.md)
 
 Запись того, что произошло в бою. Код: `src/apps/telemetry/`.
 

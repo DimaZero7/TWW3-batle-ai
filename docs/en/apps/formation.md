@@ -1,6 +1,8 @@
 # formation
 
-[Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/formation.md)
+[← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/formation.md)
+
+**Tree nodes:** [Deployment](../tree/deploy.md) · [Formation on the map](../tree/map_fit.md) · [Formation keeps the window](../tree/formation_window.md)
 
 Army formation by the roles a [strategy](strategy.md) assigned; it does not know why the strategy was chosen. Pure code without the engine: the same in battle
 and in the simulation (`tools/sim/formation.py`). Code: `src/apps/formation/`.

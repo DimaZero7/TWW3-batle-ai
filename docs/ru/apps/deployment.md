@@ -1,6 +1,6 @@
 # deployment
 
-[Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/deployment.md)
+[← Назад](README.md) · [Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/deployment.md)
 
 Начальная расстановка по контракту `deployment-placement-v2`.
 Код: `src/apps/deployment/`. Замеры — в [расстановке](../game/units/deployment.md).

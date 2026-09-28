@@ -1,6 +1,6 @@
 # Surface sampling and resolution
 
-[Map guide](README.md) · [Русский](../../../ru/game/map/sampling.md)
+[← Back](README.md) · [Map guide](README.md) · [Русский](../../../ru/game/map/sampling.md)
 
 For each cell, query its centre at the local terrain height:
 

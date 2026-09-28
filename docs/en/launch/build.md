@@ -1,6 +1,6 @@
 # Building a pack
 
-[Documentation](../README.md) · [Running](run.md) · [Русский](../../ru/launch/build.md)
+[← Back](README.md) · [Documentation](../README.md) · [Running](run.md) · [Русский](../../ru/launch/build.md)
 
 Building never touches the game; it only writes `build/<target>/`.
 

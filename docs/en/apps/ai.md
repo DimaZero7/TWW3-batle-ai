@@ -1,6 +1,6 @@
 # ai
 
-[Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/ai.md)
+[← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/ai.md)
 
 The home of **our AI**: observation in, decision out. No engine objects,
 only plain tables, so everything is testable without the game.

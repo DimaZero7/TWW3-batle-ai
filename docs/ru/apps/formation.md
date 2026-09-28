@@ -1,6 +1,8 @@
 # formation
 
-[Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/formation.md)
+[← Назад](README.md) · [Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/formation.md)
+
+**Узлы дерева:** [Расстановка](../tree/deploy.md) · [Строй по карте](../tree/map_fit.md) · [Строй держит окно](../tree/formation_window.md)
 
 Строй армии по ролям, которые назначила [стратегия](strategy.md); почему выбрана стратегия, строй не знает. Чистый код без движка: одинаково работает в бою и в
 симуляции (`tools/sim/formation.py`). Код: `src/apps/formation/`.

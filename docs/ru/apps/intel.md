@@ -1,6 +1,6 @@
 # intel
 
-[Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/intel.md)
+[← Назад](README.md) · [Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/intel.md)
 
 Что сторона знает о врагах: видим ли он сейчас и где его видели последний
 раз. Код: `src/apps/intel/`.

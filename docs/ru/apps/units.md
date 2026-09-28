@@ -1,6 +1,6 @@
 # units
 
-[Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/units.md)
+[← Назад](README.md) · [Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/units.md)
 
 Состояние своих отрядов, дальность стрельбы и общие правила ширины строя.
 Код: `src/apps/units/`. Что проверено в игре — в [знаниях об отрядах](../game/units/README.md).

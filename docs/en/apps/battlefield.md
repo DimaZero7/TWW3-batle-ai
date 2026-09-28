@@ -1,6 +1,6 @@
 # battlefield
 
-[Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/battlefield.md)
+[← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/battlefield.md)
 
 The battlefield between the two main groups. Pure: it **only computes**; the
 next task (aligning the army) uses it. Code: `src/apps/battlefield/`.

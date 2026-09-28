@@ -1,6 +1,6 @@
 # Errors and unknown values
 
-[Documentation](../README.md) · [Русский](../../ru/architecture/error_handling.md)
+[← Back](README.md) · [Documentation](../README.md) · [Русский](../../ru/architecture/error_handling.md)
 
 In battle, a script error must never silently turn into vanilla AI
 behaviour. The project follows three rules.

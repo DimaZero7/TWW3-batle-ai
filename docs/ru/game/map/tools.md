@@ -1,6 +1,6 @@
 # Lua-модуль карты и инструменты запуска
 
-[Инструкция по карте](README.md) · [English](../../../en/game/map/tools.md)
+[← Назад](README.md) · [Инструкция по карте](README.md) · [English](../../../en/game/map/tools.md)
 
 ## Компоненты
 

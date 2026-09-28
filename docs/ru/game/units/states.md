@@ -1,6 +1,6 @@
 # Состояния и пассивные эффекты
 
-[Отряды](README.md) · [English](../../../en/game/units/states.md) · [Доказательства](evidence.md)
+[← Назад](README.md) · [Отряды](README.md) · [English](../../../en/game/units/states.md) · [Доказательства](evidence.md)
 
 ## Что игра вернула для каждого отряда
 

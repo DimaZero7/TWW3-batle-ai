@@ -1,6 +1,6 @@
 # assessment
 
-[Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/assessment.md)
+[← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/assessment.md)
 
 Force assessment at the start of a battle. Pure: from both armies (the
 [roster](../game/units/roster.md)) it computes one set of features; strategies

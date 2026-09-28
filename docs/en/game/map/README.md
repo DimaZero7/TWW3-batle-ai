@@ -1,6 +1,6 @@
 # Map information: working guide
 
-[Project](../../../../README.md) · **English** | [Русский](../../../ru/game/map/README.md)
+[← Back](../README.md) · [Project](../../../../README.md) · **English** | [Русский](../../../ru/game/map/README.md)
 
 This is the current instruction for collecting **map information only**.
 It covers methods already exercised in the installed WH3 build. Unit state,

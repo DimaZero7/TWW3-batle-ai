@@ -1,6 +1,6 @@
 # battle
 
-[Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/battle.md)
+[← Назад](README.md) · [Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/battle.md)
 
 Контекст боя: стороны, армии, отряды и роли. Единственное место, которое
 обходит `bm:alliances()`; остальные приложения получают готовые списки.

@@ -1,6 +1,6 @@
 # strategy
 
-[Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/strategy.md)
+[← Назад](README.md) · [Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/strategy.md)
 
 Выбор стратегии. Чистый код: список стратегий, у каждой — условия, балл, роли
 отрядов и расстановка строя, которую она просит. Читает только признаки

@@ -1,6 +1,6 @@
 # strategy
 
-[Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/strategy.md)
+[← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/strategy.md)
 
 Strategy choice. Pure: a catalogue of strategies, each with conditions, a
 score, unit roles and the formation layout it asks for. Reads only

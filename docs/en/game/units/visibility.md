@@ -1,6 +1,6 @@
 # Visibility and hiding
 
-[Units](README.md) · [Русский](../../../ru/game/units/visibility.md)
+[← Back](README.md) · [Units](README.md) · [Русский](../../../ru/game/units/visibility.md)
 
 Verified in game on 2026-09-27 on The Moorlands Route (`catchment_03`), with
 True Sight, ×20. Run `20260927-142521`, mode [unit_readout](../../apps/entries.md#unit_readout).

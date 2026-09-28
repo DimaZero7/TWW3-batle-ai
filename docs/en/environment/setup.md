@@ -1,6 +1,6 @@
 # Setup and configuration
 
-[Documentation](../README.md) · [Русский](../../ru/environment/setup.md)
+[← Back](README.md) · [Documentation](../README.md) · [Русский](../../ru/environment/setup.md)
 
 ## Requirements
 

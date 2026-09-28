@@ -1,6 +1,38 @@
 # Документация
 
-[Проект](../../README.md) · **Русский** | [English](../en/README.md)
+[← Назад](../../README.md) · [Проект](../../README.md) · **Русский** | [English](../en/README.md)
+
+## Дерево ИИ — начните отсюда
+
+Всё, что делает боевой ИИ, по фазам и веткам, со схемами и примерами — **[Дерево ИИ](tree/README.md)**.
+
+<!-- generated:tree:trunk -->
+```mermaid
+flowchart BT
+  classDef done fill:#E1F5EE,stroke:#0F6E56,color:#04342C
+  classDef started fill:#FAEEDA,stroke:#854F0B,color:#412402
+  classDef planned fill:#F1EFE8,stroke:#888780,color:#444441
+  base["Основа<br/>18 модулей"]:::done
+  deploy["1 · Расстановка<br/><i>Стратегический</i>"]:::done
+  approach["2 · Сближение до окна<br/><i>Тактический</i>"]:::done
+  fire["3 · Перестрелка из окна<br/><i>Боевой</i>"]:::started
+  their_archers["4 · Их лучники бьют стену<br/><i>Боевой</i>"]:::started
+  infantry_attack["5 · Пехота в атаку<br/><i>Боевой</i>"]:::planned
+  echelon_step["6 · Эшелон к их лучникам<br/><i>Боевой</i>"]:::planned
+  breakthroughs["7 · Прорывы<br/><i>Боевой</i>"]:::planned
+  finish["8 · Добивание и отход<br/><i>Боевой</i>"]:::planned
+  base --> deploy
+  deploy --> approach
+  approach --> fire
+  fire --> their_archers
+  their_archers --> infantry_attack
+  infantry_attack --> echelon_step
+  echelon_step --> breakthroughs
+  breakthroughs --> finish
+```
+<!-- /generated -->
+
+- [Все узлы и переключатели](tree/README.md#все-узлы) · [Карта модулей по уровням](tree/modules.md) · [Как вести документацию](architecture/documentation.md)
 
 ## Архитектура
 

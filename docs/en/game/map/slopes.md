@@ -1,6 +1,6 @@
 # Slopes and height differences
 
-[Map guide](README.md) · [Русский](../../../ru/game/map/slopes.md) · [Height source](heights.md)
+[← Back](README.md) · [Map guide](README.md) · [Русский](../../../ru/game/map/slopes.md) · [Height source](heights.md)
 
 We can derive numeric geometric slopes from the terrain heights already read from WH3. This is an offline calculation, not a Lua-returned movement penalty or a complete cliff detector. It works with the recorded height samples and needs no game launch.
 

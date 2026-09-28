@@ -1,6 +1,8 @@
 # approach
 
-[Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/approach.md)
+[← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/approach.md)
+
+**Tree nodes:** [Approach to the window](../tree/approach.md)
 
 Simple approach and the one-action-at-a-time rule. Pure. Code: `src/apps/approach/`.
 

@@ -1,6 +1,6 @@
 # missile
 
-[Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/missile.md)
+[← Назад](README.md) · [Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/missile.md)
 
 Урон стрелами: сколько HP в секунду снимает стреляющий блок и шаг перестрелки
 для симуляции. Чистый код; модель общая для обеих сторон — по ней считает и

@@ -1,6 +1,6 @@
 # Как распознать мост и что показала проверка высоты
 
-[Инструкция по карте](README.md) · [English](../../../en/game/map/bridges.md) · [Объекты](objects.md) · [Проверенные броды](passages.md)
+[← Назад](README.md) · [Инструкция по карте](README.md) · [English](../../../en/game/map/bridges.md) · [Объекты](objects.md) · [Проверенные броды](passages.md)
 
 ## Получение моста
 

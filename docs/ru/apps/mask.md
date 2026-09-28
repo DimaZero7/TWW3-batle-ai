@@ -1,6 +1,6 @@
 # mask
 
-[Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/mask.md)
+[← Назад](README.md) · [Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/mask.md)
 
 Маска «можно ли тут встать» на [поле боя](battlefield.md). Сетка в системе поля
 (вдоль оси × поперёк), клетка **3 м** (решение пользователя). Клетка годится,

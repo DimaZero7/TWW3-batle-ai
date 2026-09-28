@@ -1,5 +1,9 @@
 # logistics — queues past an obstacle
 
+[← Back](README.md) · [Documentation](../README.md) · [Русский](../../ru/apps/logistics.md)
+
+**Tree nodes:** [Logistics past an obstacle](../tree/logistics.md)
+
 [Russian version](../../ru/apps/logistics.md) (full rules and results)
 
 `src/apps/logistics/services.lua`, pure. When an approach step walks round an

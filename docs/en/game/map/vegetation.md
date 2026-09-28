@@ -1,6 +1,6 @@
 # Forest zones and tree placements
 
-[Map guide](README.md) · [Русский](../../../ru/game/map/vegetation.md)
+[← Back](README.md) · [Map guide](README.md) · [Русский](../../../ru/game/map/vegetation.md)
 
 Experiment: 2026-09-25, `run-20260925-224603`. Official Kislev terrain, `wh3_main_macro_ksl_plains_01`, existing `scenarios/map_capture.xml`. The game was launched once and automatically closed after capture; game-side diagnostic files were removed. No combat or unit-effect test was performed.
 

@@ -15,21 +15,12 @@ from pathlib import Path
 import pytest
 
 from tests.lua_runtime import load, new_runtime
+from tools import architecture
 
 SRC = Path(__file__).resolve().parents[2] / "src"
 APPS = SRC / "apps"
 
-# 0 — base: engine access, data, rules of the game; 1 — strategic (phase 1);
-# 2 — tactical (phase 2); combat phases will be 3.
-LEVELS = {
-    "core": 0, "battle": 0, "map": 0, "navigation": 0, "units": 0, "intel": 0, "orders": 0, "telemetry": 0,
-    "observation": 0, "sandbox": 0, "ai": 0, "deployment": 0, "tree": 0, "vision": 0, "battlefield": 0,
-    "mask": 0, "reach": 0, "missile": 0,
-    "assessment": 1, "strategy": 1, "formation": 1, "plan": 1,
-    "alignment": 2, "approach": 2, "logistics": 2, "tactics": 2,
-}
-# The trunk of a level: the only module there that calls the level's other nodes.
-TRUNKS = {"plan", "tactics"}
+LEVELS, TRUNKS = architecture.LEVELS, architecture.TRUNKS
 MAX_LINES = 500
 # Longer modules, and why (to be split when they are next changed).
 TOO_LONG = {"logistics/services.lua": "backlog #18: planner and dispatch in one file"}

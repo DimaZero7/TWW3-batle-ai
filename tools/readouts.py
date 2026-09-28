@@ -63,6 +63,7 @@ def render(lang, catalog):
     items = catalog["readouts"]
     tracked = sum(r["status"] == "tracked" for r in items)
     lines = [f"# {t['title']}", "",
+             f"[{'← Назад' if lang == 'ru' else '← Back'}](README.md) · "
              f"[{'Знания об игре' if lang == 'ru' else 'Game knowledge'}](README.md) · "
              f"[{t['other']}](../../{other}/game/readouts.md)", "", t["intro"], "", t["legend"], "",
              t["summary"].format(n=len(items), t=tracked, a=len(items) - tracked), ""]

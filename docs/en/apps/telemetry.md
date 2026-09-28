@@ -1,6 +1,6 @@
 # telemetry
 
-[Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/telemetry.md)
+[← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/telemetry.md)
 
 Recording what happened in a battle. Code: `src/apps/telemetry/`.
 

@@ -1,6 +1,6 @@
 # Physical objects and structure effects
 
-[Map guide](README.md) · [Русский](../../../ru/game/map/objects.md) · [Reachability](passages.md)
+[← Back](README.md) · [Map guide](README.md) · [Русский](../../../ru/game/map/objects.md) · [Reachability](passages.md)
 
 ## Verified object inventory
 

@@ -1,4 +1,4 @@
-[Project index](../../../../README.md) · [Главная](../../../../README.md)
+[← Назад](README.md) · [Project index](../../../../README.md) · [Главная](../../../../README.md)
 
 # WH3 Battle AI: автоматический испытательный стенд
 

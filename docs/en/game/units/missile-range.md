@@ -1,6 +1,6 @@
 # Missile attack range
 
-[Units](README.md) · [Русский](../../../ru/game/units/missile-range.md) · [Visibility](../../apps/intel.md)
+[← Back](README.md) · [Units](README.md) · [Русский](../../../ru/game/units/missile-range.md) · [Visibility](../../apps/intel.md)
 
 **Verified 2026-09-26:** Lua can read missile range for own units, a separate same-alliance army, and currently visible enemies. This covers ranged and hybrid infantry. It does not measure vision radius. **Enemy visibility must be checked before reading range or querying a pair.** The [information rule](../../apps/intel.md) is mandatory.
 

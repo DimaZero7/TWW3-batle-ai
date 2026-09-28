@@ -1,6 +1,6 @@
 # battlefield
 
-[Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/battlefield.md)
+[← Назад](README.md) · [Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/battlefield.md)
 
 Поле боя между двумя основными группами. Чистый код: **только считает**, решений
 не принимает; дальше им пользуется выравнивание войск (следующая задача).

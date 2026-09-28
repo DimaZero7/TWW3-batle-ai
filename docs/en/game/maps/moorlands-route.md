@@ -1,6 +1,6 @@
 # The Moorlands Route — Empire grasslands
 
-[Map catalogue](README.md) · [Русский](../../../ru/game/maps/moorlands-route.md)
+[← Back](README.md) · [Map catalogue](README.md) · [Русский](../../../ru/game/maps/moorlands-route.md)
 
 Selected as the starting field map for `iteration-0001`. This means the project's first trial, not a verified first campaign encounter of Karl Franz or another lord. The installed database identifies an official Creative Assembly classic land battle. The name follows the official preview resource; localized display text has not been extracted.
 

@@ -1,6 +1,6 @@
 # Команды, проверенные в бою
 
-[Отряды](README.md) · [English](../../../en/game/units/commands.md) · [Доказательства](evidence.md)
+[← Назад](README.md) · [Отряды](README.md) · [English](../../../en/game/units/commands.md) · [Доказательства](evidence.md)
 
 Создаём отдельный контроллер на отряд:
 

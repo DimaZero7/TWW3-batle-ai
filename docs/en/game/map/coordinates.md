@@ -1,6 +1,6 @@
 # Coordinates and metres
 
-[Map guide](README.md) · [Русский](../../../ru/game/map/coordinates.md)
+[← Back](README.md) · [Map guide](README.md) · [Русский](../../../ru/game/map/coordinates.md)
 
 Battle vectors use **X/Z for the horizontal plane and Y for height**. Coordinates
 accept fractional values. Treat the battle distances and rectangle sizes used by

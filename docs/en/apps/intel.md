@@ -1,6 +1,6 @@
 # intel
 
-[Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/intel.md)
+[← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/intel.md)
 
 What a side knows about enemies: whether one is visible now and where it
 was last seen. Code: `src/apps/intel/`.

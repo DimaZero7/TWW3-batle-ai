@@ -1,6 +1,8 @@
 # approach
 
-[Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/approach.md)
+[← Назад](README.md) · [Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/approach.md)
+
+**Узлы дерева:** [Сближение до окна](../tree/approach.md)
 
 Простое сближение и правило «одно действие за раз». Чистый код. Код: `src/apps/approach/`.
 

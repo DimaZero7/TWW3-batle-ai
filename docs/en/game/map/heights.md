@@ -1,6 +1,6 @@
 # Terrain heights and height maps
 
-[Map guide](README.md) · [Русский](../../../ru/game/map/heights.md)
+[← Back](README.md) · [Map guide](README.md) · [Русский](../../../ru/game/map/heights.md)
 
 **We already read terrain height from the game.** A height map arranges these
 numbers by their X/Z positions. It is useful to a classical tactical algorithm;

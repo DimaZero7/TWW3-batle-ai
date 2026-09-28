@@ -1,6 +1,8 @@
 # alignment
 
-[Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/alignment.md)
+[← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/alignment.md)
+
+**Tree nodes:** [Alignment](../tree/align.md)
 
 Aligning our army opposite the enemy's main group. Pure. **Alignment only, no
 approach:** our centre goes onto the line their army looks along (their centre

@@ -1,6 +1,6 @@
 # Battle map catalogue
 
-[Documentation](../../README.md) · [Game knowledge](../README.md) · [Русский](../../../ru/game/maps/README.md)
+[← Back](../README.md) · [Documentation](../../README.md) · [Game knowledge](../README.md) · [Русский](../../../ru/game/maps/README.md)
 
 Reusable cards for specific official battle maps, grouped by region/culture. The [map collection guide](../map/README.md) describes methods; this catalogue stores map identities, confirmed properties and links to reusable measurements.
 

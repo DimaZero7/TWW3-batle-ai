@@ -1,6 +1,6 @@
 # Визуальный атлас
 
-[Знания об игре](README.md) · [English](../../en/game/atlas.md)
+[← Назад](README.md) · [Знания об игре](README.md) · [English](../../en/game/atlas.md)
 
 ## Карты
 

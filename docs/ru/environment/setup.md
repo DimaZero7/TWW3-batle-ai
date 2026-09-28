@@ -1,6 +1,6 @@
 # Установка и настройка
 
-[Документация](../README.md) · [English](../../en/environment/setup.md)
+[← Назад](README.md) · [Документация](../README.md) · [English](../../en/environment/setup.md)
 
 ## Что нужно
 

@@ -1,6 +1,6 @@
 # tree
 
-[Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/tree.md)
+[← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/tree.md)
 
 The AI's tree as data: the trunk of phases in order, branches that improve a phase, and for every
 branch its **baseline** (what happens without it). A node switched off switches off its subtree and

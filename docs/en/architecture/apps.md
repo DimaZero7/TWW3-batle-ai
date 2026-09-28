@@ -1,6 +1,6 @@
 # List of apps
 
-[Documentation](../README.md) · [Project structure](overview.md) · [Русский](../../ru/architecture/apps.md)
+[← Back](README.md) · [Documentation](../README.md) · [Project structure](overview.md) · [Русский](../../ru/architecture/apps.md)
 
 The code was moved from the `lua-knowledge-kit` research set. Module
 behaviour is preserved: the 12 original sensor tests were ported with their

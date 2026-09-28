@@ -1,6 +1,6 @@
 # observation
 
-[Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/observation.md)
+[← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/observation.md)
 
 **One side's view** — the only thing an AI side may receive.
 Code: `src/apps/observation/`.

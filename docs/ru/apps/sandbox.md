@@ -1,6 +1,6 @@
 # sandbox
 
-[Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/sandbox.md)
+[← Назад](README.md) · [Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/sandbox.md)
 
 Загрузка политик по API v1 в урезанное окружение. Нужна, если запускать
 чужой код политики. Код: `src/apps/sandbox/services.lua`.

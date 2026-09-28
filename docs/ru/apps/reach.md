@@ -1,6 +1,8 @@
 # reach
 
-[Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/reach.md)
+[← Назад](README.md) · [Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/reach.md)
+
+**Узлы дерева:** [Строй держит окно](../tree/formation_window.md) · [Сближение до окна](../tree/approach.md)
 
 Кто кого достаёт стрелами и где встать — «окно» ([теория боя, фаза 2](../architecture/battle-theory.md#2-сближение-до-окна)).
 Чистый код, не двигает отряды: двигает [approach](approach.md), а `reach` отвечает,

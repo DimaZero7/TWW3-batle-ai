@@ -1,6 +1,6 @@
 # Доступность точек и проверенные броды
 
-[Инструкция по карте](README.md) · [English](../../../en/game/map/passages.md) · [Данные воды](water-ground.md)
+[← Назад](README.md) · [Инструкция по карте](README.md) · [English](../../../en/game/map/passages.md) · [Данные воды](water-ground.md)
 
 ## Проверка для конкретного отряда
 

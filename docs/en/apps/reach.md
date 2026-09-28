@@ -1,6 +1,8 @@
 # reach
 
-[Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/reach.md)
+[← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/reach.md)
+
+**Tree nodes:** [Formation keeps the window](../tree/formation_window.md) · [Approach to the window](../tree/approach.md)
 
 Who reaches whom with missiles, and where to stand — the "window" (battle theory, phase 2).
 Pure code; it does not move units ([approach](approach.md) does). Code: `src/apps/reach/`.

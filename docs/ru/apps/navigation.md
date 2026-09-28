@@ -1,6 +1,6 @@
 # navigation
 
-[Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/navigation.md)
+[← Назад](README.md) · [Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/navigation.md)
 
 Достижимость точек для конкретных отрядов. Код: `src/apps/navigation/`.
 Как искали броды и проходы — в [проходах](../game/map/passages.md) и

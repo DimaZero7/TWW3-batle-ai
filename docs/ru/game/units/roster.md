@@ -1,6 +1,6 @@
 # Ростер отрядов
 
-[Отряды](README.md) · [English](../../../en/game/units/roster.md) · [Стратегии](../../architecture/strategies.md)
+[← Назад](README.md) · [Отряды](README.md) · [English](../../../en/game/units/roster.md) · [Стратегии](../../architecture/strategies.md)
 
 Ростер — заранее собранные данные о каждом **типе** отряда, по одному файлу
 на тип: `data/roster/<ключ отряда>.json`. ИИ берёт отсюда всё, что нужно для

@@ -23,31 +23,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -T
 
 ## Документация
 
-- **Архитектура**
-  - [Устройство проекта и слои](docs/ru/architecture/overview.md)
-  - [Список приложений](docs/ru/architecture/apps.md)
-  - [Ошибки и неизвестные значения](docs/ru/architecture/error_handling.md)
-- **Окружение**
-  - [Установка и настройка](docs/ru/environment/setup.md)
-- **Запуск**
-  - [Сборка pack](docs/ru/launch/build.md)
-  - [Запуск боя и результаты](docs/ru/launch/run.md)
-- **Тестирование**
-  - [Тесты без игры](docs/ru/testing/tests.md)
-- **Приложения** — [core](docs/ru/apps/core.md) · [battle](docs/ru/apps/battle.md) ·
-  [map](docs/ru/apps/map.md) · [navigation](docs/ru/apps/navigation.md) ·
-  [units](docs/ru/apps/units.md) · [intel](docs/ru/apps/intel.md) ·
-  [orders](docs/ru/apps/orders.md) · [deployment](docs/ru/apps/deployment.md) ·
-  [ai](docs/ru/apps/ai.md) · [observation](docs/ru/apps/observation.md) · [sandbox](docs/ru/apps/sandbox.md) ·
-  [telemetry](docs/ru/apps/telemetry.md) · [точки входа](docs/ru/apps/entries.md)
-- **Знания об игре**
-  - [Что проверено в WH3](docs/ru/game/README.md) — карта, отряды, каталог карт
-  - [Каталог показателей](docs/ru/game/readouts.md) — что собираем и что ещё можно
-  - [Визуальный атлас](docs/ru/game/atlas.md)
-- **Исследования**
-  - [Архив исследований и доказательств](docs/ru/research/README.md)
+- **Дерево ИИ — начните отсюда** — [что делает ИИ по фазам и веткам](docs/ru/tree/README.md)
+  - [Фаза 1 · Расстановка](docs/ru/tree/deploy.md) · [Фаза 2 · Сближение до окна](docs/ru/tree/approach.md) · [Фазы 3–8](docs/ru/tree/combat.md)
+  - [Карта модулей по уровням](docs/ru/tree/modules.md)
+- **Модули кода** — [все модули `src/apps`](docs/ru/apps/README.md) · [точки входа](docs/ru/apps/entries.md)
+- **Архитектура** — [раздел](docs/ru/architecture/README.md)
+  - [Устройство проекта и слои](docs/ru/architecture/overview.md) · [Список приложений](docs/ru/architecture/apps.md)
+  - [Архитектура ИИ](docs/ru/architecture/ai-design.md) · [Теория боя](docs/ru/architecture/battle-theory.md) · [Будущие задачи](docs/ru/architecture/tasks/backlog.md)
+  - [Как вести документацию](docs/ru/architecture/documentation.md)
+- **Окружение и запуск** — [установка](docs/ru/environment/setup.md) · [сборка pack](docs/ru/launch/build.md) · [запуск боя](docs/ru/launch/run.md)
+- **Тестирование** — [тесты без игры, эталоны, автозапуск](docs/ru/testing/tests.md)
+- **Знания об игре** — [что проверено в WH3](docs/ru/game/README.md) · [каталог показателей](docs/ru/game/readouts.md) · [атлас](docs/ru/game/atlas.md)
+- **Исследования** — [архив исследований и доказательств](docs/ru/research/README.md)
 
-Полное оглавление: [docs/ru/README.md](docs/ru/README.md).
+Полное оглавление: [docs/ru/README.md](docs/ru/README.md) · English: [docs/en/README.md](docs/en/README.md).
 
 ---
 

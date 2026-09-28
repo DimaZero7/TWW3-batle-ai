@@ -1,6 +1,6 @@
 # Project structure and layers
 
-[Documentation](../README.md) · [Русский](../../ru/architecture/overview.md)
+[← Back](README.md) · [Documentation](../README.md) · [Русский](../../ru/architecture/overview.md)
 
 The project follows the photo-fixing layout: code is split into **apps** by
 domain, logic lives in **services**, and entry points only wire them

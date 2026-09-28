@@ -1,6 +1,6 @@
 # Verified state fields
 
-[State guide](state-sensors.md) · [Русский](../../../ru/game/units/state-fields.md)
+[← Back](README.md) · [State guide](state-sensors.md) · [Русский](../../../ru/game/units/state-fields.md)
 
 68 fields. Ranges describe the three archived fixtures, not engine limits. False-only establishes readability, not a true transition. Read counts combine the three own types; JSON contains per-type detail.
 

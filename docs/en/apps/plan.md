@@ -1,6 +1,8 @@
 # plan
 
-[Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/plan.md)
+[← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/plan.md)
+
+**Tree nodes:** [Deployment](../tree/deploy.md)
 
 Start-of-battle plan: [assessment](assessment.md) → [strategy](strategy.md) →
 [formation](formation.md). It only calls the modules in order and passes the

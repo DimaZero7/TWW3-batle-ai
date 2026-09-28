@@ -1,6 +1,6 @@
 # Evidence, illustrations and scope of the result
 
-[Map guide](README.md) · [Русский](../../../ru/game/map/evidence.md)
+[← Back](README.md) · [Map guide](README.md) · [Русский](../../../ru/game/map/evidence.md)
 
 Measured on 25 September 2026 in the locally installed vanilla game, using our
 isolated diagnostic packs. The earlier detailed reports are in Russian; their

@@ -1,6 +1,6 @@
 # Entry points
 
-[Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/entries.md)
+[← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/entries.md)
 
 An entry wires apps into a specific battle: it subscribes to phases, runs
 the tick, calls adapters and services and writes telemetry. It contains no

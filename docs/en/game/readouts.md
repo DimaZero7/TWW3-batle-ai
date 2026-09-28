@@ -1,6 +1,6 @@
 # Readout catalogue
 
-[Game knowledge](README.md) · [Русский](../../ru/game/readouts.md)
+[← Back](README.md) · [Game knowledge](README.md) · [Русский](../../ru/game/readouts.md)
 
 Everything readable about units and the battle: what we already collect and what the game offers but we have not tested yet. Each run picks a profile — the list of what to collect ([config/readouts](../../../config/readouts/)). Generated from [data/readouts/catalog.json](../../../data/readouts/catalog.json) by `python -m tools.readouts docs`; edit the JSON, not this page.
 

@@ -14,6 +14,46 @@ import sys
 from pathlib import Path
 
 
+def _front_gap(sample):
+    """Our front to theirs along X (the armies face each other along X in window_game)."""
+    own = [u["motion"] for u in sample.get("units") or [] if (u["motion"].get("number_of_men_alive") or 0) > 1]
+    enemy = [e["motion"] for e in sample.get("enemy") or [] if (e["motion"].get("number_of_men_alive") or 0) > 1]
+    if not own or not enemy:
+        return None
+    return min(m["x"] for m in enemy) - max(m["x"] for m in own)
+
+
+def reaction(rows):
+    """How the game's AI answered our approach (research only): when it first
+    moved (our front to theirs), how far everyone had gone 15 s later, which
+    units charged (went more than 50 m towards us) and when, and per unit of
+    theirs the men over the hold."""
+    samples = [r for r in rows if r["event"] in ("approach_sample", "hold_sample") and r.get("enemy")]
+    if not samples:
+        return None
+    start = {e["script_name"]: e["motion"] for e in samples[0]["enemy"]}
+    first, out, charged = None, {}, {}
+    for s in samples:
+        moved = {e["script_name"]: start[e["script_name"]]["x"] - e["motion"]["x"] for e in s["enemy"]
+                 if e["script_name"] in start}
+        if first is None and any(abs(v) > 3 for v in moved.values()):
+            first = s
+            out["first_move_s"] = s["model_ms"] / 1000
+            out["first_move_gap_m"] = _front_gap(s) and round(_front_gap(s), 1)
+        if first is not None and "step_m" not in out and s["model_ms"] - first["model_ms"] >= 15000:
+            out["step_m"] = {k: round(v, 1) for k, v in sorted(moved.items())}
+        for k, v in moved.items():
+            if v > 50 and k not in charged:
+                charged[k] = round((s["model_ms"] - (first or s)["model_ms"]) / 1000, 1)
+    out["charged_after_first_move_s"] = charged
+    holds = [r for r in rows if r["event"] == "hold_sample" and r.get("enemy")]
+    if holds:
+        men = lambda s: {e["script_name"]: e["motion"].get("number_of_men_alive") for e in s["enemy"]}
+        a, b = men(holds[0]), men(holds[-1])
+        out["enemy_lost_by_unit"] = {k: a[k] - (b.get(k) or 0) for k in a if a[k] != b.get(k)}
+    return out
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("run", type=Path)
@@ -59,6 +99,7 @@ def main(argv=None):
             "enemy_men": [men(first, "enemy"), men(last, "enemy")],
             "arrows_spent": firing, "units_under_fire": under, "first_under_fire_s": first_under,
             "enemy_moved_m": moved}
+    summary["reaction"] = reaction(rows)
     if args.out:
         args.out.mkdir(parents=True, exist_ok=True)
         (args.out / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
@@ -74,6 +115,12 @@ def main(argv=None):
         print(f"  arrows spent: {h['arrows_spent']}")
         print(f"  under fire: {h['units_under_fire']} (first at {h['first_under_fire_s']} s)")
         print(f"  enemy moved (m): {h['enemy_moved_m']}")
+    r = summary.get("reaction")
+    if r:
+        print(f"reaction: first move at {r.get('first_move_s')} s, fronts {r.get('first_move_gap_m')} m apart; "
+              f"15 s later moved (m): {r.get('step_m')}")
+        print(f"  charged (s after the first move): {r['charged_after_first_move_s']}; "
+              f"their losses by unit in the hold: {r.get('enemy_lost_by_unit')}")
     return 0
 
 

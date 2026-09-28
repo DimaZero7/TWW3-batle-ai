@@ -1,6 +1,6 @@
 # Visual atlas
 
-[Game knowledge](README.md) · [Русский](../../ru/game/atlas.md)
+[← Back](README.md) · [Game knowledge](README.md) · [Русский](../../ru/game/atlas.md)
 
 ## Maps
 
