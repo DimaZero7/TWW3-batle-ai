@@ -56,6 +56,8 @@ A long wall at a rock (16 units): queues on both sides, no crowding.
 
 ![Logistics at a rock](../../../research/analysis/logistics/rock_march_wide/walk_1.png)
 
+In motion, with the queue and all at once side by side: `python -m tools.viewer logistics rock_march_wide` — [battle viewer](../launch/viewer.md#round-an-obstacle-in-queues).
+
 ## Checks
 
 - `tests/apps/logistics/`; battle 27.09.2026: 5 kinds of ground, Skaven too; backlog #18.

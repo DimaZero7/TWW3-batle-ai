@@ -6,7 +6,8 @@ kept in tests/golden/sim/ and compared by tests/golden/test_golden.py.
     python -m tools.sim.golden <army> ...   # only these armies
 
 A change in any module shows up here as a changed battle: the formation, the
-places, every approach decision, the window, the missile exchange. Numbers are
+places, every approach decision and its time, how long each manoeuvre walked
+(tools/sim/walker.py), the window, the missile exchange. Numbers are
 compared with a tolerance (TOLERANCE), so float noise between machines passes.
 """
 import argparse
@@ -54,12 +55,14 @@ def summary(army_name, planner=None):
         rows = []
         for r in appr["log"]:
             w = r.get("window") or {}
-            rows.append({"decision": r["decision"], "reason": r["reason"], "gap_m": _r(r["gap_m"]),
+            rows.append({"t_s": _r(r["t_s"]), "decision": r["decision"], "reason": r["reason"], "gap_m": _r(r["gap_m"]),
                          "stop_gap_m": _r(r["stop_gap_m"]), "advance_m": _r(r.get("advance_m")),
                          "window": w.get("reason"), "reached": w.get("reached"),
                          "path": {k: _r(v) for k, v in (r.get("path") or {}).items()
                                   if k in ("ok", "advance_m", "detour", "beyond_stop_line", "reason")}})
         out["approach"] = rows
+        # How long each manoeuvre walked (tools/sim/walker.py: round obstacles, in time).
+        out["walk_s"] = [_r(m["walk_s"]) for m in appr["moves"]]
     fire = sides.get("fire")
     if fire:
         out["fire"] = {"lost": fire["lost"],

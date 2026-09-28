@@ -38,3 +38,5 @@ Output: `status` (`ok`, `infeasible`, `no_wall`), `choice` and `placements`
 Defaults: the thicker the wall the better (depth weight 100, reach only breaks
 ties), every archer at least 80 m past the wall. Parameter meaning: see the [Russian page](../../ru/apps/formation.md).
 The map is not taken into account yet.
+
+Watch it in motion: [battle viewer](../launch/viewer.md), layer “lord routes” (preset `modules`).

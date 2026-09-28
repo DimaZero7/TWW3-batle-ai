@@ -1,0 +1,871 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Проигрыватель боя · Battle viewer</title>
+<!-- tools/viewer/player.html: the page of python -m tools.viewer; the records are put in place of RECORDS below. -->
+<style>
+:root {
+  --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #d9d7cf;
+  --field: #ecebe4; --mask: rgba(60, 50, 40, .45); --own: #2c64c9; --enemy: #c8412c;
+  --window: rgba(40, 160, 90, .22); --window-line: #1f8a4c; --danger: #c8412c; --path: #7a4fc2;
+  --frame: #8a6d1f; --group: #3b8b8b; --route: #b0306e; --band: #9b5a24; --label: #1d1d1b; --label-halo: rgba(255,255,255,.85);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161614; --panel: #1f1f1c; --ink: #ecebe6; --muted: #9a998f; --line: #34332e;
+    --field: #232320; --mask: rgba(210, 200, 180, .28); --own: #6b9bff; --enemy: #ff7a5f;
+    --window: rgba(70, 200, 120, .20); --window-line: #53cf85; --danger: #ff7a5f; --path: #b58cff;
+    --frame: #e0b94f; --group: #5fd0d0; --route: #ff78b8; --band: #e39a5a; --label: #f4f3ee; --label-halo: rgba(0,0,0,.75);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #161614; --panel: #1f1f1c; --ink: #ecebe6; --muted: #9a998f; --line: #34332e;
+  --field: #232320; --mask: rgba(210, 200, 180, .28); --own: #6b9bff; --enemy: #ff7a5f;
+  --window: rgba(70, 200, 120, .20); --window-line: #53cf85; --danger: #ff7a5f; --path: #b58cff;
+  --frame: #e0b94f; --group: #5fd0d0; --route: #ff78b8; --band: #e39a5a; --label: #f4f3ee; --label-halo: rgba(0,0,0,.75);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, "Segoe UI", sans-serif; }
+header { position: sticky; top: 0; z-index: 2; background: var(--panel); border-bottom: 1px solid var(--line);
+  padding: 8px 16px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+header .group { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+button, select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button#play { min-width: 44px; font-size: 16px; }
+#scrub { flex: 1 1 260px; min-width: 160px; accent-color: var(--own); }
+#clock { font-variant-numeric: tabular-nums; min-width: 190px; color: var(--muted); }
+#layers label { display: inline-flex; gap: 3px; align-items: center; color: var(--muted); cursor: pointer; white-space: nowrap; }
+#layers input { accent-color: var(--own); }
+main { display: grid; gap: 12px; padding: 12px 16px; grid-template-columns: repeat(var(--panes, 1), minmax(0, 1fr)); }
+@media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } header { position: static; } }
+.pane { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.pane h2 { margin: 0; padding: 6px 12px; font-size: 13px; font-weight: 600; border-bottom: 1px solid var(--line); }
+.pane .stage { position: relative; height: min(66vh, 640px); }
+.pane canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+.pane .say { position: absolute; left: 10px; top: 8px; right: 10px; pointer-events: none; font-size: 13px; }
+.say div { display: inline-block; background: color-mix(in srgb, var(--panel) 88%, transparent); padding: 2px 8px;
+  border-radius: 6px; margin-bottom: 3px; max-width: 100%; }
+.say .decision { font-weight: 600; }
+.say .help, .say .skip { color: var(--muted); }
+#tip { position: fixed; z-index: 5; pointer-events: none; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 10px; font-size: 12.5px; box-shadow: 0 4px 14px rgba(0,0,0,.18); display: none; max-width: 300px; }
+#tip b { display: block; margin-bottom: 2px; }
+#tip .m { color: var(--muted); }
+section#bottom { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 12px; padding: 0 16px 16px; }
+@media (max-width: 900px) { section#bottom { grid-template-columns: minmax(0, 1fr); } }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; min-width: 0; }
+.card h3 { margin: 0 0 6px; font-size: 13px; }
+#chart { width: 100%; height: 150px; display: block; cursor: pointer; }
+.scroll { max-height: 220px; overflow: auto; }
+#events { margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
+#events li { padding: 2px 4px; border-radius: 4px; cursor: pointer; display: flex; gap: 8px; }
+#events li:hover { background: var(--bg); }
+#events li.now { background: color-mix(in srgb, var(--own) 18%, transparent); }
+#events time { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 42px; }
+#events .src, .muted { color: var(--muted); }
+table.units { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+table.units th { text-align: left; font-weight: 600; color: var(--muted); padding: 2px 6px; border-bottom: 1px solid var(--line); }
+table.units td { padding: 2px 6px; border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent); }
+table.units tr.unit { cursor: default; }
+table.units tr.unit:hover, table.units tr.hl { background: color-mix(in srgb, var(--own) 14%, transparent); }
+table.units .tag { font-weight: 700; }
+table.units td.num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+table.units tr.side td { font-weight: 600; padding-top: 6px; }
+.lost { color: var(--danger); }
+#legend { display: grid; gap: 4px; font-size: 12.5px; }
+#legend div { display: flex; gap: 8px; align-items: baseline; }
+#legend i { flex: 0 0 18px; height: 4px; border-radius: 2px; transform: translateY(-3px); }
+#legend b { font-weight: 600; white-space: nowrap; }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+.legend i { display: inline-block; width: 12px; height: 8px; margin-right: 4px; vertical-align: middle; }
+.empty { padding: 40px; text-align: center; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <div class="group">
+    <button id="play">▶</button>
+    <select id="speed">
+      <option value="0.5">×0.5</option><option value="1" selected>×1</option><option value="2">×2</option>
+      <option value="5">×5</option><option value="10">×10</option><option value="20">×20</option>
+    </select>
+  </div>
+  <input id="scrub" type="range" min="0" max="1000" value="0" step="1">
+  <span id="clock">0:00</span>
+  <div class="group">
+    <select id="preset"></select>
+    <span id="layers"></span>
+    <select id="lang"><option value="ru">RU</option><option value="en">EN</option></select>
+  </div>
+</header>
+<main id="panes"></main>
+<section id="bottom">
+  <div class="card">
+    <h3 id="chart-title"></h3>
+    <canvas id="chart"></canvas>
+    <div class="legend" id="chart-legend"></div>
+  </div>
+  <div class="card">
+    <h3 id="events-title"></h3>
+    <div class="scroll"><ol id="events"></ol></div>
+  </div>
+  <div class="card">
+    <h3 id="units-title"></h3>
+    <div class="scroll" id="units"></div>
+  </div>
+  <div class="card">
+    <h3 id="legend-title"></h3>
+    <div id="legend"></div>
+  </div>
+</section>
+<div id="tip"></div>
+<script>
+"use strict";
+const DATA = /*RECORDS*/null;
+
+// ---- words: every text a person reads, in both languages ---------------------------------------
+const UI = {
+  ru: { play: "Пуск и пауза (пробел)", speed: "Скорость (×1 — настоящее время)", scrub: "Перемотка (← → по 5 с)",
+    preset: "Набор слоёв", lang: "Язык", chart_men: "Бойцы по времени", chart_series: "По времени", events: "События",
+    units: "Отряды", legend: "Что на карте", own: "наши", enemy: "враг", game: "игра", sim: "симуляция",
+    logistics: "очереди", solid: "сплошная", dash: "штрих", dots: "точки", cut: "черта снизу — вырезан простой",
+    in_game: "в игре", skipped: s => `пропущено ${s} с: ничего не двигалось`, empty: "В странице нет записей боя.",
+    tag: "", type: "Отряд", role: "Роль", men: "Бойцы", now: "Сейчас", moving: "идёт", standing: "стоит",
+    lost: n => `потери −${n}`, ammo: "стрелы", reach: "первая стрела", roles: { wall: "стена", arc: "стрелки", lord: "лорд", other: "—" },
+    sides: { own: "Наши", enemy: "Враг" }, main: "главная группа", group: "группа", field: g => `поле боя: между фронтами ${g} м`,
+    align: (a, o, n) => `выравнивание: угол ${a}°, вбок ${o} м — ${n ? "нужно" : "не нужно"}`, target: "сюда встанем",
+    route: (s, m, c) => `путь лорда ${s === "left" ? "влево" : "вправо"} ${m} м${c ? "" : " (занят)"}`,
+    band: "полоса препятствия", kinds: { detour: "в обход", straight: "прямо", aside: "в стороне" },
+    sidesLR: { left: "слева", right: "справа" }, start: s => `старт +${s} с`, ours_reach: "наши достают",
+    their_arrows: "их стрелы", stop_line: "рубеж", hundred: "100 м", custom: "свой" },
+  en: { play: "Play and pause (space)", speed: "Speed (×1 is real time)", scrub: "Scrub (← → by 5 s)",
+    preset: "Layer preset", lang: "Language", chart_men: "Men over time", chart_series: "Over time", events: "Events",
+    units: "Units", legend: "On the map", own: "ours", enemy: "enemy", game: "game", sim: "simulation",
+    logistics: "queues", solid: "solid", dash: "dashes", dots: "dots", cut: "tick below — still time cut",
+    in_game: "in game", skipped: s => `${s} s skipped: nothing moved`, empty: "No battle records on this page.",
+    tag: "", type: "Unit", role: "Role", men: "Men", now: "Now", moving: "moving", standing: "standing",
+    lost: n => `lost −${n}`, ammo: "arrows", reach: "first arrow", roles: { wall: "wall", arc: "shooters", lord: "lord", other: "—" },
+    sides: { own: "Ours", enemy: "Enemy" }, main: "main group", group: "group", field: g => `battlefield: ${g} m between the fronts`,
+    align: (a, o, n) => `alignment: ${a}°, ${o} m aside — ${n ? "needed" : "not needed"}`, target: "we will stand here",
+    route: (s, m, c) => `lord's way ${s} ${m} m${c ? "" : " (blocked)"}`,
+    band: "obstacle band", kinds: { detour: "round", straight: "straight", aside: "aside" },
+    sidesLR: { left: "left", right: "right" }, start: s => `start +${s} s`, ours_reach: "ours reach",
+    their_arrows: "their arrows", stop_line: "stop line", hundred: "100 m", custom: "custom" }};
+const LAYERS = {
+  blocks: ["отряды", "units", "Рамки отрядов: синие — наши, красные — враг. Толстая сторона — фронт, куда смотрит отряд; стрелки — пунктиром, лорд — точка.",
+    "Unit frames: blue ours, red the enemy. The thick side is the front the unit faces; shooters dashed, the lord a dot.", "--own"],
+  labels: ["подписи", "labels", "Метка отряда: П — пехота, С — стрелки, К — конница, номер по порядку; те же метки в списке отрядов. Наведите мышь на отряд — подробности.",
+    "A unit's tag: I infantry, M missile, C cavalry, numbered; the same tags as in the unit list. Hover a unit for details.", "--label"],
+  soldiers: ["бойцы", "soldiers", "Точки бойцов. В игре — настоящие места из снимков, в симуляции — ровно по рамке.",
+    "Soldier dots. In the game their real places from snapshots, in the simulation laid out evenly.", "--own"],
+  reach: ["дальность", "reach", "Дуги перед стрелками: докуда долетает первая стрела (apps.reach).",
+    "Arcs in front of shooters: how far the first arrow flies (apps.reach).", "--muted"],
+  window: ["окно", "window", "Окно (apps.reach): зелёное — где встать фронтом, чтобы наши стреляли, а их стрелы не долетали; красный пунктир — дальше их стрелы; серый — рубеж остановки.",
+    "The window (apps.reach): green is where to put our front so ours shoot and their arrows fall short; red dashes — their arrows beyond; grey — the stop line.", "--window-line"],
+  path: ["путь", "path", "След центра нашей армии, точки — где принимались решения, кружок — цель скачка.",
+    "Our army centre's trail, dots where decisions were taken, a ring — the step's target.", "--path"],
+  decisions: ["решения", "decisions", "Надписи в углу: этап боя и что он значит, решение ствола тактики и его причина.",
+    "Captions in the corner: the stage and what it means, the tactical trunk's decision and its reason.", "--ink"],
+  losses: ["потери", "losses", "«−n» над отрядом — сколько бойцов он потерял; красный круг — терял в последние 3 с.",
+    "“−n” above a unit — men it lost; a red ring — it lost men in the last 3 s.", "--danger"],
+  field: ["поле боя", "battlefield", "Прямоугольник между главными группами (apps.battlefield): ось от нас к ним, наш фронт (синяя линия) и их фронт (красная).",
+    "The frame between the main groups (apps.battlefield): the axis from us to them, our front (blue line) and theirs (red).", "--frame"],
+  groups: ["группы", "groups", "Группы отрядов, как их видит ИИ (apps.vision): рамка группы, центр и куда смотрит; толстая — главная группа.",
+    "Unit groups as the AI sees them (apps.vision): the group's box, centre and facing; thick — the main group.", "--group"],
+  alignment: ["выравнивание", "alignment", "Насколько криво мы стоим к врагу (apps.alignment): угол и сдвиг вбок; стрелка — куда встанем после выравнивания.",
+    "How crooked we stand to the enemy (apps.alignment): angle and offset; the arrow — where we stand after aligning.", "--path"],
+  routes: ["пути лорда", "lord routes", "Путь лорда из центра к флангам (apps.formation): зелёный — свободен, розовый — занят.",
+    "The lord's way from the centre to the flanks (apps.formation): free or blocked.", "--route"],
+  logistics: ["очереди", "queues", "Обход препятствия (apps.logistics): пунктир — полоса препятствия; след отряда: оранжевый — в обход слева, розовый — справа, синий — прямо; «+N с» под отрядом — сколько ему ждать очереди. Как идёт каждый — в списке отрядов.",
+    "Round an obstacle (apps.logistics): dashes — the obstacle band; a unit's trail: orange round the left, pink round the right, blue straight; “+N s” under a unit — its wait for the queue. Each unit's way is in the unit list.", "--band"],
+  mask: ["маска", "mask", "Клетки 3 м, где встать нельзя (скалы, вода) — apps.mask.", "3 m cells where no unit can stand (rocks, water) — apps.mask.", "--mask"],
+  enemy: ["враг", "enemy", "Отряды врага (с True Sight видно всех).", "The enemy's units (True Sight shows them all).", "--enemy"]};
+const PRESETS = {
+  approach: [["сближение", "approach"], ["blocks", "labels", "path", "window", "decisions", "enemy", "field"]],
+  modules: [["модули ИИ", "AI modules"], ["blocks", "labels", "field", "groups", "alignment", "routes", "window", "decisions", "enemy"]],
+  fire: [["перестрелка", "fire"], ["blocks", "labels", "soldiers", "reach", "window", "losses", "decisions", "enemy"]],
+  logistics: [["очереди", "queues"], ["blocks", "labels", "logistics", "mask", "decisions", "enemy"]],
+  debug: [["всё", "everything"], Object.keys(LAYERS)]};
+const STAGE_HELP = {
+  placed: ["Армия расставлена по плану: стена копейщиков впереди, лучники за ней в два ряда, лорд в центре.",
+    "The army is deployed by the plan: a wall of spearmen in front, archers behind in two rows, the lord in the centre."],
+  align: ["Армия поворачивается и сдвигается, чтобы стоять ровно напротив врага.",
+    "The army turns and shifts to stand square to the enemy."],
+  mask: ["ИИ читает местность: где можно встать, а где скалы и вода.", "The AI reads the ground: where units can stand and where rocks and water are."],
+  approach: ["Армия идёт к врагу скачками по 50 м, по одному манёвру за раз, и останавливается в окне: наши лучники достают, их — нет.",
+    "The army walks to the enemy in 50 m steps, one manoeuvre at a time, and stops in the window: our archers reach, theirs do not."],
+  hold: ["Армия стоит в окне и стреляет; враг отвечает, если достаёт.", "The army holds in the window and shoots; the enemy answers if it reaches."],
+  logistics: ["Скачок идёт в обход препятствия: отряды проходят его очередями, кто-то в обход слева или справа, кто-то прямо, узким строем.",
+    "The step goes round an obstacle: units pass it in queues, some round the left or right, some straight, in a narrower line."]};
+
+let lang = "ru";
+const t = key => UI[lang][key];
+const tx = v => v == null ? "" : typeof v === "object" ? (v[lang] ?? v.ru ?? "") : String(v);
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const rad = d => d * Math.PI / 180;
+const fwd = b => [Math.sin(rad(b)), Math.cos(rad(b))];
+const right = b => [Math.cos(rad(b)), -Math.sin(rad(b))];
+const clock = ms => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+const esc = s => String(s).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+const $ = id => document.getElementById(id);
+
+const state = { t: 0, playing: false, speed: 1, layers: new Set(), view: null, last: null, hover: null, preset: "approach" };
+const records = (DATA && DATA.records || []).map(prepare);
+const duration = Math.max(0, ...records.map(r => r.meta.duration_ms || 0));
+
+// ---- the record, ready for drawing ------------------------------------------------------------
+function prepare(r) {
+  const units = new Map(r.units.map(u => [u.id, u]));
+  const frames = r.frames.map(f => ({ t: f.t_ms, game: f.game_ms, units: new Map(f.units.map(u => [u.id, u])) }));
+  const soldiers = new Map(Object.entries(r.soldiers || {}).map(([k, v]) => [k, v.slice().sort((a, b) => a.t_ms - b.t_ms)]));
+  const rec = { meta: r.meta, units, frames, soldiers, events: r.events || [], overlays: r.overlays || [],
+    series: r.series || [], mask: r.mask };
+  rec.totals = frames.map(f => {
+    const s = { t: f.t, own: 0, enemy: 0 };
+    for (const u of f.units.values()) s[units.get(u.id).side] += u.men;
+    return s;
+  });
+  rec.trail = frames.map(f => ({ t: f.t, ...army(rec, f.units) })).filter(p => p.ok);
+  // Each unit's own trail (queues round an obstacle).
+  rec.tracks = new Map();
+  for (const f of frames) for (const u of f.units.values()) {
+    if (units.get(u.id).side !== "own") continue;
+    if (!rec.tracks.has(u.id)) rec.tracks.set(u.id, []);
+    rec.tracks.get(u.id).push([f.t, u.x, u.z]);
+  }
+  for (const e of rec.events) {
+    if (e.kind !== "decision") continue;
+    const a = army(rec, sample(rec, e.t_ms));
+    if (a.ok) e.geo = a;
+  }
+  return rec;
+}
+
+function army(rec, unitsNow) {
+  // Our blocks without the lord: centre, facing, front edge and half width.
+  const own = [...unitsNow.values()].filter(u => { const s = rec.units.get(u.id); return s.side === "own" && s.role !== "lord" && u.men > 0; });
+  if (!own.length) return { ok: false };
+  const cx = own.reduce((s, u) => s + u.x, 0) / own.length, cz = own.reduce((s, u) => s + u.z, 0) / own.length;
+  let sx = 0, sz = 0;
+  for (const u of own) { const [a, b] = fwd(u.bearing); sx += a; sz += b; }
+  const bearing = (Math.atan2(sx, sz) * 180 / Math.PI + 360) % 360;
+  const f = fwd(bearing), rt = right(bearing);
+  let front = -Infinity, half = 0;
+  for (const u of own) {
+    const dx = u.x - cx, dz = u.z - cz;
+    front = Math.max(front, dx * f[0] + dz * f[1] + u.depth_m / 2);
+    half = Math.max(half, Math.abs(dx * rt[0] + dz * rt[1]) + u.front_m / 2);
+  }
+  return { ok: true, x: cx, z: cz, bearing, front, half };
+}
+
+function frameAt(rec, tm) {
+  const fr = rec.frames;
+  let lo = 0, hi = fr.length - 1;
+  if (tm <= fr[0].t) return [0, 0, 0];
+  if (tm >= fr[hi].t) return [hi, hi, 0];
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (fr[mid].t <= tm) lo = mid; else hi = mid; }
+  const a = fr[lo], b = fr[hi];
+  return [lo, hi, b.t > a.t ? (tm - a.t) / (b.t - a.t) : 0];
+}
+
+function sample(rec, tm) {
+  // Units at time t: positions and facing in between two frames; men of the earlier one.
+  const [i, j, k] = frameAt(rec, tm);
+  const a = rec.frames[i].units, b = rec.frames[j].units, out = new Map();
+  for (const [id, u] of a) {
+    const v = b.get(id);
+    if (!v || k === 0) { out.set(id, u); continue; }
+    const db = ((v.bearing - u.bearing + 540) % 360) - 180;
+    out.set(id, { ...u, x: u.x + (v.x - u.x) * k, z: u.z + (v.z - u.z) * k, bearing: u.bearing + db * k,
+      front_m: u.front_m + (v.front_m - u.front_m) * k, depth_m: u.depth_m + (v.depth_m - u.depth_m) * k,
+      moving: u.moving || (Math.abs(v.x - u.x) + Math.abs(v.z - u.z) > .5) });
+  }
+  return out;
+}
+
+function menBefore(rec, id, tm, backMs) {
+  const [i] = frameAt(rec, Math.max(0, tm - backMs));
+  const u = rec.frames[i].units.get(id);
+  return u ? u.men : null;
+}
+
+function lastOf(list, tm, test) {
+  let found = null;
+  for (const e of list) { if (e.t_ms > tm) break; if (test(e)) found = e; }
+  return found;
+}
+
+// ---- view: shared by every pane (same map coordinates) -----------------------------------------
+function fitView() {
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (const r of records) for (const f of r.frames) for (const u of f.units.values()) {
+    if (!state.layers.has("enemy") && r.units.get(u.id).side === "enemy") continue;
+    x0 = Math.min(x0, u.x); x1 = Math.max(x1, u.x); z0 = Math.min(z0, u.z); z1 = Math.max(z1, u.z);
+  }
+  if (!isFinite(x0)) { x0 = -100; x1 = 100; z0 = -100; z1 = 100; }
+  const pad = 40;
+  state.view = { cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, w: x1 - x0 + 2 * pad, h: z1 - z0 + 2 * pad, zoom: 1 };
+}
+
+function scaleOf(canvas) {
+  const v = state.view;
+  return Math.min(canvas.clientWidth / v.w, canvas.clientHeight / v.h) * v.zoom;
+}
+
+// ---- panes -------------------------------------------------------------------------------------
+const panes = [];
+function buildPanes() {
+  const main = $("panes");
+  if (!records.length) { main.innerHTML = `<div class="empty">${esc(t("empty"))}</div>`; return; }
+  main.style.setProperty("--panes", Math.min(records.length, 3));
+  records.forEach((rec, n) => {
+    const el = document.createElement("div");
+    el.className = "pane";
+    el.innerHTML = `<h2></h2><div class="stage"><canvas></canvas><div class="say"></div></div>`;
+    main.appendChild(el);
+    const canvas = el.querySelector("canvas");
+    const pane = { rec, n, canvas, say: el.querySelector(".say"), title: el.querySelector("h2") };
+    panes.push(pane);
+    handleMouse(pane);
+  });
+}
+
+function handleMouse(pane) {
+  const canvas = pane.canvas;
+  let drag = null;
+  canvas.addEventListener("pointerdown", e => { drag = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture(e.pointerId); canvas.style.cursor = "grabbing"; });
+  canvas.addEventListener("pointermove", e => {
+    if (drag) {
+      const s = scaleOf(canvas);
+      state.view.cx -= (e.clientX - drag.x) / s; state.view.cz += (e.clientY - drag.y) / s;
+      drag = { x: e.clientX, y: e.clientY }; draw(); return;
+    }
+    hoverAt(pane, e);
+  });
+  canvas.addEventListener("pointerup", () => { drag = null; canvas.style.cursor = "grab"; });
+  canvas.addEventListener("pointerleave", () => { state.hover = null; $("tip").style.display = "none"; draw(); });
+  canvas.addEventListener("wheel", e => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect(), s = scaleOf(canvas);
+    const mx = e.clientX - rect.left - rect.width / 2, my = e.clientY - rect.top - rect.height / 2;
+    const wx = state.view.cx + mx / s, wz = state.view.cz - my / s;
+    state.view.zoom = Math.min(40, Math.max(0.2, state.view.zoom * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
+    const s2 = scaleOf(canvas);
+    state.view.cx = wx - mx / s2; state.view.cz = wz + my / s2; draw();
+  }, { passive: false });
+  canvas.addEventListener("dblclick", () => { fitView(); draw(); });
+}
+
+function hoverAt(pane, e) {
+  if (!state.view) return;
+  // The unit under the mouse: inside its frame, or within 6 px of a lord.
+  const { rec, canvas } = pane, rect = canvas.getBoundingClientRect(), s = scaleOf(canvas);
+  const wx = state.view.cx + (e.clientX - rect.left - rect.width / 2) / s;
+  const wz = state.view.cz - (e.clientY - rect.top - rect.height / 2) / s;
+  let found = null;
+  for (const u of sample(rec, state.t).values()) {
+    const spec = rec.units.get(u.id);
+    if (u.men <= 0 || (!state.layers.has("enemy") && spec.side === "enemy")) continue;
+    const dx = wx - u.x, dz = wz - u.z, f = fwd(u.bearing), r = right(u.bearing);
+    const along = dx * r[0] + dz * r[1], ahead = dx * f[0] + dz * f[1];
+    if (spec.role === "lord" ? Math.hypot(dx, dz) * s < 7 : Math.abs(along) <= u.front_m / 2 + 1 && Math.abs(ahead) <= u.depth_m / 2 + 1) { found = u; break; }
+  }
+  state.hover = found ? { rec, id: found.id } : null;
+  const tip = $("tip");
+  if (!found) { tip.style.display = "none"; draw(); return; }
+  tip.innerHTML = unitTip(rec, found);
+  tip.style.display = "block";
+  tip.style.left = Math.min(e.clientX + 14, innerWidth - 310) + "px"; tip.style.top = (e.clientY + 14) + "px";
+  draw();
+}
+
+function unitTip(rec, u) {
+  const spec = rec.units.get(u.id), lines = [];
+  lines.push(`<b>${esc(tx(spec.tag))} · ${esc(tx(spec.type))} · ${esc(spec.title || spec.name)}</b>`);
+  lines.push(`<span class="m">${esc(t("sides")[spec.side])} · ${esc(t("roles")[spec.role] || spec.role)} · ${esc(spec.name)}</span>`);
+  lines.push(`${esc(t("men"))}: ${u.men} / ${spec.men_max}${u.men < spec.men_max ? ` <span class="lost">(${esc(t("lost")(spec.men_max - u.men))})</span>` : ""}`);
+  lines.push(u.moving ? t("moving") : t("standing"));
+  if (spec.reach_m) lines.push(`${esc(t("reach"))}: ${Math.round(spec.reach_m)} m`);
+  if (u.ammo != null) lines.push(`${esc(t("ammo"))}: ${u.ammo}`);
+  const plan = logisticsOf(rec, u.id);
+  if (plan) lines.push(esc(planText(plan)));
+  return lines.join("<br>");
+}
+
+function logisticsOf(rec, id) {
+  const o = lastOf(rec.overlays, state.t, x => x.kind === "logistics");
+  return o && o.units ? o.units[id] : null;
+}
+
+function planText(p) {
+  let s = t("kinds")[p.kind] || p.kind;
+  if (p.side) s += " " + t("sidesLR")[p.side];
+  if (p.release_s > 0) s += ", " + t("start")(Math.round(p.release_s));
+  return s;
+}
+
+function drawPane(p) {
+  const { rec, canvas } = p, L = state.layers, tm = state.t;
+  const dpr = window.devicePixelRatio || 1, W = canvas.clientWidth, H = canvas.clientHeight;
+  if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  }
+  const ctx = canvas.getContext("2d"), v = state.view, s = scaleOf(canvas);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = css("--field"); ctx.fillRect(0, 0, W, H);
+  const X = x => W / 2 + (x - v.cx) * s, Z = z => H / 2 - (z - v.cz) * s;
+  const world = () => { ctx.setTransform(dpr * s, 0, 0, -dpr * s, dpr * (W / 2 - v.cx * s), dpr * (H / 2 + v.cz * s)); };
+  const local = (x, z, b) => { world(); ctx.translate(x, z); const c = Math.cos(rad(b)), n = Math.sin(rad(b)); ctx.transform(c, -n, n, c, 0, 0); };
+  const screen = () => ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const text = (str, x, y, colour, bold, align) => {
+    ctx.font = `${bold ? "600 " : ""}11px system-ui`; ctx.textAlign = align || "left"; ctx.lineJoin = "round";
+    ctx.strokeStyle = css("--label-halo"); ctx.lineWidth = 3; ctx.strokeText(str, x, y);
+    ctx.fillStyle = colour; ctx.fillText(str, x, y); ctx.textAlign = "left";
+  };
+  const polyline = (pts, closed) => { ctx.beginPath(); pts.forEach(([x, z], i) => i ? ctx.lineTo(X(x), Z(z)) : ctx.moveTo(X(x), Z(z))); if (closed) ctx.closePath(); };
+  const now = sample(rec, tm);
+  const side = id => rec.units.get(id).side;
+  const shown = [...now.values()].filter(u => u.men > 0 && (L.has("enemy") || side(u.id) === "own"));
+  const colour = id => css(side(id) === "own" ? "--own" : "--enemy");
+  const overlay = kind => lastOf(rec.overlays, tm, o => o.kind === kind);
+
+  screen(); ctx.strokeStyle = css("--muted"); ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(12, H - 14); ctx.lineTo(12 + 100 * s, H - 14); ctx.stroke();
+  text(t("hundred"), 14, H - 19, css("--muted"));
+
+  if (L.has("mask") && rec.mask) {
+    const m = rec.mask; local(m.x, m.z, m.bearing); ctx.fillStyle = css("--mask");
+    m.rows.forEach((row, r) => { for (let c = 0; c < row.length; c++) if (row[c] === "#") ctx.fillRect(m.across0 + c * m.step, m.along0 + r * m.step, m.step, m.step); });
+  }
+
+  if (L.has("field")) {
+    const f = overlay("field");
+    if (f) {
+      screen(); const c = css("--frame");
+      ctx.strokeStyle = c; ctx.lineWidth = 1.2; ctx.setLineDash([8, 5]); ctx.globalAlpha = .9;
+      polyline(f.corners, true); ctx.stroke(); ctx.globalAlpha = .06; ctx.fillStyle = c; ctx.fill(); ctx.globalAlpha = 1; ctx.setLineDash([]);
+      // Axis from our main group towards theirs.
+      const d = fwd(f.bearing), o = f.origin, len = (f.gap_m || 100) + 60;
+      ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(X(o[0]), Z(o[1])); ctx.lineTo(X(o[0] + d[0] * len), Z(o[1] + d[1] * len)); ctx.stroke();
+      const hx = X(o[0] + d[0] * len), hz = Z(o[1] + d[1] * len), ang = Math.atan2(-d[1], d[0]);
+      ctx.beginPath(); ctx.moveTo(hx, hz); ctx.lineTo(hx - 10 * Math.cos(ang - .4), hz - 10 * Math.sin(ang - .4));
+      ctx.lineTo(hx - 10 * Math.cos(ang + .4), hz - 10 * Math.sin(ang + .4)); ctx.closePath(); ctx.fillStyle = c; ctx.fill();
+      for (const [line, col] of [[f.own_front, "--own"], [f.enemy_front, "--enemy"]]) {
+        if (!line) continue;
+        ctx.strokeStyle = css(col); ctx.lineWidth = 2.5; ctx.setLineDash([2, 3]); polyline(line); ctx.stroke(); ctx.setLineDash([]);
+      }
+      const top = f.corners.reduce((a, b) => (Z(b[1]) < Z(a[1]) ? b : a));
+      if (f.gap_m != null) text(t("field")(Math.round(f.gap_m)), X(top[0]) + 6, Z(top[1]) + 14, c, true);
+    }
+  }
+
+  if (L.has("groups")) {
+    const g = overlay("groups");
+    if (g) for (const sideName of ["own", "enemy"]) {
+      if (sideName === "enemy" && !L.has("enemy")) continue;
+      for (const grp of g[sideName] || []) {
+        const [x0, z0, x1, z1] = grp.bounds; if (x0 == null) continue;
+        screen(); const c = css("--group");
+        ctx.strokeStyle = c; ctx.lineWidth = grp.main ? 2.5 : 1; ctx.setLineDash(grp.main ? [] : [4, 3]);
+        ctx.strokeRect(X(x0) - 6, Z(z1) - 6, (x1 - x0) * s + 12, (z1 - z0) * s + 12); ctx.setLineDash([]);
+        const [cx, cz] = grp.centre; ctx.fillStyle = c; ctx.beginPath(); ctx.arc(X(cx), Z(cz), 4, 0, 7); ctx.fill();
+        if (grp.facing != null) {
+          const d = fwd(grp.facing); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(X(cx), Z(cz)); ctx.lineTo(X(cx + d[0] * 40), Z(cz + d[1] * 40)); ctx.stroke();
+        }
+        text(`${grp.main ? t("main") : t("group")} (${grp.ids.length})`, X(x0) - 6, Z(z1) - 10, c, grp.main);
+      }
+    }
+  }
+
+  const decision = lastOf(rec.events, tm, e => e.kind === "decision" && e.geo);
+  if (L.has("window") && decision && decision.window) drawWindow(ctx, decision, screen, X, Z, text);
+
+  if (L.has("routes")) {
+    const r = overlay("routes");
+    if (r) for (const line of r.lines) {
+      screen(); ctx.strokeStyle = line.clear === false ? css("--danger") : css("--route"); ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+      polyline(line.points); ctx.stroke(); ctx.setLineDash([]);
+      const end = line.points[line.points.length - 1];
+      if (end) text(t("route")(line.side, Math.round(line.length_m || 0), line.clear !== false), X(end[0]) + 4, Z(end[1]) + 12, css("--route"));
+    }
+  }
+
+  if (L.has("alignment")) {
+    const a = overlay("alignment");
+    const cur = army(rec, now);
+    if (a && cur.ok) {
+      screen(); const c = css("--path");
+      if (a.target && a.needed) {
+        const d = fwd(a.target.bearing);
+        ctx.strokeStyle = c; ctx.lineWidth = 1.5; ctx.setLineDash([3, 4]);
+        ctx.beginPath(); ctx.moveTo(X(cur.x), Z(cur.z)); ctx.lineTo(X(a.target.x), Z(a.target.z)); ctx.stroke(); ctx.setLineDash([]);
+        ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(X(a.target.x), Z(a.target.z)); ctx.lineTo(X(a.target.x + d[0] * 40), Z(a.target.z + d[1] * 40)); ctx.stroke();
+        text(t("target"), X(a.target.x) + 6, Z(a.target.z) - 6, c);
+      }
+      // Beside the army's right flank, clear of the blocks' tags.
+      const r = right(cur.bearing), bx = cur.x + r[0] * (cur.half + 30), bz = cur.z + r[1] * (cur.half + 30);
+      text(t("align")(Math.round(a.angle_off_deg || 0), Math.round(a.offset_m || 0), a.needed), X(bx), Z(bz), c, true, "center");
+    }
+  }
+
+  if (L.has("path")) {
+    screen(); ctx.strokeStyle = css("--path"); ctx.lineWidth = 2; ctx.setLineDash([]);
+    ctx.beginPath(); let first = true;
+    for (const q of rec.trail) { if (q.t > tm) break; first ? ctx.moveTo(X(q.x), Z(q.z)) : ctx.lineTo(X(q.x), Z(q.z)); first = false; }
+    const cur = army(rec, now); if (cur.ok && !first) ctx.lineTo(X(cur.x), Z(cur.z));
+    ctx.stroke();
+    ctx.fillStyle = css("--path");
+    for (const e of rec.events) {
+      if (e.t_ms > tm) break;
+      if (e.kind === "decision" && e.geo) { ctx.beginPath(); ctx.arc(X(e.geo.x), Z(e.geo.z), 3.5, 0, 7); ctx.fill(); }
+    }
+    if (decision && decision.decision === "approach" && decision.advance_m) {
+      const g = decision.geo, f = fwd(g.bearing), tx2 = g.x + f[0] * decision.advance_m, tz = g.z + f[1] * decision.advance_m;
+      ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(X(g.x), Z(g.z)); ctx.lineTo(X(tx2), Z(tz)); ctx.stroke(); ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(X(tx2), Z(tz), 5, 0, 7); ctx.stroke();
+    }
+  }
+
+  const logi = L.has("logistics") ? overlay("logistics") : null;
+  if (logi) {
+    screen(); ctx.strokeStyle = css("--band"); ctx.lineWidth = 1.5; ctx.setLineDash([7, 5]);
+    for (const line of logi.band || []) { polyline(line); ctx.stroke(); }
+    ctx.setLineDash([]);
+    if (logi.band && logi.band[0]) text(t("band"), X(logi.band[0][1][0]) + 4, Z(logi.band[0][1][1]), css("--band"), true);
+    for (const [id, tr] of rec.tracks) {
+      // Round the left — orange, round the right — pink, straight — blue.
+      const plan = logi.units && logi.units[id];
+      ctx.strokeStyle = !plan || plan.kind !== "detour" ? css("--own") : plan.side === "right" ? css("--route") : css("--band");
+      ctx.globalAlpha = .6; ctx.lineWidth = 1.4;
+      ctx.beginPath(); let first = true;
+      for (const [ts, x, z] of tr) { if (ts > tm) break; first ? ctx.moveTo(X(x), Z(z)) : ctx.lineTo(X(x), Z(z)); first = false; }
+      const u = now.get(id); if (u && !first) ctx.lineTo(X(u.x), Z(u.z));
+      ctx.stroke(); ctx.globalAlpha = 1;
+    }
+  }
+
+  if (L.has("reach")) {
+    for (const u of shown) {
+      const spec = rec.units.get(u.id); if (!spec.reach_m) continue;
+      screen(); const b = rad(u.bearing), a = Math.atan2(-Math.cos(b), Math.sin(b));
+      ctx.strokeStyle = colour(u.id); ctx.globalAlpha = .35; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(X(u.x), Z(u.z), spec.reach_m * s, a - Math.PI / 2, a + Math.PI / 2); ctx.stroke(); ctx.globalAlpha = 1;
+    }
+  }
+
+  for (const u of shown) {
+    const spec = rec.units.get(u.id), c = colour(u.id);
+    const hl = state.hover && state.hover.rec === rec && state.hover.id === u.id;
+    if (spec.role === "lord") {
+      screen(); ctx.fillStyle = c; ctx.strokeStyle = hl ? css("--ink") : css("--panel"); ctx.lineWidth = hl ? 3 : 1.5;
+      ctx.beginPath(); ctx.arc(X(u.x), Z(u.z), 5.5, 0, 7); ctx.fill(); ctx.stroke();
+    } else {
+      if (L.has("blocks")) {
+        local(u.x, u.z, u.bearing);
+        ctx.fillStyle = c; ctx.globalAlpha = L.has("soldiers") ? .10 : (spec.role === "arc" ? .22 : .45);
+        ctx.fillRect(-u.front_m / 2, -u.depth_m / 2, u.front_m, u.depth_m); ctx.globalAlpha = 1;
+        ctx.strokeStyle = hl ? css("--ink") : c; ctx.lineWidth = (hl ? 3 : 1.2) / s; ctx.setLineDash(spec.role === "arc" && !hl ? [3 / s, 2 / s] : []);
+        ctx.strokeRect(-u.front_m / 2, -u.depth_m / 2, u.front_m, u.depth_m); ctx.setLineDash([]);
+        ctx.strokeStyle = c; ctx.lineWidth = 3 / s; ctx.beginPath(); ctx.moveTo(-u.front_m / 2, u.depth_m / 2); ctx.lineTo(u.front_m / 2, u.depth_m / 2); ctx.stroke();
+      }
+      if (L.has("soldiers")) drawSoldiers(ctx, rec, u, tm, c, s, local);
+    }
+    screen();
+    if (L.has("losses")) {
+      const before = menBefore(rec, u.id, tm, 3000);
+      if (before !== null && before > u.men) {
+        ctx.strokeStyle = css("--danger"); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(X(u.x), Z(u.z), Math.max(8, u.front_m * s / 2), 0, 7); ctx.stroke();
+      }
+      if (u.men < spec.men_max) text(`−${spec.men_max - u.men}`, X(u.x), Z(u.z) - Math.max(12, u.depth_m * s / 2 + 6), css("--danger"), true, "center");
+    }
+    if (L.has("labels")) {
+      text(tx(spec.tag), X(u.x), Z(u.z) + 4 + (spec.role === "lord" ? 14 : 0), css("--label"), true, "center");
+      // Waiting for its turn in the queue: the seconds left.
+      const plan = logi && logi.units && logi.units[u.id];
+      if (plan && plan.release_s * 1000 > tm) text(`+${Math.ceil(plan.release_s - tm / 1000)} ${lang === "en" ? "s" : "с"}`, X(u.x), Z(u.z) + 16, css("--band"), true, "center");
+    }
+  }
+  screen();
+
+  // What is going on: the stage and what it means, the decision, the last manoeuvre.
+  const lines = [];
+  if (L.has("decisions")) {
+    const stage = lastOf(rec.events, tm, e => e.kind === "stage");
+    const d = lastOf(rec.events, tm, e => e.kind === "decision");
+    const m = lastOf(rec.events, tm, e => e.kind === "manoeuvre");
+    const n = lastOf(rec.events, tm, e => e.kind === "note");
+    if (stage) {
+      lines.push(`<div>${esc(tx(stage.text))}</div>`);
+      const help = STAGE_HELP[stage.stage];
+      if (help) lines.push(`<div class="help">${esc(help[lang === "en" ? 1 : 0])}</div>`);
+    }
+    if (d) lines.push(`<div class="decision">${esc(tx(d.text))}</div>`);
+    if (m && (!d || m.t_ms >= d.t_ms)) lines.push(`<div>${esc(tx(m.text))}</div>`);
+    if (n && tm - n.t_ms < 8000) lines.push(`<div>${esc(tx(n.text))}</div>`);
+  }
+  const cut = (rec.meta.skipped || []).find(c => tm >= c.at_ms && tm <= c.at_ms + 1500);
+  if (cut) lines.push(`<div class="skip">${esc(t("skipped")(Math.round(cut.cut_ms / 1000)))}</div>`);
+  const html = lines.join("<br>");
+  if (p.say.innerHTML !== html) p.say.innerHTML = html;
+}
+
+function drawWindow(ctx, e, screen, X, Z, text) {
+  // Where our front would stand: from our front at the decision, along our facing.
+  const g = e.geo, w = e.window, f = fwd(g.bearing), r = right(g.bearing);
+  const at = (along, across) => [g.x + f[0] * along + r[0] * across, g.z + f[1] * along + r[1] * across];
+  const half = g.half + 15;
+  const line = (along, style, dash, label, end, row) => {
+    const [ax, az] = at(along, -half), [bx, bz] = at(along, half);
+    ctx.strokeStyle = style; ctx.lineWidth = 2; ctx.setLineDash(dash);
+    ctx.beginPath(); ctx.moveTo(X(ax), Z(az)); ctx.lineTo(X(bx), Z(bz)); ctx.stroke(); ctx.setLineDash([]);
+    const [lx, lz] = end > 0 ? [bx, bz] : [ax, az];
+    text(label, X(lx) + 6, Z(lz) + 4 + row * 13, style);
+  };
+  screen();
+  if (w.from != null && w.to != null) {
+    const pts = [at(g.front + w.from, -half), at(g.front + w.from, half), at(g.front + w.to, half), at(g.front + w.to, -half)];
+    ctx.fillStyle = css("--window"); ctx.beginPath();
+    pts.forEach(([x, z], i) => i ? ctx.lineTo(X(x), Z(z)) : ctx.moveTo(X(x), Z(z))); ctx.closePath(); ctx.fill();
+  }
+  if (w.from != null) line(g.front + w.from, css("--window-line"), [], t("ours_reach"), 1, 0);
+  if (w.safe_to != null) line(g.front + w.safe_to, css("--danger"), [6, 4], t("their_arrows"), -1, 0);
+  if (e.stop_gap_m != null && e.gap_m != null) line(g.front + (e.gap_m - e.stop_gap_m), css("--muted"), [2, 4], t("stop_line"), 1, 1);
+}
+
+function drawSoldiers(ctx, rec, u, tm, c, s, local) {
+  local(u.x, u.z, u.bearing);
+  ctx.fillStyle = c;
+  const r = Math.max(0.35, 1.1 / s);
+  const snaps = rec.soldiers.get(u.id);
+  let pts = null;
+  if (snaps && snaps.length) {
+    let best = snaps[0];
+    for (const sn of snaps) { if (sn.t_ms <= tm) best = sn; else break; }
+    pts = best.pts;
+  }
+  if (pts) {
+    for (let i = 0; i < Math.min(pts.length / 2, u.men); i++) ctx.fillRect(pts[2 * i] / 10 - r, pts[2 * i + 1] / 10 - r, 2 * r, 2 * r);
+    return;
+  }
+  const cols = Math.max(1, Math.round(Math.sqrt(u.men * u.front_m / Math.max(u.depth_m, .1)))), rows = Math.ceil(u.men / cols);
+  for (let k = 0; k < u.men; k++) {
+    const i = k % cols, j = Math.floor(k / cols);
+    ctx.fillRect(-u.front_m / 2 + u.front_m * (i + .5) / cols - r, u.depth_m / 2 - u.depth_m * (j + .5) / rows - r, 2 * r, 2 * r);
+  }
+}
+
+// ---- chart, events, units, legend --------------------------------------------------------------
+const chart = $("chart");
+const SERIES_COLOURS = ["--danger", "--group", "--band", "--path"];
+function drawChart() {
+  const dpr = window.devicePixelRatio || 1, W = chart.clientWidth, H = chart.clientHeight;
+  if (chart.width !== Math.round(W * dpr)) { chart.width = Math.round(W * dpr); chart.height = Math.round(H * dpr); }
+  const ctx = chart.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  // Extra series (queues: crowding) when a record has them; otherwise men of both sides.
+  const bySeries = records.some(r => r.series.length);
+  const lines = [];
+  records.forEach((r, i) => {
+    if (bySeries) r.series.forEach((sr, k) => lines.push({ rec: i, colour: css(SERIES_COLOURS[k % 4]), pts: sr.points }));
+    else for (const sideName of ["own", "enemy"]) lines.push({ rec: i, colour: css(sideName === "own" ? "--own" : "--enemy"), pts: r.totals.map(x => [x.t, x[sideName]]) });
+  });
+  const all = lines.flatMap(l => l.pts.map(p => p[1]));
+  const max = Math.max(1, ...all), lo = Math.min(...all);
+  const min = bySeries ? 0 : Math.max(0, lo - Math.max(10, (max - lo) * .1));
+  const X = tm => 36 + (W - 46) * (duration ? tm / duration : 0), Y = n => H - 16 - (H - 26) * (n - min) / Math.max(1, max - min);
+  ctx.strokeStyle = css("--line"); ctx.fillStyle = css("--muted"); ctx.font = "10px system-ui"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(36, Y(min)); ctx.lineTo(W - 10, Y(min)); ctx.stroke();
+  ctx.fillText(String(max), 2, Y(max) + 8); ctx.fillText(String(Math.round(min)), 2, Y(min));
+  const dashes = [[], [6, 3], [2, 3]];
+  for (const l of lines) {
+    ctx.strokeStyle = l.colour; ctx.setLineDash(dashes[l.rec % 3]); ctx.lineWidth = 1.6;
+    ctx.beginPath(); l.pts.forEach(([x, y], k) => k ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y))); ctx.stroke();
+  }
+  ctx.setLineDash([]); ctx.fillStyle = css("--muted");
+  for (const r of records) for (const c of r.meta.skipped || []) ctx.fillRect(X(c.at_ms), H - 14, 2, 6);
+  ctx.strokeStyle = css("--ink"); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(X(state.t), 4); ctx.lineTo(X(state.t), H - 12); ctx.stroke();
+  chart.onclick = e => { const rect = chart.getBoundingClientRect(); seek((e.clientX - rect.left - 36) / (rect.width - 46) * duration); };
+  $("chart-title").textContent = bySeries ? t("chart_series") : t("chart_men");
+  const names = [t("solid"), t("dash"), t("dots")];
+  const src = r => r.meta.source === "sim" ? t("sim") : r.meta.source === "logistics" ? tx(r.meta.title).split("·").pop().trim() : t("game");
+  const keys = bySeries
+    ? (records.find(r => r.series.length).series.map((sr, k) => `<span><i style="background:${css(SERIES_COLOURS[k % 4])}"></i>${esc(tx(sr.name))}</span>`).join(""))
+    : `<span><i style="background:${css("--own")}"></i>${esc(t("own"))}</span><span><i style="background:${css("--enemy")}"></i>${esc(t("enemy"))}</span>`;
+  const html = keys + (records.length > 1 ? records.map((r, i) => `<span>${esc(names[i % 3])} — ${esc(src(r))}</span>`).join("") : "") +
+    (records.some(r => (r.meta.skipped || []).length) ? `<span>| ${esc(t("cut"))}</span>` : "");
+  if ($("chart-legend").innerHTML !== html) $("chart-legend").innerHTML = html;
+}
+
+let eventItems = [];
+function buildEvents() {
+  const list = $("events");
+  list.innerHTML = "";
+  const all = records.flatMap((r, i) => r.events.map(e => ({ e, i }))).sort((a, b) => a.e.t_ms - b.e.t_ms);
+  eventItems = all.map(({ e, i }) => {
+    const li = document.createElement("li");
+    li.innerHTML = `<time>${clock(e.t_ms)}</time><span>${records.length > 1 ? `<span class="src">${i + 1}·</span> ` : ""}${esc(tx(e.text))}</span>`;
+    li.onclick = () => seek(Math.max(0, e.t_ms - 500));
+    list.appendChild(li);
+    return { li, t: e.t_ms };
+  });
+}
+
+function markEvents() {
+  let current = null;
+  for (const it of eventItems) { if (it.t <= state.t) current = it; it.li.classList.remove("now"); }
+  if (!current) return;
+  current.li.classList.add("now");
+  // Scroll the list only, never the page.
+  const box = current.li.closest(".scroll"), top = current.li.offsetTop - box.offsetTop;
+  if (state.playing && (top < box.scrollTop || top > box.scrollTop + box.clientHeight - current.li.offsetHeight))
+    box.scrollTop = top - box.clientHeight / 2;
+}
+
+let unitRows = [];
+function buildUnits() {
+  // Who takes part: every unit of every record, by side, with its tag, type, role and men now.
+  const box = $("units");
+  const head = `<tr><th>${records.length > 1 ? "#" : ""}</th><th>${esc(t("type"))}</th><th>${esc(t("role"))}</th><th class="num">${esc(t("men"))}</th><th>${esc(t("now"))}</th></tr>`;
+  let html = `<table class="units">${head}`;
+  unitRows = [];
+  records.forEach((rec, n) => {
+    for (const sideName of ["own", "enemy"]) {
+      const list = [...rec.units.values()].filter(u => u.side === sideName);
+      if (!list.length) continue;
+      html += `<tr class="side"><td colspan="5" style="color:${css(sideName === "own" ? "--own" : "--enemy")}">${records.length > 1 ? `${n + 1}· ` : ""}${esc(t("sides")[sideName])} — ${list.length}</td></tr>`;
+      for (const u of list) {
+        const key = `${n}|${u.id}`;
+        html += `<tr class="unit" data-key="${esc(key)}"><td class="tag" style="color:${css(sideName === "own" ? "--own" : "--enemy")}">${esc(tx(u.tag))}</td>` +
+          `<td>${esc(tx(u.type))} · ${esc(u.title || u.name)}</td><td>${esc(t("roles")[u.role] || u.role)}</td><td class="num"></td><td class="st"></td></tr>`;
+        unitRows.push({ key, rec, id: u.id });
+      }
+    }
+  });
+  box.innerHTML = html + "</table>";
+  for (const row of unitRows) {
+    row.el = box.querySelector(`tr[data-key="${CSS.escape(row.key)}"]`);
+    row.num = row.el.querySelector(".num"); row.st = row.el.querySelector(".st");
+    row.el.onmouseenter = () => { state.hover = { rec: row.rec, id: row.id }; draw(); };
+    row.el.onmouseleave = () => { state.hover = null; draw(); };
+  }
+}
+
+function markUnits() {
+  const samples = new Map(records.map(r => [r, sample(r, state.t)]));
+  for (const row of unitRows) {
+    const u = samples.get(row.rec).get(row.id), spec = row.rec.units.get(row.id);
+    if (!u) continue;
+    const num = `${u.men} / ${spec.men_max}`;
+    const plan = logisticsOf(row.rec, row.id);
+    let st = u.men <= 0 ? "—" : (u.moving ? t("moving") : t("standing"));
+    if (u.men < spec.men_max) st += ` · ${t("lost")(spec.men_max - u.men)}`;
+    if (plan) st += ` · ${planText(plan)}`;
+    if (row.num.textContent !== num) row.num.textContent = num;
+    if (row.st.textContent !== st) { row.st.textContent = st; row.st.className = "st" + (u.men < spec.men_max ? " lost" : ""); }
+    row.el.classList.toggle("hl", !!state.hover && state.hover.rec === row.rec && state.hover.id === row.id);
+  }
+}
+
+function buildLegend() {
+  const rows = Object.entries(LAYERS).filter(([k]) => state.layers.has(k))
+    .map(([k, l]) => `<div><i style="background:${css(l[4])}"></i><span><b>${esc(lang === "en" ? l[1] : l[0])}</b> — ${esc(lang === "en" ? l[3] : l[2])}</span></div>`);
+  $("legend").innerHTML = rows.join("");
+}
+
+// ---- controls and the clock --------------------------------------------------------------------
+function setPreset(name) {
+  if (!(name in PRESETS)) name = "approach";
+  state.preset = name;
+  state.layers = new Set(PRESETS[name][1]);
+  $("preset").value = name;
+  for (const k of Object.keys(LAYERS)) $("layer-" + k).checked = state.layers.has(k);
+  buildLegend();
+}
+
+function setLang(l) {
+  lang = l === "en" ? "en" : "ru";
+  document.documentElement.lang = lang;
+  $("lang").value = lang;
+  $("play").title = t("play"); $("speed").title = t("speed"); $("scrub").title = t("scrub");
+  $("preset").title = t("preset"); $("lang").title = t("lang");
+  $("preset").innerHTML = Object.entries(PRESETS).map(([k, p]) => `<option value="${k}">${esc(p[0][lang === "en" ? 1 : 0])}</option>`).join("") +
+    `<option value="custom" hidden>${esc(t("custom"))}</option>`;
+  $("preset").value = state.preset;
+  $("layers").innerHTML = Object.entries(LAYERS).map(([k, l]) =>
+    `<label title="${esc(lang === "en" ? l[3] : l[2])}"><input type="checkbox" id="layer-${k}"${state.layers.has(k) ? " checked" : ""}>${esc(lang === "en" ? l[1] : l[0])}</label>`).join(" ");
+  for (const k of Object.keys(LAYERS)) $("layer-" + k).onchange = e => {
+    e.target.checked ? state.layers.add(k) : state.layers.delete(k);
+    state.preset = "custom"; $("preset").value = "custom"; buildLegend(); draw();
+  };
+  $("events-title").textContent = t("events"); $("units-title").textContent = t("units"); $("legend-title").textContent = t("legend");
+  for (const p of panes) p.title.textContent = tx(p.rec.meta.title) || p.rec.meta.name;
+  buildEvents(); buildUnits(); buildLegend();
+  if (records.length) draw();
+}
+
+function buildControls() {
+  $("preset").onchange = e => { setPreset(e.target.value); draw(); };
+  $("lang").onchange = e => setLang(e.target.value);
+  $("speed").onchange = e => { state.speed = +e.target.value; };
+  $("play").onclick = toggle;
+  $("scrub").oninput = e => seek(+e.target.value / 1000 * duration);
+  document.addEventListener("keydown", e => {
+    if (e.target.tagName === "SELECT") return;
+    if (e.code === "Space") { e.preventDefault(); toggle(); }
+    if (e.code === "ArrowRight") seek(state.t + 5000);
+    if (e.code === "ArrowLeft") seek(state.t - 5000);
+  });
+  window.addEventListener("resize", draw);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { buildUnits(); buildLegend(); draw(); });
+}
+
+// The clock runs on a timer, not on animation frames: a hidden or embedded page gets few frames,
+// and the battle must still go at its real pace.
+let timer = null;
+function toggle() {
+  if (state.t >= duration) state.t = 0;
+  state.playing = !state.playing; state.last = null;
+  $("play").textContent = state.playing ? "❚❚" : "▶";
+  clearInterval(timer);
+  if (state.playing) timer = setInterval(() => tick(performance.now()), 33);
+}
+
+function seek(tm) { state.t = Math.min(duration, Math.max(0, tm)); draw(); }
+
+function tick(now) {
+  if (!state.playing) return;
+  if (state.last !== null) state.t += (now - state.last) * state.speed;
+  state.last = now;
+  if (state.t >= duration) { state.t = duration; toggle(); }
+  draw();
+}
+
+function draw() {
+  if (!records.length || !state.view) return;
+  for (const p of panes) drawPane(p);
+  drawChart(); markEvents(); markUnits();
+  $("scrub").value = duration ? Math.round(state.t / duration * 1000) : 0;
+  const game = records[0].frames.length ? records[0].frames[frameAt(records[0], state.t)[0]].game : 0;
+  $("clock").textContent = `${clock(state.t)} / ${clock(duration)} · ${t("in_game")} ${clock(game)}`;
+}
+
+// The address may carry a preset, a moment and a language: viewer.html#preset=fire&t=120&lang=en.
+const hash = () => new URLSearchParams(location.hash.slice(1));
+buildControls();
+buildPanes();
+state.preset = hash().get("preset") || (DATA && DATA.preset) || "approach";
+setLang(hash().get("lang") || (DATA && DATA.lang) || "ru");
+setPreset(state.preset);
+if (records.length) { fitView(); seek(1000 * (+hash().get("t") || 0)); }
+window.addEventListener("hashchange", () => {
+  if (hash().get("lang")) setLang(hash().get("lang"));
+  if (hash().get("preset")) setPreset(hash().get("preset"));
+  if (hash().get("t")) state.t = 1000 * +hash().get("t");
+  seek(state.t);
+});
+</script>
+</body>
+</html>

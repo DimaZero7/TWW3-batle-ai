@@ -15,8 +15,8 @@
   "ok": true
  },
  "anchor": [
-  -240.0,
-  50.0
+  -240,
+  50
  ],
  "bearing": 0,
  "placements": [
@@ -151,6 +151,7 @@
  ],
  "approach": [
   {
+   "t_s": 0.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 296.2,
@@ -166,6 +167,7 @@
    }
   },
   {
+   "t_s": 47.0,
    "decision": "blocked",
    "reason": "no_place",
    "gap_m": 246.0,
@@ -178,6 +180,9 @@
     "reason": "no_place"
    }
   }
+ ],
+ "walk_s": [
+  47.0
  ],
  "mask": {
   "fits": 16,

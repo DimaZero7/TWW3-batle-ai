@@ -45,10 +45,12 @@ flowchart BT
 - [Setup and configuration](environment/setup.md) — Python, `.venv`, `config/local.json`, game path.
 - [Building a pack](launch/build.md) — `duel`, `arena`, `map-capture` targets, module bundler, PFH5 format.
 - [Running a battle and results](launch/run.md) — launcher, safety rules, result folders, True Sight mod.
+- [Battle viewer](launch/viewer.md) — a battle from the game and the simulation on a page in real time: layers, presets, side by side on one clock.
 
 ## Testing
 
 - [Tests without the game](testing/tests.md) — pytest + lupa, fake `bm`, how to write tests.
+- [Simulator](testing/simulator.md) — a battle without the game: the same logic, walking like the engine, checked against the game.
 
 ## Apps (`src/apps`)
 

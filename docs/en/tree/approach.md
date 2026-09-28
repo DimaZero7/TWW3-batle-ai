@@ -96,6 +96,8 @@ In battle (x20): the window from the real blocks — ours reach from 100 m, thei
 from 95 m; in the window, 59 s — us 0, them −96…−149. The game's AI does not stand
 still: it re-forms as we come, and its spearmen charge after about 100 s (phases 3–5).
 
+Watch this battle in motion, the game and the simulation side by side: [battle viewer](../launch/viewer.md).
+
 ## Checks
 
 - `tests/apps/reach/`, `tests/apps/approach/`, `tests/apps/tactics/`; golden runs (15 armies);

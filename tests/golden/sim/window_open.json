@@ -140,6 +140,7 @@
  ],
  "approach": [
   {
+   "t_s": 0.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 493.0,
@@ -155,6 +156,7 @@
    }
   },
   {
+   "t_s": 47.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 441.4,
@@ -170,6 +172,7 @@
    }
   },
   {
+   "t_s": 94.0,
    "decision": "align",
    "reason": "off_line",
    "gap_m": 389.5,
@@ -185,6 +188,7 @@
    }
   },
   {
+   "t_s": 120.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 398.0,
@@ -200,6 +204,7 @@
    }
   },
   {
+   "t_s": 167.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 348.0,
@@ -215,6 +220,7 @@
    }
   },
   {
+   "t_s": 214.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 297.9,
@@ -230,6 +236,7 @@
    }
   },
   {
+   "t_s": 261.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 247.9,
@@ -245,6 +252,7 @@
    }
   },
   {
+   "t_s": 308.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 197.9,
@@ -260,6 +268,7 @@
    }
   },
   {
+   "t_s": 355.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 147.8,
@@ -275,6 +284,7 @@
    }
   },
   {
+   "t_s": 400.0,
    "decision": "hold",
    "reason": "at_stop_line",
    "gap_m": 100.7,
@@ -284,6 +294,17 @@
    "reached": 4,
    "path": {}
   }
+ ],
+ "walk_s": [
+  47.0,
+  47.0,
+  26.0,
+  47.0,
+  47.0,
+  47.0,
+  47.0,
+  47.0,
+  45.0
  ],
  "fire": {
   "lost": {

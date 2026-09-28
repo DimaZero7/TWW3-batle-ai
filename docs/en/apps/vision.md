@@ -22,3 +22,5 @@ between lines, 21.5 m at most over six layouts; 30 m adds margin (user's
 decision). 20 units take ≈ 2 ms. The simulation (`tools/sim/formation.py`) runs the drawn enemy through it
 (soldiers laid out evenly in each unit rectangle) and marks the groups and the main army. Tests: `tests/apps/vision/` with six real
 game AI layouts in `tests/cases/vision/`.
+
+Watch it in motion: [battle viewer](../launch/viewer.md), layer “groups” (preset `modules`).

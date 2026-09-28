@@ -25,6 +25,14 @@ tests/
 └── tools/                  pack format, bundler, every build target
 ```
 
+## Simulator checks
+
+| Check | What it catches | Where |
+|---|---|---|
+| Simulator goldens | a change in one module quietly changed a battle: formation, places, approach decisions and their time, manoeuvre times, window, fire (15 armies) | `tests/golden/`; compare `python -m tools.sim.golden`, update with `--update` and say why in the commit |
+| Tree branches | a branch switched off = its baseline | `tests/tools/test_tree_branches.py` |
+| Simulator physics | a unit walked or stood on an obstacle; the walker does not go round a rock (task 27) | `tests/tools/test_sim_physics.py`, [simulator](simulator.md) |
+
 ## Writing a test
 
 ```python
@@ -76,6 +84,7 @@ Rules:
 | Policy sandbox | `tests/apps/sandbox/test_sandbox.py` |
 | Whole duel and map capture | `tests/entries/test_entries.py` |
 | PFH5, bundler, all build targets | `tests/tools/test_build.py` |
+| Battle viewer: records from the game and the simulation, the page | `tests/tools/test_viewer.py` |
 
 ## Test levels
 

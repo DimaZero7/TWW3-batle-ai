@@ -775,8 +775,10 @@ function M.new_dispatch(plan, depths, params)
         if it.leg == 0 or not pos then return 0 end
         return math.max(0, it.row.route_m - remaining(it, pos))
     end
-    local function order(it, id, out)
+    -- `from`: where the unit stood when it got this leg; a leg is passed along its own direction.
+    local function order(it, id, out, from)
         local pt = it.row.route[it.leg]
+        it.from = from and {along = from.along, across = from.across} or it.row.route[it.leg - 1]
         out[#out + 1] = {id = id, along = pt.along, across = pt.across, width = pt.width, heading_deg = pt.heading_deg,
             final = pt.final == true, leg = it.leg}
     end
@@ -802,7 +804,7 @@ function M.new_dispatch(plan, depths, params)
                 if ready or forced then
                     it.leg, it.released_s, it.forced = 1, t, forced or nil
                     d.log[#d.log + 1] = {id = id, t_s = t, event = forced and 'forced' or 'released'}
-                    order(it, id, out)
+                    order(it, id, out, positions[id])
                 end
             elseif positions[id] then
                 local pt = it.row.route[it.leg]
@@ -812,16 +814,22 @@ function M.new_dispatch(plan, depths, params)
                     if (since >= p.reform_settle_s and pos.still) or since >= (pt.reform_s or 0) + p.reform_settle_s then
                         it.leg, it.leg_s = it.leg + 1, t
                         d.log[#d.log + 1] = {id = id, t_s = t, event = 'leg', leg = it.leg}
-                        order(it, id, out)
+                        order(it, id, out, pos)
                     end
                 elseif it.leg < #it.row.route then
-                    local nxt = it.row.route[it.leg + 1]
-                    local da, dc = nxt.along - pt.along, nxt.across - pt.across
-                    local passed = (pos.along - pt.along) * da + (pos.across - pt.across) * dc >= 0
+                    -- Past the point along THIS leg (from where it was ordered), not along the next
+                    -- one: a next leg sideways behind the obstacle would count the gate as passed
+                    -- while the unit is still before it, and send it across the rock (28.09.2026).
+                    local from = it.from
+                    local passed = false
+                    if from then
+                        local da, dc = pt.along - from.along, pt.across - from.across
+                        passed = (da ~= 0 or dc ~= 0) and (pos.along - pt.along) * da + (pos.across - pt.across) * dc >= 0
+                    end
                     if passed or dist(pos, pt) - it.depth / 2 <= p.lead_m then
                         it.leg, it.leg_s = it.leg + 1, t
                         d.log[#d.log + 1] = {id = id, t_s = t, event = 'leg', leg = it.leg}
-                        order(it, id, out)
+                        order(it, id, out, pos)
                     end
                 elseif not it.arrived and positions[id].still and dist(pos, pt) <= it.depth + p.lead_m then
                     it.arrived = true

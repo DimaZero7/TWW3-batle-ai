@@ -14,8 +14,8 @@
   "ok": true
  },
  "anchor": [
-  -150.0,
-  14.0
+  -150,
+  14
  ],
  "bearing": 0,
  "placements": [
@@ -150,6 +150,7 @@
  ],
  "approach": [
   {
+   "t_s": 0.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 235.5,
@@ -165,6 +166,7 @@
    }
   },
   {
+   "t_s": 47.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 185.2,
@@ -180,6 +182,7 @@
    }
   },
   {
+   "t_s": 219.5,
    "decision": "hold",
    "reason": "at_stop_line",
    "gap_m": 17.2,
@@ -189,6 +192,10 @@
    "reached": null,
    "path": {}
   }
+ ],
+ "walk_s": [
+  47.0,
+  172.5
  ],
  "mask": {
   "fits": 16,

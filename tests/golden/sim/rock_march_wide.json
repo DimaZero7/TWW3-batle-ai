@@ -150,6 +150,7 @@
  ],
  "approach": [
   {
+   "t_s": 0.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 259.1,
@@ -165,6 +166,7 @@
    }
   },
   {
+   "t_s": 47.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 209.4,
@@ -180,6 +182,7 @@
    }
   },
   {
+   "t_s": 237.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 39.1,
@@ -195,6 +198,7 @@
    }
   },
   {
+   "t_s": 260.5,
    "decision": "hold",
    "reason": "at_stop_line",
    "gap_m": 17.4,
@@ -204,6 +208,11 @@
    "reached": null,
    "path": {}
   }
+ ],
+ "walk_s": [
+  47.0,
+  190.0,
+  23.5
  ],
  "mask": {
   "fits": 16,

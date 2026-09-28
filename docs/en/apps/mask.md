@@ -20,3 +20,5 @@ Checked by tests, in the simulation (`hamlet_attack`: the hamlet is 241 blocked
 cells of 6120; the lane of our front clips its corner) and in battle: 249 blocked
 cells, **99.8%** agreement with the captured map, the whole mask read in **0.03 s**
 of CPU ([comparison](../../../research/analysis/mask/README.md), in Russian).
+
+Watch it in motion: [battle viewer](../launch/viewer.md), layer “mask” (preset `debug`).

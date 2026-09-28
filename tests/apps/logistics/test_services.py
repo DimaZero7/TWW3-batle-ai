@@ -141,6 +141,23 @@ def test_dispatcher_releases_legs_and_finishes(lg):
     assert d.done()
 
 
+def test_the_gate_out_is_passed_along_its_own_leg_not_the_next(lg):
+    # rock_march_wide, C9 (28.09.2026): the place is behind the rock and to the side. Just left of the
+    # gate's line the unit counted the gate out as passed (along the NEXT leg, sideways) and walked
+    # straight across the rock to its place.
+    route = [{"along": 47.6, "across": 88.3, "width": 20}, {"along": 148.1, "across": 88.3, "width": 20},
+             {"along": 148.1, "across": 40.0, "width": 20, "final": True}]
+    plan = {"units": {"c9": {"route": route, "route_m": 150.0, "release": {"at_s": 0, "after": []},
+                             "slot": {"depth_m": 18}}}}
+    d = lg.new_dispatch(lg.t(plan), lg.t({"c9": 18}))
+    legs = lambda t, along, across: [o.leg for o in d.update(t, lg.t({"c9": {"along": along, "across": across}})).values()]
+    assert legs(0, 0, 85) == [1]
+    assert legs(30, 44, 85) == [2]           # 5 m before the gate in: on to the gate out
+    assert legs(31, 46, 85) == []            # still in the gap, a little left of its line: keep going
+    assert legs(60, 100, 86) == []
+    assert legs(90, 142, 88) == [3]          # at the gate out: now sideways into the place
+
+
 def test_crowding_counts_soldiers_of_two_units_closer_than_1_m(lg):
     c = lg.crowding(lg.t([{"id": "a", "points": [0, 0, 5, 5]}, {"id": "b", "points": [0.5, 0, 20, 20]}]))
     assert c.soldiers == 2 and c.pairs["a|b"] == 2

@@ -20,3 +20,5 @@ army, off with `--engine-only`; the lowest branch, nothing below it.
 In battle (5 terrains, 13–16 units, Empire and Skaven): peak crowding 1.5–7
 times lower than the engine alone, the detour 2–22% longer
 ([analysis, Russian](../../../research/analysis/logistics/README.md)).
+
+Watch it in motion: [battle viewer](../launch/viewer.md), layer “queues” (preset `logistics`).

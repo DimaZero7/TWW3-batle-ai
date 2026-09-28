@@ -12,7 +12,7 @@
  },
  "fit": {},
  "anchor": [
-  80.0,
+  80,
   26.72
  ],
  "bearing": 0,
@@ -68,6 +68,7 @@
  ],
  "approach": [
   {
+   "t_s": 0.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 300.6,
@@ -83,6 +84,7 @@
    }
   },
   {
+   "t_s": 47.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 250.6,
@@ -98,6 +100,7 @@
    }
   },
   {
+   "t_s": 94.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 200.6,
@@ -113,6 +116,7 @@
    }
   },
   {
+   "t_s": 141.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 150.6,
@@ -128,6 +132,7 @@
    }
   },
   {
+   "t_s": 185.5,
    "decision": "hold",
    "reason": "at_stop_line",
    "gap_m": 103.9,
@@ -137,5 +142,11 @@
    "reached": 2,
    "path": {}
   }
+ ],
+ "walk_s": [
+  47.0,
+  47.0,
+  47.0,
+  44.5
  ]
 }

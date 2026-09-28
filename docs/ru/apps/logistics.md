@@ -67,9 +67,12 @@
 - Тесты: `tests/apps/logistics` — полоса, кто обходит, закрытая сторона, очередь
   без обгона, передние раньше задних, сужение только по нужде, обмен местами,
   раздача приказов, давка.
-- Симуляция: `python -m tools.sim.logistics <армия>` — те же приказы выполняют
-  простые «ходоки»; сравнение с «все сразу».
+- Симуляция: `python -m tools.sim.logistics <армия>` — те же приказы выполняет
+  ходок симулятора ([как движок](../testing/simulator.md#ходьба-как-в-игре): в обход камней,
+  по времени); сравнение с «все сразу».
 - Игра: `formation-probe` с армиями `rock_march_wide`, `edge_march_wide`,
   `gap_march_wide`, `spear_march_wide`, `skaven_march_wide`; с `--engine-only` —
   эталон; разбор — `python -m tools.analysis.logistics_game <прогоны>`
   ([итог](../../../research/analysis/logistics/README.md)).
+
+Посмотреть в движении: [проигрыватель боя](../launch/viewer.md), слой «очереди» (набор `logistics`).

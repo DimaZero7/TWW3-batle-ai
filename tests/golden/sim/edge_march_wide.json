@@ -14,7 +14,7 @@
   "ok": true
  },
  "anchor": [
-  -415.0,
+  -415,
   -472.87
  ],
  "bearing": 180,
@@ -150,6 +150,7 @@
  ],
  "approach": [
   {
+   "t_s": 0.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 245.5,
@@ -165,6 +166,7 @@
    }
   },
   {
+   "t_s": 47.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 195.3,
@@ -180,6 +182,7 @@
    }
   },
   {
+   "t_s": 212.0,
    "decision": "approach",
    "reason": "step",
    "gap_m": 40.9,
@@ -195,6 +198,7 @@
    }
   },
   {
+   "t_s": 237.0,
    "decision": "hold",
    "reason": "at_stop_line",
    "gap_m": 18.5,
@@ -204,6 +208,11 @@
    "reached": null,
    "path": {}
   }
+ ],
+ "walk_s": [
+  47.0,
+  165.0,
+  25.0
  ],
  "mask": {
   "fits": 16,

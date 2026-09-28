@@ -6,9 +6,10 @@ The army goes through tools/sim/formation.py (plan, alignment, approach). For
 every approach step that walks round an obstacle, src/apps/logistics plans the
 queue on the mask read from the captured map (who goes which side, in which
 order and width) and its dispatcher gives the orders tick by tick, exactly as
-in battle. Simple walkers carry the orders out: the front rank centre walks
-straight at 1.5 m/s to the ordered point, the block keeps facing forward and
-stands still for the measured reform time when it narrows. The same plan is
+in battle. tools/sim/walker.py carries the orders out as the engine would: the
+front rank centre walks at 1.5 m/s round obstacles, the block faces its way and
+turns to the ordered facing at the place, soldiers squeeze off blocked ground,
+and a block stands still for the measured reform time when it narrows. The same plan is
 also walked with everybody released at once (no queue) for comparison.
 
 Measured: the time the last unit stands in its place, crowding (soldiers of two
@@ -31,9 +32,10 @@ from matplotlib.patches import Polygon  # noqa: E402
 
 from tools import config as project  # noqa: E402
 from tools.sim import formation as sim  # noqa: E402
+from tools.sim import walker as walking  # noqa: E402
 from tools.sim.mapgrid import MapGrid  # noqa: E402
 
-DT_S = 0.5
+DT_S = 0.5  # tools/sim/walker.DT_S
 MAX_S = 900
 
 
@@ -93,90 +95,87 @@ def to_frame(field, x, z):
     return dx * f[0] + dz * f[1], dx * r[0] + dz * r[1]
 
 
-def walk(logistics, field, grid, before, after, units_by_id, queue=True, speed=1.5, params=None):
-    """Walks one manoeuvre. Returns (summary, tracks, plan)."""
+def walk(logistics, field, grid, before, after, units_by_id, queue=True, speed=walking.SPEED_MPS, params=None,
+         track_every=4):
+    """Walks one manoeuvre by the dispatcher's orders on tools/sim/walker.py (the engine's walking:
+    round obstacles, facing the way, soldiers squeezed off blocked ground). Returns (summary, tracks,
+    plan); a track point (x, z, bearing, front_m, depth_m of the front-rank centre) every track_every
+    steps of DT_S."""
     shapes = {p["id"]: units_by_id[p["id"]]["shapes"] for p in after}
     plan, dispatch = logistics.prepare(field, grid, before, after, shapes, queue, params)
     was = {p["id"]: p for p in before}
     goal = {p["id"]: p for p in after}
-    walkers = {}
+    terrain = walking.Terrain(grid)
+    squeezer = walking.Squeezer(terrain)
+    walker = walking.Walker(terrain, speed=speed, dt=DT_S)
     for p in after:
         b = was[p["id"]]
-        along, across = to_frame(field, b["x"], b["z"])
-        walkers[p["id"]] = {"front": [along, across], "heading": math.radians(b["bearing"] - field["bearing"]),
-                            "front_m": b["front_m"], "depth_m": b["depth_m"], "order": None, "pause": 0.0,
-                            "done_s": None, "men": units_by_id[p["id"]]["men"], "track": []}
-    t, lua = 0.0, logistics.lua
-    crowd_series, rock_series, worst_pair = [], [], {}
+        walker.add(p["id"], b["x"], b["z"], b["bearing"], b["front_m"], b["depth_m"])
+    ordered, done_s, tracks = set(), {}, {p["id"]: [] for p in after}
+    t, lua, step = 0.0, logistics.lua, 0
+    crowd_series, rock_series, worst_pair, squeezed_max = [], [], {}, 0.0
     while t <= MAX_S:
         positions = {}
-        for uid, w in walkers.items():
-            h = w["heading"]
-            positions[uid] = {"along": w["front"][0] - math.cos(h) * w["depth_m"] / 2,
-                              "across": w["front"][1] - math.sin(h) * w["depth_m"] / 2,
-                              "still": w["done_s"] is not None}
+        for uid in tracks:
+            u = walker.state(uid)
+            b = math.radians(u["bearing"])
+            along, across = to_frame(field, u["x"] - math.sin(b) * u["depth_m"] / 2, u["z"] - math.cos(b) * u["depth_m"] / 2)
+            positions[uid] = {"along": along, "across": across, "still": uid in done_s}
         for o in dispatch.update(t, lua.table_from(positions, recursive=True)).values():
-            w = walkers[o.id]
+            u = walker.state(o.id)
             if o.final:
                 g = goal[plan["units"][o.id].get("place") or o.id]
-                front_m, depth_m = g["front_m"], g["depth_m"]
+                front_m, depth_m, bearing = g["front_m"], g["depth_m"], g["bearing"]
             else:
                 slot = plan["units"][o.id]["slot"]
                 front_m, depth_m = slot["front_m"], slot["depth_m"]
-            if front_m < w["front_m"] - 1e-6:
-                w["pause"] = plan["units"][o.id]["slot"].get("reform_s") or 0
-            w["front_m"], w["depth_m"] = front_m, depth_m
-            w["order"] = (o.along, o.across, o.final)
-        for uid, w in walkers.items():
-            if not w["order"] or w["done_s"] is not None:
-                continue
-            if w["pause"] > 0:
-                w["pause"] -= DT_S
-                continue
-            ta, tc, final = w["order"]
-            da, dc = ta - w["front"][0], tc - w["front"][1]
-            d = math.hypot(da, dc)
-            step = speed * DT_S
-            if d > step:
-                w["front"][0] += da / d * step
-                w["front"][1] += dc / d * step
-            else:
-                w["front"] = [ta, tc]
-                if final:
-                    w["heading"] = math.radians(goal[plan["units"][uid].get("place") or uid]["bearing"] - field["bearing"])
-                    w["done_s"] = t
-        # Soldiers in the world for crowding and blocked cells.
+                bearing = field["bearing"] + (o.heading_deg or 0)
+            pause = (plan["units"][o.id]["slot"].get("reform_s") or 0) if front_m < u["front_m"] - 1e-6 else 0
+            x, z = to_world(field, o.along, o.across)
+            walker.order(o.id, x, z, bearing, front_m, depth_m, pause)
+            ordered.add(o.id)
+            if o.final:
+                done_s.pop(o.id, None)
+        walker.step()
+        step += 1
+        # Soldiers in the world for crowding and blocked cells, squeezed off the obstacle as the engine's.
         units, on_rock = [], 0
-        for uid, w in walkers.items():
-            x, z = to_world(field, *w["front"])
-            rect = {"x": x, "z": z, "bearing": field["bearing"] + math.degrees(w["heading"]),
-                    "front_m": w["front_m"], "depth_m": w["depth_m"]}
-            pts = sim.soldier_points(rect, int(w["men"]))
+        for uid in tracks:
+            u = walker.state(uid)
+            if u["arrived"] and uid in ordered and uid not in done_s and dispatch.state(uid).leg == len(plan["units"][uid]["route"]):
+                done_s[uid] = t
+            rect = {"x": u["x"], "z": u["z"], "bearing": u["bearing"], "front_m": u["front_m"], "depth_m": u["depth_m"]}
+            men = int(units_by_id[uid]["men"])
+            pts, moved = squeezer.squeeze(sim.soldier_points(rect, men))
+            squeezed_max = max(squeezed_max, moved / max(men, 1))
             units.append({"id": uid, "points": pts})
             for i in range(0, len(pts), 2):
                 if not grid.reader(pts[i], pts[i + 1])[0]:
                     on_rock += 1
-            if int(t / DT_S) % 4 == 0:
-                w["track"].append((x, z, rect["bearing"], w["front_m"], w["depth_m"]))
+            if step % track_every == 1 or track_every == 1:
+                tracks[uid].append((u["x"], u["z"], u["bearing"], u["front_m"], u["depth_m"]))
         crowd = logistics.crowding(units)
         crowd_series.append(crowd["soldiers"])
         rock_series.append(on_rock)
         for k, n in crowd["pairs"].items():
             worst_pair[k] = max(worst_pair.get(k, 0), n)
-        if all(w["done_s"] is not None for w in walkers.values()):
+        if len(done_s) == len(tracks) and dispatch.done():
             break
         t += DT_S
     waits = [plan["units"][u]["release"]["at_s"] for u in plan["units"]]
-    summary = {"queue": queue, "last_in_place_s": max((w["done_s"] or MAX_S) for w in walkers.values()),
+    summary = {"queue": queue, "last_in_place_s": max(done_s.get(u, MAX_S) for u in tracks),
                "planned_s": plan["makespan_s"], "crowded_max": max(crowd_series),
                "crowded_s": sum(DT_S for c in crowd_series if c > 0), "on_blocked_max": max(rock_series),
+               "squeezed_max_share": round(squeezed_max, 3),
                "longest_planned_wait_s": max(waits) if queue else 0,
                "check_s": plan["check"]["seconds"], "check_pairs": plan["check"]["pairs"],
                "kinds": {k: sum(1 for r in plan["units"].values() if r["kind"] == k) for k in ("detour", "straight", "aside")},
                "narrowed": sorted(u for u, r in plan["units"].items() if r.get("slot") and r["slot"]["front_m"] < goal[u]["front_m"] - 0.5),
                "worst_pairs": dict(sorted(worst_pair.items(), key=lambda kv: -kv[1])[:5]),
-               "log": [dict(e.items()) for e in dispatch.log.values()]}
-    return summary, {u: w["track"] for u, w in walkers.items()}, plan
+               "log": [dict(e.items()) for e in dispatch.log.values()],
+               # Over time, a value every DT_S: soldiers crowded, soldiers on blocked cells.
+               "series": {"dt_s": DT_S, "crowded": crowd_series, "on_blocked": rock_series}}
+    return summary, tracks, plan
 
 
 def draw(path, field, grid, plan, tracks, runs, before, after, title):

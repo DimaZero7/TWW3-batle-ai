@@ -21,3 +21,5 @@ Output: `status` (`ok` / `contact`), `origin`, `bearing`, `centres_m`, `gap_m`,
 `own`/`enemy` extents, `half_width_m`, `margin_m`, `corners`. Checked by tests
 (straight and diagonal armies, contact, six real game AI layouts), in the
 simulation and in battle ([results](../../../research/analysis/battlefield/README.md), in Russian).
+
+Watch it in motion: [battle viewer](../launch/viewer.md), layer “battlefield” (preset `modules`).

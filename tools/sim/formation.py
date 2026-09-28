@@ -40,6 +40,7 @@ from tools import config as project  # noqa: E402
 from tools import roster  # noqa: E402
 from tools.lua_runtime import new_runtime  # noqa: E402
 from tools.sim.enemy import native_defender  # noqa: E402
+from tools.sim import walker as walking  # noqa: E402
 from tools.sim.mapgrid import MapGrid  # noqa: E402
 
 LORD_SHAPE = [{"ordered_m": 5, "front_m": 1.0, "depth_m": 1.0}]
@@ -569,17 +570,34 @@ def blocks(placements, by_id, side):
     return out
 
 
-WALK_MPS = 1.5  # walking pace of our infantry (roster), for the simulated clock
+WALK_MPS = walking.SPEED_MPS  # walking pace of our infantry (roster), for the simulated clock
+
+
+def walk_move(before, after, terrain=None):
+    """A manoeuvre walked as the engine would (tools/sim/walker.py): every unit ordered at once to its
+    new place, round obstacles, facing its way. Returns (seconds until the last is in place, tracks
+    {id: [(t_s, x, z, bearing, front_m, depth_m), ...]} of the front-rank centre, a sample a second)."""
+    w = walking.Walker(terrain)
+    was = {p["id"]: p for p in before}
+    for p in after:
+        b = was.get(p["id"], p)
+        w.add(p["id"], b["x"], b["z"], b["bearing"], b["front_m"], b["depth_m"])
+    for p in after:
+        w.order(p["id"], p["x"], p["z"], p["bearing"], p["front_m"], p["depth_m"])
+    tracks = w.run()
+    return max(tr[-1][0] for tr in tracks.values()) if tracks else 0.0, tracks
 
 
 def approach(planner, sides, own, picture, field, place, own_by_id, enemy_by_id, grid, max_decisions=30, goal=None,
              switches=None):
     """Phase 2 in the simulation: the same trunk as in battle (apps.tactics) decides;
-    here each manoeuvre ends at once (placements are re-planned at the target) and
-    the clock moves on by its walking time, so the alignment governor's 20 s
-    cooldown is respected."""
+    placements are re-planned at the target and the army walks there as the engine
+    would (walk_move: round obstacles, in time); the clock moves on by that walk, so
+    the alignment governor's 20 s cooldown is respected."""
     trunk = planner.tactics(switches)
+    terrain = walking.Terrain(grid) if grid else None
     now, log, trail, moves = 0, [], [], []
+    start = {"anchor": list(own["anchor"]), "bearing": own["bearing"], "lord_routes": own.get("lord_routes")}
     for _ in range(max_decisions):
         view = {"now_ms": now, "field": field, "goal": bool(goal),
                 "current": {"anchor": {"x": own["anchor"][0], "z": own["anchor"][1]}, "bearing": own["bearing"]},
@@ -602,14 +620,18 @@ def approach(planner, sides, own, picture, field, place, own_by_id, enemy_by_id,
         trail.append(own["placements"])
         target = intent["target"]
         anchor, bearing = (target["anchor"]["x"], target["anchor"]["z"]), target["bearing"]
-        walk = 30 if decision == "align" else intent["path"]["advance_m"] / WALK_MPS
-        before_field = field
+        before_field, before_picture = field, picture
         own, picture, field = place(anchor, bearing)
+        walk, tracks = walk_move(trail[-1], own["placements"], terrain)
         moves.append({"decision": decision, "field": before_field, "before": trail[-1], "after": own["placements"],
-                      "detour": bool(intent.get("detour")) and decision == "approach"})
+                      "detour": bool(intent.get("detour")) and decision == "approach", "t_s": now / 1000, "walk_s": walk,
+                      "tracks": tracks,
+                      # What the modules saw before the move, and where the army stands after it (the viewer).
+                      "vision": {"own": before_picture["own"], "enemy": before_picture["enemy"]},
+                      "anchor": list(own["anchor"]), "bearing": own["bearing"], "lord_routes": own.get("lord_routes")})
         now += walk * 1000
         planner.finish(trunk, now, "stopped")
-    sides["approach"] = {"log": log, "trail": trail, "moves": moves, "final": log[-1] if log else None}
+    sides["approach"] = {"log": log, "trail": trail, "moves": moves, "final": log[-1] if log else None, "start": start}
     return own, picture, field
 
 

@@ -25,3 +25,5 @@ Checked by tests, in the simulation (`first_attack_crooked`: 25° and 54 m off �
 every unit within ≈ 1 m of the new plan; a minute of standing with the governor
 answering "aligned", no orders, stand-still PASS. With the enemy unseen (a ridge
 hid it) the AI waits instead of aligning.
+
+Watch it in motion: [battle viewer](../launch/viewer.md), layer “alignment” (preset `modules`).

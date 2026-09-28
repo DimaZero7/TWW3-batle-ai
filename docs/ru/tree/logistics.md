@@ -56,6 +56,8 @@ flowchart LR
 
 ![Логистика у скалы](../../../research/analysis/logistics/rock_march_wide/walk_1.png)
 
+В движении, с очередью и все сразу рядом: `python -m tools.viewer logistics rock_march_wide` — [проигрыватель боя](../launch/viewer.md#обход-препятствия-очередями).
+
 ## Проверки
 
 - `tests/apps/logistics/` — полоса, стороны, очереди, сужение;

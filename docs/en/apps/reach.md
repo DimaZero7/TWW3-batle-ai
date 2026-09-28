@@ -19,3 +19,5 @@ block to the target's nearest rank is <= 125-126 m for a 130 m range, whatever t
 Checked in the simulation (28.09.2026): the test army against the game AI's lines (window
 91-103.7 m), no enemy shooters, outranged, already under fire, the stop holding after
 arrival, 40 random armies with the enemy line turned up to ±8°.
+
+Watch it in motion: [battle viewer](../launch/viewer.md), layer “window” (preset `approach`).
