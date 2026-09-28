@@ -3,12 +3,12 @@
  "status": "ok",
  "strategy": "wall_and_arc",
  "choice": {
-  "wall_width": 40,
+  "wall_width": 80,
   "archer_width": 20,
   "rows": 2,
-  "wall_depth_m": 7.7,
+  "wall_depth_m": 5.5,
   "passage_m": 10,
-  "window_m": 2.56
+  "window_m": 4.26
  },
  "fit": {
   "how": "as_planned",
@@ -23,40 +23,40 @@
   {
    "id": "wh2_dlc13_emp_inf_archers_0#1",
    "role": "arc",
-   "x": -55.61,
-   "z": -219.95,
+   "x": -55.5,
+   "z": -217.75,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#2",
    "role": "arc",
-   "x": -25.44,
-   "z": -221.43,
+   "x": -25.34,
+   "z": -219.23,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#3",
    "role": "arc",
-   "x": -55.36,
-   "z": -247.05,
+   "x": -55.26,
+   "z": -244.85,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#4",
    "role": "arc",
-   "x": -28.34,
-   "z": -248.37,
+   "x": -28.23,
+   "z": -246.18,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh_main_emp_cha_general_0#1",
    "role": "lord",
-   "x": -40.97,
-   "z": -229.68,
+   "x": -40.86,
+   "z": -227.48,
    "bearing": 2.81,
    "width": null
   },
@@ -66,7 +66,7 @@
    "x": -40,
    "z": -210,
    "bearing": 2.81,
-   "width": 40
+   "width": 80
   }
  ],
  "mask": {

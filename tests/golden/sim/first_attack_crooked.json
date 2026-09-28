@@ -3,12 +3,12 @@
  "status": "ok",
  "strategy": "wall_and_arc",
  "choice": {
-  "wall_width": 40,
+  "wall_width": 80,
   "archer_width": 20,
   "rows": 2,
-  "wall_depth_m": 7.7,
+  "wall_depth_m": 5.5,
   "passage_m": 10,
-  "window_m": 1.63
+  "window_m": 3.83
  },
  "fit": {},
  "anchor": [
@@ -20,40 +20,40 @@
   {
    "id": "wh2_dlc13_emp_inf_archers_0#1",
    "role": "arc",
-   "x": 196.63,
-   "z": -302.8,
+   "x": 196.31,
+   "z": -300.62,
    "bearing": 351.56,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#2",
    "role": "arc",
-   "x": 226.51,
-   "z": -298.37,
+   "x": 226.18,
+   "z": -296.19,
    "bearing": 351.56,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#3",
    "role": "arc",
-   "x": 202.16,
-   "z": -329.33,
+   "x": 201.84,
+   "z": -327.16,
    "bearing": 351.56,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#4",
    "role": "arc",
-   "x": 228.92,
-   "z": -325.36,
+   "x": 228.6,
+   "z": -323.19,
    "bearing": 351.56,
    "width": 20
   },
   {
    "id": "wh_main_emp_cha_general_0#1",
    "role": "lord",
-   "x": 212.89,
-   "z": -309.49,
+   "x": 212.57,
+   "z": -307.31,
    "bearing": 351.56,
    "width": null
   },
@@ -63,7 +63,7 @@
    "x": 210,
    "z": -290,
    "bearing": 351.56,
-   "width": 40
+   "width": 80
   }
  ]
 }

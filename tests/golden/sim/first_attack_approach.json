@@ -3,57 +3,57 @@
  "status": "ok",
  "strategy": "wall_and_arc",
  "choice": {
-  "wall_width": 40,
+  "wall_width": 80,
   "archer_width": 20,
   "rows": 2,
-  "wall_depth_m": 7.7,
+  "wall_depth_m": 5.5,
   "passage_m": 10,
-  "window_m": 2.57
+  "window_m": 4.22
  },
  "fit": {},
  "anchor": [
   80,
-  26.72
+  25.61
  ],
  "bearing": 0,
  "placements": [
   {
    "id": "wh2_dlc13_emp_inf_archers_0#1",
    "role": "arc",
-   "x": 64.39,
-   "z": 16.77,
+   "x": 64.5,
+   "z": 17.86,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#2",
    "role": "arc",
-   "x": 94.56,
-   "z": 15.29,
+   "x": 94.66,
+   "z": 16.38,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#3",
    "role": "arc",
-   "x": 64.64,
-   "z": -10.33,
+   "x": 64.74,
+   "z": -9.24,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#4",
    "role": "arc",
-   "x": 91.66,
-   "z": -11.66,
+   "x": 91.77,
+   "z": -10.57,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh_main_emp_cha_general_0#1",
    "role": "lord",
-   "x": 79.03,
-   "z": 7.04,
+   "x": 79.14,
+   "z": 8.13,
    "bearing": 2.81,
    "width": null
   },
@@ -61,9 +61,9 @@
    "id": "wh_main_emp_inf_spearmen_0#1",
    "role": "wall",
    "x": 80,
-   "z": 26.72,
+   "z": 25.61,
    "bearing": 2.81,
-   "width": 40
+   "width": 80
   }
  ],
  "approach": [
@@ -71,8 +71,8 @@
    "t_s": 0.0,
    "decision": "approach",
    "reason": "step",
-   "gap_m": 300.6,
-   "stop_gap_m": 103.9,
+   "gap_m": 299.9,
+   "stop_gap_m": 104.2,
    "advance_m": 50,
    "window": "window",
    "reached": 2,
@@ -87,8 +87,8 @@
    "t_s": 47.0,
    "decision": "approach",
    "reason": "step",
-   "gap_m": 250.6,
-   "stop_gap_m": 103.9,
+   "gap_m": 249.9,
+   "stop_gap_m": 104.3,
    "advance_m": 50,
    "window": "window",
    "reached": 2,
@@ -103,8 +103,8 @@
    "t_s": 94.0,
    "decision": "approach",
    "reason": "step",
-   "gap_m": 200.6,
-   "stop_gap_m": 103.9,
+   "gap_m": 199.9,
+   "stop_gap_m": 104.3,
    "advance_m": 50,
    "window": "window",
    "reached": 2,
@@ -119,24 +119,24 @@
    "t_s": 141.0,
    "decision": "approach",
    "reason": "step",
-   "gap_m": 150.6,
-   "stop_gap_m": 103.9,
-   "advance_m": 46.72,
+   "gap_m": 149.9,
+   "stop_gap_m": 104.3,
+   "advance_m": 45.61,
    "window": "window",
    "reached": 2,
    "path": {
-    "advance_m": 46.72,
+    "advance_m": 45.61,
     "beyond_stop_line": false,
     "detour": false,
     "ok": true
    }
   },
   {
-   "t_s": 185.5,
+   "t_s": 185.0,
    "decision": "hold",
    "reason": "at_stop_line",
-   "gap_m": 103.9,
-   "stop_gap_m": 103.9,
+   "gap_m": 104.3,
+   "stop_gap_m": 104.3,
    "advance_m": null,
    "window": "window",
    "reached": 2,
@@ -147,6 +147,6 @@
   47.0,
   47.0,
   47.0,
-  44.5
+  44.0
  ]
 }

@@ -137,7 +137,9 @@ class Planner:
                 local f = require('apps.formation.services')
                 local roles = strategy.assign_roles(strategy.find('wall_and_arc'), input.units, assessment.category)
                 for _, u in ipairs(input.units) do u.role = roles[u.id] end
-                return require('apps.core.json').encode(f.plan('line_and_blocks', input, {}))
+                -- The drawn enemy keeps a thick wall (the narrowest): the game's AI stands
+                -- in its own blocks, not by our "the thinner the better" (task 29).
+                return require('apps.core.json').encode(f.plan('line_and_blocks', input, {max_wall_front_m = 0}))
             end
         """)
         self._facing = self.lua.eval("function(a, b) return require('apps.formation.services').facing(a, b) end")

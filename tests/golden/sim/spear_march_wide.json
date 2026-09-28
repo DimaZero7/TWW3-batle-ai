@@ -3,10 +3,10 @@
  "status": "ok",
  "strategy": "test_roles",
  "choice": {
-  "wall_width": 20,
-  "archer_width": 15,
+  "wall_width": 30,
+  "archer_width": 30,
   "rows": 1,
-  "wall_depth_m": 14.9,
+  "wall_depth_m": 9.3,
   "passage_m": 10
  },
  "fit": {
@@ -14,114 +14,114 @@
   "ok": true
  },
  "anchor": [
-  -241.14,
-  240.39
+  -240.67,
+  239.97
  ],
- "bearing": 3.33,
+ "bearing": 1.91,
  "placements": [
   {
    "id": "wh_main_emp_cha_general_0#1",
    "role": "lord",
-   "x": -242.48,
-   "z": 213.17,
+   "x": -241.5,
+   "z": 223.04,
    "bearing": 2.81,
    "width": null
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#1",
    "role": "wall",
-   "x": -289.58,
-   "z": 242.77,
+   "x": -314.08,
+   "z": 243.58,
    "bearing": 2.81,
-   "width": 20
+   "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#10",
    "role": "arc",
-   "x": -229.88,
-   "z": 221.91,
+   "x": -222.09,
+   "z": 226.74,
    "bearing": 2.81,
-   "width": 15
+   "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#11",
    "role": "arc",
-   "x": -206.37,
-   "z": 220.76,
+   "x": -192.25,
+   "z": 225.28,
    "bearing": 2.81,
-   "width": 15
+   "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#12",
    "role": "arc",
-   "x": -182.86,
-   "z": 219.6,
+   "x": -162.4,
+   "z": 223.81,
    "bearing": 2.81,
-   "width": 15
+   "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#2",
    "role": "wall",
-   "x": -270.21,
-   "z": 241.82,
+   "x": -284.71,
+   "z": 242.13,
    "bearing": 2.81,
-   "width": 20
+   "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#3",
    "role": "wall",
-   "x": -250.83,
-   "z": 240.86,
+   "x": -255.35,
+   "z": 240.69,
    "bearing": 2.81,
-   "width": 20
+   "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#4",
    "role": "wall",
-   "x": -231.45,
-   "z": 239.91,
+   "x": -225.98,
+   "z": 239.25,
    "bearing": 2.81,
-   "width": 20
+   "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#5",
    "role": "wall",
-   "x": -212.08,
-   "z": 238.96,
+   "x": -196.62,
+   "z": 237.81,
    "bearing": 2.81,
-   "width": 20
+   "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#6",
    "role": "wall",
-   "x": -192.7,
-   "z": 238.01,
+   "x": -167.26,
+   "z": 236.36,
    "bearing": 2.81,
-   "width": 20
+   "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#7",
    "role": "arc",
-   "x": -301.18,
-   "z": 225.42,
+   "x": -320.14,
+   "z": 231.56,
    "bearing": 2.81,
-   "width": 15
+   "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#8",
    "role": "arc",
-   "x": -277.67,
-   "z": 224.26,
+   "x": -290.3,
+   "z": 230.09,
    "bearing": 2.81,
-   "width": 15
+   "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#9",
    "role": "arc",
-   "x": -254.15,
-   "z": 223.11,
+   "x": -260.45,
+   "z": 228.63,
    "bearing": 2.81,
-   "width": 15
+   "width": 30
   }
  ],
  "approach": [
@@ -129,7 +129,7 @@
    "t_s": 0.0,
    "decision": "approach",
    "reason": "step",
-   "gap_m": 259.8,
+   "gap_m": 259.3,
    "stop_gap_m": 20,
    "advance_m": 50,
    "window": null,
@@ -145,39 +145,39 @@
    "t_s": 47.0,
    "decision": "approach",
    "reason": "step",
-   "gap_m": 209.8,
+   "gap_m": 209.4,
    "stop_gap_m": 20,
    "advance_m": 50,
    "window": null,
    "reached": null,
    "path": {
-    "advance_m": 152,
+    "advance_m": 140,
     "beyond_stop_line": false,
     "detour": true,
     "ok": true
    }
   },
   {
-   "t_s": 219.0,
+   "t_s": 238.5,
    "decision": "approach",
    "reason": "step",
-   "gap_m": 57.9,
+   "gap_m": 69.8,
    "stop_gap_m": 20,
-   "advance_m": 37.92,
+   "advance_m": 49.82,
    "window": null,
    "reached": null,
    "path": {
-    "advance_m": 37.92,
+    "advance_m": 49.82,
     "beyond_stop_line": false,
     "detour": false,
     "ok": true
    }
   },
   {
-   "t_s": 257.0,
+   "t_s": 286.0,
    "decision": "hold",
    "reason": "at_stop_line",
-   "gap_m": 20.1,
+   "gap_m": 20.3,
    "stop_gap_m": 20,
    "advance_m": null,
    "window": null,
@@ -187,8 +187,8 @@
  ],
  "walk_s": [
   47.0,
-  172.0,
-  38.0
+  191.5,
+  47.5
  ],
  "mask": {
   "fits": 13,

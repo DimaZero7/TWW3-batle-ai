@@ -14,7 +14,7 @@ M.NODES = {
     {name = 'map_fit', kind = 'branch', parent = 'deploy',
         baseline = 'the formation stands where asked; the map is not considered'},
     {name = 'formation_window', kind = 'branch', parent = 'deploy',
-        baseline = 'the thickest wall; the window is not checked'},
+        baseline = 'the thinnest wall up to 180 m; the window is not checked'},
     {name = 'approach', kind = 'phase', parent = 'deploy', doc = 'phase 2: approach to the window',
         baseline = 'the army stands where it was deployed'},
     {name = 'align', kind = 'branch', parent = 'approach',

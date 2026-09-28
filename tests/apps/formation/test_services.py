@@ -63,16 +63,20 @@ def test_first_example_is_covered_without_overlaps(plan):
     assert roles["lord"][0]["x"] == pytest.approx(0) and roles["lord"][0]["z"] < wall["z"] - wall["depth_m"]
 
 
-def test_the_wall_is_as_thick_as_the_archers_reach_allows(plan):
-    units = army()[1:]
+def test_the_thinnest_wall_no_wider_than_the_limit(plan):
+    # Task 29 (user, 28.09.2026): the thinner the wall, the nearer the archers stand to
+    # the front and the sooner they reach the enemy; a thin wall is wide, so up to 180 m.
+    units = [unit(f"w{i}", "wall") for i in range(6)] + [unit(f"a{i}", "arc") for i in range(4)]
     default = plan(units)["choice"]
-    assert default["min_reach_m"] >= 80
-    # Asking less reach never makes the wall thinner.
-    thick = plan(units, {"min_reach_m": 40})["choice"]
-    assert thick["wall_depth_m"] >= default["wall_depth_m"] and thick["min_reach_m"] >= 40
-    # With reach weighted like depth the thinnest wall wins, as before the rule.
-    thin = plan(units, {"wall_depth_weight": 1, "min_reach_m": 60})["choice"]
-    assert thin["wall_depth_m"] <= default["wall_depth_m"]
+    assert default["wall_front_m"] <= 180 and default["min_reach_m"] >= 80
+    # 6 x 40 m would be 239 m wide: the thinnest within 180 m is 6 x 20 m.
+    assert (default["wall_width"], default["wall_depth_m"]) == (20, 15)
+    # A wider limit, a thinner wall.
+    wider = plan(units, {"max_wall_front_m": 250})["choice"]
+    assert (wider["wall_width"], wider["wall_depth_m"]) == (40, 8)
+    # Every wall too wide: the narrowest.
+    narrow = plan(units, {"max_wall_front_m": 50})["choice"]
+    assert narrow["wall_width"] == 20 and narrow["too_wide_m"] > 0 and not narrow["failed"]
 
 
 def test_impossible_cover_is_reported(plan):
@@ -213,17 +217,22 @@ def few_archers():
 def test_the_wall_keeps_the_window_against_the_enemy_we_see(plan):
     alone = plan_against(plan, few_archers(), None)
     assert "window_check" not in alone
+    # Within 180 m no wall keeps the window here (6 x 20 m, 2.4 m): the rule is dropped, the
+    # wall is not widened past the limit for it (in the game a 352 m wall did not fit, 28.09.2026).
     seen = plan_against(plan, few_archers(), enemy_line(300, 32.4))
-    assert seen["status"] == "ok" and seen["window_check"]["ok"]
-    assert seen["choice"]["window_m"] >= 5
-    # Thinner than without the enemy, and every thicker wall failed on the window.
-    assert seen["choice"]["wall_depth_m"] < alone["choice"]["wall_depth_m"]
-    thicker = [o for o in seen["options"] if o["wall_depth_m"] > seen["choice"]["wall_depth_m"]
-               and "window_too_small" in o["failed"]]
-    assert thicker
+    assert seen["status"] == "ok" and not seen["window_check"]["ok"]
+    assert seen["choice"]["wall_width"] == alone["choice"]["wall_width"] and seen["choice"]["wall_front_m"] <= 180
+    # With room for a 239 m wall, the thinner one keeps the window.
+    wide = json.loads(plan.lua.eval("function(t) return require('apps.core.json').encode(t) end")(
+        plan.f.plan("line_and_blocks", plan.lua.table_from(
+            {"anchor": {"x": 0, "z": 0}, "bearing": 0, "units": few_archers(),
+             "enemy_blocks": enemy_line(300, 32.4)}, recursive=True),
+            plan.lua.table_from({"max_wall_front_m": 250}))))
+    assert wide["window_check"]["ok"] and wide["choice"]["window_m"] >= 5
+    assert wide["choice"]["wall_depth_m"] < alone["choice"]["wall_depth_m"]
 
 
-def test_deep_enemy_blocks_leave_the_thick_wall(plan):
+def test_deep_enemy_blocks_leave_the_wall_as_it_was(plan):
     # The game's AI in a big army: archers 54 m behind its front — a wide window anyway.
     alone = plan_against(plan, few_archers(), None)
     seen = plan_against(plan, few_archers(), enemy_line(300, 54))

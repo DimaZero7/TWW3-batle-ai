@@ -22,8 +22,15 @@ Input: `anchor` (centre of the wall's front line), `bearing`, `units` from the
 It tries every measured wall width, archer width and number of archer rows (up
 to 3). Hard rules: archers in near-square blocks with room to turn in place between them (gap = diagonal − front, rows: diagonal − depth), no wider than the wall plus 10 m per side, the wall at least
 `min_wall_depth_m` deep, every archer reaching at least `min_reach_m` past the
-wall. Among valid options the best score wins: reach + `wall_depth_weight` ×
-wall depth. Every option with its score is returned in `options`.
+wall. Among valid options: **the thinnest wall no wider than `max_wall_front_m`** (180 m); the score is
+the reach past the wall (the thinner the wall, the nearer the archers to the front). When every wall is
+wider, the narrowest. Every option with its score is returned in `options`.
+
+**The thinner the better** (user, 28.09.2026, task 29; before it was "the thicker the better"): a thick
+wall pushed the archers back and they did not reach the enemy from the window. In the simulation the
+optimum is 30 m spearmen (a 9.3 m wall); thinner walls grow to 240-475 m and do not fit between rocks.
+The window against the enemy we see (>= 5 m) is looked for only among walls within the width limit.
+On the map: `fit` (`src/apps/formation/fit.lua`).
 
 The lord stands in the centre ([battle theory](../../ru/architecture/battle-theory.md), phase 1):
 his job is to bind the enemy lord, who may come on either flank. The first archer row
@@ -35,8 +42,7 @@ soldiers, the lord 0.1 m from the plan).
 
 Output: `status` (`ok`, `infeasible`, `no_wall`), `choice` and `placements`
 (order point = front-rank centre, bearing, width, front, depth, role, row).
-Defaults: the thicker the wall the better (depth weight 100, reach only breaks
-ties), every archer at least 80 m past the wall. Parameter meaning: see the [Russian page](../../ru/apps/formation.md).
-The map is not taken into account yet.
+Defaults: the thinnest wall up to 180 m, every archer at least 80 m past the wall. Parameter meaning:
+see the [Russian page](../../ru/apps/formation.md).
 
 Watch it in motion: [battle viewer](../launch/viewer.md), layer “lord routes” (preset `modules`).

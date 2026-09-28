@@ -2,8 +2,9 @@
 
 [← Back](README.md) · [Documentation](../README.md) › [AI tree](README.md) › Formation keeps the window · [Русский](../../ru/tree/formation_window.md)
 
-A branch of deployment: the wall no thicker than the window allows. A thick wall
-pushes our archers back from the front, while their shooters reach our wall from the same distance.
+A branch of deployment: the wall keeps the window. A thick wall pushes our archers back from the front,
+while their shooters reach our wall from the same distance. Since task 29 (28.09.2026) the formation takes
+the thinnest wall up to 180 m anyway; the branch checks the window among walls within that limit.
 
 ## Place in the tree
 
@@ -25,9 +26,9 @@ flowchart BT
 <!-- generated:tree:card:formation_window -->
 | | |
 |---|---|
-| What it does | The wall no thicker than the window against the enemy we see allows (>= 5 m) |
+| What it does | Among walls up to 180 m, the one that keeps the window against the enemy we see (>= 5 m) |
 | Starts when | the enemy is seen |
-| Without it | the thickest wall; the window is not checked |
+| Without it | the thinnest wall up to 180 m; the window is not checked |
 | Switch | `formation_window` (on) |
 | Kind, level | branch, Strategic |
 | Grows from | [Deployment](deploy.md) |
@@ -39,7 +40,7 @@ flowchart BT
 
 ```mermaid
 flowchart LR
-  o["options,<br/>thickest wall first"] --> pl["place the whole army"]
+  o["walls up to 180 m,<br/>thinnest first"] --> pl["place the whole army"]
   pl --> r["reach: the window for<br/>the first archer row"]
   r --> q{"window >= 5 m?"}
   q -- yes --> take["take this option"]
@@ -54,17 +55,17 @@ flowchart LR
 | **30 m** | **175 x 9.3 m** | **103.7 m** | **95.6 m** | **8.1 m** |
 | 40 m | 237 x 7.7 m | 105.3 m | 95.6 m | 9.7 m |
 
-Against the game's AI in the test battle (their archers about 32 m behind their front).
+Against the game's AI in the test battle (their archers about 32 m behind their front). The 40 m wall is wider than 180 m: it is not taken for the window (in the game such a wide wall did not fit between the rocks).
 
 ## Example
 
-6 spearmen and 4 archers: without the branch — a 15 m wall and no window; with it — a 30 m wall, an 8 m window.
+6 spearmen and 4 archers: before task 29, without the branch a 15 m wall and no window, with it a 30 m wall and an 8 m window. Now a 30 m wall either way.
 
 ![Formation keeps the window](../../assets/tree/window_game_few.png)
 
 ## Checks
 
-- `tests/apps/formation/test_services.py`; branch off = the thickest wall: `tests/tools/test_tree_branches.py`;
+- `tests/apps/formation/test_services.py`; branch off = the thinnest wall up to 180 m: `tests/tools/test_tree_branches.py`;
 - battle 28.09.2026 (`window_game_few`): the wall re-planned to 30 m once the enemy stood in lines; in the window, 59 s — us −12, them −55.
 
 Modules: [formation](../apps/formation.md) · [reach](../apps/reach.md).

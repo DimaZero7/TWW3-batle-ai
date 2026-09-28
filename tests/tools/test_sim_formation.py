@@ -82,12 +82,13 @@ def test_the_place_past_the_rock_is_not_taken_inside_their_reach():
     sides, _ = formation.simulate(army)
     log = sides["approach"]["log"]
     # The rock lies across the way close to them: a step aside along its edge (apps.approach
-    # choose_aside), then every place past it is inside their archers' reach (apps.reach), so
-    # the approach stops and the level above decides (before 28.09.2026 the formation went
-    # past the rock under their fire).
-    assert [r["decision"] for r in log] == ["approach", "approach", "blocked"]
-    assert log[1]["path"]["aside_m"] and log[2]["reason"] == "no_place" and log[2]["window"]["reason"] == "window"
+    # choose_aside) finds the place past it out of their archers' reach (apps.reach), and the
+    # army holds at the stop line (before 28.09.2026 the formation went past the rock under
+    # their fire; with the thick wall, before task 29, no place out of their reach was left).
+    assert [r["decision"] for r in log] == ["approach", "approach", "hold"]
+    assert log[1]["path"]["aside_m"] and log[2]["reason"] == "at_stop_line" and log[2]["window"]["reason"] == "window"
     assert all(r["path"]["advance_m"] <= r["window"]["safe_to"] for r in log if r["decision"] == "approach")
+    assert not log[2]["window"]["under_fire_now"]
     # The formation is planned anew at each step (as in battle), not shifted as checked: after
     # the step aside one block may touch the rock's edge; the engine squeezes it
     # (tests/tools/test_sim_physics.py).

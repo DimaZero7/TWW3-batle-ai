@@ -62,7 +62,7 @@ flowchart BT
 |---|---|---|---|---|---|---|
 | [Расстановка](deploy.md) | фаза | Стратегический | готово | — | корень дерева, не выключается | [plan](../apps/plan.md), [assessment](../apps/assessment.md), [strategy](../apps/strategy.md), [formation](../apps/formation.md) |
 | [Строй по карте](map_fit.md) | ветка | Стратегический | готово | `map_fit` (вкл) | строй встаёт ровно в заданную точку, карта не учитывается | [formation](../apps/formation.md), [mask](../apps/mask.md) |
-| [Строй держит окно](formation_window.md) | ветка | Стратегический | готово | `formation_window` (вкл) | самая толстая стена, окно не проверяется | [formation](../apps/formation.md), [reach](../apps/reach.md) |
+| [Строй держит окно](formation_window.md) | ветка | Стратегический | готово | `formation_window` (вкл) | самая тонкая стена до 180 м, окно не проверяется | [formation](../apps/formation.md), [reach](../apps/reach.md) |
 | [Сближение до окна](approach.md) | фаза | Тактический | готово | `approach` (вкл) | армия стоит, где расставлена | [tactics](../apps/tactics.md), [approach](../apps/approach.md), [reach](../apps/reach.md), [battlefield](../apps/battlefield.md), [vision](../apps/vision.md), [mask](../apps/mask.md) |
 | [Выравнивание](align.md) | ветка | Тактический | готово | `align` (вкл) | не выравниваться, идти вдоль своего направления | [alignment](../apps/alignment.md), [battlefield](../apps/battlefield.md), [vision](../apps/vision.md) |
 | [Логистика у препятствия](logistics.md) | ветка | Тактический | готово | `logistics` (выкл) | обход препятствия делает движок | [logistics](../apps/logistics.md), [mask](../apps/mask.md) |
@@ -120,7 +120,7 @@ flowchart LR
 <!-- generated:docs:index -->
 - [Фаза 1 · Расстановка](deploy.md) — Первая фаза и корень дерева: из состава армий выбрать стратегию и поставить строй
 - [Строй по карте](map_fit.md) — Ветка расстановки: строй не встаёт на камни
-- [Строй держит окно](formation_window.md) — Ветка расстановки: стена не толще, чем позволяет окно
+- [Строй держит окно](formation_window.md) — Ветка расстановки: стена держит окно
 - [Фаза 2 · Сближение до окна](approach.md) — Подойти скачками и встать в **окне**: наш первый эшелон достаёт их пехоту, их лучники нашу стену — нет
 - [Выравнивание](align.md) — Ветка сближения: встать ровно напротив основной группы врага, чтобы стена смотрела на их фронт
 - [Логистика у препятствия](logistics.md) — Ветка сближения: когда скачок идёт в обход препятствия, отряды проходят его очередями, а не толпой

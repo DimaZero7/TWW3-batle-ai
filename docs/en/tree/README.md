@@ -62,7 +62,7 @@ Phases 3–8 and "lord against lord" come from the battle theory (Russian only).
 |---|---|---|---|---|---|---|
 | [Deployment](deploy.md) | phase | Strategic | done | — | the tree's root, cannot be off | [plan](../apps/plan.md), [assessment](../apps/assessment.md), [strategy](../apps/strategy.md), [formation](../apps/formation.md) |
 | [Formation on the map](map_fit.md) | branch | Strategic | done | `map_fit` (on) | the formation stands where asked; the map is not considered | [formation](../apps/formation.md), [mask](../apps/mask.md) |
-| [Formation keeps the window](formation_window.md) | branch | Strategic | done | `formation_window` (on) | the thickest wall; the window is not checked | [formation](../apps/formation.md), [reach](../apps/reach.md) |
+| [Formation keeps the window](formation_window.md) | branch | Strategic | done | `formation_window` (on) | the thinnest wall up to 180 m; the window is not checked | [formation](../apps/formation.md), [reach](../apps/reach.md) |
 | [Approach to the window](approach.md) | phase | Tactical | done | `approach` (on) | the army stands where it was deployed | [tactics](../apps/tactics.md), [approach](../apps/approach.md), [reach](../apps/reach.md), [battlefield](../apps/battlefield.md), [vision](../apps/vision.md), [mask](../apps/mask.md) |
 | [Alignment](align.md) | branch | Tactical | done | `align` (on) | no alignment: the army steps along its own facing | [alignment](../apps/alignment.md), [battlefield](../apps/battlefield.md), [vision](../apps/vision.md) |
 | [Logistics past an obstacle](logistics.md) | branch | Tactical | done | `logistics` (off) | the engine walks the units round an obstacle by itself | [logistics](../apps/logistics.md), [mask](../apps/mask.md) |
@@ -120,7 +120,7 @@ how to keep these docs — [rules](../architecture/documentation.md).
 <!-- generated:docs:index -->
 - [Phase 1 · Deployment](deploy.md) — The first phase and the tree's root: from the armies pick a strategy and place the formation
 - [Formation on the map](map_fit.md) — A branch of deployment: the formation does not stand on rocks
-- [Formation keeps the window](formation_window.md) — A branch of deployment: the wall no thicker than the window allows
+- [Formation keeps the window](formation_window.md) — A branch of deployment: the wall keeps the window
 - [Phase 2 · Approach to the window](approach.md) — Step up and stand in the **window**: our first echelon reaches their infantry, their archers do not reach our wall
 - [Alignment](align.md) — A branch of the approach: stand square opposite the enemy's main group so the wall faces their front
 - [Logistics past an obstacle](logistics.md) — A branch of the approach: when a step walks round an obstacle, units pass it in queues, not in a crowd

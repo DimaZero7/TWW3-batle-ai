@@ -21,9 +21,9 @@ SRC = Path(__file__).resolve().parents[2] / "src"
 APPS = SRC / "apps"
 
 LEVELS, TRUNKS = architecture.LEVELS, architecture.TRUNKS
-MAX_LINES = 500
+MAX_LINES = 1000  # user, 28.09.2026 (was 500)
 # Longer modules, and why (to be split when they are next changed).
-TOO_LONG = {"logistics/services.lua": "backlog #18: planner and dispatch in one file"}
+TOO_LONG = {}
 REQUIRE = re.compile(r"require\('apps\.([a-z_]+)\.")
 UNIT_KEY = re.compile(r"['\"]wh[0-9]?_[a-z0-9_]+['\"]")
 ENGINE = re.compile(r"\bbm:|get_context_value|script_unit|battle_manager|:unique_ui_id\(")
