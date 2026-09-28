@@ -58,9 +58,9 @@ def test_first_example_is_covered_without_overlaps(plan):
     roles = by_role(r)
     assert len(roles["wall"]) == 1 and len(roles["arc"]) == 4 and len(roles["lord"]) == 1
     wall = roles["wall"][0]
-    # Bearing 0 faces +Z: archers stand behind (lower Z), the lord level with the wall.
+    # Bearing 0 faces +Z: archers stand behind (lower Z), the lord in the centre behind the wall.
     assert all(a["z"] < wall["z"] - wall["depth_m"] for a in roles["arc"])
-    assert roles["lord"][0]["z"] == pytest.approx(0)
+    assert roles["lord"][0]["x"] == pytest.approx(0) and roles["lord"][0]["z"] < wall["z"] - wall["depth_m"]
 
 
 def test_the_wall_is_as_thick_as_the_archers_reach_allows(plan):
@@ -95,10 +95,62 @@ def test_other_roles_are_left_unplaced(plan):
     assert r["unplaced"] == ["horse"] and all(p["id"] != "horse" for p in r["placements"])
 
 
-def test_lord_goes_to_the_flank_of_the_enemy_lord(plan):
-    lord = lambda r: by_role(r)["lord"][0]
-    assert lord(plan(army(1)))["x"] > 0                       # nobody seen: right flank
-    assert lord(plan(army(1), enemy_lord=(-30, 200)))["x"] < 0   # enemy lord on our left
+def check_lord_in_the_centre(r, params=None):
+    """The lord stands on the axis in the passage of the first archer row and can reach both flanks."""
+    p = {"lord_passage_m": 10, **(params or {})}
+    assert not r["overlaps"]
+    roles = by_role(r)
+    lords, first = roles.get("lord", []), [a for a in roles.get("arc", []) if a["row"] == 1]
+    for lord in lords:
+        assert lord["along_m"] == pytest.approx(0)
+        assert lord["back_m"] > r["choice"]["wall_depth_m"]
+    if not lords:
+        return
+    if first:
+        # The two blocks either side of the axis leave the passage between them.
+        left = [a["along_m"] + a["front_m"] / 2 for a in first if a["along_m"] < 0]
+        right = [a["along_m"] - a["front_m"] / 2 for a in first if a["along_m"] > 0]
+        assert len(right) - len(left) in (0, 1)
+        assert min(right) - (max(left) if left else -min(right)) >= p["lord_passage_m"] - 1e-6
+        middle = first[0]["back_m"] + max(a["depth_m"] for a in first) / 2
+        assert sum(l["back_m"] for l in lords) / len(lords) == pytest.approx(middle)
+    routes = r["lord_routes"]
+    for side in ("left", "right"):
+        assert routes[side]["clear"], (side, routes[side]["blocked_by"])
+        assert routes[side]["length_m"] >= r["choice"]["wall_front_m"] / 2
+
+
+def test_lord_stands_in_the_centre_in_a_passage(plan):
+    r = plan(army(4))
+    check_lord_in_the_centre(r)
+    # Wider passage on request; the enemy lord's side no longer matters.
+    check_lord_in_the_centre(plan(army(4), {"lord_passage_m": 16}), {"lord_passage_m": 16})
+    assert plan(army(4), enemy_lord=(-30, 200))["placements"] == r["placements"]
+
+
+def test_without_a_lord_there_is_no_passage(plan):
+    r = plan(army(4)[1:])
+    assert "lord_routes" not in r and "passage_m" not in r["choice"]
+
+
+# Every mix from 2 to 20 units: walls, archers, none to two lords (user, 28.09.2026:
+# the code must hold for any army, not the test one).
+MIXES = [(w, a, l) for l in (0, 1, 2) for w in range(1, 19) for a in range(0, 19) if 2 <= w + a + l <= 20]
+
+
+@pytest.mark.parametrize("bearing", [0, 90])
+def test_any_mix_of_units(plan, bearing):
+    bad = []
+    for w, a, l in MIXES:
+        units = ([unit(f"l{i}", "lord") for i in range(l)] + [unit(f"w{i}", "wall") for i in range(w)]
+                 + [unit(f"a{i}", "arc") for i in range(a)])
+        r = plan(units, bearing=bearing)
+        try:
+            assert len(r["placements"]) == w + a + l
+            check_lord_in_the_centre(r)
+        except AssertionError as e:
+            bad.append(((w, a, l), r["status"], str(e)[:120]))
+    assert not bad, bad[:10]
 
 
 def test_archers_have_room_to_turn(plan):

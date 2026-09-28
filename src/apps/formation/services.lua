@@ -1,7 +1,8 @@
 -- Pure formation layouts (no engine). A layout places units by their ROLE
 -- (given by apps.strategy); it knows nothing about why a strategy was chosen.
 --   line_and_blocks: 'wall' units in a line in front, 'arc' units in
---   near-square blocks behind it, 'lord' level with the line on a flank.
+--   near-square blocks behind it, 'lord' in the centre behind the wall, in a
+--   passage between the two halves of the first archer row.
 -- Unit sizes come from the roster (data/roster): the measured front and depth
 -- for each ordered width; only measured widths are used.
 --
@@ -17,8 +18,11 @@ M.DEFAULTS = {
     wall_archer_gap_m = 3,   -- wall's rear rank to the first archer rank
     row_gap_m = 2,           -- between archer rows
     unit_gap_m = 1,          -- between neighbours in one line
-    lord_gap_m = 4,          -- wall flank to the lord
-    lord_side = 1,           -- 1 = right flank, -1 = left; used when no enemy lord is seen
+    -- The lord stands in the centre: his job is to bind the enemy lord, who
+    -- may come on either flank (battle theory, phase 1; user, 28.09.2026).
+    lord_passage_m = 10,     -- between the halves of the first archer row
+    lord_gap_m = 4,          -- between lords one behind another in the passage
+    lord_clearance_m = 1,    -- his way to a flank keeps this far from every block
     min_wall_depth_m = 5,    -- a thinner wall is not a wall (about 3 ranks)
     min_reach_m = 80,        -- every archer must shoot this far past the wall
     -- The thicker the wall the better (like a phalanx): depth decides, reach
@@ -84,6 +88,33 @@ local function line(units, width, gap)
     return total, offsets
 end
 
+-- A row centred on the formation's axis. With passage_m it is split into two
+-- halves (the extra unit on the right) with a passage of that width centred on
+-- the axis. Returns each unit's centre offset and the row's left and right edges.
+local function row(units, width, gap, passage_m)
+    if not passage_m then
+        local total, offsets = line(units, width, gap)
+        return offsets, -total / 2, total / 2
+    end
+    local offsets, left, right = {}, -passage_m / 2, passage_m / 2
+    local half = math.floor(#units / 2)
+    local cursor = -passage_m / 2
+    for i = half, 1, -1 do
+        local front = shape(units[i], width).front_m
+        offsets[i] = cursor - front / 2
+        left = cursor - front
+        cursor = left - gap
+    end
+    cursor = passage_m / 2
+    for i = half + 1, #units do
+        local front = shape(units[i], width).front_m
+        offsets[i] = cursor + front / 2
+        right = cursor + front
+        cursor = right + gap
+    end
+    return offsets, left, right
+end
+
 -- Room to turn: a block turning in place sweeps a circle of its half diagonal,
 -- so neighbours need (diagonal - front) side by side and (diagonal - depth) between rows.
 local function turn_gaps(archers, width, p)
@@ -98,24 +129,28 @@ local function turn_gaps(archers, width, p)
     return side, row, aspect
 end
 
-local function evaluate(walls, archers, wall_width, archer_width, rows, p)
+-- lords: how many stand in the passage of the first row (none: no passage).
+local function evaluate(walls, archers, wall_width, archer_width, rows, p, lords)
     local option = {wall_width = wall_width, archer_width = archer_width, rows = rows, failed = {}}
     local side_gap, row_gap, aspect = p.unit_gap_m, p.row_gap_m, 1
     if #archers > 0 then side_gap, row_gap, aspect = turn_gaps(archers, archer_width, p) end
     option.archer_gap_m, option.archer_row_gap_m, option.archer_aspect = side_gap, row_gap, aspect
+    -- Never narrower than the room the blocks need to turn.
+    if lords > 0 then option.passage_m = math.max(p.lord_passage_m, side_gap) end
     local wall_front = line(walls, wall_width, p.unit_gap_m)
     local wall_depth = 0
     for _, u in ipairs(walls) do wall_depth = math.max(wall_depth, shape(u, wall_width).depth_m) end
     option.wall_front_m, option.wall_depth_m = wall_front, wall_depth
     local per_row = math.ceil(#archers / rows)
-    local back, reach, widest = wall_depth + p.wall_archer_gap_m, nil, 0
-    option.row_back_m = {}
+    local back, reach, widest, overhang = wall_depth + p.wall_archer_gap_m, nil, 0, 0
+    option.row_back_m, option.row_depth_m = {}, {}
     for r = 1, rows do
         local members = {}
         for i = (r - 1) * per_row + 1, math.min(r * per_row, #archers) do members[#members + 1] = archers[i] end
         if #members > 0 then
-            local front = line(members, archer_width, side_gap)
-            widest = math.max(widest, front)
+            local _, left, right = row(members, archer_width, side_gap, r == 1 and option.passage_m or nil)
+            widest = math.max(widest, right - left)
+            overhang = math.max(overhang, -left - wall_front / 2, right - wall_front / 2)
             local depth = 0
             for _, u in ipairs(members) do
                 local s = shape(u, archer_width)
@@ -124,12 +159,12 @@ local function evaluate(walls, archers, wall_width, archer_width, rows, p)
                 local left = u.range_m - (back + s.depth_m / 2)
                 if not reach or left < reach then reach = left end
             end
-            option.row_back_m[r] = back
+            option.row_back_m[r], option.row_depth_m[r] = back, depth
             back = back + depth + row_gap
         end
     end
     option.archer_front_m, option.min_reach_m = widest, reach or 0
-    if widest > wall_front + 2 * p.archer_overhang_m then
+    if overhang > p.archer_overhang_m + 1e-6 then
         option.failed[#option.failed + 1] = 'archers_wider_than_wall'
     end
     if aspect > p.archer_max_aspect then option.failed[#option.failed + 1] = 'archers_not_square' end
@@ -151,9 +186,7 @@ local function place(anchor, bearing, along, back)
     return anchor.x + rx * along - fx * back, anchor.z + rz * along - fz * back
 end
 
--- input: {anchor = {x, z}, bearing, units = {{id, role, range_m, shapes}},
---         enemy_lord = {x, z} (optional, only if visible)}
--- The lord stands on the flank nearer to the enemy lord (he is to bind him).
+-- input: {anchor = {x, z}, bearing, units = {{id, role, range_m, shapes}}}
 -- params: overrides of M.DEFAULTS.
 -- Returns {status = 'ok' | 'infeasible' | 'no_wall', choice, placements, options (best first), unplaced}.
 local function line_and_blocks(input, params)
@@ -185,7 +218,8 @@ local function line_and_blocks(input, params)
                 -- Rows that would hold the same units per row as one row less add nothing.
                 local n = #archers
                 if rows == 1 or math.ceil(n / rows) ~= math.ceil(n / (rows - 1)) then
-                    options[#options + 1] = evaluate(walls, archers, ww, aw, math.ceil(n / math.ceil(math.max(n, 1) / rows)), p)
+                    options[#options + 1] = evaluate(walls, archers, ww, aw,
+                        math.ceil(n / math.ceil(math.max(n, 1) / rows)), p, #lords)
                 end
             end
         end
@@ -193,17 +227,6 @@ local function line_and_blocks(input, params)
     assert(#options > 0, 'No measured widths for the wall')
     table.sort(options, better)
     for i = 1, math.min(#options, p.max_trace) do result.options[i] = options[i] end
-
-    local side = p.lord_side
-    if input.enemy_lord and finite(input.enemy_lord.x) and finite(input.enemy_lord.z) then
-        local b = math.rad(input.bearing)
-        local along = math.cos(b) * (input.enemy_lord.x - input.anchor.x) - math.sin(b) * (input.enemy_lord.z - input.anchor.z)
-        side = along < 0 and -1 or 1
-        result.lord_side_reason = 'enemy_lord'
-    else
-        result.lord_side_reason = 'default'
-    end
-    result.lord_side = side
 
     -- Every unit's place for one option.
     local function build(best)
@@ -222,13 +245,16 @@ local function line_and_blocks(input, params)
             local members = {}
             for i = (r - 1) * per_row + 1, math.min(r * per_row, #archers) do members[#members + 1] = archers[i] end
             if #members > 0 then
-                local _, offsets = line(members, best.archer_width, best.archer_gap_m)
+                local offsets = row(members, best.archer_width, best.archer_gap_m, r == 1 and best.passage_m or nil)
                 for i, u in ipairs(members) do add(u, 'arc', best.archer_width, offsets[i], best.row_back_m[r], r) end
             end
         end
+        -- Level with the middle of the first row (or just behind the wall);
+        -- several lords one behind another around that point.
+        local middle = best.row_back_m[1] and best.row_back_m[1] + best.row_depth_m[1] / 2
+            or best.wall_depth_m + p.wall_archer_gap_m
         for i, u in ipairs(lords) do
-            local along = side * (best.wall_front_m / 2 + p.lord_gap_m + (i - 1) * p.lord_gap_m)
-            add(u, 'lord', nil, along, 0, 0)
+            add(u, 'lord', nil, 0, middle + (i - (#lords + 1) / 2) * p.lord_gap_m, 0)
         end
         return placements
     end
@@ -260,7 +286,57 @@ local function line_and_blocks(input, params)
     end
     result.choice = best
     if #best.failed > 0 then result.status = 'infeasible' end
+    if #lords > 0 then result.lord_routes = M.lord_routes(result.placements, best, p) end
     return result
+end
+
+-- The lord's way from the centre to each flank of the wall: back out of the
+-- passage into the corridor behind the first archer row (between the rows),
+-- then along it to the wall's end. Formation frame (along, back); a leg is
+-- blocked where it comes nearer than lord_clearance_m to a block.
+-- Returns {left = route, right = route}; route = {points = {{along, back}},
+-- length_m, clear, blocked_by = {ids}}.
+function M.lord_routes(placements, choice, params)
+    local p = {}
+    for k, v in pairs(M.DEFAULTS) do
+        if params and params[k] ~= nil then p[k] = params[k] else p[k] = v end
+    end
+    local lord
+    for _, q in ipairs(placements) do
+        if q.role == 'lord' and (not lord or q.back_m < lord.back_m) then lord = q end
+    end
+    assert(lord, 'No lord placed')
+    local corridor = lord.back_m
+    local first = choice.row_back_m and choice.row_back_m[1]
+    if first then
+        local bottom = first + choice.row_depth_m[1]
+        local second = choice.row_back_m[2]
+        corridor = second and (bottom + second) / 2 or bottom + math.max(p.row_gap_m, p.lord_clearance_m * 2) / 2
+    end
+    local c = p.lord_clearance_m
+    local function blocked(a1, a2, b1, b2)
+        local ids = {}
+        for _, q in ipairs(placements) do
+            if q.role ~= 'lord' then
+                local along = math.min(a2, q.along_m + q.front_m / 2) - math.max(a1, q.along_m - q.front_m / 2)
+                local back = math.min(b2, q.back_m + q.depth_m) - math.max(b1, q.back_m)
+                if along > 0.01 and back > 0.01 then ids[#ids + 1] = q.id end
+            end
+        end
+        return ids
+    end
+    local routes = {}
+    for _, side in ipairs({{'left', -1}, {'right', 1}}) do
+        local finish = side[2] * choice.wall_front_m / 2
+        local ids = blocked(lord.along_m - c, lord.along_m + c,
+            math.min(lord.back_m, corridor) - c, math.max(lord.back_m, corridor) + c)
+        for _, id in ipairs(blocked(math.min(lord.along_m, finish) - c, math.max(lord.along_m, finish) + c,
+            corridor - c, corridor + c)) do ids[#ids + 1] = id end
+        routes[side[1]] = {points = {{lord.along_m, lord.back_m}, {lord.along_m, corridor}, {finish, corridor}},
+            length_m = math.abs(corridor - lord.back_m) + math.abs(finish - lord.along_m),
+            clear = #ids == 0, blocked_by = ids}
+    end
+    return routes
 end
 
 M.LAYOUTS = {line_and_blocks = line_and_blocks}
@@ -286,7 +362,7 @@ function M.fit(layout, input, params, search)
         if search and search[k] ~= nil then s[k] = search[k] else s[k] = v end
     end
     local base = M.plan(layout, input, params)
-    if base.fit.ok or base.status == 'no_wall' then return base end
+    if base.status == 'no_wall' or base.fit.ok then return base end
     local shifts = {}
     local side = 0
     while side <= s.max_side_m + 1e-6 do

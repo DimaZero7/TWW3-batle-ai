@@ -75,3 +75,7 @@ def test_no_place_keeps_the_plan_and_says_so(fit):
     r = fit((-1000, 1000, -1000, 1000), army())
     assert not r["fit"]["ok"] and r["fit"]["how"] == "none"
     assert len(r["placements"]) == 5
+
+
+def test_without_a_wall_nothing_is_fitted(fit):
+    assert fit((500, 600, 500, 600), [unit("a1", "arc"), unit("lord", "lord")])["status"] == "no_wall"

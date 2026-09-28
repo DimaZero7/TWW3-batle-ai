@@ -9,9 +9,10 @@ and in the simulation (`tools/sim/formation.py`). Code: `src/apps/formation/`.
 
 | Function | What it does |
 |---|---|
-| `plan(layout, input, params)` | Place units with `layout`; now one: `line_and_blocks` (`wall` line in front, `arc` blocks behind, `lord` on a flank, `other` not placed) |
+| `plan(layout, input, params)` | Place units with `layout`; now one: `line_and_blocks` (`wall` line in front, `arc` blocks behind, `lord` in the centre behind the wall, `other` not placed) |
 | `facing(a, b)` | Bearing from point `a` to point `b`, degrees (0 = +Z, 90 = +X) |
 | `overlaps(placements)` | Pairs of units whose rectangles overlap |
+| `lord_routes(placements, choice, params)` | The lord's way from the centre to each flank of the wall: length and whether it is clear |
 | `turn_in_place(middle, bearing, delta, depth)` | Order point and facing that turn a unit around its middle; the engine's `rotate` pivots on the front rank and shifts the unit ([commands](../game/units/commands.md#turning-in-place)) |
 
 Input: `anchor` (centre of the wall's front line), `bearing`, `units` from the
@@ -22,8 +23,13 @@ to 3). Hard rules: archers in near-square blocks with room to turn in place betw
 wall. Among valid options the best score wins: reach + `wall_depth_weight` ×
 wall depth. Every option with its score is returned in `options`.
 
-The lord stands level with the wall on its flank; if the enemy lord is visible
-(`input.enemy_lord`), on the flank nearer to him, since our lord's job is to bind him.
+The lord stands in the centre ([battle theory](../../ru/architecture/battle-theory.md), phase 1):
+his job is to bind the enemy lord, who may come on either flank. The first archer row
+splits into two halves (the extra block on the right) with a `lord_passage_m` (10 m)
+passage on the axis; the lord stands in it level with the row's middle. `lord_routes`:
+back into the corridor behind the first row and along it to the wall's end. Checked in
+the simulation for every mix of 2 to 20 units and in battle (passage 11.7 m by the
+soldiers, the lord 0.1 m from the plan).
 
 Output: `status` (`ok`, `infeasible`, `no_wall`), `choice` and `placements`
 (order point = front-rank centre, bearing, width, front, depth, role, row).

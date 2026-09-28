@@ -374,6 +374,15 @@ def draw(path, sides, units_by_id, title):
                 centre = math.degrees(math.atan2(math.cos(b), math.sin(b)))
                 ax.add_patch(Wedge((cx, cz), u["range_m"], centre - 30, centre + 30, fill=False,
                                    ec=COLORS["arc"], lw=0.6, alpha=0.6))
+    own = sides["own"]
+    if own.get("lord_routes") and own.get("anchor"):
+        # The lord's way to each flank (formation frame: along, back).
+        b = math.radians(own["bearing"])
+        fx, fz, rx, rz = math.sin(b), math.cos(b), math.cos(b), -math.sin(b)
+        ax0, az0 = own["anchor"]
+        for route in own["lord_routes"].values():
+            pts = [(ax0 + rx * a - fx * k, az0 + rz * a - fz * k) for a, k in route["points"]]
+            ax.plot(*zip(*pts), c=COLORS["lord"], lw=1.2, ls="--" if route["clear"] else ":", zorder=4)
     for side in ("own", "enemy"):
         for p in sides[side]["placements"]:
             if p["role"] == "lord":
@@ -731,6 +740,12 @@ def main(argv=None):
         aligned += (f'маска 3 м: нельзя встать {mask["summary"]["blocked"]} из {mask["summary"]["cells"]} клеток '
                     f'(тёмное); наши отряды {"все помещаются" if not bad else "не помещаются: " + ", ".join(bad)}; '
                     f'полоса вперёд {lane}\n')
+    routes = own.get("lord_routes")
+    if routes:
+        aligned += "лорд в центре, путь к флангам (красный пунктир): " + ", ".join(
+            f'{"влево" if s == "left" else "вправо"} {routes[s]["length_m"]:.0f} м '
+            f'({"свободен" if routes[s]["clear"] else "занят: " + ", ".join(routes[s]["blocked_by"])})'
+            for s in ("left", "right")) + "\n"
     title = aligned + (f'{own["strategy"]}: {own["status"]}. Стена {c["wall_width"]} м ({c["wall_front_m"]:.0f}×{c["wall_depth_m"]:.0f}), '
              f'лучники {c["archer_width"]} м в {c["rows"]} ряд(а), запас дальности {c["min_reach_m"]:.0f} м\n'
              f'пунктир — место для разворота лучников; бледные — враг (для картинки)')

@@ -97,6 +97,35 @@ def stability(rows):
             "units": units}
 
 
+def lord_passage(snapshot, placements):
+    """The passage of the first archer row in battle: planned and real width between the
+    soldiers of the blocks either side of the lord, and how far the lord stands off its middle."""
+    by = {u["script_name"]: u for u in snapshot["units"]}
+    lord = next((p for p in placements.values() if p["role"] == "lord"), None)
+    first = [p for p in placements.values() if p["role"] == "arc" and p.get("row") == 1 and p["id"] in by]
+    if not lord or lord["id"] not in by or not first:
+        return None
+    _, right = frame(lord["bearing"])
+    origin = np.array([lord["x"], lord["z"]])
+    left = [p for p in first if p["along_m"] < lord["along_m"]]
+    rightside = [p for p in first if p["along_m"] > lord["along_m"]]
+    if not rightside:
+        return None
+    near_r = min(rightside, key=lambda p: p["along_m"])
+    near_l = max(left, key=lambda p: p["along_m"]) if left else None
+    r_edge = float(((soldiers(by[near_r["id"]]) - origin) @ right).min())
+    planned_r = near_r["along_m"] - near_r["front_m"] / 2 - lord["along_m"]
+    if near_l:
+        l_edge = float(((soldiers(by[near_l["id"]]) - origin) @ right).max())
+        planned_l = near_l["along_m"] + near_l["front_m"] / 2 - lord["along_m"]
+    else:  # nothing on the left: the passage is measured as symmetric
+        l_edge, planned_l = -r_edge, -planned_r
+    lord_off = float((soldiers(by[lord["id"]]).mean(0) - origin) @ right)
+    return {"planned_m": round(planned_r - planned_l, 1), "real_m": round(r_edge - l_edge, 1),
+            "lord_off_middle_m": round(lord_off - (r_edge + l_edge) / 2, 1),
+            "blocks": [near_l and near_l["id"], near_r["id"]]}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("events", type=Path)
@@ -171,7 +200,8 @@ def main(argv=None):
             during[t["stage"]] = dict(c, t_s=t["t_ms"] / 1000)
     summary = {"facing_source": plan_row["facing_source"], "enemies_seen": plan_row["enemies_seen"],
                "bearing": round(plan_row["bearing"], 1), "status": plan["status"], "choice": plan["choice"],
-               "units_after_placing": units, "alignment": alignment_summary, "stability": stability(rows),
+               "units_after_placing": units, "lord_passage": lord_passage(placed, placements),
+               "alignment": alignment_summary, "stability": stability(rows),
                "stages": stages,
                "archers_while_turning": during}
     args.output.mkdir(parents=True, exist_ok=True)
