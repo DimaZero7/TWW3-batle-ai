@@ -42,6 +42,7 @@
 | `--handover`, `--enemy-ai native\|defend`, `--fast`, `--plain` | formation-probe | Тестовый бой игрока: наш ИИ расставляет, дальше игрок; враг — штатный ИИ; своя скорость или `--speed`; только файл боя без скрипта |
 | `--facing-sweep` | formation-probe | Исследование: какие направления держит движок |
 | `--enemy-ai native\|defend` (без `--handover`) | formation-probe | Играет наш ИИ, враг — штатный ИИ (не берётся скриптом) |
+| `--engine-only` | formation-probe | Ветка `logistics` выключена (`tree.logistics = false`): обход делает движок |
 | `--fire` | formation-probe | Наши стрелки стреляют по готовности; на стоянке пишутся стрелы, обстрел и бойцы обеих сторон |
 | `--range-mode fire_at_will\|attack\|damage` | archer-range | Когда лучники начинают стрелять при разной глубине блока; `damage` — урон по бесстрашной цели на 70–120 м |
 | `--damage-rotate N` | archer-range `damage` | Сдвинуть дистанции на N полос (та же дистанция на другом грунте) |

@@ -46,6 +46,15 @@ LORD_SHAPE = [{"ordered_m": 5, "front_m": 1.0, "depth_m": 1.0}]
 COLORS = {"wall": "#1f77b4", "arc": "#2ca02c", "lord": "#d62728", "other": "#7f7f7f"}
 
 
+def tree_switches(army):
+    """The army's tree switches (apps.tree): the "tree" field; the old "logistics"
+    field is the logistics branch."""
+    switches = dict(army.get("tree") or {})
+    if "logistics" in army:
+        switches.setdefault("logistics", bool(army["logistics"]))
+    return switches
+
+
 def load_army(name):
     path = Path(name)
     if not path.suffix:
@@ -169,36 +178,6 @@ class Planner:
                     code = m.encode(mask), fits = fits, lane = lane})
             end
         """)
-        self._path = self.lua.eval("""
-            function(field, reader, placements, advance, max_advance, safe_to)
-                local m = require('apps.mask.services')
-                local ap = require('apps.approach.services')
-                local mask = m.new(m.grid(field))
-                m.fill(mask, reader)
-                local function fits_at(a)
-                    for _, p in ipairs(placements) do
-                        local b = math.rad(p.bearing)
-                        local moved = {x = p.x + math.sin(b) * a, z = p.z + math.cos(b) * a,
-                            bearing = p.bearing, front_m = p.front_m, depth_m = p.depth_m}
-                        if not m.fits(mask, moved).ok then return false end
-                    end
-                    return true
-                end
-                local function lane_free_at(a)
-                    return m.lane(mask, 0, field.own.width_m, field.own.front_m, field.own.front_m + a).free
-                end
-                -- Search up to 20 m short of their front, and never into their shooters' reach.
-                local limit = field.gap_m - ap.DEFAULTS.margin_m
-                if safe_to then limit = math.min(limit, safe_to) end
-                return require('apps.core.json').encode(ap.choose_advance(advance, max_advance, fits_at, lane_free_at,
-                    3, limit))
-            end
-        """)
-        self._window = self.lua.eval("""
-            function(own, enemy, bearing)
-                return require('apps.core.json').encode(require('apps.reach.services').window(own, enemy, bearing))
-            end
-        """)
         self._fire = self.lua.eval("""
             function(units, seconds)
                 local missile = require('apps.missile.services')
@@ -214,8 +193,30 @@ class Planner:
                 return require('apps.core.json').encode(timeline)
             end
         """)
-        self.approach = self.lua.eval("require('apps.approach.services')")
-        self.alignment = self.lua.eval("require('apps.alignment.services')")
+        self._tactics_new = self.lua.eval("""
+            function(switches)
+                return require('apps.tactics.services').new(require('apps.tree.services').new(switches))
+            end
+        """)
+        self._tactics_decide = self.lua.eval("""
+            function(s, view, reader)
+                if reader then
+                    local m = require('apps.mask.services')
+                    local mask = m.new(m.grid(view.field))
+                    m.fill(mask, reader)
+                    view.mask = mask
+                end
+                return require('apps.core.json').encode(require('apps.tactics.services').decide(s, view))
+            end
+        """)
+        self._tactics_finish = self.lua.eval(
+            "function(s, now, reason) require('apps.tactics.services').finish(s, now, reason) end")
+        self._tree_on = self.lua.eval("""
+            function(switches, name)
+                local tree = require('apps.tree.services')
+                return tree.on(tree.new(switches), name)
+            end
+        """)
         self._strength = self.lua.eval("function(u) return require('apps.assessment.services').strength(u) end")
 
     def strength(self, unit):
@@ -238,12 +239,6 @@ class Planner:
         return json.loads(self._mask(self.lua.table_from(field, recursive=True), grid.reader,
                                      self.lua.table_from(placements, recursive=True)))
 
-    def path(self, field, grid, placements, advance, max_advance, safe_to=None):
-        """apps.approach.choose_advance on the mask: where the step ends (past an obstacle if needed)."""
-        reader = grid.reader if grid else (lambda x, z: (True, True))
-        return json.loads(self._path(self.lua.table_from(field, recursive=True), reader,
-                                     self.lua.table_from(placements, recursive=True), advance, max_advance, safe_to))
-
     def battlefield(self, own_points, own_centre, enemy_points, enemy_centre):
         """apps.battlefield.frame between the two main groups."""
         data = {"own": {"points": own_points, "centre": own_centre},
@@ -261,7 +256,7 @@ class Planner:
         return self._facing(self.lua.table_from({"x": a[0], "z": a[1]}), self.lua.table_from({"x": b[0], "z": b[1]}))
 
     def start(self, role, anchor, bearing, units, enemy_units, enemy_lord=None, formation_params=None, roles=None,
-              grid=None, enemy_blocks=None):
+              grid=None, enemy_blocks=None, switches=None):
         """apps.plan.start: {status, features, decision, formation}; with a captured
         map grid the formation is fitted to the map (apps.formation.fit)."""
         data = {"role": role, "bearing": bearing, "own": {"anchor": {"x": anchor[0], "z": anchor[1]}, "units": units},
@@ -272,14 +267,26 @@ class Planner:
             data["enemy"]["lord"] = {"x": enemy_lord[0], "z": enemy_lord[1]}
         if enemy_blocks:
             data["enemy"]["blocks"] = enemy_blocks
+        if switches:
+            data["tree"] = switches
         if formation_params:
             data["formation_params"] = formation_params
         return json.loads(self._start(self.lua.table_from(data, recursive=True), grid.reader if grid else None))
 
-    def window(self, own_blocks, enemy_blocks, bearing):
-        """apps.reach.window: where to stop so that ours reach theirs and theirs do not reach us."""
-        t = self.lua.table_from
-        return json.loads(self._window(t(own_blocks, recursive=True), t(enemy_blocks, recursive=True), bearing))
+    def tactics(self, switches):
+        """A tactical trunk for one battle (apps.tactics) with the tree's switches."""
+        return self._tactics_new(self.lua.table_from(switches or {}))
+
+    def decide(self, trunk, view, grid=None):
+        """apps.tactics.decide on the view; with a captured map the mask is filled from it."""
+        return json.loads(self._tactics_decide(trunk, self.lua.table_from(view, recursive=True),
+                                               grid.reader if grid else None))
+
+    def finish(self, trunk, now_ms, reason):
+        self._tactics_finish(trunk, now_ms, reason)
+
+    def tree_on(self, switches, name):
+        return bool(self._tree_on(self.lua.table_from(switches or {}), name))
 
     def fire(self, blocks, seconds):
         """apps.missile.step every second for `seconds`, both sides standing: the timeline."""
@@ -469,6 +476,7 @@ def simulate(army, planner=None, params=None):
     own_by_id = {u["id"]: u for u in own_units}
 
     start_grid = MapGrid(army["map"]) if army.get("map") else None
+    switches = tree_switches(army)
 
     def place(anchor, bearing, on_map=False):
         plan = planner.start(army["own"].get("role"), anchor, bearing, [dict(u, shapes=[dict(s) for s in u["shapes"]])
@@ -477,7 +485,8 @@ def simulate(army, planner=None, params=None):
                              grid=start_grid if on_map else None,
                              # The enemy we see: the formation keeps its window against it.
                              enemy_blocks=None if army.get("goal") else
-                             blocks(sides["enemy"]["placements"], enemy_by_id, "enemy"))
+                             blocks(sides["enemy"]["placements"], enemy_by_id, "enemy"),
+                             switches=switches)
         own = plan.get("formation") or {"placements": [], "options": [], "overlaps": [], "unplaced": []}
         # Fitted to the map, the formation may stand elsewhere than asked (apps.formation.fit).
         if own.get("anchor"):
@@ -496,7 +505,7 @@ def simulate(army, planner=None, params=None):
     anchor, bearing = own["anchor"], own["bearing"]
     sides["start_fit"] = own.get("fit")
     alignment = None
-    if field and own["placements"]:
+    if field and own["placements"] and planner.tree_on(switches, "align"):
         alignment = planner.align(field, anchor, bearing, picture["enemy"].get("main"))
         if alignment["check"]["needed"]:
             target = alignment["target"]
@@ -509,9 +518,9 @@ def simulate(army, planner=None, params=None):
     sides["own"]["vision"], sides["enemy"]["vision"] = picture["own"], picture["enemy"]
     sides["battlefield"], sides["alignment"] = field, alignment
     grid = MapGrid(army["map"]) if army.get("map") else None
-    if field and army.get("approach"):
+    if field and army.get("approach") and planner.tree_on(switches, "approach"):
         own, picture, field = approach(planner, sides, own, picture, field, place, own_by_id, enemy_by_id, grid,
-                                       goal=army.get("goal"))
+                                       goal=army.get("goal"), switches=switches)
         sides["own"] = own
         sides["own"]["vision"], sides["enemy"]["vision"] = picture["own"], picture["enemy"]
         sides["battlefield"] = field
@@ -546,23 +555,6 @@ def fire_exchange(planner, own_placements, own_by_id, enemy_placements, enemy_by
                           "arrows_left": round(u["ammo"])} for i, u in end.items()}}
 
 
-def _along(field, x, z):
-    b = math.radians(field["bearing"])
-    return (x - field["origin"]["x"]) * math.sin(b) + (z - field["origin"]["z"]) * math.cos(b)
-
-
-def _shooters(field, placements, by_id):
-    """{along, range_m} of every archer block (its middle) in the battlefield frame."""
-    out = []
-    for p in placements:
-        if p["role"] != "arc":
-            continue
-        b = math.radians(p["bearing"])
-        mx, mz = p["x"] - math.sin(b) * p["depth_m"] / 2, p["z"] - math.cos(b) * p["depth_m"] / 2
-        out.append({"along": _along(field, mx, mz), "range_m": by_id[p["id"]]["range_m"]})
-    return out
-
-
 def blocks(placements, by_id, side):
     """apps.reach / apps.missile blocks: the placement plus the unit's men, hit points, arrows."""
     out = []
@@ -580,63 +572,43 @@ def blocks(placements, by_id, side):
 WALK_MPS = 1.5  # walking pace of our infantry (roster), for the simulated clock
 
 
-def approach(planner, sides, own, picture, field, place, own_by_id, enemy_by_id, grid, max_decisions=30, goal=None):
-    """The commander loop of apps.approach in the simulation. Each manoeuvre ends
-    at once (placements are re-planned at the target) and the clock moves on by
-    its walking time, so the alignment governor's 20 s cooldown is respected."""
-    ap, al, lua = planner.approach, planner.alignment, planner.lua
-    commander, governor = ap.new_commander(), al.new_governor()
+def approach(planner, sides, own, picture, field, place, own_by_id, enemy_by_id, grid, max_decisions=30, goal=None,
+             switches=None):
+    """Phase 2 in the simulation: the same trunk as in battle (apps.tactics) decides;
+    here each manoeuvre ends at once (placements are re-planned at the target) and
+    the clock moves on by its walking time, so the alignment governor's 20 s
+    cooldown is respected."""
+    trunk = planner.tactics(switches)
     now, log, trail, moves = 0, [], [], []
     for _ in range(max_decisions):
-        window = None
-        if goal:
-            # Marching to a goal point: the enemy army is not considered (no reach).
-            own_reach = enemy_reach = 0
-            stop = ap.stop_gap(0, 0)
-        else:
-            # The window (apps.reach): ours reach theirs, theirs do not reach us.
-            window = planner.window(blocks(own["placements"], own_by_id, "own"),
-                                    blocks(sides["enemy"]["placements"], enemy_by_id, "enemy"), own["bearing"])
-            own_reach = enemy_reach = None
-            # Nobody shoots: the old rule, 20 m short of their front.
-            stop = ap.stop_gap(0, 0) if window.get("advance_m") is None else field["gap_m"] - window["advance_m"]
-        step = ap.next_step(field["gap_m"], stop)
-        check = planner.align(field, own["anchor"], own["bearing"], picture["enemy"].get("main"))["check"]
-        gov = governor.decide(now, lua.table_from(check, recursive=True), False)
-        path = None
-        if step.action == "step":
-            path = planner.path(field, grid, own["placements"], step.advance_m, field["gap_m"] - stop,
-                                window and window.get("safe_to"))
-        decision, reason = commander.decide(lua.table_from({
-            "align": check, "governor": gov, "path": path or {"ok": False, "reason": "no_step"},
-            "step": {"action": step.action, "advance_m": step.advance_m},
-            "under_fire": bool(window and window.get("under_fire_now"))}, recursive=True))
+        view = {"now_ms": now, "field": field, "goal": bool(goal),
+                "current": {"anchor": {"x": own["anchor"][0], "z": own["anchor"][1]}, "bearing": own["bearing"]},
+                "placements": own["placements"],
+                "own_blocks": [] if goal else blocks(own["placements"], own_by_id, "own"),
+                "enemy_blocks": [] if goal else blocks(sides["enemy"]["placements"], enemy_by_id, "enemy")}
+        if picture["enemy"].get("main"):
+            view["enemy_main"] = picture["enemy"]["main"]
+        intent = planner.decide(trunk, view, grid)
+        decision, reason, check = intent["decision"], intent["reason"], intent.get("align")
         log.append({"t_s": now / 1000, "decision": decision, "reason": reason, "gap_m": round(field["gap_m"], 1),
-                    "stop_gap_m": round(stop, 1), "own_reach_m": own_reach, "enemy_reach_m": enemy_reach,
-                    "window": window, "advance_m": step.advance_m,
-                    "path": path, "align": {k: check[k] for k in ("angle_off_deg", "offset_m", "needed")}})
+                    "stop_gap_m": round(intent["stop_gap_m"], 1), "window": intent.get("window"),
+                    "advance_m": intent["step"].get("advance_m"), "path": intent.get("path"),
+                    "align": check and {k: check[k] for k in ("angle_off_deg", "offset_m", "needed")}})
         if decision in ("hold", "blocked"):
             break
         if decision == "wait":
             now += 5000
             continue
         trail.append(own["placements"])
-        if decision == "align":
-            target = planner.align(field, own["anchor"], own["bearing"], picture["enemy"].get("main"))["target"]
-            governor.record_order(now, lua.table_from(check, recursive=True))
-            anchor, bearing, walk = (target["anchor"]["x"], target["anchor"]["z"]), target["bearing"], 30
-        else:
-            b = math.radians(own["bearing"])
-            advance = path["advance_m"]
-            anchor = (own["anchor"][0] + math.sin(b) * advance, own["anchor"][1] + math.cos(b) * advance)
-            bearing, walk = own["bearing"], advance / WALK_MPS
-        commander.start(decision, now, None)
+        target = intent["target"]
+        anchor, bearing = (target["anchor"]["x"], target["anchor"]["z"]), target["bearing"]
+        walk = 30 if decision == "align" else intent["path"]["advance_m"] / WALK_MPS
         before_field = field
         own, picture, field = place(anchor, bearing)
         moves.append({"decision": decision, "field": before_field, "before": trail[-1], "after": own["placements"],
-                      "detour": bool((path or {}).get("detour")) and decision == "approach"})
+                      "detour": bool(intent.get("detour")) and decision == "approach"})
         now += walk * 1000
-        commander.finish(now, "stopped")
+        planner.finish(trunk, now, "stopped")
     sides["approach"] = {"log": log, "trail": trail, "moves": moves, "final": log[-1] if log else None}
     return own, picture, field
 
@@ -677,7 +649,7 @@ def probe(army, speed, settle_ms, planner=None):
             if army.get("goal"):
                 config["goal"] = {"x": army["goal"][0], "z": army["goal"][1]}
             config["approach"] = bool(army.get("approach"))
-            config["logistics"] = bool(army.get("logistics"))
+            config["tree"] = tree_switches(army)
             if army["own"].get("roles"):
                 config["roles"] = test_roles(army, units)
             if army.get("formation_params"):

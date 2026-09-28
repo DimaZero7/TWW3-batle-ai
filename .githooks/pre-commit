@@ -1,0 +1,11 @@
+#!/bin/sh
+# All tests before every commit (docs/ru/architecture/ai-design.md, 5.1 rule 9).
+# Enable once: git config core.hooksPath .githooks
+# Skip only with a reason: git commit --no-verify
+if [ -x .venv/Scripts/python.exe ]; then PY=.venv/Scripts/python.exe
+elif [ -x .venv/bin/python ]; then PY=.venv/bin/python
+else PY=python; fi
+"$PY" -m pytest -q -p no:cacheprovider || {
+  echo "pre-commit: tests failed, commit stopped" >&2
+  exit 1
+}

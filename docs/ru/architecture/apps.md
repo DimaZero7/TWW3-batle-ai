@@ -25,7 +25,16 @@
 | [mask](../apps/mask.md) | `services`, `adapter` | Маска «можно ли тут встать» на поле боя, клетка 3 м | новое |
 | [approach](../apps/approach.md) | `services` | Сближение скачками по 50 м до рубежа; одно действие за раз, выравнивание прежде | новое |
 | [reach](../apps/reach.md) | `services` | Кто кого достаёт стрелами (от середины блока); окно — где встать | новое |
-| [missile](../apps/missile.md) | `services` | Урон стрелами по замеру; шаг перестрелки для симуляции | новое |
+| [missile](../apps/missile.md) | `services`, `data` | Урон стрелами по замеру; шаг перестрелки для симуляции | новое |
+| [tree](../apps/tree.md) | `services` | Дерево ИИ: фазы, ветки, базовое поведение, переключатели | новое |
+| [tactics](../apps/tactics.md) | `services` | Ствол тактического уровня (фаза 2): одни решения в игре и симуляции | новое |
+
+**Уровни** (правило 5 из [5.1](ai-design.md#51-обязательные-правила-масштабирования-28092026), проверяет `tests/architecture/`):
+основа — `core`, `battle`, `map`, `navigation`, `units`, `intel`, `orders`, `telemetry`, `observation`,
+`sandbox`, `ai`, `deployment`, `tree`, `vision`, `battlefield`, `mask`, `reach`, `missile`;
+стратегический — `assessment`, `strategy`, `formation`, `plan` (ствол); тактический — `alignment`,
+`approach`, `logistics`, `tactics` (ствол). Зависимости только вниз; на одном уровне узлы зовёт только ствол.
+
 | [logistics](../apps/logistics.md) | `services` | Очереди у препятствия: кто обходит, какой стороной, в каком порядке и ширине; выключаемый | новое |
 | [units](../apps/units.md) | `state_adapter`, `range_adapter`, `card_adapter`, `formation_adapter`, `contract` | 68 полей состояния своего отряда, дальность стрельбы, карточка и профиль отряда, движение и бойцы, границы ширины строя | `units/state.lua`, `units/range.lua` |
 | [intel](../apps/intel.md) | `adapter`, `services` | Видимость врага, память последней известной позиции | `visibility/reader.lua` |

@@ -1,0 +1,189 @@
+{
+ "army": "spear_march_wide",
+ "status": "ok",
+ "strategy": "test_roles",
+ "choice": {
+  "wall_width": 20,
+  "archer_width": 15,
+  "rows": 1,
+  "wall_depth_m": 14.9,
+  "passage_m": 10
+ },
+ "fit": {
+  "how": "as_planned",
+  "ok": true
+ },
+ "anchor": [
+  -241.14,
+  240.39
+ ],
+ "bearing": 3.33,
+ "placements": [
+  {
+   "id": "wh_main_emp_cha_general_0#1",
+   "role": "lord",
+   "x": -242.48,
+   "z": 213.17,
+   "bearing": 2.81,
+   "width": null
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#1",
+   "role": "wall",
+   "x": -289.58,
+   "z": 242.77,
+   "bearing": 2.81,
+   "width": 20
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#10",
+   "role": "arc",
+   "x": -229.88,
+   "z": 221.91,
+   "bearing": 2.81,
+   "width": 15
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#11",
+   "role": "arc",
+   "x": -206.37,
+   "z": 220.76,
+   "bearing": 2.81,
+   "width": 15
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#12",
+   "role": "arc",
+   "x": -182.86,
+   "z": 219.6,
+   "bearing": 2.81,
+   "width": 15
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#2",
+   "role": "wall",
+   "x": -270.21,
+   "z": 241.82,
+   "bearing": 2.81,
+   "width": 20
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#3",
+   "role": "wall",
+   "x": -250.83,
+   "z": 240.86,
+   "bearing": 2.81,
+   "width": 20
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#4",
+   "role": "wall",
+   "x": -231.45,
+   "z": 239.91,
+   "bearing": 2.81,
+   "width": 20
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#5",
+   "role": "wall",
+   "x": -212.08,
+   "z": 238.96,
+   "bearing": 2.81,
+   "width": 20
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#6",
+   "role": "wall",
+   "x": -192.7,
+   "z": 238.01,
+   "bearing": 2.81,
+   "width": 20
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#7",
+   "role": "arc",
+   "x": -301.18,
+   "z": 225.42,
+   "bearing": 2.81,
+   "width": 15
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#8",
+   "role": "arc",
+   "x": -277.67,
+   "z": 224.26,
+   "bearing": 2.81,
+   "width": 15
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#9",
+   "role": "arc",
+   "x": -254.15,
+   "z": 223.11,
+   "bearing": 2.81,
+   "width": 15
+  }
+ ],
+ "approach": [
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 259.8,
+   "stop_gap_m": 20,
+   "advance_m": 50,
+   "window": null,
+   "reached": null,
+   "path": {
+    "advance_m": 50,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 209.8,
+   "stop_gap_m": 20,
+   "advance_m": 50,
+   "window": null,
+   "reached": null,
+   "path": {
+    "advance_m": 152,
+    "beyond_stop_line": false,
+    "detour": true,
+    "ok": true
+   }
+  },
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 57.9,
+   "stop_gap_m": 20,
+   "advance_m": 37.92,
+   "window": null,
+   "reached": null,
+   "path": {
+    "advance_m": 37.92,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "hold",
+   "reason": "at_stop_line",
+   "gap_m": 20.1,
+   "stop_gap_m": 20,
+   "advance_m": null,
+   "window": null,
+   "reached": null,
+   "path": {}
+  }
+ ],
+ "mask": {
+  "fits": 13,
+  "units": 13,
+  "lane_free": true
+ }
+}

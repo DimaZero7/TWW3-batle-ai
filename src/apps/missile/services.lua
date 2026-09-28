@@ -19,14 +19,8 @@ local reach = require('apps.reach.services')
 local M = {}
 local finite = value.finite
 
-M.MEASURED = {
-    shooter = 'wh2_dlc13_emp_inf_archers_0', target = 'wh_main_emp_inf_spearmen_0',
-    missile_damage = 19,
-    arrows_per_man_s = 0.1,
-    strength_power = 0.3,
-    -- {distance from the shooters' middle to the target's front rank, HP per arrow at full strength}
-    hp_per_arrow = {{70, 13.4}, {90, 11.6}, {110, 10.0}},
-}
+-- The measurement (data, not logic: rule 4 of 5.1): apps.missile.data.
+M.MEASURED = require('apps.missile.data')
 
 -- HP per arrow at a distance, at full strength of the target (flat outside the measured span).
 function M.hp_per_arrow(distance_m, missile_damage)

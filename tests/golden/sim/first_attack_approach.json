@@ -1,0 +1,141 @@
+{
+ "army": "first_attack_approach",
+ "status": "ok",
+ "strategy": "wall_and_arc",
+ "choice": {
+  "wall_width": 40,
+  "archer_width": 20,
+  "rows": 2,
+  "wall_depth_m": 7.7,
+  "passage_m": 10,
+  "window_m": 2.61
+ },
+ "fit": {},
+ "anchor": [
+  80.0,
+  26.72
+ ],
+ "bearing": 0,
+ "placements": [
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#1",
+   "role": "arc",
+   "x": 64.39,
+   "z": 16.77,
+   "bearing": 2.81,
+   "width": 20
+  },
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#2",
+   "role": "arc",
+   "x": 94.56,
+   "z": 15.29,
+   "bearing": 2.81,
+   "width": 20
+  },
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#3",
+   "role": "arc",
+   "x": 64.64,
+   "z": -10.33,
+   "bearing": 2.81,
+   "width": 20
+  },
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#4",
+   "role": "arc",
+   "x": 91.66,
+   "z": -11.66,
+   "bearing": 2.81,
+   "width": 20
+  },
+  {
+   "id": "wh_main_emp_cha_general_0#1",
+   "role": "lord",
+   "x": 79.03,
+   "z": 7.04,
+   "bearing": 2.81,
+   "width": null
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#1",
+   "role": "wall",
+   "x": 80,
+   "z": 26.72,
+   "bearing": 2.81,
+   "width": 40
+  }
+ ],
+ "approach": [
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 300.6,
+   "stop_gap_m": 103.9,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 2,
+   "path": {
+    "advance_m": 50,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 250.6,
+   "stop_gap_m": 103.9,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 2,
+   "path": {
+    "advance_m": 50,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 200.6,
+   "stop_gap_m": 103.9,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 2,
+   "path": {
+    "advance_m": 50,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 150.6,
+   "stop_gap_m": 103.9,
+   "advance_m": 46.72,
+   "window": "window",
+   "reached": 2,
+   "path": {
+    "advance_m": 46.72,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "hold",
+   "reason": "at_stop_line",
+   "gap_m": 103.9,
+   "stop_gap_m": 103.9,
+   "advance_m": null,
+   "window": "window",
+   "reached": 2,
+   "path": {}
+  }
+ ]
+}

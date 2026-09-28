@@ -1,0 +1,107 @@
+{
+ "army": "rock_attack",
+ "status": "ok",
+ "strategy": "wall_and_arc",
+ "choice": {
+  "wall_width": 40,
+  "archer_width": 20,
+  "rows": 2,
+  "wall_depth_m": 7.7,
+  "passage_m": 10,
+  "window_m": 2.55
+ },
+ "fit": {
+  "how": "as_planned",
+  "ok": true
+ },
+ "anchor": [
+  -240.0,
+  50.0
+ ],
+ "bearing": 0,
+ "placements": [
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#1",
+   "role": "arc",
+   "x": -255.61,
+   "z": 40.05,
+   "bearing": 2.81,
+   "width": 20
+  },
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#2",
+   "role": "arc",
+   "x": -225.44,
+   "z": 38.57,
+   "bearing": 2.81,
+   "width": 20
+  },
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#3",
+   "role": "arc",
+   "x": -255.36,
+   "z": 12.95,
+   "bearing": 2.81,
+   "width": 20
+  },
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#4",
+   "role": "arc",
+   "x": -228.34,
+   "z": 11.63,
+   "bearing": 2.81,
+   "width": 20
+  },
+  {
+   "id": "wh_main_emp_cha_general_0#1",
+   "role": "lord",
+   "x": -240.97,
+   "z": 30.32,
+   "bearing": 2.81,
+   "width": null
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#1",
+   "role": "wall",
+   "x": -240,
+   "z": 50,
+   "bearing": 2.81,
+   "width": 40
+  }
+ ],
+ "approach": [
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 300.6,
+   "stop_gap_m": 103.9,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 2,
+   "path": {
+    "advance_m": 50,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "blocked",
+   "reason": "no_place",
+   "gap_m": 250.6,
+   "stop_gap_m": 103.9,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 2,
+   "path": {
+    "ok": false,
+    "reason": "no_place"
+   }
+  }
+ ],
+ "mask": {
+  "fits": 6,
+  "units": 6,
+  "lane_free": false
+ }
+}

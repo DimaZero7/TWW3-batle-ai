@@ -305,7 +305,7 @@ def main(argv=None):
                               hold_s=FORMATION_HOLD_S, turn_test=args.turn_test, align_timeout_s=FORMATION_ALIGN_S,
                               manoeuvre_timeout_s=FORMATION_MANOEUVRE_S, approach_timeout_s=FORMATION_APPROACH_S)
             if args.engine_only:
-                run_config["logistics"] = False
+                run_config["tree"] = dict(run_config.get("tree") or {}, logistics=False)
             # placed + align + mask (same limit) + hold.
             model_s = (FORMATION_STAGE_S + 2 * FORMATION_ALIGN_S + FORMATION_HOLD_S
                        + (FORMATION_APPROACH_S if probe_config.get("approach") else 0)

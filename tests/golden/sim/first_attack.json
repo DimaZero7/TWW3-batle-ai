@@ -1,0 +1,69 @@
+{
+ "army": "first_attack",
+ "status": "ok",
+ "strategy": "wall_and_arc",
+ "choice": {
+  "wall_width": 40,
+  "archer_width": 20,
+  "rows": 2,
+  "wall_depth_m": 7.7,
+  "passage_m": 10,
+  "window_m": 2.57
+ },
+ "fit": {},
+ "anchor": [
+  80,
+  -170
+ ],
+ "bearing": 0,
+ "placements": [
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#1",
+   "role": "arc",
+   "x": 64.39,
+   "z": -179.95,
+   "bearing": 2.81,
+   "width": 20
+  },
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#2",
+   "role": "arc",
+   "x": 94.56,
+   "z": -181.43,
+   "bearing": 2.81,
+   "width": 20
+  },
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#3",
+   "role": "arc",
+   "x": 64.64,
+   "z": -207.05,
+   "bearing": 2.81,
+   "width": 20
+  },
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#4",
+   "role": "arc",
+   "x": 91.66,
+   "z": -208.37,
+   "bearing": 2.81,
+   "width": 20
+  },
+  {
+   "id": "wh_main_emp_cha_general_0#1",
+   "role": "lord",
+   "x": 79.03,
+   "z": -189.68,
+   "bearing": 2.81,
+   "width": null
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#1",
+   "role": "wall",
+   "x": 80,
+   "z": -170,
+   "bearing": 2.81,
+   "width": 40
+  }
+ ]
+}

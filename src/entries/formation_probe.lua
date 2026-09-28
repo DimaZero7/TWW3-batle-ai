@@ -20,7 +20,9 @@
 --      decision, 'approach_sample' every 2 ticks while units move,
 --      'approach_manoeuvre' with every soldier when a manoeuvre ends.
 --      config.goal: march to a point (the enemy army is not considered);
---      config.logistics: a step that walks round an obstacle goes by
+--      config.tree: the tree's switches (apps.tree); the decisions are made
+--      by the tactical trunk (apps.tactics), the same as in the simulation;
+--      branch logistics: a step that walks round an obstacle goes by
 --      apps.logistics — who goes which side, in which order and width, and
 --      when each unit sets off (a queue); 'logistics_plan' once, then
 --      'logistics_order' for every order it gives; the manoeuvre ends when
@@ -57,8 +59,9 @@ local battlefield = require('apps.battlefield.services')
 local alignment = require('apps.alignment.services')
 local mask_services = require('apps.mask.services')
 local mask_adapter = require('apps.mask.adapter')
-local approach = require('apps.approach.services')
 local reach = require('apps.reach.services')
+local tree = require('apps.tree.services')
+local tactics = require('apps.tactics.services')
 local navigation = require('apps.navigation.services')
 local logistics = require('apps.logistics.services')
 
@@ -85,7 +88,7 @@ function M.main(bm, config, globals)
     if _G.tww3_bai_formation_probe then return end
     local state = {active = false, finished = false, batch = '', run_id = 'bootstrap', ticks = 0,
         own = {}, enemy = {}, by_name = {}, stage_index = 0, orders_after_placed = 0, orders_alignment = 0,
-        stages = {}, governor = alignment.new_governor(), commander = approach.new_commander(), holder = {}}
+        stages = {}, trunk = tactics.new(tree.new(config.tree)), holder = {}}
     if config.facing_sweep then
         -- Research: which facing the engine gives for a commanded bearing.
         state.stages = {{'placed', 0}, {'sweep', 0, 'sweep'}}
@@ -94,7 +97,10 @@ function M.main(bm, config, globals)
         state.stages = {{'placed', 0}, {'manual', 0, 'manual'}}
     else
         for _, s in ipairs(M.BASE_STAGES) do
-            if s[3] == 'hold' and config.approach then state.stages[#state.stages + 1] = {'approach', 0, 'approach'} end
+            -- Phase 2 only when the army asks for it and the tree's node approach is on.
+            if s[3] == 'hold' and config.approach and tactics.on(state.trunk, 'approach') then
+                state.stages[#state.stages + 1] = {'approach', 0, 'approach'}
+            end
             state.stages[#state.stages + 1] = s
         end
     end
@@ -262,6 +268,11 @@ function M.main(bm, config, globals)
     -- the enemy is not seen there is nothing to align with: try again next tick
     -- (finding an unseen enemy is backlog #11). Returns true once decided.
     local function align()
+        -- Branch align off: no alignment (apps.tree).
+        if not tactics.on(state.trunk, 'align') then
+            emit('alignment', {skipped = 'branch_off'})
+            return true
+        end
         local picture, field = battle_picture()
         if not field then
             state.align_waits = (state.align_waits or 0) + 1
@@ -270,10 +281,10 @@ function M.main(bm, config, globals)
         local current = {anchor = state.placed.anchor, bearing = state.placed.bearing}
         local check = alignment.check(field, current, enemy_of(picture))
         local now = bm:time_elapsed_ms()
-        local decision = state.governor.decide(now, check, false)
+        local decision = state.trunk.governor.decide(now, check, false)
         local row = {check = check, overhang = alignment.overhang(field), field = field, decision = decision}
         if decision == 'align' then
-            state.governor.record_order(now, check)
+            state.trunk.governor.record_order(now, check)
             local target = alignment.target(field, current, enemy_of(picture))
             local result = plan_services.start({role = config.role, roles = config.roles, bearing = target.bearing,
                 own = {anchor = target.anchor, units = config.own.units},
@@ -317,7 +328,7 @@ function M.main(bm, config, globals)
         for _, it in ipairs(state.own) do
             if it.unit:is_moving() then moving = true end
         end
-        emit('governor', {t_ms = elapsed, decision = state.governor.decide(bm:time_elapsed_ms(), check, moving),
+        emit('governor', {t_ms = elapsed, decision = state.trunk.governor.decide(bm:time_elapsed_ms(), check, moving),
             check = check})
     end
 
@@ -469,8 +480,8 @@ function M.main(bm, config, globals)
 
     -- One tick of the approach commander; true when the stage is over.
     local function approach_tick(now, elapsed)
-        local c = state.commander
-        if c.current then
+        local c = state.trunk.commander
+        if tactics.busy(state.trunk) then
             if state.dispatch then logistics_tick(now) end
             state.appr_still = any_moving() and 0 or (state.appr_still or 0) + 1
             if state.ticks % 2 == 0 then
@@ -500,13 +511,15 @@ function M.main(bm, config, globals)
             -- exception to "one action at a time", 28.09.2026: in battle the army
             -- waited out a 6-minute alignment under fire and was beaten).
             local fired_on
-            for _, it in ipairs(state.own) do
-                local ok, under = pcall(function() return it.unit:is_under_missile_attack() end)
-                if ok and under then fired_on = it.name break end
+            if tactics.on(state.trunk, 'under_fire_stop') then
+                for _, it in ipairs(state.own) do
+                    local ok, under = pcall(function() return it.unit:is_under_missile_attack() end)
+                    if ok and under then fired_on = it.name break end
+                end
             end
-            if fired_on then
+            if tactics.interrupt(state.trunk, fired_on ~= nil) then
                 local kind = c.current.kind
-                c.finish(now, 'under_fire')
+                tactics.finish(state.trunk, now, 'under_fire')
                 for _, it in ipairs(state.own) do orders.halt(it.uc) end
                 state.dispatch = nil
                 emit('approach_manoeuvre', {kind = kind, t_ms = took, reason = 'under_fire', unit = fired_on,
@@ -517,7 +530,7 @@ function M.main(bm, config, globals)
             local dispatched = not state.dispatch or state.dispatch.done()
             if (took >= config.settle_ms and state.appr_still >= 3 and dispatched) or timeout then
                 local kind = c.current.kind
-                c.finish(now, timeout and 'timeout' or 'stopped')
+                tactics.finish(state.trunk, now, timeout and 'timeout' or 'stopped')
                 local row = {kind = kind, t_ms = took, reason = timeout and 'timeout' or 'stopped', units = units_row(),
                     logistics = state.dispatch ~= nil}
                 if state.dispatch then
@@ -535,69 +548,32 @@ function M.main(bm, config, globals)
         local reach_unit
         for _, it in ipairs(state.own) do if it.role == 'wall' then reach_unit = it.unit; break end end
         mask_services.fill(m, mask_adapter.reader(bm, vector_type, reach_unit or state.own[1].unit, m.grid.step))
-        -- The stop: the window (apps.reach, battle theory phase 2) — ours reach
-        -- theirs, theirs do not reach us. Marching to a goal point, or nobody
-        -- shooting: 20 m short of their front.
-        local window, stop
-        if not config.goal then
-            local own_blocks, enemy_blocks = reach_blocks()
-            window = reach.window(own_blocks, enemy_blocks, state.placed.bearing)
+        -- The decision: the tactical trunk (apps.tactics), as in the simulation.
+        local own_blocks, enemy_list = {}, {}
+        if not config.goal then own_blocks, enemy_list = reach_blocks() end
+        local placements = {}
+        for _, it in ipairs(state.own) do
+            if it.placement then placements[#placements + 1] = it.placement end
         end
-        if window and window.advance_m then
-            stop = field.gap_m - window.advance_m
-        else
-            stop = approach.stop_gap(0, 0)
-        end
-        local step = approach.next_step(field.gap_m, stop)
-        local check = alignment.check(field, {anchor = state.placed.anchor, bearing = state.placed.bearing},
-            enemy_of(picture))
-        local gov = state.governor.decide(now, check, false)
-        local path = {ok = false, reason = 'no_step'}
-        if step.action == 'step' then
-            local function fits_at(a)
-                for _, it in ipairs(state.own) do
-                    local p = it.placement
-                    if p then
-                        local b = math.rad(p.bearing)
-                        local moved = {x = p.x + math.sin(b) * a, z = p.z + math.cos(b) * a, bearing = p.bearing,
-                            front_m = p.front_m, depth_m = p.depth_m}
-                        if not mask_services.fits(m, moved).ok then return false end
-                    end
-                end
-                return true
-            end
-            local function lane_free_at(a)
-                return mask_services.lane(m, 0, field.own.width_m, field.own.front_m, field.own.front_m + a).free
-            end
-            -- Past an obstacle: never into their shooters' reach.
-            local limit = field.gap_m - approach.DEFAULTS.margin_m
-            if window and window.safe_to then limit = math.min(limit, window.safe_to) end
-            path = approach.choose_advance(step.advance_m, field.gap_m - stop, fits_at, lane_free_at, 3, limit)
-        end
-        local decision, reason = c.decide({align = check, governor = gov, step = step, path = path,
-            under_fire = window and window.under_fire_now})
+        local intent = tactics.decide(state.trunk, {now_ms = now, field = field, goal = config.goal ~= nil,
+            current = {anchor = state.placed.anchor, bearing = state.placed.bearing}, enemy_main = enemy_of(picture),
+            placements = placements, own_blocks = own_blocks, enemy_blocks = enemy_list, mask = m})
+        local decision, reason, check = intent.decision, intent.reason, intent.align
         local decide_clock = (os.clock and os.clock() or 0) - decide_started
-        emit('approach_decision', {decision = decision, reason = reason, gap_m = field.gap_m, stop_gap_m = stop,
-            window = window, step = step, path = path,
-            align = {angle_off_deg = check.angle_off_deg, offset_m = check.offset_m, needed = check.needed},
+        emit('approach_decision', {decision = decision, reason = reason, gap_m = field.gap_m,
+            stop_gap_m = intent.stop_gap_m, window = intent.window, step = intent.step,
+            path = intent.path or {ok = false, reason = 'no_step'},
+            align = check and {angle_off_deg = check.angle_off_deg, offset_m = check.offset_m, needed = check.needed},
             mask = mask_services.summary(m), clock_s = decide_clock})
         if decision == 'approach' then
-            local b = math.rad(state.placed.bearing)
-            local a = path.advance_m
-            local anchor = {x = state.placed.anchor.x + math.sin(b) * a, z = state.placed.anchor.z + math.cos(b) * a}
-            if config.logistics and path.detour then
-                start_logistics(field, m, anchor, state.placed.bearing, now)
+            if tactics.on(state.trunk, 'logistics') and intent.detour then
+                start_logistics(field, m, intent.target.anchor, intent.target.bearing, now)
             else
-                order_formation(anchor, state.placed.bearing)
+                order_formation(intent.target.anchor, intent.target.bearing)
             end
-            c.start('approach', now, nil)
             state.appr_still = 0
         elseif decision == 'align' then
-            local target = alignment.target(field, {anchor = state.placed.anchor, bearing = state.placed.bearing},
-                enemy_of(picture))
-            state.governor.record_order(now, check)
-            order_formation(target.anchor, target.bearing)
-            c.start('align', now, nil)
+            order_formation(intent.target.anchor, intent.target.bearing)
             state.appr_still = 0
         elseif decision == 'hold' or decision == 'blocked' then
             return true

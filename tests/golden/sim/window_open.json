@@ -1,0 +1,332 @@
+{
+ "army": "window_open",
+ "status": "ok",
+ "strategy": "wall_and_arc",
+ "choice": {
+  "wall_width": 30,
+  "archer_width": 20,
+  "rows": 2,
+  "wall_depth_m": 9.3,
+  "passage_m": 10,
+  "window_m": 8.03
+ },
+ "fit": {},
+ "anchor": [
+  165.82,
+  -70.95
+ ],
+ "bearing": 92.81,
+ "placements": [
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#1",
+   "role": "arc",
+   "x": 155.61,
+   "z": -28.24,
+   "bearing": 92.81,
+   "width": 20
+  },
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#2",
+   "role": "arc",
+   "x": 154.28,
+   "z": -55.27,
+   "bearing": 92.81,
+   "width": 20
+  },
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#3",
+   "role": "arc",
+   "x": 152.8,
+   "z": -85.43,
+   "bearing": 92.81,
+   "width": 20
+  },
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#4",
+   "role": "arc",
+   "x": 151.47,
+   "z": -112.45,
+   "bearing": 92.81,
+   "width": 20
+  },
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#5",
+   "role": "arc",
+   "x": 128.51,
+   "z": -28.49,
+   "bearing": 92.81,
+   "width": 20
+  },
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#6",
+   "role": "arc",
+   "x": 127.18,
+   "z": -55.51,
+   "bearing": 92.81,
+   "width": 20
+  },
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#7",
+   "role": "arc",
+   "x": 125.85,
+   "z": -82.53,
+   "bearing": 92.81,
+   "width": 20
+  },
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#8",
+   "role": "arc",
+   "x": 124.52,
+   "z": -109.56,
+   "bearing": 92.81,
+   "width": 20
+  },
+  {
+   "id": "wh_main_emp_cha_general_0#1",
+   "role": "lord",
+   "x": 144.55,
+   "z": -69.91,
+   "bearing": 92.81,
+   "width": null
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#1",
+   "role": "wall",
+   "x": 169.43,
+   "z": 2.46,
+   "bearing": 92.81,
+   "width": 30
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#2",
+   "role": "wall",
+   "x": 167.99,
+   "z": -26.91,
+   "bearing": 92.81,
+   "width": 30
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#3",
+   "role": "wall",
+   "x": 166.55,
+   "z": -56.27,
+   "bearing": 92.81,
+   "width": 30
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#4",
+   "role": "wall",
+   "x": 165.1,
+   "z": -85.63,
+   "bearing": 92.81,
+   "width": 30
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#5",
+   "role": "wall",
+   "x": 163.66,
+   "z": -115.0,
+   "bearing": 92.81,
+   "width": 30
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#6",
+   "role": "wall",
+   "x": 162.22,
+   "z": -144.36,
+   "bearing": 92.81,
+   "width": 30
+  }
+ ],
+ "approach": [
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 493.0,
+   "stop_gap_m": 95.6,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 4,
+   "path": {
+    "advance_m": 50,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 441.4,
+   "stop_gap_m": 94.0,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 4,
+   "path": {
+    "advance_m": 50,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "align",
+   "reason": "off_line",
+   "gap_m": 389.5,
+   "stop_gap_m": 92.1,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 4,
+   "path": {
+    "advance_m": 50,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 398.0,
+   "stop_gap_m": 101.0,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 4,
+   "path": {
+    "advance_m": 50,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 348.0,
+   "stop_gap_m": 101.0,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 4,
+   "path": {
+    "advance_m": 50,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 297.9,
+   "stop_gap_m": 100.9,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 4,
+   "path": {
+    "advance_m": 50,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 247.9,
+   "stop_gap_m": 100.9,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 4,
+   "path": {
+    "advance_m": 50,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 197.9,
+   "stop_gap_m": 100.9,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 4,
+   "path": {
+    "advance_m": 50,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 147.8,
+   "stop_gap_m": 100.8,
+   "advance_m": 46.99,
+   "window": "window",
+   "reached": 4,
+   "path": {
+    "advance_m": 46.99,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "hold",
+   "reason": "at_stop_line",
+   "gap_m": 100.7,
+   "stop_gap_m": 100.7,
+   "advance_m": null,
+   "window": "window",
+   "reached": 4,
+   "path": {}
+  }
+ ],
+ "fire": {
+  "lost": {
+   "own": {
+    "men": 0,
+    "men_start": 1441
+   },
+   "enemy": {
+    "men": 254,
+    "men_start": 1501
+   }
+  },
+  "units": {
+   "enemy:wh2_dlc13_emp_inf_archers_0#1": 90,
+   "enemy:wh2_dlc13_emp_inf_archers_0#2": 90,
+   "enemy:wh2_dlc13_emp_inf_archers_0#3": 90,
+   "enemy:wh2_dlc13_emp_inf_archers_0#4": 90,
+   "enemy:wh2_dlc13_emp_inf_archers_0#5": 90,
+   "enemy:wh2_dlc13_emp_inf_archers_0#6": 90,
+   "enemy:wh_main_emp_cha_general_0#1": 1,
+   "enemy:wh_main_emp_inf_spearmen_0#1": 120,
+   "enemy:wh_main_emp_inf_spearmen_0#2": 51,
+   "enemy:wh_main_emp_inf_spearmen_0#3": 4,
+   "enemy:wh_main_emp_inf_spearmen_0#4": 51,
+   "enemy:wh_main_emp_inf_spearmen_0#5": 120,
+   "enemy:wh_main_emp_inf_spearmen_0#6": 120,
+   "enemy:wh_main_emp_inf_spearmen_0#7": 120,
+   "enemy:wh_main_emp_inf_spearmen_0#8": 120,
+   "own:wh2_dlc13_emp_inf_archers_0#1": 90,
+   "own:wh2_dlc13_emp_inf_archers_0#2": 90,
+   "own:wh2_dlc13_emp_inf_archers_0#3": 90,
+   "own:wh2_dlc13_emp_inf_archers_0#4": 90,
+   "own:wh2_dlc13_emp_inf_archers_0#5": 90,
+   "own:wh2_dlc13_emp_inf_archers_0#6": 90,
+   "own:wh2_dlc13_emp_inf_archers_0#7": 90,
+   "own:wh2_dlc13_emp_inf_archers_0#8": 90,
+   "own:wh_main_emp_cha_general_0#1": 1,
+   "own:wh_main_emp_inf_spearmen_0#1": 120,
+   "own:wh_main_emp_inf_spearmen_0#2": 120,
+   "own:wh_main_emp_inf_spearmen_0#3": 120,
+   "own:wh_main_emp_inf_spearmen_0#4": 120,
+   "own:wh_main_emp_inf_spearmen_0#5": 120,
+   "own:wh_main_emp_inf_spearmen_0#6": 120
+  }
+ }
+}

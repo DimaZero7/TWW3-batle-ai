@@ -1,0 +1,289 @@
+{
+ "army": "window_game_few",
+ "status": "ok",
+ "strategy": "test_roles",
+ "choice": {
+  "wall_width": 30,
+  "archer_width": 20,
+  "rows": 1,
+  "wall_depth_m": 9.3,
+  "passage_m": 10,
+  "window_m": 8.04
+ },
+ "fit": {
+  "how": "as_planned",
+  "ok": true
+ },
+ "anchor": [
+  166.35,
+  -290.0
+ ],
+ "bearing": 90,
+ "placements": [
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#1",
+   "role": "arc",
+   "x": 156.14,
+   "z": -247.29,
+   "bearing": 92.81,
+   "width": 20
+  },
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#2",
+   "role": "arc",
+   "x": 154.81,
+   "z": -274.31,
+   "bearing": 92.81,
+   "width": 20
+  },
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#3",
+   "role": "arc",
+   "x": 153.33,
+   "z": -304.48,
+   "bearing": 92.81,
+   "width": 20
+  },
+  {
+   "id": "wh2_dlc13_emp_inf_archers_0#4",
+   "role": "arc",
+   "x": 152.0,
+   "z": -331.5,
+   "bearing": 92.81,
+   "width": 20
+  },
+  {
+   "id": "wh_main_emp_cha_general_0#1",
+   "role": "lord",
+   "x": 145.08,
+   "z": -288.95,
+   "bearing": 92.81,
+   "width": null
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#1",
+   "role": "wall",
+   "x": 169.96,
+   "z": -216.59,
+   "bearing": 92.81,
+   "width": 30
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#2",
+   "role": "wall",
+   "x": 168.52,
+   "z": -245.95,
+   "bearing": 92.81,
+   "width": 30
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#3",
+   "role": "wall",
+   "x": 167.08,
+   "z": -275.32,
+   "bearing": 92.81,
+   "width": 30
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#4",
+   "role": "wall",
+   "x": 165.63,
+   "z": -304.68,
+   "bearing": 92.81,
+   "width": 30
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#5",
+   "role": "wall",
+   "x": 164.19,
+   "z": -334.05,
+   "bearing": 92.81,
+   "width": 30
+  },
+  {
+   "id": "wh_main_emp_inf_spearmen_0#6",
+   "role": "wall",
+   "x": 162.75,
+   "z": -363.41,
+   "bearing": 92.81,
+   "width": 30
+  }
+ ],
+ "approach": [
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 493.9,
+   "stop_gap_m": 97.5,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 4,
+   "path": {
+    "advance_m": 50,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 444.6,
+   "stop_gap_m": 98.3,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 4,
+   "path": {
+    "advance_m": 50,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 395.6,
+   "stop_gap_m": 99.2,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 4,
+   "path": {
+    "advance_m": 50,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 346.7,
+   "stop_gap_m": 100.4,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 4,
+   "path": {
+    "advance_m": 50,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 296.1,
+   "stop_gap_m": 99.7,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 4,
+   "path": {
+    "advance_m": 50,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 243.9,
+   "stop_gap_m": 97.5,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 4,
+   "path": {
+    "advance_m": 50,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 190.7,
+   "stop_gap_m": 94.3,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 4,
+   "path": {
+    "advance_m": 50,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "approach",
+   "reason": "step",
+   "gap_m": 135.7,
+   "stop_gap_m": 89.4,
+   "advance_m": 46.35,
+   "window": "window",
+   "reached": 4,
+   "path": {
+    "advance_m": 46.35,
+    "beyond_stop_line": false,
+    "detour": false,
+    "ok": true
+   }
+  },
+  {
+   "decision": "hold",
+   "reason": "at_stop_line",
+   "gap_m": 81.5,
+   "stop_gap_m": 81.5,
+   "advance_m": null,
+   "window": "window",
+   "reached": 4,
+   "path": {}
+  }
+ ],
+ "fire": {
+  "lost": {
+   "own": {
+    "men": 0,
+    "men_start": 1081
+   },
+   "enemy": {
+    "men": 254,
+    "men_start": 1501
+   }
+  },
+  "units": {
+   "enemy:wh2_dlc13_emp_inf_archers_0#1": 90,
+   "enemy:wh2_dlc13_emp_inf_archers_0#2": 90,
+   "enemy:wh2_dlc13_emp_inf_archers_0#3": 90,
+   "enemy:wh2_dlc13_emp_inf_archers_0#4": 90,
+   "enemy:wh2_dlc13_emp_inf_archers_0#5": 90,
+   "enemy:wh2_dlc13_emp_inf_archers_0#6": 90,
+   "enemy:wh_main_emp_cha_general_0#1": 1,
+   "enemy:wh_main_emp_inf_spearmen_0#1": 120,
+   "enemy:wh_main_emp_inf_spearmen_0#2": 51,
+   "enemy:wh_main_emp_inf_spearmen_0#3": 51,
+   "enemy:wh_main_emp_inf_spearmen_0#4": 4,
+   "enemy:wh_main_emp_inf_spearmen_0#5": 120,
+   "enemy:wh_main_emp_inf_spearmen_0#6": 120,
+   "enemy:wh_main_emp_inf_spearmen_0#7": 120,
+   "enemy:wh_main_emp_inf_spearmen_0#8": 120,
+   "own:wh2_dlc13_emp_inf_archers_0#1": 90,
+   "own:wh2_dlc13_emp_inf_archers_0#2": 90,
+   "own:wh2_dlc13_emp_inf_archers_0#3": 90,
+   "own:wh2_dlc13_emp_inf_archers_0#4": 90,
+   "own:wh_main_emp_cha_general_0#1": 1,
+   "own:wh_main_emp_inf_spearmen_0#1": 120,
+   "own:wh_main_emp_inf_spearmen_0#2": 120,
+   "own:wh_main_emp_inf_spearmen_0#3": 120,
+   "own:wh_main_emp_inf_spearmen_0#4": 120,
+   "own:wh_main_emp_inf_spearmen_0#5": 120,
+   "own:wh_main_emp_inf_spearmen_0#6": 120
+  }
+ },
+ "mask": {
+  "fits": 11,
+  "units": 11,
+  "lane_free": true
+ }
+}
