@@ -8,7 +8,7 @@
   "rows": 2,
   "wall_depth_m": 9.3,
   "passage_m": 10,
-  "window_m": 0.41
+  "window_m": 1.17
  },
  "fit": {
   "how": "shift",
@@ -21,15 +21,15 @@
  },
  "anchor": [
   -247.98,
-  -60
+  -39.12
  ],
- "bearing": 90,
+ "bearing": 92.81,
  "placements": [
   {
    "id": "wh2_dlc13_emp_inf_archers_0#1",
    "role": "arc",
    "x": -258.19,
-   "z": -17.29,
+   "z": 3.59,
    "bearing": 92.81,
    "width": 20
   },
@@ -37,7 +37,7 @@
    "id": "wh2_dlc13_emp_inf_archers_0#2",
    "role": "arc",
    "x": -259.52,
-   "z": -44.31,
+   "z": -23.43,
    "bearing": 92.81,
    "width": 20
   },
@@ -45,7 +45,7 @@
    "id": "wh2_dlc13_emp_inf_archers_0#3",
    "role": "arc",
    "x": -261.0,
-   "z": -74.48,
+   "z": -53.6,
    "bearing": 92.81,
    "width": 20
   },
@@ -53,7 +53,7 @@
    "id": "wh2_dlc13_emp_inf_archers_0#4",
    "role": "arc",
    "x": -262.33,
-   "z": -101.5,
+   "z": -80.62,
    "bearing": 92.81,
    "width": 20
   },
@@ -61,7 +61,7 @@
    "id": "wh2_dlc13_emp_inf_archers_0#5",
    "role": "arc",
    "x": -285.3,
-   "z": -17.53,
+   "z": 3.35,
    "bearing": 92.81,
    "width": 20
   },
@@ -69,7 +69,7 @@
    "id": "wh2_dlc13_emp_inf_archers_0#6",
    "role": "arc",
    "x": -286.62,
-   "z": -44.56,
+   "z": -23.67,
    "bearing": 92.81,
    "width": 20
   },
@@ -77,7 +77,7 @@
    "id": "wh2_dlc13_emp_inf_archers_0#7",
    "role": "arc",
    "x": -287.95,
-   "z": -71.58,
+   "z": -50.7,
    "bearing": 92.81,
    "width": 20
   },
@@ -85,7 +85,7 @@
    "id": "wh2_dlc13_emp_inf_archers_0#8",
    "role": "arc",
    "x": -289.28,
-   "z": -98.6,
+   "z": -77.72,
    "bearing": 92.81,
    "width": 20
   },
@@ -93,7 +93,7 @@
    "id": "wh_main_emp_cha_general_0#1",
    "role": "lord",
    "x": -269.25,
-   "z": -58.95,
+   "z": -38.07,
    "bearing": 92.81,
    "width": null
   },
@@ -101,7 +101,7 @@
    "id": "wh_main_emp_inf_spearmen_0#1",
    "role": "wall",
    "x": -244.37,
-   "z": 13.41,
+   "z": 34.29,
    "bearing": 92.81,
    "width": 30
   },
@@ -109,7 +109,7 @@
    "id": "wh_main_emp_inf_spearmen_0#2",
    "role": "wall",
    "x": -245.81,
-   "z": -15.95,
+   "z": 4.93,
    "bearing": 92.81,
    "width": 30
   },
@@ -117,7 +117,7 @@
    "id": "wh_main_emp_inf_spearmen_0#3",
    "role": "wall",
    "x": -247.26,
-   "z": -45.32,
+   "z": -24.43,
    "bearing": 92.81,
    "width": 30
   },
@@ -125,7 +125,7 @@
    "id": "wh_main_emp_inf_spearmen_0#4",
    "role": "wall",
    "x": -248.7,
-   "z": -74.68,
+   "z": -53.8,
    "bearing": 92.81,
    "width": 30
   },
@@ -133,7 +133,7 @@
    "id": "wh_main_emp_inf_spearmen_0#5",
    "role": "wall",
    "x": -250.14,
-   "z": -104.05,
+   "z": -83.16,
    "bearing": 92.81,
    "width": 30
   },
@@ -141,13 +141,13 @@
    "id": "wh_main_emp_inf_spearmen_0#6",
    "role": "wall",
    "x": -251.58,
-   "z": -133.41,
+   "z": -112.53,
    "bearing": 92.81,
    "width": 30
   }
  ],
  "mask": {
-  "fits": 15,
+  "fits": 14,
   "units": 15,
   "lane_free": false
  }

@@ -59,7 +59,7 @@ def summary(army_name, planner=None):
                          "stop_gap_m": _r(r["stop_gap_m"]), "advance_m": _r(r.get("advance_m")),
                          "window": w.get("reason"), "reached": w.get("reached"),
                          "path": {k: _r(v) for k, v in (r.get("path") or {}).items()
-                                  if k in ("ok", "advance_m", "detour", "beyond_stop_line", "reason")}})
+                                  if k in ("ok", "advance_m", "aside_m", "detour", "beyond_stop_line", "reason")}})
         out["approach"] = rows
         # How long each manoeuvre walked (tools/sim/walker.py: round obstacles, in time).
         out["walk_s"] = [_r(m["walk_s"]) for m in appr["moves"]]

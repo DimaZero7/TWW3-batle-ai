@@ -69,6 +69,7 @@ def test_no_unit_walks_or_stands_on_an_obstacle_in_the_approach(runs, name):
     assert worst <= MAX_SQUEEZED, f"a block driven through an obstacle: {worst:.0%} of its men squeezed"
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("name", ["rock_march_wide", "gap_march_wide", "spear_march_wide", "skaven_march_wide"])
 def test_no_soldier_on_an_obstacle_in_the_queues(runs, name):
     _, planner, sides, by_id, grid = runs[name]

@@ -29,7 +29,7 @@
 | [tree](../apps/tree.md) | `services` | Дерево ИИ: фазы, ветки, базовое поведение, переключатели | новое |
 | [tactics](../apps/tactics.md) | `services` | Ствол тактического уровня (фаза 2): одни решения в игре и симуляции | новое |
 
-**Уровни** (правило 5 из [5.1](ai-design.md#51-обязательные-правила-масштабирования-28092026), проверяет `tests/architecture/`):
+**Уровни** («зависимости только вниз» из [5.1](ai-design.md#51-путеводитель-как-делаем-задачу-28092026-упрощено), проверяет `tests/architecture/`):
 основа — `core`, `battle`, `map`, `navigation`, `units`, `intel`, `orders`, `telemetry`, `observation`,
 `sandbox`, `ai`, `deployment`, `tree`, `vision`, `battlefield`, `mask`, `reach`, `missile`;
 стратегический — `assessment`, `strategy`, `formation`, `plan` (ствол); тактический — `alignment`,

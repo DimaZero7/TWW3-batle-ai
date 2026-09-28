@@ -13,6 +13,7 @@ What the modules saw is kept as overlays at every decision: the battlefield
 import math
 
 from tools.sim import formation as simulation
+from tools.sim.enemy import engine_facing
 from tools.sim.mapgrid import MapGrid
 from tools.viewer import record as rec
 
@@ -83,7 +84,8 @@ def convert(army_name, planner=None):
 
     def seen(ms, field, vision, anchor, bearing, routes):
         overlays.extend([rec.field_overlay(ms, field), rec.groups_overlay(ms, vision, side_id),
-                         rec.routes_overlay(ms, routes, anchor, bearing)])
+                         # The formation stands at the engine's facing (the middle of a 64-sector).
+                         rec.routes_overlay(ms, routes, anchor, None if bearing is None else engine_facing(bearing))])
 
     events.append(rec.stage_event(0, "placed"))
     start = 0

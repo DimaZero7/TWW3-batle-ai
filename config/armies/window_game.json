@@ -13,6 +13,8 @@
   "enemy": {
     "role": "defend",
     "layout": "native_defender",
+    "reaction": {"deploy_off_deg": -40},
+    "centre": [294, -404],
     "anchor": [270, -290],
     "bearing": 270,
     "units": [

@@ -8,63 +8,63 @@
   "rows": 2,
   "wall_depth_m": 7.7,
   "passage_m": 10,
-  "window_m": 2.55
+  "window_m": 2.57
  },
  "fit": {
   "how": "as_planned",
   "ok": true
  },
  "anchor": [
-  -240,
-  50
+  -210,
+  100
  ],
  "bearing": 0,
  "placements": [
   {
    "id": "wh2_dlc13_emp_inf_archers_0#1",
    "role": "arc",
-   "x": -255.61,
-   "z": 40.05,
+   "x": -225.61,
+   "z": 90.05,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#2",
    "role": "arc",
-   "x": -225.44,
-   "z": 38.57,
+   "x": -195.44,
+   "z": 88.57,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#3",
    "role": "arc",
-   "x": -255.36,
-   "z": 12.95,
+   "x": -225.36,
+   "z": 62.95,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#4",
    "role": "arc",
-   "x": -228.34,
-   "z": 11.63,
+   "x": -198.34,
+   "z": 61.63,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh_main_emp_cha_general_0#1",
    "role": "lord",
-   "x": -240.97,
-   "z": 30.32,
+   "x": -210.97,
+   "z": 80.32,
    "bearing": 2.81,
    "width": null
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#1",
    "role": "wall",
-   "x": -240,
-   "z": 50,
+   "x": -210,
+   "z": 100,
    "bearing": 2.81,
    "width": 40
   }
@@ -88,10 +88,27 @@
   },
   {
    "t_s": 47.0,
-   "decision": "blocked",
-   "reason": "no_place",
+   "decision": "approach",
+   "reason": "step",
    "gap_m": 250.6,
    "stop_gap_m": 103.9,
+   "advance_m": 50,
+   "window": "window",
+   "reached": 2,
+   "path": {
+    "advance_m": 50,
+    "aside_m": 30,
+    "beyond_stop_line": false,
+    "detour": true,
+    "ok": true
+   }
+  },
+  {
+   "t_s": 101.5,
+   "decision": "blocked",
+   "reason": "no_place",
+   "gap_m": 198.5,
+   "stop_gap_m": 100.4,
    "advance_m": 50,
    "window": "window",
    "reached": 2,
@@ -102,10 +119,11 @@
   }
  ],
  "walk_s": [
-  47.0
+  47.0,
+  54.5
  ],
  "mask": {
-  "fits": 6,
+  "fits": 5,
   "units": 6,
   "lane_free": false
  }

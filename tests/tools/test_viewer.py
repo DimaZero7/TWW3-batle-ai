@@ -228,6 +228,7 @@ def test_simulated_blocks_are_centred_like_the_game_s(simulated):
     assert last["z"] == pytest.approx(p["z"] - math.cos(b) * p["depth_m"] / 2, abs=0.05)
 
 
+@pytest.mark.slow
 def test_a_step_round_an_obstacle_becomes_two_records_to_compare():
     from tools.viewer import logistics
     (queue, at_once), = logistics.convert("rock_march_wide")

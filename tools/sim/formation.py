@@ -39,7 +39,7 @@ from matplotlib.patches import Polygon, Wedge  # noqa: E402
 from tools import config as project  # noqa: E402
 from tools import roster  # noqa: E402
 from tools.lua_runtime import new_runtime  # noqa: E402
-from tools.sim.enemy import native_defender  # noqa: E402
+from tools.sim.enemy import NativeReaction, army_centre, engine_facing, native_defender  # noqa: E402
 from tools.sim import walker as walking  # noqa: E402
 from tools.sim.mapgrid import MapGrid  # noqa: E402
 
@@ -157,10 +157,10 @@ class Planner:
             end
         """)
         self._align = self.lua.eval("""
-            function(field, current, enemy)
+            function(field, current, enemy, params)
                 local al = require('apps.alignment.services')
-                return require('apps.core.json').encode({check = al.check(field, current, enemy),
-                    target = al.target(field, current, enemy), overhang = al.overhang(field)})
+                return require('apps.core.json').encode({check = al.check(field, current, enemy, params),
+                    target = al.target(field, current, enemy, params), overhang = al.overhang(field)})
             end
         """)
         self._mask = self.lua.eval("""
@@ -227,13 +227,15 @@ class Planner:
         """apps.vision.groups on {id, points, strength} units."""
         return json.loads(self._groups(self.lua.table_from(units, recursive=True), total))
 
-    def align(self, field, anchor, bearing, enemy_main=None):
-        """apps.alignment: {check, target, overhang}; enemy_main = their main group from apps.vision."""
+    def align(self, field, anchor, bearing, enemy_main=None, params=None):
+        """apps.alignment: {check, target, overhang}; enemy_main = their main group from apps.vision;
+        params: apps.alignment's (line = 'centres' | 'enemy_facing', tolerances)."""
         current = {"anchor": {"x": anchor[0], "z": anchor[1]}, "bearing": bearing}
         enemy = {k: enemy_main[k] for k in ("centre", "facing") if enemy_main and k in enemy_main}
         return json.loads(self._align(self.lua.table_from(field, recursive=True),
                                       self.lua.table_from(current, recursive=True),
-                                      self.lua.table_from(enemy, recursive=True)))
+                                      self.lua.table_from(enemy, recursive=True),
+                                      self.lua.table_from(params or {}, recursive=True)))
 
     def mask(self, field, grid, placements):
         """apps.mask over the battlefield, read from a captured map."""
@@ -465,10 +467,22 @@ def simulate(army, planner=None, params=None):
     enemy_by_id = {u["id"]: u for u in enemy_units}
     # The enemy first: our lord needs to know where the enemy lord stands.
     enemy_bearing = army["enemy"].get("bearing", planner.facing(army["enemy"]["anchor"], army["own"]["anchor"]))
+    reaction, react = None, army["enemy"].get("reaction")
     if army["enemy"].get("layout") == "native_defender":
-        # As the game's AI stands in defence (tools/sim/enemy.py, measured).
+        # As the game's AI stands in defence (tools/sim/enemy.py, measured). With "reaction" it
+        # deploys deploy_off_deg off facing us and then turns to our army in time (NativeReaction).
+        # "centre": where the game's AI puts its army (measured), not our deployment anchor.
+        where = army["enemy"].get("centre") or army["enemy"]["anchor"]
+        if react is not None:
+            enemy_bearing = (planner.facing(where, army["own"]["anchor"]) + react.get("deploy_off_deg", 0)) % 360
         sides = {"enemy": {"status": "ok", "layout": "native_defender",
                            "placements": native_defender(army["enemy"]["anchor"], enemy_bearing, enemy_units)}}
+        if army["enemy"].get("centre"):
+            cx, cz = army_centre(sides["enemy"]["placements"])
+            for p in sides["enemy"]["placements"]:
+                p["x"], p["z"] = p["x"] + where[0] - cx, p["z"] + where[1] - cz
+        if react is not None:
+            reaction = NativeReaction(sides["enemy"]["placements"], engine_facing(enemy_bearing), react.get("model"))
     else:
         sides = {"enemy": planner.picture(army["enemy"]["anchor"], enemy_bearing,
                                           [dict(u, shapes=[dict(s) for s in u["shapes"]]) for u in enemy_units])}
@@ -506,25 +520,38 @@ def simulate(army, planner=None, params=None):
     anchor, bearing = own["anchor"], own["bearing"]
     sides["start_fit"] = own.get("fit")
     alignment = None
+    align_params = army.get("align")
     if field and own["placements"] and planner.tree_on(switches, "align"):
-        alignment = planner.align(field, anchor, bearing, picture["enemy"].get("main"))
+        alignment = planner.align(field, anchor, bearing, picture["enemy"].get("main"), align_params)
         if alignment["check"]["needed"]:
             target = alignment["target"]
             sides["own_before"] = own
             own, picture, field = place((target["anchor"]["x"], target["anchor"]["z"]), target["bearing"],
                                         on_map=True)
             sides["align_fit"] = own.get("fit")
-            alignment["after"] = planner.align(field, own["anchor"], own["bearing"], picture["enemy"].get("main"))
+            # The alignment is walked too; meanwhile the enemy may turn.
+            walk, tracks = walk_move(sides["own_before"]["placements"], own["placements"],
+                                     walking.Terrain(start_grid) if start_grid else None)
+            sides["align_walk"] = {"walk_s": walk, "tracks": tracks}
+            if reaction and reaction.advance(walk, own["placements"]):
+                sides["enemy"]["placements"] = [dict(p) for p in reaction.placements]
+                picture, field = see_battle(planner, own["placements"], own_by_id, sides["enemy"]["placements"],
+                                            enemy_by_id, army.get("goal"))
+            alignment["after"] = planner.align(field, own["anchor"], own["bearing"], picture["enemy"].get("main"),
+                                               align_params)
     sides["own"] = own
     sides["own"]["vision"], sides["enemy"]["vision"] = picture["own"], picture["enemy"]
     sides["battlefield"], sides["alignment"] = field, alignment
     grid = MapGrid(army["map"]) if army.get("map") else None
     if field and army.get("approach") and planner.tree_on(switches, "approach"):
         own, picture, field = approach(planner, sides, own, picture, field, place, own_by_id, enemy_by_id, grid,
-                                       goal=army.get("goal"), switches=switches)
+                                       goal=army.get("goal"), switches=switches, reaction=reaction,
+                                       align_params=align_params)
         sides["own"] = own
         sides["own"]["vision"], sides["enemy"]["vision"] = picture["own"], picture["enemy"]
         sides["battlefield"] = field
+    if reaction:
+        sides["enemy"]["timeline"] = reaction.timeline
     if army.get("fire_s") and own["placements"]:
         sides["fire"] = fire_exchange(planner, own["placements"], own_by_id, sides["enemy"]["placements"],
                                       enemy_by_id, army["fire_s"])
@@ -589,13 +616,23 @@ def walk_move(before, after, terrain=None):
 
 
 def approach(planner, sides, own, picture, field, place, own_by_id, enemy_by_id, grid, max_decisions=30, goal=None,
-             switches=None):
+             switches=None, reaction=None, align_params=None):
     """Phase 2 in the simulation: the same trunk as in battle (apps.tactics) decides;
     placements are re-planned at the target and the army walks there as the engine
     would (walk_move: round obstacles, in time); the clock moves on by that walk, so
-    the alignment governor's 20 s cooldown is respected."""
+    the alignment governor's 20 s cooldown is respected. reaction (tools/sim/enemy.NativeReaction):
+    the enemy turns to our army while time passes, as the game's AI does."""
     trunk = planner.tactics(switches)
     terrain = walking.Terrain(grid) if grid else None
+
+    def react(seconds, own, picture, field):
+        """Time passes: the enemy may turn to us (then we see it anew)."""
+        if not reaction or not reaction.advance(seconds, own["placements"]):
+            return picture, field
+        sides["enemy"]["placements"] = [dict(p) for p in reaction.placements]
+        seen, new_field = see_battle(planner, own["placements"], own_by_id, sides["enemy"]["placements"], enemy_by_id,
+                                     goal)
+        return seen, new_field or field
     now, log, trail, moves = 0, [], [], []
     start = {"anchor": list(own["anchor"]), "bearing": own["bearing"], "lord_routes": own.get("lord_routes")}
     for _ in range(max_decisions):
@@ -604,6 +641,8 @@ def approach(planner, sides, own, picture, field, place, own_by_id, enemy_by_id,
                 "placements": own["placements"],
                 "own_blocks": [] if goal else blocks(own["placements"], own_by_id, "own"),
                 "enemy_blocks": [] if goal else blocks(sides["enemy"]["placements"], enemy_by_id, "enemy")}
+        if align_params:
+            view["align_params"] = align_params
         if picture["enemy"].get("main"):
             view["enemy_main"] = picture["enemy"]["main"]
         intent = planner.decide(trunk, view, grid)
@@ -616,13 +655,22 @@ def approach(planner, sides, own, picture, field, place, own_by_id, enemy_by_id,
             break
         if decision == "wait":
             now += 5000
+            picture, field = react(5, own, picture, field)
             continue
         trail.append(own["placements"])
         target = intent["target"]
         anchor, bearing = (target["anchor"]["x"], target["anchor"]["z"]), target["bearing"]
         before_field, before_picture = field, picture
-        own, picture, field = place(anchor, bearing)
+        if decision == "approach" and intent.get("placements"):
+            # The formation carried along the step as a whole (apps.approach.carry), as in battle.
+            own = dict(own, placements=intent["placements"], anchor=list(anchor), bearing=bearing)
+            picture, new_field = see_battle(planner, own["placements"], own_by_id, sides["enemy"]["placements"],
+                                            enemy_by_id, goal)
+            field = new_field or field
+        else:
+            own, picture, field = place(anchor, bearing)
         walk, tracks = walk_move(trail[-1], own["placements"], terrain)
+        picture, field = react(walk, own, picture, field)
         moves.append({"decision": decision, "field": before_field, "before": trail[-1], "after": own["placements"],
                       "detour": bool(intent.get("detour")) and decision == "approach", "t_s": now / 1000, "walk_s": walk,
                       "tracks": tracks,

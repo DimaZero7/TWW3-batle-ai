@@ -12,128 +12,128 @@
  },
  "fit": {},
  "anchor": [
-  165.82,
-  -70.95
+  167.35,
+  -40
  ],
- "bearing": 92.81,
+ "bearing": 90,
  "placements": [
   {
    "id": "wh2_dlc13_emp_inf_archers_0#1",
    "role": "arc",
-   "x": 155.61,
-   "z": -28.24,
+   "x": 157.13,
+   "z": 2.71,
    "bearing": 92.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#2",
    "role": "arc",
-   "x": 154.28,
-   "z": -55.27,
+   "x": 155.81,
+   "z": -24.31,
    "bearing": 92.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#3",
    "role": "arc",
-   "x": 152.8,
-   "z": -85.43,
+   "x": 154.33,
+   "z": -54.48,
    "bearing": 92.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#4",
    "role": "arc",
-   "x": 151.47,
-   "z": -112.45,
+   "x": 153.0,
+   "z": -81.5,
    "bearing": 92.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#5",
    "role": "arc",
-   "x": 128.51,
-   "z": -28.49,
+   "x": 130.03,
+   "z": 2.47,
    "bearing": 92.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#6",
    "role": "arc",
-   "x": 127.18,
-   "z": -55.51,
+   "x": 128.71,
+   "z": -24.56,
    "bearing": 92.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#7",
    "role": "arc",
-   "x": 125.85,
-   "z": -82.53,
+   "x": 127.38,
+   "z": -51.58,
    "bearing": 92.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#8",
    "role": "arc",
-   "x": 124.52,
-   "z": -109.56,
+   "x": 126.05,
+   "z": -78.6,
    "bearing": 92.81,
    "width": 20
   },
   {
    "id": "wh_main_emp_cha_general_0#1",
    "role": "lord",
-   "x": 144.55,
-   "z": -69.91,
+   "x": 146.08,
+   "z": -38.95,
    "bearing": 92.81,
    "width": null
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#1",
    "role": "wall",
-   "x": 169.43,
-   "z": 2.46,
+   "x": 170.96,
+   "z": 33.41,
    "bearing": 92.81,
    "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#2",
    "role": "wall",
-   "x": 167.99,
-   "z": -26.91,
+   "x": 169.52,
+   "z": 4.05,
    "bearing": 92.81,
    "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#3",
    "role": "wall",
-   "x": 166.55,
-   "z": -56.27,
+   "x": 168.07,
+   "z": -25.32,
    "bearing": 92.81,
    "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#4",
    "role": "wall",
-   "x": 165.1,
-   "z": -85.63,
+   "x": 166.63,
+   "z": -54.68,
    "bearing": 92.81,
    "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#5",
    "role": "wall",
-   "x": 163.66,
-   "z": -115.0,
+   "x": 165.19,
+   "z": -84.05,
    "bearing": 92.81,
    "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#6",
    "role": "wall",
-   "x": 162.22,
-   "z": -144.36,
+   "x": 163.74,
+   "z": -113.41,
    "bearing": 92.81,
    "width": 30
   }
@@ -173,8 +173,8 @@
   },
   {
    "t_s": 94.0,
-   "decision": "align",
-   "reason": "off_line",
+   "decision": "approach",
+   "reason": "step",
    "gap_m": 389.5,
    "stop_gap_m": 92.1,
    "advance_m": 50,
@@ -188,11 +188,11 @@
    }
   },
   {
-   "t_s": 120.0,
+   "t_s": 141.0,
    "decision": "approach",
    "reason": "step",
-   "gap_m": 398.0,
-   "stop_gap_m": 101.0,
+   "gap_m": 337.1,
+   "stop_gap_m": 89.7,
    "advance_m": 50,
    "window": "window",
    "reached": 4,
@@ -204,11 +204,11 @@
    }
   },
   {
-   "t_s": 167.0,
+   "t_s": 188.0,
    "decision": "approach",
    "reason": "step",
-   "gap_m": 348.0,
-   "stop_gap_m": 101.0,
+   "gap_m": 284.0,
+   "stop_gap_m": 86.6,
    "advance_m": 50,
    "window": "window",
    "reached": 4,
@@ -220,11 +220,11 @@
    }
   },
   {
-   "t_s": 214.0,
+   "t_s": 235.0,
    "decision": "approach",
    "reason": "step",
-   "gap_m": 297.9,
-   "stop_gap_m": 100.9,
+   "gap_m": 229.8,
+   "stop_gap_m": 82.4,
    "advance_m": 50,
    "window": "window",
    "reached": 4,
@@ -236,11 +236,11 @@
    }
   },
   {
-   "t_s": 261.0,
+   "t_s": 282.0,
    "decision": "approach",
    "reason": "step",
-   "gap_m": 247.9,
-   "stop_gap_m": 100.9,
+   "gap_m": 173.9,
+   "stop_gap_m": 76.6,
    "advance_m": 50,
    "window": "window",
    "reached": 4,
@@ -252,43 +252,27 @@
    }
   },
   {
-   "t_s": 308.0,
+   "t_s": 329.0,
    "decision": "approach",
    "reason": "step",
-   "gap_m": 197.9,
-   "stop_gap_m": 100.9,
-   "advance_m": 50,
+   "gap_m": 115.1,
+   "stop_gap_m": 67.8,
+   "advance_m": 47.35,
    "window": "window",
    "reached": 4,
    "path": {
-    "advance_m": 50,
+    "advance_m": 47.35,
     "beyond_stop_line": false,
     "detour": false,
     "ok": true
    }
   },
   {
-   "t_s": 355.0,
-   "decision": "approach",
-   "reason": "step",
-   "gap_m": 147.8,
-   "stop_gap_m": 100.8,
-   "advance_m": 46.99,
-   "window": "window",
-   "reached": 4,
-   "path": {
-    "advance_m": 46.99,
-    "beyond_stop_line": false,
-    "detour": false,
-    "ok": true
-   }
-  },
-  {
-   "t_s": 400.0,
+   "t_s": 374.0,
    "decision": "hold",
    "reason": "at_stop_line",
-   "gap_m": 100.7,
-   "stop_gap_m": 100.7,
+   "gap_m": 54.1,
+   "stop_gap_m": 54.1,
    "advance_m": null,
    "window": "window",
    "reached": 4,
@@ -298,7 +282,6 @@
  "walk_s": [
   47.0,
   47.0,
-  26.0,
   47.0,
   47.0,
   47.0,
@@ -326,10 +309,10 @@
    "enemy:wh2_dlc13_emp_inf_archers_0#6": 90,
    "enemy:wh_main_emp_cha_general_0#1": 1,
    "enemy:wh_main_emp_inf_spearmen_0#1": 120,
-   "enemy:wh_main_emp_inf_spearmen_0#2": 51,
+   "enemy:wh_main_emp_inf_spearmen_0#2": 120,
    "enemy:wh_main_emp_inf_spearmen_0#3": 4,
    "enemy:wh_main_emp_inf_spearmen_0#4": 51,
-   "enemy:wh_main_emp_inf_spearmen_0#5": 120,
+   "enemy:wh_main_emp_inf_spearmen_0#5": 51,
    "enemy:wh_main_emp_inf_spearmen_0#6": 120,
    "enemy:wh_main_emp_inf_spearmen_0#7": 120,
    "enemy:wh_main_emp_inf_spearmen_0#8": 120,

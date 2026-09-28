@@ -25,12 +25,20 @@ tests/
 └── tools/                  pack format, bundler, every build target
 ```
 
+## Two tiers
+
+- **Fast** (~30 s) — before every commit, hook `.githooks/pre-commit`: everything but the tests marked
+  `slow`. Enable once: `git config core.hooksPath .githooks`.
+- **All, with the slow ones** (`slow`: long walks of the simulator round obstacles) — on every push,
+  GitHub Actions (`.github/workflows/tests.yml`). By hand: `python -m pytest -m slow`.
+
 ## Simulator checks
 
 | Check | What it catches | Where |
 |---|---|---|
 | Simulator goldens | a change in one module quietly changed a battle: formation, places, approach decisions and their time, manoeuvre times, window, fire (15 armies) | `tests/golden/`; compare `python -m tools.sim.golden`, update with `--update` and say why in the commit |
 | Tree branches | a branch switched off = its baseline | `tests/tools/test_tree_branches.py` |
+| Alignment against a turning enemy | the old chase and shifts aside (task 26) | `tests/tools/test_align_chase.py` |
 | Simulator physics | a unit walked or stood on an obstacle; the walker does not go round a rock (task 27) | `tests/tools/test_sim_physics.py`, [simulator](simulator.md) |
 
 ## Writing a test

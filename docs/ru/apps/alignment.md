@@ -28,11 +28,23 @@
 
 | Функция | Что делает |
 |---|---|
-| `check(field, current, enemy?, params?)` | Насколько мы сбились: `angle_off_deg`, `offset_m`, `needed`, `reasons` (`angle`, `offset`), `source` (`enemy_facing` / `centres`). `current = {anchor, bearing}` — центр нашей передней линии и направление |
-| `target(field, current, enemy?)` | Куда встать: точка на линии на том же расстоянии и направление |
+| `check(field, current, enemy?, params?)` | Насколько мы сбились: `angle_off_deg`, `offset_m`, `needed`, `reasons` (`angle`, `offset`), `source` (`centres` / `front` / `enemy_facing` / `field`). `current = {anchor, bearing}` — центр нашей передней линии и направление |
+| `target(field, current, enemy?, params?)` | Куда встать: при `front` и `centres` — там же, только повернуться; при `enemy_facing` и `field` — точка на линии на том же расстоянии |
 | `overhang(field)` | На сколько их фронт нависает над нашими флангами слева и справа (плюс — нависает) |
 | `new_governor(params?)` | Регулятор: `decide(now_ms, check, moving)` → `align` / `aligned` / `moving` / `cooldown` / `given_up`; после приказов — `record_order(now_ms, check)` |
-| `line(field, enemy?)`, `angle_diff(a, b)` | Линия, на которую встаём; разность углов |
+| `line(field, enemy?, current?, params?)`, `angle_diff(a, b)` | Линия, на которую встаём; разность углов |
+
+**Линия (`params.line`, с 28.09.2026, задача № 26).**
+
+| Значение | Что |
+|---|---|
+| `front` (по умолчанию) | Только поворот на месте. Дальше `near_m` (270 м) — на их центр, допуск `far_angle_deg` (20°); ближе — параллельно их фронту, допуск 10° |
+| `centres` | Всегда на их центр, только поворот |
+| `enemy_facing` | Как было: встать на линию, куда смотрит их армия (поворот и сдвиг) |
+| (нет их группы или их взгляда) | Ось поля: наш центр → их, поворот и сдвиг — например, марш к точке |
+
+Почему: штатный ИИ сам разворачивается к нашей армии, а выравнивание по его взгляду гонялось за ним
+([дерево](../tree/align.md#как-ровняемся-с-28092026-задача--26)).
 
 **Проверено.** Тесты функций; симуляция `first_attack_crooked` — армия поставлена
 криво (повёрнута на 25°, сдвинута на 54 м вбок) и выровнена: после выравнивания

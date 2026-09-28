@@ -7,14 +7,16 @@
 --     shooters of EITHER side reach the other side's front.
 -- Each step is checked on the stand mask first (apps.mask): the formation
 -- must fit where it goes (choose_advance); an obstacle on the way is walked
--- around by the engine. Only when no place fits before the stop line does the
--- approach stop ('blocked') and the level above decide.
+-- around by the engine. When nothing fits straight on, the same step is tried
+-- shifted aside (choose_aside, 28.09.2026: a small rock at a flank stopped the
+-- army 200 m short of the window in the game). Only when no place fits either
+-- way does the approach stop ('blocked') and the level above decide.
 local value = require('apps.core.value')
 
 local M = {}
 local finite = value.finite
 
-M.DEFAULTS = {step_m = 50, margin_m = 20, arrive_tolerance_m = 2}
+M.DEFAULTS = {step_m = 50, margin_m = 20, arrive_tolerance_m = 2, aside_m = {15, 30, 45, 60}}
 
 local function params_of(params)
     local p = {}
@@ -72,6 +74,42 @@ function M.choose_advance(advance, max_advance, fits_at, lane_free_at, search_m,
         a = a + search_m
     end
     return {ok = false, reason = 'no_place'}
+end
+
+-- Nothing fits straight on: the same step with the whole formation shifted
+-- across by each of `shifts` metres (smaller first, right then left), as
+-- choose_advance. fits_at(advance, shift), lane_free_at(advance, shift).
+-- Returns choose_advance's result plus aside_m (+ right, - left), or no_place.
+function M.choose_aside(advance, max_advance, fits_at, lane_free_at, shifts, search_m, search_limit)
+    for _, s in ipairs(shifts or M.DEFAULTS.aside_m) do
+        for _, shift in ipairs({s, -s}) do
+            local r = M.choose_advance(advance, max_advance, function(a) return fits_at(a, shift) end,
+                function(a) return lane_free_at(a, shift) end, search_m, search_limit)
+            if r.ok then
+                r.aside_m = shift
+                return r
+            end
+        end
+    end
+    return {ok = false, reason = 'no_place'}
+end
+
+-- The formation carried along a step as a whole: every placement moved `advance`
+-- metres along `bearing` and `aside` metres across (+ right). The approach keeps
+-- the formation's shape (user rule); planning it anew at every step changed the
+-- widths (30 -> 60 -> 80 m in the game, 28.09.2026) and spread the wall onto rocks.
+function M.carry(placements, bearing, advance, aside)
+    local b = math.rad(bearing)
+    local fx, fz, rx, rz = math.sin(b), math.cos(b), math.cos(b), -math.sin(b)
+    local out = {}
+    for i, p in ipairs(placements) do
+        local q = {}
+        for k, v in pairs(p) do q[k] = v end
+        q.x = p.x + fx * advance + rx * (aside or 0)
+        q.z = p.z + fz * advance + rz * (aside or 0)
+        out[i] = q
+    end
+    return out
 end
 
 -- The commander: one manoeuvre at a time, alignment first.

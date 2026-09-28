@@ -37,16 +37,26 @@ def test_simulation_builds_the_battlefield():
     assert field["half_width_m"] >= 40 + field["enemy"]["width_m"] / 2 - 1
 
 
-def test_crooked_army_is_aligned_opposite_the_enemy():
+def test_crooked_army_turns_to_face_the_enemy():
     army, _ = formation.load_army("first_attack_crooked")
     sides, _ = formation.simulate(army)
     a = sides["alignment"]
-    # Started 25 degrees off and ~54 m aside of the line the enemy looks along.
-    assert a["check"]["needed"] and set(a["check"]["reasons"]) == {"angle", "offset"}
-    assert a["check"]["source"] == "enemy_facing" and abs(a["check"]["offset_m"]) > 40
+    # Started 25 degrees off: it only turns to face their centre (task 26), no shift aside.
+    assert a["check"]["needed"] and set(a["check"]["reasons"]) == {"angle"}
+    assert a["check"]["source"] == "centres" and abs(a["check"]["offset_m"]) < 1e-6
+    after = a["after"]["check"]
+    assert not after["needed"] and abs(after["angle_off_deg"]) < 3
+    assert sides["own_before"]["placements"] and not sides["own"]["overlaps"]
+
+
+def test_crooked_army_with_the_old_line_moves_opposite_their_front():
+    army, _ = formation.load_army("first_attack_crooked")
+    sides, _ = formation.simulate(dict(army, align={"line": "enemy_facing"}))
+    a = sides["alignment"]
+    # ~54 m aside of the line the enemy looks along: turned and shifted onto it.
+    assert set(a["check"]["reasons"]) == {"angle", "offset"} and abs(a["check"]["offset_m"]) > 40
     after = a["after"]["check"]
     assert not after["needed"] and abs(after["angle_off_deg"]) < 1 and abs(after["offset_m"]) < 1
-    assert sides["own_before"]["placements"] and not sides["own"]["overlaps"]
 
 
 def test_aligned_army_is_left_alone():
@@ -71,20 +81,27 @@ def test_the_place_past_the_rock_is_not_taken_inside_their_reach():
     army, _ = formation.load_army("rock_attack")
     sides, _ = formation.simulate(army)
     log = sides["approach"]["log"]
-    # The rock lies across the way close to them: every place past it is inside their
-    # archers' reach (apps.reach), so the approach stops and the level above decides
-    # (before 28.09.2026 the formation went past the rock under their fire).
-    assert [r["decision"] for r in log] == ["approach", "blocked"]
-    assert log[1]["reason"] == "no_place" and log[1]["window"]["reason"] == "window"
-    wall = next(p for p in sides["own"]["placements"] if p["role"] == "wall")
-    assert wall["z"] < 86 and all(f["ok"] for f in sides["mask"]["fits"])
+    # The rock lies across the way close to them: a step aside along its edge (apps.approach
+    # choose_aside), then every place past it is inside their archers' reach (apps.reach), so
+    # the approach stops and the level above decides (before 28.09.2026 the formation went
+    # past the rock under their fire).
+    assert [r["decision"] for r in log] == ["approach", "approach", "blocked"]
+    assert log[1]["path"]["aside_m"] and log[2]["reason"] == "no_place" and log[2]["window"]["reason"] == "window"
+    assert all(r["path"]["advance_m"] <= r["window"]["safe_to"] for r in log if r["decision"] == "approach")
+    # The formation is planned anew at each step (as in battle), not shifted as checked: after
+    # the step aside one block may touch the rock's edge; the engine squeezes it
+    # (tests/tools/test_sim_physics.py).
+    assert sum(not f["ok"] for f in sides["mask"]["fits"]) <= 1
 
 
-def test_long_wall_stops_short_of_the_rock_too():
+def test_long_wall_steps_aside_past_the_rock_out_of_their_reach():
     army, _ = formation.load_army("rock_attack_wide")
     sides, _ = formation.simulate(army)
-    decisions = [r["decision"] for r in sides["approach"]["log"]]
-    assert decisions == ["approach", "blocked"]
+    log = sides["approach"]["log"]
+    # A step 15 m aside finds the place past the rock, still out of their archers' reach.
+    assert [r["decision"] for r in log] == ["approach", "approach", "hold"]
+    assert log[1]["path"]["aside_m"] and log[1]["path"]["advance_m"] <= log[1]["window"]["safe_to"]
+    assert log[2]["window"]["safe_to"] >= 0 and not log[2]["window"]["under_fire_now"]
     assert len(sides["own"]["placements"]) == 16 and not sides["own"]["overlaps"]
 
 

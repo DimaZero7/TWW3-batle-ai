@@ -19,7 +19,7 @@ local reach = require('apps.reach.services')
 local M = {}
 local finite = value.finite
 
--- The measurement (data, not logic: rule 4 of 5.1): apps.missile.data.
+-- The measurement (data, not logic: 5.1 of docs/ru/architecture/ai-design.md): apps.missile.data.
 M.MEASURED = require('apps.missile.data')
 
 -- HP per arrow at a distance, at full strength of the target (flat outside the measured span).

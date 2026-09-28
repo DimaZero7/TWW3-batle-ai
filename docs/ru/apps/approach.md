@@ -34,6 +34,8 @@
 | `stop_gap(own_reach, enemy_reach)` | Рубеж: бóльшая из досягаемостей + 20 м |
 | `next_step(gap, stop_gap)` | `arrived` или `step` с длиной скачка (≤ 50 м) |
 | `choose_advance(advance, max, fits_at, lane_free_at, search?, limit?)` | Где кончится скачок: планируемый, если строй помещается, иначе первое место дальше; `detour` — по прямой не пройти (обходит движок), `beyond_stop_line` |
+| `choose_aside(advance, max, fits_at, lane_free_at, shifts?, search?, limit?)` | Прямо места нет — тот же скачок со сдвигом всего строя вбок на 15, 30, 45, 60 м (меньший сначала, вправо, потом влево; пустой список `DEFAULTS.aside_m` — выключить); `aside_m` (28.09.2026: небольшая скала у фланга остановила армию в 200 м от окна) |
+| `carry(placements, bearing, advance, aside)` | Строй целиком, перенесённый на скачок: скачок не перепланирует строй (иначе ширины менялись 30 → 60 → 80 м, и стена расползалась на скалы; игра 28.09.2026) |
 | `new_commander()` | Командир: `start(kind)`, `finish()`, `decide({align, governor, step, path})` → `wait` / `align` / `approach` / `hold` / `blocked` и причина; журнал манёвров |
 
 **Проверено в симуляции** (картинки — в [симуляции строя](../../../research/analysis/formation/README.md#сближение-в-симуляции-27092026)):

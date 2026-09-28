@@ -19,7 +19,7 @@ flowchart LR
 | Part | What it does | Where |
 |---|---|---|
 | Formation, approach, window | the same code as in battle: `apps.plan`, `apps.tactics`, `apps.reach` | `tools/sim/formation.py` |
-| Enemy | stands as the game's AI defended in the test battle | `tools/sim/enemy.py` |
+| Enemy | stands as the game's AI defended in the test battle; with `reaction` crooked at deployment, then turning to face our army (in bursts, its centre stays); with `centre` where the game puts it | `tools/sim/enemy.py` |
 | Map | the captured map's 3 m cells: where a unit can stand | `tools/sim/mapgrid.py` |
 | **Walking** | like the engine: a way round obstacles, a block faces its way, a line deforms at an edge | `tools/sim/walker.py` |
 | Queues | `apps.logistics`'s dispatcher orders in time, crowding | `tools/sim/logistics.py` |

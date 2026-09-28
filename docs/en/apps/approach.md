@@ -12,7 +12,7 @@ the last one shorter; stop 20 m short of the gap at which the first shooters of
 either side reach the other side's front; before each step the [mask](mask.md)
 must show a place where the whole formation fits: an obstacle on the way is
 walked around by the engine; if the 50 m target does not fit, the first place
-past the obstacle is taken (`choose_advance`; in the simple variant without the
+past the obstacle is taken (`choose_advance`; nothing fits straight on — the same step shifted aside by 15–60 m, `choose_aside`; the formation is carried along a step as a whole, `carry`, never planned anew; in the simple variant without the
 enemy army it may lie beyond the stop line, flagged). Stop (`blocked`) only when
 there is no place at all.
 

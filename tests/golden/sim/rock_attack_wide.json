@@ -8,143 +8,143 @@
   "rows": 2,
   "wall_depth_m": 9.3,
   "passage_m": 10,
-  "window_m": 13.1
+  "window_m": 12.08
  },
  "fit": {
   "how": "as_planned",
   "ok": true
  },
  "anchor": [
-  -240,
-  50
+  -255,
+  220
  ],
  "bearing": 0,
  "placements": [
   {
    "id": "wh2_dlc13_emp_inf_archers_0#1",
    "role": "arc",
-   "x": -282.71,
-   "z": 39.78,
+   "x": -297.71,
+   "z": 209.78,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#2",
    "role": "arc",
-   "x": -255.69,
-   "z": 38.46,
+   "x": -270.69,
+   "z": 208.46,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#3",
    "role": "arc",
-   "x": -225.52,
-   "z": 36.97,
+   "x": -240.52,
+   "z": 206.97,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#4",
    "role": "arc",
-   "x": -198.5,
-   "z": 35.65,
+   "x": -213.5,
+   "z": 205.65,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#5",
    "role": "arc",
-   "x": -171.47,
-   "z": 34.32,
+   "x": -186.47,
+   "z": 204.32,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#6",
    "role": "arc",
-   "x": -282.47,
-   "z": 12.68,
+   "x": -297.47,
+   "z": 182.68,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#7",
    "role": "arc",
-   "x": -255.44,
-   "z": 11.35,
+   "x": -270.44,
+   "z": 181.35,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#8",
    "role": "arc",
-   "x": -228.42,
-   "z": 10.03,
+   "x": -243.42,
+   "z": 180.03,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh2_dlc13_emp_inf_archers_0#9",
    "role": "arc",
-   "x": -201.4,
-   "z": 8.7,
+   "x": -216.4,
+   "z": 178.7,
    "bearing": 2.81,
    "width": 20
   },
   {
    "id": "wh_main_emp_cha_general_0#1",
    "role": "lord",
-   "x": -241.05,
-   "z": 28.73,
+   "x": -256.05,
+   "z": 198.73,
    "bearing": 2.81,
    "width": null
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#1",
    "role": "wall",
-   "x": -313.41,
-   "z": 53.61,
+   "x": -328.41,
+   "z": 223.61,
    "bearing": 2.81,
    "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#2",
    "role": "wall",
-   "x": -284.05,
-   "z": 52.16,
+   "x": -299.05,
+   "z": 222.16,
    "bearing": 2.81,
    "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#3",
    "role": "wall",
-   "x": -254.68,
-   "z": 50.72,
+   "x": -269.68,
+   "z": 220.72,
    "bearing": 2.81,
    "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#4",
    "role": "wall",
-   "x": -225.32,
-   "z": 49.28,
+   "x": -240.32,
+   "z": 219.28,
    "bearing": 2.81,
    "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#5",
    "role": "wall",
-   "x": -195.95,
-   "z": 47.84,
+   "x": -210.95,
+   "z": 217.84,
    "bearing": 2.81,
    "width": 30
   },
   {
    "id": "wh_main_emp_inf_spearmen_0#6",
    "role": "wall",
-   "x": -166.59,
-   "z": 46.39,
+   "x": -181.59,
+   "z": 216.39,
    "bearing": 2.81,
    "width": 30
   }
@@ -168,25 +168,40 @@
   },
   {
    "t_s": 47.0,
-   "decision": "blocked",
-   "reason": "no_place",
+   "decision": "approach",
+   "reason": "step",
    "gap_m": 246.0,
    "stop_gap_m": 86.8,
    "advance_m": 50,
    "window": "window",
    "reached": 5,
    "path": {
-    "ok": false,
-    "reason": "no_place"
+    "advance_m": 170,
+    "aside_m": -15,
+    "beyond_stop_line": true,
+    "detour": true,
+    "ok": true
    }
+  },
+  {
+   "t_s": 249.0,
+   "decision": "hold",
+   "reason": "at_stop_line",
+   "gap_m": 75.1,
+   "stop_gap_m": 89.1,
+   "advance_m": null,
+   "window": "window",
+   "reached": 5,
+   "path": {}
   }
  ],
  "walk_s": [
-  47.0
+  47.0,
+  202.0
  ],
  "mask": {
   "fits": 16,
   "units": 16,
-  "lane_free": false
+  "lane_free": true
  }
 }

@@ -37,7 +37,7 @@ flowchart BT
 <!-- generated:tree:card:approach -->
 | | |
 |---|---|
-| What it does | In 50 m steps to the window: our archers reach them, theirs do not reach us; one action at a time |
+| What it does | In 50 m steps to the window: our archers reach them, theirs do not reach us; one action at a time; the formation is carried whole, a rock in the way — a step aside |
 | Starts when | the army is deployed, the enemy is seen |
 | Without it | the army stands where it was deployed |
 | Switch | `approach` (on) |

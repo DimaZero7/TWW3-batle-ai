@@ -51,16 +51,36 @@ def test_target_keeps_the_distance_and_sits_on_the_axis(lua):
     assert t.bearing == 90
 
 
-def test_stand_on_the_line_the_enemy_looks_along(lua):
+def test_by_default_face_their_centre_turning_in_place(lua):
+    # Task 26: the game's AI turns to face us by itself, its centre stays; aligning with
+    # where it looks chased it round. Their centre (0, 300), they look south-west (225):
+    # from (50, 0) we only turn to face their centre, we never shift aside.
+    al = lua.globals().al
+    them = enemy(lua, 0, 300, 225)
+    c = al.check(field(lua, bearing=10), current(lua, 50, 0, 0), them)
+    to_them = (-9.46 + 360)            # atan2(-50, 300) in degrees, as a bearing
+    assert c.source == "centres" and c.offset_m == pytest.approx(0, abs=1e-6)
+    assert c.angle_off_deg == pytest.approx(0 - to_them + 360, abs=0.01) and list(c.reasons.values()) == []
+    turned = al.check(field(lua), current(lua, 50, 0, 30), them)
+    assert turned.needed and list(turned.reasons.values()) == ["angle"]
+    t = al.target(field(lua), current(lua, 50, 0, 30), them)
+    assert (t.anchor.x, t.anchor.z) == (pytest.approx(50), pytest.approx(0)) and t.bearing == pytest.approx(to_them, abs=0.01)
+
+
+def test_their_facing_is_the_line_only_when_asked(lua):
     al = lua.globals().al
     # Their centre (0, 300), they face south (180): we must face north (0) on x = 0.
     them = enemy(lua, 0, 300, 180)
-    off = al.check(field(lua, bearing=10), current(lua, 50, 0, 0), them)
+    old = lua.table_from({"line": "enemy_facing"})
+    off = al.check(field(lua, bearing=10), current(lua, 50, 0, 0), them, old)
     assert off.source == "enemy_facing" and off.needed and off.offset_m == pytest.approx(50)
-    t = al.target(field(lua, bearing=10), current(lua, 50, 0, 0), them)
+    t = al.target(field(lua, bearing=10), current(lua, 50, 0, 0), them, old)
     assert t.anchor.x == pytest.approx(0) and t.anchor.z == pytest.approx(0) and t.bearing == pytest.approx(0)
-    # Without their facing the battlefield axis is used.
-    assert al.check(field(lua), current(lua, 50, 0, 0), lua.table_from({})).source == "centres"
+
+
+def test_without_their_main_group_the_battlefield_axis(lua):
+    al = lua.globals().al
+    assert al.check(field(lua), current(lua, 50, 0, 0), lua.table_from({})).source == "field"
 
 
 def test_overhang(lua):

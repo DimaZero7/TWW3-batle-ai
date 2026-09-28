@@ -26,8 +26,8 @@ flowchart BT
 <!-- generated:tree:card:align -->
 | | |
 |---|---|
-| What it does | Stand square opposite the enemy's main group: turned <= 10 deg, aside <= 15 m |
-| Starts when | turned or aside more than allowed |
+| What it does | Turn to the enemy in place, never aside: from afar towards its centre (20 deg), within 270 m square to its front (10 deg) |
+| Starts when | turned more than allowed |
 | Without it | no alignment: the army steps along its own facing |
 | Switch | `align` (on) |
 | Kind, level | branch, Tactical |
@@ -48,21 +48,30 @@ flowchart LR
   g -- allowed --> t["target: opposite their group"] --> re["the whole formation<br/>re-forms"]
 ```
 
-## Known problem (28.09.2026)
+## How we align (since 28.09.2026, task 26)
 
-Against the game's AI the alignment **chases the enemy's re-forming**: right after
-deployment the enemy stands crooked and aside — we turn 32 deg and walk 350 m aside,
-the enemy re-forms — we turn back 40 deg. In 2 of 4 battles the new axis took the army
-onto rocks and the approach stopped ("no place").
+Before, the army stood on the line the enemy **looks** along: it turned and walked aside. Against the
+game's AI that became a chase: it turns to face our army by itself, 6–15 deg a burst, while its centre
+stays (0.1–3.4 m); we shifted aside, it turned to us, we were "crooked" again. In 2 battles of 4 the army
+was led onto rocks. See the [card, in Russian](../../ru/architecture/tasks/align-chase.md).
 
-| Decision | Turned | Aside |
+Now (`apps.alignment`, `line = 'front'`) it is **a turn in place only, never a shift aside**:
+
+| Where we are | What we align with | Tolerance |
 |---|---|---|
-| right after deployment | 32 deg | −350 m |
-| next (500 m from the enemy) | −40 deg | +245 m |
-| later | 5–11 deg | 23–70 m |
+| farther than 270 m from their centre | their centre | 20 deg: a narrow lane is walked along, not across |
+| nearer than 270 m | square to their front (the window needs our line along theirs) | 10 deg |
+| a march to a point (no enemy) | the field's axis, turning and shifting as before | 10 deg and 15 m |
 
-Proposed: no alignment while the enemy re-forms; coarse limits far away, fine ones
-before the window; on "no place" go back to the last direction.
+As our centre does not move aside, the game's AI does not start turning. The old alignment is
+`line = 'enemy_facing'`.
+
+| Battle `window_game`, game, x20 | Before | After |
+|---|---|---|
+| Aside at deployment | 245–344 m | 0 |
+| Alignments before the stop line | 5–6 | 1 (a turn at 209 m) |
+| "No place" | 2 battles of 4 | 0 |
+| To the stop line | 595–620 s | 384–398 s (4 battles) |
 
 ## Checks
 

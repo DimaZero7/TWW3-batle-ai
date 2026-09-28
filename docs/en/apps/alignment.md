@@ -12,8 +12,15 @@ when clearly off: more than 10° or 15 m sideways.
 
 | Function | What it does |
 |---|---|
-| `check(field, current, enemy?, params?)` | How far off we are: `angle_off_deg`, `offset_m`, `needed`, `reasons`, `source` |
-| `target(field, current, enemy?)` | Where to stand: point on the line at the same distance, and facing |
+| `check(field, current, enemy?, params?)` | How far off we are: `angle_off_deg`, `offset_m`, `needed`, `reasons`, `source` (`centres` / `front` / `enemy_facing` / `field`) |
+| `target(field, current, enemy?, params?)` | Where to stand: with `front` and `centres` where we are, only turning; with `enemy_facing` and `field` a point on the line at the same distance |
+
+**The line (`params.line`, since 28.09.2026, task 26):** `front` (default) — a turn in place only:
+farther than `near_m` (270 m) towards their centre, tolerance `far_angle_deg` (20 deg); nearer, square
+to their front, 10 deg. `centres` — always towards their centre. `enemy_facing` — as before, onto the line
+their army looks along (a turn and a shift). Without their group or its facing — the field's axis, turning
+and shifting (a march to a point). Why: the game's AI turns to face our army by itself, and aligning with
+where it looked chased it ([tree](../tree/align.md#how-we-align-since-28092026-task-26)).
 | `overhang(field)` | How far their front hangs over our flanks, left and right |
 
 Against endless realignment (user's rule): the tolerance above, plus a governor

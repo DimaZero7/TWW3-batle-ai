@@ -219,7 +219,8 @@ class Walker:
         # a block squeezes through a gap rather than walk far round (gap_march_wide, 27.09.2026).
         want = min(MAX_CLEARANCE_CELLS, max(1, math.ceil(u["front_m"] / 2 / self.terrain.step)))
         at, best = (u["x"], u["z"]), None
-        for k in range(want, -1, -1):
+        # Half the front clear, then the tightest (one cell), then touching: two or three searches at most.
+        for k in sorted({want, 1, 0}, reverse=True):
             way = self.terrain.path(at, goal, k)
             if not way:
                 continue
@@ -227,8 +228,8 @@ class Walker:
             cost = length + (want - k) * SQUEEZE_COST_M
             if best is None or cost < best[0]:
                 best = (cost, way)
-            if len(way) == 1:
-                break          # straight at this clearance: tighter cannot be shorter
+            if len(way) == 1 or best[1] is way and k < want:
+                break          # straight, or a tighter way found: tighter still is not tried
         return best[1] if best else [goal]
 
     def state(self, uid):

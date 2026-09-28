@@ -1,7 +1,7 @@
 """Every branch of the tree switched off = its baseline (apps.tree), in the simulation.
 
 The baseline is what the chain did before the branch existed; a branch must
-never be needed for the trunk to work (rule 2 of 5.1).
+never be needed for the trunk to work (5.1 of docs/ru/architecture/ai-design.md).
 """
 import copy
 
@@ -41,7 +41,11 @@ def test_map_fit_off_is_the_formation_without_the_map(planner):
 
 
 def test_formation_window_off_is_the_thickest_wall(planner):
-    on, off = run(planner, "window_game_few"), run(planner, "window_game_few", {"formation_window": False})
+    # The enemy standing square to us (no turn after a crooked deployment): the window rule decides.
+    army, _ = sim.load_army("window_game_few")
+    square = {k: v for k, v in army["enemy"].items() if k != "reaction"}
+    on = run(planner, "window_game_few", enemy=square)
+    off = run(planner, "window_game_few", {"formation_window": False}, enemy=square)
     assert on["own"]["choice"]["wall_width"] == 30 and on["own"]["window_check"]["ok"]
     assert off["own"]["choice"]["wall_width"] == 15 and "window_check" not in off["own"]
 
@@ -56,7 +60,7 @@ def test_align_off_no_alignment(planner):
 
 def test_safe_detour_off_goes_past_the_rock_as_before(planner):
     on, off = run(planner, "rock_attack"), run(planner, "rock_attack", {"safe_detour": False})
-    assert [r["decision"] for r in on["approach"]["log"]] == ["approach", "blocked"]
+    assert [r["decision"] for r in on["approach"]["log"]] == ["approach", "approach", "blocked"]
     # Before the branch: the place past the rock, beyond the stop line (under their fire).
     log = off["approach"]["log"]
     assert [r["decision"] for r in log] == ["approach", "approach", "hold"]

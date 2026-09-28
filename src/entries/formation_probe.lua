@@ -389,6 +389,18 @@ function M.main(bm, config, globals)
         return result.formation
     end
 
+    -- The formation carried along a step as a whole (apps.approach.carry): the same places
+    -- the trunk checked on the mask, the same widths.
+    local function order_placements(placements, anchor, bearing)
+        for _, p in ipairs(placements) do
+            local it = state.by_name[state.holder[p.id] or p.id]
+            it.placement = p
+            orders.move_formation(it.uc, vec(p.x, p.z), p.bearing, p.width or M.LORD_WIDTH, false)
+            state.orders_approach = (state.orders_approach or 0) + 1
+        end
+        state.placed.anchor, state.placed.bearing = anchor, bearing
+    end
+
     -- The logistics dispatcher's orders for this tick (apps.logistics).
     local function logistics_tick(now)
         local lg = state.logistics
@@ -568,6 +580,8 @@ function M.main(bm, config, globals)
         if decision == 'approach' then
             if tactics.on(state.trunk, 'logistics') and intent.detour then
                 start_logistics(field, m, intent.target.anchor, intent.target.bearing, now)
+            elseif intent.placements and #intent.placements > 0 then
+                order_placements(intent.placements, intent.target.anchor, intent.target.bearing)
             else
                 order_formation(intent.target.anchor, intent.target.bearing)
             end
