@@ -50,8 +50,9 @@ def test_modules_are_called_in_order_with_their_data(lua):
         assert(r.status == 'ok' and r.decision.strategy == 'wall_and_arc' and r.features.tag == 'features')
         CALLS = table.concat(calls, ' | ')
     """)
+    # The bearing reaches the formation on the engine's facing grid: 15 -> 5 steps of 360/128.
     assert lua.globals().CALLS == ("assess:attack:2:1 | decide:features:2:infantry | check:wall_and_arc | "
-                                   "plan:line_and_blocks:u1=wall,u2=arc:1:nil:15:7")
+                                   "plan:line_and_blocks:u1=wall,u2=arc:1:nil:14.0625:7")
 
 
 def test_no_strategy_stops_before_the_formation(lua):
@@ -72,4 +73,4 @@ def test_overrides_reach_the_formation_and_input_units_stay_untouched(lua):
         assert(INPUT.own.units[1].role == nil, 'the chain must not change its input')
         CALLS = calls[#calls]
     """)
-    assert lua.globals().CALLS.endswith(":1:2:15:7")
+    assert lua.globals().CALLS.endswith(":1:2:14.0625:7")

@@ -31,6 +31,12 @@
 --      5 s the governor is asked on real soldiers and its answer is only
 --      logged ('governor'): it must not want to realign again and again;
 --      with config.turn_test also: archers turn right/left, engine rotate and ours.
+--   config.handover (the player's test): only 'placed', then 'manual' — our AI
+--      places the army and releases it to the player at the player's speed;
+--      the script only records ('manual_sample' every tick, soldiers every 2nd;
+--      'player_order' and 'order_end' for every order the player gives);
+--      config.enemy_ai hands the enemy to the game's AI: 'native' as the
+--      battle sets it (it attacks), 'defend' — told to defend where it stands.
 -- stage_snapshot: every own unit's movement and soldiers when a stage ends;
 -- hold_sample: every own unit's movement every tick of the hold;
 -- turn_sample: archers' soldiers every tick while they turn.
@@ -52,6 +58,7 @@ local alignment = require('apps.alignment.services')
 local mask_services = require('apps.mask.services')
 local mask_adapter = require('apps.mask.adapter')
 local approach = require('apps.approach.services')
+local navigation = require('apps.navigation.services')
 local logistics = require('apps.logistics.services')
 
 local M = {}
@@ -59,6 +66,7 @@ local M = {}
 local LOG = 'tww3_bai_events.jsonl'
 local TIMER = 'tww3_bai_formation_probe_tick'
 M.LORD_WIDTH = 5
+M.DEFEND_RADIUS_M = 80  -- the enemy's defence area in the player's test (as entries.enemy_layout)
 -- stage name, turn of the archers (degrees), how: 'rotate' = the engine's
 -- relative rotate (pivots on the front rank), 'in_place' = our turn around the middle.
 M.BASE_STAGES = {{'placed', 0}, {'align', 0, 'align'}, {'mask', 0, 'mask'}, {'hold', 0, 'hold'}}
@@ -77,9 +85,17 @@ function M.main(bm, config, globals)
     local state = {active = false, finished = false, batch = '', run_id = 'bootstrap', ticks = 0,
         own = {}, enemy = {}, by_name = {}, stage_index = 0, orders_after_placed = 0, orders_alignment = 0,
         stages = {}, governor = alignment.new_governor(), commander = approach.new_commander(), holder = {}}
-    for _, s in ipairs(M.BASE_STAGES) do
-        if s[3] == 'hold' and config.approach then state.stages[#state.stages + 1] = {'approach', 0, 'approach'} end
-        state.stages[#state.stages + 1] = s
+    if config.facing_sweep then
+        -- Research: which facing the engine gives for a commanded bearing.
+        state.stages = {{'placed', 0}, {'sweep', 0, 'sweep'}}
+    elseif config.handover then
+        -- The player's test: our AI places the army, then hands it over.
+        state.stages = {{'placed', 0}, {'manual', 0, 'manual'}}
+    else
+        for _, s in ipairs(M.BASE_STAGES) do
+            if s[3] == 'hold' and config.approach then state.stages[#state.stages + 1] = {'approach', 0, 'approach'} end
+            state.stages[#state.stages + 1] = s
+        end
     end
     if config.turn_test then
         for _, s in ipairs(M.TURN_STAGES) do state.stages[#state.stages + 1] = s end
@@ -536,9 +552,35 @@ function M.main(bm, config, globals)
             orders_after_placed = state.orders_after_placed, orders_alignment = state.orders_alignment,
             orders_approach = state.orders_approach or 0})
         for _, it in ipairs(state.own) do orders.halt(it.uc) end
-        for _, it in ipairs(state.enemy) do orders.halt(it.uc) end
+        for _, it in ipairs(state.enemy) do if it.uc then orders.halt(it.uc) end end
         flush()
         bm:end_battle()
+    end
+
+    -- The game's AI keeps the enemy but defends where it stands (as in
+    -- entries.enemy_layout: CA's script_ai_planner, else the engine planner).
+    local function enemy_defend()
+        local sx, sz = 0, 0
+        for _, it in ipairs(state.enemy) do
+            local p = it.unit:position()
+            sx, sz = sx + p:get_x(), sz + p:get_z()
+        end
+        local centre = vec(sx / #state.enemy, sz / #state.enemy)
+        local report = {radius_m = config.defend_radius_m or M.DEFEND_RADIUS_M, centre = {x = sx / #state.enemy, z = sz / #state.enemy}}
+        if script_ai_planner and script_ai_planner.defend_position and bm.get_scriptunit_for_unit then
+            local list = {}
+            for _, it in ipairs(state.enemy) do list[#list + 1] = bm:get_scriptunit_for_unit(it.unit) end
+            state.planner = script_ai_planner:new('tww3_bai_enemy_defend', list)
+            state.planner:defend_position(centre, config.defend_radius_m or M.DEFEND_RADIUS_M)
+            report.used = 'script_ai_planner.defend_position'
+        else
+            local planner = state.enemy_alliance:create_ai_unit_planner()
+            for _, it in ipairs(state.enemy) do planner:add_units(it.unit) end
+            planner:defend_position(centre, config.defend_radius_m or M.DEFEND_RADIUS_M)
+            state.planner = planner
+            report.used = 'engine_planner.defend_position'
+        end
+        emit('enemy_mode', report)
     end
 
     local function begin_stage(index)
@@ -558,7 +600,60 @@ function M.main(bm, config, globals)
                 end
             end
         end
+        if stage[3] == 'manual' then
+            -- Hand the army over: from now on the script only records.
+            for _, it in ipairs(state.own) do orders.release(it.uc) end
+            if config.enemy_ai == 'defend' then enemy_defend() end
+        end
         emit('stage', {stage = stage[1], turn_deg = stage[2], how = stage[3]})
+    end
+
+    -- Handover: a player's order is seen only as a change of the ordered point
+    -- or width (as in manual_record); each one gets a navigation leg monitor.
+    local function manual_tick(now, elapsed)
+        local rows = {}
+        for _, it in ipairs(state.own) do
+            local m = unit_motion.motion(it.unit)
+            local row = {script_name = it.name, role = it.role, motion = m}
+            if state.ticks % 2 == 0 then
+                local men = unit_motion.soldiers(cco, it.unit)
+                row.soldiers_dm = men.xz_dm
+            end
+            rows[#rows + 1] = row
+            if m.ordered_x then
+                local last = it.order
+                local changed = not last
+                    or math.sqrt((m.ordered_x - last.x) ^ 2 + (m.ordered_z - last.z) ^ 2) > 1
+                    or math.abs((m.ordered_width or 0) - (last.width or 0)) > 0.5
+                if changed then
+                    it.order = {x = m.ordered_x, z = m.ordered_z, width = m.ordered_width, ms = now}
+                    if last then
+                        emit('player_order', {unit = it.name, role = it.role, x = m.ordered_x, z = m.ordered_z,
+                            width = m.ordered_width, bearing = m.ordered_bearing, from_x = m.x, from_z = m.z, t_ms = elapsed})
+                        it.monitor = navigation.new_leg_monitor({target = {x = m.ordered_x, z = m.ordered_z},
+                            timeout_ms = 600000})
+                    end
+                end
+            end
+            if it.monitor then
+                local reason = it.monitor.update(now - it.order.ms, {x = m.x, z = m.z, moving = m.is_moving == true})
+                if reason then
+                    local st = it.monitor.stats
+                    emit('order_end', {unit = it.name, reason = reason, t_ms = now - it.order.ms, x = m.x, z = m.z,
+                        path_m = st.path_m, distance_m = st.distance_m, min_distance_m = st.min_distance_m})
+                    it.monitor = nil
+                end
+            end
+        end
+        -- Research only (the AI never reads it): where the enemy goes, to tell
+        -- whether the game's AI attacks or defends.
+        local enemy = {}
+        if config.enemy_ai then
+            for _, it in ipairs(state.enemy) do
+                enemy[#enemy + 1] = {script_name = it.name, motion = unit_motion.motion(it.unit)}
+            end
+        end
+        emit('manual_sample', {t_ms = elapsed, units = rows, enemy = enemy})
     end
 
     local function tick()
@@ -583,6 +678,31 @@ function M.main(bm, config, globals)
         if stage[3] == 'approach' and not state.approach_done then
             state.approach_done = approach_tick(now, elapsed)
         end
+        if stage[3] == 'manual' then manual_tick(now, elapsed) end
+        if stage[3] == 'sweep' and not state.sweep_done then
+            -- One commanded bearing every config.facing_sweep.ticks ticks, sent
+            -- raw (not through apps.orders.facing), read just before the next.
+            local sw = config.facing_sweep
+            local it = state.by_name[sw.unit]
+            state.sweep = state.sweep or {i = 0, wait = 0}
+            local s = state.sweep
+            if s.i > 0 and s.wait == 0 then
+                local men = unit_motion.soldiers(cco, it.unit)
+                emit('sweep_sample', {sent = sw.bearings[s.i], engine = it.unit:bearing(), soldiers_dm = men.xz_dm})
+            end
+            if s.wait == 0 then
+                s.i = s.i + 1
+                if s.i > #sw.bearings then
+                    state.sweep_done = true
+                else
+                    local p = it.placement
+                    it.uc:teleport_to_location(vec(p.x, p.z), sw.bearings[s.i], p.width)
+                    s.wait = sw.ticks
+                end
+            end
+            s.wait = s.wait - 1
+            if s.wait < 0 then s.wait = 0 end
+        end
         if stage[3] == 'hold' then
             local rows = {}
             for _, it in ipairs(state.own) do
@@ -597,7 +717,11 @@ function M.main(bm, config, globals)
         end
         state.still = moving and 0 or state.still + 1
         local done
-        if stage[3] == 'hold' then
+        if stage[3] == 'manual' then
+            done = false  -- until the player ends the battle (or the deadline)
+        elseif stage[3] == 'sweep' then
+            done = state.sweep_done == true
+        elseif stage[3] == 'hold' then
             done = elapsed >= config.hold_s * 1000
         elseif stage[3] == 'approach' then
             done = state.approach_done
@@ -652,15 +776,31 @@ function M.main(bm, config, globals)
         local centre, lord, source, seen = enemy_view()
         local bearing = config.own.start_bearing or formation.facing(config.own.anchor, centre)
         state.placed = {anchor = config.own.anchor, bearing = bearing, lord = lord}
+        -- On the map (user, 28.09.2026: units put on a rock stood crooked): the
+        -- stand mask around our army, read from the engine as in the mask stage;
+        -- the formation takes a width and a place where every unit fits.
+        local started = os.clock and os.clock() or 0
+        local reach_unit = state.own[1].unit
+        for _, it in ipairs(state.own) do
+            if it.unit:initial_number_of_men() > reach_unit:initial_number_of_men() then reach_unit = it.unit end
+        end
+        local area = mask_services.new(mask_services.area(plan_services.area(config.own.anchor, bearing)))
+        mask_services.fill(area, mask_adapter.reader(bm, vector_type, reach_unit, area.grid.step))
+        local mask_clock = (os.clock and os.clock() or 0) - started
         -- The enemy roster (unit types) is known before the battle, as to the player.
         local result = plan_services.start({role = config.role, roles = config.roles, bearing = bearing,
             own = {anchor = config.own.anchor, units = config.own.units},
-            enemy = {units = config.enemy.units, lord = lord}, formation_params = config.formation_params})
+            enemy = {units = config.enemy.units, lord = lord}, formation_params = config.formation_params,
+            fits = function(q) return mask_services.fits(area, q, true).ok end})
+        local fit_clock = (os.clock and os.clock() or 0) - started - mask_clock
         emit('plan', {facing_source = source, enemies_seen = seen, enemy_centre = centre, bearing = bearing,
             status = result.status, strategy = result.decision.strategy, features = result.features,
-            candidates = result.decision.candidates, plan = result.formation})
+            candidates = result.decision.candidates, plan = result.formation,
+            fit = result.formation and result.formation.fit, mask = mask_services.summary(area),
+            mask_clock_s = mask_clock, fit_clock_s = fit_clock})
         assert(result.formation, 'No strategy for this battle: ' .. tostring(result.status))
         local plan = result.formation
+        if plan.anchor then state.placed.anchor, state.placed.bearing = plan.anchor, plan.bearing end
         plan.overlaps = formation.overlaps(plan.placements)
         for _, p in ipairs(plan.placements) do
             local it = state.by_name[p.id]
@@ -673,15 +813,19 @@ function M.main(bm, config, globals)
     local function start()
         if state.active or state.finished then return end
         state.stall = battle_services.new_stall_detector(config.stall_ms)
-        bm:modify_battle_speed(config.speed)
-        battle.speed_guard(bm, config.speed, function(from)
-            emit('speed_restored', {from_speed = from, to_speed = config.speed})
-        end, 'tww3_bai_formation_probe_speed')
+        if config.speed then
+            bm:modify_battle_speed(config.speed)
+            battle.speed_guard(bm, config.speed, function(from)
+                emit('speed_restored', {from_speed = from, to_speed = config.speed})
+            end, 'tww3_bai_formation_probe_speed')
+        end
         bm:change_victory_countdown_limit(-1)
         for _, p in ipairs(config.enemy.placements) do
             local it = state.by_name[p.script_name]
-            orders.teleport(it.uc, vec(p.x, p.z), p.bearing, p.width)
-            orders.halt(it.uc)
+            if it.uc then
+                orders.teleport(it.uc, vec(p.x, p.z), p.bearing, p.width)
+                orders.halt(it.uc)
+            end
         end
         emit('start', {speed = config.speed, deadline_s = config.deadline_s, stall_ms = config.stall_ms})
         state.cancel_deadline = battle.deadline(bm, config.deadline_s * 1000, guarded(function()
@@ -710,13 +854,24 @@ function M.main(bm, config, globals)
         assert(common and vector_type, 'common and battle_vector globals required')
         local sides = battle.read_sides(bm)
         state.alliance = sides[1].alliance
+        state.enemy_alliance = sides[2].alliance
+        -- Who the game takes for the attacker (deployment areas may decide it).
+        local ok_roles, roles = pcall(battle.read_roles, bm)
+        emit('roles', {ok = ok_roles, roles = ok_roles and roles or tostring(roles)})
         state.all_units = {}
+        -- In the player's test with the game's AI the enemy is never taken: it
+        -- deploys and fights by itself (as in entries.enemy_layout; taken and
+        -- released, it stood idle — 27.09.2026).
+        local native_enemy = config.handover and config.enemy_ai
         local function adopt(side, list, name)
             local u = battle.find_by_name(sides[side], name)
             assert(u, 'scenario unit missing: ' .. name)
-            local it = {name = name, unit = u, uc = orders.take_control(sides[side].army, u)}
-            orders.set_fire_at_will(it.uc, false)
-            orders.halt(it.uc)
+            local it = {name = name, unit = u}
+            if not (side == 2 and native_enemy) then
+                it.uc = orders.take_control(sides[side].army, u)
+                orders.set_fire_at_will(it.uc, false)
+                orders.halt(it.uc)
+            end
             list[#list + 1] = it
             state.by_name[name] = it
             state.all_units[#state.all_units + 1] = u

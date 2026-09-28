@@ -1,0 +1,29 @@
+{
+  "description": "Player's test battle on the two halves of the map (docs/ru/game/units/deployment.md: deployment areas centred X=-270/+270, Z=0, 400 x 260 m, facing each other): we attack from the west with a lord, 6 spearmen and 8 archers placed by our AI; the enemy — a lord, 8 spearmen, 6 archers — deploys and fights by the game's own AI in the east half. Build with --handover --enemy-ai native.",
+  "own": {
+    "role": "attack",
+    "anchor": [-230, -40],
+    "bearing": 90,
+    "units": [
+      {"key": "wh_main_emp_cha_general_0", "count": 1},
+      {"key": "wh_main_emp_inf_spearmen_0", "count": 6},
+      {"key": "wh2_dlc13_emp_inf_archers_0", "count": 8}
+    ]
+  },
+  "enemy": {
+    "role": "defend",
+    "anchor": [270, -60],
+    "bearing": 270,
+    "units": [
+      {"key": "wh_main_emp_cha_general_0", "count": 1},
+      {"key": "wh_main_emp_inf_spearmen_0", "count": 8},
+      {"key": "wh2_dlc13_emp_inf_archers_0", "count": 6}
+    ]
+  },
+  "deployment": {
+    "own": {"centre": [-270, 0], "width": 400, "height": 260, "orientation": 0},
+    "enemy": {"centre": [270, 0], "width": 400, "height": 260, "orientation": 3.14}
+  },
+  "routs": [[-600, 0], [600, 0]],
+  "map": "moorlands-route"
+}

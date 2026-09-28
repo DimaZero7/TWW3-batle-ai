@@ -31,7 +31,15 @@ M.DEFAULTS = {
     archer_max_aspect = 1.3, -- max(front/depth, depth/front)
     archer_overhang_m = 10,  -- per side past the wall's ends
     max_trace = 12,
+    fit_options = 6,         -- on the map: the best options tried at one place
 }
+
+-- Where to look when the formation does not fit where it was asked to stand
+-- (user, 28.09.2026: on a rock the engine sets units crooked): first sideways
+-- along the front, then back from the enemy, then turned a little.
+-- Turns are whole steps of the engine's facing grid (360/128 deg, apps.orders.facing).
+M.FIT = {step_m = 6, max_side_m = 90, max_back_m = 60, back_weight = 1.5,
+    turns_deg = {5.625, -5.625, 11.25, -11.25}}
 
 -- Bearing in degrees from point a to point b.
 function M.facing(a, b)
@@ -184,29 +192,8 @@ local function line_and_blocks(input, params)
     end
     assert(#options > 0, 'No measured widths for the wall')
     table.sort(options, better)
-    local best = options[1]
     for i = 1, math.min(#options, p.max_trace) do result.options[i] = options[i] end
-    result.choice = best
-    if #best.failed > 0 then result.status = 'infeasible' end
 
-    local function add(u, role, width, along, back, row)
-        local s = shape(u, width) or {front_m = 1, depth_m = 1}
-        local x, z = place(input.anchor, input.bearing, along, back)
-        result.placements[#result.placements + 1] = {id = u.id, role = role, row = row, x = x, z = z,
-            bearing = input.bearing, width = width, front_m = s.front_m, depth_m = s.depth_m,
-            along_m = along, back_m = back}
-    end
-    local _, wall_offsets = line(walls, best.wall_width, p.unit_gap_m)
-    for i, u in ipairs(walls) do add(u, 'wall', best.wall_width, wall_offsets[i], 0, 0) end
-    local per_row = #archers > 0 and math.ceil(#archers / best.rows) or 0
-    for r = 1, best.rows do
-        local members = {}
-        for i = (r - 1) * per_row + 1, math.min(r * per_row, #archers) do members[#members + 1] = archers[i] end
-        if #members > 0 then
-            local _, offsets = line(members, best.archer_width, best.archer_gap_m)
-            for i, u in ipairs(members) do add(u, 'arc', best.archer_width, offsets[i], best.row_back_m[r], r) end
-        end
-    end
     local side = p.lord_side
     if input.enemy_lord and finite(input.enemy_lord.x) and finite(input.enemy_lord.z) then
         local b = math.rad(input.bearing)
@@ -217,10 +204,62 @@ local function line_and_blocks(input, params)
         result.lord_side_reason = 'default'
     end
     result.lord_side = side
-    for i, u in ipairs(lords) do
-        local along = side * (best.wall_front_m / 2 + p.lord_gap_m + (i - 1) * p.lord_gap_m)
-        add(u, 'lord', nil, along, 0, 0)
+
+    -- Every unit's place for one option.
+    local function build(best)
+        local placements = {}
+        local function add(u, role, width, along, back, row)
+            local s = shape(u, width) or {front_m = 1, depth_m = 1}
+            local x, z = place(input.anchor, input.bearing, along, back)
+            placements[#placements + 1] = {id = u.id, role = role, row = row, x = x, z = z,
+                bearing = input.bearing, width = width, front_m = s.front_m, depth_m = s.depth_m,
+                along_m = along, back_m = back}
+        end
+        local _, wall_offsets = line(walls, best.wall_width, p.unit_gap_m)
+        for i, u in ipairs(walls) do add(u, 'wall', best.wall_width, wall_offsets[i], 0, 0) end
+        local per_row = #archers > 0 and math.ceil(#archers / best.rows) or 0
+        for r = 1, best.rows do
+            local members = {}
+            for i = (r - 1) * per_row + 1, math.min(r * per_row, #archers) do members[#members + 1] = archers[i] end
+            if #members > 0 then
+                local _, offsets = line(members, best.archer_width, best.archer_gap_m)
+                for i, u in ipairs(members) do add(u, 'arc', best.archer_width, offsets[i], best.row_back_m[r], r) end
+            end
+        end
+        for i, u in ipairs(lords) do
+            local along = side * (best.wall_front_m / 2 + p.lord_gap_m + (i - 1) * p.lord_gap_m)
+            add(u, 'lord', nil, along, 0, 0)
+        end
+        return placements
     end
+
+    local best, index = options[1], 1
+    result.placements = build(best)
+    -- On the map (input.fits(placement) -> bool, e.g. the stand mask): the
+    -- best option whose every unit fits; only options that keep the layout's
+    -- rules (square archers, a thick enough wall, reach) are tried.
+    if input.fits then
+        result.fit = {ok = false, tried = 0}
+        for i, o in ipairs(options) do
+            if result.fit.tried >= p.fit_options then break end
+            if #o.failed == 0 or i == 1 then
+                result.fit.tried = result.fit.tried + 1
+                local placements = build(o)
+                local all = true
+                for _, q in ipairs(placements) do
+                    if not input.fits(q) then all = false break end
+                end
+                if all then
+                    best, index, result.placements = o, i, placements
+                    result.fit.ok, result.fit.option = true, i
+                    result.fit.how = i == 1 and 'as_planned' or 'width'
+                    break
+                end
+            end
+        end
+    end
+    result.choice = best
+    if #best.failed > 0 then result.status = 'infeasible' end
     return result
 end
 
@@ -233,6 +272,70 @@ function M.plan(layout, input, params)
     local result = fn(input, params)
     result.layout = layout
     return result
+end
+
+-- Places units on the map: input.fits(placement) -> bool. Order of what is
+-- given up (user, 28.09.2026): another width at the same place; the whole
+-- formation moved (sideways first, then back, nearest first) facing the same
+-- way; then turned by 5 or 10 degrees. result.fit = {ok, how = 'as_planned' |
+-- 'width' | 'shift' | 'turn' | 'none', shift = {side_m, back_m}, turn_deg, places_tried}.
+function M.fit(layout, input, params, search)
+    assert(input.fits, 'fit needs input.fits')
+    local s = {}
+    for k, v in pairs(M.FIT) do
+        if search and search[k] ~= nil then s[k] = search[k] else s[k] = v end
+    end
+    local base = M.plan(layout, input, params)
+    if base.fit.ok or base.status == 'no_wall' then return base end
+    local shifts = {}
+    local side = 0
+    while side <= s.max_side_m + 1e-6 do
+        local back = 0
+        while back <= s.max_back_m + 1e-6 do
+            for _, sign in ipairs(side > 0 and {1, -1} or {1}) do
+                if side > 0 or back > 0 then
+                    shifts[#shifts + 1] = {side_m = sign * side, back_m = back,
+                        cost = math.sqrt(side ^ 2 + (s.back_weight * back) ^ 2)}
+                end
+            end
+            back = back + s.step_m
+        end
+        side = side + s.step_m
+    end
+    table.sort(shifts, function(a, b) return a.cost < b.cost end)
+    local tried = 0
+    local function at(shift, turn)
+        tried = tried + 1
+        local b = math.rad(input.bearing)
+        local fx, fz, rx, rz = math.sin(b), math.cos(b), math.cos(b), -math.sin(b)
+        local moved = {}
+        for k, v in pairs(input) do moved[k] = v end
+        moved.anchor = {x = input.anchor.x + rx * shift.side_m - fx * shift.back_m,
+            z = input.anchor.z + rz * shift.side_m - fz * shift.back_m}
+        moved.bearing = (input.bearing + turn) % 360
+        local r = M.plan(layout, moved, params)
+        if r.fit.ok then
+            r.fit.how = turn ~= 0 and 'turn' or 'shift'
+            r.fit.shift, r.fit.turn_deg, r.fit.places_tried = {side_m = shift.side_m, back_m = shift.back_m}, turn, tried
+            r.anchor, r.bearing = moved.anchor, moved.bearing
+            return r
+        end
+        return nil
+    end
+    for _, shift in ipairs(shifts) do
+        local r = at(shift, 0)
+        if r then return r end
+    end
+    for _, turn in ipairs(s.turns_deg) do
+        local r = at({side_m = 0, back_m = 0}, turn)
+        if r then return r end
+        for _, shift in ipairs(shifts) do
+            r = at(shift, turn)
+            if r then return r end
+        end
+    end
+    base.fit.how, base.fit.places_tried = 'none', tried
+    return base
 end
 
 -- Turn a block in place. The engine's relative rotate pivots on the FRONT

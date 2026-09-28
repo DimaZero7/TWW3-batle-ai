@@ -164,9 +164,10 @@ def check_syntax(script):
     return True
 
 
-def build(target, run_config, dependencies=None, scenario=None):
+def build(target, run_config, dependencies=None, scenario=None, plain=False):
     """dependencies defaults to the required mods; every battle loads them.
-    scenario overrides the target's scenario file (a name in scenarios/)."""
+    scenario overrides the target's scenario file (a name in scenarios/).
+    plain: the battle only, without our script (the player's own test)."""
     if dependencies is None:
         dependencies = project.required_mods()
     spec = dict(TARGETS[target])
@@ -188,6 +189,8 @@ def build(target, run_config, dependencies=None, scenario=None):
         f"script\\battle\\{folder}\\scenario.lua": SCENARIO_LUA,
         f"script\\battle\\{folder}\\{spec['packed_scenario']}": scenario_xml,
     }
+    if plain:
+        del files[f"script\\battle\\mod\\{spec['script']}.lua"]
     dependency_names = [d["pack"] for d in dependencies]
     blob = pfh5.pack_files(files, dependency_names)
     assert pfh5.read_pack(blob) == (files, tuple(dependency_names))
@@ -236,6 +239,18 @@ def main(argv=None):
     parser.add_argument("--enemy-mode", choices=("native", "defend"), default="defend",
                         help="enemy-layout: game AI as set by the battle, or told to defend where it deployed")
     parser.add_argument("--turn-test", action="store_true", help="formation-probe: also turn the archers right/left")
+    parser.add_argument("--plain", action="store_true",
+                        help="formation-probe: the battle only, without our script: the player deploys, the game's AI")
+    parser.add_argument("--facing-sweep", action="store_true",
+                        help="formation-probe: research — teleport one unit with a sweep of bearings and read its facing")
+    parser.add_argument("--fast", action="store_true",
+                        help="formation-probe --handover: keep --speed (research runs) instead of the player's pace")
+    parser.add_argument("--handover", action="store_true",
+                        help="formation-probe: our AI places the army, then the player commands it; only recorded")
+    parser.add_argument("--defend-radius", type=int, default=300,
+                        help="formation-probe --handover --enemy-ai defend: the enemy's defence radius, m")
+    parser.add_argument("--enemy-ai", choices=("native", "defend"),
+                        help="formation-probe --handover: the enemy to the game's AI, as the battle sets it or defending")
     parser.add_argument("--engine-only", action="store_true",
                         help="formation-probe: no queues past obstacles (apps.logistics off), the engine alone")
     parser.add_argument("--features", action="store_true",
@@ -281,6 +296,20 @@ def main(argv=None):
                        + (FORMATION_APPROACH_S if probe_config.get("approach") else 0)
                        + (8 * FORMATION_STAGE_S if args.turn_test else 0) + 15)
             stall_ms = max(stall_ms, int((model_s + 120) * 1000))
+            if args.handover:
+                # The player's test: our AI places the army and hands it over;
+                # the player's pace, an hour, nobody fighting does not end it.
+                run_config.update(handover=True, enemy_ai=args.enemy_ai, defend_radius_m=args.defend_radius)
+                if not args.fast:
+                    run_config.pop("speed")
+                model_s = None
+                stall_ms = max(stall_ms, 3600000)
+            if args.facing_sweep:
+                # Research: the facing the engine gives for commanded bearings
+                # (every 1 deg round the circle, every 0.1 deg around 90).
+                bearings = [float(b) for b in range(0, 360)] + [round(80 + 0.1 * i, 1) for i in range(201)]
+                run_config["facing_sweep"] = {"unit": "own_2", "ticks": 3, "bearings": bearings}
+                stall_ms = max(stall_ms, 3600000)
         if args.target == "enemy-layout":
             from tools import enemy_layout
             enemy_layout.write_scenario(args.layout)
@@ -294,7 +323,9 @@ def main(argv=None):
             model_s = None
         run_config["deadline_s"] = args.deadline or (3600 if model_s is None else deadline_seconds(model_s, args.speed))
         run_config["stall_ms"] = stall_ms
-    manifest = build(args.target, run_config, scenario=args.scenario)
+    if args.plain:
+        run_config["deadline_s"] = args.deadline or 3600
+    manifest = build(args.target, run_config, scenario=args.scenario, plain=args.plain)
     print(json.dumps(manifest, indent=2))
     return 0
 

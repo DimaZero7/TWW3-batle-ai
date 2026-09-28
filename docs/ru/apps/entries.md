@@ -152,6 +152,20 @@
 препятствием); `approach_decision`, `approach_sample`, `approach_manoeuvre`.
 С `goal` в армии — поход к точке вместо врага.
 
+**Тестовый бой игрока** (`--handover`): наш ИИ расставляет армию и отдаёт её
+игроку; скрипт только пишет `manual_sample` (каждый такт, бойцы — каждый второй),
+`player_order` и `order_end`. `--enemy-ai native` — врага скрипт не трогает, он
+сам расставляется и воюет штатным ИИ (его движение пишется для исследования);
+`--enemy-ai defend` — ещё и задача «обороняй» (`--defend-radius`). Скорость —
+игрока; `--fast` оставляет `--speed`. `--plain` — один файл боя без нашего
+скрипта. Зоны расстановки — поле `deployment` в армии (например, половины карты,
+`config/armies/test_halves.json`); кто защищается — по роли, через победителя по
+таймауту ([orders](orders.md#штатный-ии-с-задачей-27092026)).
+
+```bash
+.venv/Scripts/python -m tools.build formation-probe --army test_halves --handover --enemy-ai native
+```
+
 <a id="enemy_layout"></a>
 
 ## enemy_layout — как стоит штатный ИИ

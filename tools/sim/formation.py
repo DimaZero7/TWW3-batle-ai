@@ -26,6 +26,7 @@ Output (default research/analysis/formation/<army>/):
 import argparse
 import json
 import math
+import re
 import sys
 from pathlib import Path
 
@@ -103,7 +104,14 @@ class Planner:
     def __init__(self):
         self.lua = new_runtime()
         self._start = self.lua.eval("""
-            function(input)
+            function(input, reader)
+                if reader then
+                    -- On the map: the stand mask around our army (as in battle, entries.formation_probe).
+                    local m = require('apps.mask.services')
+                    local mask = m.new(m.area(require('apps.plan.services').area(input.own.anchor, input.bearing)))
+                    m.fill(mask, reader)
+                    input.fits = function(p) return m.fits(mask, p, true).ok end
+                end
                 local plan = require('apps.plan.services').start(input)
                 if plan.formation then
                     plan.formation.overlaps = require('apps.formation.services').overlaps(plan.formation.placements)
@@ -230,8 +238,10 @@ class Planner:
     def facing(self, a, b):
         return self._facing(self.lua.table_from({"x": a[0], "z": a[1]}), self.lua.table_from({"x": b[0], "z": b[1]}))
 
-    def start(self, role, anchor, bearing, units, enemy_units, enemy_lord=None, formation_params=None, roles=None):
-        """apps.plan.start: {status, features, decision, formation}."""
+    def start(self, role, anchor, bearing, units, enemy_units, enemy_lord=None, formation_params=None, roles=None,
+              grid=None):
+        """apps.plan.start: {status, features, decision, formation}; with a captured
+        map grid the formation is fitted to the map (apps.formation.fit)."""
         data = {"role": role, "bearing": bearing, "own": {"anchor": {"x": anchor[0], "z": anchor[1]}, "units": units},
                 "enemy": {"units": enemy_units}}
         if roles:
@@ -240,7 +250,7 @@ class Planner:
             data["enemy"]["lord"] = {"x": enemy_lord[0], "z": enemy_lord[1]}
         if formation_params:
             data["formation_params"] = formation_params
-        return json.loads(self._start(self.lua.table_from(data, recursive=True)))
+        return json.loads(self._start(self.lua.table_from(data, recursive=True), grid.reader if grid else None))
 
     def picture(self, anchor, bearing, units):
         data = {"anchor": {"x": anchor[0], "z": anchor[1]}, "bearing": bearing, "units": units}
@@ -412,11 +422,17 @@ def simulate(army, planner=None, params=None):
     enemy_lord = (lords[0]["x"], lords[0]["z"]) if lords else None
     own_by_id = {u["id"]: u for u in own_units}
 
-    def place(anchor, bearing):
+    start_grid = MapGrid(army["map"]) if army.get("map") else None
+
+    def place(anchor, bearing, on_map=False):
         plan = planner.start(army["own"].get("role"), anchor, bearing, [dict(u, shapes=[dict(s) for s in u["shapes"]])
                                                                          for u in own_units],
-                             enemy_units, enemy_lord, params or army.get("formation_params"), test_roles(army, own_units))
+                             enemy_units, enemy_lord, params or army.get("formation_params"), test_roles(army, own_units),
+                             grid=start_grid if on_map else None)
         own = plan.get("formation") or {"placements": [], "options": [], "overlaps": [], "unplaced": []}
+        # Fitted to the map, the formation may stand elsewhere than asked (apps.formation.fit).
+        if own.get("anchor"):
+            anchor, bearing = (own["anchor"]["x"], own["anchor"]["z"]), own["bearing"]
         own.update(status=plan["status"], strategy=plan["decision"]["strategy"], features=plan["features"],
                    decision=plan["decision"], anchor=list(anchor), bearing=bearing)
         # How we see the battle: groups of both sides and their main armies (apps.vision).
@@ -427,14 +443,18 @@ def simulate(army, planner=None, params=None):
     # Start where the config says; own.bearing may set a deliberately crooked start.
     anchor = army["own"]["anchor"]
     bearing = army["own"].get("bearing", planner.facing(anchor, army["enemy"]["anchor"]))
-    own, picture, field = place(anchor, bearing)
+    own, picture, field = place(anchor, bearing, on_map=True)
+    anchor, bearing = own["anchor"], own["bearing"]
+    sides["start_fit"] = own.get("fit")
     alignment = None
     if field and own["placements"]:
         alignment = planner.align(field, anchor, bearing, picture["enemy"].get("main"))
         if alignment["check"]["needed"]:
             target = alignment["target"]
             sides["own_before"] = own
-            own, picture, field = place((target["anchor"]["x"], target["anchor"]["z"]), target["bearing"])
+            own, picture, field = place((target["anchor"]["x"], target["anchor"]["z"]), target["bearing"],
+                                        on_map=True)
+            sides["align_fit"] = own.get("fit")
             alignment["after"] = planner.align(field, own["anchor"], own["bearing"], picture["enemy"].get("main"))
     sides["own"] = own
     sides["own"]["vision"], sides["enemy"]["vision"] = picture["own"], picture["enemy"]
@@ -549,7 +569,8 @@ def probe(army, speed, settle_ms, planner=None):
             sign = -1 if side == "own" else 1
             xml_units.append({"script_name": names[u["id"]], "key": u["key"], "men": u["men"],
                               "general": u["commanding"] and u["men"] == 1,
-                              "x": ax - 37.5 + i * 15, "z": az + sign * 30})
+                              # Spawn rows of 8 inside the side's deployment area.
+                              "x": ax - 52.5 + (i % 8) * 15, "z": az + sign * (30 + (i // 8) * 20)})
         xml_sides[side] = xml_units
         if side == "own":
             for u in units:
@@ -575,7 +596,19 @@ def probe(army, speed, settle_ms, planner=None):
                                "placements": [
                 {"script_name": names[p["id"]], "role": p["role"], "x": p["x"], "z": p["z"], "bearing": p["bearing"],
                  "width": p.get("width") or 5} for p in sides["enemy"]["placements"]]}
-    return probe_xml(xml_sides, army["own"].get("faction", "wh_main_emp_empire")), config, sides
+    xml = probe_xml(xml_sides, army["own"].get("faction", "wh_main_emp_empire"),
+                    zones=deployment_zones(army), routs=army.get("routs"))
+    # The defender is the alliance that wins on timeout: this is what makes the
+    # game see one side attacking and the other defending (game, 28.09.2026;
+    # without it both sides are attackers and the game's AI always attacks).
+    winner = army.get("timeout_winner")
+    if winner is None:
+        winner = 0 if army["own"].get("role") == "defend" else 1
+    xml = xml.replace("<duration>", f'<timeout_winning_alliance_index>{winner}'
+                                    f'</timeout_winning_alliance_index>\n    <duration>', 1)
+    if army.get("battle_type"):
+        xml = xml.replace("<type>classic</type>", f'<type>{army["battle_type"]}</type>')
+    return xml, config, sides
 
 
 PROBE_UNIT = """      <unit num_soldiers="{men}" script_name="{script_name}">
@@ -586,8 +619,40 @@ PROBE_UNIT = """      <unit num_soldiers="{men}" script_name="{script_name}">
 """
 
 
-def probe_xml(xml_sides, faction="wh_main_emp_empire", enemy_faction="wh_main_emp_empire"):
+ZONE_M = 280  # a side's deployment area: a square around its army (user, 27.09.2026)
+
+
+AREA_RE = re.compile(r"      <deployment_area>.*?</deployment_area>\n", re.S)
+
+
+def zone_xml(zone):
+    """zone = {centre: [x, z], width, height, orientation} -> a <deployment_area> element."""
+    return (f'      <deployment_area>\n        <centre x="{zone["centre"][0]}" y="{zone["centre"][1]}"/>'
+            f'<width metres="{zone["width"]}"/><height metres="{zone["height"]}"/>'
+            f'<orientation radians="{zone["orientation"]}"/>\n      </deployment_area>\n')
+
+
+def deployment_zones(army):
+    """Each side's deployment area: army "deployment" = {"own": zone, "enemy": zone}
+    (e.g. the two halves of the map as in docs/ru/game/units/deployment.md), or
+    "none" (no area in the XML: the map's own), or by default a square around each army."""
+    spec = army.get("deployment")
+    if spec == "none":
+        return None, None
+    if spec:
+        return spec["own"], spec["enemy"]
+    return tuple({"centre": army[s]["anchor"], "width": ZONE_M, "height": ZONE_M, "orientation": o}
+                 for s, o in (("own", 4.71), ("enemy", 1.57)))
+
+
+def probe_xml(xml_sides, faction="wh_main_emp_empire", enemy_faction="wh_main_emp_empire", zones=None, routs=None):
+    """zones = (own zone, enemy zone) from deployment_zones (None: no area in the
+    XML); routs = (own, enemy) rout points."""
     head = roster.SCENARIO_HEAD
+    own_zone, enemy_zone = zones or (None, None)
+    own_part, rest = head.split('  <alliance id="1">', 1)
+    own_part = AREA_RE.sub(lambda _: zone_xml(own_zone) if own_zone else "", own_part, count=1)
+    head = own_part + '  <alliance id="1">' + rest
     # Reuse the roster scenario frame; swap its fixed enemy army for ours.
     start = head.index('  <alliance id="1">')
     end = head.index("  </alliance>", start) + len("  </alliance>\n")
@@ -599,10 +664,13 @@ def probe_xml(xml_sides, faction="wh_main_emp_empire", enemy_faction="wh_main_em
             for u in units)
     enemy_alliance = head[head.index('  <alliance id="0">'):head.index('  <alliance id="1">')]
     enemy_alliance = enemy_alliance.replace("<faction>{faction}</faction>", "<faction>{enemy_faction}</faction>")
+    if own_zone:
+        enemy_alliance = enemy_alliance.replace(zone_xml(own_zone), zone_xml(enemy_zone), 1)
+    own_rout, enemy_rout = routs or ((600, 0), (-600, 0))
     enemy_alliance = enemy_alliance.replace('<alliance id="0">', '<alliance id="1">') \
-        .replace('<orientation radians="4.71"/>', '<orientation radians="1.57"/>') \
-        .replace('<rout_position x="600" y="0"/>', '<rout_position x="-600" y="0"/>') \
+        .replace('<rout_position x="600" y="0"/>', f'<rout_position x="{enemy_rout[0]}" y="{enemy_rout[1]}"/>') \
         .replace("{units}", blocks["enemy"])
+    head = head.replace('<rout_position x="600" y="0"/>', f'<rout_position x="{own_rout[0]}" y="{own_rout[1]}"/>', 1)
     text = head[:start] + enemy_alliance + head[end:]
     text = text.replace("Generated by tools/roster.py from config/roster/capture.json. Edit the\n"
                         "     list there, not this file. Side 1: units whose card and formation are\n"
@@ -639,6 +707,12 @@ def main(argv=None):
                    f'\nих фронт нависает над нашим: слева {oh["left_m"]:.0f} м, справа {oh["right_m"]:.0f} м\n')
     else:
         aligned = ""
+    fit = sides.get("start_fit")
+    if fit:
+        how = {"as_planned": "помещается как задумано", "width": f'другая ширина (вариант {fit.get("option")})',
+               "shift": "сдвинут: {side_m:+.0f} м вбок, {back_m:.0f} м назад".format(**(fit.get("shift") or {})),
+               "turn": f'повёрнут на {fit.get("turn_deg")}°', "none": "места не нашлось"}.get(fit.get("how"), fit.get("how"))
+        aligned = f'по карте в начале: {how}\n' + aligned
     appr = sides.get("approach")
     if appr and appr["final"]:
         f = appr["final"]

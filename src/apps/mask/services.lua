@@ -31,6 +31,19 @@ function M.grid(field, step, pad)
         count = rows * cols, frame = {origin = field.origin, bearing = field.bearing}}
 end
 
+-- A grid over a box around one army (its deployment, before the battlefield
+-- between two armies exists): spec = {centre = {x, z}, bearing, ahead_m,
+-- behind_m, half_width_m}; along the bearing from -behind_m to +ahead_m.
+function M.area(spec, step)
+    step = step or M.DEFAULTS.step_m
+    assert(finite(step) and step > 0, 'Step must be positive')
+    assert(spec and spec.centre and finite(spec.bearing), 'Area needs centre and bearing')
+    local rows = math.ceil((spec.ahead_m + spec.behind_m) / step)
+    local cols = math.ceil(2 * spec.half_width_m / step)
+    return {step = step, along0 = -spec.behind_m, across0 = -spec.half_width_m, rows = rows, cols = cols,
+        count = rows * cols, frame = {origin = {x = spec.centre.x, z = spec.centre.z}, bearing = spec.bearing}}
+end
+
 -- Cell i (1-based, row-major: rows along the axis) -> centre {along, across, x, z}.
 function M.cell(g, i)
     local r, c = math.floor((i - 1) / g.cols), (i - 1) % g.cols
@@ -79,8 +92,9 @@ end
 
 -- Does a unit fit at a placement {x, z, bearing, front_m, depth_m} (the
 -- order point is the centre of the front rank)? Samples every half cell
--- inside its rectangle. Returns {ok, blocked, unknown, samples}.
-function M.fits(mask, rect)
+-- inside its rectangle. Returns {ok, blocked, unknown, samples}; quick = stop
+-- at the first cell that is not standable (for searches: ok only is exact).
+function M.fits(mask, rect, quick)
     local s = mask.grid.step / 2
     local b = math.rad(rect.bearing)
     local fx, fz, rx, rz = math.sin(b), math.cos(b), math.cos(b), -math.sin(b)
@@ -95,6 +109,10 @@ function M.fits(mask, rect)
             r.samples = r.samples + 1
             if stand == nil then r.unknown = r.unknown + 1
             elseif not stand then r.blocked = r.blocked + 1 end
+            if quick and stand ~= true then
+                r.ok = false
+                return r
+            end
             back = back + s
         end
         a = a + s

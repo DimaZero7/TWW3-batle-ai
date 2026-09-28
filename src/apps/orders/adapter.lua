@@ -1,6 +1,8 @@
 -- Engine calls that give orders. Only recipes verified in battle are used:
 -- docs/en/game/units/commands.md. An accepted call is not proof of execution;
 -- check the result through units.state_adapter.
+local facing = require('apps.orders.facing')
+
 local M = {}
 
 -- Script control of one unit through its own controller.
@@ -29,9 +31,11 @@ function M.move(uc, position, run)
 end
 
 -- Arrive with a given front (degrees) and formation width (metres).
--- A lord accepts the width but one entity never forms ranks.
+-- A lord accepts the width but one entity never forms ranks. The engine holds
+-- facings on a grid (apps.orders.facing): the order goes for the grid facing
+-- nearest to facing_deg, exactly.
 function M.move_formation(uc, position, facing_deg, width_m, run)
-    uc:goto_location_angle_width(position, facing_deg, width_m, run == true)
+    uc:goto_location_angle_width(position, facing.command(facing_deg), width_m, run == true)
 end
 
 -- Relative rotation.
@@ -88,7 +92,7 @@ end
 
 -- Diagnostic/deployment placement; applied on a following engine tick.
 function M.teleport(uc, position, bearing_deg, width_m)
-    uc:teleport_to_location(position, bearing_deg, width_m)
+    uc:teleport_to_location(position, facing.command(bearing_deg), width_m)
 end
 
 -- Applies one validated command (orders.contract). ctx supplies engine
