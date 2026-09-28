@@ -21,6 +21,7 @@
 | `move-probe` | `entries.move_probe` | `scenarios/move_probe.xml` | `tww3_bai_move_probe.pack` |
 | `manual` | `entries.manual_record` | `scenarios/manual_hamlet.xml` | `tww3_bai_manual.pack` |
 | `formation-probe` | `entries.formation_probe` | `scenarios/formation_probe.xml` (из `config/armies/`) | `tww3_bai_formation_probe.pack` |
+| `archer-range` | `entries.archer_range` | `scenarios/archer_range.xml` (`tools/archer_range.py`) | `tww3_bai_archer_range.pack` |
 | `enemy-layout` | `entries.enemy_layout` | `scenarios/enemy_layout.xml` (из `config/armies/defender_layouts.json`) | `tww3_bai_enemy_layout.pack` |
 | `roster-capture` | `entries.roster_capture` | `scenarios/roster_capture.xml` (из `config/roster/capture.json`) | `tww3_bai_roster_capture.pack` |
 | `map-capture` | `entries.map_capture` | `scenarios/map_capture.xml` | `tww3_bai_map_capture.pack` |
@@ -38,6 +39,9 @@
 | `--army` | formation-probe | Армия из `config/armies/<имя>.json` (по умолчанию `first_attack`) |
 | `--layout`, `--enemy-mode` | enemy-layout | Состав врага; штатный ИИ как есть или с задачей «обороняй» (по умолчанию) |
 | `--turn-test` | formation-probe | Добавить повороты лучников вправо и влево |
+| `--handover`, `--enemy-ai native\|defend`, `--fast`, `--plain` | formation-probe | Тестовый бой игрока: наш ИИ расставляет, дальше игрок; враг — штатный ИИ; своя скорость или `--speed`; только файл боя без скрипта |
+| `--facing-sweep` | formation-probe | Исследование: какие направления держит движок |
+| `--range-mode fire_at_will\|attack` | archer-range | Когда лучники начинают стрелять при разной глубине блока |
 | `--plan` | move-probe | План из `config/move-plans/<имя>.json` (по умолчанию `hamlet`) |
 | `--scenario` | все | Другой файл из `scenarios/` вместо сценария цели |
 | `--window MIN_X MAX_X MIN_Z MAX_Z` | map-capture | Снять только этот участок карты |

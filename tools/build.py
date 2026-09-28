@@ -73,6 +73,14 @@ TARGETS = {
         "scenario": "roster_capture.xml",
         "packed_scenario": "roster_capture.xml",
     },
+    "archer-range": {
+        "entry": "entries.archer_range",
+        "pack": "tww3_bai_archer_range.pack",
+        "script": "tww3_bai_archer_range",
+        "folder": "tww3_bai",
+        "scenario": "archer_range.xml",
+        "packed_scenario": "archer_range.xml",
+    },
     "formation-probe": {
         "entry": "entries.formation_probe",
         "pack": "tww3_bai_formation_probe.pack",
@@ -241,6 +249,8 @@ def main(argv=None):
     parser.add_argument("--turn-test", action="store_true", help="formation-probe: also turn the archers right/left")
     parser.add_argument("--plain", action="store_true",
                         help="formation-probe: the battle only, without our script: the player deploys, the game's AI")
+    parser.add_argument("--range-mode", choices=("fire_at_will", "attack"), default="fire_at_will",
+                        help="archer-range: archers stand with fire at will (the target steps closer) or attack it")
     parser.add_argument("--facing-sweep", action="store_true",
                         help="formation-probe: research — teleport one unit with a sweep of bearings and read its facing")
     parser.add_argument("--fast", action="store_true",
@@ -310,6 +320,12 @@ def main(argv=None):
                 bearings = [float(b) for b in range(0, 360)] + [round(80 + 0.1 * i, 1) for i in range(201)]
                 run_config["facing_sweep"] = {"unit": "own_2", "ticks": 3, "bearings": bearings}
                 stall_ms = max(stall_ms, 3600000)
+        if args.target == "archer-range":
+            from tools import archer_range
+            archer_range.write_scenario()
+            range_config, model_s = archer_range.run_config(args.range_mode)
+            run_config.update(range_config)
+            stall_ms = max(stall_ms, int((model_s + 120) * 1000))
         if args.target == "enemy-layout":
             from tools import enemy_layout
             enemy_layout.write_scenario(args.layout)
