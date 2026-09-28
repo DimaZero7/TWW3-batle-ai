@@ -10,6 +10,11 @@
 --     the archers' front rank to the target's front rank).
 --   mode 'attack': the target stands at start_d; every archer is ordered to
 --     attack its target (it walks into range by itself).
+--   mode 'damage': how much damage archers do (user, 28.09.2026: the
+--     simulation must deal and take damage). Each lane's target stands at its
+--     own distance lane.d (front rank to front rank), fearless so it does not
+--     run; the archers fire at will until their arrows are spent. Men and
+--     hit points of both are in every sample.
 -- Every tick, for every lane: ammo left, the engine's firing flag and
 -- unit_in_range, the archers' front and rear ranks and the target's nearest
 -- rank along the lane (from the soldiers) -> 'range_sample'. Research only.
@@ -117,8 +122,28 @@ function M.main(bm, config, globals)
                 in_range = read(function() return lane.archer:unit_in_range(lane.target) end),
                 moving = lane.archer:is_moving(), archer_front = a and a[2], archer_rear = a and a[1],
                 target_near = t and t[1], range = read(function() return lane.archer:missile_range() end)}
+            if config.mode == 'damage' then
+                local r = rows[#rows]
+                r.archer_men = read(function() return lane.archer:number_of_men_alive() end)
+                r.target_men = read(function() return lane.target:number_of_men_alive() end)
+                r.target_hp = read(function() return lane.target:unary_hitpoints() end)
+                r.target_health = read(function() return cco(lane.target, 'HealthValue') end)
+                r.target_moving = lane.target:is_moving()
+            end
         end
         emit('range_sample', {tick = state.ticks, lanes = rows})
+        if config.mode == 'damage' then
+            -- Done when every lane is out of arrows or has not shot for idle_ticks.
+            local done = true
+            for i, lane in ipairs(state.lanes) do
+                local ammo = rows[i].ammo
+                if ammo ~= lane.last_ammo then lane.last_ammo, lane.idle = ammo, 0 else lane.idle = (lane.idle or 0) + 1 end
+                if ammo and ammo > 0 and lane.idle < config.idle_ticks then done = false end
+            end
+            if done then finish('completed') end
+            flush()
+            return
+        end
         if config.mode == 'fire_at_will' and state.ticks % config.step_ticks == 0 then
             for _, lane in ipairs(state.lanes) do
                 if not lane.fired_at and lane.d - config.step_m >= config.end_d then place_target(lane, lane.d - config.step_m) end
@@ -146,7 +171,10 @@ function M.main(bm, config, globals)
         for _, lane in ipairs(state.lanes) do
             orders.teleport(lane.auc, vec(lane.x, config.z0), bearing, lane.width)
             orders.halt(lane.auc)
-            place_target(lane, config.start_d)
+            place_target(lane, lane.d_start or config.start_d)
+            if config.mode == 'damage' then
+                pcall(function() lane.tuc:morale_behavior_fearless() end)
+            end
         end
         emit('start', {mode = config.mode, bearing = bearing, lanes = config.lanes, start_d = config.start_d,
             end_d = config.end_d, step_m = config.step_m, step_ticks = config.step_ticks})
@@ -190,7 +218,7 @@ function M.main(bm, config, globals)
             return u, uc
         end
         for i, l in ipairs(config.lanes) do
-            local lane = {i = i, x = l.x, width = l.width}
+            local lane = {i = i, x = l.x, width = l.width, d_start = l.d}
             lane.archer, lane.auc = take(1, l.archer)
             lane.target, lane.tuc = take(2, l.target)
             state.lanes[i] = lane

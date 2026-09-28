@@ -249,18 +249,23 @@ def main(argv=None):
     parser.add_argument("--turn-test", action="store_true", help="formation-probe: also turn the archers right/left")
     parser.add_argument("--plain", action="store_true",
                         help="formation-probe: the battle only, without our script: the player deploys, the game's AI")
-    parser.add_argument("--range-mode", choices=("fire_at_will", "attack"), default="fire_at_will",
-                        help="archer-range: archers stand with fire at will (the target steps closer) or attack it")
+    parser.add_argument("--range-mode", choices=("fire_at_will", "attack", "damage"), default="fire_at_will",
+                        help="archer-range: archers stand with fire at will (the target steps closer), attack it, "
+                             "or shoot a fearless target at fixed distances until out of arrows (damage)")
+    parser.add_argument("--damage-rotate", type=int, default=0,
+                        help="archer-range --range-mode damage: shift the distances by this many lanes")
     parser.add_argument("--facing-sweep", action="store_true",
                         help="formation-probe: research — teleport one unit with a sweep of bearings and read its facing")
     parser.add_argument("--fast", action="store_true",
                         help="formation-probe --handover: keep --speed (research runs) instead of the player's pace")
+    parser.add_argument("--fire", action="store_true",
+                        help="formation-probe: our shooters fire at will; losses and arrows recorded while holding")
     parser.add_argument("--handover", action="store_true",
                         help="formation-probe: our AI places the army, then the player commands it; only recorded")
     parser.add_argument("--defend-radius", type=int, default=300,
                         help="formation-probe --handover --enemy-ai defend: the enemy's defence radius, m")
     parser.add_argument("--enemy-ai", choices=("native", "defend"),
-                        help="formation-probe --handover: the enemy to the game's AI, as the battle sets it or defending")
+                        help="formation-probe: the enemy to the game's AI, as the battle sets it or defending")
     parser.add_argument("--engine-only", action="store_true",
                         help="formation-probe: no queues past obstacles (apps.logistics off), the engine alone")
     parser.add_argument("--features", action="store_true",
@@ -306,6 +311,11 @@ def main(argv=None):
                        + (FORMATION_APPROACH_S if probe_config.get("approach") else 0)
                        + (8 * FORMATION_STAGE_S if args.turn_test else 0) + 15)
             stall_ms = max(stall_ms, int((model_s + 120) * 1000))
+            if args.enemy_ai and not args.handover:
+                # Our AI plays; the enemy is the game's AI (as the battle sets it, or told to defend).
+                run_config.update(enemy_ai=args.enemy_ai, defend_radius_m=args.defend_radius)
+            if args.fire:
+                run_config["fire"] = True
             if args.handover:
                 # The player's test: our AI places the army and hands it over;
                 # the player's pace, an hour, nobody fighting does not end it.
@@ -323,7 +333,7 @@ def main(argv=None):
         if args.target == "archer-range":
             from tools import archer_range
             archer_range.write_scenario()
-            range_config, model_s = archer_range.run_config(args.range_mode)
+            range_config, model_s = archer_range.run_config(args.range_mode, args.damage_rotate)
             run_config.update(range_config)
             stall_ms = max(stall_ms, int((model_s + 120) * 1000))
         if args.target == "enemy-layout":

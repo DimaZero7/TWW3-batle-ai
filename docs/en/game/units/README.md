@@ -9,6 +9,7 @@ This is a practical interface for a classical tactical algorithm. It is not an A
 |---|---|
 | [Common state sensors](state-sensors.md) | Health, entities, ammunition, morale, fatigue, control and status readouts; 68 fields with live evidence |
 | [Missile attack range](missile-range.md) | Native/card range, pair checks, allied units and visibility-first filtering |
+| [Missile damage](missile-damage.md) | HP an arrow takes off infantry at 70-120 m, rate of fire, a thinned target |
 | [Commands](commands.md) | Movement, facing, formation width, melee, shooting, guard, disengagement and withdrawal |
 | [Starting deployment](deployment.md) | Historical measurements and current [deployment-placement-v2](../../apps/deployment.md), without reservation circles |
 | [Visibility and hiding](visibility.md) | Forest and stalk: reveal distance, re-hiding, last-seen memory |

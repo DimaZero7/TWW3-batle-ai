@@ -1,0 +1,26 @@
+{
+  "description": "Battle theory, phase 2 (approach to the window) on open ground: the test battle's armies (config/armies/test_halves.json) without a map; the enemy stands as the game's AI does in defence in the test battle (tools/sim/enemy.py). We approach in 50 m steps to the window, then both sides stand and shoot for fire_s seconds (apps.missile). Simulation only.",
+  "own": {
+    "role": "attack",
+    "anchor": [-230, -40],
+    "bearing": 90,
+    "units": [
+      {"key": "wh_main_emp_cha_general_0", "count": 1},
+      {"key": "wh_main_emp_inf_spearmen_0", "count": 6},
+      {"key": "wh2_dlc13_emp_inf_archers_0", "count": 8}
+    ]
+  },
+  "enemy": {
+    "role": "defend",
+    "layout": "native_defender",
+    "anchor": [270, -60],
+    "bearing": 270,
+    "units": [
+      {"key": "wh_main_emp_cha_general_0", "count": 1},
+      {"key": "wh_main_emp_inf_spearmen_0", "count": 8},
+      {"key": "wh2_dlc13_emp_inf_archers_0", "count": 6}
+    ]
+  },
+  "approach": true,
+  "fire_s": 60
+}

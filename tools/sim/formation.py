@@ -39,6 +39,7 @@ from matplotlib.patches import Polygon, Wedge  # noqa: E402
 from tools import config as project  # noqa: E402
 from tools import roster  # noqa: E402
 from tools.lua_runtime import new_runtime  # noqa: E402
+from tools.sim.enemy import native_defender  # noqa: E402
 from tools.sim.mapgrid import MapGrid  # noqa: E402
 
 LORD_SHAPE = [{"ordered_m": 5, "front_m": 1.0, "depth_m": 1.0}]
@@ -169,7 +170,7 @@ class Planner:
             end
         """)
         self._path = self.lua.eval("""
-            function(field, reader, placements, advance, max_advance)
+            function(field, reader, placements, advance, max_advance, safe_to)
                 local m = require('apps.mask.services')
                 local ap = require('apps.approach.services')
                 local mask = m.new(m.grid(field))
@@ -186,10 +187,31 @@ class Planner:
                 local function lane_free_at(a)
                     return m.lane(mask, 0, field.own.width_m, field.own.front_m, field.own.front_m + a).free
                 end
-                -- Simple variant without the enemy army: search up to 20 m short of their front.
+                -- Search up to 20 m short of their front, and never into their shooters' reach.
                 local limit = field.gap_m - ap.DEFAULTS.margin_m
+                if safe_to then limit = math.min(limit, safe_to) end
                 return require('apps.core.json').encode(ap.choose_advance(advance, max_advance, fits_at, lane_free_at,
                     3, limit))
+            end
+        """)
+        self._window = self.lua.eval("""
+            function(own, enemy, bearing)
+                return require('apps.core.json').encode(require('apps.reach.services').window(own, enemy, bearing))
+            end
+        """)
+        self._fire = self.lua.eval("""
+            function(units, seconds)
+                local missile = require('apps.missile.services')
+                local timeline = {}
+                for t = 1, seconds do
+                    local shots = missile.step(units, 1)
+                    local row = {t = t, shots = #shots, units = {}}
+                    for _, u in ipairs(units) do
+                        row.units[#row.units + 1] = {id = u.id, side = u.side, men = u.men, hp = u.hp, ammo = u.ammo}
+                    end
+                    timeline[#timeline + 1] = row
+                end
+                return require('apps.core.json').encode(timeline)
             end
         """)
         self.approach = self.lua.eval("require('apps.approach.services')")
@@ -216,11 +238,11 @@ class Planner:
         return json.loads(self._mask(self.lua.table_from(field, recursive=True), grid.reader,
                                      self.lua.table_from(placements, recursive=True)))
 
-    def path(self, field, grid, placements, advance, max_advance):
+    def path(self, field, grid, placements, advance, max_advance, safe_to=None):
         """apps.approach.choose_advance on the mask: where the step ends (past an obstacle if needed)."""
         reader = grid.reader if grid else (lambda x, z: (True, True))
         return json.loads(self._path(self.lua.table_from(field, recursive=True), reader,
-                                     self.lua.table_from(placements, recursive=True), advance, max_advance))
+                                     self.lua.table_from(placements, recursive=True), advance, max_advance, safe_to))
 
     def battlefield(self, own_points, own_centre, enemy_points, enemy_centre):
         """apps.battlefield.frame between the two main groups."""
@@ -239,7 +261,7 @@ class Planner:
         return self._facing(self.lua.table_from({"x": a[0], "z": a[1]}), self.lua.table_from({"x": b[0], "z": b[1]}))
 
     def start(self, role, anchor, bearing, units, enemy_units, enemy_lord=None, formation_params=None, roles=None,
-              grid=None):
+              grid=None, enemy_blocks=None):
         """apps.plan.start: {status, features, decision, formation}; with a captured
         map grid the formation is fitted to the map (apps.formation.fit)."""
         data = {"role": role, "bearing": bearing, "own": {"anchor": {"x": anchor[0], "z": anchor[1]}, "units": units},
@@ -248,9 +270,20 @@ class Planner:
             data["roles"] = roles
         if enemy_lord:
             data["enemy"]["lord"] = {"x": enemy_lord[0], "z": enemy_lord[1]}
+        if enemy_blocks:
+            data["enemy"]["blocks"] = enemy_blocks
         if formation_params:
             data["formation_params"] = formation_params
         return json.loads(self._start(self.lua.table_from(data, recursive=True), grid.reader if grid else None))
+
+    def window(self, own_blocks, enemy_blocks, bearing):
+        """apps.reach.window: where to stop so that ours reach theirs and theirs do not reach us."""
+        t = self.lua.table_from
+        return json.loads(self._window(t(own_blocks, recursive=True), t(enemy_blocks, recursive=True), bearing))
+
+    def fire(self, blocks, seconds):
+        """apps.missile.step every second for `seconds`, both sides standing: the timeline."""
+        return json.loads(self._fire(self.lua.table_from(blocks, recursive=True), seconds))
 
     def picture(self, anchor, bearing, units):
         data = {"anchor": {"x": anchor[0], "z": anchor[1]}, "bearing": bearing, "units": units}
@@ -423,10 +456,14 @@ def simulate(army, planner=None, params=None):
     own_units, enemy_units = roster_units(army["own"], entries), roster_units(army["enemy"], entries)
     enemy_by_id = {u["id"]: u for u in enemy_units}
     # The enemy first: our lord needs to know where the enemy lord stands.
-    sides = {"enemy": planner.picture(army["enemy"]["anchor"],
-                                      army["enemy"].get("bearing",
-                                                        planner.facing(army["enemy"]["anchor"], army["own"]["anchor"])),
-                                      [dict(u, shapes=[dict(s) for s in u["shapes"]]) for u in enemy_units])}
+    enemy_bearing = army["enemy"].get("bearing", planner.facing(army["enemy"]["anchor"], army["own"]["anchor"]))
+    if army["enemy"].get("layout") == "native_defender":
+        # As the game's AI stands in defence (tools/sim/enemy.py, measured).
+        sides = {"enemy": {"status": "ok", "layout": "native_defender",
+                           "placements": native_defender(army["enemy"]["anchor"], enemy_bearing, enemy_units)}}
+    else:
+        sides = {"enemy": planner.picture(army["enemy"]["anchor"], enemy_bearing,
+                                          [dict(u, shapes=[dict(s) for s in u["shapes"]]) for u in enemy_units])}
     lords = [p for p in sides["enemy"]["placements"] if p["role"] == "lord"]
     enemy_lord = (lords[0]["x"], lords[0]["z"]) if lords else None
     own_by_id = {u["id"]: u for u in own_units}
@@ -437,7 +474,10 @@ def simulate(army, planner=None, params=None):
         plan = planner.start(army["own"].get("role"), anchor, bearing, [dict(u, shapes=[dict(s) for s in u["shapes"]])
                                                                          for u in own_units],
                              enemy_units, enemy_lord, params or army.get("formation_params"), test_roles(army, own_units),
-                             grid=start_grid if on_map else None)
+                             grid=start_grid if on_map else None,
+                             # The enemy we see: the formation keeps its window against it.
+                             enemy_blocks=None if army.get("goal") else
+                             blocks(sides["enemy"]["placements"], enemy_by_id, "enemy"))
         own = plan.get("formation") or {"placements": [], "options": [], "overlaps": [], "unplaced": []}
         # Fitted to the map, the formation may stand elsewhere than asked (apps.formation.fit).
         if own.get("anchor"):
@@ -475,12 +515,35 @@ def simulate(army, planner=None, params=None):
         sides["own"] = own
         sides["own"]["vision"], sides["enemy"]["vision"] = picture["own"], picture["enemy"]
         sides["battlefield"] = field
+    if army.get("fire_s") and own["placements"]:
+        sides["fire"] = fire_exchange(planner, own["placements"], own_by_id, sides["enemy"]["placements"],
+                                      enemy_by_id, army["fire_s"])
     if field and grid:
         sides["mask"] = planner.mask(field, grid, own["placements"])
         sides["map_blocked"] = grid.blocked_near(
             [p for ps in [own["placements"], sides["enemy"]["placements"]] + (sides.get("approach") or {}).get("trail", [])
              for p in ps], margin=60)
     return sides, own_by_id
+
+
+def fire_exchange(planner, own_placements, own_by_id, enemy_placements, enemy_by_id, seconds):
+    """Both sides stand and shoot for `seconds` (apps.missile): losses per side and per unit."""
+    units = blocks(own_placements, own_by_id, "own") + blocks(enemy_placements, enemy_by_id, "enemy")
+    timeline = planner.fire(units, seconds)
+    start = {u["id"]: u for u in units}
+
+    def side_total(row, side, key):
+        return sum(u[key] for u in row["units"] if u["side"] == side)
+    totals = [{"t": r["t"], "shots": r["shots"],
+               **{f"{side}_{k}": side_total(r, side, k) for side in ("own", "enemy") for k in ("men", "hp")}}
+              for r in timeline]
+    end = {u["id"]: u for u in timeline[-1]["units"]} if timeline else {}
+    lost = {side: {"men": sum(start[i]["men"] - end[i]["men"] for i in end if end[i]["side"] == side),
+                   "men_start": sum(start[i]["men"] for i in end if end[i]["side"] == side)}
+            for side in ("own", "enemy")}
+    return {"seconds": seconds, "totals": totals, "lost": lost,
+            "units": {i: {"side": u["side"], "men": u["men"], "men_start": start[i]["men"],
+                          "arrows_left": round(u["ammo"])} for i, u in end.items()}}
 
 
 def _along(field, x, z):
@@ -500,6 +563,20 @@ def _shooters(field, placements, by_id):
     return out
 
 
+def blocks(placements, by_id, side):
+    """apps.reach / apps.missile blocks: the placement plus the unit's men, hit points, arrows."""
+    out = []
+    for p in placements:
+        u = by_id[p["id"]]
+        men, ammo = u.get("men") or 1, (u.get("ammo") or 0) * (u.get("men") or 1)
+        # Both sides may field the same units: ids are kept apart by the side.
+        out.append({"id": f'{side}:{p["id"]}', "side": side, "key": u.get("key"), "x": p["x"], "z": p["z"], "bearing": p["bearing"],
+                    "front_m": p["front_m"], "depth_m": p["depth_m"], "range_m": u.get("range_m") or 0,
+                    "men": men, "men_max": men, "hp": u.get("health") or men, "hp_max": u.get("health") or men,
+                    "ammo": ammo, "missile_damage": u.get("missile_damage")})
+    return out
+
+
 WALK_MPS = 1.5  # walking pace of our infantry (roster), for the simulated clock
 
 
@@ -511,24 +588,32 @@ def approach(planner, sides, own, picture, field, place, own_by_id, enemy_by_id,
     commander, governor = ap.new_commander(), al.new_governor()
     now, log, trail, moves = 0, [], [], []
     for _ in range(max_decisions):
-        own_sh = [] if goal else _shooters(field, own["placements"], own_by_id)
-        # Marching to a goal point: the enemy army is not considered (no reach).
-        enemy_sh = [] if goal else _shooters(field, sides["enemy"]["placements"], enemy_by_id)
-        own_reach = ap.reach_past_front(lua.table_from(own_sh, recursive=True), field["own"]["front_m"], 1)
-        enemy_reach = ap.reach_past_front(lua.table_from(enemy_sh, recursive=True), field["enemy"]["front_m"], -1)
-        stop = ap.stop_gap(own_reach, enemy_reach)
+        window = None
+        if goal:
+            # Marching to a goal point: the enemy army is not considered (no reach).
+            own_reach = enemy_reach = 0
+            stop = ap.stop_gap(0, 0)
+        else:
+            # The window (apps.reach): ours reach theirs, theirs do not reach us.
+            window = planner.window(blocks(own["placements"], own_by_id, "own"),
+                                    blocks(sides["enemy"]["placements"], enemy_by_id, "enemy"), own["bearing"])
+            own_reach = enemy_reach = None
+            # Nobody shoots: the old rule, 20 m short of their front.
+            stop = ap.stop_gap(0, 0) if window.get("advance_m") is None else field["gap_m"] - window["advance_m"]
         step = ap.next_step(field["gap_m"], stop)
         check = planner.align(field, own["anchor"], own["bearing"], picture["enemy"].get("main"))["check"]
         gov = governor.decide(now, lua.table_from(check, recursive=True), False)
         path = None
         if step.action == "step":
-            path = planner.path(field, grid, own["placements"], step.advance_m, field["gap_m"] - stop)
+            path = planner.path(field, grid, own["placements"], step.advance_m, field["gap_m"] - stop,
+                                window and window.get("safe_to"))
         decision, reason = commander.decide(lua.table_from({
             "align": check, "governor": gov, "path": path or {"ok": False, "reason": "no_step"},
-            "step": {"action": step.action, "advance_m": step.advance_m}}, recursive=True))
+            "step": {"action": step.action, "advance_m": step.advance_m},
+            "under_fire": bool(window and window.get("under_fire_now"))}, recursive=True))
         log.append({"t_s": now / 1000, "decision": decision, "reason": reason, "gap_m": round(field["gap_m"], 1),
-                    "stop_gap_m": round(stop, 1), "own_reach_m": round(own_reach, 1),
-                    "enemy_reach_m": round(enemy_reach, 1), "advance_m": step.advance_m,
+                    "stop_gap_m": round(stop, 1), "own_reach_m": own_reach, "enemy_reach_m": enemy_reach,
+                    "window": window, "advance_m": step.advance_m,
                     "path": path, "align": {k: check[k] for k in ("angle_off_deg", "offset_m", "needed")}})
         if decision in ("hold", "blocked"):
             break
@@ -663,8 +748,6 @@ def probe_xml(xml_sides, faction="wh_main_emp_empire", enemy_faction="wh_main_em
     own_part = AREA_RE.sub(lambda _: zone_xml(own_zone) if own_zone else "", own_part, count=1)
     head = own_part + '  <alliance id="1">' + rest
     # Reuse the roster scenario frame; swap its fixed enemy army for ours.
-    start = head.index('  <alliance id="1">')
-    end = head.index("  </alliance>", start) + len("  </alliance>\n")
     blocks = {}
     for side, units in xml_sides.items():
         blocks[side] = "".join(PROBE_UNIT.format(
@@ -680,6 +763,10 @@ def probe_xml(xml_sides, faction="wh_main_emp_empire", enemy_faction="wh_main_em
         .replace('<rout_position x="600" y="0"/>', f'<rout_position x="{enemy_rout[0]}" y="{enemy_rout[1]}"/>') \
         .replace("{units}", blocks["enemy"])
     head = head.replace('<rout_position x="600" y="0"/>', f'<rout_position x="{own_rout[0]}" y="{own_rout[1]}"/>', 1)
+    # Cut after every change of the head: a rout point of another length moves the
+    # enemy alliance (before 28.09.2026 the cut came first and broke the XML).
+    start = head.index('  <alliance id="1">')
+    end = head.index("  </alliance>", start) + len("  </alliance>\n")
     text = head[:start] + enemy_alliance + head[end:]
     text = text.replace("Generated by tools/roster.py from config/roster/capture.json. Edit the\n"
                         "     list there, not this file. Side 1: units whose card and formation are\n"
@@ -731,8 +818,24 @@ def main(argv=None):
         if detours:
             what += f'; обходов препятствия: {detours} (обходит движок)'
         aligned += (f'сближение скачками по 50 м: {steps} скачков, {what}; между фронтами {f["gap_m"]:.0f} м, '
-                    f'рубеж {f["stop_gap_m"]:.0f} м (лучники достают: наши {f["own_reach_m"]:.0f}, '
-                    f'их {f["enemy_reach_m"]:.0f} + 20)\n')
+                    f'рубеж {f["stop_gap_m"]:.0f} м')
+        w = f.get("window")
+        if w:
+            gap, span = f["gap_m"], w.get("window") or {}
+            reason = {"window": "окно", "no_enemy_shooters": "у них нет стрелков", "no_window": "окна нет",
+                      "no_shooters": "у нас нет стрелков"}.get(w["reason"], w["reason"])
+            aligned += f' ({reason}'
+            if span.get("from") is not None:
+                aligned += f': наши достают с {gap - span["from"]:.0f} м'
+            if w.get("safe_to") is not None:
+                aligned += f', их лучники — с {gap - w["safe_to"]:.0f} м'
+            aligned += f'; достают {w["reached"]} из {w["shooters"]} наших)'
+        aligned += "\n"
+    fire = sides.get("fire")
+    if fire:
+        lo, le = fire["lost"]["own"], fire["lost"]["enemy"]
+        aligned += (f'перестрелка {fire["seconds"]} с на месте: мы потеряли {lo["men"]} из {lo["men_start"]} бойцов, '
+                    f'они — {le["men"]} из {le["men_start"]}\n')
     mask = sides.get("mask")
     if mask:
         bad = [f["id"] for f in mask["fits"] if not f["ok"]]

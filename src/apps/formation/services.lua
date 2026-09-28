@@ -10,6 +10,7 @@
 -- A unit's ordered point is the centre of its FRONT rank (measured 27.09.2026);
 -- "back" is the distance from the wall's front line backwards.
 local value = require('apps.core.value')
+local reach = require('apps.reach.services')
 
 local M = {}
 local finite = value.finite
@@ -36,6 +37,11 @@ M.DEFAULTS = {
     archer_overhang_m = 10,  -- per side past the wall's ends
     max_trace = 12,
     fit_options = 6,         -- on the map: the best options tried at one place
+    -- The window (battle theory, phase 2; user, 28.09.2026): against the enemy
+    -- we see, the first archer row must reach their blocks at least this many
+    -- metres before their shooters reach us — else the wall is too thick.
+    min_window_m = 5,
+    window_checks = 12,      -- options checked for the window, best first
 }
 
 -- Where to look when the formation does not fit where it was asked to stand
@@ -186,7 +192,9 @@ local function place(anchor, bearing, along, back)
     return anchor.x + rx * along - fx * back, anchor.z + rz * along - fz * back
 end
 
--- input: {anchor = {x, z}, bearing, units = {{id, role, range_m, shapes}}}
+-- input: {anchor = {x, z}, bearing, units = {{id, role, range_m, shapes}},
+--         enemy_blocks = blocks of the enemy we see (apps.reach), optional:
+--         with them an option whose window is under min_window_m fails}
 -- params: overrides of M.DEFAULTS.
 -- Returns {status = 'ok' | 'infeasible' | 'no_wall', choice, placements, options (best first), unplaced}.
 local function line_and_blocks(input, params)
@@ -257,6 +265,51 @@ local function line_and_blocks(input, params)
             add(u, 'lord', nil, 0, middle + (i - (#lords + 1) / 2) * p.lord_gap_m, 0)
         end
         return placements
+    end
+
+    -- The window against the enemy we see: the best options are checked in
+    -- turn until one keeps it (a check places the whole army, so only a few).
+    if input.enemy_blocks and #input.enemy_blocks > 0 and #archers > 0 then
+        local range_of = {}
+        for _, u in ipairs(input.units) do range_of[u.id] = u.range_m end
+        local checked, kept = 0, nil
+        for _, o in ipairs(options) do
+            if #o.failed == 0 then
+                if checked >= p.window_checks then break end
+                checked = checked + 1
+                -- Only the first archer row shoots in the window (the second is silent).
+                local own = {}
+                for _, q in ipairs(build(o)) do
+                    own[#own + 1] = {id = q.id, x = q.x, z = q.z, bearing = q.bearing, front_m = q.front_m,
+                        depth_m = q.depth_m, range_m = (q.role == 'arc' and q.row == 1) and range_of[q.id] or 0}
+                end
+                local w = reach.window(own, input.enemy_blocks, input.bearing)
+                if w.reason == 'window' then
+                    o.window_m = w.window.to - w.window.from
+                elseif w.reason == 'no_window' then
+                    o.window_m = 0
+                end
+                if o.window_m and o.window_m < p.min_window_m then
+                    o.failed[#o.failed + 1] = 'window_too_small'
+                else
+                    kept = o
+                    break
+                end
+            end
+        end
+        -- No wall keeps a window (their shooters outrange ours): the rule is
+        -- dropped and the choice is as without it.
+        if not kept then
+            for _, o in ipairs(options) do
+                for i = #o.failed, 1, -1 do
+                    if o.failed[i] == 'window_too_small' then table.remove(o.failed, i) end
+                end
+            end
+        end
+        result.window_check = {ok = kept ~= nil, checked = checked, window_m = kept and kept.window_m}
+        table.sort(options, better)
+        result.options = {}
+        for i = 1, math.min(#options, p.max_trace) do result.options[i] = options[i] end
     end
 
     local best, index = options[1], 1

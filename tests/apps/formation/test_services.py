@@ -184,3 +184,55 @@ def test_turn_in_place_keeps_the_middle(plan):
     assert (t.x, t.z, t.bearing) == (pytest.approx(9), pytest.approx(-9), pytest.approx(90))
     back = plan.f.turn_in_place(plan.lua.table_from({"x": 0, "z": 0}), 10, -20, 10)
     assert back.bearing == pytest.approx(350)
+
+
+def enemy_line(gap, archers_behind, enemy_range=130, archers=True):
+    """The enemy we see, facing us (-Z) from `gap` m ahead: spearmen in a line, archers'
+    middle `archers_behind` m behind their front (apps.reach blocks)."""
+    blocks = [{"id": f"s{i}", "x": -100 + 40 * i, "z": gap, "bearing": 180, "front_m": 38.6, "depth_m": 7.7,
+               "range_m": 0} for i in range(6)]
+    if archers:
+        blocks += [{"id": f"e{i}", "x": -100 + 40 * i, "z": gap + archers_behind - 5.5, "bearing": 180,
+                    "front_m": 38.9, "depth_m": 11, "range_m": enemy_range} for i in range(6)]
+    return blocks
+
+
+def plan_against(plan, units, blocks):
+    lua = plan.lua
+    data = {"anchor": {"x": 0, "z": 0}, "bearing": 0, "units": units}
+    if blocks is not None:
+        data["enemy_blocks"] = blocks
+    encode = lua.eval("function(t) return require('apps.core.json').encode(t) end")
+    return json.loads(encode(plan.f.plan("line_and_blocks", lua.table_from(data, recursive=True), None)))
+
+
+def few_archers():
+    return [unit("lord", "lord")] + [unit(f"w{i}", "wall") for i in range(6)] + [unit(f"a{i}", "arc") for i in range(4)]
+
+
+def test_the_wall_keeps_the_window_against_the_enemy_we_see(plan):
+    alone = plan_against(plan, few_archers(), None)
+    assert "window_check" not in alone
+    seen = plan_against(plan, few_archers(), enemy_line(300, 32.4))
+    assert seen["status"] == "ok" and seen["window_check"]["ok"]
+    assert seen["choice"]["window_m"] >= 5
+    # Thinner than without the enemy, and every thicker wall failed on the window.
+    assert seen["choice"]["wall_depth_m"] < alone["choice"]["wall_depth_m"]
+    thicker = [o for o in seen["options"] if o["wall_depth_m"] > seen["choice"]["wall_depth_m"]
+               and "window_too_small" in o["failed"]]
+    assert thicker
+
+
+def test_deep_enemy_blocks_leave_the_thick_wall(plan):
+    # The game's AI in a big army: archers 54 m behind its front — a wide window anyway.
+    alone = plan_against(plan, few_archers(), None)
+    seen = plan_against(plan, few_archers(), enemy_line(300, 54))
+    assert seen["choice"]["wall_width"] == alone["choice"]["wall_width"] and seen["window_check"]["ok"]
+
+
+def test_no_window_possible_the_rule_is_dropped(plan):
+    alone = plan_against(plan, few_archers(), None)
+    for blocks in (enemy_line(300, 32.4, enemy_range=170), enemy_line(300, 32.4, archers=False)):
+        seen = plan_against(plan, few_archers(), blocks)
+        assert seen["status"] == "ok" and seen["choice"]["wall_width"] == alone["choice"]["wall_width"]
+    assert not plan_against(plan, few_archers(), enemy_line(300, 32.4, enemy_range=170))["window_check"]["ok"]

@@ -80,3 +80,12 @@ def test_choose_advance_goes_past_the_obstacle(ap):
     # Without the enemy army the place past the obstacle may lie beyond the stop line (flagged).
     r4 = ap.choose_advance(50, 80, lua_fits(40, 95), lambda a: False, 3, 150)
     assert r4.ok and r4.advance_m > 95 and r4.beyond_stop_line
+
+
+def test_under_fire_nothing_is_started(ap):
+    c = ap.new_commander()
+    step = {"action": "step", "advance_m": 50}
+    off = {"needed": True}
+    assert tuple(c.decide(ap.t({"align": off, "governor": "align", "step": step, "path": {"ok": True},
+                                "under_fire": True}))) == ("hold", "under_fire")
+    assert tuple(c.decide(ap.t({"align": off, "governor": "align", "step": step, "path": {"ok": True}}))) ==         ("align", "off_line")

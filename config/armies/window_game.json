@@ -1,0 +1,32 @@
+{
+  "description": "Battle theory, phase 2 in the game: the test battle's armies (config/armies/test_halves.json) moved to the band of The Moorlands Route with no rocks between them (z -400..-150, data/maps/moorlands-route). Our AI places the army, aligns and approaches in 50 m steps to the window (apps.reach) and holds; the enemy is the game's AI defending (timeout winner). Build with --enemy-ai native --fire: our archers fire at will, losses and arrows are recorded while holding. In the simulation the enemy stands as the game's AI did in the test battle (tools/sim/enemy.py).",
+  "own": {
+    "role": "attack",
+    "anchor": [-230, -290],
+    "bearing": 90,
+    "units": [
+      {"key": "wh_main_emp_cha_general_0", "count": 1},
+      {"key": "wh_main_emp_inf_spearmen_0", "count": 6},
+      {"key": "wh2_dlc13_emp_inf_archers_0", "count": 8}
+    ]
+  },
+  "enemy": {
+    "role": "defend",
+    "layout": "native_defender",
+    "anchor": [270, -290],
+    "bearing": 270,
+    "units": [
+      {"key": "wh_main_emp_cha_general_0", "count": 1},
+      {"key": "wh_main_emp_inf_spearmen_0", "count": 8},
+      {"key": "wh2_dlc13_emp_inf_archers_0", "count": 6}
+    ]
+  },
+  "deployment": {
+    "own": {"centre": [-270, -290], "width": 400, "height": 260, "orientation": 0},
+    "enemy": {"centre": [270, -290], "width": 400, "height": 260, "orientation": 3.14}
+  },
+  "routs": [[-600, -290], [600, -290]],
+  "map": "moorlands-route",
+  "approach": true,
+  "fire_s": 60
+}

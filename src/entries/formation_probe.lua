@@ -58,6 +58,7 @@ local alignment = require('apps.alignment.services')
 local mask_services = require('apps.mask.services')
 local mask_adapter = require('apps.mask.adapter')
 local approach = require('apps.approach.services')
+local reach = require('apps.reach.services')
 local navigation = require('apps.navigation.services')
 local logistics = require('apps.logistics.services')
 
@@ -153,7 +154,63 @@ function M.main(bm, config, globals)
         if men.status ~= 'ok' then return nil end
         local pts = {}
         for i, v in ipairs(men.xz_dm) do pts[i] = v / 10 end
+        -- A unit with no soldiers left (destroyed, or gone off the field) is not seen.
+        if #pts == 0 then return nil end
         return pts
+    end
+
+    local function roster_of(id)
+        for _, u in ipairs(config.own.units) do
+            if u.id == id then return u end
+        end
+        return {}
+    end
+
+    -- Blocks for apps.reach where the units stand now: the middle of the
+    -- soldiers (unit:position), the unit's facing, front and depth from our
+    -- plan (ours) or from the roster shape nearest to its ordered width
+    -- (visible enemies only).
+    local function nearest_shape(spec, width)
+        local best
+        for _, s in ipairs(spec.shapes or {}) do
+            if not best or math.abs(s.ordered_m - width) < math.abs(best.ordered_m - width) then best = s end
+        end
+        return best
+    end
+    local function reach_blocks()
+        local own, enemy = {}, {}
+        local function add(list, it, bearing, front, depth, range_m)
+            local p = it.unit:position()
+            local b = math.rad(bearing)
+            list[#list + 1] = {id = it.name, x = p:get_x() + math.sin(b) * depth / 2,
+                z = p:get_z() + math.cos(b) * depth / 2, bearing = bearing, front_m = front, depth_m = depth,
+                range_m = range_m or 0}
+        end
+        for _, it in ipairs(state.own) do
+            local p = it.placement
+            if p then
+                local ok, b = pcall(function() return it.unit:bearing() end)
+                add(own, it, ok and b or p.bearing, p.front_m, p.depth_m, roster_of(it.name).range_m)
+            end
+        end
+        for _, it in ipairs(state.enemy) do
+            local spec
+            for _, u in ipairs(config.enemy.units) do if u.id == it.name then spec = u end end
+            local ok, seen = pcall(function() return it.unit:is_visible_to_alliance(state.alliance) end)
+            if spec and ok and seen then
+                local okb, b = pcall(function() return it.unit:bearing() end)
+                local okw, w = pcall(function() return it.unit:ordered_width() end)
+                local s = nearest_shape(spec, okw and w or 30) or {front_m = 1, depth_m = 1}
+                add(enemy, it, okb and b or 0, s.front_m, s.depth_m, spec.range_m)
+            end
+        end
+        return own, enemy
+    end
+
+    -- The enemy blocks we see: the formation keeps its window against them.
+    local function enemy_blocks()
+        local _, enemy = reach_blocks()
+        return enemy
     end
 
     -- The AI's own view: our units in full, the enemy only as our side sees it.
@@ -220,7 +277,7 @@ function M.main(bm, config, globals)
             local target = alignment.target(field, current, enemy_of(picture))
             local result = plan_services.start({role = config.role, roles = config.roles, bearing = target.bearing,
                 own = {anchor = target.anchor, units = config.own.units},
-                enemy = {units = config.enemy.units, lord = state.placed.lord}, formation_params = config.formation_params})
+                enemy = {units = config.enemy.units, lord = state.placed.lord, blocks = enemy_blocks()}, formation_params = config.formation_params})
             assert(result.formation, 'No strategy when aligning')
             for _, p in ipairs(result.formation.placements) do
                 local it = state.by_name[p.id]
@@ -304,43 +361,11 @@ function M.main(bm, config, globals)
         return false
     end
 
-    local function roster_of(id)
-        for _, u in ipairs(config.own.units) do
-            if u.id == id then return u end
-        end
-        return {}
-    end
-
-    -- Where our (or visible enemy) archers are along the battlefield axis.
-    local function shooters(field)
-        local own, enemy = {}, {}
-        if config.goal then return own, enemy end
-        for _, it in ipairs(state.own) do
-            local u = roster_of(it.name)
-            if (u.range_m or 0) > 0 then
-                local p = it.unit:position()
-                own[#own + 1] = {along = battlefield.to_frame(field, {x = p:get_x(), z = p:get_z()}).along,
-                    range_m = u.range_m}
-            end
-        end
-        for _, it in ipairs(state.enemy) do
-            local spec
-            for _, u in ipairs(config.enemy.units) do if u.id == it.name then spec = u end end
-            local ok, seen = pcall(function() return it.unit:is_visible_to_alliance(state.alliance) end)
-            if spec and (spec.range_m or 0) > 0 and ok and seen then
-                local p = it.unit:position()
-                enemy[#enemy + 1] = {along = battlefield.to_frame(field, {x = p:get_x(), z = p:get_z()}).along,
-                    range_m = spec.range_m}
-            end
-        end
-        return own, enemy
-    end
-
     -- Give the whole formation its new place (planned again at anchor/bearing).
     local function order_formation(anchor, bearing)
         local result = plan_services.start({role = config.role, roles = config.roles, bearing = bearing,
             own = {anchor = anchor, units = config.own.units},
-            enemy = {units = config.enemy.units, lord = state.placed.lord}, formation_params = config.formation_params})
+            enemy = {units = config.enemy.units, lord = state.placed.lord, blocks = enemy_blocks()}, formation_params = config.formation_params})
         assert(result.formation, 'No strategy when moving')
         for _, p in ipairs(result.formation.placements) do
             -- A place that changed hands in a queue stays with its new holder.
@@ -394,7 +419,7 @@ function M.main(bm, config, globals)
         for _, u in ipairs(config.own.units) do shapes[u.id] = u.shapes end
         local result = plan_services.start({role = config.role, roles = config.roles, bearing = bearing,
             own = {anchor = anchor, units = config.own.units},
-            enemy = {units = config.enemy.units, lord = state.placed.lord}, formation_params = config.formation_params})
+            enemy = {units = config.enemy.units, lord = state.placed.lord, blocks = enemy_blocks()}, formation_params = config.formation_params})
         assert(result.formation, 'No strategy when moving')
         local after, after_by_id = result.formation.placements, {}
         for _, q in ipairs(after) do after_by_id[q.id] = q end
@@ -458,10 +483,36 @@ function M.main(bm, config, globals)
                     crowd, soldiers = crowd_now(state.ticks % 20 == 0)
                     crowd_clock = (os.clock and os.clock() or 0) - started
                 end
+                -- Research only (the AI never reads it): where the game's AI goes meanwhile.
+                local enemy
+                if config.enemy_ai then
+                    enemy = {}
+                    for _, it in ipairs(state.enemy) do
+                        enemy[#enemy + 1] = {script_name = it.name, motion = unit_motion.motion(it.unit)}
+                    end
+                end
                 emit('approach_sample', {kind = c.current.kind, t_ms = now - c.current.started_ms, units = rows,
-                    crowd = crowd, soldiers_dm = soldiers, crowd_clock_s = crowd_clock, logistics = state.dispatch ~= nil})
+                    crowd = crowd, soldiers_dm = soldiers, crowd_clock_s = crowd_clock, logistics = state.dispatch ~= nil,
+                    enemy = enemy})
             end
             local took = now - c.current.started_ms
+            -- Under missile fire the manoeuvre is broken off at once (the one
+            -- exception to "one action at a time", 28.09.2026: in battle the army
+            -- waited out a 6-minute alignment under fire and was beaten).
+            local fired_on
+            for _, it in ipairs(state.own) do
+                local ok, under = pcall(function() return it.unit:is_under_missile_attack() end)
+                if ok and under then fired_on = it.name break end
+            end
+            if fired_on then
+                local kind = c.current.kind
+                c.finish(now, 'under_fire')
+                for _, it in ipairs(state.own) do orders.halt(it.uc) end
+                state.dispatch = nil
+                emit('approach_manoeuvre', {kind = kind, t_ms = took, reason = 'under_fire', unit = fired_on,
+                    units = units_row()})
+                return false
+            end
             local timeout = took >= config.manoeuvre_timeout_s * 1000
             local dispatched = not state.dispatch or state.dispatch.done()
             if (took >= config.settle_ms and state.appr_still >= 3 and dispatched) or timeout then
@@ -484,10 +535,19 @@ function M.main(bm, config, globals)
         local reach_unit
         for _, it in ipairs(state.own) do if it.role == 'wall' then reach_unit = it.unit; break end end
         mask_services.fill(m, mask_adapter.reader(bm, vector_type, reach_unit or state.own[1].unit, m.grid.step))
-        local own_sh, enemy_sh = shooters(field)
-        local own_reach = approach.reach_past_front(own_sh, field.own.front_m, 1)
-        local enemy_reach = approach.reach_past_front(enemy_sh, field.enemy.front_m, -1)
-        local stop = approach.stop_gap(own_reach, enemy_reach)
+        -- The stop: the window (apps.reach, battle theory phase 2) — ours reach
+        -- theirs, theirs do not reach us. Marching to a goal point, or nobody
+        -- shooting: 20 m short of their front.
+        local window, stop
+        if not config.goal then
+            local own_blocks, enemy_blocks = reach_blocks()
+            window = reach.window(own_blocks, enemy_blocks, state.placed.bearing)
+        end
+        if window and window.advance_m then
+            stop = field.gap_m - window.advance_m
+        else
+            stop = approach.stop_gap(0, 0)
+        end
         local step = approach.next_step(field.gap_m, stop)
         local check = alignment.check(field, {anchor = state.placed.anchor, bearing = state.placed.bearing},
             enemy_of(picture))
@@ -509,13 +569,16 @@ function M.main(bm, config, globals)
             local function lane_free_at(a)
                 return mask_services.lane(m, 0, field.own.width_m, field.own.front_m, field.own.front_m + a).free
             end
-            path = approach.choose_advance(step.advance_m, field.gap_m - stop, fits_at, lane_free_at, 3,
-                field.gap_m - approach.DEFAULTS.margin_m)
+            -- Past an obstacle: never into their shooters' reach.
+            local limit = field.gap_m - approach.DEFAULTS.margin_m
+            if window and window.safe_to then limit = math.min(limit, window.safe_to) end
+            path = approach.choose_advance(step.advance_m, field.gap_m - stop, fits_at, lane_free_at, 3, limit)
         end
-        local decision, reason = c.decide({align = check, governor = gov, step = step, path = path})
+        local decision, reason = c.decide({align = check, governor = gov, step = step, path = path,
+            under_fire = window and window.under_fire_now})
         local decide_clock = (os.clock and os.clock() or 0) - decide_started
         emit('approach_decision', {decision = decision, reason = reason, gap_m = field.gap_m, stop_gap_m = stop,
-            own_reach_m = own_reach, enemy_reach_m = enemy_reach, step = step, path = path,
+            window = window, step = step, path = path,
             align = {angle_off_deg = check.angle_off_deg, offset_m = check.offset_m, needed = check.needed},
             mask = mask_services.summary(m), clock_s = decide_clock})
         if decision == 'approach' then
@@ -706,9 +769,24 @@ function M.main(bm, config, globals)
         if stage[3] == 'hold' then
             local rows = {}
             for _, it in ipairs(state.own) do
-                rows[#rows + 1] = {script_name = it.name, motion = unit_motion.motion(it.unit)}
+                local row = {script_name = it.name, motion = unit_motion.motion(it.unit)}
+                if config.fire then
+                    local ok_a, ammo = pcall(function() return it.unit:ammo_left() end)
+                    local ok_u, under = pcall(function() return it.unit:is_under_missile_attack() end)
+                    row.ammo = ok_a and ammo or nil
+                    row.under_fire = ok_u and under or nil
+                end
+                rows[#rows + 1] = row
             end
-            emit('hold_sample', {t_ms = elapsed, orders_after_placed = state.orders_after_placed, units = rows})
+            -- Research only (the AI never reads it): the enemy's men and where it goes.
+            local enemy = {}
+            if config.enemy_ai then
+                for _, it in ipairs(state.enemy) do
+                    enemy[#enemy + 1] = {script_name = it.name, motion = unit_motion.motion(it.unit)}
+                end
+            end
+            emit('hold_sample', {t_ms = elapsed, orders_after_placed = state.orders_after_placed, units = rows,
+                enemy = enemy})
             if state.ticks % 5 == 0 then ask_governor(elapsed) end
         end
         local moving = false
@@ -790,7 +868,7 @@ function M.main(bm, config, globals)
         -- The enemy roster (unit types) is known before the battle, as to the player.
         local result = plan_services.start({role = config.role, roles = config.roles, bearing = bearing,
             own = {anchor = config.own.anchor, units = config.own.units},
-            enemy = {units = config.enemy.units, lord = lord}, formation_params = config.formation_params,
+            enemy = {units = config.enemy.units, lord = lord, blocks = enemy_blocks()}, formation_params = config.formation_params,
             fits = function(q) return mask_services.fits(area, q, true).ok end})
         local fit_clock = (os.clock and os.clock() or 0) - started - mask_clock
         emit('plan', {facing_source = source, enemies_seen = seen, enemy_centre = centre, bearing = bearing,
@@ -835,6 +913,10 @@ function M.main(bm, config, globals)
         -- The enemy teleport applies on a later tick; plan once it has.
         bm:real_callback(guarded(function()
             place_own()
+            -- config.fire: our shooters fire at will (the window check, battle theory phase 2).
+            if config.fire then
+                for _, it in ipairs(state.own) do orders.set_fire_at_will(it.uc, true) end
+            end
             state.active = true
             begin_stage(1)
             flush()
@@ -859,10 +941,10 @@ function M.main(bm, config, globals)
         local ok_roles, roles = pcall(battle.read_roles, bm)
         emit('roles', {ok = ok_roles, roles = ok_roles and roles or tostring(roles)})
         state.all_units = {}
-        -- In the player's test with the game's AI the enemy is never taken: it
+        -- With the game's AI (the player's test, or config.enemy_ai) the enemy is never taken: it
         -- deploys and fights by itself (as in entries.enemy_layout; taken and
         -- released, it stood idle — 27.09.2026).
-        local native_enemy = config.handover and config.enemy_ai
+        local native_enemy = config.enemy_ai
         local function adopt(side, list, name)
             local u = battle.find_by_name(sides[side], name)
             assert(u, 'scenario unit missing: ' .. name)

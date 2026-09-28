@@ -24,6 +24,8 @@ checks unchanged and pass. The original sources are kept in
 | [alignment](../apps/alignment.md) | `services` | Aligning the army opposite the enemy's main group (no approach) | new |
 | [mask](../apps/mask.md) | `services`, `adapter` | "Can we stand here?" mask over the battlefield, 3 m cells | new |
 | [approach](../apps/approach.md) | `services` | Approach in 50 m steps to the stop line; one action at a time, alignment first | new |
+| [reach](../apps/reach.md) | `services` | Who reaches whom with missiles (from the block's middle); the window to stand in | new |
+| [missile](../apps/missile.md) | `services` | Missile damage from the measurement; a step of a missile exchange | new |
 | [logistics](../apps/logistics.md) | `services` | Queues past an obstacle: who goes round, which side, in what order and width; can be switched off | new |
 | [units](../apps/units.md) | `state_adapter`, `range_adapter`, `card_adapter`, `formation_adapter`, `contract` | 68 own-unit state fields, missile range, unit card and profile, movement and soldiers, formation width bounds | `units/state.lua`, `units/range.lua` |
 | [intel](../apps/intel.md) | `adapter`, `services` | Enemy visibility, last known position memory | `visibility/reader.lua` |

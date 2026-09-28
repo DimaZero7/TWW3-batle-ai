@@ -67,25 +67,24 @@ def test_mask_shows_the_hamlet_and_the_lane_it_blocks():
     assert not mask["lane"]["free"] and 100 < mask["lane"]["first_blocked_along"] < 200
 
 
-def test_approach_finds_a_place_past_the_rock():
+def test_the_place_past_the_rock_is_not_taken_inside_their_reach():
     army, _ = formation.load_army("rock_attack")
     sides, _ = formation.simulate(army)
     log = sides["approach"]["log"]
-    assert [r["decision"] for r in log] == ["approach", "approach", "hold"]
-    past = log[1]["path"]
-    # The 50 m target lies on the rock: the next place where the whole formation fits is past it;
-    # the engine walks the units around (detour), the stop line is crossed (enemy not considered yet).
-    assert past["advance_m"] > 50 and past["detour"] and past["beyond_stop_line"]
-    # The rock (z 86..161, a diagonal band) is behind the wall and nobody stands on it.
+    # The rock lies across the way close to them: every place past it is inside their
+    # archers' reach (apps.reach), so the approach stops and the level above decides
+    # (before 28.09.2026 the formation went past the rock under their fire).
+    assert [r["decision"] for r in log] == ["approach", "blocked"]
+    assert log[1]["reason"] == "no_place" and log[1]["window"]["reason"] == "window"
     wall = next(p for p in sides["own"]["placements"] if p["role"] == "wall")
-    assert wall["z"] > 161 and all(f["ok"] for f in sides["mask"]["fits"])
+    assert wall["z"] < 86 and all(f["ok"] for f in sides["mask"]["fits"])
 
 
-def test_long_wall_also_goes_past_the_rock():
+def test_long_wall_stops_short_of_the_rock_too():
     army, _ = formation.load_army("rock_attack_wide")
     sides, _ = formation.simulate(army)
     decisions = [r["decision"] for r in sides["approach"]["log"]]
-    assert decisions[-1] == "hold" and decisions.count("approach") == 2
+    assert decisions == ["approach", "blocked"]
     assert len(sides["own"]["placements"]) == 16 and not sides["own"]["overlaps"]
 
 
@@ -99,3 +98,19 @@ def test_approach_in_open_field_holds_at_the_stop_line():
     assert abs(log[-1]["gap_m"] - log[-1]["stop_gap_m"]) <= 2
     # Each step waits for the one before: one manoeuvre at a time.
     assert all(b["t_s"] > a["t_s"] for a, b in zip(log, log[1:]))
+
+
+def test_scenario_xml_stays_well_formed_with_any_rout_points_and_zones():
+    # Rout points and zones of other lengths than the template's broke the XML
+    # (28.09.2026: the game crashed loading the battle).
+    import xml.etree.ElementTree as ET
+    unit = {"script_name": "u", "key": "wh_main_emp_inf_spearmen_0", "men": 120, "general": False, "x": 0, "z": 0}
+    zone = {"centre": [-270, -290], "width": 400, "height": 260, "orientation": 0}
+    for routs in (None, ((-600, 0), (600, 0)), ((-600, -290), (600, -290))):
+        xml = formation.probe_xml({"own": [unit], "enemy": [dict(unit, script_name="e")]},
+                                  zones=(zone, dict(zone, centre=[270, -290])), routs=routs)
+        root = ET.fromstring(xml)
+        alliances = root.findall(".//alliance")
+        assert [a.get("id") for a in alliances] == ["0", "1"]
+        if routs:
+            assert [a.find(".//rout_position").get("y") for a in alliances] == [str(routs[0][1]), str(routs[1][1])]

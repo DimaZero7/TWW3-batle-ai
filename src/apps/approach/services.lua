@@ -77,7 +77,11 @@ end
 -- The commander: one manoeuvre at a time, alignment first.
 -- decide(input) -> 'wait' | 'align' | 'approach' | 'hold' | 'blocked', reason.
 -- input = {align = alignment check, governor = its decision, step = next_step,
---          path = {ok, reason} for the step (mask lane and fits)}.
+--          path = {ok, reason} for the step (mask lane and fits),
+--          under_fire = their shooters reach us where we stand (apps.reach)}.
+-- Under fire nothing is started: the approach is over, the battle phases
+-- decide (28.09.2026: an alignment started under fire lasted 6 minutes and
+-- the army was beaten meanwhile).
 function M.new_commander()
     local c = {current = nil, log = {}}
     function c.start(kind, now_ms, info)
@@ -94,6 +98,7 @@ function M.new_commander()
     end
     function c.decide(input)
         if c.current then return 'wait', 'manoeuvre_under_way' end
+        if input.under_fire then return 'hold', 'under_fire' end
         if input.align and input.align.needed then
             if input.governor == 'align' then return 'align', 'off_line' end
             if input.governor ~= 'given_up' then return 'wait', 'alignment_' .. tostring(input.governor) end

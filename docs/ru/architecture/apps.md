@@ -24,6 +24,8 @@
 | [alignment](../apps/alignment.md) | `services` | Выравнивание армии напротив основной группы врага (без сближения) | новое |
 | [mask](../apps/mask.md) | `services`, `adapter` | Маска «можно ли тут встать» на поле боя, клетка 3 м | новое |
 | [approach](../apps/approach.md) | `services` | Сближение скачками по 50 м до рубежа; одно действие за раз, выравнивание прежде | новое |
+| [reach](../apps/reach.md) | `services` | Кто кого достаёт стрелами (от середины блока); окно — где встать | новое |
+| [missile](../apps/missile.md) | `services` | Урон стрелами по замеру; шаг перестрелки для симуляции | новое |
 | [logistics](../apps/logistics.md) | `services` | Очереди у препятствия: кто обходит, какой стороной, в каком порядке и ширине; выключаемый | новое |
 | [units](../apps/units.md) | `state_adapter`, `range_adapter`, `card_adapter`, `formation_adapter`, `contract` | 68 полей состояния своего отряда, дальность стрельбы, карточка и профиль отряда, движение и бойцы, границы ширины строя | `units/state.lua`, `units/range.lua` |
 | [intel](../apps/intel.md) | `adapter`, `services` | Видимость врага, память последней известной позиции | `visibility/reader.lua` |
