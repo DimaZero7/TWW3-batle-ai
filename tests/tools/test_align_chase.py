@@ -17,7 +17,7 @@ def runs():
     army, _ = sim.load_army("window_game")
     out["front"], _ = sim.simulate(dict(army, align={"line": "front"}))
     # The old line without the map: led onto the rocks, apps.formation.fit searches for
-    # minutes (backlog #20); on open ground the chase is the same as in the game.
+    # minutes (backlog #20, struck 29.09.2026); on open ground the chase is the same as in the game.
     out["enemy_facing"], _ = sim.simulate(dict(army, align={"line": "enemy_facing"}, map=None))
     return out
 

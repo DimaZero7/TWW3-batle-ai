@@ -60,6 +60,6 @@ In motion, with the queue and all at once side by side: `python -m tools.viewer 
 
 ## Checks
 
-- `tests/apps/logistics/`; battle 27.09.2026: 5 kinds of ground, Skaven too; backlog #18.
+- `tests/apps/logistics/`; battle 27.09.2026: 5 kinds of ground, Skaven too.
 
 Modules: [logistics](../apps/logistics.md) · [mask](../apps/mask.md).
