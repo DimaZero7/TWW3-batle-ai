@@ -4,7 +4,8 @@
 
 Later we want to train a neural network from scratch. The project has no
 network of its own now. This page says what data can already be collected and
-how to use it.
+how to use it. What the network itself will be, where it runs and when it is
+ready: [network model](network.md).
 
 ```mermaid
 flowchart LR
