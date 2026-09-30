@@ -7,7 +7,10 @@
 --            15 s, as generated battles do);
 --   own_ai = 'defend' — the planner defends where the army stands;
 --   own_ai = 'hold'   — no planner, no orders: our units stand where they are
---            (a still target for the game's AI; measurements, 30.09.2026).
+--            (a still target for the game's AI; measurements, 30.09.2026);
+--   own_ai = 'net'    — the network commands our units: the state goes to the
+--            companion outside the game every decide_ms, its orders come back
+--            (apps.bridge.adapter; the game's AI attacks).
 -- Each side may have its own army (tools/nn/scenario.py: named arenas).
 -- Every tick 'nn_sample' records every unit of both sides (full view: trusted
 -- research telemetry); 'nn_final' is the last such record.
@@ -23,12 +26,15 @@ local errors = require('apps.core.errors')
 local telemetry = require('apps.telemetry.adapter')
 local planner = require('apps.orders.planner_adapter')
 local map = require('apps.map.adapter')
+local bridge = require('apps.bridge.adapter')
 
 local M = {}
 
 local LOG = 'tww3_bai_events.jsonl'
 local TIMER = 'tww3_bai_nn_arena_tick'
+local DECIDE, POLL = 'tww3_bai_nn_arena_decide', 'tww3_bai_nn_arena_poll'
 M.REISSUE_MS = 15000
+M.OWN_AI = {attack = true, defend = true, hold = true, net = true}
 
 local function try(fn, ...)
     local ok, v = pcall(fn, ...)
@@ -42,8 +48,9 @@ local function round(v, k)
     return math.floor(v * m + 0.5) / m
 end
 
--- config: build, speed, tick_ms, deadline_s, stall_ms, timeout_ms, own_ai ('attack' | 'defend' | 'hold'),
--- units = {own = [...], enemy = [...]} (script names, slots), defend_radius_m.
+-- config: build, speed, tick_ms, deadline_s, stall_ms, timeout_ms, own_ai ('attack' | 'defend' | 'hold' | 'net'),
+-- units = {own = [...], enemy = [...]} (script names, slots, keys), defend_radius_m;
+-- 'net' also: decide_ms, poll_ms, factions = {own, enemy}, enemy_role.
 function M.main(bm, config, globals)
     if _G.tww3_bai_nn_arena then return end
     local state = {active = false, finished = false, batch = '', run_id = 'bootstrap', ticks = 0,
@@ -63,6 +70,8 @@ function M.main(bm, config, globals)
     local function cleanup()
         state.active = false
         pcall(function() bm:remove_process(TIMER) end)
+        pcall(function() bm:remove_process(DECIDE) end)
+        pcall(function() bm:remove_process(POLL) end)
         pcall(function() bm:remove_process('tww3_bai_nn_arena_start') end)
     end
     local function fail(err)
@@ -150,6 +159,10 @@ function M.main(bm, config, globals)
         row.duration_wall_s = clock.elapsed_wall_seconds(started_wall)
         row.rejoined = state.planner and state.planner.rejoined or 0
         row.idle_kicks = state.planner and state.planner.kicks or 0
+        if state.net then
+            state.net.finish()
+            for k, v in pairs(state.net.stats()) do row[k] = v end
+        end
         emit('result', row)
         cleanup()
         state.finished = true
@@ -197,6 +210,33 @@ function M.main(bm, config, globals)
         flush()
     end
 
+    -- What the network's companion reads: every unit, full view (its observation hides the rest),
+    -- plus the unit key and v = visible to the other side.
+    local function net_rows()
+        local rows = {}
+        for side = 1, 2 do
+            local other = state.alliances[3 - side]
+            for _, it in ipairs(state.sides[side]) do
+                local row = sample(it)
+                row.side, row.key = side, it.key
+                row.v = try(function() return it.unit:is_visible_to_alliance(other) end)
+                rows[#rows + 1] = row
+            end
+        end
+        return rows
+    end
+
+    local function net_start()
+        state.net = bridge.start({army = state.own_army, own = state.sides[1], enemies = state.sides[2],
+            vector = vec, rows = net_rows, emit = emit,
+            now_ms = function() return bm:time_elapsed_ms() - started_ms end,
+            model_ms = function() return bm:time_elapsed_ms() end,
+            meta = {batch = state.batch, factions = config.factions, decide_ms = config.decide_ms,
+                attacker = config.enemy_role == 'defend' and 1 or 2}})
+        emit('own_ai', {mode = 'net', own_ai = config.own_ai, decide_ms = config.decide_ms,
+            poll_ms = config.poll_ms, state_file = bridge.STATE_FILE, orders_file = bridge.ORDERS_FILE})
+    end
+
     local function hand_over()
         local own_units, enemy_units = {}, {}
         for _, it in ipairs(state.sides[1]) do own_units[#own_units + 1] = it.unit end
@@ -205,6 +245,7 @@ function M.main(bm, config, globals)
             emit('own_ai', {mode = 'hold', own_ai = config.own_ai})
             return
         end
+        if config.own_ai == 'net' then return net_start() end
         state.planner = planner.hand_over(bm, 'tww3_bai_nn_own', state.own_alliance, own_units, enemy_units)
         if config.own_ai == 'defend' then
             local sx, sz = 0, 0
@@ -238,6 +279,13 @@ function M.main(bm, config, globals)
         end), 'tww3_bai_nn_arena_deadline')
         state.active = true
         bm:repeat_callback(guarded(tick), config.tick_ms, TIMER)
+        if state.net then
+            state.net.decide()
+            bm:repeat_callback(guarded(function() if state.active then state.net.decide() end end),
+                config.decide_ms, DECIDE)
+            bm:repeat_callback(guarded(function() if state.active then state.net.poll() end end),
+                config.poll_ms, POLL)
+        end
     end
 
     local function initialise()
@@ -250,10 +298,10 @@ function M.main(bm, config, globals)
             return
         end
         assert(common and vector_type, 'common and battle_vector globals required')
-        assert(config.own_ai == 'attack' or config.own_ai == 'defend' or config.own_ai == 'hold',
-            'own_ai must be attack, defend or hold')
+        assert(M.OWN_AI[config.own_ai], 'own_ai must be attack, defend, hold or net')
         local sides = battle.read_sides(bm)
-        state.own_alliance = sides[1].alliance
+        state.own_alliance, state.own_army = sides[1].alliance, sides[1].army
+        state.alliances = {sides[1].alliance, sides[2].alliance}
         local ok_roles, roles = pcall(battle.read_roles, bm)
         state.all_units = {}
         for side, key in ipairs({'own', 'enemy'}) do

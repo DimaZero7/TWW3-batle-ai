@@ -27,6 +27,9 @@ flowchart LR
 - The exchange goes through files: battle Lua can read and write them (`io.open`, see
   `src/apps/telemetry/adapter.lua`). The companion writes to a temporary file and
   renames it, so Lua never reads a half-written file.
+- **Works in game since 30.09.2026:** the [bridge](../apps/bridge.md) and the companion
+  `tools/nn/companion/` (for now in the training container). A decision a second, the answer
+  within ~40 ms of real time at ×20, no misses ([watching the network](../launch/watch.md)).
 - The weights live in the Workshop mod itself; the companion reads them from the
   subscription folder. A new network arrives as an ordinary mod update. The mod's size
   is not a limit: 1–5 GB is acceptable (owner's decision).
@@ -170,7 +173,8 @@ The check needs two computers or two Steam accounts.
    the independence of the check against the game's AI (see "Readiness"), so by
    default we skip it.
 3. PPO training in the simulator: the army against its own past versions, with character.
-   The base first, then the LoRA adapters.
+   The base first, then the LoRA adapters. The training loop is built, the first run —
+   [training](training.md).
 4. **One battle per game launch** (the standard way, ~30 battles an hour). A series of
    battles per load was tested and removed: the rematch replays the same armies, and a
    pool of armies in one scene changes the battle (research, Russian only:

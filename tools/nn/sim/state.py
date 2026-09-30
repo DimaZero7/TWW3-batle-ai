@@ -97,6 +97,7 @@ STATIC = {
     "m_ap": ("f", "projectile armour-piercing damage"),
     "hit_rate": ("f", "projectile hit rate at the edge of range (config/nn/sim.json)"),
     "aim_s": ("f", "first shot after halting, s (config/nn/sim.json)"),
+    "friendly_fire": ("f", "share of its hits aimed at a unit in melee that land on its own side (config/nn/sim.json)"),
     "morale_bonus": ("f", "morale points at the start beyond leadership (config/nn/sim.json)"),
     "cost": ("f", "multiplayer cost"),
 }

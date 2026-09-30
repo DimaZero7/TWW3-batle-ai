@@ -13,7 +13,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -T
 `-Target ai-vs-ai|unit-readout|move-probe|manual|roster-capture|archer-range|enemy-layout|nn-arena|map-capture`
 (обязательный, цель должна быть [собрана](build.md)),
 `-TimeoutSeconds` (по умолчанию 240 с на загрузку + срок боя `deadline_s` из
-`manifest.json`; без срока — 1200), `-KeepGameOpen` (не закрывать игру после завершения).
+`manifest.json`; без срока — 1200), `-KeepGameOpen` (не закрывать игру после завершения),
+`-LingerSeconds` (после итога оставить игру открытой столько секунд или пока игрок её не закроет,
+потом обычная уборка; по умолчанию 0). Чтобы смотреть, как сеть командует нашей стороной, есть
+[смотреть бой сети](watch.md): он запускает помощника и вызывает этот launcher.
 
 > **Статус:** launcher проверен в игре 27.09.2026 на цели `ai-vs-ai`: загрузка,
 > события, копирование результатов и уборка своих файлов сработали. С 30.09.2026

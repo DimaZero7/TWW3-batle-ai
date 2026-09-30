@@ -1,7 +1,9 @@
 """Heads per own unit: order kind, move point, attack target (a pointer at an enemy unit), run.
 
-* kind: hold, move, attack, withdraw. Units that take no orders (routing, dead, enemy) may only
-  hold; attack needs a visible living enemy.
+* kind: hold, move, attack, withdraw, keep. Keep = no new order, the one in force goes on (a unit
+  with no order yet holds): it lets the network leave a unit alone instead of re-issuing its order
+  every decision. Units that take no orders (routing, dead, enemy) may only hold; attack needs a
+  visible living enemy.
 * point (move, withdraw): one of n_dir x n_dist bins — a direction in the side's frame (0 = towards the enemy)
   and a distance from the unit (geometric, dist_min..dist_max). Bins, not a Gaussian: the choice
   may have several peaks ("left flank or right flank"), stays exact under int8, and argmax is
@@ -19,7 +21,7 @@ from torch.distributions import Bernoulli, Categorical
 
 from tools.nn.model import observation as ob
 
-from tools.nn.sim.orders import ATTACK, HOLD, KINDS, MOVE, WITHDRAW  # noqa: F401  (the simulator's codes)
+from tools.nn.sim.orders import ATTACK, HOLD, KEEP, KINDS, MOVE, WITHDRAW  # noqa: F401  (the simulator's codes)
 NEG = -1e9
 
 
@@ -48,7 +50,8 @@ class Heads(nn.Module):
         u = self.norm(x[:, 1:])
         ctrl, ok = obs_t["ctrl"], obs_t["target_ok"]
         kind = self.kind(u)
-        allowed = torch.stack([torch.ones_like(ctrl), ctrl, ctrl & ok.any(-1, keepdim=True), ctrl], -1)
+        # hold, move, attack, withdraw, keep (tools/nn/sim/orders.py KINDS order)
+        allowed = torch.stack([torch.ones_like(ctrl), ctrl, ctrl & ok.any(-1, keepdim=True), ctrl, ctrl], -1)
         kind = kind.masked_fill(~allowed, NEG)
         target = self.q(u) @ self.k(u).transpose(1, 2) / math.sqrt(self.cfg.pointer)
         target = target.masked_fill(~ok[:, None, :], NEG)
@@ -76,8 +79,8 @@ def sample(logits, greedy=False, temperature=1.0):
 def log_prob(logits, a, ctrl):
     """(log-probability [B, N], entropy [B, N]) of the parts of the action that matter.
 
-    kind always; point for move and withdraw; target for attack; run for move and attack. Zero
-    for units that take no orders (ctrl false).
+    kind always (keep has nothing else); point for move and withdraw; target for attack; run for
+    move and attack. Zero for units that take no orders (ctrl false).
     """
     kind, point, target, run = _dists(logits)
     move, attack = a.kind == MOVE, a.kind == ATTACK

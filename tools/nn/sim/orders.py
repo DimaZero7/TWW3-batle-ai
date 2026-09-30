@@ -2,7 +2,7 @@
 
 Each decision step every unit of the batch gets one order, as five tensors [B, N]:
 
-    kind    int64  HOLD, MOVE, ATTACK or WITHDRAW (below)
+    kind    int64  HOLD, MOVE, ATTACK, WITHDRAW or KEEP (below)
     x, z    float  MOVE / WITHDRAW: the point to go to, m (same frame as the state's x, z)
     target  int64  ATTACK: the enemy's slot (the state's layout), -1 none
     run     bool   run (True) or walk (False)
@@ -14,9 +14,13 @@ Each decision step every unit of the batch gets one order, as five tensors [B, N
               their range and shoot it. Pursues a routing target.
     WITHDRAW  break off melee and go to (x, z); while leaving, the enemies in contact strike
               its rear.
+    KEEP      no new order: the order in force goes on unchanged (x, z, target, run are
+              ignored). A unit that never had an order holds. Lets a network leave a unit alone
+              instead of re-issuing (and jittering) its order every decision.
 
-An order is given every decision step and stays in force until the next one. Orders to empty
-slots and to routing or shattered units are ignored (routing units flee on their own).
+An order is given every decision step and stays in force until the next one that is not KEEP.
+Orders to empty slots and to routing or shattered units are ignored (routing units flee on their
+own).
 A network that sees its own units first (state.own_first) turns its target index back with
 state.slot_from_own_first.
 """
@@ -27,10 +31,10 @@ try:
 except ImportError:
     torch = None
 
-HOLD, MOVE, ATTACK, WITHDRAW = 0, 1, 2, 3
-KINDS = ("hold", "move", "attack", "withdraw")
+HOLD, MOVE, ATTACK, WITHDRAW, KEEP = 0, 1, 2, 3, 4
+KINDS = ("hold", "move", "attack", "withdraw", "keep")
 FIELDS = {
-    "kind": ("i", "HOLD 0, MOVE 1, ATTACK 2, WITHDRAW 3"),
+    "kind": ("i", "HOLD 0, MOVE 1, ATTACK 2, WITHDRAW 3, KEEP 4"),
     "x": ("f", "MOVE/WITHDRAW point x, m"),
     "z": ("f", "MOVE/WITHDRAW point z, m"),
     "target": ("i", "ATTACK: enemy slot, -1 none"),
@@ -70,7 +74,7 @@ def merge(first, second, use_second):
 def check(orders, N):
     """Raise ValueError when an order is malformed."""
     kind, target = orders.kind, orders.target
-    if ((kind < HOLD) | (kind > WITHDRAW)).any():
+    if ((kind < HOLD) | (kind > KEEP)).any():
         raise ValueError("order kind out of range")
     if ((target < -1) | (target >= N)).any():
         raise ValueError("order target out of range")

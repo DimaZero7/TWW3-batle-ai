@@ -10,6 +10,7 @@ Usage:
     python -m tools.build enemy-layout --layout balanced_5
     python -m tools.build nn-arena --own-ai defend --timeout 900
     python -m tools.build nn-arena --arena pair_spear_v_slave --own-ai attack   # config/nn/arenas.json
+    python -m tools.build nn-arena --own-ai net --speed 1   # the network commands our side (companion)
 
 Output: build/<target>/ with the .pack, the bundled script and manifest.json.
 Install and launch with tools/launcher/launch.ps1.
@@ -107,6 +108,8 @@ READOUT_MODEL_S = 196
 MOVE_SETTLE_MS = 2000
 # enemy-layout: game time the game AI army is watched after deployment.
 ENEMY_LAYOUT_HOLD_S = 90
+# nn-arena --own-ai net: how often the companion's orders file is read (model ms).
+NET_POLL_MS = 100
 
 
 def load_move_plan(name):
@@ -220,10 +223,13 @@ def main(argv=None):
                              "or shoot a fearless target at fixed distances until out of arrows (damage)")
     parser.add_argument("--damage-rotate", type=int, default=0,
                         help="archer-range --range-mode damage: shift the distances by this many lanes")
-    parser.add_argument("--own-ai", choices=("attack", "defend", "hold"), default="attack",
+    parser.add_argument("--own-ai", choices=("attack", "defend", "hold", "net"), default="attack",
                         help="nn-arena: CA's script AI planner attacks or defends with our side; "
                              "the game's AI does the other; hold: our side gets no orders and stands "
-                             "(a target for the game's AI to attack)")
+                             "(a target for the game's AI to attack); net: the network in the companion "
+                             "(tools/nn/companion) commands our side, the game's AI attacks")
+    parser.add_argument("--decide-ms", type=int, default=1000,
+                        help="nn-arena --own-ai net: model ms between two decisions (250..5000)")
     parser.add_argument("--arena", default="arena",
                         help="nn-arena: 'arena' (config/nn/arena.json, the same army on both sides) "
                              "or a named arena in config/nn/arenas.json")
@@ -232,6 +238,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if not 30 <= args.timeout <= 1800:
         parser.error("--timeout must be between 30 and 1800 seconds")
+    if not 250 <= args.decide_ms <= 5000:
+        parser.error("--decide-ms must be between 250 and 5000")
 
     if args.target == "map-capture":
         run_config = {"step": args.step, "features": args.features}
@@ -270,10 +278,12 @@ def main(argv=None):
             from tools.nn import scenario as nn_scenario
             # The side that wins on timeout defends: ours when the planner defends,
             # the game's AI when ours attacks.
-            enemy_role = {"attack": "defend", "defend": "attack", "hold": "attack"}[args.own_ai]
+            enemy_role = {"attack": "defend", "defend": "attack", "hold": "attack", "net": "attack"}[args.own_ai]
             arena = nn_scenario.write_scenario("enemy" if enemy_role == "defend" else "own",
                                                nn_scenario.load_arena(args.arena))
             run_config.update(nn_scenario.run_config(arena), own_ai=args.own_ai, enemy_role=enemy_role)
+            if args.own_ai == "net":
+                run_config.update(decide_ms=args.decide_ms, poll_ms=NET_POLL_MS)
         if args.target == "manual":
             # The player sets the pace: no forced speed, an hour by default.
             run_config.pop("speed")

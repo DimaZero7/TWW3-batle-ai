@@ -7,6 +7,9 @@ The rule: the AI sees only what a human player sees.
   position, facing, movement, men and health, what they do (melee, moving, running, firing) and the
   morale STATE (steady / wavering / routing / shattered), never the exact morale. Not visible:
   the last seen position and how long ago.
+* Events a player is told or sees: own and enemy lord slain and how long ago (the game announces
+  it), and per unit how recently it fought in melee and how recently it routed (enemies: while
+  seen).
 Everything is in the side's frame (tools/nn/model/frame.py), scaled to about -1..1.
 
 State: a dict of arrays [B, N] with the names of recorded `nn_sample` (tools/nn/gamedata.py):
@@ -31,6 +34,7 @@ KILLS = 200.0
 TIME = 3600.0    # s: the battle limit, 60 minutes
 MORALE = 2.0     # MoralePercent (-2..2 seen) / 2, clipped to -1.5..1.5
 FATIGUE = 6      # fresh, active, winded, tired, very tired, exhausted
+EVENT = 120.0    # s: how long an event stays "recent" (1 now, falling to 0 after EVENT)
 
 # The token's dynamic features: (name, who sees it). "both": own units and visible enemies;
 # "own": own units only (zero for enemies; the critic's full view fills them for all units).
@@ -44,13 +48,16 @@ DYNAMIC = (
     ("ammo", "own"), ("kills", "own"), *((f"fatigue_{i}", "own") for i in range(FATIGUE)), ("fatigue_known", "own"),
     ("order_fwd", "own"), ("order_lat", "own"), ("has_order", "own"), ("has_target", "own"),
     ("threat_left", "own"), ("threat_right", "own"), ("threat_rear", "own"),
+    ("melee_recent", "both"), ("rout_recent", "both"),
 )
 FLAGS = ("is_own", "visible", "seen", "age", "rank")
 NAMES = tuple(n for n, _ in DYNAMIC) + FLAGS + tuple(f"passport_{i}" for i in range(passport.SIZE))
 INDEX = {n: i for i, n in enumerate(NAMES)}
 TOKEN = len(NAMES)
 OWN_ONLY = tuple(INDEX[n] for n, who in DYNAMIC if who == "own")
-CONTEXT = factions.SIZE + 9   # character; attack, defend, time, 2 lord levels, map width and depth, 2 counts
+# character; attack, defend, time, 2 lord levels, map width and depth, 2 counts; own lord slain and how
+# recently, the enemy lord the same
+CONTEXT = factions.SIZE + 13
 CONTEXT_FULL = CONTEXT + factions.SIZE   # the critic's: + the enemy's character
 
 
@@ -73,6 +80,7 @@ class Setup:
         self.lord_level = np.ones((B, 2), np.float32) if self.lord_level is None else np.asarray(self.lord_level,
                                                                                                     np.float32)
         self.passport = np.stack([passport.table(k) for k in self.keys])      # [B, N, P]
+        self.lord = np.stack([passport.lords(k) for k in self.keys])          # [B, N] the army's general
         self.men0 = np.stack([passport.men(k) for k in self.keys])            # [B, N]
         self.ammo0 = np.stack([passport.ammo(k) for k in self.keys])          # [B, N]
         self.present = self.side > 0
@@ -89,16 +97,23 @@ class Setup:
             self._cache[key] = _Arrays(side=t(self.side), bounds=t(self.bounds.astype(np.float32)),
                                        rank=t(self.rank), lord_level=t(self.lord_level),
                                        passport=t(self.passport), men0=t(self.men0), ammo0=t(self.ammo0),
-                                       present=t(self.present), attacker=t(self.attacker))
+                                       present=t(self.present), attacker=t(self.attacker), lord=t(self.lord))
         return self._cache[key]
 
     def character(self, side):
-        """[B, traits] of the given side (1 or 2)."""
-        return np.stack([factions.character(f[side - 1]) for f in self.factions])
+        """[B, traits] of the given side (1 or 2). Computed once per side (a loop over the batch)."""
+        key = ("character", side)
+        if key not in self._cache:
+            self._cache[key] = np.stack([factions.character(f[side - 1]) for f in self.factions])
+        return self._cache[key]
 
     def adapter(self, side):
-        """[B] LoRA adapter index of (faction, role) for the side."""
-        return np.array([factions.adapter(f[side - 1], a == side) for f, a in zip(self.factions, self.attacker)])
+        """[B] LoRA adapter index of (faction, role) for the side. Computed once per side."""
+        key = ("adapter", side)
+        if key not in self._cache:
+            self._cache[key] = np.array([factions.adapter(f[side - 1], a == side)
+                                         for f, a in zip(self.factions, self.attacker)])
+        return self._cache[key]
 
 
 @dataclass
@@ -112,6 +127,7 @@ class _Arrays:
     ammo0: object
     present: object
     attacker: object
+    lord: object
 
 
 @dataclass
@@ -127,6 +143,9 @@ class Memory:
     prev_z: object
     prev_t: object
     prev_vis: object
+    last_melee_t: object = None   # [B, N] time last seen in melee (-1 never)
+    last_rout_t: object = None    # [B, N] time last seen routing (-1 never)
+    lord_dead_t: object = None    # [B, 2] time own / enemy lord was slain (-1 alive or none)
 
 
 @dataclass
@@ -172,7 +191,8 @@ def start(state, setup, side):
     b = S.bounds
     frame = Frame((b[:, 0] + b[:, 1]) / 2, (b[:, 2] + b[:, 3]) / 2, ux, uz)
     zero, false = xs * 0, xs != xs
-    return Memory(frame, zero, zero, zero, false, false, zero, zero, zero - 1, false)
+    return Memory(frame, zero, zero, zero, false, false, zero, zero, zero - 1, false, zero - 1, zero - 1,
+                  zero[:, :2] - 1)
 
 
 def observe(state, setup, side, memory=None, full=False):
@@ -233,6 +253,15 @@ def observe(state, setup, side, memory=None, full=False):
         "has_order": _f(m, has_order), "has_target": xs * 0 if target is None else _f(m, target >= 0),
         "threat_left": _f(m, state["lf"]), "threat_right": _f(m, state["rf"]), "threat_rear": _f(m, state["bf"]),
     }
+    # Events: melee and rout of units seen now; lords slain (announced: known without seeing).
+    last_melee = m.where(sees & _b(m, state["m"]), tn, memory.last_melee_t)
+    last_rout = m.where(sees & _b(m, state["r"]), tn, memory.last_rout_t)
+    cols["melee_recent"] = _recent(m, tn, last_melee)
+    cols["rout_recent"] = _recent(m, tn, last_rout)
+    slain = S.lord & S.present & ~alive
+    slain2 = m.stack([(slain & own).any(-1), (slain & enemy).any(-1)], -1)          # [B, 2] own, enemy
+    tb = tn[:, :2]
+    lord_dead = m.where(slain2 & (memory.lord_dead_t < 0), tb, memory.lord_dead_t)
     # Who sees what: "both" fields only for units seen now; "own" fields only for own units
     # (every unit in the critic's full view). Position and edges stay for the last sighting.
     keep_last = ("fwd", "lat", "edge_fwd", "edge_back", "edge_right", "edge_left")
@@ -250,16 +279,28 @@ def observe(state, setup, side, memory=None, full=False):
     ctrl = own & alive & (ms < 6)
     target_ok = enemy & sees & alive
     ctx = _context(m, setup, S, side, t, own & alive, enemy & ~dead & seen, xs)
+    lords = m.stack([_f(m, lord_dead[:, 0] >= 0), _recent(m, tb, lord_dead)[:, 0],
+                     _f(m, lord_dead[:, 1] >= 0), _recent(m, tb, lord_dead)[:, 1]], -1)
+    ctx = _cat(m, [ctx, lords], -1)
     pos = m.stack([fwd, lat], -1) / POS
     pos = m.where(seen[..., None], pos, pos * 0)
     new = Memory(fr, last_x, last_z, last_t, seen, dead, m.where(sees, xs, xs * 0), m.where(sees, zs, zs * 0),
-                 tn, sees)
+                 tn, sees, last_melee, last_rout, lord_dead)
     adapter = setup.adapter(side)
     adapter = adapter if m is np else m.as_tensor(adapter, device=x.device)
     if full:   # the critic also knows the enemy's character
         other = setup.character(3 - side)
         ctx = _cat(m, [ctx, _f(m, other if m is np else m.as_tensor(other, device=x.device))], -1)
     return Obs(_f(m, tokens), _f(m, ctx), own, attend, ctrl, target_ok, _f(m, pos), adapter, fr, side), new
+
+
+def _b(m, a):
+    return a > 0.5 if m is np else a.bool() if a.dtype != m.bool else a
+
+
+def _recent(m, now, when):
+    """1 when the event is now, falling to 0 after EVENT s; 0 when it never happened."""
+    return m.where(when >= 0, m.clip(1 - (now - when) / EVENT, 0, 1), now * 0)
 
 
 def _cat(m, xs, dim):

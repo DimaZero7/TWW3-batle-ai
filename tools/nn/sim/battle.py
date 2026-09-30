@@ -34,8 +34,8 @@ def step(st, orders, params=None, dt=None):
     N = st.N
     eye = torch.eye(N, dtype=torch.bool, device=st.device)[None]
 
-    # --- orders ---
-    take = standing
+    # --- orders --- (KEEP: the order in force goes on)
+    take = standing & (orders.kind != O.KEEP)
     kind = torch.where(take, orders.kind, u["order_kind"])
     tgt = torch.where(take, orders.target, u["order_target"])
     run = torch.where(take, orders.run, u["order_run"])
@@ -67,7 +67,7 @@ def step(st, orders, params=None, dt=None):
     u["contact_s"] = torch.where(engaged, u["contact_s"] + dt, torch.zeros_like(u["contact_s"]))
 
     # --- melee ---
-    rate, mhit, sector, fighters = melee.strikes(u, pw, strike, params, charge_now, u["contact_s"])
+    rate, mhit, sector, _ = melee.strikes(u, pw, strike, params, charge_now, u["contact_s"])
     hp_melee = rate * dt
 
     # --- shooting ---
@@ -76,7 +76,7 @@ def step(st, orders, params=None, dt=None):
     u["aim"] = torch.where(ready, u["aim"] + dt, torch.zeros_like(u["aim"]))
     can = ready & (u["aim"] >= u["aim_s"])
     m_target = missile.choose_target(u, pw, can, tgt, kind == O.ATTACK)
-    shots, hp_missile, shit = missile.volley(u, pw, m_target, dt, params, crowd=fighters.sum(1))
+    shots, hp_missile, shit = missile.volley(u, pw, m_target, dt, params, contact=touch)
     u["a"] = (u["a"] - shots).clamp(min=0)
     firing = shots > 0
 
@@ -97,7 +97,7 @@ def step(st, orders, params=None, dt=None):
     men_new = torch.where(hp_new <= 0, torch.zeros_like(men_new), men_new)
     drop = u["men"] - men_new
     want = kills.sum(1)
-    credit = kills * (drop / want.clamp(min=1e-9)).clamp(max=10)[:, None, :]
+    credit = kills * (drop / want.clamp(min=1e-9)).clamp(max=10)[:, None, :] * pw["enemy"]
     u["k"] = u["k"] + credit.sum(2)
     u["hp_abs"], u["men"] = hp_new, men_new
     u["hp"] = torch.where(present, hp_new / u["hp0"].clamp(min=1e-6), torch.zeros_like(hp_new))
@@ -107,7 +107,7 @@ def step(st, orders, params=None, dt=None):
     melee_scaled = hp_melee * scale[:, None, :]
     u["dealt"] = u["dealt"] * fade + melee_scaled.sum(2)
     u["taken"] = u["taken"] * fade + melee_scaled.sum(1)
-    shot_at = hp_missile.sum(1) > 0
+    shot_at = (hp_missile * pw["enemy"]).sum(1) > 0      # friendly fire does not count (ume_concerned_under_friendly_fire 0)
     u["under_fire_s"] = torch.where(shot_at, torch.zeros_like(u["under_fire_s"]), u["under_fire_s"] + dt)
     attackers = strike & standing[:, :, None]
     u["flank_hit"] = torch.where(attackers, sector, torch.zeros_like(sector)).amax(1).float()

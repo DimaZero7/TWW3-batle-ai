@@ -27,9 +27,9 @@ class TestLayout:
         for group in state.GROUPS.values():
             assert all(code in ("f", "b", "i") and text for code, text in group.values())
 
-    def test_orders_have_four_kinds_and_five_fields(self):
-        assert orders.KINDS == ("hold", "move", "attack", "withdraw")
-        assert (orders.HOLD, orders.MOVE, orders.ATTACK, orders.WITHDRAW) == (0, 1, 2, 3)
+    def test_orders_have_five_kinds_and_five_fields(self):
+        assert orders.KINDS == ("hold", "move", "attack", "withdraw", "keep")
+        assert (orders.HOLD, orders.MOVE, orders.ATTACK, orders.WITHDRAW, orders.KEEP) == (0, 1, 2, 3, 4)
         assert set(orders.FIELDS) == {"kind", "x", "z", "target", "run"}
 
 

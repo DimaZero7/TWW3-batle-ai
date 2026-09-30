@@ -5,8 +5,9 @@ range (from its formation's edge to the target's: the game's AI shoots from 118-
 centres with a 120-130 m range). It first aims for aim_s seconds after halting (measured 3.3 s arrows, 4.3 s
 sling); then every man shoots once per reload (measured 11.0 / 11.5 s, longer than the passport).
 
-    hits   = shots x hit_rate x distance factor (x single_entity_factor at a lone man; a lone
-             man in melee takes 1 / (1 + men fighting him) of them)
+    hits   = shots x hit_rate x distance factor (x single_entity_factor at a lone man); aimed
+             at a unit in melee, a measured share lands on the shooter's own units in contact
+             with it (friendly fire: 0.31 arrows, 0.81 sling)
     per hit = ap + base x (1 - 0.75 armour / 100); a shield blocks its chance from the front
               (within shield_defence_angle_missile, 60 deg); x (1 - missile resistance)
 
@@ -47,10 +48,11 @@ def choose_target(u, pw, can_shoot, order_target, order_attack):
     return torch.where(can_shoot, target, torch.full_like(target, -1))
 
 
-def volley(u, pw, target, dt, params, crowd=None):
-    """Shots, and HP taken per pair [B, N, N] (i shoots j) this step; per-hit damage [B, N, N].
-    crowd [B, N]: men fighting each unit in melee; a lone man among them takes his share of the
-    hits (1 / (1 + crowd)), the rest fall on the crowd and are lost (no friendly fire yet)."""
+def volley(u, pw, target, dt, params, contact=None):
+    """Shots, and HP taken per pair [B, N, N] (i shoots, f is hit) this step; per-hit damage
+    [B, N, N]. contact [B, N, N]: which units touch in melee. Of the hits aimed at a unit in
+    melee, the shooter's friendly_fire share lands on its own units in contact with the target
+    (measured, docs/en/training/simulator.md)."""
     ms = params.sim["missile"]
     B = params.battle
     shooting = target >= 0
@@ -60,14 +62,24 @@ def volley(u, pw, target, dt, params, crowd=None):
     onehot = torch.zeros_like(pw["dist"]).scatter_(2, t[:, :, None], 1.0) * shooting[:, :, None]
     dist = pw["dist"]
     factor = distance_factor(dist, ms["distance_factor"])
-    single = (u["men0"] <= 1)[:, None, :]
     rate = (u["hit_rate"][:, :, None] * factor).clamp(max=1.0)
-    rate = torch.where(single, rate * ms["single_entity_factor"], rate)
-    if crowd is not None:
-        rate = torch.where(single, rate / (1 + crowd[:, None, :]), rate)
+    aimed = onehot * shots[:, :, None] * rate                 # [B, i, j] hits aimed at j
+    men = u["men"].clamp(min=0)
+    lone = torch.where(u["men0"] <= 1, torch.full_like(men, ms["single_entity_factor"]), torch.ones_like(men))
+    if contact is None:
+        landed = aimed * lone[:, None, :]
+    else:
+        # Hits aimed at a unit in melee: the shooter's `friendly_fire` share lands on its own
+        # units in contact with the target (split by their men), the rest on the target.
+        near = contact.transpose(1, 2).float() * men[:, None, :]  # [B, j, f] men of f in contact with j
+        crowd = near.sum(2)
+        engaged = (crowd > 0).float()
+        friends = near / crowd.clamp(min=1e-6)[:, :, None]
+        ff = u["friendly_fire"][:, :, None] * engaged[:, None, :]  # [B, i, j]
+        landed = torch.bmm(aimed * ff, friends) + aimed * (1 - ff) * lone[:, None, :]
     front = pw["rel_j"].abs() <= B["shield_defence_angle_missile"] * geometry.DEG
     shield = torch.where(front, u["shield"][:, None, :], torch.zeros_like(dist))
     hit = melee.per_hit(u["m_damage"][:, :, None], u["m_ap"][:, :, None], u["armour"][:, None, :],
                         u["hp_man"][:, None, :], u["resist_missile"][:, None, :])
-    hp = onehot * shots[:, :, None] * rate * hit * (1 - shield)
+    hp = landed * hit * (1 - shield)
     return shots, hp, hit

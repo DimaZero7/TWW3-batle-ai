@@ -25,10 +25,12 @@ tests. The old work is in the Git history (the last commit before the reset is `
 | [observation](../apps/observation.md) | `adapter`, `services` | One side's view: own units in full, only permitted enemy data; leak self-check | new |
 | [orders](../apps/orders.md) | `adapter`, `planner_adapter`, `facing` | Order calls verified in battle, handing units to CA's planner, the engine's 64 facings | [verified commands](../game/units/commands.md) |
 | [telemetry](../apps/telemetry.md) | `adapter`, `sampler_adapter` | JSONL events, state files, post-battle samples of both sides | `runtime/post_battle_telemetry.lua` |
+| [bridge](../apps/bridge.md) | `adapter`, `exchange_adapter`, `services` | The bridge to the network: the state file to the companion, its orders to our units | new |
 
 ## Entry points (`src/entries`)
 
-Every entry measures the game or records a battle; none makes decisions of its own.
+Every entry measures the game or records a battle; none makes decisions of its own (in `nn_arena`
+with `--own-ai net` our side is commanded by the network, not by the entry).
 
 | Entry | Build target | Scenario | What it does |
 |---|---|---|---|
@@ -39,7 +41,7 @@ Every entry measures the game or records a battle; none makes decisions of its o
 | [archer_range](../apps/entries.md#archer_range) | `archer-range` | `archer_range.xml` | When archers start shooting by the depth of their block, arrow damage by distance |
 | [enemy_layout](../apps/entries.md#enemy_layout) | `enemy-layout` | `enemy_layout.xml` | How the game AI deploys and stands with different armies |
 | [manual_record](../apps/entries.md#manual) | `manual` | `manual_hamlet.xml` | Player's manual battle with recording |
-| [nn_arena](../apps/entries.md#nn_arena) | `nn-arena` | `nn_arena.xml` | Records the game's AI battles in the arena: every unit of both sides once a second — data for training |
+| [nn_arena](../apps/entries.md#nn_arena) | `nn-arena` | `nn_arena.xml` | Records the game's AI battles in the arena: every unit of both sides once a second — data for training; with `--own-ai net` the network commands our side |
 | [map_capture](../apps/entries.md#map_capture) | `map-capture` | `map_capture.xml` | Map grid, objects and reachability to CSV/JSONL |
 
 ## Tools outside the game (`tools`)
@@ -48,12 +50,13 @@ Every entry measures the game or records a battle; none makes decisions of its o
 |---|---|
 | `tools/build.py`, `tools/pack/` | Module bundler, PFH5 writer, manifest ([build](../launch/build.md)) |
 | `tools/launcher/launch.ps1` | Install, launch at fair difficulty, wait, clean up ([running](../launch/run.md)) |
+| `tools/launcher/watch.ps1` | A battle where the network commands our side: build, the companion in the container, the launcher ([watching the network](../launch/watch.md)) |
 | `tools/telemetry/read_jsonl.ps1` | Read JSONL while the game writes it |
 | `tools/config.py`, `tools/lua_runtime.py` | Paths and machine settings; Lua 5.1 in Python for the tests |
 | `tools/roster.py`, `tools/readouts.py` | The unit roster from runs; the readout catalogue and collection profiles |
 | `tools/archer_range.py`, `tools/enemy_layout.py` | Scenarios and settings of the `archer-range` and `enemy-layout` probes |
 | `tools/analysis/` | Height map, slopes, passages, passability, obstacles; reports of `move-probe`, `unit-readout`, `archer-range`, `enemy-layout` runs |
-| `tools/nn/` | Data for training: rules from the game's database (`gamedb.py`), [unit passports](../training/units.md) (`dbtables.py`, `units.py`), the scenario of the arena and the named arenas (`scenario.py`), arena records as arrays (`gamedata.py`), [measurements](../training/measurements.md) for the simulator (`measure.py`), running in a PyTorch container (`dock.sh`) — [more](../training/README.md) |
+| `tools/nn/` | Data for training: rules from the game's database (`gamedb.py`), [unit passports](../training/units.md) (`dbtables.py`, `units.py`), the scenario of the arena and the named arenas (`scenario.py`), arena records as arrays (`gamedata.py`), [measurements](../training/measurements.md) for the simulator (`measure.py`), running in a PyTorch container (`dock.sh`), the companion that commands our side in the game (`companion/`, [bridge](../apps/bridge.md)) — [more](../training/README.md) |
 | `tools/docs/` | Indexes of the documentation hubs (`python -m tools.docs.index_doc`) |
 | `tools/architecture.py` | The level of every app (all are the base today), for the architecture and docs tests |
 

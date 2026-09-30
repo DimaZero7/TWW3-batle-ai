@@ -107,9 +107,21 @@ class TestRecorders:
         assert f"<timeout_winning_alliance_index>{winner}</timeout_winning_alliance_index>" in \
             (tmp_path / "nn_arena.xml").read_text(encoding="utf-8")
 
-    def test_nn_arena_has_no_network_mode(self):
+    def test_nn_arena_net_gives_our_side_to_the_network(self, tmp_path, monkeypatch):
+        from tools.nn import scenario as nn_scenario
+        monkeypatch.setattr(nn_scenario, "SCENARIO", tmp_path / "nn_arena.xml")
+        written = []
+        monkeypatch.setattr(build, "build", lambda target, config, scenario=None: written.append(config) or {})
+        assert build.main(["nn-arena", "--own-ai", "net", "--speed", "1", "--decide-ms", "500"]) == 0
+        config = written[0]
+        assert config["own_ai"] == "net" and config["enemy_role"] == "attack" and config["speed"] == 1
+        assert config["decide_ms"] == 500 and config["poll_ms"] == build.NET_POLL_MS
+        assert config["factions"] == {"own": "wh_main_emp_empire", "enemy": "wh_main_emp_empire"}
+        assert all(u["key"] for u in config["units"]["own"] + config["units"]["enemy"])
+        # The game's AI attacks: our side wins on timeout.
+        assert "<timeout_winning_alliance_index>0</timeout_winning_alliance_index>" in             (tmp_path / "nn_arena.xml").read_text(encoding="utf-8")
         with pytest.raises(SystemExit):
-            build.main(["nn-arena", "--own-ai", "net"])
+            build.main(["nn-arena", "--own-ai", "net", "--decide-ms", "100"])
 
     def test_enemy_layout_records_the_game_s_ai_only(self, tmp_path, monkeypatch):
         from tools import enemy_layout

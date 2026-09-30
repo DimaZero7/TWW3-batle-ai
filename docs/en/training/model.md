@@ -85,7 +85,7 @@ flowchart TB
   enc --> att["Attention layers<br/>+ distance bias, masks"]
   att --> gru["Memory: a GRU per unit<br/>and one for the army"]
   gru --> last["Last attention layer"]
-  last --> kind["Order: hold / move / attack / withdraw"]
+  last --> kind["Order: hold / move / attack / withdraw / keep"]
   last --> point["Point: 16 directions × 8 distances"]
   last --> ptr["Target: pointer at an enemy"]
   last --> run["Run or walk"]
@@ -103,7 +103,8 @@ flowchart TB
   vector per unit, easy to carry and the same on every computer in co-op; the 10–20 s horizon
   (20–80 decisions at 2–4 per second) is learned, not fixed by a buffer.
 - **Heads** for every own unit that takes orders (alive, not routing):
-  - order kind; "attack" only when a visible living enemy exists;
+  - order kind; "attack" only when a visible living enemy exists; "keep" — no new order, the one
+    in force goes on (the network does not jerk a unit every decision);
   - point for move and withdraw: one of 16 directions in the side's frame (0 = towards the
     enemy) × 8 distances from the unit, 10–400 m on a log scale, clipped to the map. Bins,
     not a normal distribution: the choice can have several peaks ("left flank or right flank"),

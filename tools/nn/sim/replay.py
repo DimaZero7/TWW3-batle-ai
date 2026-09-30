@@ -3,7 +3,9 @@ battles open-loop (docs/en/training/simulator.md).
 
 Replay: for every recorded second and unit, the order that recording implies -
     a recorded target (fought or shot)   -> ATTACK it (a missile unit closes to its range)
-    in melee without a target            -> HOLD (fight whoever is in contact)
+    in melee without a target            -> ATTACK the nearest enemy (CA's planner leaves the
+                                            target empty in ~70 % of its melee seconds, the
+                                            game's AI in ~6 %: HOLD made the two sides differ)
     otherwise                            -> MOVE to the recorded order point (ox, oz),
                                             running if the unit was running After the recording ends the
 last recorded orders stay for `grace_s` (120 s), then every unit attacks the nearest enemy.
@@ -44,7 +46,7 @@ def half_depth(men, width, spacing=1.5):
     return np.where(men > 1, np.ceil(np.maximum(men, 1) / files) * spacing / 2, 0.0)
 
 
-def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5):
+def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=True):
     """Orders implied by a recorded battle (tools/nn/gamedata.Battle), one row per recorded second:
     dict of arrays [T, N] kind, x, z, target, run in the simulator's slots (slot_of: recorded index
     -> slot). The game records the order's point at the formation's front (measured: half a depth
@@ -56,9 +58,17 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5):
     z = np.zeros((T, N), dtype=np.float32)
     target = np.full((T, N), -1, dtype=np.int64)
     run = np.zeros((T, N), dtype=bool)
-    ammo = np.nan_to_num(f["a"], nan=0.0)
+    # The nearest living enemy of each unit each second (for fights without a recorded target).
+    xs, zs = np.nan_to_num(f["x"], nan=1e6), np.nan_to_num(f["z"], nan=1e6)
+    dist = np.hypot(xs[:, :, None] - xs[:, None, :], zs[:, :, None] - zs[:, None, :])
+    foe = (battle.side[:, None] != battle.side[None, :])[None] & (np.nan_to_num(f["men"]) > 0)[:, None, :]
+    nearest = np.where(foe, dist, np.inf).argmin(axis=2)
     for i, s in enumerate(slot_of):
         tg = battle.target[:, i]
+        # In melee without a recorded target (CA's planner leaves it empty most of the time):
+        # the nearest enemy, as the game's own AI records it.
+        if fight_nearest:
+            tg = np.where((tg < 0) & f["m"][:, i], nearest[:, i], tg)
         ok_t = tg >= 0
         mapped = np.where(ok_t, np.array(slot_of)[np.clip(tg, 0, None)], -1)
         attack = ok_t & (battle.side[np.clip(tg, 0, None)] != battle.side[i])

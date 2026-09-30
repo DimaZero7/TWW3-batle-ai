@@ -28,6 +28,8 @@ from tools.nn.sim.params import load
 
 OUT = project.BUILD / "nn-sim" / "check.json"
 TOLERANCE = 0.2
+FIGHT_NEAREST = True             # replay: a unit in melee without a recorded target attacks the nearest enemy
+PLANNER = ("attack", "defend")   # battles of CA's planner against the game's AI (not the network's own runs)
 COPIES = 8           # whole battles: replays of each recorded battle
 CURVE_S = (60, 120, 180)   # share of HP lost this long after the first contact
 JITTER_M = 2.0       # ... from starts moved by up to this much
@@ -115,7 +117,7 @@ def simulate(run_dirs, params=None, device="cpu", copies=1, jitter_m=0.0, seed=0
         slot_maps.append(slot_of)
         width = {x["name"]: x.get("width") for side in (1, 2) for x in a["sides"][side]["units"]}
         orders = replay.recorded_orders(g, slot_of, 2 * H, [width.get(n) for n in g.names],
-                                        params.sim["formation"]["spacing_m"])
+                                        params.sim["formation"]["spacing_m"], FIGHT_NEAREST)
         rows.extend([orders] * copies)
     rec = Recorder(st)
     battle.run(st, replay.Replay(rows, device=device), params, record=rec)
@@ -215,7 +217,8 @@ def battles(params=None, device="cpu", copies=COPIES, jitter_m=JITTER_M):
     `copies` times from slightly moved starts; the simulator's winner is the majority's."""
     params = params or load()
     p = measure.passports()
-    runs = [d for d in gamedata.runs() if gamedata.load(d).arena.startswith("whole") or gamedata.load(d).arena == "arena"]
+    runs = [d for d in gamedata.runs() if (gamedata.load(d).arena.startswith("whole") or gamedata.load(d).arena == "arena")
+            and gamedata.load(d).own_ai in PLANNER]
     out = []
     for g, sims, fac in simulate(runs, params, device, copies, jitter_m):
         names = {1: fac.get("own", "?"), 2: fac.get("enemy", "?")}

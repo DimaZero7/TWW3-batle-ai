@@ -57,8 +57,9 @@ first; `side` = 0 is an empty slot). Three groups:
   leadership, projectiles, range, reload, cost;
 - *internal* — what only the simulator needs: morale and fatigue points, timers.
 
-**Orders** (`tools/nn/sim/orders.py`): per unit and decision step `kind` ∈ hold, move, attack,
-withdraw; the point `x`, `z` for move and withdraw (the unit's centre); `target` — the enemy's
+**Orders** (`tools/nn/sim/orders.py`): per unit and decision step `kind` ∈ hold (0), move (1),
+attack (2), withdraw (3), keep (4: no new order, the one in force goes on; a unit with no order
+holds); the point `x`, `z` for move and withdraw (the unit's centre); `target` — the enemy's
 slot for attack; `run` — run or walk. All `[B, N]`. A move order to a unit in melee does not
 take it out: that is what withdraw is for (it breaks off, and the enemies in contact strike its
 back).

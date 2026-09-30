@@ -56,6 +56,11 @@ def strikes(u, pw, contact, params, charge_now, contact_s):
     F = torch.minimum(F, men_i)
     F = torch.where(single_j, torch.minimum(men_i, torch.full_like(F, float(cc["lord_max_attackers"]))), F)
     F = torch.where(single_i, torch.ones_like(F), F)
+    # Fewer men left, fewer bring their weapons to bear (and fewer can be reached).
+    share_i = (u["men"] / u["men0"].clamp(min=1)).clamp(0, 1)[:, :, None]
+    share_j = (u["men"] / u["men0"].clamp(min=1)).clamp(0, 1)[:, None, :]
+    F = F * torch.where(single_i, torch.ones_like(F), share_i.pow(cal.get("men_exp_striker", 0.0)))
+    F = F * torch.where(single_j, torch.ones_like(F), share_j.pow(cal.get("men_exp_target", 0.0)))
     F = torch.where(contact, F, torch.zeros_like(F))
     # Across several contacts a unit brings no more men than its own front holds (and no more
     # than it has); a single man is split between his opponents.

@@ -412,9 +412,69 @@ class TestNnArena:
         assert rows[-1]["status"] == "completed" and rows[-1]["idle_kicks"] == 0
         assert all(r["policy"] == "nn_arena_hold" for r in rows)
 
+    def test_net_writes_the_state_and_gives_the_companions_orders(self, lua, tmp_path):
+        # The test plays the companion (tools/nn/companion/exchange.py writes its answer).
+        from tools.nn.companion import exchange
+        lua.execute(self.SETUP + """
+            CONFIG.own_ai, CONFIG.enemy_role, CONFIG.decide_ms, CONFIG.poll_ms = 'net', 'attack', 1000, 100
+            CONFIG.factions = {own = 'wh_main_emp_empire', enemy = 'wh2_main_skv_skaven'}
+            STATE = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+        """)
+        doc = exchange.read_state(tmp_path / exchange.STATE)
+        assert doc["move"] == 1 and doc["attacker"] == 2 and not doc["done"]
+        assert [(u["n"], u["side"], u["key"], u["v"]) for u in doc["units"]] == [
+            ("own_lord", 1, "lord", True), ("own_spear_1", 1, "spears", True),
+            ("enemy_lord", 2, "lord", True), ("enemy_spear_1", 2, "spears", True)]
+        orders = [{"unit": "own_lord", "kind": "move", "x": -200.0, "z": 30.0, "run": True},
+                  {"unit": "own_spear_1", "kind": "attack", "target": "enemy_spear_1", "run": False}]
+        exchange.write_atomic(tmp_path / exchange.ORDERS, exchange.orders_text(doc["batch"], 1, orders, 3.5))
+        lua.execute("""
+            bm:tick(100)                  -- the answer is read and given
+            bm:tick(100)                  -- the same answer again: nothing new
+            for _ = 1, 9 do bm:tick(100) end   -- the next decision: move 2 is written
+            for _ = 1, 10 do bm:tick(100) end  -- no answer: a miss at move 3
+        """)
+        log = list(lua.eval("bm.orders").values())
+        assert log == ["goto own_lord -200 30 true", "attack enemy_spear_1"]
+        doc = exchange.read_state(tmp_path / exchange.STATE)
+        assert doc["move"] == 3
+        exchange.write_atomic(tmp_path / exchange.ORDERS, exchange.orders_text(
+            doc["batch"], 3, [{"unit": "own_lord", "kind": "move", "x": -202.0, "z": 31.0, "run": True},
+                              {"unit": "own_spear_1", "kind": "hold"}]))
+        lua.execute("bm:tick(100)")
+        exchange.write_atomic(tmp_path / exchange.ORDERS, exchange.orders_text(      # the answer to move 4 (taken once it is written): keep all
+            doc["batch"], 4, [{"unit": "own_lord", "kind": "keep"}, {"unit": "own_spear_1", "kind": "keep"}]))
+        lua.execute("""
+            bm:tick(100)
+            bm.outcome, bm.winner = true, 2
+            for _ = 1, 10 do bm:tick(100) end
+            assert(STATE.finished, 'the battle did not finish')
+        """)
+        log = list(lua.eval("bm.orders").values())
+        assert log[2:] == ["halt"]          # the lord's point moved < 5 m: the same order, not given again
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        kinds = [r["event"] for r in rows]
+        assert "error" not in kinds, [r for r in rows if r["event"] == "error"]
+        assert next(r for r in rows if r["event"] == "own_ai")["mode"] == "net"
+        given = [r for r in rows if r["event"] == "nn_orders"]
+        assert [g["move"] for g in given] == [1, 3, 4]
+        assert given[2]["keeps"] == 2 and not given[2]["orders"]   # keep: nothing given
+        assert [(o["u"], o["k"], o["status"]) for o in given[0]["orders"]] == [
+            ("own_lord", "move", "given"), ("own_spear_1", "attack", "given")]
+        assert given[0]["think_ms"] == 3.5 and given[0]["wait_model_ms"] == 100 and given[0]["lag"] == 0
+        assert given[1]["kept"] == 1
+        assert [r["move"] for r in rows if r["event"] == "nn_miss"] == [2]
+        result = rows[-1]
+        assert result["event"] == "result" and result["nn_moves"] == 4 and result["nn_answered"] == 3
+        assert result["nn_missed"] == 1 and result["nn_orders_given"] == 3 and result["nn_keeps"] == 2
+        final = exchange.read_state(tmp_path / exchange.STATE)
+        assert final["done"] is True and final["move"] == 4   # the decision just before the end
+        assert all(r["policy"] == "nn_arena_net" for r in rows)
+
     def test_an_unknown_own_ai_is_an_error(self, lua, tmp_path):
         lua.execute(self.SETUP + """
-            CONFIG.own_ai = 'net'
+            CONFIG.own_ai = 'dance'
             local state = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
             assert(state.finished and not state.active)
         """)

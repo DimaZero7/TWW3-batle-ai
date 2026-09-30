@@ -95,6 +95,7 @@ class Params:
             "m_ap": missile.get("ap_damage", 0) if missile else 0,
             "hit_rate": ms["hit_rate"].get(cat, ms["hit_rate_other"]) if missile else 0,
             "aim_s": ms["aim_s"].get(cat, ms["aim_s_other"]) if missile else 0,
+            "friendly_fire": ms["friendly_fire"].get(cat, ms["friendly_fire_other"]) if missile else 0,
             "morale_bonus": self.sim["morale"]["faction_bonus"].get(faction, 0),
             "cost": u.get("multiplayer_cost", 0),
         }

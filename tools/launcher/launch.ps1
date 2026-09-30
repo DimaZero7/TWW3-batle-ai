@@ -16,7 +16,10 @@
 param(
     [Parameter(Mandatory = $true)][ValidateSet('ai-vs-ai', 'unit-readout', 'move-probe', 'manual', 'roster-capture', 'enemy-layout', 'map-capture', 'archer-range', 'nn-arena')][string]$Target,
     [int]$TimeoutSeconds = 0,
-    [switch]$KeepGameOpen
+    [switch]$KeepGameOpen,
+    # After the result the game stays open this long (or until the user closes it), so a watcher
+    # sees the end of the battle; then the usual cleanup (tools/launcher/watch.ps1 uses it).
+    [int]$LingerSeconds = 0
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
@@ -165,6 +168,13 @@ try {
         if ($status -eq 'lua_error') { break }
         if ($done -ge 1) { $status = 'completed'; break }
         Start-Sleep -Seconds 1
+    }
+    if ($status -eq 'completed' -and $LingerSeconds -gt 0) {
+        Write-Output ("Battle over: the game closes in {0} s (or close it yourself)." -f $LingerSeconds)
+        $lingerEnd = (Get-Date).AddSeconds($LingerSeconds)
+        while ((Get-Date) -lt $lingerEnd -and -not $process.HasExited) { Start-Sleep -Seconds 1 }
+        $lines = @(Read-JsonlLines -State $reader -Path $eventLog)
+        if ($lines.Count -gt 0) { [IO.File]::AppendAllLines($runLog, [string[]]$lines, [Text.UTF8Encoding]::new($false)) }
     }
     foreach ($name in $outputs) {
         $path = Join-Path $game $name

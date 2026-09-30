@@ -1,0 +1,24 @@
+{
+  "_description": "Units available for training, per faction (random armies, tools/nn/armies, docs/en/training/armies.md). A new unit or faction is a new entry here; its passport must be in config/nn/units.json (cost multiplayer_cost, category, men). slot: the unit's name in an army (slot_1, slot_2, ...); width: frontage in m at deployment (default men / rank_depth files x 1.5 m).",
+  "caps": {
+    "_description": "Share of an army's units (the lord counted) that may be of one passport category, rounded down, at least 1. Against degenerate stacks; see docs/en/training/armies.md.",
+    "inf_ranged": 0.6
+  },
+  "factions": {
+    "wh_main_emp_empire": {
+      "lord": {"key": "wh_main_emp_cha_general_0", "width": 5},
+      "units": [
+        {"key": "wh_main_emp_inf_spearmen_0", "slot": "spear", "width": 30},
+        {"key": "wh2_dlc13_emp_inf_archers_0", "slot": "archer", "width": 40}
+      ]
+    },
+    "wh2_main_skv_skaven": {
+      "lord": {"key": "wh2_main_skv_cha_warlord_0", "width": 5},
+      "units": [
+        {"key": "wh2_main_skv_inf_clanrat_spearmen_0", "slot": "clanrat", "width": 30},
+        {"key": "wh2_main_skv_inf_skavenslave_spearmen_0", "slot": "slave", "width": 30},
+        {"key": "wh2_main_skv_inf_skavenslave_slingers_0", "slot": "sling", "width": 35}
+      ]
+    }
+  }
+}

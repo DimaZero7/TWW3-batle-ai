@@ -4,6 +4,7 @@
     orders, h, logits, action = decide.act(actor, obs, setup, h)
 
 Only the side's units that take orders get one; every other unit (enemy, dead, routing) holds.
+A unit may get KEEP (code 4): no new order, the one in force goes on (x, z = its place, target -1).
 """
 import numpy as np
 import torch

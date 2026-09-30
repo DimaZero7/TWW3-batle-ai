@@ -12,5 +12,5 @@ APPS = ROOT / "src" / "apps"
 # 0 - base: engine access, data, rules of the game.
 LEVELS = {
     "core": 0, "battle": 0, "map": 0, "navigation": 0, "units": 0, "intel": 0, "orders": 0, "telemetry": 0,
-    "observation": 0,
+    "observation": 0, "bridge": 0,
 }

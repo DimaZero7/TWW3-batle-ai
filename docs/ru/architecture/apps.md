@@ -25,10 +25,12 @@
 | [observation](../apps/observation.md) | `adapter`, `services` | Сводка одной стороны: свои целиком, о врагах только разрешённое; самопроверка на утечки | новое |
 | [orders](../apps/orders.md) | `adapter`, `planner_adapter`, `facing` | Проверенные в бою вызовы приказов, передача отрядов планировщику CA, 64 направления движка | [проверенные команды](../game/units/commands.md) |
 | [telemetry](../apps/telemetry.md) | `adapter`, `sampler_adapter` | JSONL-события, файлы состояния, послебоевые снимки обеих сторон | `runtime/post_battle_telemetry.lua` |
+| [bridge](../apps/bridge.md) | `adapter`, `exchange_adapter`, `services` | Мост к сети: файл состояния помощнику, его приказы нашим отрядам | новое |
 
 ## Точки входа (`src/entries`)
 
-Каждая точка входа измеряет игру или записывает бой; своих решений в бою у неё нет.
+Каждая точка входа измеряет игру или записывает бой; своих решений в бою у неё нет (в `nn_arena`
+с `--own-ai net` нашей стороной командует сеть, а не точка входа).
 
 | Точка входа | Цель сборки | Сценарий | Что делает |
 |---|---|---|---|
@@ -39,7 +41,7 @@
 | [archer_range](../apps/entries.md#archer_range) | `archer-range` | `archer_range.xml` | Когда лучники начинают стрелять при разной глубине блока, урон стрел по дистанции |
 | [enemy_layout](../apps/entries.md#enemy_layout) | `enemy-layout` | `enemy_layout.xml` | Как штатный ИИ расставляется и стоит при разных составах |
 | [manual_record](../apps/entries.md#manual) | `manual` | `manual_hamlet.xml` | Ручной бой игрока с записью |
-| [nn_arena](../apps/entries.md#nn_arena) | `nn-arena` | `nn_arena.xml` | Запись боёв ИИ игры на арене: каждый отряд обеих сторон раз в секунду — данные для обучения |
+| [nn_arena](../apps/entries.md#nn_arena) | `nn-arena` | `nn_arena.xml` | Запись боёв ИИ игры на арене: каждый отряд обеих сторон раз в секунду — данные для обучения; с `--own-ai net` нашей стороной командует сеть |
 | [map_capture](../apps/entries.md#map_capture) | `map-capture` | `map_capture.xml` | Сетка карты, объекты и достижимость в CSV/JSONL |
 
 ## Инструменты вне игры (`tools`)
@@ -48,12 +50,13 @@
 |---|---|
 | `tools/build.py`, `tools/pack/` | Бандлер модулей, запись PFH5, manifest ([сборка](../launch/build.md)) |
 | `tools/launcher/launch.ps1` | Установка, запуск на честной сложности, ожидание, очистка ([запуск](../launch/run.md)) |
+| `tools/launcher/watch.ps1` | Бой, где нашей стороной командует сеть: сборка, помощник в контейнере, launcher ([смотреть бой сети](../launch/watch.md)) |
 | `tools/telemetry/read_jsonl.ps1` | Чтение JSONL, пока игра пишет |
 | `tools/config.py`, `tools/lua_runtime.py` | Пути и настройки машины; Lua 5.1 в Python для тестов |
 | `tools/roster.py`, `tools/readouts.py` | Ростер отрядов из прогонов; каталог показателей и профили сбора |
 | `tools/archer_range.py`, `tools/enemy_layout.py` | Сценарии и настройки зондов `archer-range` и `enemy-layout` |
 | `tools/analysis/` | Карта высот, склоны, проходы, проходимость, препятствия; разборы прогонов `move-probe`, `unit-readout`, `archer-range`, `enemy-layout` |
-| `tools/nn/` | Данные для обучения: правила из базы игры (`gamedb.py`), [паспорта отрядов](../training/units.md) (`dbtables.py`, `units.py`), сценарий арены и именованных арен (`scenario.py`), записи арены как массивы (`gamedata.py`), [замеры](../training/measurements.md) для симулятора (`measure.py`), запуск в контейнере с PyTorch (`dock.sh`) — [подробнее](../training/README.md) |
+| `tools/nn/` | Данные для обучения: правила из базы игры (`gamedb.py`), [паспорта отрядов](../training/units.md) (`dbtables.py`, `units.py`), сценарий арены и именованных арен (`scenario.py`), записи арены как массивы (`gamedata.py`), [замеры](../training/measurements.md) для симулятора (`measure.py`), запуск в контейнере с PyTorch (`dock.sh`), помощник, который командует нашей стороной в игре (`companion/`, [bridge](../apps/bridge.md)) — [подробнее](../training/README.md) |
 | `tools/docs/` | Оглавления хабов документации (`python -m tools.docs.index_doc`) |
 | `tools/architecture.py` | Уровень каждого приложения (сейчас все — основа) — для тестов архитектуры и документации |
 

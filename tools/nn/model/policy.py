@@ -42,19 +42,58 @@ class Actor(nn.Module):
         B, N = obs_t["own"].shape
         return torch.zeros(B, 1 + N, self.cfg.d, device=obs_t["tokens"].device)
 
-    def forward(self, obs_t, h=None, use_adapter=True):
-        """-> (logits, new memory). h: memory of the last decision (None: start of battle)."""
+    def _split(self):
+        """Attention blocks before the memory (the rest come after it)."""
+        return len(self.blocks) - 1 if self.memory is not None else len(self.blocks)
+
+    def encode(self, obs_t, use_adapter=True):
+        """Tokens -> the blocks before the memory: (x [B, 1 + N, d], attention bias, adapter)."""
         adapter = obs_t["adapter"] if use_adapter else None
         x = self.encoder(obs_t["tokens"], obs_t["ctx"])
         bias = attention_bias(obs_t, self.dist, self.cfg.dist_bins)
-        h = self.initial(obs_t) if h is None else h
-        last = len(self.blocks) - 1
-        for i, block in enumerate(self.blocks):
-            if i == last and self.memory is not None:
-                keep = torch.nn.functional.pad(obs_t["attend"], (1, 0), value=True).float()
-                x, h = self.memory(x, h, keep)
+        for block in self.blocks[:self._split()]:
             x = block(x, bias, adapter)
-        return self.heads(x, obs_t), h
+        return x, bias, adapter
+
+    def finish(self, x, bias, adapter, obs_t):
+        """The blocks after the memory and the heads -> logits."""
+        for block in self.blocks[self._split():]:
+            x = block(x, bias, adapter)
+        return self.heads(x, obs_t)
+
+    @staticmethod
+    def keep(obs_t):
+        return torch.nn.functional.pad(obs_t["attend"], (1, 0), value=True).float()
+
+    def forward(self, obs_t, h=None, use_adapter=True):
+        """-> (logits, new memory). h: memory of the last decision (None: start of battle)."""
+        x, bias, adapter = self.encode(obs_t, use_adapter)
+        h = self.initial(obs_t) if h is None else h
+        if self.memory is not None:
+            x, h = self.memory(x, h, self.keep(obs_t))
+        return self.finish(x, bias, adapter, obs_t), h
+
+    def sequence(self, obs_seq, h0, reset, use_adapter=True):
+        """Decisions in a row, for training the memory through time.
+
+        obs_seq: dict of [T, B, ...]; h0 [B, 1 + N, d]: the memory before the first; reset [T, B]:
+        a new battle begins at step t (the memory starts empty). -> (logits of [T, B, ...], last memory).
+        The parts without memory run on all T x B at once; only the GRU steps one by one."""
+        T, B = obs_seq["own"].shape[:2]
+        flat = {k: v.reshape(T * B, *v.shape[2:]) for k, v in obs_seq.items()}
+        x, bias, adapter = self.encode(flat, use_adapter)
+        h = self.initial(flat)[:B] if h0 is None else h0
+        if self.memory is not None:
+            x = x.reshape(T, B, *x.shape[1:])
+            keep = self.keep(flat).reshape(T, B, -1)
+            out = []
+            for t in range(T):
+                h = h * (~reset[t]).float()[:, None, None]
+                xt, h = self.memory(x[t], h, keep[t])
+                out.append(xt)
+            x = torch.stack(out).reshape(T * B, *x.shape[2:])
+        logits = self.finish(x, bias, adapter, flat)
+        return {k: v.reshape(T, B, *v.shape[1:]) for k, v in logits.items()}, h
 
 
 def parameters(module):

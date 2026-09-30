@@ -37,6 +37,8 @@ What every entry does: [entry points](../apps/entries.md).
 | `--features` | map-capture | After deployment also read objects and cell reachability |
 | `--window MIN_X MAX_X MIN_Z MAX_Z` | map-capture | Capture only this part of the map |
 | `--own-ai attack\|defend` | nn-arena | Our side under CA's planner attacks (the game's AI defends) or defends (the game's AI attacks) |
+| `--own-ai net` | nn-arena | The network in the companion commands our side, the game's AI attacks ([watching the network](watch.md)) |
+| `--decide-ms 250..5000` | nn-arena `net` | Battle time between two decisions of the network, ms (1000) |
 | `--layout`, `--enemy-mode native\|defend` | enemy-layout | Enemy layout; the game AI as is or told to defend (default) |
 | `--range-mode fire_at_will\|attack\|damage` | archer-range | When archers start shooting by the depth of their block; `damage` — damage to a fearless target at 70–120 m |
 | `--damage-rotate N` | archer-range `damage` | Shift the distances by N lanes (the same distance on other ground) |

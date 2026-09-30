@@ -93,3 +93,9 @@ def ammo(keys, passports=None):
     passports = passports or load()
     return np.array([(passports[k].get("missile") or {}).get("ammo", 0) * passports[k]["men"] if k else 0
                      for k in keys], dtype=np.float32)
+
+
+def lords(keys, passports=None):
+    """True for the army's general (caste lord) per unit; False for padding."""
+    passports = passports or load()
+    return np.array([bool(k) and passports[k].get("caste") == "lord" for k in keys], dtype=bool)

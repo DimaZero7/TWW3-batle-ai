@@ -70,9 +70,12 @@ local function controller(log)
     function uc:change_behaviour_active() end
     function uc:melee() end
     function uc:halt() log[#log + 1] = 'halt' end
-    function uc:attack_unit() log[#log + 1] = 'attack' end
+    function uc:attack_unit(enemy) log[#log + 1] = 'attack' .. (enemy and (' ' .. enemy:name()) or '') end
     function uc:teleport_to_location() end
-    function uc:goto_location() self.unit.moving = true end
+    function uc:goto_location(p, run)
+        self.unit.moving = true
+        log[#log + 1] = string.format('goto %s %g %g %s', self.unit:name(), p:get_x(), p:get_z(), tostring(run))
+    end
     -- Arrives at once: entry tests check wiring, not movement.
     function uc:goto_location_angle_width(p) self.unit.pos = vec(p:get_x(), p:get_y(), p:get_z()) end
     function uc:rotate() end
@@ -128,8 +131,12 @@ function F.manager(sides)
         self.timers = {}
         for _, fn in pairs(due) do fn() end
     end
-    bm.repeating = {}
-    function bm:repeat_callback(fn, _, name) self.repeating[name or fn] = fn end
+    -- Repeating callbacks run on tick() once their interval has passed (at most once a tick).
+    bm.repeating, bm.intervals, bm.last_run = {}, {}, {}
+    function bm:repeat_callback(fn, ms, name)
+        local key = name or fn
+        self.repeating[key], self.intervals[key], self.last_run[key] = fn, ms or 0, self.now
+    end
     function bm:remove_process(name) self.repeating[name] = nil end
     function bm:remove_real_callback(name) self.timers[name] = nil end
     function bm:end_current_battle_phase() self:set_phase('Deployed') end
@@ -160,8 +167,12 @@ function F.manager(sides)
         self.now = self.now + (ms or 1000)
         local names = {}
         for name in pairs(self.repeating) do names[#names + 1] = name end
+        table.sort(names, function(a, b) return tostring(a) < tostring(b) end)
         for _, name in ipairs(names) do
-            if self.repeating[name] then self.repeating[name]() end
+            if self.repeating[name] and self.now - self.last_run[name] >= self.intervals[name] then
+                self.last_run[name] = self.now
+                self.repeating[name]()
+            end
         end
     end
     return bm

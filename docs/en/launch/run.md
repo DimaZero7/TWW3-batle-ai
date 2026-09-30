@@ -13,7 +13,10 @@ Options:
 `-Target ai-vs-ai|unit-readout|move-probe|manual|roster-capture|archer-range|enemy-layout|nn-arena|map-capture`
 (required; the target must be [built](build.md) first),
 `-TimeoutSeconds` (default 240 s for loading + the battle's deadline `deadline_s` from
-`manifest.json`; 1200 without one), `-KeepGameOpen` (leave the game running after completion).
+`manifest.json`; 1200 without one), `-KeepGameOpen` (leave the game running after completion),
+`-LingerSeconds` (after the result keep the game open this long, or until the user closes it, then
+clean up as usual; 0 by default). To watch the network command our side, use
+[watching the network](watch.md): it starts the companion and calls this launcher.
 
 > **Status:** the launcher was verified in game on 2026-09-27 with the
 > `ai-vs-ai` target: load, events, result copy and cleanup of its own files worked.
