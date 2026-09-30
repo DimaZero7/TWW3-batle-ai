@@ -9,13 +9,16 @@ ready: [network model](network.md).
 
 ```mermaid
 flowchart LR
-  arena["config/nn/arena.json"] --> scen["tools/nn/scenario.py<br/>→ scenarios/nn_arena.xml"]
+  arena["config/nn/arena.json<br/>config/nn/arenas.json"] --> scen["tools/nn/scenario.py<br/>→ scenarios/nn_arena.xml"]
   scen --> game["Battle in the game<br/>entries/nn_arena.lua"]
   game --> runs["build/nn-arena/runs/…<br/>events.jsonl"]
   runs --> load["tools/nn/gamedata.py<br/>numpy arrays"]
   db["data/db.pack"] --> rules["config/nn/game_rules.json"]
+  db --> passports["config/nn/units.json"]
   load --> train["Training<br/>in the container"]
+  load --> measure["tools/nn/measure.py<br/>→ build/nn-measure/targets.json"]
   rules --> train
+  passports --> train
 ```
 
 ## The arena
@@ -32,6 +35,10 @@ flowchart LR
   leads our side — `attack` or `defend`; side 2 is always the game's AI
   ([the game's own AI](../game/game-ai.md)). The defender is the side that wins
   when time runs out ([attacker and defender](../game/battle-roles.md)).
+- `config/nn/arenas.json` — **named arenas** with an army per side: the same map
+  and zones as `arena.json`, but each side its own faction and units, and the
+  arena its own gap. They hold the [measurements](measurements.md): melee pairs,
+  missile units against a target, whole battles Empire against Skaven.
 
 ## How to record a battle
 
@@ -40,7 +47,28 @@ flowchart LR
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -Target nn-arena
 ```
 
-- One battle takes about 2 minutes at ×20: loading ~90 s, the battle 25–45 s.
+### Different armies
+
+Pick a named arena with `--arena`; `--own-ai hold` leaves our side without
+orders (it stands, a target), and the game's AI attacks it:
+
+```powershell
+.venv/Scripts/python -m tools.build nn-arena --arena whole_emp_v_skv --own-ai attack --timeout 1200
+.venv/Scripts/python -m tools.build nn-arena --arena missile_archers_v_slave --own-ai hold --timeout 900
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -Target nn-arena
+```
+
+- A new army is a new entry in `config/nn/arenas.json`: `sides.own` and
+  `sides.enemy`, each `faction` and `units` (`slot`, `key`, `men`, `forward`,
+  `lateral`, `width`, `general` for the lord). Slots are unique within a side; a
+  side has at most one general (none is allowed: the one-unit pairs have none).
+- The run's manifest records `arena` and `factions`; the loader reads the units
+  from it.
+
+### Time and difficulty
+
+- One battle takes about 2 minutes at ×20: loading ~90 s, the battle 25–45 s
+  (a one-unit pair — under a minute in all).
 - The launcher sets the difficulty itself — Normal ([fair difficulty](../launch/run.md#fair-difficulty),
   [battle difficulty](../game/difficulty.md)).
 - A battle ends with one side winning (`completed`), at our limit of game time
@@ -54,7 +82,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -T
 
 | File | What |
 |---|---|
-| `manifest.json` | build and settings: `own_ai`, `enemy_role`, unit places |
+| `manifest.json` | build and settings: `arena`, `factions`, `own_ai`, `enemy_role`, unit places |
 | `launch.json` | the launch, `battle_difficulty` and `user_battle_difficulty` |
 | `events.jsonl` | battle events |
 | `status.json` | the run's outcome, `preferences_restored` |
@@ -91,28 +119,39 @@ from tools.nn import gamedata
 for run in gamedata.runs():          # Normal difficulty only
     b = gamedata.load(run)
     b.t               # seconds, [T]
-    b.f["hp"]         # [T, 14]: our 7 units, then the enemy's 7
-    b.target          # [T, 14]: target index, -1 — none
-    b.own_ai, b.enemy_role, b.winner, b.result
+    b.f["hp"]         # [T, N]: our units, then the enemy's (the mirror arena: 7 + 7 = 14)
+    b.target          # [T, N]: target index, -1 — none
+    b.names, b.keys, b.side   # [N]: script names, unit keys, side 1 or 2
+    b.arena, b.own_ai, b.enemy_role, b.winner, b.result
 ```
 
-- Slot order: `lord`, `spear_1`…`spear_4`, `archer_1`, `archer_2` — ours first,
-  then the enemy's.
-- `runs(own_ai=None, since=None, fair_only=True)`: `fair_only` keeps only battles
-  at Normal difficulty.
+- Unit order: as the run's manifest lists them, ours first. In the mirror arena:
+  `lord`, `spear_1`…`spear_4`, `archer_1`, `archer_2`.
+- `runs(own_ai=None, since=None, fair_only=True, arena=None)`: `fair_only` keeps
+  only battles at Normal difficulty; `arena="arena"` — only the mirror arena. The
+  runs of the dropped battle series (with `series.json`) are left out.
 - `python -m tools.nn.gamedata` lists the battles.
 
-As of 30.09.2026 there are 40 runs, 18 of them fair battles with a result. The
+As of 30.09.2026 there are 40 runs of the mirror arena, 18 of them fair battles with a result. The
 mechanics ([morale](../game/units/morale.md), [melee](../game/units/melee.md) and
 the other pages below) were worked out from the first 13 of them:
 `20260930-130637` … `20260930-132200`, 7522 s of records. 5 more battles
 (`20260930-133202` … `20260930-133710`) were recorded after the analysis; all 18
-together are 9886 s.
+together are 9886 s. Then 28 battles of the [measurements](measurements.md) on
+named arenas (`20260930-181821` … `20260930-184908`).
 
 ## The game's rules
 
 The rule numbers come from the game's database: [the game's database](../game/database.md),
 `config/nn/game_rules.json` (`py -3.14 -m tools.nn.gamedb`).
+
+The units' numbers — [unit passports](units.md), `config/nn/units.json`
+(`py -3.14 -m tools.nn.units`): men, health, speed, weapons, armour, shield and
+shooting of the seven v1 units (Empire and Skaven), checked against their cards from battle.
+
+Numbers from battles to check the simulator against — [measurements in the game](measurements.md)
+(`python -m tools.nn.measure` → `build/nn-measure/targets.json`): melee one against one,
+shooting at a unit that stands, whole battles of the Empire against the Skaven.
 
 What is known about the mechanics:
 [morale](../game/units/morale.md) ·

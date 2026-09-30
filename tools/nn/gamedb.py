@@ -5,7 +5,8 @@
   _kv_fatigue_tables                fatigue rules;
   _kv_rules_tables                  battle rules: melee hit chance, attack interval, armour roll,
                                     defence in the flank and rear, charge decay;
-  land_units_tables                 base melee attack, defence and leadership of the arena's units;
+  land_units_tables                 base melee attack, defence and leadership of the arena's units
+                                    (all unit numbers: tools/nn/units.py -> config/nn/units.json);
   unit_experience_bonuses_tables    what a rank adds (leadership, attack, defence, accuracy);
   unit_experience_thresholds_tables experience needed for each rank.
 Writes config/nn/game_rules.json (data for training the network). The game's
@@ -19,6 +20,7 @@ import sys
 from pathlib import Path
 
 from tools import config as project
+from tools.nn import dbtables
 
 OUT = project.CONFIG_DIR / "nn" / "game_rules.json"
 TABLES = {"morale": r"db\_kv_morale_tables\data__", "fatigue": r"db\_kv_fatigue_tables\data__",
@@ -114,18 +116,10 @@ def exp_levels(b):
     return {k: v for k, v in out.items() if k.startswith("land_")}
 
 
-def unit_row(b, key):
-    """Melee attack, melee defence and leadership: the three int32 after the two
-    text fields that follow the unit's key in land_units (checked against the card's attack and defence)."""
-    k = key.encode()
-    i = b.find(struct.pack("<H", len(k)) + k)
-    assert i >= 0, key
-    p = i + 2 + len(k) + 1                     # the key, then a byte flag
-    for _ in range(2):                         # skeleton, blood kind
-        n = struct.unpack_from("<H", b, p)[0]
-        p += 2 + n
-    ma, md, leadership = struct.unpack_from("<iii", b, p)
-    return {"melee_attack": ma, "melee_defence": md, "leadership": leadership}
+def unit_row(rows, key):
+    """Melee attack, melee defence and leadership of a unit: land_units decoded whole (tools/nn/dbtables.py)."""
+    row = next(r for r in rows if r["key"] == key)
+    return {"melee_attack": row["melee_attack"], "melee_defence": row["melee_defence"], "leadership": row["morale"]}
 
 
 def card_melee(key):
@@ -138,11 +132,12 @@ def main():
     sys.stdout.reconfigure(encoding="utf-8")
     game = Path(project.load()["game_dir"]) / "data" / "db.pack"
     raw = read_entries(game, set(TABLES.values()))
+    land_units = dbtables.decode(raw[TABLES["units"]], "land_units")
     rules = {"_source": str(game), "morale": kv_table(raw[TABLES["morale"]]),
              "fatigue": kv_table(raw[TABLES["fatigue"]]), "battle": kv_table(raw[TABLES["battle"]]),
              "experience_bonus": exp_bonuses(raw[TABLES["exp_bonus"]]),
              "experience_levels": exp_levels(raw[TABLES["exp_levels"]]),
-             "units": {t: dict(unit_row(raw[TABLES["units"]], k), key=k) for t, k in UNIT_KEYS.items()}}
+             "units": {t: dict(unit_row(land_units, k), key=k) for t, k in UNIT_KEYS.items()}}
     for t, u in rules["units"].items():
         assert (u["melee_attack"], u["melee_defence"]) == card_melee(u["key"]), (t, u)
     OUT.write_text(json.dumps(rules, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")

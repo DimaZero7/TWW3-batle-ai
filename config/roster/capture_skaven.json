@@ -1,5 +1,5 @@
 {
-  "description": "Roster capture of Skaven units (user, 27.09.2026: Skaven have more soldiers per unit). Same widths as config/roster/capture.json.",
+  "description": "Roster capture of Skaven units (user, 27.09.2026: Skaven have more soldiers per unit); skavenslave slingers added 30.09.2026 for the unit passports (captured with the warlord only). Same widths as config/roster/capture.json.",
   "faction": "wh2_main_skv_skaven",
   "units": [
     {
@@ -14,6 +14,10 @@
     {
       "key": "wh2_main_skv_inf_skavenslave_spearmen_0",
       "men": 180
+    },
+    {
+      "key": "wh2_main_skv_inf_skavenslave_slingers_0",
+      "men": 140
     }
   ],
   "slots": [

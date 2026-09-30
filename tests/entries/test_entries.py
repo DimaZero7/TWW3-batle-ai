@@ -381,6 +381,37 @@ class TestNnArena:
         assert "defend 150" in log and not any(e.startswith("attack") for e in log)
         assert rows[-1]["event"] == "result" and rows[-1]["status"] == "timeout" and rows[-1]["winner"] == 0
 
+    def test_hold_gives_no_orders_and_each_side_has_its_own_army(self, lua, tmp_path):
+        # A named arena: one Skaven unit of ours holds, two Empire units of the game's AI.
+        lua.execute("""
+            own = {fake.unit('own_slave', 'slaves', -125, 0)}
+            enemy = {fake.unit('enemy_archer', 'archers', 125, 0), fake.unit('enemy_lord', 'lord', 185, 0)}
+            bm = fake.manager({own, enemy})
+            CONFIG = {build = 'test', speed = 20, tick_ms = 1000, deadline_s = 600, stall_ms = 600000,
+                timeout_ms = 600000, defend_radius_m = 150, own_ai = 'hold', units = {
+                    own = {{script_name = 'own_slave', slot = 'slave', key = 'slaves'}},
+                    enemy = {{script_name = 'enemy_archer', slot = 'archer', key = 'archers'},
+                             {script_name = 'enemy_lord', slot = 'lord', key = 'lord'}}}}
+            local state = require('entries.nn_arena').main(bm, CONFIG,
+                {common = fake.common, battle_vector = fake.vector_type})
+            bm:pump()
+            for _ = 1, 20 do own[1].men = own[1].men - 1; bm:tick() end   -- shot at, stands
+            bm.outcome, bm.winner = true, 2
+            bm:tick()
+            assert(state.finished and state.planner == nil)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        kinds = [r["event"] for r in rows]
+        assert "error" not in kinds, [r for r in rows if r["event"] == "error"]
+        assert next(r for r in rows if r["event"] == "own_ai")["mode"] == "hold"
+        assert "idle_kick" not in kinds and "rejoined" not in kinds
+        assert list(lua.eval("bm.planner_log").values()) == []
+        sample = [r for r in rows if r["event"] == "nn_sample"][-1]
+        assert [(u["n"], u["side"]) for u in sample["units"]] == [
+            ("own_slave", 1), ("enemy_archer", 2), ("enemy_lord", 2)]
+        assert rows[-1]["status"] == "completed" and rows[-1]["idle_kicks"] == 0
+        assert all(r["policy"] == "nn_arena_hold" for r in rows)
+
     def test_an_unknown_own_ai_is_an_error(self, lua, tmp_path):
         lua.execute(self.SETUP + """
             CONFIG.own_ai = 'net'

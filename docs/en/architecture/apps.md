@@ -53,7 +53,7 @@ Every entry measures the game or records a battle; none makes decisions of its o
 | `tools/roster.py`, `tools/readouts.py` | The unit roster from runs; the readout catalogue and collection profiles |
 | `tools/archer_range.py`, `tools/enemy_layout.py` | Scenarios and settings of the `archer-range` and `enemy-layout` probes |
 | `tools/analysis/` | Height map, slopes, passages, passability, obstacles; reports of `move-probe`, `unit-readout`, `archer-range`, `enemy-layout` runs |
-| `tools/nn/` | Data for training: rules from the game's database (`gamedb.py`), the arena's scenario (`scenario.py`), arena records as arrays (`gamedata.py`), running in a PyTorch container (`dock.sh`) — [more](../training/README.md) |
+| `tools/nn/` | Data for training: rules from the game's database (`gamedb.py`), [unit passports](../training/units.md) (`dbtables.py`, `units.py`), the scenario of the arena and the named arenas (`scenario.py`), arena records as arrays (`gamedata.py`), [measurements](../training/measurements.md) for the simulator (`measure.py`), running in a PyTorch container (`dock.sh`) — [more](../training/README.md) |
 | `tools/docs/` | Indexes of the documentation hubs (`python -m tools.docs.index_doc`) |
 | `tools/architecture.py` | The level of every app (all are the base today), for the architecture and docs tests |
 

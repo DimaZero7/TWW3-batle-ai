@@ -1,0 +1,133 @@
+{
+  "description": "Named arenas for measurements in the game (step 2 of the simulator, docs/en/training/measurements.md; 30.09.2026). Each takes the map, zones and weather from config/nn/arena.json and sets its own gap and both armies: sides.own is ours (CA's script AI planner: attack or defend; or hold = no orders, stands), sides.enemy the game's AI. Positions as in arena.json: forward towards the enemy, lateral to the right; forward 0 of both sides is gap_m apart. Build: python -m tools.build nn-arena --arena <name> --own-ai attack|defend|hold.",
+  "arenas": {
+    "pair_spear_v_slave": {
+      "note": "melee pair: Empire spearmen against skavenslave spearmen",
+      "gap_m": 150, "defend_radius_m": 150,
+      "sides": {
+        "own": {"faction": "wh_main_emp_empire", "units": [
+          {"slot": "spear", "key": "wh_main_emp_inf_spearmen_0", "men": 120, "forward": 0, "lateral": 0, "width": 30}
+        ]},
+        "enemy": {"faction": "wh2_main_skv_skaven", "units": [
+          {"slot": "slave", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": 0, "width": 30}
+        ]}
+      }
+    },
+    "pair_spear_v_clanrat": {
+      "note": "melee pair: Empire spearmen against clanrat spearmen",
+      "gap_m": 150, "defend_radius_m": 150,
+      "sides": {
+        "own": {"faction": "wh_main_emp_empire", "units": [
+          {"slot": "spear", "key": "wh_main_emp_inf_spearmen_0", "men": 120, "forward": 0, "lateral": 0, "width": 30}
+        ]},
+        "enemy": {"faction": "wh2_main_skv_skaven", "units": [
+          {"slot": "clanrat", "key": "wh2_main_skv_inf_clanrat_spearmen_0", "men": 160, "forward": 0, "lateral": 0, "width": 30}
+        ]}
+      }
+    },
+    "pair_general_v_clanrat": {
+      "note": "melee pair: the Empire General against clanrat spearmen",
+      "gap_m": 150, "defend_radius_m": 150,
+      "sides": {
+        "own": {"faction": "wh_main_emp_empire", "units": [
+          {"slot": "lord", "key": "wh_main_emp_cha_general_0", "men": 1, "general": true, "forward": 0, "lateral": 0, "width": 5}
+        ]},
+        "enemy": {"faction": "wh2_main_skv_skaven", "units": [
+          {"slot": "clanrat", "key": "wh2_main_skv_inf_clanrat_spearmen_0", "men": 160, "forward": 0, "lateral": 0, "width": 30}
+        ]}
+      }
+    },
+    "pair_warlord_v_spear": {
+      "note": "melee pair: the Skaven Warlord against Empire spearmen",
+      "gap_m": 150, "defend_radius_m": 150,
+      "sides": {
+        "own": {"faction": "wh2_main_skv_skaven", "units": [
+          {"slot": "lord", "key": "wh2_main_skv_cha_warlord_0", "men": 1, "general": true, "forward": 0, "lateral": 0, "width": 5}
+        ]},
+        "enemy": {"faction": "wh_main_emp_empire", "units": [
+          {"slot": "spear", "key": "wh_main_emp_inf_spearmen_0", "men": 120, "forward": 0, "lateral": 0, "width": 30}
+        ]}
+      }
+    },
+    "missile_archers_v_slave": {
+      "note": "missile: Empire archers (the game's AI) shoot skavenslave spearmen that hold (--own-ai hold)",
+      "gap_m": 250, "defend_radius_m": 150,
+      "sides": {
+        "own": {"faction": "wh2_main_skv_skaven", "units": [
+          {"slot": "slave", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": 0, "width": 30}
+        ]},
+        "enemy": {"faction": "wh_main_emp_empire", "units": [
+          {"slot": "archer", "key": "wh2_dlc13_emp_inf_archers_0", "men": 90, "forward": 0, "lateral": 0, "width": 40}
+        ]}
+      }
+    },
+    "missile_slingers_v_spear": {
+      "note": "missile: skavenslave slingers (the game's AI) shoot Empire spearmen that hold (--own-ai hold)",
+      "gap_m": 250, "defend_radius_m": 150,
+      "sides": {
+        "own": {"faction": "wh_main_emp_empire", "units": [
+          {"slot": "spear", "key": "wh_main_emp_inf_spearmen_0", "men": 120, "forward": 0, "lateral": 0, "width": 30}
+        ]},
+        "enemy": {"faction": "wh2_main_skv_skaven", "units": [
+          {"slot": "sling", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": 0, "lateral": 0, "width": 35}
+        ]}
+      }
+    },
+    "whole_emp_v_skv": {
+      "note": "whole battle, equal budget: Empire 2500 (ours) against Skaven 2575 (the game's AI)",
+      "gap_m": 350, "defend_radius_m": 150,
+      "sides": {
+        "own": {"faction": "wh_main_emp_empire", "units": [
+          {"slot": "lord", "key": "wh_main_emp_cha_general_0", "men": 1, "general": true, "forward": -60, "lateral": 0, "width": 5},
+          {"slot": "spear_1", "key": "wh_main_emp_inf_spearmen_0", "men": 120, "forward": 0, "lateral": -54, "width": 30},
+          {"slot": "spear_2", "key": "wh_main_emp_inf_spearmen_0", "men": 120, "forward": 0, "lateral": -18, "width": 30},
+          {"slot": "spear_3", "key": "wh_main_emp_inf_spearmen_0", "men": 120, "forward": 0, "lateral": 18, "width": 30},
+          {"slot": "spear_4", "key": "wh_main_emp_inf_spearmen_0", "men": 120, "forward": 0, "lateral": 54, "width": 30},
+          {"slot": "archer_1", "key": "wh2_dlc13_emp_inf_archers_0", "men": 90, "forward": -35, "lateral": -30, "width": 40},
+          {"slot": "archer_2", "key": "wh2_dlc13_emp_inf_archers_0", "men": 90, "forward": -35, "lateral": 30, "width": 40}
+        ]},
+        "enemy": {"faction": "wh2_main_skv_skaven", "units": [
+          {"slot": "lord", "key": "wh2_main_skv_cha_warlord_0", "men": 1, "general": true, "forward": -60, "lateral": 0, "width": 5},
+          {"slot": "slave_1", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": -90, "width": 30},
+          {"slot": "slave_2", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": -54, "width": 30},
+          {"slot": "clanrat_1", "key": "wh2_main_skv_inf_clanrat_spearmen_0", "men": 160, "forward": 0, "lateral": -18, "width": 30},
+          {"slot": "clanrat_2", "key": "wh2_main_skv_inf_clanrat_spearmen_0", "men": 160, "forward": 0, "lateral": 18, "width": 30},
+          {"slot": "slave_3", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": 54, "width": 30},
+          {"slot": "slave_4", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": 90, "width": 30},
+          {"slot": "sling_1", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": -81, "width": 35},
+          {"slot": "sling_2", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": -27, "width": 35},
+          {"slot": "sling_3", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": 27, "width": 35},
+          {"slot": "sling_4", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": 81, "width": 35}
+        ]}
+      }
+    },
+    "whole_skv_v_emp": {
+      "note": "whole battle, equal budget: Skaven 2575 (ours) against Empire 2500 (the game's AI)",
+      "gap_m": 350, "defend_radius_m": 150,
+      "sides": {
+        "own": {"faction": "wh2_main_skv_skaven", "units": [
+          {"slot": "lord", "key": "wh2_main_skv_cha_warlord_0", "men": 1, "general": true, "forward": -60, "lateral": 0, "width": 5},
+          {"slot": "slave_1", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": -90, "width": 30},
+          {"slot": "slave_2", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": -54, "width": 30},
+          {"slot": "clanrat_1", "key": "wh2_main_skv_inf_clanrat_spearmen_0", "men": 160, "forward": 0, "lateral": -18, "width": 30},
+          {"slot": "clanrat_2", "key": "wh2_main_skv_inf_clanrat_spearmen_0", "men": 160, "forward": 0, "lateral": 18, "width": 30},
+          {"slot": "slave_3", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": 54, "width": 30},
+          {"slot": "slave_4", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": 90, "width": 30},
+          {"slot": "sling_1", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": -81, "width": 35},
+          {"slot": "sling_2", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": -27, "width": 35},
+          {"slot": "sling_3", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": 27, "width": 35},
+          {"slot": "sling_4", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": 81, "width": 35}
+        ]},
+        "enemy": {"faction": "wh_main_emp_empire", "units": [
+          {"slot": "lord", "key": "wh_main_emp_cha_general_0", "men": 1, "general": true, "forward": -60, "lateral": 0, "width": 5},
+          {"slot": "spear_1", "key": "wh_main_emp_inf_spearmen_0", "men": 120, "forward": 0, "lateral": -54, "width": 30},
+          {"slot": "spear_2", "key": "wh_main_emp_inf_spearmen_0", "men": 120, "forward": 0, "lateral": -18, "width": 30},
+          {"slot": "spear_3", "key": "wh_main_emp_inf_spearmen_0", "men": 120, "forward": 0, "lateral": 18, "width": 30},
+          {"slot": "spear_4", "key": "wh_main_emp_inf_spearmen_0", "men": 120, "forward": 0, "lateral": 54, "width": 30},
+          {"slot": "archer_1", "key": "wh2_dlc13_emp_inf_archers_0", "men": 90, "forward": -35, "lateral": -30, "width": 40},
+          {"slot": "archer_2", "key": "wh2_dlc13_emp_inf_archers_0", "men": 90, "forward": -35, "lateral": 30, "width": 40}
+        ]}
+      }
+    }
+  }
+}

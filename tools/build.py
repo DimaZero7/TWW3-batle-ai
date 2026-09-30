@@ -9,6 +9,7 @@ Usage:
     python -m tools.build archer-range --range-mode damage
     python -m tools.build enemy-layout --layout balanced_5
     python -m tools.build nn-arena --own-ai defend --timeout 900
+    python -m tools.build nn-arena --arena pair_spear_v_slave --own-ai attack   # config/nn/arenas.json
 
 Output: build/<target>/ with the .pack, the bundled script and manifest.json.
 Install and launch with tools/launcher/launch.ps1.
@@ -219,9 +220,13 @@ def main(argv=None):
                              "or shoot a fearless target at fixed distances until out of arrows (damage)")
     parser.add_argument("--damage-rotate", type=int, default=0,
                         help="archer-range --range-mode damage: shift the distances by this many lanes")
-    parser.add_argument("--own-ai", choices=("attack", "defend"), default="attack",
+    parser.add_argument("--own-ai", choices=("attack", "defend", "hold"), default="attack",
                         help="nn-arena: CA's script AI planner attacks or defends with our side; "
-                             "the game's AI does the other")
+                             "the game's AI does the other; hold: our side gets no orders and stands "
+                             "(a target for the game's AI to attack)")
+    parser.add_argument("--arena", default="arena",
+                        help="nn-arena: 'arena' (config/nn/arena.json, the same army on both sides) "
+                             "or a named arena in config/nn/arenas.json")
     parser.add_argument("--features", action="store_true",
                         help="map-capture: also read objects and reachability after deployment")
     args = parser.parse_args(argv)
@@ -265,8 +270,9 @@ def main(argv=None):
             from tools.nn import scenario as nn_scenario
             # The side that wins on timeout defends: ours when the planner defends,
             # the game's AI when ours attacks.
-            enemy_role = {"attack": "defend", "defend": "attack"}[args.own_ai]
-            arena = nn_scenario.write_scenario("enemy" if enemy_role == "defend" else "own")
+            enemy_role = {"attack": "defend", "defend": "attack", "hold": "attack"}[args.own_ai]
+            arena = nn_scenario.write_scenario("enemy" if enemy_role == "defend" else "own",
+                                               nn_scenario.load_arena(args.arena))
             run_config.update(nn_scenario.run_config(arena), own_ai=args.own_ai, enemy_role=enemy_role)
         if args.target == "manual":
             # The player sets the pace: no forced speed, an hour by default.

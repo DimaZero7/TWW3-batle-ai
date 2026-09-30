@@ -87,7 +87,10 @@ The roster also has Skaven (list `config/roster/capture_skaven.json`, captured
 with `python -m tools.build roster-capture --capture config/roster/capture_skaven.json`):
 the warlord `wh2_main_skv_cha_warlord_0` (1 man), clanrat spearmen
 `wh2_main_skv_inf_clanrat_spearmen_0` (160) and skavenslave spearmen
-`wh2_main_skv_inf_skavenslave_spearmen_0` (180). `python -m tools.roster show`
+`wh2_main_skv_inf_skavenslave_spearmen_0` (180). On 30.09.2026 the skavenslave
+slingers `wh2_main_skv_inf_skavenslave_slingers_0` (140) were added to the list;
+their card was captured in a run with only the warlord (for the
+[unit passports](../../training/units.md)). `python -m tools.roster show`
 prints every number for any unit.
 
 ## What the card does not give, and oddities
@@ -95,8 +98,8 @@ prints every number for any unit.
 - **Card morale = 0** for all three in deployment (the game's database gives
   the archers 50). The cause is not known; we do not use the card's morale yet.
 - **No damage split** into normal and armour-piercing, for weapons or arrows:
-  the card shows only the sum. To work out "does it pierce", the split has to
-  come from the game's database or another field — not found.
+  the card shows only the sum. The split is taken from the game's database
+  ([unit passports](../../training/units.md), since 30.09.2026).
 - **Shields:** the spearmen and archers have no shields; the general has one,
   but the card has no line for it. How the card shows a shield's defence
   against arrows was not checked.

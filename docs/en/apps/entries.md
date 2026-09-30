@@ -149,18 +149,20 @@ minutes without damage.
 
 ## nn_arena — recording battles to train a network
 
-Build: `python -m tools.build nn-arena --own-ai attack|defend --timeout 900`.
+Build: `python -m tools.build nn-arena --own-ai attack|defend|hold --timeout 900 [--arena NAME]`.
 `--timeout 900` is a battle limit of 900 s of game time, as in the records of 30.09.2026;
 without it the build gives 600 s.
 Scenario `nn_arena.xml` is written by `tools/nn/scenario.py` from `config/nn/arena.json`: the
 empty flat map MP Crossroads (flat), each side a lord, 4 spearmen and 2 archers of the Empire,
-the armies' fronts 350 m apart. The script makes no battle decisions: side 2 is always led by
+the armies' fronts 350 m apart. With `--arena NAME` — a named arena from `config/nn/arenas.json`:
+each side has its own army and faction ([measurements](../training/measurements.md)). The script makes no battle decisions: side 2 is always led by
 the game's general battle AI, side 1 by CA's planner ([planner_adapter](orders.md)). The script
 repeats the planner's task, sends rallied and idle units back into battle (below) and records
 the battle. The side that wins on timeout defends:
 
 - `attack` — the planner attacks (the order repeated every 15 s), the game's AI defends;
-- `defend` — the planner defends where the army stands, the game's AI attacks.
+- `defend` — the planner defends where the army stands, the game's AI attacks;
+- `hold` — no planner: our units get no orders and stand (a target), the game's AI attacks.
 
 Every second `nn_sample` records every unit of both sides (the full view):
 

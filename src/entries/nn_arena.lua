@@ -5,7 +5,10 @@
 -- Side 1 (ours) is handed to CA's script AI planner:
 --   own_ai = 'attack' — the planner attacks the enemy force (re-issued every
 --            15 s, as generated battles do);
---   own_ai = 'defend' — the planner defends where the army stands.
+--   own_ai = 'defend' — the planner defends where the army stands;
+--   own_ai = 'hold'   — no planner, no orders: our units stand where they are
+--            (a still target for the game's AI; measurements, 30.09.2026).
+-- Each side may have its own army (tools/nn/scenario.py: named arenas).
 -- Every tick 'nn_sample' records every unit of both sides (full view: trusted
 -- research telemetry); 'nn_final' is the last such record.
 -- A unit that routs and rallies is given back to the planner with its last
@@ -39,7 +42,7 @@ local function round(v, k)
     return math.floor(v * m + 0.5) / m
 end
 
--- config: build, speed, tick_ms, deadline_s, stall_ms, timeout_ms, own_ai ('attack' | 'defend'),
+-- config: build, speed, tick_ms, deadline_s, stall_ms, timeout_ms, own_ai ('attack' | 'defend' | 'hold'),
 -- units = {own = [...], enemy = [...]} (script names, slots), defend_radius_m.
 function M.main(bm, config, globals)
     if _G.tww3_bai_nn_arena then return end
@@ -153,6 +156,20 @@ function M.main(bm, config, globals)
         flush()
     end
 
+    -- Our units in the planner: rallied units back with its last order, idle ones under fire kicked
+    -- (apps.orders.planner_adapter). Not in 'hold': nobody leads our side then.
+    local function lead(now)
+        local rallied = state.planner.check_rallies()
+        if #rallied > 0 then
+            local names = {}
+            for k, i in ipairs(rallied) do names[k] = state.sides[1][i].name end
+            emit('rejoined', {t = now - started_ms, units = names})
+        end
+        for _, k in ipairs(state.planner.check_idle(now)) do
+            emit('idle_kick', {t = now - started_ms, unit = state.sides[1][k.unit].name, stage = k.stage})
+        end
+    end
+
     local function tick()
         if not state.active then return end
         if state.stall.update(bm:time_elapsed_ms(), battle.health_signature(state.all_units)) then
@@ -170,17 +187,7 @@ function M.main(bm, config, globals)
             bm:force_battle_end(0, 'timeout', true)
             return
         end
-        -- Rallied units: back into the planner with its last order (apps.orders.planner_adapter).
-        local rallied = state.planner.check_rallies()
-        if #rallied > 0 then
-            local names = {}
-            for k, i in ipairs(rallied) do names[k] = state.sides[1][i].name end
-            emit('rejoined', {t = now - started_ms, units = names})
-        end
-        -- Idle under fire: back to the planner, then a planner of its own that attacks.
-        for _, k in ipairs(state.planner.check_idle(now)) do
-            emit('idle_kick', {t = now - started_ms, unit = state.sides[1][k.unit].name, stage = k.stage})
-        end
+        if state.planner then lead(now) end
         if config.own_ai == 'attack' and now - last_reissue >= M.REISSUE_MS then
             last_reissue = now
             state.planner.attack()
@@ -190,16 +197,14 @@ function M.main(bm, config, globals)
         flush()
     end
 
-    local function start()
-        if state.active then return end
-        started_ms, started_wall = bm:time_elapsed_ms(), clock.wall_seconds()
-        bm:modify_battle_speed(config.speed)
-        battle.speed_guard(bm, config.speed, function(from)
-            emit('speed_restored', {from_speed = from, to_speed = config.speed})
-        end)
+    local function hand_over()
         local own_units, enemy_units = {}, {}
         for _, it in ipairs(state.sides[1]) do own_units[#own_units + 1] = it.unit end
         for _, it in ipairs(state.sides[2]) do enemy_units[#enemy_units + 1] = it.unit end
+        if config.own_ai == 'hold' then
+            emit('own_ai', {mode = 'hold', own_ai = config.own_ai})
+            return
+        end
         state.planner = planner.hand_over(bm, 'tww3_bai_nn_own', state.own_alliance, own_units, enemy_units)
         if config.own_ai == 'defend' then
             local sx, sz = 0, 0
@@ -212,6 +217,16 @@ function M.main(bm, config, globals)
             state.planner.attack()
         end
         emit('own_ai', {mode = state.planner.mode, own_ai = config.own_ai})
+    end
+
+    local function start()
+        if state.active then return end
+        started_ms, started_wall = bm:time_elapsed_ms(), clock.wall_seconds()
+        bm:modify_battle_speed(config.speed)
+        battle.speed_guard(bm, config.speed, function(from)
+            emit('speed_restored', {from_speed = from, to_speed = config.speed})
+        end)
+        hand_over()
         last_reissue = bm:time_elapsed_ms()
         state.stall = battle_services.new_stall_detector(config.stall_ms)
         emit('start', {speed = config.speed, timeout_ms = config.timeout_ms, deadline_s = config.deadline_s})
@@ -235,7 +250,8 @@ function M.main(bm, config, globals)
             return
         end
         assert(common and vector_type, 'common and battle_vector globals required')
-        assert(config.own_ai == 'attack' or config.own_ai == 'defend', 'own_ai must be attack or defend')
+        assert(config.own_ai == 'attack' or config.own_ai == 'defend' or config.own_ai == 'hold',
+            'own_ai must be attack, defend or hold')
         local sides = battle.read_sides(bm)
         state.own_alliance = sides[1].alliance
         local ok_roles, roles = pcall(battle.read_roles, bm)

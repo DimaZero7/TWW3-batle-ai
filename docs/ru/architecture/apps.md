@@ -53,7 +53,7 @@
 | `tools/roster.py`, `tools/readouts.py` | Ростер отрядов из прогонов; каталог показателей и профили сбора |
 | `tools/archer_range.py`, `tools/enemy_layout.py` | Сценарии и настройки зондов `archer-range` и `enemy-layout` |
 | `tools/analysis/` | Карта высот, склоны, проходы, проходимость, препятствия; разборы прогонов `move-probe`, `unit-readout`, `archer-range`, `enemy-layout` |
-| `tools/nn/` | Данные для обучения: правила из базы игры (`gamedb.py`), сценарий арены (`scenario.py`), записи арены как массивы (`gamedata.py`), запуск в контейнере с PyTorch (`dock.sh`) — [подробнее](../training/README.md) |
+| `tools/nn/` | Данные для обучения: правила из базы игры (`gamedb.py`), [паспорта отрядов](../training/units.md) (`dbtables.py`, `units.py`), сценарий арены и именованных арен (`scenario.py`), записи арены как массивы (`gamedata.py`), [замеры](../training/measurements.md) для симулятора (`measure.py`), запуск в контейнере с PyTorch (`dock.sh`) — [подробнее](../training/README.md) |
 | `tools/docs/` | Оглавления хабов документации (`python -m tools.docs.index_doc`) |
 | `tools/architecture.py` | Уровень каждого приложения (сейчас все — основа) — для тестов архитектуры и документации |
 
