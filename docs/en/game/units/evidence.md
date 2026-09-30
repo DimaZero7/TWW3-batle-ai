@@ -66,19 +66,13 @@ Every linked dataset directory contains `events.jsonl.gz`, `analysis.json`, exac
 
 Static DB selection was extracted before live trials, with strict decode/re-encode verification. It is source-record evidence, not a measurement of damage coefficients. Game binaries and the proprietary packs themselves are not included. Builder/analyser/plot snapshots are preserved for traceability; the supported replay path below uses the **exact per-run script**, not a reconstruction with a later builder revision.
 
-## Repeat a verified experiment
+## How the experiments were replayed
 
-From the repository root, using this project's Python with the existing `.tools/python` Lupa dependency:
+The [replay builder](../../../../research/scripts/unit-actions/replay_tool.py) checked archived file hashes, compiled Lua 5.1, built the PFH5 pack, round-tripped its contents and required an **identical original pack hash**. It is kept as it was and refers to the old file layout: it does not run without fixing paths. It never installed or launched anything; the experiment labels are listed in the archive's `runs.json`.
 
-```powershell
-python -X utf8 tools/unit-actions/replay.py basic-rank1
-if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
-./tools/map-capture/launch.ps1 -TimeoutSeconds 240
-```
+Today a battle is started by the [launcher](../../../../tools/launcher/launch.ps1): it installs the pack, launches one battle, preserves outputs and closes only its own game process on completion, error or timeout ([running a battle](../../launch/run.md)). Unit orders in a live battle are checked now by the `move_probe` and `unit_readout` entries ([entries](../../apps/entries.md)).
 
-[Replay builder](../../../../research/scripts/unit-actions/replay_tool.py) checks archived file hashes, compiles Lua 5.1, builds the PFH5 pack, round-trips its contents and requires an **identical original pack hash**. It does not launch or install. Other experiment labels are listed by `--help`.
-
-The existing [launcher](../../../../tools/launcher/launch.ps1) installs the private diagnostic pack, launches once, preserves outputs and closes only its owned game process on completion/error/timeout. [Finish](../../../../tools/launcher/launch.ps1) verifies saved outputs before cleanup. No UI clicking is required. The map and unit probes **share the map-capture build directory and private pack name**: build/replay the desired probe immediately before launch; do not run them concurrently. The placeholder grid CSV in unit runs is a launcher compatibility marker, not a map measurement.
+In these experiments the map and unit probes shared one build folder and one private pack name. The placeholder grid CSV in unit runs was a launcher compatibility marker, not a map measurement.
 
 An error or timeout can leave private files for diagnosis. Preserve partial output before removing them; do not treat a failed run as completed. The successful withdrawal probes stop early on the unit leave flags because battle timers can cease when the battle ends.
 

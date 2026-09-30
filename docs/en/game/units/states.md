@@ -2,6 +2,9 @@
 
 [← Back](README.md) · [Units](README.md) · [Русский](../../../ru/game/units/states.md) · [Evidence](evidence.md)
 
+Which modes, abilities and passive effects the game returned for Empire
+spearmen, archers and the general, and what of it was checked in battle.
+
 ## What each unit actually exposed
 
 | Runtime property | Shieldless Spearmen | Archers | Foot General |

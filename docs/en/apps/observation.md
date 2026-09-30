@@ -25,6 +25,21 @@ Code: `src/apps/observation/`.
   to an invisible enemy is not withheld.
 - `visibility_counts(view)` — how many enemies are visible / hidden.
 
+## The rule for orders
+
+A side's orders also stay within what it sees:
+
+- it may attack only an enemy that is visible now;
+- only units with missile weapons and ammunition may shoot;
+- it may order only its own living units;
+- one unit gets at most one movement order at a time.
+
+This used to be checked by the `orders/contract.lua` module. It was removed with
+our AI in the reset of 30.09.2026, and the remaining code has no such check: battle
+decisions are now made by the game's AI and CA's planner, and the probes give
+only orders set in advance. A future AI must
+check its orders against this rule.
+
 ## Leak check
 
 `python -m tools.analysis.unit_readout <run> --view side --side 1` compares the

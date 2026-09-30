@@ -95,27 +95,4 @@ function M.teleport(uc, position, bearing_deg, width_m)
     uc:teleport_to_location(position, facing.command(bearing_deg), width_m)
 end
 
--- Applies one validated command (orders.contract). ctx supplies engine
--- lookups: controller(unit_id), unit(unit_id), enemy(target_id), vector(x, z).
-function M.apply(command, ctx)
-    local uc = ctx.controller(command.unit_id)
-    if command.action == 'move' then
-        local p = ctx.vector(command.x, command.z)
-        if command.facing_deg then
-            M.move_formation(uc, p, command.facing_deg, command.width_m, command.run)
-        else
-            M.move(uc, p, command.run)
-        end
-    elseif command.action == 'attack' then
-        local enemy = ctx.enemy(command.target_id)
-        if command.mode == 'ranged' then M.attack_ranged(uc, enemy) else M.attack_melee(uc, enemy) end
-    elseif command.action == 'guard' then
-        M.set_guard(uc, ctx.unit(command.unit_id), command.enabled)
-    elseif command.action == 'halt' then
-        M.halt(uc)
-    else
-        error('unsupported action: ' .. tostring(command.action))
-    end
-end
-
 return M

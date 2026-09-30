@@ -9,10 +9,11 @@
 | Функция | Что делает |
 |---|---|
 | `sink(path, stamp?)` | Возвращает `emit(event, fields)`: строка JSONL с `event`, `wall_iso` и полями из `stamp(row)` |
+| `buffered_sink(path, stamp?)` | Те же строки, но копятся в памяти; `flush()` пишет их одним открытием файла. Для частых записей: сбрасывать раз в тик и в конце боя |
 | `read_file`, `write_file`, `append` | Небольшие файлы состояния в папке игры |
 | `next_sequence(path)` | Счётчик на диске: уникальные номера серий без случайных чисел игры |
 
-Файл открывается на каждую строку заново: при падении игры в журнале не
+`sink` открывает файл на каждую строку заново: при падении игры в журнале не
 теряются строки из буфера.
 
 ```lua
@@ -20,7 +21,7 @@ local telemetry = require('apps.telemetry.adapter')
 local emit = telemetry.sink('tww3_bai_events.jsonl', function(row)
     row.build, row.model_ms = config.build, bm:time_elapsed_ms()
 end)
-emit('decision', {side = 1, action = 'attack', reason = 'initial_charge'})
+emit('result', {status = 'completed', winner = 1})
 ```
 
 ## sampler_adapter — послебоевые снимки
@@ -29,7 +30,7 @@ emit('decision', {side = 1, action = 'attack', reason = 'initial_charge'})
 стороны, здоровье и мораль из CCO, боезапас и его расход, цель, заданная
 позиция, расстояния между атакующими и получившими урон.
 
-> **Никогда не вход для политики.** Снимок читает и скрытых врагов.
+> **Никогда не вход для ИИ стороны.** Снимок читает и скрытых врагов.
 
 | Функция | Что делает |
 |---|---|

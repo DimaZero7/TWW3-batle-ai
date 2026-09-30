@@ -1,4 +1,4 @@
--- Entry: diagnostic map capture. Separate from the AI entries.
+-- Entry: diagnostic map capture.
 -- Writes tww3_bai_map_capture_{events.jsonl, grid.csv, ready.xml} into the
 -- game directory. With config.features it also reads native/CCO objects and
 -- per-cell reachability for the first unit of each side after deployment.

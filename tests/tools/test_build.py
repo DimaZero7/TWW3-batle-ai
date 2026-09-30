@@ -28,8 +28,8 @@ class TestPfh5:
 
 class TestBundle:
     def test_collects_dependencies_first(self):
-        modules = [name for name, _ in bundle.collect(project.SRC, "entries.duel")]
-        assert modules[-1] == "entries.duel"
+        modules = [name for name, _ in bundle.collect(project.SRC, "entries.ai_vs_ai")]
+        assert modules[-1] == "entries.ai_vs_ai"
         assert modules.index("apps.core.value") < modules.index("apps.core.json")
 
     def test_bundle_runs_entry_with_loader(self):
@@ -42,11 +42,15 @@ class TestBundle:
 
 
 class TestTargets:
+    def test_the_kept_targets(self):
+        assert sorted(build.TARGETS) == ["ai-vs-ai", "archer-range", "enemy-layout", "manual", "map-capture",
+                                         "move-probe", "nn-arena", "roster-capture", "unit-readout"]
+
     @pytest.mark.parametrize("target", sorted(build.TARGETS))
     def test_every_target_builds_and_compiles(self, target, tmp_path, monkeypatch):
         monkeypatch.setattr(project, "BUILD", tmp_path)
         config = {"step": 5, "features": False} if target == "map-capture" else {
-            "runs": 1, "speed": 20, "timeout_ms": 60000, "tick_ms": 1000, "scenario": "x"}
+            "speed": 20, "timeout_ms": 60000, "tick_ms": 1000, "scenario": "x"}
         manifest = build.build(target, config)
         assert manifest["syntax_checked"] is True
         entries, _ = pfh5.read_pack((tmp_path / target / manifest["pack"]).read_bytes())
@@ -57,8 +61,8 @@ class TestTargets:
 class TestRequiredMods:
     def test_every_build_depends_on_true_sight(self, tmp_path, monkeypatch):
         monkeypatch.setattr(project, "BUILD", tmp_path)
-        manifest = build.build("ai-vs-ai", {"runs": 1, "speed": 3, "timeout_ms": 60000,
-                                            "tick_ms": 1000, "scenario": "ai_vs_ai"})
+        manifest = build.build("ai-vs-ai", {"speed": 3, "timeout_ms": 60000, "tick_ms": 1000,
+                                            "scenario": "ai_vs_ai"})
         _, dependencies = pfh5.read_pack((tmp_path / "ai-vs-ai" / manifest["pack"]).read_bytes())
         assert dependencies == ("true_sight.pack",)
         assert manifest["mod_profile"] == "true-sight-v1"
@@ -83,3 +87,36 @@ class TestMovePlan:
         monkeypatch.setattr(project, "CONFIG_DIR", tmp_path)
         with pytest.raises(KeyError):
             build.load_move_plan("bad")
+
+
+class TestRecorders:
+    @pytest.mark.parametrize("own_ai,enemy_role", [("attack", "defend"), ("defend", "attack")])
+    def test_nn_arena_records_the_planner_against_the_game_s_ai(self, own_ai, enemy_role, tmp_path, monkeypatch):
+        from tools.nn import scenario as nn_scenario
+        monkeypatch.setattr(project, "BUILD", tmp_path)
+        monkeypatch.setattr(nn_scenario, "SCENARIO", tmp_path / "nn_arena.xml")
+        written = []
+        monkeypatch.setattr(build, "build", lambda target, config, scenario=None: written.append(config) or {})
+        assert build.main(["nn-arena", "--own-ai", own_ai]) == 0
+        config = written[0]
+        assert config["own_ai"] == own_ai and config["enemy_role"] == enemy_role
+        assert {u["slot"] for u in config["units"]["own"]} == {u["slot"] for u in config["units"]["enemy"]}
+        assert "decide_ms" not in config
+        # The side that wins on timeout defends.
+        winner = "1" if enemy_role == "defend" else "0"
+        assert f"<timeout_winning_alliance_index>{winner}</timeout_winning_alliance_index>" in \
+            (tmp_path / "nn_arena.xml").read_text(encoding="utf-8")
+
+    def test_nn_arena_has_no_network_mode(self):
+        with pytest.raises(SystemExit):
+            build.main(["nn-arena", "--own-ai", "net"])
+
+    def test_enemy_layout_records_the_game_s_ai_only(self, tmp_path, monkeypatch):
+        from tools import enemy_layout
+        monkeypatch.setattr(enemy_layout, "SCENARIO", tmp_path / "enemy_layout.xml")
+        written = []
+        monkeypatch.setattr(build, "build", lambda target, config, scenario=None: written.append(config) or {})
+        assert build.main(["enemy-layout", "--layout", "balanced_5"]) == 0
+        config = written[0]
+        assert config["layout"] == "balanced_5" and config["enemy_mode"] == "defend"
+        assert "picture_every" not in config and "roster" not in config

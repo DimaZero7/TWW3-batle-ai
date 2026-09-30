@@ -2,44 +2,57 @@
 
 [← Back](README.md) · [Documentation](../README.md) · [Русский](../../ru/testing/tests.md)
 
+Tests run **the same Lua 5.1** as WH3 through `lupa` and check the code without starting the game.
+
 ```bash
 .venv/Scripts/python -m pytest
 .venv/Scripts/python -m pytest tests/apps/units -v
 ```
 
-Tests run **the same Lua 5.1** as WH3 through `lupa`. They check contracts,
-services, adapters on fake objects and the wiring of apps in the entry
-points. They do not model WH3 battle mechanics: engine behaviour is only
-verified by running the game ([running](../launch/run.md)).
+They check services, adapters on fake objects, the wiring of apps in the entry
+points, the tools outside the game and the documentation rules. They do not
+model WH3 battle mechanics: engine behaviour is only verified by running the
+game ([running](../launch/run.md)).
+
+## Test levels
+
+Rule of 27.09.2026: small modules are tested on their own; above them only that
+they are called correctly. The failing level shows where the fault is.
+
+| Level | What | Where |
+|---|---|---|
+| 1. Functions | A small function does its job | `tests/apps/<app>/test_*.py` |
+| 2. Module by measurements | On data from the game a module gives what the game gave: engine facings, the radar frame, the kit's sensors | `tests/apps/orders/test_facing.py`, `tests/apps/map/test_services.py`, `tests/apps/units/` |
+| 3. Wiring | An entry on the fake game calls the modules in order and writes the right events | `tests/entries/test_entries.py` |
+| 4. Engine checks | Game facts the code relies on | In-game runs with a verdict; on game updates and new engine facts |
+
+Besides the levels:
+
+| Check | What it catches | Where |
+|---|---|---|
+| Architecture | every app has a level (all are the base today), dependencies go only down, pure code never touches the engine, no unit keys in logic, no module over 1000 lines | `tests/architecture/` |
+| Documentation | language mirror, "← Back", live links and pictures, fresh indexes, a page for every module | `tests/docs/` ([rules](../architecture/documentation.md)) |
+| Build | PFH5 format, the bundler, every target builds and compiles, True Sight in every pack | `tests/tools/test_build.py` |
+
+**Tests run by themselves:**
+- **before every commit** (~5 s) — hook `.githooks/pre-commit`. Enable once:
+  `git config core.hooksPath .githooks`; skip only with a reason, `--no-verify`;
+- **on every push** — all tests in GitHub Actions (`.github/workflows/tests.yml`).
 
 ## Layout
 
-As in photo-fixing, tests mirror the code:
+As in photo-fixing, another project of the author, tests mirror the code:
 
 ```text
 tests/
 ├── lua_runtime.py          Lua runtime: require('apps.x.y') loads src/apps/x/y.lua
-├── apps/<app>/             service, contract and adapter tests
+├── apps/<app>/             service and adapter tests
 ├── entries/                entry smoke tests on a fake bm
 │   └── fake_battle.lua     minimal battle manager fake
-└── tools/                  pack format, bundler, every build target
+├── tools/                  pack format, bundler, every build target, roster, readouts, reports
+├── architecture/           code rules
+└── docs/                   documentation rules
 ```
-
-## Two tiers
-
-- **Fast** (~30 s) — before every commit, hook `.githooks/pre-commit`: everything but the tests marked
-  `slow`. Enable once: `git config core.hooksPath .githooks`.
-- **All, with the slow ones** (`slow`: long walks of the simulator round obstacles) — on every push,
-  GitHub Actions (`.github/workflows/tests.yml`). By hand: `python -m pytest -m slow`.
-
-## Simulator checks
-
-| Check | What it catches | Where |
-|---|---|---|
-| Simulator goldens | a change in one module quietly changed a battle: formation, places, approach decisions and their time, manoeuvre times, window, fire (15 armies) | `tests/golden/`; compare `python -m tools.sim.golden`, update with `--update` and say why in the commit |
-| Tree branches | a branch switched off = its baseline | `tests/tools/test_tree_branches.py` |
-| Alignment against a turning enemy | the old chase and shifts aside (task 26) | `tests/tools/test_align_chase.py` |
-| Simulator physics | a unit walked or stood on an obstacle; the walker does not go round a rock (task 27) | `tests/tools/test_sim_physics.py`, [simulator](simulator.md) |
 
 ## Writing a test
 
@@ -51,19 +64,27 @@ from tests.lua_runtime import load, new_runtime
 @pytest.fixture
 def lua():
     runtime = new_runtime()
-    runtime.globals().orders = load(runtime, "apps.orders.contract")
+    runtime.globals().intel = load(runtime, "apps.intel.adapter")
+    runtime.execute("""
+        position_reads = 0
+        function enemy(visible)
+            local u = {visible = visible}
+            function u:is_visible_to_alliance() return self.visible end
+            function u:position()
+                position_reads = position_reads + 1
+                return {get_x=function() return 10 end, get_y=function() return 0 end, get_z=function() return 20 end}
+            end
+            return u
+        end
+    """)
     return runtime
 
 
-class TestValidate:
-    def test_hidden_target_is_rejected(self, lua):
-        lua.execute("""
-            local own = {spears = {alive = true, position = {x=0, z=0}, kind = 'spearmen'}}
-            local enemies = {hidden = {visibility = 'not_visible'}}
-            local ok, err = pcall(orders.validate,
-                {{unit_id='spears', action='attack', target_id='hidden', mode='melee'}}, own, enemies, 14)
-            assert(not ok and err:find('target not visible', 1, true))
-        """)
+def test_hidden_enemy_position_is_never_read(lua):
+    lua.execute("""
+        intel.observe(enemy(false), {}, 'enemy-2', 0, {})
+        assert(position_reads == 0)
+    """)
 ```
 
 Rules:
@@ -72,7 +93,7 @@ Rules:
   same types, `nil` and `0/0` as the game.
 - **Test an adapter with a fake object**: a table with the needed methods.
   For "hidden data is never read" checks the fake counts calls or raises on
-  a forbidden read (see `tests/apps/units/test_range_adapter.py`).
+  a forbidden read (as above and in `tests/apps/units/test_range_adapter.py`).
 - **Test an entry** with `tests/entries/fake_battle.lua`: callbacks queue up
   and the test drives them with `bm:pump()` and `bm:tick()`.
 - A new engine method used by an entry → add it to `fake_battle.lua`.
@@ -83,27 +104,14 @@ Rules:
 |---|---|
 | State sensor (ported from the kit) | `tests/apps/units/test_state_adapter.py` |
 | Range sensor (ported from the kit) | `tests/apps/units/test_range_adapter.py` |
-| `core`: reads, JSON, errors | `tests/apps/core/test_core.py` |
+| `core`: reads, JSON, errors, guards | `tests/apps/core/test_core.py` |
+| Health signature for the stall rule | `tests/apps/battle/test_adapter.py` |
 | Radar frame and grid | `tests/apps/map/test_services.py` |
+| End of a leg: `arrived`, `stopped`, `stuck`, `timeout` | `tests/apps/navigation/test_services.py` |
 | Visibility memory | `tests/apps/intel/test_intel.py` |
-| AI policies and contract | `tests/apps/ai/test_policies.py` |
-| Command validation | `tests/apps/orders/test_contract.py` |
-| Deployment v2 | `tests/apps/deployment/test_deployment.py` |
-| Policy sandbox | `tests/apps/sandbox/test_sandbox.py` |
-| Whole duel and map capture | `tests/entries/test_entries.py` |
+| The engine's 64 facings | `tests/apps/orders/test_facing.py` |
+| CA's planner: rallied units and units idle under fire | `tests/apps/orders/test_planner_adapter.py` |
+| Whole entries on the fake game | `tests/entries/test_entries.py` |
 | PFH5, bundler, all build targets | `tests/tools/test_build.py` |
-| Battle viewer: records from the game and the simulation, the page | `tests/tools/test_viewer.py` |
-
-## Test levels
-
-Rule of 27.09.2026: small modules are tested on their own; above them only
-that they are called correctly. The failing level shows where the fault is.
-
-| Level | What | Where |
-|---|---|---|
-| 1. Functions | A small function does its job | `tests/apps/<app>/test_services.py` |
-| 2. Module contract | On given armies a module decides as expected (strategy chosen or rejected by the right conditions; formation without overlaps) | `tests/cases/start/*.json` + `tests/apps/strategy/test_cases.py`; a new case is a new file |
-| 3. Chain wiring | Modules called in order and passing their data; modules replaced by spies | `tests/apps/plan/`, entries on the fake battle |
-| 4. Engine checks | Game facts the AI relies on | In-game runs with verdicts, on game updates and new engine facts |
-
-Level 2 checks properties, not exact numbers, so tuning does not break tests.
+| Roster, readout catalogue | `tests/tools/test_roster.py`, `tests/tools/test_readouts.py` |
+| Reports: obstacles on a map, the game AI's groups | `tests/tools/test_obstacles.py`, `tests/tools/test_enemy_layout.py` |

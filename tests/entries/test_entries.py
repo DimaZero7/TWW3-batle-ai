@@ -25,34 +25,6 @@ def events(path):
     return [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines()]
 
 
-class TestDuel:
-    def test_duel_charges_and_records_result(self, lua, tmp_path):
-        lua.execute("""
-            local a = fake.unit('bai_ranged_a', 'wh3_main_ksl_inf_kossars_0', -50, 0)
-            local b = fake.unit('bai_ranged_b', 'wh3_main_ksl_inf_kossars_0', 50, 0)
-            bm = fake.manager({{a}, {b}})
-            find_uicomponent = function() return nil end
-            local duel = require('entries.duel')
-            local state = duel.main(bm, {build='test', runs=1, speed=20, timeout_ms=60000, tick_ms=1000, deadline_s=60, stall_ms=600000})
-            bm:pump()             -- deployment -> end phase -> start
-            bm:tick(); bm:tick()  -- decisions
-            bm.outcome, bm.winner = true, 1
-            bm:tick()
-            assert(state.finished, 'duel did not finish')
-            assert(a.attacked > 0 and b.attacked > 0, 'no attack orders')
-        """)
-        rows = events(tmp_path / "tww3_bai_events.jsonl")
-        kinds = [r["event"] for r in rows]
-        assert "error" not in kinds, rows[-1]
-        assert kinds[:2] == ["loaded", "ready"]
-        result = next(r for r in rows if r["event"] == "result")
-        assert result["status"] == "completed" and result["winner"] == 1
-        assert {r["reason"] for r in rows if r["event"] == "decision"} >= {"initial_charge"}
-        # 'loaded' is written before the scenario is recognised by unit names.
-        assert all(r["build"] == "test" for r in rows)
-        assert all(r["scenario"] == "ranged_melee" for r in rows[1:])
-
-
 class TestMapCapture:
     def test_grid_and_features(self, lua, tmp_path):
         lua.execute("""
@@ -321,88 +293,6 @@ class TestRosterCapture:
         assert rows[-1]["event"] == "result" and rows[-1]["status"] == "completed"
 
 
-class TestFormationProbe:
-    # Our spearmen and archers against two enemy spearmen: "wall and arc" fits
-    # (the enemy has more infantry, we have the only archers, we attack).
-    SETUP = """
-        local spears = fake.unit('own_1', 'wh_main_emp_inf_spearmen_0', 0, -200)
-        local archers = fake.unit('own_2', 'wh2_dlc13_emp_inf_archers_0', 20, -200)
-        local e1 = fake.unit('enemy_1', 'wh_main_emp_inf_spearmen_0', 0, 100)
-        local e2 = fake.unit('enemy_2', 'wh_main_emp_inf_spearmen_0', 30, 100)
-        bm = fake.manager({{spears, archers}, {e1, e2}})
-        local function spear(id)
-            return {id = id, class = 'inf_mel', men = 120, commanding = false, range_m = 0, health = 8280,
-                armour = 30, melee_attack = 20, melee_defence = 34, shapes = {{ordered_m = 40, front_m = 39, depth_m = 8}}}
-        end
-        CONFIG = {build = 'test', speed = 20, tick_ms = 1000, deadline_s = 100, stall_ms = 900000, align_timeout_s = 30,
-            settle_ms = 3000, stage_timeout_s = 20, hold_s = 10, role = 'attack',
-            own = {anchor = {x = 0, z = -150}, units = {spear('own_1'),
-                {id = 'own_2', class = 'inf_mis', men = 90, commanding = false, fire = 'arc', range_m = 130,
-                 health = 6210, missile_damage = 19, shapes = {{ordered_m = 20, front_m = 19, depth_m = 18}}}}},
-            enemy = {anchor = {x = 0, z = 150}, units = {spear('enemy_1'), spear('enemy_2')}, placements = {
-                {script_name = 'enemy_1', role = 'wall', x = 0, z = 150, bearing = 180, width = 30},
-                {script_name = 'enemy_2', role = 'wall', x = 30, z = 150, bearing = 180, width = 30}}}}
-        -- Two soldiers per unit around its position, so each side has its own place.
-        local by_id = {uid_own_1 = spears, uid_own_2 = archers, uid_enemy_1 = e1, uid_enemy_2 = e2}
-        local common = {game_version = fake.common.game_version, get_context_value = function(key, id, field)
-            local u = by_id[id]
-            if u and field == 'ManList.Size' then return 2 end
-            local i = u and field and field:match('^ManList%.At%((%d+)%)%.Position$')
-            if i then return u.pos.x + tonumber(i) * 2, 0, u.pos.z end
-            return fake.common.get_context_value(key, id, field)
-        end}
-        GLOBALS = {common = common, battle_vector = fake.vector_type}
-    """
-
-    def test_plan_is_applied_and_stages_run(self, lua, tmp_path):
-        lua.execute(self.SETUP + """
-            CONFIG.turn_test = true
-            local state = require('entries.formation_probe').main(bm, CONFIG, GLOBALS)
-            bm:pump()
-            for _ = 1, 140 do bm:tick() end
-            assert(state.finished and bm.ended)
-        """)
-        rows = events(tmp_path / "tww3_bai_events.jsonl")
-        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
-        plan = next(r for r in rows if r["event"] == "plan")
-        assert plan["facing_source"] == "visible_enemy" and plan["plan"]["status"] == "ok"
-        assert plan["strategy"] == "wall_and_arc" and plan["plan"]["layout"] == "line_and_blocks"
-        stages = [r["stage"] for r in rows if r["event"] == "stage_snapshot"]
-        assert len([r for r in rows if r["event"] == "hold_sample"]) >= 10
-        assert stages == ["placed", "align", "mask", "hold", "turn_right", "back_from_right", "turn_left", "back_from_left",
-                          "turn_right_in_place", "back_right_in_place", "turn_left_in_place", "back_left_in_place"]
-        assert any(r["event"] == "turn_sample" for r in rows)
-        assert rows[-1]["event"] == "result" and rows[-1]["status"] == "completed"
-
-    def test_default_run_only_places_and_holds_without_orders(self, lua, tmp_path):
-        lua.execute(self.SETUP + """
-            CONFIG.hold_s = 5
-            local state = require('entries.formation_probe').main(bm, CONFIG, GLOBALS)
-            bm:pump()
-            for _ = 1, 60 do bm:tick() end
-            assert(state.finished)
-        """)
-        rows = events(tmp_path / "tww3_bai_events.jsonl")
-        assert [r["stage"] for r in rows if r["event"] == "stage_snapshot"] == ["placed", "align", "mask", "hold"]
-        mask = next(r for r in rows if r["event"] == "mask")
-        assert mask["summary"]["known"] == mask["summary"]["cells"] and mask["summary"]["cells"] > 0
-        assert not any(r["event"] == "turn_sample" for r in rows)
-        assert rows[-1]["orders_after_placed"] == 0 and rows[-1]["status"] == "completed"
-
-    def test_no_fitting_strategy_is_an_error_not_a_guess(self, lua, tmp_path):
-        lua.execute(self.SETUP + """
-            CONFIG.role = 'defend'
-            local state = require('entries.formation_probe').main(bm, CONFIG, GLOBALS)
-            bm:pump()
-            bm:tick()
-            assert(state.finished and not state.active)
-        """)
-        rows = events(tmp_path / "tww3_bai_events.jsonl")
-        plan = next(r for r in rows if r["event"] == "plan")
-        assert plan["status"] == "no_strategy" and plan["strategy"] == "none"
-        assert any(r["event"] == "error" and "No strategy" in r["message"] for r in rows)
-
-
 class TestEnemyLayout:
     def test_game_ai_side_is_watched_not_commanded(self, lua, tmp_path):
         lua.execute("""
@@ -424,52 +314,78 @@ class TestEnemyLayout:
         assert sample["units"][0]["seen"] is True and sample["layout"] == "test"
         assert rows[-1]["status"] == "completed"
 
-    def test_battle_picture_from_our_side_view(self, lua, tmp_path):
-        lua.execute("""
-            local own = fake.unit('own_1', 'wh_main_emp_inf_spearmen_0', 0, -250)
-            local seen = fake.unit('enemy_1', 'wh_main_emp_inf_spearmen_0', 0, 200)
-            local hidden = fake.unit('enemy_2', 'wh_main_emp_inf_spearmen_0', 600, 200)
-            function hidden:is_visible_to_alliance() return false end
-            local by_id = {uid_own_1 = own, uid_enemy_1 = seen, uid_enemy_2 = hidden}
-            -- Two soldiers per unit, around the unit's position.
-            local common = {game_version = fake.common.game_version, get_context_value = function(key, id, field)
-                local u = by_id[id]
-                if u and field == 'ManList.Size' then return 2 end
-                local i = u and field and field:match('^ManList%.At%((%d+)%)%.Position$')
-                if i then return u.pos.x + tonumber(i) * 2, 0, u.pos.z end
-                return fake.common.get_context_value(key, id, field)
-            end}
-            bm = fake.manager({{own}, {seen, hidden}})
-            local spec = {class = 'inf_mel', men = 120, range_m = 0, health = 8280, melee_attack = 20, melee_defence = 34}
-            local state = require('entries.enemy_layout').main(bm, {build = 'test', speed = 20, tick_ms = 1000,
-                deadline_s = 100, stall_ms = 900000, hold_s = 5, layout = 'test', picture_every = 1,
-                roster = {wh_main_emp_inf_spearmen_0 = spec}}, {common = common, battle_vector = fake.vector_type})
+
+class TestNnArena:
+    # Two units a side; the config as tools/nn/scenario.run_config gives it (script names, slots).
+    SETUP = """
+        own = {fake.unit('own_lord', 'lord', -235, 0), fake.unit('own_spear_1', 'spears', -175, 0)}
+        enemy = {fake.unit('enemy_lord', 'lord', 235, 0), fake.unit('enemy_spear_1', 'spears', 175, 0)}
+        bm = fake.manager({own, enemy})
+        local function slots(side)
+            return {{script_name = side .. '_lord', slot = 'lord', key = 'lord'},
+                {script_name = side .. '_spear_1', slot = 'spear_1', key = 'spears'}}
+        end
+        CONFIG = {build = 'test', speed = 20, tick_ms = 1000, deadline_s = 600, stall_ms = 600000,
+            timeout_ms = 600000, defend_radius_m = 150, units = {own = slots('own'), enemy = slots('enemy')}}
+        GLOBALS = {common = fake.common, battle_vector = fake.vector_type}
+    """
+
+    def test_attack_records_every_unit_and_the_result(self, lua, tmp_path):
+        # No CA library loaded: the planner falls back to the engine's AI unit planner.
+        lua.execute(self.SETUP + """
+            CONFIG.own_ai = 'attack'
+            local state = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
             bm:pump()
-            for _ = 1, 3 do bm:tick() end
+            for _ = 1, 16 do bm:tick() end         -- the attack is re-issued after 15 s
+            own[2].routing = true; bm:tick()
+            own[2].routing = false; bm:tick()       -- rallied: back into the planner
+            for _ = 1, 8 do own[2].men = own[2].men - 1; bm:tick() end  -- idle under fire
+            bm:pump()                               -- the last order is repeated
+            bm.outcome, bm.winner = true, 2
+            bm:tick()
+            assert(state.finished, 'the battle did not finish')
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        kinds = [r["event"] for r in rows]
+        assert "error" not in kinds, [r for r in rows if r["event"] == "error"]
+        assert kinds[:2] == ["loaded", "ready"]
+        assert next(r for r in rows if r["event"] == "own_ai")["mode"] == "engine_planner"
+        samples = [r for r in rows if r["event"] == "nn_sample"]
+        assert len(samples) >= 20
+        assert {(u["n"], u["side"]) for u in samples[-1]["units"]} == {
+            ("own_lord", 1), ("own_spear_1", 1), ("enemy_lord", 2), ("enemy_spear_1", 2)}
+        assert samples[-1]["units"][1]["men"] < 120 and samples[-1]["units"][1]["x"] == -175
+        assert [r["units"] for r in rows if r["event"] == "rejoined"] == [["own_spear_1"]]
+        assert any(r["event"] == "idle_kick" and r["unit"] == "own_spear_1" for r in rows)
+        log = list(lua.eval("bm.planner_log").values())
+        assert log[:2] == ["add own_lord", "add own_spear_1"]
+        assert log.count("attack enemy_spear_1") >= 3   # the start, 15 s later, after the rally
+        assert kinds[-2:] == ["nn_final", "result"]
+        result = rows[-1]
+        assert result["status"] == "completed" and result["winner"] == 2
+        assert result["rejoined"] == 1 and result["idle_kicks"] >= 1
+        assert result["side_1_men"] < result["side_2_men"] == 240
+        assert all(r["policy"] == "nn_arena_attack" and r["scenario"] == "nn_arena" for r in rows)
+
+    def test_defend_holds_its_place_until_the_timeout(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            CONFIG.own_ai, CONFIG.timeout_ms = 'defend', 20000
+            local state = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 25 do bm:tick() end
+            assert(state.finished and bm.ended, 'the timeout did not end the battle')
         """)
         rows = events(tmp_path / "tww3_bai_events.jsonl")
         assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
-        pic = next(r for r in rows if r["event"] == "battlefield")
-        # The hidden unit is not in the picture; its strength still counts in the enemy total.
-        assert pic["seen"] == 1 and pic["enemy"]["groups"][0]["ids"] == ["enemy_1"]
-        assert pic["enemy"]["seen_share"] == 0.5
-        assert pic["field"]["status"] == "ok" and abs(pic["field"]["centres_m"] - 450) < 1
+        log = list(lua.eval("bm.planner_log").values())
+        assert "defend 150" in log and not any(e.startswith("attack") for e in log)
+        assert rows[-1]["event"] == "result" and rows[-1]["status"] == "timeout" and rows[-1]["winner"] == 0
 
-
-def test_formation_probe_approach_to_a_goal_one_manoeuvre_at_a_time(lua, tmp_path):
-    lua.execute(TestFormationProbe.SETUP + """
-        CONFIG.approach, CONFIG.goal = true, {x = 0, z = 60}
-        CONFIG.manoeuvre_timeout_s, CONFIG.approach_timeout_s, CONFIG.hold_s = 60, 300, 3
-        local state = require('entries.formation_probe').main(bm, CONFIG, GLOBALS)
-        bm:pump()
-        for _ = 1, 200 do bm:tick() end
-        assert(state.finished)
-    """)
-    rows = events(tmp_path / "tww3_bai_events.jsonl")
-    assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
-    decisions = [r["decision"] for r in rows if r["event"] == "approach_decision"]
-    assert decisions and decisions[-1] == "hold"
-    # A new decision only after the manoeuvre before it ended.
-    kinds = [r["event"] for r in rows if r["event"] in ("approach_decision", "approach_manoeuvre")]
-    assert all(not (a == b == "approach_decision") for a, b in zip(kinds, kinds[1:]))
-    assert [r["stage"] for r in rows if r["event"] == "stage_snapshot"][-2:] == ["approach", "hold"]
+    def test_an_unknown_own_ai_is_an_error(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            CONFIG.own_ai = 'net'
+            local state = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+            assert(state.finished and not state.active)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert any(r["event"] == "error" and "own_ai" in r["message"] for r in rows)

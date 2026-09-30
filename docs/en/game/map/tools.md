@@ -6,35 +6,39 @@
 
 | File | Responsibility |
 |---|---|
-| [src/map/reader.lua](../../../../src/apps/map/) | Read the radar frame, define grid coordinates, sample cells in batches |
-| [src/map/objects.lua](../../../../src/apps/map/) | Read native building/prop origins and state in batches; [verified scope](objects.md) |
-| [src/map/reachability.lua](../../../../src/apps/navigation/) | Query supplied units for sampled points after deployment; [limits](passages.md) |
+| [src/apps/map/adapter.lua](../../../../src/apps/map/adapter.lua) | Read the radar frame (`read_frame`), sample cells in batches (`read_batch`), read native objects and CCO structures in batches (`read_buildings`, `read_structure_contexts`); [verified scope](objects.md) |
+| [src/apps/map/services.lua](../../../../src/apps/map/services.lua) | Geometry without the engine: frame, grid and cell coordinates (`new_grid`, `world_to_radar`, `world_to_cell`, `cell_center`) |
+| [src/apps/navigation/adapter.lua](../../../../src/apps/navigation/adapter.lua) | Query supplied units for sampled points after deployment (`read_cells`); [limits](passages.md) |
 | [slopes.py](../../../../tools/analysis/slopes.py) | Derive geometric slopes and neighbour-height differences offline |
 | [passages.py](../../../../tools/analysis/passages.py) | Find shallow-water connection candidates in saved reachability grids |
-| [capture.lua](../../../../src/entries/map_capture.lua) | Static test runner, pause, callbacks, CSV and JSONL output |
-| [features.lua](../../../../src/entries/map_capture.lua) | Optional controlled start, native/CCO objects and full point-reachability capture |
+| [src/entries/map_capture.lua](../../../../src/entries/map_capture.lua) | Entry point: static test runner, pause, callbacks, CSV and JSONL output; the `--features` mode adds a controlled start, native/CCO objects and full point-reachability capture |
 | [heightmap.py](../../../../tools/analysis/heightmap.py) | Offline CSV-to-height-matrix and PNG conversion; [instructions](heights.md) |
-| [build.py](../../../../tools/build.py) | Bundle reader + runner + fixed test scenario into an isolated pack |
-| [launch.ps1](../../../../tools/launcher/launch.ps1) | Verify/install the pack, start one process, watch completion, preserve output, close automatically |
-| [finish.ps1](../../../../tools/launcher/launch.ps1) | Verify saved files and process identity, close the owned process, remove its private game-side files |
+| [build.py](../../../../tools/build.py) | Bundle the map modules, the entry and a fixed test scenario into an isolated pack |
+| [launch.ps1](../../../../tools/launcher/launch.ps1) | Verify/install the pack, start one process, watch completion, preserve output, close the owned process and remove its private game-side files |
 | [map_capture.xml](../../../../scenarios/map_capture.xml) | Vanilla Kislev classic test setup; two minimal opposing units needed to load the battle |
 
-The reader has no unit commands, timers, files, global initialization or AI policy.
-It is a local Lua service/module, not a network service. The test runner owns the
-execution lifecycle. Nothing is installed into the normal duel pack automatically.
+The map and navigation modules have no unit commands, timers, files or global
+initialization. They are local Lua modules, not a network service. The
+`entries.map_capture` entry owns the execution lifecycle; the modules enter another
+target's build only if that target's entry requires them.
 
 ## Module interface
 
-The builder bundles `reader.lua` as a local returned table, using the same wrapper
-pattern as the existing harness. No unverified game `require` path is assumed.
+The builder (`tools/build.py`) bundles the modules from `src/` into one script
+through wrapper functions. No unverified game `require` path is assumed.
 
 ```lua
-local frame = reader.read_frame(common)
-local grid = reader.new_grid(frame, 5)
-local cells, next_index, done = reader.read_batch(bm, battle_vector, grid, 0, 4096)
-local u, v = reader.world_to_radar(frame, 100, 0)
-local ix, iz = reader.world_to_cell(grid, 100, 0)
-local x, z = reader.cell_center(grid, ix, iz)
+local map = require('apps.map.adapter')
+local map_services = require('apps.map.services')
+local navigation = require('apps.navigation.adapter')
+
+local frame = map.read_frame(common)
+local grid = map_services.new_grid(frame, 5)
+local cells, next_index, done = map.read_batch(bm, battle_vector, grid, 0, 4096)
+local u, v = map_services.world_to_radar(frame, 100, 0)
+local ix, iz = map_services.world_to_cell(grid, 100, 0)
+local x, z = map_services.cell_center(grid, ix, iz)
+local rows = navigation.read_cells(bm, battle_vector, units, cells)  -- after deployment
 ```
 
 - `frame`: coefficients, validated corners, `min_x/max_x/min_z/max_z`, width/depth,
@@ -52,58 +56,57 @@ missing in the measured game Lua environment.
 
 ## Run from the repository root
 
-Requirements: installed WH3, Python with the project's local Lupa/Lua 5.1 dependency,
-PowerShell, and write access to the game folder. The current launch scripts use
-this machine's Steam installation path; inspect it before use on another machine.
+Requirements: installed WH3, the project's Python (`.venv` with the dependencies
+from `requirements-dev.txt`), PowerShell, and write access to the game folder. The
+game path is in `config/default.json` or `config/local.json`.
 
-```powershell
-python -m pip install --only-binary=:all: --target .tools/python -r requirements-dev.txt
-python -m unittest discover -s tests -p test_map_reader.py -v
-python tools/map-capture/build.py --step 5
-& ./tools/map-capture/launch.ps1
+```bash
+.venv/Scripts/python -m pytest tests/apps/map
 ```
 
-Supported capture steps: `1`, `2`, `3`, `5`. Game must be closed. The launcher's
-graphics helper backs up preferences, applies minimum graphics and Ultra unit size.
-Capture is static and paused: x20 is the manual-battle preference, not a way to
-accelerate these read-only queries. No mouse automation or Computer Use is needed.
-
-Output: `build/map-capture/run-YYYYMMDD-HHMMSS/`, including source snapshots,
-manifest and source hashes, launch identity, exported XML, JSONL events, CSV,
-status and cleanup record. The builder does not replace `build/tww3_bai_duel.pack`.
-
-**Automatic captures close their own game process after saving.** Error/timeout
-paths also stop only their identified process and preserve unfinished files for
-diagnosis. They do not erase unverified partial output. A running game or existing
-private files blocks a new launch. For a completed run whose cleanup was interrupted:
-
-```powershell
-& ./tools/map-capture/finish.ps1 -Run ./build/map-capture/run-YYYYMMDD-HHMMSS
+```bash
+.venv/Scripts/python -m tools.build map-capture --step 5
 ```
 
-Replace the placeholder with the actual run directory. Do not run the normal duel
-launch command when intending to capture a map. Leave a game open only when the
-user explicitly needs manual control.
+```bash
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -Target map-capture
+```
+
+Grid steps: `1`, `2`, `3`, `5`; `--window MIN_X MAX_X MIN_Z MAX_Z` captures only a
+part of the map. The game must be closed. Capture is static and paused; no mouse
+automation is needed.
+
+Output: `build/map-capture/runs/<YYYYMMDD-hhmmss>/`: the build manifest, launch
+identity, events, exported battle XML, grid CSV and status with the cleanup result
+([running a battle](../../launch/run.md)).
+
+**The launcher closes its own game process after saving.** Error/timeout paths also
+stop only its identified process. A running game or files of a previous run in the
+game folder block a new launch: inspect and remove them by hand. Leave a game open
+(`-KeepGameOpen`) only when the user explicitly needs manual control.
 
 ## Complete field-feature capture
 
 The optional `--features` mode adds native objects, [structure/bridge contexts](bridges.md), and point-reachability columns for the first unit of each of two opposing armies. Use the preserved two-unit diagnostic scenarios. This runner takes control of both units, disables firing, halts them, advances Deployment, and pauses after Deployed. The default surface-only mode remains in Deployment.
 
-Reproduce the validated bridge-location capture:
+Reproduce the validated bridge-location capture (its XML is in the local archive):
 
-```powershell
-python tools/map-capture/build.py --step 3 --scenario docs/map/evidence/field-20260925/bridge-navigation/map_probe.xml --features
-& ./tools/map-capture/launch.ps1
+```bash
+.venv/Scripts/python -m tools.build map-capture --step 3 --features --scenario ../research/evidence/map/field-20260925/bridge-navigation/map_probe.xml
 ```
 
-`--scenario` changes the bundled XML; it does not select a map by localized menu name. Source XML, bundled Lua and hashes are preserved in the run directory. Keep custom captures separate from a normal campaign or manual battle.
+```bash
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -Target map-capture
+```
+
+`--scenario` takes a path relative to `scenarios/` and changes the bundled XML; it does not select a map by localized menu name. Source XML, bundled Lua and hashes are preserved in the run directory. Keep custom captures separate from a normal campaign or manual battle.
 
 Additional CSV columns: `reach_side_1`, `reach_side_2` — 1 true, 0 false, −1 not queried outside the frame. JSONL contains `building`, `structure_context`, `navigation_unit`, `feature_conditions`, counts and timings. The unit events establish which units the columns refer to. Read the text as **UTF-8**, including on Windows; localized CCO names are not ASCII.
 
 For the passage tool, select the new columns explicitly:
 
-```powershell
-python tools/map-capture/passages.py --csv build/map-capture/run-YYYYMMDD-HHMMSS/tww3_bai_map_capture_grid.csv --step 3 --reach-columns reach_side_1 reach_side_2 --output tmp/map-research/passages
+```bash
+.venv/Scripts/python -m tools.analysis.passages --csv build/map-capture/runs/<time>/tww3_bai_map_capture_grid.csv --step 3 --reach-columns reach_side_1 reach_side_2 --output build/map-research/passages
 ```
 
 This identifies candidates only; a capture containing a bridge need not contain a ford candidate. In the live regression, **116,964 rows**, including all surface and reachability values, **2,696 native records**, and **one CCO record** matched the research capture. Navigation sampling and logging took **2.430 s** by Lua `os.clock()`; loading was separate. The whole run completed in approximately **36.7 s**, then the owned game process closed. `Validation` (local archive: `research/evidence/map/field-20260925/feature-runner/validation.json`) · `Run status` (local archive: `research/evidence/map/field-20260925/feature-runner/status.json`).

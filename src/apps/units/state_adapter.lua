@@ -1,4 +1,4 @@
--- Trusted read-only sensor of one own unit. Not part of policy API v1.
+-- Trusted read-only sensor of one own unit.
 -- The caller establishes ownership; this does not authenticate an untrusted caller.
 -- Field catalogue: data/units/field-catalog.json, docs/en/game/units/state-fields.md.
 local value = require('apps.core.value')

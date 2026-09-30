@@ -8,4 +8,4 @@ Short unit cards grouped by faction. This is an index to verified descriptions a
 |---|---|
 | [Empire](empire.md) | Foot General of the Empire, shieldless Spearmen, Archers |
 
-Each faction has its own folder. Cards give the English/Russian name, exact unit key/variant, type and equipment, a few supported properties, test scope and links to detailed information. Add further factions and units as needed; do not populate unverified abilities or stats from memory. English is primary.
+Each faction has its own folder. Cards give the English/Russian name, exact unit key/variant, type and equipment, a few supported properties, test scope and links to detailed information. Add further factions and units as needed; do not populate unverified abilities or stats from memory. The Russian page is the master; the English one mirrors it with the same facts.

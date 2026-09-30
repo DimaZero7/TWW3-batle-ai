@@ -1,18 +1,15 @@
 """The documentation keeps its rules (docs/ru/architecture/documentation.md)."""
-import json
 import re
-from pathlib import Path
 
 import pytest
 
 from tools import architecture
-from tools.docs import tree_doc
+from tools.docs import index_doc
 
 ROOT = architecture.ROOT
 DOCS = ROOT / "docs"
-# Working drafts and research: Russian only.
-RU_ONLY = ("architecture/ai-design.md", "architecture/battle-theory.md", "architecture/strategies.md",
-           "architecture/tasks/", "research/")
+# Research write-ups: Russian only.
+RU_ONLY = ("research/",)
 BACK = {"ru": "[← Назад](", "en": "[← Back]("}
 LINK = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)\)")
 
@@ -61,43 +58,11 @@ def test_links_and_pictures_exist():
 
 
 def test_generated_blocks_match_the_code():
-    stale = tree_doc.update(check=True)
-    assert not stale, "run: python -m tools.docs.tree_doc\n" + "\n".join(str(p.relative_to(ROOT)) for p in stale)
+    stale = index_doc.update(check=True)
+    assert not stale, "run: python -m tools.docs.index_doc\n" + "\n".join(str(p.relative_to(ROOT)) for p in stale)
 
 
 def test_every_module_has_a_page_in_both_languages():
     apps = sorted(p.name for p in architecture.APPS.iterdir() if p.is_dir())
     missing = [f"{lang}/apps/{a}.md" for a in apps for lang in ("ru", "en") if not (DOCS / lang / "apps" / f"{a}.md").exists()]
     assert not missing, missing
-
-
-def test_every_tree_node_is_documented():
-    data = json.loads(tree_doc.DATA.read_text(encoding="utf-8"))
-    documented = {n["id"]: n for n in data["nodes"]}
-    code = tree_doc.lua_nodes()
-    assert set(code) <= set(documented), f"add to docs/tree.json: {sorted(set(code) - set(documented))}"
-    for nid, n in documented.items():
-        assert n["lua"] == (nid in code), f"{nid}: 'lua' must say whether the node is in src/apps/tree"
-        for field in ("title", "what", "enter"):
-            assert n[field].get("ru") and n[field].get("en"), f"{nid}: {field} in both languages"
-        if n["lua"] and code[nid]["parent"]:
-            assert n.get("baseline_ru"), f"{nid}: baseline_ru"
-        page = n["page"].split("#")[0]
-        for lang in ("ru", "en"):
-            text = (DOCS / lang / "tree" / page).read_text(encoding="utf-8")
-            assert f"generated:tree:card:{nid}" in text, f"{lang}/tree/{page}: card of {nid}"
-            if n["lua"]:
-                assert f"generated:tree:here:{nid}" in text, f"{lang}/tree/{page}: place of {nid}"
-
-
-def test_a_node_s_module_pages_link_to_the_node():
-    data = json.loads(tree_doc.DATA.read_text(encoding="utf-8"))
-    bad = []
-    for n in data["nodes"]:
-        if not n["lua"]:
-            continue
-        for lang in ("ru", "en"):
-            if not any(f"../tree/{n['page']}" in (DOCS / lang / "apps" / f"{m}.md").read_text(encoding="utf-8")
-                       for m in n["modules"]):
-                bad.append(f"{lang}: no module page of {n['id']} links to tree/{n['page']}")
-    assert not bad, "\n".join(bad)

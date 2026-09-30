@@ -2,13 +2,13 @@
 
 [← Back](README.md) · [Units](README.md) · [Русский](../../../ru/game/units/state-sensors.md) · [Complete field table](state-fields.md)
 
-This is shared infrastructure knowledge: how to read a unit's changing condition. Faction tactics, unit balance statistics, abilities, equipment and special racial mechanics belong to separate research. Test subjects were the existing shieldless Spearmen, basic Archers and rank-1 foot Empire General; their fixture values are examples, not constants for algorithms.
+This is shared infrastructure knowledge: how to read a unit's changing condition. Faction tactics, unit balance statistics, abilities, equipment and special racial mechanics belong to separate research. Test subjects were the existing shieldless Spearmen, basic Archers and rank-1 foot Empire General; their fixture values are examples, not constants.
 
 ## Scope and evidence
 
 Three live diagnostics on official `chokepoint_badlands_river`, 26 September 2026, WH3 v9.0.0 build 50218.4334952, Ultra entities, requested ×20, minimum graphics. There are **7,926 own-unit samples** at roughly 0.5 simulated-second intervals. The final reader exposes **68 fields**, including duplicate channels and helper fields, not 68 independent mechanics. Six focused Lua 5.1 wrapper tests passed. All three owned game processes were closed.
 
-`Handoff and measured comparisons` (local archive: `research/evidence/units/unit-state-20260926/handoff.json`) · `Machine-readable field catalogue` (local archive: `research/evidence/units/unit-state-20260926/field-catalog.json`) · `Archive hashes` (local archive: `research/evidence/units/unit-state-20260926/archive.json`). Raw logs are compressed JSONL in the `basic`, `charge` and `charge-extended` evidence directories. The archive preserves exact scripts, XML, source hashes, summaries and cleanup records. The operator produced the experiments; the coordinator checked hashes, sample counts and enemy-data withholding and approved publication.
+`Handoff and measured comparisons` (local archive: `research/evidence/units/unit-state-20260926/handoff.json`) · `Machine-readable field catalogue` (local archive: `research/evidence/units/unit-state-20260926/field-catalog.json`) · `Archive hashes` (local archive: `research/evidence/units/unit-state-20260926/archive.json`). Raw logs are compressed JSONL in the `basic`, `charge` and `charge-extended` evidence directories. The archive preserves exact scripts, XML, source hashes, summaries and cleanup records. After the runs, hashes, sample counts and the withholding of enemy detail at the reader's output were checked.
 
 ## What we can read
 
@@ -37,7 +37,7 @@ Native names below mean `unit:method()`; CCO names mean `common.get_context_valu
 - While CCO `IsAlive=true`, `HealthValue/HealthMax` agreed with CCO `HealthPercent` within 3×10⁻⁸. Native and CCO fractions differed by up to 0.03591 in these runs. The cause was not isolated; reads are not a proven atomic snapshot.
 - After voluntary exit, the General and Spearmen reported zero `HealthValue`, zero native living entities and `IsAlive=false`, while HP fractions remained positive and leaving/withdrawal flags were true. **Exit is not proof of death.** Do not derive casualties or total damage solely from these disappearing entities.
 - The 90-entity Archer fixture began with 1,800 total projectiles. Native ammo ratio and CCO ammo percentage occasionally differed by up to 0.008333 during firing. This does not establish a universal per-soldier load or exact simultaneity.
-- `MoralePercent` was above 1 in the basic run and reached −1.78 under pressure. Do not clamp it to [0,1] or label it a probability. The card's `stat_morale.Value` also changed, but with a different time series. No formula for the exact internal morale reserve or routing threshold is established.
+- `MoralePercent` was above 1 in the basic run and reached −1.78 under pressure. Do not clamp it to [0,1] or label it a probability. The card's `stat_morale.Value` also changed, but with a different time series. This test did not establish a formula for the exact internal morale reserve or the routing threshold. Later (30.09.2026), from arena recordings: a unit routs when `MoralePercent` reaches 0; the morale model is on [morale](morale.md).
 - In `charge-extended`, Archers naturally first reported routing at probe timestamp **59.2 s**, then shattered at **75.2 s**. No forced rout command was used. This confirms transitions in this fixture; it does not establish universal thresholds/timings or prove that other types cannot rout.
 - All three types returned to `threshold_fresh` during the 240-second rest stage; HP did not recover. This is an observation, not a universal rest timer.
 
@@ -45,12 +45,12 @@ Native names below mean `unit:method()`; CCO names mean `common.get_context_valu
 
 Observed status keys: `braced`, `firing`, `hidden`, `melee`, `moving`, `moving_fast`, `routing`, `shaken`, `shattered`, `wavering`, `withdraw`. Several can coexist. The catalogue stores observed values, not an exhaustive enum for the game. Native fatigue readings included fresh, active, winded, tired and very tired; exhausted was not reached in these runs. Some booleans, including awaiting-rally-order and out-of-control, stayed false: their readout is checked, their trigger is not.
 
-## Reader contract and use
+## How to use the reader
 
-[src/units/state.lua](../../../../src/apps/units/) is a **trusted own-unit reader**, separate from [policy API v1](../../apps/sandbox.md). Ownership must be established by the trusted caller; setting `owned=true` is not authentication or a sandbox. Enemy detail is withheld even when visible. The only enemy output is native visibility. Do not give untrusted policy code the unit handle, CCO callback or ownership option.
+[`apps.units.state_adapter`](../../../../src/apps/units/state_adapter.lua) reads **own** units through `observe`. The calling code establishes ownership; setting `owned=true` proves nothing by itself. Enemy detail is withheld even when visible; the only enemy output is native visibility. What a side may see of the enemy: [observation rules](../../apps/observation.md).
 
 ```lua
-local snapshot = state.observe(own_unit, {
+local snapshot = state_adapter.observe(own_unit, {
     owned = true,
     observer_alliance = own_alliance,
     cco = function(u, field)
@@ -66,10 +66,10 @@ end
 
 Each sensor is `{status='known', value=...}` or `{status='unknown', reason=...}`. False and zero remain real values. Nil, read errors, wrong types and nonfinite numbers become unknown. Status arrays are bounded. A missing target is a known empty string; a hidden/unresolved target is unknown. Vectors are plain copies. The three threat methods return units, not numeric threat strength: the first probe's wrapper mistake is preserved and excluded from those catalogue aggregates; two subsequent probes verified the correction.
 
-The wrapper does not connect new sensors to fighters or change their policies. Detailed enemy fields need a separately reviewed disclosure contract. Neither sampled damage fields nor these tests certify the global inactivity monitor. Flying, barriers, undead mechanics, abilities, siege and faction-specific stats are outside this study.
+Detailed enemy fields need a separate decision on what may be disclosed. Neither sampled damage fields nor these tests certify the global inactivity monitor. Flying, barriers, undead mechanics, abilities, siege and faction-specific stats are outside this study.
 
-Rebuild a preserved probe with `python tools/unit-state/replay.py charge-extended`; this does not launch the game. An authorized operator can then run `tools/map-capture/launch.ps1 -TimeoutSeconds 180` (400 for `basic`). Exact pack hashes are checked; outcome determinism is not promised. [Tests](../../../../tests/apps/units/test_state_adapter.py): `python -m unittest discover -s tests -p test_unit_state.py -v`.
+[Reader tests](../../../../tests/apps/units/test_state_adapter.py): `.venv/Scripts/python -m pytest tests/apps/units/test_state_adapter.py`. The [unit_readout](../../apps/entries.md#unit_readout) entry reads every unit readout in a live battle.
 
 API references used to select probes: [native battle_unit documentation](https://chadvandy.github.io/tw_modding_resources/WH3/battle/battle_unit.html), [CCO documentation](https://chadvandy.github.io/tw_modding_resources/WH3/cco/documentation.html). Measured claims above come from the archived local runs.
 
-Scripts under evidence are immutable snapshots with their original working paths. Use the portable tools/unit-state/replay.py entry point above, not the archived replay.py.
+The scripts of these runs are kept as they were in `research/scripts/unit-state/` and in the local archive: they refer to the old file layout and do not run without fixing paths.

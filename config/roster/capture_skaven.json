@@ -1,5 +1,5 @@
 {
-  "description": "Roster capture of Skaven units (user, 27.09.2026: Skaven have more soldiers per unit; queues past obstacles). Same widths as config/roster/capture.json.",
+  "description": "Roster capture of Skaven units (user, 27.09.2026: Skaven have more soldiers per unit). Same widths as config/roster/capture.json.",
   "faction": "wh2_main_skv_skaven",
   "units": [
     {

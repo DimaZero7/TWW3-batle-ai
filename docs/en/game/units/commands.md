@@ -2,6 +2,8 @@
 
 [← Back](README.md) · [Units](README.md) · [Русский](../../../ru/game/units/commands.md) · [Evidence](evidence.md)
 
+Which unit orders from Lua we checked in battle and how the engine carries them out.
+
 Create one controller per unit so that commands do not accidentally affect an entire group:
 
 ```lua
@@ -56,21 +58,24 @@ Measured on 27.09.2026 with Empire spearmen, 120 men
   fail, `ordered_position` keeps its old value and the unit stays `is_idle`.
   Check `unit:can_reach_position(p)` before the order and that
   `ordered_position` changed after it.
+- **A place on rock puts the unit crooked.** When a unit's place (an order or
+  a deployment spot) falls on rock, the engine places the unit itself: shifted
+  up to 18 m and facing 172° and 28° instead of 90° (28.09.2026, The Moorlands
+  Route). So check the place against the map before the order.
 - Widths of 5–60 m are accepted as given (`ordered_width` equals the order).
   The real front is 1–2 m narrower. Narrowing from 30 to 10 m took 22 s; to 8
   and 5 m, more than 25 s.
 
 ## Turning in place
 
-Measured on 27.09.2026 with 19 × 18 m archer blocks:
+Measured on 27.09.2026 with 19 × 18 m archer blocks, The Moorlands Route:
 
 - `uc:rotate(90)` turns the unit **around the centre of its front rank**, not
   around its middle. A square block shifts ≈ 12 m sideways and forwards on a 90°
   turn. Archers standing 3 m behind their infantry ran into it (0.7–1.0 m
   between soldiers of different units). The turn took 14–17 s.
 - Turning in place: `goto_location_angle_width` to "middle + half the depth
-  along the new facing" with the same width (`apps.formation.services.turn_in_place`):
-  1.4–1.7 m shift, 2–3 m to the infantry, 7–8 s. Computed from the current middle
+  along the new facing" with the same width: 1.4–1.7 m shift, 2–3 m to the infantry, 7–8 s. Computed from the current middle
   each time, the shift adds up (3.9 m after four turns); use the unit's remembered slot.
 
 ## Unit position is not the soldiers' middle
@@ -79,6 +84,67 @@ During a minute of standing without orders (27.09.2026) `unit:position()` of a
 spearmen wall jumped 2.1 m and of archers 0.9 m, while the soldiers' middle from
 `ManList` moved at most 0.3 m and `is_moving` was never `true`. To tell whether a
 unit stands still, and for exact geometry, use soldier positions.
+
+## Unit facing: 64 sectors
+
+Measured on 28.09.2026: one spearmen unit was teleported with every facing round
+the circle 1° apart, and 0.1° apart around 90°, and `unit:bearing()` and the
+soldiers were read. The engine holds a unit's facing in **64 sectors of 5.625°**
+and puts the unit in the **middle** of its sector: everything from 0 to 5.62° →
+2.81°, from 84.38° to 89.99° → 87.19°, from 90 to 95.62° → 92.81°. Right after the
+order the soldiers face exactly as sent; within a few seconds they turn to the
+middle of the sector. A formation planned for another facing ends up as a
+**staircase**: the centres on one line, each block turned up to 2.8° from it. So
+take the facing at the middle of the sector straight away
+(`apps.orders.facing.snap`) and send that in the order. All 27 earlier battles
+behaved the same way.
+
+## How a unit walks on an order
+
+Measured on 27–28.09.2026 on The Moorlands Route, x20: plain move orders
+(`goto_location_angle_width`) to armies of 13–16 Empire and Skaven units, unit
+centres every 2 s.
+
+- A walking unit faces where it goes: the deviation is a median 3–4°, within 37°
+  in 90% of samples. It turns at up to 15–20° a second (90% of turns).
+- In a general march it walks at ≈ 1.3 m/s (median over 2 s segments). A straight
+  move of 4–50 m takes ≈ 9.7 s + distance / 1.37 m/s (53 moves): a few seconds go
+  on starting and dressing the formation in place. Speeds by unit type: [pace](pace.md).
+- The width in a move order changes only at the destination: the unit walks with
+  its old width and re-forms there. To pass in a narrow formation, narrow before
+  leaving.
+- A long wall of 16 units, each unit ordered to its own place behind a rock: the
+  engine **split the wall**
+  (the left units went round the rock on the west, the right ones on the east) and
+  **assembled it again** behind the rock. It took 198 s; the farthest unit walked
+  254 m instead of 170 m straight.
+- Round an obstacle the engine lets units press into each other and separates them
+  itself afterwards: at the peak 10–45% of the army's men stand closer than 1 m to
+  men of another unit (rock 35%, spearmen in two
+  rows 45%, Skaven 25%, a 72 m gap between rocks 20%, a rock at the map edge 10%).
+  Units jostle and slow down. The same happened by the hamlet in a manual battle:
+  the jam comes from a crowd of own units ([hamlet](../../../../research/analysis/hamlet/README.md), in Russian).
+
+**Going round an obstacle, engine only.** Each unit gets one plain order to its
+place behind the obstacle, and the engine chooses the path. `formation-probe`
+runs of 27.09.2026, The Moorlands Route, x20. Time: until the last unit stops.
+"Longer than straight": the median over units of the unit centre's path divided
+by the straight line from start to end. "Closest to the rock": how near the unit
+centre came to an impassable cell.
+
+| Terrain | Units | Time | Longer than straight | Closest to the rock |
+|---|---:|---:|---:|---:|
+| a rock | 16 | 208 s | 1.20 | 6.7 m |
+| a rock at the map edge, one side closed | 16 | 129 s | — | — |
+| a 72 m gap between two rocks | 16 | 139 s | 1.07 | 6.7 m |
+| spearmen only, in two rows | 13 | 213 s | 1.28 | 4.2 m |
+| Skaven: clanrats of 160 and slaves of 180 men | 13 | 215 s | 1.17 | 10.8 m |
+
+In short: the path is 7–28 % longer than the straight line, and unit centres
+come within 4–11 m of the rock. At the map edge only the time was measured.
+Source: the analyses `research/analysis/walker/` and
+`research/analysis/logistics/`; they were removed with our AI and remain in the
+Git history (commit 242c3b1).
 
 ## Numbers in the game's Lua
 
@@ -102,4 +168,4 @@ end
 
 Both Stand Your Ground and Foe Seeker produced their corresponding live effects. Omitting the target raised an error in this build. Availability must be read from the particular unit; this is not a claim about the skill tree of a campaign rank-1 lord.
 
-Skirmish was disabled in the fixtures. It is an optional native automation, not a required primitive for our algorithm. Unsupported formation-spacing behavior was not invoked. No “raise shield”, “dig in” or instant restoration command is included.
+Skirmish was disabled in the fixtures: it is an optional native automation of the unit. Unsupported formation-spacing behavior was not invoked. No “raise shield”, “dig in” or instant restoration command is included.

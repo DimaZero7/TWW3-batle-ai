@@ -2,6 +2,9 @@
 
 [← Back](README.md) · [Game knowledge](README.md) · [Русский](../../ru/game/atlas.md)
 
+Pictures of the maps we measured: the official preview and our map of heights,
+ground and objects.
+
 ## Maps
 
 ### Moorlands Route

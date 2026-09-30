@@ -1,6 +1,6 @@
--- Optional trusted missile-range sensor. NOT part of policy API v1, NOT a sandbox.
+-- Optional trusted missile-range sensor (a research read, not an AI's input).
 -- Only the trusted adapter may call observe or hold its engine arguments.
--- context.is_friendly must use the native alliance registry, never policy input.
+-- context.is_friendly must use the native alliance registry, never caller-supplied data.
 -- Both endpoints are gated before any range/CCO/pair/position read. No memory.
 -- Measured behaviour: docs/en/game/units/missile-range.md.
 local value = require('apps.core.value')

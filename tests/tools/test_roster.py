@@ -35,7 +35,7 @@ def test_too_many_units_or_duplicates_are_rejected(tmp_path):
 def test_update_keeps_hand_filled_part(tmp_path):
     out = tmp_path / "roster"
     out.mkdir()
-    (out / "inf_key.json").write_text(json.dumps({"ours": {"fire": "arc", "roles": ["wall"], "notes": "x"}}))
+    (out / "inf_key.json").write_text(json.dumps({"ours": {"fire": "arc", "roles": ["x"], "notes": "x"}}))
     soldiers = [0, 0, 100, 0, 0, -20, 100, -20]  # 10 m front, 2 m deep, bearing 0
     rows = [
         {"event": "ready", "wall_iso": "2026-09-27T00:00:00Z", "game_version": "v", "build": "b", "batch": "r"},
@@ -48,7 +48,7 @@ def test_update_keeps_hand_filled_part(tmp_path):
     log.write_text("\n".join(json.dumps(r) for r in rows))
     roster.update(log, out)
     entry = json.loads((out / "inf_key.json").read_text(encoding="utf-8"))
-    assert entry["ours"] == {"fire": "arc", "roles": ["wall"], "notes": "x"}
+    assert entry["ours"] == {"fire": "arc", "roles": ["x"], "notes": "x"}
     assert entry["card"]["stats"]["stat_armour"] == {"value": 30, "displayed": 30, "base": 25}
     assert entry["formation"]["widths"] == [{"ordered_m": 10, "front_m": 10.0, "depth_m": 2.0, "reform_s": 5.0,
                                              "ended": "arrived", "men": 4}]

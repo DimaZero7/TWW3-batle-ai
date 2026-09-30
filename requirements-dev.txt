@@ -2,7 +2,7 @@
 lupa==2.8
 pytest==9.1.1
 
-# tools/analysis (height maps, slopes, passages)
+# tools/analysis (height maps, slopes, passages) and tools/nn/gamedata
 numpy==2.2.6
 scipy==1.15.3
 matplotlib==3.10.9

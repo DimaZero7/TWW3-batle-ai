@@ -1,4 +1,4 @@
--- Entry: movement probe for the obstacle task (docs/ru/architecture/tasks/obstacles.md).
+-- Entry: movement probe: how the engine moves a unit (research/analysis/hamlet/README.md).
 -- One own unit runs a plan of legs from config.plan (config/move-plans/*.json):
 --   shape:    reform in place at another width (formation geometry, reform time);
 --   traverse: one plain engine order to a far target (how the engine itself

@@ -3,9 +3,8 @@
 [← Назад](README.md) · [Инструкция по карте](README.md) · [English](../../../en/game/map/heights.md)
 
 **Высоту земли мы уже читаем из игры.** Карта высот — эти же числа, разложенные
-по положениям X/Z. Она пригодится классическому тактическому алгоритму;
-нейросеть для этого не нужна. Чтение высот проверено; выбор боевых позиций и
-предсказание движения на их основе — будущая работа.
+по положениям X/Z. Чтение высот проверено; что из высот следует для боя
+(позиции, движение, видимость), здесь не исследовалось.
 
 ## 1. Получить высоту точки из игры
 
@@ -73,16 +72,16 @@ H[iz, ix] = высота_земли(x, z)
 
 ## 4. Повторить пример без запуска WH3
 
-Из корня репозитория, используя Python 3.10 и зависимости для рисования:
+Из корня репозитория, Python проекта (`numpy`, `matplotlib` из `requirements-dev.txt`);
+исходная сетка — локальный архив:
 
-```powershell
-python -m pip install --only-binary=:all: --target .tools/plotting numpy==2.2.6 matplotlib==3.10.9
-python tools/map-capture/heightmap.py --csv docs/ai/map-data/kislev-scales-evidence/grid-1m.csv.gz --bounds -512 512 -512 512 --step 1 --output tmp/map-research/heightmap-1m
+```bash
+.venv/Scripts/python -m tools.analysis.heightmap --csv research/evidence/map-data/kislev-scales-evidence/grid-1m.csv.gz --bounds -512 512 -512 512 --step 1 --output build/map-research/heightmap-1m
 ```
 
 Можно передать и `tww3_bai_map_capture_grid.csv` завершённого нового замера,
 указав рамку и шаг именно того опыта. Скрипт не запускает игру и не отдаёт Lua-команд.
-Черновые результаты и воспроизводимый NPY остаются в игнорируемой `tmp/`.
+Результаты и воспроизводимый NPY остаются в игнорируемой `build/`.
 
 ![Высота земли Кислева, шаг 1 м](../../../assets/map/heightmap-kislev-1m.ru.png)
 

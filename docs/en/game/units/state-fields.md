@@ -2,7 +2,10 @@
 
 [← Back](README.md) · [State guide](state-sensors.md) · [Русский](../../../ru/game/units/state-fields.md)
 
-68 fields. Ranges describe the three archived fixtures, not engine limits. False-only establishes readability, not a true transition. Read counts combine the three own types; JSON contains per-type detail.
+Every unit state field we read in three tests, with its type and the values we
+saw.
+
+68 fields in all. Ranges describe the three archived fixtures, not engine limits. False-only establishes readability, not a true transition. Read counts combine the three own types; JSON contains per-type detail.
 
 `JSON` (local archive: `research/evidence/units/unit-state-20260926/field-catalog.json`)
 

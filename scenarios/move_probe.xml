@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Movement probe around the hamlet on The Moorlands Route (catchment_03)
-     for the obstacle task. Side 1: one Empire spearmen unit moved by the plan
+<!-- Movement probe around the hamlet on The Moorlands Route (catchment_03):
+     how the engine moves a unit (research/analysis/hamlet/README.md). Side 1: one Empire spearmen unit moved by the plan
      in config/move-plans/. Side 2: a general held by script
      far away, only because a battle needs two armies. -->
 <battle>

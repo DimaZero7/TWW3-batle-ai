@@ -4,8 +4,27 @@
 
 **Русский** · [English](#english)
 
-Собственный боевой ИИ для **Total War: WARHAMMER III** на Lua-скриптах.
-Код разбит на приложения, логика — в сервисах, обращения к движку — только в
+Основа для боевого ИИ **Total War: WARHAMMER III**: измеренная механика боя,
+инструменты для работы с игрой из Lua-скриптов и данные, на которых потом можно
+с нуля обучить нейросеть.
+
+**Сброс 30.09.2026.** По решению автора проекта наш алгоритмический ИИ (стратегия,
+тактика, строй, дерево ИИ), его документы, карточки задач и наш симулятор боя
+удалены. Прежняя работа осталась в истории Git (последний коммит до сброса —
+`242c3b1`).
+
+## Что есть в проекте
+
+- **Механика игры** — что проверено в WH3: карта, отряды, мораль, рукопашная,
+  стрельба, скорость хода, сложность, как воюет штатный ИИ — [знания об игре](docs/ru/game/README.md).
+- **Инфраструктура** — сборка pack, launcher с честной сложностью, чтение карты,
+  карточки, состояние, видимость и дальность отрядов, формы строя, проверенные
+  приказы, контекст боя, телеметрия, правила наблюдения и зонды, которые измеряют
+  игру или записывают бои — [модули кода](docs/ru/apps/README.md).
+- **Данные для обучения** — правила из базы данных игры, запись боёв ИИ игры на
+  арене и загрузчик этих записей — [данные для обучения нейросети](docs/ru/training/README.md).
+
+Код разбит на приложения: логика — в сервисах, обращения к движку — только в
 адаптерах. Тесты проверяют Lua 5.1 без запуска игры.
 
 ## Быстрый старт
@@ -14,26 +33,24 @@
 python -m venv .venv
 .venv/Scripts/python -m pip install -r requirements-dev.txt
 .venv/Scripts/python -m pytest
-.venv/Scripts/python -m tools.build duel --runs 3
+.venv/Scripts/python -m tools.build nn-arena --own-ai attack --timeout 900
 ```
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -Target duel
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -Target nn-arena
 ```
+
+Для боя нужны установленная игра, путь к ней в `config/local.json` и подписка на
+мод True Sight — [установка и настройка](docs/ru/environment/setup.md).
 
 ## Документация
 
-- **Дерево ИИ — начните отсюда** — [что делает ИИ по фазам и веткам](docs/ru/tree/README.md)
-  - [Фаза 1 · Расстановка](docs/ru/tree/deploy.md) · [Фаза 2 · Сближение до окна](docs/ru/tree/approach.md) · [Фазы 3–8](docs/ru/tree/combat.md)
-  - [Карта модулей по уровням](docs/ru/tree/modules.md)
-- **Модули кода** — [все модули `src/apps`](docs/ru/apps/README.md) · [точки входа](docs/ru/apps/entries.md)
-- **Архитектура** — [раздел](docs/ru/architecture/README.md)
-  - [Устройство проекта и слои](docs/ru/architecture/overview.md) · [Список приложений](docs/ru/architecture/apps.md)
-  - [Архитектура ИИ](docs/ru/architecture/ai-design.md) · [Теория боя](docs/ru/architecture/battle-theory.md) · [Будущие задачи](docs/ru/architecture/tasks/backlog.md)
-  - [Как вести документацию](docs/ru/architecture/documentation.md)
+- **Данные для обучения нейросети** — [арена, записи боёв, правила игры](docs/ru/training/README.md)
+- **Механика игры** — [что проверено в WH3](docs/ru/game/README.md) · [каталог показателей](docs/ru/game/readouts.md) · [атлас](docs/ru/game/atlas.md)
+- **Код** — [модули `src/apps`](docs/ru/apps/README.md) · [точки входа](docs/ru/apps/entries.md)
+- **Архитектура** — [устройство проекта и слои](docs/ru/architecture/overview.md) · [список приложений](docs/ru/architecture/apps.md) · [ошибки и неизвестные значения](docs/ru/architecture/error_handling.md) · [как вести документацию](docs/ru/architecture/documentation.md)
 - **Окружение и запуск** — [установка](docs/ru/environment/setup.md) · [сборка pack](docs/ru/launch/build.md) · [запуск боя](docs/ru/launch/run.md)
-- **Тестирование** — [тесты без игры, эталоны, автозапуск](docs/ru/testing/tests.md)
-- **Знания об игре** — [что проверено в WH3](docs/ru/game/README.md) · [каталог показателей](docs/ru/game/readouts.md) · [атлас](docs/ru/game/atlas.md)
+- **Тестирование** — [тесты без игры](docs/ru/testing/tests.md)
 - **Исследования** — [архив исследований и доказательств](docs/ru/research/README.md)
 
 Полное оглавление: [docs/ru/README.md](docs/ru/README.md) · English: [docs/en/README.md](docs/en/README.md).
@@ -44,7 +61,26 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -T
 
 ## English
 
-Our own battle AI for **Total War: WARHAMMER III**, written as Lua scripts.
+The base for a battle AI for **Total War: WARHAMMER III**: measured battle
+mechanics, tools to work with the game from Lua scripts, and the data on which a
+neural network can later be trained from scratch.
+
+**Reset of 30.09.2026.** By the project owner's decision our algorithmic AI (strategy,
+tactics, formation, the AI tree), its docs, the task cards and our battle
+simulator were removed. The old work stays in the Git history (the last commit
+before the reset is `242c3b1`).
+
+### What the project has
+
+- **Game mechanics** — what is verified in WH3: the map, units, morale, melee,
+  shooting, pace, difficulty, how the game's own AI fights — [game knowledge](docs/en/game/README.md).
+- **Infrastructure** — pack build, a launcher with fair difficulty, map reading,
+  unit cards, state, visibility and range, formation shapes, verified orders,
+  battle context, telemetry, observation rules, and probes that measure the game
+  or record battles — [code modules](docs/en/apps/README.md).
+- **Training data** — rules from the game's database, recording the game's AI
+  battles in the arena and a loader for those records — [data for training the network](docs/en/training/README.md).
+
 Code is split into apps; logic lives in services and engine calls only in
 adapters. Tests run Lua 5.1 without the game.
 
@@ -54,37 +90,24 @@ adapters. Tests run Lua 5.1 without the game.
 python -m venv .venv
 .venv/Scripts/python -m pip install -r requirements-dev.txt
 .venv/Scripts/python -m pytest
-.venv/Scripts/python -m tools.build duel --runs 3
+.venv/Scripts/python -m tools.build nn-arena --own-ai attack --timeout 900
 ```
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -Target duel
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -Target nn-arena
 ```
+
+A battle needs the game installed, its path in `config/local.json` and a
+subscription to the True Sight mod — [setup and configuration](docs/en/environment/setup.md).
 
 ### Documentation
 
-- **Architecture**
-  - [Project structure and layers](docs/en/architecture/overview.md)
-  - [List of apps](docs/en/architecture/apps.md)
-  - [Errors and unknown values](docs/en/architecture/error_handling.md)
-- **Environment**
-  - [Setup and configuration](docs/en/environment/setup.md)
-- **Launch**
-  - [Building a pack](docs/en/launch/build.md)
-  - [Running a battle and results](docs/en/launch/run.md)
-- **Testing**
-  - [Tests without the game](docs/en/testing/tests.md)
-- **Apps** — [core](docs/en/apps/core.md) · [battle](docs/en/apps/battle.md) ·
-  [map](docs/en/apps/map.md) · [navigation](docs/en/apps/navigation.md) ·
-  [units](docs/en/apps/units.md) · [intel](docs/en/apps/intel.md) ·
-  [orders](docs/en/apps/orders.md) · [deployment](docs/en/apps/deployment.md) ·
-  [ai](docs/en/apps/ai.md) · [observation](docs/en/apps/observation.md) · [sandbox](docs/en/apps/sandbox.md) ·
-  [telemetry](docs/en/apps/telemetry.md) · [entries](docs/en/apps/entries.md)
-- **Game knowledge**
-  - [What is verified in WH3](docs/en/game/README.md) — map, units, map catalogue
-  - [Readout catalogue](docs/en/game/readouts.md) — what we collect and what else is available
-  - [Visual atlas](docs/en/game/atlas.md)
-- **Research**
-  - [Research and evidence archive](docs/en/research/README.md)
+- **Data for training the network** — [the arena, recorded battles, game rules](docs/en/training/README.md)
+- **Game mechanics** — [what is verified in WH3](docs/en/game/README.md) · [readout catalogue](docs/en/game/readouts.md) · [atlas](docs/en/game/atlas.md)
+- **Code** — [`src/apps` modules](docs/en/apps/README.md) · [entry points](docs/en/apps/entries.md)
+- **Architecture** — [project structure and layers](docs/en/architecture/overview.md) · [list of apps](docs/en/architecture/apps.md) · [errors and unknown values](docs/en/architecture/error_handling.md) · [how to keep the docs](docs/en/architecture/documentation.md)
+- **Environment and launch** — [setup](docs/en/environment/setup.md) · [building a pack](docs/en/launch/build.md) · [running a battle](docs/en/launch/run.md)
+- **Testing** — [tests without the game](docs/en/testing/tests.md)
+- **Research** — [research and evidence archive](docs/en/research/README.md)
 
-Full index: [docs/en/README.md](docs/en/README.md).
+Full index: [docs/en/README.md](docs/en/README.md) · Русский: [docs/ru/README.md](docs/ru/README.md).

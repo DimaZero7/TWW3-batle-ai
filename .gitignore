@@ -9,6 +9,8 @@ build/
 
 # Machine-specific settings (see config/default.json)
 config/local.json
+# Local Claude Code settings of this machine
+.claude/settings.local.json
 
 # IDE
 .idea/

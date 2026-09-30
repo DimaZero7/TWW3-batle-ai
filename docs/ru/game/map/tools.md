@@ -6,35 +6,39 @@
 
 | Файл | Назначение |
 |---|---|
-| [src/map/reader.lua](../../../../src/apps/map/) | Рамка мини-карты, координаты сетки, чтение клеток порциями |
-| [src/map/objects.lua](../../../../src/apps/map/) | Пакетное чтение точек и состояния объектов; [проверенные рамки](objects.md) |
-| [src/map/reachability.lua](../../../../src/apps/navigation/) | Доступность точек выбранным отрядам после расстановки; [ограничения](passages.md) |
+| [src/apps/map/adapter.lua](../../../../src/apps/map/adapter.lua) | Рамка мини-карты (`read_frame`), чтение клеток порциями (`read_batch`), пакетное чтение объектов и сооружений CCO (`read_buildings`, `read_structure_contexts`); [проверенные рамки](objects.md) |
+| [src/apps/map/services.lua](../../../../src/apps/map/services.lua) | Геометрия без движка: рамка, сетка и координаты клеток (`new_grid`, `world_to_radar`, `world_to_cell`, `cell_center`) |
+| [src/apps/navigation/adapter.lua](../../../../src/apps/navigation/adapter.lua) | Доступность точек выбранным отрядам после расстановки (`read_cells`); [ограничения](passages.md) |
 | [slopes.py](../../../../tools/analysis/slopes.py) | Уклоны и соседние перепады из сохранённых высот |
 | [passages.py](../../../../tools/analysis/passages.py) | Поиск соединений мелководья по сохранённой доступности |
-| [capture.lua](../../../../src/entries/map_capture.lua) | Статический опыт, пауза, отложенные вызовы, CSV и JSONL |
-| [features.lua](../../../../src/entries/map_capture.lua) | Дополнительный режим: начало боя под контролем скрипта, объекты/CCO и доступность всех точек |
+| [src/entries/map_capture.lua](../../../../src/entries/map_capture.lua) | Точка входа: статический опыт, пауза, отложенные вызовы, CSV и JSONL; режим `--features` — начало боя под контролем скрипта, объекты/CCO и доступность всех точек |
 | [heightmap.py](../../../../tools/analysis/heightmap.py) | Таблица высот и PNG из CSV без игры; [инструкция](heights.md) |
-| [build.py](../../../../tools/build.py) | Отдельный pack из модуля, запускного скрипта и фиксированного сценария |
-| [launch.ps1](../../../../tools/launcher/launch.ps1) | Проверка/установка pack, запуск процесса, ожидание результата, сохранение, автоматическое закрытие |
-| [finish.ps1](../../../../tools/launcher/launch.ps1) | Проверка сохранённых файлов и процесса, закрытие своего процесса, удаление его служебных файлов из игры |
+| [build.py](../../../../tools/build.py) | Отдельный pack из модулей карты, точки входа и фиксированного сценария |
+| [launch.ps1](../../../../tools/launcher/launch.ps1) | Проверка/установка pack, запуск процесса, ожидание результата, сохранение, закрытие своего процесса и удаление своих служебных файлов из игры |
 | [map_capture.xml](../../../../scenarios/map_capture.xml) | Штатный полевой Кислев; два минимальных противостоящих отряда нужны для загрузки боя |
 
-В модуле нет команд отрядам, таймеров, файлов, глобального запуска и политики ИИ.
-Это локальный Lua-сервис/модуль, не сетевой сервис. Жизненным циклом управляет
-тестовый запускатель. В обычную сборку дуэлей модуль автоматически не добавляется.
+В модулях карты и доступности нет команд отрядам, таймеров, файлов и
+глобального запуска. Это локальные Lua-модули, не сетевой сервис. Жизненным
+циклом управляет точка входа `entries.map_capture`; в сборку другой цели модули
+попадают, только если её точка входа их подключает.
 
 ## Интерфейс модуля
 
-Сборщик вставляет `reader.lua` в локальную таблицу через функцию-обёртку, как
-существующий стенд. Непроверенный игровой путь `require` не предполагается.
+Сборщик (`tools/build.py`) собирает модули из `src/` в один скрипт через
+функции-обёртки. Непроверенный игровой путь `require` не предполагается.
 
 ```lua
-local frame = reader.read_frame(common)
-local grid = reader.new_grid(frame, 5)
-local cells, next_index, done = reader.read_batch(bm, battle_vector, grid, 0, 4096)
-local u, v = reader.world_to_radar(frame, 100, 0)
-local ix, iz = reader.world_to_cell(grid, 100, 0)
-local x, z = reader.cell_center(grid, ix, iz)
+local map = require('apps.map.adapter')
+local map_services = require('apps.map.services')
+local navigation = require('apps.navigation.adapter')
+
+local frame = map.read_frame(common)
+local grid = map_services.new_grid(frame, 5)
+local cells, next_index, done = map.read_batch(bm, battle_vector, grid, 0, 4096)
+local u, v = map_services.world_to_radar(frame, 100, 0)
+local ix, iz = map_services.world_to_cell(grid, 100, 0)
+local x, z = map_services.cell_center(grid, ix, iz)
+local rows = navigation.read_cells(bm, battle_vector, units, cells)  -- после расстановки
 ```
 
 - `frame`: коэффициенты, проверенные углы, `min_x/max_x/min_z/max_z`, размеры,
@@ -52,39 +56,35 @@ local x, z = reader.cell_center(grid, ix, iz)
 
 ## Запуск из корня репозитория
 
-Нужны установленная WH3, Python с локальной зависимостью Lupa/Lua 5.1, PowerShell
-и доступ на запись в папку игры. В запускных скриптах указан Steam-путь этой машины;
-перед использованием на другой машине его нужно проверить.
+Нужны установленная WH3, Python проекта (`.venv` с зависимостями из
+`requirements-dev.txt`), PowerShell и доступ на запись в папку игры. Путь к игре —
+в `config/default.json` или `config/local.json`.
 
-```powershell
-python -m pip install --only-binary=:all: --target .tools/python -r requirements-dev.txt
-python -m unittest discover -s tests -p test_map_reader.py -v
-python tools/map-capture/build.py --step 5
-& ./tools/map-capture/launch.ps1
+```bash
+.venv/Scripts/python -m pytest tests/apps/map
 ```
 
-Шаги запуска: `1`, `2`, `3`, `5`. Игра должна быть закрыта. Помощник графики
-сохраняет резервную копию настроек, выставляет минимум и размер отрядов Ultra.
-Сбор статический, на паузе: x20 нужно для ручного боя, а не для ускорения этих
-запросов. Управление мышью и Computer Use не требуются.
-
-Результат: `build/map-capture/run-YYYYMMDD-HHMMSS/`: снимки исходников,
-manifest и хеши, сведения о процессе, XML, JSONL, CSV, статус и запись очистки.
-Сборщик не заменяет `build/tww3_bai_duel.pack`.
-
-**Автоматический замер закрывает свой процесс после сохранения.** При ошибке
-или тайм-ауте также завершается только свой проверенный процесс; незавершённые
-файлы остаются для диагностики. Непроверенный частичный результат не стирается.
-Запущенная игра или существующие служебные файлы блокируют новый запуск.
-Если очистка завершённого опыта была прервана:
-
-```powershell
-& ./tools/map-capture/finish.ps1 -Run ./build/map-capture/run-YYYYMMDD-HHMMSS
+```bash
+.venv/Scripts/python -m tools.build map-capture --step 5
 ```
 
-Вместо шаблона подставить реальную папку опыта. Для сбора карты не запускать
-обычный стенд дуэлей. Оставлять игру открытой только для явно нужной пользователю
-ручной проверки.
+```bash
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -Target map-capture
+```
+
+Шаги сетки: `1`, `2`, `3`, `5`; `--window MIN_X MAX_X MIN_Z MAX_Z` снимает только
+участок карты. Игра должна быть закрыта. Сбор статический, на паузе; управление
+мышью не требуется.
+
+Результат: `build/map-capture/runs/<ГГГГММДД-ччммсс>/`: manifest сборки, сведения
+о процессе, события, XML боя, CSV сетки и статус с итогом очистки
+([запуск боя](../../launch/run.md)).
+
+**Launcher закрывает свой процесс после сохранения.** При ошибке или тайм-ауте
+также завершается только свой проверенный процесс. Запущенная игра или файлы
+прошлого запуска в папке игры блокируют новый запуск: их нужно проверить и убрать
+вручную. Оставлять игру открытой (`-KeepGameOpen`) только для явно нужной
+пользователю ручной проверки.
 
 ## Степень проверки
 
@@ -107,21 +107,26 @@ manifest и хеши, сведения о процессе, XML, JSONL, CSV, с�
 
 Флаг `--features` добавляет обычный список объектов, [сооружения и мосты CCO](bridges.md), доступность точек для первого отряда каждой из двух армий. Использовать сохранённые диагностические сценарии с двумя отрядами. Запускатель берёт их под управление, запрещает стрельбу, останавливает, завершает расстановку и ставит бой на паузу. Без флага остаётся прежний сбор поверхности во время расстановки.
 
-Повтор проверенного сбора участка с мостом:
+Повтор проверенного сбора участка с мостом (XML того замера лежит в локальном
+архиве):
 
-```powershell
-python tools/map-capture/build.py --step 3 --scenario docs/map/evidence/field-20260925/bridge-navigation/map_probe.xml --features
-& ./tools/map-capture/launch.ps1
+```bash
+.venv/Scripts/python -m tools.build map-capture --step 3 --features --scenario ../research/evidence/map/field-20260925/bridge-navigation/map_probe.xml
 ```
 
-`--scenario` подставляет XML, а не выбирает карту по русскому названию. Исходный сценарий, собранный Lua и хеши сохраняются в папке запуска. Это отдельный диагностический бой.
+```bash
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -Target map-capture
+```
+
+`--scenario` берёт путь от папки `scenarios/` и подставляет XML, а не выбирает
+карту по русскому названию. Исходный сценарий, собранный Lua и хеши сохраняются в папке запуска. Это отдельный диагностический бой.
 
 В CSV добавлены `reach_side_1`, `reach_side_2`: 1 — да, 0 — нет, −1 — вне рамки, не запрашивалось. В JSONL — `building`, `structure_context`, `navigation_unit`, `feature_conditions`, количества и время. Записи отрядов показывают, к кому относятся столбцы. Файлы читать как **UTF-8**, в том числе в Windows: имена CCO могут быть русскими.
 
 Для поиска бродов указать новые столбцы:
 
-```powershell
-python tools/map-capture/passages.py --csv build/map-capture/run-YYYYMMDD-HHMMSS/tww3_bai_map_capture_grid.csv --step 3 --reach-columns reach_side_1 reach_side_2 --output tmp/map-research/passages
+```bash
+.venv/Scripts/python -m tools.analysis.passages --csv build/map-capture/runs/<время>/tww3_bai_map_capture_grid.csv --step 3 --reach-columns reach_side_1 reach_side_2 --output build/map-research/passages
 ```
 
 Заменить папку запуска на настоящую. Это поиск кандидатов; наличие моста не гарантирует наличие брода.

@@ -5,8 +5,8 @@
 Building never touches the game; it only writes `build/<target>/`.
 
 ```bash
-.venv/Scripts/python -m tools.build duel --runs 3 --speed 20 --timeout 300
-.venv/Scripts/python -m tools.build arena
+.venv/Scripts/python -m tools.build nn-arena --own-ai attack --timeout 900
+.venv/Scripts/python -m tools.build ai-vs-ai --speed 3
 .venv/Scripts/python -m tools.build map-capture --step 3 --features
 ```
 
@@ -14,35 +14,37 @@ Building never touches the game; it only writes `build/<target>/`.
 
 | Target | Entry | Scenario | Pack |
 |---|---|---|---|
-| `duel` | `entries.duel` | `scenarios/ranged_melee.xml` | `tww3_bai_duel.pack` |
-| `arena` | `entries.arena` | `scenarios/triple_melee.xml` | `tww3_bai_arena.pack` |
 | `ai-vs-ai` | `entries.ai_vs_ai` | `scenarios/ai_vs_ai.xml` | `tww3_bai_ai_vs_ai.pack` |
 | `unit-readout` | `entries.unit_readout` | `scenarios/unit_readout.xml` | `tww3_bai_unit_readout.pack` |
 | `move-probe` | `entries.move_probe` | `scenarios/move_probe.xml` | `tww3_bai_move_probe.pack` |
 | `manual` | `entries.manual_record` | `scenarios/manual_hamlet.xml` | `tww3_bai_manual.pack` |
-| `formation-probe` | `entries.formation_probe` | `scenarios/formation_probe.xml` (from `config/armies/`) | `tww3_bai_formation_probe.pack` |
+| `archer-range` | `entries.archer_range` | `scenarios/archer_range.xml` (`tools/archer_range.py`) | `tww3_bai_archer_range.pack` |
 | `enemy-layout` | `entries.enemy_layout` | `scenarios/enemy_layout.xml` (from `config/armies/defender_layouts.json`) | `tww3_bai_enemy_layout.pack` |
 | `roster-capture` | `entries.roster_capture` | `scenarios/roster_capture.xml` (from `config/roster/capture.json`) | `tww3_bai_roster_capture.pack` |
+| `nn-arena` | `entries.nn_arena` | `scenarios/nn_arena.xml` (`tools/nn/scenario.py`) | `tww3_bai_nn_arena.pack` |
 | `map-capture` | `entries.map_capture` | `scenarios/map_capture.xml` | `tww3_bai_map_capture.pack` |
+
+What every entry does: [entry points](../apps/entries.md).
 
 ## Options
 
 | Option | Targets | Meaning |
 |---|---|---|
-| `--runs 1..10` | duel | Battles in a row in one game process (automatic rematch) |
-| `--speed 1/3/10/20` | duel, arena, ai-vs-ai, unit-readout, move-probe | Battle speed |
-| `--timeout 30..1800` | duel, arena, ai-vs-ai | Model-time limit per battle, seconds |
-| `--tick-ms` | duel, arena | Decision period, ms (default 1000) |
+| `--speed 1/3/10/20` | all but map-capture and manual | Battle speed (default 20) |
+| `--timeout 30..1800` | ai-vs-ai, nn-arena | Model-time limit per battle, s (600); the battle's deadline is computed from it. The arena battles of 30.09.2026 were recorded with 900 |
+| `--tick-ms` | all but map-capture | Tick period, ms (1000) |
 | `--step 1/2/3/5` | map-capture | Grid cell size, m |
 | `--features` | map-capture | After deployment also read objects and cell reachability |
-| `--army` | formation-probe | Army from `config/armies/<name>.json` (default `first_attack`) |
-| `--layout`, `--enemy-mode` | enemy-layout | Enemy layout; the game AI as is or told to defend (default) |
-| `--turn-test` | formation-probe | Also turn the archers right and left |
-| `--plan` | move-probe | Plan from `config/move-plans/<name>.json` (default `hamlet`) |
-| `--scenario` | all | Another file from `scenarios/` instead of the target's scenario |
 | `--window MIN_X MAX_X MIN_Z MAX_Z` | map-capture | Capture only this part of the map |
+| `--own-ai attack\|defend` | nn-arena | Our side under CA's planner attacks (the game's AI defends) or defends (the game's AI attacks) |
+| `--layout`, `--enemy-mode native\|defend` | enemy-layout | Enemy layout; the game AI as is or told to defend (default) |
+| `--range-mode fire_at_will\|attack\|damage` | archer-range | When archers start shooting by the depth of their block; `damage` — damage to a fearless target at 70–120 m |
+| `--damage-rotate N` | archer-range `damage` | Shift the distances by N lanes (the same distance on other ground) |
+| `--plan` | move-probe | Plan from `config/move-plans/<name>.json` (default `hamlet`) |
+| `--capture` | roster-capture | Another unit list instead of `config/roster/capture.json` |
+| `--scenario` | all | Another file from `scenarios/` instead of the target's scenario |
 | `--deadline` | all but map-capture | Real-time limit per battle, s (default: from the scripted length and speed) |
-| `--stall-minutes` | all but map-capture | End the battle when nobody takes damage for this many game minutes (10). In move-probe at least the plan length + 2 min |
+| `--stall-minutes` | all but map-capture | End the battle when nobody takes damage for this many game minutes (10). In move-probe, roster-capture, archer-range and enemy-layout at least the scenario length + 2 min |
 
 ## What `build/<target>/` contains
 
@@ -66,7 +68,7 @@ __modules["apps.core.value"] = function(require)
 end
 ...
 if bm then
-    __require("entries.duel").main(bm, {runs = 3, ...}, {common = common, battle_vector = battle_vector})
+    __require("entries.nn_arena").main(bm, {own_ai = "attack", ...}, {common = common, battle_vector = battle_vector})
 end
 ```
 

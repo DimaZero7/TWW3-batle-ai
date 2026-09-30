@@ -37,8 +37,8 @@
 
 Сначала выполнить [сборку карты высот](heights.md), затем:
 
-```powershell
-python tools/map-capture/slopes.py --height tmp/map-research/heightmap-1m/height.npy --metadata tmp/map-research/heightmap-1m/heightmap.json --output tmp/map-research/slopes
+```bash
+.venv/Scripts/python -m tools.analysis.slopes --height build/map-research/heightmap-1m/height.npy --metadata build/map-research/heightmap-1m/heightmap.json --output build/map-research/slopes
 ```
 
 [Инструмент](../../../../tools/analysis/slopes.py) проверяет хеш и размеры исходной матрицы. Расчёт проверен на плоскости с заранее известным наклоном, горизонтальной поверхности, резком гребне, краях и пропущенных данных.

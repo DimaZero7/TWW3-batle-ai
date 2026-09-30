@@ -36,8 +36,8 @@ The original 8 m order-arrival criterion succeeded for infantry. Cavalry crossed
 
 ## Reproduce candidates without the game
 
-```powershell
-python tools/map-capture/passages.py --csv docs/map/evidence/field-20260925/cathay-navigation/tww3_bai_map_capture_grid.csv.gz --step 3 --output tmp/map-research/passages
+```bash
+.venv/Scripts/python -m tools.analysis.passages --csv research/evidence/map/field-20260925/cathay-navigation/tww3_bai_map_capture_grid.csv.gz --step 3 --output build/map-research/passages
 ```
 
 The tool requires explicit reachability columns, grid indices, X/Z, ground and inside-frame flags. It validates complete unique indices and coordinate spacing. Output `components.npz` contains land/shallow component labels (−1 outside that layer) and the selected reachability intersection; `connections.json` preserves source/tool hashes, grid metadata, filter and component bounds. The extracted tool reproduced all three measured component sizes and bank IDs.

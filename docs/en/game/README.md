@@ -1,34 +1,44 @@
 # Game knowledge
 
-[← Back](../README.md) · [Documentation](../README.md) · [Русский](../../ru/game/README.md)
+[← Back](../README.md) · [Documentation](../README.md) › Game knowledge · [Русский](../../ru/game/README.md)
 
-What is verified in Total War: WARHAMMER III (v9.0.0, build 50218.4334952,
-September 2026) and how it was measured. Only game facts and methods live
-here; the code that uses them is described in [apps](../architecture/apps.md).
+What is verified in Total War: WARHAMMER III and how it was measured: v9.0.0,
+build 50218 (25–26.09.2026) and v9.0.1, build 50381 (from 27.09.2026). Only game
+facts and methods live here; the code that uses them is described in
+[apps](../architecture/apps.md).
 
-| Section | Contents |
-|---|---|
-| [Map](map/README.md) | Coordinates, radar frame, grid, heights, forest, water and ground, objects, passages, bridges, slopes, tools, evidence |
-| [Map catalogue](maps/README.md) | Cards of specific maps: [Moorlands Route](maps/moorlands-route.md) |
-| [Units](units/README.md) | State indicators, fields, states, missile range, commands, deployment, evidence |
-| [Unit catalogue](units/catalog/README.md) | [Empire](units/catalog/empire.md): identifiers, cost, static stats |
-| [Readout catalogue](readouts.md) | Everything readable about units and the battle: tracked and not yet; run profiles |
-| [Visual atlas](atlas.md) | The key research images |
+<!-- generated:docs:index -->
+- **[Map information: working guide](map/README.md)** — This is the current instruction for collecting **map information only**
+- **[Battle map catalogue](maps/README.md)** — Cards for specific official battle maps
+- **[Units](units/README.md)** — What is verified about units in the game: what can be read, which orders work and how the battle mechanics work
+- [Visual atlas](atlas.md) — Pictures of the maps we measured: the official preview and our map of heights, ground and objects
+- [Attacker and defender in a battle from a scenario file](battle-roles.md) — Who attacks and who defends in a battle from our own scenario file, and how to set it
+- [The game's database](database.md) — The battle rules live in the game's database: morale, fatigue, hit chance, leadership, arrows
+- [Battle difficulty](difficulty.md) — **All battles against the game's AI are at Normal difficulty** (the user's decision, 30.09.2026)
+- [The game's own battle AI](game-ai.md) — How the game's own AI fights
+- [Readout catalogue](readouts.md) — Everything readable about units and the battle: what we already collect and what the game offers but we have not tested yet
+<!-- /generated -->
+
+**Battle mechanics** are in the units section: [morale](units/morale.md) · [melee](units/melee.md) · [missile damage](units/missile-damage.md) · [pace and fatigue](units/pace.md); the unit catalogue — [Empire](units/catalog/empire.md).
+
+How this knowledge feeds network training: [data for training](../training/README.md).
 
 ## Data available through Lua
 
 - **Map**: point height, world coordinates and grid, ground type, water and
   forest, static objects, point reachability for a specific unit.
 - **Own units**: type, position, men, health, movement, combat, routing,
-  ammo, range, orders and some formation parameters, CCO card fields.
+  ammo, range, orders and some formation parameters, CCO card fields,
+  `MoralePercent` — morale as a share of leadership.
 - **Enemy**: only the current visible state and the last known position.
 - **Commands**: move, run, attack a visible target, halt, guard, formation
   and width, some abilities.
 
-Unavailable or incomplete: the exact internal morale reserve, fresh physical
-bounds of every entity, hidden state of an invisible enemy, execution
-guaranteed merely by an accepted order, a universal passability map without
-a unit-specific check.
+Unavailable or incomplete: the morale points themselves (we compute them from
+`MoralePercent` and the database rules — [morale](units/morale.md)), fresh
+physical bounds of every entity, hidden state of an invisible enemy, execution
+guaranteed merely by an accepted order, a universal passability map without a
+unit-specific check.
 
 ## Old module names in these pages
 
@@ -47,5 +57,4 @@ names. Mapping:
 | `tools/map-capture/heightmap.py`, `slopes.py`, `passages.py` | `tools/analysis/` |
 | `evidence/...` next to a page | `research/evidence/...` |
 
-Links inside the pages already point to the new locations. Links to the
-excluded tournament material are kept as plain text.
+Links inside the pages already point to the new locations.

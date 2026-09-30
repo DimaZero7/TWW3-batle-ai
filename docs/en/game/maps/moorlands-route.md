@@ -2,7 +2,7 @@
 
 [← Back](README.md) · [Map catalogue](README.md) · [Русский](../../../ru/game/maps/moorlands-route.md)
 
-Selected as the starting field map for `iteration-0001`. This means the project's first trial, not a verified first campaign encounter of Karl Franz or another lord. The installed database identifies an official Creative Assembly classic land battle. The name follows the official preview resource; localized display text has not been extracted.
+The project's first field map: its terrain and objects were captured, and units, visibility and deployment were checked on it. It is not a verified first campaign encounter of Karl Franz or another lord. The installed database identifies an official Creative Assembly classic land battle. The name follows the official preview resource; localized display text has not been extracted.
 
 ![Official menu preview](../../../../research/evidence/maps/moorlands-route/preview.png)
 
@@ -51,10 +51,25 @@ Live capture on 26 September 2026: requested `catchment_03`; the game's XML conf
 
 `Summary and limits` (local archive: `research/evidence/maps/moorlands-route/capture-20260926/summary.json`) · `Raw terrain grid` (local archive: `research/evidence/maps/moorlands-route/capture-20260926/terrain-grid.csv`) · `Height matrix` (local archive: `research/evidence/maps/moorlands-route/capture-20260926/height.csv`) · `Forest matrix` (local archive: `research/evidence/maps/moorlands-route/capture-20260926/forest.csv`) · `Ground codes` (local archive: `research/evidence/maps/moorlands-route/capture-20260926/ground-code.csv`) and `legend` (local archive: `research/evidence/maps/moorlands-route/capture-20260926/ground-legend.json`) · `Water mask` (local archive: `research/evidence/maps/moorlands-route/capture-20260926/water-ground.csv`) · `Objects` (local archive: `research/evidence/maps/moorlands-route/capture-20260926/objects.json`) · `Hashes` (local archive: `research/evidence/maps/moorlands-route/capture-20260926/hashes.json`) · `Closure evidence` (local archive: `research/evidence/maps/moorlands-route/capture-20260926/cleanup.json`).
 
-Array order is `[iz, ix]`, with increasing Z by row and X by column. Cell centres are `x=-512+(ix+0.5)*3`, `z=-512+(iz+0.5)*3`. The last row/column centres lie outside the radar rectangle; their small clipped inside portions remain unmeasured. CSV and NPY variants are preserved. This is a reusable terrain-only export: no fighter policy, combat positions or opponent data.
+Array order is `[iz, ix]`, with increasing Z by row and X by column. Cell centres are `x=-512+(ix+0.5)*3`, `z=-512+(iz+0.5)*3`. The last row/column centres lie outside the radar rectangle; their small clipped inside portions remain unmeasured. CSV and NPY variants are preserved. This is a terrain-only export: no army positions or opponent data.
 
 One successful capture followed a startup crash; removing the XML BOM preceded success but does not prove the crash cause. The owned game was closed and installed probe files removed. Slopes are derivable from heights but have not been published for this capture. Traversal by the assigned Empire units and active structure bonuses remain untested.
 
 Use the tested [frame](../map/boundaries.md), [sampling](../map/sampling.md), [height](../map/heights.md), [vegetation](../map/vegetation.md) and [object](../map/objects.md) methods. A radar frame remains distinct from proven movement walls; point samples do not describe every part of a cell. Per-unit reachability requires a separate query.
 
-For this iteration both sides use the same disclosed card and API v1. The roster is defined in the assignment. Deployment, weather and battle conditions must be recorded by the operator, rather than inferred from the preview. Map-specific constants or knowledge of hidden enemy deployment must not enter either policy.
+Deployment, weather and battle conditions come from each experiment's scenario file; the preview does not tell them.
+
+## The copy in the repository
+
+`data/maps/moorlands-route/` is the part of the capture kept in Git: `summary.json`, `objects.json`, `ground-legend.json`, pictures and `grid-3m.npz` — the 3 m grid matrices, 342 × 342, order `[iz, ix]`, origin `min_x = min_z = −512`, `step = 3`:
+
+| Array | Contents |
+|---|---|
+| `clear` | `is_area_clear`: 1 clear, 0 blocked (2,268 cells), −1 outside the frame |
+| `ground` | Ground code per `ground-legend.json`: 0 forest, 1 grass, 2 mud, 3 sharp stones; −1 outside the frame |
+| `height` | Height, m, `float16`; `NaN` outside the frame |
+| `inside` | 1 when the cell centre is inside the radar frame |
+
+The file was made from the capture's local archive; no tool in `tools/` recreates it.
+
+Analyses of this grid (in Russian): [map obstacles](../../../../research/analysis/moorlands-obstacles/README.md) and [the hamlet](../../../../research/analysis/hamlet/README.md).

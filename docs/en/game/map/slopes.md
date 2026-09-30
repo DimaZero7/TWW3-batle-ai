@@ -44,8 +44,8 @@ The NPZ keys are `gradient_x`, `gradient_z`, `slope_degrees`, `max_neighbor_delt
 
 First run the [height-map recipe](heights.md), then:
 
-```powershell
-python tools/map-capture/slopes.py --height tmp/map-research/heightmap-1m/height.npy --metadata tmp/map-research/heightmap-1m/heightmap.json --output tmp/map-research/slopes
+```bash
+.venv/Scripts/python -m tools.analysis.slopes --height build/map-research/heightmap-1m/height.npy --metadata build/map-research/heightmap-1m/heightmap.json --output build/map-research/slopes
 ```
 
 The tool verifies the height file's hash and dimensions before computing. Validation used an analytic tilted plane (including axis signs and metre spacing), constant height, a crest that defeats a central gradient, undefined borders and rejection of missing heights.

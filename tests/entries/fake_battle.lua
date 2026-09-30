@@ -10,6 +10,7 @@ local function vec(x, y, z)
     function v:set_x(n) self.x = n end
     function v:set_y(n) self.y = n end
     function v:set_z(n) self.z = n end
+    function v:distance(o) return math.sqrt((self.x - o.x) ^ 2 + (self.y - o.y) ^ 2 + (self.z - o.z) ^ 2) end
     return v
 end
 F.vector_type = {new = function() return vec() end}
@@ -20,7 +21,7 @@ end
 
 function F.unit(name, kind, x, z)
     local u = {script_name = name, kind = kind, pos = vec(x, 0, z), men = 120, controlled = false,
-        routing = false, attacked = 0}
+        routing = false}
     function u:name() return self.script_name end
     function u:type() return self.kind end
     function u:position() return self.pos end
@@ -69,7 +70,7 @@ local function controller(log)
     function uc:change_behaviour_active() end
     function uc:melee() end
     function uc:halt() log[#log + 1] = 'halt' end
-    function uc:attack_unit(target) self.unit.attacked = self.unit.attacked + 1; log[#log + 1] = 'attack' end
+    function uc:attack_unit() log[#log + 1] = 'attack' end
     function uc:teleport_to_location() end
     function uc:goto_location() self.unit.moving = true end
     -- Arrives at once: entry tests check wiring, not movement.
@@ -78,16 +79,27 @@ local function controller(log)
     return uc
 end
 
+-- The engine's AI unit planner: records what it is told in log.
+local function ai_planner(log)
+    local p = {}
+    function p:add_units(u) log[#log + 1] = 'add ' .. u:name() end
+    function p:remove_units(u) log[#log + 1] = 'remove ' .. u:name() end
+    function p:attack_unit(u) log[#log + 1] = 'attack ' .. u:name() end
+    function p:defend_position(_, radius) log[#log + 1] = 'defend ' .. radius end
+    return p
+end
+
 -- sides: {{unit, ...}, {unit, ...}}
 function F.manager(sides)
     local bm = {now = 0, phase = 'Deployment', speed = 1, phase_callbacks = {}, queue = {},
-        orders = {}, outcome = false, winner = 0, ended = false}
+        orders = {}, planner_log = {}, outcome = false, winner = 0, ended = false}
     local alliances = {}
     for i, units in ipairs(sides) do
         local army = {units = function() return list(units) end,
             create_unit_controller = function() return controller(bm.orders) end}
         alliances[i] = {armies = function() return list({army}) end,
-            is_attacker = function() return i == 1 end}
+            is_attacker = function() return i == 1 end,
+            create_ai_unit_planner = function() return ai_planner(bm.planner_log) end}
     end
     for _, m in ipairs({'is_from_campaign', 'is_multiplayer', 'is_replay', 'is_quest_battle',
         'is_tutorial', 'is_siege_battle', 'is_ambush_battle'}) do

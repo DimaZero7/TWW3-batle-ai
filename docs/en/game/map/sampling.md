@@ -63,3 +63,19 @@ largest gap was 24.987 m. Finer cells do not increase the accuracy of that old r
 
 See the [same enlarged fragment](../../../../research/evidence/map-data/kislev-scales-evidence/comparison-zoom.png)
 and [full results](../../../ru/research/map-data/kislev-scales-check.md).
+
+## Querying during battle: the hamlet on The Moorlands Route
+
+Measured on 27.09.2026 with the formation probe (removed in the reset of
+30.09.2026). During battle, not paused, 6120 cells of 3 m around the hamlet were
+queried in batches of 500: `is_area_clear` per cell and `can_reach_position` of a
+spearmen unit.
+
+- The whole grid took **0.03 s of CPU time**.
+- Against the map captured beforehand (`data/maps/moorlands-route/grid-3m.npz`)
+  the "can stand here" answer agreed in **99.8%** of cells: 12 cells differed,
+  all at the edge of the hamlet (249 blocked cells in battle, 241 on the
+  captured map).
+
+So a small grid around an army can be queried right in battle, and the map
+captured beforehand almost matches it.

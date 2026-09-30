@@ -1,6 +1,6 @@
-# All tests on every push (docs/ru/architecture/ai-design.md, 5.1 rule 9):
-# modules, the tree's branches, the architecture rules and the simulator's
-# golden runs. Lua 5.1 runs inside Python (lupa), no game needed.
+# All tests on every push (docs/ru/testing/tests.md): modules, entry points,
+# the architecture and docs rules, the build. Lua 5.1 runs inside Python
+# (lupa), no game needed.
 name: tests
 on:
   push:

@@ -2,8 +2,9 @@
 
 [← Back](README.md) · [Documentation](../README.md) · [Русский](../../ru/architecture/error_handling.md)
 
-In battle, a script error must never silently turn into vanilla AI
-behaviour. The project follows three rules.
+In battle, a script error must never pass silently: the battle would go on
+without our script and the record or measurement would be wrong. The project
+follows three rules.
 
 ## 1. Engine reads never raise: `known` / `unknown`
 
@@ -22,12 +23,12 @@ local hp = value.read(function() return unit:unary_hitpoints() end, 'number')
 - Coordinates are copied into a plain `{x, y, z}` table (`value.vector`);
   engine objects never leave the adapter.
 
-## 2. A contract violation is an immediate error
+## 2. Wrong data is an immediate error
 
-Contracts (`orders.contract`, `deployment.contract`, `ai.contract`) check
-data with `assert` and a clear message: `'target not visible'`,
-`'width outside engineering input bounds'`. An invalid command set or plan
-is never applied partially: everything is validated first, then executed.
+Services and adapters check their input with `assert` and a clear message:
+`'declared/native battle role mismatch'`, `'battle requires one army per alliance'`,
+`'Invalid terrain height'`. A battle with wrong data does not go on "somehow":
+the entry stops with an error.
 
 For new errors with a stable code use `core.errors`:
 
@@ -49,9 +50,9 @@ end
 bm:repeat_callback(guarded(tick), config.tick_ms, TIMER)
 ```
 
-`fail` writes one `error` event with a traceback, removes timers, releases
-unit control; the duel also shows `BAI ERROR` on screen. The launcher sees `error` /
-`probe_error` and ends the run with status `lua_error`.
+`fail` writes one `error` event with a traceback, removes timers and releases
+unit control. The launcher sees `error` / `probe_error` and ends the run with
+status `lua_error`.
 
 ## Where to look
 

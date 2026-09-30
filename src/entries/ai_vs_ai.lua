@@ -110,6 +110,16 @@ function M.main(bm, config)
             bm:force_battle_end(0, 'timeout', true)
             return
         end
+        for _, info in ipairs(state.sides) do
+            -- Rallied units rejoin the planner with its last order (apps.orders.planner_adapter).
+            if info.planner then
+                local rallied = info.planner.check_rallies()
+                if #rallied > 0 then emit('rejoined', {side = info.side, units = rallied}) end
+                for _, k in ipairs(info.planner.check_idle(now)) do
+                    emit('idle_kick', {side = info.side, unit = k.unit, stage = k.stage})
+                end
+            end
+        end
         if now - last_reissue >= REISSUE_MS then
             last_reissue = now
             for _, info in ipairs(state.sides) do

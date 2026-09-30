@@ -53,7 +53,7 @@ classic test scenario. Current recommendation: 2 m cells; 1 m remains available
 for finer one-time capture. Neither recommendation approves a neural-network schema.
 
 New drafts go to `tmp/`. New confirmed results need raw evidence, hashes, conditions
-and limits. English is primary; update the Russian counterpart with the same facts.
+and limits. The Russian page is the master; the English one mirrors it with the same facts.
 Do not add research lists or untested API candidates to this guide or its index.
 
 The field-feature checks preserve negative results too: no runtime `scrub` mask,

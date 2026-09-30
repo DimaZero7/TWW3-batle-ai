@@ -2,7 +2,7 @@
 
 [← Back](README.md) · [Documentation](../README.md) · [Apps](../architecture/apps.md) · [Русский](../../ru/apps/units.md)
 
-Own unit state, missile range and shared formation width rules.
+Own unit state, missile range, the unit card and its soldiers' positions.
 Code: `src/apps/units/`. What is verified in game: [unit knowledge](../game/units/README.md).
 
 ## state_adapter — own unit sensor
@@ -51,13 +51,3 @@ Unknown values are written as `'unknown:<reason>'`. Used by the
 | `soldiers(cco, unit)` | CCO `ManList.At(i).Position` of every soldier → `{status = 'ok', count, xz_dm = {x1, z1, ...}}` in whole decimetres, or `{status = 'unavailable', reason}` |
 
 Own units only: enemy soldier positions would reveal hidden men.
-
-## contract
-
-| Function | What it does |
-|---|---|
-| `width_bounds(kind)` | Lord 3–8 m, formation 20–40 m. Engineering input limits, not measured game limits |
-| `valid_width(kind, width)` | Width within the bounds |
-| `can_shoot(unit)` | Archers with positive ammo |
-
-These bounds used to be duplicated in `deployment` and `policy_host`.

@@ -2,27 +2,8 @@
 
 [← Назад](README.md) · [Документация](../README.md) · [Приложения](../architecture/apps.md) · [English](../../en/apps/orders.md)
 
-Команды отрядам: какие бывают, как проверяются и какими вызовами движка
-выполняются. Код: `src/apps/orders/`.
-
-## contract — форма команды
-
-| Действие | Поля |
-|---|---|
-| `move` | `unit_id`, `x`, `z`, `run?`; с контрактом движения ещё `facing_deg`, `width_m` |
-| `attack` | `unit_id`, `target_id`, `mode = 'melee' \| 'ranged'` |
-| `guard` | `unit_id`, `enabled` |
-| `halt` | `unit_id` |
-
-`validate(commands, own, enemies, limit, movement_contract?)` отклоняет
-весь набор, если хотя бы одна команда неверна:
-
-- плотный массив не длиннее `limit`, никаких лишних полей;
-- отряд свой и жив; на отряд не больше одного движения (`move`/`attack`/`halt`)
-  и одного `guard`;
-- цель атаки **видима**; `ranged` — только лучники с боезапасом;
-- `facing_deg` / `width_m` — только с контрактом `formation-move-v1` или
-  `deployment-march-formation-v1`, ширина в рамках `units.contract`.
+Приказы отрядам: какими вызовами движка они отдаются, как отдать отряды штатному
+ИИ игры и какие направления держит движок. Код: `src/apps/orders/`.
 
 ## adapter — проверенные вызовы
 
@@ -31,16 +12,17 @@
 | Функция | Вызовы движка |
 |---|---|
 | `take_control(army, unit)` | `create_unit_controller`, `add_units`, `take_control` |
+| `release(uc)` | `release_control` |
 | `prepare_melee(uc, unit)` | `fire_at_will(false)`, отключить `skirmish`, `melee(true)` |
 | `move`, `move_formation`, `rotate`, `halt` | `goto_location`, `goto_location_angle_width`, `rotate`, `halt` |
 | `attack_melee(uc, enemy)` | `melee(true)`, `attack_unit(enemy, false, true)` |
 | `attack_ranged(uc, enemy)` | `melee(false)`, `fire_at_will(false)`, `attack_unit(enemy, true, false)` |
+| `set_fire_at_will(uc, on)` | `fire_at_will(on)` |
 | `stop_firing(uc)` | `halt()` + `fire_at_will(false)` |
 | `set_guard(uc, unit, on)` | `change_behaviour_active('defend', on)` |
 | `withdraw(uc)` | `withdraw(true)` |
 | `use_ability_on_self(uc, unit, key)` | `perform_special_ability(key, unit)` |
 | `teleport(uc, p, bearing, width)` | `teleport_to_location` |
-| `apply(command, ctx)` | Выполняет одну проверенную команду |
 
 ## planner_adapter — отдать отряды штатному ИИ
 
@@ -49,8 +31,22 @@
 CA (`lib_battle_script_ai_planner.lua`) — тот же механизм, которым
 генерируемые бои ведут армии ИИ. Он оборачивает
 `alliance:create_ai_unit_planner()`; без библиотеки адаптер обращается к
-этому планировщику напрямую. Возвращает `{mode, attack(), release()}`:
-`attack()` — «атаковать вражескую армию», повторяется точкой входа.
+этому планировщику напрямую. Возвращает `{mode, attack(), defend(центр, радиус),
+check_rallies(), check_idle(мс), release()}`: `attack()` — «атаковать вражескую армию»,
+повторяется точкой входа. Им пользуются [ai_vs_ai](entries.md#ai_vs_ai) и
+[nn_arena](entries.md#nn_arena).
+
+**Что планировщик CA сам не делает, и как мы это чиним** (записи арены, 30.09.2026):
+
+- `check_rallies()` — отряд, который побежал и собрался, планировщик больше не ведёт: без
+  этого он стоял без дела до конца боя (ИИ игры свои собравшиеся отряды снова ведёт в бой).
+  Такой отряд вынимается из планировщика, возвращается в него, и через 0,6 с повторяется
+  последний приказ.
+- `check_idle(мс)` — отряд стоит без дела под стрелами: не идёт, не в рукопашной, нет цели,
+  теряет здоровье. У наших отрядов так было 15–75% времени, когда их обстреливали, у отрядов
+  ИИ игры — 0–3%. Через 6 с такого простоя — назад в планировщик с приказом; если через 6 с он
+  снова стоит под обстрелом — свой планировщик с приказом атаковать ближайшего врага. Не чаще
+  раза в 15 с на отряд. Проверено тестами `tests/apps/orders/test_planner_adapter.py`.
 
 ### Штатный ИИ с задачей (27.09.2026)
 
@@ -66,7 +62,8 @@ CA (`lib_battle_script_ai_planner.lua`) — тот же механизм, кот
 штатный ИИ всегда атакует; с ним `is_attacker()` даёт нападающего и защитника, а
 штатный ИИ-защитник стоит у себя (8 минут игры, ни одного движения). Зоны
 расстановки на роли не влияют (проверены половины карты и бой без зон).
-`tools/sim/formation.py` пишет этот тег всегда: защитник — сторона с ролью `defend`.
+`tools/nn/scenario.py` пишет этот тег в сценарий арены: защитник — ИИ игры, когда наша
+сторона атакует, и наша сторона, когда она обороняется.
 Все варианты и замеры — [нападающий и защитник](../game/battle-roles.md).
 
 ## facing — направления, которые держит движок
@@ -74,8 +71,7 @@ CA (`lib_battle_script_ai_planner.lua`) — тот же механизм, кот
 `apps.orders.facing` (чистый): движок держит направление отряда в 64 секторах
 по 5,625° и ставит его в середину сектора
 ([замер](../game/units/commands.md#направление-отряда-64-сектора)). `snap(b)` —
-направление, которое движок удержит (на нём планируется строй: `apps.plan`
-приводит к нему `bearing`); `command(f)` — что послать; `teleport` и
+направление, которое движок удержит; `command(f)` — что послать; `teleport` и
 `move_formation` посылают его сами.
 
 ## Что важно знать

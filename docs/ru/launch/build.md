@@ -5,8 +5,8 @@
 Сборка не трогает игру: она только создаёт файлы в `build/<цель>/`.
 
 ```bash
-.venv/Scripts/python -m tools.build duel --runs 3 --speed 20 --timeout 300
-.venv/Scripts/python -m tools.build arena
+.venv/Scripts/python -m tools.build nn-arena --own-ai attack --timeout 900
+.venv/Scripts/python -m tools.build ai-vs-ai --speed 3
 .venv/Scripts/python -m tools.build map-capture --step 3 --features
 ```
 
@@ -14,43 +14,37 @@
 
 | Цель | Точка входа | Сценарий | Pack |
 |---|---|---|---|
-| `duel` | `entries.duel` | `scenarios/ranged_melee.xml` | `tww3_bai_duel.pack` |
-| `arena` | `entries.arena` | `scenarios/triple_melee.xml` | `tww3_bai_arena.pack` |
 | `ai-vs-ai` | `entries.ai_vs_ai` | `scenarios/ai_vs_ai.xml` | `tww3_bai_ai_vs_ai.pack` |
 | `unit-readout` | `entries.unit_readout` | `scenarios/unit_readout.xml` | `tww3_bai_unit_readout.pack` |
 | `move-probe` | `entries.move_probe` | `scenarios/move_probe.xml` | `tww3_bai_move_probe.pack` |
 | `manual` | `entries.manual_record` | `scenarios/manual_hamlet.xml` | `tww3_bai_manual.pack` |
-| `formation-probe` | `entries.formation_probe` | `scenarios/formation_probe.xml` (из `config/armies/`) | `tww3_bai_formation_probe.pack` |
 | `archer-range` | `entries.archer_range` | `scenarios/archer_range.xml` (`tools/archer_range.py`) | `tww3_bai_archer_range.pack` |
 | `enemy-layout` | `entries.enemy_layout` | `scenarios/enemy_layout.xml` (из `config/armies/defender_layouts.json`) | `tww3_bai_enemy_layout.pack` |
 | `roster-capture` | `entries.roster_capture` | `scenarios/roster_capture.xml` (из `config/roster/capture.json`) | `tww3_bai_roster_capture.pack` |
+| `nn-arena` | `entries.nn_arena` | `scenarios/nn_arena.xml` (`tools/nn/scenario.py`) | `tww3_bai_nn_arena.pack` |
 | `map-capture` | `entries.map_capture` | `scenarios/map_capture.xml` | `tww3_bai_map_capture.pack` |
+
+Что делает каждая точка входа — [точки входа](../apps/entries.md).
 
 ## Параметры
 
 | Параметр | Цели | Значение |
 |---|---|---|
-| `--runs 1..10` | duel | Боёв подряд в одном процессе игры (автопереигровка) |
-| `--speed 1/3/10/20` | duel, arena, ai-vs-ai, unit-readout, move-probe | Скорость боя |
-| `--timeout 30..1800` | duel, arena, ai-vs-ai | Лимит модельного времени боя, секунды |
-| `--tick-ms` | duel, arena | Период решений, мс (по умолчанию 1000) |
+| `--speed 1/3/10/20` | все, кроме map-capture и manual | Скорость боя (по умолчанию 20) |
+| `--timeout 30..1800` | ai-vs-ai, nn-arena | Лимит модельного времени боя, с (600); из него считается срок боя. Бои арены 30.09.2026 записаны с 900 |
+| `--tick-ms` | все, кроме map-capture | Период тика, мс (1000) |
 | `--step 1/2/3/5` | map-capture | Размер клетки сетки, м |
 | `--features` | map-capture | После расстановки прочитать объекты и достижимость клеток |
-| `--army` | formation-probe | Армия из `config/armies/<имя>.json` (по умолчанию `first_attack`) |
-| `--layout`, `--enemy-mode` | enemy-layout | Состав врага; штатный ИИ как есть или с задачей «обороняй» (по умолчанию) |
-| `--turn-test` | formation-probe | Добавить повороты лучников вправо и влево |
-| `--handover`, `--enemy-ai native\|defend`, `--fast`, `--plain` | formation-probe | Тестовый бой игрока: наш ИИ расставляет, дальше игрок; враг — штатный ИИ; своя скорость или `--speed`; только файл боя без скрипта |
-| `--facing-sweep` | formation-probe | Исследование: какие направления держит движок |
-| `--enemy-ai native\|defend` (без `--handover`) | formation-probe | Играет наш ИИ, враг — штатный ИИ (не берётся скриптом) |
-| `--engine-only` | formation-probe | Ветка `logistics` выключена (`tree.logistics = false`): обход делает движок |
-| `--fire` | formation-probe | Наши стрелки стреляют по готовности; на стоянке пишутся стрелы, обстрел и бойцы обеих сторон |
+| `--window MIN_X MAX_X MIN_Z MAX_Z` | map-capture | Снять только этот участок карты |
+| `--own-ai attack\|defend` | nn-arena | Наша сторона под планировщиком CA атакует (ИИ игры обороняется) или обороняется (ИИ игры атакует) |
+| `--layout`, `--enemy-mode native\|defend` | enemy-layout | Состав врага; штатный ИИ как есть или с задачей «обороняй» (по умолчанию) |
 | `--range-mode fire_at_will\|attack\|damage` | archer-range | Когда лучники начинают стрелять при разной глубине блока; `damage` — урон по бесстрашной цели на 70–120 м |
 | `--damage-rotate N` | archer-range `damage` | Сдвинуть дистанции на N полос (та же дистанция на другом грунте) |
 | `--plan` | move-probe | План из `config/move-plans/<имя>.json` (по умолчанию `hamlet`) |
+| `--capture` | roster-capture | Другой список отрядов вместо `config/roster/capture.json` |
 | `--scenario` | все | Другой файл из `scenarios/` вместо сценария цели |
-| `--window MIN_X MAX_X MIN_Z MAX_Z` | map-capture | Снять только этот участок карты |
 | `--deadline` | все, кроме map-capture | Лимит реального времени на бой, с (по умолчанию из длины сценария и скорости) |
-| `--stall-minutes` | все, кроме map-capture | Завершить бой, если никто не получает урон столько минут игры (10). В move-probe не меньше длины плана + 2 мин |
+| `--stall-minutes` | все, кроме map-capture | Завершить бой, если никто не получает урон столько минут игры (10). В move-probe, roster-capture, archer-range и enemy-layout — не меньше длины сценария + 2 мин |
 
 ## Что лежит в `build/<цель>/`
 
@@ -74,7 +68,7 @@ __modules["apps.core.value"] = function(require)
 end
 ...
 if bm then
-    __require("entries.duel").main(bm, {runs = 3, ...}, {common = common, battle_vector = battle_vector})
+    __require("entries.nn_arena").main(bm, {own_ai = "attack", ...}, {common = common, battle_vector = battle_vector})
 end
 ```
 

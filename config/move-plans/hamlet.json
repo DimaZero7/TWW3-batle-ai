@@ -1,6 +1,6 @@
 {
   "name": "hamlet",
-  "description": "Obstacle task, one infantry unit (Moorlands Route, catchment_03). shape: reform in place at another width. traverse: one plain engine order past or into the hamlet block (x -110.5..-52.5, z -96.5..-49.5). Bearing 0 = +Z, 90 = +X.",
+  "description": "Movement probe, one infantry unit (Moorlands Route, catchment_03). shape: reform in place at another width. traverse: one plain engine order past or into the hamlet block (x -110.5..-52.5, z -96.5..-49.5). Bearing 0 = +Z, 90 = +X.",
   "monitor": {
     "arrive_m": 5,
     "stop_samples": 3,

@@ -1,5 +1,5 @@
 -- Pure movement bookkeeping for one ordered move ("leg").
--- Definitions: docs/ru/architecture/tasks/obstacles.md (arrived, stuck).
+-- Definitions (arrived, stuck): docs/ru/apps/navigation.md.
 local value = require('apps.core.value')
 
 local M = {}

@@ -270,7 +270,7 @@
 Наличие дождя/тумана в окружении не даёт автоматически числовой карты видимости.
 
 Источник: [CCO Root](https://chadvandy.github.io/tw_modding_resources/WH3/cco/documentation.html#CcoBattleRoot),
-`scenarios/ranged_melee.xml` в нашем репозитории.
+сценарии в нашем репозитории (тогда `scenarios/ranged_melee.xml`, сейчас те же поля в `scenarios/nn_arena.xml`, его пишет сборка `nn-arena`).
 
 ## 9. Данные ресурсов карты вне игрового Lua
 

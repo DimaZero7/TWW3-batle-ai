@@ -11,6 +11,8 @@ The reports below exist **in Russian only**; each row gives the main result.
 
 ## Map data (2026-09-25)
 
+Section hub (Russian): [map data research](../../ru/research/map-data/README.md).
+
 | Report | Main result |
 |---|---|
 | [Map data catalogue](../../ru/research/map-data/catalog.md) | Which battlefield data sources exist and which were verified |
@@ -24,13 +26,23 @@ The reports below exist **in Russian only**; each row gives the main result.
 | [Kislev plains](../../ru/research/map-data/kislev-plains-check.md) | Frame and surface grid on an official landscape, cavalry route |
 | [Kislev: 5/3/2/1 m cells](../../ru/research/map-data/kislev-scales-check.md) | Cost and size of collection at different grid steps |
 
-## Launch and test stand
+## Launch
+
+Section hub (Russian): [launch research](../../ru/research/launch/README.md).
 
 | Report | Main result |
 |---|---|
 | [Loading times](../../ru/research/launch/loading-times.md) | ~83 s to the first battle, ~11 s per rematch; a series in one process saves time |
-| [Required True Sight mod](../../ru/research/launch/dependencies.md) | How the mod was pinned and loaded; vanilla vs modded battles |
-| [Test stand](../../ru/research/launch/test-stand.md) | The previous duel stand: loop, results, limits |
+| [Required True Sight mod](../../ru/research/launch/dependencies.md) | How the mod is pinned and loaded into every battle |
+| [A series of battles in one process](../../ru/research/launch/test-stand.md) | A scripted rematch through `button_rematch` and `dialogue_box`: 3 battles in a row, x25–28 at a requested x40 |
+
+## Measurement analyses (27–28.09.2026)
+
+| Analysis | Main result |
+|---|---|
+| [Moorlands Route: obstacles](../../../research/analysis/moorlands-obstacles/README.md) | 10 large obstacle groups, no narrow gaps between rocks; `is_area_clear` hardly sees fences |
+| [Moorlands Route: the hamlet](../../../research/analysis/hamlet/README.md) | For the engine the hamlet is one solid block; an order into it is silently dropped; jams come from own units |
+| [How the game's AI stands in defence](../../../research/analysis/enemy-layout/README.md) | Lines with 2–6 m gaps, ≈ 20 m between lines, archers in the second line |
 
 ## Archive files
 
@@ -42,13 +54,14 @@ The [research/](../../../research/) folder at the repository root:
 | `research/evidence/map-data/` | Evidence for the reports above: XML, JSONL, CSV, images |
 | `research/evidence/maps/moorlands-route/` | The full Moorlands Route package |
 | `research/evidence/units/`, `units-catalog/` | Unit experiments: state, range, commands, deployment |
+| `research/analysis/` | Measurement analyses: write-ups and pictures; data stays local |
 | `research/probes/` | Minimal Lua probes for state and range |
 | `research/scripts/` | Research Python/Lua scripts and the previous launchers |
 | `research/scripts/legacy-lua/` | The original Lua modules before the move to `src/apps` |
 | `research/kit-manifest.json` | Origin and SHA-256 of every file of the source set |
 
 **Git holds only images (`.png`, `.svg`) and descriptions (`.md`) from
-`research/evidence`.** Raw data — `.csv`/`.gz` grids, `.npz` arrays, `.jsonl`
+`research/evidence` and `research/analysis`.** Raw data — `.csv`/`.gz` grids, `.npz` arrays, `.jsonl`
 logs, `.json` summaries, experiment XML — lives only on the local disk (see
 `.gitignore`). The docs mark it as "local archive". Its hashes are kept in
 `research/kit-manifest.json`, so a copy can be verified. It can only be

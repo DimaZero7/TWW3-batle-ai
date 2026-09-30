@@ -1,5 +1,5 @@
 -- Trusted private telemetry for post-terminal export research.
--- Never a policy input. Reads both sides, including hidden enemies.
+-- Research telemetry, never an AI's input. Reads both sides, including hidden enemies.
 local value = require('apps.core.value')
 
 local M = {version = 1, profile = 'post-battle-telemetry-probe-v1'}

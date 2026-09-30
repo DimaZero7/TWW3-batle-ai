@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Map capture around the hamlet on The Moorlands Route (catchment_03) for
-     the obstacle task. Side 1: Empire spearmen outside the hamlet (their
+     the movement research (research/analysis/hamlet/README.md). Side 1: Empire spearmen outside the hamlet (their
      can_reach_position per cell = where infantry can go). Side 2: a general
      far away, only because a battle needs two armies. -->
 <battle>

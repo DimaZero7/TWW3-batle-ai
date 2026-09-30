@@ -1,4 +1,4 @@
--- Trusted-side visibility reads. Not a Lua sandbox or a complete policy API.
+-- Trusted-side visibility reads.
 -- Only the current visible state of an enemy is reliable; see
 -- docs/en/apps/intel.md.
 local value = require('apps.core.value')

@@ -1,6 +1,6 @@
-# Moorlands Route: terrain-only handoff
+# Moorlands Route: terrain-only export
 
-Captured 2026-09-26 with the existing map reader and native objects module. No fighter policy was loaded and no battle between fighters was run. This directory is the shareable export; `../capture/` holds operator source evidence and diagnostic-unit observations and is not the fighter export.
+Captured 2026-09-26 with the existing map reader and native objects module. No battle was fought; only the terrain was read. This directory is the terrain export; `../capture/` holds the source evidence and diagnostic-unit observations.
 
 - `summary.json`: validation, identity, counts, limits and original source hashes.
 - `terrain-grid.csv`: 116,964 unique surface records, without unit reachability columns.
@@ -13,8 +13,8 @@ Captured 2026-09-26 with the existing map reader and native objects module. No f
 - `cleanup.json`: owned PID 9788 closed; saved outputs verified; installed capture files removed. No remaining WH3 process found in the final check.
 - `overview.png`: inspected height/ground/object visualization. Colour never proves passability.
 
-Inside-frame height range: 516.490967–624.861023 m. Ground counts: grass 79,379; forest 30,225; mud 3,687; sharp_stones 2,990. No shallow_water/deep_water centre samples; this does not exclude small unsampled water features. Radar bounds do not prove movement walls. No policies or hidden combat information are included.
+Inside-frame height range: 516.490967–624.861023 m. Ground counts: grass 79,379; forest 30,225; mud 3,687; sharp_stones 2,990. No shallow_water/deep_water centre samples; this does not exclude small unsampled water features. Radar bounds do not prove movement walls. No army positions or combat information are included.
 
 The first attempt crashed before producing a grid. The same scenario without UTF-8 BOM completed; this suggests a serialization issue, not a proven crash root cause. Its evidence remains in `../failed-bom-attempt/`.
 
-Source hashes and file hashes are in summary.json and hashes.json. The coordinator gates publication. Both fighters must review the shared grid before the coordinator authorizes integration.
+Source hashes and file hashes are in summary.json and hashes.json.

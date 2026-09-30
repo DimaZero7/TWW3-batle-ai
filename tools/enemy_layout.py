@@ -108,22 +108,6 @@ def scenario_xml(spec, layout):
     return HEAD.format(layout=layout, alliances=alliances)
 
 
-def roster_inputs(layout, spec=None):
-    """{unit key: roster unit input} for every type in the battle (both armies), numbers only."""
-    from tools import roster
-    from tools.sim.formation import roster_units
-    spec = spec or load()
-    keys = {u["key"] for u in spec["own"]["units"]} | {u["key"] for u in spec["layouts"][layout]}
-    entries = roster.load_roster()
-    out = {}
-    for key in sorted(keys):
-        unit = roster_units({"units": [{"key": key, "count": 1}]}, entries)[0]
-        out[key] = {k: v for k, v in unit.items() if isinstance(v, (int, float, str)) and not isinstance(v, bool)
-                    and k != "id"}
-        out[key]["commanding"] = unit["commanding"]
-    return out
-
-
 def write_scenario(layout, spec=None):
     spec = spec or load()
     SCENARIO.write_text(scenario_xml(spec, layout), encoding="utf-8")

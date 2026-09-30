@@ -2,80 +2,65 @@
 
 [← Back](../../README.md) · [Project](../../README.md) · **English** | [Русский](../ru/README.md)
 
-## The AI tree — start here
+This is the project's base: the battle mechanics of Total War: WARHAMMER III that we
+measured, our tools to work with the game, and the data on which a neural network can
+later be trained from scratch. Our own algorithmic AI was removed on 30.09.2026 (the
+project owner's decision); the old work is in the Git history.
 
-Everything the battle AI does, by phases and branches, with diagrams and examples — **[The AI tree](tree/README.md)**.
+## Data for training the network
 
-<!-- generated:tree:trunk -->
-```mermaid
-flowchart BT
-  classDef done fill:#E1F5EE,stroke:#0F6E56,color:#04342C
-  classDef started fill:#FAEEDA,stroke:#854F0B,color:#412402
-  classDef planned fill:#F1EFE8,stroke:#888780,color:#444441
-  base["Base<br/>18 modules"]:::done
-  deploy["1 · Deployment<br/><i>Strategic</i>"]:::done
-  approach["2 · Approach to the window<br/><i>Tactical</i>"]:::done
-  fire["3 · Fire from the window<br/><i>Combat</i>"]:::started
-  their_archers["4 · Their archers hit our wall<br/><i>Combat</i>"]:::started
-  infantry_attack["5 · Infantry attacks<br/><i>Combat</i>"]:::planned
-  echelon_step["6 · Echelon to their archers<br/><i>Combat</i>"]:::planned
-  breakthroughs["7 · Breakthroughs<br/><i>Combat</i>"]:::planned
-  finish["8 · Finish and withdrawal<br/><i>Combat</i>"]:::planned
-  base --> deploy
-  deploy --> approach
-  approach --> fire
-  fire --> their_archers
-  their_archers --> infantry_attack
-  infantry_attack --> echelon_step
-  echelon_step --> breakthroughs
-  breakthroughs --> finish
-```
-<!-- /generated -->
+- **[Data for training the network](training/README.md)** — the arena, recorded battles of
+  the game's AI, rules from the game's database, measured facts; how to collect and read them.
 
-- [All nodes and switches](tree/README.md#all-nodes) · [Module map by level](tree/modules.md) · [How to keep the docs](architecture/documentation.md)
+## Game mechanics
 
-## Architecture
+- [What is verified in WH3](game/README.md) — map, units, map catalogue, how we measured it.
+- [Morale](game/units/morale.md) · [Melee](game/units/melee.md) · [Pace and fatigue](game/units/pace.md) —
+  battle rules checked against recorded battles.
+- [The game's database](game/database.md) · [Battle difficulty](game/difficulty.md) · [The game's own battle AI](game/game-ai.md) —
+  rule tables, difficulty bonuses, how the game's own AI fights.
+- [MP Crossroads (flat)](game/maps/crossroads-flat.md) — the arena's empty flat map.
+- [Readout catalogue](game/readouts.md) — what can be collected about units and the battle, what we already collect.
+- [Visual atlas](game/atlas.md) — the key research images.
 
-- [Project structure and layers](architecture/overview.md) — folders, app layers, dependency rules, the tick flow.
-- [List of apps](architecture/apps.md) — what each app does and where it came from.
-- [Errors and unknown values](architecture/error_handling.md) — `known/unknown`, error codes, guarded callbacks.
+## Infrastructure
 
-## Environment and launch
-
-- [Setup and configuration](environment/setup.md) — Python, `.venv`, `config/local.json`, game path.
-- [Building a pack](launch/build.md) — `duel`, `arena`, `map-capture` targets, module bundler, PFH5 format.
-- [Running a battle and results](launch/run.md) — launcher, safety rules, result folders, True Sight mod.
-- [Battle viewer](launch/viewer.md) — a battle from the game and the simulation on a page in real time: layers, presets, side by side on one clock.
-
-## Testing
-
-- [Tests without the game](testing/tests.md) — pytest + lupa, fake `bm`, how to write tests.
-- [Simulator](testing/simulator.md) — a battle without the game: the same logic, walking like the engine, checked against the game.
-
-## Apps (`src/apps`)
+### Code in the game (`src`)
 
 | App | Purpose |
 |---|---|
 | [core](apps/core.md) | Value checks, JSON, error codes, time |
-| [battle](apps/battle.md) | Sides, armies, units, attacker/defender roles |
+| [battle](apps/battle.md) | Sides, armies, units, attacker/defender roles, speed, deadline and stall |
 | [map](apps/map.md) | Radar frame, grid, heights, ground, objects |
-| [navigation](apps/navigation.md) | Point reachability for a specific unit |
-| [units](apps/units.md) | Own unit state, missile range, formation width |
+| [navigation](apps/navigation.md) | Point reachability for a specific unit, the end of a leg |
+| [units](apps/units.md) | Own unit state, missile range, the unit card, soldier positions |
 | [intel](apps/intel.md) | Enemy visibility and last known position |
-| [orders](apps/orders.md) | Command contract and verified order calls |
-| [deployment](apps/deployment.md) | Initial placement `deployment-placement-v2` |
-| [ai](apps/ai.md) | Profiles, decision contract, policies |
-| [observation](apps/observation.md) | One side's view — AI input without hidden data |
-| [sandbox](apps/sandbox.md) | Restricted loading of external policies |
+| [observation](apps/observation.md) | One side's view — without hidden data |
+| [orders](apps/orders.md) | Verified order calls, handing units to the game's AI, engine facings |
 | [telemetry](apps/telemetry.md) | JSONL events, state files, post-battle samples |
-| [Entries](apps/entries.md) | `duel`, `arena`, `map_capture` — apps wired into a battle |
+| [Entries](apps/entries.md) | Probes and battle recorders: `nn_arena`, `ai_vs_ai`, `unit_readout`, `move_probe`, `archer_range`, `enemy_layout`, `roster_capture`, `manual_record`, `map_capture` |
 
-## Game knowledge
+### Project and rules
 
-- [What is verified in WH3](game/README.md) — map, units, map catalogue.
-- [Readout catalogue](game/readouts.md) — what can be collected about units and the battle, what we already collect.
-- [Visual atlas](game/atlas.md) — the key research images.
+- [Project structure and layers](architecture/overview.md) — folders, layers, dependency rules, the tick flow, project rules.
+- [List of apps](architecture/apps.md) — apps, entries and tools, where they came from.
+- [Errors and unknown values](architecture/error_handling.md) — `known/unknown`, error codes, guarded callbacks.
+- [How to keep the docs](architecture/documentation.md) — language mirror, hubs, navigation, generated indexes.
+
+### Environment, build, launch, tests
+
+- [Setup and configuration](environment/setup.md) — Python, `.venv`, `config/local.json`, game path.
+- [Building a pack](launch/build.md) — build targets, options, module bundler, PFH5 format.
+- [Running a battle and results](launch/run.md) — launcher, fair difficulty, result folders, True Sight mod.
+- [Tests without the game](testing/tests.md) — pytest + lupa, fake `bm`, how to write tests.
 
 ## Research
 
 - [Research archive](research/README.md) — map-data and launch reports, evidence and legacy scripts.
+
+## All sections
+
+[Game knowledge](game/README.md) · [Training data](training/README.md) ·
+[Code modules](apps/README.md) · [Architecture](architecture/README.md) ·
+[Environment](environment/README.md) · [Build and launch](launch/README.md) ·
+[Testing](testing/README.md) · [Research](research/README.md)

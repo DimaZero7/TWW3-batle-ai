@@ -2,6 +2,8 @@
 
 [← Назад](README.md) · [Документация](../README.md) · [English](../../en/environment/setup.md)
 
+Что установить и как настроить машину, чтобы собирать и запускать бои.
+
 ## Что нужно
 
 - Windows с установленной Total War: WARHAMMER III (Steam, app id 1142710);
@@ -28,13 +30,23 @@ python -m venv .venv
 |---|---|
 | `lupa` | Lua 5.1 внутри Python: тесты и проверка синтаксиса бандла при сборке |
 | `pytest` | Запуск тестов |
-| `numpy`, `matplotlib` | `tools/analysis`: карты высот, склоны, проходы |
+| `numpy`, `scipy`, `matplotlib` | `tools/analysis`: карты высот, склоны, проходы; `tools/nn/gamedata.py`: записи арены как массивы |
 
 Без `lupa` сборка работает, но в `manifest.json` будет `"syntax_checked": false`.
 
+## Для данных обучения
+
+- **Python 3.14+** нужен только чтобы прочитать базу данных игры: файлы в
+  `db.pack` из папки `data` игры сжаты zstd, а модуль `compression.zstd` есть в стандартной
+  библиотеке с 3.14. Запуск: `py -3.14 -m tools.nn.gamedb` → `config/nn/game_rules.json`.
+- **Docker с PyTorch и CUDA** — для будущего обучения: `bash tools/nn/dock.sh <модуль>`
+  запускает модуль проекта в контейнере `snake-ai-trainer` (репозиторий смонтирован в `/repo`).
+
+Подробнее — [данные для обучения нейросети](../training/README.md).
+
 ## Настройки машины: `config/local.json`
 
-Как в photo-fixing (`default_config.toml` → `config.toml`): в Git лежит
+Как в photo-fixing, другом проекте автора (`default_config.toml` → `config.toml`): в Git лежит
 `config/default.json`, а личные настройки — в `config/local.json`, который Git
 игнорирует. Значения из `local.json` заменяют значения по умолчанию.
 

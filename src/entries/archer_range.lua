@@ -10,11 +10,10 @@
 --     the archers' front rank to the target's front rank).
 --   mode 'attack': the target stands at start_d; every archer is ordered to
 --     attack its target (it walks into range by itself).
---   mode 'damage': how much damage archers do (user, 28.09.2026: the
---     simulation must deal and take damage). Each lane's target stands at its
---     own distance lane.d (front rank to front rank), fearless so it does not
---     run; the archers fire at will until their arrows are spent. Men and
---     hit points of both are in every sample.
+--   mode 'damage': how much damage archers do (user, 28.09.2026). Each
+--     lane's target stands at its own distance lane.d (front rank to front
+--     rank), fearless so it does not run; the archers fire at will until their
+--     arrows are spent. Men and hit points of both are in every sample.
 -- Every tick, for every lane: ammo left, the engine's firing flag and
 -- unit_in_range, the archers' front and rear ranks and the target's nearest
 -- rank along the lane (from the soldiers) -> 'range_sample'. Research only.

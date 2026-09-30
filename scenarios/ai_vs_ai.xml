@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Two symmetric Kislev armies for an AI-vs-AI observation battle.
-     Map, factions and unit keys are the ones already loaded in ranged_melee,
-     triple_melee and map_capture. -->
+     Map, factions and unit keys are the ones already loaded in map_capture. -->
 <battle>
   <alliance id="0">
     <army>

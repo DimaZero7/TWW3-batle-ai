@@ -4,42 +4,9 @@
 
 An entry wires apps into a specific battle: it subscribes to phases, runs
 the tick, calls adapters and services and writes telemetry. It contains no
-decision logic. Code: `src/entries/`. Each entry is a module with
-`main(bm, config, globals)`, called by the bundled script.
-
-<a id="duel"></a>
-
-## duel — duel with automatic rematch
-
-Build: `python -m tools.build duel --runs 3`. Scenario `ranged_melee.xml`:
-one Kossars unit per side, script names `bai_ranged_a` / `bai_ranged_b`. With
-other names the duel accepts a manual "one foot lord per side" battle.
-
-1. `loaded` → battle kind check → read sides → `ready`.
-2. `Deployment` phase: end deployment automatically after 1 s.
-3. `Deployed` phase: re-read `tww3_bai_policy.lua` (if present), set speed,
-   take control, `prepare_melee`.
-4. Tick: battle result → timeout → control confirmation → policy decision
-   per side → order → `decision` and `snapshot`.
-5. `result`: `completed` (winner from the engine), `timeout` (a forced draw,
-   never a "natural" one), `incomplete`.
-6. With battles left in the series: write `tww3_bai_pending.txt`, end the
-   battle, press "rematch" through the UI API and confirm.
-
-Events: `loaded`, `ready`, `initial_unit`, `deployment`, `start`,
-`control_requested`, `control_acquired`, `decision`, `snapshot`,
-`final_unit`, `result`, `restart_*`, `error`, `skipped`.
-
-<a id="arena"></a>
-
-## arena — three pairs on one map
-
-Build: `python -m tools.build arena`. Scenario `triple_melee.xml`: pairs
-`bai_arena_<pair>_<side>` — Kossars 120, Tzar Guard 100, Snow Leopard 1.
-Control is taken before deployment; afterwards units return to their XML
-positions. A pair ends at the first rout or death. A unit of another pair
-within 120 m raises `isolation_warning`. Army morale is shared by all pairs;
-every result says so.
+decision logic: every entry either measures the game or records a battle.
+Code: `src/entries/`. Each entry is a module with `main(bm, config, globals)`,
+called by the bundled script.
 
 <a id="ai_vs_ai"></a>
 
@@ -47,12 +14,13 @@ every result says so.
 
 Build: `python -m tools.build ai-vs-ai --speed 3`. Scenario `ai_vs_ai.xml`:
 4 Kislev units per side (2 Kossars, Tzar Guard, Winged Lancers). Our code
-gives no unit orders.
+makes no battle decisions and gives units no orders directly.
 
 - The army the engine treats as AI stays with the **general battle AI**.
 - The army the engine treats as the player's (`army:is_player_controlled()`)
   goes to the game's AI planner ([planner_adapter](orders.md)) with "attack the
-  enemy force", re-issued every 15 s.
+  enemy force", re-issued every 15 s. Units that rally after a rout or stand idle
+  under fire are brought back as in [nn_arena](#nn_arena) (`rejoined`, `idle_kick`).
 - Who controls what: the `ai_assigned` event (`general_battle_ai` / `script_ai_planner`).
 - Every 5 ticks: per-unit `snapshot` and `progress` (men and standing units
   per side); at the end `final_unit` and `result`.
@@ -103,7 +71,7 @@ Hiding measurements: [visibility](../game/units/visibility.md).
 Build: `python -m tools.build move-probe --plan hamlet`. Scenario
 `move_probe.xml` on **The Moorlands Route** (`catchment_03`): unit
 `probe_spears` (Empire spearmen) and a far general `far_general` held by the
-script. Task: obstacle avoidance (card in Russian: [obstacles](../../ru/architecture/tasks/obstacles.md)).
+script.
 
 The plan `config/move-plans/<name>.json` is a list of legs:
 
@@ -128,45 +96,42 @@ reforms in place at its own slot for each width in the list, all at once —
 `shape_result` with soldier positions and timing. Result: `tools/roster.py
 update`, see [unit roster](../game/units/roster.md).
 
-<a id="formation_probe"></a>
+<a id="archer_range"></a>
 
-## formation_probe — formation in battle
+## archer_range — when archers shoot and how much damage
 
-Build: `python -m tools.build formation-probe --army first_attack`; scenario and
-data come from `config/armies/` and the roster (`tools/sim/formation.py`). After
-deployment the enemy is placed at its simulated plan and held; our formation is
-planned in battle by `apps.formation` from the visible enemy and placed by
-teleport.
-After placing, the army stands for `hold_s` (60 s) without orders — the "no rushing"
-check (`hold_sample` every tick, `stability` verdict in the analysis). Archer turns only
-with `--turn-test`: right and left with the engine's `rotate` and with our turn in place.
-Events: `plan`, `stage_snapshot`, `turn_sample`.
-Analysis: `tools/analysis/formation_probe.py`.
+Build: `python -m tools.build archer-range [--range-mode fire_at_will|attack|damage]`;
+the scenario `archer_range.xml` is written by `tools/archer_range.py`. The Moorlands Route,
+four lanes 200 m apart: in each an Empire archer unit and in front of it a spearmen unit as
+the target; the script holds them all.
 
-After placing, stage `align`: [vision](vision.md) → [battlefield](battlefield.md) →
-[alignment](alignment.md) from our side's view; if the army is off, the formation is
-planned again opposite the enemy and the units **walk** there (`alignment`,
-`alignment_after`). While the enemy is unseen it waits. During the hold the
-governor only answers every 5 s (`governor`).
+- `fire_at_will` — archers of different widths (60, 30, 15, 8 m — 8 to 46 m deep) stand with
+  fire at will, the target steps closer;
+- `attack` — the target stands, the archers are ordered to attack it (they walk into range);
+- `damage` — archers 20 m wide, a fearless target at its own distance (70–120 m); the archers
+  shoot until out of arrows. `--damage-rotate N` shifts the distances by N lanes (the same
+  distance on other ground).
 
-With `approach` in the army: stage `approach`, the [approach](approach.md)
-commander (one action at a time, alignment first, 50 m steps, a place past an
-obstacle); events `approach_decision`, `approach_sample`, `approach_manoeuvre`.
-With `goal`: march to a point instead of the enemy.
+Every tick `range_sample` per lane: arrows, the engine's firing flag, `unit_in_range`, the
+archers' front and rear ranks and the target's nearest rank (from the soldiers), men and
+health. Analysis: `tools/analysis/archer_range.py`; results — [missile range](../game/units/missile-range.md)
+and [missile damage](../game/units/missile-damage.md).
 
 <a id="enemy_layout"></a>
 
-## enemy_layout — how the game AI stands
+## enemy_layout — how the game AI deploys and stands
 
 Build: `python -m tools.build enemy-layout --layout <name> [--enemy-mode native|defend]`;
 scenario from `config/armies/defender_layouts.json` (`tools/enemy_layout.py`). Our
-army is held; the enemy is the game AI. In `defend` mode (default) it gets
-`script_ai_planner:defend_position` after deployment (where it stands, 80 m
-radius). For 90 s: `enemy_sample` every tick, `enemy_snapshot` with every
-soldier. Research data; the AI itself uses only what it sees. Every
-`picture_every` ticks [vision](vision.md) and [battlefield](battlefield.md) build
-the groups and the field from our side's view: event `battlefield`. Analysis:
-`tools/analysis/enemy_layout.py`.
+army stands, held by the script; the enemy is the game AI, which deploys its army itself
+when deployment ends. In `defend` mode (default) it gets
+`script_ai_planner:defend_position` after deployment (where it stands, 80 m radius);
+`native` — the AI as the battle sets it.
+
+For 90 game seconds: `enemy_sample` every tick (every unit's movement and whether our side
+sees it), `enemy_snapshot` with every soldier — in deployment, after it and at the end,
+`own_snapshot` at the end. This is the full view, for research. Analysis:
+`tools/analysis/enemy_layout.py`; results — [how it stands](../../../research/analysis/enemy-layout/README.md) (in Russian).
 
 <a id="manual"></a>
 
@@ -179,6 +144,53 @@ player's command. The script never commands them, it only records:
 when the ordered point changes, `order_end` (`arrived`, `stopped`, `stuck`,
 `timeout`). The player ends the battle; otherwise after an hour or 30 game
 minutes without damage.
+
+<a id="nn_arena"></a>
+
+## nn_arena — recording battles to train a network
+
+Build: `python -m tools.build nn-arena --own-ai attack|defend --timeout 900`.
+`--timeout 900` is a battle limit of 900 s of game time, as in the records of 30.09.2026;
+without it the build gives 600 s.
+Scenario `nn_arena.xml` is written by `tools/nn/scenario.py` from `config/nn/arena.json`: the
+empty flat map MP Crossroads (flat), each side a lord, 4 spearmen and 2 archers of the Empire,
+the armies' fronts 350 m apart. The script makes no battle decisions: side 2 is always led by
+the game's general battle AI, side 1 by CA's planner ([planner_adapter](orders.md)). The script
+repeats the planner's task, sends rallied and idle units back into battle (below) and records
+the battle. The side that wins on timeout defends:
+
+- `attack` — the planner attacks (the order repeated every 15 s), the game's AI defends;
+- `defend` — the planner defends where the army stands, the game's AI attacks.
+
+Every second `nn_sample` records every unit of both sides (the full view):
+
+| Field | What it is |
+|---|---|
+| `n`, `side` | The unit's script name (`own_lord`, `enemy_spear_1`, …) and side |
+| `x`, `z`, `b` | Place, m, and facing, ° |
+| `men`, `hp` | Men alive, share of health |
+| `mp`, `ms` | Morale from CCO: `MoralePercent` and `MoraleState` |
+| `r`, `s`, `w` | Routing, shattered, wavering |
+| `m`, `mv`, `f` | In melee, moving, running |
+| `a`, `fire` | Arrows left, firing now |
+| `t` | Current target (a script name) |
+| `fat`, `k` | Fatigue, kills |
+| `ox`, `oz` | Ordered position |
+| `lf`, `rf`, `bf` | Threat to the left flank, right flank, rear |
+
+The end: the last snapshot `nn_final` and `result` — the outcome, men and health of each side,
+how many `rejoined` and `idle_kick` there were. A battle takes about 2 minutes at ×20 including
+loading. Only battles at Normal difficulty count in analysis ([fair difficulty](../launch/run.md#fair-difficulty)).
+The records are read by `tools/nn/gamedata.py` — [data for training](../training/README.md).
+
+CA's planner has two weaknesses the script mends (30.09.2026):
+
+- a unit that routed and rallied is no longer led by the planner — it stood to the end; now it
+  goes back into the planner with the last order (`rejoined`);
+- a unit stands idle under arrows (no target, not moving, not in melee, losing health): 15-75%
+  of the time our units were shot at, 0-3% for the game's AI. After 6 s idle it goes back into
+  the planner; if it again stands 6 s under fire, but no sooner than 15 s after the first kick,
+  it gets a planner of its own that attacks the nearest enemy (`idle_kick`, stages 1 and 2).
 
 <a id="map_capture"></a>
 
@@ -205,7 +217,7 @@ Process the grid without the game with [tools/analysis](../../../tools/analysis/
   `deadline_s` (`battle.deadline`, result `deadline`); a stall — nobody takes
   damage for `stall_ms` of game time, 10 minutes by default
   (`battle.services.new_stall_detector`, result `stalled`); the launcher limit
-  = 240 s for loading + every battle's deadline. Build options: `--deadline`,
+  = 240 s for loading + the battle's deadline. Build options: `--deadline`,
   `--stall-minutes`.
 
 - **Speed.** Once the outcome is decided and units flee, the engine drops the
@@ -213,7 +225,7 @@ Process the grid without the game with [tools/analysis](../../../tools/analysis/
   every 0.5 s until the `Complete` phase and writes `speed_restored` (verified
   on 2026-09-27 at ×20: 1 → 20 right after `result`). A pause (speed 0) is left alone.
 
-- Reload guard: a global flag (`tww3_bai_duel`, `tww3_bai_arena`,
-  `tww3_bai_map_capture`).
+- Reload guard: a global flag `tww3_bai_<entry>` (for example
+  `tww3_bai_nn_arena`, `tww3_bai_map_capture`).
 - Every callback goes through `errors.guard` ([errors](../architecture/error_handling.md)).
 - Checked without the game in `tests/entries/test_entries.py` on a fake `bm`.

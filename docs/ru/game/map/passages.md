@@ -36,8 +36,8 @@ local result = reachability.read_cells(bm, battle_vector, {cavalry, infantry}, c
 
 ## Повтор без игры
 
-```powershell
-python tools/map-capture/passages.py --csv docs/map/evidence/field-20260925/cathay-navigation/tww3_bai_map_capture_grid.csv.gz --step 3 --output tmp/map-research/passages
+```bash
+.venv/Scripts/python -m tools.analysis.passages --csv research/evidence/map/field-20260925/cathay-navigation/tww3_bai_map_capture_grid.csv.gz --step 3 --output build/map-research/passages
 ```
 
 Проверяются полная сетка без повторов и соответствие координат шагу. В `components.npz` — номера участков суши/мелководья (−1 вне этого слоя) и пересечение доступности выбранных отрядов. В `connections.json` — хеши, параметры, фильтр, номера и границы областей. Выделенный инструмент повторил размеры и номера всех трёх соединений.

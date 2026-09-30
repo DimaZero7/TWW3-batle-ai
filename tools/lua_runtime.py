@@ -1,4 +1,4 @@
-"""Lua 5.1 runtime (tests, simulation) where `require('apps.x.y')` loads src/apps/x/y.lua.
+"""Lua 5.1 runtime (tests) where `require('apps.x.y')` loads src/apps/x/y.lua.
 
 Lua's own file loader cannot open non-ASCII Windows paths, so sources are
 read by Python and handed to a loader registered in package.loaders.

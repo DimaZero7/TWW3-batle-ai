@@ -3,9 +3,8 @@
 [← Back](README.md) · [Map guide](README.md) · [Русский](../../../ru/game/map/heights.md)
 
 **We already read terrain height from the game.** A height map arranges these
-numbers by their X/Z positions. It is useful to a classical tactical algorithm;
-no neural network is required. Reading heights is verified; using them to choose
-combat positions or predict movement is future work.
+numbers by their X/Z positions. Reading heights is verified; what heights mean for
+a battle (positions, movement, sight) was not studied here.
 
 ## 1. Read a point from the game
 
@@ -74,16 +73,16 @@ shared numeric scale before comparing colours from different captures.
 
 ## 4. Reproduce the saved example without launching WH3
 
-From the repository root, with Python 3.10 and these plotting dependencies:
+From the repository root, with the project's Python (`numpy`, `matplotlib` from `requirements-dev.txt`);
+the source grid is in the local archive:
 
-```powershell
-python -m pip install --only-binary=:all: --target .tools/plotting numpy==2.2.6 matplotlib==3.10.9
-python tools/map-capture/heightmap.py --csv docs/ai/map-data/kislev-scales-evidence/grid-1m.csv.gz --bounds -512 512 -512 512 --step 1 --output tmp/map-research/heightmap-1m
+```bash
+.venv/Scripts/python -m tools.analysis.heightmap --csv research/evidence/map-data/kislev-scales-evidence/grid-1m.csv.gz --bounds -512 512 -512 512 --step 1 --output build/map-research/heightmap-1m
 ```
 
 The renderer also works with a completed capture's `tww3_bai_map_capture_grid.csv`;
 provide that run's frame and step. It neither starts the game nor issues Lua orders.
-Draft outputs, including the regenerable NPY, stay in ignored `tmp/`.
+Outputs, including the regenerable NPY, stay in the ignored `build/`.
 
 ![Kislev terrain height, 1 m samples](../../../assets/map/heightmap-kislev-1m.en.png)
 

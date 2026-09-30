@@ -1,15 +1,14 @@
 """Build a battle pack from src/ for one target. Never touches the game.
 
 Usage:
-    python -m tools.build duel --runs 3 --speed 20 --timeout 300
-    python -m tools.build arena
     python -m tools.build ai-vs-ai --speed 3
     python -m tools.build map-capture --step 3 --features
     python -m tools.build move-probe --plan hamlet
     python -m tools.build manual --deadline 3600 --stall-minutes 30
     python -m tools.build roster-capture        # scenario from config/roster/capture.json
-    python -m tools.build formation-probe --army first_attack
+    python -m tools.build archer-range --range-mode damage
     python -m tools.build enemy-layout --layout balanced_5
+    python -m tools.build nn-arena --own-ai defend --timeout 900
 
 Output: build/<target>/ with the .pack, the bundled script and manifest.json.
 Install and launch with tools/launcher/launch.ps1.
@@ -25,22 +24,6 @@ from tools.pack import bundle, pfh5
 
 # target -> entry module, pack/script names, scenario XML and its in-pack name.
 TARGETS = {
-    "duel": {
-        "entry": "entries.duel",
-        "pack": "tww3_bai_duel.pack",
-        "script": "tww3_bai_duel",
-        "folder": "tww3_bai",
-        "scenario": "ranged_melee.xml",
-        "packed_scenario": "ranged_melee.xml",
-    },
-    "arena": {
-        "entry": "entries.arena",
-        "pack": "tww3_bai_arena.pack",
-        "script": "tww3_bai_arena",
-        "folder": "tww3_bai",
-        "scenario": "triple_melee.xml",
-        "packed_scenario": "triple_melee.xml",
-    },
     "ai-vs-ai": {
         "entry": "entries.ai_vs_ai",
         "pack": "tww3_bai_ai_vs_ai.pack",
@@ -81,14 +64,6 @@ TARGETS = {
         "scenario": "archer_range.xml",
         "packed_scenario": "archer_range.xml",
     },
-    "formation-probe": {
-        "entry": "entries.formation_probe",
-        "pack": "tww3_bai_formation_probe.pack",
-        "script": "tww3_bai_formation_probe",
-        "folder": "tww3_bai",
-        "scenario": "formation_probe.xml",
-        "packed_scenario": "formation_probe.xml",
-    },
     "enemy-layout": {
         "entry": "entries.enemy_layout",
         "pack": "tww3_bai_enemy_layout.pack",
@@ -104,6 +79,14 @@ TARGETS = {
         "folder": "tww3_bai",
         "scenario": "manual_hamlet.xml",
         "packed_scenario": "manual_hamlet.xml",
+    },
+    "nn-arena": {
+        "entry": "entries.nn_arena",
+        "pack": "tww3_bai_nn_arena.pack",
+        "script": "tww3_bai_nn_arena",
+        "folder": "tww3_bai",
+        "scenario": "nn_arena.xml",
+        "packed_scenario": "nn_arena.xml",
     },
     "map-capture": {
         "entry": "entries.map_capture",
@@ -121,18 +104,8 @@ SCENARIO_LUA = b"load_script_libraries()\n"
 READOUT_MODEL_S = 196
 # move-probe: model time between legs (teleport, then the formation settles).
 MOVE_SETTLE_MS = 2000
-# formation-probe: least time per stage and its limit (entries/formation_probe.lua, 9 stages).
-FORMATION_SETTLE_MS = 3000
-FORMATION_STAGE_S = 20
 # enemy-layout: game time the game AI army is watched after deployment.
 ENEMY_LAYOUT_HOLD_S = 90
-# formation-probe approach: one manoeuvre at most, the whole approach at most.
-FORMATION_MANOEUVRE_S = 360
-FORMATION_APPROACH_S = 900
-# formation-probe: longest walk to the aligned place (walking pace 1.5 m/s).
-FORMATION_ALIGN_S = 120
-# formation-probe: the army stands this long after placing and must not move.
-FORMATION_HOLD_S = 60
 
 
 def load_move_plan(name):
@@ -172,10 +145,9 @@ def check_syntax(script):
     return True
 
 
-def build(target, run_config, dependencies=None, scenario=None, plain=False):
+def build(target, run_config, dependencies=None, scenario=None):
     """dependencies defaults to the required mods; every battle loads them.
-    scenario overrides the target's scenario file (a name in scenarios/).
-    plain: the battle only, without our script (the player's own test)."""
+    scenario overrides the target's scenario file (a name in scenarios/)."""
     if dependencies is None:
         dependencies = project.required_mods()
     spec = dict(TARGETS[target])
@@ -197,8 +169,6 @@ def build(target, run_config, dependencies=None, scenario=None, plain=False):
         f"script\\battle\\{folder}\\scenario.lua": SCENARIO_LUA,
         f"script\\battle\\{folder}\\{spec['packed_scenario']}": scenario_xml,
     }
-    if plain:
-        del files[f"script\\battle\\mod\\{spec['script']}.lua"]
     dependency_names = [d["pack"] for d in dependencies]
     blob = pfh5.pack_files(files, dependency_names)
     assert pfh5.read_pack(blob) == (files, tuple(dependency_names))
@@ -228,7 +198,6 @@ def build(target, run_config, dependencies=None, scenario=None, plain=False):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("target", choices=sorted(TARGETS))
-    parser.add_argument("--runs", type=int, choices=range(1, 11), default=3, help="duel: battles in a row")
     parser.add_argument("--speed", type=int, choices=(1, 3, 10, 20), default=20)
     parser.add_argument("--timeout", type=int, default=600, help="model seconds, 30..1800")
     parser.add_argument("--tick-ms", type=int, default=1000)
@@ -242,32 +211,17 @@ def main(argv=None):
                         help="map-capture: capture only this area")
     parser.add_argument("--plan", default="hamlet", help="move-probe: plan in config/move-plans/")
     parser.add_argument("--capture", type=Path, help="roster-capture: capture list instead of config/roster/capture.json")
-    parser.add_argument("--army", default="first_attack", help="formation-probe: army in config/armies/")
     parser.add_argument("--layout", default="balanced_5", help="enemy-layout: layout in config/armies/defender_layouts.json")
     parser.add_argument("--enemy-mode", choices=("native", "defend"), default="defend",
                         help="enemy-layout: game AI as set by the battle, or told to defend where it deployed")
-    parser.add_argument("--turn-test", action="store_true", help="formation-probe: also turn the archers right/left")
-    parser.add_argument("--plain", action="store_true",
-                        help="formation-probe: the battle only, without our script: the player deploys, the game's AI")
     parser.add_argument("--range-mode", choices=("fire_at_will", "attack", "damage"), default="fire_at_will",
                         help="archer-range: archers stand with fire at will (the target steps closer), attack it, "
                              "or shoot a fearless target at fixed distances until out of arrows (damage)")
     parser.add_argument("--damage-rotate", type=int, default=0,
                         help="archer-range --range-mode damage: shift the distances by this many lanes")
-    parser.add_argument("--facing-sweep", action="store_true",
-                        help="formation-probe: research — teleport one unit with a sweep of bearings and read its facing")
-    parser.add_argument("--fast", action="store_true",
-                        help="formation-probe --handover: keep --speed (research runs) instead of the player's pace")
-    parser.add_argument("--fire", action="store_true",
-                        help="formation-probe: our shooters fire at will; losses and arrows recorded while holding")
-    parser.add_argument("--handover", action="store_true",
-                        help="formation-probe: our AI places the army, then the player commands it; only recorded")
-    parser.add_argument("--defend-radius", type=int, default=300,
-                        help="formation-probe --handover --enemy-ai defend: the enemy's defence radius, m")
-    parser.add_argument("--enemy-ai", choices=("native", "defend"),
-                        help="formation-probe: the enemy to the game's AI, as the battle sets it or defending")
-    parser.add_argument("--engine-only", action="store_true",
-                        help="formation-probe: no queues past obstacles (apps.logistics off), the engine alone")
+    parser.add_argument("--own-ai", choices=("attack", "defend"), default="attack",
+                        help="nn-arena: CA's script AI planner attacks or defends with our side; "
+                             "the game's AI does the other")
     parser.add_argument("--features", action="store_true",
                         help="map-capture: also read objects and reachability after deployment")
     args = parser.parse_args(argv)
@@ -279,8 +233,7 @@ def main(argv=None):
         if args.window:
             run_config["window"] = dict(zip(("min_x", "max_x", "min_z", "max_z"), args.window))
     else:
-        run_config = {"runs": args.runs if args.target == "duel" else 1, "speed": args.speed,
-                      "timeout_ms": args.timeout * 1000, "tick_ms": args.tick_ms,
+        run_config = {"speed": args.speed, "timeout_ms": args.timeout * 1000, "tick_ms": args.tick_ms,
                       "scenario": TARGETS[args.target]["scenario"].removesuffix(".xml")}
         model_s = READOUT_MODEL_S if args.target == "unit-readout" else args.timeout
         stall_ms = int(args.stall_minutes * 60000)
@@ -296,40 +249,6 @@ def main(argv=None):
             capture, model_s = roster.run_config(spec, args.speed, MOVE_SETTLE_MS)
             run_config.update(capture)
             stall_ms = max(stall_ms, int((model_s + 120) * 1000))
-        if args.target == "formation-probe":
-            from tools.sim import formation as sim
-            army, _ = sim.load_army(args.army)
-            xml, probe_config, _ = sim.probe(army, args.speed, FORMATION_SETTLE_MS)
-            (project.SCENARIOS / "formation_probe.xml").write_text(xml, encoding="utf-8")
-            run_config.update(probe_config, stage_timeout_s=FORMATION_STAGE_S, army=args.army,
-                              hold_s=FORMATION_HOLD_S, turn_test=args.turn_test, align_timeout_s=FORMATION_ALIGN_S,
-                              manoeuvre_timeout_s=FORMATION_MANOEUVRE_S, approach_timeout_s=FORMATION_APPROACH_S)
-            if args.engine_only:
-                run_config["tree"] = dict(run_config.get("tree") or {}, logistics=False)
-            # placed + align + mask (same limit) + hold.
-            model_s = (FORMATION_STAGE_S + 2 * FORMATION_ALIGN_S + FORMATION_HOLD_S
-                       + (FORMATION_APPROACH_S if probe_config.get("approach") else 0)
-                       + (8 * FORMATION_STAGE_S if args.turn_test else 0) + 15)
-            stall_ms = max(stall_ms, int((model_s + 120) * 1000))
-            if args.enemy_ai and not args.handover:
-                # Our AI plays; the enemy is the game's AI (as the battle sets it, or told to defend).
-                run_config.update(enemy_ai=args.enemy_ai, defend_radius_m=args.defend_radius)
-            if args.fire:
-                run_config["fire"] = True
-            if args.handover:
-                # The player's test: our AI places the army and hands it over;
-                # the player's pace, an hour, nobody fighting does not end it.
-                run_config.update(handover=True, enemy_ai=args.enemy_ai, defend_radius_m=args.defend_radius)
-                if not args.fast:
-                    run_config.pop("speed")
-                model_s = None
-                stall_ms = max(stall_ms, 3600000)
-            if args.facing_sweep:
-                # Research: the facing the engine gives for commanded bearings
-                # (every 1 deg round the circle, every 0.1 deg around 90).
-                bearings = [float(b) for b in range(0, 360)] + [round(80 + 0.1 * i, 1) for i in range(201)]
-                run_config["facing_sweep"] = {"unit": "own_2", "ticks": 3, "bearings": bearings}
-                stall_ms = max(stall_ms, 3600000)
         if args.target == "archer-range":
             from tools import archer_range
             archer_range.write_scenario()
@@ -339,19 +258,23 @@ def main(argv=None):
         if args.target == "enemy-layout":
             from tools import enemy_layout
             enemy_layout.write_scenario(args.layout)
-            run_config.update(layout=args.layout, hold_s=ENEMY_LAYOUT_HOLD_S, enemy_mode=args.enemy_mode,
-                              picture_every=5, roster=enemy_layout.roster_inputs(args.layout))
+            run_config.update(layout=args.layout, hold_s=ENEMY_LAYOUT_HOLD_S, enemy_mode=args.enemy_mode)
             model_s = ENEMY_LAYOUT_HOLD_S + 10
             stall_ms = max(stall_ms, int((model_s + 120) * 1000))
+        if args.target == "nn-arena":
+            from tools.nn import scenario as nn_scenario
+            # The side that wins on timeout defends: ours when the planner defends,
+            # the game's AI when ours attacks.
+            enemy_role = {"attack": "defend", "defend": "attack"}[args.own_ai]
+            arena = nn_scenario.write_scenario("enemy" if enemy_role == "defend" else "own")
+            run_config.update(nn_scenario.run_config(arena), own_ai=args.own_ai, enemy_role=enemy_role)
         if args.target == "manual":
             # The player sets the pace: no forced speed, an hour by default.
             run_config.pop("speed")
             model_s = None
         run_config["deadline_s"] = args.deadline or (3600 if model_s is None else deadline_seconds(model_s, args.speed))
         run_config["stall_ms"] = stall_ms
-    if args.plain:
-        run_config["deadline_s"] = args.deadline or 3600
-    manifest = build(args.target, run_config, scenario=args.scenario, plain=args.plain)
+    manifest = build(args.target, run_config, scenario=args.scenario)
     print(json.dumps(manifest, indent=2))
     return 0
 
