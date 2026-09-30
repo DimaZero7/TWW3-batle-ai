@@ -1,0 +1,15 @@
+{
+ "_description": "Faction character: numbers the network gets as input (docs/en/training/model.md, docs/en/training/network.md). Values 0-1. PLACEHOLDERS: the project's author picks the final values by lore. The order of 'traits' is the order of the network's input; adding a trait changes the input size (a new model).",
+ "traits": ["formation", "synchrony", "aggression", "patience", "wilfulness"],
+ "_traits": {
+  "formation": "keep the line of units straight",
+  "synchrony": "start together (all engage within a few seconds)",
+  "aggression": "seek the fight",
+  "patience": "wait for the right moment",
+  "wilfulness": "random dashes of single units"
+ },
+ "factions": {
+  "wh_main_emp_empire": {"name": "Empire", "character": {"formation": 0.6, "synchrony": 0.5, "aggression": 0.5, "patience": 0.5, "wilfulness": 0.2}},
+  "wh2_main_skv_skaven": {"name": "Skaven", "character": {"formation": 0.3, "synchrony": 0.3, "aggression": 0.6, "patience": 0.3, "wilfulness": 0.5}}
+ }
+}

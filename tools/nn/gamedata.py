@@ -21,6 +21,9 @@ SLOTS = ("lord", "spear_1", "spear_2", "spear_3", "spear_4", "archer_1", "archer
 NAMES = tuple(f"own_{s}" for s in SLOTS) + tuple(f"enemy_{s}" for s in SLOTS)
 FLOAT_FIELDS = ("x", "z", "b", "men", "hp", "mp", "ms", "a", "k", "ox", "oz")
 BOOL_FIELDS = ("r", "s", "w", "m", "mv", "f", "fire", "lf", "rf", "bf")
+# `fat` is recorded as a string; the array holds its index here (NaN: unknown).
+FATIGUE_LEVELS = ("threshold_fresh", "threshold_active", "threshold_winded", "threshold_tired",
+                  "threshold_very_tired", "threshold_exhausted")
 
 
 @dataclass
@@ -30,7 +33,7 @@ class Battle:
     enemy_role: str
     result: dict
     t: np.ndarray
-    f: dict = field(default_factory=dict)       # field -> [T, N]
+    f: dict = field(default_factory=dict)       # field -> [T, N]; fat: the fatigue state's index
     target: np.ndarray = None                   # [T, N] index of the current target (-1: none)
     arena: str = "arena"                        # config/nn/arena.json, or a name in config/nn/arenas.json
     names: tuple = NAMES                        # [N] script names: side 1's units, then side 2's
@@ -62,6 +65,8 @@ def load(run_dir):
     t = np.array([s["t"] / 1000 for s in samples])
     arrays = {k: np.full((T, N), np.nan) for k in FLOAT_FIELDS}
     arrays.update({k: np.zeros((T, N), dtype=bool) for k in BOOL_FIELDS})
+    arrays["fat"] = np.full((T, N), np.nan)
+    fatigue = {name: float(i) for i, name in enumerate(FATIGUE_LEVELS)}
     target = np.full((T, N), -1, dtype=int)
     for ti, s in enumerate(samples):
         for u in s["units"]:
@@ -73,6 +78,7 @@ def load(run_dir):
             for k in BOOL_FIELDS:
                 arrays[k][ti, i] = bool(u.get(k))
             target[ti, i] = index.get(u.get("t") or "", -1)
+            arrays["fat"][ti, i] = fatigue.get(u.get("fat"), np.nan)
     return Battle(run=run_dir.name, own_ai=cfg.get("own_ai", "?"), enemy_role=cfg.get("enemy_role", "?"),
                   result=result, t=t, f=arrays, target=target, arena=cfg.get("arena", "arena"),
                   names=names, keys=keys, side=side)

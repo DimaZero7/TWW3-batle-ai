@@ -1,0 +1,209 @@
+"""The simulator's state layout: the single source of truth (docs/en/training/simulator.md).
+
+A batch of B battles, N unit slots each. A slot is one unit of either side; `side` [B, N] says
+whose (1 or 2, 0 = an empty slot). Layout the simulator builds: side 1 in slots [0, H), side 2
+in [H, 2H), H = N // 2; a side's lord (if any) is its first slot. Everything goes by `side`, so
+other layouts work too; only own_first() assumes this one.
+
+Three groups of per-unit tensors, all [B, N]:
+
+* OBSERVED - the fields and names of the recorded `nn_sample` rows (tools/nn/gamedata.py,
+  docs/en/training/README.md "What a recording holds"), so recorded battles and the simulator
+  feed the network the same way. `target` is the recording's `t` (current target, a slot index,
+  -1 none; as gamedata.Battle.target), `fat` the fatigue state as a number (FATIGUE_LEVELS)
+  instead of its string; the battle time is `t` [B] (s), as gamedata.Battle.t.
+* STATIC - the unit passport (config/nn/units.json) and the unit's place, fixed for the battle.
+* INTERNAL - what the simulator keeps for itself (morale points, fatigue points, timers).
+
+Names are importable without torch; the tensors need it.
+"""
+from dataclasses import dataclass, field
+
+try:
+    import torch
+except ImportError:          # the layout (names) is importable without torch
+    torch = None
+
+# Fatigue states in order, as the game names them (`fat` in recordings; `fat` here is the index).
+FATIGUE_LEVELS = ("threshold_fresh", "threshold_active", "threshold_winded", "threshold_tired",
+                  "threshold_very_tired", "threshold_exhausted")
+# MoraleState (`ms`) as recorded: 1 eager ... 5 wavering, 6 routing, 7 shattered.
+MORALE_STATES = {1: "eager", 2: "confident", 3: "steady", 4: "shaken", 5: "wavering", 6: "routing",
+                 7: "shattered"}
+
+# name -> (dtype, meaning). dtype: "f" float32, "b" bool, "i" int64.
+OBSERVED = {
+    "x": ("f", "position east, m (map centre 0)"),
+    "z": ("f", "position north, m"),
+    "b": ("f", "bearing, degrees: facing (sin b, cos b) in (x, z); 90 = east"),
+    "men": ("f", "men alive"),
+    "hp": ("f", "share of health left, 0-1"),
+    "mp": ("f", "MoralePercent: morale points / leadership; routs at 0; may be below 0 or above 1"),
+    "ms": ("f", "MoraleState 1-7 (MORALE_STATES)"),
+    "r": ("b", "routing (shattered units too)"),
+    "s": ("b", "shattered"),
+    "w": ("b", "wavering"),
+    "m": ("b", "in melee"),
+    "mv": ("b", "moving"),
+    "f": ("b", "running"),
+    "a": ("f", "projectiles left, whole unit"),
+    "fire": ("b", "firing missiles"),
+    "target": ("i", "current target: slot of the enemy fought or shot at, -1 none (recording's t)"),
+    "fat": ("f", "fatigue state 0-5 (FATIGUE_LEVELS)"),
+    "k": ("f", "kills: enemy men killed"),
+    "ox": ("f", "the order's point x, m (own position when holding)"),
+    "oz": ("f", "the order's point z, m"),
+    "lf": ("b", "an enemy threatens the left flank"),
+    "rf": ("b", "an enemy threatens the right flank"),
+    "bf": ("b", "an enemy threatens the rear"),
+    "vis": ("b", "visible to the other side"),
+}
+
+STATIC = {
+    "side": ("i", "1 or 2; 0 = empty slot"),
+    "lord": ("b", "the side's general"),
+    "men0": ("f", "men at the start"),
+    "hp_man": ("f", "health of a man"),
+    "hp0": ("f", "health of the unit at the start"),
+    "mass": ("f", "a man's mass"),
+    "radius": ("f", "a man's radius, m"),
+    "width": ("f", "frontage at the start, m"),
+    "walk": ("f", "walk speed, m/s"),
+    "run": ("f", "run speed, m/s"),
+    "charge_speed": ("f", "charge speed, m/s"),
+    "accel": ("f", "acceleration, m/s2"),
+    "decel": ("f", "deceleration, m/s2"),
+    "attack": ("f", "melee attack"),
+    "defence": ("f", "melee defence"),
+    "charge_bonus": ("f", "charge bonus"),
+    "damage": ("f", "melee weapon damage (base)"),
+    "ap_damage": ("f", "melee weapon armour-piercing damage"),
+    "bonus_v_large": ("f", "melee bonus against large"),
+    "bonus_v_inf": ("f", "melee bonus against infantry"),
+    "interval": ("f", "time between a man's blows, s"),
+    "splash": ("f", "targets per blow (hits several)"),
+    "armour": ("f", "armour"),
+    "shield": ("f", "shield: chance to block a projectile from the front, 0-1"),
+    "leadership": ("f", "leadership"),
+    "resist_missile": ("f", "missile resistance, 0-1"),
+    "resist_physical": ("f", "physical resistance, 0-1"),
+    "large": ("b", "size class above small"),
+    "expendable": ("b", "attribute expendable: its rout does not scare others"),
+    "encourages": ("b", "attribute encourages (lords)"),
+    "ammo0": ("f", "projectiles of the whole unit at the start"),
+    "range": ("f", "missile range, m (0 = no missile)"),
+    "reload": ("f", "reload, s (measured where known, config/nn/sim.json)"),
+    "m_damage": ("f", "projectile damage (base)"),
+    "m_ap": ("f", "projectile armour-piercing damage"),
+    "hit_rate": ("f", "projectile hit rate at the edge of range (config/nn/sim.json)"),
+    "aim_s": ("f", "first shot after halting, s (config/nn/sim.json)"),
+    "morale_bonus": ("f", "morale points at the start beyond leadership (config/nn/sim.json)"),
+    "cost": ("f", "multiplayer cost"),
+}
+
+INTERNAL = {
+    "vx": ("f", "velocity x, m/s"),
+    "vz": ("f", "velocity z, m/s"),
+    "hp_abs": ("f", "health left, HP"),
+    "morale": ("f", "morale points"),
+    "fatigue": ("f", "fatigue points"),
+    "recent": ("f", "HP lost recently (decaying sum)"),
+    "contact_s": ("f", "seconds in melee since the contact began"),
+    "charge": ("f", "charge at the contact, 0-1 (1 = hit at full run)"),
+    "aim": ("f", "seconds standing still able to shoot"),
+    "shots": ("f", "fractional shots carried to the next step"),
+    "rout_count": ("f", "times routed"),
+    "rout_s": ("f", "seconds since the rout began"),
+    "rally_s": ("f", "seconds since the last rally"),
+    "flank_hit": ("f", "worst direction attacked from now: 0 front, 1 flank, 2 rear"),
+    "under_fire_s": ("f", "seconds since last hit by a projectile"),
+    "dealt": ("f", "HP dealt in melee recently (decaying)"),
+    "taken": ("f", "HP taken in melee recently (decaying)"),
+    "gone": ("b", "left the map (routed off it)"),
+    "order_kind": ("i", "the order in force (tools/nn/sim/orders.py)"),
+    "order_target": ("i", "its target slot"),
+    "order_run": ("b", "its run flag"),
+}
+
+GROUPS = {"observed": OBSERVED, "static": STATIC, "internal": INTERNAL}
+
+
+def _dtype(code):
+    return {"f": torch.float32, "b": torch.bool, "i": torch.int64}[code]
+
+
+@dataclass
+class State:
+    """A batch of battles. u: every per-unit tensor [B, N] by name (OBSERVED, STATIC, INTERNAL);
+    t: battle time [B], s; attacker [B] (1 or 2); done [B]; winner [B] (0 none yet, 1 or 2);
+    lord_dead_s [B, 2]: seconds since side 1's / side 2's lord died (-1: alive or none);
+    bounds: the map's half-size, m (square, centre 0); keys [B][N] unit keys ("" empty slot)."""
+    u: dict
+    t: "torch.Tensor"
+    attacker: "torch.Tensor"
+    done: "torch.Tensor"
+    winner: "torch.Tensor"
+    lord_dead_s: "torch.Tensor"
+    bounds: float = 1020.0
+    keys: list = field(default_factory=list)
+
+    @property
+    def B(self):
+        return self.t.shape[0]
+
+    @property
+    def N(self):
+        return self.u["side"].shape[1]
+
+    @property
+    def device(self):
+        return self.t.device
+
+    def __getitem__(self, name):
+        return self.u[name]
+
+    def observation(self):
+        """The contract with the network (tools/nn/model/observation.py): the OBSERVED tensors
+        [B, N], `side` [B, N] and `t` [B] (s)."""
+        out = {k: self.u[k] for k in OBSERVED}
+        out["side"] = self.u["side"]
+        out["t"] = self.t
+        return out
+
+    def clone(self):
+        return State({k: v.clone() for k, v in self.u.items()}, self.t.clone(), self.attacker.clone(),
+                     self.done.clone(), self.winner.clone(), self.lord_dead_s.clone(), self.bounds,
+                     [list(r) for r in self.keys])
+
+
+def empty(B, N, device="cpu"):
+    """B battles with N empty slots (side 0); tools/nn/sim/scenario.py fills them."""
+    u = {}
+    for group in GROUPS.values():
+        for name, (code, _) in group.items():
+            u[name] = torch.zeros((B, N), dtype=_dtype(code), device=device)
+    u["target"].fill_(-1)
+    u["order_target"].fill_(-1)
+    u["vis"].fill_(True)
+    zeros = torch.zeros(B, device=device)
+    return State(u=u, t=zeros.clone(), attacker=torch.ones(B, dtype=torch.int64, device=device),
+                 done=torch.zeros(B, dtype=torch.bool, device=device),
+                 winner=torch.zeros(B, dtype=torch.int64, device=device),
+                 lord_dead_s=torch.full((B, 2), -1.0, device=device), keys=[[""] * N for _ in range(B)])
+
+
+def own_first(x, side):
+    """x [B, N, ...] in the simulator's layout (side 1's half, then side 2's) seen from `side`:
+    for side 2 the halves swap, so the side's own units come first."""
+    if side == 1:
+        return x
+    H = x.shape[1] // 2
+    return torch.cat([x[:, H:], x[:, :H]], dim=1)
+
+
+def slot_from_own_first(index, side, N):
+    """A slot index in own_first order -> the simulator's slot (-1 stays -1)."""
+    if side == 1:
+        return index
+    H = N // 2
+    return torch.where(index < 0, index, (index + H) % N)

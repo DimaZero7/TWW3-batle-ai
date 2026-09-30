@@ -1,0 +1,61 @@
+{
+  "_description": "Battle simulator v1 (tools/nn/sim, docs/en/training/simulator.md): the numbers that are neither in a unit passport (config/nn/units.json) nor in the game's rules (config/nn/game_rules.json). Each is measured in the game or calibrated to a measurement (docs/en/training/measurements.md); `why` says which. Written by hand; python -m tools.nn.sim.check compares the simulator with the game.",
+  "step_s": {"value": 0.5, "why": "morale rises 2 points a second before contact in every recording (+0.057 MoralePercent/s at leadership 35 ... +0.029 at 70) = one point (minimium_increment_update_per_tick) per 0.5 s tick"},
+  "battle_limit_s": {"value": 3600, "why": "network plan: 60 minutes, the attacker loses on time"},
+  "map_half_m": {"value": 1020, "why": "measured: routing units leave the map at |x| or |z| = 1020 m (Crossroads flat, 28 runs)"},
+  "formation": {
+    "spacing_m": 1.5,
+    "why": "arena spearmen: 120 men, width 30 m, rank_depth 6 -> 20 files 1.5 m apart; ranks the same. Centre distance at first contact in the pairs (7.5-12.8 m) matches the depths this gives"
+  },
+  "contact": {
+    "reach_m": 1.0,
+    "hold_m": 2.0,
+    "lord_max_attackers": 8,
+    "front_deg": 60,
+    "rear_deg": 120,
+    "why": "reach: pairs touch when the formations' edges meet (centre distance 10.6-12.8 m for spearmen against slaves, depths 9 and 13.5 m). lord_max_attackers: melee.md (up to ~8 reach a lord). Front = within 60 deg of the facing (shield_defence_angle_melee 60), rear = beyond 120 deg"
+  },
+  "melee": {
+    "hit_slope": 0.1,
+    "flank_slope": 1.0,
+    "fighting_files": 0.75,
+    "impact": 2.5,
+    "ramp_s": 20,
+    "why": "calibrated on the four melee pairs (tools/nn/sim/check.py). The database rule hit = 35 + attack - defence does not fit: the losses of all four pairs and both lords need about the same 30-38 % whatever attack - defence is (from -35 to +31); hit_slope scales attack - defence (1 = the database rule). fighting_files: men striking = this share of the files in contact (0.75 x 20 = 15 of a 30 m front). impact: extra damage of a charging unit in the first 13 s (charge_decay_duration), times the charge factor; fitted to the HP lost in the first 15 s of the pairs"
+  },
+  "kills": {
+    "exponent": 0.5,
+    "why": "men lost per HP lost: blows that do not kill wound; men share = max(1 - g (1 - hp share), hp share), g = (hits to kill)^-exponent; fitted to men against health in the pairs (at half health: slaves 0.6 of men, spearmen 0.7-0.78; lords kill whole men: 1)"
+  },
+  "missile": {
+    "reload_s": {"arrow": 11.0, "sling": 11.5},
+    "reload_scale_other": 1.2,
+    "hit_rate": {"arrow": 0.42, "sling": 0.47},
+    "hit_rate_other": 0.445,
+    "aim_s": {"arrow": 3.3, "sling": 4.3},
+    "aim_s_other": 3.8,
+    "distance_factor": [[70, 1.29], [90, 1.12], [105, 1.0], [120, 1.0]],
+    "single_entity_factor": 0.9,
+    "why": "measured (measurements.md, shooting at a unit that stands): reload in practice 11.0 s arrows (passport 10) and 11.5 s sling (passport 9); hit rate at the edge of range 0.42 and 0.47; first shot 3.3 and 4.3 s after halting. Other projectiles: the mean, reload x1.2 of the passport. distance_factor: HP per arrow against the distance, relative to 105-130 m, from the range test (28.09.2026, standing spearmen: c = 13.4 at 70 m, 11.6 at 90 m, 9.5-10.4 at 105-120 m), held below 70 m; the arena's 34 m (~25 HP) and 52 m (~18 HP) are left out: they exceed or reach the arrow's whole damage (19), so melee losses are mixed in. single_entity_factor: HP a lord loses per projectile aimed at him out of melee, against the unit rule with his armour, shield (by the shooter's side) and resistance: 1.03 the General by arrows, 0.77 by sling, 0.67 the Warlord by arrows, 0.9 overall (26.5k shots, 18 mirror and 10 Empire-Skaven battles); this is higher than the 0.02-0.1 of the spearmen's damage in missile-damage.md"
+  },
+  "morale": {
+    "faction_bonus": {"wh2_main_skv_skaven": 6, "wh_main_emp_empire": 0},
+    "recent_s": 30,
+    "recent_of_current": false,
+    "combat_ratio": {"slightly": 1.5, "yes": 2.5, "significantly": 4},
+    "rally_mp": 0.23,
+    "rally_rate": 2.0,
+    "rally_free_m": 90,
+    "rout_floor_mp": -0.3,
+    "rout_speed": 0.9,
+    "why": "faction_bonus: before contact Skaven units stand 6 points higher than the Empire's in the same place (slaves, clanrats, slingers; pairs, shooting, whole battles). recent_s / recent_of_current: the window of 'recent casualties' (the database gives the penalties, not the window) and whether its share is of the health left; calibrated on the waver and rout times of the pairs and the shooting. combat_ratio: melee HP dealt / taken for winning slightly, winning, significantly (the database gives only the points). rally_mp: a routing unit rallies at MoralePercent ~0.23 (morale.md, median 0.22 at 365 rallies). rally_free_m: no standing enemy that near (at 365 rallies of the mirror and Empire-Skaven battles the nearest standing enemy was 91 m or more in 90 %). rally_rate: points a second a routing unit regains while free, calibrated to the rallies of the whole battles (median 44 s). rout_floor_mp: where morale stands at most when the rout begins (recorded MoralePercent at the rout: median -0.03, 10 % below -0.17). rout_speed: a routing unit runs at this share of its run speed (median of the recorded routing speed: Empire units 0.80-0.86, Skaven 0.85-0.96)"
+  },
+  "fatigue": {
+    "per_second": 5,
+    "why": "the database gives points per activity but not the time; regressing the recorded fatigue states (18 mirror battles, 1315 transitions) gives 5.0x a second for melee, 4.8x for shooting, 6.2x for running"
+  },
+  "threat": {
+    "range_m": 60,
+    "why": "lf / rf / bf: a non-routing enemy within this distance in the left, right or rear sector; not calibrated"
+  }
+}

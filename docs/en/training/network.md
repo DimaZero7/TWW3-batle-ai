@@ -39,6 +39,8 @@ decision of a network with one attention layer at 7 vs 7 units and ~20 ms at 20 
 
 ## Network design
 
+The inputs and the layers in code, with sizes and timings: [inputs and model](model.md).
+
 ```
 every unit (own and enemy) → features: position, health, morale, fatigue, arrows
    + stats from the game's database (leadership, speed, charge, armour, range, reload)
@@ -162,6 +164,8 @@ The check needs two computers or two Steam accounts.
 
 1. **A new simulator** from the [game's database](../game/database.md) rules, checked
    against the recorded battles ([data](README.md)). Without it there is no training.
+   Version 1 is built: [battle simulator](simulator.md) (step 1 — [unit passports](units.md),
+   step 2 — [measurements](measurements.md)).
 2. Optionally, a warm start on the recorded battles of the game's AI. It takes away
    the independence of the check against the game's AI (see "Readiness"), so by
    default we skip it.

@@ -5,7 +5,7 @@
 Later we want to train a neural network from scratch. The project has no
 network of its own now. This page says what data can already be collected and
 how to use it. What the network itself will be, where it runs and when it is
-ready: [network model](network.md).
+ready: [network model](network.md). Its inputs and layers in code: [inputs and model](model.md).
 
 ```mermaid
 flowchart LR
@@ -152,6 +152,10 @@ shooting of the seven v1 units (Empire and Skaven), checked against their cards 
 Numbers from battles to check the simulator against — [measurements in the game](measurements.md)
 (`python -m tools.nn.measure` → `build/nn-measure/targets.json`): melee one against one,
 shooting at a unit that stands, whole battles of the Empire against the Skaven.
+
+The simulator the network will train in — [battle simulator](simulator.md)
+(`tools/nn/sim/`, `config/nn/sim.json`, `python -m tools.nn.sim.check`): thousands of battles
+at once on the GPU, checked against these measurements and the recorded battles.
 
 What is known about the mechanics:
 [morale](../game/units/morale.md) ·
