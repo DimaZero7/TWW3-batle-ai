@@ -32,17 +32,18 @@ class Brain:
         self.battle, self.memory, self.h = None, None, None
 
     def decide(self, doc):
-        """-> (orders list, think ms) for one state document."""
+        """-> (orders list, think ms, abilities to use [{unit, key}]) for one state document."""
         t0 = time.perf_counter()
         if self.battle is None or self.battle.batch != doc["batch"]:
             self.battle, self.memory, self.h = exchange.battle(doc), None, None
         b = self.battle
-        state = exchange.arrays(doc, b.names)
+        state = exchange.arrays(doc, b.names, b.slots)
         obs, self.memory = ob.observe(state, b.setup, SIDE, self.memory)
         orders, self.h, _, _ = decide.act(self.actor, obs, b.setup, self.h, self.greedy, self.temperature)
         cols = [getattr(orders, k)[0].cpu().numpy() for k in ("kind", "x", "z", "target", "run")]
         out = exchange.orders_list(b.names, b.side, *cols)
-        return out, (time.perf_counter() - t0) * 1000
+        uses = exchange.ability_list(b.names, b.side, orders.ability[0].cpu().numpy(), b.slots)
+        return out, (time.perf_counter() - t0) * 1000, uses
 
 
 def describe(orders, limit=4):
@@ -84,16 +85,18 @@ def run(game, brain, log=None, poll_s=0.005, idle_poll_s=0.1, exit_on_done=False
             if exit_on_done:
                 return
             continue
-        orders, think_ms = brain.decide(doc)
-        attempts = exchange.write_atomic(orders_path, exchange.orders_text(doc["batch"], doc["move"], orders, think_ms))
+        orders, think_ms, uses = brain.decide(doc)
+        attempts = exchange.write_atomic(orders_path, exchange.orders_text(doc["batch"], doc["move"], orders, think_ms,
+                                                                           uses))
         turn_ms = (time.perf_counter() - seen) * 1000
+        used = "".join(f" | ability {a['unit'].removeprefix('own_')} {a['key']}" for a in uses)
         out(f"move {doc['move']:4d}  t {doc.get('t', 0) / 1000:6.1f} s  think {think_ms:5.1f} ms  "
-            f"turn {turn_ms:5.1f} ms  | {exchange.summary(orders)} | {describe(orders)}")
+            f"turn {turn_ms:5.1f} ms  | {exchange.summary(orders)} | {describe(orders)}{used}")
         if log:
             with open(log, "a", encoding="utf-8", newline="\n") as f:
                 f.write(json.dumps({"batch": doc["batch"], "move": doc["move"], "t": doc.get("t"),
                                     "think_ms": round(think_ms, 2), "turn_ms": round(turn_ms, 2),
-                                    "write_attempts": attempts, "orders": orders}) + "\n")
+                                    "write_attempts": attempts, "orders": orders, "abilities": uses}) + "\n")
 
 
 def main(argv=None):

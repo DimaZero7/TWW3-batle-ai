@@ -233,6 +233,93 @@ class TestFunctions:
         assert torch.equal(st.u["morale"][0], st.u["leadership"][0])
 
 
+def pile():
+    """Side 1: four spearmen (slots 0-3) and archers (4); side 2: two spearmen (5, 6). Slots 0-2 attack
+    enemy 5; enemy 6 strikes unit 3 from behind; nothing else fights."""
+    spear, archers = "wh_main_emp_inf_spearmen_0", "wh2_dlc13_emp_inf_archers_0"
+    army = {"attacker": 1, "sides": {
+        1: {"faction": "wh_main_emp_empire", "units": [{"key": spear, "x": -20.0 * i, "z": 0, "b": 90} for i in range(4)]
+            + [{"key": archers, "x": -100, "z": 0, "b": 90}]},
+        2: {"faction": "wh_main_emp_empire", "units": [{"key": spear, "x": 30, "z": 0, "b": 270},
+                                                        {"key": spear, "x": -60, "z": 0, "b": 90}]}}}
+    st = scenario.build([army])
+    u = st.u
+    for i in range(3):
+        u["order_kind"][0, i], u["order_target"][0, i] = O.ATTACK, 5
+    # enemy 6 at x -60 faces east, unit 3 at x -60 faces east too: 6 strikes 3 in the rear
+    u["x"][0, 6] = -66.0
+    u["m"][0, 3] = u["m"][0, 6] = True
+    u["target"][0, 6], u["target"][0, 3] = 3, 6
+    u["flank_hit"][0, 3] = 2.0
+    return st
+
+
+class TestBehaviour:
+    def test_facts_see_a_rear_attack_a_flanked_unit_and_a_pile(self):
+        from tools.nn.train import behaviour
+        st = pile()
+        f = behaviour.facts(st, load())
+        assert bool(f["flank_attack"][0, 6]) and not bool(f["flank_attack"][0, 3])
+        assert bool(f["flanked"][0, 3]) and not bool(f["flanked"][0, 0])
+        assert f["crowded"][0, :3].tolist() == pytest.approx([1 / 3] * 3)          # 3 on one enemy: 1 too many
+        assert float(f["crowded"][0, 3:].abs().sum()) == 0.0
+        st.u["m"][0, 6] = False                                                     # no flanker: no pile
+        assert float(behaviour.facts(st, load())["crowded"].sum()) == 0.0
+
+    def test_a_melee_unit_standing_by_while_a_fellow_fights_is_idle(self):
+        from tools.nn.train import behaviour
+        st = pile()
+        assert not bool(behaviour.facts(st, load())["idle_near"].any())   # attack orders, the archers, too far
+        st.u["order_kind"][0, 2] = O.HOLD                                  # unit 2 (x -40) by unit 3 (x -60) in melee
+        f = behaviour.facts(st, load())
+        assert f["idle_near"][0].nonzero().flatten().tolist() == [2]
+
+    def test_a_missile_unit_in_melee_is_seen(self):
+        from tools.nn.train import behaviour
+        st = pile()
+        st.u["m"][0, 4] = True
+        f = behaviour.facts(st, load())
+        assert bool(f["missile_melee"][0, 4]) and not bool(f["missile_melee"][0, 3])
+
+    def test_the_unit_reward_counts_its_own_losses_and_the_shaped_terms(self):
+        from tools.nn.train import behaviour
+        st = pile()
+        p = load()
+        before = reward.unit_before(st.u)
+        st.u["hp_abs"][0, 3] -= 100.0
+        f = behaviour.facts(st, p)
+        w = reward.Weights(unit_hp=0.05, flanked=0.01, missile_melee=0.0, crowd=0.02, flank_attack=0.03, neighbour=0.0)
+        r = reward.unit_step(before, st, f, p, w)
+        hp1 = float((st.u["hp0"] * (st.u["side"] == 1)).sum())
+        assert float(r[0, 3]) == pytest.approx(-0.05 * 5 * 100.0 / hp1 - 0.01, rel=1e-4)
+        assert r[0, :3].tolist() == pytest.approx([-0.02 / 3] * 3)
+        assert float(r[0, 6]) == pytest.approx(0.03)
+        assert float(r[0, 4]) == 0.0
+        near = reward.unit_step(before, st, f, p, dataclasses.replace(w, neighbour=1.0, neighbour_m=25.0))
+        # unit 1 (x -20) has units 0 (x 0) and 2 (x -40) within 25 m
+        assert float(near[0, 1]) == pytest.approx(float(r[0, 1]) + (float(r[0, 0]) + float(r[0, 2])) / 2)
+
+    def test_gae_per_unit_stops_at_the_end_of_a_battle(self):
+        r = torch.tensor([[[1.0, 2.0]], [[0.0, 0.0]], [[2.0, 1.0]]])                # [T, R, N]
+        done = torch.tensor([[False], [True], [False]])
+        _, ret = ppo.gae(r, torch.zeros(3, 1, 2), done, torch.tensor([[10.0, 0.0]]), gamma=0.5, lam=1.0)
+        assert ret[:, 0, 0].tolist() == pytest.approx([1.0, 0.0, 7.0])
+        assert ret[:, 0, 1].tolist() == pytest.approx([2.0, 0.0, 1.0])
+
+    def test_per_unit_advantages_reach_the_policy_loss(self):
+        loss, _ = ppo.policy_loss(torch.zeros(1, 2), torch.zeros(1, 2), torch.tensor([[1.0, -1.0]]),
+                                  torch.tensor([[True, True]]), 0.2)
+        assert float(loss) == pytest.approx(0.0)
+
+    def test_the_critic_loads_a_checkpoint_from_before_the_per_unit_head(self):
+        _, c = nets()
+        state = {k: v for k, v in c.state_dict().items() if not k.startswith("unit_value.")}
+        fresh = critic.Critic(CFG).load(state)
+        assert float(fresh.unit_value[2].weight.detach().abs().sum()) == 0.0
+        with pytest.raises(RuntimeError):
+            critic.Critic(CFG).load({k: v for k, v in state.items() if not k.startswith("value.")})
+
+
 # --- level 2: properties ---
 
 class TestProperties:
@@ -384,9 +471,12 @@ class TestLoop:
         batch = rollout.collect(env, actor, crit, 3)
         assert batch["obs"]["tokens"].shape[:2] == (3, env.R)
         assert batch["lp"].shape == (3, env.R, env.N)
+        assert batch["unit_reward"].shape == batch["unit_value"].shape == (3, env.R, env.N)
+        assert batch["last_unit_value"].shape == (env.R, env.N)
         opt = torch.optim.Adam(list(actor.parameters()) + list(crit.parameters()), lr=1e-3)
-        st = ppo.update(actor, crit, opt, batch, dataclasses.replace(ppo.PPOConfig(), epochs=2, minibatch=6))
-        assert all(np.isfinite(v) for v in st.values())
+        st = ppo.update(actor, crit, opt, batch, dataclasses.replace(ppo.PPOConfig(), epochs=2, minibatch=6,
+                                                                     unit_credit=0.3))
+        assert all(np.isfinite(v) for v in st.values()) and "unit_reward" in st
         assert any(not torch.equal(a, b) for a, b in zip(before, actor.parameters()))
 
     def test_behaviour_cloning_learns_the_teachers_targets(self):
@@ -433,3 +523,58 @@ class TestLoop:
         assert past["roles"]["attack"]["games"] == 1 and past["roles"]["defend"]["wins"] == 1
         assert past["timeouts"] == 1.0
         assert sum(res["kinds"].values()) == pytest.approx(1.0)
+
+    def test_evaluation_of_several_opponents_in_one_batch_counts_them_apart(self):
+        actor, _ = nets()
+        res = evaluate.play(actor, opponents=("hold", "past"), per_scene=2, past=nets(1)[0], limit_s=2.0,
+                            scene_list=MIRROR, together=True)
+        hold, past = res["by_opponent"]["hold"], res["by_opponent"]["past"]
+        assert hold["games"] == 2 and hold["roles"]["attack"]["games"] == 2
+        assert past["roles"]["attack"]["games"] == 1 and past["roles"]["defend"]["games"] == 1
+        for o in (hold, past):
+            assert sum(o["kinds"].values()) == pytest.approx(1.0)
+            assert set(o["behaviour"]) >= {"missile_melee_s", "flanked_share", "crowding_share", "flank_attack_share",
+                                           "abilities_per_battle"}
+            assert "behaviour" in o["roles"]["attack"]
+
+
+class TestProtocol:
+    def test_the_gpu_lock_is_held_while_the_test_runs_and_freed_after_a_failure(self, tmp_path):
+        from tools.nn.train import test5
+        lock = tmp_path / "gpu-train.lock"
+        with test5.gpu_lock("t", path=lock, poll_s=0.01):
+            assert lock.read_text(encoding="utf-8").startswith("t ")
+        assert not lock.exists()
+        with pytest.raises(ValueError):
+            with test5.gpu_lock("t", path=lock, poll_s=0.01):
+                raise ValueError
+        assert not lock.exists()
+
+    def test_the_gpu_lock_waits_for_the_other_holder(self, tmp_path):
+        import threading
+        import time
+        from tools.nn.train import test5
+        lock = tmp_path / "gpu-train.lock"
+        lock.write_text("other", encoding="utf-8")
+        threading.Timer(0.2, lock.unlink).start()
+        t = time.time()
+        with test5.gpu_lock("t", path=lock, poll_s=0.02):
+            assert time.time() - t >= 0.15
+
+    def test_a_job_started_right_after_a_release_lets_the_queue_go_first(self, tmp_path):
+        import time
+        from tools.nn.train import test5
+        lock = tmp_path / "gpu-train.lock"
+        with test5.gpu_lock("first", path=lock, poll_s=0.01, gap_s=0.3):
+            pass
+        assert lock.with_suffix(".released").read_text(encoding="utf-8").split()[1] == "first"
+        t = time.time()
+        with test5.gpu_lock("second", path=lock, poll_s=0.01, gap_s=0.3):
+            assert time.time() - t >= 0.2
+
+    def test_the_report_table_shows_before_and_after(self):
+        from tools.nn.train import test5
+        before = {"ai_like/attack": {"win": 0.5, "flanked_share": 0.3}, "ai_like/all": {"kind_attack": 0.5}}
+        after = {"ai_like/attack": {"win": 0.6, "flanked_share": 0.2}, "ai_like/all": {"kind_attack": 0.4}}
+        text = "\n".join(test5.table(before, after))
+        assert "0.500 → 0.600" in text and "0.300 → 0.200" in text and "0.50 → 0.40" in text

@@ -81,7 +81,7 @@ def load_critic(path, device="cpu"):
     if "critic" not in data:
         return None
     critic = model_critic.Critic(config_of(data))
-    critic.load_state_dict(data["critic"])
+    critic.load(data["critic"])
     return critic.to(device)
 
 

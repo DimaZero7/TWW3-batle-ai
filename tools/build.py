@@ -12,6 +12,7 @@ Usage:
     python -m tools.build nn-arena --arena pair_spear_v_slave --own-ai attack   # config/nn/arenas.json
     python -m tools.build nn-arena --own-ai net --speed 1   # the network commands our side (companion)
     python -m tools.build nn-arena --army-seed 1000900000 --own-role attack   # a generated battle, the network
+    python -m tools.build lord-swarm --repeats 2   # a lord swarmed by 1-4 units (tools/nn/lord_swarm.py)
 
 Output: build/<target>/ with the .pack, the bundled script and manifest.json.
 Install and launch with tools/launcher/launch.ps1.
@@ -91,6 +92,14 @@ TARGETS = {
         "scenario": "nn_arena.xml",
         "packed_scenario": "nn_arena.xml",
     },
+    "lord-swarm": {
+        "entry": "entries.lord_swarm",
+        "pack": "tww3_bai_lord_swarm.pack",
+        "script": "tww3_bai_lord_swarm",
+        "folder": "tww3_bai",
+        "scenario": "lord_swarm.xml",
+        "packed_scenario": "lord_swarm.xml",
+    },
     "map-capture": {
         "entry": "entries.map_capture",
         "pack": "tww3_bai_map_capture.pack",
@@ -111,6 +120,8 @@ MOVE_SETTLE_MS = 2000
 ENEMY_LAYOUT_HOLD_S = 90
 # nn-arena --own-ai net: how often the companion's orders file is read (model ms).
 NET_POLL_MS = 100
+# lord-swarm: ms between samples of the lords and their attackers.
+LORD_SWARM_TICK_MS = 200
 # nn-arena: the battle file's own time limit is past the script's (the script ends the battle first).
 TIMEOUT_MARGIN_S = 60
 
@@ -240,7 +251,7 @@ def main(argv=None):
     parser.add_argument("target", choices=sorted(TARGETS))
     parser.add_argument("--speed", type=int, choices=(1, 3, 10, 20), default=20)
     parser.add_argument("--timeout", type=int, default=600, help="model seconds, 30..3600")
-    parser.add_argument("--tick-ms", type=int, default=1000)
+    parser.add_argument("--tick-ms", type=int, help="ms between samples (default 1000; lord-swarm 200)")
     parser.add_argument("--step", type=int, choices=(1, 2, 3, 5), default=5, help="map-capture: cell size, m")
     parser.add_argument("--deadline", type=int, help="real seconds per battle before the script ends it "
                         "(default: from the scripted length and speed)")
@@ -276,6 +287,10 @@ def main(argv=None):
     parser.add_argument("--arena", default="arena",
                         help="nn-arena: 'arena' (config/nn/arena.json, the same army on both sides) "
                              "or a named arena in config/nn/arenas.json")
+    parser.add_argument("--repeats", type=int, default=2,
+                        help="lord-swarm: how many times each layout runs in the battle")
+    parser.add_argument("--swarm", dest="plan_swarm", choices=("infantry", "lords", "all"), default="infantry",
+                        help="lord-swarm: infantry around each lord, the other lord (with units) on him, or both")
     parser.add_argument("--features", action="store_true",
                         help="map-capture: also read objects and reachability after deployment")
     args = parser.parse_args(argv)
@@ -296,7 +311,8 @@ def main(argv=None):
             run_config["window"] = dict(zip(("min_x", "max_x", "min_z", "max_z"), args.window))
     else:
         scenario_file = None
-        run_config = {"speed": args.speed, "timeout_ms": args.timeout * 1000, "tick_ms": args.tick_ms,
+        tick_ms = args.tick_ms or (LORD_SWARM_TICK_MS if args.target == "lord-swarm" else 1000)
+        run_config = {"speed": args.speed, "timeout_ms": args.timeout * 1000, "tick_ms": tick_ms,
                       "scenario": TARGETS[args.target]["scenario"].removesuffix(".xml")}
         model_s = READOUT_MODEL_S if args.target == "unit-readout" else args.timeout
         stall_ms = int(args.stall_minutes * 60000)
@@ -326,6 +342,12 @@ def main(argv=None):
             stall_ms = max(stall_ms, int((model_s + 120) * 1000))
         if args.target == "nn-arena":
             scenario_file = nn_arena_config(args, run_config)
+        if args.target == "lord-swarm":
+            from tools.nn import lord_swarm
+            lord_swarm.write_scenario()
+            swarm, model_s = lord_swarm.run_config(args.repeats, plan=args.plan_swarm)
+            run_config.update(swarm)
+            stall_ms = max(stall_ms, int((model_s + 120) * 1000))
         if args.target == "manual":
             # The player sets the pace: no forced speed, an hour by default.
             run_config.pop("speed")

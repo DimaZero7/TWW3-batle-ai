@@ -117,6 +117,23 @@ archers' front and rear ranks and the target's nearest rank (from the soldiers),
 health. Analysis: `tools/analysis/archer_range.py`; results — [missile range](../game/units/missile-range.md)
 and [missile damage](../game/units/missile-damage.md).
 
+<a id="lord_swarm"></a>
+
+## lord_swarm — a lord surrounded by infantry
+
+Build: `python -m tools.build lord-swarm [--swarm infantry|lords|all] [--repeats N]`; the scenario
+`lord_swarm.xml` is written by `tools/nn/lord_swarm.py`. MP Crossroads (flat), two lanes 600 m
+apart: the Empire General attacked by Skaven clanrat spearmen and Stormvermin halberds, the
+Skaven Warlord by Empire spearmen and halberdiers. Both sides are held by script, fearless. A
+trial puts 1-4 attacking units 20 m around each lord (front, back, left, right) and orders them to
+attack him; `lords` sends the other lord in too (one lane at a time). A lane's trial ends 40 s after
+the lord's first contact; then every unit is healed and the next trial begins.
+
+Every 0.2 s `swarm_sample` per lane: the lord's and each attacker's health (CCO `HealthValue`),
+men, kills, melee flag, place; every 1 s `swarm_men`: the attackers' soldiers within 1.5-6 m of
+the lord (CCO `ManList` positions). Analysis: `python -m tools.nn.lord_swarm` (`--sim`: the
+simulator on the same trials); results — [a lord surrounded](../game/units/lord-swarm.md).
+
 <a id="enemy_layout"></a>
 
 ## enemy_layout — how the game AI deploys and stands

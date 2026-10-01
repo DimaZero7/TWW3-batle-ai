@@ -75,6 +75,36 @@ Orders are given through the verified recipes of [orders](orders.md):
 Every unit of our side is under script control (`take_control`) from the start of the battle. Until
 the first answer it stands and shoots at will.
 
+**Abilities.** The network decides itself when its lord uses an ability, like a player. An
+`ability <unit> <key>` line of the answer is used once, at once, beside the unit's order:
+
+- the unit must stand (not routing, shattered or dead) and `unit:can_perform_special_ability(key)`
+  must say yes; then `uc:perform_special_ability(key, unit)` — on the lord himself (self-cast:
+  the network is offered only abilities that need no target; the recipe verified in battle,
+  [commands](../game/units/commands.md));
+- each request is logged (`nn_ability`: `used`, `not_ready`, `down`, `unknown_unit`, `error`);
+- the state carries `abilities_used` (each ability's last use, battle ms) and, for every unit of
+  both sides, `fx`: the phases active on it now, as its card shows them (CCO
+  `ActiveEffectList.At(i).PhaseRecordContext.Key`, verified in battle, [states](../game/units/states.md)).
+  The companion counts the timers from the use and the passport (active for `active_s`, ready
+  again `recharge_s` later; `config/nn/abilities.json`) and trusts the card over the count: a use
+  whose phase is not on the lord 1.5 s later did not take (ready again). It shows an enemy ability
+  as active while its phase is on the unit and the unit is seen.
+- once per decision, changes only: `nn_ability_ready` (`can_perform_special_ability` of each own
+  active ability) and `nn_effects` (a unit's active phases).
+
+**In the game** (run `20261001-105336`, 01.10.2026: arena `whole_emp_v_skv`, ×3, 240 s of battle,
+Normal difficulty, the untrained network `build/nn-train/random.pt` with a fresh ability head):
+
+| What | Result |
+|---|---|
+| Uses | 6 asked, 6 `used`, 0 refused, no Lua errors: Stand Your Ground at 1.2, 111.2, 221.2 s; Foe Seeker at 2.1, 88.2, 176.2 s |
+| Our General's card (`fx`) | the phase appears by the next state (≤ 1 s) and is gone after 18 s (Stand Your Ground: 2.0 → 20.0 s) and 25 s (Foe Seeker: 3.0 → 28.0 s): the passports' `active_s` |
+| Recharge | the companion's count asked again at 86 s (Foe Seeker, passport 25 + 60) and 110 s (Stand Your Ground, 18 + 90) after the first use; every use took |
+| `can_perform_special_ability` | **true all battle**, active and recharging alike: it says the lord owns the ability, not that it is ready. So the bridge cannot refuse a use in recharge; the companion's count and the card decide readiness |
+| The enemy's cards | readable: Strength in Numbers shows on every Skaven unit from 1 s. The Warlord stood behind his army all battle and used nothing, so an enemy active ability was not seen |
+| Passives on the card | Hold the Line shows on the General; Single Entity and Scurry Away never show (conditional) |
+
 ## The files
 
 Both files are written to a temp file first (`.tmp`) and then renamed, so the reader never sees half a
@@ -93,7 +123,8 @@ companion then simply reads again when the JSON is not complete.
 | `attacker` | Side that attacks (2: the game's AI attacks) |
 | `factions` | `{own, enemy}` |
 | `decide_ms` | Time between decisions, ms |
-| `units` | Every unit: the fields of the recorded `nn_sample` ([nn_arena](entries.md#nn_arena)) plus `side`, `key` (unit key) and `v` (visible to the other side) |
+| `units` | Every unit: the fields of the recorded `nn_sample` ([nn_arena](entries.md#nn_arena)) plus `side`, `key` (unit key), `v` (visible to the other side) and `fx` (phase keys active on it; missing when the card cannot be read) |
+| `abilities_used` | `{unit: {ability key: battle ms of its last use by the bridge}}` (`{}` before any) |
 
 **Orders** `tww3_bai_nn_orders.txt` (companion → game), text, one line per unit:
 
@@ -107,20 +138,24 @@ unit own_spear_1 move -120.5 33.2 1
 unit own_spear_2 attack enemy_spear_3 0
 unit own_archer_1 withdraw -300.0 0.0 1
 unit own_archer_2 keep
+ability own_lord wh_main_character_abilities_stand_your_ground
 end
 ```
 
 `move` / `withdraw`: point x, z in metres and run 1 / 0; `attack`: the enemy's script name and run;
-`keep`: no new order (the network chose to go on with the one in force).
+`keep`: no new order (the network chose to go on with the one in force); `ability`: the unit and the
+ability key to use now (any number of lines; a file without them is as before, the format stays
+`tww3_bai_nn_orders 1`).
 Without the last line `end` the game takes nothing. A unit without a line keeps its order.
 
 ## services — pure rules
 
 | Function | What it does |
 |---|---|
-| `parse_orders(text)` | The orders file → `{move, batch, think_ms, orders}`, or `nil` and the reason (`incomplete`, `bad kind`…) |
+| `parse_orders(text)` | The orders file → `{move, batch, think_ms, orders, abilities}`, or `nil` and the reason (`incomplete`, `bad kind`, `ability without a unit or a key`…) |
 | `changed(old, new)` | Is the order different (kind, target, run, point further than `REPEAT_M` = 5 m) |
-| `state_document(meta, move, t, units, done)` | The state as a table for JSON |
+| `state_document(meta, move, t, units, done, used)` | The state as a table for JSON (`used` → `abilities_used`) |
+| `active_effects(read)` | The phase keys active on a unit from its card (`read(field)` → the CcoBattleUnit value), or `nil` when the list cannot be read |
 | `real_ms(a, b)` | Milliseconds between two `os.clock()` readings |
 | `fire_freely(me, target, range)` | Give an attack as fire at will: the target stands in melee within range |
 | `shooter_idle(row)` | A shooter stands idle: standing, not moving, not in melee, not firing, with ammunition |
@@ -134,7 +169,8 @@ Without the last line `end` the game takes nothing. A unit without a line keeps 
 ## adapter — the bridge
 
 `start(opts)` takes our units under control, removes the files of an earlier battle and returns
-`decide()`, `poll()`, `finish()`, `stats()`. The entry [nn_arena](entries.md#nn_arena) with
+`decide()`, `poll()`, `finish()`, `stats()`. `opts.cco(unit, field)` (optional) reads a unit's
+card: with it every row gets `fx`. The entry [nn_arena](entries.md#nn_arena) with
 `--own-ai net` calls them on its timers.
 
 ## Events
@@ -144,8 +180,11 @@ Without the last line `end` the game takes nothing. A unit without a line keeps 
 | `nn_orders` | `move`, `lag` (moves written since), `wait_model_ms` and `wait_real_ms` (from writing the state to giving the orders), `think_ms` (the network's time in the companion), `orders` (given: `u`, `k`, `x`, `z`, `tg`, `run`, `status`, `again` — the first order after a rally), `kept` (the same order again: not given), `keeps` (units told `keep`), `skipped` |
 | `nn_duty` | `u`, `action` (`free` — an attack on a target in melee given as fire at will, `release` — idle: to fire at will, `resume` — the ordered target again), `tg` |
 | `nn_miss` | `move` that got no answer by the next decision, `answered` |
-| `result` (added) | `nn_moves`, `nn_answered`, `nn_missed`, `nn_orders_given`, `nn_keeps`, `nn_bad_files`, `nn_write_mode`, `nn_regiven` (orders given after a rally), `nn_released`, `nn_resumed` |
+| `nn_ability` | `move`, `u`, `key`, `status`: `used`, `not_ready` (`can_perform_special_ability` said no: in the game only for an ability not owned), `down` (the unit is not standing), `unknown_unit` (not ours), `error` |
+| `nn_ability_ready` | `u`, `key`, `ready` (`can_perform_special_ability`), when it changes |
+| `nn_effects` | `u`, `fx` (the phases on the unit, or `unknown`), when they change |
+| `result` (added) | `nn_moves`, `nn_answered`, `nn_missed`, `nn_orders_given`, `nn_keeps`, `nn_bad_files`, `nn_write_mode`, `nn_regiven` (orders given after a rally), `nn_released`, `nn_resumed`, `nn_abilities_used`, `nn_abilities_refused` |
 
 Tests: `tests/apps/bridge/test_bridge.py` (the orders file as the game reads it, what counts as a
 new order, a shooter's duty), `tests/entries/test_entries.py` (`test_net_...`: state, answer, orders
-given, a miss, the last state; a ranged attack runs, a rout and a rally, a shooter released and taken back), `tests/tools/test_nn_companion.py` (the companion's side).
+given, a miss, the last state; a ranged attack runs, a rout and a rally, a shooter released and taken back), `tests/entries/test_bridge_abilities.py` (ability lines, the card's active effects, a use once, refused when not ready, down or not ours; the state's uses), `tests/tools/test_nn_companion.py` (the companion's side, the ability timers and lines).

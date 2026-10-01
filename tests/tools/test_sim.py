@@ -88,7 +88,8 @@ class TestFunctions:
         st = S.empty(2, 6)
         assert all(v.shape == (2, 6) for v in st.u.values())
         obs = st.observation()
-        assert set(obs) == set(S.OBSERVED) | {"side", "t"} and obs["t"].shape == (2,)
+        timers = {f"ab{k}_{t}" for k in range(3) for t in ("on", "cd")}
+        assert set(obs) == set(S.OBSERVED) | {"side", "t"} | timers and obs["t"].shape == (2,)
         x = torch.arange(6).repeat(2, 1)
         assert S.own_first(x, 2)[0].tolist() == [3, 4, 5, 0, 1, 2]
         assert S.slot_from_own_first(torch.tensor([0, 4, -1]), 2, 6).tolist() == [3, 1, -1]
@@ -150,15 +151,63 @@ class TestMelee:
         rate, _, sector, _ = melee.strikes(st.u, pw, contact, p, z, z + 100)
         assert int(sector[0, 0, 1]) == 2 and float(rate[0, 0, 1]) > float(front)
 
-    def test_at_most_eight_reach_a_lord(self):
+    def test_at_most_the_cap_reach_a_lord(self):
         st = face_off(SPEAR, GENERAL)
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
         contact = pw["enemy"] & (pw["gap"] <= 1.0)
         z = torch.zeros_like(st.u["men"])
         rate, hit, _, _ = melee.strikes(st.u, pw, contact, P, z, z + 100)
         p = melee.hit_chance(torch.tensor(20.0), torch.tensor(45.0), P.sim["melee"]["hit_slope"])
-        eight = 8 * float(p) * float(hit[0, 0, 1]) / 5.7
-        assert float(rate[0, 0, 1]) == pytest.approx(eight, rel=1e-4)
+        cap = P.sim["contact"]["lord_max_attackers"]
+        assert float(rate[0, 0, 1]) == pytest.approx(cap * float(p) * float(hit[0, 0, 1]) / 5.7, rel=1e-4)
+
+    @staticmethod
+    def surrounded(n, rival=False):
+        """A General at the centre, n spear units touching him from front, back, left, right
+        (and the Warlord on him too); every enemy in contact with him."""
+        places = [(0, 6, 180), (0, -6, 0), (-6, 0, 90), (6, 0, 270)][:n]
+        enemies = [(SPEAR, x, z, b) for x, z, b in places]
+        if rival:
+            enemies = [("wh2_main_skv_cha_warlord_0", 0, 1, 180, True)] + enemies
+        st = scenario.build([army([(GENERAL, 0, 0, 0, True)], enemies, factions=("wh2_main_skv_skaven",
+                                                                                 "wh_main_emp_empire"))], P)
+        pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
+        contact = pw["enemy"] & (torch.arange(st.N)[None, None, :] == 0)
+        z = torch.zeros_like(st.u["men"])
+        return st, pw, contact, z
+
+    def test_more_units_round_a_lord_share_the_same_men(self):
+        # The lord swarm probe: 1-4 spear units take from a lord the same HP/s.
+        lost = []
+        for n in (1, 2, 4):
+            st, pw, contact, z = self.surrounded(n)
+            rate, _, _, F = melee.strikes(st.u, pw, contact, P, z, z + 100)
+            lost.append(float(rate[0, :, 0].sum()))
+            assert float(F[0, :, 0].sum()) == pytest.approx(P.sim["contact"]["lord_max_attackers"], rel=1e-4)
+        assert lost[1] == pytest.approx(lost[0], rel=0.01) and lost[2] == pytest.approx(lost[0], rel=0.01)
+
+    def test_a_unit_attacking_another_enemy_barely_strikes_a_lord_it_touches(self):
+        st, pw, contact, z = self.surrounded(2)
+        H = st.N // 2
+        full = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, H, 0])
+        st.u["order_kind"][0, H] = O.ATTACK
+        st.u["order_target"][0, H] = 1          # told to attack another slot, touching the lord
+        busy = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, H, 0])
+        assert busy == pytest.approx(full * P.sim["contact"]["lord_incidental"], rel=1e-4)
+
+    def test_the_enemy_lord_keeps_his_blow_and_the_infantry_counts_less(self):
+        st, pw, contact, z = self.surrounded(0, rival=True)
+        alone = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, :, 0].sum())
+        st, pw, contact, z = self.surrounded(3, rival=True)
+        rate = melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, :, 0]
+        H = st.N // 2
+        assert float(rate[H]) == pytest.approx(alone, rel=1e-4)
+        st3, pw3, c3, z3 = self.surrounded(3)
+        infantry = float(melee.strikes(st3.u, pw3, c3, P, z3, z3 + 100)[0][0, :, 0].sum())
+        k = P.sim["contact"]["lord_rival_others"]
+        # The rival takes one of the cap's places: the infantry share the rest.
+        cap = P.sim["contact"]["lord_max_attackers"]
+        assert float(rate.sum()) - alone == pytest.approx(k * infantry * (cap - 1) / cap, rel=1e-3)
 
     def test_a_charge_hits_harder(self):
         st = face_off(SPEAR, SLAVE)
@@ -418,27 +467,101 @@ class TestFlanksAndRoles:
 
 
 class TestAbilities:
-    def test_only_the_game_ai_fires_actives_and_passives_hold_for_all(self):
-        from tools.nn.sim import abilities
+    """Numbers from the ability passports (config/nn/abilities.json); the game's AI fires by its rule,
+    the network by order (Orders.ability); passives hold for all."""
+    WARLORD = "wh2_main_skv_cha_warlord_0"
+
+    def lords(self):
         # side 1 (the network): our General and spearmen; side 2 (the game's AI): the Warlord touching the General.
-        st = scenario.build([army([(GENERAL, 0, 0, 90), (SPEAR, 0, 20, 90)],
-                                  [("wh2_main_skv_cha_warlord_0", 2, 0, 270)])], P)
-        H = st.N // 2
+        st = scenario.build([army([(GENERAL, 0, 0, 90), (SPEAR, 0, 20, 90)], [(self.WARLORD, 2, 0, 270)])], P)
         u = st.u
-        assert not bool(u["ai"][0, 0]) and bool(u["ai"][0, H])
         pw = geometry.pairwise(u, 1.5)
         same = u["side"][:, :, None] == u["side"][:, None, :]
         standing = u["men"] > 0
         engaged = torch.zeros_like(standing)
+        return st, st.N // 2, pw["dist"], same, standing, engaged
+
+    def test_the_slots_and_the_numbers_are_the_passports(self):
+        from tools.nn.sim import abilities
+        names = abilities.keys(P)
+        slots = lambda key: [names[i] if i >= 0 else "" for i in abilities.slots_of(P, key)]
+        assert slots(GENERAL) == ["wh_main_character_abilities_foe_seeker",
+                                  "wh_main_character_abilities_stand_your_ground", "wh_main_lord_passive_hold_the_line"]
+        assert slots(self.WARLORD) == ["wh2_main_character_abilities_verminous_valour",
+                                       "wh_main_character_abilities_deadly_onslaught", "wh_main_character_abilities_rally"]
+        assert slots(SPEAR) == ["", "", ""]
+        r = dict(zip(abilities.COLS, abilities.row(P, "wh_main_character_abilities_stand_your_ground")))
+        assert (r["active_s"], r["recharge_s"], r["range_m"], r["self_cast"], r["modelled"]) == (18, 90, 35, 1, 1)
+        assert (r["self_defence"], r["friends_defence"], r["friends_leadership"], r["enemies_defence"]) == (24, 24, 16, 0)
+        r = dict(zip(abilities.COLS, abilities.row(P, "wh_main_character_abilities_foe_seeker")))
+        assert (r["self_speed"], r["self_charge_speed"], r["friends_speed"]) == (1.25, 1.25, 1.0)
+        r = dict(zip(abilities.COLS, abilities.row(P, "wh3_main_unit_passive_single_entity")))
+        assert r["passive"] == 1 and r["modelled"] == 0          # shown to the network, no effect here
+
+    def test_the_game_ai_fires_by_its_rule_and_passives_hold_for_all(self):
+        from tools.nn.sim import abilities
+        st, H, dist, same, standing, engaged = self.lords()
+        u = st.u
+        assert not bool(u["ai"][0, 0]) and bool(u["ai"][0, H])
         engaged[0, 0] = engaged[0, H] = True
-        dmg, defence, run = float(u["damage"][0, H]), float(u["defence"][0, 1]), float(u["run"][0, H])
-        old = abilities.apply(u, P, 0.5, standing, engaged, pw["dist"], same)
+        dmg, ap, defence, run = (float(u[k][0, i]) for k, i in (("damage", H), ("ap_damage", H), ("defence", 1),
+                                                                    ("run", H)))
+        old = abilities.apply(u, P, 0.5, standing, engaged, dist, same)
         assert float(u["damage"][0, H]) == pytest.approx(1.25 * dmg)      # Deadly Onslaught (in melee)
+        assert float(u["ap_damage"][0, H]) == pytest.approx(1.25 * ap)
         assert float(u["run"][0, H]) == pytest.approx(1.25 * run)         # Verminous Valour (enemy near)
-        assert float(u["ab0_on"][0, H]) == 31 and float(u["ab0_cd"][0, H]) == 31 + 90
-        assert float(u["ab0_on"][0, 0]) == 0 and float(u["ab1_on"][0, 0]) == 0   # our General: no actives
+        assert float(u["ab1_on"][0, H]) == 31 and float(u["ab1_cd"][0, H]) == 31 + 90
+        assert float(u["ab0_on"][0, 0]) == 0 and float(u["ab1_on"][0, 0]) == 0   # our General: no order, no use
         assert float(u["defence"][0, 1]) == defence + 5                    # Hold the Line reaches our spearmen
         abilities.restore(u, old)
         assert float(u["damage"][0, H]) == dmg
-        abilities.apply(u, P, 31.0, standing, engaged, pw["dist"], same)  # 31 s later: over, recharging
-        assert float(u["ab0_on"][0, H]) == 0 and float(u["ab0_cd"][0, H]) == 90
+        abilities.apply(u, P, 31.0, standing, engaged, dist, same)  # 31 s later: over, recharging
+        assert float(u["ab1_on"][0, H]) == 0 and float(u["ab1_cd"][0, H]) == 90
+
+    def test_the_network_fires_a_ready_self_cast_ability_by_order(self):
+        from tools.nn.sim import abilities
+        st, H, dist, same, standing, engaged = self.lords()
+        u = st.u
+        defence = float(u["defence"][0, 1])
+        use = torch.full_like(u["ab0"], -1)
+        use[0, 0] = 1                                                      # Stand Your Ground
+        old = abilities.apply(u, P, 0.5, standing, engaged, dist, same, use)
+        assert float(u["ab1_on"][0, 0]) == 18 and float(u["ab1_cd"][0, 0]) == 18 + 90
+        assert float(u["defence"][0, 1]) == defence + 24 + 5              # + Hold the Line
+        assert float(u["defence"][0, H]) == float(old["defence"][0, H])   # friends only, not the enemy
+        abilities.restore(u, old)
+        abilities.apply(u, P, 0.5, standing, engaged, dist, same, use)     # active: a new order does nothing
+        assert float(u["ab1_on"][0, 0]) == pytest.approx(17.5)
+        use[0, 0] = 2                                                      # Hold the Line is passive
+        cd = [float(u[f"ab{k}_cd"][0, 0]) for k in range(3)]
+        abilities.apply(u, P, 0.5, standing, engaged, dist, same, use)
+        assert float(u["ab2_on"][0, 0]) == 0 and float(u["ab2_cd"][0, 0]) == 0
+        assert [float(u[f"ab{k}_cd"][0, 0]) for k in range(2)] == [cd[0], pytest.approx(cd[1] - 0.5)]
+
+    def test_a_network_side_fires_by_order_only_whichever_side_it_plays(self):
+        from tools.nn.sim import abilities
+        st = scenario.build([army([(GENERAL, 0, 0, 90)], [(self.WARLORD, 2, 0, 270)])] * 2, P)
+        H = st.N // 2
+        assert st.u["ai"][:, H].tolist() == [True, True]              # the default: side 2 by the rule
+        abilities.set_rule(st.u, torch.tensor([[True, False], [False, False]]))
+        assert st.u["ai"][:, 0].tolist() == [True, False] and st.u["ai"][:, H].tolist() == [False, False]
+        assert not bool(st.u["ai"][st.u["side"] == 0].any())
+        o = replay.hold(st)
+        for _ in range(4):                                             # in melee, enemy near: no rule fires
+            battle.step(st, o, P)
+        assert float(st.u["ab0_cd"][1, H]) == 0 and float(st.u["ab1_cd"][1, H]) == 0
+        assert float(st.u["ab0_cd"][0, 0]) > 0                         # battle 0: side 1 by the rule
+
+    def test_an_order_reaches_the_step_and_old_orders_hold_no_ability(self):
+        st, H, *_ = self.lords()
+        o = replay.hold(st)
+        assert torch.all(o.ability == -1)
+        plain = O.Orders(kind=o.kind, x=o.x, z=o.z, target=o.target, run=o.run)       # the five-field contract
+        assert torch.all(plain.ability == -1) and torch.all(O.merge(plain, o, o.kind == 0).ability == -1)
+        o.ability[0, 0] = 0                                                # Foe Seeker
+        battle.step(st, o, P)
+        assert float(st.u["ab0_on"][0, 0]) == 25
+        assert float(st.observation()["ab0_on"][0, 0]) == 25
+        o.ability[0, 0] = 3
+        with pytest.raises(ValueError):
+            O.check(o, st.N)

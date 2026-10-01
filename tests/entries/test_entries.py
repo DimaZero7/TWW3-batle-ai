@@ -611,3 +611,75 @@ class TestNnArena:
         assert len(list(lua.eval("bm.orders").values())) == n_own
         result = rows[-1]
         assert result["event"] == "result" and result["winner"] == 1 and result["nn_orders_given"] == n_own
+
+
+class TestLordSwarm:
+    SETUP = """
+        own = {fake.unit('own_lord', 'lord', -300, 0), fake.unit('own_spear_1', 'spears', 0, 0),
+               fake.unit('own_spear_2', 'spears', 0, 0)}
+        enemy = {fake.unit('enemy_lord', 'lord', 300, 0), fake.unit('enemy_spear_1', 'spears', 0, 0),
+                 fake.unit('enemy_spear_2', 'spears', 0, 0)}
+        own[1].melee, enemy[1].melee = true, true
+        bm = fake.manager({own, enemy})
+        local trial = function(name, places)
+            local a = {}
+            for _, s in ipairs(places) do a[#a + 1] = {side = s, kind = 'spear'} end
+            return {name = name, attackers = a}
+        end
+        CONFIG = {build = 'test', speed = 20, tick_ms = 200, soldier_ms = 1000, deadline_s = 100,
+            start_m = 20, settle_ms = 3000, fight_s = 2, max_s = 10, min_hp = 0.3, radii = {2, 4}, near_m = 6,
+            lanes = {{name = 'general', lord = 'own_lord', x = -300, z = 0, bearing = 0,
+                      spears = {'enemy_spear_1', 'enemy_spear_2'}, ap = {}, park = {x = -700, z = 600, bearing = 0}},
+                     {name = 'warlord', lord = 'enemy_lord', x = 300, z = 0, bearing = 0,
+                      spears = {'own_spear_1', 'own_spear_2'}, ap = {}, park = {x = 250, z = -600, bearing = 180}}},
+            trials = {trial('s1', {'front'}), trial('s2', {'front', 'back'})}, widths = {}, depths = {}}
+        GLOBALS = {common = fake.common, battle_vector = fake.vector_type}
+    """
+
+    def test_trials_run_in_turn_and_the_attackers_are_recorded(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            STATE = require('entries.lord_swarm').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 100 do bm:tick(200); bm:pump() end
+            assert(STATE.finished and bm.ended)
+            assert(own[2].controlled and enemy[1].controlled)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        kinds = [r["event"] for r in rows]
+        assert "error" not in kinds, [r for r in rows if r["event"] == "error"]
+        trials = [r for r in rows if r["event"] == "swarm_trial"]
+        assert [t["name"] for t in trials] == ["s1", "s2"]
+        # Spear units rotate: the second trial starts with the unit after the first trial's.
+        assert [a["name"] for a in trials[1]["lanes"][0]["attackers"]] == ["enemy_spear_2", "enemy_spear_1"]
+        ends = [r for r in rows if r["event"] == "swarm_lane_end"]
+        assert len(ends) == 4 and all(e["why"] == "fight_s" for e in ends)
+        sample = next(r for r in rows if r["event"] == "swarm_sample")
+        assert {x["lane"] for x in sample["lanes"]} == {"general", "warlord"}
+        men = next(r for r in rows if r["event"] == "swarm_men")
+        assert men["lanes"][0]["att"][0]["c"] == [0, 0]   # the fake soldiers stand at (1.25, -2.5)
+        assert rows[-1]["event"] == "result" and rows[-1]["trials"] == 3
+
+    def test_soldiers_are_counted_by_distance(self, lua):
+        counts, near = lua.eval("""(function()
+            local c, n = require('entries.lord_swarm').count_near({1, 0, 0, 2.5, 5, 5}, 0, 0, {1.5, 3}, 4)
+            return c, n end)()""")
+        assert list(counts.values()) == [1, 2] and list(near.values()) == [10, 0, 0, 25]
+
+    def test_a_rival_lord_attacks_in_one_lane_only(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            CONFIG.lanes[1].rival, CONFIG.lanes[2].rival = 'enemy_lord', 'own_lord'
+            CONFIG.trials = {{name = 'lord_s1', lanes = {'warlord'},
+                attackers = {{side = 'front', kind = 'lord'}, {side = 'back', kind = 'spear'}}}}
+            STATE = require('entries.lord_swarm').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 60 do bm:tick(200); bm:pump() end
+            assert(STATE.finished)
+            assert(own[1].attack_args.target == 'enemy_lord' and own[2].attack_args.target == 'enemy_lord')
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows]
+        trial = next(r for r in rows if r["event"] == "swarm_trial")
+        assert trial["lanes"] == [{"lane": "warlord", "attackers": [
+            {"kind": "lord", "name": "own_lord", "side": "front"}, {"kind": "spear", "name": "own_spear_1", "side": "back"}]}]
+        assert [r["lane"] for r in rows if r["event"] == "swarm_lane_end"] == ["warlord"]
+        assert all(x["lane"] == "warlord" for r in rows if r["event"] == "swarm_sample" for x in r["lanes"])

@@ -1,6 +1,7 @@
 """The network's inputs and model, no training yet (docs/en/training/model.md).
 
     passport.py     a unit's static features from config/nn/units.json (numpy)
+    abilities.py    an ability's static features from config/nn/abilities.json, a unit's slots (numpy)
     factions.py     faction character (config/nn/factions.json), LoRA adapter index (numpy)
     frame.py        the side's frame: side-symmetric coordinates (numpy or torch)
     observation.py  what one side sees; the critic's full view (numpy or torch)

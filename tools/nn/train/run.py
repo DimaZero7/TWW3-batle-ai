@@ -39,7 +39,7 @@ def compatible(path, preset):
         data = checkpoint.read(path)
         cfg = checkpoint.config_of(data)
         model_policy.Actor(cfg).load_state_dict(data["actor"])
-        model_critic.Critic(cfg).load_state_dict(data["critic"])
+        model_critic.Critic(cfg).load(data["critic"])
         return data.get("preset") == preset
     except (FileNotFoundError, ValueError, RuntimeError, KeyError):
         return False
@@ -54,7 +54,7 @@ def networks(preset, device, start=None):
     cfg = checkpoint.config_of(data)
     actor, critic = model_policy.Actor(cfg), model_critic.Critic(cfg)
     actor.load_state_dict(data["actor"])
-    critic.load_state_dict(data["critic"])
+    critic.load(data["critic"])
     return actor.to(device).eval(), critic.to(device).eval()
 
 
@@ -111,11 +111,14 @@ def train(args):
         for p in reference.parameters():
             p.requires_grad_(False)
     cfg = ppo.PPOConfig(lr=args.lr, gamma=args.gamma, epochs=args.epochs, minibatch=args.minibatch,
-                        entropy=args.entropy, anchor=args.anchor)
+                        entropy=args.entropy, anchor=args.anchor, unit_credit=args.unit_credit)
     opt = torch.optim.Adam(list(actor.parameters()) + list(critic.parameters()), lr=cfg.lr, eps=1e-5)
     weights = reward.Weights(order_change=args.order_cost, timeout=args.timeout, idle=args.idle, hp=args.hp,
                              standing=args.standing, lord=args.lord, retarget=args.retarget,
-                             idle_ramp_s=args.idle_ramp, tempo=args.tempo, tempo_after_s=args.tempo_after)
+                             idle_ramp_s=args.idle_ramp, tempo=args.tempo, tempo_after_s=args.tempo_after,
+                             unit_hp=args.unit_hp, flanked=args.flanked, missile_melee=args.missile_melee,
+                             crowd=args.crowd, flank_attack=args.flank_attack, neighbour=args.neighbour,
+                             idle_near=args.idle_near)
 
     def small_arg():
         if not args.small:
@@ -179,9 +182,15 @@ def train(args):
     update, decisions, total, window, best = 0, 0, {}, {}, -1.0
     best_eval, t_eval, paused = -1.0, time.time(), 0.0
     elog = (out / "eval_log.jsonl").open("w", encoding="utf-8", newline="\n")
-    while time.time() - t0 - paused < args.minutes * 60:
+    def share_done():
+        """The share of the run done: of the updates when --updates is set, else of the minutes."""
+        if args.updates:
+            return update / args.updates
+        return (time.time() - t0 - paused) / (args.minutes * 60)
+
+    while share_done() < 1.0 and (not args.updates or time.time() - t0 - paused < args.minutes * 60):
         t_u = time.time()
-        done_share = (t_u - t0 - paused) / (args.minutes * 60)
+        done_share = share_done()
         if stage + 1 < len(stages) and done_share >= stages[stage][1]:
             stage += 1
             del env
@@ -228,7 +237,7 @@ def train(args):
             print(f"u{update:4d} {row['seconds']:6.0f}s battles {env.battles:6d} (timeouts {env.timeouts:5d}) "
                   f"{row['battle_steps_per_s']:6d} st/s pl {st['policy_loss']:+.3f} vl {st['value_loss']:.4f} "
                   f"ent {st['entropy']:.2f}/{st['entropy_all']:.2f} kl {st['kl']:.3f} R {st['reward']:+.3f} "
-                  f"anchor {st['anchor_kl']:.3f} orders/min {row['orders_per_minute']:5.1f} "
+                  f"anchor {st['anchor_kl']:.3f} unit A share {st['unit_adv_share']:.2f} orders/min {row['orders_per_minute']:5.1f} "
                   f"lords dead own {lords['own']:.2f} enemy {lords['enemy']:.2f} "
                   f"kinds " + " ".join(f"{k[:2]} {v:.2f}" for k, v in row["kinds"].items()), flush=True)
         if update % args.snapshot_every == 0:
@@ -322,12 +331,13 @@ def final_eval(path, args, summary, out):
     return res
 
 
-def main():
-    sys.stdout.reconfigure(encoding="utf-8")
+def parser():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--name", default="run")
     ap.add_argument("--init", help="start from this checkpoint (default: random.pt)")
     ap.add_argument("--minutes", type=float, default=5.0, help="wall time of training (the warm-up not counted)")
+    ap.add_argument("--updates", type=int, default=0,
+                    help="train this many updates instead (--minutes then only caps the time; schedules follow the updates)")
     ap.add_argument("--battles", type=int, default=1024, help="battles at once")
     ap.add_argument("--steps", type=int, default=64, help="decisions per chunk (between updates)")
     ap.add_argument("--preset", default="small", choices=sorted(model_config.PRESETS))
@@ -369,6 +379,21 @@ def main():
     ap.add_argument("--tempo", type=float, default=reward.Weights.tempo,
                     help="the attacker's cost per decision past --tempo-after s of battle")
     ap.add_argument("--tempo-after", type=float, default=reward.Weights.tempo_after_s)
+    ap.add_argument("--unit-credit", type=float, default=ppo.PPOConfig.unit_credit,
+                    help="weight of each unit's own advantage beside the side's (0: the side's only)")
+    ap.add_argument("--unit-hp", type=float, default=reward.Weights.unit_hp, help="per unit: its own health trade")
+    ap.add_argument("--flanked", type=float, default=reward.Weights.flanked,
+                    help="per unit and decision: struck in the flank or rear")
+    ap.add_argument("--missile-melee", type=float, default=reward.Weights.missile_melee,
+                    help="per missile unit and decision in melee")
+    ap.add_argument("--crowd", type=float, default=reward.Weights.crowd,
+                    help="per unit and decision in a pile (more than 2 on one enemy while another flanks)")
+    ap.add_argument("--idle-near", type=float, default=reward.Weights.idle_near,
+                    help="per melee unit and decision standing by while a fellow within 60 m fights")
+    ap.add_argument("--flank-attack", type=float, default=reward.Weights.flank_attack,
+                    help="per unit and decision striking an enemy's flank or rear (bonus)")
+    ap.add_argument("--neighbour", type=float, default=reward.Weights.neighbour,
+                    help="+ this x the mean of own units' terms within 40 m")
     ap.add_argument("--no-eval", action="store_true")
     ap.add_argument("--armies", default="scenes", choices=("scenes", "generated"),
                     help="the fixed arenas, or random armies of tools/nn/armies")
@@ -379,7 +404,12 @@ def main():
     ap.add_argument("--eval-generated", type=int, default=512, help="random battles per opponent (EVAL_SEEDS)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    args = ap.parse_args()
+    return ap
+
+
+def main():
+    sys.stdout.reconfigure(encoding="utf-8")
+    args = parser().parse_args()
     actor, summary, out = train(args)
     checkpoint.save(checkpoint.LATEST, actor, None, args.preset, checkpoint.meta(out / "latest.pt"))
     if not args.no_eval:

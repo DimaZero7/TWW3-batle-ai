@@ -13,6 +13,16 @@
 -- on a target already in melee within range is given as fire at will at once
 -- (services.missile_duty, services.fire_freely, event nn_duty).
 -- No answer by the next decision tick: the orders in force stay (event nn_miss).
+-- Abilities: an 'ability <unit> <key>' line of the answer is used at once when the unit
+-- stands and can_perform_special_ability(key) says yes: perform_special_ability(key, the
+-- unit itself) (self-cast; the recipe verified in battle, docs/en/game/units/commands.md).
+-- In the game can_perform_special_ability says the lord owns it, ready or not (01.10.2026):
+-- readiness is the companion's (its count and the card's active effects).
+-- Each request is logged (event nn_ability: used, not_ready, down, unknown_unit, error); the
+-- state document carries each ability's last use (abilities_used) and every unit's active
+-- effects (row fx, when opts.cco reads the unit's card), so the companion knows the timers.
+-- Changes only are logged once per decision: nn_ability_ready (an own unit's active ability:
+-- can_perform_special_ability turned true or false) and nn_effects (a unit's active phases).
 -- The Lua side writes everything it reads; what a human would not see is hidden
 -- by the companion's observation (tools/nn/model/observation.py).
 local json = require('apps.core.json')
@@ -50,15 +60,27 @@ end
 
 -- opts: army (our engine army), own / enemies = {{name, unit}}, vector(x, z) -> engine
 -- vector, rows() -> every unit's row, meta (put into every state: batch...), emit(event,
--- fields), now_ms() (battle time since the start), model_ms() (engine time).
+-- fields), now_ms() (battle time since the start), model_ms() (engine time); optional
+-- cco(unit, field) -> the unit's CcoBattleUnit value (active effects into the rows).
 function M.start(opts)
     local handle = {written = 0, applied = 0, answered = 0, missed = 0, given = 0, keeps = 0, bad = 0,
-        regiven = 0, released = 0, resumed = 0, write_mode = nil}
+        regiven = 0, released = 0, resumed = 0, write_mode = nil, abilities_used = 0, abilities_refused = 0}
     -- current: the order in force; lost: the order a unit had when it broke (given again after
     -- it rallies, also for 'keep'); duty: a shooter's state under an attack order.
     local times, current, lost, duty, enemy_by_name = {}, {}, {}, {}, {}
     local seen = {}   -- the rows of the last decision, by unit name
-    for _, it in ipairs(opts.enemies) do enemy_by_name[it.name] = it end
+    local used, own_by_name, unit_by_name = {}, {}, {}   -- used[name][key] = battle ms of the last use
+    for _, it in ipairs(opts.enemies) do enemy_by_name[it.name], unit_by_name[it.name] = it, it.unit end
+    for _, it in ipairs(opts.own) do own_by_name[it.name], unit_by_name[it.name] = it, it.unit end
+    -- Own units' active abilities (as the card lists them) and what was last logged.
+    local owned, ready_was, fx_was = {}, {}, {}
+    for _, it in ipairs(opts.own) do
+        local list = read(function() return it.unit:owned_non_passive_special_abilities() end)
+        if type(list) == 'table' and #list > 0 then
+            owned[it.name] = {}
+            for _, k in ipairs(list) do owned[it.name][#owned[it.name] + 1] = tostring(k) end
+        end
+    end
     exchange.remove(M.STATE_FILE)
     exchange.remove(M.ORDERS_FILE)
     for _, it in ipairs(opts.own) do
@@ -105,9 +127,42 @@ function M.start(opts)
         return 'given'
     end
 
+    local function effects(rows)
+        if not opts.cco then return end
+        for _, row in ipairs(rows) do
+            local u = unit_by_name[row.n]
+            if u then
+                row.fx = services.active_effects(function(field)
+                    return read(function() return opts.cco(u, field) end)
+                end)
+                local text = row.fx and table.concat(row.fx, ',') or nil
+                if text ~= fx_was[row.n] then
+                    fx_was[row.n] = text
+                    opts.emit('nn_effects', {t = opts.now_ms(), u = row.n, fx = row.fx or 'unknown'})
+                end
+            end
+        end
+    end
+
+    local function readiness()
+        for name, keys in pairs(owned) do
+            local it = own_by_name[name]
+            ready_was[name] = ready_was[name] or {}
+            for _, key in ipairs(keys) do
+                local r = read(function() return it.unit:can_perform_special_ability(key) end)
+                if r ~= ready_was[name][key] then
+                    ready_was[name][key] = r
+                    opts.emit('nn_ability_ready', {t = opts.now_ms(), u = name, key = key, ready = r})
+                end
+            end
+        end
+    end
+
     local function write(done)
         local rows = opts.rows()
-        local doc = services.state_document(opts.meta, handle.written, opts.now_ms(), rows, done)
+        effects(rows)
+        readiness()
+        local doc = services.state_document(opts.meta, handle.written, opts.now_ms(), rows, done, used)
         handle.write_mode = exchange.write(M.STATE_FILE, json.encode(doc))
         return rows
     end
@@ -141,6 +196,21 @@ function M.start(opts)
         times[handle.written] = {model = opts.model_ms(), real = clock()}
         times[handle.written - M.KEEP_TIMES] = nil
         watch_shooters(write(false))
+    end
+
+    -- One ability request of the answer -> its status (module comment).
+    local function use_ability(req)
+        local it = own_by_name[req.unit]
+        if not it then return 'unknown_unit' end
+        if not standing(it.unit) then return 'down' end
+        if read(function() return it.unit:can_perform_special_ability(req.key) end) ~= true then
+            return 'not_ready'
+        end
+        local ok = pcall(function() it.uc:perform_special_ability(req.key, it.unit) end)
+        if not ok then return 'error' end
+        used[req.unit] = used[req.unit] or {}
+        used[req.unit][req.key] = opts.now_ms()
+        return 'used'
     end
 
     function handle.poll()
@@ -190,6 +260,15 @@ function M.start(opts)
         handle.keeps = handle.keeps + row.keeps
         handle.applied = handle.applied + 1
         opts.emit('nn_orders', row)
+        for _, req in ipairs(doc.abilities or {}) do
+            local status = use_ability(req)
+            if status == 'used' then
+                handle.abilities_used = handle.abilities_used + 1
+            else
+                handle.abilities_refused = handle.abilities_refused + 1
+            end
+            opts.emit('nn_ability', {t = opts.now_ms(), move = doc.move, u = req.unit, key = req.key, status = status})
+        end
     end
 
     function handle.finish()
@@ -199,7 +278,8 @@ function M.start(opts)
     function handle.stats()
         return {nn_moves = handle.written, nn_answered = handle.applied, nn_missed = handle.missed,
             nn_orders_given = handle.given, nn_keeps = handle.keeps, nn_bad_files = handle.bad, nn_write_mode = handle.write_mode,
-            nn_regiven = handle.regiven, nn_released = handle.released, nn_resumed = handle.resumed}
+            nn_regiven = handle.regiven, nn_released = handle.released, nn_resumed = handle.resumed,
+            nn_abilities_used = handle.abilities_used, nn_abilities_refused = handle.abilities_refused}
     end
 
     return handle

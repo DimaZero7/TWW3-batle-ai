@@ -39,6 +39,7 @@
 | [move_probe](../apps/entries.md#move_probe) | `move-probe` | `move_probe.xml` | Один отряд по плану заходов: строй и обычные приказы, позиции бойцов |
 | [roster_capture](../apps/entries.md#roster_capture) | `roster-capture` | `roster_capture.xml` | Карточки и строй отрядов для ростера |
 | [archer_range](../apps/entries.md#archer_range) | `archer-range` | `archer_range.xml` | Когда лучники начинают стрелять при разной глубине блока, урон стрел по дистанции |
+| [lord_swarm](../apps/entries.md#lord_swarm) | `lord-swarm` | `lord_swarm.xml` | Стоящий лорд под атакой 1–4 отрядов пехоты (и другого лорда): его потери и бойцы вокруг |
 | [enemy_layout](../apps/entries.md#enemy_layout) | `enemy-layout` | `enemy_layout.xml` | Как штатный ИИ расставляется и стоит при разных составах |
 | [manual_record](../apps/entries.md#manual) | `manual` | `manual_hamlet.xml` | Ручной бой игрока с записью |
 | [nn_arena](../apps/entries.md#nn_arena) | `nn-arena` | `nn_arena.xml` | Запись боёв ИИ игры на арене: каждый отряд обеих сторон раз в секунду — данные для обучения; с `--own-ai net` нашей стороной командует сеть |

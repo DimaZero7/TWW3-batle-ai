@@ -10,12 +10,19 @@ The rule: the AI sees only what a human player sees.
 * Events a player is told or sees: own and enemy lord slain and how long ago (the game announces
   it), and per unit how recently it fought in melee and how recently it routed (enemies: while
   seen).
+* Abilities (Obs.abil, per unit and ability slot): the ability's passport (tools/nn/model/abilities.py:
+  both sides, it is on the unit's card) and its state. Own units: owned, ready, seconds until ready,
+  seconds active left (the ability bar). Enemies: owned, and active now only while the unit is seen
+  (the game draws the ability's effect on the unit and lists it among the unit's active effects;
+  its timers are not shown). Obs.abil_ok: own abilities the network may use now.
 Everything is in the side's frame (tools/nn/model/frame.py), scaled to about -1..1.
 
 State: a dict of arrays [B, N] with the names of recorded `nn_sample` (tools/nn/gamedata.py):
 x, z, b, men, hp, mp, ms, m, mv, f, fire, a, k, ox, oz, lf, rf, bf, target, plus `t` [B] (s).
 Optional: `vis` [B, N] (the unit is visible to the other side; missing = all visible),
-`fat` [B, N] (fatigue state 0-5; missing = unknown). Units of both sides in one row; `setup.side`
+`fat` [B, N] (fatigue state 0-5; missing = unknown), `ab{k}_on` / `ab{k}_cd` [B, N] for ability slot
+k (seconds active left / until ready: tools/nn/sim/state.py observation(); missing = unknown: no
+ability is ready). Units of both sides in one row; `setup.side`
 says whose each is. Works on numpy arrays and torch tensors: the same code for recorded
 battles and the batched simulator.
 """
@@ -23,7 +30,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from tools.nn.model import factions, passport
+from tools.nn.model import abilities, factions, passport
 from tools.nn.model.frame import Frame, army_axis, edge_distances, xp
 
 POS = 500.0      # m: positions and order points
@@ -83,6 +90,10 @@ class Setup:
         self.lord = np.stack([passport.lords(k) for k in self.keys])          # [B, N] the army's general
         self.men0 = np.stack([passport.men(k) for k in self.keys])            # [B, N]
         self.ammo0 = np.stack([passport.ammo(k) for k in self.keys])          # [B, N]
+        ab = [abilities.slots(k) for k in self.keys]
+        self.abil = np.stack([a[0] for a in ab])                               # [B, N, SLOTS, STATIC]
+        self.abil_owned = np.stack([a[1] for a in ab])                         # [B, N, SLOTS]
+        self.abil_use = np.stack([a[2] for a in ab])                           # [B, N, SLOTS] may be ordered
         self.present = self.side > 0
         self._cache = {}
 
@@ -97,7 +108,9 @@ class Setup:
             self._cache[key] = _Arrays(side=t(self.side), bounds=t(self.bounds.astype(np.float32)),
                                        rank=t(self.rank), lord_level=t(self.lord_level),
                                        passport=t(self.passport), men0=t(self.men0), ammo0=t(self.ammo0),
-                                       present=t(self.present), attacker=t(self.attacker), lord=t(self.lord))
+                                       present=t(self.present), attacker=t(self.attacker), lord=t(self.lord),
+                                       abil=t(self.abil), abil_owned=t(self.abil_owned),
+                                       abil_use=t(self.abil_use))
         return self._cache[key]
 
     def character(self, side):
@@ -128,6 +141,9 @@ class _Arrays:
     present: object
     attacker: object
     lord: object
+    abil: object = None        # abilities (Setup.abil ...); None: the units have no abilities
+    abil_owned: object = None
+    abil_use: object = None
 
 
 @dataclass
@@ -160,6 +176,9 @@ class Obs:
     adapter: object    # [B] LoRA adapter index
     frame: Frame
     side: int
+    abil: object = None     # [B, N, SLOTS, abilities.SIZE] per ability slot: state, then passport
+    abil_ok: object = None  # [B, N, SLOTS] own abilities that may be used now (owned, self-cast, ready,
+    #                         the unit takes orders). Both None when the setup has no abilities.
 
 
 def _f(m, a):
@@ -291,7 +310,30 @@ def observe(state, setup, side, memory=None, full=False):
     if full:   # the critic also knows the enemy's character
         other = setup.character(3 - side)
         ctx = _cat(m, [ctx, _f(m, other if m is np else m.as_tensor(other, device=x.device))], -1)
-    return Obs(_f(m, tokens), _f(m, ctx), own, attend, ctrl, target_ok, _f(m, pos), adapter, fr, side), new
+    abil, abil_ok = _abilities(m, state, S, own, sees, ctrl, full, xs)
+    return Obs(_f(m, tokens), _f(m, ctx), own, attend, ctrl, target_ok, _f(m, pos), adapter, fr, side,
+               abil, abil_ok), new
+
+
+def _abilities(m, state, S, own, sees, ctrl, full, like):
+    """(abil [B, N, SLOTS, SIZE], abil_ok [B, N, SLOTS]): each slot's state and passport (module doc)."""
+    K = abilities.SLOTS
+    if getattr(S, "abil", None) is None:          # a setup without abilities (e.g. an older LiveSetup):
+        return None, None                         # no ability input at all (and nothing to store)
+    owned = S.abil_owned & S.present[..., None]
+    known = all(state.get(f"ab{k}_{t}") is not None for k in range(K) for t in ("on", "cd"))
+    zero = like * 0
+    on = m.stack([_f(m, state[f"ab{k}_on"]) if known else zero for k in range(K)], -1)       # [B, N, K]
+    cd = m.stack([_f(m, state[f"ab{k}_cd"]) if known else zero for k in range(K)], -1)
+    mine = (S.present if full else own)[..., None] & owned
+    ready = mine & S.abil_use & (cd <= 0) & (on <= 0) & known
+    seen_on = owned & (on > 0) & ((S.present if full else own | sees)[..., None])
+    none = zero[..., None] * 0
+    dyn = m.stack([_f(m, owned), _f(m, ready), m.where(mine, m.clip(cd / abilities.RECHARGE, 0, 3), none),
+                   m.where(mine, m.clip(on / abilities.ACTIVE, 0, 2), none), _f(m, seen_on)], -1)
+    abil = _cat(m, [dyn, _f(m, S.abil) * _f(m, owned)[..., None]], -1)
+    abil_ok = ready & own[..., None] & ctrl[..., None]
+    return _f(m, abil), abil_ok
 
 
 def _b(m, a):

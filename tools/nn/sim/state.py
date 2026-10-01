@@ -101,8 +101,10 @@ STATIC = {
     "friendly_fire": ("f", "share of its hits aimed at a unit in melee that land on its own side (config/nn/sim.json)"),
     "morale_bonus": ("f", "morale points at the start beyond leadership (config/nn/sim.json)"),
     "cost": ("f", "multiplayer cost"),
-    "ai": ("b", "played by the game's AI: its lord uses his active abilities (the network's side never does)"),
-    "ab0": ("i", "the unit's first ability: index in config/nn/sim.json abilities.table, -1 none"),
+    "ai": ("b", "played by the game's AI: its lord fires his active abilities by the AI's rule (the network's "
+                "side by order: tools/nn/sim/orders.py ability)"),
+    "ab0": ("i", "the unit's first ability slot: index in the ability passports (tools/nn/sim/abilities.py keys), "
+                 "-1 none"),
     "ab1": ("i", "its second ability (-1 none)"),
     "ab2": ("i", "its third ability (-1 none)"),
 }
@@ -176,8 +178,12 @@ class State:
 
     def observation(self):
         """The contract with the network (tools/nn/model/observation.py): the OBSERVED tensors
-        [B, N], `side` [B, N] and `t` [B] (s)."""
+        [B, N], `side` [B, N], `t` [B] (s) and the abilities' timers ab{k}_on / ab{k}_cd [B, N] (s:
+        active left, until ready; the observation shows them for own units, `on` for seen enemies)."""
         out = {k: self.u[k] for k in OBSERVED}
+        for k in range(3):
+            for t in ("on", "cd"):
+                out[f"ab{k}_{t}"] = self.u[f"ab{k}_{t}"]
         out["side"] = self.u["side"]
         out["t"] = self.t
         return out

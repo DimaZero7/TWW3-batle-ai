@@ -1,7 +1,9 @@
 """The files the game and the companion exchange (docs/en/apps/bridge.md). Numpy only, no torch.
 
     game  -> tww3_bai_nn_state.json   every decision: move number, battle time, every unit's row
-    companion -> tww3_bai_nn_orders.txt   the answer for that move: one line per own unit
+             (with fx: the phases active on it), abilities_used: {unit: {ability: ms of its last use}}
+    companion -> tww3_bai_nn_orders.txt   the answer for that move: one line per own unit, and a line
+             'ability <unit> <key>' per ability to use now
 
 Both files are written to a temp file first and then renamed, so a reader never sees half of one.
 The orders file ends with a line 'end': the game takes nothing without it.
@@ -15,8 +17,11 @@ from pathlib import Path
 
 import numpy as np
 
+from tools.nn.model import abilities as model_abilities
+from tools.nn.model import passport
 from tools.nn.model.observation import Setup
 from tools.nn.model.sources import CROSSROADS, EMPIRE, SKAVEN
+from tools.nn.sim.abilities import SLOTS, slot_keys
 from tools.nn.sim.orders import KINDS   # hold, move, attack, withdraw, keep (codes 0-4)
 
 STATE = "tww3_bai_nn_state.json"
@@ -47,6 +52,7 @@ class Battle:
     names: list
     side: np.ndarray
     setup: Setup
+    slots: list = None     # per unit: its ability keys by slot ("" empty), as the network's input has them
 
     @property
     def own(self):
@@ -63,11 +69,15 @@ def battle(doc, bounds=CROSSROADS):
                   bounds=np.asarray([bounds], np.float32),
                   factions=[(factions.get("own", EMPIRE), factions.get("enemy", SKAVEN))],
                   attacker=np.array([int(doc.get("attacker", 2))]))
-    return Battle(doc["batch"], names, side[0], setup)
+    units_db, passports = passport.load(), model_abilities.load()
+    slots = [slot_keys(u.get("key") or "", units_db, passports) if u.get("key") in units_db else [""] * SLOTS
+             for u in units]
+    return Battle(doc["batch"], names, side[0], setup, slots)
 
 
-def arrays(doc, names):
-    """The state for tools/nn/model/observation.py: dict of arrays [1, N] (NaN: not read), t [1] in s."""
+def arrays(doc, names, slots=None):
+    """The state for tools/nn/model/observation.py: dict of arrays [1, N] (NaN: not read), t [1] in s;
+    with slots (Battle.slots) also the abilities' timers (ability_timers)."""
     N = len(names)
     index = {n: i for i, n in enumerate(names)}
     out = {k: np.full((1, N), np.nan) for k in FLOAT_FIELDS}
@@ -90,6 +100,59 @@ def arrays(doc, names):
             out["vis"][0, i] = False
     out["men"] = np.nan_to_num(out["men"], nan=0.0)
     out["t"] = np.array([doc.get("t", 0) / 1000.0])
+    if slots is not None:
+        out.update(ability_timers(doc, names, slots))
+    return out
+
+
+def _effects(row):
+    """The phases active on a unit (row fx; JSON gives an empty list as {}), or None when not read."""
+    fx = row.get("fx")
+    if fx is None:
+        return None
+    return set(fx) if isinstance(fx, list) else set()
+
+
+TAKE_S = 1.5   # s after a use by which the card shows its phase (in game: by the next state, <= 1 s)
+
+
+def ability_timers(doc, names, slots, passports=None):
+    """ab{k}_on / ab{k}_cd [1, N] (s) for tools/nn/model/observation.py.
+
+    Own units (side 1): from the bridge's last use of each ability (abilities_used) and its passport:
+    active for active_s, then ready again recharge_s later (matched the game to ~1 s, 01.10.2026).
+    The unit's card (fx) is trusted over that count: a use whose phase is not on the unit TAKE_S
+    after it did not take (ready again: on and cd 0; the game's can_perform_special_ability only says
+    the lord owns it, so the bridge cannot refuse a use in recharge); a phase on the unit with no use
+    known counts 1 s active. Enemies: only whether it is active now (fx: the game shows it on the
+    unit; the observation keeps it only while the unit is seen): `on` 1 s, timers 0."""
+    passports = passports or model_abilities.load()
+    N = len(names)
+    out = {f"ab{k}_{t}": np.zeros((1, N)) for k in range(SLOTS) for t in ("on", "cd")}
+    t = doc.get("t", 0) / 1000.0
+    used = doc.get("abilities_used") or {}
+    rows = {u["n"]: u for u in doc["units"]}
+    for i, name in enumerate(names):
+        row = rows.get(name, {})
+        fx = _effects(row)
+        mine = int(row.get("side", 0)) == 1
+        last = used.get(name) if isinstance(used.get(name), dict) else {}
+        for k, key in enumerate(slots[i]):
+            if not key or key not in passports:
+                continue
+            p = passports[key]
+            seen_on = fx is not None and any(ph in fx for ph in p.get("phases") or ())
+            on = cd = 0.0
+            if mine and key in last and not p.get("passive"):
+                since = t - float(last[key]) / 1000.0
+                active, recharge = max(float(p["active_s"]), 0.0), max(float(p["recharge_s"]), 0.0)
+                on, cd = max(0.0, active - since), max(0.0, active + recharge - since)
+                if fx is not None and not seen_on and since >= TAKE_S and on > 0:
+                    on = cd = 0.0                      # the card does not show it: it did not take
+            if seen_on and on <= 0 and not p.get("passive"):
+                on = 1.0
+                cd = max(cd, on)
+            out[f"ab{k}_on"][0, i], out[f"ab{k}_cd"][0, i] = on, cd
     return out
 
 
@@ -113,8 +176,19 @@ def orders_list(names, side, kind, x, z, target, run):
     return out
 
 
-def orders_text(batch, move, orders, think_ms=None):
-    """The orders file for the game (parsed by src/apps/bridge/services.lua)."""
+def ability_list(names, side, ability, slots):
+    """The network's ability choice [N] (slot, -1 none) -> [{unit, key}] for own units."""
+    out = []
+    for i, name in enumerate(names):
+        k = int(ability[i])
+        if side[i] == 1 and 0 <= k < len(slots[i]) and slots[i][k]:
+            out.append({"unit": name, "key": slots[i][k]})
+    return out
+
+
+def orders_text(batch, move, orders, think_ms=None, abilities=()):
+    """The orders file for the game (parsed by src/apps/bridge/services.lua). abilities: [{unit, key}]
+    to use now, one line each."""
     lines = [FORMAT, f"move {int(move)}", f"batch {batch}"]
     if think_ms is not None:
         lines.append(f"think_ms {think_ms:.1f}")
@@ -130,6 +204,10 @@ def orders_text(batch, move, orders, think_ms=None):
             lines.append(f"unit {o['unit']} {k}")
         else:
             raise ValueError(f"unknown order kind: {k}")
+    for a in abilities:
+        if not a["unit"] or not a["key"] or any(c.isspace() for c in a["unit"] + a["key"]):
+            raise ValueError(f"bad ability line: {a}")
+        lines.append(f"ability {a['unit']} {a['key']}")
     lines.append("end")
     return "\n".join(lines) + "\n"
 
@@ -140,7 +218,7 @@ def parse_orders(text):
     lines = text.splitlines()
     if not lines or lines[0] != FORMAT or lines[-1] != "end":
         return None
-    doc = {"orders": {}}
+    doc = {"orders": {}, "abilities": []}
     for line in lines[1:-1]:
         w = line.split()
         if w[0] == "move":
@@ -156,6 +234,8 @@ def parse_orders(text):
             elif w[2] == "attack":
                 o.update(target=w[3], run=w[4] == "1")
             doc["orders"][w[1]] = o
+        elif w[0] == "ability":
+            doc["abilities"].append({"unit": w[1], "key": w[2]})
     return doc
 
 

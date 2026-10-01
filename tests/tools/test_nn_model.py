@@ -178,3 +178,109 @@ def test_simulator_state_to_orders():
     sim_orders.check(orders, s.N)
     other = torch.as_tensor(setup.side == 1)
     assert torch.all(orders.kind[other] == heads.HOLD)
+
+
+# --- abilities: the pointer over a unit's ability slots (tools/nn/model/heads.py) ---
+
+LORDS = ["wh_main_emp_cha_general_0", "wh2_main_skv_cha_warlord_0", "wh_main_emp_inf_spearmen_0"]
+
+
+def ability_obs(batch=2, seed=7, **timers):
+    setup, state = sources.synthetic(batch=batch, own=4, enemy=4, seed=seed, keys=LORDS)
+    N = 8
+    state.update(men=np.maximum(state["men"], 1.0), ms=np.full((batch, N), 2.0), r=np.zeros((batch, N), bool),
+                 s=np.zeros((batch, N), bool))
+    for k in range(3):
+        for t in ("on", "cd"):
+            state[f"ab{k}_{t}"] = timers.get(f"ab{k}_{t}", np.zeros((batch, N)))
+    obs, _ = ob.observe(state, setup, 1)
+    return setup, state, obs
+
+
+def test_abilities_are_the_same_on_numpy_and_torch():
+    setup, state, obs = ability_obs()
+    tobs, _ = ob.observe({k: torch.as_tensor(v) for k, v in state.items()}, setup, 1)
+    assert np.allclose(obs.abil, tobs.abil.numpy(), atol=1e-6)
+    assert np.array_equal(obs.abil_ok, tobs.abil_ok.numpy()) and obs.abil_ok.any()
+
+
+def test_only_ready_abilities_of_own_units_can_be_chosen():
+    cd = np.zeros((2, 8))
+    cd[:, :] = 30.0                                     # every slot 0 recharging
+    setup, state, obs = ability_obs(ab0_cd=cd)
+    o = policy.to_torch(obs)
+    logits, _ = model()(o)
+    a = logits["ability"]
+    assert a.shape == (2, 8, 4) and torch.isfinite(a[..., 0]).all()
+    allowed = o["abil_ok"] & o["ctrl"][..., None]
+    assert torch.all(a[..., 1:][~allowed] <= heads.NEG / 2) and torch.all(a[..., 1:][allowed] > heads.NEG / 2)
+    assert not allowed[..., 0].any() and allowed.any()
+    for _ in range(5):
+        orders, _, _, act = decide.act(model(), obs, setup, temperature=3.0)
+        chosen = orders.ability
+        ok = (chosen == -1) | allowed.gather(2, chosen.clamp(min=0)[..., None])[..., 0]
+        assert torch.all(ok) and torch.all(chosen[torch.as_tensor(setup.side == 2)] == -1)
+        sim_orders.check(orders, 8)
+
+
+def test_permuting_ability_slots_permutes_the_choice():
+    setup, state, obs = ability_obs()
+    o = policy.to_torch(obs)
+    perm = torch.tensor([2, 0, 1])
+    p = dict(o, abil=o["abil"][:, :, perm], abil_ok=o["abil_ok"][:, :, perm])
+    net = model()
+    a, _ = net(o)
+    b, _ = net(p)
+    assert torch.allclose(a["ability"][..., 1:][..., perm], b["ability"][..., 1:], atol=1e-5)
+    assert torch.allclose(a["ability"][..., 0], b["ability"][..., 0], atol=1e-5)
+    assert torch.allclose(a["kind"], b["kind"], atol=1e-5)
+
+
+def test_an_unseen_ability_still_gives_a_valid_choice():
+    from tools.nn.model import abilities as mab
+    setup, state, obs = ability_obs()
+    o = policy.to_torch(obs)
+    torch.manual_seed(3)
+    owned = o["abil"][..., mab.INDEX["owned"]] > 0.5
+    new = o["abil"].clone()
+    new[..., mab.DYNAMIC:] = torch.where(owned[..., None], torch.rand_like(new[..., mab.DYNAMIC:]) * 2 - 1,
+                                         new[..., mab.DYNAMIC:])
+    logits, _ = model()(dict(o, abil=new))
+    assert torch.isfinite(logits["ability"][..., 0]).all() and torch.isfinite(logits["kind"]).all()
+    a = heads.sample(logits, abilities=True)
+    allowed = torch.cat([torch.ones_like(o["abil_ok"][..., :1]), o["abil_ok"] & o["ctrl"][..., None]], -1)
+    assert torch.all(allowed.gather(2, (a.ability + 1)[..., None]))
+    lp, _ = heads.log_prob(logits, a, o["ctrl"])
+    assert torch.isfinite(lp).all()
+
+
+def test_the_ability_counts_in_log_prob_only_when_chosen():
+    setup, state, obs = ability_obs()
+    o = policy.to_torch(obs)
+    logits, _ = model()(o)
+    torch.manual_seed(0)
+    a = heads.sample(logits)
+    assert a.ability is None
+    base = {k: v for k, v in logits.items() if k != "ability"}
+    lp, _ = heads.log_prob(logits, a, o["ctrl"])
+    assert torch.allclose(lp, heads.log_prob(base, a, o["ctrl"])[0])
+    a.ability = torch.full_like(a.kind, -1)
+    lp2, ent2 = heads.log_prob(logits, a, o["ctrl"])
+    has = (o["abil_ok"] & o["ctrl"][..., None]).any(-1)
+    assert torch.all(lp2[has] < lp[has]) and torch.allclose(lp2[~has], lp[~has])
+
+
+def test_an_actor_saved_before_abilities_loads_and_its_input_starts_silent():
+    setup, state, obs = ability_obs()
+    o = policy.to_torch(obs)
+    net = model()
+    old = {k: v for k, v in net.state_dict().items() if not k.startswith(policy.ABILITY_PARAMS)}
+    fresh = model(seed=9)
+    fresh.load_state_dict(old)
+    a, _ = net(o)
+    b, _ = fresh(o)
+    assert torch.allclose(a["kind"], b["kind"], atol=1e-6) and torch.allclose(a["target"], b["target"], atol=1e-6)
+    without, _ = net({k: v for k, v in o.items() if k not in ("abil", "abil_ok")})
+    assert torch.allclose(a["kind"], without["kind"], atol=1e-6) and "ability" not in without
+    with pytest.raises(RuntimeError):
+        fresh.load_state_dict({k: v for k, v in old.items() if not k.startswith("heads.kind")})

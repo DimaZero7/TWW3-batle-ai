@@ -216,3 +216,69 @@ class TestEvents:
         hidden = with_state(fight, vis=np.array([[True, True, True, False]]))
         obs, _ = ob.observe(hidden, setup, 1)
         assert obs.tokens[0, 3, I["melee_recent"]] == 0 and obs.tokens[0, 1, I["melee_recent"]] == 1
+
+
+class TestAbilities:
+    """Abilities as a player sees them: own lord's bar (ready, timers), the enemy's only while active
+    and seen; every ability by its passport (tools/nn/model/abilities.py)."""
+
+    KEYS = TestEvents.KEYS
+    A = __import__("tools.nn.model.abilities", fromlist=["x"])
+
+    def setup_state(self, **timers):
+        setup, state = TestEvents().setup_state()
+        state = with_state(state, t=np.array([30.0]))
+        for k in range(3):
+            for t in ("on", "cd"):
+                state[f"ab{k}_{t}"] = np.array(timers.get(f"ab{k}_{t}", [0.0] * 4), dtype=float)[None]
+        return setup, state
+
+    def test_the_own_lords_bar_and_the_passports_of_both_sides(self):
+        setup, state = self.setup_state(ab1_on=[10.0, 0, 5.0, 0], ab1_cd=[100.0, 0, 70.0, 0])
+        obs, _ = ob.observe(state, setup, 1)
+        J = self.A.INDEX
+        assert obs.abil.shape == (1, 4, 3, self.A.SIZE)
+        lord = obs.abil[0, 0]
+        assert lord[:, J["owned"]].tolist() == [1, 1, 1]
+        assert lord[:, J["ready"]].tolist() == [1, 0, 0]               # Hold the Line is passive
+        assert lord[1, J["recharge_left"]] == pytest.approx(100 / 60) and lord[1, J["active_left"]] == pytest.approx(10 / 30)
+        assert obs.abil_ok[0].tolist() == [[True, False, False], [False] * 3, [False] * 3, [False] * 3]
+        assert lord[0, J["active_s"]] == pytest.approx(25 / 60)       # Foe Seeker's passport
+        enemy = obs.abil[0, 2]                                           # the Warlord: known abilities, no timers
+        assert enemy[:, J["owned"]].tolist() == [1, 1, 1] and enemy[:, J["ready"]].tolist() == [0, 0, 0]
+        assert enemy[1, J["recharge_left"]] == 0 and enemy[1, J["active_left"]] == 0
+        assert enemy[:, J["active_now"]].tolist() == [0, 1, 0]           # seen active
+        assert np.all(obs.abil[0, 1] == 0)                               # spearmen own nothing
+
+    def test_an_enemy_ability_is_seen_only_while_the_unit_is(self):
+        setup, state = self.setup_state(ab0_on=[0, 0, 5.0, 0], ab0_cd=[0, 0, 65.0, 0])
+        hidden = with_state(state, vis=np.array([[True, True, False, True]]))
+        obs, _ = ob.observe(hidden, setup, 1)
+        assert obs.abil[0, 2, 0, self.A.INDEX["active_now"]] == 0
+        full, _ = ob.observe(hidden, setup, 1, full=True)                 # the critic's view sees it
+        assert full.abil[0, 2, 0, self.A.INDEX["active_now"]] == 1
+
+    def test_no_timers_known_nothing_is_ready_and_a_routing_lord_uses_nothing(self):
+        setup, state = self.setup_state()
+        bare = {k: v for k, v in state.items() if not k.startswith("ab")}
+        obs, _ = ob.observe(bare, setup, 1)
+        assert not obs.abil_ok.any() and obs.abil[0, 0, :, self.A.INDEX["owned"]].tolist() == [1, 1, 1]
+        routing = with_state(state, ms=np.array([[6.0, 2, 2, 2]]), r=np.array([[True, False, False, False]]))
+        obs, _ = ob.observe(routing, setup, 1)
+        assert not obs.abil_ok.any()
+
+    def test_the_warlords_side_sees_its_own_bar(self):
+        setup, state = self.setup_state()
+        obs, _ = ob.observe(state, setup, 2)
+        assert obs.abil_ok[0, 2].tolist() == [True, True, True] and not obs.abil_ok[0, :2].any()
+
+    def test_a_setup_without_abilities_gives_no_ability_input(self):
+        setup, state = self.setup_state()
+        fields = ("side", "bounds", "rank", "lord_level", "passport", "men0", "ammo0", "present", "attacker", "lord")
+
+        class Bare:                                   # as an older LiveSetup (tools/nn/train/scenes.py)
+            def like(self, x):
+                return ob._Arrays(**{k: getattr(setup, k) for k in fields})
+            character, adapter = setup.character, setup.adapter
+        obs, _ = ob.observe(state, Bare(), 1)
+        assert obs.abil is None and obs.abil_ok is None and obs.tokens.shape == (1, 4, ob.TOKEN)

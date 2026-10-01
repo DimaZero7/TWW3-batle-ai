@@ -47,7 +47,14 @@ function F.unit(name, kind, x, z)
     function u:has_attribute() return false end
     function u:is_commanding_unit() return false end
     function u:missile_range() return self.range or 0 end
-    function u:owned_non_passive_special_abilities() return {} end
+    -- Abilities a test gives the unit: u.abilities[key] = true (ready) or false (owned, not ready).
+    function u:can_perform_special_ability(key) return (self.abilities or {})[key] == true end
+    function u:owned_non_passive_special_abilities()
+        local keys = {}
+        for k in pairs(self.abilities or {}) do keys[#keys + 1] = k end
+        table.sort(keys)
+        return keys
+    end
     function u:owned_passive_special_abilities() return {} end
     function u:unit_distance() return 50 end
     function u:unit_in_range() return false end
@@ -83,6 +90,12 @@ local function controller(log)
     -- Arrives at once: entry tests check wiring, not movement.
     function uc:goto_location_angle_width(p) self.unit.pos = vec(p:get_x(), p:get_y(), p:get_z()) end
     function uc:rotate() end
+    -- Like the engine: the target is mandatory. The ability is then on recharge.
+    function uc:perform_special_ability(key, target)
+        assert(target, 'perform_special_ability needs a target')
+        if self.unit.abilities then self.unit.abilities[key] = false end
+        log[#log + 1] = 'ability ' .. self.unit:name() .. ' ' .. key .. ' on ' .. target:name()
+    end
     return uc
 end
 

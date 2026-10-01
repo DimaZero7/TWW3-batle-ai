@@ -67,7 +67,8 @@ Hit chance by the formula (computed, not measured):
   16–21 men.
 - **The lord.** Pairs with a lord match the formula when the lord strikes as one
   man and up to ~8 enemies reach that one man (the lord) (recorded to computed
-  ratio 0.84–1.2).
+  ratio 0.84–1.2). Measured directly in [a lord surrounded](lord-swarm.md): 4–5 enemy soldiers
+  stand within 2.5 m of a lord, and 1, 2, 3 or 4 units around him take the same HP/s.
 
 ## The charge: a measurement of 29.09.2026
 

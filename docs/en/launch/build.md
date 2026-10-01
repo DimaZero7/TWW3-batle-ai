@@ -18,6 +18,7 @@ Building never touches the game; it only writes `build/<target>/`.
 | `unit-readout` | `entries.unit_readout` | `scenarios/unit_readout.xml` | `tww3_bai_unit_readout.pack` |
 | `move-probe` | `entries.move_probe` | `scenarios/move_probe.xml` | `tww3_bai_move_probe.pack` |
 | `manual` | `entries.manual_record` | `scenarios/manual_hamlet.xml` | `tww3_bai_manual.pack` |
+| `lord-swarm` | `entries.lord_swarm` | `scenarios/lord_swarm.xml` (`tools/nn/lord_swarm.py`) | `tww3_bai_lord_swarm.pack` |
 | `archer-range` | `entries.archer_range` | `scenarios/archer_range.xml` (`tools/archer_range.py`) | `tww3_bai_archer_range.pack` |
 | `enemy-layout` | `entries.enemy_layout` | `scenarios/enemy_layout.xml` (from `config/armies/defender_layouts.json`) | `tww3_bai_enemy_layout.pack` |
 | `roster-capture` | `entries.roster_capture` | `scenarios/roster_capture.xml` (from `config/roster/capture.json`) | `tww3_bai_roster_capture.pack` |
@@ -44,6 +45,7 @@ What every entry does: [entry points](../apps/entries.md).
 | `--layout`, `--enemy-mode native\|defend` | enemy-layout | Enemy layout; the game AI as is or told to defend (default) |
 | `--range-mode fire_at_will\|attack\|damage` | archer-range | When archers start shooting by the depth of their block; `damage` — damage to a fearless target at 70–120 m |
 | `--damage-rotate N` | archer-range `damage` | Shift the distances by N lanes (the same distance on other ground) |
+| `--swarm infantry\|lords\|all`, `--repeats N` | lord-swarm | Infantry around each lord, the other lord (with units) on him, or both; each layout N times (2). Samples every 0.2 s (`--tick-ms`) |
 | `--plan` | move-probe | Plan from `config/move-plans/<name>.json` (default `hamlet`) |
 | `--capture` | roster-capture | Another unit list instead of `config/roster/capture.json` |
 | `--scenario` | all | Another file from `scenarios/` instead of the target's scenario |

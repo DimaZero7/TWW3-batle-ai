@@ -75,8 +75,9 @@ def step(st, orders, params=None, dt=None):
     charge_now = u["charge"] * (1 - u["contact_s"] / decay).clamp(min=0)
     u["contact_s"] = torch.where(engaged, u["contact_s"] + dt, torch.zeros_like(u["contact_s"]))
 
-    # --- lord abilities (the game's AI side; passives for all): their effects hold for this step ---
-    base = abilities.apply(u, params, dt, standing, engaged, pw["dist"], same_side)
+    # --- lord abilities (the game's AI by its rule, the network by order; passives for all): their
+    # effects hold for this step ---
+    base = abilities.apply(u, params, dt, standing, engaged, pw["dist"], same_side, orders.ability)
 
     # --- melee ---
     rate, mhit, sector, _ = melee.strikes(u, pw, strike, params, charge_now, u["contact_s"])

@@ -26,7 +26,24 @@
   (divided the same way): hysteresis against a unit dithering between two enemies (seen in the
   gate battles: a new target every second or two).
 No style terms yet (the faction characters are placeholders).
+
+Per unit (unit_step, for per-unit credit in PPO: tools/nn/train/ppo.py), what happens to the unit
+itself, beside the side's reward; none of it enters the side's reward:
+    unit_hp       x n_own x (HP it dealt / the enemy's starting HP - HP it lost / own starting HP):
+                  its share of the side's health trade, scaled to one unit (sums to unit_hp x n_own x
+                  the side's trade, as `hp` does for the side);
+    flanked       per decision struck in the flank or rear in melee (the game: ~x1.74 losses);
+    missile_melee per decision a missile unit spends in melee;
+    crowd         per decision of a pile, by the excess share (tools/nn/train/behaviour.py);
+    idle_near     per decision a melee unit with no attack order stands out of melee while a fellow
+                  within 60 m fights (a unit's own credit otherwise pays it to let others fight);
+    flank_attack  per decision striking an enemy's flank or rear (a bonus, as large as `flanked`: a flank
+                  exchange is zero-sum between the two units);
+then `neighbour` x the mean of the same of own units within neighbour_m (what happens next to it).
+Each shaped term at most 1200 decisions x weight per unit in a 10-minute battle: at 2e-4, 0.24, a
+quarter of a win.
 """
+import math
 from dataclasses import dataclass
 
 import torch
@@ -49,6 +66,15 @@ class Weights:
     order_move_m: float = 10.0
     lord: float = 0.3             # the enemy lord's death - own lord's death
     retarget: float = 0.003       # an attack switched to another target while the old one stands
+    # per unit (unit_step), not in the side's reward
+    unit_hp: float = 0.05         # the unit's own health trade, scaled to one unit
+    flanked: float = 2e-4         # per decision struck in flank / rear
+    missile_melee: float = 2e-4   # per decision a missile unit is in melee
+    crowd: float = 2e-4           # per decision of a pile (excess share)
+    idle_near: float = 0.0        # per decision a melee unit stands by while a fellow within 60 m fights
+    flank_attack: float = 2e-4    # per decision striking an enemy's flank / rear (bonus; = flanked: zero-sum)
+    neighbour: float = 0.5        # + this x the mean of own units' terms within neighbour_m
+    neighbour_m: float = 40.0
 
 
 def standing_mask(u):
@@ -144,3 +170,46 @@ def order_cost(changes, side, weights=Weights(), switched=None):
             c = c + weights.retarget * (switched & mine).float().sum(1)
         out.append(c / n)
     return torch.stack(out, 1)
+
+
+UNIT_FIELDS = ("hp_abs", "k", "dealt")
+
+
+def unit_before(u):
+    """What unit_step needs from before the step."""
+    return {k: u[k].clone() for k in UNIT_FIELDS}
+
+
+def unit_step(before, st, facts, params, weights=Weights()):
+    """[B, N] each unit's own reward for the step (0 for empty slots): its health trade and the
+    shaped terms of behaviour.facts (after the step), then its neighbours' mean (see the module)."""
+    u = st.u
+    side = u["side"]
+    present = side > 0
+    lost = (before["hp_abs"] - u["hp_abs"]).clamp(min=0)
+    fade = math.exp(-params.dt / params.sim["morale"]["recent_s"])
+    melee = (u["dealt"] - fade * before["dealt"]).clamp(min=0)            # melee HP dealt this step
+    tgt = u["target"].clamp(min=0)
+    shot = torch.where(u["fire"] & (u["target"] >= 0), (u["k"] - before["k"]).clamp(min=0) * u["hp_man"].gather(1, tgt),
+                       torch.zeros_like(melee))
+    dealt = torch.where(u["m"], melee, shot)
+    hp0 = torch.stack([(u["hp0"] * (side == s)).sum(1) for s in (1, 2)], 1).clamp(min=1e-6)   # [B, 2]
+    n = torch.stack([(side == s).sum(1) for s in (1, 2)], 1).float()
+    own_i = (side - 1).clamp(min=0)
+    own_hp0, enemy_hp0 = hp0.gather(1, own_i), hp0.gather(1, 1 - own_i)
+    trade = n.gather(1, own_i) * (dealt / enemy_hp0 - lost / own_hp0)
+    r = (weights.unit_hp * trade - weights.flanked * facts["flanked"].float()
+         - weights.missile_melee * facts["missile_melee"].float() - weights.crowd * facts["crowded"]
+         - weights.idle_near * facts["idle_near"].float()
+         + weights.flank_attack * facts["flank_attack"].float())
+    r = torch.where(present, r, torch.zeros_like(r))
+    if weights.neighbour:
+        dx = u["x"][:, :, None] - u["x"][:, None, :]
+        dz = u["z"][:, :, None] - u["z"][:, None, :]
+        alive = present & (u["men"] > 0) & ~u["gone"]
+        eye = torch.eye(side.shape[1], dtype=torch.bool, device=side.device)[None]
+        near = ((dx * dx + dz * dz) <= weights.neighbour_m ** 2) & (side[:, :, None] == side[:, None, :])             & alive[:, :, None] & alive[:, None, :] & ~eye
+        nf = near.float()
+        mean = (nf * r[:, None, :]).sum(2) / nf.sum(2).clamp(min=1)
+        r = r + weights.neighbour * mean
+    return r

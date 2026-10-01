@@ -3,7 +3,8 @@
 Per pair of units in contact (i strikes j), per second:
 
     men striking F  = fighting_files x (length of the sides in contact / spacing), at most men;
-                      against a single man (a lord) at most lord_max_attackers (measured ~8);
+                      against a single man (a lord) at most lord_max_attackers in all, however many
+                      units surround him (measured: the lord swarm probe, docs/en/game/units/lord-swarm.md);
                       a single man strikes once (his blow hits up to `splash` men); a unit in
                       contact with several enemies shares out no more than its own front holds
     hit chance p    = 35 + hit_slope x (attack + charge - defence x direction) within 8-90 %
@@ -14,7 +15,8 @@ Per pair of units in contact (i strikes j), per second:
 
 Direction: defence x0.6 from the flank, x0.3 from the rear or against a routing unit (database);
 the defence lost counts at flank_slope / rear_slope of the rule (measured in whole battles; a lone
-man: the rule). A unit brings to each side of its formation no more men than that side holds.
+man: lord_direction of it). A unit brings to each side of its formation no more men than that side
+holds. A lone man fought by the enemy lord takes lord_rival_others of the infantry's rate.
 Charge: a unit that meets the enemy running gets its charge bonus to attack and damage and hits
 harder (x (1 + impact)), fading over charge_decay_duration (13 s); a unit that did not charge
 brings its men to bear over ramp_s (calibrated on the first 15 s of the pairs); a braced unit
@@ -23,6 +25,7 @@ with charge_reflection meets a frontal charge as a charge (battle.py).
 import torch
 
 from tools.nn.sim import geometry
+from tools.nn.sim import orders as O
 
 
 def hit_chance(attack, defence, slope, base=35.0, lo=8.0, hi=90.0):
@@ -81,10 +84,13 @@ def strikes(u, pw, contact, params, charge_now, contact_s):
     own = torch.where(single_i, torch.ones_like(men_i), men_i)
     total = F.sum(dim=2, keepdim=True)
     F = F * torch.where(total > own, own / total.clamp(min=1e-6), torch.ones_like(total))
-    # At most lord_max_attackers around a single man, whoever they belong to.
-    around = F.sum(dim=1, keepdim=True)
-    cap = float(cc["lord_max_attackers"])
-    F = torch.where(single_j & (around > cap), F * cap / around.clamp(min=1e-6), F)
+    # At most lord_max_attackers around a single man, however many units they belong to (the
+    # lord swarm probe); an enemy lord among them keeps his place (one man) and the infantry
+    # share the rest.
+    lone = (single_i & (F > 0)).float().sum(dim=1, keepdim=True)
+    around = torch.where(single_i, torch.zeros_like(F), F).sum(dim=1, keepdim=True)
+    cap = (float(cc["lord_max_attackers"]) - lone).clamp(min=0)
+    F = torch.where(single_j & ~single_i & (around > cap), F * cap / around.clamp(min=1e-6), F)
 
     sector = geometry.sector(pw["rel_j"], cc["front_deg"], cc["rear_deg"])
     routing_j = u["r"][:, None, :]
@@ -97,9 +103,10 @@ def strikes(u, pw, contact, params, charge_now, contact_s):
     attack = u["attack"][:, :, None] + u["charge_bonus"][:, :, None] * ch + bonus
     defence = u["defence"][:, None, :]
     # Defence lost to a flank / rear attack counts at flank_slope / rear_slope (1 = the database rule).
-    # A lord turns to fight whoever reaches him: the database rule (slope 1) for him.
+    # A lone man (a lord) at contact.lord_direction of the rule (measured in the lord swarm probe:
+    # infantry on his back or flank hurts him hardly more than on his front).
     slope = torch.where(sector == 2, cal.get("rear_slope", cal["flank_slope"]), cal["flank_slope"])
-    slope = torch.where(single_j, torch.ones_like(slope), slope)
+    slope = torch.where(single_j, torch.full_like(slope, float(cc.get("lord_direction", 1.0))), slope)
     exposed = defence * (1 - coef) * (slope / max(cal["hit_slope"], 1e-6) - 1)
     p = hit_chance(attack + exposed, defence * coef, cal["hit_slope"], B["melee_hit_chance_base"],
                    B["melee_hit_chance_min"], B["melee_hit_chance_max"])
@@ -114,11 +121,18 @@ def strikes(u, pw, contact, params, charge_now, contact_s):
     # nor against one (no more than lord_max_attackers reach him anyway).
     impact = torch.where(single_i | single_j, torch.zeros_like(ch), cal["impact"] * ch)
     rate = F * splash * p * hit / u["interval"][:, :, None].clamp(min=1e-6) * (1 + impact) * ramp[:, :, None]
-    # A lone man (a lord) fought by several units takes the strongest one's rate and only
-    # lord_others of the rest (measured in the recordings: a lord fighting the enemy lord loses
-    # 12.2 HP/s, with an enemy unit more 13.5; fighting infantry 3.5, two units 5.1).
-    total = rate.sum(dim=1, keepdim=True)
-    top = rate.amax(dim=1, keepdim=True)
-    want = top + float(cc.get("lord_others", 1.0)) * (total - top)
-    rate = torch.where(single_j & (total > 0), rate * want / total.clamp(min=1e-9), rate)
+    # A lone man (a lord) fought by infantry takes the sum of what the men around him strike (no
+    # more than lord_max_attackers of them, however many units: the lord swarm probe). Fought by
+    # the enemy lord too, the infantry's share counts only lord_rival_others (the probe's lord
+    # against lord and units; the whole battles: 12.2 HP/s from the enemy lord, 13.5 with a unit).
+    rival = (single_i & (rate > 0)).any(dim=1, keepdim=True)
+    k = float(cc.get("lord_rival_others", 1.0))
+    rate = torch.where(single_j & rival & ~single_i, rate * k, rate)
+    # A unit told to attack another enemy fights that one: a lone man it only touches takes
+    # lord_incidental of its rate (whole battles: a lord in contact with one enemy unit loses
+    # 1.7 HP/s when the unit's current target is another, 4.1 when it is him).
+    slot = torch.arange(u["men"].shape[1], device=rate.device)[None, None, :]
+    order_t = u["order_target"][:, :, None]
+    busy = (u["order_kind"][:, :, None] == O.ATTACK) & (order_t >= 0) & (order_t != slot)
+    rate = torch.where(single_j & ~single_i & busy, rate * float(cc.get("lord_incidental", 1.0)), rate)
     return rate, hit, sector, F

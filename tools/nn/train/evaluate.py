@@ -18,8 +18,9 @@ import torch
 
 from tools.nn.model import factions as fac
 from tools.nn.sim import check, scenario
+from tools.nn.sim import orders as O
 from tools.nn.sim import state as S
-from tools.nn.train import checkpoint, league, randomise, reward, rollout, scenes
+from tools.nn.train import behaviour, checkpoint, league, randomise, reward, rollout, scenes
 
 SPREAD = randomise.Spread(common=0.0, side=0.0, jitter_m=2.0)
 OPPONENTS = ("nearest", "hold_shoot", "hold", "ai_like", "past")
@@ -47,21 +48,26 @@ def combined(opponents, per_scene, n_scenes, scene_attacker=None, attack_only=()
 
 @torch.no_grad()
 def play(actor, opponents=OPPONENTS, per_scene=512, past=None, device="cpu", limit_s=3600.0, greedy=False,
-         seed=1, scene_list=scenes.SCENES, compile=None, hold_defend=False, generated=None, max_units=19, small=None):
+         seed=1, scene_list=scenes.SCENES, compile=None, hold_defend=False, generated=None, max_units=19, small=None,
+         together=False):
     """-> {"by_opponent": {name: {games, wins, win_rate, seconds, hp_own_lost, hp_enemy_lost, timeouts,
-    contact_share, first_contact_s, fired_share, orders_per_minute, kinds, roles: {attack|defend: {games,
-    wins, win_rate, seconds, hp_own_lost, hp_enemy_lost, timeouts}}}}, "by_scene": {name: {label: {games,
-    wins, win_rate}}}, "orders_per_minute", "kinds"}. One batch per opponent. past: the actor behind "past"
-    (e.g. the untrained one). `hold` is met only as the defender unless hold_defend: as the attacker it
-    never moves, and the battle only waits out the limit. generated: that many battles of random armies
-    (tools/nn/armies, EVAL_SEEDS, up to max_units units a side) per opponent instead of the scenes."""
+    contact_share, first_contact_s, fired_share, orders_per_minute, switches_per_minute, kinds, behaviour,
+    roles: {attack|defend: {games, wins, win_rate, seconds, hp_own_lost, hp_enemy_lost, timeouts, behaviour}}}},
+    "by_scene": {name: {label: {games, wins, win_rate}}}, "orders_per_minute", "kinds"}. One batch per
+    opponent (together: one batch for all, as fast as one; the randomised start places differ). past: the
+    actor behind "past" (e.g. the untrained one). `hold` is met only as the defender unless hold_defend: as
+    the attacker it never moves, and the battle only waits out the limit. generated: that many battles of
+    random armies (tools/nn/armies, EVAL_SEEDS, up to max_units units a side) per opponent instead of the
+    scenes. behaviour: tools/nn/train/behaviour.py Tracker."""
     out = {"by_opponent": {}, "by_scene": {}, "limit_s": limit_s, "greedy": greedy, "per_scene": per_scene}
-    for name in opponents:
-        only = () if hold_defend else league.ATTACK_ONLY
-        mine, rows = _play_one(actor, name, per_scene, past, device, limit_s, greedy, seed, scene_list, compile, only,
-                               generated, max_units, small)
-        out["by_opponent"][name] = mine
-        out["by_scene"][name] = rows
+    only = () if hold_defend else league.ATTACK_ONLY
+    groups = [tuple(opponents)] if together else [(n,) for n in opponents]
+    for names in groups:
+        res = _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, scene_list, compile, only,
+                         generated, max_units, small)
+        for name, (mine, rows) in res.items():
+            out["by_opponent"][name] = mine
+            out["by_scene"][name] = rows
     ops = list(out["by_opponent"].values())
     out["orders_per_minute"] = float(np.mean([o["orders_per_minute"] for o in ops]))
     out["kinds"] = {k: float(np.mean([o["kinds"][k] for o in ops])) for k in ops[0]["kinds"]}
@@ -81,40 +87,48 @@ def _summary(sel, won, t, hp_own, hp_enemy, limit_s, lord_own=None, lord_enemy=N
     return out
 
 
-def generated_layout(source, opponent, attack_only=league.ATTACK_ONLY):
+def generated_layout(source, opponent, attack_only=league.ATTACK_ONLY, rows=None):
     """Battle b = bank battle b; the learner's side alternates every two battles (the bank alternates
-    who attacks), so both roles and both sides come up; an attack_only opponent only defends."""
-    n = source.bank.M
+    who attacks), so both roles and both sides come up; an attack_only opponent only defends.
+    rows: the bank rows of this opponent's battles (default: all)."""
+    rows = np.arange(source.bank.M) if rows is None else np.asarray(rows)
+    n = len(rows)
     side = 1 + (np.arange(n) // 2) % 2
     if opponent in attack_only:
-        side = source.bank.attacker.cpu().numpy()
+        side = source.bank.attacker.cpu().numpy()[rows]
     return league.Layout(np.zeros(n, dtype=int), side, np.full(n, league.CODE[opponent]))
 
 
-def _play_one(actor, name, per_scene, past, device, limit_s, greedy, seed, scene_list, compile, attack_only,
-              generated=None, max_units=19, small=None):
+def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, scene_list, compile, attack_only,
+               generated=None, max_units=19, small=None):
+    """{name: (result, rows by scene)} of the opponents `names`, played in one batch."""
     params = rollout.params_with_limit(limit_s)
     if generated:
         from tools.nn.armies import generate
-        source = scenes.Generated(range(generate.EVAL_SEEDS.start, generate.EVAL_SEEDS.start + generated),
-                                  max_units, params, device, sequential=True, small=small)
-        lay = generated_layout(source, name, attack_only)
+        seeds = list(range(generate.EVAL_SEEDS.start, generate.EVAL_SEEDS.start + generated))
+        source = scenes.Generated(seeds * len(names), max_units, params, device, sequential=True, small=small)
+        lays = [generated_layout(source, n, attack_only, range(i * generated, (i + 1) * generated))
+                for i, n in enumerate(names)]
+        lay = league.Layout(*(np.concatenate([getattr(x, k) for x in lays]) for k in ("scene", "learner", "opponent")))
     else:
         source = None
-        lay = combined((name,), per_scene, len(scene_list), scenes.attackers(scene_list), attack_only)
+        lay = combined(names, per_scene, len(scene_list), scenes.attackers(scene_list), attack_only)
     env = rollout.Battles(lay, scene_list, device=device, params=params, spread=SPREAD,
                           seed=seed, auto_reset=False, compile=compile, source=source)
-    if name == "past":
+    if "past" in names:
         env.set_past(past)
     B = env.B
     learner_side = torch.as_tensor(lay.learner, device=env.device)
     mine = env.st.u["side"] == learner_side[:, None]
     contact = torch.full((B,), -1.0, device=env.device)
     fired = torch.zeros(B, dtype=torch.bool, device=env.device)
+    watch = behaviour.Tracker(env.st, env.params, mine)
     for _ in range(int(limit_s / env.params.dt) + 2):
         if bool(env.st.done.all()):
             break
+        live = ~env.st.done
         env.step(actor, None, greedy)
+        watch.update(env.st, live)
         u = env.st.u
         touch = (u["m"] & mine).any(1)
         contact = torch.where((contact < 0) & touch, env.st.t, contact)
@@ -126,42 +140,56 @@ def _play_one(actor, name, per_scene, past, device, limit_s, greedy, seed, scene
     won = winner == side
     hp_own = 1 - health[np.arange(B), side - 1]
     hp_enemy = 1 - health[np.arange(B), 2 - side]
-    attacks = env.st.attacker.cpu().numpy() == side
-    c = contact.cpu().numpy()
+    attacks_all = env.st.attacker.cpu().numpy() == side
+    c_all = contact.cpu().numpy()
+    fired_all = fired.cpu().numpy()
     dead = env.st.lord_dead_s.cpu().numpy() >= 0                      # [B, side]
     lords = (dead[np.arange(B), side - 1], dead[np.arange(B), 2 - side])
-    every = np.ones(B, dtype=bool)
-    switches = env.lords()["switches_per_minute"]
-    result = _summary(every, won, t, hp_own, hp_enemy, limit_s, *lords)
-    result.update({"contact_share": float((c >= 0).mean()),
-                   "first_contact_s": float(np.median(c[c >= 0])) if (c >= 0).any() else None,
-                   "fired_share": float(fired.cpu().numpy().mean()),
-                   "orders_per_minute": env.orders_per_minute(), "switches_per_minute": switches, "kinds": env.kinds(),
-                   "roles": {"attack": _summary(attacks, won, t, hp_own, hp_enemy, limit_s, *lords),
-                             "defend": _summary(~attacks, won, t, hp_own, hp_enemy, limit_s, *lords)}})
-    rows = {}
-    if generated:
-        fac = env.setup.factions
-        for b in range(B):
-            own, enemy = fac[b][side[b] - 1], fac[b][2 - side[b]]
-            key = f"{faction_name(own)} v {faction_name(enemy)}, {'attack' if attacks[b] else 'defend'}"
-            r = rows.setdefault(key, {"games": 0, "wins": 0})
-            r["games"] += 1
-            r["wins"] += int(won[b])
+    kinds_b = env.kind_battle.cpu().numpy()
+    orders_b = env.order_battle.cpu().numpy()                         # changes, switches, unit-steps
+    minutes = params.dt / 60
+    out = {}
+    for name in names:
+        this = lay.opponent == league.CODE[name]
+        attacks = attacks_all & this
+        c = c_all[this]
+        k = kinds_b[this].sum(0)
+        ch, sw, steps = orders_b[this].sum(0)
+        result = _summary(this, won, t, hp_own, hp_enemy, limit_s, *lords)
+        result.update({"contact_share": float((c >= 0).mean()),
+                       "first_contact_s": float(np.median(c[c >= 0])) if (c >= 0).any() else None,
+                       "fired_share": float(fired_all[this].mean()),
+                       "orders_per_minute": float(ch / max(1e-9, steps * minutes)),
+                       "switches_per_minute": float(sw / max(1e-9, steps * minutes)),
+                       "kinds": {kd: float(k[i] / max(1, k.sum())) for i, kd in enumerate(O.KINDS)},
+                       "behaviour": watch.summary(this),
+                       "roles": {"attack": _summary(attacks, won, t, hp_own, hp_enemy, limit_s, *lords),
+                                 "defend": _summary(this & ~attacks, won, t, hp_own, hp_enemy, limit_s, *lords)}})
+        for role, sel in (("attack", attacks), ("defend", this & ~attacks)):
+            if sel.any():
+                result["roles"][role]["behaviour"] = watch.summary(sel)
+        rows = {}
+        if generated:
+            fac = env.setup.factions
+            for b in np.nonzero(this)[0]:
+                own, enemy = fac[b][side[b] - 1], fac[b][2 - side[b]]
+                key = f"{faction_name(own)} v {faction_name(enemy)}, {'attack' if attacks_all[b] else 'defend'}"
+                r = rows.setdefault(key, {"games": 0, "wins": 0})
+                r["games"] += 1
+                r["wins"] += int(won[b])
+        else:
+            for i, sc in enumerate(scene_list):
+                for s_ in (1, 2):
+                    k_ = this & (lay.scene == i) & (side == s_)
+                    if not k_.any():
+                        continue
+                    r = rows.setdefault(label(sc, s_), {"games": 0, "wins": 0})
+                    r["games"] += int(k_.sum())
+                    r["wins"] += int(won[k_].sum())
         for r in rows.values():
             r["win_rate"] = r["wins"] / max(1, r["games"])
-        return result, rows
-    for i, sc in enumerate(scene_list):
-        for s in (1, 2):
-            k = (lay.scene == i) & (side == s)
-            if not k.any():
-                continue
-            r = rows.setdefault(label(sc, s), {"games": 0, "wins": 0})
-            r["games"] += int(k.sum())
-            r["wins"] += int(won[k].sum())
-    for r in rows.values():
-        r["win_rate"] = r["wins"] / max(1, r["games"])
-    return result, rows
+        out[name] = (result, rows)
+    return out
 
 
 def names_of(army, H):

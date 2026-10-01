@@ -228,7 +228,7 @@ function M.main(bm, config, globals)
 
     local function net_start()
         state.net = bridge.start({army = state.own_army, own = state.sides[1], enemies = state.sides[2],
-            vector = vec, rows = net_rows, emit = emit,
+            vector = vec, rows = net_rows, emit = emit, cco = cco,
             now_ms = function() return bm:time_elapsed_ms() - started_ms end,
             model_ms = function() return bm:time_elapsed_ms() end,
             meta = {batch = state.batch, factions = config.factions, decide_ms = config.decide_ms,

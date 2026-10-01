@@ -11,6 +11,13 @@
 * target: a pointer, as in AlphaStar: the unit's query against every enemy's key; only enemies
   that are visible and alive now.
 * run: run or walk (for move and attack).
+* ability: per own unit, "none" or one of its ability slots (a pointer, as the target): the unit's
+  query against a key made from each slot's state and passport (tools/nn/model/abilities.py), so
+  the choice follows the ability's description, not its slot or name, and a new ability needs no
+  new weights. Only abilities in obs abil_ok (owned, self-cast, ready, the unit takes orders);
+  "none" always. Independent of the order kind: a lord may move and use an ability at once.
+  Sampled only when asked (sample(abilities=True)): code that does not know the head (training
+  before it is wired in) gets Action.ability None, and log_prob leaves it out.
 """
 import math
 from dataclasses import dataclass
@@ -19,6 +26,7 @@ import torch
 from torch import nn
 from torch.distributions import Bernoulli, Categorical
 
+from tools.nn.model import abilities as ab
 from tools.nn.model import observation as ob
 
 from tools.nn.sim.orders import ATTACK, HOLD, KEEP, KINDS, MOVE, WITHDRAW  # noqa: F401  (the simulator's codes)
@@ -31,6 +39,7 @@ class Action:
     point: torch.Tensor    # [B, N] long: bin
     target: torch.Tensor   # [B, N] long: unit index, -1 none
     run: torch.Tensor      # [B, N] bool
+    ability: torch.Tensor = None   # [B, N] long: ability slot to use, -1 none; None: not chosen
 
 
 class Heads(nn.Module):
@@ -44,9 +53,13 @@ class Heads(nn.Module):
         self.run = nn.Linear(d, 1)
         self.q = nn.Linear(d, cfg.pointer)
         self.k = nn.Linear(d, cfg.pointer)
+        self.ability_q = nn.Linear(d, cfg.pointer)
+        self.ability_k = nn.Sequential(nn.Linear(ab.SIZE, d), nn.GELU(), nn.Linear(d, cfg.pointer))
+        self.ability_none = nn.Linear(d, 1)
 
     def forward(self, x, obs_t):
-        """x [B, 1 + N, d] -> masked logits: kind [B, N, 4], point [B, N, P], target [B, N, N], run [B, N]."""
+        """x [B, 1 + N, d] -> masked logits: kind [B, N, 5], point [B, N, P], target [B, N, N], run [B, N],
+        ability [B, N, 1 + SLOTS] (0: none, 1 + k: slot k; when obs_t has abilities)."""
         u = self.norm(x[:, 1:])
         ctrl, ok = obs_t["ctrl"], obs_t["target_ok"]
         kind = self.kind(u)
@@ -55,7 +68,13 @@ class Heads(nn.Module):
         kind = kind.masked_fill(~allowed, NEG)
         target = self.q(u) @ self.k(u).transpose(1, 2) / math.sqrt(self.cfg.pointer)
         target = target.masked_fill(~ok[:, None, :], NEG)
-        return {"kind": kind, "point": self.point(u), "target": target, "run": self.run(u)[..., 0]}
+        out = {"kind": kind, "point": self.point(u), "target": target, "run": self.run(u)[..., 0]}
+        if obs_t.get("abil") is not None:
+            keys = self.ability_k(obs_t["abil"])                                     # [B, N, K, P]
+            slot = (self.ability_q(u)[:, :, None, :] * keys).sum(-1) / math.sqrt(self.cfg.pointer)
+            slot = slot.masked_fill(~(obs_t["abil_ok"] & ctrl[..., None]), NEG)
+            out["ability"] = torch.cat([self.ability_none(u), slot], -1)
+        return out
 
 
 def _dists(logits, temperature=1.0):
@@ -64,8 +83,9 @@ def _dists(logits, temperature=1.0):
             Categorical(logits=logits["target"] / t), Bernoulli(logits=logits["run"] / t))
 
 
-def sample(logits, greedy=False, temperature=1.0):
-    """An Action from the logits (greedy: the most likely choice of each part)."""
+def sample(logits, greedy=False, temperature=1.0, abilities=False):
+    """An Action from the logits (greedy: the most likely choice of each part). abilities: also
+    choose the ability (Action.ability; else None)."""
     kind, point, target, run = _dists(logits, temperature)
     if greedy:
         a = Action(kind.probs.argmax(-1), point.probs.argmax(-1), target.probs.argmax(-1), logits["run"] > 0)
@@ -73,6 +93,9 @@ def sample(logits, greedy=False, temperature=1.0):
         a = Action(kind.sample(), point.sample(), target.sample(), run.sample() > 0.5)
     has_target = logits["target"].max(-1).values > NEG / 2
     a.target = torch.where((a.kind == ATTACK) & has_target, a.target, torch.full_like(a.target, -1))
+    if abilities and "ability" in logits:
+        d = Categorical(logits=logits["ability"] / max(temperature, 1e-6))
+        a.ability = (d.probs.argmax(-1) if greedy else d.sample()) - 1
     return a
 
 
@@ -80,7 +103,8 @@ def log_prob(logits, a, ctrl):
     """(log-probability [B, N], entropy [B, N]) of the parts of the action that matter.
 
     kind always (keep has nothing else); point for move and withdraw; target for attack; run for
-    move and attack. Zero for units that take no orders (ctrl false).
+    move and attack; the ability choice when the action has one (Action.ability not None). Zero for
+    units that take no orders (ctrl false).
     """
     kind, point, target, run = _dists(logits)
     move, attack = a.kind == MOVE, a.kind == ATTACK
@@ -89,6 +113,10 @@ def log_prob(logits, a, ctrl):
     lp = lp + torch.where(attack, target.log_prob(a.target.clamp(min=0)), torch.zeros_like(lp))
     lp = lp + torch.where(move | attack, run.log_prob(a.run.float()), torch.zeros_like(lp))
     ent = kind.entropy() + point.entropy() * (kind.probs[..., MOVE] + kind.probs[..., WITHDRAW]) + run.entropy()
+    if a.ability is not None and "ability" in logits:
+        d = Categorical(logits=logits["ability"])
+        lp = lp + d.log_prob(a.ability.clamp(min=-1) + 1)
+        ent = ent + d.entropy()
     zero = torch.zeros_like(lp)
     return torch.where(ctrl, lp, zero), torch.where(ctrl, ent, zero)
 

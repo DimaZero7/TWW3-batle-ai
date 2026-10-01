@@ -10,7 +10,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -T
 ```
 
 Параметры:
-`-Target ai-vs-ai|unit-readout|move-probe|manual|roster-capture|archer-range|enemy-layout|nn-arena|map-capture`
+`-Target ai-vs-ai|unit-readout|move-probe|manual|roster-capture|archer-range|enemy-layout|nn-arena|lord-swarm|map-capture`
 (обязательный, цель должна быть [собрана](build.md)),
 `-TimeoutSeconds` (по умолчанию 240 с на загрузку + срок боя `deadline_s` из
 `manifest.json`; без срока — 1200), `-KeepGameOpen` (не закрывать игру после завершения),

@@ -5,6 +5,7 @@
 
 Only the side's units that take orders get one; every other unit (enemy, dead, routing) holds.
 A unit may get KEEP (code 4): no new order, the one in force goes on (x, z = its place, target -1).
+Orders.ability: the slot of an ability to use now (only where obs.abil_ok allowed it), -1 none.
 """
 import numpy as np
 import torch
@@ -31,16 +32,21 @@ def to_orders(cfg, action, obs_t, frame, bounds):
     point = torch.where(move[..., None], point, here)
     target = torch.where(kind == hd.ATTACK, action.target, torch.full_like(action.target, -1))
     run = action.run & ((kind == hd.MOVE) | (kind == hd.ATTACK))
-    return Orders(kind=kind, x=point[..., 0].float(), z=point[..., 1].float(), target=target, run=run)
+    ability = None
+    if action.ability is not None:
+        ability = torch.where(ctrl & (action.ability >= 0), action.ability, torch.full_like(action.ability, -1))
+    return Orders(kind=kind, x=point[..., 0].float(), z=point[..., 1].float(), target=target, run=run,
+                  ability=ability)
 
 
 @torch.no_grad()
-def act(actor, obs, setup, h=None, greedy=False, temperature=1.0):
-    """(orders, new memory, logits, action) for the batch of one side's observation."""
+def act(actor, obs, setup, h=None, greedy=False, temperature=1.0, abilities=True):
+    """(orders, new memory, logits, action) for the batch of one side's observation. abilities: the
+    network also chooses its abilities (Orders.ability)."""
     device = next(actor.parameters()).device
     obs_t = policy.to_torch(obs, device)
     logits, h = actor(obs_t, h)
-    action = hd.sample(logits, greedy, temperature)
+    action = hd.sample(logits, greedy, temperature, abilities)
     bounds = torch.as_tensor(setup.bounds, device=device)
     orders = to_orders(actor.cfg, action, obs_t, frame_to(obs.frame, device), bounds)
     return orders, h, logits, action

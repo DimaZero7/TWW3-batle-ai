@@ -3,6 +3,10 @@
 * TokenEncoder: the same weights for every unit, own and enemy (the unit is known by its passport,
   not by its name); the side's context (character, role, time) is added to every token and is
   also a token of its own (index 0).
+* AbilityEncoder: each ability slot (its state and passport, tools/nn/model/abilities.py) through
+  the same small network; the sum over the unit's owned slots is added to the unit's token, so the
+  order of the slots does not matter. Its last layer starts at zero: an actor trained before
+  abilities sees exactly what it saw.
 * Block: attention + feed-forward. Masks: padding, own dead units and known-dead enemies are
   never looked at. Bias: a learned number per head for the distance between two units (buckets),
   so "who is near" is easy; tokens without a known position use a bucket of their own.
@@ -13,6 +17,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from tools.nn.model import abilities as ab
 from tools.nn.model import observation as ob
 from tools.nn.model.lora import LoRALinear
 
@@ -29,6 +34,19 @@ class TokenEncoder(nn.Module):
         c = self.ctx(ctx)
         u = self.unit(tokens) + c[:, None]
         return self.norm(torch.cat([c[:, None], u], 1))
+
+
+class AbilityEncoder(nn.Module):
+    def __init__(self, d):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(ab.SIZE, d), nn.GELU(), nn.Linear(d, d))
+        nn.init.zeros_(self.net[2].weight)
+        nn.init.zeros_(self.net[2].bias)
+
+    def forward(self, abil):
+        """abil [B, N, SLOTS, SIZE] -> [B, N, d]: the sum over the owned slots."""
+        owned = (abil[..., ab.INDEX["owned"]] > 0.5).float()[..., None]
+        return (self.net(abil) * owned).sum(2)
 
 
 def distance_buckets(pos, known, bins):

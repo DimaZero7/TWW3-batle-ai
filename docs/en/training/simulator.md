@@ -60,9 +60,12 @@ first; `side` = 0 is an empty slot). Three groups:
 **Orders** (`tools/nn/sim/orders.py`): per unit and decision step `kind` ∈ hold (0), move (1),
 attack (2), withdraw (3), keep (4: no new order, the one in force goes on; a unit with no order
 holds); the point `x`, `z` for move and withdraw (the unit's centre); `target` — the enemy's
-slot for attack; `run` — run or walk. All `[B, N]`. A move order to a unit in melee does not
-take it out: that is what withdraw is for (it breaks off, and the enemies in contact strike its
-back).
+slot for attack; `run` — run or walk; `ability` — the unit's ability slot to use now (−1 none;
+optional: orders made without it get −1; independent of `kind`). All `[B, N]`. A move order to a
+unit in melee does not take it out: that is what withdraw is for (it breaks off, and the enemies
+in contact strike its back). An ability order fires a ready self-cast ability once (not passive,
+not active, recharged); otherwise nothing happens. The network reads the abilities' timers from
+`State.observation()` (`ab{k}_on`, `ab{k}_cd` [B, N], s).
 
 ## One step (0.5 s)
 
@@ -88,8 +91,8 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 | Contact | edges within 1 m (2 m more for those already fighting) | measured: centre distance at the first contact |
 | Facing | a moving unit faces where it goes, but a step of less than 10 m to its point goes without turning; a formation in melee turns at most 2° a second (a lord turns at once) | measured: infantry in melee turns 1°/s (median; mean 2.3), a free unit struck in the flank turns 8° in 5 s (median) |
 | Order point | the game records the front's centre; the simulator goes to the unit's centre, half a depth behind | measured (spearmen 3.3–4.8 m, slaves 6.5–6.9 m) |
-| Men fighting | 0.75 of the files in contact; a unit shares out to each side of its formation (front, left, right, back) no more than that side holds; at most 8 around a lord; a lord fought by several units takes the strongest one's rate and 0.35 of the others' | calibrated; per side — measured: a unit already fighting hits a newcomer on its flank 2.2× the rule in the first 15 s (with one shared front the simulator gave 1.2×); 8 — measured ([melee](../game/units/melee.md)); 0.35 — measured (below, "Lords fought by several units") |
-| Hit chance | 35 + 0.1 × (attack − defence), within 8–90 %; defence ×0.6 from the flank, ×0.3 from the rear; the defence lost counts 2.0× the rule from the flank, 0.25× from the rear (against a lord: the rule) | DB numbers; the weights calibrated (see below and [flanks](#flanks-rear-and-charges-in-whole-battles)) |
+| Men fighting | 0.75 of the files in contact; a unit shares out to each side of its formation (front, left, right, back) no more than that side holds; at most 9 men strike a lord in all, however many units, their rates summed; with the enemy lord on him the infantry at 0.35; a unit attacking another enemy strikes a lord it touches at 0.4 | calibrated; per side — measured: a unit already fighting hits a newcomer on its flank 2.2× the rule in the first 15 s (with one shared front the simulator gave 1.2×); 9, the sum — measured ([a lord surrounded](../game/units/lord-swarm.md)); 0.35, 0.4 — whole battles (below, "Lords fought by several units") |
+| Hit chance | 35 + 0.1 × (attack − defence), within 8–90 %; defence ×0.6 from the flank, ×0.3 from the rear; the defence lost counts 2.0× the rule from the flank, 0.25× from the rear (against a lord: none, measured) | DB numbers; the weights calibrated (see below and [flanks](#flanks-rear-and-charges-in-whole-battles)) |
 | Damage of a hit | armour-piercing + base × (1 − 0.75 × armour/100), no more than a man's health | DB (armour stops a random 50–100 %) |
 | Time between blows | `attack_interval_s` of the passport | DB |
 | A lord's blow | hits up to `splash` (4) men | DB; agrees with the measured 0.36 kills a second |
@@ -109,7 +112,7 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 | States | wavering below 16 points, rout at 0, shattered at the third rout, no new rout within 10 s of a rally | DB |
 | Rally | while no standing enemy is within 90 m the router regains 2 points a second; rallies at MoralePercent 0.23 | measured: 0.23 and 90 m (365 rallies); 2 points calibrated (median rally 44 s) |
 | Fatigue | charge +34, melee +19, shooting +18, running +4, walking −1, standing −7, ×5 a second; states by the database thresholds | DB; ×5 fitted to 1315 recorded changes of state |
-| Lord abilities | the side the game's AI plays (`ai`, side 2 by default) fires its lord's active abilities; the network's side never does (the bridge gives no ability orders); passives work for both. Warlord: Deadly Onslaught (31 s, ready 90 s after: melee damage and AP ×1.25, charge bonus ×1.6) in melee; Verminous Valour (17 s / 60 s: speed ×1.25, +8 morale points; its 25 m blast has no damage) with an enemy within 60 m; Rally (14 s / 60 s: +16 to friends within 35 m) when a friend there wavers. General: Stand Your Ground (18 s / 90 s: melee defence +24, +16 within 35 m) in melee; Foe Seeker (25 s / 60 s: speed ×1.25) with an enemy within 60 m; Hold the Line, passive (defence +5, +4 within 35 m) | DB (`config/nn/sim.json` abilities; owned per the game's roster readout); when the AI fires them is an assumption |
+| Lord abilities | the side the game's AI plays (`ai`, side 2 by default) fires its lord's active abilities by a rule; the network's side fires them by order (`Orders.ability`; a side the network plays should have `ai` false); passives work for both. Every number is the ability's passport (`config/nn/abilities.json`, the database; `sim.json` abilities says which are modelled and the AI's triggers); effects on the owner (phase targets self), his side's units within range (friends) and enemies within range (enemies): speed, charge speed, melee attack and defence, damage, AP, charge bonus, morale. Warlord: Deadly Onslaught (31 s, ready 90 s after: melee damage and AP ×1.25, charge bonus ×1.6) in melee; Verminous Valour (17 s / 60 s: speed ×1.25, +8 morale points; its 25 m blast has no damage) with an enemy within 60 m; Rally (14 s / 60 s: +16 to friends within 35 m) when a friend there wavers. General: Stand Your Ground (18 s / 90 s: melee defence +24, +16 within 35 m) in melee; Foe Seeker (25 s / 60 s: speed ×1.25) with an enemy within 60 m; Hold the Line, passive (defence +5, +4 within 35 m) | DB (`config/nn/sim.json` abilities; owned per the game's roster readout); when the AI fires them is an assumption |
 | Map | a square ±1020 m; a routing unit that crosses the edge leaves the battle | measured |
 | Visibility | everything is visible (`vis`, kept for later) | a flat empty map |
 
@@ -296,17 +299,30 @@ compiler for compiling on the CPU.
   broke the pairs (fights twice as long) and did not help the mirror. What triggers it in the
   game is not known.
 - **Simulated battles end later**: 72 % are not over when their recording ends (80 % before the flanks).
-- **Lords fought by several units** (01.10.2026, `build/nn-sim/flank/lord_n2.py`, not in Git:
-  the 28 whole battles and 27 gate runs replayed twice; a lord in melee, not shot at). In the
-  game most of a lord's loss comes from the enemy lord: against the enemy lord alone 12.2 HP/s
-  (gate), with one enemy unit more 13.5, two 12.4, three 15.3; against infantry alone 3.5, two
-  units 5.1. The simulator added the attackers up (26.8 with the lord and a unit). Now a lord
-  takes the strongest attacker's rate and 0.35 of the others' (`contact.lord_others`), and the
-  friendly fire that lands on a lord is ×0.43 (a lone target), not the whole share. Lord HP/s by
-  the enemy units in contact (gate runs; game / before / now): 1 — 7.6 / 8.4 / 8.4; 2 — 9.5 /
-  20.0 / 16.7; 3 — 12.2 / 19.4 / 14.3; 4 — 13.5 / 19.3 / 14.4. Still high: a lord fought by the
-  enemy lord and one unit (21.2 against 13.5), and infantry alone on a lord in whole battles
-  (4.8–6.6 against 3.5–5.1; the pairs match). The pairs did not change (51 of 54).
+- **Lords fought by several units** (01.10.2026; measured in the game by the
+  [lord swarm probe](../game/units/lord-swarm.md), 3 battles). A lord standing in a ring of 1–4
+  spear units loses the same HP/s however many units there are (General 7.8 / 8.3 / 8.7 / 7.4,
+  Warlord 6.2 / 5.8 / 5.1 / 4.8); 4–5 enemy soldiers stand within 2.5 m of him, shared by the
+  units; his back and flanks give no extra; an armour-piercing unit counts by its share. The old
+  rule (the strongest attacker's rate and 0.35 of the others', inferred from unit totals of whole
+  battles) is replaced: at most `lord_max_attackers` (9) men strike a lord in all, summed;
+  `lord_direction` 0 (no flank or rear rule on a lord); an enemy lord among the attackers keeps
+  his blow (the cap squeezed him out before: the lord, a lord and three units took half of what
+  the lord alone took); with the enemy lord on him the infantry counts at `lord_rival_others`
+  0.35; a unit told to attack another enemy strikes a lord it only touches at `lord_incidental`
+  0.4 (whole battles: 1.7 HP/s against 4.1 when he is its target). The probe's trials replayed
+  (`python -m tools.nn.lord_swarm --sim`; game / old / new): one spear unit 7.8 / 6.8 / 7.7 and
+  6.2 / 5.4 / 6.1; four 7.4 / 7.8 / 8.0 and 4.8 / 6.7 / 6.3; halberds 21.5 / 15.2 / 17.1 and
+  11.2 / 10.4 / 11.7; the other lord and three units 29.8 / 9.8 / 21.8 and 27.6 / 9.5 / 22.4;
+  mean error over the 24 layouts 22 % → 18 % (13 of 24 within 20 %, as before). The pairs stay
+  51 of 54 (the lords' steady loss: General −17 % → −6 %, Warlord −2 % → +10 %; the General's
+  first 15 s now +27 %); same winner 19 of 26 (20 before; a mirror battle that was 4 : 4 of the
+  8 replays) and 17 of 27 network battles (18; one that 6 of 8 replays got right now 5 of 8 get wrong). Lord HP/s in the whole
+  battles by contacts (game / now): infantry alone 3.7 / 4.7, two units 4.6 / 4.9; the enemy lord
+  alone 16.5 / 18.9, with a unit 17.6 / 19.2. Still high in the network's gate runs: the enemy lord
+  and one unit 13.5 against 20.9 — not the infantry (with `lord_rival_others` 0 it is still 19.8),
+  partly missile spill on the lord (16.6 without it and the infantry); the rest is the enemy lord's own rate in a
+  crowd, not found yet.
 - **Lord abilities** (01.10.2026, `tools/nn/sim/abilities.py`, the row in the table above). When
   the game's AI fires them is assumed, not measured (only the Warlord's speed in the recordings,
   5–6.5 m/s, shows Verminous Valour in use). The CA planner's side 1 of the 28 whole battles gets
@@ -316,6 +332,10 @@ compiler for compiling on the CPU.
   of 16), the network's battles 19 of 27 (16 before); the swarm of run 20261001-074420 (8
   replays): ours lost 12.9k (12.2k before, the game 14.7k), the Warlord 2.5k (2.5k, the game 1.6k).
   The simulator now runs ~590 battles/s on the GPU (~675 before).
+  Since 01.10.2026 (later) the numbers come from the ability passports, not from `sim.json`
+  (the same values), and the network's side fires its abilities by order. The conditional
+  passives (Single Entity, Scurry Away, Strength in Numbers) are shown to the network but have no
+  effect here (`sim.json` abilities `model`).
 - **Shots at a lord in a crowd** (spill in melee, 01.10.2026): the game's AI slingers shoot the
   network's General while he fights among its own spearmen, and the misses fall on those spearmen
   (run 20261001-074420, s 127–240: four spearmen and the General on the Warlord lost 14.7k HP, the

@@ -20,6 +20,8 @@ end
 
 -- One unit line: unit <name> hold | move <x> <z> <run> | withdraw <x> <z> <run>
 -- | attack <target name> <run> | keep. run is 1 or 0.
+-- An ability line: ability <unit name> <ability key>: use it now (once; independent of the
+-- unit's order). Files without ability lines are as before.
 local function unit_order(w)
     local name, kind = w[2], w[3]
     if not name or not M.KINDS[kind] then return nil, 'bad kind: ' .. tostring(kind) end
@@ -36,11 +38,12 @@ local function unit_order(w)
     return name, order
 end
 
--- The companion's answer -> {move, batch, think_ms, orders = {name -> order}},
--- or nil and the reason. A file without its last line 'end' is not complete.
+-- The companion's answer -> {move, batch, think_ms, orders = {name -> order},
+-- abilities = {{unit, key}...}}, or nil and the reason. A file without its last line 'end'
+-- is not complete.
 function M.parse_orders(text)
     if type(text) ~= 'string' or text == '' then return nil, 'empty' end
-    local doc = {orders = {}, count = 0}
+    local doc = {orders = {}, count = 0, abilities = {}}
     local header, complete = false, false
     for line in text:gmatch('[^\r\n]+') do
         local w = words(line)
@@ -58,6 +61,9 @@ function M.parse_orders(text)
             if not name then return nil, order end
             doc.orders[name] = order
             doc.count = doc.count + 1
+        elseif w[1] == 'ability' then
+            if not w[2] or not w[3] then return nil, 'ability without a unit or a key' end
+            doc.abilities[#doc.abilities + 1] = {unit = w[2], key = w[3]}
         elseif w[1] == 'end' then
             complete = true
         end
@@ -133,11 +139,27 @@ function M.missile_duty(duty, me, target)
 end
 
 -- What the companion reads: meta (batch, factions, attacker...), the move
--- number, the battle time and every unit's row.
-function M.state_document(meta, move, t_ms, units, done)
-    local doc = {move = move, t = t_ms, units = units, done = done == true}
+-- number, the battle time and every unit's row; used = {unit name -> {ability key ->
+-- battle ms of its last use by the bridge}} (the companion counts the timers from it).
+function M.state_document(meta, move, t_ms, units, done, used)
+    local doc = {move = move, t = t_ms, units = units, done = done == true, abilities_used = used or {}}
     for k, v in pairs(meta) do doc[k] = v end
     return doc
+end
+
+-- The phases active on a unit now, as its card shows them (CCO ActiveEffectList: verified in
+-- battle, docs/en/game/units/states.md). read(field) -> the unit's CcoBattleUnit value or nil.
+-- Returns a list of phase keys ({} when none), or nil when the list cannot be read.
+M.MAX_EFFECTS = 16
+function M.active_effects(read)
+    local n = read('ActiveEffectList.Size')
+    if type(n) ~= 'number' then return nil end
+    local out = {}
+    for i = 0, math.min(n, M.MAX_EFFECTS) - 1 do
+        local key = read('ActiveEffectList.At(' .. i .. ').PhaseRecordContext.Key')
+        if type(key) == 'string' and key ~= '' then out[#out + 1] = key end
+    end
+    return out
 end
 
 -- Real milliseconds between two os.clock() readings (nil when unknown).

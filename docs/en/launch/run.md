@@ -10,7 +10,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -T
 ```
 
 Options:
-`-Target ai-vs-ai|unit-readout|move-probe|manual|roster-capture|archer-range|enemy-layout|nn-arena|map-capture`
+`-Target ai-vs-ai|unit-readout|move-probe|manual|roster-capture|archer-range|enemy-layout|nn-arena|lord-swarm|map-capture`
 (required; the target must be [built](build.md) first),
 `-TimeoutSeconds` (default 240 s for loading + the battle's deadline `deadline_s` from
 `manifest.json`; 1200 without one), `-KeepGameOpen` (leave the game running after completion),

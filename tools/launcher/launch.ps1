@@ -14,7 +14,7 @@
 #    restored byte for byte afterwards (user, 30.09.2026: never Very Hard
 #    against the game's AI — we train for people, not a cheating AI).
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('ai-vs-ai', 'unit-readout', 'move-probe', 'manual', 'roster-capture', 'enemy-layout', 'map-capture', 'archer-range', 'nn-arena')][string]$Target,
+    [Parameter(Mandatory = $true)][ValidateSet('ai-vs-ai', 'unit-readout', 'move-probe', 'manual', 'roster-capture', 'enemy-layout', 'map-capture', 'archer-range', 'nn-arena', 'lord-swarm')][string]$Target,
     [int]$TimeoutSeconds = 0,
     [switch]$KeepGameOpen,
     # After the result the game stays open this long (or until the user closes it), so a watcher

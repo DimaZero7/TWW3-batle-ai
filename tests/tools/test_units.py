@@ -77,7 +77,8 @@ def test_passports_hold_the_v1_units_and_equal_their_cards():
             assert units.check_card(p, c) == [], key
             assert p["card_check"] == "equal"
             checked += 1
-    assert checked == len(units.UNITS) == 7
+    # The v1 units have cards from battle; the probe's halberds (lord swarm, 01.10.2026) do not.
+    assert checked == 7 and len(units.UNITS) == 9
 
 
 def test_v1_spears_have_no_shield_and_missile_units_have_missiles():

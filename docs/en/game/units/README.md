@@ -13,6 +13,7 @@ September 2026, **v9.0.1, build 50381**.
 - [Commands tested in battle](commands.md) — Which unit orders from Lua we checked in battle and how the engine carries them out
 - [Starting deployment](deployment.md) — Verified on 26 September 2026 in five controlled diagnostic launches on [The Moorlands Route](../maps/moorlands-route.md), using 15 Empire units per side (Gener…
 - [Live experiments and reproducibility](evidence.md) — Ten completed automatic runs, **55,356 samples**, with raw orders/state transitions and verified cleanup records
+- [A lord surrounded](lord-swarm.md) — How much a lord loses when one to four infantry units attack him from different sides, and what an armour-piercing unit or the enemy lord adds
 - [Melee](melee.md) — How the game counts blows in melee and how many men really fight
 - [Missile damage](missile-damage.md) — How much health an Empire archers' arrow takes, how often they shoot and at whom
 - [Missile attack range](missile-range.md) — **Verified 2026-09-26:** Lua can read missile range for own units, a separate same-alliance army, and currently visible enemies
@@ -25,7 +26,7 @@ September 2026, **v9.0.1, build 50381**.
 - [Visibility and hiding](visibility.md) — When the enemy sees a hidden unit, how an ambush hides again and how the ground hides the enemy from us
 <!-- /generated -->
 
-**Battle mechanics:** [morale](morale.md) · [melee](melee.md) · [missile damage](missile-damage.md) · [pace and fatigue](pace.md) — rules from the game's database and arena battle recordings.
+**Battle mechanics:** [morale](morale.md) · [melee](melee.md) · [missile damage](missile-damage.md) · [pace and fatigue](pace.md) · [a lord surrounded](lord-swarm.md) — rules from the game's database and arena battle recordings.
 
 ## Test conditions
 

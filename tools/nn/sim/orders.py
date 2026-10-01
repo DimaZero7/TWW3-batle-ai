@@ -1,11 +1,14 @@
 """Orders to units: the simulator's action layout (docs/en/training/simulator.md).
 
-Each decision step every unit of the batch gets one order, as five tensors [B, N]:
+Each decision step every unit of the batch gets one order, as six tensors [B, N]:
 
-    kind    int64  HOLD, MOVE, ATTACK, WITHDRAW or KEEP (below)
-    x, z    float  MOVE / WITHDRAW: the point to go to, m (same frame as the state's x, z)
-    target  int64  ATTACK: the enemy's slot (the state's layout), -1 none
-    run     bool   run (True) or walk (False)
+    kind     int64  HOLD, MOVE, ATTACK, WITHDRAW or KEEP (below)
+    x, z     float  MOVE / WITHDRAW: the point to go to, m (same frame as the state's x, z)
+    target   int64  ATTACK: the enemy's slot (the state's layout), -1 none
+    run      bool   run (True) or walk (False)
+    ability  int64  the unit's ability slot to use now (0..SLOTS-1, tools/nn/sim/abilities.py), -1 none.
+                    Optional: Orders made without it get -1 everywhere (the five-field contract
+                    still works). Independent of kind: a lord may move and use an ability at once.
 
     HOLD      stay; shoot at will at enemies in range; fight back when attacked.
     MOVE      go to (x, z) and stop there; missile units do not shoot on the move. A unit
@@ -20,11 +23,14 @@ Each decision step every unit of the batch gets one order, as five tensors [B, N
 
 An order is given every decision step and stays in force until the next one that is not KEEP.
 Orders to empty slots and to routing or shattered units are ignored (routing units flee on their
-own).
+own). An ability order is not kept: it fires the ability once if it is ready (self-cast, not
+active, recharged), else nothing happens.
 A network that sees its own units first (state.own_first) turns its target index back with
 state.slot_from_own_first.
 """
 from dataclasses import dataclass
+
+from tools.nn.sim.abilities import SLOTS
 
 try:
     import torch
@@ -39,6 +45,7 @@ FIELDS = {
     "z": ("f", "MOVE/WITHDRAW point z, m"),
     "target": ("i", "ATTACK: enemy slot, -1 none"),
     "run": ("b", "run instead of walk"),
+    "ability": ("i", "ability slot to use now, -1 none"),
 }
 
 
@@ -49,6 +56,11 @@ class Orders:
     z: "torch.Tensor"
     target: "torch.Tensor"
     run: "torch.Tensor"
+    ability: "torch.Tensor" = None
+
+    def __post_init__(self):
+        if self.ability is None:
+            self.ability = torch.full_like(self.kind, -1)
 
     def to(self, device):
         return Orders(*(getattr(self, k).to(device) for k in FIELDS))
@@ -62,7 +74,8 @@ def hold(B, N, device="cpu"):
     return Orders(kind=torch.full((B, N), HOLD, dtype=torch.int64, device=device),
                   x=torch.zeros((B, N), device=device), z=torch.zeros((B, N), device=device),
                   target=torch.full((B, N), -1, dtype=torch.int64, device=device),
-                  run=torch.zeros((B, N), dtype=torch.bool, device=device))
+                  run=torch.zeros((B, N), dtype=torch.bool, device=device),
+                  ability=torch.full((B, N), -1, dtype=torch.int64, device=device))
 
 
 def merge(first, second, use_second):
@@ -82,3 +95,5 @@ def check(orders, N):
         raise ValueError("ATTACK without a target")
     if not (torch.isfinite(orders.x).all() and torch.isfinite(orders.z).all()):
         raise ValueError("order point not finite")
+    if ((orders.ability < -1) | (orders.ability >= SLOTS)).any():
+        raise ValueError("order ability slot out of range")

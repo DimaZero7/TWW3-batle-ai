@@ -25,7 +25,7 @@ from tools.nn.sim import battle
 from tools.nn.sim import orders as O
 from tools.nn.sim import state as S
 from tools.nn.sim.params import load
-from tools.nn.train import league, opponents, randomise, reward, scenes
+from tools.nn.train import behaviour, league, opponents, randomise, reward, scenes
 
 CRITIC_KEYS = ("tokens", "ctx", "own", "attend", "pos")
 FRAME = ("cx", "cz", "ux", "uz")
@@ -140,6 +140,10 @@ class Battles:
         self.kind_stats = torch.zeros(len(O.KINDS), dtype=torch.long, device=self.device)   # decisions by kind
         self.lord_stats = torch.zeros(3, device=self.device)        # learner battles ended, own / enemy lord dead
         self.switch_stats = torch.zeros(1, device=self.device)      # the learner's attack target switches
+        # The same per battle (evaluation reads them per opponent): decisions by kind [B, kinds], and
+        # order changes, target switches and standing unit-steps [B, 3].
+        self.kind_battle = torch.zeros(self.B, len(O.KINDS), device=self.device)
+        self.order_battle = torch.zeros(self.B, 3, device=self.device)
         self.start()
 
     @property
@@ -221,9 +225,13 @@ class Battles:
             *_, o_past, h_past_new = self._act(self.past_actor, a, frame, self.rows_past, self.h_past, False)
             parts.append((self.rows_past, o_past))
         lp, _ = hd.log_prob(logits, action, obs_r["ctrl"])
-        value = critic(c) if critic is not None else None
+        value = unit_value = None
+        if critic is not None:
+            value, unit_value = critic(c, per_unit=True)
         acting = obs_r["ctrl"] & ~self.st.done[self.rows_learn % self.B][:, None]
         self.kind_stats += torch.bincount(action.kind[acting], minlength=len(O.KINDS))[:len(O.KINDS)]
+        onehot = torch.nn.functional.one_hot(action.kind.clamp(0, len(O.KINDS) - 1), len(O.KINDS)).float()
+        self.kind_battle.index_add_(0, self.rows_learn % self.B, (onehot * acting[..., None].float()).sum(1))
 
         was_done = self.st.done.clone()
         orders = self.assemble(parts)
@@ -231,6 +239,7 @@ class Battles:
         switched = reward.retargets(self.st.u, orders) & ~was_done[:, None]
         cost = reward.order_cost(changes, self.st.u["side"], self.weights, switched)
         self._count_orders(changes, was_done)
+        prev = reward.unit_before(self.st.u) if critic is not None else None
         self.advance(self.st, orders, self.params, self.params.dt)
         after = reward.measure(self.st)
         finished = self.st.done & ~was_done
@@ -239,12 +248,20 @@ class Battles:
         self.timeouts += int((finished & (after[:, 0, 1] > 0) & (after[:, 1, 1] > 0)).sum())
         rb, rs = self.rows_learn % self.B, self.rows_learn // self.B
         r_rows, d_rows = r[rb, rs], finished[rb]
+        unit_rows = None
+        if prev is not None:
+            # Each learner unit's own reward (reward.unit_step), in the row's slots; 0 for the other side.
+            ur = reward.unit_step(prev, self.st, behaviour.facts(self.st, self.params), self.params, self.weights)
+            own = self.st.u["side"][rb] == (rs + 1)[:, None]
+            unit_rows = torch.where(own & ~was_done[rb][:, None], ur[rb], torch.zeros_like(ur[rb]))
         self._count(finished, rb, rs, d_rows)
         lord_dead = after[:, :, 2] < 0.5 if after.shape[-1] > 2 else torch.zeros_like(after[:, :, 0], dtype=torch.bool)
         d = d_rows.float()
         self.lord_stats += torch.stack([d.sum(), (d * lord_dead[rb, rs].float()).sum(),
                                         (d * lord_dead[rb, 1 - rs].float()).sum()])
-        self.switch_stats += self._learner_units(switched).float().sum()
+        sw = self._learner_units(switched).float().sum(1)
+        self.switch_stats += sw.sum()
+        self.order_battle[:, 1] += sw
 
         if self.auto_reset:
             self._reset(finished)
@@ -255,7 +272,7 @@ class Battles:
             self.h_past = h_past_new * keep[self.rows_past % self.B][:, None, None]
         self.cur = self.observe(critic is not None)
         return {"obs": obs_r, "action": action, "lp": lp, "value": value, "reward": r_rows,
-                "done": d_rows, "critic_obs": c}
+                "done": d_rows, "critic_obs": c, "unit_value": unit_value, "unit_reward": unit_rows}
 
     def _count(self, finished, rb, rs, d_rows):
         won = (self.st.winner[rb] == rs + 1).float()
@@ -295,7 +312,10 @@ class Battles:
         for s in (1, 2):
             learner = learner | ((side == s) & (self.ctrl[:, s - 1] == league.LEARNER)[:, None])
         standing = (side > 0) & (u["men"] > 0) & ~u["gone"] & ~u["r"] & learner & ~was_done[:, None]
-        self.orders_stats += torch.stack([(changes & learner).float().sum(), standing.float().sum()])
+        c, n = (changes & learner).float().sum(1), standing.float().sum(1)
+        self.orders_stats += torch.stack([c.sum(), n.sum()])
+        self.order_battle[:, 0] += c
+        self.order_battle[:, 2] += n
 
     def orders_per_minute(self, reset=True):
         """Real order changes per standing learner unit per minute of battle since the last call."""
@@ -336,15 +356,16 @@ class Battles:
 
     @torch.no_grad()
     def value(self, critic):
+        """(the side's value [R], per-unit values [R, N]) of the learner rows now."""
         if self.cur is None:
             self.cur = self.observe(True)
-        return critic(self.cur[2])
+        return critic(self.cur[2], per_unit=True)
 
 
 def collect(env, actor, critic, T):
     """T steps of every battle -> a dict of stacked tensors [T, R, ...], the memory the chunk began
-    with h0 [R, 1 + N, d], reset [T, R] (a new battle began at step t: its memory starts empty) and
-    the bootstrap value [R]."""
+    with h0 [R, 1 + N, d], reset [T, R] (a new battle began at step t: its memory starts empty), the
+    bootstrap value [R], and per unit: unit_reward, unit_value [T, R, N], last_unit_value [R, N]."""
     h0 = env.h_learn
     steps = [env.step(actor, critic) for _ in range(T)]
     out = {}
@@ -355,7 +376,7 @@ def collect(env, actor, critic, T):
     out["reset"] = torch.cat([torch.zeros_like(done[:1]), done[:-1]])
     out["action"] = hd.Action(*(torch.stack([getattr(s["action"], f) for s in steps])
                                 for f in ("kind", "point", "target", "run")))
-    for k in ("lp", "value", "reward", "done"):
+    for k in ("lp", "value", "reward", "done", "unit_value", "unit_reward"):
         out[k] = torch.stack([s[k] for s in steps])
-    out["last_value"] = env.value(critic)
+    out["last_value"], out["last_unit_value"] = env.value(critic)
     return out

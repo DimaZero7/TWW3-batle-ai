@@ -26,6 +26,8 @@ bash tools/nn/dock.sh tools.nn.train.evaluate --checkpoint build/nn-train/latest
 bash tools/nn/dock.sh tools.nn.train.evaluate --checkpoint build/nn-train/latest.pt --generated 512 \
   --opponents ai_like,nearest,hold_shoot,past --against build/nn-train/runs/long19/latest.pt
 bash tools/nn/dock.sh tools.nn.train.checkpoint                  # write an untrained random.pt
+# the standard test of a change (below): before -> after behaviour report in build/nn-train/test5/<label>/
+DOCK_NAME=t2-test5 bash tools/nn/dock.sh tools.nn.train.test5 --label mychange [-- run.py options]
 ```
 
 Main options of `run`: `--name` (the folder under `build/nn-train/runs/`), `--init` (start from a
@@ -33,7 +35,10 @@ checkpoint), `--armies` (`scenes` or `generated`), `--curriculum`, `--battles` (
 `--steps` (decisions per chunk, 64), `--limit` (3600 s), `--lr`, `--anchor` and `--anchor-end`,
 `--entropy` and `--entropy-end` (linear from the first to the second over the run),
 `--critic-warmup`, the reward weights (`--timeout`, `--idle`, `--hp`, `--standing`,
-`--order-cost`, `--lord`, `--retarget`, `--idle-ramp`, `--tempo`, `--tempo-after`), `--mix`,
+`--order-cost`, `--lord`, `--retarget`, `--idle-ramp`, `--tempo`, `--tempo-after`), per-unit
+credit (`--unit-credit`, `--unit-hp`, `--flanked`, `--missile-melee`, `--crowd`, `--flank-attack`, `--idle-near`,
+`--neighbour`; [below](#per-unit-credit-01102026)), `--updates` (train that many updates instead of
+`--minutes`, which then only caps the time), `--mix`,
 `--small share:units` (that share of every bank of random battles with at most `units` a side),
 `--eval-every` minutes / `--eval-opponents` / `--eval-battles` (evaluation on `EVAL_SEEDS` during
 the run, both roles; the best mean win rate is saved as `best_eval.pt`, the evaluations in
@@ -63,6 +68,68 @@ only), `meta`. `load_policy(path)` gives the actor ready to play; the
 **Replays** are folders like a recorded run: `manifest.json` and `events.jsonl` with an
 `nn_sample` every second and the `result`. `tools.nn.gamedata.load(folder)` reads them as a
 game battle. `manifest.json` also says which side the network played and against whom.
+
+## Test protocol (`test5`)
+
+`tools/nn/train/test5.py`: the standard short test of a training change. Every change is closed
+with it, so tests can be compared with each other.
+
+1. **Before.** The starting network (`--init`, by default `runs/long_ai/best.pt`, 2 of 4 against
+   the game's AI) plays the evaluation: 512 battles of random armies from `EVAL_SEEDS` (up to 19
+   units a side) per opponent, 256 in each role, against `ai_like`, `nearest` and `hold_shoot`. All
+   1536 battles run in one batch (`evaluate.play(..., together=True)`), the same battles every time.
+2. **Training.** 36 PPO updates (`--updates`; ~5 minutes on a free GPU) with the current code and
+   the settings of the `long_ai2` continuation (`test5.PROTOCOL`: random armies up to 19 units,
+   `--small 0.35:6`, KL to `bcmix` 0.06 → 0.03, entropy 0.003 → 0.001, the attacker's time
+   pressure, `long19` among the past versions) and the baseline's `--unit-credit 0` pinned, so
+   tests stay comparable when `run.py`'s defaults change. Options after `--` go to `run.py` and
+   override them: a task passes its own new settings there (`-- --unit-credit 0.3`);
+   `report.json` keeps them all (`protocol`, `options`, `train_args`). A fixed number of updates, not minutes: on a GPU shared with other jobs an update took
+   up to 290 s, and a 5-minute test learned 1–2 updates. `build/nn-train/latest.pt` is not touched.
+3. **After.** The trained network plays the same evaluation.
+4. **The report**, printed and written to `build/nn-train/test5/<label>/report.json` (with
+   `before.json` and `after.json`, the whole evaluations): before → after per opponent and role.
+
+| Metric | What is counted (the learner's units; `tools/nn/train/behaviour.py`) |
+|---|---|
+| win rate | by opponent and role |
+| own lord dead | share of battles that ended with the own lord dead |
+| missile s in melee / battle, missile time in melee | seconds missile units (range > 0, not a lord) stand in melee, per battle and as a share of their standing time |
+| own melee hit flank/rear | share of own melee unit-seconds struck in the flank or rear (the simulator's `flank_hit` ≥ 1; the game: a flank attack costs the defender ~×1.74 losses) |
+| decisions with a pile | share of decisions with more than 2 own units on one enemy (attack order or the enemy fought) while another enemy strikes an own unit in the flank or rear |
+| own melee into flank/rear | share of own melee unit-seconds striking a standing enemy from its flank or rear (the angle off its facing ≥ `contact.front_deg`, 60°) |
+| target switches / min, order changes / min | per standing unit, per opponent |
+| order kinds | shares of the learner's unit decisions |
+| ability uses / battle | own abilities started (their cooldown set) |
+| timeouts | share of battles at the time limit |
+
+The "before" and the "after" each take ~10 minutes (the batch runs until its longest battle ends),
+the training ~7: a test takes about half an hour. `--before PATH` reuses a "before" evaluation (only
+while the simulator has not changed). Heavy GPU jobs take turns: the test waits while
+`build/gpu-train.lock` exists (polled every 30 s), then holds it (its label and start time) until
+it ends, also on failure; a test started within 60 s of a release (`build/gpu-train.released`)
+waits out those 60 s first, so the jobs already waiting go before it. `DOCK_NAME` names the container (`dock.sh`). Noise: at 256 battles a role a
+win rate moves by ±3 points (one standard error); 36 updates move the network little, so the test
+shows whether a change breaks something and where the behaviour goes, not a final strength.
+
+**Baseline** (`--label baseline`, the training before per-unit credit: `--unit-credit 0`; 01.10.2026):
+
+| Metric | `ai_like` attack / defend | `nearest` attack / defend | `hold_shoot` attack / defend |
+|---|---|---|---|
+| win rate | 0.543 → 0.543 / 0.676 → 0.625 | 0.434 → 0.418 / 0.469 → 0.398 | 0.590 → 0.609 / 0.504 → 0.504 |
+| own lord dead | 0.27 → 0.17 / 0.07 → 0.10 | 0.09 → 0.07 / 0.09 → 0.08 | 0.22 → 0.22 / 0.13 → 0.16 |
+| missile s in melee / battle | 105 → 113 / 94 → 102 | 89 → 95 / 101 → 96 | 158 → 151 / 110 → 123 |
+| own melee hit flank/rear | 0.35 → 0.36 / 0.36 → 0.38 | 0.35 → 0.37 / 0.39 → 0.40 | 0.26 → 0.27 / 0.33 → 0.35 |
+| decisions with a pile | 0.064 → 0.074 / 0.110 → 0.108 | 0.077 → 0.085 / 0.087 → 0.100 | 0.055 → 0.058 / 0.121 → 0.124 |
+| own melee into flank/rear | 0.28 → 0.29 / 0.30 → 0.31 | 0.25 → 0.26 / 0.27 → 0.28 | 0.27 → 0.28 / 0.29 → 0.30 |
+| target switches / min | 0.66 → 0.96 | 0.76 → 1.13 | 0.69 → 0.97 |
+| kinds hold / move / attack | 0.28 / 0.23 / 0.49 → 0.27 / 0.22 / 0.51 | 0.28 / 0.22 / 0.49 → 0.27 / 0.21 / 0.51 | 0.26 / 0.26 / 0.49 → 0.23 / 0.24 / 0.53 |
+
+`best.pt` loses a third of its melee time struck in the flank or rear, its missile units stand in
+melee ~100 s a battle, and in 6–12 % of decisions it piles more than 2 units on one enemy while
+another enemy flanks it — the picture seen in the game. Ability uses (~4 a battle) are the lord's
+abilities fired by the simulator's AI rule: `scenario.py` marks side 2 as played by the game's AI
+by default, also when the learner plays side 2.
 
 ## How a training step goes
 
@@ -130,7 +197,9 @@ The game's AI takes no part in training: it stays an independent check ([network
 
 The win, health, standing and lord terms are zero-sum (side 2 gets minus side 1's) except at the time
 limit. Both shaping terms are potential differences: they do not change which outcome is best.
-No style terms yet: the faction characters are placeholders.
+No style terms yet: the faction characters are placeholders. Beside the side's reward each unit has
+its own (`reward.unit_step`, [per-unit credit](#per-unit-credit-01102026)); it does not enter the
+side's reward.
 
 **The order `keep`.** The network may give a unit no new order: `keep` (kind code 4) leaves the
 order in force; a unit with no order holds. A real change is a new kind, a new attack target, or a
@@ -152,7 +221,8 @@ from nothing while the actor already plays), and a KL term holds the policy near
 (`--anchor-end`), so the copy does not lock the policy.
 
 **PPO** (`ppo.py`), MAPPO style: each own unit is an agent with its own probability ratio; all
-units of a side share its advantage; the critic sees the whole field (and is never shipped).
+units of a side share its advantage, and each adds its own ([per-unit credit](#per-unit-credit-01102026));
+the critic sees the whole field (and is never shipped).
 
 | Setting | Value | Why |
 |---|---|---|
@@ -186,6 +256,95 @@ alternating (both roles), the simulator's own numbers, starts moved by up to 2 m
 in training; `hold` only as the defender. Scenes: `--per-scene` battles per scene; random armies:
 `--generated` battles of `EVAL_SEEDS`. Per opponent and role also the share of battles that ended
 with the own / the enemy lord dead, the order kinds and attack target switches a minute.
+
+## Per-unit credit, 01.10.2026
+
+In the game: 4 infantry units piled on one enemy while 2 Skaven infantry units flanked them, and 2
+archer units were stuck in melee. Every unit shared the side's advantage, so one unit's mistake
+was lost in the battle's total: its gradient was the same whether it piled on or covered the flank.
+
+**Each unit's own return** (`reward.unit_step`, per decision, per unit; not in the side's reward):
+
+| Term | Weight | Why |
+|---|---:|---|
+| its health trade: n_own × (HP it dealt / the enemy's starting HP − HP it lost / own starting HP) | 0.05 | what happens to the unit itself; summed over the side it is 0.05 × n_own × the side's trade, about the side's `hp` term (0.5 at 10 units); dealt = melee HP from the simulator's `dealt`, missiles = men killed × the target's HP a man |
+| struck in the flank or rear in melee | −0.0002 | the game: ~×1.74 losses; the trade sees the losses, this sees the position before they pile up |
+| a missile unit in melee | −0.0002 | archers stuck in melee |
+| a pile: more than 2 own units on one enemy while another enemy strikes an own unit in flank or rear, by the excess share (n − 2) / n | −0.0002 | the whole pile pays n − 2 units' worth: the units over 2 should turn to the flanker |
+| a melee unit without an attack order out of melee while a fellow within 60 m fights (`idle_near`) | 0 | tried at −0.0004 (below): the units piled instead |
+| striking a standing enemy's flank or rear | +0.0002 | as large as the penalty: a flank exchange is zero-sum between the two units |
+| + 0.5 × the mean of the same of own units within 40 m | | what happens next to it: a unit that leaves its neighbour flanked pays for it |
+
+`behaviour.facts` finds these from the simulator's state (the same as the [test protocol](#test-protocol-test5)).
+Bounds: each shaped term is at most 0.0002 × 1200 = 0.24 a unit over a 10-minute battle, a quarter
+of a win, and the unit's credit is weighted below the side's (below). In battles of `best.pt` against
+`ai_like` and `nearest` (256 battles, 1200 decisions) the mean size per unit-decision: trade 6.4e-5,
+flanked 2.0e-5 (10 % of unit-decisions), flank attack 7.7e-6 (8 %), pile 6.2e-6, missile in melee
+4.2e-6 (2 %) — the trade leads and the shaped terms are ~40 % of the total.
+
+**The critic** has a second head (`critic.Critic(..., per_unit=True)`): per unit token over the full
+state, the value of that unit's own return × 100 (`unit_scale`: about the side's size, so the shared
+layers feel it). Its last layer starts at zero, so an older checkpoint loads (`Critic.load`). GAE
+runs per unit on its own return. **The advantage** of unit i: A_i = A_side + `unit_credit` ×
+A_unit_i. A_unit is centred per decision over the side's units that take orders — it only says
+which unit did better than its fellows and never pushes the whole side one way — then both are
+normalised over the minibatch (a unit's return is ~100 times smaller than the side's and would
+vanish beside it otherwise). `--unit-credit` 0.3 keeps the side's win and loss the main signal; 0
+(the default for now) is the old training exactly. The per-unit value learns with the side's (loss weight
+0.5); the log has `unit_value_loss` and `unit_adv_share` (the unit part's share of the advantage's
+size, ~0.27 at 0.3).
+
+**Tuning** (the [test protocol](#test-protocol-test5), 36 updates each, from `best.pt`; the same
+"before" for all; win rates after training, `ai_like` / `nearest` / `hold_shoot`, attack / defend):
+
+| Run | Settings | Win rate after | Kind hold | Piles, `ai_like` att / def | Flanked, `ai_like` att / def |
+|---|---|---|---|---|---|
+| before (`best.pt`) | — | 0.54 / 0.68, 0.43 / 0.47, 0.59 / 0.50 | 0.28 / 0.28 / 0.26 | 0.064 / 0.110 | 0.35 / 0.36 |
+| `baseline` | `--unit-credit 0` | 0.54 / 0.63, 0.42 / 0.40, 0.61 / 0.50 | 0.27 / 0.27 / 0.23 | 0.074 / 0.108 | 0.36 / 0.38 |
+| `u03` | 0.3, not centred, flank bonus 1e-4 | 0.51 / 0.61, 0.38 / 0.43, 0.57 / 0.50 | 0.31 / 0.27 / 0.28 | 0.076 / 0.120 | 0.35 / 0.37 |
+| `u06x2` | 0.6, not centred, shaped terms × 2 | 0.18 / 0.31, 0.18 / 0.21, 0.09 / 0.20 | **0.73 / 0.52 / 0.84** | 0.016 / 0.044 | 0.45 / 0.46 |
+| `u03c` | 0.3, centred (the task's settings) | 0.51 / 0.65, 0.44 / 0.50, 0.56 / 0.44 | 0.33 / 0.29 / 0.33 | 0.069 / 0.121 | 0.36 / 0.39 |
+| `u06c` | 0.6, centred | 0.28 / 0.36, 0.22 / 0.21, 0.19 / 0.29 | **0.70 / 0.46 / 0.85** | 0.026 / 0.066 | 0.41 / 0.46 |
+| `u06ci` | 0.6, centred, `--idle-near 4e-4` | 0.48 / 0.58, 0.33 / 0.39, 0.55 / 0.47 | 0.33 / 0.20 / 0.36 | **0.114 / 0.205** | 0.39 / 0.42 |
+
+- **A strong unit credit teaches the side to stand.** At 0.6 the policy went to "hold" (0.7–0.85 of
+  the decisions) within 36 updates and lost half its wins (66–77 % of its attacks on `hold_shoot`
+  ran out the hour): a unit that stays out of the fight takes no losses, no flank and no pile, so
+  it looks better than its fellows that fight. Piles fell 2–4 times, but by not fighting. Centring
+  per decision (it cannot push the whole side) did not stop it: it is a unit's choice against its
+  fellows, not the side's.
+- **A cost for standing by** (`idle_near`: a melee unit without an attack order out of melee while a
+  fellow within 60 m fights) stops the standing, and the units pile instead: piles doubled
+  (0.11–0.23 of decisions). The unit terms pull between "stay out" and "join in"; with no term that
+  says *where* to join, a unit joins the nearest fight. `idle_near` stays in the code, weight 0.
+- **At 0.3** the policy keeps its order kinds, and its win rates and behaviour stay within the
+  noise of the baseline (36 updates move little): no harm shown, and no gain yet. Hold creeps up
+  (0.28 → 0.33), the first sign of the same pull. `run.py` keeps 0 by default for now (test5
+  pins it); use `--unit-credit 0.3` and watch the hold share in longer runs.
+
+**`task2`** (the test that closes the task: `--unit-credit 0.3`, the weights above; its own fresh
+"before": the simulator had changed since the baseline — other work on melee and lords — and
+`best.pt`'s win rates moved by up to 10 points, so compare the changes, not the numbers):
+
+| Metric | `ai_like` attack / defend | `nearest` attack / defend | `hold_shoot` attack / defend |
+|---|---|---|---|
+| win rate | 0.516 → 0.523 / 0.578 → 0.652 | 0.352 → 0.395 / 0.418 → 0.449 | 0.539 → 0.539 / 0.414 → 0.512 |
+| own lord dead | 0.27 → 0.28 / 0.10 → 0.07 | 0.08 → 0.10 / 0.11 → 0.08 | 0.25 → 0.42 / 0.11 → 0.15 |
+| missile time in melee | 0.068 → 0.043 / 0.086 → 0.084 | 0.087 → 0.083 / 0.087 → 0.089 | 0.080 → 0.044 / 0.087 → 0.079 |
+| own melee hit flank/rear | 0.35 → 0.36 / 0.37 → 0.39 | 0.35 → 0.37 / 0.38 → 0.40 | 0.26 → 0.27 / 0.34 → 0.35 |
+| decisions with a pile | 0.064 → 0.073 / 0.111 → 0.127 | 0.076 → 0.117 / 0.094 → 0.122 | 0.055 → 0.036 / 0.117 → 0.105 |
+| own melee into flank/rear | 0.28 → 0.29 / 0.31 → 0.31 | 0.25 → 0.26 / 0.27 → 0.28 | 0.28 → 0.29 / 0.30 → 0.30 |
+| timeouts | 0.012 → 0.066 / 0 → 0.004 | 0 → 0 / 0 → 0 | 0.016 → 0.102 / 0 → 0 |
+| kinds hold / move / attack | 0.28 / 0.23 / 0.49 → 0.37 / 0.18 / 0.45 | 0.29 / 0.22 / 0.50 → 0.27 / 0.19 / 0.54 | 0.25 / 0.26 / 0.49 → 0.39 / 0.20 / 0.40 |
+| target switches / min | 0.66 → 0.75 | 0.78 → 0.97 | 0.72 → 0.67 |
+
+Win rates rose in 4 of the 6 (opponent, role) pairs by 3–10 points (the baseline: down in 3, by
+up to 7), within the noise each but all one way; missile units attacking spend half as much of
+their time in melee (0.068 → 0.043, 0.080 → 0.044). Piles and flank hits did not fall (36 updates),
+"hold" rose to 0.37–0.39 against the waiting opponents, attacks on `hold_shoot` ran out the hour
+more often (10 %), and the own lord died more often attacking it (0.25 → 0.42). So per-unit credit
+at 0.3 is harmless and slightly helpful in 36 updates, but it has not yet taught the piling
+infantry to turn to the flank; its pull towards standing must be watched in longer runs.
 
 ## Against the game's AI, 01.10.2026
 
@@ -493,6 +652,8 @@ opponent mix).
 - `ai_like` is weaker than `nearest` in the simulator (below), while the game's AI won 3 of the 4
   gate battles: what it does better in the game is not in the script or not in the simulator.
 - The `target` network, longer runs.
+- A per-unit signal that says *where* to join a fight (the flanker, not the pile): per-unit
+  credit alone moves units out of fights or into the nearest one ([above](#per-unit-credit-01102026)).
 - More factions and unit kinds in the army generator.
 - Style rewards from the faction character; the LoRA adapters per faction and role.
 - A check in the game against the game's AI (`tools/launcher/gate.ps1`).
@@ -508,6 +669,12 @@ again, random armies with the setup following the new army, `ai_like` (the attac
 line with its lord behind, the defender holds, counter-charges close enemies and shoots the lord in
 range, a lord in front goes back to its line) (level 2); a training step on the CPU, behaviour
 cloning of one and of two teachers, checkpoints, replays readable by `gamedata`, evaluation
-(level 3).
+(level 3). Per-unit credit and the protocol: `behaviour.facts` sees a rear attack, a flanked unit, a
+pile (and none without a flanker) and a missile unit in melee; `unit_step` counts the unit's own
+losses, the shaped terms and its neighbours; GAE per unit stops at the end of a battle; per-unit
+advantages reach the policy loss; the critic loads a checkpoint from before its per-unit head; a
+rollout gives the per-unit reward and value; several opponents in one evaluation batch are counted
+apart, with the behaviour metrics; the GPU lock is held, waited for and freed after a failure; the
+report table.
 `tests/tools/test_nn_observation.py`: the lord known from the passport; a slain enemy lord is
 known unseen and fades; an enemy's melee and rout count only while seen.

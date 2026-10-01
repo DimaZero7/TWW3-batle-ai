@@ -782,6 +782,139 @@
     "shot_type": "small_arm_default"
    },
    "card_check": "equal"
+  },
+  "wh_main_emp_inf_halberdiers": {
+   "land_unit": "wh_main_emp_inf_halberdiers",
+   "caste": "melee_infantry",
+   "category": "inf_melee",
+   "class": "inf_mel",
+   "men": 120,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 6,
+   "entity": "wh_main_infantry_standard_blood_dismembers",
+   "hp_per_man": 73,
+   "hp_total": 8760,
+   "mass": 100.0,
+   "size": "small",
+   "height_m": 1.8,
+   "radius_m": 0.65,
+   "speed": {
+    "walk": 1.5,
+    "run": 3.0,
+    "charge": 3.8,
+    "acceleration": 3.0,
+    "deceleration": 4.0
+   },
+   "melee": {
+    "attack": 26,
+    "defence": 42,
+    "charge_bonus": 8,
+    "weapon": "wh_main_emp_halberd",
+    "damage": 8,
+    "ap_damage": 20,
+    "bonus_v_large": 16,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 5.6,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0
+   },
+   "armour": 30,
+   "armour_material": "chainmail",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 70,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": true,
+   "hiding_scalar": 1.0,
+   "attributes": [
+    "charge_defense_vs_large",
+    "charge_reflection",
+    "hide_forest"
+   ],
+   "abilities": [],
+   "multiplayer_cost": 550,
+   "missile": null,
+   "card_check": "no card"
+  },
+  "wh2_main_skv_inf_stormvermin_0": {
+   "land_unit": "wh2_main_skv_inf_stormvermin_0",
+   "caste": "melee_infantry",
+   "category": "inf_melee",
+   "class": "inf_mel",
+   "men": 160,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 8,
+   "entity": "wh2_main_skv_infantry_heavy",
+   "hp_per_man": 62,
+   "hp_total": 9920,
+   "mass": 150.0,
+   "size": "small",
+   "height_m": 1.6,
+   "radius_m": 0.7,
+   "speed": {
+    "walk": 1.5,
+    "run": 3.8,
+    "charge": 4.5,
+    "acceleration": 2.0,
+    "deceleration": 5.0
+   },
+   "melee": {
+    "attack": 32,
+    "defence": 34,
+    "charge_bonus": 10,
+    "weapon": "wh2_main_skv_halberd",
+    "damage": 9,
+    "ap_damage": 23,
+    "bonus_v_large": 17,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.6,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0
+   },
+   "armour": 90,
+   "armour_material": "heavy_metal",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 70,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": true,
+   "hiding_scalar": 1.0,
+   "attributes": [
+    "charge_defense_vs_large",
+    "charge_reflection",
+    "hide_forest"
+   ],
+   "abilities": [
+    "wh2_main_unit_passive_scurry_away",
+    "wh2_main_unit_passive_strength_in_numbers"
+   ],
+   "multiplayer_cost": 950,
+   "missile": null,
+   "card_check": "no card"
   }
  }
 }

@@ -39,6 +39,7 @@ with `--own-ai net` our side is commanded by the network, not by the entry).
 | [move_probe](../apps/entries.md#move_probe) | `move-probe` | `move_probe.xml` | One unit through a plan of legs: formation and plain orders, soldier positions |
 | [roster_capture](../apps/entries.md#roster_capture) | `roster-capture` | `roster_capture.xml` | Unit cards and formation for the roster |
 | [archer_range](../apps/entries.md#archer_range) | `archer-range` | `archer_range.xml` | When archers start shooting by the depth of their block, arrow damage by distance |
+| [lord_swarm](../apps/entries.md#lord_swarm) | `lord-swarm` | `lord_swarm.xml` | A lord standing, attacked by 1-4 infantry units (and the other lord): his loss and the soldiers around him |
 | [enemy_layout](../apps/entries.md#enemy_layout) | `enemy-layout` | `enemy_layout.xml` | How the game AI deploys and stands with different armies |
 | [manual_record](../apps/entries.md#manual) | `manual` | `manual_hamlet.xml` | Player's manual battle with recording |
 | [nn_arena](../apps/entries.md#nn_arena) | `nn-arena` | `nn_arena.xml` | Records the game's AI battles in the arena: every unit of both sides once a second — data for training; with `--own-ai net` the network commands our side |

@@ -120,6 +120,53 @@ def test_write_waits_while_the_file_is_held(tmp_path, monkeypatch):
     assert exchange.write_atomic(path, "x\n", wait_s=0) == 3 and path.read_text() == "x\n"
 
 
+FS, SYG, HTL = ("wh_main_character_abilities_foe_seeker", "wh_main_character_abilities_stand_your_ground",
+                "wh_main_lord_passive_hold_the_line")
+
+
+def test_ability_timers_from_the_bridges_uses_and_the_active_effects():
+    doc = state_doc()
+    doc["t"] = 20000
+    doc["abilities_used"] = {"own_lord": {SYG: 10000}}               # used 10 s ago: 18 s active, 90 s recharge
+    doc["units"][2]["fx"] = ["wh_main_character_abilities_foe_seeker"]   # the enemy General's Foe Seeker shows
+    doc["units"][0]["fx"] = [HTL, SYG]                                   # the lord's card: SYG is on
+    doc["units"][1]["fx"] = {}                                            # JSON's empty list
+    b = exchange.battle(doc)
+    assert b.slots[0] == [FS, SYG, HTL] and b.slots[1] == ["", "", ""]
+    s = exchange.arrays(doc, b.names, b.slots)
+    assert s["ab1_on"][0, 0] == pytest.approx(8) and s["ab1_cd"][0, 0] == pytest.approx(98)
+    assert s["ab0_on"][0, 0] == 0 and s["ab0_cd"][0, 0] == 0
+    assert s["ab0_on"][0, 2] == 1 and s["ab0_cd"][0, 2] == 1 and s["ab1_on"][0, 2] == 0
+    obs, _ = ob.observe(s, b.setup, 1)
+    assert obs.abil_ok[0, 0].tolist() == [True, False, False]
+    late = json.loads(json.dumps(dict(doc, t=200000)))
+    late["units"][0]["fx"] = [HTL]
+    assert exchange.arrays(late, b.names, b.slots)["ab1_cd"][0, 0] == 0   # ready again
+    late["units"][0]["fx"] = [HTL, SYG]                                   # still on the card: 1 s more
+    assert exchange.arrays(late, b.names, b.slots)["ab1_on"][0, 0] == 1
+    doc["units"][0]["fx"] = [SYG]                                         # the card shows it: as counted
+    assert exchange.arrays(doc, b.names, b.slots)["ab1_on"][0, 0] == pytest.approx(8)
+    doc["units"][0]["fx"] = []                                            # used, but not on the card:
+    s = exchange.arrays(doc, b.names, b.slots)                            # it did not take, ready again
+    assert s["ab1_on"][0, 0] == 0 and s["ab1_cd"][0, 0] == 0
+    del doc["units"][0]["fx"]                                             # the card not read: the count
+    assert exchange.arrays(doc, b.names, b.slots)["ab1_cd"][0, 0] == pytest.approx(98)
+
+
+def test_ability_choices_become_lines_and_back():
+    names, side = ["own_lord", "own_spear_1", "enemy_lord"], np.array([1, 1, 2])
+    slots = [[FS, SYG, HTL], ["", "", ""], [FS, SYG, HTL]]
+    uses = exchange.ability_list(names, side, np.array([1, 0, 0]), slots)
+    assert uses == [{"unit": "own_lord", "key": SYG}]                    # empty slots and enemies give none
+    orders = [{"unit": "own_lord", "kind": "keep"}, {"unit": "own_spear_1", "kind": "hold"}]
+    text = exchange.orders_text("b-1", 3, orders, None, uses)
+    assert text.endswith(f"ability own_lord {SYG}\nend\n")
+    doc = exchange.parse_orders(text)
+    assert doc["abilities"] == uses and doc["orders"]["own_lord"] == {"kind": "keep"}
+    with pytest.raises(ValueError):
+        exchange.orders_text("b-1", 3, orders, None, [{"unit": "own lord", "key": SYG}])
+
+
 class TestCompanion:
     """One decision and the loop, with a fresh untrained actor (torch)."""
 
@@ -130,8 +177,9 @@ class TestCompanion:
     def test_a_decision_gives_every_own_unit_a_valid_order(self):
         from tools.nn.companion import loop, policy
         brain = loop.Brain(policy.fresh(seed=1))
-        orders, think_ms = brain.decide(state_doc())
+        orders, think_ms, uses = brain.decide(state_doc())
         assert [o["unit"] for o in orders] == ["own_lord", "own_spear_1"] and think_ms > 0
+        assert all(u["unit"] == "own_lord" and u["key"] in brain.battle.slots[0] for u in uses)
         for o in orders:
             assert o["kind"] in exchange.KINDS
             if o["kind"] == "attack":

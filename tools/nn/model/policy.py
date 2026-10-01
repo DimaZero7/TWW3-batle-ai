@@ -1,6 +1,7 @@
 """The actor: what the side's units do. It is what ships with the mod (the critic does not).
 
-observation -> TokenEncoder -> attention blocks -> GRU per token -> last attention block -> heads.
+observation -> TokenEncoder (+ AbilityEncoder) -> attention blocks -> GRU per token -> last attention block
+-> heads.
 Conditioning: the side's context (character, role, time) is in every token and is a token itself;
 the LoRA adapter of (faction, role) is chosen per battle (off by default).
 """
@@ -10,10 +11,12 @@ from torch import nn
 
 from tools.nn.model import factions
 from tools.nn.model import heads as hd
-from tools.nn.model.encoder import Block, TokenEncoder, attention_bias
+from tools.nn.model.encoder import AbilityEncoder, Block, TokenEncoder, attention_bias
 from tools.nn.model.memory import TokenMemory
 
-OBS_KEYS = ("tokens", "ctx", "own", "attend", "ctrl", "target_ok", "pos", "adapter")
+OBS_KEYS = ("tokens", "ctx", "own", "attend", "ctrl", "target_ok", "pos", "adapter", "abil", "abil_ok")
+# Parameters an actor saved before abilities lacks: they start fresh when it is loaded.
+ABILITY_PARAMS = ("abilities.", "heads.ability_")
 
 
 def to_torch(obs, device=None):
@@ -21,7 +24,8 @@ def to_torch(obs, device=None):
     out = {}
     for k in OBS_KEYS:
         v = getattr(obs, k)
-        out[k] = (torch.as_tensor(np.asarray(v)) if isinstance(v, np.ndarray) else v).to(device)
+        if v is not None:
+            out[k] = (torch.as_tensor(np.asarray(v)) if isinstance(v, np.ndarray) else v).to(device)
     return out
 
 
@@ -31,6 +35,7 @@ class Actor(nn.Module):
         self.cfg = cfg
         adapters = factions.ADAPTERS if cfg.lora_rank else 0
         self.encoder = TokenEncoder(cfg.d)
+        self.abilities = AbilityEncoder(cfg.d)
         self.dist = nn.Embedding(cfg.dist_bins + 1, cfg.heads)
         self.blocks = nn.ModuleList(Block(cfg.d, cfg.heads, cfg.ff, cfg.lora_rank, adapters, cfg.lora_alpha)
                                     for _ in range(cfg.layers))
@@ -50,6 +55,8 @@ class Actor(nn.Module):
         """Tokens -> the blocks before the memory: (x [B, 1 + N, d], attention bias, adapter)."""
         adapter = obs_t["adapter"] if use_adapter else None
         x = self.encoder(obs_t["tokens"], obs_t["ctx"])
+        if obs_t.get("abil") is not None:
+            x = x + torch.nn.functional.pad(self.abilities(obs_t["abil"]), (0, 0, 1, 0))
         bias = attention_bias(obs_t, self.dist, self.cfg.dist_bins)
         for block in self.blocks[:self._split()]:
             x = block(x, bias, adapter)
@@ -94,6 +101,16 @@ class Actor(nn.Module):
             x = torch.stack(out).reshape(T * B, *x.shape[2:])
         logits = self.finish(x, bias, adapter, flat)
         return {k: v.reshape(T, B, *v.shape[1:]) for k, v in logits.items()}, h
+
+
+    def load_state_dict(self, state_dict, strict=True, assign=False):
+        """As nn.Module's, but an actor saved before abilities loads: its ability parts start fresh
+        (the encoder's adds nothing until trained; the head chooses at random among ready abilities)."""
+        missing, unexpected = super().load_state_dict(state_dict, strict=False, assign=assign)
+        bad = [k for k in missing if not k.startswith(ABILITY_PARAMS)] + list(unexpected)
+        if strict and bad:
+            raise RuntimeError(f"actor state does not match: {bad[:5]}")
+        return missing, unexpected
 
 
 def parameters(module):

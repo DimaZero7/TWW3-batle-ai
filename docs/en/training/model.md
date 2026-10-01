@@ -79,6 +79,34 @@ lord's counts even when he was not seen.
 The critic's view (`full=True`) fills every field for every unit, with no visibility, and adds
 the enemy's character. It is for training only.
 
+### Abilities (each unit, each of its ability slots)
+
+An ability is known by what it does, never by its name: its **passport**
+(`config/nn/abilities.json`, written by `py -3.14 -m tools.nn.abilities` from the game's database;
+features in `tools/nn/model/abilities.py`). A new lord's ability needs a passport, not a new
+network. A unit has up to 3 slots (`tools/nn/sim/abilities.py` `slot_keys`, the same for the
+simulator): active abilities first, then passives that reach other units, then the rest, each
+group by key. General: Foe Seeker, Stand Your Ground, Hold the Line; Warlord: Verminous Valour,
+Deadly Onslaught, Rally.
+
+| Input (per slot, `Obs.abil` [B, N, 3, 106]) | Own unit | Enemy, visible | Enemy, not visible | Scale |
+|---|---|---|---|---|
+| Owned | yes | yes | yes | 0/1 |
+| Ready to use now | yes | no | no | 0/1 |
+| Seconds until ready | yes | no | no | s / 60, up to 3 |
+| Seconds active left | yes | no | no | s / 30, up to 2 |
+| Active now | yes | yes | no | 0/1 |
+| Passport: passive, active and recharge time, uses, range, self-cast, how many friends / enemies it reaches, targets (self, friends, enemies) | yes | yes | yes | s / 60, s / 120, m / 100, 0/1 |
+| Passport: effects on allies (the owner and his friends) and on enemies: 28 stats of the database (speed, charge speed, melee attack and defence, damage and AP, charge bonus, leadership, armour, resistances, missile damage, reload, accuracy, range, bonus vs large / infantry, mass, …) and 15 attributes (unbreakable, immune to psychology, causes fear, …) | yes | yes | yes | multipliers as value − 1; additions / 50 or / 100; attributes 0/1 |
+
+Why the enemy's: a player sees the enemy army's cards before battle (the abilities are on them),
+and in battle the game draws an active ability's effect on the unit and lists it among the
+unit's active effects (CCO `ActiveEffectList`, read by the bridge). The enemy's timers are not
+shown anywhere: they are not given. `Obs.abil_ok` [B, N, 3]: own abilities the network may use
+now — owned, active (not passive), self-cast (used on the owner, no target to choose), ready
+(not active, recharged) and the unit takes orders (alive, not routing). Without the timers in the
+state (recordings) nothing is ready.
+
 ## Model
 
 ```mermaid
@@ -92,11 +120,15 @@ flowchart TB
   last --> point["Point: 16 directions × 8 distances"]
   last --> ptr["Target: pointer at an enemy"]
   last --> run["Run or walk"]
+  last --> abil["Ability: none or a pointer at a slot"]
 ```
 
 - **Tokens.** One token per unit, own and enemy, with the same encoder: a new unit is known by
   its passport, not by its name. The context (character, role, time) is added to every token
-  and is a token of its own.
+  and is a token of its own. Each ability slot goes through one small shared network
+  (`AbilityEncoder`); the sum over the unit's owned slots is added to its token, so the slots'
+  order does not matter. Its last layer starts at zero: an actor trained before abilities sees
+  exactly what it saw.
 - **Attention** (3–4 layers): every unit looks at the others. Masks: padding, own dead units and
   enemies seen destroyed are never looked at. A learned bias per head by the distance between
   two units (16 buckets, 0 to ~1500 m) makes "who is near" easy. Invisible enemies stay in the
@@ -115,7 +147,16 @@ flowchart TB
     survives int8, and the best bin is found without randomness;
   - target: a pointer at a visible living enemy (the unit's query against each enemy's key),
     as in AlphaStar;
-  - run or walk.
+  - run or walk;
+  - ability: "none" or a pointer at one of the unit's slots (the unit's query against a key made
+    from each slot's state and passport), only slots in `abil_ok`. It is independent of the
+    order kind (a lord can move and use an ability at once). Permuting the slots permutes the
+    choice; an ability never seen before still gets a valid choice (tests). Sampled only when
+    asked (`heads.sample(..., abilities=True)`; `decide.act` asks): until training knows the head,
+    `Action.ability` is `None` and `log_prob` leaves it out.
+- **Loading an older actor.** `Actor.load_state_dict` accepts a state without the ability parts
+  (`policy.ABILITY_PARAMS`): they start fresh — the encoder adds nothing, the head picks at random
+  among ready abilities.
 - **LoRA adapters** per pair "faction + role" on the attention and feed-forward layers
   (`lora_rank`, off by default). An adapter starts as "no change"; `lora.freeze_base` leaves only
   the adapters to train.
@@ -123,8 +164,17 @@ flowchart TB
   enemy units and the context token → the value of the battle for the side.
 
 Orders go out in the simulator's format (`tools/nn/sim/orders.py`): `kind`, `x`, `z`,
-`target`, `run` [B, N] in the state's slots. Units of the other side, dead and routing units
-hold.
+`target`, `run` [B, N] in the state's slots, and `ability` [B, N] (the slot to use now, −1 none;
+optional: orders made without it get −1). Units of the other side, dead and routing units
+hold and use nothing.
+
+**For training** (`tools/nn/train/`, not wired yet): the learner's rows need
+`heads.sample(..., abilities=True)`, `Action.ability` kept through the rollout and rebuilt in the
+update (`hd.Action(kind, point, target, run, ability)`), the `ai` flag false on every side a network
+plays, learner or past version, side 1 or 2 (`tools/nn/sim/abilities.py` `set_rule(u, by_rule [B, 2])`:
+true only for the scripted opponents; again after each auto-reset, since restarted rows bring the
+bank's `ai`, which `scenario.build` sets for side 2; else that lord also fires by the game-AI rule) and `abil`, `abil_owned`, `abil_use` in the
+LiveSetup's fields (without them the observation shows no abilities).
 
 ## Sizes
 
@@ -132,8 +182,8 @@ hold.
 
 | Preset | Width | Attention layers | Actor | Critic (training only) | One LoRA adapter, rank 8 |
 |---|---:|---:|---:|---:|---:|
-| `small` | 128 | 3 | 0.78 M | 0.69 M | 0.05 M |
-| `target` | 512 | 4 | 14.98 M | 20.30 M (6 layers) | 0.26 M |
+| `small` | 128 | 3 | 0.84 M | 0.69 M | 0.05 M |
+| `target` | 512 | 4 | 15.49 M | 20.30 M (6 layers) | 0.26 M |
 
 ## Speed
 
@@ -174,11 +224,16 @@ An int8 export of the actor looks practical; not done yet:
 
 - `tests/tools/test_nn_observation.py` (numpy, runs in `.venv`): frame, scaling, padding;
   the enemy's exact morale never reaches the input; invisible enemies keep only the last seen
-  place; side symmetry; unit order; recorded battles.
+  place; side symmetry; unit order; recorded battles; abilities: the own bar, the enemy's only
+  active and seen, nothing ready without timers or for a routing lord.
+- `tests/tools/test_abilities.py` (numpy): reading the ability tables, passports, the cards'
+  check, the saved numbers, features and slots.
 - `tests/tools/test_nn_model.py` (torch; skipped in `.venv`, run in the container): numpy and
   torch give the same input; only visible living enemies can be targets; swapping units swaps
   the outputs; memory; adapters; log-probabilities; points inside the map; the critic; the
-  presets' sizes; recorded battles and the simulator's state → orders.
+  presets' sizes; recorded battles and the simulator's state → orders; the ability head: only
+  ready own abilities, permuting slots permutes the choice, an unseen passport still gives a
+  valid choice, log-probability only when chosen, an older actor loads.
 
 The `snake-ai-trainer` image has no pytest. The torch tests were run with the pure-Python
 pytest of `.venv` put on `PYTHONPATH` in the container.

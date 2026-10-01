@@ -1,0 +1,401 @@
+{
+ "_description": "Ability passports (docs/en/training/model.md, abilities): what each ability of our units does, from the game's database. Written by py -3.14 -m tools.nn.abilities.",
+ "_source": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Total War WARHAMMER III\\data\\db.pack",
+ "_fields": {
+  "active_s": "unit_special_abilities.active_time (inferred), s; -1: no duration (passive or instant)",
+  "recharge_s": "unit_special_abilities.recharge_time (inferred), s; -1: none",
+  "uses": "unit_special_abilities.num_uses (inferred); -1: unlimited",
+  "range_m": "unit_special_abilities.effect_range (inferred), m: the reach around the caster (0: itself)",
+  "passive": "active_s and recharge_s both -1 (inferred); checked against the cards' owned_passive lists",
+  "targets_own": "unit_special_abilities field 5 (inferred): 1 for abilities cast on the caster or a friend",
+  "friendly_units": "unit_special_abilities.num_effected_friendly_units (inferred): -1 all in range, n, 0 none",
+  "enemy_units": "unit_special_abilities.num_effected_enemy_units (inferred): -1 all in range, n, 0 none",
+  "self_cast": "active, targets_own, friendly_units and enemy_units 0 or -1 (ours): used on the caster himself, no target to choose (perform_special_ability(key, the lord))",
+  "phases": "special_ability_to_special_ability_phase_junctions for the ability: the phase named as the ability when there is one, else all its phases",
+  "targets": "the phases' target_self / target_friends / target_enemies (inferred: self-only abilities have 1 0 0, auras 1 1 0, hexes 0 0 1)",
+  "effects": "special_ability_phase_stat_effects of the phases: stat, how (add or mult), value, and on whom (the phase's targets)",
+  "attributes": "special_ability_phase_attribute_effects of the phases (attribute, positive/negative)"
+ },
+ "_missing": {
+  "area damage": "battle_vortexs / projectile bombardments are not decoded: no damage numbers yet (Verminous Valour's 25 m, 1 s blast has damage 0 and AP 0 by an earlier hand decode)",
+  "conditions": "when a passive is on (Single Entity, Scurry Away, Strength in Numbers have conditions) is in tables not decoded; a passive's effects are what it gives while on",
+  "ui type": "unit_abilities (hex, augment, ...) is not decoded: the targets say the same",
+  "initial recharge": "not found among the decoded fields: abilities start ready (as the simulator assumed)"
+ },
+ "abilities": {
+  "wh2_main_character_abilities_verminous_valour": {
+   "active_s": 17.0,
+   "recharge_s": 60.0,
+   "uses": -1,
+   "range_m": 0.0,
+   "passive": false,
+   "targets_own": true,
+   "friendly_units": 0,
+   "enemy_units": 0,
+   "self_cast": true,
+   "phases": [
+    "wh2_main_character_abilities_verminous_valour"
+   ],
+   "targets": {
+    "self": true,
+    "friends": false,
+    "enemies": false
+   },
+   "effects": [
+    {
+     "stat": "scalar_speed",
+     "how": "mult",
+     "value": 1.25,
+     "on": [
+      "self"
+     ],
+     "phase": "wh2_main_character_abilities_verminous_valour"
+    },
+    {
+     "stat": "stat_morale",
+     "how": "add",
+     "value": 8.0,
+     "on": [
+      "self"
+     ],
+     "phase": "wh2_main_character_abilities_verminous_valour"
+    }
+   ],
+   "attributes": []
+  },
+  "wh2_main_unit_passive_scurry_away": {
+   "active_s": -1.0,
+   "recharge_s": -1.0,
+   "uses": -1,
+   "range_m": 0.0,
+   "passive": true,
+   "targets_own": true,
+   "friendly_units": 0,
+   "enemy_units": 0,
+   "self_cast": false,
+   "phases": [
+    "wh2_main_unit_passive_scurry_away"
+   ],
+   "targets": {
+    "self": true,
+    "friends": false,
+    "enemies": false
+   },
+   "effects": [
+    {
+     "stat": "scalar_speed",
+     "how": "mult",
+     "value": 1.1,
+     "on": [
+      "self"
+     ],
+     "phase": "wh2_main_unit_passive_scurry_away"
+    }
+   ],
+   "attributes": []
+  },
+  "wh2_main_unit_passive_strength_in_numbers": {
+   "active_s": -1.0,
+   "recharge_s": -1.0,
+   "uses": -1,
+   "range_m": 0.0,
+   "passive": true,
+   "targets_own": true,
+   "friendly_units": 0,
+   "enemy_units": 0,
+   "self_cast": false,
+   "phases": [
+    "wh2_main_unit_passive_strength_in_numbers"
+   ],
+   "targets": {
+    "self": true,
+    "friends": false,
+    "enemies": false
+   },
+   "effects": [
+    {
+     "stat": "scalar_speed",
+     "how": "mult",
+     "value": 0.9,
+     "on": [
+      "self"
+     ],
+     "phase": "wh2_main_unit_passive_strength_in_numbers"
+    },
+    {
+     "stat": "stat_melee_defence",
+     "how": "add",
+     "value": 8.0,
+     "on": [
+      "self"
+     ],
+     "phase": "wh2_main_unit_passive_strength_in_numbers"
+    },
+    {
+     "stat": "stat_morale",
+     "how": "add",
+     "value": 6.0,
+     "on": [
+      "self"
+     ],
+     "phase": "wh2_main_unit_passive_strength_in_numbers"
+    }
+   ],
+   "attributes": []
+  },
+  "wh3_main_unit_passive_single_entity": {
+   "active_s": -1.0,
+   "recharge_s": -1.0,
+   "uses": -1,
+   "range_m": 0.0,
+   "passive": true,
+   "targets_own": true,
+   "friendly_units": 0,
+   "enemy_units": 0,
+   "self_cast": false,
+   "phases": [
+    "wh3_main_unit_passive_single_entity"
+   ],
+   "targets": {
+    "self": true,
+    "friends": false,
+    "enemies": false
+   },
+   "effects": [
+    {
+     "stat": "scalar_speed",
+     "how": "mult",
+     "value": 0.9,
+     "on": [
+      "self"
+     ],
+     "phase": "wh3_main_unit_passive_single_entity"
+    },
+    {
+     "stat": "stat_melee_damage_ap",
+     "how": "mult",
+     "value": 0.8,
+     "on": [
+      "self"
+     ],
+     "phase": "wh3_main_unit_passive_single_entity"
+    },
+    {
+     "stat": "stat_melee_damage_base",
+     "how": "mult",
+     "value": 0.8,
+     "on": [
+      "self"
+     ],
+     "phase": "wh3_main_unit_passive_single_entity"
+    }
+   ],
+   "attributes": []
+  },
+  "wh_main_character_abilities_deadly_onslaught": {
+   "active_s": 31.0,
+   "recharge_s": 90.0,
+   "uses": -1,
+   "range_m": 0.0,
+   "passive": false,
+   "targets_own": true,
+   "friendly_units": 0,
+   "enemy_units": 0,
+   "self_cast": true,
+   "phases": [
+    "wh_main_character_abilities_deadly_onslaught"
+   ],
+   "targets": {
+    "self": true,
+    "friends": false,
+    "enemies": false
+   },
+   "effects": [
+    {
+     "stat": "stat_charge_bonus",
+     "how": "mult",
+     "value": 1.6,
+     "on": [
+      "self"
+     ],
+     "phase": "wh_main_character_abilities_deadly_onslaught"
+    },
+    {
+     "stat": "stat_melee_damage_ap",
+     "how": "mult",
+     "value": 1.25,
+     "on": [
+      "self"
+     ],
+     "phase": "wh_main_character_abilities_deadly_onslaught"
+    },
+    {
+     "stat": "stat_melee_damage_base",
+     "how": "mult",
+     "value": 1.25,
+     "on": [
+      "self"
+     ],
+     "phase": "wh_main_character_abilities_deadly_onslaught"
+    }
+   ],
+   "attributes": []
+  },
+  "wh_main_character_abilities_foe_seeker": {
+   "active_s": 25.0,
+   "recharge_s": 60.0,
+   "uses": -1,
+   "range_m": 0.0,
+   "passive": false,
+   "targets_own": true,
+   "friendly_units": 0,
+   "enemy_units": 0,
+   "self_cast": true,
+   "phases": [
+    "wh_main_character_abilities_foe_seeker"
+   ],
+   "targets": {
+    "self": true,
+    "friends": false,
+    "enemies": false
+   },
+   "effects": [
+    {
+     "stat": "scalar_charge_speed",
+     "how": "mult",
+     "value": 1.25,
+     "on": [
+      "self"
+     ],
+     "phase": "wh_main_character_abilities_foe_seeker"
+    },
+    {
+     "stat": "scalar_speed",
+     "how": "mult",
+     "value": 1.25,
+     "on": [
+      "self"
+     ],
+     "phase": "wh_main_character_abilities_foe_seeker"
+    }
+   ],
+   "attributes": []
+  },
+  "wh_main_character_abilities_rally": {
+   "active_s": 14.0,
+   "recharge_s": 60.0,
+   "uses": -1,
+   "range_m": 35.0,
+   "passive": false,
+   "targets_own": true,
+   "friendly_units": -1,
+   "enemy_units": 0,
+   "self_cast": true,
+   "phases": [
+    "wh_main_character_abilities_rally"
+   ],
+   "targets": {
+    "self": true,
+    "friends": true,
+    "enemies": false
+   },
+   "effects": [
+    {
+     "stat": "stat_morale",
+     "how": "add",
+     "value": 16.0,
+     "on": [
+      "self",
+      "friends"
+     ],
+     "phase": "wh_main_character_abilities_rally"
+    }
+   ],
+   "attributes": []
+  },
+  "wh_main_character_abilities_stand_your_ground": {
+   "active_s": 18.0,
+   "recharge_s": 90.0,
+   "uses": -1,
+   "range_m": 35.0,
+   "passive": false,
+   "targets_own": true,
+   "friendly_units": -1,
+   "enemy_units": 0,
+   "self_cast": true,
+   "phases": [
+    "wh_main_character_abilities_stand_your_ground"
+   ],
+   "targets": {
+    "self": true,
+    "friends": true,
+    "enemies": false
+   },
+   "effects": [
+    {
+     "stat": "stat_melee_defence",
+     "how": "add",
+     "value": 24.0,
+     "on": [
+      "self",
+      "friends"
+     ],
+     "phase": "wh_main_character_abilities_stand_your_ground"
+    },
+    {
+     "stat": "stat_morale",
+     "how": "add",
+     "value": 16.0,
+     "on": [
+      "self",
+      "friends"
+     ],
+     "phase": "wh_main_character_abilities_stand_your_ground"
+    }
+   ],
+   "attributes": []
+  },
+  "wh_main_lord_passive_hold_the_line": {
+   "active_s": -1.0,
+   "recharge_s": -1.0,
+   "uses": -1,
+   "range_m": 35.0,
+   "passive": true,
+   "targets_own": true,
+   "friendly_units": -1,
+   "enemy_units": 0,
+   "self_cast": false,
+   "phases": [
+    "wh_main_lord_passive_hold_the_line"
+   ],
+   "targets": {
+    "self": true,
+    "friends": true,
+    "enemies": false
+   },
+   "effects": [
+    {
+     "stat": "stat_melee_defence",
+     "how": "add",
+     "value": 5.0,
+     "on": [
+      "self",
+      "friends"
+     ],
+     "phase": "wh_main_lord_passive_hold_the_line"
+    },
+    {
+     "stat": "stat_morale",
+     "how": "add",
+     "value": 4.0,
+     "on": [
+      "self",
+      "friends"
+     ],
+     "phase": "wh_main_lord_passive_hold_the_line"
+    }
+   ],
+   "attributes": []
+  }
+ }
+}

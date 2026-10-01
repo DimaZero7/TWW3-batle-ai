@@ -10,13 +10,15 @@
   "contact": {
     "reach_m": 1.0,
     "hold_m": 2.0,
-    "lord_max_attackers": 8,
-    "lord_others": 0.35,
+    "lord_max_attackers": 9,
+    "lord_direction": 0.0,
+    "lord_rival_others": 0.35,
+    "lord_incidental": 0.4,
     "front_deg": 60,
     "rear_deg": 120,
     "melee_turn_deg_s": 2.0,
     "step_m": 10.0,
-    "why": "reach: pairs touch when the formations' edges meet (centre distance 10.6-12.8 m for spearmen against slaves, depths 9 and 13.5 m). lord_max_attackers: melee.md (up to ~8 reach a lord). lord_others: a lord fought by several units takes the strongest attacker's rate and this share of the others' (measured 01.10.2026 in the 28 whole battles and 24 gate runs, lord in melee, not shot at: fighting the enemy lord 12.2 HP/s, with one enemy unit more 13.5, two 12.4, three 15.3; fighting infantry only 3.5, two units 5.1; the simulator adding them up gave 26.8 and 8.4) Front = within 60 deg of the facing (shield_defence_angle_melee 60), rear = beyond 120 deg. melee_turn_deg_s: a formation in melee turns no faster (a lord at once): measured in the 28 whole battles, infantry in melee standing turns 1 deg/s (median, mean 2.3; 20.8k seconds), a free unit struck in the flank turns 8 deg in the next 5 s (median, 653 contacts). step_m: a unit whose point is nearer does not turn to walk there (formations step back or aside facing the enemy); without it, units replayed to their recorded points stood with their backs to the enemy at contact in the pairs"
+    "why": "reach: pairs touch when the formations' edges meet (centre distance 10.6-12.8 m for spearmen against slaves, depths 9 and 13.5 m). lord_max_attackers / lord_direction / lord_rival_others / lord_incidental: the lord swarm probe (01.10.2026, docs/en/game/units/lord-swarm.md; 3 battles, a lord standing, attacked by 1-4 infantry units from front, back and flanks, 5 repeats a layout, lords held by script so no abilities): the lord loses the same whatever the number of units (General 7.8 / 8.3 / 8.7 / 7.4 HP/s with 1 / 2 / 3 / 4 clanrat units, Warlord 6.2 / 5.8 / 5.1 / 4.8 with Empire spearmen); 4-5 enemy soldiers stand within 2.5 m of him, 7-10 within 3 m, shared by the units; an armour-piercing unit counts by its share (General: halberds alone 21.5, with one spear unit 16.1, with three 10.7). So the men striking a lord are capped in all (9 fits the probe's single units and the pairs) and summed, split between the units by their contact; from his back or flank they hit him as from the front (lord_direction 0: the share of the database's flank/rear rule against a lone man). lord_rival_others: with the enemy lord on him too, the infantry's rate counts at this share (whole battles, a lord in melee not shot at: the enemy lord alone 14.5 HP/s, with 1 / 2 / 3 / 4 units targeting him too 18.6 / 10.6 / 15.1 / 20.4; the probe's lord-and-units trials, noisy: 0.7 +- 0.5). lord_incidental: a unit whose attack order is on another enemy strikes a lord it only touches at this share (whole battles: one enemy unit in contact, its current target another: 1.7 HP/s; him: 4.1). Front = within 60 deg of the facing (shield_defence_angle_melee 60), rear = beyond 120 deg. melee_turn_deg_s: a formation in melee turns no faster (a lord at once): measured in the 28 whole battles, infantry in melee standing turns 1 deg/s (median, mean 2.3; 20.8k seconds), a free unit struck in the flank turns 8 deg in the next 5 s (median, 653 contacts). step_m: a unit whose point is nearer does not turn to walk there (formations step back or aside facing the enemy); without it, units replayed to their recorded points stood with their backs to the enemy at contact in the pairs"
   },
   "melee": {
     "hit_slope": 0.1,
@@ -71,61 +73,22 @@
   },
   "abilities": {
     "near_m": 60,
-    "units": {
-      "wh2_main_skv_cha_warlord_0": [
-        "wh_main_character_abilities_deadly_onslaught",
-        "wh2_main_character_abilities_verminous_valour",
-        "wh_main_character_abilities_rally"
-      ],
-      "wh_main_emp_cha_general_0": [
-        "wh_main_character_abilities_stand_your_ground",
-        "wh_main_character_abilities_foe_seeker",
-        "wh_main_lord_passive_hold_the_line"
-      ]
+    "model": [
+      "wh2_main_character_abilities_verminous_valour",
+      "wh_main_character_abilities_deadly_onslaught",
+      "wh_main_character_abilities_rally",
+      "wh_main_character_abilities_stand_your_ground",
+      "wh_main_character_abilities_foe_seeker",
+      "wh_main_lord_passive_hold_the_line"
+    ],
+    "triggers": {
+      "wh_main_character_abilities_deadly_onslaught": "melee",
+      "wh2_main_character_abilities_verminous_valour": "near",
+      "wh_main_character_abilities_rally": "waver",
+      "wh_main_character_abilities_stand_your_ground": "melee",
+      "wh_main_character_abilities_foe_seeker": "near"
     },
-    "table": {
-      "wh_main_character_abilities_deadly_onslaught": {
-        "active_s": 31,
-        "recharge_s": 90,
-        "trigger": "melee",
-        "damage": 1.25,
-        "charge": 1.6
-      },
-      "wh2_main_character_abilities_verminous_valour": {
-        "active_s": 17,
-        "recharge_s": 60,
-        "trigger": "near",
-        "speed": 1.25,
-        "leadership": 8
-      },
-      "wh_main_character_abilities_rally": {
-        "active_s": 14,
-        "recharge_s": 60,
-        "trigger": "waver",
-        "range_m": 35,
-        "leadership": 16
-      },
-      "wh_main_character_abilities_stand_your_ground": {
-        "active_s": 18,
-        "recharge_s": 90,
-        "trigger": "melee",
-        "range_m": 35,
-        "defence": 24,
-        "leadership": 16
-      },
-      "wh_main_character_abilities_foe_seeker": {
-        "active_s": 25,
-        "recharge_s": 60,
-        "trigger": "near",
-        "speed": 1.25
-      },
-      "wh_main_lord_passive_hold_the_line": {
-        "trigger": "passive",
-        "range_m": 35,
-        "defence": 5,
-        "leadership": 4
-      }
-    },
-    "why": "Lord abilities (tools/nn/sim/abilities.py). units: what each lord owns in our battles (the game's own readout, data/roster/*.json owned_non_passive / owned_passive_special_abilities). table: from the database (db.pack, decoded by hand 01.10.2026): unit_special_abilities active_time / recharge_time / effect_range (initial_recharge 0 for all), special_ability_phase_stat_effects for the effects (scalar_speed mult 1.25 -> speed; stat_melee_damage_base and _ap mult 1.25 -> damage; stat_charge_bonus mult 1.6 -> charge; stat_morale add -> leadership (morale points); stat_melee_defence add -> defence). Speed of Foe Seeker also scales the charge speed (its scalar_charge_speed 1.25). Verminous Valour's 25 m, 1 s blast (battle_vortexs) has damage 0 and AP 0: not modelled. Hold the Line is passive: every side's General has it. Active abilities only for a side played by the game's AI (STATIC ai): the network's bridge gives no ability orders. trigger (when the AI fires it; an assumption, not measured): melee = its lord is in melee, near = a standing enemy within near_m of him (the recordings show the Warlord running 5-6.5 m/s, above his run 4.0 and charge 4.7, when closing in), waver = a friend within range_m wavers or routs; ready again recharge_s after it ends"
+    "default_trigger": "near",
+    "why": "Lord abilities (tools/nn/sim/abilities.py). The numbers (active and recharge time, range, targets, effects) are the ability passports, config/nn/abilities.json (py -3.14 -m tools.nn.abilities, the game's database); what each unit owns: units.json abilities (the slots: tools/nn/sim/abilities.py slot_keys). model: the abilities whose effects the simulator lays on (the lords' actives and Hold the Line); the conditional passives (Single Entity, Scurry Away, Strength in Numbers: when they are on is in tables not decoded) are shown to the network but have no effect here. Effects modelled: scalar_speed (walk, run, and the charge speed unless scalar_charge_speed is given), scalar_charge_speed, melee attack and defence (add), melee damage base and AP (mult), charge bonus (mult), stat_morale (add, morale points). Verminous Valour's 25 m, 1 s blast (battle_vortexs) has damage 0 and AP 0 (hand decode): not modelled. triggers: when the game's AI fires an active (an assumption, not measured): melee = its lord is in melee, near = a standing enemy within near_m of him (the recordings show the Warlord running 5-6.5 m/s, above his run 4.0 and charge 4.7, when closing in), waver = a friend within range_m wavers or routs; default_trigger for an active not listed. The network fires its lord's self-cast actives by order (Orders.ability). Ready again recharge_s after the active time ends; ready at the start (no initial recharge found)."
   }
 }

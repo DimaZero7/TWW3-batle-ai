@@ -24,7 +24,9 @@ ROSTER = project.ROOT / "data" / "roster"
 # v1 test build (user, 30.09.2026): Empire against Skaven, a lord, spears without shields, missile infantry.
 UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_emp_inf_archers_0",
          "wh2_main_skv_cha_warlord_0", "wh2_main_skv_inf_clanrat_spearmen_0", "wh2_main_skv_inf_skavenslave_spearmen_0",
-         "wh2_main_skv_inf_skavenslave_slingers_0")
+         "wh2_main_skv_inf_skavenslave_slingers_0",
+         # armour-piercing halberds of the lord swarm probe (tools/nn/lord_swarm.py, 01.10.2026)
+         "wh_main_emp_inf_halberdiers", "wh2_main_skv_inf_stormvermin_0")
 TABLES = ("main_units", "land_units", "battle_entities", "melee_weapons", "missile_weapons", "projectiles",
           "unit_armour_types", "unit_shield_types", "unit_attributes_to_groups_junctions",
           "land_units_to_unit_abilites_junctions")

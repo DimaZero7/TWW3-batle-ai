@@ -1,8 +1,9 @@
 """The simulator's numbers, from three files (docs/en/training/simulator.md):
 
     config/nn/units.json       unit passports (the game's database)
+    config/nn/abilities.json   ability passports (the game's database)
     config/nn/game_rules.json  the game's battle, morale and fatigue rules (the game's database)
-    config/nn/sim.json         measured or calibrated numbers the other two lack
+    config/nn/sim.json         measured or calibrated numbers the others lack
 
 Only json; no torch here.
 """
@@ -26,6 +27,7 @@ class Params:
     units: dict      # key -> passport
     rules: dict      # game_rules.json: battle, morale, fatigue
     sim: dict        # sim.json
+    abilities: dict = None   # abilities.json: ability key -> passport
 
     # --- the game's rules (config/nn/game_rules.json) ---
     @property
@@ -60,7 +62,7 @@ class Params:
         """A copy with some calibrated numbers replaced (for fitting)."""
         sim = json.loads(json.dumps(self.sim))
         sim[section].update(values)
-        return Params(self.units, self.rules, sim)
+        return Params(self.units, self.rules, sim, self.abilities)
 
     # --- per unit ---
     def static(self, key, faction=None):
@@ -111,8 +113,9 @@ def _read(path):
 
 
 @lru_cache(maxsize=4)
-def load(units=None, rules=None, sim=None):
-    """Params from the three files (defaults: config/nn/)."""
+def load(units=None, rules=None, sim=None, abilities=None):
+    """Params from the four files (defaults: config/nn/)."""
     return Params(units=_read(units or CONFIG / "units.json")["units"],
                   rules=_read(rules or CONFIG / "game_rules.json"),
-                  sim=_read(sim or CONFIG / "sim.json"))
+                  sim=_read(sim or CONFIG / "sim.json"),
+                  abilities=_read(abilities or CONFIG / "abilities.json")["abilities"])

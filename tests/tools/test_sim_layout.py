@@ -27,10 +27,15 @@ class TestLayout:
         for group in state.GROUPS.values():
             assert all(code in ("f", "b", "i") and text for code, text in group.values())
 
-    def test_orders_have_five_kinds_and_five_fields(self):
+    def test_orders_have_five_kinds_and_six_fields(self):
         assert orders.KINDS == ("hold", "move", "attack", "withdraw", "keep")
         assert (orders.HOLD, orders.MOVE, orders.ATTACK, orders.WITHDRAW, orders.KEEP) == (0, 1, 2, 3, 4)
-        assert set(orders.FIELDS) == {"kind", "x", "z", "target", "run"}
+        # ability (the slot to use now, -1 none) came last and is optional: the first five are as before
+        assert list(orders.FIELDS) == ["kind", "x", "z", "target", "run", "ability"]
+
+    def test_the_network_reads_the_ability_timers(self):
+        assert {f"ab{k}_{t}" for k in range(3) for t in ("on", "cd")} <= set(state.INTERNAL)
+        assert {f"ab{k}" for k in range(3)} <= set(state.STATIC)
 
 
 class TestCalibration:

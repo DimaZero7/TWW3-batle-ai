@@ -18,6 +18,7 @@
 | `unit-readout` | `entries.unit_readout` | `scenarios/unit_readout.xml` | `tww3_bai_unit_readout.pack` |
 | `move-probe` | `entries.move_probe` | `scenarios/move_probe.xml` | `tww3_bai_move_probe.pack` |
 | `manual` | `entries.manual_record` | `scenarios/manual_hamlet.xml` | `tww3_bai_manual.pack` |
+| `lord-swarm` | `entries.lord_swarm` | `scenarios/lord_swarm.xml` (`tools/nn/lord_swarm.py`) | `tww3_bai_lord_swarm.pack` |
 | `archer-range` | `entries.archer_range` | `scenarios/archer_range.xml` (`tools/archer_range.py`) | `tww3_bai_archer_range.pack` |
 | `enemy-layout` | `entries.enemy_layout` | `scenarios/enemy_layout.xml` (из `config/armies/defender_layouts.json`) | `tww3_bai_enemy_layout.pack` |
 | `roster-capture` | `entries.roster_capture` | `scenarios/roster_capture.xml` (из `config/roster/capture.json`) | `tww3_bai_roster_capture.pack` |
@@ -44,6 +45,7 @@
 | `--layout`, `--enemy-mode native\|defend` | enemy-layout | Состав врага; штатный ИИ как есть или с задачей «обороняй» (по умолчанию) |
 | `--range-mode fire_at_will\|attack\|damage` | archer-range | Когда лучники начинают стрелять при разной глубине блока; `damage` — урон по бесстрашной цели на 70–120 м |
 | `--damage-rotate N` | archer-range `damage` | Сдвинуть дистанции на N полос (та же дистанция на другом грунте) |
+| `--swarm infantry\|lords\|all`, `--repeats N` | lord-swarm | Пехота вокруг каждого лорда, другой лорд (с отрядами) на нём или всё вместе; каждая раскладка N раз (2). Замеры каждые 0,2 с (`--tick-ms`) |
 | `--plan` | move-probe | План из `config/move-plans/<имя>.json` (по умолчанию `hamlet`) |
 | `--capture` | roster-capture | Другой список отрядов вместо `config/roster/capture.json` |
 | `--scenario` | все | Другой файл из `scenarios/` вместо сценария цели |

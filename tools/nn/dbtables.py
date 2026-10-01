@@ -77,6 +77,18 @@ LAYOUTS = {
     "unit_shield_types": (6, _layout("key:s f01:i f02:i missile_block_chance:i material:o")),
     "unit_attributes_to_groups_junctions": (2, _layout("attribute:s f01:b attribute_group:s")),
     "land_units_to_unit_abilites_junctions": (1, _layout("ability:s land_unit:s culture:s")),
+    # Abilities (tools/nn/abilities.py), worked out 01.10.2026 on the same build.
+    "special_ability_to_special_ability_phase_junctions": (2, _layout(
+        "order:i special_ability:s phase:s target_self:b target_friends:b target_enemies:b")),
+    "special_ability_phase_stat_effects": (3, _layout("phase:s value:f stat:s how:s")),
+    "special_ability_phase_attribute_effects": (1, _layout("attribute:s phase:s effect:s")),
+}
+# Tables too wide to decode whole (unit_special_abilities: version 74, ~80 fields, rows of 200-500
+# bytes): only the fields right after the key, which sit at fixed offsets (decode_prefix).
+PREFIXES = {
+    "unit_special_abilities": (74, _layout("""
+        key:s active_time:f recharge_time:f num_uses:i effect_range:f targets_own:b
+        num_effected_friendly_units:i num_effected_enemy_units:i f08:b f09:f""")),
 }
 # Names we gave from the values, not from the game (why: docs/*/game/database.md).
 INFERRED = {
@@ -91,6 +103,12 @@ INFERRED = {
                     "shots_per_volley"},
     "unit_armour_types": {"material"},
     "unit_shield_types": {"missile_block_chance", "material"},
+    "special_ability_to_special_ability_phase_junctions": {"order", "target_self", "target_friends",
+                                                           "target_enemies"},
+    "special_ability_phase_stat_effects": {"phase", "value", "stat", "how"},
+    "special_ability_phase_attribute_effects": {"attribute", "phase", "effect"},
+    "unit_special_abilities": {"active_time", "recharge_time", "num_uses", "effect_range", "targets_own",
+                               "num_effected_friendly_units", "num_effected_enemy_units"},
 }
 
 
@@ -161,6 +179,47 @@ def decode(b, table, layout=None):
     if p != len(b):
         raise ValueError(f"{table}: {len(b) - p} bytes left after {rows} rows")
     return out
+
+
+def decode_prefix(b, table, keys, layout=None):
+    """{key: first fields of its row} for a table read only up to PREFIXES[table] (the key first).
+
+    The row of a key is found where the key is written as text and the fields after it read as
+    the layout says: flags 0 or 1, times and counts in a sane range (-1 = none). A key found in no
+    row, or in two rows that both read sanely, raises: never a guess."""
+    version, fields = layout or PREFIXES[table]
+    got, _ = header(b)
+    if got != version:
+        raise ValueError(f"{table}: version {got}, the prefix is for {version}")
+    out = {}
+    for key in keys:
+        raw = key.encode("utf-8")
+        mark = struct.pack("<H", len(raw)) + raw
+        rows, at = [], b.find(mark)
+        while at >= 0:
+            try:
+                row, p = {}, at
+                for name, t in fields:
+                    row[name], p = read_field(b, p, t)
+                if _sane(row):
+                    rows.append(row)
+            except (ValueError, struct.error, UnicodeDecodeError, IndexError):
+                pass
+            at = b.find(mark, at + 1)
+        if len(rows) != 1:
+            raise ValueError(f"{table}: {len(rows)} rows read for {key}")
+        out[key] = rows[0]
+    return out
+
+
+def _sane(row):
+    """Numbers of a real row (not a key written inside another row): -1 or 0..10000."""
+    for name, v in row.items():
+        if isinstance(v, float) and not (v == -1 or 0 <= v <= 10000):
+            return False
+        if isinstance(v, int) and not isinstance(v, bool) and not -1 <= v <= 10000:
+            return False
+    return True
 
 
 def read_tables(pack, tables):
