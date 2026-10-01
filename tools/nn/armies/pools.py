@@ -1,8 +1,9 @@
-"""The units each faction may field in training (config/nn/pools.json joined with the passports
-of config/nn/units.json).
+"""The units each faction may field in training: config/nn/pools.json joined with the passports
+(config/nn/units.json) and the campaign's army templates (config/nn/army_templates.json).
 
     pool = load()["wh2_main_skv_skaven"]
-    pool.lord.cost, [u.key for u in pool.units], pool.cap_of(n_units=10)
+    pool.lord.cost, [u.key for u in pool.units], pool.cap("inf_ranged", 10)
+    pool.templates        # ((name, weight, (share of each pool unit, ...)), ...)
 
 Plain python: no numpy, no torch.
 """
@@ -15,6 +16,7 @@ from tools import config as project
 
 POOLS = project.CONFIG_DIR / "nn" / "pools.json"
 PASSPORTS = project.CONFIG_DIR / "nn" / "units.json"
+TEMPLATES = project.CONFIG_DIR / "nn" / "army_templates.json"
 SPACING_M = 1.5          # a man's place in a formation (config/nn/sim.json formation.spacing_m)
 
 
@@ -28,6 +30,7 @@ class Unit:
     men: int
     width: float         # frontage at deployment, m
     depth: float         # formation depth at that frontage, m
+    family: str = ""     # root of its army generator group (army_templates.json), "" unknown
 
 
 @dataclass(frozen=True)
@@ -36,15 +39,13 @@ class Pool:
     lord: Unit
     units: tuple         # (Unit, ...) the side buys from
     caps: dict           # {category: share of the army's units, lord counted}
+    generator: str = ""  # the faction's army generator config (WH_Empire, ...)
+    templates: tuple = ()  # ((template, weight, (share per unit of `units`)), ...)
 
     def cap(self, category, n_units):
         """Most units of a category in an army of the lord and n_units units (None = no cap)."""
         share = self.caps.get(category)
         return None if share is None else max(1, math.floor(share * (n_units + 1)))
-
-    def groups(self):
-        """Capped categories in a fixed order."""
-        return tuple(sorted(self.caps))
 
 
 def depth(men, width, spacing=SPACING_M):
@@ -53,6 +54,31 @@ def depth(men, width, spacing=SPACING_M):
         return 0.0
     files = max(1, min(men, round(width / spacing)))
     return math.ceil(men / files) * spacing
+
+
+def root(group, parents):
+    """The last group of a group's parent chain."""
+    seen = {group}
+    while group in parents:
+        group = parents[group]
+        assert group not in seen, f"a loop of parents at {group}"
+        seen.add(group)
+    return group
+
+
+def family_shares(ratios, families, parents):
+    """A template's ratios {group: ratio} summed by family (root group) over the families present
+    in the pool, then split evenly among the pool's units of a family: (share per unit), sum 1;
+    None when the template names none of the pool's families."""
+    total = {}
+    for group, ratio in ratios.items():
+        fam = root(group, parents)
+        if fam in families and ratio > 0:
+            total[fam] = total.get(fam, 0) + ratio
+    s = sum(total.values())
+    if not s:
+        return None
+    return tuple(total.get(f, 0) / s / families.count(f) for f in families)
 
 
 def _unit(spec, passports, slot):
@@ -64,10 +90,30 @@ def _unit(spec, passports, slot):
                 missile=p.get("missile") is not None, men=int(p["men"]), width=width, depth=depth(p["men"], width))
 
 
-def load(path=None, passports_path=None):
-    """{faction: Pool}."""
+def _templates(faction, units, doc):
+    """(units with their families, templates) of a faction from army_templates.json."""
+    f = doc["factions"].get(faction)
+    if f is None:
+        return units, ()
+    parents = doc["parents"]
+    units = tuple(dataclasses.replace(u, family=root(f["units"][u.key][0]["group"], parents))
+                  if f["units"].get(u.key) else u for u in units)
+    families = [u.family for u in units]
+    out = []
+    for name, t in f["templates"].items():
+        shares = family_shares(t["ratios"], families, parents)
+        if shares is not None and t["priority"] > 0:
+            out.append((name, float(t["priority"]), shares))
+    return units, tuple(out)
+
+
+def load(path=None, passports_path=None, templates_path=None):
+    """{faction: Pool}. templates_path=False: without the army templates."""
     doc = json.loads((path or POOLS).read_text(encoding="utf-8"))
     passports = json.loads((passports_path or PASSPORTS).read_text(encoding="utf-8"))["units"]
+    tdoc = None
+    if templates_path is not False and (templates_path or TEMPLATES).exists():
+        tdoc = json.loads((templates_path or TEMPLATES).read_text(encoding="utf-8"))
     caps = {k: float(v) for k, v in doc.get("caps", {}).items() if not k.startswith("_")}
     out = {}
     for faction, spec in doc["factions"].items():
@@ -76,5 +122,17 @@ def load(path=None, passports_path=None):
         assert units, f"{faction}: an empty pool"
         slots = [u.slot for u in units]
         assert len(slots) == len(set(slots)) and "lord" not in slots, f"{faction}: slots must be unique"
-        out[faction] = Pool(faction=faction, lord=lord, units=units, caps=caps)
+        templates = ()
+        if tdoc is not None:
+            units, templates = _templates(faction, units, tdoc)
+        out[faction] = Pool(faction=faction, lord=lord, units=units, caps=caps,
+                            generator=spec.get("generator", ""), templates=templates)
     return out
+
+
+def mix(path=None):
+    """{"template": share, "random": share} of armies (config/nn/pools.json "mix")."""
+    doc = json.loads((path or POOLS).read_text(encoding="utf-8"))
+    m = {k: float(v) for k, v in doc.get("mix", {"template": 1.0}).items() if not k.startswith("_")}
+    assert set(m) <= {"template", "random"} and abs(sum(m.values()) - 1) < 1e-9, f"bad mix {m}"
+    return m

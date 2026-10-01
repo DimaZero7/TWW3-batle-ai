@@ -1,0 +1,220 @@
+"""tools.nn.armies: pools, the budget market, random battles, their deployment and consumers."""
+import json
+import math
+
+import numpy as np
+import pytest
+
+from tools.nn import scenario as nn_scenario
+from tools.nn.armies import export
+from tools.nn.armies import generate as G
+from tools.nn.armies import place as PL
+from tools.nn.armies import pools as P
+
+POOLS = P.load()
+EMP, SKV = "wh_main_emp_empire", "wh2_main_skv_skaven"
+SEEDS = range(300)
+
+
+@pytest.fixture(scope="module")
+def battles():
+    return [G.battle(s) for s in SEEDS]
+
+
+def units_of(side):
+    return [u for u in side["units"] if not u.get("general")]
+
+
+class TestPools:
+    def test_every_pool_unit_has_a_passport_cost_and_a_family(self):
+        passports = json.loads(P.PASSPORTS.read_text(encoding="utf-8"))["units"]
+        for pool in POOLS.values():
+            for u in (pool.lord,) + pool.units:
+                assert u.key in passports and u.cost == passports[u.key]["multiplayer_cost"] > 0
+            assert all(u.family for u in pool.units) and pool.templates
+
+    def test_cap_counts_the_lord_rounds_down_and_allows_one(self):
+        pool = POOLS[EMP]
+        assert pool.cap("inf_ranged", 0) == 1 and pool.cap("inf_ranged", 1) == 1
+        assert pool.cap("inf_ranged", 4) == 3 and pool.cap("inf_ranged", 19) == 12
+        assert pool.cap("no_such_category", 5) is None
+
+    def test_depth_of_a_formation(self):
+        assert P.depth(120, 30) == 9.0 and P.depth(180, 30) == 13.5 and P.depth(1, 5) == 0.0
+
+    def test_family_shares_sum_by_root_and_split_evenly(self):
+        parents = {"a_high": "a", "a": "a_trash", "b_low": "b"}
+        shares = P.family_shares({"a_high": 30, "a": 10, "b_low": 20, "artillery": 40},
+                                 ["a_trash", "a_trash", "b"], parents)
+        assert shares == pytest.approx((1 / 3, 1 / 3, 1 / 3))
+        assert P.family_shares({"naval": 5}, ["a_trash", "b"], parents) is None
+        for pool in POOLS.values():
+            for _, weight, s in pool.templates:
+                assert weight > 0 and sum(s) == pytest.approx(1.0)
+
+    def test_the_mix_is_three_quarters_templates(self):
+        assert P.mix() == {"template": 0.75, "random": 0.25}
+
+
+class TestMarket:
+    @pytest.mark.parametrize("faction", [EMP, SKV])
+    def test_every_spendable_budget_is_spent_inside_the_window(self, faction):
+        m = G.Market(POOLS[faction])
+        rng = np.random.default_rng(0)
+        pool = POOLS[faction]
+        for budget in np.linspace(m.totals.min(), m.totals.max(), 60):
+            if not m.can_spend(budget):
+                continue
+            for shares in [t[2] for t in pool.templates] + [None]:
+                bought = m.template_army(rng, budget, shares) if shares else m.random_army(rng, budget)
+                cost = pool.lord.cost + sum(pool.units[i].cost for i in bought)
+                assert budget * (1 - G.TOLERANCE) - 1e-6 <= cost <= budget + 1e-6
+                assert len(bought) <= G.MAX_UNITS
+
+    def test_template_armies_keep_the_caps(self):
+        m, pool = G.Market(POOLS[EMP]), POOLS[EMP]
+        rng = np.random.default_rng(1)
+        for budget in np.linspace(1000, 6900, 40):
+            if m.can_spend(budget):
+                bought = m.template_army(rng, budget, (0.0, 1.0))   # a template of archers only
+                n_missile = sum(pool.units[i].category == "inf_ranged" for i in bought)
+                assert n_missile <= pool.cap("inf_ranged", len(bought))
+
+    def test_a_random_army_has_the_drawn_number_of_units(self):
+        m = G.Market(POOLS[SKV])
+        counts = m.counts(3000)
+        assert min(counts) <= 8 and max(counts) >= 15      # few clanrats .. many slaves
+        rng = np.random.default_rng(2)
+        sizes = {len(m.random_army(rng, 3000)) for _ in range(200)}
+        assert sizes == set(counts)
+
+
+class TestBattles:
+    def test_equal_budget_within_five_percent(self, battles):
+        for a in battles:
+            costs = [a["sides"][s]["cost"] for s in ("own", "enemy")]
+            assert abs(costs[0] - costs[1]) <= 0.05 * max(costs) + 1e-9
+            assert all(c <= a["budget"] + 1 for c in costs)
+
+    def test_a_lord_and_at_most_nineteen_units_from_the_pool(self, battles):
+        for a in battles:
+            for side in a["sides"].values():
+                pool = POOLS[side["faction"]]
+                generals = [u for u in side["units"] if u.get("general")]
+                assert len(generals) == 1 and generals[0]["key"] == pool.lord.key
+                assert 1 <= len(side["units"]) <= 20
+                keys = {u.key for u in pool.units}
+                assert all(u["key"] in keys for u in units_of(side))
+                cost = pool.lord.cost + sum(next(p.cost for p in pool.units if p.key == u["key"])
+                                            for u in units_of(side))
+                assert cost == side["cost"]
+
+    def test_the_same_seed_gives_the_same_battle(self):
+        assert G.battle(7) == G.battle(7)
+        assert G.battle(7) != G.battle(8)
+
+    def test_train_and_eval_seeds_are_disjoint(self):
+        assert G.TRAIN_SEEDS.stop <= G.EVAL_SEEDS.start
+        assert G.split(0) == "train" and G.split(G.EVAL_SEEDS.start) == "eval"
+        with pytest.raises(ValueError):
+            G.split(-1)
+
+    def test_mirrors_cross_matchups_templates_and_random_armies_all_occur(self, battles):
+        pairs = {(a["sides"]["own"]["faction"], a["sides"]["enemy"]["faction"]) for a in battles}
+        assert pairs == {(EMP, EMP), (EMP, SKV), (SKV, EMP), (SKV, SKV)}
+        kinds = [s["army"] == "random" for a in battles for s in a["sides"].values()]
+        assert 0.15 < np.mean(kinds) < 0.35
+
+    def test_template_armies_keep_the_caps(self, battles):
+        for a in battles:
+            for side in a["sides"].values():
+                if side["army"] != "random":
+                    pool = POOLS[side["faction"]]
+                    missile = {u.key for u in pool.units if u.category == "inf_ranged"}
+                    n = len(units_of(side))
+                    assert sum(u["key"] in missile for u in units_of(side)) <= pool.cap("inf_ranged", n)
+
+    def test_shapes_vary_many_cheap_against_few_elite(self, battles):
+        ratio = [max(len(units_of(s)) for s in a["sides"].values())
+                 / max(1, min(len(units_of(s)) for s in a["sides"].values())) for a in battles]
+        assert np.mean(np.asarray(ratio) >= 1.5) > 0.1 and max(ratio) >= 2
+
+    def test_a_budget_range_a_unit_limit_and_one_faction(self):
+        rng = np.random.default_rng(3)
+        for _ in range(50):
+            a = G.generate(rng, factions=[SKV], budget_range=(1000, 1500), max_units=5)
+            assert all(s["faction"] == SKV for s in a["sides"].values())
+            assert 1000 <= a["budget"] <= 1500
+            assert all(len(s["units"]) <= 6 for s in a["sides"].values())
+        with pytest.raises(AssertionError):
+            G.generate(rng, factions=[EMP], budget_range=(100, 200))
+
+    def test_the_budget_never_exceeds_what_both_can_field(self):
+        gen = G.default()
+        lo, hi = gen.budget_bounds((EMP, SKV))
+        assert lo == POOLS[EMP].lord.cost + 300 and hi == POOLS[SKV].lord.cost + 19 * 325
+
+
+class TestPlace:
+    @staticmethod
+    def check(units, pools_units, deployment_m=300.0):
+        depth = {u.key: u.depth for u in pools_units}
+        boxes = [PL.footprint(u, depth.get(u["key"], 0.0)) for u in units]
+        for f0, f1, l0, l1 in boxes:
+            assert f0 >= PL.ZONE_FRONT_M - deployment_m and f1 <= PL.ZONE_FRONT_M
+            assert l0 >= -deployment_m / 2 and l1 <= deployment_m / 2
+        for i, a in enumerate(boxes):
+            for b in boxes[i + 1:]:
+                assert a[1] <= b[0] or b[1] <= a[0] or a[3] <= b[2] or b[3] <= a[2], (a, b)
+
+    @pytest.mark.parametrize("faction", [EMP, SKV])
+    def test_one_to_twenty_units_fit_the_zone_without_overlaps(self, faction):
+        pool = POOLS[faction]
+        rng = np.random.default_rng(4)
+        for n in range(0, 20):
+            units = [pool.units[i] for i in rng.integers(len(pool.units), size=n)]
+            placed = PL.place(pool.lord, units)
+            assert len(placed) == n + 1 and placed[0]["general"]
+            assert len({u["slot"] for u in placed}) == n + 1
+            self.check(placed, (pool.lord,) + pool.units)
+
+    def test_melee_in_front_missile_behind_the_lord_last(self):
+        pool = POOLS[SKV]
+        units = [pool.units[0]] * 9 + [pool.units[2]] * 7
+        placed = PL.place(pool.lord, units)
+        melee = [u["forward"] for u in placed if u["slot"].startswith("clanrat")]
+        missile = [u["forward"] for u in placed if u["slot"].startswith("sling")]
+        assert max(melee) == 0.0 and min(melee) > max(missile)
+        assert placed[0]["forward"] < min(missile)
+
+    def test_generated_battles_fit(self, battles):
+        for a in battles[:100]:
+            for side in a["sides"].values():
+                pool = POOLS[side["faction"]]
+                self.check(side["units"], (pool.lord,) + pool.units, a["deployment_m"])
+
+
+class TestConsumers:
+    def test_the_game_battle_file_takes_a_generated_battle(self, battles):
+        for a in battles[:20]:
+            xml = export.scenario_xml(a)
+            n = sum(len(s["units"]) for s in a["sides"].values())
+            assert xml.count("<unit ") == n and xml.count("<general>") == 2
+            config = nn_scenario.run_config(a)
+            assert len(config["units"]["own"]) == len(a["sides"]["own"]["units"])
+
+    def test_an_arenas_file_loads_as_named_arenas(self, battles, tmp_path):
+        path = export.write_arenas(battles[:5], tmp_path / "arenas.json")
+        for a in battles[:5]:
+            loaded = nn_scenario.load_arena(a["name"], arenas_path=path)
+            assert nn_scenario.placements(loaded) == nn_scenario.placements(a)
+
+    def test_the_simulator_takes_generated_battles(self, battles):
+        pytest.importorskip("torch")
+        from tools.nn.sim import scenario as sim_scenario
+        armies = export.to_sim(battles[:4], "attack")
+        st = sim_scenario.build(armies, per_side=G.MAX_UNITS + 1)
+        for b, a in enumerate(battles[:4]):
+            assert int((st.u["side"][b] == 1).sum()) == len(a["sides"]["own"]["units"])
+            assert int((st.u["side"][b] == 2).sum()) == len(a["sides"]["enemy"]["units"])
+        assert math.isfinite(float(st.u["x"].abs().max()))

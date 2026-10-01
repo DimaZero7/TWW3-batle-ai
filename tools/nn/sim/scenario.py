@@ -76,10 +76,26 @@ def build(armies, params=None, device="cpu", per_side=None):
     return st
 
 
+def arena_of(arena, arena_path=None):
+    """An arena by name (config/nn/arenas.json, or 'arena'), or given as a dict: an entry in
+    arenas.json's format ({"gap_m", "sides": {"own", "enemy"}}, ...) laid over the base arena
+    (config/nn/arena.json: map, zones), or a whole arena as tools.nn.scenario.load_arena gives."""
+    if arena is None or isinstance(arena, str):
+        return arena_scenario.load_arena(arena, arenas_path=arena_path)
+    if "sides" not in arena and "units" not in arena:
+        raise ValueError("an arena dict sets its armies: 'sides' (own, enemy) or 'units'")
+    base = json.loads(arena_scenario.ARENA.read_text(encoding="utf-8"))
+    merged = {k: v for k, v in base.items() if k not in ("faction", "units", "description")} if "sides" in arena         else dict(base)
+    merged.update(arena)
+    merged.setdefault("name", "custom")
+    return merged
+
+
 def from_arena(name, own_ai="attack", arena_path=None):
-    """An army description from a named arena of config/nn/arenas.json (or 'arena'): our side
-    is side 1. own_ai attack -> side 1 attacks; defend or hold -> side 2 attacks."""
-    arena = arena_scenario.load_arena(name, arenas_path=arena_path)
+    """An army description from an arena: a name in config/nn/arenas.json (or 'arena'), or an
+    arena dict (arena_of). Our side is side 1. own_ai attack -> side 1 attacks; defend or hold ->
+    side 2 attacks."""
+    arena = arena_of(name, arena_path)
     places = arena_scenario.placements(arena)
     sides = arena_scenario.armies(arena)
     params = load()
@@ -99,11 +115,21 @@ def from_arena(name, own_ai="attack", arena_path=None):
     return out
 
 
+def attacker_of(battle, cfg=None):
+    """The attacking side of a recorded battle: the manifest's own_role or enemy_role (a run the
+    network played has own_ai "net"), else own_ai (attack -> side 1)."""
+    cfg = cfg or {}
+    own = cfg.get("own_role") or {"attack": "defend", "defend": "attack"}.get(cfg.get("enemy_role") or battle.enemy_role)
+    if own in ("attack", "defend"):
+        return 1 if own == "attack" else 2
+    return 1 if battle.own_ai == "attack" else 2
+
+
 def from_recording(battle, run_dir=None):
     """An army description from a recorded battle (tools/nn/gamedata.Battle): the units' places
     and bearings at the first record, widths and factions from the run's manifest. Also returns
     the slot of each recorded unit, in the recording's order."""
-    widths, factions, generals = {}, {}, set()
+    widths, factions, generals, cfg = {}, {}, set(), {}
     if run_dir is not None:
         cfg = json.loads((Path(run_dir) / "manifest.json").read_text(encoding="utf-8"))["config"]
         factions = cfg.get("factions", {})
@@ -112,7 +138,7 @@ def from_recording(battle, run_dir=None):
                 widths[unit["script_name"]] = unit.get("width")
                 if unit.get("slot") == "lord" or unit["script_name"].endswith("_lord"):
                     generals.add(unit["script_name"])
-    out = {"attacker": 1 if battle.own_ai == "attack" else 2, "sides": {1: {"faction": factions.get("own"), "units": []},
+    out = {"attacker": attacker_of(battle, cfg), "sides": {1: {"faction": factions.get("own"), "units": []},
                                                                      2: {"faction": factions.get("enemy"), "units": []}}}
     for i, name in enumerate(battle.names):
         side = int(battle.side[i])

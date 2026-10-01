@@ -161,6 +161,13 @@ at once on the GPU, checked against these measurements and the recorded battles.
 How the network learns in it — [training](training.md) (`tools/nn/train/`,
 `bash tools/nn/dock.sh tools.nn.train.run`): PPO, battles against itself, its past versions and scripts.
 
+The battles it learns and is checked on — [random armies](armies.md) (`tools/nn/armies/`,
+`python -m tools.nn.armies`): an equal budget, a lord and 0–19 units a side, deployed for the
+simulator and the game.
+
+How the network is checked in the game against the game's AI — the [in-game check](../launch/gate.md)
+(`tools/launcher/gate.ps1`): 4 generated battles on held-out seeds, at least 3 wins.
+
 What is known about the mechanics:
 [morale](../game/units/morale.md) ·
 [melee](../game/units/melee.md) ·

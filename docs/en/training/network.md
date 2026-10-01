@@ -114,7 +114,8 @@ sooner. These numbers come from the game's database.
 ## Armies and battle rules
 
 The network must be very flexible, so armies are random. The same generator builds the
-check battles against the game's AI.
+check battles against the game's AI. The generator is ready: [random armies](armies.md)
+(`tools/nn/armies/`).
 
 - **Size:** 1 lord and 0 to 19 units. No reinforcements for now.
 - **Equal budget.** Both sides get the same sum of unit prices (`multiplayer_cost` from
@@ -122,16 +123,19 @@ check battles against the game's AI.
   side is often stronger and a win says nothing about the network. Tiers are not needed:
   the budget evens out the price.
 - **One faction per army:** units only from its recruitment list.
-- **No doom stacks.** The shares of infantry, missile, cavalry and monsters come from how
-  the campaign AI recruits armies (tables in the game's database, different per faction).
-  Armies come out sensible and true to lore. Which tables — still to check.
+- **Three quarters of the armies — as the game's AI builds them.** The shares of infantry,
+  missile, cavalry and monsters come from the army templates of the game's generator
+  (`cdir_military_generator_*`, different per faction). Armies come out sensible and true
+  to lore. A quarter of the armies are random within the pool and the budget, stacks
+  included: what a human might build. The share is `mix` in `config/nn/pools.json`.
 - **Small armies first:** 1–5 units, then growing to 20.
 - **The unit pool grows in steps** with the simulator: first 1–2 factions without magic,
   flying and artillery; each new category after a check against the game.
 - **Battle limit — 60 minutes.** When it runs out the attacker loses (the game's rule: the
   defender wins on time). Dragging it out does not pay for the attacker.
-- **Deployment.** `tools/nn/scenario.py` places only the 7 vs 7 arena for now. It must
-  learn to place 1–20 units.
+- **Deployment.** `tools/nn/armies/place.py` puts a side's 1–20 units in lines: melee in
+  front, missile behind, the lord at the back. The format is the arenas', so a battle
+  runs both in the simulator and in the game.
 
 ## Co-op
 
@@ -191,6 +195,8 @@ A proposal; the owner decides. The network is ready when all of these hold:
    has not seen. A draw and the attacker's timeout are not wins. The breakdown by army
    size, faction, attack and defence is a hint where the weak spot is: with 200 battles a
    threshold per group proves nothing. The price of victory counts too: our losses.
+   A quick check before the night one is the [in-game check](../launch/gate.md): 4 battles
+   (`tools/launcher/gate.ps1`), at least 3 wins; the same outcome rules and held-out seeds.
 2. **The style shows in numbers:** elves keep a straighter line and strike more
    simultaneously than orcs, by the margin the character sets.
 3. **The game's AI is an independent check.** The network learns only against itself;

@@ -31,13 +31,15 @@ What every entry does: [entry points](../apps/entries.md).
 | Option | Targets | Meaning |
 |---|---|---|
 | `--speed 1/3/10/20` | all but map-capture and manual | Battle speed (default 20) |
-| `--timeout 30..1800` | ai-vs-ai, nn-arena | Model-time limit per battle, s (600); the battle's deadline is computed from it. The arena battles of 30.09.2026 were recorded with 900 |
+| `--timeout 30..3600` | ai-vs-ai, nn-arena | Model-time limit per battle, s (600); the battle's deadline is computed from it. The arena battles of 30.09.2026 were recorded with 900, the [network check](gate.md) uses 3600, as the simulator |
 | `--tick-ms` | all but map-capture | Tick period, ms (1000) |
 | `--step 1/2/3/5` | map-capture | Grid cell size, m |
 | `--features` | map-capture | After deployment also read objects and cell reachability |
 | `--window MIN_X MAX_X MIN_Z MAX_Z` | map-capture | Capture only this part of the map |
 | `--own-ai attack\|defend` | nn-arena | Our side under CA's planner attacks (the game's AI defends) or defends (the game's AI attacks) |
-| `--own-ai net` | nn-arena | The network in the companion commands our side, the game's AI attacks ([watching the network](watch.md)) |
+| `--own-ai net` | nn-arena | The network in the companion commands our side ([watching the network](watch.md)) |
+| `--own-role attack\|defend` | nn-arena `net` | The network attacks (the game's AI defends and wins when time is out) or defends (default: the game's AI attacks) |
+| `--army-seed N` | nn-arena | A battle from the [army generator](../training/armies.md): `generate.battle(N)`, a lord and 0-19 units a side. Without `--own-ai` the network commands our side. The battle file is `build/nn-arena/random_<N>.xml`; `scenarios/` is not touched. The manifest gets `army` (seed, train/eval, budget, templates, men) |
 | `--decide-ms 250..5000` | nn-arena `net` | Battle time between two decisions of the network, ms (1000) |
 | `--layout`, `--enemy-mode native\|defend` | enemy-layout | Enemy layout; the game AI as is or told to defend (default) |
 | `--range-mode fire_at_will\|attack\|damage` | archer-range | When archers start shooting by the depth of their block; `damage` — damage to a fearless target at 70–120 m |

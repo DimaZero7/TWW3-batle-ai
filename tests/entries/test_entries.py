@@ -472,6 +472,77 @@ class TestNnArena:
         assert final["done"] is True and final["move"] == 4   # the decision just before the end
         assert all(r["policy"] == "nn_arena_net" for r in rows)
 
+    def test_net_runs_shooters_frees_idle_ones_and_gives_orders_again_after_a_rally(self, lua, tmp_path):
+        # The gate's in-game findings (01.10.2026): a ranged attack must pass the run flag; a unit that
+        # routed and rallied gets its order again; a shooter that cannot hit its target (the target in
+        # melee) is released to fire at will and takes the target again once it is out of melee.
+        from tools.nn.companion import exchange
+        lua.execute(self.SETUP + """
+            archer = fake.unit('own_archer_1', 'archers', -200, 40)
+            archer.ammo, archer.range = 1800, 150
+            table.insert(own, archer)
+            table.insert(CONFIG.units.own, {script_name = 'own_archer_1', slot = 'archer_1', key = 'archers'})
+            fake.cco['uid_own_archer_1'] = {IsFiringMissiles = true}
+            CONFIG.own_ai, CONFIG.enemy_role, CONFIG.decide_ms, CONFIG.poll_ms = 'net', 'attack', 1000, 100
+            CONFIG.factions = {own = 'wh_main_emp_empire', enemy = 'wh2_main_skv_skaven'}
+            STATE = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+        """)
+        orders = [{"unit": "own_spear_1", "kind": "attack", "target": "enemy_lord", "run": True},
+                  {"unit": "own_archer_1", "kind": "attack", "target": "enemy_spear_1", "run": True}]
+        answered = [0]
+
+        def play(seconds):   # the companion answers every move with the same orders
+            for _ in range(seconds * 10):
+                doc = exchange.read_state(tmp_path / exchange.STATE)
+                if doc["move"] > answered[0]:
+                    answered[0] = doc["move"]
+                    exchange.write_atomic(tmp_path / exchange.ORDERS,
+                                          exchange.orders_text(doc["batch"], doc["move"], orders, 1.0))
+                lua.execute("bm:tick(100)")
+
+        def log():
+            return list(lua.eval("bm.orders").values())
+        play(3)
+        assert log() == ["attack enemy_lord", "attack enemy_spear_1"]
+        args = lua.eval("archer.attack_args")
+        assert (args.target, args.primary, args.run) == ("enemy_spear_1", True, True)   # runs as told
+        assert lua.eval("archer.free_fire") is True
+        lua.execute("own[2].routing = true")
+        play(3)
+        lua.execute("own[2].routing = false")        # rallied: the same order is given again
+        play(2)
+        assert log() == ["attack enemy_lord", "attack enemy_spear_1", "attack enemy_lord"]
+        lua.execute("fake.cco['uid_own_archer_1'].IsFiringMissiles = false; enemy[2].melee = true")
+        play(5)                                      # 4 decisions idle: released to fire at will
+        assert log()[3:] == ["halt"] and lua.eval("archer.free_fire") is True
+        lua.execute("fake.cco['uid_own_archer_1'].IsFiringMissiles = true")
+        play(12)                                     # the target still in melee: stays free
+        assert log()[3:] == ["halt"]
+        lua.execute("enemy[2].melee = false")
+        play(2)                                      # out of melee: the ordered target again
+        assert log()[3:] == ["halt", "attack enemy_spear_1"]
+        # A new target in melee within range: not an explicit target (it would stand idle), fire at will.
+        lua.execute("enemy[1].pos.x, enemy[1].pos.z, enemy[1].melee = -120, 40, true")
+        play(1)                                      # the bridge sees it at the next decision
+        orders[1]["target"] = "enemy_lord"
+        play(2)
+        assert log()[3:] == ["halt", "attack enemy_spear_1", "halt"]
+        lua.execute("""
+            bm.outcome, bm.winner = true, 2
+            for _ = 1, 10 do bm:tick(100) end
+            assert(STATE.finished, 'the battle did not finish')
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        again = [o for r in rows if r["event"] == "nn_orders" for o in r["orders"] if o.get("again")]
+        assert [(o["u"], o["k"], o["tg"]) for o in again] == [("own_spear_1", "attack", "enemy_lord")]
+        assert sum(r["skipped"] for r in rows if r["event"] == "nn_orders") >= 2
+        assert [(r["u"], r["action"]) for r in rows if r["event"] == "nn_duty"] == [
+            ("own_archer_1", "release"), ("own_archer_1", "resume"), ("own_archer_1", "free")]
+        result = rows[-1]
+        assert (result["nn_regiven"], result["nn_released"], result["nn_resumed"]) == (1, 2, 1)
+
     def test_an_unknown_own_ai_is_an_error(self, lua, tmp_path):
         lua.execute(self.SETUP + """
             CONFIG.own_ai = 'dance'
@@ -480,3 +551,63 @@ class TestNnArena:
         """)
         rows = events(tmp_path / "tww3_bai_events.jsonl")
         assert any(r["event"] == "error" and "own_ai" in r["message"] for r in rows)
+
+    def test_net_commands_a_generated_army_of_twenty_units(self, lua, tmp_path):
+        # The gate's largest battle (tools/nn/gate.py): 19 Empire units v 20 Skaven, lords of both factions,
+        # several unit types. Our network attacks: the state says so, and every one of our units takes its order.
+        from tools.nn import scenario as nn_scenario
+        from tools.nn.armies import generate
+        from tools.nn.companion import exchange
+        arena = generate.battle(1_000_900_008)
+        places = nn_scenario.placements(arena)
+        cfg = nn_scenario.run_config(arena)
+        assert (len(places["own"]), len(places["enemy"])) == (19, 20)
+        assert len({u["key"] for u in places["own"]}) == 3 and len({u["key"] for u in places["enemy"]}) == 4
+
+        def units(side):
+            return ", ".join(f"fake.unit('{u['script_name']}', '{u['key']}', {u['x']}, {u['z']})" for u in places[side])
+
+        def specs(side):
+            return ", ".join(f"{{script_name = '{u['script_name']}', slot = '{u['slot']}', key = '{u['key']}'}}"
+                             for u in cfg["units"][side])
+        lua.execute(f"""
+            own = {{{units('own')}}}
+            enemy = {{{units('enemy')}}}
+            bm = fake.manager({{own, enemy}})
+            CONFIG = {{build = 'test', speed = 20, tick_ms = 1000, deadline_s = 600, stall_ms = 600000,
+                timeout_ms = 600000, defend_radius_m = 150, own_ai = 'net', enemy_role = 'defend',
+                decide_ms = 1000, poll_ms = 100, units = {{own = {{{specs('own')}}}, enemy = {{{specs('enemy')}}}}},
+                factions = {{own = '{cfg['factions']['own']}', enemy = '{cfg['factions']['enemy']}'}}}}
+            STATE = require('entries.nn_arena').main(bm, CONFIG, {{common = fake.common, battle_vector = fake.vector_type}})
+            bm:pump()
+        """)
+        doc = exchange.read_state(tmp_path / exchange.STATE)
+        assert doc["attacker"] == 1 and doc["factions"] == cfg["factions"]
+        assert len(doc["units"]) == len(places["own"]) + len(places["enemy"])
+        assert [(u["n"], u["key"]) for u in doc["units"]] == [(u["script_name"], u["key"])
+                                                              for s in ("own", "enemy") for u in places[s]]
+        b = exchange.battle(doc)
+        n_own, enemies = len(b.own), [n for n, s in zip(b.names, b.side) if s == 2]
+        kinds = [("attack", i) if i % 3 == 0 else ("move", i) if i % 3 == 1 else ("hold", i) for i in range(n_own)]
+        orders = []
+        for (k, i), name in zip(kinds, b.own):
+            o = {"unit": name, "kind": k}
+            if k == "attack":
+                o.update(target=enemies[i % len(enemies)], run=True)
+            elif k == "move":
+                o.update(x=-100.0 + i, z=10.0 * i, run=False)
+            orders.append(o)
+        exchange.write_atomic(tmp_path / exchange.ORDERS, exchange.orders_text(doc["batch"], 1, orders, 2.0))
+        lua.execute("""
+            bm:tick(100)
+            bm.outcome, bm.winner = true, 1
+            for _ = 1, 10 do bm:tick(100) end
+            assert(STATE.finished, 'the battle did not finish')
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        (given,) = [r for r in rows if r["event"] == "nn_orders"]
+        assert len(given["orders"]) == n_own == 19 and all(o["status"] == "given" for o in given["orders"])
+        assert len(list(lua.eval("bm.orders").values())) == n_own
+        result = rows[-1]
+        assert result["event"] == "result" and result["winner"] == 1 and result["nn_orders_given"] == n_own

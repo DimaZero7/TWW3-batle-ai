@@ -16,7 +16,7 @@
 | `prepare_melee(uc, unit)` | `fire_at_will(false)`, отключить `skirmish`, `melee(true)` |
 | `move`, `move_formation`, `rotate`, `halt` | `goto_location`, `goto_location_angle_width`, `rotate`, `halt` |
 | `attack_melee(uc, enemy)` | `melee(true)`, `attack_unit(enemy, false, true)` |
-| `attack_ranged(uc, enemy)` | `melee(false)`, `fire_at_will(false)`, `attack_unit(enemy, true, false)` |
+| `attack_ranged(uc, enemy, run, free_fire)` | `melee(false)`, `fire_at_will(free_fire)`, `attack_unit(enemy, true, run)`; `attack_unit(цель, основное оружие, бег)`: аргументы так, как их передаёт библиотека скриптов CA |
 | `set_fire_at_will(uc, on)` | `fire_at_will(on)` |
 | `stop_firing(uc)` | `halt()` + `fire_at_will(false)` |
 | `set_guard(uc, unit, on)` | `change_behaviour_active('defend', on)` |

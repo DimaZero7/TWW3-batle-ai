@@ -54,10 +54,15 @@ function M.attack_melee(uc, enemy)
 end
 
 -- Explicit fire at a target works even with free fire disabled.
-function M.attack_ranged(uc, enemy)
+-- attack_unit(target, primary weapon, run) — the arguments as CA's own script
+-- library uses them (lib_battle_patrol_manager, lib_battle_script_unit):
+-- run = false walks to the range (1.0-1.6 m/s for archers, 01.10.2026).
+-- free_fire keeps fire at will on, so the unit is not left without a target
+-- once the ordered one dies.
+function M.attack_ranged(uc, enemy, run, free_fire)
     uc:melee(false)
-    uc:fire_at_will(false)
-    uc:attack_unit(enemy, true, false)
+    uc:fire_at_will(free_fire == true)
+    uc:attack_unit(enemy, true, run == true)
 end
 
 function M.set_fire_at_will(uc, enabled)

@@ -160,9 +160,10 @@ def run_config(arena):
                              for u in places[side]] for side in SIDES}}
 
 
-def write_scenario(defender, arena=None):
+def write_scenario(defender, arena=None, path=None, duration_s=3600):
+    """Writes the battle file (scenarios/nn_arena.xml unless path is given); returns the arena."""
     arena = arena or load_arena()
-    SCENARIO.write_text(scenario_xml(arena, defender), encoding="utf-8")
+    (path or SCENARIO).write_text(scenario_xml(arena, defender, duration_s), encoding="utf-8", newline="\n")
     return arena
 
 

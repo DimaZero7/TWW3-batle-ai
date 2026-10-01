@@ -11,6 +11,7 @@ Usage:
     python -m tools.build nn-arena --own-ai defend --timeout 900
     python -m tools.build nn-arena --arena pair_spear_v_slave --own-ai attack   # config/nn/arenas.json
     python -m tools.build nn-arena --own-ai net --speed 1   # the network commands our side (companion)
+    python -m tools.build nn-arena --army-seed 1000900000 --own-role attack   # a generated battle, the network
 
 Output: build/<target>/ with the .pack, the bundled script and manifest.json.
 Install and launch with tools/launcher/launch.ps1.
@@ -110,6 +111,8 @@ MOVE_SETTLE_MS = 2000
 ENEMY_LAYOUT_HOLD_S = 90
 # nn-arena --own-ai net: how often the companion's orders file is read (model ms).
 NET_POLL_MS = 100
+# nn-arena: the battle file's own time limit is past the script's (the script ends the battle first).
+TIMEOUT_MARGIN_S = 60
 
 
 def load_move_plan(name):
@@ -199,11 +202,44 @@ def build(target, run_config, dependencies=None, scenario=None):
     return manifest
 
 
+def nn_arena_config(args, run_config):
+    """nn-arena: writes the battle file and fills run_config (units, roles, the generated armies).
+    Returns the path of a battle file written outside scenarios/ (a generated battle), else None."""
+    from tools.nn import scenario as nn_scenario
+    # The side that wins on timeout defends: ours when the planner defends,
+    # the game's AI when ours attacks; the network's role is --own-role (default defend).
+    own_role = {"attack": "attack", "defend": "defend", "hold": "defend",
+                "net": args.own_role or "defend"}[args.own_ai]
+    enemy_role = "defend" if own_role == "attack" else "attack"
+    defender = "enemy" if enemy_role == "defend" else "own"
+    duration_s = max(3600, args.timeout + TIMEOUT_MARGIN_S)
+    path = None
+    if args.army_seed is not None:
+        from tools.nn.armies import generate
+        arena = generate.battle(args.army_seed)
+        # A generated battle is not a scenario of the repository: its file goes next to the build.
+        path = project.BUILD / "nn-arena" / f"{arena['name']}.xml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        nn_scenario.write_scenario(defender, arena, path, duration_s)
+        run_config["army"] = {"seed": args.army_seed, "split": generate.split(args.army_seed),
+                              "budget": arena["budget"],
+                              "template": {s: arena["sides"][s]["army"] for s in nn_scenario.SIDES},
+                              "cost": {s: arena["sides"][s]["cost"] for s in nn_scenario.SIDES},
+                              "men": {s: sum(u["men"] for u in arena["sides"][s]["units"])
+                                      for s in nn_scenario.SIDES}}
+    else:
+        arena = nn_scenario.write_scenario(defender, nn_scenario.load_arena(args.arena), duration_s=duration_s)
+    run_config.update(nn_scenario.run_config(arena), own_ai=args.own_ai, enemy_role=enemy_role)
+    if args.own_ai == "net":
+        run_config.update(own_role=own_role, decide_ms=args.decide_ms, poll_ms=NET_POLL_MS)
+    return path
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("target", choices=sorted(TARGETS))
     parser.add_argument("--speed", type=int, choices=(1, 3, 10, 20), default=20)
-    parser.add_argument("--timeout", type=int, default=600, help="model seconds, 30..1800")
+    parser.add_argument("--timeout", type=int, default=600, help="model seconds, 30..3600")
     parser.add_argument("--tick-ms", type=int, default=1000)
     parser.add_argument("--step", type=int, choices=(1, 2, 3, 5), default=5, help="map-capture: cell size, m")
     parser.add_argument("--deadline", type=int, help="real seconds per battle before the script ends it "
@@ -223,11 +259,18 @@ def main(argv=None):
                              "or shoot a fearless target at fixed distances until out of arrows (damage)")
     parser.add_argument("--damage-rotate", type=int, default=0,
                         help="archer-range --range-mode damage: shift the distances by this many lanes")
-    parser.add_argument("--own-ai", choices=("attack", "defend", "hold", "net"), default="attack",
+    parser.add_argument("--own-ai", choices=("attack", "defend", "hold", "net"),
                         help="nn-arena: CA's script AI planner attacks or defends with our side; "
                              "the game's AI does the other; hold: our side gets no orders and stands "
                              "(a target for the game's AI to attack); net: the network in the companion "
-                             "(tools/nn/companion) commands our side, the game's AI attacks")
+                             "(tools/nn/companion) commands our side (its role: --own-role). "
+                             "Default: net with --army-seed, else attack")
+    parser.add_argument("--own-role", choices=("attack", "defend"),
+                        help="nn-arena --own-ai net: our side attacks (the game's AI defends and wins on "
+                             "timeout) or defends (default: the game's AI attacks)")
+    parser.add_argument("--army-seed", type=int,
+                        help="nn-arena: a generated battle (tools/nn/armies, generate.battle(seed)): "
+                             "armies of a lord and 0-19 units a side; EVAL seeds for checks")
     parser.add_argument("--decide-ms", type=int, default=1000,
                         help="nn-arena --own-ai net: model ms between two decisions (250..5000)")
     parser.add_argument("--arena", default="arena",
@@ -236,8 +279,14 @@ def main(argv=None):
     parser.add_argument("--features", action="store_true",
                         help="map-capture: also read objects and reachability after deployment")
     args = parser.parse_args(argv)
-    if not 30 <= args.timeout <= 1800:
-        parser.error("--timeout must be between 30 and 1800 seconds")
+    if args.own_ai is None:
+        args.own_ai = "net" if args.army_seed is not None else "attack"
+    if args.own_role and args.own_ai != "net":
+        parser.error("--own-role is for --own-ai net (the planner modes set our role themselves)")
+    if args.army_seed is not None and args.arena != "arena":
+        parser.error("--army-seed and --arena are two sources of armies: give one")
+    if not 30 <= args.timeout <= 3600:
+        parser.error("--timeout must be between 30 and 3600 seconds")
     if not 250 <= args.decide_ms <= 5000:
         parser.error("--decide-ms must be between 250 and 5000")
 
@@ -246,6 +295,7 @@ def main(argv=None):
         if args.window:
             run_config["window"] = dict(zip(("min_x", "max_x", "min_z", "max_z"), args.window))
     else:
+        scenario_file = None
         run_config = {"speed": args.speed, "timeout_ms": args.timeout * 1000, "tick_ms": args.tick_ms,
                       "scenario": TARGETS[args.target]["scenario"].removesuffix(".xml")}
         model_s = READOUT_MODEL_S if args.target == "unit-readout" else args.timeout
@@ -275,21 +325,15 @@ def main(argv=None):
             model_s = ENEMY_LAYOUT_HOLD_S + 10
             stall_ms = max(stall_ms, int((model_s + 120) * 1000))
         if args.target == "nn-arena":
-            from tools.nn import scenario as nn_scenario
-            # The side that wins on timeout defends: ours when the planner defends,
-            # the game's AI when ours attacks.
-            enemy_role = {"attack": "defend", "defend": "attack", "hold": "attack", "net": "attack"}[args.own_ai]
-            arena = nn_scenario.write_scenario("enemy" if enemy_role == "defend" else "own",
-                                               nn_scenario.load_arena(args.arena))
-            run_config.update(nn_scenario.run_config(arena), own_ai=args.own_ai, enemy_role=enemy_role)
-            if args.own_ai == "net":
-                run_config.update(decide_ms=args.decide_ms, poll_ms=NET_POLL_MS)
+            scenario_file = nn_arena_config(args, run_config)
         if args.target == "manual":
             # The player sets the pace: no forced speed, an hour by default.
             run_config.pop("speed")
             model_s = None
         run_config["deadline_s"] = args.deadline or (3600 if model_s is None else deadline_seconds(model_s, args.speed))
         run_config["stall_ms"] = stall_ms
+    if args.target == "nn-arena" and scenario_file and not args.scenario:
+        args.scenario = str(scenario_file)
     manifest = build(args.target, run_config, scenario=args.scenario)
     print(json.dumps(manifest, indent=2))
     return 0

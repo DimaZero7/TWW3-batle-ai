@@ -77,6 +77,61 @@ function M.changed(old, new)
     return false
 end
 
+-- A shooter's duty under an ATTACK order (the rows of the state, one per decision).
+-- In the game a shooter holding an explicit target it cannot hit (the target in
+-- melee, out of sight) stands without shooting and picks no other: 722 unit-seconds
+-- in one gate battle (01.10.2026). So:
+--   * an attack order on a target in melee within the shooter's range is not given
+--     as an explicit target: the shooter fires at will (fire_freely);
+--   * after RELEASE_AFTER decisions standing idle (not moving, not firing, not in
+--     melee, with ammunition) under an explicit target the order is released to fire
+--     at will. The count goes on across the network's new attack orders: it changes
+--     a shooter's target every ~5 s, a count that restarted with each would never end;
+--   * fire at will: the game chooses the target, as its own AI's shooters do. The
+--     ordered target is taken again once it is out of melee, after at least FREE_MIN
+--     decisions.
+M.RELEASE_AFTER = 4
+M.FREE_MIN = 10
+
+local function up(row)
+    return row ~= nil and (row.men or 0) > 0 and row.r ~= true and row.s ~= true
+end
+
+-- Standing, not moving, not in melee, not shooting, with ammunition.
+function M.shooter_idle(row)
+    return up(row) and row.m ~= true and row.mv ~= true and row.fire ~= true and (row.a or 0) > 0
+end
+
+-- Give this attack order as fire at will: the target stands in melee within range
+-- (centre to centre, metres: never further than the engine's edge-to-edge range).
+function M.fire_freely(me, target, range)
+    if not (up(me) and up(target) and target.m == true) then return false end
+    if not (value.finite(me.x) and value.finite(me.z) and value.finite(target.x) and value.finite(target.z)) then
+        return false
+    end
+    return math.sqrt((me.x - target.x) ^ 2 + (me.z - target.z) ^ 2) <= (range or 0)
+end
+
+-- duty = {idle, free, free_for} (kept per unit between calls; {} to start).
+-- Returns 'release', 'resume' or nil.
+function M.missile_duty(duty, me, target)
+    duty.idle, duty.free_for = duty.idle or 0, duty.free_for or 0
+    if duty.free then
+        duty.free_for = duty.free_for + 1
+        if duty.free_for >= M.FREE_MIN and up(me) and up(target) and target.m ~= true then
+            duty.free, duty.free_for, duty.idle = false, 0, 0
+            return 'resume'
+        end
+        return nil
+    end
+    duty.idle = M.shooter_idle(me) and duty.idle + 1 or 0
+    if duty.idle >= M.RELEASE_AFTER then
+        duty.free, duty.free_for, duty.idle = true, 0, 0
+        return 'release'
+    end
+    return nil
+end
+
 -- What the companion reads: meta (batch, factions, attacker...), the move
 -- number, the battle time and every unit's row.
 function M.state_document(meta, move, t_ms, units, done)

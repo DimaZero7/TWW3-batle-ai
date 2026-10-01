@@ -30,6 +30,7 @@ OUT = project.BUILD / "nn-sim" / "check.json"
 TOLERANCE = 0.2
 FIGHT_NEAREST = True             # replay: a unit in melee without a recorded target attacks the nearest enemy
 PLANNER = ("attack", "defend")   # battles of CA's planner against the game's AI (not the network's own runs)
+NET = "net"          # the network's battles against the game's AI on generated armies (the gate): reported apart
 COPIES = 8           # whole battles: replays of each recorded battle
 CURVE_S = (60, 120, 180)   # share of HP lost this long after the first contact
 JITTER_M = 2.0       # ... from starts moved by up to this much
@@ -89,9 +90,21 @@ def factions_of(run_dir, arena):
     return fac
 
 
-def simulate(run_dirs, params=None, device="cpu", copies=1, jitter_m=0.0, seed=0):
+def ahead(st):
+    """[B] the side with more of its starting health left in standing units (1 or 2)."""
+    u = st.u
+    stand = (u["men"] > 0) & ~u["gone"] & ~u["r"]
+    share = [((u["hp_abs"] * (stand & (u["side"] == s))).sum(1) / (u["hp0"] * (u["side"] == s)).sum(1).clamp(min=1))
+             for s in (1, 2)]
+    return torch.where(share[0] >= share[1], 1, 2)
+
+
+def simulate(run_dirs, params=None, device="cpu", copies=1, jitter_m=0.0, seed=0, end_at_recording=False):
     """Replay recorded runs in one batch, `copies` times each (start places moved by up to
-    jitter_m, so the copies differ); returns [(game Battle, [sim Battle per copy], factions)]."""
+    jitter_m, so the copies differ); returns [(game Battle, [sim Battle per copy], factions)].
+    end_at_recording: a simulated battle stops when its recording ends; if it is not over by
+    then, the side with more standing health is taken as the winner (Battle.result "cut": True).
+    Otherwise the last recorded orders go on until the battle ends."""
     params = params or load()
     games = [gamedata.load(d) for d in run_dirs]
     armies, facs = [], []
@@ -120,12 +133,27 @@ def simulate(run_dirs, params=None, device="cpu", copies=1, jitter_m=0.0, seed=0
                                         params.sim["formation"]["spacing_m"], FIGHT_NEAREST)
         rows.extend([orders] * copies)
     rec = Recorder(st)
-    battle.run(st, replay.Replay(rows, device=device), params, record=rec)
+    ends = torch.tensor([float(g.t[-1]) for g in games for _ in range(copies)], device=device)
+    cut = torch.zeros(st.B, dtype=torch.bool, device=device)
+
+    def record(s):
+        if end_at_recording:
+            over = ~s.done & (s.t >= ends - 1e-6)
+            if bool(over.any()):
+                s.winner = torch.where(over, ahead(s), s.winner)
+                s.done = s.done | over
+                cut.copy_(cut | over)
+        rec(s)
+    policy = replay.Replay(rows, device=device, grace_s=0.0 if end_at_recording else 1e9)
+    battle.run(st, policy, params, record=record)
     winners = st.winner.cpu().numpy()
+    cuts = cut.cpu().numpy()
     out = []
     for k, g in enumerate(games):
         sims = [rec.battle(k * copies + c, g.names, g.keys, g.side, slot_maps[k], winners[k * copies + c], g.own_ai,
                            g.arena) for c in range(copies)]
+        for c, sim in enumerate(sims):
+            sim.result["cut"] = bool(cuts[k * copies + c])
         out.append((g, sims, facs[k]))
     return out
 
@@ -212,15 +240,20 @@ def routs(b):
     return n_rout, n_rally, spans
 
 
-def battles(params=None, device="cpu", copies=COPIES, jitter_m=JITTER_M):
+def battles(params=None, device="cpu", copies=COPIES, jitter_m=JITTER_M, net=False):
     """Whole battles: the 10 Empire-Skaven runs and the fair mirror-arena runs, each replayed
-    `copies` times from slightly moved starts; the simulator's winner is the majority's."""
+    `copies` times from slightly moved starts; the simulator's winner is the majority's.
+    net: instead the network's battles against the game's AI on generated armies (both sides'
+    recorded orders replayed)."""
     params = params or load()
     p = measure.passports()
-    runs = [d for d in gamedata.runs() if (gamedata.load(d).arena.startswith("whole") or gamedata.load(d).arena == "arena")
-            and gamedata.load(d).own_ai in PLANNER]
+    if net:
+        runs = [d for d in gamedata.runs(own_ai=NET) if gamedata.load(d).arena.startswith("random")]
+    else:
+        runs = [d for d in gamedata.runs() if (gamedata.load(d).arena.startswith("whole")
+                                               or gamedata.load(d).arena == "arena") and gamedata.load(d).own_ai in PLANNER]
     out = []
-    for g, sims, fac in simulate(runs, params, device, copies, jitter_m):
+    for g, sims, fac in simulate(runs, params, device, copies, jitter_m, end_at_recording=True):
         names = {1: fac.get("own", "?"), 2: fac.get("enemy", "?")}
         votes = [int(x.winner) for x in sims]
         sw = max((1, 2), key=votes.count)
@@ -228,6 +261,7 @@ def battles(params=None, device="cpu", copies=COPIES, jitter_m=JITTER_M):
         gw = g.winner
         row = {"run": g.run, "arena": g.arena, "own_ai": g.own_ai, "game_winner": int(gw), "sim_winner": int(sw),
                "sim_winner_share": round(votes.count(sw) / len(votes), 2),
+               "sim_cut": round(sum(x.result.get("cut", False) for x in sims) / len(sims), 2),
                "game_s": float(g.t[-1]), "sim_s": float(np.median([x.t[-1] for x in sims])),
                "match": bool(gw == sw) if gw else None}
         for side in (1, 2):
@@ -369,11 +403,25 @@ def main(argv=None):
               f"sim {summary['sim_routs_per_battle']} / {summary['sim_rallies_per_battle']}; rally takes (median): "
               f"game {summary['game_rally_median_s']} s, sim {summary['sim_rally_median_s']} s; battle (mean): "
               f"game {summary['game_duration_mean_s']} s, sim {summary['sim_duration_mean_s']} s")
+        summary["sim_not_over_at_recording_end"] = round(float(np.mean([r["sim_cut"] for r in rows])), 2)
+        print(f"simulated battles not over when the recording ended (winner = side with more standing health): "
+              f"{100 * summary['sim_not_over_at_recording_end']:.0f} %")
         report["battles_summary"] = summary
         for k in ("whole", "arena", "all"):
             if k in summary:
                 v = summary[k]
                 print(f"same winner, {k}: {v['same_winner']} of {v['decided']} ({100 * v['share']:.0f} %)")
+        # The network's gate battles (generated armies), apart: both sides' recorded orders replayed.
+        net_rows = battles(params, dev, net=True)
+        report["battles_net"] = net_rows
+        print("== the network's battles against the game's AI (generated armies), replayed open-loop")
+        for r in net_rows:
+            print(f"{r['run']:16} {r['arena']:20} winner game/sim {r['game_winner']}/{r['sim_winner']} "
+                  f"({r['sim_winner_share']:.2f})  s {r['game_s']:.0f}/{r['sim_s']:.0f}  HP lost 1 "
+                  f"{r['game_hp_lost_1']:.2f}/{r['sim_hp_lost_1']:.2f}  2 {r['game_hp_lost_2']:.2f}/{r['sim_hp_lost_2']:.2f}")
+        decided = [r for r in net_rows if r["match"] is not None]
+        report["battles_net_summary"] = {"decided": len(decided), "same_winner": sum(r["match"] for r in decided)}
+        print(f"same winner, the network's battles: {sum(r['match'] for r in decided)} of {len(decided)}")
     if args.only in (None, "speed"):
         devices = [args.device] if args.device else (["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"])
         report["speed"] = []

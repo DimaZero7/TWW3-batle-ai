@@ -7,7 +7,9 @@ sling); then every man shoots once per reload (measured 11.0 / 11.5 s, longer th
 
     hits   = shots x hit_rate x distance factor (x single_entity_factor at a lone man); aimed
              at a unit in melee, a measured share lands on the shooter's own units in contact
-             with it (friendly fire: 0.31 arrows, 0.81 sling)
+             with it (friendly fire: 0.26 arrows, 0.56 sling); and a share by distance
+             lands on the target's neighbours out of melee (spill: 0.115 within 30 m,
+             0.034 at 30-60 m, 0.015 at 60-90 m)
     per hit = ap + base x (1 - 0.75 armour / 100); a shield blocks its chance from the front
               (within shield_defence_angle_missile, 60 deg); x (1 - missile resistance)
 
@@ -77,6 +79,14 @@ def volley(u, pw, target, dt, params, contact=None):
         friends = near / crowd.clamp(min=1e-6)[:, :, None]
         ff = u["friendly_fire"][:, :, None] * engaged[:, None, :]  # [B, i, j]
         landed = torch.bmm(aimed * ff, friends) + aimed * (1 - ff) * lone[:, None, :]
+    # Spill: hits aimed at j also land on j's neighbours of its own side that are out of melee,
+    # a share by distance between centres (measured).
+    if ms.get("spill"):
+        same = (u["side"][:, :, None] == u["side"][:, None, :]) & (u["side"][:, :, None] > 0)
+        eye = torch.eye(men.shape[1], dtype=torch.bool, device=men.device)[None]
+        free = (men > 0) if contact is None else (men > 0) & ~contact.any(2)
+        spill = distance_factor(dist, ms["spill"]) * (same & ~eye & free[:, None, :]).float()
+        landed = landed + torch.bmm(aimed, spill * lone[:, None, :])
     front = pw["rel_j"].abs() <= B["shield_defence_angle_missile"] * geometry.DEG
     shield = torch.where(front, u["shield"][:, None, :], torch.zeros_like(dist))
     hit = melee.per_hit(u["m_damage"][:, :, None], u["m_ap"][:, :, None], u["armour"][:, None, :],

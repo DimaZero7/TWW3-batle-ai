@@ -6,7 +6,8 @@ that sum by max(1, 15 % of the gap) (minimium_increment_update_per_tick, percent
 
 Effects (points): lord within 70 m +4; lord died recently -16, dead -10; neighbour within 120 m
 (flanks secure) +5; casualties over the battle (share of HP) -2 ... -74; recent casualties
--6 ... -80; winning / losing the melee +3/+6/+8, -3/-8; attacked in the flank / rear -6 / -14;
+-6 ... -80; winning / losing the melee +3/+6/+8, -3/-8; attacked in the flank / rear -6 / -14; flanks exposed (an enemy threatens the left, right or rear:
+lf / rf / bf) -3, several -6;
 routing friends within 100 m -3 each (at most 4; expendable units scare nobody); routing
 enemies within 100 m +2.5 each (at most 5); under fire -5; very tired -2, exhausted -6;
 a stronger enemy within 70 m -3.
@@ -59,9 +60,15 @@ def target_points(u, ctx, params):
     recent = u["recent"] / base.clamp(min=1e-6)
     pts = pts + steps(recent, table(R, "recent_casualties_penalty_", (6, 10, 15, 33, 50)))
     pts = pts + combat_points(u["dealt"], u["taken"], ctx["in_melee"], cal, R)
-    flank = torch.where(u["flank_hit"] >= 2, R["was_attacked_in_rear"],
-                        torch.where(u["flank_hit"] >= 1, R["was_attacked_in_flank"], 0.0))
+    # Attacked in the flank / rear: measured points (the database's -6 / -14 is not what a unit
+    # fighting on its flank or rear shows in the recordings).
+    flank = torch.where(u["flank_hit"] >= 2, cal.get("attacked_rear", R["was_attacked_in_rear"]),
+                        torch.where(u["flank_hit"] >= 1, cal.get("attacked_flank", R["was_attacked_in_flank"]), 0.0))
     pts = pts + flank
+    # Flanks exposed: an enemy threatens one (-3) or several (-6) of the left, right and rear (lf, rf, bf).
+    exposed = u["lf"].float() + u["rf"].float() + u["bf"].float()
+    pts = pts + torch.where(exposed >= 2, R["ume_concerned_flanks_exposed_multiple"],
+                            torch.where(exposed >= 1, R["ume_concerned_flanks_exposed_single"], 0.0))
     pts = pts - R["routing_friends_effect_weighting"] * ctx["routing_friends"].clamp(max=R["max_routing_friends_to_consider"])
     pts = pts + R["routing_enemies_effect_weighting"] * ctx["routing_enemies"].clamp(max=R["max_routing_enemies_to_consider"])
     pts = pts + torch.where(ctx["under_fire"], R["ume_concerned_attacked_by_projectile"], 0.0)

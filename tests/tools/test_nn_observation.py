@@ -170,3 +170,49 @@ def test_recorded_battles_give_the_same_input_as_the_simulator_would():
             obs, memory = ob.observe(rec.state(ti), rec.setup, side, memory)
             assert np.isfinite(obs.tokens).all() and np.isfinite(obs.ctx).all()
             assert obs.ctrl.sum() > 0 and obs.target_ok.sum() > 0
+
+
+class TestEvents:
+    """Events a player is told or sees: a lord slain (announced), a unit fought or routed lately."""
+
+    KEYS = ["wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_main_skv_cha_warlord_0",
+            "wh2_main_skv_inf_clanrat_spearmen_0"]
+
+    def setup_state(self):
+        _, state = sources.synthetic(batch=1, own=2, enemy=2, seed=3)
+        setup = ob.Setup(keys=[list(self.KEYS)], side=np.array([[1, 1, 2, 2]]),
+                         bounds=np.array([sources.CROSSROADS], np.float32),
+                         factions=[(sources.EMPIRE, sources.SKAVEN)], attacker=np.array([1]))
+        state = with_state(state, men=np.array([[1.0, 100, 1, 100]]), m=np.zeros((1, 4), bool),
+                           r=np.zeros((1, 4), bool), ms=np.full((1, 4), 2.0), vis=np.ones((1, 4), bool))
+        return setup, state
+
+    def test_the_general_is_known_by_the_passport(self):
+        assert passport.lords(self.KEYS + [""]).tolist() == [True, False, True, False, False]
+
+    def test_a_slain_enemy_lord_is_known_even_unseen_and_fades(self):
+        setup, state = self.setup_state()
+        obs, mem = ob.observe(with_state(state, t=np.array([29.0])), setup, 1)
+        assert obs.ctx[0, -4:].tolist() == [0, 0, 0, 0]
+        dead = with_state(state, t=np.array([30.0]), men=np.array([[1.0, 100, 0, 100]]),
+                          vis=np.array([[True, True, False, True]]))
+        obs, mem = ob.observe(dead, setup, 1, mem)
+        assert obs.ctx[0, -4:].tolist() == pytest.approx([0, 0, 1, 1])
+        obs, mem = ob.observe(with_state(dead, t=np.array([90.0])), setup, 1, mem)
+        assert obs.ctx[0, -4:].tolist() == pytest.approx([0, 0, 1, 0.5])
+        other, _ = ob.observe(with_state(dead, t=np.array([90.0])), setup, 2)
+        assert other.ctx[0, -4:].tolist() == pytest.approx([1, 1, 0, 0])      # the Skaven side: own lord
+
+    def test_melee_and_rout_of_an_enemy_count_only_while_seen(self):
+        setup, state = self.setup_state()
+        fight = with_state(state, t=np.array([30.0]), m=np.array([[False, True, False, True]]),
+                           r=np.array([[False, False, False, False]]))
+        obs, mem = ob.observe(fight, setup, 1)
+        assert obs.tokens[0, [1, 3], I["melee_recent"]].tolist() == [1, 1]
+        later = with_state(state, t=np.array([90.0]), r=np.array([[False, False, False, True]]))
+        obs, mem = ob.observe(later, setup, 1, mem)
+        assert obs.tokens[0, [1, 3], I["melee_recent"]].tolist() == pytest.approx([0.5, 0.5])
+        assert obs.tokens[0, 3, I["rout_recent"]] == 1
+        hidden = with_state(fight, vis=np.array([[True, True, True, False]]))
+        obs, _ = ob.observe(hidden, setup, 1)
+        assert obs.tokens[0, 3, I["melee_recent"]] == 0 and obs.tokens[0, 1, I["melee_recent"]] == 1

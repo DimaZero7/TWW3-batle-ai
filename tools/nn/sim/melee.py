@@ -12,10 +12,13 @@ Per pair of units in contact (i strikes j), per second:
                       not more than a man's health
     HP/s            = F x splash x p x per hit / interval x (1 + impact x charge)
 
-Direction: defence x0.6 from the flank, x0.3 from the rear or against a routing unit (database).
+Direction: defence x0.6 from the flank, x0.3 from the rear or against a routing unit (database);
+the defence lost counts at flank_slope / rear_slope of the rule (measured in whole battles; a lone
+man: the rule). A unit brings to each side of its formation no more men than that side holds.
 Charge: a unit that meets the enemy running gets its charge bonus to attack and damage and hits
 harder (x (1 + impact)), fading over charge_decay_duration (13 s); a unit that did not charge
-brings its men to bear over ramp_s (calibrated on the first 15 s of the pairs).
+brings its men to bear over ramp_s (calibrated on the first 15 s of the pairs); a braced unit
+with charge_reflection meets a frontal charge as a charge (battle.py).
 """
 import torch
 
@@ -62,10 +65,20 @@ def strikes(u, pw, contact, params, charge_now, contact_s):
     F = F * torch.where(single_i, torch.ones_like(F), share_i.pow(cal.get("men_exp_striker", 0.0)))
     F = F * torch.where(single_j, torch.ones_like(F), share_j.pow(cal.get("men_exp_target", 0.0)))
     F = torch.where(contact, F, torch.zeros_like(F))
-    # Across several contacts a unit brings no more men than its own front holds (and no more
-    # than it has); a single man is split between his opponents.
-    front_i = pw["front"][:, :, None]
-    own = torch.where(single_i, torch.ones_like(men_i), torch.minimum(men_i, cal["fighting_files"] * front_i / spacing))
+    # Across several contacts a unit brings to each side of its formation (front, left, right, back)
+    # no more men than that side holds, and no more than it has in all; a single man is split
+    # between his opponents. (Men on a flank turn to fight: measured, a unit already fighting hits a
+    # newcomer on its flank as hard as a free unit does.)
+    front_i, depth_i = pw["front"][:, :, None], pw["depth"][:, :, None]
+    s, c = torch.sin(pw["rel_i"]), torch.cos(pw["rel_i"])
+    through_front = s.abs() * depth_i <= c.abs() * front_i
+    side_of = torch.where(through_front, torch.where(c >= 0, 0, 3), torch.where(s >= 0, 1, 2))
+    for g in range(4):
+        in_g = side_of == g
+        hold = cal["fighting_files"] * (front_i if g in (0, 3) else depth_i) / spacing
+        tot = torch.where(in_g, F, torch.zeros_like(F)).sum(dim=2, keepdim=True)
+        F = torch.where(in_g & ~single_i & (tot > hold), F * hold / tot.clamp(min=1e-6), F)
+    own = torch.where(single_i, torch.ones_like(men_i), men_i)
     total = F.sum(dim=2, keepdim=True)
     F = F * torch.where(total > own, own / total.clamp(min=1e-6), torch.ones_like(total))
     # At most lord_max_attackers around a single man, whoever they belong to.
@@ -83,8 +96,11 @@ def strikes(u, pw, contact, params, charge_now, contact_s):
     bonus = torch.where(large_j, u["bonus_v_large"][:, :, None], u["bonus_v_inf"][:, :, None])
     attack = u["attack"][:, :, None] + u["charge_bonus"][:, :, None] * ch + bonus
     defence = u["defence"][:, None, :]
-    # Defence lost to a flank or rear attack counts at flank_slope (1 = the database rule).
-    exposed = defence * (1 - coef) * (cal["flank_slope"] / max(cal["hit_slope"], 1e-6) - 1)
+    # Defence lost to a flank / rear attack counts at flank_slope / rear_slope (1 = the database rule).
+    # A lord turns to fight whoever reaches him: the database rule (slope 1) for him.
+    slope = torch.where(sector == 2, cal.get("rear_slope", cal["flank_slope"]), cal["flank_slope"])
+    slope = torch.where(single_j, torch.ones_like(slope), slope)
+    exposed = defence * (1 - coef) * (slope / max(cal["hit_slope"], 1e-6) - 1)
     p = hit_chance(attack + exposed, defence * coef, cal["hit_slope"], B["melee_hit_chance_base"],
                    B["melee_hit_chance_min"], B["melee_hit_chance_max"])
     dmg, ap = u["damage"][:, :, None], u["ap_damage"][:, :, None]

@@ -90,6 +90,7 @@ STATIC = {
     "large": ("b", "size class above small"),
     "expendable": ("b", "attribute expendable: its rout does not scare others"),
     "encourages": ("b", "attribute encourages (lords)"),
+    "reflect": ("b", "attribute charge_reflection: braced, it meets a frontal infantry charge as a charge"),
     "ammo0": ("f", "projectiles of the whole unit at the start"),
     "range": ("f", "missile range, m (0 = no missile)"),
     "reload": ("f", "reload, s (measured where known, config/nn/sim.json)"),

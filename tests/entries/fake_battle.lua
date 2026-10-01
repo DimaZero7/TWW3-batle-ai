@@ -30,9 +30,9 @@ function F.unit(name, kind, x, z)
     function u:initial_number_of_men() return 120 end
     function u:is_routing() return self.routing end
     function u:is_shattered() return false end
-    function u:is_in_melee() return false end
+    function u:is_in_melee() return self.melee == true end
     function u:is_script_controlled() return self.controlled end
-    function u:ammo_left() return 0 end
+    function u:ammo_left() return self.ammo or 0 end
     function u:starting_ammo() return 0 end
     function u:is_behaviour_active() return false end
     function u:can_use_behaviour() return true end
@@ -46,7 +46,7 @@ function F.unit(name, kind, x, z)
     function u:unique_ui_id() return 'uid_' .. self.script_name end
     function u:has_attribute() return false end
     function u:is_commanding_unit() return false end
-    function u:missile_range() return 0 end
+    function u:missile_range() return self.range or 0 end
     function u:owned_non_passive_special_abilities() return {} end
     function u:owned_passive_special_abilities() return {} end
     function u:unit_distance() return 50 end
@@ -66,11 +66,15 @@ local function controller(log)
     function uc:add_units(u) self.unit = u end
     function uc:take_control() self.unit.controlled = true end
     function uc:release_control() self.unit.controlled = false end
-    function uc:fire_at_will() end
+    -- The last free-fire switch and attack_unit's arguments stay on the unit (the log keeps its old lines).
+    function uc:fire_at_will(on) self.unit.free_fire = on end
     function uc:change_behaviour_active() end
     function uc:melee() end
     function uc:halt() log[#log + 1] = 'halt' end
-    function uc:attack_unit(enemy) log[#log + 1] = 'attack' .. (enemy and (' ' .. enemy:name()) or '') end
+    function uc:attack_unit(enemy, primary, run)
+        self.unit.attack_args = {target = enemy and enemy:name(), primary = primary, run = run}
+        log[#log + 1] = 'attack' .. (enemy and (' ' .. enemy:name()) or '')
+    end
     function uc:teleport_to_location() end
     function uc:goto_location(p, run)
         self.unit.moving = true
@@ -178,9 +182,13 @@ function F.manager(sides)
     return bm
 end
 
+-- Per-unit context values a test sets: F.cco[unique_ui_id][field] (e.g. IsFiringMissiles).
+F.cco = {}
+
 -- Unrotated radar over x in [-100, 100], z in [-100, 100].
 F.common = {
-    get_context_value = function(key, _, field)
+    get_context_value = function(key, id, field)
+        if key == 'CcoBattleUnit' and F.cco[id] and F.cco[id][field] ~= nil then return F.cco[id][field] end
         -- Two soldiers per unit; Position returns three numbers like the engine.
         if key == 'CcoBattleUnit' and field == 'ManList.Size' then return 2 end
         -- A two-row unit card.

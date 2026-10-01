@@ -99,6 +99,23 @@ class TestFunctions:
             O.check(o, 6)
 
 
+class TestScenario:
+    def test_an_arena_can_be_given_as_a_dict(self):
+        import json
+        from tools.nn import scenario as arena_scenario
+        entry = json.loads(arena_scenario.ARENAS.read_text(encoding="utf-8"))["arenas"]["pair_spear_v_slave"]
+        by_name = scenario.from_arena("pair_spear_v_slave", "attack")
+        by_dict = scenario.from_arena(entry, "attack")
+        assert by_dict == by_name
+        loaded = arena_scenario.load_arena("whole_emp_v_skv")
+        assert scenario.from_arena(loaded, "defend") == scenario.from_arena("whole_emp_v_skv", "defend")
+        custom = dict(entry, gap_m=300)
+        far = scenario.from_arena(custom)
+        assert far["sides"][2]["units"][0]["x"] - far["sides"][1]["units"][0]["x"] >             by_name["sides"][2]["units"][0]["x"] - by_name["sides"][1]["units"][0]["x"]
+        with pytest.raises(ValueError):
+            scenario.from_arena({"gap_m": 100})
+
+
 # --- level 2: modules on cases ---
 
 class TestMelee:
@@ -174,6 +191,26 @@ class TestMissile:
         lord = face_off(ARCHER, GENERAL, gap=120)
         lone = float(missile.volley(lord.u, geometry.pairwise(lord.u, 1.5), target, 1.0, P)[1].sum())
         assert lone < 0.2 * hp[0]
+
+    def test_shots_into_a_melee_hit_friends_and_shots_spill_on_neighbours(self):
+        # side 1: archers far west, spearmen at x=0; side 2: spearmen touching ours, more spearmen 10 m behind.
+        st = scenario.build([army([(ARCHER, -100, 0, 90), (SPEAR, 0, 0, 90)],
+                                  [(SPEAR, 10, 0, 270), (SPEAR, 30, 0, 270)])], P)
+        H = st.N // 2
+        pw = geometry.pairwise(st.u, 1.5)
+        target = torch.full((1, st.N), -1)
+        target[0, 0] = H                                      # the archers shoot the enemy in melee
+        contact = torch.zeros((1, st.N, st.N), dtype=torch.bool)
+        contact[0, 1, H] = contact[0, H, 1] = True
+        _, hp, _ = missile.volley(st.u, pw, target, 1.0, P, contact=contact)
+        assert float(hp[0, 0, 1]) > 0                        # friendly fire on our spearmen
+        assert float(hp[0, 0, H + 1]) > 0                    # spill on the enemy's neighbour
+        _, alone, _ = missile.volley(st.u, pw, target, 1.0, P, contact=torch.zeros_like(contact))
+        assert float(alone[0, 0, 1]) == 0 and float(alone[0, 0, H]) > float(hp[0, 0, H])
+        share = P.sim["missile"]["friendly_fire"]["arrow"]
+        hit = melee.per_hit(torch.tensor(17.0), torch.tensor(2.0), torch.tensor(30.0), torch.tensor(69.0))
+        ratio = float(hp[0, 0, 1]) / float(hp[0, 0, H])       # same armour: hits on friends / on target
+        assert ratio == pytest.approx(share / (1 - share), rel=1e-3) and float(hit) > 0
 
     def test_out_of_range_nobody_is_chosen(self):
         st = face_off(ARCHER, SLAVE, gap=200)
@@ -299,3 +336,61 @@ class TestBattle:
         for _ in range(20):
             battle.step(st, o, P)
         assert not bool(st.u["m"][0, 0]) and float(st.u["x"][0, 0]) < x0 - 15
+
+    def _charge(self, defender_key, run_defender):
+        """A spearmen unit charges defender_key head-on; returns the step's state after contact."""
+        st = scenario.build([army([(defender_key, 0, 0, 90)], [(SPEAR, 60, 0, 270)])], P)
+        H = st.N // 2
+        for _ in range(80):
+            o = replay.hold(st)
+            o.kind[0, H], o.target[0, H], o.run[0, H] = O.ATTACK, 0, True
+            if run_defender:
+                o.kind[0, 0], o.target[0, 0], o.run[0, 0] = O.ATTACK, H, True
+            battle.step(st, o, P)
+            if st.u["m"][0, 0]:
+                return st, H
+        raise AssertionError("no contact")
+
+    def test_braced_spearmen_meet_a_charge_as_a_charge(self):
+        braced, H = self._charge(SPEAR, run_defender=False)       # spearmen: charge_reflection
+        assert float(braced.u["charge"][0, H]) > 0.5 and float(braced.u["charge"][0, 0]) > 0.5
+        caught, H = self._charge(SLAVE, run_defender=False)       # slaves: no charge_reflection
+        assert float(caught.u["charge"][0, H]) > 0.5 and float(caught.u["charge"][0, 0]) == 0
+
+    def test_a_unit_in_melee_does_not_turn_to_a_flanker(self):
+        # A fights B to the east; C comes at A's north flank: A keeps facing B, C hits a flank.
+        st = scenario.build([army([(SPEAR, 0, 0, 90)], [(SPEAR, 60, 0, 270), (SPEAR, 0, 80, 180)])], P)
+        H = st.N // 2
+        for k in range(160):
+            o = replay.hold(st)
+            o.kind[0, H], o.target[0, H], o.run[0, H] = O.ATTACK, 0, True
+            if k > 20:
+                o.kind[0, H + 1], o.target[0, H + 1], o.run[0, H + 1] = O.ATTACK, 0, True
+            battle.step(st, o, P)
+        b = float(st.u["b"][0, 0])
+        assert bool(st.u["m"][0, 0]) and abs(((b - 90) + 180) % 360 - 180) < 30
+        assert float(st.u["flank_hit"][0, 0]) >= 1
+
+
+class TestFlanksAndRoles:
+    def test_exposed_flanks_lower_morale(self):
+        st = face_off(SPEAR, SLAVE)
+        z = torch.zeros_like(st.u["r"])
+        ctx = {"aura": z, "lord_dead_points": torch.zeros_like(st.u["men"]), "neighbour": z, "in_melee": z,
+               "routing_friends": torch.zeros_like(st.u["men"]), "routing_enemies": torch.zeros_like(st.u["men"]),
+               "under_fire": z, "strong_enemy": z, "enemy_near": z | True}
+        base = morale.target_points(st.u, ctx, P)
+        st.u["lf"][0, 0] = True
+        one = morale.target_points(st.u, ctx, P)
+        st.u["bf"][0, 0] = True
+        two = morale.target_points(st.u, ctx, P)
+        assert float((one - base)[0, 0]) == -3 and float((two - base)[0, 0]) == -6
+
+    def test_the_attacker_of_a_recording_comes_from_its_roles(self):
+        class Rec:
+            own_ai, enemy_role = "net", "attack"
+        assert scenario.attacker_of(Rec(), {"own_role": "defend", "enemy_role": "attack"}) == 2
+        assert scenario.attacker_of(Rec(), {"own_role": "attack", "enemy_role": "defend"}) == 1
+        assert scenario.attacker_of(Rec(), {}) == 2
+        Rec.own_ai, Rec.enemy_role = "attack", "?"
+        assert scenario.attacker_of(Rec(), {}) == 1

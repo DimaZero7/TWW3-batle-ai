@@ -1,0 +1,252 @@
+{
+ "_description": "The campaign's army templates (cdir_military_generator_*, CA's army generator) for the factions of config/nn/pools.json; random armies follow them (docs/en/training/armies.md). Written by py -3.14 -m tools.nn.armies.templates.",
+ "_source": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Total War WARHAMMER III\\data\\db.pack",
+ "parents": {
+  "wh3_default_land_artillery_long_range": "wh3_default_land_artillery",
+  "wh3_default_land_artillery_short_range": "wh3_default_land_artillery",
+  "wh3_default_land_flying_heavy": "wh3_default_land_flying",
+  "wh3_default_land_flying_light": "wh3_default_land_flying",
+  "wh3_default_land_flying_light_harasser": "wh3_default_land_flying_light",
+  "wh3_default_land_flying_light_main": "wh3_default_land_flying_light",
+  "wh3_default_land_melee_cavalry_light": "wh3_default_land_melee_cavalry",
+  "wh3_default_land_melee_cavalry_main": "wh3_default_land_melee_cavalry",
+  "wh3_default_land_melee_cavalry_main_chariots": "wh3_default_land_melee_cavalry_main",
+  "wh3_default_land_melee_cavalry_main_mounted": "wh3_default_land_melee_cavalry_main",
+  "wh3_default_land_melee_cavalry_main_mounted_heavy": "wh3_default_land_melee_cavalry_main_mounted",
+  "wh3_default_land_melee_cavalry_main_mounted_medium": "wh3_default_land_melee_cavalry_main_mounted",
+  "wh3_default_land_melee_infantry": "wh3_default_land_melee_infantry_trash",
+  "wh3_default_land_melee_infantry_main": "wh3_default_land_melee_infantry",
+  "wh3_default_land_melee_infantry_main_flanking": "wh3_default_land_melee_infantry_main",
+  "wh3_default_land_melee_infantry_main_flanking_high_quality": "wh3_default_land_melee_infantry_main_flanking",
+  "wh3_default_land_melee_infantry_main_frontline": "wh3_default_land_melee_infantry_main",
+  "wh3_default_land_melee_infantry_main_frontline_spears": "wh3_default_land_melee_infantry_main_frontline",
+  "wh3_default_land_melee_infantry_main_frontline_spears_high_quality": "wh3_default_land_melee_infantry_main_frontline_spears",
+  "wh3_default_land_melee_infantry_main_frontline_swords": "wh3_default_land_melee_infantry_main_frontline",
+  "wh3_default_land_melee_infantry_main_frontline_swords_high_quality": "wh3_default_land_melee_infantry_main_frontline_swords",
+  "wh3_default_land_melee_infantry_special": "wh3_default_land_melee_infantry",
+  "wh3_default_land_melee_infantry_trash_spears": "wh3_default_land_melee_infantry_trash",
+  "wh3_default_land_monsters_flanking": "wh3_default_land_monsters",
+  "wh3_default_land_monsters_flanking_strong": "wh3_default_land_monsters_flanking",
+  "wh3_default_land_monsters_heavy": "wh3_default_land_monsters",
+  "wh3_default_land_ranged_cavalry_chariots": "wh3_default_land_ranged_cavalry",
+  "wh3_default_land_ranged_cavalry_mounted": "wh3_default_land_ranged_cavalry",
+  "wh3_default_land_ranged_infantry_main": "wh3_default_land_ranged_infantry",
+  "wh3_default_land_ranged_infantry_main_heavy": "wh3_default_land_ranged_infantry_main",
+  "wh3_default_land_ranged_infantry_main_heavy_long_range": "wh3_default_land_ranged_infantry_main_heavy",
+  "wh3_default_land_ranged_infantry_main_heavy_short_range": "wh3_default_land_ranged_infantry_main_heavy",
+  "wh3_default_land_ranged_infantry_main_light": "wh3_default_land_ranged_infantry_main",
+  "wh3_default_land_ranged_infantry_main_light_backline": "wh3_default_land_ranged_infantry_main_light",
+  "wh3_default_land_ranged_infantry_main_light_backline_high_quality": "wh3_default_land_ranged_infantry_main_light_backline",
+  "wh3_default_land_ranged_infantry_main_light_skirmisher": "wh3_default_land_ranged_infantry_main_light",
+  "wh3_default_land_ranged_infantry_trash": "wh3_default_land_ranged_infantry",
+  "wh3_nagash_land_melee_infantry": "wh3_nagash_land_melee_infantry_trash",
+  "wh3_nagash_land_melee_infantry_spears": "wh3_nagash_land_melee_infantry_spears_trash",
+  "wh3_nagash_land_monsters_infantry": "wh3_nagash_land_monsters_infantry_trash",
+  "wh3_nagash_land_monsters_single_entity": "wh3_nagash_land_monsters_infantry",
+  "wh3_nagash_land_ranged": "wh3_nagash_land_ranged_trash"
+ },
+ "factions": {
+  "wh_main_emp_empire": {
+   "config": "WH_Empire",
+   "templates": {
+    "WH_Empire_land": {
+     "priority": 1,
+     "ratios": {
+      "wh3_default_land_artillery_long_range": 15,
+      "wh3_default_land_aura": 5,
+      "wh3_default_land_characters": 10,
+      "wh3_default_land_melee_cavalry_main_mounted_heavy": 10,
+      "wh3_default_land_melee_cavalry_main_mounted_medium": 5,
+      "wh3_default_land_melee_infantry_main_frontline_spears_high_quality": 20,
+      "wh3_default_land_melee_infantry_main_frontline_swords_high_quality": 20,
+      "wh3_default_land_ranged_cavalry": 5,
+      "wh3_default_land_ranged_infantry_main_light_backline": 25
+     }
+    },
+    "WH_Empire_land_2": {
+     "priority": 1,
+     "ratios": {
+      "wh3_default_land_artillery_long_range": 15,
+      "wh3_default_land_characters": 10,
+      "wh3_default_land_melee_cavalry_main_mounted_heavy": 10,
+      "wh3_default_land_melee_cavalry_main_mounted_medium": 10,
+      "wh3_default_land_melee_infantry_main_flanking": 5,
+      "wh3_default_land_melee_infantry_main_frontline_spears_high_quality": 20,
+      "wh3_default_land_melee_infantry_main_frontline_swords_high_quality": 15,
+      "wh3_default_land_ranged_cavalry": 5,
+      "wh3_default_land_ranged_infantry": 5,
+      "wh3_default_land_ranged_infantry_main_light_backline": 15
+     }
+    },
+    "WH_Empire_land_3": {
+     "priority": 1,
+     "ratios": {
+      "wh3_default_land_artillery_long_range": 20,
+      "wh3_default_land_aura": 5,
+      "wh3_default_land_characters": 10,
+      "wh3_default_land_melee_cavalry_main_mounted_heavy": 10,
+      "wh3_default_land_melee_cavalry_main_mounted_medium": 5,
+      "wh3_default_land_melee_infantry_main": 10,
+      "wh3_default_land_melee_infantry_main_frontline_spears_high_quality": 15,
+      "wh3_default_land_melee_infantry_main_frontline_swords_high_quality": 15,
+      "wh3_default_land_ranged_cavalry": 0,
+      "wh3_default_land_ranged_infantry_main_light_backline": 25
+     }
+    },
+    "WH_Empire_land_4": {
+     "priority": 1,
+     "ratios": {
+      "wh3_default_land_artillery_long_range": 10,
+      "wh3_default_land_characters": 10,
+      "wh3_default_land_melee_cavalry_main_mounted_heavy": 5,
+      "wh3_default_land_melee_cavalry_main_mounted_medium": 5,
+      "wh3_default_land_melee_infantry_main": 10,
+      "wh3_default_land_melee_infantry_main_frontline_spears_high_quality": 15,
+      "wh3_default_land_melee_infantry_main_frontline_swords_high_quality": 15,
+      "wh3_default_land_ranged_cavalry_chariots": 5,
+      "wh3_default_land_ranged_cavalry_mounted": 5,
+      "wh3_default_land_ranged_infantry": 10,
+      "wh3_default_land_ranged_infantry_main_light_backline": 20
+     }
+    },
+    "WH_default_naval": {
+     "priority": 1,
+     "ratios": {
+      "Default_naval_melee": 1
+     }
+    }
+   },
+   "units": {
+    "wh_main_emp_cha_general_0": [
+     {
+      "group": "wh3_default_land_characters",
+      "quality": "tier_2_step_2_units"
+     }
+    ],
+    "wh_main_emp_inf_spearmen_0": [
+     {
+      "group": "wh3_default_land_melee_infantry_main_frontline_spears",
+      "quality": "tier_1_step_4_units"
+     }
+    ],
+    "wh2_dlc13_emp_inf_archers_0": [
+     {
+      "group": "wh3_default_land_ranged_infantry_trash",
+      "quality": "tier_1_step_4_units"
+     }
+    ]
+   }
+  },
+  "wh2_main_skv_skaven": {
+   "config": "WH_Skaven",
+   "templates": {
+    "WH_Skaven_land": {
+     "priority": 1,
+     "ratios": {
+      "wh3_default_land_artillery": 10,
+      "wh3_default_land_artillery_long_range": 5,
+      "wh3_default_land_characters": 10,
+      "wh3_default_land_melee_infantry_main_flanking": 15,
+      "wh3_default_land_melee_infantry_main_frontline_spears_high_quality": 15,
+      "wh3_default_land_melee_infantry_main_frontline_swords_high_quality": 10,
+      "wh3_default_land_monsters_flanking_strong": 10,
+      "wh3_default_land_monsters_heavy": 10,
+      "wh3_default_land_ranged_infantry_main_heavy_long_range": 15,
+      "wh3_default_land_ranged_infantry_main_heavy_short_range": 10
+     }
+    },
+    "WH_Skaven_land_2": {
+     "priority": 1,
+     "ratios": {
+      "wh3_default_land_artillery": 10,
+      "wh3_default_land_characters": 10,
+      "wh3_default_land_melee_infantry_main": 15,
+      "wh3_default_land_melee_infantry_main_flanking": 10,
+      "wh3_default_land_melee_infantry_main_frontline_spears_high_quality": 10,
+      "wh3_default_land_melee_infantry_main_frontline_swords_high_quality": 10,
+      "wh3_default_land_monsters": 5,
+      "wh3_default_land_monsters_flanking_strong": 10,
+      "wh3_default_land_monsters_heavy": 10,
+      "wh3_default_land_ranged_infantry_main_heavy_long_range": 10,
+      "wh3_default_land_ranged_infantry_main_light": 10
+     }
+    },
+    "WH_Skaven_land_3": {
+     "priority": 1,
+     "ratios": {
+      "wh3_default_land_characters": 10,
+      "wh3_default_land_melee_infantry_main": 15,
+      "wh3_default_land_melee_infantry_main_flanking": 5,
+      "wh3_default_land_melee_infantry_main_frontline_spears_high_quality": 10,
+      "wh3_default_land_melee_infantry_main_frontline_swords_high_quality": 10,
+      "wh3_default_land_monsters": 10,
+      "wh3_default_land_monsters_flanking_strong": 15,
+      "wh3_default_land_monsters_heavy": 15,
+      "wh3_default_land_ranged_infantry_main_heavy": 10,
+      "wh3_default_land_ranged_infantry_main_light": 10
+     }
+    },
+    "WH_Skaven_land_4": {
+     "priority": 1,
+     "ratios": {
+      "wh3_default_land_artillery": 10,
+      "wh3_default_land_artillery_long_range": 10,
+      "wh3_default_land_characters": 10,
+      "wh3_default_land_melee_infantry": 20,
+      "wh3_default_land_melee_infantry_main_flanking": 10,
+      "wh3_default_land_melee_infantry_main_frontline_spears_high_quality": 10,
+      "wh3_default_land_melee_infantry_main_frontline_swords_high_quality": 10,
+      "wh3_default_land_monsters": 5,
+      "wh3_default_land_monsters_flanking_strong": 5,
+      "wh3_default_land_monsters_heavy": 5,
+      "wh3_default_land_ranged_infantry_main_heavy_long_range": 10,
+      "wh3_default_land_ranged_infantry_main_light": 5
+     }
+    },
+    "WH_Skaven_land_5": {
+     "priority": 1,
+     "ratios": {
+      "wh3_default_land_artillery": 5,
+      "wh3_default_land_artillery_long_range": 10,
+      "wh3_default_land_characters": 10,
+      "wh3_default_land_melee_infantry_main_flanking": 15,
+      "wh3_default_land_melee_infantry_main_frontline_spears_high_quality": 10,
+      "wh3_default_land_melee_infantry_main_frontline_swords_high_quality": 15,
+      "wh3_default_land_monsters_flanking_strong": 10,
+      "wh3_default_land_monsters_heavy": 10,
+      "wh3_default_land_ranged_infantry_main_heavy_long_range": 10,
+      "wh3_default_land_ranged_infantry_main_heavy_short_range": 5,
+      "wh3_default_land_ranged_infantry_main_light": 10
+     }
+    },
+    "WH_default_naval": {
+     "priority": 1,
+     "ratios": {
+      "Default_naval_melee": 1
+     }
+    }
+   },
+   "units": {
+    "wh2_main_skv_cha_warlord_0": [],
+    "wh2_main_skv_inf_clanrat_spearmen_0": [
+     {
+      "group": "wh3_default_land_melee_infantry_main_frontline_spears",
+      "quality": "tier_1_step_4_units"
+     }
+    ],
+    "wh2_main_skv_inf_skavenslave_spearmen_0": [
+     {
+      "group": "wh3_default_land_melee_infantry_trash_spears",
+      "quality": "tier_1_step_2_units"
+     }
+    ],
+    "wh2_main_skv_inf_skavenslave_slingers_0": [
+     {
+      "group": "wh3_default_land_ranged_infantry_trash",
+      "quality": "tier_1_step_3_units"
+     }
+    ]
+   }
+  }
+ }
+}

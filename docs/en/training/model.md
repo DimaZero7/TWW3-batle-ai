@@ -66,12 +66,15 @@ ones by lore.
 | Order point, has an order, has a target | yes | no | — | m / 500; 0/1 |
 | Threat to the left flank, right flank, rear | yes | no | — | 0/1 |
 | Own or enemy, visible now, ever seen, age of the sighting | yes | yes | yes | 0/1; age s / 60, up to 1 |
+| Fought in melee lately, routed lately | yes | yes (seen then) | — | 1 now, down to 0 after 120 s; 0 never |
 
 Morale states 1–4 of the game (eager … shaken) are all "steady" for the enemy: telling them
 apart would give away the exact morale.
 
-Every decision also gets the battle time (s / 3600, the 60-minute limit) and the count of own
-living units and of known enemy units (/ 20).
+Every decision also gets the battle time (s / 3600, the 60-minute limit), the count of own
+living units and of known enemy units (/ 20), and whether the own and the enemy lord is slain and
+how lately (1 now, down to 0 after 120 s). The game announces a general's death, so the enemy
+lord's counts even when he was not seen.
 
 The critic's view (`full=True`) fills every field for every unit, with no visibility, and adds
 the enemy's character. It is for training only.
@@ -80,7 +83,7 @@ the enemy's character. It is for training only.
 
 ```mermaid
 flowchart TB
-  tok["Unit tokens: 113 numbers each<br/>(64 of them the passport)"] --> enc["Shared encoder<br/>the same weights for every unit"]
+  tok["Unit tokens: 115 numbers each<br/>(64 of them the passport)"] --> enc["Shared encoder<br/>the same weights for every unit"]
   ctx["Context: character, role, time, counts"] --> enc
   enc --> att["Attention layers<br/>+ distance bias, masks"]
   att --> gru["Memory: a GRU per unit<br/>and one for the army"]
@@ -98,7 +101,8 @@ flowchart TB
   enemies seen destroyed are never looked at. A learned bias per head by the distance between
   two units (16 buckets, 0 to ~1500 m) makes "who is near" easy. Invisible enemies stay in the
   attention with their last seen place.
-- **Memory: a GRU per token**, before the last attention layer. Chosen over attention to the
+- **Memory: a GRU per token**, before the last attention layer. Training runs it through chunks
+  of 64 decisions (32 s of battle) ([training](training.md)). Chosen over attention to the
   last frames because the cost of a decision does not grow with the memory; the state is one
   vector per unit, easy to carry and the same on every computer in co-op; the 10–20 s horizon
   (20–80 decisions at 2–4 per second) is learned, not fixed by a buffer.

@@ -19,7 +19,7 @@ from tools.nn.model import config, critic, heads, policy  # noqa: E402
 from tools.nn.sim import battle, scenario  # noqa: E402
 from tools.nn.sim import orders as O  # noqa: E402
 from tools.nn.sim.params import load  # noqa: E402
-from tools.nn.train import checkpoint, evaluate, league, opponents, ppo, randomise, reward, rollout, scenes  # noqa: E402
+from tools.nn.train import checkpoint, evaluate, imitate, league, opponents, ppo, randomise, reward, rollout, scenes  # noqa: E402,E501
 
 CFG = config.preset("small", d=32, layers=2, heads=2, pointer=16, critic_d=32, critic_layers=1, critic_heads=2)
 MIRROR = [("arena", "attack")]
@@ -35,6 +35,18 @@ def two_units(kind_first=O.HOLD):
         1: {"faction": "wh_main_emp_empire", "units": [{"key": "wh_main_emp_inf_spearmen_0", "x": -300, "z": 0, "b": 90}]},
         2: {"faction": "wh_main_emp_empire", "units": [{"key": "wh_main_emp_inf_spearmen_0", "x": 300, "z": 0, "b": 270}]}}}
     return scenario.build([army])
+
+
+def line_army(attacker=1, gap=600.0, lord_ahead=0.0):
+    """Each side: a general, two spearmen and archers behind; side 1 west, side 2 east."""
+    def side(sign, faces):
+        x0 = sign * gap / 2
+        return {"faction": "wh_main_emp_empire", "units": [
+            {"key": "wh_main_emp_cha_general_0", "general": True, "x": x0 + sign * (20 - lord_ahead), "z": 0, "b": faces},
+            {"key": "wh_main_emp_inf_spearmen_0", "x": x0, "z": -40, "b": faces},
+            {"key": "wh_main_emp_inf_spearmen_0", "x": x0, "z": 40, "b": faces},
+            {"key": "wh2_dlc13_emp_inf_archers_0", "x": x0 + sign * 40, "z": 0, "b": faces}]}
+    return scenario.build([{"attacker": attacker, "sides": {1: side(-1, 90), 2: side(1, 270)}}])
 
 
 # --- level 1: functions ---
@@ -64,13 +76,39 @@ class TestFunctions:
                                   torch.tensor([[True, False]]), 0.2)
         assert float(loss) == pytest.approx(-1.0)
 
-    def test_the_reward_is_win_plus_the_health_difference(self):
-        w = reward.Weights(win=1.0, hp=0.5)
-        before = torch.tensor([[1.0, 1.0], [0.5, 0.4]])
-        after = torch.tensor([[0.9, 0.7], [0.5, 0.4]])
-        r = reward.step(before, after, torch.tensor([False, True]), torch.tensor([0, 2]), w)
-        assert r[0].tolist() == pytest.approx([0.5 * (0.3 - 0.1), -0.5 * (0.3 - 0.1)])
-        assert r[1].tolist() == pytest.approx([-1.0, 1.0])
+    def test_the_reward_is_win_plus_health_and_standing_differences(self):
+        w = reward.Weights(win=1.0, hp=0.5, standing=0.5)
+        before = torch.tensor([[[1.0, 1.0], [1.0, 1.0]], [[0.5, 0.5], [0.4, 0.3]]])
+        after = torch.tensor([[[0.9, 1.0], [0.7, 0.8]], [[0.5, 0.0], [0.4, 0.3]]])
+        r = reward.step(before, after, torch.tensor([False, True]), torch.tensor([0, 2]), torch.tensor([1, 1]), w)
+        shaped = 0.5 * (0.3 - 0.1) + 0.5 * 0.2
+        assert r[0].tolist() == pytest.approx([shaped, -shaped])
+        assert r[1].tolist() == pytest.approx([-1.0 - 0.25, 1.0 + 0.25])
+
+    def test_at_the_time_limit_the_attacker_loses_more_than_a_fight(self):
+        w = reward.Weights(win=1.0, timeout=1.5, hp=0.0, standing=0.0)
+        m = torch.ones(2, 2, 2)                                            # both sides still stand
+        r = reward.step(m, m, torch.tensor([True, True]), torch.tensor([2, 1]), torch.tensor([1, 2]), w)
+        assert r.tolist() == [[-1.5, 1.0], [1.0, -1.5]]
+
+    def test_the_idle_attacker_pays_until_it_fights_or_shoots(self):
+        st = two_units()
+        w = reward.Weights(idle=0.01)
+        assert reward.idle_cost(st, w)[0].tolist() == pytest.approx([0.01, 0.0])
+        st.u["fire"][0, 0] = True
+        assert reward.idle_cost(st, w)[0].tolist() == [0.0, 0.0]
+
+    def test_the_attackers_idle_cost_grows_with_time_and_a_tempo_cost_comes_late(self):
+        st = two_units()
+        w = reward.Weights(idle=0.01, idle_ramp_s=100.0, idle_cap=3.0, tempo=0.1, tempo_after_s=50.0)
+        assert reward.idle_cost(st, w)[0].tolist() == pytest.approx([0.01, 0.0])
+        st.t[:] = 100.0
+        assert reward.idle_cost(st, w)[0].tolist() == pytest.approx([0.02 + 0.1, 0.0])
+        st.t[:] = 1000.0
+        st.u["fire"][0, 0] = True                                          # busy: only the tempo cost
+        assert reward.idle_cost(st, w)[0].tolist() == pytest.approx([0.1, 0.0])
+        st.u["fire"][0, 0] = False
+        assert reward.idle_cost(st, w)[0].tolist() == pytest.approx([0.03 + 0.1, 0.0])   # capped at x3
 
     def test_order_changes(self):
         st = two_units()
@@ -94,6 +132,81 @@ class TestFunctions:
         changes = torch.tensor([[True, True, True, True]])
         cost = reward.order_cost(changes, side, reward.Weights(order_change=0.1))
         assert cost[0].tolist() == pytest.approx([0.1, 0.1])
+
+    def test_a_lords_death_is_paid_by_its_side_and_earned_by_the_other(self):
+        w = reward.Weights(win=1.0, hp=0.0, standing=0.0, lord=0.3)
+        before = torch.ones(1, 2, 3)
+        after = before.clone()
+        after[0, 0, 2] = 0.0                                               # side 1's lord died
+        r = reward.step(before, after, torch.tensor([False]), torch.tensor([0]), torch.tensor([1]), w)
+        assert r[0].tolist() == pytest.approx([-0.3, 0.3])
+        st = line_army()
+        assert reward.measure(st)[0, :, 2].tolist() == [1.0, 1.0]
+        st.u["men"][0, 0] = 0
+        assert reward.measure(st)[0, :, 2].tolist() == [0.0, 1.0]
+
+    def test_switching_an_attack_while_the_old_target_stands_is_a_retarget(self):
+        st = line_army()
+        u = st.u
+        H = st.N // 2
+        u["order_kind"][0, 1], u["order_target"][0, 1] = O.ATTACK, H + 1
+        o = O.hold(1, st.N)
+        o.kind[0, 1], o.target[0, 1] = O.ATTACK, H + 2
+        assert reward.retargets(u, o)[0, 1] and int(reward.retargets(u, o).sum()) == 1
+        o.target[0, 1] = H + 1
+        assert not reward.retargets(u, o).any()                           # the same target again
+        o.target[0, 1] = H + 2
+        u["r"][0, H + 1] = True
+        assert not reward.retargets(u, o).any()                           # the old one routs: free to switch
+        cost = reward.order_cost(torch.zeros(1, st.N, dtype=torch.bool), u["side"], reward.Weights(retarget=0.4),
+                                 torch.tensor([[False, True] + [False] * (st.N - 2)]))
+        assert cost[0].tolist() == pytest.approx([0.1, 0.0])               # 0.4 / 4 units
+
+    def test_schedules_go_linearly_from_start_to_end(self):
+        from tools.nn.train import run
+        assert run.schedule(0.01, 0.0, 0.0) == 0.01 and run.schedule(0.01, 0.0, 0.5) == pytest.approx(0.005)
+        assert run.schedule(0.01, 0.0, 2.0) == 0.0
+
+    def test_softening_the_kind_keeps_the_choice_and_raises_the_entropy(self):
+        from tools.nn.train import run
+        actor, _ = nets()
+        with torch.no_grad():
+            actor.heads.kind.weight.mul_(50)                                   # a collapsed head
+        env = rollout.Battles(league.layout(2, 1, opponent="hold"), MIRROR)
+        a, _, _ = env.observe(critic=False)
+        x = rollout.rows_of(a, env.rows_learn)
+        with torch.no_grad():
+            before = actor(x)[0]["kind"]
+            run.soften_kind(actor, 4.0)
+            after = actor(x)[0]["kind"]
+        ctrl = x["ctrl"]
+        assert torch.equal(before.argmax(-1)[ctrl], after.argmax(-1)[ctrl])
+        assert float(ppo.kind_entropy({"kind": after})[ctrl].mean()) > float(ppo.kind_entropy({"kind": before})[ctrl].mean())
+
+    def test_a_point_turns_into_the_bin_that_points_back_at_it(self):
+        env = rollout.Battles(league.layout(2, 1, opponent="hold"), MIRROR, spread=randomise.NONE)
+        a, frame, _ = env.observe(critic=False)
+        obs_t = rollout.rows_of(a, env.rows_learn)
+        fr = rollout.frame_rows(frame, env.rows_learn)
+        cfg = config.SMALL
+        for want in (5, 37, 100, 127):
+            bins = torch.full_like(obs_t["own"], want, dtype=torch.long)
+            act = heads.Action(bins * 0, bins, bins * 0 - 1, torch.zeros_like(obs_t["own"]))
+            pt = heads.point_world(cfg, act, obs_t, fr, torch.tensor([[-1e4, 1e4, -1e4, 1e4]] * 2))
+            got = imitate.point_bin(cfg, pt[..., 0], pt[..., 1], obs_t, fr)
+            assert (got[obs_t["own"]] == want).all()
+
+    def test_ai_like_is_in_the_league_in_both_roles(self):
+        lay = league.layout(48, 2, {"ai_like": 0.5, "nearest": 0.5}, scene_attacker=[1, 2])
+        sel = lay.opponent == league.CODE["ai_like"]
+        assert sel.sum() == 24 and set(lay.learner[sel]) == {1, 2}
+        assert "ai_like" in evaluate.OPPONENTS
+
+    def test_hold_is_met_only_as_the_defender(self):
+        lay = league.layout(48, 2, {"hold": 0.5, "nearest": 0.5}, scene_attacker=[1, 2])
+        hold = lay.opponent == league.CODE["hold"]
+        assert (lay.learner[hold] == np.array([1, 2])[lay.scene[hold]]).all()
+        assert set(lay.learner[~hold]) == {1, 2}
 
     def test_the_layout_meets_every_opponent_in_every_scene_from_both_sides(self):
         lay = league.layout(240, 6, {"self": 0.25, "nearest": 0.25, "hold": 0.5})
@@ -139,6 +252,69 @@ class TestProperties:
         assert int(st.u["order_kind"][0, 1]) == O.HOLD                   # never had an order: holds
         assert float(st.u["x"][0, 1]) == pytest.approx(300.0)
 
+    def test_the_memory_through_a_chunk_is_the_same_as_step_by_step(self):
+        actor, crit = nets()
+        env = rollout.Battles(league.layout(4, 1, opponent="nearest"), MIRROR, params=rollout.params_with_limit(3.0))
+        batch = rollout.collect(env, actor, crit, 8)                       # battles end at step 6 and restart
+        assert batch["reset"][6].all() and not batch["reset"][:6].any()
+        with torch.no_grad():
+            logits, _ = actor.sequence(batch["obs"], batch["h0"], batch["reset"])
+            lp, _ = heads.log_prob(logits, batch["action"], batch["obs"]["ctrl"])
+        assert torch.allclose(lp, batch["lp"], atol=1e-4)
+
+    def test_generated_battles_restart_as_new_armies_and_the_setup_follows(self):
+        src = scenes.Generated(range(500, 516), 3, rollout.params_with_limit(1.0), "cpu", seed=1)
+        lay = league.layout(8, 1, {"nearest": 0.5, "hold": 0.5}, scene_attacker=[1])
+        env = rollout.Battles(lay, MIRROR, params=rollout.params_with_limit(1.0), source=src,
+                              spread=randomise.NONE)
+        actor, crit = nets()
+        before = env.bank_row.clone()
+        for _ in range(2):
+            env.step(actor, crit)                                        # the 1 s limit: all restart
+        rows = env.bank_row
+        assert not torch.equal(rows, before)
+        bank = src.bank
+        assert torch.equal(env.setup.arrays.passport, bank.setup.arrays.passport[rows])
+        assert torch.equal(env.setup.char[1], bank.setup.char[1][rows])
+        assert torch.equal(env.st.u["side"], bank.state.u["side"][rows])
+        hold = torch.as_tensor(lay.opponent == league.CODE["hold"])
+        assert torch.equal(env.st.attacker[hold], torch.as_tensor(lay.learner)[hold])   # the learner attacks `hold`
+
+    def test_ai_like_attacker_advances_in_line_and_the_defender_waits_with_its_lord_behind(self):
+        st = line_army(attacker=1, gap=600)
+        H = st.N // 2
+        o = opponents.ai_like(st)
+        assert (o.kind[0, 1:3] == O.MOVE).all() and o.run[0, 1:3].all()          # attacker's spearmen advance
+        assert (o.x[0, 1:3] > st.u["x"][0, 1:3]).all()                          # towards the enemy (east)
+        assert (o.kind[0, H + 1:H + 3] == O.HOLD).all()                          # the defender's line holds
+        assert int(o.kind[0, H]) in (O.HOLD, O.MOVE) and int(o.kind[0, 0]) in (O.HOLD, O.MOVE)
+        P = load()
+        for _ in range(60):                                                       # 30 s
+            battle.step(st, opponents.ai_like(st), P)
+        lead = st.u["x"][0, 1:3].mean()
+        assert float(lead) > -300 + 60                                            # it advanced
+        assert float(st.u["x"][0, 0]) < float(lead)                               # the lord behind its line
+
+    def test_ai_like_counter_charges_close_enemies_and_shoots_the_lord_in_range(self):
+        st = line_army(attacker=1, gap=80, lord_ahead=30)        # spearmen 80 m apart, the lord 110 m from the archers
+        H = st.N // 2
+        o = opponents.ai_like(st)
+        assert (o.kind[0, H + 1:H + 3] == O.ATTACK).all() and o.run[0, H + 1:H + 3].all()   # counter-charge
+        assert int(o.kind[0, H + 3]) == O.ATTACK and int(o.target[0, H + 3]) == 0        # archers: the lord
+        assert int(o.kind[0, H]) != O.ATTACK or bool(o.kind[0, H + 1:H + 3].eq(O.ATTACK).any())
+
+    def test_ai_like_lord_does_not_charge_alone(self):
+        st = line_army(attacker=1, gap=600, lord_ahead=150)                      # side 1's lord far in front
+        o = opponents.ai_like(st)
+        assert int(o.kind[0, 0]) == O.MOVE and float(o.x[0, 0]) < float(st.u["x"][0, 0])    # back to the line
+
+    def test_a_bank_keeps_a_share_of_small_armies(self):
+        src = scenes.Generated(range(500, 520), 19, rollout.params_with_limit(1.0), "cpu", small=(0.5, 3))
+        side = src.bank.state.u["side"]
+        per = torch.stack([(side == s).sum(1) for s in (1, 2)], 1)          # units + lord per battle
+        assert (per[:10] <= 4).all()
+        assert src.bank.N == 40
+
     def test_the_policy_respects_the_masks(self):
         actor, _ = nets()
         env = rollout.Battles(league.layout(6, 1, opponent="hold"), MIRROR)
@@ -171,14 +347,15 @@ class TestProperties:
         b.attacker = 3 - a.attacker
         P = load()
         for _ in range(400):
-            ha, hb = reward.health(a), reward.health(b)
+            ha, hb = reward.measure(a), reward.measure(b)
             oa = opponents.nearest(a)
             ob_ = O.Orders(*(getattr(oa, k)[:, swap] for k in O.FIELDS))
             ob_.target = torch.where(ob_.target >= 0, (ob_.target + H) % (2 * H), ob_.target)
             battle.step(a, oa, P)
             battle.step(b, ob_, P)
-            ra = reward.step(ha, reward.health(a), a.done, a.winner)
-            rb = reward.step(hb, reward.health(b), b.done, b.winner)
+            even = reward.Weights(timeout=1.0)                             # zero-sum at the limit too
+            ra = reward.step(ha, reward.measure(a), a.done, a.winner, a.attacker, even)
+            rb = reward.step(hb, reward.measure(b), b.done, b.winner, b.attacker, even)
             assert torch.allclose(ra, rb.flip(1), atol=1e-4)
             assert torch.allclose(ra.sum(1), torch.zeros(2), atol=1e-6)
         assert float(reward.health(a)[0, 0]) < 1.0                        # the battle got going
@@ -188,10 +365,11 @@ class TestProperties:
         env = rollout.Battles(league.layout(4, 1, opponent="nearest"), MIRROR, params=rollout.params_with_limit(1.0))
         out = [env.step(actor, crit) for _ in range(3)]
         assert bool(out[1]["done"].all())                                 # the 1 s limit: 2 steps
-        assert float(out[1]["reward"].abs().min()) >= 0.99                # the attacker loses, the defender wins
+        assert sorted(out[1]["reward"].tolist()) == pytest.approx([-1.5, -1.5, 1.0, 1.0], abs=0.01)
         assert float(env.st.t.max()) == pytest.approx(0.5)                # started again
         stats = env.take_stats()
-        assert stats["nearest"][0] == 4
+        assert stats["nearest/attack"][0] == 2 and stats["nearest/defend"][0] == 2
+        assert stats["nearest/attack"][1] == 0 and stats["nearest/defend"][1] == 2      # the defender wins on time
 
 
 # --- level 3: the loop ---
@@ -207,9 +385,21 @@ class TestLoop:
         assert batch["obs"]["tokens"].shape[:2] == (3, env.R)
         assert batch["lp"].shape == (3, env.R, env.N)
         opt = torch.optim.Adam(list(actor.parameters()) + list(crit.parameters()), lr=1e-3)
-        st = ppo.update(actor, crit, opt, batch, dataclasses.replace(ppo.PPOConfig(), epochs=2, minibatches=2))
+        st = ppo.update(actor, crit, opt, batch, dataclasses.replace(ppo.PPOConfig(), epochs=2, minibatch=6))
         assert all(np.isfinite(v) for v in st.values())
         assert any(not torch.equal(a, b) for a, b in zip(before, actor.parameters()))
+
+    def test_behaviour_cloning_learns_the_teachers_targets(self):
+        actor, _ = nets()
+        res = imitate.train(actor, minutes=5, battles=4, device="cpu", lr=3e-3, max_steps=40, scene_list=MIRROR,
+                            log=lambda m: None)
+        assert res["steps"] == 40 and res["kind_acc"] > 0.9
+
+    def test_behaviour_cloning_of_two_teachers_learns_moves_too(self):
+        actor, _ = nets()
+        res = imitate.train(actor, minutes=5, battles=4, device="cpu", lr=3e-3, max_steps=6, scene_list=MIRROR,
+                            teacher="nearest,ai_like", log=lambda m: None)
+        assert res["steps"] == 6 and np.isfinite(res["loss"])
 
     def test_a_checkpoint_rebuilds_the_same_policy(self, tmp_path):
         actor, crit = nets()
@@ -237,8 +427,9 @@ class TestLoop:
         actor, _ = nets()
         res = evaluate.play(actor, opponents=("hold", "past"), per_scene=2, past=nets(1)[0], limit_s=2.0,
                             scene_list=MIRROR)
-        for name in ("hold", "past"):
-            r = res["by_opponent"][name]
-            assert r["games"] == 2 and r["timeouts"] == 1.0
-            assert r["win_rate"] == 0.5                                   # the defender wins on time
+        hold, past = res["by_opponent"]["hold"], res["by_opponent"]["past"]
+        assert hold["games"] == 2 and hold["roles"]["attack"]["games"] == 2      # `hold` only defends
+        assert hold["win_rate"] == 0.0                                    # the attacker loses on time
+        assert past["roles"]["attack"]["games"] == 1 and past["roles"]["defend"]["wins"] == 1
+        assert past["timeouts"] == 1.0
         assert sum(res["kinds"].values()) == pytest.approx(1.0)

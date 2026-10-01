@@ -7,8 +7,9 @@ Replay: for every recorded second and unit, the order that recording implies -
                                             target empty in ~70 % of its melee seconds, the
                                             game's AI in ~6 %: HOLD made the two sides differ)
     otherwise                            -> MOVE to the recorded order point (ox, oz),
-                                            running if the unit was running After the recording ends the
-last recorded orders stay for `grace_s` (120 s), then every unit attacks the nearest enemy.
+                                            running if the unit was running. After the recording ends the
+last recorded orders stay for `grace_s` (120 s), then every unit attacks the nearest enemy
+(check.py stops a whole battle when its recording ends, and keeps a pair on its last orders).
 """
 import numpy as np
 import torch

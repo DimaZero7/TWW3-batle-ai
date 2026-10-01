@@ -60,8 +60,17 @@ def step(st, orders, params=None, dt=None):
     speed = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)
     new = engaged & (u["contact_s"] <= 0)
     fast = speed >= 0.5 * u["run"]
-    u["charge"] = torch.where(new, torch.where(fast, (speed / u["run"].clamp(min=0.1)).clamp(max=1), 0.0),
-                              torch.where(engaged, u["charge"], torch.zeros_like(u["charge"])))
+    factor = torch.where(fast, (speed / u["run"].clamp(min=0.1)).clamp(max=1), torch.zeros_like(speed))
+    # Bracing: a unit with charge_reflection that stands still meets an infantry charge coming within
+    # bracing_attack_angle of its front as if it charged too (measured in the whole battles: the
+    # charger gains nothing). The database's charge_reflect_min_charge_factor_threshold (0.7) is not
+    # applied: chargers here meet their target at 0.55-0.9 of their run (median 0.75).
+    braced = new & u["reflect"] & (speed < cal["melee"]["braced_speed"])
+    incoming = torch.where(touch & (new & (u["men0"] > 1))[:, None, :]
+                           & (pw["rel_i"].abs() <= R["bracing_attack_angle"] * geometry.DEG),
+                           factor[:, None, :], torch.zeros_like(pw["gap"])).amax(2)
+    factor = torch.where(braced & (incoming > 0), incoming, factor)
+    u["charge"] = torch.where(new, factor, torch.where(engaged, u["charge"], torch.zeros_like(u["charge"])))
     decay = R["charge_decay_duration"]
     charge_now = u["charge"] * (1 - u["contact_s"] / decay).clamp(min=0)
     u["contact_s"] = torch.where(engaged, u["contact_s"] + dt, torch.zeros_like(u["contact_s"]))
@@ -202,7 +211,10 @@ def step(st, orders, params=None, dt=None):
     # --- facing and the observed flags ---
     spd = torch.sqrt(vx * vx + vz * vz)
     mv = alive & (spd > 0.3)
-    movement.face(u, vx, vz, mv)
+    # A formation steps a few metres back or aside to its point without turning round.
+    goal_d = torch.sqrt((gx - u["x"]) ** 2 + (gz - u["z"]) ** 2)
+    shuffle = standing & point & ~routing & (goal_d < cal["contact"]["step_m"]) & (u["men0"] > 1)
+    movement.face(u, vx, vz, mv & ~shuffle)
     near_foe = torch.where(touch & standing[:, None, :], d, torch.full_like(d, 1e9))
     opp = near_foe.argmin(2)
     has_opp = near_foe.min(2).values < 1e9
@@ -210,6 +222,8 @@ def step(st, orders, params=None, dt=None):
     movement.face(u, ox_ - u["x"], oz_ - u["z"], has_opp & ~mv & standing)
     mt = m_target.clamp(min=0)
     movement.face(u, u["x"].gather(1, mt) - u["x"], u["z"].gather(1, mt) - u["z"], firing & ~mv & ~has_opp)
+    # A formation in melee turns slowly (measured): an enemy on its flank or rear stays there.
+    movement.limit_turn(u, old["b"], engaged & ~leaving & (u["men0"] > 1), cal["contact"]["melee_turn_deg_s"] * dt)
     router_hit = torch.where(strike & u["r"][:, None, :], d, torch.full_like(d, 1e9))
     router = router_hit.argmin(2)
     has_router = router_hit.min(2).values < 1e9

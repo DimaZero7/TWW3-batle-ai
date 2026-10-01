@@ -6,7 +6,7 @@ plays and the opponent. Opponents:
     self        the learner on both sides (both sides give training data)
     past        a past version of the learner from the pool (one version for all such
                 battles, drawn again every update); the untrained network is always in the pool
-    nearest, hold_shoot, hold   the scripted opponents (tools/nn/train/opponents.py)
+    nearest, hold_shoot, hold, ai_like   the scripted opponents (tools/nn/train/opponents.py)
 
 The pool: build/nn-train/pool/*.pt in the checkpoint format (tools/nn/train/checkpoint.py).
 """
@@ -19,9 +19,9 @@ import numpy as np
 from tools.nn.train import checkpoint
 
 LEARNER = 0
-OPPONENTS = ("self", "past", "nearest", "hold_shoot", "hold")
+OPPONENTS = ("self", "past", "nearest", "hold_shoot", "hold", "ai_like")
 CODE = {name: i + 1 for i, name in enumerate(OPPONENTS)}     # controller codes; 0 = the learner
-MIX = {"self": 0.2, "past": 0.3, "nearest": 0.2, "hold_shoot": 0.2, "hold": 0.1}
+MIX = {"self": 0.1, "past": 0.15, "nearest": 0.2, "hold_shoot": 0.1, "hold": 0.05, "ai_like": 0.4}
 
 
 @dataclass
@@ -55,16 +55,24 @@ def counts(B, mix):
     return dict(zip(names, n))
 
 
-def layout(B, n_scenes, mix=None, opponent=None):
+ATTACK_ONLY = ("hold",)   # `hold` never attacks: as the attacker it only waits out the hour
+
+
+def layout(B, n_scenes, mix=None, opponent=None, scene_attacker=None, attack_only=ATTACK_ONLY):
     """A layout of B battles: within each opponent's share the scenes and the learner's side
     cycle, so every opponent meets every (scene, side) about equally. opponent: one name for all
-    battles (evaluation)."""
+    battles (evaluation). scene_attacker [n_scenes] (1 or 2): with it, the opponents in attack_only
+    play only the defender (the learner takes the attacker's side)."""
     per = {opponent: B} if opponent else counts(B, mix or MIX)
     scene, side, opp = [], [], []
     for name, n in per.items():
         j = np.arange(n)
-        scene.append(j % n_scenes)
-        side.append(1 + (j // n_scenes) % 2)
+        sc = j % n_scenes
+        sd = 1 + (j // n_scenes) % 2
+        if scene_attacker is not None and name in attack_only:
+            sd = np.asarray(scene_attacker)[sc]
+        scene.append(sc)
+        side.append(sd)
         opp.append(np.full(n, CODE[name]))
     return Layout(np.concatenate(scene), np.concatenate(side), np.concatenate(opp))
 

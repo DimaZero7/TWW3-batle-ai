@@ -1,11 +1,17 @@
 {
-  "_description": "Units available for training, per faction (random armies, tools/nn/armies, docs/en/training/armies.md). A new unit or faction is a new entry here; its passport must be in config/nn/units.json (cost multiplayer_cost, category, men). slot: the unit's name in an army (slot_1, slot_2, ...); width: frontage in m at deployment (default men / rank_depth files x 1.5 m).",
+  "_description": "Units available for training, per faction (random armies, tools/nn/armies, docs/en/training/armies.md). A new unit or faction is a new entry here; its passport must be in config/nn/units.json (cost multiplayer_cost, category, men), then py -3.14 -m tools.nn.armies.templates. slot: the unit's name in an army (slot_1, slot_2, ...); width: frontage in m at deployment (default men / rank_depth files x 1.5 m); generator: the faction's config of the game's army generator (cdir_military_generator_configs), whose templates set the proportions of template armies.",
+  "mix": {
+    "_description": "Share of armies (per side) built by the faction's army templates (as the campaign AI) and pure random within the pool and budget (as a human might, stacks included).",
+    "template": 0.75,
+    "random": 0.25
+  },
   "caps": {
-    "_description": "Share of an army's units (the lord counted) that may be of one passport category, rounded down, at least 1. Against degenerate stacks; see docs/en/training/armies.md.",
+    "_description": "Template armies only: share of an army's units (the lord counted) that may be of one passport category, rounded down, at least 1. Random armies have no caps.",
     "inf_ranged": 0.6
   },
   "factions": {
     "wh_main_emp_empire": {
+      "generator": "WH_Empire",
       "lord": {"key": "wh_main_emp_cha_general_0", "width": 5},
       "units": [
         {"key": "wh_main_emp_inf_spearmen_0", "slot": "spear", "width": 30},
@@ -13,6 +19,7 @@
       ]
     },
     "wh2_main_skv_skaven": {
+      "generator": "WH_Skaven",
       "lord": {"key": "wh2_main_skv_cha_warlord_0", "width": 5},
       "units": [
         {"key": "wh2_main_skv_inf_clanrat_spearmen_0", "slot": "clanrat", "width": 30},

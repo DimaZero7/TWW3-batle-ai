@@ -23,6 +23,7 @@ from tools.nn.model.decide import to_orders
 from tools.nn.model.frame import Frame
 from tools.nn.sim import battle
 from tools.nn.sim import orders as O
+from tools.nn.sim import state as S
 from tools.nn.sim.params import load
 from tools.nn.train import league, opponents, randomise, reward, scenes
 
@@ -34,6 +35,22 @@ ROLES = ("attack", "defend")
 # Outcome counters: the opponents, and the untrained network as "past" on its own.
 STAT_NAMES = league.OPPONENTS + ("untrained",)
 UNTRAINED = len(league.OPPONENTS) + 1
+
+
+_OBSERVE = {}
+
+
+def observer(device, compile=None):
+    """observation.observe, compiled by torch.compile on CUDA (~14x faster: it is hundreds of small
+    operations on [B, N] tensors)."""
+    use = compile if compile is not None else torch.device(device).type == "cuda"
+    if not use:
+        return ob.observe
+    if "f" not in _OBSERVE:
+        # One graph per batch shape and view (actor, critic): evaluation builds batches of new sizes.
+        torch._dynamo.config.recompile_limit = max(64, torch._dynamo.config.recompile_limit)
+        _OBSERVE["f"] = torch.compile(ob.observe, dynamic=False)
+    return _OBSERVE["f"]
 
 
 def params_with_limit(limit_s=None):
@@ -67,9 +84,30 @@ def merge_memory(old, new, rows):
     return ob.Memory(frame, *(w(getattr(old, k), getattr(new, k)) for k in MEMORY))
 
 
+def open_rows(source, want=None):
+    """(State, LiveSetup, bank rows) of a batch that starts with the battles the source picks."""
+    idx = source.pick(want)
+    b, bs = source.bank.state, source.bank.setup
+    st = S.State({k: v[idx].clone() for k, v in b.u.items()}, b.t[idx].clone(), b.attacker[idx].clone(),
+                 b.done[idx].clone(), b.winner[idx].clone(), b.lord_dead_s[idx].clone(), b.bounds,
+                 [list(b.keys[int(i)]) for i in idx.tolist()])
+    arrays = ob._Arrays(**{k: getattr(bs.arrays, k)[idx].clone() for k in scenes.LiveSetup.FIELDS})
+    setup = scenes.LiveSetup(arrays, {s: bs.char[s][idx].clone() for s in (1, 2)},
+                             {s: bs.adapt[s][idx].clone() for s in (1, 2)}, [bs.factions[int(i)] for i in idx.tolist()])
+    return st, setup, idx
+
+
+def restart_rows(st, setup, source, rows, want=None):
+    """Battles where rows [B] is true start again as battles the source picks (in place). -> bank rows."""
+    idx = source.pick(want)
+    scenes.take_rows(st, source.bank.state, rows, idx)
+    setup.take(source.bank.setup, rows, idx)
+    return idx
+
+
 class Battles:
     def __init__(self, layout, scene_list=scenes.SCENES, device="cpu", params=None, spread=randomise.Spread(),
-                 weights=reward.Weights(), seed=0, auto_reset=True, compile=None):
+                 weights=reward.Weights(), seed=0, auto_reset=True, compile=None, source=None):
         self.device = torch.device(device)
         self.params = params or load()
         self.layout = layout
@@ -77,14 +115,19 @@ class Battles:
         self.weights = weights
         self.auto_reset = auto_reset
         self.gen = torch.Generator(device=self.device).manual_seed(seed)
-        self.template, self.setup = scenes.build(layout.scene, scene_list, self.params, self.device)
-        self.B, self.N = self.template.B, self.template.N
+        # Where battles come from: the fixed scenes (battle b plays layout.scene[b]) or generated armies.
+        self.source = source or scenes.Fixed(layout.scene, scene_list, self.params, self.device)
+        self.bank = self.source.bank
+        self.B, self.N = layout.B, self.bank.N
         self.advance = battle.stepper(self.device, compile)
+        self.look = observer(self.device, compile)
+        # `hold` is met only as the defender: its battles must have the learner attacking.
+        only = np.isin(layout.opponent, [league.CODE[n] for n in league.ATTACK_ONLY])
+        self.want = torch.as_tensor(np.where(only, layout.learner, 0), device=self.device)
         self.ctrl = torch.as_tensor(layout.controllers(), device=self.device)           # [B, 2]
         flat = torch.cat([self.ctrl[:, 0], self.ctrl[:, 1]])
         self.rows_learn = (flat == league.LEARNER).nonzero().squeeze(1)
         self.rows_past = (flat == league.CODE["past"]).nonzero().squeeze(1)
-        self.bounds2 = torch.as_tensor(np.tile(self.setup.bounds, (2, 1)), device=self.device)
         self.scripts = {league.CODE[n]: f for n, f in opponents.SCRIPTS.items() if bool((self.ctrl == league.CODE[n]).any())}
         opp = torch.as_tensor(layout.opponent, device=self.device)
         self.row_opp = torch.cat([opp, opp])[self.rows_learn]                          # [R]
@@ -95,6 +138,8 @@ class Battles:
         self.row_attacks = None
         self.orders_stats = torch.zeros(2, device=self.device)                         # changes, unit-steps
         self.kind_stats = torch.zeros(len(O.KINDS), dtype=torch.long, device=self.device)   # decisions by kind
+        self.lord_stats = torch.zeros(3, device=self.device)        # learner battles ended, own / enemy lord dead
+        self.switch_stats = torch.zeros(1, device=self.device)      # the learner's attack target switches
         self.start()
 
     @property
@@ -102,7 +147,9 @@ class Battles:
         return len(self.rows_learn)
 
     def start(self):
-        self.st = self.template.clone()
+        self.st, self.setup, idx = open_rows(self.source, self.want)
+        self.bank_row = idx.clone()
+        self.bounds2 = torch.cat([self.setup.bounds, self.setup.bounds])
         every = torch.ones(self.B, dtype=torch.bool, device=self.device)
         randomise.apply(self.st, every, self.spread, self.gen)
         state = self.st.observation()
@@ -125,12 +172,12 @@ class Battles:
         state = self.st.observation()
         obs, cobs = {}, {}
         for s in (1, 2):
-            obs[s], self.mem[s] = ob.observe(state, self.setup, s, self.mem[s])
+            obs[s], self.mem[s] = self.look(state, self.setup, s, self.mem[s])
         a, frame = stack(obs[1], obs[2], self.device)
         c = None
         if critic:
             for s in (1, 2):
-                cobs[s], self.cmem[s] = ob.observe(state, self.setup, s, self.cmem[s], full=True)
+                cobs[s], self.cmem[s] = self.look(state, self.setup, s, self.cmem[s], full=True)
             full, _ = stack(cobs[1], cobs[2], self.device)
             c = {k: full[k][self.rows_learn] for k in CRITIC_KEYS}
         return a, frame, c
@@ -181,7 +228,8 @@ class Battles:
         was_done = self.st.done.clone()
         orders = self.assemble(parts)
         changes = reward.order_changes(self.st.u, orders, self.weights.order_move_m) & ~was_done[:, None]
-        cost = reward.order_cost(changes, self.st.u["side"], self.weights)
+        switched = reward.retargets(self.st.u, orders) & ~was_done[:, None]
+        cost = reward.order_cost(changes, self.st.u["side"], self.weights, switched)
         self._count_orders(changes, was_done)
         self.advance(self.st, orders, self.params, self.params.dt)
         after = reward.measure(self.st)
@@ -192,6 +240,11 @@ class Battles:
         rb, rs = self.rows_learn % self.B, self.rows_learn // self.B
         r_rows, d_rows = r[rb, rs], finished[rb]
         self._count(finished, rb, rs, d_rows)
+        lord_dead = after[:, :, 2] < 0.5 if after.shape[-1] > 2 else torch.zeros_like(after[:, :, 0], dtype=torch.bool)
+        d = d_rows.float()
+        self.lord_stats += torch.stack([d.sum(), (d * lord_dead[rb, rs].float()).sum(),
+                                        (d * lord_dead[rb, 1 - rs].float()).sum()])
+        self.switch_stats += self._learner_units(switched).float().sum()
 
         if self.auto_reset:
             self._reset(finished)
@@ -212,6 +265,27 @@ class Battles:
         defends = (self.st.attacker[rb] != rs + 1).long()
         self.stats.index_add_(0, 2 * code + defends, torch.stack([d, d * won, d * self.st.t[rb]], 1))
         self.battles += int(finished.sum())
+
+    def _learner_units(self, mask):
+        """mask [B, N] limited to the learner's units."""
+        side = self.st.u["side"]
+        learner = torch.zeros_like(mask)
+        for s in (1, 2):
+            learner = learner | ((side == s) & (self.ctrl[:, s - 1] == league.LEARNER)[:, None])
+        return mask & learner
+
+    def lords(self, reset=True):
+        """{"own", "enemy"}: shares of the learner's ended battles in which its own / the enemy's lord
+        was dead at the end, since the last call; "switches_per_minute": attack target switches per
+        standing learner unit per minute (read before orders_per_minute resets its unit-steps)."""
+        n, own, enemy = (float(x) for x in self.lord_stats)
+        steps = float(self.orders_stats[1])
+        out = {"own": own / max(1.0, n), "enemy": enemy / max(1.0, n),
+               "switches_per_minute": float(self.switch_stats[0]) / max(1e-9, steps * self.params.dt / 60)}
+        if reset:
+            self.lord_stats.zero_()
+            self.switch_stats.zero_()
+        return out
 
     def _count_orders(self, changes, was_done):
         """Order changes of the learner's units that stand, and their unit-steps."""
@@ -240,7 +314,8 @@ class Battles:
     def _reset(self, finished):
         if not bool(finished.any()):
             return
-        scenes.reset_rows(self.st, self.template, finished)
+        idx = restart_rows(self.st, self.setup, self.source, finished, self.want)
+        self.bank_row = torch.where(finished, idx, self.bank_row)
         randomise.apply(self.st, finished, self.spread, self.gen)
         state = self.st.observation()
         for s in (1, 2):

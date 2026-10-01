@@ -88,6 +88,7 @@ class Params:
             "large": u.get("size", "small") != "small",
             "expendable": "expendable" in u.get("attributes", []),
             "encourages": "encourages" in u.get("attributes", []),
+            "reflect": "charge_reflection" in u.get("attributes", []),
             "ammo0": men * missile.get("ammo", 0) if missile else 0,
             "range": missile.get("range_m", 0) if missile else 0,
             "reload": reload_s,
