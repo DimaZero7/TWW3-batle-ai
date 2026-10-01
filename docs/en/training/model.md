@@ -71,10 +71,40 @@ ones by lore.
 Morale states 1–4 of the game (eager … shaken) are all "steady" for the enemy: telling them
 apart would give away the exact morale.
 
-Every decision also gets the battle time (s / 3600, the 60-minute limit), the count of own
-living units and of known enemy units (/ 20), and whether the own and the enemy lord is slain and
-how lately (1 now, down to 0 after 120 s). The game announces a general's death, so the enemy
-lord's counts even when he was not seen.
+Every decision also gets the side's context:
+
+| Input (context) | Scale |
+|---|---|
+| Count of own living units and of known enemy units | / 20 |
+| Own lord slain, how lately; the enemy lord the same | 0/1; 1 now, down to 0 after 120 s |
+| Battle time elapsed (a fine clock for the first minutes) | log(1 + s / 30) / log(21): 0.23 at 30 s, 0.59 at 150 s, 1 from 10 minutes |
+| We have dealt damage yet; seconds since we last did | 0/1; s / 300, up to 1 (0 before the first) |
+| The enemy has dealt us damage yet; seconds since it last did | 0/1; s / 300, up to 1 (0 before the first) |
+
+The game announces a general's death, so the enemy lord's counts even when he was not seen.
+
+Nothing in the input (nor in the critic's) refers to the battle's time limit: a campaign battle
+may have none. Only time elapsed is given; the earlier `t / 3600` column (the 60-minute limit in
+disguise) was removed.
+
+The damage timers (`observation.TIMERS`) follow what a player sees: his units fight, the kill
+counters and the balance-of-power bar. A side has dealt damage when some unit of the other side
+lost health (`hp` fell) since the previous decision: all units, seen or not (the bar shows the
+totals); a unit whose health is not known (NaN) counts nothing until known again. The memory
+keeps the previous health (`Memory.prev_hp`) and the time of each side's last damage
+(`Memory.hit_t`), so the simulator, recorded battles (per-second samples) and the companion
+(the states the game sends) are measured by one rule. In training it is the reward's attacker
+damage (`reward.struck`, `rollout.Battles.last_hit`: the defender's health fell in the step):
+the attacker sees it as "we dealt", the defender as "the enemy dealt"; so the critic can predict
+the attacker's idle cost and the policy can anticipate it ([training](training.md)).
+
+A checkpoint written before these inputs (with the `t / 3600` column) loads as it is
+(`encoder.TokenEncoder`): that column's weights are dropped and the new inputs' weights start at
+zero, so it acts exactly as it did with the battle time at 0. What dropping the real `t / 3600`
+changes (01.10.2026, 24 simulated battles against `ai_like`, 20 minutes, the greedy choices of
+every unit that takes orders every 5 s, each network with its own memory): `test5/t0_gold30/m20.pt`
+order kind 99.92% the same (35 487 choices), attack target 99.92%, move point 99.96%;
+`runs/long_ai/best.pt` 99.93%, 99.93%, 99.92%; the least by minute of battle 99.7% (m20, 6th minute).
 
 The critic's view (`full=True`) fills every field for every unit, with no visibility, and adds
 the enemy's character. It is for training only.
@@ -112,7 +142,7 @@ state (recordings) nothing is ready.
 ```mermaid
 flowchart TB
   tok["Unit tokens: 115 numbers each<br/>(64 of them the passport)"] --> enc["Shared encoder<br/>the same weights for every unit"]
-  ctx["Context: character, role, time, counts"] --> enc
+  ctx["Context: character, role, counts, lords,<br/>time elapsed, damage timers"] --> enc
   enc --> att["Attention layers<br/>+ distance bias, masks"]
   att --> gru["Memory: a GRU per unit<br/>and one for the army"]
   gru --> last["Last attention layer"]
@@ -124,7 +154,7 @@ flowchart TB
 ```
 
 - **Tokens.** One token per unit, own and enemy, with the same encoder: a new unit is known by
-  its passport, not by its name. The context (character, role, time) is added to every token
+  its passport, not by its name. The context (character, role, timers) is added to every token
   and is a token of its own. Each ability slot goes through one small shared network
   (`AbilityEncoder`); the sum over the unit's owned slots is added to its token, so the slots'
   order does not matter. Its last layer starts at zero: an actor trained before abilities sees
@@ -225,7 +255,10 @@ An int8 export of the actor looks practical; not done yet:
 - `tests/tools/test_nn_observation.py` (numpy, runs in `.venv`): frame, scaling, padding;
   the enemy's exact morale never reaches the input; invisible enemies keep only the last seen
   place; side symmetry; unit order; recorded battles; abilities: the own bar, the enemy's only
-  active and seen, nothing ready without timers or for a routing lord.
+  active and seen, nothing ready without timers or for a routing lord; the damage timers restart
+  at each damage, per side and per battle row, rising or unknown health is no damage, a new memory
+  starts empty, a recording gives the same timers as the same states observed one by one; the
+  context does not depend on time beyond the fine clock (no time limit).
 - `tests/tools/test_abilities.py` (numpy): reading the ability tables, passports, the cards'
   check, the saved numbers, features and slots.
 - `tests/tools/test_nn_model.py` (torch; skipped in `.venv`, run in the container): numpy and
@@ -233,7 +266,13 @@ An int8 export of the actor looks practical; not done yet:
   the outputs; memory; adapters; log-probabilities; points inside the map; the critic; the
   presets' sizes; recorded battles and the simulator's state → orders; the ability head: only
   ready own abilities, permuting slots permutes the choice, an unseen passport still gives a
-  valid choice, log-probability only when chosen, an older actor loads.
+  valid choice, log-probability only when chosen, an older actor loads; the damage timers on
+  numpy and torch; networks with the older context (the `t / 3600` column) load and give the same
+  logits, greedy actions, memory and values, also the trained `test5/t0_gold30/m20.pt` and
+  `runs/long_ai/best.pt` (skipped without them).
+- `tests/tools/test_nn_train.py`: in the simulator the attacker's row sees `rollout.last_hit` as
+  "we dealt", the defender's as "the enemy dealt", per battle, cleared on restart; training
+  continues from `m20.pt` (one PPO update).
 
 The `snake-ai-trainer` image has no pytest. The torch tests were run with the pure-Python
 pytest of `.venv` put on `PYTHONPATH` in the container.

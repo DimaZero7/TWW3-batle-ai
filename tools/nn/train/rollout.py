@@ -39,7 +39,7 @@ from tools.nn.train import behaviour, league, opponents, randomise, reward, scen
 CRITIC_KEYS = ("tokens", "ctx", "own", "attend", "pos")
 FRAME = ("cx", "cz", "ux", "uz")
 MEMORY = ("last_x", "last_z", "last_t", "seen", "dead", "prev_x", "prev_z", "prev_t", "prev_vis", "last_melee_t",
-          "last_rout_t", "lord_dead_t")
+          "last_rout_t", "lord_dead_t", "prev_hp", "hit_t")
 ROLES = ("attack", "defend")
 # Outcome counters: the opponents, and the untrained network as "past" on its own.
 STAT_NAMES = league.OPPONENTS + ("untrained",)
@@ -186,7 +186,9 @@ class Battles:
         self.cmem = {s: ob.start(state, self.setup, s) for s in (1, 2)}
         self.h_learn = None
         self.h_past = None
-        self.health = reward.measure(self.st)
+        self.health = reward.measure(self.st, self.weights.rout_share)
+        # [B] the battle time of the attacker's last damage (reward.idle_cost), -1 before its first
+        self.last_hit = torch.full((self.B,), -1.0, device=self.device)
         self.cur = None
         self.battles = 0
         self.timeouts = 0
@@ -266,12 +268,13 @@ class Battles:
         switched = reward.retargets(self.st.u, orders) & ~was_done[:, None]
         cost = reward.order_cost(changes, self.st.u["side"], self.weights, switched)
         self._count_orders(changes, was_done)
-        prev = reward.unit_before(self.st.u) if critic is not None else None
+        prev = reward.unit_before(self.st.u, self.weights.rout_share) if critic is not None else None
         self.advance(self.st, orders, self.params, self.params.dt)
-        after = reward.measure(self.st)
+        after = reward.measure(self.st, self.weights.rout_share)
         finished = self.st.done & ~was_done
         r = reward.step(self.health, after, finished, self.st.winner, self.st.attacker, self.weights) - cost
-        r = r - reward.idle_cost(self.st, self.weights) * (~finished).float()[:, None]
+        self.last_hit = torch.where(reward.struck(self.health, after, self.st.attacker), self.st.t, self.last_hit)
+        r = r - reward.idle_cost(self.st, self.weights, self.last_hit) * (~finished).float()[:, None]
         self.timeouts += int((finished & (after[:, 0, 1] > 0) & (after[:, 1, 1] > 0)).sum())
         rb, rs = self.rows_learn % self.B, self.rows_learn // self.B
         r_rows, d_rows = r[rb, rs], finished[rb]
@@ -294,7 +297,7 @@ class Battles:
 
         if self.auto_reset:
             self._reset(finished)
-        self.health = reward.measure(self.st)
+        self.health = reward.measure(self.st, self.weights.rout_share)
         keep = (~finished).float()
         self.h_learn = h_new * keep[rb][:, None, None]
         if h_past_new is not None:
@@ -380,6 +383,7 @@ class Battles:
         if not bool(finished.any()):
             return
         idx = restart_rows(self.st, self.setup, self.source, finished, self.want)
+        self.last_hit = torch.where(finished, torch.full_like(self.last_hit, -1.0), self.last_hit)
         sim_abilities.set_rule(self.st.u, self.by_rule)
         self.bank_row = torch.where(finished, idx, self.bank_row)
         randomise.apply(self.st, finished, self.spread, self.gen)

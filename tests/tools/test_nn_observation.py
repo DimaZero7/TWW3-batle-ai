@@ -14,6 +14,8 @@ from tools.nn.model import observation as ob
 from tools.nn.model.frame import Frame, edge_distances
 
 I = ob.INDEX
+C = ob.CTX
+LORDS = slice(ob.CONTEXT_BASE - 4, ob.CONTEXT_BASE)   # own lord slain, how recently, the enemy's
 
 
 def battle(seed=0, own=5, enemy=6, batch=2):
@@ -193,15 +195,15 @@ class TestEvents:
     def test_a_slain_enemy_lord_is_known_even_unseen_and_fades(self):
         setup, state = self.setup_state()
         obs, mem = ob.observe(with_state(state, t=np.array([29.0])), setup, 1)
-        assert obs.ctx[0, -4:].tolist() == [0, 0, 0, 0]
+        assert obs.ctx[0, LORDS].tolist() == [0, 0, 0, 0]
         dead = with_state(state, t=np.array([30.0]), men=np.array([[1.0, 100, 0, 100]]),
                           vis=np.array([[True, True, False, True]]))
         obs, mem = ob.observe(dead, setup, 1, mem)
-        assert obs.ctx[0, -4:].tolist() == pytest.approx([0, 0, 1, 1])
+        assert obs.ctx[0, LORDS].tolist() == pytest.approx([0, 0, 1, 1])
         obs, mem = ob.observe(with_state(dead, t=np.array([90.0])), setup, 1, mem)
-        assert obs.ctx[0, -4:].tolist() == pytest.approx([0, 0, 1, 0.5])
+        assert obs.ctx[0, LORDS].tolist() == pytest.approx([0, 0, 1, 0.5])
         other, _ = ob.observe(with_state(dead, t=np.array([90.0])), setup, 2)
-        assert other.ctx[0, -4:].tolist() == pytest.approx([1, 1, 0, 0])      # the Skaven side: own lord
+        assert other.ctx[0, LORDS].tolist() == pytest.approx([1, 1, 0, 0])      # the Skaven side: own lord
 
     def test_melee_and_rout_of_an_enemy_count_only_while_seen(self):
         setup, state = self.setup_state()
@@ -216,6 +218,81 @@ class TestEvents:
         hidden = with_state(fight, vis=np.array([[True, True, True, False]]))
         obs, _ = ob.observe(hidden, setup, 1)
         assert obs.tokens[0, 3, I["melee_recent"]] == 0 and obs.tokens[0, 1, I["melee_recent"]] == 1
+
+
+class TestDamageTimers:
+    """When each side last dealt damage (some unit of the other side lost health), per battle row."""
+
+    def states(self, batch=2):
+        setup, state = sources.synthetic(batch=batch, own=2, enemy=2, seed=4)
+        return setup, with_state(state, hp=np.full((batch, 4), 0.9), vis=np.ones((batch, 4), bool))
+
+    @staticmethod
+    def timers(obs):
+        return obs.ctx[:, [C["dealt_any"], C["dealt_since"], C["taken_any"], C["taken_since"]]]
+
+    def test_the_timer_restarts_at_each_damage_per_side_and_per_battle(self):
+        setup, s = self.states()
+        mem = {1: None, 2: None}
+
+        def look(t, hp):
+            out = {}
+            for side in (1, 2):
+                obs, mem[side] = ob.observe(with_state(s, t=np.array([t, t]), hp=np.array(hp)), setup, side, mem[side])
+                out[side] = self.timers(obs)
+            return out
+        o = look(10.0, [[0.9] * 4, [0.9] * 4])
+        assert o[1].tolist() == [[0, 0, 0, 0]] * 2 and o[2].tolist() == [[0, 0, 0, 0]] * 2
+        o = look(20.0, [[0.9, 0.9, 0.8, 0.9], [0.9] * 4])               # row 0: side 1 strikes an enemy
+        assert o[1][0].tolist() == [1, 0, 0, 0] and o[2][0].tolist() == [0, 0, 1, 0]
+        assert o[1][1].tolist() == [0, 0, 0, 0] and o[2][1].tolist() == [0, 0, 0, 0]   # row 1: nothing
+        o = look(80.0, [[0.9, 0.9, 0.8, 0.9], [0.9] * 4])               # a pause: no new damage
+        assert o[1][0].tolist() == pytest.approx([1, 60 / ob.SINCE, 0, 0])
+        assert o[2][0].tolist() == pytest.approx([0, 0, 1, 60 / ob.SINCE])
+        o = look(90.0, [[0.7, 0.9, 0.7, 0.9], [0.9] * 4])               # both sides strike
+        assert o[1][0].tolist() == pytest.approx([1, 0, 1, 0])
+        o = look(500.0, [[0.7, 0.9, 0.7, 0.9], [0.9] * 4])
+        assert o[1][0].tolist() == pytest.approx([1, 1, 1, 1])          # capped
+        o = look(510.0, [[0.7, 0.9, 0.6, 0.9], [0.9] * 4])               # damage sets it back to 0
+        assert o[1][0].tolist() == pytest.approx([1, 0, 1, 1]) and o[1][1].tolist() == [0, 0, 0, 0]
+
+    def test_rising_or_unknown_health_is_no_damage_and_a_new_memory_starts_empty(self):
+        setup, s = self.states(batch=1)
+        _, mem = ob.observe(with_state(s, t=np.array([1.0])), setup, 1)
+        obs, mem = ob.observe(with_state(s, t=np.array([2.0]), hp=np.array([[0.9, 0.9, 1.0, np.nan]])), setup, 1, mem)
+        assert self.timers(obs).tolist() == [[0, 0, 0, 0]]
+        obs, _ = ob.observe(with_state(s, t=np.array([3.0]), hp=np.array([[0.9, 0.9, 1.0, 0.5]])), setup, 1, mem)
+        assert self.timers(obs).tolist() == [[0, 0, 0, 0]]             # unknown, then known: nothing
+        obs, _ = ob.observe(with_state(s, t=np.array([3.0]), hp=np.array([[0.9, 0.9, 0.1, 0.1]])), setup, 1)
+        assert self.timers(obs).tolist() == [[0, 0, 0, 0]]             # no memory: no previous health
+
+    def test_the_context_has_no_time_limit_only_elapsed_time(self):
+        setup, s = self.states(batch=1)
+        ctx = {t: ob.observe(with_state(s, t=np.array([t])), setup, 1)[0].ctx[0] for t in (0.0, 30.0, 600.0, 3000.0, 7200.0)}
+        assert ctx[0.0][C["clock_fine"]] == 0 and ctx[30.0][C["clock_fine"]] == pytest.approx(np.log(2) / np.log(21))
+        assert ctx[600.0][C["clock_fine"]] == pytest.approx(1)
+        assert np.array_equal(ctx[600.0], ctx[3000.0]) and np.array_equal(ctx[3000.0], ctx[7200.0])
+        others = [i for i in range(ob.CONTEXT) if i != C["clock_fine"]]
+        assert np.array_equal(ctx[0.0][others], ctx[30.0][others])
+
+    def test_a_recorded_battle_and_the_same_states_live_give_the_same_timers(self):
+        """sources.batch (per-second samples of a recording) and observing the states one by one."""
+        setup, s = self.states(batch=1)
+        hp = [[0.9] * 4, [0.9, 0.9, 0.8, 0.9], [0.9, 0.9, 0.8, 0.9], [0.8, 0.9, 0.8, 0.9], [0.8, 0.9, 0.8, 0.9]]
+
+        f = {k: np.repeat(np.asarray(s[k], float if k in gamedata.FLOAT_FIELDS else bool), 5, 0)
+             for k in gamedata.FLOAT_FIELDS + gamedata.BOOL_FIELDS}
+        f["hp"] = np.array(hp)
+        rec = sources.batch([gamedata.Battle(run="none", own_ai="attack", enemy_role="defend", result={},
+                                             t=np.arange(5.0), f=f, target=np.full((5, 4), -1),
+                                             names=("a", "b", "c", "d"), keys=tuple(setup.keys[0]),
+                                             side=np.array([1, 1, 2, 2]))])
+        live = recorded = None
+        for ti in range(5):
+            a, live = ob.observe(with_state(s, t=np.array([float(ti)]), hp=np.array([hp[ti]])), setup, 1, live)
+            b, recorded = ob.observe(rec.state(ti), rec.setup, 1, recorded)
+            assert np.allclose(self.timers(a), self.timers(b))
+        assert self.timers(b)[0].tolist() == pytest.approx([1, 3 / ob.SINCE, 1, 1 / ob.SINCE])
 
 
 class TestAbilities:

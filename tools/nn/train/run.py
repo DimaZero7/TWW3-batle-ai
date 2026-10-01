@@ -96,7 +96,9 @@ def score(window):
     return (min(rs), keys) if len(rs) >= 5 else (None, keys)
 
 
-def train(args):
+def train(args, every=None):
+    """every: (minutes, hook) - hook(actor, critic, minute, update) after every `minutes` of training
+    (its time not counted as training: e.g. a full evaluation)."""
     device = torch.device(args.device)
     torch.manual_seed(args.seed)
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -115,10 +117,11 @@ def train(args):
     opt = torch.optim.Adam(list(actor.parameters()) + list(critic.parameters()), lr=cfg.lr, eps=1e-5)
     weights = reward.Weights(order_change=args.order_cost, timeout=args.timeout, idle=args.idle, hp=args.hp,
                              standing=args.standing, lord=args.lord, retarget=args.retarget,
-                             idle_ramp_s=args.idle_ramp, tempo=args.tempo, tempo_after_s=args.tempo_after,
-                             unit_hp=args.unit_hp, flanked=args.flanked, missile_melee=args.missile_melee,
+                             idle_tau_s=args.idle_tau, idle_cap=args.idle_cap, idle_pause_s=args.idle_pause,
+                             idle_step=args.idle_step,
+                             unit_gold=args.unit_gold, flanked=args.flanked, missile_melee=args.missile_melee,
                              crowd=args.crowd, flank_attack=args.flank_attack, neighbour=args.neighbour,
-                             idle_near=args.idle_near)
+                             idle_near=args.idle_near, gold=args.gold, rout_share=args.rout_share)
 
     def small_arg():
         if not args.small:
@@ -181,6 +184,7 @@ def train(args):
     t_bank = t0
     update, decisions, total, window, best = 0, 0, {}, {}, -1.0
     best_eval, t_eval, paused = -1.0, time.time(), 0.0
+    next_mark = every[0] if every else None
     elog = (out / "eval_log.jsonl").open("w", encoding="utf-8", newline="\n")
     def share_done():
         """The share of the run done: of the updates when --updates is set, else of the minutes."""
@@ -280,6 +284,15 @@ def train(args):
                   + f" [{time.time() - t_e:.0f} s]", flush=True)
             paused += time.time() - t_e
             t_eval = time.time()
+        if every and time.time() - t0 - paused >= next_mark * 60 and time.time() - t0 - paused < args.minutes * 60:
+            t_e = time.time()
+            torch.cuda.empty_cache()
+            every[1](actor, critic, next_mark, update)
+            actor.eval()
+            critic.eval()
+            torch.cuda.empty_cache()
+            paused += time.time() - t_e
+            next_mark += every[0]
     seconds = time.time() - t0
     meta = {"update": update, "battles": env.battles, "seconds": round(seconds), "decisions": decisions,
             "battles_at_once": env.B, "steps_per_update": args.steps, "limit_s": args.limit, "run": args.name,
@@ -305,7 +318,9 @@ def show(name, r):
             if not x.get("games"):
                 continue
             print(f"  v {opp:10} {role:6} win {x['win_rate']:.3f} ({x['wins']}/{x['games']}), {x['seconds']:5.0f} s, "
-                  f"HP lost own {x['hp_own_lost']:.2f} enemy {x['hp_enemy_lost']:.2f}, timeouts {x['timeouts']:.2f}, "
+                  f"HP lost own {x['hp_own_lost']:.2f} enemy {x['hp_enemy_lost']:.2f}, "
+                  f"gold lost own {x.get('gold_lost', float('nan')):.0f} enemy {x.get('gold_destroyed', float('nan')):.0f} "
+                  f"(ratio {x.get('gold_ratio', float('nan')):.2f}), timeouts {x['timeouts']:.2f}, "
                   f"lord dead own {x.get('lord_dead_own', float('nan')):.2f} enemy {x.get('lord_dead_enemy', float('nan')):.2f}")
         print(f"      kinds " + ", ".join(f"{k} {v:.2f}" for k, v in o["kinds"].items()), flush=True)
         if len(r["by_scene"][opp]) <= 12:
@@ -352,8 +367,13 @@ def parser():
     ap.add_argument("--order-cost", type=float, default=reward.Weights.order_change)
     ap.add_argument("--timeout", type=float, default=reward.Weights.timeout)
     ap.add_argument("--idle", type=float, default=reward.Weights.idle)
-    ap.add_argument("--hp", type=float, default=reward.Weights.hp)
-    ap.add_argument("--standing", type=float, default=reward.Weights.standing)
+    ap.add_argument("--gold", type=float, default=reward.Weights.gold,
+                    help="(enemy gold destroyed - own gold lost) / budget, per step")
+    ap.add_argument("--rout-share", type=float, default=reward.Weights.rout_share,
+                    help="a routing unit (it may rally) loses this share of the gold it has left")
+    ap.add_argument("--hp", type=float, default=reward.Weights.hp, help="the old health trade (0: in gold)")
+    ap.add_argument("--standing", type=float, default=reward.Weights.standing,
+                    help="the old cost share that stopped standing (0: in gold)")
     ap.add_argument("--lord", type=float, default=reward.Weights.lord, help="the enemy lord's death - own lord's death")
     ap.add_argument("--retarget", type=float, default=reward.Weights.retarget,
                     help="cost of switching an attack to another target while the old one stands")
@@ -375,14 +395,17 @@ def parser():
     ap.add_argument("--eval-opponents", default="ai_like,nearest")
     ap.add_argument("--eval-battles", type=int, default=128, help="EVAL_SEEDS battles per opponent in those evaluations")
     ap.add_argument("--small", help="share:units - that share of every generated bank with at most `units` a side")
-    ap.add_argument("--idle-ramp", type=float, default=reward.Weights.idle_ramp_s,
-                    help="the attacker's idle cost grows x (1 + t / this) (s; 0: flat)")
-    ap.add_argument("--tempo", type=float, default=reward.Weights.tempo,
-                    help="the attacker's cost per decision past --tempo-after s of battle")
-    ap.add_argument("--tempo-after", type=float, default=reward.Weights.tempo_after_s)
+    ap.add_argument("--idle-tau", type=float, default=reward.Weights.idle_tau_s,
+                    help="s: before its first damage the attacker's idle cost is --idle x (exp(t / this) - 1)")
+    ap.add_argument("--idle-pause", type=float, default=reward.Weights.idle_pause_s,
+                    help="s: after it, a step up every this many seconds without damage (0 before the first)")
+    ap.add_argument("--idle-step", type=float, default=reward.Weights.idle_step,
+                    help="... --idle x (exp(steps x this) - 1); new damage sets it back to 0")
+    ap.add_argument("--idle-cap", type=float, default=reward.Weights.idle_cap,
+                    help="the idle cost at most --idle x this")
     ap.add_argument("--unit-credit", type=float, default=ppo.PPOConfig.unit_credit,
                     help="weight of each unit's own advantage beside the side's (0: the side's only)")
-    ap.add_argument("--unit-hp", type=float, default=reward.Weights.unit_hp, help="per unit: its own health trade")
+    ap.add_argument("--unit-gold", type=float, default=reward.Weights.unit_gold, help="per unit: its own gold trade")
     ap.add_argument("--flanked", type=float, default=reward.Weights.flanked,
                     help="per unit and decision: struck in the flank or rear")
     ap.add_argument("--missile-melee", type=float, default=reward.Weights.missile_melee,

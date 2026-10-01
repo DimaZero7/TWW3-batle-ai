@@ -34,9 +34,10 @@ Main options of `run`: `--name` (the folder under `build/nn-train/runs/`), `--in
 checkpoint), `--armies` (`scenes` or `generated`), `--curriculum`, `--battles` (at once, 1024),
 `--steps` (decisions per chunk, 64), `--limit` (3600 s), `--lr`, `--anchor` and `--anchor-end`,
 `--entropy` and `--entropy-end` (linear from the first to the second over the run),
-`--critic-warmup`, the reward weights (`--timeout`, `--idle`, `--hp`, `--standing`,
-`--order-cost`, `--lord`, `--retarget`, `--idle-ramp`, `--tempo`, `--tempo-after`), per-unit
-credit (`--unit-credit`, `--unit-hp`, `--flanked`, `--missile-melee`, `--crowd`, `--flank-attack`, `--idle-near`,
+`--critic-warmup`, the reward weights (`--timeout`, `--gold`, `--rout-share`, `--idle`,
+`--idle-tau`, `--idle-pause`, `--idle-step`, `--idle-cap`, `--hp`, `--standing`, `--order-cost`, `--lord`,
+`--retarget`; [gold](#losses-in-gold-and-the-attackers-idle-cost-01102026)), per-unit
+credit (`--unit-credit`, `--unit-gold`, `--flanked`, `--missile-melee`, `--crowd`, `--flank-attack`, `--idle-near`,
 `--neighbour`; [below](#per-unit-credit-01102026)), `--updates` (train that many updates instead of
 `--minutes`, which then only caps the time), `--mix`,
 `--small share:units` (that share of every bank of random battles with at most `units` a side),
@@ -80,8 +81,8 @@ with it, so tests can be compared with each other.
    1536 battles run in one batch (`evaluate.play(..., together=True)`), the same battles every time.
 2. **Training.** 36 PPO updates (`--updates`; ~5 minutes on a free GPU) with the current code and
    the settings of the `long_ai2` continuation (`test5.PROTOCOL`: random armies up to 19 units,
-   `--small 0.35:6`, KL to `bcmix` 0.06 → 0.03, entropy 0.003 → 0.001, the attacker's time
-   pressure, `long19` among the past versions) and the baseline's `--unit-credit 0` pinned, so
+   `--small 0.35:6`, KL to `bcmix` 0.06 → 0.03, entropy 0.003 → 0.001, the attacker's
+   idle cost at `run.py`'s defaults, `long19` among the past versions) and the baseline's `--unit-credit 0` pinned, so
    tests stay comparable when `run.py`'s defaults change. Options after `--` go to `run.py` and
    override them: a task passes its own new settings there (`-- --unit-credit 0.3`);
    `report.json` keeps them all (`protocol`, `options`, `train_args`). A fixed number of updates, not minutes: on a GPU shared with other jobs an update took
@@ -89,10 +90,14 @@ with it, so tests can be compared with each other.
 3. **After.** The trained network plays the same evaluation.
 4. **The report**, printed and written to `build/nn-train/test5/<label>/report.json` (with
    `before.json` and `after.json`, the whole evaluations): before → after per opponent and role.
+   A trend run (`--updates 0 --minutes M --every K`) evaluates every K minutes of training too
+   (their time not counted), keeps each network (`m<minute>.pt`) and evaluation
+   (`eval_m<minute>.json`) and writes the table minute 0 / K / … / M (`trend.md`, `report.json`).
 
 | Metric | What is counted (the learner's units; `tools/nn/train/behaviour.py`) |
 |---|---|
 | win rate | by opponent and role |
+| enemy gold destroyed, own gold lost / battle; gold exchange ratio | the gold of the reward ([below](#losses-in-gold-and-the-attackers-idle-cost-01102026)) at the end of the battle, mean per battle; the ratio is destroyed / lost over all the battles of the cell |
 | own lord dead | share of battles that ended with the own lord dead |
 | missile s in melee / battle, missile time in melee | seconds missile units (range > 0, not a lord) stand in melee, per battle and as a share of their standing time |
 | own melee hit flank/rear | share of own melee unit-seconds struck in the flank or rear (the simulator's `flank_hit` ≥ 1; the game: a flank attack costs the defender ~×1.74 losses) |
@@ -187,16 +192,16 @@ The game's AI takes no part in training: it stays an independent check ([network
 |---|---:|---|
 | win / loss | +1 / −1 | the goal |
 | time limit (both sides still stand) | defender +1, attacker **−1.5** | worse than losing a fight: an attacker that only stands must lose more than one that attacks and fails |
-| enemy health lost − own health lost, per step, as a share of the side's start | 0.5 | a steady signal long before the end |
-| enemy army (by cost) that stopped standing − own, per step | 0.5 | routs, not health, decide battles; a rally gives it back |
-| the attacker, each decision none of its units fights in melee or shoots | 0.0002 (`long_ai2`: × (1 + t / 300 s), at most × 4) | standing has a price from the first second, not only at the limit an hour later (an idle hour: −1.44) |
-| the attacker, each decision once the battle is older than 600 s (`long_ai2`) | 0.0003 | the −1.5 at the limit an hour away counts 0.9997^7200 ≈ 0.11 and is hardly seen; this cost is seen every step (10 minutes more: −0.36) |
+| (enemy gold destroyed − own gold lost) / budget, per step ([gold](#losses-in-gold-and-the-attackers-idle-cost-01102026)) | 1.0 | a steady signal long before the end, by what the units are worth; replaces the two terms below |
+| enemy health lost − own health lost, per step, as a share of the side's start | 0 (was 0.5) | in gold now |
+| enemy army (by cost) that stopped standing − own, per step | 0 (was 0.5) | in gold now (a routing unit counts half of what it has left) |
+| the attacker, each decision none of its units fights in melee or shoots (marching too) | 0.0002 × m: before its first damage m = exp(t / 150 s) − 1; after it 0 while it deals damage, then a step up every 30 s without damage, m = exp(0.5 k) − 1; m at most 20 ([below](#losses-in-gold-and-the-attackers-idle-cost-01102026)) | deploying and marching are nearly free (3 minutes: −0.07), standing on is not (10 minutes without damage: −2.2, more than the −1.5 at the limit); a pause in the fight costs little only while it is short |
 | each real order change of a unit, divided by the side's units | 0.001 | against jitter (below) |
 | the enemy lord died − own lord died | 0.3 | the game's morale rule makes it decisive (−16, then −10 points to every unit); the lord's cost share alone (in "stopped standing") does not show it; in the gate battles the network sent its lord in alone |
 | each switch of an attack to another target while the old one still stands, divided by the side's units | 0.003 | hysteresis: in the gate battles units switched between two targets every 1–2 s |
 
-The win, health, standing and lord terms are zero-sum (side 2 gets minus side 1's) except at the time
-limit. Both shaping terms are potential differences: they do not change which outcome is best.
+The win, gold and lord terms are zero-sum (side 2 gets minus side 1's) except at the time
+limit. The shaping terms are potential differences: they do not change which outcome is best.
 No style terms yet: the faction characters are placeholders. Beside the side's reward each unit has
 its own (`reward.unit_step`, [per-unit credit](#per-unit-credit-01102026)); it does not enter the
 side's reward.
@@ -257,6 +262,109 @@ in training; `hold` only as the defender. Scenes: `--per-scene` battles per scen
 `--generated` battles of `EVAL_SEEDS`. Per opponent and role also the share of battles that ended
 with the own / the enemy lord dead, the order kinds and attack target switches a minute.
 
+## Losses in gold and the attacker's idle cost, 01.10.2026
+
+**Losses by gold, not health** (`reward.gold_lost`, `gold_sides`, `budget`). A unit is worth its
+`multiplayer_cost` (`config/nn/units.json`); the gold it has lost is that cost × the share of it lost:
+
+| The unit | Share lost | Why |
+|---|---|---|
+| fighting | its health lost (`1 − hp_abs / hp0`) | for a unit of many men health and men fall together (kills take men as damage takes health), so it is about the men lost, without the step of a whole man; for a single entity (a lord, a monster) men drop 1 → 0 only at its death, health shows the damage before |
+| dead, gone off the map, shattered | 1 | it never comes back |
+| routing (not shattered) | health lost + 0.5 × what is left (`--rout-share`) | it is out of the fight now, but it may rally; a rally gives the half back (the term is not clamped: a potential difference) |
+
+The side's term, per step: `gold` × (enemy gold destroyed − own gold lost) / budget, budget = the
+mean of the two armies' starting cost (the same for both sides, so the term is exactly zero-sum).
+Weight 1.0: the old `hp` 0.5 + `standing` 0.5, the same scale — a battle's worth of shaping is at
+most about ±1, the win stays the main signal. `hp` and `standing` are 0 by default: the gold term
+holds both the health and the routs, and keeping them would count the same loss twice. The lord
+term (0.3) stays: it is the morale shock of the lord's death (−16, then −10 points to every unit),
+not his gold. The per-unit term (`--unit-credit`) is in gold too (`unit_gold`, the table below).
+
+**The attacker's idle cost: exponential in time, set back by damage** (`reward.idle_cost`,
+`idle_scale`, `struck`). The attacker pays 0.0002 (`--idle`) × m each decision in which none of its
+units fights in melee or shoots — marching at the enemy too (the morning's waiver for closing in,
+`reward.closing` and `--close-speed`, is gone; so is the linear `--idle-ramp`). m:
+
+- before its first damage: m = exp(t / 150 s) − 1 (`--idle-tau`): almost nothing for the first
+  minutes (time to deploy and march), then sharply more;
+- after it: 0 while it deals damage; with no damage for 30 s (`--idle-pause`), k = ⌊seconds since
+  the last damage / 30 s⌋ and m = exp(0.5 k) − 1 (`--idle-step`): a step up every 30 s, faster than
+  the first curve at the same seconds and without its grace; new damage sets it back to 0;
+- at most 20 (`--idle-cap`): 0.004 a decision, 0.48 a minute.
+
+Damage is any health the defender loses in a step (`reward.struck`, `measure` column 0: only the
+attacker's melee, missiles and abilities take it). `rollout.Battles.last_hit` [B] keeps the battle
+time of the attacker's last damage per battle (−1 before the first) and clears it when the battle
+starts again. The defender never pays. The cost, 2 decisions a second:
+
+| No damage from the start | a decision | so far |
+|---|---:|---:|
+| 1 min | 0.0001 | 0.006 |
+| 3 min | 0.0005 | 0.07 |
+| 5 min | 0.0013 | 0.26 |
+| 10 min | 0.004 (the cap from 7.6 min) | 2.2 |
+| 15 min | 0.004 | 4.6 |
+
+| A pause after damage | a decision from then | the pause so far | the first curve at as many seconds |
+|---|---:|---:|---:|
+| 30 s | 0.00013 | 0.000 | 0.001 |
+| 60 s | 0.00034 | 0.008 | 0.006 |
+| 90 s | 0.0007 | 0.03 | 0.013 |
+| 120 s | 0.0013 | 0.07 | 0.03 |
+| 180 s | 0.0038 | 0.28 | 0.07 |
+
+Against the outcome (win +1, loss −1, the attacker at the limit −1.5): 3 minutes of deploying and
+marching cost 0.07, a fourteenth of a loss (contact against `nearest` comes after ~50–120 s); an
+attacker that has dealt no damage by minute 10 has paid 2.2 — more than the −1.5 at the limit
+itself, so standing on is worse than attacking and losing (−1, and its gold lost); every further
+minute is −0.48. The limit an hour away counts 0.9997^7200 ≈ 0.11, the idle
+cost is paid now. Short pauses in the fight (reforming, a charge's recoil) cost little (90 s: 0.03),
+3 minutes without damage 0.28. An attacker that never strikes faces up to 0.004 / (1 − 0.9997) ≈ 13
+at the cap: the critic sees that scale only in battles that stall. The late tempo cost (`--tempo`,
+`--tempo-after`: 0.0003 a decision past 600 s whatever the attacker did, in `long_ai2` and
+`test5.PROTOCOL`) is removed: the idle cost alone presses the attacker.
+
+**Metrics** (evaluate, test5): enemy gold destroyed and own gold lost per battle (the reward's gold at
+the end of the battle), their ratio (over all battles of the cell) and the mean trade
+(destroyed − lost) / budget, per opponent and role.
+
+**Trend run** (`test5 --updates 0 --minutes 30 --every 10 --eval 256`): from `long_ai/best.pt`, the
+protocol's settings and the new reward, 30 minutes of training with the full evaluation (256
+`EVAL_SEEDS` battles per opponent, both roles, against `ai_like`, `nearest`, `hold_shoot`) every 10
+minutes; the networks are kept as `m10.pt`, `m20.pt`, `m30.pt` in `build/nn-train/test5/<label>/`.
+
+The run `t0_gold30` (01.10.2026; 181 updates, 12 615 training battles; 256 battles per opponent,
+128 per role, so ±4–5 points per cell; minute 30 is `after.json`):
+
+| Metric (attack / defend) | min 0 (`best.pt`) | min 10 | min 20 | min 30 |
+|---|---|---|---|---|
+| win rate, `ai_like` | 0.52 / 0.59 | 0.57 / 0.41 | 0.48 / 0.66 | 0.51 / 0.58 |
+| win rate, `nearest` | 0.41 / 0.39 | 0.37 / 0.30 | 0.41 / 0.46 | 0.46 / 0.40 |
+| win rate, `hold_shoot` | 0.55 / 0.45 | 0.57 / 0.39 | 0.55 / 0.48 | 0.52 / 0.45 |
+| mean of the 6 win rates | 0.487 | 0.435 | **0.504** | 0.487 |
+| gold exchange ratio, `ai_like` | 1.02 / 1.09 | 1.01 / 0.94 | 0.96 / 1.10 | 1.01 / 1.05 |
+| gold exchange ratio, `nearest` | 0.97 / 0.96 | 0.94 / 0.88 | 0.94 / 0.99 | 0.98 / 0.94 |
+| gold exchange ratio, `hold_shoot` | 1.06 / 1.00 | 1.04 / 0.95 | 1.04 / 1.02 | 1.03 / 1.00 |
+| mean gold trade / budget | +0.014 | −0.024 | +0.013 | +0.008 |
+| own lord dead, `ai_like` | 0.30 / 0.10 | 0.29 / 0.26 | 0.27 / 0.07 | 0.36 / 0.18 |
+| own lord dead, `hold_shoot` | 0.27 / 0.20 | 0.23 / 0.24 | 0.20 / 0.15 | 0.37 / 0.20 |
+| timeouts attacking `ai_like` / `hold_shoot` | 0 / 0.01 | 0 / 0.01 | 0 / 0 | 0.04 / 0.06 |
+| order changes / min (`ai_like`) | 3.1 | 5.3 | 4.8 | 4.3 |
+| target switches / min (`ai_like`) | 0.66 | 1.21 | 1.01 | 1.03 |
+| kinds hold / move / attack (`ai_like`) | 0.30 / 0.22 / 0.48 | 0.34 / 0.20 / 0.46 | 0.22 / 0.22 / 0.56 | 0.34 / 0.18 / 0.49 |
+
+Flat: the mean win rate goes 0.487 → 0.435 → 0.504 → 0.487 and the gold exchange stays at ~1.0
+(0.96–1.02 on the mean); the dip at minute 10 (the defence: −18 points against `ai_like`, its lord
+dead in a quarter of the defences) came back by minute 20. The best network is `m20.pt` (update 122:
+0.504, its worst cell 0.41 against 0.39 at minute 0), within the noise of `best.pt`. What did move:
+order changes and target switches +40–80 % (the 0.003 switch cost against a gold term that pays for
+striking the dearer enemy), and at minute 30 the attacker's lord died more often (0.36–0.37) and
+4–6 % of the attacks on `ai_like` / `hold_shoot` ran into the time limit (none before) — to watch:
+the march exemption must not let an attacker walk about without engaging. 30 minutes of PPO from
+`best.pt` with the gold reward neither helped nor hurt measurably; `long_ai2` with the old reward
+was flat or falling too.
+
 ## Per-unit credit, 01.10.2026
 
 In the game: 4 infantry units piled on one enemy while 2 Skaven infantry units flanked them, and 2
@@ -267,7 +375,7 @@ was lost in the battle's total: its gradient was the same whether it piled on or
 
 | Term | Weight | Why |
 |---|---:|---|
-| its health trade: n_own × (HP it dealt / the enemy's starting HP − HP it lost / own starting HP) | 0.05 | what happens to the unit itself; summed over the side it is 0.05 × n_own × the side's trade, about the side's `hp` term (0.5 at 10 units); dealt = melee HP from the simulator's `dealt`, missiles = men killed × the target's HP a man |
+| its gold trade: n_own × (gold it destroyed − gold it lost) / budget (was its health trade) | 0.05 | what happens to the unit itself; destroyed = the HP it dealt × the target's cost / the target's starting HP (melee HP from the simulator's `dealt`, missiles = men killed × the target's HP a man), lost = the change of its own lost gold (a rout and a rally too) |
 | struck in the flank or rear in melee | −0.0002 | the game: ~×1.74 losses; the trade sees the losses, this sees the position before they pile up |
 | a missile unit in melee | −0.0002 | archers stuck in melee |
 | a pile: more than 2 own units on one enemy while another enemy strikes an own unit in flank or rear, by the excess share (n − 2) / n | −0.0002 | the whole pile pays n − 2 units' worth: the units over 2 should turn to the flanker |
@@ -740,5 +848,15 @@ apart, with the behaviour metrics; the GPU lock is held, waited for and freed af
 report table. Abilities: only the scripted sides fire by the AI rule, also after a restart; a
 stored decision keeps only the slots' state and `full_obs` gives the observation back; a network
 lord uses abilities by order and PPO trains the head.
+Gold and the idle cost: the gold lost is the cost × the health lost, a routing unit 0.75 at half health,
+a shattered, gone or dead one whole, empty slots nothing; the budget is the mean of the armies; the
+gold term is zero-sum and a rally gives it back; `hp` and `standing` are off by default; the
+attacker's idle cost before its first damage is exponential in time (≈ 0 early, growing, capped);
+after damage 0 for 30 s, then a step up every 30 s, faster than the first curve, capped, and new
+damage sets it back to 0; a marching attacker pays (also in a simulated battle); late in the
+battle there is no cost beside the idle cost; the defender never pays, in either role; `struck` is the
+defender's health falling; `Battles` keeps the last damage per battle and clears it on a restart;
+evaluation gives
+the gold metrics; the trend table has a column per minute.
 `tests/tools/test_nn_observation.py`: the lord known from the passport; a slain enemy lord is
 known unseen and fades; an enemy's melee and rout count only while seen.

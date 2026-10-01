@@ -91,24 +91,154 @@ class TestFunctions:
         r = reward.step(m, m, torch.tensor([True, True]), torch.tensor([2, 1]), torch.tensor([1, 2]), w)
         assert r.tolist() == [[-1.5, 1.0], [1.0, -1.5]]
 
+    def test_gold_lost_is_cost_times_the_share_lost(self):
+        st = line_army()
+        u = st.u
+        cost = u["cost"][0].clone()
+        assert reward.gold_lost(u)[0].abs().sum() == 0.0                             # nothing lost yet
+        u["hp_abs"][0, 1] = u["hp0"][0, 1] * 0.5                                      # half its health
+        u["hp_abs"][0, 2] = u["hp0"][0, 2] * 0.5
+        u["r"][0, 2] = True                                                           # ... and routing
+        u["r"][0, 3] = u["s"][0, 3] = True                                            # shattered, health full
+        H = st.N // 2
+        u["gone"][0, H + 1] = True                                                    # off the map
+        u["hp_abs"][0, H + 2] = 0.0
+        u["men"][0, H + 2] = 0.0                                                      # dead
+        g = reward.gold_lost(u, rout_share=0.5)[0]
+        assert float(g[1]) == pytest.approx(0.5 * float(cost[1]))
+        assert float(g[2]) == pytest.approx(0.75 * float(cost[2]))                    # 0.5 + 0.5 x the rest
+        for i in (3, H + 1, H + 2):
+            assert float(g[i]) == pytest.approx(float(cost[i]))                       # lost whole
+        assert float(g[0]) == 0.0 and float(g[H]) == 0.0
+        assert float(g[u["side"][0] == 0].abs().sum()) == 0.0                         # empty slots
+        sides = reward.gold_sides(u, 0.5)[0]
+        assert sides.tolist() == pytest.approx([float(g[1] + g[2] + g[3]), float(g[H + 1] + g[H + 2])])
+        c1, c2 = float(cost[u["side"][0] == 1].sum()), float(cost[u["side"][0] == 2].sum())
+        assert float(reward.budget(u)[0]) == pytest.approx((c1 + c2) / 2)
+
+    def test_the_gold_reward_is_zero_sum_and_a_rally_gives_it_back(self):
+        st = line_army()
+        u = st.u
+        H = st.N // 2
+        w = reward.Weights(win=1.0, gold=1.0, lord=0.0)
+        no = torch.tensor([False])
+        before = reward.measure(st)
+        u["hp_abs"][0, H + 1] = u["hp0"][0, H + 1] * 0.6                              # an enemy spearman
+        u["r"][0, 1] = True                                                           # an own spearman routs
+        after = reward.measure(st)
+        r = reward.step(before, after, no, torch.tensor([0]), torch.tensor([1]), w)
+        bud = float(reward.budget(u)[0])
+        want = (0.4 * float(u["cost"][0, H + 1]) - 0.5 * float(u["cost"][0, 1])) / bud
+        assert r[0].tolist() == pytest.approx([want, -want], rel=1e-4)
+        assert float(r.sum()) == pytest.approx(0.0, abs=1e-7)
+        u["r"][0, 1] = False                                                          # it rallies
+        back = reward.step(after, reward.measure(st), no, torch.tensor([0]), torch.tensor([1]), w)
+        assert float(back[0, 0]) == pytest.approx(0.5 * float(u["cost"][0, 1]) / bud, rel=1e-4)
+        # the hp and standing terms are off by default: gold counts those losses once
+        assert reward.Weights().hp == 0.0 and reward.Weights().standing == 0.0
+
+    def test_before_its_first_damage_the_attackers_idle_cost_is_exponential_in_time_and_capped(self):
+        st = two_units()
+        w = reward.Weights(idle=0.01, idle_tau_s=100.0, idle_cap=5.0)
+        costs = []
+        for t in (0.0, 10.0, 50.0, 100.0, 150.0, 1000.0):
+            st.t[:] = t
+            costs.append(reward.idle_cost(st, w)[0].tolist())
+        att = [c[0] for c in costs]
+        assert att == pytest.approx([0.0, 0.01 * (np.exp(0.1) - 1), 0.01 * (np.exp(0.5) - 1), 0.01 * (np.e - 1),
+                                     0.01 * (np.exp(1.5) - 1), 0.05], rel=1e-5)          # capped at x5
+        assert att[1] < 0.002 and all(a < b for a, b in zip(att, att[1:]))                # ~0 early, then grows
+        assert all(c[1] == 0.0 for c in costs)
+        # the defaults: almost nothing for the first minutes, the cap by 10 minutes
+        d = reward.Weights()
+        assert float(reward.idle_scale(torch.tensor([60.0]), torch.tensor([-1.0]), d)) < 0.5
+        assert float(reward.idle_scale(torch.tensor([180.0]), torch.tensor([-1.0]), d)) < 2.5
+        assert float(reward.idle_scale(torch.tensor([600.0]), torch.tensor([-1.0]), d)) == pytest.approx(d.idle_cap)
+
+    def test_after_damage_the_idle_cost_is_zero_then_steps_up_every_pause_and_new_damage_resets_it(self):
+        st = two_units()
+        w = reward.Weights(idle=0.01, idle_tau_s=100.0, idle_pause_s=30.0, idle_step=0.5, idle_cap=20.0)
+        hit = torch.tensor([100.0])
+        cost = []
+        for t in (100.0, 110.0, 129.9, 130.0, 159.9, 160.0, 190.0, 1000.0):
+            st.t[:] = t
+            cost.append(float(reward.idle_cost(st, w, hit)[0, 0]))
+        assert cost == pytest.approx([0.0, 0.0, 0.0, 0.01 * (np.exp(0.5) - 1), 0.01 * (np.exp(0.5) - 1),
+                                      0.01 * (np.e - 1), 0.01 * (np.exp(1.5) - 1), 0.2], rel=1e-5)
+        st.t[:] = 1000.0
+        assert reward.idle_cost(st, w, torch.tensor([1000.0]))[0].tolist() == [0.0, 0.0]   # new damage: 0 again
+        assert reward.idle_cost(st, w, torch.tensor([980.0]))[0].tolist() == [0.0, 0.0]    # within the pause
+        # the defaults: faster than the first curve at the same seconds, without its grace
+        d = reward.Weights()
+        for s in (30.0, 60.0, 90.0, 120.0, 180.0):
+            t = torch.tensor([200.0 + s])
+            after = float(reward.idle_scale(t, torch.tensor([200.0]), d))
+            first = float(reward.idle_scale(torch.tensor([s]), torch.tensor([-1.0]), d))
+            assert after > first
+        assert float(reward.idle_scale(torch.tensor([200.0 + 30 * 20]), torch.tensor([200.0]), d)) == d.idle_cap
+
+    def test_a_marching_attacker_pays_the_idle_cost(self):
+        st = two_units()                                                              # side 1 at x -300 attacks
+        w = reward.Weights(idle=0.01, idle_tau_s=100.0)
+        st.t[:] = 100.0
+        standing = reward.idle_cost(st, w)[0].tolist()
+        st.u["vx"][0, 0] = 1.5                                                        # walking at the enemy
+        assert reward.idle_cost(st, w)[0].tolist() == standing == pytest.approx([0.01 * (np.e - 1), 0.0])
+        st = line_army(attacker=1)
+        P = load()
+        for _ in range(20):                                                           # 10 s at the enemy 600 m away
+            battle.step(st, opponents.nearest(st), P)
+        own = st.u["side"][0] == 1
+        assert float(st.u["vx"][0][own].mean()) > 0.5 and not bool((st.u["m"] | st.u["fire"]).any())   # marching
+        w = reward.Weights(idle=0.01, idle_tau_s=10.0)
+        assert reward.idle_cost(st, w)[0].tolist() == pytest.approx([0.01 * (np.exp(float(st.t[0]) / 10) - 1), 0.0])
+
+    def test_the_defender_never_pays_the_idle_cost(self):
+        w = reward.Weights(idle=0.01, idle_tau_s=100.0)
+        for attacker in (1, 2):
+            st = two_units()
+            H = st.N // 2
+            st.attacker[:] = attacker
+            d = 2 - attacker                                                          # the defender's column
+            slot = 0 if d == 0 else H
+            for t, vx, hit in ((10.0, 0.0, -1.0), (1000.0, 0.0, -1.0), (1000.0, 1.5, -1.0), (1000.0, -1.5, 900.0)):
+                st.t[:] = t
+                st.u["vx"][0, slot] = vx if d == 0 else -vx
+                cost = reward.idle_cost(st, w, torch.tensor([hit]))[0]
+                assert float(cost[d]) == 0.0
+                assert float(cost[1 - d]) > 0.0                                       # the attacker stands: it pays
+
     def test_the_idle_attacker_pays_until_it_fights_or_shoots(self):
         st = two_units()
-        w = reward.Weights(idle=0.01)
-        assert reward.idle_cost(st, w)[0].tolist() == pytest.approx([0.01, 0.0])
+        st.t[:] = 100.0
+        w = reward.Weights(idle=0.01, idle_tau_s=100.0)
+        assert reward.idle_cost(st, w)[0].tolist() == pytest.approx([0.01 * (np.e - 1), 0.0])
         st.u["fire"][0, 0] = True
         assert reward.idle_cost(st, w)[0].tolist() == [0.0, 0.0]
 
-    def test_the_attackers_idle_cost_grows_with_time_and_a_tempo_cost_comes_late(self):
+    def test_late_in_the_battle_there_is_no_cost_beside_the_idle_cost(self):
         st = two_units()
-        w = reward.Weights(idle=0.01, idle_ramp_s=100.0, idle_cap=3.0, tempo=0.1, tempo_after_s=50.0)
-        assert reward.idle_cost(st, w)[0].tolist() == pytest.approx([0.01, 0.0])
-        st.t[:] = 100.0
-        assert reward.idle_cost(st, w)[0].tolist() == pytest.approx([0.02 + 0.1, 0.0])
+        w = reward.Weights(idle=0.01, idle_tau_s=100.0, idle_cap=3.0)
+        assert not hasattr(w, "tempo")
         st.t[:] = 1000.0
-        st.u["fire"][0, 0] = True                                          # busy: only the tempo cost
-        assert reward.idle_cost(st, w)[0].tolist() == pytest.approx([0.1, 0.0])
+        st.u["fire"][0, 0] = True
+        assert reward.idle_cost(st, w)[0].tolist() == [0.0, 0.0]                          # busy: nothing
         st.u["fire"][0, 0] = False
-        assert reward.idle_cost(st, w)[0].tolist() == pytest.approx([0.03 + 0.1, 0.0])   # capped at x3
+        assert reward.idle_cost(st, w)[0].tolist() == pytest.approx([0.03, 0.0])          # capped at x3
+        assert reward.idle_cost(st, w, torch.tensor([1000.0]))[0].tolist() == [0.0, 0.0]  # damage: nothing
+
+    def test_struck_is_the_defenders_health_falling(self):
+        st = line_army(attacker=1)
+        H = st.N // 2
+        one, two = torch.tensor([1]), torch.tensor([2])
+        before = reward.measure(st)
+        st.u["hp_abs"][0, 1] *= 0.9                                                   # side 1 loses health
+        assert not bool(reward.struck(before, reward.measure(st), one)[0])            # its own loss as the attacker
+        assert bool(reward.struck(before, reward.measure(st), two)[0])                # damage dealt by attacker 2
+        before = reward.measure(st)
+        st.u["hp_abs"][0, H + 1] *= 0.999                                             # side 2 loses a little
+        assert bool(reward.struck(before, reward.measure(st), one)[0])
+        assert not bool(reward.struck(before, reward.measure(st), two)[0])
 
     def test_order_changes(self):
         st = two_units()
@@ -288,10 +418,10 @@ class TestBehaviour:
         before = reward.unit_before(st.u)
         st.u["hp_abs"][0, 3] -= 100.0
         f = behaviour.facts(st, p)
-        w = reward.Weights(unit_hp=0.05, flanked=0.01, missile_melee=0.0, crowd=0.02, flank_attack=0.03, neighbour=0.0)
+        w = reward.Weights(unit_gold=0.05, flanked=0.01, missile_melee=0.0, crowd=0.02, flank_attack=0.03, neighbour=0.0)
         r = reward.unit_step(before, st, f, p, w)
-        hp1 = float((st.u["hp0"] * (st.u["side"] == 1)).sum())
-        assert float(r[0, 3]) == pytest.approx(-0.05 * 5 * 100.0 / hp1 - 0.01, rel=1e-4)
+        lost = 100.0 * float(st.u["cost"][0, 3] / st.u["hp0"][0, 3])                  # gold of 100 HP
+        assert float(r[0, 3]) == pytest.approx(-0.05 * 5 * lost / float(reward.budget(st.u)[0]) - 0.01, rel=1e-4)
         assert r[0, :3].tolist() == pytest.approx([-0.02 / 3] * 3)
         assert float(r[0, 6]) == pytest.approx(0.03)
         assert float(r[0, 4]) == 0.0
@@ -460,6 +590,66 @@ class TestProperties:
         assert stats["nearest/attack"][1] == 0 and stats["nearest/defend"][1] == 2      # the defender wins on time
 
 
+    def test_the_attackers_last_damage_is_kept_per_battle_and_cleared_when_it_starts_again(self):
+        actor, crit = nets()
+        env = rollout.Battles(league.layout(4, 1, opponent="nearest"), MIRROR, params=rollout.params_with_limit(1.0))
+        assert env.last_hit.tolist() == [-1.0] * env.B
+        env.step(actor, crit)                                             # t 0.5: far apart, no damage
+        assert env.last_hit.tolist() == [-1.0] * env.B
+        u = env.st.u
+        defender = u["side"] == (3 - env.st.attacker)[:, None]
+        u["hp_abs"][0] = torch.where(defender[0], u["hp_abs"][0] * 0.99, u["hp_abs"][0])   # row 0: the attacker struck
+        out = env.step(actor, crit)                                       # t 1.0: the limit, all end
+        assert bool(out["done"].all())
+        assert env.last_hit.tolist() == [-1.0] * env.B                    # cleared for the new battles
+        u = env.st.u
+        defender = u["side"] == (3 - env.st.attacker)[:, None]
+        u["hp_abs"][1] = torch.where(defender[1], u["hp_abs"][1] * 0.99, u["hp_abs"][1])
+        env.step(actor, crit)                                             # t 0.5 of the new battles
+        assert env.last_hit.tolist() == [-1.0, 0.5] + [-1.0] * (env.B - 2)   # per row
+
+    def test_each_side_sees_the_attackers_last_damage_as_the_reward_counts_it(self):
+        """observation TIMERS: the attacker's row sees `dealt` = rollout.last_hit, the defender's row `taken`;
+        per battle row and per side, cleared when a battle starts again."""
+        from tools.nn.model import observation as ob
+        actor, crit = nets()
+        env = rollout.Battles(league.layout(4, 1, opponent="nearest"), MIRROR, params=rollout.params_with_limit(1.5))
+
+        def strike(b, side):          # what a simulator step's damage does to a unit of `side` in battle b
+            u = env.st.u
+            i = int(((u["side"][b] == side) & (u["men"][b] > 0)).nonzero()[0])
+            u["hp_abs"][b, i] *= 0.99
+            u["hp"][b, i] = u["hp_abs"][b, i] / u["hp0"][b, i]
+
+        def seen():                   # [B, 2] per battle: (dealt_any, dealt_since, taken_any, taken_since) of sides 1, 2
+            ctx = env.cur[0]["ctx"]
+            cols = [ob.CTX[n] for n in ("dealt_any", "dealt_since", "taken_any", "taken_since")]
+            return ctx[:env.B][:, cols], ctx[env.B:][:, cols]
+
+        def agrees():
+            s1, s2 = seen()
+            att = env.st.attacker
+            dealt = torch.where((att == 1)[:, None], s1, s2)[:, :2]
+            taken = torch.where((att == 1)[:, None], s2, s1)[:, 2:]
+            hit = env.last_hit >= 0
+            since = torch.where(hit, ((env.st.t - env.last_hit) / ob.SINCE).clamp(0, 1), torch.zeros_like(env.last_hit))
+            want = torch.stack([hit.float(), since], 1)
+            assert torch.allclose(dealt, want, atol=1e-6) and torch.allclose(taken, want, atol=1e-6)
+            return s1, s2
+        env.step(actor, crit)                                             # t 0.5: no damage
+        s1, s2 = agrees()
+        assert float(s1.abs().sum() + s2.abs().sum()) == 0
+        strike(0, int(3 - env.st.attacker[0]))                            # battle 0: the attacker strikes
+        strike(1, int(env.st.attacker[1]))                                # battle 1: the defender strikes
+        env.step(actor, crit)                                             # t 1.0
+        s1, s2 = agrees()
+        a1 = int(env.st.attacker[1])
+        assert (s1, s2)[a1 - 1][1].tolist() == [0, 0, 1, 0]               # the defender's damage: seen, no reward clock
+        assert float(env.last_hit[1]) == -1 and float(env.last_hit[0]) == 1.0
+        env.step(actor, crit)                                             # t 1.5: the limit, all start again
+        s1, s2 = agrees()
+        assert float(s1.abs().sum() + s2.abs().sum()) == 0                # cleared for the new battles
+
 # --- level 3: the loop ---
 
 class TestAbilities:
@@ -530,6 +720,17 @@ class TestLoop:
         assert all(np.isfinite(v) for v in st.values()) and "unit_reward" in st
         assert any(not torch.equal(a, b) for a, b in zip(before, actor.parameters()))
 
+    @pytest.mark.skipif(not (checkpoint.DIR / "test5/t0_gold30/m20.pt").exists(), reason="no m20.pt (build/ is not in Git)")
+    def test_training_continues_from_a_checkpoint_saved_before_the_damage_timers(self):
+        from tools.nn.train import run
+        actor, crit = run.networks("small", "cpu", checkpoint.DIR / "test5/t0_gold30/m20.pt")
+        assert torch.all(actor.encoder.ctx[0].weight[:, -len(rollout.ob.TIMERS):] == 0)
+        env = rollout.Battles(league.layout(2, 1, opponent="nearest"), MIRROR)
+        batch = rollout.collect(env, actor, crit, 2)
+        opt = torch.optim.Adam(list(actor.parameters()) + list(crit.parameters()), lr=1e-4)
+        st = ppo.update(actor, crit, opt, batch, dataclasses.replace(ppo.PPOConfig(), epochs=1, minibatch=4))
+        assert all(np.isfinite(v) for v in st.values())
+
     def test_behaviour_cloning_learns_the_teachers_targets(self):
         actor, _ = nets()
         res = imitate.train(actor, minutes=5, battles=4, device="cpu", lr=3e-3, max_steps=40, scene_list=MIRROR,
@@ -587,6 +788,9 @@ class TestLoop:
             assert set(o["behaviour"]) >= {"missile_melee_s", "flanked_share", "crowding_share", "flank_attack_share",
                                            "abilities_per_battle"}
             assert "behaviour" in o["roles"]["attack"]
+            for x in (o, o["roles"]["attack"]):
+                assert x["gold_lost"] >= 0 and x["gold_destroyed"] >= 0 and x["gold_ratio"] >= 0
+                assert -1.5 <= x["gold_trade"] <= 1.5
 
 
 class TestProtocol:
@@ -629,3 +833,14 @@ class TestProtocol:
         after = {"ai_like/attack": {"win": 0.6, "flanked_share": 0.2}, "ai_like/all": {"kind_attack": 0.4}}
         text = "\n".join(test5.table(before, after))
         assert "0.500 → 0.600" in text and "0.300 → 0.200" in text and "0.50 → 0.40" in text
+
+    def test_the_trend_table_has_a_column_per_minute(self):
+        from tools.nn.train import test5
+
+        def m(w, g):
+            return {"ai_like/attack": {"win": w, "gold_ratio": g}, "ai_like/defend": {"win": w + 0.1},
+                    "ai_like/all": {"kind_hold": 0.2}}
+        text = "\n".join(test5.trend([(0, m(0.5, 1.0)), (10, m(0.6, 1.25))]))
+        assert "min 0 | min 10" in text
+        assert "| win rate, ai_like | 0.500 / 0.600 | 0.600 / 0.700 |" in text
+        assert "| gold exchange ratio, ai_like | 1.00 / - | 1.25 / - |" in text

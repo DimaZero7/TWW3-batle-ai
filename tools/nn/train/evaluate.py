@@ -51,6 +51,8 @@ def play(actor, opponents=OPPONENTS, per_scene=512, past=None, device="cpu", lim
          seed=1, scene_list=scenes.SCENES, compile=None, hold_defend=False, generated=None, max_units=19, small=None,
          together=False):
     """-> {"by_opponent": {name: {games, wins, win_rate, seconds, hp_own_lost, hp_enemy_lost, timeouts,
+    gold_destroyed, gold_lost (mean gold a battle, reward.gold_sides at the end), gold_ratio (their sums'
+    ratio), gold_trade (mean (destroyed - lost) / budget),
     contact_share, first_contact_s, fired_share, orders_per_minute, switches_per_minute, kinds, behaviour,
     roles: {attack|defend: {games, wins, win_rate, seconds, hp_own_lost, hp_enemy_lost, timeouts, behaviour}}}},
     "by_scene": {name: {label: {games, wins, win_rate}}}, "orders_per_minute", "kinds"}. One batch per
@@ -74,13 +76,19 @@ def play(actor, opponents=OPPONENTS, per_scene=512, past=None, device="cpu", lim
     return out
 
 
-def _summary(sel, won, t, hp_own, hp_enemy, limit_s, lord_own=None, lord_enemy=None):
+def _summary(sel, won, t, hp_own, hp_enemy, limit_s, lord_own=None, lord_enemy=None, gold=None):
+    """gold: (own gold lost, enemy gold destroyed, budget) per battle (reward.gold_sides, at the end)."""
     n = int(sel.sum())
     if not n:
         return {"games": 0}
     out = {"games": n, "wins": int(won[sel].sum()), "win_rate": float(won[sel].mean()),
            "seconds": float(t[sel].mean()), "hp_own_lost": float(hp_own[sel].mean()),
            "hp_enemy_lost": float(hp_enemy[sel].mean()), "timeouts": float((t[sel] >= limit_s - 1e-6).mean())}
+    if gold is not None:
+        own, enemy, bud = (g[sel] for g in gold)
+        out.update({"gold_destroyed": float(enemy.mean()), "gold_lost": float(own.mean()),
+                    "gold_ratio": float(enemy.sum() / max(1e-9, own.sum())),
+                    "gold_trade": float(((enemy - own) / bud).mean())})
     if lord_own is not None:
         out["lord_dead_own"] = float(lord_own[sel].mean())
         out["lord_dead_enemy"] = float(lord_enemy[sel].mean())
@@ -145,6 +153,8 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
     fired_all = fired.cpu().numpy()
     dead = env.st.lord_dead_s.cpu().numpy() >= 0                      # [B, side]
     lords = (dead[np.arange(B), side - 1], dead[np.arange(B), 2 - side])
+    gold_b = reward.gold_sides(env.st.u, env.weights.rout_share).cpu().numpy()   # [B, side]
+    gold = (gold_b[np.arange(B), side - 1], gold_b[np.arange(B), 2 - side], reward.budget(env.st.u).cpu().numpy())
     kinds_b = env.kind_battle.cpu().numpy()
     orders_b = env.order_battle.cpu().numpy()                         # changes, switches, unit-steps
     minutes = params.dt / 60
@@ -155,7 +165,7 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
         c = c_all[this]
         k = kinds_b[this].sum(0)
         ch, sw, steps = orders_b[this].sum(0)
-        result = _summary(this, won, t, hp_own, hp_enemy, limit_s, *lords)
+        result = _summary(this, won, t, hp_own, hp_enemy, limit_s, *lords, gold=gold)
         result.update({"contact_share": float((c >= 0).mean()),
                        "first_contact_s": float(np.median(c[c >= 0])) if (c >= 0).any() else None,
                        "fired_share": float(fired_all[this].mean()),
@@ -163,8 +173,9 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
                        "switches_per_minute": float(sw / max(1e-9, steps * minutes)),
                        "kinds": {kd: float(k[i] / max(1, k.sum())) for i, kd in enumerate(O.KINDS)},
                        "behaviour": watch.summary(this),
-                       "roles": {"attack": _summary(attacks, won, t, hp_own, hp_enemy, limit_s, *lords),
-                                 "defend": _summary(this & ~attacks, won, t, hp_own, hp_enemy, limit_s, *lords)}})
+                       "roles": {"attack": _summary(attacks, won, t, hp_own, hp_enemy, limit_s, *lords, gold=gold),
+                                 "defend": _summary(this & ~attacks, won, t, hp_own, hp_enemy, limit_s, *lords,
+                                                    gold=gold)}})
         for role, sel in (("attack", attacks), ("defend", this & ~attacks)):
             if sel.any():
                 result["roles"][role]["behaviour"] = watch.summary(sel)

@@ -29,6 +29,17 @@ class TokenEncoder(nn.Module):
         self.ctx = nn.Sequential(nn.Linear(n_ctx, d), nn.GELU(), nn.Linear(d, d))
         self.norm = nn.LayerNorm(d)
 
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+        """A checkpoint of the older context (observation.py: a t / 3600 column, no TIMERS) loads:
+        that column's weights are dropped and the TIMERS' start at zero, so it computes what it did
+        with the time column at 0."""
+        key = prefix + "ctx.0.weight"
+        w = state_dict.get(key)
+        if w is not None and w.shape[1] == self.ctx[0].in_features - len(ob.TIMERS) + 1:
+            state_dict[key] = torch.cat([w[:, :ob.OLD_TIME], w[:, ob.OLD_TIME + 1:ob.CONTEXT_BASE + 1],
+                                         w.new_zeros(w.shape[0], len(ob.TIMERS)), w[:, ob.CONTEXT_BASE + 1:]], 1)
+        super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
+
     def forward(self, tokens, ctx):
         """tokens [B, N, F], ctx [B, C] -> [B, 1 + N, d] (the context token first)."""
         c = self.ctx(ctx)

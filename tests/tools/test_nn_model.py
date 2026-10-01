@@ -8,6 +8,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from tools.config import ROOT  # noqa: E402
 from tools.nn import gamedata  # noqa: E402
 from tools.nn.model import config, critic, decide, factions, heads, lora, policy, sources  # noqa: E402
 from tools.nn.model import observation as ob  # noqa: E402
@@ -284,3 +285,97 @@ def test_an_actor_saved_before_abilities_loads_and_its_input_starts_silent():
     assert torch.allclose(a["kind"], without["kind"], atol=1e-6) and "ability" not in without
     with pytest.raises(RuntimeError):
         fresh.load_state_dict({k: v for k, v in old.items() if not k.startswith("heads.kind")})
+
+
+# --- the damage timers and the context without the time limit (observation.TIMERS) ---
+
+def timer_states(batch=2):
+    """Three decisions of a made-up battle: side 1 strikes an enemy at t 31, side 2 strikes back at t 32."""
+    setup, state = sources.synthetic(batch=batch, own=3, enemy=3, seed=5, keys=LORDS)
+    N = 6
+    hp = np.full((batch, N), 0.9)
+    hit1, hit2 = hp.copy(), hp.copy()
+    hit1[:, 4] = 0.7
+    hit2[:, 4], hit2[:, 1] = 0.7, 0.5
+    for k in range(3):
+        for t in ("on", "cd"):
+            state[f"ab{k}_{t}"] = np.zeros((batch, N))
+    return setup, [dict(state, t=np.full(batch, 30.0 + i), hp=h) for i, h in enumerate((hp, hit1, hit2))]
+
+
+def test_the_damage_timers_are_the_same_on_numpy_and_torch():
+    setup, states = timer_states()
+    mn = mt = None
+    for st in states:
+        a, mn = ob.observe(st, setup, 1, mn)
+        b, mt = ob.observe({k: torch.as_tensor(v) for k, v in st.items()}, setup, 1, mt)
+        assert np.allclose(a.ctx, b.ctx.numpy(), atol=1e-6)
+    assert a.ctx[0, [ob.CTX[n] for n in ob.TIMERS[1:]]].tolist() == pytest.approx([1, 1 / ob.SINCE, 1, 0])
+
+
+def old_context(ctx, t=None):
+    """The context as networks before the damage timers saw it: a t / 3600 column (t None: 0), no TIMERS."""
+    time = torch.zeros_like(ctx[:, :1]) if t is None else (t / 3600.0).clamp(0, 1)[:, None].to(ctx)
+    return torch.cat([ctx[:, :ob.OLD_TIME], time, ctx[:, ob.OLD_TIME:ob.CONTEXT_BASE], ctx[:, ob.CONTEXT:]], 1)
+
+
+def old_networks(cfg):
+    """An actor and a critic with the older context input (one column more, no TIMERS)."""
+    actor, crit = policy.Actor(cfg), critic.Critic(cfg)
+    actor.encoder.ctx[0] = torch.nn.Linear(ob.CONTEXT - len(ob.TIMERS) + 1, cfg.d)
+    crit.encoder.ctx[0] = torch.nn.Linear(ob.CONTEXT_FULL - len(ob.TIMERS) + 1, cfg.critic_d)
+    return actor.eval(), crit.eval()
+
+
+def same_outputs(old, new, old_crit, new_crit, setup, states):
+    """Runs both through the decisions (memory carried); asserts equal logits, greedy actions, values."""
+    m = mc = h_old = h_new = None
+    for st in states:
+        obs, m = ob.observe(st, setup, 1, m)
+        cobs, mc = ob.observe(st, setup, 1, mc, full=True)
+        o = policy.to_torch(obs)
+        with torch.no_grad():
+            lo, h_old = old(dict(o, ctx=old_context(o["ctx"])), h_old)
+            ln, h_new = new(o, h_new)
+            c = policy.to_torch(cobs)
+            v_old = old_crit({k: c[k] for k in ("tokens", "own", "attend", "pos")} | {"ctx": old_context(c["ctx"])})
+            v_new = new_crit(c)
+        assert set(lo) == set(ln)
+        for k in lo:
+            assert torch.allclose(lo[k], ln[k], atol=1e-5), k
+        assert torch.allclose(h_old, h_new, atol=1e-5) and torch.allclose(v_old, v_new, atol=1e-5)
+        a, b = heads.sample(lo, greedy=True, abilities=True), heads.sample(ln, greedy=True, abilities=True)
+        assert torch.equal(a.kind, b.kind) and torch.equal(a.target, b.target) and torch.equal(a.point, b.point)
+    assert obs.ctx[:, ob.CTX["dealt_any"]].sum() > 0          # the timers were not all zero
+
+
+def test_networks_saved_before_the_damage_timers_load_and_act_the_same():
+    setup, states = timer_states()
+    torch.manual_seed(3)
+    old, old_crit = old_networks(CFG)
+    new, new_crit = model(seed=8), critic.Critic(CFG).eval()
+    new.load_state_dict(old.state_dict())
+    new_crit.load(old_crit.state_dict())
+    assert torch.all(new.encoder.ctx[0].weight[:, ob.CONTEXT_BASE:] == 0)
+    same_outputs(old, new, old_crit, new_crit, setup, states)
+
+
+REAL = [p for p in (ROOT / "build/nn-train/test5/t0_gold30/m20.pt",
+                    ROOT / "build/nn-train/runs/long_ai/best.pt") if p.exists()]
+
+
+@pytest.mark.skipif(not REAL, reason="no trained checkpoints (build/ is not in Git)")
+@pytest.mark.parametrize("path", REAL, ids=[p.parent.name + "/" + p.name for p in REAL])
+def test_a_trained_checkpoint_acts_as_before_the_damage_timers(path):
+    from tools.nn.train import checkpoint
+    data = checkpoint.read(path)
+    cfg = checkpoint.config_of(data)
+    new, new_crit = checkpoint.load_policy(path), checkpoint.load_critic(path).eval()
+    old, old_crit = old_networks(cfg)
+    # parts a checkpoint older than abilities / the per-unit value lacks start fresh: the same in both
+    fresh = {k: v for k, v in new.state_dict().items() if k.startswith(policy.ABILITY_PARAMS)}
+    torch.nn.Module.load_state_dict(old, {**fresh, **data["actor"]})
+    fresh = {k: v for k, v in new_crit.state_dict().items() if k.startswith("unit_value.")}
+    torch.nn.Module.load_state_dict(old_crit, {**fresh, **data["critic"]})
+    setup, states = timer_states()
+    same_outputs(old, new, old_crit, new_crit, setup, states)

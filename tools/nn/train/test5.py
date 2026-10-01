@@ -25,6 +25,12 @@ a test on a busy GPU takes longer but learns as much; --minutes only caps the ti
    seconds striking an enemy's flank or rear; attack target switches a minute; ability uses
    (tools/nn/train/behaviour.py).
 --before PATH reuses a "before" evaluation (a before.json of the same --init and code).
+
+A trend run: --updates 0 --minutes M --every K trains M minutes and runs the same evaluation every K
+minutes of training too (its time not counted), keeping each network (m<minute>.pt) and evaluation
+(eval_m<minute>.json); report.json and trend.md then hold the table minute 0 / K / ... / M:
+
+    DOCK_NAME=t0-trend bash tools/nn/dock.sh tools.nn.train.test5 --label gold30 --updates 0 --minutes 30 --every 10 --eval 256
 """
 import argparse
 import contextlib
@@ -44,7 +50,7 @@ INIT = "build/nn-train/runs/long_ai/best.pt"
 OPPONENTS = ("ai_like", "nearest", "hold_shoot")
 PROTOCOL = ["--armies", "generated", "--curriculum", "19:1", "--small", "0.35:6", "--critic-warmup", "3",
             "--lr", "1.5e-4", "--entropy", "0.003", "--entropy-end", "0.001", "--anchor", "0.06", "--anchor-end", "0.03",
-            "--reference", "build/nn-train/runs/bcmix/bc.pt", "--idle-ramp", "300", "--tempo", "0.0003",
+            "--reference", "build/nn-train/runs/bcmix/bc.pt",
             "--pool-extra", "build/nn-train/runs/long19/latest.pt", "--snapshot-every", "10", "--no-eval",
             # pinned, so tests stay comparable when run.py's defaults change: the baseline's training
             # (no per-unit credit); a task passes its own settings after `--`
@@ -104,13 +110,17 @@ def metrics(res):
                 continue
             b = x.get("behaviour", {})
             out[f"{opp}/{role}"] = {"win": x["win_rate"], "lord_dead_own": x.get("lord_dead_own"),
-                                    "timeouts": x["timeouts"], **b}
+                                    "timeouts": x["timeouts"], "gold_destroyed": x.get("gold_destroyed"),
+                                    "gold_lost": x.get("gold_lost"), "gold_ratio": x.get("gold_ratio"),
+                                    "gold_trade": x.get("gold_trade"), **b}
         out[f"{opp}/all"] = {"switches_per_min": o.get("switches_per_minute"), "orders_per_min": o["orders_per_minute"],
                              **{f"kind_{k}": v for k, v in o["kinds"].items()}}
     return out
 
 
-ROWS = (("win", "win rate", "{:.3f}"), ("lord_dead_own", "own lord dead", "{:.3f}"),
+ROWS = (("win", "win rate", "{:.3f}"), ("gold_destroyed", "enemy gold destroyed / battle", "{:.0f}"),
+        ("gold_lost", "own gold lost / battle", "{:.0f}"), ("gold_ratio", "gold exchange ratio", "{:.2f}"),
+        ("lord_dead_own", "own lord dead", "{:.3f}"),
         ("missile_melee_s", "missile s in melee / battle", "{:.1f}"),
         ("missile_melee_share", "missile time in melee", "{:.3f}"),
         ("flanked_share", "own melee hit flank/rear", "{:.3f}"),
@@ -142,6 +152,24 @@ def table(before, after):
     return lines
 
 
+def trend(points):
+    """Lines: a metric per opponent (attack / defend), a column per minute. points: [(minute, metrics())]."""
+    mins = [m for m, _ in points]
+    first = points[0][1]
+    opps = sorted({k.split("/")[0] for k in first}, key=lambda o: OPPONENTS.index(o) if o in OPPONENTS else 99)
+    lines = ["| metric (attack / defend) | " + " | ".join(f"min {m}" for m in mins) + " |", "|---" * (len(mins) + 1) + "|"]
+    f = (lambda fmt, v: "-" if v is None else fmt.format(v))
+    for name, title, fmt in ROWS:
+        for o in opps:
+            cells = [f"{f(fmt, m.get(f'{o}/attack', {}).get(name))} / {f(fmt, m.get(f'{o}/defend', {}).get(name))}"
+                     for _, m in points]
+            lines.append(f"| {title}, {o} | " + " | ".join(cells) + " |")
+    for name, title, fmt in ALL:
+        for o in opps:
+            lines.append(f"| {title}, {o} | " + " | ".join(f(fmt, m.get(f"{o}/all", {}).get(name)) for _, m in points) + " |")
+    return lines
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -151,6 +179,8 @@ def main():
     ap.add_argument("--minutes", type=float, default=30.0, help="the training's time cap")
     ap.add_argument("--eval", type=int, default=512, help="EVAL_SEEDS battles per opponent (half in each role)")
     ap.add_argument("--before", help="reuse this before.json")
+    ap.add_argument("--every", type=float, default=0,
+                    help="minutes of training between full evaluations (a trend run; 0: before and after only)")
     ap.add_argument("--no-lock", action="store_true", help="do not take the GPU lock (small smoke runs only)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args, rest = ap.parse_known_args()
@@ -174,20 +204,45 @@ def test(args, rest):
     targs = run.parser().parse_args(["--name", f"test5_{args.label}", "--init", args.init, "--minutes",
                                      str(args.minutes), "--updates", str(args.updates), "--device", args.device]
                                     + PROTOCOL + rest)
-    actor, summary, run_dir = run.train(targs)
+    points = [(0, metrics(before))]
+
+    def hook(actor, critic, minute, update):
+        actor.eval()
+        res = evaluation(actor, args, device)
+        res["update"] = update
+        m = f"{minute:g}"
+        checkpoint.save(out / f"m{m}.pt", actor, critic, targs.preset, {"minute": minute, "update": update,
+                                                                      "run": targs.name})
+        (out / f"eval_m{m}.json").write_text(json.dumps(res, indent=1), encoding="utf-8", newline="\n")
+        points.append((m, metrics(res)))
+        print(f"evaluation at minute {m} (update {update}): {res['seconds']} s", flush=True)
+        print("\n".join(trend(points)), flush=True)
+
+    actor, summary, run_dir = run.train(targs, (args.every, hook) if args.every else None)
     actor.eval()
     after = evaluation(actor, args, device)
     (out / "after.json").write_text(json.dumps(after, indent=1), encoding="utf-8", newline="\n")
+    if args.every:
+        m = f"{args.minutes:g}"
+        checkpoint.save(out / f"m{m}.pt", actor, None, targs.preset, {"minute": args.minutes, "update": summary["updates"],
+                                                                    "run": targs.name})
+        points.append((m, metrics(after)))
 
     mb, ma = metrics(before), metrics(after)
     lines = table(mb, ma)
     report = {"label": args.label, "init": args.init, "updates": summary["updates"], "train_s": summary["seconds"],
               "eval_battles": args.eval, "protocol": PROTOCOL, "options": rest, "train_args": vars(targs), "training": summary, "run": str(run_dir),
               "before": mb, "after": ma, "table": lines}
+    if args.every:
+        report["trend"] = {str(m): p for m, p in points}
+        report["trend_table"] = trend(points)
+        (out / "trend.md").write_text("\n".join(report["trend_table"]) + "\n", encoding="utf-8", newline="\n")
     (out / "report.json").write_text(json.dumps(report, indent=1), encoding="utf-8", newline="\n")
     print(f"\ntest5 {args.label}: {args.init}, {summary['updates']} updates in {summary['seconds']} s "
           f"({summary['battles']} battles); before -> after, {args.eval} EVAL_SEEDS battles per opponent", flush=True)
     print("\n".join(lines), flush=True)
+    if args.every:
+        print("\ntrend:\n" + "\n".join(report["trend_table"]), flush=True)
     print(f"written: {out / 'report.json'}", flush=True)
 
 

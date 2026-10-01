@@ -10,6 +10,14 @@ The rule: the AI sees only what a human player sees.
 * Events a player is told or sees: own and enemy lord slain and how long ago (the game announces
   it), and per unit how recently it fought in melee and how recently it routed (enemies: while
   seen).
+* Damage timers (context, TIMERS): whether the side has dealt any damage yet and how long ago it
+  last did, the same for the enemy (damage it dealt to us), and a fine battle clock for the first
+  minutes. A human sees his units fight, the kill counters and the balance-of-power bar. Damage
+  dealt by a side = some unit of the other side lost health (`hp` fell) since the previous
+  observation (Memory.prev_hp; all units, seen or not: the bar shows the totals; a unit whose `hp`
+  is not known (NaN) counts nothing until known again). The same rule for the simulator, recorded
+  battles and the companion; in training it is the reward's attacker damage (reward.struck: the
+  defender's health fell in the step), seen by the attacker as `dealt` and by the defender as `taken`.
 * Abilities (Obs.abil, per unit and ability slot): the ability's passport (tools/nn/model/abilities.py:
   both sides, it is on the unit's card) and its state. Own units: owned, ready, seconds until ready,
   seconds active left (the ability bar). Enemies: owned, and active now only while the unit is seen
@@ -38,10 +46,11 @@ VEL = 5.0        # m/s
 EDGE = 1000.0    # m: distance to the map edge (capped)
 AGE = 60.0       # s: age of the last sighting (capped at 1)
 KILLS = 200.0
-TIME = 3600.0    # s: the battle limit, 60 minutes
 MORALE = 2.0     # MoralePercent (-2..2 seen) / 2, clipped to -1.5..1.5
 FATIGUE = 6      # fresh, active, winded, tired, very tired, exhausted
 EVENT = 120.0    # s: how long an event stays "recent" (1 now, falling to 0 after EVENT)
+SINCE = 300.0    # s: seconds since a side last dealt damage / SINCE, capped at 1
+EARLY = 30.0     # s: the fine clock log1p(t / EARLY) / log1p(20): 0.23 at 30 s, 0.59 at 150 s, 1 from 10 min
 
 # The token's dynamic features: (name, who sees it). "both": own units and visible enemies;
 # "own": own units only (zero for enemies; the critic's full view fills them for all units).
@@ -62,10 +71,18 @@ NAMES = tuple(n for n, _ in DYNAMIC) + FLAGS + tuple(f"passport_{i}" for i in ra
 INDEX = {n: i for i, n in enumerate(NAMES)}
 TOKEN = len(NAMES)
 OWN_ONLY = tuple(INDEX[n] for n, who in DYNAMIC if who == "own")
-# character; attack, defend, time, 2 lord levels, map width and depth, 2 counts; own lord slain and how
-# recently, the enemy lord the same
-CONTEXT = factions.SIZE + 13
+# character; attack, defend, 2 lord levels, map width and depth, 2 counts; own lord slain and how
+# recently, the enemy lord the same (CONTEXT_BASE: the context before the damage timers); then TIMERS:
+# the fine clock, we dealt damage yet and seconds since we last did (0 before), the enemy the same.
+# Nothing refers to the battle's time limit (a campaign battle may have none): only time elapsed.
+# A checkpoint of the older context (a t / 3600 column after defend, no TIMERS) loads with that
+# column dropped and zero weights for TIMERS (encoder.TokenEncoder).
+CONTEXT_BASE = factions.SIZE + 12
+OLD_TIME = factions.SIZE + 2   # the older context's t / 3600 column (removed)
+TIMERS = ("clock_fine", "dealt_any", "dealt_since", "taken_any", "taken_since")
+CONTEXT = CONTEXT_BASE + len(TIMERS)
 CONTEXT_FULL = CONTEXT + factions.SIZE   # the critic's: + the enemy's character
+CTX = {n: CONTEXT_BASE + i for i, n in enumerate(TIMERS)}
 
 
 @dataclass
@@ -162,6 +179,8 @@ class Memory:
     last_melee_t: object = None   # [B, N] time last seen in melee (-1 never)
     last_rout_t: object = None    # [B, N] time last seen routing (-1 never)
     lord_dead_t: object = None    # [B, 2] time own / enemy lord was slain (-1 alive or none)
+    prev_hp: object = None        # [B, N] health share at the previous observation (-1 unknown)
+    hit_t: object = None          # [B, 2] time own / enemy side last dealt damage (-1 not yet)
 
 
 @dataclass
@@ -211,7 +230,7 @@ def start(state, setup, side):
     frame = Frame((b[:, 0] + b[:, 1]) / 2, (b[:, 2] + b[:, 3]) / 2, ux, uz)
     zero, false = xs * 0, xs != xs
     return Memory(frame, zero, zero, zero, false, false, zero, zero, zero - 1, false, zero - 1, zero - 1,
-                  zero[:, :2] - 1)
+                  zero[:, :2] - 1, zero - 1, zero[:, :2] - 1)
 
 
 def observe(state, setup, side, memory=None, full=False):
@@ -281,6 +300,12 @@ def observe(state, setup, side, memory=None, full=False):
     slain2 = m.stack([(slain & own).any(-1), (slain & enemy).any(-1)], -1)          # [B, 2] own, enemy
     tb = tn[:, :2]
     lord_dead = m.where(slain2 & (memory.lord_dead_t < 0), tb, memory.lord_dead_t)
+    # Damage: some unit of the other side lost health since the previous observation (module doc).
+    hp_now = m.nan_to_num(state["hp"] * 1.0, nan=-1.0)
+    hp_now = m.where(S.present, hp_now, hp_now * 0 - 1)
+    fell = (hp_now >= 0) & (memory.prev_hp >= 0) & (hp_now < memory.prev_hp)
+    struck2 = m.stack([(fell & enemy).any(-1), (fell & own).any(-1)], -1)           # [B, 2] we, the enemy
+    hit_t = m.where(struck2, tb, memory.hit_t)
     # Who sees what: "both" fields only for units seen now; "own" fields only for own units
     # (every unit in the critic's full view). Position and edges stay for the last sighting.
     keep_last = ("fwd", "lat", "edge_fwd", "edge_back", "edge_right", "edge_left")
@@ -297,14 +322,18 @@ def observe(state, setup, side, memory=None, full=False):
     attend = S.present & ~dead & ~(own & ~alive)
     ctrl = own & alive & (ms < 6)
     target_ok = enemy & sees & alive
-    ctx = _context(m, setup, S, side, t, own & alive, enemy & ~dead & seen, xs)
+    ctx = _context(m, setup, S, side, own & alive, enemy & ~dead & seen, xs)
     lords = m.stack([_f(m, lord_dead[:, 0] >= 0), _recent(m, tb, lord_dead)[:, 0],
                      _f(m, lord_dead[:, 1] >= 0), _recent(m, tb, lord_dead)[:, 1]], -1)
-    ctx = _cat(m, [ctx, lords], -1)
+    hit = hit_t >= 0
+    since = m.where(hit, m.clip((tb - hit_t) / SINCE, 0, 1), tb * 0)
+    clock = m.log1p(m.clip(t / EARLY, 0, 20)) / np.log1p(20.0)
+    timers = m.stack([clock, _f(m, hit[:, 0]), since[:, 0], _f(m, hit[:, 1]), since[:, 1]], -1)
+    ctx = _cat(m, [ctx, lords, _f(m, timers)], -1)
     pos = m.stack([fwd, lat], -1) / POS
     pos = m.where(seen[..., None], pos, pos * 0)
     new = Memory(fr, last_x, last_z, last_t, seen, dead, m.where(sees, xs, xs * 0), m.where(sees, zs, zs * 0),
-                 tn, sees, last_melee, last_rout, lord_dead)
+                 tn, sees, last_melee, last_rout, lord_dead, hp_now, hit_t)
     adapter = setup.adapter(side)
     adapter = adapter if m is np else m.as_tensor(adapter, device=x.device)
     if full:   # the critic also knows the enemy's character
@@ -349,12 +378,12 @@ def _cat(m, xs, dim):
     return np.concatenate(xs, dim) if m is np else m.cat(xs, dim)
 
 
-def _context(m, setup, S, side, t, own_alive, enemy_known, like):
+def _context(m, setup, S, side, own_alive, enemy_known, like):
     char = setup.character(side)
     char = char if m is np else m.as_tensor(char, device=like.device)
     attack = S.attacker == side
     b = S.bounds
-    cols = [attack, ~attack, m.clip(t / TIME, 0, 1),
+    cols = [attack, ~attack,
             S.lord_level[:, side - 1] / 50, S.lord_level[:, 2 - side] / 50,
             (b[:, 1] - b[:, 0]) / 2000, (b[:, 3] - b[:, 2]) / 2000,
             own_alive.sum(-1) / 20.0, enemy_known.sum(-1) / 20.0]
