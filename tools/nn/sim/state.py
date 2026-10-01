@@ -101,6 +101,10 @@ STATIC = {
     "friendly_fire": ("f", "share of its hits aimed at a unit in melee that land on its own side (config/nn/sim.json)"),
     "morale_bonus": ("f", "morale points at the start beyond leadership (config/nn/sim.json)"),
     "cost": ("f", "multiplayer cost"),
+    "ai": ("b", "played by the game's AI: its lord uses his active abilities (the network's side never does)"),
+    "ab0": ("i", "the unit's first ability: index in config/nn/sim.json abilities.table, -1 none"),
+    "ab1": ("i", "its second ability (-1 none)"),
+    "ab2": ("i", "its third ability (-1 none)"),
 }
 
 INTERNAL = {
@@ -125,6 +129,12 @@ INTERNAL = {
     "order_kind": ("i", "the order in force (tools/nn/sim/orders.py)"),
     "order_target": ("i", "its target slot"),
     "order_run": ("b", "its run flag"),
+    "ab0_on": ("f", "seconds ability 0 stays active"),
+    "ab0_cd": ("f", "seconds until ability 0 is ready"),
+    "ab1_on": ("f", "seconds ability 1 stays active"),
+    "ab1_cd": ("f", "seconds until ability 1 is ready"),
+    "ab2_on": ("f", "seconds ability 2 stays active"),
+    "ab2_cd": ("f", "seconds until ability 2 is ready"),
 }
 
 GROUPS = {"observed": OBSERVED, "static": STATIC, "internal": INTERNAL}

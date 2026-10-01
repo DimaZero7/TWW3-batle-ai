@@ -114,4 +114,11 @@ def strikes(u, pw, contact, params, charge_now, contact_s):
     # nor against one (no more than lord_max_attackers reach him anyway).
     impact = torch.where(single_i | single_j, torch.zeros_like(ch), cal["impact"] * ch)
     rate = F * splash * p * hit / u["interval"][:, :, None].clamp(min=1e-6) * (1 + impact) * ramp[:, :, None]
+    # A lone man (a lord) fought by several units takes the strongest one's rate and only
+    # lord_others of the rest (measured in the recordings: a lord fighting the enemy lord loses
+    # 12.2 HP/s, with an enemy unit more 13.5; fighting infantry 3.5, two units 5.1).
+    total = rate.sum(dim=1, keepdim=True)
+    top = rate.amax(dim=1, keepdim=True)
+    want = top + float(cc.get("lord_others", 1.0)) * (total - top)
+    rate = torch.where(single_j & (total > 0), rate * want / total.clamp(min=1e-9), rate)
     return rate, hit, sector, F

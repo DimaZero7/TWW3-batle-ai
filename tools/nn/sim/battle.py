@@ -10,7 +10,7 @@ import math
 
 import torch
 
-from tools.nn.sim import fatigue, geometry, melee, missile, morale, movement
+from tools.nn.sim import abilities, fatigue, geometry, melee, missile, morale, movement
 from tools.nn.sim import orders as O
 from tools.nn.sim.params import load
 
@@ -74,6 +74,9 @@ def step(st, orders, params=None, dt=None):
     decay = R["charge_decay_duration"]
     charge_now = u["charge"] * (1 - u["contact_s"] / decay).clamp(min=0)
     u["contact_s"] = torch.where(engaged, u["contact_s"] + dt, torch.zeros_like(u["contact_s"]))
+
+    # --- lord abilities (the game's AI side; passives for all): their effects hold for this step ---
+    base = abilities.apply(u, params, dt, standing, engaged, pw["dist"], same_side)
 
     # --- melee ---
     rate, mhit, sector, _ = melee.strikes(u, pw, strike, params, charge_now, u["contact_s"])
@@ -246,6 +249,8 @@ def step(st, orders, params=None, dt=None):
     dead = present & ((u["men"] <= 0) | u["gone"])
     for k in ("m", "mv", "f", "fire", "w", "lf", "rf", "bf"):
         u[k] = u[k] & ~dead
+
+    abilities.restore(u, base)
 
     # --- is the battle over ---
     standing = present & (u["men"] > 0) & ~u["gone"] & ~u["r"]

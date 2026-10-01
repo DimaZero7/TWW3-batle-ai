@@ -11,11 +11,12 @@
     "reach_m": 1.0,
     "hold_m": 2.0,
     "lord_max_attackers": 8,
+    "lord_others": 0.35,
     "front_deg": 60,
     "rear_deg": 120,
     "melee_turn_deg_s": 2.0,
     "step_m": 10.0,
-    "why": "reach: pairs touch when the formations' edges meet (centre distance 10.6-12.8 m for spearmen against slaves, depths 9 and 13.5 m). lord_max_attackers: melee.md (up to ~8 reach a lord). Front = within 60 deg of the facing (shield_defence_angle_melee 60), rear = beyond 120 deg. melee_turn_deg_s: a formation in melee turns no faster (a lord at once): measured in the 28 whole battles, infantry in melee standing turns 1 deg/s (median, mean 2.3; 20.8k seconds), a free unit struck in the flank turns 8 deg in the next 5 s (median, 653 contacts). step_m: a unit whose point is nearer does not turn to walk there (formations step back or aside facing the enemy); without it, units replayed to their recorded points stood with their backs to the enemy at contact in the pairs"
+    "why": "reach: pairs touch when the formations' edges meet (centre distance 10.6-12.8 m for spearmen against slaves, depths 9 and 13.5 m). lord_max_attackers: melee.md (up to ~8 reach a lord). lord_others: a lord fought by several units takes the strongest attacker's rate and this share of the others' (measured 01.10.2026 in the 28 whole battles and 24 gate runs, lord in melee, not shot at: fighting the enemy lord 12.2 HP/s, with one enemy unit more 13.5, two 12.4, three 15.3; fighting infantry only 3.5, two units 5.1; the simulator adding them up gave 26.8 and 8.4) Front = within 60 deg of the facing (shield_defence_angle_melee 60), rear = beyond 120 deg. melee_turn_deg_s: a formation in melee turns no faster (a lord at once): measured in the 28 whole battles, infantry in melee standing turns 1 deg/s (median, mean 2.3; 20.8k seconds), a free unit struck in the flank turns 8 deg in the next 5 s (median, 653 contacts). step_m: a unit whose point is nearer does not turn to walk there (formations step back or aside facing the enemy); without it, units replayed to their recorded points stood with their backs to the enemy at contact in the pairs"
   },
   "melee": {
     "hit_slope": 0.1,
@@ -43,7 +44,8 @@
     "friendly_fire": {"arrow": 0.26, "sling": 0.56},
     "friendly_fire_other": 0.41,
     "spill": [[15, 0.115], [45, 0.034], [75, 0.015], [90, 0.0]],
-    "why": "measured (measurements.md, shooting at a unit that stands): reload in practice 11.0 s arrows (passport 10) and 11.5 s sling (passport 9); hit rate at the edge of range 0.42 and 0.47; first shot 3.3 and 4.3 s after halting. Other projectiles: the mean, reload x1.2 of the passport. distance_factor: HP per arrow against the distance, relative to 105-130 m, from the range test (28.09.2026, standing spearmen: c = 13.4 at 70 m, 11.6 at 90 m, 9.5-10.4 at 105-120 m), held below 70 m; the arena's 34 m (~25 HP) and 52 m (~18 HP) are left out: they exceed or reach the arrow's whole damage (19), so melee losses are mixed in. single_entity_factor: HP a lord loses per projectile aimed at him while he is out of melee for the whole flight (the shot's second and the 2 s after), against the unit rule with his armour, shield (by the shooter's side), resistance and distance factor: 0.43 over ~33k shots of the 18 mirror and 10 Empire-Skaven battles (General by arrows ~0.5, by sling ~0.37, Warlord by arrows ~0.32; per battle median 0.43). An earlier count gave 0.9: its 2-second loss windows overlapped and counted each loss twice. friendly_fire: of the hits aimed at a unit in melee, the share that lands on the shooter's own units in contact with it. Measured in the recordings: in the seconds a missile unit shoots an enemy that fights its own units (and nobody shoots those units), their HP lost beyond the melee rule (and beyond the 1.15x / 1.5x they lose when their own side does not shoot), against those shots' hits by the unit rule: arrows 0.26 (18 mirror battles, 1.5k seconds), sling 0.56 (10 Empire-Skaven battles, 1.3k seconds); other projectiles: the mean. spill: of the hits aimed at a unit, the share that lands on each other unit of the target's side out of melee, by the distance between their centres: in the recordings a unit nobody shoots at, out of melee, with an enemy-shot neighbour within 30 m loses 0.115 of the hits that neighbour takes by the unit rule (2.1k seconds), 0.034 at 30-60 m (6.3k), 0.015 at 60-90 m (7.2k), 0.005 beyond (units with no shot neighbour lose 0.7 HP/s); it is why an infantry unit in a whole battle loses ~1.3x per shot aimed at it what the lone target of the shooting arena does. Without it a unit in melee loses 3.2x the melee rule (Skaven infantry) and 2.2x (Empire infantry, mirror) while its own missile units shoot at the enemy it fights, 1.5x and 1.15x otherwise"
+    "spill_melee": [[7.5, 0.19], [22.5, 0.047], [45, 0.035], [60, 0.0]],
+    "why": "measured (measurements.md, shooting at a unit that stands): reload in practice 11.0 s arrows (passport 10) and 11.5 s sling (passport 9); hit rate at the edge of range 0.42 and 0.47; first shot 3.3 and 4.3 s after halting. Other projectiles: the mean, reload x1.2 of the passport. distance_factor: HP per arrow against the distance, relative to 105-130 m, from the range test (28.09.2026, standing spearmen: c = 13.4 at 70 m, 11.6 at 90 m, 9.5-10.4 at 105-120 m), held below 70 m; the arena's 34 m (~25 HP) and 52 m (~18 HP) are left out: they exceed or reach the arrow's whole damage (19), so melee losses are mixed in. single_entity_factor: HP a lord loses per projectile aimed at him while he is out of melee for the whole flight (the shot's second and the 2 s after), against the unit rule with his armour, shield (by the shooter's side), resistance and distance factor: 0.43 over ~33k shots of the 18 mirror and 10 Empire-Skaven battles (General by arrows ~0.5, by sling ~0.37, Warlord by arrows ~0.32; per battle median 0.43). An earlier count gave 0.9: its 2-second loss windows overlapped and counted each loss twice. friendly_fire: of the hits aimed at a unit in melee, the share that lands on the shooter's own units in contact with it. Measured in the recordings: in the seconds a missile unit shoots an enemy that fights its own units (and nobody shoots those units), their HP lost beyond the melee rule (and beyond the 1.15x / 1.5x they lose when their own side does not shoot), against those shots' hits by the unit rule: arrows 0.26 (18 mirror battles, 1.5k seconds), sling 0.56 (10 Empire-Skaven battles, 1.3k seconds); other projectiles: the mean; a lord among those units takes his share x single_entity_factor (a lone target; 01.10.2026, otherwise a lord in melee with shot enemies took the whole friendly fire). spill: of the hits aimed at a unit, the share that lands on each other unit of the target's side out of melee, by the distance between their centres: in the recordings a unit nobody shoots at, out of melee, with an enemy-shot neighbour within 30 m loses 0.115 of the hits that neighbour takes by the unit rule (2.1k seconds), 0.034 at 30-60 m (6.3k), 0.015 at 60-90 m (7.2k), 0.005 beyond (units with no shot neighbour lose 0.7 HP/s); spill_melee: the same for the target's own units that are in melee too, when the target is in melee (01.10.2026, build/nn-sim/flank/spill_melee.py: HP a unit in melee, not shot at itself and whose own side does not shoot its opponents, loses regressed on its melee rule and on the hits aimed at other units of its side in melee, by centre distance: 0.19 within 15 m, 0.047 at 15-30 m, 0.035 at 30-60 m (the 27 net runs and the 28 game-AI battles, 74k seconds, 15k with a shot neighbour; the 28 battles alone 0.23 / 0.09 / 0.16, the net runs 0.19 / 0.05 / 0.035, the far bin taken from the net runs). Before it, only units out of melee took spill, so units fighting around a lord the enemy shoots at (run 20261001-074420) lost nothing to those shots; it is why an infantry unit in a whole battle loses ~1.3x per shot aimed at it what the lone target of the shooting arena does. Without it a unit in melee loses 3.2x the melee rule (Skaven infantry) and 2.2x (Empire infantry, mirror) while its own missile units shoot at the enemy it fights, 1.5x and 1.15x otherwise"
   },
   "morale": {
     "faction_bonus": {"wh2_main_skv_skaven": 6, "wh_main_emp_empire": 0},
@@ -66,5 +68,64 @@
   "threat": {
     "range_m": 60,
     "why": "lf / rf / bf: a non-routing enemy within this distance in the left, right or rear sector; not calibrated"
+  },
+  "abilities": {
+    "near_m": 60,
+    "units": {
+      "wh2_main_skv_cha_warlord_0": [
+        "wh_main_character_abilities_deadly_onslaught",
+        "wh2_main_character_abilities_verminous_valour",
+        "wh_main_character_abilities_rally"
+      ],
+      "wh_main_emp_cha_general_0": [
+        "wh_main_character_abilities_stand_your_ground",
+        "wh_main_character_abilities_foe_seeker",
+        "wh_main_lord_passive_hold_the_line"
+      ]
+    },
+    "table": {
+      "wh_main_character_abilities_deadly_onslaught": {
+        "active_s": 31,
+        "recharge_s": 90,
+        "trigger": "melee",
+        "damage": 1.25,
+        "charge": 1.6
+      },
+      "wh2_main_character_abilities_verminous_valour": {
+        "active_s": 17,
+        "recharge_s": 60,
+        "trigger": "near",
+        "speed": 1.25,
+        "leadership": 8
+      },
+      "wh_main_character_abilities_rally": {
+        "active_s": 14,
+        "recharge_s": 60,
+        "trigger": "waver",
+        "range_m": 35,
+        "leadership": 16
+      },
+      "wh_main_character_abilities_stand_your_ground": {
+        "active_s": 18,
+        "recharge_s": 90,
+        "trigger": "melee",
+        "range_m": 35,
+        "defence": 24,
+        "leadership": 16
+      },
+      "wh_main_character_abilities_foe_seeker": {
+        "active_s": 25,
+        "recharge_s": 60,
+        "trigger": "near",
+        "speed": 1.25
+      },
+      "wh_main_lord_passive_hold_the_line": {
+        "trigger": "passive",
+        "range_m": 35,
+        "defence": 5,
+        "leadership": 4
+      }
+    },
+    "why": "Lord abilities (tools/nn/sim/abilities.py). units: what each lord owns in our battles (the game's own readout, data/roster/*.json owned_non_passive / owned_passive_special_abilities). table: from the database (db.pack, decoded by hand 01.10.2026): unit_special_abilities active_time / recharge_time / effect_range (initial_recharge 0 for all), special_ability_phase_stat_effects for the effects (scalar_speed mult 1.25 -> speed; stat_melee_damage_base and _ap mult 1.25 -> damage; stat_charge_bonus mult 1.6 -> charge; stat_morale add -> leadership (morale points); stat_melee_defence add -> defence). Speed of Foe Seeker also scales the charge speed (its scalar_charge_speed 1.25). Verminous Valour's 25 m, 1 s blast (battle_vortexs) has damage 0 and AP 0: not modelled. Hold the Line is passive: every side's General has it. Active abilities only for a side played by the game's AI (STATIC ai): the network's bridge gives no ability orders. trigger (when the AI fires it; an assumption, not measured): melee = its lord is in melee, near = a standing enemy within near_m of him (the recordings show the Warlord running 5-6.5 m/s, above his run 4.0 and charge 4.7, when closing in), waver = a friend within range_m wavers or routs; ready again recharge_s after it ends"
   }
 }

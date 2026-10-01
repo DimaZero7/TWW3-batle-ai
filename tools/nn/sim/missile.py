@@ -78,7 +78,9 @@ def volley(u, pw, target, dt, params, contact=None):
         engaged = (crowd > 0).float()
         friends = near / crowd.clamp(min=1e-6)[:, :, None]
         ff = u["friendly_fire"][:, :, None] * engaged[:, None, :]  # [B, i, j]
-        landed = torch.bmm(aimed * ff, friends) + aimed * (1 - ff) * lone[:, None, :]
+        # A lone man among them (a lord) is hit as a lone target is: single_entity_factor of his
+        # share (without it a lord in melee with shot enemies took the whole friendly fire).
+        landed = torch.bmm(aimed * ff, friends * lone[:, None, :]) + aimed * (1 - ff) * lone[:, None, :]
     # Spill: hits aimed at j also land on j's neighbours of its own side that are out of melee,
     # a share by distance between centres (measured).
     if ms.get("spill"):
@@ -86,6 +88,12 @@ def volley(u, pw, target, dt, params, contact=None):
         eye = torch.eye(men.shape[1], dtype=torch.bool, device=men.device)[None]
         free = (men > 0) if contact is None else (men > 0) & ~contact.any(2)
         spill = distance_factor(dist, ms["spill"]) * (same & ~eye & free[:, None, :]).float()
+        if contact is not None and ms.get("spill_melee"):
+            # Hits aimed at a unit in melee also land on its own side's units in melee near it
+            # (measured: the spearmen around a General the slingers shoot at).
+            fighting = (men > 0) & contact.any(2)
+            near = distance_factor(dist, ms["spill_melee"]) * (same & ~eye & fighting[:, None, :]).float()
+            spill = spill + near * fighting[:, :, None].float()
         landed = landed + torch.bmm(aimed, spill * lone[:, None, :])
     front = pw["rel_j"].abs() <= B["shield_defence_angle_missile"] * geometry.DEG
     shield = torch.where(front, u["shield"][:, None, :], torch.zeros_like(dist))

@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+from tools.nn.sim import abilities
+
 ROOT = Path(__file__).resolve().parents[3]
 CONFIG = ROOT / "config" / "nn"
 
@@ -99,6 +101,8 @@ class Params:
             "friendly_fire": ms["friendly_fire"].get(cat, ms["friendly_fire_other"]) if missile else 0,
             "morale_bonus": self.sim["morale"]["faction_bonus"].get(faction, 0),
             "cost": u.get("multiplayer_cost", 0),
+            "ai": False,
+            **{f"ab{k}": i for k, i in enumerate(abilities.slots_of(self, key))},
         }
 
 

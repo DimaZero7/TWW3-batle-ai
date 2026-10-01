@@ -47,6 +47,8 @@ def build(armies, params=None, device="cpu", per_side=None):
                     row["width"] = float(unit["width"]) if row["men0"] > 1 else row["width"]
                 row["side"] = side
                 row["lord"] = bool(unit.get("general"))
+                # The game's AI uses abilities; by default it plays side 2 (the arena's enemy).
+                row["ai"] = bool(spec.get("ai", side == 2))
                 for name in S.STATIC:
                     rows[name][bi][slot] = row[name]
                 obs["x"][bi][slot] = unit["x"]

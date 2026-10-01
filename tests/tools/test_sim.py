@@ -212,6 +212,27 @@ class TestMissile:
         ratio = float(hp[0, 0, 1]) / float(hp[0, 0, H])       # same armour: hits on friends / on target
         assert ratio == pytest.approx(share / (1 - share), rel=1e-3) and float(hit) > 0
 
+    def test_shots_at_a_lord_in_melee_spill_on_his_units_fighting_beside_him(self):
+        # side 1: our General and spearmen beside him, both fighting the enemy; side 2: slingers shoot the General.
+        st = scenario.build([army([(GENERAL, 0, 0, 90), (SPEAR, 0, 8, 90)],
+                                  [(SPEAR, 6, 0, 270), (SLINGER, 120, 0, 270)])], P)
+        H = st.N // 2
+        pw = geometry.pairwise(st.u, 1.5)
+        target = torch.full((1, st.N), -1)
+        target[0, H + 1] = 0                                  # the slingers shoot our General
+        contact = torch.zeros((1, st.N, st.N), dtype=torch.bool)
+        for i in (0, 1):
+            contact[0, i, H] = contact[0, H, i] = True
+        _, hp, _ = missile.volley(st.u, pw, target, 1.0, P, contact=contact)
+        assert float(hp[0, H + 1, 1]) > float(hp[0, H + 1, 0]) > 0   # the crowd takes more than the lord
+        free = contact.clone()
+        free[0, 1, H] = free[0, H, 1] = False                 # our spearmen out of melee: the ordinary spill
+        _, out, _ = missile.volley(st.u, pw, target, 1.0, P, contact=free)
+        ratio = float(hp[0, H + 1, 1]) / float(out[0, H + 1, 1])
+        d = float(pw["dist"][0, 0, 1])
+        expect = float(missile.distance_factor(torch.tensor(d), P.sim["missile"]["spill_melee"]))             / float(missile.distance_factor(torch.tensor(d), P.sim["missile"]["spill"]))
+        assert ratio == pytest.approx(expect, rel=1e-3)
+
     def test_out_of_range_nobody_is_chosen(self):
         st = face_off(ARCHER, SLAVE, gap=200)
         pw = geometry.pairwise(st.u, 1.5)
@@ -394,3 +415,30 @@ class TestFlanksAndRoles:
         assert scenario.attacker_of(Rec(), {}) == 2
         Rec.own_ai, Rec.enemy_role = "attack", "?"
         assert scenario.attacker_of(Rec(), {}) == 1
+
+
+class TestAbilities:
+    def test_only_the_game_ai_fires_actives_and_passives_hold_for_all(self):
+        from tools.nn.sim import abilities
+        # side 1 (the network): our General and spearmen; side 2 (the game's AI): the Warlord touching the General.
+        st = scenario.build([army([(GENERAL, 0, 0, 90), (SPEAR, 0, 20, 90)],
+                                  [("wh2_main_skv_cha_warlord_0", 2, 0, 270)])], P)
+        H = st.N // 2
+        u = st.u
+        assert not bool(u["ai"][0, 0]) and bool(u["ai"][0, H])
+        pw = geometry.pairwise(u, 1.5)
+        same = u["side"][:, :, None] == u["side"][:, None, :]
+        standing = u["men"] > 0
+        engaged = torch.zeros_like(standing)
+        engaged[0, 0] = engaged[0, H] = True
+        dmg, defence, run = float(u["damage"][0, H]), float(u["defence"][0, 1]), float(u["run"][0, H])
+        old = abilities.apply(u, P, 0.5, standing, engaged, pw["dist"], same)
+        assert float(u["damage"][0, H]) == pytest.approx(1.25 * dmg)      # Deadly Onslaught (in melee)
+        assert float(u["run"][0, H]) == pytest.approx(1.25 * run)         # Verminous Valour (enemy near)
+        assert float(u["ab0_on"][0, H]) == 31 and float(u["ab0_cd"][0, H]) == 31 + 90
+        assert float(u["ab0_on"][0, 0]) == 0 and float(u["ab1_on"][0, 0]) == 0   # our General: no actives
+        assert float(u["defence"][0, 1]) == defence + 5                    # Hold the Line reaches our spearmen
+        abilities.restore(u, old)
+        assert float(u["damage"][0, H]) == dmg
+        abilities.apply(u, P, 31.0, standing, engaged, pw["dist"], same)  # 31 s later: over, recharging
+        assert float(u["ab0_on"][0, H]) == 0 and float(u["ab0_cd"][0, H]) == 90

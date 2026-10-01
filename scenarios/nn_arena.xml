@@ -103,7 +103,7 @@
     <precipitation_type>dry</precipitation_type>
     <battle_script prepare_for_fade_in="false">script/battle/tww3_bai/scenario.lua</battle_script>
     <type>classic</type>
-    <timeout_winning_alliance_index>1</timeout_winning_alliance_index>
+    <timeout_winning_alliance_index>0</timeout_winning_alliance_index>
     <duration>3600</duration>
     <los_visibility_enabled>true</los_visibility_enabled>
   </battle_description>
