@@ -26,6 +26,8 @@ clean up as usual; 0 by default). To watch the network command our side, use
 
 1. Reads `config/default.json` and `config/local.json`, finds the game.
 2. Checks that WH3 is not running and no files of a previous run remain.
+   Lines left in the event log from outside a launcher run are moved into the
+   run folder (`events.before.jsonl`).
 3. Checks dependencies (SHA-256), then copies them and our pack into `data`
    and verifies the installed pack hash.
 4. Writes its **own** mod list `tww3_bai_<target>_mods.txt`. The user's
@@ -40,6 +42,8 @@ clean up as usual; 0 by default). To watch the network command our side, use
    start time).
 10. Removes its pack, its mod list and its dependency copies — only when
     unchanged; puts the game's preferences file back.
+11. Copies the last lines of the event log and **removes the log** from the game
+    folder — only when no game runs and all of it is in the run's `events.jsonl`.
 
 ## Results
 
@@ -48,13 +52,21 @@ clean up as usual; 0 by default). To watch the network command our side, use
 | File | Contents |
 |---|---|
 | `manifest.json` | The build that played |
-| `launch.json` | PID, time, arguments, log offset, battle difficulty |
-| `events.jsonl` | New events of this run |
-| `status.json` | `completed` / `lua_error` / `timeout` / `process_exited` / `crash_report`, cleanup and preferences outcome |
+| `launch.json` | PID, time, arguments, log offset, earlier log bytes moved (`stale_log_bytes`), battle difficulty |
+| `events.jsonl` | Events of this run |
+| `events.before.jsonl` | Only if the game-folder log was not empty at the start: its earlier lines |
+| `status.json` | `completed` / `lua_error` / `timeout` / `process_exited` / `crash_report`, cleanup and preferences outcome, `event_log` (`removed` / `absent` / `kept: <reason>`) |
 | `tww3_bai_map_capture_*.{csv,xml,jsonl}` | For `map-capture`: grid, battle XML, events |
 
 The event log in the game folder (`tww3_bai_events.jsonl`) is shared by every target
-but `map-capture` and is only appended; the launcher copies the new part.
+but `map-capture`; the Lua entries only append to it. **After each run the launcher
+clears it**: once the game is gone it copies the remaining lines into the run's
+`events.jsonl` and removes the file, but only when the whole file was read from the start,
+no cut line is left and the run's copy holds the same number of lines
+(`tools/launcher/event_log.ps1`, tested in `tests/tools/test_launcher_event_log.py`).
+Otherwise the file stays (`status.json`: `event_log` = `kept: …`) and the next run moves
+it to its folder as `events.before.jsonl`. With `-KeepGameOpen` the log stays until the
+next run. `tww3_bai_sequence.txt` (batch numbers) is kept.
 
 ## Fair difficulty
 

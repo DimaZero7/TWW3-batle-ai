@@ -26,6 +26,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -T
 
 1. Читает `config/default.json` и `config/local.json`, находит игру.
 2. Проверяет, что WH3 не запущена и в папке игры нет файлов прошлого запуска.
+   Строки журнала событий, записанные вне запуска launcher, переносит в папку
+   запуска (`events.before.jsonl`).
 3. Проверяет зависимости (SHA-256), затем копирует их и наш pack в `data`,
    сверяет хэш установленного pack.
 4. Пишет **собственный** список модов `tww3_bai_<цель>_mods.txt`.
@@ -40,6 +42,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -T
    путь и время старта).
 10. Удаляет свой pack, свой список модов и свои копии зависимостей — только если
     они не изменились; возвращает файл настроек игры.
+11. Дописывает последние строки журнала событий и **удаляет журнал** из папки
+    игры — только если игра не запущена и весь журнал есть в `events.jsonl` запуска.
 
 ## Результаты
 
@@ -48,13 +52,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -T
 | Файл | Содержимое |
 |---|---|
 | `manifest.json` | Сборка, которая играла |
-| `launch.json` | PID, время, аргументы, смещение журнала, сложность боя |
-| `events.jsonl` | Новые события этого запуска |
-| `status.json` | `completed` / `lua_error` / `timeout` / `process_exited` / `crash_report`, итог очистки и возврата настроек |
+| `launch.json` | PID, время, аргументы, смещение журнала, перенесённые байты старого журнала (`stale_log_bytes`), сложность боя |
+| `events.jsonl` | События этого запуска |
+| `events.before.jsonl` | Только если журнал в папке игры был не пуст при старте: его прежние строки |
+| `status.json` | `completed` / `lua_error` / `timeout` / `process_exited` / `crash_report`, итог очистки и возврата настроек, `event_log` (`removed` / `absent` / `kept: <причина>`) |
 | `tww3_bai_map_capture_*.{csv,xml,jsonl}` | Для `map-capture`: сетка, XML боя, события |
 
 Журнал событий в папке игры (`tww3_bai_events.jsonl`) общий для всех целей,
-кроме `map-capture`, и только дописывается; launcher копирует новую часть.
+кроме `map-capture`; точки входа Lua только дописывают его. **После каждого запуска
+launcher его очищает**: когда игры нет, дописывает оставшиеся строки в `events.jsonl`
+запуска и удаляет файл, но только если файл прочитан целиком с начала, нет оборванной
+строки и в копии запуска столько же строк (`tools/launcher/event_log.ps1`, тест
+`tests/tools/test_launcher_event_log.py`). Иначе файл остаётся (`status.json`:
+`event_log` = `kept: …`), и следующий запуск переносит его в свою папку как
+`events.before.jsonl`. С `-KeepGameOpen` журнал остаётся до следующего запуска.
+`tww3_bai_sequence.txt` (номера партий) не трогается.
 
 ## Честная сложность
 

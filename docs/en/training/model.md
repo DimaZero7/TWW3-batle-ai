@@ -168,13 +168,13 @@ Orders go out in the simulator's format (`tools/nn/sim/orders.py`): `kind`, `x`,
 optional: orders made without it get −1). Units of the other side, dead and routing units
 hold and use nothing.
 
-**For training** (`tools/nn/train/`, not wired yet): the learner's rows need
-`heads.sample(..., abilities=True)`, `Action.ability` kept through the rollout and rebuilt in the
-update (`hd.Action(kind, point, target, run, ability)`), the `ai` flag false on every side a network
-plays, learner or past version, side 1 or 2 (`tools/nn/sim/abilities.py` `set_rule(u, by_rule [B, 2])`:
-true only for the scripted opponents; again after each auto-reset, since restarted rows bring the
-bank's `ai`, which `scenario.build` sets for side 2; else that lord also fires by the game-AI rule) and `abil`, `abil_owned`, `abil_use` in the
-LiveSetup's fields (without them the observation shows no abilities).
+**In training** (`tools/nn/train/rollout.py`, `ppo.py`; [training](training.md#lord-abilities-01102026)):
+the learner and the past version choose abilities (`heads.sample(..., abilities=True)`), the
+rollout keeps `Action.ability` and the update counts it in the log-probability; the `ai` flag is
+true only for the scripted opponents' sides (`tools/nn/sim/abilities.py` `set_rule`, again after
+every restart: the bank's rows bring `scenario.build`'s default, side 2); the LiveSetup carries
+`abil`, `abil_owned`, `abil_use`. A stored transition keeps only the slots' state (5 numbers) and
+the battle's bank row; `rollout.full_obs` puts the passports back for the update.
 
 ## Sizes
 

@@ -44,9 +44,13 @@ class AbilityEncoder(nn.Module):
         nn.init.zeros_(self.net[2].bias)
 
     def forward(self, abil):
-        """abil [B, N, SLOTS, SIZE] -> [B, N, d]: the sum over the owned slots."""
-        owned = (abil[..., ab.INDEX["owned"]] > 0.5).float()[..., None]
-        return (self.net(abil) * owned).sum(2)
+        """abil [B, N, SLOTS, SIZE] -> [B, N, d]: the sum over the owned slots. Only the owned slots
+        go through the network (lords: a few of the B x N x SLOTS), so the cost stays small."""
+        B, N, K, _ = abil.shape
+        b, n, k = (abil[..., ab.INDEX["owned"]] > 0.5).nonzero(as_tuple=True)
+        e = self.net(abil[b, n, k])                                                   # [M, d]
+        out = abil.new_zeros(B * N, e.shape[-1]).index_add(0, b * N + n, e)
+        return out.reshape(B, N, -1)
 
 
 def distance_buckets(pos, known, bins):

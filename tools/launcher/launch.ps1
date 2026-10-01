@@ -9,6 +9,10 @@
 #  * stops only the process it started (same PID, path and start time);
 #  * removes only its own pack and mod list, and only if unchanged;
 #  * results are copied to build/<target>/runs/<time>/ before cleanup;
+#  * the game-folder event log tww3_bai_events.jsonl is removed after the run
+#    only once all of it is verifiably in the run's events.jsonl and no game
+#    runs; lines left from outside a launcher run are moved into the run
+#    folder (events.before.jsonl) before the game starts (event_log.ps1);
 #  * every battle is fair: the game's battle difficulty is set to Normal
 #    (battle_difficulty 1) for the run and the user's preferences file is
 #    restored byte for byte afterwards (user, 30.09.2026: never Very Hard
@@ -24,6 +28,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $repo 'tools\telemetry\read_jsonl.ps1')
+. (Join-Path $PSScriptRoot 'event_log.ps1')
 
 # Settings: config/default.json overridden by config/local.json.
 $settings = Get-Content -LiteralPath (Join-Path $repo 'config\default.json') -Raw | ConvertFrom-Json
@@ -131,14 +136,20 @@ $userDifficulty = [int]$Matches[1]
 [IO.File]::WriteAllBytes($prefs, $latin.GetBytes(($prefsText -replace 'battle_difficulty \d+;', ('battle_difficulty ' + $fairDifficulty + ';'))))
 Write-Output ("Battle difficulty for this run: {0} (normal); the user's {1} is restored afterwards" -f $fairDifficulty, $userDifficulty)
 
+# The shared log is cleared after every run; anything in it now came from outside a launcher
+# run (or a run whose log could not be cleared): keep it with this run, start from offset 0.
+$clearLog = $outputs -notcontains (Split-Path -Leaf $eventLog)
 $offset = 0
+$staleBytes = [long]0
+if ($clearLog) { $staleBytes = Move-StaleEventLog -Path $eventLog -Destination (Join-Path $run 'events.before.jsonl') }
+if ($staleBytes -gt 0) { Write-Output ("Earlier lines of the event log ({0} bytes) moved to the run folder: events.before.jsonl" -f $staleBytes) }
 if (Test-Path -LiteralPath $eventLog) { $offset = (Get-Item -LiteralPath $eventLog).Length }
 $reader = New-JsonlReader -Offset $offset
 $started = Get-Date
 $arguments = 'game_startup_mode battle ' + $manifest.scenario + '; ' + (Split-Path -Leaf $modList) + ';'
 $process = Start-Process -FilePath $exe -WorkingDirectory $game -ArgumentList $arguments -PassThru
 @{pid = $process.Id; started_utc = $started.ToUniversalTime().ToString('o'); target = $Target; build = $manifest.build;
-  pack_sha256 = $manifest.pack_sha256; log_offset = $offset; arguments = $arguments;
+  pack_sha256 = $manifest.pack_sha256; log_offset = $offset; stale_log_bytes = $staleBytes; arguments = $arguments;
   battle_difficulty = $fairDifficulty; user_battle_difficulty = $userDifficulty} |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'launch.json') -Encoding utf8
 Write-Output ("Started WH3 PID {0}; run folder {1}. Process start is not success: waiting for events." -f $process.Id, $run)
@@ -146,6 +157,7 @@ Write-Output ("Started WH3 PID {0}; run folder {1}. Process start is not success
 $status = 'timeout'
 $done = 0
 $runLog = Join-Path $run 'events.jsonl'
+$copiedLines = [long]0
 try {
     while (((Get-Date) - $started).TotalSeconds -lt $TimeoutSeconds) {
         if ($process.HasExited) { $status = 'process_exited'; break }
@@ -157,6 +169,7 @@ try {
         $lines = @(Read-JsonlLines -State $reader -Path $eventLog)
         if ($lines.Count -gt 0) {
             [IO.File]::AppendAllLines($runLog, [string[]]$lines, [Text.UTF8Encoding]::new($false))
+            $copiedLines += $lines.Count
             foreach ($line in $lines) {
                 if ($line -notmatch '"event":"(ready|start|result|error|frame|grid_done|probe_done|probe_error|skipped|speed_restored)"') { continue }
                 $event = $Matches[1]
@@ -174,7 +187,7 @@ try {
         $lingerEnd = (Get-Date).AddSeconds($LingerSeconds)
         while ((Get-Date) -lt $lingerEnd -and -not $process.HasExited) { Start-Sleep -Seconds 1 }
         $lines = @(Read-JsonlLines -State $reader -Path $eventLog)
-        if ($lines.Count -gt 0) { [IO.File]::AppendAllLines($runLog, [string[]]$lines, [Text.UTF8Encoding]::new($false)) }
+        if ($lines.Count -gt 0) { [IO.File]::AppendAllLines($runLog, [string[]]$lines, [Text.UTF8Encoding]::new($false)); $copiedLines += $lines.Count }
     }
     foreach ($name in $outputs) {
         $path = Join-Path $game $name
@@ -206,6 +219,18 @@ try {
                 }
             }
             $cleanup.private_files_removed = $true
+        }
+        # The game is gone: copy what it wrote after the last poll (a cut last line too), then
+        # remove the shared log if all of it is in the run's copy.
+        if ($clearLog) {
+            try {
+                $lines = @(Read-JsonlLines -State $reader -Path $eventLog)
+                if ($reader.Pending.Length -gt 0) { $lines += $reader.Pending; $reader.Pending = '' }
+                if ($lines.Count -gt 0) { [IO.File]::AppendAllLines($runLog, [string[]]$lines, [Text.UTF8Encoding]::new($false)); $copiedLines += $lines.Count }
+                $cleanup.event_log = Remove-CopiedEventLog -Path $eventLog -State $reader -RunLog $runLog -CopiedLines $copiedLines
+            } catch {
+                $cleanup.event_log = 'kept: ' + $_.Exception.Message
+            }
         }
     }
     # The user's preferences back, byte for byte, once our game is gone.

@@ -70,9 +70,11 @@ class Heads(nn.Module):
         target = target.masked_fill(~ok[:, None, :], NEG)
         out = {"kind": kind, "point": self.point(u), "target": target, "run": self.run(u)[..., 0]}
         if obs_t.get("abil") is not None:
-            keys = self.ability_k(obs_t["abil"])                                     # [B, N, K, P]
-            slot = (self.ability_q(u)[:, :, None, :] * keys).sum(-1) / math.sqrt(self.cfg.pointer)
-            slot = slot.masked_fill(~(obs_t["abil_ok"] & ctrl[..., None]), NEG)
+            # Only the slots that may be used are scored (a few of B x N x SLOTS); the rest stay masked.
+            b, n, k = (obs_t["abil_ok"] & ctrl[..., None]).nonzero(as_tuple=True)
+            score = (self.ability_q(u)[b, n] * self.ability_k(obs_t["abil"][b, n, k])).sum(-1)
+            slot = torch.full(obs_t["abil_ok"].shape, NEG, device=u.device, dtype=u.dtype)
+            slot = slot.index_put((b, n, k), score / math.sqrt(self.cfg.pointer))
             out["ability"] = torch.cat([self.ability_none(u), slot], -1)
         return out
 

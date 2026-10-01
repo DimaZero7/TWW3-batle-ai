@@ -12,15 +12,24 @@ Battles(layout) holds B battles on one device. A row is one side of one battle: 
 step() returns the learner's transition: its observation, action, log-probabilities, the critic's
 value, reward and done, per learner row. collect() stacks T of them with the memory the chunk
 began with, so the update can run the memory (GRU) through the chunk again.
+
+Abilities: the networks (learner and past version) choose their lords' abilities (heads.sample with
+abilities=True; Orders.ability); only the scripted opponents' lords fire by the game-AI rule
+(sim abilities.set_rule, again after every restart: the bank's rows bring scenario.build's `ai`).
+A transition keeps only the abilities' state (abil [.., SLOTS, DYNAMIC]) and the battle's bank row
+(abil_row); full_obs() puts the passports back from the bank (batch["abil_static"]) for the update:
+the whole input would be ~3 GB for 1024 battles x 64 decisions.
 """
 import numpy as np
 import torch
 
+from tools.nn.model import abilities as mab
 from tools.nn.model import heads as hd
 from tools.nn.model import observation as ob
 from tools.nn.model import policy
 from tools.nn.model.decide import to_orders
 from tools.nn.model.frame import Frame
+from tools.nn.sim import abilities as sim_abilities
 from tools.nn.sim import battle
 from tools.nn.sim import orders as O
 from tools.nn.sim import state as S
@@ -84,6 +93,17 @@ def merge_memory(old, new, rows):
     return ob.Memory(frame, *(w(getattr(old, k), getattr(new, k)) for k in MEMORY))
 
 
+def full_obs(obs, table):
+    """A stored observation (rows of collect's batch["obs"], [..]) with the abilities' passports put back:
+    abil [.., N, SLOTS, DYNAMIC] + table[abil_row] -> abil [.., N, SLOTS, SIZE]; abil_row dropped.
+    An observation without abilities is returned as it is."""
+    if "abil_row" not in obs:
+        return obs
+    out = {k: v for k, v in obs.items() if k != "abil_row"}
+    out["abil"] = torch.cat([obs["abil"], table[obs["abil_row"]]], -1)
+    return out
+
+
 def open_rows(source, want=None):
     """(State, LiveSetup, bank rows) of a batch that starts with the battles the source picks."""
     idx = source.pick(want)
@@ -144,6 +164,10 @@ class Battles:
         # order changes, target switches and standing unit-steps [B, 3].
         self.kind_battle = torch.zeros(self.B, len(O.KINDS), device=self.device)
         self.order_battle = torch.zeros(self.B, 3, device=self.device)
+        # Only the scripted opponents fire their lords' abilities by the game-AI rule; a side a
+        # network plays (the learner, self-play, a past version) fires them by its own order.
+        self.by_rule = self.ctrl >= league.CODE["nearest"]                              # [B, 2]
+        self.ability_stats = torch.zeros(2, device=self.device)   # the learner's ability uses, its ended battles
         self.start()
 
     @property
@@ -152,6 +176,7 @@ class Battles:
 
     def start(self):
         self.st, self.setup, idx = open_rows(self.source, self.want)
+        sim_abilities.set_rule(self.st.u, self.by_rule)
         self.bank_row = idx.clone()
         self.bounds2 = torch.cat([self.setup.bounds, self.setup.bounds])
         every = torch.ones(self.B, dtype=torch.bool, device=self.device)
@@ -192,7 +217,7 @@ class Battles:
         if h is None:
             h = actor.initial(obs_r)
         logits, h_new = actor(obs_r, h)
-        action = hd.sample(logits, greedy)
+        action = hd.sample(logits, greedy, abilities=True)
         orders = to_orders(actor.cfg, action, obs_r, frame_rows(frame, rows), self.bounds2[rows])
         return obs_r, h, logits, action, orders, h_new
 
@@ -218,6 +243,7 @@ class Battles:
         if self.cur is None:
             self.cur = self.observe(critic is not None)
         a, frame, c = self.cur
+        abil_row = self.bank_row[self.rows_learn % self.B]           # the battles the observation was made of
         obs_r, h_prev, logits, action, orders, h_new = self._act(actor, a, frame, self.rows_learn, self.h_learn, greedy)
         parts = [(self.rows_learn, orders)]
         h_past_new = None
@@ -234,6 +260,7 @@ class Battles:
         self.kind_battle.index_add_(0, self.rows_learn % self.B, (onehot * acting[..., None].float()).sum(1))
 
         was_done = self.st.done.clone()
+        marks = self._ability_marks()
         orders = self.assemble(parts)
         changes = reward.order_changes(self.st.u, orders, self.weights.order_move_m) & ~was_done[:, None]
         switched = reward.retargets(self.st.u, orders) & ~was_done[:, None]
@@ -259,6 +286,8 @@ class Battles:
         d = d_rows.float()
         self.lord_stats += torch.stack([d.sum(), (d * lord_dead[rb, rs].float()).sum(),
                                         (d * lord_dead[rb, 1 - rs].float()).sum()])
+        self.ability_stats += torch.stack([((self._ability_marks() > marks + 1e-3).float().sum((1, 2))
+                                            * (~was_done).float()).sum(), d.sum()])
         sw = self._learner_units(switched).float().sum(1)
         self.switch_stats += sw.sum()
         self.order_battle[:, 1] += sw
@@ -271,6 +300,9 @@ class Battles:
         if h_past_new is not None:
             self.h_past = h_past_new * keep[self.rows_past % self.B][:, None, None]
         self.cur = self.observe(critic is not None)
+        if "abil" in obs_r:                          # keep the state, not the passports (full_obs)
+            # a copy: a slice (view) would keep the whole input of every step alive (~60 MB each)
+            obs_r = dict(obs_r, abil=obs_r["abil"][..., :mab.DYNAMIC].clone(), abil_row=abil_row)
         return {"obs": obs_r, "action": action, "lp": lp, "value": value, "reward": r_rows,
                 "done": d_rows, "critic_obs": c, "unit_value": unit_value, "unit_reward": unit_rows}
 
@@ -290,6 +322,19 @@ class Battles:
         for s in (1, 2):
             learner = learner | ((side == s) & (self.ctrl[:, s - 1] == league.LEARNER)[:, None])
         return mask & learner
+
+    def _ability_marks(self):
+        """[B, N, SLOTS] the learner's units' ability cooldowns (a use sets one up)."""
+        u = self.st.u
+        cd = torch.stack([u[f"ab{k}_cd"] for k in range(sim_abilities.SLOTS)], -1)
+        return cd * self._learner_units(torch.ones_like(u["m"])).float()[..., None]
+
+    def abilities(self, reset=True):
+        """The learner's ability uses per its ended battle since the last call (uses / battles)."""
+        uses, n = (float(x) for x in self.ability_stats)
+        if reset:
+            self.ability_stats.zero_()
+        return uses / max(1.0, n)
 
     def lords(self, reset=True):
         """{"own", "enemy"}: shares of the learner's ended battles in which its own / the enemy's lord
@@ -335,6 +380,7 @@ class Battles:
         if not bool(finished.any()):
             return
         idx = restart_rows(self.st, self.setup, self.source, finished, self.want)
+        sim_abilities.set_rule(self.st.u, self.by_rule)
         self.bank_row = torch.where(finished, idx, self.bank_row)
         randomise.apply(self.st, finished, self.spread, self.gen)
         state = self.st.observation()
@@ -365,7 +411,8 @@ class Battles:
 def collect(env, actor, critic, T):
     """T steps of every battle -> a dict of stacked tensors [T, R, ...], the memory the chunk began
     with h0 [R, 1 + N, d], reset [T, R] (a new battle began at step t: its memory starts empty), the
-    bootstrap value [R], and per unit: unit_reward, unit_value [T, R, N], last_unit_value [R, N]."""
+    bootstrap value [R], per unit: unit_reward, unit_value [T, R, N], last_unit_value [R, N], and
+    abil_static: the bank's ability passports (full_obs puts them back into obs)."""
     h0 = env.h_learn
     steps = [env.step(actor, critic) for _ in range(T)]
     out = {}
@@ -374,8 +421,9 @@ def collect(env, actor, critic, T):
     out["h0"] = h0 if h0 is not None else actor.initial(rows_of(steps[0]["obs"], slice(None)))
     done = torch.stack([s["done"] for s in steps])
     out["reset"] = torch.cat([torch.zeros_like(done[:1]), done[:-1]])
-    out["action"] = hd.Action(*(torch.stack([getattr(s["action"], f) for s in steps])
-                                for f in ("kind", "point", "target", "run")))
+    fields = ("kind", "point", "target", "run") + (("ability",) if steps[0]["action"].ability is not None else ())
+    out["action"] = hd.Action(*(torch.stack([getattr(s["action"], f) for s in steps]) for f in fields))
+    out["abil_static"] = getattr(env.bank.setup.arrays, "abil", None)
     for k in ("lp", "value", "reward", "done", "unit_value", "unit_reward"):
         out[k] = torch.stack([s[k] for s in steps])
     out["last_value"], out["last_unit_value"] = env.value(critic)

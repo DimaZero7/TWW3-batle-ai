@@ -29,6 +29,7 @@ from dataclasses import dataclass
 import torch
 
 from tools.nn.model import heads as hd
+from tools.nn.train.rollout import full_obs
 
 
 @dataclass(frozen=True)
@@ -131,11 +132,11 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
     n, stop = 0, False
     actor.train()
     critic.train()
-    kinds = ("kind", "point", "target", "run")
+    kinds = ("kind", "point", "target", "run") + (("ability",) if batch["action"].ability is not None else ())
     for _ in range(cfg.epochs):
         order = torch.randperm(R, device=adv.device)
         for idx in order.split(max(1, cfg.minibatch // T)):
-            obs = {k: v[:, idx] for k, v in batch["obs"].items()}
+            obs = full_obs({k: v[:, idx] for k, v in batch["obs"].items()}, batch.get("abil_static"))
             cobs = {k: _rows(v, idx) for k, v in batch["critic_obs"].items()}
             act = hd.Action(*(_rows(getattr(batch["action"], k), idx) for k in kinds))
             a = _rows(adv, idx)
@@ -147,20 +148,23 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                 std = ((au ** 2 * m).sum() / m.sum().clamp(min=1)).sqrt() + 1e-8
                 au = au / std
                 a = a[:, None] + cfg.unit_credit * au
-            logits, _ = actor.sequence(obs, batch["h0"][idx], batch["reset"][:, idx])
-            logits = {k: v.reshape(-1, *v.shape[2:]) for k, v in logits.items()}
-            ctrl = obs["ctrl"].reshape(-1, obs["ctrl"].shape[-1])
-            lp, ent = hd.log_prob(logits, act, ctrl)
-            old = _rows(batch["lp"], idx)
-            pl, clipped = policy_loss(lp, old, a, ctrl, cfg.clip)
-            entropy = masked_mean(kind_entropy(logits), ctrl)
-            if reference is not None and cfg.anchor:
-                with torch.no_grad():
-                    ref, _ = reference.sequence(obs, batch["h0"][idx], batch["reset"][:, idx])
-                    ref = {k: v.reshape(-1, *v.shape[2:]) for k, v in ref.items()}
-                anchored = anchor_kl(logits, ref, ctrl)
-            else:
-                anchored = torch.zeros((), device=adv.device)
+            # The critic's warm-up (train_policy False): the actor runs without a graph, for the stats
+            # only; with one its activations took ~3.5 GB more at the peak (13.5 GB on a 16 GB card).
+            with torch.set_grad_enabled(train_policy):
+                logits, _ = actor.sequence(obs, batch["h0"][idx], batch["reset"][:, idx])
+                logits = {k: v.reshape(-1, *v.shape[2:]) for k, v in logits.items()}
+                ctrl = obs["ctrl"].reshape(-1, obs["ctrl"].shape[-1])
+                lp, ent = hd.log_prob(logits, act, ctrl)
+                old = _rows(batch["lp"], idx)
+                pl, clipped = policy_loss(lp, old, a, ctrl, cfg.clip)
+                entropy = masked_mean(kind_entropy(logits), ctrl)
+                if reference is not None and cfg.anchor:
+                    with torch.no_grad():
+                        ref, _ = reference.sequence(obs, batch["h0"][idx], batch["reset"][:, idx])
+                        ref = {k: v.reshape(-1, *v.shape[2:]) for k, v in ref.items()}
+                    anchored = anchor_kl(logits, ref, ctrl)
+                else:
+                    anchored = torch.zeros((), device=adv.device)
             if per_unit:
                 v, vu = critic(cobs, per_unit=True)
                 uvl = masked_mean((vu - _rows(ret_u, idx)) ** 2, ctrl)

@@ -129,7 +129,7 @@ shows whether a change breaks something and where the behaviour goes, not a fina
 melee ~100 s a battle, and in 6–12 % of decisions it piles more than 2 units on one enemy while
 another enemy flanks it — the picture seen in the game. Ability uses (~4 a battle) are the lord's
 abilities fired by the simulator's AI rule: `scenario.py` marks side 2 as played by the game's AI
-by default, also when the learner plays side 2.
+by default, also when the learner plays side 2 (fixed: [lord abilities](#lord-abilities-01102026)).
 
 ## How a training step goes
 
@@ -345,6 +345,49 @@ their time in melee (0.068 → 0.043, 0.080 → 0.044). Piles and flank hits did
 more often (10 %), and the own lord died more often attacking it (0.25 → 0.42). So per-unit credit
 at 0.3 is harmless and slightly helpful in 36 updates, but it has not yet taught the piling
 infantry to turn to the flank; its pull towards standing must be watched in longer runs.
+
+## Lord abilities, 01.10.2026
+
+The network decides itself when its lord uses an ability, like a player
+([model](model.md#abilities-each-unit-each-of-its-ability-slots), [bridge](../apps/bridge.md)).
+In training (`rollout.py`, `ppo.py`):
+
+- the learner and the past version choose abilities (`heads.sample(..., abilities=True)`); the
+  rollout keeps `Action.ability`, the update counts it in the log-probability;
+- only the scripted opponents' lords fire by the simulator's game-AI rule: `Battles.by_rule`
+  (`tools/nn/sim/abilities.py` `set_rule`), set again after every restart, because a battle from
+  the bank brings `scenario.build`'s default (side 2 by the rule). Before, a learner on side 2 had
+  its lord fire by that rule (the ~4 uses a battle of the baseline);
+- the LiveSetup carries the ability passports; a stored decision keeps only the slots' state (5
+  numbers) and the battle's bank row, `rollout.full_obs` puts the passports back in the update
+  (the whole input would be ~3 GB for 1024 battles × 64 decisions);
+- `run.py` logs `abilities_per_battle` (the learner's uses per its ended battle).
+
+Memory: the slice of the stored state must be a copy (a view kept every step's whole input:
+collect peaked at 9.9 GB instead of 6.6), and the ability encoder and head work only on owned /
+usable slots. The critic's warm-up updates now run the actor without a graph: they peaked at
+13.5 GB, left 14 GB reserved on the 16 GB card, and with the abilities' extra the training spilled
+over (the first test5 run: updates of 146 s; then 10–14 s). Now 10.7 GB reserved; collect ~4 s
+and update ~5.5 s per update (3.3 / 5.2 s without the ability input).
+
+Test (`test5 --label task1`, 01.10.2026; `long_ai/best.pt`, whose ability parts start fresh, so
+"before" uses every ready ability at random; 36 updates in 732 s, slowed by the spill above; 512
+EVAL_SEEDS battles per opponent):
+
+| metric | ai_like attack | ai_like defend | nearest attack | nearest defend | hold_shoot attack | hold_shoot defend |
+|---|---|---|---|---|---|---|
+| win rate | 0.512 → 0.547 | 0.625 → 0.645 | 0.406 → 0.438 | 0.449 → 0.500 | 0.602 → 0.617 | 0.496 → 0.449 |
+| own lord dead | 0.336 → 0.238 | 0.102 → 0.094 | 0.121 → 0.102 | 0.109 → 0.113 | 0.285 → 0.148 | 0.160 → 0.137 |
+| ability uses / battle | 11.77 → 11.59 | 11.70 → 11.33 | 10.87 → 10.61 | 11.26 → 11.18 | 14.79 → 14.91 | 13.08 → 13.02 |
+| decisions with a pile | 0.054 → 0.101 | 0.110 → 0.127 | 0.081 → 0.088 | 0.098 → 0.115 | 0.052 → 0.079 | 0.111 → 0.149 |
+
+The baseline test (the same network, its lord on side 2 by the AI rule, side 1 never): before
+0.54 / 0.68 / 0.43 / 0.47 / 0.59 / 0.50 wins, own lord dead 0.27 / 0.07 / 0.09 / 0.09 / 0.22 /
+0.12, ~4 uses a battle. With the network's own (still random) choice the lord uses ~3 times as
+many abilities — every ability as soon as it is ready — and dies more as the attacker before
+training (0.34 against 0.27 against `ai_like`); 36 updates bring that to 0.24 (the baseline's
+after: 0.17) and the wins to the baseline's level or above (5 of 6). The ability head itself
+hardly moved in 36 updates (11.8 → 11.6 uses): what it learns needs a longer run.
 
 ## Against the game's AI, 01.10.2026
 
@@ -675,6 +718,8 @@ losses, the shaped terms and its neighbours; GAE per unit stops at the end of a 
 advantages reach the policy loss; the critic loads a checkpoint from before its per-unit head; a
 rollout gives the per-unit reward and value; several opponents in one evaluation batch are counted
 apart, with the behaviour metrics; the GPU lock is held, waited for and freed after a failure; the
-report table.
+report table. Abilities: only the scripted sides fire by the AI rule, also after a restart; a
+stored decision keeps only the slots' state and `full_obs` gives the observation back; a network
+lord uses abilities by order and PPO trains the head.
 `tests/tools/test_nn_observation.py`: the lord known from the passport; a slain enemy lord is
 known unseen and fades; an enemy's melee and rout count only while seen.

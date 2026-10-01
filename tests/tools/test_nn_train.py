@@ -345,7 +345,8 @@ class TestProperties:
         batch = rollout.collect(env, actor, crit, 8)                       # battles end at step 6 and restart
         assert batch["reset"][6].all() and not batch["reset"][:6].any()
         with torch.no_grad():
-            logits, _ = actor.sequence(batch["obs"], batch["h0"], batch["reset"])
+            obs = rollout.full_obs(batch["obs"], batch["abil_static"])
+            logits, _ = actor.sequence(obs, batch["h0"], batch["reset"])
             lp, _ = heads.log_prob(logits, batch["action"], batch["obs"]["ctrl"])
         assert torch.allclose(lp, batch["lp"], atol=1e-4)
 
@@ -460,6 +461,56 @@ class TestProperties:
 
 
 # --- level 3: the loop ---
+
+class TestAbilities:
+    """The networks choose their lords' abilities; only scripted opponents fire by the game-AI rule."""
+
+    def test_only_scripted_sides_fire_by_the_rule_also_after_a_restart(self):
+        lay = league.layout(8, 1, {"self": 0.25, "past": 0.25, "nearest": 0.25, "ai_like": 0.25})
+        env = rollout.Battles(lay, MIRROR, params=rollout.params_with_limit(1.0), spread=randomise.NONE)
+        env.set_past(nets(1)[0])
+        side = env.st.u["side"]
+
+        def expected():
+            script = env.ctrl >= league.CODE["nearest"]
+            return ((side == 1) & script[:, :1]) | ((side == 2) & script[:, 1:])
+        network = ((side == 1) & (env.ctrl[:, :1] <= league.CODE["past"])) | (
+            (side == 2) & (env.ctrl[:, 1:] <= league.CODE["past"]))
+        assert torch.equal(env.st.u["ai"], expected()) and not (env.st.u["ai"] & network).any()
+        assert (env.st.u["ai"] & (side == 1)).any()               # a script on side 1 fires by the rule
+        actor, crit = nets()
+        for _ in range(3):
+            env.step(actor, crit)                                       # the 1 s limit: all restart
+        assert env.battles >= 8 and torch.equal(env.st.u["ai"], expected())
+
+    def test_the_stored_input_is_small_and_full_obs_gives_back_the_observation(self):
+        from tools.nn.model import abilities as mab
+        env = rollout.Battles(league.layout(4, 1, opponent="nearest"), MIRROR, params=rollout.params_with_limit(3.0))
+        actor, crit = nets()
+        a, _, _ = env.observe()
+        full = rollout.rows_of(a, env.rows_learn)
+        step = env.step(actor, crit)
+        assert step["obs"]["abil"].shape[-1] == mab.DYNAMIC and step["action"].ability is not None
+        back = rollout.full_obs(step["obs"], env.bank.setup.arrays.abil)
+        assert torch.equal(back["abil"], full["abil"]) and "abil_row" not in back
+        assert torch.all((step["action"].ability == -1) | full["abil_ok"].gather(
+            2, step["action"].ability.clamp(min=0)[..., None])[..., 0])
+
+    def test_a_network_lord_uses_abilities_by_order_and_ppo_trains_the_head(self):
+        lay = league.layout(4, 1, opponent="nearest")
+        env = rollout.Battles(lay, MIRROR, params=rollout.params_with_limit(20.0), spread=randomise.NONE)
+        actor, crit = nets()
+        with torch.no_grad():
+            actor.heads.ability_none.bias.fill_(-20.0)                 # always use one when ready
+        before = actor.heads.ability_q.weight.detach().clone()
+        batch = rollout.collect(env, actor, crit, 4)
+        assert batch["action"].ability.shape == batch["action"].kind.shape and (batch["action"].ability >= 0).any()
+        assert float(env.ability_stats[0]) > 0 and float(env.ability_stats[1]) == 0   # uses; no battle ended yet
+        opt = torch.optim.Adam(list(actor.parameters()) + list(crit.parameters()), lr=1e-3)
+        st = ppo.update(actor, crit, opt, batch, dataclasses.replace(ppo.PPOConfig(), epochs=1, minibatch=8))
+        assert all(np.isfinite(v) for v in st.values())
+        assert not torch.equal(before, actor.heads.ability_q.weight)
+
 
 class TestLoop:
     def test_a_tiny_training_step(self):

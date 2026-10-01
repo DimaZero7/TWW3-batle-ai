@@ -78,7 +78,8 @@ class LiveSetup:
     a battle that ends takes a new army, and its row is copied in place (the compiled observe keeps
     working on the same tensors)."""
 
-    FIELDS = ("side", "bounds", "rank", "lord_level", "passport", "men0", "ammo0", "present", "attacker", "lord")
+    FIELDS = ("side", "bounds", "rank", "lord_level", "passport", "men0", "ammo0", "present", "attacker", "lord",
+              "abil", "abil_owned", "abil_use")      # abil: the ability slots' passports [B, N, SLOTS, STATIC]
 
     def __init__(self, arrays, char, adapt, factions):
         self.arrays, self.char, self.adapt, self.factions = arrays, char, adapt, factions

@@ -227,6 +227,7 @@ def train(args):
                **{k: round(v, 4) for k, v in st.items()},
                "entropy_weight": round(u_cfg.entropy, 5), "anchor_weight": round(u_cfg.anchor, 4),
                "lord_dead_own": round(lords["own"], 3), "lord_dead_enemy": round(lords["enemy"], 3),
+               "abilities_per_battle": round(env.abilities(), 2),
                "switches_per_minute": round(lords["switches_per_minute"], 2),
                "orders_per_minute": round(env.orders_per_minute(), 2), "kinds": env.kinds(),
                "games": {k: g for k, (g, _, _) in stats.items()}, "win_rate": rates(stats),
@@ -238,7 +239,7 @@ def train(args):
                   f"{row['battle_steps_per_s']:6d} st/s pl {st['policy_loss']:+.3f} vl {st['value_loss']:.4f} "
                   f"ent {st['entropy']:.2f}/{st['entropy_all']:.2f} kl {st['kl']:.3f} R {st['reward']:+.3f} "
                   f"anchor {st['anchor_kl']:.3f} unit A share {st['unit_adv_share']:.2f} orders/min {row['orders_per_minute']:5.1f} "
-                  f"lords dead own {lords['own']:.2f} enemy {lords['enemy']:.2f} "
+                  f"lords dead own {lords['own']:.2f} enemy {lords['enemy']:.2f} abil {row['abilities_per_battle']:.1f} "
                   f"kinds " + " ".join(f"{k[:2]} {v:.2f}" for k, v in row["kinds"].items()), flush=True)
         if update % args.snapshot_every == 0:
             meta = {"update": update, "battles": env.battles, "seconds": row["seconds"], "run": args.name}
