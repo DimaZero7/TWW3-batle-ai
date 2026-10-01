@@ -687,6 +687,25 @@ wins on time, standing gives no order costs, and a charge first costs health. Lo
 to show whether it grows out of this; if not, the attacker needs pressure (the reward or the
 opponent mix).
 
+## A failed experiment: two networks, attack and defence, 01.10.2026
+
+Instead of one shared network we tried two — attack and defence — each twice as wide (`wide`,
+3.2 M weights against 0.84 M). The code is **removed** (owner's decision); the runs stay in
+`build/nn-train/runs/t4b/`, `test5_t4b_pair10/`, `pair40/` (not in Git).
+
+- **Size is not needed.** The small network copies both teachers (`nearest` + `ai_like`) as
+  accurately as the wide one: order kind 98.5%, target 98%.
+- **The attack network** is at the level of `long_ai/best.pt` (vs `ai_like` 44–54%, vs
+  `nearest` 28–42%), not better; 98% attack orders, piles three times as often.
+- **The defence network** failed: after the warm start copying the scripts 25/16% (vs
+  `ai_like` / `nearest`), after 10/20/30 minutes of PPO 22/17 → 34/28 → 14/6% on held-out armies;
+  `best.pt` has 64/42%. It grows on its own battles but doesn't carry over to new armies.
+- **The only plus:** the attacker's pressure no longer leaks into defence (`best.pt` gives more
+  attack orders when defending than when attacking: 0.54 against 0.44).
+- **Conclusion:** the base is one network (`long_ai/best.pt`). The comparison was unfair
+  (`best.pt` had ~80 min of practice, the defence net a weak start from the scripts); roles are
+  to be separated by LoRA adapters on one network, not by two networks.
+
 ## What is missing
 
 - A way past the `nearest` script (see "Why not 80 % against nearest"); the simulator now has
