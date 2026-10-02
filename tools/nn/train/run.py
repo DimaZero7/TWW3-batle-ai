@@ -496,7 +496,8 @@ def parser():
     ap.add_argument("--idle-cap", type=float, default=reward.Weights.idle_cap,
                     help="the idle cost at most --idle x this")
     ap.add_argument("--idle-share", type=float, default=reward.Weights.idle_share,
-                    help="0: idle while no unit fights or shoots; 1: x the share of the standing army (by cost) that does not")
+                    help="0: idle while no unit fights or shoots; 1: x the share of the standing army (by cost) that does not; "
+                         "-1: progress only (the --idle-rate clock alone, whoever is busy)")
     ap.add_argument("--idle-rate", type=float, default=reward.Weights.idle_rate,
                     help="0: any damage resets the idle timer; > 0: only a damage rate of at least this share of "
                          "the budget a minute (defender gold lost, mean over --idle-window)")

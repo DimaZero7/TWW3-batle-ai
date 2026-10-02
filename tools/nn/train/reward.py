@@ -139,7 +139,8 @@ class Weights:
     idle_step: float = 0.5        # ... m = exp(k x idle_step) - 1
     idle_cap: float = 20.0        # ... m at most this
     idle_share: float = 0.0       # 0: idle while no unit fights or shoots (one busy unit stops the cost);
-    #                               1: x the share of its standing army, by cost, not fighting or shooting
+    #                               1: x the share of its standing army, by cost, not fighting or shooting;
+    #                               < 0: progress only (the idle_rate clock alone, whoever is busy)
     idle_rate: float = 0.0        # 0: any damage resets the timer; > 0: only a damage rate (defender gold
     #                               lost, share of the budget a minute, over ~idle_window_s) of at least this
     idle_window_s: float = 30.0   # ... the time constant of that rate
@@ -319,7 +320,11 @@ def idle_cost(st, weights=Weights(), last_hit=None):
         side = u["side"] == s
         mine = (st.attacker == s) & ~st.done
         idle = (~(busy & side).any(1)).float()
-        if weights.idle_share:
+        if weights.idle_share < 0:
+            # progress only: the clock (idle_rate) alone decides; units waiting (reserve, second line,
+            # the lord kept back) cost nothing while the army as a whole makes progress
+            idle = torch.ones_like(idle)
+        elif weights.idle_share:
             # the share of its standing army (by cost) that neither fights nor shoots: one unit
             # skirmishing while the rest stand no longer stops the cost
             standing = (cost * (stand & side)).sum(1)
