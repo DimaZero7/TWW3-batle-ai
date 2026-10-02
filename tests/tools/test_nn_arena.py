@@ -34,14 +34,18 @@ class TestArenas:
             assert xml.count("<general>") == sum(bool(u.get("general")) for a in nn_scenario.armies(arena).values()
                                                  for u in a["units"])
 
-    def test_whole_battles_give_the_skaven_four_fifths_of_the_gold(self):
-        """config/nn/pools.json budget_factor: Skaven 0.8 of the Empire's budget (2050 against 2500)."""
+    def test_whole_battles_give_the_skaven_their_budget_factor_of_the_gold(self):
+        """config/nn/pools.json budget_factor: the Skaven's gold against the Empire's 2500 (factor 1.0 since
+        02.10.2026: 2575; at 0.8 the arenas held 2050), read from the config."""
+        from tools.nn.armies import pools
+        p = pools.load()
+        factor = p["wh2_main_skv_skaven"].budget_factor / p["wh_main_emp_empire"].budget_factor
         for name in ("whole_emp_v_skv", "whole_skv_v_emp"):
             sides = nn_scenario.armies(nn_scenario.load_arena(name))
             cost = {a["faction"]: sum(PASSPORTS[u["key"]]["multiplayer_cost"] for u in a["units"])
                     for a in sides.values()}
-            assert cost == {"wh_main_emp_empire": 2500, "wh2_main_skv_skaven": 2050}
-            assert abs(cost["wh2_main_skv_skaven"] / cost["wh_main_emp_empire"] - 0.8) <= 0.05
+            assert cost["wh_main_emp_empire"] == 2500
+            assert abs(cost["wh2_main_skv_skaven"] / cost["wh_main_emp_empire"] - factor) <= 0.05
 
     def test_an_unknown_arena_and_a_named_arena_that_moves_the_map_are_errors(self, tmp_path):
         with pytest.raises(KeyError):

@@ -1,7 +1,7 @@
 # The in-game gate (docs/en/launch/gate.md): N battles in the real game, our side commanded by a
 # trained network (a checkpoint), the other by the game's AI at fair Normal difficulty, on armies
 # from the random army generator (EVAL seeds, never used in training), our network attacking and
-# defending in turn. One battle per game launch (watch.ps1 -> launch.ps1: difficulty Normal, the
+# defending in turn, in swapped pairs (the same seed twice, our network on either army). One battle per game launch (watch.ps1 -> launch.ps1: difficulty Normal, the
 # user's preferences restored byte for byte, cleanup). Then build/nn-gate/<time>/summary.json and
 # a table. Gate: 4 battles, at least 3 wins.
 #
@@ -52,8 +52,10 @@ try {
         $attempt = 0
         while ($true) {
             $attempt++
-            Write-Output ("--- battle {0}: seed {1}, our network {2}s, {3} v {4} units ({5} v {6}), attempt {7}" -f $b.battle, $b.seed, $b.role, $b.own_units, $b.enemy_units, $b.factions.own, $b.factions.enemy, $attempt)
-            & $python -m tools.build nn-arena --own-ai net --army-seed $b.seed --own-role $b.role --speed $Speed `
+            Write-Output ("--- battle {0} (pair {8}{9}): seed {1}, our network {2}s, {3} v {4} units ({5} v {6}), attempt {7}" -f $b.battle, $b.seed, $b.role, $b.own_units, $b.enemy_units, $b.factions.own, $b.factions.enemy, $attempt, $b.pair, $(if ($b.swap) { ', armies swapped' } else { '' }))
+            $swapArgs = @()
+            if ($b.swap) { $swapArgs = @('--army-swap') }
+            & $python -m tools.build nn-arena --own-ai net --army-seed $b.seed @swapArgs --own-role $b.role --speed $Speed `
                 --timeout $plan.timeout_s --deadline $plan.deadline_s --decide-ms $DecideMs | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "Build failed for seed $($b.seed)" }
             $before = @(Get-ChildItem -LiteralPath $runs -Directory -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
@@ -67,7 +69,7 @@ try {
             $hasResult = $run -and (Test-Path -LiteralPath (Join-Path $run 'events.jsonl')) -and
                 (Select-String -LiteralPath (Join-Path $run 'events.jsonl') -Pattern '"event":"result"' -SimpleMatch -Quiet)
             if ($hasResult -or $attempt -gt $Retries) {
-                $done += [ordered]@{battle = $b.battle; seed = $b.seed; role = $b.role; run = $run; attempts = $attempt; launcher_exit = $code}
+                $done += [ordered]@{battle = $b.battle; pair = $b.pair; swap = [bool]$b.swap; seed = $b.seed; role = $b.role; run = $run; attempts = $attempt; launcher_exit = $code}
                 Save-Battles
                 break
             }

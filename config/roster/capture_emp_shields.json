@@ -1,0 +1,12 @@
+{
+  "description": "Roster capture of the Empire spearmen with shields wh_main_emp_inf_spearmen_1 (02.10.2026, for the unit passports: the Empire pool's shielded spear unit; captured with the general only). Same widths as config/roster/capture.json.",
+  "faction": "wh_main_emp_empire",
+  "units": [
+    {"key": "wh_main_emp_cha_general_0", "men": 1, "general": true},
+    {"key": "wh_main_emp_inf_spearmen_1", "men": 120}
+  ],
+  "slots": [[0, -100], [100, -200], [210, -120], [370, -50], [-80, -140]],
+  "widths": [80, 60, 40, 30, 20, 15, 10, 8],
+  "baseline_width": 30,
+  "shape_timeout_s": 40
+}

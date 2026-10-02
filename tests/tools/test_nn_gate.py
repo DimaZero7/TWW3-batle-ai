@@ -46,6 +46,20 @@ class TestBuild:
         # What the Lua side puts into the companion's state: attacker 1 when our side attacks.
         assert (1 if config["enemy_role"] == "defend" else 2) == attacker
 
+    def test_the_swapped_battle_gives_our_side_the_other_army(self, tmp_path, monkeypatch):
+        written = capture(monkeypatch, tmp_path)
+        seed = 1_000_900_008
+        assert build.main(["nn-arena", "--army-seed", str(seed), "--army-swap", "--own-role", "defend"]) == 0
+        (config, scenario), = written
+        arena = generate.battle(seed)
+        assert config["army"]["swap"] is True and config["arena"] == f"random_{seed}_swap"
+        assert config["factions"] == {"own": arena["sides"]["enemy"]["faction"], "enemy": arena["sides"]["own"]["faction"]}
+        assert [u["key"] for u in config["units"]["own"]] == [u["key"] for u in arena["sides"]["enemy"]["units"]]
+        assert config["army"]["cost"] == {"own": arena["sides"]["enemy"]["cost"], "enemy": arena["sides"]["own"]["cost"]}
+        assert scenario.endswith(f"random_{seed}_swap.xml")
+        with pytest.raises(SystemExit):
+            build.main(["nn-arena", "--army-swap"])
+
     def test_the_build_reads_a_battle_file_outside_scenarios(self, tmp_path, monkeypatch):
         monkeypatch.setattr(project, "BUILD", tmp_path)
         xml = tmp_path / "random_1.xml"
@@ -68,13 +82,21 @@ class TestBuild:
 
 
 class TestPlan:
-    def test_eval_seeds_by_army_size_and_alternating_roles(self):
-        rows = gate.plan(4)
-        assert [r["seed"] for r in rows] == [1_000_900_000, 1_000_900_003, 1_000_900_007, 1_000_900_008]
-        assert [r["role"] for r in rows] == ["attack", "defend", "attack", "defend"]
-        sizes = [r["own_units"] - 1 for r in rows]
-        assert [lo <= n <= hi for n, (lo, hi) in zip(sizes, gate.SIZE_BINS)] == [True] * 4
-        assert all(generate.split(r["seed"]) == "eval" for r in rows)
+    def test_swapped_pairs_of_eval_seeds_by_army_size_and_alternating_roles(self):
+        rows = gate.plan(8)
+        assert [r["pair"] for r in rows] == [1, 1, 2, 2, 3, 3, 4, 4]
+        assert [r["swap"] for r in rows] == [False, True] * 4
+        assert [r["role"] for r in rows] == ["attack", "defend"] * 4
+        seeds = [r["seed"] for r in rows]
+        assert seeds[0::2] == seeds[1::2] and len(set(seeds)) == 4 and seeds[0] == gate.GATE_BLOCK.start
+        assert all(generate.split(s) == "eval" for s in seeds)
+        for r, swapped in zip(rows[0::2], rows[1::2]):                       # the same battle, the armies swapped
+            assert (r["own_units"], r["enemy_units"]) == (swapped["enemy_units"], swapped["own_units"])
+            assert r["factions"] == {"own": swapped["factions"]["enemy"], "enemy": swapped["factions"]["own"]}
+            assert r["side_budget"]["own"] == swapped["side_budget"]["enemy"]
+        sizes = [r["own_units"] - 1 for r in rows[0::2]]                     # the generator's own army
+        assert [lo <= n <= hi for n, (lo, hi) in zip(sizes, (gate.SIZE_BINS[b] for b in gate.PAIR_BINS))] == [True] * 4
+        assert gate.plan(4) == rows[:4]                                     # 4 battles: 2 pairs, small and large
         assert gate.plan(1, offset=3) == [rows[3]]
         assert gate.min_wins(4) == 3 and gate.min_wins(200) == 150
 
@@ -91,10 +113,10 @@ def result(**kw):
     return row
 
 
-def write_run(root, name, seed, role, res, difficulty=1, errors=()):
+def write_run(root, name, seed, role, res, difficulty=1, errors=(), swap=False):
     d = root / name
     d.mkdir(parents=True)
-    config = {"own_role": role, "army": {"seed": seed, "men": {"own": 600, "enemy": 700}, "budget": 1000},
+    config = {"own_role": role, "army": {"seed": seed, "men": {"own": 600, "enemy": 700}, "budget": 1000, "swap": swap},
               "factions": {"own": "wh_main_emp_empire", "enemy": "wh2_main_skv_skaven"},
               "units": {"own": [{}] * 3, "enemy": [{}] * 4}}
     (d / "manifest.json").write_text(json.dumps({"config": config}))
@@ -143,6 +165,80 @@ class TestSummary:
         assert rows[0]["nn"]["moves"] == 250 and rows[0]["duration_s"] == 250.0
         out = capsys.readouterr().out
         assert "NOT PASSED" in out and "EMP-SKV" in out
+        by = s["by_faction"]                                   # every run: our Empire against Skaven
+        assert by["factions"]["EMP"]["attack"] == {"games": 2, "wins": 1, "win_rate": 0.5, "no_result": 0}
+        assert by["factions"]["EMP"]["defend"] == {"games": 2, "wins": 1, "win_rate": 0.5, "no_result": 1}
+        assert by["matchups"] == {"EMP-SKV": {"games": 4, "wins": 2, "win_rate": 0.5, "no_result": 1}}
+        assert "by faction (wins/battles): EMP attack 1/2, defend 1/2 | EMP-SKV 2/4 0.50 (1 no result)" in out
+        assert s["pairs"]["pairs"] == 0                                        # battles of an old plan: no pairs
+
+    def test_pair_outcomes(self, tmp_path, capsys):
+        runs = tmp_path / "runs"
+
+        def entry(battle, seed, role, res, swap, run_swap=None):
+            return {"battle": battle, "pair": (battle + 1) // 2, "swap": swap, "seed": seed, "role": role,
+                    "run": write_run(runs, f"r{battle}", seed, role, res, swap=swap if run_swap is None else run_swap)}
+        battles = [entry(1, 11, "attack", result(), False),                                  # pair 1: won both
+                   entry(2, 11, "defend", result(status="timeout", winner=0), True),
+                   entry(3, 13, "attack", result(winner=2), False),                          # pair 2: split
+                   entry(4, 13, "defend", result(), True),
+                   entry(5, 15, "attack", result(winner=2), False),                          # pair 3: lost both
+                   entry(6, 15, "defend", result(winner=2), True),
+                   entry(7, 17, "attack", result(), False),                                  # pair 4: incomplete
+                   entry(8, 17, "defend", result(), True, run_swap=False)]   # the run is not the swapped battle
+        (tmp_path / "battles.json").write_text(json.dumps({"planned": 8, "battles": battles}))
+        s = gate.summarize(tmp_path)
+        p = s["pairs"]
+        assert [x["result"] for x in p["each"]] == ["won both", "split", "lost both", "incomplete"]
+        assert s["battles"][7]["how"] == "run_does_not_match_plan"
+        assert (p["pairs"], p["incomplete"]) == (3, 1)
+        assert p["pair_score"] == pytest.approx(0.0) and p["won_both"] == pytest.approx(1 / 3)
+        lines = "\n".join(gate.table(s))
+        assert "1 won both; 2 split; 3 lost both; 4 incomplete; pair score +0.00 over 3 complete" in lines
+        assert " 2   1s " in lines
+
+    def test_gold_from_the_end_state_and_the_pair_gold(self, tmp_path, monkeypatch, capsys):
+        """Each side: a lord (cost 100) and a unit (cost 300); gold lost as the simulator's reward counts it."""
+        costs = {"lord": 100, "unit": 300}
+        monkeypatch.setattr(gate, "_costs", lambda: costs)
+        runs = tmp_path / "runs"
+
+        def entry(battle, role, res, swap, end, final=True):
+            d = runs / f"r{battle}"
+            run = write_run(runs, f"r{battle}", 21, role, res, swap=swap)
+            m = json.loads((d / "manifest.json").read_text())
+            m["config"]["units"] = {s: [{"script_name": f"{s}_lord", "key": "lord"}, {"script_name": f"{s}_unit", "key": "unit"}]
+                                    for s in ("own", "enemy")}
+            m["config"]["army"]["cost"] = {"own": 400, "enemy": 400}
+            (d / "manifest.json").write_text(json.dumps(m))
+            units = [dict(n=n, side=1 if n.startswith("own") else 2, **u) for n, u in end.items()]
+            sep = (",", ":")                                    # compact, as the game writes it
+            ev = [json.dumps({"event": "nn_sample", "units": [dict(u, hp=1.0, r=False) for u in units]}, separators=sep),
+                  json.dumps({"event": "nn_final" if final else "nn_sample", "units": units}, separators=sep)]
+            old = (d / "events.jsonl").read_text().splitlines()
+            (d / "events.jsonl").write_text("\n".join(ev + old) + "\n")
+            return {"battle": battle, "pair": 1, "swap": swap, "seed": 21, "role": role, "run": run}
+        full = {"men": 50, "hp": 1.0, "r": False, "s": False}
+        b1 = entry(1, "attack", result(), False,                 # we win: their lord dead, their unit routs at half
+                   {"own_lord": full, "own_unit": dict(full, hp=0.8), "enemy_lord": dict(full, men=0, hp=0.0),
+                    "enemy_unit": dict(full, hp=0.5, r=True)})
+        b2 = entry(2, "defend", result(winner=2), True,          # we lose: our unit shattered, no final event
+                   {"own_lord": dict(full, hp=0.5), "own_unit": dict(full, s=True, r=True), "enemy_lord": full},
+                   final=False)                                  # enemy_unit missing: lost whole
+        (tmp_path / "battles.json").write_text(json.dumps({"planned": 2, "battles": [b1, b2]}))
+        s = gate.summarize(tmp_path)
+        g1, g2 = s["battles"][0]["gold"], s["battles"][1]["gold"]
+        assert g1["lost"] == pytest.approx([60.0, 100 + 300 * (0.5 + 0.5 * 0.5)]) and g1["start"] == [400, 400]
+        assert g1["destroyed"] == pytest.approx(325.0) and g1["budget"] == 1000
+        assert g1["trade"] == pytest.approx((325 - 60) / 1000) and g1["margin"] == pytest.approx(1 - 60 / 400)
+        assert g2["lost"] == pytest.approx([350.0, 300.0]) and g2["margin"] == pytest.approx(-(1 - 300 / 400))
+        pg = s["pair_gold"]
+        assert pg["pairs"] == 1 and pg["pair_gold"]["value"] == pytest.approx((325 + 300 - 60 - 350) / 1000)
+        assert pg["weak"]["ratio_net"] == pytest.approx(300 / 350)             # army B: we lost with it
+        assert pg["weak"]["ratio_opp"] == pytest.approx(60 / 325)              # the game AI with it in battle 1
+        gate.main(["summary", str(tmp_path)])
+        assert "pair gold (ours - game AI's, same armies, / budget): +0.215" in capsys.readouterr().out
+        assert gate.ROUT_SHARE == 0.5                            # tools/nn/train/reward.py Weights.rout_share
 
     def test_a_missing_run_is_no_result_and_a_short_gate_does_not_pass(self, tmp_path):
         (tmp_path / "battles.json").write_text(json.dumps({"planned": 2, "battles": [

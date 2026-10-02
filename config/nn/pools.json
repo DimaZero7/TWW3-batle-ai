@@ -1,5 +1,5 @@
 {
-  "_description": "Units available for training, per faction (random armies, tools/nn/armies, docs/en/training/armies.md). A new unit or faction is a new entry here; its passport must be in config/nn/units.json (cost multiplayer_cost, category, men), then py -3.14 -m tools.nn.armies.templates. slot: the unit's name in an army (slot_1, slot_2, ...); width: frontage in m at deployment (default men / rank_depth files x 1.5 m); generator: the faction's config of the game's army generator (cdir_military_generator_configs), whose templates set the proportions of template armies; budget_factor (default 1.0): the faction's gold relative to the other side's after the equal-budget draw (a side's budget is B x its factor / the larger factor of the two, so mirrors stay equal; Skaven 0.8: they won all 10 equal-budget whole battles in the game, docs/en/training/measurements.md).",
+  "_description": "Units available for training, per faction (random armies, tools/nn/armies, docs/en/training/armies.md). A new unit or faction is a new entry here; its passport must be in config/nn/units.json (cost multiplayer_cost, category, men), then py -3.14 -m tools.nn.armies.templates. slot: the unit's name in an army (slot_1, slot_2, ...); width: frontage in m at deployment (default men / rank_depth files x 1.5 m); generator: the faction's config of the game's army generator (cdir_military_generator_configs), whose templates set the proportions of template armies; budget_factor (default 1.0): the faction's gold relative to the other side's after the equal-budget draw (a side's budget is B x its factor / the larger factor of the two, so mirrors stay equal). Every faction is at 1.0 since 02.10.2026: the Skaven's 0.8 of 01.10.2026 (they won all 10 equal-budget whole battles in the game, docs/en/training/measurements.md) made them lose ~90% in the simulator; the Empire got shielded units instead (docs/en/training/armies.md).",
   "mix": {
     "_description": "Share of armies (per side) built by the faction's army templates (as the campaign AI) and pure random within the pool and budget (as a human might, stacks included).",
     "template": 0.75,
@@ -15,12 +15,14 @@
       "lord": {"key": "wh_main_emp_cha_general_0", "width": 5},
       "units": [
         {"key": "wh_main_emp_inf_spearmen_0", "slot": "spear", "width": 30},
+        {"key": "wh_main_emp_inf_spearmen_1", "slot": "shield_spear", "width": 30},
+        {"key": "wh_main_emp_inf_swordsmen", "slot": "sword", "width": 30},
         {"key": "wh2_dlc13_emp_inf_archers_0", "slot": "archer", "width": 40}
       ]
     },
     "wh2_main_skv_skaven": {
       "generator": "WH_Skaven",
-      "budget_factor": 0.8,
+      "budget_factor": 1.0,
       "lord": {"key": "wh2_main_skv_cha_warlord_0", "width": 5},
       "units": [
         {"key": "wh2_main_skv_inf_clanrat_spearmen_0", "slot": "clanrat", "width": 30},

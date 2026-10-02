@@ -915,6 +915,134 @@
    "multiplayer_cost": 950,
    "missile": null,
    "card_check": "no card"
+  },
+  "wh_main_emp_inf_spearmen_1": {
+   "land_unit": "wh_main_emp_inf_spearmen_1",
+   "caste": "melee_infantry",
+   "category": "inf_melee",
+   "class": "inf_mel",
+   "men": 120,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 6,
+   "entity": "wh_main_infantry_standard_blood_dismembers",
+   "hp_per_man": 69,
+   "hp_total": 8280,
+   "mass": 100.0,
+   "size": "small",
+   "height_m": 1.8,
+   "radius_m": 0.65,
+   "speed": {
+    "walk": 1.5,
+    "run": 3.0,
+    "charge": 3.8,
+    "acceleration": 3.0,
+    "deceleration": 4.0
+   },
+   "melee": {
+    "attack": 20,
+    "defence": 42,
+    "charge_bonus": 4,
+    "weapon": "wh_main_emp_spear",
+    "damage": 19,
+    "ap_damage": 6,
+    "bonus_v_large": 15,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.4,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0
+   },
+   "armour": 30,
+   "armour_material": "chainmail",
+   "shield": {
+    "key": "wh_missile_block_35_metal",
+    "missile_block_chance": 35
+   },
+   "leadership": 60,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": true,
+   "hiding_scalar": 1.0,
+   "attributes": [
+    "charge_defense_vs_large",
+    "charge_reflection",
+    "hide_forest"
+   ],
+   "abilities": [],
+   "multiplayer_cost": 350,
+   "missile": null,
+   "card_check": "equal"
+  },
+  "wh_main_emp_inf_swordsmen": {
+   "land_unit": "wh_main_emp_inf_swordsmen",
+   "caste": "melee_infantry",
+   "category": "inf_melee",
+   "class": "inf_mel",
+   "men": 120,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 6,
+   "entity": "wh_main_infantry_standard_blood_dismembers",
+   "hp_per_man": 69,
+   "hp_total": 8280,
+   "mass": 100.0,
+   "size": "small",
+   "height_m": 1.8,
+   "radius_m": 0.65,
+   "speed": {
+    "walk": 1.5,
+    "run": 3.0,
+    "charge": 3.8,
+    "acceleration": 3.0,
+    "deceleration": 4.0
+   },
+   "melee": {
+    "attack": 32,
+    "defence": 32,
+    "charge_bonus": 14,
+    "weapon": "wh_main_emp_sword",
+    "damage": 21,
+    "ap_damage": 7,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0
+   },
+   "armour": 30,
+   "armour_material": "chainmail",
+   "shield": {
+    "key": "wh_missile_block_35_metal",
+    "missile_block_chance": 35
+   },
+   "leadership": 60,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": true,
+   "hiding_scalar": 1.0,
+   "attributes": [
+    "hide_forest"
+   ],
+   "abilities": [],
+   "multiplayer_cost": 375,
+   "missile": null,
+   "card_check": "equal"
   }
  }
 }

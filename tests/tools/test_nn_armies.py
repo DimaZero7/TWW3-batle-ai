@@ -14,6 +14,10 @@ from tools.nn.armies import pools as P
 POOLS = P.load()
 EMP, SKV = "wh_main_emp_empire", "wh2_main_skv_skaven"
 SEEDS = range(300)
+# The Skaven's gold relative to the Empire's (config/nn/pools.json budget_factor; 0.8 from 01.10.2026,
+# back to 1.0 on 02.10.2026): read from the config, not fixed here.
+SKV_SHARE = POOLS[SKV].budget_factor / max(POOLS[EMP].budget_factor, POOLS[SKV].budget_factor)
+EMP_SHARE = POOLS[EMP].budget_factor / max(POOLS[EMP].budget_factor, POOLS[SKV].budget_factor)
 
 
 @pytest.fixture(scope="module")
@@ -55,8 +59,10 @@ class TestPools:
     def test_the_mix_is_three_quarters_templates(self):
         assert P.mix() == {"template": 0.75, "random": 0.25}
 
-    def test_skaven_get_four_fifths_of_the_gold(self):
-        assert POOLS[EMP].budget_factor == 1.0 and POOLS[SKV].budget_factor == 0.8
+    def test_budget_factors_are_the_configs(self):
+        doc = json.loads(P.POOLS.read_text(encoding="utf-8"))["factions"]
+        for faction, pool in POOLS.items():
+            assert pool.budget_factor == float(doc[faction].get("budget_factor", 1.0)) > 0
 
 
 class TestMarket:
@@ -79,7 +85,8 @@ class TestMarket:
         rng = np.random.default_rng(1)
         for budget in np.linspace(1000, 6900, 40):
             if m.can_spend(budget):
-                bought = m.template_army(rng, budget, (0.0, 1.0))   # a template of archers only
+                archers = tuple(float(u.category == "inf_ranged") for u in pool.units)
+                bought = m.template_army(rng, budget, archers)      # a template of archers only
                 n_missile = sum(pool.units[i].category == "inf_ranged" for i in bought)
                 assert n_missile <= pool.cap("inf_ranged", len(bought))
 
@@ -104,15 +111,16 @@ class TestBattles:
                 assert abs(costs[0] - costs[1]) <= 0.05 * max(costs) + 1e-9
 
     def test_budget_ratio_per_faction_pair(self, battles):
-        """Skaven spend 0.8 of the Empire's budget; mirrors spend equal budgets."""
-        expect = {(EMP, EMP): 1.0, (SKV, SKV): 1.0, (EMP, SKV): 0.8, (SKV, EMP): 1.25}
+        """Skaven spend their budget_factor of the Empire's budget; mirrors spend equal budgets."""
+        r = SKV_SHARE / EMP_SHARE
+        expect = {(EMP, EMP): 1.0, (SKV, SKV): 1.0, (EMP, SKV): r, (SKV, EMP): 1 / r}
         ratios = {}
         for a in battles:
             own, enemy = a["sides"]["own"], a["sides"]["enemy"]
             pair = (own["faction"], enemy["faction"])
             assert enemy["budget"] / own["budget"] == pytest.approx(expect[pair], abs=0.002)
             ratios.setdefault(pair, []).append(enemy["cost"] / own["cost"])
-            if EMP in pair:
+            if EMP in pair and EMP_SHARE == 1.0:
                 assert a["sides"]["own" if own["faction"] == EMP else "enemy"]["budget"] == a["budget"]
         for pair, r in ratios.items():
             lo, hi = expect[pair] * 0.95, expect[pair] / 0.95
@@ -124,7 +132,8 @@ class TestBattles:
         for _ in range(30):
             a = G.generate(rng, sides=(EMP, SKV))
             emp, skv = a["sides"]["own"], a["sides"]["enemy"]
-            assert emp["budget"] == a["budget"] and abs(skv["budget"] - 0.8 * a["budget"]) <= 1
+            assert abs(emp["budget"] - EMP_SHARE * a["budget"]) <= 1
+            assert abs(skv["budget"] - SKV_SHARE * a["budget"]) <= 1
 
     def test_a_lord_and_at_most_nineteen_units_from_the_pool(self, battles):
         for a in battles:
@@ -167,7 +176,7 @@ class TestBattles:
     def test_shapes_vary_many_cheap_against_few_elite(self, battles):
         ratio = [max(len(units_of(s)) for s in a["sides"].values())
                  / max(1, min(len(units_of(s)) for s in a["sides"].values())) for a in battles]
-        # Skaven at 0.8 of the Empire's gold field about as many units as it: 7% of battles over 1.5.
+        # Cheap Skaven against fewer Empire units: ~7% of battles over 1.5 at 0.8 of the gold, more at 1.0.
         assert np.mean(np.asarray(ratio) >= 1.5) > 0.03 and max(ratio) >= 2
 
     def test_a_budget_range_a_unit_limit_and_one_faction(self):
@@ -184,10 +193,18 @@ class TestBattles:
         gen = G.default()
         lo, hi = gen.budget_bounds((SKV,))
         assert lo == POOLS[SKV].lord.cost + 150 and hi == POOLS[SKV].lord.cost + 19 * 325
-        # Against the Empire the Skaven get 0.8 B: B up to the Empire's most (12 archers at most).
+        # The Empire's most: 19 units, at most 12 of them archers (the cap), the rest its dearest melee.
+        emp = POOLS[EMP]
+        melee = max(u.cost for u in emp.units if u.category != "inf_ranged")
+        archer = max(u.cost for u in emp.units if u.category == "inf_ranged")
+        emp_hi = emp.lord.cost + 12 * max(melee, archer) + 7 * melee
+        assert gen.budget_bounds((EMP,)) == (emp.lord.cost + min(u.cost for u in emp.units), emp_hi)
+        # Against the Empire each side gets its share of B: B up to what both can field.
         lo, hi = gen.budget_bounds((EMP, SKV))
-        assert lo == POOLS[EMP].lord.cost + 300 and hi == POOLS[EMP].lord.cost + 12 * 350 + 7 * 300
-        assert gen.shares((EMP, SKV)) == {EMP: 1.0, SKV: 0.8} and gen.shares((SKV, SKV)) == {SKV: 1.0}
+        skv_hi = POOLS[SKV].lord.cost + 19 * 325
+        assert hi == pytest.approx(min(emp_hi / EMP_SHARE, skv_hi / SKV_SHARE))
+        assert lo == pytest.approx(max((emp.lord.cost + 300) / EMP_SHARE, (POOLS[SKV].lord.cost + 150) / SKV_SHARE))
+        assert gen.shares((EMP, SKV)) == {EMP: EMP_SHARE, SKV: SKV_SHARE} and gen.shares((SKV, SKV)) == {SKV: 1.0}
 
 
 class TestPlace:

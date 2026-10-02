@@ -11,7 +11,10 @@ a test on a busy GPU takes longer but learns as much; --minutes only caps the ti
 
 1. "before": the starting network (--init, default build/nn-train/runs/long_ai/best.pt) is evaluated
    on EVAL_SEEDS: --eval battles of random armies (up to 19 units a side) per opponent, half of them
-   in each role, against ai_like, nearest and hold_shoot; the same battles every time.
+   in each role, against ai_like, nearest and hold_shoot; the same battles every time: --eval / 2
+   seeds in swapped pairs (the network on either side), with the script baselines (cached) and the
+   rating (docs/en/training/training.md "Network evaluation: fair metrics"; the report's and
+   trend.md's first block, "skill").
 2. 36 updates of PPO (--updates; ~5 minutes) from it with the current code and the protocol's settings
    (PROTOCOL below: the long_ai2 continuation with the baseline's --unit-credit 0 pinned; run.py's
    defaults otherwise), options after `--` go to run.py and override them (a task passes its own
@@ -42,7 +45,7 @@ from pathlib import Path
 
 import torch
 
-from tools.nn.train import checkpoint, evaluate, run
+from tools.nn.train import checkpoint, evaluate, matchups, run, skill
 
 OUT = checkpoint.DIR / "test5"
 LOCK = checkpoint.DIR.parent / "gpu-train.lock"
@@ -96,14 +99,17 @@ def gpu_lock(label, path=LOCK, poll_s=30.0, gap_s=60.0):
 def evaluation(actor, args, device):
     t = time.time()
     res = evaluate.play(actor, opponents=OPPONENTS, device=device, generated=args.eval, max_units=19, seed=1,
-                        together=True)
+                        together=True, paired=True, baseline=True)
     res["seconds"] = round(time.time() - t)
     return res
 
 
 def metrics(res):
-    """{(opponent, role): {name: value}} of one evaluation."""
-    out = {}
+    """{"opponent/role": {name: value}} of one evaluation; "opponent/all": per opponent; "opponent/factions":
+    win rates by our faction and role and by matchup, with gold (tools/nn/train/matchups.py); "skill": the
+    fair metrics (tools/nn/train/skill.py summary: rating, pairs, pair gold, advantage over the script,
+    margin)."""
+    out = {"skill": skill.summary(res)}
     for opp, o in res["by_opponent"].items():
         for role, x in o["roles"].items():
             if not x.get("games"):
@@ -115,6 +121,8 @@ def metrics(res):
                                     "gold_trade": x.get("gold_trade"), **b}
         out[f"{opp}/all"] = {"switches_per_min": o.get("switches_per_minute"), "orders_per_min": o["orders_per_minute"],
                              **{f"kind_{k}": v for k, v in o["kinds"].items()}}
+        if "matchups" in o:
+            out[f"{opp}/factions"] = {"factions": o["factions"], "matchups": o["matchups"]}
     return out
 
 
@@ -134,7 +142,7 @@ ALL = (("switches_per_min", "target switches / min", "{:.2f}"), ("orders_per_min
 
 def table(before, after):
     """Lines: metric, then before -> after per opponent and role."""
-    keys = [k for k in before if not k.endswith("/all")]
+    keys = [k for k in before if k.endswith(("/attack", "/defend"))]
     lines = ["| metric | " + " | ".join(keys) + " |", "|---" * (len(keys) + 1) + "|"]
     for name, title, fmt in ROWS:
         cells = []
@@ -149,15 +157,34 @@ def table(before, after):
         f = (lambda v: "-" if v is None else fmt.format(v))
         lines.append(f"| {title} | " + " | ".join(f"{f(before[k].get(name))} → {f(after.get(k, {}).get(name))}"
                                                   for k in opps) + " |")
-    return lines
+    by = [(f"{title}, {k.split('/')[0]}", cells) for k in before if k.endswith("/factions")
+          for title, cells in matchups.rows([before[k], after.get(k)])]
+    if by:
+        lines += ["", "| by faction | before → after |", "|---|---|"]
+        lines += [f"| {title} | {' → '.join(cells)} |" for title, cells in by]
+    return skill_block([before.get("skill"), after.get("skill")], ["before → after"], " → ") + lines
+
+
+def skill_block(points, heads, join=None):
+    """The compact skill block (tools/nn/train/skill.py rows): a column per point, or one column of the
+    cells joined by `join`; [] when no point has it."""
+    if not any(points):
+        return []
+    rows = skill.rows(points)
+    if join is not None:
+        rows = [(t, [join.join(c)]) for t, c in rows]
+    return (["skill (fair metrics: docs/en/training/training.md):", "", "| skill | " + " | ".join(heads) + " |",
+             "|---" * (len(heads) + 1) + "|"] + [f"| {t} | " + " | ".join(c) + " |" for t, c in rows] + [""])
 
 
 def trend(points):
     """Lines: a metric per opponent (attack / defend), a column per minute. points: [(minute, metrics())]."""
     mins = [m for m, _ in points]
     first = points[0][1]
-    opps = sorted({k.split("/")[0] for k in first}, key=lambda o: OPPONENTS.index(o) if o in OPPONENTS else 99)
-    lines = ["| metric (attack / defend) | " + " | ".join(f"min {m}" for m in mins) + " |", "|---" * (len(mins) + 1) + "|"]
+    opps = sorted({k.split("/")[0] for k in first if "/" in k},
+                  key=lambda o: OPPONENTS.index(o) if o in OPPONENTS else 99)
+    lines = skill_block([m.get("skill") for _, m in points], [f"min {m}" for m in mins])
+    lines += ["| metric (attack / defend) | " + " | ".join(f"min {m}" for m in mins) + " |", "|---" * (len(mins) + 1) + "|"]
     f = (lambda fmt, v: "-" if v is None else fmt.format(v))
     for name, title, fmt in ROWS:
         for o in opps:
@@ -167,6 +194,12 @@ def trend(points):
     for name, title, fmt in ALL:
         for o in opps:
             lines.append(f"| {title}, {o} | " + " | ".join(f(fmt, m.get(f"{o}/all", {}).get(name)) for _, m in points) + " |")
+    by = [(f"{title}, {o}", cells) for o in opps
+          for title, cells in matchups.rows([m.get(f"{o}/factions") for _, m in points])]
+    if by:
+        lines += ["", "by faction (our faction first):", "",
+                  "| by faction | " + " | ".join(f"min {m}" for m in mins) + " |", "|---" * (len(mins) + 1) + "|"]
+        lines += [f"| {title} | " + " | ".join(cells) + " |" for title, cells in by]
     return lines
 
 

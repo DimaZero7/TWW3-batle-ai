@@ -11,7 +11,7 @@ the passports. One file for all units — `config/nn/units.json`.
 ## How to get them
 
 ```bash
-py -3.14 -m tools.nn.units                  # the seven v1 units
+py -3.14 -m tools.nn.units                  # the units of UNITS (tools/nn/units.py)
 py -3.14 -m tools.nn.units --units k1,k2    # other units
 ```
 
@@ -94,6 +94,40 @@ Experience is not in the passport: what a rank adds is the same for everyone —
 All seven also have `hide_forest` (they hide in woods). The size of all seven is
 `small`. The lords' and the Skaven's abilities are in the file.
 
+## Spearmen with shields and swordsmen
+
+Added on 02.10.2026 to the Empire's pool: shields block slings and arrows from the
+front, the Empire's answer to the Skaven at equal gold ([armies](armies.md)).
+The same men as the spearmen without shields (health, mass, speed, armour,
+leadership); they differ in the shield, the weapon, attack and defence.
+
+| | Spearmen | Spearmen with shields | Swordsmen |
+|---|---:|---:|---:|
+| Key | `wh_main_emp_inf_spearmen_0` | `wh_main_emp_inf_spearmen_1` | `wh_main_emp_inf_swordsmen` |
+| Men; health of a man / unit | 120; 69 / 8280 | 120; 69 / 8280 | 120; 69 / 8280 |
+| Walk / run / charge, m/s | 1.5 / 3.0 / 3.8 | 1.5 / 3.0 / 3.8 | 1.5 / 3.0 / 3.8 |
+| Attack / defence | 20 / 34 | 20 / **42** | **32 / 32** |
+| Charge | 4 | 4 | **14** |
+| Damage: normal + piercing | 19 + 6 | 19 + 6 | **21 + 7** |
+| Bonus against large / against infantry | 15 / 0 | 15 / 0 | **0** / 0 |
+| Time between blows, s | 5.7 (`wh_main_emp_spear_0`) | **4.4** (`wh_main_emp_spear`) | **4.3** (`wh_main_emp_sword`) |
+| Armour | 30 | 30 | 30 |
+| Shield, blocks arrows | none | **35 %** (`wh_missile_block_35_metal`) | **35 %** (the same) |
+| Leadership | 60 | 60 | 60 |
+| Attributes | charge_defense_vs_large, charge_reflection, hide_forest | the same | hide_forest only |
+| Cost (multiplayer) | 300 | **350** | **375** |
+
+The swordsmen have no bonus against infantry in the database (`bonus_v_infantry` 0):
+their edge over the spearmen against infantry is attack 32, a heavier and faster blow
+and the charge. The simulator reads all of it from the passport: no new rule.
+
+Their cards were captured on 02.10.2026 (game v9.0.1, build 50381; each run had only
+the General and the unit): the spearmen with shields with list
+`config/roster/capture_emp_shields.json` (run `20261002T094315-roster-372`), the swordsmen
+with `config/roster/capture_emp_swords.json` (run `20261002T095749-roster-373`). Both equal
+their passports. The halberdiers and the stormvermin of the lord swarm probe are in the
+file too, without cards.
+
 ## Checked against the cards
 
 All seven passports equal their cards from battle in every checked field (the
@@ -112,10 +146,12 @@ with a schema from 26.09.2026 (local archive `research/evidence/units/empire-202
 
 ## Shields
 
-All three spearmen units have **no shield** (`shield` = `none`), nor do the archers
-and the slingers. Only the lords have one: the General's is metal and blocks
-55 % of arrows, the Warlord's is wood, 35 %. A shield covers 60° from the front
-([missile damage](../game/units/missile-damage.md)).
+The three v1 spearmen units have **no shield** (`shield` = `none`), nor do the archers
+and the slingers. The lords have one: the General's is metal and blocks
+55 % of arrows, the Warlord's is wood, 35 %. Since 02.10.2026 the Empire's pool also has
+the spearmen with shields and the swordsmen (metal, 35 % both). A shield covers 60° from the front
+([missile damage](../game/units/missile-damage.md)); the simulator blocks that share of
+the hits whose shooter stands within 60° of the target's facing, for lords and infantry alike.
 
 ## What is not there, and why
 

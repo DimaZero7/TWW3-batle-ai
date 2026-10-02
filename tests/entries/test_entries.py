@@ -553,7 +553,7 @@ class TestNnArena:
         assert any(r["event"] == "error" and "own_ai" in r["message"] for r in rows)
 
     def test_net_commands_a_generated_army_of_twenty_units(self, lua, tmp_path):
-        # The gate's largest battle (tools/nn/gate.py): 19 Empire units v 20 Skaven, lords of both factions,
+        # The gate's largest battle (tools/nn/gate.py): 18 Empire units v 20 Skaven, lords of both factions,
         # several unit types. Our network attacks: the state says so, and every one of our units takes its order.
         from tools.nn import scenario as nn_scenario
         from tools.nn.armies import generate
@@ -561,8 +561,9 @@ class TestNnArena:
         arena = generate.battle(1_000_900_008)
         places = nn_scenario.placements(arena)
         cfg = nn_scenario.run_config(arena)
-        assert (len(places["own"]), len(places["enemy"])) == (19, 20)
-        assert len({u["key"] for u in places["own"]}) == 3 and len({u["key"] for u in places["enemy"]}) == 4
+        assert (len(places["own"]), len(places["enemy"])) == (18, 20)
+        # several unit types a side (the count follows config/nn/pools.json: not fixed here)
+        assert len({u["key"] for u in places["own"]}) >= 3 and len({u["key"] for u in places["enemy"]}) >= 3
 
         def units(side):
             return ", ".join(f"fake.unit('{u['script_name']}', '{u['key']}', {u['x']}, {u['z']})" for u in places[side])
@@ -607,7 +608,7 @@ class TestNnArena:
         rows = events(tmp_path / "tww3_bai_events.jsonl")
         assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
         (given,) = [r for r in rows if r["event"] == "nn_orders"]
-        assert len(given["orders"]) == n_own == 19 and all(o["status"] == "given" for o in given["orders"])
+        assert len(given["orders"]) == n_own == 18 and all(o["status"] == "given" for o in given["orders"])
         assert len(list(lua.eval("bm.orders").values())) == n_own
         result = rows[-1]
         assert result["event"] == "result" and result["winner"] == 1 and result["nn_orders_given"] == n_own

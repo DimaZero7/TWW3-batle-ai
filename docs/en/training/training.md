@@ -21,7 +21,8 @@ bash tools/nn/dock.sh tools.nn.train.run --name long_ai --minutes 80 --armies ge
   --lr 1.5e-4 --entropy 0.005 --entropy-end 0.001 --anchor 0.1 --anchor-end 0 \
   --mix '{"self": 0.1, "past": 0.15, "nearest": 0.2, "hold_shoot": 0.1, "hold": 0.05, "ai_like": 0.4}' \
   --eval-past build/nn-train/runs/long19/latest.pt
-# evaluation alone: the fixed scenes, or random battles of EVAL_SEEDS per opponent
+# evaluation alone: the fixed scenes, or random battles of EVAL_SEEDS per opponent (in swapped pairs,
+# with the script baseline and the rating: "Network evaluation: fair metrics" below)
 bash tools/nn/dock.sh tools.nn.train.evaluate --checkpoint build/nn-train/latest.pt --per-scene 128
 bash tools/nn/dock.sh tools.nn.train.evaluate --checkpoint build/nn-train/latest.pt --generated 512 \
   --opponents ai_like,nearest,hold_shoot,past --against build/nn-train/runs/long19/latest.pt
@@ -60,6 +61,7 @@ Everything goes to `build/nn-train/` (not in Git):
 | `runs/<name>/log.jsonl` | one line per update: losses, entropy, KL, the weights of entropy and KL in force, reward and the same by term a minute of battle per role (`reward_parts`), the critic's quality (`ev`, per role), win rate by opponent and role, order changes, order kinds, lord deaths, target switches |
 | `runs/<name>/eval.json` | the final evaluation |
 | `runs/<name>/replays/*/` | battles of the final network, written like the game's recordings |
+| `baselines/<opponent>_<units>u_<limit>s_<version>.json` | the script baselines of the evaluation ([fair metrics](#network-evaluation-fair-metrics)) |
 
 **A checkpoint** (`tools/nn/train/checkpoint.py`) is one file, a dict saved by `torch.save`:
 `format` (2), `kinds` (the order kinds in code order), `preset`, `config` (the network's sizes:
@@ -78,8 +80,10 @@ with it, so tests can be compared with each other.
 
 1. **Before.** The starting network (`--init`, by default `runs/long_ai/best.pt`, 2 of 4 against
    the game's AI) plays the evaluation: 512 battles of random armies from `EVAL_SEEDS` (up to 19
-   units a side) per opponent, 256 in each role, against `ai_like`, `nearest` and `hold_shoot`. All
-   1536 battles run in one batch (`evaluate.play(..., together=True)`), the same battles every time.
+   units a side) per opponent, 256 in each role, against `ai_like`, `nearest` and `hold_shoot`: 256
+   seeds, each played twice, the network on either side ([swapped pairs](#network-evaluation-fair-metrics)),
+   and the script baselines of the same battles (cached). All 1536 battles run in one batch
+   (`evaluate.play(..., together=True)`), the same battles every time.
 2. **Training.** 36 PPO updates (`--updates`; ~5 minutes on a free GPU) with the current code and
    the settings of the `long_ai2` continuation (`test5.PROTOCOL`: random armies up to 19 units,
    `--small 0.35:6`, KL to `bcmix` 0.06 → 0.03, entropy 0.003 → 0.001, the attacker's
@@ -97,7 +101,9 @@ with it, so tests can be compared with each other.
 
 | Metric | What is counted (the learner's units; `tools/nn/train/behaviour.py`) |
 |---|---|
+| skill (the first block) | the [fair metrics](#network-evaluation-fair-metrics): the rating ± 95 % overall and per opponent, the fitted faction and attack edges, the pair score, the advantage over the script per matchup, the margin per matchup (`skill` of `metrics()`) |
 | win rate | by opponent and role |
+| by faction | per opponent: win rate of our faction (EMP, SKV) by role and of each matchup, ours first (EMP-EMP, EMP-SKV, SKV-EMP, SKV-SKV), with the battle count and the matchup's gold exchange ratio (`factions`, `matchups` of the evaluation; `tools/nn/train/matchups.py`); one block in `trend.md` |
 | enemy gold destroyed, own gold lost / battle; gold exchange ratio | the gold of the reward ([below](#losses-in-gold-and-the-attackers-idle-cost-01102026)) at the end of the battle, mean per battle; the ratio is destroyed / lost over all the battles of the cell |
 | own lord dead | share of battles that ended with the own lord dead |
 | missile s in melee / battle, missile time in melee | seconds missile units (range > 0, not a lord) stand in melee, per battle and as a share of their standing time |
@@ -136,6 +142,82 @@ melee ~100 s a battle, and in 6–12 % of decisions it piles more than 2 units o
 another enemy flanks it — the picture seen in the game. Ability uses (~4 a battle) are the lord's
 abilities fired by the simulator's AI rule: `scenario.py` marks side 2 as played by the game's AI
 by default, also when the learner plays side 2 (fixed: [lord abilities](#lord-abilities-01102026)).
+
+## Network evaluation: fair metrics
+
+The factions are unequal, and that is fine: the game is rock-paper-scissors. But it spoils the
+measurements: in Empire–Skaven battles the faction decides most outcomes (at equal gold the network
+won 59–79 % as the Skaven against the Empire and 24–50 % as the Empire against the Skaven; mirrors
+~45–55 %), so a win rate says more about the matchups drawn than about the network. The evaluation
+(`tools/nn/train/evaluate.py`, `test5`, the [gate](../launch/gate.md)) adds measures that take
+the matchup out (`tools/nn/train/skill.py`, plain numpy); the old fields stay as they were.
+
+| Measure | How it is counted |
+|---|---|
+| **Swapped pairs**, `pairs` | Every generated evaluation battle is played twice on the same armies: the network on side 1, then on side 2 (the opponent takes the other). The same army attacks in both, so the network's role swaps too. A pair is won both / split / lost both; `pair_score` = P(won both) − P(lost both). `generated` battles an opponent are `generated / 2` seeds × 2 (`pair_count`: even, at least 2). The scenes already play each scene from both sides: their pairs are counted too. `hold` (attack-only) has no pairs. |
+| **Advantage over the script**, `baseline` | The same battles played by the opponent script against itself (`ai_like` against `ai_like`, …): the matchup's natural edge. Per battle the network minus the script, same armies, same side: the win and the gold exchange (`trade` = (enemy gold destroyed − own gold lost) / budget), per matchup and overall (`win_adv`, `gold_adv`, with `win_net`, `win_script`, …). The script plays both sides, so both battles of a pair are one script battle: one per seed. |
+| **Rating**, `skill` | One ridge logistic (Bradley–Terry) fit over all battles of the evaluation: P(win) = σ(r_opponent + edge(ours, theirs) + a · (+1 attack, −1 defend)), r = skill_net − skill_opponent in logits; the faction edge is antisymmetric (EMP-SKV = −SKV-EMP, 0 in mirrors); a Gaussian prior with sd 3 on every parameter keeps all-wins finite; the 95 % interval from the inverse Hessian. `overall` = the mean of the opponents' ratings: **the single trend number**. 0 is even with that opponent in a mirror, roles balanced; +0.4 ≈ 60 %. |
+| **Margin**, `margin` | The winner's gold left / its starting gold (the reward's gold: health lost, a routing unit by `rout_share`), + when we win, − when we lose: a continuous score; the mean per opponent and per matchup (`matchups[...]["margin"]`). |
+| **Pair gold**, `pair_gold` | Most pairs are split 1:1, which hides the skill; the gold does not. In a pair the network plays army A in one battle and army B in the other, the opponent the other way round, so both pairs of hands get the same two armies. `pair_gold` = (enemy gold destroyed by us in both battles − by the opponent in both) / budget, the mean ± 95 % over the pairs; it equals our trade with an army minus the opponent's with the same army, for either army. `exchange`: the same as a factor, exp(mean log(our destroyed / lost with an army) − log(the opponent's with it)) with its 95 % interval (gold floored at 1 % of the budget; ×1 = even hands). `weak` / `strong`: the army we did worse with (the lower margin; in a split pair the one that lost both), its destroyed / lost summed over the pairs and its mean trade in our hands vs the opponent's (`ratio_net`, `ratio_opp`, `trade_net`, `trade_opp`): how well each pair of hands gets value out of a losing army. In the [gate](../launch/gate.md) the gold comes from each unit's end state (the last `nn_final`, else `nn_sample`, of `events.jsonl`) × its passport cost (`config/nn/units.json`), counted as the reward counts it. |
+
+`evaluate.play(..., paired=True, baseline=False)`: pairs are the default for generated battles
+(`paired=False`, `--no-pairs`: each battle once, as before); the baseline is on in `test5` and in
+`python -m tools.nn.train.evaluate` (`--no-baseline`), off in `run.py`'s evaluations, never with
+`--small` (the armies' sizes would differ). The result keeps the per-battle lists (`battles`: won,
+factions, role, side, pair, seed, margin, trade, destroyed, lost, budget) for a refit.
+
+**Pairs in the batch.** `scenes.Generated` sets a battle's role (side 1 attacks at even positions)
+and size (`small`: the first share of the bank) by its position, so the batch is laid out in blocks
+of four battles `[p, q, p, q]` (two pairs; the network on side 1, then on side 2), the blocks cycling
+through the opponents (`paired_order`); with `small` the bank is padded at its end so the small
+share ends at a block (`padded`).
+
+**The baseline cache.** `build/nn-train/baselines/<opponent>_<units>u_<limit>s_<version>.json`, per
+battle: seed, winner, gold lost and starting gold per side, budget, factions, attacker. `version`
+is a hash of what a script battle depends on (`evaluate.VERSION_FILES`: the simulator, the army
+generator, the scripts, the reward, `config/nn`; and the budget factors as loaded), so a change
+there plays the baselines again; a file of more seeds serves a prefix. The 768 script battles (256
+seeds × 3 opponents) take a fraction of the network's own evaluation time.
+
+**The report.** `evaluate` prints the skill block after its table; `test5`'s `report.json`
+(`before`, `after`, `trend`: `skill`) and `trend.md` start with it:
+
+```
+| skill | min 0 | min 10 |
+| rating, overall (logit, ± 95%) | -0.05 ± 0.12 | ... |
+| rating, ai_like | +0.25 ± 0.21 | ... |
+| faction edge EMP-SKV (fitted) | -0.70 | ... |
+| pair score (both/split/neither), ai_like (n 192) | +0.120 (0.21/0.69/0.09) | ... |
+| vs script win / gold adv, ai_like EMP-SKV (n 86) | +0.047 / +0.008 | ... |
+| margin, ai_like all / EMP-EMP / EMP-SKV / SKV-EMP / SKV-SKV | +0.019 / +0.052 / -0.165 / +0.177 / +0.005 | ... |
+```
+
+**The check, 02.10.2026.** `build/nn-train/test5/it1/m10.pt`, 384 battles per opponent (192 pairs)
+against `ai_like`, `nearest` and `hold_shoot`, the Skaven budget factor 1.0 and 0.9 (overridden in
+memory; `build/eval_fair/`; the pools of 02.10 with the Empire's shielded units):
+
+| | Skaven ×1.0 | Skaven ×0.9 |
+|---|---|---|
+| win rate EMP-SKV / SKV-EMP, `ai_like` | 0.314 / 0.733 | 0.686 / 0.407 |
+| win rate, the network on the Empire / on the Skaven (all opponents) | 0.419 / 0.558 | 0.581 / 0.407 |
+| win rate, all (paired) | 0.488 | 0.495 |
+| faction edge EMP-SKV (fitted) | −0.70 | +0.72 |
+| **rating, overall** | **−0.05 ± 0.12** | **−0.02 ± 0.12** |
+| rating fitted on the Empire's battles / on the Skaven's | −0.04 ± 0.22 / −0.06 ± 0.23 | +0.00 ± 0.22 / −0.14 ± 0.22 |
+| rating `ai_like` / `nearest` / `hold_shoot` | +0.25 / −0.55 / +0.13 (± 0.21) | +0.24 / −0.30 / −0.01 (± 0.21) |
+| pair score `ai_like` / `nearest` / `hold_shoot` | +0.12 / −0.26 / +0.06 | +0.12 / −0.14 / −0.01 |
+| win advantage over the script `ai_like` / `nearest` / `hold_shoot` | +0.06 / −0.13 / +0.03 | +0.06 / −0.07 / −0.00 |
+
+10 % of the Skaven's gold flips the cross matchups: a matchup's win rate moves by up to 0.37, the
+win rate of the network's battles on one faction by 0.16. The fitted faction edge takes it
+(−0.70 → +0.72); the overall rating moves by 0.03 (its interval ±0.12), fitted on one faction's
+battles alone by 0.04–0.08 (±0.22). Within one run the win rates of the mixes (the Empire's side,
+the Skaven's side, cross matchups, mirrors) span 0.42–0.56, their ratings −0.06…−0.04. The paired
+overall win rate holds too (0.488 → 0.495), because the pairs balance the sides; an unbalanced mix
+does not. Per opponent the measures move within about 1.5 of their intervals (`nearest`
+−0.55 → −0.30; the armies, so the battles, differ between the two runs). What it says about `m10`:
+about even with the scripts overall, ahead of `ai_like` (+0.25; +6 points over `ai_like` playing
+itself), behind `nearest` (−13 points against `nearest` playing itself).
 
 ## How a training step goes
 
@@ -1036,6 +1118,82 @@ leaving its ground (185 m and 146 m forward in battles 2 and 4); in-game attack 
 
 Not done (simulator): a shattered lord should count as dead for morale (`lord_dead_s`), as in the game.
 
+### Iteration 1: why training is flat, 02.10
+
+`it1` (10 minutes, 95 updates from `fix45d/m45.pt`, KL 0.03 to it): against `ai_like` 0.51 / 0.55 →
+0.50 / 0.56, `nearest` 0.43 / 0.41 → 0.45 / 0.38, `hold_shoot` 0.57 / 0.43 → 0.56 / 0.44; the gate 2 of 4.
+Diagnosis (`runs/test5_it1/log.jsonl` and GPU probes; scripts in `build/nn-train/diag_it1/`, not in Git):
+
+- **The policy is deterministic.** Kind entropy 0.0004–0.027 of 1.61; 87–99.7 % of the units' decisions
+  give the chosen kind a probability above 0.99, the target (attack) entropy is 0.004–0.1. The entropy
+  bonus's gradient at weight 0.003 is 1e-4 to 1e-2 of the policy's: no exploration.
+- **The step is noise.** KL per update 0.0002–0.0008, clipping 0.1–0.35 %; the cosine of the policy
+  gradient with the previous update's from −0.47 to +0.56, about 0 on average (as `snr.py` before).
+- **The leash is not the brake.** The gradient of the KL to the reference (× 0.03) is ~10 times smaller
+  than the policy's (0.01–0.05 against 0.13–0.44) but steady; the KL to the reference levels at 0.007
+  within ~30 updates: it holds a random walk, not a signal — there is no signal.
+- **The critic is fine:** explained variance 0.98–0.99 per role, advantage σ ~0.1 at a return σ ~1;
+  reward a minute: outcome ±0.05, lord ±0.01, gold ±0.005, the attacker's idle −0.007, orders −0.0035.
+
+**The lost gate battles** (`build/nn-arena/runs/20261002-091548`, `-091736`) show the same pattern: in
+the 2v2 our lord, 45 m ahead of its archers, fights the enemy lord under fire and routs at 200 s; in
+the 7v5 our lord is 10–23 m ahead of the centre of its units (the game's lord 3 m behind its own), in
+melee from 59 s down to 0.25 health, routs at 274 s and shatters at 282 s — all six units rout within
+4 s with 685 men against 399; the defender again left its ground, 193 m.
+
+**The simulator does not teach it** (`sim_lord.py`, 512 battles against `ai_like`): `ai_like`'s lord is
+as far forward in a fight as ours (34 m ahead of its units' centre, more than 10 m in 0.67–0.72 of the
+decisions, in melee 0.76) and shatters as often (0.33 / 0.40 against our 0.39 / 0.30). The only
+differences: attacking, our lord is in melee before the army in 29 % of battles (`ai_like` 0), and our
+defender walks 164 m before contact (`ai_like` 24 m), harmless in the simulator (0.55 wins).
+
+**Added** (default off):
+
+| Option | What | For iteration 2 |
+|---|---|---|
+| `--entropy-target`, `--entropy-max` (0.1), `--entropy-rate` (1.25) | an entropy floor on the kind: the bonus's weight × rate every update while the entropy is below the target, back down to the schedule above it (`ppo.entropy_weight`) | 0.1, 0.1 |
+| `--kind-temperature` | now softens the `--reference` actor too (otherwise the KL pulls the softened kind straight back to the sharp one) | 2 |
+| `--lord-lead`, `--lord-lead-m` (10), `--lord-lead-near` (100) | per unit: a lord standing more than m ahead of the centre of its side's standing units (towards the enemy's centre) while an enemy is within `near` pays weight × (lead − m) / m, at most the weight (`reward.lord_lead`) | 2e-4 |
+
+A short GPU run (26 updates from `it1/m10`, all of it together): kind entropy 0.03 → 0.1–0.21 in ~17
+updates (weight 0.003 → 0.085 and back to 0.011), decisions with a probability above 0.99 13–30 %
+instead of 87–99 %; order changes a minute 2.9 → 10 (the price of exploring, paid by the order cost);
+KL to the reference 0.03–0.04; the unit reward with `lord_lead` 2e-4 has σ 0.0012–0.0034 a step (the
+size of the other terms); training win rates unchanged. Not verified by training.
+
+### Iteration 2: the entropy floor and the lord, 02.10
+
+`it2` (15 minutes, 137 updates from `it1/m10.pt`, the iteration-2 settings above, two new Empire units in
+the pools; `build/nn-train/test5/it2/`, 512 battles an opponent):
+
+- **Rating** −0.06 → −0.28 → −0.13 → −0.16 (± 0.11; minutes 0/5/10/15): no gain. `ai_like` +0.20 → +0.17,
+  `nearest` −0.46 → −0.59, `hold_shoot` +0.07 → −0.05; the attack edge +0.14 → +0.28 (defending got
+  worse: against `hold_shoot` 0.44 → 0.36, as the Empire 0.39 → 0.24).
+- **The floor works, exploration does not.** Kind entropy 0.009 → 0.10 within ~20 updates (weight
+  0.009–0.017 after that), but no new kind was learnt: hold, withdraw and keep stay at ≤ 0.01, move
+  falls 0.14 → 0.06, attack 0.86 → 0.93. The randomness is churn: order changes a minute 2.6 → 5.2–6.8,
+  target switches 0.86 → 1.01, struck in flank or rear 0.42 → 0.47, the order cost a minute −0.0035 →
+  −0.006 per role. The evaluation samples (not greedy), so it pays for the noise too.
+- Reward a minute (thirds of the run): attack `end` −0.002 → +0.008, `idle` −0.003 → −0.008; defence
+  `end` −0.002 → −0.003; lord ±0.002. Explained variance 0.98–0.99; KL a step 0.0004–0.0017.
+- Own lord dead (`ai_like`, attack / defend) 0.29 / 0.26 → 0.26 / 0.24 (within the noise).
+
+**The gate** (`build/nn-gate/20261002-105113`, 4 swapped pairs): **3 of 8**, pair score −0.25, gold
+exchange 0.77. Our lord routed or shattered in 4 of the 5 losses (at 179–372 s, and 736 s in the fifth) and
+in none of the 3 wins, where the enemy's lord routed (205–280 s); it fought in melee in all 8 (114–600 s),
+38–273 s of it below half health (`lord_exposed` 5e-4 did not stop it), 0.9–4 enemies on it. Its lead over
+its line: median 6–58 m (the game's −3–50 m), more than 10 m in 0.24–0.97 of the time near the enemy: the
+lead alone does not tell a loss. Defending, our army walked 160–275 m before contact, the attacker 59–155 m
+(it1 139–197 m), in the 2 wins as in the 2 losses. Missile units fired 0.30–0.71 of their time, in melee
+27–262 s. The new units (Empire 18v20 attack, won; 2v2 defence, won): attack orders 0.7–0.9, in melee
+0.6–0.8 of their time, the swordsmen on the enemy lord 141–162 s; 3 of 5 routed late (500–533 s).
+
+**Added** (default off):
+
+| Option | What | For iteration 3 |
+|---|---|---|
+| `--lord-fall` | per unit: the lord pays weight × its fall in the step (`reward.lord_up`: 1 standing, 1 − `--lord-rout` (0.5 when 0) routing, 0 shattered, dead or gone; a rally gives it back): the army's price of its rout on the lord's own credit, which saw only its gold (~0.06 for a whole lord in a 19-unit army) against ~0.2 for the gold it kills | 0.2 |
+
 ## A failed experiment: two networks, attack and defence, 01.10.2026
 
 Instead of one shared network we tried two — attack and defence — each twice as wide (`wide`,
@@ -1071,6 +1229,17 @@ Instead of one shared network we tried two — attack and defence — each twice
 
 ## Tests
 
+Fair metrics: `tests/tools/test_nn_skill.py` (numpy): pairs (won both / split / lost both, the score,
+incomplete pairs; a faction edge that decides single battles leaves only splits), the margin, the
+advantage over the script per matchup, the rating fitted on synthetic battles with a known rating,
+faction edge and role (they come back; the rating stays when the matchup mix moves the win rate;
+per opponent and their mean; all wins stay finite), the report rows; `tests/tools/test_nn_eval_pairs.py`
+(torch, in the container): the pairs' layout (one bank battle, both sides, the same role), the small
+share padded to a block, a paired evaluation (pairs, swapped armies and roles, `hold` without pairs,
+margins, the baselines and their cache, the rating), the script's view from the network's side, the
+version hash, the skill block in `test5`'s report and trend; `tests/tools/test_nn_gate.py`: the gate's
+swapped pairs, `--army-swap`, the pair outcomes.
+
 `tests/tools/test_nn_train.py` (torch; skipped in `.venv`, run in the container like
 `tests/tools/test_sim.py`): GAE, clipping, reward (the time limit, the idle attacker, a lord's
 death), order changes and target switches, schedules, a move point turned back into its bin, the
@@ -1098,6 +1267,6 @@ damage sets it back to 0; a marching attacker pays (also in a simulated battle);
 battle there is no cost beside the idle cost; the defender never pays, in either role; `struck` is the
 defender's health falling; `Battles` keeps the last damage per battle and clears it on a restart;
 evaluation gives
-the gold metrics; the trend table has a column per minute. Night 01.10→02.10: the reward terms add up to the step, and the ones logged per role to the collected reward; with `idle_share` one shooting unit no longer lifts the idle cost (the idle share of the army by cost pays); the damage rate is the defender's gold lost, a share of the budget a minute, a rally is no damage; with `idle_rate` a scratch does not reset the timer, a real blow does; per-role normalisation; a run with `--reference self`, `--adv-norm role`, the new idle cost and the critic from another checkpoint (`--critic-init`, a `--init` without a critic); `unit_idle` charges every standing unit of the attacker the idle multiplier, a shooting one and the defender nothing.
+the gold metrics; the trend table has a column per minute. Night 01.10→02.10: the reward terms add up to the step, and the ones logged per role to the collected reward; with `idle_share` one shooting unit no longer lifts the idle cost (the idle share of the army by cost pays); the damage rate is the defender's gold lost, a share of the budget a minute, a rally is no damage; with `idle_rate` a scratch does not reset the timer, a real blow does; per-role normalisation; a run with `--reference self`, `--adv-norm role`, the new idle cost and the critic from another checkpoint (`--critic-init`, a `--init` without a critic); `unit_idle` charges every standing unit of the attacker the idle multiplier, a shooting one and the defender nothing. Iteration 1: the entropy floor raises the weight below the target and lowers it above, within the schedule and the ceiling; `lord_lead` is 1 for a lord 2 m or more ahead of its units' centre with an enemy near, a share between m and 2 m, 0 with no enemy near and for other units. Iteration 2: `lord_fall` charges the lord half its weight when it routs, the other half when it shatters, all of it when it dies standing, gives it back on a rally, and never another unit.
 `tests/tools/test_nn_observation.py`: the lord known from the passport; a slain enemy lord is
 known unseen and fades; an enemy's melee and rout count only while seen.

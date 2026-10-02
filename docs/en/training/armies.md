@@ -2,8 +2,8 @@
 
 [← Back](README.md) · [Documentation](../README.md) › [Data for training](README.md) › Random armies · [Русский](../../ru/training/armies.md)
 
-The random battle generator for training: two armies with an equal budget (the Skaven
-get 0.8 of it, see below), each a lord and 0 to 19 units, already deployed. The same battle can be played both in the
+The random battle generator for training: two armies with an equal budget (a faction's
+`budget_factor` can change its share, see below), each a lord and 0 to 19 units, already deployed. The same battle can be played both in the
 [simulator](simulator.md) and in the game. The rules come from the
 [network model](network.md#armies-and-battle-rules).
 
@@ -46,11 +46,14 @@ flowchart LR
    factions can field in 1 lord and 19 units. The budget is drawn again until both sides
    can spend it.
    - **Budget factor.** A side's budget is B × its faction's `budget_factor` / the larger
-     factor of the two sides (`config/nn/pools.json`, 1.0 by default). The Skaven have
-     0.8: against the Empire they get 0.8·B, the Empire B; in a mirror both get B. Why:
-     at an equal budget the Skaven won all 10 whole battles in the game
-     ([measurements](measurements.md#whole-battles-empire-against-skaven)). The bounds of
-     B take the factor into account, so both sides can always spend their share.
+     factor of the two sides (`config/nn/pools.json`, 1.0 by default). The bounds of
+     B take the factor into account, so both sides can always spend their share. Now
+     every faction has 1.0. The Skaven had 0.8 from 01.10.2026: at an equal budget they
+     won all 10 whole battles in the game
+     ([measurements](measurements.md#whole-battles-empire-against-skaven)); at 0.8 they lost
+     ~90% in the simulator, so on 02.10.2026 the factor went back to 1.0 and the Empire got
+     the spearmen with shields and the swordsmen instead
+     ([unit passports](units.md#spearmen-with-shields-and-swordsmen)).
 3. **Buying.** Each side spends 0.95 to 1 of its budget, the lord included, so sides with
    the same factor differ by at most 5%. A unit is taken only if the army can still end
    inside that window. For this
@@ -99,12 +102,19 @@ last byte (`tools/nn/dbtables.decode`). The field names are ours, from the value
 
 Shares by number of units (lord not counted), per template:
 
-| Faction | Template | Spearmen | Archers |
-|---|---|---:|---:|
-| Empire | `WH_Empire_land` | 62% | 38% |
-| | `WH_Empire_land_2` | 67% | 33% |
-| | `WH_Empire_land_3` | 62% | 38% |
-| | `WH_Empire_land_4` | 57% | 43% |
+| Faction | Template | Spearmen | Spearmen with shields | Swordsmen | Archers |
+|---|---|---:|---:|---:|---:|
+| Empire | `WH_Empire_land` | 21% | 21% | 21% | 38% |
+| | `WH_Empire_land_2` | 22% | 22% | 22% | 33% |
+| | `WH_Empire_land_3` | 21% | 21% | 21% | 38% |
+| | `WH_Empire_land_4` | 19% | 19% | 19% | 43% |
+
+The spearmen (both) are in group `..._melee_infantry_main_frontline_spears`, the swordsmen
+in `..._melee_infantry_main_frontline_swords` (quality step `tier_1_step_4` all three).
+Both groups end at the family `melee_infantry_trash`, like all melee infantry, so the
+templates' spear and sword shares (e.g. 20 + 20 in `WH_Empire_land`) are summed into one
+melee share, split evenly among the three units. Before 02.10.2026 the pool had the
+spearmen without shields only: 62 / 67 / 62 / 57%.
 
 | Faction | Template | Clanrats | Skavenslave spearmen | Skavenslave slingers |
 |---|---|---:|---:|---:|
@@ -146,30 +156,32 @@ its front.
 
 ## Summary over 10,000 battles
 
-`python -m tools.nn.armies`, seeds 5 … 10,004:
+`python -m tools.nn.armies`, seeds 5 … 10,004 (02.10.2026: every `budget_factor` 1.0, the
+Empire's pool with the spearmen with shields and the swordsmen):
 
 | What | Value |
 |---|---|
 | Mirror battles | 50% |
 | Armies: template / random | 75% / 25% |
-| Budget B | 676 … 6900, median 2971 |
-| Units per side (lord not counted) | mean 9.1; 1–4: 24%, 5–9: 33%, 10–14: 21%, 15–18: 14%, 19: 7% |
-| Cost difference between sides of equal budgets | mean 1.2%, at most 4.9% |
-| Skaven cost / Empire cost | mean 0.801, 0.761 … 0.842 (4997 battles) |
-| Skaven / Skaven, Empire / Empire | mean 1.000 and 1.001, 0.952 … 1.052 |
-| One side has x times the other's units | x ≥ 1.5: 6.7%; x ≥ 2: 0.3%; x ≥ 3: 0.0% |
-| Missile share of a side | mean 34%; no missile: 16%; ≥ 50%: 28%; missile only: 3.4% |
-| Empire template armies | spearmen 64%, archers 36% |
-| Skaven template armies | clanrats 35%, slaves 34%, slingers 31% |
+| Budget B | 676 … 7725, median 2749 |
+| Units per side (lord not counted) | mean 9.0; 1–4: 28%, 5–9: 31%, 10–14: 20%, 15–18: 12%, 19: 9% |
+| Cost difference between sides of equal budgets | mean 1.5%, at most 5.0% |
+| Skaven cost / Empire cost | mean 0.998, 0.950 … 1.052 (4997 battles) |
+| Skaven / Skaven, Empire / Empire | mean 1.000 and 1.000, 0.951 … 1.051 |
+| One side has x times the other's units | x ≥ 1.5: 34.2%; x ≥ 2: 10.0%; x ≥ 3: 1.0% |
+| Missile share of a side | mean 27%; no missile: 23%; ≥ 50%: 20%; missile only: 1.4% |
+| Empire template armies | spearmen 27%, spearmen with shields 19%, swordsmen 21%, archers 34% |
+| Skaven template armies | clanrats 39%, slaves 32%, slingers 29% |
 
-Before the budget factor (Skaven at B too): budget median 2935, 9.5 units a side,
-x ≥ 1.5: 27%, x ≥ 2: 6.1%, x ≥ 3: 0.8%. The many-cheap-against-few-elite battles were
-mostly Skaven against Empire; at 0.8·B the Skaven field about as many units as the
-Empire.
+Within the same melee share the cheapest unit, the plain spearmen (300), is bought most:
+27% against 19% (with shields, 350) and 21% (swordsmen, 375); the market fills the budget
+window, and how the dearer two split is the luck of that fit. The many-cheap-against-few-elite battles are mostly Skaven
+against Empire. With the Skaven at 0.8·B (01.10.2026) they fielded about as many units as
+the Empire: x ≥ 1.5 in 6.7% of battles.
 
 An equal budget was not equal strength ([measurements](measurements.md): Skaven fielded
-1601 men against the Empire's 661 and won all 10 whole battles), hence the Skaven's 0.8.
-Whether 0.8 evens them out is not yet measured in the game.
+1601 men against the Empire's 661 and won all 10 whole battles). The 0.8 factor
+overshot in the simulator; the shielded spearmen are the second try at the balance.
 
 The first eight battles were run in the simulator (`--sim`: every unit attacks the
 nearest enemy): all ended within 250–540 s. With the sides swapped, the same army wins in

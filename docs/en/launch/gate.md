@@ -5,7 +5,9 @@
 One command: N real battles where our side is commanded by a trained network (a checkpoint) and
 the other by the game's AI at fair Normal difficulty. The armies come from the
 [army generator](../training/armies.md) on evaluation seeds the network never saw in training. The
-network attacks and defends in turn. The gate is passed with **4 battles, at least 3 wins**. It is
+network attacks and defends in turn, in swapped pairs: every seed twice, the network on either army
+([fair metrics](../training/training.md#network-evaluation-fair-metrics)). The gate is passed with
+**4 battles (2 pairs), at least 3 wins**. It is
 a quick check before the night one ([readiness](../training/network.md#readiness)), not that check.
 
 ## Launch
@@ -21,6 +23,8 @@ What happens in each battle:
 1. `python -m tools.build nn-arena --own-ai net --army-seed <seed> --own-role attack|defend --speed 20
    --timeout 3600`: a generated battle with our side under the network ([build](build.md#options)).
    The battle file goes to `build/nn-arena/random_<seed>.xml`; `scenarios/` is not changed.
+   The second battle of a pair adds `--army-swap`: our side gets the generator's enemy army and the
+   game's AI its own army (`random_<seed>_swap.xml`; the run's `army.swap` is true).
 2. [watch.ps1](watch.md) `-NoBuild -LingerSeconds 0`: the companion in the container with this
    checkpoint, one battle per game launch through [launch.ps1](run.md): Normal difficulty
    (`battle_difficulty 1`), the user's preferences restored byte for byte, only our files removed.
@@ -50,18 +54,24 @@ One battle of the plan: `-Battles 1 -Offset 3` is the 4th (the largest armies).
 - Seeds come from the game-check block `1 000 900 000 … 1 000 999 999`: the last 100 000 of the
   generator's `EVAL_SEEDS`. Training takes `TRAIN_SEEDS`, so the network never sees these battles.
   The lower part of `EVAL_SEEDS` is left to the simulator check.
-- The plan walks the block in order and takes seeds by the size of our army (units besides the
-  lord), in turn 1-4, 5-9, 10-14, 15-19. So even a short plan has small and large armies.
-- Roles alternate: the network attacks in battles 1, 3, … and defends in 2, 4, …
+- Battles come in swapped pairs: battles 1 and 2 are one seed, the network on the generator's own
+  army, then on its enemy army; the same army attacks in both, so the network attacks in battles
+  1, 3, … and defends in 2, 4, … A pair is won both, split or lost both: a faction matchup that
+  decides single battles weighs on both battles of a pair alike, so a pair won both says more about
+  the network than two single wins. No script baseline in the game (the game's AI against itself
+  would cost a launch per battle).
+- The plan walks the block in order and takes a pair's seed by the size of the generator's own army
+  (units besides the lord), in turn 1-4, 10-14, 5-9, 15-19 (`PAIR_BINS`). So even a short plan has
+  small and large armies.
 
-The first 4 battles:
+The first 4 battles (with the pools of 02.10.2026; they follow `config/nn/pools.json`):
 
-| Battle | Seed | Our army | The game AI's army | Network |
-|---|---|---|---|---|
-| 1 | 1000900000 | Empire, lord + 1 | Empire, lord + 1 | attacks |
-| 2 | 1000900002 | Skaven, lord + 5 | Empire, lord + 3 | defends |
-| 3 | 1000900007 | Skaven, lord + 10 | Skaven, lord + 9 | attacks |
-| 4 | 1000900008 | Empire, lord + 18 | Skaven, lord + 19 | defends |
+| Battle | Pair | Seed | Our army | The game AI's army | Network |
+|---|---|---|---|---|---|
+| 1 | 1 | 1000900000 | Empire, lord + 1 | Empire, lord + 1 | attacks |
+| 2 | 1, swapped | 1000900000 | Empire, lord + 1 | Empire, lord + 1 | defends |
+| 3 | 2 | 1000900007 | Skaven, lord + 10 | Skaven, lord + 9 | attacks |
+| 4 | 2, swapped | 1000900007 | Skaven, lord + 9 | Skaven, lord + 10 | defends |
 
 If a network version is chosen by these battles, they stop being an independent check: take
 another set (`-Offset`) for the final check.
@@ -87,6 +97,9 @@ A battle not at Normal difficulty (`battle_difficulty` in `launch.json` other th
 |---|---|
 | `battles.json` | the plan and each battle's run folder (`build/nn-arena/runs/<time>/`) |
 | `summary.json` | wins, losses, no outcome, `passed`, `fair`, `preferences_restored` and a row per battle |
+| `summary.json`: `by_faction` | wins and battles by our faction and role and by matchup, ours first (EMP-SKV), battles without an outcome counted; also a line under the table |
+| `summary.json`: `pairs` | the swapped pairs: shares won both / split / lost both, `pair_score` (won both − lost both), incomplete pairs (a battle without an outcome or not played), and per pair (`each`) its seed, outcomes and result; also the table's last line |
+| `summary.json`: `pair_gold` | the pairs' gold balance ([fair metrics](../training/training.md#network-evaluation-fair-metrics)): ours minus the game AI's on the same armies / budget, the exchange factor, the weak army's destroyed / lost in our hands vs the game AI's; a battle's `gold` (lost per side from the units' end state × passport cost, destroyed, budget, trade, margin); a line under the table |
 
 A battle's row: seed, factions and army templates, budget (B, each side's budget and cost; Skaven 0.8 of the Empire's), units per side (lord included), role,
 who won and how, battle length, men at the start and at the end, units still standing, the
@@ -96,11 +109,11 @@ difficulty, preferences restored.
 The table:
 
 ```
- #       seed  factions   units   role  winner       how battle s    men left nn moves/miss/orders
- 4 1000900008   EMP-SKV   19v20 defend game_ai completed    567.6    866/2996           568/0/4306
+ # pair       seed  factions   units   role  winner       how battle s    men left nn moves/miss/orders
+ 4    - 1000900008   EMP-SKV   19v20 defend game_ai completed    567.6    866/2996           568/0/4306
 ```
 
-`units` counts the lord; `men left` is the network's / the game AI's men.
+`pair` is the pair and `s` its swapped battle (`-` in a gate planned before the pairs); `units` counts the lord; `men left` is the network's / the game AI's men.
 
 ## In-game check (30.09.2026)
 

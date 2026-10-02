@@ -171,3 +171,10 @@ the last one is `306074d`.
   luck. Night result: the network no longer collapses without the script leash, learns from its
   own version and holds `best.pt`'s level, but doesn't beat it. Weak spots unchanged: small armies
   and defending with few units (4 vs 5, 7 vs 5).
+
+## Morning 02.10: 10-minute iterations (accelerated training)
+
+- **09:25. Iteration 1** (10 min from `fix45d/m45.pt`): flat — vs `ai_like` 51/55 → 50/56%, "all at
+  the nearest" 43/41 → 45/38, "hold and shoot" 57/43 → 56/44; "attack" 84 → 86%. Game: **2 of 4**
+  (the 7 vs 5 Skaven defence lost again with more men left, 685/399). Started an analysis: why
+  training stands still and what to change in the rewards.

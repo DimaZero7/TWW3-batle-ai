@@ -77,14 +77,18 @@ def test_passports_hold_the_v1_units_and_equal_their_cards():
             assert units.check_card(p, c) == [], key
             assert p["card_check"] == "equal"
             checked += 1
-    # The v1 units have cards from battle; the probe's halberds (lord swarm, 01.10.2026) do not.
-    assert checked == 7 and len(units.UNITS) == 9
+    # The v1 units, the shielded spearmen and the swordsmen (02.10.2026) have cards from battle; the
+    # probe's halberds and stormvermin (lord swarm, 01.10.2026) do not.
+    assert checked == 9 and len(units.UNITS) == 11
 
 
 def test_v1_spears_have_no_shield_and_missile_units_have_missiles():
     u = saved()["units"]
     for key in ("wh_main_emp_inf_spearmen_0", "wh2_main_skv_inf_clanrat_spearmen_0", "wh2_main_skv_inf_skavenslave_spearmen_0"):
         assert u[key]["shield"] == {"key": "none", "missile_block_chance": 0}
+    # The same spearmen with shields: a 35% metal shield, a better spear (defence 42, a faster blow), dearer.
+    assert u["wh_main_emp_inf_spearmen_1"]["shield"] == {"key": "wh_missile_block_35_metal", "missile_block_chance": 35}
+    assert u["wh_main_emp_inf_spearmen_1"]["multiplayer_cost"] > u["wh_main_emp_inf_spearmen_0"]["multiplayer_cost"]
     for key in ("wh2_dlc13_emp_inf_archers_0", "wh2_main_skv_inf_skavenslave_slingers_0"):
         assert u[key]["missile"]["range_m"] > 0 and u[key]["missile"]["ammo"] > 0
     assert all(u[k]["missile"] is None for k in u if "archers" not in k and "slingers" not in k)

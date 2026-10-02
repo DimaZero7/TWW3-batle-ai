@@ -129,6 +129,18 @@
       "quality": "tier_1_step_4_units"
      }
     ],
+    "wh_main_emp_inf_spearmen_1": [
+     {
+      "group": "wh3_default_land_melee_infantry_main_frontline_spears",
+      "quality": "tier_1_step_4_units"
+     }
+    ],
+    "wh_main_emp_inf_swordsmen": [
+     {
+      "group": "wh3_default_land_melee_infantry_main_frontline_swords",
+      "quality": "tier_1_step_4_units"
+     }
+    ],
     "wh2_dlc13_emp_inf_archers_0": [
      {
       "group": "wh3_default_land_ranged_infantry_trash",

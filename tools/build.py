@@ -228,11 +228,15 @@ def nn_arena_config(args, run_config):
     if args.army_seed is not None:
         from tools.nn.armies import generate
         arena = generate.battle(args.army_seed)
+        if args.army_swap:
+            # the other half of a swapped pair (tools/nn/gate.py): our network takes the other army
+            arena = dict(arena, name=f"{arena['name']}_swap",
+                         sides={"own": arena["sides"]["enemy"], "enemy": arena["sides"]["own"]})
         # A generated battle is not a scenario of the repository: its file goes next to the build.
         path = project.BUILD / "nn-arena" / f"{arena['name']}.xml"
         path.parent.mkdir(parents=True, exist_ok=True)
         nn_scenario.write_scenario(defender, arena, path, duration_s)
-        run_config["army"] = {"seed": args.army_seed, "split": generate.split(args.army_seed),
+        run_config["army"] = {"seed": args.army_seed, "split": generate.split(args.army_seed), "swap": args.army_swap,
                               "budget": arena["budget"],
                               "side_budget": {s: arena["sides"][s]["budget"] for s in nn_scenario.SIDES},
                               "template": {s: arena["sides"][s]["army"] for s in nn_scenario.SIDES},
@@ -283,6 +287,9 @@ def main(argv=None):
     parser.add_argument("--army-seed", type=int,
                         help="nn-arena: a generated battle (tools/nn/armies, generate.battle(seed)): "
                              "armies of a lord and 0-19 units a side; EVAL seeds for checks")
+    parser.add_argument("--army-swap", action="store_true",
+                        help="nn-arena --army-seed: the seed's armies swapped (our side gets the generator's "
+                             "enemy army): the second battle of a swapped pair (tools/nn/gate.py)")
     parser.add_argument("--decide-ms", type=int, default=1000,
                         help="nn-arena --own-ai net: model ms between two decisions (250..5000)")
     parser.add_argument("--arena", default="arena",
@@ -299,6 +306,8 @@ def main(argv=None):
         args.own_ai = "net" if args.army_seed is not None else "attack"
     if args.own_role and args.own_ai != "net":
         parser.error("--own-role is for --own-ai net (the planner modes set our role themselves)")
+    if args.army_swap and args.army_seed is None:
+        parser.error("--army-swap is for --army-seed")
     if args.army_seed is not None and args.arena != "arena":
         parser.error("--army-seed and --arena are two sources of armies: give one")
     if not 30 <= args.timeout <= 3600:

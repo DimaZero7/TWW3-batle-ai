@@ -41,6 +41,7 @@ What every entry does: [entry points](../apps/entries.md).
 | `--own-ai net` | nn-arena | The network in the companion commands our side ([watching the network](watch.md)) |
 | `--own-role attack\|defend` | nn-arena `net` | The network attacks (the game's AI defends and wins when time is out) or defends (default: the game's AI attacks) |
 | `--army-seed N` | nn-arena | A battle from the [army generator](../training/armies.md): `generate.battle(N)`, a lord and 0-19 units a side. Without `--own-ai` the network commands our side. The battle file is `build/nn-arena/random_<N>.xml`; `scenarios/` is not touched. The manifest gets `army` (seed, train/eval, budget, templates, men) |
+| `--army-swap` | nn-arena `--army-seed` | The seed's armies swapped: our side gets the generator's enemy army, the game's AI its own army (`random_<N>_swap.xml`, `army.swap` true in the manifest): the second battle of a swapped pair of the [gate](gate.md#which-battles) |
 | `--decide-ms 250..5000` | nn-arena `net` | Battle time between two decisions of the network, ms (1000) |
 | `--layout`, `--enemy-mode native\|defend` | enemy-layout | Enemy layout; the game AI as is or told to defend (default) |
 | `--range-mode fire_at_will\|attack\|damage` | archer-range | When archers start shooting by the depth of their block; `damage` — damage to a fearless target at 70–120 m |

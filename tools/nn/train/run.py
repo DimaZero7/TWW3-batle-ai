@@ -29,7 +29,7 @@ import torch
 from tools.nn.model import config as model_config
 from tools.nn.model import critic as model_critic
 from tools.nn.model import policy as model_policy
-from tools.nn.train import checkpoint, evaluate, league, ppo, randomise, reward, rollout, scenes
+from tools.nn.train import checkpoint, evaluate, league, matchups, ppo, randomise, reward, rollout, scenes
 
 SCRIPTED = ("nearest", "hold_shoot", "hold", "ai_like")
 
@@ -125,6 +125,9 @@ def train(args, every=None):
             reference = copy.deepcopy(actor).eval()
         else:
             reference = checkpoint.load_policy(args.reference or args.init, device)
+            if args.kind_temperature != 1.0:
+                # the same softening, or the KL would pull the softened kind straight back to the sharp one
+                soften_kind(reference, args.kind_temperature)
         for p in reference.parameters():
             p.requires_grad_(False)
     cfg = ppo.PPOConfig(lr=args.lr, gamma=args.gamma, epochs=args.epochs, minibatch=args.minibatch,
@@ -140,7 +143,9 @@ def train(args, every=None):
                              crowd=args.crowd, flank_attack=args.flank_attack, neighbour=args.neighbour,
                              idle_near=args.idle_near, gold=args.gold, rout_share=args.rout_share,
                              unit_idle=args.unit_idle, lord_rout=args.lord_rout,
-                             lord_exposed=args.lord_exposed, lord_exposed_hp=args.lord_exposed_hp)
+                             lord_exposed=args.lord_exposed, lord_exposed_hp=args.lord_exposed_hp,
+                             lord_lead=args.lord_lead, lord_lead_m=args.lord_lead_m, lord_lead_near=args.lord_lead_near,
+                             lord_fall=args.lord_fall)
 
     def small_arg():
         if not args.small:
@@ -202,6 +207,7 @@ def train(args, every=None):
     t0 = time.time()
     t_bank = t0
     update, decisions, total, window, best = 0, 0, {}, {}, -1.0
+    floor_w = None                                # the entropy floor's current weight (--entropy-target)
     best_eval, t_eval, paused = -1.0, time.time(), 0.0
     next_mark = every[0] if every else None
     elog = (out / "eval_log.jsonl").open("w", encoding="utf-8", newline="\n")
@@ -231,10 +237,16 @@ def train(args, every=None):
         t_c = time.time()
         # Schedules: the kind's entropy bonus and the KL to the reference go linearly from their start to
         # their end value over the run (e.g. exploration and the warm start's hold fade out).
-        u_cfg = dataclasses.replace(step_cfg, entropy=schedule(args.entropy, entropy_end, done_share),
+        # With --entropy-target the weight is the floor's (ppo.entropy_weight), never below the schedule.
+        scheduled = schedule(args.entropy, entropy_end, done_share)
+        floor_w = scheduled if floor_w is None else max(scheduled, floor_w)
+        u_cfg = dataclasses.replace(step_cfg, entropy=floor_w if args.entropy_target else scheduled,
                                     anchor=schedule(args.anchor, anchor_end, done_share))
-        st = ppo.update(actor, critic, opt, batch, u_cfg, train_policy=update >= args.critic_warmup,
-                        reference=reference)
+        trains = update >= args.critic_warmup
+        st = ppo.update(actor, critic, opt, batch, u_cfg, train_policy=trains, reference=reference)
+        if args.entropy_target and trains:
+            floor_w = ppo.entropy_weight(floor_w, st["entropy"], args.entropy_target, scheduled,
+                                         max(scheduled, args.entropy_max), args.entropy_rate)
         del batch
         update += 1
         if own_reference and reference is not None and update % args.reference_every == 0:
@@ -349,6 +361,8 @@ def show(name, r):
                   f"(ratio {x.get('gold_ratio', float('nan')):.2f}), timeouts {x['timeouts']:.2f}, "
                   f"lord dead own {x.get('lord_dead_own', float('nan')):.2f} enemy {x.get('lord_dead_enemy', float('nan')):.2f}")
         print(f"      kinds " + ", ".join(f"{k} {v:.2f}" for k, v in o["kinds"].items()), flush=True)
+        if "matchups" in o:
+            print(f"      by faction: {matchups.text(o)}", flush=True)
         if len(r["by_scene"][opp]) <= 12:
             print("      " + "; ".join(f"{k} {v['win_rate']:.2f}" for k, v in r["by_scene"][opp].items()), flush=True)
 
@@ -390,6 +404,11 @@ def parser():
     ap.add_argument("--minibatch", type=int, default=ppo.PPOConfig.minibatch, help="decisions per minibatch")
     ap.add_argument("--entropy", type=float, default=ppo.PPOConfig.entropy, help="weight of the kind's entropy")
     ap.add_argument("--entropy-end", type=float, help="... at the end of the run (linear; default: no change)")
+    ap.add_argument("--entropy-target", type=float, default=0.0,
+                    help="> 0: an entropy floor - the weight goes up x --entropy-rate every update while the kind's "
+                         "entropy is below this, back down to the schedule above it (0: the schedule only)")
+    ap.add_argument("--entropy-max", type=float, default=0.1, help="the floor's weight at most this")
+    ap.add_argument("--entropy-rate", type=float, default=1.25, help="the floor's factor per update")
     ap.add_argument("--order-cost", type=float, default=reward.Weights.order_change)
     ap.add_argument("--timeout", type=float, default=reward.Weights.timeout)
     ap.add_argument("--idle", type=float, default=reward.Weights.idle)
@@ -408,7 +427,8 @@ def parser():
     ap.add_argument("--mix", help='opponent shares as json, e.g. {"self": 0.2, "nearest": 0.4}')
     ap.add_argument("--critic-warmup", type=int, default=0, help="first updates train only the critic")
     ap.add_argument("--kind-temperature", type=float, default=1.0,
-                    help="divide the starting actor's order-kind logits by this (> 1: softer, for exploration)")
+                    help="divide the starting actor's order-kind logits by this (> 1: softer, for exploration); "
+                         "a --reference checkpoint gets the same")
     ap.add_argument("--anchor", type=float, default=ppo.PPOConfig.anchor, help="KL weight to the reference actor")
     ap.add_argument("--anchor-end", type=float, help="... at the end of the run (linear; default: no change)")
     ap.add_argument("--reference", help="the reference actor (default: --init); 'self': the network's own copy, "
@@ -461,6 +481,15 @@ def parser():
     ap.add_argument("--lord-exposed", type=float, default=reward.Weights.lord_exposed,
                     help="per unit: per decision a lord fights in melee below --lord-exposed-hp of its health")
     ap.add_argument("--lord-exposed-hp", type=float, default=reward.Weights.lord_exposed_hp)
+    ap.add_argument("--lord-lead", type=float, default=reward.Weights.lord_lead,
+                    help="per unit: per decision a lord stands ahead of its line near the enemy (x 0-1: past "
+                         "--lord-lead-m, full at twice it)")
+    ap.add_argument("--lord-lead-m", type=float, default=reward.Weights.lord_lead_m)
+    ap.add_argument("--lord-lead-near", type=float, default=reward.Weights.lord_lead_near,
+                    help="m: only while a standing enemy is this near the lord")
+    ap.add_argument("--lord-fall", type=float, default=reward.Weights.lord_fall,
+                    help="per unit: the lord pays this x its fall in the step (standing 1, routing 1 - --lord-rout "
+                         "(0.5 when 0), shattered or dead 0; a rally gives it back)")
     ap.add_argument("--neighbour", type=float, default=reward.Weights.neighbour,
                     help="+ this x the mean of own units' terms within 40 m")
     ap.add_argument("--no-eval", action="store_true")

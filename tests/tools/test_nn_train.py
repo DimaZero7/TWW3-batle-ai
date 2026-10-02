@@ -62,6 +62,12 @@ class TestFunctions:
         adv, _ = ppo.gae(r, torch.ones(3, 1), done, torch.tensor([0.0]), gamma=0.5, lam=0.0)
         assert adv[:, 0].tolist() == pytest.approx([1.0 + 0.5 - 1, -1.0, 2.0 - 1])
 
+    def test_the_entropy_floor_raises_the_weight_below_the_target_within_its_bounds(self):
+        assert ppo.entropy_weight(0.01, 0.02, 0.1, 0.003, 0.1, rate=2.0) == pytest.approx(0.02)
+        assert ppo.entropy_weight(0.08, 0.02, 0.1, 0.003, 0.1, rate=2.0) == pytest.approx(0.1)     # the ceiling
+        assert ppo.entropy_weight(0.01, 0.2, 0.1, 0.003, 0.1, rate=2.0) == pytest.approx(0.005)
+        assert ppo.entropy_weight(0.004, 0.2, 0.1, 0.003, 0.1, rate=2.0) == pytest.approx(0.003)   # the schedule
+
     def test_the_clipped_loss_stops_at_the_clip(self):
         lp_old = torch.zeros(1, 2)
         lp_new = torch.log(torch.tensor([[1.5, 0.5]])).requires_grad_()
@@ -545,6 +551,68 @@ class TestBehaviour:
         off = reward.unit_step(before, st, behaviour.facts(st, p), p, dataclasses.replace(w, lord_exposed=0.0))
         assert off.abs().sum() == 0
 
+    def test_a_lord_ahead_of_its_line_near_the_enemy_pays_lord_lead(self):
+        from tools.nn.train import behaviour
+        # side 1's lord 35 m ahead of its spearmen (x -60 -> -25), the enemy's 20 m behind its own
+        st = line_army(gap=120.0, lord_ahead=55.0)
+        p = load()
+        u = st.u
+        lords = u["lord"][0].nonzero().flatten().tolist()
+        side2_lord = [i for i in lords if int(u["side"][0, i]) == 2][0]
+        u["x"][0, side2_lord] = 80.0                                                 # back to 20 m behind
+        lead = reward.lord_lead(u, margin_m=10.0, near_m=100.0)
+        own = [i for i in lords if int(u["side"][0, i]) == 1][0]
+        # the rest's centre (spearmen at -60, archers at -100, by cost) is behind -60: the lead is > 35 m
+        assert float(lead[0, own]) == pytest.approx(1.0)
+        assert float(lead[0, side2_lord]) == 0.0
+        assert lead[0][~u["lord"][0]].abs().sum() == 0                              # only lords
+        assert float(reward.lord_lead(u, margin_m=10.0, near_m=5.0).abs().sum()) == 0.0   # no enemy near
+        before = reward.unit_before(u)
+        w = reward.Weights(unit_gold=0.0, flanked=0.0, missile_melee=0.0, crowd=0.0, flank_attack=0.0, neighbour=0.0,
+                           lord_lead=0.01, lord_lead_m=10.0, lord_lead_near=100.0)
+        r = reward.unit_step(before, st, behaviour.facts(st, p), p, w)
+        assert float(r[0, own]) == pytest.approx(-0.01)
+        assert r[0].abs().sum() == pytest.approx(0.01)
+        # a lead between the margin and twice it pays a share: put the lord 15 m ahead of the rest's centre
+        rest = (u["side"][0] == 1) & ~u["lord"][0]
+        c = float((u["x"][0] * u["cost"][0] * rest).sum() / (u["cost"][0] * rest).sum())
+        u["x"][0, own] = c + 15.0
+        u["z"][0, own] = 0.0
+        assert float(reward.lord_lead(u, 10.0, 200.0)[0, own]) == pytest.approx(0.5, abs=1e-3)
+        off = reward.unit_step(before, st, behaviour.facts(st, p), p, dataclasses.replace(w, lord_lead=0.0))
+        assert off.abs().sum() == 0
+
+    def test_a_lord_that_routs_or_falls_pays_lord_fall_and_a_rally_gives_it_back(self):
+        from tools.nn.train import behaviour
+        st = line_army()
+        p = load()
+        u = st.u
+        lords = u["lord"][0].nonzero().flatten().tolist()
+        own = [i for i in lords if int(u["side"][0, i]) == 1][0]
+        w = reward.Weights(unit_gold=0.0, flanked=0.0, missile_melee=0.0, crowd=0.0, flank_attack=0.0, neighbour=0.0,
+                           lord_fall=0.2, lord_rout=0.5)
+        before = reward.unit_before(u)
+        u["r"][0, own] = True                                                        # standing -> routing: 0.5
+        r = reward.unit_step(before, st, behaviour.facts(st, p), p, w)
+        assert float(r[0, own]) == pytest.approx(-0.1)
+        assert r[0].abs().sum() == pytest.approx(0.1)                                # only the lord
+        before = reward.unit_before(u)
+        u["s"][0, own] = True                                                        # routing -> shattered: 0.5 more
+        assert float(reward.unit_step(before, st, behaviour.facts(st, p), p, w)[0, own]) == pytest.approx(-0.1)
+        u["s"][0, own] = False
+        before = reward.unit_before(u)
+        u["r"][0, own] = False                                                       # a rally gives it back
+        assert float(reward.unit_step(before, st, behaviour.facts(st, p), p, w)[0, own]) == pytest.approx(0.1)
+        before = reward.unit_before(u)
+        u["men"][0, own] = 0                                                         # standing -> dead: the whole
+        assert float(reward.unit_step(before, st, behaviour.facts(st, p), p, w)[0, own]) == pytest.approx(-0.2)
+        off = reward.unit_step(before, st, behaviour.facts(st, p), p, dataclasses.replace(w, lord_fall=0.0))
+        assert float(off[0, own]) == 0.0
+        spear = [i for i in range(u["side"].shape[1]) if int(u["side"][0, i]) == 1 and not bool(u["lord"][0, i])][0]
+        before = reward.unit_before(u)
+        u["r"][0, spear] = True                                                      # another unit's rout: not this term
+        assert float(reward.unit_step(before, st, behaviour.facts(st, p), p, w)[0, spear]) == 0.0
+
     def test_gae_per_unit_stops_at_the_end_of_a_battle(self):
         r = torch.tensor([[[1.0, 2.0]], [[0.0, 0.0]], [[2.0, 1.0]]])                # [T, R, N]
         done = torch.tensor([[False], [True], [False]])
@@ -1019,3 +1087,18 @@ class TestProtocol:
         assert "min 0 | min 10" in text
         assert "| win rate, ai_like | 0.500 / 0.600 | 0.600 / 0.700 |" in text
         assert "| gold exchange ratio, ai_like | 1.00 / - | 1.25 / - |" in text
+
+    def test_the_report_and_the_trend_have_a_block_by_faction(self):
+        from tools.nn.train import matchups, test5
+
+        def m(w):
+            g = matchups.group([True, w > 0.5], ["wh_main_emp_empire", "wh2_main_skv_skaven"],
+                               ["wh2_main_skv_skaven"] * 2, [True, False],
+                               gold=(np.array([100.0, 200.0]), np.array([200.0, 100.0]), np.array([1000.0, 1000.0])))
+            return {"ai_like/attack": {"win": w}, "ai_like/all": {"kind_hold": 0.2}, "ai_like/factions": g}
+        text = "\n".join(test5.trend([(0, m(0.4)), (10, m(0.6))]))
+        assert "| EMP win attack / defend (n 1/0), ai_like | 1.000 / - | 1.000 / - |" in text
+        assert "| SKV-SKV win / gold ratio (n 1), ai_like | 0.000 / 0.50 | 1.000 / 0.50 |" in text
+        table = "\n".join(test5.table(m(0.4), m(0.6)))
+        assert "| SKV win attack / defend (n 0/1), ai_like | - / 0.000 → - / 1.000 |" in table
+        assert "ai_like/factions" not in table

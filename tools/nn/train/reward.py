@@ -73,6 +73,18 @@ itself, beside the side's reward; none of it enters the side's reward:
     lord_exposed  per decision a lord fights in melee with less than lord_exposed_hp of its health
                   (gate 02.10: the network's lord led the line and went back into melee at 19 % health
                   until it shattered);
+    lord_lead     x 0-1 per decision a lord stands more than lord_lead_m ahead of the centre of its
+                  side's other standing units (towards the enemy's centre) while an enemy is within
+                  lord_lead_near (lord_lead()): full at twice lord_lead_m. Gates 02.10 (fix45b, it1): the
+                  game's AI keeps its lord at or behind its line's centre (-3 to -12 m), ours 10-45 m
+                  ahead, and its shattering broke the army; in the simulator ai_like's lord leads as far
+                  as ours (34 m), so the simulator alone does not teach it;
+    lord_fall     x the lord's fall in the step (lord_up: 1 standing, 1 - lord_rout (0.5 when lord_rout
+                  is 0) routing, 0 shattered, dead or gone; a rally gives it back): the army-wide price of
+                  its rout laid on the lord's own credit. Gate 02.10 (it2/m15, 8 battles): our lord routed
+                  or shattered in 4 of the 5 losses and in none of the 3 wins, after 38-109 s in melee
+                  below half health; its own credit saw only its gold (~0.06 for a whole lord at 19 units)
+                  against ~0.2 for the gold it kills, so fighting on paid;
 then `neighbour` x the mean of the same of own units within neighbour_m (what happens next to it).
 Each shaped term at most 1200 decisions x weight per unit in a 10-minute battle: at 2e-4, 0.24, a
 quarter of a win.
@@ -118,7 +130,11 @@ class Weights:
     unit_idle: float = 0.0        # x the attacker's idle m, per decision an attacking unit neither fights nor shoots
     lord_exposed: float = 0.0     # per decision a lord fights in melee below lord_exposed_hp of its health
     lord_exposed_hp: float = 0.5
-    neighbour: float = 0.5        # + this x the mean of own units' terms within neighbour_m
+    lord_lead: float = 0.0        # per decision a lord stands ahead of its own line near the enemy (x 0-1, lord_lead())
+    lord_lead_m: float = 10.0     # ... the lead it may have free; full weight at twice this
+    lord_lead_near: float = 100.0  # ... only while a standing enemy is within this of it
+    lord_fall: float = 0.0        # per unit: the lord pays this x its fall (lord_up() before - after; a rally gives back)
+    neighbour: float = 0.5       # + this x the mean of own units' terms within neighbour_m
     neighbour_m: float = 40.0
 
 
@@ -309,12 +325,53 @@ def order_cost(changes, side, weights=Weights(), switched=None):
     return torch.stack(out, 1)
 
 
+def lord_lead(u, margin_m=10.0, near_m=100.0):
+    """[B, N] 0-1 per standing lord: how far it stands ahead of its own line, (lead - margin_m) /
+    margin_m clipped to 0-1, while a standing enemy is within near_m of it; 0 for every other unit.
+    lead: the lord's distance ahead of the cost-weighted centre of its side's other standing units,
+    along the line from that centre to the centre of the standing enemies. A lord with no other
+    standing unit has no line (0)."""
+    stand = standing_mask(u)
+    side = u["side"]
+    cost = u["cost"].clamp(min=1.0)
+    out = torch.zeros_like(u["x"])
+    for s in (1, 2):
+        own = stand & (side == s)
+        rest = (own & ~u["lord"]).float() * cost
+        foe = (stand & (side > 0) & (side != s)).float() * cost
+        n_rest, n_foe = rest.sum(1, keepdim=True), foe.sum(1, keepdim=True)
+        cx = (u["x"] * rest).sum(1, keepdim=True) / n_rest.clamp(min=1e-6)
+        cz = (u["z"] * rest).sum(1, keepdim=True) / n_rest.clamp(min=1e-6)
+        ex = (u["x"] * foe).sum(1, keepdim=True) / n_foe.clamp(min=1e-6)
+        ez = (u["z"] * foe).sum(1, keepdim=True) / n_foe.clamp(min=1e-6)
+        norm = torch.sqrt((ex - cx) ** 2 + (ez - cz) ** 2).clamp(min=1e-6)
+        lead = ((u["x"] - cx) * (ex - cx) + (u["z"] - cz) * (ez - cz)) / norm
+        dx = u["x"][:, :, None] - u["x"][:, None, :]
+        dz = u["z"][:, :, None] - u["z"][:, None, :]
+        near = ((dx * dx + dz * dz <= near_m ** 2) & (stand & (side > 0) & (side != s))[:, None, :]).any(2)
+        share = ((lead - margin_m) / max(margin_m, 1e-6)).clamp(0, 1)
+        lords = own & u["lord"] & near & (n_rest > 0) & (n_foe > 0)
+        out = torch.where(lords, share, out)
+    return out
+
+
 UNIT_FIELDS = ("hp_abs", "k", "dealt")
+
+
+def lord_up(r, out, share):
+    """[B, N] 1 for a standing unit, 1 - share for a routing one, 0 for one shattered, dead or gone
+    (r: routing, out: men <= 0 | gone | shattered)."""
+    return torch.where(out, torch.zeros_like(r, dtype=torch.float32), 1 - share * r.float())
+
+
+def unit_out(u):
+    return (u["men"] <= 0) | u["gone"] | u["s"]
 
 
 def unit_before(u, rout_share=Weights.rout_share):
     """What unit_step needs from before the step."""
-    return dict({k: u[k].clone() for k in UNIT_FIELDS}, gold=gold_lost(u, rout_share))
+    return dict({k: u[k].clone() for k in UNIT_FIELDS}, gold=gold_lost(u, rout_share), r=u["r"].clone(),
+                out=unit_out(u))
 
 
 def unit_step(before, st, facts, params, weights=Weights(), idle_m=None):
@@ -347,6 +404,12 @@ def unit_step(before, st, facts, params, weights=Weights(), idle_m=None):
     if weights.lord_exposed:
         low = u["hp_abs"] < weights.lord_exposed_hp * u["hp0"]
         r = r - weights.lord_exposed * (u["lord"] & standing_mask(u) & u["m"] & low).float()
+    if weights.lord_lead:
+        r = r - weights.lord_lead * lord_lead(u, weights.lord_lead_m, weights.lord_lead_near)
+    if weights.lord_fall and "out" in before:
+        share = weights.lord_rout or 0.5
+        fall = lord_up(before["r"], before["out"], share) - lord_up(u["r"], unit_out(u), share)
+        r = r - weights.lord_fall * u["lord"].float() * fall
     r = torch.where(present, r, torch.zeros_like(r))
     if weights.neighbour:
         dx = u["x"][:, :, None] - u["x"][:, None, :]

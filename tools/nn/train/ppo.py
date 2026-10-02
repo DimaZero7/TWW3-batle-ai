@@ -19,6 +19,8 @@
   only when the unit moves, so a bonus on it pays the network for moving (and for switching
   points): in a first run the full entropy rose from 3.5 to 5 and order changes from 79 to 98
   a minute in 20 updates, before any battle had ended.
+  With an entropy floor (run.py --entropy-target) the bonus's weight follows the kind's entropy
+  (entropy_weight): up while it is below the target, back down to the scheduled weight above it.
 * GAE over the rollout; the value of the last state bootstraps; a finished battle cuts it.
 * The memory (GRU) is trained through time: a minibatch is a set of whole chunks (T decisions of
   some battles); the actor runs its memory through each chunk from the memory stored when the
@@ -85,6 +87,15 @@ def policy_loss(lp_new, lp_old, adv, mask, clip):
 def kind_entropy(logits):
     """[B, N] entropy of the order kind."""
     return torch.distributions.Categorical(logits=logits["kind"], validate_args=False).entropy()
+
+
+def entropy_weight(weight, entropy, target, low, high, rate=1.25):
+    """The next update's weight of the kind's entropy under an entropy floor: x rate while the kind's
+    entropy (the update's mean) is below target, / rate at or above it, kept within [low, high].
+    Iteration 1 (02.10): at the fixed 0.003 the bonus's gradient was 1e-4 to 1e-2 of the policy's and
+    87-99.7 % of the units' kind choices had a probability above 0.99: no exploration."""
+    w = weight * rate if entropy < target else weight / rate
+    return min(high, max(low, w))
 
 
 def masked_mean(x, mask):

@@ -19,6 +19,7 @@ SPEAR, SLAVE, CLANRAT = "wh_main_emp_inf_spearmen_0", "wh2_main_skv_inf_skavensl
     "wh2_main_skv_inf_clanrat_spearmen_0"
 ARCHER, SLINGER = "wh2_dlc13_emp_inf_archers_0", "wh2_main_skv_inf_skavenslave_slingers_0"
 GENERAL = "wh_main_emp_cha_general_0"
+SHIELD_SPEAR, SWORD = "wh_main_emp_inf_spearmen_1", "wh_main_emp_inf_swordsmen"
 
 
 def army(side1, side2, attacker=1, factions=("wh_main_emp_empire", "wh2_main_skv_skaven")):
@@ -209,6 +210,19 @@ class TestMelee:
         cap = P.sim["contact"]["lord_max_attackers"]
         assert float(rate.sum()) - alone == pytest.approx(k * infantry * (cap - 1) / cap, rel=1e-3)
 
+    def test_swordsmen_out_strike_spearmen_against_clanrats(self):
+        # Same men, armour and shield class; the sword: attack 32 (spear 20), 21 + 7 damage, a blow every 4.3 s
+        # (the plain spear 5.7 s); no bonus against infantry in the database (bonus_v_infantry 0).
+        assert P.units[SWORD]["melee"]["bonus_v_infantry"] == 0
+        rates = {}
+        for key in (SPEAR, SWORD):
+            st = face_off(key, CLANRAT)
+            pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
+            contact = pw["enemy"] & (pw["gap"] <= 1.0)
+            z = torch.zeros_like(st.u["men"])
+            rates[key] = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, 0, 1])
+        assert rates[SWORD] > 1.5 * rates[SPEAR] > 0
+
     def test_a_charge_hits_harder(self):
         st = face_off(SPEAR, SLAVE)
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
@@ -230,6 +244,22 @@ class TestMissile:
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
         _, back, _ = missile.volley(st.u, pw, target, 1.0, P)
         assert float(back.sum()) > float(front.sum()) > 0
+
+    def test_shielded_spearmen_take_fewer_hits_from_the_front_only(self):
+        # Skaven slingers shoot Empire spearmen without and with shields (35% block, passport).
+        assert P.units[SHIELD_SPEAR]["shield"]["missile_block_chance"] == 35
+        assert P.units[SPEAR]["shield"]["missile_block_chance"] == 0
+        target = torch.tensor([[-1, 0]])                      # the slingers (slot H) shoot slot 0
+        lost = {}
+        for key in (SPEAR, SHIELD_SPEAR):
+            for facing in (90.0, 270.0):                      # towards the slingers, then away
+                st = face_off(key, SLINGER, gap=100)
+                st.u["b"][0, 0] = facing
+                pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
+                lost[key, facing] = float(missile.volley(st.u, pw, target, 1.0, P)[1].sum())
+        assert lost[SHIELD_SPEAR, 90.0] == pytest.approx(0.65 * lost[SPEAR, 90.0], rel=1e-4)
+        assert lost[SHIELD_SPEAR, 270.0] == pytest.approx(lost[SPEAR, 270.0], rel=1e-4)
+        assert lost[SPEAR, 90.0] > 0
 
     def test_nearer_hits_more_and_a_lone_man_is_a_small_target(self):
         far = face_off(ARCHER, SLAVE, gap=120)
