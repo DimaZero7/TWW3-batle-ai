@@ -43,6 +43,7 @@ class Pool:
     generator: str = ""  # the faction's army generator config (WH_Empire, ...)
     templates: tuple = ()  # ((template, weight, (share per unit of `units`)), ...)
     budget_factor: float = 1.0  # gold relative to the other side's after the equal-budget draw
+    budget_max: float = None    # the most this faction's side spends (pools.json faction "budget_max"; None: no cap)
 
     def cap(self, category, n_units):
         """Most units of a category in an army of the lord and n_units units (None = no cap)."""
@@ -129,8 +130,10 @@ def load(path=None, passports_path=None, templates_path=None):
             units, templates = _templates(faction, units, tdoc)
         factor = float(spec.get("budget_factor", 1.0))
         assert factor > 0, f"{faction}: budget_factor {factor} must be positive"
+        cap = spec.get("budget_max")
         out[faction] = Pool(faction=faction, lord=lord, units=units, caps=caps,
-                            generator=spec.get("generator", ""), templates=templates, budget_factor=factor)
+                            generator=spec.get("generator", ""), templates=templates, budget_factor=factor,
+                            budget_max=None if cap is None else float(cap))
     return out
 
 

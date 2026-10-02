@@ -203,11 +203,14 @@ end
 
 -- Per-unit context values a test sets: F.cco[unique_ui_id][field] (e.g. IsFiringMissiles).
 F.cco = {}
+-- Root context values a test sets: F.root[path] (e.g. 'BattleRoot.BalanceOfPowerPercent').
+F.root = {}
 
 -- Unrotated radar over x in [-100, 100], z in [-100, 100].
 F.common = {
     get_context_value = function(key, id, field)
         if key == 'CcoBattleUnit' and F.cco[id] and F.cco[id][field] ~= nil then return F.cco[id][field] end
+        if id == nil and F.root[key] ~= nil then return F.root[key] end
         -- Two soldiers per unit; Position returns three numbers like the engine.
         if key == 'CcoBattleUnit' and field == 'ManList.Size' then return 2 end
         -- A two-row unit card.

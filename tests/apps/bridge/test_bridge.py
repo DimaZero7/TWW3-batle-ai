@@ -186,3 +186,12 @@ def test_an_order_the_engine_dropped_is_given_again(lua):
     there = t({"kind": "move", "x": 5, "z": 0})                                 # arrived (the front's offset)
     assert [stalled(t({}), me, there, None) for _ in range(after)][-1] is None
     assert [stalled(t({}), me, t({"kind": "hold"}), None) for _ in range(after)][-1] is None
+
+
+def test_a_unit_down_in_the_state_takes_no_order_from_its_answer(lua):
+    down = lua.eval("function(r) return bridge.down(r) end")
+    t = lua.table_from
+    assert down(t({"men": 90})) is False
+    assert down(t({"men": 90, "r": True})) is True and down(t({"men": 90, "s": True})) is True
+    assert down(t({"men": 0})) is True
+    assert down(t({})) is False                       # a reading that failed is not taken as down

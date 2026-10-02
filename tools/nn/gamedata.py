@@ -21,6 +21,11 @@ SLOTS = ("lord", "spear_1", "spear_2", "spear_3", "spear_4", "archer_1", "archer
 NAMES = tuple(f"own_{s}" for s in SLOTS) + tuple(f"enemy_{s}" for s in SLOTS)
 FLOAT_FIELDS = ("x", "z", "b", "men", "hp", "mp", "ms", "a", "k", "ox", "oz")
 BOOL_FIELDS = ("r", "s", "w", "m", "mv", "f", "fire", "lf", "rf", "bf")
+# For the army collapse and morale rules (recorded from 02.10.2026; NaN in older runs and where the
+# game gave nothing), into Battle.f but not part of the simulator's state (FLOAT_FIELDS):
+# sv = unit:strategic_value(), pcr / phr = CCO PercentCasualtiesRecently / PercentHpLostRecently
+# (men / HP lost in the last 4 s). The battle's balance of power and the morale text: Battle.bop, .mge.
+MORALE_FIELDS = ("sv", "pcr", "phr")
 # `fat` is recorded as a string; the array holds its index here (NaN: unknown).
 FATIGUE_LEVELS = ("threshold_fresh", "threshold_active", "threshold_winded", "threshold_tired",
                   "threshold_very_tired", "threshold_exhausted")
@@ -39,6 +44,9 @@ class Battle:
     names: tuple = NAMES                        # [N] script names: side 1's units, then side 2's
     keys: tuple = ()                            # [N] unit keys (main_units)
     side: np.ndarray = None                     # [N] 1 or 2
+    bop: np.ndarray = None                      # [T] CCO BattleRoot.BalanceOfPowerPercent (NaN: not recorded)
+    bop_side: int = 0                           # the side bop is for (the player's alliance; 0: unknown)
+    mge: np.ndarray = None                      # [T, N] CCO MoraleGreatestEffect: localised text or None
 
     @property
     def winner(self):
@@ -68,9 +76,22 @@ def load(run_dir):
     arrays["fat"] = np.full((T, N), np.nan)
     fatigue = {name: float(i) for i, name in enumerate(FATIGUE_LEVELS)}
     target = np.full((T, N), -1, dtype=int)
+    arrays.update({k: np.full((T, N), np.nan) for k in MORALE_FIELDS})
+    mge = np.full((T, N), None, dtype=object)
+    bop = np.full(T, np.nan)
+    bop_side = 0
     for ti, s in enumerate(samples):
+        if _number(s.get("bop")):
+            bop[ti] = s["bop"]
+        if s.get("bop_side") in (1, 2):
+            bop_side = s["bop_side"]
         for u in s["units"]:
             i = index[u["n"]]
+            for k in MORALE_FIELDS:
+                if _number(u.get(k)):
+                    arrays[k][ti, i] = u[k]
+            if isinstance(u.get("mge"), str):
+                mge[ti, i] = u["mge"]
             for k in FLOAT_FIELDS:
                 v = u.get(k)
                 if isinstance(v, (int, float)) and not isinstance(v, bool):
@@ -81,7 +102,35 @@ def load(run_dir):
             arrays["fat"][ti, i] = fatigue.get(u.get("fat"), np.nan)
     return Battle(run=run_dir.name, own_ai=cfg.get("own_ai", "?"), enemy_role=cfg.get("enemy_role", "?"),
                   result=result, t=t, f=arrays, target=target, arena=cfg.get("arena", "arena"),
-                  names=names, keys=keys, side=side)
+                  names=names, keys=keys, side=side, bop=bop, bop_side=bop_side, mge=mge)
+
+
+def _number(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def balance(b, side):
+    """[T] the balance of power for `side` (1 or 2): Battle.bop as recorded for bop_side, else its
+    complement (the bar's two parts taken to add up to 1, or to 100 when recorded in percent).
+    All NaN when not recorded."""
+    if b.bop is None or b.bop_side not in (1, 2):
+        return np.full(len(b.t), np.nan)
+    if side == b.bop_side:
+        return b.bop.copy()
+    top = 100.0 if np.nanmax(np.append(b.bop, 0.0)) > 1.0 else 1.0
+    return top - b.bop
+
+
+def morale_coverage(b):
+    """Share of the recorded seconds (unit-seconds) where each of the collapse and morale values
+    was read: {bop, sv, pcr, phr, mge}. 0 for a run recorded before them."""
+    def share(a):
+        return float(a.mean()) if a is not None and a.size else 0.0
+    out = {"bop": share(np.isfinite(b.bop)) if b.bop is not None else 0.0}
+    for k in MORALE_FIELDS:
+        out[k] = share(np.isfinite(b.f[k])) if k in b.f else 0.0
+    out["mge"] = share(b.mge != None) if b.mge is not None else 0.0  # noqa: E711
+    return out
 
 
 FAIR = 1   # battle_difficulty 1 = Normal: the only difficulty our battles count at (user, 30.09.2026)

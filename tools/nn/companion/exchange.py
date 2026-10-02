@@ -234,11 +234,16 @@ def ability_list(names, side, ability, slots):
 
 def orders_text(batch, move, orders, think_ms=None, abilities=()):
     """The orders file for the game (parsed by src/apps/bridge/services.lua). abilities: [{unit, key}]
-    to use now, one line each."""
+    to use now, one line each. A unit that takes no orders (marked "out" by the loop: dead, routing,
+    shattered) gets no line: the network's HOLD for it is only a filler, and given to a unit that
+    rallied before the answer came it halted it (gate 02.10.2026: 42 of 102 rallies; the bridge
+    also ignores it, docs/en/apps/bridge.md)."""
     lines = [FORMAT, f"move {int(move)}", f"batch {batch}"]
     if think_ms is not None:
         lines.append(f"think_ms {think_ms:.1f}")
     for o in orders:
+        if o.get("out"):
+            continue
         k = o["kind"]
         if k in ("move", "withdraw"):
             if not (math.isfinite(o["x"]) and math.isfinite(o["z"])):

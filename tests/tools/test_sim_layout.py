@@ -54,7 +54,8 @@ class TestCalibration:
         archers = p.static("wh2_dlc13_emp_inf_archers_0")
         assert archers["reload"] == 11.0 and archers["hit_rate"] == 0.42 and archers["ammo0"] == 90 * 20
         slingers = p.static("wh2_main_skv_inf_skavenslave_slingers_0", "wh2_main_skv_skaven")
-        assert slingers["reload"] == 11.5 and slingers["morale_bonus"] == 6
+        # the Skaven's +6 start reserve is Strength in Numbers' (an innate effect), not a faction bonus
+        assert slingers["reload"] == 11.5 and slingers["morale_bonus"] == 0 and slingers["fx"] > 0
         spear = p.static("wh_main_emp_inf_spearmen_0")
         assert spear["range"] == 0 and spear["width"] == 30.0
 

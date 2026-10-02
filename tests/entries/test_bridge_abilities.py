@@ -174,3 +174,53 @@ def test_an_attack_the_engine_dropped_is_given_again(lua, tmp_path):
     assert [(r["u"], r["k"], r["tg"]) for r in rows if r["event"] == "nn_stall"] == [
         ("own_lord", "attack", "enemy_spear_1")]
     assert rows[-1]["nn_stalls"] == 1 and "error" not in [r["event"] for r in rows]
+
+
+def test_a_rallied_unit_goes_on_with_its_order_and_takes_no_filler_hold(lua, tmp_path):
+    # Gate 02.10.2026: rallied units stood to the end. The engine drops a routing unit's order, the
+    # simulator keeps it (the unit goes on with it as it rallies); and the network's HOLD for a unit
+    # that was routing when the state was written (a filler: it takes no orders) reached units that
+    # rallied before the answer came and halted them (42 of 102 rallies).
+    from tools.nn.companion import exchange
+    lua.globals().SYG, lua.globals().FS = SYG, FS
+    lua.execute(SETUP + """
+        STATE = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+        bm:pump()
+    """)
+    batch = exchange.read_state(tmp_path / exchange.STATE)["batch"]
+
+    def answer(move, orders):
+        exchange.write_atomic(tmp_path / exchange.ORDERS, exchange.orders_text(batch, move, orders))
+
+    def log():
+        return list(lua.eval("bm.orders").values())
+    answer(1, [{"unit": "own_lord", "kind": "keep"},
+               {"unit": "own_spear_1", "kind": "attack", "target": "enemy_lord", "run": True}])
+    lua.execute("bm:tick(100)")
+    assert log() == ["attack enemy_lord"]
+    lua.execute("own[2].routing = true; for _ = 1, 9 do bm:tick(100) end")    # move 2: written routing
+    doc = exchange.read_state(tmp_path / exchange.STATE)
+    assert doc["move"] == 2 and [u["r"] for u in doc["units"] if u["n"] == "own_spear_1"] == [True]
+    lua.execute("own[2].routing = false; bm:tick(100)")                        # rallied: goes on at once
+    assert log() == ["attack enemy_lord", "attack enemy_lord"]
+    filler = [{"unit": "own_lord", "kind": "keep"}, {"unit": "own_spear_1", "kind": "hold"}]
+    answer(2, filler)                                                          # the answer to move 2
+    lua.execute("bm:tick(100)")
+    assert log() == ["attack enemy_lord", "attack enemy_lord"]                 # no halt
+    lua.execute("for _ = 1, 9 do bm:tick(100) end")                            # move 3: standing
+    answer(3, [{"unit": "own_lord", "kind": "keep"}, {"unit": "own_spear_1", "kind": "keep"}])
+    lua.execute("bm:tick(100)")
+    assert log() == ["attack enemy_lord", "attack enemy_lord"]                 # keep: the attack goes on
+    # Its target gone while it routed: it holds, as the simulator turns the attack to HOLD.
+    lua.execute("own[2].routing = true; bm:tick(100); enemy[1].men = 0; own[2].routing = false; bm:tick(100)")
+    assert log() == ["attack enemy_lord", "attack enemy_lord", "halt"]
+    lua.execute("""
+        bm.outcome, bm.winner = true, 2
+        for _ = 1, 10 do bm:tick(100) end
+    """)
+    rows = events(tmp_path / "tww3_bai_events.jsonl")
+    assert "error" not in [r["event"] for r in rows]
+    assert [(r["u"], r["k"], r.get("tg"), r["status"]) for r in rows if r["event"] == "nn_rally"] == [
+        ("own_spear_1", "attack", "enemy_lord", "given"), ("own_spear_1", "hold", None, "given")]
+    skipped = {r["move"]: r["skipped"] for r in rows if r["event"] == "nn_orders"}
+    assert skipped[2] == 1 and rows[-1]["nn_regiven"] == 2

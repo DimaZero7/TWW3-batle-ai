@@ -2,6 +2,7 @@
 
     config/nn/units.json       unit passports (the game's database)
     config/nn/abilities.json   ability passports (the game's database)
+    config/nn/effects.json     innate effects: attributes and passives, linked to units (the game's database)
     config/nn/game_rules.json  the game's battle, morale and fatigue rules (the game's database)
     config/nn/sim.json         measured or calibrated numbers the others lack
 
@@ -13,6 +14,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from tools.nn.sim import abilities
+from tools.nn.sim import effects as innate
 
 ROOT = Path(__file__).resolve().parents[3]
 CONFIG = ROOT / "config" / "nn"
@@ -28,6 +30,7 @@ class Params:
     rules: dict      # game_rules.json: battle, morale, fatigue
     sim: dict        # sim.json
     abilities: dict = None   # abilities.json: ability key -> passport
+    effects: dict = None     # effects.json: {"order", "effects", "units"}
 
     # --- the game's rules (config/nn/game_rules.json) ---
     @property
@@ -62,7 +65,7 @@ class Params:
         """A copy with some calibrated numbers replaced (for fitting)."""
         sim = json.loads(json.dumps(self.sim))
         sim[section].update(values)
-        return Params(self.units, self.rules, sim, self.abilities)
+        return Params(self.units, self.rules, sim, self.abilities, self.effects)
 
     # --- per unit ---
     def static(self, key, faction=None):
@@ -72,7 +75,13 @@ class Params:
         missile = u.get("missile") or {}
         cat = missile.get("category")
         ms = self.sim["missile"]
-        reload_s = ms["reload_s"].get(cat, missile.get("reload_s", 0) * ms["reload_scale_other"]) if missile else 0
+        # measured reload of the category, for the passport reload it was measured on (reload_ref_s); another
+        # unit of the category scales with its passport (Night Runners' sling 8 s against the slaves' 9 s)
+        reload_s = 0
+        if missile:
+            ref = (ms.get("reload_ref_s") or {}).get(cat)
+            reload_s = (ms["reload_s"][cat] * (missile.get("reload_s", ref) / ref if ref else 1.0)
+                        if cat in ms["reload_s"] else missile.get("reload_s", 0) * ms["reload_scale_other"])
         resist = u.get("damage_resist") or {}
         spacing = self.sim["formation"]["spacing_m"]
         men = u["men"]
@@ -90,11 +99,9 @@ class Params:
             "leadership": u["leadership"], "resist_missile": resist.get("missile", 0) / 100,
             "resist_physical": resist.get("physical", 0) / 100,
             "large": u.get("size", "small") != "small",
-            "expendable": "expendable" in u.get("attributes", []),
-            "encourages": "encourages" in u.get("attributes", []),
-            "reflect": "charge_reflection" in u.get("attributes", []),
-            "unbreakable": "unbreakable" in u.get("attributes", []),
-            "fire_move": "mounted_fire_move" in u.get("attributes", []),
+            # rule flags (expendable, encourages, reflect, unbreakable, fire_move, fatigue_immune), the
+            # effects bitmask and the timed effects: from the unit's innate effects (config/nn/effects.json)
+            **innate.static(self, key),
             "direct": bool(missile.get("direct")) if missile else False,
             "ammo0": men * missile.get("ammo", 0) if missile else 0,
             "range": missile.get("range_m", 0) if missile else 0,
@@ -116,9 +123,10 @@ def _read(path):
 
 
 @lru_cache(maxsize=4)
-def load(units=None, rules=None, sim=None, abilities=None):
-    """Params from the four files (defaults: config/nn/)."""
+def load(units=None, rules=None, sim=None, abilities=None, effects=None):
+    """Params from the five files (defaults: config/nn/)."""
     return Params(units=_read(units or CONFIG / "units.json")["units"],
                   rules=_read(rules or CONFIG / "game_rules.json"),
                   sim=_read(sim or CONFIG / "sim.json"),
-                  abilities=_read(abilities or CONFIG / "abilities.json")["abilities"])
+                  abilities=_read(abilities or CONFIG / "abilities.json")["abilities"],
+                  effects=_read(effects or CONFIG / "effects.json"))

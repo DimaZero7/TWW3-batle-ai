@@ -24,6 +24,9 @@ def step(u, activity, params, dt):
     rate = torch.where(activity["shooting"], F["shooting"], rate)
     rate = torch.where(activity["melee"], F["combat"], rate)
     rate = torch.where(activity["charging"], F["charging"], rate)
+    # Perfect Vigour (attribute fatigue_immune, an innate effect): never tires
+    if "fatigue_immune" in u:
+        rate = torch.where(u["fatigue_immune"], torch.clamp(rate, max=0.0), rate)
     u["fatigue"] = (u["fatigue"] + rate * scale).clamp(0, F["threshold_max"])
     th = torch.tensor([F[k] for k in LEVELS], dtype=u["fatigue"].dtype, device=u["fatigue"].device)
     u["fat"] = (torch.bucketize(u["fatigue"], th, right=True) - 1).clamp(min=0).float()

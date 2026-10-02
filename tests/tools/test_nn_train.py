@@ -9,6 +9,7 @@ step end to end on the CPU, checkpoints, recordings.
 """
 import dataclasses
 import json
+import math
 
 import numpy as np
 import pytest
@@ -534,11 +535,71 @@ class TestBehaviour:
         lost = 100.0 * float(st.u["cost"][0, 3] / st.u["hp0"][0, 3])                  # gold of 100 HP
         assert float(r[0, 3]) == pytest.approx(-0.05 * 5 * lost / float(reward.budget(st.u)[0]) - 0.01, rel=1e-4)
         assert r[0, :3].tolist() == pytest.approx([-0.02 / 3] * 3)
-        assert float(r[0, 6]) == pytest.approx(0.03)
+        # enemy 6 strikes unit 3: the gold unit 3 lost is what 6 destroyed (reward.attributed), + its flank bonus
+        assert float(r[0, 6]) == pytest.approx(0.03 + 0.05 * 2 * lost / float(reward.budget(st.u)[0]), rel=1e-4)
         assert float(r[0, 4]) == 0.0
         near = reward.unit_step(before, st, f, p, dataclasses.replace(w, neighbour=1.0, neighbour_m=25.0))
         # unit 1 (x -20) has units 0 (x 0) and 2 (x -40) within 25 m
         assert float(near[0, 1]) == pytest.approx(float(r[0, 1]) + (float(r[0, 0]) + float(r[0, 2])) / 2)
+
+    def test_the_enemys_gold_loss_is_split_among_the_units_that_engage_it(self):
+        st = pile()
+        p = load()
+        u = st.u
+        for i in (0, 1):                                                  # 0 and 1 fight enemy 5, 2 only marches
+            u["m"][0, i], u["target"][0, i] = True, 5
+        before = reward.unit_before(u)
+        u["dealt"][0, 0] += 30.0                                          # 0 struck 30 HP, 1 struck 10
+        u["dealt"][0, 1] += 10.0
+        u["hp_abs"][0, 5] -= 40.0
+        u["r"][0, 5] = True                                               # ... and enemy 5 routs
+        gold = float((reward.gold_lost(u) - before["gold"])[0, 5])          # its health and the rout's share
+        hp_gold = 40.0 * float(u["cost"][0, 5] / u["hp0"][0, 5])
+        assert gold > 1.5 * hp_gold
+        d = reward.attributed(before, u, p)
+        fade = math.exp(-p.dt / p.sim["morale"]["recent_s"])
+        w0, w1 = 30.0 + (1 - fade) * float(before["dealt"][0, 0]), 10.0 + (1 - fade) * float(before["dealt"][0, 1])
+        assert float(d[0, 0] + d[0, 1]) == pytest.approx(gold, rel=1e-4)       # the whole loss, the rout too
+        assert float(d[0, 0]) / float(d[0, 1]) == pytest.approx(w0 / w1, rel=1e-3)
+        assert float(d[0, 2]) == 0.0
+        # the enemy dies in the step: the simulator drops it from `target`; the target before the step counts
+        before = reward.unit_before(u)
+        u["men"][0, 5] = 0.0
+        u["target"][0, 0] = u["target"][0, 1] = -1
+        u["m"][0, 0] = u["m"][0, 1] = False
+        d = reward.attributed(before, u, p)
+        left = float((reward.gold_lost(u) - before["gold"])[0, 5])
+        assert left > 0 and float(d[0, 0] + d[0, 1]) == pytest.approx(left, rel=1e-4)
+        w = reward.Weights(unit_gold=0.05, flanked=0.0, missile_melee=0.0, crowd=0.0, flank_attack=0.0, neighbour=0.0)
+        from tools.nn.train import behaviour
+        f = behaviour.facts(st, p)
+        new = reward.unit_step(before, st, f, p, w)
+        old = reward.unit_step(before, st, f, p, dataclasses.replace(w, unit_attrib=0.0))
+        assert float(new[0, 0]) > 0 and float(old[0, 0]) == 0.0              # the old estimate missed the kill
+
+    def test_a_melee_unit_standing_still_while_its_side_fights_shirks(self):
+        st = pile()                                                       # 3 and 6 fight; 0-2, 5 stand near
+        u = st.u
+        u["mv"][0, 1] = True                                              # 1 moves (to the fight)
+        sh = reward.shirking(u)
+        assert sh[0, :7].tolist() == [True, False, True, False, False, True, False] and not bool(sh[0, 7:].any())
+        assert not bool(reward.shirking(u, reach_m=5.0)[0, 0])            # no enemy within reach
+        u["m"][0, 3] = u["m"][0, 6] = False                               # nobody fights: nobody shirks
+        assert not bool(reward.shirking(u).any())
+        u["m"][0, 3] = u["m"][0, 6] = True
+        p = load()
+        before = reward.unit_before(u)
+        from tools.nn.train import behaviour
+        f = {k: torch.zeros_like(v) for k, v in behaviour.facts(st, p).items()}
+        w = reward.Weights(unit_gold=0.0, neighbour=0.0, shirk=0.01)
+        r = reward.unit_step(before, st, f, p, w)
+        assert r[0, :7].tolist() == pytest.approx([-0.01, 0.0, -0.01, 0.0, 0.0, -0.01, 0.0])
+        # the side's twin (shirk_side): either side pays x its shirking share of the standing army, by cost
+        c = u["cost"][0]
+        cost = reward.idle_cost(st, reward.Weights(idle=0.0, shirk_side=0.1))[0]
+        assert cost.tolist() == pytest.approx([0.1 * float((c[0] + c[2]) / c[:5].sum()), 0.1 * float(c[5] / c[5:7].sum())],
+                                              rel=1e-4)
+        assert reward.idle_cost(st, reward.Weights(idle=0.0))[0].abs().sum() == 0
 
     def test_friendly_fire_is_the_shooters_loss_not_the_victims(self):
         st = pile()

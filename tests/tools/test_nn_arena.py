@@ -117,6 +117,36 @@ class TestRuns:
         b = gamedata.load(found[0])
         assert b.arena == "pair_x" and b.names == ("own_spear", "enemy_slave") and b.keys == (SPEAR, SLAVE)
         assert b.f["men"].shape == (3, 2) and list(b.side) == [1, 2] and b.target[0, 1] == 0
+        # Recorded before the collapse and morale values: all unknown.
+        assert np.isnan(b.f["sv"]).all() and np.isnan(b.bop).all() and b.bop_side == 0
+        assert gamedata.morale_coverage(b) == {"bop": 0.0, "sv": 0.0, "pcr": 0.0, "phr": 0.0, "mge": 0.0}
+        assert np.isnan(gamedata.balance(b, 1)).all()
+
+    def test_the_collapse_and_morale_values_are_read(self, tmp_path):
+        # As nn_arena.lua writes them: bop / bop_side per sample, sv / pcr / phr / mge per unit,
+        # each left out when the game gave nothing.
+        frames = [[unit("own_spear", 1, sv=800.0 - 10 * t, pcr=0.05 * t, phr=0.02 * t, mge="Losses"),
+                   unit("enemy_slave", 2, sv=400.0)] for t in range(3)]
+        frames[1][1]["mge"] = "Outnumbered"
+        d = write_run(tmp_path, "20260102-000001", "pair_x", [("own_spear", SPEAR)], [("enemy_slave", SLAVE)], frames)
+        lines = (d / "events.jsonl").read_text().splitlines()
+        for i, bop in enumerate((0.5, None, 0.75)):
+            row = json.loads(lines[i])
+            row["bop_side"] = 1
+            if bop is not None:
+                row["bop"] = bop
+            lines[i] = json.dumps(row)
+        (d / "events.jsonl").write_text("\n".join(lines))
+        b = gamedata.load(d)
+        assert b.bop_side == 1 and b.bop[0] == 0.5 and np.isnan(b.bop[1]) and b.bop[2] == 0.75
+        assert list(gamedata.balance(b, 2)[[0, 2]]) == [0.5, 0.25]
+        assert list(b.f["sv"][:, 0]) == [800.0, 790.0, 780.0] and list(b.f["sv"][:, 1]) == [400.0] * 3
+        assert b.f["pcr"][2, 0] == pytest.approx(0.1) and np.isnan(b.f["phr"][:, 1]).all()
+        assert list(b.mge[:, 0]) == ["Losses"] * 3 and list(b.mge[:, 1]) == [None, "Outnumbered", None]
+        cov = gamedata.morale_coverage(b)
+        assert cov["bop"] == pytest.approx(2 / 3) and cov["sv"] == 1.0 and cov["pcr"] == 0.5
+        assert cov["mge"] == pytest.approx(4 / 6)
+        assert "sv" not in gamedata.FLOAT_FIELDS     # not the simulator's state
 
 
 def pair_frames():

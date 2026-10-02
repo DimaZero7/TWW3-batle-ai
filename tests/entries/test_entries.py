@@ -412,6 +412,33 @@ class TestNnArena:
         assert rows[-1]["status"] == "completed" and rows[-1]["idle_kicks"] == 0
         assert all(r["policy"] == "nn_arena_hold" for r in rows)
 
+    def test_samples_record_the_balance_of_power_and_the_morale_fields(self, lua, tmp_path):
+        # The values for the army collapse and morale rules; a field that fails is left out.
+        lua.execute(self.SETUP + """
+            CONFIG.own_ai, CONFIG.timeout_ms = 'hold', 5000
+            bm.get_player_alliance_num = function() return 1 end
+            fake.root['BattleRoot.BalanceOfPowerPercent'] = 0.61234
+            fake.root['BattleRoot.PlayerAllianceContext.Id'] = 0
+            own[1].strategic_value = function() return 812.46 end
+            own[2].strategic_value = function() error('no such method') end
+            fake.cco['uid_own_lord'] = {PercentCasualtiesRecently = 0.125, PercentHpLostRecently = 0.03,
+                MoraleGreatestEffect = 'Losses'}
+            fake.cco['uid_own_spear_1'] = {MoraleGreatestEffect = ''}
+            local state = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 8 do bm:tick() end
+            assert(state.finished)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        ready = next(r for r in rows if r["event"] == "ready")
+        assert ready["player_side"] == 1 and ready["player_alliance_cco"] == 0
+        sample = [r for r in rows if r["event"] == "nn_sample"][-1]
+        assert sample["bop"] == 0.6123 and sample["bop_side"] == 1
+        lord, spear = sample["units"][0], sample["units"][1]
+        assert (lord["sv"], lord["pcr"], lord["phr"], lord["mge"]) == (812.5, 0.125, 0.03, "Losses")
+        assert not {"sv", "pcr", "phr", "mge"} & set(spear)
+
     def test_net_writes_the_state_and_gives_the_companions_orders(self, lua, tmp_path):
         # The test plays the companion (tools/nn/companion/exchange.py writes its answer).
         from tools.nn.companion import exchange
@@ -535,8 +562,8 @@ class TestNnArena:
         """)
         rows = events(tmp_path / "tww3_bai_events.jsonl")
         assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
-        again = [o for r in rows if r["event"] == "nn_orders" for o in r["orders"] if o.get("again")]
-        assert [(o["u"], o["k"], o["tg"]) for o in again] == [("own_spear_1", "attack", "enemy_lord")]
+        assert [(r["u"], r["k"], r["tg"], r["status"]) for r in rows if r["event"] == "nn_rally"] == [
+            ("own_spear_1", "attack", "enemy_lord", "given")]
         assert sum(r["skipped"] for r in rows if r["event"] == "nn_orders") >= 2
         assert [(r["u"], r["action"]) for r in rows if r["event"] == "nn_duty"] == [
             ("own_archer_1", "release"), ("own_archer_1", "resume"), ("own_archer_1", "free")]

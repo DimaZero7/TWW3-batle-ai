@@ -34,7 +34,11 @@ UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_e
          # 02.10.2026, the Empire's second wave: unbreakable frenzied flagellants (cheap chaff that never
          # routs), heavy armour-piercing greatswords, and the first DIRECT-fire shooters (pistols, fire
          # whilst moving, decent melee): units.md "Flagellants, Greatswords, Free Company Militia"
-         "wh_dlc04_emp_inf_flagellants_0", "wh_main_emp_inf_greatswords", "wh_dlc04_emp_inf_free_company_militia_0")
+         "wh_dlc04_emp_inf_flagellants_0", "wh_main_emp_inf_greatswords", "wh_dlc04_emp_inf_free_company_militia_0",
+         # 02.10.2026, the Skaven wave: the cheapest chaff (plain skavenslaves, expendable), clanrats with
+         # sword and shield (the shield blocks arrows and pistols from the front) and Night Runners with
+         # slings (fast, vanguard, long-ranged): units.md "Skavenslaves, Clanrats with shields, Night Runners"
+         "wh2_main_skv_inf_skavenslaves_0", "wh2_main_skv_inf_clanrats_1", "wh2_main_skv_inf_night_runners_1")
 TABLES = ("main_units", "land_units", "battle_entities", "melee_weapons", "missile_weapons", "projectiles",
           "unit_armour_types", "unit_shield_types", "unit_attributes_to_groups_junctions",
           "land_units_to_unit_abilites_junctions")
@@ -121,7 +125,9 @@ MISSING = {
                                   "(config/nn/game_rules.json, fatigue)",
     "lord aura per unit": "no per-unit radius found; the aura is global (_kv_morale_tables: general_aura_radius, "
                           "general_inspire_effect_amount_*); a lord is marked by the attribute 'encourages'",
-    "ability and attribute effects": "only the keys; their numbers are in special_ability_* tables, not decoded",
+    "ability and attribute effects": "only the keys here: the abilities' numbers are their passports "
+                                     "(config/nn/abilities.json), the attributes' rules and every innate effect "
+                                     "the catalogue config/nn/effects.json (python -m tools.nn.effects)",
     "experience": "per rank, global: config/nn/game_rules.json (experience_bonus, experience_levels)",
 }
 

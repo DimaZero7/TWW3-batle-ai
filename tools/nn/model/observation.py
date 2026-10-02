@@ -23,6 +23,10 @@ The rule: the AI sees only what a human player sees.
   seconds active left (the ability bar). Enemies: owned, and active now only while the unit is seen
   (the game draws the ability's effect on the unit and lists it among the unit's active effects;
   its timers are not shown). Obs.abil_ok: own abilities the network may use now.
+* Innate effects (tools/nn/model/effects.py, the token's last columns): per effect of
+  config/nn/effects.json, owned (both sides: the unit's card) and on now (own units; enemies while
+  seen: the game lists a seen unit's active effects). On comes from the simulator's `fx_on` or, in a
+  recorded battle or the game, from the token's own fields (health, morale state, melee, own morale).
 Everything is in the side's frame (tools/nn/model/frame.py), scaled to about -1..1.
 
 State: a dict of arrays [B, N] with the names of recorded `nn_sample` (tools/nn/gamedata.py):
@@ -30,7 +34,8 @@ x, z, b, men, hp, mp, ms, m, mv, f, fire, a, k, ox, oz, lf, rf, bf, target, plus
 Optional: `vis` [B, N] (the unit is visible to the other side; missing = all visible),
 `fat` [B, N] (fatigue state 0-5; missing = unknown), `ab{k}_on` / `ab{k}_cd` [B, N] for ability slot
 k (seconds active left / until ready: tools/nn/sim/state.py observation(); missing = unknown: no
-ability is ready). Units of both sides in one row; `setup.side`
+ability is ready), `fx_on` [B, N] (the innate effects on now, a bitmask: missing = worked out from the
+other fields). Units of both sides in one row; `setup.side`
 says whose each is. Works on numpy arrays and torch tensors: the same code for recorded
 battles and the batched simulator.
 """
@@ -38,7 +43,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from tools.nn.model import abilities, factions, passport
+from tools.nn.model import abilities, effects, factions, passport
 from tools.nn.model.frame import Frame, army_axis, edge_distances, xp
 
 POS = 500.0      # m: positions and order points
@@ -67,7 +72,9 @@ DYNAMIC = (
     ("melee_recent", "both"), ("rout_recent", "both"),
 )
 FLAGS = ("is_own", "visible", "seen", "age", "rank")
-NAMES = tuple(n for n, _ in DYNAMIC) + FLAGS + tuple(f"passport_{i}" for i in range(passport.SIZE))
+# Innate effects appended after the passport (02.10.2026; older checkpoints load with zero weights for
+# them, encoder.py): per effect (owned, on), tools/nn/model/effects.py.
+NAMES = tuple(n for n, _ in DYNAMIC) + FLAGS + tuple(f"passport_{i}" for i in range(passport.SIZE)) + effects.NAMES
 INDEX = {n: i for i, n in enumerate(NAMES)}
 TOKEN = len(NAMES)
 OWN_ONLY = tuple(INDEX[n] for n, who in DYNAMIC if who == "own")
@@ -111,6 +118,7 @@ class Setup:
         self.abil = np.stack([a[0] for a in ab])                               # [B, N, SLOTS, STATIC]
         self.abil_owned = np.stack([a[1] for a in ab])                         # [B, N, SLOTS]
         self.abil_use = np.stack([a[2] for a in ab])                           # [B, N, SLOTS] may be ordered
+        self.fx_owned = np.stack([effects.owned(k) for k in self.keys])       # [B, N, E] innate effects
         self.present = self.side > 0
         self._cache = {}
 
@@ -127,7 +135,7 @@ class Setup:
                                        passport=t(self.passport), men0=t(self.men0), ammo0=t(self.ammo0),
                                        present=t(self.present), attacker=t(self.attacker), lord=t(self.lord),
                                        abil=t(self.abil), abil_owned=t(self.abil_owned),
-                                       abil_use=t(self.abil_use))
+                                       abil_use=t(self.abil_use), fx_owned=t(self.fx_owned))
         return self._cache[key]
 
     def character(self, side):
@@ -161,6 +169,7 @@ class _Arrays:
     abil: object = None        # abilities (Setup.abil ...); None: the units have no abilities
     abil_owned: object = None
     abil_use: object = None
+    fx_owned: object = None    # [B, N, E] innate effects owned (Setup.fx_owned); None: none known
 
 
 @dataclass
@@ -317,7 +326,12 @@ def observe(state, setup, side, memory=None, full=False):
     flags = {"is_own": _f(m, own), "visible": _f(m, sees), "seen": _f(m, seen),
              "age": m.where(seen & ~sees, age, age * 0), "rank": S.rank / passport.MAX_RANK}
     dyn = m.stack([cols[n] for n, _ in DYNAMIC] + [_f(m, flags[n]) for n in FLAGS], -1)
-    tokens = _cat(m, [dyn, _f(m, S.passport)], -1) * _f(m, S.present)[..., None]
+    fx_own = getattr(S, "fx_owned", None)
+    if fx_own is None:                           # a setup without innate effects: none owned
+        E = effects.SIZE // 2
+        fx_own = np.zeros(xs.shape + (E,), np.float32) if m is np else xs.new_zeros(xs.shape + (E,))
+    fx = effects.features(m, state, fx_own, S.present if full else (own | sees))
+    tokens = _cat(m, [dyn, _f(m, S.passport), fx], -1) * _f(m, S.present)[..., None]
 
     attend = S.present & ~dead & ~(own & ~alive)
     ctrl = own & alive & (ms < 6)

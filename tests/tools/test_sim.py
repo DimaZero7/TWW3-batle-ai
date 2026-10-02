@@ -9,7 +9,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from tools.nn.sim import abilities, battle, fatigue, geometry, melee, missile, morale, replay, scenario  # noqa: E402
+from tools.nn.sim import abilities, battle, effects, fatigue, geometry, melee, missile, morale, replay, scenario  # noqa: E402
 from tools.nn.sim import orders as O  # noqa: E402
 from tools.nn.sim import state as S  # noqa: E402
 from tools.nn.sim.params import load  # noqa: E402
@@ -103,7 +103,7 @@ class TestFunctions:
         assert all(v.shape == (2, 6) for v in st.u.values())
         obs = st.observation()
         timers = {f"ab{k}_{t}" for k in range(3) for t in ("on", "cd")}
-        assert set(obs) == set(S.OBSERVED) | {"side", "t"} | timers and obs["t"].shape == (2,)
+        assert set(obs) == set(S.OBSERVED) | {"side", "t", "fx_on"} | timers and obs["t"].shape == (2,)
         x = torch.arange(6).repeat(2, 1)
         assert S.own_first(x, 2)[0].tolist() == [3, 4, 5, 0, 1, 2]
         assert S.slot_from_own_first(torch.tensor([0, 4, -1]), 2, 6).tolist() == [3, 1, -1]
@@ -603,7 +603,7 @@ class TestAbilities:
         r = dict(zip(abilities.COLS, abilities.row(P, "wh_main_character_abilities_foe_seeker")))
         assert (r["self_speed"], r["self_charge_speed"], r["friends_speed"]) == (1.25, 1.25, 1.0)
         r = dict(zip(abilities.COLS, abilities.row(P, "wh3_main_unit_passive_single_entity")))
-        assert r["passive"] == 1 and r["modelled"] == 0          # shown to the network, no effect here
+        assert r["passive"] == 1 and r["modelled"] == 0          # innate: tools/nn/sim/effects.py lays it on
 
     def test_the_game_ai_fires_by_its_rule_and_passives_hold_for_all(self):
         from tools.nn.sim import abilities
@@ -619,7 +619,7 @@ class TestAbilities:
         assert float(u["run"][0, H]) == pytest.approx(1.25 * run)         # Verminous Valour (enemy near)
         assert float(u["ab1_on"][0, H]) == 31 and float(u["ab1_cd"][0, H]) == 31 + 90
         assert float(u["ab0_on"][0, 0]) == 0 and float(u["ab1_on"][0, 0]) == 0   # our General: no order, no use
-        assert float(u["defence"][0, 1]) == defence + 5                    # Hold the Line reaches our spearmen
+        assert float(u["defence"][0, 1]) == defence                        # Hold the Line: an innate effect
         abilities.restore(u, old)
         assert float(u["damage"][0, H]) == dmg
         abilities.apply(u, P, 31.0, standing, engaged, dist, same)  # 31 s later: over, recharging
@@ -634,7 +634,7 @@ class TestAbilities:
         use[0, 0] = 1                                                      # Stand Your Ground
         old = abilities.apply(u, P, 0.5, standing, engaged, dist, same, use)
         assert float(u["ab1_on"][0, 0]) == 18 and float(u["ab1_cd"][0, 0]) == 18 + 90
-        assert float(u["defence"][0, 1]) == defence + 24 + 5              # + Hold the Line
+        assert float(u["defence"][0, 1]) == defence + 24                  # (Hold the Line: effects.py)
         assert float(u["defence"][0, H]) == float(old["defence"][0, H])   # friends only, not the enemy
         abilities.restore(u, old)
         abilities.apply(u, P, 0.5, standing, engaged, dist, same, use)     # active: a new order does nothing
@@ -717,19 +717,22 @@ class TestSecondWave:
         u["morale"][:] = u["leadership"]
         u["taken"][0, 0], u["dealt"][0, 0] = 500.0, 100.0          # losing the melee
         engaged = standing.clone()
-        old = abilities.apply(u, P, 0.5, standing, engaged, pw["dist"], same)
+        old = effects.apply(u, P, 0.5, standing, engaged, pw["dist"], same)
         assert float(u["attack"][0, 0]) == base_att + 10                          # frenzy
         assert float(u["defence"][0, 0]) == base_def + 14                         # the penitent
         assert float(u["resist_physical"][0, 0]) == pytest.approx(0.15)
-        abilities.restore(u, old)
+        slot = abilities.slot_keys(FLAG, P.units, P.abilities).index("wh_dlc04_unit_passive_strength_of_the_penitent")
+        assert float(u[f"ab{slot}_on"][0, 0]) == 20 and float(u["fxt0_on"][0, 0]) == 20   # the bar shows it
+        effects.restore(u, old)
         # out of melee the penitent ends at once (and recharges); frenzy stays while morale holds
-        old = abilities.apply(u, P, 0.5, standing, torch.zeros_like(engaged), pw["dist"], same)
+        old = effects.apply(u, P, 0.5, standing, torch.zeros_like(engaged), pw["dist"], same)
         assert float(u["defence"][0, 0]) == base_def and float(u["attack"][0, 0]) == base_att + 10
-        abilities.restore(u, old)
+        assert float(u["fxt0_on"][0, 0]) == 0 and float(u["fxt0_cd"][0, 0]) == 3
+        effects.restore(u, old)
         u["morale"][0, 0] = 0.4 * float(u["leadership"][0, 0])                    # below half: frenzy off
-        old = abilities.apply(u, P, 0.5, standing, torch.zeros_like(engaged), pw["dist"], same)
+        old = effects.apply(u, P, 0.5, standing, torch.zeros_like(engaged), pw["dist"], same)
         assert float(u["attack"][0, 0]) == base_att
-        abilities.restore(u, old)
+        effects.restore(u, old)
         # the network cannot order them: they are the game's own
         assert not any(P.abilities[k]["self_cast"] for k in P.units[FLAG]["abilities"])
 
@@ -783,3 +786,161 @@ class TestSecondWave:
                 battle.step(st, o, P)
             lost[key] = 1 - float(st.u["hp"][0, H])
         assert lost[GREAT] > 1.5 * lost[SWORD]
+
+
+# --- innate effects (tools/nn/sim/effects.py, config/nn/effects.json): one mechanism, each effect on and off ---
+
+SLAVES, CLANRAT_SHIELD, RUNNERS = ("wh2_main_skv_inf_skavenslaves_0", "wh2_main_skv_inf_clanrats_1",
+                                   "wh2_main_skv_inf_night_runners_1")
+WARLORD = "wh2_main_skv_cha_warlord_0"
+
+
+def innate(st, engaged=None, params=P):
+    """effects.apply on a built state as it stands; returns (old, the fields as the step sees them)."""
+    u = st.u
+    pw = geometry.pairwise(u, params.sim["formation"]["spacing_m"])
+    same = u["side"][:, :, None] == u["side"][:, None, :]
+    standing = (u["side"] > 0) & ~u["r"]
+    engaged = torch.zeros_like(standing) if engaged is None else engaged
+    old = effects.apply(u, params, 0.5, standing, engaged, pw["dist"], same)
+    after = {k: u[k].clone() for k in old}
+    effects.restore(u, old)
+    return old, after
+
+
+def bit(key):
+    return 1 << effects.index(P)[key]
+
+
+class TestInnateEffects:
+    SIN, SCURRY = "wh2_main_unit_passive_strength_in_numbers", "wh2_main_unit_passive_scurry_away"
+
+    def test_units_own_the_effects_the_catalogue_links(self):
+        st = scenario.build([army([(FLAG, -50, 0, 90), (SPEAR, -50, 40, 90)], [(SLAVES, 50, 0, 270),
+                                                                              (RUNNERS, 50, 40, 270)])], P)
+        H = st.N // 2
+        fx = [int(x) for x in st.u["fx"][0]]
+        assert fx[0] & bit("unbreakable") and fx[0] & bit("wh_main_unit_passive_frenzy")
+        assert fx[H] & bit("expendable") and fx[H] & bit(self.SIN) and fx[H] & bit(self.SCURRY)
+        assert fx[H + 1] & bit("guerrilla_deploy") and not fx[H + 1] & bit("expendable")
+        assert bool(st.u["unbreakable"][0, 0]) and bool(st.u["expendable"][0, H]) and bool(st.u["reflect"][0, 1])
+        assert int(st.u["fxt0"][0, 0]) == effects.index(P)["wh_dlc04_unit_passive_strength_of_the_penitent"]
+        assert int(st.u["fxt0"][0, 1]) == -1
+
+    def test_strength_in_numbers_holds_above_half_health(self):
+        st = scenario.build([army([(SPEAR, -100, 0, 90)], [(CLANRAT_SHIELD, 100, 0, 270)])], P)
+        H = st.N // 2
+        u = st.u
+        run, defence, bonus = float(u["run"][0, H]), float(u["defence"][0, H]), float(u["morale_bonus"][0, H])
+        _, a = innate(st)
+        assert float(a["run"][0, H]) == pytest.approx(0.9 * run) and float(a["defence"][0, H]) == defence + 8
+        assert float(a["morale_bonus"][0, H]) == bonus + 6
+        assert int(st.u["fx_on"][0, H]) & bit(self.SIN)
+        u["hp"][0, H] = 0.45                                       # below half of the start: off
+        _, a = innate(st)
+        assert float(a["run"][0, H]) == run and float(a["defence"][0, H]) == defence
+        assert float(a["morale_bonus"][0, H]) == bonus and not int(st.u["fx_on"][0, H]) & bit(self.SIN)
+        assert float(a["run"][0, 0]) == float(u["run"][0, 0])      # the Empire's spearmen own neither
+
+    def test_scurry_away_speeds_wavering_and_routing_units(self):
+        st = scenario.build([army([(SPEAR, -100, 0, 90)], [(SLAVES, 100, 0, 270)])], P)
+        H = st.N // 2
+        u = st.u
+        u["hp"][0, H] = 0.3                                        # Strength in Numbers off
+        run = float(u["run"][0, H])
+        _, a = innate(st)
+        assert float(a["run"][0, H]) == run                        # steady: off
+        u["w"][0, H] = True
+        _, a = innate(st)
+        assert float(a["run"][0, H]) == pytest.approx(1.1 * run)   # wavering
+        u["w"][0, H], u["r"][0, H] = False, True
+        _, a = innate(st)
+        assert float(a["run"][0, H]) == pytest.approx(1.1 * run)   # routing (alive): a faster rout
+        u["hp"][0, H] = 0.8
+        _, a = innate(st)
+        assert float(a["run"][0, H]) == pytest.approx(0.99 * run)  # both: x1.1 x0.9
+
+    def test_a_routing_skaven_unit_runs_faster_than_an_empire_one(self):
+        # (a standing unit a side far away keeps the battle going)
+        st = scenario.build([army([(SPEAR, -300, 0, 90), (SPEAR, -300, 700, 90)],
+                                  [(SLAVE, 300, 0, 270), (SLAVE, 300, 700, 270)])], P)
+        H = st.N // 2
+        for i in (0, H):
+            st.u["r"][0, i], st.u["morale"][0, i], st.u["hp"][0, i] = True, -40.0, 0.4
+            st.u["hp_abs"][0, i] = 0.4 * st.u["hp0"][0, i]
+            st.u["rout_count"][0, i], st.u["rally_s"][0, i] = 1.0, 0.0
+        for _ in range(20):
+            battle.step(st, replay.hold(st), P)
+        share = {}
+        for i, key in ((0, SPEAR), (H, SLAVE)):
+            assert bool(st.u["r"][0, i])
+            v = math.hypot(float(st.u["vx"][0, i]), float(st.u["vz"][0, i]))
+            share[i] = v / float(P.units[key]["speed"]["run"])
+        rout = P.sim["morale"]["rout_speed"]
+        assert share[0] == pytest.approx(rout, rel=0.01) and share[H] == pytest.approx(1.1 * rout, rel=0.01)
+
+    def test_single_entity_weakens_a_lord_below_a_quarter_of_his_health_unless_left_out(self):
+        """sim.json effects.off leaves Single Entity out (the recordings show no such speed drop); the
+        mechanism itself, with the switch empty: below 25 % health, speed x0.9 and damage x0.8."""
+        import dataclasses
+        import json
+        sim = json.loads(json.dumps(P.sim))
+        assert "wh3_main_unit_passive_single_entity" in sim["effects"]["off"]
+        sim["effects"]["off"] = []
+        Q = dataclasses.replace(P, sim=sim)
+        for params, on in ((Q, True), (P, False)):
+            st = scenario.build([army([(GENERAL, -100, 0, 90, True)], [(WARLORD, 100, 0, 270, True)])], params)
+            H = st.N // 2
+            u = st.u
+            dmg, run = float(u["damage"][0, H]), float(u["run"][0, H])
+            _, a = innate(st, params=params)
+            assert float(a["damage"][0, H]) == dmg
+            u["hp"][0, H] = 0.2
+            _, a = innate(st, params=params)
+            k = (0.8, 0.9) if on else (1.0, 1.0)
+            assert float(a["damage"][0, H]) == pytest.approx(k[0] * dmg) and float(a["run"][0, H]) == pytest.approx(k[1] * run)
+            assert int(st.u["fx_on"][0, H]) & bit("wh3_main_unit_passive_single_entity")     # the network sees it
+
+    def test_hold_the_line_reaches_friends_in_range_from_a_standing_lord(self):
+        st = scenario.build([army([(GENERAL, 0, 0, 90, True), (SPEAR, 0, 30, 90), (SPEAR, 0, 120, 90)],
+                                  [(SLAVE, 20, 0, 270)])], P)
+        H = st.N // 2
+        u = st.u
+        d = [float(u["defence"][0, i]) for i in (1, 2, H)]
+        _, a = innate(st)
+        assert [float(a["defence"][0, i]) for i in (1, 2, H)] == [d[0] + 5, d[1], d[2] + 8]   # (slaves: SiN)
+        assert float(a["morale_bonus"][0, 1]) == float(u["morale_bonus"][0, 1]) + 4
+        u["r"][0, 0] = True                                        # a routing lord holds no line
+        _, a = innate(st)
+        assert float(a["defence"][0, 1]) == d[0]
+
+    def test_an_effect_the_simulator_lacks_counts_as_on_but_changes_nothing(self):
+        st = scenario.build([army([(SPEAR, -100, 0, 90)], [(RUNNERS, 100, 0, 270)])], P)
+        H = st.N // 2
+        _, a = innate(st)
+        on = int(st.u["fx_on"][0, H])
+        assert on & bit("guerrilla_deploy") and on & bit("hide_forest")
+        assert not P.effects["effects"]["guerrilla_deploy"]["modelled"]
+        assert float(a["attack"][0, H]) == float(st.u["attack"][0, H])
+
+    def test_a_new_effect_in_the_catalogue_works_without_code(self):
+        """Perfect Vigour (fatigue_immune) given to the spearmen by the catalogue alone: they never tire."""
+        import dataclasses
+        import json
+        from tools.nn import effects as catalogue
+        doc = json.loads(json.dumps(P.effects))
+        doc["effects"]["fatigue_immune"] = catalogue.attribute_effect("fatigue_immune")
+        doc["order"].append("fatigue_immune")
+        doc["units"][SPEAR] = doc["units"][SPEAR] + ["fatigue_immune"]
+        Q = dataclasses.replace(P, effects=doc)
+        st = scenario.build([army([(SPEAR, -100, 0, 90), (SPEAR, -100, 60, 90)], [(SLAVE, 300, 0, 270)])], Q)
+        st.u["fx"][0, 1] = int(st.u["fx"][0, 1]) & ~bit_of(Q, "fatigue_immune")   # the second has it not
+        for _ in range(40):
+            o = replay.hold(st)
+            o.kind[0, :2], o.x[0, :2], o.z[0, :2], o.run[0, :2] = O.MOVE, 200.0, 0.0, True
+            battle.step(st, o, Q)
+        assert float(st.u["fatigue"][0, 0]) == 0 and float(st.u["fatigue"][0, 1]) > 0
+
+
+def bit_of(params, key):
+    return 1 << effects.index(params)[key]

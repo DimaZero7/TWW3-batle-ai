@@ -38,11 +38,27 @@ sequenceDiagram
   point more than 5 m away. Otherwise a unit would restart its path every second.
 - **No answer by the next decision** — the orders in force stay; the event `nn_miss`.
   A late answer (for an earlier move) is still taken; `lag` in the event says how late.
-- Routing, shattered and dead units get no orders: they take care of themselves. The engine drops
-  the order of a unit that routs, so the bridge forgets it too: after the rally the network's order
-  is given again even when it is the same as before the rout (`again` in `nn_orders`; `keep` right
-  after a rally gives the order the unit had). Before this fix a rallied unit stood idle under an
-  order the bridge thought was in force: up to 128 s (gate, 01.10.2026).
+- **Routing, shattered and dead units get no orders**: they take care of themselves. The companion
+  writes no line for them (the network's HOLD for a unit that takes no orders is only a filler), and
+  the bridge takes no order from an answer to a state in which the unit was down (`down_at`; counted
+  in `skipped`). Before 02.10.2026 that filler HOLD reached units that rallied between the state and
+  the answer and halted them: the first order after 42 of 102 rallies in the gate of 02.10.2026.
+- **A rallied unit goes on with the order it had.** The engine drops the order of a unit that
+  routs; the simulator keeps it, and the unit goes on with it the moment it rallies. So the bridge
+  keeps the order a unit had when it broke and gives it again at once when the unit stands again
+  (checked every poll; event `nn_rally`, counted in `nn_regiven`); an attack on a target that is gone
+  becomes hold, as in the simulator. Before, the unit stood until the network's next answer, and the
+  network, seeing it stand far from its target, often held it (replayed offline: HOLD 0.41-0.43
+  standing, 0.11-0.12 when seen walking back to the target as in the simulator). (Before 01.10.2026
+  a rallied unit stood up to 128 s under an order the bridge thought was in force.)
+- **What the bridge does not change:** a held unit far from the enemy stays held. The network
+  (`test5/it6/m40`) keeps an own unit under HOLD with no enemy near on HOLD (offline: 0.999-1.0;
+  moving its order point onto an enemy: attack 0.82-0.98; morale, fatigue and health change nothing),
+  and units rally 75-255 m from the nearest enemy. Gate 02.10.2026 (8 battles): of 102 rallies 37
+  ended in a hold of 30 s or more (17 held before the rout as well); 48 % of rallied units' decisions
+  were HOLD (78 % of them idle) against 10 % for units that never routed. The simulator shows the
+  same habit, weaker: rallied units under HOLD 24 % of their time, 38 % of it idle (6 battles against
+  ai_like). That is for training, not for the bridge.
 - **A held shooter shoots as in the simulator** (02.10.2026). The simulator's held shooter shoots
   the nearest enemy in range (into melee too). The game's fire at will does not: a halted shooter
   picks a target itself, often one just out of range, keeps it and stands (gate it4, 8 battles:
@@ -156,7 +172,7 @@ companion then simply reads again when the JSON is not complete.
 | `attacker` | Side that attacks (2: the game's AI attacks) |
 | `factions` | `{own, enemy}` |
 | `decide_ms` | Time between decisions, ms |
-| `units` | Every unit: the fields of the recorded `nn_sample` ([nn_arena](entries.md#nn_arena)) plus `side`, `key` (unit key), `v` (visible to the other side) and `fx` (phase keys active on it; missing when the card cannot be read) |
+| `units` | Every unit: the fields of the recorded `nn_sample` ([nn_arena](entries.md#nn_arena)) plus `side`, `key` (unit key), `v` (visible to the other side) and `fx` (phase keys active on it; missing when the card cannot be read); without the recording-only `sv`, `pcr`, `phr`, `mge` (and the sample's `bop`), which `nn_arena` reads for the simulator's calibration, not for the network |
 | `abilities_used` | `{unit: {ability key: battle ms of its last use by the bridge}}` (`{}` before any) |
 
 **Orders** `tww3_bai_nn_orders.txt` (companion → game), text, one line per unit:
@@ -210,7 +226,8 @@ card: with it every row gets `fx`. The entry [nn_arena](entries.md#nn_arena) wit
 
 | Event | Fields |
 |---|---|
-| `nn_orders` | `move`, `lag` (moves written since), `wait_model_ms` and `wait_real_ms` (from writing the state to giving the orders), `think_ms` (the network's time in the companion), `orders` (given: `u`, `k`, `x`, `z`, `tg`, `run`, `status`, `again` — the first order after a rally), `kept` (the same order again: not given), `keeps` (units told `keep`), `skipped` |
+| `nn_orders` | `move`, `lag` (moves written since), `wait_model_ms` and `wait_real_ms` (from writing the state to giving the orders), `think_ms` (the network's time in the companion), `orders` (given: `u`, `k`, `x`, `z`, `tg`, `run`, `status`), `kept` (the same order again: not given), `keeps` (units told `keep`), `skipped` (orders to units down now or in the state answered) |
+| `nn_rally` | `u`, `k`, `x`, `z`, `tg`, `run`, `status` — the order a unit had when it broke, given again as it rallied (`hold` if the attack's target is gone) |
 | `nn_duty` | `u`, `action` (`free` — an attack on a target in melee given as fire at will, `release` — idle: to fire at will, `resume` — the ordered target again), `tg` |
 | `nn_miss` | `move` that got no answer by the next decision, `answered` |
 | `nn_hold` | `u`, `action` (`aim`, `none`, `halt`), `tg` — a held shooter's target |
@@ -218,8 +235,8 @@ card: with it every row gets `fx`. The entry [nn_arena](entries.md#nn_arena) wit
 | `nn_ability` | `move`, `u`, `key`, `status`: `used`, `not_ready` (`can_perform_special_ability` said no: in the game only for an ability not owned), `down` (the unit is not standing), `unknown_unit` (not ours), `error` |
 | `nn_ability_ready` | `u`, `key`, `ready` (`can_perform_special_ability`), when it changes |
 | `nn_effects` | `u`, `fx` (the phases on the unit, or `unknown`), when they change |
-| `result` (added) | `nn_moves`, `nn_answered`, `nn_missed`, `nn_orders_given`, `nn_keeps`, `nn_bad_files`, `nn_write_mode`, `nn_regiven` (orders given after a rally), `nn_released`, `nn_resumed`, `nn_abilities_used`, `nn_abilities_refused`, `nn_hold_aims`, `nn_hold_halts`, `nn_stalls` |
+| `result` (added) | `nn_moves`, `nn_answered`, `nn_missed`, `nn_orders_given`, `nn_keeps`, `nn_bad_files`, `nn_write_mode`, `nn_regiven` (orders given again at a rally), `nn_released`, `nn_resumed`, `nn_abilities_used`, `nn_abilities_refused`, `nn_hold_aims`, `nn_hold_halts`, `nn_stalls` |
 
 Tests: `tests/apps/bridge/test_bridge.py` (the orders file as the game reads it, what counts as a
 new order, a shooter's duty), `tests/entries/test_entries.py` (`test_net_...`: state, answer, orders
-given, a miss, the last state; a ranged attack runs, a rout and a rally, a shooter released and taken back), `tests/entries/test_bridge_abilities.py` (ability lines, the card's active effects, a use once, refused when not ready, down or not ours; the state's uses), `tests/tools/test_nn_companion.py` (the companion's side, the ability timers and lines).
+given, a miss, the last state; a ranged attack runs, a rout and a rally, a shooter released and taken back), `tests/entries/test_bridge_abilities.py` (ability lines, the card's active effects, a use once, refused when not ready, down or not ours; the state's uses; a held shooter aimed, a dropped attack given again, a rallied unit going on with its order and taking no filler HOLD), `tests/tools/test_nn_companion.py` (the companion's side, the ability timers and lines, no line for units that take no orders).

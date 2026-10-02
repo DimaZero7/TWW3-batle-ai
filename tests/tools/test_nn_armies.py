@@ -192,7 +192,9 @@ class TestBattles:
     def test_the_budget_never_exceeds_what_both_can_field(self):
         gen = G.default()
         lo, hi = gen.budget_bounds((SKV,))
-        assert lo == POOLS[SKV].lord.cost + 150 and hi == POOLS[SKV].lord.cost + 19 * 325
+        # the cheapest Skaven unit: plain skavenslaves (125); the Skaven's own cap (pools.json faction budget_max,
+        # 02.10.2026): the Warlord and 19 clanrat spearmen, their most before the Night Runners
+        assert lo == POOLS[SKV].lord.cost + 125 and hi == POOLS[SKV].budget_max == POOLS[SKV].lord.cost + 19 * 325
         # The Empire's most: 19 units, at most 12 of them archers (the cap), the rest its dearest melee.
         emp = POOLS[EMP]
         melee = max(u.cost for u in emp.units if u.category != "inf_ranged")

@@ -80,7 +80,7 @@ def test_passports_hold_the_v1_units_and_equal_their_cards():
     # The v1 units, the shielded spearmen and the swordsmen (02.10.2026) have cards from battle; the
     # probe's halberds and stormvermin (lord swarm, 01.10.2026) do not, nor (yet: list
     # config/roster/capture_emp_wave2.json) the flagellants, greatswords and militia (02.10.2026).
-    assert checked >= 9 and len(units.UNITS) == 14
+    assert checked >= 9 and len(units.UNITS) == 17
 
 
 def test_v1_spears_have_no_shield_and_missile_units_have_missiles():
@@ -91,6 +91,7 @@ def test_v1_spears_have_no_shield_and_missile_units_have_missiles():
     assert u["wh_main_emp_inf_spearmen_1"]["shield"] == {"key": "wh_missile_block_35_metal", "missile_block_chance": 35}
     assert u["wh_main_emp_inf_spearmen_1"]["multiplayer_cost"] > u["wh_main_emp_inf_spearmen_0"]["multiplayer_cost"]
     shooters = ("wh2_dlc13_emp_inf_archers_0", "wh2_main_skv_inf_skavenslave_slingers_0",
+                "wh2_main_skv_inf_night_runners_1",
                 "wh_dlc04_emp_inf_free_company_militia_0")
     for key in shooters:
         assert u[key]["missile"]["range_m"] > 0 and u[key]["missile"]["ammo"] > 0
@@ -145,3 +146,18 @@ def game_db():
 def test_passports_are_rebuilt_from_the_game_the_same():
     tables = dbtables.read_tables(game_db(), units.TABLES)
     assert units.build(tables) == saved()["units"]
+
+
+def test_the_skaven_wave():
+    """Plain skavenslaves (cheapest, expendable), clanrats with shields, Night Runners with slings (fast,
+    vanguard, arcing sling): every Skaven infantry unit has Strength in Numbers and Scurry Away!."""
+    u = saved()["units"]
+    slaves, clanrats, runners = (u[k] for k in ("wh2_main_skv_inf_skavenslaves_0", "wh2_main_skv_inf_clanrats_1",
+                                                "wh2_main_skv_inf_night_runners_1"))
+    assert slaves["multiplayer_cost"] == 125 and "expendable" in slaves["attributes"] and slaves["armour"] == 0
+    assert clanrats["shield"]["missile_block_chance"] == 35 and clanrats["melee"]["defence"] == 22
+    assert runners["speed"]["run"] > u["wh2_main_skv_inf_clanrat_spearmen_0"]["speed"]["run"]
+    assert "guerrilla_deploy" in runners["attributes"] and "stalk" not in runners["attributes"]
+    assert runners["missile"]["category"] == "sling" and not runners["missile"]["direct"]
+    for p in (slaves, clanrats, runners):
+        assert set(p["abilities"]) == {"wh2_main_unit_passive_scurry_away", "wh2_main_unit_passive_strength_in_numbers"}

@@ -1,6 +1,9 @@
-"""Lord abilities (docs/en/training/simulator.md). Every number comes from the ability passports
-(config/nn/abilities.json, the game's database); config/nn/sim.json `abilities` says which of them
-the simulator models (`model`), when the game's AI fires an active one (`triggers`) and near_m.
+"""Lord abilities cast by order or by the game's AI (docs/en/training/simulator.md). Every number comes
+from the ability passports (config/nn/abilities.json, the game's database); config/nn/sim.json
+`abilities` says which of them the simulator models (`model`), when the game's AI fires an active one
+(`triggers`) and near_m. Innate abilities - passive ones and those the game fires by itself (passport
+`auto`: Strength of the Penitent) - are innate effects (tools/nn/sim/effects.py): this module leaves
+their slots alone (effects.py shows a timed one's timers in its slot).
 
 Who fires an active ability:
 * a side played by the game's AI (STATIC `ai`) by a rule (an assumption, not measured): `melee`
@@ -9,14 +12,8 @@ Who fires an active ability:
 * any unit when ordered (Orders.ability: the slot to use, -1 none; the network's side) - only a
   self-cast ability (passport self_cast: used on the owner, no target to choose), ready and not
   active. A side the network plays should have `ai` false, or its lord also fires by the rule.
-* the game itself, for every side: a timed passive (passport `auto`, Strength of the Penitent) when
-  its context holds (auto_when: losing_melee_combat = in melee and losing it by the morale rule's
-  combat ratio, sim.json morale.combat_ratio.slightly; engaged_in_melee = in melee), else whenever
-  ready. Never by order.
-It then lasts active_s and is ready again recharge_s after it ends. Passive ones work for every side.
-Switching off (passport off_when): out_of_melee ends an active one at once (recharge from then) and
-holds a passive off; morale_is_lower_than_half_of_base_morale (Frenzy), morale_is_higher_than_wavering,
-health_below_50%_base hold the effect off while true.
+It then lasts active_s and is ready again recharge_s after it ends. Switching off (passport
+off_when): out_of_melee ends an active one at once (recharge from then).
 
 Effects (the passport's effects the simulator has a number for, SIM_STATS): on the owner himself
 (the phase targets self), on his side's units within range_m (targets friends) and on enemies
@@ -24,7 +21,8 @@ within range_m (targets enemies). Multipliers multiply, additions add.
 
 Slots: a unit shows up to SLOTS abilities (slot_keys): active ones first, then passives that reach
 other units, then the rest, each group by key. The network's input (tools/nn/model/abilities.py)
-uses the same slots. Only json here and in slot_keys(); the tensors need torch.
+uses the same slots (passives included: the ability bar shows them). Only json here and in
+slot_keys(); the tensors need torch.
 """
 try:
     import torch
@@ -142,8 +140,9 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None):
     for k in range(SLOTS):
         r = T[u[f"ab{k}"]]                          # [B, N, COLS]; -1 picks the empty last row
         c = lambda name: r[..., COL[name]]
-        has = u[f"ab{k}"] >= 0
         passive, trig, rng = c("passive") > 0, c("trigger"), c("range_m")
+        # innate (passive or fired by the game itself): tools/nn/sim/effects.py
+        has = (u[f"ab{k}"] >= 0) & ~passive & ~(c("auto") > 0)
         on = (u[f"ab{k}_on"] - dt).clamp(min=0)
         cd = (u[f"ab{k}_cd"] - dt).clamp(min=0)
         friends = same_side & ~eye & present[:, None, :] & (dist <= rng[:, :, None])     # owner i -> unit j
@@ -156,16 +155,16 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None):
             off = off | ((c(f"off_{f}") > 0) & off_now[f])
         ready = standing & has & ~passive & (on <= 0) & (cd <= 0) & ~off
         ordered = (use == k) & (c("self_cast") > 0)
-        auto = c("auto") > 0
-        fire = ready & (((u["ai"] | auto) & want) | ordered)
+        fire = ready & ((u["ai"] & want) | ordered)
         on = torch.where(fire, c("active_s"), on)
         cd = torch.where(fire, c("active_s") + c("recharge_s"), cd)
         # switched off while active: it ends now and recharges from now
         ended = (on > 0) & off
         cd = torch.where(ended, torch.minimum(cd, c("recharge_s").clamp(min=0)), cd)
         on = torch.where(ended, torch.zeros_like(on), on)
-        u[f"ab{k}_on"], u[f"ab{k}_cd"] = on, cd
-        active = has & standing & (c("modelled") > 0) & ((on > 0) | (passive & ~off))
+        u[f"ab{k}_on"] = torch.where(has, on, u[f"ab{k}_on"])
+        u[f"ab{k}_cd"] = torch.where(has, cd, u[f"ab{k}_cd"])
+        active = has & standing & (c("modelled") > 0) & (on > 0)
         reach = {"self": eye & active[:, :, None], "friends": friends & active[:, :, None],
                  "enemies": enemies & active[:, :, None]}
         for g in GROUPS:

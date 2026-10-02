@@ -10,7 +10,7 @@ import math
 
 import torch
 
-from tools.nn.sim import abilities, fatigue, geometry, melee, missile, morale, movement
+from tools.nn.sim import abilities, effects, fatigue, geometry, melee, missile, morale, movement
 from tools.nn.sim import orders as O
 from tools.nn.sim.params import load
 
@@ -62,6 +62,9 @@ def step(st, orders, params=None, dt=None):
     strike = touch & striker[:, :, None]
     engaged = standing & (touch & standing[:, None, :]).any(2)
     speed = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)
+    # --- innate effects (attributes, passives, game-fired timed passives: config/nn/effects.json): their
+    # stats and rule flags hold for this step ---
+    innate = effects.apply(u, params, dt, standing, engaged, pw["dist"], same_side)
     new = engaged & (u["contact_s"] <= 0)
     fast = speed >= 0.5 * u["run"]
     factor = torch.where(fast, (speed / u["run"].clamp(min=0.1)).clamp(max=1), torch.zeros_like(speed))
@@ -79,8 +82,8 @@ def step(st, orders, params=None, dt=None):
     charge_now = u["charge"] * (1 - u["contact_s"] / decay).clamp(min=0)
     u["contact_s"] = torch.where(engaged, u["contact_s"] + dt, torch.zeros_like(u["contact_s"]))
 
-    # --- lord abilities (the game's AI by its rule, the network by order; passives for all): their
-    # effects hold for this step ---
+    # --- lord abilities cast by the game's AI by its rule or by the network's order: their effects hold
+    # for this step ---
     base = abilities.apply(u, params, dt, standing, engaged, pw["dist"], same_side, orders.ability)
     # --- fatigue's stat multipliers (the database's unit_fatigue_effects_tables), for this step ---
     tired = fatigue.effects(u, params)
@@ -301,6 +304,7 @@ def step(st, orders, params=None, dt=None):
 
     u.update(tired)
     abilities.restore(u, base)
+    effects.restore(u, innate)
 
     # --- is the battle over ---
     standing = present & (u["men"] > 0) & ~u["gone"] & ~u["r"]

@@ -149,9 +149,9 @@ def train(args, every=None):
                              idle_tau_s=args.idle_tau, idle_cap=args.idle_cap, idle_pause_s=args.idle_pause,
                              idle_step=args.idle_step, idle_share=args.idle_share, idle_rate=args.idle_rate,
                              idle_window_s=args.idle_window,
-                             unit_gold=args.unit_gold, flanked=args.flanked, missile_melee=args.missile_melee,
+                             unit_gold=args.unit_gold, unit_attrib=args.unit_attrib, flanked=args.flanked, missile_melee=args.missile_melee,
                              crowd=args.crowd, flank_attack=args.flank_attack, neighbour=args.neighbour,
-                             idle_near=args.idle_near, gold=args.gold, rout_share=args.rout_share,
+                             idle_near=args.idle_near, shirk=args.shirk, shirk_m=args.shirk_m, shirk_side=args.shirk_side, gold=args.gold, rout_share=args.rout_share,
                              unit_idle=args.unit_idle, lord_rout=args.lord_rout,
                              lord_exposed=args.lord_exposed, lord_exposed_hp=args.lord_exposed_hp,
                              lord_lead=args.lord_lead, lord_lead_m=args.lord_lead_m, lord_lead_near=args.lord_lead_near,
@@ -164,6 +164,7 @@ def train(args, every=None):
         return float(share), int(units)
     entropy_end = args.entropy if args.entropy_end is None else args.entropy_end
     anchor_end = args.anchor if args.anchor_end is None else args.anchor_end
+    unit_credit_end = args.unit_credit if args.unit_credit_end is None else args.unit_credit_end
     pool = league.Pool(out / "pool", size=args.pool)
     pool.add(checkpoint.RANDOM)
     if args.init:
@@ -246,13 +247,15 @@ def train(args, every=None):
             t_bank = time.time()
         batch = rollout.collect(env, actor, critic, args.steps)
         t_c = time.time()
-        # Schedules: the kind's entropy bonus and the KL to the reference go linearly from their start to
-        # their end value over the run (e.g. exploration and the warm start's hold fade out).
+        # Schedules: the kind's entropy bonus, the KL to the reference and the per-unit credit go linearly
+        # from their start to their end value over the run (e.g. exploration and the warm start's hold fade
+        # out; the units' own credit hands over to the side's, OpenAI Five's "team spirit").
         # With --entropy-target the weight is the floor's (ppo.entropy_weight), never below the schedule.
         scheduled = schedule(args.entropy, entropy_end, done_share)
         floor_w = scheduled if floor_w is None else max(scheduled, floor_w)
         u_cfg = dataclasses.replace(step_cfg, entropy=floor_w if args.entropy_target else scheduled,
-                                    anchor=schedule(args.anchor, anchor_end, done_share))
+                                    anchor=schedule(args.anchor, anchor_end, done_share),
+                                    unit_credit=schedule(args.unit_credit, unit_credit_end, done_share))
         trains = update >= args.critic_warmup
         st = ppo.update(actor, critic, opt, batch, u_cfg, train_policy=trains, reference=reference)
         if start is not None:
@@ -284,6 +287,7 @@ def train(args, every=None):
                "collect_s": round(t_c - t_u, 2), "update_s": round(time.time() - t_c, 2),
                **{k: round(v, 4) for k, v in st.items()},
                "entropy_weight": round(u_cfg.entropy, 5), "anchor_weight": round(u_cfg.anchor, 4),
+               "unit_credit": round(u_cfg.unit_credit, 4),
                "anchor_rolls": rolls,
                "lord_dead_own": round(lords["own"], 3), "lord_dead_enemy": round(lords["enemy"], 3),
                "abilities_per_battle": round(env.abilities(), 2),
@@ -490,9 +494,14 @@ def parser():
                     help="s: the time constant of that damage rate")
     ap.add_argument("--unit-credit", type=float, default=ppo.PPOConfig.unit_credit,
                     help="weight of each unit's own advantage beside the side's (0: the side's only)")
+    ap.add_argument("--unit-credit-end", type=float,
+                    help="... at the end of the run (linear from --unit-credit; default: no change)")
     ap.add_argument("--unit-value", type=float, default=ppo.PPOConfig.unit_value,
                     help="weight of the per-unit value loss beside the side's (its targets are x unit_scale)")
     ap.add_argument("--unit-gold", type=float, default=reward.Weights.unit_gold, help="per unit: its own gold trade")
+    ap.add_argument("--unit-attrib", type=float, default=reward.Weights.unit_attrib,
+                    help="in the unit's gold trade, what it destroyed: 1 the enemy's gold loss (routs, kills) split "
+                         "among the units engaging it; 0 the old HP estimate")
     ap.add_argument("--flanked", type=float, default=reward.Weights.flanked,
                     help="per unit and decision: struck in the flank or rear")
     ap.add_argument("--missile-melee", type=float, default=reward.Weights.missile_melee,
@@ -501,6 +510,13 @@ def parser():
                     help="per unit and decision in a pile (more than 2 on one enemy while another flanks)")
     ap.add_argument("--idle-near", type=float, default=reward.Weights.idle_near,
                     help="per melee unit and decision standing by while a fellow within 60 m fights")
+    ap.add_argument("--shirk", type=float, default=reward.Weights.shirk,
+                    help="per melee unit and decision standing still out of melee while its side fights in melee "
+                         "and an enemy is within --shirk-m")
+    ap.add_argument("--shirk-m", type=float, default=reward.Weights.shirk_m)
+    ap.add_argument("--shirk-side", type=float, default=reward.Weights.shirk_side,
+                    help="the side (either role) pays this x the share of its army (by cost) shirking (as --shirk) "
+                         "per decision; works at --unit-credit 0")
     ap.add_argument("--flank-attack", type=float, default=reward.Weights.flank_attack,
                     help="per unit and decision striking an enemy's flank or rear (bonus)")
     ap.add_argument("--unit-idle", type=float, default=reward.Weights.unit_idle,

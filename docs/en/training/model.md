@@ -138,11 +138,30 @@ now — owned, active (not passive), self-cast (used on the owner, no target to 
 (not active, recharged) and the unit takes orders (alive, not routing). Without the timers in the
 state (recordings) nothing is ready.
 
+### Innate effects (each unit, each effect of the catalogue)
+
+Every attribute and passive or game-fired ability of a unit is an innate effect of one catalogue
+(`config/nn/effects.json`, [unit passports](units.md#innate-effects)); the token ends with a pair of
+inputs per effect, in the catalogue's append-only `order` (14 effects, 28 inputs;
+`tools/nn/model/effects.py`):
+
+| Input (per effect) | Own unit | Enemy, visible | Enemy, not visible | Scale |
+|---|---|---|---|---|
+| Owned | yes | yes | yes | 0/1 |
+| On now (its conditions hold: Strength in Numbers above half health, Scurry Away! while wavering, Frenzy above half morale, the Penitent's 20 s, an attribute always) | yes | yes | no | 0/1 |
+
+Owned is on the unit's card (both armies' cards are seen before battle); the game lists a seen
+unit's active effects (CCO `ActiveEffectList`). In the simulator "on" is its `fx_on`; in a recorded
+battle or in the game (the companion) it is worked out from the token's own fields by the same
+conditions (health, the morale state, melee; own morale for half-morale), and a timed effect whose
+timer is not known (the Penitent) counts as off. A new effect appends its pair at the token's end:
+an older network loads with zero weights for it (`encoder.pad_inputs`) and acts as before.
+
 ## Model
 
 ```mermaid
 flowchart TB
-  tok["Unit tokens: 120 numbers each<br/>(69 of them the passport)"] --> enc["Shared encoder<br/>the same weights for every unit"]
+  tok["Unit tokens: 148 numbers each<br/>(69 of them the passport, 28 the innate effects)"] --> enc["Shared encoder<br/>the same weights for every unit"]
   ctx["Context: character, role, counts, lords,<br/>time elapsed, damage timers"] --> enc
   enc --> att["Attention layers<br/>+ distance bias, masks"]
   att --> gru["Memory: a GRU per unit<br/>and one for the army"]
@@ -270,7 +289,11 @@ An int8 export of the actor looks practical; not done yet:
   valid choice, log-probability only when chosen, an older actor loads; the damage timers on
   numpy and torch; networks with the older context (the `t / 3600` column) load and give the same
   logits, greedy actions, memory and values, also the trained `test5/t0_gold30/m20.pt` and
-  `runs/long_ai/best.pt` (skipped without them).
+  `runs/long_ai/best.pt` (skipped without them); the innate effects: owned as the catalogue says,
+  numpy and torch the same, "on" follows its conditions and is shown for seen enemies only, the
+  simulator's `fx_on` and the observed fields agree, networks saved before them (and the chain's
+  `test5/it5/m20.pt`) load and give the same outputs, the same with the effect inputs zeroed, and
+  the new inputs get a gradient.
 - `tests/tools/test_nn_train.py`: in the simulator the attacker's row sees `rollout.last_hit` as
   "we dealt", the defender's as "the enemy dealt", per battle, cleared on restart; training
   continues from `m20.pt` (one PPO update).

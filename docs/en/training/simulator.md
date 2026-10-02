@@ -36,6 +36,7 @@ st.winner, st.t, st.observation()            # [B], [B], dict of [B, N]
 ```mermaid
 flowchart LR
   pass["config/nn/units.json<br/>passports"] --> params["params.py"]
+  fx["config/nn/effects.json<br/>innate effects"] --> params
   rules["config/nn/game_rules.json<br/>the game's rules"] --> params
   cal["config/nn/sim.json<br/>calibration"] --> params
   params --> scen["scenario.py<br/>armies → state"]
@@ -54,8 +55,10 @@ first; `side` = 0 is an empty slot). Three groups:
   `fat` (the fatigue state 0–5), `k`, `ox`, `oz`, `lf`, `rf`, `bf`, `vis`; the battle time
   is `t` `[B]`. So recorded battles and the simulator feed the network the same way;
 - *static* — the passport: men, health, speeds, attack, defence, weapon, armour, shield,
-  leadership, projectiles, range, reload, cost;
-- *internal* — what only the simulator needs: morale and fatigue points, timers.
+  leadership, projectiles, range, reload, cost; the unit's innate effects (`fx`, a bitmask over
+  `config/nn/effects.json`'s order; `fxt0`, `fxt1`: its timed ones) and their rule flags;
+- *internal* — what only the simulator needs: morale and fatigue points, timers (of the abilities
+  and of the timed effects), `fx_on` (the innate effects on in the last step).
 
 **Orders** (`tools/nn/sim/orders.py`): per unit and decision step `kind` ∈ hold (0), move (1),
 attack (2), withdraw (3), keep (4: no new order, the one in force goes on; a unit with no order
@@ -65,18 +68,20 @@ optional: orders made without it get −1; independent of `kind`). All `[B, N]`.
 unit in melee does not take it out: that is what withdraw is for (it breaks off, and the enemies
 in contact strike its back). An ability order fires a ready self-cast ability once (not passive,
 not active, recharged); otherwise nothing happens. The network reads the abilities' timers from
-`State.observation()` (`ab{k}_on`, `ab{k}_cd` [B, N], s).
+`State.observation()` (`ab{k}_on`, `ab{k}_cd` [B, N], s) and the innate effects on now (`fx_on`).
 
 ## One step (0.5 s)
 
 1. Take the orders (routing units ignore them).
 2. Contacts: the units' rectangles (front × depth of the ranks the men fill) touch.
-3. Blows in melee and shots.
-4. Health, men, kills.
-5. Morale: wavering, rout, rally, shattering.
-6. Fatigue.
-7. Movement: to the order's point or the target, fleeing for routers; the edge of the map.
-8. Is the battle over: a side with no standing unit loses; at 60 minutes the defender wins.
+3. Innate effects (attributes, passives, game-fired timed passives) and cast abilities: their
+   stats and rule flags hold for this step.
+4. Blows in melee and shots.
+5. Health, men, kills.
+6. Morale: wavering, rout, rally, shattering.
+7. Fatigue.
+8. Movement: to the order's point or the target, fleeing for routers; the edge of the map.
+9. Is the battle over: a side with no standing unit loses; at 60 minutes the defender wins.
 
 ## Mechanics and their sources
 
@@ -86,7 +91,7 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 
 | Mechanic | How | Source |
 |---|---|---|
-| Speed | walk, run, acceleration, deceleration of the passport; routing units run at 0.9 of the run | DB; the routing speed measured (median 0.80–0.96) |
+| Speed | walk, run, acceleration, deceleration of the passport; routing units run at 0.86 of the run (before innate effects: a Skaven rout ×1.1 by Scurry Away!) | DB; the routing speed measured (Empire 0.865; Skaven 0.945 below half health, 0.866 above: [innate effects](#innate-effects)) |
 | Formation | front of the ordered width, ranks 1.5 m apart; a lord is a circle of his radius | measured: 120 spearmen, 30 m, 6 ranks |
 | Contact | edges within 1 m (2 m more for those already fighting) | measured: centre distance at the first contact |
 | Facing | a moving unit faces where it goes, but a step of less than 10 m to its point goes without turning; a formation in melee turns at most 2° a second (a lord turns at once) | measured: infantry in melee turns 1°/s (median; mean 2.3), a free unit struck in the flank turns 8° in 5 s (median) |
@@ -111,13 +116,11 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 | Pistols (estimate) | hit rate 0.5 at the edge of range (×1.12–1.29 at 60–90 m), reload 10.8 s, first shot 3.8 s | estimate from the projectile's calibration area (2.0 m at 65 m against the arrow's 3.7 m at 95 m), not measured: `sim.json` missile.musket_why |
 | Morale | points: leadership + effects; MoralePercent = points / leadership; moves 1 point or 15 % of the gap per 0.5 s | DB; the step measured (+2 points a second in every recording) |
 | Morale effects | lord +4 within 70 m, fading to 0 at 105 m; lord died or shattered: his aura only (`lord_fall` 0 / 0); neighbour within 120 m +5; casualties −2…−74; recent casualties −6…−80 (last 30 s, of the whole health); winning / losing the melee +3/+6/+8, −3/−8 (damage ratio 1.5 / 2.5 / 4); first struck in the flank −6, rear −14 for one 0.5 s tick; the army beaten as a whole (enemy strength ≥ 2.6× own, own ≤ 0.22 of the start) −120; flanks exposed (an enemy threatens the left, right or rear: `lf`, `rf`, `bf`) −3, two or more −6; routing friends −3 each; routing enemies +2.5 each; under fire −5; very tired −2, exhausted −6; a stronger enemy within 70 m −3 | DB points; window, ratios calibrated; attacked in the flank / rear measured ([flanks](#flanks-rear-and-charges-in-whole-battles)); a shattered lord counts as lost: in the game his whole army drops 0.5–0.6 of its leadership in the second he shatters and routs within ~3 s (gate battles 02.10.2026) |
-| Faction | Skaven +6 points at the start | measured: before contact they stand 6 higher than the Empire in the same place |
 | States | wavering below 16 points, rout at 0, shattered at the third rout, no new rout within 10 s of a rally | DB |
-| Unbreakable | a unit with `unbreakable` (Flagellants) never loses leadership: its points stay at leadership or above, it never wavers or routs (also not on army destruction) | DB attribute; the knowledge base ([abilities](../game/mechanics/abilities.md), [morale](../game/mechanics/morale.md)) |
 | Rally | while no standing enemy is within 90 m the router regains 2 points a second; rallies at MoralePercent 0.23 | measured: 0.23 and 90 m (365 rallies); 2 points calibrated (median rally 44 s) |
 | Fatigue | charge +34, melee +19, shooting +18, running +4, walking −1, standing −7, ×5 a second; states by the database thresholds; each state scales speed, melee attack and defence, armour, charge, AP damage and reload (`unit_fatigue_effects_tables`) | DB; ×5 fitted to 1315 recorded changes of state |
-| Lord abilities | the side the game's AI plays (`ai`, side 2 by default) fires its lord's active abilities by a rule; the network's side fires them by order (`Orders.ability`; a side the network plays should have `ai` false); passives work for both. Every number is the ability's passport (`config/nn/abilities.json`, the database; `sim.json` abilities says which are modelled and the AI's triggers); effects on the owner (phase targets self), his side's units within range (friends) and enemies within range (enemies): speed, charge speed, melee attack and defence, damage, AP, charge bonus, morale. Warlord: Deadly Onslaught (31 s, ready 90 s after: melee damage and AP ×1.25, charge bonus ×1.6) in melee; Verminous Valour (17 s / 60 s: speed ×1.25, +8 morale points; its 25 m blast has no damage) with an enemy within 60 m; Rally (14 s / 60 s: +16 to friends within 35 m) when a friend there wavers. General: Stand Your Ground (18 s / 90 s: melee defence +24, +16 within 35 m) in melee; Foe Seeker (25 s / 60 s: speed ×1.25) with an enemy within 60 m; Hold the Line, passive (defence +5, +4 within 35 m) | DB (`config/nn/sim.json` abilities; owned per the game's roster readout); when the AI fires them is an assumption |
-| Unit abilities the game fires itself | Flagellants: Frenzy, passive (+10 melee attack, ×1.1 damage, AP and charge), off while morale is below half of leadership (never for unbreakable men); Strength of the Penitent, a timed passive the game fires by itself for either side when the unit is in melee and losing it (HP taken ≥ 1.5 × dealt, the morale rule's ratio): 20 s of +14 melee defence and +15 % physical resistance, ends out of melee, ready 3 s after. Never ordered by the network (`self_cast` false); the network sees `auto`, its context and switch-off in the ability passport | DB: `special_ability_to_recharge_contexts` (losing_melee_combat), `special_ability_to_auto_deactivate_flags` (out_of_melee; morale_is_lower_than_half_of_base_morale), the phases' effects; 'losing' as the morale rule's 1.5 is ours |
+| Lord abilities | the side the game's AI plays (`ai`, side 2 by default) fires its lord's active abilities by a rule; the network's side fires them by order (`Orders.ability`; a side the network plays should have `ai` false); passives are innate effects (below). Every number is the ability's passport (`config/nn/abilities.json`, the database; `sim.json` abilities says which are modelled and the AI's triggers); effects on the owner (phase targets self), his side's units within range (friends) and enemies within range (enemies): speed, charge speed, melee attack and defence, damage, AP, charge bonus, morale. Warlord: Deadly Onslaught (31 s, ready 90 s after: melee damage and AP ×1.25, charge bonus ×1.6) in melee; Verminous Valour (17 s / 60 s: speed ×1.25, +8 morale points; its 25 m blast has no damage) with an enemy within 60 m; Rally (14 s / 60 s: +16 to friends within 35 m) when a friend there wavers. General: Stand Your Ground (18 s / 90 s: melee defence +24, +16 within 35 m) in melee; Foe Seeker (25 s / 60 s: speed ×1.25) with an enemy within 60 m | DB (`config/nn/sim.json` abilities; owned per the game's roster readout); when the AI fires them is an assumption |
+| Innate effects | every attribute and passive or game-fired ability of a unit (`config/nn/effects.json`), one mechanism: on while its conditions hold, its stats on the owner (an aura also on friends in range), its rules for the step. Unbreakable (Flagellants: morale never below leadership, never wavers or routs), Expendable (its rout scares nobody), Encourage (the lord's aura), Charge Reflection (bracing), Fire Whilst Moving; Strength in Numbers (Skaven infantry: +6 leadership, +8 melee defence, speed ×0.9 while health ≥ 50 %), Scurry Away! (speed ×1.1 while wavering or routing), Hold the Line! (+5 melee defence, +4 leadership within 35 m of a standing General), Frenzy (+10 melee attack, ×1.1 damage, AP and charge while morale ≥ half of leadership), Strength of the Penitent (fired by the game when losing the melee: 20 s of +14 melee defence, +15 % physical resistance, ends out of melee, ready 3 s after). Schema only (the network sees them): Charge Defence vs. Large, Vanguard Deployment, Hide (forest), Immune to Psychology; left out by `sim.json` effects.off: Single Entity (lords: speed ×0.9, damage ×0.8 below 25 % health; no such speed drop in the recordings) | DB: the passports, `special_ability_to_auto_deactivate_flags`, `special_ability_to_recharge_contexts`; the attributes' rules: the knowledge base; measured: rout and running speeds, the morale drop at 50 % health ([below](#innate-effects)) |
 | Map | a square ±1020 m; a routing unit that crosses the edge leaves the battle | measured |
 | Visibility | everything is visible (`vis`, kept for later) | a flat empty map |
 
@@ -126,6 +129,53 @@ men striking at once, and a lord ~38 ([measurements](measurements.md)). With a f
 same losses need 12–17 men on a 30 m front in every pair and ~8 around a lord: one number fits
 all. So attack − defence counts at 0.1 of the rule. The flank and rear, which the pairs do not
 test, are fitted to the whole battles (below).
+
+## Innate effects
+
+`tools/nn/sim/effects.py`: one mechanism for every attribute and every passive or game-fired
+ability of a unit. The catalogue is `config/nn/effects.json` (`python -m tools.nn.effects`, from the
+passports; [unit passports](units.md#innate-effects)): per effect its stats, rules, conditions,
+timers and whether the simulator acts on it (`modelled`). Nothing in the simulator knows a unit or
+an effect by its key.
+
+- **Owned.** `params.static` gives each unit `fx`, a bitmask of the effects the catalogue links to
+  it, `fxt0` / `fxt1` (its timed effects) and the rule flags of its unconditional effects.
+- **Conditions** (each step, from the state at its start): `in_melee` / `out_of_melee` (in contact
+  with a standing enemy), `losing_melee` (in melee and HP taken ≥ 1.5 × dealt recently: the morale
+  rule's ratio), `morale_below_half` (points < half of leadership), `not_wavering`, `hp_below_half`
+  (< 50 % of the start), `hp_below_quarter`. An effect is on while all its `needs` hold and none of
+  its `off_when` does; an attribute always.
+- **Timed** (Strength of the Penitent): fires by itself for a standing unit when its `fires_when`
+  holds and it is ready, lasts `active_s`, ends at once while an `off_when` holds, ready again
+  `recharge_s` after it ends. The ability bar slot holding its ability (`ab{k}_on`, `ab{k}_cd`) shows
+  the same timers, so the observation reads it as before.
+- **Effects.** While on: multipliers multiply, additions add (melee attack, defence, damage, AP,
+  charge, speed and charge speed, morale points, physical resistance to the 90 % cap) on the owner,
+  and for an aura (`range_m` > 0, stats on friends: Hold the Line!) on the friends within range of a
+  standing owner. Rule flags (`unbreakable`, `expendable`, `encourages`, `reflect`, `fire_move`,
+  `fatigue_immune`) hold for the step, read by morale, the aura, bracing, shooting and fatigue. An
+  effect lies on a unit that is alive, routing too (Scurry Away! speeds a rout). All of it is undone
+  at the step's end, as for the cast abilities and fatigue.
+- **`fx_on`** (the network's input): the effects whose conditions hold now, whether the simulator
+  acts on them or not (Hide (forest) counts as on: in the game it is).
+- **Schema only** (`modelled` false, with the reason in the file): Charge Defence vs. Large (no
+  large units in our pools), Vanguard Deployment (placements are the army generator's), Hide
+  (forest) (no woods), Immune to Psychology (no fear or terror). `sim.json` effects.off leaves out an
+  effect the catalogue could model (a calibration switch with its reason): Single Entity, whose
+  "speed ×0.9, damage ×0.8 below 25 % health" (our reading of its recharge context) the recordings
+  do not show (lords running out of melee: 0.84–0.85 of their run in every health band). A new effect whose stats, rules
+  and conditions the simulator has works without code (a test gives the spearmen Perfect Vigour by
+  the catalogue alone).
+
+**Measured** (02.10.2026, all fair recordings with unit keys; speed over 1 s steps, at least 3 s
+into a rout): routing Empire units run at 0.865 of their run (115k s), routing Skaven at 0.945 below
+half health (186k s) and 0.866 above it (14k s); running in order, steady, above half health:
+Empire 0.97, Skaven 0.88. Scurry Away!'s ×1.1 and Strength in Numbers' ×0.9 (above half health)
+give exactly these ratios, so `morale.rout_speed` is the Empire's 0.86. Crossing 50 % health, Skaven
+units drop 2.3 points more morale in the next 3 s than Empire units (7.7 against 5.5 over 1 039 and
+951 crossings; at 40 % and 60 % both drop the same): Strength in Numbers' +6 switches off there.
+The Skaven's former start bonus (`morale.faction_bonus` +6, fitted) was Strength in Numbers: it is 0
+now.
 
 ## Flanks, rear and charges in whole battles
 
@@ -212,7 +262,7 @@ until a unit routs; a whole battle stops when its recording ends and is compared
 is not over, the side with more health left in standing units counts as the winner). Results of
 30.09.2026 (third version, the same night):
 
-### Mechanics: 51 of 54 numbers within 20 %
+### Mechanics: 50 of 54 numbers within 20 %
 
 | Case | The game | The simulator |
 |---|---|---|
@@ -239,6 +289,15 @@ Outside 20 % (01.10.2026, with the flanks, bracing and turning): the HP lost in 
 of contact (the charge) in three places: the clanrats against the General (−28 %) and against
 the spearmen (−33 %), the Warlord (−22 %) — the charge is noisy in the game too (before: four
 places, −28 %… +107 %).
+
+With the innate effects (Strength in Numbers, Scurry Away!, the Skaven start bonus 0, rout speed
+0.86) one more row is outside: in the spearmen–clanrats pair the clanrats waver on the last tick of
+one replay, as the spearmen rout (the game's clanrats never waver there, though one run brought them
+to 13 points, below the 16 of wavering); their +6 of Strength in Numbers is off below half health.
+The spearmen–slaves pair got closer (fight and the slaves' rout 15 % → 0 %), the clanrats against the
+General waver 13 % early (2 % before); the mean error is the same (8.7 %). The whole battles: the same
+winner in 22 of 26, as before the effects (8 replays; at 32 replays 21 of 26, the set before the
+effects 20).
 
 ### Whole battles: the same winner in 18 of 26 (69 %)
 
@@ -426,10 +485,8 @@ compiler for compiling on the CPU.
   of 16), the network's battles 19 of 27 (16 before); the swarm of run 20261001-074420 (8
   replays): ours lost 12.9k (12.2k before, the game 14.7k), the Warlord 2.5k (2.5k, the game 1.6k).
   The simulator now runs ~590 battles/s on the GPU (~675 before).
-  Since 01.10.2026 (later) the numbers come from the ability passports, not from `sim.json`
-  (the same values), and the network's side fires its abilities by order. The conditional
-  passives (Single Entity, Scurry Away, Strength in Numbers) are shown to the network but have no
-  effect here (`sim.json` abilities `model`).
+  The numbers come from the ability passports, and the network's side fires its abilities by
+  order. The passives are innate effects ([innate effects](#innate-effects)).
 - **Shots at a lord in a crowd** (spill in melee, 01.10.2026): the game's AI slingers shoot the
   network's General while he fights among its own spearmen, and the misses fall on those spearmen
   (run 20261001-074420, s 127–240: four spearmen and the General on the Warlord lost 14.7k HP, the

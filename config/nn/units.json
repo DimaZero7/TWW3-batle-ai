@@ -272,7 +272,7 @@
   "missile.can_fire_over_friendlies": "no column of its own: missile.direct (trajectory 'low') says the unit cannot; the others arc over friends (knowledge base, not measured)",
   "fatigue modifiers per unit": "none in land_units / battle_entities; fatigue rules are global (config/nn/game_rules.json, fatigue)",
   "lord aura per unit": "no per-unit radius found; the aura is global (_kv_morale_tables: general_aura_radius, general_inspire_effect_amount_*); a lord is marked by the attribute 'encourages'",
-  "ability and attribute effects": "only the keys; their numbers are in special_ability_* tables, not decoded",
+  "ability and attribute effects": "only the keys here: the abilities' numbers are their passports (config/nn/abilities.json), the attributes' rules and every innate effect the catalogue config/nn/effects.json (python -m tools.nn.effects)",
   "experience": "per rank, global: config/nn/game_rules.json (experience_bonus, experience_levels)"
  },
  "units": {
@@ -1263,6 +1263,228 @@
     "calibration_area_m": 2.0,
     "explosion": null,
     "penetration": "low",
+    "shot_type": "small_arm_default"
+   },
+   "card_check": "no card"
+  },
+  "wh2_main_skv_inf_skavenslaves_0": {
+   "land_unit": "wh2_main_skv_inf_skavenslaves_0",
+   "caste": "melee_infantry",
+   "category": "inf_melee",
+   "class": "inf_mel",
+   "men": 180,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 8,
+   "entity": "wh2_main_skv_infantry_small",
+   "hp_per_man": 50,
+   "hp_total": 9000,
+   "mass": 90.0,
+   "size": "small",
+   "height_m": 1.3,
+   "radius_m": 0.55,
+   "speed": {
+    "walk": 1.5,
+    "run": 4.2,
+    "charge": 4.8,
+    "acceleration": 2.0,
+    "deceleration": 4.0
+   },
+   "melee": {
+    "attack": 12,
+    "defence": 10,
+    "charge_bonus": 5,
+    "weapon": "wh2_main_skv_sword_skavenslaves",
+    "damage": 14,
+    "ap_damage": 4,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0
+   },
+   "armour": 0,
+   "armour_material": "body",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 35,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": true,
+   "hiding_scalar": 0.8,
+   "attributes": [
+    "expendable",
+    "hide_forest"
+   ],
+   "abilities": [
+    "wh2_main_unit_passive_scurry_away",
+    "wh2_main_unit_passive_strength_in_numbers"
+   ],
+   "multiplayer_cost": 125,
+   "missile": null,
+   "card_check": "no card"
+  },
+  "wh2_main_skv_inf_clanrats_1": {
+   "land_unit": "wh2_main_skv_inf_clanrats_1",
+   "caste": "melee_infantry",
+   "category": "inf_melee",
+   "class": "inf_mel",
+   "men": 160,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 8,
+   "entity": "wh2_main_skv_infantry",
+   "hp_per_man": 60,
+   "hp_total": 9600,
+   "mass": 100.0,
+   "size": "small",
+   "height_m": 1.5,
+   "radius_m": 0.65,
+   "speed": {
+    "walk": 1.5,
+    "run": 4.2,
+    "charge": 4.8,
+    "acceleration": 2.0,
+    "deceleration": 4.0
+   },
+   "melee": {
+    "attack": 24,
+    "defence": 22,
+    "charge_bonus": 10,
+    "weapon": "wh2_main_skv_sword",
+    "damage": 20,
+    "ap_damage": 6,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0
+   },
+   "armour": 25,
+   "armour_material": "leather",
+   "shield": {
+    "key": "wh_missile_block_35_wood",
+    "missile_block_chance": 35
+   },
+   "leadership": 45,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": true,
+   "hiding_scalar": 0.8,
+   "attributes": [
+    "hide_forest"
+   ],
+   "abilities": [
+    "wh2_main_unit_passive_scurry_away",
+    "wh2_main_unit_passive_strength_in_numbers"
+   ],
+   "multiplayer_cost": 350,
+   "missile": null,
+   "card_check": "no card"
+  },
+  "wh2_main_skv_inf_night_runners_1": {
+   "land_unit": "wh2_main_skv_inf_night_runners_1",
+   "caste": "missile_infantry",
+   "category": "inf_ranged",
+   "class": "inf_mis",
+   "men": 120,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 5,
+   "entity": "wh2_main_skv_infantry_fast",
+   "hp_per_man": 56,
+   "hp_total": 6720,
+   "mass": 90.0,
+   "size": "small",
+   "height_m": 1.5,
+   "radius_m": 0.6,
+   "speed": {
+    "walk": 1.5,
+    "run": 5.4,
+    "charge": 6.0,
+    "acceleration": 5.0,
+    "deceleration": 6.0
+   },
+   "melee": {
+    "attack": 24,
+    "defence": 14,
+    "charge_bonus": 10,
+    "weapon": "wh2_main_skv_sword",
+    "damage": 20,
+    "ap_damage": 6,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0
+   },
+   "armour": 10,
+   "armour_material": "body",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 48,
+   "damage_resist": {
+    "all": 0,
+    "physical": 20,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": true,
+   "can_brace": true,
+   "hiding_scalar": 0.9,
+   "attributes": [
+    "guerrilla_deploy",
+    "hide_forest"
+   ],
+   "abilities": [
+    "wh2_main_unit_passive_scurry_away",
+    "wh2_main_unit_passive_strength_in_numbers"
+   ],
+   "multiplayer_cost": 450,
+   "missile": {
+    "weapon": "wh2_main_skv_sling_night_runners",
+    "projectile": "wh2_main_skv_sling_night_runners",
+    "ammo": 22,
+    "accuracy": 10,
+    "category": "sling",
+    "range_m": 140,
+    "min_range_m": 0,
+    "reload_s": 8.0,
+    "damage": 10,
+    "ap_damage": 1,
+    "projectile_number": 1,
+    "shots_per_volley": 1,
+    "trajectory": "dual_low_fixed",
+    "direct": false,
+    "muzzle_velocity": 50.0,
+    "max_elevation": 88,
+    "calibration_distance_m": 85.0,
+    "calibration_area_m": 4.0,
+    "explosion": null,
+    "penetration": "very_low",
     "shot_type": "small_arm_default"
    },
    "card_check": "no card"

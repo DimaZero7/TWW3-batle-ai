@@ -119,16 +119,33 @@ function M.main(bm, config, globals)
             bf = try(function() return u:is_rear_flank_threatened() end)}
     end
 
+    -- For the simulator's army collapse and morale rules (docs/en/training/measurements.md), in the
+    -- recording only (not in the companion's state): sv = unit:strategic_value() (the game's strength
+    -- estimate of the unit now), pcr / phr = CCO PercentCasualtiesRecently / PercentHpLostRecently
+    -- (men / HP lost in the last 4 s), mge = CCO MoraleGreatestEffect (localised display text of the
+    -- effect weighing most on morale now; absent when empty). A field that cannot be read is left out.
+    local function morale_fields(it, row)
+        local u = it.unit
+        row.sv = round(try(function() return u:strategic_value() end), 1)
+        row.pcr = round(try(cco, u, 'PercentCasualtiesRecently'), 4)
+        row.phr = round(try(cco, u, 'PercentHpLostRecently'), 4)
+        local effect = try(cco, u, 'MoraleGreatestEffect')
+        if type(effect) == 'string' and effect ~= '' then row.mge = effect end
+    end
+
     local function snapshot(event)
         local rows = {}
         for side = 1, 2 do
             for _, it in ipairs(state.sides[side]) do
                 local row = sample(it)
                 row.side = side
+                morale_fields(it, row)
                 rows[#rows + 1] = row
             end
         end
-        emit(event, {t = bm:time_elapsed_ms() - started_ms, units = rows})
+        -- bop: CCO BattleRoot.BalanceOfPowerPercent, the top bar for the player's alliance (bop_side).
+        emit(event, {t = bm:time_elapsed_ms() - started_ms, units = rows, bop_side = state.player_side,
+            bop = round(try(common and common.get_context_value, 'BattleRoot.BalanceOfPowerPercent'), 4)})
     end
 
     local function side_summary()
@@ -302,6 +319,9 @@ function M.main(bm, config, globals)
         local sides = battle.read_sides(bm)
         state.own_alliance, state.own_army = sides[1].alliance, sides[1].army
         state.alliances = {sides[1].alliance, sides[2].alliance}
+        -- The side whose balance of power the top bar shows (sides are bm:alliances() in order).
+        local player = try(function() return bm:get_player_alliance_num() end)
+        if player == 1 or player == 2 then state.player_side = player end
         local ok_roles, roles = pcall(battle.read_roles, bm)
         state.all_units = {}
         for side, key in ipairs({'own', 'enemy'}) do
@@ -317,7 +337,8 @@ function M.main(bm, config, globals)
         state.batch = clock.batch_stamp() .. '-nn-' .. telemetry.next_sequence('tww3_bai_sequence.txt')
         state.run_id = state.batch .. '-r1'
         emit('ready', {own = #state.sides[1], enemy = #state.sides[2], own_ai = config.own_ai,
-            roles = ok_roles and roles or tostring(roles)})
+            roles = ok_roles and roles or tostring(roles), player_side = state.player_side,
+            player_alliance_cco = try(common.get_context_value, 'BattleRoot.PlayerAllianceContext.Id')})
         flush()
         bm:register_phase_change_callback('Deployed', guarded(start))
         bm:register_phase_change_callback('VictoryCountdown', guarded(tick))

@@ -68,9 +68,10 @@ Sources: [twwstats morale][tws-m] (high), [fandom Leadership][fw-lead], [fandom 
 - **Starting reserve.** Ours: units start above leadership (Skaven +6 points, the fitted
   `morale.faction_bonus`). This matches **Strength in Numbers** (Skaven passive: +6 leadership,
   +8 melee defence, −10 % speed while the unit has more than 50 % HP). · [fandom][fw-sin] · high.
-  - Ours: the +6 is constant in the simulator; in the game it ends below 50 % HP, and its +8
-    defence and −10 % speed are not modelled (`sim.json` abilities: conditional passives have no
-    effect). **Gap.**
+  - Ours: modelled as the database says (an innate effect, `config/nn/effects.json`); the fitted
+    `morale.faction_bonus` +6 was this and is 0 now. Crossing 50 % health, Skaven units drop 2.3
+    points more morale in the next 3 s than Empire units (at 40 % and 60 % both the same): the +6
+    switching off.
 - **Hold the Line!** (Empire lord passive, WH3): +5 melee defence and +4 leadership to allies
   within 35 m. · [fandom][fw-htl] · medium. Ours: modelled from the ability passport.
 - **Rally!** (lord ability): +16 leadership, 35 m, 14 s, 60 s recharge (WH3). · [fandom Rally!][fw-rally] · high.
@@ -113,8 +114,9 @@ Sources: [twwstats morale][tws-m] (high), [fandom Leadership][fw-lead], [fandom 
     `BalanceOfPowerPercent`) to find the trigger.
 - **Rout speed.** No public number. **Scurry Away!** (Skaven): +10 % speed at wavering or worse.
   · [fandom][fw-scurry] · high.
-  - Ours: measured routing speed 0.80–0.86 of run (Empire), 0.85–0.96 (Skaven) — the gap
-    between them is about Scurry Away's +10 %. The simulator uses one 0.9. Agreement in kind.
+  - Ours: measured routing speed (all recordings, 02.10.2026): Empire 0.865 of the run, Skaven
+    0.945 below half health and 0.866 above it — Scurry Away!'s ×1.1 and Strength in Numbers' ×0.9.
+    The simulator: `rout_speed` 0.86 and both passives as innate effects. Agreement.
 - **Expendable** units don't scare others when they rout (except other expendables); Knights
   ignore routing peasants (3.1.0). · [fandom Attributes][fw-attr] · high. Ours: expendable handled.
 

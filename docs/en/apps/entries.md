@@ -200,6 +200,16 @@ Every second `nn_sample` records every unit of both sides (the full view):
 | `fat`, `k` | Fatigue, kills |
 | `ox`, `oz` | Ordered position |
 | `lf`, `rf`, `bf` | Threat to the left flank, right flank, rear |
+| `sv` | `unit:strategic_value()`: the game's strength estimate of the unit now (from 02.10.2026) |
+| `pcr`, `phr` | CCO `PercentCasualtiesRecently`, `PercentHpLostRecently`: men / HP lost in the last 4 s |
+| `mge` | CCO `MoraleGreatestEffect`: localised text of the effect weighing most on morale now (missing when empty) |
+
+The sample itself also carries `bop` — CCO `BattleRoot.BalanceOfPowerPercent`, the top bar for the
+player's alliance — and `bop_side`, that alliance as our side number (`bm:get_player_alliance_num()`,
+also in `ready` with the CCO `BattleRoot.PlayerAllianceContext.Id` as `player_alliance_cco`). Each of
+these is read under `pcall`: a value the game does not give is left out. They are for the simulator's
+army collapse and morale rules ([measurements](../training/measurements.md#morale-events-and-the-army-collapse-task-20-02102026))
+and are not in the companion's state.
 
 The end: the last snapshot `nn_final` and `result` — the outcome, men and health of each side,
 how many `rejoined` and `idle_kick` there were. A battle takes about 2 minutes at ×20 including

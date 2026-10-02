@@ -44,6 +44,11 @@
   of "no unit busy"), and idle_rate > 0 resets m only while the attacker's damage rate (hit_rate: the
   defender's gold lost, share of the budget a minute, exponential mean over idle_window_s) is at least
   idle_rate, instead of on any damage. Both 0: the old rule.
+* Either side pays `shirk_side` x the share of its standing army, by cost, of melee units standing
+  still out of melee while its side fights in melee with an enemy within shirk_m (shirking(); in
+  the "idle" part): the team-level twin of the per-unit `shirk` (gate 02.10, it6/m40: 37 of 102
+  rallied units held 30 s or more 75-255 m from the enemy while their side fought; the network
+  gave such a unit HOLD at 0.999 - a state that cost nothing).
 * Every real order change costs `order_change`, divided by the side's number of units: a new kind,
   a new attack target, or a move / withdraw point more than `order_move_m` from the one in force.
   KEEP and re-issuing the same order cost nothing. A unit that changes its order every decision
@@ -57,8 +62,15 @@ No style terms yet (the faction characters are placeholders).
 Per unit (unit_step, for per-unit credit in PPO: tools/nn/train/ppo.py), what happens to the unit
 itself, beside the side's reward; none of it enters the side's reward:
     unit_gold     x n_own x (gold it destroyed - gold it lost) / budget: its share of the side's gold
-                  trade, scaled to one unit; destroyed = the HP it dealt x the target's cost / the
-                  target's starting HP, lost = the change of its gold_lost (routs and rallies too);
+                  trade, scaled to one unit; destroyed (unit_attrib 1, attributed()) = every enemy unit's
+                  gold lost in the step (health, a rout, shattering, death) split among the units that
+                  fight or shoot it, by the HP each dealt; lost = the change of its gold_lost (routs and
+                  rallies too). The old destroyed (unit_attrib 0: the HP it dealt x the target's gold a HP)
+                  counted health only (a unit's losses held its routs and death, its kills did not), and
+                  a missile unit's volley spill at its target's HP a man: 02.10, it5/m20 v nearest, the
+                  units' destroyed summed to 3.6 x the enemy's loss, the missile units' 3.1 x (attributed:
+                  0.84, 0.41), so the centred credit put every melee unit below its side's mean
+                  (training.md "Per-unit reward: contribution, not self-preservation");
                   with friendly_fire (1) the gold its projectiles took from its own side counts as
                   lost by the shooter, not by the unit hit (sim missile.friendly: ff_dealt / ff_taken;
                   the side's gold pays it either way). Gate 02.10.2026: four slinger units shot the
@@ -69,6 +81,12 @@ itself, beside the side's reward; none of it enters the side's reward:
     crowd         per decision of a pile, by the excess share (tools/nn/train/behaviour.py);
     idle_near     per decision a melee unit with no attack order stands out of melee while a fellow
                   within 60 m fights (a unit's own credit otherwise pays it to let others fight);
+    shirk         per decision a melee unit (not a missile unit, not a lord) stands still out of melee
+                  (no fight, no move) while its side fights in melee and a standing enemy is within
+                  shirk_m (shirking()): standing by is no longer free. Per-unit diagnosis 02.10 (it5/m20
+                  v nearest): centred per decision over the side's units, a melee unit standing while
+                  its side fights got +5.0e-5 and one fighting -1.5e-5 (a losing trade makes the
+                  fellows' mean negative and the one that takes no losses looks best);
     flank_attack  per decision striking an enemy's flank or rear (a bonus, as large as `flanked`: a flank
                   exchange is zero-sum between the two units);
     unit_idle     x the attacker's idle multiplier m (idle_scale, as the side's idle cost) per decision a
@@ -127,11 +145,17 @@ class Weights:
     retarget: float = 0.003       # an attack switched to another target while the old one stands
     # per unit (unit_step), not in the side's reward
     unit_gold: float = 0.05       # the unit's own gold trade, scaled to one unit
+    unit_attrib: float = 1.0      # in unit_gold, destroyed: 1 the enemy's gold loss split among the units that
+    #                               engage it (attributed(): routs and kills too); 0 the old HP estimate
     friendly_fire: float = 1.0    # in unit_gold: the shooter pays its friendly fire, the unit hit not (0: as hit)
     flanked: float = 2e-4         # per decision struck in flank / rear
     missile_melee: float = 2e-4   # per decision a missile unit is in melee
     crowd: float = 2e-4           # per decision of a pile (excess share)
     idle_near: float = 0.0        # per decision a melee unit stands by while a fellow within 60 m fights
+    shirk: float = 0.0            # per decision a melee unit stands still out of melee while its side fights
+    shirk_m: float = 300.0        # ... and a standing enemy is within this
+    shirk_side: float = 0.0       # the side's reward (either role): x the share of its standing army, by cost,
+    #                               shirking (shirking()), per decision
     flank_attack: float = 2e-4    # per decision striking an enemy's flank / rear (bonus; = flanked: zero-sum)
     unit_idle: float = 0.0        # x the attacker's idle m, per decision an attacking unit neither fights nor shoots
     lord_exposed: float = 0.0     # per decision a lord fights in melee below lord_exposed_hp of its health
@@ -273,7 +297,9 @@ def idle_cost(st, weights=Weights(), last_hit=None):
     """[B, 2]: the attacker pays `idle` x idle_scale when none of its units is in melee or shooting
     (with idle_share: x the share of its standing army, by cost, that is not) (last_hit [B]: the
     battle time of its last damage, negative before the first; None: no damage yet in any battle);
-    the defender nothing."""
+    the defender nothing. With shirk_side, either side also pays shirk_side x the share of its
+    standing army, by cost, that shirks (shirking(): melee units standing still while their side
+    fights in melee, an enemy within shirk_m)."""
     u = st.u
     stand = standing_mask(u)
     busy = (u["m"] | u["fire"]) & stand
@@ -293,7 +319,13 @@ def idle_cost(st, weights=Weights(), last_hit=None):
             share = 1 - (cost * (busy & side)).sum(1) / standing.clamp(min=1e-6)
             share = torch.where(standing > 0, share, torch.ones_like(share))
             idle = (1 - weights.idle_share) * idle + weights.idle_share * share
-        out.append(weights.idle * scale * idle * mine.float())
+        cost_s = weights.idle * scale * idle * mine.float()
+        if weights.shirk_side:
+            # either role: the share of its standing army (by cost) standing by while its side fights
+            standing = (cost * (stand & side)).sum(1)
+            shirk = (cost * (shirking(u, weights.shirk_m) & side)).sum(1) / standing.clamp(min=1e-6)
+            cost_s = cost_s + weights.shirk_side * shirk * (~st.done).float()
+        out.append(cost_s)
     return torch.stack(out, 1)
 
 
@@ -361,7 +393,45 @@ def lord_lead(u, margin_m=10.0, near_m=100.0):
     return out
 
 
-UNIT_FIELDS = ("hp_abs", "k", "dealt")
+UNIT_FIELDS = ("hp_abs", "k", "dealt", "target", "m", "fire")
+
+
+def hp_dealt(before, u, params):
+    """[B, N] the HP each unit dealt in the step, as estimated from its own counters: melee from the
+    simulator's decaying `dealt`, missiles = the enemy men it killed (the spill on its target's
+    neighbours too) x its target's HP a man (a single entity counts only when it dies); 0 for a unit
+    with no target. Only a weight in attributed(): as a gold measure it paid missile units 3.1 x the
+    enemy's whole loss (02.10)."""
+    fade = math.exp(-params.dt / params.sim["morale"]["recent_s"])
+    melee = (u["dealt"] - fade * before["dealt"]).clamp(min=0)            # melee HP dealt this step
+    tgt = u["target"].clamp(min=0)
+    shot = torch.where(u["fire"] & (u["target"] >= 0), (u["k"] - before["k"]).clamp(min=0) * u["hp_man"].gather(1, tgt),
+                       torch.zeros_like(melee))
+    return torch.where(u["target"] >= 0, torch.where(u["m"], melee, shot), torch.zeros_like(melee))
+
+
+def attributed(before, u, params, rout_share=Weights.rout_share):
+    """[B, N] the enemy gold each unit destroyed in the step: every enemy unit's gold lost in it
+    (gold_lost: health, a rout, shattering, death; a rally is not taken back) less what its own side's
+    projectiles took (ff_taken), split among the units of the other side that fight or shoot it, by the
+    HP each dealt (hp_dealt; equally when none shows). Whom a unit engages: its target after the step
+    while it fights or shoots, else its target before it (the enemy it struck down this step: the
+    simulator drops a dead enemy from `target` at once). Losses no unit engaged (a rout spreading by
+    morale) are no one's. The units' sum is the enemy's loss they engaged: a rout or a kill pays the
+    units that caused it in full, and a pile splits one enemy's gold among more units."""
+    g = (gold_lost(u, rout_share) - before["gold"]).clamp(min=0)
+    if "ff_taken" in u:
+        g = (g - u["ff_taken"]).clamp(min=0)
+    side = u["side"]
+    busy_a = (u["m"] | u["fire"]) & (u["target"] >= 0)
+    busy_b = (before["m"] | before["fire"]) & (before["target"] >= 0)
+    tgt = torch.where(busy_a, u["target"], torch.where(busy_b, before["target"], torch.full_like(u["target"], -1)))
+    t = tgt.clamp(min=0)
+    foe = side.gather(1, t)
+    eng = (tgt >= 0) & (side > 0) & (foe > 0) & (foe != side)
+    w = torch.where(eng, hp_dealt(before, u, params) + 1e-3, torch.zeros_like(g))
+    total = torch.zeros_like(w).scatter_add_(1, t, w)
+    return torch.where(eng, w / total.gather(1, t).clamp(min=1e-9) * g.gather(1, t), torch.zeros_like(g))
 
 
 def lord_up(r, out, share):
@@ -380,6 +450,23 @@ def unit_before(u, rout_share=Weights.rout_share):
                 out=unit_out(u))
 
 
+def shirking(u, reach_m=Weights.shirk_m):
+    """[B, N] bool: standing melee units (not missile units, not lords) that stand still out of melee
+    (no fight, no shooting, no move) while a unit of their side fights in melee and a standing enemy is
+    within reach_m of them."""
+    stand = standing_mask(u)
+    side = u["side"]
+    missile = (u["range"] > 0) & (u["ammo0"] > 0)
+    still = stand & ~u["m"] & ~u["fire"] & ~u["mv"] & ~missile & ~u["lord"]
+    team = torch.stack([(stand & u["m"] & (side == s)).any(1) for s in (1, 2)], 1)          # [B, 2]
+    engaged = team.gather(1, (side - 1).clamp(min=0)) & (side > 0)
+    dx = u["x"][:, :, None] - u["x"][:, None, :]
+    dz = u["z"][:, :, None] - u["z"][:, None, :]
+    foe = stand[:, None, :] & (side[:, None, :] > 0) & (side[:, None, :] != side[:, :, None])
+    near = ((dx * dx + dz * dz <= reach_m ** 2) & foe).any(2)
+    return still & engaged & near
+
+
 def unit_step(before, st, facts, params, weights=Weights(), idle_m=None):
     """[B, N] each unit's own reward for the step (0 for empty slots): its gold trade and the
     shaped terms of behaviour.facts (after the step), then its neighbours' mean (see the module).
@@ -390,14 +477,11 @@ def unit_step(before, st, facts, params, weights=Weights(), idle_m=None):
     lost = gold_lost(u, weights.rout_share) - before["gold"]                # gold; a rally gives it back
     if weights.friendly_fire and "ff_dealt" in u:                         # own projectiles: the shooter's loss
         lost = lost + weights.friendly_fire * (u["ff_dealt"] - u["ff_taken"])
-    fade = math.exp(-params.dt / params.sim["morale"]["recent_s"])
-    melee = (u["dealt"] - fade * before["dealt"]).clamp(min=0)            # melee HP dealt this step
-    tgt = u["target"].clamp(min=0)
-    shot = torch.where(u["fire"] & (u["target"] >= 0), (u["k"] - before["k"]).clamp(min=0) * u["hp_man"].gather(1, tgt),
-                       torch.zeros_like(melee))
-    dealt = torch.where(u["m"], melee, shot)                              # HP
-    worth = (u["cost"] / u["hp0"].clamp(min=1e-6)).gather(1, tgt)          # the target's gold a HP
-    dealt = torch.where(u["target"] >= 0, dealt * worth, torch.zeros_like(dealt))
+    if weights.unit_attrib and "target" in before:
+        dealt = attributed(before, u, params, weights.rout_share)          # the enemy's gold, routs and kills too
+    else:                                                                  # the old estimate: HP x the target's gold a HP
+        worth = (u["cost"] / u["hp0"].clamp(min=1e-6)).gather(1, u["target"].clamp(min=0))
+        dealt = hp_dealt(before, u, params) * worth
     n = torch.stack([(side == s).sum(1) for s in (1, 2)], 1).float()
     own_i = (side - 1).clamp(min=0)
     trade = n.gather(1, own_i) * (dealt - lost) / budget(u)[:, None]
@@ -405,6 +489,8 @@ def unit_step(before, st, facts, params, weights=Weights(), idle_m=None):
          - weights.missile_melee * facts["missile_melee"].float() - weights.crowd * facts["crowded"]
          - weights.idle_near * facts["idle_near"].float()
          + weights.flank_attack * facts["flank_attack"].float())
+    if weights.shirk:
+        r = r - weights.shirk * shirking(u, weights.shirk_m).float()
     if weights.unit_idle and idle_m is not None:
         stand = standing_mask(u)
         idle = stand & ~(u["m"] | u["fire"]) & (side == st.attacker[:, None]) & ~st.done[:, None]

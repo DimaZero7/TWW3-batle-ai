@@ -38,7 +38,7 @@ checkpoint), `--armies` (`scenes` or `generated`), `--curriculum`, `--battles` (
 `--critic-warmup`, the reward weights (`--timeout`, `--gold`, `--rout-share`, `--idle`,
 `--idle-tau`, `--idle-pause`, `--idle-step`, `--idle-cap`, `--idle-share`, `--idle-rate`, `--idle-window`, `--hp`, `--standing`, `--order-cost`, `--lord`, `--lord-rout`,
 `--retarget`; [gold](#losses-in-gold-and-the-attackers-idle-cost-01102026), [the loophole](#night-01100210-why-the-network-falls-apart-without-the-leash)), `--adv-norm`, `--reference self` and `--reference-every`, `--critic-init`, per-unit
-credit (`--unit-credit`, `--unit-gold`, `--flanked`, `--missile-melee`, `--crowd`, `--flank-attack`, `--idle-near`, `--unit-idle`, `--lord-exposed`, `--lord-exposed-hp`,
+credit (`--unit-credit` and `--unit-credit-end`, `--unit-gold`, `--unit-attrib`, `--shirk`, `--shirk-m`, `--shirk-side`, `--flanked`, `--missile-melee`, `--crowd`, `--flank-attack`, `--idle-near`, `--unit-idle`, `--lord-exposed`, `--lord-exposed-hp`,
 `--neighbour`; [below](#per-unit-credit-01102026)), `--updates` (train that many updates instead of
 `--minutes`, which then only caps the time), `--mix`,
 `--small share:units` (that share of every bank of random battles with at most `units` a side),
@@ -607,11 +607,12 @@ was lost in the battle's total: its gradient was the same whether it piled on or
 
 | Term | Weight | Why |
 |---|---:|---|
-| its gold trade: n_own × (gold it destroyed − gold it lost) / budget (was its health trade) | 0.05 | what happens to the unit itself; destroyed = the HP it dealt × the target's cost / the target's starting HP (melee HP from the simulator's `dealt`, missiles = men killed × the target's HP a man), lost = the change of its own lost gold (a rout and a rally too) |
+| its gold trade: n_own × (gold it destroyed − gold it lost) / budget (was its health trade) | 0.05 | what happens to the unit itself; destroyed (`--unit-attrib 1`, `reward.attributed`) = every enemy unit's gold lost in the step (health, a rout, shattering, death; less its own side's friendly fire) split among the units that fight or shoot it, by the HP each dealt; lost = the change of its own lost gold (a rout and a rally too), its friendly fire charged to the shooter. Until 02.10 destroyed was the HP it dealt × the target's gold a HP (`--unit-attrib 0`; [why replaced](#per-unit-reward-contribution-not-self-preservation-0210)) |
 | struck in the flank or rear in melee | −0.0002 | the game: ~×1.74 losses; the trade sees the losses, this sees the position before they pile up |
 | a missile unit in melee | −0.0002 | archers stuck in melee |
 | a pile: more than 2 own units on one enemy while another enemy strikes an own unit in flank or rear, by the excess share (n − 2) / n | −0.0002 | the whole pile pays n − 2 units' worth: the units over 2 should turn to the flanker |
 | a melee unit without an attack order out of melee while a fellow within 60 m fights (`idle_near`) | 0 | tried at −0.0004 (below): the units piled instead |
+| a melee unit (not missile, not a lord) standing still out of melee (no fight, no move) while its side fights in melee and an enemy is within 150 m (`shirk`, `--shirk`, `--shirk-m`; `reward.shirking`) | 0 | standing by is no longer free ([below](#per-unit-reward-contribution-not-self-preservation-0210)) |
 | striking a standing enemy's flank or rear | +0.0002 | as large as the penalty: a flank exchange is zero-sum between the two units |
 | + 0.5 × the mean of the same of own units within 40 m | | what happens next to it: a unit that leaves its neighbour flanked pays for it |
 
@@ -685,6 +686,85 @@ their time in melee (0.068 → 0.043, 0.080 → 0.044). Piles and flank hits did
 more often (10 %), and the own lord died more often attacking it (0.25 → 0.42). So per-unit credit
 at 0.3 is harmless and slightly helpful in 36 updates, but it has not yet taught the piling
 infantry to turn to the flank; its pull towards standing must be watched in longer runs.
+
+### Per-unit reward: contribution, not self-preservation, 02.10
+
+Per-unit credit at 0.3 taught melee units to stand out of the fight (iteration 3, [below](#iteration-3-the-policy-took-no-step--the-gradient-clip-0210)).
+**Diagnosis** (`it5/m20` against `nearest`, 256 battles, every unit's reward by term; the probe
+`build/unitrew/measure.py`, not in Git). The unit advantage is centred over the side's units, so what
+counts is a unit's reward against its fellows' mean, per decision (× 1e-5):
+
+| Melee unit (not missile, not a lord) | old reward | contribution (`--unit-attrib 1`) | + `--shirk 1e-4` |
+|---|---:|---:|---:|
+| fighting in melee | −16.4 | −1.5 | −1.4 |
+| moving, out of melee, while its side fights | −21.0 | +3.3 | +3.6 |
+| standing still out of melee while its side fights, an enemy within 150 m | −15.7 | **+5.0** | −2.4 |
+
+- **The old "destroyed" paid the missile units 7.6 times their part.** It was the men a unit's
+  volley killed × the HP a man of *its target*, and the kills count the spill on the target's
+  neighbours: a volley at a lord or a monster counted every infantryman it killed nearby at the
+  lord's HP a man. The units' destroyed summed to 3.6 × the enemy's real loss, the missile units'
+  alone 3.1 × (their attributed part: 0.41). The centred mean of the side sat high, every melee
+  unit below it, and the least bad for a melee unit was to stand (−15.7 against −16.4 fighting).
+- **Its losses held routs and death, its kills did not.** Lost: 88 % health, 12 % rout,
+  shattering, death; destroyed: health only.
+- **Even with the losses counted fairly, the one that takes none looks best.** In a losing trade
+  (gold −0.07 against `nearest`) a fighting unit's own trade is negative (per battle, units engaged
+  40 % of the time or more: destroyed 0.024 against lost 0.042 in reward units), a standing unit's
+  is 0 — above its fellows' mean: +5.0 against −1.5. Per-unit credit pays for self-preservation
+  unless standing by costs something.
+
+**Fix** (`tools/nn/train/reward.py`, `run.py`):
+
+- `reward.attributed` (`--unit-attrib 1`, the default): a unit's destroyed is every enemy unit's
+  gold lost in the step (health, a rout, shattering, death, less its own side's friendly fire) split
+  among the units that fight or shoot it, by the HP each dealt (its target before the step counts
+  for the enemy it struck down). The units' sum is now 0.84 of the enemy's loss (the rest: routs
+  that spread by morale, with no unit engaged). A pile splits one enemy's gold among more units.
+  Friendly fire stays the shooter's loss.
+- `shirk` (`--shirk`, per unit, `--unit-credit` > 0) and `shirk_side` (`--shirk-side`, the side's
+  reward in either role, works at `--unit-credit 0`), `reward.shirking`: a melee unit (not missile,
+  not a lord) standing still out of melee (no fight, no move) while its side fights in melee and a
+  standing enemy is within `--shirk-m` (300 m: gate 02.10, `it6/m40`: 37 of 102 rallied units held
+  30 s or more 75–255 m from the enemy, the network giving such a unit HOLD at 0.999). Per unit: the
+  weight per decision; per side: the weight × the shirking share of its standing army by cost.
+  Moving units do not pay (marching to a fight or round a flank is not standing by).
+- `--unit-credit-end`: `--unit-credit` goes linearly to it over the run (OpenAI Five's "team
+  spirit": a unit's own credit early, the side's later). With the centring, mixing the side's mean
+  into each unit's reward is the same as a lower credit, so the schedule is on the credit.
+
+**Probes** (25 updates each from `it5/m20`, the `it6` settings otherwise, seed 0; paired evaluation,
+256 pairs an opponent; idle melee: the share of the standing army's cost in melee units standing
+still out of melee, against `nearest`, 256 battles):
+
+| Probe | Options | `nearest` pair gold / win | `ai_like` pair gold / win | hold `nearest` / `ai_like` | idle melee |
+|---|---|---|---|---|---:|
+| start (`it5/m20`) | — | −0.139 ± 0.016 / 0.37 | −0.124 ± 0.018 / 0.41 | 0.23 / 0.15 | 0.038 |
+| A | `--unit-credit 0` | −0.157 ± 0.018 / 0.38 | −0.106 ± 0.016 / 0.42 | 0.46 / 0.40 | 0.096 |
+| B | `--unit-credit 0.3 --unit-attrib 0` (the old reward) | −0.079 ± 0.017 / 0.43 | −0.092 ± 0.015 / 0.42 | 0.23 / 0.18 | 0.089 |
+| D | `--unit-credit 0.3 --shirk 2e-4` | −0.122 ± 0.019 / 0.39 | −0.074 ± 0.017 / 0.41 | 0.47 / 0.43 | 0.120 |
+| G | D + `--shirk-side 2e-3` | −0.140 ± 0.018 / 0.41 | −0.091 ± 0.016 / 0.44 | 0.51 / 0.45 | 0.115 |
+| F | `--unit-credit 0 --shirk-side 2e-3` | −0.116 ± 0.018 / 0.39 | −0.109 ± 0.016 / 0.41 | 0.38 / 0.31 | 0.069 |
+| **E** | `--unit-credit 0.5 --unit-credit-end 0 --shirk 2e-4` | **−0.058 ± 0.016 / 0.44** | **−0.051 ± 0.015 / 0.44** | 0.30 / 0.23 | **0.052** |
+| H | E + `--shirk-side 2e-3` | −0.124 ± 0.018 / 0.40 | −0.121 ± 0.016 / 0.41 | 0.43 / 0.36 | 0.066 |
+| I | `--unit-credit 0.5 --unit-credit-end 0 --unit-attrib 0` (annealed, the old reward) | −0.100 ± 0.015 / 0.40 | −0.115 ± 0.015 / 0.41 | 0.27 / 0.23 | 0.067 |
+
+All probes stand more than the start (25 updates of this setting raise "hold" even at credit 0: A).
+The units' damage share did not tell them apart: 93–97 % of the units dealt 10 % of their own cost
+or more, the top unit 36 % of its side's damage, in every probe. Probes of one seed: H differs from E
+by one option and lost 0.07 pair gold on both opponents, so a single probe's pair gold is noisy;
+idle melee is the steadier signal.
+
+- **Annealed credit stands least:** idle melee 0.052–0.067 (E, H, I) against 0.096 at credit 0 (A)
+  and 0.115–0.120 at a constant 0.3 (D, G); E is the best probe on every column.
+- **The side's `shirk_side` at credit 0** (F) cut idle melee 0.096 → 0.069 and hold 0.46 → 0.38;
+  on top of E (H) it did not help.
+- **Tried and rejected:** a constant `--unit-credit 0.3`, also with the contribution reward and
+  `--shirk 2e-4` (D, G: the most standing of all, idle melee 0.12, hold 0.47–0.51); the old
+  "destroyed" (`--unit-attrib 0`: kept only for comparison).
+
+For the next iteration: `--unit-credit 0.5 --unit-credit-end 0 --shirk 2e-4` in place of
+`--unit-credit 0` (`--unit-attrib 1` is the default); watch idle melee and hold at each trend minute.
 
 ## Lord abilities, 01.10.2026
 
@@ -1403,6 +1483,6 @@ damage sets it back to 0; a marching attacker pays (also in a simulated battle);
 battle there is no cost beside the idle cost; the defender never pays, in either role; `struck` is the
 defender's health falling; `Battles` keeps the last damage per battle and clears it on a restart;
 evaluation gives
-the gold metrics; the trend table has a column per minute. Night 01.10→02.10: the reward terms add up to the step, and the ones logged per role to the collected reward; with `idle_share` one shooting unit no longer lifts the idle cost (the idle share of the army by cost pays); the damage rate is the defender's gold lost, a share of the budget a minute, a rally is no damage; with `idle_rate` a scratch does not reset the timer, a real blow does; per-role normalisation; a run with `--reference self`, `--adv-norm role`, the new idle cost and the critic from another checkpoint (`--critic-init`, a `--init` without a critic); `unit_idle` charges every standing unit of the attacker the idle multiplier, a shooting one and the defender nothing. Iteration 1: the entropy floor raises the weight below the target and lowers it above, within the schedule and the ceiling; `lord_lead` is 1 for a lord 2 m or more ahead of its units' centre with an enemy near, a share between m and 2 m, 0 with no enemy near and for other units. Iteration 2: `lord_fall` charges the lord half its weight when it routs, the other half when it shatters, all of it when it dies standing, gives it back on a rally, and never another unit.
+the gold metrics; the trend table has a column per minute. Night 01.10→02.10: the reward terms add up to the step, and the ones logged per role to the collected reward; with `idle_share` one shooting unit no longer lifts the idle cost (the idle share of the army by cost pays); the damage rate is the defender's gold lost, a share of the budget a minute, a rally is no damage; with `idle_rate` a scratch does not reset the timer, a real blow does; per-role normalisation; a run with `--reference self`, `--adv-norm role`, the new idle cost and the critic from another checkpoint (`--critic-init`, a `--init` without a critic); `unit_idle` charges every standing unit of the attacker the idle multiplier, a shooting one and the defender nothing. Iteration 1: the entropy floor raises the weight below the target and lowers it above, within the schedule and the ceiling; `lord_lead` is 1 for a lord 2 m or more ahead of its units' centre with an enemy near, a share between m and 2 m, 0 with no enemy near and for other units. Iteration 2: `lord_fall` charges the lord half its weight when it routs, the other half when it shatters, all of it when it dies standing, gives it back on a rally, and never another unit. Per-unit contribution: an enemy's gold loss (its rout too) is split among the units engaging it by the HP each dealt, a kill goes to the units whose target it was before the step (the old estimate missed it); `shirking` marks melee units standing still while their side fights with an enemy in reach (not a moving one, nor with nobody fighting), `shirk` charges them per unit and `shirk_side` charges either side its shirking share by cost.
 `tests/tools/test_nn_observation.py`: the lord known from the passport; a slain enemy lord is
 known unseen and fades; an enemy's melee and rout count only while seen.

@@ -4,10 +4,14 @@
 --             move number;
 --   poll()    often: reads the companion's answer and gives each of our units
 --             its order through apps.orders.adapter (only orders that changed;
---             'keep' gives nothing: the order in force goes on). A unit that
---             routs loses its order in the engine: the bridge forgets it too, so
---             the same order is given again once the unit rallies;
+--             'keep' gives nothing: the order in force goes on);
 --   finish()  writes the last state with done = true.
+-- A unit that routs loses its order in the engine; the simulator keeps it and the unit goes on
+-- with it the moment it rallies. So the bridge keeps the order a unit had when it broke and gives
+-- it again at once when the unit stands again (every poll; event nn_rally; an attack on a target
+-- that is gone becomes hold, as in the simulator). An answer to a state in which the unit was down
+-- (routing, shattered, dead) carries no order for it: the network gives such units HOLD only as a
+-- filler, and given to a unit that rallied meanwhile it halted it (gate 02.10.2026, 42 of 102 rallies).
 -- A shooter under an attack order that stands idle (its target in melee, out of
 -- sight) is released to fire at will and takes its target again later; an attack
 -- on a target already in melee within range is given as fire at will at once
@@ -71,11 +75,13 @@ function M.start(opts)
     local handle = {written = 0, applied = 0, answered = 0, missed = 0, given = 0, keeps = 0, bad = 0,
         regiven = 0, released = 0, resumed = 0, write_mode = nil, abilities_used = 0, abilities_refused = 0,
         hold_aims = 0, hold_halts = 0, stalls = 0}
-    -- current: the order in force; lost: the order a unit had when it broke (given again after
-    -- it rallies, also for 'keep'); duty: a shooter's state under an attack order (or a held
-    -- shooter's picked target); guard: a held unit's {pick, walk, block} (services.hold_target);
-    -- stall: a unit's count of decisions standing under an order the engine dropped (services.order_stalled).
+    -- current: the order in force; lost: the order a unit had when it broke (given again the moment
+    -- it rallies); down_at: the last move whose state showed the unit down (its answer has no order
+    -- for it); duty: a shooter's state under an attack order (or a held shooter's picked target);
+    -- guard: a held unit's {pick, walk, block} (services.hold_target); stall: a unit's count of
+    -- decisions standing under an order the engine dropped (services.order_stalled).
     local times, current, lost, duty, enemy_by_name, guard, stall = {}, {}, {}, {}, {}, {}, {}
+    local down_at = {}
     local seen = {}   -- the rows of the last decision, by unit name
     local used, own_by_name, unit_by_name = {}, {}, {}   -- used[name][key] = battle ms of the last use
     for _, it in ipairs(opts.enemies) do enemy_by_name[it.name], unit_by_name[it.name] = it, it.unit end
@@ -280,7 +286,42 @@ function M.start(opts)
         handle.written = handle.written + 1
         times[handle.written] = {model = opts.model_ms(), real = clock()}
         times[handle.written - M.KEEP_TIMES] = nil
-        watch_shooters(write(false))
+        local rows = write(false)
+        for _, row in ipairs(rows) do
+            if own_by_name[row.n] and services.down(row) then down_at[row.n] = handle.written end
+        end
+        watch_shooters(rows)
+    end
+
+    -- A unit that rallied goes on with the order it had when it broke, as in the simulator (an
+    -- attack on a target that is gone holds: the simulator turns it to HOLD).
+    local function rally(it)
+        local order = lost[it.name]
+        lost[it.name] = nil
+        if order.kind == 'attack' then
+            local enemy = enemy_by_name[order.target]
+            if not enemy or (read(function() return enemy.unit:number_of_men_alive() end) or 0) <= 0 then
+                order = {kind = 'hold', run = false}
+            end
+        end
+        local status = give(it, order)
+        if status == 'given' then current[it.name] = order end
+        handle.regiven = handle.regiven + 1
+        opts.emit('nn_rally', {t = opts.now_ms(), u = it.name, k = order.kind, x = order.x, z = order.z,
+            tg = order.target, run = order.run, status = status})
+    end
+
+    -- Every poll: a unit that broke loses its order (the engine dropped it), one that stands again
+    -- gets it back at once.
+    local function follow_morale()
+        for _, it in ipairs(opts.own) do
+            if not standing(it.unit) then
+                if current[it.name] then lost[it.name] = current[it.name] end
+                current[it.name], duty[it.name], guard[it.name], stall[it.name] = nil, nil, nil, nil
+            elseif lost[it.name] and not current[it.name] then
+                rally(it)
+            end
+        end
     end
 
     -- One ability request of the answer -> its status (module comment).
@@ -299,6 +340,7 @@ function M.start(opts)
     end
 
     function handle.poll()
+        follow_morale()
         local text = exchange.read(M.ORDERS_FILE)
         if not text then return end
         local doc, reason = services.parse_orders(text)
@@ -315,29 +357,19 @@ function M.start(opts)
             orders = {}, kept = 0, keeps = 0, skipped = 0}
         for _, it in ipairs(opts.own) do
             local order = doc.orders[it.name]
-            local up = standing(it.unit)
-            if not up then
-                -- The engine drops the order of a routing unit: forget it, give it again after the rally.
-                lost[it.name] = current[it.name] or lost[it.name]
-                current[it.name], duty[it.name], guard[it.name] = nil, nil, nil
-            end
-            local again = false
-            if order and order.kind == 'keep' and up and not current[it.name] and lost[it.name] then
-                order, again = lost[it.name], true   -- keep after a rally: the order the unit had
-            end
+            -- down in the state answered (the network's HOLD is a filler), or down now: no order
+            local up = standing(it.unit) and not (down_at[it.name] and doc.move <= down_at[it.name])
             if order and order.kind == 'keep' then
                 -- The order in force goes on; a unit without one stands as it was taken.
                 row.keeps = row.keeps + 1
             elseif order and not up then
                 row.skipped = row.skipped + 1
             elseif order and services.changed(current[it.name], order) then
-                again = again or lost[it.name] ~= nil   -- the first order after a rally
                 local status = give(it, order)
                 if status == 'given' then current[it.name], lost[it.name] = order, nil end
                 handle.given = handle.given + 1
-                if again then handle.regiven = handle.regiven + 1 end
                 row.orders[#row.orders + 1] = {u = it.name, k = order.kind, x = order.x, z = order.z,
-                    tg = order.target, run = order.run, status = status, again = again or nil}
+                    tg = order.target, run = order.run, status = status}
             elseif order then
                 row.kept = row.kept + 1
             end

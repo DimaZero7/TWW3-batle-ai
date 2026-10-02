@@ -103,6 +103,12 @@ local function up(row)
     return row ~= nil and (row.men or 0) > 0 and row.r ~= true and row.s ~= true
 end
 
+-- A row of a unit that takes no orders: routing, shattered or dead (men read as 0). A reading
+-- that failed (nil) is not taken as down.
+function M.down(row)
+    return row ~= nil and (row.r == true or row.s == true or (type(row.men) == 'number' and row.men <= 0))
+end
+
 -- Present and not shattered (a routing unit can still be shot).
 local function present(row)
     return row ~= nil and (row.men or 0) > 0 and row.s ~= true

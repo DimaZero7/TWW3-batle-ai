@@ -57,8 +57,9 @@ FIELDS = {
 MISSING = {
     "area damage": "battle_vortexs / projectile bombardments are not decoded: no damage numbers yet "
                    "(Verminous Valour's 25 m, 1 s blast has damage 0 and AP 0 by an earlier hand decode)",
-    "conditions": "when a passive is on (Single Entity, Scurry Away, Strength in Numbers have conditions) is "
-                  "in tables not decoded; a passive's effects are what it gives while on",
+    "conditions": "decoded: auto_when (special_ability_to_recharge_contexts) and off_when "
+                  "(special_ability_to_auto_deactivate_flags); a passive's effects are what it gives while on; "
+                  "passive and auto abilities are innate effects (config/nn/effects.json, python -m tools.nn.effects)",
     "ui type": "unit_abilities (hex, augment, ...) is not decoded: the targets say the same",
     "initial recharge": "not found among the decoded fields: abilities start ready (as the simulator assumed)",
 }

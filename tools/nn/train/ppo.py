@@ -5,8 +5,10 @@
   the whole field). Units that take no orders (dead, routing, padding) are left out of the policy
   loss and the entropy: their log-probability is zero and they are masked.
 * Per-unit credit (unit_credit > 0): each unit's advantage also has its own, from its own reward
-  (tools/nn/train/reward.py unit_step: its health trade, flank, piles, missile units in melee, its
-  neighbours') and the critic's per-unit value: A_i = A_side + unit_credit x A_unit_i. A_unit is
+  (tools/nn/train/reward.py unit_step: its gold trade - the enemy's losses it caused, routs and kills
+  included, less its own -, flank, piles, missile units in melee, its neighbours') and the critic's
+  per-unit value: A_i = A_side + unit_credit x A_unit_i (run.py --unit-credit-end: unit_credit goes
+  linearly to that over the run, OpenAI Five's "team spirit"). A_unit is
   centred per decision over the side's units that take orders (it only says which of them did
   better than their fellows, never pushes the whole side one way: uncentred, at unit_credit 0.6 it
   taught the side to stand, as standing units take no losses and no flank), then both are

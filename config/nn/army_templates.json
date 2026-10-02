@@ -275,6 +275,24 @@
       "group": "wh3_default_land_ranged_infantry_trash",
       "quality": "tier_1_step_3_units"
      }
+    ],
+    "wh2_main_skv_inf_skavenslaves_0": [
+     {
+      "group": "wh3_default_land_melee_infantry_trash",
+      "quality": "tier_1_step_2_units"
+     }
+    ],
+    "wh2_main_skv_inf_clanrats_1": [
+     {
+      "group": "wh3_default_land_melee_infantry_main_frontline_swords",
+      "quality": "tier_1_step_4_units"
+     }
+    ],
+    "wh2_main_skv_inf_night_runners_1": [
+     {
+      "group": "wh3_default_land_ranged_infantry_main_light_skirmisher",
+      "quality": "tier_1_step_5_units"
+     }
     ]
    }
   }

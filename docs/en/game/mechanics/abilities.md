@@ -40,9 +40,11 @@ abilities of our lords are read from the database (`config/nn/abilities.json`, `
 | Daemonic | 20 % physical resistance; no rout (instability) | medium |
 | Glorious Charge (4.2.0) | double charge duration; target takes the flank morale penalty | high |
 
-Sources: [fandom Attributes][fw-attr], individual fandom pages, [twwstats][tws]. Ours: Strength in
-Numbers and Scurry Away! are shown to the network but have no effect in the simulator (`sim.json`
-abilities); their measured traces are in [morale](morale.md). **Gap.**
+Sources: [fandom Attributes][fw-attr], individual fandom pages, [twwstats][tws]. Ours: every
+attribute and passive of our units is an innate effect (`config/nn/effects.json`, the database's
+numbers and conditions; [unit passports](../../training/units.md#innate-effects)); Strength in
+Numbers and Scurry Away! are modelled, with their traces measured in the recordings
+([simulator](../../training/simulator.md#innate-effects)).
 
 ## Contact effects
 

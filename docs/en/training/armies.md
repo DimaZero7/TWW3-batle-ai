@@ -54,6 +54,11 @@ flowchart LR
      ~90% in the simulator, so on 02.10.2026 the factor went back to 1.0 and the Empire got
      the spearmen with shields and the swordsmen instead
      ([unit passports](units.md#spearmen-with-shields-and-swordsmen)).
+   - **A faction's cap.** `budget_max` in a faction's entry caps what its side spends (B × its
+     share). The Skaven's is 6700, their most before their wave (the Warlord and 19 clanrat
+     spearmen): the Night Runners (450) and the clanrats with shields (350) would otherwise raise
+     every battle with Skaven to richer armies. Their cheapest unit, the skavenslaves (125), lowers
+     the least Skaven-mirror budget from 675 to 650.
 3. **Buying.** Each side spends 0.95 to 1 of its budget, the lord included, so sides with
    the same factor differ by at most 5%. A unit is taken only if the army can still end
    inside that window. For this
@@ -122,13 +127,20 @@ templates' spear and sword shares (e.g. 20 + 20 in `WH_Empire_land`) are summed 
 melee share, split evenly among the three units. Before 02.10.2026 the pool had the
 spearmen without shields only: 62 / 67 / 62 / 57%.
 
-| Faction | Template | Clanrats | Skavenslave spearmen | Skavenslave slingers |
-|---|---|---:|---:|---:|
-| Skaven | `WH_Skaven_land` | 31% | 31% | 38% |
-| | `WH_Skaven_land_2` | 35% | 35% | 31% |
-| | `WH_Skaven_land_3` | 33% | 33% | 33% |
-| | `WH_Skaven_land_4` | 38% | 38% | 23% |
-| | `WH_Skaven_land_5` | 31% | 31% | 38% |
+| Faction | Template | Clanrat spearmen | Skavenslave spearmen | Skavenslaves | Clanrats with shields | Skavenslave slingers | Night Runners |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Skaven | `WH_Skaven_land` | 15% | 15% | 15% | 15% | 19% | 19% |
+| | `WH_Skaven_land_2` | 17% | 17% | 17% | 17% | 15% | 15% |
+| | `WH_Skaven_land_3` | 17% | 17% | 17% | 17% | 17% | 17% |
+| | `WH_Skaven_land_4` | 19% | 19% | 19% | 19% | 12% | 12% |
+| | `WH_Skaven_land_5` | 15% | 15% | 15% | 15% | 19% | 19% |
+
+The Skaven wave ([unit passports](units.md#skavenslaves-clanrats-with-shields-night-runners)): the
+skavenslaves are in `..._melee_infantry_trash` (`tier_1_step_2`), the clanrats with shields in
+`..._melee_infantry_main_frontline_swords` (`tier_1_step_4`), both of the family
+`melee_infantry_trash`; the Night Runners in `..._ranged_infantry_main_light_skirmisher`
+(`tier_1_step_5`), of the family `ranged_infantry` with the slingers. Four melee units share the
+melee share, two the missile share.
 
 ## Limits
 
@@ -158,26 +170,28 @@ its front.
   (350 m). The deepest army (3 melee lines, 2 missile lines) ends with the lord at about
   −140 m.
 - A unit's width comes from `pools.json` (as in the arenas: spearmen and slaves 30 m,
-  archers 40, slingers 35), otherwise men / `rank_depth` × 1.5 m.
+  archers 40, slingers 35; skavenslaves, clanrats with shields and Night Runners 30), otherwise
+  men / `rank_depth` × 1.5 m.
 
 ## Summary over 10,000 battles
 
-`python -m tools.nn.armies`, seeds 5 … 10,004 (02.10.2026: every `budget_factor` 1.0, the
-Empire's pool with the second wave, budgets capped at `budget_max` 7725 as before it):
+`python -m tools.nn.armies`, seeds 5 … 10,004 (every `budget_factor` 1.0, the Empire's pool with
+the second wave and the Skaven's with their wave, budgets capped at `budget_max` 7725 and the
+Skaven's side at 6700, as before the waves):
 
 | What | Value |
 |---|---|
 | Mirror battles | 50% |
 | Armies: template / random | 75% / 25% |
-| Budget B | 676 … 7725, median 2624 (before the wave 2749) |
-| Units per side (lord not counted) | mean 7.9; 1–4: 35%, 5–9: 31%, 10–14: 18%, 15–18: 8%, 19: 8% (before: 9.0) |
-| Cost difference between sides of equal budgets | mean 1.5%, at most 5.0% |
-| Skaven cost / Empire cost | mean 0.998, 0.950 … 1.052 (4997 battles) |
-| Skaven / Skaven, Empire / Empire | mean 1.000 and 1.000, 0.951 … 1.051 |
-| One side has x times the other's units | x ≥ 1.5: 51.8%; x ≥ 2: 30.8%; x ≥ 3: 6.5% (before: 34.2 / 10.0 / 1.0%) |
-| Missile share of a side | mean 31%; no missile: 20%; ≥ 50%: 27%; missile only: 2.9% |
+| Budget B | 651 … 7725, median 2548 |
+| Units per side (lord not counted) | mean 7.3; 1–4: 39%, 5–9: 31%, 10–14: 18%, 15–18: 8%, 19: 5% |
+| Cost difference between sides of equal budgets | mean 1.5%, at most 4.9% |
+| Skaven cost / Empire cost | mean 1.001, 0.951 … 1.052 (4996 battles) |
+| Skaven / Skaven, Empire / Empire | mean 1.000 and 0.999, 0.952 … 1.050 |
+| One side has x times the other's units | x ≥ 1.5: 49.1%; x ≥ 2: 26.2%; x ≥ 3: 7.2% |
+| Missile share of a side | mean 32%; no missile: 22%; ≥ 50%: 28%; missile only: 3.6% |
 | Empire template armies | spearmen 17%, with shields 13%, swordsmen 13%, flagellants 11%, greatswords 9%, archers 19%, militia 19% (before: 27 / 19 / 21 / – / – / 34 / –%) |
-| Skaven template armies | clanrats 39%, slaves 32%, slingers 29% |
+| Skaven template armies | clanrat spearmen 15%, slave spearmen 19%, skavenslaves 20%, clanrats with shields 15%, slingers 17%, Night Runners 15% |
 
 Within the same melee share the cheapest unit, the plain spearmen (300), is bought most:
 27% against 19% (with shields, 350) and 21% (swordsmen, 375); the market fills the budget

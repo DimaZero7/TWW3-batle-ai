@@ -156,18 +156,18 @@ no cards from battle yet (list `config/roster/capture_emp_wave2.json`, see "Reco
 
 | Unit | Feature | What it does | Source | Simulator | Network |
 |---|---|---|---|---|---|
-| Flagellants | Unbreakable | never loses leadership, never routs (also not when the army is destroyed) | DB attribute `unbreakable`; [abilities](../game/mechanics/abilities.md), [morale](../game/mechanics/morale.md) | morale points never below leadership: never wavers or routs (`morale.py`) | passport attribute `unbreakable` (already an input) |
-| Flagellants | Frenzy (passive) | +10 melee attack, ×1.1 damage, AP and charge bonus, Immune to Psychology; off while morale is below half of leadership | DB: `special_ability_phase_stat_effects`, `_attribute_effects`, `special_ability_to_auto_deactivate_flags` (`morale_is_lower_than_half_of_base_morale`); knowledge base | modelled (`sim.json` abilities.model); never off for these unbreakable men; Immune to Psychology has nothing to act on (no fear or terror in the simulator) | ability slot: effects, `immune_to_psychology`, `off_morale_below_half` |
-| Flagellants | Strength of the Penitent (timed passive): the "defends better when losing" effect | the game fires it itself when the unit is in melee **and losing it**: 20 s of **+14 melee defence, +15 % physical resistance**, ends at once out of melee, ready again 3 s after | DB: `unit_special_abilities` (20 s, 3 s), `special_ability_to_recharge_contexts` (`losing_melee_combat`), auto-deactivate `out_of_melee`, the phase's effects. The fandom wiki gives 15 s (an older patch): the database wins | modelled for either side; "losing" = HP taken ≥ 1.5 × dealt recently (the morale rule's ratio, ours); physical resistance added to the melee damage rule (cap 90 %) | ability slot: `auto`, `when_losing_melee`, `off_out_of_melee`, the effects; never orderable |
+| Flagellants | Unbreakable | never loses leadership, never routs (also not when the army is destroyed) | DB attribute `unbreakable`; [abilities](../game/mechanics/abilities.md), [morale](../game/mechanics/morale.md) | innate effect (rule `unbreakable`): morale points never below leadership, never wavers or routs (`morale.py`) | passport attribute `unbreakable`; effect pair |
+| Flagellants | Frenzy (passive) | +10 melee attack, ×1.1 damage, AP and charge bonus, Immune to Psychology; off while morale is below half of leadership | DB: `special_ability_phase_stat_effects`, `_attribute_effects`, `special_ability_to_auto_deactivate_flags` (`morale_is_lower_than_half_of_base_morale`); knowledge base | innate effect; never off for these unbreakable men; Immune to Psychology has nothing to act on (no fear or terror in the simulator) | ability slot: effects, `immune_to_psychology`, `off_morale_below_half`; effect pair |
+| Flagellants | Strength of the Penitent (timed passive): the "defends better when losing" effect | the game fires it itself when the unit is in melee **and losing it**: 20 s of **+14 melee defence, +15 % physical resistance**, ends at once out of melee, ready again 3 s after | DB: `unit_special_abilities` (20 s, 3 s), `special_ability_to_recharge_contexts` (`losing_melee_combat`), auto-deactivate `out_of_melee`, the phase's effects. The fandom wiki gives 15 s (an older patch): the database wins | innate effect (timed) for either side; "losing" = HP taken ≥ 1.5 × dealt recently (the morale rule's ratio, ours); physical resistance added to the melee damage rule (cap 90 %) | ability slot: `auto`, `when_losing_melee`, `off_out_of_melee`, the effects, its timers; effect pair; never orderable |
 | Flagellants | Very low defence, no armour | the whole base damage of every hit lands, arrows and slings too | passport | the per-hit rule with armour 0 | passport |
 | Flagellants | Chaff | cheap and never runs: holds enemies in place | follows from the above | (from the numbers) | — |
 | Greatswords | Armour 95, armour-piercing two-handed sword, bonus 14 against infantry | most of their damage ignores armour; their armour stops 71 % of base damage on average | passport (the wiki's 32 / 23 AP / bonus 10 are older; the DB has 35 / 25 / 14); no Stubborn or other special attribute in the WH3 database | already modelled (AP split, bonus against infantry to attack and damage, armour); test: they bring armoured stormvermin down more than 1.5× faster than swordsmen | passport |
 | Greatswords | Slow (run 2.8), heavy (mass 120) | slow to reposition | passport | speed from the passport (the simulator does not use mass) | passport |
 | Militia | Direct fire | flat, fixed-speed bullets: cannot shoot through or over friends; 75 % of the men blocked = holds fire at that target | DB: `projectiles.trajectory` `low`, `unit_firing_line_of_sight_considered_obstructed_ratio` 0.75, `projectile_friendly_fire_man_radius_coefficient` 2.2; [missiles](../game/mechanics/missiles.md) | line of fire (`missile.py` clear_shot, [simulator](simulator.md)) | passport `direct` |
 | Militia | Accuracy, spread | calibration area 2.0 m at 65 m (the arrow 3.7 m at 95 m): tighter, but short-ranged | DB `projectiles` | hit rate 0.5 at the edge of range: an **estimate** (`sim.json` missile.musket_why) | passport `spread` (calibration area / distance × 20), `muzzle_velocity` |
-| Militia | Fire whilst moving | shoots on the move | DB attribute `mounted_fire_move`; the wiki says the same | aims and shoots while moving | passport attribute |
+| Militia | Fire whilst moving | shoots on the move | DB attribute `mounted_fire_move`; the wiki says the same | innate effect (rule `fire_while_moving`): aims and shoots while moving | passport attribute; effect pair |
 | Militia | Decent melee (28 / 25, sword 21 + 7) | can hold a line or finish routers | passport | from the passport | passport |
-| Militia | Vanguard deployment | may deploy ahead of the deployment zone | DB attribute `guerrilla_deploy`; the wiki | not modelled (placements come from the army generator) | passport attribute |
+| Militia | Vanguard deployment | may deploy ahead of the deployment zone | DB attribute `guerrilla_deploy`; the wiki | schema only (placements come from the army generator) | passport attribute; effect pair |
 
 The bridge needs nothing for them: a blocked shooter under an attack order stands idle and is
 released to fire at will after 4 decisions (`services.missile_duty`), as any shooter; the
@@ -188,6 +188,127 @@ timers (the bridge knows only the abilities it fired), so there the network sees
    every second: when the phase comes on (HP taken against dealt), how long it stays.
 5. **Fire whilst moving**: militia walking past a standing enemy unit at 70 m: shots while moving.
 
+## Skavenslaves, Clanrats with shields, Night Runners
+
+The Skaven wave, added like the Empire's: the cheapest chaff, a shielded line and fast long-ranged
+slingers. Passports from the database; no cards from battle yet (list
+`config/roster/capture_skv_wave.json`, see "Recordings wanted" below). We already had the clanrat
+**spearmen without shields** (`wh2_main_skv_inf_clanrat_spearmen_0`); the variant added is the
+**Clanrats with sword and shield** (`wh2_main_skv_inf_clanrats_1`, 350): a shield against the Empire's
+arrows and pistols. The plain sword clanrats (`_0`, 300, defence 18, no shield) differ from it only by
+the shield and 4 defence. The Night Runners added are the **slings** (`_1`); the `_0` throw stars
+(70 m, direct fire, fire whilst moving).
+
+| | Skavenslaves | Clanrats with shields | Night Runners (slings) |
+|---|---:|---:|---:|
+| Key | `wh2_main_skv_inf_skavenslaves_0` | `wh2_main_skv_inf_clanrats_1` | `wh2_main_skv_inf_night_runners_1` |
+| Men; health of a man / unit | 180; 50 / 9000 | 160; 60 / 9600 | 120; 56 / 6720 |
+| Mass; run / charge, m/s | 90; 4.2 / 4.8 | 100; 4.2 / 4.8 | 90; **5.4 / 6.0** (acceleration 5) |
+| Attack / defence | 12 / 10 | 24 / 22 | 24 / 14 |
+| Charge | 5 | 10 | 10 |
+| Damage: normal + piercing | 14 + 4 (sword) | 20 + 6 (sword) | 20 + 6 (sword) |
+| Armour; shield | 0; none | 25; **35 %** (wood) | 10; none |
+| Leadership | 35 | 45 | 48 |
+| Physical resistance | — | — | **20 %** |
+| Attributes | **expendable**, hide_forest | hide_forest | **guerrilla_deploy** (vanguard), hide_forest; can skirmish |
+| Innate abilities | Strength in Numbers, Scurry Away! | the same | the same |
+| Shooting | — | — | sling, arcing (`dual_low_fixed`), **140 m**, 22 shots, 10 + 1, reload 8 s, calibration 4.0 m at 85 m |
+| Cost (multiplayer) | **125** | 350 | 450 |
+
+### What each feature does, and where it comes from
+
+| Unit | Feature | What it does | Source | Simulator | Network |
+|---|---|---|---|---|---|
+| all three | Strength in Numbers | +6 leadership, +8 melee defence, speed ×0.9 while health is above 50 % of the start | DB: the ability passport (`stat_morale` +6, `stat_melee_defence` +8, `scalar_speed` ×0.9; off `health_below_50%_base`); knowledge base | innate effect (below); the Skaven's fitted +6 start reserve (`morale.faction_bonus`) was this, so it is 0 now | effect pair (owned, on); ability slot |
+| all three | Scurry Away! | speed ×1.1 while wavering or routing | DB (`scalar_speed` ×1.1; off `morale_is_higher_than_wavering`); knowledge base | innate effect: a Skaven rout runs ×1.1 (measured ×1.09, below) | effect pair; ability slot |
+| Skavenslaves | Expendable | their rout scares only other expendable units | DB attribute `expendable`; knowledge base | innate effect (rule `expendable`) | effect pair; passport attribute |
+| Skavenslaves | Cheapest chaff (125), defence 10, no armour | soak and hold for the cost | passport | from the numbers | passport |
+| Clanrats with shields | Shield 35 % | blocks 35 % of arrows, slings and pistol shots from within 60° of the front | DB `unit_shield_types` | the shield rule ([shields](#shields)) | passport `shield` |
+| Night Runners | Fast (run 5.4, acceleration 5) | outpace every infantry in both pools | passport | from the passport | passport |
+| Night Runners | Long-ranged sling (140 m) with a tighter spread (4.0 m at 85 m against the slave slingers' 4.8 m) | outranges the archers (130 m) | DB `projectiles` | the measured sling hit rate 0.47 at the edge of range (the spread at 140 m about the slaves' at 120 m); reload 11.5 × 8 / 9 = 10.2 s (`sim.json` missile.reload_ref_s: an estimate, not measured) | passport (`spread`, range, reload) |
+| Night Runners | Physical resistance 20 % | every melee hit and every arrow / sling takes 20 % less | DB `land_units.damage_mod_physical` | the per-hit rule (melee; missiles: resistances are those of the passport) | passport |
+| Night Runners | Vanguard deployment | may deploy ahead of the deployment zone | DB attribute `guerrilla_deploy` | schema only: placements come from the army generator | effect pair; passport attribute |
+| Night Runners | Skirmish | can keep away from melee by itself | DB `land_units.can_skirmish` | not modelled (no skirmish mode) | passport `can_skirmish` |
+| Night Runners | No Stalk | the WH3 database gives them no `stalk` (the sling Night Runners of older patches had it) | DB | — | — |
+
+The bridge needs nothing for them: nothing is orderable (their abilities are innate).
+
+### Recordings wanted
+
+1. **Cards**: `python -m tools.build roster-capture --capture config/roster/capture_skv_wave.json`,
+   launch, `python -m tools.roster update …/events.jsonl`, then `py -3.14 -m tools.nn.units` (the card check).
+2. **Night Runners' reload and hit rate**: the archer range (`--range-mode damage`) with the Night Runners in
+   the archers' place against standing Empire spearmen at 100, 120 and 140 m, 3 runs each.
+3. **Strength in Numbers and Scurry Away! on the bridge**: any Skaven battle with the bridge's
+   `ActiveEffectList` every second: when each switches (health 50 %, wavering).
+4. **Single Entity**: a lord brought below 25 % health (the lord swarm probe, `build/lord-swarm`), the
+   bridge's `ActiveEffectList` and his speed and kills a second: does the "wounded" effect come on, and
+   what does it do.
+
+## Innate effects
+
+Every attribute and every passive or game-fired ability of a unit is an **innate effect**, one
+catalogue for all: `config/nn/effects.json`, written by `python -m tools.nn.effects` from the unit
+and ability passports (both from the database). Which unit owns which effect comes from the database
+rows (the passport's `attributes`, and its `abilities` that are passive or `auto`), never from a hand
+list. The simulator lays them on by one mechanism (`tools/nn/sim/effects.py`,
+[simulator](simulator.md#innate-effects)); the network sees each as a pair of inputs, owned and on
+now ([model](model.md#innate-effects)). An attribute's rule is the engine's (the database gives only
+its key): `ATTRIBUTES` in `tools/nn/effects.py` says what it does, with its numbers and source.
+
+For each effect the file holds: `kind` (attribute, passive, timed), `stats` (stat, how, value, on
+self or friends, the simulator's stat), `rules` (flags such as `unbreakable`), `range_m` (an aura),
+`needs` and `off_when` (the conditions, as the simulator's predicates), `timed` (active and recharge
+time, when the game fires it), `when` in words, `source` (tables and row), `kb` (knowledge base),
+`modelled` and `why` (what the simulator lacks). `order` is append-only: an effect keeps its place
+when the file is rebuilt, so the network's inputs keep their meaning.
+
+The game's condition flags and what the simulator checks for them (`_fields.predicates` in the file):
+
+| Database flag | Predicate | The simulator |
+|---|---|---|
+| `health_below_50%_base` | hp_below_half | health < 50 % of the start |
+| `health_below_25%` | hp_below_quarter | health < 25 % |
+| `morale_is_higher_than_wavering` | not_wavering | not wavering and not routing |
+| `morale_is_lower_than_half_of_base_morale` | morale_below_half | morale points < half of leadership |
+| `out_of_melee`, `engaged_in_melee` | out_of_melee, in_melee | in melee with a standing enemy |
+| `losing_melee_combat` | losing_melee | in melee and HP taken ≥ 1.5 × dealt recently (the morale rule's ratio; ours) |
+
+The 14 effects of our 17 units:
+
+| Effect | Kind | What it does | When | Owners | Simulator |
+|---|---|---|---|---|---|
+| Unbreakable (`unbreakable`) | attribute | never loses leadership, never routs | always | Flagellants | modelled: morale points never below leadership |
+| Expendable (`expendable`) | attribute | its rout scares only other expendables | always | slave spearmen, slingers, skavenslaves | modelled: not counted among routing friends |
+| Encourage (`encourages`) | attribute | +4 leadership to friends within 70 m, to 0 at 105 m | always | the two lords | modelled: the lord's aura |
+| Charge Reflection (`charge_reflection`) | attribute | braced, meets a frontal charge as a charge | always | spearmen, halberdiers, clanrat spearmen, stormvermin | modelled (bracing) |
+| Fire Whilst Moving (`mounted_fire_move`) | attribute | shoots on the move | always | militia | modelled |
+| Charge Defence vs. Large (`charge_defense_vs_large`) | attribute | braced, cancels a large charger's bonus | always | the spear units | schema only: no large units in our pools |
+| Vanguard (`guerrilla_deploy`) | attribute | deploys ahead | always | militia, Night Runners | schema only: placements are the generator's |
+| Hide (forest) (`hide_forest`) | attribute | hidden in woods | always | all 17 units | schema only: no woods, no hiding |
+| Strength in Numbers | passive | +6 leadership, +8 melee defence, speed ×0.9 | health ≥ 50 % of the start | Skaven infantry (7) | modelled |
+| Scurry Away! | passive | speed ×1.1 | wavering or routing | Skaven infantry and the Warlord (8) | modelled |
+| Single Entity | passive | speed ×0.9, melee damage and AP ×0.8 | health < 25 % (its recharge context `health_below_25%`) | the two lords | left out (`sim.json` effects.off): the recordings show no ×0.9 speed below 25 % (lords running out of melee: 0.84–0.85 of the run in every health band); the reading of the context is ours (the cards, at full health, show the full damage) |
+| Hold the Line! | passive aura | +5 melee defence, +4 leadership to self and friends within 35 m | always (a standing lord) | the General | modelled |
+| Frenzy | passive | +10 melee attack, ×1.1 damage, AP and charge; Immune to Psychology | morale ≥ half of leadership | Flagellants | modelled (Immune to Psychology: nothing to act on) |
+| Strength of the Penitent | timed | 20 s of +14 melee defence, +15 % physical resistance; ready 3 s after | fired by the game when losing the melee; ends out of melee | Flagellants | modelled |
+
+`sim.json` effects.off is the calibration switch for an effect the catalogue could model but the
+simulator leaves out (each with its reason): today Single Entity only.
+
+Stubborn and Hatred are not in the WH3 database as unit attributes or passives (WH2 had them);
+Perfect Vigour is the attribute `fatigue_immune` (in `ATTRIBUTES`, modelled: no fatigue) for when a
+unit with it comes. Effect bundles (`effect_bundles`, `effect_bonus_value_*`) are campaign effects
+(skills, technologies, `battle_context_unit_attribute_junctions`): custom battles have none.
+
+**Measured** (02.10.2026, all fair recordings with unit keys; speed over 1 s steps): routing
+Empire units run at 0.865 of their run, routing Skaven below half health at 0.945 (×1.09: Scurry
+Away!) and above half health at 0.866 (×1.1 × 0.9); running in order, steady, above half health:
+Empire 0.97, Skaven 0.88 (×0.91: Strength in Numbers). Crossing 50 % health, Skaven units drop
+2.3 points more morale in the next 3 s than Empire units (7.7 against 5.5; at 40 % and 60 % both
+the same): Strength in Numbers' +6 switching off. So `morale.rout_speed` is 0.86 (the Empire's) and
+the Skaven's ×1.1 comes from Scurry Away!.
+
 ## How to add a unit
 
 A standing procedure (user, 02.10.2026). The Flagellants, Greatswords and Free Company Militia
@@ -196,17 +317,21 @@ above are the worked example.
 1. **Key and passport.** Find the main unit key (`main_units`), add it to `UNITS` in
    `tools/nn/units.py`, run `py -3.14 -m tools.nn.units`; its abilities: `py -3.14 -m tools.nn.abilities`.
 2. **Research every special feature.** The unit's attributes (the passport's `attributes`), its
-   abilities (effects, `auto`, `auto_when`: when the game fires it, `off_when`: when it is off),
+   abilities (effects, `auto`, `auto_when`: when the game fires it, `off_when`: when it is off; the
+   passive and game-fired ones become innate effects: `python -m tools.nn.effects` rebuilds
+   `config/nn/effects.json` and prints which are modelled and why not),
    its projectile (trajectory, calibration, penetration) and its in-game description; then the
    web (honga.net's WH3 unit pages, the fandom wiki, guides; older patches' numbers differ: the
    database wins) and the knowledge base `docs/en/game/mechanics/`. Look for conditional bonuses
    ("the worse it goes, the better it defends"), immunities, deployment and movement rules.
 3. **Write each feature down** in this page's table for the unit: what it does, its source, how the
    simulator models it (or why not) and how the network sees it.
-4. **Model every feature that changes battle outcomes**: in the simulator (a `sim.json` number with
-   its `why`; an estimate says so and names the recording that would measure it) and in the
-   network's input: a passport feature (`tools/nn/model/passport.py`) or an ability field
-   (`tools/nn/model/abilities.py`). New inputs go **at the end** of the passport or ability features
+4. **Model every feature that changes battle outcomes**: in the simulator (an attribute's rule in
+   `ATTRIBUTES` of `tools/nn/effects.py` and `RULES` of `tools/nn/sim/effects.py`, a new condition in
+   `CONDITIONS` / `PREDICATES`; a `sim.json` number with its `why`; an estimate says so and names the
+   recording that would measure it) and in the network's input: a passport feature
+   (`tools/nn/model/passport.py`), an ability field (`tools/nn/model/abilities.py`); an innate effect
+   gets its pair of inputs by itself (`tools/nn/model/effects.py`). New inputs go **at the end** of the passport or ability features
    only: older checkpoints then load with zero weights for them (`encoder.pad_inputs`) and act as before.
 5. **Card from battle**: a capture list `config/roster/capture_<name>.json` (the general and up to 4
    units), roster capture, `tools.roster update`, rebuild the passports (they must equal the card).
@@ -255,8 +380,10 @@ the hits whose shooter stands within 60° of the target's facing, for lords and 
   is shared: `general_aura_radius` 70 m and `general_inspire_effect_amount_*` in
   `_kv_morale_tables` ([morale](../game/units/morale.md)). A lord is marked by
   the attribute `encourages`.
-- **What attributes do.** Keys only. Abilities: their numbers, when the game fires them and when
-  they are off are in the ability passports (`config/nn/abilities.json`).
+- **What attributes do.** Keys only (`unit_attributes_tables`): their rules and numbers are the
+  engine's, written down in `ATTRIBUTES` of `tools/nn/effects.py` with the source ([innate
+  effects](#innate-effects)). Abilities: their numbers, when the game fires them and when they are off
+  are in the ability passports (`config/nn/abilities.json`).
 
 ## What we inferred
 

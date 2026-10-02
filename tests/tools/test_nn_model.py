@@ -11,6 +11,7 @@ torch = pytest.importorskip("torch")
 from tools.config import ROOT  # noqa: E402
 from tools.nn import gamedata  # noqa: E402
 from tools.nn.model import config, critic, decide, factions, heads, lora, policy, sources  # noqa: E402
+from tools.nn.model import effects as mfx  # noqa: E402
 from tools.nn.model import observation as ob  # noqa: E402
 from tools.nn.sim import orders as sim_orders  # noqa: E402
 
@@ -387,6 +388,7 @@ WAVE2 = ["wh_dlc04_emp_inf_flagellants_0", "wh_main_emp_inf_greatswords", "wh_dl
          "wh_main_emp_cha_general_0", "wh2_main_skv_cha_warlord_0", "wh2_main_skv_inf_skavenslave_slingers_0"]
 NEW_PASSPORT = 2 + 3          # attributes mounted_fire_move, guerrilla_deploy; direct, spread, muzzle_velocity
 NEW_ABILITY = 8               # abilities.WHEN
+NEW_EFFECTS = mfx.SIZE        # the innate effects' columns (appended after the second wave)
 
 
 def test_the_second_wave_is_seen_in_the_passport_and_the_ability_slots():
@@ -414,16 +416,16 @@ def narrow_networks(cfg):
     fewer ability inputs (all appended at the ends)."""
     from tools.nn.model import abilities as mab
     actor, crit = policy.Actor(cfg), critic.Critic(cfg)
-    actor.encoder.unit[0] = torch.nn.Linear(ob.TOKEN - NEW_PASSPORT, cfg.d)
+    actor.encoder.unit[0] = torch.nn.Linear(ob.TOKEN - NEW_EFFECTS - NEW_PASSPORT, cfg.d)
     actor.abilities.net[0] = torch.nn.Linear(mab.SIZE - NEW_ABILITY, cfg.d)
     actor.heads.ability_k[0] = torch.nn.Linear(mab.SIZE - NEW_ABILITY, cfg.d)
-    crit.encoder.unit[0] = torch.nn.Linear(ob.TOKEN - NEW_PASSPORT, cfg.critic_d)
+    crit.encoder.unit[0] = torch.nn.Linear(ob.TOKEN - NEW_EFFECTS - NEW_PASSPORT, cfg.critic_d)
     return actor.eval(), crit.eval()
 
 
 def narrow(o):
     """The observation as the networks before the second wave saw it."""
-    out = dict(o, tokens=o["tokens"][..., :ob.TOKEN - NEW_PASSPORT])
+    out = dict(o, tokens=o["tokens"][..., :ob.TOKEN - NEW_EFFECTS - NEW_PASSPORT])
     if "abil" in o:
         out["abil"] = o["abil"][..., :o["abil"].shape[-1] - NEW_ABILITY]
     return out
@@ -450,7 +452,7 @@ def test_networks_saved_before_the_second_wave_load_and_act_the_same_and_train()
     new.load_state_dict(old.state_dict())
     new_crit.load(old_crit.state_dict())
     o, c = policy.to_torch(obs), policy.to_torch(cobs)
-    assert o["tokens"][..., -NEW_PASSPORT:].abs().sum() > 0                  # the new inputs are not all zero
+    assert o["tokens"][..., -NEW_EFFECTS - NEW_PASSPORT:].abs().sum() > 0    # the new inputs are not all zero
     with torch.no_grad():
         lo, _ = old(narrow(o))
         ln, _ = new(o)
@@ -468,7 +470,7 @@ def test_networks_saved_before_the_second_wave_load_and_act_the_same_and_train()
     out, _ = new(o)
     loss = sum(v.masked_fill(v < -1e8, 0).sum() for v in out.values())
     loss.backward()
-    assert new.encoder.unit[0].weight.grad[:, -NEW_PASSPORT:].abs().sum() > 0
+    assert new.encoder.unit[0].weight.grad[:, -NEW_EFFECTS - NEW_PASSPORT:-NEW_EFFECTS].abs().sum() > 0
     assert new.abilities.net[0].weight.grad[:, -NEW_ABILITY:].abs().sum() > 0
 
 
@@ -500,4 +502,145 @@ def test_the_chain_checkpoint_loads_through_the_conversion_and_acts_as_before():
         keys = ("tokens", "own", "attend", "pos", "ctx")
         with torch.no_grad():
             assert torch.allclose(old_crit.eval()(narrow({k: c[k] for k in keys})),
+                                  new_crit.eval()({k: c[k] for k in keys}), atol=1e-4)
+
+
+# --- innate effects (tools/nn/model/effects.py): per effect (owned, on) appended at the token's end ---
+
+FX_UNITS = ["wh_dlc04_emp_inf_flagellants_0", "wh2_main_skv_inf_clanrats_1", "wh2_main_skv_inf_skavenslaves_0",
+            "wh_main_emp_cha_general_0", "wh2_main_skv_inf_night_runners_1", "wh2_main_skv_cha_warlord_0"]
+
+
+def fx_obs(batch=2, seed=13, **changes):
+    setup, state = sources.synthetic(batch=batch, own=3, enemy=3, seed=seed, keys=FX_UNITS)
+    N = 6
+    state.update(men=np.maximum(state["men"], 1.0))
+    for k in range(3):
+        for t in ("on", "cd"):
+            state[f"ab{k}_{t}"] = np.zeros((batch, N))
+    state.update(changes)
+    obs, _ = ob.observe(state, setup, 1)
+    cobs, _ = ob.observe(state, setup, 1, full=True)
+    return setup, state, obs, cobs
+
+
+def fx_cols(tokens):
+    return tokens[..., -NEW_EFFECTS:]
+
+
+def test_the_effects_are_owned_by_the_catalogue_and_the_same_on_numpy_and_torch():
+    setup, state, obs, _ = fx_obs()
+    keys = mfx.keys()
+    owned = fx_cols(obs.tokens)[..., 0::2]
+    for b in range(2):
+        for n, key in enumerate(setup.keys[b]):
+            want = {keys.index(e) for e in mfx.load()["units"][key]}
+            assert set(np.nonzero(owned[b, n])[0]) == want, key
+    t, _ = ob.observe({k: torch.as_tensor(v) for k, v in state.items()}, setup, 1)
+    assert np.allclose(obs.tokens, t.tokens.numpy(), atol=1e-6)
+    assert ob.NAMES[-NEW_EFFECTS:] == mfx.NAMES
+
+
+def test_on_follows_the_conditions_and_enemies_show_it_only_while_seen():
+    sin = mfx.keys().index("wh2_main_unit_passive_strength_in_numbers")
+    N = 6
+    hp = np.full((2, N), 0.9)
+    setup, state, obs, cobs = fx_obs(hp=hp, vis=np.ones((2, N), bool))
+    on = fx_cols(obs.tokens)[..., 1::2]
+    owners = fx_cols(obs.tokens)[..., 0::2][..., sin] > 0
+    assert owners.any() and np.all(on[..., sin][owners] == 1)
+    setup, state, obs, cobs = fx_obs(hp=np.full((2, N), 0.3), vis=np.ones((2, N), bool))
+    assert np.all(fx_cols(obs.tokens)[..., 1::2][..., sin] == 0)              # below half: off
+    hidden = np.ones((2, N), bool)
+    hidden[:, 3:] = False
+    setup, state, obs, cobs = fx_obs(hp=hp, vis=hidden)
+    assert np.all(fx_cols(obs.tokens)[:, 3:, 1::2] == 0)                       # unseen enemies: not shown
+    assert np.all(fx_cols(obs.tokens)[:, 3:, 0::2] == fx_cols(cobs.tokens)[:, 3:, 0::2])  # owned: known
+    assert fx_cols(cobs.tokens)[:, 3:, 1::2].sum() > 0                          # the critic sees all
+
+
+def test_the_simulator_and_the_observed_fields_agree_on_what_is_on():
+    from tools.nn.sim import battle, replay, scenario
+    from tools.nn.sim.params import load
+    P = load()
+
+    def side(rows):
+        return [{"key": k, "x": x, "z": 0.0, "b": b, "general": "cha" in k} for k, x, b in rows]
+    a = {"attacker": 1, "sides": {1: {"faction": "wh_main_emp_empire", "units": side(
+        [(FX_UNITS[3], -80, 90), (FX_UNITS[0], -25, 90)])}, 2: {"faction": "wh2_main_skv_skaven", "units": side(
+            [(FX_UNITS[5], 80, 270), (FX_UNITS[1], 25, 270), (FX_UNITS[2], 30, 270)])}}}
+    st = scenario.build([a], P)
+    timed = [mfx.keys().index(k) for k, e in mfx.load()["effects"].items() if e.get("timed")]
+    for _ in range(120):
+        battle.step(st, replay.nearest_attack(st), P)
+        su, ss = sources.from_sim(st)
+        sim, _ = ob.observe(ss, su, 1, full=True)
+        rec, _ = ob.observe({k: v for k, v in ss.items() if k != "fx_on"}, su, 1, full=True)
+        s_on, r_on = fx_cols(sim.tokens)[..., 1::2], fx_cols(rec.tokens)[..., 1::2]
+        keep = [i for i in range(len(mfx.keys())) if i not in timed]
+        alive = (ss["men"] > 0)
+        assert torch.equal(s_on[..., keep][alive], r_on[..., keep][alive])
+
+
+def pre_effects_networks(cfg):
+    """An actor and critic as saved before the innate effects: NEW_EFFECTS fewer token inputs."""
+    actor, crit = policy.Actor(cfg), critic.Critic(cfg)
+    actor.encoder.unit[0] = torch.nn.Linear(ob.TOKEN - NEW_EFFECTS, cfg.d)
+    crit.encoder.unit[0] = torch.nn.Linear(ob.TOKEN - NEW_EFFECTS, cfg.critic_d)
+    return actor.eval(), crit.eval()
+
+
+def without_effects(o):
+    return dict(o, tokens=o["tokens"][..., :ob.TOKEN - NEW_EFFECTS])
+
+
+def test_networks_saved_before_the_effects_load_act_the_same_and_learn_them():
+    setup, state, obs, cobs = fx_obs()
+    torch.manual_seed(5)
+    old, old_crit = pre_effects_networks(CFG)
+    new, new_crit = model(seed=14), critic.Critic(CFG).eval()
+    new.load_state_dict(old.state_dict())
+    new_crit.load(old_crit.state_dict())
+    o, c = policy.to_torch(obs), policy.to_torch(cobs)
+    assert fx_cols(o["tokens"]).abs().sum() > 0
+    keys = ("tokens", "own", "attend", "pos", "ctx")
+    with torch.no_grad():
+        lo, _ = old(without_effects(o))
+        ln, _ = new(o)
+        zeroed, _ = new(dict(o, tokens=torch.cat([without_effects(o)["tokens"],
+                                                  torch.zeros_like(fx_cols(o["tokens"]))], -1)))
+        vo, vn = old_crit(without_effects({k: c[k] for k in keys})), new_crit({k: c[k] for k in keys})
+    for k in lo:
+        assert torch.allclose(lo[k], ln[k], atol=1e-5) and torch.allclose(ln[k], zeroed[k], atol=1e-6), k
+    assert torch.allclose(vo, vn, atol=1e-5)
+    new.train()
+    out, _ = new(o)
+    sum(v.masked_fill(v < -1e8, 0).sum() for v in out.values()).backward()
+    assert new.encoder.unit[0].weight.grad[:, -NEW_EFFECTS:].abs().sum() > 0
+
+
+CHAIN5 = ROOT / "build/nn-train/test5/it5/m20.pt"
+
+
+@pytest.mark.skipif(not CHAIN5.exists(), reason="no chain checkpoint (build/ is not in Git)")
+def test_the_it5_checkpoint_loads_and_acts_as_before_the_effects():
+    from tools.nn.train import checkpoint
+    data = checkpoint.read(CHAIN5)
+    cfg = checkpoint.config_of(data)
+    new = checkpoint.load_policy(CHAIN5)
+    new_crit = checkpoint.load_critic(CHAIN5)
+    old, old_crit = pre_effects_networks(cfg)
+    torch.nn.Module.load_state_dict(old, data["actor"])
+    setup, state, obs, cobs = fx_obs()
+    o, c = policy.to_torch(obs), policy.to_torch(cobs)
+    with torch.no_grad():
+        lo, _ = old(without_effects(o))
+        ln, _ = new(o)
+    for k in lo:
+        assert torch.allclose(lo[k], ln[k], atol=1e-4), k
+    if new_crit is not None:
+        torch.nn.Module.load_state_dict(old_crit, data["critic"])
+        keys = ("tokens", "own", "attend", "pos", "ctx")
+        with torch.no_grad():
+            assert torch.allclose(old_crit.eval()(without_effects({k: c[k] for k in keys})),
                                   new_crit.eval()({k: c[k] for k in keys}), atol=1e-4)

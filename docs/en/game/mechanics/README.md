@@ -96,8 +96,7 @@ better one; each is a candidate for a test.
 | 15 | Strong enemy near | −3 … −24 by combat power within 70 m (DB) | −3 only | [morale](morale.md#modifiers-points) |
 
 **Gaps** — game mechanics our simulator does not have, by likely impact on our battles:
-army-losses collapse (−120, ends battles), charge morale (+15), Strength in Numbers as a
-conditional passive (its +8 defence, −10 % speed, off below 50 % HP) and Scurry Away!, pursuit
+army-losses collapse (−120, ends battles), charge morale (+15), pursuit
 blows counting as charges, shooters going into melee when out of ammunition, the entity
 `turn_speed` out of melee, the morale shock (25 % lost in 4 s), shattering by casualties.
 

@@ -198,7 +198,16 @@ From the 28 game-AI and 71 network battles (`build/simacc/kb_events.py`, `collap
 - **Army collapse** (68 of 182 sides break all at once): the database's rule with strength =
   cost × health of units not shattered (routing included) fires on 36 sides, 32 of them collapse,
   median 2 s after the trigger; 36 collapses have no trigger. With standing units only: 79
-  triggers, 63 collapse, but 50 s later (median). The game's own strength is not recorded.
+  triggers, 63 collapse, but 50 s later (median). The game's own strength was not recorded.
+- **Recorded from 02.10.2026** (every `nn_sample`, [the fields](../apps/entries.md#nn_arena)): the
+  balance of power `bop` (CCO `BattleRoot.BalanceOfPowerPercent`, for the player's alliance
+  `bop_side`; the CCO has no per-alliance value, the other side's is its complement), per unit
+  `sv` (`unit:strategic_value()`), `pcr` / `phr` (CCO `PercentCasualtiesRecently` /
+  `PercentHpLostRecently`, the last 4 s) and `mge` (CCO `MoraleGreatestEffect`, display text).
+  Read by `tools/nn/gamedata.py`: `Battle.bop`, `bop_side`, `balance(b, side)`, `f["sv"]`,
+  `f["pcr"]`, `f["phr"]`, `Battle.mge`; `morale_coverage(b)` gives the share of seconds each was
+  read (0 for older runs). Not yet measured: the scale of `bop` (0–1 or percent) and of the 4 s
+  shares are taken from the first battles.
 - **Lords** fall (all shattered, none killed) at 16 % health (median of 48 in the network
   battles); the simulator's at 4 %, 130–145 s earlier.
 

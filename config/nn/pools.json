@@ -28,11 +28,16 @@
     "wh2_main_skv_skaven": {
       "generator": "WH_Skaven",
       "budget_factor": 1.0,
+      "budget_max": 6700,
+      "_budget_max": "The most a Skaven side spends: 6700 = the Skaven's most before 02.10.2026 (the Warlord and 19 clanrat spearmen). The Night Runners (450) and the clanrats with shields (350) would raise it to 9075 and shift every battle with Skaven to richer armies (B is capped by what both sides can field); the cap keeps the budgets as they were.",
       "lord": {"key": "wh2_main_skv_cha_warlord_0", "width": 5},
       "units": [
         {"key": "wh2_main_skv_inf_clanrat_spearmen_0", "slot": "clanrat", "width": 30},
         {"key": "wh2_main_skv_inf_skavenslave_spearmen_0", "slot": "slave", "width": 30},
-        {"key": "wh2_main_skv_inf_skavenslave_slingers_0", "slot": "sling", "width": 35}
+        {"key": "wh2_main_skv_inf_skavenslave_slingers_0", "slot": "sling", "width": 35},
+        {"key": "wh2_main_skv_inf_skavenslaves_0", "slot": "slave_sword", "width": 30},
+        {"key": "wh2_main_skv_inf_clanrats_1", "slot": "clanrat_shield", "width": 30},
+        {"key": "wh2_main_skv_inf_night_runners_1", "slot": "night_runner", "width": 30}
       ]
     }
   }

@@ -28,7 +28,10 @@ infantry, missiles at him, abilities. Monsters are in [monsters](monsters.md). C
   bodyguard/crew). · [twwstats][tws] (WH2 description) · high (value), medium (WH3).
 - **"Wounded" state.** WH3 single entities get stat penalties at low health; 2.0 made it harder to
   heal back from very low HP. Thresholds not found. · [GameWatcher][gw] · high (exists).
-  - Ours: not modelled.
+  - Ours: the database's passive Single Entity (both our lords) has speed ×0.9 and melee damage and
+    AP ×0.8 with the recharge context `health_below_25%` (`config/nn/effects.json`); the recordings
+    show no speed drop below 25 % (lords running out of melee: 0.84–0.85 of their run in every
+    health band), so the simulator leaves it out (`sim.json` effects.off); the network sees it.
 
 ## A lord against infantry
 

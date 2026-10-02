@@ -1,0 +1,549 @@
+{
+ "_description": "Innate unit effects (docs/en/training/units.md, Innate effects): every attribute and passive or game-fired ability of the units in config/nn/units.json, from the game's database. Written by python -m tools.nn.effects; the simulator (tools/nn/sim/effects.py) lays on the `modelled` ones, the network (tools/nn/model/effects.py) sees each by `order` (append-only).",
+ "_fields": {
+  "kind": "attribute (a rule flag of the engine), passive (on while its conditions hold), timed (fired by the game itself, active_s then recharge_s)",
+  "rules": "rule flags it sets (attributes; ability attribute effects)",
+  "stats": "the ability passport's stat effects: stat, how (add / mult), value, on (self, friends within range_m), sim (the simulator's stat; null: not modelled)",
+  "needs": "predicates that must hold for it to be on (the database's recharge contexts of a passive)",
+  "off_when": "predicates that hold it off (the database's auto-deactivate flags)",
+  "timed": "a timed passive: active_s, recharge_s, fires_when (the recharge contexts)",
+  "when": "the condition in words",
+  "source": "database tables and rows",
+  "kb": "knowledge base page",
+  "modelled": "the simulator acts on it",
+  "sim": "what the simulator does",
+  "why": "why not (all) of it",
+  "predicates": "the conditions the simulator evaluates: out_of_melee = out of melee, in_melee = in melee, losing_melee = losing its melee, morale_below_half = morale below half of leadership, not_wavering = steady (not wavering or routing), hp_below_half = health below 50 % of the start, hp_below_quarter = health below 25 % (db flag -> predicate: out_of_melee -> out_of_melee, engaged_in_melee -> in_melee, losing_melee_combat -> losing_melee, morale_is_lower_than_half_of_base_morale -> morale_below_half, morale_is_higher_than_wavering -> not_wavering, health_below_50%_base -> hp_below_half, health_below_25% -> hp_below_quarter)"
+ },
+ "_missing": {
+  "effect bundles": "effect_bundles / effect_bonus_value_*: campaign effects (skills, techs, the contexts of battle_context_unit_attribute_junctions such as causes_fear vs a culture); custom battles have none",
+  "attribute numbers": "unit_attributes_tables holds the keys only: an attribute's rule and numbers are the engine's (_kv tables, game_rules.json) and the knowledge base's (ATTRIBUTES in tools/nn/effects.py)",
+  "stubborn, hatred": "not in the WH3 database as unit attributes or passive abilities (WH2 had them)",
+  "phase flags": "special_ability_phases (unbreakable, cant_move, ... per phase) is not decoded: the phases of our passives carry their effects in the stat and attribute tables"
+ },
+ "order": [
+  "charge_defense_vs_large",
+  "charge_reflection",
+  "encourages",
+  "expendable",
+  "guerrilla_deploy",
+  "hide_forest",
+  "mounted_fire_move",
+  "unbreakable",
+  "wh2_main_unit_passive_scurry_away",
+  "wh2_main_unit_passive_strength_in_numbers",
+  "wh3_main_unit_passive_single_entity",
+  "wh_dlc04_unit_passive_strength_of_the_penitent",
+  "wh_main_lord_passive_hold_the_line",
+  "wh_main_unit_passive_frenzy"
+ ],
+ "effects": {
+  "charge_defense_vs_large": {
+   "kind": "attribute",
+   "name": "Charge Defence vs. Large",
+   "rules": [
+    "charge_defence_vs_large"
+   ],
+   "stats": [],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "when": "always",
+   "source": "db: unit_attributes_to_groups_junctions (charge_defense_vs_large)",
+   "kb": "docs/en/game/mechanics/melee.md#bracing-and-charge-defence",
+   "does": "braced, cancels the charge bonus of large chargers from the front",
+   "modelled": false,
+   "sim": null,
+   "why": "no large units in our pools (no cavalry or monsters yet)"
+  },
+  "charge_reflection": {
+   "kind": "attribute",
+   "name": "Charge Reflection",
+   "rules": [
+    "charge_reflection"
+   ],
+   "stats": [],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "when": "always",
+   "source": "db: unit_attributes_to_groups_junctions (charge_reflection)",
+   "kb": "docs/en/game/mechanics/melee.md#bracing-and-charge-defence",
+   "does": "braced, reflects a frontal charge (_kv_rules charge_reflect_damage_multiplier 2, charge_reflect_min_charge_factor_threshold 0.7)",
+   "modelled": true,
+   "sim": "braced (slower than melee.braced_speed at contact), meets a frontal infantry charge as a charge (battle.py)",
+   "why": null
+  },
+  "encourages": {
+   "kind": "attribute",
+   "name": "Encourage",
+   "rules": [
+    "encourages"
+   ],
+   "stats": [],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "when": "always",
+   "source": "db: unit_attributes_to_groups_junctions (encourages)",
+   "kb": "docs/en/game/mechanics/morale.md#modifiers-points",
+   "does": "+4 leadership to friends nearby (_kv_morale general_aura_radius 70 m, general_inspire_effect_amount_max 4; not stacking with the lord's aura since 5.3)",
+   "modelled": true,
+   "sim": "the lord's aura: +4 morale points to friends within 70 m, fading to 0 at 105 m (battle.py)",
+   "why": null
+  },
+  "expendable": {
+   "kind": "attribute",
+   "name": "Expendable",
+   "rules": [
+    "expendable"
+   ],
+   "stats": [],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "when": "always",
+   "source": "db: unit_attributes_to_groups_junctions (expendable)",
+   "kb": "docs/en/game/mechanics/morale.md#waver-rout-rally-shatter",
+   "does": "its rout scares only other expendable units (routing_friends_effect_weighting -3 each)",
+   "modelled": true,
+   "sim": "its rout does not count among the routing friends of others (battle.py)",
+   "why": null
+  },
+  "guerrilla_deploy": {
+   "kind": "attribute",
+   "name": "Vanguard Deployment",
+   "rules": [
+    "vanguard"
+   ],
+   "stats": [],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "when": "always",
+   "source": "db: unit_attributes_to_groups_junctions (guerrilla_deploy)",
+   "kb": "docs/en/game/mechanics/abilities.md#attributes-selection",
+   "does": "may deploy outside the deployment zone, not in the enemy's",
+   "modelled": false,
+   "sim": null,
+   "why": "deployment comes from the army generator (tools/nn/armies/place.py)"
+  },
+  "hide_forest": {
+   "kind": "attribute",
+   "name": "Hide (forest)",
+   "rules": [
+    "hide_forest"
+   ],
+   "stats": [],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "when": "always",
+   "source": "db: unit_attributes_to_groups_junctions (hide_forest)",
+   "kb": "docs/en/game/mechanics/abilities.md#attributes-selection",
+   "does": "hidden while in woods",
+   "modelled": false,
+   "sim": null,
+   "why": "the simulator's maps have no woods and no hiding"
+  },
+  "mounted_fire_move": {
+   "kind": "attribute",
+   "name": "Fire Whilst Moving",
+   "rules": [
+    "fire_while_moving"
+   ],
+   "stats": [],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "when": "always",
+   "source": "db: unit_attributes_to_groups_junctions (mounted_fire_move)",
+   "kb": "docs/en/game/mechanics/missiles.md",
+   "does": "shoots on the move",
+   "modelled": true,
+   "sim": "aims and shoots while moving (battle.py)",
+   "why": null
+  },
+  "unbreakable": {
+   "kind": "attribute",
+   "name": "Unbreakable",
+   "rules": [
+    "unbreakable"
+   ],
+   "stats": [],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "when": "always",
+   "source": "db: unit_attributes_to_groups_junctions (unbreakable)",
+   "kb": "docs/en/game/mechanics/abilities.md#attributes-selection",
+   "does": "never loses leadership, never routs (also not when the army is destroyed)",
+   "modelled": true,
+   "sim": "morale points never below leadership: never wavers or routs (morale.py)",
+   "why": null
+  },
+  "wh2_main_unit_passive_scurry_away": {
+   "kind": "passive",
+   "name": "Scurry Away",
+   "rules": [],
+   "stats": [
+    {
+     "stat": "scalar_speed",
+     "how": "mult",
+     "value": 1.1,
+     "on": [
+      "self"
+     ],
+     "sim": "speed"
+    }
+   ],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [
+    "not_wavering"
+   ],
+   "timed": null,
+   "when": "off while steady (not wavering or routing)",
+   "source": "db: unit_special_abilities, special_ability_phase_stat_effects, special_ability_to_auto_deactivate_flags (wh2_main_unit_passive_scurry_away); config/nn/abilities.json",
+   "kb": "docs/en/game/mechanics/morale.md#waver-rout-rally-shatter",
+   "does": null,
+   "modelled": true,
+   "sim": "scalar_speed mult 1.1 (off while steady (not wavering or routing))",
+   "why": null
+  },
+  "wh2_main_unit_passive_strength_in_numbers": {
+   "kind": "passive",
+   "name": "Strength In Numbers",
+   "rules": [],
+   "stats": [
+    {
+     "stat": "scalar_speed",
+     "how": "mult",
+     "value": 0.9,
+     "on": [
+      "self"
+     ],
+     "sim": "speed"
+    },
+    {
+     "stat": "stat_melee_defence",
+     "how": "add",
+     "value": 8.0,
+     "on": [
+      "self"
+     ],
+     "sim": "defence"
+    },
+    {
+     "stat": "stat_morale",
+     "how": "add",
+     "value": 6.0,
+     "on": [
+      "self"
+     ],
+     "sim": "leadership"
+    }
+   ],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [
+    "hp_below_half"
+   ],
+   "timed": null,
+   "when": "off while health below 50 % of the start",
+   "source": "db: unit_special_abilities, special_ability_phase_stat_effects, special_ability_to_auto_deactivate_flags (wh2_main_unit_passive_strength_in_numbers); config/nn/abilities.json",
+   "kb": "docs/en/game/mechanics/abilities.md#attributes-selection",
+   "does": null,
+   "modelled": true,
+   "sim": "scalar_speed mult 0.9; stat_melee_defence add 8; stat_morale add 6 (off while health below 50 % of the start)",
+   "why": null
+  },
+  "wh3_main_unit_passive_single_entity": {
+   "kind": "passive",
+   "name": "Single Entity",
+   "rules": [],
+   "stats": [
+    {
+     "stat": "scalar_speed",
+     "how": "mult",
+     "value": 0.9,
+     "on": [
+      "self"
+     ],
+     "sim": "speed"
+    },
+    {
+     "stat": "stat_melee_damage_ap",
+     "how": "mult",
+     "value": 0.8,
+     "on": [
+      "self"
+     ],
+     "sim": "ap"
+    },
+    {
+     "stat": "stat_melee_damage_base",
+     "how": "mult",
+     "value": 0.8,
+     "on": [
+      "self"
+     ],
+     "sim": "damage"
+    }
+   ],
+   "range_m": 0.0,
+   "needs": [
+    "hp_below_quarter"
+   ],
+   "off_when": [],
+   "timed": null,
+   "when": "while health below 25 %",
+   "source": "db: unit_special_abilities, special_ability_phase_stat_effects, special_ability_to_recharge_contexts (wh3_main_unit_passive_single_entity); config/nn/abilities.json",
+   "kb": "docs/en/game/mechanics/single-entities.md",
+   "does": null,
+   "modelled": true,
+   "sim": "scalar_speed mult 0.9; stat_melee_damage_ap mult 0.8; stat_melee_damage_base mult 0.8 (while health below 25 %)",
+   "why": null
+  },
+  "wh_dlc04_unit_passive_strength_of_the_penitent": {
+   "kind": "timed",
+   "name": "Strength Of The Penitent",
+   "rules": [],
+   "stats": [
+    {
+     "stat": "stat_melee_defence",
+     "how": "add",
+     "value": 14.0,
+     "on": [
+      "self"
+     ],
+     "sim": "defence"
+    },
+    {
+     "stat": "stat_resistance_physical",
+     "how": "add",
+     "value": 15.0,
+     "on": [
+      "self"
+     ],
+     "sim": "resist_physical"
+    }
+   ],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [
+    "out_of_melee"
+   ],
+   "timed": {
+    "active_s": 20.0,
+    "recharge_s": 3.0,
+    "fires_when": [
+     "losing_melee"
+    ]
+   },
+   "when": "the game fires it when losing its melee: 20 s, ready again 3 s after; off while out of melee",
+   "source": "db: unit_special_abilities, special_ability_phase_stat_effects, special_ability_to_auto_deactivate_flags, special_ability_to_recharge_contexts (wh_dlc04_unit_passive_strength_of_the_penitent); config/nn/abilities.json",
+   "kb": "docs/en/training/units.md#flagellants-greatswords-free-company-militia",
+   "does": null,
+   "modelled": true,
+   "sim": "stat_melee_defence add 14; stat_resistance_physical add 15 (the game fires it when losing its melee: 20 s, ready again 3 s after; off while out of melee)",
+   "why": null
+  },
+  "wh_main_lord_passive_hold_the_line": {
+   "kind": "passive",
+   "name": "Hold The Line",
+   "rules": [],
+   "stats": [
+    {
+     "stat": "stat_melee_defence",
+     "how": "add",
+     "value": 5.0,
+     "on": [
+      "self",
+      "friends"
+     ],
+     "sim": "defence"
+    },
+    {
+     "stat": "stat_morale",
+     "how": "add",
+     "value": 4.0,
+     "on": [
+      "self",
+      "friends"
+     ],
+     "sim": "leadership"
+    }
+   ],
+   "range_m": 35.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "when": "always",
+   "source": "db: unit_special_abilities, special_ability_phase_stat_effects (wh_main_lord_passive_hold_the_line); config/nn/abilities.json",
+   "kb": "docs/en/game/mechanics/morale.md#modifiers-points",
+   "does": null,
+   "modelled": true,
+   "sim": "stat_melee_defence add 5; stat_morale add 4 (always)",
+   "why": null
+  },
+  "wh_main_unit_passive_frenzy": {
+   "kind": "passive",
+   "name": "Frenzy",
+   "rules": [
+    "immune_to_psychology"
+   ],
+   "stats": [
+    {
+     "stat": "stat_charge_bonus",
+     "how": "mult",
+     "value": 1.1,
+     "on": [
+      "self"
+     ],
+     "sim": "charge"
+    },
+    {
+     "stat": "stat_melee_attack",
+     "how": "add",
+     "value": 10.0,
+     "on": [
+      "self"
+     ],
+     "sim": "attack"
+    },
+    {
+     "stat": "stat_melee_damage_ap",
+     "how": "mult",
+     "value": 1.1,
+     "on": [
+      "self"
+     ],
+     "sim": "ap"
+    },
+    {
+     "stat": "stat_melee_damage_base",
+     "how": "mult",
+     "value": 1.1,
+     "on": [
+      "self"
+     ],
+     "sim": "damage"
+    }
+   ],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [
+    "morale_below_half"
+   ],
+   "timed": null,
+   "when": "off while morale below half of leadership",
+   "source": "db: unit_special_abilities, special_ability_phase_stat_effects, special_ability_phase_attribute_effects, special_ability_to_auto_deactivate_flags (wh_main_unit_passive_frenzy); config/nn/abilities.json",
+   "kb": "docs/en/game/mechanics/abilities.md#attributes-selection",
+   "does": null,
+   "modelled": true,
+   "sim": "stat_charge_bonus mult 1.1; stat_melee_attack add 10; stat_melee_damage_ap mult 1.1; stat_melee_damage_base mult 1.1 (off while morale below half of leadership)",
+   "why": "rules with nothing to act on: immune_to_psychology"
+  }
+ },
+ "units": {
+  "wh2_dlc13_emp_inf_archers_0": [
+   "hide_forest"
+  ],
+  "wh2_main_skv_cha_warlord_0": [
+   "encourages",
+   "hide_forest",
+   "wh2_main_unit_passive_scurry_away",
+   "wh3_main_unit_passive_single_entity"
+  ],
+  "wh2_main_skv_inf_clanrat_spearmen_0": [
+   "charge_defense_vs_large",
+   "charge_reflection",
+   "hide_forest",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_strength_in_numbers"
+  ],
+  "wh2_main_skv_inf_clanrats_1": [
+   "hide_forest",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_strength_in_numbers"
+  ],
+  "wh2_main_skv_inf_night_runners_1": [
+   "guerrilla_deploy",
+   "hide_forest",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_strength_in_numbers"
+  ],
+  "wh2_main_skv_inf_skavenslave_slingers_0": [
+   "expendable",
+   "hide_forest",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_strength_in_numbers"
+  ],
+  "wh2_main_skv_inf_skavenslave_spearmen_0": [
+   "expendable",
+   "hide_forest",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_strength_in_numbers"
+  ],
+  "wh2_main_skv_inf_skavenslaves_0": [
+   "expendable",
+   "hide_forest",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_strength_in_numbers"
+  ],
+  "wh2_main_skv_inf_stormvermin_0": [
+   "charge_defense_vs_large",
+   "charge_reflection",
+   "hide_forest",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_strength_in_numbers"
+  ],
+  "wh_dlc04_emp_inf_flagellants_0": [
+   "hide_forest",
+   "unbreakable",
+   "wh_dlc04_unit_passive_strength_of_the_penitent",
+   "wh_main_unit_passive_frenzy"
+  ],
+  "wh_dlc04_emp_inf_free_company_militia_0": [
+   "guerrilla_deploy",
+   "hide_forest",
+   "mounted_fire_move"
+  ],
+  "wh_main_emp_cha_general_0": [
+   "encourages",
+   "hide_forest",
+   "wh3_main_unit_passive_single_entity",
+   "wh_main_lord_passive_hold_the_line"
+  ],
+  "wh_main_emp_inf_greatswords": [
+   "hide_forest"
+  ],
+  "wh_main_emp_inf_halberdiers": [
+   "charge_defense_vs_large",
+   "charge_reflection",
+   "hide_forest"
+  ],
+  "wh_main_emp_inf_spearmen_0": [
+   "charge_defense_vs_large",
+   "charge_reflection",
+   "hide_forest"
+  ],
+  "wh_main_emp_inf_spearmen_1": [
+   "charge_defense_vs_large",
+   "charge_reflection",
+   "hide_forest"
+  ],
+  "wh_main_emp_inf_swordsmen": [
+   "hide_forest"
+  ]
+ }
+}

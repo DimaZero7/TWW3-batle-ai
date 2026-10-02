@@ -211,6 +211,25 @@ def test_orders_in_force_skip_keep_and_units_that_take_none():
     assert given["own_a"]["kind"] == "move" and given["own_b"]["kind"] == "attack" and "own_c" not in given
 
 
+def test_a_rallied_unit_is_seen_going_on_with_the_order_it_had():
+    # The bridge gives a rallied unit the order it had when it broke (as the simulator goes on with
+    # it): the companion's filler HOLD for it while it routed is neither in force nor in the file.
+    doc = _game_points_doc()
+    names = [u["n"] for u in doc["units"]]
+    side = np.array([u["side"] for u in doc["units"]])
+    given = {"own_spear_1": {"unit": "own_spear_1", "kind": "attack", "target": "enemy_spear_1", "run": True}}
+    doc["units"][1]["r"] = True                                  # routing: out, the network's HOLD a filler
+    filler = [{"unit": "own_spear_1", "kind": "hold", "out": True}]
+    exchange.remember_orders(given, filler, set())
+    assert "own_spear_1" not in exchange.parse_orders(exchange.orders_text("b", 1, filler))["orders"]
+    s = exchange.arrays(doc, names)
+    last = exchange.order_points(s, names, side, given)
+    doc["units"][1]["r"], doc["units"][3]["x"] = False, 150.0     # rallied; its target has moved
+    s = exchange.arrays(doc, names)
+    exchange.order_points(s, names, side, given, last)
+    assert given["own_spear_1"]["kind"] == "attack" and (s["ox"][0, 1], s["oz"][0, 1]) == (150.0, 0.0)
+
+
 class TestCompanion:
     """One decision and the loop, with a fresh untrained actor (torch)."""
 
@@ -292,4 +311,7 @@ def test_units_that_take_no_orders_count_as_out_not_hold():
     orders = [{"unit": "own_a", "kind": "hold"}, {"unit": "own_b", "kind": "hold", "out": True},
               {"unit": "own_c", "kind": "attack", "target": "enemy_a", "run": True}]
     assert exchange.summary(orders) == "hold 1 attack 1 out 1"
-    assert "unit own_b hold\n" in exchange.orders_text("b", 1, orders)
+    text = exchange.orders_text("b", 1, orders)
+    assert "own_b" not in text                                  # no line: the network's HOLD is a filler
+    assert exchange.parse_orders(text)["orders"] == {"own_a": {"kind": "hold"},
+                                                     "own_c": {"kind": "attack", "target": "enemy_a", "run": True}}

@@ -80,7 +80,8 @@ class LiveSetup:
     working on the same tensors)."""
 
     FIELDS = ("side", "bounds", "rank", "lord_level", "passport", "men0", "ammo0", "present", "attacker", "lord",
-              "abil", "abil_owned", "abil_use")      # abil: the ability slots' passports [B, N, SLOTS, STATIC]
+              "abil", "abil_owned", "abil_use",      # abil: the ability slots' passports [B, N, SLOTS, STATIC]
+              "fx_owned")                            # innate effects owned [B, N, E] (tools/nn/model/effects.py)
 
     def __init__(self, arrays, char, adapt, factions):
         self.arrays, self.char, self.adapt, self.factions = arrays, char, adapt, factions

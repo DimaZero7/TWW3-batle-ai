@@ -93,6 +93,7 @@ STATIC = {
     "reflect": ("b", "attribute charge_reflection: braced, it meets a frontal infantry charge as a charge"),
     "unbreakable": ("b", "attribute unbreakable: never loses leadership, never wavers or routs"),
     "fire_move": ("b", "attribute mounted_fire_move: shoots while moving (fire whilst moving)"),
+    "fatigue_immune": ("b", "attribute fatigue_immune (Perfect Vigour): gains no fatigue"),
     "direct": ("b", "direct (flat, trajectory low) fire: holds fire where friends block the line (missile.py)"),
     "ammo0": ("f", "projectiles of the whole unit at the start"),
     "range": ("f", "missile range, m (0 = no missile)"),
@@ -110,6 +111,9 @@ STATIC = {
                  "-1 none"),
     "ab1": ("i", "its second ability (-1 none)"),
     "ab2": ("i", "its third ability (-1 none)"),
+    "fx": ("i", "its innate effects: bitmask over config/nn/effects.json order (tools/nn/sim/effects.py)"),
+    "fxt0": ("i", "its first timed effect (index in that order, -1 none)"),
+    "fxt1": ("i", "its second timed effect (-1 none)"),
 }
 
 INTERNAL = {
@@ -143,6 +147,11 @@ INTERNAL = {
     "ab1_cd": ("f", "seconds until ability 1 is ready"),
     "ab2_on": ("f", "seconds ability 2 stays active"),
     "ab2_cd": ("f", "seconds until ability 2 is ready"),
+    "fxt0_on": ("f", "seconds timed effect 0 stays on"),
+    "fxt0_cd": ("f", "seconds until timed effect 0 is ready"),
+    "fxt1_on": ("f", "seconds timed effect 1 stays on"),
+    "fxt1_cd": ("f", "seconds until timed effect 1 is ready"),
+    "fx_on": ("i", "the innate effects on in the last step: bitmask over config/nn/effects.json order"),
 }
 
 GROUPS = {"observed": OBSERVED, "static": STATIC, "internal": INTERNAL}
@@ -184,12 +193,14 @@ class State:
 
     def observation(self):
         """The contract with the network (tools/nn/model/observation.py): the OBSERVED tensors
-        [B, N], `side` [B, N], `t` [B] (s) and the abilities' timers ab{k}_on / ab{k}_cd [B, N] (s:
-        active left, until ready; the observation shows them for own units, `on` for seen enemies)."""
+        [B, N], `side` [B, N], `t` [B] (s), the abilities' timers ab{k}_on / ab{k}_cd [B, N] (s:
+        active left, until ready; the observation shows them for own units, `on` for seen enemies) and
+        `fx_on` [B, N]: the innate effects on now (bitmask, tools/nn/sim/effects.py)."""
         out = {k: self.u[k] for k in OBSERVED}
         for k in range(3):
             for t in ("on", "cd"):
                 out[f"ab{k}_{t}"] = self.u[f"ab{k}_{t}"]
+        out["fx_on"] = self.u["fx_on"]
         out["side"] = self.u["side"]
         out["t"] = self.t
         return out
@@ -208,6 +219,8 @@ def empty(B, N, device="cpu"):
             u[name] = torch.zeros((B, N), dtype=_dtype(code), device=device)
     u["target"].fill_(-1)
     u["order_target"].fill_(-1)
+    u["fxt0"].fill_(-1)
+    u["fxt1"].fill_(-1)
     u["vis"].fill_(True)
     zeros = torch.zeros(B, device=device)
     return State(u=u, t=zeros.clone(), attacker=torch.ones(B, dtype=torch.int64, device=device),

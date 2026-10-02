@@ -183,6 +183,8 @@ class Generator:
         hi = min(float(self.market(f, max_units).totals.max()) / share[f] for f in factions)
         if self.budget_max is not None:
             hi = min(hi, self.budget_max)
+        # a faction's own cap on what its side spends (B x its share), when a dear unit joins its pool
+        hi = min([hi] + [self.pools[f].budget_max / share[f] for f in factions if self.pools[f].budget_max])
         return lo, hi
 
     def generate(self, rng, factions=None, budget_range=None, max_units=None, sides=None, name="random"):
