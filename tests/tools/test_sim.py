@@ -385,6 +385,22 @@ class TestBattle:
         assert bool(st.u["gone"][0, 0]) and not bool(st.done[0])
         assert not bool(st.u["mv"][0, 0]) and int(st.u["target"][0, 0]) == -1
 
+    def test_a_shattered_lord_counts_as_lost_for_morale(self):
+        # Gate runs 02.10.2026: when a lord shatters, his whole army loses 0.5-0.6 of its leadership
+        # in that second, as if he had died. Battle 0: side 1's General shattered (far off, so his
+        # rout and his aura touch no one); battle 1: the same, the General steady.
+        sides = army([(GENERAL, -900, 0, 90, True), (SPEAR, -300, 0, 90)], [(SPEAR, 300, 0, 270)])
+        st = scenario.build([sides, sides], P)
+        st.u["r"][0, 0] = st.u["s"][0, 0] = True
+        st.u["morale"][0, 0] = -20.0
+        for _ in range(4):
+            battle.step(st, replay.hold(st), P)
+        assert float(st.u["men"][0, 0]) > 0 and not bool(st.u["gone"][0, 0])      # lost by shattering alone
+        assert float(st.lord_dead_s[0, 0]) == pytest.approx(1.5) and float(st.lord_dead_s[0, 1]) == -1
+        assert float(st.lord_dead_s[1, 0]) == -1
+        assert float(st.u["morale"][0, 1]) < float(st.u["morale"][1, 1]) - 3
+        assert not bool(st.done[0])
+
     def test_orders_move_attack_and_withdraw(self):
         st = scenario.build([army([(SPEAR, -100, 0, 90)], [(SLAVE, 100, 0, 270)])], P)
         H = st.N // 2

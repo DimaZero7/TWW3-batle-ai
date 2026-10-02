@@ -99,3 +99,75 @@ the last one is `306074d`.
 - **For the morning:** commit (nothing committed since `306074d`, tests pass); next step —
   whole-battle simulator accuracy or a look at small battles; container `cbbde7bd5bfd`
   stopped by an agent; the events file in the game folder (~900 MB and growing).
+
+## Night 01.10→02.10
+
+- **23:20.** An hour without the leash from `noleash20/m10.pt` (`build/nn-train/test5/free60`): the
+  network fell apart. Wins vs `ai_like` 44/50% → 7/16% (attack/defence), vs "all at the nearest"
+  37/34 → 11/11, vs "hold and shoot" 46/41 → 14/7; gold exchange 0.94 → 0.68; own lord dies 3–4×
+  as often. The training signal pulls down — without the leash it shows plainly. Started: 4 battles
+  vs the game's AI with the last version (`m60.pt`) and an agent to find the cause in the logs and
+  fix the rewards/training.
+- **23:45.** Tests pass. In-game gate with `free60/m60.pt`: **0 of 4** (2 vs 2 attack, 7 vs 5
+  defence, 11 vs 10 attack — close 931/865, 19 vs 20 defence). Missed decisions 34/41/119 in three
+  battles — the GPU was shared with the agent's diagnostics; keep in mind for the next gates.
+- **00:25.** Causes found (details in `training.md`, section "Night 01.10→02.10"): (1) **a loophole
+  in the idle cost** — it was waived if any one unit fought, and the network learned to keep 1–2
+  units skirmishing while the rest stood ("hold" when attacking 2% → 57%, battles up to 40 min);
+  (2) **a single PPO update is almost pure noise** — its direction can't be told from random, so
+  without a leash the loophole wins. Fixes (behind options): cost by the share of the army idle
+  (`--idle-share 1`), the timer resets only on real damage (`--idle-rate 0.05`), advantages
+  normalised per role (`--adv-norm role`), a leash to its OWN version renewed every 10 updates
+  (`--reference self`). Started 45 minutes from `free60/m60.pt` with these settings.
+- **01:35.** 45 minutes with the fixes (`fix45`): the collapse **stopped** but nothing came back —
+  wins at the collapsed level (vs `ai_like` ~10/14%), the network is stuck on "hold" (84–99% of
+  orders). Timeouts vs "hold and shoot" 39% → 3%. Started: 4 game battles with `fix45/m45.pt` and
+  an analysis of how to get the network out of "hold".
+- **01:55.** In-game gate `fix45/m45.pt`: **0 of 4**, but **the gate is spoiled** — the companion
+  missed most decisions (394 of 407 in battle 1): an agent ran 6 CPU containers in parallel. From
+  now on: nothing heavy in parallel with in-game gates.
+- **02:20.** `fix45` analysis: `m45` **forgot how to fight**, not just picks "hold" — forced to
+  attack it plays even worse (2–6% wins), while `m10` under the same push plays as before (44/39%).
+  Training from `m45` can't pull it out: steps are near noise, no exploration (order-kind entropy
+  0.004–0.012 of 1.6). **I deviate from the "only from the last version" rule** (top rule: the
+  result over formalities): the chain continues from the last healthy version
+  `noleash20/m10.pt`. New: a cost for an attacker unit standing idle (`--unit-idle 1e-4` with
+  `--unit-credit 0.3`), a 0.03 leash to `m10` itself, less self-play (15% instead of 25%). Started
+  45 minutes (`fix45b`).
+- **03:30.** `fix45b` (45 min from `m10`): **no collapse**, a slight gain in attack. Wins (attack /
+  defence), 0 → 45 min: `ai_like` 45/52 → 52/47%, "all at the nearest" 40/34 → 44/39%, "hold and
+  shoot" 48/41 → 56/43%; gold exchange 0.94 → 0.98; own lord dies less; timeouts almost gone.
+  "Hold" 5% → 0%, "attack" 76% → 82% — watch for a slide into "attack everything". Started 4 game
+  battles with `fix45b/m45.pt` on a clean machine.
+- **03:40.** In-game gate `fix45b/m45.pt` (clean machine, no misses): **2 of 4** — level with the old
+  best `best.pt` on these battles. Won 11 vs 10 attacking (903/721) and 19 vs 20 defending; lost
+  2 vs 2 attacking and 7 vs 5 defending — in the latter we had more men left (605 vs 340), being
+  analysed. Started: the next 45 minutes of the chain from `fix45b/m45.pt` (`fix45c`, same
+  settings) and an analysis of the lost battles for the next reward change.
+- **04:00.** Loss analysis: both times **our lord broke**. In the game a shattered (not only
+  killed) lord collapses the whole army's morale within a second — that's how the 7 vs 5 battle
+  was lost with 605 vs 340 men. The simulator and the reward count only the lord's death. Also the
+  network leads with its lord and sends him back in wounded. Being prepared: in the simulator a
+  shattered lord = dead for morale; in the reward `--lord-rout 0.5` (a shattered lord counts as a
+  death, a routing one as a share) and `--lord-exposed 5e-4` (a cost for the lord in melee below
+  50% health).
+- **04:10.** Simulator: a shattered lord now hits the army's morale like a dead one (−16, then
+  −10). Checked on the recordings: at the shatter every unit loses ~0.5–0.57 of leadership and
+  routs within 1–3 s. In the simulator morale falls over several seconds, not one — a possible
+  calibration.
+- **04:50.** `fix45c` (another 45 min): flat, a slight gain in defence. Vs `ai_like` 51/49 → 51/55%,
+  "all at the nearest" 44/40 → 43/41, "hold and shoot" 54/42 → 55/43; gold exchange ~1.0–1.04.
+  "Attack" stays at 82–83%, "hold" 0%. Next in turn: container tests → 4 game battles with
+  `fix45c/m45.pt` → 45 min `fix45d` with the new lord changes (`--lord-rout 0.5
+  --lord-exposed 5e-4`, a shattered lord in the simulator).
+- **06:10.** Torch tests pass in the container. **In-game gate `fix45c/m45.pt`: 3 of 4 — the GATE IS
+  PASSED for the first time** (won 2 vs 2 attacking, 11 vs 10 attacking 1049/655, 19 vs 20
+  defending; lost 7 vs 5 defending). `fix45d` (45 min with the lord changes) — flat: vs `ai_like`
+  53/52 → 50/56%, "hold and shoot" 54/42 → 57/45; "lord dead" now also counts shattering, so it
+  rose (don't compare with older numbers). The weekly limit has reset. Started: a gate for
+  `fix45d/m45.pt` and a re-check of `fix45c/m45.pt` on 4 other battles, so 3 of 4 isn't luck.
+- **06:30.** `fix45d/m45.pt`: 2 of 4. Re-check of `fix45c/m45.pt` on 4 other battles: 1 of 4.
+  **In total `fix45c` — 4 of 8**, exactly like the old best `best.pt`: the earlier 3 of 4 was partly
+  luck. Night result: the network no longer collapses without the script leash, learns from its
+  own version and holds `best.pt`'s level, but doesn't beat it. Weak spots unchanged: small armies
+  and defending with few units (4 vs 5, 7 vs 5).

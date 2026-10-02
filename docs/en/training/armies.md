@@ -2,8 +2,8 @@
 
 [← Back](README.md) · [Documentation](../README.md) › [Data for training](README.md) › Random armies · [Русский](../../ru/training/armies.md)
 
-The random battle generator for training: two armies with an equal budget, each a lord
-and 0 to 19 units, already deployed. The same battle can be played both in the
+The random battle generator for training: two armies with an equal budget (the Skaven
+get 0.8 of it, see below), each a lord and 0 to 19 units, already deployed. The same battle can be played both in the
 [simulator](simulator.md) and in the game. The rules come from the
 [network model](network.md#armies-and-battle-rules).
 
@@ -30,7 +30,7 @@ flowchart LR
 
 | File | What |
 |---|---|
-| `config/nn/pools.json` | each faction's units for training, the share of template armies (`mix`), limits (`caps`) |
+| `config/nn/pools.json` | each faction's units for training, its budget factor (`budget_factor`), the share of template armies (`mix`), limits (`caps`) |
 | `config/nn/army_templates.json` | the factions' army templates from the game's database (written by `templates.py`) |
 | `tools/nn/armies/pools.py` | pools: unit passports, families, template shares |
 | `tools/nn/armies/generate.py` | budget, buying units, a battle from a seed |
@@ -45,8 +45,15 @@ flowchart LR
 2. **Budget B.** Log-uniform between "the dearer lord and the cheapest unit" and what both
    factions can field in 1 lord and 19 units. The budget is drawn again until both sides
    can spend it.
-3. **Buying.** Each side spends 0.95·B to B, the lord included, so the sides differ by at
-   most 5%. A unit is taken only if the army can still end inside that window. For this
+   - **Budget factor.** A side's budget is B × its faction's `budget_factor` / the larger
+     factor of the two sides (`config/nn/pools.json`, 1.0 by default). The Skaven have
+     0.8: against the Empire they get 0.8·B, the Empire B; in a mirror both get B. Why:
+     at an equal budget the Skaven won all 10 whole battles in the game
+     ([measurements](measurements.md#whole-battles-empire-against-skaven)). The bounds of
+     B take the factor into account, so both sides can always spend their share.
+3. **Buying.** Each side spends 0.95 to 1 of its budget, the lord included, so sides with
+   the same factor differ by at most 5%. A unit is taken only if the army can still end
+   inside that window. For this
    there are numpy tables of what the pool can buy with k units. So a side never fails
    and never overspends.
    - **A template army** (75%, `mix.template`) follows one of its faction's templates from
@@ -145,16 +152,24 @@ its front.
 |---|---|
 | Mirror battles | 50% |
 | Armies: template / random | 75% / 25% |
-| Budget | 676 … 6900, median 2935 |
-| Units per side (lord not counted) | mean 9.5; 1–4: 23%, 5–9: 32%, 10–14: 22%, 15–18: 14%, 19: 9% |
-| Cost difference between the sides | mean 1.5%, at most 5.0% |
-| One side has x times the other's units | x ≥ 1.5: 27%; x ≥ 2: 6.1%; x ≥ 3: 0.8% |
-| Missile share of a side | mean 33%; no missile: 16%; ≥ 50%: 27%; missile only: 2.9% |
+| Budget B | 676 … 6900, median 2971 |
+| Units per side (lord not counted) | mean 9.1; 1–4: 24%, 5–9: 33%, 10–14: 21%, 15–18: 14%, 19: 7% |
+| Cost difference between sides of equal budgets | mean 1.2%, at most 4.9% |
+| Skaven cost / Empire cost | mean 0.801, 0.761 … 0.842 (4997 battles) |
+| Skaven / Skaven, Empire / Empire | mean 1.000 and 1.001, 0.952 … 1.052 |
+| One side has x times the other's units | x ≥ 1.5: 6.7%; x ≥ 2: 0.3%; x ≥ 3: 0.0% |
+| Missile share of a side | mean 34%; no missile: 16%; ≥ 50%: 28%; missile only: 3.4% |
 | Empire template armies | spearmen 64%, archers 36% |
-| Skaven template armies | clanrats 39%, slaves 32%, slingers 29% |
+| Skaven template armies | clanrats 35%, slaves 34%, slingers 31% |
 
-An equal budget is not equal strength ([measurements](measurements.md): Skaven field
-1601 men against the Empire's 661). That is fine: the network learns to play either side.
+Before the budget factor (Skaven at B too): budget median 2935, 9.5 units a side,
+x ≥ 1.5: 27%, x ≥ 2: 6.1%, x ≥ 3: 0.8%. The many-cheap-against-few-elite battles were
+mostly Skaven against Empire; at 0.8·B the Skaven field about as many units as the
+Empire.
+
+An equal budget was not equal strength ([measurements](measurements.md): Skaven fielded
+1601 men against the Empire's 661 and won all 10 whole battles), hence the Skaven's 0.8.
+Whether 0.8 evens them out is not yet measured in the game.
 
 The first eight battles were run in the simulator (`--sim`: every unit attacks the
 nearest enemy): all ended within 250–540 s. With the sides swapped, the same army wins in
@@ -187,6 +202,6 @@ st = scenario.build(armies, per_side=generate.MAX_UNITS + 1)
 
 1. The unit's passport — in `config/nn/units.json` (`py -3.14 -m tools.nn.units --units …`).
 2. An entry in `config/nn/pools.json`: `key`, `slot`, `width`; a new faction also needs
-   `lord` and `generator`.
+   `lord` and `generator`, and `budget_factor` if it is stronger or weaker than its price.
 3. `py -3.14 -m tools.nn.armies.templates` — the unit needs a generator group.
 4. A new category (cavalry, monsters) — its own limit in `caps` if wanted.

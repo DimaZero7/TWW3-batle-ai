@@ -150,7 +150,7 @@ def _dtype(code):
 class State:
     """A batch of battles. u: every per-unit tensor [B, N] by name (OBSERVED, STATIC, INTERNAL);
     t: battle time [B], s; attacker [B] (1 or 2); done [B]; winner [B] (0 none yet, 1 or 2);
-    lord_dead_s [B, 2]: seconds since side 1's / side 2's lord died (-1: alive or none);
+    lord_dead_s [B, 2]: seconds since side 1's / side 2's lord died or shattered (-1: alive or none);
     bounds: the map's half-size, m (square, centre 0); keys [B][N] unit keys ("" empty slot)."""
     u: dict
     t: "torch.Tensor"

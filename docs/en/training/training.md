@@ -35,9 +35,9 @@ checkpoint), `--armies` (`scenes` or `generated`), `--curriculum`, `--battles` (
 `--steps` (decisions per chunk, 64), `--limit` (3600 s), `--lr`, `--anchor` and `--anchor-end`,
 `--entropy` and `--entropy-end` (linear from the first to the second over the run),
 `--critic-warmup`, the reward weights (`--timeout`, `--gold`, `--rout-share`, `--idle`,
-`--idle-tau`, `--idle-pause`, `--idle-step`, `--idle-cap`, `--hp`, `--standing`, `--order-cost`, `--lord`,
-`--retarget`; [gold](#losses-in-gold-and-the-attackers-idle-cost-01102026)), per-unit
-credit (`--unit-credit`, `--unit-gold`, `--flanked`, `--missile-melee`, `--crowd`, `--flank-attack`, `--idle-near`,
+`--idle-tau`, `--idle-pause`, `--idle-step`, `--idle-cap`, `--idle-share`, `--idle-rate`, `--idle-window`, `--hp`, `--standing`, `--order-cost`, `--lord`, `--lord-rout`,
+`--retarget`; [gold](#losses-in-gold-and-the-attackers-idle-cost-01102026), [the loophole](#night-01100210-why-the-network-falls-apart-without-the-leash)), `--adv-norm`, `--reference self` and `--reference-every`, `--critic-init`, per-unit
+credit (`--unit-credit`, `--unit-gold`, `--flanked`, `--missile-melee`, `--crowd`, `--flank-attack`, `--idle-near`, `--unit-idle`, `--lord-exposed`, `--lord-exposed-hp`,
 `--neighbour`; [below](#per-unit-credit-01102026)), `--updates` (train that many updates instead of
 `--minutes`, which then only caps the time), `--mix`,
 `--small share:units` (that share of every bank of random battles with at most `units` a side),
@@ -56,7 +56,7 @@ Everything goes to `build/nn-train/` (not in Git):
 | `latest.pt` | the network of the last run (the companion's default) |
 | `runs/<name>/latest.pt`, `best.pt` | the run's last network; the one with the best window of training battles against the scripts |
 | `runs/<name>/pool/v*.pt` | past versions: the opponents of self-play |
-| `runs/<name>/log.jsonl` | one line per update: losses, entropy, KL, the weights of entropy and KL in force, reward, win rate by opponent and role, order changes, order kinds, lord deaths, target switches |
+| `runs/<name>/log.jsonl` | one line per update: losses, entropy, KL, the weights of entropy and KL in force, reward and the same by term a minute of battle per role (`reward_parts`), the critic's quality (`ev`, per role), win rate by opponent and role, order changes, order kinds, lord deaths, target switches |
 | `runs/<name>/eval.json` | the final evaluation |
 | `runs/<name>/replays/*/` | battles of the final network, written like the game's recordings |
 
@@ -164,7 +164,7 @@ rhythm: the state at tick N, the order at tick N + 0.5 s. So a 10-minute battle 
 
 - the scenes: the Empire mirror arena, Empire against Skaven and Skaven against Empire
   (`config/nn/arenas.json`), each with side 1 attacking and defending;
-- random armies of the [army generator](armies.md) (`tools/nn/armies`): equal budget, a lord and
+- random armies of the [army generator](armies.md) (`tools/nn/armies`): equal budget (Skaven 0.8 of it), a lord and
   up to `max_units` units a side, half the bank with side 1 attacking. Training seeds only; the
   bank is renewed every 5 minutes; evaluation uses `EVAL_SEEDS`, never trained on. Curriculum:
   up to 5 units a side for the first quarter of the time, 10 for the second, then 19.
@@ -795,6 +795,180 @@ wins on time, standing gives no order costs, and a charge first costs health. Lo
 to show whether it grows out of this; if not, the attacker needs pressure (the reward or the
 opponent mix).
 
+## Night 01.10→02.10: why the network falls apart without the leash
+
+**What is seen.** Without the KL to the script copy (`--anchor 0`) the network slid down every time:
+`noleash10`, `noleash20`, then the hour-long `free60` (test5, 411 updates from
+`test5/noleash20/m10.pt`): win rates against `ai_like` 0.44 / 0.50 → 0.07 / 0.16 (attacking /
+defending), against `nearest` 0.37 / 0.34 → 0.11 / 0.11, against `hold_shoot` 0.46 / 0.41 → 0.14 /
+0.07, gold exchange 0.94 → 0.68, own lord dead 3–4 times as often
+(`build/nn-train/test5/free60/trend.md`). With the leash (0.06 → 0.03 to `bcmix/bc.pt`) runs were
+flat — but did not rise either. In the training log (`runs/test5_free60/log.jsonl`, per 50
+updates) battles grew longer, the critic's value fell, and the network stood more and more:
+
+| Updates | 0–50 | 100–150 | 200–250 | 400–411 |
+|---|---:|---:|---:|---:|
+| battle against itself, s | 444 | 1124 | 2304 | 2351 |
+| attacking `hold`, s | 668 | 2074 | 2777 | 2342 |
+| attacking `hold_shoot`, s | 528 | 1628 | 1664 | 1663 |
+| the critic's mean value (update 21 / 101 / 201 / 411) | −0.05 | −0.75 | −2.05 | −1.30 |
+
+**Cause 1 — a loophole in the attacker's idle cost.** The cost was paid only while *no* unit fought
+or shot, and *any* damage reset the timer m. One unit skirmishing or fighting while the rest stand
+keeps the whole army free of the cost; the time limit (−1.5 an hour away) is hardly seen at γ 0.9997.
+The network learned exactly that. Measured on the CPU (`build/nn-train/diag_night/loophole.py`, 128
+battles × 20 minutes of battle, the same battles, the learner against the training mix),
+`noleash20/m10.pt` → `free60/m60.pt`:
+
+| The learner attacks… | `ai_like` | `hold` | `hold_shoot` | itself |
+|---|---|---|---|---|
+| share of standing units that fight or shoot | 0.54 → 0.26 | 0.42 → 0.24 | 0.52 → 0.32 | 0.58 → 0.26 |
+| decisions with 1–2 units busy out of 6 or more | 0.04 → 0.11 | 0.12 → 0.14 | 0.03 → 0.11 | 0.04 → 0.19 |
+| "hold" orders | 0.02 → 0.57 | 0.01 → 0.38 | 0.10 → 0.35 | 0.13 → 0.37 |
+| decisions after minute 15 of the battle | 0.01 → 0.10 | 0.00 → 0.22 | 0.00 → 0.14 | 0.02 → 0.23 |
+
+The defender holds almost always: "hold" 0.11 → 0.89 (`ai_like`), 0.11 → 0.88 (itself): the
+attacker (in self-play and against past versions, the same network) does not attack, and the time
+limit is the defender's win. The reward by term (`diag.py`, `free60/m45.pt`, minutes 6–9 of battle,
+per minute, attacking): idle −0.008…−0.055, gold ±0.01, order changes −0.003…−0.008; the critic's
+mean value attacking −1.8…−2.3 (`m10`: ≈ 0), defending −0.6.
+
+The damage rate (`rate.py`; the defender's gold lost, share of the budget a minute, mean over 30 s):
+with the army fighting (≥ 30 % of units busy) the median is 0.10–0.19, ≥ 0.05 in 82–95 % of decisions;
+`m60` skirmishing with one or two units out of 6+: median 0.04, ≥ 0.05 in 39 %. So a threshold of
+0.05 a minute (the whole budget in 20 minutes) tells a fight from scratches.
+
+**Cause 2 — a PPO step is nearly all noise.** `snr.py`: 4 independent batches of 128 battles × 64
+decisions from `m10`; the mean cosine between the policy gradients of different batches is 0.065
+(γ 0.9997, λ 0.95) — with *random* advantages 0.073, i.e. indistinguishable; with λ 0.99 and 1, γ
+0.999 and 0.995, per-role normalisation: −0.05 to +0.05. The critic's explained variance of
+0.97–0.99 says little: it is the spread between battles. One update's signal drowns in noise; without
+the leash nothing holds the policy, and over hundreds of updates a steady bias wins — the loophole
+above. At `m45` the attacker's advantage (σ 0.07–0.21) is 2–3 times as wide as the defender's
+(0.04–0.08): with one normalisation the attacker's rows weigh two to three times as much.
+
+**What changed** (new options; the defaults keep the old behaviour):
+
+| Option | What | Suggested |
+|---|---|---|
+| `--idle-share` (`reward.Weights.idle_share`, 0) | 1: the attacker pays × the share of its standing army (by cost) that neither fights nor shoots, instead of "no unit busy" | 1 |
+| `--idle-rate` (`idle_rate`, 0), `--idle-window` (30 s) | > 0: only a damage rate of at least this share of the budget a minute resets the timer m (`reward.hit_rate`, an exponential mean over the window), not any damage | 0.05 |
+| `--adv-norm` (`PPOConfig.adv_norm`, `batch`) | `role`: the advantage is normalised over the attacking and the defending rows apart | `role` |
+| `--reference self`, `--reference-every` (10) | the KL (`--anchor`) not to the script copy but to the network's own copy, renewed every N updates: a trust region, not a leash | `--anchor 0.05 --reference self` |
+| `--critic-init` | the critic from another checkpoint; a `--init` without a critic starts a fresh one (with a warning) | `runs/test5_free60/latest.pt` |
+
+The same idle cost on the same battles (`compare.py`, first 10 minutes, per minute, the learner
+attacking): the healthy `m10` 0.0003–0.0035 → 0.001–0.004 (almost unchanged); the standing `m60`
+against `hold` 0.010 → 0.096, `hold_shoot` 0.014 → 0.091, `nearest` 0.0016 → 0.019, itself 0.017 →
+0.036: half an hour of such standing costs ~3, more than a loss.
+
+Also: `log.jsonl` and the console get the reward by term a minute of battle per learner role
+(`reward_parts`: `trade`, `lord`, `end`, `idle`, `orders`; `reward.parts`,
+`rollout.Battles.reward_parts`) and the critic's quality (`ev`, `ev_attack`/`ev_defend`, the std of
+the return, the advantage and the reward per role; `ppo.critic_stats`); `test5` writes the final
+`m<minute>.pt` with its critic (before without, and `run.py --init m60.pt` failed). A limit: the
+damage timers in the input (`TIMERS`) still count any damage, so with `--idle-rate` the reward's
+timer is seen by the network only indirectly (through the units' health and melee).
+
+The next run of the chain starts from the last network, `free60/m60.pt` (its actor equals
+`runs/test5_free60/latest.pt`, update 411; the critic comes from there); the critic learns alone
+for 10 updates, as the old standing world's values (−2 attacking) do not fit the new cost:
+
+```bash
+DOCK_NAME=t0-fix45 bash tools/nn/dock.sh tools.nn.train.test5 --label fix45 --init build/nn-train/test5/free60/m60.pt \
+  --updates 0 --minutes 45 --every 15 -- --critic-init build/nn-train/runs/test5_free60/latest.pt \
+  --critic-warmup 10 --anchor 0.05 --anchor-end 0.05 --reference self --reference-every 10 --adv-norm role \
+  --idle-share 1 --idle-rate 0.05
+```
+
+That is how `fix45` ran (below).
+
+### The run `fix45`, and why it did not leave "hold", 02.10
+
+`fix45` (45 minutes, 275 updates from `free60/m60.pt` with the options above) stopped the fall but
+recovered nothing: against `ai_like` 0.09 / 0.15 → 0.10 / 0.15, `nearest` 0.12 / 0.11 → 0.10 / 0.12,
+`hold_shoot` 0.12 / 0.08 → 0.19 / 0.09, gold exchange 0.67–0.82; "hold" 0.84 (`ai_like`), 0.99
+(`nearest`), 0.73 (`hold_shoot`); time limit against `hold_shoot` 0.39 → 0.03. From the log
+(`runs/test5_fix45/log.jsonl`):
+
+- the attacker's reward a minute: idle −0.09…−0.18 (the new cost works and dominates), gold −0.01,
+  outcome −0.03; the defender's: gold −0.02, outcome −0.05: standing, both roles lose;
+- the order kind's entropy 0.004–0.012 (of 1.6): the policy is deterministic; KL per update
+  0.0003–0.006, clipping 0.2–0.6 %, KL to its own copy 0.0002–0.027 at weight 0.05 — the self-leash
+  held almost nothing, the steps are small by themselves (at a nearly deterministic policy the
+  gradient of the probabilities vanishes, and a rare one-decision "attack" is cancelled at once by
+  the next "hold");
+- the "hold" share per update wanders 0.68–0.88 without a trend; explained variance 0.97–0.99, the
+  advantage std 0.08–0.12 attacking, 0.03–0.05 defending.
+
+**Can `m45` get out by shifting the order-kind head?** No — more than the kind choice is broken. A
+CPU check (`diag_night/probe.py`, 64 battles per role against `ai_like`, `EVAL_SEEDS`, limit 1800 s):
+
+| Network | kinds hold / attack | wins attacking / defending | gold exchange |
+|---|---|---|---|
+| `noleash20/m10`, kind temperature 3 | 0.03 / 0.84 | 0.44 / 0.39 | 0.95 / 0.90 |
+| `fix45/m45` as is (trend, 256 battles) | 0.84 / 0.09 | 0.10 / 0.15 | 0.68 / 0.73 |
+| `fix45/m45`, kind temperature 3 | 0.35 / 0.53 | 0.14 / 0.09 | 0.70 / 0.72 |
+| `fix45/m45`, "hold" − 3 | 0.64 / 0.24 | 0.06 / 0.13 | 0.63 / 0.71 |
+| `fix45/m45`, "hold" − 8 | 0.05 / 0.72 | **0.02 / 0.03** | 0.60 / 0.61 |
+
+The healthy `m10` with a softened kind plays as before; `m45` made to attack as much as `m10` loses
+even worse than standing: its targets, points and coordination are unlearned, not just outweighed by
+"hold". PPO cannot relearn them: a step is nearly all noise (gradient cosine 0.065 — as with random
+advantages, above), and a deterministic policy does not explore. So the chain should continue not
+from `m45` but from the line's last healthy network, `noleash20/m10.pt` (minute 0 of `free60`: 0.44 /
+0.50, 0.37 / 0.34, 0.46 / 0.41; with its critic).
+
+**Added:** `--unit-idle` (`reward.Weights.unit_idle`, 0): per-unit credit (`reward.unit_step`, needs
+`--unit-credit` > 0) — every standing unit of the attacker that neither fights nor shoots pays
+`unit_idle` × m (the same idle multiplier `idle_scale` as the side's cost; ≈ 0 early in the battle).
+The side's cost could not tell a standing unit from a fighting one; the unit's own can, and the
+centring over the decision's units says directly who stands for nothing. It is also a counterweight to
+the earlier pull of per-unit credit toward standing (`u06c`, above).
+
+The next run starts from `m10`, with the loophole closed, the per-unit idle cost, a KL to `m10` itself
+(0.03: noise does not carry it off, a real signal can still move it) and less self-play and
+past-version play (where stalling was worst: self-play battles up to 2300 s):
+
+```bash
+DOCK_NAME=t0-fix45b bash tools/nn/dock.sh tools.nn.train.test5 --label fix45b --init build/nn-train/test5/noleash20/m10.pt \
+  --updates 0 --minutes 45 --every 15 -- --critic-warmup 5 --anchor 0.03 --anchor-end 0.03 \
+  --reference build/nn-train/test5/noleash20/m10.pt --adv-norm role --idle-share 1 --idle-rate 0.05 \
+  --unit-credit 0.3 --unit-idle 1e-4 \
+  --mix '{"self": 0.05, "past": 0.1, "nearest": 0.25, "hold_shoot": 0.15, "hold": 0.05, "ai_like": 0.4}'
+```
+
+Checked by the tests and a short CPU run (3 updates from `m10`: the unit part's share of the
+advantage 0.14–0.21, all finite), not by training.
+
+### The gate with `fix45b/m45`: the lord decides, 02.10
+
+Gate `build/nn-gate/20261002-032919` (Normal, 2 of 4); timelines from `gamedata` and the companion
+logs (runs `build/nn-arena/runs/20261002-03*`):
+
+| Battle | What decided it |
+|---|---|
+| 1, 2v2 Empire mirror, attack (lord + archers) — lost 46 / 86 men | lord and archers marched together (move orders) up to 50 m from the enemy archers; ours shot first at t ≈ 90 s (311 arrows of 1800, the enemy 856), at the enemy lord in melee with ours. Our lord charged 25 m in front of the enemy archers, fought 70 s under their fire, routed at 162 s; the archers routed at 186 s |
+| 2, 7v5 Skaven slaves vs Empire spearmen, defence — lost with 605 / 340 men | the defender ran 185 m forward and met the attacker mid-map; lord 7 m ahead of its line at contact (the game's lord 12 m behind); 1:1 and 2:1 frontal pairs, no flank used despite 2.2× the men. Lord routed at 213 s (19 % health), was sent back into melee three times (61 s in melee below 40 % health), routed a third time and shattered at 365 s: that second every own unit lost 0.5–0.6 of its leadership in morale, all seven routed by 368 s — no unit standing, a loss whatever the men |
+| 3, 4 — won | the enemy lord shattered at 535 s (end 538 s) and 515 s (end 515 s) |
+
+So in the game a shattered lord ends the battle (3 of 4 within 3 s), and men left count for nothing.
+The simulator and the reward do not know this: `sim/battle.py` gives the −16 / −10 lord morale only
+for a dead lord (`alive` = men and not gone), and the lord term pays only death; a routing or
+shattered lord costs only its gold. The "attack 82 %" shows in the game as the lord leading (7–15 m
+ahead of its line at contact in all four battles) and re-engaging when weak, and as the defender
+leaving its ground (185 m and 146 m forward in battles 2 and 4); in-game attack share 0.46 / 0.74 /
+0.68 / 0.83.
+
+**Added** (default off):
+
+| Option | What | Proposed |
+|---|---|---|
+| `--lord-rout` (`reward.Weights.lord_rout`, 0) | the lord term counts a shattered lord as dead and a routing one as this share of a death, given back on a rally (`measure()` column 4; the "lord dead" statistic stays death only) | 0.5 |
+| `--lord-exposed`, `--lord-exposed-hp` (`lord_exposed` 0, `lord_exposed_hp` 0.5) | per unit (`unit_step`, needs `--unit-credit`): a lord in melee below that share of its health pays this per decision | 5e-4, 0.5 |
+
+Not done (simulator): a shattered lord should count as dead for morale (`lord_dead_s`), as in the game.
+
 ## A failed experiment: two networks, attack and defence, 01.10.2026
 
 Instead of one shared network we tried two — attack and defence — each twice as wide (`wide`,
@@ -857,6 +1031,6 @@ damage sets it back to 0; a marching attacker pays (also in a simulated battle);
 battle there is no cost beside the idle cost; the defender never pays, in either role; `struck` is the
 defender's health falling; `Battles` keeps the last damage per battle and clears it on a restart;
 evaluation gives
-the gold metrics; the trend table has a column per minute.
+the gold metrics; the trend table has a column per minute. Night 01.10→02.10: the reward terms add up to the step, and the ones logged per role to the collected reward; with `idle_share` one shooting unit no longer lifts the idle cost (the idle share of the army by cost pays); the damage rate is the defender's gold lost, a share of the budget a minute, a rally is no damage; with `idle_rate` a scratch does not reset the timer, a real blow does; per-role normalisation; a run with `--reference self`, `--adv-norm role`, the new idle cost and the critic from another checkpoint (`--critic-init`, a `--init` without a critic); `unit_idle` charges every standing unit of the attacker the idle multiplier, a shooting one and the defender nothing.
 `tests/tools/test_nn_observation.py`: the lord known from the passport; a slain enemy lord is
 known unseen and fades; an enemy's melee and rout count only while seen.

@@ -162,7 +162,7 @@ How the network learns in it — [training](training.md) (`tools/nn/train/`,
 `bash tools/nn/dock.sh tools.nn.train.run`): PPO, battles against itself, its past versions and scripts.
 
 The battles it learns and is checked on — [random armies](armies.md) (`tools/nn/armies/`,
-`python -m tools.nn.armies`): an equal budget, a lord and 0–19 units a side, deployed for the
+`python -m tools.nn.armies`): an equal budget (Skaven 0.8 of it), a lord and 0–19 units a side, deployed for the
 simulator and the game.
 
 How the network is checked in the game against the game's AI — the [in-game check](../launch/gate.md)

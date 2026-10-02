@@ -139,6 +139,15 @@ skavenslave slingers — 11 units, 1601 men). The Skaven line has 6 spear units
 (clanrats in the centre), the slingers 35 m behind them, the Warlord 60 m. Gap
 350 m, battle limit 1200 s.
 
+**Since 01.10.2026 the arenas give the Skaven 0.8 of the Empire's gold** (after these
+10 battles; `budget_factor` in `config/nn/pools.json`, as in the
+[random armies](armies.md#how-a-battle-is-built)): Skaven 2050 = 0.82 × 2500 (Warlord,
+1 clanrat spearmen, 4 skavenslave spearmen, 3 skavenslave slingers — 8 units, 1301 men).
+The line has 5 spear units (the clanrats in the centre, 36 m between centres), the
+slingers 35 m behind at −54, 0 and 54 m, the Warlord 60 m. Exactly 2000 cannot keep the
+make-up (it needs 1 clanrat, 5 slaves, 2 slingers). The Empire is unchanged. The new
+arenas are not yet measured in the game.
+
 | Who attacks | Battles | Skaven won | Battle, s | First contact, s |
 |---|---:|---:|---|---|
 | Empire | 5 | 5 | 627 (488–859) | 97–112 |

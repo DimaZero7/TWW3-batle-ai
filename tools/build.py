@@ -234,6 +234,7 @@ def nn_arena_config(args, run_config):
         nn_scenario.write_scenario(defender, arena, path, duration_s)
         run_config["army"] = {"seed": args.army_seed, "split": generate.split(args.army_seed),
                               "budget": arena["budget"],
+                              "side_budget": {s: arena["sides"][s]["budget"] for s in nn_scenario.SIDES},
                               "template": {s: arena["sides"][s]["army"] for s in nn_scenario.SIDES},
                               "cost": {s: arena["sides"][s]["cost"] for s in nn_scenario.SIDES},
                               "men": {s: sum(u["men"] for u in arena["sides"][s]["units"])

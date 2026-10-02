@@ -129,8 +129,10 @@ def step(st, orders, params=None, dt=None):
     standing = alive & ~u["r"]
 
     # --- the lords ---
+    # A shattered lord is lost as if slain: in the game the whole army drops 0.5-0.6 of its
+    # leadership in the second he shatters (gate runs 02.10.2026), the same −16 then −10.
     has_lord = torch.stack([(u["lord"] & (u["side"] == s)).any(1) for s in (1, 2)], 1)
-    lord_alive = torch.stack([(u["lord"] & (u["side"] == s) & alive).any(1) for s in (1, 2)], 1)
+    lord_alive = torch.stack([(u["lord"] & (u["side"] == s) & alive & ~u["s"]).any(1) for s in (1, 2)], 1)
     dead = has_lord & ~lord_alive
     st.lord_dead_s = torch.where(live[:, None] & dead, torch.where(st.lord_dead_s < 0, torch.zeros_like(st.lord_dead_s),
                                                                     st.lord_dead_s + dt), st.lord_dead_s)

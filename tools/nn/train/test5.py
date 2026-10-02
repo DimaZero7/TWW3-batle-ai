@@ -224,8 +224,10 @@ def test(args, rest):
     (out / "after.json").write_text(json.dumps(after, indent=1), encoding="utf-8", newline="\n")
     if args.every:
         m = f"{args.minutes:g}"
-        checkpoint.save(out / f"m{m}.pt", actor, None, targs.preset, {"minute": args.minutes, "update": summary["updates"],
-                                                                    "run": targs.name})
+        # with the critic (the run's latest.pt has it): the next run of the chain starts from this file
+        critic = checkpoint.load_critic(run_dir / "latest.pt", device)
+        checkpoint.save(out / f"m{m}.pt", actor, critic, targs.preset, {"minute": args.minutes, "update": summary["updates"],
+                                                                      "run": targs.name})
         points.append((m, metrics(after)))
 
     mb, ma = metrics(before), metrics(after)

@@ -70,7 +70,7 @@ class TestBuild:
 class TestPlan:
     def test_eval_seeds_by_army_size_and_alternating_roles(self):
         rows = gate.plan(4)
-        assert [r["seed"] for r in rows] == [1_000_900_000, 1_000_900_002, 1_000_900_007, 1_000_900_008]
+        assert [r["seed"] for r in rows] == [1_000_900_000, 1_000_900_003, 1_000_900_007, 1_000_900_008]
         assert [r["role"] for r in rows] == ["attack", "defend", "attack", "defend"]
         sizes = [r["own_units"] - 1 for r in rows]
         assert [lo <= n <= hi for n, (lo, hi) in zip(sizes, gate.SIZE_BINS)] == [True] * 4

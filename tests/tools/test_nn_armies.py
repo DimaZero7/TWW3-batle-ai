@@ -55,6 +55,9 @@ class TestPools:
     def test_the_mix_is_three_quarters_templates(self):
         assert P.mix() == {"template": 0.75, "random": 0.25}
 
+    def test_skaven_get_four_fifths_of_the_gold(self):
+        assert POOLS[EMP].budget_factor == 1.0 and POOLS[SKV].budget_factor == 0.8
+
 
 class TestMarket:
     @pytest.mark.parametrize("faction", [EMP, SKV])
@@ -90,11 +93,38 @@ class TestMarket:
 
 
 class TestBattles:
-    def test_equal_budget_within_five_percent(self, battles):
+    def test_each_side_spends_its_budget_within_five_percent(self, battles):
         for a in battles:
+            for side in a["sides"].values():
+                assert side["budget"] * 0.95 - 1 <= side["cost"] <= side["budget"] + 1
+                assert side["budget"] <= a["budget"] + 1
             costs = [a["sides"][s]["cost"] for s in ("own", "enemy")]
-            assert abs(costs[0] - costs[1]) <= 0.05 * max(costs) + 1e-9
-            assert all(c <= a["budget"] + 1 for c in costs)
+            if len({s["faction"] for s in a["sides"].values()}) == 1:     # a mirror: equal budgets
+                assert a["sides"]["own"]["budget"] == a["sides"]["enemy"]["budget"] == a["budget"]
+                assert abs(costs[0] - costs[1]) <= 0.05 * max(costs) + 1e-9
+
+    def test_budget_ratio_per_faction_pair(self, battles):
+        """Skaven spend 0.8 of the Empire's budget; mirrors spend equal budgets."""
+        expect = {(EMP, EMP): 1.0, (SKV, SKV): 1.0, (EMP, SKV): 0.8, (SKV, EMP): 1.25}
+        ratios = {}
+        for a in battles:
+            own, enemy = a["sides"]["own"], a["sides"]["enemy"]
+            pair = (own["faction"], enemy["faction"])
+            assert enemy["budget"] / own["budget"] == pytest.approx(expect[pair], abs=0.002)
+            ratios.setdefault(pair, []).append(enemy["cost"] / own["cost"])
+            if EMP in pair:
+                assert a["sides"]["own" if own["faction"] == EMP else "enemy"]["budget"] == a["budget"]
+        for pair, r in ratios.items():
+            lo, hi = expect[pair] * 0.95, expect[pair] / 0.95
+            assert all(lo - 1e-3 <= x <= hi + 1e-3 for x in r), pair
+            assert np.mean(r) == pytest.approx(expect[pair], rel=0.03), pair
+
+    def test_the_skaven_factor_scales_only_the_skaven_side(self):
+        rng = np.random.default_rng(5)
+        for _ in range(30):
+            a = G.generate(rng, sides=(EMP, SKV))
+            emp, skv = a["sides"]["own"], a["sides"]["enemy"]
+            assert emp["budget"] == a["budget"] and abs(skv["budget"] - 0.8 * a["budget"]) <= 1
 
     def test_a_lord_and_at_most_nineteen_units_from_the_pool(self, battles):
         for a in battles:
@@ -137,7 +167,8 @@ class TestBattles:
     def test_shapes_vary_many_cheap_against_few_elite(self, battles):
         ratio = [max(len(units_of(s)) for s in a["sides"].values())
                  / max(1, min(len(units_of(s)) for s in a["sides"].values())) for a in battles]
-        assert np.mean(np.asarray(ratio) >= 1.5) > 0.1 and max(ratio) >= 2
+        # Skaven at 0.8 of the Empire's gold field about as many units as it: 7% of battles over 1.5.
+        assert np.mean(np.asarray(ratio) >= 1.5) > 0.03 and max(ratio) >= 2
 
     def test_a_budget_range_a_unit_limit_and_one_faction(self):
         rng = np.random.default_rng(3)
@@ -151,8 +182,12 @@ class TestBattles:
 
     def test_the_budget_never_exceeds_what_both_can_field(self):
         gen = G.default()
+        lo, hi = gen.budget_bounds((SKV,))
+        assert lo == POOLS[SKV].lord.cost + 150 and hi == POOLS[SKV].lord.cost + 19 * 325
+        # Against the Empire the Skaven get 0.8 B: B up to the Empire's most (12 archers at most).
         lo, hi = gen.budget_bounds((EMP, SKV))
-        assert lo == POOLS[EMP].lord.cost + 300 and hi == POOLS[SKV].lord.cost + 19 * 325
+        assert lo == POOLS[EMP].lord.cost + 300 and hi == POOLS[EMP].lord.cost + 12 * 350 + 7 * 300
+        assert gen.shares((EMP, SKV)) == {EMP: 1.0, SKV: 0.8} and gen.shares((SKV, SKV)) == {SKV: 1.0}
 
 
 class TestPlace:

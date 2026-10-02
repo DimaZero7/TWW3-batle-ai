@@ -34,12 +34,14 @@ class TestArenas:
             assert xml.count("<general>") == sum(bool(u.get("general")) for a in nn_scenario.armies(arena).values()
                                                  for u in a["units"])
 
-    def test_whole_battles_have_an_equal_budget(self):
+    def test_whole_battles_give_the_skaven_four_fifths_of_the_gold(self):
+        """config/nn/pools.json budget_factor: Skaven 0.8 of the Empire's budget (2050 against 2500)."""
         for name in ("whole_emp_v_skv", "whole_skv_v_emp"):
             sides = nn_scenario.armies(nn_scenario.load_arena(name))
-            cost = {s: sum(PASSPORTS[u["key"]]["multiplayer_cost"] for u in a["units"]) for s, a in sides.items()}
-            assert sorted(cost.values()) == [2500, 2575]
-            assert abs(cost["own"] - cost["enemy"]) / max(cost.values()) <= 0.05
+            cost = {a["faction"]: sum(PASSPORTS[u["key"]]["multiplayer_cost"] for u in a["units"])
+                    for a in sides.values()}
+            assert cost == {"wh_main_emp_empire": 2500, "wh2_main_skv_skaven": 2050}
+            assert abs(cost["wh2_main_skv_skaven"] / cost["wh_main_emp_empire"] - 0.8) <= 0.05
 
     def test_an_unknown_arena_and_a_named_arena_that_moves_the_map_are_errors(self, tmp_path):
         with pytest.raises(KeyError):

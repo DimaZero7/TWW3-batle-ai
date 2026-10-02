@@ -28,11 +28,14 @@ def describe(arena):
 def stats(arenas, pools):
     """Summary lines over many battles."""
     n_units, missile, gaps, budgets, ratio, modes, mix = [], [], [], [], [], Counter(), Counter()
-    realized = {}
+    realized, pairs = {}, {}
     for a in arenas:
         budgets.append(a["budget"])
         sides = [a["sides"][s] for s in ("own", "enemy")]
-        gaps.append(abs(sides[0]["cost"] - sides[1]["cost"]) / max(s["cost"] for s in sides))
+        if sides[0]["budget"] == sides[1]["budget"]:
+            gaps.append(abs(sides[0]["cost"] - sides[1]["cost"]) / max(s["cost"] for s in sides))
+        lo, hi = sorted(sides, key=lambda s: (pools[s["faction"]].budget_factor, s["faction"]))
+        pairs.setdefault((lo["faction"], hi["faction"]), []).append(lo["cost"] / hi["cost"])
         counts = []
         for s in sides:
             units = [u for u in s["units"] if not u.get("general")]
@@ -54,11 +57,14 @@ def stats(arenas, pools):
            f"budget: min {min(budgets)}, median {int(np.median(budgets))}, max {max(budgets)}",
            f"units per side (lord not counted): mean {n_units.mean():.1f}; 0: {hist[0]}, 1-4: {hist[1]}, "
            f"5-9: {hist[2]}, 10-14: {hist[3]}, 15-18: {hist[4]}, 19: {hist[5]}",
-           f"cost difference between sides: mean {gaps.mean():.1%}, max {gaps.max():.1%}",
+           f"cost difference between sides of equal budgets: mean {gaps.mean():.1%}, max {gaps.max():.1%}",
            f"cheap against elite (one side has x times the other's units): x>=1.5 {np.mean(ratio >= 1.5):.1%}, "
            f"x>=2 {np.mean(ratio >= 2):.1%}, x>=3 {np.mean(ratio >= 3):.1%}",
            f"missile share of a side's units: mean {missile.mean():.0%}; none {np.mean(missile == 0):.0%}, "
            f">=50% {np.mean(missile >= 0.5):.0%}, all {np.mean(missile == 1):.1%}"]
+    for (f1, f2), r in sorted(pairs.items()):
+        r = np.asarray(r)
+        out.append(f"cost {f1} / {f2}: mean {r.mean():.3f}, min {r.min():.3f}, max {r.max():.3f} ({len(r)} battles)")
     for faction, r in sorted(realized.items()):
         total = sum(r.values())
         out.append(f"template armies of {faction}: " + ", ".join(

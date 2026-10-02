@@ -8,6 +8,7 @@ respected, rewards are symmetric between the sides, KEEP keeps the order). Level
 step end to end on the CPU, checkpoints, recordings.
 """
 import dataclasses
+import json
 
 import numpy as np
 import pytest
@@ -227,6 +228,60 @@ class TestFunctions:
         assert reward.idle_cost(st, w)[0].tolist() == pytest.approx([0.03, 0.0])          # capped at x3
         assert reward.idle_cost(st, w, torch.tensor([1000.0]))[0].tolist() == [0.0, 0.0]  # damage: nothing
 
+    def test_the_reward_terms_add_up_to_the_step(self):
+        st = line_army(attacker=1)
+        H = st.N // 2
+        before = reward.measure(st)
+        st.u["hp_abs"][0, H + 1] *= 0.5
+        st.u["men"][0, 0] = 0                                                         # side 1's lord dies
+        after = reward.measure(st)
+        for fin, win in ((False, 0), (True, 2)):
+            args = (before, after, torch.tensor([fin]), torch.tensor([win]), torch.tensor([1]))
+            p = reward.parts(*args)
+            assert set(p) == {"trade", "lord", "end"} and set(reward.PARTS) >= set(p)
+            assert torch.allclose(p["trade"] + p["lord"] + p["end"], reward.step(*args))
+            assert float(p["lord"][0, 0]) == pytest.approx(-reward.Weights.lord)
+            assert float(p["trade"][0, 0]) < 0                     # its lord (all of it) is worth more than half a unit
+        assert reward.parts(*args)["end"][0].tolist() == [-1.5, 1.0]                   # both stand: the time limit
+
+    def test_with_idle_share_one_skirmisher_no_longer_stops_the_idle_cost(self):
+        st = line_army(attacker=1)
+        st.t[:] = 100.0
+        st.u["fire"][0, 3] = True                                                     # side 1's archers shoot
+        u = st.u
+        cost = u["cost"].clamp(min=1.0)
+        mine = u["side"][0] == 1
+        idle_share = 1 - float(cost[0, 3] / cost[0][mine].sum())
+        m = np.e - 1
+        assert reward.idle_cost(st, reward.Weights(idle=0.01, idle_tau_s=100.0))[0].tolist() == [0.0, 0.0]   # the old rule
+        w = reward.Weights(idle=0.01, idle_tau_s=100.0, idle_share=1.0)
+        assert reward.idle_cost(st, w)[0].tolist() == pytest.approx([0.01 * m * idle_share, 0.0])
+        half = dataclasses.replace(w, idle_share=0.5)
+        assert reward.idle_cost(st, half)[0].tolist() == pytest.approx([0.01 * m * 0.5 * idle_share, 0.0])
+        u["m"][0, :3] = mine[:3]                                                      # the rest of the army in melee
+        assert reward.idle_cost(st, w)[0].tolist() == pytest.approx([0.0, 0.0], abs=1e-9)
+        st.u["fire"][0] = False
+        st.u["m"][0] = False
+        assert reward.idle_cost(st, w)[0].tolist() == pytest.approx([0.01 * m, 0.0])   # nobody busy: all of it
+
+    def test_the_damage_rate_is_the_defenders_gold_lost_a_minute_averaged(self):
+        st = line_army(attacker=1)
+        H = st.N // 2
+        before = reward.measure(st)
+        st.u["hp_abs"][0, H + 1] *= 0.5                                              # a defender's unit loses half
+        after = reward.measure(st)
+        share = float(reward.damage_share(before, after, torch.tensor([1]))[0])
+        u = st.u
+        assert share == pytest.approx(0.5 * float(u["cost"][0, H + 1]) / float(reward.budget(u)[0]), rel=1e-4)
+        assert float(reward.damage_share(before, after, torch.tensor([2]))[0]) == 0.0   # attacker 2 took it
+        assert float(reward.damage_share(after, before, torch.tensor([1]))[0]) == 0.0   # a rally is not damage
+        rate = reward.hit_rate(torch.zeros(1), before, after, torch.tensor([1]), 0.5, 30.0)
+        assert float(rate[0]) == pytest.approx((1 - np.exp(-0.5 / 30)) * share * 120, rel=1e-4)
+        steady = torch.zeros(1)
+        for _ in range(600):                                                          # the same damage every step
+            steady = reward.hit_rate(steady, before, after, torch.tensor([1]), 0.5, 30.0)
+        assert float(steady[0]) == pytest.approx(share * 120, rel=1e-3)               # a share of the budget a minute
+
     def test_struck_is_the_defenders_health_falling(self):
         st = line_army(attacker=1)
         H = st.N // 2
@@ -274,6 +329,29 @@ class TestFunctions:
         assert reward.measure(st)[0, :, 2].tolist() == [1.0, 1.0]
         st.u["men"][0, 0] = 0
         assert reward.measure(st)[0, :, 2].tolist() == [0.0, 1.0]
+
+    def test_with_lord_rout_a_shattered_lord_counts_as_dead_and_a_routing_one_in_part(self):
+        w = reward.Weights(win=1.0, hp=0.0, standing=0.0, gold=0.0, lord=0.3, lord_rout=0.5)
+        st = line_army()
+        assert reward.measure(st).shape[-1] == 4                                    # off: the old columns
+        no, none = torch.tensor([False]), torch.tensor([0])
+        before = reward.measure(st, lord_rout=0.5)
+        assert before[0, :, 4].tolist() == [1.0, 1.0]
+        st.u["r"][0, 0] = True                                                      # side 1's lord routs
+        routing = reward.measure(st, lord_rout=0.5)
+        assert routing[0, :, 4].tolist() == [0.5, 1.0] and routing[0, :, 2].tolist() == [1.0, 1.0]
+        r = reward.step(before, routing, no, none, torch.tensor([1]), w)
+        assert r[0].tolist() == pytest.approx([-0.15, 0.15])
+        st.u["r"][0, 0] = False                                                     # it rallies: given back
+        rallied = reward.measure(st, lord_rout=0.5)
+        assert reward.step(routing, rallied, no, none, torch.tensor([1]), w)[0].tolist() == pytest.approx([0.15, -0.15])
+        st.u["r"][0, 0] = st.u["s"][0, 0] = True                                    # it shatters: a whole death
+        shattered = reward.measure(st, lord_rout=0.5)
+        assert shattered[0, :, 4].tolist() == [0.0, 1.0] and shattered[0, :, 2].tolist() == [1.0, 1.0]
+        assert reward.step(rallied, shattered, no, none, torch.tensor([1]), w)[0].tolist() == pytest.approx([-0.3, 0.3])
+        st.u["men"][0, 0] = 0                                                       # then dies: nothing more
+        assert reward.step(shattered, reward.measure(st, lord_rout=0.5), no, none, torch.tensor([1]),
+                           w)[0].tolist() == pytest.approx([0.0, 0.0])
 
     def test_switching_an_attack_while_the_old_target_stands_is_a_retarget(self):
         st = line_army()
@@ -428,6 +506,44 @@ class TestBehaviour:
         near = reward.unit_step(before, st, f, p, dataclasses.replace(w, neighbour=1.0, neighbour_m=25.0))
         # unit 1 (x -20) has units 0 (x 0) and 2 (x -40) within 25 m
         assert float(near[0, 1]) == pytest.approx(float(r[0, 1]) + (float(r[0, 0]) + float(r[0, 2])) / 2)
+
+    def test_the_unit_idle_term_charges_the_attackers_standing_units_by_its_idle_multiplier(self):
+        from tools.nn.train import behaviour
+        st = line_army(attacker=1)
+        p = load()
+        before = reward.unit_before(st.u)
+        st.u["fire"][0, 3] = True                                                     # side 1's archers shoot
+        f = behaviour.facts(st, p)
+        w = reward.Weights(unit_gold=0.0, flanked=0.0, missile_melee=0.0, crowd=0.0, flank_attack=0.0, neighbour=0.0,
+                           unit_idle=0.01)
+        off = reward.unit_step(before, st, f, p, w)                                     # no multiplier: no term
+        assert off.abs().sum() == 0
+        r = reward.unit_step(before, st, f, p, w, idle_m=torch.tensor([2.0]))
+        side = st.u["side"][0]
+        attacker_units = ((side == 1) & (st.u["men"][0] > 0)).nonzero().flatten().tolist()
+        for i in attacker_units:
+            assert float(r[0, i]) == pytest.approx(0.0 if i == 3 else -0.02)          # busy: nothing; standing: 0.01 x 2
+        assert r[0][side == 2].abs().sum() == 0                                         # the defender never pays
+
+    def test_a_lord_in_melee_with_little_health_pays_lord_exposed(self):
+        from tools.nn.train import behaviour
+        st = line_army()
+        p = load()
+        u = st.u
+        lords = u["lord"][0].nonzero().flatten().tolist()
+        before = reward.unit_before(u)
+        w = reward.Weights(unit_gold=0.0, flanked=0.0, missile_melee=0.0, crowd=0.0, flank_attack=0.0, neighbour=0.0,
+                           lord_exposed=0.01, lord_exposed_hp=0.5)
+        for i in lords:
+            u["m"][0, i] = True
+        u["hp_abs"][0, lords[0]] = 0.4 * u["hp0"][0, lords[0]]                       # side 1's lord: 40 % health
+        before["hp_abs"] = u["hp_abs"].clone()
+        r = reward.unit_step(before, st, behaviour.facts(st, p), p, w)
+        assert float(r[0, lords[0]]) == pytest.approx(-0.01)
+        assert float(r[0, lords[1]]) == 0.0                                            # full health: fights freely
+        assert r[0].abs().sum() == pytest.approx(0.01)
+        off = reward.unit_step(before, st, behaviour.facts(st, p), p, dataclasses.replace(w, lord_exposed=0.0))
+        assert off.abs().sum() == 0
 
     def test_gae_per_unit_stops_at_the_end_of_a_battle(self):
         r = torch.tensor([[[1.0, 2.0]], [[0.0, 0.0]], [[2.0, 1.0]]])                # [T, R, N]
@@ -590,6 +706,36 @@ class TestProperties:
         assert stats["nearest/attack"][1] == 0 and stats["nearest/defend"][1] == 2      # the defender wins on time
 
 
+    def test_with_idle_rate_only_a_steady_damage_rate_counts_as_the_attackers_damage(self):
+        actor, crit = nets()
+        w = reward.Weights(idle_rate=0.05, idle_window_s=1.0)
+        env = rollout.Battles(league.layout(2, 1, opponent="nearest"), MIRROR, weights=w)
+
+        def strike(b, share):
+            u = env.st.u
+            defender = u["side"][b] == 3 - env.st.attacker[b]
+            u["hp_abs"][b] = torch.where(defender, u["hp_abs"][b] * (1 - share), u["hp_abs"][b])
+        strike(0, 1e-4)                                                   # a scratch (the old rule: struck)
+        strike(1, 0.05)                                                   # a real blow
+        env.step(actor, crit)
+        assert env.last_hit[0] == -1.0 and env.last_hit[1] == pytest.approx(0.5)
+        assert float(env.hit_rate[1]) > float(env.hit_rate[0]) > 0
+
+    def test_the_logged_reward_terms_add_up_to_the_reward(self):
+        actor, crit = nets()
+        env = rollout.Battles(league.layout(4, 1, opponent="nearest"), MIRROR, params=rollout.params_with_limit(1.0))
+        env.reward_parts()
+        out = [env.step(actor, crit) for _ in range(3)]
+        att = torch.stack([o["attacks"] for o in out])
+        r = torch.stack([o["reward"] for o in out])
+        parts = env.reward_parts()
+        per_min = 60.0 / env.params.dt
+        for role, m in (("attack", att), ("defend", ~att)):            # (a battle that ends starts again at once)
+            total = sum(parts[role].values()) * float(m.sum()) / per_min
+            assert total == pytest.approx(float(r[m].sum()), abs=1e-4)
+        assert parts["attack"]["end"] < 0 < parts["defend"]["end"]        # the defender wins on time
+        assert env.reward_parts() == {}                                   # reset
+
     def test_the_attackers_last_damage_is_kept_per_battle_and_cleared_when_it_starts_again(self):
         actor, crit = nets()
         env = rollout.Battles(league.layout(4, 1, opponent="nearest"), MIRROR, params=rollout.params_with_limit(1.0))
@@ -730,6 +876,35 @@ class TestLoop:
         opt = torch.optim.Adam(list(actor.parameters()) + list(crit.parameters()), lr=1e-4)
         st = ppo.update(actor, crit, opt, batch, dataclasses.replace(ppo.PPOConfig(), epochs=1, minibatch=4))
         assert all(np.isfinite(v) for v in st.values())
+
+    def test_a_run_with_its_own_reference_role_advantages_and_the_new_idle_rule(self, tmp_path, monkeypatch):
+        from tools.nn.train import run
+        actor, crit = nets()
+        init = checkpoint.save(tmp_path / "init.pt", actor, crit)
+        bare = checkpoint.save(tmp_path / "bare.pt", actor)                    # no critic (a test5 m<minute>.pt)
+        monkeypatch.setattr(checkpoint, "DIR", tmp_path)
+        monkeypatch.setattr(checkpoint, "RANDOM", init)
+        a, c = run.networks("small", "cpu", bare, critic_from=init)
+        assert all(torch.equal(x, y) for x, y in zip(c.state_dict().values(), crit.state_dict().values()))
+        run.networks("small", "cpu", bare)                                      # a fresh critic, no failure
+        args = run.parser().parse_args(["--name", "t", "--init", str(bare), "--critic-init", str(init), "--battles", "4",
+                                        "--steps", "2", "--updates", "3", "--minutes", "5", "--device", "cpu", "--no-eval",
+                                        "--mix", '{"self": 0.5, "nearest": 0.5}', "--anchor", "0.05", "--reference", "self",
+                                        "--reference-every", "2", "--adv-norm", "role", "--idle-share", "1",
+                                        "--idle-rate", "0.05", "--print-every", "1"])
+        trained, summary, out = run.train(args)
+        assert summary["updates"] == 3
+        rows = [json.loads(x) for x in (out / "log.jsonl").read_text(encoding="utf-8").splitlines()]
+        assert "reward_parts" in rows[-1] and "ev" in rows[-1] and rows[-1]["anchor_weight"] == 0.05
+        assert set(rows[-1]["reward_parts"]) <= {"attack", "defend"}
+
+    def test_per_role_normalisation_gives_each_role_mean_0_std_1(self):
+        a = torch.tensor([[1.0, 10.0], [3.0, 30.0], [5.0, 50.0]])
+        g = torch.tensor([[True, False]] * 3)
+        n = ppo.normalise(a, g)
+        for m in (g, ~g):
+            assert float(n[m].mean()) == pytest.approx(0.0, abs=1e-6) and float(n[m].std()) == pytest.approx(1.0)
+        assert torch.allclose(ppo.normalise(a), (a - a.mean()) / (a.std() + 1e-8))
 
     def test_behaviour_cloning_learns_the_teachers_targets(self):
         actor, _ = nets()

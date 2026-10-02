@@ -49,6 +49,9 @@ class PPOConfig:
     unit_credit: float = 0.0   # weight of each unit's own (normalised) advantage beside the side's (0: off;
     #                            the tested setting is 0.3, docs/en/training/training.md "Per-unit credit")
     unit_scale: float = 100.0  # the per-unit value predicts the unit's return x this
+    adv_norm: str = "batch"    # normalise the side's advantage over the minibatch ("batch") or over each
+    #                            role's rows apart ("role": the attacker's, bigger with its idle cost, no
+    #                            longer outweighs the defender's)
 
 
 def gae(rewards, values, dones, last_value, gamma, lam):
@@ -111,6 +114,44 @@ def anchor_kl(logits, ref, ctrl):
     return masked_mean(k + p_attack * t, ctrl)
 
 
+def normalise(a, groups=None):
+    """(a - mean) / std over all of a, or over each group apart (groups: bool of a's shape, e.g. the
+    learner attacks)."""
+    if groups is None:
+        return (a - a.mean()) / (a.std() + 1e-8)
+    out = torch.zeros_like(a)
+    for m in (groups, ~groups):
+        if int(m.sum()) > 1:
+            out[m] = (a[m] - a[m].mean()) / (a[m].std() + 1e-8)
+    return out
+
+
+def explained_variance(value, ret):
+    """1 - Var(return - value) / Var(return): 1 a perfect critic, 0 no better than the mean."""
+    v = ret.var()
+    return float(1 - (ret - value).var() / v) if v > 1e-12 else 0.0
+
+
+def critic_stats(batch, adv, ret):
+    """The critic's quality and the advantage's scale on a rollout, by the learner's role (batch["attacks"]
+    [T, R]): explained variance of the returns, the std of the return and of the advantage, the std of
+    the per-step reward and of the TD error (r + gamma V' - V at lambda 0 is mostly the critic's own step
+    to step jitter when it is far above the reward's)."""
+    out = {"ev": explained_variance(batch["value"], ret)}
+    att = batch.get("attacks")
+    if att is None:
+        return out
+    for role, m in (("attack", att), ("defend", ~att)):
+        if not bool(m.any()):
+            continue
+        out[f"ev_{role}"] = explained_variance(batch["value"][m], ret[m])
+        out[f"ret_std_{role}"] = float(ret[m].std())
+        out[f"adv_mean_{role}"] = float(adv[m].mean())
+        out[f"adv_std_{role}"] = float(adv[m].std())
+        out[f"reward_std_{role}"] = float(batch["reward"][m].std())
+    return out
+
+
 def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, reference=None):
     """Some epochs of minibatch updates on one rollout (batch from rollout.collect). -> stats.
     train_policy False: the critic only (a warm-up for a critic that starts from nothing while the
@@ -139,8 +180,8 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
             obs = full_obs({k: v[:, idx] for k, v in batch["obs"].items()}, batch.get("abil_static"))
             cobs = {k: _rows(v, idx) for k, v in batch["critic_obs"].items()}
             act = hd.Action(*(_rows(getattr(batch["action"], k), idx) for k in kinds))
-            a = _rows(adv, idx)
-            a = (a - a.mean()) / (a.std() + 1e-8)
+            a = normalise(_rows(adv, idx), _rows(batch["attacks"], idx) if cfg.adv_norm == "role"
+                          and batch.get("attacks") is not None else None)
             if per_unit:
                 au = _rows(adv_u, idx)
                 m = obs["ctrl"].reshape(-1, au.shape[-1]).float()
@@ -198,6 +239,7 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
     out["reward"] = float(batch["reward"].sum(0).mean())
     out["value_mean"] = float(batch["value"].mean())
     out["return_mean"] = float(ret.mean())
+    out.update(critic_stats(batch, adv, ret))
     if per_unit:
         out["unit_reward"] = float(batch["unit_reward"].sum(0).mean())
     return out

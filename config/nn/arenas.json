@@ -74,7 +74,7 @@
       }
     },
     "whole_emp_v_skv": {
-      "note": "whole battle, equal budget: Empire 2500 (ours) against Skaven 2575 (the game's AI)",
+      "note": "whole battle, Skaven at 0.8 of the Empire's gold (config/nn/pools.json budget_factor): Empire 2500 (ours) against Skaven 2050 (the game's AI)",
       "gap_m": 350, "defend_radius_m": 150,
       "sides": {
         "own": {"faction": "wh_main_emp_empire", "units": [
@@ -88,35 +88,31 @@
         ]},
         "enemy": {"faction": "wh2_main_skv_skaven", "units": [
           {"slot": "lord", "key": "wh2_main_skv_cha_warlord_0", "men": 1, "general": true, "forward": -60, "lateral": 0, "width": 5},
-          {"slot": "slave_1", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": -90, "width": 30},
-          {"slot": "slave_2", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": -54, "width": 30},
-          {"slot": "clanrat_1", "key": "wh2_main_skv_inf_clanrat_spearmen_0", "men": 160, "forward": 0, "lateral": -18, "width": 30},
-          {"slot": "clanrat_2", "key": "wh2_main_skv_inf_clanrat_spearmen_0", "men": 160, "forward": 0, "lateral": 18, "width": 30},
-          {"slot": "slave_3", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": 54, "width": 30},
-          {"slot": "slave_4", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": 90, "width": 30},
-          {"slot": "sling_1", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": -81, "width": 35},
-          {"slot": "sling_2", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": -27, "width": 35},
-          {"slot": "sling_3", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": 27, "width": 35},
-          {"slot": "sling_4", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": 81, "width": 35}
+          {"slot": "slave_1", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": -72, "width": 30},
+          {"slot": "slave_2", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": -36, "width": 30},
+          {"slot": "clanrat_1", "key": "wh2_main_skv_inf_clanrat_spearmen_0", "men": 160, "forward": 0, "lateral": 0, "width": 30},
+          {"slot": "slave_3", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": 36, "width": 30},
+          {"slot": "slave_4", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": 72, "width": 30},
+          {"slot": "sling_1", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": -54, "width": 35},
+          {"slot": "sling_2", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": 0, "width": 35},
+          {"slot": "sling_3", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": 54, "width": 35}
         ]}
       }
     },
     "whole_skv_v_emp": {
-      "note": "whole battle, equal budget: Skaven 2575 (ours) against Empire 2500 (the game's AI)",
+      "note": "whole battle, Skaven at 0.8 of the Empire's gold (config/nn/pools.json budget_factor): Skaven 2050 (ours) against Empire 2500 (the game's AI)",
       "gap_m": 350, "defend_radius_m": 150,
       "sides": {
         "own": {"faction": "wh2_main_skv_skaven", "units": [
           {"slot": "lord", "key": "wh2_main_skv_cha_warlord_0", "men": 1, "general": true, "forward": -60, "lateral": 0, "width": 5},
-          {"slot": "slave_1", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": -90, "width": 30},
-          {"slot": "slave_2", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": -54, "width": 30},
-          {"slot": "clanrat_1", "key": "wh2_main_skv_inf_clanrat_spearmen_0", "men": 160, "forward": 0, "lateral": -18, "width": 30},
-          {"slot": "clanrat_2", "key": "wh2_main_skv_inf_clanrat_spearmen_0", "men": 160, "forward": 0, "lateral": 18, "width": 30},
-          {"slot": "slave_3", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": 54, "width": 30},
-          {"slot": "slave_4", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": 90, "width": 30},
-          {"slot": "sling_1", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": -81, "width": 35},
-          {"slot": "sling_2", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": -27, "width": 35},
-          {"slot": "sling_3", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": 27, "width": 35},
-          {"slot": "sling_4", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": 81, "width": 35}
+          {"slot": "slave_1", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": -72, "width": 30},
+          {"slot": "slave_2", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": -36, "width": 30},
+          {"slot": "clanrat_1", "key": "wh2_main_skv_inf_clanrat_spearmen_0", "men": 160, "forward": 0, "lateral": 0, "width": 30},
+          {"slot": "slave_3", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": 36, "width": 30},
+          {"slot": "slave_4", "key": "wh2_main_skv_inf_skavenslave_spearmen_0", "men": 180, "forward": 0, "lateral": 72, "width": 30},
+          {"slot": "sling_1", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": -54, "width": 35},
+          {"slot": "sling_2", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": 0, "width": 35},
+          {"slot": "sling_3", "key": "wh2_main_skv_inf_skavenslave_slingers_0", "men": 140, "forward": -35, "lateral": 54, "width": 35}
         ]},
         "enemy": {"faction": "wh_main_emp_empire", "units": [
           {"slot": "lord", "key": "wh_main_emp_cha_general_0", "men": 1, "general": true, "forward": -60, "lateral": 0, "width": 5},

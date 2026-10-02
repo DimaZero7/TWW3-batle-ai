@@ -119,7 +119,8 @@ check battles against the game's AI. The generator is ready: [random armies](arm
 
 - **Size:** 1 lord and 0 to 19 units. No reinforcements for now.
 - **Equal budget.** Both sides get the same sum of unit prices (`multiplayer_cost` from
-  the game's database, within ±5%). The number and make-up of units differ. Otherwise one
+  the game's database, within ±5%), times the faction's `budget_factor` (Skaven 0.8: at an
+  equal budget they won all 10 whole battles, [random armies](armies.md#how-a-battle-is-built)). The number and make-up of units differ. Otherwise one
   side is often stronger and a win says nothing about the network. Tiers are not needed:
   the budget evens out the price.
 - **One faction per army:** units only from its recruitment list.

@@ -3,7 +3,8 @@
 Two sources of battles, both as a Bank: ready start states that a battle takes when it (re)starts.
 * Fixed: the named arenas (config/nn/arenas.json) in both roles. A scene is (arena, role of side
   1): "attack" - side 1 attacks, "defend" - side 2 attacks. Battle b always plays its scene.
-* Generated: random armies of tools/nn/armies (equal budget, 1 lord + 0..max_units units a side),
+* Generated: random armies of tools/nn/armies (equal budget times the factions' budget_factor:
+  Skaven 0.8 of the Empire's; 1 lord + 0..max_units units a side),
   half with side 1 attacking; a battle that ends takes a random battle of the bank. Train seeds
   for training, eval seeds (never trained on) for evaluation.
 The learner plays side 1 in some battles and side 2 in others (tools/nn/train/league.py), so it plays

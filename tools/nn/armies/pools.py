@@ -4,6 +4,7 @@
     pool = load()["wh2_main_skv_skaven"]
     pool.lord.cost, [u.key for u in pool.units], pool.cap("inf_ranged", 10)
     pool.templates        # ((name, weight, (share of each pool unit, ...)), ...)
+    pool.budget_factor    # 0.8: the faction gets 0.8 of the other side's gold (1.0 default)
 
 Plain python: no numpy, no torch.
 """
@@ -41,6 +42,7 @@ class Pool:
     caps: dict           # {category: share of the army's units, lord counted}
     generator: str = ""  # the faction's army generator config (WH_Empire, ...)
     templates: tuple = ()  # ((template, weight, (share per unit of `units`)), ...)
+    budget_factor: float = 1.0  # gold relative to the other side's after the equal-budget draw
 
     def cap(self, category, n_units):
         """Most units of a category in an army of the lord and n_units units (None = no cap)."""
@@ -125,8 +127,10 @@ def load(path=None, passports_path=None, templates_path=None):
         templates = ()
         if tdoc is not None:
             units, templates = _templates(faction, units, tdoc)
+        factor = float(spec.get("budget_factor", 1.0))
+        assert factor > 0, f"{faction}: budget_factor {factor} must be positive"
         out[faction] = Pool(faction=faction, lord=lord, units=units, caps=caps,
-                            generator=spec.get("generator", ""), templates=templates)
+                            generator=spec.get("generator", ""), templates=templates, budget_factor=factor)
     return out
 
 

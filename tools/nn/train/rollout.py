@@ -168,6 +168,9 @@ class Battles:
         # network plays (the learner, self-play, a past version) fires them by its own order.
         self.by_rule = self.ctrl >= league.CODE["nearest"]                              # [B, 2]
         self.ability_stats = torch.zeros(2, device=self.device)   # the learner's ability uses, its ended battles
+        # The learner's reward by term (reward.PARTS) and its decisions, by role (attack, defend)
+        self.part_stats = torch.zeros(2, len(reward.PARTS), device=self.device)
+        self.part_steps = torch.zeros(2, device=self.device)
         self.start()
 
     @property
@@ -186,9 +189,10 @@ class Battles:
         self.cmem = {s: ob.start(state, self.setup, s) for s in (1, 2)}
         self.h_learn = None
         self.h_past = None
-        self.health = reward.measure(self.st, self.weights.rout_share)
+        self.health = reward.measure(self.st, self.weights.rout_share, self.weights.lord_rout)
         # [B] the battle time of the attacker's last damage (reward.idle_cost), -1 before its first
         self.last_hit = torch.full((self.B,), -1.0, device=self.device)
+        self.hit_rate = torch.zeros(self.B, device=self.device)     # [B] reward.hit_rate (with idle_rate)
         self.cur = None
         self.battles = 0
         self.timeouts = 0
@@ -262,6 +266,7 @@ class Battles:
         self.kind_battle.index_add_(0, self.rows_learn % self.B, (onehot * acting[..., None].float()).sum(1))
 
         was_done = self.st.done.clone()
+        attacks = self.st.attacker[self.rows_learn % self.B] == self.rows_learn // self.B + 1   # [R], this battle
         marks = self._ability_marks()
         orders = self.assemble(parts)
         changes = reward.order_changes(self.st.u, orders, self.weights.order_move_m) & ~was_done[:, None]
@@ -270,18 +275,33 @@ class Battles:
         self._count_orders(changes, was_done)
         prev = reward.unit_before(self.st.u, self.weights.rout_share) if critic is not None else None
         self.advance(self.st, orders, self.params, self.params.dt)
-        after = reward.measure(self.st, self.weights.rout_share)
+        after = reward.measure(self.st, self.weights.rout_share, self.weights.lord_rout)
         finished = self.st.done & ~was_done
-        r = reward.step(self.health, after, finished, self.st.winner, self.st.attacker, self.weights) - cost
-        self.last_hit = torch.where(reward.struck(self.health, after, self.st.attacker), self.st.t, self.last_hit)
-        r = r - reward.idle_cost(self.st, self.weights, self.last_hit) * (~finished).float()[:, None]
+        terms = reward.parts(self.health, after, finished, self.st.winner, self.st.attacker, self.weights)
+        if self.weights.idle_rate > 0:
+            # only a steady damage rate counts as attacking (reward.idle_cost: idle_rate)
+            self.hit_rate = reward.hit_rate(self.hit_rate, self.health, after, self.st.attacker, self.params.dt,
+                                            self.weights.idle_window_s)
+            hit = self.hit_rate >= self.weights.idle_rate
+        else:
+            hit = reward.struck(self.health, after, self.st.attacker)
+        self.last_hit = torch.where(hit, self.st.t, self.last_hit)
+        terms["idle"] = -reward.idle_cost(self.st, self.weights, self.last_hit) * (~finished).float()[:, None]
+        terms["orders"] = -cost
+        r = sum(terms[k] for k in reward.PARTS)
         self.timeouts += int((finished & (after[:, 0, 1] > 0) & (after[:, 1, 1] > 0)).sum())
         rb, rs = self.rows_learn % self.B, self.rows_learn // self.B
         r_rows, d_rows = r[rb, rs], finished[rb]
+        live = (~was_done[rb]).float()
+        role = 1 - attacks.long()                                    # 0 the learner attacks, 1 defends
+        self.part_stats.index_add_(0, role, torch.stack([terms[k][rb, rs] for k in reward.PARTS], 1) * live[:, None])
+        self.part_steps.index_add_(0, role, live)
         unit_rows = None
         if prev is not None:
             # Each learner unit's own reward (reward.unit_step), in the row's slots; 0 for the other side.
-            ur = reward.unit_step(prev, self.st, behaviour.facts(self.st, self.params), self.params, self.weights)
+            idle_m = reward.idle_scale(self.st.t, self.last_hit, self.weights) if self.weights.unit_idle else None
+            ur = reward.unit_step(prev, self.st, behaviour.facts(self.st, self.params), self.params, self.weights,
+                                  idle_m)
             own = self.st.u["side"][rb] == (rs + 1)[:, None]
             unit_rows = torch.where(own & ~was_done[rb][:, None], ur[rb], torch.zeros_like(ur[rb]))
         self._count(finished, rb, rs, d_rows)
@@ -297,7 +317,7 @@ class Battles:
 
         if self.auto_reset:
             self._reset(finished)
-        self.health = reward.measure(self.st, self.weights.rout_share)
+        self.health = reward.measure(self.st, self.weights.rout_share, self.weights.lord_rout)
         keep = (~finished).float()
         self.h_learn = h_new * keep[rb][:, None, None]
         if h_past_new is not None:
@@ -307,7 +327,20 @@ class Battles:
             # a copy: a slice (view) would keep the whole input of every step alive (~60 MB each)
             obs_r = dict(obs_r, abil=obs_r["abil"][..., :mab.DYNAMIC].clone(), abil_row=abil_row)
         return {"obs": obs_r, "action": action, "lp": lp, "value": value, "reward": r_rows,
-                "done": d_rows, "critic_obs": c, "unit_value": unit_value, "unit_reward": unit_rows}
+                "done": d_rows, "critic_obs": c, "unit_value": unit_value, "unit_reward": unit_rows,
+                "attacks": attacks}
+
+    def reward_parts(self, reset=True):
+        """{role: {term: the learner's mean reward a minute of battle}} since the last call (reward.PARTS;
+        the sum of the terms is the reward PPO learns from)."""
+        per_min = 60.0 / self.params.dt
+        p, n = self.part_stats.cpu().numpy(), self.part_steps.cpu().numpy()
+        out = {role: {k: float(p[i, j] / max(1.0, n[i]) * per_min) for j, k in enumerate(reward.PARTS)}
+               for i, role in enumerate(ROLES) if n[i] > 0}
+        if reset:
+            self.part_stats.zero_()
+            self.part_steps.zero_()
+        return out
 
     def _count(self, finished, rb, rs, d_rows):
         won = (self.st.winner[rb] == rs + 1).float()
@@ -384,6 +417,7 @@ class Battles:
             return
         idx = restart_rows(self.st, self.setup, self.source, finished, self.want)
         self.last_hit = torch.where(finished, torch.full_like(self.last_hit, -1.0), self.last_hit)
+        self.hit_rate = torch.where(finished, torch.zeros_like(self.hit_rate), self.hit_rate)
         sim_abilities.set_rule(self.st.u, self.by_rule)
         self.bank_row = torch.where(finished, idx, self.bank_row)
         randomise.apply(self.st, finished, self.spread, self.gen)
@@ -428,7 +462,7 @@ def collect(env, actor, critic, T):
     fields = ("kind", "point", "target", "run") + (("ability",) if steps[0]["action"].ability is not None else ())
     out["action"] = hd.Action(*(torch.stack([getattr(s["action"], f) for s in steps]) for f in fields))
     out["abil_static"] = getattr(env.bank.setup.arrays, "abil", None)
-    for k in ("lp", "value", "reward", "done", "unit_value", "unit_reward"):
+    for k in ("lp", "value", "reward", "done", "unit_value", "unit_reward", "attacks"):
         out[k] = torch.stack([s[k] for s in steps])
     out["last_value"], out["last_unit_value"] = env.value(critic)
     return out

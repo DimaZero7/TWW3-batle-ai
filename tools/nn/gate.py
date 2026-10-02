@@ -74,7 +74,8 @@ def plan(battles, offset=0, block=GATE_BLOCK):
                     "own_units": len(arena["sides"]["own"]["units"]),
                     "enemy_units": len(arena["sides"]["enemy"]["units"]),
                     "factions": {s: arena["sides"][s]["faction"] for s in ("own", "enemy")},
-                    "budget": arena["budget"]})
+                    "budget": arena["budget"],
+                    "side_budget": {s: arena["sides"][s]["budget"] for s in ("own", "enemy")}})
     return out
 
 
@@ -139,6 +140,7 @@ def battle_row(entry):
     result = result or {}
     row.update({
         "factions": cfg.get("factions"), "template": army.get("template"), "budget": army.get("budget"),
+        "side_budget": army.get("side_budget"), "cost": army.get("cost"),
         "units": {s: len(cfg.get("units", {}).get(s, [])) for s in ("own", "enemy")},
         "men_start": army.get("men"),
         "men_left": {"own": result.get("side_1_men"), "enemy": result.get("side_2_men")},

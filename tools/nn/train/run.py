@@ -16,6 +16,7 @@ every `--steps` decisions. Writes (build/ is not in Git), in build/nn-train/runs
 and copies the final network to build/nn-train/latest.pt (the companion's default).
 """
 import argparse
+import copy
 import dataclasses
 import json
 import shutil
@@ -45,7 +46,10 @@ def compatible(path, preset):
         return False
 
 
-def networks(preset, device, start=None):
+def networks(preset, device, start=None, critic_from=None):
+    """(actor, critic) of `start` (default: random.pt, written if missing). The critic comes from
+    critic_from when given (e.g. the run's latest.pt beside a test5 m<minute>.pt saved without it); a
+    checkpoint without one starts a fresh critic (then give --critic-warmup updates)."""
     if start is None:
         start = checkpoint.RANDOM
         if not compatible(start, preset):
@@ -54,7 +58,11 @@ def networks(preset, device, start=None):
     cfg = checkpoint.config_of(data)
     actor, critic = model_policy.Actor(cfg), model_critic.Critic(cfg)
     actor.load_state_dict(data["actor"])
-    critic.load(data["critic"])
+    state = checkpoint.read(critic_from)["critic"] if critic_from else data.get("critic")
+    if state is None:
+        print(f"{start}: no critic in the checkpoint, a fresh one (give it --critic-warmup updates)", flush=True)
+    else:
+        critic.load(state)
     return actor.to(device).eval(), critic.to(device).eval()
 
 
@@ -104,24 +112,35 @@ def train(args, every=None):
     torch.backends.cuda.matmul.allow_tf32 = True
     out = checkpoint.DIR / "runs" / args.name
     out.mkdir(parents=True, exist_ok=True)
-    actor, critic = networks(args.preset, device, args.init)
+    actor, critic = networks(args.preset, device, args.init, args.critic_init)
     if args.kind_temperature != 1.0:
         soften_kind(actor, args.kind_temperature)
     reference = None
+    own_reference = args.reference == "self"
     if args.anchor:
-        reference = checkpoint.load_policy(args.reference or args.init, device)
+        if own_reference:
+            # a trust region to the network's own recent version: a frozen copy of the actor, renewed
+            # every --reference-every updates (it bounds how far noisy steps drift between renewals,
+            # not where the policy may go)
+            reference = copy.deepcopy(actor).eval()
+        else:
+            reference = checkpoint.load_policy(args.reference or args.init, device)
         for p in reference.parameters():
             p.requires_grad_(False)
     cfg = ppo.PPOConfig(lr=args.lr, gamma=args.gamma, epochs=args.epochs, minibatch=args.minibatch,
-                        entropy=args.entropy, anchor=args.anchor, unit_credit=args.unit_credit)
+                        entropy=args.entropy, anchor=args.anchor, unit_credit=args.unit_credit,
+                        adv_norm=args.adv_norm)
     opt = torch.optim.Adam(list(actor.parameters()) + list(critic.parameters()), lr=cfg.lr, eps=1e-5)
     weights = reward.Weights(order_change=args.order_cost, timeout=args.timeout, idle=args.idle, hp=args.hp,
                              standing=args.standing, lord=args.lord, retarget=args.retarget,
                              idle_tau_s=args.idle_tau, idle_cap=args.idle_cap, idle_pause_s=args.idle_pause,
-                             idle_step=args.idle_step,
+                             idle_step=args.idle_step, idle_share=args.idle_share, idle_rate=args.idle_rate,
+                             idle_window_s=args.idle_window,
                              unit_gold=args.unit_gold, flanked=args.flanked, missile_melee=args.missile_melee,
                              crowd=args.crowd, flank_attack=args.flank_attack, neighbour=args.neighbour,
-                             idle_near=args.idle_near, gold=args.gold, rout_share=args.rout_share)
+                             idle_near=args.idle_near, gold=args.gold, rout_share=args.rout_share,
+                             unit_idle=args.unit_idle, lord_rout=args.lord_rout,
+                             lord_exposed=args.lord_exposed, lord_exposed_hp=args.lord_exposed_hp)
 
     def small_arg():
         if not args.small:
@@ -218,6 +237,8 @@ def train(args, every=None):
                         reference=reference)
         del batch
         update += 1
+        if own_reference and reference is not None and update % args.reference_every == 0:
+            reference.load_state_dict(actor.state_dict())
         decisions += env.B * args.steps
         stats = env.take_stats()
         lords = env.lords()
@@ -234,6 +255,7 @@ def train(args, every=None):
                "abilities_per_battle": round(env.abilities(), 2),
                "switches_per_minute": round(lords["switches_per_minute"], 2),
                "orders_per_minute": round(env.orders_per_minute(), 2), "kinds": env.kinds(),
+               "reward_parts": {r: {k: round(v, 4) for k, v in p.items()} for r, p in env.reward_parts().items()},
                "games": {k: g for k, (g, _, _) in stats.items()}, "win_rate": rates(stats),
                "seconds_per_battle": {k: round(s) for k, (_, _, s) in stats.items()}, "past": str(past_path.name)}
         log.write(json.dumps(row) + "\n")
@@ -245,6 +267,10 @@ def train(args, every=None):
                   f"anchor {st['anchor_kl']:.3f} unit A share {st['unit_adv_share']:.2f} orders/min {row['orders_per_minute']:5.1f} "
                   f"lords dead own {lords['own']:.2f} enemy {lords['enemy']:.2f} abil {row['abilities_per_battle']:.1f} "
                   f"kinds " + " ".join(f"{k[:2]} {v:.2f}" for k, v in row["kinds"].items()), flush=True)
+            print(f"      ev {st.get('ev', 0):.3f} (attack {st.get('ev_attack', 0):.3f} defend {st.get('ev_defend', 0):.3f}) "
+                  f"adv std attack {st.get('adv_std_attack', 0):.3f} defend {st.get('adv_std_defend', 0):.3f}; "
+                  "reward a minute " + "; ".join(f"{r} " + " ".join(f"{k} {v:+.3f}" for k, v in p.items())
+                                                 for r, p in row["reward_parts"].items()), flush=True)
         if update % args.snapshot_every == 0:
             meta = {"update": update, "battles": env.battles, "seconds": row["seconds"], "run": args.name}
             pool.save(actor, None, args.preset, meta)
@@ -375,6 +401,8 @@ def parser():
     ap.add_argument("--standing", type=float, default=reward.Weights.standing,
                     help="the old cost share that stopped standing (0: in gold)")
     ap.add_argument("--lord", type=float, default=reward.Weights.lord, help="the enemy lord's death - own lord's death")
+    ap.add_argument("--lord-rout", type=float, default=reward.Weights.lord_rout,
+                    help="> 0: in the lord term a shattered lord counts as dead, a routing one as this share of a death")
     ap.add_argument("--retarget", type=float, default=reward.Weights.retarget,
                     help="cost of switching an attack to another target while the old one stands")
     ap.add_argument("--mix", help='opponent shares as json, e.g. {"self": 0.2, "nearest": 0.4}')
@@ -383,7 +411,12 @@ def parser():
                     help="divide the starting actor's order-kind logits by this (> 1: softer, for exploration)")
     ap.add_argument("--anchor", type=float, default=ppo.PPOConfig.anchor, help="KL weight to the reference actor")
     ap.add_argument("--anchor-end", type=float, help="... at the end of the run (linear; default: no change)")
-    ap.add_argument("--reference", help="the reference actor (default: --init)")
+    ap.add_argument("--reference", help="the reference actor (default: --init); 'self': the network's own copy, "
+                                        "renewed every --reference-every updates (a trust region, no fixed leash)")
+    ap.add_argument("--reference-every", type=int, default=10, help="updates between renewals of --reference self")
+    ap.add_argument("--critic-init", help="take the critic from this checkpoint (default: --init's own)")
+    ap.add_argument("--adv-norm", default=ppo.PPOConfig.adv_norm, choices=("batch", "role"),
+                    help="normalise the side's advantage over the minibatch or over each role apart")
     ap.add_argument("--pool", type=int, default=8)
     ap.add_argument("--pool-extra", help="more past opponents for the pool (checkpoints, comma-separated)")
     ap.add_argument("--snapshot-every", type=int, default=20)
@@ -403,6 +436,13 @@ def parser():
                     help="... --idle x (exp(steps x this) - 1); new damage sets it back to 0")
     ap.add_argument("--idle-cap", type=float, default=reward.Weights.idle_cap,
                     help="the idle cost at most --idle x this")
+    ap.add_argument("--idle-share", type=float, default=reward.Weights.idle_share,
+                    help="0: idle while no unit fights or shoots; 1: x the share of the standing army (by cost) that does not")
+    ap.add_argument("--idle-rate", type=float, default=reward.Weights.idle_rate,
+                    help="0: any damage resets the idle timer; > 0: only a damage rate of at least this share of "
+                         "the budget a minute (defender gold lost, mean over --idle-window)")
+    ap.add_argument("--idle-window", type=float, default=reward.Weights.idle_window_s,
+                    help="s: the time constant of that damage rate")
     ap.add_argument("--unit-credit", type=float, default=ppo.PPOConfig.unit_credit,
                     help="weight of each unit's own advantage beside the side's (0: the side's only)")
     ap.add_argument("--unit-gold", type=float, default=reward.Weights.unit_gold, help="per unit: its own gold trade")
@@ -416,6 +456,11 @@ def parser():
                     help="per melee unit and decision standing by while a fellow within 60 m fights")
     ap.add_argument("--flank-attack", type=float, default=reward.Weights.flank_attack,
                     help="per unit and decision striking an enemy's flank or rear (bonus)")
+    ap.add_argument("--unit-idle", type=float, default=reward.Weights.unit_idle,
+                    help="per unit: x the attacker's idle m, per decision an attacking unit neither fights nor shoots")
+    ap.add_argument("--lord-exposed", type=float, default=reward.Weights.lord_exposed,
+                    help="per unit: per decision a lord fights in melee below --lord-exposed-hp of its health")
+    ap.add_argument("--lord-exposed-hp", type=float, default=reward.Weights.lord_exposed_hp)
     ap.add_argument("--neighbour", type=float, default=reward.Weights.neighbour,
                     help="+ this x the mean of own units' terms within 40 m")
     ap.add_argument("--no-eval", action="store_true")

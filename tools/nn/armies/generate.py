@@ -1,17 +1,21 @@
-"""Random battles with an equal budget: two armies of a lord and 0-19 units each, deployed.
+"""Random battles with an equal budget (times the factions' budget factors): two armies of a lord
+and 0-19 units each, deployed.
 
     arena = battle(seed)                       # deterministic; seeds of TRAIN_SEEDS or EVAL_SEEDS
     arena = generate(np.random.default_rng(1), factions=["wh_main_emp_empire"], budget_range=(1000, 3000))
 
 An arena is the dict tools/nn/scenario.py takes (map, zones, gap_m, "sides": {"own", "enemy"}),
-plus "budget" and, per side, "cost" and "army" (the template it follows, or "random").
+plus "budget" (B) and, per side, "budget" (what it may spend), "cost" and "army" (the template it
+follows, or "random").
 
 A battle:
 1. factions - each side one of `factions`, independently (mirrors included);
 2. budget B - log-uniform between what both can field (the dearer lord and the cheapest unit)
    and what both can reach with max_units units; redrawn until both sides can spend it;
-3. each side spends between (1 - TOLERANCE) B and B (lord included), so the two sides differ
-   by at most 5%:
+   a side's budget is B x its faction's budget_factor / the larger factor of the two sides
+   (config/nn/pools.json; Skaven 0.8: against the Empire they get 0.8 B, in a mirror both B);
+3. each side spends between (1 - TOLERANCE) and 1 of its budget (lord included), so with equal
+   factors the two sides differ by at most 5%:
    * a template army (share mix["template"]) follows one of its faction's army templates
      (pools.Pool.templates, the game's army generator), buying unit by unit with the template's
      shares until the budget is spent; categories under caps (config/nn/pools.json);
@@ -165,10 +169,16 @@ class Generator:
             self._markets[key] = Market(self.pools[faction], key[1])
         return self._markets[key]
 
+    def shares(self, factions):
+        """{faction: share of B it may spend}: its budget_factor / the largest factor of `factions`."""
+        top = max(self.pools[f].budget_factor for f in factions)
+        return {f: self.pools[f].budget_factor / top for f in factions}
+
     def budget_bounds(self, factions, max_units=None):
-        """(least, most) budget every faction of `factions` can field."""
-        lo = max(self.pools[f].lord.cost + min(u.cost for u in self.pools[f].units) for f in factions)
-        hi = min(int(self.market(f, max_units).totals.max()) for f in factions)
+        """(least, most) budget B every faction of `factions` can field (its share of B)."""
+        share = self.shares(factions)
+        lo = max((self.pools[f].lord.cost + min(u.cost for u in self.pools[f].units)) / share[f] for f in factions)
+        hi = min(float(self.market(f, max_units).totals.max()) / share[f] for f in factions)
         return lo, hi
 
     def generate(self, rng, factions=None, budget_range=None, max_units=None, sides=None, name="random"):
@@ -180,9 +190,11 @@ class Generator:
             lo, hi = max(lo, budget_range[0]), min(hi, budget_range[1])
         assert lo <= hi, f"no budget both {own} and {enemy} can field in {budget_range}"
         markets = {"own": self.market(own, max_units), "enemy": self.market(enemy, max_units)}
+        share = self.shares((own, enemy))
+        share = {"own": share[own], "enemy": share[enemy]}
         for _ in range(BUDGET_TRIES):
             budget = float(np.exp(rng.uniform(math.log(lo), math.log(hi))))
-            if all(m.can_spend(budget) for m in markets.values()):
+            if all(m.can_spend(budget * share[s]) for s, m in markets.items()):
                 break
         else:
             raise ValueError(f"no budget in {lo}..{hi} both {own} and {enemy} can spend")
@@ -190,15 +202,15 @@ class Generator:
         arena.update(name=name, budget=round(budget), sides={},
                      note=f"random battle: {own} against {enemy}, budget {round(budget)}")
         for side, faction in (("own", own), ("enemy", enemy)):
-            m, pool = markets[side], self.pools[faction]
+            m, pool, side_budget = markets[side], self.pools[faction], budget * share[side]
             if pool.templates and rng.random() < self.mix.get("template", 0.0):
                 names, weights, shares = zip(*pool.templates)
                 t = int(rng.choice(len(names), p=np.asarray(weights) / sum(weights)))
-                bought, army = m.template_army(rng, budget, shares[t]), names[t]
+                bought, army = m.template_army(rng, side_budget, shares[t]), names[t]
             else:
-                bought, army = m.random_army(rng, budget), "random"
+                bought, army = m.random_army(rng, side_budget), "random"
             units = [pool.units[i] for i in bought]
-            arena["sides"][side] = {"faction": faction, "army": army,
+            arena["sides"][side] = {"faction": faction, "army": army, "budget": round(side_budget),
                                     "cost": pool.lord.cost + sum(u.cost for u in units),
                                     "units": placement.place(pool.lord, units, arena["deployment_m"])}
         return arena

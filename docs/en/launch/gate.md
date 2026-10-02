@@ -88,7 +88,7 @@ A battle not at Normal difficulty (`battle_difficulty` in `launch.json` other th
 | `battles.json` | the plan and each battle's run folder (`build/nn-arena/runs/<time>/`) |
 | `summary.json` | wins, losses, no outcome, `passed`, `fair`, `preferences_restored` and a row per battle |
 
-A battle's row: seed, factions and army templates, budget, units per side (lord included), role,
+A battle's row: seed, factions and army templates, budget (B, each side's budget and cost; Skaven 0.8 of the Empire's), units per side (lord included), role,
 who won and how, battle length, men at the start and at the end, units still standing, the
 network's counters (`nn`: decisions, answers, misses, orders given, `keep`, bad files), Lua errors,
 difficulty, preferences restored.

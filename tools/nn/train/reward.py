@@ -18,7 +18,10 @@
                  - the same of own army) (0: in gold).
     lord      x (the enemy's lord died - own lord died): the game's morale rule makes a lord's death
                  decisive (-16, then -10 points to every unit of the side); the lord's gold alone
-                 does not show it.
+                 does not show it. With lord_rout > 0 a shattered lord counts as dead and a routing
+                 one as lord_rout of a death, given back when it rallies (measure() column 4): in
+                 the game a shattered lord breaks the army as a dead one does (gate 02.10, fix45b/m45:
+                 3 of 4 battles ended within 3 s of a lord shattering; docs/en/training/training.md).
   A share is of the side at the start of battle.
 * The attacker pays `idle` x m every decision in which none of its units fights in melee or shoots
   (marching is idling too): the time limit's -timeout an hour away is discounted by gamma^7200 ~
@@ -35,6 +38,12 @@
   by minute 1, 0.07 by 3, 0.26 by 5, 2.2 by 10 (more than the -timeout), then 0.48 a minute (the cap
   from minute 7.6); a pause after damage 0 by 30 s, 0.03 by 90 s, 0.28 by 3 minutes
   (docs/en/training/training.md).
+  Two options close the skirmisher's loophole (01.10 -> 02.10: one unit shooting or fighting kept the
+  whole army free of the cost and every scratch reset m, so attackers stood; docs/en/training/training.md):
+  idle_share 1 pays x the share of its standing army, by cost, that neither fights nor shoots (instead
+  of "no unit busy"), and idle_rate > 0 resets m only while the attacker's damage rate (hit_rate: the
+  defender's gold lost, share of the budget a minute, exponential mean over idle_window_s) is at least
+  idle_rate, instead of on any damage. Both 0: the old rule.
 * Every real order change costs `order_change`, divided by the side's number of units: a new kind,
   a new attack target, or a move / withdraw point more than `order_move_m` from the one in force.
   KEEP and re-issuing the same order cost nothing. A unit that changes its order every decision
@@ -57,6 +66,13 @@ itself, beside the side's reward; none of it enters the side's reward:
                   within 60 m fights (a unit's own credit otherwise pays it to let others fight);
     flank_attack  per decision striking an enemy's flank or rear (a bonus, as large as `flanked`: a flank
                   exchange is zero-sum between the two units);
+    unit_idle     x the attacker's idle multiplier m (idle_scale, as the side's idle cost) per decision a
+                  unit of the attacking side stands without fighting or shooting: the side's idle cost
+                  laid on the units that cause it (02.10: a side-wide cost could not tell the holding units
+                  from the fighting ones, and the policy stayed in "hold");
+    lord_exposed  per decision a lord fights in melee with less than lord_exposed_hp of its health
+                  (gate 02.10: the network's lord led the line and went back into melee at 19 % health
+                  until it shattered);
 then `neighbour` x the mean of the same of own units within neighbour_m (what happens next to it).
 Each shaped term at most 1200 decisions x weight per unit in a 10-minute battle: at 2e-4, 0.24, a
 quarter of a win.
@@ -82,9 +98,15 @@ class Weights:
     idle_pause_s: float = 30.0    # ... after it, k = floor(s since its last damage / idle_pause_s),
     idle_step: float = 0.5        # ... m = exp(k x idle_step) - 1
     idle_cap: float = 20.0        # ... m at most this
+    idle_share: float = 0.0       # 0: idle while no unit fights or shoots (one busy unit stops the cost);
+    #                               1: x the share of its standing army, by cost, not fighting or shooting
+    idle_rate: float = 0.0        # 0: any damage resets the timer; > 0: only a damage rate (defender gold
+    #                               lost, share of the budget a minute, over ~idle_window_s) of at least this
+    idle_window_s: float = 30.0   # ... the time constant of that rate
     order_change: float = 0.001
     order_move_m: float = 10.0
     lord: float = 0.3             # the enemy lord's death - own lord's death
+    lord_rout: float = 0.0        # > 0: in the lord term a shattered lord is dead, a routing one this share of it
     retarget: float = 0.003       # an attack switched to another target while the old one stands
     # per unit (unit_step), not in the side's reward
     unit_gold: float = 0.05       # the unit's own gold trade, scaled to one unit
@@ -93,6 +115,9 @@ class Weights:
     crowd: float = 2e-4           # per decision of a pile (excess share)
     idle_near: float = 0.0        # per decision a melee unit stands by while a fellow within 60 m fights
     flank_attack: float = 2e-4    # per decision striking an enemy's flank / rear (bonus; = flanked: zero-sum)
+    unit_idle: float = 0.0        # x the attacker's idle m, per decision an attacking unit neither fights nor shoots
+    lord_exposed: float = 0.0     # per decision a lord fights in melee below lord_exposed_hp of its health
+    lord_exposed_hp: float = 0.5
     neighbour: float = 0.5        # + this x the mean of own units' terms within neighbour_m
     neighbour_m: float = 40.0
 
@@ -122,10 +147,11 @@ def gold_sides(u, rout_share=Weights.rout_share):
     return torch.stack([(g * (u["side"] == s)).sum(1) for s in (1, 2)], 1)
 
 
-def measure(st, rout_share=Weights.rout_share):
+def measure(st, rout_share=Weights.rout_share, lord_rout=0.0):
     """[B, 2, 4]: per side (1, 2) the share of starting health left, the share of the army's cost
     still standing, 1 while its lord lives (or it has none), 0 once the lord is dead, and
-    1 - its gold lost / budget."""
+    1 - its gold lost / budget. With lord_rout > 0, [B, 2, 5]: column 4 is 1 while the lord stands
+    (or it has none), 1 - lord_rout while it routes, 0 once it is shattered or dead."""
     u = st.u
     gold = 1 - gold_sides(u, rout_share) / budget(u)[:, None]
     stand = standing_mask(u).float()
@@ -137,7 +163,12 @@ def measure(st, rout_share=Weights.rout_share):
         cost = u["cost"].clamp(min=1.0) * mine
         lords = u["lord"] & (u["side"] == s)
         lord = (~lords.any(1) | (lords & alive).any(1)).float()
-        out.append(torch.stack([hp, (cost * stand).sum(1) / cost.sum(1).clamp(min=1e-6), lord, gold[:, s - 1]], 1))
+        cols = [hp, (cost * stand).sum(1) / cost.sum(1).clamp(min=1e-6), lord, gold[:, s - 1]]
+        if lord_rout:
+            up = lords & alive & ~u["s"]
+            each = torch.where(up, 1 - lord_rout * u["r"].float(), torch.zeros_like(mine))
+            cols.append(torch.where(lords.any(1), (each * lords.float()).amax(1), torch.ones_like(hp)))
+        out.append(torch.stack(cols, 1))
     return torch.stack(out, 1)
 
 
@@ -146,26 +177,40 @@ def health(st):
     return measure(st)[:, :, 0]
 
 
+PARTS = ("trade", "lord", "end", "idle", "orders")   # the side's reward by term (rollout logs them per role)
+
+
+def parts(before, after, finished, winner, attacker, weights=Weights()):
+    """{"trade", "lord", "end"}: [B, 2] the terms of step() for side 1 and side 2 (trade: gold + hp +
+    standing; end: win / loss / the attacker's timeout). Arguments as step()."""
+    lost = (before - after).clamp(min=0)                                  # [B, side, (hp, standing, lord, gold)]
+    t1 = weights.hp * (lost[:, 1, 0] - lost[:, 0, 0]) + weights.standing * (lost[:, 1, 1] - lost[:, 0, 1])
+    l1 = torch.zeros_like(t1)
+    if lost.shape[-1] > 4:
+        g = before[:, :, 4] - after[:, :, 4]                              # not clamped: a rally gives it back
+        l1 = weights.lord * (g[:, 1] - g[:, 0])
+    elif lost.shape[-1] > 2:
+        l1 = weights.lord * (lost[:, 1, 2] - lost[:, 0, 2])
+    if lost.shape[-1] > 3:
+        g = before[:, :, 3] - after[:, :, 3]                              # not clamped: a rally gives its gold back
+        t1 = t1 + weights.gold * (g[:, 1] - g[:, 0])
+    timeout = finished & (after[:, 0, 1] > 0) & (after[:, 1, 1] > 0)
+    won1 = (winner == 1).float() - (winner == 2).float()
+    end1 = torch.where(finished, weights.win * won1, torch.zeros_like(t1))
+    # At the limit the attacker loses more than a fight: -timeout instead of -win.
+    extra = torch.where(timeout, torch.full_like(t1, weights.win - weights.timeout), torch.zeros_like(t1))
+    side = torch.stack([attacker == 1, attacker == 2], 1).float()
+    end = torch.stack([end1, -end1], 1) + side * extra[:, None]
+    return {"trade": torch.stack([t1, -t1], 1), "lord": torch.stack([l1, -l1], 1), "end": end}
+
+
 def step(before, after, finished, winner, attacker, weights=Weights()):
     """[B, 2] reward of side 1 and side 2 for one step, without the idle and order costs.
 
     before, after: measure() [B, 2, 4] around the step (the lord and gold columns optional); finished [B]:
     the battle ended in this step; winner [B] 1 or 2 (read where finished); attacker [B] 1 or 2."""
-    lost = (before - after).clamp(min=0)                                  # [B, side, (hp, standing, lord, gold)]
-    r1 = weights.hp * (lost[:, 1, 0] - lost[:, 0, 0]) + weights.standing * (lost[:, 1, 1] - lost[:, 0, 1])
-    if lost.shape[-1] > 2:
-        r1 = r1 + weights.lord * (lost[:, 1, 2] - lost[:, 0, 2])
-    if lost.shape[-1] > 3:
-        g = before[:, :, 3] - after[:, :, 3]                              # not clamped: a rally gives its gold back
-        r1 = r1 + weights.gold * (g[:, 1] - g[:, 0])
-    timeout = finished & (after[:, 0, 1] > 0) & (after[:, 1, 1] > 0)
-    won1 = (winner == 1).float() - (winner == 2).float()
-    end = torch.where(finished, weights.win * won1, torch.zeros_like(r1))
-    r = torch.stack([r1 + end, -r1 - end], 1)
-    # At the limit the attacker loses more than a fight: -timeout instead of -win.
-    extra = torch.where(timeout, torch.full_like(r1, weights.win - weights.timeout), torch.zeros_like(r1))
-    side = torch.stack([attacker == 1, attacker == 2], 1).float()
-    return r + side * extra[:, None]
+    p = parts(before, after, finished, winner, attacker, weights)
+    return p["trade"] + p["lord"] + p["end"]
 
 
 def idle_scale(t, last_hit, weights=Weights()):
@@ -175,6 +220,22 @@ def idle_scale(t, last_hit, weights=Weights()):
     k = torch.floor((t - last_hit).clamp(min=0) / weights.idle_pause_s)
     later = (k * weights.idle_step).clamp(max=60.0)
     return (torch.where(last_hit < 0, first, later).exp() - 1).clamp(max=weights.idle_cap)
+
+
+def damage_share(before, after, attacker):
+    """[B] the share of the budget in gold the defender lost in the step (measure() column 3; a rally
+    is not damage: 0)."""
+    d = (2 - attacker).long()
+    g_b = before[:, :, 3].gather(1, d[:, None])[:, 0]
+    g_a = after[:, :, 3].gather(1, d[:, None])[:, 0]
+    return (g_b - g_a).clamp(min=0)
+
+
+def hit_rate(rate, before, after, attacker, dt, window_s):
+    """[B] the attacker's damage rate (the defender's gold lost, share of the budget a minute), an
+    exponential mean over ~window_s: rate [B] the one before the step."""
+    a = math.exp(-dt / window_s)
+    return a * rate + (1 - a) * damage_share(before, after, attacker) * (60.0 / dt)
 
 
 def struck(before, after, attacker):
@@ -188,18 +249,29 @@ def struck(before, after, attacker):
 
 def idle_cost(st, weights=Weights(), last_hit=None):
     """[B, 2]: the attacker pays `idle` x idle_scale when none of its units is in melee or shooting
-    (last_hit [B]: the battle time of its last damage, negative before the first; None: no damage
-    yet in any battle); the defender nothing."""
+    (with idle_share: x the share of its standing army, by cost, that is not) (last_hit [B]: the
+    battle time of its last damage, negative before the first; None: no damage yet in any battle);
+    the defender nothing."""
     u = st.u
-    busy = (u["m"] | u["fire"]) & standing_mask(u)
+    stand = standing_mask(u)
+    busy = (u["m"] | u["fire"]) & stand
     if last_hit is None:
         last_hit = torch.full_like(st.t, -1.0)
     scale = idle_scale(st.t, last_hit, weights)
+    cost = u["cost"].clamp(min=1.0)
     out = []
     for s in (1, 2):
+        side = u["side"] == s
         mine = (st.attacker == s) & ~st.done
-        idle = ~(busy & (u["side"] == s)).any(1) & mine
-        out.append(weights.idle * scale * idle.float())
+        idle = (~(busy & side).any(1)).float()
+        if weights.idle_share:
+            # the share of its standing army (by cost) that neither fights nor shoots: one unit
+            # skirmishing while the rest stand no longer stops the cost
+            standing = (cost * (stand & side)).sum(1)
+            share = 1 - (cost * (busy & side)).sum(1) / standing.clamp(min=1e-6)
+            share = torch.where(standing > 0, share, torch.ones_like(share))
+            idle = (1 - weights.idle_share) * idle + weights.idle_share * share
+        out.append(weights.idle * scale * idle * mine.float())
     return torch.stack(out, 1)
 
 
@@ -245,9 +317,10 @@ def unit_before(u, rout_share=Weights.rout_share):
     return dict({k: u[k].clone() for k in UNIT_FIELDS}, gold=gold_lost(u, rout_share))
 
 
-def unit_step(before, st, facts, params, weights=Weights()):
+def unit_step(before, st, facts, params, weights=Weights(), idle_m=None):
     """[B, N] each unit's own reward for the step (0 for empty slots): its gold trade and the
-    shaped terms of behaviour.facts (after the step), then its neighbours' mean (see the module)."""
+    shaped terms of behaviour.facts (after the step), then its neighbours' mean (see the module).
+    idle_m [B]: the attacker's idle multiplier (idle_scale) for unit_idle (None: no such term)."""
     u = st.u
     side = u["side"]
     present = side > 0
@@ -267,6 +340,13 @@ def unit_step(before, st, facts, params, weights=Weights()):
          - weights.missile_melee * facts["missile_melee"].float() - weights.crowd * facts["crowded"]
          - weights.idle_near * facts["idle_near"].float()
          + weights.flank_attack * facts["flank_attack"].float())
+    if weights.unit_idle and idle_m is not None:
+        stand = standing_mask(u)
+        idle = stand & ~(u["m"] | u["fire"]) & (side == st.attacker[:, None]) & ~st.done[:, None]
+        r = r - weights.unit_idle * idle_m[:, None] * idle.float()
+    if weights.lord_exposed:
+        low = u["hp_abs"] < weights.lord_exposed_hp * u["hp0"]
+        r = r - weights.lord_exposed * (u["lord"] & standing_mask(u) & u["m"] & low).float()
     r = torch.where(present, r, torch.zeros_like(r))
     if weights.neighbour:
         dx = u["x"][:, :, None] - u["x"][:, None, :]
