@@ -84,7 +84,7 @@ def policy_loss(lp_new, lp_old, adv, mask, clip):
 
 def kind_entropy(logits):
     """[B, N] entropy of the order kind."""
-    return torch.distributions.Categorical(logits=logits["kind"]).entropy()
+    return torch.distributions.Categorical(logits=logits["kind"], validate_args=False).entropy()
 
 
 def masked_mean(x, mask):

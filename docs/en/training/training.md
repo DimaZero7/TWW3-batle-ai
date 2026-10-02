@@ -44,7 +44,8 @@ credit (`--unit-credit`, `--unit-gold`, `--flanked`, `--missile-melee`, `--crowd
 `--eval-every` minutes / `--eval-opponents` / `--eval-battles` (evaluation on `EVAL_SEEDS` during
 the run, both roles; the best mean win rate is saved as `best_eval.pt`, the evaluations in
 `eval_log.jsonl`, their time not counted as training), `--eval-past` (the network behind "past" in
-the final evaluation). The first steps compile for 1–3 minutes; the training time does not count them.
+the final evaluation). The first steps compile for 1–3 minutes (seconds once a run of the same shapes
+compiled them: [training speed](#training-speed)); the training time does not count them.
 
 ## What it writes
 
@@ -153,6 +154,72 @@ Modules: `scenes.py` (where battles come from: the arenas or random armies, as a
 starts), `league.py` (who plays whom, the pool), `opponents.py` (the scripts, `ai_like` among them), `randomise.py`,
 `reward.py`, `rollout.py` (the battles and one step), `ppo.py`, `imitate.py` (the warm start),
 `evaluate.py` (evaluation and replays), `checkpoint.py`, `run.py`.
+
+## Training speed
+
+Measured 02.10.2026 on the RTX 5070 Ti with the chain's settings (`fix45d`: 1024 battles, up to
+19 units a side, 64 decisions per update, `--unit-credit 0.3`, KL to a reference; scripts
+`build/speed/` outside Git):
+
+| | before | after |
+|---|---:|---:|
+| one update: collecting 64 decisions | 3.5 s | 1.4 s |
+| one update: PPO (31 minibatches) | 4.8 s | 4.2–4.4 s |
+| battle steps a second | ~7 850 | ~11 300–11 700 |
+| updates a minute | 7.2 | ~10.3 |
+| warm-up (compiling) of a run | ~100 s | 13 s once compiled before (cold: 160–170 s) |
+| a standard evaluation (512 battles × 3 opponents) | 290–400 s | 155 s (cold compile: 260–270 s) |
+| `test5` trend run, 45 minutes of training, 3 evaluations | ~69 min, 274 updates | ~56 min with ~460 updates; the same 274 updates in ~37 min |
+
+Where the time went (one update before the change; regions timed with a synchronisation each):
+collecting was launch-bound (GPU ~45 % busy): the scripted opponents uncompiled 0.88 s, the
+actor's / critic's / past version's passes 1.3 s, rewards and counters 0.7 s, sampling 0.24 s,
+while the simulator's step (0.23 s) and the observation (0.17 s) were already compiled. The PPO
+update was GPU-bound (~85 %): the backward pass 2.9 s, the actor's forward 0.86 s, the reference's
+0.79 s, the critic's 0.47 s.
+
+What changed (none of it changes the numbers beyond float rounding; checked below):
+
+- **Compiled bookkeeping** (`rollout.fast()`, CUDA only): the scripts and the assembly of orders,
+  the order costs, the rewards and their counters, the per-unit reward, `reward.measure`, the
+  actor's decision (forward, sampling, orders) and the critic's values in collection, the
+  log-probability, and the behaviour tracker of evaluation. Inside a compiled graph the ability
+  encoder and head take every slot and mask the unowned (`torch.compiler.is_compiling()`); eager,
+  they still pick the owned slots with `nonzero`.
+- **No reads of GPU values in the hot loop:** `torch.distributions` without argument validation
+  (it synchronised ~10 times a decision), battle and timeout counters kept on the GPU, order
+  placement by index tensors made once, kind counts by comparison instead of `bincount` /
+  `one_hot`.
+- **The memory through the chunk** (`TokenMemory.scan`): the norm, the masks and the residual of
+  the GRU run on all 64 steps at once, only the cell steps one by one; `unbind` instead of `x[t]`
+  (the backward of each `x[t]` filled a zero tensor of the whole chunk). Exactly the same numbers.
+- **The attention bias** is made once in memory aligned for the attention kernel (it was copied in
+  every layer, forward and backward).
+- **The compile cache:** `tools/nn/dock.sh` keeps `torch.compile`'s kernels in the Docker volume
+  `tww3-torch-cache` (`TORCHINDUCTOR_CACHE_DIR`, `TRITON_CACHE_DIR`).
+
+Tried and not kept: bf16 autocast in the update was slower (5.06 s against 4.62 s) and moved the
+log-probabilities from the rollout's by ~2·10⁻³ on average (TF32: 2·10⁻⁵), as much as a real
+update's KL; compiling the actor's blocks and the critic for the update gave nothing (4.60 s); the
+GRU's input weights hoisted out of the loop through the fused cell were slower. TF32 was already on
+in training (`allow_tf32`).
+
+**Same in distribution.** The compiled functions against the eager ones on the same states (300
+decisions of 512 battles): rewards, order costs, counters, orders equal to ~10⁻⁴; the critic's
+values within TF32 rounding. Sampling of the compiled decision against the logits: kind 0.0408 /
+0.9592 against probabilities 0.0408 / 0.9592. Short fixed-seed runs (6 updates, seeds 1–3, the
+old code against the new): value mean after 6 updates 0.208 / 0.136 / 0.061 against 0.293 / 0.203 /
+−0.025, the per-unit value loss 20–26 against 21–25, the rest alike; two runs of the old code with
+the same seed already part after 4 updates. Evaluation of `fix45d/m45` (512 battles a role and
+opponent): `ai_like` 0.531 / 0.574 before, 0.547 / 0.551, 0.512 / 0.551 after; `nearest` 0.457 /
+0.395 → 0.438 / 0.426, 0.449 / 0.402; `hold_shoot` 0.547 / 0.449 → 0.570 / 0.426, 0.562 / 0.430 —
+within the ±3 points of noise.
+
+**What is left.** An evaluation runs until its longest battle ends: after ~1 700 decisions fewer
+than 1 % of the battles (often stand-offs to the 60-minute limit) are alive, yet each decision still
+costs ~21 ms for the whole batch — two thirds of an evaluation. Compacting the batch to the live
+battles (at a few fixed sizes, so the compiled graphs stay few) would cut that; not done. In the
+update, the GRU's 64 steps and the attention's float32 backward remain the main cost.
 
 ## Decisions
 

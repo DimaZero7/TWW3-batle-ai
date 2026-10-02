@@ -82,38 +82,44 @@ def ability_marks(u):
     return torch.stack([u.get(f"ab{k}_cd", torch.zeros_like(u["men"])) for k in range(ABILITY_SLOTS)], -1)
 
 
+def track(st, params, mine, live, sums, marks):
+    """Tracker.update: adds this step to sums (in place) -> the abilities' new marks."""
+    f = facts(st, params)
+    dt = params.dt
+    m = mine & live[:, None]
+    add = {"steps": live.float(),
+           "melee_s": (f["melee"] & m).float().sum(1) * dt,
+           "flanked_s": (f["flanked"] & m).float().sum(1) * dt,
+           "missile_melee_s": (f["missile_melee"] & m).float().sum(1) * dt,
+           "missile_s": (f["missile"] & m).float().sum(1) * dt,
+           "flank_attack_s": (f["flank_attack"] & m).float().sum(1) * dt,
+           "crowd_steps": ((f["crowded"] > 0) & m).any(1).float(),
+           "crowded_units": (f["crowded"] * m.float()).sum(1)}
+    new = ability_marks(st.u)
+    add["abilities"] = ((new > marks + 1e-3) & m[..., None]).float().sum((1, 2))
+    for k, v in add.items():
+        sums[k] += v
+    return new
+
+
 class Tracker:
     """Per battle [B] sums over the learner's units (mine [B, N]) while the battle runs: seconds in
     melee, flanked, missile units in melee, flank attacks; decisions with a pile; ability uses."""
     FIELDS = ("steps", "melee_s", "flanked_s", "missile_melee_s", "missile_s", "flank_attack_s", "crowd_steps",
               "crowded_units", "abilities")
 
-    def __init__(self, st, params, mine):
+    def __init__(self, st, params, mine, wrap=None):
+        """wrap: e.g. tools/nn/train/rollout.py fast (compiles the update on CUDA)."""
         self.params = params
         self.mine = mine
         self.dt = params.dt
         self.sums = {k: torch.zeros(st.B, device=st.device) for k in self.FIELDS}
         self.marks = ability_marks(st.u)
+        self._track = wrap(track) if wrap else track
 
     def update(self, st, live):
         """After a step; live [B]: the battle was running before it."""
-        f = facts(st, self.params)
-        m = self.mine & live[:, None]
-        lv = live.float()
-        add = {"steps": lv,
-               "melee_s": (f["melee"] & m).float().sum(1) * self.dt,
-               "flanked_s": (f["flanked"] & m).float().sum(1) * self.dt,
-               "missile_melee_s": (f["missile_melee"] & m).float().sum(1) * self.dt,
-               "missile_s": (f["missile"] & m).float().sum(1) * self.dt,
-               "flank_attack_s": (f["flank_attack"] & m).float().sum(1) * self.dt,
-               "crowd_steps": ((f["crowded"] > 0) & m).any(1).float(),
-               "crowded_units": (f["crowded"] * m.float()).sum(1)}
-        marks = ability_marks(st.u)
-        used = (marks > self.marks + 1e-3) & m[..., None]
-        add["abilities"] = used.float().sum((1, 2))
-        self.marks = marks
-        for k, v in add.items():
-            self.sums[k] += v
+        self.marks = self._track(st, self.params, self.mine, live, self.sums, self.marks)
 
     def summary(self, sel):
         """Metrics over the battles sel [B] (numpy bool)."""

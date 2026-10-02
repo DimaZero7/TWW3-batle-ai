@@ -130,7 +130,7 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
     mine = env.st.u["side"] == learner_side[:, None]
     contact = torch.full((B,), -1.0, device=env.device)
     fired = torch.zeros(B, dtype=torch.bool, device=env.device)
-    watch = behaviour.Tracker(env.st, env.params, mine)
+    watch = behaviour.Tracker(env.st, env.params, mine, wrap=lambda f: rollout.fast(f, env.compiled))
     for _ in range(int(limit_s / env.params.dt) + 2):
         if bool(env.st.done.all()):
             break

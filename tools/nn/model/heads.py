@@ -70,19 +70,30 @@ class Heads(nn.Module):
         target = target.masked_fill(~ok[:, None, :], NEG)
         out = {"kind": kind, "point": self.point(u), "target": target, "run": self.run(u)[..., 0]}
         if obs_t.get("abil") is not None:
-            # Only the slots that may be used are scored (a few of B x N x SLOTS); the rest stay masked.
-            b, n, k = (obs_t["abil_ok"] & ctrl[..., None]).nonzero(as_tuple=True)
-            score = (self.ability_q(u)[b, n] * self.ability_k(obs_t["abil"][b, n, k])).sum(-1)
-            slot = torch.full(obs_t["abil_ok"].shape, NEG, device=u.device, dtype=u.dtype)
-            slot = slot.index_put((b, n, k), score / math.sqrt(self.cfg.pointer))
+            usable = obs_t["abil_ok"] & ctrl[..., None]                                   # [B, N, SLOTS]
+            if torch.compiler.is_compiling():
+                # Compiled (as AbilityEncoder): every slot is scored, those that may not be used masked.
+                abil = torch.where(usable[..., None], obs_t["abil"], torch.zeros_like(obs_t["abil"]))
+                score = (self.ability_q(u)[:, :, None] * self.ability_k(abil)).sum(-1)
+                slot = torch.where(usable, score / math.sqrt(self.cfg.pointer), torch.full_like(score, NEG))
+            else:
+                # Only the slots that may be used are scored (a few of B x N x SLOTS); the rest stay masked.
+                b, n, k = usable.nonzero(as_tuple=True)
+                score = (self.ability_q(u)[b, n] * self.ability_k(obs_t["abil"][b, n, k])).sum(-1)
+                slot = torch.full(obs_t["abil_ok"].shape, NEG, device=u.device, dtype=score.dtype)
+                slot = slot.index_put((b, n, k), score / math.sqrt(self.cfg.pointer))
             out["ability"] = torch.cat([self.ability_none(u), slot], -1)
         return out
 
 
 def _dists(logits, temperature=1.0):
+    # validate_args=False: the argument checks read the GPU's answer back (a sync per distribution,
+    # ~10 a decision); the logits are finite by construction (masked with NEG, not -inf)
     t = max(temperature, 1e-6)
-    return (Categorical(logits=logits["kind"] / t), Categorical(logits=logits["point"] / t),
-            Categorical(logits=logits["target"] / t), Bernoulli(logits=logits["run"] / t))
+    return (Categorical(logits=logits["kind"] / t, validate_args=False),
+            Categorical(logits=logits["point"] / t, validate_args=False),
+            Categorical(logits=logits["target"] / t, validate_args=False),
+            Bernoulli(logits=logits["run"] / t, validate_args=False))
 
 
 def sample(logits, greedy=False, temperature=1.0, abilities=False):
@@ -96,7 +107,7 @@ def sample(logits, greedy=False, temperature=1.0, abilities=False):
     has_target = logits["target"].max(-1).values > NEG / 2
     a.target = torch.where((a.kind == ATTACK) & has_target, a.target, torch.full_like(a.target, -1))
     if abilities and "ability" in logits:
-        d = Categorical(logits=logits["ability"] / max(temperature, 1e-6))
+        d = Categorical(logits=logits["ability"] / max(temperature, 1e-6), validate_args=False)
         a.ability = (d.probs.argmax(-1) if greedy else d.sample()) - 1
     return a
 
@@ -116,7 +127,7 @@ def log_prob(logits, a, ctrl):
     lp = lp + torch.where(move | attack, run.log_prob(a.run.float()), torch.zeros_like(lp))
     ent = kind.entropy() + point.entropy() * (kind.probs[..., MOVE] + kind.probs[..., WITHDRAW]) + run.entropy()
     if a.ability is not None and "ability" in logits:
-        d = Categorical(logits=logits["ability"])
+        d = Categorical(logits=logits["ability"], validate_args=False)
         lp = lp + d.log_prob(a.ability.clamp(min=-1) + 1)
         ent = ent + d.entropy()
     zero = torch.zeros_like(lp)

@@ -56,11 +56,19 @@ class AbilityEncoder(nn.Module):
 
     def forward(self, abil):
         """abil [B, N, SLOTS, SIZE] -> [B, N, d]: the sum over the owned slots. Only the owned slots
-        go through the network (lords: a few of the B x N x SLOTS), so the cost stays small."""
+        go through the network (lords: a few of the B x N x SLOTS), so the cost stays small. Compiled
+        (the decisions of training, tools/nn/train/rollout.py fast()), every slot goes through it and
+        those not owned are dropped after it - the same sum: picking the owned ones (nonzero) reads
+        their number back from the GPU and breaks the graph, and a decision's batch is small."""
+        if torch.compiler.is_compiling():
+            owned = (abil[..., ab.INDEX["owned"]] > 0.5)[..., None]
+            # (the slots not owned enter as zeros: a stray NaN there would poison the weights' gradient)
+            e = self.net(torch.where(owned, abil, torch.zeros_like(abil)))             # [B, N, SLOTS, d]
+            return torch.where(owned, e, torch.zeros_like(e)).sum(2)
         B, N, K, _ = abil.shape
         b, n, k = (abil[..., ab.INDEX["owned"]] > 0.5).nonzero(as_tuple=True)
         e = self.net(abil[b, n, k])                                                   # [M, d]
-        out = abil.new_zeros(B * N, e.shape[-1]).index_add(0, b * N + n, e)
+        out = e.new_zeros(B * N, e.shape[-1]).index_add(0, b * N + n, e)
         return out.reshape(B, N, -1)
 
 
@@ -82,7 +90,12 @@ def attention_bias(obs_t, bias_table, bins):
     buckets = distance_buckets(obs_t["pos"], known, bins)
     bias = bias_table(buckets).permute(0, 3, 1, 2)                     # [B, H, L, L]
     keys = F.pad(obs_t["attend"], (1, 0), value=True)                  # [B, L]
-    return bias.masked_fill(~keys[:, None, None, :], float("-inf"))
+    bias = bias.masked_fill(~keys[:, None, None, :], float("-inf"))
+    # Made once in memory the attention kernel takes as it is: rows aligned to 16 numbers (a view
+    # of a padded tensor). Otherwise scaled_dot_product_attention copies it into such memory in
+    # every layer, forward and backward (~15 % of a training update).
+    L = bias.shape[-1]
+    return F.pad(bias, (0, -L % 16))[..., :L]
 
 
 class Block(nn.Module):

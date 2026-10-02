@@ -91,14 +91,8 @@ class Actor(nn.Module):
         x, bias, adapter = self.encode(flat, use_adapter)
         h = self.initial(flat)[:B] if h0 is None else h0
         if self.memory is not None:
-            x = x.reshape(T, B, *x.shape[1:])
-            keep = self.keep(flat).reshape(T, B, -1)
-            out = []
-            for t in range(T):
-                h = h * (~reset[t]).float()[:, None, None]
-                xt, h = self.memory(x[t], h, keep[t])
-                out.append(xt)
-            x = torch.stack(out).reshape(T * B, *x.shape[2:])
+            x, h = self.memory.scan(x.reshape(T, B, *x.shape[1:]), h, self.keep(flat).reshape(T, B, -1), reset)
+            x = x.reshape(T * B, *x.shape[2:])
         logits = self.finish(x, bias, adapter, flat)
         return {k: v.reshape(T, B, *v.shape[1:]) for k, v in logits.items()}, h
 

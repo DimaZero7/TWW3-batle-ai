@@ -24,3 +24,19 @@ class TokenMemory(nn.Module):
         new = self.cell(self.norm(x).reshape(B * L, d), h.reshape(B * L, d)).reshape(B, L, d)
         new = new * keep[..., None]
         return x + new, new
+
+    def scan(self, x, h, keep, reset):
+        """forward() through decisions in a row (training through time): x [T, B, L, d], h [B, L, d] the
+        memory before the first, keep [T, B, L], reset [T, B] (the memory starts empty at step t) ->
+        (x + memory of every step [T, B, L, d], the last memory). The same numbers as forward() step
+        by step; the parts that do not depend on the memory (the norm, the masks, the residual) run
+        on all T steps at once, so each step launches a few operations instead of a dozen."""
+        T, B, L, d = x.shape
+        xn = self.norm(x).reshape(T, B * L, d)
+        go_on = (~reset).float()[:, :, None, None]                    # [T, B, 1, 1]
+        keep = keep[..., None]
+        out = []
+        for xt, gt, kt in zip(xn.unbind(0), go_on.unbind(0), keep.unbind(0)):
+            h = self.cell(xt, (h * gt).reshape(B * L, d)).reshape(B, L, d) * kt
+            out.append(h)
+        return x + torch.stack(out), h

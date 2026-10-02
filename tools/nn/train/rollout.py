@@ -47,6 +47,19 @@ UNTRAINED = len(league.OPPONENTS) + 1
 
 
 _OBSERVE = {}
+_FAST = {}
+
+
+def fast(fn, use):
+    """fn compiled by torch.compile (one graph per batch shape) when use, else fn itself. The
+    bookkeeping of a decision (the scripts, rewards, counters) is hundreds of small operations on
+    [B, N] tensors: on the GPU their launches, not the work, took most of the time."""
+    if not use:
+        return fn
+    if fn not in _FAST:
+        torch._dynamo.config.recompile_limit = max(64, torch._dynamo.config.recompile_limit)
+        _FAST[fn] = torch.compile(fn, dynamic=False)
+    return _FAST[fn]
 
 
 def observer(device, compile=None):
@@ -104,6 +117,108 @@ def full_obs(obs, table):
     return out
 
 
+def placement(rows, B):
+    """Where the rows [R] (row = (side - 1) * B + battle) go in the batch: ((side, battles, rows' positions)
+    for side 1 and 2), as index tensors made once (boolean indexing reads its size back from the GPU)."""
+    b, two = rows % B, rows >= B
+    return tuple((s, b[sel], torch.nonzero(sel).squeeze(1)) for s, sel in ((1, ~two), (2, two)))
+
+
+def assemble_orders(st, ctrl, scripts, parts):
+    """The batch's Orders [B, N]: scripts ((code, script), ...) give the orders of the sides whose
+    controller (ctrl [B, 2]) is their code; parts ((placement, Orders [rows, N]), ...) those of the
+    networks' rows."""
+    B, N = st.B, st.N
+    side = {s: O.hold(B, N, st.device) for s in (1, 2)}
+    for code, script in scripts:
+        o = script(st)
+        for s in (1, 2):
+            use = (ctrl[:, s - 1] == code)[:, None].expand(B, N)
+            side[s] = O.merge(side[s], o, use)
+    for place, o in parts:
+        for s, b, i in place:
+            for k in O.FIELDS:
+                getattr(side[s], k)[b] = getattr(o, k)[i]
+    return O.merge(side[1], side[2], st.u["side"] == 2)
+
+
+def learner_units(u, ctrl):
+    """[B, N] the units of the sides the learner plays (ctrl [B, 2])."""
+    side = u["side"]
+    learner = torch.zeros_like(side, dtype=torch.bool)
+    for s in (1, 2):
+        learner = learner | ((side == s) & (ctrl[:, s - 1] == league.LEARNER)[:, None])
+    return learner
+
+
+def _orders_cost(st, orders, was_done, ctrl, weights, orders_stats, order_battle):
+    """Before the step: what each side pays for its order changes [B, 2] and the target switches [B, N];
+    counts the learner's order changes and standing unit-steps (in place: orders_stats, order_battle)."""
+    u = st.u
+    changes = reward.order_changes(u, orders, weights.order_move_m) & ~was_done[:, None]
+    switched = reward.retargets(u, orders) & ~was_done[:, None]
+    cost = reward.order_cost(changes, u["side"], weights, switched)
+    learner = learner_units(u, ctrl)
+    standing = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"] & ~u["r"] & learner & ~was_done[:, None]
+    c, n = (changes & learner).float().sum(1), standing.float().sum(1)
+    orders_stats += torch.stack([c.sum(), n.sum()])
+    order_battle[:, 0] += c
+    order_battle[:, 2] += n
+    return cost, switched
+
+
+def _rewards(st, health, was_done, hit_rate, last_hit, cost, weights, dt, rb, rs, attacks, part_stats, part_steps,
+             timeouts):
+    """After the step: (measure after, finished [B], the terms {PARTS: [B, 2]}, the reward [B, 2], the
+    attacker's damage rate and last hit [B]); counts the learner's reward by term and role, and the
+    timeouts (in place)."""
+    after = reward.measure(st, weights.rout_share, weights.lord_rout)
+    finished = st.done & ~was_done
+    terms = reward.parts(health, after, finished, st.winner, st.attacker, weights)
+    if weights.idle_rate > 0:
+        # only a steady damage rate counts as attacking (reward.idle_cost: idle_rate)
+        hit_rate = reward.hit_rate(hit_rate, health, after, st.attacker, dt, weights.idle_window_s)
+        hit = hit_rate >= weights.idle_rate
+    else:
+        hit = reward.struck(health, after, st.attacker)
+    last_hit = torch.where(hit, st.t, last_hit)
+    terms["idle"] = -reward.idle_cost(st, weights, last_hit) * (~finished).float()[:, None]
+    terms["orders"] = -cost
+    r = sum(terms[k] for k in reward.PARTS)
+    timeouts += (finished & (after[:, 0, 1] > 0) & (after[:, 1, 1] > 0)).sum()
+    live = (~was_done[rb]).float()
+    role = 1 - attacks.long()                                    # 0 the learner attacks, 1 defends
+    part_stats.index_add_(0, role, torch.stack([terms[k][rb, rs] for k in reward.PARTS], 1) * live[:, None])
+    part_steps.index_add_(0, role, live)
+    return after, finished, terms, r, hit_rate, last_hit
+
+
+def _unit_rewards(prev, st, params, weights, last_hit, rb, rs, was_done):
+    """[R, N] each learner unit's own reward (reward.unit_step) in its row's slots; 0 for the other side."""
+    idle_m = reward.idle_scale(st.t, last_hit, weights) if weights.unit_idle else None
+    ur = reward.unit_step(prev, st, behaviour.facts(st, params), params, weights, idle_m)
+    own = st.u["side"][rb] == (rs + 1)[:, None]
+    return torch.where(own & ~was_done[rb][:, None], ur[rb], torch.zeros_like(ur[rb]))
+
+
+def _decide(actor, obs, h, frame, bounds, greedy):
+    """The actor's decision: (logits, sampled Action, Orders, new memory). Compiled with fast(), the
+    network's weights are the graph's inputs (the learner, the past version and their updates share
+    it); the sampling then draws from the compiled code's own random stream (the same distribution)."""
+    logits, h_new = actor(obs, h)
+    action = hd.sample(logits, greedy, abilities=True)
+    return logits, action, to_orders(actor.cfg, action, obs, frame, bounds), h_new
+
+
+def _log_prob(logits, action, ctrl):
+    return hd.log_prob(logits, action, ctrl)[0]
+
+
+def _values(critic, obs):
+    """The critic's (value [R], per-unit values [R, N])."""
+    return critic(obs, per_unit=True)
+
+
 def open_rows(source, want=None):
     """(State, LiveSetup, bank rows) of a batch that starts with the battles the source picks."""
     idx = source.pick(want)
@@ -141,6 +256,16 @@ class Battles:
         self.B, self.N = layout.B, self.bank.N
         self.advance = battle.stepper(self.device, compile)
         self.look = observer(self.device, compile)
+        # the bookkeeping around the simulator's step, compiled like it on CUDA (fast())
+        self.compiled = use = compile if compile is not None else self.device.type == "cuda"
+        self._assemble = fast(assemble_orders, use)
+        self._orders_cost = fast(_orders_cost, use)
+        self._rewards = fast(_rewards, use)
+        self._unit_rewards = fast(_unit_rewards, use)
+        self._measure = fast(reward.measure, use)
+        self._decide = fast(_decide, use)
+        self._log_prob = fast(_log_prob, use)
+        self._values = fast(_values, use)
         # `hold` is met only as the defender: its battles must have the learner attacking.
         only = np.isin(layout.opponent, [league.CODE[n] for n in league.ATTACK_ONLY])
         self.want = torch.as_tensor(np.where(only, layout.learner, 0), device=self.device)
@@ -148,6 +273,8 @@ class Battles:
         flat = torch.cat([self.ctrl[:, 0], self.ctrl[:, 1]])
         self.rows_learn = (flat == league.LEARNER).nonzero().squeeze(1)
         self.rows_past = (flat == league.CODE["past"]).nonzero().squeeze(1)
+        self.place_learn = placement(self.rows_learn, self.B)
+        self.place_past = placement(self.rows_past, self.B)
         self.scripts = {league.CODE[n]: f for n, f in opponents.SCRIPTS.items() if bool((self.ctrl == league.CODE[n]).any())}
         opp = torch.as_tensor(layout.opponent, device=self.device)
         self.row_opp = torch.cat([opp, opp])[self.rows_learn]                          # [R]
@@ -222,26 +349,15 @@ class Battles:
         obs_r = rows_of(a, rows)
         if h is None:
             h = actor.initial(obs_r)
-        logits, h_new = actor(obs_r, h)
-        action = hd.sample(logits, greedy, abilities=True)
-        orders = to_orders(actor.cfg, action, obs_r, frame_rows(frame, rows), self.bounds2[rows])
+        logits, action, orders, h_new = self._decide(actor, obs_r, h, frame_rows(frame, rows), self.bounds2[rows],
+                                                     greedy)
         return obs_r, h, logits, action, orders, h_new
 
     def assemble(self, parts):
         """[(rows, Orders [len(rows), N])] and the scripts -> the batch's Orders [B, N]."""
-        B, N = self.B, self.N
-        side = {s: O.hold(B, N, self.device) for s in (1, 2)}
-        for code, script in self.scripts.items():
-            o = script(self.st)
-            for s in (1, 2):
-                use = (self.ctrl[:, s - 1] == code)[:, None].expand(B, N)
-                side[s] = O.merge(side[s], o, use)
-        for rows, o in parts:
-            b, two = rows % B, rows >= B
-            for s, sel in ((1, ~two), (2, two)):
-                for k in O.FIELDS:
-                    getattr(side[s], k)[b[sel]] = getattr(o, k)[sel]
-        return O.merge(side[1], side[2], self.st.u["side"] == 2)
+        places = [(self.place_learn if rows is self.rows_learn else self.place_past if rows is self.rows_past
+                   else placement(rows, self.B), o) for rows, o in parts]
+        return self._assemble(self.st, self.ctrl, tuple(self.scripts.items()), tuple(places))
 
     # --- one decision and one simulator step ---
     @torch.no_grad()
@@ -256,54 +372,34 @@ class Battles:
         if len(self.rows_past) and self.past_actor is not None:
             *_, o_past, h_past_new = self._act(self.past_actor, a, frame, self.rows_past, self.h_past, False)
             parts.append((self.rows_past, o_past))
-        lp, _ = hd.log_prob(logits, action, obs_r["ctrl"])
+        lp = self._log_prob(logits, action, obs_r["ctrl"])
         value = unit_value = None
         if critic is not None:
-            value, unit_value = critic(c, per_unit=True)
+            value, unit_value = self._values(critic, c)
         acting = obs_r["ctrl"] & ~self.st.done[self.rows_learn % self.B][:, None]
-        self.kind_stats += torch.bincount(action.kind[acting], minlength=len(O.KINDS))[:len(O.KINDS)]
-        onehot = torch.nn.functional.one_hot(action.kind.clamp(0, len(O.KINDS) - 1), len(O.KINDS)).float()
-        self.kind_battle.index_add_(0, self.rows_learn % self.B, (onehot * acting[..., None].float()).sum(1))
+        # (a comparison, not bincount / one_hot: they read the GPU's answer back to size their output)
+        kinds = action.kind[..., None] == torch.arange(len(O.KINDS), device=self.device)
+        per_row = (kinds & acting[..., None]).sum(1)                                    # [R, kinds]
+        self.kind_stats += per_row.sum(0)
+        self.kind_battle.index_add_(0, self.rows_learn % self.B, per_row.float())
 
         was_done = self.st.done.clone()
         attacks = self.st.attacker[self.rows_learn % self.B] == self.rows_learn // self.B + 1   # [R], this battle
         marks = self._ability_marks()
         orders = self.assemble(parts)
-        changes = reward.order_changes(self.st.u, orders, self.weights.order_move_m) & ~was_done[:, None]
-        switched = reward.retargets(self.st.u, orders) & ~was_done[:, None]
-        cost = reward.order_cost(changes, self.st.u["side"], self.weights, switched)
-        self._count_orders(changes, was_done)
+        cost, switched = self._orders_cost(self.st, orders, was_done, self.ctrl, self.weights, self.orders_stats,
+                                           self.order_battle)
         prev = reward.unit_before(self.st.u, self.weights.rout_share) if critic is not None else None
         self.advance(self.st, orders, self.params, self.params.dt)
-        after = reward.measure(self.st, self.weights.rout_share, self.weights.lord_rout)
-        finished = self.st.done & ~was_done
-        terms = reward.parts(self.health, after, finished, self.st.winner, self.st.attacker, self.weights)
-        if self.weights.idle_rate > 0:
-            # only a steady damage rate counts as attacking (reward.idle_cost: idle_rate)
-            self.hit_rate = reward.hit_rate(self.hit_rate, self.health, after, self.st.attacker, self.params.dt,
-                                            self.weights.idle_window_s)
-            hit = self.hit_rate >= self.weights.idle_rate
-        else:
-            hit = reward.struck(self.health, after, self.st.attacker)
-        self.last_hit = torch.where(hit, self.st.t, self.last_hit)
-        terms["idle"] = -reward.idle_cost(self.st, self.weights, self.last_hit) * (~finished).float()[:, None]
-        terms["orders"] = -cost
-        r = sum(terms[k] for k in reward.PARTS)
-        self.timeouts += int((finished & (after[:, 0, 1] > 0) & (after[:, 1, 1] > 0)).sum())
         rb, rs = self.rows_learn % self.B, self.rows_learn // self.B
+        after, finished, terms, r, self.hit_rate, self.last_hit = self._rewards(
+            self.st, self.health, was_done, self.hit_rate, self.last_hit, cost, self.weights, self.params.dt, rb, rs,
+            attacks, self.part_stats, self.part_steps, self.timeout_count)
         r_rows, d_rows = r[rb, rs], finished[rb]
-        live = (~was_done[rb]).float()
-        role = 1 - attacks.long()                                    # 0 the learner attacks, 1 defends
-        self.part_stats.index_add_(0, role, torch.stack([terms[k][rb, rs] for k in reward.PARTS], 1) * live[:, None])
-        self.part_steps.index_add_(0, role, live)
         unit_rows = None
         if prev is not None:
             # Each learner unit's own reward (reward.unit_step), in the row's slots; 0 for the other side.
-            idle_m = reward.idle_scale(self.st.t, self.last_hit, self.weights) if self.weights.unit_idle else None
-            ur = reward.unit_step(prev, self.st, behaviour.facts(self.st, self.params), self.params, self.weights,
-                                  idle_m)
-            own = self.st.u["side"][rb] == (rs + 1)[:, None]
-            unit_rows = torch.where(own & ~was_done[rb][:, None], ur[rb], torch.zeros_like(ur[rb]))
+            unit_rows = self._unit_rewards(prev, self.st, self.params, self.weights, self.last_hit, rb, rs, was_done)
         self._count(finished, rb, rs, d_rows)
         lord_dead = after[:, :, 2] < 0.5 if after.shape[-1] > 2 else torch.zeros_like(after[:, :, 0], dtype=torch.bool)
         d = d_rows.float()
@@ -317,7 +413,7 @@ class Battles:
 
         if self.auto_reset:
             self._reset(finished)
-        self.health = reward.measure(self.st, self.weights.rout_share, self.weights.lord_rout)
+        self.health = self._measure(self.st, self.weights.rout_share, self.weights.lord_rout)
         keep = (~finished).float()
         self.h_learn = h_new * keep[rb][:, None, None]
         if h_past_new is not None:
@@ -344,20 +440,33 @@ class Battles:
 
     def _count(self, finished, rb, rs, d_rows):
         won = (self.st.winner[rb] == rs + 1).float()
-        code = torch.where((self.row_opp == league.CODE["past"]) & torch.tensor(self.past_untrained, device=self.device),
-                           torch.full_like(self.row_opp, UNTRAINED), self.row_opp)
+        code = self.row_opp if not self.past_untrained else torch.where(
+            self.row_opp == league.CODE["past"], torch.full_like(self.row_opp, UNTRAINED), self.row_opp)
         d = d_rows.float()
         defends = (self.st.attacker[rb] != rs + 1).long()
         self.stats.index_add_(0, 2 * code + defends, torch.stack([d, d * won, d * self.st.t[rb]], 1))
-        self.battles += int(finished.sum())
+        self.battle_count += finished.sum()
+
+    # Battles and timeouts so far: counted on the GPU (reading them back every decision waited for it).
+    @property
+    def battles(self):
+        return int(self.battle_count)
+
+    @battles.setter
+    def battles(self, n):
+        self.battle_count = torch.full((), n, dtype=torch.long, device=self.device)
+
+    @property
+    def timeouts(self):
+        return int(self.timeout_count)
+
+    @timeouts.setter
+    def timeouts(self, n):
+        self.timeout_count = torch.full((), n, dtype=torch.long, device=self.device)
 
     def _learner_units(self, mask):
         """mask [B, N] limited to the learner's units."""
-        side = self.st.u["side"]
-        learner = torch.zeros_like(mask)
-        for s in (1, 2):
-            learner = learner | ((side == s) & (self.ctrl[:, s - 1] == league.LEARNER)[:, None])
-        return mask & learner
+        return mask & learner_units(self.st.u, self.ctrl)
 
     def _ability_marks(self):
         """[B, N, SLOTS] the learner's units' ability cooldowns (a use sets one up)."""
@@ -384,19 +493,6 @@ class Battles:
             self.lord_stats.zero_()
             self.switch_stats.zero_()
         return out
-
-    def _count_orders(self, changes, was_done):
-        """Order changes of the learner's units that stand, and their unit-steps."""
-        u = self.st.u
-        side = u["side"]
-        learner = torch.zeros_like(changes)
-        for s in (1, 2):
-            learner = learner | ((side == s) & (self.ctrl[:, s - 1] == league.LEARNER)[:, None])
-        standing = (side > 0) & (u["men"] > 0) & ~u["gone"] & ~u["r"] & learner & ~was_done[:, None]
-        c, n = (changes & learner).float().sum(1), standing.float().sum(1)
-        self.orders_stats += torch.stack([c.sum(), n.sum()])
-        self.order_battle[:, 0] += c
-        self.order_battle[:, 2] += n
 
     def orders_per_minute(self, reset=True):
         """Real order changes per standing learner unit per minute of battle since the last call."""
@@ -443,7 +539,7 @@ class Battles:
         """(the side's value [R], per-unit values [R, N]) of the learner rows now."""
         if self.cur is None:
             self.cur = self.observe(True)
-        return critic(self.cur[2], per_unit=True)
+        return self._values(critic, self.cur[2])
 
 
 def collect(env, actor, critic, T):
