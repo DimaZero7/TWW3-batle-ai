@@ -82,6 +82,11 @@ LAYOUTS = {
         "order:i special_ability:s phase:s target_self:b target_friends:b target_enemies:b")),
     "special_ability_phase_stat_effects": (3, _layout("phase:s value:f stat:s how:s")),
     "special_ability_phase_attribute_effects": (1, _layout("attribute:s phase:s effect:s")),
+    # When the game fires a timed passive by itself (02.10.2026, the same build; no version marker):
+    # Strength of the Penitent - losing_melee_combat; and when an effect switches off (out_of_melee,
+    # morale_is_lower_than_half_of_base_morale for Frenzy).
+    "special_ability_to_recharge_contexts": (None, _layout("context:s special_ability:s")),
+    "special_ability_to_auto_deactivate_flags": (None, _layout("flag:s special_ability:s")),
 }
 # Tables too wide to decode whole (unit_special_abilities: version 74, ~80 fields, rows of 200-500
 # bytes): only the fields right after the key, which sit at fixed offsets (decode_prefix).
@@ -107,6 +112,8 @@ INFERRED = {
                                                            "target_enemies"},
     "special_ability_phase_stat_effects": {"phase", "value", "stat", "how"},
     "special_ability_phase_attribute_effects": {"attribute", "phase", "effect"},
+    "special_ability_to_recharge_contexts": {"context", "special_ability"},
+    "special_ability_to_auto_deactivate_flags": {"flag", "special_ability"},
     "unit_special_abilities": {"active_time", "recharge_time", "num_uses", "effect_range", "targets_own",
                                "num_effected_friendly_units", "num_effected_enemy_units"},
 }

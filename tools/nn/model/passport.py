@@ -17,7 +17,13 @@ CASTES = ("lord", "hero", "melee_infantry", "missile_infantry", "melee_cavalry",
           "monstrous_infantry", "monstrous_cavalry", "monster", "warbeast", "chariot", "war_machine")
 SIZES = ("small", "medium", "large", "very_large")
 ATTRIBUTES = ("encourages", "expendable", "charge_defense_vs_large", "charge_reflection",
-              "hide_forest", "stalk", "causes_fear", "causes_terror", "unbreakable", "strider")
+              "hide_forest", "stalk", "causes_fear", "causes_terror", "unbreakable", "strider",
+              # 02.10.2026 (appended: older checkpoints load with zero weights for them, encoder.py)
+              "mounted_fire_move", "guerrilla_deploy")
+# Shooting's flight, appended after the attributes on 02.10.2026: direct (flat, trajectory low: needs a
+# clear line past friends), spread = calibration_area / calibration_distance x 20 (arrow 0.78, pistol
+# 0.62), muzzle velocity / 100 m/s.
+FLIGHT = ("direct", "spread", "muzzle_velocity")
 MAX_RANK = 9   # experience ranks 0-9 (game_rules.json experience_levels)
 
 
@@ -55,6 +61,10 @@ def features(p):
     out += _hot(p["caste"], CASTES) + _hot(p["size"], SIZES)
     attrs = set(p.get("attributes") or ())
     out += [float(a in attrs) for a in ATTRIBUTES]
+    cal_d = miss.get("calibration_distance_m") or 0
+    out += [float(bool(miss.get("direct"))),
+            20 * (miss.get("calibration_area_m") or 0) / cal_d if cal_d else 0.0,
+            (miss.get("muzzle_velocity") or 0) / 100]
     return out
 
 

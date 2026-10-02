@@ -179,6 +179,29 @@ arenas are not yet measured in the game.
 - When the Skaven attack and the Empire defends under the planner, the first
   contact comes after ~6 min (363–364 s): the game's AI takes long to close in.
 
+## Morale events and the army collapse (task 20, 02.10.2026)
+
+From the 28 game-AI and 71 network battles (`build/simacc/kb_events.py`, `collapse.py`,
+`kb_lords.py`; points = MoralePercent × leadership, change from the second before the event):
+
+| Event (infantry) | Count | +1 s | +2 s | +4 s | +10 s |
+|---|---:|---:|---:|---:|---:|
+| First contact, the enemy in front | 1457 | +0.4 | +0.1 | −1.0 | −7.8 |
+| First contact, in the flank | 309 | −1.2 | −1.5 | −2.2 | −5.9 |
+| First contact, in the rear | 202 | −1.4 | −1.8 | −2.6 | −3.8 |
+| A new attacker, front / flank / rear (already fighting) | 18462 / 3555 / 1442 | −0.7 / −1.0 / −1.4 | −1.0 / −1.4 / −1.9 | −1.7 / −2.3 / −2.9 | −3.1 / −4.1 / −4.2 |
+| Runs into contact (≥ half its run speed) | 3343 | −0.2 | −0.7 | −2.2 | −8.1 |
+| Met standing | 1500 | −0.2 | −0.4 | −1.2 | −4.4 |
+
+- The flank / rear drop over 1–2 s is one 0.5 s tick of the database's −6 / −14 (1 and 2.1
+  points), not a lasting penalty. No charge bonus (+15) shows after contact.
+- **Army collapse** (68 of 182 sides break all at once): the database's rule with strength =
+  cost × health of units not shattered (routing included) fires on 36 sides, 32 of them collapse,
+  median 2 s after the trigger; 36 collapses have no trigger. With standing units only: 79
+  triggers, 63 collapse, but 50 s later (median). The game's own strength is not recorded.
+- **Lords** fall (all shattered, none killed) at 16 % health (median of 48 in the network
+  battles); the simulator's at 4 %, 130–145 s earlier.
+
 ## Acceleration and charge (from the pairs)
 
 Speed between the one-second records before contact:

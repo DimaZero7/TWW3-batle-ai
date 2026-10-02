@@ -106,13 +106,18 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 | Spill | of the hits aimed at a unit, each unit of the target's side out of melee takes 0.115 within 30 m, 0.034 at 30–60 m, 0.015 at 60–90 m | measured: HP of units nobody shoots at, next to a unit that is shot (15.6k seconds) |
 | Spill in melee | of the hits aimed at a unit in melee, each unit of the target's side also in melee takes 0.19 within 15 m, 0.047 at 15–30 m, 0.035 at 30–60 m (centres) | measured (01.10.2026, `build/nn-sim/flank/spill_melee.py`): HP of units in melee, not shot at themselves and whose side does not shoot their opponents, regressed on the melee rule and on the hits aimed at their neighbours in melee (74k seconds, 15k with a shot neighbour; 28 game-AI battles 0.23 / 0.09, net runs 0.19 / 0.05) |
 | Target at will | the order's target if in range, else the nearest standing enemy | as the game ([missile damage](../game/units/missile-damage.md)) |
+| Line of fire (direct fire) | only for direct (flat) fire, the passport's `missile.direct` (trajectory `low`: the Free Company Militia's pistols); the shooter's men aim at the target's centre, a friendly unit between (nearer than the target's edge) blocks the lines passing through its width across the line, widened by 1.2 man radii (friends count 2.2× wider); blocked men do not shoot; at 75 % blocked the unit takes the next target in range, or holds fire. Arrows and slings arc over friends; enemies in the way do not block; no fire over friends from higher ground (flat map) | DB (`projectile_friendly_fire_man_radius_coefficient` 2.2, `unit_firing_line_of_sight_considered_obstructed_ratio` 0.75, trajectory); the knowledge base ([missiles](../game/mechanics/missiles.md)); the geometry is ours, not measured |
+| Fire whilst moving | a unit with `mounted_fire_move` (the militia) aims and shoots while it moves | DB attribute |
+| Pistols (estimate) | hit rate 0.5 at the edge of range (×1.12–1.29 at 60–90 m), reload 10.8 s, first shot 3.8 s | estimate from the projectile's calibration area (2.0 m at 65 m against the arrow's 3.7 m at 95 m), not measured: `sim.json` missile.musket_why |
 | Morale | points: leadership + effects; MoralePercent = points / leadership; moves 1 point or 15 % of the gap per 0.5 s | DB; the step measured (+2 points a second in every recording) |
-| Morale effects | lord within 70 m +4; lord died or shattered −16 then −10; neighbour within 120 m +5; casualties −2…−74; recent casualties −6…−80 (last 30 s, of the whole health); winning / losing the melee +3/+6/+8, −3/−8 (damage ratio 1.5 / 2.5 / 4); attacked in the flank −1, rear −2; flanks exposed (an enemy threatens the left, right or rear: `lf`, `rf`, `bf`) −3, two or more −6; routing friends −3 each; routing enemies +2.5 each; under fire −5; very tired −2, exhausted −6; a stronger enemy within 70 m −3 | DB points; window, ratios calibrated; attacked in the flank / rear measured ([flanks](#flanks-rear-and-charges-in-whole-battles)); a shattered lord counts as lost: in the game his whole army drops 0.5–0.6 of its leadership in the second he shatters and routs within ~3 s (gate battles 02.10.2026) |
+| Morale effects | lord +4 within 70 m, fading to 0 at 105 m; lord died or shattered: his aura only (`lord_fall` 0 / 0); neighbour within 120 m +5; casualties −2…−74; recent casualties −6…−80 (last 30 s, of the whole health); winning / losing the melee +3/+6/+8, −3/−8 (damage ratio 1.5 / 2.5 / 4); first struck in the flank −6, rear −14 for one 0.5 s tick; the army beaten as a whole (enemy strength ≥ 2.6× own, own ≤ 0.22 of the start) −120; flanks exposed (an enemy threatens the left, right or rear: `lf`, `rf`, `bf`) −3, two or more −6; routing friends −3 each; routing enemies +2.5 each; under fire −5; very tired −2, exhausted −6; a stronger enemy within 70 m −3 | DB points; window, ratios calibrated; attacked in the flank / rear measured ([flanks](#flanks-rear-and-charges-in-whole-battles)); a shattered lord counts as lost: in the game his whole army drops 0.5–0.6 of its leadership in the second he shatters and routs within ~3 s (gate battles 02.10.2026) |
 | Faction | Skaven +6 points at the start | measured: before contact they stand 6 higher than the Empire in the same place |
 | States | wavering below 16 points, rout at 0, shattered at the third rout, no new rout within 10 s of a rally | DB |
+| Unbreakable | a unit with `unbreakable` (Flagellants) never loses leadership: its points stay at leadership or above, it never wavers or routs (also not on army destruction) | DB attribute; the knowledge base ([abilities](../game/mechanics/abilities.md), [morale](../game/mechanics/morale.md)) |
 | Rally | while no standing enemy is within 90 m the router regains 2 points a second; rallies at MoralePercent 0.23 | measured: 0.23 and 90 m (365 rallies); 2 points calibrated (median rally 44 s) |
-| Fatigue | charge +34, melee +19, shooting +18, running +4, walking −1, standing −7, ×5 a second; states by the database thresholds | DB; ×5 fitted to 1315 recorded changes of state |
+| Fatigue | charge +34, melee +19, shooting +18, running +4, walking −1, standing −7, ×5 a second; states by the database thresholds; each state scales speed, melee attack and defence, armour, charge, AP damage and reload (`unit_fatigue_effects_tables`) | DB; ×5 fitted to 1315 recorded changes of state |
 | Lord abilities | the side the game's AI plays (`ai`, side 2 by default) fires its lord's active abilities by a rule; the network's side fires them by order (`Orders.ability`; a side the network plays should have `ai` false); passives work for both. Every number is the ability's passport (`config/nn/abilities.json`, the database; `sim.json` abilities says which are modelled and the AI's triggers); effects on the owner (phase targets self), his side's units within range (friends) and enemies within range (enemies): speed, charge speed, melee attack and defence, damage, AP, charge bonus, morale. Warlord: Deadly Onslaught (31 s, ready 90 s after: melee damage and AP ×1.25, charge bonus ×1.6) in melee; Verminous Valour (17 s / 60 s: speed ×1.25, +8 morale points; its 25 m blast has no damage) with an enemy within 60 m; Rally (14 s / 60 s: +16 to friends within 35 m) when a friend there wavers. General: Stand Your Ground (18 s / 90 s: melee defence +24, +16 within 35 m) in melee; Foe Seeker (25 s / 60 s: speed ×1.25) with an enemy within 60 m; Hold the Line, passive (defence +5, +4 within 35 m) | DB (`config/nn/sim.json` abilities; owned per the game's roster readout); when the AI fires them is an assumption |
+| Unit abilities the game fires itself | Flagellants: Frenzy, passive (+10 melee attack, ×1.1 damage, AP and charge), off while morale is below half of leadership (never for unbreakable men); Strength of the Penitent, a timed passive the game fires by itself for either side when the unit is in melee and losing it (HP taken ≥ 1.5 × dealt, the morale rule's ratio): 20 s of +14 melee defence and +15 % physical resistance, ends out of melee, ready 3 s after. Never ordered by the network (`self_cast` false); the network sees `auto`, its context and switch-off in the ability passport | DB: `special_ability_to_recharge_contexts` (losing_melee_combat), `special_ability_to_auto_deactivate_flags` (out_of_melee; morale_is_lower_than_half_of_base_morale), the phases' effects; 'losing' as the morale rule's 1.5 is ours |
 | Map | a square ±1020 m; a routing unit that crosses the edge leaves the battle | measured |
 | Visibility | everything is visible (`vis`, kept for later) | a flat empty map |
 
@@ -283,6 +288,53 @@ compiler for compiling on the CPU.
 
 ## What is missing
 
+- **The second Empire wave (02.10.2026) is not checked against the game yet.** Flagellants,
+  Greatswords and Free Company Militia use their passports and the database's rules; the pistol's
+  hit rate is an estimate; the line of fire is our geometry (aim at the target's centre, friends as
+  rectangles); a blocked unit does not step aside to get a clear shot; an enemy in the way does
+  not catch the shots; no accuracy loss while firing on the move. Recordings wanted:
+  [units](units.md#flagellants-greatswords-free-company-militia).
+- **Task 20: the knowledge-base conflicts, fixed as one set (02.10.2026)** (`build/simacc/kb_eval.py`,
+  `kb_events.py`, `kb_lords.py`, `collapse.py`, `fat_db.py`; [conflicts](../game/mechanics/README.md#conflicts-with-our-simulator)).
+  Each conflict was checked against the database (`db.pack`) and the recordings (26 decided
+  game-AI battles, 71 network battles), then the set was evaluated together (8 replays a battle,
+  majority winner):
+
+  | | All off (before) | The set (now) |
+  |---|---:|---:|
+  | Same winner, game-AI battles | 20 of 26 | 18 of 26 |
+  | Same winner, network battles | 43 of 71 | 43 of 71 |
+  | Pairs and shooting within 20 % | 51 of 54 (mean error 8.8 %) | 51 of 54 (8.7 %) |
+  | HP-lost curve error 60/120/180 s, game-AI / network | 0.063 / 0.088 | 0.058 / 0.088 |
+  | Not over when the recording ends, game-AI / network | 66 / 81 % | 54 / 70 % |
+  | Lords fallen (of 26 / 48 in the game) | 18.6 / 41.6 | 12.1 / 36.5 |
+  | Lord's fall, sim - game (median), game-AI / network | -29 / -129 s | -61 / -145 s |
+
+  In: fatigue effects (`unit_fatigue_effects_tables`, read from `db.pack`: attack x0.95-0.7, speed
+  x0.95-0.85, armour, charge, AP, reload); "attacked in the flank / rear" -6 / -14 as a one-tick
+  event at the first strike from that side (DB; the recordings: a unit first struck in the flank
+  drops 1.5 points more in 1-2 s than one struck in front, in the rear 1.9 - one 0.5 s tick of
+  -6 / -14; the old continuous -1 / -2 is gone); the aura fading 70 -> 105 m (DB); army
+  destruction -120 (DB rule, strength = cost x health of units not shattered); splash damage
+  divided among its targets (no change for today's units: the share still exceeds a man's
+  health); and the three earlier switches (`lord_v_lord` 0.73, `lord_fall` 0 / 0, `missile_leave_m`
+  10). Each of them alone had lowered the winners; together they hold them (the game-AI 20 -> 18
+  is within the replays' noise: other variants of the set gave 18-20), and more battles end as in
+  the game. Dropped after the check: the 4 s recent and 60 s extended casualties (DB
+  description) - the archers' target wavered 90 % late and the slingers' never (4 s), or the
+  pairs wavered too early (30 s + 60 s): the calibrated single 30 s window stays; the charge's
+  +15 morale (DB) - after 3343 recorded charges morale over the next 1-4 s falls as after 1500
+  contacts met standing, no +15 shows; hit slope 1, flank x0.6 / rear x0.3, sectors 45/135 deg,
+  spacing 1.8 m, bracing x2, charge impact - our measured numbers kept (the pairs, the whole
+  battles). Not done: the scaled "strong enemy near" (-3...-24 by a combat power not in the data),
+  the rally timer (meaning unclear). The targets (83 %, +10 points) are not reached: the errors
+  left are elsewhere. **Lords fall too soon** (network battles: 130-145 s earlier, at 4 % health
+  against the game's 16 %, in melee 53 % of their time against 45 %: the game's lords break off
+  and shatter with health left) and the mirror arena (6-8 wrong of 16, as before). **To record**
+  (bridge, every second): `CCO BattleRoot.BalanceOfPowerPercent` (the game's strength for the army
+  destruction), `unit:strategic_value()` per unit, and per unit `CCO PercentCasualtiesRecently`,
+  `PercentHpLostRecently`, `MoraleGreatestEffect` (the casualty windows and which effect drives a
+  rout).
 - **Accuracy pass of 02.10.2026** (the scripts in `build/simacc/`, not in Git). The check then:
   pairs 51 of 54, same winner 20 of 26 (Empire-Skaven 9 of 10, mirror 11 of 16), the network's
   battles 40 of 63. Three gaps were measured on the 28 game-AI and 63 network battles and put
@@ -348,7 +400,11 @@ compiler for compiling on the CPU.
   his blow (the cap squeezed him out before: the lord, a lord and three units took half of what
   the lord alone took); with the enemy lord on him the infantry counts at `lord_rival_others`
   0.35; a unit told to attack another enemy strikes a lord it only touches at `lord_incidental`
-  0.4 (whole battles: 1.7 HP/s against 4.1 when he is its target). The probe's trials replayed
+  0.4 (whole battles: 1.7 HP/s against 4.1 when he is its target), and an enemy unit it only
+  touches at `unit_incidental` 0.3 (the gate battles with Skaven replayed open-loop: an infantry
+  unit fought by one enemy unit while other enemy units stood within 35 m took 19.6 HP/s in the
+  game, 33.9 in the simulator without the rule, 22.3 with it; with no other enemy near 16.5 /
+  20.7; the check's whole battles: same winner 22 of 26 against 18, the pairs unchanged). The probe's trials replayed
   (`python -m tools.nn.lord_swarm --sim`; game / old / new): one spear unit 7.8 / 6.8 / 7.7 and
   6.2 / 5.4 / 6.1; four 7.4 / 7.8 / 8.0 and 4.8 / 6.7 / 6.3; halberds 21.5 / 15.2 / 17.1 and
   11.2 / 10.4 / 11.7; the other lord and three units 29.8 / 9.8 / 21.8 and 27.6 / 9.5 / 22.4;
@@ -386,8 +442,8 @@ compiler for compiling on the CPU.
   shooter's own units in that melee take more than the friendly-fire share.
 - **Replay is open-loop**: the recorded orders do not react to a battle that went differently.
 - **Fatigue** matches the recorded state exactly in 43 % of the samples (off by 0.86 of a
-  state on average). What fatigue does to attack, defence and speed is not in the database and
-  is not modelled.
+  state on average). What it does to attack, defence and speed is in the database
+  (`unit_fatigue_effects_tables`) and modelled since task 20.
 - **Not modelled**: terrain, a turn rate out of melee (a moving unit faces where it goes at
   once), cavalry, monsters, magic, flying, artillery, abilities, experience ranks, the scaled
   "strong enemy near" (only −3).

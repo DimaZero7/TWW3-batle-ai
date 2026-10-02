@@ -64,6 +64,7 @@ column's meaning from its values ourselves (see [below](#what-we-inferred)).
 | `missile.ammo`, `range_m` | projectiles per man, range | `land_units.primary_ammo`, `projectiles` | card |
 | `missile.damage`, `ap_damage`, `reload_s` | projectile damage and reload, s | `projectiles` | card: (damage + piercing) × 10 / reload |
 | `missile.accuracy` | accuracy | `land_units.accuracy` | — |
+| `missile.direct` | direct (flat) fire: trajectory `low`, needs a clear line past friends | `projectiles.trajectory` | ours |
 | `missile.trajectory`, `muzzle_velocity`, `max_elevation`, `calibration_*`, `penetration`, `projectile_number`, `shots_per_volley`, `explosion` | the projectile's flight | `projectiles` | ours |
 
 Experience is not in the passport: what a rank adds is the same for everyone —
@@ -128,6 +129,94 @@ with `config/roster/capture_emp_swords.json` (run `20261002T095749-roster-373`).
 their passports. The halberdiers and the stormvermin of the lord swarm probe are in the
 file too, without cards.
 
+## Flagellants, Greatswords, Free Company Militia
+
+Added on 02.10.2026 to the Empire's pool (the second wave): cheap chaff that never routs, heavy
+armour-piercing infantry, and the first **direct-fire** shooters. Passports from the database;
+no cards from battle yet (list `config/roster/capture_emp_wave2.json`, see "Recordings wanted").
+
+| | Flagellants | Greatswords | Free Company Militia |
+|---|---:|---:|---:|
+| Key | `wh_dlc04_emp_inf_flagellants_0` | `wh_main_emp_inf_greatswords` | `wh_dlc04_emp_inf_free_company_militia_0` |
+| Men; health of a man / unit | 120; 73 / 8760 | 120; 76 / 9120 | 120; 61 / 7320 |
+| Mass; run / charge, m/s | 100; 3.6 / 4.0 | **120**; **2.8** / 3.5 | 90; 3.6 / 4.0 |
+| Attack / defence | 32 / **12** | 32 / 30 | 28 / 25 |
+| Charge | **28** | 18 | 14 |
+| Damage: normal + piercing | 25 + 8 (mace) | **10 + 25** (greatsword) | 21 + 7 (sword) |
+| Bonus against large / infantry | 0 / 0 | 0 / **14** | 0 / 0 |
+| Time between blows, s | 4.5 | 4.3 | 4.2 |
+| Armour; shield | **0**; none | **95** (plate); none | 25 (leather); none |
+| Leadership | **100** | 75 | 55 |
+| Attributes | **unbreakable**, hide_forest | hide_forest | **mounted_fire_move**, guerrilla_deploy, hide_forest |
+| Abilities | Frenzy, Strength of the Penitent | — | — |
+| Shooting | — | — | pistol: **direct** (trajectory `low`), 90 m, 18 shots, 12 + 2, reload 9 s, 90 m/s, calibration 2.0 m at 65 m, penetration low |
+| Cost (multiplayer) | 600 | 850 | 450 |
+
+### What each feature does, and where it comes from
+
+| Unit | Feature | What it does | Source | Simulator | Network |
+|---|---|---|---|---|---|
+| Flagellants | Unbreakable | never loses leadership, never routs (also not when the army is destroyed) | DB attribute `unbreakable`; [abilities](../game/mechanics/abilities.md), [morale](../game/mechanics/morale.md) | morale points never below leadership: never wavers or routs (`morale.py`) | passport attribute `unbreakable` (already an input) |
+| Flagellants | Frenzy (passive) | +10 melee attack, ×1.1 damage, AP and charge bonus, Immune to Psychology; off while morale is below half of leadership | DB: `special_ability_phase_stat_effects`, `_attribute_effects`, `special_ability_to_auto_deactivate_flags` (`morale_is_lower_than_half_of_base_morale`); knowledge base | modelled (`sim.json` abilities.model); never off for these unbreakable men; Immune to Psychology has nothing to act on (no fear or terror in the simulator) | ability slot: effects, `immune_to_psychology`, `off_morale_below_half` |
+| Flagellants | Strength of the Penitent (timed passive): the "defends better when losing" effect | the game fires it itself when the unit is in melee **and losing it**: 20 s of **+14 melee defence, +15 % physical resistance**, ends at once out of melee, ready again 3 s after | DB: `unit_special_abilities` (20 s, 3 s), `special_ability_to_recharge_contexts` (`losing_melee_combat`), auto-deactivate `out_of_melee`, the phase's effects. The fandom wiki gives 15 s (an older patch): the database wins | modelled for either side; "losing" = HP taken ≥ 1.5 × dealt recently (the morale rule's ratio, ours); physical resistance added to the melee damage rule (cap 90 %) | ability slot: `auto`, `when_losing_melee`, `off_out_of_melee`, the effects; never orderable |
+| Flagellants | Very low defence, no armour | the whole base damage of every hit lands, arrows and slings too | passport | the per-hit rule with armour 0 | passport |
+| Flagellants | Chaff | cheap and never runs: holds enemies in place | follows from the above | (from the numbers) | — |
+| Greatswords | Armour 95, armour-piercing two-handed sword, bonus 14 against infantry | most of their damage ignores armour; their armour stops 71 % of base damage on average | passport (the wiki's 32 / 23 AP / bonus 10 are older; the DB has 35 / 25 / 14); no Stubborn or other special attribute in the WH3 database | already modelled (AP split, bonus against infantry to attack and damage, armour); test: they bring armoured stormvermin down more than 1.5× faster than swordsmen | passport |
+| Greatswords | Slow (run 2.8), heavy (mass 120) | slow to reposition | passport | speed from the passport (the simulator does not use mass) | passport |
+| Militia | Direct fire | flat, fixed-speed bullets: cannot shoot through or over friends; 75 % of the men blocked = holds fire at that target | DB: `projectiles.trajectory` `low`, `unit_firing_line_of_sight_considered_obstructed_ratio` 0.75, `projectile_friendly_fire_man_radius_coefficient` 2.2; [missiles](../game/mechanics/missiles.md) | line of fire (`missile.py` clear_shot, [simulator](simulator.md)) | passport `direct` |
+| Militia | Accuracy, spread | calibration area 2.0 m at 65 m (the arrow 3.7 m at 95 m): tighter, but short-ranged | DB `projectiles` | hit rate 0.5 at the edge of range: an **estimate** (`sim.json` missile.musket_why) | passport `spread` (calibration area / distance × 20), `muzzle_velocity` |
+| Militia | Fire whilst moving | shoots on the move | DB attribute `mounted_fire_move`; the wiki says the same | aims and shoots while moving | passport attribute |
+| Militia | Decent melee (28 / 25, sword 21 + 7) | can hold a line or finish routers | passport | from the passport | passport |
+| Militia | Vanguard deployment | may deploy ahead of the deployment zone | DB attribute `guerrilla_deploy`; the wiki | not modelled (placements come from the army generator) | passport attribute |
+
+The bridge needs nothing for them: a blocked shooter under an attack order stands idle and is
+released to fire at will after 4 decisions (`services.missile_duty`), as any shooter; the
+Penitent is never ordered (not `self_cast`). In the game the companion cannot count the Penitent's
+timers (the bridge knows only the abilities it fired), so there the network sees it as not active.
+
+### Recordings wanted
+
+1. **Cards**: `python -m tools.build roster-capture --capture config/roster/capture_emp_wave2.json`,
+   launch, `python -m tools.roster update …/events.jsonl`, then `py -3.14 -m tools.nn.units` (the card
+   check) and `py -3.14 -m tools.nn.abilities` (Frenzy and the Penitent must be on the card's passive list).
+2. **Pistol hit rate, reload, first shot**: the archer range (`--range-mode damage`) with 120 militia in
+   the archers' place against a standing clanrat unit at 60, 75 and 90 m, 3 runs each.
+3. **Line of fire**: militia, a friendly spearmen unit 20 m in front of them across the whole line,
+   clanrats 80 m away, fire at will, 60 s; then the spearmen moved aside by half their width
+   (expected: no shots, then about half).
+4. **The Penitent**: flagellants against stormvermin (they lose), the bridge's `ActiveEffectList`
+   every second: when the phase comes on (HP taken against dealt), how long it stays.
+5. **Fire whilst moving**: militia walking past a standing enemy unit at 70 m: shots while moving.
+
+## How to add a unit
+
+A standing procedure (user, 02.10.2026). The Flagellants, Greatswords and Free Company Militia
+above are the worked example.
+
+1. **Key and passport.** Find the main unit key (`main_units`), add it to `UNITS` in
+   `tools/nn/units.py`, run `py -3.14 -m tools.nn.units`; its abilities: `py -3.14 -m tools.nn.abilities`.
+2. **Research every special feature.** The unit's attributes (the passport's `attributes`), its
+   abilities (effects, `auto`, `auto_when`: when the game fires it, `off_when`: when it is off),
+   its projectile (trajectory, calibration, penetration) and its in-game description; then the
+   web (honga.net's WH3 unit pages, the fandom wiki, guides; older patches' numbers differ: the
+   database wins) and the knowledge base `docs/en/game/mechanics/`. Look for conditional bonuses
+   ("the worse it goes, the better it defends"), immunities, deployment and movement rules.
+3. **Write each feature down** in this page's table for the unit: what it does, its source, how the
+   simulator models it (or why not) and how the network sees it.
+4. **Model every feature that changes battle outcomes**: in the simulator (a `sim.json` number with
+   its `why`; an estimate says so and names the recording that would measure it) and in the
+   network's input: a passport feature (`tools/nn/model/passport.py`) or an ability field
+   (`tools/nn/model/abilities.py`). New inputs go **at the end** of the passport or ability features
+   only: older checkpoints then load with zero weights for them (`encoder.pad_inputs`) and act as before.
+5. **Card from battle**: a capture list `config/roster/capture_<name>.json` (the general and up to 4
+   units), roster capture, `tools.roster update`, rebuild the passports (they must equal the card).
+6. **Pool**: `config/nn/pools.json` (key, slot, width), then `py -3.14 -m tools.nn.armies.templates`
+   ([armies](armies.md#a-new-unit-or-faction)).
+7. **Tests**: the passport (`tests/tools/test_units.py`), each new mechanic in the simulator
+   (`tests/tools/test_sim.py`), the network forward/backward and an old checkpoint loading through the
+   conversion (`tests/tools/test_nn_model.py`).
+8. **Docs** in both languages: this page, [simulator](simulator.md), [armies](armies.md).
+
 ## Checked against the cards
 
 All seven passports equal their cards from battle in every checked field (the
@@ -157,16 +246,17 @@ the hits whose shooter stands within 60° of the target's facing, for lords and 
 
 - **Projectile bonus against large and infantry.** No column found: the
   archers' "anti-large arrow" row equals the plain arrow in every field.
-- **Whether it shoots over friends.** No column of its own. Perhaps it is
-  `trajectory` (`dual_low_fixed` for the arrow and the sling) — not checked.
+- **Whether it shoots over friends.** No column of its own: `missile.direct` (trajectory `low`,
+  the militia's pistols) cannot; `dual_low_fixed` (arrow, sling) arcs over friends (knowledge base,
+  not measured).
 - **Fatigue per unit.** Not in `land_units` or `battle_entities`; the fatigue
   rules are shared (`config/nn/game_rules.json`, `fatigue`).
 - **A lord's own aura.** The tables give a lord no radius of his own. The aura
   is shared: `general_aura_radius` 70 m and `general_inspire_effect_amount_*` in
   `_kv_morale_tables` ([morale](../game/units/morale.md)). A lord is marked by
   the attribute `encourages`.
-- **What abilities and attributes do.** Keys only; their numbers are in the
-  `special_ability_*` tables, which we did not decode.
+- **What attributes do.** Keys only. Abilities: their numbers, when the game fires them and when
+  they are off are in the ability passports (`config/nn/abilities.json`).
 
 ## What we inferred
 

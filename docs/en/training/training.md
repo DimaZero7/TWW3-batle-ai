@@ -98,6 +98,13 @@ with it, so tests can be compared with each other.
    A trend run (`--updates 0 --minutes M --every K`) evaluates every K minutes of training too
    (their time not counted), keeps each network (`m<minute>.pt`) and evaluation
    (`eval_m<minute>.json`) and writes the table minute 0 / K / … / M (`trend.md`, `report.json`).
+   Under the skill block it shows the **distance from the start** next to the overall rating:
+   `start_kl`, the mean per-unit KL (order kind and target) of the actor to the network the run
+   started from, on one minibatch of every update's training batch (`ppo.distance`, the `log.jsonl`
+   field `start_kl`; mean and last value of the updates since the previous point), the mean anchor
+   KL to the leash's reference, and how many times `--anchor-roll` renewed that reference
+   (`test5.distance`, `distance` in each evaluation's json). A distance that grows while the rating
+   rises means the search works; a rating flat while the distance stalls, a leash too short.
 
 | Metric | What is counted (the learner's units; `tools/nn/train/behaviour.py`) |
 |---|---|
@@ -500,6 +507,11 @@ most about ±1, the win stays the main signal. `hp` and `standing` are 0 by defa
 holds both the health and the routs, and keeping them would count the same loss twice. The lord
 term (0.3) stays: it is the morale shock of the lord's death (−16, then −10 points to every unit),
 not his gold. The per-unit term (`--unit-credit`) is in gold too (`unit_gold`, the table below).
+Friendly fire (02.10.2026, `Weights.friendly_fire` 1): in `unit_gold` the gold a unit's projectiles
+take from its own side is the shooter's loss, not the loss of the unit hit (simulator `missile.friendly`:
+`ff_dealt` / `ff_taken`); the side's reward pays it either way. Gate it4: four slinger units shot the
+enemy Warlord in melee with our spearmen for 119 s; ~2 HP of our own per shot in the game and in the
+simulator alike (game 2.3 / 1.8, simulator 2.3 / 1.8 for the game's AI's and our shooters).
 
 **The attacker's idle cost: exponential in time, set back by damage** (`reward.idle_cost`,
 `idle_scale`, `struck`). The attacker pays 0.0002 (`--idle`) × m each decision in which none of its
@@ -1075,6 +1087,7 @@ above. At `m45` the attacker's advantage (σ 0.07–0.21) is 2–3 times as wide
 | `--idle-rate` (`idle_rate`, 0), `--idle-window` (30 s) | > 0: only a damage rate of at least this share of the budget a minute resets the timer m (`reward.hit_rate`, an exponential mean over the window), not any damage | 0.05 |
 | `--adv-norm` (`PPOConfig.adv_norm`, `batch`) | `role`: the advantage is normalised over the attacking and the defending rows apart | `role` |
 | `--reference self`, `--reference-every` (10) | the KL (`--anchor`) not to the script copy but to the network's own copy, renewed every N updates: a trust region, not a leash | `--anchor 0.05 --reference self` |
+| `--anchor-roll` (0 s) | a rolling anchor: every that many seconds of training the KL reference (`--reference`, else `--init`) becomes the current actor (console "anchor roll", `anchor_rolls` in `log.jsonl`); the leash bounds the drift within a window, not over the whole run. 0: the reference stays fixed | `600` (a 30–40 minute run) |
 | `--critic-init` | the critic from another checkpoint; a `--init` without a critic starts a fresh one (with a warning) | `runs/test5_free60/latest.pt` |
 
 The same idle cost on the same battles (`compare.py`, first 10 minutes, per minute, the learner

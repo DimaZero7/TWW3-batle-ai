@@ -1,0 +1,14 @@
+{
+  "description": "Roster capture of the Empire's second wave (02.10.2026, for the unit passports): Flagellants wh_dlc04_emp_inf_flagellants_0 (unbreakable; the card's passive list checks that Strength of the Penitent and Frenzy are passives), Greatswords wh_main_emp_inf_greatswords, Free Company Militia wh_dlc04_emp_inf_free_company_militia_0 (the first direct-fire unit: ammo, range, damage per 10 s). Captured with the general only. Same widths as config/roster/capture.json.",
+  "faction": "wh_main_emp_empire",
+  "units": [
+    {"key": "wh_main_emp_cha_general_0", "men": 1, "general": true},
+    {"key": "wh_dlc04_emp_inf_flagellants_0", "men": 120},
+    {"key": "wh_main_emp_inf_greatswords", "men": 120},
+    {"key": "wh_dlc04_emp_inf_free_company_militia_0", "men": 120}
+  ],
+  "slots": [[0, -100], [100, -200], [210, -120], [370, -50], [-80, -140]],
+  "widths": [80, 60, 40, 30, 20, 15, 10, 8],
+  "baseline_width": 30,
+  "shape_timeout_s": 40
+}

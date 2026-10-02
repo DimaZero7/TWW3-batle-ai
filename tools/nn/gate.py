@@ -62,14 +62,22 @@ def _size(arena):
     return sum(not u.get("general") for u in arena["sides"]["own"]["units"])
 
 
-def plan(battles, offset=0, block=GATE_BLOCK):
+# symmetric: a seed plays 4 battles, (swap, role) in turn - so each army attacks and defends under
+# either pair of hands (in the plain plan the generator's own army always attacks: our network
+# defends only with the other army, a faction matchup's role never turns round).
+SYMMETRIC = ((False, "attack"), (True, "defend"), (False, "defend"), (True, "attack"))
+
+
+def plan(battles, offset=0, block=GATE_BLOCK, symmetric=False):
     """[{battle, pair, swap, seed, role, own_units, enemy_units, factions, budget, side_budget}] for
     battles offset+1 .. offset+battles; own / enemy: our network's army and the game AI's (swapped in
-    the second battle of a pair)."""
+    the second battle of a pair). symmetric: 4 battles a seed (SYMMETRIC; pairs 2k+1 and 2k+2: in the
+    second pair the generator's enemy army attacks), else 2 (its own army attacks)."""
     from tools.nn.armies import generate
     assert block.start >= generate.EVAL_SEEDS.start and block.stop <= generate.EVAL_SEEDS.stop
     total = offset + battles
-    want = [SIZE_BINS[PAIR_BINS[k % len(PAIR_BINS)]] for k in range((total + 1) // 2)]
+    per_seed = 4 if symmetric else 2
+    want = [SIZE_BINS[PAIR_BINS[k % len(PAIR_BINS)]] for k in range((total + per_seed - 1) // per_seed)]
     picked = [None] * len(want)
     queues = {b: [] for b in SIZE_BINS}
     seeds = iter(block)
@@ -85,10 +93,10 @@ def plan(battles, offset=0, block=GATE_BLOCK):
         picked[i] = (seed, arena)
     out = []
     for i in range(offset, total):
-        seed, arena = picked[i // 2]
-        swap = i % 2 == 1
+        seed, arena = picked[i // per_seed]
+        swap, role = SYMMETRIC[i % 4] if symmetric else (i % 2 == 1, ROLES[i % 2])
         ours, theirs = ("enemy", "own") if swap else ("own", "enemy")
-        out.append({"battle": i + 1, "pair": i // 2 + 1, "swap": swap, "seed": seed, "role": ROLES[i % 2],
+        out.append({"battle": i + 1, "pair": i // 2 + 1, "swap": swap, "seed": seed, "role": role,
                     "own_units": len(arena["sides"][ours]["units"]),
                     "enemy_units": len(arena["sides"][theirs]["units"]),
                     "factions": {"own": arena["sides"][ours]["faction"], "enemy": arena["sides"][theirs]["faction"]},
@@ -504,6 +512,8 @@ def main(argv=None):
     p.add_argument("--battles", type=int, default=4)
     p.add_argument("--offset", type=int, default=0, help="skip this many battles of the plan (another set)")
     p.add_argument("--timeout", type=int, default=0, help="battle limit, model s (0: the simulator's)")
+    p.add_argument("--symmetric", action="store_true",
+                   help="4 battles a seed: each army attacks and defends under either side (SYMMETRIC)")
     s = sub.add_parser("summary", help="summary.json and a table of a gate folder")
     s.add_argument("gate_dir", type=Path)
     args = parser.parse_args(argv)
@@ -513,7 +523,7 @@ def main(argv=None):
             parser.error("--battles must be 1 or more, --offset 0 or more")
         timeout = args.timeout or battle_limit_s()
         print(json.dumps({"timeout_s": timeout, "deadline_s": deadline_s(timeout), "min_wins": min_wins(args.battles),
-                          "battles": plan(args.battles, args.offset)}))
+                          "battles": plan(args.battles, args.offset, symmetric=args.symmetric)}))
         return 0
     summary = summarize(args.gate_dir)
     for line in table(summary):

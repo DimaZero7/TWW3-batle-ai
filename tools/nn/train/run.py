@@ -130,6 +130,15 @@ def train(args, every=None):
                 soften_kind(reference, args.kind_temperature)
         for p in reference.parameters():
             p.requires_grad_(False)
+    # The network the run started from, frozen: the distance from the start (ppo.distance, start_kl in
+    # the log) next to the rating, whatever the reference does (--anchor-roll moves it).
+    start = None
+    if args.init:
+        start = checkpoint.load_policy(args.init, device)
+        if args.kind_temperature != 1.0:
+            soften_kind(start, args.kind_temperature)
+        for p in start.parameters():
+            p.requires_grad_(False)
     cfg = ppo.PPOConfig(lr=args.lr, gamma=args.gamma, epochs=args.epochs, minibatch=args.minibatch,
                         entropy=args.entropy, anchor=args.anchor, unit_credit=args.unit_credit,
                         unit_value=args.unit_value,
@@ -210,6 +219,7 @@ def train(args, every=None):
     update, decisions, total, window, best = 0, 0, {}, {}, -1.0
     floor_w = None                                # the entropy floor's current weight (--entropy-target)
     best_eval, t_eval, paused = -1.0, time.time(), 0.0
+    rolls, rolled_at = 0, 0.0                     # --anchor-roll: renewals of the reference, training s of the last
     next_mark = every[0] if every else None
     elog = (out / "eval_log.jsonl").open("w", encoding="utf-8", newline="\n")
     def share_done():
@@ -245,6 +255,8 @@ def train(args, every=None):
                                     anchor=schedule(args.anchor, anchor_end, done_share))
         trains = update >= args.critic_warmup
         st = ppo.update(actor, critic, opt, batch, u_cfg, train_policy=trains, reference=reference)
+        if start is not None:
+            st["start_kl"] = ppo.distance(actor, start, batch, u_cfg.minibatch)
         if args.entropy_target and trains:
             floor_w = ppo.entropy_weight(floor_w, st["entropy"], args.entropy_target, scheduled,
                                          max(scheduled, args.entropy_max), args.entropy_rate)
@@ -252,6 +264,14 @@ def train(args, every=None):
         update += 1
         if own_reference and reference is not None and update % args.reference_every == 0:
             reference.load_state_dict(actor.state_dict())
+        # --anchor-roll: every that many seconds of training the reference becomes the current actor (a
+        # leash that moves with the network: it bounds the drift within a window, not the whole run).
+        trained_s = time.time() - t0 - paused
+        if args.anchor_roll and reference is not None and not own_reference and trained_s - rolled_at >= args.anchor_roll:
+            reference.load_state_dict(actor.state_dict())
+            rolls, rolled_at = rolls + 1, trained_s
+            print(f"   anchor roll {rolls}: the KL reference is now the actor of update {update} "
+                  f"({trained_s / 60:.1f} min of training)", flush=True)
         decisions += env.B * args.steps
         stats = env.take_stats()
         lords = env.lords()
@@ -264,6 +284,7 @@ def train(args, every=None):
                "collect_s": round(t_c - t_u, 2), "update_s": round(time.time() - t_c, 2),
                **{k: round(v, 4) for k, v in st.items()},
                "entropy_weight": round(u_cfg.entropy, 5), "anchor_weight": round(u_cfg.anchor, 4),
+               "anchor_rolls": rolls,
                "lord_dead_own": round(lords["own"], 3), "lord_dead_enemy": round(lords["enemy"], 3),
                "abilities_per_battle": round(env.abilities(), 2),
                "switches_per_minute": round(lords["switches_per_minute"], 2),
@@ -277,7 +298,7 @@ def train(args, every=None):
             print(f"u{update:4d} {row['seconds']:6.0f}s battles {env.battles:6d} (timeouts {env.timeouts:5d}) "
                   f"{row['battle_steps_per_s']:6d} st/s pl {st['policy_loss']:+.3f} vl {st['value_loss']:.4f} "
                   f"ent {st['entropy']:.2f}/{st['entropy_all']:.2f} kl {st['kl']:.3f} R {st['reward']:+.3f} "
-                  f"anchor {st['anchor_kl']:.3f} unit A share {st['unit_adv_share']:.2f} orders/min {row['orders_per_minute']:5.1f} "
+                  f"anchor {st['anchor_kl']:.3f} start {st.get('start_kl', 0.0):.3f} unit A share {st['unit_adv_share']:.2f} orders/min {row['orders_per_minute']:5.1f} "
                   f"lords dead own {lords['own']:.2f} enemy {lords['enemy']:.2f} abil {row['abilities_per_battle']:.1f} "
                   f"kinds " + " ".join(f"{k[:2]} {v:.2f}" for k, v in row["kinds"].items()), flush=True)
             print(f"      ev {st.get('ev', 0):.3f} (attack {st.get('ev_attack', 0):.3f} defend {st.get('ev_defend', 0):.3f}) "
@@ -435,6 +456,9 @@ def parser():
     ap.add_argument("--reference", help="the reference actor (default: --init); 'self': the network's own copy, "
                                         "renewed every --reference-every updates (a trust region, no fixed leash)")
     ap.add_argument("--reference-every", type=int, default=10, help="updates between renewals of --reference self")
+    ap.add_argument("--anchor-roll", type=float, default=0.0,
+                    help="seconds of training between renewals of the KL reference (--reference or --init): it "
+                         "becomes the current actor (a rolling anchor; 0: fixed for the run)")
     ap.add_argument("--critic-init", help="take the critic from this checkpoint (default: --init's own)")
     ap.add_argument("--adv-norm", default=ppo.PPOConfig.adv_norm, choices=("batch", "role"),
                     help="normalise the side's advantage over the minibatch or over each role apart")

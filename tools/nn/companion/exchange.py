@@ -304,8 +304,14 @@ def write_atomic(path, text, attempts=50, wait_s=0.004):
 
 
 def summary(orders):
-    """A short line: how many units got each kind of order."""
+    """A short line: how many units got each kind of order; units that take no orders (dead, routing,
+    shattered: the network gives them HOLD, the game nothing; marked "out" by the loop) count as out.
+    Before 02.10.2026 they counted as hold: "hold 15 attack 5" late in a gate battle was 13 units out."""
     counts = {k: 0 for k in KINDS}
+    out = 0
     for o in orders:
-        counts[o["kind"]] += 1
-    return " ".join(f"{k} {n}" for k, n in counts.items() if n)
+        if o.get("out"):
+            out += 1
+        else:
+            counts[o["kind"]] += 1
+    return " ".join([f"{k} {n}" for k, n in counts.items() if n] + ([f"out {out}"] if out else []))

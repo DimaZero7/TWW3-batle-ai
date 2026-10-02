@@ -82,18 +82,23 @@ def step(st, orders, params=None, dt=None):
     # --- lord abilities (the game's AI by its rule, the network by order; passives for all): their
     # effects hold for this step ---
     base = abilities.apply(u, params, dt, standing, engaged, pw["dist"], same_side, orders.ability)
+    # --- fatigue's stat multipliers (the database's unit_fatigue_effects_tables), for this step ---
+    tired = fatigue.effects(u, params)
 
     # --- melee ---
     rate, mhit, sector, _ = melee.strikes(u, pw, strike, params, charge_now, u["contact_s"])
     hp_melee = rate * dt
 
     # --- shooting ---
-    still = speed < 0.2
+    # (fire whilst moving, attribute mounted_fire_move: shoots and aims on the move too)
+    still = (speed < 0.2) | u["fire_move"]
     ready = standing & ~engaged & (u["a"] > 0) & (u["range"] > 0) & still
     u["aim"] = torch.where(ready, u["aim"] + dt, torch.zeros_like(u["aim"]))
     can = ready & (u["aim"] >= u["aim_s"])
     m_target = missile.choose_target(u, pw, can, tgt, kind == O.ATTACK)
-    shots, hp_missile, shit = missile.volley(u, pw, m_target, dt, params, contact=touch)
+    # direct fire needs a clear line past friends (missile.py clear_shot); arcing fire: unchanged
+    m_target, clear = missile.clear_shot(u, pw, m_target, can, tgt, kind == O.ATTACK, params)
+    shots, hp_missile, shit = missile.volley(u, pw, m_target, dt, params, contact=touch, clear=clear)
     u["a"] = (u["a"] - shots).clamp(min=0)
     firing = shots > 0
 
@@ -104,6 +109,7 @@ def step(st, orders, params=None, dt=None):
     scale = torch.where(taken > u["hp_abs"], u["hp_abs"] / taken.clamp(min=1e-9), torch.ones_like(taken))
     dmg = dmg * scale[:, None, :]
     taken = dmg.sum(1)
+    u["ff_dealt"], u["ff_taken"] = missile.friendly(hp_missile * scale[:, None, :], u)   # (reward.unit_step)
     share = melee.kill_share(u["hp_man"][:, None, :], hit, cal["kills"]["exponent"])
     kills = dmg / u["hp_man"][:, None, :].clamp(min=1e-6) * share
     hp_new = (u["hp_abs"] - taken).clamp(min=0)
@@ -118,9 +124,16 @@ def step(st, orders, params=None, dt=None):
     u["k"] = u["k"] + credit.sum(2)
     u["hp_abs"], u["men"] = hp_new, men_new
     u["hp"] = torch.where(present, hp_new / u["hp0"].clamp(min=1e-6), torch.zeros_like(hp_new))
-    tau = cal["morale"]["recent_s"]
+    # Casualty windows (decaying sums, time constant = the window): recent casualties
+    # (casualties_s; the database: the last 4 s), extended casualties (extended_s; the last 60 s);
+    # recent_s: the melee balance (dealt / taken; reward.py reads the same) and the lord's fall.
+    cm = cal["morale"]
+    tau = cm["recent_s"]
+    u["recent"] = u["recent"] * math.exp(-dt / float(cm.get("casualties_s", tau))) + taken
+    ext_s = float(cm.get("extended_s") or 0.0)
+    if ext_s > 0:
+        u["extended"] = u["extended"] * math.exp(-dt / ext_s) + taken
     fade = math.exp(-dt / tau)
-    u["recent"] = u["recent"] * fade + taken
     melee_scaled = hp_melee * scale[:, None, :]
     u["dealt"] = u["dealt"] * fade + melee_scaled.sum(2)
     u["taken"] = u["taken"] * fade + melee_scaled.sum(1)
@@ -128,14 +141,18 @@ def step(st, orders, params=None, dt=None):
     u["under_fire_s"] = torch.where(shot_at, torch.zeros_like(u["under_fire_s"]), u["under_fire_s"] + dt)
     attackers = strike & standing[:, :, None]
     u["flank_hit"] = torch.where(attackers, sector, torch.zeros_like(sector)).amax(1).float()
+    # First struck from a worse side (flank, rear) this step: the database's was_attacked_in_flank / _rear.
+    worse = u["flank_hit"] > old["flank_hit"]
+    flank_event = torch.where(worse & (u["flank_hit"] >= 2), params.morale["was_attacked_in_rear"],
+                              torch.where(worse & (u["flank_hit"] >= 1), params.morale["was_attacked_in_flank"], 0.0))
 
     alive = present & (u["men"] > 0) & ~u["gone"]
     standing = alive & ~u["r"]
 
     # --- the lords ---
     # A lord who falls (dead or shattered) takes his aura with him, and his army loses
-    # sim.json morale.lord_fall: the database's -16 then -10 (the recordings show about the aura
-    # only; the -16 / -10 stand in for the game's army collapse until it is modelled: sim.json).
+    # sim.json morale.lord_fall on top (0 / 0: the recordings show about the aura only; the
+    # database's -16 / -10 are not seen; the army collapse is its own rule below).
     has_lord = torch.stack([(u["lord"] & (u["side"] == s)).any(1) for s in (1, 2)], 1)
     lord_alive = torch.stack([(u["lord"] & (u["side"] == s) & alive & ~u["s"]).any(1) for s in (1, 2)], 1)
     dead = has_lord & ~lord_alive
@@ -145,16 +162,40 @@ def step(st, orders, params=None, dt=None):
     since = st.lord_dead_s.gather(1, side_idx)
     M = params.morale
     fall = cal["morale"]["lord_fall"]
-    lord_pts = torch.where(since < 0, 0.0, torch.where(since < tau, float(fall["recent"]), float(fall["lasting"])))
+    fall_s = tau
+    lord_pts = torch.where(since < 0, 0.0, torch.where(since < fall_s, float(fall["recent"]), float(fall["lasting"])))
 
     # --- morale ---
     d = pw["dist"]
     friends = same_side & ~eye & alive[:, None, :]
     foes = pw["enemy"] & alive[:, None, :]
-    aura = (same_side & standing[:, None, :] & u["encourages"][:, None, :] & (d <= M["general_aura_radius"])).any(2)
+    # The lord's aura: full within general_aura_radius, fading linearly to 0 at
+    # x inspiration_radius_max_effect_range_modifier (database: 70 m, 105 m).
+    r0 = M["general_aura_radius"]
+    r1 = r0 * (M["inspiration_radius_max_effect_range_modifier"] if cal["morale"].get("aura_fade") else 1.0)
+    reach_share = ((r1 - d) / max(r1 - r0, 1e-6)).clamp(0, 1) if r1 > r0 else (d <= r0).float()
+    aura = torch.where(same_side & standing[:, None, :] & u["encourages"][:, None, :], reach_share,
+                       torch.zeros_like(d)).amax(2)
     worth = u["cost"] * u["hp"]
+    # Army destruction (database: ume_concerned_army_destruction -120 when the enemy's strength is
+    # army_destruction_enemy_strength_ratio (2.6) x own or more and own strength is
+    # army_destruction_alliance_strength_ratio (0.22) of the start or less). Strength: sim.json
+    # morale.collapse (the game's balance of power is not recorded yet).
+    collapse = torch.zeros_like(standing)
+    cc = cal["morale"].get("collapse") or {}
+    if cc.get("on"):
+        hp_w = u["hp"] ** float(cc.get("hp_power", 1.0))
+        count = standing if cc.get("count", "standing") == "standing" else (alive & ~u["s"])
+        power = u["cost"] * hp_w * count.float()
+        start = u["cost"] * present.float()
+        strength = torch.stack([(power * (u["side"] == s)).sum(1) for s in (1, 2)], 1)
+        start_s = torch.stack([(start * (u["side"] == s)).sum(1) for s in (1, 2)], 1)
+        beaten = (strength.flip(1) >= M["army_destruction_enemy_strength_ratio"] * strength)             & (strength <= M["army_destruction_alliance_strength_ratio"] * start_s)
+        collapse = beaten.gather(1, side_idx) & present
     ctx = {
-        "aura": aura & standing,
+        "aura": aura * standing.float(),
+        "flank_event": flank_event,
+        "collapse": collapse,
         "lord_dead_points": lord_pts,
         "neighbour": (friends & standing[:, None, :] & (d <= M["neighbour_effect_range"])).any(2),
         "in_melee": engaged,
@@ -258,6 +299,7 @@ def step(st, orders, params=None, dt=None):
     for k in ("m", "mv", "f", "fire", "w", "lf", "rf", "bf"):
         u[k] = u[k] & ~dead
 
+    u.update(tired)
     abilities.restore(u, base)
 
     # --- is the battle over ---

@@ -44,6 +44,7 @@ At the end: `build/nn-gate/<time>/summary.json` and a table. Exit code: 0 passed
 | `-DecideMs` | 1000 | Battle time between two decisions of the network, ms |
 | `-Greedy` | off | The most likely order; by default orders are sampled, as in training and in the simulator check (`tools/nn/train/evaluate.py`) |
 | `-Retries` | 1 | Reruns of a battle without an outcome |
+| `-Symmetric` | off | 4 battles a seed (`gate.SYMMETRIC`): each army attacks and defends under either side (below) |
 
 One battle of the plan: `-Battles 1 -Offset 3` is the 4th (the largest armies).
 
@@ -60,6 +61,11 @@ One battle of the plan: `-Battles 1 -Offset 3` is the 4th (the largest armies).
   decides single battles weighs on both battles of a pair alike, so a pair won both says more about
   the network than two single wins. No script baseline in the game (the game's AI against itself
   would cost a launch per battle).
+- `-Symmetric` (`plan --symmetric`, 02.10.2026): in the plain plan the generator's own army always
+  attacks, so the network defends only with the other army and a matchup's roles never turn round.
+  Symmetric blocks play a seed 4 times: own army attacks, enemy army defends, own army defends,
+  enemy army attacks (pairs 2k+1 and 2k+2; in the second pair the generator's enemy army attacks).
+  Use a multiple of 4 battles.
 - The plan walks the block in order and takes a pair's seed by the size of the generator's own army
   (units besides the lord), in turn 1-4, 10-14, 5-9, 15-19 (`PAIR_BINS`). So even a short plan has
   small and large armies.

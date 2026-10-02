@@ -117,3 +117,72 @@ def test_the_idle_count_goes_on_across_the_networks_new_targets(lua):
     d = t({})
     out = [duty(d, idle, t({"men": 100, "m": i % 2 == 0})) for i in range(lua.eval("bridge.RELEASE_AFTER"))]
     assert out[-1] == "release"
+
+
+def test_a_held_shooter_takes_the_nearest_enemy_in_range_as_the_simulator_does(lua):
+    pick = lua.eval("function(me, rows, r, cur) return bridge.hold_target(me, rows, r, cur) end")
+    t = lua.table_from
+    reach = lua.eval("bridge.HOLD_REACH_M")
+    me = t({"n": "own_sling", "side": 1, "men": 140, "a": 3000, "x": 0, "z": 0})
+
+    def rows(*items):
+        return t({i + 1: t(r) for i, r in enumerate(items)})
+
+    far = {"n": "e_far", "side": 2, "men": 100, "x": 120 + reach + 1, "z": 0}
+    melee = {"n": "e_melee", "side": 2, "men": 100, "m": True, "x": 125, "z": 0}
+    near = {"n": "e_near", "side": 2, "men": 100, "x": 0, "z": 90}
+    friend = {"n": "own_spear", "side": 1, "men": 100, "x": 10, "z": 0}
+    assert pick(me, rows(far, friend), 120, None) is None                     # out of reach, a friend
+    assert pick(me, rows(far, melee), 120, None) == "e_melee"                 # into melee too (the sim's)
+    assert pick(me, rows(far, melee, near), 120, None) == "e_near"            # the nearest
+    assert pick(me, rows(far, melee, near), 120, "e_melee") == "e_melee"      # kept while it qualifies
+    routing = dict(near, n="e_rout", r=True, z=50)
+    assert pick(me, rows(routing), 120, None) == "e_rout"                     # routing only if nothing stands
+    assert pick(me, rows(routing, melee), 120, "e_rout") == "e_melee"
+    assert pick(me, rows(dict(near, v=False)), 120, None) is None             # not seen
+    assert pick(me, rows(dict(near, s=True)), 120, None) is None              # shattered
+    assert pick(t(dict(me, a=0)), rows(near), 120, None) is None              # no ammunition
+    assert pick(t(dict(me, m=True)), rows(near), 120, "e_melee") == "e_melee"  # in melee: nothing new
+
+
+def test_a_held_shooter_that_walks_under_its_target_is_halted_for_a_while(lua):
+    guard = lua.eval("function(g, me, aiming) return bridge.hold_guard(g, me, aiming) end")
+    t = lua.table_from
+    walk, free_min = lua.eval("bridge.HOLD_WALK"), lua.eval("bridge.FREE_MIN")
+    g = t({})
+    walking, still = t({"mv": True}), t({"mv": False})
+    assert guard(g, walking, False) is None and g.walk == 0                   # no target: its own walk
+    assert [guard(g, walking, True) for _ in range(walk)][-1] == "halt"
+    assert [guard(g, still, True) for _ in range(free_min)] == ["wait"] * free_min
+    assert guard(g, walking, True) is None and guard(g, still, True) is None and g.walk == 0
+
+
+def test_an_order_the_engine_dropped_is_given_again(lua):
+    stalled = lua.eval("function(s, me, o, tg) return bridge.order_stalled(s, me, o, tg) end")
+    t = lua.table_from
+    after, far_m = lua.eval("bridge.STALL_AFTER"), lua.eval("bridge.STALL_M")
+    attack = t({"kind": "attack", "target": "e_sling"})
+    me = t({"n": "own_lord", "side": 1, "men": 1, "hp": 0.6, "x": 0, "z": 0})
+    far = t({"n": "e_sling", "side": 2, "men": 140, "x": far_m + 60, "z": 0})
+    s = t({})
+    assert [stalled(s, me, attack, far) for _ in range(after)] == [None] * (after - 1) + ["regive"]
+    assert s.n == 0                                                            # counted afresh
+    near = t({"n": "e_sling", "side": 2, "men": 140, "x": far_m - 5, "z": 0})
+    s = t({})
+    assert [stalled(s, me, attack, near) for _ in range(after + 2)] == [None] * (after + 2)   # fighting range
+    for busy in ({"mv": True}, {"m": True}, {"fire": True}, {"r": True}):
+        s = t({})
+        row = t(dict({"n": "own_lord", "side": 1, "men": 1, "hp": 0.6, "x": 0, "z": 0}, **busy))
+        assert [stalled(s, row, attack, far) for _ in range(after + 2)] == [None] * (after + 2)
+    s = t({})                                                                  # losing health: not idle
+    hits = [stalled(s, t({"n": "own_lord", "side": 1, "men": 1, "hp": 0.6 - 0.01 * k, "x": 0, "z": 0}), attack, far)
+            for k in range(after + 2)]
+    assert hits == [None] * (after + 2)
+    gone = t({"n": "e_sling", "side": 2, "men": 0, "x": 200, "z": 0})
+    assert [stalled(t({}), me, attack, gone) for _ in range(after)][-1] is None   # no target left
+    move = t({"kind": "move", "x": 100, "z": 0})
+    s = t({})
+    assert [stalled(s, me, move, None) for _ in range(after)][-1] == "regive"
+    there = t({"kind": "move", "x": 5, "z": 0})                                 # arrived (the front's offset)
+    assert [stalled(t({}), me, there, None) for _ in range(after)][-1] is None
+    assert [stalled(t({}), me, t({"kind": "hold"}), None) for _ in range(after)][-1] is None

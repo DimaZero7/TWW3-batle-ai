@@ -198,7 +198,12 @@ class TestBattles:
         melee = max(u.cost for u in emp.units if u.category != "inf_ranged")
         archer = max(u.cost for u in emp.units if u.category == "inf_ranged")
         emp_hi = emp.lord.cost + 12 * max(melee, archer) + 7 * melee
-        assert gen.budget_bounds((EMP,)) == (emp.lord.cost + min(u.cost for u in emp.units), emp_hi)
+        # ... capped at pools.json budget_max (02.10.2026: the budgets stay where they were before the
+        # greatswords, 7725)
+        cap = P.budget_max()
+        assert gen.budget_bounds((EMP,)) == (emp.lord.cost + min(u.cost for u in emp.units),
+                                             emp_hi if cap is None else min(emp_hi, cap))
+        assert cap is None or G.Generator(pools=POOLS).budget_bounds((EMP,))[1] == emp_hi
         # Against the Empire each side gets its share of B: B up to what both can field.
         lo, hi = gen.budget_bounds((EMP, SKV))
         skv_hi = POOLS[SKV].lord.cost + 19 * 325

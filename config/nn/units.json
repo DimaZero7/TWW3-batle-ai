@@ -234,6 +234,10 @@
    "source": "projectiles.trajectory (inferred)",
    "checked": null
   },
+  "missile.direct": {
+   "source": "projectiles.trajectory == 'low' (ours): flat, fixed-speed fire (guns) that needs a clear line past friendly units (docs/en/game/mechanics/missiles.md: `low` flat; `dual_low_fixed` switches to an arc when blocked, `fixed` arcs)",
+   "checked": null
+  },
   "missile.muzzle_velocity": {
    "source": "projectiles.muzzle_velocity (inferred), m/s",
    "checked": null
@@ -265,7 +269,7 @@
  },
  "_missing": {
   "missile.bonus_v_large / bonus_v_infantry": "no such column found: the anti-large arrow row equals the plain arrow",
-  "missile.can_fire_over_friendlies": "no column found; projectiles.trajectory may say it (not checked)",
+  "missile.can_fire_over_friendlies": "no column of its own: missile.direct (trajectory 'low') says the unit cannot; the others arc over friends (knowledge base, not measured)",
   "fatigue modifiers per unit": "none in land_units / battle_entities; fatigue rules are global (config/nn/game_rules.json, fatigue)",
   "lord aura per unit": "no per-unit radius found; the aura is global (_kv_morale_tables: general_aura_radius, general_inspire_effect_amount_*); a lord is marked by the attribute 'encourages'",
   "ability and attribute effects": "only the keys; their numbers are in special_ability_* tables, not decoded",
@@ -480,6 +484,7 @@
     "projectile_number": 1,
     "shots_per_volley": 1,
     "trajectory": "dual_low_fixed",
+    "direct": false,
     "muzzle_velocity": 45.0,
     "max_elevation": 88,
     "calibration_distance_m": 95.0,
@@ -773,6 +778,7 @@
     "projectile_number": 1,
     "shots_per_volley": 1,
     "trajectory": "dual_low_fixed",
+    "direct": false,
     "muzzle_velocity": 50.0,
     "max_elevation": 88,
     "calibration_distance_m": 85.0,
@@ -1043,6 +1049,223 @@
    "multiplayer_cost": 375,
    "missile": null,
    "card_check": "equal"
+  },
+  "wh_dlc04_emp_inf_flagellants_0": {
+   "land_unit": "wh_dlc04_emp_inf_flagellants_0",
+   "caste": "melee_infantry",
+   "category": "inf_melee",
+   "class": "inf_mel",
+   "men": 120,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 6,
+   "entity": "wh_dlc04_infantry_flagellants_blood_dismembers",
+   "hp_per_man": 73,
+   "hp_total": 8760,
+   "mass": 100.0,
+   "size": "small",
+   "height_m": 1.8,
+   "radius_m": 0.65,
+   "speed": {
+    "walk": 1.5,
+    "run": 3.6,
+    "charge": 4.0,
+    "acceleration": 3.0,
+    "deceleration": 4.0
+   },
+   "melee": {
+    "attack": 32,
+    "defence": 12,
+    "charge_bonus": 28,
+    "weapon": "wh_dlc04_emp_mace",
+    "damage": 25,
+    "ap_damage": 8,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.5,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 0.2
+   },
+   "armour": 0,
+   "armour_material": "body",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 100,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": true,
+   "hiding_scalar": 1.0,
+   "attributes": [
+    "hide_forest",
+    "unbreakable"
+   ],
+   "abilities": [
+    "wh_dlc04_unit_passive_strength_of_the_penitent",
+    "wh_main_unit_passive_frenzy"
+   ],
+   "multiplayer_cost": 600,
+   "missile": null,
+   "card_check": "no card"
+  },
+  "wh_main_emp_inf_greatswords": {
+   "land_unit": "wh_main_emp_inf_greatswords",
+   "caste": "melee_infantry",
+   "category": "inf_melee",
+   "class": "inf_mel",
+   "men": 120,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 6,
+   "entity": "wh_main_infantry_slow_blood_dismembers",
+   "hp_per_man": 76,
+   "hp_total": 9120,
+   "mass": 120.0,
+   "size": "small",
+   "height_m": 1.8,
+   "radius_m": 0.68,
+   "speed": {
+    "walk": 1.5,
+    "run": 2.8,
+    "charge": 3.5,
+    "acceleration": 2.0,
+    "deceleration": 4.0
+   },
+   "melee": {
+    "attack": 32,
+    "defence": 30,
+    "charge_bonus": 18,
+    "weapon": "wh_main_emp_greatsword",
+    "damage": 10,
+    "ap_damage": 25,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 14,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0
+   },
+   "armour": 95,
+   "armour_material": "plate",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 75,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": true,
+   "hiding_scalar": 1.0,
+   "attributes": [
+    "hide_forest"
+   ],
+   "abilities": [],
+   "multiplayer_cost": 850,
+   "missile": null,
+   "card_check": "no card"
+  },
+  "wh_dlc04_emp_inf_free_company_militia_0": {
+   "land_unit": "wh_dlc04_emp_inf_free_company_militia_0",
+   "caste": "missile_infantry",
+   "category": "inf_ranged",
+   "class": "inf_mis",
+   "men": 120,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 6,
+   "entity": "wh_dlc04_infantry_free_company_blood_dismembers",
+   "hp_per_man": 61,
+   "hp_total": 7320,
+   "mass": 90.0,
+   "size": "small",
+   "height_m": 1.8,
+   "radius_m": 0.65,
+   "speed": {
+    "walk": 1.5,
+    "run": 3.6,
+    "charge": 4.0,
+    "acceleration": 3.0,
+    "deceleration": 4.0
+   },
+   "melee": {
+    "attack": 28,
+    "defence": 25,
+    "charge_bonus": 14,
+    "weapon": "wh_dlc04_emp_free_company_sword",
+    "damage": 21,
+    "ap_damage": 7,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.2,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0
+   },
+   "armour": 25,
+   "armour_material": "leather",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 55,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": true,
+   "can_brace": true,
+   "hiding_scalar": 1.0,
+   "attributes": [
+    "guerrilla_deploy",
+    "hide_forest",
+    "mounted_fire_move"
+   ],
+   "abilities": [],
+   "multiplayer_cost": 450,
+   "missile": {
+    "weapon": "wh_dlc04_emp_free_company_pistol",
+    "projectile": "wh_dlc04_emp_free_company_pistol_bullet",
+    "ammo": 18,
+    "accuracy": 10,
+    "category": "musket",
+    "range_m": 90,
+    "min_range_m": 0,
+    "reload_s": 9.0,
+    "damage": 12,
+    "ap_damage": 2,
+    "projectile_number": 1,
+    "shots_per_volley": 1,
+    "trajectory": "low",
+    "direct": true,
+    "muzzle_velocity": 90.0,
+    "max_elevation": 45,
+    "calibration_distance_m": 65.0,
+    "calibration_area_m": 2.0,
+    "explosion": null,
+    "penetration": "low",
+    "shot_type": "small_arm_default"
+   },
+   "card_check": "no card"
   }
  }
 }

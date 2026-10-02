@@ -104,8 +104,13 @@ Sources: [twwstats morale][tws-m] (high), [fandom Leadership][fw-lead], [fandom 
 - **Army losses.** When the army as a whole is beaten (the −120 rule above), every unit routs
   except unbreakable ones; one source says the trigger moved from ~92 % of the balance-of-power
   bar (WH2) to ~75 % (WH3); 2.6 : 1 is 72 % of the bar. · [fandom][fw-lead], Steam · medium.
-  - Ours: not modelled; a battle ends when a side has no standing unit. **Gap** — this decides
-    when a battle ends in the game.
+  - Ours: modelled (`sim.json` `morale.collapse`: −120 at enemy / own strength 2.6 and own 22 % of
+    the start, strength = cost × health of the units not shattered, routing ones included). In the
+    network's gate battles (14, 02.10.2026) the Skaven armies collapsed all at once (every unit's
+    `MoralePercent` −1…−2.7 within 1–2 s) at strength 0.31–0.42 of the start and enemy / own
+    1.2–1.9 by that measure (standing units only: 0.12–0.26 and 1.7–5.9): the rule with these numbers
+    does not fire for them. **Gap** — record the game's balance of power (CCO
+    `BalanceOfPowerPercent`) to find the trigger.
 - **Rout speed.** No public number. **Scurry Away!** (Skaven): +10 % speed at wavering or worse.
   · [fandom][fw-scurry] · high.
   - Ours: measured routing speed 0.80–0.86 of run (Empire), 0.85–0.96 (Skaven) — the gap

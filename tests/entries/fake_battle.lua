@@ -39,7 +39,8 @@ function F.unit(name, kind, x, z)
     function u:is_valid_target() return true end
     function u:is_visible_to_alliance() return true end
     function u:is_idle() return true end
-    function u:is_moving() return false end
+    -- Walks while a move or an attack is in force (set by the controller; a test may stop it).
+    function u:is_moving() return self.moving == true end
     function u:is_commanding_unit() return false end
     function u:is_infantry() return true end
     function u:can_reach_position() return true end
@@ -77,9 +78,14 @@ local function controller(log)
     function uc:fire_at_will(on) self.unit.free_fire = on end
     function uc:change_behaviour_active() end
     function uc:melee() end
-    function uc:halt() log[#log + 1] = 'halt' end
+    function uc:halt()
+        self.unit.moving = false
+        log[#log + 1] = 'halt'
+    end
     function uc:attack_unit(enemy, primary, run)
         self.unit.attack_args = {target = enemy and enemy:name(), primary = primary, run = run}
+        -- a melee unit walks to its target; a shooter (ammunition, range) stands and shoots
+        self.unit.moving = not ((self.unit.range or 0) > 0 and (self.unit.ammo or 0) > 0)
         log[#log + 1] = 'attack' .. (enemy and (' ' .. enemy:name()) or '')
     end
     function uc:teleport_to_location() end

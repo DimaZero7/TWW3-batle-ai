@@ -2,7 +2,8 @@
 
 * TokenEncoder: the same weights for every unit, own and enemy (the unit is known by its passport,
   not by its name); the side's context (character, role, time) is added to every token and is
-  also a token of its own (index 0).
+  also a token of its own (index 0). Inputs added since a checkpoint was saved (passport features
+  appended at the token's end) load with zero weights (pad_inputs): it computes what it did.
 * AbilityEncoder: each ability slot (its state and passport, tools/nn/model/abilities.py) through
   the same small network; the sum over the unit's owned slots is added to the unit's token, so the
   order of the slots does not matter. Its last layer starts at zero: an actor trained before
@@ -22,6 +23,15 @@ from tools.nn.model import observation as ob
 from tools.nn.model.lora import LoRALinear
 
 
+def pad_inputs(state_dict, key, n_in):
+    """A first layer saved with fewer inputs (inputs added since at the END: unit passport features,
+    tools/nn/model/passport.py; ability features, tools/nn/model/abilities.py) gets zero weights for
+    the new ones, so the old network computes exactly what it did. In place."""
+    w = state_dict.get(key)
+    if w is not None and w.dim() == 2 and w.shape[1] < n_in:
+        state_dict[key] = torch.cat([w, w.new_zeros(w.shape[0], n_in - w.shape[1])], 1)
+
+
 class TokenEncoder(nn.Module):
     def __init__(self, d, n_token=ob.TOKEN, n_ctx=ob.CONTEXT):
         super().__init__()
@@ -38,6 +48,7 @@ class TokenEncoder(nn.Module):
         if w is not None and w.shape[1] == self.ctx[0].in_features - len(ob.TIMERS) + 1:
             state_dict[key] = torch.cat([w[:, :ob.OLD_TIME], w[:, ob.OLD_TIME + 1:ob.CONTEXT_BASE + 1],
                                          w.new_zeros(w.shape[0], len(ob.TIMERS)), w[:, ob.CONTEXT_BASE + 1:]], 1)
+        pad_inputs(state_dict, prefix + "unit.0.weight", self.unit[0].in_features)
         super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
     def forward(self, tokens, ctx):
@@ -53,6 +64,10 @@ class AbilityEncoder(nn.Module):
         self.net = nn.Sequential(nn.Linear(ab.SIZE, d), nn.GELU(), nn.Linear(d, d))
         nn.init.zeros_(self.net[2].weight)
         nn.init.zeros_(self.net[2].bias)
+
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+        pad_inputs(state_dict, prefix + "net.0.weight", self.net[0].in_features)
+        super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
     def forward(self, abil):
         """abil [B, N, SLOTS, SIZE] -> [B, N, d]: the sum over the owned slots. Only the owned slots

@@ -540,6 +540,25 @@ class TestBehaviour:
         # unit 1 (x -20) has units 0 (x 0) and 2 (x -40) within 25 m
         assert float(near[0, 1]) == pytest.approx(float(r[0, 1]) + (float(r[0, 0]) + float(r[0, 2])) / 2)
 
+    def test_friendly_fire_is_the_shooters_loss_not_the_victims(self):
+        st = pile()
+        p = load()
+        before = reward.unit_before(st.u)
+        side = st.u["side"][0]
+        shooter = next(i for i in range(st.N) if i != 3 and int(side[i]) == int(side[3]))
+        st.u["hp_abs"][0, 3] -= 100.0
+        gold = 100.0 * float(st.u["cost"][0, 3] / st.u["hp0"][0, 3])
+        st.u["ff_dealt"][0, shooter], st.u["ff_taken"][0, 3] = gold, gold
+        from tools.nn.train import behaviour
+        f = {k: torch.zeros_like(v) for k, v in behaviour.facts(st, p).items()}
+        w = reward.Weights(unit_gold=0.05, neighbour=0.0)
+        n = float((side == side[3]).sum())
+        r = reward.unit_step(before, st, f, p, w)
+        charge = -0.05 * n * gold / float(reward.budget(st.u)[0])
+        assert float(r[0, 3]) == pytest.approx(0.0, abs=1e-7) and float(r[0, shooter]) == pytest.approx(charge, rel=1e-4)
+        off = reward.unit_step(before, st, f, p, dataclasses.replace(w, friendly_fire=0.0))
+        assert float(off[0, 3]) == pytest.approx(charge, rel=1e-4) and float(off[0, shooter]) == 0.0
+
     def test_the_unit_idle_term_charges_the_attackers_standing_units_by_its_idle_multiplier(self):
         from tools.nn.train import behaviour
         st = line_army(attacker=1)
@@ -1012,6 +1031,32 @@ class TestLoop:
         assert "reward_parts" in rows[-1] and "ev" in rows[-1] and rows[-1]["anchor_weight"] == 0.05
         assert set(rows[-1]["reward_parts"]) <= {"attack", "defend"}
 
+    def test_a_rolling_anchor_moves_the_reference_and_the_log_keeps_the_distance_from_the_start(self, tmp_path,
+                                                                                                    monkeypatch):
+        from tools.nn.train import run, test5
+        actor, crit = nets()
+        init = checkpoint.save(tmp_path / "init.pt", actor, crit)
+        monkeypatch.setattr(checkpoint, "DIR", tmp_path)
+        monkeypatch.setattr(checkpoint, "RANDOM", init)
+        args = run.parser().parse_args(["--name", "roll", "--init", str(init), "--battles", "4", "--steps", "2",
+                                        "--updates", "3", "--minutes", "5", "--device", "cpu", "--no-eval",
+                                        "--mix", '{"nearest": 1.0}', "--anchor", "0.05", "--anchor-roll", "1e-9",
+                                        "--lr", "1e-2", "--print-every", "1"])
+        trained, summary, out = run.train(args)
+        rows = [json.loads(x) for x in (out / "log.jsonl").read_text(encoding="utf-8").splitlines()]
+        assert [r["anchor_rolls"] for r in rows] == [1, 2, 3]            # renewed after every update
+        assert rows[0]["start_kl"] >= 0 and rows[-1]["start_kl"] > 0     # the actor moved off its start
+        assert ppo.distance(trained, trained, rollout.collect(rollout.Battles(league.layout(2, 1, opponent="nearest"),
+                                                                              MIRROR), trained, crit, 2), 4) ==             pytest.approx(0.0, abs=1e-6)
+        d = test5.distance(out, 1, 3)
+        assert d["updates"] == [2, 3] and d["rolls"] == 3 and d["start_kl_last"] == round(rows[-1]["start_kl"], 4)
+        assert test5.distance(out, 3, 9) is None and test5.distance(tmp_path / "none", 0, 3) is None
+        args = run.parser().parse_args(["--name", "fixed", "--init", str(init), "--battles", "4", "--steps", "2",
+                                        "--updates", "2", "--minutes", "5", "--device", "cpu", "--no-eval",
+                                        "--mix", '{"nearest": 1.0}', "--anchor", "0.05"])
+        _, _, out = run.train(args)
+        assert [json.loads(x)["anchor_rolls"] for x in (out / "log.jsonl").read_text(encoding="utf-8").splitlines()] == [0, 0]
+
     def test_per_role_normalisation_gives_each_role_mean_0_std_1(self):
         a = torch.tensor([[1.0, 10.0], [3.0, 30.0], [5.0, 50.0]])
         g = torch.tensor([[True, False]] * 3)
@@ -1092,6 +1137,19 @@ class TestProtocol:
         assert "| order changes / unit-min, ai_like | 6.00 / 4.00 | 6.00 / - |" in lines
         assert "| flips A→B→A ≤10 s / unit-min, ai_like | 0.500 / - | 0.500 / - |" in lines
         assert not test5.lively_block([{"ai_like/attack": {"win": 0.5}}], ["min 0"])     # an older evaluation
+
+    def test_the_trend_shows_the_distance_from_the_start_next_to_the_rating(self):
+        from tools.nn.train import test5
+        sk = (lambda v: {"rating": {"overall": {"value": v, "se": 0.05}}})
+        p0 = {"skill": sk(-0.4)}
+        p1 = {"skill": sk(-0.1), "distance": {"start_kl": 0.012, "start_kl_last": 0.02, "anchor_kl": 0.008, "rolls": 1}}
+        lines = test5.trend([(0, p0), ("10", p1)])
+        assert "| rating, overall (logit) | -0.40 | -0.10 |" in lines
+        assert any(x.startswith("| distance from start: KL to the init network") and x.endswith("| 0 | 0.012 / 0.020 |")
+                   for x in lines)
+        assert "| reference renewals (--anchor-roll), so far | - | 1 |" in lines
+        assert not test5.distance_block([(0, p0), ("10", {"skill": sk(0.0)})])        # older evaluations: no block
+        assert test5.metrics({"by_opponent": {}, "distance": p1["distance"]})["distance"] == p1["distance"]
 
     def test_the_gpu_lock_is_held_while_the_test_runs_and_freed_after_a_failure(self, tmp_path):
         from tools.nn.train import test5

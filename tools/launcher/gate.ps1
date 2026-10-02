@@ -8,6 +8,7 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/gate.ps1 -Checkpoint build/nn-train/latest.pt
 #   ... -Battles 4 -Speed 20        (the defaults)
 #   ... -Battles 1 -Offset 3        (one battle: the plan's 4th, the largest armies)
+#   ... -Battles 8 -Symmetric       (4 battles a seed: each army attacks and defends under either side)
 param(
     [string]$Checkpoint = 'build/nn-train/latest.pt',
     [int]$Battles = 4,
@@ -16,6 +17,7 @@ param(
     [int]$DecideMs = 1000,
     [int]$TimeoutModelSeconds = 0,
     [switch]$Greedy,
+    [switch]$Symmetric,
     [int]$Retries = 1
 )
 $ErrorActionPreference = 'Stop'
@@ -31,6 +33,7 @@ $checkpointRel = $full.Substring($repo.Length + 1) -replace '\\', '/'
 if (Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue) { throw 'WH3 is already running; not interrupting it.' }
 
 $planArgs = @('-m', 'tools.nn.gate', 'plan', '--battles', $Battles, '--offset', $Offset, '--timeout', $TimeoutModelSeconds)
+if ($Symmetric) { $planArgs += '--symmetric' }   # 4 battles a seed: each army attacks and defends
 $plan = (& $python @planArgs) | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0) { throw 'Gate plan failed' }
 

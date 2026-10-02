@@ -9,7 +9,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from tools.nn.sim import battle, fatigue, geometry, melee, missile, morale, replay, scenario  # noqa: E402
+from tools.nn.sim import abilities, battle, fatigue, geometry, melee, missile, morale, replay, scenario  # noqa: E402
 from tools.nn.sim import orders as O  # noqa: E402
 from tools.nn.sim import state as S  # noqa: E402
 from tools.nn.sim.params import load  # noqa: E402
@@ -84,6 +84,19 @@ class TestFunctions:
         idle = {k: torch.zeros(4, dtype=torch.bool) for k in ("melee", "charging", "shooting", "running", "walking")}
         fatigue.step(u, idle, P, 0.0)
         assert u["fat"].tolist() == [0, 0, 1, 5]
+
+    def test_an_exhausted_unit_fights_and_moves_worse(self):
+        # unit_fatigue_effects_tables (sim.json fatigue.effects): exhausted attack x0.7, speed x0.85,
+        # reload / 0.9; fresh x1; the old values come back.
+        st = face_off(SPEAR, SLAVE)
+        st.u["fat"][0, 0] = 5.0
+        before = {k: st.u[k].clone() for k in ("attack", "run", "reload", "defence")}
+        old = fatigue.effects(st.u, P)
+        assert float(st.u["attack"][0, 0]) == pytest.approx(0.7 * float(before["attack"][0, 0]))
+        assert float(st.u["run"][0, 0]) == pytest.approx(0.85 * float(before["run"][0, 0]))
+        assert float(st.u["attack"][0, 1]) == float(before["attack"][0, 1])
+        st.u.update(old)
+        assert all(torch.equal(st.u[k], v) for k, v in before.items())
 
     def test_state_and_orders_shapes_and_perspective(self):
         st = S.empty(2, 6)
@@ -195,6 +208,21 @@ class TestMelee:
         st.u["order_target"][0, H] = 1          # told to attack another slot, touching the lord
         busy = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, H, 0])
         assert busy == pytest.approx(full * P.sim["contact"]["lord_incidental"], rel=1e-4)
+
+    def test_a_unit_attacking_another_enemy_strikes_a_unit_it_touches_at_its_share(self):
+        st = face_off(SPEAR, SLAVE)
+        pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
+        contact = pw["enemy"] & (pw["gap"] <= 1.0)
+        z = torch.zeros_like(st.u["men"])
+        H = st.N // 2
+        full = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, 0, H])
+        st.u["order_kind"][0, 0] = O.ATTACK
+        st.u["order_target"][0, 0] = H         # its own target: the whole rate
+        assert float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, 0, H]) == pytest.approx(full, rel=1e-6)
+        st.u["order_target"][0, 0] = H + 1     # told to attack another slot, touching the slaves
+        busy = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, 0, H])
+        assert 0 < P.sim["contact"]["unit_incidental"] < 1
+        assert busy == pytest.approx(full * P.sim["contact"]["unit_incidental"], rel=1e-4)
 
     def test_the_enemy_lord_keeps_his_blow_and_the_infantry_counts_less(self):
         st, pw, contact, z = self.surrounded(0, rival=True)
@@ -343,18 +371,24 @@ class TestMorale:
         dead = morale.target_points(st.u, self.ctx(st, lord_dead_points=torch.full_like(st.u["men"], -16.0)), P)
         assert (aura - base)[0, 0] == 4 and (dead - base)[0, 0] == -16
 
-    def test_a_rear_attack_routs_sooner(self):
-        def time_to_rout(flank):
+    def test_a_first_strike_in_the_rear_costs_more_than_in_the_flank(self):
+        # The database's was_attacked_in_flank / _rear (-6 / -14) for the step a worse side is first
+        # struck (sim.json morale.attacked_event; battle.py gives the points).
+        after = []
+        for pts in (0.0, -6.0, -14.0):
             st = face_off(SPEAR, SLAVE)
-            st.u["hp_abs"][0, 0] = 0.1 * st.u["hp0"][0, 0]
-            st.u["flank_hit"][0, 0] = flank
-            for n in range(400):
-                morale.step(st.u, self.ctx(st, in_melee=torch.ones_like(st.u["r"])), P, 0.5)
-                if st.u["r"][0, 0]:
-                    return n
-            return 999
-        front, flank, rear = time_to_rout(0), time_to_rout(1), time_to_rout(2)
-        assert rear < front and rear <= flank <= front
+            st.u["morale"] = morale.target_points(st.u, self.ctx(st), P)
+            morale.step(st.u, self.ctx(st, flank_event=torch.full_like(st.u["men"], pts)), P, 0.5)
+            after.append(float(st.u["morale"][0, 0]))
+        assert after[2] < after[1] < after[0]
+
+    def test_the_army_beaten_as_a_whole_routs(self):
+        # Army destruction: -120 to every unit of the side (battle.py decides when).
+        st = face_off(SPEAR, SLAVE)
+        hit = torch.ones_like(st.u["r"])
+        for _ in range(8):
+            morale.step(st.u, self.ctx(st, collapse=hit), P, 0.5)
+        assert bool(st.u["r"].all())
 
     def test_the_third_rout_shatters_and_a_free_unit_rallies(self):
         st = face_off(SPEAR, SLAVE)
@@ -423,9 +457,10 @@ class TestBattle:
         assert not bool(st.u["mv"][0, 0]) and int(st.u["target"][0, 0]) == -1
 
     def test_a_shattered_lord_counts_as_lost_for_morale(self):
-        # A shattered lord is lost as if he had died (sim.json morale.lord_fall, now the database's
-        # -16 then -10). Battle 0: side 1's General shattered (far off, so his rout and his aura
-        # touch no one); battle 1: the same, the General steady.
+        # A shattered lord is lost as if he had died: his fall is timed (lord_dead_s) and his army
+        # loses sim.json morale.lord_fall (measured: about his aura only, so 0 / 0 on top of it).
+        # Battle 0: side 1's General shattered (far off, so his rout and his aura touch no one);
+        # battle 1: the same, the General steady.
         sides = army([(GENERAL, -900, 0, 90, True), (SPEAR, -300, 0, 90)], [(SPEAR, 300, 0, 270)])
         st = scenario.build([sides, sides], P)
         st.u["r"][0, 0] = st.u["s"][0, 0] = True
@@ -435,7 +470,8 @@ class TestBattle:
         assert float(st.u["men"][0, 0]) > 0 and not bool(st.u["gone"][0, 0])      # lost by shattering alone
         assert float(st.lord_dead_s[0, 0]) == pytest.approx(1.5) and float(st.lord_dead_s[0, 1]) == -1
         assert float(st.lord_dead_s[1, 0]) == -1
-        assert float(st.u["morale"][0, 1]) < float(st.u["morale"][1, 1]) - 3
+        fall = P.sim["morale"]["lord_fall"]["recent"]
+        assert float(st.u["morale"][0, 1]) <= float(st.u["morale"][1, 1]) + min(fall, 0) * 0.15 + 1e-4
         assert not bool(st.done[0])
 
     def test_orders_move_attack_and_withdraw(self):
@@ -636,3 +672,114 @@ class TestAbilities:
         o.ability[0, 0] = 3
         with pytest.raises(ValueError):
             O.check(o, st.N)
+
+
+# --- the second Empire wave (02.10.2026): unbreakable, frenzy and the penitent, direct fire ---
+
+FLAG, GREAT, MILITIA = ("wh_dlc04_emp_inf_flagellants_0", "wh_main_emp_inf_greatswords",
+                        "wh_dlc04_emp_inf_free_company_militia_0")
+
+
+class TestSecondWave:
+    def test_an_unbreakable_unit_never_routs_nor_wavers(self):
+        st = scenario.build([army([(SPEAR, -100, 0, 90), (FLAG, -100, 60, 90)], [(SLAVE, 300, 0, 270)])], P)
+        assert bool(st.u["unbreakable"][0, 1]) and not bool(st.u["unbreakable"][0, 0])
+        st.u["morale"][0, :2] = -20.0                     # crushed: the spearmen rout, the flagellants not
+        for _ in range(4):
+            battle.step(st, replay.hold(st), P)
+        assert bool(st.u["r"][0, 0])
+        assert not bool(st.u["r"][0, 1]) and not bool(st.u["w"][0, 1]) and float(st.u["morale"][0, 1]) >= 100
+
+    def test_flagellants_surrounded_fight_on_and_the_penitent_fires_when_losing(self):
+        st = scenario.build([army([(FLAG, 0, 0, 90)], [(CLANRAT, 40, 0, 270), (CLANRAT, 0, 50, 180),
+                                                       (CLANRAT, -40, 0, 90)])], P)
+        H = st.N // 2
+        slot = abilities.slot_keys(FLAG, P.units, P.abilities).index("wh_dlc04_unit_passive_strength_of_the_penitent")
+        fired = False
+        for _ in range(600):
+            o = replay.hold(st)
+            for k in range(3):
+                o.kind[0, H + k], o.target[0, H + k], o.run[0, H + k] = O.ATTACK, 0, True
+            battle.step(st, o, P)
+            assert not bool(st.u["r"][0, 0])
+            fired = fired or float(st.u[f"ab{slot}_on"][0, 0]) > 0
+            if float(st.u["men"][0, 0]) <= 0:
+                break
+        assert fired and float(st.u["hp"][0, 0]) < 0.3
+
+    def test_frenzy_and_the_penitent_lay_their_effects_by_their_conditions(self):
+        st = scenario.build([army([(FLAG, 0, 0, 90)], [(CLANRAT, 12, 0, 270)])], P)
+        u = st.u
+        pw = geometry.pairwise(u, P.sim["formation"]["spacing_m"])
+        same = u["side"][:, :, None] == u["side"][:, None, :]
+        standing = u["side"] > 0
+        base_att, base_def = float(u["attack"][0, 0]), float(u["defence"][0, 0])
+        u["morale"][:] = u["leadership"]
+        u["taken"][0, 0], u["dealt"][0, 0] = 500.0, 100.0          # losing the melee
+        engaged = standing.clone()
+        old = abilities.apply(u, P, 0.5, standing, engaged, pw["dist"], same)
+        assert float(u["attack"][0, 0]) == base_att + 10                          # frenzy
+        assert float(u["defence"][0, 0]) == base_def + 14                         # the penitent
+        assert float(u["resist_physical"][0, 0]) == pytest.approx(0.15)
+        abilities.restore(u, old)
+        # out of melee the penitent ends at once (and recharges); frenzy stays while morale holds
+        old = abilities.apply(u, P, 0.5, standing, torch.zeros_like(engaged), pw["dist"], same)
+        assert float(u["defence"][0, 0]) == base_def and float(u["attack"][0, 0]) == base_att + 10
+        abilities.restore(u, old)
+        u["morale"][0, 0] = 0.4 * float(u["leadership"][0, 0])                    # below half: frenzy off
+        old = abilities.apply(u, P, 0.5, standing, torch.zeros_like(engaged), pw["dist"], same)
+        assert float(u["attack"][0, 0]) == base_att
+        abilities.restore(u, old)
+        # the network cannot order them: they are the game's own
+        assert not any(P.abilities[k]["self_cast"] for k in P.units[FLAG]["abilities"])
+
+    def _spent(self, shooter, side1_more=(), enemies=((SPEAR, -20, 0, 270),), steps=40, orders=None):
+        st = scenario.build([army([(shooter, -100, 0, 90), *side1_more], list(enemies))], P)
+        for _ in range(steps):
+            o = replay.hold(st) if orders is None else orders(st)
+            battle.step(st, o, P)
+        return float(st.u["ammo0"][0, 0] - st.u["a"][0, 0]), st
+
+    def test_direct_fire_is_blocked_by_a_friendly_unit_in_between_arcing_fire_is_not(self):
+        screen = ((SPEAR, -60, 0, 90),)
+        open_m, _ = self._spent(MILITIA)
+        blocked_m, st = self._spent(MILITIA, screen)
+        assert bool(st.u["direct"][0, 0]) and open_m > 0 and blocked_m == 0
+        open_a, _ = self._spent(ARCHER)
+        over_a, st = self._spent(ARCHER, screen)
+        assert not bool(st.u["direct"][0, 0]) and open_a > 0 and over_a == pytest.approx(open_a, rel=0.05)
+        # a screen half way, off to one side, blocks about half of the men (their lines converge on the
+        # target's centre: half way a line is at half its offset)
+        part_m, _ = self._spent(MILITIA, ((SPEAR, -60, 16, 90),))
+        assert 0.2 * open_m < part_m < 0.8 * open_m
+
+    def test_a_blocked_direct_fire_unit_shoots_another_target_it_can_see(self):
+        _, st = self._spent(MILITIA, ((SPEAR, -60, 0, 90),), enemies=((SPEAR, -20, 0, 270), (SLAVE, -30, 60, 270)),
+                            steps=30)
+        H = st.N // 2
+        assert int(st.u["target"][0, 0]) == H + 1 and bool(st.u["fire"][0, 0])
+
+    def test_fire_whilst_moving(self):
+        def walk(st):
+            o = replay.hold(st)
+            o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = O.MOVE, -100.0, 200.0, False
+            return o
+        moving_m, st = self._spent(MILITIA, steps=30, orders=walk)
+        assert bool(st.u["fire_move"][0, 0]) and moving_m > 0 and bool(st.u["mv"][0, 0])
+        moving_a, _ = self._spent(ARCHER, steps=30, orders=walk)
+        assert moving_a == 0
+
+    def test_greatswords_cut_through_armour(self):
+        """Armour-piercing greatswords (10 + 25, bonus 14 v infantry) beat armoured stormvermin faster than
+        swordsmen (21 + 7) of about the same attack do."""
+        lost = {}
+        for key in (GREAT, SWORD):
+            st = face_off(key, "wh2_main_skv_inf_stormvermin_0")
+            H = st.N // 2
+            for _ in range(60):
+                o = replay.hold(st)
+                o.kind[0, 0], o.target[0, 0] = O.ATTACK, H
+                o.kind[0, H], o.target[0, H] = O.ATTACK, 0
+                battle.step(st, o, P)
+            lost[key] = 1 - float(st.u["hp"][0, H])
+        assert lost[GREAT] > 1.5 * lost[SWORD]

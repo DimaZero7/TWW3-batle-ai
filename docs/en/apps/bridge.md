@@ -43,6 +43,31 @@ sequenceDiagram
   is given again even when it is the same as before the rout (`again` in `nn_orders`; `keep` right
   after a rally gives the order the unit had). Before this fix a rallied unit stood idle under an
   order the bridge thought was in force: up to 128 s (gate, 01.10.2026).
+- **A held shooter shoots as in the simulator** (02.10.2026). The simulator's held shooter shoots
+  the nearest enemy in range (into melee too). The game's fire at will does not: a halted shooter
+  picks a target itself, often one just out of range, keeps it and stands (gate it4, 8 battles:
+  standing shooters with an enemy in range by the simulator's measure fired within 10 s in 40 % of
+  the seconds under hold, 98 % under an attack order, 90-97 % for the game's AI; one slinger unit
+  stood 155 s with full ammunition). So once per decision the bridge picks the target of each held
+  shooter (`services.hold_target`: nearest standing visible enemy within range + `HOLD_REACH_M` = 10 m
+  centre to centre, else the nearest routing one; the pick is kept while it qualifies) and gives it
+  as an attack order's target, walking, under the same duty (`fire_freely`, `missile_duty`). A held
+  shooter that walks under it for `HOLD_WALK` = 2 decisions is halted to fire at will for `FREE_MIN`
+  decisions (`services.hold_guard`): hold never walks. Event `nn_hold` (`aim`, `none`, `halt`);
+  `nn_hold_aims`, `nn_hold_halts` in the result.
+- **An order the engine dropped is given again.** The engine forgets a unit's attack (or move)
+  after a fight it was drawn into: the unit stands where the fight ended, while the bridge still
+  holds the order as in force and gives nothing for the same order (gate it5: our lord under an
+  attack on slingers 80-170 m away stood 92 s after beating off the enemy lord, another time 14 s).
+  So a unit under a melee attack whose target is further than `STALL_M` = 20 m (centre to centre),
+  or under a move whose point is further than `STALL_POINT_M` = 15 m, that stands — not moving, not
+  in melee, not shooting, not losing health — for `STALL_AFTER` = 3 decisions is given the order
+  again (`services.order_stalled`; a shooter's attack is left to its duty). Event `nn_stall`;
+  `nn_stalls` in the result.
+- **The companion's log counts units that take no orders as `out`.** The network gives dead,
+  routing and shattered units HOLD (the game gives them nothing); the line "hold 15 attack 5" late in
+  a gate battle was ~13 such units. The real hold share of units that take orders in gate it4 was
+  7.6 % (the simulator's evaluation 5.5 %).
 - **A shooter that cannot shoot its target is released to fire at will.** In the game a shooter
   that holds an explicit target it cannot hit (the target is in melee with our units, out of sight)
   stands and picks no other target: 722 unit-seconds with the target in melee and 149 with a free
@@ -74,7 +99,7 @@ Orders are given through the verified recipes of [orders](orders.md):
 
 | Order | Engine calls |
 |---|---|
-| `hold` | `halt()`, `fire_at_will(true)` |
+| `hold` | `halt()`, `fire_at_will(true)`; a held shooter is then aimed by the bridge (below) |
 | `move` | `fire_at_will(true)`, `goto_location(point, run)` |
 | `withdraw` | `fire_at_will(true)`, `goto_location(point, true)` — a run out of the fight |
 | `attack` | a shooter with ammunition: `attack_ranged(uc, enemy, run, true)` — `melee(false)`, `fire_at_will(true)`, `attack_unit(enemy, true, run)`; everyone else: `attack_melee` (always runs) |
@@ -188,10 +213,12 @@ card: with it every row gets `fx`. The entry [nn_arena](entries.md#nn_arena) wit
 | `nn_orders` | `move`, `lag` (moves written since), `wait_model_ms` and `wait_real_ms` (from writing the state to giving the orders), `think_ms` (the network's time in the companion), `orders` (given: `u`, `k`, `x`, `z`, `tg`, `run`, `status`, `again` — the first order after a rally), `kept` (the same order again: not given), `keeps` (units told `keep`), `skipped` |
 | `nn_duty` | `u`, `action` (`free` — an attack on a target in melee given as fire at will, `release` — idle: to fire at will, `resume` — the ordered target again), `tg` |
 | `nn_miss` | `move` that got no answer by the next decision, `answered` |
+| `nn_hold` | `u`, `action` (`aim`, `none`, `halt`), `tg` — a held shooter's target |
+| `nn_stall` | `u`, `k` (`attack`, `move`, `withdraw`), `tg` — an order the engine dropped, given again |
 | `nn_ability` | `move`, `u`, `key`, `status`: `used`, `not_ready` (`can_perform_special_ability` said no: in the game only for an ability not owned), `down` (the unit is not standing), `unknown_unit` (not ours), `error` |
 | `nn_ability_ready` | `u`, `key`, `ready` (`can_perform_special_ability`), when it changes |
 | `nn_effects` | `u`, `fx` (the phases on the unit, or `unknown`), when they change |
-| `result` (added) | `nn_moves`, `nn_answered`, `nn_missed`, `nn_orders_given`, `nn_keeps`, `nn_bad_files`, `nn_write_mode`, `nn_regiven` (orders given after a rally), `nn_released`, `nn_resumed`, `nn_abilities_used`, `nn_abilities_refused` |
+| `result` (added) | `nn_moves`, `nn_answered`, `nn_missed`, `nn_orders_given`, `nn_keeps`, `nn_bad_files`, `nn_write_mode`, `nn_regiven` (orders given after a rally), `nn_released`, `nn_resumed`, `nn_abilities_used`, `nn_abilities_refused`, `nn_hold_aims`, `nn_hold_halts`, `nn_stalls` |
 
 Tests: `tests/apps/bridge/test_bridge.py` (the orders file as the game reads it, what counts as a
 new order, a shooter's duty), `tests/entries/test_entries.py` (`test_net_...`: state, answer, orders

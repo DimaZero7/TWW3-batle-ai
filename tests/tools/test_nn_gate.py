@@ -100,6 +100,17 @@ class TestPlan:
         assert gate.plan(1, offset=3) == [rows[3]]
         assert gate.min_wins(4) == 3 and gate.min_wins(200) == 150
 
+    def test_symmetric_blocks_let_each_army_attack_and_defend_under_either_side(self):
+        rows = gate.plan(8, symmetric=True)
+        assert [r["pair"] for r in rows] == [1, 1, 2, 2, 3, 3, 4, 4]
+        assert [(r["swap"], r["role"]) for r in rows] == list(gate.SYMMETRIC) * 2
+        seeds = [r["seed"] for r in rows]
+        assert len(set(seeds[:4])) == 1 and len(set(seeds[4:])) == 1 and seeds[0] != seeds[4]
+        # the generator's own army (swap False for us) attacks in pair 1 and defends in pair 2
+        attacker_army = {(r["pair"], "own" if (r["swap"] == (r["role"] == "defend")) else "enemy") for r in rows}
+        assert attacker_army == {(1, "own"), (2, "enemy"), (3, "own"), (4, "enemy")}
+        assert gate.plan(2, offset=2, symmetric=True) == rows[2:4]
+
     def test_the_battle_limit_is_the_simulator_s(self):
         assert gate.battle_limit_s() == 3600 and gate.deadline_s(3600) == 840
 

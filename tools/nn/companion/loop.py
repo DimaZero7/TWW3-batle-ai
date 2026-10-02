@@ -47,7 +47,11 @@ class Brain:
         cols = [getattr(orders, k)[0].cpu().numpy() for k in ("kind", "x", "z", "target", "run")]
         out = exchange.orders_list(b.names, b.side, *cols)
         ctrl = np.asarray(obs.ctrl[0])
-        exchange.remember_orders(self.given, out, {n for n, c in zip(b.names, ctrl) if c})
+        ctrl_names = {n for n, c in zip(b.names, ctrl) if c}
+        for o in out:
+            if o["unit"] not in ctrl_names:
+                o["out"] = True     # dead, routing or shattered: the network's HOLD is no order (summary)
+        exchange.remember_orders(self.given, out, ctrl_names)
         uses = exchange.ability_list(b.names, b.side, orders.ability[0].cpu().numpy(), b.slots)
         return out, (time.perf_counter() - t0) * 1000, uses
 

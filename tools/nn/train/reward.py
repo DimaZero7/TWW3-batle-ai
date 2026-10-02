@@ -59,6 +59,11 @@ itself, beside the side's reward; none of it enters the side's reward:
     unit_gold     x n_own x (gold it destroyed - gold it lost) / budget: its share of the side's gold
                   trade, scaled to one unit; destroyed = the HP it dealt x the target's cost / the
                   target's starting HP, lost = the change of its gold_lost (routs and rallies too);
+                  with friendly_fire (1) the gold its projectiles took from its own side counts as
+                  lost by the shooter, not by the unit hit (sim missile.friendly: ff_dealt / ff_taken;
+                  the side's gold pays it either way). Gate 02.10.2026: four slinger units shot the
+                  enemy Warlord in melee with our spearmen for 119 s, ~2 HP of our own per shot (3-5x
+                  the HP he lost), and nothing told the shooters;
     flanked       per decision struck in the flank or rear in melee (the game: ~x1.74 losses);
     missile_melee per decision a missile unit spends in melee;
     crowd         per decision of a pile, by the excess share (tools/nn/train/behaviour.py);
@@ -122,6 +127,7 @@ class Weights:
     retarget: float = 0.003       # an attack switched to another target while the old one stands
     # per unit (unit_step), not in the side's reward
     unit_gold: float = 0.05       # the unit's own gold trade, scaled to one unit
+    friendly_fire: float = 1.0    # in unit_gold: the shooter pays its friendly fire, the unit hit not (0: as hit)
     flanked: float = 2e-4         # per decision struck in flank / rear
     missile_melee: float = 2e-4   # per decision a missile unit is in melee
     crowd: float = 2e-4           # per decision of a pile (excess share)
@@ -382,6 +388,8 @@ def unit_step(before, st, facts, params, weights=Weights(), idle_m=None):
     side = u["side"]
     present = side > 0
     lost = gold_lost(u, weights.rout_share) - before["gold"]                # gold; a rally gives it back
+    if weights.friendly_fire and "ff_dealt" in u:                         # own projectiles: the shooter's loss
+        lost = lost + weights.friendly_fire * (u["ff_dealt"] - u["ff_taken"])
     fade = math.exp(-params.dt / params.sim["morale"]["recent_s"])
     melee = (u["dealt"] - fade * before["dealt"]).clamp(min=0)            # melee HP dealt this step
     tgt = u["target"].clamp(min=0)

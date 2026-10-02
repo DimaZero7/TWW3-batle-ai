@@ -23,7 +23,8 @@ OUT = project.CONFIG_DIR / "nn" / "abilities.json"
 UNITS = project.CONFIG_DIR / "nn" / "units.json"
 ROSTER = project.ROOT / "data" / "roster"
 TABLES = ("special_ability_to_special_ability_phase_junctions", "special_ability_phase_stat_effects",
-          "special_ability_phase_attribute_effects")
+          "special_ability_phase_attribute_effects", "special_ability_to_recharge_contexts",
+          "special_ability_to_auto_deactivate_flags")
 PREFIX = "unit_special_abilities"
 
 # Where each passport field comes from (inferred: the column's meaning is ours, from its values).
@@ -36,8 +37,15 @@ FIELDS = {
     "targets_own": "unit_special_abilities field 5 (inferred): 1 for abilities cast on the caster or a friend",
     "friendly_units": "unit_special_abilities.num_effected_friendly_units (inferred): -1 all in range, n, 0 none",
     "enemy_units": "unit_special_abilities.num_effected_enemy_units (inferred): -1 all in range, n, 0 none",
-    "self_cast": "active, targets_own, friendly_units and enemy_units 0 or -1 (ours): used on the caster "
-                 "himself, no target to choose (perform_special_ability(key, the lord))",
+    "self_cast": "active, not auto, targets_own, friendly_units and enemy_units 0 or -1 (ours): used on the "
+                 "caster himself, no target to choose (perform_special_ability(key, the lord))",
+    "auto_when": "special_ability_to_recharge_contexts.context of the ability (inferred): the battle context in "
+                 "which the game fires it by itself (Strength of the Penitent: losing_melee_combat)",
+    "off_when": "special_ability_to_auto_deactivate_flags.flag (inferred): the effect switches off while this "
+                "holds (Frenzy: morale_is_lower_than_half_of_base_morale; Penitent: out_of_melee)",
+    "auto": "a timed passive (ours): an active time, a key with '_passive_' (the game lists it among the "
+            "passives, unit_abilities) - the game fires it by itself (in auto_when, else whenever ready); "
+            "no player or network order",
     "phases": "special_ability_to_special_ability_phase_junctions for the ability: the phase named as the "
               "ability when there is one, else all its phases",
     "targets": "the phases' target_self / target_friends / target_enemies (inferred: self-only abilities "
@@ -81,12 +89,18 @@ def passport(key, prefix, t):
                 attributes.append({"attribute": r["attribute"], "effect": r["effect"], "on": on,
                                    "phase": ph["phase"]})
     passive = p["active_time"] < 0 and p["recharge_time"] < 0
+    auto = not passive and "_passive_" in key
     friendly, enemy = p["num_effected_friendly_units"], p["num_effected_enemy_units"]
     return {
         "active_s": p["active_time"], "recharge_s": p["recharge_time"], "uses": p["num_uses"],
         "range_m": p["effect_range"], "passive": passive, "targets_own": p["targets_own"],
         "friendly_units": friendly, "enemy_units": enemy,
-        "self_cast": (not passive) and p["targets_own"] and friendly in (0, -1) and enemy in (0, -1),
+        "self_cast": (not passive) and not auto and p["targets_own"] and friendly in (0, -1) and enemy in (0, -1),
+        "auto": auto,
+        "auto_when": sorted(r["context"] for r in t.get("special_ability_to_recharge_contexts", ())
+                            if r["special_ability"] == key),
+        "off_when": sorted(r["flag"] for r in t.get("special_ability_to_auto_deactivate_flags", ())
+                           if r["special_ability"] == key),
         "phases": [r["phase"] for r in phases], "targets": targets,
         "effects": sorted(effects, key=lambda e: (e["phase"], e["stat"], e["how"])),
         "attributes": sorted(attributes, key=lambda a: (a["phase"], a["attribute"])),
@@ -114,7 +128,7 @@ def check_cards(abilities, units, roster=ROSTER):
             if k in abilities and abilities[k]["passive"]:
                 bad.append(f"{unit_key}: {k} is passive in the passport, active on the card")
         for k in passive:
-            if k in abilities and not abilities[k]["passive"]:
+            if k in abilities and not (abilities[k]["passive"] or abilities[k].get("auto")):
                 bad.append(f"{unit_key}: {k} is active in the passport, passive on the card")
     return bad
 
@@ -158,7 +172,9 @@ def main(argv=None):
                         encoding="utf-8", newline="\n")
     for k, a in abilities.items():
         eff = ", ".join(f"{e['stat']} {e['how']} {e['value']:g}" for e in a["effects"])
-        kind = "passive" if a["passive"] else f"{a['active_s']:g} s / {a['recharge_s']:g} s"
+        kind = "passive" if a["passive"] else f"{a['active_s']:g} s / {a['recharge_s']:g} s" + (
+            f" auto {a['auto_when']}" if a["auto"] else "")
+        kind += f" off {a['off_when']}" if a["off_when"] else ""
         print(f"{k}: {kind}, range {a['range_m']:g} m, self_cast {a['self_cast']}: {eff}")
     print("written", args.out)
     return 0

@@ -159,6 +159,8 @@ class Generator:
     def __init__(self, pools=None, mix=None, max_units=MAX_UNITS, base=None):
         self.pools = pools or P.load()
         self.mix = mix or P.mix()
+        # the config's budget cap goes with the config's pools (pools given: no cap)
+        self.budget_max = P.budget_max() if pools is None else None
         self.max_units = max_units
         self.base = base or arena_scenario.load_arena()
         self._markets = {}
@@ -179,6 +181,8 @@ class Generator:
         share = self.shares(factions)
         lo = max((self.pools[f].lord.cost + min(u.cost for u in self.pools[f].units)) / share[f] for f in factions)
         hi = min(float(self.market(f, max_units).totals.max()) / share[f] for f in factions)
+        if self.budget_max is not None:
+            hi = min(hi, self.budget_max)
         return lo, hi
 
     def generate(self, rng, factions=None, budget_range=None, max_units=None, sides=None, name="random"):

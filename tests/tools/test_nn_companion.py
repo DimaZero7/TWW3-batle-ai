@@ -286,3 +286,10 @@ class TestCompanion:
         assert len([ln for ln in lines if ln.startswith("move")]) == 1 and "done" in lines[-1]
         logged = [json.loads(ln) for ln in (tmp_path / "companion.jsonl").read_text().splitlines()]
         assert [r["move"] for r in logged] == [1]
+
+
+def test_units_that_take_no_orders_count_as_out_not_hold():
+    orders = [{"unit": "own_a", "kind": "hold"}, {"unit": "own_b", "kind": "hold", "out": True},
+              {"unit": "own_c", "kind": "attack", "target": "enemy_a", "run": True}]
+    assert exchange.summary(orders) == "hold 1 attack 1 out 1"
+    assert "unit own_b hold\n" in exchange.orders_text("b", 1, orders)

@@ -6,11 +6,13 @@ Per pair of units in contact (i strikes j), per second:
                       against a single man (a lord) at most lord_max_attackers in all, however many
                       units surround him (measured: the lord swarm probe, docs/en/game/units/lord-swarm.md);
                       a single man strikes once (his blow hits up to `splash` men); a unit in
-                      contact with several enemies shares out no more than its own front holds
+                      contact with several enemies shares out no more than its own front holds;
+                      a unit attacking another enemy strikes one it only touches at
+                      contact.unit_incidental (a lord: lord_incidental) of its rate
     hit chance p    = 35 + hit_slope x (attack + charge - defence x direction) within 8-90 %
                       (the database rule is hit_slope 1; calibrated, config/nn/sim.json)
     per hit         = ap + base x (1 - 0.75 armour / 100)   (armour stops 50-100 %: mean 75 %),
-                      not more than a man's health
+                      not more than a man's health; a splash blow's damage is divided among its targets
     HP/s            = F x splash x p x per hit / interval x (1 + impact x charge)
 
 Direction: defence x0.6 from the flank, x0.3 from the rear or against a routing unit (database);
@@ -113,9 +115,12 @@ def strikes(u, pw, contact, params, charge_now, contact_s):
     dmg, ap = u["damage"][:, :, None], u["ap_damage"][:, :, None]
     share = dmg / (dmg + ap).clamp(min=1e-6)
     extra = u["charge_bonus"][:, :, None] * ch + bonus
-    hit = per_hit(dmg + extra * share, ap + extra * (1 - share), u["armour"][:, None, :], u["hp_man"][:, None, :],
-                  u["resist_physical"][:, None, :])
     splash = torch.minimum(u["splash"][:, :, None], u["men"][:, None, :].clamp(min=1))
+    # A splash blow's damage is divided among the men it strikes (melee.splash_divides; CA forum, the
+    # community): each takes 1/targets of it, then armour and the man's health cap it.
+    div = splash.clamp(min=1) if cal.get("splash_divides") else torch.ones_like(splash)
+    hit = per_hit((dmg + extra * share) / div, (ap + extra * (1 - share)) / div, u["armour"][:, None, :],
+                  u["hp_man"][:, None, :], u["resist_physical"][:, None, :])
     ramp = torch.where(u["charge"] > 0, torch.ones_like(contact_s), (contact_s / cal["ramp_s"]).clamp(0, 1))
     # The charge's impact brings more men to bear: not for a single man (his charge is his bonus),
     # nor against one (no more than lord_max_attackers reach him anyway).
@@ -138,4 +143,8 @@ def strikes(u, pw, contact, params, charge_now, contact_s):
     order_t = u["order_target"][:, :, None]
     busy = (u["order_kind"][:, :, None] == O.ATTACK) & (order_t >= 0) & (order_t != slot)
     rate = torch.where(single_j & ~single_i & busy, rate * float(cc.get("lord_incidental", 1.0)), rate)
+    # The same for an enemy unit it only touches: unit_incidental of its rate (gate battles, 02.10.2026:
+    # a unit fought by one enemy unit took 19.6 HP/s in the game, 33.9 in the open-loop replay, when
+    # other enemy units stood within 35 m of it; 16.5 against 20.7 when none did).
+    rate = torch.where(~single_j & ~single_i & busy, rate * float(cc.get("unit_incidental", 1.0)), rate)
     return rate, hit, sector, F

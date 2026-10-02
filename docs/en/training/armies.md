@@ -102,12 +102,18 @@ last byte (`tools/nn/dbtables.decode`). The field names are ours, from the value
 
 Shares by number of units (lord not counted), per template:
 
-| Faction | Template | Spearmen | Spearmen with shields | Swordsmen | Archers |
-|---|---|---:|---:|---:|---:|
-| Empire | `WH_Empire_land` | 21% | 21% | 21% | 38% |
-| | `WH_Empire_land_2` | 22% | 22% | 22% | 33% |
-| | `WH_Empire_land_3` | 21% | 21% | 21% | 38% |
-| | `WH_Empire_land_4` | 19% | 19% | 19% | 43% |
+| Faction | Template | Spearmen | Spearmen with shields | Swordsmen | Flagellants | Greatswords | Archers | Militia |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| Empire | `WH_Empire_land` | 12% | 12% | 12% | 12% | 12% | 19% | 19% |
+| | `WH_Empire_land_2` | 13% | 13% | 13% | 13% | 13% | 17% | 17% |
+| | `WH_Empire_land_3` | 12% | 12% | 12% | 12% | 12% | 19% | 19% |
+| | `WH_Empire_land_4` | 11% | 11% | 11% | 11% | 11% | 21% | 21% |
+
+Since 02.10.2026 (the second wave, [unit passports](units.md#flagellants-greatswords-free-company-militia)):
+the flagellants are in `..._melee_infantry_main_flanking`, the greatswords in
+`..._melee_infantry_main_frontline_swords_high_quality`, both of the family `melee_infantry_trash`;
+the militia in `..._ranged_infantry_trash`, of the family `ranged_infantry` with the archers. A
+family's share is split evenly among its units (five melee, two missile). Before the wave the shares were 21 / 21 / 21 / 38% and so on; the paragraph below describes that pool (three melee units).
 
 The spearmen (both) are in group `..._melee_infantry_main_frontline_spears`, the swordsmen
 in `..._melee_infantry_main_frontline_swords` (quality step `tier_1_step_4` all three).
@@ -157,20 +163,20 @@ its front.
 ## Summary over 10,000 battles
 
 `python -m tools.nn.armies`, seeds 5 … 10,004 (02.10.2026: every `budget_factor` 1.0, the
-Empire's pool with the spearmen with shields and the swordsmen):
+Empire's pool with the second wave, budgets capped at `budget_max` 7725 as before it):
 
 | What | Value |
 |---|---|
 | Mirror battles | 50% |
 | Armies: template / random | 75% / 25% |
-| Budget B | 676 … 7725, median 2749 |
-| Units per side (lord not counted) | mean 9.0; 1–4: 28%, 5–9: 31%, 10–14: 20%, 15–18: 12%, 19: 9% |
+| Budget B | 676 … 7725, median 2624 (before the wave 2749) |
+| Units per side (lord not counted) | mean 7.9; 1–4: 35%, 5–9: 31%, 10–14: 18%, 15–18: 8%, 19: 8% (before: 9.0) |
 | Cost difference between sides of equal budgets | mean 1.5%, at most 5.0% |
 | Skaven cost / Empire cost | mean 0.998, 0.950 … 1.052 (4997 battles) |
 | Skaven / Skaven, Empire / Empire | mean 1.000 and 1.000, 0.951 … 1.051 |
-| One side has x times the other's units | x ≥ 1.5: 34.2%; x ≥ 2: 10.0%; x ≥ 3: 1.0% |
-| Missile share of a side | mean 27%; no missile: 23%; ≥ 50%: 20%; missile only: 1.4% |
-| Empire template armies | spearmen 27%, spearmen with shields 19%, swordsmen 21%, archers 34% |
+| One side has x times the other's units | x ≥ 1.5: 51.8%; x ≥ 2: 30.8%; x ≥ 3: 6.5% (before: 34.2 / 10.0 / 1.0%) |
+| Missile share of a side | mean 31%; no missile: 20%; ≥ 50%: 27%; missile only: 2.9% |
+| Empire template armies | spearmen 17%, with shields 13%, swordsmen 13%, flagellants 11%, greatswords 9%, archers 19%, militia 19% (before: 27 / 19 / 21 / – / – / 34 / –%) |
 | Skaven template armies | clanrats 39%, slaves 32%, slingers 29% |
 
 Within the same melee share the cheapest unit, the plain spearmen (300), is bought most:
@@ -212,6 +218,8 @@ st = scenario.build(armies, per_side=generate.MAX_UNITS + 1)
 
 ## A new unit or faction
 
+0. The whole procedure (research of its special features, simulator, network inputs, card, tests):
+   [how to add a unit](units.md#how-to-add-a-unit).
 1. The unit's passport — in `config/nn/units.json` (`py -3.14 -m tools.nn.units --units …`).
 2. An entry in `config/nn/pools.json`: `key`, `slot`, `width`; a new faction also needs
    `lord` and `generator`, and `budget_factor` if it is stronger or weaker than its price.

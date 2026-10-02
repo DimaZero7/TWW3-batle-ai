@@ -134,6 +134,15 @@ def load(path=None, passports_path=None, templates_path=None):
     return out
 
 
+def budget_max(path=None):
+    """The largest budget B drawn (config/nn/pools.json "budget_max"; None: what the pools can field).
+    Keeps the budgets where they were when dear units join a pool (02.10.2026: 7725, the Empire's
+    most before the greatswords: 19 swordsmen and the general)."""
+    doc = json.loads((path or POOLS).read_text(encoding="utf-8"))
+    v = doc.get("budget_max")
+    return None if v is None else float(v)
+
+
 def mix(path=None):
     """{"template": share, "random": share} of armies (config/nn/pools.json "mix")."""
     doc = json.loads((path or POOLS).read_text(encoding="utf-8"))

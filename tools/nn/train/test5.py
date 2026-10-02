@@ -112,12 +112,32 @@ def evaluation(actor, args, device):
     return res
 
 
+def distance(run_dir, since, until):
+    """The distance from the start over the training updates (since, until] of a run (run.py's
+    log.jsonl): start_kl, the mean per-unit KL of the actor to the network the run started from
+    (ppo.distance on the training batch), and its last value; anchor_kl, the mean KL to the leash's
+    reference (moved by --anchor-roll); rolls, the reference's renewals so far. None without a log."""
+    path = Path(run_dir) / "log.jsonl"
+    if not path.exists():
+        return None
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    rows = [r for r in rows if since < r.get("update", 0) <= until]
+    if not rows:
+        return None
+    mean = (lambda k: sum(r.get(k, 0.0) for r in rows) / len(rows))
+    return {"start_kl": round(mean("start_kl"), 4), "start_kl_last": round(rows[-1].get("start_kl", 0.0), 4),
+            "anchor_kl": round(mean("anchor_kl"), 4), "rolls": rows[-1].get("anchor_rolls", 0),
+            "updates": [rows[0]["update"], rows[-1]["update"]]}
+
+
 def metrics(res):
     """{"opponent/role": {name: value}} of one evaluation; "opponent/all": per opponent; "opponent/factions":
     win rates by our faction and role and by matchup, with gold (tools/nn/train/matchups.py); "skill": the
     fair metrics (tools/nn/train/skill.py summary: rating, pairs, pair gold, advantage over the script,
     margin)."""
     out = {"skill": skill.summary(res)}
+    if res.get("distance") is not None:
+        out["distance"] = res["distance"]
     for opp, o in res["by_opponent"].items():
         for role, x in o["roles"].items():
             if not x.get("games"):
@@ -213,6 +233,25 @@ def skill_block(points, heads, join=None):
              "|---" * (len(heads) + 1) + "|"] + [f"| {t} | " + " | ".join(c) + " |" for t, c in rows] + [""])
 
 
+def distance_block(points):
+    """Lines: the distance from the start next to the rating, a column per minute ([] when no point has it)."""
+    if not any(m.get("distance") for _, m in points[1:]):
+        return []
+    d = [m.get("distance") or {} for _, m in points]
+    f = (lambda v, fmt="{:.3f}": "-" if v is None else fmt.format(v))
+    rows = [("rating, overall (logit)", [f(((((m.get("skill") or {}).get("rating") or {}).get("overall")) or {}).get("value"), "{:+.2f}")
+                                         for _, m in points]),
+            ("distance from start: KL to the init network (mean / last of the updates since the last point)",
+             ["0" if i == 0 else f"{f(x.get('start_kl'))} / {f(x.get('start_kl_last'))}" for i, x in enumerate(d)]),
+            ("anchor KL to the leash's reference (mean)", ["-" if i == 0 else f(x.get("anchor_kl")) for i, x in enumerate(d)]),
+            ("reference renewals (--anchor-roll), so far", ["-" if i == 0 else f(x.get("rolls"), "{:d}")
+                                                           for i, x in enumerate(d)])]
+    mins = [m for m, _ in points]
+    return (["distance from start (training batch, run.py log; growing with the rating = the search works):", "",
+             "| distance | " + " | ".join(f"min {m}" for m in mins) + " |", "|---" * (len(mins) + 1) + "|"]
+            + [f"| {t} | " + " | ".join(c) + " |" for t, c in rows] + [""])
+
+
 def trend(points):
     """Lines: a metric per opponent (attack / defend), a column per minute. points: [(minute, metrics())]."""
     mins = [m for m, _ in points]
@@ -220,6 +259,7 @@ def trend(points):
     opps = sorted({k.split("/")[0] for k in first if "/" in k},
                   key=lambda o: OPPONENTS.index(o) if o in OPPONENTS else 99)
     lines = skill_block([m.get("skill") for _, m in points], [f"min {m}" for m in mins])
+    lines += distance_block(points)
     lines += ["| metric (attack / defend) | " + " | ".join(f"min {m}" for m in mins) + " |", "|---" * (len(mins) + 1) + "|"]
     f = (lambda fmt, v: "-" if v is None else fmt.format(v))
     for name, title, fmt in ROWS:
@@ -280,11 +320,15 @@ def test(args, rest):
                                      str(args.minutes), "--updates", str(args.updates), "--device", args.device]
                                     + PROTOCOL + rest)
     points = [(0, metrics(before))]
+    run_log = checkpoint.DIR / "runs" / targs.name
+    last = [0]                                   # the update of the last evaluation point
 
     def hook(actor, critic, minute, update):
         actor.eval()
         res = evaluation(actor, args, device)
         res["update"] = update
+        res["distance"] = distance(run_log, last[0], update)
+        last[0] = update
         m = f"{minute:g}"
         checkpoint.save(out / f"m{m}.pt", actor, critic, targs.preset, {"minute": minute, "update": update,
                                                                       "run": targs.name})
@@ -296,6 +340,7 @@ def test(args, rest):
     actor, summary, run_dir = run.train(targs, (args.every, hook) if args.every else None)
     actor.eval()
     after = evaluation(actor, args, device)
+    after["distance"] = distance(run_dir, last[0], summary["updates"])
     (out / "after.json").write_text(json.dumps(after, indent=1), encoding="utf-8", newline="\n")
     if args.every:
         m = f"{args.minutes:g}"

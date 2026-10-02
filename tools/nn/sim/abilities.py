@@ -9,7 +9,14 @@ Who fires an active ability:
 * any unit when ordered (Orders.ability: the slot to use, -1 none; the network's side) - only a
   self-cast ability (passport self_cast: used on the owner, no target to choose), ready and not
   active. A side the network plays should have `ai` false, or its lord also fires by the rule.
+* the game itself, for every side: a timed passive (passport `auto`, Strength of the Penitent) when
+  its context holds (auto_when: losing_melee_combat = in melee and losing it by the morale rule's
+  combat ratio, sim.json morale.combat_ratio.slightly; engaged_in_melee = in melee), else whenever
+  ready. Never by order.
 It then lasts active_s and is ready again recharge_s after it ends. Passive ones work for every side.
+Switching off (passport off_when): out_of_melee ends an active one at once (recharge from then) and
+holds a passive off; morale_is_lower_than_half_of_base_morale (Frenzy), morale_is_higher_than_wavering,
+health_below_50%_base hold the effect off while true.
 
 Effects (the passport's effects the simulator has a number for, SIM_STATS): on the owner himself
 (the phase targets self), on his side's units within range_m (targets friends) and on enemies
@@ -25,16 +32,21 @@ except ImportError:          # slots_of() is used without torch (params)
     torch = None
 
 SLOTS = 3
-TRIGGERS = {"passive": 0, "melee": 1, "near": 2, "waver": 3}
+TRIGGERS = {"passive": 0, "melee": 1, "near": 2, "waver": 3, "losing": 4, "ready": 5}
+AUTO_TRIGGERS = {"losing_melee_combat": "losing", "engaged_in_melee": "melee"}
+OFF = ("out_of_melee", "morale_is_lower_than_half_of_base_morale", "morale_is_higher_than_wavering",
+       "health_below_50%_base")
 GROUPS = ("self", "friends", "enemies")
-STATS = ("speed", "charge_speed", "attack", "defence", "damage", "ap", "charge", "leadership")
+STATS = ("speed", "charge_speed", "attack", "defence", "damage", "ap", "charge", "leadership", "resist_physical")
 MULT = ("speed", "charge_speed", "damage", "ap", "charge")
 # (stat, how) of the game's database -> the simulator's stat
 SIM_STATS = {("scalar_speed", "mult"): "speed", ("scalar_charge_speed", "mult"): "charge_speed",
              ("stat_melee_attack", "add"): "attack", ("stat_melee_defence", "add"): "defence",
              ("stat_melee_damage_base", "mult"): "damage", ("stat_melee_damage_ap", "mult"): "ap",
-             ("stat_charge_bonus", "mult"): "charge", ("stat_morale", "add"): "leadership"}
-HEAD = ("active_s", "recharge_s", "passive", "trigger", "range_m", "self_cast", "modelled")
+             ("stat_charge_bonus", "mult"): "charge", ("stat_morale", "add"): "leadership",
+             ("stat_resistance_physical", "add"): "resist_physical"}
+HEAD = ("active_s", "recharge_s", "passive", "trigger", "range_m", "self_cast", "modelled", "auto") + tuple(
+    f"off_{f}" for f in OFF)
 COLS = HEAD + tuple(f"{g}_{s}" for g in GROUPS for s in STATS)
 COL = {c: i for i, c in enumerate(COLS)}
 
@@ -82,10 +94,17 @@ def row(params, key):
     """One ability's row of the table (COLS)."""
     p = params.abilities[key]
     cal = params.sim["abilities"]
-    trigger = "passive" if p["passive"] else cal["triggers"].get(key, cal["default_trigger"])
+    auto = bool(p.get("auto"))
+    if p["passive"]:
+        trigger = "passive"
+    elif auto:
+        trigger = next((AUTO_TRIGGERS[c] for c in p.get("auto_when") or () if c in AUTO_TRIGGERS), "ready")
+    else:
+        trigger = cal["triggers"].get(key, cal["default_trigger"])
     eff = effects(p)
     out = [float(p["active_s"]), float(p["recharge_s"]), float(p["passive"]), float(TRIGGERS[trigger]),
-           float(p["range_m"]), float(p["self_cast"]), float(key in cal["model"])]
+           float(p["range_m"]), float(p["self_cast"]) * float(not auto), float(key in cal["model"]), float(auto)]
+    out += [float(f in (p.get("off_when") or ())) for f in OFF]
     for g in GROUPS:
         for s in STATS:
             out.append(eff.get((g, s), 1.0 if s in MULT else 0.0))
@@ -109,6 +128,13 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None):
     present = u["side"] > 0
     foe_near = (~same_side & standing[:, None, :] & (dist <= near_m)).any(2)
     shaky = (u["w"] | u["r"]) & (u["men"] > 0)
+    # losing the melee: HP taken / dealt recently at the morale rule's "losing" ratio (morale.combat_points)
+    lose_ratio = float(params.sim["morale"]["combat_ratio"]["slightly"])
+    losing = engaged & ((u["taken"] + 1.0) >= lose_ratio * (u["dealt"] + 1.0))
+    # conditions that hold an effect off (OFF)
+    L = u["leadership"].clamp(min=1)
+    off_now = {"out_of_melee": ~engaged, "morale_is_lower_than_half_of_base_morale": u["morale"] < 0.5 * L,
+               "morale_is_higher_than_wavering": ~(u["w"] | u["r"]), "health_below_50%_base": u["hp"] < 0.5}
     zero = torch.zeros_like(u["men"])
     log = {s: zero.clone() for s in MULT}
     add = {s: zero.clone() for s in STATS if s not in MULT}
@@ -124,14 +150,22 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None):
         enemies = ~same_side & present[:, None, :] & (rng[:, :, None] > 0) & (dist <= rng[:, :, None])
         friend_shaky = (friends & shaky[:, None, :]).any(2)
         want = torch.where(trig == 1, engaged, torch.where(trig == 2, foe_near, torch.where(
-            trig == 3, friend_shaky, torch.zeros_like(engaged))))
-        ready = standing & has & ~passive & (on <= 0) & (cd <= 0)
+            trig == 3, friend_shaky, torch.where(trig == 4, losing, trig == 5))))
+        off = torch.zeros_like(engaged)
+        for f in OFF:
+            off = off | ((c(f"off_{f}") > 0) & off_now[f])
+        ready = standing & has & ~passive & (on <= 0) & (cd <= 0) & ~off
         ordered = (use == k) & (c("self_cast") > 0)
-        fire = ready & ((u["ai"] & want) | ordered)
+        auto = c("auto") > 0
+        fire = ready & (((u["ai"] | auto) & want) | ordered)
         on = torch.where(fire, c("active_s"), on)
         cd = torch.where(fire, c("active_s") + c("recharge_s"), cd)
+        # switched off while active: it ends now and recharges from now
+        ended = (on > 0) & off
+        cd = torch.where(ended, torch.minimum(cd, c("recharge_s").clamp(min=0)), cd)
+        on = torch.where(ended, torch.zeros_like(on), on)
         u[f"ab{k}_on"], u[f"ab{k}_cd"] = on, cd
-        active = has & standing & (c("modelled") > 0) & ((on > 0) | passive)
+        active = has & standing & (c("modelled") > 0) & ((on > 0) | (passive & ~off))
         reach = {"self": eye & active[:, :, None], "friends": friends & active[:, :, None],
                  "enemies": enemies & active[:, :, None]}
         for g in GROUPS:
@@ -143,7 +177,7 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None):
                 else:
                     add[s] = add[s] + torch.einsum("bij,bi->bj", give, v)
     old = {k: u[k] for k in ("walk", "run", "charge_speed", "damage", "ap_damage", "charge_bonus", "attack",
-                              "defence", "morale_bonus")}
+                              "defence", "morale_bonus", "resist_physical")}
     speed = torch.exp(log["speed"])
     # scalar_charge_speed, when an ability gives it, sets the charge speed; else scalar_speed scales it too
     charge_speed = torch.exp(torch.where(log["charge_speed"].abs() > 1e-9, log["charge_speed"], log["speed"]))
@@ -155,6 +189,8 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None):
     u["attack"] = u["attack"] + add["attack"]
     u["defence"] = u["defence"] + add["defence"]
     u["morale_bonus"] = u["morale_bonus"] + add["leadership"]
+    # resistances add up to a 90 % cap (docs/en/game/mechanics/missiles.md)
+    u["resist_physical"] = (u["resist_physical"] + add["resist_physical"] / 100).clamp(max=0.9)
     return old
 
 

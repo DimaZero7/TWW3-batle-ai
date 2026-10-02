@@ -57,6 +57,12 @@ class Heads(nn.Module):
         self.ability_k = nn.Sequential(nn.Linear(ab.SIZE, d), nn.GELU(), nn.Linear(d, cfg.pointer))
         self.ability_none = nn.Linear(d, 1)
 
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+        """Ability features appended since the checkpoint load with zero weights (encoder.pad_inputs)."""
+        from tools.nn.model.encoder import pad_inputs
+        pad_inputs(state_dict, prefix + "ability_k.0.weight", self.ability_k[0].in_features)
+        super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
+
     def forward(self, x, obs_t):
         """x [B, 1 + N, d] -> masked logits: kind [B, N, 5], point [B, N, P], target [B, N, N], run [B, N],
         ability [B, N, 1 + SLOTS] (0: none, 1 + k: slot k; when obs_t has abilities)."""

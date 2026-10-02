@@ -4,13 +4,14 @@ Morale is points: leadership + a start bonus + the effects of the moment (the ga
 _kv_morale_tables). MoralePercent = points / leadership. Each 0.5 s tick the points move towards
 that sum by max(1, 15 % of the gap) (minimium_increment_update_per_tick, percent_update_per_tick).
 
-Effects (points): lord within 70 m +4; lord died recently -16, dead -10; neighbour within 120 m
+Effects (points): lord within 70 m +4 (fading to 0 at 105 m); lord died recently -16, dead -10; neighbour within 120 m
 (flanks secure) +5; casualties over the battle (share of HP) -2 ... -74; recent casualties
--6 ... -80; winning / losing the melee +3/+6/+8, -3/-8; attacked in the flank / rear -6 / -14; flanks exposed (an enemy threatens the left, right or rear:
+-6 ... -80 (last 4 s); extended casualties -4 ... -60 (last 60 s); winning / losing the melee +3/+6/+8,
+-3/-8; attacked in the flank / rear -6 / -14 for the tick of the first contact from that side; flanks exposed (an enemy threatens the left, right or rear:
 lf / rf / bf) -3, several -6;
 routing friends within 100 m -3 each (at most 4; expendable units scare nobody); routing
 enemies within 100 m +2.5 each (at most 5); under fire -5; very tired -2, exhausted -6;
-a stronger enemy within 70 m -3.
+a stronger enemy within 70 m -3; the army beaten as a whole -120 (army destruction).
 
 States: wavering below 16 points; routing at 0 or below (not within 10 s of a rally); the third
 rout shatters. A routing unit regains rally_rate points a second while no standing enemy is
@@ -51,7 +52,9 @@ def target_points(u, ctx, params):
     cal = params.sim["morale"]
     L = u["leadership"]
     pts = L + u["morale_bonus"]
-    pts = pts + torch.where(ctx["aura"], R["general_inspire_effect_amount_max"], 0.0)
+    # The lord's aura: full within general_aura_radius, fading to 0 at x inspiration_radius_max_effect_range_modifier
+    # (battle.py gives the share 0-1).
+    pts = pts + ctx["aura"].float() * R["general_inspire_effect_amount_max"]
     pts = pts + ctx["lord_dead_points"]
     pts = pts + torch.where(ctx["neighbour"], R["ume_encouraged_flanks_secure"], 0.0)
     lost = 1 - u["hp_abs"] / u["hp0"].clamp(min=1e-6)
@@ -59,12 +62,22 @@ def target_points(u, ctx, params):
     base = (u["hp_abs"] + u["recent"]) if cal["recent_of_current"] else u["hp0"]
     recent = u["recent"] / base.clamp(min=1e-6)
     pts = pts + steps(recent, table(R, "recent_casualties_penalty_", (6, 10, 15, 33, 50)))
+    if cal.get("extended_s"):
+        ext = u["extended"] / u["hp0"].clamp(min=1e-6)
+        pts = pts + steps(ext, table(R, "extended_casualties_penalty_", (10, 15, 33, 50, 80)))
     pts = pts + combat_points(u["dealt"], u["taken"], ctx["in_melee"], cal, R)
     # Attacked in the flank / rear: measured points (the database's -6 / -14 is not what a unit
     # fighting on its flank or rear shows in the recordings).
-    flank = torch.where(u["flank_hit"] >= 2, cal.get("attacked_rear", R["was_attacked_in_rear"]),
-                        torch.where(u["flank_hit"] >= 1, cal.get("attacked_flank", R["was_attacked_in_flank"]), 0.0))
-    pts = pts + flank
+    if cal.get("attacked_event"):
+        # The database's was_attacked_in_flank / _rear (-6 / -14) at the first contact from that side:
+        # battle.py gives the points for the step a worse side is first struck (measured: a unit
+        # first struck in the flank / rear drops 1.5 / 1.9 points more in 1-2 s than one struck in
+        # front, which is one 0.5 s tick of -6 / -14).
+        pts = pts + ctx.get("flank_event", 0.0)
+    else:
+        flank = torch.where(u["flank_hit"] >= 2, cal.get("attacked_rear", R["was_attacked_in_rear"]),
+                            torch.where(u["flank_hit"] >= 1, cal.get("attacked_flank", R["was_attacked_in_flank"]), 0.0))
+        pts = pts + flank
     # Flanks exposed: an enemy threatens one (-3) or several (-6) of the left, right and rear (lf, rf, bf).
     exposed = u["lf"].float() + u["rf"].float() + u["bf"].float()
     pts = pts + torch.where(exposed >= 2, R["ume_concerned_flanks_exposed_multiple"],
@@ -75,6 +88,9 @@ def target_points(u, ctx, params):
     pts = pts + torch.where(u["fat"] >= 5, R["ume_concerned_exhausted"],
                             torch.where(u["fat"] >= 4, R["ume_concerned_very_tired"], 0.0))
     pts = pts + torch.where(ctx["strong_enemy"], R["enemy_morale_penalty_value_min"], 0.0)
+    # The army is beaten as a whole (battle.py: enemy strength >= 2.6x own and own <= 0.22 of the start).
+    pts = pts + torch.where(ctx.get("collapse", torch.zeros_like(pts, dtype=torch.bool)),
+                            R["ume_concerned_army_destruction"], 0.0)
     return pts
 
 
@@ -99,6 +115,9 @@ def step(u, ctx, params, dt):
     M = torch.where(routing, routed_M, stepped)
     u["rout_s"] = torch.where(routing, u["rout_s"] + dt, torch.zeros_like(u["rout_s"]))
     u["rally_s"] = u["rally_s"] + dt
+    # Unbreakable units (attribute unbreakable: flagellants) never lose leadership: their points stay
+    # at leadership or above, so they never waver or rout (docs/en/game/mechanics/abilities.md).
+    M = torch.where(u["unbreakable"], torch.maximum(M, L), M)
 
     # Rally.
     rally = routing & ~u["s"] & free & (M >= cal["rally_mp"] * L) & alive

@@ -10,7 +10,10 @@
   "targets_own": "unit_special_abilities field 5 (inferred): 1 for abilities cast on the caster or a friend",
   "friendly_units": "unit_special_abilities.num_effected_friendly_units (inferred): -1 all in range, n, 0 none",
   "enemy_units": "unit_special_abilities.num_effected_enemy_units (inferred): -1 all in range, n, 0 none",
-  "self_cast": "active, targets_own, friendly_units and enemy_units 0 or -1 (ours): used on the caster himself, no target to choose (perform_special_ability(key, the lord))",
+  "self_cast": "active, not auto, targets_own, friendly_units and enemy_units 0 or -1 (ours): used on the caster himself, no target to choose (perform_special_ability(key, the lord))",
+  "auto_when": "special_ability_to_recharge_contexts.context of the ability (inferred): the battle context in which the game fires it by itself (Strength of the Penitent: losing_melee_combat)",
+  "off_when": "special_ability_to_auto_deactivate_flags.flag (inferred): the effect switches off while this holds (Frenzy: morale_is_lower_than_half_of_base_morale; Penitent: out_of_melee)",
+  "auto": "a timed passive (ours): an active time, a key with '_passive_' (the game lists it among the passives, unit_abilities) - the game fires it by itself (in auto_when, else whenever ready); no player or network order",
   "phases": "special_ability_to_special_ability_phase_junctions for the ability: the phase named as the ability when there is one, else all its phases",
   "targets": "the phases' target_self / target_friends / target_enemies (inferred: self-only abilities have 1 0 0, auras 1 1 0, hexes 0 0 1)",
   "effects": "special_ability_phase_stat_effects of the phases: stat, how (add or mult), value, and on whom (the phase's targets)",
@@ -33,6 +36,9 @@
    "friendly_units": 0,
    "enemy_units": 0,
    "self_cast": true,
+   "auto": false,
+   "auto_when": [],
+   "off_when": [],
    "phases": [
     "wh2_main_character_abilities_verminous_valour"
    ],
@@ -73,6 +79,11 @@
    "friendly_units": 0,
    "enemy_units": 0,
    "self_cast": false,
+   "auto": false,
+   "auto_when": [],
+   "off_when": [
+    "morale_is_higher_than_wavering"
+   ],
    "phases": [
     "wh2_main_unit_passive_scurry_away"
    ],
@@ -104,6 +115,11 @@
    "friendly_units": 0,
    "enemy_units": 0,
    "self_cast": false,
+   "auto": false,
+   "auto_when": [],
+   "off_when": [
+    "health_below_50%_base"
+   ],
    "phases": [
     "wh2_main_unit_passive_strength_in_numbers"
    ],
@@ -153,6 +169,11 @@
    "friendly_units": 0,
    "enemy_units": 0,
    "self_cast": false,
+   "auto": false,
+   "auto_when": [
+    "health_below_25%"
+   ],
+   "off_when": [],
    "phases": [
     "wh3_main_unit_passive_single_entity"
    ],
@@ -192,6 +213,53 @@
    ],
    "attributes": []
   },
+  "wh_dlc04_unit_passive_strength_of_the_penitent": {
+   "active_s": 20.0,
+   "recharge_s": 3.0,
+   "uses": -1,
+   "range_m": 0.0,
+   "passive": false,
+   "targets_own": true,
+   "friendly_units": 0,
+   "enemy_units": 0,
+   "self_cast": false,
+   "auto": true,
+   "auto_when": [
+    "losing_melee_combat"
+   ],
+   "off_when": [
+    "out_of_melee"
+   ],
+   "phases": [
+    "wh_dlc04_unit_passive_strength_of_the_penitent"
+   ],
+   "targets": {
+    "self": true,
+    "friends": false,
+    "enemies": false
+   },
+   "effects": [
+    {
+     "stat": "stat_melee_defence",
+     "how": "add",
+     "value": 14.0,
+     "on": [
+      "self"
+     ],
+     "phase": "wh_dlc04_unit_passive_strength_of_the_penitent"
+    },
+    {
+     "stat": "stat_resistance_physical",
+     "how": "add",
+     "value": 15.0,
+     "on": [
+      "self"
+     ],
+     "phase": "wh_dlc04_unit_passive_strength_of_the_penitent"
+    }
+   ],
+   "attributes": []
+  },
   "wh_main_character_abilities_deadly_onslaught": {
    "active_s": 31.0,
    "recharge_s": 90.0,
@@ -202,6 +270,9 @@
    "friendly_units": 0,
    "enemy_units": 0,
    "self_cast": true,
+   "auto": false,
+   "auto_when": [],
+   "off_when": [],
    "phases": [
     "wh_main_character_abilities_deadly_onslaught"
    ],
@@ -251,6 +322,9 @@
    "friendly_units": 0,
    "enemy_units": 0,
    "self_cast": true,
+   "auto": false,
+   "auto_when": [],
+   "off_when": [],
    "phases": [
     "wh_main_character_abilities_foe_seeker"
    ],
@@ -291,6 +365,9 @@
    "friendly_units": -1,
    "enemy_units": 0,
    "self_cast": true,
+   "auto": false,
+   "auto_when": [],
+   "off_when": [],
    "phases": [
     "wh_main_character_abilities_rally"
    ],
@@ -323,6 +400,9 @@
    "friendly_units": -1,
    "enemy_units": 0,
    "self_cast": true,
+   "auto": false,
+   "auto_when": [],
+   "off_when": [],
    "phases": [
     "wh_main_character_abilities_stand_your_ground"
    ],
@@ -365,6 +445,9 @@
    "friendly_units": -1,
    "enemy_units": 0,
    "self_cast": false,
+   "auto": false,
+   "auto_when": [],
+   "off_when": [],
    "phases": [
     "wh_main_lord_passive_hold_the_line"
    ],
@@ -396,6 +479,78 @@
     }
    ],
    "attributes": []
+  },
+  "wh_main_unit_passive_frenzy": {
+   "active_s": -1.0,
+   "recharge_s": -1.0,
+   "uses": -1,
+   "range_m": 0.0,
+   "passive": true,
+   "targets_own": true,
+   "friendly_units": 0,
+   "enemy_units": 0,
+   "self_cast": false,
+   "auto": false,
+   "auto_when": [],
+   "off_when": [
+    "morale_is_lower_than_half_of_base_morale"
+   ],
+   "phases": [
+    "wh_main_unit_passive_frenzy"
+   ],
+   "targets": {
+    "self": true,
+    "friends": false,
+    "enemies": false
+   },
+   "effects": [
+    {
+     "stat": "stat_charge_bonus",
+     "how": "mult",
+     "value": 1.1,
+     "on": [
+      "self"
+     ],
+     "phase": "wh_main_unit_passive_frenzy"
+    },
+    {
+     "stat": "stat_melee_attack",
+     "how": "add",
+     "value": 10.0,
+     "on": [
+      "self"
+     ],
+     "phase": "wh_main_unit_passive_frenzy"
+    },
+    {
+     "stat": "stat_melee_damage_ap",
+     "how": "mult",
+     "value": 1.1,
+     "on": [
+      "self"
+     ],
+     "phase": "wh_main_unit_passive_frenzy"
+    },
+    {
+     "stat": "stat_melee_damage_base",
+     "how": "mult",
+     "value": 1.1,
+     "on": [
+      "self"
+     ],
+     "phase": "wh_main_unit_passive_frenzy"
+    }
+   ],
+   "attributes": [
+    {
+     "attribute": "immune_to_psychology",
+     "effect": "positive",
+     "on": [
+      "self"
+     ],
+     "phase": "wh_main_unit_passive_frenzy"
+    }
+   ]
   }
  }
 }

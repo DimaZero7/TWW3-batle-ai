@@ -116,3 +116,61 @@ def test_the_lord_uses_an_ability_once_and_the_state_tells_when(lua, tmp_path):
     fx = [(r["u"], r["fx"]) for r in rows if r["event"] == "nn_effects"]
     assert ("enemy_lord", ["wh_main_character_abilities_deadly_onslaught"]) in fx
     assert len([u for u, _ in fx if u == "enemy_lord"]) == 1
+
+
+def test_a_held_shooter_is_aimed_at_the_nearest_enemy_in_range(lua, tmp_path):
+    from tools.nn.companion import exchange
+    lua.globals().SYG, lua.globals().FS = SYG, FS
+    lua.execute(SETUP + """
+        own[2].ammo, own[2].range = 1000, 120
+        enemy[2].pos = fake.vector_type.new()
+        enemy[2].pos:set_x(-60)
+        STATE = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+        bm:pump()
+    """)
+    doc = exchange.read_state(tmp_path / exchange.STATE)
+    hold = [{"unit": "own_lord", "kind": "keep"}, {"unit": "own_spear_1", "kind": "hold"}]
+    exchange.write_atomic(tmp_path / exchange.ORDERS, exchange.orders_text(doc["batch"], 1, hold))
+    lua.execute("bm:tick(100)")
+    assert list(lua.eval("bm.orders").values())[-1] == "halt"
+    lua.execute("for _ = 1, 9 do bm:tick(100) end")             # the next decision aims it
+    assert list(lua.eval("bm.orders").values())[-1] == "attack enemy_spear_1"
+    assert lua.eval("own[2].attack_args.run") is False
+    lua.execute("""
+        bm.outcome, bm.winner = true, 2
+        for _ = 1, 10 do bm:tick(100) end
+    """)
+    rows = events(tmp_path / "tww3_bai_events.jsonl")
+    assert [(r["u"], r["action"], r["tg"]) for r in rows if r["event"] == "nn_hold"] == [
+        ("own_spear_1", "aim", "enemy_spear_1")]
+    assert rows[-1]["nn_hold_aims"] == 1 and "error" not in [r["event"] for r in rows]
+
+
+def test_an_attack_the_engine_dropped_is_given_again(lua, tmp_path):
+    from tools.nn.companion import exchange
+    lua.globals().SYG, lua.globals().FS = SYG, FS
+    lua.execute(SETUP + """
+        STATE = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+        bm:pump()
+    """)
+    doc = exchange.read_state(tmp_path / exchange.STATE)
+    attack = [{"unit": "own_lord", "kind": "attack", "target": "enemy_spear_1", "run": True},
+              {"unit": "own_spear_1", "kind": "keep"}]
+    exchange.write_atomic(tmp_path / exchange.ORDERS, exchange.orders_text(doc["batch"], 1, attack))
+    lua.execute("bm:tick(100)")
+    given = len(list(lua.eval("bm.orders").values()))
+    after = lua.eval("require('apps.bridge.services').STALL_AFTER")
+    lua.execute(f"for _ = 1, {10 * after} do bm:tick(100) end")    # walking to it: nothing new
+    assert len(list(lua.eval("bm.orders").values())) == given
+    lua.execute("own[1].moving = false")                            # stands: the engine dropped the order
+    lua.execute(f"for _ = 1, {10 * after} do bm:tick(100) end")
+    orders = list(lua.eval("bm.orders").values())
+    assert len(orders) == given + 1 and orders[-1] == orders[given - 1]
+    lua.execute("""
+        bm.outcome, bm.winner = true, 2
+        for _ = 1, 10 do bm:tick(100) end
+    """)
+    rows = events(tmp_path / "tww3_bai_events.jsonl")
+    assert [(r["u"], r["k"], r["tg"]) for r in rows if r["event"] == "nn_stall"] == [
+        ("own_lord", "attack", "enemy_spear_1")]
+    assert rows[-1]["nn_stalls"] == 1 and "error" not in [r["event"] for r in rows]

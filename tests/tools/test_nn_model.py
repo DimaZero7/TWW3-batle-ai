@@ -379,3 +379,125 @@ def test_a_trained_checkpoint_acts_as_before_the_damage_timers(path):
     torch.nn.Module.load_state_dict(old_crit, {**fresh, **data["critic"]})
     setup, states = timer_states()
     same_outputs(old, new, old_crit, new_crit, setup, states)
+
+
+# --- the second Empire wave's inputs (02.10.2026): passport features and ability conditions appended ---
+
+WAVE2 = ["wh_dlc04_emp_inf_flagellants_0", "wh_main_emp_inf_greatswords", "wh_dlc04_emp_inf_free_company_militia_0",
+         "wh_main_emp_cha_general_0", "wh2_main_skv_cha_warlord_0", "wh2_main_skv_inf_skavenslave_slingers_0"]
+NEW_PASSPORT = 2 + 3          # attributes mounted_fire_move, guerrilla_deploy; direct, spread, muzzle_velocity
+NEW_ABILITY = 8               # abilities.WHEN
+
+
+def test_the_second_wave_is_seen_in_the_passport_and_the_ability_slots():
+    from tools.nn.model import abilities as mab
+    from tools.nn.model import passport
+    assert len(passport.FLIGHT) + 2 == NEW_PASSPORT and len(mab.WHEN) == NEW_ABILITY
+    f = passport.table(WAVE2[:3] + ["wh2_dlc13_emp_inf_archers_0"])
+    at = len(passport.features(passport.load()[WAVE2[0]])) - len(passport.FLIGHT) - len(passport.ATTRIBUTES)
+    unbreakable = at + passport.ATTRIBUTES.index("unbreakable")
+    direct = len(f[0]) - 3
+    assert f[0, unbreakable] == 1 and f[1, unbreakable] == 0                  # flagellants never rout
+    assert f[2, direct] == 1 and f[3, direct] == 0                            # pistols flat, arrows arc
+    assert f[2, at + passport.ATTRIBUTES.index("mounted_fire_move")] == 1
+    feat, owned, usable = mab.slots([WAVE2[0]])
+    names = mab.STATIC_NAMES
+    assert owned[0].sum() == 2 and not usable[0].any()                        # the game fires them, not orders
+    penitent = feat[0, 0]                                                     # actives first (sim slot order)
+    assert penitent[names.index("auto")] == 1 and penitent[names.index("when_losing_melee")] == 1
+    assert penitent[names.index("off_out_of_melee")] == 1
+    assert feat[0, 1, names.index("off_morale_below_half")] == 1             # frenzy
+
+
+def narrow_networks(cfg):
+    """An actor and critic as saved before the second wave: NEW_PASSPORT fewer token inputs, NEW_ABILITY
+    fewer ability inputs (all appended at the ends)."""
+    from tools.nn.model import abilities as mab
+    actor, crit = policy.Actor(cfg), critic.Critic(cfg)
+    actor.encoder.unit[0] = torch.nn.Linear(ob.TOKEN - NEW_PASSPORT, cfg.d)
+    actor.abilities.net[0] = torch.nn.Linear(mab.SIZE - NEW_ABILITY, cfg.d)
+    actor.heads.ability_k[0] = torch.nn.Linear(mab.SIZE - NEW_ABILITY, cfg.d)
+    crit.encoder.unit[0] = torch.nn.Linear(ob.TOKEN - NEW_PASSPORT, cfg.critic_d)
+    return actor.eval(), crit.eval()
+
+
+def narrow(o):
+    """The observation as the networks before the second wave saw it."""
+    out = dict(o, tokens=o["tokens"][..., :ob.TOKEN - NEW_PASSPORT])
+    if "abil" in o:
+        out["abil"] = o["abil"][..., :o["abil"].shape[-1] - NEW_ABILITY]
+    return out
+
+
+def wave2_obs():
+    setup, state = sources.synthetic(batch=2, own=4, enemy=4, seed=11, keys=WAVE2)
+    N = 8
+    state.update(men=np.maximum(state["men"], 1.0), ms=np.full((2, N), 2.0), r=np.zeros((2, N), bool),
+                 s=np.zeros((2, N), bool))
+    for k in range(3):
+        for t in ("on", "cd"):
+            state[f"ab{k}_{t}"] = np.zeros((2, N))
+    obs, _ = ob.observe(state, setup, 1)
+    cobs, _ = ob.observe(state, setup, 1, full=True)
+    return obs, cobs
+
+
+def test_networks_saved_before_the_second_wave_load_and_act_the_same_and_train():
+    obs, cobs = wave2_obs()
+    torch.manual_seed(4)
+    old, old_crit = narrow_networks(CFG)
+    new, new_crit = model(seed=12), critic.Critic(CFG).eval()
+    new.load_state_dict(old.state_dict())
+    new_crit.load(old_crit.state_dict())
+    o, c = policy.to_torch(obs), policy.to_torch(cobs)
+    assert o["tokens"][..., -NEW_PASSPORT:].abs().sum() > 0                  # the new inputs are not all zero
+    with torch.no_grad():
+        lo, _ = old(narrow(o))
+        ln, _ = new(o)
+        keys = ("tokens", "own", "attend", "pos", "ctx")
+        vo, vn = old_crit(narrow({k: c[k] for k in keys})), new_crit({k: c[k] for k in keys})
+    for k in lo:
+        assert torch.allclose(lo[k], ln[k], atol=1e-5), k
+    assert torch.allclose(vo, vn, atol=1e-5)
+    # forward and backward with the new inputs: the new columns get a gradient (they can learn)
+    # (the ability encoder's last layer starts at zero: its first layer learns once that one has moved;
+    # the flagellants' abilities are never orderable, so the head's key gets nothing from them)
+    new.train()
+    with torch.no_grad():
+        new.abilities.net[2].weight.normal_(std=0.01)
+    out, _ = new(o)
+    loss = sum(v.masked_fill(v < -1e8, 0).sum() for v in out.values())
+    loss.backward()
+    assert new.encoder.unit[0].weight.grad[:, -NEW_PASSPORT:].abs().sum() > 0
+    assert new.abilities.net[0].weight.grad[:, -NEW_ABILITY:].abs().sum() > 0
+
+
+CHAIN = ROOT / "build/nn-train/test5/it4/m10.pt"
+
+
+@pytest.mark.skipif(not CHAIN.exists(), reason="no chain checkpoint (build/ is not in Git)")
+def test_the_chain_checkpoint_loads_through_the_conversion_and_acts_as_before():
+    from tools.nn.train import checkpoint
+    data = checkpoint.read(CHAIN)
+    cfg = checkpoint.config_of(data)
+    new = checkpoint.load_policy(CHAIN)
+    new_crit = checkpoint.load_critic(CHAIN)
+    old, old_crit = narrow_networks(cfg)
+    fresh = {k: v for k, v in new.state_dict().items() if k.startswith(policy.ABILITY_PARAMS)
+             and k not in data["actor"]}
+    torch.nn.Module.load_state_dict(old, {**fresh, **data["actor"]})
+    if new_crit is not None:
+        fresh = {k: v for k, v in new_crit.state_dict().items() if k not in data["critic"]}
+        torch.nn.Module.load_state_dict(old_crit, {**fresh, **data["critic"]})
+    obs, cobs = wave2_obs()
+    o, c = policy.to_torch(obs), policy.to_torch(cobs)
+    with torch.no_grad():
+        lo, _ = old.eval()(narrow(o))
+        ln, _ = new(o)
+    for k in lo:
+        assert torch.allclose(lo[k], ln[k], atol=1e-4), k
+    if new_crit is not None:
+        keys = ("tokens", "own", "attend", "pos", "ctx")
+        with torch.no_grad():
+            assert torch.allclose(old_crit.eval()(narrow({k: c[k] for k in keys})),
+                                  new_crit.eval()({k: c[k] for k in keys}), atol=1e-4)

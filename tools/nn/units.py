@@ -30,7 +30,11 @@ UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_e
          # spearmen with shields (02.10.2026): the Empire's answer to Skaven slings and arrows
          "wh_main_emp_inf_spearmen_1",
          # swordsmen with sword and shield (02.10.2026): the Empire's melee line against Skaven infantry
-         "wh_main_emp_inf_swordsmen")
+         "wh_main_emp_inf_swordsmen",
+         # 02.10.2026, the Empire's second wave: unbreakable frenzied flagellants (cheap chaff that never
+         # routs), heavy armour-piercing greatswords, and the first DIRECT-fire shooters (pistols, fire
+         # whilst moving, decent melee): units.md "Flagellants, Greatswords, Free Company Militia"
+         "wh_dlc04_emp_inf_flagellants_0", "wh_main_emp_inf_greatswords", "wh_dlc04_emp_inf_free_company_militia_0")
 TABLES = ("main_units", "land_units", "battle_entities", "melee_weapons", "missile_weapons", "projectiles",
           "unit_armour_types", "unit_shield_types", "unit_attributes_to_groups_junctions",
           "land_units_to_unit_abilites_junctions")
@@ -97,6 +101,9 @@ FIELDS = {
     "missile.projectile_number": ("projectiles.projectile_number (inferred)", None),
     "missile.shots_per_volley": ("projectiles.shots_per_volley (inferred)", None),
     "missile.trajectory": ("projectiles.trajectory (inferred)", None),
+    "missile.direct": ("projectiles.trajectory == 'low' (ours): flat, fixed-speed fire (guns) that needs a clear line "
+                       "past friendly units (docs/en/game/mechanics/missiles.md: `low` flat; `dual_low_fixed` "
+                       "switches to an arc when blocked, `fixed` arcs)", None),
     "missile.muzzle_velocity": ("projectiles.muzzle_velocity (inferred), m/s", None),
     "missile.max_elevation": ("projectiles.max_elevation (inferred), degrees", None),
     "missile.calibration_distance_m": ("projectiles.calibration_distance (inferred)", None),
@@ -108,7 +115,8 @@ FIELDS = {
 # Asked for, but not in the tables read (or not decoded): why (docs/*/training/units.md).
 MISSING = {
     "missile.bonus_v_large / bonus_v_infantry": "no such column found: the anti-large arrow row equals the plain arrow",
-    "missile.can_fire_over_friendlies": "no column found; projectiles.trajectory may say it (not checked)",
+    "missile.can_fire_over_friendlies": "no column of its own: missile.direct (trajectory 'low') says the unit "
+                                        "cannot; the others arc over friends (knowledge base, not measured)",
     "fatigue modifiers per unit": "none in land_units / battle_entities; fatigue rules are global "
                                   "(config/nn/game_rules.json, fatigue)",
     "lord aura per unit": "no per-unit radius found; the aura is global (_kv_morale_tables: general_aura_radius, "
@@ -170,7 +178,8 @@ def passport(key, t):
             "category": pr["category"], "range_m": pr["effective_range"], "min_range_m": pr["minimum_range"],
             "reload_s": pr["base_reload_time"], "damage": pr["damage"], "ap_damage": pr["ap_damage"],
             "projectile_number": pr["projectile_number"], "shots_per_volley": pr["shots_per_volley"],
-            "trajectory": pr["trajectory"], "muzzle_velocity": pr["muzzle_velocity"],
+            "trajectory": pr["trajectory"], "direct": pr["trajectory"] == "low",
+            "muzzle_velocity": pr["muzzle_velocity"],
             "max_elevation": pr["max_elevation"], "calibration_distance_m": pr["calibration_distance"],
             "calibration_area_m": pr["calibration_area"], "explosion": pr["explosion_type"],
             "penetration": pr["penetration"], "shot_type": pr["shot_type"]}

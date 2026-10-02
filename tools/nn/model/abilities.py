@@ -43,8 +43,15 @@ ATTRIBUTES = ("immune_to_psychology", "unbreakable", "rampage", "stalk", "causes
 GROUPS = ("allies", "enemies")     # allies: the owner and his friends (phase targets self or friends)
 HEAD = ("passive", "active_s", "recharge_s", "uses_limited", "uses", "range_m", "self_cast", "targets_own",
         "friendly_all", "friendly_n", "enemy_all", "enemy_n", "target_self", "target_friends", "target_enemies")
+# When the game fires it and when it is off (02.10.2026; appended last so that older checkpoints load
+# with zero weights for them, encoder.py): auto = a timed passive the game fires by itself (never by
+# order), its context (auto_when) and the conditions that hold it off (off_when), from the database.
+WHEN = (("auto", None), ("when_losing_melee", "losing_melee_combat"), ("when_in_melee", "engaged_in_melee"),
+        ("off_out_of_melee", "out_of_melee"), ("off_morale_below_half", "morale_is_lower_than_half_of_base_morale"),
+        ("off_not_wavering", "morale_is_higher_than_wavering"), ("off_health_below_half", "health_below_50%_base"),
+        ("other_condition", None))
 STATIC_NAMES = HEAD + tuple(f"{g}_{s}_{h}" for g in GROUPS for s, h, _ in STATS) + tuple(
-    f"{g}_{a}" for g in GROUPS for a in ATTRIBUTES)
+    f"{g}_{a}" for g in GROUPS for a in ATTRIBUTES) + tuple(n for n, _ in WHEN)
 STATIC = len(STATIC_NAMES)
 # The state of a slot in battle (tools/nn/model/observation.py): owned, ready to use, seconds until
 # ready / 60, seconds active left / 30, active now. Enemies: owned and active now (while seen).
@@ -84,6 +91,9 @@ def features(p):
     given = {(g, a["attribute"]) for a in p.get("attributes") or () for g in _group(a.get("on") or ())}
     for g in GROUPS:
         out += [float((g, a) in given) for a in ATTRIBUTES]
+    conds = set(p.get("auto_when") or ()) | set(p.get("off_when") or ())
+    known = {c for _, c in WHEN if c}
+    out += [float(bool(p.get("auto")))] + [float(c in conds) for n, c in WHEN[1:-1]] + [float(bool(conds - known))]
     return out
 
 

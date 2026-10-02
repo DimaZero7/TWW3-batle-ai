@@ -15,6 +15,16 @@ sling); then every man shoots once per reload (measured 11.0 / 11.5 s, longer th
 
 Target: the ATTACK order's target if in range, else the nearest standing enemy in range, else
 the nearest routing one (fire at will; into melee too: allow_fire_at_will_into_melee 1).
+
+Line of fire (direct fire only: projectiles with trajectory `low`, the passport's missile.direct;
+arrows and slings arc over friends): the shooter's men aim at the target's centre; a friendly unit
+between them (nearer than the target's edge) blocks the lines that pass through its width across
+the line, widened by the friendly man radius coefficient (projectile_friendly_fire_man_radius_
+coefficient 2.2: friends count wider, so a formation is a wall). Blocked men do not shoot; at
+unit_firing_line_of_sight_considered_obstructed_ratio (0.75) blocked the unit holds fire at that
+target and takes the next one in range (an ordered target too: the bridge releases a blocked
+shooter to fire at will), or holds fire. Enemies in the way do not block (the game's clear-shot
+test is about friends). Flat map: no fire over friends from higher ground.
 """
 import torch
 
@@ -35,10 +45,12 @@ def distance_factor(dist, table):
     return v0 + w * (v1 - v0)
 
 
-def choose_target(u, pw, can_shoot, order_target, order_attack):
-    """[B, N] slot each shooter aims at (-1 none) and whether it is in range."""
+def choose_target(u, pw, can_shoot, order_target, order_attack, exclude=None):
+    """[B, N] slot each shooter aims at (-1 none). exclude [B, N, N]: targets i may not take."""
     alive = (u["men"] > 0) & ~u["gone"]
     in_range = pw["enemy"] & alive[:, None, :] & (pw["gap"] <= u["range"][:, :, None])
+    if exclude is not None:
+        in_range = in_range & ~exclude
     standing = in_range & ~u["r"][:, None, :]
     score = torch.where(standing, pw["dist"], torch.where(in_range, pw["dist"] + 1e5, torch.full_like(pw["dist"], FAR)))
     nearest = score.argmin(dim=2)
@@ -50,15 +62,68 @@ def choose_target(u, pw, can_shoot, order_target, order_attack):
     return torch.where(can_shoot, target, torch.full_like(target, -1))
 
 
-def volley(u, pw, target, dt, params, contact=None):
+def blocked_share(u, pw, target, params):
+    """[B, N] share of shooter i's men whose line to its target (slot, -1 none: 0) passes through a
+    friendly unit (module docstring). Rectangles across the line: front x |cos| + depth x |sin|."""
+    t = target.clamp(min=0)[:, :, None]
+    theta = pw["theta"].gather(2, t)                              # [B, i, 1] bearing to the target
+    dist = pw["dist"].gather(2, t).clamp(min=1e-3)
+    near_edge = pw["reach_j"].gather(2, t)                         # to the target's edge
+    rel = pw["theta"] - theta                                      # [B, i, k] k seen off the line
+    along = pw["dist"] * torch.cos(rel)
+    across = pw["dist"] * torch.sin(rel)
+    b = u["b"] * geometry.DEG
+    front, depth = pw["front"], pw["depth"]
+    phi = b[:, None, :] - theta                                    # k's facing against the line
+    coef = params.battle.get("projectile_friendly_fire_man_radius_coefficient", 2.2)
+    half = (front[:, None, :] / 2 * torch.cos(phi).abs() + depth[:, None, :] / 2 * torch.sin(phi).abs()
+            + (coef - 1) * u["radius"][:, None, :])
+    phi_i = b[:, :, None] - theta
+    width = (front[:, :, None] * torch.cos(phi_i).abs() + depth[:, :, None] * torch.sin(phi_i).abs()).clamp(min=1e-3)
+    # The lines from the shooter's front converge on the target's centre: at `along` the line from
+    # offset s across passes at s x (1 - along / dist); k covers the offsets lo..hi.
+    shrink = (1 - along / dist).clamp(min=1e-3)
+    lo, hi = (across - half) / shrink, (across + half) / shrink
+    cover = (torch.minimum(hi, width / 2) - torch.maximum(lo, -width / 2)).clamp(min=0) / width
+    N = u["men"].shape[1]
+    eye = torch.eye(N, dtype=torch.bool, device=u["men"].device)[None]
+    friend = ((u["side"][:, :, None] == u["side"][:, None, :]) & ~eye & (u["side"][:, None, :] > 0)
+              & ((u["men"] > 0) & ~u["gone"])[:, None, :])
+    between = friend & (along > 0) & (along < near_edge)
+    blocked = torch.where(between, cover, torch.zeros_like(cover)).sum(2).clamp(max=1)
+    return torch.where(target >= 0, blocked, torch.zeros_like(blocked))
+
+
+def clear_shot(u, pw, target, can_shoot, order_target, order_attack, params):
+    """Direct fire's line of fire (module docstring): (target [B, N], clear [B, N] share of the men
+    that shoot). A direct-fire unit blocked at its target beyond the obstructed ratio takes the next
+    target in range; blocked there too, it holds fire (-1). Other shooters: as given, clear 1."""
+    ratio = params.battle.get("unit_firing_line_of_sight_considered_obstructed_ratio", 0.75)
+    direct = u["direct"]
+    blocked = blocked_share(u, pw, target, params)
+    bad = direct & (target >= 0) & (blocked >= ratio)
+    exclude = torch.zeros_like(pw["enemy"]).scatter_(2, target.clamp(min=0)[:, :, None], True) & bad[:, :, None]
+    again = choose_target(u, pw, can_shoot & bad, order_target, order_attack, exclude=exclude)
+    target = torch.where(bad, again, target)
+    blocked = torch.where(bad, blocked_share(u, pw, target, params), blocked)
+    held = direct & (target >= 0) & (blocked >= ratio)
+    target = torch.where(held, torch.full_like(target, -1), target)
+    clear = torch.where(direct, 1 - blocked, torch.ones_like(blocked))
+    return target, torch.where(target >= 0, clear, torch.zeros_like(clear))
+
+
+def volley(u, pw, target, dt, params, contact=None, clear=None):
     """Shots, and HP taken per pair [B, N, N] (i shoots, f is hit) this step; per-hit damage
-    [B, N, N]. contact [B, N, N]: which units touch in melee. Of the hits aimed at a unit in
+    [B, N, N]. clear [B, N]: share of the shooter's men with a clear line (clear_shot; None: all).
+    contact [B, N, N]: which units touch in melee. Of the hits aimed at a unit in
     melee, the shooter's friendly_fire share lands on its own units in contact with the target
     (measured, docs/en/training/simulator.md)."""
     ms = params.sim["missile"]
     B = params.battle
     shooting = target >= 0
     shots = torch.where(shooting, u["men"] * dt / u["reload"].clamp(min=1e-6), torch.zeros_like(u["men"]))
+    if clear is not None:
+        shots = shots * clear
     shots = torch.minimum(shots, u["a"])
     t = target.clamp(min=0)
     onehot = torch.zeros_like(pw["dist"]).scatter_(2, t[:, :, None], 1.0) * shooting[:, :, None]
@@ -101,3 +166,16 @@ def volley(u, pw, target, dt, params, contact=None):
                         u["hp_man"][:, None, :], u["resist_missile"][:, None, :])
     hp = landed * hit * (1 - shield)
     return shots, hp, hit
+
+
+def friendly(hp, u):
+    """Friendly fire in gold this step from the HP per pair [B, N, N] (i shoots, f is hit; as dealt):
+    (dealt [B, N]: what each shooter took from its own side, taken [B, N]: what each unit lost to its
+    own side's shots). Gold = HP x the victim's cost / its starting HP (reward.py's worth). The side's
+    reward pays it anyway (its gold lost); reward.unit_step lays it on the shooter instead of the
+    victim (gate 02.10.2026: four slinger units shot a Warlord in melee with our spearmen for 119 s,
+    ~1.8-2.3 HP of our own per shot in the game and in the simulator alike)."""
+    same = (u["side"][:, :, None] == u["side"][:, None, :]) & (u["side"][:, :, None] > 0)
+    worth = u["cost"] / u["hp0"].clamp(min=1e-6)
+    gold = torch.where(same, hp, torch.zeros_like(hp)) * worth[:, None, :]
+    return gold.sum(2), gold.sum(1)

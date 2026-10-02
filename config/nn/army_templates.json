@@ -146,6 +146,24 @@
       "group": "wh3_default_land_ranged_infantry_trash",
       "quality": "tier_1_step_4_units"
      }
+    ],
+    "wh_dlc04_emp_inf_flagellants_0": [
+     {
+      "group": "wh3_default_land_melee_infantry_main_flanking",
+      "quality": "tier_2_step_2_units"
+     }
+    ],
+    "wh_main_emp_inf_greatswords": [
+     {
+      "group": "wh3_default_land_melee_infantry_main_frontline_swords_high_quality",
+      "quality": "tier_2_step_4_units"
+     }
+    ],
+    "wh_dlc04_emp_inf_free_company_militia_0": [
+     {
+      "group": "wh3_default_land_ranged_infantry_trash",
+      "quality": "tier_1_step_5_units"
+     }
     ]
    }
   },

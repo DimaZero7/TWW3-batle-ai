@@ -5,6 +5,8 @@
     "template": 0.75,
     "random": 0.25
   },
+  "budget_max": 7725,
+  "_budget_max": "The largest budget B drawn (tools/nn/armies/pools.py budget_max): 7725 = the Empire's most before 02.10.2026 (the general and 19 swordsmen). The greatswords (850) would raise an Empire mirror's top to 16750 and shift every Empire mirror to richer armies; the cap keeps the budgets as they were.",
   "caps": {
     "_description": "Template armies only: share of an army's units (the lord counted) that may be of one passport category, rounded down, at least 1. Random armies have no caps.",
     "inf_ranged": 0.6
@@ -17,7 +19,10 @@
         {"key": "wh_main_emp_inf_spearmen_0", "slot": "spear", "width": 30},
         {"key": "wh_main_emp_inf_spearmen_1", "slot": "shield_spear", "width": 30},
         {"key": "wh_main_emp_inf_swordsmen", "slot": "sword", "width": 30},
-        {"key": "wh2_dlc13_emp_inf_archers_0", "slot": "archer", "width": 40}
+        {"key": "wh2_dlc13_emp_inf_archers_0", "slot": "archer", "width": 40},
+        {"key": "wh_dlc04_emp_inf_flagellants_0", "slot": "flagellant", "width": 30},
+        {"key": "wh_main_emp_inf_greatswords", "slot": "greatsword", "width": 30},
+        {"key": "wh_dlc04_emp_inf_free_company_militia_0", "slot": "militia", "width": 30}
       ]
     },
     "wh2_main_skv_skaven": {

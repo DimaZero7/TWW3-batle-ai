@@ -131,6 +131,23 @@ def anchor_kl(logits, ref, ctrl):
     return masked_mean(k + p_attack * t, ctrl)
 
 
+def distance(actor, other, batch, minibatch):
+    """The mean per-unit KL(actor || other) on the order kind and the target (anchor_kl), without
+    gradients, over the first minibatch's worth of the batch's learner rows (each with its whole
+    chunk; both networks start the chunk from the memory the actor began it with, as the anchor's
+    reference does). E.g. the distance of the trained actor from the network the run started from."""
+    T, R = batch["reward"].shape
+    idx = torch.arange(min(R, max(1, minibatch // T)), device=batch["reward"].device)
+    with torch.no_grad():
+        obs = full_obs({k: v[:, idx] for k, v in batch["obs"].items()}, batch.get("abil_static"))
+        a, _ = actor.sequence(obs, batch["h0"][idx], batch["reset"][:, idx])
+        b, _ = other.sequence(obs, batch["h0"][idx], batch["reset"][:, idx])
+        a = {k: v.reshape(-1, *v.shape[2:]) for k, v in a.items()}
+        b = {k: v.reshape(-1, *v.shape[2:]) for k, v in b.items()}
+        ctrl = obs["ctrl"].reshape(-1, obs["ctrl"].shape[-1])
+        return float(anchor_kl(a, b, ctrl))
+
+
 def normalise(a, groups=None):
     """(a - mean) / std over all of a, or over each group apart (groups: bool of a's shape, e.g. the
     learner attacks)."""

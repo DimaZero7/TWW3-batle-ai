@@ -38,7 +38,7 @@ takes a recorded battle and the simulator's batch: both have the fields of the r
 
 | Input | Who sees it | Scale |
 |---|---|---|
-| Passport of every unit, own and enemy ([passports](units.md)): men, health, mass, speeds, attack, defence, charge, weapon damage and bonuses, armour, shield, leadership, resistances, missile (range, ammo, damage, reload, accuracy), cost, caste, size, attributes | both sides | ~0–1; wide numbers (health, mass, cost, damage) on a log scale; caste, size, attributes as 0/1 |
+| Passport of every unit, own and enemy ([passports](units.md)): men, health, mass, speeds, attack, defence, charge, weapon damage and bonuses, armour, shield, leadership, resistances, missile (range, ammo, damage, reload, accuracy; since 02.10.2026 at the end: direct fire, spread, muzzle velocity), cost, caste, size, attributes (unbreakable, fire whilst moving, …) | both sides | ~0–1; wide numbers (health, mass, cost, damage) on a log scale; caste, size, attributes as 0/1 |
 | Experience rank | both sides | rank / 9 |
 | Faction character (5 numbers, `config/nn/factions.json`) | own side | 0–1 as written |
 | Role: attack or defend | own side | 0/1 |
@@ -119,7 +119,7 @@ simulator): active abilities first, then passives that reach other units, then t
 group by key. General: Foe Seeker, Stand Your Ground, Hold the Line; Warlord: Verminous Valour,
 Deadly Onslaught, Rally.
 
-| Input (per slot, `Obs.abil` [B, N, 3, 106]) | Own unit | Enemy, visible | Enemy, not visible | Scale |
+| Input (per slot, `Obs.abil` [B, N, 3, 114]) | Own unit | Enemy, visible | Enemy, not visible | Scale |
 |---|---|---|---|---|
 | Owned | yes | yes | yes | 0/1 |
 | Ready to use now | yes | no | no | 0/1 |
@@ -128,6 +128,7 @@ Deadly Onslaught, Rally.
 | Active now | yes | yes | no | 0/1 |
 | Passport: passive, active and recharge time, uses, range, self-cast, how many friends / enemies it reaches, targets (self, friends, enemies) | yes | yes | yes | s / 60, s / 120, m / 100, 0/1 |
 | Passport: effects on allies (the owner and his friends) and on enemies: 28 stats of the database (speed, charge speed, melee attack and defence, damage and AP, charge bonus, leadership, armour, resistances, missile damage, reload, accuracy, range, bonus vs large / infantry, mass, …) and 15 attributes (unbreakable, immune to psychology, causes fear, …) | yes | yes | yes | multipliers as value − 1; additions / 50 or / 100; attributes 0/1 |
+| Passport: when (02.10.2026, at the end): the game fires it itself (`auto`), on losing a melee / in melee, off out of melee / below half morale / when not wavering / below half health, another condition | yes | yes | yes | 0/1 |
 
 Why the enemy's: a player sees the enemy army's cards before battle (the abilities are on them),
 and in battle the game draws an active ability's effect on the unit and lists it among the
@@ -141,7 +142,7 @@ state (recordings) nothing is ready.
 
 ```mermaid
 flowchart TB
-  tok["Unit tokens: 115 numbers each<br/>(64 of them the passport)"] --> enc["Shared encoder<br/>the same weights for every unit"]
+  tok["Unit tokens: 120 numbers each<br/>(69 of them the passport)"] --> enc["Shared encoder<br/>the same weights for every unit"]
   ctx["Context: character, role, counts, lords,<br/>time elapsed, damage timers"] --> enc
   enc --> att["Attention layers<br/>+ distance bias, masks"]
   att --> gru["Memory: a GRU per unit<br/>and one for the army"]
