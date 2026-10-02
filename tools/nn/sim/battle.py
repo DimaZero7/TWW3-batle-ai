@@ -53,7 +53,11 @@ def step(st, orders, params=None, dt=None):
     # Units already fighting stay in contact a little longer (formations thin as men fall).
     held = (u["m"][:, :, None] | u["m"][:, None, :]).float() * cal["contact"]["hold_m"]
     touch = pw["enemy"] & both & (pw["gap"] <= reach + held)
-    leaving = kind == O.WITHDRAW
+    # Leaving melee: a withdraw order, or a missile unit told to move contact.missile_leave_m or more
+    # away (0: off; measured in the game, off for now: config/nn/sim.json).
+    leave_m = float(cal["contact"].get("missile_leave_m", 0.0))
+    far_point = torch.sqrt((u["ox"] - u["x"]) ** 2 + (u["oz"] - u["z"]) ** 2) >= leave_m
+    leaving = (kind == O.WITHDRAW) | ((kind == O.MOVE) & (u["range"] > 0) & far_point & (leave_m > 0))
     striker = standing & ~leaving
     strike = touch & striker[:, :, None]
     engaged = standing & (touch & standing[:, None, :]).any(2)
@@ -129,8 +133,9 @@ def step(st, orders, params=None, dt=None):
     standing = alive & ~u["r"]
 
     # --- the lords ---
-    # A shattered lord is lost as if slain: in the game the whole army drops 0.5-0.6 of its
-    # leadership in the second he shatters (gate runs 02.10.2026), the same −16 then −10.
+    # A lord who falls (dead or shattered) takes his aura with him, and his army loses
+    # sim.json morale.lord_fall: the database's -16 then -10 (the recordings show about the aura
+    # only; the -16 / -10 stand in for the game's army collapse until it is modelled: sim.json).
     has_lord = torch.stack([(u["lord"] & (u["side"] == s)).any(1) for s in (1, 2)], 1)
     lord_alive = torch.stack([(u["lord"] & (u["side"] == s) & alive & ~u["s"]).any(1) for s in (1, 2)], 1)
     dead = has_lord & ~lord_alive
@@ -139,8 +144,8 @@ def step(st, orders, params=None, dt=None):
     side_idx = (u["side"] - 1).clamp(min=0)
     since = st.lord_dead_s.gather(1, side_idx)
     M = params.morale
-    lord_pts = torch.where(since < 0, 0.0, torch.where(since < tau, M["ume_concerned_general_died_recently"],
-                                                       M["ume_concerned_general_dead"]))
+    fall = cal["morale"]["lord_fall"]
+    lord_pts = torch.where(since < 0, 0.0, torch.where(since < tau, float(fall["recent"]), float(fall["lasting"])))
 
     # --- morale ---
     d = pw["dist"]

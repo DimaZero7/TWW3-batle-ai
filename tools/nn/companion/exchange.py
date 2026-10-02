@@ -105,6 +105,52 @@ def arrays(doc, names, slots=None):
     return out
 
 
+def order_points(state, names, side, given, last=None):
+    """The order point (ox, oz) of own units as the simulator reports it (tools/nn/sim/battle.py), in
+    place in `state` (exchange.arrays); returns the points kept for the next call (`last`).
+
+    The network was trained on the simulator's point: a holding unit's own place, an attacking unit's
+    target, a move / withdraw point. The game's ordered_position is a move's point too, but ~10 m
+    from the unit itself for a hold or an attack (gate it2, 8 battles: 28 309 attack samples, median
+    9.8 m from the unit, 13.5 m from the target). Fed that, the network does not recognise the order
+    in force: the same network changed orders 15.7 times a unit-minute in game vs 5.8 in the
+    simulator (docs/en/apps/bridge.md "Order point"). given: {name: the last order the companion gave
+    the unit, not keep} (orders_list's dicts); a unit without one holds. An attack on a target that
+    is gone (no men) holds, as the simulator turns it to HOLD. Routing or shattered units keep the
+    point they had (the simulator does not update them). Enemy rows are left as read."""
+    last = dict(last or {})
+    index = {n: i for i, n in enumerate(names)}
+    x, z, men = state["x"][0], state["z"][0], state["men"][0]
+    for i, name in enumerate(names):
+        if side[i] != 1:
+            continue
+        if (state["r"][0, i] or state["s"][0, i]) and name in last:
+            state["ox"][0, i], state["oz"][0, i] = last[name]
+            continue
+        o = given.get(name) or {}
+        k = o.get("kind")
+        px, pz = x[i], z[i]
+        if k in ("move", "withdraw"):
+            px, pz = o["x"], o["z"]
+        elif k == "attack":
+            j = index.get(o.get("target"), -1)
+            if j >= 0 and men[j] > 0 and np.isfinite(x[j]) and np.isfinite(z[j]):
+                px, pz = x[j], z[j]
+        state["ox"][0, i], state["oz"][0, i] = px, pz
+        last[name] = (px, pz)
+    return last
+
+
+def remember_orders(given, orders, ctrl_names):
+    """The orders in force after an answer: given updated in place with every order to a unit that
+    takes orders (ctrl_names), except keep (the order in force goes on). Orders to routing units are
+    not given in the game (nor in the simulator)."""
+    for o in orders:
+        if o["kind"] != "keep" and o["unit"] in ctrl_names:
+            given[o["unit"]] = o
+    return given
+
+
 def _effects(row):
     """The phases active on a unit (row fx; JSON gives an empty list as {}), or None when not read."""
     fx = row.get("fx")

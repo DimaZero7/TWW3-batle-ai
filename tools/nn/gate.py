@@ -20,6 +20,11 @@ and `stalled` (nobody took damage for 10 minutes of battle) are the defender's w
 (real time ran out), `incomplete`, a crash or no result: no result, not a win. A battle not at
 Normal difficulty (launch.json battle_difficulty 1) does not count either.
 
+Liveliness (measured only, docs/en/launch/gate.md): from each recording our network's given orders
+(nn_orders: changes, attack-target switches, A->B->A flips, move jitter, twitching out of melee, as
+tools/nn/train/behaviour.py counts them in the simulator) and both sides' own current targets every
+second (nn_sample): the game's AI's target switches are the reference band.
+
 Plain python (numpy through the generator): runs in the project's .venv.
 """
 import argparse
@@ -169,6 +174,152 @@ def gold(cfg, units, costs, rout_share=ROUT_SHARE):
     return {"lost": [round(x, 1) for x in lost], "start": start}
 
 
+# Liveliness, as tools/nn/train/behaviour.py measures it in the simulator (its constants; no torch here).
+MOVE_M, REPEAT_M, FLIP_S, TWITCH_PER_MIN, FREE_MIN_S = 10.0, 5.0, 10.0, 6.0, 30.0
+LIVELY_COUNTS = ("unit_s", "changes", "switches", "flips", "move_s", "repoints", "repoint_m", "free_s", "free_changes",
+                 "twitch_units", "free_units", "eng_s", "eng_switches", "eng_flips")
+POINT_KINDS = ("move", "withdraw")
+
+
+def _point(o):
+    return o is not None and o.get("k") in POINT_KINDS and o.get("x") is not None and o.get("z") is not None
+
+
+def _dist(a, b):
+    return math.hypot(a["x"] - b["x"], a["z"] - b["z"])
+
+
+def _same_order(a, b):
+    """The order b is a (A -> B -> A): the same kind, target, a point within MOVE_M."""
+    if a is None or b is None or a.get("k") != b.get("k"):
+        return False
+    if a.get("k") == "attack":
+        return a.get("tg") == b.get("tg")
+    return _dist(a, b) <= MOVE_M if _point(a) and _point(b) else True
+
+
+def liveliness(path):
+    """Liveliness counts of a run's events.jsonl: {"net": counts, "game_ai": counts} (LIVELY_COUNTS) or
+    None without samples. Our network's orders: the bridge's nn_orders (only orders that changed are
+    given; a change: a new kind, attack target or a point more than MOVE_M away; a switch: a new attack
+    target while the old one stands; a flip: back to the order before the previous one within FLIP_S;
+    move jitter: successive points of a moving unit more than REPEAT_M apart; twitching: FREE_MIN_S or
+    more out of melee, TWITCH_PER_MIN or more changes a minute there). Both sides, from the nn_sample
+    rows (every second): the units' own current target (t) switching (eng_switches) and flipping back
+    within FLIP_S (eng_flips), a standing unit's seconds (eng_s): the game's AI as a reference."""
+    c = {s: dict.fromkeys(LIVELY_COUNTS, 0.0) for s in ("net", "game_ai")}
+    last = {}                  # name -> the last sample row
+    order, before, changed = {}, {}, {}      # our units: the order in force, the one before it, when it changed
+    eng = {}                   # name -> (target, previous target, when it changed)
+    free_s, free_ch = {}, {}
+    t_prev = None
+    seen = False
+    try:
+        f = open(path, encoding="utf-8")
+    except OSError:
+        return None
+    with f:
+        for line in f:
+            if '"event":"nn_sample"' in line:
+                ev = json.loads(line)
+                t = ev.get("t", 0) / 1000
+                dt = 0.0 if t_prev is None else min(max(t - t_prev, 0.0), 2.0)
+                t_prev = t
+                seen = True
+                for u in ev.get("units") or []:
+                    who = "net" if u.get("side") == 1 else "game_ai"
+                    name = u.get("n")
+                    last[name] = u
+                    up = (u.get("men") or 0) > 0 and not u.get("r") and not u.get("s")
+                    tg = (u.get("t") or "") if up else ""
+                    if up:
+                        c[who]["eng_s"] += dt
+                        if who == "net":
+                            c[who]["unit_s"] += dt
+                            if _point(order.get(name)):
+                                c[who]["move_s"] += dt
+                            if not u.get("m"):
+                                free_s[name] = free_s.get(name, 0.0) + dt
+                    old, older, when = eng.get(name, ("", "", -1e9))
+                    if tg and old and tg != old:
+                        c[who]["eng_switches"] += 1
+                        if tg == older and t - when <= FLIP_S:
+                            c[who]["eng_flips"] += 1
+                        eng[name] = (tg, old, t)
+                    elif tg != old:
+                        eng[name] = (tg, older, when)
+            elif '"event":"nn_orders"' in line:
+                ev = json.loads(line)
+                t = ev.get("t", 0) / 1000
+                for o in ev.get("orders") or []:
+                    if o.get("status") != "given":
+                        continue
+                    name = o.get("u")
+                    cur = order.get(name)
+                    new_target = o.get("k") == "attack" and cur is not None and o.get("tg") != cur.get("tg")
+                    moved = _point(o) and _point(cur) and _dist(o, cur) > MOVE_M
+                    if cur is None or o.get("k") != cur.get("k") or new_target or moved:
+                        c["net"]["changes"] += 1
+                        if cur is not None and cur.get("k") == "attack" and o.get("k") == "attack":
+                            old = last.get(cur.get("tg")) or {}
+                            if (old.get("men") or 0) > 0 and not old.get("r") and not old.get("s"):
+                                c["net"]["switches"] += 1
+                        if _same_order(o, before.get(name)) and t - changed.get(name, -1e9) <= FLIP_S:
+                            c["net"]["flips"] += 1
+                        if not (last.get(name) or {}).get("m"):
+                            free_ch[name] = free_ch.get(name, 0) + 1
+                        before[name], changed[name] = cur, t
+                    if _point(o) and _point(cur) and _dist(o, cur) > REPEAT_M:
+                        c["net"]["repoints"] += 1
+                        c["net"]["repoint_m"] += _dist(o, cur)
+                    order[name] = o
+    if not seen:
+        return None
+    c["net"]["free_s"] = sum(free_s.values())
+    c["net"]["free_changes"] = float(sum(free_ch.values()))
+    for name, s in free_s.items():
+        if s >= FREE_MIN_S:
+            c["net"]["free_units"] += 1
+            c["net"]["twitch_units"] += free_ch.get(name, 0) / (s / 60) >= TWITCH_PER_MIN
+    return {k: {n: round(v, 3) for n, v in x.items()} for k, x in c.items()}
+
+
+def lively_rates(c):
+    """Rates of liveliness counts (one battle's or a sum): the names of tools/nn/train/behaviour.py."""
+    if not c:
+        return {}
+
+    def per(k, d, scale=60.0):
+        return c[k] / c[d] * scale if c.get(d) else None
+    return {"order_changes_per_min": per("changes", "unit_s"), "target_switches_per_min": per("switches", "unit_s"),
+            "flips_per_min": per("flips", "unit_s"), "move_jitter_m": per("repoint_m", "repoints", 1.0),
+            "move_repoints_per_min": per("repoints", "move_s"), "free_changes_per_min": per("free_changes", "free_s"),
+            "twitch_share": per("twitch_units", "free_units", 1.0), "engine_switches_per_min": per("eng_switches", "eng_s"),
+            "engine_flips_per_min": per("eng_flips", "eng_s")}
+
+
+def lively_summary(rows):
+    """{"net": {role: rates}, "game_ai": rates, "band": {"net"|"game_ai": [min, median, max] of the
+    battles' engine_switches_per_min}} over the battles with a recording."""
+    have = [r for r in rows if r.get("lively")]
+    if not have:
+        return None
+
+    def total(rs, who):
+        return {k: sum(r["lively"][who][k] for r in rs) for k in LIVELY_COUNTS}
+    out = {"net": {role: lively_rates(total([r for r in have if r["role"] == role], "net"))
+                   for role in ROLES if any(r["role"] == role for r in have)},
+           "game_ai": {k: v for k, v in lively_rates(total(have, "game_ai")).items() if k.startswith("engine_")},
+           "band": {}}
+    for who in ("net", "game_ai"):
+        v = sorted(x for x in (lively_rates(r["lively"][who]).get("engine_switches_per_min") for r in have)
+                   if x is not None)
+        if v:
+            out["band"][who] = [round(v[0], 3), round(v[len(v) // 2] if len(v) % 2 else (v[len(v) // 2 - 1] + v[len(v) // 2]) / 2, 3),
+                                round(v[-1], 3)]
+    return out
+
+
 def outcome(result, own_role):
     """(winner side 1 | 2 | None, how) from the result event; timeouts go to the defender."""
     if not result:
@@ -224,7 +375,7 @@ def battle_row(entry, costs=None):
         "wall_s": result.get("duration_wall_s"),
         "nn": {k[3:]: result.get(k) for k in ("nn_moves", "nn_answered", "nn_missed", "nn_orders_given",
                                                "nn_keeps", "nn_bad_files")},
-        "gold": g, "lua_errors": errors, "battle_difficulty": launch.get("battle_difficulty"),
+        "gold": g, "lively": liveliness(run / "events.jsonl"), "lua_errors": errors, "battle_difficulty": launch.get("battle_difficulty"),
         "launch_status": status.get("status"), "preferences_restored": bool(status.get("preferences_restored")),
         "build": cfg.get("build")})
     return row
@@ -245,7 +396,8 @@ def summarize(gate_dir):
                "min_wins": need, "passed": len(rows) == planned and count["win"] >= need,
                "fair": all(r.get("battle_difficulty") == 1 for r in rows),
                "preferences_restored": all(r.get("preferences_restored") for r in rows),
-               "by_faction": by_faction(rows), "pairs": pairs(rows), "pair_gold": pair_gold(rows), "battles": rows}
+               "by_faction": by_faction(rows), "pairs": pairs(rows), "pair_gold": pair_gold(rows),
+               "liveliness": lively_summary(rows), "battles": rows}
     (gate_dir / "summary.json").write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8", newline="\n")
     return summary
 
@@ -324,7 +476,25 @@ def table(summary):
         pg, ex, weak = skill.gold_cells(g)
         lines.append(f"pair gold (ours - game AI's, same armies, / budget): {pg}; exchange {ex}; "
                      f"weak army destroyed/lost net vs game AI: {weak}; over {g['pairs']} pairs")
+    lines += lively_lines(summary.get("liveliness"))
     return lines
+
+
+def lively_lines(lv):
+    """The liveliness lines of a summary (lively_summary) or []."""
+    if not lv:
+        return []
+    f = (lambda v, fmt="{:.2f}": "-" if v is None else fmt.format(v))
+    net = lv["net"]
+    roles = [r for r in ROLES if r in net]
+    cell = (lambda k, fmt="{:.2f}": " / ".join(f(net[r].get(k), fmt) for r in roles))
+    band = (lambda w: "-" if w not in lv["band"] else "{:.2f} [{:.2f}, {:.2f}]".format(*[lv["band"][w][i] for i in (1, 0, 2)]))
+    return [f"liveliness of our network in the game ({' / '.join(roles)}; per unit-minute): order changes "
+            f"{cell('order_changes_per_min')}, attack-target switches {cell('target_switches_per_min')}, flips A-B-A "
+            f"{cell('flips_per_min', '{:.3f}')}, move jitter {cell('move_jitter_m', '{:.1f}')} m, out of melee "
+            f"{cell('free_changes_per_min')}, twitching units {cell('twitch_share', '{:.2f}')}",
+            f"units' own target switches / unit-min (every second; median [min, max] of the battles): ours "
+            f"{band('net')}, the game's AI {band('game_ai')} (flips {f(lv['game_ai'].get('engine_flips_per_min'), '{:.3f}')})"]
 
 
 def main(argv=None):

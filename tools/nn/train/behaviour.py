@@ -17,6 +17,27 @@ facts() reads the simulator's state after a step and says, per unit [B, N]:
 
 The test protocol's metrics (Tracker, tools/nn/train/test5.py) and the per-unit reward terms
 (tools/nn/train/reward.py unit_step) both read it.
+
+Liveliness (Tracker, measured only; docs/en/training/training.md "Liveliness"): units that change
+their orders too often look artificial. From the order in force after each step (order_kind,
+order_target, ox / oz), per role:
+
+    order_changes_per_min    real changes a standing unit-minute: a new kind, a new attack target or a
+                             move / withdraw point more than MOVE_M away (as reward.order_changes; the
+                             simulator's own ATTACK -> HOLD when the target dies is not a change)
+    target_switches_per_min  attack-target switches while the old target still stands (reward.retargets)
+    flips_per_min            back-and-forth: a change back to the order before the previous one
+                             (A -> B -> A, a point within MOVE_M of it) within FLIP_S of that change
+    move_jitter_m            mean distance between successive points of a unit that keeps moving
+                             (move / withdraw -> move / withdraw, more than REPEAT_M apart: the bridge
+                             does not give a nearer one in the game); move_repoints_per_min of moving time
+    free_changes_per_min     order changes a minute out of melee (standing)
+    twitch_share             units with at least FREE_MIN_S out of melee that change orders there
+                             TWITCH_PER_MIN times a minute or more (a unit in a battle counts once)
+    engine_switches_per_min  the unit's own current target (the simulator's `target`: whom it fights or
+                             shoots) changing between whole seconds, as the game's recordings sample it
+                             (tools/nn/gate.py: the same for the game's AI, a reference);
+                             opp_engine_switches_per_min: the opponent script's units
 """
 import math
 
@@ -28,6 +49,11 @@ from tools.nn.sim import orders as O
 CROWD = 2          # more own units than this on one enemy is a pile
 IDLE_M = 60.0      # a fight this near an idle own melee unit is its business
 ABILITY_SLOTS = 3
+MOVE_M = 10.0          # = reward.Weights.order_move_m: a nearer new point is not an order change
+REPEAT_M = 5.0         # = src/apps/bridge/services.lua REPEAT_M: a nearer point is not given in the game
+FLIP_S = 10.0          # A -> B -> A within this many seconds is a flip
+TWITCH_PER_MIN = 6.0   # order changes a minute out of melee that make a unit "twitching"
+FREE_MIN_S = 30.0      # ... over at least this many seconds out of melee
 
 
 def standing_mask(u):
@@ -82,8 +108,9 @@ def ability_marks(u):
     return torch.stack([u.get(f"ab{k}_cd", torch.zeros_like(u["men"])) for k in range(ABILITY_SLOTS)], -1)
 
 
-def track(st, params, mine, live, sums, marks):
-    """Tracker.update: adds this step to sums (in place) -> the abilities' new marks."""
+def track(st, params, mine, live, sums, marks, mem=None):
+    """Tracker.update: adds this step to sums (in place) -> the abilities' new marks. mem: the
+    liveliness memory (lively_memory, updated in place) or None (no liveliness)."""
     f = facts(st, params)
     dt = params.dt
     m = mine & live[:, None]
@@ -97,9 +124,72 @@ def track(st, params, mine, live, sums, marks):
            "crowded_units": (f["crowded"] * m.float()).sum(1)}
     new = ability_marks(st.u)
     add["abilities"] = ((new > marks + 1e-3) & m[..., None]).float().sum((1, 2))
+    if mem is not None:
+        add.update(lively(st, mine, live, mem, dt))
     for k, v in add.items():
         sums[k] += v
     return new
+
+
+def lively_memory(st):
+    """The liveliness memory [B, N] (and [B]): the order in force, the one before the last change and
+    when it changed, the unit's current target at the last whole second; per-unit sums out of melee."""
+    u = st.u
+    z = torch.zeros_like(u["x"])
+    return {"k0": u["order_kind"].clone(), "t0": u["order_target"].clone(), "x0": u["ox"].clone(),
+            "z0": u["oz"].clone(), "pk": torch.full_like(u["order_kind"], -1),
+            "pt": torch.full_like(u["order_target"], -1), "px": z.clone(), "pz": z.clone(),
+            "tc": torch.full_like(z, -1e9), "eng": torch.full_like(u["target"], -1),
+            "sec": torch.floor(st.t).clone(), "free_s": z.clone(), "free_ch": z.clone()}
+
+
+def lively(st, mine, live, mem, dt):
+    """This step's liveliness counts {name: [B]} over mine's standing units (opp_*: the other side's);
+    updates mem in place (no reads back from the GPU: it runs compiled, tools/nn/train/rollout.py fast)."""
+    u = st.u
+    stand = standing_mask(u)
+    alive = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
+    run = live[:, None]
+    m = mine & run & stand
+    k, tg, ox, oz = u["order_kind"], u["order_target"], u["ox"], u["oz"]
+    k0, t0 = mem["k0"], mem["t0"]
+    point = (k == O.MOVE) | (k == O.WITHDRAW)
+    point0 = (k0 == O.MOVE) | (k0 == O.WITHDRAW)
+    d = torch.sqrt((ox - mem["x0"]) ** 2 + (oz - mem["z0"]) ** 2)
+    auto = (k0 == O.ATTACK) & (k == O.HOLD) & ~_gather(alive, t0)       # the simulator's own: the target died
+    change = m & ~auto & ((k != k0) | ((k == O.ATTACK) & (tg != t0)) | (point & point0 & (d > MOVE_M)))
+    switch = m & (k0 == O.ATTACK) & (k == O.ATTACK) & (t0 >= 0) & (tg != t0) & _gather(stand, t0)
+    back = torch.sqrt((ox - mem["px"]) ** 2 + (oz - mem["pz"]) ** 2) <= MOVE_M
+    same = (k == mem["pk"]) & torch.where(k == O.ATTACK, tg == mem["pt"], torch.where(point, back, torch.ones_like(back)))
+    t = st.t[:, None].expand_as(d)
+    flip = change & same & (t - mem["tc"] <= FLIP_S)
+    repoint = m & point & point0 & (d > REPEAT_M)
+    free = m & ~u["m"]
+    # the unit's current target at whole seconds (the game's recordings sample every second)
+    sec = torch.floor(st.t)
+    tick = (sec > mem["sec"]) & live
+    eng_now = torch.where(stand, u["target"], torch.full_like(u["target"], -1))
+    eng_sw = tick[:, None] & stand & (eng_now >= 0) & (mem["eng"] >= 0) & (eng_now != mem["eng"])
+    opp = (u["side"] > 0) & ~mine & run & stand
+    f = (lambda x: x.float().sum(1))
+    out = {"unit_s": f(m) * dt, "changes": f(change), "switches": f(switch), "flips": f(flip),
+           "move_s": f(m & point) * dt, "repoints": f(repoint), "repoint_m": (d * repoint.float()).sum(1),
+           "eng_switches": f(eng_sw & mine & run), "eng_s": f(m) * dt,
+           "opp_eng_switches": f(eng_sw & opp), "opp_unit_s": f(opp) * dt}
+    mem["free_s"] += free.float() * dt
+    mem["free_ch"] += (change & free).float()
+    mem["pk"].copy_(torch.where(change, k0, mem["pk"]))
+    mem["pt"].copy_(torch.where(change, t0, mem["pt"]))
+    mem["px"].copy_(torch.where(change, mem["x0"], mem["px"]))
+    mem["pz"].copy_(torch.where(change, mem["z0"], mem["pz"]))
+    mem["tc"].copy_(torch.where(change, t, mem["tc"]))
+    mem["k0"].copy_(k)
+    mem["t0"].copy_(tg)
+    mem["x0"].copy_(ox)
+    mem["z0"].copy_(oz)
+    mem["eng"].copy_(torch.where(tick[:, None], eng_now, mem["eng"]))
+    mem["sec"].copy_(torch.where(tick, sec, mem["sec"]))
+    return out
 
 
 class Tracker:
@@ -107,19 +197,23 @@ class Tracker:
     melee, flanked, missile units in melee, flank attacks; decisions with a pile; ability uses."""
     FIELDS = ("steps", "melee_s", "flanked_s", "missile_melee_s", "missile_s", "flank_attack_s", "crowd_steps",
               "crowded_units", "abilities")
+    LIVELY = ("unit_s", "changes", "switches", "flips", "move_s", "repoints", "repoint_m", "eng_switches", "eng_s",
+              "opp_eng_switches", "opp_unit_s")
 
-    def __init__(self, st, params, mine, wrap=None):
-        """wrap: e.g. tools/nn/train/rollout.py fast (compiles the update on CUDA)."""
+    def __init__(self, st, params, mine, wrap=None, lively=True):
+        """wrap: e.g. tools/nn/train/rollout.py fast (compiles the update on CUDA). lively: also the
+        liveliness counts (the module's docstring)."""
         self.params = params
         self.mine = mine
         self.dt = params.dt
-        self.sums = {k: torch.zeros(st.B, device=st.device) for k in self.FIELDS}
+        self.sums = {k: torch.zeros(st.B, device=st.device) for k in self.FIELDS + (self.LIVELY if lively else ())}
         self.marks = ability_marks(st.u)
+        self.mem = lively_memory(st) if lively else None
         self._track = wrap(track) if wrap else track
 
     def update(self, st, live):
         """After a step; live [B]: the battle was running before it."""
-        self.marks = self._track(st, self.params, self.mine, live, self.sums, self.marks)
+        self.marks = self._track(st, self.params, self.mine, live, self.sums, self.marks, self.mem)
 
     def summary(self, sel):
         """Metrics over the battles sel [B] (numpy bool)."""
@@ -134,4 +228,24 @@ class Tracker:
                 "flank_attack_share": float(s["flank_attack_s"].sum() / melee),
                 "crowding_share": float(s["crowd_steps"].sum() / steps),
                 "crowded_units_per_min": float(s["crowded_units"].sum() / minutes),
-                "abilities_per_battle": float(s["abilities"].sum() / n)}
+                "abilities_per_battle": float(s["abilities"].sum() / n), **self.lively(sel, s)}
+
+    def lively(self, sel, s):
+        """The liveliness metrics (the module's docstring) over the battles sel; {} without them."""
+        if self.mem is None:
+            return {}
+
+        def per(k, d, scale=60.0):
+            den = float(s[d].sum())
+            return float(s[k].sum()) / den * scale if den > 0 else None
+        free_s = self.mem["free_s"].cpu().numpy()[sel]
+        free_ch = self.mem["free_ch"].cpu().numpy()[sel]
+        long = free_s >= FREE_MIN_S
+        rate = free_ch[long] / (free_s[long] / 60)
+        return {"order_changes_per_min": per("changes", "unit_s"), "target_switches_per_min": per("switches", "unit_s"),
+                "flips_per_min": per("flips", "unit_s"), "move_jitter_m": per("repoint_m", "repoints", 1.0),
+                "move_repoints_per_min": per("repoints", "move_s"),
+                "free_changes_per_min": float(free_ch.sum() / (free_s.sum() / 60)) if free_s.sum() > 0 else None,
+                "twitch_share": float((rate >= TWITCH_PER_MIN).mean()) if long.any() else None,
+                "engine_switches_per_min": per("eng_switches", "eng_s"),
+                "opp_engine_switches_per_min": per("opp_eng_switches", "opp_unit_s")}

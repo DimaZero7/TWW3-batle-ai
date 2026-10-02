@@ -210,6 +210,13 @@ class TestMelee:
         cap = P.sim["contact"]["lord_max_attackers"]
         assert float(rate.sum()) - alone == pytest.approx(k * infantry * (cap - 1) / cap, rel=1e-3)
 
+    def test_a_lord_strikes_a_lord_at_lord_v_lord_of_the_rule(self):
+        st, pw, contact, z = self.surrounded(0, rival=True)
+        H = st.N // 2
+        full = float(melee.strikes(st.u, pw, contact, P.with_cal("contact", lord_v_lord=1.0), z, z + 100)[0][0, H, 0])
+        less = float(melee.strikes(st.u, pw, contact, P.with_cal("contact", lord_v_lord=0.73), z, z + 100)[0][0, H, 0])
+        assert full > 0 and less == pytest.approx(0.73 * full, rel=1e-4)
+
     def test_swordsmen_out_strike_spearmen_against_clanrats(self):
         # Same men, armour and shield class; the sword: attack 32 (spear 20), 21 + 7 damage, a blow every 4.3 s
         # (the plain spear 5.7 s); no bonus against infantry in the database (bonus_v_infantry 0).
@@ -416,9 +423,9 @@ class TestBattle:
         assert not bool(st.u["mv"][0, 0]) and int(st.u["target"][0, 0]) == -1
 
     def test_a_shattered_lord_counts_as_lost_for_morale(self):
-        # Gate runs 02.10.2026: when a lord shatters, his whole army loses 0.5-0.6 of its leadership
-        # in that second, as if he had died. Battle 0: side 1's General shattered (far off, so his
-        # rout and his aura touch no one); battle 1: the same, the General steady.
+        # A shattered lord is lost as if he had died (sim.json morale.lord_fall, now the database's
+        # -16 then -10). Battle 0: side 1's General shattered (far off, so his rout and his aura
+        # touch no one); battle 1: the same, the General steady.
         sides = army([(GENERAL, -900, 0, 90, True), (SPEAR, -300, 0, 90)], [(SPEAR, 300, 0, 270)])
         st = scenario.build([sides, sides], P)
         st.u["r"][0, 0] = st.u["s"][0, 0] = True
@@ -452,6 +459,24 @@ class TestBattle:
         for _ in range(20):
             battle.step(st, o, P)
         assert not bool(st.u["m"][0, 0]) and float(st.u["x"][0, 0]) < x0 - 15
+
+    def test_a_missile_unit_told_to_move_away_leaves_melee_when_missile_leave_m_is_on(self):
+        moved = {}
+        for leave in (0.0, 10.0):
+            params = P.with_cal("contact", missile_leave_m=leave)
+            st = face_off(ARCHER, SPEAR)
+            H = st.N // 2
+            o = replay.hold(st)
+            o.kind[0, H], o.target[0, H] = O.ATTACK, 0
+            battle.step(st, o, params)
+            assert bool(st.u["m"][0, 0])
+            x0 = float(st.u["x"][0, 0])
+            for _ in range(10):
+                o = replay.hold(st)
+                o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = O.MOVE, -200.0, 0.0, True
+                battle.step(st, o, params)
+            moved[leave] = x0 - float(st.u["x"][0, 0])
+        assert moved[0.0] == pytest.approx(0.0, abs=0.5) and moved[10.0] > 10
 
     def _charge(self, defender_key, run_defender):
         """A spearmen unit charges defender_key head-on; returns the step's state after contact."""

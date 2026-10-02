@@ -12,7 +12,7 @@ of the side it plays.
     hold        every unit holds (shoots at will, fights back when attacked)
     ai_like     modelled on the game's AI in the recorded gate battles (build/gate-analysis): a
                 line that keeps together (at a run), missile units that halt at range and shoot (the
-                enemy lord first), the lord in the line, never first, a charge or counter-charge from ~80-100 m,
+                enemy lord first, in melee too), the lord in the line, never first, a charge or counter-charge from ~80-100 m,
                 free units sent against enemy missile units and enemies already in melee (Line
                 below has the numbers and where they come from)
 """
@@ -93,8 +93,11 @@ class Line:
     withdraw_m: float = 50.0      # how far a missile unit steps back
     flank_m: float = 12.0         # a free unit goes for an engaged enemy via a point this far beside its flank
     #                               (0: straight at it); the simulator's tactic scan (simulator.md)
-    focus_lord: bool = True       # missile units shoot the enemy lord when it is in range (battles 1-3), not
-    #                               in melee (ours: friendly fire)
+    focus_lord: bool = True       # missile units shoot the enemy lord when it is in range (battles 1-3)
+    lord_in_melee: bool = True    # ... in melee too: in the 63 network gate battles the game's missile units, the
+    #                               network's lord in range, shot him 89 % of their firing seconds, 91 % while he
+    #                               was in melee, 86 % while free (02.10.2026; ai_like without it: 34 % of its
+    #                               firing on him, the game's AI 57 % of all its firing)
     advance_without_missiles: bool = True   # battle 2: a defender with no missile units met the attacker half-way
 
 
@@ -215,7 +218,8 @@ def ai_like(st, p=Line()):
     # Missile units: the enemy lord when in range; else shoot at will; attackers walk up to range;
     # step back from enemy melee units that come close.
     shooter = missile & standing & ~lord
-    lord_d = torch.where(foe & (lord & ~fighting)[:, None, :], d, torch.full_like(d, BIG))
+    aim = lord if p.lord_in_melee else lord & ~fighting
+    lord_d = torch.where(foe & aim[:, None, :], d, torch.full_like(d, BIG))
     ld, li = lord_d.min(2)
     closer = shooter & has & ~fighting & advance_side & behind & (near_d > p.missile_stop * u["range"])
     put(closer, O.MOVE, fwd_x, fwd_z, r=p.advance_run)

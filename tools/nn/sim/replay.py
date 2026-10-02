@@ -47,11 +47,14 @@ def half_depth(men, width, spacing=1.5):
     return np.where(men > 1, np.ceil(np.maximum(men, 1) / files) * spacing / 2, 0.0)
 
 
-def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=True):
+def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=True, missile=None, leave_m=10.0):
     """Orders implied by a recorded battle (tools/nn/gamedata.Battle), one row per recorded second:
     dict of arrays [T, N] kind, x, z, target, run in the simulator's slots (slot_of: recorded index
     -> slot). The game records the order's point at the formation's front (measured: half a depth
-    ahead of the centre); widths [recorded index] (m) turn it into the centre the simulator goes to."""
+    ahead of the centre); widths [recorded index] (m) turn it into the centre the simulator goes to.
+    missile [recorded index]: missile units; one in melee without a recorded target whose order
+    point is leave_m or more away moves there (it walks out of the fight, as in the game) instead
+    of attacking the nearest enemy."""
     f = battle.f
     T = len(battle.t)
     kind = np.full((T, N), O.HOLD, dtype=np.int64)
@@ -66,19 +69,23 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
     nearest = np.where(foe, dist, np.inf).argmin(axis=2)
     for i, s in enumerate(slot_of):
         tg = battle.target[:, i]
+        ox, oz = np.nan_to_num(f["ox"][:, i]), np.nan_to_num(f["oz"][:, i])
         # In melee without a recorded target (CA's planner leaves it empty most of the time):
-        # the nearest enemy, as the game's own AI records it.
+        # the nearest enemy, as the game's own AI records it - unless a missile unit is told to go
+        # somewhere else (it leaves the fight).
+        leaving = np.zeros(T, dtype=bool)
+        if missile is not None and missile[i] and leave_m > 0:
+            leaving = np.hypot(ox - np.nan_to_num(f["x"][:, i]), oz - np.nan_to_num(f["z"][:, i])) >= leave_m
         if fight_nearest:
-            tg = np.where((tg < 0) & f["m"][:, i], nearest[:, i], tg)
+            tg = np.where((tg < 0) & f["m"][:, i] & ~leaving, nearest[:, i], tg)
         ok_t = tg >= 0
         mapped = np.where(ok_t, np.array(slot_of)[np.clip(tg, 0, None)], -1)
         attack = ok_t & (battle.side[np.clip(tg, 0, None)] != battle.side[i])
-        ox, oz = np.nan_to_num(f["ox"][:, i]), np.nan_to_num(f["oz"][:, i])
         if widths is not None and widths[i]:
             back = half_depth(np.nan_to_num(f["men"][:, i]), widths[i], spacing)
             br = np.radians(np.nan_to_num(f["b"][:, i]))
             ox, oz = ox - back * np.sin(br), oz - back * np.cos(br)
-        fighting = f["m"][:, i] & ~attack
+        fighting = f["m"][:, i] & ~attack & ~leaving
         kind[:, s] = np.where(attack, O.ATTACK, np.where(fighting, O.HOLD, O.MOVE))
         target[:, s] = np.where(attack, mapped, -1)
         x[:, s], z[:, s] = ox, oz

@@ -249,3 +249,52 @@ class TestSummary:
         (tmp_path / "battles.json").write_text(json.dumps({"planned": 1, "battles": [
             {"battle": 1, "seed": 1, "role": "attack", "run": str(tmp_path / "r1")}]}))
         assert gate.summarize(tmp_path)["passed"] is True
+
+
+class TestLiveliness:
+    @staticmethod
+    def events(tmp_path):
+        """Two of our units and one of the game AI's, sampled every second for 4 s; our orders between."""
+        def sample(t, own_t, enemy_t, m=False):
+            units = [{"n": "own_a", "side": 1, "men": 90, "t": own_t, "m": m},
+                     {"n": "own_b", "side": 1, "men": 90, "t": "", "m": False},
+                     {"n": "enemy_a", "side": 2, "men": 90, "t": enemy_t},
+                     {"n": "enemy_b", "side": 2, "men": 90, "t": ""}]
+            return {"event": "nn_sample", "t": t, "units": units}
+
+        def orders(t, *rows):
+            return {"event": "nn_orders", "t": t, "orders": [dict(r, status="given") for r in rows]}
+        lines = [sample(0, "", ""),
+                 orders(500, {"u": "own_a", "k": "attack", "tg": "enemy_a"}, {"u": "own_b", "k": "move", "x": 0, "z": 0}),
+                 sample(1000, "enemy_a", "own_a"),
+                 orders(1500, {"u": "own_a", "k": "attack", "tg": "enemy_b"}, {"u": "own_b", "k": "move", "x": 0, "z": 20}),
+                 sample(2000, "enemy_b", "own_b"),
+                 orders(2500, {"u": "own_a", "k": "attack", "tg": "enemy_a"}, {"u": "own_b", "k": "move", "x": 0, "z": 26}),
+                 sample(3000, "enemy_a", "own_a"),
+                 sample(4000, "enemy_a", "own_a")]
+        path = tmp_path / "events.jsonl"
+        path.write_text("\n".join(json.dumps(x, separators=(",", ":")) for x in lines) + "\n", encoding="utf-8")
+        return path
+
+    def test_our_orders_and_both_sides_targets_from_a_recording(self, tmp_path):
+        c = gate.liveliness(self.events(tmp_path))
+        net, ai = c["net"], c["game_ai"]
+        # own_a: attack a, b, a (2 switches, the last a flip); own_b: move, 20 m on (a change), 6 m (a re-point only)
+        assert (net["changes"], net["switches"], net["flips"]) == (5, 2, 1)
+        assert (net["repoints"], net["repoint_m"]) == (2, 26.0)
+        assert net["unit_s"] == 8.0 and net["eng_switches"] == 2 and net["eng_flips"] == 1   # own_a: a, b, a
+        assert ai["eng_switches"] == 2 and ai["eng_s"] == 8.0                                # enemy_a: own_a, own_b, own_a
+        r = gate.lively_rates(net)
+        assert r["order_changes_per_min"] == pytest.approx(5 / 8 * 60) and r["move_jitter_m"] == 13.0
+        assert r["twitch_share"] is None                                                     # under 30 s out of melee
+
+    def test_the_summary_has_rates_per_role_and_the_game_ais_band(self, tmp_path):
+        c = gate.liveliness(self.events(tmp_path))
+        rows = [{"role": "attack", "lively": c}, {"role": "defend", "lively": c}, {"role": "attack", "lively": None}]
+        s = gate.lively_summary(rows)
+        assert set(s["net"]) == {"attack", "defend"} and set(s["game_ai"]) == {"engine_switches_per_min",
+                                                                                 "engine_flips_per_min"}
+        assert s["band"]["game_ai"] == [15.0, 15.0, 15.0]
+        text = "\n".join(gate.lively_lines(s))
+        assert "the game's AI 15.00 [15.00, 15.00]" in text and "order changes 37.50 / 37.50" in text
+        assert gate.lively_summary([{"role": "attack", "lively": None}]) is None

@@ -10,6 +10,7 @@ facts and methods live here; the code that uses them is described in
 <!-- generated:docs:index -->
 - **[Map information: working guide](map/README.md)** — This is the current instruction for collecting **map information only**
 - **[Battle map catalogue](maps/README.md)** — Cards for specific official battle maps
+- **[Battle mechanics](mechanics/README.md)** — A reference of how Total War: WARHAMMER III land battles work, collected from public sources on 02.10.2026: CA's blogs and patch notes, the game's key-value tab…
 - **[Units](units/README.md)** — What is verified about units in the game: what can be read, which orders work and how the battle mechanics work
 - [Visual atlas](atlas.md) — Pictures of the maps we measured: the official preview and our map of heights, ground and objects
 - [Attacker and defender in a battle from a scenario file](battle-roles.md) — Who attacks and who defends in a battle from our own scenario file, and how to set it
@@ -20,6 +21,8 @@ facts and methods live here; the code that uses them is described in
 <!-- /generated -->
 
 **Battle mechanics** are in the units section: [morale](units/morale.md) · [melee](units/melee.md) · [missile damage](units/missile-damage.md) · [pace and fatigue](units/pace.md); the unit catalogue — [Empire](units/catalog/empire.md).
+
+**How the game's battle mechanics work** according to CA, the database and the community (a reference with sources, confidence and the conflicts with our simulator): [battle mechanics](mechanics/README.md).
 
 How this knowledge feeds network training: [data for training](../training/README.md).
 

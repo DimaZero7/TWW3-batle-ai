@@ -522,6 +522,58 @@ class Battles:
             self.mem[s] = merge_memory(self.mem[s], ob.start(state, self.setup, s), finished)
             self.cmem[s] = merge_memory(self.cmem[s], ob.start(state, self.setup, s), finished)
 
+    def narrow(self, keep):
+        """Only the battles keep (indices into the batch) stay, in ascending order (in place) -> keep
+        sorted, as a tensor on the device: new battle i is old battle keep[i]. For evaluation
+        (auto_reset off): a batch whose battles have mostly ended steps the live ones (and as many
+        ended ones as fill a fixed size: each new size is compiled once, tools/nn/train/evaluate.py
+        BUCKETS) instead of all. Everything per
+        battle goes along: the state, the setup, both sides' memories, the networks' memories, the
+        pending observation; the counters over all battles (stats, kind_stats, ...) stay."""
+        B = self.B
+        keep = torch.as_tensor(keep, device=self.device).long().sort().values
+        two = torch.cat([keep, keep + B])                    # rows [2B]: (side - 1) * B + battle
+        at = torch.full((B,), -1, dtype=torch.long, device=self.device)
+        at[keep] = torch.arange(len(keep), device=self.device)
+        sel_learn = (at[self.rows_learn % B] >= 0).nonzero().squeeze(1)       # same order: (side, battle)
+        sel_past = (at[self.rows_past % B] >= 0).nonzero().squeeze(1)
+        take = (lambda x: None if x is None else x[keep])
+        st, setup = self.st, self.setup
+        kl = keep.tolist()
+        self.st = S.State({k: v[keep] for k, v in st.u.items()}, st.t[keep], st.attacker[keep], st.done[keep],
+                          st.winner[keep], st.lord_dead_s[keep], st.bounds, [st.keys[i] for i in kl])
+        arrays = ob._Arrays(**{k: take(getattr(setup.arrays, k)) for k in scenes.LiveSetup.FIELDS})
+        self.setup = scenes.LiveSetup(arrays, {s: setup.char[s][keep] for s in (1, 2)},
+                                      {s: setup.adapt[s][keep] for s in (1, 2)}, [setup.factions[i] for i in kl])
+        self.bounds2 = torch.cat([self.setup.bounds, self.setup.bounds])
+
+        def memory(m):
+            return ob.Memory(Frame(*(getattr(m.frame, k)[keep] for k in FRAME)), *(take(getattr(m, k)) for k in MEMORY))
+        self.mem = {s: memory(m) for s, m in self.mem.items()}
+        self.cmem = {s: memory(m) for s, m in self.cmem.items()}
+        if self.h_learn is not None:
+            self.h_learn = self.h_learn[sel_learn]
+        if self.h_past is not None:
+            self.h_past = self.h_past[sel_past]
+        if self.cur is not None:
+            a, frame, c = self.cur
+            self.cur = ({k: v[two] for k, v in a.items()}, frame_rows(frame, two),
+                        None if c is None else {k: v[sel_learn] for k, v in c.items()})
+        for k in ("health", "last_hit", "hit_rate", "bank_row", "want", "ctrl", "by_rule", "kind_battle",
+                  "order_battle"):
+            setattr(self, k, getattr(self, k)[keep])
+        self.row_opp = self.row_opp[sel_learn]
+        lay = self.layout
+        self.layout = league.Layout(lay.scene[kl], lay.learner[kl], lay.opponent[kl])
+        self.B = len(kl)
+        flat = torch.cat([self.ctrl[:, 0], self.ctrl[:, 1]])
+        self.rows_learn = (flat == league.LEARNER).nonzero().squeeze(1)
+        self.rows_past = (flat == league.CODE["past"]).nonzero().squeeze(1)
+        self.place_learn = placement(self.rows_learn, self.B)
+        self.place_past = placement(self.rows_past, self.B)
+        # self.scripts stays: the compiled assembly is keyed by it (an unused script costs little)
+        return keep
+
     def take_stats(self):
         """{"opponent/role": (games, wins, mean seconds)} since the last call (role of the learner)."""
         s = self.stats.cpu().clone().numpy()

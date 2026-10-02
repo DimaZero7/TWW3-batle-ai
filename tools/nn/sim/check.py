@@ -129,8 +129,10 @@ def simulate(run_dirs, params=None, device="cpu", copies=1, jitter_m=0.0, seed=0
         slot_of = [m[n] for n in g.names]
         slot_maps.append(slot_of)
         width = {x["name"]: x.get("width") for side in (1, 2) for x in a["sides"][side]["units"]}
+        missile = [bool((params.units.get(k) or {}).get("missile")) for k in g.keys] if g.keys else None
         orders = replay.recorded_orders(g, slot_of, 2 * H, [width.get(n) for n in g.names],
-                                        params.sim["formation"]["spacing_m"], FIGHT_NEAREST)
+                                        params.sim["formation"]["spacing_m"], FIGHT_NEAREST, missile,
+                                        params.sim["contact"].get("missile_leave_m", 0.0))
         rows.extend([orders] * copies)
     rec = Recorder(st)
     ends = torch.tensor([float(g.t[-1]) for g in games for _ in range(copies)], device=device)

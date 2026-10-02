@@ -167,8 +167,81 @@ def test_ability_choices_become_lines_and_back():
         exchange.orders_text("b-1", 3, orders, None, [{"unit": "own lord", "key": SYG}])
 
 
+def _game_points_doc():
+    """A state as the game writes it: the ordered_position of a held / attacking unit ~10 m from it."""
+    doc = state_doc()
+    doc["units"].append(unit("own_spear_2", 1, SPEAR, -150.0, z=40.0, ox=-141.0, oz=46.0))
+    doc["units"].append(unit("own_spear_3", 1, SPEAR, -120.0, z=-40.0, ox=-60.0, oz=-10.0, r=True, ms=6))
+    for u in doc["units"][:2]:
+        u["ox"], u["oz"] = u["x"] + 7.0, 7.0
+    return doc
+
+
+def test_order_points_are_the_simulators():
+    doc = _game_points_doc()
+    names = [u["n"] for u in doc["units"]]
+    side = np.array([u["side"] for u in doc["units"]])
+    s = exchange.arrays(doc, names)
+    given = {"own_spear_1": {"unit": "own_spear_1", "kind": "attack", "target": "enemy_spear_1", "run": True},
+             "own_spear_2": {"unit": "own_spear_2", "kind": "move", "x": -100.0, "z": 30.0, "run": False},
+             "own_spear_3": {"unit": "own_spear_3", "kind": "hold"}}
+    enemy_ox = s["ox"][0, 2:4].copy()
+    last = exchange.order_points(s, names, side, given, {"own_spear_3": (-125.0, -45.0)})
+    ox, oz = s["ox"][0], s["oz"][0]
+    assert (ox[0], oz[0]) == (-235.0, 0.0)                 # no order yet: holds, its own place
+    assert (ox[1], oz[1]) == (175.0, 0.0)                  # attack: the target's place
+    assert (ox[4], oz[4]) == (-100.0, 30.0)                # move: the point
+    assert (ox[5], oz[5]) == (-125.0, -45.0)               # routing: the point it had
+    assert (s["ox"][0, 2:4] == enemy_ox).all()             # enemies: as read
+    assert last["own_spear_1"] == (175.0, 0.0) and last["own_spear_3"] == (-125.0, -45.0)
+    obs, _ = ob.observe(s, exchange.battle(doc).setup, 1)
+    assert obs.tokens[0, 0, ob.INDEX["has_order"]] == 0 and obs.tokens[0, 1, ob.INDEX["has_order"]] == 1
+    assert obs.tokens[0, 1, ob.INDEX["order_fwd"]] == pytest.approx(0.7)   # 350 m ahead / POS, not ~10 m off
+    doc["units"][3]["men"] = 0                             # the target is gone: holds, as in the simulator
+    s = exchange.arrays(doc, names)
+    exchange.order_points(s, names, side, given)
+    assert (s["ox"][0, 1], s["oz"][0, 1]) == (-175.0, 0.0)
+
+
+def test_orders_in_force_skip_keep_and_units_that_take_none():
+    given = {"own_a": {"unit": "own_a", "kind": "move", "x": 1.0, "z": 2.0, "run": True}}
+    orders = [{"unit": "own_a", "kind": "keep"}, {"unit": "own_b", "kind": "attack", "target": "enemy_c", "run": True},
+              {"unit": "own_c", "kind": "hold"}]
+    exchange.remember_orders(given, orders, {"own_a", "own_b"})
+    assert given["own_a"]["kind"] == "move" and given["own_b"]["kind"] == "attack" and "own_c" not in given
+
+
 class TestCompanion:
     """One decision and the loop, with a fresh untrained actor (torch)."""
+
+    def test_the_brain_sees_its_own_orders_as_the_simulator_does(self):
+        from tools.nn.companion import loop, policy
+        brain = loop.Brain(policy.fresh(seed=1))
+        orders, _, _ = brain.decide(_game_points_doc())
+        mine = {o["unit"]: o for o in orders}
+        ctrl = {"own_lord", "own_spear_1", "own_spear_2"}                        # not the routing one
+        assert set(brain.given) == {n for n in ctrl if mine[n]["kind"] != "keep"}
+        assert all(brain.given[n] == mine[n] for n in brain.given)
+        given = dict(brain.given)
+        captured = {}
+        real = loop.ob.observe
+
+        def spy(state, *a, **k):
+            captured["ox"], captured["x"] = state["ox"][0].copy(), state["x"][0].copy()
+            return real(state, *a, **k)
+        loop.ob.observe = spy
+        try:
+            brain.decide(dict(_game_points_doc(), move=2))
+        finally:
+            loop.ob.observe = real
+        place = {"own_lord": 0, "own_spear_1": 1, "own_spear_2": 4, "enemy_lord": 2, "enemy_spear_1": 3}
+        for n, o in given.items():
+            i = place[n]
+            want = {"hold": captured["x"][i], "move": o.get("x"), "withdraw": o.get("x"),
+                    "attack": captured["x"][place.get(o.get("target"), i)]}[o["kind"]]
+            assert captured["ox"][i] == pytest.approx(want)
+        brain.decide(dict(_game_points_doc(), batch="b-2"))
+        assert brain.battle.batch == "b-2"
 
     @pytest.fixture(autouse=True)
     def need_torch(self):

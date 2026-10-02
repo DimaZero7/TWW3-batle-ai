@@ -137,3 +137,51 @@ class TestReport:
         m = test5.metrics(res)
         assert {"nearest/attack", "nearest/defend", "nearest/all", "nearest/factions", "skill"} <= set(m)
         assert m["skill"]["rating"]["battles"] == 4 and "nearest" in m["skill"]["pairs"]
+
+
+class TestCompact:
+    def test_a_narrowed_batch_plays_its_battles_as_the_whole_one(self, monkeypatch):
+        from tools.nn.train import league, rollout, scenes
+        real = rollout.Battles._act
+        # the past version samples its orders: greedy here, so both batches draw nothing at random
+        monkeypatch.setattr(rollout.Battles, "_act", lambda self, a, o, f, r, h, g: real(self, a, o, f, r, h, True))
+        sc = scenes.SCENES[:1]
+        lay = evaluate.combined(("nearest", "past", "hold_shoot"), 2, 1, scenes.attackers(sc))
+        envs = [rollout.Battles(lay, sc, params=rollout.params_with_limit(60.0), spread=evaluate.SPREAD, seed=1,
+                                auto_reset=False) for _ in range(2)]
+        torch.manual_seed(1)
+        past = policy.Actor(CFG).eval()
+        for env in envs:
+            env.set_past(past)
+            for _ in range(3):
+                env.step(actor(), None, True)
+        whole, part = envs
+        keep = part.narrow([5, 0, 2, 3])
+        assert keep.tolist() == [0, 2, 3, 5] and part.B == 4 and part.R == 4
+        for _ in range(4):
+            whole.step(actor(), None, True)
+            part.step(actor(), None, True)
+        for k, v in part.st.u.items():
+            assert torch.equal(v, whole.st.u[k][keep]), k
+        assert torch.equal(part.st.t, whole.st.t[keep])
+        assert torch.equal(part.kind_battle, whole.kind_battle[keep])
+        assert torch.equal(part.order_battle, whole.order_battle[keep])
+        at = torch.isin(whole.rows_learn % whole.B, keep)
+        # the network's memory: the same up to float rounding (a batch's size sets the order of the sums)
+        assert torch.allclose(part.h_learn, whole.h_learn[at], atol=1e-4)
+
+    def test_the_batch_shrinks_to_the_smallest_size_that_holds_the_running_battles(self, monkeypatch):
+        monkeypatch.setattr(evaluate, "BUCKETS", (256, 64))
+        assert evaluate.bucket(300, 1536) == 1536
+        assert evaluate.bucket(200, 1536) == 256
+        assert evaluate.bucket(3, 1536) == 64
+        assert evaluate.bucket(3, 64) == 64
+
+    def test_script_battles_end_the_same_in_a_shrinking_batch(self, monkeypatch):
+        # the scripts draw nothing at random: every battle ends the same, whatever the batch around it
+        monkeypatch.setattr(evaluate, "CHECK_EVERY", 2)
+        monkeypatch.setattr(evaluate, "BUCKETS", tuple(range(2, 8)))
+        x = evaluate.script_battles(["nearest"], 8, max_units=4, limit_s=900.0)
+        monkeypatch.setattr(evaluate, "BUCKETS", ())
+        y = evaluate.script_battles(["nearest"], 8, max_units=4, limit_s=900.0)
+        assert x == y and len(set(x["nearest"]["winner"])) == 2

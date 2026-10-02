@@ -283,6 +283,44 @@ compiler for compiling on the CPU.
 
 ## What is missing
 
+- **Accuracy pass of 02.10.2026** (the scripts in `build/simacc/`, not in Git). The check then:
+  pairs 51 of 54, same winner 20 of 26 (Empire-Skaven 9 of 10, mirror 11 of 16), the network's
+  battles 40 of 63. Three gaps were measured on the 28 game-AI and 63 network battles and put
+  in `sim.json` as switches; none raised the winners, so all three stay off (the old behaviour):
+  - *Lord against lord* (`contact.lord_v_lord`, off = 1): a lord fought by the enemy lord alone
+    loses 14.6 HP/s (General) and 10.0 (Warlord) in the game, 19.4 / 15.0 in the simulator
+    (0.73 of it). Infantry on a lord in these battles is too strong as well (one unit: 3.3 / 2.9
+    against 4.7 / 4.1) while the lord swarm probe and the pairs match. At 0.73 the network's
+    battles fell from 40 to 36 of 63 (side-balance error 0.165 → 0.176): something else
+    compensates for the lords' losses.
+  - *A lord's fall* (`morale.lord_fall`, now the database's −16 then −10): in all 75 recorded
+    falls the lord shattered with 2–50 % of his health (none was killed), and his standing units
+    lost −3 / −4.7 / −4.8 points 2 / 6 / 10 s later (mean of 167 unit-falls; median −3) — about
+    his aura; the simulator gives −9 / −17 / −18 and routs 39 % of the army within 10 s of a fall
+    (the game 21 %). So the user's "the drop takes seconds in the simulator, ~1 s in the game"
+    is the other way round: the simulator's drop is 4× the game's. With 0 / 0 the winners did
+    not change (20 of 26, 36 of 63) but more battles stayed undecided at the recording's end
+    (76 % against 66 %).
+  - *Missile units leaving melee* (`contact.missile_leave_m`, off = 0): in the game a missile
+    unit in melee with no target and its order point 10 m or more away is moving 45–78 % of
+    those seconds and leaves after 10–12 s (median); the simulator keeps missile units in melee
+    284 s a battle against the game's 162 (spells 15 s against 8). At 10 m (with the replay
+    moving such units instead of fighting the nearest enemy) the mirror got 1–2 worse.
+- **The army collapse** (the biggest gap left, probably why the switches above do not help):
+  in the game a losing army breaks all at once — in 68 of 182 recorded sides 60 % of the
+  standing units lose 0.4 MoralePercent or rout within 3 s, near the end — and the
+  simulator has no such rule (66 % of its battles are not over when the recording ends). The
+  database has one: `ume_concerned_army_destruction` −120 at
+  `army_destruction_enemy_strength_ratio` 2.6 and `…_alliance_strength_ratio` 0.22; with strength
+  = cost × health share it does not time the collapses (8–11 of 58 within 5 s of the trigger),
+  so the game's own strength measure is needed (a recording of its balance-of-power value each second would settle it).
+- **Morale at contact**: units that run into contact gain ~3 points over the last 6 s in the
+  game (the database's morale `charge_bonus` 15 / `charge_timeout` 60, not modelled) and lose
+  it fast after; the simulator keeps falling (−2 points) there. And before contact the
+  simulator's units stand 6–10 points lower than the game's (its exposed-flank flags fire 1.5–3×
+  as often: in melee lf / rf / bf 0.33 / 0.34 / 0.25 against 0.22 / 0.25 / 0.09; no simple
+  distance-and-sector rule fits the game's flags, F1 ≤ 0.46).
+
 - **The mirror battles**: in the game the defender wins 15 of 16; the simulator gets 9 of 16.
   Its side 1 (CA's planner) loses too much (0.81 of its health by the recording's end against
   0.75): its archers get caught in melee for 70 s a battle (21 s in the game).

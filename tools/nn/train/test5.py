@@ -29,6 +29,14 @@ a test on a busy GPU takes longer but learns as much; --minutes only caps the ti
    (tools/nn/train/behaviour.py).
 --before PATH reuses a "before" evaluation (a before.json of the same --init and code).
 
+Two more blocks (measured only): "liveliness" per opponent and role (order changes, attack-target
+switches, A->B->A flips, move-point jitter, twitching units out of melee, the units' own target
+switches; tools/nn/train/behaviour.py), and "capacity and forgetting" (tools/nn/train/capacity.py:
+the final evaluation against the previous iteration's (--prev-report, else found) and against minute
+0, the training log's signals, a verdict ok / watch / widen-candidate); report.json "capacity".
+--report-only rebuilds trend.md and report.json's blocks of a finished --label from its evaluations
+(no training, no GPU; the liveliness rows of an evaluation older than them stay "-").
+
 A trend run: --updates 0 --minutes M --every K trains M minutes and runs the same evaluation every K
 minutes of training too (its time not counted), keeping each network (m<minute>.pt) and evaluation
 (eval_m<minute>.json); report.json and trend.md then hold the table minute 0 / K / ... / M:
@@ -45,7 +53,7 @@ from pathlib import Path
 
 import torch
 
-from tools.nn.train import checkpoint, evaluate, matchups, run, skill
+from tools.nn.train import capacity, checkpoint, evaluate, matchups, run, skill
 
 OUT = checkpoint.DIR / "test5"
 LOCK = checkpoint.DIR.parent / "gpu-train.lock"
@@ -135,6 +143,15 @@ ROWS = (("win", "win rate", "{:.3f}"), ("gold_destroyed", "enemy gold destroyed 
         ("crowding_share", "decisions with a pile", "{:.3f}"),
         ("flank_attack_share", "own melee into flank/rear", "{:.3f}"),
         ("abilities_per_battle", "ability uses / battle", "{:.2f}"), ("timeouts", "timeouts", "{:.3f}"))
+LIVELY = (("order_changes_per_min", "order changes / unit-min", "{:.2f}"),
+          ("target_switches_per_min", "attack-target switches / unit-min", "{:.2f}"),
+          ("flips_per_min", "flips A→B→A ≤10 s / unit-min", "{:.3f}"),
+          ("move_jitter_m", "move-point jitter (keeps moving), m", "{:.1f}"),
+          ("move_repoints_per_min", "move re-points / moving min", "{:.2f}"),
+          ("free_changes_per_min", "changes out of melee / unit-min", "{:.2f}"),
+          ("twitch_share", "units twitching out of melee", "{:.3f}"),
+          ("engine_switches_per_min", "own target switches / unit-min (1 s)", "{:.2f}"),
+          ("opp_engine_switches_per_min", "opponent's target switches / unit-min (1 s)", "{:.2f}"))
 ALL = (("switches_per_min", "target switches / min", "{:.2f}"), ("orders_per_min", "order changes / min", "{:.2f}"),
        ("kind_hold", "kind hold", "{:.2f}"), ("kind_move", "kind move", "{:.2f}"), ("kind_attack", "kind attack", "{:.2f}"),
        ("kind_withdraw", "kind withdraw", "{:.2f}"), ("kind_keep", "kind keep", "{:.2f}"))
@@ -162,7 +179,26 @@ def table(before, after):
     if by:
         lines += ["", "| by faction | before → after |", "|---|---|"]
         lines += [f"| {title} | {' → '.join(cells)} |" for title, cells in by]
-    return skill_block([before.get("skill"), after.get("skill")], ["before → after"], " → ") + lines
+    return (skill_block([before.get("skill"), after.get("skill")], ["before → after"], " → ") + lines
+            + lively_block([before, after], ["before → after"], " → "))
+
+
+def lively_block(points, heads, join=None):
+    """The liveliness block (LIVELY, attack / defend per opponent) over metrics() points: a column per
+    point, or one column of the cells joined by `join`; [] when no point has it."""
+    if not any("order_changes_per_min" in v for p in points for k, v in p.items() if k.endswith(("/attack", "/defend"))):
+        return []
+    opps = list(dict.fromkeys(k.split("/")[0] for p in points for k in p if k.endswith(("/attack", "/defend"))))
+    f = (lambda fmt, v: "-" if v is None else fmt.format(v))
+    rows = []
+    for name, title, fmt in LIVELY:
+        for o in opps:
+            cells = [f"{f(fmt, p.get(f'{o}/attack', {}).get(name))} / {f(fmt, p.get(f'{o}/defend', {}).get(name))}"
+                     for p in points]
+            rows.append((f"{title}, {o}", [join.join(cells)] if join is not None else cells))
+    return (["", "liveliness (attack / defend; measured only: tools/nn/train/behaviour.py):", "",
+             "| liveliness | " + " | ".join(heads) + " |", "|---" * (len(heads) + 1) + "|"]
+            + [f"| {t} | " + " | ".join(c) + " |" for t, c in rows])
 
 
 def skill_block(points, heads, join=None):
@@ -200,7 +236,7 @@ def trend(points):
         lines += ["", "by faction (our faction first):", "",
                   "| by faction | " + " | ".join(f"min {m}" for m in mins) + " |", "|---" * (len(mins) + 1) + "|"]
         lines += [f"| {title} | " + " | ".join(cells) + " |" for title, cells in by]
-    return lines
+    return lines + lively_block([m for _, m in points], [f"min {m}" for m in mins])
 
 
 def main():
@@ -215,9 +251,15 @@ def main():
     ap.add_argument("--every", type=float, default=0,
                     help="minutes of training between full evaluations (a trend run; 0: before and after only)")
     ap.add_argument("--no-lock", action="store_true", help="do not take the GPU lock (small smoke runs only)")
+    ap.add_argument("--prev-report", help="the previous iteration's report.json or folder (default: found, "
+                                          "tools/nn/train/capacity.py)")
+    ap.add_argument("--report-only", action="store_true",
+                    help="rebuild trend.md and report.json's blocks of a finished --label from its files")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args, rest = ap.parse_known_args()
     rest = [a for a in rest if a != "--"]
+    if args.report_only:
+        return report_only(args)
     with (contextlib.nullcontext() if args.no_lock else gpu_lock(f"test5 {args.label}")):
         test(args, rest)
 
@@ -268,9 +310,12 @@ def test(args, rest):
     report = {"label": args.label, "init": args.init, "updates": summary["updates"], "train_s": summary["seconds"],
               "eval_battles": args.eval, "protocol": PROTOCOL, "options": rest, "train_args": vars(targs), "training": summary, "run": str(run_dir),
               "before": mb, "after": ma, "table": lines}
+    cap = capacity.report(out, args.prev_report, run_dir, start=before, end=after, rep=report)
+    report["capacity"] = cap
+    lines += [""] + capacity.lines(cap)
     if args.every:
         report["trend"] = {str(m): p for m, p in points}
-        report["trend_table"] = trend(points)
+        report["trend_table"] = trend(points) + [""] + capacity.lines(cap)
         (out / "trend.md").write_text("\n".join(report["trend_table"]) + "\n", encoding="utf-8", newline="\n")
     (out / "report.json").write_text(json.dumps(report, indent=1), encoding="utf-8", newline="\n")
     print(f"\ntest5 {args.label}: {args.init}, {summary['updates']} updates in {summary['seconds']} s "
@@ -278,6 +323,30 @@ def test(args, rest):
     print("\n".join(lines), flush=True)
     if args.every:
         print("\ntrend:\n" + "\n".join(report["trend_table"]), flush=True)
+    print(f"written: {out / 'report.json'}", flush=True)
+
+
+def report_only(args):
+    """--report-only: the blocks of a finished folder from its evaluations (before.json, eval_m<minute>.json,
+    after.json) and report.json; rewrites trend.md and report.json's before, after, table, trend,
+    trend_table and capacity."""
+    out = OUT / args.label
+    rep = json.loads((out / "report.json").read_text(encoding="utf-8"))
+    load = (lambda p: json.loads(p.read_text(encoding="utf-8")))
+    before, after = load(out / "before.json"), load(out / "after.json")
+    evs = sorted(out.glob("eval_m*.json"), key=lambda p: float(p.stem[6:]))
+    mb, ma = metrics(before), metrics(after)
+    cap = capacity.report(out, args.prev_report, None, start=before, end=after, rep=rep)
+    rep.update(before=mb, after=ma, table=table(mb, ma) + [""] + capacity.lines(cap), capacity=cap)
+    if evs:
+        last = (rep.get("train_args") or {}).get("minutes")
+        points = [(0, mb)] + [(p.stem[6:], metrics(load(p))) for p in evs]
+        points.append((f"{last:g}" if last is not None else "end", ma))
+        rep["trend"] = {str(m): p for m, p in points}
+        rep["trend_table"] = trend(points) + [""] + capacity.lines(cap)
+        (out / "trend.md").write_text("\n".join(rep["trend_table"]) + "\n", encoding="utf-8", newline="\n")
+    (out / "report.json").write_text(json.dumps(rep, indent=1), encoding="utf-8", newline="\n")
+    print("\n".join(rep.get("trend_table") or rep["table"]), flush=True)
     print(f"written: {out / 'report.json'}", flush=True)
 
 

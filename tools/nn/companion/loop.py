@@ -14,6 +14,7 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from tools.nn.companion import exchange
@@ -30,18 +31,23 @@ class Brain:
     def __init__(self, actor, greedy=False, temperature=1.0):
         self.actor, self.greedy, self.temperature = actor, greedy, temperature
         self.battle, self.memory, self.h = None, None, None
+        self.given, self.points = {}, {}     # the orders in force, the order points (exchange.order_points)
 
     def decide(self, doc):
         """-> (orders list, think ms, abilities to use [{unit, key}]) for one state document."""
         t0 = time.perf_counter()
         if self.battle is None or self.battle.batch != doc["batch"]:
             self.battle, self.memory, self.h = exchange.battle(doc), None, None
+            self.given, self.points = {}, {}
         b = self.battle
         state = exchange.arrays(doc, b.names, b.slots)
+        self.points = exchange.order_points(state, b.names, b.side, self.given, self.points)
         obs, self.memory = ob.observe(state, b.setup, SIDE, self.memory)
         orders, self.h, _, _ = decide.act(self.actor, obs, b.setup, self.h, self.greedy, self.temperature)
         cols = [getattr(orders, k)[0].cpu().numpy() for k in ("kind", "x", "z", "target", "run")]
         out = exchange.orders_list(b.names, b.side, *cols)
+        ctrl = np.asarray(obs.ctrl[0])
+        exchange.remember_orders(self.given, out, {n for n, c in zip(b.names, ctrl) if c})
         uses = exchange.ability_list(b.names, b.side, orders.ability[0].cpu().numpy(), b.slots)
         return out, (time.perf_counter() - t0) * 1000, uses
 

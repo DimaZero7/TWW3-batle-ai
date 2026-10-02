@@ -24,6 +24,14 @@ sequenceDiagram
 - The companion builds the network's input from it. What a human would not see is hidden there
   (the observation, [model](../training/model.md)): the game writes everything, the companion's
   observation hides the rest.
+- **Order point** (`ox`, `oz` of our units): the companion replaces the game's reading with the
+  simulator's (`exchange.order_points`, from the orders it gave): a holding unit's own place, an
+  attacking unit's target, a move's point. The game's `ordered_position` is a move's point too, but
+  ~10 m from the unit for a hold or an attack (gate it2: median 9.8 m from the unit, not at the
+  target). Fed that, the network did not recognise its own order in force and re-decided: replaying
+  the gate's recordings offline gave the game's 15.6 order changes a unit-minute (sampled and
+  greedy alike, so not the bridge); the simulator with the game's point gave 30 instead of its own
+  5.5 (02.10.2026). Recordings (`nn_sample`) keep the game's raw value.
 - The companion answers with orders for that move. The game reads the file every 100 ms of battle
   time (`poll_ms`) and gives each of our units its order.
 - **Only a changed order is given again**: another kind, another target, run instead of walk, or a

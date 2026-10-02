@@ -488,6 +488,33 @@ class TestBehaviour:
         f = behaviour.facts(st, load())
         assert f["idle_near"][0].nonzero().flatten().tolist() == [2]
 
+    def test_liveliness_counts_changes_switches_flips_jitter_and_the_units_own_targets(self):
+        from tools.nn.train import behaviour
+        st = pile()                          # units 0-2 attack enemy 5; unit 3 fights enemy 6 (target 6)
+        u = st.u
+        watch = behaviour.Tracker(st, load(), u["side"] == 1)
+        live = torch.ones(1, dtype=torch.bool)
+
+        def step(t, orders):
+            st.t[:] = t
+            for (slot, field), v in orders.items():
+                u[field][0, slot] = v
+            watch.update(st, live)
+        step(0.5, {(0, "order_target"): 6, (1, "order_kind"): O.MOVE, (1, "ox"): 0.0, (1, "oz"): 100.0})
+        step(1.0, {(0, "order_target"): 5, (1, "oz"): 103.0})     # 0: back to 5 (a flip); 1: 3 m, not given
+        step(1.5, {(1, "oz"): 120.0})                              # 17 m on: a change and a re-point
+        u["men"][0, 5] = 0.0                                         # enemy 5 dies: the simulator holds 0 and 2
+        step(2.0, {(0, "order_kind"): O.HOLD, (0, "order_target"): -1, (2, "order_kind"): O.HOLD,
+                     (2, "order_target"): -1, (3, "target"): 5})
+        s = {k: float(v[0]) for k, v in watch.sums.items()}
+        assert s["changes"] == 4 and s["switches"] == 2 and s["flips"] == 1     # the deaths' holds are no change
+        assert s["repoints"] == 1 and s["repoint_m"] == pytest.approx(17.0)
+        assert s["eng_switches"] == 1                               # unit 3: 6 -> 5 between whole seconds
+        m = watch.summary(np.array([True]))
+        assert m["move_jitter_m"] == pytest.approx(17.0)
+        assert m["order_changes_per_min"] == pytest.approx(4 / s["unit_s"] * 60)
+        assert m["twitch_share"] is None                             # nobody 30 s out of melee yet
+
     def test_a_missile_unit_in_melee_is_seen(self):
         from tools.nn.train import behaviour
         st = pile()
@@ -934,6 +961,25 @@ class TestLoop:
         assert all(np.isfinite(v) for v in st.values()) and "unit_reward" in st
         assert any(not torch.equal(a, b) for a, b in zip(before, actor.parameters()))
 
+    def test_a_huge_critic_loss_does_not_shrink_the_actors_step(self):
+        # 02.10: actor and critic were clipped together, the per-unit value's gradient (norm ~1000) scaled
+        # the actor's to ~1e-8 a parameter, below Adam's eps: the policy took no step at all
+        import copy
+        actor, crit = nets()
+        env = rollout.Battles(league.layout(6, 1, {"self": 0.5, "nearest": 0.5}), MIRROR)
+        batch = rollout.collect(env, actor, crit, 3)
+        steps = []
+        for weight in (1e-3, 1e6):
+            a, c = copy.deepcopy(actor), copy.deepcopy(crit)
+            opt = torch.optim.Adam(list(a.parameters()) + list(c.parameters()), lr=1e-3, eps=1e-5)
+            torch.manual_seed(0)
+            st = ppo.update(a, c, opt, batch, dataclasses.replace(ppo.PPOConfig(), epochs=1, minibatch=6,
+                                                                  unit_credit=0.3, unit_value=weight))
+            assert "grad_norm" in st and "grad_norm_critic" in st
+            steps.append([p.detach() - q.detach() for p, q in zip(a.parameters(), actor.parameters())])
+        assert max(float(x.abs().max()) for x in steps[0]) > 1e-5
+        assert all(torch.allclose(x, y, atol=1e-7) for x, y in zip(*steps))
+
     @pytest.mark.skipif(not (checkpoint.DIR / "test5/t0_gold30/m20.pt").exists(), reason="no m20.pt (build/ is not in Git)")
     def test_training_continues_from_a_checkpoint_saved_before_the_damage_timers(self):
         from tools.nn.train import run
@@ -1029,7 +1075,8 @@ class TestLoop:
         for o in (hold, past):
             assert sum(o["kinds"].values()) == pytest.approx(1.0)
             assert set(o["behaviour"]) >= {"missile_melee_s", "flanked_share", "crowding_share", "flank_attack_share",
-                                           "abilities_per_battle"}
+                                           "abilities_per_battle", "order_changes_per_min", "flips_per_min",
+                                           "engine_switches_per_min", "opp_engine_switches_per_min"}
             assert "behaviour" in o["roles"]["attack"]
             for x in (o, o["roles"]["attack"]):
                 assert x["gold_lost"] >= 0 and x["gold_destroyed"] >= 0 and x["gold_ratio"] >= 0
@@ -1037,6 +1084,15 @@ class TestLoop:
 
 
 class TestProtocol:
+    def test_the_trend_has_a_liveliness_block_per_opponent_and_role(self):
+        from tools.nn.train import test5
+        point = {"ai_like/attack": {"win": 0.5, "order_changes_per_min": 6.0, "flips_per_min": 0.5},
+                 "ai_like/defend": {"win": 0.4, "order_changes_per_min": 4.0}}
+        lines = test5.trend([(0, point), ("5", dict(point, **{"ai_like/defend": {"win": 0.4}}))])
+        assert "| order changes / unit-min, ai_like | 6.00 / 4.00 | 6.00 / - |" in lines
+        assert "| flips A→B→A ≤10 s / unit-min, ai_like | 0.500 / - | 0.500 / - |" in lines
+        assert not test5.lively_block([{"ai_like/attack": {"win": 0.5}}], ["min 0"])     # an older evaluation
+
     def test_the_gpu_lock_is_held_while_the_test_runs_and_freed_after_a_failure(self, tmp_path):
         from tools.nn.train import test5
         lock = tmp_path / "gpu-train.lock"

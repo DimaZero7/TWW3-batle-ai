@@ -125,6 +125,9 @@ def strikes(u, pw, contact, params, charge_now, contact_s):
     # more than lord_max_attackers of them, however many units: the lord swarm probe). Fought by
     # the enemy lord too, the infantry's share counts only lord_rival_others (the probe's lord
     # against lord and units; the whole battles: 12.2 HP/s from the enemy lord, 13.5 with a unit).
+    # A lone man striking a lone man (lord against lord) hits at lord_v_lord of the rule (measured
+    # in the whole and network battles: a lord fought by the enemy lord alone).
+    rate = torch.where(single_i & single_j, rate * float(cc.get("lord_v_lord", 1.0)), rate)
     rival = (single_i & (rate > 0)).any(dim=1, keepdim=True)
     k = float(cc.get("lord_rival_others", 1.0))
     rate = torch.where(single_j & rival & ~single_i, rate * k, rate)

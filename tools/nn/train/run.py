@@ -132,6 +132,7 @@ def train(args, every=None):
             p.requires_grad_(False)
     cfg = ppo.PPOConfig(lr=args.lr, gamma=args.gamma, epochs=args.epochs, minibatch=args.minibatch,
                         entropy=args.entropy, anchor=args.anchor, unit_credit=args.unit_credit,
+                        unit_value=args.unit_value,
                         adv_norm=args.adv_norm)
     opt = torch.optim.Adam(list(actor.parameters()) + list(critic.parameters()), lr=cfg.lr, eps=1e-5)
     weights = reward.Weights(order_change=args.order_cost, timeout=args.timeout, idle=args.idle, hp=args.hp,
@@ -465,6 +466,8 @@ def parser():
                     help="s: the time constant of that damage rate")
     ap.add_argument("--unit-credit", type=float, default=ppo.PPOConfig.unit_credit,
                     help="weight of each unit's own advantage beside the side's (0: the side's only)")
+    ap.add_argument("--unit-value", type=float, default=ppo.PPOConfig.unit_value,
+                    help="weight of the per-unit value loss beside the side's (its targets are x unit_scale)")
     ap.add_argument("--unit-gold", type=float, default=reward.Weights.unit_gold, help="per unit: its own gold trade")
     ap.add_argument("--flanked", type=float, default=reward.Weights.flanked,
                     help="per unit and decision: struck in the flank or rear")

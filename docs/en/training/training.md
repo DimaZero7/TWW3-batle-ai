@@ -219,6 +219,58 @@ does not. Per opponent the measures move within about 1.5 of their intervals (`n
 about even with the scripts overall, ahead of `ai_like` (+0.25; +6 points over `ai_like` playing
 itself), behind `nearest` (−13 points against `nearest` playing itself).
 
+### Liveliness
+
+Units that change orders and targets too often look artificial. Measured only (no reward), per
+opponent and role, in every evaluation (`tools/nn/train/behaviour.py` Tracker; `test5`'s report and
+trend.md, block "liveliness") and in the gate from the game's recordings (`tools/nn/gate.py`):
+
+| Number | What |
+|---|---|
+| order changes / unit-min | a new kind, a new attack target or a move point more than 10 m away (as the order cost counts them); the simulator's own attack → hold when the target dies is not one |
+| attack-target switches / unit-min | a new attack target while the old one still stands |
+| flips A→B→A / unit-min | a change back to the order before the previous one within 10 s |
+| move-point jitter, m | the mean distance between successive points of a unit that keeps moving (more than 5 m apart: the bridge gives no nearer one); re-points per moving minute |
+| changes out of melee / unit-min; units twitching | the changes of a standing unit out of melee; the share of units with 30 s or more out of melee that change orders there 6 times a minute or more |
+| own target switches / unit-min (1 s) | the unit's current target (whom it fights or shoots) changing between whole seconds, as the game samples it; also the opponent's units: in the game the game's AI is the reference band |
+
+In the game (gate of `it2/m15`, 8 battles, attack / defend): 15.4 / 16.1 order changes a unit-minute,
+5.8 / 4.9 attack-target switches, 6.4 / 5.9 flips, move jitter 18 / 36 m, every unit twitching; the
+units' own target switches 3.19 a unit-minute (battles 0.53–6.84) against the game's AI's 1.26
+(0.38–2.76). The same network in the simulator (32 battles an opponent, CPU): 5.1–5.9 order
+changes, 0.7–1.4 switches, 0.9–1.4 flips, jitter 61–89 m, 43–57 % of units twitching, own target
+switches 0.6–1.1 (the scripts' 0.5–1.0): in the game it changes orders about three times as often.
+
+### Capacity and forgetting
+
+When to widen the network (×2): `tools/nn/train/capacity.py`, at the end of every `test5` run (block
+"capacity and forgetting", report.json `capacity`), or on a finished folder in `.venv`:
+`python -m tools.nn.train.capacity build/nn-train/test5/<label> [--prev <folder or report.json>]`.
+Nothing is played.
+
+- Forgetting: the final evaluation against the previous iteration's (`--prev-report`, else the
+  folder of `--init`, else the label with its number one less) and against minute 0 of this one:
+  per opponent the pair score and pair gold, per matchup the win rate and gold trade, per our
+  faction and role the win rate (higher is better; 5 points = 0.05). Same battles are matched
+  (opponent, seed, side) and the noise is the paired difference's error; an older evaluation
+  without the per-battle lists is compared with its own errors. A drop of 5 points or more beyond
+  2.58 standard errors (about 40 numbers are compared) is "forgetting", a drop of 5+ within the
+  noise "drop?". Against the previous iteration it counts only with the same simulator version
+  (the script baseline's cache name), else it is "drop?".
+- The training log: explained variance, value and policy loss (the late half's slope: a plateau
+  within 2 errors of 0), entropy, grad norm (`ppo.update` logs `grad_norm`, the actor's norm before
+  clipping, and `grad_norm_critic`, from 02.10), kl, clip; early third → late third.
+- Verdict: **widen-candidate** when old numbers drop beyond noise while others rise beyond noise
+  and the overall rating does not (interference: new skill at the cost of old); **watch** for
+  forgetting with a rising rating (a trade-off), forgetting with nothing rising (the training loses
+  skill: settings first), drops within the noise, a plateau of rating and value loss, a falling
+  critic, an entropy collapse, a rising grad norm; else **ok**.
+
+On `it2` (02.10): within the iteration 3 of 51 numbers drop beyond noise (worst `hold_shoot` EMP
+defend −15.6 points ± 12.4), none rises, the rating −0.06 → −0.16 (± 0.15) — **watch**: the
+training loses skill, the size is not the first suspect; against `it1` only "drop?" (its
+evaluation has no simulator version, and the Skaven budget and the armies changed since).
+
 ## How a training step goes
 
 ```mermaid
@@ -297,10 +349,29 @@ opponent): `ai_like` 0.531 / 0.574 before, 0.547 / 0.551, 0.512 / 0.551 after; `
 0.395 → 0.438 / 0.426, 0.449 / 0.402; `hold_shoot` 0.547 / 0.449 → 0.570 / 0.426, 0.562 / 0.430 —
 within the ±3 points of noise.
 
-**What is left.** An evaluation runs until its longest battle ends: after ~1 700 decisions fewer
-than 1 % of the battles (often stand-offs to the 60-minute limit) are alive, yet each decision still
-costs ~21 ms for the whole batch — two thirds of an evaluation. Compacting the batch to the live
-battles (at a few fixed sizes, so the compiled graphs stay few) would cut that; not done. In the
+**Evaluation: only the running battles (02.10.2026).** An evaluation runs until its longest battle
+ends: after ~1 600 decisions fewer than 5 % of the battles are alive (often stand-offs to the
+60-minute limit), and every decision still cost ~22 ms for the whole batch. Now, once at most 64 are
+left, the batch shrinks to them (`rollout.Battles.narrow`: the state, setup, memories, the pending
+observation per battle; padded with ended battles, which stay frozen; `evaluate.BUCKETS`, one fixed
+size so the compiled graphs stay few), and the shrunk batch's decision is replayed as one CUDA graph
+(`evaluate.Graphed`: at 64 battles a decision was ~10 ms of kernel launches, the replay ~2.8 ms). The
+results read the whole batch back (`evaluate._Full`); the script baselines shrink the same way.
+`play(compact=False, cuda_graph=False)` steps as before.
+
+| `test5` evaluation (1536 battles, `it2/m15.pt`, warm compile cache, baselines from cache) | wall time |
+|---|---:|
+| before: the whole batch to the end | 180 s |
+| shrunk to 64 | 133 s |
+| shrunk to 64 + CUDA graph | 65 s |
+
+The same seeds give the same battles: the simulator is deterministic and an ended battle frozen; the
+graph's replay gives bit for bit the same battles as stepping (sampled and greedy); against the whole
+batch only the tail's random draws differ (the batch's shape sets them): 1533 of 1536 outcomes the
+same, win rates 0.520 / 0.361 / 0.447 against 0.520 / 0.361 / 0.441. Cost: a new code version
+compiles the 64-battle graphs once (~75–100 s, then in the torch cache). Not tried: a graph for any
+batch size (`dynamic=True`) does not build — the simulator's step then needs a C++ compiler the
+container lacks. The whole-batch phase (~35 s, ~22 ms a decision, GPU-bound) is unchanged. In the
 update, the GRU's 64 steps and the attention's float32 backward remain the main cost.
 
 ## Decisions
@@ -670,7 +741,7 @@ keeping together), its missile units halt at range.
 | the attacker charges from | 80 m | battle 4: targets at ~80 m, contact 11 s later |
 | the defender counter-charges from | 100 m | battles 1 and 3: ~100 m, 78–87 s into the battle |
 | an enemy that wavers is charged from; once own units fight, the rest join enemies within | 150 m | ours |
-| missile units halt at a share of range and shoot; the enemy lord first when in range and not in melee | 0.9 | battles 3–4: first volleys at 108–134 m; battles 1–3: slings and archers on the lord (not in melee: friendly fire, ours) |
+| missile units halt at a share of range and shoot; the enemy lord first when in range, in melee too | 0.9 | battles 3–4: first volleys at 108–134 m; the 63 network gate battles: with our lord in range the game's missile units shot him 89 % of their firing seconds (91 % while he was in melee, 86 % free). Before 02.10.2026 `ai_like` spared a lord in melee and put 34 % of its fire on him, now 64 % (the game's AI 62 %, median of the battles; side 1 replayed, side 2 scripted, `build/simacc/opp_gap.py`) |
 | missile units step back 50 m from an enemy melee unit within | 40 m | battle 3: slings stepped back and aside |
 | the lord stays behind its line's centre, never charges first: goes in with the line or at an enemy within 50 m that already fights; withdraws below 30 % health | 10 m | battle 4: in the line from contact on; 50 m and 30 % ours |
 | targets: nearest, pulled 30 m towards enemies already fighting, 25 m towards missile units, 60 m towards enemies on own missile units; a new target must be 15 m better | — | battles 3–4 retargets; hysteresis ours |
@@ -1194,6 +1265,50 @@ lead alone does not tell a loss. Defending, our army walked 160–275 m before c
 |---|---|---|
 | `--lord-fall` | per unit: the lord pays weight × its fall in the step (`reward.lord_up`: 1 standing, 1 − `--lord-rout` (0.5 when 0) routing, 0 shattered, dead or gone; a rally gives it back): the army's price of its rout on the lord's own credit, which saw only its gold (~0.06 for a whole lord in a 19-unit army) against ~0.2 for the gold it kills | 0.2 |
 
+### Iteration 3: the policy took no step — the gradient clip, 02.10
+
+`it3` (10 minutes from `it2/m15`, `--unit-credit 0.3`) was flat: rating −0.12 → −0.13, against `nearest`
+pair gold −0.14 ± 0.02 at every minute, KL an update 0.0002, anchor KL ~0.007. Probe on the `it3`
+settings (`build/analyst/probe.py`, not in Git; per term gradient norms on one minibatch, 6 updates):
+
+- **The cause.** `ppo.update` clipped the actor's and the critic's gradients *together* to norm 0.5. The
+  per-unit value loss (targets × `unit_scale` 100, loss 20–50) had gradient norm 200–900 (total
+  400–2000), the actor's (policy 0.16–0.5, anchor 0.01–0.07, entropy 0.003) 0.2–0.5. The clip
+  multiplied everything by 0.0006–0.0025: the actor's gradient per parameter ~1e-8, Adam's
+  √v for every actor parameter below its eps 1e-5, so its step was ~lr × g / eps ≈ 0: the actor's
+  parameters moved 6e-5–1.4e-4 (relative) an update, the full KL of an update ≤ 3e-5 (kind) and
+  2e-4–2e-3 (target). Iterations 1–3 ("the step is noise", "no signal") trained only the critic,
+  and every per-unit term (`lord_lead`, `lord_fall`, `lord_exposed`, ...) never reached the policy.
+- **Fix** (`tools/nn/train/ppo.py`): the actor and the critic are clipped apart (each to `max_grad`), and
+  the per-unit value loss has its own weight `unit_value` 1e-3 (`--unit-value`) beside the side's, so
+  its gradient (~0.5–1) no longer drowns the side's value (0.1–0.7) inside the critic. `grad_norm` is
+  now the actor's norm, `grad_norm_critic` the critic's. After it (3-minute runs from `it3/m10`, 23–27
+  updates): KL an update 0.004–0.011, clip fraction 0.012–0.019, actor grad norm 0.3–1.1, critic 0.3–1.1,
+  explained variance 0.985–0.99, anchor KL 0.005 → 0.06–0.08: the policy moves at a normal PPO pace.
+
+**Per-unit credit pulls to standing once the policy can move.** The same 3 minutes, paired evaluation
+(256 pairs an opponent, the same simulator; pair gold ± s.e.):
+
+| Network | `nearest` pair gold / win | `ai_like` pair gold / win | kind hold | idle melee units (share of army cost, vs `nearest`) |
+|---|---|---|---|---|
+| `it3/m10` (start) | −0.146 ± 0.014 / 0.39 | +0.008 ± 0.014 / 0.54 | 0.01 | 0.008 |
+| + fix, `--unit-credit 0.3` | −0.183 ± 0.014 / 0.34 | −0.030 ± 0.014 / 0.49 | 0.03–0.06 | 0.107 |
+| + fix, `--unit-credit 0` | **−0.114 ± 0.013** / 0.40 | **+0.028 ± 0.014** / 0.55 | 0.01–0.02 | 0.014 |
+
+At 0.3 melee units learn to stand out of the fight (a unit that does not fight looks better than its
+fellows that trade at a loss, as `u06c` above); without it the side's win and gold teach. For
+iteration 4: `--unit-credit 0` (the per-unit lord terms are then off; the side's `lord` term with
+`--lord-rout 0.5` stays), more `nearest` in the mix (0.35, `ai_like` 0.3): it is the weakest matchup.
+
+**Against `nearest`** (`build/analyst/battles.py`, 256 battles, `it3/m10`, our side against its side in
+the same battles): losses run equal for 2 minutes (lost share of the army 0.32 / 0.31 at 120 s), then
+ours outrun its (0.78 / 0.71 at 300 s; in our lost battles 0.84 / 0.65). In melee our units are
+outnumbered (two or more enemies on one) in 23 % of unit-steps against its 14 %, outnumber in 39 % against
+51 %, are struck in flank or rear in 57 % against 45 %; 7 % of our army's cost stands idle (missile units
+with or without ammunition) against its 1 %; our lord stands 28 m ahead of its line (its 19 m) and is in
+melee 62 % of the time (its 56 %). `nearest` wins by committing everything at once into local
+superiority; ours spreads and leaves part of the army out.
+
 ## A failed experiment: two networks, attack and defence, 01.10.2026
 
 Instead of one shared network we tried two — attack and defence — each twice as wide (`wide`,
@@ -1237,8 +1352,16 @@ per opponent and their mean; all wins stay finite), the report rows; `tests/tool
 (torch, in the container): the pairs' layout (one bank battle, both sides, the same role), the small
 share padded to a block, a paired evaluation (pairs, swapped armies and roles, `hold` without pairs,
 margins, the baselines and their cache, the rating), the script's view from the network's side, the
-version hash, the skill block in `test5`'s report and trend; `tests/tools/test_nn_gate.py`: the gate's
+version hash, the skill block in `test5`'s report and trend, a shrunk batch (`Battles.narrow`) playing
+its battles as the whole one does, script battles ending the same in a shrinking batch; `tests/tools/test_nn_gate.py`: the gate's
 swapped pairs, `--army-swap`, the pair outcomes.
+Capacity and liveliness: `tests/tools/test_nn_capacity.py` (numpy): a paired drop beyond noise is
+forgetting, a small one is not, an older evaluation from its summary and scene rows, the training
+log's plateau / entropy collapse / grad norm, the verdict (interference, trade-off, losing skill),
+the previous iteration found and doubted under another simulator; `tests/tools/test_nn_gate.py`
+`TestLiveliness`: our orders and both sides' targets from a recording, the per-role summary and the
+game AI's band; in `test_nn_train.py` the Tracker's changes, switches, flips, jitter and own target
+switches, and the trend's liveliness block.
 
 `tests/tools/test_nn_train.py` (torch; skipped in `.venv`, run in the container like
 `tests/tools/test_sim.py`): GAE, clipping, reward (the time limit, the idle attacker, a lord's
