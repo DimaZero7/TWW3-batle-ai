@@ -108,6 +108,9 @@ def evaluation(actor, args, device):
     t = time.time()
     res = evaluate.play(actor, opponents=OPPONENTS, device=device, generated=args.eval, max_units=19, seed=1,
                         together=True, paired=True, baseline=True)
+    if args.drill_eval:
+        # the drills (tools/nn/train/drills, the verified ones): win rate and gold trade per drill
+        res["drills"] = evaluate.play_drills(actor, args.drill_eval, device)
     res["seconds"] = round(time.time() - t)
     return res
 
@@ -136,6 +139,8 @@ def metrics(res):
     fair metrics (tools/nn/train/skill.py summary: rating, pairs, pair gold, advantage over the script,
     margin)."""
     out = {"skill": skill.summary(res)}
+    if res.get("drills"):
+        out["drills"] = res["drills"]
     if res.get("distance") is not None:
         out["distance"] = res["distance"]
     for opp, o in res["by_opponent"].items():
@@ -200,7 +205,47 @@ def table(before, after):
         lines += ["", "| by faction | before → after |", "|---|---|"]
         lines += [f"| {title} | {' → '.join(cells)} |" for title, cells in by]
     return (skill_block([before.get("skill"), after.get("skill")], ["before → after"], " → ") + lines
-            + lively_block([before, after], ["before → after"], " → "))
+            + lively_block([before, after], ["before → after"], " → ")
+            + drill_block([before, after], ["before → after"], " → "))
+
+
+def drill_block(points, heads, join=None):
+    """The drills block (win rate and gold trade per drill, the drill's naive / skilled scripts beside) over
+    metrics() points: a column per point, or one column joined by `join`; [] when no point has drills."""
+    names = list(dict.fromkeys(n for p in points for n in (p.get("drills") or {})))
+    if not names:
+        return []
+    f = (lambda fmt, v: "-" if v is None else fmt.format(v))
+    rows = []
+    for n in names:
+        for key, title, fmt in (("win_rate", "win rate", "{:.3f}"), ("gold_trade", "gold trade", "{:+.3f}")):
+            cells = [f(fmt, ((p.get("drills") or {}).get(n) or {}).get(key)) for p in points]
+            ref = next(((p.get("drills") or {}).get(n, {}).get("scripts") for p in points
+                        if (p.get("drills") or {}).get(n, {}).get("scripts")), None)
+            ref_s = (f" (naive {fmt.format(ref['naive'][key])}, skilled {fmt.format(ref['skilled'][key])})"
+                     if ref else "")
+            rows.append((f"drill {n}: {title}{ref_s}", [join.join(cells)] if join is not None else cells))
+        # what our units do (drills/metrics.py): unit-seconds by order, all / the last 100 s before the limit
+        def play(p):
+            return ((p.get("drills") or {}).get(n) or {}).get("play")
+        if not any(play(p) for p in points):
+            continue
+        sk = next((((p.get("drills") or {}).get(n, {}).get("scripts") or {}).get("skilled", {}).get("play")
+                   for p in points if (((p.get("drills") or {}).get(n, {}).get("scripts") or {}).get("skilled") or {}).get("play")), None)
+        for key, title in (("correct", "on the correct target"), ("bad", "on its counter"), ("other", "on another enemy"),
+                           ("hold", "holding"), ("move", "moving"), ("melee", "in melee")):
+            g = (lambda x, part: "-" if not x or x.get(part, {}).get(key) is None else f"{x[part][key]:.2f}")
+            cells = [f"{g(play(p), 'all')} / {g(play(p), 'tail')}" for p in points]
+            ref = f" (skilled {g(sk, 'all')} / {g(sk, 'tail')})" if sk else ""
+            rows.append((f"drill {n}: unit-s {title}, all / last 100 s{ref}", [join.join(cells)] if join is not None else cells))
+        fc = (lambda x: "-" if not x or x.get("first_correct_s") is None else f"{x['first_correct_s']:.0f} s ({x.get('ever_correct', 0):.2f})")
+        cells = [fc(play(p)) for p in points]
+        rows.append((f"drill {n}: first order on the correct target, median (share of units ever){' (skilled ' + fc(sk) + ')' if sk else ''}",
+                     [join.join(cells)] if join is not None else cells))
+    return (["", "drills (tools/nn/train/drills; the network against each drill's enemy, DRILL_EVAL_SEEDS; "
+             "in brackets the drill's check scripts on the same battles):", "",
+             "| drill | " + " | ".join(heads) + " |", "|---" * (len(heads) + 1) + "|"]
+            + [f"| {t} | " + " | ".join(c) + " |" for t, c in rows])
 
 
 def lively_block(points, heads, join=None):
@@ -276,7 +321,8 @@ def trend(points):
         lines += ["", "by faction (our faction first):", "",
                   "| by faction | " + " | ".join(f"min {m}" for m in mins) + " |", "|---" * (len(mins) + 1) + "|"]
         lines += [f"| {title} | " + " | ".join(cells) + " |" for title, cells in by]
-    return lines + lively_block([m for _, m in points], [f"min {m}" for m in mins])
+    return (lines + lively_block([m for _, m in points], [f"min {m}" for m in mins])
+            + drill_block([m for _, m in points], [f"min {m}" for m in mins]))
 
 
 def main():
@@ -291,6 +337,8 @@ def main():
     ap.add_argument("--every", type=float, default=0,
                     help="minutes of training between full evaluations (a trend run; 0: before and after only)")
     ap.add_argument("--no-lock", action="store_true", help="do not take the GPU lock (small smoke runs only)")
+    ap.add_argument("--drill-eval", type=int, default=128,
+                    help="battles of each verified drill per evaluation (tools/nn/train/drills; 0: none)")
     ap.add_argument("--prev-report", help="the previous iteration's report.json or folder (default: found, "
                                           "tools/nn/train/capacity.py)")
     ap.add_argument("--report-only", action="store_true",

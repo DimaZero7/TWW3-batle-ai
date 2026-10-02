@@ -7,6 +7,7 @@ plays and the opponent. Opponents:
     past        a past version of the learner from the pool (one version for all such
                 battles, drawn again every update); the untrained network is always in the pool
     nearest, hold_shoot, hold, ai_like   the scripted opponents (tools/nn/train/opponents.py)
+    drill_<name>  a drill's enemy script on that drill's battles (tools/nn/train/drills; run.py --drills)
 
 The pool: build/nn-train/pool/*.pt in the checkpoint format (tools/nn/train/checkpoint.py).
 """
@@ -17,9 +18,10 @@ from pathlib import Path
 import numpy as np
 
 from tools.nn.train import checkpoint
+from tools.nn.train import drills
 
 LEARNER = 0
-OPPONENTS = ("self", "past", "nearest", "hold_shoot", "hold", "ai_like")
+OPPONENTS = ("self", "past", "nearest", "hold_shoot", "hold", "ai_like") + tuple(drills.opponent(n) for n in drills.NAMES)
 CODE = {name: i + 1 for i, name in enumerate(OPPONENTS)}     # controller codes; 0 = the learner
 MIX = {"self": 0.1, "past": 0.15, "nearest": 0.2, "hold_shoot": 0.1, "hold": 0.05, "ai_like": 0.4}
 
@@ -42,6 +44,21 @@ class Layout:
             self_play = self.opponent == CODE["self"]
             out[:, s - 1] = np.where(mine | self_play, LEARNER, self.opponent)
         return out
+
+
+def with_drills(mix, share, weights=None, names=drills.NAMES):
+    """The mix with `share` of the battles given to the drills (by weights {name: w}, default equal; a
+    drill of weight 0 is left out), the other opponents scaled to 1 - share."""
+    if not share:
+        return dict(mix)
+    w = {n: float((weights or {}).get(n, 1.0 if weights is None else 0.0)) for n in names}
+    w = {n: v for n, v in w.items() if v > 0}
+    total = sum(w.values())
+    assert total > 0, "--drills needs a drill with a weight above 0"
+    base = sum(v for k, v in mix.items() if not k.startswith(drills.PREFIX))
+    out = {k: v / base * (1 - share) for k, v in mix.items() if not k.startswith(drills.PREFIX)}
+    out.update({drills.opponent(n): share * v / total for n, v in w.items()})
+    return out
 
 
 def counts(B, mix):

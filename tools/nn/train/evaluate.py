@@ -545,6 +545,96 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
     return out
 
 
+_SCRIPT_REF = {}
+
+
+def drill_scripts(name, n, device="cpu"):
+    """{"naive", "skilled"}: the drill's two check scripts' win rate and gold trade on the evaluation's
+    battles (DRILL_EVAL_SEEDS, our side alternating; SPREAD), cached per process."""
+    from tools.nn.train import drills as D
+    from tools.nn.train.drills import verify
+    key = (name, n, str(device))
+    if key not in _SCRIPT_REF:
+        drill = D.load([name])[name]
+        seeds = range(D.DRILL_EVAL_SEEDS.start, D.DRILL_EVAL_SEEDS.start + n)
+        out = {}
+        from tools.nn.train.drills import metrics as drill_metrics
+        for which in ("naive", "skilled"):
+            box = {}
+
+            def extra(st, box=box):
+                if "tr" not in box:
+                    box["tr"] = drill_metrics.Tracker(st, box["ours"], drill.roles)
+                box["tr"].update(st, ~box.get("done", st.done))
+                box["done"] = st.done.clone()
+                box["st"] = st
+            res, descs = verify.play(drill, getattr(drill, which), device=device, spread=SPREAD, seeds=seeds,
+                                     extra=extra, ours_box=box)
+            out[which] = {"win_rate": round(float(res["won"].mean()), 3), "gold_trade": round(float(res["trade"].mean()), 3),
+                          "play": box["tr"].summary(None, box["st"]) if "tr" in box else None}
+        _SCRIPT_REF[key] = out
+    return _SCRIPT_REF[key]
+
+
+@torch.no_grad()
+def play_drills(actor, n=128, device="cpu", names=None, greedy=False, seed=1, compile=None, scripts=True):
+    """The drills (tools/nn/train/drills; default the verified ones, drills.READY): n battles of each on
+    DRILL_EVAL_SEEDS (our side alternating, SPREAD) against the drill's enemy script -> {drill: {games, wins,
+    win_rate, gold_trade (mean (enemy gold destroyed - own lost) / budget), gold_destroyed, gold_lost, seconds,
+    timeouts, scripts: {naive, skilled: {win_rate, gold_trade}} (scripts: the drill's check scripts on the same
+    battles)}}; {} without drills."""
+    from tools.nn.train import drills as D
+    from tools.nn.train.drills import metrics as drill_metrics
+    from tools.nn.train.drills import source as drill_source
+    names = [x for x in D.NAMES if x in (names if names is not None else D.READY)]
+    if not names or n <= 0:
+        return {}
+    params = rollout.params_with_limit(None)
+    src, lay = drill_source.evaluation(names, n, params, device)
+    env = rollout.Battles(lay, device=device, params=params, spread=SPREAD, seed=seed, auto_reset=False,
+                          compile=compile, source=src)
+    steps = int(params.limit_s / params.dt) + 2
+    # what our units do in each drill's battles (drills/metrics.py; the drill's roles: correct / bad targets)
+    loaded = D.load(names)
+    side_t = torch.as_tensor(lay.learner, device=env.device)
+    opp_t = torch.as_tensor(lay.opponent, device=env.device)
+    trackers = {n: drill_metrics.Tracker(env.st, torch.where(opp_t == league.CODE[D.opponent(n)], side_t,
+                                                             torch.zeros_like(side_t)), loaded[n].roles,
+                                                limit_s=params.limit_s)
+                for n in names}
+    for i in range(steps):
+        if i % CHECK_EVERY == 0 and bool(env.st.done.all()):
+            break
+        live = ~env.st.done
+        env.step(actor, None, greedy)
+        for tr in trackers.values():
+            tr.update(env.st, live)
+    side = lay.learner
+    B = env.B
+    won = env.st.winner.cpu().numpy() == side
+    gold_b = reward.gold_sides(env.st.u, env.weights.rout_share).cpu().numpy()
+    own, enemy = gold_b[np.arange(B), side - 1], gold_b[np.arange(B), 2 - side]
+    bud = reward.budget(env.st.u).cpu().numpy()
+    t = env.st.t.cpu().numpy()
+    out = {}
+    for name in names:
+        this = lay.opponent == league.CODE[D.opponent(name)]
+        out[name] = {"games": int(this.sum()), "wins": int(won[this].sum()), "win_rate": float(won[this].mean()),
+                     "gold_trade": float(((enemy - own) / np.maximum(bud, 1e-9))[this].mean()),
+                     "gold_destroyed": float(enemy[this].mean()), "gold_lost": float(own[this].mean()),
+                     "seconds": float(t[this].mean()), "timeouts": float((t[this] >= params.limit_s - 1e-6).mean())}
+        out[name]["play"] = trackers[name].summary(this, env.st)
+        u = env.st.u
+        up = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"] & ~u["r"]
+        ours_b = u["side"] == torch.as_tensor(side, device=env.device)[:, None]
+        sel = torch.as_tensor(this, device=env.device)
+        out[name]["standing_end"] = {"ours": float((up & ours_b).sum(1)[sel].float().mean()),
+                                     "enemy": float((up & ~ours_b).sum(1)[sel].float().mean())}
+        if scripts:
+            out[name]["scripts"] = drill_scripts(name, n, device)
+    return out
+
+
 def start_cost(u):
     """[B, 2] numpy: each side's starting gold (the cost of its units)."""
     return torch.stack([(u["cost"] * (u["side"] == s)).sum(1) for s in (1, 2)], 1).cpu().numpy()

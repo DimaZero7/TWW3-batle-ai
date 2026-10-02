@@ -34,7 +34,7 @@ from tools.nn.sim import battle
 from tools.nn.sim import orders as O
 from tools.nn.sim import state as S
 from tools.nn.sim.params import load
-from tools.nn.train import behaviour, league, opponents, randomise, reward, scenes
+from tools.nn.train import behaviour, drills, league, opponents, randomise, reward, scenes
 
 CRITIC_KEYS = ("tokens", "ctx", "own", "attend", "pos")
 FRAME = ("cx", "cz", "ux", "uz")
@@ -122,6 +122,17 @@ def placement(rows, B):
     for side 1 and 2), as index tensors made once (boolean indexing reads its size back from the GPU)."""
     b, two = rows % B, rows >= B
     return tuple((s, b[sel], torch.nonzero(sel).squeeze(1)) for s, sel in ((1, ~two), (2, two)))
+
+
+def scripts_of(layout):
+    """{opponent name: script} the layout's rows may need: the scripted opponents, and the enemy scripts
+    of the drills it plays (tools/nn/train/drills)."""
+    out = dict(opponents.SCRIPTS)
+    used = set(np.unique(layout.opponent).tolist())
+    names = [n for n in drills.NAMES if league.CODE[drills.opponent(n)] in used]
+    if names:
+        out.update(drills.enemy_scripts(drills.load(names)))
+    return out
 
 
 def assemble_orders(st, ctrl, scripts, parts):
@@ -275,7 +286,7 @@ class Battles:
         self.rows_past = (flat == league.CODE["past"]).nonzero().squeeze(1)
         self.place_learn = placement(self.rows_learn, self.B)
         self.place_past = placement(self.rows_past, self.B)
-        self.scripts = {league.CODE[n]: f for n, f in opponents.SCRIPTS.items() if bool((self.ctrl == league.CODE[n]).any())}
+        self.scripts = {league.CODE[n]: f for n, f in scripts_of(layout).items() if bool((self.ctrl == league.CODE[n]).any())}
         opp = torch.as_tensor(layout.opponent, device=self.device)
         self.row_opp = torch.cat([opp, opp])[self.rows_learn]                          # [R]
         self.past_actor = None

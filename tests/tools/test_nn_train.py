@@ -577,12 +577,25 @@ class TestBehaviour:
         old = reward.unit_step(before, st, f, p, dataclasses.replace(w, unit_attrib=0.0))
         assert float(new[0, 0]) > 0 and float(old[0, 0]) == 0.0              # the old estimate missed the kill
 
-    def test_a_melee_unit_standing_still_while_its_side_fights_shirks(self):
+    def test_a_melee_unit_not_fighting_nor_closing_while_its_side_fights_shirks(self):
         st = pile()                                                       # 3 and 6 fight; 0-2, 5 stand near
         u = st.u
         u["mv"][0, 1] = True                                              # 1 moves (to the fight)
+        u["vx"][0, 1] = 3.0                                               # ... east, on its target 5 (not the nearest)
         sh = reward.shirking(u)
         assert sh[0, :7].tolist() == [True, False, True, False, False, True, False] and not bool(sh[0, 7:].any())
+        # walking about is not a way out: 0 walks sideways (the old rule, shirk_close 0, excused any move)
+        u["mv"][0, 0], u["vz"][0, 0] = True, 3.0
+        assert bool(reward.shirking(u)[0, 0]) and not bool(reward.shirking(u, close_mps=0.0)[0, 0])
+        u["vx"][0, 0] = 2.0                                               # ... now also towards 5, its nearest enemy
+        assert not bool(reward.shirking(u)[0, 0])
+        u["vx"][0, 1] = -3.0                                              # 1 turns from its target 5 ...
+        assert not bool(reward.shirking(u)[0, 1])                         # ... towards 6, its nearest: still closing
+        u["vz"][0, 1], u["vx"][0, 1] = 3.0, 0.0                           # ... sideways: shirks
+        assert bool(reward.shirking(u)[0, 1])
+        u["vx"][0, 0] = u["vz"][0, 0] = u["vz"][0, 1] = 0.0
+        u["mv"][0, 0] = False
+        u["vx"][0, 1] = 3.0
         assert not bool(reward.shirking(u, reach_m=5.0)[0, 0])            # no enemy within reach
         u["m"][0, 3] = u["m"][0, 6] = False                               # nobody fights: nobody shirks
         assert not bool(reward.shirking(u).any())

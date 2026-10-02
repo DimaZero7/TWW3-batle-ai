@@ -29,7 +29,8 @@ import torch
 from tools.nn.model import config as model_config
 from tools.nn.model import critic as model_critic
 from tools.nn.model import policy as model_policy
-from tools.nn.train import checkpoint, evaluate, league, matchups, ppo, randomise, reward, rollout, scenes
+from tools.nn.train import checkpoint, drills, evaluate, league, matchups, ppo, randomise, reward, rollout, scenes
+from tools.nn.train.drills import source as drill_source
 
 SCRIPTED = ("nearest", "hold_shoot", "hold", "ai_like")
 
@@ -174,6 +175,12 @@ def train(args, every=None):
     past = model_policy.Actor(actor.cfg).to(device).eval()
     past_path = None
     mix = json.loads(args.mix) if args.mix else league.MIX
+    if args.drills:
+        # drills: --drills of the battles, shared by --drill-weights (default: the verified ones equally)
+        if args.armies != "generated":
+            raise SystemExit("--drills needs --armies generated")
+        shares = json.loads(args.drill_weights) if args.drill_weights else {n: 1.0 for n in drills.READY}
+        mix = league.with_drills(mix, args.drills, shares)
     lay = league.layout(args.battles, len(scenes.SCENES), mix, scene_attacker=scenes.attackers())
     params = rollout.params_with_limit(args.limit)
     stages = curriculum(args.curriculum) if args.armies == "generated" else [(None, 1.0)]
@@ -185,6 +192,9 @@ def train(args, every=None):
             return None
         from tools.nn.armies import generate
         seeds = rng.integers(generate.TRAIN_SEEDS.start, generate.TRAIN_SEEDS.stop, args.bank)
+        if args.drills:
+            return drill_source.Mixed(seeds, max_units, params, device, lay, seed=int(rng.integers(1 << 30)),
+                                      small=small_arg(), per_drill=args.drill_bank)
         return scenes.Generated(seeds, max_units, params, device, seed=int(rng.integers(1 << 30)), small=small_arg())
 
     def make_env(max_units):
@@ -541,6 +551,12 @@ def parser():
     ap.add_argument("--curriculum", default="5:0.3,10:0.6,19:1",
                     help="generated armies: max units a side, until this share of the time")
     ap.add_argument("--bank", type=int, default=2048, help="generated battles ready at once")
+    ap.add_argument("--drills", type=float, default=0.0,
+                    help="share of the battles that are drills (tools/nn/train/drills; e.g. 0.08), taken from the "
+                         "other opponents in proportion; needs --armies generated")
+    ap.add_argument("--drill-weights", help="the drills' shares of --drills as json, e.g. {\"pincer\": 1, \"kiting\": 2} "
+                                            "(default: the verified drills, drills.READY, equally)")
+    ap.add_argument("--drill-bank", type=int, default=256, help="battles of each drill ready at once (renewed with the bank)")
     ap.add_argument("--bank-refresh", type=float, default=5.0, help="minutes between new banks of armies")
     ap.add_argument("--eval-generated", type=int, default=512, help="random battles per opponent (EVAL_SEEDS)")
     ap.add_argument("--seed", type=int, default=0)

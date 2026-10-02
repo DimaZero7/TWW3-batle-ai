@@ -2,7 +2,8 @@
 
 Per pair of units in contact (i strikes j), per second:
 
-    men striking F  = fighting_files x (length of the sides in contact / spacing), at most men;
+    men striking F  = fighting_files x (length of the sides in contact / spacing), at most men
+                      (through the target's flank: the striker's own side, melee.flank_face "striker");
                       against a single man (a lord) at most lord_max_attackers in all, however many
                       units surround him (measured: the lord swarm probe, docs/en/game/units/lord-swarm.md);
                       a single man strikes once (his blow hits up to `splash` men); a unit in
@@ -60,6 +61,13 @@ def strikes(u, pw, contact, params, charge_now, contact_s):
     single_i = u["men0"][:, :, None] <= 1
     single_j = u["men0"][:, None, :] <= 1
     length = torch.minimum(pw["face_i"], pw["face_j"])
+    if cal.get("flank_face", "min") == "striker":
+        # Through the target's flank (its side towards i is its depth) the striker brings men by
+        # its own face, not by the target's short flank (measured: a lone flank attacker takes
+        # 1.53x what a frontal one does; melee.flank_face, config/nn/sim.json).
+        s_j, c_j = torch.sin(pw["rel_j"]).abs(), torch.cos(pw["rel_j"]).abs()
+        flank_j = s_j * pw["depth"][:, None, :] > c_j * pw["front"][:, None, :]
+        length = torch.where(flank_j, pw["face_i"], length)
     F = cal["fighting_files"] * length / spacing
     F = torch.minimum(F, men_i)
     F = torch.where(single_j, torch.minimum(men_i, torch.full_like(F, float(cc["lord_max_attackers"]))), F)

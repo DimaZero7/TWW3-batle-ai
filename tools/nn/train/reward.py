@@ -44,11 +44,11 @@
   of "no unit busy"), and idle_rate > 0 resets m only while the attacker's damage rate (hit_rate: the
   defender's gold lost, share of the budget a minute, exponential mean over idle_window_s) is at least
   idle_rate, instead of on any damage. Both 0: the old rule.
-* Either side pays `shirk_side` x the share of its standing army, by cost, of melee units standing
-  still out of melee while its side fights in melee with an enemy within shirk_m (shirking(); in
-  the "idle" part): the team-level twin of the per-unit `shirk` (gate 02.10, it6/m40: 37 of 102
-  rallied units held 30 s or more 75-255 m from the enemy while their side fought; the network
-  gave such a unit HOLD at 0.999 - a state that cost nothing).
+* Either side pays `shirk_side` x the share of its standing army, by cost, of melee units not
+  contributing (out of melee, not closing on the enemy) while its side fights in melee with an enemy
+  within shirk_m (shirking(); in the "idle" part): the team-level twin of the per-unit `shirk`
+  (gate 02.10, it6/m40: 37 of 102 rallied units held 30 s or more 75-255 m from the enemy while
+  their side fought; the network gave such a unit HOLD at 0.999 - a state that cost nothing).
 * Every real order change costs `order_change`, divided by the side's number of units: a new kind,
   a new attack target, or a move / withdraw point more than `order_move_m` from the one in force.
   KEEP and re-issuing the same order cost nothing. A unit that changes its order every decision
@@ -81,12 +81,17 @@ itself, beside the side's reward; none of it enters the side's reward:
     crowd         per decision of a pile, by the excess share (tools/nn/train/behaviour.py);
     idle_near     per decision a melee unit with no attack order stands out of melee while a fellow
                   within 60 m fights (a unit's own credit otherwise pays it to let others fight);
-    shirk         per decision a melee unit (not a missile unit, not a lord) stands still out of melee
-                  (no fight, no move) while its side fights in melee and a standing enemy is within
-                  shirk_m (shirking()): standing by is no longer free. Per-unit diagnosis 02.10 (it5/m20
-                  v nearest): centred per decision over the side's units, a melee unit standing while
-                  its side fights got +5.0e-5 and one fighting -1.5e-5 (a losing trade makes the
-                  fellows' mean negative and the one that takes no losses looks best);
+    shirk         per decision a melee unit (not a missile unit, not a lord) does not contribute: out of
+                  melee, not shooting and not closing on the enemy (at least shirk_close m/s towards the
+                  nearest standing enemy or its attack target: closing()) while its side fights in melee
+                  and a standing enemy is within shirk_m (shirking()): standing by is no longer free, and
+                  walking about is not a way out (iteration 7, 02.10: with "no move" as the excuse, move
+                  orders went from 24 to 70 % of the decisions and the rating -0.25 -> -1.05; the closing
+                  rule alone does not make per-unit credit safe: docs/en/training/training.md "Iteration 7").
+                  Per-unit diagnosis 02.10 (it5/m20 v nearest): centred per decision over the side's
+                  units, a melee unit standing while its side fights got +5.0e-5 and one fighting
+                  -1.5e-5 (a losing trade makes the fellows' mean negative and the one that takes no
+                  losses looks best);
     flank_attack  per decision striking an enemy's flank or rear (a bonus, as large as `flanked`: a flank
                   exchange is zero-sum between the two units);
     unit_idle     x the attacker's idle multiplier m (idle_scale, as the side's idle cost) per decision a
@@ -152,8 +157,10 @@ class Weights:
     missile_melee: float = 2e-4   # per decision a missile unit is in melee
     crowd: float = 2e-4           # per decision of a pile (excess share)
     idle_near: float = 0.0        # per decision a melee unit stands by while a fellow within 60 m fights
-    shirk: float = 0.0            # per decision a melee unit stands still out of melee while its side fights
+    shirk: float = 0.0            # per decision a melee unit does not contribute (shirking()) while its side fights
     shirk_m: float = 300.0        # ... and a standing enemy is within this
+    shirk_close: float = 1.0      # ... and does not close on the enemy at this, m/s (closing(); 0: the old rule,
+    #                               any movement excused - learned to walk about, iteration 7)
     shirk_side: float = 0.0       # the side's reward (either role): x the share of its standing army, by cost,
     #                               shirking (shirking()), per decision
     flank_attack: float = 2e-4    # per decision striking an enemy's flank / rear (bonus; = flanked: zero-sum)
@@ -298,8 +305,8 @@ def idle_cost(st, weights=Weights(), last_hit=None):
     (with idle_share: x the share of its standing army, by cost, that is not) (last_hit [B]: the
     battle time of its last damage, negative before the first; None: no damage yet in any battle);
     the defender nothing. With shirk_side, either side also pays shirk_side x the share of its
-    standing army, by cost, that shirks (shirking(): melee units standing still while their side
-    fights in melee, an enemy within shirk_m)."""
+    standing army, by cost, that shirks (shirking(): melee units out of melee and not closing on
+    the enemy while their side fights in melee, an enemy within shirk_m)."""
     u = st.u
     stand = standing_mask(u)
     busy = (u["m"] | u["fire"]) & stand
@@ -323,7 +330,8 @@ def idle_cost(st, weights=Weights(), last_hit=None):
         if weights.shirk_side:
             # either role: the share of its standing army (by cost) standing by while its side fights
             standing = (cost * (stand & side)).sum(1)
-            shirk = (cost * (shirking(u, weights.shirk_m) & side)).sum(1) / standing.clamp(min=1e-6)
+            shirks = shirking(u, weights.shirk_m, weights.shirk_close) & side
+            shirk = (cost * shirks).sum(1) / standing.clamp(min=1e-6)
             cost_s = cost_s + weights.shirk_side * shirk * (~st.done).float()
         out.append(cost_s)
     return torch.stack(out, 1)
@@ -450,14 +458,39 @@ def unit_before(u, rout_share=Weights.rout_share):
                 out=unit_out(u))
 
 
-def shirking(u, reach_m=Weights.shirk_m):
-    """[B, N] bool: standing melee units (not missile units, not lords) that stand still out of melee
-    (no fight, no shooting, no move) while a unit of their side fights in melee and a standing enemy is
-    within reach_m of them."""
+def closing(u, speed_mps=1.0):
+    """[B, N] bool: units heading for the enemy - their velocity's component towards the nearest standing
+    enemy, or towards their attack order's target while it stands, is at least speed_mps."""
+    stand = standing_mask(u)
+    side = u["side"]
+    dx = u["x"][:, None, :] - u["x"][:, :, None]                       # [B, i, j]: from unit i to unit j
+    dz = u["z"][:, None, :] - u["z"][:, :, None]
+    d = torch.sqrt(dx * dx + dz * dz).clamp(min=1e-6)
+    towards = (u["vx"][:, :, None] * dx + u["vz"][:, :, None] * dz) / d   # i's speed towards j
+    foe = stand[:, None, :] & (side[:, None, :] > 0) & (side[:, None, :] != side[:, :, None])
+    nearest = torch.where(foe, d, torch.full_like(d, 1e9)).argmin(2, keepdim=True)
+    to_nearest = towards.gather(2, nearest)[..., 0] * foe.gather(2, nearest)[..., 0].float()
+    tgt = u["order_target"].clamp(min=0)
+    aimed = (u["order_kind"] == O.ATTACK) & (u["order_target"] >= 0) & foe.gather(2, tgt[..., None])[..., 0]
+    to_target = torch.where(aimed, towards.gather(2, tgt[..., None])[..., 0], torch.zeros_like(to_nearest))
+    return torch.maximum(to_nearest, to_target) >= speed_mps
+
+
+def shirking(u, reach_m=Weights.shirk_m, close_mps=Weights.shirk_close):
+    """[B, N] bool: standing melee units (not missile units, not lords) that do not contribute - out of
+    melee, not shooting and not closing on the enemy (closing(): at least close_mps towards the nearest
+    standing enemy or their attack target) - while a unit of their side fights in melee and a standing
+    enemy is within reach_m of them. Walking about, sideways or away, is shirking; marching on the enemy
+    is not. close_mps 0: the old rule (until iteration 7, 02.10), any movement excused - and the network
+    learned to walk about instead of fighting (move orders 24 -> 70 % of the decisions)."""
     stand = standing_mask(u)
     side = u["side"]
     missile = (u["range"] > 0) & (u["ammo0"] > 0)
-    still = stand & ~u["m"] & ~u["fire"] & ~u["mv"] & ~missile & ~u["lord"]
+    if close_mps > 0:
+        busy = closing(u, close_mps)
+    else:
+        busy = u["mv"]
+    still = stand & ~u["m"] & ~u["fire"] & ~busy & ~missile & ~u["lord"]
     team = torch.stack([(stand & u["m"] & (side == s)).any(1) for s in (1, 2)], 1)          # [B, 2]
     engaged = team.gather(1, (side - 1).clamp(min=0)) & (side > 0)
     dx = u["x"][:, :, None] - u["x"][:, None, :]
@@ -490,7 +523,7 @@ def unit_step(before, st, facts, params, weights=Weights(), idle_m=None):
          - weights.idle_near * facts["idle_near"].float()
          + weights.flank_attack * facts["flank_attack"].float())
     if weights.shirk:
-        r = r - weights.shirk * shirking(u, weights.shirk_m).float()
+        r = r - weights.shirk * shirking(u, weights.shirk_m, weights.shirk_close).float()
     if weights.unit_idle and idle_m is not None:
         stand = standing_mask(u)
         idle = stand & ~(u["m"] | u["fire"]) & (side == st.attacker[:, None]) & ~st.done[:, None]

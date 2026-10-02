@@ -278,6 +278,48 @@ defend −15.6 points ± 12.4), none rises, the rating −0.06 → −0.16 (± 0
 training loses skill, the size is not the first suspect; against `it1` only "drop?" (its
 evaluation has no simulator version, and the Skaven budget and the armies changed since).
 
+## Drills
+
+Curriculum battles that teach one skill each (02.10.2026; code `tools/nn/train/drills/`). A drill is
+a **frame** — a condition — and every battle inside it is generated from a seed: random rosters and
+unit types that satisfy the condition, sizes, distances, the place and bearing of the whole battle on
+the map (within 700 m of the centre), and which side we play (half side 1, half side 2). The drill's
+enemy is a script (a league opponent `drill_<name>`); the network plays it on that drill's battles
+only. Drills change *which battles* the network plays: there is no imitation term (a teacher acts as
+a leash). Each drill keeps a `skilled` script, so an annealed imitation term per drill can be added
+later with it as the teacher.
+
+**Verification before a drill trains anything** (`tools/nn/train/drills/verify.py`): two scripts of
+ours play ≥ 256 generated battles of the drill against its enemy, with the training's randomised
+numbers (`randomise.Spread()`); the naive script must lose clearly (win rate ≤ 0.25), the script
+that uses the skill must win clearly (≥ 0.75), else the frame is retuned. Only drills that pass are
+in `drills.READY`, the default of `--drills`.
+
+```bash
+bash tools/nn/dock.sh tools.nn.train.drills.verify --drill pincer,kiting --battles 256 --show 4
+# training: 8 % of the battles are drills, equally (or --drill-weights '{"kiting": 2, "defend": 1}')
+... tools.nn.train.run ... --armies generated --drills 0.08
+```
+
+How it plugs in: `league.with_drills` takes `--drills` of the mix from the other opponents in
+proportion and shares it by `--drill-weights`; `drills/source.py` `Mixed` builds one bank of the
+generated battles and every drill's battles (`--drill-bank` per drill, renewed with the bank), and a
+drill row restarts as a battle of its drill with our side = the side the learner plays in that row.
+A drill battle runs under the standard battle limit, as every training battle (the user's rule, 03.10.2026: the network sees no time limit, so a drill must be won or lost by the fight; per-drill limits were a crutch: the counter drill's naive play lost only on its 300 s clock and won at 900 s). In the training log the drills appear as opponents (`drill_pincer/attack`
+...). `test5` evaluates every verified drill (`--drill-eval`, 128 battles each on
+`DRILL_EVAL_SEEDS`): win rate and gold trade per drill, with the two check scripts on the same
+battles beside them, in the report and in `trend.md` — so the trend shows whether the network
+learns each skill.
+
+| drill | frame | enemy | naive (win / gold trade) | skilled (win / gold trade) | status |
+|---|---|---|---|---|---|
+| `counter` | Empire v Empire, two pairs in random order along the line, 110–200 m apart, 20–60 m between the pairs: our X opposite its counter C (its nearest enemy), our Z (which beats C) opposite Y; (X, Z, C, Y): spearmen + flagellants v flagellants + shield spearmen / swordsmen; shield spearmen or swordsmen + greatswords v greatswords + flagellants; spearmen + greatswords v greatswords + swordsmen (picked from all same-faction pairings run 2 v 2 in the simulator); we attack, the standard limit | holds; a unit whose opponent broke presses the nearest of ours | `nearest`: 0.215 / +0.06 (X breaks on its counter, which joins the other fight) | each unit on the enemy it beats (passport matchup: the scarcest, then the most dangerous): 0.867 / +0.22 | verified, 256 battles, decided by the fight (no timeouts); on the evaluation seeds the skilled script attacks its correct target 98 % of the time, naive 53 % (36 % on its counter), first correct order 0.5 s v 150 s; in `READY` |
+| `pincer` | 2–3 Empire greatswords holding 120–180 m apart (each its own fight); two of ours per greatsword in a column opposite it (the second 35–55 m behind), 140–240 m away, all Empire swordsmen or all Skaven clanrats (clanrats: at most 2 greatswords); we attack (verified with a 420 s limit: to re-check at the standard limit). Piled on the front two of ours lose to a greatsword unit, front + flank beat it | `hold` | `nearest`: 0.223 / +0.06 (the pair piles on the front) | the nearer unit pins in front and waits, the other goes round to the open flank, then both attack: 0.922 / +0.40 | verified, 256 battles, **with the flank batch only** (`build/sim-pending/flank.json`; with the current simulator both 0.00: a flank attacker strikes no harder than a frontal one); into `READY` when that batch is in the simulator |
+| `hold_fire` | our infantry unit (spearmen, shield spearmen, swordsmen; clanrat spearmen, clanrats) in contact with the enemy's lord; 2–3 of our shooters 70–95 m behind it — Empire archers (with 2 free enemies), Skaven Night Runners (1–2) or slave slingers (1); the free enemies: missile units of the enemy's faction 65–95 m beyond the end of our shooters' line; we attack, the standard limit (900 / 1800 s: naive 0.10, skilled 0.83, no timeouts). In the simulator fire into the melee around a lord costs us 1.5–3.5x what it costs him (slings worst); into an ordinary or armoured unit it pays | melee units attack the nearest, missile units hold | our shooters focus the lord in the melee: 0.098 / −0.57 | our shooters shoot the free enemies; with none left they step out of range of the melee and hold: 0.801 / +0.37 (timeouts 0.11) | verified, 256 battles, current simulator; in `READY` |
+| `kiting`, `defend` | built, being tuned | | | | not in `READY` |
+
+`READY` = `counter`, `hold_fire`: `--drills 0.08` gives each 4 %.
+
 ## How a training step goes
 
 ```mermaid
@@ -612,7 +654,7 @@ was lost in the battle's total: its gradient was the same whether it piled on or
 | a missile unit in melee | −0.0002 | archers stuck in melee |
 | a pile: more than 2 own units on one enemy while another enemy strikes an own unit in flank or rear, by the excess share (n − 2) / n | −0.0002 | the whole pile pays n − 2 units' worth: the units over 2 should turn to the flanker |
 | a melee unit without an attack order out of melee while a fellow within 60 m fights (`idle_near`) | 0 | tried at −0.0004 (below): the units piled instead |
-| a melee unit (not missile, not a lord) standing still out of melee (no fight, no move) while its side fights in melee and an enemy is within 150 m (`shirk`, `--shirk`, `--shirk-m`; `reward.shirking`) | 0 | standing by is no longer free ([below](#per-unit-reward-contribution-not-self-preservation-0210)) |
+| a melee unit (not missile, not a lord) not contributing - out of melee, not shooting and not closing on the enemy (at least 1 m/s towards the nearest standing enemy or its attack target: `Weights.shirk_close`, `reward.closing`) - while its side fights in melee and an enemy is within 300 m (`shirk`, `--shirk`, `--shirk-m`; `reward.shirking`) | 0 | standing by is no longer free ([below](#per-unit-reward-contribution-not-self-preservation-0210)); until iteration 7 any movement excused it, and the network learned to walk about ([below](#iteration-7-per-unit-credit-05-walks-away-from-the-fight-0210)) |
 | striking a standing enemy's flank or rear | +0.0002 | as large as the penalty: a flank exchange is zero-sum between the two units |
 | + 0.5 × the mean of the same of own units within 40 m | | what happens next to it: a unit that leaves its neighbour flanked pays for it |
 
@@ -728,7 +770,9 @@ counts is a unit's reward against its fellows' mean, per decision (× 1e-5):
   standing enemy is within `--shirk-m` (300 m: gate 02.10, `it6/m40`: 37 of 102 rallied units held
   30 s or more 75–255 m from the enemy, the network giving such a unit HOLD at 0.999). Per unit: the
   weight per decision; per side: the weight × the shirking share of its standing army by cost.
-  Moving units do not pay (marching to a fight or round a flank is not standing by).
+  Until iteration 7 a moving unit did not pay; since then only one closing on the enemy is excused
+  (marching on the enemy or round a flank to its target is not standing by, walking about is:
+  [iteration 7](#iteration-7-per-unit-credit-05-walks-away-from-the-fight-0210)).
 - `--unit-credit-end`: `--unit-credit` goes linearly to it over the run (OpenAI Five's "team
   spirit": a unit's own credit early, the side's later). With the centring, mixing the side's mean
   into each unit's reward is the same as a lower credit, so the schedule is on the credit.
@@ -765,6 +809,70 @@ idle melee is the steadier signal.
 
 For the next iteration: `--unit-credit 0.5 --unit-credit-end 0 --shirk 2e-4` in place of
 `--unit-credit 0` (`--unit-attrib 1` is the default); watch idle melee and hold at each trend minute.
+(Rejected by iteration 7, below: a 25-update probe that anneals 0.5 → 0 spends ~12 updates above
+0.25; a 20-minute run spends ~70.)
+
+### Iteration 7: per-unit credit 0.5 walks away from the fight, 02.10
+
+**Run** (`it7`, 20 min from `it6/m40`, `--unit-credit 0.5 --unit-credit-end 0 --shirk 2e-4`): the
+best probe (E) collapsed in a full run. In 5 minutes the order kinds went from attack 63 % / move 24 %
+to move 41 % (70 % by minute 10), own lord dead 0.32 → 0.60, rating −0.25 → −1.05, pair gold against
+`ai_like` −0.06 → −0.22; as the credit annealed to 0 it came back to −0.43 (worse than the start).
+
+**Diagnosis** (`build/shirkfix/shirkdiag.py`, not in Git: 128 battles against `ai_like`, every
+melee unit, not a lord, of the learner while its side fights in melee and an enemy is within 300 m;
+reward per unit-decision, centred over the side's standing units as in PPO, × 1e-5):
+
+| Melee unit, its side fighting | `it6/m40`: share | centred | `it7/m5`: share | centred |
+|---|---:|---:|---:|---:|
+| in melee | 0.70 | −0.5 | 0.59 | −2.7 |
+| standing still (charged by `--shirk`) | 0.035 | −9.0 | 0.063 | −13.4 |
+| moving, closing on the enemy (≥ 1 m/s) | 0.22 | +4.4 | 0.13 | +6.4 |
+| moving, not closing (sideways, away) | 0.047 | **+1.9** | **0.21** | +3.9 |
+
+- **The loophole:** `shirk` charged "standing still", so walking about was free and paid above a
+  fighting unit (+1.9 against −0.5); the walking share grew 4.5 times in 5 minutes, the melee share
+  fell 0.70 → 0.59, the move orders 0.25 → 0.60 of the decisions.
+- **Under it, the credit itself pays for not fighting:** a fighting unit takes losses, and in a losing
+  trade its own reward sits below its fellows' mean (centred −0.5, −2.7 after 5 minutes); any state
+  out of melee that costs nothing is above it. The per-unit part of the advantage is not small: the
+  log's `unit_adv_share` (|credit × A_unit| / |A|) was 0.40 at credit 0.5 (0.20 at 0.25).
+
+**Fix** (`reward.shirking`, `reward.closing`, `Weights.shirk_close` = 1 m/s; 0 is the old rule):
+what costs is not contributing - out of melee, not shooting, and not closing on the enemy at
+1 m/s or more (towards the nearest standing enemy or towards the attack order's target while it
+stands) - not "not moving". Marching on the enemy is not idling; walking sideways or away is. The
+same definition serves `shirk_side`.
+
+**Probes** (40 updates, 4.5 min each from `it6/m40`, the `it7` settings, the new `shirk`; credit
+annealed as in the first 5 minutes of a 25-minute run; paired evaluation, 256 pairs an opponent;
+the kinds and the shares of the table above from the evaluation against `ai_like`):
+
+| Probe | Options | pair gold `nearest` / `ai_like` | own lord dead `nearest` / `ai_like` | hold / move / attack (`ai_like`) | in melee / standing / walking |
+|---|---|---|---|---|---|
+| start (`it6/m40`, `it7` minute 0) | — | −0.110 / −0.063 | 0.22 / 0.31 | 0.12 / 0.25 / 0.62 | 0.70 / 0.035 / 0.047 |
+| `it7` minute 5 (old `shirk`) | `--unit-credit 0.5 → 0` | −0.232 / −0.216 | 0.50 / 0.55 | 0.19 / 0.60 / 0.20 | 0.59 / 0.063 / 0.21 |
+| P1 | `--unit-credit 0.5 --unit-credit-end 0.4 --shirk 2e-4` | **−0.682 / −0.588** | 0.45 / 0.51 | 0.23 / 0.62 / 0.11 | 0.36 / 0.35 / 0.13 |
+| P2 | `--unit-credit 0.25 --unit-credit-end 0.2 --shirk 2e-4` | −0.106 / −0.087 | 0.32 / 0.38 | 0.31 / 0.26 / 0.42 | 0.64 / 0.11 / 0.07 |
+| **P0** | `--unit-credit 0` | **−0.068 / −0.060** | **0.25 / 0.36** | **0.17 / 0.24 / 0.59** | **0.67 / 0.056 / 0.061** |
+
+(± 0.015–0.022 on pair gold; the same network evaluated twice differs by up to 0.04: `it6/m40` was
+−0.102 / −0.122 in the `it6` trend. A first P1 ran on a simulator with an unreviewed missile change
+and gave −0.31 / −0.23: the same direction.)
+
+- **The fix closes the loophole** (walking is charged: the walking share's centred reward −8.6 to −10.3
+  in every probe) **but not the pull out of the fight**: at credit 0.5 the units stood and walked
+  instead (melee 0.36, standing 0.35, battles unfinished after 13 minutes) and P1 was the worst
+  probe; at 0.25 hold doubled (0.15 → 0.31) and standing tripled. The order follows the credit:
+  0 > 0.25 > 0.5 on every column.
+- **Tried and rejected:** per-unit credit in this form (centred unit reward, normalised beside the
+  side's advantage) for the next runs - `--unit-credit 0.5 --unit-credit-end 0` (iteration 7:
+  collapse to move orders, rating −0.25 → −1.05), and 0.5 or 0.25 with the fixed `shirk` (P1, P2).
+  A unit's own reward pays self-preservation as long as its losses count against it and its share
+  of a win does not; a fix would be a reward with no gain from staying out of the fight, not a larger
+  charge on one way of staying out.
+
+For the next run: `--unit-credit 0` (the `it6` setting) from `it6/m40`.
 
 ## Lord abilities, 01.10.2026
 
@@ -1483,6 +1591,6 @@ damage sets it back to 0; a marching attacker pays (also in a simulated battle);
 battle there is no cost beside the idle cost; the defender never pays, in either role; `struck` is the
 defender's health falling; `Battles` keeps the last damage per battle and clears it on a restart;
 evaluation gives
-the gold metrics; the trend table has a column per minute. Night 01.10→02.10: the reward terms add up to the step, and the ones logged per role to the collected reward; with `idle_share` one shooting unit no longer lifts the idle cost (the idle share of the army by cost pays); the damage rate is the defender's gold lost, a share of the budget a minute, a rally is no damage; with `idle_rate` a scratch does not reset the timer, a real blow does; per-role normalisation; a run with `--reference self`, `--adv-norm role`, the new idle cost and the critic from another checkpoint (`--critic-init`, a `--init` without a critic); `unit_idle` charges every standing unit of the attacker the idle multiplier, a shooting one and the defender nothing. Iteration 1: the entropy floor raises the weight below the target and lowers it above, within the schedule and the ceiling; `lord_lead` is 1 for a lord 2 m or more ahead of its units' centre with an enemy near, a share between m and 2 m, 0 with no enemy near and for other units. Iteration 2: `lord_fall` charges the lord half its weight when it routs, the other half when it shatters, all of it when it dies standing, gives it back on a rally, and never another unit. Per-unit contribution: an enemy's gold loss (its rout too) is split among the units engaging it by the HP each dealt, a kill goes to the units whose target it was before the step (the old estimate missed it); `shirking` marks melee units standing still while their side fights with an enemy in reach (not a moving one, nor with nobody fighting), `shirk` charges them per unit and `shirk_side` charges either side its shirking share by cost.
+the gold metrics; the trend table has a column per minute. Night 01.10→02.10: the reward terms add up to the step, and the ones logged per role to the collected reward; with `idle_share` one shooting unit no longer lifts the idle cost (the idle share of the army by cost pays); the damage rate is the defender's gold lost, a share of the budget a minute, a rally is no damage; with `idle_rate` a scratch does not reset the timer, a real blow does; per-role normalisation; a run with `--reference self`, `--adv-norm role`, the new idle cost and the critic from another checkpoint (`--critic-init`, a `--init` without a critic); `unit_idle` charges every standing unit of the attacker the idle multiplier, a shooting one and the defender nothing. Iteration 1: the entropy floor raises the weight below the target and lowers it above, within the schedule and the ceiling; `lord_lead` is 1 for a lord 2 m or more ahead of its units' centre with an enemy near, a share between m and 2 m, 0 with no enemy near and for other units. Iteration 2: `lord_fall` charges the lord half its weight when it routs, the other half when it shatters, all of it when it dies standing, gives it back on a rally, and never another unit. Per-unit contribution: an enemy's gold loss (its rout too) is split among the units engaging it by the HP each dealt, a kill goes to the units whose target it was before the step (the old estimate missed it); `shirking` marks melee units standing still, or walking without closing on the enemy, while their side fights with an enemy in reach (not one closing on its nearest enemy or its attack target, nor with nobody fighting), `shirk` charges them per unit and `shirk_side` charges either side its shirking share by cost.
 `tests/tools/test_nn_observation.py`: the lord known from the passport; a slain enemy lord is
 known unseen and fades; an enemy's melee and rout count only while seen.

@@ -165,6 +165,27 @@ class TestMelee:
         rate, _, sector, _ = melee.strikes(st.u, pw, contact, p, z, z + 100)
         assert int(sector[0, 0, 1]) == 2 and float(rate[0, 0, 1]) > float(front)
 
+    def test_a_flank_attacker_strikes_with_its_own_front(self):
+        # melee.flank_face "striker": through the target's flank the striker brings men by its own
+        # front, not by the target's short depth ("min": the old rule).
+        st = face_off(SPEAR, SLAVE)
+        H = st.N // 2
+        st.u["b"][0, H] = 0.0             # the slaves turn their flank to the spearmen
+        front, depth = geometry.dims(st.u, P.sim["formation"]["spacing_m"])
+        st.u["x"][0, H] = front[0, H] / 2
+        pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
+        contact = pw["enemy"] & (pw["gap"] <= 1.0)
+        z = torch.zeros_like(st.u["men"])
+        F = {}
+        for mode in ("min", "striker"):
+            _, _, sector, f = melee.strikes(st.u, pw, contact, P.with_cal("melee", flank_face=mode), z, z + 100)
+            assert int(sector[0, 0, H]) == 1
+            F[mode] = float(f[0, 0, H])
+        ff, sp = P.sim["melee"]["fighting_files"], P.sim["formation"]["spacing_m"]
+        assert F["min"] == pytest.approx(ff * float(depth[0, H]) / sp, rel=1e-4)
+        assert F["striker"] == pytest.approx(ff * float(front[0, 0]) / sp, rel=1e-4)
+        assert F["striker"] > F["min"]
+
     def test_at_most_the_cap_reach_a_lord(self):
         st = face_off(SPEAR, GENERAL)
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
