@@ -24,7 +24,7 @@ def _d(a, b):
 
 class TestFrame:
     def test_the_melee_shooters_and_free_enemies_are_placed_as_the_frame_says(self):
-        for desc, ours in D.battles(H.DRILL, SEEDS):
+        for desc, ours in D.battles(H.DRILL, SEEDS, broad=0.0):
             mine, theirs = desc["sides"][ours]["units"], desc["sides"][3 - ours]["units"]
             assert desc["attacker"] == ours
             fo, fe = desc["sides"][ours]["faction"], desc["sides"][3 - ours]["faction"]
@@ -49,7 +49,7 @@ class TestFrame:
             assert all(abs(u["x"]) <= D.MAP_HALF_M and abs(u["z"]) <= D.MAP_HALF_M for u in mine + theirs)
 
     def test_both_sides_and_both_factions_occur(self):
-        pairs = D.battles(H.DRILL, SEEDS)
+        pairs = D.battles(H.DRILL, SEEDS, broad=0.0)
         assert {o for _, o in pairs} == {1, 2}
         assert {d["engaged"] for d, _ in pairs} == {"lord"}
         assert {d["sides"][o]["faction"] for d, o in pairs} == {H.EMPIRE, H.SKAVEN}
@@ -78,7 +78,7 @@ def _settle(st, pairs, steps=6):
 
 class TestScripts:
     def test_naive_shoots_into_the_melee_skilled_at_a_free_enemy(self):
-        pairs = D.battles(H.DRILL, range(8))
+        pairs = D.battles(H.DRILL, range(8), broad=0.0)
         st, _ = _state(pairs)
         _settle(st, pairs)
         u = st.u
@@ -94,7 +94,7 @@ class TestScripts:
                 assert int(u["side"][b, t]) == 3 - ours and not bool(u["m"][b, t]) and float(u["range"][b, t]) > 0
 
     def test_skilled_with_no_free_enemy_steps_out_of_range_of_the_melee(self):
-        pairs = D.battles(H.DRILL, range(4), both_sides=False)
+        pairs = D.battles(H.DRILL, range(4), both_sides=False, broad=0.0)
         st, _ = _state(pairs)
         _settle(st, pairs)
         u = st.u
@@ -111,7 +111,7 @@ class TestScripts:
         assert bool((o.kind[:, 0] == O.ATTACK).all())  # our infantry fights on
 
     def test_scripts_run_a_few_battles(self):
-        pairs = D.battles(H.DRILL, range(4))
+        pairs = D.battles(H.DRILL, range(4), broad=0.0)
         params = load()
         for script in (H.naive, H.skilled):
             st, ours = _state(pairs)

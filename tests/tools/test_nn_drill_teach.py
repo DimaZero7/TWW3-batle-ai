@@ -37,7 +37,11 @@ def kiting_env(B, other=0, taught=True):
     """B battles of the kiting drill (our side alternating) and `other` against nearest (generated)."""
     lay = league.Layout(np.zeros(B + other, dtype=int), 1 + np.arange(B + other) % 2,
                         np.array([KITING] * B + [league.CODE["nearest"]] * other))
-    src = ds.Mixed(np.arange(other), 3, None, "cpu", lay, per_drill=max(B, 2), drills={"kiting": K.DRILL}, seed=1)
+    broad, D.BROAD = D.BROAD, 0.0                # the clean frame: its only active label is the run-back
+    try:
+        src = ds.Mixed(np.arange(other), 3, None, "cpu", lay, per_drill=max(B, 2), drills={"kiting": K.DRILL}, seed=1)
+    finally:
+        D.BROAD = broad
     return rollout.Battles(lay, device="cpu", source=src, compile=False, spread=randomise.NONE,
                            teach={"kiting": K.skilled} if taught else None)
 

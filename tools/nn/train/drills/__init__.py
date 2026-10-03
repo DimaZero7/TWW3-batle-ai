@@ -11,6 +11,14 @@ a DRILL = Drill(...):
                                        battle; the side the enemy plays takes its own)
     naive(st), skilled(st) -> Orders   our side's two check scripts: without the skill the drill
                                        must be lost clearly, with it won clearly (verify.py)
+    broad(rng) -> army description     optional: the same situation embedded in a messier battle (more
+                                       unit types, uninvolved units on both sides, lords, other sizes);
+                                       battles() draws it for a share BROAD of the seeds, frame() for the rest
+    transfer(st) -> (situation, applied, mistake) [B, N]
+                                       optional: the drill's situation detected in an ORDINARY battle, per
+                                       unit and step, and whether the unit applies the skill there / makes
+                                       the drill's mistake (drills/transfer.py: measured in the normal
+                                       evaluation battles, the network's units and the opponent script's)
 
 A drill battle runs under the standard battle limit (the simulator's battle_limit_s, as every training
 battle: the attacker loses at it): the naive play must lose the fight itself, not the clock (the
@@ -36,6 +44,8 @@ READY = ("kiting", "counter", "hold_fire")   # the drills that passed verify.py 
 PREFIX = "drill_"
 MAP_HALF_M = 700.0       # a generated battle stays within this of the map's centre (the network's map frame,
 #                          tools/nn/model/sources.py CROSSROADS, is -768..768 x -800..736)
+BROAD = 0.5              # share of a drill's battles from its broad frame (when it has one; the rest: the
+#                          clean frame); drills.BROAD is read by battles() at every call (run.py --drill-broad)
 DRILL_SEEDS = range(0, 1_000_000_000)           # training (as tools/nn/armies/generate.py)
 DRILL_EVAL_SEEDS = range(1_000_000_000, 1_001_000_000)
 
@@ -49,6 +59,8 @@ class Drill:
     skilled: Callable               # State -> Orders
     about: str = ""
     roles: Callable = None          # optional: State -> (correct, bad) [B, N, N] targets (drills/metrics.py)
+    broad: Callable = None          # optional: rng -> a messier army description of the same situation
+    transfer: Callable = None       # optional: State -> (situation, applied, mistake) [B, N] (drills/transfer.py)
 
 
 def opponent(name):
@@ -132,12 +144,23 @@ def mirror(desc):
     return out
 
 
-def battles(drill, seeds, both_sides=True):
-    """[(army description, our side)] of a drill, one per seed: our side alternates 1, 2 (both_sides)."""
+def is_broad(drill, seed, share=None):
+    """Whether the drill's battle of this seed comes from its broad frame: a draw of its own (the clean
+    battles of a seed stay what they were before broad frames existed), below `share` (default BROAD)."""
+    share = BROAD if share is None else share
+    return drill.broad is not None and share > 0 and np.random.default_rng([int(seed), 7]).random() < share
+
+
+def battles(drill, seeds, both_sides=True, broad=None):
+    """[(army description, our side)] of a drill, one per seed: our side alternates 1, 2 (both_sides);
+    a share `broad` (default BROAD) of them from the drill's broad frame (is_broad; the description's
+    "broad": True)."""
     out = []
     for i, s in enumerate(seeds):
         rng = np.random.default_rng(int(s))
-        desc = transform(drill.frame(rng), rng)
+        wide = is_broad(drill, s, broad)
+        desc = transform((drill.broad if wide else drill.frame)(rng), rng)
+        desc["broad"] = bool(wide)
         ours = 2 if both_sides and i % 2 else 1
         out.append((mirror(desc) if ours == 2 else desc, ours))
     return out

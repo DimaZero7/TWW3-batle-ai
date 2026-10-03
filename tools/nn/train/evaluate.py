@@ -33,6 +33,7 @@ from tools.nn.sim import state as S
 from tools.nn.train import behaviour, checkpoint, league, matchups, randomise, reward, rollout, scenes, skill
 from tools.nn.train import cadence as cad
 from tools.nn.train import opponents as scripts
+from tools.nn.train.drills import transfer as drill_transfer
 
 SPREAD = randomise.Spread(common=0.0, side=0.0, jitter_m=2.0)
 OPPONENTS = ("nearest", "hold_shoot", "hold", "ai_like", "past")
@@ -97,18 +98,23 @@ def play(actor, opponents=OPPONENTS, per_scene=512, past=None, device="cpu", lim
     differ from compact=False (the batch's shape sets them); the results stay the same in distribution.
     cuda_graph (CUDA, compact): the shrunk batch's decisions replayed as one CUDA graph (Graphed).
     cadence: how often the network decides and how late its orders land (tools/nn/train/cadence.py;
-    default the game's, as in training)."""
+    default the game's, as in training).
+
+    "transfer" (tools/nn/train/drills/transfer.py): per drill with a transfer detector, the share of the
+    unit-seconds in the drill's situation where the units apply its skill, the network's and (per
+    opponent) the opponent script's; "ai_like": the ai_like script's units, the reference."""
     out = {"by_opponent": {}, "by_scene": {}, "limit_s": limit_s, "greedy": greedy, "per_scene": per_scene,
-           "battles": {}}
+           "battles": {}, "transfer": {}}
     only = () if hold_defend else league.ATTACK_ONLY
     groups = [tuple(opponents)] if together else [(n,) for n in opponents]
     for names in groups:
         res = _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, scene_list, compile, only,
                          generated, max_units, small, paired, compact, cuda_graph, cadence)
-        for name, (mine, rows, per) in res.items():
+        for name, (mine, rows, per) in ((k, v) for k, v in res.items() if k != _TRANSFER):
             out["by_opponent"][name] = mine
             out["by_scene"][name] = rows
             out["battles"][name] = per
+        out["transfer"] = merge_transfer(out["transfer"], res.get(_TRANSFER, {}))
     if baseline and generated and paired and small is None:
         base = baselines([n for n in opponents if n in scripts.SCRIPTS], pair_count(generated), max_units, limit_s,
                          device, compile)
@@ -125,6 +131,24 @@ def play(actor, opponents=OPPONENTS, per_scene=512, past=None, device="cpu", lim
     out["orders_per_minute"] = float(np.mean([o["orders_per_minute"] for o in ops]))
     out["kinds"] = {k: float(np.mean([o["kinds"][k] for o in ops])) for k in ops[0]["kinds"]}
     return out
+
+
+_TRANSFER = "_transfer"     # _play_many's key of its transfer report (not an opponent)
+
+
+def merge_transfer(acc, new):
+    """The transfer reports of several batches (together=False) as one: per drill the opponents' blocks
+    side by side; "network" and "ai_like" from the batch that has them (the network's over all opponents
+    only when one batch played them all)."""
+    for name, x in new.items():
+        if name not in acc:
+            acc[name] = x
+            continue
+        acc[name]["by_opponent"].update(x["by_opponent"])
+        if "ai_like" in x:
+            acc[name]["ai_like"] = x["ai_like"]
+        acc[name]["network"] = None                  # (a mean over batches would need the sums)
+    return acc
 
 
 def _summary(sel, won, t, hp_own, hp_enemy, limit_s, lord_own=None, lord_enemy=None, gold=None):
@@ -246,28 +270,29 @@ def _scatter(full, orig, cur):
 
 class _Full:
     """The whole evaluation batch while rollout.Battles.narrow shrinks the one that steps: what the
-    results read (the state, the per-battle counters, the behaviour.Tracker's per-battle tensors) at
-    full size, taken at the first shrink; a shrink writes the running batch back first, finish() at
-    the end."""
+    results read (the state, the per-battle counters, the per-battle tensors of the watchers: the
+    behaviour.Tracker, the drills' transfer Tracker) at full size, taken at the first shrink; a shrink
+    writes the running batch back first, finish() at the end."""
 
     def __init__(self, env, watch):
-        self.watch = watch
+        self.watches = tuple(watch) if isinstance(watch, (tuple, list)) else (watch,)
         self.orig = torch.arange(env.B, device=env.device)          # running battle -> its place in the batch
         self.full = None
 
     def _save(self, env, contact, fired):
-        w = _per_battle(self.watch, env.B)
+        ws = [_per_battle(w, env.B) for w in self.watches]
         if self.full is None:                    # the first shrink: the running batch is the whole one
             self.full = dict(st=env.st, setup=env.setup, kind_battle=env.kind_battle,
-                             order_battle=env.order_battle, contact=contact, fired=fired, watch=w)
+                             order_battle=env.order_battle, contact=contact, fired=fired, watch=ws)
             return
         f, o = self.full, self.orig
         _put(f["st"], o, env.st)
         for k, v in (("kind_battle", env.kind_battle), ("order_battle", env.order_battle), ("contact", contact),
                      ("fired", fired)):
             f[k][o] = v
-        for k, v in w.items():
-            _scatter(f["watch"][k], o, v)
+        for i, w in enumerate(ws):
+            for k, v in w.items():
+                _scatter(f["watch"][i][k], o, v)
 
     def shrink(self, env, contact, fired, mine):
         """-> (any battle running, contact, fired, mine of the batch that steps on)."""
@@ -276,11 +301,12 @@ class _Full:
         if n == 0 or size >= env.B:
             return n > 0, contact, fired, mine
         self._save(env, contact, fired)
-        w = _per_battle(self.watch, env.B)
+        ws = [_per_battle(w, env.B) for w in self.watches]
         keep = env.narrow(_ended(env, size))
         self.orig = self.orig[keep]
-        for k, v in w.items():
-            setattr(self.watch, k, {kk: x[keep] for kk, x in v.items()} if isinstance(v, dict) else v[keep])
+        for watch, w in zip(self.watches, ws):
+            for k, v in w.items():
+                setattr(watch, k, {kk: x[keep] for kk, x in v.items()} if isinstance(v, dict) else v[keep])
         return True, contact[keep], fired[keep], mine[keep]
 
     def finish(self, env, contact, fired):
@@ -290,15 +316,17 @@ class _Full:
             return env, contact, fired
         self._save(env, contact, fired)
         f = self.full
-        for k, v in f["watch"].items():
-            setattr(self.watch, k, v)
+        for watch, w in zip(self.watches, f["watch"]):
+            for k, v in w.items():
+                setattr(watch, k, v)
         whole = SimpleNamespace(st=f["st"], setup=f["setup"], weights=env.weights, kind_battle=f["kind_battle"],
                                 order_battle=f["order_battle"])
         return whole, f["contact"], f["fired"]
 
 
 # What Graphed walks for the tensors a decision reads and writes (the bank and the setup are only read).
-_WALK = (S.State, rollout.Battles, behaviour.Tracker, SimpleNamespace, rollout.ob.Memory, rollout.Frame)
+_WALK = (S.State, rollout.Battles, behaviour.Tracker, drill_transfer.Tracker, SimpleNamespace, rollout.ob.Memory,
+         rollout.Frame)
 _SKIP = {"source", "bank", "setup", "params", "weights", "layout", "scripts", "past_actor", "gen"}
 
 
@@ -434,12 +462,14 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
     contact = torch.full((B,), -1.0, device=env.device)
     fired = torch.zeros(B, dtype=torch.bool, device=env.device)
     watch = behaviour.Tracker(env.st, env.params, mine, wrap=lambda f: rollout.fast(f, env.compiled))
-    full = _Full(env, watch) if compact else None
+    xfer = drill_transfer.Tracker(env.st, env.params, mine, wrap=lambda f: rollout.fast(f, env.compiled))
+    full = _Full(env, (watch, xfer)) if compact else None
     acc = SimpleNamespace(contact=contact, fired=fired, mine=mine)
 
     def counts(live):
         """The evaluation's own per-battle counts, after every simulator step."""
         watch.update(env.st, live)
+        xfer.update(env.st, live)
         u = env.st.u
         touch = (u["m"] & acc.mine).any(1)
         acc.contact = torch.where((acc.contact < 0) & touch, env.st.t, acc.contact)
@@ -459,7 +489,7 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
             if (cuda_graph and env.device.type == "cuda" and env.B in BUCKETS and n_steps - i > 4 * CHECK_EVERY
                     and (graph is None or graph.B != env.B)):
                 graph = None                     # (a graph of another size: its memory goes)
-                graph = Graphed(one, SimpleNamespace(env=env, watch=watch, acc=acc), env.B)
+                graph = Graphed(one, SimpleNamespace(env=env, watch=watch, xfer=xfer, acc=acc), env.B)
                 i += graph.warm
         elif bool(env.st.done.all()):
             break
@@ -548,18 +578,36 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
         for r in rows.values():
             r["win_rate"] = r["wins"] / max(1, r["games"])
         out[name] = (result, rows, per)
+    out[_TRANSFER] = drill_transfer.report(xfer, {n: lay.opponent == league.CODE[n] for n in names})
     return out
 
 
 _SCRIPT_REF = {}
 
 
+def drill_version():
+    """sim_version() and the drills' code (tools/nn/train/drills): what a drill's script battles depend on."""
+    h = hashlib.sha256(sim_version().encode())
+    for f in sorted((ROOT / "tools/nn/train/drills").glob("*.py")):
+        h.update(f.name.encode())
+        h.update(f.read_bytes().replace(b"\r\n", b"\n"))
+    return h.hexdigest()[:12]
+
+
 def drill_scripts(name, n, device="cpu"):
     """{"naive", "skilled"}: the drill's two check scripts' win rate and gold trade on the evaluation's
-    battles (DRILL_EVAL_SEEDS, our side alternating; SPREAD), cached per process."""
+    battles (DRILL_EVAL_SEEDS, our side alternating; SPREAD), cached per process and on disk
+    (BASELINES/drill_<name>_<n>_broad<share>_<drill_version>.json: the broad frames' long battles make
+    them ~15 min of a test5 start)."""
     from tools.nn.train import drills as D
     from tools.nn.train.drills import verify
-    key = (name, n, str(device))
+    key = (name, n, str(device), D.BROAD)
+    path = BASELINES / f"drill_{name}_{n}_broad{D.BROAD:g}_{drill_version()}.json"
+    if key not in _SCRIPT_REF:
+        try:
+            _SCRIPT_REF[key] = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
     if key not in _SCRIPT_REF:
         drill = D.load([name])[name]
         seeds = range(D.DRILL_EVAL_SEEDS.start, D.DRILL_EVAL_SEEDS.start + n)
@@ -578,7 +626,14 @@ def drill_scripts(name, n, device="cpu"):
                                      extra=extra, ours_box=box)
             out[which] = {"win_rate": round(float(res["won"].mean()), 3), "gold_trade": round(float(res["trade"].mean()), 3),
                           "play": box["tr"].summary(None, box["st"]) if "tr" in box else None}
+            b = res["broad"]
+            if b.any() and not b.all():
+                for tag, sel in (("clean", ~b), ("broad", b)):
+                    out[which][tag] = {"games": int(sel.sum()), "win_rate": round(float(res["won"][sel].mean()), 3),
+                                       "gold_trade": round(float(res["trade"][sel].mean()), 3)}
         _SCRIPT_REF[key] = out
+        BASELINES.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(out, separators=SEP), encoding="utf-8", newline="\n")
     return _SCRIPT_REF[key]
 
 
@@ -588,7 +643,8 @@ def play_drills(actor, n=128, device="cpu", names=None, greedy=False, seed=1, co
     DRILL_EVAL_SEEDS (our side alternating, SPREAD) against the drill's enemy script -> {drill: {games, wins,
     win_rate, gold_trade (mean (enemy gold destroyed - own lost) / budget), gold_destroyed, gold_lost, seconds,
     timeouts, scripts: {naive, skilled: {win_rate, gold_trade}} (scripts: the drill's check scripts on the same
-    battles)}}; {} without drills. cadence: the network's (tools/nn/train/cadence.py; default the game's)."""
+    battles), with both frames in the battles (drills.BROAD) "clean" and "broad": {games, win_rate, gold_trade}
+    of each}}; {} without drills. cadence: the network's (tools/nn/train/cadence.py; default the game's)."""
     from tools.nn.train import drills as D
     from tools.nn.train.drills import metrics as drill_metrics
     from tools.nn.train.drills import source as drill_source
@@ -630,6 +686,12 @@ def play_drills(actor, n=128, device="cpu", names=None, greedy=False, seed=1, co
                      "gold_destroyed": float(enemy[this].mean()), "gold_lost": float(own[this].mean()),
                      "seconds": float(t[this].mean()), "timeouts": float((t[this] >= params.limit_s - 1e-6).mean())}
         out[name]["play"] = trackers[name].summary(this, env.st)
+        wide = src.broad[:B]
+        if (wide & this).any() and (~wide & this).any():
+            trade = (enemy - own) / np.maximum(bud, 1e-9)
+            for tag, sel in (("clean", this & ~wide), ("broad", this & wide)):
+                out[name][tag] = {"games": int(sel.sum()), "win_rate": float(won[sel].mean()),
+                                  "gold_trade": float(trade[sel].mean())}
         u = env.st.u
         up = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"] & ~u["r"]
         ours_b = u["side"] == torch.as_tensor(side, device=env.device)[:, None]

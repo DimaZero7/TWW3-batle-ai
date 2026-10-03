@@ -39,7 +39,7 @@ The first steps compile for 1–3 minutes (seconds once a run of the same shapes
 | leash | `--anchor` (0: KL weight to the reference) and `--anchor-end`, `--reference` (default `--init`), `--anchor-roll` (0 s: seconds of training between renewals of the reference), `--anchor-ema` (0 s: instead, the reference follows the actor with this half-life) |
 | reward | `--gold` (1.0), `--rout-share` (0.5), `--lord` (0.3), `--lord-rout` (0), `--idle` (2e-4), `--idle-tau` (150 s), `--idle-pause` (30 s), `--idle-step` (0.5), `--idle-cap` (20), `--idle-rate` (0), `--idle-window` (30 s), `--order-cost` (0.001), `--retarget` (0.003): [reward](#reward) |
 | opponents | `--mix` (json shares), `--pool` (8 past versions), `--pool-extra` (more checkpoints for the pool), `--eval-past`, `--eval-generated` (512) |
-| drills | `--drills` (0: share of the battles), `--drill-weights` (json; default the `READY` drills equally), `--drill-bank` (256 per drill), `--drill-teach` (`auto` or json {drill: weight}: the teacher, off by default), `--drill-teach-minutes` (10: manual), `--drill-teach-k` (0.5), `--drill-teach-cap` (0.25), `--drill-teach-weight` (0.15: auto): [drills](#drills) |
+| drills | `--drills` (0: share of the battles), `--drill-weights` (json; default the `READY` drills equally), `--drill-bank` (256 per drill), `--drill-broad` (0.5: share of the broad frame), `--drill-teach` (`auto` or json {drill: weight}: the teacher, off by default), `--drill-teach-minutes` (10: manual), `--drill-teach-k` (0.5), `--drill-teach-cap` (0.25), `--drill-teach-weight` (0.15: auto): [drills](#drills) |
 
 ### The chain's settings
 
@@ -491,6 +491,74 @@ target; the same over the last 100 s before the limit. `test5` evaluates every `
 (`--drill-eval`, 128 battles each on `DRILL_EVAL_SEEDS`): win rate, gold trade and these metrics,
 with the two check scripts on the same battles beside them, in the report and in `trend.md`.
 
+**Transfer to normal battles** (`drills/transfer.py`): a drill mastered in its own battles is not yet a
+skill — after the kiting teacher the network won the kiting drill 1.00 and still never kited in a normal
+battle. So every drill also gives a detector of its situation in an *ordinary* battle
+(`Drill.transfer(st) -> (situation, applied, mistake)` per unit and simulator step), and the normal
+evaluation (`evaluate.play`: test5's battles against `ai_like`, `nearest`, `hold_shoot`) sums, per side,
+the unit-seconds in the situation, applying the skill and making the drill's mistake: the network's
+units and the opponent script's — the units of `ai_like` in the same battles are the reference.
+**Transfer share** = applied / situation unit-seconds (the skill used where it applies); the mistake share
+beside it.
+
+| drill | situation (any battle) | applied | mistake |
+|---|---|---|---|
+| `kiting` | a standing missile unit (with ammunition, not a lord) with a melee enemy at least 1.0 m/s slower (run speeds) within 60 m that comes at it (≥ 0.5 m/s towards it) or holds it in melee | it runs back: out of melee, moving away from that enemy at ≥ 1 m/s | it is in melee |
+| `counter` | a standing melee unit (not a lord) with, within 200 m, a hard counter (an enemy taking its health ≥ 1.5× faster than it takes the enemy's: the skilled script's matchup without the charge) and a free (not in melee) better target, one that beats it ≥ 1.5× less than that counter (the drill's X: spearmen with flagellants opposite, ×3.2, swordsmen free, ×1.5) | it goes for any other enemy | its attack order (else its melee opponent) is a hard counter while a target 1.5× better is free |
+| `hold_fire` | a standing missile unit (not a lord) with an enemy single entity (lord, hero) in melee with one of its side's units (within 30 m) inside its range + 10 m | it does not fire at that single entity | it fires at it |
+
+The detectors were checked on the drills' own battles (64 each, clean frame, the share of the
+situation's unit-steps): kiting naive 0.00 / skilled 0.64 applied (naive caught in melee 0.90 of them);
+counter naive 0.00 / skilled 0.97 (naive: a hard counter in all of them); hold_fire naive 0.33 / skilled 0.99.
+
+Reported as `res["transfer"]` (`{drill: {network, ai_like, by_opponent: {opponent: {network, script}}}}`,
+each `{share, mistake, unit_s (situation unit-seconds a battle), battles (share of the battles where it
+came up)}`), in test5's drill block ("TRANSFER to normal battles, network / ai_like") and report.json
+(`before` / `after` / `trend` → `transfer`). Alone, without training:
+
+```bash
+bash tools/nn/dock.sh tools.nn.train.drills.transfer --checkpoint build/nn-train/test5/w5_kiting_teach/m25.pt
+```
+
+Baseline (03.10.2026, `w5_kiting_teach/m25.pt` — the wide network that wins the kiting drill 1.00; 512
+battles per opponent, 99 s; an earlier run gave kiting and hold_fire within ±0.02):
+
+| drill | network: transfer / mistake (unit-s a battle) | `ai_like`: transfer / mistake (unit-s a battle) |
+|---|---|---|
+| `kiting` | **0.003** / 0.88 (107; in 32 % of the battles) | **0.71** / 0.07 (113) |
+| `counter` | **0.38** / 0.20 (985; in 95 % of the battles) | **0.52** / 0.25 (725) |
+| `hold_fire` | **0.84** / 0.16 (303; in 77 % of the battles) | **0.39** / 0.61 (225) |
+
+Kiting does not transfer at all (the network's missile units stand and get caught: 0.88 of the
+situation's seconds in melee, against `ai_like`'s 0.07); counter-picking transfers partly (the network
+goes for a hard counter less often than `ai_like` but for a good target less often too: it holds more);
+holding fire into a lord's melee is already the network's habit (0.84 against `ai_like`'s 0.39), drill or
+not. `nearest` and `hold_shoot` never kite (0.00), as expected.
+
+**Broad frames** (`Drill.broad`; `--drill-broad`, default `drills.BROAD` = 0.5): the same situation
+embedded in a messier battle, so the network meets the skill's cue among what normal battles look like —
+more unit types, uninvolved units on both sides, lords, other sizes. `drills.battles` draws, per seed, the
+broad frame with the share `--drill-broad` (its own draw: the clean battles of a seed stay what they were),
+the clean one otherwise; the description carries `"broad": true`. The share applies to training
+(`drills/source.py`) and to test5's drill evaluation, which reports the win rate clean / broad apart
+(the scripts' beside). `verify.py --broad 1` checks the broad frame alone. The broad battles are longer
+(kiting skilled 836 s of battle against 311 s clean), so the check scripts' numbers on the drill evaluation's
+battles (~15 min of GPU at a test5 start) are cached on disk: `build/nn-train/baselines/drill_<name>_<n>_broad<share>_<version>.json`,
+the version a hash of the simulator's files and `tools/nn/train/drills`.
+
+| drill | broad frame | verify, broad only (naive / skilled) | verify, 50 % mix |
+|---|---|---|---|
+| `kiting` | 2–3 Night Runners (+ slave slingers with 0.35, then 2 more swordsmen chasers); chasers as the clean frame, 3 kiters: 2 swordsmen + 2 random; 0–2 Skaven slave units and the Warlord (0.5) 70–150 m behind our kiters, guarding (attack an enemy within 60 m), each slave unit meets one more spearmen chaser, the Warlord the Empire general | **0.125 / 0.871** | 0.070 / 0.910 (clean 0.056 / 1.000, broad 0.085 / 0.823) |
+| `counter` | one combo or two (0.4: two 2 v 2 fights 250–350 m apart); the general 120–200 m behind each line (0.5): ours a reserve in both check scripts (holds until the enemy line is gone), the enemy's holds and presses as its line; the skilled script sends the line only at line units while any stand | **0.191 / 0.785** | 0.188 / 0.859 (clean 0.183 / 0.889, broad 0.192 / 0.831) |
+| `hold_fire` | the clean frame + one of our shooters of another kind (0.5: militia, which shoots on the move; Night Runners ↔ slave slingers), our lord 30–60 m behind the shooters holding (0.5), a second melee 150–250 m to the side of ours v an ordinary enemy unit (0.5: fire into it pays — the naive script still focuses the lord, the skilled one shoots it when no free enemy is left), an enemy melee unit 150–250 m behind his lord (0.3) | **0.164 / 0.855** (naive: 10 % timeouts) | 0.117 / 0.848 (clean 0.063 / 0.817, broad 0.169 / 0.877) |
+
+Tried in the broad frames and dropped: flagellants among the kiting chasers (unbreakable: kiting cannot
+break them); clanrats as the kiting background (they beat the tired chasers: naive 0.32); the general
+plus a swordsmen unit for the Warlord (skilled 0.54); more counter pairings (flagellants as X's counter,
+greatswords as Z: naive won 0.56 without any extras); archers behind both counter lines (the attacker's
+tired winners walk into the enemy archers' fire at the end: skilled 0.79 → 0.17–0.30; the enemy's
+archers as a reserve too: naive 0.42).
+
 ## Evaluation
 
 `evaluate.py`: whole battles to the end against each opponent, the learner's side alternating (both
@@ -515,8 +583,8 @@ with it, so tests can be compared with each other.
 1. **Before.** The starting network (`--init`) plays the evaluation: `--eval` (512) battles of random
    armies from `EVAL_SEEDS` (up to 19 units a side) per opponent against `ai_like`, `nearest` and
    `hold_shoot`: 256 seeds, each played twice, the network on either side, with the script
-   baselines of the same battles (cached) and the `READY` drills. All in one batch, the same battles
-   every time.
+   baselines of the same battles (cached) and the `READY` drills (with the drills' transfer to these
+   normal battles, [drills](#drills)). All in one batch, the same battles every time.
 2. **Training.** 36 PPO updates (`--updates`; ~5 minutes on a free GPU) with the current code and
    `test5.PROTOCOL` (`--small 0.35:6 --critic-warmup 3 --lr 1.5e-4 --entropy 0.003 --entropy-end
    0.001 --anchor 0.06 --anchor-end 0.03`, `long19` in the pool, `--snapshot-every 10 --no-eval`).

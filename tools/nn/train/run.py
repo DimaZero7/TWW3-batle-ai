@@ -136,6 +136,7 @@ def train(args, every=None, teacher=None):
     device = torch.device(args.device)
     torch.manual_seed(args.seed)
     torch.backends.cuda.matmul.allow_tf32 = True
+    drills.BROAD = args.drill_broad              # the drills' broad frames: their share of every drill's battles
     out = checkpoint.DIR / "runs" / args.name
     out.mkdir(parents=True, exist_ok=True)
     if args.preset is None:          # the record follows the network: --init's preset (e.g. "wide"), else small
@@ -303,6 +304,14 @@ def train(args, every=None, teacher=None):
                                          max(scheduled, args.entropy_max), args.entropy_rate)
         del batch
         update += 1
+        if args.gpu_duty < 1.0:
+            # --gpu-duty: rest the GPU for this share of the time (quieter fans, a responsive desktop);
+            # the rest does not count as training time
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            rest = (time.time() - t_u) * (1.0 / max(args.gpu_duty, 0.1) - 1.0)
+            time.sleep(rest)
+            paused += rest
         # --anchor-roll: every that many seconds of training the reference becomes the current actor (a
         # leash that moves with the network: it bounds the drift within a window, not the whole run).
         trained_s = time.time() - t0 - paused
@@ -520,6 +529,10 @@ def parser():
     ap.add_argument("--drill-weights", help="the drills' shares of --drills as json, e.g. {\"pincer\": 1, \"kiting\": 2} "
                                             "(default: the verified drills, drills.READY, equally)")
     ap.add_argument("--drill-bank", type=int, default=256, help="battles of each drill ready at once (renewed with the bank)")
+    ap.add_argument("--drill-broad", type=float, default=drills.BROAD,
+                    help="share of every drill's battles from its broad frame (the situation in a messier battle: more "
+                         "unit types, uninvolved units, lords; tools/nn/train/drills), the rest from the clean frame; "
+                         "also the drill evaluation's mix (test5)")
     ap.add_argument("--drill-teach", help="the drills' teacher: 'auto' (tools/nn/train/teach_auto.py: every READY drill "
                                           "the run plays, a share of its battles labelled from how far the network is "
                                           "behind the skilled script, renewed after every test5 evaluation) or, manual, "
@@ -535,6 +548,9 @@ def parser():
     ap.add_argument("--drill-teach-minutes", type=float, default=10.0,
                     help="minutes of training over which the teacher's weight goes to 0")
     ap.add_argument("--bank-refresh", type=float, default=5.0, help="minutes between new banks of armies")
+    ap.add_argument("--gpu-duty", type=float, default=1.0,
+                    help="share of the time the GPU works (e.g. 0.9: after each update rest 1/9 of its time; "
+                         "quieter fans, a responsive desktop; the rest is not counted as training time)")
     ap.add_argument("--eval-generated", type=int, default=512, help="random battles per opponent (EVAL_SEEDS)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")

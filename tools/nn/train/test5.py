@@ -35,6 +35,10 @@ adaptive teacher (`-- --drill-teach auto`, tools/nn/train/teach_auto.py) the tes
 shares from the "before" evaluation's drills, new ones after every evaluation (the hook), and per point a
 table drill | net win | skilled win | deficit | teacher share (was -> now) | agreement.
 
+The drills block also carries, per drill, the win rate on the clean / broad frame (run.py --drill-broad,
+drills.BROAD) and the TRANSFER of its skill to the normal evaluation battles, network / ai_like
+(tools/nn/train/drills/transfer.py; report.json before / after / trend -> "transfer").
+
 Two more blocks (measured only): "liveliness" per opponent and role (order changes, attack-target
 switches, A->B->A flips, move-point jitter, twitching units out of melee, the units' own target
 switches; tools/nn/train/behaviour.py), and "capacity and forgetting" (tools/nn/train/capacity.py:
@@ -60,7 +64,7 @@ from pathlib import Path
 import torch
 
 from tools.nn.train import cadence as cad
-from tools.nn.train import capacity, checkpoint, evaluate, matchups, run, skill, teach_auto
+from tools.nn.train import capacity, checkpoint, drills, evaluate, matchups, run, skill, teach_auto
 
 OUT = checkpoint.DIR / "test5"
 LOCK = checkpoint.DIR.parent / "gpu-train.lock"
@@ -213,6 +217,8 @@ def metrics(res):
     out = {"skill": skill.summary(res)}
     if res.get("drills"):
         out["drills"] = res["drills"]
+    if res.get("transfer"):
+        out["transfer"] = res["transfer"]
     if res.get("distance") is not None:
         out["distance"] = res["distance"]
     if res.get("teach"):
@@ -287,10 +293,18 @@ def table(before, after):
             + auto_block([before, after], ["before", "after"]))
 
 
+def transfer_cell(p, n):
+    """'network / ai_like' transfer shares of drill n at a metrics() point (drills/transfer.py), '-' without."""
+    x = (p.get("transfer") or {}).get(n) or {}
+    g = (lambda d: "-" if not d or d.get("share") is None else f"{d['share']:.2f}")
+    return "-" if not x else f"{g(x.get('network'))} / {g(x.get('ai_like'))}"
+
+
 def drill_block(points, heads, join=None):
-    """The drills block (win rate and gold trade per drill, the drill's naive / skilled scripts beside) over
-    metrics() points: a column per point, or one column joined by `join`; [] when no point has drills."""
-    names = list(dict.fromkeys(n for p in points for n in (p.get("drills") or {})))
+    """The drills block (win rate and gold trade per drill, the drill's naive / skilled scripts beside; clean /
+    broad frames; the transfer to the normal battles, network / ai_like) over metrics() points: a column per
+    point, or one column joined by `join`; [] when no point has drills."""
+    names = list(dict.fromkeys(n for p in points for n in list(p.get("drills") or {}) + list(p.get("transfer") or {})))
     if not names:
         return []
     f = (lambda fmt, v: "-" if v is None else fmt.format(v))
@@ -303,6 +317,20 @@ def drill_block(points, heads, join=None):
             ref_s = (f" (naive {fmt.format(ref['naive'][key])}, skilled {fmt.format(ref['skilled'][key])})"
                      if ref else "")
             rows.append((f"drill {n}: {title}{ref_s}", [join.join(cells)] if join is not None else cells))
+        # the clean and the broad frame apart (drills.BROAD), the scripts' beside
+        d = (lambda p: (p.get("drills") or {}).get(n) or {})
+        if any(d(p).get("broad") for p in points):
+            cells = [f"{f('{:.3f}', (d(p).get('clean') or {}).get('win_rate'))} / "
+                     f"{f('{:.3f}', (d(p).get('broad') or {}).get('win_rate'))}" for p in points]
+            ref = next((d(p)["scripts"] for p in points if (d(p).get("scripts") or {}).get("skilled", {}).get("broad")), None)
+            ref_s = (f" (naive {ref['naive']['clean']['win_rate']:.3f} / {ref['naive']['broad']['win_rate']:.3f}, skilled "
+                     f"{ref['skilled']['clean']['win_rate']:.3f} / {ref['skilled']['broad']['win_rate']:.3f})" if ref else "")
+            rows.append((f"drill {n}: win rate clean / broad frame{ref_s}", [join.join(cells)] if join is not None else cells))
+        # the transfer: the skill in the normal evaluation battles (drills/transfer.py)
+        if any((p.get("transfer") or {}).get(n) for p in points):
+            cells = [transfer_cell(p, n) for p in points]
+            rows.append((f"drill {n}: TRANSFER to normal battles, network / ai_like (share of the situation's unit-s "
+                         f"applying the skill)", [join.join(cells)] if join is not None else cells))
         # what our units do (drills/metrics.py): unit-seconds by order, all / the last 100 s before the limit
         def play(p):
             return ((p.get("drills") or {}).get(n) or {}).get("play")
@@ -441,6 +469,7 @@ def test(args, rest):
                                      str(args.minutes), "--updates", str(args.updates), "--device", args.device]
                                     + PROTOCOL + rest)
     cadence = cad.of_args(targs)                 # the evaluations decide as the training does
+    drills.BROAD = targs.drill_broad              # the drill evaluations play the training's mix of clean / broad frames
     if args.before:
         before = json.loads(Path(args.before).read_text(encoding="utf-8"))
         if before.get("cadence", cad.STEP.meta()) != cadence.meta():

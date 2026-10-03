@@ -18,6 +18,15 @@ Frame (one battle; Empire against Empire):
   hurt attacks the nearest of ours - it presses where it has won; it is the defender;
 * random: the pairing, the order of the pairs, the gap, the lateral spacing, the place and bearing
   on the map, our side (1 or 2).
+Broad frame (`broad`, drills.BROAD of the battles; the same situation in a messier battle): one combo
+of COMBOS or two (TWO_P: two 2 v 2 fights SEP_M apart along the line, each pair order random); with
+LORD_P the general LORD_BACK_M behind each line: the enemy's holds as the rest of the enemy (presses when
+hurt and free), ours is a reserve in both check scripts (reserve(): holds until the enemy has no line
+unit left, then attacks the nearest); the skilled script sends the line only at the enemy's line units
+while any stand. Not in it: archers behind the lines (both sides: the attacker's tired winners walking
+into the enemy archers' fire at the end lost the skilled script's battles, 0.79 -> 0.17-0.30).
+Verified (256 battles): the broad frame only naive 0.191 / skilled 0.785; the 50 % mix 0.188 / 0.859; the
+clean frame 0.195 / 0.871 (as before the broad frame; 04.10.2026).
 Scripts:
 * naive: every unit attacks the nearest enemy, running: X breaks on its counter, which then joins
   the other fight against our Z;
@@ -45,6 +54,10 @@ COMBOS = ((SPEAR, FLAG, FLAG, SHIELD),     # 0.00 - 0.75
           (SPEAR, GS, GS, SWORD),          # 0.38 - 1.00
           (SWORD, GS, GS, FLAG),           # 0.38 - 1.00
           (SPEAR, FLAG, FLAG, SWORD))      # 0.25 - 0.81
+GENERAL = "wh_main_emp_cha_general_0"
+TWO_P, LORD_P = 0.4, 0.5
+SEP_M = (250.0, 350.0)         # two combos: their centres this far apart along the line (two 2 v 2 fights)
+LORD_BACK_M = (120.0, 200.0)   # each side's general this far behind its line
 GAP_M = (110.0, 200.0)
 WIDTH_M = 30.0
 LAT_GAP_M = (20.0, 60.0)
@@ -72,9 +85,50 @@ def frame(rng):
     return D.army(ours, enemy, attacker=1, ours_faction=EMPIRE, enemy_faction=EMPIRE)
 
 
+def broad(rng):
+    two = rng.random() < TWO_P
+    sep = float(rng.uniform(*SEP_M))
+    gap = float(rng.uniform(*GAP_M))
+    lat_gap = float(rng.uniform(*LAT_GAP_M))
+    ours, enemy, picked = [], [], []
+    for c in range(2 if two else 1):
+        k = int(rng.integers(len(COMBOS)))
+        x, z, cc, y = COMBOS[k]
+        picked.append(k)
+        pairs = [(x, cc), (z, y)]
+        centre = (c - 0.5) * sep if two else 0.0
+        for slot, j in enumerate(rng.permutation(2)):
+            lat = centre + (slot - 0.5) * (WIDTH_M + lat_gap)
+            o, e = pairs[int(j)]
+            ours.append(D.unit(o, *D.local(-gap / 2, lat), 0.0, WIDTH_M))
+            enemy.append(D.unit(e, *D.local(gap / 2, lat), 180.0, WIDTH_M))
+    lord = rng.random() < LORD_P
+    if lord:
+        back, lat = float(rng.uniform(*LORD_BACK_M)), float(rng.uniform(-30.0, 30.0))
+        ours.append(D.unit(GENERAL, *D.local(-gap / 2 - back, lat), 0.0, general=True))
+        enemy.append(D.unit(GENERAL, *D.local(gap / 2 + back, -lat), 180.0, general=True))
+    return D.army(ours, enemy, attacker=1, ours_faction=EMPIRE, enemy_faction=EMPIRE,
+                  meta={"combos": picked, "lord": lord})
+
+
+def reserve(st, o):
+    """The broad frame's reserve of ours (the lord, missile units: not in the clean frame) holds (missile
+    units shoot at will) while a standing enemy line unit (melee, not a lord) is left, then attacks the
+    nearest enemy (in place on the orders o; returns o)."""
+    v = D.View(st)
+    u = st.u
+    line = v.melee & ~u["lord"]
+    enemy_line = (v.foe & line[:, None, :]).any(2)                                       # [B, i]
+    res = v.standing & (u["lord"] | v.missile)
+    o.kind = torch.where(res & enemy_line, torch.full_like(o.kind, O.HOLD), o.kind)
+    o.target = torch.where(res & enemy_line, torch.full_like(o.target, -1), o.target)
+    i, d = v.nearest()
+    return D.attack(o, res & ~enemy_line & (d < 1e9), i)
+
+
 def enemy(st):
     """Hold (stand, fight back); a unit free of its opponent (it broke or died) after taking damage
-    attacks the nearest of ours: the enemy presses where it has won."""
+    attacks the nearest of ours: the enemy presses where it has won (the broad frame's lord too)."""
     v = D.View(st)
     i, d = v.nearest()
     o = D.hold(st)
@@ -83,7 +137,7 @@ def enemy(st):
 
 
 def naive(st):
-    return D.nearest(st)
+    return reserve(st, D.nearest(st))
 
 
 def rates(u, charge_w=0.0):
@@ -108,6 +162,11 @@ def _choice(st, v):
     u = st.u
     adv = rates(u, CHARGE_W) / rates(u).transpose(1, 2).clamp(min=1e-9)     # [B, i, j]: i attacking j
     foe = v.foe & v.melee[:, :, None]
+    # while the enemy has line units (melee, not its lord) left, only they are targets: the broad frame's
+    # reserve behind (lord, archers) comes after (the clean frame has only line units)
+    line = v.melee & ~u["lord"]
+    has_line = (foe & line[:, None, :]).any(2, keepdim=True)
+    foe = foe & (line[:, None, :] | ~has_line)
     beats = foe & (adv >= BEATS)
     # scarcity of j: how many of j's enemies (standing melee units) beat it
     beaten_by = (beats & v.standing[:, :, None]).sum(1)              # [B, j]
@@ -146,10 +205,8 @@ def skilled(st):
     o = O.hold(st.B, st.N, st.device)
     has = v.standing & foe.any(2)
     D.attack(o, has, tgt, run=True)
-    # missile units (not in this drill's frame): as `nearest`
-    i, d = v.nearest()
-    D.attack(o, v.standing & v.missile & (d < 1e9), i)
-    return o
+    # the broad frame's reserve (the lord, missile units)
+    return reserve(st, o)
 
 
 def diag_key(desc, ours):
@@ -158,5 +215,47 @@ def diag_key(desc, ours):
     return tuple(sorted(sh(u) for u in m)) + ("v",) + tuple(sorted(sh(u) for u in e))
 
 
+# --- transfer: the situation in an ordinary battle (drills/transfer.py) ---
+T_HARD = 1.5             # a hard counter: it takes the unit's health this many times faster than the unit its own
+T_BETTER = 1.5           # a better target: one that beats the unit at least this many times less than its counter
+T_REACH_M = 200.0        # the counter and the better target within this of the unit (centres)
+
+
+def aim(st):
+    """[B, N] the enemy a unit goes for: its attack order's target, else the one it fights in melee; -1 none."""
+    u = st.u
+    att = (u["order_kind"] == O.ATTACK) & (u["order_target"] >= 0)
+    return torch.where(att, u["order_target"], torch.where(u["m"] & (u["target"] >= 0), u["target"],
+                                                            torch.full_like(u["target"], -1)))
+
+
+def transfer(st):
+    """(situation, applied, mistake) [B, N]. The matchup: worse[i, j] = how many times faster enemy j takes
+    unit i's health than i takes j's (the skilled script's rates(), without the charge - the sustained
+    fight). Situation = a standing melee unit (not a lord) with, within T_REACH_M, a hard counter (worse >=
+    T_HARD) and a free (standing, not in melee) better target (worse at least T_BETTER times below that
+    counter's; e.g. the drill's X: spearmen with flagellants opposite, x3.2, and swordsmen free, x1.5);
+    mistake = it goes for (attack order, else its melee opponent) a hard counter while a free target near
+    is T_BETTER times better; applied = it goes for any other enemy (no target: neither)."""
+    v = D.View(st)
+    u = st.u
+    r = rates(u)
+    worse = r.transpose(1, 2) / r.clamp(min=1e-9)                                        # [B, i, j]: j's over i's
+    me = v.melee & ~u["lord"]
+    near = v.foe & (v.d < T_REACH_M)
+    big = torch.full_like(worse, 1e9)
+    hardest = torch.where(near & (worse >= T_HARD), worse, torch.zeros_like(worse)).amax(2)        # [B, i]
+    free = near & ~u["m"][:, None, :]
+    easiest = torch.where(free, worse, big).amin(2)                                                # [B, i]
+    sit = me & (hardest >= T_HARD) & (easiest * T_BETTER <= hardest)
+    a = aim(st)
+    at = a.clamp(min=0)[:, :, None]
+    on = (a >= 0) & v.foe.gather(2, at).squeeze(2)
+    w = worse.gather(2, at).squeeze(2)
+    mistake = sit & on & (w >= T_HARD) & (easiest * T_BETTER <= w)
+    return sit, sit & on & ~mistake, mistake
+
+
 DRILL = D.Drill("counter", frame, enemy, naive, skilled,
-                "the nearest enemy is the unit's hard counter: send each unit at the enemy it beats", roles=roles)
+                "the nearest enemy is the unit's hard counter: send each unit at the enemy it beats", roles=roles,
+                broad=broad, transfer=transfer)

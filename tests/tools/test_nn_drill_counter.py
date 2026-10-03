@@ -23,7 +23,7 @@ def _nearest(u, others):
 class TestFrame:
     def test_each_of_our_units_faces_a_pairing_of_the_combos(self):
         combos = set(C.COMBOS)
-        for desc, ours in D.battles(C.DRILL, SEEDS):
+        for desc, ours in D.battles(C.DRILL, SEEDS, broad=0.0):
             mine, theirs = desc["sides"][ours]["units"], desc["sides"][3 - ours]["units"]
             assert len(mine) == len(theirs) == 2 and desc["attacker"] == ours
             near = [_nearest(m, theirs) for m in mine]
@@ -32,7 +32,7 @@ class TestFrame:
             assert got & combos
 
     def test_the_matchup_says_x_loses_to_its_counter_and_z_beats_it(self):
-        descs = [d for d, _ in D.battles(C.DRILL, SEEDS, both_sides=False)]
+        descs = [d for d, _ in D.battles(C.DRILL, SEEDS, both_sides=False, broad=0.0)]
         st = scenario.build(descs)
         adv = C.rates(st.u, C.CHARGE_W) / C.rates(st.u).transpose(1, 2).clamp(min=1e-9)
         H = st.N // 2
@@ -48,7 +48,7 @@ class TestFrame:
 
 class TestScripts:
     def test_skilled_takes_the_matchups_choice(self):
-        pairs = D.battles(C.DRILL, range(16))
+        pairs = D.battles(C.DRILL, range(16), broad=0.0)
         descs = [p[0] for p in pairs]
         st = scenario.build(descs)
         o = C.skilled(st)
@@ -67,7 +67,7 @@ class TestScripts:
                     assert int(o.target[b, i]) != c_slot
 
     def test_the_scripts_run_in_the_simulator(self):
-        pairs = D.battles(C.DRILL, range(4))
+        pairs = D.battles(C.DRILL, range(4), broad=0.0)
         descs = [p[0] for p in pairs]
         ours = torch.tensor([p[1] for p in pairs])
         params = load()
