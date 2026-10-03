@@ -47,7 +47,8 @@ from tools.nn.train import cadence as cad
 CRITIC_KEYS = ("tokens", "ctx", "own", "attend", "pos")
 FRAME = ("cx", "cz", "ux", "uz")
 MEMORY = ("last_x", "last_z", "last_t", "seen", "dead", "prev_x", "prev_z", "prev_t", "prev_vis", "last_melee_t",
-          "last_rout_t", "lord_dead_t", "prev_hp", "hit_t", "prev_gold", "rate", "rate_t")
+          "last_rout_t", "lord_dead_t", "prev_hp", "hit_t", "prev_gold", "rate", "rate_t",
+          "prev_ammo", "volley_t")
 ROLES = ("attack", "defend")
 # Outcome counters: the opponents, and the untrained network as "past" on its own.
 STAT_NAMES = league.OPPONENTS + ("untrained",)

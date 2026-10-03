@@ -33,7 +33,14 @@ The rule: the AI sees only what a human player sees.
   seconds active left (the ability bar). Enemies: owned, and active now only while the unit is seen
   (the game draws the ability's effect on the unit and lists it among the unit's active effects;
   its timers are not shown). Obs.abil_ok: own abilities the network may use now.
-* Innate effects (tools/nn/model/effects.py, the token's last columns): per effect of
+* Volley readiness (VOLLEY, own units only, the token's last column, 03.10.2026): seconds since the
+  unit's projectiles left (`a`) last fell between two observations (its last volley) / its passport
+  reload_s, clipped to 0..1; 1 before its first shot; 0 for units without missiles. Seen at the
+  decisions only (Memory.prev_ammo, volley_t), so the simulator (its ammo counter at the network's 1 s
+  cadence) and the companion (the game's ammo_left() each second) compute it the same way, from the
+  same code. The simulator's men load fully only after its measured reload (missile.py: ~1.1-1.3x the
+  passport's), so 1 means "the passport's reload has passed", not "every man is loaded".
+* Innate effects (tools/nn/model/effects.py, the columns before VOLLEY): per effect of
   config/nn/effects.json, owned (both sides: the unit's card) and on now (own units; enemies while
   seen: the game lists a seen unit's active effects). On comes from the simulator's `fx_on` or, in a
   recorded battle or the game, from the token's own fields (health, morale state, melee, own morale).
@@ -88,11 +95,14 @@ DYNAMIC = (
 )
 FLAGS = ("is_own", "visible", "seen", "age", "rank")
 # Innate effects appended after the passport (02.10.2026; older checkpoints load with zero weights for
-# them, encoder.py): per effect (owned, on), tools/nn/model/effects.py.
-NAMES = tuple(n for n, _ in DYNAMIC) + FLAGS + tuple(f"passport_{i}" for i in range(passport.SIZE)) + effects.NAMES
+# them, encoder.py): per effect (owned, on), tools/nn/model/effects.py. Then VOLLEY (03.10.2026, own units
+# only; older checkpoints: zero weights): seconds since the last volley / passport reload (module doc).
+VOLLEY = ("volley_ready",)
+NAMES = (tuple(n for n, _ in DYNAMIC) + FLAGS + tuple(f"passport_{i}" for i in range(passport.SIZE)) + effects.NAMES
+         + VOLLEY)
 INDEX = {n: i for i, n in enumerate(NAMES)}
 TOKEN = len(NAMES)
-OWN_ONLY = tuple(INDEX[n] for n, who in DYNAMIC if who == "own")
+OWN_ONLY = tuple(INDEX[n] for n, who in DYNAMIC if who == "own") + tuple(INDEX[n] for n in VOLLEY)
 # character; attack, defend, 2 lord levels, map width and depth, 2 counts; own lord slain and how
 # recently, the enemy lord the same (CONTEXT_BASE: the context before the damage timers); then TIMERS:
 # the fine clock, we dealt damage yet and seconds since we last did (0 before), the enemy the same.
@@ -133,6 +143,7 @@ class Setup:
         self.lord = np.stack([passport.lords(k) for k in self.keys])          # [B, N] the army's general
         self.men0 = np.stack([passport.men(k) for k in self.keys])            # [B, N]
         self.ammo0 = np.stack([passport.ammo(k) for k in self.keys])          # [B, N]
+        self.reload = np.stack([passport.reload(k) for k in self.keys])       # [B, N] s (VOLLEY; 0: no missile)
         ab = [abilities.slots(k) for k in self.keys]
         self.abil = np.stack([a[0] for a in ab])                               # [B, N, SLOTS, STATIC]
         self.abil_owned = np.stack([a[1] for a in ab])                         # [B, N, SLOTS]
@@ -155,7 +166,8 @@ class Setup:
                                        passport=t(self.passport), men0=t(self.men0), ammo0=t(self.ammo0),
                                        present=t(self.present), attacker=t(self.attacker), lord=t(self.lord),
                                        abil=t(self.abil), abil_owned=t(self.abil_owned),
-                                       abil_use=t(self.abil_use), fx_owned=t(self.fx_owned), cost=t(self.cost))
+                                       abil_use=t(self.abil_use), fx_owned=t(self.fx_owned), cost=t(self.cost),
+                                       reload=t(self.reload))
         return self._cache[key]
 
     def character(self, side):
@@ -183,6 +195,7 @@ class _Arrays:
     abil_use: object = None
     fx_owned: object = None    # [B, N, E] innate effects owned (Setup.fx_owned); None: none known
     cost: object = None        # [B, N] multiplayer cost (Setup.cost); None: unknown, every unit counts 1
+    reload: object = None      # [B, N] passport reload_s (Setup.reload, VOLLEY); None: unknown, the input 0
 
 
 @dataclass
@@ -206,6 +219,8 @@ class Memory:
     prev_gold: object = None      # [B, N] the worst gold each unit has lost so far (-1 never known; _progress)
     rate: object = None           # [B] the attacker's damage rate (PROGRESS; budget share a minute)
     rate_t: object = None         # [B] time it last was at least RATE_MIN (-1 not yet)
+    prev_ammo: object = None      # [B, N] projectiles left at the last observation that read them (-1 unknown)
+    volley_t: object = None       # [B, N] time they last fell (VOLLEY: the last volley; -1 not yet)
 
 
 @dataclass
@@ -254,7 +269,8 @@ def start(state, setup, side):
     frame = Frame((b[:, 0] + b[:, 1]) / 2, (b[:, 2] + b[:, 3]) / 2, ux, uz)
     zero, false = xs * 0, xs != xs
     return Memory(frame, zero, zero, zero, false, false, zero, zero, zero - 1, false, zero - 1, zero - 1,
-                  zero[:, :2] - 1, zero - 1, zero[:, :2] - 1, zero - 1, zero[:, 0], zero[:, 0] - 1)
+                  zero[:, :2] - 1, zero - 1, zero[:, :2] - 1, zero - 1, zero[:, 0], zero[:, 0] - 1, zero - 1,
+                  zero - 1)
 
 
 def observe(state, setup, side, memory=None, full=False):
@@ -331,6 +347,7 @@ def observe(state, setup, side, memory=None, full=False):
     struck2 = m.stack([(fell & enemy).any(-1), (fell & own).any(-1)], -1)           # [B, 2] we, the enemy
     hit_t = m.where(struck2, tb, memory.hit_t)
     rate, rate_t, gold = _progress(m, state, S, memory, men, tb[:, 0])
+    cols["volley_ready"], prev_ammo, volley_t = _volley(m, state, S, memory, tn, xs)
     # Who sees what: "both" fields only for units seen now; "own" fields only for own units
     # (every unit in the critic's full view). Position and edges stay for the last sighting.
     keep_last = ("fwd", "lat", "edge_fwd", "edge_back", "edge_right", "edge_left")
@@ -347,7 +364,8 @@ def observe(state, setup, side, memory=None, full=False):
         E = effects.SIZE // 2
         fx_own = np.zeros(xs.shape + (E,), np.float32) if m is np else xs.new_zeros(xs.shape + (E,))
     fx = effects.features(m, state, fx_own, S.present if full else (own | sees))
-    tokens = _cat(m, [dyn, _f(m, S.passport), fx], -1) * _f(m, S.present)[..., None]
+    late = m.stack([m.where(see_all & S.present, cols[n], cols[n] * 0) for n in VOLLEY], -1)
+    tokens = _cat(m, [dyn, _f(m, S.passport), fx, late], -1) * _f(m, S.present)[..., None]
 
     attend = S.present & ~dead & ~(own & ~alive)
     ctrl = own & alive & (ms < 6)
@@ -366,7 +384,7 @@ def observe(state, setup, side, memory=None, full=False):
     pos = m.stack([fwd, lat], -1) / POS
     pos = m.where(seen[..., None], pos, pos * 0)
     new = Memory(fr, last_x, last_z, last_t, seen, dead, m.where(sees, xs, xs * 0), m.where(sees, zs, zs * 0),
-                 tn, sees, last_melee, last_rout, lord_dead, hp_now, hit_t, gold, rate, rate_t)
+                 tn, sees, last_melee, last_rout, lord_dead, hp_now, hit_t, gold, rate, rate_t, prev_ammo, volley_t)
     if full:   # the critic also knows the enemy's character
         other = setup.character(3 - side)
         ctx = _cat(m, [ctx, _f(m, other if m is np else m.as_tensor(other, device=x.device))], -1)
@@ -444,6 +462,25 @@ def _progress(m, state, S, memory, men, now):
     rate_t = m.where(step & (rate >= RATE_MIN), now, memory.rate_t)
     again = (prev_t >= 0) & ~step                       # the same time again: the reference stays
     return rate, rate_t, m.where(again[:, None], memory.prev_gold, worst)
+
+
+def _volley(m, state, S, memory, tn, like):
+    """(ready [B, N], prev_ammo, volley_t): VOLLEY (module doc). The unit's projectiles left `a` fell
+    since the previous observation that read them -> its last volley is now; ready = seconds since it /
+    the passport reload_s, clipped to 0..1, 1 before the first; 0 without a missile (or a reload not
+    known). `a` not read (NaN) or missing: nothing changes. The same time again (the critic's view or a
+    repeated state) finds no fall: the reference is the same number."""
+    a = state.get("a")
+    a = like * 0 - 1 if a is None else m.nan_to_num(a * 1.0, nan=-1.0)
+    known = (a >= 0) & S.present
+    fell = known & (memory.prev_ammo >= 0) & (a < memory.prev_ammo)
+    volley_t = m.where(fell, tn, memory.volley_t)
+    reload = getattr(S, "reload", None)
+    reload = like * 0 if reload is None else _f(m, reload)
+    shooter = reload > 0
+    since = m.clip((tn - volley_t) / m.where(shooter, reload, reload * 0 + 1), 0, 1)
+    ready = m.where(shooter, m.where(volley_t >= 0, since, since * 0 + 1), since * 0)
+    return _f(m, ready), m.where(known, a, memory.prev_ammo), volley_t
 
 
 def _recent(m, now, when):

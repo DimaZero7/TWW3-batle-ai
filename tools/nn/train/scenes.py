@@ -63,7 +63,8 @@ class LiveSetup:
     FIELDS = ("side", "bounds", "rank", "lord_level", "passport", "men0", "ammo0", "present", "attacker", "lord",
               "abil", "abil_owned", "abil_use",      # abil: the ability slots' passports [B, N, SLOTS, STATIC]
               "fx_owned",                            # innate effects owned [B, N, E] (tools/nn/model/effects.py)
-              "cost")                                # multiplayer cost [B, N] (the attacker's progress)
+              "cost",                                # multiplayer cost [B, N] (the attacker's progress)
+              "reload")                              # passport reload_s [B, N] (the volley input, VOLLEY)
 
     def __init__(self, arrays, char, factions):
         self.arrays, self.char, self.factions = arrays, char, factions

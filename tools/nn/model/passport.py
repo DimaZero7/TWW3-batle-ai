@@ -105,6 +105,13 @@ def ammo(keys, passports=None):
                      for k in keys], dtype=np.float32)
 
 
+def reload(keys, passports=None):
+    """The missile weapon's reload_s per unit (0: no missile weapon, or padding): the observation's VOLLEY."""
+    passports = passports or load()
+    return np.array([float((passports[k].get("missile") or {}).get("reload_s") or 0) if k else 0
+                     for k in keys], dtype=np.float32)
+
+
 def cost(keys, passports=None):
     """Multiplayer cost per unit, gold (0 for padding): the simulator's `cost` (tools/nn/sim/params.py)."""
     passports = passports or load()

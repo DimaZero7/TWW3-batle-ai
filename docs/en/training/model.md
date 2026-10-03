@@ -62,6 +62,7 @@ ones by lore.
 | Exact morale (`MoralePercent`) | yes | **no** | — | / 2, clipped to ±1.5 |
 | Detailed morale state 1–7 | yes | **no** | — | 0/1 |
 | Ammunition, kills | yes | no | — | share of the start; kills / 200 |
+| Volley ready: seconds since the ammunition last fell (the last volley) / the passport's reload ([below](#volley-readiness-own-units-the-tokens-last-input)) | yes | no | — | 0–1; 1 before the first shot; 0 without a missile weapon |
 | Fatigue state (6), known or not | yes | no | — | 0/1 |
 | Order point, has an order, has a target | yes | no | — | m / 500; 0/1 |
 | Threat to the left flank, right flank, rear | yes | no | — | 0/1 |
@@ -172,14 +173,42 @@ Owned is on the unit's card (both armies' cards are seen before battle); the gam
 unit's active effects (CCO `ActiveEffectList`). In the simulator "on" is its `fx_on`; in a recorded
 battle or in the game (the companion) it is worked out from the token's own fields by the same
 conditions (health, the morale state, melee; own morale for half-morale), and a timed effect whose
-timer is not known (the Penitent) counts as off. A new effect appends its pair at the token's end:
-an older network loads with zero weights for it (`encoder.pad_inputs`) and acts as before.
+timer is not known (the Penitent) counts as off. A new effect appends its pair at the token's end
+(before the volley input below): an older network loads with zero weights for it
+(`encoder.pad_inputs`) and acts as before.
+
+### Volley readiness (own units, the token's last input)
+
+The kiting skill is "halt when the volley is ready, run while reloading", and nothing else in the
+token tells when a missile unit has reloaded. One input (`volley_ready`, `observation.VOLLEY`,
+03.10.2026): seconds since the unit's projectiles left (`a`) last fell between two observations
+(its last volley), divided by the passport's `reload_s`, clipped to 0..1. 1 before the first shot,
+0 for a unit without a missile weapon; own units only (the critic sees all).
+
+It is worked out in `observation.observe` from `a` at the decisions only (the memory keeps the
+last reading and the time of the last fall: `Memory.prev_ammo`, `volley_t`), so the simulator (its
+ammunition counter, read at the network's 1 s cadence, not at its 0.5 s physics steps) and the
+companion (the bridge's `ammo_left()` each second) compute it with the same code from the same kind of
+samples; a reading that is missing changes nothing. The input is appended after the innate
+effects: a checkpoint saved before it, small or wide, loads with zero weights for it and acts as
+before (`encoder.pad_inputs`; the wide `test5/w3_kiting30/m15.pt` and `wide/w0.pt` and the small
+`test5/r7_lostworst/m15.pt` checked).
+
+What it shows differs a little between the two worlds, from their shooting, not from the input:
+
+- the scale is the passport's reload (Night Runners 8 s), while the simulator's men load fully
+  only after its measured reload (missile.py: 10.2 s for them): 1 means "the passport's reload
+  has passed";
+- in the simulator a unit that stands and shoots on fires the steady rate men / reload after its
+  first volley (ammunition falls every second), so the input stays at 0 until it moves; the game
+  fires whole-unit volleys one reload apart ([measurements](measurements.md)), so there it goes
+  0 → 1 between volleys while standing too. While the unit runs (the kiting drill) both rise alike.
 
 ## Model
 
 ```mermaid
 flowchart TB
-  tok["Unit tokens: 148 numbers each<br/>(69 of them the passport, 28 the innate effects)"] --> enc["Shared encoder<br/>the same weights for every unit"]
+  tok["Unit tokens: 149 numbers each<br/>(69 of them the passport, 28 the innate effects,<br/>1 the volley readiness)"] --> enc["Shared encoder<br/>the same weights for every unit"]
   ctx["Context: character, role, counts, lords,<br/>time elapsed, damage timers,<br/>the attacker's progress"] --> enc
   enc --> att["Attention layers<br/>+ distance bias, masks"]
   att --> gru["Memory: a GRU per unit<br/>and one for the army"]
@@ -376,7 +405,16 @@ An int8 export of the actor looks practical; not done yet:
   numpy and torch the same, "on" follows its conditions and is shown for seen enemies only, the
   simulator's `fx_on` and the observed fields agree, networks saved before them (and the chain's
   `test5/it5/m20.pt`) load and give the same outputs, the same with the effect inputs zeroed, and
-  the new inputs get a gradient.
+  the new inputs get a gradient; networks saved before the volley input (and the wide
+  `test5/w3_kiting30/m15.pt`, `wide/w0.pt`, the small `test5/r7_lostworst/m15.pt`) load and give the
+  same logits, memory, greedy orders and values while it takes values inside 0..1, and it gets a
+  gradient.
+- `tests/tools/test_nn_volley.py` (torch): the simulator's path (the training's `LiveSetup`, the
+  state read at the decisions only, a volley between two of them) and the companion's
+  (`loop.Brain` on the bridge's documents each second) give the same volley input on one
+  projectiles-left trajectory, as worked out by hand; in the kiting drill with the skilled script
+  the Night Runners' input is 1 before the first volley, 0 at each decision their ammunition fell,
+  rises by 1 / reload a decision while they run, and goes 0 → 1 at least twice per unit.
 - `tests/tools/test_nn_widen.py` (torch): a network widened ×2 and ×3 gives the same logits,
   greedy actions, memory (each copy) and value, decision after decision (float64 to 1e-10, float32 to
   1e-5); the wider config is the `wide` preset; the readers' copies differ and the writers' are

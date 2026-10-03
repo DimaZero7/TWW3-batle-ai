@@ -433,3 +433,47 @@ class TestAbilities:
             character = setup.character
         obs, _ = ob.observe(state, Bare(), 1)
         assert obs.abil is None and obs.abil_ok is None and obs.tokens.shape == (1, 4, ob.TOKEN)
+
+
+class TestVolley:
+    """VOLLEY: seconds since the unit's projectiles last fell (its last volley) / its passport reload_s,
+    clipped to 0..1; 1 before the first; 0 without a missile; own units only (the critic: all)."""
+
+    KEYS = ("wh2_main_skv_inf_night_runners_1", "wh_main_emp_inf_swordsmen",       # side 1: reload 8 s, none
+            "wh2_dlc13_emp_inf_archers_0", "wh_main_emp_inf_spearmen_0")           # side 2: reload 10 s, none
+
+    def setup_state(self):
+        _, state = sources.synthetic(batch=1, own=2, enemy=2, seed=5)
+        setup = ob.Setup(keys=[list(self.KEYS)], side=np.array([[1, 1, 2, 2]]),
+                         bounds=np.array([sources.CROSSROADS], np.float32),
+                         factions=[(sources.SKAVEN, sources.EMPIRE)], attacker=np.array([1]))
+        return setup, with_state(state, vis=np.ones((1, 4), bool))
+
+    def test_the_reload_is_the_passports_and_zero_without_a_missile(self):
+        setup, _ = self.setup_state()
+        assert setup.reload[0].tolist() == [8.0, 0.0, 10.0, 0.0]
+
+    def test_it_counts_from_each_fall_of_the_ammunition_at_the_observations(self):
+        setup, state = self.setup_state()
+        # (t s, projectiles left of the Night Runners and the archers); NaN: not read
+        rows = [(0, 2640, 1800), (1, 2640, 1800), (2, 2520, 1800), (3, 2510, 1710), (4, 2510, 1710),
+                (6, np.nan, 1710), (7, 2510, 1710), (12, 2510, 1710), (13, 2400, 1710), (13, 2400, 1710),
+                (14, 2400, 1700)]
+        want = [1, 1, 0, 0, 1 / 8, 3 / 8, 4 / 8, 1, 0, 0, 1 / 8]
+        mem = cmem = None
+        for (t, a_own, a_enemy), w in zip(rows, want):
+            s = with_state(state, t=np.array([float(t)]), a=np.array([[a_own, 0, a_enemy, 0]], float))
+            obs, mem = ob.observe(s, setup, 1, mem)
+            cobs, cmem = ob.observe(s, setup, 1, cmem, full=True)
+            v = obs.tokens[0, :, I["volley_ready"]]
+            assert v.tolist() == pytest.approx([w, 0, 0, 0]), t                 # enemies: never shown
+            assert cobs.tokens[0, :2, I["volley_ready"]].tolist() == pytest.approx([w, 0]), t
+        # the critic sees the archers' too: their last fall at 14 s, the one before at 3 s
+        assert cobs.tokens[0, 2, I["volley_ready"]] == 0
+        assert I["volley_ready"] == ob.TOKEN - 1 and I["volley_ready"] in ob.OWN_ONLY
+
+    def test_a_new_memory_starts_ready(self):
+        setup, state = self.setup_state()
+        s = with_state(state, t=np.array([50.0]), a=np.array([[100.0, 0, 50, 0]]))
+        obs, mem = ob.observe(s, setup, 1)
+        assert obs.tokens[0, 0, I["volley_ready"]] == 1 and mem.volley_t[0, 0] == -1

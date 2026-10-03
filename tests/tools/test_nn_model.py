@@ -461,6 +461,8 @@ WAVE2 = ["wh_dlc04_emp_inf_flagellants_0", "wh_main_emp_inf_greatswords", "wh_dl
 NEW_PASSPORT = 2 + 3          # attributes mounted_fire_move, guerrilla_deploy; direct, spread, muzzle_velocity
 NEW_ABILITY = 8               # abilities.WHEN
 NEW_EFFECTS = mfx.SIZE        # the innate effects' columns (appended after the second wave)
+NEW_VOLLEY = len(ob.VOLLEY)   # the volley input, appended after the effects (03.10.2026)
+T0 = ob.TOKEN - NEW_VOLLEY    # the token before the volley input
 
 
 def test_the_second_wave_is_seen_in_the_passport_and_the_ability_slots():
@@ -488,16 +490,16 @@ def narrow_networks(cfg):
     fewer ability inputs (all appended at the ends)."""
     from tools.nn.model import abilities as mab
     actor, crit = policy.Actor(cfg), critic.Critic(cfg)
-    actor.encoder.unit[0] = torch.nn.Linear(ob.TOKEN - NEW_EFFECTS - NEW_PASSPORT, cfg.d)
+    actor.encoder.unit[0] = torch.nn.Linear(T0 - NEW_EFFECTS - NEW_PASSPORT, cfg.d)
     actor.abilities.net[0] = torch.nn.Linear(mab.SIZE - NEW_ABILITY, cfg.d)
     actor.heads.ability_k[0] = torch.nn.Linear(mab.SIZE - NEW_ABILITY, cfg.d)
-    crit.encoder.unit[0] = torch.nn.Linear(ob.TOKEN - NEW_EFFECTS - NEW_PASSPORT, cfg.critic_d)
+    crit.encoder.unit[0] = torch.nn.Linear(T0 - NEW_EFFECTS - NEW_PASSPORT, cfg.critic_d)
     return actor.eval(), crit.eval()
 
 
 def narrow(o):
     """The observation as the networks before the second wave saw it."""
-    out = dict(o, tokens=o["tokens"][..., :ob.TOKEN - NEW_EFFECTS - NEW_PASSPORT])
+    out = dict(o, tokens=o["tokens"][..., :T0 - NEW_EFFECTS - NEW_PASSPORT])
     if "abil" in o:
         out["abil"] = o["abil"][..., :o["abil"].shape[-1] - NEW_ABILITY]
     return out
@@ -524,7 +526,7 @@ def test_networks_saved_before_the_second_wave_load_and_act_the_same_and_train()
     new.load_state_dict(old.state_dict())
     new_crit.load(old_crit.state_dict())
     o, c = policy.to_torch(obs), policy.to_torch(cobs)
-    assert o["tokens"][..., -NEW_EFFECTS - NEW_PASSPORT:].abs().sum() > 0    # the new inputs are not all zero
+    assert o["tokens"][..., T0 - NEW_EFFECTS - NEW_PASSPORT:].abs().sum() > 0    # the new inputs are not all zero
     with torch.no_grad():
         lo, _ = old(narrow(o))
         ln, _ = new(o)
@@ -542,7 +544,7 @@ def test_networks_saved_before_the_second_wave_load_and_act_the_same_and_train()
     out, _ = new(o)
     loss = sum(v.masked_fill(v < -1e8, 0).sum() for v in out.values())
     loss.backward()
-    assert new.encoder.unit[0].weight.grad[:, -NEW_EFFECTS - NEW_PASSPORT:-NEW_EFFECTS].abs().sum() > 0
+    assert new.encoder.unit[0].weight.grad[:, T0 - NEW_EFFECTS - NEW_PASSPORT:T0 - NEW_EFFECTS].abs().sum() > 0
     assert new.abilities.net[0].weight.grad[:, -NEW_ABILITY:].abs().sum() > 0
 
 
@@ -597,7 +599,7 @@ def fx_obs(batch=2, seed=13, **changes):
 
 
 def fx_cols(tokens):
-    return tokens[..., -NEW_EFFECTS:]
+    return tokens[..., T0 - NEW_EFFECTS:T0]
 
 
 def test_the_effects_are_owned_by_the_catalogue_and_the_same_on_numpy_and_torch():
@@ -610,7 +612,7 @@ def test_the_effects_are_owned_by_the_catalogue_and_the_same_on_numpy_and_torch(
             assert set(np.nonzero(owned[b, n])[0]) == want, key
     t, _ = ob.observe({k: torch.as_tensor(v) for k, v in state.items()}, setup, 1)
     assert np.allclose(obs.tokens, t.tokens.numpy(), atol=1e-6)
-    assert ob.NAMES[-NEW_EFFECTS:] == mfx.NAMES
+    assert ob.NAMES[T0 - NEW_EFFECTS:T0] == mfx.NAMES
 
 
 def test_on_follows_the_conditions_and_enemies_show_it_only_while_seen():
@@ -657,13 +659,13 @@ def test_the_simulator_and_the_observed_fields_agree_on_what_is_on():
 def pre_effects_networks(cfg):
     """An actor and critic as saved before the innate effects: NEW_EFFECTS fewer token inputs."""
     actor, crit = policy.Actor(cfg), critic.Critic(cfg)
-    actor.encoder.unit[0] = torch.nn.Linear(ob.TOKEN - NEW_EFFECTS, cfg.d)
-    crit.encoder.unit[0] = torch.nn.Linear(ob.TOKEN - NEW_EFFECTS, cfg.critic_d)
+    actor.encoder.unit[0] = torch.nn.Linear(T0 - NEW_EFFECTS, cfg.d)
+    crit.encoder.unit[0] = torch.nn.Linear(T0 - NEW_EFFECTS, cfg.critic_d)
     return actor.eval(), crit.eval()
 
 
 def without_effects(o):
-    return dict(o, tokens=o["tokens"][..., :ob.TOKEN - NEW_EFFECTS])
+    return dict(o, tokens=o["tokens"][..., :T0 - NEW_EFFECTS])
 
 
 def test_networks_saved_before_the_effects_load_act_the_same_and_learn_them():
@@ -680,7 +682,7 @@ def test_networks_saved_before_the_effects_load_act_the_same_and_learn_them():
         lo, _ = old(without_effects(o))
         ln, _ = new(o)
         zeroed, _ = new(dict(o, tokens=torch.cat([without_effects(o)["tokens"],
-                                                  torch.zeros_like(fx_cols(o["tokens"]))], -1)))
+                                                  torch.zeros_like(o["tokens"][..., T0 - NEW_EFFECTS:])], -1)))
         vo, vn = old_crit(without_effects({k: c[k] for k in keys})), new_crit({k: c[k] for k in keys})
     for k in lo:
         assert torch.allclose(lo[k], ln[k], atol=1e-5) and torch.allclose(ln[k], zeroed[k], atol=1e-6), k
@@ -688,7 +690,7 @@ def test_networks_saved_before_the_effects_load_act_the_same_and_learn_them():
     new.train()
     out, _ = new(o)
     sum(v.masked_fill(v < -1e8, 0).sum() for v in out.values()).backward()
-    assert new.encoder.unit[0].weight.grad[:, -NEW_EFFECTS:].abs().sum() > 0
+    assert new.encoder.unit[0].weight.grad[:, T0 - NEW_EFFECTS:T0].abs().sum() > 0
 
 
 CHAIN5 = ROOT / "build/nn-train/test5/it5/m20.pt"
@@ -716,3 +718,103 @@ def test_the_it5_checkpoint_loads_and_acts_as_before_the_effects():
         with torch.no_grad():
             assert torch.allclose(old_crit.eval()(without_effects({k: c[k] for k in keys})),
                                   new_crit.eval()({k: c[k] for k in keys}), atol=1e-4)
+
+
+# --- the volley input (observation.VOLLEY, 03.10.2026): one own-only column appended after the effects ---
+
+VOLLEY_KEYS = ["wh2_main_skv_inf_night_runners_1", "wh2_dlc13_emp_inf_archers_0", "wh_main_emp_inf_swordsmen",
+               "wh2_main_skv_cha_warlord_0"]
+
+
+def volley_states(batch=2):
+    """(setup, six decisions) of a made-up battle whose missile units' projectiles fall at decisions 2
+    and 5: the volley input goes 1, 1, 0, 1/8 or 1/10, 2/8 or 2/10, 0."""
+    setup, state = sources.synthetic(batch=batch, own=3, enemy=3, seed=21, keys=VOLLEY_KEYS)
+    N = 6
+    state.update(men=np.maximum(state["men"], 1.0))
+    for k in range(3):
+        for t in ("on", "cd"):
+            state[f"ab{k}_{t}"] = np.zeros((batch, N))
+    a0 = setup.ammo0.astype(float)
+    return setup, [dict(state, t=np.full(batch, 30.0 + i), a=np.maximum(a0 - 100 * n, 0))
+                   for i, n in enumerate((0, 0, 1, 1, 1, 2))]
+
+
+def pre_volley_networks(cfg):
+    """An actor and critic as saved before the volley input: NEW_VOLLEY fewer token inputs."""
+    actor, crit = policy.Actor(cfg), critic.Critic(cfg)
+    actor.encoder.unit[0] = torch.nn.Linear(T0, cfg.d)
+    crit.encoder.unit[0] = torch.nn.Linear(T0, cfg.critic_d)
+    return actor.eval(), crit.eval()
+
+
+def without_volley(o):
+    return dict(o, tokens=o["tokens"][..., :T0])
+
+
+def same_without_volley(old, new, old_crit, new_crit, atol=1e-5):
+    """Old (no volley input) and new networks through the decisions of volley_states (memory carried):
+    equal logits, memory, greedy orders and values, while the new input takes values inside 0..1."""
+    setup, states = volley_states()
+    m = mc = h_old = h_new = None
+    keys = ("tokens", "own", "attend", "pos", "ctx")
+    inside = 0
+    for st in states:
+        obs, m = ob.observe(st, setup, 1, m)
+        cobs, mc = ob.observe(st, setup, 1, mc, full=True)
+        o, c = policy.to_torch(obs), policy.to_torch(cobs)
+        v = o["tokens"][..., ob.INDEX["volley_ready"]]
+        inside += int(((v > 0) & (v < 1)).sum())
+        with torch.no_grad():
+            lo, h_old = old(without_volley(o), h_old)
+            ln, h_new = new(o, h_new)
+            vo = old_crit(without_volley({k: c[k] for k in keys}))
+            vn = new_crit({k: c[k] for k in keys})
+        for k in lo:
+            assert torch.allclose(lo[k], ln[k], atol=atol), k
+        assert torch.allclose(h_old, h_new, atol=atol) and torch.allclose(vo, vn, atol=atol)
+        a, b = heads.sample(lo, greedy=True, abilities=True), heads.sample(ln, greedy=True, abilities=True)
+        assert torch.equal(a.kind, b.kind) and torch.equal(a.target, b.target) and torch.equal(a.point, b.point)
+    assert inside > 0
+
+
+def test_networks_saved_before_the_volley_input_load_act_the_same_and_learn_it():
+    torch.manual_seed(6)
+    old, old_crit = pre_volley_networks(CFG)
+    new, new_crit = model(seed=15), critic.Critic(CFG).eval()
+    new.load_state_dict(old.state_dict())
+    new_crit.load(old_crit.state_dict())
+    assert torch.all(new.encoder.unit[0].weight[:, T0:] == 0) and torch.all(new_crit.encoder.unit[0].weight[:, T0:] == 0)
+    same_without_volley(old, new, old_crit, new_crit)
+    setup, states = volley_states()
+    obs, _ = ob.observe(states[0], setup, 1)
+    new.train()
+    out, _ = new(policy.to_torch(obs))
+    sum(v.masked_fill(v < -1e8, 0).sum() for v in out.values()).backward()
+    assert new.encoder.unit[0].weight.grad[:, T0:].abs().sum() > 0
+
+
+PRE_VOLLEY = [p for p in (ROOT / "build/nn-train/test5/w3_kiting30/m15.pt",      # wide (the kiting run)
+                          ROOT / "build/nn-train/wide/w0.pt",                    # wide, widened from the small
+                          ROOT / "build/nn-train/test5/r7_lostworst/m15.pt")     # small
+              if p.exists()]
+
+
+@pytest.mark.skipif(not PRE_VOLLEY, reason="no checkpoint saved before the volley input (build/ is not in Git)")
+@pytest.mark.parametrize("path", PRE_VOLLEY, ids=[p.parent.name + "/" + p.name for p in PRE_VOLLEY])
+def test_a_checkpoint_saved_before_the_volley_input_acts_as_before(path):
+    from tools.nn.train import checkpoint
+    data = checkpoint.read(path)
+    cfg = checkpoint.config_of(data)
+    new = checkpoint.load_policy(path)
+    assert data["actor"]["encoder.unit.0.weight"].shape[1] == T0 and torch.all(new.encoder.unit[0].weight[:, T0:] == 0)
+    old, old_crit = pre_volley_networks(cfg)
+    torch.nn.Module.load_state_dict(old, data["actor"])
+    # the critic: in the checkpoint, or beside it (widen.py --critic-dst <stem>_critic.pt), else a fresh one
+    crit_path = path.with_name(path.stem + "_critic.pt")
+    crit_data = (critic_state(data) if "critic" in data else
+                 critic_state(checkpoint.read(crit_path)) if crit_path.exists() else old_crit.state_dict())
+    torch.nn.Module.load_state_dict(old_crit, crit_data)
+    new_crit = critic.Critic(cfg).eval()
+    new_crit.load(dict(crit_data))
+    same_without_volley(old, new, old_crit, new_crit, atol=1e-4)
