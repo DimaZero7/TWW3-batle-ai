@@ -6,12 +6,13 @@
     frame.py        the side's frame: side-symmetric coordinates (numpy or torch)
     observation.py  what one side sees; the critic's full view (numpy or torch)
     sources.py      Setup and states from recorded battles, the simulator, made-up battles
-    config.py       sizes: presets small and target
+    config.py       sizes: presets small, wide and target
     encoder.py      unit tokens, attention with masks and a distance bias (torch)
     memory.py       a GRU per token (torch)
     heads.py        order kind, move point bins, target pointer, run; sampling (torch)
     policy.py       the actor (torch)
     critic.py       the centralised critic, training only (torch)
+    widen.py        a trained network k times wider, computing the same (torch)
     decide.py       one decision: observation -> actor -> the simulator's Orders (torch)
     bench.py        sizes and timings: bash tools/nn/dock.sh tools.nn.model.bench
 """

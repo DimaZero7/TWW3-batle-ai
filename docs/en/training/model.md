@@ -248,30 +248,89 @@ the battle's bank row; `rollout.full_obs` puts the passports back for the update
 
 `tools/nn/model/config.py`, count with `bash tools/nn/dock.sh tools.nn.model.bench`:
 
-| Preset | Width | Attention layers | Actor | Critic (training only) |
-|---|---:|---:|---:|---:|
-| `small` | 128 | 3 | 0.84 M | 0.69 M |
-| `target` | 512 | 4 | 15.49 M | 20.30 M (6 layers) |
+| Preset | Width | Heads | Attention layers | Actor | Critic (training only) |
+|---|---:|---:|---:|---:|---:|
+| `small` | 128 | 4 | 3 | 0.85 M | 0.70 M |
+| `wide` | 256 | 8 | 3 | 3.23 M | 2.75 M |
+| `target` | 512 | 8 | 4 | 15.52 M | 20.32 M (6 layers) |
+
+`wide` is `small` × 2 in every width (the head width stays 32); it is made from a trained `small`
+network by widening (below), not trained from scratch.
+
+## Widening
+
+`tools/nn/model/widen.py` makes a trained network k times wider so that it computes exactly what it
+did; training then goes on from it as usual (`--init`, the self-anchor on it):
+
+```bash
+bash tools/nn/dock.sh tools.nn.model.widen --src build/nn-train/test5/r7_lostworst/m15.pt     --dst build/nn-train/wide/w0.pt --critic-src build/nn-train/runs/test5_r7_lostworst/latest.pt     --critic-dst build/nn-train/wide/w0_critic.pt --factor 2
+# then: test5 --init build/nn-train/wide/w0.pt -- --critic-init build/nn-train/wide/w0_critic.pt
+```
+
+What grows k times: the token width (128 → 256), the attention heads (4 → 8; new heads beside the
+old ones), the feed-forward (512 → 1024), the GRU (128 → 256), the hidden layers of the unit,
+context and ability encoders, of the ability key and of the critic's value, and the pointers'
+width (64 → 128); the critic's width and heads the same. The depth stays.
+
+The method (Net2WiderNet, Chen et al., 2016, with exact copies):
+
+- **The token stream is copied**: x → [x, x]. A LayerNorm over [x, x] has the same mean and variance
+  as over x, so with its gain and bias repeated it gives [y, y]. New channels at zero would not do:
+  they change the LayerNorm's mean and variance, so its output.
+- **Writers write every copy**: the rows of the encoders' last layers, attention out, feed-forward
+  out and the GRU are repeated. A GRU unit and its copy get equal inputs and weights, so their states
+  stay equal at every step.
+- **Readers read each copy with half the weight plus a noise of zero sum**: (W/2 + E) y + (W/2 − E) y
+  = W y exactly while the copies are equal. The noise (0.1 × the weights' std) breaks the symmetry:
+  the copies get different gradients and grow apart in training.
+- **New units** (feed-forward, the encoders', the ability key's and the value's hidden layers, the
+  new heads' queries, keys and values): incoming weights small random (0.1 × the layer's weights'
+  std), bias 0, **outgoing weights 0**; they add nothing until trained, and their outgoing weights
+  get a gradient from the first update. New heads take the old heads' distance bias.
+- **Pointers** (attack target, ability): q·k / √width. The new key dimensions are 0 (q·k is
+  unchanged), the new query dimensions random, the old query × √k for the wider √width.
+
+**The proof** (`--check-battles`, after every widening): 16 random armies (up to 19 units a side)
+played by the small network against `ai_like` for 48 decisions, 8 256 unit decisions, the memory
+carried through. In float64 (the small network and its widening in float64) the largest difference:
+target logits 4·10⁻¹³, point 4·10⁻¹⁴, kind, run, ability ≤ 2·10⁻¹⁴, memory 8·10⁻¹⁵, value 1·10⁻¹⁵ —
+the method is exact. The stored float32 checkpoint against the small one: kind 6·10⁻⁶, run 7·10⁻⁶,
+ability 5·10⁻⁶, memory 4·10⁻⁶, value 1·10⁻⁶; point 2.3·10⁻⁵ and target 2.2·10⁻⁴ on logits up to
+22 and 250 — the small network's own float32 error (its float32 against its float64) is the same:
+1.9·10⁻⁵ and 2.3·10⁻⁴. Greedy choices 100% the same. Tests: `tests/tools/test_nn_widen.py`.
+
+**Training the widened network.** A checkpoint carries its sizes (`config`), so `run.py`, `test5`,
+the evaluation and the companion build the wide network from it; small checkpoints load as before.
+`--preset` follows `--init`'s record. Past versions of another size in the pool (`random.pt`, a
+`--pool-extra`) play with an actor of their own size. The optimizer is not in a checkpoint: every run
+starts a fresh Adam. The minibatch is divided by the width (`run.sized`): the wide network with the
+small one's minibatch (2 252 decisions at 40 slots) failed in its first policy update on the 16 GB
+card; with 1 126 its peak is 10.9 GB. So a wide update takes twice the optimizer steps on half the
+data (with the fresh Adam the KL stop at 0.05 ends some updates early).
+
+Smoke, `test5` protocol, 2–3 minutes, RTX 5070 Ti, policy updates: `small` from `m15.pt` 8 700 s of
+battle a second (collect 2.9 s, update 4.7 s), `wide` from `w0.pt` 5 900 (4.9 s, 7.6 s) — about 0.7×;
+distance from the start after 13–14 updates: `small` 0.018, `wide` 0.031.
 
 ## Speed
 
 One decision of one side, 20 vs 20 units, random weights, median of 50
-(`bash tools/nn/dock.sh tools.nn.model.bench`). "Decision" = observation + network +
+(`bash tools/nn/dock.sh tools.nn.model.bench`, 03.10.2026). "Decision" = observation + network +
 sampling + orders; "network" = the network alone.
 
-| Where | `small`: decision / network | `target`: decision / network |
-|---|---:|---:|
-| CPU, 1 thread | 3.5 / 1.4 ms | 16.9 / 14.6 ms |
-| CPU, 4 threads | 3.2 / 0.9 ms | 7.6 / 5.2 ms |
-| GPU RTX 5070 Ti, 1 battle | 13.3 / 2.0 ms | 12.8 / 4.6 ms |
-| GPU, 256 battles at once (training) | 13.0 ms (51 µs per battle) | 28.8 ms (113 µs per battle) |
+| Where | `small`: decision / network | `wide`: decision / network | `target`: decision / network |
+|---|---:|---:|---:|
+| CPU, 1 thread | 4.8 / 1.8 ms | 7.4 / 4.3 ms | 19.7 / 16.6 ms |
+| CPU, 4 threads | 4.8 / 1.3 ms | 5.7 / 2.1 ms | 9.8 / 6.0 ms |
+| GPU RTX 5070 Ti, 1 battle | 18.7 / 2.9 ms | 16.7 / 2.8 ms | 16.3 / 2.9 ms |
+| GPU, 256 battles at once (training) | 16.8 ms (66 µs per battle) | 19.5 ms (76 µs per battle) | 38.3 ms (150 µs per battle) |
 
 - In the game, one battle at a time: the GPU is no faster than the CPU, it waits for its many
-  small launches. The `target` network on 4 CPU threads takes ~8 ms per decision: at 4
-  decisions a second that is ~3% of those threads' time, and the GPU is not needed.
-  On the GPU the same load is ~5% of the time, and the GPU is mostly idle even then:
-  well within the ≤ 20% budget.
-- In training the GPU pays off: 256 battles in 29 ms.
+  small launches. The `wide` network on 4 CPU threads takes ~6 ms per decision, the `target` one
+  ~10 ms: at a decision a second that is ≤ 1% of those threads' time, and the GPU is not needed.
+  On the GPU a decision takes ~17 ms whatever the size (launches): ~2% of the time at a decision
+  a second, well within the ≤ 20% budget.
+- In training the GPU pays off: 256 battles in 17–38 ms.
 
 ## Determinism in co-op: int8
 
@@ -315,6 +374,13 @@ An int8 export of the actor looks practical; not done yet:
   simulator's `fx_on` and the observed fields agree, networks saved before them (and the chain's
   `test5/it5/m20.pt`) load and give the same outputs, the same with the effect inputs zeroed, and
   the new inputs get a gradient.
+- `tests/tools/test_nn_widen.py` (torch): a network widened ×2 and ×3 gives the same logits,
+  greedy actions, memory (each copy) and value, decision after decision (float64 to 1e-10, float32 to
+  1e-5); the wider config is the `wide` preset; the readers' copies differ and the writers' are
+  equal, new units have zero outgoing weights and get a gradient, the copies get different
+  gradients; a widened checkpoint loads (small ones as before) and trains with a small past version
+  in the pool; the trained `test5/r7_lostworst/m15.pt` widened acts the same on simulator battles
+  (skipped without it).
 - `tests/tools/test_nn_train.py`: in the simulator the attacker's row sees `rollout.last_hit` as
   "we dealt", the defender's as "the enemy dealt", per battle, cleared on restart; both sides'
   rows see the attacker's progress as `rollout.Battles.hit_rate` / `last_hit` with `--idle-rate`

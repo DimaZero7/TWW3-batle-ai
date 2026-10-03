@@ -1,4 +1,5 @@
-"""Sizes of the network (docs/en/training/model.md). Two presets: small (tests, first training) and target."""
+"""Sizes of the network (docs/en/training/model.md). Presets: small (tests, first training), wide (small x 2 in
+every width: what tools/nn/model/widen.py makes of a trained small network) and target."""
 from dataclasses import dataclass, replace
 
 
@@ -25,8 +26,11 @@ class ModelConfig:
 
 
 SMALL = ModelConfig()
+# small x 2 in width: token width, attention heads (the head width stays 32), feed-forward, GRU, pointer
+# and the critic's; the depth the same (tools/nn/model/widen.py widens a trained small network to it)
+WIDE = ModelConfig(d=256, heads=8, pointer=128, critic_d=256, critic_heads=8)
 TARGET = ModelConfig(d=512, layers=4, heads=8, pointer=128, critic_d=512, critic_layers=6, critic_heads=8)
-PRESETS = {"small": SMALL, "target": TARGET}
+PRESETS = {"small": SMALL, "wide": WIDE, "target": TARGET}
 
 
 def preset(name, **changes):

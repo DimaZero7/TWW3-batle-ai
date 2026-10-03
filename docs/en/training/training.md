@@ -521,6 +521,7 @@ Nothing is played.
   and the overall rating does not (interference: new skill at the cost of old); **watch** for
   forgetting with a rising rating, forgetting with nothing rising (the settings first), drops within
   the noise, a plateau, a falling critic, an entropy collapse, a rising grad norm; else **ok**.
+- To widen the network keeping its skills: `tools/nn/model/widen.py` ([widening](model.md#widening)).
 
 ## Training speed
 

@@ -69,10 +69,13 @@ def networks(preset, device, start=None, critic_from=None):
     return actor.to(device).eval(), critic.to(device).eval()
 
 
-def sized(cfg, N, slots=22):
+def sized(cfg, N, slots=22, width=1.0):
     """The PPO settings for battles of N slots: fewer decisions per minibatch for bigger battles, so a
-    minibatch holds about as many unit tokens as at 22 slots (the memory of a 16 GB card)."""
-    return dataclasses.replace(cfg, minibatch=max(256, int(cfg.minibatch * min(1.0, slots / N))))
+    minibatch holds about as many unit tokens as at 22 slots (the memory of a 16 GB card); and for a
+    wider network (width: its token width / the small one's 128) fewer by that factor: the widened
+    network (tools/nn/model/widen.py, x 2) with the small one's minibatch did not fit in 16 GB (its
+    first policy update failed, 03.10)."""
+    return dataclasses.replace(cfg, minibatch=max(256, int(cfg.minibatch * min(1.0, slots / N) / max(1.0, width))))
 
 
 def schedule(start, end, share):
@@ -100,6 +103,8 @@ def train(args, every=None):
     torch.backends.cuda.matmul.allow_tf32 = True
     out = checkpoint.DIR / "runs" / args.name
     out.mkdir(parents=True, exist_ok=True)
+    if args.preset is None:          # the record follows the network: --init's preset (e.g. "wide"), else small
+        args.preset = checkpoint.read(args.init).get("preset", "small") if args.init else "small"
     actor, critic = networks(args.preset, device, args.init, args.critic_init)
     reference = None
     if args.anchor:
@@ -139,6 +144,7 @@ def train(args, every=None):
     for extra in filter(None, (args.pool_extra or "").split(",")):
         pool.add(extra)
     past = model_policy.Actor(actor.cfg).to(device).eval()
+    pasts = {actor.cfg: past}
     past_path = None
     mix = json.loads(args.mix) if args.mix else league.MIX
     if args.drills:
@@ -161,18 +167,25 @@ def train(args, every=None):
 
     env = rollout.Battles(lay, scenes.SCENES, device, params, randomise.Spread(), weights, seed=args.seed,
                           source=source(), cadence=cadence)
-    step_cfg = sized(cfg, env.N)
+    step_cfg = sized(cfg, env.N, width=actor.cfg.d / model_config.SMALL.d)
     log = (out / "log.jsonl").open("w", encoding="utf-8", newline="\n")
     print(f"{args.name}: battles {env.B} (learner rows {env.R}), slots {env.N}, up to {args.max_units} units a side, "
-          f"steps per update {args.steps} ({args.steps * env.decision_s:g} s of battle), {cadence.text(params.dt)}, "
+          f"steps per update {args.steps} ({args.steps * env.decision_s:g} s of battle), "
+          f"minibatch {step_cfg.minibatch} decisions, {cadence.text(params.dt)}, "
           f"model {args.preset} {model_policy.parameters(actor) / 1e6:.2f} M actor, limit {args.limit:.0f} s, "
           f"ppo {dataclasses.asdict(cfg)}, reward {dataclasses.asdict(weights)}, mix {mix}", flush=True)
 
     def pick_past():
-        nonlocal past_path
+        nonlocal past, past_path
         path, untrained = pool.sample()
         if path != past_path:
-            past.load_state_dict(checkpoint.read(path, device)["actor"])
+            data = checkpoint.read(path, device)
+            cfg_past = checkpoint.config_of(data)
+            # a pool version of another size (random.pt beside a widened learner): its own actor, made once
+            if cfg_past not in pasts:
+                pasts[cfg_past] = model_policy.Actor(cfg_past).to(device).eval()
+            past = pasts[cfg_past]
+            past.load_state_dict(data["actor"])
             past_path = path
         env.set_past(past, untrained)
 
@@ -355,7 +368,9 @@ def parser():
                     help="train this many updates instead (--minutes then only caps the time; schedules follow the updates)")
     ap.add_argument("--battles", type=int, default=1024, help="battles at once")
     ap.add_argument("--steps", type=int, default=64, help="decisions per chunk (between updates)")
-    ap.add_argument("--preset", default="small", choices=sorted(model_config.PRESETS))
+    ap.add_argument("--preset", choices=sorted(model_config.PRESETS),
+                    help="the size of a network started from random.pt (default: --init's, else small; a checkpoint "
+                         "brings its own sizes)")
     ap.add_argument("--limit", type=float, default=3600.0, help="battle time limit, s (the defender wins at it)")
     ap.add_argument("--lr", type=float, default=ppo.PPOConfig.lr)
     ap.add_argument("--gamma", type=float, default=ppo.PPOConfig.gamma,
