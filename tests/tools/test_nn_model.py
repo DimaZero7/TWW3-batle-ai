@@ -1,4 +1,4 @@
-"""tools.nn.model network (PyTorch): masks, unit order, adapters, orders out (levels 2 and 3).
+"""tools.nn.model network (PyTorch): masks, unit order, old checkpoints, orders out (levels 2 and 3).
 
 torch is not in the project's .venv: these tests are skipped there and run in the training
 container (snake-ai-trainer; its image has no pytest, so put a pure-Python pytest on PYTHONPATH).
@@ -10,7 +10,7 @@ torch = pytest.importorskip("torch")
 
 from tools.config import ROOT  # noqa: E402
 from tools.nn import gamedata  # noqa: E402
-from tools.nn.model import config, critic, decide, factions, heads, lora, policy, sources  # noqa: E402
+from tools.nn.model import config, critic, decide, heads, policy, sources  # noqa: E402
 from tools.nn.model import effects as mfx  # noqa: E402
 from tools.nn.model import observation as ob  # noqa: E402
 from tools.nn.sim import orders as sim_orders  # noqa: E402
@@ -23,6 +23,11 @@ def setup_obs(seed=0, own=5, enemy=6, batch=2, **state_changes):
     state.update(state_changes)
     obs, _ = ob.observe(state, setup, 1)
     return setup, state, obs
+
+
+def critic_state(data):
+    """A checkpoint's critic without the per-unit value head of its time (Critic.load drops it too)."""
+    return {k: v for k, v in data["critic"].items() if not k.startswith("unit_value.")}
 
 
 def model(cfg=CFG, seed=0):
@@ -81,19 +86,24 @@ def test_memory_carries_between_decisions():
     assert h.abs().sum() > 0 and not torch.allclose(a["kind"], b["kind"])
 
 
-def test_adapters_start_as_no_change_and_train_alone():
-    cfg = config.preset("small", d=64, layers=2, heads=4, lora_rank=4)
+def test_a_checkpoint_of_the_lora_wrapper_loads_and_acts_the_same():
+    # until 03.10 the attention blocks' layers were LoRA wrappers (adapters never on): qkv.base.weight
     setup, state, obs = setup_obs()
-    net = model(cfg)
+    net = model()
+    old = {}
+    for k, v in net.state_dict().items():
+        for name in ("qkv", "out", "f1", "f2"):
+            k = k.replace(f".{name}.weight", f".{name}.base.weight").replace(f".{name}.bias", f".{name}.base.bias")
+        old[k] = v
+    assert any(".qkv.base.weight" in k for k in old)
+    again = policy.Actor(CFG).eval()
+    again.load_state_dict(old)
     o = policy.to_torch(obs)
-    with_adapter, _ = net(o)
-    without, _ = net(o, use_adapter=False)
-    assert torch.allclose(with_adapter["kind"], without["kind"])
-    lora.freeze_base(net)
-    trainable = [p for p in net.parameters() if p.requires_grad]
-    assert trainable and all(any(p is q for q in lora.adapter_parameters(net)) for p in trainable)
-    per_adapter = sum(p.numel() for p in trainable) / factions.ADAPTERS     # one pair "faction + role"
-    assert per_adapter < 0.05 * policy.parameters(net)
+    with torch.no_grad():
+        assert torch.equal(net(o)[0]["kind"], again(o)[0]["kind"])
+    c = critic.Critic(CFG)
+    cold = {k.replace(".qkv.weight", ".qkv.base.weight"): v for k, v in c.state_dict().items()}
+    assert all(torch.equal(v, c.state_dict()[k]) for k, v in critic.Critic(CFG).load(cold).state_dict().items())
 
 
 def test_log_prob_of_a_sampled_action_is_finite_and_zero_for_units_without_orders():
@@ -380,11 +390,10 @@ def test_a_trained_checkpoint_acts_as_before_the_damage_timers(path):
     cfg = checkpoint.config_of(data)
     new, new_crit = checkpoint.load_policy(path), checkpoint.load_critic(path).eval()
     old, old_crit = old_networks(cfg)
-    # parts a checkpoint older than abilities / the per-unit value lacks start fresh: the same in both
+    # parts a checkpoint older than abilities lacks start fresh: the same in both
     fresh = {k: v for k, v in new.state_dict().items() if k.startswith(policy.ABILITY_PARAMS)}
     torch.nn.Module.load_state_dict(old, {**fresh, **data["actor"]})
-    fresh = {k: v for k, v in new_crit.state_dict().items() if k.startswith("unit_value.")}
-    torch.nn.Module.load_state_dict(old_crit, {**fresh, **data["critic"]})
+    torch.nn.Module.load_state_dict(old_crit, critic_state(data))
     setup, states = timer_states()
     same_outputs(old, new, old_crit, new_crit, setup, states)
 
@@ -440,7 +449,7 @@ def test_a_checkpoint_saved_before_the_progress_inputs_acts_as_before(path):
     assert torch.all(progress_cols(new) == 0) and torch.all(progress_cols(new_crit) == 0)
     old, old_crit = pre_progress_networks(cfg)
     torch.nn.Module.load_state_dict(old, data["actor"])
-    torch.nn.Module.load_state_dict(old_crit, data["critic"])
+    torch.nn.Module.load_state_dict(old_crit, critic_state(data))
     setup, states = timer_states()
     same_outputs(old, new, old_crit, new_crit, setup, states, to_old=no_progress, atol=1e-4)
 
@@ -553,7 +562,7 @@ def test_the_chain_checkpoint_loads_through_the_conversion_and_acts_as_before():
     torch.nn.Module.load_state_dict(old, {**fresh, **data["actor"]})
     if new_crit is not None:
         fresh = {k: v for k, v in new_crit.state_dict().items() if k not in data["critic"]}
-        torch.nn.Module.load_state_dict(old_crit, {**fresh, **data["critic"]})
+        torch.nn.Module.load_state_dict(old_crit, {**fresh, **critic_state(data)})
     obs, cobs = wave2_obs()
     o, c = policy.to_torch(obs), policy.to_torch(cobs)
     with torch.no_grad():
@@ -702,7 +711,7 @@ def test_the_it5_checkpoint_loads_and_acts_as_before_the_effects():
     for k in lo:
         assert torch.allclose(lo[k], ln[k], atol=1e-4), k
     if new_crit is not None:
-        torch.nn.Module.load_state_dict(old_crit, data["critic"])
+        torch.nn.Module.load_state_dict(old_crit, critic_state(data))
         keys = ("tokens", "own", "attend", "pos", "ctx")
         with torch.no_grad():
             assert torch.allclose(old_crit.eval()(without_effects({k: c[k] for k in keys})),

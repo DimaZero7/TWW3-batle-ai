@@ -134,9 +134,9 @@ class TestBattles:
         orig = env._sim_step
         calls = []
 
-        def spy(parts, attacks, rb, rs, was_done, units):
-            r, u_r, fin = orig(parts, attacks, rb, rs, was_done, units)
-            return torch.ones_like(r) * len(calls), u_r, fin       # 1, 2, 3 (counted before)
+        def spy(parts, attacks, rb, rs, was_done):
+            r, fin = orig(parts, attacks, rb, rs, was_done)
+            return torch.ones_like(r) * len(calls), fin            # 1, 2, 3 (counted before)
         env._sim_step = lambda *a: (calls.append(1), spy(*a))[1]
         hooks = []
         out = env.step(self.actor(), each=lambda live: hooks.append(live.clone()))

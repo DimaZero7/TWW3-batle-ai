@@ -55,25 +55,6 @@ def build(scene_of, scenes=SCENES, params=None, device="cpu", H=None):
     return st, setup
 
 
-def reset_rows(st, template, rows):
-    """Battles where rows [B] (bool tensor) is true start again from the template (in place)."""
-    keep = ~rows
-    for k, v in st.u.items():
-        st.u[k] = torch.where(rows[:, None], template.u[k], v)
-    st.t = torch.where(keep, st.t, template.t)
-    st.done = torch.where(keep, st.done, template.done)
-    st.winner = torch.where(keep, st.winner, template.winner)
-    st.attacker = torch.where(keep, st.attacker, template.attacker)
-    st.lord_dead_s = torch.where(keep[:, None], st.lord_dead_s, template.lord_dead_s)
-    return st
-
-
-def spread_evenly(B, n, seed=0):
-    """[B] indices 0..n-1, each about B / n times, in a shuffled order."""
-    idx = np.arange(B) % n
-    return np.random.default_rng(seed).permutation(idx)
-
-
 class LiveSetup:
     """What observation.observe needs of a Setup, as tensors on the device that change per battle:
     a battle that ends takes a new army, and its row is copied in place (the compiled observe keeps
@@ -84,25 +65,21 @@ class LiveSetup:
               "fx_owned",                            # innate effects owned [B, N, E] (tools/nn/model/effects.py)
               "cost")                                # multiplayer cost [B, N] (the attacker's progress)
 
-    def __init__(self, arrays, char, adapt, factions):
-        self.arrays, self.char, self.adapt, self.factions = arrays, char, adapt, factions
+    def __init__(self, arrays, char, factions):
+        self.arrays, self.char, self.factions = arrays, char, factions
 
     @classmethod
     def of(cls, setup, device):
         like = setup.like(torch.zeros(1, device=device))
         arrays = observation._Arrays(**{k: getattr(like, k).clone() for k in cls.FIELDS})
         char = {s: torch.as_tensor(setup.character(s), device=device).float() for s in (1, 2)}
-        adapt = {s: torch.as_tensor(setup.adapter(s), device=device).long() for s in (1, 2)}
-        return cls(arrays, char, adapt, list(setup.factions))
+        return cls(arrays, char, list(setup.factions))
 
     def like(self, x):
         return self.arrays
 
     def character(self, side):
         return self.char[side]
-
-    def adapter(self, side):
-        return self.adapt[side]
 
     @property
     def bounds(self):
@@ -117,7 +94,6 @@ class LiveSetup:
             put(getattr(self.arrays, k), getattr(other.arrays, k))
         for s in (1, 2):
             put(self.char[s], other.char[s])
-            put(self.adapt[s], other.adapt[s])
         for b in torch.nonzero(rows).flatten().tolist():
             self.factions[b] = other.factions[int(idx[b])]
 

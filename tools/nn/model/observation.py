@@ -165,14 +165,6 @@ class Setup:
             self._cache[key] = np.stack([factions.character(f[side - 1]) for f in self.factions])
         return self._cache[key]
 
-    def adapter(self, side):
-        """[B] LoRA adapter index of (faction, role) for the side. Computed once per side."""
-        key = ("adapter", side)
-        if key not in self._cache:
-            self._cache[key] = np.array([factions.adapter(f[side - 1], a == side)
-                                         for f, a in zip(self.factions, self.attacker)])
-        return self._cache[key]
-
 
 @dataclass
 class _Arrays:
@@ -225,7 +217,6 @@ class Obs:
     ctrl: object       # [B, N] own units that take orders (alive, not routing or shattered)
     target_ok: object  # [B, N] enemies that may be attacked now (visible, alive)
     pos: object        # [B, N, 2] (forward, lateral) / POS: current or last seen
-    adapter: object    # [B] LoRA adapter index
     frame: Frame
     side: int
     abil: object = None     # [B, N, SLOTS, abilities.SIZE] per ability slot: state, then passport
@@ -376,13 +367,11 @@ def observe(state, setup, side, memory=None, full=False):
     pos = m.where(seen[..., None], pos, pos * 0)
     new = Memory(fr, last_x, last_z, last_t, seen, dead, m.where(sees, xs, xs * 0), m.where(sees, zs, zs * 0),
                  tn, sees, last_melee, last_rout, lord_dead, hp_now, hit_t, gold, rate, rate_t)
-    adapter = setup.adapter(side)
-    adapter = adapter if m is np else m.as_tensor(adapter, device=x.device)
     if full:   # the critic also knows the enemy's character
         other = setup.character(3 - side)
         ctx = _cat(m, [ctx, _f(m, other if m is np else m.as_tensor(other, device=x.device))], -1)
     abil, abil_ok = _abilities(m, state, S, own, sees, ctrl, full, xs)
-    return Obs(_f(m, tokens), _f(m, ctx), own, attend, ctrl, target_ok, _f(m, pos), adapter, fr, side,
+    return Obs(_f(m, tokens), _f(m, ctx), own, attend, ctrl, target_ok, _f(m, pos), fr, side,
                abil, abil_ok), new
 
 

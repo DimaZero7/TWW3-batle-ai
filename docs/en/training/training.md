@@ -12,12 +12,9 @@ in the `snake-ai-trainer` container).
 ## How to run it
 
 ```bash
-# 1. warm start: copy the scripts `nearest` and `ai_like` (random armies up to 19 units a side)
-bash tools/nn/dock.sh tools.nn.train.imitate --minutes 5 --generated 19 --teacher nearest,ai_like \
-  --out build/nn-train/runs/bcmix/bc.pt
-# 2. PPO from it on random armies, small armies first; evaluate and record at the end
-bash tools/nn/dock.sh tools.nn.train.run --name long_ai --minutes 80 --armies generated \
-  --curriculum 5:0.15,10:0.4,19:1 --init build/nn-train/runs/bcmix/bc.pt --critic-warmup 8 \
+# PPO on random armies (up to 19 units a side); evaluate and record at the end
+bash tools/nn/dock.sh tools.nn.train.run --name long_ai --minutes 80 \
+  --init build/nn-train/runs/bcmix/bc.pt --critic-warmup 8 \
   --lr 1.5e-4 --entropy 0.005 --entropy-end 0.001 --anchor 0.1 --anchor-end 0 \
   --mix '{"self": 0.1, "past": 0.15, "nearest": 0.2, "hold_shoot": 0.1, "hold": 0.05, "ai_like": 0.4}' \
   --eval-past build/nn-train/runs/long19/latest.pt
@@ -32,20 +29,20 @@ DOCK_NAME=t2-test5 bash tools/nn/dock.sh tools.nn.train.test5 --label mychange [
 ```
 
 Main options of `run`: `--name` (the folder under `build/nn-train/runs/`), `--init` (start from a
-checkpoint), `--armies` (`scenes` or `generated`), `--curriculum`, `--battles` (at once, 1024),
+checkpoint), `--max-units` (random armies: units a side at most, 19), `--battles` (at once, 1024),
 `--steps` (decisions per chunk, 64), `--limit` (3600 s), `--lr`, `--anchor` and `--anchor-end`,
 `--entropy` and `--entropy-end` (linear from the first to the second over the run),
-`--critic-warmup`, the reward weights (`--timeout`, `--gold`, `--rout-share`, `--idle`,
-`--idle-tau`, `--idle-pause`, `--idle-step`, `--idle-cap`, `--idle-share`, `--idle-rate`, `--idle-window`, `--hp`, `--standing`, `--order-cost`, `--lord`, `--lord-rout`,
-`--retarget`; [gold](#losses-in-gold-and-the-attackers-idle-cost-01102026), [the loophole](#night-01100210-why-the-network-falls-apart-without-the-leash)), `--adv-norm`, `--reference self` and `--reference-every`, `--critic-init`, per-unit
-credit (`--unit-credit` and `--unit-credit-end`, `--unit-gold`, `--unit-attrib`, `--shirk`, `--shirk-m`, `--shirk-side`, `--flanked`, `--missile-melee`, `--crowd`, `--flank-attack`, `--idle-near`, `--unit-idle`, `--lord-exposed`, `--lord-exposed-hp`,
-`--neighbour`; [below](#per-unit-credit-01102026)), `--updates` (train that many updates instead of
+`--critic-warmup`, the reward weights (`--gold`, `--rout-share`, `--idle`,
+`--idle-tau`, `--idle-pause`, `--idle-step`, `--idle-cap`, `--idle-rate`, `--idle-window`, `--order-cost`, `--lord`, `--lord-rout`,
+`--retarget`; [gold](#losses-in-gold-and-the-attackers-idle-cost-01102026), [the loophole](#night-01100210-why-the-network-falls-apart-without-the-leash)), `--adv-norm`, `--critic-init`, `--updates` (train that many updates instead of
 `--minutes`, which then only caps the time), `--mix`,
 `--small share:units` (that share of every bank of random battles with at most `units` a side),
-`--eval-every` minutes / `--eval-opponents` / `--eval-battles` (evaluation on `EVAL_SEEDS` during
-the run, both roles; the best mean win rate is saved as `best_eval.pt`, the evaluations in
-`eval_log.jsonl`, their time not counted as training), `--eval-past` (the network behind "past" in
-the final evaluation). The first steps compile for 1–3 minutes (seconds once a run of the same shapes
+`--eval-past` (the network behind "past" in the final evaluation). Removed on 03.10.2026 (the
+sections below that use them are history): per-unit credit and its terms ([below](#per-unit-credit-01102026)),
+the time limit's extra loss (`--timeout`: the attacker's loss there is the normal −1 now), `--hp`,
+`--standing`, `--idle-share` (the idle cost is progress only, as `-1` was), training on the fixed
+scenes (`--armies`, `--curriculum`), `--reference self`, `--kind-temperature`, evaluations during the
+run (`--eval-every`), the warm start by copying the scripts (`imitate`) and the LoRA adapters. The first steps compile for 1–3 minutes (seconds once a run of the same shapes
 compiled them: [training speed](#training-speed)); the training time does not count them.
 
 ## What it writes
@@ -85,11 +82,10 @@ with it, so tests can be compared with each other.
    and the script baselines of the same battles (cached). All 1536 battles run in one batch
    (`evaluate.play(..., together=True)`), the same battles every time.
 2. **Training.** 36 PPO updates (`--updates`; ~5 minutes on a free GPU) with the current code and
-   the settings of the `long_ai2` continuation (`test5.PROTOCOL`: random armies up to 19 units,
-   `--small 0.35:6`, KL to `bcmix` 0.06 → 0.03, entropy 0.003 → 0.001, the attacker's
-   idle cost at `run.py`'s defaults, `long19` among the past versions) and the baseline's `--unit-credit 0` pinned, so
-   tests stay comparable when `run.py`'s defaults change. Options after `--` go to `run.py` and
-   override them: a task passes its own new settings there (`-- --unit-credit 0.3`);
+   the settings of `test5.PROTOCOL` (random armies up to 19 units, `--small 0.35:6`, KL to the
+   starting network 0.06 → 0.03, entropy 0.003 → 0.001, the attacker's idle cost at `run.py`'s
+   defaults, `long19` among the past versions). Options after `--` go to `run.py` and
+   override them: a task passes its own new settings there (`-- --lord-rout 0.5`);
    `report.json` keeps them all (`protocol`, `options`, `train_args`). A fixed number of updates, not minutes: on a GPU shared with other jobs an update took
    up to 290 s, and a 5-minute test learned 1–2 updates. `build/nn-train/latest.pt` is not touched.
 3. **After.** The trained network plays the same evaluation.
@@ -336,7 +332,7 @@ flowchart LR
 
 Modules: `scenes.py` (where battles come from: the arenas or random armies, as a bank of ready
 starts), `league.py` (who plays whom, the pool), `opponents.py` (the scripts, `ai_like` among them), `randomise.py`,
-`reward.py`, `rollout.py` (the battles and one decision), `cadence.py` (how often the networks decide), `ppo.py`, `imitate.py` (the warm start),
+`reward.py`, `rollout.py` (the battles and one decision), `cadence.py` (how often the networks decide), `ppo.py`,
 `evaluate.py` (evaluation and replays), `checkpoint.py`, `run.py`.
 
 ## Training speed

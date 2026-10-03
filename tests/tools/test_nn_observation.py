@@ -58,7 +58,6 @@ class TestPassport:
     def test_placeholder_characters_exist_for_empire_and_skaven(self):
         for key in ("wh_main_emp_empire", "wh2_main_skv_skaven"):
             assert factions.character(key).shape == (factions.SIZE,)
-        assert factions.adapter("wh_main_emp_empire", True) != factions.adapter("wh_main_emp_empire", False)
 
 
 class TestObservation:
@@ -140,7 +139,6 @@ class TestObservation:
         a, _ = ob.observe(state, setup, 1)
         m, _ = ob.observe(mirror, msetup, 2)
         assert np.allclose(a.tokens, m.tokens, atol=1e-5) and np.allclose(a.ctx, m.ctx)
-        assert np.array_equal(a.adapter, m.adapter)
 
     def test_permuting_units_permutes_the_tokens(self):
         setup, state = battle()
@@ -432,6 +430,6 @@ class TestAbilities:
         class Bare:                                   # as an older LiveSetup (tools/nn/train/scenes.py)
             def like(self, x):
                 return ob._Arrays(**{k: getattr(setup, k) for k in fields})
-            character, adapter = setup.character, setup.adapter
+            character = setup.character
         obs, _ = ob.observe(state, Bare(), 1)
         assert obs.abil is None and obs.abil_ok is None and obs.tokens.shape == (1, 4, ob.TOKEN)

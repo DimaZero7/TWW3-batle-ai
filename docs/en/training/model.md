@@ -225,9 +225,9 @@ flowchart TB
 - **Loading an older actor.** `Actor.load_state_dict` accepts a state without the ability parts
   (`policy.ABILITY_PARAMS`): they start fresh — the encoder adds nothing, the head picks at random
   among ready abilities.
-- **LoRA adapters** per pair "faction + role" on the attention and feed-forward layers
-  (`lora_rank`, off by default). An adapter starts as "no change"; `lora.freeze_base` leaves only
-  the adapters to train.
+- **No adapters.** The LoRA adapters per pair "faction + role" (never switched on) were removed on
+  03.10.2026; a checkpoint of their time (layers saved as `qkv.base.weight`) loads as it was
+  (`encoder.Block`).
 - **Critic** (training only): its own encoder and attention on the full view, pooled own and
   enemy units and the context token → the value of the battle for the side.
 
@@ -248,10 +248,10 @@ the battle's bank row; `rollout.full_obs` puts the passports back for the update
 
 `tools/nn/model/config.py`, count with `bash tools/nn/dock.sh tools.nn.model.bench`:
 
-| Preset | Width | Attention layers | Actor | Critic (training only) | One LoRA adapter, rank 8 |
-|---|---:|---:|---:|---:|---:|
-| `small` | 128 | 3 | 0.84 M | 0.69 M | 0.05 M |
-| `target` | 512 | 4 | 15.49 M | 20.30 M (6 layers) | 0.26 M |
+| Preset | Width | Attention layers | Actor | Critic (training only) |
+|---|---:|---:|---:|---:|
+| `small` | 128 | 3 | 0.84 M | 0.69 M |
+| `target` | 512 | 4 | 15.49 M | 20.30 M (6 layers) |
 
 ## Speed
 

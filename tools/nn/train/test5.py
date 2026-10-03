@@ -1,7 +1,7 @@
 """The standard 5-minute test of a training change (docs/en/training/training.md "Test protocol").
 
     DOCK_NAME=t2-test5 bash tools/nn/dock.sh tools.nn.train.test5 --label baseline
-    bash tools/nn/dock.sh tools.nn.train.test5 --label mychange -- --unit-credit 0.5   # run.py options after --
+    bash tools/nn/dock.sh tools.nn.train.test5 --label mychange -- --lord-rout 0.5   # run.py options after --
 
 The GPU lock: the test waits while build/gpu-train.lock exists (another heavy GPU job: training, a
 test, a big evaluation; polled every 30 s), then holds it (its label and start time) until it ends,
@@ -16,9 +16,8 @@ a test on a busy GPU takes longer but learns as much; --minutes only caps the ti
    rating (docs/en/training/training.md "Network evaluation: fair metrics"; the report's and
    trend.md's first block, "skill").
 2. 36 updates of PPO (--updates; ~5 minutes) from it with the current code and the protocol's settings
-   (PROTOCOL below: the long_ai2 continuation with the baseline's --unit-credit 0 pinned; run.py's
-   defaults otherwise), options after `--` go to run.py and override them (a task passes its own
-   new settings there, e.g. `-- --unit-credit 0.3`). report.json keeps all of them (train_args). build/nn-train/latest.pt is not touched.
+   (PROTOCOL below; run.py's defaults otherwise), options after `--` go to run.py and override them
+   (a task passes its own new settings there, e.g. `-- --lord-rout 0.5`). report.json keeps all of them (train_args). build/nn-train/latest.pt is not touched.
 3. "after": the trained network, the same evaluation.
 4. The behaviour report, before -> after, printed and written to build/nn-train/test5/<label>/
    (report.json; before.json, after.json: the whole evaluations): win rates by opponent and role;
@@ -60,13 +59,9 @@ OUT = checkpoint.DIR / "test5"
 LOCK = checkpoint.DIR.parent / "gpu-train.lock"
 INIT = "build/nn-train/runs/long_ai/best.pt"
 OPPONENTS = ("ai_like", "nearest", "hold_shoot")
-PROTOCOL = ["--armies", "generated", "--curriculum", "19:1", "--small", "0.35:6", "--critic-warmup", "3",
+PROTOCOL = ["--small", "0.35:6", "--critic-warmup", "3",
             "--lr", "1.5e-4", "--entropy", "0.003", "--entropy-end", "0.001", "--anchor", "0.06", "--anchor-end", "0.03",
-            "--reference", "build/nn-train/runs/bcmix/bc.pt",
-            "--pool-extra", "build/nn-train/runs/long19/latest.pt", "--snapshot-every", "10", "--no-eval",
-            # pinned, so tests stay comparable when run.py's defaults change: the baseline's training
-            # (no per-unit credit); a task passes its own settings after `--`
-            "--unit-credit", "0"]
+            "--pool-extra", "build/nn-train/runs/long19/latest.pt", "--snapshot-every", "10", "--no-eval"]
 
 
 @contextlib.contextmanager

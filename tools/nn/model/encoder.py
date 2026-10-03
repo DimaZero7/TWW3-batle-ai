@@ -20,7 +20,6 @@ from torch import nn
 
 from tools.nn.model import abilities as ab
 from tools.nn.model import observation as ob
-from tools.nn.model.lora import LoRALinear
 
 
 def pad_inputs(state_dict, key, n_in):
@@ -119,18 +118,30 @@ def attention_bias(obs_t, bias_table, bins):
 
 
 class Block(nn.Module):
-    def __init__(self, d, heads, ff, rank=0, adapters=0, alpha=8.0):
+    LINEAR = ("qkv", "out", "f1", "f2")
+
+    def __init__(self, d, heads, ff):
         super().__init__()
         self.heads = heads
         self.n1, self.n2 = nn.LayerNorm(d), nn.LayerNorm(d)
-        self.qkv = LoRALinear(d, 3 * d, rank, adapters, alpha)
-        self.out = LoRALinear(d, d, rank, adapters, alpha)
-        self.f1 = LoRALinear(d, ff * d, rank, adapters, alpha)
-        self.f2 = LoRALinear(ff * d, d, rank, adapters, alpha)
+        self.qkv = nn.Linear(d, 3 * d)
+        self.out = nn.Linear(d, d)
+        self.f1 = nn.Linear(d, ff * d)
+        self.f2 = nn.Linear(ff * d, d)
 
-    def forward(self, x, bias, adapter=None):
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+        """A checkpoint of the LoRA wrapper's time (until 03.10: qkv.base.weight, never trained adapters)
+        loads as the plain layers it was (in place)."""
+        for name in self.LINEAR:
+            for p in ("weight", "bias"):
+                old = f"{prefix}{name}.base.{p}"
+                if old in state_dict:
+                    state_dict[f"{prefix}{name}.{p}"] = state_dict.pop(old)
+        super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
+
+    def forward(self, x, bias):
         B, L, d = x.shape
-        q, k, v = self.qkv(self.n1(x), adapter).reshape(B, L, 3, self.heads, d // self.heads).permute(2, 0, 3, 1, 4)
+        q, k, v = self.qkv(self.n1(x)).reshape(B, L, 3, self.heads, d // self.heads).permute(2, 0, 3, 1, 4)
         a = F.scaled_dot_product_attention(q, k, v, attn_mask=bias)
-        x = x + self.out(a.transpose(1, 2).reshape(B, L, d), adapter)
-        return x + self.f2(F.gelu(self.f1(self.n2(x), adapter)), adapter)
+        x = x + self.out(a.transpose(1, 2).reshape(B, L, d))
+        return x + self.f2(F.gelu(self.f1(self.n2(x))))

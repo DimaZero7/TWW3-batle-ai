@@ -9,7 +9,7 @@ import time
 
 import torch
 
-from tools.nn.model import config, critic, decide, factions, lora, policy, sources
+from tools.nn.model import config, critic, decide, policy, sources
 from tools.nn.model import observation as ob
 
 
@@ -17,10 +17,7 @@ def sizes():
     out = {}
     for name, cfg in config.PRESETS.items():
         actor = policy.Actor(cfg)
-        with_lora = policy.Actor(config.preset(name, lora_rank=8))
-        per_adapter = sum(p.numel() for p in lora.adapter_parameters(with_lora)) // factions.ADAPTERS
-        out[name] = {"actor": policy.parameters(actor), "critic": policy.parameters(critic.Critic(cfg)),
-                     "lora_r8_per_pair": per_adapter}
+        out[name] = {"actor": policy.parameters(actor), "critic": policy.parameters(critic.Critic(cfg))}
     return out
 
 
@@ -60,8 +57,7 @@ def decision_ms(cfg, device, batch=1, units=20, repeat=50, threads=None, actor_o
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     for name, s in sizes().items():
-        print(f"{name:7} actor {s['actor'] / 1e6:6.2f} M  critic {s['critic'] / 1e6:6.2f} M  "
-              f"LoRA r8 per (faction, role) {s['lora_r8_per_pair'] / 1e6:5.2f} M")
+        print(f"{name:7} actor {s['actor'] / 1e6:6.2f} M  critic {s['critic'] / 1e6:6.2f} M")
     cpu = torch.device("cpu")
     for name, cfg in config.PRESETS.items():
         for threads in (1, 4):

@@ -1,6 +1,6 @@
-"""Faction character (config/nn/factions.json) and the LoRA adapter index of a pair "faction + role".
+"""Faction character (config/nn/factions.json).
 
-An unknown faction gets the neutral character 0.5 and the last adapter (shared "other").
+An unknown faction gets the neutral character 0.5.
 """
 import json
 from functools import lru_cache
@@ -20,7 +20,6 @@ def load(path=None):
 TRAITS = tuple(load()["traits"])
 SIZE = len(TRAITS)
 KEYS = tuple(load()["factions"])
-ADAPTERS = 2 * (len(KEYS) + 1)   # (faction or "other") x (attack, defend)
 
 
 def character(faction):
@@ -28,8 +27,3 @@ def character(faction):
     c = load()["factions"].get(faction, {}).get("character", {})
     return np.array([c.get(t, 0.5) for t in TRAITS], dtype=np.float32)
 
-
-def adapter(faction, attacks):
-    """Index of the LoRA adapter of (faction, role): 2 * faction + (0 attack, 1 defend)."""
-    f = KEYS.index(faction) if faction in KEYS else len(KEYS)
-    return 2 * f + (0 if attacks else 1)

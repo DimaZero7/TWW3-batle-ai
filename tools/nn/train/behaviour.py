@@ -11,12 +11,9 @@ facts() reads the simulator's state after a step and says, per unit [B, N]:
     crowded        one of more than `crowd` own units on the same enemy (its attack order, or the
                    enemy it fights) while another standing enemy strikes an own unit in flank or rear;
                    as the share of the excess, (n - crowd) / n, so the whole pile weighs n - crowd
-    idle_near      a standing melee unit (not missile, not a lord) out of melee, with no attack order,
-                   while an own unit within IDLE_M fights in melee: it lets its fellows fight alone
     aim            the enemy slot it attacks or fights (-1 none)
 
-The test protocol's metrics (Tracker, tools/nn/train/test5.py) and the per-unit reward terms
-(tools/nn/train/reward.py unit_step) both read it.
+The test protocol's metrics (Tracker, tools/nn/train/test5.py) read it.
 
 Liveliness (Tracker, measured only; docs/en/training/training.md "Liveliness"): units that change
 their orders too often look artificial. From the order in force after each step (order_kind,
@@ -47,7 +44,6 @@ from tools.nn.sim import geometry
 from tools.nn.sim import orders as O
 
 CROWD = 2          # more own units than this on one enemy is a pile
-IDLE_M = 60.0      # a fight this near an idle own melee unit is its business
 ABILITY_SLOTS = 3
 MOVE_M = 10.0          # = reward.Weights.order_move_m: a nearer new point is not an order change
 REPEAT_M = 5.0         # = src/apps/bridge/services.lua REPEAT_M: a nearer point is not given in the game
@@ -94,12 +90,7 @@ def facts(st, params, crowd=CROWD):
                           (on_mine - crowd) / on_mine.clamp(min=1), torch.zeros_like(on_mine))
 
     missile = (u["range"] > 0) & (u["ammo0"] > 0) & ~u["lord"]
-    dx = u["x"][:, :, None] - u["x"][:, None, :]
-    dz = u["z"][:, :, None] - u["z"][:, None, :]
-    fight_near = ((dx * dx + dz * dz <= IDLE_M ** 2) & (side[:, :, None] == side[:, None, :])
-                  & melee[:, None, :]).any(2)
-    idle_near = stand & ~melee & ~missile & ~u["lord"] & ~attack & fight_near
-    return {"idle_near": idle_near, "melee": melee, "flanked": melee & (u["flank_hit"] >= 1), "missile_melee": melee & missile,
+    return {"melee": melee, "flanked": melee & (u["flank_hit"] >= 1), "missile_melee": melee & missile,
             "missile": stand & missile, "flank_attack": flank_attack, "crowded": crowded, "aim": aim}
 
 

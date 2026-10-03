@@ -41,7 +41,7 @@ from tools.nn.sim import battle
 from tools.nn.sim import orders as O
 from tools.nn.sim import state as S
 from tools.nn.sim.params import load
-from tools.nn.train import behaviour, drills, league, opponents, randomise, reward, scenes
+from tools.nn.train import drills, league, opponents, randomise, reward, scenes
 from tools.nn.train import cadence as cad
 
 CRITIC_KEYS = ("tokens", "ctx", "own", "attend", "pos")
@@ -193,7 +193,7 @@ def _rewards(st, health, was_done, hit_rate, last_hit, cost, weights, dt, rb, rs
     timeouts (in place)."""
     after = reward.measure(st, weights.rout_share, weights.lord_rout)
     finished = st.done & ~was_done
-    terms = reward.parts(health, after, finished, st.winner, st.attacker, weights)
+    terms = reward.parts(health, after, finished, st.winner, weights)
     if weights.idle_rate > 0:
         # only a steady damage rate counts as attacking (reward.idle_cost: idle_rate)
         hit_rate = reward.hit_rate(hit_rate, health, after, st.attacker, dt, weights.idle_window_s)
@@ -212,14 +212,6 @@ def _rewards(st, health, was_done, hit_rate, last_hit, cost, weights, dt, rb, rs
     return after, finished, terms, r, hit_rate, last_hit
 
 
-def _unit_rewards(prev, st, params, weights, last_hit, rb, rs, was_done):
-    """[R, N] each learner unit's own reward (reward.unit_step) in its row's slots; 0 for the other side."""
-    idle_m = reward.idle_scale(st.t, last_hit, weights) if weights.unit_idle else None
-    ur = reward.unit_step(prev, st, behaviour.facts(st, params), params, weights, idle_m)
-    own = st.u["side"][rb] == (rs + 1)[:, None]
-    return torch.where(own & ~was_done[rb][:, None], ur[rb], torch.zeros_like(ur[rb]))
-
-
 def _decide(actor, obs, h, frame, bounds, greedy):
     """The actor's decision: (logits, sampled Action, Orders, new memory). Compiled with fast(), the
     network's weights are the graph's inputs (the learner, the past version and their updates share
@@ -234,8 +226,8 @@ def _log_prob(logits, action, ctrl):
 
 
 def _values(critic, obs):
-    """The critic's (value [R], per-unit values [R, N])."""
-    return critic(obs, per_unit=True)
+    """The critic's value [R]."""
+    return critic(obs)
 
 
 def open_rows(source, want=None):
@@ -247,7 +239,7 @@ def open_rows(source, want=None):
                  [list(b.keys[int(i)]) for i in idx.tolist()])
     arrays = ob._Arrays(**{k: getattr(bs.arrays, k)[idx].clone() for k in scenes.LiveSetup.FIELDS})
     setup = scenes.LiveSetup(arrays, {s: bs.char[s][idx].clone() for s in (1, 2)},
-                             {s: bs.adapt[s][idx].clone() for s in (1, 2)}, [bs.factions[int(i)] for i in idx.tolist()])
+                             [bs.factions[int(i)] for i in idx.tolist()])
     return st, setup, idx
 
 
@@ -289,7 +281,6 @@ class Battles:
         self._assemble = fast(assemble_orders, use)
         self._orders_cost = fast(_orders_cost, use)
         self._rewards = fast(_rewards, use)
-        self._unit_rewards = fast(_unit_rewards, use)
         self._measure = fast(reward.measure, use)
         self._track = fast(reward.track, use)
         self._decide = fast(_decide, use)
@@ -423,9 +414,9 @@ class Battles:
             *_, o_past, h_past_new = self._act(self.past_actor, a, frame, self.rows_past, self.h_past, False)
             parts.append((self.rows_past, o_past))
         lp = self._log_prob(logits, action, obs_r["ctrl"])
-        value = unit_value = None
+        value = None
         if critic is not None:
-            value, unit_value = self._values(critic, c)
+            value = self._values(critic, c)
         acting = obs_r["ctrl"] & ~self.st.done[self.rows_learn % self.B][:, None]
         # (a comparison, not bincount / one_hot: they read the GPU's answer back to size their output)
         kinds = action.kind[..., None] == torch.arange(len(O.KINDS), device=self.device)
@@ -438,16 +429,14 @@ class Battles:
         # When the decision's orders land: a fixed step, or (a latency between steps) at random per battle.
         whole, frac = self.cadence.delay(self.params.dt)
         delay = self.cadence.delays(self.params.dt, self.B, self.device) if frac else None
-        r_rows = unit_rows = None
+        r_rows = None
         finished = torch.zeros_like(self.st.done)
         for j in range(self.k):
             land = (delay == j) if delay is not None and j in (whole, whole + 1) else (j == whole)
             now = [(rows, self._landing(o, rows, land)) for rows, o in parts]
             was_done = self.st.done.clone()
-            r, u_r, fin = self._sim_step(now, attacks, rb, rs, was_done, critic is not None)
+            r, fin = self._sim_step(now, attacks, rb, rs, was_done)
             r_rows = r if r_rows is None else r_rows + r
-            if u_r is not None:
-                unit_rows = u_r if unit_rows is None else unit_rows + u_r
             finished = finished | fin
             if each is not None:
                 each(~was_done)
@@ -465,18 +454,16 @@ class Battles:
             # a copy: a slice (view) would keep the whole input of every step alive (~60 MB each)
             obs_r = dict(obs_r, abil=obs_r["abil"][..., :mab.DYNAMIC].clone(), abil_row=abil_row)
         return {"obs": obs_r, "action": action, "lp": lp, "value": value, "reward": r_rows,
-                "done": d_rows, "critic_obs": c, "unit_value": unit_value, "unit_reward": unit_rows,
-                "attacks": attacks}
+                "done": d_rows, "critic_obs": c, "attacks": attacks}
 
-    def _sim_step(self, parts, attacks, rb, rs, was_done, units):
+    def _sim_step(self, parts, attacks, rb, rs, was_done):
         """One simulator step with the networks' orders `parts` and the scripts': -> (the learner rows'
-        reward [R], their units' rewards [R, N] or None, finished [B]); the counters (in place). A battle
-        that had ended before the step is frozen and gets no reward."""
+        reward [R], finished [B]); the counters (in place). A battle that had ended before the step is
+        frozen and gets no reward."""
         marks = self._ability_marks()
         orders = self.assemble(parts)
         cost, switched = self._orders_cost(self.st, orders, was_done, self.ctrl, self.weights, self.orders_stats,
                                            self.order_battle)
-        prev = reward.unit_before(self.st.u, self.weights.rout_share) if units else None
         self.advance(self.st, orders, self.params, self.params.dt)
         # each unit's worst loss so far: a rally gives nothing back, a new rout counts beyond it (reward.track)
         self.st.u["lost_worst"] = self._track(self.st.u, self.weights.rout_share)
@@ -485,10 +472,6 @@ class Battles:
             attacks, self.part_stats, self.part_steps, self.timeout_count)
         r_rows = r[rb, rs] * (~was_done[rb]).float()
         d_rows = finished[rb]
-        unit_rows = None
-        if prev is not None:
-            # Each learner unit's own reward (reward.unit_step), in the row's slots; 0 for the other side.
-            unit_rows = self._unit_rewards(prev, self.st, self.params, self.weights, self.last_hit, rb, rs, was_done)
         self._count(finished, rb, rs, d_rows)
         lord_dead = after[:, :, 2] < 0.5 if after.shape[-1] > 2 else torch.zeros_like(after[:, :, 0], dtype=torch.bool)
         d = d_rows.float()
@@ -500,7 +483,7 @@ class Battles:
         self.switch_stats += sw.sum()
         self.order_battle[:, 1] += sw
         self.health = after                          # = reward.measure of the state now
-        return r_rows, unit_rows, finished
+        return r_rows, finished
 
     def reward_parts(self, reset=True):
         """{role: {term: the learner's mean reward a minute of battle}} since the last call (reward.PARTS;
@@ -620,7 +603,7 @@ class Battles:
                           st.winner[keep], st.lord_dead_s[keep], st.bounds, [st.keys[i] for i in kl])
         arrays = ob._Arrays(**{k: take(getattr(setup.arrays, k)) for k in scenes.LiveSetup.FIELDS})
         self.setup = scenes.LiveSetup(arrays, {s: setup.char[s][keep] for s in (1, 2)},
-                                      {s: setup.adapt[s][keep] for s in (1, 2)}, [setup.factions[i] for i in kl])
+                                      [setup.factions[i] for i in kl])
         self.bounds2 = torch.cat([self.setup.bounds, self.setup.bounds])
 
         def memory(m):
@@ -664,7 +647,7 @@ class Battles:
 
     @torch.no_grad()
     def value(self, critic):
-        """(the side's value [R], per-unit values [R, N]) of the learner rows now."""
+        """The side's value [R] of the learner rows now."""
         if self.cur is None:
             self.cur = self.observe(True)
         return self._values(critic, self.cur[2])
@@ -673,8 +656,7 @@ class Battles:
 def collect(env, actor, critic, T):
     """T decisions (steps) of every battle -> a dict of stacked tensors [T, R, ...], the memory the chunk began
     with h0 [R, 1 + N, d], reset [T, R] (a new battle began at step t: its memory starts empty), the
-    bootstrap value [R], per unit: unit_reward, unit_value [T, R, N], last_unit_value [R, N], and
-    abil_static: the bank's ability passports (full_obs puts them back into obs)."""
+    bootstrap value [R], and abil_static: the bank's ability passports (full_obs puts them back into obs)."""
     h0 = env.h_learn
     steps = [env.step(actor, critic) for _ in range(T)]
     out = {}
@@ -686,7 +668,7 @@ def collect(env, actor, critic, T):
     fields = ("kind", "point", "target", "run") + (("ability",) if steps[0]["action"].ability is not None else ())
     out["action"] = hd.Action(*(torch.stack([getattr(s["action"], f) for s in steps]) for f in fields))
     out["abil_static"] = getattr(env.bank.setup.arrays, "abil", None)
-    for k in ("lp", "value", "reward", "done", "unit_value", "unit_reward", "attacks"):
+    for k in ("lp", "value", "reward", "done", "attacks"):
         out[k] = torch.stack([s[k] for s in steps])
-    out["last_value"], out["last_unit_value"] = env.value(critic)
+    out["last_value"] = env.value(critic)
     return out

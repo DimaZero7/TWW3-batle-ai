@@ -172,16 +172,3 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None):
                         u["hp_man"][:, None, :], u["resist_missile"][:, None, :])
     hp = landed * hit * (1 - shield)
     return shots, hp, hit
-
-
-def friendly(hp, u):
-    """Friendly fire in gold this step from the HP per pair [B, N, N] (i shoots, f is hit; as dealt):
-    (dealt [B, N]: what each shooter took from its own side, taken [B, N]: what each unit lost to its
-    own side's shots). Gold = HP x the victim's cost / its starting HP (reward.py's worth). The side's
-    reward pays it anyway (its gold lost); reward.unit_step lays it on the shooter instead of the
-    victim (gate 02.10.2026: four slinger units shot a Warlord in melee with our spearmen for 119 s,
-    ~1.8-2.3 HP of our own per shot in the game and in the simulator alike)."""
-    same = (u["side"][:, :, None] == u["side"][:, None, :]) & (u["side"][:, :, None] > 0)
-    worth = u["cost"] / u["hp0"].clamp(min=1e-6)
-    gold = torch.where(same, hp, torch.zeros_like(hp)) * worth[:, None, :]
-    return gold.sum(2), gold.sum(1)

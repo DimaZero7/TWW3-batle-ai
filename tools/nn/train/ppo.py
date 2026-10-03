@@ -4,21 +4,8 @@
   a side share the side's advantage (one reward per side, one value of the critic that sees
   the whole field). Units that take no orders (dead, routing, padding) are left out of the policy
   loss and the entropy: their log-probability is zero and they are masked.
-* Per-unit credit (unit_credit > 0): each unit's advantage also has its own, from its own reward
-  (tools/nn/train/reward.py unit_step: its gold trade - the enemy's losses it caused, routs and kills
-  included, less its own -, flank, piles, missile units in melee, its neighbours') and the critic's
-  per-unit value: A_i = A_side + unit_credit x A_unit_i (run.py --unit-credit-end: unit_credit goes
-  linearly to that over the run, OpenAI Five's "team spirit"). A_unit is
-  centred per decision over the side's units that take orders (it only says which of them did
-  better than their fellows, never pushes the whole side one way: uncentred, at unit_credit 0.6 it
-  taught the side to stand, as standing units take no losses and no flank), then both are
-  normalised over the minibatch: the unit's own return is ~100 times smaller than the side's and
-  would vanish beside it. With unit_credit below 1 the side's win and loss stay the main signal,
-  and a unit's own mistake is not lost in the battle's total.
-  The per-unit value learns with the side's (weight cfg.value x cfg.unit_value, over the units that take
-  orders), on the unit's return x unit_scale (100: about the side's size).
-* The actor's and the critic's gradients are clipped apart, each to max_grad (clipped together, the
-  per-unit value's large gradient froze the policy: 02.10, docs/en/training/training.md).
+* The actor's and the critic's gradients are clipped apart, each to max_grad (clipped together, a
+  large critic loss's gradient froze the policy: 02.10, docs/en/training/training.md).
 * The entropy bonus is on the order kind only. The full entropy counts the move point's 128 bins
   only when the unit moves, so a bonus on it pays the network for moving (and for switching
   points): in a first run the full entropy rose from 3.5 to 5 and order changes from 79 to 98
@@ -54,27 +41,18 @@ class PPOConfig:
     value: float = 0.5
     max_grad: float = 0.5
     anchor: float = 0.0        # weight of KL(policy || reference) on the order kind and target (0: off)
-    unit_credit: float = 0.0   # weight of each unit's own (normalised) advantage beside the side's (0: off;
-    #                            the tested setting is 0.3, docs/en/training/training.md "Per-unit credit")
-    unit_scale: float = 100.0  # the per-unit value predicts the unit's return x this
-    unit_value: float = 1e-3   # weight of the per-unit value loss beside the side's (x value): at unit_scale
-    #                            100 its gradient is ~1600 x the side value's (norms 400-900 vs 0.1-0.7, probe
-    #                            02.10) and after clipping the side's value had no step left; at 1e-3 the two
-    #                            are about equal (the unit head's own step is the same: Adam is per parameter)
     adv_norm: str = "batch"    # normalise the side's advantage over the minibatch ("batch") or over each
     #                            role's rows apart ("role": the attacker's, bigger with its idle cost, no
     #                            longer outweighs the defender's)
 
 
 def gae(rewards, values, dones, last_value, gamma, lam):
-    """Advantages and returns [T, R] (or [T, R, N] per unit). dones[t] [R]: the battle ended at step
-    t (no bootstrap past it)."""
+    """Advantages and returns [T, R]. dones[t] [R]: the battle ended at step t (no bootstrap past it)."""
     T = rewards.shape[0]
     adv = torch.zeros_like(rewards)
     running = torch.zeros_like(last_value)
-    extra = rewards.dim() - dones.dim()
     for t in reversed(range(T)):
-        go_on = 1.0 - dones[t].float().reshape(*dones[t].shape, *([1] * extra))
+        go_on = 1.0 - dones[t].float()
         nxt = last_value if t == T - 1 else values[t + 1]
         delta = rewards[t] + gamma * nxt * go_on - values[t]
         running = delta + gamma * lam * go_on * running
@@ -83,10 +61,9 @@ def gae(rewards, values, dones, last_value, gamma, lam):
 
 
 def policy_loss(lp_new, lp_old, adv, mask, clip):
-    """Clipped surrogate per unit. lp_* [S, N], adv [S] (the side's) or [S, N] (per unit), mask [S, N]
-    -> (loss, clip share)."""
+    """Clipped surrogate per unit. lp_* [S, N], adv [S] (the side's), mask [S, N] -> (loss, clip share)."""
     ratio = torch.exp(lp_new - lp_old)
-    a = adv[:, None] if adv.dim() == 1 else adv
+    a = adv[:, None]
     surrogate = torch.minimum(ratio * a, ratio.clamp(1 - clip, 1 + clip) * a)
     m = mask.float()
     n = m.sum().clamp(min=1)
@@ -193,26 +170,22 @@ def critic_stats(batch, adv, ret):
 def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, reference=None):
     """Some epochs of minibatch updates on one rollout (batch from rollout.collect). -> stats.
     train_policy False: the critic only (a warm-up for a critic that starts from nothing while the
-    actor already plays, e.g. after behaviour cloning). reference: a frozen actor (e.g. the cloned
-    one) the policy is held near by cfg.anchor x KL, so PPO's noisy steps do not wash out what it
-    started with while it looks for better.
+    actor already plays: a checkpoint saved without one). reference: a frozen actor (e.g. the one the
+    run started from) the policy is held near by cfg.anchor x KL, so PPO's noisy steps do not wash out
+    what it started with while it looks for better.
 
     A minibatch is a set of learner rows with their whole chunk of T decisions: the actor runs its
     memory through the chunk from the memory the chunk began with (Actor.sequence)."""
     adv, ret = gae(batch["reward"], batch["value"], batch["done"], batch["last_value"], cfg.gamma, cfg.lam)
     T, R = adv.shape
-    per_unit = bool(cfg.unit_credit) and batch.get("unit_reward") is not None
-    if per_unit:
-        adv_u, ret_u = gae(batch["unit_reward"] * cfg.unit_scale, batch["unit_value"], batch["done"],
-                           batch["last_unit_value"], cfg.gamma, cfg.lam)
     # The actor's and the critic's gradients are clipped apart (each to max_grad). Clipped together
-    # (until 02.10), the per-unit value loss's gradient (norm 200-2000 at unit_credit 0.3; the actor's
+    # (until 02.10), a critic loss's gradient (then the per-unit value's, norm 200-2000; the actor's
     # 0.2-0.5) scaled the actor's by 0.0006-0.0025: per parameter ~1e-8, far below Adam's eps 1e-5, so
     # the policy took no step at all (KL 0.0002 an update, iterations it1-it3 flat; analyst probe 02.10).
     actor_params = [p for p in actor.parameters() if p.requires_grad]
     critic_params = [p for p in critic.parameters() if p.requires_grad]
     stats = {"policy_loss": 0.0, "value_loss": 0.0, "entropy": 0.0, "entropy_all": 0.0, "kl": 0.0, "clip": 0.0,
-             "anchor_kl": 0.0, "unit_value_loss": 0.0, "unit_adv_share": 0.0,
+             "anchor_kl": 0.0,
              "grad_norm": 0.0,          # the actor's gradient norm before clipping (max_grad)
              "grad_norm_critic": 0.0}   # the critic's
     n, stop = 0, False
@@ -227,13 +200,6 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
             act = hd.Action(*(_rows(getattr(batch["action"], k), idx) for k in kinds))
             a = normalise(_rows(adv, idx), _rows(batch["attacks"], idx) if cfg.adv_norm == "role"
                           and batch.get("attacks") is not None else None)
-            if per_unit:
-                au = _rows(adv_u, idx)
-                m = obs["ctrl"].reshape(-1, au.shape[-1]).float()
-                au = (au - (au * m).sum(-1, keepdim=True) / m.sum(-1, keepdim=True).clamp(min=1)) * m
-                std = ((au ** 2 * m).sum() / m.sum().clamp(min=1)).sqrt() + 1e-8
-                au = au / std
-                a = a[:, None] + cfg.unit_credit * au
             # The critic's warm-up (train_policy False): the actor runs without a graph, for the stats
             # only; with one its activations took ~3.5 GB more at the peak (13.5 GB on a 16 GB card).
             with torch.set_grad_enabled(train_policy):
@@ -251,16 +217,9 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                     anchored = anchor_kl(logits, ref, ctrl)
                 else:
                     anchored = torch.zeros((), device=adv.device)
-            if per_unit:
-                v, vu = critic(cobs, per_unit=True)
-                uvl = masked_mean((vu - _rows(ret_u, idx)) ** 2, ctrl)
-                with torch.no_grad():
-                    share = masked_mean((cfg.unit_credit * au).abs(), ctrl) / masked_mean(a.abs(), ctrl).clamp(min=1e-8)
-            else:
-                v, uvl, share = critic(cobs), torch.zeros((), device=adv.device), torch.zeros((), device=adv.device)
-            vl = ((v - _rows(ret, idx)) ** 2).mean()
+            vl = ((critic(cobs) - _rows(ret, idx)) ** 2).mean()
             policy_part = pl - cfg.entropy * entropy + cfg.anchor * anchored
-            loss = cfg.value * (vl + cfg.unit_value * uvl) + (policy_part if train_policy else 0.0)
+            loss = cfg.value * vl + (policy_part if train_policy else 0.0)
             opt.zero_grad(set_to_none=True)
             loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(actor_params, cfg.max_grad)
@@ -269,8 +228,7 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
             with torch.no_grad():
                 kl = masked_mean(old - lp, ctrl)
             for k, x in (("policy_loss", pl), ("value_loss", vl), ("entropy", entropy), ("kl", kl), ("clip", clipped),
-                         ("entropy_all", masked_mean(ent, ctrl)), ("anchor_kl", anchored), ("unit_value_loss", uvl),
-                         ("unit_adv_share", share), ("grad_norm", grad_norm),
+                         ("entropy_all", masked_mean(ent, ctrl)), ("anchor_kl", anchored), ("grad_norm", grad_norm),
                          ("grad_norm_critic", grad_norm_critic)):
                 stats[k] += float(x.detach())
             n += 1
@@ -287,6 +245,4 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
     out["value_mean"] = float(batch["value"].mean())
     out["return_mean"] = float(ret.mean())
     out.update(critic_stats(batch, adv, ret))
-    if per_unit:
-        out["unit_reward"] = float(batch["unit_reward"].sum(0).mean())
     return out

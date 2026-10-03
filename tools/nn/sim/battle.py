@@ -120,7 +120,6 @@ def step(st, orders, params=None, dt=None):
     scale = torch.where(taken > u["hp_abs"], u["hp_abs"] / taken.clamp(min=1e-9), torch.ones_like(taken))
     dmg = dmg * scale[:, None, :]
     taken = dmg.sum(1)
-    u["ff_dealt"], u["ff_taken"] = missile.friendly(hp_missile * scale[:, None, :], u)   # (reward.unit_step)
     share = melee.kill_share(u["hp_man"][:, None, :], hit, cal["kills"]["exponent"])
     kills = dmg / u["hp_man"][:, None, :].clamp(min=1e-6) * share
     hp_new = (u["hp_abs"] - taken).clamp(min=0)

@@ -12,12 +12,9 @@
 ## Как запустить
 
 ```bash
-# 1. разгон: копия скриптов `nearest` и `ai_like` (случайные армии до 19 отрядов на сторону)
-bash tools/nn/dock.sh tools.nn.train.imitate --minutes 5 --generated 19 --teacher nearest,ai_like \
-  --out build/nn-train/runs/bcmix/bc.pt
-# 2. PPO от неё на случайных армиях, сначала маленьких; в конце проверка и записи боёв
-bash tools/nn/dock.sh tools.nn.train.run --name long_ai --minutes 80 --armies generated \
-  --curriculum 5:0.15,10:0.4,19:1 --init build/nn-train/runs/bcmix/bc.pt --critic-warmup 8 \
+# PPO на случайных армиях (до 19 отрядов на сторону); в конце проверка и записи боёв
+bash tools/nn/dock.sh tools.nn.train.run --name long_ai --minutes 80 \
+  --init build/nn-train/runs/bcmix/bc.pt --critic-warmup 8 \
   --lr 1.5e-4 --entropy 0.005 --entropy-end 0.001 --anchor 0.1 --anchor-end 0 \
   --mix '{"self": 0.1, "past": 0.15, "nearest": 0.2, "hold_shoot": 0.1, "hold": 0.05, "ai_like": 0.4}' \
   --eval-past build/nn-train/runs/long19/latest.pt
@@ -32,19 +29,20 @@ DOCK_NAME=t2-test5 bash tools/nn/dock.sh tools.nn.train.test5 --label mychange [
 ```
 
 Главные параметры `run`: `--name` (папка в `build/nn-train/runs/`), `--init` (начать с
-чекпойнта), `--armies` (`scenes` или `generated`), `--curriculum`, `--battles` (боёв сразу,
+чекпойнта), `--max-units` (случайные армии: не больше отрядов на сторону, 19), `--battles` (боёв сразу,
 1024), `--steps` (решений в куске, 64), `--limit` (3600 с), `--lr`, `--anchor` и `--anchor-end`,
 `--entropy` и `--entropy-end` (от первого ко второму линейно за прогон), `--critic-warmup`, веса
-награды (`--timeout`, `--gold`, `--rout-share`, `--idle`, `--idle-tau`, `--idle-pause`, `--idle-step`,
-`--idle-cap`, `--idle-share`, `--idle-rate`, `--idle-window`, `--hp`, `--standing`, `--order-cost`, `--lord`, `--lord-rout`, `--retarget`;
-[золото](#потери-в-золоте-и-цена-простоя-нападающего-01102026), [лазейка](#ночь-01100210-почему-без-поводка-сеть-разваливается)), `--adv-norm`, `--reference self` и `--reference-every`, `--critic-init`, оценка каждого отряда (`--unit-credit` и `--unit-credit-end`, `--unit-gold`, `--unit-attrib`, `--shirk`, `--shirk-m`, `--shirk-side`,
-`--flanked`, `--missile-melee`, `--crowd`, `--flank-attack`, `--idle-near`, `--unit-idle`, `--lord-exposed`, `--lord-exposed-hp`, `--neighbour`;
-[ниже](#оценка-каждого-отряда-01102026)), `--updates` (учиться столько обновлений вместо
+награды (`--gold`, `--rout-share`, `--idle`, `--idle-tau`, `--idle-pause`, `--idle-step`,
+`--idle-cap`, `--idle-rate`, `--idle-window`, `--order-cost`, `--lord`, `--lord-rout`, `--retarget`;
+[золото](#потери-в-золоте-и-цена-простоя-нападающего-01102026), [лазейка](#ночь-01100210-почему-без-поводка-сеть-разваливается)), `--adv-norm`, `--critic-init`, `--updates` (учиться столько обновлений вместо
 `--minutes`; тогда `--minutes` только ограничивает время), `--mix`, `--small доля:отряды` (такая доля каждого
-запаса случайных боёв — не больше `отряды` на сторону), `--eval-every` минут / `--eval-opponents` /
-`--eval-battles` (проверка на `EVAL_SEEDS` во время прогона, обе роли; лучшая средняя доля побед
-сохраняется как `best_eval.pt`, проверки — в `eval_log.jsonl`, их время не идёт в обучение),
-`--eval-past` (сеть за «прошлую версию» в итоговой проверке). Первые шаги компилируются
+запаса случайных боёв — не больше `отряды` на сторону), `--eval-past` (сеть за «прошлую версию» в
+итоговой проверке). Убраны 03.10.2026 (разделы ниже, где они есть, — история): оценка каждого отряда и
+её слагаемые ([ниже](#оценка-каждого-отряда-01102026)), добавочный проигрыш на пределе времени
+(`--timeout`: нападающий там теперь получает обычный −1), `--hp`, `--standing`, `--idle-share` (цена
+простоя — только по продвижению, как было при `-1`), обучение на постоянных сценах (`--armies`,
+`--curriculum`), `--reference self`, `--kind-temperature`, проверки во время прогона (`--eval-every`),
+разгон копированием скриптов (`imitate`) и адаптеры LoRA. Первые шаги компилируются
 1–3 минуты (секунды, если прогон тех же размеров их уже компилировал: [скорость
 обучения](#скорость-обучения)); во время обучения они не входят.
 
@@ -85,11 +83,10 @@ DOCK_NAME=t2-test5 bash tools/nn/dock.sh tools.nn.train.test5 --label mychange [
    скриптов на тех же боях (из кэша). Все 1536 боёв идут одним набором
    (`evaluate.play(..., together=True)`), каждый раз те же бои.
 2. **Обучение.** 36 обновлений PPO (`--updates`; ~5 минут на свободной карте) текущим кодом с
-   настройками продолжения `long_ai2` (`test5.PROTOCOL`: случайные армии до 19 отрядов,
-   `--small 0.35:6`, KL к `bcmix` 0,06 → 0,03, энтропия 0,003 → 0,001, цена простоя
-   нападающего по умолчаниям `run.py`, `long19` среди прошлых версий) и закреплённым `--unit-credit 0` базовой проверки,
-   чтобы проверки оставались сравнимыми, когда меняются умолчания `run.py`. Параметры после `--`
-   уходят в `run.py` и меняют их: задача передаёт там свои новые настройки (`-- --unit-credit 0.3`);
+   настройками `test5.PROTOCOL` (случайные армии до 19 отрядов, `--small 0.35:6`, KL к начальной
+   сети 0,06 → 0,03, энтропия 0,003 → 0,001, цена простоя нападающего по умолчаниям `run.py`,
+   `long19` среди прошлых версий). Параметры после `--`
+   уходят в `run.py` и меняют их: задача передаёт там свои новые настройки (`-- --lord-rout 0.5`);
    `report.json` хранит их все (`protocol`, `options`, `train_args`).
    Число обновлений, а не минуты: на карте, занятой другими задачами, обновление шло до 290 с, и
    5-минутная проверка успевала 1–2 обновления. `build/nn-train/latest.pt` не трогается.
@@ -336,7 +333,7 @@ flowchart LR
 
 Модули: `scenes.py` (откуда бои: арены или случайные армии, запас готовых начал), `league.py`
 (кто с кем играет, набор прошлых версий), `opponents.py` (скрипты, среди них `ai_like`), `randomise.py`, `reward.py`,
-`rollout.py` (бои и одно решение), `cadence.py` (как часто решают сети), `ppo.py`, `imitate.py` (разгон), `evaluate.py` (проверка и записи
+`rollout.py` (бои и одно решение), `cadence.py` (как часто решают сети), `ppo.py`, `evaluate.py` (проверка и записи
 боёв), `checkpoint.py`, `run.py`.
 
 ## Скорость обучения

@@ -40,7 +40,10 @@ POOL = DIR / "pool"
 
 
 def config_of(data):
-    """The ModelConfig of a checkpoint dict (unknown fields ignored, missing ones default)."""
+    """The ModelConfig of a checkpoint dict (unknown fields ignored, missing ones default). The LoRA
+    adapters are gone (03.10; they were never on): a checkpoint with lora_rank > 0 is refused."""
+    if data["config"].get("lora_rank"):
+        raise ValueError("a checkpoint with LoRA adapters (lora_rank > 0): no longer supported")
     names = {f.name for f in dataclasses.fields(model_config.ModelConfig)}
     return model_config.ModelConfig(**{k: v for k, v in data["config"].items() if k in names})
 

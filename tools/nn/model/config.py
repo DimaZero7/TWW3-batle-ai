@@ -15,8 +15,6 @@ class ModelConfig:
     dist_min: float = 10.0
     dist_max: float = 400.0
     pointer: int = 64        # width of the target pointer's query and key
-    lora_rank: int = 0       # 0: no adapters (default); > 0: an adapter per (faction, role)
-    lora_alpha: float = 8.0
     critic_d: int = 128      # the centralised critic (training only)
     critic_layers: int = 3
     critic_heads: int = 4
