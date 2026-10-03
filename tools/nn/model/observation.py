@@ -18,6 +18,15 @@ The rule: the AI sees only what a human player sees.
   is not known (NaN) counts nothing until known again). The same rule for the simulator, recorded
   battles and the companion; in training it is the reward's attacker damage (reward.struck: the
   defender's health fell in the step), seen by the attacker as `dealt` and by the defender as `taken`.
+* The attacker's progress (context, PROGRESS; both sides see it): the clock of the reward's idle cost
+  (tools/nn/train/reward.py, idle_rate > 0). Its damage rate - the defender's gold lost (gold_lost:
+  cost x the share lost, a routing unit ROUT_SHARE of what it has left besides, one dead, gone or
+  shattered whole), share of the budget (the mean of the two armies' cost) a minute, an exponential
+  mean over RATE_WINDOW s - divided by RATE_MIN; whether it has reached RATE_MIN yet; seconds since it
+  last was at least RATE_MIN (the reward's last_hit). From every unit's health and state (a unit
+  whose `hp` is not known counts nothing until known again), so the companion computes it from the
+  game's state as the simulator does. It is the reward's clock while the run's --idle-rate,
+  --idle-window and rout share are these numbers (0.05, 30 s, 0.5: rollout.Battles warns otherwise).
 * Abilities (Obs.abil, per unit and ability slot): the ability's passport (tools/nn/model/abilities.py:
   both sides, it is on the unit's card) and its state. Own units: owned, ready, seconds until ready,
   seconds active left (the ability bar). Enemies: owned, and active now only while the unit is seen
@@ -32,8 +41,9 @@ Everything is in the side's frame (tools/nn/model/frame.py), scaled to about -1.
 State: a dict of arrays [B, N] with the names of recorded `nn_sample` (tools/nn/gamedata.py):
 x, z, b, men, hp, mp, ms, m, mv, f, fire, a, k, ox, oz, lf, rf, bf, target, plus `t` [B] (s).
 Optional: `vis` [B, N] (the unit is visible to the other side; missing = all visible),
-`fat` [B, N] (fatigue state 0-5; missing = unknown), `ab{k}_on` / `ab{k}_cd` [B, N] for ability slot
-k (seconds active left / until ready: tools/nn/sim/state.py observation(); missing = unknown: no
+`fat` [B, N] (fatigue state 0-5; missing = unknown), `s` [B, N] (shattered; missing = ms 7), `gone`
+[B, N] (left the map; missing = none: in the game such a unit reads no men), `ab{k}_on` /
+`ab{k}_cd` [B, N] for ability slot k (seconds active left / until ready: tools/nn/sim/state.py observation(); missing = unknown: no
 ability is ready), `fx_on` [B, N] (the innate effects on now, a bitmask: missing = worked out from the
 other fields). Units of both sides in one row; `setup.side`
 says whose each is. Works on numpy arrays and torch tensors: the same code for recorded
@@ -56,6 +66,10 @@ FATIGUE = 6      # fresh, active, winded, tired, very tired, exhausted
 EVENT = 120.0    # s: how long an event stays "recent" (1 now, falling to 0 after EVENT)
 SINCE = 300.0    # s: seconds since a side last dealt damage / SINCE, capped at 1
 EARLY = 30.0     # s: the fine clock log1p(t / EARLY) / log1p(20): 0.23 at 30 s, 0.59 at 150 s, 1 from 10 min
+RATE_MIN = 0.05      # the attacker's progress (PROGRESS): the reward's idle_rate (budget share a minute) ...
+RATE_WINDOW = 30.0   # ... its idle_window_s (s) ...
+ROUT_SHARE = 0.5     # ... and its rout_share (reward.Weights)
+RATE_CAP = 4.0       # the rate input: rate / RATE_MIN, at most this
 
 # The token's dynamic features: (name, who sees it). "both": own units and visible enemies;
 # "own": own units only (zero for enemies; the critic's full view fills them for all units).
@@ -81,15 +95,19 @@ OWN_ONLY = tuple(INDEX[n] for n, who in DYNAMIC if who == "own")
 # character; attack, defend, 2 lord levels, map width and depth, 2 counts; own lord slain and how
 # recently, the enemy lord the same (CONTEXT_BASE: the context before the damage timers); then TIMERS:
 # the fine clock, we dealt damage yet and seconds since we last did (0 before), the enemy the same.
+# Then PROGRESS: the attacker's damage rate / RATE_MIN, it reached RATE_MIN yet, seconds since it last
+# did (the reward's idle clock).
 # Nothing refers to the battle's time limit (a campaign battle may have none): only time elapsed.
 # A checkpoint of the older context (a t / 3600 column after defend, no TIMERS) loads with that
-# column dropped and zero weights for TIMERS (encoder.TokenEncoder).
+# column dropped and zero weights for TIMERS and PROGRESS; one without PROGRESS with zero weights
+# for it (encoder.TokenEncoder).
 CONTEXT_BASE = factions.SIZE + 12
 OLD_TIME = factions.SIZE + 2   # the older context's t / 3600 column (removed)
 TIMERS = ("clock_fine", "dealt_any", "dealt_since", "taken_any", "taken_since")
-CONTEXT = CONTEXT_BASE + len(TIMERS)
+PROGRESS = ("progress_rate", "progress_any", "progress_since")
+CONTEXT = CONTEXT_BASE + len(TIMERS) + len(PROGRESS)
 CONTEXT_FULL = CONTEXT + factions.SIZE   # the critic's: + the enemy's character
-CTX = {n: CONTEXT_BASE + i for i, n in enumerate(TIMERS)}
+CTX = {n: CONTEXT_BASE + i for i, n in enumerate(TIMERS + PROGRESS)}
 
 
 @dataclass
@@ -119,6 +137,7 @@ class Setup:
         self.abil_owned = np.stack([a[1] for a in ab])                         # [B, N, SLOTS]
         self.abil_use = np.stack([a[2] for a in ab])                           # [B, N, SLOTS] may be ordered
         self.fx_owned = np.stack([effects.owned(k) for k in self.keys])       # [B, N, E] innate effects
+        self.cost = np.stack([passport.cost(k) for k in self.keys])           # [B, N] gold (PROGRESS)
         self.present = self.side > 0
         self._cache = {}
 
@@ -135,7 +154,7 @@ class Setup:
                                        passport=t(self.passport), men0=t(self.men0), ammo0=t(self.ammo0),
                                        present=t(self.present), attacker=t(self.attacker), lord=t(self.lord),
                                        abil=t(self.abil), abil_owned=t(self.abil_owned),
-                                       abil_use=t(self.abil_use), fx_owned=t(self.fx_owned))
+                                       abil_use=t(self.abil_use), fx_owned=t(self.fx_owned), cost=t(self.cost))
         return self._cache[key]
 
     def character(self, side):
@@ -170,6 +189,7 @@ class _Arrays:
     abil_owned: object = None
     abil_use: object = None
     fx_owned: object = None    # [B, N, E] innate effects owned (Setup.fx_owned); None: none known
+    cost: object = None        # [B, N] multiplayer cost (Setup.cost); None: unknown, every unit counts 1
 
 
 @dataclass
@@ -190,6 +210,9 @@ class Memory:
     lord_dead_t: object = None    # [B, 2] time own / enemy lord was slain (-1 alive or none)
     prev_hp: object = None        # [B, N] health share at the previous observation (-1 unknown)
     hit_t: object = None          # [B, 2] time own / enemy side last dealt damage (-1 not yet)
+    prev_gold: object = None      # [B, N] gold each unit had lost at the previous observation (-1 unknown)
+    rate: object = None           # [B] the attacker's damage rate (PROGRESS; budget share a minute)
+    rate_t: object = None         # [B] time it last was at least RATE_MIN (-1 not yet)
 
 
 @dataclass
@@ -239,7 +262,7 @@ def start(state, setup, side):
     frame = Frame((b[:, 0] + b[:, 1]) / 2, (b[:, 2] + b[:, 3]) / 2, ux, uz)
     zero, false = xs * 0, xs != xs
     return Memory(frame, zero, zero, zero, false, false, zero, zero, zero - 1, false, zero - 1, zero - 1,
-                  zero[:, :2] - 1, zero - 1, zero[:, :2] - 1)
+                  zero[:, :2] - 1, zero - 1, zero[:, :2] - 1, zero - 1, zero[:, 0], zero[:, 0] - 1)
 
 
 def observe(state, setup, side, memory=None, full=False):
@@ -315,6 +338,7 @@ def observe(state, setup, side, memory=None, full=False):
     fell = (hp_now >= 0) & (memory.prev_hp >= 0) & (hp_now < memory.prev_hp)
     struck2 = m.stack([(fell & enemy).any(-1), (fell & own).any(-1)], -1)           # [B, 2] we, the enemy
     hit_t = m.where(struck2, tb, memory.hit_t)
+    rate, rate_t, gold = _progress(m, state, S, memory, men, tb[:, 0])
     # Who sees what: "both" fields only for units seen now; "own" fields only for own units
     # (every unit in the critic's full view). Position and edges stay for the last sighting.
     keep_last = ("fwd", "lat", "edge_fwd", "edge_back", "edge_right", "edge_left")
@@ -343,11 +367,14 @@ def observe(state, setup, side, memory=None, full=False):
     since = m.where(hit, m.clip((tb - hit_t) / SINCE, 0, 1), tb * 0)
     clock = m.log1p(m.clip(t / EARLY, 0, 20)) / np.log1p(20.0)
     timers = m.stack([clock, _f(m, hit[:, 0]), since[:, 0], _f(m, hit[:, 1]), since[:, 1]], -1)
-    ctx = _cat(m, [ctx, lords, _f(m, timers)], -1)
+    reached = rate_t >= 0
+    progress = m.stack([m.clip(rate / RATE_MIN, 0, RATE_CAP), _f(m, reached),
+                        m.where(reached, m.clip((tb[:, 0] - rate_t) / SINCE, 0, 1), rate * 0)], -1)
+    ctx = _cat(m, [ctx, lords, _f(m, timers), _f(m, progress)], -1)
     pos = m.stack([fwd, lat], -1) / POS
     pos = m.where(seen[..., None], pos, pos * 0)
     new = Memory(fr, last_x, last_z, last_t, seen, dead, m.where(sees, xs, xs * 0), m.where(sees, zs, zs * 0),
-                 tn, sees, last_melee, last_rout, lord_dead, hp_now, hit_t)
+                 tn, sees, last_melee, last_rout, lord_dead, hp_now, hit_t, gold, rate, rate_t)
     adapter = setup.adapter(side)
     adapter = adapter if m is np else m.as_tensor(adapter, device=x.device)
     if full:   # the critic also knows the enemy's character
@@ -381,6 +408,47 @@ def _abilities(m, state, S, own, sees, ctrl, full, like):
 
 def _b(m, a):
     return a > 0.5 if m is np else a.bool() if a.dtype != m.bool else a
+
+
+def gold_lost(m, state, S, men):
+    """[B, N] the gold each unit has lost, from the observed fields (as tools/nn/train/reward.py
+    gold_lost): its cost x the share lost - the health lost; dead (no men), gone or shattered: whole;
+    routing: ROUT_SHARE of what it has left besides. -1 where not known (`hp` not read and not out of
+    the fight) and for padding."""
+    hp = state["hp"] * 1.0
+    hp_lost = m.clip(1 - m.nan_to_num(hp, nan=1.0), 0, 1)
+    shattered, gone = state.get("s"), state.get("gone")
+    shattered = m.nan_to_num(state["ms"] * 1.0, nan=0.0) == 7 if shattered is None else _b(m, shattered)
+    out = (men <= 0) | shattered
+    if gone is not None:
+        out = out | _b(m, gone)
+    share = m.where(out, hp_lost * 0 + 1, hp_lost + (1 - hp_lost) * ROUT_SHARE * _f(m, _b(m, state["r"])))
+    cost = getattr(S, "cost", None)
+    g = _f(m, share * (_f(m, S.present) if cost is None else cost))
+    return m.where(S.present & ((hp == hp) | out), g, g * 0 - 1)
+
+
+def _progress(m, state, S, memory, men, now):
+    """(rate [B], rate_t [B], gold [B, N]): the attacker's damage rate and the time it last was at least
+    RATE_MIN after this observation (PROGRESS; tools/nn/train/reward.py hit_rate and idle_cost's
+    last_hit), and every unit's gold lost now (gold_lost: the next observation's reference). The
+    defender's loss counts over the units known at both observations; a rally is not damage (0)."""
+    gold = gold_lost(m, state, S, men)
+    cost = getattr(S, "cost", None)
+    cost = _f(m, S.present) if cost is None else cost * _f(m, S.present)
+    budget = m.clip(cost.sum(-1) / 2, 1.0, 1e12)                     # the mean of the two armies' cost
+    defender = S.present & (S.side == (3 - S.attacker).reshape(-1, 1))
+    prev_t = memory.prev_t[:, 0]
+    dt = now - prev_t
+    step = (prev_t >= 0) & (dt > 0)
+    both = defender & (gold >= 0) & (memory.prev_gold >= 0)
+    share = m.clip(m.where(both, gold - memory.prev_gold, gold * 0).sum(-1) / budget, 0, 1e12)
+    dts = m.where(step, dt, dt * 0 + 1)
+    a = m.exp(-dts / RATE_WINDOW)
+    rate = m.where(step, a * memory.rate + (1 - a) * share * (60.0 / dts), memory.rate)
+    rate_t = m.where(step & (rate >= RATE_MIN), now, memory.rate_t)
+    again = (prev_t >= 0) & ~step                       # the same time again: the reference stays
+    return rate, rate_t, m.where(again[:, None], memory.prev_gold, gold)
 
 
 def _recent(m, now, when):

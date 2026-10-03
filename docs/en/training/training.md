@@ -1287,9 +1287,9 @@ Also: `log.jsonl` and the console get the reward by term a minute of battle per 
 (`reward_parts`: `trade`, `lord`, `end`, `idle`, `orders`; `reward.parts`,
 `rollout.Battles.reward_parts`) and the critic's quality (`ev`, `ev_attack`/`ev_defend`, the std of
 the return, the advantage and the reward per role; `ppo.critic_stats`); `test5` writes the final
-`m<minute>.pt` with its critic (before without, and `run.py --init m60.pt` failed). A limit: the
-damage timers in the input (`TIMERS`) still count any damage, so with `--idle-rate` the reward's
-timer is seen by the network only indirectly (through the units' health and melee).
+`m<minute>.pt` with its critic (before without, and `run.py --init m60.pt` failed). The network
+sees the reward's timer: the attacker's progress in the context (`observation.PROGRESS`: its damage
+rate, the threshold reached, seconds since; [model](model.md)), the same rule in the companion.
 
 The next run of the chain starts from the last network, `free60/m60.pt` (its actor equals
 `runs/test5_free60/latest.pt`, update 411; the critic comes from there); the critic learns alone

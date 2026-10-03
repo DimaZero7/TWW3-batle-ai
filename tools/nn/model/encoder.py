@@ -40,14 +40,19 @@ class TokenEncoder(nn.Module):
         self.norm = nn.LayerNorm(d)
 
     def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
-        """A checkpoint of the older context (observation.py: a t / 3600 column, no TIMERS) loads:
-        that column's weights are dropped and the TIMERS' start at zero, so it computes what it did
-        with the time column at 0."""
+        """A checkpoint of an older context loads and computes what it did: one without PROGRESS
+        (observation.py) gets zero weights for it; one older still (a t / 3600 column, no TIMERS) has
+        that column's weights dropped and zero weights for TIMERS and PROGRESS (the time column at 0).
+        The critic's enemy character, after them, keeps its weights."""
         key = prefix + "ctx.0.weight"
         w = state_dict.get(key)
-        if w is not None and w.shape[1] == self.ctx[0].in_features - len(ob.TIMERS) + 1:
-            state_dict[key] = torch.cat([w[:, :ob.OLD_TIME], w[:, ob.OLD_TIME + 1:ob.CONTEXT_BASE + 1],
-                                         w.new_zeros(w.shape[0], len(ob.TIMERS)), w[:, ob.CONTEXT_BASE + 1:]], 1)
+        n, timers, progress = self.ctx[0].in_features, len(ob.TIMERS), len(ob.PROGRESS)
+        at = ob.CONTEXT_BASE + timers                                    # where PROGRESS begins
+        if w is not None and w.shape[1] == n - timers - progress + 1:
+            w = torch.cat([w[:, :ob.OLD_TIME], w[:, ob.OLD_TIME + 1:ob.CONTEXT_BASE + 1],
+                           w.new_zeros(w.shape[0], timers), w[:, ob.CONTEXT_BASE + 1:]], 1)
+        if w is not None and w.shape[1] == n - progress:
+            state_dict[key] = torch.cat([w[:, :at], w.new_zeros(w.shape[0], progress), w[:, at:]], 1)
         pad_inputs(state_dict, prefix + "unit.0.weight", self.unit[0].in_features)
         super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 

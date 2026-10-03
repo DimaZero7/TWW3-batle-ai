@@ -43,7 +43,8 @@
   idle_share 1 pays x the share of its standing army, by cost, that neither fights nor shoots (instead
   of "no unit busy"), and idle_rate > 0 resets m only while the attacker's damage rate (hit_rate: the
   defender's gold lost, share of the budget a minute, exponential mean over idle_window_s) is at least
-  idle_rate, instead of on any damage. Both 0: the old rule.
+  idle_rate, instead of on any damage. Both 0: the old rule. The network sees this clock (the rate,
+  the threshold reached, seconds since): tools/nn/model/observation.py PROGRESS.
 * Either side pays `shirk_side` x the share of its standing army, by cost, of melee units not
   contributing (out of melee, not closing on the enemy) while its side fights in melee with an enemy
   within shirk_m (shirking(); in the "idle" part): the team-level twin of the per-unit `shirk`

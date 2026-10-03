@@ -291,9 +291,12 @@ def test_an_actor_saved_before_abilities_loads_and_its_input_starts_silent():
 # --- the damage timers and the context without the time limit (observation.TIMERS) ---
 
 def timer_states(batch=2):
-    """Three decisions of a made-up battle: side 1 strikes an enemy at t 31, side 2 strikes back at t 32."""
+    """Three decisions of a made-up battle: side 1 strikes an enemy at t 31, side 2 strikes back at t 32
+    (every unit standing: side 1's blow is the attacker's progress too)."""
     setup, state = sources.synthetic(batch=batch, own=3, enemy=3, seed=5, keys=LORDS)
     N = 6
+    state.update(men=np.maximum(state["men"], 1.0), ms=np.full((batch, N), 2.0), r=np.zeros((batch, N), bool),
+                 s=np.zeros((batch, N), bool))
     hp = np.full((batch, N), 0.9)
     hit1, hit2 = hp.copy(), hp.copy()
     hit1[:, 4] = 0.7
@@ -312,39 +315,43 @@ def test_the_damage_timers_are_the_same_on_numpy_and_torch():
         b, mt = ob.observe({k: torch.as_tensor(v) for k, v in st.items()}, setup, 1, mt)
         assert np.allclose(a.ctx, b.ctx.numpy(), atol=1e-6)
     assert a.ctx[0, [ob.CTX[n] for n in ob.TIMERS[1:]]].tolist() == pytest.approx([1, 1 / ob.SINCE, 1, 0])
+    assert a.ctx[0, ob.CTX["progress_rate"]] > 0                       # the attacker's progress: on both too
 
 
 def old_context(ctx, t=None):
-    """The context as networks before the damage timers saw it: a t / 3600 column (t None: 0), no TIMERS."""
+    """The context as networks before the damage timers saw it: a t / 3600 column (t None: 0), no TIMERS
+    (and no PROGRESS)."""
     time = torch.zeros_like(ctx[:, :1]) if t is None else (t / 3600.0).clamp(0, 1)[:, None].to(ctx)
     return torch.cat([ctx[:, :ob.OLD_TIME], time, ctx[:, ob.OLD_TIME:ob.CONTEXT_BASE], ctx[:, ob.CONTEXT:]], 1)
 
 
 def old_networks(cfg):
-    """An actor and a critic with the older context input (one column more, no TIMERS)."""
+    """An actor and a critic with the older context input (a time column, no TIMERS, no PROGRESS)."""
     actor, crit = policy.Actor(cfg), critic.Critic(cfg)
-    actor.encoder.ctx[0] = torch.nn.Linear(ob.CONTEXT - len(ob.TIMERS) + 1, cfg.d)
-    crit.encoder.ctx[0] = torch.nn.Linear(ob.CONTEXT_FULL - len(ob.TIMERS) + 1, cfg.critic_d)
+    n = len(ob.TIMERS) + len(ob.PROGRESS) - 1
+    actor.encoder.ctx[0] = torch.nn.Linear(ob.CONTEXT - n, cfg.d)
+    crit.encoder.ctx[0] = torch.nn.Linear(ob.CONTEXT_FULL - n, cfg.critic_d)
     return actor.eval(), crit.eval()
 
 
-def same_outputs(old, new, old_crit, new_crit, setup, states):
-    """Runs both through the decisions (memory carried); asserts equal logits, greedy actions, values."""
+def same_outputs(old, new, old_crit, new_crit, setup, states, to_old=old_context, atol=1e-5):
+    """Runs both through the decisions (memory carried); asserts equal logits, greedy actions, values
+    (to_old: the context as the old networks saw it)."""
     m = mc = h_old = h_new = None
     for st in states:
         obs, m = ob.observe(st, setup, 1, m)
         cobs, mc = ob.observe(st, setup, 1, mc, full=True)
         o = policy.to_torch(obs)
         with torch.no_grad():
-            lo, h_old = old(dict(o, ctx=old_context(o["ctx"])), h_old)
+            lo, h_old = old(dict(o, ctx=to_old(o["ctx"])), h_old)
             ln, h_new = new(o, h_new)
             c = policy.to_torch(cobs)
-            v_old = old_crit({k: c[k] for k in ("tokens", "own", "attend", "pos")} | {"ctx": old_context(c["ctx"])})
+            v_old = old_crit({k: c[k] for k in ("tokens", "own", "attend", "pos")} | {"ctx": to_old(c["ctx"])})
             v_new = new_crit(c)
         assert set(lo) == set(ln)
         for k in lo:
-            assert torch.allclose(lo[k], ln[k], atol=1e-5), k
-        assert torch.allclose(h_old, h_new, atol=1e-5) and torch.allclose(v_old, v_new, atol=1e-5)
+            assert torch.allclose(lo[k], ln[k], atol=atol), k
+        assert torch.allclose(h_old, h_new, atol=atol) and torch.allclose(v_old, v_new, atol=atol)
         a, b = heads.sample(lo, greedy=True, abilities=True), heads.sample(ln, greedy=True, abilities=True)
         assert torch.equal(a.kind, b.kind) and torch.equal(a.target, b.target) and torch.equal(a.point, b.point)
     assert obs.ctx[:, ob.CTX["dealt_any"]].sum() > 0          # the timers were not all zero
@@ -380,6 +387,62 @@ def test_a_trained_checkpoint_acts_as_before_the_damage_timers(path):
     torch.nn.Module.load_state_dict(old_crit, {**fresh, **data["critic"]})
     setup, states = timer_states()
     same_outputs(old, new, old_crit, new_crit, setup, states)
+
+
+# --- the attacker's progress (observation.PROGRESS), appended after the damage timers ---
+
+def no_progress(ctx):
+    """The context as networks before PROGRESS saw it (the critic's enemy character stays after it)."""
+    at = ob.CONTEXT - len(ob.PROGRESS)
+    return torch.cat([ctx[:, :at], ctx[:, ob.CONTEXT:]], 1)
+
+
+def pre_progress_networks(cfg):
+    actor, crit = policy.Actor(cfg), critic.Critic(cfg)
+    actor.encoder.ctx[0] = torch.nn.Linear(ob.CONTEXT - len(ob.PROGRESS), cfg.d)
+    crit.encoder.ctx[0] = torch.nn.Linear(ob.CONTEXT_FULL - len(ob.PROGRESS), cfg.critic_d)
+    return actor.eval(), crit.eval()
+
+
+def progress_cols(net):
+    at = ob.CONTEXT - len(ob.PROGRESS)
+    return net.encoder.ctx[0].weight[:, at:ob.CONTEXT]
+
+
+def test_networks_saved_before_the_progress_inputs_load_and_act_the_same():
+    setup, states = timer_states()
+    torch.manual_seed(5)
+    old, old_crit = pre_progress_networks(CFG)
+    new, new_crit = model(seed=9), critic.Critic(CFG).eval()
+    new.load_state_dict(old.state_dict())
+    new_crit.load(old_crit.state_dict())
+    assert torch.all(progress_cols(new) == 0) and torch.all(progress_cols(new_crit) == 0)
+    # the critic's enemy character keeps its weights, after the new columns
+    assert torch.equal(new_crit.encoder.ctx[0].weight[:, ob.CONTEXT:],
+                       old_crit.encoder.ctx[0].weight[:, ob.CONTEXT - len(ob.PROGRESS):])
+    same_outputs(old, new, old_crit, new_crit, setup, states, to_old=no_progress)
+    mem = None
+    for st in states:
+        obs, mem = ob.observe(st, setup, 1, mem)
+    assert obs.ctx[:, ob.CTX["progress_rate"]].sum() > 0 and obs.ctx[:, ob.CTX["progress_any"]].sum() > 0
+
+
+PRE_PROGRESS = [p for p in (ROOT / "build/nn-train/test5/r1_idleprog/m15.pt",) if p.exists()]
+
+
+@pytest.mark.skipif(not PRE_PROGRESS, reason="no checkpoint saved before PROGRESS (build/ is not in Git)")
+@pytest.mark.parametrize("path", PRE_PROGRESS, ids=[p.parent.name + "/" + p.name for p in PRE_PROGRESS])
+def test_a_checkpoint_saved_before_the_progress_inputs_acts_as_before(path):
+    from tools.nn.train import checkpoint
+    data = checkpoint.read(path)
+    cfg = checkpoint.config_of(data)
+    new, new_crit = checkpoint.load_policy(path), checkpoint.load_critic(path).eval()
+    assert torch.all(progress_cols(new) == 0) and torch.all(progress_cols(new_crit) == 0)
+    old, old_crit = pre_progress_networks(cfg)
+    torch.nn.Module.load_state_dict(old, data["actor"])
+    torch.nn.Module.load_state_dict(old_crit, data["critic"])
+    setup, states = timer_states()
+    same_outputs(old, new, old_crit, new_crit, setup, states, to_old=no_progress, atol=1e-4)
 
 
 # --- the second Empire wave's inputs (02.10.2026): passport features and ability conditions appended ---

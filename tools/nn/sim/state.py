@@ -194,13 +194,15 @@ class State:
     def observation(self):
         """The contract with the network (tools/nn/model/observation.py): the OBSERVED tensors
         [B, N], `side` [B, N], `t` [B] (s), the abilities' timers ab{k}_on / ab{k}_cd [B, N] (s:
-        active left, until ready; the observation shows them for own units, `on` for seen enemies) and
-        `fx_on` [B, N]: the innate effects on now (bitmask, tools/nn/sim/effects.py)."""
+        active left, until ready; the observation shows them for own units, `on` for seen enemies),
+        `fx_on` [B, N]: the innate effects on now (bitmask, tools/nn/sim/effects.py) and `gone` [B, N]
+        (left the map: its gold is lost whole, the attacker's progress in the observation)."""
         out = {k: self.u[k] for k in OBSERVED}
         for k in range(3):
             for t in ("on", "cd"):
                 out[f"ab{k}_{t}"] = self.u[f"ab{k}_{t}"]
         out["fx_on"] = self.u["fx_on"]
+        out["gone"] = self.u["gone"]
         out["side"] = self.u["side"]
         out["t"] = self.t
         return out

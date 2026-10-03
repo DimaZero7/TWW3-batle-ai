@@ -295,6 +295,78 @@ class TestDamageTimers:
         assert self.timers(b)[0].tolist() == pytest.approx([1, 3 / ob.SINCE, 1, 1 / ob.SINCE])
 
 
+class TestProgress:
+    """The attacker's progress (observation PROGRESS): the reward's idle clock - its damage rate in the
+    defender's gold, and when that rate last reached RATE_MIN - seen by both sides."""
+
+    KEYS = TestEvents.KEYS                       # side 1: general, spearmen; side 2: warlord, clanrats
+
+    def setup_state(self, attacker=1):
+        _, state = sources.synthetic(batch=1, own=2, enemy=2, seed=3)
+        setup = ob.Setup(keys=[list(self.KEYS)], side=np.array([[1, 1, 2, 2]]),
+                         bounds=np.array([sources.CROSSROADS], np.float32),
+                         factions=[(sources.EMPIRE, sources.SKAVEN)], attacker=np.array([attacker]))
+        state = with_state(state, men=np.array([[1.0, 100, 1, 100]]), hp=np.ones((1, 4)), r=np.zeros((1, 4), bool),
+                           s=np.zeros((1, 4), bool), ms=np.full((1, 4), 2.0), vis=np.ones((1, 4), bool))
+        return setup, state
+
+    @staticmethod
+    def progress(obs):
+        return obs.ctx[0, [C[n] for n in ob.PROGRESS]]
+
+    def test_the_cost_is_the_passports(self):
+        setup, _ = self.setup_state()
+        want = [passport.load()[k]["multiplayer_cost"] for k in self.KEYS]
+        assert setup.cost[0].tolist() == want and min(want) > 0
+
+    def test_the_rate_is_the_defenders_gold_lost_a_minute_over_the_window_and_both_sides_see_it(self):
+        setup, s = self.setup_state()
+        cost = setup.cost[0]
+        budget = cost.sum() / 2
+        mem = {1: None, 2: None}
+        rate, last, prev = 0.0, -1.0, None
+
+        def look(t, share, **changes):
+            nonlocal rate, last, prev
+            if prev is not None:
+                a = np.exp(-(t - prev) / ob.RATE_WINDOW)
+                rate = a * rate + (1 - a) * share * 60 / (t - prev)
+                last = t if rate >= ob.RATE_MIN else last
+            prev = t
+            want = [min(rate / ob.RATE_MIN, ob.RATE_CAP), float(last >= 0),
+                    min((t - last) / ob.SINCE, 1) if last >= 0 else 0]
+            for side in (1, 2):
+                obs, mem[side] = ob.observe(with_state(s, t=np.array([t]), **changes), setup, side, mem[side])
+                assert self.progress(obs).tolist() == pytest.approx(want, abs=1e-6), (t, side)
+            return want
+
+        assert look(0.0, 0) == [0, 0, 0]
+        hp = np.array([[1, 1, 1, 0.8]])                                    # the attacker strikes the clanrats
+        assert look(0.5, cost[3] * 0.2 / budget, hp=hp)[1] == 1            # a real blow: the clock resets
+        own = np.array([[1, 0.5, 1, 0.8]])                                 # the defender's blows: not progress
+        look(1.0, 0, hp=own)
+        r = np.array([[False, False, False, True]])                        # the clanrats rout: half of the rest
+        look(1.5, cost[3] * 0.8 * ob.ROUT_SHARE / budget, hp=own, r=r)
+        look(2.0, 0, hp=own)                                               # they rally: no damage (not negative)
+        unknown = np.array([[1, 0.5, 1, np.nan]])
+        look(2.5, 0, hp=unknown)                                           # not read: nothing
+        look(3.0, 0, hp=np.array([[1, 0.5, 1, 0.5]]))                      # read again: the new reference
+        look(3.5, (cost[2] + cost[3] * 0.5) / budget, hp=np.array([[1, 0.5, 1, 0.5]]),
+             men=np.array([[1.0, 100, 0, 100]]), s=np.array([[False, False, False, True]]))   # dead, shattered: whole
+        for t in (60.0, 200.0, 600.0):                                     # no damage: the rate falls, the time grows
+            want = look(t, 0, hp=np.array([[1, 0.5, 1, 0.5]]), men=np.array([[1.0, 100, 0, 100]]),
+                        s=np.array([[False, False, False, True]]))
+        assert want[0] < 1 and want[2] == 1
+
+    def test_when_side_2_attacks_side_1s_losses_count(self):
+        setup, s = self.setup_state(attacker=2)
+        _, mem = ob.observe(with_state(s, t=np.array([0.0])), setup, 1)
+        obs, mem = ob.observe(with_state(s, t=np.array([0.5]), hp=np.array([[1, 1, 1, 0.5]])), setup, 1, mem)
+        assert self.progress(obs).tolist() == [0, 0, 0]
+        obs, _ = ob.observe(with_state(s, t=np.array([1.0]), hp=np.array([[1, 0.5, 1, 0.5]])), setup, 1, mem)
+        assert self.progress(obs)[0] > 1 and self.progress(obs)[1] == 1
+
+
 class TestAbilities:
     """Abilities as a player sees them: own lord's bar (ready, timers), the enemy's only while active
     and seen; every ability by its passport (tools/nn/model/abilities.py)."""

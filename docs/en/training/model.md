@@ -80,6 +80,7 @@ Every decision also gets the side's context:
 | Battle time elapsed (a fine clock for the first minutes) | log(1 + s / 30) / log(21): 0.23 at 30 s, 0.59 at 150 s, 1 from 10 minutes |
 | We have dealt damage yet; seconds since we last did | 0/1; s / 300, up to 1 (0 before the first) |
 | The enemy has dealt us damage yet; seconds since it last did | 0/1; s / 300, up to 1 (0 before the first) |
+| The attacker's progress (both sides): its damage rate; it has reached 0.05 yet; seconds since it last was at 0.05 or more | rate / 0.05, up to 4; 0/1; s / 300, up to 1 (0 before) |
 
 The game announces a general's death, so the enemy lord's counts even when he was not seen.
 
@@ -95,12 +96,28 @@ keeps the previous health (`Memory.prev_hp`) and the time of each side's last da
 (`Memory.hit_t`), so the simulator, recorded battles (per-second samples) and the companion
 (the states the game sends) are measured by one rule. In training it is the reward's attacker
 damage (`reward.struck`, `rollout.Battles.last_hit`: the defender's health fell in the step):
-the attacker sees it as "we dealt", the defender as "the enemy dealt"; so the critic can predict
-the attacker's idle cost and the policy can anticipate it ([training](training.md)).
+the attacker sees it as "we dealt", the defender as "the enemy dealt".
+
+The attacker's progress (`observation.PROGRESS`) is the clock of the reward's idle cost with
+`--idle-rate` ([training](training.md)), so the actor and the critic see the state that cost
+depends on. The attacker's damage rate is the defender's gold lost (`observation.gold_lost`: the
+unit's cost × the share of its health lost; a routing unit loses half of what it has left besides,
+a dead, shattered or gone one all of it; a rally is not damage) as a share of the budget (the mean
+of the two armies' cost) a minute, an exponential mean over 30 s; the input is that rate / 0.05 (1
+at the threshold), whether it has reached 0.05 yet, and seconds since it last did (the reward's
+`last_hit`: the idle multiplier m grows with it). Both sides see it. It is computed from every
+unit's health and state (a unit whose health is not known counts nothing until known again) and
+the passports' cost (`Setup.cost`), with the time between the observations, in the memory
+(`Memory.prev_gold`, `rate`, `rate_t`): the simulator's observation and the companion's (the
+game's states; a unit gone from the map reads no men there, `gone` in the simulator) are one rule.
+It is the reward's clock while `--idle-rate`, `--idle-window` and the rout share are 0.05, 30 s
+and 0.5 (`observation.RATE_MIN`, `RATE_WINDOW`, `ROUT_SHARE`); `rollout.Battles` warns otherwise.
 
 A checkpoint written before these inputs (with the `t / 3600` column) loads as it is
 (`encoder.TokenEncoder`): that column's weights are dropped and the new inputs' weights start at
-zero, so it acts exactly as it did with the battle time at 0. What dropping the real `t / 3600`
+zero, so it acts exactly as it did with the battle time at 0. One written before the progress
+inputs loads with zero weights for them (inserted after the damage timers; the critic's enemy
+character keeps its weights) and acts exactly as it did. What dropping the real `t / 3600`
 changes (01.10.2026, 24 simulated battles against `ai_like`, 20 minutes, the greedy choices of
 every unit that takes orders every 5 s, each network with its own memory): `test5/t0_gold30/m20.pt`
 order kind 99.92% the same (35 487 choices), attack target 99.92%, move point 99.96%;
@@ -162,7 +179,7 @@ an older network loads with zero weights for it (`encoder.pad_inputs`) and acts 
 ```mermaid
 flowchart TB
   tok["Unit tokens: 148 numbers each<br/>(69 of them the passport, 28 the innate effects)"] --> enc["Shared encoder<br/>the same weights for every unit"]
-  ctx["Context: character, role, counts, lords,<br/>time elapsed, damage timers"] --> enc
+  ctx["Context: character, role, counts, lords,<br/>time elapsed, damage timers,<br/>the attacker's progress"] --> enc
   enc --> att["Attention layers<br/>+ distance bias, masks"]
   att --> gru["Memory: a GRU per unit<br/>and one for the army"]
   gru --> last["Last attention layer"]
@@ -278,7 +295,9 @@ An int8 export of the actor looks practical; not done yet:
   active and seen, nothing ready without timers or for a routing lord; the damage timers restart
   at each damage, per side and per battle row, rising or unknown health is no damage, a new memory
   starts empty, a recording gives the same timers as the same states observed one by one; the
-  context does not depend on time beyond the fine clock (no time limit).
+  context does not depend on time beyond the fine clock (no time limit); the attacker's progress:
+  the cost is the passports', the rate follows the defender's gold lost (blows, a rout, a rally,
+  unknown health, death and shattering), both sides see it, the defender's blows do not count.
 - `tests/tools/test_abilities.py` (numpy): reading the ability tables, passports, the cards'
   check, the saved numbers, features and slots.
 - `tests/tools/test_nn_model.py` (torch; skipped in `.venv`, run in the container): numpy and
@@ -289,13 +308,17 @@ An int8 export of the actor looks practical; not done yet:
   valid choice, log-probability only when chosen, an older actor loads; the damage timers on
   numpy and torch; networks with the older context (the `t / 3600` column) load and give the same
   logits, greedy actions, memory and values, also the trained `test5/t0_gold30/m20.pt` and
-  `runs/long_ai/best.pt` (skipped without them); the innate effects: owned as the catalogue says,
+  `runs/long_ai/best.pt` (skipped without them); networks saved before the progress inputs (and
+  `test5/r1_idleprog/m15.pt`) load and give the same outputs; the innate effects: owned as the catalogue says,
   numpy and torch the same, "on" follows its conditions and is shown for seen enemies only, the
   simulator's `fx_on` and the observed fields agree, networks saved before them (and the chain's
   `test5/it5/m20.pt`) load and give the same outputs, the same with the effect inputs zeroed, and
   the new inputs get a gradient.
 - `tests/tools/test_nn_train.py`: in the simulator the attacker's row sees `rollout.last_hit` as
-  "we dealt", the defender's as "the enemy dealt", per battle, cleared on restart; training
+  "we dealt", the defender's as "the enemy dealt", per battle, cleared on restart; both sides'
+  rows see the attacker's progress as `rollout.Battles.hit_rate` / `last_hit` with `--idle-rate`
+  0.05 (blows, scratches, a rout, a rally, a unit leaving the map, restarts), and the companion,
+  given the same states as the game's rows, computes the same; training
   continues from `m20.pt` (one PPO update).
 
 The `snake-ai-trainer` image has no pytest. The torch tests were run with the pure-Python

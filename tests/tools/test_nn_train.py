@@ -984,6 +984,84 @@ class TestProperties:
         s1, s2 = agrees()
         assert float(s1.abs().sum() + s2.abs().sum()) == 0                # cleared for the new battles
 
+    def test_both_sides_and_the_companion_see_the_attackers_progress_as_the_reward_clocks_it(self):
+        """observation PROGRESS = the rollout's hit_rate / last_hit (idle_rate RATE_MIN) on both sides' rows,
+        per battle, cleared when a battle starts again; the companion, given the same states as the game's
+        rows (a unit gone from the map: no men), computes the same."""
+        from tools.nn.companion import exchange
+        from tools.nn.model import observation as ob
+        actor, crit = nets()
+        w = reward.Weights(idle_rate=ob.RATE_MIN, idle_window_s=ob.RATE_WINDOW, rout_share=ob.ROUT_SHARE)
+        env = rollout.Battles(league.layout(4, 1, opponent="nearest"), MIRROR, params=rollout.params_with_limit(6.0),
+                              weights=w)
+        B, cols = env.B, [ob.CTX[n] for n in ob.PROGRESS]
+
+        def want():
+            hit = env.last_hit >= 0
+            since = torch.where(hit, ((env.st.t - env.last_hit) / ob.SINCE).clamp(0, 1), torch.zeros_like(env.last_hit))
+            return torch.stack([(env.hit_rate / ob.RATE_MIN).clamp(0, ob.RATE_CAP), hit.float(), since], 1)
+
+        def unit(b, side, k):         # the k-th unit of `side` in battle b
+            return int((env.st.u["side"][b] == side).nonzero()[k])
+
+        def strike(b, side, share, k=-1):
+            u = env.st.u
+            i = unit(b, side, k)
+            u["hp_abs"][b, i] *= 1 - share
+            u["hp"][b, i] = u["hp_abs"][b, i] / u["hp0"][b, i]
+
+        def game_doc(b, batch):       # battle b as the game's state document (exchange.py)
+            u, st = env.st.u, env.st
+            rows = [{"n": f"u{i}", "side": int(u["side"][b, i]), "key": st.keys[b][i], "x": float(u["x"][b, i]),
+                     "z": float(u["z"][b, i]), "men": 0.0 if bool(u["gone"][b, i]) else float(u["men"][b, i]),
+                     "hp": float(u["hp"][b, i]), "ms": float(u["ms"][b, i]), "r": bool(u["r"][b, i]),
+                     "s": bool(u["s"][b, i])} for i in range(st.N) if int(u["side"][b, i]) > 0]
+            return {"batch": batch, "move": 0, "t": float(st.t[b]) * 1000, "attacker": int(st.attacker[b]),
+                    "units": rows}
+
+        game = {"batch": None, "memory": None, "n": 0}
+
+        def companion():              # battle 0 seen by the companion -> its PROGRESS
+            if game["batch"] is None or float(env.st.t[0]) == 0:
+                game["n"] += 1
+                game["batch"], game["memory"] = f"b{game['n']}", None
+                game["battle"] = exchange.battle(game_doc(0, game["batch"]))
+            g = game["battle"]
+            state = exchange.arrays(game_doc(0, game["batch"]), g.names)
+            obs, game["memory"] = ob.observe(state, g.setup, 1, game["memory"])
+            return obs.ctx[0, cols]
+
+        env.cur = env.observe(True)                                       # t 0: the first decision's state
+        seen_game = companion()
+        reached = set()
+        for k in range(16):
+            att = env.st.attacker
+            if 1 <= k <= 4:
+                strike(0, int(3 - att[0]), 0.03)                          # battle 0: steady blows
+            if k == 6:
+                env.st.u["r"][0, unit(0, int(3 - att[0]), -2)] = True    # ... a rout (half its rest lost)
+            if k == 8:
+                env.st.u["r"][0, unit(0, int(3 - att[0]), -2)] = False   # ... it rallies (no damage)
+            if k == 9:
+                i = unit(0, int(3 - att[0]), -3)
+                env.st.u["r"][0, i], env.st.u["gone"][0, i] = True, True  # ... another leaves the map: whole
+            strike(1, int(3 - att[1]), 1e-4)                              # battle 1: scratches only
+            if k == 3:
+                strike(1, int(att[1]), 0.3)                               # ... and the defender's blow
+                strike(2, int(3 - att[2]), 0.3)                           # battle 2: one big blow, then a pause
+            if k == 7:
+                strike(3, int(3 - att[3]), 0.002, k=0)                    # battle 3: a small blow
+            env.step(actor, crit)
+            ctx = env.cur[0]["ctx"]
+            assert torch.allclose(ctx[:B, cols], want(), atol=1e-5), k
+            assert torch.allclose(ctx[B:, cols], want(), atol=1e-5), k
+            seen_game = companion()
+            assert np.allclose(seen_game, ctx[0, cols].numpy(), atol=1e-5), (k, seen_game, ctx[0, cols])
+            reached |= {b for b in range(B) if float(env.last_hit[b]) >= 0}
+            if k == 11:                                                   # t 6: the limit, all start again
+                assert float(ctx[:, cols].abs().sum()) == 0 and env.last_hit.tolist() == [-1.0] * B
+        assert reached == {0, 2}
+
 # --- level 3: the loop ---
 
 class TestAbilities:
@@ -1077,7 +1155,7 @@ class TestLoop:
     def test_training_continues_from_a_checkpoint_saved_before_the_damage_timers(self):
         from tools.nn.train import run
         actor, crit = run.networks("small", "cpu", checkpoint.DIR / "test5/t0_gold30/m20.pt")
-        assert torch.all(actor.encoder.ctx[0].weight[:, -len(rollout.ob.TIMERS):] == 0)
+        assert torch.all(actor.encoder.ctx[0].weight[:, -len(rollout.ob.TIMERS) - len(rollout.ob.PROGRESS):] == 0)
         env = rollout.Battles(league.layout(2, 1, opponent="nearest"), MIRROR)
         batch = rollout.collect(env, actor, crit, 2)
         opt = torch.optim.Adam(list(actor.parameters()) + list(crit.parameters()), lr=1e-4)

@@ -20,6 +20,8 @@ A transition keeps only the abilities' state (abil [.., SLOTS, DYNAMIC]) and the
 (abil_row); full_obs() puts the passports back from the bank (batch["abil_static"]) for the update:
 the whole input would be ~3 GB for 1024 battles x 64 decisions.
 """
+import warnings
+
 import numpy as np
 import torch
 
@@ -39,7 +41,7 @@ from tools.nn.train import behaviour, drills, league, opponents, randomise, rewa
 CRITIC_KEYS = ("tokens", "ctx", "own", "attend", "pos")
 FRAME = ("cx", "cz", "ux", "uz")
 MEMORY = ("last_x", "last_z", "last_t", "seen", "dead", "prev_x", "prev_z", "prev_t", "prev_vis", "last_melee_t",
-          "last_rout_t", "lord_dead_t", "prev_hp", "hit_t")
+          "last_rout_t", "lord_dead_t", "prev_hp", "hit_t", "prev_gold", "rate", "rate_t")
 ROLES = ("attack", "defend")
 # Outcome counters: the opponents, and the untrained network as "past" on its own.
 STAT_NAMES = league.OPPONENTS + ("untrained",)
@@ -259,6 +261,11 @@ class Battles:
         self.layout = layout
         self.spread = spread
         self.weights = weights
+        if weights.idle_rate > 0 and (weights.idle_rate, weights.idle_window_s, weights.rout_share) != (
+                ob.RATE_MIN, ob.RATE_WINDOW, ob.ROUT_SHARE):
+            warnings.warn(f"the idle clock (idle_rate {weights.idle_rate}, idle_window_s {weights.idle_window_s}, "
+                          f"rout_share {weights.rout_share}) is not the one the observation shows (PROGRESS: "
+                          f"{ob.RATE_MIN}, {ob.RATE_WINDOW}, {ob.ROUT_SHARE})")
         self.auto_reset = auto_reset
         self.gen = torch.Generator(device=self.device).manual_seed(seed)
         # Where battles come from: the fixed scenes (battle b plays layout.scene[b]) or generated armies.

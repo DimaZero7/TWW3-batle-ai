@@ -161,8 +161,11 @@ class TestCompact:
         for _ in range(4):
             whole.step(actor(), None, True)
             part.step(actor(), None, True)
+        # the state: the same up to float rounding too (a batch's size sets the order of the network's sums, and
+        # a greedy point or bearing may differ in the last digit)
         for k, v in part.st.u.items():
-            assert torch.equal(v, whole.st.u[k][keep]), k
+            w = whole.st.u[k][keep]
+            assert torch.allclose(v, w, atol=1e-3) if v.is_floating_point() else torch.equal(v, w), k
         assert torch.equal(part.st.t, whole.st.t[keep])
         assert torch.equal(part.kind_battle, whole.kind_battle[keep])
         assert torch.equal(part.order_battle, whole.order_battle[keep])
