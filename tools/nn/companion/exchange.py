@@ -104,6 +104,38 @@ def running_by_speed(state, walk, prev=None):
     return x.copy(), z.copy(), t
 
 
+def engaged_targets(state, side):
+    """Own units' `target` as the simulator has it (tools/nn/sim/battle.py: the enemy fought or shot at
+    now, -1 otherwise), in place in `state` (exchange.arrays); the observation's has_target input.
+
+    The game's `t` is the engine's target: an attack order's target from the moment it is given (free
+    units under an attack: 99 % with a target), and mostly none for a unit fighting under a hold (26 %)
+    or a move (0 %). In the simulator a unit has a target exactly while it is in melee or shooting.
+    Fed the game's, the network saw 'in melee, no target' (never in training) and 'free, target' (gate
+    of 03.10.2026, build/gap2/hastarget.py); the same shift in the simulator (build/gap2/sim2.py
+    --gametarget) lowered its trade against ai_like by 0.105 a battle and moved its orders to the
+    game's mix (hold 0.73 -> 0.63, attack 0.17 -> 0.24, move 0.10 -> 0.13; game 0.61 / 0.23 / 0.16).
+    So: an own unit in melee keeps the engine's target when it is a present enemy, else takes the
+    nearest present enemy; a firing unit keeps the engine's target; any other own unit has none.
+    Enemy rows are left as read (has_target is an own-only input)."""
+    tg = state["target"][0]
+    x, z, men = state["x"][0], state["z"][0], state["men"][0]
+    enemy = (np.asarray(side) != 1) & (men > 0) & np.isfinite(x) & np.isfinite(z)
+    for i in np.nonzero(np.asarray(side) == 1)[0]:
+        j = int(tg[i])
+        valid = 0 <= j < len(tg) and bool(enemy[j])
+        if state["m"][0, i]:
+            if not valid and enemy.any() and np.isfinite(x[i]) and np.isfinite(z[i]):
+                d = np.where(enemy, np.hypot(x - x[i], z - z[i]), np.inf)
+                j, valid = int(d.argmin()), True
+            tg[i] = j if valid else -1
+        elif state["fire"][0, i]:
+            tg[i] = j if valid else -1
+        else:
+            tg[i] = -1
+    return state
+
+
 def arrays(doc, names, slots=None):
     """The state for tools/nn/model/observation.py: dict of arrays [1, N] (NaN: not read), t [1] in s;
     with slots (Battle.slots) also the abilities' timers (ability_timers)."""

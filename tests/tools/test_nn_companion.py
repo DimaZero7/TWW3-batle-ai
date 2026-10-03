@@ -224,6 +224,30 @@ def test_running_is_the_simulators_speed_not_the_games_run_mode():
     assert obs.tokens[0, 1, ob.INDEX["running"]] == 1 and obs.tokens[0, 3, ob.INDEX["running"]] == 0
 
 
+def test_own_targets_are_the_simulators_fought_or_shot_enemy():
+    # The game's t is the engine's target: an attack order's target while the unit still walks, and
+    # often none for a unit fighting under a hold or a move. The network learned the simulator's:
+    # a target exactly while the unit fights or shoots.
+    doc = state_doc()
+    doc["units"].append(unit("own_spear_2", 1, SPEAR, 170.0, m=True))                       # fights, no t
+    doc["units"].append(unit("own_spear_3", 1, SPEAR, -100.0, fire=True, t="enemy_lord"))   # shoots
+    doc["units"].append(unit("own_spear_4", 1, SPEAR, 180.0, m=True, t="enemy_lord"))       # fights, t kept
+    doc["units"].append(unit("own_spear_5", 1, SPEAR, -50.0, fire=True))                    # no t read
+    b = exchange.battle(doc)
+    s = exchange.arrays(doc, b.names)
+    assert s["target"][0].tolist() == [-1, 3, -1, -1, -1, 2, 2, -1]
+    exchange.engaged_targets(s, b.side)
+    # own_spear_1 under an attack, not fighting: none; own_spear_2 in melee: the nearest enemy (spear at 175)
+    assert s["target"][0].tolist() == [-1, -1, -1, -1, 3, 2, 2, -1]
+    obs, _ = ob.observe(s, b.setup, 1)
+    assert obs.tokens[0, :2, ob.INDEX["has_target"]].tolist() == [0, 0]
+    assert obs.tokens[0, 4:7, ob.INDEX["has_target"]].tolist() == [1, 1, 1]
+    doc["units"][3]["men"] = 0                     # the engine's target is gone: the nearest present enemy
+    s = exchange.arrays(doc, b.names)
+    exchange.engaged_targets(s, b.side)
+    assert s["target"][0, 6] == 2 and s["target"][0, 4] == 2
+
+
 def test_orders_in_force_skip_keep_and_units_that_take_none():
     given = {"own_a": {"unit": "own_a", "kind": "move", "x": 1.0, "z": 2.0, "run": True}}
     orders = [{"unit": "own_a", "kind": "keep"}, {"unit": "own_b", "kind": "attack", "target": "enemy_c", "run": True},

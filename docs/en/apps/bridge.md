@@ -40,6 +40,14 @@ sequenceDiagram
   and in 99 % of the game AI's melee seconds; the simulator's `f` is on in 3-4 % of melee seconds.
   Measured by speed, the game AI's units in melee run 9 % of the time, as the simulator's. Recordings
   keep the game's raw value (the replay uses it as the run order).
+- **Target** (`t` of our units, the network's `has_target`): the companion replaces the game's reading
+  with the simulator's (`exchange.engaged_targets`): a unit has a target exactly while it fights (the
+  engine's target if it is a present enemy, else the nearest one) or shoots (the engine's target).
+  The game's `t` is the engine's target: an attack order's target from the moment it is given (99 % of
+  free units under an attack), none for most units fighting under a hold (74 %) or a move (100 %). Gate
+  of 03.10.2026: the same shift put into the simulator cut the network's trade against `ai_like` by 0.105
+  a battle and moved its orders to the game's mix (hold 0.73 -> 0.63, attack 0.17 -> 0.24, move 0.10 ->
+  0.13; in the game 0.61 / 0.23 / 0.16). Recordings keep the game's raw value.
 - The companion answers with orders for that move. The game reads the file every 100 ms of battle
   time (`poll_ms`) and gives each of our units its order.
 - **Only a changed order is given again**: another kind, another target, run instead of walk, or a
