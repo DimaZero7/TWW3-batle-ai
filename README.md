@@ -5,13 +5,11 @@
 **Русский** · [English](#english)
 
 Основа для боевого ИИ **Total War: WARHAMMER III**: измеренная механика боя,
-инструменты для работы с игрой из Lua-скриптов и данные, на которых потом можно
-с нуля обучить нейросеть.
+инструменты для работы с игрой из Lua-скриптов и нейросеть для боя, которая учится с нуля
+в нашем симуляторе и проверяется в игре против ИИ игры.
 
-**Сброс 30.09.2026.** По решению автора проекта наш алгоритмический ИИ (стратегия,
-тактика, строй, дерево ИИ), его документы, карточки задач и наш симулятор боя
-удалены. Прежняя работа осталась в истории Git (последний коммит до сброса —
-`242c3b1`).
+Прежний алгоритмический ИИ проекта (стратегия, тактика, строй, дерево ИИ) удалён по
+решению автора проекта; он в истории Git (последний коммит с ним — `242c3b1`).
 
 ## Что есть в проекте
 
@@ -23,6 +21,9 @@
   игру или записывают бои — [модули кода](docs/ru/apps/README.md).
 - **Данные для обучения** — правила из базы данных игры, запись боёв ИИ игры на
   арене и загрузчик этих записей — [данные для обучения нейросети](docs/ru/training/README.md).
+- **Нейросеть для боя** — симулятор боя, вход и устройство сети, обучение PPO, мост к игре и
+  проверка в игре — [обучение](docs/ru/training/training.md), [симулятор](docs/ru/training/simulator.md),
+  [проверка в игре](docs/ru/launch/gate.md).
 
 Код разбит на приложения: логика — в сервисах, обращения к движку — только в
 адаптерах. Тесты проверяют Lua 5.1 без запуска игры.
@@ -62,13 +63,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -T
 ## English
 
 The base for a battle AI for **Total War: WARHAMMER III**: measured battle
-mechanics, tools to work with the game from Lua scripts, and the data on which a
-neural network can later be trained from scratch.
+mechanics, tools to work with the game from Lua scripts, and a battle network trained
+from scratch in our simulator and checked in the game against the game's AI.
 
-**Reset of 30.09.2026.** By the project owner's decision our algorithmic AI (strategy,
-tactics, formation, the AI tree), its docs, the task cards and our battle
-simulator were removed. The old work stays in the Git history (the last commit
-before the reset is `242c3b1`).
+The project's earlier algorithmic AI (strategy, tactics, formation, the AI tree) was removed
+by the project owner's decision; it is in the Git history (the last commit with it is
+`242c3b1`).
 
 ### What the project has
 
@@ -80,6 +80,9 @@ before the reset is `242c3b1`).
   or record battles — [code modules](docs/en/apps/README.md).
 - **Training data** — rules from the game's database, recording the game's AI
   battles in the arena and a loader for those records — [data for training the network](docs/en/training/README.md).
+- **The battle network** — the battle simulator, the network's inputs and model, PPO training,
+  the bridge to the game and the in-game check — [training](docs/en/training/training.md),
+  [simulator](docs/en/training/simulator.md), [in-game check](docs/en/launch/gate.md).
 
 Code is split into apps; logic lives in services and engine calls only in
 adapters. Tests run Lua 5.1 without the game.

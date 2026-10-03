@@ -4,8 +4,8 @@
 
 A real battle where our side (side 1) is commanded by the network and side 2 by the game's AI. The
 network runs in the companion (`tools/nn/companion/`) in the training container; the game and the
-companion talk through two files ([bridge](../apps/bridge.md)). Until the network is trained its
-orders are random, but they go the whole way: game → network → orders → our units.
+companion talk through two files ([bridge](../apps/bridge.md)). With the default untrained
+`random.pt` its orders are random, but they go the whole way: game → network → orders → our units.
 
 ## Launch
 
@@ -59,7 +59,7 @@ the answer (`turn`), how many units got each kind of order, the first orders.
 `events.jsonl`: `nn_orders` (orders given, the answer's wait), `nn_miss` (no answer in time), and in
 `result` the counters `nn_*` ([bridge](../apps/bridge.md#events)).
 
-## Check in game (30.09.2026)
+## A check in the game
 
 Run `20260930-204047`: ×20, arena 7 against 7 of the Empire, the untrained network
 (`build/nn-train/random.pt`, sampling), Normal difficulty, the preferences put back.
@@ -75,7 +75,7 @@ Run `20260930-204047`: ×20, arena 7 against 7 of the Empire, the untrained netw
 | Battle | the game's AI won (534 men left against 375): random orders do not win |
 | Lua errors | none; the game closed, our pack and the exchange files removed |
 
-The first launch of the day (`20260930-203835`) crashed the game while it was loading, before our
+One launch (`20260930-203835`) crashed the game while it was loading, before our
 script ran (no events at all; the crash report shows only the game's code). The same build ran fine
 the next time. The cause is not known; the companion now looks for files 10 times a second while
 nothing is happening (loading, menus) instead of 200.

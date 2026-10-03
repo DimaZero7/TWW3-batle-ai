@@ -3,14 +3,18 @@
 [← Back](../../README.md) · [Project](../../README.md) · **English** | [Русский](../ru/README.md)
 
 This is the project's base: the battle mechanics of Total War: WARHAMMER III that we
-measured, our tools to work with the game, and the data on which a neural network can
-later be trained from scratch. Our own algorithmic AI was removed on 30.09.2026 (the
-project owner's decision); the old work is in the Git history.
+measured, our tools to work with the game, and the battle network trained from scratch in our
+simulator and checked in the game. The project's earlier algorithmic AI was removed (the
+project owner's decision); it is in the Git history.
 
 ## Data for training the network
 
 - **[Data for training the network](training/README.md)** — the arena, recorded battles of
   the game's AI, rules from the game's database, measured facts; how to collect and read them.
+- [Network model](training/network.md) · [Inputs and model](training/model.md) ·
+  [Training](training/training.md) · [Battle simulator](training/simulator.md) ·
+  [Random armies](training/armies.md) · [Unit passports](training/units.md) ·
+  [Measurements](training/measurements.md) · [In-game check](launch/gate.md)
 
 ## Game mechanics
 

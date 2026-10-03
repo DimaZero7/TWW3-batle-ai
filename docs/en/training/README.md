@@ -2,11 +2,20 @@
 
 [← Back](../README.md) · [Documentation](../README.md) › Data for training · [Русский](../../ru/training/README.md)
 
-Later we want to train a neural network from scratch. The project has no
-network of its own now. This page says what data can already be collected and
-how to use it. What the network itself will be, where it runs and when it is
-ready: [network model](network.md). Its inputs and layers in code: [inputs and model](model.md).
-How it is trained: [training](training.md).
+The battle network is trained from scratch in our own simulator and checked in the game
+against the game's AI. This page says what data is collected from the game and how to use it;
+the pages of the section:
+
+| Page | What |
+|---|---|
+| [Network model](network.md) | the design: goal, where it runs, faction character, co-op, readiness |
+| [Inputs and model](model.md) | what the network sees, its layers and heads, in code |
+| [Training](training.md) | PPO in the simulator: battles, opponents, reward, drills, evaluation, what was tried and rejected |
+| [Battle simulator](simulator.md) | the battle the network trains in, its checks against the game, pending changes |
+| [Random armies](armies.md) | the battle generator for training and the in-game check |
+| [Unit passports](units.md) | the units' numbers from the game's database, innate effects, how to add a unit |
+| [Measurements in the game](measurements.md) | numbers from real battles the simulator is checked against |
+| [In-game check](../launch/gate.md) | the network against the game's AI at Normal |
 
 ```mermaid
 flowchart LR
@@ -133,7 +142,7 @@ for run in gamedata.runs():          # Normal difficulty only
   runs of the dropped battle series (with `series.json`) are left out.
 - `python -m tools.nn.gamedata` lists the battles.
 
-As of 30.09.2026 there are 40 runs of the mirror arena, 18 of them fair battles with a result. The
+The mirror arena has 40 recorded runs, 18 of them fair battles with a result. The
 mechanics ([morale](../game/units/morale.md), [melee](../game/units/melee.md) and
 the other pages below) were worked out from the first 13 of them:
 `20260930-130637` … `20260930-132200`, 7522 s of records. 5 more battles
@@ -148,7 +157,7 @@ The rule numbers come from the game's database: [the game's database](../game/da
 
 The units' numbers — [unit passports](units.md), `config/nn/units.json`
 (`py -3.14 -m tools.nn.units`): men, health, speed, weapons, armour, shield and
-shooting of the seven v1 units (Empire and Skaven), checked against their cards from battle.
+shooting of the training pools' units (Empire and Skaven), checked against their cards from battle.
 
 Numbers from battles to check the simulator against — [measurements in the game](measurements.md)
 (`python -m tools.nn.measure` → `build/nn-measure/targets.json`): melee one against one,
@@ -162,7 +171,7 @@ How the network learns in it — [training](training.md) (`tools/nn/train/`,
 `bash tools/nn/dock.sh tools.nn.train.run`): PPO, battles against itself, its past versions and scripts.
 
 The battles it learns and is checked on — [random armies](armies.md) (`tools/nn/armies/`,
-`python -m tools.nn.armies`): an equal budget (Skaven 0.8 of it), a lord and 0–19 units a side, deployed for the
+`python -m tools.nn.armies`): an equal budget, a lord and 0–19 units a side, deployed for the
 simulator and the game.
 
 How the network is checked in the game against the game's AI — the [in-game check](../launch/gate.md)

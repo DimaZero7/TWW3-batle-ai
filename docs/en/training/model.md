@@ -3,7 +3,7 @@
 [← Back](README.md) · [Documentation](../README.md) › [Training data](README.md) › Inputs and model · [Русский](../../ru/training/model.md)
 
 What the network gets as input and how it is built, in code, following the design in
-[network model](network.md). There is no training yet: the weights are random. Code — `tools/nn/model/`
+[network model](network.md); it is trained in the simulator ([training](training.md)). Code — `tools/nn/model/`
 (PyTorch; the observation also works on plain numpy).
 
 ```mermaid
@@ -38,7 +38,7 @@ takes a recorded battle and the simulator's batch: both have the fields of the r
 
 | Input | Who sees it | Scale |
 |---|---|---|
-| Passport of every unit, own and enemy ([passports](units.md)): men, health, mass, speeds, attack, defence, charge, weapon damage and bonuses, armour, shield, leadership, resistances, missile (range, ammo, damage, reload, accuracy; since 02.10.2026 at the end: direct fire, spread, muzzle velocity), cost, caste, size, attributes (unbreakable, fire whilst moving, …) | both sides | ~0–1; wide numbers (health, mass, cost, damage) on a log scale; caste, size, attributes as 0/1 |
+| Passport of every unit, own and enemy ([passports](units.md)): men, health, mass, speeds, attack, defence, charge, weapon damage and bonuses, armour, shield, leadership, resistances, missile (range, ammo, damage, reload, accuracy; at the end: direct fire, spread, muzzle velocity), cost, caste, size, attributes (unbreakable, fire whilst moving, …) | both sides | ~0–1; wide numbers (health, mass, cost, damage) on a log scale; caste, size, attributes as 0/1 |
 | Experience rank | both sides | rank / 9 |
 | Faction character (5 numbers, `config/nn/factions.json`) | own side | 0–1 as written |
 | Role: attack or defend | own side | 0/1 |
@@ -119,7 +119,7 @@ A checkpoint written before these inputs (with the `t / 3600` column) loads as i
 zero, so it acts exactly as it did with the battle time at 0. One written before the progress
 inputs loads with zero weights for them (inserted after the damage timers; the critic's enemy
 character keeps its weights) and acts exactly as it did. What dropping the real `t / 3600`
-changes (01.10.2026, 24 simulated battles against `ai_like`, 20 minutes, the greedy choices of
+changes (24 simulated battles against `ai_like`, 20 minutes, the greedy choices of
 every unit that takes orders every 5 s, each network with its own memory): `test5/t0_gold30/m20.pt`
 order kind 99.92% the same (35 487 choices), attack target 99.92%, move point 99.96%;
 `runs/long_ai/best.pt` 99.93%, 99.93%, 99.92%; the least by minute of battle 99.7% (m20, 6th minute).
@@ -146,7 +146,7 @@ Deadly Onslaught, Rally.
 | Active now | yes | yes | no | 0/1 |
 | Passport: passive, active and recharge time, uses, range, self-cast, how many friends / enemies it reaches, targets (self, friends, enemies) | yes | yes | yes | s / 60, s / 120, m / 100, 0/1 |
 | Passport: effects on allies (the owner and his friends) and on enemies: 28 stats of the database (speed, charge speed, melee attack and defence, damage and AP, charge bonus, leadership, armour, resistances, missile damage, reload, accuracy, range, bonus vs large / infantry, mass, …) and 15 attributes (unbreakable, immune to psychology, causes fear, …) | yes | yes | yes | multipliers as value − 1; additions / 50 or / 100; attributes 0/1 |
-| Passport: when (02.10.2026, at the end): the game fires it itself (`auto`), on losing a melee / in melee, off out of melee / below half morale / when not wavering / below half health, another condition | yes | yes | yes | 0/1 |
+| Passport: when (at the end): the game fires it itself (`auto`), on losing a melee / in melee, off out of melee / below half morale / when not wavering / below half health, another condition | yes | yes | yes | 0/1 |
 
 Why the enemy's: a player sees the enemy army's cards before battle (the abilities are on them),
 and in battle the game draws an active ability's effect on the unit and lists it among the
@@ -202,10 +202,10 @@ flowchart TB
   two units (16 buckets, 0 to ~1500 m) makes "who is near" easy. Invisible enemies stay in the
   attention with their last seen place.
 - **Memory: a GRU per token**, before the last attention layer. Training runs it through chunks
-  of 64 decisions (64 s of battle at the game's cadence of a decision a second; 32 s before 03.10) ([training](training.md)). Chosen over attention to the
+  of 64 decisions (64 s of battle at the game's cadence of a decision a second) ([training](training.md)). Chosen over attention to the
   last frames because the cost of a decision does not grow with the memory; the state is one
   vector per unit, easy to carry and the same on every computer in co-op; the 10–20 s horizon
-  (20–80 decisions at 2–4 per second) is learned, not fixed by a buffer.
+  (10–20 decisions at one a second) is learned, not fixed by a buffer.
 - **Heads** for every own unit that takes orders (alive, not routing):
   - order kind; "attack" only when a visible living enemy exists; "keep" — no new order, the one
     in force goes on (the network does not jerk a unit every decision);
@@ -225,9 +225,9 @@ flowchart TB
 - **Loading an older actor.** `Actor.load_state_dict` accepts a state without the ability parts
   (`policy.ABILITY_PARAMS`): they start fresh — the encoder adds nothing, the head picks at random
   among ready abilities.
-- **No adapters.** The LoRA adapters per pair "faction + role" (never switched on) were removed on
-  03.10.2026; a checkpoint of their time (layers saved as `qkv.base.weight`) loads as it was
-  (`encoder.Block`).
+- **No adapters.** One network for every faction and role (the role and the faction character are
+  inputs). A checkpoint with the former LoRA wrapper layers (saved as `qkv.base.weight`, the adapters
+  never switched on) loads as it was (`encoder.Block`).
 - **Critic** (training only): its own encoder and attention on the full view, pooled own and
   enemy units and the context token → the value of the battle for the side.
 
@@ -236,7 +236,7 @@ Orders go out in the simulator's format (`tools/nn/sim/orders.py`): `kind`, `x`,
 optional: orders made without it get −1). Units of the other side, dead and routing units
 hold and use nothing.
 
-**In training** (`tools/nn/train/rollout.py`, `ppo.py`; [training](training.md#lord-abilities-01102026)):
+**In training** (`tools/nn/train/rollout.py`, `ppo.py`; [training](training.md#lord-abilities)):
 the learner and the past version choose abilities (`heads.sample(..., abilities=True)`), the
 rollout keeps `Action.ability` and the update counts it in the log-probability; the `ai` flag is
 true only for the scripted opponents' sides (`tools/nn/sim/abilities.py` `set_rule`, again after
@@ -256,7 +256,7 @@ the battle's bank row; `rollout.full_obs` puts the passports back for the update
 ## Speed
 
 One decision of one side, 20 vs 20 units, random weights, median of 50
-(`bash tools/nn/dock.sh tools.nn.model.bench`, 30.09.2026). "Decision" = observation + network +
+(`bash tools/nn/dock.sh tools.nn.model.bench`). "Decision" = observation + network +
 sampling + orders; "network" = the network alone.
 
 | Where | `small`: decision / network | `target`: decision / network |
@@ -303,7 +303,7 @@ An int8 export of the actor looks practical; not done yet:
   check, the saved numbers, features and slots.
 - `tests/tools/test_nn_model.py` (torch; skipped in `.venv`, run in the container): numpy and
   torch give the same input; only visible living enemies can be targets; swapping units swaps
-  the outputs; memory; adapters; log-probabilities; points inside the map; the critic; the
+  the outputs; memory; a checkpoint of the former LoRA wrapper; log-probabilities; points inside the map; the critic; the
   presets' sizes; recorded battles and the simulator's state → orders; the ability head: only
   ready own abilities, permuting slots permutes the choice, an unseen passport still gives a
   valid choice, log-probability only when chosen, an older actor loads; the damage timers on

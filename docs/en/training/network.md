@@ -2,16 +2,16 @@
 
 [← Back](README.md) · [Documentation](../README.md) › [Training data](README.md) › Network model · [Русский](../../ru/training/network.md)
 
-Research and the project owner's decisions of 30.09.2026. There is no network yet.
-This page describes what it will be, where it will run and how we will know it is ready.
+The design of the network and the project owner's decisions: what it is for, where it runs and how
+we will know it is ready. The network as built: [inputs and model](model.md); how it learns:
+[training](training.md).
 
 ## Goal
 
 An interesting AI that depends on the faction and its lore. For example, orcs move
 loosely and rush into the attack, while High Elves move in sync and keep neat lines.
-The network is a **shared base** for all factions plus an **adapter for every
-"faction + role" pair** (attack or defence). The faction character and the adapters
-set the differences.
+The network is **one shared network** for all factions and both roles (attack and
+defence); the faction character and the role are its inputs and set the differences.
 
 ## Where the network runs
 
@@ -27,7 +27,7 @@ flowchart LR
 - The exchange goes through files: battle Lua can read and write them (`io.open`, see
   `src/apps/telemetry/adapter.lua`). The companion writes to a temporary file and
   renames it, so Lua never reads a half-written file.
-- **Works in game since 30.09.2026:** the [bridge](../apps/bridge.md) and the companion
+- **Works in game:** the [bridge](../apps/bridge.md) and the companion
   `tools/nn/companion/` (for now in the training container). A decision a second, the answer
   within ~40 ms of real time at ×20, no misses ([watching the network](../launch/watch.md)).
 - The weights live in the Workshop mod itself; the companion reads them from the
@@ -51,15 +51,11 @@ every unit (own and enemy) → features: position, health, morale, fatigue, arro
       ↓ 3–4 attention layers: each unit "looks" at the others
       ↓ memory of the last 10–20 s of battle
       ↓ + faction character (5–6 numbers) and role (attack / defence)
-      ↓ + a LoRA adapter for the "faction + role" pair
 for every own unit: hold / move to a point / attack unit N / fall back, pace
 ```
 
-- **Base and adapters.** The base knows battle: melee, morale, shooting, flanks. A LoRA
-  adapter is a few percent of weights on top of the base, one per "faction + role" pair
-  (orcs-attack, orcs-defence, elves-attack…). To the player it is two networks per
-  faction, but the basics of battle are learnt once for all. One battle teaches three
-  things at once: the base and both sides' adapters.
+- **One network.** It knows battle — melee, morale, shooting, flanks — once for all factions
+  and both roles; one battle teaches it from both sides.
 
 - **Per-unit input with shared weights** fits any army size. The network knows a new
   unit by its stats from the [game's database](../game/database.md), not by its name.
@@ -81,7 +77,8 @@ for every own unit: hold / move to a point / attack unit N / fall back, pace
 |---|---|
 | A network in Lua inside the game | Too small for a good AI; a fallback version is not worth the effort |
 | A plain network with a fixed-size input | Breaks with a different number of units |
-| Separate networks per faction and role | Each relearns the basics of battle; LoRA adapters give the same specialisation |
+| Separate networks per faction and role | Each relearns the basics of battle; two networks for attack and defence were tried: the defence one did not carry over to new armies ([training](training.md#two-networks-attack-and-defence)) |
+| LoRA adapters per "faction + role" | Built and never switched on; removed. The role and the character are inputs of the one network |
 | Learning only in the game | ~30 battles an hour, hundreds of thousands are needed |
 | Only copying the game's AI | No style, repeats its mistakes ([the game's AI](../game/game-ai.md)) |
 
@@ -119,8 +116,9 @@ check battles against the game's AI. The generator is ready: [random armies](arm
 
 - **Size:** 1 lord and 0 to 19 units. No reinforcements for now.
 - **Equal budget.** Both sides get the same sum of unit prices (`multiplayer_cost` from
-  the game's database, within ±5%), times the faction's `budget_factor` (Skaven 0.8: at an
-  equal budget they won all 10 whole battles, [random armies](armies.md#how-a-battle-is-built)). The number and make-up of units differ. Otherwise one
+  the game's database, within ±5%), times the faction's `budget_factor` (1.0 for every faction:
+  [random armies](armies.md#how-a-battle-is-built); the faction imbalance is handled by the fair
+  metrics of [training](training.md#network-evaluation-fair-metrics)). The number and make-up of units differ. Otherwise one
   side is often stronger and a win says nothing about the network. Tiers are not needed:
   the budget evens out the price.
 - **One faction per army:** units only from its recruitment list.
@@ -129,7 +127,7 @@ check battles against the game's AI. The generator is ready: [random armies](arm
   (`cdir_military_generator_*`, different per faction). Armies come out sensible and true
   to lore. A quarter of the armies are random within the pool and the budget, stacks
   included: what a human might build. The share is `mix` in `config/nn/pools.json`.
-- **Small armies first:** 1–5 units, then growing to 20.
+- **Small armies stay in the mix:** a share of every bank has at most 6 units a side.
 - **The unit pool grows in steps** with the simulator: first 1–2 factions without magic,
   flying and artillery; each new category after a check against the game.
 - **Battle limit — 60 minutes.** When it runs out the attacker loses (the game's rule: the
@@ -141,7 +139,7 @@ check battles against the game's AI. The generator is ready: [random armies](arm
 ## Co-op
 
 Co-op is designed in from the start. From the game's own scripts (`data_script.pack`,
-CA's co-op Survival battles, checked 30.09.2026):
+CA's co-op Survival battles):
 
 - in a multiplayer battle the script runs **on every computer**; players do not send
   each other orders (lockstep). If one computer gets a different order, the game desyncs;
@@ -172,14 +170,13 @@ The check needs two computers or two Steam accounts.
 
 1. **A new simulator** from the [game's database](../game/database.md) rules, checked
    against the recorded battles ([data](README.md)). Without it there is no training.
-   Version 1 is built: [battle simulator](simulator.md) (step 1 — [unit passports](units.md),
+   Built: the [battle simulator](simulator.md) (step 1 — [unit passports](units.md),
    step 2 — [measurements](measurements.md)).
 2. Optionally, a warm start on the recorded battles of the game's AI. It takes away
    the independence of the check against the game's AI (see "Readiness"), so by
    default we skip it.
-3. PPO training in the simulator: the army against its own past versions, with character.
-   The base first, then the LoRA adapters. The training loop is built, the first run —
-   [training](training.md).
+3. PPO training in the simulator: the army against its own past versions, scripts and drills
+   ([training](training.md)).
 4. **One battle per game launch** (the standard way, ~30 battles an hour). A series of
    battles per load was tested and removed: the rematch replays the same armies, and a
    pool of armies in one scene changes the battle (research, Russian only:

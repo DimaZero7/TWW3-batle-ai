@@ -3,11 +3,11 @@
 [← Back](README.md) · [Documentation](../README.md) › [Data for training](README.md) › Battle simulator · [Русский](../../ru/training/simulator.md)
 
 Step 3 of the path ([network model](network.md)): a simulator of the game's battle in which
-the network will train. It plays thousands of battles at once on the GPU. Each unit is one
+the network trains. It plays thousands of battles at once on the GPU. Each unit is one
 object (men, health, place, facing, morale, fatigue, projectiles), not every soldier. The
 numbers come from the [unit passports](units.md) and the [game's rules](../game/database.md);
 where the game behaves differently, they are calibrated to the [measurements](measurements.md).
-Version 1, 30.09.2026: the seven v1 units, a flat empty map.
+It covers the units of the training pools on a flat empty map.
 
 ## How to run it
 
@@ -112,13 +112,13 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 | A lord as a target | 0.43 of the unit rule | measured: ~33k shots at lords out of melee for the whole flight (General by arrows ~0.5, by sling ~0.37, Warlord by arrows ~0.32) |
 | Friendly fire | of the hits aimed at a unit in melee, 0.26 (arrows) / 0.56 (sling) land on the shooter's own units in contact with it, split by their men (a lord among them ×0.43, as a lone target) | measured: the HP those units lose beyond the melee rule while their own side shoots (1.5k + 1.3k seconds) |
 | Spill | of the hits aimed at a unit, each unit of the target's side out of melee takes 0.115 within 30 m, 0.034 at 30–60 m, 0.015 at 60–90 m | measured: HP of units nobody shoots at, next to a unit that is shot (15.6k seconds) |
-| Spill in melee | of the hits aimed at a unit in melee, each unit of the target's side also in melee takes 0.19 within 15 m, 0.047 at 15–30 m, 0.035 at 30–60 m (centres) | measured (01.10.2026, `build/nn-sim/flank/spill_melee.py`): HP of units in melee, not shot at themselves and whose side does not shoot their opponents, regressed on the melee rule and on the hits aimed at their neighbours in melee (74k seconds, 15k with a shot neighbour; 28 game-AI battles 0.23 / 0.09, net runs 0.19 / 0.05) |
+| Spill in melee | of the hits aimed at a unit in melee, each unit of the target's side also in melee takes 0.19 within 15 m, 0.047 at 15–30 m, 0.035 at 30–60 m (centres) | measured (`build/nn-sim/flank/spill_melee.py`): HP of units in melee, not shot at themselves and whose side does not shoot their opponents, regressed on the melee rule and on the hits aimed at their neighbours in melee (74k seconds, 15k with a shot neighbour; 28 game-AI battles 0.23 / 0.09, net runs 0.19 / 0.05) |
 | Target at will | the order's target if in range, else the nearest standing enemy | as the game ([missile damage](../game/units/missile-damage.md)) |
 | Line of fire (direct fire) | only for direct (flat) fire, the passport's `missile.direct` (trajectory `low`: the Free Company Militia's pistols); the shooter's men aim at the target's centre, a friendly unit between (nearer than the target's edge) blocks the lines passing through its width across the line, widened by 1.2 man radii (friends count 2.2× wider); blocked men do not shoot; at 75 % blocked the unit takes the next target in range, or holds fire. Arrows and slings arc over friends; enemies in the way do not block; no fire over friends from higher ground (flat map) | DB (`projectile_friendly_fire_man_radius_coefficient` 2.2, `unit_firing_line_of_sight_considered_obstructed_ratio` 0.75, trajectory); the knowledge base ([missiles](../game/mechanics/missiles.md)); the geometry is ours, not measured |
 | Fire whilst moving | a unit with `mounted_fire_move` (the militia) aims and shoots while it moves | DB attribute |
 | Pistols (estimate) | hit rate 0.5 at the edge of range (×1.12–1.29 at 60–90 m), reload 10.8 s, first shot 3.8 s | estimate from the projectile's calibration area (2.0 m at 65 m against the arrow's 3.7 m at 95 m), not measured: `sim.json` missile.musket_why |
 | Morale | points: leadership + effects; MoralePercent = points / leadership; moves 1 point or 15 % of the gap per 0.5 s | DB; the step measured (+2 points a second in every recording) |
-| Morale effects | lord +4 within 70 m, fading to 0 at 105 m; lord died or shattered: his aura only (`lord_fall` 0 / 0); neighbour within 120 m +5; casualties −2…−74; recent casualties −6…−80 (last 30 s, of the whole health); winning / losing the melee +3/+6/+8, −3/−8 (damage ratio 1.5 / 2.5 / 4); first struck in the flank −6, rear −14 for one 0.5 s tick; the army beaten as a whole (enemy strength ≥ 2.6× own, own ≤ 0.22 of the start) −120; flanks exposed (an enemy threatens the left, right or rear: `lf`, `rf`, `bf`) −3, two or more −6; routing friends −3 each; routing enemies +2.5 each; under fire −5; very tired −2, exhausted −6; a stronger enemy within 70 m −3 | DB points; window, ratios calibrated; attacked in the flank / rear measured ([flanks](#flanks-rear-and-charges-in-whole-battles)); a shattered lord counts as lost: in the game his whole army drops 0.5–0.6 of its leadership in the second he shatters and routs within ~3 s (gate battles 02.10.2026) |
+| Morale effects | lord +4 within 70 m, fading to 0 at 105 m; lord died or shattered: his aura only (`lord_fall` 0 / 0); neighbour within 120 m +5; casualties −2…−74; recent casualties −6…−80 (last 30 s, of the whole health); winning / losing the melee +3/+6/+8, −3/−8 (damage ratio 1.5 / 2.5 / 4); first struck in the flank −6, rear −14 for one 0.5 s tick; the army beaten as a whole (enemy strength ≥ 2.6× own, own ≤ 0.22 of the start) −120; flanks exposed (an enemy threatens the left, right or rear: `lf`, `rf`, `bf`) −3, two or more −6; routing friends −3 each; routing enemies +2.5 each; under fire −5; very tired −2, exhausted −6; a stronger enemy within 70 m −3 | DB points; window, ratios calibrated; attacked in the flank / rear measured ([flanks](#flanks-rear-and-charges-in-whole-battles)); a lord's fall measured in 75 recorded falls ([lords](#lords)) |
 | States | wavering below 16 points, rout at 0, shattered at the third rout, no new rout within 10 s of a rally | DB |
 | Rally | while no standing enemy is within 90 m the router regains 2 points a second; rallies at MoralePercent 0.23 | measured: 0.23 and 90 m (365 rallies); 2 points calibrated (median rally 44 s) |
 | Fatigue | charge +34, melee +19, shooting +18, running +4, walking −1, standing −7, ×5 a second; states by the database thresholds; each state scales speed, melee attack and defence, armour, charge, AP damage and reload (`unit_fatigue_effects_tables`) | DB; ×5 fitted to 1315 recorded changes of state |
@@ -173,7 +173,7 @@ an effect by its key.
   and conditions the simulator has works without code (a test gives the spearmen Perfect Vigour by
   the catalogue alone).
 
-**Measured** (02.10.2026, all fair recordings with unit keys; speed over 1 s steps, at least 3 s
+**Measured** (all fair recordings with unit keys; speed over 1 s steps, at least 3 s
 into a rout): routing Empire units run at 0.865 of their run (115k s), routing Skaven at 0.945 below
 half health (186k s) and 0.866 above it (14k s); running in order, steady, above half health:
 Empire 0.97, Skaven 0.88. Scurry Away!'s ×1.1 and Strength in Numbers' ×0.9 (above half health)
@@ -185,119 +185,135 @@ now.
 
 ## Flanks, rear and charges in whole battles
 
-Measured 01.10.2026 in the 28 whole battles (18 mirror, 10 Empire-Skaven), and in the
-simulator's open-loop replays of them by the same code (`build/nn-sim/flank/flank.py`, not in
-Git). A contact: an enemy standing in melee whose formation edge (the simulator's rectangles at
-the recorded places, bearings and men) is within 3 m; its sector is the angle of its centre off
-the unit's facing (front within 60°, rear beyond 120°), as the simulator counts it. HP lost is
-set against the simulator's frontal melee rule for the same contact.
+Measured in the 28 whole battles (18 mirror, 10 Empire-Skaven), and in the simulator's open-loop
+replays of them by the same code (`build/nn-sim/flank/flank.py`, not in Git). A contact: an enemy
+standing in melee whose formation edge (the simulator's rectangles at the recorded places,
+bearings and men) is within 3 m; its sector is the angle of its centre off the unit's facing
+(front within 60°, rear beyond 120°), as the simulator counts it. HP lost is set against the
+simulator's frontal melee rule for the same contact.
 
-| Infantry in melee, one contact, not shot at | The game | Simulator before | Now |
-|---|---:|---:|---:|
-| Seconds with the worst contact front / flank / rear | 58 / 31 / 11 % | 78 / 18 / 4 % | 72 / 23 / 6 % |
-| HP lost from the flank, × from the front (10–90 % over runs) | 1.74 (1.56–1.89) | 1.20 | 1.55 |
-| HP lost from the rear, × from the front | 1.31 (1.19–1.42) | 2.04 | 1.50 |
-| Morale points while fought from the flank / rear (regression*) | −1.0 / −1.8 | −1.0 / −14.5 | −0.8 / −4.0 |
-| … one / two or more of `lf`, `rf`, `bf` set | −3.9 / −8.1 | — | −4.3 / −7.0 |
+| Infantry in melee, one contact, not shot at | The game | The simulator |
+|---|---:|---:|
+| Seconds with the worst contact front / flank / rear | 58 / 31 / 11 % | 72 / 23 / 6 % |
+| HP lost from the flank, × from the front (10–90 % over runs) | 1.74 (1.56–1.89) | 1.55 |
+| HP lost from the rear, × from the front | 1.31 (1.19–1.42) | 1.50 |
+| Morale points while fought from the flank / rear (regression*) | −1.0 / −1.8 | −0.8 / −4.0 |
+| … one / two or more of `lf`, `rf`, `bf` set | −3.9 / −8.1 | −4.3 / −7.0 |
 
 \* Points − leadership against health lost (and its square), flank, rear, 2+ contacts, the
 exposed flags, under fire; infantry melee seconds (the game 30k, the simulator 97k).
 
 New contacts (infantry i struck by infantry j): HP i loses in the first 15 s over HP j loses.
 
-| | Contacts in the game | The game | Before | Now |
-|---|---:|---:|---:|---:|
-| j charges, i stands, from the front | 102 | 0.82 | 2.69 | 1.44 |
-| j charges, i runs at it too | 104 | 0.90 | 0.98 | 0.91 |
-| j charges i's flank or rear, i free | 206 | 1.11 | 2.65 | 1.65 |
-| j charges i's flank or rear, i already fighting | 24 | 1.30 | 3.30 | 2.22 |
-| j walks into i's flank or rear, i already fighting | 77 | 1.23 | 2.00 | 1.34 |
-| Morale points of i 15 s after it is charged standing | 102 | −6.5 | −17.5 | −11.3 |
+| | Contacts in the game | The game | The simulator |
+|---|---:|---:|---:|
+| j charges, i stands, from the front | 102 | 0.82 | 1.44 |
+| j charges, i runs at it too | 104 | 0.90 | 0.91 |
+| j charges i's flank or rear, i free | 206 | 1.11 | 1.65 |
+| j charges i's flank or rear, i already fighting | 24 | 1.30 | 2.22 |
+| j walks into i's flank or rear, i already fighting | 77 | 1.23 | 1.34 |
+| Morale points of i 15 s after it is charged standing | 102 | −6.5 | −11.3 |
 
 - **In the game a charge buys little.** A unit charged while standing loses no more than its
   charger (0.82); braced spearmen (`charge_reflection`, 87 of the 102) 0.80, units without it
-  about the same (1.02, 15 contacts). The simulator gave the charger 2.7×, which is why in it
-  every unit left standing when charged lost. Now: bracing, and the charge's impact 1.5 instead
-  of 2.5 (the pairs keep within 20 %: 51 of 54).
+  about the same (1.02, 15 contacts). Hence bracing and a charge impact of 1.5.
 - **In the game formations do not turn round in melee** (1°/s): an enemy on the flank or rear
-  stays there. In the simulator a unit turned to its nearest opponent at once, so a flank attack
-  on a free unit lasted one step. Now it turns at 2°/s in melee.
-- **The flank costs more than the rear by this count** (1.74 against 1.31), against the
-  database's defence ×0.6 / ×0.3; the simulator is fitted to it (flank_slope 2.0, rear_slope 0.25).
+  stays there. The simulator turns a unit in melee at 2°/s.
+- **The flank costs more than the rear by this count** (1.74 against 1.31), against the database's
+  defence ×0.6 / ×0.3; the simulator is fitted to it (`flank_slope` 2.0, `rear_slope` 0.25).
 - **A lone attacker from the flank or rear, counted apart**
-  ([measurements](measurements.md#flank-and-rear-a-lone-attacker): infantry only, nobody
-  shooting, contacts older than 10 s) takes 1.53× (flank) and 1.92× (rear) of what a lone frontal
-  one takes — the rear costs more, as the database says; the simulator gives 0.94× / 0.99× (a
-  flank striker brings men by the target's short side, its depth: ~4.5 men for a 30 m front
-  instead of 15). The fix is in the code as a switch, off: `melee.flank_face` "striker" (the
-  striker brings men by its own front) with `flank_slope` 3.8 / `rear_slope` 5.5 gives 1.62× /
-  1.94×, but whole battles got worse with it (below, "The check now"): the simulator raises flank
-  contacts more often than the game (the rear flag of our units in melee 0.29 against 0.11), so the
-  per-contact rule overshoots; and the `counter` drill stopped holding (its naive play won 0.66).
-- **"Attacked in the flank / rear" is small in the recordings**: −1 / −2 points, not the
-  database's −6 / −14 (the simulator with the database's points shows −14.5 for the rear).
-  "Flanks exposed" is there as in the database: −3.9 / −8.1 against −3 / −6.
-- Still stronger than in the game: a charge into the flank or rear (1.65–2.22 against 1.1–1.3),
-  and the morale drop after a charge (−11 against −6.5). `lf` / `rf` / `bf` are set 1.3–3× as
-  often as the game's flags (the game's are noisy: 0.3–0.7 with an enemy within 60 m on that side).
+  ([measurements](measurements.md#flank-and-rear-a-lone-attacker): infantry only, nobody shooting,
+  contacts older than 10 s) takes 1.53× (flank) and 1.92× (rear) of what a lone frontal one takes;
+  the simulator gives 0.94× / 0.99× (a flank striker brings men by the target's short side, its
+  depth: ~4.5 men for a 30 m front instead of 15). The fix is [pending](#pending-changes).
+- **"Attacked in the flank / rear" is small in the recordings**: −1 / −2 points over the contact,
+  the database's −6 / −14 being one 0.5 s tick at the first strike from that side (the simulator
+  gives it so). "Flanks exposed" is there as in the database: −3.9 / −8.1 against −3 / −6.
+- Still stronger than in the game: a charge into the flank or rear (1.65–2.22 against 1.1–1.3), and
+  the morale drop after a charge (−11 against −6.5). `lf` / `rf` / `bf` are set 1.3–3× as often as
+  the game's flags (the game's are noisy: 0.3–0.7 with an enemy within 60 m on that side).
 
 Tactic scan against `nearest` (the training's scripts, `build/nn-sim/flank/scan.py`: 48 battles
 per army, role and side; wins of the tactic; Empire / Skaven = the tactic plays that army in the
 Empire-Skaven battle):
 
-| Tactic | Mirror: before / now | Empire: before / now | Skaven: before / now |
+| Tactic | Mirror | Empire | Skaven |
 |---|---:|---:|---:|
-| `nearest` itself | 47 / 49 % | 60 / 26 % | 58 / 82 % |
-| all on one target | 47 / 32 % | 5 / 1 % | 43 / 65 % |
-| archers stand and shoot | 0 / 1 % | 1 / 1 % | 77 / 88 % |
-| the lord waits 2 minutes | 11 / 18 % | 3 / 1 % | 80 / 80 % |
-| attack at a walk | 0 / 0 % | 0 / 0 % | 0 / 0 % |
-| enemies already engaged first | 36 / 32 % | 17 / 3 % | 24 / 46 % |
-| a reserve waits until the enemy is engaged | 6 / 3 % | 0 / 0 % | 1 / 7 % |
-| `hold_shoot` | 19 / 34 % | 3 / 5 % | 48 / 70 % |
-| **flank**: melee units go for an enemy already fighting ours, via a point beside its flank | **61 / 69 %** | 27 / 17 % | 32 / 79 % |
-| flank, with a reserve | 6 / 15 % | 0 / 1 % | 18 / 51 % |
+| `nearest` itself | 49 % | 26 % | 82 % |
+| all on one target | 32 % | 1 % | 65 % |
+| archers stand and shoot | 1 % | 1 % | 88 % |
+| the lord waits 2 minutes | 18 % | 1 % | 80 % |
+| attack at a walk | 0 % | 0 % | 0 % |
+| enemies already engaged first | 32 % | 3 % | 46 % |
+| a reserve waits until the enemy is engaged | 3 % | 0 % | 7 % |
+| `hold_shoot` | 34 % | 5 % | 70 % |
+| **flank**: melee units go for an enemy already fighting ours, via a point beside its flank | **69 %** | 17 % | 79 % |
+| flank, with a reserve | 15 % | 1 % | 51 % |
 
-Now the Skaven win the Empire-Skaven battle (`nearest` against `nearest`: 26 % for the Empire,
-82 % for the Skaven; in the game the Skaven won all 10 recorded ones). Flanking beats `nearest`
-in the mirror (69 %) and is no longer punished on the other armies (Skaven 79 % against
-`nearest`'s own 82 %; before 32 % against 58 %). Waiting (a reserve, a walk) still loses: the
-side that waits fights outnumbered.
+The Skaven win the Empire-Skaven battle (`nearest` against `nearest`: 26 % for the Empire, 82 % for
+the Skaven; in the game the Skaven won all 10 recorded ones). Flanking beats `nearest` in the
+mirror (69 %). Waiting (a reserve, a walk) loses: the side that waits fights outnumbered.
+
+## Lords
+
+- **Fought by several units** (the [lord swarm probe](../game/units/lord-swarm.md), 3 battles in
+  the game). A lord in a ring of 1–4 spear units loses the same HP/s however many units there are
+  (General 7.8 / 8.3 / 8.7 / 7.4, Warlord 6.2 / 5.8 / 5.1 / 4.8); 4–5 enemy soldiers stand within
+  2.5 m of him; his back and flanks give no extra. So at most `lord_max_attackers` (9) men strike a
+  lord in all, summed; `lord_direction` 0; an enemy lord among the attackers keeps his blow; with
+  the enemy lord on him the infantry counts at `lord_rival_others` 0.35; a unit told to attack
+  another enemy strikes a lord it only touches at `lord_incidental` 0.4 (whole battles: 1.7 HP/s
+  against 4.1 when he is its target), and an enemy unit it only touches at `unit_incidental` 0.3 (the
+  gate battles: an infantry unit fought by one enemy unit while other enemy units stood within 35 m
+  took 19.6 HP/s in the game, 33.9 in the simulator without the rule, 22.3 with it). The probe's
+  trials replayed (`python -m tools.nn.lord_swarm --sim`; game / simulator): one spear unit 7.8 /
+  7.7 and 6.2 / 6.1; four 7.4 / 8.0 and 4.8 / 6.3; halberds 21.5 / 17.1 and 11.2 / 11.7; the other
+  lord and three units 29.8 / 21.8 and 27.6 / 22.4; mean error over the 24 layouts 18 %.
+- **Lord against lord** (`contact.lord_v_lord` 0.73): a lord fought by the enemy lord alone loses
+  14.6 HP/s (General) and 10.0 (Warlord) in the game, 19.4 / 15.0 in the simulator without the
+  factor.
+- **A lord's fall** (`morale.lord_fall` 0 / 0: his aura only): in all 75 recorded falls the lord
+  shattered with 2–50 % of his health (none was killed), and his standing units lost −3 / −4.7 /
+  −4.8 points 2 / 6 / 10 s later (mean of 167 unit-falls) — about his aura. The army's collapse is
+  the army-destruction rule's (below), not the lord's.
+- **Lord abilities** (`tools/nn/sim/abilities.py`). When the game's AI fires them is assumed, not
+  measured (only the Warlord's speed in the recordings, 5–6.5 m/s, shows Verminous Valour in use);
+  CA's planner on side 1 of the recorded whole battles gets no actives. The network's side fires
+  them by order.
+- **Shots at a lord in a crowd.** The game's AI slingers shoot a General fighting among his own
+  spearmen, and the misses fall on those spearmen: spill reaches the target's units in melee too
+  (the table above). One recorded swarm replayed 8 times: ours lost 12.2k HP (the game 14.7k), the
+  Warlord 2.5k (the game 1.6k).
 
 ## Checks against the game
 
-`python -m tools.nn.sim.check`: every recorded run is replayed in the simulator from the
-recorded start with the recorded orders (open-loop: `tools/nn/sim/replay.py`: a target fought
-or shot → attack it; in melee without a recorded target → attack the nearest enemy (CA's planner
-leaves the target empty in ~70 % of its melee seconds, the game's AI in ~6 %); otherwise → move
-to the order's point), written down once a second like a recording and measured by the same code
-as the game (`tools/nn/measure.py`). Only the battles of CA's planner against the game's AI
-count (not the network's own runs). A pair or shooting replay runs on its last recorded orders
-until a unit routs; a whole battle stops when its recording ends and is compared then (if it
-is not over, the side with more health left in standing units counts as the winner). A unit in
-melee without a recorded target whose recorded point is 10 m or more away moves there (it leaves
-the fight) only if that point is a move order in force: the network's units and missile units;
-the melee units of CA's planner and of the game's AI fight on (their point in melee lies anywhere,
-and they fight at the attack rate: [measurements](measurements.md#leaving-melee)).
+`python -m tools.nn.sim.check`: every recorded run is replayed in the simulator from the recorded
+start with the recorded orders (open-loop: `tools/nn/sim/replay.py`: a target fought or shot →
+attack it; in melee without a recorded target → attack the nearest enemy (CA's planner leaves the
+target empty in ~70 % of its melee seconds, the game's AI in ~6 %); otherwise → move to the order's
+point), written down once a second like a recording and measured by the same code as the game
+(`tools/nn/measure.py`). A pair or shooting replay runs on its last recorded orders until a unit
+routs; a whole battle stops when its recording ends and is compared then (if it is not over, the
+side with more health left in standing units counts as the winner). Each recorded battle is played
+8 times from starts moved by up to 2 m; the simulator's winner is the majority's. A unit in melee
+without a recorded target whose recorded point is 10 m or more away moves there (it leaves the
+fight) only if that point is a move order in force: the network's units and missile units; the
+melee units of CA's planner and of the game's AI fight on. The network's battles against the game's
+AI (the gate: generated armies) are reported apart; the attacker of a recorded battle comes from its
+manifest's roles (`scenario.attacker_of`).
 
-**The check now** (the rows below each mechanic's section give the details of their time):
+| Same winner: game-AI battles | network's battles (of them the 8 gate battles of one network) | Mechanics within 20 % | HP lost 60 s after contact, mean \|sim − game\|, network's battles |
+|---:|---:|---:|---:|
+| 20 of 26 (Empire-Skaven 10 of 10, mirror 10 of 16) | 52 of 93 (7 of 8) | 50 of 54 | 0.048 |
 
-| | Same winner: game-AI battles | network's battles (the 8 gate battles of `r2_clock`) | Mechanics within 20 % | HP lost 60 s after contact, mean \|sim − game\|, network's battles |
-|---|---:|---:|---:|---:|
-| without the two rules below | 22 of 26 | 44 of 93 (4 of 8) | 50 of 54 | 0.044 |
-| + any unit leaves melee on a move ≥ 10 m (`contact.leave_m`) | 22 of 26 | 47 of 93 (7 of 8) | 51 of 54 | 0.043 |
-| + the first shot after a halt is a volley (**now**) | 20 of 26 (Empire-Skaven 10 of 10, mirror 10 of 16) | 52 of 93 (7 of 8) | 50 of 54 | 0.048 |
-| tried, left out: + flank / rear striker by its own front, weights 3.8 / 5.5 | 21 of 26 | 54 of 93 (7 of 8) | 50 of 54 | 0.072 |
+Without the two newest rules (any unit leaves melee on a move ≥ 10 m; the first shot after a halt is
+a volley) the network's battles were 44 of 93 (4 of 8): the simulator had let a melee unit under
+such a move fight on at full rate, and the network had learned to use that.
 
-The volley moves the archers' target's wavering after the first shot to 22 s (the game 39 s):
-the whole unit's first volley lands at once; the mirror's −2 is within the replays' noise (the
-same rule gave +1 on top of the flank rule). The flank rule raised the network's winners but
-made the early exchange less exact (the simulator went from 0.01 slow to 0.02–0.03 fast; on the
-game-AI battles 0.049 → 0.071) and broke the `counter` drill, so it stays off ([flanks](#flanks-rear-and-charges-in-whole-battles)).
+### Mechanics: the pairs and shooting
 
-Older results (30.09.2026, third version, and the steps since):
-
-### Mechanics: 50 of 54 numbers within 20 %
+The detail behind the mechanics count (measured before the volley rule; the volley moves the
+archers' target's wavering after the first shot to 22 s):
 
 | Case | The game | The simulator |
 |---|---|---|
@@ -320,231 +336,121 @@ Older results (30.09.2026, third version, and the steps since):
 | Slingers → spearmen: reload, s / hit rate / HP/s | 11.5 / 0.47 / 36 | 11.5 / 0.47 / 37 |
 | … the target wavers / routs, s | 154 / 177 | 160 / 183 |
 
-Outside 20 % (01.10.2026, with the flanks, bracing and turning): the HP lost in the first 15 s
-of contact (the charge) in three places: the clanrats against the General (−28 %) and against
-the spearmen (−33 %), the Warlord (−22 %) — the charge is noisy in the game too (before: four
-places, −28 %… +107 %).
+Outside 20 %: the HP lost in the first 15 s of contact (the charge) — the clanrats against the
+General (−28 %) and against the spearmen (−33 %), the Warlord (−22 %): the charge is noisy in the
+game too; and in the spearmen–clanrats pair the clanrats waver on the last tick of one replay as
+the spearmen rout (their Strength in Numbers' +6 is off below half health; the game's clanrats
+reached 13 points there, below the 16 of wavering, without wavering).
 
-With the innate effects (Strength in Numbers, Scurry Away!, the Skaven start bonus 0, rout speed
-0.86) one more row is outside: in the spearmen–clanrats pair the clanrats waver on the last tick of
-one replay, as the spearmen rout (the game's clanrats never waver there, though one run brought them
-to 13 points, below the 16 of wavering); their +6 of Strength in Numbers is off below half health.
-The spearmen–slaves pair got closer (fight and the slaves' rout 15 % → 0 %), the clanrats against the
-General waver 13 % early (2 % before); the mean error is the same (8.7 %). The whole battles: the same
-winner in 22 of 26, as before the effects (8 replays; at 32 replays 21 of 26, the set before the
-effects 20).
+### Whole battles
 
-### Whole battles: the same winner in 20 of 26 (77 %)
+| | The game | The simulator |
+|---|---|---|
+| Empire HP lost 60 / 120 / 180 s after the first contact | 0.25 / 0.41 / 0.53 | 0.29 / 0.49 / 0.63 |
+| Skaven HP lost 60 / 120 / 180 s after the first contact | 0.21 / 0.34 / 0.42 | 0.20 / 0.34 / 0.44 |
+| Mirror: HP lost by side 1 / side 2 at the end | 0.74 / 0.75 | 0.83 / 0.72 |
+| Routs / rallies a battle | 22.5 / 13.0 | 22.2 / 14.8 |
+| A rally takes (median), s | 44 | 44 |
+| A battle lasts (mean), s | 613 | 579 (stopped at the recording's end) |
 
-| | Battles decided | Same winner: v1 | v2 (friendly fire, spill) | v3 (stop at the recording's end) | now (flanks) |
-|---|---:|---:|---:|---:|---:|
-| Empire against Skaven | 10 | 10 | 9 | 8 | 8 |
-| Mirror arena (Empire against Empire) | 16 | 11 | 8 | 9 | 10 |
+(Measured with the flank rules, before the leave and volley rules.)
 
-Each recorded battle is played 8 times from starts moved by up to 2 m; the simulator's winner
-is the majority's. Two mirror runs ended on our 900 s limit without a winner and are not counted.
-
-| | The game | v1 | v2 | v3 | now |
-|---|---|---|---|---|---|
-| Empire HP lost 60 / 120 / 180 s after the first contact | 0.25 / 0.41 / 0.53 | 0.27 / 0.48 / 0.61 | 0.27 / 0.45 / 0.58 | 0.27 / 0.45 / 0.58 | 0.29 / 0.49 / 0.63 |
-| Skaven HP lost 60 / 120 / 180 s after the first contact | 0.21 / 0.34 / 0.42 | 0.14 / 0.23 / 0.29 | 0.19 / 0.32 / 0.41 | 0.19 / 0.32 / 0.41 | 0.20 / 0.34 / 0.44 |
-| Mirror: HP lost by side 1 / side 2 at the end | 0.74 / 0.75 | 0.85 / 0.73 | 0.88 / 0.76 | 0.81 / 0.68 | 0.83 / 0.72 |
-| Routs / rallies a battle | 22.5 / 13.0 | 24.4 / 15.5 | 29.2 / 18.8 | 21.7 / 14.6 | 22.2 / 14.8 |
-| A rally takes (median), s | 44 | 47 | 44 | 47 | 44 |
-| A battle lasts (mean), s | 613 | 716 | 737 | 590 (stopped at the recording's end) | 579 |
-| Not over when the recording ends | — | — | — | 80 % | 72 % |
-
-**Why v1 leaned to the Skaven.** Replaying the melee rule on the recorded seconds (the recorded
-places, men and contacts) shows that in the whole battles the Skaven infantry lost 2–3× what the
-rule gives, the Empire's about 1×, while in the pairs both ~1×. Two missile effects the pairs do
-not have explain it: *friendly fire* — Skaven infantry in melee lose 3.2× the rule in the seconds
-their own slingers shoot at the enemy they fight, 1.5× otherwise (Empire infantry in the mirror
-2.2× and 1.15×); and *spill* — shots at a unit hit its neighbours (an infantry unit in a whole
-battle loses ~1.3× per shot aimed at it what the lone target of the shooting arena does). With
-both, the casualty curves of both sides match the game within ~10 %. The mirror battles did not
-get better (see "What is missing").
-
-**The network's battles against the game's AI** (the gate: generated armies, `own_ai` "net"),
-both sides' recorded orders replayed, are reported apart: the same winner in 52 of 93. The attacker of a recorded battle comes from its manifest's roles
-(`scenario.attacker_of`); a run the network played had side 2 as the attacker before.
+**Friendly fire and spill** are why the whole battles cost the Skaven more than the pairs suggest.
+Replaying the melee rule on the recorded seconds shows the Skaven infantry in whole battles losing
+2–3× what the rule gives, the Empire's about 1×, while in the pairs both ~1×. Skaven infantry in
+melee lose 3.2× the rule in the seconds their own slingers shoot at the enemy they fight, 1.5×
+otherwise (Empire infantry in the mirror 2.2× and 1.15×); and shots at a unit hit its neighbours
+(an infantry unit in a whole battle loses ~1.3× per shot aimed at it what the lone target of the
+shooting arena does). With both, the casualty curves of both sides match the game within ~10 %.
 
 ### Speed
 
 | Where | Battles at once | Battles a second |
 |---|---:|---:|
-| GPU, RTX 5070 Ti (`torch.compile`) | 4096 | ~900 (v1 without friendly fire and spill: 1200–1560) |
+| GPU, RTX 5070 Ti (`torch.compile`) | 4096 | ~590 |
 | CPU in the container (no compile) | 1024 | 8 |
 
-A battle here is the Empire-Skaven battle (40 slots) to its end, 430–620 s of game time. On
-the GPU the step is compiled by `torch.compile` (about 10× faster); the container has no C++
-compiler for compiling on the CPU.
+A battle here is the Empire-Skaven battle (40 slots) to its end, 430–620 s of game time. On the GPU
+the step is compiled by `torch.compile` (about 10× faster); the container has no C++ compiler for
+compiling on the CPU.
+
+## Pending changes
+
+Measured, ready as a switch, not in `config/nn/sim.json`:
+
+- **The flank / rear striker by its own front** (`melee.flank_face` "striker", `flank_slope` 3.8,
+  `rear_slope` 5.5; the values in `build/sim-pending/flank.json`, the switch and its test in the
+  code, default "min": the old rule). A unit striking through the target's flank brings men by its
+  own front, not by the target's depth; the replay then gives 1.62× / 1.94× for a lone flank / rear
+  attacker (the game 1.53× / 1.92×). On top of the current rules: game-AI battles 22 → 20 of 26
+  (mirror 12 → 10), network's battles 47 → 52 of 93, mechanics 51 → 51, but the HP lost 60 s after
+  contact got ~40 % less exact (network's 0.043 → 0.061, game-AI 0.049 → 0.071: the simulator went
+  from 0.01 slow to 0.02–0.03 fast), and the `counter` drill stopped holding (its naive play won
+  0.66). Left out until the early exchange is fixed with it; the `pincer` drill needs it.
 
 ## What is missing
 
-- **The second Empire wave (02.10.2026) is not checked against the game yet.** Flagellants,
-  Greatswords and Free Company Militia use their passports and the database's rules; the pistol's
-  hit rate is an estimate; the line of fire is our geometry (aim at the target's centre, friends as
-  rectangles); a blocked unit does not step aside to get a clear shot; an enemy in the way does
+- **The second Empire wave and the Skaven wave are not checked against the game.** Flagellants,
+  Greatswords, Free Company Militia, Skavenslaves, Clanrats with shields and Night Runners use
+  their passports and the database's rules; the pistol's hit rate is an estimate; the line of fire
+  is our geometry; a blocked unit does not step aside to get a clear shot; an enemy in the way does
   not catch the shots; no accuracy loss while firing on the move. Recordings wanted:
   [units](units.md#flagellants-greatswords-free-company-militia).
-- **Task 20: the knowledge-base conflicts, fixed as one set (02.10.2026)** (`build/simacc/kb_eval.py`,
-  `kb_events.py`, `kb_lords.py`, `collapse.py`, `fat_db.py`; [conflicts](../game/mechanics/README.md#conflicts-with-our-simulator)).
-  Each conflict was checked against the database (`db.pack`) and the recordings (26 decided
-  game-AI battles, 71 network battles), then the set was evaluated together (8 replays a battle,
-  majority winner):
-
-  | | All off (before) | The set (now) |
-  |---|---:|---:|
-  | Same winner, game-AI battles | 20 of 26 | 18 of 26 |
-  | Same winner, network battles | 43 of 71 | 43 of 71 |
-  | Pairs and shooting within 20 % | 51 of 54 (mean error 8.8 %) | 51 of 54 (8.7 %) |
-  | HP-lost curve error 60/120/180 s, game-AI / network | 0.063 / 0.088 | 0.058 / 0.088 |
-  | Not over when the recording ends, game-AI / network | 66 / 81 % | 54 / 70 % |
-  | Lords fallen (of 26 / 48 in the game) | 18.6 / 41.6 | 12.1 / 36.5 |
-  | Lord's fall, sim - game (median), game-AI / network | -29 / -129 s | -61 / -145 s |
-
-  In: fatigue effects (`unit_fatigue_effects_tables`, read from `db.pack`: attack x0.95-0.7, speed
-  x0.95-0.85, armour, charge, AP, reload); "attacked in the flank / rear" -6 / -14 as a one-tick
-  event at the first strike from that side (DB; the recordings: a unit first struck in the flank
-  drops 1.5 points more in 1-2 s than one struck in front, in the rear 1.9 - one 0.5 s tick of
-  -6 / -14; the old continuous -1 / -2 is gone); the aura fading 70 -> 105 m (DB); army
-  destruction -120 (DB rule, strength = cost x health of units not shattered); splash damage
-  divided among its targets (no change for today's units: the share still exceeds a man's
-  health); and the three earlier switches (`lord_v_lord` 0.73, `lord_fall` 0 / 0, missiles leaving
-  melee at 10 m, now `contact.leave_m` for every unit). Each of them alone had lowered the winners; together they hold them (the game-AI 20 -> 18
-  is within the replays' noise: other variants of the set gave 18-20), and more battles end as in
-  the game. Dropped after the check: the 4 s recent and 60 s extended casualties (DB
-  description) - the archers' target wavered 90 % late and the slingers' never (4 s), or the
-  pairs wavered too early (30 s + 60 s): the calibrated single 30 s window stays; the charge's
-  +15 morale (DB) - after 3343 recorded charges morale over the next 1-4 s falls as after 1500
-  contacts met standing, no +15 shows; hit slope 1, flank x0.6 / rear x0.3, sectors 45/135 deg,
-  spacing 1.8 m, bracing x2, charge impact - our measured numbers kept (the pairs, the whole
-  battles). Not done: the scaled "strong enemy near" (-3...-24 by a combat power not in the data),
-  the rally timer (meaning unclear). The targets (83 %, +10 points) are not reached: the errors
-  left are elsewhere. **Lords fall too soon** (network battles: 130-145 s earlier, at 4 % health
-  against the game's 16 %, in melee 53 % of their time against 45 %: the game's lords break off
-  and shatter with health left) and the mirror arena (6-8 wrong of 16, as before). **To record**
-  (bridge, every second): `CCO BattleRoot.BalanceOfPowerPercent` (the game's strength for the army
-  destruction), `unit:strategic_value()` per unit, and per unit `CCO PercentCasualtiesRecently`,
-  `PercentHpLostRecently`, `MoraleGreatestEffect` (the casualty windows and which effect drives a
-  rout).
-- **Accuracy pass of 02.10.2026** (the scripts in `build/simacc/`, not in Git). The check then:
-  pairs 51 of 54, same winner 20 of 26 (Empire-Skaven 9 of 10, mirror 11 of 16), the network's
-  battles 40 of 63. Three gaps were measured on the 28 game-AI and 63 network battles and put
-  in `sim.json` as switches; none raised the winners, so all three stay off (the old behaviour):
-  - *Lord against lord* (`contact.lord_v_lord`, off = 1): a lord fought by the enemy lord alone
-    loses 14.6 HP/s (General) and 10.0 (Warlord) in the game, 19.4 / 15.0 in the simulator
-    (0.73 of it). Infantry on a lord in these battles is too strong as well (one unit: 3.3 / 2.9
-    against 4.7 / 4.1) while the lord swarm probe and the pairs match. At 0.73 the network's
-    battles fell from 40 to 36 of 63 (side-balance error 0.165 → 0.176): something else
-    compensates for the lords' losses.
-  - *A lord's fall* (`morale.lord_fall`, now the database's −16 then −10): in all 75 recorded
-    falls the lord shattered with 2–50 % of his health (none was killed), and his standing units
-    lost −3 / −4.7 / −4.8 points 2 / 6 / 10 s later (mean of 167 unit-falls; median −3) — about
-    his aura; the simulator gives −9 / −17 / −18 and routs 39 % of the army within 10 s of a fall
-    (the game 21 %). So the user's "the drop takes seconds in the simulator, ~1 s in the game"
-    is the other way round: the simulator's drop is 4× the game's. With 0 / 0 the winners did
-    not change (20 of 26, 36 of 63) but more battles stayed undecided at the recording's end
-    (76 % against 66 %).
-  - *Missile units leaving melee* (now `contact.leave_m`, on at 10 m for every unit): in the game a missile
-    unit in melee with no target and its order point 10 m or more away is moving 45–78 % of
-    those seconds and leaves after 10–12 s (median); the simulator keeps missile units in melee
-    284 s a battle against the game's 162 (spells 15 s against 8). At 10 m (with the replay
-    moving such units instead of fighting the nearest enemy) the mirror got 1–2 worse.
-- **The army collapse** (the biggest gap left, probably why the switches above do not help):
-  in the game a losing army breaks all at once — in 68 of 182 recorded sides 60 % of the
-  standing units lose 0.4 MoralePercent or rout within 3 s, near the end — and the
-  simulator has no such rule (66 % of its battles are not over when the recording ends). The
-  database has one: `ume_concerned_army_destruction` −120 at
-  `army_destruction_enemy_strength_ratio` 2.6 and `…_alliance_strength_ratio` 0.22; with strength
-  = cost × health share it does not time the collapses (8–11 of 58 within 5 s of the trigger),
-  so the game's own strength measure is needed (a recording of its balance-of-power value each second would settle it).
-- **Morale at contact**: units that run into contact gain ~3 points over the last 6 s in the
-  game (the database's morale `charge_bonus` 15 / `charge_timeout` 60, not modelled) and lose
-  it fast after; the simulator keeps falling (−2 points) there. And before contact the
-  simulator's units stand 6–10 points lower than the game's (its exposed-flank flags fire 1.5–3×
-  as often: in melee lf / rf / bf 0.33 / 0.34 / 0.25 against 0.22 / 0.25 / 0.09; no simple
+- **Lords fall too soon** (network battles: 130–145 s earlier, at 4 % health against the game's
+  16 %, in melee 53 % of their time against 45 %: the game's lords break off and shatter with health
+  left). In the network's gate runs a lord fought by the enemy lord and one unit loses 20.9 HP/s
+  against the game's 13.5: not the infantry, partly missile spill; the rest not found.
+- **The army collapse.** In the game a losing army breaks all at once — in 68 of 182 recorded sides
+  60 % of the standing units lose 0.4 MoralePercent or rout within 3 s, near the end. The
+  database's rule (`ume_concerned_army_destruction` −120 at `army_destruction_enemy_strength_ratio`
+  2.6 and `…_alliance_strength_ratio` 0.22) is on, with strength = cost × health of the units not
+  shattered; it times 32 of the 68 collapses (median 2 s after the trigger), 36 have no trigger. The
+  game's own measure (`bop`, recorded every second now: [measurements](measurements.md#morale-events-and-the-army-collapse))
+  is to replace that strength.
+- **Morale at contact**: units that run into contact gain ~3 points over the last 6 s in the game
+  and lose them fast after; the simulator keeps falling (−2) there. Before contact the simulator's
+  units stand 6–10 points lower than the game's (its exposed-flank flags fire 1.5–3× as often: in
+  melee `lf` / `rf` / `bf` 0.33 / 0.34 / 0.25 against 0.22 / 0.25 / 0.09; no simple
   distance-and-sector rule fits the game's flags, F1 ≤ 0.46).
-
-- **The mirror battles**: in the game the defender wins 15 of 16; the simulator gets 9 of 16.
-  Its side 1 (CA's planner) loses too much (0.81 of its health by the recording's end against
-  0.75): its archers get caught in melee for 70 s a battle (21 s in the game).
-- **Fights break off in the game, not in the simulator.** In the mirror and Empire-Skaven
-  battles a unit in melee leaves it (for 4 s or more, both standing) 0.013 times a second
-  (infantry), 0.030 (lords), 0.033 (missile units); melee spells are short (median 17 s, the
-  General's 9 s; in the simulator 21–112 s). In the one-against-one pairs it almost never
-  happens (2 times in 4.9k seconds). A move order is not the cause: infantry with a move order
-  10 m or more away from the enemies break off as often as those told to stay (0.013 against
-  0.011 a second; they drift ~2 m/s with the fight and lose 1.2× more health); only lords (0.066
-  against 0.025) and missile units (0.038 against 0.027) break off more. So the simulator keeps
-  "a move order does not take a unit out of melee". A break-off at the measured rates, with the
-  database's 10 s of immunity (`melee_breakoff_total_immunity_secs`), was tried and dropped: it
-  broke the pairs (fights twice as long) and did not help the mirror. What triggers it in the
-  game is not known.
-- **Simulated battles end later**: 72 % are not over when their recording ends (80 % before the flanks).
-- **Lords fought by several units** (01.10.2026; measured in the game by the
-  [lord swarm probe](../game/units/lord-swarm.md), 3 battles). A lord standing in a ring of 1–4
-  spear units loses the same HP/s however many units there are (General 7.8 / 8.3 / 8.7 / 7.4,
-  Warlord 6.2 / 5.8 / 5.1 / 4.8); 4–5 enemy soldiers stand within 2.5 m of him, shared by the
-  units; his back and flanks give no extra; an armour-piercing unit counts by its share. The old
-  rule (the strongest attacker's rate and 0.35 of the others', inferred from unit totals of whole
-  battles) is replaced: at most `lord_max_attackers` (9) men strike a lord in all, summed;
-  `lord_direction` 0 (no flank or rear rule on a lord); an enemy lord among the attackers keeps
-  his blow (the cap squeezed him out before: the lord, a lord and three units took half of what
-  the lord alone took); with the enemy lord on him the infantry counts at `lord_rival_others`
-  0.35; a unit told to attack another enemy strikes a lord it only touches at `lord_incidental`
-  0.4 (whole battles: 1.7 HP/s against 4.1 when he is its target), and an enemy unit it only
-  touches at `unit_incidental` 0.3 (the gate battles with Skaven replayed open-loop: an infantry
-  unit fought by one enemy unit while other enemy units stood within 35 m took 19.6 HP/s in the
-  game, 33.9 in the simulator without the rule, 22.3 with it; with no other enemy near 16.5 /
-  20.7; the check's whole battles: same winner 22 of 26 against 18, the pairs unchanged). The probe's trials replayed
-  (`python -m tools.nn.lord_swarm --sim`; game / old / new): one spear unit 7.8 / 6.8 / 7.7 and
-  6.2 / 5.4 / 6.1; four 7.4 / 7.8 / 8.0 and 4.8 / 6.7 / 6.3; halberds 21.5 / 15.2 / 17.1 and
-  11.2 / 10.4 / 11.7; the other lord and three units 29.8 / 9.8 / 21.8 and 27.6 / 9.5 / 22.4;
-  mean error over the 24 layouts 22 % → 18 % (13 of 24 within 20 %, as before). The pairs stay
-  51 of 54 (the lords' steady loss: General −17 % → −6 %, Warlord −2 % → +10 %; the General's
-  first 15 s now +27 %); same winner 19 of 26 (20 before; a mirror battle that was 4 : 4 of the
-  8 replays) and 17 of 27 network battles (18; one that 6 of 8 replays got right now 5 of 8 get wrong). Lord HP/s in the whole
-  battles by contacts (game / now): infantry alone 3.7 / 4.7, two units 4.6 / 4.9; the enemy lord
-  alone 16.5 / 18.9, with a unit 17.6 / 19.2. Still high in the network's gate runs: the enemy lord
-  and one unit 13.5 against 20.9 — not the infantry (with `lord_rival_others` 0 it is still 19.8),
-  partly missile spill on the lord (16.6 without it and the infantry); the rest is the enemy lord's own rate in a
-  crowd, not found yet.
-- **Lord abilities** (01.10.2026, `tools/nn/sim/abilities.py`, the row in the table above). When
-  the game's AI fires them is assumed, not measured (only the Warlord's speed in the recordings,
-  5–6.5 m/s, shows Verminous Valour in use). The CA planner's side 1 of the 28 whole battles gets
-  no actives (not known whether it uses them). With them: pairs 51 of 54 as before (the Warlord
-  pair has the Warlord on side 1, so no actives there; the General's passive moves his pair from
-  6.92 to 6.81 HP/s, game 8.19); same winner 19 of 26 (17 before: Empire-Skaven 9 of 10, mirror 10
-  of 16), the network's battles 19 of 27 (16 before); the swarm of run 20261001-074420 (8
-  replays): ours lost 12.9k (12.2k before, the game 14.7k), the Warlord 2.5k (2.5k, the game 1.6k).
-  The simulator now runs ~590 battles/s on the GPU (~675 before).
-  The numbers come from the ability passports, and the network's side fires its abilities by
-  order. The passives are innate effects ([innate effects](#innate-effects)).
-- **Shots at a lord in a crowd** (spill in melee, 01.10.2026): the game's AI slingers shoot the
-  network's General while he fights among its own spearmen, and the misses fall on those spearmen
-  (run 20261001-074420, s 127–240: four spearmen and the General on the Warlord lost 14.7k HP, the
-  Warlord 1.6k; both sling units shot the General the whole time). Spill used to reach only units
-  out of melee; now it reaches the target's units in melee too. That run replayed 8 times: ours
-  lost 9.7k before, 12.2k now (the game 14.7k); the Warlord 2.4k / 2.5k (the game 1.6k). The check:
-  pairs 51 of 54 as before; same winner 17 of 26 (18 before: the mirror arena 9 of 16, 10 before),
-  the network's battles 16 of 27 (17 before); Empire HP lost 60 / 120 / 180 s after contact 0.30 /
-  0.50 / 0.64 (before 0.29 / 0.49 / 0.64, the game 0.25 / 0.41 / 0.53). Not measured: whether the
-  shooter's own units in that melee take more than the friendly-fire share.
+- **The mirror battles**: in the game the defender wins 15 of 16; the simulator gets 10 of 16. Its
+  side 1 (CA's planner) loses too much: its archers get caught in melee for 70 s a battle (21 s in
+  the game).
+- **Fights break off in the game, not in the simulator.** In whole battles a unit in melee leaves it
+  (for 4 s or more, both standing) 0.013 times a second (infantry), 0.030 (lords), 0.033 (missile
+  units); melee spells are short (median 17 s, the General's 9 s; in the simulator 21–112 s). In the
+  one-against-one pairs it almost never happens. A move order is not the cause for infantry (0.013
+  against 0.011 a second for those told to stay); what triggers it is not known.
+- **Simulated battles end later**: 54–72 % are not over when their recording ends.
 - **Replay is open-loop**: the recorded orders do not react to a battle that went differently.
-- **Fatigue** matches the recorded state exactly in 43 % of the samples (off by 0.86 of a
-  state on average). What it does to attack, defence and speed is in the database
-  (`unit_fatigue_effects_tables`) and modelled since task 20.
-- **Not modelled**: terrain, a turn rate out of melee (a moving unit faces where it goes at
-  once), cavalry, monsters, magic, flying, artillery, abilities, experience ranks, the scaled
-  "strong enemy near" (only −3).
+- **Fatigue** matches the recorded state exactly in 43 % of the samples (off by 0.86 of a state on
+  average); its effects come from the database (`unit_fatigue_effects_tables`).
+- **Not modelled**: terrain, a turn rate out of melee (a moving unit faces where it goes at once),
+  cavalry, monsters, magic, flying, artillery, experience ranks, the scaled "strong enemy near"
+  (only −3: its combat power is not in the data), the database's rally timer (meaning unclear).
 - `vis` is always true: line of sight is not modelled.
+
+## Tried and rejected
+
+| What | Result | Why not |
+|---|---|---|
+| The flank / rear striker by its own front (pending, above) | the lone flank / rear attacker right (1.62× / 1.94×), network's winners 47 → 52 of 93 | the early exchange ~40 % less exact (0.043 → 0.061), game-AI winners 22 → 20, the `counter` drill broken |
+| A break-off at the measured rates, with the database's 10 s immunity (`melee_breakoff_total_immunity_secs`) | fights in the pairs twice as long | broke the pairs, did not help the mirror; the trigger is unknown |
+| The database's 4 s recent and 60 s extended casualty windows | 4 s: the archers' target wavered 90 % late, the slingers' never; 30 s + 60 s: the pairs wavered too early | the calibrated single 30 s window stays |
+| The charge's +15 morale (DB `charge_bonus` 15 / `charge_timeout` 60) | after 3343 recorded charges morale over the next 1–4 s falls as after 1500 contacts met standing | no +15 shows in the game |
+| The database's hit slope 1, flank ×0.6 / rear ×0.3, sectors 45° / 135°, spacing 1.8 m, bracing ×2 | worse against the pairs and the whole battles | the measured numbers kept (slope 0.1: the pairs need one flat number; flank 2.0 / rear 0.25; 60° / 120°; 1.5 m) |
+| The database's lord-fall morale (−16, then −10 to every unit) | the simulator routed 39 % of the army within 10 s of a fall (the game 21 %); the game's units lose −3 to −4.8 points | the fall is only the aura (`lord_fall` 0 / 0) |
+| A continuous "attacked in the flank / rear" −1 / −2 | the recordings show a 1–2 s drop of 1.5 / 1.9 points | one 0.5 s tick of the database's −6 / −14 at the first strike |
+| A charge impact of 2.5 and instant turning in melee | a unit charged standing lost 2.7× its charger (the game 0.82), a flank attack on a free unit lasted one step | everything left standing when charged lost; now 1.5, bracing and 2°/s |
+| The lord rule "the strongest attacker's rate + 0.35 of the others'" (inferred from unit totals) | the lord, a lord and three units took half of what the lord alone took | the measured 9-men cap |
+| A Skaven start morale bonus (`faction_bonus` +6, fitted) | it was Strength in Numbers in disguise (Skaven drop 2.3 points more crossing 50 % health) | the effect models it; the bonus is 0 |
+| Single Entity's "speed ×0.9, damage ×0.8 below 25 % health" | lords running out of melee keep 0.84–0.85 of their run in every health band | left out (`effects.off`) |
+| A lord as a target at 0.9 of the unit rule | its 2-second loss windows overlapped and counted each loss twice | 0.43 over ~33k shots |
+| Leaving melee for missile units only | network units under a move away fought on at full rate (the game: ~6 % of the attack rate) | `contact.leave_m` 10 m for every unit |
 
 ## Surprises
 
 - A lord loses ~0.43 of the unit rule (his armour, shield, resistance) per projectile aimed at
-  him while he is out of melee for the whole flight (~33k shots). v1 had 0.9: its 2-second loss
-  windows overlapped and counted each loss twice.
+  him while he is out of melee for the whole flight (~33k shots).
 - Missile units hurt their own side: of the hits aimed at an enemy fighting their own infantry,
   0.26 (arrows) and 0.56 (sling) land on their own men. The Skaven slingers shooting over their
   line are why the Skaven lose more in the whole battles than the pairs suggest.

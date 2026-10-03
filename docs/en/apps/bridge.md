@@ -31,12 +31,12 @@ sequenceDiagram
   target). Fed that, the network did not recognise its own order in force and re-decided: replaying
   the gate's recordings offline gave the game's 15.6 order changes a unit-minute (sampled and
   greedy alike, so not the bridge); the simulator with the game's point gave 30 instead of its own
-  5.5 (02.10.2026). Recordings (`nn_sample`) keep the game's raw value.
+  5.5. Recordings (`nn_sample`) keep the game's raw value.
 - **Running** (`f`): the companion replaces the game's reading with the simulator's
   (`exchange.running_by_speed`): moving (`mv`) and faster than the unit's walk (passport) + 0.3 m/s,
   the speed measured between the previous state and this one; nobody runs in a battle's first state.
-  The game's `f` is `unit:is_moving_fast()`, the unit's run mode, not its speed: in the gate of
-  03.10.2026 (8 battles) it was on in 74 % of the unit-seconds a unit stood still (< 0.3 m/s) in melee
+  The game's `f` is `unit:is_moving_fast()`, the unit's run mode, not its speed: in a gate of
+  8 battles it was on in 74 % of the unit-seconds a unit stood still (< 0.3 m/s) in melee
   and in 99 % of the game AI's melee seconds; the simulator's `f` is on in 3-4 % of melee seconds.
   Measured by speed, the game AI's units in melee run 9 % of the time, as the simulator's. Recordings
   keep the game's raw value (the replay uses it as the run order).
@@ -44,8 +44,8 @@ sequenceDiagram
   with the simulator's (`exchange.engaged_targets`): a unit has a target exactly while it fights (the
   engine's target if it is a present enemy, else the nearest one) or shoots (the engine's target).
   The game's `t` is the engine's target: an attack order's target from the moment it is given (99 % of
-  free units under an attack), none for most units fighting under a hold (74 %) or a move (100 %). Gate
-  of 03.10.2026: the same shift put into the simulator cut the network's trade against `ai_like` by 0.105
+  free units under an attack), none for most units fighting under a hold (74 %) or a move (100 %). In
+  a gate: the same shift put into the simulator cut the network's trade against `ai_like` by 0.105
   a battle and moved its orders to the game's mix (hold 0.73 -> 0.63, attack 0.17 -> 0.24, move 0.10 ->
   0.13; in the game 0.61 / 0.23 / 0.16). Recordings keep the game's raw value.
 - The companion answers with orders for that move. The game reads the file every 100 ms of battle
@@ -57,25 +57,24 @@ sequenceDiagram
 - **Routing, shattered and dead units get no orders**: they take care of themselves. The companion
   writes no line for them (the network's HOLD for a unit that takes no orders is only a filler), and
   the bridge takes no order from an answer to a state in which the unit was down (`down_at`; counted
-  in `skipped`). Before 02.10.2026 that filler HOLD reached units that rallied between the state and
-  the answer and halted them: the first order after 42 of 102 rallies in the gate of 02.10.2026.
+  in `skipped`). Without that, the filler HOLD reached units that rallied between the state and the answer
+  and halted them: the first order after 42 of 102 rallies in one gate.
 - **A rallied unit goes on with the order it had.** The engine drops the order of a unit that
   routs; the simulator keeps it, and the unit goes on with it the moment it rallies. So the bridge
   keeps the order a unit had when it broke and gives it again at once when the unit stands again
   (checked every poll; event `nn_rally`, counted in `nn_regiven`); an attack on a target that is gone
-  becomes hold, as in the simulator. Before, the unit stood until the network's next answer, and the
+  becomes hold, as in the simulator. Without it the unit stands until the network's next answer, and the
   network, seeing it stand far from its target, often held it (replayed offline: HOLD 0.41-0.43
-  standing, 0.11-0.12 when seen walking back to the target as in the simulator). (Before 01.10.2026
-  a rallied unit stood up to 128 s under an order the bridge thought was in force.)
+  standing, 0.11-0.12 when seen walking back to the target as in the simulator).
 - **What the bridge does not change:** a held unit far from the enemy stays held. The network
   (`test5/it6/m40`) keeps an own unit under HOLD with no enemy near on HOLD (offline: 0.999-1.0;
   moving its order point onto an enemy: attack 0.82-0.98; morale, fatigue and health change nothing),
-  and units rally 75-255 m from the nearest enemy. Gate 02.10.2026 (8 battles): of 102 rallies 37
+  and units rally 75-255 m from the nearest enemy. In a gate of 8 battles: of 102 rallies 37
   ended in a hold of 30 s or more (17 held before the rout as well); 48 % of rallied units' decisions
   were HOLD (78 % of them idle) against 10 % for units that never routed. The simulator shows the
   same habit, weaker: rallied units under HOLD 24 % of their time, 38 % of it idle (6 battles against
   ai_like). That is for training, not for the bridge.
-- **A held shooter shoots as in the simulator** (02.10.2026). The simulator's held shooter shoots
+- **A held shooter shoots as in the simulator.** The simulator's held shooter shoots
   the nearest enemy in range (into melee too). The game's fire at will does not: a halted shooter
   picks a target itself, often one just out of range, keeps it and stands (gate it4, 8 battles:
   standing shooters with an enemy in range by the simulator's measure fired within 10 s in 40 % of
@@ -118,7 +117,7 @@ sequenceDiagram
     `FREE_MIN` = 10 decisions (event `nn_duty`). The network's order stays the same all along: the
     same order again is not new.
 
-  In the game (battle 4 of the gate, seed 1000900008, 01.10.2026; another sampled battle each time):
+  In the game, without and with these rules (battle 4 of the gate, seed 1000900008; another sampled battle each time):
 
   | | Before | After |
   |---|---|---|
@@ -158,7 +157,7 @@ the first answer it stands and shoots at will.
 - once per decision, changes only: `nn_ability_ready` (`can_perform_special_ability` of each own
   active ability) and `nn_effects` (a unit's active phases).
 
-**In the game** (run `20261001-105336`, 01.10.2026: arena `whole_emp_v_skv`, ×3, 240 s of battle,
+**In the game** (run `20261001-105336`: arena `whole_emp_v_skv`, ×3, 240 s of battle,
 Normal difficulty, the untrained network `build/nn-train/random.pt` with a fresh ability head):
 
 | What | Result |

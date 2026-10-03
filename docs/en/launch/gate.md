@@ -61,7 +61,7 @@ One battle of the plan: `-Battles 1 -Offset 3` is the 4th (the largest armies).
   decides single battles weighs on both battles of a pair alike, so a pair won both says more about
   the network than two single wins. No script baseline in the game (the game's AI against itself
   would cost a launch per battle).
-- `-Symmetric` (`plan --symmetric`, 02.10.2026): in the plain plan the generator's own army always
+- `-Symmetric` (`plan --symmetric`): in the plain plan the generator's own army always
   attacks, so the network defends only with the other army and a matchup's roles never turn round.
   Symmetric blocks play a seed 4 times: own army attacks, enemy army defends, own army defends,
   enemy army attacks (pairs 2k+1 and 2k+2; in the second pair the generator's enemy army attacks).
@@ -70,7 +70,7 @@ One battle of the plan: `-Battles 1 -Offset 3` is the 4th (the largest armies).
   (units besides the lord), in turn 1-4, 10-14, 5-9, 15-19 (`PAIR_BINS`). So even a short plan has
   small and large armies.
 
-The first 4 battles (with the pools of 02.10.2026; they follow `config/nn/pools.json`):
+The first 4 battles (with the current pools; they follow `config/nn/pools.json`):
 
 | Battle | Pair | Seed | Our army | The game AI's army | Network |
 |---|---|---|---|---|---|
@@ -108,7 +108,7 @@ A battle not at Normal difficulty (`battle_difficulty` in `launch.json` other th
 | `summary.json`: `pair_gold` | the pairs' gold balance ([fair metrics](../training/training.md#network-evaluation-fair-metrics)): ours minus the game AI's on the same armies / budget, the exchange factor, the weak army's destroyed / lost in our hands vs the game AI's; a battle's `gold` (lost per side from the units' end state × passport cost, destroyed, budget, trade, margin); a line under the table |
 | `summary.json`: `liveliness` | measured only ([liveliness](../training/training.md#liveliness)): our network's order changes, attack-target switches, A→B→A flips, move jitter and twitching out of melee per role, from the given orders (`nn_orders`); both sides' own target switches every second (`nn_sample`): the game's AI as the reference band (median [min, max] of the battles); a battle's `lively` (the counts); two lines under the table |
 
-A battle's row: seed, factions and army templates, budget (B, each side's budget and cost; Skaven 0.8 of the Empire's), units per side (lord included), role,
+A battle's row: seed, factions and army templates, budget (B, each side's budget and cost), units per side (lord included), role,
 who won and how, battle length, men at the start and at the end, units still standing, the
 network's counters (`nn`: decisions, answers, misses, orders given, `keep`, bad files), Lua errors,
 difficulty, preferences restored.
@@ -122,7 +122,7 @@ The table:
 
 `pair` is the pair and `s` its swapped battle (`-` in a gate planned before the pairs); `units` counts the lord; `men left` is the network's / the game AI's men.
 
-## In-game check (30.09.2026)
+## A trial battle
 
 A trial battle: `gate.ps1 -Battles 1 -Offset 3` (battle 4 of the plan), ×20, checkpoint
 `build/nn-train/latest.pt` (12 updates, barely trained), sampled orders. Run

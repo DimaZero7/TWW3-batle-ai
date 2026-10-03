@@ -146,14 +146,8 @@ skavenslave slingers — 11 units, 1601 men). The Skaven line has 6 spear units
 (clanrats in the centre), the slingers 35 m behind them, the Warlord 60 m. Gap
 350 m, battle limit 1200 s.
 
-**Since 01.10.2026 the arenas give the Skaven 0.8 of the Empire's gold** (after these
-10 battles; `budget_factor` in `config/nn/pools.json`, as in the
-[random armies](armies.md#how-a-battle-is-built)): Skaven 2050 = 0.82 × 2500 (Warlord,
-1 clanrat spearmen, 4 skavenslave spearmen, 3 skavenslave slingers — 8 units, 1301 men).
-The line has 5 spear units (the clanrats in the centre, 36 m between centres), the
-slingers 35 m behind at −54, 0 and 54 m, the Warlord 60 m. Exactly 2000 cannot keep the
-make-up (it needs 1 clanrat, 5 slaves, 2 slingers). The Empire is unchanged. The new
-arenas are not yet measured in the game.
+The arenas `whole_emp_v_skv` and `whole_skv_v_emp` keep this equal budget (every
+`budget_factor` is 1.0: [random armies](armies.md#how-a-battle-is-built)).
 
 | Who attacks | Battles | Skaven won | Battle, s | First contact, s |
 |---|---:|---:|---|---|
@@ -226,9 +220,9 @@ target loses.
 
 - The rear costs more than the flank, as the database's defence ×0.3 / ×0.6 says. An earlier
   count over all melee seconds (several attackers, shooting and young contacts mixed in) gave
-  1.74× / 1.31×. The simulator keeps the old fit for now ([simulator](simulator.md#flanks-rear-and-charges-in-whole-battles)).
+  1.74× / 1.31×. The simulator keeps the old fit; the rule that matches these is pending ([simulator](simulator.md#pending-changes)).
 
-## Morale events and the army collapse (task 20, 02.10.2026)
+## Morale events and the army collapse
 
 From the 28 game-AI and 71 network battles (`build/simacc/kb_events.py`, `collapse.py`,
 `kb_lords.py`; points = MoralePercent × leadership, change from the second before the event):
@@ -248,7 +242,7 @@ From the 28 game-AI and 71 network battles (`build/simacc/kb_events.py`, `collap
   cost × health of units not shattered (routing included) fires on 36 sides, 32 of them collapse,
   median 2 s after the trigger; 36 collapses have no trigger. With standing units only: 79
   triggers, 63 collapse, but 50 s later (median). The game's own strength was not recorded.
-- **Recorded from 02.10.2026** (every `nn_sample`, [the fields](../apps/entries.md#nn_arena)): the
+- **Recorded** (every `nn_sample`, [the fields](../apps/entries.md#nn_arena)): the
   balance of power `bop` (CCO `BattleRoot.BalanceOfPowerPercent`, for the player's alliance
   `bop_side`; the CCO has no per-alliance value, the other side's is its complement), per unit
   `sv` (`unit:strategic_value()`), `pcr` / `phr` (CCO `PercentCasualtiesRecently` /

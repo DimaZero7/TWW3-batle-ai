@@ -97,7 +97,7 @@ All seven also have `hide_forest` (they hide in woods). The size of all seven is
 
 ## Spearmen with shields and swordsmen
 
-Added on 02.10.2026 to the Empire's pool: shields block slings and arrows from the
+In the Empire's pool: shields block slings and arrows from the
 front, the Empire's answer to the Skaven at equal gold ([armies](armies.md)).
 The same men as the spearmen without shields (health, mass, speed, armour,
 leadership); they differ in the shield, the weapon, attack and defence.
@@ -131,7 +131,7 @@ file too, without cards.
 
 ## Flagellants, Greatswords, Free Company Militia
 
-Added on 02.10.2026 to the Empire's pool (the second wave): cheap chaff that never routs, heavy
+In the Empire's pool (the second wave): cheap chaff that never routs, heavy
 armour-piercing infantry, and the first **direct-fire** shooters. Passports from the database;
 no cards from battle yet (list `config/roster/capture_emp_wave2.json`, see "Recordings wanted").
 
@@ -253,7 +253,7 @@ and ability passports (both from the database). Which unit owns which effect com
 rows (the passport's `attributes`, and its `abilities` that are passive or `auto`), never from a hand
 list. The simulator lays them on by one mechanism (`tools/nn/sim/effects.py`,
 [simulator](simulator.md#innate-effects)); the network sees each as a pair of inputs, owned and on
-now ([model](model.md#innate-effects)). An attribute's rule is the engine's (the database gives only
+now ([model](model.md#innate-effects-each-unit-each-effect-of-the-catalogue)). An attribute's rule is the engine's (the database gives only
 its key): `ATTRIBUTES` in `tools/nn/effects.py` says what it does, with its numbers and source.
 
 For each effect the file holds: `kind` (attribute, passive, timed), `stats` (stat, how, value, on
@@ -301,7 +301,7 @@ Perfect Vigour is the attribute `fatigue_immune` (in `ATTRIBUTES`, modelled: no 
 unit with it comes. Effect bundles (`effect_bundles`, `effect_bonus_value_*`) are campaign effects
 (skills, technologies, `battle_context_unit_attribute_junctions`): custom battles have none.
 
-**Measured** (02.10.2026, all fair recordings with unit keys; speed over 1 s steps): routing
+**Measured** (all fair recordings with unit keys; speed over 1 s steps): routing
 Empire units run at 0.865 of their run, routing Skaven below half health at 0.945 (×1.09: Scurry
 Away!) and above half health at 0.866 (×1.1 × 0.9); running in order, steady, above half health:
 Empire 0.97, Skaven 0.88 (×0.91: Strength in Numbers). Crossing 50 % health, Skaven units drop
@@ -311,7 +311,7 @@ the Skaven's ×1.1 comes from Scurry Away!.
 
 ## How to add a unit
 
-A standing procedure (user, 02.10.2026). The Flagellants, Greatswords and Free Company Militia
+A standing procedure (the user's). The Flagellants, Greatswords and Free Company Militia
 above are the worked example.
 
 1. **Key and passport.** Find the main unit key (`main_units`), add it to `UNITS` in
@@ -362,7 +362,7 @@ with a schema from 26.09.2026 (local archive `research/evidence/units/empire-202
 
 The three v1 spearmen units have **no shield** (`shield` = `none`), nor do the archers
 and the slingers. The lords have one: the General's is metal and blocks
-55 % of arrows, the Warlord's is wood, 35 %. Since 02.10.2026 the Empire's pool also has
+55 % of arrows, the Warlord's is wood, 35 %. The Empire's pool also has
 the spearmen with shields and the swordsmen (metal, 35 % both). A shield covers 60° from the front
 ([missile damage](../game/units/missile-damage.md)); the simulator blocks that share of
 the hits whose shooter stands within 60° of the target's facing, for lords and infantry alike.

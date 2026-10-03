@@ -208,7 +208,7 @@ The sample itself also carries `bop` — CCO `BattleRoot.BalanceOfPowerPercent`,
 player's alliance — and `bop_side`, that alliance as our side number (`bm:get_player_alliance_num()`,
 also in `ready` with the CCO `BattleRoot.PlayerAllianceContext.Id` as `player_alliance_cco`). Each of
 these is read under `pcall`: a value the game does not give is left out. They are for the simulator's
-army collapse and morale rules ([measurements](../training/measurements.md#morale-events-and-the-army-collapse-task-20-02102026))
+army collapse and morale rules ([measurements](../training/measurements.md#morale-events-and-the-army-collapse))
 and are not in the companion's state.
 
 The end: the last snapshot `nn_final` and `result` — the outcome, men and health of each side,

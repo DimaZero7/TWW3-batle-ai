@@ -47,13 +47,13 @@ flowchart LR
    can spend it.
    - **Budget factor.** A side's budget is B × its faction's `budget_factor` / the larger
      factor of the two sides (`config/nn/pools.json`, 1.0 by default). The bounds of
-     B take the factor into account, so both sides can always spend their share. Now
-     every faction has 1.0. The Skaven had 0.8 from 01.10.2026: at an equal budget they
-     won all 10 whole battles in the game
-     ([measurements](measurements.md#whole-battles-empire-against-skaven)); at 0.8 they lost
-     ~90% in the simulator, so on 02.10.2026 the factor went back to 1.0 and the Empire got
-     the spearmen with shields and the swordsmen instead
-     ([unit passports](units.md#spearmen-with-shields-and-swordsmen)).
+     B take the factor into account, so both sides can always spend their share. Every
+     faction has 1.0: the faction imbalance (at an equal budget the Skaven won all 10 whole
+     battles in the game: [measurements](measurements.md#whole-battles-empire-against-skaven))
+     is handled by the fair metrics of [training](training.md#network-evaluation-fair-metrics)
+     and by the Empire's shielded units ([unit passports](units.md#spearmen-with-shields-and-swordsmen)).
+     The Skaven at 0.8 lost ~90% in the simulator
+     ([tried and rejected](training.md#the-skaven-at-08-of-the-budget)).
    - **A faction's cap.** `budget_max` in a faction's entry caps what its side spends (B × its
      share). The Skaven's is 6700, their most before their wave (the Warlord and 19 clanrat
      spearmen): the Night Runners (450) and the clanrats with shields (350) would otherwise raise
@@ -114,18 +114,17 @@ Shares by number of units (lord not counted), per template:
 | | `WH_Empire_land_3` | 12% | 12% | 12% | 12% | 12% | 19% | 19% |
 | | `WH_Empire_land_4` | 11% | 11% | 11% | 11% | 11% | 21% | 21% |
 
-Since 02.10.2026 (the second wave, [unit passports](units.md#flagellants-greatswords-free-company-militia)):
+The second wave ([unit passports](units.md#flagellants-greatswords-free-company-militia)):
 the flagellants are in `..._melee_infantry_main_flanking`, the greatswords in
 `..._melee_infantry_main_frontline_swords_high_quality`, both of the family `melee_infantry_trash`;
 the militia in `..._ranged_infantry_trash`, of the family `ranged_infantry` with the archers. A
-family's share is split evenly among its units (five melee, two missile). Before the wave the shares were 21 / 21 / 21 / 38% and so on; the paragraph below describes that pool (three melee units).
+family's share is split evenly among its units (five melee, two missile).
 
 The spearmen (both) are in group `..._melee_infantry_main_frontline_spears`, the swordsmen
 in `..._melee_infantry_main_frontline_swords` (quality step `tier_1_step_4` all three).
 Both groups end at the family `melee_infantry_trash`, like all melee infantry, so the
 templates' spear and sword shares (e.g. 20 + 20 in `WH_Empire_land`) are summed into one
-melee share, split evenly among the three units. Before 02.10.2026 the pool had the
-spearmen without shields only: 62 / 67 / 62 / 57%.
+melee share, split evenly among the pool's melee units.
 
 | Faction | Template | Clanrat spearmen | Skavenslave spearmen | Skavenslaves | Clanrats with shields | Skavenslave slingers | Night Runners |
 |---|---|---:|---:|---:|---:|---:|---:|
@@ -190,18 +189,17 @@ Skaven's side at 6700, as before the waves):
 | Skaven / Skaven, Empire / Empire | mean 1.000 and 0.999, 0.952 … 1.050 |
 | One side has x times the other's units | x ≥ 1.5: 49.1%; x ≥ 2: 26.2%; x ≥ 3: 7.2% |
 | Missile share of a side | mean 32%; no missile: 22%; ≥ 50%: 28%; missile only: 3.6% |
-| Empire template armies | spearmen 17%, with shields 13%, swordsmen 13%, flagellants 11%, greatswords 9%, archers 19%, militia 19% (before: 27 / 19 / 21 / – / – / 34 / –%) |
+| Empire template armies | spearmen 17%, with shields 13%, swordsmen 13%, flagellants 11%, greatswords 9%, archers 19%, militia 19% |
 | Skaven template armies | clanrat spearmen 15%, slave spearmen 19%, skavenslaves 20%, clanrats with shields 15%, slingers 17%, Night Runners 15% |
 
-Within the same melee share the cheapest unit, the plain spearmen (300), is bought most:
-27% against 19% (with shields, 350) and 21% (swordsmen, 375); the market fills the budget
-window, and how the dearer two split is the luck of that fit. The many-cheap-against-few-elite battles are mostly Skaven
-against Empire. With the Skaven at 0.8·B (01.10.2026) they fielded about as many units as
-the Empire: x ≥ 1.5 in 6.7% of battles.
+Within the same melee share the cheapest unit, the plain spearmen (300), is bought most
+(17 % against 9–13 % for the dearer ones): the market fills the budget window, and how the
+dearer units split is the luck of that fit. The many-cheap-against-few-elite battles are mostly
+Skaven against Empire.
 
-An equal budget was not equal strength ([measurements](measurements.md): Skaven fielded
-1601 men against the Empire's 661 and won all 10 whole battles). The 0.8 factor
-overshot in the simulator; the shielded spearmen are the second try at the balance.
+An equal budget is not equal strength ([measurements](measurements.md): Skaven fielded 1601
+men against the Empire's 661 and won all 10 whole battles); the fair metrics of training take
+the matchup out of the network's score.
 
 The first eight battles were run in the simulator (`--sim`: every unit attacks the
 nearest enemy): all ended within 250–540 s. With the sides swapped, the same army wins in
@@ -220,7 +218,7 @@ st = scenario.build(armies, per_side=generate.MAX_UNITS + 1)
 
 - `generate.generate(rng, factions=None, budget_range=None, max_units=None, sides=None)` —
   the same with your own random generator. `max_units=5` and `budget_range` give small
-  armies for the start of training. `factions` is a list of factions, `sides` the sides'
+  armies (training's `--small` share). `factions` is a list of factions, `sides` the sides'
   factions explicitly.
 - `per_side` must be 20: a side can have that many units.
 - `export.to_sim` writes the battles into a temporary `arenas.json` and calls
