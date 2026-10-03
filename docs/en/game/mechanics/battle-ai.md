@@ -57,6 +57,10 @@ planner, and the AI weaknesses players exploit. Our own observations: [the game'
 ## Known AI behaviours and fixes (patch notes)
 
 - 7.0: shooters keep their distance and spend leftover ammo better. · [7.0][p70] · high.
+  - Ours: measured in the 110 network gate battles (03.10.2026, `build/ail`): a free missile unit moves away
+    from a closing enemy melee unit in 52–58 % of the seconds within 40 m, 42 % at 40–60 m, 23 % at 60–80 m,
+    and one caught in melee moves (tries to leave) 52 % of its first 5 s; in melee 10 % of its standing
+    time. Agreement; `ai_like` now does the same ([training](../../training/training.md#the-opponent-ai_like)).
 - 7.2: no longer splits its army to chase groups of only flyers; lords no longer flip-flop behind
   their army; no "spaghetti" lines into minor settlements. · [7.2][p72] · high.
 - 8.0: the whole army no longer clumps when every unit gets the same order; no idling while the
@@ -74,6 +78,10 @@ All community, mostly low-medium confidence.
   kiting a lord or flyer back and forth drained AI ammo in WH2. · [Flogis mod][flogis], Steam · medium.
 - **Flyers as decoys**: the AI tends to target the closest unit, so a flyer can pull artillery and
   missiles. · Steam guide · low.
+  - Ours: at Normal its melee units take the nearest only 41–48 % of the time (3,397 new targets in the 110
+    network gate battles, 03.10.2026): from ~90 m, preferring enemies already fighting elsewhere (+20 m),
+    avoiding our lord (−26 m), not drawn to missile units; the rest looks random (a logit's spread 27 m).
+    Conflict for melee targets (missile fire: the nearest, above).
 - **Stacking units** to fire through friends (1.3.0, reverted in 1.3.1). · high.
 - **Difficulty ≠ smarter tactics**: many players say higher difficulty is mostly stat bonuses and
   reaction time. · Steam · low.

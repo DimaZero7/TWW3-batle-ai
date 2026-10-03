@@ -827,6 +827,43 @@ class TestProperties:
         assert int(o.kind[0, H + 3]) == O.ATTACK and int(o.target[0, H + 3]) == 0        # archers: the lord
         assert int(o.kind[0, H]) != O.ATTACK or bool(o.kind[0, H + 1:H + 3].eq(O.ATTACK).any())
 
+    def test_ai_like_missile_units_step_back_from_close_melee_and_break_off_melee_for_a_while(self):
+        st = line_army(attacker=1, gap=600)
+        H = st.N // 2
+        u = st.u
+        u["x"][0, H + 1] = u["x"][0, 3] + 30.0                  # an enemy spearman 30 m from side 1's archers
+        u["z"][0, H + 1] = u["z"][0, 3]
+        o = opponents.ai_like(st)
+        assert int(o.kind[0, 3]) == O.WITHDRAW and bool(o.run[0, 3])
+        assert float(o.x[0, 3]) < float(u["x"][0, 3]) - 30                  # away from it (west), not towards
+        u["x"][0, H + 1] = u["x"][0, 3] + 70.0                  # 70 m: beyond skirmish_m, the archers stay
+        assert int(opponents.ai_like(st).kind[0, 3]) != O.WITHDRAW
+        u["x"][0, H + 1] = u["x"][0, 3] + 8.0                   # caught in melee
+        u["m"][0, 3] = u["m"][0, H + 1] = True
+        u["target"][0, 3], u["target"][0, H + 1] = H + 1, 3
+        u["contact_s"][0, 3] = 2.0
+        assert int(opponents.ai_like(st).kind[0, 3]) == O.WITHDRAW          # breaks off
+        u["contact_s"][0, 3] = opponents.Line().escape_s + 1.0
+        assert int(opponents.ai_like(st).kind[0, 3]) == O.HOLD              # then fights
+
+    def test_ai_like_melee_target_avoids_the_lord_and_its_random_part_is_fixed(self):
+        st = line_army(attacker=1, gap=600)
+        H = st.N // 2
+        u = st.u
+        u["x"][0, H + 1], u["z"][0, H + 1] = 0.0, 0.0           # side 2's spearman (defender: counter_m 100)
+        u["x"][0, 0], u["z"][0, 0] = -80.0, 0.0                 # side 1's lord 80 m away
+        u["x"][0, 1], u["z"][0, 1] = -95.0, 10.0                # a spearman ~95 m away
+        u["x"][0, 2], u["z"][0, 2] = -400.0, 300.0              # the rest far
+        u["x"][0, 3], u["z"][0, 3] = -400.0, -300.0
+        o = opponents.ai_like(st, opponents.Line(pick_noise_m=0.0))
+        assert int(o.kind[0, H + 1]) == O.ATTACK and int(o.target[0, H + 1]) == 1     # not the nearer lord
+        g = opponents.pick_noise(64, 40, "cpu")
+        assert torch.equal(g, opponents.pick_noise(64, 40, "cpu"))                   # the same every step
+        assert float(g.mean()) == pytest.approx(0.5772, abs=0.03)                     # standard Gumbel
+        assert float(g.std()) == pytest.approx(1.2825, abs=0.03)
+        a, b = opponents.ai_like(st), opponents.ai_like(st)
+        assert torch.equal(a.kind, b.kind) and torch.equal(a.target, b.target)
+
     def test_ai_like_lord_does_not_charge_alone(self):
         st = line_army(attacker=1, gap=600, lord_ahead=150)                      # side 1's lord far in front
         o = opponents.ai_like(st)

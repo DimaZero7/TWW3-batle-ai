@@ -480,7 +480,7 @@ the simulator's square.
 |---|---:|---|
 | itself | 10 % | the learner on both sides; both give training data |
 | a past version | 15 % | one network from the pool, drawn again every 2 updates; the untrained one stays in the pool |
-| `ai_like` | 40 % | modelled on the game's AI ([below](#the-opponent-ai_like)): a line that runs in together, missile units halt at range and shoot the enemy lord first, the lord in the line and never first, a charge from 80 m (attacker) or counter-charge from 100 m (defender), free units against enemies already fighting (via their flank) and missile units |
+| `ai_like` | 40 % | modelled on the game's AI ([below](#the-opponent-ai_like)): a line that runs in together at its slowest unit's pace, missile units halt at range, shoot the enemy lord first, step back from melee units within 50 m and break off melee, the lord behind the line and never first, a charge from 95 m (attacker) or counter-charge from 100 m (defender), melee targets as the game AI picks them (03.10.2026) |
 | `nearest` | 20 % | every unit attacks the nearest standing enemy, running |
 | `hold_shoot` | 10 % | holds and shoots; a melee unit counter-charges an enemy within 80 m; as the attacker it attacks after 5 minutes |
 | `hold` | 5 % | holds (shoots at will, fights back); met only as the defender — as the attacker it would only wait out the hour |
@@ -964,22 +964,57 @@ keeping together), its missile units halt at range.
 
 ### The opponent `ai_like`
 
-`tools/nn/train/opponents.py`, numbers in `Line` (from the recordings where they show them):
+`tools/nn/train/opponents.py`, numbers in `Line` (from the recordings where they show them; "pool": the game
+AI in all 110 network-vs-game-AI gate recordings, measured 03.10.2026 by `build/ail/*.py`, not in Git):
 
 | Rule | Number | Source |
 |---|---|---|
-| the attacker's line advances together at a run (a point 30 m ahead); a unit more than 15 m ahead of its line's centre waits | run, 15 m | battle 4: 3.6 m/s, then 2.8 m/s (the simulator's infantry walks 1.5, runs 3–3.4) |
+| the attacker's line advances together at a run (a point 30 m ahead); a unit more than 15 m ahead of its line's rearmost free melee unit waits (the march goes at the slowest unit's pace); after the side's first fight nobody waits | run, 15 m | pool: the game's attacking Empire line marched at 2.8–2.9 m/s, the greatswords' pace, 16–17 m deep (`ai_like` waiting on the line's centre: 3.0–3.6 m/s, 27–29 m deep) |
 | a defender with no missile units advances too | — | battle 2: 80 m in 30 s |
-| the attacker charges from | 80 m | battle 4: targets at ~80 m, contact 11 s later |
-| the defender counter-charges from | 100 m | battles 1 and 3: ~100 m, 78–87 s into the battle |
-| an enemy that wavers is charged from; once own units fight, the rest join enemies within | 150 m | ours |
-| missile units halt at a share of range and shoot; the enemy lord first when in range, in melee too | 0.9 | battles 3–4: first volleys at 108–134 m; the 63 network gate battles: with our lord in range the game's missile units shot him 89 % of their firing seconds (91 % while he was in melee, 86 % free). Before 02.10.2026 `ai_like` spared a lord in melee and put 34 % of its fire on him, now 64 % (the game's AI 62 %, median of the battles; side 1 replayed, side 2 scripted, `build/simacc/opp_gap.py`) |
-| missile units step back 50 m from an enemy melee unit within | 40 m | battle 3: slings stepped back and aside |
-| the lord stays behind its line's centre, never charges first: goes in with the line or at an enemy within 50 m that already fights; withdraws below 30 % health | 10 m | battle 4: in the line from contact on; 50 m and 30 % ours |
-| targets: nearest, pulled 30 m towards enemies already fighting, 25 m towards missile units, 60 m towards enemies on own missile units; a new target must be 15 m better | — | battles 3–4 retargets; hysteresis ours |
+| once own units have fought (in melee now or a melee unit with kills), the free units go forward and join enemies within 150 m, missile units up to their range | 150 m | pool: after the first contact the game AI's units stand idle 1.6 % (melee) / 8.7 % (missile, reloading 61 m from the enemy) of the time; `ai_like` before: 5.5 % / 20–27 %, 150–175 m from any enemy |
+| the attacker charges from | 95 m | pool: an attacking melee unit's first target at 87 m median (q10–q90 68–105 m); `ai_like` at 80 m: 73 m |
+| the defender counter-charges from | 100 m | battles 1 and 3: ~100 m, 78–87 s into the battle; pool: first targets at 100 m |
+| an enemy that wavers is charged from | 150 m | ours |
+| missile units halt at a share of range and shoot; the enemy lord first when in range, in melee too | 0.9 | battles 3–4: first volleys at 108–134 m; the 63 network gate battles: with our lord in range the game's missile units shot him 89 % of their firing seconds. Before 02.10.2026 `ai_like` put 34 % of its fire on him, then 64 % (the game's AI 62 %, `build/simacc/opp_gap.py`) |
+| missile units withdraw 50 m (away from the enemy and back) from an enemy melee unit within | 50 m | pool: a free missile unit moves away from the nearest closing enemy melee unit in 52–58 % of the seconds within 40 m, 42 % at 40–60 m, 23 % at 60–80 m (`ai_like` at 40 m: 19–32 / 5 / 4 %) |
+| a missile unit caught in melee breaks off (withdraw) for its first | 15 s | pool: the game's missile units in melee move 52 % of their first 5 s, 34 % at 5–10 s, 23 % later; `ai_like` never left (6–8 % moving) |
+| the lord stays behind his line's centre, never charges first: goes in when the line does, at his target within 90 m, or at an enemy within 50 m that already fights; withdraws below 30 % health | 20 m, 90 m | pool: 20–22 m behind the centre before contact, his first target at 90 m, 6 s before the first contact (`ai_like` at 10 m / 150 m: 16 m, 136 m, 10 s); 50 m and 30 % ours |
+| melee targets: score = distance − 20 m if the enemy is in melee (+30 m back if the unit stands within 40 m of an own fight) + 25 m for the enemy lord (not for the own lord) + 6 m for each other own unit already on it (up to 3) − 10 m × cos(the side's forward, the enemy) + 15 m if it wavers − 27 m × a fixed Gumbel draw per (battle row, unit, enemy); the lowest wins, a new one must be 15 m better | see left | a conditional logit fitted on the game AI's 3,397 new targets of melee units out of melee in the pool (`build/ail/choice.py`: utility −d / 27 m + features; missile units −2 m and enemies near own missile units −1 m: no pull, so the old 25 m / 60 m pulls are 0); hysteresis ours |
 | a free unit goes for an enemy already fighting via a point 12 m beside its flank | 12 m | the simulator's tactic scan |
 
-Scripts against each other (random armies of `EVAL_SEEDS`, 256 battles per pairing and side, wins of the first):
+The random part is an integer hash of (battle row, unit slot, enemy slot): the same every step (no flip-flop),
+nothing to replay, other units in the slots when a row restarts; the evaluation's compaction renumbers the rows
+when battles end, so a live battle may draw anew then (the 15 m hysteresis keeps most targets).
+
+**Fitted to the game AI (03.10.2026).** Before → after on the same 8 gate battle starts (gate
+`build/nn-gate/20261003-070648`, the network `a1_simbatch/m25` as it played there: its own units' `target` as the
+game recorded it then, the game cadence; 16 copies a battle, 8 recorded, `build/ail/sim3.py`), side 2's behaviour
+against the game AI's in the two gates of that network (16 battles; "pool": all 110):
+
+| Side 2 | game AI (pool) | `ai_like` before | after |
+|---|---:|---:|---:|
+| missile units' standing time in melee | 0.11 (0.10) | 0.33 | 0.10 |
+| ... moving away from a closing melee unit at 40–60 m / 20–40 m | 0.35–0.42 / 0.58–0.63 | 0.05 / 0.32 | 0.43 / 0.52 |
+| melee targets: distance when taken (median), the nearest taken | 91 m, 0.48 (94 m, 0.41) | 73 m, 0.61 | 93 m, 0.49 |
+| ... chosen / available: in melee, missile, the lord | 0.34/0.24, 0.25/0.33, 0.10/0.10 | 0.46/0.21, 0.31/0.36, 0.09/0.07 | 0.35/0.23, 0.27/0.34, 0.07/0.08 |
+| new melee targets a battle | 27 (31) | 50 | 33 |
+| unit time idle after contact | 0.045 (0.034) | 0.079 | 0.031 |
+| attacker's first contact (s), its line's depth on the march | 57 (55), 16–17 m | 49, 27–29 m | 50, 14 m |
+| lord: behind the line's centre before contact, his first melee after the first contact | 22 m, 12 s | 16 m, 3 s | 27 m, 6 s |
+| side 1's trade (the network) | −0.333 | −0.172 ± 0.011 | −0.245 ± 0.013 |
+| mean error per battle (sim − game, 8 battles), correlation | — | 0.225, +0.38 | 0.161, +0.42 |
+
+So the simulator's prediction of the in-game trade of these battles moved from −0.172 to −0.245 against the game's
+−0.333 (the gap 0.161 → 0.088 a battle). The newer network `c1_cadence/m20` (trained at the game cadence, its own
+targets as the fixed companion gives them) on the same starts: −0.012 ± 0.015 → −0.030 ± 0.016 (its predicted gate
+trade). Left: the simulator lets a unit leave melee in ~2 s (the game's missile units take ~10 s), so `ai_like`'s
+missile units are caught 17 times a battle for 2 s (median) against the game's 6 for 10 s, the same total time;
+two or more of `ai_like`'s units on one of ours 0.26 of the time (the game 0.10, the game AI's own orders replayed in
+the simulator 0.16); the lord still goes in sooner (6 s against 12 s). Not changed: the defender's advance (median
+0 m in the first 60 s in both; the game's defender went out in 2 of the 8 starts, with no rule visible in the 53
+pool defences).
+
+Scripts against each other (before 03.10.2026; random armies of `EVAL_SEEDS`, 256 battles per pairing and side, wins of the first):
 
 | | attacking | defending | own / enemy lord dead |
 |---|---:|---:|---|
