@@ -141,14 +141,18 @@ class TestReport:
 
 class TestCompact:
     def test_a_narrowed_batch_plays_its_battles_as_the_whole_one(self, monkeypatch):
+        from tools.nn.train import cadence as cad
         from tools.nn.train import league, rollout, scenes
         real = rollout.Battles._act
         # the past version samples its orders: greedy here, so both batches draw nothing at random
         monkeypatch.setattr(rollout.Battles, "_act", lambda self, a, o, f, r, h, g: real(self, a, o, f, r, h, True))
         sc = scenes.SCENES[:1]
         lay = evaluate.combined(("nearest", "past", "hold_shoot"), 2, 1, scenes.attackers(sc))
+        # a decision a second with the orders one step late, not at random (a random landing step is drawn per
+        # battle: the batch's size would set the draws)
+        cadence = cad.Cadence(1.0, 0.5)
         envs = [rollout.Battles(lay, sc, params=rollout.params_with_limit(60.0), spread=evaluate.SPREAD, seed=1,
-                                auto_reset=False) for _ in range(2)]
+                                auto_reset=False, cadence=cadence) for _ in range(2)]
         torch.manual_seed(1)
         past = policy.Actor(CFG).eval()
         for env in envs:

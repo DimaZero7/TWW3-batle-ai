@@ -53,6 +53,7 @@ from pathlib import Path
 
 import torch
 
+from tools.nn.train import cadence as cad
 from tools.nn.train import capacity, checkpoint, evaluate, matchups, run, skill
 
 OUT = checkpoint.DIR / "test5"
@@ -104,14 +105,16 @@ def gpu_lock(label, path=LOCK, poll_s=30.0, gap_s=60.0):
             path.unlink()
 
 
-def evaluation(actor, args, device):
+def evaluation(actor, args, device, cadence):
+    """The evaluation of every point; cadence: the training's (run.py --decide-s, --order-latency)."""
     t = time.time()
     res = evaluate.play(actor, opponents=OPPONENTS, device=device, generated=args.eval, max_units=19, seed=1,
-                        together=True, paired=True, baseline=True)
+                        together=True, paired=True, baseline=True, cadence=cadence)
     if args.drill_eval:
         # the drills (tools/nn/train/drills, the verified ones): win rate and gold trade per drill
-        res["drills"] = evaluate.play_drills(actor, args.drill_eval, device)
+        res["drills"] = evaluate.play_drills(actor, args.drill_eval, device, cadence=cadence)
     res["seconds"] = round(time.time() - t)
+    res["cadence"] = cadence.meta()
     return res
 
 
@@ -357,29 +360,33 @@ def test(args, rest):
     out.mkdir(parents=True, exist_ok=True)
     device = torch.device(args.device)
 
-    if args.before:
-        before = json.loads(Path(args.before).read_text(encoding="utf-8"))
-    else:
-        before = evaluation(checkpoint.load_policy(args.init, device), args, device)
-    (out / "before.json").write_text(json.dumps(before, indent=1), encoding="utf-8", newline="\n")
-    print(f"before: {before.get('seconds')} s", flush=True)
-
     targs = run.parser().parse_args(["--name", f"test5_{args.label}", "--init", args.init, "--minutes",
                                      str(args.minutes), "--updates", str(args.updates), "--device", args.device]
                                     + PROTOCOL + rest)
+    cadence = cad.of_args(targs)                 # the evaluations decide as the training does
+    if args.before:
+        before = json.loads(Path(args.before).read_text(encoding="utf-8"))
+        if before.get("cadence", cad.STEP.meta()) != cadence.meta():
+            print(f"WARNING: --before was evaluated at cadence {before.get('cadence', cad.STEP.meta())}, "
+                  f"this run's is {cadence.meta()}", flush=True)
+    else:
+        before = evaluation(checkpoint.load_policy(args.init, device), args, device, cadence)
+    (out / "before.json").write_text(json.dumps(before, indent=1), encoding="utf-8", newline="\n")
+    print(f"before: {before.get('seconds')} s", flush=True)
+
     points = [(0, metrics(before))]
     run_log = checkpoint.DIR / "runs" / targs.name
     last = [0]                                   # the update of the last evaluation point
 
     def hook(actor, critic, minute, update):
         actor.eval()
-        res = evaluation(actor, args, device)
+        res = evaluation(actor, args, device, cadence)
         res["update"] = update
         res["distance"] = distance(run_log, last[0], update)
         last[0] = update
         m = f"{minute:g}"
         checkpoint.save(out / f"m{m}.pt", actor, critic, targs.preset, {"minute": minute, "update": update,
-                                                                      "run": targs.name})
+                                                                      "run": targs.name, "cadence": cadence.meta()})
         (out / f"eval_m{m}.json").write_text(json.dumps(res, indent=1), encoding="utf-8", newline="\n")
         points.append((m, metrics(res)))
         print(f"evaluation at minute {m} (update {update}): {res['seconds']} s", flush=True)
@@ -387,7 +394,7 @@ def test(args, rest):
 
     actor, summary, run_dir = run.train(targs, (args.every, hook) if args.every else None)
     actor.eval()
-    after = evaluation(actor, args, device)
+    after = evaluation(actor, args, device, cadence)
     after["distance"] = distance(run_dir, last[0], summary["updates"])
     (out / "after.json").write_text(json.dumps(after, indent=1), encoding="utf-8", newline="\n")
     if args.every:
@@ -395,7 +402,7 @@ def test(args, rest):
         # with the critic (the run's latest.pt has it): the next run of the chain starts from this file
         critic = checkpoint.load_critic(run_dir / "latest.pt", device)
         checkpoint.save(out / f"m{m}.pt", actor, critic, targs.preset, {"minute": args.minutes, "update": summary["updates"],
-                                                                      "run": targs.name})
+                                                                      "run": targs.name, "cadence": cadence.meta()})
         points.append((m, metrics(after)))
 
     mb, ma = metrics(before), metrics(after)

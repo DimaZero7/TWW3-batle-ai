@@ -201,7 +201,7 @@ flowchart TB
   two units (16 buckets, 0 to ~1500 m) makes "who is near" easy. Invisible enemies stay in the
   attention with their last seen place.
 - **Memory: a GRU per token**, before the last attention layer. Training runs it through chunks
-  of 64 decisions (32 s of battle) ([training](training.md)). Chosen over attention to the
+  of 64 decisions (64 s of battle at the game's cadence of a decision a second; 32 s before 03.10) ([training](training.md)). Chosen over attention to the
   last frames because the cost of a decision does not grow with the memory; the state is one
   vector per unit, easy to carry and the same on every computer in co-op; the 10–20 s horizon
   (20–80 decisions at 2–4 per second) is learned, not fixed by a buffer.

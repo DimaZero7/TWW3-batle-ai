@@ -40,8 +40,10 @@ from tools.nn.train.rollout import full_obs
 
 @dataclass(frozen=True)
 class PPOConfig:
-    gamma: float = 0.9997      # per decision (0.5 s): a horizon of ~3300 decisions (~28 min); a win
-    #                            10 minutes away still counts 0.7
+    gamma: float = 0.9997      # per decision of 0.5 s: a horizon of ~3300 x 0.5 s (~28 min); a win
+    #                            10 minutes away still counts 0.7. gae() takes gamma and lam per decision:
+    #                            run.py gives these per-0.5 s defaults ** (decision s / 0.5) (cadence.py;
+    #                            at the game's 1 s decisions 0.99940 and 0.9025), the horizon in seconds the same
     lam: float = 0.95
     clip: float = 0.2
     epochs: int = 1

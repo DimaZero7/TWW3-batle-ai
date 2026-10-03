@@ -326,17 +326,17 @@ learns each skill.
 ```mermaid
 flowchart LR
   obs["Observe both sides<br/>1024 battles"] --> act["Learner, past version<br/>and scripts give orders"]
-  act --> step["Simulator step 0.5 s"]
-  step --> rew["Reward per side"]
+  act --> step["2 simulator steps of 0.5 s<br/>(the networks' orders land<br/>0.36 s late; scripts every step)"]
+  step --> rew["Reward per side<br/>(summed over the steps)"]
   rew --> reset["Finished battles take a new battle<br/>from the bank, new numbers"]
   reset --> obs
-  rew --> buf["64 steps collected<br/>(a chunk of 32 s)"]
+  rew --> buf["64 decisions collected<br/>(a chunk of 64 s)"]
   buf --> ppo["PPO update<br/>actor through the chunk + critic"]
 ```
 
 Modules: `scenes.py` (where battles come from: the arenas or random armies, as a bank of ready
 starts), `league.py` (who plays whom, the pool), `opponents.py` (the scripts, `ai_like` among them), `randomise.py`,
-`reward.py`, `rollout.py` (the battles and one step), `ppo.py`, `imitate.py` (the warm start),
+`reward.py`, `rollout.py` (the battles and one decision), `cadence.py` (how often the networks decide), `ppo.py`, `imitate.py` (the warm start),
 `evaluate.py` (evaluation and replays), `checkpoint.py`, `run.py`.
 
 ## Training speed
@@ -424,11 +424,42 @@ batch size (`dynamic=True`) does not build — the simulator's step then needs a
 container lacks. The whole-batch phase (~35 s, ~22 ms a decision, GPU-bound) is unchanged. In the
 update, the GRU's 64 steps and the attention's float32 backward remain the main cost.
 
+At the game's cadence (03.10.2026, same settings, a 1.5-minute run from `a1_simbatch/m25`): 5700 → 9900 s of
+battle a second of training (a decision now plays two simulator steps for one observation and one network
+pass), 852 → 1677 battles in 92 s; the test5 evaluation (128 battles per opponent and 64 per drill) 194 → 81 s.
+
 ## Decisions
 
-**2 decisions a second** — one decision per simulator step (0.5 s). The step is the game's morale
-tick ([simulator](simulator.md)); a faster decision would see nothing new. It is also the in-game
-rhythm: the state at tick N, the order at tick N + 0.5 s. So a 10-minute battle is ~1200 decisions.
+**Cadence: a decision a second, the orders 0.36 s late, as in the game** (03.10.2026, `cadence.py`;
+`--decide-s 1 --order-latency 0.36`, run.py, test5 and evaluate.py alike). The companion decides once a
+second of battle time (the bridge's `tick_ms` 1000) and its orders reach the units later: in the gate
+recordings (`nn_orders` `wait_model_ms`, 2 gates of 03.10, 9251 decisions) median 0.3 s, mean 0.36 s, p10–p90
+0.2–0.6 s of battle time (gates play at speed 20; the real wait is ~40 ms). Until 03.10 the simulator let the
+network decide every 0.5 s step with the orders at once; replaying the gate battles with the game's cadence
+cost the same network −0.055 trade a battle (gap analysis 2). Now:
+
+- the simulator's step stays 0.5 s (the game's morale tick, [simulator](simulator.md)); one decision
+  (`Battles.step`) plays `decide_s / 0.5` = 2 of them;
+- the networks' orders (the learner's and the past version's) land after the latency rounded to whole
+  steps at random so that its mean is 0.36 s: one step late with probability 0.72, at once otherwise;
+  before and after that step the orders in force go on (`KEEP`), as the game keeps them between ticks;
+- the scripts (`nearest`, `ai_like`, the drills' enemies) give orders every simulator step as before (they
+  stand in for the game's AI, which has no tick of ours; not measured otherwise);
+- the observation and its memory (last sightings, speeds) are taken only at decisions, as the companion
+  reads the state once a second; the GRU steps once a decision;
+- the reward of a decision is the sum of its steps' (a term written "per decision" below is per 0.5 s
+  step: its weight a second is unchanged); a battle that ends within a decision ends that decision and
+  restarts after it;
+- `--steps` 64 stays decisions per update (the same PPO batch; now 64 s of battle a chunk);
+- `--gamma` (0.9997) and GAE's λ (0.95) are per 0.5 s of battle; per decision they are γ^(decide_s / 0.5)
+  (0.99940 at 1 s) and λ^(decide_s / 0.5) (0.9025), so the horizon in seconds is the same (~28 min);
+- evaluation (`evaluate.play`, `play_drills`, `record`) decides as training does (default the game's
+  cadence); its per-step counts (behaviour, drill metrics, recordings) still see every simulator step.
+  Numbers evaluated before 03.10 (the old cadence) are not comparable with new ones: `--decide-s 0.5
+  --order-latency 0` gives the old cadence back.
+
+Checkpoints are the same networks: old ones load and play at either cadence (run.py and test5 write
+`cadence` into the checkpoint's meta). A 10-minute battle is now ~600 decisions.
 
 **Battles.** Two sources, both a bank of ready starts from which a finished battle takes a new one:
 
@@ -501,8 +532,8 @@ the critic sees the whole field (and is never shipped).
 
 | Setting | Value | Why |
 |---|---|---|
-| discount γ | 0.9997 per decision | a horizon of ~3300 decisions (~28 min): a win 10 minutes away still counts 0.7 (with 0.999, 0.3) |
-| GAE λ | 0.95 | the usual |
+| discount γ | 0.9997 per 0.5 s (0.99940 per decision of 1 s) | a horizon of ~28 min: a win 10 minutes away still counts 0.7 (with 0.999, 0.3) |
+| GAE λ | 0.95 per 0.5 s (0.9025 per decision of 1 s) | the usual |
 | clip | 0.2 | the usual |
 | learning rate | 1.5e-4, Adam (eps 1e-5) | from the copy, larger steps without the anchor drifted to standing within 15 minutes |
 | epochs, minibatch | 1, 4096 decisions (whole chunks) | the update costs more than the battles; the memory of a 16 GB card |
@@ -511,7 +542,7 @@ the critic sees the whole field (and is never shipped).
 | KL to the copy | `long19` 0.1; `long_ai` 0.1 → 0 | see the warm start |
 | value loss, gradient norm | 0.5, 0.5 | the usual |
 
-- **Memory (GRU) through time.** A rollout is a chunk of 64 decisions (32 s of battle) of every
+- **Memory (GRU) through time.** A rollout is a chunk of 64 decisions (64 s of battle; 32 s before 03.10) of every
   battle; the update runs the actor over each chunk from the memory stored when the chunk began,
   emptied where a new battle begins (recurrent PPO, R2D2's stored state). Only the GRU steps one
   by one; the layers before and after it run on the whole chunk at once.
@@ -571,7 +602,7 @@ units fights in melee or shoots — marching at the enemy too (the morning's wai
 Damage is any health the defender loses in a step (`reward.struck`, `measure` column 0: only the
 attacker's melee, missiles and abilities take it). `rollout.Battles.last_hit` [B] keeps the battle
 time of the attacker's last damage per battle (−1 before the first) and clears it when the battle
-starts again. The defender never pays. The cost, 2 decisions a second:
+starts again. The defender never pays. The cost, per 0.5 s simulator step (2 a second):
 
 | No damage from the start | a decision | so far |
 |---|---:|---:|

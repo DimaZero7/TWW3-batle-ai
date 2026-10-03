@@ -6,7 +6,8 @@
 play(): per opponent, `per_scene` battles of every scene (the learner's side alternating), all
 in one batch until every battle ends. The numbers are the simulator's own (no randomisation),
 the start places moved by up to 2 m, the learner's orders sampled (greedy=False) as in training.
-Results by the learner's role (attack, defend).
+Results by the learner's role (attack, defend). The network decides as often as in training and in the
+game (tools/nn/train/cadence.py; --decide-s, --order-latency); the scripts every simulator step.
 
 Fair metrics (docs/en/training/training.md "Network evaluation: fair metrics"; tools/nn/train/skill.py):
 generated battles are played in swapped pairs (every battle twice on the same armies, the network on side 1, then on
@@ -30,6 +31,7 @@ from tools.nn.sim import check, scenario
 from tools.nn.sim import orders as O
 from tools.nn.sim import state as S
 from tools.nn.train import behaviour, checkpoint, league, matchups, randomise, reward, rollout, scenes, skill
+from tools.nn.train import cadence as cad
 from tools.nn.train import opponents as scripts
 
 SPREAD = randomise.Spread(common=0.0, side=0.0, jitter_m=2.0)
@@ -65,7 +67,7 @@ def combined(opponents, per_scene, n_scenes, scene_attacker=None, attack_only=()
 @torch.no_grad()
 def play(actor, opponents=OPPONENTS, per_scene=512, past=None, device="cpu", limit_s=3600.0, greedy=False,
          seed=1, scene_list=scenes.SCENES, compile=None, hold_defend=False, generated=None, max_units=19, small=None,
-         together=False, paired=True, baseline=False, compact=True, cuda_graph=True):
+         together=False, paired=True, baseline=False, compact=True, cuda_graph=True, cadence=None):
     """-> {"by_opponent": {name: {games, wins, win_rate, seconds, hp_own_lost, hp_enemy_lost, timeouts,
     gold_destroyed, gold_lost (mean gold a battle, reward.gold_sides at the end), gold_ratio (their sums'
     ratio), gold_trade (mean (destroyed - lost) / budget),
@@ -93,14 +95,16 @@ def play(actor, opponents=OPPONENTS, per_scene=512, past=None, device="cpu", lim
     compact: once most battles have ended, step only the running ones (BUCKETS; rollout.Battles.narrow).
     The simulator is deterministic and an ended battle frozen, so only the sampled orders' random draws
     differ from compact=False (the batch's shape sets them); the results stay the same in distribution.
-    cuda_graph (CUDA, compact): the shrunk batch's decisions replayed as one CUDA graph (Graphed)."""
+    cuda_graph (CUDA, compact): the shrunk batch's decisions replayed as one CUDA graph (Graphed).
+    cadence: how often the network decides and how late its orders land (tools/nn/train/cadence.py;
+    default the game's, as in training)."""
     out = {"by_opponent": {}, "by_scene": {}, "limit_s": limit_s, "greedy": greedy, "per_scene": per_scene,
            "battles": {}}
     only = () if hold_defend else league.ATTACK_ONLY
     groups = [tuple(opponents)] if together else [(n,) for n in opponents]
     for names in groups:
         res = _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, scene_list, compile, only,
-                         generated, max_units, small, paired, compact, cuda_graph)
+                         generated, max_units, small, paired, compact, cuda_graph, cadence)
         for name, (mine, rows, per) in res.items():
             out["by_opponent"][name] = mine
             out["by_scene"][name] = rows
@@ -389,7 +393,7 @@ class Graphed:
 
 
 def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, scene_list, compile, attack_only,
-               generated=None, max_units=19, small=None, paired=True, compact=True, cuda_graph=True):
+               generated=None, max_units=19, small=None, paired=True, compact=True, cuda_graph=True, cadence=None):
     """{name: (result, rows by scene, per-battle lists)} of the opponents `names`, played in one batch."""
     params = rollout.params_with_limit(limit_s)
     if generated and paired:
@@ -421,7 +425,7 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
                         j % n_sc + n_sc * (j // (2 * n_sc)))
         seeds_b = lay.scene
     env = rollout.Battles(lay, scene_list, device=device, params=params, spread=SPREAD,
-                          seed=seed, auto_reset=False, compile=compile, source=source)
+                          seed=seed, auto_reset=False, compile=compile, source=source, cadence=cadence)
     if "past" in names:
         env.set_past(past)
     B = env.B
@@ -433,18 +437,20 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
     full = _Full(env, watch) if compact else None
     acc = SimpleNamespace(contact=contact, fired=fired, mine=mine)
 
-    def one():
-        """One decision of every battle, and the evaluation's own per-battle counts."""
-        live = ~env.st.done
-        env.step(actor, None, greedy)
+    def counts(live):
+        """The evaluation's own per-battle counts, after every simulator step."""
         watch.update(env.st, live)
         u = env.st.u
         touch = (u["m"] & acc.mine).any(1)
         acc.contact = torch.where((acc.contact < 0) & touch, env.st.t, acc.contact)
         acc.fired = acc.fired | (u["fire"] & acc.mine).any(1)
 
+    def one():
+        """One decision of every battle (its simulator steps), and the counts."""
+        env.step(actor, None, greedy, each=counts)
+
     graph = None
-    n_steps, i = int(limit_s / env.params.dt) + 2, 0
+    n_steps, i = int(limit_s / env.decision_s) + 2, 0
     while i < n_steps:
         if compact:
             live_any, acc.contact, acc.fired, acc.mine = full.shrink(env, acc.contact, acc.fired, acc.mine)
@@ -577,12 +583,12 @@ def drill_scripts(name, n, device="cpu"):
 
 
 @torch.no_grad()
-def play_drills(actor, n=128, device="cpu", names=None, greedy=False, seed=1, compile=None, scripts=True):
+def play_drills(actor, n=128, device="cpu", names=None, greedy=False, seed=1, compile=None, scripts=True, cadence=None):
     """The drills (tools/nn/train/drills; default the verified ones, drills.READY): n battles of each on
     DRILL_EVAL_SEEDS (our side alternating, SPREAD) against the drill's enemy script -> {drill: {games, wins,
     win_rate, gold_trade (mean (enemy gold destroyed - own lost) / budget), gold_destroyed, gold_lost, seconds,
     timeouts, scripts: {naive, skilled: {win_rate, gold_trade}} (scripts: the drill's check scripts on the same
-    battles)}}; {} without drills."""
+    battles)}}; {} without drills. cadence: the network's (tools/nn/train/cadence.py; default the game's)."""
     from tools.nn.train import drills as D
     from tools.nn.train.drills import metrics as drill_metrics
     from tools.nn.train.drills import source as drill_source
@@ -592,8 +598,8 @@ def play_drills(actor, n=128, device="cpu", names=None, greedy=False, seed=1, co
     params = rollout.params_with_limit(None)
     src, lay = drill_source.evaluation(names, n, params, device)
     env = rollout.Battles(lay, device=device, params=params, spread=SPREAD, seed=seed, auto_reset=False,
-                          compile=compile, source=src)
-    steps = int(params.limit_s / params.dt) + 2
+                          compile=compile, source=src, cadence=cadence)
+    steps = int(params.limit_s / env.decision_s) + 2
     # what our units do in each drill's battles (drills/metrics.py; the drill's roles: correct / bad targets)
     loaded = D.load(names)
     side_t = torch.as_tensor(lay.learner, device=env.device)
@@ -605,10 +611,10 @@ def play_drills(actor, n=128, device="cpu", names=None, greedy=False, seed=1, co
     for i in range(steps):
         if i % CHECK_EVERY == 0 and bool(env.st.done.all()):
             break
-        live = ~env.st.done
-        env.step(actor, None, greedy)
-        for tr in trackers.values():
-            tr.update(env.st, live)
+        def track(live):
+            for tr in trackers.values():
+                tr.update(env.st, live)
+        env.step(actor, None, greedy, each=track)
     side = lay.learner
     B = env.B
     won = env.st.winner.cpu().numpy() == side
@@ -786,17 +792,17 @@ def write_run(path, b, army, arena, side, opponent, source):
 
 @torch.no_grad()
 def record(actor, out=REPLAYS, opponents=("nearest", "hold_shoot", "hold", "ai_like", "self"), device="cpu", limit_s=3600.0, source="", seed=2,
-           scene_list=scenes.SCENES, compile=None):
-    """Every scene from both sides against each opponent, written down per second; -> run folders."""
+           scene_list=scenes.SCENES, compile=None, cadence=None):
+    """Every scene from both sides against each opponent, written down per second; -> run folders.
+    cadence: the network's (tools/nn/train/cadence.py; default the game's)."""
     lay = combined(opponents, 2, len(scene_list), scenes.attackers(scene_list), league.ATTACK_ONLY)
     env = rollout.Battles(lay, scene_list, device=device, params=rollout.params_with_limit(limit_s), spread=SPREAD,
-                          seed=seed, auto_reset=False, compile=compile)
+                          seed=seed, auto_reset=False, compile=compile, cadence=cadence)
     rec = check.Recorder(env.st)
-    for _ in range(int(limit_s / env.params.dt) + 2):
+    for _ in range(int(limit_s / env.decision_s) + 2):
         if bool(env.st.done.all()):
             break
-        env.step(actor, None, False)
-        rec(env.st)
+        env.step(actor, None, False, each=lambda live: rec(env.st))
     winners = env.st.winner.cpu().numpy()
     H = env.N // 2
     paths = []
@@ -828,12 +834,13 @@ def main():
     ap.add_argument("--greedy", action="store_true")
     ap.add_argument("--out", help="write the results as json")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    cad.add_args(ap)
     args = ap.parse_args()
     actor = checkpoint.load_policy(args.checkpoint, args.device)
     past = checkpoint.load_policy(args.against, args.device)
     res = play(actor, opponents=tuple(args.opponents.split(",")), per_scene=args.per_scene, past=past, device=args.device, limit_s=args.limit, greedy=args.greedy,
                hold_defend=args.hold_defend, generated=args.generated, max_units=args.max_units, together=args.together,
-               paired=not args.no_pairs, baseline=not args.no_baseline)
+               paired=not args.no_pairs, baseline=not args.no_baseline, cadence=cad.of_args(args))
     from tools.nn.train.run import show
     show(Path(args.checkpoint).name, res)
     print("\n".join(skill.text(skill.summary(res))), flush=True)

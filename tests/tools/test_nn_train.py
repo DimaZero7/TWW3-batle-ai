@@ -22,6 +22,7 @@ from tools.nn.sim import battle, scenario  # noqa: E402
 from tools.nn.sim import orders as O  # noqa: E402
 from tools.nn.sim.params import load  # noqa: E402
 from tools.nn.train import checkpoint, evaluate, imitate, league, opponents, ppo, randomise, reward, rollout, scenes  # noqa: E402,E501
+from tools.nn.train import cadence as cad  # noqa: E402
 
 CFG = config.preset("small", d=32, layers=2, heads=2, pointer=16, critic_d=32, critic_layers=1, critic_heads=2)
 MIRROR = [("arena", "attack")]
@@ -776,8 +777,9 @@ class TestProperties:
     def test_the_memory_through_a_chunk_is_the_same_as_step_by_step(self):
         actor, crit = nets()
         env = rollout.Battles(league.layout(4, 1, opponent="nearest"), MIRROR, params=rollout.params_with_limit(3.0))
-        batch = rollout.collect(env, actor, crit, 8)                       # battles end at step 6 and restart
-        assert batch["reset"][6].all() and not batch["reset"][:6].any()
+        batch = rollout.collect(env, actor, crit, 8)          # a decision a second: battles end at decisions 3, 6
+        assert batch["reset"][3].all() and batch["reset"][6].all()
+        assert not batch["reset"][[0, 1, 2, 4, 5, 7]].any()
         with torch.no_grad():
             obs = rollout.full_obs(batch["obs"], batch["abil_static"])
             logits, _ = actor.sequence(obs, batch["h0"], batch["reset"])
@@ -884,7 +886,8 @@ class TestProperties:
 
     def test_battles_start_again_when_they_end(self):
         actor, crit = nets()
-        env = rollout.Battles(league.layout(4, 1, opponent="nearest"), MIRROR, params=rollout.params_with_limit(1.0))
+        env = rollout.Battles(league.layout(4, 1, opponent="nearest"), MIRROR, params=rollout.params_with_limit(1.0),
+                              cadence=cad.STEP)                   # step level: a simulator step a call
         out = [env.step(actor, crit) for _ in range(3)]
         assert bool(out[1]["done"].all())                                 # the 1 s limit: 2 steps
         assert sorted(out[1]["reward"].tolist()) == pytest.approx([-1.5, -1.5, 1.0, 1.0], abs=0.01)
@@ -897,7 +900,7 @@ class TestProperties:
     def test_with_idle_rate_only_a_steady_damage_rate_counts_as_the_attackers_damage(self):
         actor, crit = nets()
         w = reward.Weights(idle_rate=0.05, idle_window_s=1.0)
-        env = rollout.Battles(league.layout(2, 1, opponent="nearest"), MIRROR, weights=w)
+        env = rollout.Battles(league.layout(2, 1, opponent="nearest"), MIRROR, weights=w, cadence=cad.STEP)
 
         def strike(b, share):
             u = env.st.u
@@ -909,9 +912,13 @@ class TestProperties:
         assert env.last_hit[0] == -1.0 and env.last_hit[1] == pytest.approx(0.5)
         assert float(env.hit_rate[1]) > float(env.hit_rate[0]) > 0
 
-    def test_the_logged_reward_terms_add_up_to_the_reward(self):
+    @pytest.mark.parametrize("cadence", [cad.STEP, cad.Cadence(1.0, 0.0)])
+    def test_the_logged_reward_terms_add_up_to_the_reward(self, cadence):
+        """The terms a minute of battle (per simulator step) add up to the decisions' rewards (each the sum of
+        its env.k steps')."""
         actor, crit = nets()
-        env = rollout.Battles(league.layout(4, 1, opponent="nearest"), MIRROR, params=rollout.params_with_limit(1.0))
+        env = rollout.Battles(league.layout(4, 1, opponent="nearest"), MIRROR, params=rollout.params_with_limit(1.0),
+                              cadence=cadence)
         env.reward_parts()
         out = [env.step(actor, crit) for _ in range(3)]
         att = torch.stack([o["attacks"] for o in out])
@@ -919,14 +926,15 @@ class TestProperties:
         parts = env.reward_parts()
         per_min = 60.0 / env.params.dt
         for role, m in (("attack", att), ("defend", ~att)):            # (a battle that ends starts again at once)
-            total = sum(parts[role].values()) * float(m.sum()) / per_min
+            total = sum(parts[role].values()) * float(m.sum()) * env.k / per_min
             assert total == pytest.approx(float(r[m].sum()), abs=1e-4)
         assert parts["attack"]["end"] < 0 < parts["defend"]["end"]        # the defender wins on time
         assert env.reward_parts() == {}                                   # reset
 
     def test_the_attackers_last_damage_is_kept_per_battle_and_cleared_when_it_starts_again(self):
         actor, crit = nets()
-        env = rollout.Battles(league.layout(4, 1, opponent="nearest"), MIRROR, params=rollout.params_with_limit(1.0))
+        env = rollout.Battles(league.layout(4, 1, opponent="nearest"), MIRROR, params=rollout.params_with_limit(1.0),
+                              cadence=cad.STEP)                   # step level: a simulator step a call
         assert env.last_hit.tolist() == [-1.0] * env.B
         env.step(actor, crit)                                             # t 0.5: far apart, no damage
         assert env.last_hit.tolist() == [-1.0] * env.B
@@ -947,7 +955,8 @@ class TestProperties:
         per battle row and per side, cleared when a battle starts again."""
         from tools.nn.model import observation as ob
         actor, crit = nets()
-        env = rollout.Battles(league.layout(4, 1, opponent="nearest"), MIRROR, params=rollout.params_with_limit(1.5))
+        env = rollout.Battles(league.layout(4, 1, opponent="nearest"), MIRROR, params=rollout.params_with_limit(1.5),
+                              cadence=cad.STEP)                   # step level: a simulator step a call
 
         def strike(b, side):          # what a simulator step's damage does to a unit of `side` in battle b
             u = env.st.u
@@ -993,7 +1002,7 @@ class TestProperties:
         actor, crit = nets()
         w = reward.Weights(idle_rate=ob.RATE_MIN, idle_window_s=ob.RATE_WINDOW, rout_share=ob.ROUT_SHARE)
         env = rollout.Battles(league.layout(4, 1, opponent="nearest"), MIRROR, params=rollout.params_with_limit(6.0),
-                              weights=w)
+                              weights=w, cadence=cad.STEP)        # step level: a simulator step a call
         B, cols = env.B, [ob.CTX[n] for n in ob.PROGRESS]
 
         def want():

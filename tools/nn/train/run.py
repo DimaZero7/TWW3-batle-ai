@@ -5,7 +5,10 @@
 
 The network starts from build/nn-train/random.pt (written if missing) or --init, plays `--battles`
 battles at once against itself, its past versions and the scripted opponents, and learns after
-every `--steps` decisions. Writes (build/ is not in Git), in build/nn-train/runs/<name>/:
+every `--steps` decisions. The networks decide as in the game (tools/nn/train/cadence.py: every
+--decide-s 1 s of battle, the orders --order-latency 0.36 s late; the simulator's step stays 0.5 s);
+--gamma (and GAE's lambda) are per 0.5 s of battle and become per decision here, the horizon in
+seconds the same. Writes (build/ is not in Git), in build/nn-train/runs/<name>/:
 
     latest.pt, best.pt     the network (tools/nn/train/checkpoint.py); best: the best window of
                            training battles against the scripts (the worst opponent-role counts)
@@ -29,6 +32,7 @@ import torch
 from tools.nn.model import config as model_config
 from tools.nn.model import critic as model_critic
 from tools.nn.model import policy as model_policy
+from tools.nn.train import cadence as cad
 from tools.nn.train import checkpoint, drills, evaluate, league, matchups, ppo, randomise, reward, rollout, scenes
 from tools.nn.train.drills import source as drill_source
 
@@ -140,7 +144,11 @@ def train(args, every=None):
             soften_kind(start, args.kind_temperature)
         for p in start.parameters():
             p.requires_grad_(False)
-    cfg = ppo.PPOConfig(lr=args.lr, gamma=args.gamma, epochs=args.epochs, minibatch=args.minibatch,
+    cadence = cad.of_args(args)
+    # gamma and lambda per decision: the --gamma given per 0.5 s (and the default lambda) over the decision's
+    # seconds, so the horizon in seconds stays whatever the cadence (cadence.py)
+    cfg = ppo.PPOConfig(lr=args.lr, gamma=cadence.discount(args.gamma), lam=cadence.discount(ppo.PPOConfig.lam),
+                        epochs=args.epochs, minibatch=args.minibatch,
                         entropy=args.entropy, anchor=args.anchor, unit_credit=args.unit_credit,
                         unit_value=args.unit_value,
                         adv_norm=args.adv_norm)
@@ -199,13 +207,13 @@ def train(args, every=None):
 
     def make_env(max_units):
         return rollout.Battles(lay, scenes.SCENES, device, params, randomise.Spread(), weights, seed=args.seed,
-                               source=source(max_units))
+                               source=source(max_units), cadence=cadence)
     stage = 0
     env = make_env(stages[0][0])
     step_cfg = sized(cfg, env.N)
     log = (out / "log.jsonl").open("w", encoding="utf-8", newline="\n")
     print(f"{args.name}: battles {env.B} (learner rows {env.R}), slots {env.N}, armies {args.armies} {stages}, "
-          f"steps per update {args.steps}, "
+          f"steps per update {args.steps} ({args.steps * env.decision_s:g} s of battle), {cadence.text(params.dt)}, "
           f"model {args.preset} {model_policy.parameters(actor) / 1e6:.2f} M actor, limit {args.limit:.0f} s, "
           f"ppo {dataclasses.asdict(cfg)}, reward {dataclasses.asdict(weights)}, mix {mix}", flush=True)
 
@@ -294,6 +302,7 @@ def train(args, every=None):
                 acc[k] = (G + g, W + w, S + s * g)
         row = {"update": update, "seconds": round(time.time() - t0, 1), "battles": env.battles,
                "timeouts": env.timeouts, "battle_steps_per_s": round(env.B * args.steps / (time.time() - t_u)),
+               "battle_seconds_per_s": round(env.B * args.steps * env.decision_s / (time.time() - t_u)),
                "collect_s": round(t_c - t_u, 2), "update_s": round(time.time() - t_c, 2),
                **{k: round(v, 4) for k, v in st.items()},
                "entropy_weight": round(u_cfg.entropy, 5), "anchor_weight": round(u_cfg.anchor, 4),
@@ -310,7 +319,7 @@ def train(args, every=None):
         log.flush()
         if update % args.print_every == 0:
             print(f"u{update:4d} {row['seconds']:6.0f}s battles {env.battles:6d} (timeouts {env.timeouts:5d}) "
-                  f"{row['battle_steps_per_s']:6d} st/s pl {st['policy_loss']:+.3f} vl {st['value_loss']:.4f} "
+                  f"{row['battle_steps_per_s']:6d} st/s ({row['battle_seconds_per_s']} battle-s/s) pl {st['policy_loss']:+.3f} vl {st['value_loss']:.4f} "
                   f"ent {st['entropy']:.2f}/{st['entropy_all']:.2f} kl {st['kl']:.3f} R {st['reward']:+.3f} "
                   f"anchor {st['anchor_kl']:.3f} start {st.get('start_kl', 0.0):.3f} unit A share {st['unit_adv_share']:.2f} orders/min {row['orders_per_minute']:5.1f} "
                   f"lords dead own {lords['own']:.2f} enemy {lords['enemy']:.2f} abil {row['abilities_per_battle']:.1f} "
@@ -320,7 +329,8 @@ def train(args, every=None):
                   "reward a minute " + "; ".join(f"{r} " + " ".join(f"{k} {v:+.3f}" for k, v in p.items())
                                                  for r, p in row["reward_parts"].items()), flush=True)
         if update % args.snapshot_every == 0:
-            meta = {"update": update, "battles": env.battles, "seconds": row["seconds"], "run": args.name}
+            meta = {"update": update, "battles": env.battles, "seconds": row["seconds"], "run": args.name,
+                    "cadence": cadence.meta()}
             pool.save(actor, None, args.preset, meta)
             checkpoint.save(out / "latest.pt", actor, critic, args.preset, meta)
             sc, _ = score(window)
@@ -341,7 +351,7 @@ def train(args, every=None):
             t_e = time.time()
             res = evaluate.play(actor, opponents=tuple(args.eval_opponents.split(",")), device=device,
                                 limit_s=args.limit, generated=args.eval_battles, max_units=stages[-1][0] or 19,
-                                small=small_arg())
+                                small=small_arg(), cadence=cadence)
             rates_ = {f"{o}/{r}": x["win_rate"] for o, v in res["by_opponent"].items()
                       for r, x in v["roles"].items() if x.get("games")}
             sc = float(np.mean(list(rates_.values())))
@@ -370,6 +380,7 @@ def train(args, every=None):
     seconds = time.time() - t0
     meta = {"update": update, "battles": env.battles, "seconds": round(seconds), "decisions": decisions,
             "battles_at_once": env.B, "steps_per_update": args.steps, "limit_s": args.limit, "run": args.name,
+            "cadence": cadence.meta(),
             "ppo": dataclasses.asdict(cfg), "reward": dataclasses.asdict(weights)}
     checkpoint.save(out / "latest.pt", actor, critic, args.preset, meta)
     if not (out / "best.pt").exists():
@@ -377,6 +388,8 @@ def train(args, every=None):
     log.close()
     summary = {"updates": update, "seconds": round(seconds), "battles": env.battles, "timeouts": env.timeouts,
                "battle_steps_per_s": round(decisions / seconds),
+               "battle_seconds_per_s": round(decisions * env.decision_s / seconds),
+               "battles_per_min": round(env.battles / (seconds / 60)), "cadence": cadence.meta(),
                "win_rate_all": {k: round(w / g, 3) for k, (g, w, _) in sorted(total.items()) if g},
                "games": {k: g for k, (g, _, _) in sorted(total.items())},
                "mean_battle_s": {k: round(s / g) for k, (g, _, s) in sorted(total.items()) if g}, "best_score": best}
@@ -405,20 +418,22 @@ def show(name, r):
 
 def final_eval(path, args, summary, out):
     device = torch.device(args.device)
+    cadence = cad.of_args(args)
     actor = checkpoint.load_policy(path, device)
     untrained = checkpoint.load_policy(args.eval_past or checkpoint.RANDOM, device)
     res = {"training": summary, "checkpoint": str(path)}
     t = time.time()
     if args.armies == "generated":
         res["trained"] = evaluate.play(actor, past=untrained, device=device, limit_s=args.limit,
-                                       generated=args.eval_generated, max_units=curriculum(args.curriculum)[-1][0])
+                                       generated=args.eval_generated, max_units=curriculum(args.curriculum)[-1][0],
+                                       cadence=cadence)
     else:
         res["trained"] = evaluate.play(actor, per_scene=args.eval_per_scene, past=untrained, device=device,
-                                       limit_s=args.limit)
+                                       limit_s=args.limit, cadence=cadence)
     print(f"eval {path.name} {time.time() - t:.0f} s", flush=True)
     show(path.name, res["trained"])
     (out / "eval.json").write_text(json.dumps(res, indent=1), encoding="utf-8", newline="\n")
-    paths = evaluate.record(actor, out / "replays", device=device, limit_s=args.limit, source=str(path))
+    paths = evaluate.record(actor, out / "replays", device=device, limit_s=args.limit, source=str(path), cadence=cadence)
     print(f"replays: {len(paths)} in {out / 'replays'}", flush=True)
     return res
 
@@ -435,7 +450,9 @@ def parser():
     ap.add_argument("--preset", default="small", choices=sorted(model_config.PRESETS))
     ap.add_argument("--limit", type=float, default=3600.0, help="battle time limit, s (the defender wins at it)")
     ap.add_argument("--lr", type=float, default=ppo.PPOConfig.lr)
-    ap.add_argument("--gamma", type=float, default=ppo.PPOConfig.gamma)
+    ap.add_argument("--gamma", type=float, default=ppo.PPOConfig.gamma,
+                    help="discount per 0.5 s of battle (per decision: gamma ** (--decide-s / 0.5); GAE's lambda too)")
+    cad.add_args(ap)
     ap.add_argument("--epochs", type=int, default=ppo.PPOConfig.epochs)
     ap.add_argument("--minibatch", type=int, default=ppo.PPOConfig.minibatch, help="decisions per minibatch")
     ap.add_argument("--entropy", type=float, default=ppo.PPOConfig.entropy, help="weight of the kind's entropy")

@@ -2,12 +2,17 @@
 
 Battles(layout) holds B battles on one device. A row is one side of one battle: row = (side - 1) * B
 + battle, so both sides' observations stack into one batch of 2B rows. Each row has a controller
-(tools/nn/train/league.py): the learner, a past version, or a script. Every step (one decision,
-0.5 s of battle - the simulator's step):
+(tools/nn/train/league.py): the learner, a past version, or a script. Every step() is one decision
+of the networks, as often as in the game (tools/nn/train/cadence.py: by default every 1 s of battle =
+2 simulator steps of 0.5 s, the orders landing ~0.36 s late):
 
-    observe both sides -> the learner acts for its rows (and the past version for its rows,
-    the scripts for theirs) -> one simulator step -> reward -> finished battles start again
-    (auto_reset) with fresh randomised numbers.
+    observe both sides -> the learner acts for its rows (and the past version for its rows) ->
+    the simulator steps until the next decision (the networks' orders land after the latency, KEEP
+    otherwise; the scripts give theirs every simulator step) -> reward summed over them ->
+    finished battles start again (auto_reset) with fresh randomised numbers.
+
+The observation (and its memory: last sightings, speeds) is taken only at decisions, as the companion
+takes the game's state once a second.
 
 step() returns the learner's transition: its observation, action, log-probabilities, the critic's
 value, reward and done, per learner row. collect() stacks T of them with the memory the chunk
@@ -37,6 +42,7 @@ from tools.nn.sim import orders as O
 from tools.nn.sim import state as S
 from tools.nn.sim.params import load
 from tools.nn.train import behaviour, drills, league, opponents, randomise, reward, scenes
+from tools.nn.train import cadence as cad
 
 CRITIC_KEYS = ("tokens", "ctx", "own", "attend", "pos")
 FRAME = ("cx", "cz", "ux", "uz")
@@ -255,9 +261,13 @@ def restart_rows(st, setup, source, rows, want=None):
 
 class Battles:
     def __init__(self, layout, scene_list=scenes.SCENES, device="cpu", params=None, spread=randomise.Spread(),
-                 weights=reward.Weights(), seed=0, auto_reset=True, compile=None, source=None):
+                 weights=reward.Weights(), seed=0, auto_reset=True, compile=None, source=None, cadence=None):
         self.device = torch.device(device)
         self.params = params or load()
+        # how often the networks decide and how late their orders land (cadence.py; default: the game's)
+        self.cadence = cadence or cad.GAME
+        self.k = self.cadence.steps(self.params.dt)
+        self.cadence.delay(self.params.dt)                     # (checks that the latency fits a decision)
         self.layout = layout
         self.spread = spread
         self.weights = weights
@@ -377,9 +387,30 @@ class Battles:
                    else placement(rows, self.B), o) for rows, o in parts]
         return self._assemble(self.st, self.ctrl, tuple(self.scripts.items()), tuple(places))
 
-    # --- one decision and one simulator step ---
+    @property
+    def decision_s(self):
+        """Seconds of battle a step() plays (one decision: self.k simulator steps)."""
+        return self.k * self.params.dt
+
+    def _landing(self, orders, rows, land):
+        """The networks' rows' Orders of one simulator step of a decision: the decision's own where it
+        lands now (land [B] or a bool for all), KEEP elsewhere (the orders in force go on)."""
+        if land is True:
+            return orders
+        keep = O.Orders(torch.full_like(orders.kind, O.KEEP), orders.x, orders.z, orders.target, orders.run,
+                        torch.full_like(orders.ability, -1))
+        if land is False:
+            return keep
+        return O.merge(keep, orders, land[rows % self.B][:, None].expand_as(orders.kind))
+
+    # --- one decision and its simulator steps ---
     @torch.no_grad()
-    def step(self, actor, critic=None, greedy=False):
+    def step(self, actor, critic=None, greedy=False, each=None):
+        """One decision of the networks and the self.k simulator steps until the next (cadence.py): their
+        orders land after the cadence's latency (KEEP before and after), the scripts give theirs every step.
+        The reward and done of the learner rows are summed / any over the steps; finished battles restart
+        (auto_reset) after the last. each(live [B]): called after every simulator step (live: the battles
+        running before it), e.g. the evaluation's per-step counts."""
         if self.cur is None:
             self.cur = self.observe(critic is not None)
         a, frame, c = self.cur
@@ -401,33 +432,25 @@ class Battles:
         self.kind_stats += per_row.sum(0)
         self.kind_battle.index_add_(0, self.rows_learn % self.B, per_row.float())
 
-        was_done = self.st.done.clone()
         attacks = self.st.attacker[self.rows_learn % self.B] == self.rows_learn // self.B + 1   # [R], this battle
-        marks = self._ability_marks()
-        orders = self.assemble(parts)
-        cost, switched = self._orders_cost(self.st, orders, was_done, self.ctrl, self.weights, self.orders_stats,
-                                           self.order_battle)
-        prev = reward.unit_before(self.st.u, self.weights.rout_share) if critic is not None else None
-        self.advance(self.st, orders, self.params, self.params.dt)
         rb, rs = self.rows_learn % self.B, self.rows_learn // self.B
-        after, finished, terms, r, self.hit_rate, self.last_hit = self._rewards(
-            self.st, self.health, was_done, self.hit_rate, self.last_hit, cost, self.weights, self.params.dt, rb, rs,
-            attacks, self.part_stats, self.part_steps, self.timeout_count)
-        r_rows, d_rows = r[rb, rs], finished[rb]
-        unit_rows = None
-        if prev is not None:
-            # Each learner unit's own reward (reward.unit_step), in the row's slots; 0 for the other side.
-            unit_rows = self._unit_rewards(prev, self.st, self.params, self.weights, self.last_hit, rb, rs, was_done)
-        self._count(finished, rb, rs, d_rows)
-        lord_dead = after[:, :, 2] < 0.5 if after.shape[-1] > 2 else torch.zeros_like(after[:, :, 0], dtype=torch.bool)
-        d = d_rows.float()
-        self.lord_stats += torch.stack([d.sum(), (d * lord_dead[rb, rs].float()).sum(),
-                                        (d * lord_dead[rb, 1 - rs].float()).sum()])
-        self.ability_stats += torch.stack([((self._ability_marks() > marks + 1e-3).float().sum((1, 2))
-                                            * (~was_done).float()).sum(), d.sum()])
-        sw = self._learner_units(switched).float().sum(1)
-        self.switch_stats += sw.sum()
-        self.order_battle[:, 1] += sw
+        # When the decision's orders land: a fixed step, or (a latency between steps) at random per battle.
+        whole, frac = self.cadence.delay(self.params.dt)
+        delay = self.cadence.delays(self.params.dt, self.B, self.device) if frac else None
+        r_rows = unit_rows = None
+        finished = torch.zeros_like(self.st.done)
+        for j in range(self.k):
+            land = (delay == j) if delay is not None and j in (whole, whole + 1) else (j == whole)
+            now = [(rows, self._landing(o, rows, land)) for rows, o in parts]
+            was_done = self.st.done.clone()
+            r, u_r, fin = self._sim_step(now, attacks, rb, rs, was_done, critic is not None)
+            r_rows = r if r_rows is None else r_rows + r
+            if u_r is not None:
+                unit_rows = u_r if unit_rows is None else unit_rows + u_r
+            finished = finished | fin
+            if each is not None:
+                each(~was_done)
+        d_rows = finished[rb]
 
         if self.auto_reset:
             self._reset(finished)
@@ -443,6 +466,38 @@ class Battles:
         return {"obs": obs_r, "action": action, "lp": lp, "value": value, "reward": r_rows,
                 "done": d_rows, "critic_obs": c, "unit_value": unit_value, "unit_reward": unit_rows,
                 "attacks": attacks}
+
+    def _sim_step(self, parts, attacks, rb, rs, was_done, units):
+        """One simulator step with the networks' orders `parts` and the scripts': -> (the learner rows'
+        reward [R], their units' rewards [R, N] or None, finished [B]); the counters (in place). A battle
+        that had ended before the step is frozen and gets no reward."""
+        marks = self._ability_marks()
+        orders = self.assemble(parts)
+        cost, switched = self._orders_cost(self.st, orders, was_done, self.ctrl, self.weights, self.orders_stats,
+                                           self.order_battle)
+        prev = reward.unit_before(self.st.u, self.weights.rout_share) if units else None
+        self.advance(self.st, orders, self.params, self.params.dt)
+        after, finished, terms, r, self.hit_rate, self.last_hit = self._rewards(
+            self.st, self.health, was_done, self.hit_rate, self.last_hit, cost, self.weights, self.params.dt, rb, rs,
+            attacks, self.part_stats, self.part_steps, self.timeout_count)
+        r_rows = r[rb, rs] * (~was_done[rb]).float()
+        d_rows = finished[rb]
+        unit_rows = None
+        if prev is not None:
+            # Each learner unit's own reward (reward.unit_step), in the row's slots; 0 for the other side.
+            unit_rows = self._unit_rewards(prev, self.st, self.params, self.weights, self.last_hit, rb, rs, was_done)
+        self._count(finished, rb, rs, d_rows)
+        lord_dead = after[:, :, 2] < 0.5 if after.shape[-1] > 2 else torch.zeros_like(after[:, :, 0], dtype=torch.bool)
+        d = d_rows.float()
+        self.lord_stats += torch.stack([d.sum(), (d * lord_dead[rb, rs].float()).sum(),
+                                        (d * lord_dead[rb, 1 - rs].float()).sum()])
+        self.ability_stats += torch.stack([((self._ability_marks() > marks + 1e-3).float().sum((1, 2))
+                                            * (~was_done).float()).sum(), d.sum()])
+        sw = self._learner_units(switched).float().sum(1)
+        self.switch_stats += sw.sum()
+        self.order_battle[:, 1] += sw
+        self.health = after                          # = reward.measure of the state now
+        return r_rows, unit_rows, finished
 
     def reward_parts(self, reset=True):
         """{role: {term: the learner's mean reward a minute of battle}} since the last call (reward.PARTS;
@@ -613,7 +668,7 @@ class Battles:
 
 
 def collect(env, actor, critic, T):
-    """T steps of every battle -> a dict of stacked tensors [T, R, ...], the memory the chunk began
+    """T decisions (steps) of every battle -> a dict of stacked tensors [T, R, ...], the memory the chunk began
     with h0 [R, 1 + N, d], reset [T, R] (a new battle began at step t: its memory starts empty), the
     bootstrap value [R], per unit: unit_reward, unit_value [T, R, N], last_unit_value [R, N], and
     abil_static: the bank's ability passports (full_obs puts them back into obs)."""
