@@ -695,6 +695,7 @@ def script_battles(names, n_pairs, max_units=19, limit_s=3600.0, device="cpu", c
             orig, ctrl = orig[keep], ctrl[keep]
         for _ in range(min(CHECK_EVERY, n_steps - i)):
             env.advance(env.st, env._assemble(env.st, ctrl, plays, ()), env.params, env.params.dt)
+            env.st.u["lost_worst"] = env._track(env.st.u, env.weights.rout_share)   # as Battles: a loss counts once
             i += 1
     _put(full, orig, env.st)
     env.st = full

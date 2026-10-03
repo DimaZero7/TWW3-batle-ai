@@ -21,8 +21,9 @@ The rule: the AI sees only what a human player sees.
 * The attacker's progress (context, PROGRESS; both sides see it): the clock of the reward's idle cost
   (tools/nn/train/reward.py, idle_rate > 0). Its damage rate - the defender's gold lost (gold_lost:
   cost x the share lost, a routing unit ROUT_SHARE of what it has left besides, one dead, gone or
-  shattered whole), share of the budget (the mean of the two armies' cost) a minute, an exponential
-  mean over RATE_WINDOW s - divided by RATE_MIN; whether it has reached RATE_MIN yet; seconds since it
+  shattered whole; counted once: only beyond the unit's worst so far, so a rally gives nothing back
+  and a rout after a rally adds nothing new), share of the budget (the mean of the two armies' cost)
+  a minute, an exponential mean over RATE_WINDOW s - divided by RATE_MIN; whether it has reached RATE_MIN yet; seconds since it
   last was at least RATE_MIN (the reward's last_hit). From every unit's health and state (a unit
   whose `hp` is not known counts nothing until known again), so the companion computes it from the
   game's state as the simulator does. It is the reward's clock while the run's --idle-rate,
@@ -210,7 +211,7 @@ class Memory:
     lord_dead_t: object = None    # [B, 2] time own / enemy lord was slain (-1 alive or none)
     prev_hp: object = None        # [B, N] health share at the previous observation (-1 unknown)
     hit_t: object = None          # [B, 2] time own / enemy side last dealt damage (-1 not yet)
-    prev_gold: object = None      # [B, N] gold each unit had lost at the previous observation (-1 unknown)
+    prev_gold: object = None      # [B, N] the worst gold each unit has lost so far (-1 never known; _progress)
     rate: object = None           # [B] the attacker's damage rate (PROGRESS; budget share a minute)
     rate_t: object = None         # [B] time it last was at least RATE_MIN (-1 not yet)
 
@@ -431,9 +432,14 @@ def gold_lost(m, state, S, men):
 def _progress(m, state, S, memory, men, now):
     """(rate [B], rate_t [B], gold [B, N]): the attacker's damage rate and the time it last was at least
     RATE_MIN after this observation (PROGRESS; tools/nn/train/reward.py hit_rate and idle_cost's
-    last_hit), and every unit's gold lost now (gold_lost: the next observation's reference). The
-    defender's loss counts over the units known at both observations; a rally is not damage (0)."""
+    last_hit), and every unit's worst gold lost so far (Memory.prev_gold: the next observation's
+    reference; -1 never known). A loss counts once, as in reward.gold_lost: only beyond the unit's
+    worst - a rally is not damage and a rout after a rally adds nothing until the unit has lost more
+    than at its worst. The defender's loss counts over the units known at both observations (a unit
+    whose health was not known at the previous one: its worst is raised to its loss now, uncounted)."""
     gold = gold_lost(m, state, S, men)
+    known = gold >= 0
+    worst = m.where(known, m.maximum(gold, memory.prev_gold), memory.prev_gold)
     cost = getattr(S, "cost", None)
     cost = _f(m, S.present) if cost is None else cost * _f(m, S.present)
     budget = m.clip(cost.sum(-1) / 2, 1.0, 1e12)                     # the mean of the two armies' cost
@@ -441,14 +447,14 @@ def _progress(m, state, S, memory, men, now):
     prev_t = memory.prev_t[:, 0]
     dt = now - prev_t
     step = (prev_t >= 0) & (dt > 0)
-    both = defender & (gold >= 0) & (memory.prev_gold >= 0)
-    share = m.clip(m.where(both, gold - memory.prev_gold, gold * 0).sum(-1) / budget, 0, 1e12)
+    both = defender & known & (memory.prev_gold >= 0) & (memory.prev_hp >= 0)
+    share = m.clip(m.where(both, worst - memory.prev_gold, gold * 0).sum(-1) / budget, 0, 1e12)
     dts = m.where(step, dt, dt * 0 + 1)
     a = m.exp(-dts / RATE_WINDOW)
     rate = m.where(step, a * memory.rate + (1 - a) * share * (60.0 / dts), memory.rate)
     rate_t = m.where(step & (rate >= RATE_MIN), now, memory.rate_t)
     again = (prev_t >= 0) & ~step                       # the same time again: the reference stays
-    return rate, rate_t, m.where(again[:, None], memory.prev_gold, gold)
+    return rate, rate_t, m.where(again[:, None], memory.prev_gold, worst)
 
 
 def _recent(m, now, when):

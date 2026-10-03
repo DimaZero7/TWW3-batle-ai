@@ -10,8 +10,11 @@
                  of many men the same as its men lost; a single entity counts before it dies); a unit
                  dead, gone off the map or shattered is lost whole; a routing unit that may still
                  rally loses `rout_share` of what it has left besides (out of the fight now, but it
-                 may come back), given back when it rallies. budget: the mean of the two armies'
-                 starting cost. It replaces `hp` and `standing` (weights 0 by default: with gold
+                 may come back). A loss counts once: per unit the worst share lost so far (the
+                 state's `lost_worst`, track()) - a rally gives nothing back, a rout after a rally
+                 adds nothing until the unit loses more than at its worst (audit B3, 03.10); the
+                 progress clock and the network's progress inputs count the same. budget: the mean
+                 of the two armies' starting cost. It replaces `hp` and `standing` (weights 0 by default: with gold
                  they would count the same losses twice).
     hp        x (the share of the enemy's health lost - the share of own health lost) (0: in gold),
     standing  x (the share of the enemy's army, by cost, that stopped standing (routed, dead, gone)
@@ -65,9 +68,11 @@ itself, beside the side's reward; none of it enters the side's reward:
     unit_gold     x n_own x (gold it destroyed - gold it lost) / budget: its share of the side's gold
                   trade, scaled to one unit; destroyed (unit_attrib 1, attributed()) = every enemy unit's
                   gold lost in the step (health, a rout, shattering, death) split among the units that
-                  fight or shoot it, by the HP each dealt; lost = the change of its gold_lost (routs and
-                  rallies too). The old destroyed (unit_attrib 0: the HP it dealt x the target's gold a HP)
-                  counted health only (a unit's losses held its routs and death, its kills did not), and
+                  fight or shoot it, by the HP each dealt; lost = the change of its gold_lost (a rout
+                  beyond its worst; a rally gives nothing back; the same for the destroyed: until
+                  03.10 a rally gave the routed enemy's gold back to it but not from its attackers, so
+                  each new rout of the same enemy paid them again). The old destroyed (unit_attrib 0:
+                  the HP it dealt x the target's gold a HP) counted health only (a unit's losses held its routs and death, its kills did not), and
                   a missile unit's volley spill at its target's HP a man: 02.10, it5/m20 v nearest, the
                   units' destroyed summed to 3.6 x the enemy's loss, the missile units' 3.1 x (attributed:
                   0.84, 0.41), so the centred credit put every melee unit below its side's mean
@@ -181,14 +186,33 @@ def standing_mask(u):
     return (u["side"] > 0) & (u["men"] > 0) & ~u["gone"] & ~u["r"]
 
 
-def gold_lost(u, rout_share=Weights.rout_share):
-    """[B, N] the gold each unit has lost: its cost x the share of it lost. The share is the health
-    lost; a unit dead, gone or shattered is lost whole; a routing one (it may rally) loses
-    rout_share of what it has left besides. 0 for empty slots."""
+def lost_now(u, rout_share=Weights.rout_share):
+    """[B, N] the share of each unit lost by its state now: the health lost; a unit dead, gone or
+    shattered is lost whole; a routing one (it may rally) loses rout_share of what it has left
+    besides. 0 for empty slots. No memory: a rally takes the rout share off (see gold_lost)."""
     hp_lost = (1 - u["hp_abs"] / u["hp0"].clamp(min=1e-6)).clamp(0, 1)
     out = (u["men"] <= 0) | u["gone"] | u["s"]
     share = torch.where(out, torch.ones_like(hp_lost), hp_lost + (1 - hp_lost) * rout_share * u["r"].float())
-    return torch.where(u["side"] > 0, u["cost"] * share, torch.zeros_like(share))
+    return torch.where(u["side"] > 0, share, torch.zeros_like(share))
+
+
+def track(u, rout_share=Weights.rout_share):
+    """[B, N] the unit's worst share lost so far (state field `lost_worst`, 0 at the start of a battle):
+    the larger of the one kept and lost_now. The caller stores it after every simulator step
+    (rollout.Battles); the simulator itself does not know rout_share."""
+    return torch.maximum(u["lost_worst"], lost_now(u, rout_share))
+
+
+def gold_lost(u, rout_share=Weights.rout_share):
+    """[B, N] the gold each unit has lost: its cost x the worst share of it lost so far (lost_now, and
+    the state's `lost_worst` kept by track()). A loss counts once: a rally gives nothing back and a
+    rout after a rally adds nothing until the unit loses more than at its worst (audit B3, 03.10: a
+    defender unit routing, rallying and routing again was new damage each time - the attacker's
+    progress clock reset and the trade paid with no real progress). 0 for empty slots."""
+    share = lost_now(u, rout_share)
+    if "lost_worst" in u:
+        share = torch.maximum(share, u["lost_worst"])
+    return u["cost"] * share
 
 
 def budget(u):
@@ -247,7 +271,7 @@ def parts(before, after, finished, winner, attacker, weights=Weights()):
     elif lost.shape[-1] > 2:
         l1 = weights.lord * (lost[:, 1, 2] - lost[:, 0, 2])
     if lost.shape[-1] > 3:
-        g = before[:, :, 3] - after[:, :, 3]                              # not clamped: a rally gives its gold back
+        g = before[:, :, 3] - after[:, :, 3]                              # the worst so far: never negative
         t1 = t1 + weights.gold * (g[:, 1] - g[:, 0])
     timeout = finished & (after[:, 0, 1] > 0) & (after[:, 1, 1] > 0)
     won1 = (winner == 1).float() - (winner == 2).float()
@@ -278,8 +302,8 @@ def idle_scale(t, last_hit, weights=Weights()):
 
 
 def damage_share(before, after, attacker):
-    """[B] the share of the budget in gold the defender lost in the step (measure() column 3; a rally
-    is not damage: 0)."""
+    """[B] the share of the budget in gold the defender lost in the step (measure() column 3: each unit's
+    worst so far, so a rally is not damage and a rout after a rally only beyond the unit's worst)."""
     d = (2 - attacker).long()
     g_b = before[:, :, 3].gather(1, d[:, None])[:, 0]
     g_a = after[:, :, 3].gather(1, d[:, None])[:, 0]
@@ -426,7 +450,7 @@ def hp_dealt(before, u, params):
 
 def attributed(before, u, params, rout_share=Weights.rout_share):
     """[B, N] the enemy gold each unit destroyed in the step: every enemy unit's gold lost in it
-    (gold_lost: health, a rout, shattering, death; a rally is not taken back) less what its own side's
+    (gold_lost: health, a rout, shattering, death; counted once, beyond the unit's worst) less what its own side's
     projectiles took (ff_taken), split among the units of the other side that fight or shoot it, by the
     HP each dealt (hp_dealt; equally when none shows). Whom a unit engages: its target after the step
     while it fights or shoots, else its target before it (the enemy it struck down this step: the
@@ -513,7 +537,7 @@ def unit_step(before, st, facts, params, weights=Weights(), idle_m=None):
     u = st.u
     side = u["side"]
     present = side > 0
-    lost = gold_lost(u, weights.rout_share) - before["gold"]                # gold; a rally gives it back
+    lost = gold_lost(u, weights.rout_share) - before["gold"]                # gold, beyond its worst (never < 0)
     if weights.friendly_fire and "ff_dealt" in u:                         # own projectiles: the shooter's loss
         lost = lost + weights.friendly_fire * (u["ff_dealt"] - u["ff_taken"])
     if weights.unit_attrib and "target" in before:

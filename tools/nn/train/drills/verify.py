@@ -42,6 +42,7 @@ def play(drill, script, n=256, seed=0, device="cpu", spread=randomise.Spread(), 
     while not bool(st.done.all()):
         orders = D.merged(st, ours, script(st), drill.enemy(st))
         battle.step(st, orders, params, params.dt)
+        st.u["lost_worst"] = reward.track(st.u)          # a loss counts once (reward.gold_lost)
         if extra is not None:
             extra(st)
     gold = reward.gold_sides(st.u).cpu().numpy()

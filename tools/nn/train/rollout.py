@@ -291,6 +291,7 @@ class Battles:
         self._rewards = fast(_rewards, use)
         self._unit_rewards = fast(_unit_rewards, use)
         self._measure = fast(reward.measure, use)
+        self._track = fast(reward.track, use)
         self._decide = fast(_decide, use)
         self._log_prob = fast(_log_prob, use)
         self._values = fast(_values, use)
@@ -477,6 +478,8 @@ class Battles:
                                            self.order_battle)
         prev = reward.unit_before(self.st.u, self.weights.rout_share) if units else None
         self.advance(self.st, orders, self.params, self.params.dt)
+        # each unit's worst loss so far: a rally gives nothing back, a new rout counts beyond it (reward.track)
+        self.st.u["lost_worst"] = self._track(self.st.u, self.weights.rout_share)
         after, finished, terms, r, self.hit_rate, self.last_hit = self._rewards(
             self.st, self.health, was_done, self.hit_rate, self.last_hit, cost, self.weights, self.params.dt, rb, rs,
             attacks, self.part_stats, self.part_steps, self.timeout_count)

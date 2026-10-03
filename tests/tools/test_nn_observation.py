@@ -348,10 +348,14 @@ class TestProgress:
         r = np.array([[False, False, False, True]])                        # the clanrats rout: half of the rest
         look(1.5, cost[3] * 0.8 * ob.ROUT_SHARE / budget, hp=own, r=r)
         look(2.0, 0, hp=own)                                               # they rally: no damage (not negative)
+        look(2.25, 0, hp=own, r=r)                                         # rout again: counted once (audit B3)
+        look(2.4, 0, hp=own)                                               # ... and rally again: nothing
         unknown = np.array([[1, 0.5, 1, np.nan]])
         look(2.5, 0, hp=unknown)                                           # not read: nothing
-        look(3.0, 0, hp=np.array([[1, 0.5, 1, 0.5]]))                      # read again: the new reference
-        look(3.5, (cost[2] + cost[3] * 0.5) / budget, hp=np.array([[1, 0.5, 1, 0.5]]),
+        look(3.0, 0, hp=np.array([[1, 0.5, 1, 0.5]]))                      # read again: the new reference (its worst
+        #                                                                    0.6 of the rout stays: 0.5 lost is below it)
+        look(3.2, cost[3] * 0.15 / budget, hp=np.array([[1, 0.5, 1, 0.5]]), r=r)   # routs at 0.5: 0.75, 0.15 beyond
+        look(3.5, (cost[2] + cost[3] * 0.25) / budget, hp=np.array([[1, 0.5, 1, 0.5]]),
              men=np.array([[1.0, 100, 0, 100]]), s=np.array([[False, False, False, True]]))   # dead, shattered: whole
         for t in (60.0, 200.0, 600.0):                                     # no damage: the rate falls, the time grows
             want = look(t, 0, hp=np.array([[1, 0.5, 1, 0.5]]), men=np.array([[1.0, 100, 0, 100]]),

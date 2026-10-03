@@ -572,7 +572,7 @@ with the own / the enemy lord dead, the order kinds and attack target switches a
 |---|---|---|
 | fighting | its health lost (`1 − hp_abs / hp0`) | for a unit of many men health and men fall together (kills take men as damage takes health), so it is about the men lost, without the step of a whole man; for a single entity (a lord, a monster) men drop 1 → 0 only at its death, health shows the damage before |
 | dead, gone off the map, shattered | 1 | it never comes back |
-| routing (not shattered) | health lost + 0.5 × what is left (`--rout-share`) | it is out of the fight now, but it may rally; a rally gives the half back (the term is not clamped: a potential difference) |
+| routing (not shattered) | health lost + 0.5 × what is left (`--rout-share`) | it is out of the fight now, but it may rally; a loss counts once ([below](#a-loss-counts-once-03102026)): a rally gives nothing back |
 
 The side's term, per step: `gold` × (enemy gold destroyed − own gold lost) / budget, budget = the
 mean of the two armies' starting cost (the same for both sides, so the term is exactly zero-sum).
@@ -671,6 +671,51 @@ the march exemption must not let an attacker walk about without engaging. 30 min
 `best.pt` with the gold reward neither helped nor hurt measurably; `long_ai2` with the old reward
 was flat or falling too.
 
+### A loss counts once, 03.10.2026
+
+Audit B3. Until 03.10 a unit's gold lost was read from its state now: a routing unit lost
+`rout_share` of what it had left and a rally took it off again. In the side's trade (a potential
+difference) that netted out, but the attacker's progress clock (`reward.damage_share`, `hit_rate`; the
+observation's PROGRESS) counts only rises: a rally gave nothing back there, so a defender unit that
+routed, rallied and routed again was new damage each time - the clock reset and the network's
+progress inputs rose with no real progress. The per-unit credit had the same: `reward.attributed`
+paid every new rout of the same enemy again to the units engaging it.
+
+Now a unit's loss counts only beyond its worst so far (`reward.lost_now`, `track`, `gold_lost`; the
+state's `lost_worst`, stored by `rollout.Battles` after every simulator step, also in
+`evaluate.script_battles` and `drills/verify.py`): gold lost = cost × the worst share lost so far. A
+rally gives nothing back; a rout after a rally adds nothing until the unit has lost more than at its
+worst (routing at half health: 0.75; rallied: still 0.75; hit to 60 % lost and routing again: 0.8,
++0.05). One rule for the side's trade (our side's losses alike), the damage rate and the idle clock,
+the per-unit credit, the end-of-battle gold metrics and the network's PROGRESS inputs
+(`Memory.prev_gold` keeps each unit's worst; the companion runs the same code on the game's
+states). The price: health a rallied unit loses counts only beyond its routed worst - its rout share
+was counted in advance. The lord term with `--lord-rout` and `lord_fall` are unchanged (a rally gives
+them back: a potential, nothing counted twice).
+
+How often under the old rule (64 generated battles each, up to 19 units a side, the first EVAL seeds,
+the time limit 3600 s; GPU, 8.4 min wall for the three samples; per battle):
+
+| | `ai_like` v `ai_like` | `nearest` v `nearest` | `test5_ai1_newailike/latest.pt` v `ai_like` |
+|---|---|---|---|
+| routs / of them after a rally (attacker's units; defender's) | 9.4 / 3.8; 8.8 / 3.5 | 11.2 / 4.8; 9.4 / 3.8 | 9.8 / 3.9; 9.9 / 4.0 |
+| battles with a rout after a rally | 94 % | 97 % | 95 % |
+| battles the defender's loss was counted more than once | 91 % | 92 % | 89 % |
+| ... the excess, share of the budget: mean / median of those / max | 0.070 / 0.037 / 0.25 | 0.076 / 0.053 / 0.28 | 0.078 / 0.066 / 0.29 |
+| ... share of the clock's counted damage: mean / max | 6.4 % / 21 % | 6.9 % / 22 % | 6.9 % / 22 % |
+| ... of it in the steps a unit routed again (the rest: health a rallied unit lost below its worst) | 52 % | 46 % | 55 % |
+| battles the old clock showed progress (rate ≥ 0.05) where the new does not | 59 % | 38 % | 50 % |
+| ... seconds a battle: mean / max; share of battle time | 22 / 135; 3.4 % | 10 / 114; 2.8 % | 26 / 143; 4.8 % |
+| the end trade, old − new (budget share: the rallied units' rout share): mean abs / max | 0.013 / 0.06 | 0.022 / 0.11 | 0.030 / 0.12 |
+
+Our side's losses were counted the same way: in the trade a rally gave its share back (no double
+count: the potential nets out), but the enemy's per-unit credit paid each new rout of ours again
+(excess 0.07–0.10 of the budget a battle, as above). Tests: `tests/tools/test_nn_train.py` (a rout, a
+rally and a rout again count once in the trade, the damage share and per unit, for either side; beyond
+the worst it counts; in the rollout the clock does not rise at a rally or a second rout, and the
+companion sees the same), `tests/tools/test_nn_observation.py` (PROGRESS: a second rout counts once,
+a rout beyond the worst counts the excess).
+
 ## Per-unit credit, 01.10.2026
 
 In the game: 4 infantry units piled on one enemy while 2 Skaven infantry units flanked them, and 2
@@ -681,7 +726,7 @@ was lost in the battle's total: its gradient was the same whether it piled on or
 
 | Term | Weight | Why |
 |---|---:|---|
-| its gold trade: n_own × (gold it destroyed − gold it lost) / budget (was its health trade) | 0.05 | what happens to the unit itself; destroyed (`--unit-attrib 1`, `reward.attributed`) = every enemy unit's gold lost in the step (health, a rout, shattering, death; less its own side's friendly fire) split among the units that fight or shoot it, by the HP each dealt; lost = the change of its own lost gold (a rout and a rally too), its friendly fire charged to the shooter. Until 02.10 destroyed was the HP it dealt × the target's gold a HP (`--unit-attrib 0`; [why replaced](#per-unit-reward-contribution-not-self-preservation-0210)) |
+| its gold trade: n_own × (gold it destroyed − gold it lost) / budget (was its health trade) | 0.05 | what happens to the unit itself; destroyed (`--unit-attrib 1`, `reward.attributed`) = every enemy unit's gold lost in the step (health, a rout, shattering, death; less its own side's friendly fire) split among the units that fight or shoot it, by the HP each dealt; lost = the change of its own lost gold (beyond its worst: a rally gives nothing back), its friendly fire charged to the shooter. Until 02.10 destroyed was the HP it dealt × the target's gold a HP (`--unit-attrib 0`; [why replaced](#per-unit-reward-contribution-not-self-preservation-0210)) |
 | struck in the flank or rear in melee | −0.0002 | the game: ~×1.74 losses; the trade sees the losses, this sees the position before they pile up |
 | a missile unit in melee | −0.0002 | archers stuck in melee |
 | a pile: more than 2 own units on one enemy while another enemy strikes an own unit in flank or rear, by the excess share (n − 2) / n | −0.0002 | the whole pile pays n − 2 units' worth: the units over 2 should turn to the flanker |
@@ -1651,7 +1696,7 @@ stored decision keeps only the slots' state and `full_obs` gives the observation
 lord uses abilities by order and PPO trains the head.
 Gold and the idle cost: the gold lost is the cost × the health lost, a routing unit 0.75 at half health,
 a shattered, gone or dead one whole, empty slots nothing; the budget is the mean of the armies; the
-gold term is zero-sum and a rally gives it back; `hp` and `standing` are off by default; the
+gold term is zero-sum and a loss counts once (a rally gives nothing back; a rout, a rally and a rout again count once in the trade, the damage rate and per unit, for either side; beyond its worst a loss counts); `hp` and `standing` are off by default; the
 attacker's idle cost before its first damage is exponential in time (≈ 0 early, growing, capped);
 after damage 0 for 30 s, then a step up every 30 s, faster than the first curve, capped, and new
 damage sets it back to 0; a marching attacker pays (also in a simulated battle); late in the

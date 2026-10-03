@@ -136,6 +136,8 @@ INTERNAL = {
     "under_fire_s": ("f", "seconds since last hit by a projectile"),
     "ff_dealt": ("f", "gold its projectiles took from its own side this step (friendly fire, missile.friendly)"),
     "ff_taken": ("f", "gold it lost to its own side's projectiles this step"),
+    "lost_worst": ("f", "the worst share of the unit lost so far (tools/nn/train/reward.py track: health, a rout's "
+                        "share, out whole), kept by the reward's caller, not the simulator: a rally gives nothing back"),
     "dealt": ("f", "HP dealt in melee recently (decaying)"),
     "taken": ("f", "HP taken in melee recently (decaying)"),
     "gone": ("b", "left the map (routed off it)"),

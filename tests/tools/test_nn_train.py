@@ -125,7 +125,7 @@ class TestFunctions:
         c1, c2 = float(cost[u["side"][0] == 1].sum()), float(cost[u["side"][0] == 2].sum())
         assert float(reward.budget(u)[0]) == pytest.approx((c1 + c2) / 2)
 
-    def test_the_gold_reward_is_zero_sum_and_a_rally_gives_it_back(self):
+    def test_the_gold_reward_is_zero_sum_and_a_rally_gives_nothing_back(self):
         st = line_army()
         u = st.u
         H = st.N // 2
@@ -134,6 +134,7 @@ class TestFunctions:
         before = reward.measure(st)
         u["hp_abs"][0, H + 1] = u["hp0"][0, H + 1] * 0.6                              # an enemy spearman
         u["r"][0, 1] = True                                                           # an own spearman routs
+        u["lost_worst"] = reward.track(u)                                             # (after every simulator step)
         after = reward.measure(st)
         r = reward.step(before, after, no, torch.tensor([0]), torch.tensor([1]), w)
         bud = float(reward.budget(u)[0])
@@ -141,10 +142,54 @@ class TestFunctions:
         assert r[0].tolist() == pytest.approx([want, -want], rel=1e-4)
         assert float(r.sum()) == pytest.approx(0.0, abs=1e-7)
         u["r"][0, 1] = False                                                          # it rallies
+        u["lost_worst"] = reward.track(u)
         back = reward.step(after, reward.measure(st), no, torch.tensor([0]), torch.tensor([1]), w)
-        assert float(back[0, 0]) == pytest.approx(0.5 * float(u["cost"][0, 1]) / bud, rel=1e-4)
+        assert back[0].tolist() == pytest.approx([0.0, 0.0], abs=1e-7)                # a loss counts once (B3)
         # the hp and standing terms are off by default: gold counts those losses once
         assert reward.Weights().hp == 0.0 and reward.Weights().standing == 0.0
+
+    def test_a_rout_a_rally_and_a_rout_again_count_once_in_the_trade_and_the_clock(self):
+        # Audit B3 (03.10): a defender unit that routed, rallied and routed again was new damage each
+        # time - the attacker's progress clock reset and the trade paid with no real progress.
+        st = line_army(attacker=1)
+        u = st.u
+        H = st.N // 2
+        w = reward.Weights(win=1.0, gold=1.0, lord=0.0)
+        no, none, att = torch.tensor([False]), torch.tensor([0]), torch.tensor([1])
+        bud = float(reward.budget(u)[0])
+        foe, own = H + 1, 1                                                          # the defender's, the attacker's
+        cf, co = float(u["cost"][0, foe]), float(u["cost"][0, own])
+
+        def turn(set_):
+            prev = reward.measure(st)
+            for (k, i), v in set_.items():
+                u[k][0, i] = v
+            u["lost_worst"] = reward.track(u)
+            now = reward.measure(st)
+            # [side 1's reward, side 2's, the clock's damage share, the defender unit's gold lost]
+            return reward.step(prev, now, no, none, att, w)[0].tolist() + [
+                float(reward.damage_share(prev, now, att)[0]), float(reward.gold_lost(u)[0, foe])]
+
+        assert turn({("r", foe): True}) == pytest.approx([0.5 * cf / bud, -0.5 * cf / bud, 0.5 * cf / bud, 0.5 * cf])
+        assert turn({("r", foe): False}) == pytest.approx([0, 0, 0, 0.5 * cf], abs=1e-6)          # rallies: nothing
+        assert turn({("r", foe): True}) == pytest.approx([0, 0, 0, 0.5 * cf], abs=1e-6)           # routs again: nothing
+        # beyond its worst it counts: 60 % health lost while routing -> 0.6 + 0.4 x 0.5 = 0.8 of its cost
+        assert turn({("hp_abs", foe): 0.4 * float(u["hp0"][0, foe])}) == pytest.approx(
+            [0.3 * cf / bud, -0.3 * cf / bud, 0.3 * cf / bud, 0.8 * cf], rel=1e-4)
+        assert turn({("r", foe): False})[2] == 0.0
+        assert turn({("s", foe): True, ("r", foe): True}) == pytest.approx(                       # shattered: whole
+            [0.2 * cf / bud, -0.2 * cf / bud, 0.2 * cf / bud, cf], rel=1e-4)
+        # our side's losses: the same rule (the trade; the clock counts the defender's only)
+        assert turn({("r", own): True})[:3] == pytest.approx([-0.5 * co / bud, 0.5 * co / bud, 0], rel=1e-4)
+        assert turn({("r", own): False})[:3] == pytest.approx([0, 0, 0], abs=1e-7)
+        assert turn({("r", own): True})[:3] == pytest.approx([0, 0, 0], abs=1e-7)
+        # the per-unit credit (unit_step, attributed) reads the same gold: a re-rout is nobody's new kill
+        other = H + 2
+        turn({("r", other): True})
+        before = reward.unit_before(u)
+        turn({("r", other): False})
+        turn({("r", other): True})
+        assert float((reward.gold_lost(u) - before["gold"]).abs().max()) == 0.0
 
     def test_before_its_first_damage_the_attackers_idle_cost_is_exponential_in_time_and_capped(self):
         st = two_units()
@@ -1084,13 +1129,16 @@ class TestProperties:
             att = env.st.attacker
             if 1 <= k <= 4:
                 strike(0, int(3 - att[0]), 0.03)                          # battle 0: steady blows
-            if k == 6:
-                env.st.u["r"][0, unit(0, int(3 - att[0]), -2)] = True    # ... a rout (half its rest lost)
+            router = unit(0, int(3 - att[0]), -2)
+            low, high = 0.0, float(env.st.u["leadership"][0, router])    # morale points: stays routing / steady
+            if k in (6, 10):                                              # ... a rout (half its rest lost), and at
+                env.st.u["r"][0, router], env.st.u["morale"][0, router] = True, low   # 10 again: counted once (B3)
             if k == 8:
-                env.st.u["r"][0, unit(0, int(3 - att[0]), -2)] = False   # ... it rallies (no damage)
+                env.st.u["r"][0, router], env.st.u["morale"][0, router] = False, high  # ... it rallies (no damage)
             if k == 9:
                 i = unit(0, int(3 - att[0]), -3)
                 env.st.u["r"][0, i], env.st.u["gone"][0, i] = True, True  # ... another leaves the map: whole
+            rate0 = float(env.hit_rate[0])
             strike(1, int(3 - att[1]), 1e-4)                              # battle 1: scratches only
             if k == 3:
                 strike(1, int(att[1]), 0.3)                               # ... and the defender's blow
@@ -1103,6 +1151,10 @@ class TestProperties:
             assert torch.allclose(ctx[B:, cols], want(), atol=1e-5), k
             seen_game = companion()
             assert np.allclose(seen_game, ctx[0, cols].numpy(), atol=1e-5), (k, seen_game, ctx[0, cols])
+            if k in (6, 9):
+                assert float(env.hit_rate[0]) > rate0 and bool(env.st.u["r"][0, router]) == (k == 6), k
+            if k in (8, 10):                                              # a rally and a rout again: no damage
+                assert float(env.hit_rate[0]) < rate0 and bool(env.st.u["r"][0, router]) == (k == 10), k
             reached |= {b for b in range(B) if float(env.last_hit[b]) >= 0}
             if k == 11:                                                   # t 6: the limit, all start again
                 assert float(ctx[:, cols].abs().sum()) == 0 and env.last_hit.tolist() == [-1.0] * B

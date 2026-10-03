@@ -102,13 +102,14 @@ The attacker's progress (`observation.PROGRESS`) is the clock of the reward's id
 `--idle-rate` ([training](training.md)), so the actor and the critic see the state that cost
 depends on. The attacker's damage rate is the defender's gold lost (`observation.gold_lost`: the
 unit's cost × the share of its health lost; a routing unit loses half of what it has left besides,
-a dead, shattered or gone one all of it; a rally is not damage) as a share of the budget (the mean
+a dead, shattered or gone one all of it; counted once, as `reward.gold_lost`: only beyond the unit's
+worst so far, so a rally is not damage and a rout after a rally adds nothing new) as a share of the budget (the mean
 of the two armies' cost) a minute, an exponential mean over 30 s; the input is that rate / 0.05 (1
 at the threshold), whether it has reached 0.05 yet, and seconds since it last did (the reward's
 `last_hit`: the idle multiplier m grows with it). Both sides see it. It is computed from every
 unit's health and state (a unit whose health is not known counts nothing until known again) and
 the passports' cost (`Setup.cost`), with the time between the observations, in the memory
-(`Memory.prev_gold`, `rate`, `rate_t`): the simulator's observation and the companion's (the
+(`Memory.prev_gold`: each unit's worst so far, `rate`, `rate_t`): the simulator's observation and the companion's (the
 game's states; a unit gone from the map reads no men there, `gone` in the simulator) are one rule.
 It is the reward's clock while `--idle-rate`, `--idle-window` and the rout share are 0.05, 30 s
 and 0.5 (`observation.RATE_MIN`, `RATE_WINDOW`, `ROUT_SHARE`); `rollout.Battles` warns otherwise.
@@ -296,7 +297,7 @@ An int8 export of the actor looks practical; not done yet:
   at each damage, per side and per battle row, rising or unknown health is no damage, a new memory
   starts empty, a recording gives the same timers as the same states observed one by one; the
   context does not depend on time beyond the fine clock (no time limit); the attacker's progress:
-  the cost is the passports', the rate follows the defender's gold lost (blows, a rout, a rally,
+  the cost is the passports', the rate follows the defender's gold lost (blows, a rout, a rally, a rout again counted once,
   unknown health, death and shattering), both sides see it, the defender's blows do not count.
 - `tests/tools/test_abilities.py` (numpy): reading the ability tables, passports, the cards'
   check, the saved numbers, features and slots.
@@ -317,7 +318,7 @@ An int8 export of the actor looks practical; not done yet:
 - `tests/tools/test_nn_train.py`: in the simulator the attacker's row sees `rollout.last_hit` as
   "we dealt", the defender's as "the enemy dealt", per battle, cleared on restart; both sides'
   rows see the attacker's progress as `rollout.Battles.hit_rate` / `last_hit` with `--idle-rate`
-  0.05 (blows, scratches, a rout, a rally, a unit leaving the map, restarts), and the companion,
+  0.05 (blows, scratches, a rout, a rally, a rout again counted once, a unit leaving the map, restarts), and the companion,
   given the same states as the game's rows, computes the same; training
   continues from `m20.pt` (one PPO update).
 
