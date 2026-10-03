@@ -962,6 +962,53 @@ class TestLoop:
         assert max(float(x.abs().max()) for x in steps[0]) > 1e-5
         assert all(torch.allclose(x, y, atol=1e-7) for x, y in zip(*steps))
 
+    def test_a_minibatch_in_parts_takes_the_same_step_as_whole(self):
+        # 03.10: the widened network's minibatch was halved to fit the GPU: twice the optimizer steps per update,
+        # ~4 times the KL, the run collapsed. Gradient accumulation (PPOConfig.accum) keeps the steps and the step.
+        import copy
+        actor, crit = nets()
+        env = rollout.Battles(league.layout(8, 1, {"self": 0.5, "nearest": 0.5}), MIRROR)
+        batch = rollout.collect(env, actor, crit, 3)
+        after = []
+        for accum in (1, 2, 3):
+            a, c = copy.deepcopy(actor), copy.deepcopy(crit)
+            opt = torch.optim.Adam(list(a.parameters()) + list(c.parameters()), lr=1e-3, eps=1e-5)
+            torch.manual_seed(0)
+            st = ppo.update(a, c, opt, batch, dataclasses.replace(ppo.PPOConfig(), epochs=1, minibatch=3 * env.R, accum=accum))
+            assert st["minibatches"] == 1 and all(np.isfinite(v) for v in st.values())
+            after.append([p.detach().clone() for p in list(a.parameters()) + list(c.parameters())])
+        for other in after[1:]:
+            assert all(torch.allclose(x, y, atol=1e-6) for x, y in zip(after[0], other))
+
+    def test_a_wider_network_keeps_the_minibatch_in_parts_and_its_stream_readers_take_lr_over_width(self):
+        from tools.nn.model import widen
+        from tools.nn.train import run
+        cfg = ppo.PPOConfig(minibatch=4096)
+        assert (run.sized(cfg, 22).minibatch, run.sized(cfg, 22).accum) == (4096, 1)
+        assert (run.sized(cfg, 44, width=2.0).minibatch, run.sized(cfg, 44, width=2.0).accum) == (2048, 2)
+        actor, crit = nets()
+        opt = run.optimizer(actor, crit, 1e-3, 2.0)
+        readers = widen.stream_readers(actor, widen.ACTOR) | {f"c.{n}" for n in widen.stream_readers(crit, widen.CRITIC)}
+        assert "heads.kind.weight" in readers and "memory.cell.weight_hh" in readers and "blocks.0.f1.weight" in readers
+        assert "heads.kind.bias" not in readers and "blocks.0.f2.weight" not in readers and "c.value.0.weight" in readers
+        (slow, fast) = opt.param_groups
+        assert slow["lr"] == pytest.approx(5e-4) and fast["lr"] == pytest.approx(1e-3)
+        assert len(slow["params"]) == len(readers)
+        assert len(slow["params"]) + len(fast["params"]) == len(list(actor.parameters())) + len(list(crit.parameters()))
+        assert len(run.optimizer(actor, crit, 1e-3, 1.0).param_groups) == 1
+
+    def test_the_ema_anchor_follows_the_actor_by_its_half_life(self):
+        import copy
+        from tools.nn.train import run
+        actor, _ = nets()
+        ref = copy.deepcopy(actor)
+        with torch.no_grad():
+            for p in actor.parameters():
+                p.add_(1.0)
+        before = [p.detach().clone() for p in ref.parameters()]
+        run.follow(ref, actor, 0.25)
+        assert all(torch.allclose(r, b + 0.25) for r, b in zip(ref.parameters(), before))
+
     @pytest.mark.skipif(not (checkpoint.DIR / "test5/t0_gold30/m20.pt").exists(), reason="no m20.pt (build/ is not in Git)")
     def test_training_continues_from_a_checkpoint_saved_before_the_damage_timers(self):
         from tools.nn.train import run

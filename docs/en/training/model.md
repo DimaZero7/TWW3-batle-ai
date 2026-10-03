@@ -267,6 +267,9 @@ bash tools/nn/dock.sh tools.nn.model.widen --src build/nn-train/test5/r7_lostwor
 # then: test5 --init build/nn-train/wide/w0.pt -- --critic-init build/nn-train/wide/w0_critic.pt
 ```
 
+How to train it (the whole command; why it collapsed with a halved minibatch):
+[training a widened network](training.md#training-a-widened-network).
+
 What grows k times: the token width (128 → 256), the attention heads (4 → 8; new heads beside the
 old ones), the feed-forward (512 → 1024), the GRU (128 → 256), the hidden layers of the unit,
 context and ability encoders, of the ability key and of the critic's value, and the pointers'

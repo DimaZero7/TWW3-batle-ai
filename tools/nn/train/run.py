@@ -21,6 +21,7 @@ and copies the final network to build/nn-train/latest.pt (the companion's defaul
 import argparse
 import dataclasses
 import json
+import math
 import sys
 import time
 
@@ -71,11 +72,41 @@ def networks(preset, device, start=None, critic_from=None):
 
 def sized(cfg, N, slots=22, width=1.0):
     """The PPO settings for battles of N slots: fewer decisions per minibatch for bigger battles, so a
-    minibatch holds about as many unit tokens as at 22 slots (the memory of a 16 GB card); and for a
-    wider network (width: its token width / the small one's 128) fewer by that factor: the widened
-    network (tools/nn/model/widen.py, x 2) with the small one's minibatch did not fit in 16 GB (its
-    first policy update failed, 03.10)."""
-    return dataclasses.replace(cfg, minibatch=max(256, int(cfg.minibatch * min(1.0, slots / N) / max(1.0, width))))
+    minibatch holds about as many unit tokens as at 22 slots (the memory of a 16 GB card). A wider
+    network (width: its token width / the small one's 128) keeps the minibatch and computes it in
+    ceil(width) parts (gradient accumulation): the widened network (x 2) with the small one's minibatch
+    did not fit in 16 GB, and a minibatch halved instead (03.10) doubled the optimizer's steps per update:
+    Adam's steps are about lr each, so the policy moved ~2 times as far and the KL (quadratic in the
+    step) ~4 times (the first update's KL over the whole batch 0.033 against the small network's 0.0073
+    on the same batch; with the parts 0.010) - the wide run w1 collapsed within 5 minutes."""
+    return dataclasses.replace(cfg, minibatch=max(256, int(cfg.minibatch * min(1.0, slots / N))),
+                               accum=max(1, math.ceil(width - 1e-9)))
+
+
+def optimizer(actor, critic, lr, width=1.0):
+    """Adam over the actor and the critic. In a widened network (width > 1, tools/nn/model/widen.py) the
+    weights that read the copied token stream (widen.stream_readers: fan-in x width) take lr / width:
+    every copy gets the gradient the small weight got and Adam moves each about lr, so their sum (what
+    the network computes) moved width times as far as in the small network (as muP's lr ~ 1 / fan-in)."""
+    if width <= 1.0:
+        return torch.optim.Adam(list(actor.parameters()) + list(critic.parameters()), lr=lr, eps=1e-5)
+    from tools.nn.model import widen
+    readers, rest = [], []
+    for model, spec in ((actor, widen.ACTOR), (critic, widen.CRITIC)):
+        names = widen.stream_readers(model, spec)
+        for n, p in model.named_parameters():
+            (readers if n in names else rest).append(p)
+    return torch.optim.Adam([{"params": readers, "lr": lr / width}, {"params": rest, "lr": lr}], lr=lr, eps=1e-5)
+
+
+@torch.no_grad()
+def follow(reference, actor, share):
+    """The reference moves `share` of the way to the actor (Polyak averaging of the weights: --anchor-ema)."""
+    for r, a in zip(reference.state_dict().values(), actor.state_dict().values()):
+        if r.is_floating_point():
+            r.lerp_(a, share)
+        else:
+            r.copy_(a)
 
 
 def schedule(start, end, share):
@@ -124,7 +155,8 @@ def train(args, every=None):
     cfg = ppo.PPOConfig(lr=args.lr, gamma=cadence.discount(args.gamma), lam=cadence.discount(ppo.PPOConfig.lam),
                         epochs=args.epochs, minibatch=args.minibatch,
                         entropy=args.entropy, anchor=args.anchor, adv_norm=args.adv_norm)
-    opt = torch.optim.Adam(list(actor.parameters()) + list(critic.parameters()), lr=cfg.lr, eps=1e-5)
+    width = actor.cfg.d / model_config.SMALL.d
+    opt = optimizer(actor, critic, cfg.lr, width)
     weights = reward.Weights(order_change=args.order_cost, idle=args.idle, lord=args.lord, retarget=args.retarget,
                              idle_tau_s=args.idle_tau, idle_cap=args.idle_cap, idle_pause_s=args.idle_pause,
                              idle_step=args.idle_step, idle_rate=args.idle_rate, idle_window_s=args.idle_window,
@@ -167,11 +199,11 @@ def train(args, every=None):
 
     env = rollout.Battles(lay, scenes.SCENES, device, params, randomise.Spread(), weights, seed=args.seed,
                           source=source(), cadence=cadence)
-    step_cfg = sized(cfg, env.N, width=actor.cfg.d / model_config.SMALL.d)
+    step_cfg = sized(cfg, env.N, width=width)
     log = (out / "log.jsonl").open("w", encoding="utf-8", newline="\n")
     print(f"{args.name}: battles {env.B} (learner rows {env.R}), slots {env.N}, up to {args.max_units} units a side, "
           f"steps per update {args.steps} ({args.steps * env.decision_s:g} s of battle), "
-          f"minibatch {step_cfg.minibatch} decisions, {cadence.text(params.dt)}, "
+          f"minibatch {step_cfg.minibatch} decisions in {step_cfg.accum} part(s), {cadence.text(params.dt)}, "
           f"model {args.preset} {model_policy.parameters(actor) / 1e6:.2f} M actor, limit {args.limit:.0f} s, "
           f"ppo {dataclasses.asdict(cfg)}, reward {dataclasses.asdict(weights)}, mix {mix}", flush=True)
 
@@ -203,6 +235,9 @@ def train(args, every=None):
     floor_w = None                                # the entropy floor's current weight (--entropy-target)
     paused = 0.0
     rolls, rolled_at = 0, 0.0                     # --anchor-roll: renewals of the reference, training s of the last
+    followed_at = 0.0                             # --anchor-ema: training s of the reference's last step
+    if args.anchor_ema and args.anchor_roll:
+        raise SystemExit("--anchor-ema and --anchor-roll: one of them")
     next_mark = every[0] if every else None
     def share_done():
         """The share of the run done: of the updates when --updates is set, else of the minutes."""
@@ -238,6 +273,12 @@ def train(args, every=None):
         # --anchor-roll: every that many seconds of training the reference becomes the current actor (a
         # leash that moves with the network: it bounds the drift within a window, not the whole run).
         trained_s = time.time() - t0 - paused
+        # --anchor-ema: after every update the reference moves towards the actor, by the share that halves
+        # their distance in --anchor-ema seconds of training (a slow leash: a sudden collapse moves it a
+        # little and the KL pulls back; steady progress it follows)
+        if args.anchor_ema and reference is not None:
+            follow(reference, actor, 1.0 - 0.5 ** ((trained_s - followed_at) / args.anchor_ema))
+            followed_at = trained_s
         if args.anchor_roll and reference is not None and trained_s - rolled_at >= args.anchor_roll:
             reference.load_state_dict(actor.state_dict())
             rolls, rolled_at = rolls + 1, trained_s
@@ -404,6 +445,9 @@ def parser():
     ap.add_argument("--anchor-roll", type=float, default=0.0,
                     help="seconds of training between renewals of the KL reference (--reference or --init): it "
                          "becomes the current actor (a rolling anchor; 0: fixed for the run)")
+    ap.add_argument("--anchor-ema", type=float, default=0.0,
+                    help="> 0: after every update the reference moves towards the actor (Polyak averaging of the "
+                         "weights) with this half-life in seconds of training (0: off; not with --anchor-roll)")
     ap.add_argument("--critic-init", help="take the critic from this checkpoint (default: --init's own)")
     ap.add_argument("--adv-norm", default=ppo.PPOConfig.adv_norm, choices=("batch", "role"),
                     help="normalise the side's advantage over the minibatch or over each role apart")

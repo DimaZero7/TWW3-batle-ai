@@ -28,7 +28,9 @@ How (Net2WiderNet, Chen et al., 2016, with exact copies):
 * Pointers (attack target, ability): q.k / sqrt(width). The new query dims are random, the new key dims
   0 (q.k unchanged) and the old query is scaled by sqrt(k) for the wider sqrt(width).
 
-The optimizer is not part of a checkpoint: a run (tools/nn/train/run.py) starts its own Adam.
+The optimizer is not part of a checkpoint: a run (tools/nn/train/run.py) starts its own Adam, with the
+small network's optimizer steps per update (its minibatch in parts) and lr / k on the stream's readers
+(stream_readers; docs/en/training/training.md "Training a widened network").
 """
 import argparse
 import contextlib
@@ -74,6 +76,25 @@ CRITIC = {"encoder.unit.0": ("hid", "raw"), "encoder.unit.2": ("res", "hid"),
           "encoder.ctx.0": ("hid", "raw"), "encoder.ctx.2": ("res", "hid"),
           "value.0": ("hid", "res3"), "value.2": ("raw", "hid")}
 BLOCK = {"qkv": ("qkv", "res"), "out": ("res", "hid"), "f1": ("hid", "res"), "f2": ("res", "hid")}
+
+
+def stream_readers(model, spec):
+    """Names of the weights that read the copied stream (columns "res"/"res3" above: attention q/k/v,
+    feed-forward in, the GRU, the heads, the critic's value): their fan-in is k times the small one's.
+    Each copy gets the gradient the small weight got, so Adam moves their sum k times as far
+    (run.py gives them the learning rate / k: the first update's KL 0.0148 -> 0.0103, the small 0.0082)."""
+    names = set()
+    for name, _ in model.named_parameters():
+        module, _, param = name.rpartition(".")
+        if param in ("weight_ih", "weight_hh"):
+            rule = spec.get(name)
+        elif param == "weight":
+            rule = spec.get(module) or (BLOCK.get(module.split(".")[-1]) if module.startswith("blocks.") else None)
+        else:
+            rule = None
+        if rule and rule[1] in ("res", "res3"):
+            names.add(name)
+    return names
 
 
 class Widener:

@@ -34,7 +34,9 @@ class PPOConfig:
     lam: float = 0.95
     clip: float = 0.2
     epochs: int = 1
-    minibatch: int = 4096      # decisions per minibatch (whole chunks: minibatch // T rows); bounds GPU memory
+    minibatch: int = 4096      # decisions per minibatch (whole chunks: minibatch // T rows): one optimizer step
+    accum: int = 1             # ... computed in this many parts whose gradients add up (gradient accumulation):
+    #                            the GPU memory of minibatch / accum, the optimizer's steps those of minibatch
     lr: float = 1e-4
     target_kl: float = 0.05    # stop the epochs early when the mean per-unit KL passes this
     entropy: float = 0.01      # on the order kind's entropy (at most log 5 = 1.6)
@@ -195,42 +197,53 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
     for _ in range(cfg.epochs):
         order = torch.randperm(R, device=adv.device)
         for idx in order.split(max(1, cfg.minibatch // T)):
-            obs = full_obs({k: v[:, idx] for k, v in batch["obs"].items()}, batch.get("abil_static"))
-            cobs = {k: _rows(v, idx) for k, v in batch["critic_obs"].items()}
-            act = hd.Action(*(_rows(getattr(batch["action"], k), idx) for k in kinds))
-            a = normalise(_rows(adv, idx), _rows(batch["attacks"], idx) if cfg.adv_norm == "role"
-                          and batch.get("attacks") is not None else None)
-            # The critic's warm-up (train_policy False): the actor runs without a graph, for the stats
-            # only; with one its activations took ~3.5 GB more at the peak (13.5 GB on a 16 GB card).
-            with torch.set_grad_enabled(train_policy):
-                logits, _ = actor.sequence(obs, batch["h0"][idx], batch["reset"][:, idx])
-                logits = {k: v.reshape(-1, *v.shape[2:]) for k, v in logits.items()}
-                ctrl = obs["ctrl"].reshape(-1, obs["ctrl"].shape[-1])
-                lp, ent = hd.log_prob(logits, act, ctrl)
-                old = _rows(batch["lp"], idx)
-                pl, clipped = policy_loss(lp, old, a, ctrl, cfg.clip)
-                entropy = masked_mean(kind_entropy(logits), ctrl)
-                if reference is not None and cfg.anchor:
-                    with torch.no_grad():
-                        ref, _ = reference.sequence(obs, batch["h0"][idx], batch["reset"][:, idx])
-                        ref = {k: v.reshape(-1, *v.shape[2:]) for k, v in ref.items()}
-                    anchored = anchor_kl(logits, ref, ctrl)
-                else:
-                    anchored = torch.zeros((), device=adv.device)
-            vl = ((critic(cobs) - _rows(ret, idx)) ** 2).mean()
-            policy_part = pl - cfg.entropy * entropy + cfg.anchor * anchored
-            loss = cfg.value * vl + (policy_part if train_policy else 0.0)
+            # the advantage normalised over the whole minibatch, then its rows in cfg.accum parts: the
+            # parts' gradients add up to the minibatch's (each part's loss x its share of the rows)
+            a_all = normalise(_rows(adv, idx), _rows(batch["attacks"], idx) if cfg.adv_norm == "role"
+                              and batch.get("attacks") is not None else None).reshape(T, len(idx))
+            parts = torch.arange(len(idx), device=idx.device).tensor_split(max(1, min(cfg.accum, len(idx))))
             opt.zero_grad(set_to_none=True)
-            loss.backward()
+            step = dict.fromkeys(("policy_loss", "value_loss", "entropy", "kl", "clip", "entropy_all", "anchor_kl"), 0.0)
+            for part in parts:
+                share = len(part) / len(idx)
+                pidx = idx[part]
+                obs = full_obs({k: v[:, pidx] for k, v in batch["obs"].items()}, batch.get("abil_static"))
+                cobs = {k: _rows(v, pidx) for k, v in batch["critic_obs"].items()}
+                act = hd.Action(*(_rows(getattr(batch["action"], k), pidx) for k in kinds))
+                a = a_all[:, part].reshape(-1)
+                # The critic's warm-up (train_policy False): the actor runs without a graph, for the stats
+                # only; with one its activations took ~3.5 GB more at the peak (13.5 GB on a 16 GB card).
+                with torch.set_grad_enabled(train_policy):
+                    logits, _ = actor.sequence(obs, batch["h0"][pidx], batch["reset"][:, pidx])
+                    logits = {k: v.reshape(-1, *v.shape[2:]) for k, v in logits.items()}
+                    ctrl = obs["ctrl"].reshape(-1, obs["ctrl"].shape[-1])
+                    lp, ent = hd.log_prob(logits, act, ctrl)
+                    old = _rows(batch["lp"], pidx)
+                    pl, clipped = policy_loss(lp, old, a, ctrl, cfg.clip)
+                    entropy = masked_mean(kind_entropy(logits), ctrl)
+                    if reference is not None and cfg.anchor:
+                        with torch.no_grad():
+                            ref, _ = reference.sequence(obs, batch["h0"][pidx], batch["reset"][:, pidx])
+                            ref = {k: v.reshape(-1, *v.shape[2:]) for k, v in ref.items()}
+                        anchored = anchor_kl(logits, ref, ctrl)
+                    else:
+                        anchored = torch.zeros((), device=adv.device)
+                vl = ((critic(cobs) - _rows(ret, pidx)) ** 2).mean()
+                policy_part = pl - cfg.entropy * entropy + cfg.anchor * anchored
+                loss = cfg.value * vl + (policy_part if train_policy else 0.0)
+                (loss * share).backward()
+                with torch.no_grad():
+                    kl = masked_mean(old - lp, ctrl)
+                for k, x in (("policy_loss", pl), ("value_loss", vl), ("entropy", entropy), ("kl", kl),
+                             ("clip", clipped), ("entropy_all", masked_mean(ent, ctrl)), ("anchor_kl", anchored)):
+                    step[k] += float(x.detach()) * share
             grad_norm = torch.nn.utils.clip_grad_norm_(actor_params, cfg.max_grad)
             grad_norm_critic = torch.nn.utils.clip_grad_norm_(critic_params, cfg.max_grad)
             opt.step()
-            with torch.no_grad():
-                kl = masked_mean(old - lp, ctrl)
-            for k, x in (("policy_loss", pl), ("value_loss", vl), ("entropy", entropy), ("kl", kl), ("clip", clipped),
-                         ("entropy_all", masked_mean(ent, ctrl)), ("anchor_kl", anchored), ("grad_norm", grad_norm),
-                         ("grad_norm_critic", grad_norm_critic)):
-                stats[k] += float(x.detach())
+            step["grad_norm"], step["grad_norm_critic"] = float(grad_norm), float(grad_norm_critic)
+            kl = step["kl"]
+            for k, x in step.items():
+                stats[k] += x
             n += 1
             if train_policy and cfg.target_kl and float(kl) > cfg.target_kl:
                 stop = True

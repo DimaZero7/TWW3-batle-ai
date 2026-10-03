@@ -36,7 +36,7 @@ The first steps compile for 1–3 minutes (seconds once a run of the same shapes
 | cadence | `--decide-s` (1.0 s of battle between decisions), `--order-latency` (0.36 s): [decisions](#decisions) |
 | PPO | `--lr` (1e-4), `--gamma` (0.9997 per 0.5 s), `--epochs` (1), `--minibatch` (4096 decisions), `--adv-norm` (`batch` or `role`), `--critic-warmup` (0 updates that train the critic alone), `--critic-init` (the critic from another checkpoint) |
 | exploration | `--entropy` (0.01) and `--entropy-end` (linear over the run), `--entropy-target` (0: off), `--entropy-max` (0.1), `--entropy-rate` (1.25) |
-| leash | `--anchor` (0: KL weight to the reference) and `--anchor-end`, `--reference` (default `--init`), `--anchor-roll` (0 s: seconds of training between renewals of the reference) |
+| leash | `--anchor` (0: KL weight to the reference) and `--anchor-end`, `--reference` (default `--init`), `--anchor-roll` (0 s: seconds of training between renewals of the reference), `--anchor-ema` (0 s: instead, the reference follows the actor with this half-life) |
 | reward | `--gold` (1.0), `--rout-share` (0.5), `--lord` (0.3), `--lord-rout` (0), `--idle` (2e-4), `--idle-tau` (150 s), `--idle-pause` (30 s), `--idle-step` (0.5), `--idle-cap` (20), `--idle-rate` (0), `--idle-window` (30 s), `--order-cost` (0.001), `--retarget` (0.003): [reward](#reward) |
 | opponents | `--mix` (json shares), `--pool` (8 past versions), `--pool-extra` (more checkpoints for the pool), `--eval-past`, `--eval-generated` (512) |
 | drills | `--drills` (0: share of the battles), `--drill-weights` (json; default the `READY` drills equally), `--drill-bank` (256 per drill): [drills](#drills) |
@@ -61,6 +61,58 @@ advantages normalised per role (the attacker's, wider with its idle cost, no lon
 defender's); the progress clock at 0.05 of the budget a minute (the network sees it:
 [model](model.md)); a shattered lord counted as dead; drills at 10 % (30 % made the small
 network forget: [drills](#drills)).
+
+### Training a widened network
+
+A network widened by `tools/nn/model/widen.py` ([widening](model.md#widening)) continues the chain
+with the same command and options; only `--init`, `--critic-init` and `--reference` are the wide
+files:
+
+```bash
+DOCK_NAME=orch-w2 bash tools/nn/dock.sh tools.nn.train.test5 --label w2_wide --init build/nn-train/wide/w0.pt \
+  --updates 0 --minutes 25 --every 5 -- \
+  --critic-init build/nn-train/wide/w0_critic.pt --critic-warmup 3 \
+  --reference build/nn-train/wide/w0.pt --anchor 0.03 --anchor-end 0.03 --anchor-roll 600 --adv-norm role \
+  --idle-rate 0.05 --lord-rout 0.5 --entropy-target 0.05 --entropy-max 0.03 \
+  --drills 0.1 --drill-weights '{"counter": 1}' \
+  --mix '{"self": 0.05, "past": 0.1, "nearest": 0.35, "hold_shoot": 0.15, "hold": 0.05, "ai_like": 0.3}'
+```
+
+`run.py` sees the width (the token width / the small network's 128) and does two things so that an
+update moves the wide network as far as the small one would:
+
+- **The same optimizer steps per update.** The wide network's minibatch does not fit in 16 GB, so
+  it is computed in `ceil(width)` parts whose gradients add up (gradient accumulation,
+  `PPOConfig.accum`; `run.sized`); the minibatch and the number of Adam steps stay the small
+  network's (31 an update at 40 slots).
+- **The learning rate / width on the weights that read the copied stream** (`widen.stream_readers`:
+  attention q/k/v, feed-forward in, the GRU, the heads, the critic's value). Each copy gets the
+  gradient the small weight got and Adam moves every copy about lr, so their sum, what the network
+  computes, moved width times as far (as muP's learning rate ~ 1 / fan-in).
+
+Why (03.10). The first wide run (`w1_wide`, before the fix) halved the minibatch to fit the memory:
+63 Adam steps an update instead of 31. Adam's step is about lr whatever the gradient, so the policy
+moved ~2 times as far and the KL, quadratic in the step, ~4 times. On the same batch (its first
+policy update, measured over all its rows): the small network 0.0073, the wide one with the halved
+minibatch 0.033 (the target pointer 0.027 against 0.003), with accumulation 0.010, with accumulation
+and the readers at lr / 2 0.0093; after a second pass 0.0082 / 0.016 / 0.015 / 0.010. In the run the
+per-update KL was 3 times the small network's while its logged mean (over the minibatches) looked
+normal, the KL stop (0.05) cut 30-90 % of the updates, the KL to the anchor climbed to 0.08 in 25
+updates (the small network's 0.02), and the rating fell +0.05 -> -2.48 in 5 minutes, before the anchor
+first rolled; the roll at 10 minutes then tied the leash to the collapsed policy. With the fix, under
+the same command: 31 steps every update, no KL stop, KL 0.003 an update and to the anchor at most
+0.033 (as the small network's: `wfix_small5`, +0.05 -> +0.08 in 5 minutes), the rating +0.05 -> +0.02
+(5 min) -> +0.18 ± 0.11 (10 min), pair gold against `ai_like` +0.018 -> +0.032 (`wfix_wide10`). The wide
+network trains ~half as fast (4 900 against 9 000 s of battle a second).
+
+**A slow leash, `--anchor-ema S`** (instead of `--anchor-roll`): after every update the reference
+moves towards the actor by the share that halves their distance in S seconds of training (Polyak
+averaging of the weights; `run.follow`), so a sudden collapse moves the anchor only a little while
+steady progress is followed. Measured once on the wide network, the same command with
+`--anchor-ema 450`: the rating +0.05 -> +0.12 -> +0.05 ± 0.11 (5, 10 min), KL to the anchor at most
+0.029 (`wfix_ema10`) against +0.02 -> +0.18 with the fixed anchor: both stable, the difference
+within the noise; the roll it replaces comes only at minute 10, so a longer pair of runs is needed to
+choose. The chain keeps `--anchor-roll 600`.
 
 ## What it writes
 
@@ -298,8 +350,8 @@ side share the side's advantage; the critic sees the whole field (and is never s
 | discount γ | 0.9997 per 0.5 s (0.99940 per 1 s decision) | a horizon of ~28 min: a win 10 minutes away still counts 0.7 |
 | GAE λ | 0.95 per 0.5 s (0.9025 per decision) | the usual |
 | clip | 0.2 | the usual |
-| learning rate | 1e-4 (`test5` and the chain: 1.5e-4), Adam (eps 1e-5) | |
-| epochs, minibatch | 1, 4096 decisions of whole chunks (fewer for battles of more than 22 slots: `run.sized`) | the update costs more than the battles; the memory of a 16 GB card |
+| learning rate | 1e-4 (`test5` and the chain: 1.5e-4), Adam (eps 1e-5); in a widened network lr / width on the weights that read the copied stream (`run.optimizer`) | [a widened network](#training-a-widened-network) |
+| epochs, minibatch | 1, 4096 decisions of whole chunks (fewer for battles of more than 22 slots: `run.sized`); a widened network computes it in parts (`accum`) | the update costs more than the battles; the memory of a 16 GB card; [a widened network](#training-a-widened-network) |
 | stop at KL | 0.05 per unit | a guard against a too large step |
 | entropy | on the order kind only; `--entropy` → `--entropy-end` linearly; with `--entropy-target` a floor: the weight × `--entropy-rate` every update while the kind's entropy is below the target, back down to the schedule above it, at most `--entropy-max` | a bonus on the move point's 128 bins would pay for moving |
 | KL to a reference | `--anchor` → `--anchor-end` on the order kind and target; the reference is `--reference` (default `--init`); `--anchor-roll` S: every S seconds of training the reference becomes the current actor (`anchor_rolls` in the log) | a leash that bounds drift within a window, not over the whole run |
@@ -553,9 +605,10 @@ on (`allow_tf32`).
 
 ## What is missing
 
-- A wider network: the `small` preset (0.84 M) shows interference (new skills at the cost of old).
-  The plan is ×2 by weight surgery (new units with zero outgoing weights: the same output at the
-  start) and training on with the usual self-anchor.
+- A wider network that beats the small one: the `small` preset (0.84 M) shows interference (new
+  skills at the cost of old). The ×2 network (`wide`, weight surgery: [widening](model.md#widening))
+  trains stably since 03.10 ([a widened network](#training-a-widened-network)); whether it learns
+  more than the small one is for a longer chain to show.
 - Unit-anchored orders (attack enemy N from the flank, stand behind own unit M, cover its flank):
   the move point is a 16 × 8 grid relative to the enemy direction, so flanking a given enemy needs
   the network to compute the cell itself.
