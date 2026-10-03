@@ -34,6 +34,7 @@ from tools.nn.model import policy as model_policy
 from tools.nn.train import cadence as cad
 from tools.nn.train import checkpoint, drills, evaluate, league, matchups, ppo, randomise, reward, rollout, scenes
 from tools.nn.train.drills import source as drill_source
+from tools.nn.train.drills import teach as drill_teach
 
 SCRIPTED = ("nearest", "hold_shoot", "hold", "ai_like")
 
@@ -184,6 +185,12 @@ def train(args, every=None):
         shares = json.loads(args.drill_weights) if args.drill_weights else {n: 1.0 for n in drills.READY}
         mix = league.with_drills(mix, args.drills, shares)
     lay = league.layout(args.battles, len(scenes.SCENES), mix, scene_attacker=scenes.attackers())
+    # the drills' teacher (drills/teach.py): {drill: the imitation term's starting weight}, annealed to 0
+    teach0 = json.loads(args.drill_teach) if args.drill_teach else {}
+    played = set(np.unique(lay.opponent).tolist())
+    absent = [n for n in teach0 if n not in drills.NAMES or league.CODE[drills.opponent(n)] not in played]
+    if absent:
+        raise SystemExit(f"--drill-teach {absent}: not drills the run plays (--drills, --drill-weights)")
     params = rollout.params_with_limit(args.limit)
     rng = np.random.default_rng(args.seed)
 
@@ -198,14 +205,16 @@ def train(args, every=None):
                                 small=small_arg())
 
     env = rollout.Battles(lay, scenes.SCENES, device, params, randomise.Spread(), weights, seed=args.seed,
-                          source=source(), cadence=cadence)
+                          source=source(), cadence=cadence,
+                          teach={n: d.skilled for n, d in drills.load(list(teach0)).items()} if teach0 else None)
     step_cfg = sized(cfg, env.N, width=width)
     log = (out / "log.jsonl").open("w", encoding="utf-8", newline="\n")
     print(f"{args.name}: battles {env.B} (learner rows {env.R}), slots {env.N}, up to {args.max_units} units a side, "
           f"steps per update {args.steps} ({args.steps * env.decision_s:g} s of battle), "
           f"minibatch {step_cfg.minibatch} decisions in {step_cfg.accum} part(s), {cadence.text(params.dt)}, "
           f"model {args.preset} {model_policy.parameters(actor) / 1e6:.2f} M actor, limit {args.limit:.0f} s, "
-          f"ppo {dataclasses.asdict(cfg)}, reward {dataclasses.asdict(weights)}, mix {mix}", flush=True)
+          f"ppo {dataclasses.asdict(cfg)}, reward {dataclasses.asdict(weights)}, mix {mix}"
+          + (f", drill teacher {teach0} -> 0 over {args.drill_teach_minutes:g} min" if teach0 else ""), flush=True)
 
     def pick_past():
         nonlocal past, past_path
@@ -262,7 +271,9 @@ def train(args, every=None):
         u_cfg = dataclasses.replace(step_cfg, entropy=floor_w if args.entropy_target else scheduled,
                                     anchor=schedule(args.anchor, anchor_end, done_share))
         trains = update >= args.critic_warmup
-        st = ppo.update(actor, critic, opt, batch, u_cfg, train_policy=trains, reference=reference)
+        teach_w = drill_teach.weights(teach0, args.drill_teach_minutes, (time.time() - t0 - paused) / 60)
+        st = ppo.update(actor, critic, opt, batch, u_cfg, train_policy=trains, reference=reference, teach=teach_w)
+        taught = st.pop("teach", None)
         if start is not None:
             st["start_kl"] = ppo.distance(actor, start, batch, u_cfg.minibatch)
         if args.entropy_target and trains:
@@ -305,6 +316,8 @@ def train(args, every=None):
                "reward_parts": {r: {k: round(v, 4) for k, v in p.items()} for r, p in env.reward_parts().items()},
                "games": {k: g for k, (g, _, _) in stats.items()}, "win_rate": rates(stats),
                "seconds_per_battle": {k: round(s) for k, (_, _, s) in stats.items()}, "past": str(past_path.name)}
+        if taught:
+            row["teach"] = taught
         log.write(json.dumps(row) + "\n")
         log.flush()
         if update % args.print_every == 0:
@@ -318,6 +331,11 @@ def train(args, every=None):
                   f"adv std attack {st.get('adv_std_attack', 0):.3f} defend {st.get('adv_std_defend', 0):.3f}; "
                   "reward a minute " + "; ".join(f"{r} " + " ".join(f"{k} {v:+.3f}" for k, v in p.items())
                                                  for r, p in row["reward_parts"].items()), flush=True)
+            if taught:
+                active = (lambda v: "-" if v["agree_active"] is None else f"{v['agree_active']:.3f}")
+                print("      teacher " + "; ".join(f"{k} weight {v['weight']:.3f} ce {v['ce']:.3f} agree {v['agree']:.3f} "
+                                                  f"(kind {v['agree_kind']:.3f}, active {active(v)} of {v['active']}; "
+                                                  f"{v['units']} unit-decisions)" for k, v in taught.items()), flush=True)
         if update % args.snapshot_every == 0:
             meta = {"update": update, "battles": env.battles, "seconds": row["seconds"], "run": args.name,
                     "cadence": cadence.meta()}
@@ -479,6 +497,12 @@ def parser():
     ap.add_argument("--drill-weights", help="the drills' shares of --drills as json, e.g. {\"pincer\": 1, \"kiting\": 2} "
                                             "(default: the verified drills, drills.READY, equally)")
     ap.add_argument("--drill-bank", type=int, default=256, help="battles of each drill ready at once (renewed with the bank)")
+    ap.add_argument("--drill-teach", help="the drills' teacher as json {drill: weight}, e.g. {\"kiting\": 0.5}: in that "
+                                          "drill's battles + weight x cross-entropy of the policy against the drill's "
+                                          "skilled script (labels only; tools/nn/train/drills/teach.py), the weight "
+                                          "going linearly to 0 over --drill-teach-minutes")
+    ap.add_argument("--drill-teach-minutes", type=float, default=10.0,
+                    help="minutes of training over which the teacher's weight goes to 0")
     ap.add_argument("--bank-refresh", type=float, default=5.0, help="minutes between new banks of armies")
     ap.add_argument("--eval-generated", type=int, default=512, help="random battles per opponent (EVAL_SEEDS)")
     ap.add_argument("--seed", type=int, default=0)

@@ -18,8 +18,8 @@ network sees no time limit).
 
 The drill's enemy is a training opponent (tools/nn/train/league.py "drill_<name>"): the battles
 of its rows come from the drill's bank (Source below). Drills only change which battles the
-network plays; no imitation term (a later, annealed one per drill could use `skilled` as its
-teacher).
+network plays; only a drill given to the teacher (drills/teach.py, run.py --drill-teach) also adds an
+annealed imitation term of its `skilled` script.
 """
 import importlib
 import math

@@ -39,7 +39,7 @@ The first steps compile for 1–3 minutes (seconds once a run of the same shapes
 | leash | `--anchor` (0: KL weight to the reference) and `--anchor-end`, `--reference` (default `--init`), `--anchor-roll` (0 s: seconds of training between renewals of the reference), `--anchor-ema` (0 s: instead, the reference follows the actor with this half-life) |
 | reward | `--gold` (1.0), `--rout-share` (0.5), `--lord` (0.3), `--lord-rout` (0), `--idle` (2e-4), `--idle-tau` (150 s), `--idle-pause` (30 s), `--idle-step` (0.5), `--idle-cap` (20), `--idle-rate` (0), `--idle-window` (30 s), `--order-cost` (0.001), `--retarget` (0.003): [reward](#reward) |
 | opponents | `--mix` (json shares), `--pool` (8 past versions), `--pool-extra` (more checkpoints for the pool), `--eval-past`, `--eval-generated` (512) |
-| drills | `--drills` (0: share of the battles), `--drill-weights` (json; default the `READY` drills equally), `--drill-bank` (256 per drill): [drills](#drills) |
+| drills | `--drills` (0: share of the battles), `--drill-weights` (json; default the `READY` drills equally), `--drill-bank` (256 per drill), `--drill-teach` (json {drill: weight}: the teacher, off by default), `--drill-teach-minutes` (10): [drills](#drills) |
 
 ### The chain's settings
 
@@ -393,8 +393,8 @@ condition — and every battle inside it is generated from a seed: random roster
 satisfy the condition, sizes, distances, the place and bearing of the whole battle on the map
 (within 700 m of the centre), and which side we play (half side 1, half side 2). The drill's enemy
 is a script (a league opponent `drill_<name>`); the network plays it on that drill's battles only.
-Drills change *which battles* the network plays: there is no imitation term. Each drill keeps a
-`skilled` script, so an annealed imitation term per drill could use it as the teacher.
+Drills change *which battles* the network plays; only a drill given to the teacher (below,
+`--drill-teach`) also adds an annealed imitation term of its `skilled` script.
 
 Every drill battle runs under the standard battle limit, as every training battle: the network sees
 no time limit, so a drill must be won or lost by the fight, not by the clock.
@@ -431,6 +431,28 @@ with it the network learned the counter-pick (drill win 0.40 → 0.65–0.73, ti
 target 0.60 → 0.72, first correct order 44 → 26–40 s). At 30 % the same skill came at a cost:
 capacity verdict "widen-candidate", 17 older numbers dropped beyond noise, the overall rating
 −0.41 → −0.60.
+
+**Teacher** (`drills/teach.py`; `--drill-teach '{"kiting": 0.5}' --drill-teach-minutes 10`): an
+optional imitation term, only for a drill PPO does not find on its own, annealed to zero so it is a
+hint, not a leash. In the battles of a taught drill the network plays as always; the drill's
+`skilled` script does not act, it only labels: at every decision the rollout runs it on the same state
+and maps its orders for our units to the network's action — the order kind; the move point as the
+bin whose point (the unit's position + the bin's offset) is nearest the script's; the attack target as
+the pointer to the same slot; run. PPO's loss gets λ(t) × the cross-entropy of the policy against the
+label (the kind, the point for move / withdraw, the target for attack, run for move / attack; no
+ability) on those units only (they take orders, the battle runs, an attack's target may be attacked
+now), λ going linearly from the given value to 0 over `--drill-teach-minutes` of training. A drill
+the run does not play (`--drills`, `--drill-weights`) is refused. Logged per drill and update
+(`log.jsonl` "teach", a "teacher" line under every printed update): the weight, the term's
+cross-entropy, the agreement (the policy's most likely action = the label), on the kind alone and on
+the active labels alone (any kind but hold: for kiting the run-back, which the many hold labels of the
+approach would hide), and the labelled unit-decisions; `test5` puts the same per evaluation point in a
+"teacher" block (mean weight and cross-entropy, agreement first / last update, on the kind, on the
+active labels). Checks (`tests/tools/test_nn_drill_teach.py`): on kiting states the labels decode
+back to the script's orders (the kind, run, the move point to the nearest bin's, within 0.35 of the
+distance; the chasers' attack orders to the same slot), only the taught drill's rows are labelled, and
+pure imitation on kiting battles for a short CPU run raises the agreement on new rollouts from 0.00 to
+0.54 (on the kind 0.19 → 0.87, on the run-back 0.00 → 0.45).
 
 **Drill metrics** (`drills/metrics.py`): per battle, over our standing units' seconds, the share
 attacking the correct target / a bad one (its hard counter) / another enemy, the other order kinds,
@@ -789,5 +811,5 @@ opponents in one batch); `test5`'s report, trend, liveliness and faction blocks,
 their cache, the version hash, a shrunk batch playing its battles as the whole one does.
 `tests/tools/test_nn_skill.py`, `test_nn_capacity.py`, `test_nn_matchups.py` (numpy): the rating,
 pairs, margins, pair gold, forgetting and the verdict, matchups. `tests/tools/test_nn_cadence.py`:
-the cadence. `tests/tools/test_nn_drills.py` and `test_nn_drill_*.py`: the drill framework, frames,
+the cadence. `tests/tools/test_nn_drills.py` and `test_nn_drill_*.py`: the drill framework, the teacher, frames,
 scripts and metrics. `tests/tools/test_nn_gate.py`: the gate's pairs and liveliness from recordings.

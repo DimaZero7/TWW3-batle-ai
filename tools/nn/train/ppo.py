@@ -16,12 +16,16 @@
 * The memory (GRU) is trained through time: a minibatch is a set of whole chunks (T decisions of
   some battles); the actor runs its memory through each chunk from the memory stored when the
   chunk began, emptied where a new battle begins (recurrent PPO, as R2D2's stored state).
+* The drills' teacher (update's teach=, run.py --drill-teach; tools/nn/train/drills/teach.py): with
+  labels in the batch, + weight x the cross-entropy of the policy against the drill's skilled script on
+  the labelled units of that drill's battles; its term and the agreement are logged per drill.
 """
 from dataclasses import dataclass
 
 import torch
 
 from tools.nn.model import heads as hd
+from tools.nn.train.drills import teach as drill_teach
 from tools.nn.train.rollout import full_obs
 
 
@@ -169,12 +173,14 @@ def critic_stats(batch, adv, ret):
     return out
 
 
-def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, reference=None):
+def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, reference=None, teach=None):
     """Some epochs of minibatch updates on one rollout (batch from rollout.collect). -> stats.
     train_policy False: the critic only (a warm-up for a critic that starts from nothing while the
     actor already plays: a checkpoint saved without one). reference: a frozen actor (e.g. the one the
     run started from) the policy is held near by cfg.anchor x KL, so PPO's noisy steps do not wash out
-    what it started with while it looks for better.
+    what it started with while it looks for better. teach: {drill: weight now} of the imitation term
+    (drills/teach.py) on the batch's labels (batch["teach"]); its stats (out["teach"]) whenever the
+    batch has labels.
 
     A minibatch is a set of learner rows with their whole chunk of T decisions: the actor runs its
     memory through the chunk from the memory the chunk began with (Actor.sequence)."""
@@ -194,6 +200,8 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
     actor.train()
     critic.train()
     kinds = ("kind", "point", "target", "run") + (("ability",) if batch["action"].ability is not None else ())
+    taught = batch.get("teach")
+    teach_acc = {n: [0.0] * 6 for n in taught["names"]} if taught else {}
     for _ in range(cfg.epochs):
         order = torch.randperm(R, device=adv.device)
         for idx in order.split(max(1, cfg.minibatch // T)):
@@ -228,8 +236,15 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                         anchored = anchor_kl(logits, ref, ctrl)
                     else:
                         anchored = torch.zeros((), device=adv.device)
+                    imitation = torch.zeros((), device=adv.device)
+                    if taught:
+                        label = hd.Action(*(_rows(getattr(taught["action"], k), pidx) for k in ("kind", "point", "target", "run")))
+                        imitation, sums = drill_teach.terms(logits, label, _rows(taught["valid"], pidx),
+                                                            _rows(taught["drill"], pidx), taught["names"], teach)
+                        for name, v in sums.items():
+                            teach_acc[name] = [x + y for x, y in zip(teach_acc[name], v)]
                 vl = ((critic(cobs) - _rows(ret, pidx)) ** 2).mean()
-                policy_part = pl - cfg.entropy * entropy + cfg.anchor * anchored
+                policy_part = pl - cfg.entropy * entropy + cfg.anchor * anchored + imitation
                 loss = cfg.value * vl + (policy_part if train_policy else 0.0)
                 (loss * share).backward()
                 with torch.no_grad():
@@ -254,6 +269,8 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
     critic.eval()
     out = {k: v / max(1, n) for k, v in stats.items()}
     out["minibatches"] = n
+    if taught:
+        out["teach"] = drill_teach.summary(teach_acc, teach)
     out["reward"] = float(batch["reward"].sum(0).mean())
     out["value_mean"] = float(batch["value"].mean())
     out["return_mean"] = float(ret.mean())

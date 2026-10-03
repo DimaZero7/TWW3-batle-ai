@@ -28,6 +28,10 @@ a test on a busy GPU takes longer but learns as much; --minutes only caps the ti
    (tools/nn/train/behaviour.py).
 --before PATH reuses a "before" evaluation (a before.json of the same --init and code).
 
+With the drills' teacher (`-- --drill-teach '{"kiting": 0.5}'`, run.py) a "teacher" block per taught
+drill from the training log: the imitation weight, its cross-entropy and the agreement (the policy's
+most likely action = the skilled script's label) over the updates since the last point.
+
 Two more blocks (measured only): "liveliness" per opponent and role (order changes, attack-target
 switches, A->B->A flips, move-point jitter, twitching units out of melee, the units' own target
 switches; tools/nn/train/behaviour.py), and "capacity and forgetting" (tools/nn/train/capacity.py:
@@ -131,6 +135,55 @@ def distance(run_dir, since, until):
             "updates": [rows[0]["update"], rows[-1]["update"]]}
 
 
+def teacher(run_dir, since, until):
+    """The drills' teacher over the training updates (since, until] of a run (run.py's log.jsonl "teach",
+    drills/teach.py): {drill: {weight (mean), ce (mean), agree (mean, first, last), agree_kind (mean),
+    agree_active (over the active labels of all the updates: any kind but hold; None without), updates}};
+    None without a log or a teacher."""
+    path = Path(run_dir) / "log.jsonl"
+    if not path.exists():
+        return None
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    rows = [r for r in rows if since < r.get("update", 0) <= until and r.get("teach")]
+    if not rows:
+        return None
+    out = {}
+    for name in dict.fromkeys(n for r in rows for n in r["teach"]):
+        xs = [r["teach"][name] for r in rows if name in r["teach"] and r["teach"][name].get("units")]
+        if not xs:
+            continue
+        mean = (lambda k: round(sum(x[k] for x in xs) / len(xs), 4))
+        act = sum(x.get("active", 0) for x in xs)
+        hit = sum((x.get("agree_active") or 0.0) * x.get("active", 0) for x in xs)
+        out[name] = {"weight": mean("weight"), "ce": mean("ce"), "agree": mean("agree"),
+                     "agree_first": xs[0]["agree"], "agree_last": xs[-1]["agree"], "agree_kind": mean("agree_kind"),
+                     "agree_active": round(hit / act, 4) if act else None, "updates": len(xs)}
+    return out or None
+
+
+def teach_block(points, heads, join=None):
+    """The teacher block (teacher() per drill) over metrics() points: a column per point, or one column
+    joined by `join`; [] when no point has it."""
+    names = list(dict.fromkeys(n for p in points for n in (p.get("teach") or {})))
+    if not names:
+        return []
+    f = (lambda fmt, v: "-" if v is None else fmt.format(v))
+    rows = []
+    for n in names:
+        get = (lambda p, k: ((p.get("teach") or {}).get(n) or {}).get(k))
+        for title, cell in (("weight (mean)", lambda p: f("{:.3f}", get(p, "weight"))),
+                            ("imitation cross-entropy (mean)", lambda p: f("{:.3f}", get(p, "ce"))),
+                            ("agreement, policy argmax = script (first / last update)",
+                             lambda p: f"{f('{:.3f}', get(p, 'agree_first'))} / {f('{:.3f}', get(p, 'agree_last'))}"),
+                            ("agreement on the kind (mean)", lambda p: f("{:.3f}", get(p, "agree_kind"))),
+                            ("agreement on the active labels (not hold)", lambda p: f("{:.3f}", get(p, "agree_active")))):
+            cells = [cell(p) for p in points]
+            rows.append((f"teacher {n}: {title}", [join.join(cells)] if join is not None else cells))
+    return (["", "the drills' teacher (run.py --drill-teach; training batch, run.py log):", "",
+             "| teacher | " + " | ".join(heads) + " |", "|---" * (len(heads) + 1) + "|"]
+            + [f"| {t} | " + " | ".join(c) + " |" for t, c in rows])
+
+
 def metrics(res):
     """{"opponent/role": {name: value}} of one evaluation; "opponent/all": per opponent; "opponent/factions":
     win rates by our faction and role and by matchup, with gold (tools/nn/train/matchups.py); "skill": the
@@ -141,6 +194,8 @@ def metrics(res):
         out["drills"] = res["drills"]
     if res.get("distance") is not None:
         out["distance"] = res["distance"]
+    if res.get("teach"):
+        out["teach"] = res["teach"]
     for opp, o in res["by_opponent"].items():
         for role, x in o["roles"].items():
             if not x.get("games"):
@@ -204,7 +259,8 @@ def table(before, after):
         lines += [f"| {title} | {' → '.join(cells)} |" for title, cells in by]
     return (skill_block([before.get("skill"), after.get("skill")], ["before → after"], " → ") + lines
             + lively_block([before, after], ["before → after"], " → ")
-            + drill_block([before, after], ["before → after"], " → "))
+            + drill_block([before, after], ["before → after"], " → ")
+            + teach_block([before, after], ["before → after"], " → "))
 
 
 def drill_block(points, heads, join=None):
@@ -320,7 +376,8 @@ def trend(points):
                   "| by faction | " + " | ".join(f"min {m}" for m in mins) + " |", "|---" * (len(mins) + 1) + "|"]
         lines += [f"| {title} | " + " | ".join(cells) + " |" for title, cells in by]
     return (lines + lively_block([m for _, m in points], [f"min {m}" for m in mins])
-            + drill_block([m for _, m in points], [f"min {m}" for m in mins]))
+            + drill_block([m for _, m in points], [f"min {m}" for m in mins])
+            + teach_block([m for _, m in points], [f"min {m}" for m in mins]))
 
 
 def main():
@@ -378,6 +435,7 @@ def test(args, rest):
         res = evaluation(actor, args, device, cadence)
         res["update"] = update
         res["distance"] = distance(run_log, last[0], update)
+        res["teach"] = teacher(run_log, last[0], update)
         last[0] = update
         m = f"{minute:g}"
         checkpoint.save(out / f"m{m}.pt", actor, critic, targs.preset, {"minute": minute, "update": update,
@@ -391,6 +449,7 @@ def test(args, rest):
     actor.eval()
     after = evaluation(actor, args, device, cadence)
     after["distance"] = distance(run_dir, last[0], summary["updates"])
+    after["teach"] = teacher(run_dir, last[0], summary["updates"])
     (out / "after.json").write_text(json.dumps(after, indent=1), encoding="utf-8", newline="\n")
     if args.every:
         m = f"{args.minutes:g}"

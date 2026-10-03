@@ -24,6 +24,10 @@ abilities=True; Orders.ability); only the scripted opponents' lords fire by the 
 A transition keeps only the abilities' state (abil [.., SLOTS, DYNAMIC]) and the battle's bank row
 (abil_row); full_obs() puts the passports back from the bank (batch["abil_static"]) for the update:
 the whole input would be ~3 GB for 1024 battles x 64 decisions.
+
+The drills' teacher (teach= {drill name: its skilled script}; tools/nn/train/drills/teach.py): at every
+decision the script labels the learner's units in that drill's battles on the same state (it does
+not act); the transition carries the labels ("teach") for PPO's imitation term.
 """
 import warnings
 
@@ -43,6 +47,7 @@ from tools.nn.sim import state as S
 from tools.nn.sim.params import load
 from tools.nn.train import drills, league, opponents, randomise, reward, scenes
 from tools.nn.train import cadence as cad
+from tools.nn.train.drills import teach as drill_teach
 
 CRITIC_KEYS = ("tokens", "ctx", "own", "attend", "pos")
 FRAME = ("cx", "cz", "ux", "uz")
@@ -254,7 +259,8 @@ def restart_rows(st, setup, source, rows, want=None):
 
 class Battles:
     def __init__(self, layout, scene_list=scenes.SCENES, device="cpu", params=None, spread=randomise.Spread(),
-                 weights=reward.Weights(), seed=0, auto_reset=True, compile=None, source=None, cadence=None):
+                 weights=reward.Weights(), seed=0, auto_reset=True, compile=None, source=None, cadence=None,
+                 teach=None):
         self.device = torch.device(device)
         self.params = params or load()
         # how often the networks decide and how late their orders land (cadence.py; default: the game's)
@@ -301,6 +307,11 @@ class Battles:
         self.row_opp = torch.cat([opp, opp])[self.rows_learn]                          # [R]
         self.past_actor = None
         self.past_untrained = False
+        # the drills' teacher: {league code: (drill name, skilled script)} of the taught drills the layout plays
+        self.teach_names = tuple(teach or ())
+        used = set(np.unique(layout.opponent).tolist())
+        self.teach = {league.CODE[drills.opponent(n)]: (i, f) for i, (n, f) in enumerate((teach or {}).items())
+                      if league.CODE[drills.opponent(n)] in used}
         self.stats = torch.zeros(2 * (len(STAT_NAMES) + 1), 3, device=self.device)    # games, wins, seconds
         # by (opponent, the learner's role)
         self.row_attacks = None
@@ -415,6 +426,7 @@ class Battles:
             *_, o_past, h_past_new = self._act(self.past_actor, a, frame, self.rows_past, self.h_past, False)
             parts.append((self.rows_past, o_past))
         lp = self._log_prob(logits, action, obs_r["ctrl"])
+        taught = self._teach_labels(actor.cfg, obs_r, frame) if self.teach_names else None
         value = None
         if critic is not None:
             value = self._values(critic, c)
@@ -455,7 +467,30 @@ class Battles:
             # a copy: a slice (view) would keep the whole input of every step alive (~60 MB each)
             obs_r = dict(obs_r, abil=obs_r["abil"][..., :mab.DYNAMIC].clone(), abil_row=abil_row)
         return {"obs": obs_r, "action": action, "lp": lp, "value": value, "reward": r_rows,
-                "done": d_rows, "critic_obs": c, "attacks": attacks}
+                "done": d_rows, "critic_obs": c, "attacks": attacks, "teach": taught}
+
+    def _teach_labels(self, cfg, obs_r, frame):
+        """The taught drills' labels of the learner rows at this decision (drills/teach.py): (Action [R, N],
+        valid [R, N], drill [R]: index into teach_names, -1 for a row of no taught drill)."""
+        R, N = obs_r["ctrl"].shape
+        dev = self.device
+        z = torch.zeros((R, N), dtype=torch.long, device=dev)
+        a = hd.Action(z.clone(), z.clone(), z - 1, torch.zeros((R, N), dtype=torch.bool, device=dev))
+        valid = torch.zeros((R, N), dtype=torch.bool, device=dev)
+        drill = torch.full((R,), -1, dtype=torch.long, device=dev)
+        if not self.teach:
+            return a, valid, drill
+        live = ~self.st.done[self.rows_learn % self.B]
+        frame_r = frame_rows(frame, self.rows_learn)
+        for code, (i, script) in self.teach.items():
+            mine = self.row_opp == code                                                  # [R]
+            lab, ok = drill_teach.label(cfg, script(self.st), obs_r, frame_r, self.rows_learn, self.B)
+            sel = mine[:, None] & ok & live[:, None]
+            for f in ("kind", "point", "target", "run"):
+                setattr(a, f, torch.where(mine[:, None], getattr(lab, f), getattr(a, f)))
+            valid = valid | sel
+            drill = torch.where(mine, torch.full_like(drill, i), drill)
+        return a, valid, drill
 
     def _sim_step(self, parts, attacks, rb, rs, was_done):
         """One simulator step with the networks' orders `parts` and the scripts': -> (the learner rows'
@@ -671,5 +706,11 @@ def collect(env, actor, critic, T):
     out["abil_static"] = getattr(env.bank.setup.arrays, "abil", None)
     for k in ("lp", "value", "reward", "done", "attacks"):
         out[k] = torch.stack([s[k] for s in steps])
+    if steps[0].get("teach") is not None:
+        # the drills' teacher: labels [T, R, N], where they count [T, R, N], the row's drill [T, R]
+        out["teach"] = {"action": hd.Action(*(torch.stack([getattr(s["teach"][0], f) for s in steps])
+                                              for f in ("kind", "point", "target", "run"))),
+                        "valid": torch.stack([s["teach"][1] for s in steps]),
+                        "drill": torch.stack([s["teach"][2] for s in steps]), "names": env.teach_names}
     out["last_value"] = env.value(critic)
     return out
