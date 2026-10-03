@@ -32,6 +32,14 @@ sequenceDiagram
   the gate's recordings offline gave the game's 15.6 order changes a unit-minute (sampled and
   greedy alike, so not the bridge); the simulator with the game's point gave 30 instead of its own
   5.5 (02.10.2026). Recordings (`nn_sample`) keep the game's raw value.
+- **Running** (`f`): the companion replaces the game's reading with the simulator's
+  (`exchange.running_by_speed`): moving (`mv`) and faster than the unit's walk (passport) + 0.3 m/s,
+  the speed measured between the previous state and this one; nobody runs in a battle's first state.
+  The game's `f` is `unit:is_moving_fast()`, the unit's run mode, not its speed: in the gate of
+  03.10.2026 (8 battles) it was on in 74 % of the unit-seconds a unit stood still (< 0.3 m/s) in melee
+  and in 99 % of the game AI's melee seconds; the simulator's `f` is on in 3-4 % of melee seconds.
+  Measured by speed, the game AI's units in melee run 9 % of the time, as the simulator's. Recordings
+  keep the game's raw value (the replay uses it as the run order).
 - The companion answers with orders for that move. The game reads the file every 100 ms of battle
   time (`poll_ms`) and gives each of our units its order.
 - **Only a changed order is given again**: another kind, another target, run instead of walk, or a

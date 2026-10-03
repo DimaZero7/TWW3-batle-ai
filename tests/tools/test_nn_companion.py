@@ -203,6 +203,27 @@ def test_order_points_are_the_simulators():
     assert (s["ox"][0, 1], s["oz"][0, 1]) == (-175.0, 0.0)
 
 
+def test_running_is_the_simulators_speed_not_the_games_run_mode():
+    # The game's f (is_moving_fast) is the run mode: on for a unit standing in melee. The network
+    # learned the simulator's: moving faster than the walk + 0.3 m/s.
+    doc = state_doc()
+    for u in doc["units"]:
+        u["f"], u["m"] = True, True
+    b = exchange.battle(doc)
+    assert b.walk[0] == pytest.approx(1.5) and b.walk[1] > 0           # passports' walk speeds
+    s = exchange.arrays(doc, b.names)
+    prev = exchange.running_by_speed(s, b.walk)
+    assert not s["f"][0].any()                                         # the first state: nobody runs
+    doc2 = dict(state_doc(), t=6000)
+    doc2["units"][1].update(x=-171.0, mv=True, f=True)                 # 4 m in 1 s: runs
+    doc2["units"][3].update(x=174.0, mv=True, f=True, m=True)          # 1 m in 1 s, run mode in melee: walks
+    s2 = exchange.arrays(doc2, b.names)
+    exchange.running_by_speed(s2, b.walk, prev)
+    assert s2["f"][0].tolist() == [False, True, False, False]
+    obs, _ = ob.observe(s2, b.setup, 1)
+    assert obs.tokens[0, 1, ob.INDEX["running"]] == 1 and obs.tokens[0, 3, ob.INDEX["running"]] == 0
+
+
 def test_orders_in_force_skip_keep_and_units_that_take_none():
     given = {"own_a": {"unit": "own_a", "kind": "move", "x": 1.0, "z": 2.0, "run": True}}
     orders = [{"unit": "own_a", "kind": "keep"}, {"unit": "own_b", "kind": "attack", "target": "enemy_c", "run": True},

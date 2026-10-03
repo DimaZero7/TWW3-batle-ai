@@ -53,6 +53,7 @@ class Battle:
     side: np.ndarray
     setup: Setup
     slots: list = None     # per unit: its ability keys by slot ("" empty), as the network's input has them
+    walk: np.ndarray = None   # [N] walk speed (m/s, passport; 0 unknown): running_by_speed
 
     @property
     def own(self):
@@ -72,7 +73,35 @@ def battle(doc, bounds=CROSSROADS):
     units_db, passports = passport.load(), model_abilities.load()
     slots = [slot_keys(u.get("key") or "", units_db, passports) if u.get("key") in units_db else [""] * SLOTS
              for u in units]
-    return Battle(doc["batch"], names, side[0], setup, slots)
+    walk = np.array([float(((units_db.get(u.get("key") or "") or {}).get("speed") or {}).get("walk") or 0.0)
+                     for u in units])
+    return Battle(doc["batch"], names, side[0], setup, slots, walk)
+
+
+RUN_MARGIN = 0.3   # m/s: running = moving faster than the walk + this (the simulator's `f`, tools/nn/sim/battle.py)
+
+
+def running_by_speed(state, walk, prev=None):
+    """The `running` input as the simulator has it: moving (mv) and faster than the unit's walk +
+    RUN_MARGIN, the speed measured between the previous state (prev: (x, z, t) of the last call)
+    and this one; in place in `state` (exchange.arrays). Returns the reference for the next call.
+
+    The game's `f` is unit:is_moving_fast(), the unit's run mode, not its speed: in the gate of
+    03.10.2026 it was on in 74 % of the unit-seconds a unit stood (< 0.3 m/s) in melee and in 99 % of
+    the game AI's melee seconds; the simulator's `f` is on in 3-4 % of melee seconds. Measured by speed
+    the game AI's units in melee run 9 % of the time (docs/en/apps/bridge.md "Running"). Without a
+    previous state (the battle's first) or with a unit's position unknown, it is not running."""
+    x, z, t = state["x"][0].astype(float), state["z"][0].astype(float), float(state["t"][0])
+    run = np.zeros(x.shape, dtype=bool)
+    same = prev is not None and len(prev[0]) == len(x)
+    if same and t > prev[2]:
+        speed = np.hypot(x - prev[0], z - prev[1]) / (t - prev[2])
+        with np.errstate(invalid="ignore"):
+            run = np.asarray(state["mv"][0], dtype=bool) & np.isfinite(speed) & (speed > np.asarray(walk) + RUN_MARGIN)
+    state["f"][0] = run
+    if same and t <= prev[2]:
+        return prev            # the same moment again: the reference stays
+    return x.copy(), z.copy(), t
 
 
 def arrays(doc, names, slots=None):

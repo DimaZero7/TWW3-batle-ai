@@ -32,15 +32,17 @@ class Brain:
         self.actor, self.greedy, self.temperature = actor, greedy, temperature
         self.battle, self.memory, self.h = None, None, None
         self.given, self.points = {}, {}     # the orders in force, the order points (exchange.order_points)
+        self.moved = None                    # the last positions and time (exchange.running_by_speed)
 
     def decide(self, doc):
         """-> (orders list, think ms, abilities to use [{unit, key}]) for one state document."""
         t0 = time.perf_counter()
         if self.battle is None or self.battle.batch != doc["batch"]:
             self.battle, self.memory, self.h = exchange.battle(doc), None, None
-            self.given, self.points = {}, {}
+            self.given, self.points, self.moved = {}, {}, None
         b = self.battle
         state = exchange.arrays(doc, b.names, b.slots)
+        self.moved = exchange.running_by_speed(state, b.walk, self.moved)
         self.points = exchange.order_points(state, b.names, b.side, self.given, self.points)
         obs, self.memory = ob.observe(state, b.setup, SIDE, self.memory)
         orders, self.h, _, _ = decide.act(self.actor, obs, b.setup, self.h, self.greedy, self.temperature)
