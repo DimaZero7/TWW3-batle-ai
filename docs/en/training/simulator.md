@@ -58,15 +58,18 @@ first; `side` = 0 is an empty slot). Three groups:
   leadership, projectiles, range, reload, cost; the unit's innate effects (`fx`, a bitmask over
   `config/nn/effects.json`'s order; `fxt0`, `fxt1`: its timed ones) and their rule flags;
 - *internal* — what only the simulator needs: morale and fatigue points, timers (of the abilities
-  and of the timed effects), `fx_on` (the innate effects on in the last step).
+  and of the timed effects), `fx_on` (the innate effects on at the step's end).
 
 **Orders** (`tools/nn/sim/orders.py`): per unit and decision step `kind` ∈ hold (0), move (1),
 attack (2), withdraw (3), keep (4: no new order, the one in force goes on; a unit with no order
 holds); the point `x`, `z` for move and withdraw (the unit's centre); `target` — the enemy's
 slot for attack; `run` — run or walk; `ability` — the unit's ability slot to use now (−1 none;
-optional: orders made without it get −1; independent of `kind`). All `[B, N]`. A move order to a
-unit in melee does not take it out: that is what withdraw is for (it breaks off, and the enemies
-in contact strike its back). An ability order fires a ready self-cast ability once (not passive,
+optional: orders made without it get −1; independent of `kind`). All `[B, N]`. A unit in melee
+leaves the fight on withdraw, or on a move to a point 10 m or more away (`contact.leave_m`, any
+unit): it strikes nobody and is not held in place, while the enemies in contact go on striking
+it. As in the game: a melee unit moving away deals ~6 % of its attack rate and takes ~1.7× the
+damage ([measurements](measurements.md#leaving-melee)); before, the simulator let a unit under
+such a move fight on at full rate, and the network learned to use that. An ability order fires a ready self-cast ability once (not passive,
 not active, recharged); otherwise nothing happens. The network reads the abilities' timers from
 `State.observation()` (`ab{k}_on`, `ab{k}_cd` [B, N], s) and the innate effects on now (`fx_on`).
 
@@ -93,7 +96,7 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 |---|---|---|
 | Speed | walk, run, acceleration, deceleration of the passport; routing units run at 0.86 of the run (before innate effects: a Skaven rout ×1.1 by Scurry Away!) | DB; the routing speed measured (Empire 0.865; Skaven 0.945 below half health, 0.866 above: [innate effects](#innate-effects)) |
 | Formation | front of the ordered width, ranks 1.5 m apart; a lord is a circle of his radius | measured: 120 spearmen, 30 m, 6 ranks |
-| Contact | edges within 1 m (2 m more for those already fighting) | measured: centre distance at the first contact |
+| Contact | edges within 1 m (2 m more for those already fighting); a unit leaves melee on withdraw or a move 10 m or more away (it strikes nobody, the enemies in contact strike it) | measured: centre distance at the first contact; leaving — the network's runs ([measurements](measurements.md#leaving-melee)) |
 | Facing | a moving unit faces where it goes, but a step of less than 10 m to its point goes without turning; a formation in melee turns at most 2° a second (a lord turns at once) | measured: infantry in melee turns 1°/s (median; mean 2.3), a free unit struck in the flank turns 8° in 5 s (median) |
 | Order point | the game records the front's centre; the simulator goes to the unit's centre, half a depth behind | measured (spearmen 3.3–4.8 m, slaves 6.5–6.9 m) |
 | Men fighting | 0.75 of the files in contact; a unit shares out to each side of its formation (front, left, right, back) no more than that side holds; at most 9 men strike a lord in all, however many units, their rates summed; with the enemy lord on him the infantry at 0.35; a unit attacking another enemy strikes a lord it touches at 0.4 | calibrated; per side — measured: a unit already fighting hits a newcomer on its flank 2.2× the rule in the first 15 s (with one shared front the simulator gave 1.2×); 9, the sum — measured ([a lord surrounded](../game/units/lord-swarm.md)); 0.35, 0.4 — whole battles (below, "Lords fought by several units") |
@@ -103,7 +106,7 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 | A lord's blow | hits up to `splash` (4) men | DB; agrees with the measured 0.36 kills a second |
 | Charge | the charge bonus to attack and damage, fading over 13 s; a unit that meets the enemy running hits ×(1 + 1.5 × its speed share) for those 13 s; one that did not charge brings its men in over 20 s. Bracing: a unit with `charge_reflection` (spearmen, clanrats) standing still (under 0.5 m/s) meets an infantry charge within `bracing_attack_angle` (80°) of its front as a charge of the same speed | DB (13 s, 80°, the attribute); 1.5 fitted to the first 15 s of the whole battles and the pairs, 20 s to the pairs; bracing measured (whole battles: a braced unit charged head-on loses 0.8× what its charger loses) |
 | Men lost | blows that do not kill wound: men share = max(1 − g × (1 − health share), health share), g = (hits to kill)^−0.5 | calibrated on men against health in the pairs |
-| Shooting | from standing only; first shot 3.3 s (arrows) / 4.3 s (sling) after halting; a shot per man every 11.0 / 11.5 s; range from the formation's edge | measured |
+| Shooting | from standing only; first shot 3.3 s (arrows) / 4.3 s (sling) after halting; the men reload all the time (moving too) and every loaded man shoots as soon as the unit can, so the first shot after a halt or a pause is a volley of the whole unit, then a shot per man every 11.0 / 11.5 s (every loaded man starts reloading when the unit fires, also those whose line is blocked); range from the formation's edge | measured |
 | Hits | 0.42 arrows, 0.47 sling at the edge of range; ×1.29 at 70 m, ×1.12 at 90 m | measured; the distance factor from the range test |
 | Shield, resistance | a shield blocks its chance within 60° of the front; missile resistance of the passport | DB |
 | A lord as a target | 0.43 of the unit rule | measured: ~33k shots at lords out of melee for the whole flight (General by arrows ~0.5, by sling ~0.37, Warlord by arrows ~0.32) |
@@ -157,7 +160,10 @@ an effect by its key.
   effect lies on a unit that is alive, routing too (Scurry Away! speeds a rout). All of it is undone
   at the step's end, as for the cast abilities and fatigue.
 - **`fx_on`** (the network's input): the effects whose conditions hold now, whether the simulator
-  acts on them or not (Hide (forest) counts as on: in the game it is).
+  acts on them or not (Hide (forest) counts as on: in the game it is). The step acts on the
+  conditions at its start; `fx_on` is worked out again on the step's final state (in melee = `m`),
+  so the network sees what a recording's fields give at the same moment (a unit that wavers in
+  this step shows Scurry Away! now, not a step later).
 - **Schema only** (`modelled` false, with the reason in the file): Charge Defence vs. Large (no
   large units in our pools), Vanguard Deployment (placements are the army generator's), Hide
   (forest) (no woods), Immune to Psychology (no fear or terror). `sim.json` effects.off leaves out an
@@ -217,8 +223,17 @@ New contacts (infantry i struck by infantry j): HP i loses in the first 15 s ove
   stays there. In the simulator a unit turned to its nearest opponent at once, so a flank attack
   on a free unit lasted one step. Now it turns at 2°/s in melee.
 - **The flank costs more than the rear by this count** (1.74 against 1.31), against the
-  database's defence ×0.6 / ×0.3. The rear seconds are probably often a lagging recorded
-  bearing; the simulator is fitted to the measured numbers (flank_slope 2.0, rear_slope 0.25).
+  database's defence ×0.6 / ×0.3; the simulator is fitted to it (flank_slope 2.0, rear_slope 0.25).
+- **A lone attacker from the flank or rear, counted apart**
+  ([measurements](measurements.md#flank-and-rear-a-lone-attacker): infantry only, nobody
+  shooting, contacts older than 10 s) takes 1.53× (flank) and 1.92× (rear) of what a lone frontal
+  one takes — the rear costs more, as the database says; the simulator gives 0.94× / 0.99× (a
+  flank striker brings men by the target's short side, its depth: ~4.5 men for a 30 m front
+  instead of 15). The fix is in the code as a switch, off: `melee.flank_face` "striker" (the
+  striker brings men by its own front) with `flank_slope` 3.8 / `rear_slope` 5.5 gives 1.62× /
+  1.94×, but whole battles got worse with it (below, "The check now"): the simulator raises flank
+  contacts more often than the game (the rear flag of our units in melee 0.29 against 0.11), so the
+  per-contact rule overshoots; and the `counter` drill stopped holding (its naive play won 0.66).
 - **"Attacked in the flank / rear" is small in the recordings**: −1 / −2 points, not the
   database's −6 / −14 (the simulator with the database's points shows −14.5 for the rear).
   "Flanks exposed" is there as in the database: −3.9 / −8.1 against −3 / −6.
@@ -259,8 +274,28 @@ to the order's point), written down once a second like a recording and measured 
 as the game (`tools/nn/measure.py`). Only the battles of CA's planner against the game's AI
 count (not the network's own runs). A pair or shooting replay runs on its last recorded orders
 until a unit routs; a whole battle stops when its recording ends and is compared then (if it
-is not over, the side with more health left in standing units counts as the winner). Results of
-30.09.2026 (third version, the same night):
+is not over, the side with more health left in standing units counts as the winner). A unit in
+melee without a recorded target whose recorded point is 10 m or more away moves there (it leaves
+the fight) only if that point is a move order in force: the network's units and missile units;
+the melee units of CA's planner and of the game's AI fight on (their point in melee lies anywhere,
+and they fight at the attack rate: [measurements](measurements.md#leaving-melee)).
+
+**The check now** (the rows below each mechanic's section give the details of their time):
+
+| | Same winner: game-AI battles | network's battles (the 8 gate battles of `r2_clock`) | Mechanics within 20 % | HP lost 60 s after contact, mean \|sim − game\|, network's battles |
+|---|---:|---:|---:|---:|
+| without the two rules below | 22 of 26 | 44 of 93 (4 of 8) | 50 of 54 | 0.044 |
+| + any unit leaves melee on a move ≥ 10 m (`contact.leave_m`) | 22 of 26 | 47 of 93 (7 of 8) | 51 of 54 | 0.043 |
+| + the first shot after a halt is a volley (**now**) | 20 of 26 (Empire-Skaven 10 of 10, mirror 10 of 16) | 52 of 93 (7 of 8) | 50 of 54 | 0.048 |
+| tried, left out: + flank / rear striker by its own front, weights 3.8 / 5.5 | 21 of 26 | 54 of 93 (7 of 8) | 50 of 54 | 0.072 |
+
+The volley moves the archers' target's wavering after the first shot to 22 s (the game 39 s):
+the whole unit's first volley lands at once; the mirror's −2 is within the replays' noise (the
+same rule gave +1 on top of the flank rule). The flank rule raised the network's winners but
+made the early exchange less exact (the simulator went from 0.01 slow to 0.02–0.03 fast; on the
+game-AI battles 0.049 → 0.071) and broke the `counter` drill, so it stays off ([flanks](#flanks-rear-and-charges-in-whole-battles)).
+
+Older results (30.09.2026, third version, and the steps since):
 
 ### Mechanics: 50 of 54 numbers within 20 %
 
@@ -299,7 +334,7 @@ General waver 13 % early (2 % before); the mean error is the same (8.7 %). The w
 winner in 22 of 26, as before the effects (8 replays; at 32 replays 21 of 26, the set before the
 effects 20).
 
-### Whole battles: the same winner in 18 of 26 (69 %)
+### Whole battles: the same winner in 20 of 26 (77 %)
 
 | | Battles decided | Same winner: v1 | v2 (friendly fire, spill) | v3 (stop at the recording's end) | now (flanks) |
 |---|---:|---:|---:|---:|---:|
@@ -330,8 +365,7 @@ both, the casualty curves of both sides match the game within ~10 %. The mirror 
 get better (see "What is missing").
 
 **The network's battles against the game's AI** (the gate: generated armies, `own_ai` "net"),
-both sides' recorded orders replayed, are reported apart: the same winner in 4 of 6
-(01.10.2026). The attacker of a recorded battle comes from its manifest's roles
+both sides' recorded orders replayed, are reported apart: the same winner in 52 of 93. The attacker of a recorded battle comes from its manifest's roles
 (`scenario.attacker_of`); a run the network played had side 2 as the attacker before.
 
 ### Speed
@@ -376,8 +410,8 @@ compiler for compiling on the CPU.
   -6 / -14; the old continuous -1 / -2 is gone); the aura fading 70 -> 105 m (DB); army
   destruction -120 (DB rule, strength = cost x health of units not shattered); splash damage
   divided among its targets (no change for today's units: the share still exceeds a man's
-  health); and the three earlier switches (`lord_v_lord` 0.73, `lord_fall` 0 / 0, `missile_leave_m`
-  10). Each of them alone had lowered the winners; together they hold them (the game-AI 20 -> 18
+  health); and the three earlier switches (`lord_v_lord` 0.73, `lord_fall` 0 / 0, missiles leaving
+  melee at 10 m, now `contact.leave_m` for every unit). Each of them alone had lowered the winners; together they hold them (the game-AI 20 -> 18
   is within the replays' noise: other variants of the set gave 18-20), and more battles end as in
   the game. Dropped after the check: the 4 s recent and 60 s extended casualties (DB
   description) - the archers' target wavered 90 % late and the slingers' never (4 s), or the
@@ -412,7 +446,7 @@ compiler for compiling on the CPU.
     is the other way round: the simulator's drop is 4× the game's. With 0 / 0 the winners did
     not change (20 of 26, 36 of 63) but more battles stayed undecided at the recording's end
     (76 % against 66 %).
-  - *Missile units leaving melee* (`contact.missile_leave_m`, off = 0): in the game a missile
+  - *Missile units leaving melee* (now `contact.leave_m`, on at 10 m for every unit): in the game a missile
     unit in melee with no target and its order point 10 m or more away is moving 45–78 % of
     those seconds and leaves after 10–12 s (median); the simulator keeps missile units in melee
     284 s a battle against the game's 162 (spells 15 s against 8). At 10 m (with the replay

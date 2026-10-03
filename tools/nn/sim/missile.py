@@ -4,6 +4,10 @@ A missile unit shoots when it stands still, is not in melee, has projectiles and
 range (from its formation's edge to the target's: the game's AI shoots from 118-135 m between
 centres with a 120-130 m range). It first aims for aim_s seconds after halting (measured 3.3 s arrows, 4.3 s
 sling); then every man shoots once per reload (measured 11.0 / 11.5 s, longer than the passport).
+Volleys: the men reload all the time (moving too) and every loaded man shoots as soon as the unit
+can, so the first shot after halting or after a pause is a volley of the whole unit (measured:
+archers on the range, build/archer-range/runs 28.09.2026, ~80 of 90 arrows within 1 s of the first,
+then ~10 s nothing); a unit shooting on keeps the steady rate men / reload.
 
     hits   = shots x hit_rate x distance factor (x single_entity_factor at a lone man); aimed
              at a unit in melee, a measured share lands on the shooter's own units in contact
@@ -112,16 +116,18 @@ def clear_shot(u, pw, target, can_shoot, order_target, order_attack, params):
     return target, torch.where(target >= 0, clear, torch.zeros_like(clear))
 
 
-def volley(u, pw, target, dt, params, contact=None, clear=None):
+def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None):
     """Shots, and HP taken per pair [B, N, N] (i shoots, f is hit) this step; per-hit damage
     [B, N, N]. clear [B, N]: share of the shooter's men with a clear line (clear_shot; None: all).
+    loaded [B, N]: share of the men loaded, who all shoot now (None: men x dt / reload, the steady rate).
     contact [B, N, N]: which units touch in melee. Of the hits aimed at a unit in
     melee, the shooter's friendly_fire share lands on its own units in contact with the target
     (measured, docs/en/training/simulator.md)."""
     ms = params.sim["missile"]
     B = params.battle
     shooting = target >= 0
-    shots = torch.where(shooting, u["men"] * dt / u["reload"].clamp(min=1e-6), torch.zeros_like(u["men"]))
+    per_man = dt / u["reload"].clamp(min=1e-6) if loaded is None else loaded
+    shots = torch.where(shooting, u["men"] * per_man, torch.zeros_like(u["men"]))
     if clear is not None:
         shots = shots * clear
     shots = torch.minimum(shots, u["a"])

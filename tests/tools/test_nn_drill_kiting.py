@@ -125,8 +125,6 @@ class TestScripts:
         assert int(o.kind[0, 5]) == O.HOLD                                # an empty slot holds
 
 
-@pytest.mark.skipif("unready" not in __import__("tools.nn.sim.state", fromlist=["INTERNAL"]).INTERNAL,
-                    reason="the volley rule is not in the simulator yet (build/sim-pending/volley.patch)")
 class TestVolley:
     def test_the_first_shot_after_halting_is_a_volley_then_the_steady_rate(self):
         """tools/nn/sim/missile.py: the men reload all the time, every loaded man shoots when the unit

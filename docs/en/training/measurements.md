@@ -130,6 +130,13 @@ units' centres.
   armour, 7.4–8.5 at ~125 m to the front rank — not more. Why unarmoured slaves
   take as much is not checked.
 - The target never got into melee: it routed and the battle ended.
+- **Volleys** (archers on the range, `build/archer-range/runs`): ~80 of 90 arrows leave within
+  1 s of the first, then ~10 s nothing. The men reload all the time (moving too), and every
+  loaded man shoots as soon as the unit can: the first shot after a halt or a pause is a volley
+  of the whole unit. In the shooting arenas the game goes on in whole-unit volleys one reload
+  apart (archers 89, then 85 arrows 10 s later; slingers 140, then 130 11 s later); the
+  simulator fires the first volley, then the steady rate men / reload a second (the same shots
+  over time, spread out).
 
 ## Whole battles: Empire against Skaven
 
@@ -178,6 +185,48 @@ arenas are not yet measured in the game.
   the Empire loses 46–65 % of its HP (mean 53 %), the Skaven 32–52 % (mean 42 %).
 - When the Skaven attack and the Empire defends under the planner, the first
   contact comes after ~6 min (363–364 s): the game's AI takes long to close in.
+
+## Leaving melee
+
+The network's runs against the game's AI (all fair runs with a companion log; the network's
+non-missile, non-lord units standing in melee, by the order in force; `build/gap/leave.py`,
+`build/simbatch/leave_dir.py`):
+
+| Order in force | Unit-seconds | Kills/s | Health share lost/s | Moving |
+|---|---:|---:|---:|---:|
+| attack | 129 757 | 0.186 | 0.0026 | 9 % |
+| hold | 1 355 | 0.225 | 0.0038 | 0 % |
+| move ≥ 10 m away from the enemy | 1 741 | 0.003 | 0.0045 | 100 % |
+| move ≥ 10 m sideways | 1 146 | 0.005 | 0.0046 | 100 % |
+| move ≥ 10 m towards the enemy (the point beyond it) | 868 | 0.038 | 0.0051 | 98 % |
+| withdraw | 557 | 0.004 | 0.0038 | 100 % |
+
+- **A unit told to move 10 m or more stops fighting**, whatever the direction: it deals
+  2–20 % of its attack rate and takes ~1.7× the damage; it stays in contact 97–99 % of the next
+  seconds (the enemy follows). The simulator has it (`contact.leave_m` 10 m, any unit).
+- **The recorded point of CA's planner and the game's AI is not such an order**: their melee
+  units with no recorded target and a point 10 m or more away fight on (the planner's 0.17–0.29
+  kills a second in every direction; its point is often the enemy's start, beyond the enemy). The
+  check's replay leaves melee on a far point only for the network's units and missile units.
+
+## Flank and rear: a lone attacker
+
+The 28 whole game-AI battles (`build/drills/meas/encircle_*.py`): infantry fought by infantry
+only, nobody shooting the target or its attackers, contacts older than 10 s; HP a second the
+target loses.
+
+| Attackers | Seconds | HP/s | × one frontal |
+|---|---:|---:|---:|
+| one, front | 6 563 | 17.2 | 1 |
+| one, flank | 2 572 | 26.3 | 1.53 |
+| one, rear | 869 | 33.1 | 1.92 |
+| two, front | | 29.4 | 1.71 |
+| front + flank | | 36.0 | 2.09 |
+| front + rear (little data) | | 24.4 | 1.42 |
+
+- The rear costs more than the flank, as the database's defence ×0.3 / ×0.6 says. An earlier
+  count over all melee seconds (several attackers, shooting and young contacts mixed in) gave
+  1.74× / 1.31×. The simulator keeps the old fit for now ([simulator](simulator.md#flanks-rear-and-charges-in-whole-battles)).
 
 ## Morale events and the army collapse (task 20, 02.10.2026)
 

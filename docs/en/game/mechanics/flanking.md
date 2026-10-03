@@ -16,8 +16,11 @@ game decides the direction. Conventions: [index](README.md).
   - Ours: the simulator uses ×0.6 / ×0.3, but the defence lost counts at `flank_slope` 2.0 /
     `rear_slope` 0.25 of the rule, fitted to the 28 whole battles where infantry fought on the
     flank lost 1.74× and on the rear 1.31× of the front. **Conflict**: by the database the rear
-    must cost more than the flank; our measurement says the opposite (`simulator.md` suspects a
-    lagging recorded bearing on "rear" seconds).
+    must cost more than the flank; that count says the opposite. Counted apart, a lone attacker
+    (infantry only, nobody shooting, contacts older than 10 s) takes 1.53× from the flank and
+    1.92× from the rear ([measurements](../../training/measurements.md#flank-and-rear-a-lone-attacker)):
+    the rear costs more, as the database says. The simulator keeps the old fit (its rule with the
+    striker's own front fits these ratios but made whole battles worse: `simulator.md`).
 - **Per model, by quadrant.** The penalty is decided for each attacking model against the struck
   entity: a blow from the target entity's left, right or rear quadrant is a flank/rear blow; it
   stops once that model turns to face its attacker. WH3 · [CA damage blog][dmg], [CA forum thread][t10108] ·

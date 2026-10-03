@@ -262,6 +262,31 @@ def restore(u, old):
     u.update(old)
 
 
+def refresh_on(u, params):
+    """At the step's end: `fx_on` (the network's input) from the state the network observes now - the
+    untimed effects by their conditions on the step's final state (in melee = `m`, as the observation
+    works them out from a recording; tools/nn/model/effects.py), the timed ones as their timers say.
+    apply() acts on the conditions at the step's start; without this the network saw an effect one
+    step late whenever a condition changed within the step (a unit wavering, health crossing a half)."""
+    if not params.effects or not order(params):
+        return
+    T = table(params, u["men"].device)
+    E = T.shape[0] - 1
+    timed = T[:E, COL["timed"]] > 0
+    own = owned(u, E) & (u["side"] > 0)[..., None]
+    alive = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
+    pred = predicates(u, u["m"], params)
+    P = torch.stack([pred[p] for p in PREDICATES], -1)
+    need = T[:E, [COL[f"need_{p}"] for p in PREDICATES]] > 0
+    offc = T[:E, [COL[f"off_{p}"] for p in PREDICATES]] > 0
+    unmet = torch.einsum("bnp,ep->bne", (~P).float(), need.float()) > 0
+    off = torch.einsum("bnp,ep->bne", P.float(), offc.float()) > 0
+    bit = torch.arange(E, device=u["fx"].device)
+    was = ((u["fx_on"][..., None] >> bit) & 1) > 0
+    on = torch.where(timed, was & alive[..., None], own & alive[..., None] & ~unmet & ~off)
+    u["fx_on"] = (on.long() << bit).sum(-1)
+
+
 def timers(u):
     """The timed effects' state: {"fxt{j}_on", "fxt{j}_cd"} [B, N] (s)."""
     return {f"fxt{j}_{t}": u[f"fxt{j}_{t}"] for j in range(TIMERS) for t in ("on", "cd")}

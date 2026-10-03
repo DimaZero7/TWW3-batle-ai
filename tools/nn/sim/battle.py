@@ -53,11 +53,12 @@ def step(st, orders, params=None, dt=None):
     # Units already fighting stay in contact a little longer (formations thin as men fall).
     held = (u["m"][:, :, None] | u["m"][:, None, :]).float() * cal["contact"]["hold_m"]
     touch = pw["enemy"] & both & (pw["gap"] <= reach + held)
-    # Leaving melee: a withdraw order, or a missile unit told to move contact.missile_leave_m or more
-    # away (0: off; measured in the game, off for now: config/nn/sim.json).
-    leave_m = float(cal["contact"].get("missile_leave_m", 0.0))
+    # Leaving melee: a withdraw order, or any unit told to move contact.leave_m or more away (0: off).
+    # It walks out of the fight: it strikes nobody and is not held in place, the enemies in contact
+    # still strike it (measured in the game, config/nn/sim.json contact.why).
+    leave_m = float(cal["contact"].get("leave_m", 0.0))
     far_point = torch.sqrt((u["ox"] - u["x"]) ** 2 + (u["oz"] - u["z"]) ** 2) >= leave_m
-    leaving = (kind == O.WITHDRAW) | ((kind == O.MOVE) & (u["range"] > 0) & far_point & (leave_m > 0))
+    leaving = (kind == O.WITHDRAW) | ((kind == O.MOVE) & far_point & (leave_m > 0))
     striker = standing & ~leaving
     strike = touch & striker[:, :, None]
     engaged = standing & (touch & standing[:, None, :]).any(2)
@@ -101,7 +102,14 @@ def step(st, orders, params=None, dt=None):
     m_target = missile.choose_target(u, pw, can, tgt, kind == O.ATTACK)
     # direct fire needs a clear line past friends (missile.py clear_shot); arcing fire: unchanged
     m_target, clear = missile.clear_shot(u, pw, m_target, can, tgt, kind == O.ATTACK, params)
-    shots, hp_missile, shit = missile.volley(u, pw, m_target, dt, params, contact=touch, clear=clear)
+    # the men reload all the time; every loaded man shoots when the unit can (missile.py: the first
+    # shot after halting is a volley, then the steady rate). When the unit fires, every loaded man
+    # starts reloading, those whose line is blocked too (clear_shot): else the blocked men stayed
+    # loaded and fired on the next steps, and a screen that blocks half the men blocked nothing.
+    unready = (u["unready"] - dt / u["reload"].clamp(min=1e-6)).clamp(min=0)
+    shots, hp_missile, shit = missile.volley(u, pw, m_target, dt, params, contact=touch, clear=clear,
+                                             loaded=1 - unready)
+    u["unready"] = torch.where(shots > 0, torch.ones_like(unready), unready)
     u["a"] = (u["a"] - shots).clamp(min=0)
     firing = shots > 0
 
@@ -305,6 +313,7 @@ def step(st, orders, params=None, dt=None):
     u.update(tired)
     abilities.restore(u, base)
     effects.restore(u, innate)
+    effects.refresh_on(u, params)
 
     # --- is the battle over ---
     standing = present & (u["men"] > 0) & ~u["gone"] & ~u["r"]

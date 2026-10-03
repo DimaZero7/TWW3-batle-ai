@@ -11,8 +11,9 @@ Each decision step every unit of the batch gets one order, as six tensors [B, N]
                     still works). Independent of kind: a lord may move and use an ability at once.
 
     HOLD      stay; shoot at will at enemies in range; fight back when attacked.
-    MOVE      go to (x, z) and stop there; missile units do not shoot on the move. A unit
-              locked in melee first breaks off (as WITHDRAW).
+    MOVE      go to (x, z) and stop there; missile units do not shoot on the move. A unit in
+              melee with the point contact.leave_m (10 m) or more away breaks off (as WITHDRAW:
+              it strikes nobody, the enemies in contact strike it); a nearer point it fights on.
     ATTACK    melee units run (or walk) at the target and fight it; missile units close to
               their range and shoot it. Pursues a routing target.
     WITHDRAW  break off melee and go to (x, z); while leaving, the enemies in contact strike

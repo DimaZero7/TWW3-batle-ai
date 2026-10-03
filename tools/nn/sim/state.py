@@ -128,6 +128,7 @@ INTERNAL = {
     "charge": ("f", "charge at the contact, 0-1 (1 = hit at full run)"),
     "aim": ("f", "seconds standing still able to shoot"),
     "shots": ("f", "fractional shots carried to the next step"),
+    "unready": ("f", "share of the men still reloading, 0-1 (0: all loaded, the start; missile.py volley)"),
     "rout_count": ("f", "times routed"),
     "rout_s": ("f", "seconds since the rout began"),
     "rally_s": ("f", "seconds since the last rally"),

@@ -32,7 +32,7 @@ import torch
 from tools.nn.sim import orders as O
 
 NAMES = ("pincer", "kiting", "counter", "hold_fire", "defend")   # the drills, in the order they were built
-READY = ("counter", "hold_fire")   # the drills that passed verify.py (naive loses, skilled wins): run.py --drills default
+READY = ("kiting", "counter", "hold_fire")   # the drills that passed verify.py (naive loses, skilled wins): run.py --drills default
 PREFIX = "drill_"
 MAP_HALF_M = 700.0       # a generated battle stays within this of the map's centre (the network's map frame,
 #                          tools/nn/model/sources.py CROSSROADS, is -768..768 x -800..736)

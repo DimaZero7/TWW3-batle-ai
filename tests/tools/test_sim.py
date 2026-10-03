@@ -517,11 +517,13 @@ class TestBattle:
             battle.step(st, o, P)
         assert not bool(st.u["m"][0, 0]) and float(st.u["x"][0, 0]) < x0 - 15
 
-    def test_a_missile_unit_told_to_move_away_leaves_melee_when_missile_leave_m_is_on(self):
+    @pytest.mark.parametrize("key", [ARCHER, SPEAR])
+    def test_a_unit_told_to_move_away_leaves_melee_when_leave_m_is_on(self, key):
+        """contact.leave_m: any unit (missile or melee) told to move that far walks out of the fight."""
         moved = {}
         for leave in (0.0, 10.0):
-            params = P.with_cal("contact", missile_leave_m=leave)
-            st = face_off(ARCHER, SPEAR)
+            params = P.with_cal("contact", leave_m=leave)
+            st = face_off(key, SPEAR)
             H = st.N // 2
             o = replay.hold(st)
             o.kind[0, H], o.target[0, H] = O.ATTACK, 0
@@ -534,6 +536,23 @@ class TestBattle:
                 battle.step(st, o, params)
             moved[leave] = x0 - float(st.u["x"][0, 0])
         assert moved[0.0] == pytest.approx(0.0, abs=0.5) and moved[10.0] > 10
+
+    def test_a_melee_unit_moving_away_strikes_nobody_and_is_still_struck(self):
+        params = P.with_cal("contact", leave_m=10.0)
+        st = face_off(SPEAR, SPEAR)
+        H = st.N // 2
+        o = replay.hold(st)
+        o.kind[0, 0], o.target[0, 0] = O.ATTACK, H
+        o.kind[0, H], o.target[0, H] = O.ATTACK, 0
+        for _ in range(20):
+            battle.step(st, o, params)
+        assert bool(st.u["m"][0, 0])
+        hp0, hpH = float(st.u["hp_abs"][0, 0]), float(st.u["hp_abs"][0, H])
+        o = replay.hold(st)
+        o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = O.MOVE, float(st.u["x"][0, 0]), 200.0, True
+        o.kind[0, H], o.target[0, H] = O.ATTACK, 0
+        battle.step(st, o, params)
+        assert float(st.u["hp_abs"][0, H]) == pytest.approx(hpH) and float(st.u["hp_abs"][0, 0]) < hp0
 
     def _charge(self, defender_key, run_defender):
         """A spearmen unit charges defender_key head-on; returns the step's state after contact."""

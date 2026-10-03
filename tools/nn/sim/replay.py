@@ -47,14 +47,19 @@ def half_depth(men, width, spacing=1.5):
     return np.where(men > 1, np.ceil(np.maximum(men, 1) / files) * spacing / 2, 0.0)
 
 
-def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=True, missile=None, leave_m=10.0):
+def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=True, leave_m=10.0, leavers=None):
     """Orders implied by a recorded battle (tools/nn/gamedata.Battle), one row per recorded second:
     dict of arrays [T, N] kind, x, z, target, run in the simulator's slots (slot_of: recorded index
     -> slot). The game records the order's point at the formation's front (measured: half a depth
     ahead of the centre); widths [recorded index] (m) turn it into the centre the simulator goes to.
-    missile [recorded index]: missile units; one in melee without a recorded target whose order
-    point is leave_m or more away moves there (it walks out of the fight, as in the game) instead
-    of attacking the nearest enemy."""
+    leavers [recorded index] (None: all): units whose recorded point in melee is a move order in force;
+    such a unit in melee without a recorded target whose point is leave_m or more away moves there (it
+    walks out of the fight, as in the game; leave_m 0: never) instead of attacking the nearest enemy.
+    The network's units and every missile unit are leavers; the melee units of CA's planner and the
+    game's AI are not: in melee their recorded point lies anywhere (the planner's: often the enemy's
+    start beyond it) while they fight on at the attack rate (build/simbatch/leave_dir.py: the planner's
+    melee units with a point 10 m or more away kill 0.17-0.29 a second in every direction, the
+    network's under such a move 0.003-0.04 against 0.19 attacking)."""
     f = battle.f
     T = len(battle.t)
     kind = np.full((T, N), O.HOLD, dtype=np.int64)
@@ -71,10 +76,10 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
         tg = battle.target[:, i]
         ox, oz = np.nan_to_num(f["ox"][:, i]), np.nan_to_num(f["oz"][:, i])
         # In melee without a recorded target (CA's planner leaves it empty most of the time):
-        # the nearest enemy, as the game's own AI records it - unless a missile unit is told to go
+        # the nearest enemy, as the game's own AI records it - unless the unit is told to go
         # somewhere else (it leaves the fight).
         leaving = np.zeros(T, dtype=bool)
-        if missile is not None and missile[i] and leave_m > 0:
+        if leave_m > 0 and (leavers is None or leavers[i]):
             leaving = np.hypot(ox - np.nan_to_num(f["x"][:, i]), oz - np.nan_to_num(f["z"][:, i])) >= leave_m
         if fight_nearest:
             tg = np.where((tg < 0) & f["m"][:, i] & ~leaving, nearest[:, i], tg)
