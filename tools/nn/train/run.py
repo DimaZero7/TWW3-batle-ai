@@ -33,6 +33,7 @@ from tools.nn.model import critic as model_critic
 from tools.nn.model import policy as model_policy
 from tools.nn.train import cadence as cad
 from tools.nn.train import checkpoint, drills, evaluate, league, matchups, ppo, randomise, reward, rollout, scenes
+from tools.nn.train import teach_auto
 from tools.nn.train.drills import source as drill_source
 from tools.nn.train.drills import teach as drill_teach
 
@@ -127,9 +128,11 @@ def score(window):
     return (min(rs), keys) if len(rs) >= 5 else (None, keys)
 
 
-def train(args, every=None):
+def train(args, every=None, teacher=None):
     """every: (minutes, hook) - hook(actor, critic, minute, update) after every `minutes` of training
-    (its time not counted as training: e.g. a full evaluation)."""
+    (its time not counted as training: e.g. a full evaluation). teacher: with --drill-teach auto, the
+    adaptive teacher (teach_auto.Auto; default: one with the init checkpoint's last drill numbers,
+    teach_auto.prior) - the hook may change its shares (Auto.observe), read before every update."""
     device = torch.device(args.device)
     torch.manual_seed(args.seed)
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -185,9 +188,24 @@ def train(args, every=None):
         shares = json.loads(args.drill_weights) if args.drill_weights else {n: 1.0 for n in drills.READY}
         mix = league.with_drills(mix, args.drills, shares)
     lay = league.layout(args.battles, len(scenes.SCENES), mix, scene_attacker=scenes.attackers())
-    # the drills' teacher (drills/teach.py): {drill: the imitation term's starting weight}, annealed to 0
-    teach0 = json.loads(args.drill_teach) if args.drill_teach else {}
+    # the drills' teacher (drills/teach.py): manual {drill: the imitation term's starting weight}, annealed
+    # to 0; or auto (teach_auto.py): every READY drill the run plays, a share of its battles from its deficit
     played = set(np.unique(lay.opponent).tolist())
+    auto = args.drill_teach == "auto"
+    if auto:
+        names = [n for n in drills.READY if league.CODE[drills.opponent(n)] in played]
+        if not names:
+            raise SystemExit("--drill-teach auto: the run plays no READY drill (--drills, --drill-weights)")
+        if teacher is None:
+            teacher = teach_auto.Auto(args.drill_teach_k, args.drill_teach_cap, args.drill_teach_weight,
+                                      *teach_auto.prior(args.init))
+        rows = teacher.bind(names)
+        teach0 = dict.fromkeys(names, teacher.weight)
+        print(f"drill teacher auto (k {teacher.k:g}, cap {teacher.cap:g}, weight {teacher.weight:g}), from "
+              f"{rows[0]['source'] if rows else '-'}:\n" + "\n".join(teach_auto.table(rows)), flush=True)
+    else:
+        teacher = None
+        teach0 = json.loads(args.drill_teach) if args.drill_teach else {}
     absent = [n for n in teach0 if n not in drills.NAMES or league.CODE[drills.opponent(n)] not in played]
     if absent:
         raise SystemExit(f"--drill-teach {absent}: not drills the run plays (--drills, --drill-weights)")
@@ -214,7 +232,8 @@ def train(args, every=None):
           f"minibatch {step_cfg.minibatch} decisions in {step_cfg.accum} part(s), {cadence.text(params.dt)}, "
           f"model {args.preset} {model_policy.parameters(actor) / 1e6:.2f} M actor, limit {args.limit:.0f} s, "
           f"ppo {dataclasses.asdict(cfg)}, reward {dataclasses.asdict(weights)}, mix {mix}"
-          + (f", drill teacher {teach0} -> 0 over {args.drill_teach_minutes:g} min" if teach0 else ""), flush=True)
+          + (f", drill teacher {teach0} -> 0 over {args.drill_teach_minutes:g} min" if teach0 and not auto else "")
+          + (f", drill teacher auto {teacher.meta()}" if auto else ""), flush=True)
 
     def pick_past():
         nonlocal past, past_path
@@ -261,6 +280,8 @@ def train(args, every=None):
             env.source = source()
             env.bank = env.source.bank
             t_bank = time.time()
+        if teacher is not None:
+            env.set_teach_shares(teacher.shares)
         batch = rollout.collect(env, actor, critic, args.steps)
         t_c = time.time()
         # Schedules: the kind's entropy bonus and the KL to the reference go linearly from their start to
@@ -271,7 +292,8 @@ def train(args, every=None):
         u_cfg = dataclasses.replace(step_cfg, entropy=floor_w if args.entropy_target else scheduled,
                                     anchor=schedule(args.anchor, anchor_end, done_share))
         trains = update >= args.critic_warmup
-        teach_w = drill_teach.weights(teach0, args.drill_teach_minutes, (time.time() - t0 - paused) / 60)
+        teach_w = (teacher.weights() if teacher is not None
+                   else drill_teach.weights(teach0, args.drill_teach_minutes, (time.time() - t0 - paused) / 60))
         st = ppo.update(actor, critic, opt, batch, u_cfg, train_policy=trains, reference=reference, teach=teach_w)
         taught = st.pop("teach", None)
         if start is not None:
@@ -333,7 +355,8 @@ def train(args, every=None):
                                                  for r, p in row["reward_parts"].items()), flush=True)
             if taught:
                 active = (lambda v: "-" if v["agree_active"] is None else f"{v['agree_active']:.3f}")
-                print("      teacher " + "; ".join(f"{k} weight {v['weight']:.3f} ce {v['ce']:.3f} agree {v['agree']:.3f} "
+                share = (lambda v: f"share {v['share']:.2f} (labelled {v['labelled']:.2f}) " if "share" in v else "")
+                print("      teacher " + "; ".join(f"{k} {share(v)}weight {v['weight']:.3f} ce {v['ce']:.3f} agree {v['agree']:.3f} "
                                                   f"(kind {v['agree_kind']:.3f}, active {active(v)} of {v['active']}; "
                                                   f"{v['units']} unit-decisions)" for k, v in taught.items()), flush=True)
         if update % args.snapshot_every == 0:
@@ -497,10 +520,18 @@ def parser():
     ap.add_argument("--drill-weights", help="the drills' shares of --drills as json, e.g. {\"pincer\": 1, \"kiting\": 2} "
                                             "(default: the verified drills, drills.READY, equally)")
     ap.add_argument("--drill-bank", type=int, default=256, help="battles of each drill ready at once (renewed with the bank)")
-    ap.add_argument("--drill-teach", help="the drills' teacher as json {drill: weight}, e.g. {\"kiting\": 0.5}: in that "
-                                          "drill's battles + weight x cross-entropy of the policy against the drill's "
-                                          "skilled script (labels only; tools/nn/train/drills/teach.py), the weight "
-                                          "going linearly to 0 over --drill-teach-minutes")
+    ap.add_argument("--drill-teach", help="the drills' teacher: 'auto' (tools/nn/train/teach_auto.py: every READY drill "
+                                          "the run plays, a share of its battles labelled from how far the network is "
+                                          "behind the skilled script, renewed after every test5 evaluation) or, manual, "
+                                          "json {drill: weight}, e.g. {\"kiting\": 0.5}: in that drill's battles + "
+                                          "weight x cross-entropy of the policy against the drill's skilled script "
+                                          "(labels only; tools/nn/train/drills/teach.py), the weight going linearly to 0 "
+                                          "over --drill-teach-minutes")
+    ap.add_argument("--drill-teach-k", type=float, default=teach_auto.K,
+                    help="auto: share = min(cap, k x deficit), deficit = max(0, skilled - net win) / skilled")
+    ap.add_argument("--drill-teach-cap", type=float, default=teach_auto.CAP, help="auto: the share at most this")
+    ap.add_argument("--drill-teach-weight", type=float, default=teach_auto.WEIGHT,
+                    help="auto: the imitation weight on a labelled unit (fixed; the pull is weight x share)")
     ap.add_argument("--drill-teach-minutes", type=float, default=10.0,
                     help="minutes of training over which the teacher's weight goes to 0")
     ap.add_argument("--bank-refresh", type=float, default=5.0, help="minutes between new banks of armies")

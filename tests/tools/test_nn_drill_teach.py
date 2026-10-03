@@ -213,3 +213,100 @@ class TestImitation:
         bad = run.parser().parse_args(["--name", "bad"] + base + ["--drill-teach", '{"counter": 0.5}'])
         with pytest.raises(SystemExit):
             run.train(bad)
+
+
+class TestAdaptiveShare:
+    """The adaptive teacher (run.py --drill-teach auto, teach_auto.py): only a share of a drill's battles is
+    labelled, whole battles, never another opponent's; the term over all the drill's units."""
+
+    def test_only_a_share_of_the_drills_battles_is_labelled(self):
+        env = kiting_env(16, other=4)
+        actor, crit = nets()
+        drill_rows = env.row_opp == KITING
+        for share in (0.0, 0.5, 1.0):
+            env.set_teach_shares({"kiting": share})
+            batch = rollout.collect(env, actor, crit, 3)
+            t = batch["teach"]
+            assert t["shares"] == {"kiting": share} and t["picked"].shape == t["drill"].shape
+            assert not bool(t["picked"][:, ~drill_rows].any())                  # never another opponent's battle
+            draw = env.teach_draw[env.rows_learn % env.B]
+            want = drill_rows & (draw < share)                                   # the draw of the battle: whole
+            assert bool((t["picked"] == want).all())
+            assert bool(t["valid"][:, drill_rows].any())                         # labels on every drill row still
+        assert 0 < int((drill_rows & (draw < 0.5)).sum()) < int(drill_rows.sum())
+
+    def test_a_new_battle_draws_again(self):
+        env = kiting_env(8)
+        before = env.teach_draw.clone()
+        finished = torch.zeros(env.B, dtype=torch.bool)
+        finished[:3] = True
+        env._reset(finished)
+        assert bool((env.teach_draw[:3] != before[:3]).all()) and bool((env.teach_draw[3:] == before[3:]).all())
+
+    def test_the_term_sums_the_labelled_units_over_all_the_drills(self):
+        env = kiting_env(8)
+        actor, crit = nets()
+        batch = rollout.collect(env, actor, crit, 4)
+        logits, lab, valid, drill, names = _imitate(actor, batch)
+        logits = {k: v.detach() for k, v in logits.items()}
+        w = {"kiting": 0.15}
+        full, s_full = teach.terms(logits, lab, valid, drill, names, w)
+        every = torch.ones_like(drill, dtype=torch.bool)
+        assert float(teach.terms(logits, lab, valid, drill, names, w, every)[0]) == pytest.approx(float(full))
+        half = torch.arange(len(drill)) % 2 == 0
+        a, s_a = teach.terms(logits, lab, valid, drill, names, w, half)
+        b, _ = teach.terms(logits, lab, valid, drill, names, w, ~half)
+        assert 0 < float(a) < float(full) and float(a + b) == pytest.approx(float(full), rel=1e-5)
+        none, s_none = teach.terms(logits, lab, valid, drill, names, w, torch.zeros_like(every))
+        assert float(none) == 0.0
+        # the log: agreement over all the drill's units, labelled or not
+        assert s_none["kiting"][:6] == s_full["kiting"][:6] and s_none["kiting"][6] == 0.0
+        assert s_full["kiting"][6] == s_full["kiting"][3] and 0 < s_a["kiting"][6] < s_full["kiting"][3]
+        out = teach.summary(s_a, w, {"kiting": 0.5})["kiting"]
+        assert out["share"] == 0.5 and 0 < out["labelled"] < 1 and out["units"] == int(s_full["kiting"][3])
+
+    def test_a_run_with_the_auto_teacher_follows_the_evaluations(self, tmp_path, monkeypatch):
+        """run.train with --drill-teach auto: the first shares from the prior, a hook's observe() changes
+        them for the next updates, the log has the share and the labelled share; test5 reports the table."""
+        from tools.nn.train import run, teach_auto, test5
+        actor, crit = nets()
+        init = checkpoint.save(tmp_path / "init.pt", actor, crit)
+        monkeypatch.setattr(checkpoint, "DIR", tmp_path)
+        monkeypatch.setattr(checkpoint, "RANDOM", init)
+        base = ["--init", str(init), "--battles", "16", "--steps", "4", "--updates", "4", "--minutes", "3",
+                "--device", "cpu", "--no-eval", "--mix", '{"nearest": 1.0}', "--drills", "0.5",
+                "--drill-weights", '{"kiting": 1}', "--drill-bank", "16", "--bank", "8", "--max-units", "4",
+                "--print-every", "1", "--drill-teach", "auto", "--drill-teach-cap", "1.0", "--drill-teach-k", "1.0"]
+        args = run.parser().parse_args(["--name", "auto"] + base)
+        prior = {"kiting": {"win_rate": 0.0, "scripts": {"skilled": {"win_rate": 1.0}}},
+                 "counter": {"win_rate": 0.0, "scripts": {"skilled": {"win_rate": 1.0}}}}
+        auto = teach_auto.Auto(args.drill_teach_k, args.drill_teach_cap, args.drill_teach_weight, prior, "test")
+        seen = []
+
+        def hook(actor_, critic_, minute, update):
+            seen.append(update)
+            if update == 2:                                       # the network matches the script now
+                auto.observe({"kiting": {"win_rate": 1.0, "scripts": {"skilled": {"win_rate": 1.0}}}})
+        _, summary, out = run.train(args, (1e-6, hook), teacher=auto)
+        assert auto.names == ("kiting",)                           # the READY drills the run plays only
+        rows = [json.loads(x) for x in (out / "log.jsonl").read_text(encoding="utf-8").splitlines()]
+        k = [r["teach"]["kiting"] for r in rows]
+        assert [x["weight"] for x in k] == [0.15] * 4 and seen[:2] == [1, 2]
+        assert k[0]["share"] == 1.0 and k[0]["labelled"] == 1.0 and k[0]["units"] > 0
+        assert k[-1]["share"] == 0.0 and k[-1]["labelled"] == 0.0 and k[-1]["units"] > 0
+        # the run alone: the prior from the init's files (none here: the default)
+        _, _, out2 = run.train(run.parser().parse_args(["--name", "auto2"] + base))
+        first = json.loads((out2 / "log.jsonl").read_text(encoding="utf-8").splitlines()[0])["teach"]["kiting"]
+        assert first["share"] == 0.5                               # half the cap (1.0)
+        # test5's blocks
+        rep = test5.teacher(out, 0, 4)
+        assert 0 <= rep["kiting"]["labelled"] <= 1
+        point = {"teach_auto": auto.history[-1], "teach": rep}
+        lines = test5.auto_block([{"teach_auto": auto.history[0]}, point], ["min 0", "min 5"])
+        assert "min 0:" in lines and "min 5:" in lines
+        assert any(x.startswith("| kiting | 1.000 | 1.000 | 0.000 | 1.00 → 0.00 |") for x in lines)
+        assert test5.auto_block([{}, {}], ["a", "b"]) == []
+        # a run with no READY drill
+        bad = run.parser().parse_args(["--name", "bad"] + [x for x in base] + ["--drills", "0"])
+        with pytest.raises(SystemExit):
+            run.train(bad)

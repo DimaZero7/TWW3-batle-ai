@@ -18,7 +18,9 @@
   chunk began, emptied where a new battle begins (recurrent PPO, as R2D2's stored state).
 * The drills' teacher (update's teach=, run.py --drill-teach; tools/nn/train/drills/teach.py): with
   labels in the batch, + weight x the cross-entropy of the policy against the drill's skilled script on
-  the labelled units of that drill's battles; its term and the agreement are logged per drill.
+  the labelled units of that drill's battles (over all its units: only a share of its battles may be
+  labelled, the adaptive teacher's, run.py --drill-teach auto); its term and the agreement are logged per
+  drill.
 """
 from dataclasses import dataclass
 
@@ -201,7 +203,7 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
     critic.train()
     kinds = ("kind", "point", "target", "run") + (("ability",) if batch["action"].ability is not None else ())
     taught = batch.get("teach")
-    teach_acc = {n: [0.0] * 6 for n in taught["names"]} if taught else {}
+    teach_acc = {n: [0.0] * 7 for n in taught["names"]} if taught else {}
     for _ in range(cfg.epochs):
         order = torch.randperm(R, device=adv.device)
         for idx in order.split(max(1, cfg.minibatch // T)):
@@ -239,8 +241,10 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                     imitation = torch.zeros((), device=adv.device)
                     if taught:
                         label = hd.Action(*(_rows(getattr(taught["action"], k), pidx) for k in ("kind", "point", "target", "run")))
+                        picked = _rows(taught["picked"], pidx) if taught.get("picked") is not None else None
                         imitation, sums = drill_teach.terms(logits, label, _rows(taught["valid"], pidx),
-                                                            _rows(taught["drill"], pidx), taught["names"], teach)
+                                                            _rows(taught["drill"], pidx), taught["names"], teach,
+                                                            picked)
                         for name, v in sums.items():
                             teach_acc[name] = [x + y for x, y in zip(teach_acc[name], v)]
                 vl = ((critic(cobs) - _rows(ret, pidx)) ** 2).mean()
@@ -270,7 +274,7 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
     out = {k: v / max(1, n) for k, v in stats.items()}
     out["minibatches"] = n
     if taught:
-        out["teach"] = drill_teach.summary(teach_acc, teach)
+        out["teach"] = drill_teach.summary(teach_acc, teach, taught.get("shares"))
     out["reward"] = float(batch["reward"].sum(0).mean())
     out["value_mean"] = float(batch["value"].mean())
     out["return_mean"] = float(ret.mean())

@@ -10,7 +10,10 @@ same slot (the network's unit index is the state's slot, decide.to_orders); run.
 weight(t) x the cross-entropy of the policy against the label (heads.log_prob of the label: kind,
 point for move / withdraw, target for attack, run for move / attack; no ability) on those units
 only, the weight per drill going linearly from --drill-teach's value to 0 over
---drill-teach-minutes of training (a hint, not a leash). Logged per drill: the term (ce) and the
+--drill-teach-minutes of training (a hint, not a leash). The adaptive teacher (run.py --drill-teach auto,
+tools/nn/train/teach_auto.py) instead keeps the weight fixed and labels only a share of each drill's
+battles (rollout.Battles.set_teach_shares), the term then summed over the labelled units / all the drill's
+units: the pull is weight x share. Logged per drill: the term (ce) and the
 agreement (the policy's most likely action is the label): over all labels, on the kind alone, and on
 the active labels alone (any kind but hold: for kiting the run-back, which the many hold labels of
 the approach would hide).
@@ -72,11 +75,14 @@ def weights(start, minutes, trained_min):
     return {n: float(w) * share for n, w in start.items()}
 
 
-def terms(logits, a, valid, drill, names, weight=None):
+def terms(logits, a, valid, drill, names, weight=None, picked=None):
     """(loss, sums) of a minibatch's units (logits, a, valid [S, N]; drill [S]: index into names, -1
-    none): loss = sum over drills of weight[name] x the mean cross-entropy over the drill's labelled
-    units (a zero tensor without weights); sums {name: [ce sum, agree sum, kind agree sum, units,
-    agree sum on the active labels (not hold), active units]} (floats, for the log)."""
+    none; picked [S]: the row's battle is labelled - the adaptive teacher's share, teach_auto.py; None:
+    every row) -> loss = sum over drills of weight[name] x the cross-entropy summed over the drill's
+    labelled (picked) units / ALL its valid units (so the pull is weight x the labelled share; every row
+    picked: the mean); a zero tensor without weights. sums {name: [ce sum, agree sum, kind agree sum,
+    units, agree sum on the active labels (not hold), active units, labelled units]} over all the drill's
+    valid units, labelled or not (floats, for the log)."""
     ce = cross_entropy(logits, a, valid)
     with torch.no_grad():
         hit = agree(logits, a)
@@ -86,24 +92,28 @@ def terms(logits, a, valid, drill, names, weight=None):
     sums = {}
     for i, name in enumerate(names):
         m = valid & (drill == i)[:, None]
+        lab = m if picked is None else m & picked[:, None]
         n = m.float().sum()
-        mean = (ce * m).sum() / n.clamp(min=1)
         w = (weight or {}).get(name, 0.0)
         if w:
-            loss = loss + w * mean
+            loss = loss + w * (ce * lab).sum() / n.clamp(min=1)
         sums[name] = [float((ce.detach() * m).sum()), float((hit & m).float().sum()),
                       float((kind_hit & m).float().sum()), float(n), float((hit & m & active).float().sum()),
-                      float((m & active).float().sum())]
+                      float((m & active).float().sum()), float(lab.float().sum())]
     return loss, sums
 
 
-def summary(acc, weight=None):
-    """{name: {weight, ce, agree, agree_kind, units, agree_active (None without active labels),
-    active}} of terms()' sums added up over an update."""
+def summary(acc, weight=None, shares=None):
+    """{name: {weight, ce, agree, agree_kind, units, agree_active (None without active labels), active,
+    labelled (the share of the units labelled), share (the adaptive teacher's, when given)}} of terms()'
+    sums added up over an update."""
     out = {}
-    for name, (ce, hit, kind_hit, n, act_hit, act_n) in acc.items():
+    for name, (ce, hit, kind_hit, n, act_hit, act_n, lab) in acc.items():
         out[name] = {"weight": round(float((weight or {}).get(name, 0.0)), 5),
                      "ce": round(ce / max(1.0, n), 4), "agree": round(hit / max(1.0, n), 4),
                      "agree_kind": round(kind_hit / max(1.0, n), 4), "units": int(n),
-                     "agree_active": round(act_hit / act_n, 4) if act_n else None, "active": int(act_n)}
+                     "agree_active": round(act_hit / act_n, 4) if act_n else None, "active": int(act_n),
+                     "labelled": round(lab / max(1.0, n), 4)}
+        if shares is not None and name in shares:
+            out[name]["share"] = round(float(shares[name]), 4)
     return out

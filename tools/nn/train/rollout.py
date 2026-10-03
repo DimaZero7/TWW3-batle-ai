@@ -27,7 +27,10 @@ the whole input would be ~3 GB for 1024 battles x 64 decisions.
 
 The drills' teacher (teach= {drill name: its skilled script}; tools/nn/train/drills/teach.py): at every
 decision the script labels the learner's units in that drill's battles on the same state (it does
-not act); the transition carries the labels ("teach") for PPO's imitation term.
+not act); the transition carries the labels ("teach") for PPO's imitation term. Only a share of a drill's
+battles may count (set_teach_shares: the adaptive teacher, tools/nn/train/teach_auto.py; default all):
+every battle draws a number when it starts, and it is labelled while that number is below its drill's
+share (a battle is labelled whole; a larger share keeps the battles a smaller one had).
 """
 import warnings
 
@@ -312,6 +315,10 @@ class Battles:
         used = set(np.unique(layout.opponent).tolist())
         self.teach = {league.CODE[drills.opponent(n)]: (i, f) for i, (n, f) in enumerate((teach or {}).items())
                       if league.CODE[drills.opponent(n)] in used}
+        # the share of each taught drill's battles labelled ([drills], default all) and each battle's draw [B]
+        self.teach_share = torch.ones(len(self.teach_names), device=self.device)
+        self.teach_gen = torch.Generator(device=self.device).manual_seed(seed + 7919)
+        self.teach_draw = torch.zeros(self.B, device=self.device)
         self.stats = torch.zeros(2 * (len(STAT_NAMES) + 1), 3, device=self.device)    # games, wins, seconds
         # by (opponent, the learner's role)
         self.row_attacks = None
@@ -355,6 +362,17 @@ class Battles:
         self.cur = None
         self.battles = 0
         self.timeouts = 0
+        if self.teach_names:
+            self.teach_draw = torch.rand(self.B, generator=self.teach_gen, device=self.device)
+
+    def set_teach_shares(self, shares):
+        """{drill: the share of its battles the teacher labels} (drills not given keep theirs)."""
+        for i, n in enumerate(self.teach_names):
+            if n in shares:
+                self.teach_share[i] = float(min(1.0, max(0.0, shares[n])))
+
+    def teach_shares(self):
+        return {n: float(self.teach_share[i]) for i, n in enumerate(self.teach_names)}
 
     def set_past(self, actor, untrained=False):
         self.past_actor = actor
@@ -471,7 +489,8 @@ class Battles:
 
     def _teach_labels(self, cfg, obs_r, frame):
         """The taught drills' labels of the learner rows at this decision (drills/teach.py): (Action [R, N],
-        valid [R, N], drill [R]: index into teach_names, -1 for a row of no taught drill)."""
+        valid [R, N], drill [R]: index into teach_names, -1 for a row of no taught drill, picked [R]: the
+        row's battle is among its drill's labelled share)."""
         R, N = obs_r["ctrl"].shape
         dev = self.device
         z = torch.zeros((R, N), dtype=torch.long, device=dev)
@@ -479,7 +498,7 @@ class Battles:
         valid = torch.zeros((R, N), dtype=torch.bool, device=dev)
         drill = torch.full((R,), -1, dtype=torch.long, device=dev)
         if not self.teach:
-            return a, valid, drill
+            return a, valid, drill, torch.zeros(R, dtype=torch.bool, device=dev)
         live = ~self.st.done[self.rows_learn % self.B]
         frame_r = frame_rows(frame, self.rows_learn)
         for code, (i, script) in self.teach.items():
@@ -490,7 +509,8 @@ class Battles:
                 setattr(a, f, torch.where(mine[:, None], getattr(lab, f), getattr(a, f)))
             valid = valid | sel
             drill = torch.where(mine, torch.full_like(drill, i), drill)
-        return a, valid, drill
+        picked = (drill >= 0) & (self.teach_draw[self.rows_learn % self.B] < self.teach_share[drill.clamp(min=0)])
+        return a, valid, drill, picked
 
     def _sim_step(self, parts, attacks, rb, rs, was_done):
         """One simulator step with the networks' orders `parts` and the scripts': -> (the learner rows'
@@ -612,6 +632,9 @@ class Battles:
         sim_abilities.set_rule(self.st.u, self.by_rule)
         self.bank_row = torch.where(finished, idx, self.bank_row)
         randomise.apply(self.st, finished, self.spread, self.gen)
+        if self.teach_names:                     # a new battle: a new draw for the teacher's share
+            self.teach_draw = torch.where(finished, torch.rand(self.B, generator=self.teach_gen, device=self.device),
+                                          self.teach_draw)
         state = self.st.observation()
         for s in (1, 2):
             self.mem[s] = merge_memory(self.mem[s], ob.start(state, self.setup, s), finished)
@@ -707,10 +730,13 @@ def collect(env, actor, critic, T):
     for k in ("lp", "value", "reward", "done", "attacks"):
         out[k] = torch.stack([s[k] for s in steps])
     if steps[0].get("teach") is not None:
-        # the drills' teacher: labels [T, R, N], where they count [T, R, N], the row's drill [T, R]
+        # the drills' teacher: labels [T, R, N], where they count [T, R, N], the row's drill [T, R], the
+        # row's battle labelled [T, R] (the share), the shares
         out["teach"] = {"action": hd.Action(*(torch.stack([getattr(s["teach"][0], f) for s in steps])
                                               for f in ("kind", "point", "target", "run"))),
                         "valid": torch.stack([s["teach"][1] for s in steps]),
-                        "drill": torch.stack([s["teach"][2] for s in steps]), "names": env.teach_names}
+                        "drill": torch.stack([s["teach"][2] for s in steps]),
+                        "picked": torch.stack([s["teach"][3] for s in steps]), "names": env.teach_names,
+                        "shares": env.teach_shares()}
     out["last_value"] = env.value(critic)
     return out

@@ -39,7 +39,7 @@ The first steps compile for 1–3 minutes (seconds once a run of the same shapes
 | leash | `--anchor` (0: KL weight to the reference) and `--anchor-end`, `--reference` (default `--init`), `--anchor-roll` (0 s: seconds of training between renewals of the reference), `--anchor-ema` (0 s: instead, the reference follows the actor with this half-life) |
 | reward | `--gold` (1.0), `--rout-share` (0.5), `--lord` (0.3), `--lord-rout` (0), `--idle` (2e-4), `--idle-tau` (150 s), `--idle-pause` (30 s), `--idle-step` (0.5), `--idle-cap` (20), `--idle-rate` (0), `--idle-window` (30 s), `--order-cost` (0.001), `--retarget` (0.003): [reward](#reward) |
 | opponents | `--mix` (json shares), `--pool` (8 past versions), `--pool-extra` (more checkpoints for the pool), `--eval-past`, `--eval-generated` (512) |
-| drills | `--drills` (0: share of the battles), `--drill-weights` (json; default the `READY` drills equally), `--drill-bank` (256 per drill), `--drill-teach` (json {drill: weight}: the teacher, off by default), `--drill-teach-minutes` (10): [drills](#drills) |
+| drills | `--drills` (0: share of the battles), `--drill-weights` (json; default the `READY` drills equally), `--drill-bank` (256 per drill), `--drill-teach` (`auto` or json {drill: weight}: the teacher, off by default), `--drill-teach-minutes` (10: manual), `--drill-teach-k` (0.5), `--drill-teach-cap` (0.25), `--drill-teach-weight` (0.15: auto): [drills](#drills) |
 
 ### The chain's settings
 
@@ -454,6 +454,36 @@ distance; the chasers' attack orders to the same slot), only the taught drill's 
 pure imitation on kiting battles for a short CPU run raises the agreement on new rollouts from 0.00 to
 0.54 (on the kind 0.19 → 0.87, on the run-back 0.00 → 0.45).
 
+**Adaptive teacher** (`--drill-teach auto`; `tools/nn/train/teach_auto.py`): the teacher for every
+`READY` drill the run plays, as much as the network still needs. After every evaluation (test5's drill
+block: the network's and the drill's skilled script's win rates on the same battles), per drill
+deficit = max(0, skilled − net) / skilled and share = 0 when deficit ≤ 0.05 (about one standard error of
+a 128-battle win rate: the network matches the script), else min(`--drill-teach-cap`,
+`--drill-teach-k` × deficit). The share is the part of the drill's battles the script labels: each
+battle draws a number when it starts and is labelled, whole, while the number is below its drill's
+share (a larger share keeps the battles a smaller one had); battles of no drill are never labelled.
+The weight on a labelled unit is a fixed `--drill-teach-weight`, and the term is summed over the
+labelled units / *all* the drill's units, so the pull is weight × share (share 1 = the manual teacher at
+that weight); the agreement is logged over all the drill's units, labelled or not. Until the run's
+first evaluation the shares come from the previous numbers: test5's "before" evaluation of the
+starting network, else the init checkpoint's own test5 evaluation (`m<minute>.pt` → its
+`eval_m<minute>.json` / report.json's trend / after.json; a test5 run's `latest.pt` → that folder's
+after.json), else half the cap. The defaults come from the manual kiting run (w 0.15 → 0 over 15 min on
+every kiting battle): kiting went from win 0.02 to 0.98 within 5 min — in the training log between
+updates 13 and 19, ~3.5 min at w ≈ 0.13, about 0.47 weight-minutes of pull — and stayed 1.00 after the
+weight reached 0, with no loss in normal play: a push, not a leash, is all a drill needs, and that run
+gave ~2.4× the pull it needed. Weight 0.15 is what worked; cap 0.25 gives a drill as far behind as
+kiting 0.0375 of pull (~0.47 weight-minutes in ~12.5 min, within one 15-min run) while ≥ 75 % of every
+drill's battles stay pure PPO; k 0.5 reaches the cap from a deficit of 0.5, below it the pull falls with
+the gap (counter's 0.30 → 0.15). If a kiting-like gap does not close within ~15 min, the cap goes up
+first. Reported: at the start of the run and under every printed update ("teacher … share … labelled"),
+and in test5 a table per evaluation point — drill | net win | skilled win | deficit | teacher share
+(was → now) | agreement (since the last point) — in report.json / trend.md and the evaluation's json
+("teach_auto"). Checks: `tests/tools/test_nn_teach_auto.py` (the rule, the cap, the dead zone, the
+state across evaluations, the prior's files, the table; .venv) and `test_nn_drill_teach.py` (torch:
+only drill battles are labelled, whole battles, the share's draw, the term's normalisation, a run whose
+evaluation hook switches a matched drill off).
+
 **Drill metrics** (`drills/metrics.py`): per battle, over our standing units' seconds, the share
 attacking the correct target / a bad one (its hard counter) / another enemy, the other order kinds,
 the share in melee, and the median battle time a unit's attack order first goes to its correct
@@ -811,5 +841,5 @@ opponents in one batch); `test5`'s report, trend, liveliness and faction blocks,
 their cache, the version hash, a shrunk batch playing its battles as the whole one does.
 `tests/tools/test_nn_skill.py`, `test_nn_capacity.py`, `test_nn_matchups.py` (numpy): the rating,
 pairs, margins, pair gold, forgetting and the verdict, matchups. `tests/tools/test_nn_cadence.py`:
-the cadence. `tests/tools/test_nn_drills.py` and `test_nn_drill_*.py`: the drill framework, the teacher, frames,
+the cadence. `tests/tools/test_nn_drills.py`, `test_nn_drill_*.py` and `test_nn_teach_auto.py`: the drill framework, the teacher, frames,
 scripts and metrics. `tests/tools/test_nn_gate.py`: the gate's pairs and liveliness from recordings.

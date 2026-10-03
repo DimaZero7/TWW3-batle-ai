@@ -30,7 +30,10 @@ a test on a busy GPU takes longer but learns as much; --minutes only caps the ti
 
 With the drills' teacher (`-- --drill-teach '{"kiting": 0.5}'`, run.py) a "teacher" block per taught
 drill from the training log: the imitation weight, its cross-entropy and the agreement (the policy's
-most likely action = the skilled script's label) over the updates since the last point.
+most likely action = the skilled script's label) over the updates since the last point. With the
+adaptive teacher (`-- --drill-teach auto`, tools/nn/train/teach_auto.py) the test makes it: its first
+shares from the "before" evaluation's drills, new ones after every evaluation (the hook), and per point a
+table drill | net win | skilled win | deficit | teacher share (was -> now) | agreement.
 
 Two more blocks (measured only): "liveliness" per opponent and role (order changes, attack-target
 switches, A->B->A flips, move-point jitter, twitching units out of melee, the units' own target
@@ -57,7 +60,7 @@ from pathlib import Path
 import torch
 
 from tools.nn.train import cadence as cad
-from tools.nn.train import capacity, checkpoint, evaluate, matchups, run, skill
+from tools.nn.train import capacity, checkpoint, evaluate, matchups, run, skill, teach_auto
 
 OUT = checkpoint.DIR / "test5"
 LOCK = checkpoint.DIR.parent / "gpu-train.lock"
@@ -158,6 +161,8 @@ def teacher(run_dir, since, until):
         out[name] = {"weight": mean("weight"), "ce": mean("ce"), "agree": mean("agree"),
                      "agree_first": xs[0]["agree"], "agree_last": xs[-1]["agree"], "agree_kind": mean("agree_kind"),
                      "agree_active": round(hit / act, 4) if act else None, "updates": len(xs)}
+        if all("labelled" in x for x in xs):
+            out[name]["labelled"] = mean("labelled")
     return out or None
 
 
@@ -172,6 +177,7 @@ def teach_block(points, heads, join=None):
     for n in names:
         get = (lambda p, k: ((p.get("teach") or {}).get(n) or {}).get(k))
         for title, cell in (("weight (mean)", lambda p: f("{:.3f}", get(p, "weight"))),
+                            ("share of the units labelled (mean)", lambda p: f("{:.3f}", get(p, "labelled"))),
                             ("imitation cross-entropy (mean)", lambda p: f("{:.3f}", get(p, "ce"))),
                             ("agreement, policy argmax = script (first / last update)",
                              lambda p: f"{f('{:.3f}', get(p, 'agree_first'))} / {f('{:.3f}', get(p, 'agree_last'))}"),
@@ -182,6 +188,21 @@ def teach_block(points, heads, join=None):
     return (["", "the drills' teacher (run.py --drill-teach; training batch, run.py log):", "",
              "| teacher | " + " | ".join(heads) + " |", "|---" * (len(heads) + 1) + "|"]
             + [f"| {t} | " + " | ".join(c) + " |" for t, c in rows])
+
+
+def auto_block(points, heads):
+    """The adaptive teacher's tables (teach_auto.table), one per point that has one: the drill numbers of
+    that evaluation and the shares chosen from them; [] when no point has one."""
+    if not any(p.get("teach_auto") for p in points):
+        return []
+    lines = ["", "the drills' adaptive teacher (run.py --drill-teach auto; tools/nn/train/teach_auto.py): per "
+             "evaluation the network's and the skilled script's drill win rates, deficit = max(0, skilled - net) / "
+             "skilled, the share of the drill's battles labelled until the next point, the agreement since the "
+             "last point:"]
+    for p, h in zip(points, heads):
+        if p.get("teach_auto"):
+            lines += [""] + teach_auto.table(p["teach_auto"], f"{h}:")
+    return lines
 
 
 def metrics(res):
@@ -196,6 +217,8 @@ def metrics(res):
         out["distance"] = res["distance"]
     if res.get("teach"):
         out["teach"] = res["teach"]
+    if res.get("teach_auto"):
+        out["teach_auto"] = res["teach_auto"]
     for opp, o in res["by_opponent"].items():
         for role, x in o["roles"].items():
             if not x.get("games"):
@@ -260,7 +283,8 @@ def table(before, after):
     return (skill_block([before.get("skill"), after.get("skill")], ["before → after"], " → ") + lines
             + lively_block([before, after], ["before → after"], " → ")
             + drill_block([before, after], ["before → after"], " → ")
-            + teach_block([before, after], ["before → after"], " → "))
+            + teach_block([before, after], ["before → after"], " → ")
+            + auto_block([before, after], ["before", "after"]))
 
 
 def drill_block(points, heads, join=None):
@@ -377,7 +401,8 @@ def trend(points):
         lines += [f"| {title} | " + " | ".join(cells) + " |" for title, cells in by]
     return (lines + lively_block([m for _, m in points], [f"min {m}" for m in mins])
             + drill_block([m for _, m in points], [f"min {m}" for m in mins])
-            + teach_block([m for _, m in points], [f"min {m}" for m in mins]))
+            + teach_block([m for _, m in points], [f"min {m}" for m in mins])
+            + auto_block([m for _, m in points], [f"min {m}" for m in mins]))
 
 
 def main():
@@ -429,6 +454,20 @@ def test(args, rest):
     points = [(0, metrics(before))]
     run_log = checkpoint.DIR / "runs" / targs.name
     last = [0]                                   # the update of the last evaluation point
+    # the adaptive teacher: first shares from the "before" drills (else the init's files), new after every point
+    auto = None
+    if targs.drill_teach == "auto":
+        prior = ((before["drills"], "test5 before") if before.get("drills") else teach_auto.prior(args.init))
+        auto = teach_auto.Auto(targs.drill_teach_k, targs.drill_teach_cap, targs.drill_teach_weight, *prior)
+
+    def observe(res):
+        """The adaptive teacher sees an evaluation: new shares; its table goes into the evaluation."""
+        if auto is None:
+            return
+        if auto.history and not points[0][1].get("teach_auto"):
+            before["teach_auto"] = points[0][1]["teach_auto"] = auto.history[0]
+        agree = {n: v.get("agree") for n, v in (res.get("teach") or {}).items()}
+        res["teach_auto"] = auto.observe(res.get("drills"), agree)
 
     def hook(actor, critic, minute, update):
         actor.eval()
@@ -436,6 +475,7 @@ def test(args, rest):
         res["update"] = update
         res["distance"] = distance(run_log, last[0], update)
         res["teach"] = teacher(run_log, last[0], update)
+        observe(res)
         last[0] = update
         m = f"{minute:g}"
         checkpoint.save(out / f"m{m}.pt", actor, critic, targs.preset, {"minute": minute, "update": update,
@@ -445,11 +485,14 @@ def test(args, rest):
         print(f"evaluation at minute {m} (update {update}): {res['seconds']} s", flush=True)
         print("\n".join(trend(points)), flush=True)
 
-    actor, summary, run_dir = run.train(targs, (args.every, hook) if args.every else None)
+    actor, summary, run_dir = run.train(targs, (args.every, hook) if args.every else None, teacher=auto)
     actor.eval()
     after = evaluation(actor, args, device, cadence)
     after["distance"] = distance(run_dir, last[0], summary["updates"])
     after["teach"] = teacher(run_dir, last[0], summary["updates"])
+    observe(after)
+    if auto is not None:
+        (out / "before.json").write_text(json.dumps(before, indent=1), encoding="utf-8", newline="\n")
     (out / "after.json").write_text(json.dumps(after, indent=1), encoding="utf-8", newline="\n")
     if args.every:
         m = f"{args.minutes:g}"
