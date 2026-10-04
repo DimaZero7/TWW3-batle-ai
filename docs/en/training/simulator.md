@@ -67,7 +67,10 @@ slot for attack; `run` — run or walk; `ability` — the unit's ability slot to
 optional: orders made without it get −1; independent of `kind`). All `[B, N]`. A unit in melee
 leaves the fight on withdraw, or on a move to a point 10 m or more away (`contact.leave_m`, any
 unit): it strikes nobody and is not held in place, while the enemies in contact go on striking
-it. As in the game: a melee unit moving away deals ~6 % of its attack rate and takes ~1.7× the
+it. A missile unit is first pinned: it stays where it is, in contact and struck, for `contact.pin_s`
+5 s, then walks out (the game: our caught shooters told to move away get out after 6–7 s, still in
+melee 3 s later 0.85; the simulator walked them out in ~2 s; melee units already stay as long as in
+the game, their enemies follow them). As in the game: a melee unit moving away deals ~6 % of its attack rate and takes ~1.7× the
 damage ([measurements](measurements.md#leaving-melee)); before, the simulator let a unit under
 such a move fight on at full rate, and the network learned to use that. A unit without a missile
 weapon standing in melee under hold (no attack order) strikes at `contact.hold_rate` 0.5 of its rate,
@@ -111,7 +114,7 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 | A lord's blow | hits up to `splash` (4) men | DB; agrees with the measured 0.36 kills a second |
 | Charge | the charge bonus to attack and damage, fading over 13 s; a unit that meets the enemy running hits ×(1 + 1.5 × its speed share) for those 13 s; one that did not charge brings its men in over 20 s. Bracing: a unit with `charge_reflection` (spearmen, clanrats) standing still (under 0.5 m/s) meets an infantry charge within `bracing_attack_angle` (80°) of its front as a charge of the same speed | DB (13 s, 80°, the attribute); 1.5 fitted to the first 15 s of the whole battles and the pairs, 20 s to the pairs; bracing measured (whole battles: a braced unit charged head-on loses 0.8× what its charger loses) |
 | Men lost | blows that do not kill wound: men share = max(1 − g × (1 − health share), health share), g = (hits to kill)^−0.5 | calibrated on men against health in the pairs |
-| Shooting | from standing only; first shot 3.3 s (arrows) / 4.3 s (sling) after halting; the men reload all the time (moving too) and every loaded man shoots as soon as the unit can, so the first shot after a halt or a pause is a volley of the whole unit, then a shot per man every 11.0 / 11.5 s (every loaded man starts reloading when the unit fires, also those whose line is blocked); range from the formation's edge | measured |
+| Shooting | from standing only; first shot 3.3 s (arrows) / 4.3 s (sling) after halting; a new order (another kind or another attack target) makes the unit aim again (`missile.aim_reset_on_order`); the men reload all the time (moving too) and the unit shoots once they are all loaded (`missile.volley_load` 1): whole-unit volleys 11.0 / 11.5 s apart (every loaded man starts reloading when the unit fires, also those whose line is blocked; the `fire` flag stays on between volleys); range from the formation's edge | measured (the range; the battles: a halt gives 0.55–0.76 projectiles a man in the next 12 s, the old volley-then-trickle 1.5–1.7, volleys 1.0; a firing unit given a new order shoots 0.6–0.75 as much in the next 10 s) |
 | Hits | 0.42 arrows, 0.47 sling at the edge of range; ×1.29 at 70 m, ×1.12 at 90 m | measured; the distance factor from the range test |
 | Shield, resistance | a shield blocks its chance within 60° of the front; missile resistance of the passport | DB |
 | A lord as a target | 0.43 of the unit rule | measured: ~33k shots at lords out of melee for the whole flight (General by arrows ~0.5, by sling ~0.37, Warlord by arrows ~0.32) |
@@ -120,7 +123,7 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 | Spill in melee | of the hits aimed at a unit in melee, each unit of the target's side also in melee takes 0.19 within 15 m, 0.047 at 15–30 m, 0.035 at 30–60 m (centres) | measured (`build/nn-sim/flank/spill_melee.py`): HP of units in melee, not shot at themselves and whose side does not shoot their opponents, regressed on the melee rule and on the hits aimed at their neighbours in melee (74k seconds, 15k with a shot neighbour; 28 game-AI battles 0.23 / 0.09, net runs 0.19 / 0.05) |
 | Target at will | the order's target if in range, else the nearest standing enemy | as the game ([missile damage](../game/units/missile-damage.md)) |
 | Line of fire (direct fire) | only for direct (flat) fire, the passport's `missile.direct` (trajectory `low`: the Free Company Militia's pistols); the shooter's men aim at the target's centre, a friendly unit between (nearer than the target's edge) blocks the lines passing through its width across the line, widened by 1.2 man radii (friends count 2.2× wider); blocked men do not shoot; at 75 % blocked the unit takes the next target in range, or holds fire. Arrows and slings arc over friends; enemies in the way do not block; no fire over friends from higher ground (flat map) | DB (`projectile_friendly_fire_man_radius_coefficient` 2.2, `unit_firing_line_of_sight_considered_obstructed_ratio` 0.75, trajectory); the knowledge base ([missiles](../game/mechanics/missiles.md)); the geometry is ours, not measured |
-| Fire whilst moving | a unit with `mounted_fire_move` (the militia) aims and shoots while it moves | DB attribute |
+| Fire whilst moving | a unit with `mounted_fire_move` (the militia) aims and shoots while it moves, at targets within `missile.move_fire_arc_deg` 90° of the way it walks | DB attribute; the arc measured (our militia on the move: 0.52 of its full rate toward the enemy, 0.31 across, 0.16 away) |
 | Pistols (estimate) | hit rate 0.5 at the edge of range (×1.12–1.29 at 60–90 m), reload 10.8 s, first shot 3.8 s | estimate from the projectile's calibration area (2.0 m at 65 m against the arrow's 3.7 m at 95 m), not measured: `sim.json` missile.musket_why |
 | Morale | points: leadership + effects; MoralePercent = points / leadership; moves 1 point or 15 % of the gap per 0.5 s | DB; the step measured (+2 points a second in every recording) |
 | Morale effects | lord +4 within 70 m, fading to 0 at 105 m; lord died or shattered: his aura only (`lord_fall` 0 / 0); neighbour within 120 m +5; casualties −2…−74; recent casualties −6…−80 (last 30 s, of the whole health); winning / losing the melee +3/+6/+8, −3/−8 (damage ratio 1.5 / 2.5 / 4); first struck in the flank −6, rear −14 for one 0.5 s tick; the army beaten as a whole (enemy strength ≥ 2.6× own, own ≤ 0.22 of the start) −120; flanks exposed (an enemy threatens the left, right or rear: `lf`, `rf`, `bf`) −3, two or more −6; routing friends −3 each; routing enemies +2.5 each; under fire −5; very tired −2, exhausted −6; a stronger enemy within 70 m −3 | DB points; window, ratios calibrated; attacked in the flank / rear measured ([flanks](#flanks-rear-and-charges-in-whole-battles)); a lord's fall measured in 75 recorded falls ([lords](#lords)) |
@@ -407,9 +410,12 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
   against 22.9) — most one against one with our unit (+77 %) and where its own shooters fire into that
   melee (+30–55 %: friendly fire and spill in melee). And the simulator kills a quarter fewer of our men
   than the game for the same health (more wounded).
-- **Units pinned in melee.** A caught missile unit is still in melee 3 s later 75–81% of the time in
-  the game; in the sim it walks out in about 2 s. ai_like does not hunt shooters as the game AI does
-  (twice as often in the game).
+- **Shooters in battle fire slower than on the range.** Standing in range for 20 s and more, the
+  game's shooters fire 0.05–0.07 projectiles a man a second (arrows 0.06–0.074, slings ~0.06), the
+  simulator the range's 0.087–0.091; the first shot after a halt in battle comes 4–6 s after it (the
+  range 2–3 s, on the same 1 s count). Not modelled: the range's numbers stay. ai_like does not hunt
+  shooters as the game AI does (twice as often in the game), and the game AI's militia never shoots
+  on the move (ours does; the simulator lets both).
 - **The enemy lord breaks too easily.** In the sim it breaks in 97% of these battles (game 25%);
   chasers catch skirmishers 57% of the time (game 32%).
 - **Order latency** is 0.6–0.8 s of game time in small battles; the sim uses a fixed 0.36 s.
@@ -470,6 +476,7 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
 | A lord as a target at 0.9 of the unit rule | its 2-second loss windows overlapped and counted each loss twice | 0.43 over ~33k shots |
 | Leaving melee for missile units only | network units under a move away fought on at full rate (the game: ~6 % of the attack rate) | `contact.leave_m` 10 m for every unit |
 | Hold in melee at the measured 0.75 (one against one: 0.66–0.80) | n3 against ai_like on the 8 gate battles +0.19 → +0.07 (the game −0.27), but held units still killed 0.26–0.27 a second against the game's 0.17 (they touch 2.3 enemies and strike each), both sides replayed −0.100 → −0.065 | 0.5: kills 0.18, n3 −0.08, replay −0.089 (same winner 7 of 8 in both) |
+| Pinning every unit leaving melee for 5 s (melee units too) | melee units still in melee 3 s later 0.94 (the game 0.81; without the pin 0.82), escape 0.029 a second (game 0.041, without 0.048) | missile units only (`contact.pin_s`) |
 
 ## Surprises
 

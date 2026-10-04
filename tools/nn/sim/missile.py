@@ -4,10 +4,11 @@ A missile unit shoots when it stands still, is not in melee, has projectiles and
 range (from its formation's edge to the target's: the game's AI shoots from 118-135 m between
 centres with a 120-130 m range). It first aims for aim_s seconds after halting (measured 3.3 s arrows, 4.3 s
 sling); then every man shoots once per reload (measured 11.0 / 11.5 s, longer than the passport).
-Volleys: the men reload all the time (moving too) and every loaded man shoots as soon as the unit
-can, so the first shot after halting or after a pause is a volley of the whole unit (measured:
-archers on the range, build/archer-range/runs 28.09.2026, ~80 of 90 arrows within 1 s of the first,
-then ~10 s nothing); a unit shooting on keeps the steady rate men / reload.
+Volleys: the men reload all the time (moving too) and the unit shoots once missile.volley_load of them
+(1: all) are loaded, so it fires whole-unit volleys one reload apart (measured: archers on the range,
+build/archer-range/runs 28.09.2026, ~80 of 90 arrows within 1 s of the first, then ~10 s nothing; in
+battle a halt gives about one volley in the next 12 s, not a volley and then the steady rate at once).
+A new order (another kind or another attack target) makes it aim again (missile.aim_reset_on_order).
 
     hits   = shots x hit_rate x distance factor (x single_entity_factor at a lone man); aimed
              at a unit in melee, a measured share lands on the shooter's own units in contact
@@ -18,7 +19,8 @@ then ~10 s nothing); a unit shooting on keeps the steady rate men / reload.
               (within shield_defence_angle_missile, 60 deg); x (1 - missile resistance)
 
 Target: the ATTACK order's target if in range, else the nearest standing enemy in range, else
-the nearest routing one (fire at will; into melee too: allow_fire_at_will_into_melee 1).
+the nearest routing one (fire at will; into melee too: allow_fire_at_will_into_melee 1). On the move
+(fire whilst moving) only targets within missile.move_fire_arc_deg of the facing (battle.py).
 
 Line of fire (direct fire only: projectiles with trajectory `low`, the passport's missile.direct;
 arrows and slings arc over friends): the shooter's men aim at the target's centre; a friendly unit

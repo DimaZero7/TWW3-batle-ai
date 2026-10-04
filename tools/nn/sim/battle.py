@@ -45,6 +45,11 @@ def step(st, orders, params=None, dt=None):
     point = (kind == O.MOVE) | (kind == O.WITHDRAW)
     u["ox"] = torch.where(take & point, orders.x, u["ox"])
     u["oz"] = torch.where(take & point, orders.z, u["oz"])
+    # A new order (another kind, or another attack target) makes a shooter aim again (missile.aim_reset_on_order;
+    # measured: a firing unit given one in the game shoots its next 10 s at 0.6-0.75 of the rate of one given none).
+    if cal["missile"].get("aim_reset_on_order"):
+        changed = (kind != u["order_kind"]) | (tgt != u["order_target"])
+        u["aim"] = torch.where(changed, torch.zeros_like(u["aim"]), u["aim"])
     u["order_kind"], u["order_target"], u["order_run"] = kind, tgt, run
 
     # --- contacts ---
@@ -62,6 +67,13 @@ def step(st, orders, params=None, dt=None):
     striker = standing & ~leaving
     strike = touch & striker[:, :, None]
     engaged = standing & (touch & standing[:, None, :]).any(2)
+    # Pinned: a missile unit leaving melee stays held where it is (not striking, struck) until it has been leaving
+    # in contact for contact.pin_s seconds (measured in the game, config/nn/sim.json contact.pin_why; melee units
+    # already stay as long as in the game: their enemies follow them; a lone man is not held).
+    pin_s = float(cal["contact"].get("pin_s", 0.0))
+    stuck = leaving & engaged & (u["men0"] > 1) & (u["range"] > 0)
+    pinned = stuck & (u["leave_s"] < pin_s)
+    u["leave_s"] = torch.where(stuck, u["leave_s"] + dt, torch.zeros_like(u["leave_s"]))
     speed = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)
     # --- innate effects (attributes, passives, game-fired timed passives: config/nn/effects.json): their
     # stats and rule flags hold for this step ---
@@ -99,19 +111,33 @@ def step(st, orders, params=None, dt=None):
     ready = standing & ~engaged & (u["a"] > 0) & (u["range"] > 0) & still
     u["aim"] = torch.where(ready, u["aim"] + dt, torch.zeros_like(u["aim"]))
     can = ready & (u["aim"] >= u["aim_s"])
-    m_target = missile.choose_target(u, pw, can, tgt, kind == O.ATTACK)
+    # On the move (fire whilst moving) a unit shoots only at targets within missile.move_fire_arc_deg of its
+    # facing (the way it walks): walking away it holds fire (measured, config/nn/sim.json missile.move_fire_why).
+    arc = float(cal["missile"].get("move_fire_arc_deg", 180.0))
+    on_move = u["fire_move"] & (speed >= 0.2)
+    behind = (on_move[:, :, None] & (pw["rel_i"].abs() > arc * geometry.DEG)) if arc < 180 else None
+    m_target = missile.choose_target(u, pw, can, tgt, kind == O.ATTACK, exclude=behind)
     # direct fire needs a clear line past friends (missile.py clear_shot); arcing fire: unchanged
     m_target, clear = missile.clear_shot(u, pw, m_target, can, tgt, kind == O.ATTACK, params)
-    # the men reload all the time; every loaded man shoots when the unit can (missile.py: the first
-    # shot after halting is a volley, then the steady rate). When the unit fires, every loaded man
+    if behind is not None:
+        back = behind.gather(2, m_target.clamp(min=0)[:, :, None]).squeeze(2) & (m_target >= 0)
+        m_target = torch.where(back, torch.full_like(m_target, -1), m_target)
+    # the men reload all the time (moving too); the unit shoots when it can and enough of its men are loaded
+    # (missile.py: whole-unit volleys one reload apart). When the unit fires, every loaded man
     # starts reloading, those whose line is blocked too (clear_shot): else the blocked men stayed
     # loaded and fired on the next steps, and a screen that blocks half the men blocked nothing.
     unready = (u["unready"] - dt / u["reload"].clamp(min=1e-6)).clamp(min=0)
-    shots, hp_missile, shit = missile.volley(u, pw, m_target, dt, params, contact=touch, clear=clear,
-                                             loaded=1 - unready)
+    loaded = 1 - unready
+    # missile.volley_load: the unit shoots only once this share of its men is loaded (1: whole-unit volleys one
+    # reload apart, as the game; 0: every loaded man at once, the volley then a steady trickle).
+    load_min = float(cal["missile"].get("volley_load", 0.0))
+    # (between volleys the unit is still shooting at its target: the game's IsFiringMissiles, the `fire` flag)
+    volley_target = torch.where(loaded >= load_min - 1e-3, m_target, torch.full_like(m_target, -1))
+    shots, hp_missile, shit = missile.volley(u, pw, volley_target, dt, params, contact=touch, clear=clear,
+                                             loaded=loaded)
     u["unready"] = torch.where(shots > 0, torch.ones_like(unready), unready)
     u["a"] = (u["a"] - shots).clamp(min=0)
-    firing = shots > 0
+    firing = (m_target >= 0) & ((shots > 0) | (load_min > 0))
 
     # --- damage, men, kills ---
     dmg = hp_melee + hp_missile
@@ -257,7 +283,7 @@ def step(st, orders, params=None, dt=None):
     want = torch.where(closing, u["walk"], want)
     moving = moving | closing
     vx, vz = movement.velocity(u, gx, gz, want, moving, dt)
-    locked = engaged & ~leaving & ~closing
+    locked = engaged & (~leaving | pinned) & ~closing
     stop = locked | ~alive
     vx = torch.where(stop, torch.zeros_like(vx), vx)
     vz = torch.where(stop, torch.zeros_like(vz), vz)

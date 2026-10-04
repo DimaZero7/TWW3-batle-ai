@@ -561,7 +561,7 @@ class TestBattle:
         """contact.leave_m: any unit (missile or melee) told to move that far walks out of the fight."""
         moved = {}
         for leave in (0.0, 10.0):
-            params = P.with_cal("contact", leave_m=leave)
+            params = P.with_cal("contact", leave_m=leave, pin_s=0.0)
             st = face_off(key, SPEAR)
             H = st.N // 2
             o = replay.hold(st)
@@ -575,6 +575,30 @@ class TestBattle:
                 battle.step(st, o, params)
             moved[leave] = x0 - float(st.u["x"][0, 0])
         assert moved[0.0] == pytest.approx(0.0, abs=0.5) and moved[10.0] > 10
+
+    @pytest.mark.parametrize("key", [ARCHER, SPEAR])
+    def test_a_missile_unit_leaving_melee_is_pinned_for_pin_s_a_melee_unit_is_not(self, key):
+        """contact.pin_s: a missile unit told to leave melee stays held (in contact, struck) for pin_s seconds,
+        then walks out; a melee unit walks out at once (its enemies follow it, as in the game)."""
+        params = P.with_cal("contact", leave_m=10.0, pin_s=5.0)
+        st = face_off(key, SPEAR)
+        H = st.N // 2
+        o = replay.hold(st)
+        o.kind[0, H], o.target[0, H] = O.ATTACK, 0
+        battle.step(st, o, params)
+        x0, hp0 = float(st.u["x"][0, 0]), float(st.u["hp_abs"][0, 0])
+        xs = []
+        for _ in range(20):
+            o = replay.hold(st)
+            o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = O.MOVE, -200.0, 0.0, True
+            battle.step(st, o, params)
+            xs.append(x0 - float(st.u["x"][0, 0]))
+        held = int(5.0 / params.dt)
+        if key == ARCHER:
+            assert max(xs[:held]) == pytest.approx(0.0, abs=0.01) and float(st.u["hp_abs"][0, 0]) < hp0
+            assert xs[-1] > 10 and float(st.u["leave_s"][0, 0]) == 0      # out: the count is over
+        else:
+            assert xs[2] > 1 and xs[-1] > 10
 
     def test_a_melee_unit_moving_away_strikes_nobody_and_is_still_struck(self):
         params = P.with_cal("contact", leave_m=10.0)
@@ -841,15 +865,38 @@ class TestSecondWave:
         H = st.N // 2
         assert int(st.u["target"][0, 0]) == H + 1 and bool(st.u["fire"][0, 0])
 
-    def test_fire_whilst_moving(self):
-        def walk(st):
-            o = replay.hold(st)
-            o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = O.MOVE, -100.0, 200.0, False
-            return o
-        moving_m, st = self._spent(MILITIA, steps=30, orders=walk)
-        assert bool(st.u["fire_move"][0, 0]) and moving_m > 0 and bool(st.u["mv"][0, 0])
-        moving_a, _ = self._spent(ARCHER, steps=30, orders=walk)
+    def test_fire_whilst_moving_only_at_targets_ahead(self):
+        """mounted_fire_move: shoots on the move, but only within missile.move_fire_arc_deg of the way it walks."""
+        def walk(x):
+            def orders(st):
+                o = replay.hold(st)
+                o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = O.MOVE, x, 0.0, False
+                return o
+            return orders
+        toward, st = self._spent(MILITIA, steps=30, orders=walk(-40.0))
+        assert bool(st.u["fire_move"][0, 0]) and toward > 0 and bool(st.u["mv"][0, 0])
+        away, st = self._spent(MILITIA, steps=30, orders=walk(-300.0))
+        assert away == 0 and bool(st.u["mv"][0, 0])
+        moving_a, _ = self._spent(ARCHER, steps=30, orders=walk(-40.0))
         assert moving_a == 0
+
+    def test_a_new_order_makes_a_shooter_aim_again(self):
+        """missile.aim_reset_on_order: another kind or another attack target restarts the aim; the same order
+        given again does not."""
+        st = scenario.build([army([(ARCHER, -100, 0, 90)], [(SLAVE, 0, -20, 270), (SLAVE, 0, 40, 270)])], P)
+        H = st.N // 2
+        for _ in range(12):
+            battle.step(st, replay.hold(st), P)
+        aim = float(st.u["aim"][0, 0])
+        assert aim > float(st.u["aim_s"][0, 0])
+        battle.step(st, replay.hold(st), P)                                        # HOLD again: aims on
+        assert float(st.u["aim"][0, 0]) == pytest.approx(aim + P.dt)
+        for params, reset in ((P, True), (P.with_cal("missile", aim_reset_on_order=0), False)):
+            s = st.clone()
+            o = replay.hold(s)
+            o.kind[0, 0], o.target[0, 0] = O.ATTACK, H + 1
+            battle.step(s, o, params)
+            assert (float(s.u["aim"][0, 0]) == pytest.approx(P.dt)) == reset
 
     def test_greatswords_cut_through_armour(self):
         """Armour-piercing greatswords (10 + 25, bonus 14 v infantry) beat armoured stormvermin faster than

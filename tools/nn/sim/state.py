@@ -130,6 +130,7 @@ INTERNAL = {
     "contact_s": ("f", "seconds in melee since the contact began"),
     "charge": ("f", "charge at the contact, 0-1 (1 = hit at full run)"),
     "aim": ("f", "seconds standing still able to shoot"),
+    "leave_s": ("f", "seconds leaving melee while still touching an enemy (contact.pin_s)"),
     "shots": ("f", "fractional shots carried to the next step"),
     "unready": ("f", "share of the men still reloading, 0-1 (0: all loaded, the start; missile.py volley)"),
     "rout_count": ("f", "times routed"),

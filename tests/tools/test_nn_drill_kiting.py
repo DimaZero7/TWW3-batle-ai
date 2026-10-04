@@ -126,9 +126,10 @@ class TestScripts:
 
 
 class TestVolley:
-    def test_the_first_shot_after_halting_is_a_volley_then_the_steady_rate(self):
-        """tools/nn/sim/missile.py: the men reload all the time, every loaded man shoots when the unit
-        can (the game: ~80 of 90 archers shoot within 1 s of the first shot, build/archer-range)."""
+    def test_the_unit_shoots_in_whole_volleys_one_reload_apart(self):
+        """tools/nn/sim/missile.py: the men reload all the time and the unit shoots once they are all loaded
+        (missile.volley_load 1; the game: ~80 of 90 archers shoot within 1 s of the first shot, then ~10 s
+        nothing, build/archer-range)."""
         st = scenario.build([{"attacker": 1, "sides": {
             1: {"faction": K.SKAVEN, "units": [D.unit(K.OURS[0], 0, 0, 0, K.OURS[2])]},
             2: {"faction": K.EMPIRE, "units": [D.unit(K.SWORDS[0], 0, 120, 180, K.WIDTH_M)]}}}])
@@ -141,9 +142,8 @@ class TestVolley:
             a = float(st.u["a"][0, 0])
             battle.step(st, O.hold(st.B, st.N), params, dt)
             fired.append(a - float(st.u["a"][0, 0]))
-        first = next(i for i, f in enumerate(fired) if f > 0)
-        assert fired[first] == pytest.approx(men, rel=1e-3)               # the whole unit at once
-        steady = fired[first + 1:]
-        rate = sum(steady) / (len(steady) * dt)
-        assert rate == pytest.approx(men / float(st.u["reload"][0, 0]), rel=0.05)
+        shots = [i for i, f in enumerate(fired) if f > 0]
+        assert len(shots) == 2 and all(fired[i] == pytest.approx(men, rel=1e-3) for i in shots)   # whole volleys
+        assert (shots[1] - shots[0]) * dt == pytest.approx(float(st.u["reload"][0, 0]), abs=dt)  # one reload apart
+        assert bool(st.u["fire"][0, 0])                                   # still shooting between them (the flag)
         assert a0 - float(st.u["a"][0, 0]) == pytest.approx(sum(fired))

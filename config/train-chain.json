@@ -19,7 +19,7 @@
     "lord-rout": 0.5,
     "entropy-target": 0.05,
     "entropy-max": 0.03,
-    "gpu-duty": 0.9,
+    "gpu-duty": 1.0,
     "mix": {"self": 0.05, "past": 0.1, "nearest": 0.35, "hold_shoot": 0.15, "hold": 0.05, "ai_like": 0.3}
   }
 }
