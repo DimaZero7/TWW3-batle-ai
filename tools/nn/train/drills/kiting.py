@@ -26,6 +26,20 @@ Broad frame (`broad`, drills.BROAD of the battles; the same situation in a messi
 Verified (256 battles, the broad frame only): naive 0.125, skilled 0.871; by part naive / skilled - no
 background 0.13 / 0.95, with background 0.12-0.13 / 0.82-0.84, with the Warlord 0.10 / 0.87, M = 2 0.17 /
 0.81, M = 3 0.09 / 0.92 (build/xfer, 04.10.2026).
+Embedded frame (`embedded`, drills.EMBED of the battles, the default: the situation inside a normal battle,
+so nothing but the situation tells it from one): a normal generated battle (tools/nn/armies, our side the
+Skaven, the enemy the Empire - the only pair with a missile unit MIN_GAP_MS faster than the other side's
+infantry; both lords, normal sizes, the arena's deployment, attacking or defending) with M = 1-2 Night Runners
+(TAG_OURS) EMB_GAP_M beyond the end of our line on one flank, EMB_BACK_M behind our front, and the clean
+frame's chasers for M (TAG_ENEMY) at the end of the enemy's front line on the same flank, marching in its line
+until one of our kiters comes within EMB_CHASE_M (then they CHASE: the situation starts as in a normal battle,
+when our shooters come near slower infantry); each side's
+formation shifted sideways by half its inserted block (centred as a normal deployment); for every inserted
+unit its side gave up the unit of nearest cost and was deployed again without them (drills.generated: a
+normal battle's unit count and gold, no hole in the lines), the gold evened (drills.balance). The enemy plays `ai_like`, its tagged chasers
+CHASE our tagged kiters once near; the check scripts play `ai_like` for our army, the kiters as the clean scripts
+(naive: hold; skilled: kite). The rest of the battle is a normal one, so the separation is in the gold
+trade (paired, same battles), not the win rate.
 Not in the frame: skavenslave slingers (run 4.2; their 7-damage stones do not break Empire infantry
 within the ammunition even kited), greatswords (armour 95: neither script breaks them), Skaven
 infantry chasing Night Runners (4.2 against 5.4: standing already wins against the slaves).
@@ -35,11 +49,16 @@ Scripts:
   run back (away from the chasers near, bent sideways and towards the map's centre near its edge)
   until it is STOP_M or farther, then halt and shoot again (short stops: every halt gives a volley
   of the men reloaded meanwhile, tools/nn/sim/missile.py).
+In an embedded battle both check scripts are `ai_like` for every unit of ours but the tagged kiters.
+The teacher (drills/teach.py) labels with `kite` (the skilled rule for every unit, tag-blind) at the
+situation's `moments` (the transfer detector's, and the run-back it keeps going) in embedded and normal
+battles; on every unit in the clean and broad frames.
 """
 import torch
 
 from tools.nn.sim import orders as O
 from tools.nn.train import drills as D
+from tools.nn.train import opponents
 
 EMPIRE, SKAVEN = "wh_main_emp_empire", "wh2_main_skv_skaven"
 # (key, run m/s, width m) - our missile unit (config/nn/units.json; width: config/nn/pools.json)
@@ -139,6 +158,54 @@ def broad(rng):
                   meta={"m": m, "sling": sling, "bg": n_bg, "lord": lord})
 
 
+# --- the embedded frame ---
+EMB_GAP_M = (6.0, 20.0)      # from the end of our line to our first kiter's edge (and of the enemy's to its chasers;
+#                              the deployment's own gap between units is 6 m, tools/nn/armies/place.py)
+EMB_LAT_GAP_M = 6.0          # between the inserted units, as in a deployed line
+EMB_BACK_M = (0.0, 25.0)     # our kiters this far behind our front line (the missile line stands ~25 m back)
+EMB_AHEAD_M = (0.0, 0.0)     # the chasers this far ahead of the enemy's front line (in it)
+EMB_CHASE_M = 180.0          # the chasers march in ai_like's line until a tagged kiter is this near (sling 140 m)
+
+
+def embedded(rng):
+    best = None
+    for _ in range(D.EMBED_TRIES):
+        m = int(rng.integers(1, 3))
+        if m == 1:
+            chasers = [SWORDS]
+        elif rng.random() < PAIR_P:
+            chasers = [SWORDS, SWORDS]
+        else:
+            chasers = [CHASERS[int(rng.integers(len(CHASERS)))] for _ in range(3)]
+        desc = D.generated(rng, SKAVEN, EMPIRE, swap={1: [OURS[0]] * m, 2: [k for k, _ in chasers]})
+        ax = D.axes(desc, 1)
+        ours, enemy = desc["sides"][1]["units"], desc["sides"][2]["units"]
+        b_ours, b_enemy = ours[0]["b"], enemy[0]["b"]
+        s = float(rng.choice([-1.0, 1.0]))
+        lat_gap = EMB_LAT_GAP_M
+        # our kiters beyond our line's end on flank s, a little behind our front
+        start = D.extent(ours, ax, s) + float(rng.uniform(*EMB_GAP_M))
+        f_k = D.front(ours, ax) - float(rng.uniform(*EMB_BACK_M))
+        w = OURS[2]
+        kiters = [D.unit(OURS[0], *ax.world(f_k, s * (start + i * (w + lat_gap) + w / 2)), b_ours, w, tag=D.TAG_OURS)
+                  for i in range(m)]
+        ours += kiters
+        D.shift(ours, ax, -s * (m * w + (m - 1) * lat_gap) / 2)
+        # the chasers beyond the same flank of the enemy's line, a little ahead of its front
+        start = D.extent(enemy, ax, s) + float(rng.uniform(*EMB_GAP_M))
+        f_c = D.front(enemy, ax, enemy=True) - float(rng.uniform(*EMB_AHEAD_M))
+        k = len(chasers)
+        enemy += [D.unit(key, *ax.world(f_c, s * (start + i * (WIDTH_M + lat_gap) + WIDTH_M / 2)), b_enemy, WIDTH_M,
+                         tag=D.TAG_ENEMY) for i, (key, _) in enumerate(chasers)]
+        D.shift(enemy, ax, -s * (k * WIDTH_M + (k - 1) * lat_gap) / 2)
+        desc["meta"] = {"m": m, "chasers": k}
+        if D.balance(desc):
+            return desc
+        if best is None or D.imbalance(desc) < D.imbalance(best):
+            best = desc
+    return best
+
+
 def guard(st, o):
     """Our melee units (the broad frame's background) hold until an enemy is within GUARD_M, then attack
     the nearest (in place on the orders o of every unit; returns o)."""
@@ -147,22 +214,55 @@ def guard(st, o):
     return D.attack(o, v.standing & (st.u["range"] <= 0) & (d < GUARD_M), i)
 
 
-def enemy(st):
-    """CHASE: every standing unit attacks (running) the nearest standing enemy missile unit, else
-    the nearest standing enemy."""
+def chase(st):
+    """CHASE: every standing unit attacks (running) the nearest standing tagged unit of the enemy (an
+    embedded battle's kiters), else the nearest standing enemy missile unit, else the nearest standing enemy."""
     v = D.View(st)
+    i_t, d_t = v.nearest(D.tagged(st, D.TAG_OURS) | D.tagged(st, D.TAG_ENEMY))
     i_m, d_m = v.nearest(v.missile)
     i_a, d_a = v.nearest()
-    tgt = torch.where(d_m < 1e9, i_m, i_a)
+    tgt = torch.where(d_t < 1e9, i_t, torch.where(d_m < 1e9, i_m, i_a))
     o = O.hold(st.B, st.N, st.device)
     return D.attack(o, v.standing & (d_a < 1e9), tgt, run=True)
 
 
+def _embed(st, clean, tag, inner):
+    """Orders: `clean` in the clean / broad battles; in the embedded ones `ai_like`, with `inner`'s orders for
+    the units tagged `tag`."""
+    emb = D.embedded_rows(st)[:, None]
+    mixed = O.merge(opponents.ai_like(st), inner, D.tagged(st, tag))
+    return O.merge(clean, mixed, emb.expand_as(st.u["tag"]))
+
+
+def enemy(st):
+    """CHASE (the clean / broad frames: every unit); in an embedded battle `ai_like`, its tagged chasers too
+    (they march in its line) until one of our tagged kiters is within EMB_CHASE_M of them, then CHASE (and
+    keep chasing while their attack order is on a tagged unit of ours)."""
+    o = chase(st)
+    v = D.View(st)
+    _, d_t = v.nearest(D.tagged(st, D.TAG_OURS))
+    u = st.u
+    on = (u["order_kind"] == O.ATTACK) & (u["order_target"] >= 0)
+    chasing = on & (u["tag"].gather(1, u["order_target"].clamp(min=0)) == D.TAG_OURS)
+    go = D.tagged(st, D.TAG_ENEMY) & ((d_t < EMB_CHASE_M) | chasing)
+    emb = D.embedded_rows(st)[:, None].expand_as(go)
+    return O.merge(o, O.merge(opponents.ai_like(st), o, go), emb)
+
+
 def naive(st):
-    return guard(st, D.hold(st))
+    """Hold, the broad frame's background guards; in an embedded battle `ai_like`, the tagged kiters hold."""
+    return _embed(st, guard(st, D.hold(st)), D.TAG_OURS, D.hold(st))
 
 
 def skilled(st):
+    """kite(); in an embedded battle `ai_like`, the tagged kiters kite."""
+    o = kite(st)
+    return _embed(st, o, D.TAG_OURS, o)
+
+
+def kite(st):
+    """The skill, tag-blind (the clean frame's skilled script; the teacher's labels): every standing missile
+    unit stands and shoots, runs back from an enemy within RUN_M until it is STOP_M away; melee units guard."""
     v = D.View(st)
     u = st.u
     x, z = u["x"], u["z"]
@@ -219,5 +319,19 @@ def transfer(st):
     return sit, applied, sit & u["m"]
 
 
+def moments(st, o):
+    """[B, N] where the teacher's orders `o` (kite) label a unit outside the clean frames: the situation
+    (transfer) and, after it, while the unit runs back on the script's word (its move order on, the script
+    says move, a slower melee enemy within STOP_M) - the run-back kept to its end."""
+    v = D.View(st)
+    u = st.u
+    sit = transfer(st)[0]
+    slower = u["run"][:, None, :] <= u["run"][:, :, None] - MIN_GAP_MS
+    chaser = v.foe & (u["range"] <= 0)[:, None, :] & slower & (v.d < STOP_M)
+    running = v.standing & v.missile & ~u["lord"] & (o.kind == O.MOVE) & (u["order_kind"] == O.MOVE) & chaser.any(2)
+    return sit | running
+
+
 DRILL = D.Drill("kiting", frame, enemy, naive, skilled,
-                "faster missile units against slower chasers: shoot, run back, shoot", broad=broad, transfer=transfer)
+                "faster missile units against slower chasers: shoot, run back, shoot", broad=broad, transfer=transfer,
+                embedded=embedded, teacher=kite, moments=moments)

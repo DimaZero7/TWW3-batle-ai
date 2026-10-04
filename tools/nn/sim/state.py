@@ -114,6 +114,9 @@ STATIC = {
     "fx": ("i", "its innate effects: bitmask over config/nn/effects.json order (tools/nn/sim/effects.py)"),
     "fxt0": ("i", "its first timed effect (index in that order, -1 none)"),
     "fxt1": ("i", "its second timed effect (-1 none)"),
+    "tag": ("i", "a drill's mark of the unit (tools/nn/train/drills: 1 our unit of the drill's situation, 2 the "
+                 "enemy's, inserted into an otherwise normal battle; 0 every other unit); set by scenario.build from "
+                 "the description's \"tag\"; the simulator and the observation never read it (only the drill's scripts)"),
 }
 
 INTERNAL = {

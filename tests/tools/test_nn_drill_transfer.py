@@ -47,15 +47,15 @@ class TestFramework:
     def test_the_clean_battles_of_a_seed_do_not_depend_on_the_broad_share(self):
         for name in D.READY:
             drill = D.load([name])[name]
-            clean = D.battles(drill, range(40), broad=0.0)
-            mixed = D.battles(drill, range(40), broad=0.5)
+            clean = D.battles(drill, range(40), broad=0.0, embed=0.0)
+            mixed = D.battles(drill, range(40), broad=0.5, embed=0.0)
             wide = [d for d, _ in mixed if d["broad"]]
             assert 5 < len(wide) < 35
             for (a, sa), (b, sb) in zip(clean, mixed):
                 assert sa == sb and not a["broad"]
                 if not b["broad"]:
                     assert a == b
-            assert all(d["broad"] for d, _ in D.battles(drill, range(8), broad=1.0))
+            assert all(d["broad"] for d, _ in D.battles(drill, range(8), broad=1.0, embed=0.0))
 
 
 class TestDetectors:
@@ -119,7 +119,7 @@ class TestDetectors:
 class TestBroadFrames:
     def test_kiting_broad_keeps_the_speed_condition_and_varies(self):
         sizes, lords = set(), set()
-        for desc, ours in D.battles(kiting.DRILL, range(64), broad=1.0):
+        for desc, ours in D.battles(kiting.DRILL, range(64), broad=1.0, embed=0.0):
             mine, theirs = desc["sides"][ours]["units"], desc["sides"][3 - ours]["units"]
             kiters = [u for u in mine if (UNITS[u["key"]].get("missile") or {}).get("ammo")]
             run = min(UNITS[u["key"]]["speed"]["run"] for u in kiters)
@@ -133,7 +133,7 @@ class TestBroadFrames:
 
     def test_counter_broad_has_the_counter_situation(self):
         n_pairs, have = set(), []
-        for desc, ours in D.battles(counter.DRILL, range(32), broad=1.0):
+        for desc, ours in D.battles(counter.DRILL, range(32), broad=1.0, embed=0.0):
             st = scenario.build([desc])
             sit = counter.transfer(st)[0][0]
             mine = st.u["side"][0] == ours
@@ -144,7 +144,7 @@ class TestBroadFrames:
 
     def test_hold_fire_broad_engages_the_lord(self):
         kinds = set()
-        for desc, ours in D.battles(hold_fire.DRILL, range(32), broad=1.0):
+        for desc, ours in D.battles(hold_fire.DRILL, range(32), broad=1.0, embed=0.0):
             enemy = desc["sides"][3 - ours]["units"]
             assert any(u["general"] for u in enemy)
             kinds |= {u["key"] for u in desc["sides"][ours]["units"]}

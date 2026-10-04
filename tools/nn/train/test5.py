@@ -197,15 +197,23 @@ def teach_block(points, heads, join=None):
 def auto_block(points, heads):
     """The adaptive teacher's tables (teach_auto.table), one per point that has one: the drill numbers of
     that evaluation and the shares chosen from them; [] when no point has one."""
-    if not any(p.get("teach_auto") for p in points):
-        return []
-    lines = ["", "the drills' adaptive teacher (run.py --drill-teach auto; tools/nn/train/teach_auto.py): per "
-             "evaluation the network's and the skilled script's drill win rates, deficit = max(0, skilled - net) / "
-             "skilled, the share of the drill's battles labelled until the next point, the agreement since the "
-             "last point:"]
-    for p, h in zip(points, heads):
-        if p.get("teach_auto"):
-            lines += [""] + teach_auto.table(p["teach_auto"], f"{h}:")
+    lines = []
+    if any(p.get("teach_auto") for p in points):
+        lines += ["", "the drills' adaptive teacher (run.py --drill-teach auto; tools/nn/train/teach_auto.py): per "
+                  "evaluation the network's and the skilled script's drill win rates (an embedded frame: gold-trade "
+                  "scores, naive 0, skilled 1), deficit = max(0, skilled - net) / skilled, the share of the drill's "
+                  "battles labelled until the next point, the agreement since the last point:"]
+        for p, h in zip(points, heads):
+            if p.get("teach_auto"):
+                lines += [""] + teach_auto.table(p["teach_auto"], f"{h}:")
+    if any(p.get("teach_normal") for p in points):
+        lines += ["", "the teacher in normal battles (run.py --teach-normal; teach_auto.Transfer): per evaluation the "
+                  "APPLIED share (higher is better) of the network and of ai_like in the normal battles, gap = "
+                  "max(0, ai_like - net) / ai_like, the share of the normal battles labelled at the drill's moments "
+                  "until the next point, the agreement since the last point:"]
+        for p, h in zip(points, heads):
+            if p.get("teach_normal"):
+                lines += [""] + teach_auto.table(p["teach_normal"], f"{h}:", ref="ai_like applied", net="net applied")
     return lines
 
 
@@ -225,6 +233,8 @@ def metrics(res):
         out["teach"] = res["teach"]
     if res.get("teach_auto"):
         out["teach_auto"] = res["teach_auto"]
+    if res.get("teach_normal"):
+        out["teach_normal"] = res["teach_normal"]
     for opp, o in res["by_opponent"].items():
         for role, x in o["roles"].items():
             if not x.get("games"):
@@ -293,10 +303,11 @@ def table(before, after):
             + auto_block([before, after], ["before", "after"]))
 
 
-def transfer_cell(p, n):
-    """'network / ai_like' transfer shares of drill n at a metrics() point (drills/transfer.py), '-' without."""
+def transfer_cell(p, n, key="share"):
+    """'network / ai_like' transfer numbers of drill n at a metrics() point (drills/transfer.py): key "share" the
+    APPLIED share, "mistake" the MISTAKE share; '-' without."""
     x = (p.get("transfer") or {}).get(n) or {}
-    g = (lambda d: "-" if not d or d.get("share") is None else f"{d['share']:.2f}")
+    g = (lambda d: "-" if not d or d.get(key) is None else f"{d[key]:.2f}")
     return "-" if not x else f"{g(x.get('network'))} / {g(x.get('ai_like'))}"
 
 
@@ -317,20 +328,29 @@ def drill_block(points, heads, join=None):
             ref_s = (f" (naive {fmt.format(ref['naive'][key])}, skilled {fmt.format(ref['skilled'][key])})"
                      if ref else "")
             rows.append((f"drill {n}: {title}{ref_s}", [join.join(cells)] if join is not None else cells))
-        # the clean and the broad frame apart (drills.BROAD), the scripts' beside
+        # the frames apart (drills.FRAMES: clean, broad, embedded; drills.BROAD, drills.EMBED), the scripts' beside
         d = (lambda p: (p.get("drills") or {}).get(n) or {})
-        if any(d(p).get("broad") for p in points):
-            cells = [f"{f('{:.3f}', (d(p).get('clean') or {}).get('win_rate'))} / "
-                     f"{f('{:.3f}', (d(p).get('broad') or {}).get('win_rate'))}" for p in points]
-            ref = next((d(p)["scripts"] for p in points if (d(p).get("scripts") or {}).get("skilled", {}).get("broad")), None)
-            ref_s = (f" (naive {ref['naive']['clean']['win_rate']:.3f} / {ref['naive']['broad']['win_rate']:.3f}, skilled "
-                     f"{ref['skilled']['clean']['win_rate']:.3f} / {ref['skilled']['broad']['win_rate']:.3f})" if ref else "")
-            rows.append((f"drill {n}: win rate clean / broad frame{ref_s}", [join.join(cells)] if join is not None else cells))
+        kinds = [k for k in drills.FRAMES if any(d(p).get(k) for p in points)]
+        if len(kinds) > 1:
+            cells = [" / ".join(f"{f('{:.3f}', (d(p).get(k) or {}).get('win_rate'))} {f('{:+.3f}', (d(p).get(k) or {}).get('gold_trade'))}"
+                                for k in kinds) for p in points]
+            ref = next((d(p)["scripts"] for p in points
+                        if all((d(p).get("scripts") or {}).get("skilled", {}).get(k) for k in kinds)), None)
+            ref_s = ("" if not ref else " (" + ", ".join(
+                f"{w} " + " / ".join(f"{ref[w][k]['win_rate']:.3f} {ref[w][k]['gold_trade']:+.3f}" for k in kinds)
+                for w in ("naive", "skilled")) + ")")
+            rows.append((f"drill {n}: win rate and gold trade by frame, {' / '.join(kinds)}{ref_s}",
+                         [join.join(cells)] if join is not None else cells))
         # the transfer: the skill in the normal evaluation battles (drills/transfer.py)
         if any((p.get("transfer") or {}).get(n) for p in points):
             cells = [transfer_cell(p, n) for p in points]
-            rows.append((f"drill {n}: TRANSFER to normal battles, network / ai_like (share of the situation's unit-s "
-                         f"applying the skill)", [join.join(cells)] if join is not None else cells))
+            rows.append((f"drill {n}: TRANSFER to normal battles, APPLIED share (higher is better), network / ai_like "
+                         f"(share of the situation's unit-s where the unit uses the skill)",
+                         [join.join(cells)] if join is not None else cells))
+            cells = [transfer_cell(p, n, "mistake") for p in points]
+            rows.append((f"drill {n}: TRANSFER to normal battles, MISTAKE share (lower is better), network / ai_like "
+                         f"(share of the situation's unit-s where the unit makes the drill's mistake)",
+                         [join.join(cells)] if join is not None else cells))
         # what our units do (drills/metrics.py): unit-seconds by order, all / the last 100 s before the limit
         def play(p):
             return ((p.get("drills") or {}).get(n) or {}).get("play")
@@ -470,6 +490,7 @@ def test(args, rest):
                                     + PROTOCOL + rest)
     cadence = cad.of_args(targs)                 # the evaluations decide as the training does
     drills.BROAD = targs.drill_broad              # the drill evaluations play the training's mix of clean / broad frames
+    drills.EMBED = targs.drill_embed              # ... and of embedded ones
     if args.before:
         before = json.loads(Path(args.before).read_text(encoding="utf-8"))
         if before.get("cadence", cad.STEP.meta()) != cadence.meta():
@@ -489,14 +510,25 @@ def test(args, rest):
         prior = ((before["drills"], "test5 before") if before.get("drills") else teach_auto.prior(args.init))
         auto = teach_auto.Auto(targs.drill_teach_k, targs.drill_teach_cap, targs.drill_teach_weight, *prior)
 
+    # the teacher in normal battles, adaptive: first shares from the "before" transfer block, new after every point
+    nauto = None
+    fixed_normal, normal_names = run.normal_drills(targs.teach_normal)
+    if normal_names and fixed_normal is None:
+        prior_t = ((before["transfer"], "test5 before") if before.get("transfer") else teach_auto.prior(args.init, "transfer"))
+        nauto = teach_auto.Transfer(targs.teach_normal_k, targs.teach_normal_cap, targs.teach_normal_weight, *prior_t,
+                                    match=targs.teach_normal_match)
+
     def observe(res):
-        """The adaptive teacher sees an evaluation: new shares; its table goes into the evaluation."""
-        if auto is None:
-            return
-        if auto.history and not points[0][1].get("teach_auto"):
-            before["teach_auto"] = points[0][1]["teach_auto"] = auto.history[0]
+        """The adaptive teachers see an evaluation: new shares; their tables go into the evaluation."""
         agree = {n: v.get("agree") for n, v in (res.get("teach") or {}).items()}
-        res["teach_auto"] = auto.observe(res.get("drills"), agree)
+        if auto is not None:
+            if auto.history and not points[0][1].get("teach_auto"):
+                before["teach_auto"] = points[0][1]["teach_auto"] = auto.history[0]
+            res["teach_auto"] = auto.observe(res.get("drills"), agree)
+        if nauto is not None:
+            if nauto.history and not points[0][1].get("teach_normal"):
+                before["teach_normal"] = points[0][1]["teach_normal"] = nauto.history[0]
+            res["teach_normal"] = nauto.observe(res.get("transfer"), agree)
 
     def hook(actor, critic, minute, update):
         actor.eval()
@@ -514,13 +546,13 @@ def test(args, rest):
         print(f"evaluation at minute {m} (update {update}): {res['seconds']} s", flush=True)
         print("\n".join(trend(points)), flush=True)
 
-    actor, summary, run_dir = run.train(targs, (args.every, hook) if args.every else None, teacher=auto)
+    actor, summary, run_dir = run.train(targs, (args.every, hook) if args.every else None, teacher=auto, normal=nauto)
     actor.eval()
     after = evaluation(actor, args, device, cadence)
     after["distance"] = distance(run_dir, last[0], summary["updates"])
     after["teach"] = teacher(run_dir, last[0], summary["updates"])
     observe(after)
-    if auto is not None:
+    if auto is not None or nauto is not None:
         (out / "before.json").write_text(json.dumps(before, indent=1), encoding="utf-8", newline="\n")
     (out / "after.json").write_text(json.dumps(after, indent=1), encoding="utf-8", newline="\n")
     if args.every:

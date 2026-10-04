@@ -76,9 +76,10 @@ def weights(start, minutes, trained_min):
 
 
 def terms(logits, a, valid, drill, names, weight=None, picked=None):
-    """(loss, sums) of a minibatch's units (logits, a, valid [S, N]; drill [S]: index into names, -1
-    none; picked [S]: the row's battle is labelled - the adaptive teacher's share, teach_auto.py; None:
-    every row) -> loss = sum over drills of weight[name] x the cross-entropy summed over the drill's
+    """(loss, sums) of a minibatch's units (logits, a, valid [S, N]; drill [S] or [S, N]: index into names,
+    -1 none - per row, or per unit (rollout: the teacher in normal battles labels single units); picked [S] or
+    [S, N]: the battle is labelled - the adaptive teacher's share, teach_auto.py; None: every row) -> loss =
+    sum over drills of weight[name] x the cross-entropy summed over the drill's
     labelled (picked) units / ALL its valid units (so the pull is weight x the labelled share; every row
     picked: the mean); a zero tensor without weights. sums {name: [ce sum, agree sum, kind agree sum,
     units, agree sum on the active labels (not hold), active units, labelled units]} over all the drill's
@@ -90,9 +91,10 @@ def terms(logits, a, valid, drill, names, weight=None, picked=None):
         active = a.kind != hd.HOLD
     loss = torch.zeros((), device=ce.device)
     sums = {}
+    per_unit = (lambda x: x if x.dim() == 2 else x[:, None])
     for i, name in enumerate(names):
-        m = valid & (drill == i)[:, None]
-        lab = m if picked is None else m & picked[:, None]
+        m = valid & per_unit(drill == i)
+        lab = m if picked is None else m & per_unit(picked)
         n = m.float().sum()
         w = (weight or {}).get(name, 0.0)
         if w:

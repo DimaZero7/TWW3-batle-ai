@@ -39,7 +39,7 @@ The first steps compile for 1–3 minutes (seconds once a run of the same shapes
 | leash | `--anchor` (0: KL weight to the reference) and `--anchor-end`, `--reference` (default `--init`), `--anchor-roll` (0 s: seconds of training between renewals of the reference), `--anchor-ema` (0 s: instead, the reference follows the actor with this half-life) |
 | reward | `--gold` (1.0), `--rout-share` (0.5), `--lord` (0.3), `--lord-rout` (0), `--idle` (2e-4), `--idle-tau` (150 s), `--idle-pause` (30 s), `--idle-step` (0.5), `--idle-cap` (20), `--idle-rate` (0), `--idle-window` (30 s), `--order-cost` (0.001), `--retarget` (0.003): [reward](#reward) |
 | opponents | `--mix` (json shares), `--pool` (8 past versions), `--pool-extra` (more checkpoints for the pool), `--eval-past`, `--eval-generated` (512) |
-| drills | `--drills` (0: share of the battles), `--drill-weights` (json; default the `READY` drills equally), `--drill-bank` (256 per drill), `--drill-broad` (0.5: share of the broad frame), `--drill-teach` (`auto` or json {drill: weight}: the teacher, off by default), `--drill-teach-minutes` (10: manual), `--drill-teach-k` (0.5), `--drill-teach-cap` (0.25), `--drill-teach-weight` (0.15: auto): [drills](#drills) |
+| drills | `--drills` (0: share of the battles), `--drill-weights` (json; default the `TRAIN` drills equally: kiting, hold_fire), `--drill-bank` (256 per drill), `--drill-embed` (1: share of the embedded frame, for the drills that have one), `--drill-broad` (0.5: of the rest, share of the broad frame), `--drill-teach` (`auto` or json {drill: weight}: the teacher, off by default), `--drill-teach-minutes` (10: manual), `--drill-teach-k` (0.5), `--drill-teach-cap` (0.25), `--drill-teach-weight` (0.15: auto), `--teach-normal` (`auto`, names or json {drill: share}: the teacher in normal battles, off by default), `--teach-normal-k` (0.5), `--teach-normal-cap` (0.15), `--teach-normal-weight` (0.1), `--teach-normal-match` (0.1): [drills](#drills) |
 
 ### The chain's settings
 
@@ -426,7 +426,9 @@ In the training log the drills appear as opponents (`drill_counter/attack`, ...)
 | `defend` | Skaven defenders (a line + 4 missile units) against L + 2 stronger attackers playing `ai_like` | `ai_like` | marching out | holding the line and shooting | built, being tuned; not in `READY` |
 | `reserve` | a reserve that must intercept flankers instead of joining the main melee | scripted flankers | joins the melee | intercepts | module written, not in `NAMES` (not loaded) |
 
-`READY` = `kiting`, `counter`, `hold_fire`. The chain trains `counter` at 10 % of the battles:
+`READY` = `kiting`, `counter`, `hold_fire` (verified; test5 evaluates them); the drills trained by
+default (`--drill-weights`) are `drills.TRAIN` = `kiting`, `hold_fire` — `counter` costs in normal battles
+(below, "Default training drills"). The chain trained `counter` at 10 % of the battles:
 with it the network learned the counter-pick (drill win 0.40 → 0.65–0.73, time on the correct
 target 0.60 → 0.72, first correct order 44 → 26–40 s). At 30 % the same skill came at a cost:
 capacity verdict "widen-candidate", 17 older numbers dropped beyond noise, the overall rating
@@ -498,8 +500,12 @@ battle. So every drill also gives a detector of its situation in an *ordinary* b
 evaluation (`evaluate.play`: test5's battles against `ai_like`, `nearest`, `hold_shoot`) sums, per side,
 the unit-seconds in the situation, applying the skill and making the drill's mistake: the network's
 units and the opponent script's — the units of `ai_like` in the same battles are the reference.
-**Transfer share** = applied / situation unit-seconds (the skill used where it applies); the mistake share
-beside it.
+**Applied share** (the "transfer share", key `share`) = applied / situation unit-seconds — the skill used
+where it applies, HIGHER is better; **mistake share** (key `mistake`) = mistake / situation unit-seconds — the
+drill's mistake made there, LOWER is better (for hold_fire the two add up to 1: applied = not firing at the
+lord in melee). test5 shows both, labelled so ("TRANSFER … APPLIED share (higher is better)", "… MISTAKE
+share (lower is better)"), and `transfer.py` prints "applied … (higher is better), mistake … (lower is
+better)".
 
 | drill | situation (any battle) | applied | mistake |
 |---|---|---|---|
@@ -523,7 +529,7 @@ bash tools/nn/dock.sh tools.nn.train.drills.transfer --checkpoint build/nn-train
 Baseline (03.10.2026, `w5_kiting_teach/m25.pt` — the wide network that wins the kiting drill 1.00; 512
 battles per opponent, 99 s; an earlier run gave kiting and hold_fire within ±0.02):
 
-| drill | network: transfer / mistake (unit-s a battle) | `ai_like`: transfer / mistake (unit-s a battle) |
+| drill | network: applied ↑ / mistake ↓ (unit-s a battle) | `ai_like`: applied ↑ / mistake ↓ (unit-s a battle) |
 |---|---|---|
 | `kiting` | **0.003** / 0.88 (107; in 32 % of the battles) | **0.71** / 0.07 (113) |
 | `counter` | **0.38** / 0.20 (985; in 95 % of the battles) | **0.52** / 0.25 (725) |
@@ -543,7 +549,7 @@ the clean one otherwise; the description carries `"broad": true`. The share appl
 (`drills/source.py`) and to test5's drill evaluation, which reports the win rate clean / broad apart
 (the scripts' beside). `verify.py --broad 1` checks the broad frame alone. The broad battles are longer
 (kiting skilled 836 s of battle against 311 s clean), so the check scripts' numbers on the drill evaluation's
-battles (~15 min of GPU at a test5 start) are cached on disk: `build/nn-train/baselines/drill_<name>_<n>_broad<share>_<version>.json`,
+battles (~15 min of GPU at a test5 start) are cached on disk: `build/nn-train/baselines/drill_<name>_<n>_broad<share>[_embed<share>]_<version>.json`,
 the version a hash of the simulator's files and `tools/nn/train/drills`.
 
 | drill | broad frame | verify, broad only (naive / skilled) | verify, 50 % mix |
@@ -558,6 +564,93 @@ plus a swordsmen unit for the Warlord (skilled 0.54); more counter pairings (fla
 greatswords as Z: naive won 0.56 without any extras); archers behind both counter lines (the attacker's
 tired winners walk into the enemy archers' fire at the end: skilled 0.79 → 0.17–0.30; the enemy's
 archers as a reserve too: naive 0.42).
+
+**Embedded frames** (`Drill.embedded`; `--drill-embed`, default `drills.EMBED` = 1 — the default for
+`kiting` and `hold_fire`; 0 gives the old clean / broad mix): the drill's situation *inside a normal
+battle*. Why: on the clean and broad frames the actor told drill battles from normal ones perfectly (a
+linear probe on its own representation, AUC 1.00 at decisions 0, 30 and 90 s: 76 % of the drill battles
+had no lord of ours, 1–5 units against ~8), so a skill mastered in the drill stayed a drill-only habit
+(kiting drill 1.00, kiting in normal battles 0.004 of the situation's time). An embedded battle is a
+normal generated battle (`drills.generated`: `tools/nn/armies`, the budget, templates, both lords, normal
+sizes, the arena's deployment — no turn or move on the map; attacking or defending, one half each) with the
+drill's units inserted and marked by a `tag` (state STATIC `tag`: 1 our unit of the situation, 2 the
+enemy's; the simulator and the observation never read it, only the drill's scripts do); each side's
+formation is shifted sideways by half its inserted block; for every inserted unit its side gives up the
+unit of nearest cost (not the lord) and is deployed again without them (`drills.generated(swap=)`: a normal
+battle's unit count and gold, no hole in the lines), and the gold is evened (`drills.balance`: the richer side
+drops the untagged non-lord unit that brings the difference nearest zero, until within 5 %, as the generator's
+tolerance; else redrawn, up to 40 times). With our side 2 the battle is also turned half
+round the map's centre, so our army deploys where side 2 does in a normal battle. The enemy plays `ai_like`
+except its tagged units (the drill's enemy rule); the check scripts play `ai_like` for our army except the
+tagged units (naive: the drill's mistake, skilled: the skill), so the two differ only where the skill acts,
+on the same battles. The rest of the battle is a normal one, so the measure is the **paired gold trade**
+(skilled − naive on the same seeds and randomised numbers), not the win rate: `verify.py` passes an
+embedded frame when that difference is ≥ 0.05 and above 0 at 95 % (`EMBED_PASS_TRADE`); the adaptive
+teacher uses the gold-trade score (net − naive) / (skilled − naive) for a drill evaluated mostly on its
+embedded frame.
+
+| drill | embedded frame | verify, 256 battles: naive / skilled win, gold trade | skilled − naive, paired |
+|---|---|---|---|
+| `kiting` | Skaven (ours) v Empire — the only pair with a missile unit ≥ 1 m/s faster than the other side's infantry; 1–2 Night Runners 6–20 m beyond the end of our line, 0–25 m behind our front; the clean frame's chasers for that number (1 swordsmen; 2 swordsmen or 3 of spearmen / shielded spearmen / swordsmen) at the end of the enemy's front line on the same flank (~340–370 m apart); the chasers march in `ai_like`'s line until one of our kiters is within 180 m (`EMB_CHASE_M`; sling 140 m), then CHASE it | naive 0.727 / +0.162, skilled 0.840 / +0.307 | **+0.145 ± 0.025** trade, +0.113 ± 0.048 win; skilled better in 66 % of the battles, worse in 8 % |
+| `hold_fire` | factions at random; our infantry unit 20–50 m beyond the end of our line, 10–30 m ahead of our front, in contact with the enemy's OWN lord (taken out of his army); 2–3 of our shooters 70–95 m behind it; 1–2 free enemy missile units 65–95 m beyond the outer end of our shooters' line; the lord keeps fighting, the free missile units hold and shoot | naive 0.152 / −0.266, skilled 0.766 / +0.218 | **+0.484 ± 0.030** trade, +0.613 ± 0.061 win; better in 98 %, worse in 2 % |
+
+Is the cue gone? The same probe (`build/embed/cues.py`, the n1 network, 256 embedded battles of each drill
+against the normal evaluation battles): 5-fold AUC at decisions 0 / 30 / 90 s (the probe's floor, two random halves of the normal
+battles: 0.52 / 0.52 / 0.47):
+
+| embedded drill against | 0 s | 30 s | 90 s |
+|---|---|---|---|
+| (clean + broad frames, 04.10 before: every drill v normal) | 1.00 | 1.00 | 1.00 |
+| `kiting` v every normal battle | 0.90 | 0.82 | 0.93 |
+| `kiting` v normal Skaven-v-Empire battles | 0.76 | 0.77 | 0.84 |
+| `kiting` v normal Skaven-v-Empire battles with our Night Runners | **0.68** | **0.72** | **0.83** |
+| `hold_fire` v every normal battle | 1.00 | 1.00 | 1.00 |
+
+Army cues are gone (both lords in every battle; gold difference ≤ 5 %, mean 2 %; unit counts those of
+normal battles of the same factions — the first embedded version, with the drill's units added on top, had
++3 units and the probe at 0.83–0.94). What is left for kiting is the situation itself: Skaven against the
+Empire with Night Runners on a flank (the only pair where it exists), and by 90 s the chasers leaving the line
+for our shooters; a skill the network is to use exactly there is allowed to see that. hold_fire keeps an
+inherent cue: the enemy's lord engaged at our line from the first second, far from his army, and enemy
+shooters behind our flank — hold_fire already transfers (0.84 against ai_like's 0.39), so it stays as it is
+(embedded still gives it normal armies and both lords).
+
+The teacher in embedded battles: `rollout.Battles` takes the drills as `Drill` objects; their `teacher`
+script labels (tag-blind: `kiting.kite`, `hold_fire.spare` — the clean frame's skilled rules) and, in an
+embedded battle, only at the drill's `moments` (kiting: the transfer detector's situation and the run-back
+it keeps going; hold_fire: the situation) — never `ai_like`'s orders for the rest of our army. Clean and
+broad battles are labelled on every unit, as before.
+
+**The teacher in normal battles** (`--teach-normal`; `teach_auto.Transfer`; `rollout.Battles(teach_normal=)`):
+the counterfactual check (`build/why`) showed kiting *pays* in normal sim battles — our unit overridden by
+the kiting script at the detector's moments: +0.014…+0.041 gold trade a battle, +4 pp win when it keeps
+running until clear — while the network applies it 0.004 of the situation's time (ai_like 0.71). So the
+drill's teacher script may also label our units in the ORDINARY training battles (the rows of no drill),
+at the drill's moments only, under the name `<drill>@normal` with a share of its own (the per-battle
+draw, as the drills' teacher). Adaptive by the transfer gap, after every test5 evaluation (its transfer
+block): gap = max(0, ai_like's applied share − the network's) / ai_like's; share = 0 while gap ≤
+`--teach-normal-match` (0.1), else min(`--teach-normal-cap` 0.15, `--teach-normal-k` 0.5 × gap); the weight
+`--teach-normal-weight` 0.1 on a labelled unit, so the pull is at most 0.015 (the drills' 0.0375): it acts
+on the battles the network is judged by, and it switches itself off when the transfer catches up (and stays
+off for a skill the network already applies more than ai_like: hold_fire 0.84 v 0.39 → share 0). Before the
+first evaluation the shares come from test5's "before" transfer block (else the init's evaluation files,
+else half the cap). `--teach-normal auto` = every `drills.TRAIN` drill with moments (kiting, hold_fire);
+`--teach-normal kiting` = those names, adaptive; `--teach-normal '{"kiting": 0.1}'` = fixed shares.
+Logged as the drills' teacher (the "teacher" line, `log.jsonl` "teach" → `kiting@normal`) and in test5 a
+table per evaluation point (drill | net applied | ai_like applied | deficit | share was → now | agreement).
+Smoke: 2.5 min from `n1_teach_broad/m25` (`--drills 0.2 --drill-teach auto --teach-normal auto
+--gpu-duty 0.9`, wide network, 12 updates, 264 s of wall time with the warm-up; the first embedded version of the
+frames): the prior from n1's transfer numbers gave `kiting@normal` share 0.15 (the cap: gap 0.99) and
+`hold_fire@normal` 0 (the network applies it more than ai_like); 0.15–0.25 of the situation's unit-decisions
+labelled, ~5–7 k a batch; the agreement on them 0.002 → 0.25 (on the kind 0.48 → 0.83) in 12 updates; the
+embedded drills labelled at their moments only (kiting 1.7–8.5 k unit-decisions a batch); ~4.4 k battle-steps/s
+(the teachers' scripts and `ai_like` in the embedded battles cost ~30 %). A first update's start-KL jump (0.42, back
+to ~0.1 by update 4) came without `--critic-warmup` (the chain's options have it).
+
+**Default training drills**: `drills.TRAIN` = `kiting`, `hold_fire` (the default of `--drill-weights`).
+`counter` stays `READY` (verified, evaluated by test5, its code kept) but is not trained by default: the
+same check showed counter-picking as the drill defines it COSTS in normal battles (−0.09 gold trade, −12 pp
+win: it pulls units out of their fights).
 
 ## Evaluation
 

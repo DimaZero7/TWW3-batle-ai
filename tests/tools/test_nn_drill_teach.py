@@ -37,11 +37,11 @@ def kiting_env(B, other=0, taught=True):
     """B battles of the kiting drill (our side alternating) and `other` against nearest (generated)."""
     lay = league.Layout(np.zeros(B + other, dtype=int), 1 + np.arange(B + other) % 2,
                         np.array([KITING] * B + [league.CODE["nearest"]] * other))
-    broad, D.BROAD = D.BROAD, 0.0                # the clean frame: its only active label is the run-back
+    broad, embed, D.BROAD, D.EMBED = D.BROAD, D.EMBED, 0.0, 0.0     # the clean frame: its only active label is the run-back
     try:
         src = ds.Mixed(np.arange(other), 3, None, "cpu", lay, per_drill=max(B, 2), drills={"kiting": K.DRILL}, seed=1)
     finally:
-        D.BROAD = broad
+        D.BROAD, D.EMBED = broad, embed
     return rollout.Battles(lay, device="cpu", source=src, compile=False, spread=randomise.NONE,
                            teach={"kiting": K.skilled} if taught else None)
 
@@ -119,7 +119,7 @@ class TestMapping:
         batch = rollout.collect(env, actor, crit, 3)
         t = batch["teach"]
         T, R = batch["reward"].shape
-        assert t["names"] == ("kiting",) and t["valid"].shape == (T, R, env.N) and t["drill"].shape == (T, R)
+        assert t["names"] == ("kiting",) and t["valid"].shape == (T, R, env.N) and t["drill"].shape == (T, R, env.N)
         drill_rows = env.row_opp == KITING
         assert bool((t["drill"][:, drill_rows] == 0).all()) and bool((t["drill"][:, ~drill_rows] == -1).all())
         assert bool(t["valid"][:, drill_rows].any()) and not bool(t["valid"][:, ~drill_rows].any())
@@ -201,7 +201,7 @@ class TestImitation:
         base = ["--init", str(init), "--battles", "8", "--steps", "4", "--updates", "3", "--minutes", "3",
                 "--device", "cpu", "--no-eval", "--mix", '{"nearest": 1.0}', "--drills", "0.5",
                 "--drill-weights", '{"kiting": 1}', "--drill-bank", "8", "--bank", "8", "--max-units", "4",
-                "--print-every", "1"]
+                "--print-every", "1", "--drill-embed", "0"]
         args = run.parser().parse_args(["--name", "teach"] + base + ["--drill-teach", '{"kiting": 0.5}',
                                                                      "--drill-teach-minutes", "100"])
         _, summary, out = run.train(args)
@@ -235,7 +235,7 @@ class TestAdaptiveShare:
             assert not bool(t["picked"][:, ~drill_rows].any())                  # never another opponent's battle
             draw = env.teach_draw[env.rows_learn % env.B]
             want = drill_rows & (draw < share)                                   # the draw of the battle: whole
-            assert bool((t["picked"] == want).all())
+            assert bool((t["picked"] == want[:, None]).all())
             assert bool(t["valid"][:, drill_rows].any())                         # labels on every drill row still
         assert 0 < int((drill_rows & (draw < 0.5)).sum()) < int(drill_rows.sum())
 
@@ -280,7 +280,7 @@ class TestAdaptiveShare:
         base = ["--init", str(init), "--battles", "16", "--steps", "4", "--updates", "4", "--minutes", "3",
                 "--device", "cpu", "--no-eval", "--mix", '{"nearest": 1.0}', "--drills", "0.5",
                 "--drill-weights", '{"kiting": 1}', "--drill-bank", "16", "--bank", "8", "--max-units", "4",
-                "--print-every", "1", "--drill-teach", "auto", "--drill-teach-cap", "1.0", "--drill-teach-k", "1.0"]
+                "--print-every", "1", "--drill-embed", "0", "--drill-teach", "auto", "--drill-teach-cap", "1.0", "--drill-teach-k", "1.0"]
         args = run.parser().parse_args(["--name", "auto"] + base)
         prior = {"kiting": {"win_rate": 0.0, "scripts": {"skilled": {"win_rate": 1.0}}},
                  "counter": {"win_rate": 0.0, "scripts": {"skilled": {"win_rate": 1.0}}}}

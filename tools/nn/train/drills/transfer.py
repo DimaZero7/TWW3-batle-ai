@@ -8,8 +8,11 @@ The Tracker sums, per battle, the unit-seconds of each, for the two sides apart:
 units ("mine") and the opponent script's (in the battles against ai_like: the reference of what the
 game-like script does in the same situations).
 
-    transfer share = applied unit-s / situation unit-s      (the skill used where it applies)
-    mistake share  = mistake unit-s / situation unit-s
+    applied share = applied unit-s / situation unit-s      (the skill used where it applies: HIGHER is better;
+                                                            the "transfer share", key "share")
+    mistake share = mistake unit-s / situation unit-s      (the drill's mistake made there: LOWER is better)
+
+(hold_fire: applied = NOT firing at the lord in melee, mistake = firing at him; the two add up to 1 there.)
 
 evaluate.play (the normal evaluation battles: test5's ai_like / nearest / hold_shoot) runs it and returns
 res["transfer"] = {drill: {"network": {...}, "by_opponent": {name: {"network": {...}, "script": {...}}},
@@ -102,16 +105,17 @@ def report(tracker, this_by_opponent):
 
 
 def text(tr):
-    """Lines: per drill the network's transfer share against the ai_like reference."""
+    """Lines: per drill the network's applied and mistake shares against the ai_like reference."""
     f = (lambda v: "-" if v is None else f"{v:.3f}")
     lines = []
     for name, x in (tr or {}).items():
         net, ref = x.get("network") or {}, x.get("ai_like") or {}
-        lines.append(f"{name}: network {f(net.get('share'))} (mistake {f(net.get('mistake'))}, {net.get('unit_s', 0):.1f} "
-                     f"unit-s/battle, in {f(net.get('battles'))} of battles) | ai_like {f(ref.get('share'))} "
-                     f"(mistake {f(ref.get('mistake'))}, {ref.get('unit_s', 0):.1f} unit-s/battle)")
+        lines.append(f"{name}: network applied {f(net.get('share'))} (higher is better), mistake {f(net.get('mistake'))} "
+                     f"(lower is better); {net.get('unit_s', 0):.1f} situation unit-s/battle, in {f(net.get('battles'))} "
+                     f"of battles | ai_like applied {f(ref.get('share'))}, mistake {f(ref.get('mistake'))}; "
+                     f"{ref.get('unit_s', 0):.1f} unit-s/battle")
         for o, p in (x.get("by_opponent") or {}).items():
-            lines.append(f"    vs {o}: network {f(p['network']['share'])} / {f(p['network']['mistake'])} "
+            lines.append(f"    vs {o}: network applied / mistake {f(p['network']['share'])} / {f(p['network']['mistake'])} "
                          f"({p['network']['unit_s']:.1f} unit-s); {o} itself {f(p['script']['share'])} / "
                          f"{f(p['script']['mistake'])} ({p['script']['unit_s']:.1f} unit-s)")
     return lines

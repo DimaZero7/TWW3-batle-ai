@@ -26,7 +26,7 @@ def _centre(units):
 
 class TestFrame:
     def test_our_missile_units_outrun_every_chaser_and_the_gap_is_in_range(self):
-        for desc, ours in D.battles(K.DRILL, SEEDS, broad=0.0):
+        for desc, ours in D.battles(K.DRILL, SEEDS, broad=0.0, embed=0.0):
             mine, theirs = desc["sides"][ours]["units"], desc["sides"][3 - ours]["units"]
             assert desc["attacker"] == ours
             assert 1 <= len(mine) <= 2 and 1 <= len(theirs) <= 3 and len(theirs) >= len(mine)
@@ -41,7 +41,7 @@ class TestFrame:
             assert all(abs(u["x"]) <= D.MAP_HALF_M and abs(u["z"]) <= D.MAP_HALF_M for u in mine + theirs)
 
     def test_both_sides_are_played_and_the_rosters_vary(self):
-        pairs = D.battles(K.DRILL, SEEDS, broad=0.0)
+        pairs = D.battles(K.DRILL, SEEDS, broad=0.0, embed=0.0)
         assert {o for _, o in pairs} == {1, 2}
         sizes = {(len(d["sides"][o]["units"]), len(d["sides"][3 - o]["units"])) for d, o in pairs}
         assert {(1, 1), (2, 2), (2, 3)} <= sizes
@@ -55,7 +55,7 @@ def _state(pairs):
 
 class TestScripts:
     def test_the_enemy_chases_our_nearest_missile_unit(self):
-        pairs = D.battles(K.DRILL, range(8), broad=0.0)
+        pairs = D.battles(K.DRILL, range(8), broad=0.0, embed=0.0)
         st, ours = _state(pairs)
         o = K.enemy(st)
         u = st.u
@@ -68,7 +68,7 @@ class TestScripts:
                 assert int(u["side"][b, t]) == side and float(u["range"][b, t]) > 0
 
     def test_the_skilled_script_runs_back_from_a_near_chaser(self):
-        pairs = D.battles(K.DRILL, range(8), both_sides=False, broad=0.0)
+        pairs = D.battles(K.DRILL, range(8), both_sides=False, broad=0.0, embed=0.0)
         st, _ = _state(pairs)
         u = st.u
         # move every chaser of battle 0 to 30 m in front of our first unit
@@ -87,7 +87,7 @@ class TestScripts:
         assert all(int(o.kind[b, 0]) == O.HOLD for b in far)
 
     def test_the_retreat_bends_inward_at_the_map_edge(self):
-        pairs = D.battles(K.DRILL, range(1), both_sides=False, broad=0.0)
+        pairs = D.battles(K.DRILL, range(1), both_sides=False, broad=0.0, embed=0.0)
         st, _ = _state(pairs)
         u = st.u
         H = st.N // 2
@@ -100,7 +100,7 @@ class TestScripts:
         assert float(o.x[0, 0]) < 790.0 + 1.0 and abs(float(o.z[0, 0])) > 20.0
 
     def test_scripts_run_a_few_battles(self):
-        pairs = D.battles(K.DRILL, range(4), broad=0.0)
+        pairs = D.battles(K.DRILL, range(4), broad=0.0, embed=0.0)
         descs = [p[0] for p in pairs]
         params = load()
         for script in (K.naive, K.skilled):

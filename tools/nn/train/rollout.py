@@ -30,7 +30,14 @@ decision the script labels the learner's units in that drill's battles on the sa
 not act); the transition carries the labels ("teach") for PPO's imitation term. Only a share of a drill's
 battles may count (set_teach_shares: the adaptive teacher, tools/nn/train/teach_auto.py; default all):
 every battle draws a number when it starts, and it is labelled while that number is below its drill's
-share (a battle is labelled whole; a larger share keeps the battles a smaller one had).
+share (a battle is labelled whole; a larger share keeps the battles a smaller one had). A teach= value may be
+a Drill (drills.Drill): then its `teacher` script labels (default `skilled`), and in an EMBEDDED battle of the
+drill (drills.embedded_rows) only at its `moments` (the situation; the clean and broad frames: every unit).
+The teacher in normal battles (teach_normal= {drill name: Drill}; run.py --teach-normal): in the rows of no
+drill (the ordinary training battles) the drill's teacher script labels our units at the drill's `moments`
+only (e.g. kiting: a slower melee enemy closing in, and the run-back it keeps going), under the name
+"<drill>@normal" with a share of its own (the same per-battle draw). The labels' drill index and the share's
+pick are per unit ([R, N]).
 """
 import warnings
 
@@ -170,6 +177,13 @@ def assemble_orders(st, ctrl, scripts, parts):
     return O.merge(side[1], side[2], st.u["side"] == 2)
 
 
+def _teacher_of(f):
+    """(script, moments or None) of a teach= value: a script, or a drills.Drill (its teacher, else skilled)."""
+    if isinstance(f, drills.Drill):
+        return (f.teacher or f.skilled), f.moments
+    return f, None
+
+
 def learner_units(u, ctrl):
     """[B, N] the units of the sides the learner plays (ctrl [B, 2])."""
     side = u["side"]
@@ -263,7 +277,7 @@ def restart_rows(st, setup, source, rows, want=None):
 class Battles:
     def __init__(self, layout, scene_list=scenes.SCENES, device="cpu", params=None, spread=randomise.Spread(),
                  weights=reward.Weights(), seed=0, auto_reset=True, compile=None, source=None, cadence=None,
-                 teach=None):
+                 teach=None, teach_normal=None):
         self.device = torch.device(device)
         self.params = params or load()
         # how often the networks decide and how late their orders land (cadence.py; default: the game's)
@@ -308,13 +322,19 @@ class Battles:
         self.scripts = {league.CODE[n]: f for n, f in scripts_of(layout).items() if bool((self.ctrl == league.CODE[n]).any())}
         opp = torch.as_tensor(layout.opponent, device=self.device)
         self.row_opp = torch.cat([opp, opp])[self.rows_learn]                          # [R]
+        drill_codes = torch.tensor([league.CODE[drills.opponent(n)] for n in drills.NAMES], device=self.device)
+        self.row_normal = ~torch.isin(self.row_opp, drill_codes)                         # [R] a row of no drill
         self.past_actor = None
         self.past_untrained = False
-        # the drills' teacher: {league code: (drill name, skilled script)} of the taught drills the layout plays
-        self.teach_names = tuple(teach or ())
+        # the drills' teacher: {league code: (index, script, moments or None)} of the taught drills the layout
+        # plays; the teacher in normal battles: ((index, script, moments), ...) on the rows of no drill
+        teach, teach_normal = dict(teach or {}), dict(teach_normal or {})
+        self.teach_names = tuple(teach) + tuple(drills.normal_name(n) for n in teach_normal)
         used = set(np.unique(layout.opponent).tolist())
-        self.teach = {league.CODE[drills.opponent(n)]: (i, f) for i, (n, f) in enumerate((teach or {}).items())
+        self.teach = {league.CODE[drills.opponent(n)]: (i, *_teacher_of(f)) for i, (n, f) in enumerate(teach.items())
                       if league.CODE[drills.opponent(n)] in used}
+        self.teach_normal = tuple((len(teach) + i, *_teacher_of(d)) for i, d in enumerate(teach_normal.values()))
+        assert all(m is not None for _, _, m in self.teach_normal), "a teacher in normal battles needs the drill's moments"
         # the share of each taught drill's battles labelled ([drills], default all) and each battle's draw [B]
         self.teach_share = torch.ones(len(self.teach_names), device=self.device)
         self.teach_gen = torch.Generator(device=self.device).manual_seed(seed + 7919)
@@ -444,7 +464,7 @@ class Battles:
             *_, o_past, h_past_new = self._act(self.past_actor, a, frame, self.rows_past, self.h_past, False)
             parts.append((self.rows_past, o_past))
         lp = self._log_prob(logits, action, obs_r["ctrl"])
-        taught = self._teach_labels(actor.cfg, obs_r, frame) if self.teach_names else None
+        taught = self._teach_labels(actor.cfg, obs_r, frame) if self.teach_names and self.R else None
         value = None
         if critic is not None:
             value = self._values(critic, c)
@@ -488,28 +508,41 @@ class Battles:
                 "done": d_rows, "critic_obs": c, "attacks": attacks, "teach": taught}
 
     def _teach_labels(self, cfg, obs_r, frame):
-        """The taught drills' labels of the learner rows at this decision (drills/teach.py): (Action [R, N],
-        valid [R, N], drill [R]: index into teach_names, -1 for a row of no taught drill, picked [R]: the
-        row's battle is among its drill's labelled share)."""
+        """The teachers' labels of the learner rows at this decision (drills/teach.py): (Action [R, N],
+        valid [R, N], drill [R, N]: index into teach_names, -1 for a unit no teacher labels (a taught drill's
+        row: all its units), picked [R, N]: the unit's battle is among its teacher's labelled share)."""
         R, N = obs_r["ctrl"].shape
         dev = self.device
         z = torch.zeros((R, N), dtype=torch.long, device=dev)
         a = hd.Action(z.clone(), z.clone(), z - 1, torch.zeros((R, N), dtype=torch.bool, device=dev))
         valid = torch.zeros((R, N), dtype=torch.bool, device=dev)
-        drill = torch.full((R,), -1, dtype=torch.long, device=dev)
-        if not self.teach:
-            return a, valid, drill, torch.zeros(R, dtype=torch.bool, device=dev)
-        live = ~self.st.done[self.rows_learn % self.B]
+        drill = torch.full((R, N), -1, dtype=torch.long, device=dev)
+        if not self.teach and not self.teach_normal:
+            return a, valid, drill, torch.zeros((R, N), dtype=torch.bool, device=dev)
+        b = self.rows_learn % self.B
+        live = ~self.st.done[b]
         frame_r = frame_rows(frame, self.rows_learn)
-        for code, (i, script) in self.teach.items():
+        emb = drills.embedded_rows(self.st)[b]                                           # [R]
+        for code, (i, script, moments) in self.teach.items():
             mine = self.row_opp == code                                                  # [R]
-            lab, ok = drill_teach.label(cfg, script(self.st), obs_r, frame_r, self.rows_learn, self.B)
+            o = script(self.st)
+            lab, ok = drill_teach.label(cfg, o, obs_r, frame_r, self.rows_learn, self.B)
+            if moments is not None:                                                      # embedded: the moments only
+                ok = ok & (moments(self.st, o)[b] | ~emb[:, None])
             sel = mine[:, None] & ok & live[:, None]
             for f in ("kind", "point", "target", "run"):
                 setattr(a, f, torch.where(mine[:, None], getattr(lab, f), getattr(a, f)))
             valid = valid | sel
-            drill = torch.where(mine, torch.full_like(drill, i), drill)
-        picked = (drill >= 0) & (self.teach_draw[self.rows_learn % self.B] < self.teach_share[drill.clamp(min=0)])
+            drill = torch.where(mine[:, None], torch.full_like(drill, i), drill)
+        for i, script, moments in self.teach_normal:
+            o = script(self.st)
+            lab, ok = drill_teach.label(cfg, o, obs_r, frame_r, self.rows_learn, self.B)
+            sel = self.row_normal[:, None] & ok & moments(self.st, o)[b] & live[:, None] & (drill < 0)
+            for f in ("kind", "point", "target", "run"):
+                setattr(a, f, torch.where(sel, getattr(lab, f), getattr(a, f)))
+            valid = valid | sel
+            drill = torch.where(sel, torch.full_like(drill, i), drill)
+        picked = (drill >= 0) & (self.teach_draw[b][:, None] < self.teach_share[drill.clamp(min=0)])
         return a, valid, drill, picked
 
     def _sim_step(self, parts, attacks, rb, rs, was_done):
@@ -678,9 +711,10 @@ class Battles:
             self.cur = ({k: v[two] for k, v in a.items()}, frame_rows(frame, two),
                         None if c is None else {k: v[sel_learn] for k, v in c.items()})
         for k in ("health", "last_hit", "hit_rate", "bank_row", "want", "ctrl", "by_rule", "kind_battle",
-                  "order_battle"):
+                  "order_battle", "teach_draw"):
             setattr(self, k, getattr(self, k)[keep])
         self.row_opp = self.row_opp[sel_learn]
+        self.row_normal = self.row_normal[sel_learn]
         lay = self.layout
         self.layout = league.Layout(lay.scene[kl], lay.learner[kl], lay.opponent[kl])
         self.B = len(kl)
@@ -730,8 +764,8 @@ def collect(env, actor, critic, T):
     for k in ("lp", "value", "reward", "done", "attacks"):
         out[k] = torch.stack([s[k] for s in steps])
     if steps[0].get("teach") is not None:
-        # the drills' teacher: labels [T, R, N], where they count [T, R, N], the row's drill [T, R], the
-        # row's battle labelled [T, R] (the share), the shares
+        # the teachers: labels [T, R, N], where they count [T, R, N], the unit's teacher [T, R, N] (index into
+        # names), the unit's battle labelled [T, R, N] (the share), the shares
         out["teach"] = {"action": hd.Action(*(torch.stack([getattr(s["teach"][0], f) for s in steps])
                                               for f in ("kind", "point", "target", "run"))),
                         "valid": torch.stack([s["teach"][1] for s in steps]),

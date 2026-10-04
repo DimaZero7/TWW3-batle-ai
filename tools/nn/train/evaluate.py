@@ -597,12 +597,14 @@ def drill_version():
 def drill_scripts(name, n, device="cpu"):
     """{"naive", "skilled"}: the drill's two check scripts' win rate and gold trade on the evaluation's
     battles (DRILL_EVAL_SEEDS, our side alternating; SPREAD), cached per process and on disk
-    (BASELINES/drill_<name>_<n>_broad<share>_<drill_version>.json: the broad frames' long battles make
-    them ~15 min of a test5 start)."""
+    (BASELINES/drill_<name>_<n>_broad<share>[_embed<share>]_<drill_version>.json: the broad and embedded
+    frames' long battles make them ~15 min of a test5 start). With more than one frame (drills.FRAMES) in
+    the battles, per frame too: {frame: {games, win_rate, gold_trade}}."""
     from tools.nn.train import drills as D
     from tools.nn.train.drills import verify
-    key = (name, n, str(device), D.BROAD)
-    path = BASELINES / f"drill_{name}_{n}_broad{D.BROAD:g}_{drill_version()}.json"
+    embed = D.EMBED if D.load([name])[name].embedded is not None else 0.0
+    key = (name, n, str(device), D.BROAD, embed)
+    path = BASELINES / f"drill_{name}_{n}_broad{D.BROAD:g}{f'_embed{embed:g}' if embed else ''}_{drill_version()}.json"
     if key not in _SCRIPT_REF:
         try:
             _SCRIPT_REF[key] = json.loads(path.read_text(encoding="utf-8"))
@@ -626,9 +628,11 @@ def drill_scripts(name, n, device="cpu"):
                                      extra=extra, ours_box=box)
             out[which] = {"win_rate": round(float(res["won"].mean()), 3), "gold_trade": round(float(res["trade"].mean()), 3),
                           "play": box["tr"].summary(None, box["st"]) if "tr" in box else None}
-            b = res["broad"]
-            if b.any() and not b.all():
-                for tag, sel in (("clean", ~b), ("broad", b)):
+            kinds = res["frame"]
+            out[which]["frames"] = {k: int((kinds == k).sum()) for k in D.FRAMES if (kinds == k).any()}
+            if len(out[which]["frames"]) > 1:
+                for tag in out[which]["frames"]:
+                    sel = kinds == tag
                     out[which][tag] = {"games": int(sel.sum()), "win_rate": round(float(res["won"][sel].mean()), 3),
                                        "gold_trade": round(float(res["trade"][sel].mean()), 3)}
         _SCRIPT_REF[key] = out
@@ -643,8 +647,8 @@ def play_drills(actor, n=128, device="cpu", names=None, greedy=False, seed=1, co
     DRILL_EVAL_SEEDS (our side alternating, SPREAD) against the drill's enemy script -> {drill: {games, wins,
     win_rate, gold_trade (mean (enemy gold destroyed - own lost) / budget), gold_destroyed, gold_lost, seconds,
     timeouts, scripts: {naive, skilled: {win_rate, gold_trade}} (scripts: the drill's check scripts on the same
-    battles), with both frames in the battles (drills.BROAD) "clean" and "broad": {games, win_rate, gold_trade}
-    of each}}; {} without drills. cadence: the network's (tools/nn/train/cadence.py; default the game's)."""
+    battles), frames: {frame: battles} (drills.FRAMES: clean, broad, embedded; drills.BROAD, drills.EMBED), with
+    more than one frame in the battles {frame: {games, win_rate, gold_trade}} of each}}; {} without drills. cadence: the network's (tools/nn/train/cadence.py; default the game's)."""
     from tools.nn.train import drills as D
     from tools.nn.train.drills import metrics as drill_metrics
     from tools.nn.train.drills import source as drill_source
@@ -686,10 +690,12 @@ def play_drills(actor, n=128, device="cpu", names=None, greedy=False, seed=1, co
                      "gold_destroyed": float(enemy[this].mean()), "gold_lost": float(own[this].mean()),
                      "seconds": float(t[this].mean()), "timeouts": float((t[this] >= params.limit_s - 1e-6).mean())}
         out[name]["play"] = trackers[name].summary(this, env.st)
-        wide = src.broad[:B]
-        if (wide & this).any() and (~wide & this).any():
+        kinds = src.frame[:B]
+        out[name]["frames"] = {k: int((this & (kinds == k)).sum()) for k in D.FRAMES if (this & (kinds == k)).any()}
+        if len(out[name]["frames"]) > 1:
             trade = (enemy - own) / np.maximum(bud, 1e-9)
-            for tag, sel in (("clean", this & ~wide), ("broad", this & wide)):
+            for tag in out[name]["frames"]:
+                sel = this & (kinds == tag)
                 out[name][tag] = {"games": int(sel.sum()), "win_rate": float(won[sel].mean()),
                                   "gold_trade": float(trade[sel].mean())}
         u = env.st.u

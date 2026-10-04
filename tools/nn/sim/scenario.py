@@ -47,6 +47,7 @@ def build(armies, params=None, device="cpu", per_side=None):
                     row["width"] = float(unit["width"]) if row["men0"] > 1 else row["width"]
                 row["side"] = side
                 row["lord"] = bool(unit.get("general"))
+                row["tag"] = int(unit.get("tag", 0))       # a drill's mark (state.py STATIC "tag"), not the simulator's
                 # The game's AI uses abilities; by default it plays side 2 (the arena's enemy).
                 row["ai"] = bool(spec.get("ai", side == 2))
                 for name in S.STATIC:

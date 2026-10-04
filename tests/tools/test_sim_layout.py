@@ -50,7 +50,7 @@ class TestCalibration:
         p = params.load()
         for key in p.units:
             row = p.static(key, "wh_main_emp_empire")
-            assert set(row) == set(state.STATIC) - {"side", "lord"}, key
+            assert set(row) == set(state.STATIC) - {"side", "lord", "tag"}, key
         archers = p.static("wh2_dlc13_emp_inf_archers_0")
         assert archers["reload"] == 11.0 and archers["hit_rate"] == 0.42 and archers["ammo0"] == 90 * 20
         slingers = p.static("wh2_main_skv_inf_skavenslave_slingers_0", "wh2_main_skv_skaven")

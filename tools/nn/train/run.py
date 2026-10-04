@@ -128,15 +128,30 @@ def score(window):
     return (min(rs), keys) if len(rs) >= 5 else (None, keys)
 
 
-def train(args, every=None, teacher=None):
+def normal_drills(spec):
+    """--teach-normal -> ({drill: fixed share} or None for adaptive, [drill names]): "auto" every drills.TRAIN
+    drill with moments; "kiting,hold_fire" those, adaptive; json {"kiting": 0.1} fixed shares; "" none."""
+    if not spec:
+        return None, []
+    if spec.strip().startswith("{"):
+        fixed = {k: float(v) for k, v in json.loads(spec).items()}
+        return fixed, list(fixed)
+    names = [n for n in drills.TRAIN] if spec == "auto" else [n.strip() for n in spec.split(",") if n.strip()]
+    return None, names
+
+
+def train(args, every=None, teacher=None, normal=None):
     """every: (minutes, hook) - hook(actor, critic, minute, update) after every `minutes` of training
     (its time not counted as training: e.g. a full evaluation). teacher: with --drill-teach auto, the
     adaptive teacher (teach_auto.Auto; default: one with the init checkpoint's last drill numbers,
-    teach_auto.prior) - the hook may change its shares (Auto.observe), read before every update."""
+    teach_auto.prior) - the hook may change its shares (Auto.observe), read before every update. normal: with
+    an adaptive --teach-normal, the teacher in normal battles (teach_auto.Transfer; default: one with the init
+    checkpoint's last transfer numbers), likewise."""
     device = torch.device(args.device)
     torch.manual_seed(args.seed)
     torch.backends.cuda.matmul.allow_tf32 = True
     drills.BROAD = args.drill_broad              # the drills' broad frames: their share of every drill's battles
+    drills.EMBED = args.drill_embed              # the embedded frames: their share (of the drills that have one)
     out = checkpoint.DIR / "runs" / args.name
     out.mkdir(parents=True, exist_ok=True)
     if args.preset is None:          # the record follows the network: --init's preset (e.g. "wide"), else small
@@ -186,7 +201,7 @@ def train(args, every=None, teacher=None):
     mix = json.loads(args.mix) if args.mix else league.MIX
     if args.drills:
         # drills: --drills of the battles, shared by --drill-weights (default: the verified ones equally)
-        shares = json.loads(args.drill_weights) if args.drill_weights else {n: 1.0 for n in drills.READY}
+        shares = json.loads(args.drill_weights) if args.drill_weights else {n: 1.0 for n in drills.TRAIN}
         mix = league.with_drills(mix, args.drills, shares)
     lay = league.layout(args.battles, len(scenes.SCENES), mix, scene_attacker=scenes.attackers())
     # the drills' teacher (drills/teach.py): manual {drill: the imitation term's starting weight}, annealed
@@ -210,6 +225,26 @@ def train(args, every=None, teacher=None):
     absent = [n for n in teach0 if n not in drills.NAMES or league.CODE[drills.opponent(n)] not in played]
     if absent:
         raise SystemExit(f"--drill-teach {absent}: not drills the run plays (--drills, --drill-weights)")
+    # the teacher in normal battles (--teach-normal): the drill's teacher script at its moments in the rows of no
+    # drill, a share of those battles (fixed, or adaptive from the transfer gap: teach_auto.Transfer)
+    fixed_normal, normal_names = normal_drills(args.teach_normal)
+    loaded_normal = drills.load(normal_names) if normal_names else {}
+    bad = [n for n in normal_names if n not in loaded_normal or loaded_normal[n].moments is None]
+    if bad:
+        raise SystemExit(f"--teach-normal {bad}: no such drill with moments (drills.Drill.moments)")
+    if normal_names and fixed_normal is None:
+        if normal is None:
+            normal = teach_auto.Transfer(args.teach_normal_k, args.teach_normal_cap, args.teach_normal_weight,
+                                         *teach_auto.prior(args.init, "transfer"), match=args.teach_normal_match)
+        rows = normal.bind(normal_names)
+        print(f"teacher in normal battles auto (k {normal.k:g}, cap {normal.cap:g}, weight {normal.weight:g}, match "
+              f"{normal.match:g}), from {rows[0]['source'] if rows else '-'}:\n"
+              + "\n".join(teach_auto.table(rows, ref="ai_like applied", net="net applied")), flush=True)
+    else:
+        normal = None
+    normal_w = ({drills.normal_name(n): args.teach_normal_weight for n in normal_names} if fixed_normal is not None
+                else {})
+    normal_s = {drills.normal_name(n): v for n, v in (fixed_normal or {}).items()}
     params = rollout.params_with_limit(args.limit)
     rng = np.random.default_rng(args.seed)
 
@@ -225,7 +260,10 @@ def train(args, every=None, teacher=None):
 
     env = rollout.Battles(lay, scenes.SCENES, device, params, randomise.Spread(), weights, seed=args.seed,
                           source=source(), cadence=cadence,
-                          teach={n: d.skilled for n, d in drills.load(list(teach0)).items()} if teach0 else None)
+                          teach=drills.load(list(teach0)) if teach0 else None,
+                          teach_normal={n: loaded_normal[n] for n in normal_names} if normal_names else None)
+    if normal_s:
+        env.set_teach_shares(normal_s)
     step_cfg = sized(cfg, env.N, width=width)
     log = (out / "log.jsonl").open("w", encoding="utf-8", newline="\n")
     print(f"{args.name}: battles {env.B} (learner rows {env.R}), slots {env.N}, up to {args.max_units} units a side, "
@@ -234,7 +272,10 @@ def train(args, every=None, teacher=None):
           f"model {args.preset} {model_policy.parameters(actor) / 1e6:.2f} M actor, limit {args.limit:.0f} s, "
           f"ppo {dataclasses.asdict(cfg)}, reward {dataclasses.asdict(weights)}, mix {mix}"
           + (f", drill teacher {teach0} -> 0 over {args.drill_teach_minutes:g} min" if teach0 and not auto else "")
-          + (f", drill teacher auto {teacher.meta()}" if auto else ""), flush=True)
+          + (f", drill teacher auto {teacher.meta()}" if auto else "")
+          + (f", teacher in normal battles {normal.meta()}" if normal is not None else "")
+          + (f", teacher in normal battles fixed shares {normal_s} weight {args.teach_normal_weight:g}" if normal_s else ""),
+          flush=True)
 
     def pick_past():
         nonlocal past, past_path
@@ -283,6 +324,8 @@ def train(args, every=None, teacher=None):
             t_bank = time.time()
         if teacher is not None:
             env.set_teach_shares(teacher.shares)
+        if normal is not None:
+            env.set_teach_shares(normal.shares)
         batch = rollout.collect(env, actor, critic, args.steps)
         t_c = time.time()
         # Schedules: the kind's entropy bonus and the KL to the reference go linearly from their start to
@@ -295,6 +338,7 @@ def train(args, every=None, teacher=None):
         trains = update >= args.critic_warmup
         teach_w = (teacher.weights() if teacher is not None
                    else drill_teach.weights(teach0, args.drill_teach_minutes, (time.time() - t0 - paused) / 60))
+        teach_w = {**teach_w, **(normal.weights() if normal is not None else normal_w)}
         st = ppo.update(actor, critic, opt, batch, u_cfg, train_policy=trains, reference=reference, teach=teach_w)
         taught = st.pop("teach", None)
         if start is not None:
@@ -527,12 +571,31 @@ def parser():
                     help="share of the battles that are drills (tools/nn/train/drills; e.g. 0.08), taken from the "
                          "other opponents in proportion")
     ap.add_argument("--drill-weights", help="the drills' shares of --drills as json, e.g. {\"pincer\": 1, \"kiting\": 2} "
-                                            "(default: the verified drills, drills.READY, equally)")
+                                            "(default: drills.TRAIN equally - kiting, hold_fire; counter is READY but "
+                                            "not trained by default: it costs in normal battles)")
     ap.add_argument("--drill-bank", type=int, default=256, help="battles of each drill ready at once (renewed with the bank)")
-    ap.add_argument("--drill-broad", type=float, default=drills.BROAD,
+    ap.add_argument("--drill-broad", type=float, default=drills.BROAD_DEFAULT,
                     help="share of every drill's battles from its broad frame (the situation in a messier battle: more "
                          "unit types, uninvolved units, lords; tools/nn/train/drills), the rest from the clean frame; "
                          "also the drill evaluation's mix (test5)")
+    ap.add_argument("--drill-embed", type=float, default=drills.EMBED_DEFAULT,
+                    help="share of the battles of a drill that has an embedded frame (kiting, hold_fire) from it: the "
+                         "situation inside a normal generated battle (both lords, normal sizes, no other cue); the "
+                         "rest clean / broad by --drill-broad; also the drill evaluation's mix (test5); 0: the old mix")
+    ap.add_argument("--teach-normal", default="",
+                    help="the teacher in NORMAL battles (tools/nn/train/teach_auto.py Transfer): the drill's teacher "
+                         "script labels our units in the ordinary training battles at the drill's moments only (its "
+                         "transfer detector's situation), a share of those battles: 'auto' (every drills.TRAIN drill, "
+                         "adaptive: share = min(cap, k x gap), gap = max(0, ai_like's applied share - the network's) / "
+                         "ai_like's from every test5 evaluation's transfer block, 0 within --teach-normal-match), "
+                         "'kiting' (names, adaptive) or json {\"kiting\": 0.1} (fixed shares)")
+    ap.add_argument("--teach-normal-k", type=float, default=teach_auto.NORMAL_K, help="--teach-normal adaptive: k")
+    ap.add_argument("--teach-normal-cap", type=float, default=teach_auto.NORMAL_CAP,
+                    help="--teach-normal adaptive: the share of the normal battles labelled at most this")
+    ap.add_argument("--teach-normal-weight", type=float, default=teach_auto.NORMAL_WEIGHT,
+                    help="--teach-normal: the imitation weight on a labelled unit (the pull is weight x share)")
+    ap.add_argument("--teach-normal-match", type=float, default=teach_auto.NORMAL_MATCH,
+                    help="--teach-normal adaptive: no labels while the gap is at most this")
     ap.add_argument("--drill-teach", help="the drills' teacher: 'auto' (tools/nn/train/teach_auto.py: every READY drill "
                                           "the run plays, a share of its battles labelled from how far the network is "
                                           "behind the skilled script, renewed after every test5 evaluation) or, manual, "

@@ -26,9 +26,29 @@ worked); CAP 0.25: a drill as far behind as kiting was gets 0.0375 of pull, ~0.4
 from a deficit of 0.5 on, below it the pull falls with the gap (counter's 0.30 -> 0.15); MATCH 0.05:
 ~one standard error of a 128-battle win rate, so noise around a matched drill does not switch it on.
 
+A drill evaluated mostly on its EMBEDDED frame (drills.EMBED; the drill block's "frames") is measured by
+its gold trade instead of the win rate (the rest of a normal battle blurs the win rate): with the naive
+script's trade beside, the network's place between the two scripts, score = (net - naive) / (skilled - naive),
+against the skilled script's 1: deficit = max(0, 1 - score) (numbers()).
+
 Until the run's first evaluation the shares come from the previous drill numbers: test5's "before"
 evaluation of the starting network, else the init checkpoint's own test5 evaluation (prior()), else
 UNKNOWN (half the cap) for every taught drill.
+
+The teacher in NORMAL battles (run.py --teach-normal; Transfer below; rollout.Battles teach_normal): the
+drill's teacher script labels our units in the ordinary training battles at the drill's moments only (its
+transfer detector's situation), as much as the network still needs there. After every evaluation (test5's
+normal battles: the transfer block, drills/transfer.py), per drill d with a transfer detector:
+
+    gap_d   = max(0, ref_d - net_d) / ref_d    net_d: the network's APPLIED share (the situation's unit-seconds
+                                              where it uses the skill), ref_d: ai_like's on the same battles
+    share_d = 0                    if gap_d <= NORMAL_MATCH (the network applies the skill as often as ai_like)
+              min(cap, k x gap_d)  else
+
+share_d is the share of the NORMAL battles whose units the script labels at the moments (under the name
+"<drill>@normal"); the weight a fixed --teach-normal-weight; the pull weight x share. Smaller than the drills'
+(NORMAL_CAP, NORMAL_WEIGHT): it acts on the battles the network is judged by; it switches itself off as the
+transfer catches up (and stays off for a skill the network already applies more than ai_like: hold_fire).
 """
 import json
 import re
@@ -38,6 +58,11 @@ WEIGHT = 0.15
 K = 0.5
 CAP = 0.25
 MATCH = 0.05
+# the teacher in normal battles (Transfer): a smaller pull than the drills' - at the cap 0.1 x 0.15 = 0.015
+NORMAL_WEIGHT = 0.1
+NORMAL_K = 0.5
+NORMAL_CAP = 0.15
+NORMAL_MATCH = 0.1       # the applied share within 10 % of ai_like's: matched (a 512-battle evaluation's noise ~0.02-0.05)
 ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -59,12 +84,33 @@ def share(d, k=K, cap=CAP, match=MATCH):
     return min(float(cap), max(0.0, float(k) * d))
 
 
+def embedded_mostly(d):
+    """Whether a drill block's battles are mostly from the embedded frame ("frames": {frame: battles})."""
+    fr = d.get("frames") or {}
+    return sum(fr.values()) > 0 and fr.get("embedded", 0) >= 0.5 * sum(fr.values())
+
+
 def numbers(drills_eval, name):
-    """(net win rate, skilled win rate) of a drill in an evaluation's drill block (evaluate.play_drills;
-    test5's eval json "drills"); (None, None) without it."""
+    """(net, skilled) of a drill in an evaluation's drill block (evaluate.play_drills; test5's eval json
+    "drills"): the win rates; for a drill evaluated mostly on its embedded frame the gold-trade scores
+    ((trade - naive's) / (skilled's - naive's): the skilled script 1; None when skilled does not trade above
+    naive); (None, None) without it."""
     d = (drills_eval or {}).get(name) or {}
-    sk = ((d.get("scripts") or {}).get("skilled") or {}).get("win_rate")
+    sc = d.get("scripts") or {}
+    if embedded_mostly(d):
+        net, nv, sk = d.get("gold_trade"), (sc.get("naive") or {}).get("gold_trade"), (sc.get("skilled") or {}).get("gold_trade")
+        if net is None or nv is None or sk is None or sk <= nv:
+            return None, None
+        return (float(net) - float(nv)) / (float(sk) - float(nv)), 1.0
+    sk = (sc.get("skilled") or {}).get("win_rate")
     return d.get("win_rate"), sk
+
+
+def transfer_numbers(transfer_eval, name):
+    """(network's applied share, ai_like's) of a drill in an evaluation's transfer block (drills/transfer.py;
+    test5's eval json "transfer"); (None, None) without it."""
+    x = (transfer_eval or {}).get(name) or {}
+    return (x.get("network") or {}).get("share"), (x.get("ai_like") or {}).get("share")
 
 
 def _load(path):
@@ -81,8 +127,9 @@ def _path(p):
     return p if p.is_absolute() or p.exists() else ROOT / p
 
 
-def prior(init):
-    """(the drill block, where from) of the last evaluation of the init checkpoint, or (None, None): a
+def prior(init, key="drills"):
+    """(the evaluation's `key` block - "drills", or "transfer" for the teacher in normal battles - , where
+    from) of the last evaluation of the init checkpoint, or (None, None): a
     test5 point m<minute>.pt -> its eval_m<minute>.json, else report.json's trend at that minute (the last
     minute is after.json's); a run's latest.pt of a test5 run (runs/test5_<label>) -> that test5 folder's
     after.json."""
@@ -96,16 +143,16 @@ def prior(init):
         cands.append(p.parent / f"eval_m{minute:g}.json")
         rep = _load(p.parent / "report.json") or {}
         point = (rep.get("trend") or {}).get(f"{minute:g}")
-        if point and point.get("drills"):
-            return point["drills"], f"{p.parent / 'report.json'} trend minute {minute:g}"
+        if point and point.get(key):
+            return point[key], f"{p.parent / 'report.json'} trend minute {minute:g}"
         if (rep.get("train_args") or {}).get("minutes") == minute:
             cands.append(p.parent / "after.json")
     if p.stem == "latest" and p.parent.name.startswith("test5_"):
         cands.append(p.parent.parent.parent / "test5" / p.parent.name[len("test5_"):] / "after.json")
     for c in cands:
         ev = _load(c)
-        if ev and ev.get("drills"):
-            return ev["drills"], str(c)
+        if ev and ev.get(key):
+            return ev[key], str(c)
     return None, None
 
 
@@ -138,13 +185,20 @@ class Auto:
         """{drill: the imitation weight on its labelled units} (fixed)."""
         return {n: self.weight for n in self.names}
 
+    def _numbers(self, evaluation, name):
+        return numbers(evaluation, name)
+
+    def _measure(self, evaluation, name):
+        """What net and skilled are: "win rate", or "trade score" (an embedded frame's, numbers())."""
+        return "trade score" if embedded_mostly((evaluation or {}).get(name) or {}) else "win rate"
+
     def observe(self, drills_eval, agreement=None, source="evaluation"):
         """New shares from an evaluation's drill block -> rows [{drill, net, skilled, deficit, share_was,
         share, agree}] (agree: {drill: the agreement since the last point}, the training log's; a drill
         without numbers keeps its share)."""
         rows = []
         for n in self.names:
-            net, sk = numbers(drills_eval, n)
+            net, sk = self._numbers(drills_eval, n)
             d = deficit(net, sk)
             s = share(d, self.k, self.cap, self.match)
             was = self.shares.get(n, self.unknown)
@@ -152,7 +206,8 @@ class Auto:
                 self.shares[n] = s
             rows.append({"drill": n, "net": net, "skilled": sk, "deficit": None if d is None else round(d, 4),
                          "share_was": round(was, 4), "share": round(self.shares[n], 4),
-                         "agree": (agreement or {}).get(n), "source": source})
+                         "agree": (agreement or {}).get(n), "source": source,
+                         "measure": self._measure(drills_eval, n)})
         self.rows = rows
         self.history.append(rows)
         return rows
@@ -161,14 +216,37 @@ class Auto:
         return {"k": self.k, "cap": self.cap, "weight": self.weight, "match": self.match}
 
 
-def table(rows, title=None):
-    """Markdown lines: drill | net win | skilled win | deficit | teacher share (was -> now) | agreement."""
+class Transfer(Auto):
+    """The teacher in normal battles (run.py --teach-normal): shares {"<drill>@normal": share of the normal
+    battles labelled at the drill's moments} from the transfer gap (the network's applied share against
+    ai_like's, transfer_numbers); bind() with the drills' names, observe() with an evaluation's transfer
+    block. Rows as Auto's: net = the network's applied share, skilled = ai_like's."""
+
+    def __init__(self, k=NORMAL_K, cap=NORMAL_CAP, weight=NORMAL_WEIGHT, prior=None, source=None, match=NORMAL_MATCH):
+        super().__init__(k, cap, weight, prior, source, match)
+
+    def bind(self, drills):
+        from tools.nn.train import drills as D
+        return super().bind([D.normal_name(d) for d in drills])
+
+    def _numbers(self, evaluation, name):
+        from tools.nn.train import drills as D
+        return transfer_numbers(evaluation, name[:-len(D.NORMAL)] if name.endswith(D.NORMAL) else name)
+
+    def _measure(self, evaluation, name):
+        return "applied share"
+
+
+def table(rows, title=None, ref="skilled win", net="net win"):
+    """Markdown lines: drill | net win | skilled win | deficit | teacher share (was -> now) | agreement (the
+    teacher in normal battles: ref "ai_like applied", net "net applied")."""
     if not rows:
         return []
     f = (lambda v, fmt="{:.3f}": "-" if v is None else fmt.format(v))
     out = ([title, ""] if title else []) + [
-        "| drill | net win | skilled win | deficit | teacher share (was → now) | agreement |",
+        f"| drill | {net} | {ref} | deficit | teacher share (was → now) | agreement |",
         "|---|---|---|---|---|---|"]
-    out += [f"| {r['drill']} | {f(r['net'])} | {f(r['skilled'])} | {f(r['deficit'])} | "
+    m = (lambda r: f" ({r['measure']})" if r.get("measure") not in (None, "win rate") else "")
+    out += [f"| {r['drill']}{m(r)} | {f(r['net'])} | {f(r['skilled'])} | {f(r['deficit'])} | "
             f"{f(r['share_was'], '{:.2f}')} → {f(r['share'], '{:.2f}')} | {f(r.get('agree'))} |" for r in rows]
     return out

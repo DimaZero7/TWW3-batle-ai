@@ -26,6 +26,16 @@ the first: one of our infantry units in contact with one of the enemy's (an ordi
 pays), and with FAR_P an enemy melee unit FAR_M behind the enemy's lord (it comes on, as every enemy melee
 unit). Verified (256 battles): the broad frame only naive 0.164 / skilled 0.855; the 50 % mix 0.117 /
 0.848 (04.10.2026).
+Embedded frame (`embedded`, drills.EMBED of the battles, the default: the situation inside a normal battle):
+a normal generated battle (tools/nn/armies: factions at random, both lords, normal sizes, the arena's
+deployment, attacking or defending) with the clean frame inserted beyond one flank of our line: our infantry
+unit (TAG_OURS) EMB_GAP_M beyond our line's end, EMB_AHEAD_M ahead of our front, in contact with the ENEMY'S
+OWN LORD (taken out of his army, TAG_ENEMY); our K shooters (TAG_OURS) DIST_M behind it; the free enemy
+missile units (TAG_ENEMY) LAT_M beyond the outer end of our shooters' line; the armies bought for the drawn
+for every inserted unit its side gave up the unit of nearest cost and was deployed again without them
+(drills.generated), the gold evened (drills.balance). The enemy plays `ai_like`, its tagged units as the clean enemy (the lord keeps fighting,
+the free missile units hold and shoot); the check scripts `ai_like` for our army, the tagged units as the
+clean scripts.
 Scripts:
 * enemy: melee units attack the nearest enemy (the engaged one keeps fighting), missile units hold
   (shoot at will at the nearest);
@@ -40,6 +50,7 @@ import torch
 from tools.nn.sim import orders as O
 from tools.nn.sim.replay import half_depth
 from tools.nn.train import drills as D
+from tools.nn.train import opponents
 
 EMPIRE, SKAVEN = "wh_main_emp_empire", "wh2_main_skv_skaven"
 LORD = {EMPIRE: "wh_main_emp_cha_general_0", SKAVEN: "wh2_main_skv_cha_warlord_0"}
@@ -145,6 +156,64 @@ def broad(rng):
     return desc
 
 
+# --- the embedded frame ---
+EMB_GAP_M = (20.0, 50.0)     # from the end of our line to our infantry unit's edge
+EMB_AHEAD_M = (10.0, 30.0)   # our infantry unit this far ahead of our front line
+
+
+def embedded(rng):
+    best = None
+    for _ in range(D.EMBED_TRIES):
+        fo, s_key, f_free = SHOOT[int(rng.integers(len(SHOOT)))]
+        fe = str(rng.choice([EMPIRE, SKAVEN]))
+        pick = lambda pool: str(pool[int(rng.integers(len(pool)))])
+        k = int(rng.integers(K_SHOOT[0], K_SHOOT[1] + 1))
+        m_key = pick(OURS_MELEE[fo])
+        f = int(rng.integers(f_free[0], f_free[1] + 1))
+        free = [pick(FREE[fe]) for _ in range(f)]
+        desc = D.generated(rng, fo, fe, swap={1: [m_key] + [s_key] * k, 2: free})
+        ax = D.axes(desc, 1)
+        ours, enemy = desc["sides"][1]["units"], desc["sides"][2]["units"]
+        b_ours, b_enemy = ours[0]["b"], enemy[0]["b"]
+        s = float(rng.choice([-1.0, 1.0]))
+        # our infantry beyond our line's end, ahead of our front; the enemy's lord in contact in front of it
+        lat0 = s * (D.extent(ours, ax, s) + float(rng.uniform(*EMB_GAP_M)) + 15.0)
+        f0 = D.front(ours, ax) + float(rng.uniform(*EMB_AHEAD_M))
+        hm = float(half_depth(MEN[m_key], 30.0))
+        lord = next(u for u in enemy if u.get("general"))
+        lord["x"], lord["z"] = ax.world(f0 + hm + 1.0 + 0.5, lat0)
+        lord["b"], lord["tag"] = b_enemy, D.TAG_ENEMY
+        ours.append(D.unit(m_key, *ax.world(f0, lat0), b_ours, 30.0, tag=D.TAG_OURS))
+        # our shooters: a line behind it
+        dist = float(rng.uniform(*DIST_M))
+        gap = float(rng.uniform(*LAT_GAP_M))
+        step = _w(s_key) + gap
+        for i in range(k):
+            ours.append(D.unit(s_key, *ax.world(f0 - dist, lat0 + (i - (k - 1) / 2) * step), b_ours, _w(s_key),
+                               tag=D.TAG_OURS))
+        half = (k - 1) / 2 * step + _w(s_key) / 2
+        # the free enemies: beyond the outer end of our shooters' line, facing it
+        for i, key in enumerate(free):
+            lat = lat0 + s * (half + float(rng.uniform(*LAT_M)) + i * (_w(key) + gap))
+            fz = f0 - dist + float(rng.uniform(-20.0, 20.0))
+            enemy.append(D.unit(key, *ax.world(fz, lat), (b_ours + (-90.0 if s > 0 else 90.0)) % 360.0, _w(key),
+                                tag=D.TAG_ENEMY))
+        desc["meta"] = {"k": k, "free": f, "shoot": s_key}
+        if D.balance(desc):
+            return desc
+        if best is None or D.imbalance(desc) < D.imbalance(best):
+            best = desc
+    return best
+
+
+def _embed(st, clean, tag, inner):
+    """Orders: `clean` in the clean / broad battles; in the embedded ones `ai_like`, with `inner`'s orders for
+    the units tagged `tag`."""
+    emb = D.embedded_rows(st)[:, None]
+    mixed = O.merge(opponents.ai_like(st), inner, D.tagged(st, tag))
+    return O.merge(clean, mixed, emb.expand_as(st.u["tag"]))
+
+
 def _engaged(st):
     """[B, N] standing units in melee."""
     v = D.View(st)
@@ -152,10 +221,13 @@ def _engaged(st):
 
 
 def enemy(st):
+    """Melee units attack the nearest, missile units hold; in an embedded battle `ai_like`, the tagged units
+    (his lord, the free missile units) so."""
     v = D.View(st)
     i, d = v.nearest()
     o = O.hold(st.B, st.N, st.device)
-    return D.attack(o, v.melee & (d < 1e9), i)
+    o = D.attack(o, v.melee & (d < 1e9), i)
+    return _embed(st, o, D.TAG_ENEMY, o)
 
 
 def _melee_orders(st, v):
@@ -166,6 +238,19 @@ def _melee_orders(st, v):
 
 
 def naive(st):
+    """focus(); in an embedded battle `ai_like`, the tagged units of ours so."""
+    o = focus(st)
+    return _embed(st, o, D.TAG_OURS, o)
+
+
+def skilled(st):
+    """spare(); in an embedded battle `ai_like`, the tagged units of ours so."""
+    o = spare(st)
+    return _embed(st, o, D.TAG_OURS, o)
+
+
+def focus(st):
+    """The mistake, tag-blind: shooters on the nearest enemy single entity in melee."""
     v, eng = _engaged(st)
     o = _melee_orders(st, v)
     shooter = v.standing & v.missile
@@ -176,7 +261,9 @@ def naive(st):
     return D.attack(o, shooter & (d2 < 1e9), i)
 
 
-def skilled(st):
+def spare(st):
+    """The skill, tag-blind (the clean frame's skilled script; the teacher's labels): shooters on the free
+    enemies, else on an ordinary unit in melee, else out of range of the melee."""
     v, eng = _engaged(st)
     u = st.u
     o = _melee_orders(st, v)
@@ -227,9 +314,14 @@ def transfer(st):
     return sit, sit & ~mistake, mistake
 
 
+def moments(st, o):
+    """[B, N] where the teacher's orders label a unit outside the clean frames: the situation (transfer)."""
+    return transfer(st)[0]
+
+
 DRILL = D.Drill("hold_fire", frame, enemy, naive, skilled,
                 "our infantry in melee with the enemy lord: shoot the free enemies, not into the melee",
-                broad=broad, transfer=transfer)
+                broad=broad, transfer=transfer, embedded=embedded, teacher=spare, moments=moments)
 
 
 def measure(seconds=200.0, shooters=2):

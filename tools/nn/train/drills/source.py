@@ -45,7 +45,7 @@ class Mixed:
         drills = drills or D.load(list(codes))
         missing = [n for n in codes if n not in drills]
         assert not missing, f"no drill modules for {missing}"
-        descs, names, ours, group, wide = [], [], [], [], []
+        descs, names, ours, group, wide, kinds = [], [], [], [], [], []
         for n, code in codes.items():
             pick = rng.integers(drill_seeds.start, drill_seeds.stop, per_drill) if not sequential \
                 else np.arange(drill_seeds.start, drill_seeds.start + per_drill)
@@ -55,6 +55,7 @@ class Mixed:
                 ours.append(side)
                 group.append(code)
                 wide.append(bool(desc.get("broad")))
+                kinds.append(desc.get("frame", "broad" if desc.get("broad") else "clean"))
         armies = [a for a, _ in gen] + descs
         H = max([max_units + 1 if gen else 1] + [len(d["sides"][s]["units"]) for d in descs for s in (1, 2)])
         self.bank = scenes.Bank(armies, params, device, H, names=[n for _, n in gen] + names)
@@ -63,6 +64,7 @@ class Mixed:
         self.group = torch.tensor([0] * len(gen) + group, device=dev)          # [M] 0 generated, else the drill's code
         self.ours = torch.tensor([0] * len(gen) + ours, device=dev)            # [M] our side in a drill battle
         self.broad = np.array([False] * len(gen) + wide, dtype=bool)           # [M] a drill battle of the broad frame
+        self.frame = np.array([""] * len(gen) + kinds, dtype=object)          # [M] its frame (drills.FRAMES), "" generated
         self.gen = torch.Generator(device=dev).manual_seed(int(rng.integers(1 << 30)))
         att = self.bank.attacker[:len(gen)]
         self.by_attacker = {s: torch.nonzero(att == s).flatten() for s in (1, 2)}
