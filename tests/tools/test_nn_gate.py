@@ -142,6 +142,14 @@ def write_run(root, name, seed, role, res, difficulty=1, errors=(), swap=False):
 
 
 class TestSummary:
+    def test_bridge_recovery_counters_reach_the_gate(self, tmp_path):
+        run = write_run(tmp_path, "recovery", 11, "attack", result(nn_reaims=7, nn_empty_melees=2))
+        row = gate.battle_row({"battle": 1, "seed": 11, "role": "attack", "run": run}, costs={})
+        assert row["nn"]["reaims"] == 7 and row["nn"]["empty_melees"] == 2
+        old = write_run(tmp_path, "old", 12, "attack", result())
+        row = gate.battle_row({"battle": 2, "seed": 12, "role": "attack", "run": old}, costs={})
+        assert row["nn"]["reaims"] is None and row["nn"]["empty_melees"] is None
+
     @pytest.mark.parametrize("status,winner,role,expected", [
         ("completed", 1, "attack", (1, "completed")), ("completed", 2, "defend", (2, "completed")),
         ("timeout", 0, "attack", (2, "timeout")), ("timeout", 0, "defend", (1, "timeout")),

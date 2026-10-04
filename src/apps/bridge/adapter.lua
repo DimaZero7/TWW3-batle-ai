@@ -29,6 +29,9 @@
 -- for FIRE_RECENT decisions) the order is given for real (nn_duty engine_off). A shooter shooting
 -- standing (services.firing) that is to fire at will (its target in melee) is not halted for it
 -- (nn_duty free_kept).
+-- An idle shooter without a valid engine target is explicitly re-aimed within REAIM_AFTER
+-- decisions, even if the enemy is still in melee (nn_reaim). Empty shooters under ATTACK
+-- leave ranged duty immediately and receive a melee attack (nn_empty_melee).
 -- No answer by the next decision tick: the orders in force stay (event nn_miss).
 -- Abilities: an 'ability <unit> <key>' line of the answer is used at once when the unit
 -- stands and can_perform_special_ability(key) says yes: perform_special_ability(key, the
@@ -75,6 +78,11 @@ local function shooter(u)
         and (read(function() return u:missile_range() end) or 0) > 0
 end
 
+local function empty_shooter(u)
+    return read(function() return u:ammo_left() end) == 0
+        and (read(function() return u:missile_range() end) or 0) > 0
+end
+
 -- opts: army (our engine army), own / enemies = {{name, unit}}, vector(x, z) -> engine
 -- vector, rows() -> every unit's row, meta (put into every state: batch...), emit(event,
 -- fields), now_ms() (battle time since the start), model_ms() (engine time); optional
@@ -82,7 +90,7 @@ end
 function M.start(opts)
     local handle = {written = 0, applied = 0, answered = 0, missed = 0, given = 0, keeps = 0, bad = 0,
         regiven = 0, released = 0, resumed = 0, write_mode = nil, abilities_used = 0, abilities_refused = 0,
-        hold_aims = 0, hold_halts = 0, stalls = 0, aims_kept = 0}
+        hold_aims = 0, hold_halts = 0, stalls = 0, aims_kept = 0, reaims = 0, empty_melees = 0}
     -- current: the order in force; lost: the order a unit had when it broke (given again the moment
     -- it rallies); down_at: the last move whose state showed the unit down (its answer has no order
     -- for it); duty: a shooter's state under an attack order (or a held shooter's picked target);
@@ -90,6 +98,7 @@ function M.start(opts)
     -- decisions standing under an order the engine dropped (services.order_stalled).
     local times, current, lost, duty, enemy_by_name, guard, stall = {}, {}, {}, {}, {}, {}, {}
     local down_at = {}
+    local reaim = {}   -- targetless decisions, independent of network target changes / ranged duty
     local seen, seen_rows = {}, {}   -- the rows of the last decision, by unit name and as a list
     local fired = {}   -- the last move whose state showed the unit firing
     local used, own_by_name, unit_by_name = {}, {}, {}   -- used[name][key] = battle ms of the last use
@@ -177,6 +186,7 @@ function M.start(opts)
 
     local function give(it, order)
         local uc = it.uc
+        if order.kind ~= 'attack' and order.kind ~= 'hold' then reaim[it.name] = nil end
         if order.kind ~= 'attack' then duty[it.name] = nil end
         guard[it.name] = nil
         stall[it.name] = nil
@@ -206,6 +216,10 @@ function M.start(opts)
             else
                 duty[it.name] = nil
                 orders.attack_melee(uc, enemy.unit)
+                if empty_shooter(it.unit) then
+                    handle.empty_melees = handle.empty_melees + 1
+                    opts.emit('nn_empty_melee', {t = opts.now_ms(), u = it.name, tg = order.target})
+                end
             end
         end
         return 'given'
@@ -308,6 +322,26 @@ function M.start(opts)
         end
     end
 
+    local function recover_target(it, order, rows)
+        if not (order and (order.kind == 'attack' or order.kind == 'hold') and shooter(it.unit)) then
+            reaim[it.name] = nil
+            return false
+        end
+        reaim[it.name] = reaim[it.name] or {}
+        local target = services.reaim_target(reaim[it.name], seen[it.name], rows,
+            read(function() return it.unit:missile_range() end), order.target, recent(it.name))
+        local enemy = target and enemy_by_name[target]
+        if not enemy then return false end
+        -- Deliberately bypass aim/fire_freely: halt + free fire can leave no engine target
+        -- indefinitely. attack_unit supplies a target for the engine to turn toward and shoot.
+        orders.attack_ranged(it.uc, enemy.unit, order.kind == 'attack' and order.run, true)
+        duty[it.name] = {}
+        if order.kind == 'hold' then guard[it.name] = {pick = target} end
+        handle.reaims = handle.reaims + 1
+        opts.emit('nn_reaim', {t = opts.now_ms(), u = it.name, k = order.kind, tg = target})
+        return true
+    end
+
     local function watch_shooters(rows)
         seen, seen_rows = {}, rows
         for _, row in ipairs(rows) do
@@ -316,7 +350,11 @@ function M.start(opts)
         end
         for _, it in ipairs(opts.own) do
             local order, d, g = current[it.name], duty[it.name], guard[it.name]
-            if d and order and order.kind == 'attack' and drifted(it, d, order.target) then
+            if d and order and order.kind == 'attack' and empty_shooter(it.unit) and standing(it.unit) then
+                give(it, order)
+            elseif recover_target(it, order, rows) then
+                -- Recovery takes precedence over free-fire duty and the held walk cooldown.
+            elseif d and order and order.kind == 'attack' and drifted(it, d, order.target) then
                 give(it, order)
             elseif d and order and order.kind == 'attack' then
                 local action = services.missile_duty(d, seen[it.name], seen[order.target])
@@ -386,6 +424,7 @@ function M.start(opts)
             if not standing(it.unit) then
                 if current[it.name] then lost[it.name] = current[it.name] end
                 current[it.name], duty[it.name], guard[it.name], stall[it.name] = nil, nil, nil, nil
+                reaim[it.name] = nil
             elseif lost[it.name] and not current[it.name] then
                 rally(it)
             end
@@ -466,7 +505,7 @@ function M.start(opts)
             nn_regiven = handle.regiven, nn_released = handle.released, nn_resumed = handle.resumed,
             nn_abilities_used = handle.abilities_used, nn_abilities_refused = handle.abilities_refused,
             nn_hold_aims = handle.hold_aims, nn_hold_halts = handle.hold_halts, nn_stalls = handle.stalls,
-            nn_aims_kept = handle.aims_kept}
+            nn_aims_kept = handle.aims_kept, nn_reaims = handle.reaims, nn_empty_melees = handle.empty_melees}
     end
 
     return handle

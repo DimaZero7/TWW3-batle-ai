@@ -185,11 +185,11 @@ end
 M.HOLD_REACH_M = 10
 M.HOLD_WALK = 2
 
-local function in_reach(me, row, range)
+local function in_reach(me, row, range, margin)
     if not (present(row) and row.side ~= me.side and row.v ~= false) then return nil end
     if not (value.finite(row.x) and value.finite(row.z)) then return nil end
     local d = math.sqrt((me.x - row.x) ^ 2 + (me.z - row.z) ^ 2)
-    if d > range + M.HOLD_REACH_M then return nil end
+    if d > range + (margin or M.HOLD_REACH_M) then return nil end
     return d
 end
 
@@ -216,6 +216,38 @@ function M.hold_target(me, rows, range, current)
     if keep and (keep.r ~= true or not best) then return current end
     local pick = best or routing
     return pick and pick.n or nil
+end
+
+-- Missing/invalid engine target under ATTACK/HOLD: explicit aim after three decisions (3 s
+-- at the default cadence). Unlike ordinary duty, this may target an enemy still in melee.
+-- Strict centre range avoids pulling a held shooter forward during its walk cooldown.
+M.REAIM_AFTER = 3
+function M.reaim_target(watch, me, rows, range, preferred, recent)
+    if not (up(me) and me.m ~= true and me.fire ~= true and (me.a or 0) > 0 and (range or 0) > 0
+        and value.finite(me.x) and value.finite(me.z)) then
+        watch.n = 0
+        return nil
+    end
+    local best, best_d, wanted
+    for _, row in ipairs(rows or {}) do
+        local d = in_reach(me, row, range, 0)
+        -- Keep a real target between volleys, including the engine's edge-to-edge range.
+        if row.n == me.t and (d or M.on_target(me, row, recent)) then
+            watch.n = 0
+            return nil
+        end
+        if d then
+            if row.n == preferred then wanted = row.n end
+            if not best_d or d < best_d then best, best_d = row.n, d end
+        end
+    end
+    local pick = wanted or best
+    watch.n = pick and (watch.n or 0) + 1 or 0
+    if watch.n >= M.REAIM_AFTER then
+        watch.n = 0
+        return pick
+    end
+    return nil
 end
 
 -- guard = {walk, block} (kept per held shooter; {} to start), me: its row, aiming: a target is

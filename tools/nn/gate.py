@@ -383,7 +383,7 @@ def battle_row(entry, costs=None):
         "duration_s": round(result["duration_model_ms"] / 1000, 1) if result.get("duration_model_ms") else None,
         "wall_s": result.get("duration_wall_s"),
         "nn": {k[3:]: result.get(k) for k in ("nn_moves", "nn_answered", "nn_missed", "nn_orders_given",
-                                               "nn_keeps", "nn_bad_files")},
+                                               "nn_keeps", "nn_bad_files", "nn_reaims", "nn_empty_melees")},
         "gold": g, "lively": liveliness(run / "events.jsonl"), "lua_errors": errors, "battle_difficulty": launch.get("battle_difficulty"),
         "launch_status": status.get("status"), "preferences_restored": bool(status.get("preferences_restored")),
         "build": cfg.get("build")})

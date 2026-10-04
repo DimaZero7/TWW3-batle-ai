@@ -115,7 +115,8 @@ sequenceDiagram
   - fire at will is `halt()` + `fire_at_will(true)`: the game picks the target, as its own AI's
     shooters do. The ordered target is given again once it is out of melee, after at least
     `FREE_MIN` = 10 decisions (event `nn_duty`). The network's order stays the same all along: the
-    same order again is not new.
+    same order again is not new. If the engine has no suitable target, `nn_reaim` recovery below
+    takes precedence before this wait expires.
 
   In the game, without and with these rules (battle 4 of the gate, seed 1000900008; another sampled battle each time):
 
@@ -151,6 +152,24 @@ sequenceDiagram
   a move 0.39, a held shooter's new pick 0.13 a minute), which the simulator charges since sim
   task 2 (`missile.aim_reset_on_order`).
 
+- **A targetless shooter receives an explicit target within 3 decisions.** Under ATTACK or HOLD,
+  the bridge counts decisions when the unit is standing with ammo, is neither in melee nor firing,
+  and the engine has no suitable target. At `REAIM_AFTER` = 3 decisions (at most 3 s with the usual
+  `decide_ms = 1000`), it picks the network's target if visible and in range, otherwise the nearest
+  visible living, non-shattered enemy; routing enemies can also be shot. Range is strictly between
+  centres, without `HOLD_REACH_M`. No enemy resets the count; network target changes do not.
+  Explicit `attack_ranged` bypasses `fire_freely`, even while the enemy remains in melee:
+  `melee(false)`, `fire_at_will(true)`, `attack_unit(enemy, true, run)` supply the engine with a
+  target to turn toward and shoot. HOLD uses walk. Recovery also works during the cooldown after
+  halting a walking shooter; the existing walk guard remains. A firing unit and its valid target
+  between volleys are kept. If the engine does not accept the target, another attempt requires
+  the next 3 decisions. MOVE and WITHDRAW retain their behavior.
+- **ATTACK with zero ammunition is a melee attack.** A new order immediately calls `melee(true)`,
+  `attack_unit(enemy, false, true)`. When ammo runs out under an existing attack, the bridge clears
+  ranged duty and issues the same attack in melee on the next decision, including an unchanged
+  ATTACK or a KEEP reply. Normal `nn_rally` and `nn_stall` apply thereafter. Each such order emits
+  `nn_empty_melee`; target recovery emits `nn_reaim`.
+
 Orders are given through the verified recipes of [orders](orders.md):
 
 | Order | Engine calls |
@@ -158,7 +177,8 @@ Orders are given through the verified recipes of [orders](orders.md):
 | `hold` | `halt()`, `fire_at_will(true)`; a held shooter is then aimed by the bridge (below) |
 | `move` | `fire_at_will(true)`, `goto_location(point, run)` |
 | `withdraw` | `fire_at_will(true)`, `goto_location(point, true)` — a run out of the fight |
-| `attack` | a shooter with ammunition: `attack_ranged(uc, enemy, run, true)` — `melee(false)`, `fire_at_will(true)`, `attack_unit(enemy, true, run)`; everyone else: `attack_melee` (always runs) |
+| `attack` | a shooter with ammunition: `attack_ranged(uc, enemy, run, true)` — `melee(false)`, `fire_at_will(true)`, `attack_unit(enemy, true, run)`; everyone else, including a shooter with ammo 0: `attack_melee` — `melee(true)`, `attack_unit(enemy, false, true)`; an existing attack switches when ammo runs out |
+| ATTACK / HOLD target recovery | `nn_reaim`: explicit `attack_ranged` after 3 decisions without a suitable target, including enemies in melee; HOLD walks |
 | `keep` | nothing: the order in force goes on; a unit without one yet stands as it was taken |
 
 Every unit of our side is under script control (`take_control`) from the start of the battle. Until
@@ -251,6 +271,7 @@ Without the last line `end` the game takes nothing. A unit without a line keeps 
 | `missile_duty(duty, me, target)` | One decision of a shooter under an attack order: `release`, `resume` or `nil` (`RELEASE_AFTER`, `FREE_MIN`) |
 | `firing(me, recent)` | Shoots standing: up, not moving, not in melee, the fire flag on now or within `FIRE_RECENT` decisions (`recent`) |
 | `on_target(me, target, recent)` | `firing` and the engine's target (`t`) is that unit: giving it again would restart the aim |
+| `reaim_target(watch, me, rows, range, preferred, recent)` | After `REAIM_AFTER` = 3 decisions without a suitable target: the network's in-range target, otherwise the nearest valid enemy; `nil` when no intervention is needed; count in `watch.n` |
 
 ## exchange_adapter — files
 
@@ -272,14 +293,21 @@ card: with it every row gets `fx`. The entry [nn_arena](entries.md#nn_arena) wit
 | `nn_rally` | `u`, `k`, `x`, `z`, `tg`, `run`, `status` — the order a unit had when it broke, given again as it rallied (`hold` if the attack's target is gone) |
 | `nn_duty` | `u`, `action` (`free` — an attack on a target in melee given as fire at will, `free_kept` — the same, the shooter shooting standing already: no halt, `release` — idle: to fire at will, `resume` — the ordered target again, `engine_off` — a kept aim given for real), `tg` |
 | `nn_aim_kept` | `u`, `tg` — an attack on the unit the shooter fires at already: nothing given |
+| `nn_reaim` | `u`, `k` (`attack`, `hold`), `tg` — explicit target replacing a missing or unsuitable engine target |
+| `nn_empty_melee` | `u`, `tg` — melee attack issued to a shooter with zero ammunition |
 | `nn_miss` | `move` that got no answer by the next decision, `answered` |
 | `nn_hold` | `u`, `action` (`aim`, `none`, `halt`, `keep` — a HOLD left the engine's target as the pick, no halt), `tg` — a held shooter's target |
 | `nn_stall` | `u`, `k` (`attack`, `move`, `withdraw`), `tg` — an order the engine dropped, given again |
 | `nn_ability` | `move`, `u`, `key`, `status`: `used`, `not_ready` (`can_perform_special_ability` said no: in the game only for an ability not owned), `down` (the unit is not standing), `unknown_unit` (not ours), `error` |
 | `nn_ability_ready` | `u`, `key`, `ready` (`can_perform_special_ability`), when it changes |
 | `nn_effects` | `u`, `fx` (the phases on the unit, or `unknown`), when they change |
-| `result` (added) | `nn_moves`, `nn_answered`, `nn_missed`, `nn_orders_given`, `nn_keeps`, `nn_bad_files`, `nn_write_mode`, `nn_regiven` (orders given again at a rally), `nn_released`, `nn_resumed`, `nn_abilities_used`, `nn_abilities_refused`, `nn_hold_aims`, `nn_hold_halts`, `nn_stalls`, `nn_aims_kept` (orders not given: the shooter was on that target already) |
+| `result` (added) | `nn_moves`, `nn_answered`, `nn_missed`, `nn_orders_given`, `nn_keeps`, `nn_bad_files`, `nn_write_mode`, `nn_regiven` (orders given again at a rally), `nn_released`, `nn_resumed`, `nn_abilities_used`, `nn_abilities_refused`, `nn_hold_aims`, `nn_hold_halts`, `nn_stalls`, `nn_reaims`, `nn_empty_melees`, `nn_aims_kept` (orders not given: the shooter was on that target already) |
 
-Tests: `tests/apps/bridge/test_bridge.py` (the orders file as the game reads it, what counts as a
+The result also includes `nn_reaims` and `nn_empty_melees`, counting these interventions.
+`tools/nn/gate.py` copies them into `battles[].nn.reaims` and `battles[].nn.empty_melees`.
+
+Tests: `tests/entries/test_bridge_recovery.py` (explicit aim within 3 s under ATTACK/HOLD, fallback
+target, walk cooldown, preserved firing, zero ammo and normal attack recovery);
+`tests/apps/bridge/test_bridge.py` (the orders file as the game reads it, what counts as a
 new order, a shooter's duty), `tests/entries/test_entries.py` (`test_net_...`: state, answer, orders
 given, a miss, the last state; a ranged attack runs, a rout and a rally, a shooter released and taken back), `tests/entries/test_bridge_abilities.py` (ability lines, the card's active effects, a use once, refused when not ready, down or not ours; the state's uses; a held shooter aimed, a shooter firing at its target given nothing for an attack or a hold and the order given once the engine leaves it, a shooter shooting standing not halted for fire at will, a dropped attack given again, a rallied unit going on with its order and taking no filler HOLD), `tests/tools/test_nn_companion.py` (the companion's side, the ability timers and lines, no line for units that take no orders).

@@ -79,7 +79,7 @@ local function controller(log)
     -- The last free-fire switch and attack_unit's arguments stay on the unit (the log keeps its old lines).
     function uc:fire_at_will(on) self.unit.free_fire = on end
     function uc:change_behaviour_active() end
-    function uc:melee() end
+    function uc:melee(on) self.unit.melee_mode = on end
     function uc:halt()
         self.unit.moving = false
         log[#log + 1] = 'halt'

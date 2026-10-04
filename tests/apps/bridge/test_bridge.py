@@ -218,3 +218,34 @@ def test_a_unit_down_in_the_state_takes_no_order_from_its_answer(lua):
     assert down(t({"men": 90, "r": True})) is True and down(t({"men": 90, "s": True})) is True
     assert down(t({"men": 0})) is True
     assert down(t({})) is False                       # a reading that failed is not taken as down
+
+
+def test_targetless_recovery_prefers_the_order_then_nearest_valid_enemy(lua):
+    t = lua.table_from
+    recover = lua.eval("bridge.reaim_target")
+    me = {"n": "own", "side": 1, "men": 100, "a": 20, "x": 0, "z": 0, "t": ""}
+    near = {"n": "near", "side": 2, "men": 100, "x": 50, "z": 0}
+    preferred = dict(near, n="ordered", x=100, m=True)
+    after = lua.eval("bridge.REAIM_AFTER")
+    assert after == 3
+
+    def cycle(row, enemies, recent=False):
+        watch = t({})
+        rows = t([t(e) for e in enemies])
+        return [recover(watch, t(row), rows, 120, "ordered", recent) for _ in range(after)]
+
+    assert cycle(me, [near, preferred]) == [None, None, "ordered"]  # melee is not a veto
+    for invalid in ({"v": False}, {"men": 0}, {"s": True}, {"side": 1}, {"x": 121}, {"x": float("nan")}):
+        assert cycle(me, [dict(preferred, **invalid), near]) == [None, None, "near"]
+        assert cycle(me, [dict(preferred, **invalid)]) == [None] * after
+    assert cycle(me, [dict(near, r=True)])[-1] == "near"
+    assert cycle(dict(me, t="ordered"), [near, preferred]) == [None] * after
+    assert cycle(dict(me, t="gone"), [near])[-1] == "near"
+    assert cycle(dict(me, mv=True), [near])[-1] == "near"  # targetless ATTACK can be walking
+    for busy in ({"fire": True}, {"m": True}, {"a": 0}, {"r": True}, {"s": True}, {"men": 0}):
+        assert cycle(dict(me, **busy), [near, preferred]) == [None] * after
+    # Engine edge-to-edge range can exceed centre range: keep its recent firing target.
+    assert cycle(dict(me, t="ordered"), [near, dict(preferred, x=125)], True) == [None] * after
+    watch, rows = t({}), t([t(near)])
+    assert [recover(watch, t(me), rows, 120, None, False) for _ in range(6)] == [
+        None, None, "near", None, None, "near"]  # rejected engine orders retry only every 3 decisions
