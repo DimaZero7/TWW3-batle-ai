@@ -31,6 +31,13 @@ planner, and the AI weaknesses players exploit. Our own observations: [the game'
   [twwstats][tws] · high (values), low (WH3 formula).
   - Ours: at Normal the starting `MoralePercent` of both sides is the same (lord 1.057, spearmen
     1.067), so no visible morale bonus. Agreement with "Normal = 0".
+  - Ours: at equal health the AI's units (side 2) in melee hold 0.1–0.2 more `MoralePercent` than
+    ours — in AI-against-AI battles too (CA's planner on side 1, 28 battles: at health 0.4–0.6 0.46
+    against 0.63), but the simulator, with no bonus for either side, gives the same on the same orders
+    (0.49 against 0.68): it is the fight (who wins the melee, routing enemies), not a difficulty
+    extra. The localised battle difficulty texts name only reaction time, dodging and targeting; the
+    separate `battle_ai_stats_modifier` (the AI's stat multiplier) in `preferences.script.txt` is 1.
+    Agreement with "Normal = 0".
 - Community figures (Very Hard ≈ +8 leadership for the AI, slider max ≈ +7, Hard/VH +5–10 % melee
   stats) conflict with each other. · Steam threads · low.
 

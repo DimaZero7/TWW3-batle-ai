@@ -133,8 +133,10 @@ def simulate(run_dirs, params=None, device="cpu", copies=1, jitter_m=0.0, seed=0
         # of its runs: their point is the network's move order; replay.recorded_orders)
         missile = [bool((params.units.get(k) or {}).get("missile")) for k in g.keys] if g.keys else [False] * len(g.names)
         leavers = [bool(m) or (g.own_ai == NET and int(s) == 1) for m, s in zip(missile, g.side)]
+        # the network's units in melee without a recorded target are under its HOLD (replay.recorded_orders)
+        nearest = [FIGHT_NEAREST and not (g.own_ai == NET and int(s) == 1) for s in g.side]
         orders = replay.recorded_orders(g, slot_of, 2 * H, [width.get(n) for n in g.names],
-                                        params.sim["formation"]["spacing_m"], FIGHT_NEAREST,
+                                        params.sim["formation"]["spacing_m"], nearest,
                                         params.sim["contact"].get("leave_m", 0.0), leavers)
         rows.extend([orders] * copies)
     rec = Recorder(st)

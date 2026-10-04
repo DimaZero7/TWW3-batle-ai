@@ -55,6 +55,11 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
     leavers [recorded index] (None: all): units whose recorded point in melee is a move order in force;
     such a unit in melee without a recorded target whose point is leave_m or more away moves there (it
     walks out of the fight, as in the game; leave_m 0: never) instead of attacking the nearest enemy.
+    fight_nearest: a bool, or one per recorded index: a unit in melee without a recorded target (and not
+    leaving) attacks the nearest enemy; where false it holds (HOLD). The network's units hold: the game
+    records the engine target of its attack orders in melee 97 % of the time (all fair network runs: 75 %
+    of their melee unit-seconds with one, 2.7 % without), so in melee without one they are under its HOLD
+    (12 %) or moving (4 %).
     The network's units and every missile unit are leavers; the melee units of CA's planner and the
     game's AI are not: in melee their recorded point lies anywhere (the planner's: often the enemy's
     start beyond it) while they fight on at the attack rate (build/simbatch/leave_dir.py: the planner's
@@ -72,6 +77,7 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
     dist = np.hypot(xs[:, :, None] - xs[:, None, :], zs[:, :, None] - zs[:, None, :])
     foe = (battle.side[:, None] != battle.side[None, :])[None] & (np.nan_to_num(f["men"]) > 0)[:, None, :]
     nearest = np.where(foe, dist, np.inf).argmin(axis=2)
+    nearest_of = list(fight_nearest) if isinstance(fight_nearest, (list, tuple, np.ndarray)) else [fight_nearest] * len(slot_of)
     for i, s in enumerate(slot_of):
         tg = battle.target[:, i]
         ox, oz = np.nan_to_num(f["ox"][:, i]), np.nan_to_num(f["oz"][:, i])
@@ -81,7 +87,7 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
         leaving = np.zeros(T, dtype=bool)
         if leave_m > 0 and (leavers is None or leavers[i]):
             leaving = np.hypot(ox - np.nan_to_num(f["x"][:, i]), oz - np.nan_to_num(f["z"][:, i])) >= leave_m
-        if fight_nearest:
+        if nearest_of[i]:
             tg = np.where((tg < 0) & f["m"][:, i] & ~leaving, nearest[:, i], tg)
         ok_t = tg >= 0
         mapped = np.where(ok_t, np.array(slot_of)[np.clip(tg, 0, None)], -1)

@@ -191,6 +191,8 @@ class TestMelee:
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
         contact = pw["enemy"] & (pw["gap"] <= 1.0)
         z = torch.zeros_like(st.u["men"])
+        st.u["order_kind"][0, 0] = O.ATTACK
+        st.u["order_target"][0, 0] = st.N // 2   # attacking the lord: the whole rate
         rate, hit, _, _ = melee.strikes(st.u, pw, contact, P, z, z + 100)
         p = melee.hit_chance(torch.tensor(20.0), torch.tensor(45.0), P.sim["melee"]["hit_slope"])
         cap = P.sim["contact"]["lord_max_attackers"]
@@ -224,8 +226,9 @@ class TestMelee:
     def test_a_unit_attacking_another_enemy_barely_strikes_a_lord_it_touches(self):
         st, pw, contact, z = self.surrounded(2)
         H = st.N // 2
-        full = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, H, 0])
         st.u["order_kind"][0, H] = O.ATTACK
+        st.u["order_target"][0, H] = 0          # attacking the lord: the whole rate
+        full = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, H, 0])
         st.u["order_target"][0, H] = 1          # told to attack another slot, touching the lord
         busy = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, H, 0])
         assert busy == pytest.approx(full * P.sim["contact"]["lord_incidental"], rel=1e-4)
@@ -236,14 +239,30 @@ class TestMelee:
         contact = pw["enemy"] & (pw["gap"] <= 1.0)
         z = torch.zeros_like(st.u["men"])
         H = st.N // 2
-        full = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, 0, H])
         st.u["order_kind"][0, 0] = O.ATTACK
         st.u["order_target"][0, 0] = H         # its own target: the whole rate
-        assert float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, 0, H]) == pytest.approx(full, rel=1e-6)
+        full = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, 0, H])
         st.u["order_target"][0, 0] = H + 1     # told to attack another slot, touching the slaves
         busy = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, 0, H])
         assert 0 < P.sim["contact"]["unit_incidental"] < 1
         assert busy == pytest.approx(full * P.sim["contact"]["unit_incidental"], rel=1e-4)
+
+    def test_a_melee_unit_holding_in_melee_strikes_at_the_hold_rate_a_missile_unit_in_full(self):
+        k = P.sim["contact"]["hold_rate"]
+        assert 0 < k < 1
+        for key, share in ((SPEAR, k), (ARCHER, 1.0)):
+            st = face_off(key, SLAVE)
+            pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
+            contact = pw["enemy"] & (pw["gap"] <= 1.0)
+            z = torch.zeros_like(st.u["men"])
+            H = st.N // 2
+            st.u["order_kind"][0, 0] = O.ATTACK
+            st.u["order_target"][0, 0] = H
+            attacking = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, 0, H])
+            st.u["order_kind"][0, 0] = O.HOLD
+            st.u["order_target"][0, 0] = -1
+            held = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, 0, H])
+            assert attacking > 0 and held == pytest.approx(share * attacking, rel=1e-5), key
 
     def test_the_enemy_lord_keeps_his_blow_and_the_infantry_counts_less(self):
         st, pw, contact, z = self.surrounded(0, rival=True)
@@ -430,6 +449,26 @@ class TestMorale:
 
 
 # --- level 3: the battle loop ---
+
+class TestReplay:
+    def test_a_unit_in_melee_without_a_recorded_target_fights_the_nearest_or_holds(self):
+        from tools.nn import gamedata
+        import numpy as np
+        T, N = 3, 2
+        f = {k: np.zeros((T, N)) for k in gamedata.FLOAT_FIELDS}
+        f.update({k: np.zeros((T, N), dtype=bool) for k in gamedata.BOOL_FIELDS})
+        f["x"][:, 1] = 10.0
+        f["ox"][:] = f["x"]
+        f["men"][:] = 100
+        f["m"][:] = True
+        b = gamedata.Battle(run="t", own_ai="net", enemy_role="attack", result={}, t=np.arange(T, dtype=float), f=f,
+                            target=np.full((T, N), -1), names=("a", "b"), keys=("", ""), side=np.array([1, 2]))
+        rows = replay.recorded_orders(b, [0, 1], N, fight_nearest=[False, True], leave_m=10.0, leavers=[True, False])
+        assert (rows["kind"][:, 0] == O.HOLD).all() and (rows["target"][:, 0] == -1).all()
+        assert (rows["kind"][:, 1] == O.ATTACK).all() and (rows["target"][:, 1] == 0).all()
+        both = replay.recorded_orders(b, [0, 1], N, fight_nearest=True, leave_m=10.0)
+        assert (both["kind"] == O.ATTACK).all()
+
 
 class TestBattle:
     def test_spearmen_beat_slaves_and_the_battle_ends(self):

@@ -9,7 +9,8 @@ Per pair of units in contact (i strikes j), per second:
                       a single man strikes once (his blow hits up to `splash` men); a unit in
                       contact with several enemies shares out no more than its own front holds;
                       a unit attacking another enemy strikes one it only touches at
-                      contact.unit_incidental (a lord: lord_incidental) of its rate
+                      contact.unit_incidental (a lord: lord_incidental) of its rate; a unit without
+                      a missile weapon under HOLD (no attack order) strikes at contact.hold_rate of it
     hit chance p    = 35 + hit_slope x (attack + charge - defence x direction) within 8-90 %
                       (the database rule is hit_slope 1; calibrated, config/nn/sim.json)
     per hit         = ap + base x (1 - 0.75 armour / 100)   (armour stops 50-100 %: mean 75 %),
@@ -155,4 +156,11 @@ def strikes(u, pw, contact, params, charge_now, contact_s):
     # a unit fought by one enemy unit took 19.6 HP/s in the game, 33.9 in the open-loop replay, when
     # other enemy units stood within 35 m of it; 16.5 against 20.7 when none did).
     rate = torch.where(~single_j & ~single_i & busy, rate * float(cc.get("unit_incidental", 1.0)), rate)
+    # A unit without a missile weapon standing under HOLD in melee (no attack order) fights only with the men
+    # that happen to be in contact: hold_rate of its rate on every enemy it touches (the network's units in the
+    # game: matched on own and enemy unit keys 0.80 of the kills of the same unit attacking; calibrated to the
+    # kills of held units in the gate battles, where they touch 2.3 enemy units; missile units 0.99-1.01;
+    # config/nn/sim.json contact.why).
+    held = (u["order_kind"] == O.HOLD) & (u["range"] <= 0)
+    rate = torch.where(held[:, :, None], rate * float(cc.get("hold_rate", 1.0)), rate)
     return rate, hit, sector, F

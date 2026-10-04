@@ -69,7 +69,12 @@ leaves the fight on withdraw, or on a move to a point 10 m or more away (`contac
 unit): it strikes nobody and is not held in place, while the enemies in contact go on striking
 it. As in the game: a melee unit moving away deals ~6 % of its attack rate and takes ~1.7× the
 damage ([measurements](measurements.md#leaving-melee)); before, the simulator let a unit under
-such a move fight on at full rate, and the network learned to use that. An ability order fires a ready self-cast ability once (not passive,
+such a move fight on at full rate, and the network learned to use that. A unit without a missile
+weapon standing in melee under hold (no attack order) strikes at `contact.hold_rate` 0.5 of its rate,
+every enemy it touches: in the game only such a unit's men in contact fight (the network's units,
+matched on own and enemy unit keys: 0.80 of the kills of the same unit attacking; with such a unit
+touching 2.3 enemy units in the gate battles, calibrated on the kills). Before, holding in melee
+struck at full rate and the network held 76 % of its melee seconds. An ability order fires a ready self-cast ability once (not passive,
 not active, recharged); otherwise nothing happens. The network reads the abilities' timers from
 `State.observation()` (`ab{k}_on`, `ab{k}_cd` [B, N], s) and the innate effects on now (`fx_on`).
 
@@ -99,7 +104,7 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 | Contact | edges within 1 m (2 m more for those already fighting); a unit leaves melee on withdraw or a move 10 m or more away (it strikes nobody, the enemies in contact strike it) | measured: centre distance at the first contact; leaving — the network's runs ([measurements](measurements.md#leaving-melee)) |
 | Facing | a moving unit faces where it goes, but a step of less than 10 m to its point goes without turning; a formation in melee turns at most 2° a second (a lord turns at once) | measured: infantry in melee turns 1°/s (median; mean 2.3), a free unit struck in the flank turns 8° in 5 s (median) |
 | Order point | the game records the front's centre; the simulator goes to the unit's centre, half a depth behind | measured (spearmen 3.3–4.8 m, slaves 6.5–6.9 m) |
-| Men fighting | 0.75 of the files in contact; a unit shares out to each side of its formation (front, left, right, back) no more than that side holds; at most 9 men strike a lord in all, however many units, their rates summed; with the enemy lord on him the infantry at 0.35; a unit attacking another enemy strikes a lord it touches at 0.4 | calibrated; per side — measured: a unit already fighting hits a newcomer on its flank 2.2× the rule in the first 15 s (with one shared front the simulator gave 1.2×); 9, the sum — measured ([a lord surrounded](../game/units/lord-swarm.md)); 0.35, 0.4 — whole battles (below, "Lords fought by several units") |
+| Men fighting | 0.75 of the files in contact; a unit shares out to each side of its formation (front, left, right, back) no more than that side holds; at most 9 men strike a lord in all, however many units, their rates summed; with the enemy lord on him the infantry at 0.35; a unit attacking another enemy strikes a lord it touches at 0.4; a melee unit under hold at 0.5 | calibrated; hold — on the kills of the network's units in the gate battles (above, "Orders"); per side — measured: a unit already fighting hits a newcomer on its flank 2.2× the rule in the first 15 s (with one shared front the simulator gave 1.2×); 9, the sum — measured ([a lord surrounded](../game/units/lord-swarm.md)); 0.35, 0.4 — whole battles (below, "Lords fought by several units") |
 | Hit chance | 35 + 0.1 × (attack − defence), within 8–90 %; defence ×0.6 from the flank, ×0.3 from the rear; the defence lost counts 2.0× the rule from the flank, 0.25× from the rear (against a lord: none, measured) | DB numbers; the weights calibrated (see below and [flanks](#flanks-rear-and-charges-in-whole-battles)) |
 | Damage of a hit | armour-piercing + base × (1 − 0.75 × armour/100), no more than a man's health | DB (armour stops a random 50–100 %) |
 | Time between blows | `attack_interval_s` of the passport | DB |
@@ -290,7 +295,9 @@ mirror (69 %). Waiting (a reserve, a walk) loses: the side that waits fights out
 `python -m tools.nn.sim.check`: every recorded run is replayed in the simulator from the recorded
 start with the recorded orders (open-loop: `tools/nn/sim/replay.py`: a target fought or shot →
 attack it; in melee without a recorded target → attack the nearest enemy (CA's planner leaves the
-target empty in ~70 % of its melee seconds, the game's AI in ~6 %); otherwise → move to the order's
+target empty in ~70 % of its melee seconds, the game's AI in ~6 %), while the network's unit holds (the
+engine target of its attack orders is recorded in 97 % of their melee seconds, so without one it is
+under its hold); otherwise → move to the order's
 point), written down once a second like a recording and measured by the same code as the game
 (`tools/nn/measure.py`). A pair or shooting replay runs on its last recorded orders until a unit
 routs; a whole battle stops when its recording ends and is compared then (if it is not over, the
@@ -390,11 +397,16 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
 
 ## What is missing
 
-- **The game AI's army holds morale much better than the sim's.** Replaying the 8 gate battles: at
-  equal health the game AI's units keep 0.10–0.20 more morale than ours; they rout 0.72 times a unit
-  in the game against 1.44 (both sides replaying the game's orders) and 2.17 (against our network) in
-  the sim, and the sim gives the game AI's army 25% more losses than it took. This is the largest
-  sim-to-game gap (~0.17 trade a battle); the cause is not found yet.
+- **The game AI's army routs more often than in the game.** On the 8 battles of gate 20261004-071805 a
+  game-AI unit routs 0.92 times in the game, 1.9 in the simulator (both sides replaying the game's
+  orders) and 1.65 (against network n3). Not morale: there is no AI morale extra at Normal (AI against
+  AI, side 2 holds 0.15–0.2 more morale at equal health and the simulator, with no extra, gives the
+  same; on the gate the AI's morale at equal health is the game's: 0.73 / 0.91 against 0.72 / 0.90 at
+  health 0.4–0.6 / 0.6–0.8). The excess is health: over the recording the AI loses 0.45 of its health
+  in melee against the game's 0.38 (24.5 against 21.3 HP a melee second; CA's planner battles 20.2
+  against 22.9) — most one against one with our unit (+77 %) and where its own shooters fire into that
+  melee (+30–55 %: friendly fire and spill in melee). And the simulator kills a quarter fewer of our men
+  than the game for the same health (more wounded).
 - **Units pinned in melee.** A caught missile unit is still in melee 3 s later 75–81% of the time in
   the game; in the sim it walks out in about 2 s. ai_like does not hunt shooters as the game AI does
   (twice as often in the game).
@@ -457,6 +469,7 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
 | Single Entity's "speed ×0.9, damage ×0.8 below 25 % health" | lords running out of melee keep 0.84–0.85 of their run in every health band | left out (`effects.off`) |
 | A lord as a target at 0.9 of the unit rule | its 2-second loss windows overlapped and counted each loss twice | 0.43 over ~33k shots |
 | Leaving melee for missile units only | network units under a move away fought on at full rate (the game: ~6 % of the attack rate) | `contact.leave_m` 10 m for every unit |
+| Hold in melee at the measured 0.75 (one against one: 0.66–0.80) | n3 against ai_like on the 8 gate battles +0.19 → +0.07 (the game −0.27), but held units still killed 0.26–0.27 a second against the game's 0.17 (they touch 2.3 enemies and strike each), both sides replayed −0.100 → −0.065 | 0.5: kills 0.18, n3 −0.08, replay −0.089 (same winner 7 of 8 in both) |
 
 ## Surprises
 
