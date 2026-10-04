@@ -1,5 +1,7 @@
 """tools/nn/train/evaluate.py fair metrics with torch: swapped pairs of generated battles, the script
 baseline (script against itself on the same battles, cached) and the rating over all battles."""
+import json
+
 import numpy as np
 import pytest
 
@@ -80,6 +82,37 @@ class TestPairedEvaluation:
         assert again["nearest"]["cache"] == first["nearest"]["cache"]
         # a battle's attacker as in a paired evaluation: side 1 attacks at even positions
         assert first["nearest"]["attacker"] == [1, 2, 1, 2]
+
+    def test_the_canary_adopts_an_older_version_s_baseline_when_its_first_pairs_are_identical(self, tmp_path, monkeypatch):
+        """A code change outside a script battle changes the version but not the battles: with CANARY the
+        cache plays the first pairs only, finds them identical in the older file and copies it under the
+        new version; a file whose pairs differ (another simulator) is never adopted."""
+        monkeypatch.setattr(evaluate, "BASELINES", tmp_path)
+        full = evaluate.baselines(["nearest"], 4, limit_s=4.0)["nearest"]
+        old = tmp_path / f"nearest_19u_4s_{evaluate.sim_version()}.json"
+        other = old.with_name("nearest_19u_4s_oldversion.json")
+        old.rename(other)                                               # the file of an "older version"
+        played = []
+        real = evaluate.script_battles
+        monkeypatch.setattr(evaluate, "script_battles", lambda names, n, *a, **k: played.append((list(names), n)) or real(names, n, *a, **k))
+        monkeypatch.setattr(evaluate, "CANARY", 2)
+        got = evaluate.baselines(["nearest"], 4, limit_s=4.0)["nearest"]
+        assert played == [(["nearest"], 2)]                             # the canary only, not the 4 pairs
+        assert old.is_file() and got["winner"] == full["winner"] and got["cache"] == old.name
+        # a differing older file: the canary does not match, the whole baseline is played
+        doc = dict(json.loads(other.read_text(encoding="utf-8")))
+        doc["winner"] = [3 - w for w in doc["winner"]]
+        other.write_text(json.dumps(doc), encoding="utf-8")
+        old.unlink()
+        played.clear()
+        got = evaluate.baselines(["nearest"], 4, limit_s=4.0)["nearest"]
+        assert played == [(["nearest"], 2), (["nearest"], 4)] and got["winner"] == full["winner"]
+        # CANARY 0 (the default): straight to the whole baseline
+        monkeypatch.setattr(evaluate, "CANARY", 0)
+        old.unlink()
+        played.clear()
+        evaluate.baselines(["nearest"], 4, limit_s=4.0)
+        assert played == [(["nearest"], 4)]
 
     def test_the_script_view_takes_the_network_s_side(self):
         base = {"seed": [5, 6], "winner": [1, 2], "lost": [[100.0, 300.0], [50.0, 0.0]], "budget": [1000.0, 500.0]}

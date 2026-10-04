@@ -1,0 +1,25 @@
+{
+  "_comment": "The training chain's standing options for one test5 trend step; tools/ops/step.py builds the command from them (docs/en/training/workflow.md). --init, --critic-init and --reference come from the previous step and are not here. A value true is a bare flag, a dict is passed as JSON, null drops the option. Kept outside config/nn on purpose: that folder is hashed into the simulator version, and a change there makes the baselines' cache miss (~25 minutes).",
+  "test5": {
+    "minutes": 25,
+    "every": 5,
+    "baseline_canary": 32,
+    "dock_prefix": "orch-"
+  },
+  "options": {
+    "critic-warmup": 3,
+    "anchor": 0.03,
+    "anchor-end": 0.03,
+    "anchor-roll": 600,
+    "adv-norm": "role",
+    "idle-rate": 0.05,
+    "drills": 0.2,
+    "drill-teach": "auto",
+    "teach-normal": "auto",
+    "lord-rout": 0.5,
+    "entropy-target": 0.05,
+    "entropy-max": 0.03,
+    "gpu-duty": 0.9,
+    "mix": {"self": 0.05, "past": 0.1, "nearest": 0.35, "hold_shoot": 0.15, "hold": 0.05, "ai_like": 0.3}
+  }
+}

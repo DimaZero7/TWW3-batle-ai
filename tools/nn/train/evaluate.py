@@ -33,6 +33,7 @@ from tools.nn.sim import state as S
 from tools.nn.train import behaviour, checkpoint, league, matchups, randomise, reward, rollout, scenes, skill
 from tools.nn.train import cadence as cad
 from tools.nn.train import opponents as scripts
+from tools.nn.train import version as sim_ver
 from tools.nn.train.drills import transfer as drill_transfer
 
 SPREAD = randomise.Spread(common=0.0, side=0.0, jitter_m=2.0)
@@ -40,10 +41,15 @@ OPPONENTS = ("nearest", "hold_shoot", "hold", "ai_like", "past")
 REPLAYS = checkpoint.DIR / "replays"
 BASELINES = checkpoint.DIR / "baselines"
 ROOT = Path(__file__).resolve().parents[3]
-# What a script-vs-script battle depends on: the simulator, the armies, the scripts, the numbers.
-VERSION_FILES = ("tools/nn/sim", "tools/nn/armies", "tools/nn/train/opponents.py", "tools/nn/train/scenes.py",
-                 "tools/nn/train/reward.py", "tools/nn/train/randomise.py", "tools/nn/scenario.py", "tools/nn/units.py",
-                 "tools/nn/abilities.py", "tools/nn/model", "config/nn")
+# What a script-vs-script battle depends on: the simulator, the armies, the scripts, the numbers
+# (tools/nn/train/version.py; the same hash on the host without torch).
+VERSION_FILES = sim_ver.VERSION_FILES
+# Pairs of script battles played on a baseline cache miss to try an older version's file first
+# (baselines(); test5 --baseline-canary N; 0: always play the whole baseline). When those pairs come
+# out identical in every field (winner, gold lost, start, budget, factions, attacker) the older file
+# is adopted under the new version: a code change that cannot touch a script battle (the network, a
+# reward term) no longer costs the ~20-30 minutes of playing 256 pairs x 3 scripts again.
+CANARY = 0
 SEP = (",", ":")          # compact, as the game writes events.jsonl (gamedata looks for '"event":"result"')
 
 
@@ -718,17 +724,8 @@ def start_cost(u):
 
 def sim_version():
     """A hash of what a script-vs-script battle depends on: VERSION_FILES (line ends ignored) and the
-    generator's budget factors as loaded (an override in memory changes the armies too)."""
-    from tools.nn.armies import generate
-    h = hashlib.sha256()
-    h.update(json.dumps(sorted((f, p.budget_factor) for f, p in generate.default().pools.items())).encode())
-    for rel in VERSION_FILES:
-        p = ROOT / rel
-        for f in (sorted(p.rglob("*")) if p.is_dir() else [p]):
-            if f.is_file() and f.suffix in (".py", ".json") and "__pycache__" not in f.parts:
-                h.update(f.relative_to(ROOT).as_posix().encode())
-                h.update(f.read_bytes().replace(b"\r\n", b"\n"))
-    return h.hexdigest()[:12]
+    generator's budget factors as loaded (tools/nn/train/version.py, shared with the host-side tools)."""
+    return sim_ver.sim_version()
 
 
 def baseline_path(name, max_units, limit_s, version=None):
@@ -797,6 +794,27 @@ def baselines(names, n_pairs, max_units=19, limit_s=3600.0, device="cpu", compil
             out[n] = dict({k: v[:n_pairs] for k, v in doc.items()}, cache=path.name)
         else:
             missing.append(n)
+    if missing and CANARY and 0 < CANARY < n_pairs:
+        # the canary: the first CANARY pairs now, compared with the older versions' files (the newest
+        # first); identical in every field -> that file is the baseline of this version too
+        seeds = eval_seeds(n_pairs)
+        old = {n: sim_ver.older_baselines(BASELINES, n, max_units, limit_s, version, seeds) for n in missing}
+        names = [n for n in missing if old[n]]
+        if names:
+            print(f"baselines {', '.join(names)} missing for simulator version {version}: playing a canary of "
+                  f"{CANARY} pairs against the older files", flush=True)
+            BASELINES.mkdir(parents=True, exist_ok=True)
+            for n, canary in script_battles(names, CANARY, max_units, limit_s, device, compile).items():
+                for p, doc in old[n]:
+                    if sim_ver.same_prefix(doc, canary, CANARY):
+                        path = baseline_path(n, max_units, limit_s, version)
+                        path.write_text(json.dumps(doc, separators=SEP), encoding="utf-8", newline="\n")
+                        out[n] = dict({k: v[:n_pairs] for k, v in doc.items()}, cache=path.name)
+                        missing.remove(n)
+                        print(f"baseline {n}: adopted {p.name} (the {CANARY} canary pairs identical)", flush=True)
+                        break
+                else:
+                    print(f"baseline {n}: no older file matches the canary; playing all {n_pairs} pairs", flush=True)
     if missing:
         BASELINES.mkdir(parents=True, exist_ok=True)
         for n, doc in script_battles(missing, n_pairs, max_units, limit_s, device, compile).items():

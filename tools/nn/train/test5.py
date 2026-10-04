@@ -471,11 +471,15 @@ def main():
                                           "tools/nn/train/capacity.py)")
     ap.add_argument("--report-only", action="store_true",
                     help="rebuild trend.md and report.json's blocks of a finished --label from its files")
+    ap.add_argument("--baseline-canary", type=int, default=0,
+                    help="on a baseline cache miss play this many pairs first and adopt an older version's file "
+                         "when they come out identical (evaluate.CANARY; 0: play the whole baseline)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args, rest = ap.parse_known_args()
     rest = [a for a in rest if a != "--"]
     if args.report_only:
         return report_only(args)
+    evaluate.CANARY = max(0, args.baseline_canary)
     with (contextlib.nullcontext() if args.no_lock else gpu_lock(f"test5 {args.label}")):
         test(args, rest)
 

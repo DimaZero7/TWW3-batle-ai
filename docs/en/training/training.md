@@ -693,7 +693,10 @@ time not counted), keeps each network (`m<minute>.pt`, the last with its critic)
 (`eval_m<minute>.json`) and writes the table minute 0 / K / … / M (`trend.md`, `report.json`).
 `--before PATH` reuses a "before" evaluation (only while the simulator has not changed);
 `--report-only` rebuilds the report of a finished label without the GPU; `--prev-report` names the
-previous iteration for the capacity block.
+previous iteration for the capacity block. `--baseline-canary N` (the chain passes 32): on a
+baseline cache miss the scripts play the first N pairs first, and when they are identical in every
+field to an older version's file that file is adopted — a change that cannot touch a script battle
+no longer costs the ~25 minutes of the whole baseline ([workflow](workflow.md#the-baselines-cache-and-the-canary)).
 
 The report's blocks: skill (the [fair metrics](#network-evaluation-fair-metrics), with the distance
 from the start: `start_kl`, the anchor KL, the anchor rolls), drills, win rate by opponent and role,
@@ -999,7 +1002,10 @@ loss; continuing from older checkpoints; `--critic-init`, per-role advantages, `
 `start_kl`; checkpoints; replays readable by `gamedata`; evaluation (every battle counted, several
 opponents in one batch); `test5`'s report, trend, liveliness and faction blocks, and the GPU lock.
 `tests/tools/test_nn_eval_pairs.py` (torch): the pairs' layout, a paired evaluation, the baselines and
-their cache, the version hash, a shrunk batch playing its battles as the whole one does.
+their cache, the canary adopting an older version's baseline, the version hash, a shrunk batch playing
+its battles as the whole one does. `tests/tools/test_nn_version.py` and `tests/tools/test_ops.py`
+(plain Python): the simulator version and the baseline comparison on the host; the working process's
+tools — the chain step, the run card, leftovers, the wait with a timeout ([workflow](workflow.md)).
 `tests/tools/test_nn_skill.py`, `test_nn_capacity.py`, `test_nn_matchups.py` (numpy): the rating,
 pairs, margins, pair gold, forgetting and the verdict, matchups. `tests/tools/test_nn_cadence.py`:
 the cadence. `tests/tools/test_nn_drills.py`, `test_nn_drill_*.py` and `test_nn_teach_auto.py`: the drill framework, the teacher, frames,
