@@ -9,7 +9,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from tools.nn.sim import abilities, battle, effects, fatigue, geometry, melee, missile, morale, replay, scenario  # noqa: E402
+from tools.nn.sim import abilities, battle, effects, fatigue, geometry, melee, missile, morale  # noqa: E402
+from tools.nn.sim import movement, replay, scenario  # noqa: E402
 from tools.nn.sim import orders as O  # noqa: E402
 from tools.nn.sim import state as S  # noqa: E402
 from tools.nn.sim.params import load  # noqa: E402
@@ -386,6 +387,34 @@ class TestMissile:
         d = float(pw["dist"][0, 0, 1])
         expect = float(missile.distance_factor(torch.tensor(d), P.sim["missile"]["spill_melee"]))             / float(missile.distance_factor(torch.tensor(d), P.sim["missile"]["spill"]))
         assert ratio == pytest.approx(expect, rel=1e-3)
+
+    def test_a_standing_shooter_turns_to_a_target_behind_before_it_aims(self):
+        """missile.stand_fire_arc_deg + turn.formation_deg_s: standing, a shooter facing away from its only
+        target turns at the formation rate and aims only once the target is within the arc."""
+        def first_shot(params, steps=24):
+            st = scenario.build([army([(ARCHER, -100, 0, 270)], [(SLAVE, 0, 0, 270)])], params)
+            b0, bearings = float(st.u["b"][0, 0]), []
+            for k in range(steps):
+                battle.step(st, replay.hold(st), params)
+                bearings.append(float(st.u["b"][0, 0]))
+                if float(st.u["a"][0, 0]) < float(st.u["ammo0"][0, 0]):
+                    return (k + 1) * params.dt, b0, bearings
+            return None, b0, bearings
+        rate = P.sim["turn"]["formation_deg_s"]
+        arc = P.sim["missile"]["stand_fire_arc_deg"]
+        aim_s = P.sim["missile"]["aim_s"]["arrow"]
+        t, b0, bearings = first_shot(P)
+        step = abs(((bearings[0] - b0) + 180) % 360 - 180)
+        assert step == pytest.approx(rate * P.dt, abs=0.5)                       # one step of the turn
+        assert t is not None and t >= (180 - arc) / rate + aim_s - P.dt         # turned, then aimed
+        off = P.with_cal("missile", stand_fire_arc_deg=180).with_cal("turn", formation_deg_s=0)
+        t_off, _, bearings_off = first_shot(off)
+        assert t_off is not None and t_off < t and abs(((bearings_off[0] - 90) + 180) % 360 - 180) < 1
+
+    def test_the_turn_limit_takes_a_rate_per_unit(self):
+        u = {"b": torch.tensor([[100.0, 100.0]])}
+        movement.limit_turn(u, torch.tensor([[0.0, 0.0]]), torch.tensor([[True, True]]), torch.tensor([[40.0, 20.0]]))
+        assert u["b"].tolist() == [[40.0, 20.0]]
 
     def test_out_of_range_nobody_is_chosen(self):
         st = face_off(ARCHER, SLAVE, gap=200)

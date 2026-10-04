@@ -2,7 +2,8 @@
 
 Each unit heads for a point at walk or run speed (passport), speeding up and slowing down with
 the passport's acceleration and deceleration, and stops on the point. A unit locked in melee
-stands, and its formation turns slowly (melee_turn_deg_s, measured). A routing unit runs (at
+stands, and its formation turns slowly (melee_turn_deg_s, measured); out of melee a standing unit turns
+in place at turn.formation_deg_s (a lord: turn.single_deg_s), a walking one faces the way it walks. A routing unit runs (at
 rout_speed of its run, measured) away from the enemies near it (or towards its own edge of the map)
 and leaves the battle when it crosses the map's edge; standing units stay inside. Formations do
 not pass through each other: overlapping units are pushed apart along the line of centres.
@@ -59,9 +60,10 @@ def face(u, dir_x, dir_z, turn):
 
 
 def limit_turn(u, before, mask, max_deg):
-    """Where mask [B, N] is true, the bearing moves at most max_deg from `before`."""
+    """Where mask [B, N] is true, the bearing moves at most max_deg (a number or [B, N]) from `before`."""
     turn = torch.remainder(u["b"] - before + 180, 360) - 180
-    b = torch.remainder(before + turn.clamp(-max_deg, max_deg), 360)
+    lim = torch.as_tensor(max_deg, dtype=turn.dtype, device=turn.device)
+    b = torch.remainder(before + torch.maximum(torch.minimum(turn, lim), -lim), 360)
     u["b"] = torch.where(mask, b, u["b"])
 
 

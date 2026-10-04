@@ -109,6 +109,29 @@ def test_an_attack_on_a_target_in_melee_within_range_is_fire_at_will(lua):
     assert not freely(me, None, 150)
 
 
+def test_a_shooter_firing_at_its_target_is_on_target(lua):
+    # Any order restarts a shooter's aim in the game: one firing at the unit it is to shoot is left alone.
+    on = lua.eval("function(me, tg, recent) return bridge.on_target(me, tg, recent) end")
+    t = lua.table_from
+    tg = t({"n": "e_1", "men": 100})
+    firing = {"men": 90, "a": 900, "t": "e_1", "fire": True}
+    assert on(t(firing), tg, False)
+    assert on(t(dict(firing, fire=False)), tg, True)                       # between volleys
+    assert not on(t(dict(firing, fire=False)), tg, False)                  # not firing lately
+    assert not on(t(dict(firing, t="e_2")), tg, True)                      # at another unit
+    assert not on(t(dict(firing, t="")), tg, True)
+    assert not on(t(dict(firing, mv=True)), tg, True)                      # walking
+    assert not on(t(dict(firing, m=True)), tg, True)                       # in melee
+    assert not on(t(dict(firing, r=True)), tg, True)                       # routing
+    assert on(t(firing), t({"n": "e_1", "men": 100, "r": True}), False)    # a routing target is still shot
+    assert not on(t(firing), t({"n": "e_1", "men": 0}), True)              # gone
+    assert not on(t(firing), None, True)
+    assert lua.eval("bridge.FIRE_RECENT") == 3
+    firing = lua.eval("function(me, recent) return bridge.firing(me, recent) end")
+    assert firing(t({"men": 90, "fire": True}), False) and firing(t({"men": 90}), True)
+    assert not firing(t({"men": 90}), False) and not firing(t({"men": 90, "fire": True, "mv": True}), True)
+
+
 def test_the_idle_count_goes_on_across_the_networks_new_targets(lua):
     # The adapter keeps the duty table across attack orders; missile_duty never restarts it itself.
     duty = lua.eval("function(d, me, tg) return bridge.missile_duty(d, me, tg) end")

@@ -146,6 +146,90 @@ def test_a_held_shooter_is_aimed_at_the_nearest_enemy_in_range(lua, tmp_path):
     assert rows[-1]["nn_hold_aims"] == 1 and "error" not in [r["event"] for r in rows]
 
 
+def test_a_shooter_firing_at_its_target_is_not_given_it_again(lua, tmp_path):
+    # In the game any order restarts a shooter's aim (a firing unit given an attack order shoots 0.35 /
+    # 0.26 of its next 10 s instead of 0.47 / 0.42): an attack or a hold that leaves a firing shooter on
+    # the unit it fires at gives the engine nothing; a genuinely new target is given.
+    from tools.nn.companion import exchange
+    lua.globals().SYG, lua.globals().FS = SYG, FS
+    lua.execute(SETUP + """
+        own[2].ammo, own[2].range = 1000, 120
+        enemy[2].pos = fake.vector_type.new()
+        enemy[2].pos:set_x(-60)
+        own[2].target = enemy[2]
+        fake.cco['uid_own_spear_1'] = {IsFiringMissiles = true}
+        STATE = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+        bm:pump()
+    """)
+    batch = exchange.read_state(tmp_path / exchange.STATE)["batch"]
+
+    def answer(move, order):
+        exchange.write_atomic(tmp_path / exchange.ORDERS, exchange.orders_text(
+            batch, move, [{"unit": "own_lord", "kind": "keep"}, dict(order, unit="own_spear_1")]))
+        lua.execute("bm:tick(100)")
+
+    def log():
+        return list(lua.eval("bm.orders").values())
+    answer(1, {"kind": "attack", "target": "enemy_spear_1", "run": True})
+    assert log() == []                                          # firing at it: nothing new
+    lua.execute("for _ = 1, 9 do bm:tick(100) end")             # move 2
+    answer(2, {"kind": "attack", "target": "enemy_spear_1", "run": False})
+    answer_hold = {"kind": "hold"}
+    lua.execute("for _ = 1, 9 do bm:tick(100) end")             # move 3
+    answer(3, answer_hold)
+    assert log() == []                                          # hold on the unit it fires at: no halt
+    lua.execute("for _ = 1, 10 do bm:tick(100) end")            # move 4: the held pick stays
+    assert log() == []
+    lua.execute("own[2].target = enemy[1]; for _ = 1, 10 do bm:tick(100) end")   # the engine turned away
+    assert log() == ["attack enemy_spear_1"]                    # the pick given for real
+    lua.execute("own[2].target = enemy[2]; for _ = 1, 9 do bm:tick(100) end")
+    answer(5, {"kind": "attack", "target": "enemy_lord", "run": False})
+    assert log() == ["attack enemy_spear_1", "attack enemy_lord"]   # a new target is given
+    lua.execute("""
+        bm.outcome, bm.winner = true, 2
+        for _ = 1, 10 do bm:tick(100) end
+    """)
+    rows = events(tmp_path / "tww3_bai_events.jsonl")
+    assert "error" not in [r["event"] for r in rows]
+    status = [(r["move"], o["k"], o["status"]) for r in rows if r["event"] == "nn_orders" for o in r["orders"]
+              if o["u"] == "own_spear_1"]
+    assert status == [(1, "attack", "kept"), (2, "attack", "kept"), (3, "hold", "kept"),
+                      (5, "attack", "given")]
+    assert [(r["action"], r["tg"]) for r in rows if r["event"] == "nn_hold"] == [("keep", "enemy_spear_1")]
+    assert [(r["action"], r["tg"]) for r in rows if r["event"] == "nn_duty"] == [("engine_off", "enemy_spear_1")]
+    assert rows[-1]["nn_aims_kept"] == 3
+
+
+def test_a_shooter_shooting_standing_is_not_halted_to_fire_at_will(lua, tmp_path):
+    # An attack on a target in melee within range is given as fire at will (a halt): a shooter already
+    # shooting standing does that, and the halt would restart its aim.
+    from tools.nn.companion import exchange
+    lua.globals().SYG, lua.globals().FS = SYG, FS
+    lua.execute(SETUP + """
+        own[2].ammo, own[2].range = 1000, 120
+        enemy[1].pos = fake.vector_type.new()
+        enemy[1].pos:set_x(-100)
+        enemy[1].melee = true
+        own[2].target = enemy[2]
+        fake.cco['uid_own_spear_1'] = {IsFiringMissiles = true}
+        STATE = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+        bm:pump()
+    """)
+    batch = exchange.read_state(tmp_path / exchange.STATE)["batch"]
+    exchange.write_atomic(tmp_path / exchange.ORDERS, exchange.orders_text(batch, 1, [
+        {"unit": "own_lord", "kind": "keep"},
+        {"unit": "own_spear_1", "kind": "attack", "target": "enemy_lord", "run": False}]))
+    lua.execute("bm:tick(100)")
+    assert list(lua.eval("bm.orders").values()) == []
+    lua.execute("""
+        bm.outcome, bm.winner = true, 2
+        for _ = 1, 10 do bm:tick(100) end
+    """)
+    rows = events(tmp_path / "tww3_bai_events.jsonl")
+    assert [(r["action"], r["tg"]) for r in rows if r["event"] == "nn_duty"] == [("free_kept", "enemy_lord")]
+    assert rows[-1]["nn_aims_kept"] == 1 and "error" not in [r["event"] for r in rows]
+
+
 def test_an_attack_the_engine_dropped_is_given_again(lua, tmp_path):
     from tools.nn.companion import exchange
     lua.globals().SYG, lua.globals().FS = SYG, FS

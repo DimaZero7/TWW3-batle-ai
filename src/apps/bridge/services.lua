@@ -149,6 +149,27 @@ function M.missile_duty(duty, me, target)
     return nil
 end
 
+-- A shooter already on its target is not given it again. In the game any order restarts a shooter's
+-- aim: a unit that shot in the 3 s before, standing with an enemy in range, given an attack order
+-- shoots in 0.35 / 0.26 of its next 10 s (arrows / slings) against 0.47 / 0.42 given none (sim task 2,
+-- 04.10.2026). Gate 20261004-071805: the bridge gave our shooters 2.6 orders a shooter-minute while they
+-- were firing, a tenth of them on the very unit they were firing at. On target: standing (not moving,
+-- not in melee), the engine's target (row t) is that unit, and it fires now or fired within FIRE_RECENT
+-- decisions (the fire flag is off 1-3 s between volleys: 104 of 116 gaps, gate 20261004-071805).
+M.FIRE_RECENT = 3
+
+-- Shooting standing: up, not moving, not in melee, firing now or within FIRE_RECENT decisions
+-- (recent). Such a shooter is already doing what fire at will asks: it is not halted for it.
+function M.firing(me, recent)
+    return up(me) and me.m ~= true and me.mv ~= true and (me.fire == true or recent == true)
+end
+
+-- me: the shooter's row; target: the target's row; recent: it fired within FIRE_RECENT decisions.
+function M.on_target(me, target, recent)
+    if not (M.firing(me, recent) and present(target)) then return false end
+    return type(target.n) == 'string' and me.t == target.n
+end
+
 -- A shooter under a HOLD order shoots as the simulator's holding shooter does
 -- (tools/nn/sim/missile.py choose_target): the nearest standing enemy in range, else the nearest
 -- routing one. The game's own fire at will does not: a halted shooter picks a target itself, often

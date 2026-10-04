@@ -21,6 +21,14 @@
 -- duty; a held shooter that walks is halted to fire at will again (services.hold_guard; event nn_hold).
 -- A unit that stands under an attack or a move the engine dropped (after a fight it was drawn
 -- into) is given that order again (services.order_stalled; event nn_stall).
+-- Any order restarts a shooter's aim in the game, so a shooter already firing at the unit it is to
+-- shoot (services.on_target) is not given it again: an attack (or a resume, a held shooter's pick) on
+-- that unit is taken as given (status kept, event nn_aim_kept), a hold keeps the engine's target as
+-- the held shooter's pick instead of halting it (nn_hold keep), and a held shooter with no pick takes the
+-- unit it is firing at if that qualifies. Once the engine is off that target (another target, no fire
+-- for FIRE_RECENT decisions) the order is given for real (nn_duty engine_off). A shooter shooting
+-- standing (services.firing) that is to fire at will (its target in melee) is not halted for it
+-- (nn_duty free_kept).
 -- No answer by the next decision tick: the orders in force stay (event nn_miss).
 -- Abilities: an 'ability <unit> <key>' line of the answer is used at once when the unit
 -- stands and can_perform_special_ability(key) says yes: perform_special_ability(key, the
@@ -74,7 +82,7 @@ end
 function M.start(opts)
     local handle = {written = 0, applied = 0, answered = 0, missed = 0, given = 0, keeps = 0, bad = 0,
         regiven = 0, released = 0, resumed = 0, write_mode = nil, abilities_used = 0, abilities_refused = 0,
-        hold_aims = 0, hold_halts = 0, stalls = 0}
+        hold_aims = 0, hold_halts = 0, stalls = 0, aims_kept = 0}
     -- current: the order in force; lost: the order a unit had when it broke (given again the moment
     -- it rallies); down_at: the last move whose state showed the unit down (its answer has no order
     -- for it); duty: a shooter's state under an attack order (or a held shooter's picked target);
@@ -82,7 +90,8 @@ function M.start(opts)
     -- decisions standing under an order the engine dropped (services.order_stalled).
     local times, current, lost, duty, enemy_by_name, guard, stall = {}, {}, {}, {}, {}, {}, {}
     local down_at = {}
-    local seen = {}   -- the rows of the last decision, by unit name
+    local seen, seen_rows = {}, {}   -- the rows of the last decision, by unit name and as a list
+    local fired = {}   -- the last move whose state showed the unit firing
     local used, own_by_name, unit_by_name = {}, {}, {}   -- used[name][key] = battle ms of the last use
     for _, it in ipairs(opts.enemies) do enemy_by_name[it.name], unit_by_name[it.name] = it, it.unit end
     for _, it in ipairs(opts.own) do own_by_name[it.name], unit_by_name[it.name] = it, it.unit end
@@ -112,20 +121,58 @@ function M.start(opts)
         opts.emit('nn_duty', {t = opts.now_ms(), u = it.name, action = action, tg = target})
     end
 
-    -- A shooter takes `target` (an enemy's name): as fire at will when it stands in melee within
+    local function recent(name)
+        return fired[name] ~= nil and handle.written - fired[name] <= services.FIRE_RECENT
+    end
+
+    -- Is the shooter firing at `target` already (services.on_target)?
+    local function on_target(it, target)
+        return services.on_target(seen[it.name], seen[target], recent(it.name))
+    end
+
+    -- A shooter takes `target` (an enemy's name): nothing when it is firing at it already (the
+    -- engine's aim stands for the order: duty.engine), as fire at will when it stands in melee within
     -- range (services.fire_freely), else as an explicit target. Its duty table goes on.
     local function aim(it, target, run)
         local enemy = enemy_by_name[target]
         if not enemy then return 'unknown_target' end
         duty[it.name] = duty[it.name] or {}
+        if on_target(it, target) then
+            local d = duty[it.name]
+            d.free, d.free_for, d.engine = false, 0, target
+            handle.aims_kept = handle.aims_kept + 1
+            opts.emit('nn_aim_kept', {t = opts.now_ms(), u = it.name, tg = target})
+            return 'kept'
+        end
+        duty[it.name].engine = nil
         local range = read(function() return it.unit:missile_range() end)
         if services.fire_freely(seen[it.name], seen[target], range) then
-            if not duty[it.name].free then free_fire(it, target, 'free') end
+            local d = duty[it.name]
+            if not d.free and services.firing(seen[it.name], recent(it.name)) then
+                -- shooting standing already: fire at will is what it does (a halt would restart its aim)
+                d.free, d.free_for, d.idle = true, 0, 0
+                handle.aims_kept = handle.aims_kept + 1
+                opts.emit('nn_duty', {t = opts.now_ms(), u = it.name, action = 'free_kept', tg = target})
+                return 'kept'
+            end
+            if not d.free then free_fire(it, target, 'free') end
         else
             orders.attack_ranged(it.uc, enemy.unit, run, true)
             duty[it.name].free, duty[it.name].free_for = false, 0
         end
         return 'given'
+    end
+
+    -- A shooter left on the engine's aim (duty.engine) whose engine is off that target now: the
+    -- order is given for real.
+    local function drifted(it, d, target)
+        if d.engine ~= target or d.free then return false end
+        local me, row = seen[it.name], seen[target]
+        if not (me and not services.down(me) and me.m ~= true) or on_target(it, target) then return false end
+        if not (row and not services.down(row)) then return false end
+        d.engine = nil
+        opts.emit('nn_duty', {t = opts.now_ms(), u = it.name, action = 'engine_off', tg = target})
+        return true
     end
 
     local function give(it, order)
@@ -134,6 +181,17 @@ function M.start(opts)
         guard[it.name] = nil
         stall[it.name] = nil
         if order.kind == 'hold' then
+            -- A shooter firing at the unit it would be aimed at under hold goes on (no halt).
+            local me = seen[it.name]
+            local tg = me and me.t
+            if shooter(it.unit) and type(tg) == 'string' and on_target(it, tg)
+                and services.hold_target(me, seen_rows, read(function() return it.unit:missile_range() end), tg) == tg then
+                guard[it.name] = {pick = tg}
+                duty[it.name] = {engine = tg}
+                handle.aims_kept = handle.aims_kept + 1
+                opts.emit('nn_hold', {t = opts.now_ms(), u = it.name, action = 'keep', tg = tg})
+                return 'kept'
+            end
             orders.halt(uc)
             orders.set_fire_at_will(uc, true)
             guard[it.name] = {}       -- a held shooter is aimed by watch_shooters (services.hold_target)
@@ -144,7 +202,7 @@ function M.start(opts)
             local enemy = enemy_by_name[order.target]
             if not enemy then return 'unknown_target' end
             if shooter(it.unit) then
-                aim(it, order.target, order.run)
+                return aim(it, order.target, order.run)
             else
                 duty[it.name] = nil
                 orders.attack_melee(uc, enemy.unit)
@@ -222,7 +280,10 @@ function M.start(opts)
             return
         end
         local range = read(function() return it.unit:missile_range() end)
-        local pick = services.hold_target(me, rows, range, g.pick)
+        -- No pick yet: the unit the engine fires at is kept while it qualifies (no new aim).
+        local current = g.pick
+        if not current and me and type(me.t) == 'string' and on_target(it, me.t) then current = me.t end
+        local pick = services.hold_target(me, rows, range, current)
         if pick ~= g.pick then
             g.pick = pick
             opts.emit('nn_hold', {t = opts.now_ms(), u = it.name, action = pick and 'aim' or 'none', tg = pick})
@@ -233,6 +294,8 @@ function M.start(opts)
             else
                 stand_free(it)
             end
+        elseif pick and duty[it.name] and drifted(it, duty[it.name], pick) then
+            aim(it, pick, false)
         elseif pick and duty[it.name] then
             local action = services.missile_duty(duty[it.name], me, seen[pick])
             if action == 'release' then
@@ -246,11 +309,16 @@ function M.start(opts)
     end
 
     local function watch_shooters(rows)
-        seen = {}
-        for _, row in ipairs(rows) do seen[row.n] = row end
+        seen, seen_rows = {}, rows
+        for _, row in ipairs(rows) do
+            seen[row.n] = row
+            if row.fire == true then fired[row.n] = handle.written end
+        end
         for _, it in ipairs(opts.own) do
             local order, d, g = current[it.name], duty[it.name], guard[it.name]
-            if d and order and order.kind == 'attack' then
+            if d and order and order.kind == 'attack' and drifted(it, d, order.target) then
+                give(it, order)
+            elseif d and order and order.kind == 'attack' then
                 local action = services.missile_duty(d, seen[it.name], seen[order.target])
                 if action == 'release' then
                     free_fire(it, order.target, 'release')
@@ -305,7 +373,7 @@ function M.start(opts)
             end
         end
         local status = give(it, order)
-        if status == 'given' then current[it.name] = order end
+        if status ~= 'unknown_target' then current[it.name] = order end
         handle.regiven = handle.regiven + 1
         opts.emit('nn_rally', {t = opts.now_ms(), u = it.name, k = order.kind, x = order.x, z = order.z,
             tg = order.target, run = order.run, status = status})
@@ -366,8 +434,8 @@ function M.start(opts)
                 row.skipped = row.skipped + 1
             elseif order and services.changed(current[it.name], order) then
                 local status = give(it, order)
-                if status == 'given' then current[it.name], lost[it.name] = order, nil end
-                handle.given = handle.given + 1
+                if status ~= 'unknown_target' then current[it.name], lost[it.name] = order, nil end
+                if status ~= 'kept' then handle.given = handle.given + 1 end
                 row.orders[#row.orders + 1] = {u = it.name, k = order.kind, x = order.x, z = order.z,
                     tg = order.target, run = order.run, status = status}
             elseif order then
@@ -397,7 +465,8 @@ function M.start(opts)
             nn_orders_given = handle.given, nn_keeps = handle.keeps, nn_bad_files = handle.bad, nn_write_mode = handle.write_mode,
             nn_regiven = handle.regiven, nn_released = handle.released, nn_resumed = handle.resumed,
             nn_abilities_used = handle.abilities_used, nn_abilities_refused = handle.abilities_refused,
-            nn_hold_aims = handle.hold_aims, nn_hold_halts = handle.hold_halts, nn_stalls = handle.stalls}
+            nn_hold_aims = handle.hold_aims, nn_hold_halts = handle.hold_halts, nn_stalls = handle.stalls,
+            nn_aims_kept = handle.aims_kept}
     end
 
     return handle

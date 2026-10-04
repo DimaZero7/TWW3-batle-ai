@@ -549,12 +549,13 @@ class TestNnArena:
         lua.execute("enemy[2].melee = false")
         play(2)                                      # out of melee: the ordered target again
         assert log()[3:] == ["halt", "attack enemy_spear_1"]
-        # A new target in melee within range: not an explicit target (it would stand idle), fire at will.
+        # A new target in melee within range: not an explicit target (it would stand idle), fire at will;
+        # the archer shoots standing already, so it is not halted for it (a halt restarts its aim).
         lua.execute("enemy[1].pos.x, enemy[1].pos.z, enemy[1].melee = -120, 40, true")
         play(1)                                      # the bridge sees it at the next decision
         orders[1]["target"] = "enemy_lord"
         play(2)
-        assert log()[3:] == ["halt", "attack enemy_spear_1", "halt"]
+        assert log()[3:] == ["halt", "attack enemy_spear_1"]
         lua.execute("""
             bm.outcome, bm.winner = true, 2
             for _ = 1, 10 do bm:tick(100) end
@@ -566,9 +567,10 @@ class TestNnArena:
             ("own_spear_1", "attack", "enemy_lord", "given")]
         assert sum(r["skipped"] for r in rows if r["event"] == "nn_orders") >= 2
         assert [(r["u"], r["action"]) for r in rows if r["event"] == "nn_duty"] == [
-            ("own_archer_1", "release"), ("own_archer_1", "resume"), ("own_archer_1", "free")]
+            ("own_archer_1", "release"), ("own_archer_1", "resume"), ("own_archer_1", "free_kept")]
         result = rows[-1]
-        assert (result["nn_regiven"], result["nn_released"], result["nn_resumed"]) == (1, 2, 1)
+        assert (result["nn_regiven"], result["nn_released"], result["nn_resumed"]) == (1, 1, 1)
+        assert result["nn_aims_kept"] == 1
 
     def test_an_unknown_own_ai_is_an_error(self, lua, tmp_path):
         lua.execute(self.SETUP + """

@@ -48,6 +48,8 @@ function F.unit(name, kind, x, z)
     function u:has_attribute() return false end
     function u:is_commanding_unit() return false end
     function u:missile_range() return self.range or 0 end
+    -- The unit the engine aims at (a test sets u.target to another fake unit).
+    function u:current_target() return self.target end
     -- Abilities a test gives the unit: u.abilities[key] = true (ready) or false (owned, not ready).
     function u:can_perform_special_ability(key) return (self.abilities or {})[key] == true end
     function u:owned_non_passive_special_abilities()

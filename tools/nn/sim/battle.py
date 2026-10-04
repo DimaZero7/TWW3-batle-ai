@@ -109,14 +109,29 @@ def step(st, orders, params=None, dt=None):
     # (fire whilst moving, attribute mounted_fire_move: shoots and aims on the move too)
     still = (speed < 0.2) | u["fire_move"]
     ready = standing & ~engaged & (u["a"] > 0) & (u["range"] > 0) & still
-    u["aim"] = torch.where(ready, u["aim"] + dt, torch.zeros_like(u["aim"]))
-    can = ready & (u["aim"] >= u["aim_s"])
     # On the move (fire whilst moving) a unit shoots only at targets within missile.move_fire_arc_deg of its
     # facing (the way it walks): walking away it holds fire (measured, config/nn/sim.json missile.move_fire_why).
     arc = float(cal["missile"].get("move_fire_arc_deg", 180.0))
     on_move = u["fire_move"] & (speed >= 0.2)
     behind = (on_move[:, :, None] & (pw["rel_i"].abs() > arc * geometry.DEG)) if arc < 180 else None
-    m_target = missile.choose_target(u, pw, can, tgt, kind == O.ATTACK, exclude=behind)
+    # Standing, a unit shoots only at targets within missile.stand_fire_arc_deg of its facing (measured,
+    # missile.stand_fire_why): one beyond it is turned to first (the facing below, at turn.*_deg_s), and the unit
+    # aims only once its target is within the arc. Without an ordered target it takes the nearest within the arc,
+    # else turns to the nearest beyond it.
+    aim_at = missile.choose_target(u, pw, ready, tgt, kind == O.ATTACK, exclude=behind)
+    s_arc = float(cal["missile"].get("stand_fire_arc_deg", 180.0))
+    turning = torch.zeros_like(ready)
+    if s_arc < 180:
+        on_stand = ready & (speed < 0.2)
+        out = on_stand[:, :, None] & (pw["rel_i"].abs() > s_arc * geometry.DEG)
+        ahead = missile.choose_target(u, pw, ready, tgt, kind == O.ATTACK,
+                                      exclude=out if behind is None else (out | behind))
+        ordered = (kind == O.ATTACK) & (aim_at == tgt) & (aim_at >= 0)
+        aim_at = torch.where(ordered | (ahead < 0), aim_at, ahead)
+        turning = (aim_at >= 0) & out.gather(2, aim_at.clamp(min=0)[:, :, None]).squeeze(2)
+    u["aim"] = torch.where(ready & ~turning, u["aim"] + dt, torch.zeros_like(u["aim"]))
+    can = ready & ~turning & (u["aim"] >= u["aim_s"])
+    m_target = torch.where(can, aim_at, torch.full_like(aim_at, -1))
     # direct fire needs a clear line past friends (missile.py clear_shot); arcing fire: unchanged
     m_target, clear = missile.clear_shot(u, pw, m_target, can, tgt, kind == O.ATTACK, params)
     if behind is not None:
@@ -310,8 +325,19 @@ def step(st, orders, params=None, dt=None):
     movement.face(u, ox_ - u["x"], oz_ - u["z"], has_opp & ~mv & standing)
     mt = m_target.clamp(min=0)
     movement.face(u, u["x"].gather(1, mt) - u["x"], u["z"].gather(1, mt) - u["z"], firing & ~mv & ~has_opp)
+    # A shooter that aims or turns to its target (not yet shooting) faces it too.
+    wt = aim_at.clamp(min=0)
+    movement.face(u, u["x"].gather(1, wt) - u["x"], u["z"].gather(1, wt) - u["z"],
+                  (aim_at >= 0) & ~firing & ~mv & ~has_opp & standing)
     # A formation in melee turns slowly (measured): an enemy on its flank or rear stays there.
     movement.limit_turn(u, old["b"], engaged & ~leaving & (u["men0"] > 1), cal["contact"]["melee_turn_deg_s"] * dt)
+    # Out of melee a standing unit turns in place at turn.formation_deg_s (a lord or another single entity:
+    # turn.single_deg_s); measured, config/nn/sim.json turn.why. A walking unit faces the way it walks.
+    t_cal = cal.get("turn") or {}
+    if t_cal.get("formation_deg_s"):
+        rate = torch.where(u["men0"] > 1, torch.full_like(u["b"], float(t_cal["formation_deg_s"])),
+                           torch.full_like(u["b"], float(t_cal.get("single_deg_s", t_cal["formation_deg_s"]))))
+        movement.limit_turn(u, old["b"], standing & ~mv & ~engaged, rate * dt)
     router_hit = torch.where(strike & u["r"][:, None, :], d, torch.full_like(d, 1e9))
     router = router_hit.argmin(2)
     has_router = router_hit.min(2).values < 1e9

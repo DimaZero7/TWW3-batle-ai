@@ -126,6 +126,31 @@ sequenceDiagram
   | Idle under an attack order (standing, ammunition, not firing), unit-s per battle second | 1.43 | 0.78 |
   | The first order after a rally | up to 77 s (128 s in battle 2) | within 0.4 s; 0 idle seconds |
 
+- **A shooter already firing at its target is not given it again.** In the game any order restarts a
+  shooter's aim: a unit that shot in the 3 s before, standing with an enemy in range, given an attack
+  order shoots in 0.35 / 0.26 of its next 10 s (arrows / slings) against 0.47 / 0.42 given none
+  (sim task 2, 04.10.2026). On target (`services.on_target`): standing (not moving, not in melee),
+  the engine's target (row `t`) is that unit, and it fires now or fired within `FIRE_RECENT` = 3
+  decisions (the fire flag is off 1-3 s between volleys: 104 of 116 gaps). Then:
+  - an attack (the network's, a duty's `resume`, a held shooter's pick) on that unit gives the engine
+    nothing (status `kept`, event `nn_aim_kept`); a run flag that changed alone is not given either;
+  - a HOLD keeps the engine's target as the held shooter's pick instead of `halt()` when
+    `hold_target` would pick it too (event `nn_hold` `keep`); a held shooter with no pick takes the
+    unit it is firing at while that qualifies;
+  - an attack on a target in melee within range (fire at will) does not halt a shooter that shoots
+    standing already (`services.firing`; event `nn_duty` `free_kept`);
+  - once the engine is off that target (another target, no fire for `FIRE_RECENT` decisions) the
+    order is given for real (event `nn_duty` `engine_off`).
+
+  Gate 20261004-071805 (8 battles, 210 shooter-minutes), its recorded orders through these rules
+  offline: orders to our standing shooters while they fire 1.53 a shooter-minute → 1.03 (the
+  battles of 04.10 afternoon, 139 shooter-minutes: 2.38 → 1.44); the drift check adds 0.01. All
+  engine orders to our shooters 14.7 → 14.2 a shooter-minute: 77 % of them are new move points to
+  shooters already walking (the network's point moves with the unit, > 5 m a second), which do not
+  touch aiming; what stays for firing shooters is the network's own choice (another target 0.44,
+  a move 0.39, a held shooter's new pick 0.13 a minute), which the simulator charges since sim
+  task 2 (`missile.aim_reset_on_order`).
+
 Orders are given through the verified recipes of [orders](orders.md):
 
 | Order | Engine calls |
@@ -224,6 +249,8 @@ Without the last line `end` the game takes nothing. A unit without a line keeps 
 | `fire_freely(me, target, range)` | Give an attack as fire at will: the target stands in melee within range |
 | `shooter_idle(row)` | A shooter stands idle: standing, not moving, not in melee, not firing, with ammunition |
 | `missile_duty(duty, me, target)` | One decision of a shooter under an attack order: `release`, `resume` or `nil` (`RELEASE_AFTER`, `FREE_MIN`) |
+| `firing(me, recent)` | Shoots standing: up, not moving, not in melee, the fire flag on now or within `FIRE_RECENT` decisions (`recent`) |
+| `on_target(me, target, recent)` | `firing` and the engine's target (`t`) is that unit: giving it again would restart the aim |
 
 ## exchange_adapter — files
 
@@ -241,17 +268,18 @@ card: with it every row gets `fx`. The entry [nn_arena](entries.md#nn_arena) wit
 
 | Event | Fields |
 |---|---|
-| `nn_orders` | `move`, `lag` (moves written since), `wait_model_ms` and `wait_real_ms` (from writing the state to giving the orders), `think_ms` (the network's time in the companion), `orders` (given: `u`, `k`, `x`, `z`, `tg`, `run`, `status`), `kept` (the same order again: not given), `keeps` (units told `keep`), `skipped` (orders to units down now or in the state answered) |
+| `nn_orders` | `move`, `lag` (moves written since), `wait_model_ms` and `wait_real_ms` (from writing the state to giving the orders), `think_ms` (the network's time in the companion), `orders` (given: `u`, `k`, `x`, `z`, `tg`, `run`, `status`: `given`, `kept` — nothing given to a shooter on that target, `unknown_target`), `kept` (the same order again: not given), `keeps` (units told `keep`), `skipped` (orders to units down now or in the state answered) |
 | `nn_rally` | `u`, `k`, `x`, `z`, `tg`, `run`, `status` — the order a unit had when it broke, given again as it rallied (`hold` if the attack's target is gone) |
-| `nn_duty` | `u`, `action` (`free` — an attack on a target in melee given as fire at will, `release` — idle: to fire at will, `resume` — the ordered target again), `tg` |
+| `nn_duty` | `u`, `action` (`free` — an attack on a target in melee given as fire at will, `free_kept` — the same, the shooter shooting standing already: no halt, `release` — idle: to fire at will, `resume` — the ordered target again, `engine_off` — a kept aim given for real), `tg` |
+| `nn_aim_kept` | `u`, `tg` — an attack on the unit the shooter fires at already: nothing given |
 | `nn_miss` | `move` that got no answer by the next decision, `answered` |
-| `nn_hold` | `u`, `action` (`aim`, `none`, `halt`), `tg` — a held shooter's target |
+| `nn_hold` | `u`, `action` (`aim`, `none`, `halt`, `keep` — a HOLD left the engine's target as the pick, no halt), `tg` — a held shooter's target |
 | `nn_stall` | `u`, `k` (`attack`, `move`, `withdraw`), `tg` — an order the engine dropped, given again |
 | `nn_ability` | `move`, `u`, `key`, `status`: `used`, `not_ready` (`can_perform_special_ability` said no: in the game only for an ability not owned), `down` (the unit is not standing), `unknown_unit` (not ours), `error` |
 | `nn_ability_ready` | `u`, `key`, `ready` (`can_perform_special_ability`), when it changes |
 | `nn_effects` | `u`, `fx` (the phases on the unit, or `unknown`), when they change |
-| `result` (added) | `nn_moves`, `nn_answered`, `nn_missed`, `nn_orders_given`, `nn_keeps`, `nn_bad_files`, `nn_write_mode`, `nn_regiven` (orders given again at a rally), `nn_released`, `nn_resumed`, `nn_abilities_used`, `nn_abilities_refused`, `nn_hold_aims`, `nn_hold_halts`, `nn_stalls` |
+| `result` (added) | `nn_moves`, `nn_answered`, `nn_missed`, `nn_orders_given`, `nn_keeps`, `nn_bad_files`, `nn_write_mode`, `nn_regiven` (orders given again at a rally), `nn_released`, `nn_resumed`, `nn_abilities_used`, `nn_abilities_refused`, `nn_hold_aims`, `nn_hold_halts`, `nn_stalls`, `nn_aims_kept` (orders not given: the shooter was on that target already) |
 
 Tests: `tests/apps/bridge/test_bridge.py` (the orders file as the game reads it, what counts as a
 new order, a shooter's duty), `tests/entries/test_entries.py` (`test_net_...`: state, answer, orders
-given, a miss, the last state; a ranged attack runs, a rout and a rally, a shooter released and taken back), `tests/entries/test_bridge_abilities.py` (ability lines, the card's active effects, a use once, refused when not ready, down or not ours; the state's uses; a held shooter aimed, a dropped attack given again, a rallied unit going on with its order and taking no filler HOLD), `tests/tools/test_nn_companion.py` (the companion's side, the ability timers and lines, no line for units that take no orders).
+given, a miss, the last state; a ranged attack runs, a rout and a rally, a shooter released and taken back), `tests/entries/test_bridge_abilities.py` (ability lines, the card's active effects, a use once, refused when not ready, down or not ours; the state's uses; a held shooter aimed, a shooter firing at its target given nothing for an attack or a hold and the order given once the engine leaves it, a shooter shooting standing not halted for fire at will, a dropped attack given again, a rallied unit going on with its order and taking no filler HOLD), `tests/tools/test_nn_companion.py` (the companion's side, the ability timers and lines, no line for units that take no orders).
