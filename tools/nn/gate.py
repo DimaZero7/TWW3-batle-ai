@@ -41,6 +41,7 @@ SIZE_BINS = ((0, 4), (5, 9), (10, 14), (15, 19))  # our units besides the lord
 PAIR_BINS = (0, 2, 1, 3)                           # the size bins of pairs 1, 2, 3, 4 (then again)
 ROLES = ("attack", "defend")
 PASS_SHARE = 0.75                                  # 4 battles: 3 wins
+PAIR_GOLD_SOFT_LOSS = -0.10                         # split pairs below this need analysis
 REAL_SPEED = 5                                     # the slowest engine speed the deadline allows (x20 gives ~x9)
 SIM = project.CONFIG_DIR / "nn" / "sim.json"
 UNITS = project.CONFIG_DIR / "nn" / "units.json"
@@ -406,6 +407,8 @@ def summarize(gate_dir):
                "preferences_restored": all(r.get("preferences_restored") for r in rows),
                "by_faction": by_faction(rows), "pairs": pairs(rows), "pair_gold": pair_gold(rows),
                "liveliness": lively_summary(rows), "battles": rows}
+    summary["analyse"] = sorted(b for p in summary["pairs"]["each"] if "analyse" in p["verdict"]
+                                for b in p["battles"])
     (gate_dir / "summary.json").write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8", newline="\n")
     return summary
 
@@ -421,18 +424,31 @@ def by_faction(rows):
 
 def pairs(rows):
     """The swapped pairs: skill.pairs (won both / split / lost both, pair_score; a pair with a battle
-    without a result or a missing half is incomplete) and "each": [{pair, seed, outcomes, result}]."""
+    without a result or a missing half is incomplete), plus each pair's gold and verdict."""
     out = skill.pairs([r["outcome"] == "win" for r in rows], [r.get("pair") or -1 for r in rows],
                       [r["outcome"] == "no_result" for r in rows])
-    each = {}
+    each, grouped = {}, {}
     for r in rows:
         if r.get("pair"):
-            p = each.setdefault(r["pair"], {"pair": r["pair"], "seed": r["seed"], "outcomes": []})
+            p = each.setdefault(r["pair"], {"pair": r["pair"], "seed": r["seed"], "outcomes": [], "battles": []})
             p["outcomes"].append(r["outcome"])
+            p["battles"].append(r["battle"])
+            grouped.setdefault(r["pair"], []).append(r)
     for p in each.values():
         o = p["outcomes"]
         p["result"] = ("incomplete" if len(o) != 2 or "no_result" in o
                        else {2: "won both", 1: "split", 0: "lost both"}[o.count("win")])
+        # The mean over just this pair is its gold balance; keep skill's validity and budget rules.
+        gold = pair_gold(grouped[p["pair"]])["pair_gold"]
+        value = gold["value"] if gold else None
+        p["pair_gold"] = value if value is not None and math.isfinite(value) else None
+        if p["result"] == "split" and p["pair_gold"] is not None:
+            p["verdict"] = ("armies decide, we trade worse — analyse" if value < PAIR_GOLD_SOFT_LOSS
+                            else "armies decide, we trade better" if value >= -PAIR_GOLD_SOFT_LOSS
+                            else "armies decide, even")
+        else:
+            p["verdict"] = {"won both": "net stronger", "lost both": "game AI stronger — analyse"}.get(
+                p["result"], "incomplete")
     out["each"] = list(each.values())
     return out
 
@@ -479,6 +495,12 @@ def table(summary):
         lines.append("pairs (one seed, our network on either army): "
                      + "; ".join(f"{x['pair']} {x['result']}" for x in p["each"])
                      + f"; pair score {score} over {p['pairs']} complete")
+        for x in p["each"]:
+            gold = "-" if x["pair_gold"] is None else f"{x['pair_gold']:+.3f}"
+            battles = ", ".join(map(str, x["battles"]))
+            lines.append(f"pair {x['pair']} (battles {battles}): {x['result']}; pair gold {gold}; {x['verdict']}")
+    analyse = summary.get("analyse", [])
+    lines.append("analyse: " + ("battles " + ", ".join(map(str, analyse)) if analyse else "none"))
     g = summary.get("pair_gold")
     if g and g.get("pairs"):
         pg, ex, weak = skill.gold_cells(g)

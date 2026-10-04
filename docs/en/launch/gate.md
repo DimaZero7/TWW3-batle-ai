@@ -108,6 +108,14 @@ A battle not at Normal difficulty (`battle_difficulty` in `launch.json` other th
 | `summary.json`: `pair_gold` | the pairs' gold balance ([fair metrics](../training/training.md#network-evaluation-fair-metrics)): ours minus the game AI's on the same armies / budget, the exchange factor, the weak army's destroyed / lost in our hands vs the game AI's; a battle's `gold` (lost per side from the units' end state × passport cost, destroyed, budget, trade, margin); a line under the table |
 | `summary.json`: `liveliness` | measured only ([liveliness](../training/training.md#liveliness)): our network's order changes, attack-target switches, A→B→A flips, move jitter and twitching out of melee per role, from the given orders (`nn_orders`); both sides' own target switches every second (`nn_sample`): the game's AI as the reference band (median [min, max] of the battles); a battle's `lively` (the counts); two lines under the table |
 
+`pairs.each` and separate pair lines include `battles`, `pair_gold` and `verdict`: 2–0 means `net stronger`;
+0–2 means `game AI stronger — analyse`; 1–1 means `armies decide, even` for gold from −0.10 to +0.10
+(upper bound excluded), `armies decide, we trade better` at ≥ +0.10,
+or `armies decide, we trade worse — analyse` below −0.10 (a soft loss). One pair's gold is
+(the network's destroyed gold in both battles − its lost gold in both battles) / budget; positive means better trades.
+An incomplete pair or a split without gold has verdict `incomplete`. The line `analyse: battles N, M, ...`
+and JSON list `analyse` include both battles of every pair whose verdict says `analyse`; otherwise the line is `analyse: none`.
+
 A battle's row: seed, factions and army templates, budget (B, each side's budget and cost), units per side (lord included), role,
 who won and how, battle length, men at the start and at the end, units still standing, the
 network's counters (`nn`: decisions, answers, misses, orders given, `keep`, bad files), Lua errors,

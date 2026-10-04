@@ -208,6 +208,53 @@ class TestSummary:
         assert "1 won both; 2 split; 3 lost both; 4 incomplete; pair score +0.00 over 3 complete" in lines
         assert " 2   1s " in lines
 
+    @pytest.mark.parametrize("outcomes,balance,verdict", [
+        (["win", "win"], -0.3, "net stronger"),
+        (["win", "loss"], -0.1001, "armies decide, we trade worse — analyse"),
+        (["win", "loss"], -0.10, "armies decide, even"),
+        (["loss", "win"], 0.0, "armies decide, even"),
+        (["win", "loss"], 0.0999, "armies decide, even"),
+        (["loss", "win"], 0.10, "armies decide, we trade better"),
+        (["win", "loss"], 0.3, "armies decide, we trade better"),
+        (["loss", "loss"], 0.3, "game AI stronger — analyse"),
+        (["win", "no_result"], 0.3, "incomplete"),
+        (["win"], 0.3, "incomplete"),
+        (["win", "loss"], None, "incomplete"),
+    ])
+    def test_pair_verdict(self, outcomes, balance, verdict):
+        rows = [{"battle": i + 9, "pair": 5, "seed": 21, "swap": bool(i), "outcome": outcome,
+                 "gold": {"destroyed": 500 + balance * 500, "own_lost": 500, "budget": 1000,
+                          "margin": 0.2 if outcome == "win" else -0.2} if balance is not None else None}
+                for i, outcome in enumerate(outcomes)]
+        p = gate.pairs(rows)["each"][0]
+        assert p["verdict"] == verdict
+        assert p["battles"] == [r["battle"] for r in rows]
+        expected = balance if len(rows) == 2 and "no_result" not in outcomes else None
+        assert p["pair_gold"] == (pytest.approx(expected) if expected is not None else None)
+
+    def test_summary_lists_both_battles_only_for_pairs_needing_analysis(self, tmp_path, monkeypatch):
+        rows = []
+        for pair, outcomes, destroyed in [(5, ["win", "loss"], 400), (6, ["win", "loss"], 600),
+                                           (7, ["loss", "loss"], 500), (8, ["win", "win"], 400)]:
+            for i, outcome in enumerate(outcomes):
+                rows.append({"battle": 2 * pair - 1 + i, "pair": pair, "seed": pair, "swap": bool(i),
+                             "outcome": outcome, "role": "defend" if i else "attack",
+                             "gold": {"destroyed": destroyed, "own_lost": 500, "budget": 1000, "margin": 0.1}})
+        monkeypatch.setattr(gate, "battle_row", lambda entry, costs: entry)
+        (tmp_path / "battles.json").write_text(json.dumps({"battles": rows}))
+        s = gate.summarize(tmp_path)
+        saved = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+        assert saved == s
+        assert s["analyse"] == [9, 10, 13, 14]
+        assert [p["pair_gold"] for p in s["pairs"]["each"]] == pytest.approx([-0.2, 0.2, 0, -0.2])
+        assert s["pair_gold"]["pair_gold"]["value"] == pytest.approx(-0.05)
+        lines = gate.table(s)
+        assert "pair 5 (battles 9, 10): split; pair gold -0.200; armies decide, we trade worse — analyse" in lines
+        assert "pair 6 (battles 11, 12): split; pair gold +0.200; armies decide, we trade better" in lines
+        assert "pair 7 (battles 13, 14): lost both; pair gold +0.000; game AI stronger — analyse" in lines
+        assert "pair 8 (battles 15, 16): won both; pair gold -0.200; net stronger" in lines
+        assert [line for line in lines if line.startswith("analyse:")] == ["analyse: battles 9, 10, 13, 14"]
+
     def test_gold_from_the_end_state_and_the_pair_gold(self, tmp_path, monkeypatch, capsys):
         """Each side: a lord (cost 100) and a unit (cost 300); gold lost as the simulator's reward counts it."""
         costs = {"lord": 100, "unit": 300}
@@ -245,6 +292,9 @@ class TestSummary:
         assert g2["lost"] == pytest.approx([350.0, 300.0]) and g2["margin"] == pytest.approx(-(1 - 300 / 400))
         pg = s["pair_gold"]
         assert pg["pairs"] == 1 and pg["pair_gold"]["value"] == pytest.approx((325 + 300 - 60 - 350) / 1000)
+        assert s["pairs"]["each"][0]["pair_gold"] == pg["pair_gold"]["value"]
+        assert s["pairs"]["each"][0]["verdict"] == "armies decide, we trade better"
+        assert "analyse: none" in gate.table(s)
         assert pg["weak"]["ratio_net"] == pytest.approx(300 / 350)             # army B: we lost with it
         assert pg["weak"]["ratio_opp"] == pytest.approx(60 / 325)              # the game AI with it in battle 1
         gate.main(["summary", str(tmp_path)])
