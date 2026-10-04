@@ -390,6 +390,17 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
 
 ## What is missing
 
+- **The game AI's army holds morale much better than the sim's.** Replaying the 8 gate battles: at
+  equal health the game AI's units keep 0.10–0.20 more morale than ours; they rout 0.72 times a unit
+  in the game against 1.44 (both sides replaying the game's orders) and 2.17 (against our network) in
+  the sim, and the sim gives the game AI's army 25% more losses than it took. This is the largest
+  sim-to-game gap (~0.17 trade a battle); the cause is not found yet.
+- **Units pinned in melee.** A caught missile unit is still in melee 3 s later 75–81% of the time in
+  the game; in the sim it walks out in about 2 s. ai_like does not hunt shooters as the game AI does
+  (twice as often in the game).
+- **The enemy lord breaks too easily.** In the sim it breaks in 97% of these battles (game 25%);
+  chasers catch skirmishers 57% of the time (game 32%).
+- **Order latency** is 0.6–0.8 s of game time in small battles; the sim uses a fixed 0.36 s.
 - **The second Empire wave and the Skaven wave are not checked against the game.** Flagellants,
   Greatswords, Free Company Militia, Skavenslaves, Clanrats with shields and Night Runners use
   their passports and the database's rules; the pistol's hit rate is an estimate; the line of fire
