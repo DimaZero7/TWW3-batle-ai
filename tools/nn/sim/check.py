@@ -1,7 +1,7 @@
 """Checks of the simulator against the game (docs/en/training/simulator.md).
 
 Every fair recorded run of the measurement arenas and of the mirror arena is replayed in the
-simulator open-loop (tools/nn/sim/replay.py: the recorded orders, from the recorded start), the
+simulator (tools/nn/sim/replay.py: recorded orders synchronised to contact, from the recorded start), the
 simulated battle is written down per second like a recording (a gamedata.Battle) and measured
 by the same code as the game (tools/nn/measure.py). Then the speed: many battles at once.
 
@@ -104,7 +104,7 @@ def simulate(run_dirs, params=None, device="cpu", copies=1, jitter_m=0.0, seed=0
     jitter_m, so the copies differ); returns [(game Battle, [sim Battle per copy], factions)].
     end_at_recording: a simulated battle stops when its recording ends; if it is not over by
     then, the side with more standing health is taken as the winner (Battle.result "cut": True).
-    Otherwise the last recorded orders go on until the battle ends."""
+    Otherwise replay continues through its contact phases and holds the last recorded orders."""
     params = params or load()
     games = [gamedata.load(d) for d in run_dirs]
     armies, facs = [], []
@@ -368,7 +368,7 @@ def main(argv=None):
     if args.only in (None, "battles"):
         rows = battles(params, dev)
         report["battles"] = rows
-        print("== whole battles: recorded orders replayed open-loop from the recorded start")
+        print("== whole battles: recorded orders replayed with contact-phase synchronisation")
         print(f"{'run':16} {'arena':16} {'own_ai':6} {'winner game/sim (share)':>24} {'s game/sim':>12} "
               f"{'HP lost 1 game/sim':>19} {'HP lost 2 game/sim':>19}")
         for r in rows:
@@ -421,7 +421,7 @@ def main(argv=None):
         # The network's gate battles (generated armies), apart: both sides' recorded orders replayed.
         net_rows = battles(params, dev, net=True)
         report["battles_net"] = net_rows
-        print("== the network's battles against the game's AI (generated armies), replayed open-loop")
+        print("== the network's battles against the game's AI (generated armies), contact-phase replay")
         for r in net_rows:
             print(f"{r['run']:16} {r['arena']:20} winner game/sim {r['game_winner']}/{r['sim_winner']} "
                   f"({r['sim_winner_share']:.2f})  s {r['game_s']:.0f}/{r['sim_s']:.0f}  HP lost 1 "

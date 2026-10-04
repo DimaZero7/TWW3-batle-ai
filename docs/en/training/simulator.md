@@ -271,9 +271,9 @@ mirror (69 %). Waiting (a reserve, a walk) loses: the side that waits fights out
   lord in all, summed; `lord_direction` 0; an enemy lord among the attackers keeps his blow; with
   the enemy lord on him the infantry counts at `lord_rival_others` 0.35; a unit told to attack
   another enemy strikes a lord it only touches at `lord_incidental` 0.4 (whole battles: 1.7 HP/s
-  against 4.1 when he is its target), and an enemy unit it only touches at `unit_incidental` 0.3 (the
-  gate battles: an infantry unit fought by one enemy unit while other enemy units stood within 35 m
-  took 19.6 HP/s in the game, 33.9 in the simulator without the rule, 22.3 with it). The probe's
+  against 4.1 when he is its target), and an enemy unit it only touches at `unit_incidental` 1.0.
+  This coefficient was reselected with contact-phase synchronisation (checks below); the old
+  0.3 fit is rejected. The probe's
   trials replayed (`python -m tools.nn.lord_swarm --sim`; game / simulator): one spear unit 7.8 /
   7.7 and 6.2 / 6.1; four 7.4 / 8.0 and 4.8 / 6.3; halberds 21.5 / 17.1 and 11.2 / 11.7; the other
   lord and three units 29.8 / 21.8 and 27.6 / 22.4; mean error over the 24 layouts 18 %.
@@ -296,7 +296,7 @@ mirror (69 %). Waiting (a reserve, a walk) loses: the side that waits fights out
 ## Checks against the game
 
 `python -m tools.nn.sim.check`: every recorded run is replayed in the simulator from the recorded
-start with the recorded orders (open-loop: `tools/nn/sim/replay.py`: a target fought or shot →
+start with the recorded orders (`tools/nn/sim/replay.py`: a target fought or shot →
 attack it; in melee without a recorded target → attack the nearest enemy (CA's planner leaves the
 target empty in ~70 % of its melee seconds, the game's AI in ~6 %), while the network's unit holds (the
 engine target of its attack orders is recorded in 97 % of their melee seconds, so without one it is
@@ -312,15 +312,64 @@ melee units of CA's planner and of the game's AI fight on. The network's battles
 AI (the gate: generated armies) are reported apart; the attacker of a recorded battle comes from its
 manifest's roles (`scenario.attacker_of`).
 
-| Same winner: game-AI battles | network's battles (of them the 8 gate battles of one network) | Mechanics within 20 % | HP lost 60 s after contact, mean \|sim − game\|, network's battles |
-|---:|---:|---:|---:|
-| 20 of 26 (Empire-Skaven 10 of 10, mirror 10 of 16) | 52 of 93 (7 of 8) | 50 of 54 | 0.048 |
+**Contact synchronisation.** Each unit and batch copy has its own recording clock. A run or
+attack preceding recorded contact continues until actual simulated melee; once running starts,
+its flag stays set until contact. The recorded route is preserved until contact is due. If contact
+is late, the unit follows the opponent identified by the recorded fight instead of stopping at
+that opponent's old position. The attack target stays fixed through this phase and the recorded
+fight while that opponent stands. Ordinary shooting attacks never wait for melee.
 
-Now (the turn rule, the missile rules of 04.10.2026 and hold in melee included; the battles of 02–04.10): game-AI battles 22 of 26 (whole 10 of 10, arena 12 of 16), the network's battles 81 of 132 (80 without the turn rule), mechanics 51 of 54 (the same). The turn rule on the 8 gate battles of 20261004-071805 (16 copies, the game −0.269): s1e_hold/m15 against ai_like +0.099 → +0.058 (same winner 2 → 3 of 8), both sides replayed −0.076 → −0.066 (6 of 8 both); after a new target 60–180° off the simulator's first volley comes 1–2 s later than at 0–40° (the game: 1–2 s), before it came at the same time.
+A recorded break-off waits for actual separation. The `leave_m` inference is unchanged: a far
+point in recorded melee means leaving only for network units and missile units; other AI infantry
+still attack. A MOVE first recorded after separation also waits for separation, without skipping
+the subsequent route. A move cancelled before separation is not an exit phase. Routing or losing
+the actor, or an unavailable target, releases the latch. Contact means the simulator's `m` flag,
+including incidental opponents; game positions, health and outcomes are never imposed on the sim.
 
-Without the two newest rules (any unit leaves melee on a move ≥ 10 m; the first shot after a halt is
-a volley) the network's battles were 44 of 93 (4 of 8): the simulator had let a melee unit under
-such a move fight on at full rate, and the network had learned to use that.
+Ordinary orders keep their durations relative to these clocks. Comparisons use the original game
+end time; extended replays attack the nearest enemy 120 s after the recording ends even if a phase
+is stuck. `check` still cuts whole battles at the recording's end and continues pairs on their last
+orders. Legacy order arrays without phase metadata remain clock-indexed.
+
+Controlled comparison on three gates (`build/gap5/replay_task`): both sides replayed, 4 copies
+per battle, identical start jitter up to 2 m, seed 1, existing ability rules and the 120 s grace
+before nearest attack. Trade is enemy gold lost minus our gold lost, divided by budget; each
+unit's loss is its worst state up to the measurement time, including routing, as in the gates.
+Positive favours us; fidelity means closer to the game. Cells show **at game end / at sim end**:
+
+| Gate | Game | Previous replay, 0.3 | Phases, 0.3 | Phases, 0.6 | Phases, 1.0 |
+|---|---:|---:|---:|---:|---:|
+| 20261004-230630, 6 battles | −0.306 | −0.010 / −0.043 | −0.036 / −0.081 | −0.057 / −0.095 | −0.090 / −0.152 |
+| 20261004-071805, 8 battles | −0.260 | −0.060 / −0.032 | +0.054 / +0.089 | −0.034 / −0.038 | −0.080 / −0.086 |
+| 20261003-204730, 8 battles | −0.407 | −0.190 / −0.254 | −0.156 / −0.174 | −0.209 / −0.235 | −0.252 / −0.280 |
+
+The game AI on the first six battles: running entries / contacts per melee-second (pooled
+numerators and denominators): game **97.8% / 0.0300**; previous replay **86.1% / 0.0241**;
+phases at 0.3 **86.2% / 0.0275**, at 0.6 **87.1% / 0.0298**, at 1.0 **85.1% / 0.0300**.
+At 1.0, cut at the game's end: **84.2% / 0.0308**. Mean duration overrun on these battles:
+previously 243 s, phases at 0.3 263 s, at 0.6 267 s, at 1.0 238 s. The 98% running-entry
+requirement is **not met**: at 1.0, 114 of 165 non-running entries already had a run order,
+and 85 were met standing. Order latching alone is insufficient; this does not establish
+that the simulator/game discrepancy is resolved.
+
+The current `contact.unit_incidental` is **1.0**: it is closer to game trade on all three
+gates and improves the overall check. The matched `sim.check` comparison uses 8 copies,
+seed 0, up to 2 m jitter, CUDA battles and CPU mechanics. The network sample is frozen to
+`build/p3/check_after_battles.json` (132 decided battles); later recordings are excluded.
+The old replay control reproduces the original 22/26 and 81/132.
+
+| Replay / unit_incidental | Same winner: game AI | Network | Mechanics within 20% |
+|---|---:|---:|---:|
+| Previous / 0.3 | 22/26 | 81/132 | 51/54 |
+| Phases / 0.3 | 22/26 | 78/132 | 51/54 |
+| Phases / 0.6 | 22/26 | 91/132 | 51/54 |
+| **Phases / 1.0** | **23/26** | **98/132** | **51/54** |
+
+Mean absolute trade error across the three gates at game end / sim end: previous replay
+0.238 / 0.215; phases at 0.3: 0.278 / 0.269, at 0.6: 0.225 / 0.202, at 1.0:
+**0.184 / 0.151**. This selects a coefficient from the combined checks; it does not establish
+that game movement is reproduced or the 98% requirement is met. The replay and coefficient
+changes alter the simulator version and its baseline evaluation cache.
 
 ### Mechanics: the pairs and shooting
 
@@ -464,6 +513,7 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
 
 | What | Result | Why not |
 |---|---|---|
+| `unit_incidental` 0.3 / 0.6 with contact synchronisation | mean trade error at game end 0.278 / 0.225 against 0.184 at 1.0; at sim end 0.269 / 0.202 against 0.151; network winners 78 / 91 against 98 of 132 | use 1.0; the old fit (game 19.6 HP/s, sim 33.9 at 1 and 22.3 at 0.3) used clock-indexed replay and may have compensated for its errors |
 | The flank / rear striker by its own front (pending, above) | the lone flank / rear attacker right (1.62× / 1.94×), network's winners 47 → 52 of 93 | the early exchange ~40 % less exact (0.043 → 0.061), game-AI winners 22 → 20, the `counter` drill broken |
 | A break-off at the measured rates, with the database's 10 s immunity (`melee_breakoff_total_immunity_secs`) | fights in the pairs twice as long | broke the pairs, did not help the mirror; the trigger is unknown |
 | The database's 4 s recent and 60 s extended casualty windows | 4 s: the archers' target wavered 90 % late, the slingers' never; 30 s + 60 s: the pairs wavered too early | the calibrated single 30 s window stays |

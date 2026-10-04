@@ -234,7 +234,9 @@ class TestMelee:
         busy = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, H, 0])
         assert busy == pytest.approx(full * P.sim["contact"]["lord_incidental"], rel=1e-4)
 
-    def test_a_unit_attacking_another_enemy_strikes_a_unit_it_touches_at_its_share(self):
+    @pytest.mark.parametrize("share", [0.3, 0.6, 1.0])
+    def test_a_unit_attacking_another_enemy_strikes_a_unit_it_touches_at_its_share(self, share):
+        params = P.with_cal("contact", unit_incidental=share)
         st = face_off(SPEAR, SLAVE)
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
         contact = pw["enemy"] & (pw["gap"] <= 1.0)
@@ -242,11 +244,10 @@ class TestMelee:
         H = st.N // 2
         st.u["order_kind"][0, 0] = O.ATTACK
         st.u["order_target"][0, 0] = H         # its own target: the whole rate
-        full = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, 0, H])
+        full = float(melee.strikes(st.u, pw, contact, params, z, z + 100)[0][0, 0, H])
         st.u["order_target"][0, 0] = H + 1     # told to attack another slot, touching the slaves
-        busy = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, 0, H])
-        assert 0 < P.sim["contact"]["unit_incidental"] < 1
-        assert busy == pytest.approx(full * P.sim["contact"]["unit_incidental"], rel=1e-4)
+        busy = float(melee.strikes(st.u, pw, contact, params, z, z + 100)[0][0, 0, H])
+        assert busy == pytest.approx(full * share, rel=1e-4)
 
     def test_a_melee_unit_holding_in_melee_strikes_at_the_hold_rate_a_missile_unit_in_full(self):
         k = P.sim["contact"]["hold_rate"]
