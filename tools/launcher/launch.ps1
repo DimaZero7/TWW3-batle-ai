@@ -16,19 +16,24 @@
 #  * every battle is fair: the game's battle difficulty is set to Normal
 #    (battle_difficulty 1) for the run and the user's preferences file is
 #    restored byte for byte afterwards (user, 30.09.2026: never Very Hard
-#    against the game's AI — we train for people, not a cheating AI).
+#    against the game's AI — we train for people, not a cheating AI);
+#  * -Graphics ultra sets the graphics preset for this run only (preferences.ps1), restored with
+#    the same backup (a battle a human plays: build human).
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('ai-vs-ai', 'unit-readout', 'move-probe', 'manual', 'roster-capture', 'enemy-layout', 'map-capture', 'archer-range', 'nn-arena', 'lord-swarm')][string]$Target,
+    [Parameter(Mandatory = $true)][ValidateSet('ai-vs-ai', 'unit-readout', 'move-probe', 'manual', 'roster-capture', 'enemy-layout', 'map-capture', 'archer-range', 'nn-arena', 'lord-swarm', 'human')][string]$Target,
     [int]$TimeoutSeconds = 0,
     [switch]$KeepGameOpen,
     # After the result the game stays open this long (or until the user closes it), so a watcher
     # sees the end of the battle; then the usual cleanup (tools/launcher/watch.ps1 uses it).
-    [int]$LingerSeconds = 0
+    [int]$LingerSeconds = 0,
+    # A graphics preset for this run only (tools/launcher/preferences.ps1); empty: the user's own.
+    [ValidateSet('', 'ultra')][string]$Graphics = ''
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $repo 'tools\telemetry\read_jsonl.ps1')
 . (Join-Path $PSScriptRoot 'event_log.ps1')
+. (Join-Path $PSScriptRoot 'preferences.ps1')
 
 # Settings: config/default.json overridden by config/local.json.
 $settings = Get-Content -LiteralPath (Join-Path $repo 'config\default.json') -Raw | ConvertFrom-Json
@@ -133,8 +138,11 @@ $prefsText = $latin.GetString($prefsBytes)
 if ($prefsText -notmatch 'battle_difficulty (\d+);') { throw "battle_difficulty not found in $prefs" }
 $userDifficulty = [int]$Matches[1]
 [IO.File]::WriteAllBytes($prefsBackup, $prefsBytes)
-[IO.File]::WriteAllBytes($prefs, $latin.GetBytes(($prefsText -replace 'battle_difficulty \d+;', ('battle_difficulty ' + $fairDifficulty + ';'))))
+$prefValues = [ordered]@{battle_difficulty = $fairDifficulty}
+if ($Graphics) { foreach ($key in $GraphicsPresets[$Graphics].Keys) { $prefValues[$key] = $GraphicsPresets[$Graphics][$key] } }
+[IO.File]::WriteAllBytes($prefs, $latin.GetBytes((Set-PreferenceValues -Text $prefsText -Values $prefValues)))
 Write-Output ("Battle difficulty for this run: {0} (normal); the user's {1} is restored afterwards" -f $fairDifficulty, $userDifficulty)
+if ($Graphics) { Write-Output ("Graphics for this run: {0}; the user's are restored afterwards" -f $Graphics) }
 
 # The shared log is cleared after every run; anything in it now came from outside a launcher
 # run (or a run whose log could not be cleared): keep it with this run, start from offset 0.
@@ -150,7 +158,7 @@ $arguments = 'game_startup_mode battle ' + $manifest.scenario + '; ' + (Split-Pa
 $process = Start-Process -FilePath $exe -WorkingDirectory $game -ArgumentList $arguments -PassThru
 @{pid = $process.Id; started_utc = $started.ToUniversalTime().ToString('o'); target = $Target; build = $manifest.build;
   pack_sha256 = $manifest.pack_sha256; log_offset = $offset; stale_log_bytes = $staleBytes; arguments = $arguments;
-  battle_difficulty = $fairDifficulty; user_battle_difficulty = $userDifficulty} |
+  battle_difficulty = $fairDifficulty; user_battle_difficulty = $userDifficulty; graphics = $Graphics} |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'launch.json') -Encoding utf8
 Write-Output ("Started WH3 PID {0}; run folder {1}. Process start is not success: waiting for events." -f $process.Id, $run)
 

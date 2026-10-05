@@ -10,7 +10,10 @@
 --            (a still target for the game's AI; measurements, 30.09.2026);
 --   own_ai = 'net'    — the network commands our units: the state goes to the
 --            companion outside the game every decide_ms, its orders come back
---            (apps.bridge.adapter; the game's AI attacks).
+--            (apps.bridge.adapter; the game's AI attacks);
+--   own_ai = 'human'  — a human commands our units (the player's side); the script gives no
+--            orders, records as for the others plus apps.telemetry.observer_adapter (ordered
+--            bearing and width, idle, visibility, damage flags, effects, abilities, soldiers).
 -- Each side may have its own army (tools/nn/scenario.py: named arenas).
 -- Every tick 'nn_sample' records every unit of both sides (full view: trusted
 -- research telemetry); 'nn_final' is the last such record.
@@ -27,6 +30,7 @@ local telemetry = require('apps.telemetry.adapter')
 local planner = require('apps.orders.planner_adapter')
 local map = require('apps.map.adapter')
 local bridge = require('apps.bridge.adapter')
+local observer = require('apps.telemetry.observer_adapter')
 
 local M = {}
 
@@ -34,7 +38,7 @@ local LOG = 'tww3_bai_events.jsonl'
 local TIMER = 'tww3_bai_nn_arena_tick'
 local DECIDE, POLL = 'tww3_bai_nn_arena_decide', 'tww3_bai_nn_arena_poll'
 M.REISSUE_MS = 15000
-M.OWN_AI = {attack = true, defend = true, hold = true, net = true}
+M.OWN_AI = {attack = true, defend = true, hold = true, net = true, human = true}
 
 local function try(fn, ...)
     local ok, v = pcall(fn, ...)
@@ -50,7 +54,7 @@ end
 
 -- config: build, speed, tick_ms, deadline_s, stall_ms, timeout_ms, own_ai ('attack' | 'defend' | 'hold' | 'net'),
 -- units = {own = [...], enemy = [...]} (script names, slots, keys), defend_radius_m;
--- 'net' also: decide_ms, poll_ms, factions = {own, enemy}, enemy_role.
+-- 'net' also: decide_ms, poll_ms, factions = {own, enemy}, enemy_role; 'human': soldiers_every (ticks).
 function M.main(bm, config, globals)
     if _G.tww3_bai_nn_arena then return end
     local state = {active = false, finished = false, batch = '', run_id = 'bootstrap', ticks = 0,
@@ -140,6 +144,7 @@ function M.main(bm, config, globals)
                 local row = sample(it)
                 row.side = side
                 morale_fields(it, row)
+                if state.observer then state.observer.decorate(row) end
                 rows[#rows + 1] = row
             end
         end
@@ -224,6 +229,10 @@ function M.main(bm, config, globals)
         end
         state.ticks = state.ticks + 1
         snapshot('nn_sample')
+        if state.observer then
+            state.observer.changes()
+            state.observer.soldiers()
+        end
         flush()
     end
 
@@ -260,6 +269,17 @@ function M.main(bm, config, globals)
         for _, it in ipairs(state.sides[2]) do enemy_units[#enemy_units + 1] = it.unit end
         if config.own_ai == 'hold' then
             emit('own_ai', {mode = 'hold', own_ai = config.own_ai})
+            return
+        end
+        if config.own_ai == 'human' then
+            local units = {}
+            for side = 1, 2 do
+                for _, it in ipairs(state.sides[side]) do units[#units + 1] = it end
+            end
+            state.observer = observer.new({units = units, alliances = state.alliances, cco = cco, emit = emit,
+                now_ms = function() return bm:time_elapsed_ms() - started_ms end,
+                soldiers_every = config.soldiers_every})
+            emit('own_ai', {mode = 'human', own_ai = config.own_ai, soldiers_every = config.soldiers_every})
             return
         end
         if config.own_ai == 'net' then return net_start() end
@@ -315,7 +335,7 @@ function M.main(bm, config, globals)
             return
         end
         assert(common and vector_type, 'common and battle_vector globals required')
-        assert(M.OWN_AI[config.own_ai], 'own_ai must be attack, defend, hold or net')
+        assert(M.OWN_AI[config.own_ai], 'own_ai must be attack, defend, hold, net or human')
         local sides = battle.read_sides(bm)
         state.own_alliance, state.own_army = sides[1].alliance, sides[1].army
         state.alliances = {sides[1].alliance, sides[2].alliance}

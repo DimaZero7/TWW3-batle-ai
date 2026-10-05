@@ -43,7 +43,7 @@ class TestBundle:
 
 class TestTargets:
     def test_the_kept_targets(self):
-        assert sorted(build.TARGETS) == ["ai-vs-ai", "archer-range", "enemy-layout", "lord-swarm", "manual", "map-capture",
+        assert sorted(build.TARGETS) == ["ai-vs-ai", "archer-range", "enemy-layout", "human", "lord-swarm", "manual", "map-capture",
                                          "move-probe", "nn-arena", "roster-capture", "unit-readout"]
 
     @pytest.mark.parametrize("target", sorted(build.TARGETS))

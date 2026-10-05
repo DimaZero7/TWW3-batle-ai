@@ -38,6 +38,20 @@ emit('result', {status = 'completed', winner = 1})
 | `sample(state, time_ms)` | Кадр телеметрии |
 | `entity_hit(state, event, time_ms)`, `drain_hits(state)` | Попадания из игрового события |
 
+<a id="observer_adapter"></a>
+
+## observer_adapter — всё о бое человека
+
+Дополнительная запись боя, который играет человек ([nn_arena](entries.md#nn_arena), режим `human`):
+всё, что игра даёт о каждом отряде обеих сторон, сверх строки `nn_sample`. Полная сводка, не вход для ИИ.
+
+| Функция | Что делает |
+|---|---|
+| `new(opts)` | `units` (имя, отряд, сторона), `alliances`, `cco`, `emit`, `now_ms`, `soldiers_every` |
+| `decorate(row)` | В строку отряда: `ob`, `ow` — направление и ширина строя заданного приказа; `idle` — у отряда нет приказа; `v` — виден другой стороне; `uma`, `td`, `dir` — под обстрелом, получает урон, нанесённый урон за последнее время (CCO) |
+| `changes()` | При изменении: `nn_effects` (активные эффекты отряда) и `nn_ability_ready` (готовность способности; использование — true → false), обе стороны |
+| `soldiers()` | Каждый `soldiers_every`-й вызов: `nn_soldiers` — место каждого бойца, дм |
+
 ## Обработка вне игры
 
 - [tools/telemetry/read_jsonl.ps1](../../../tools/telemetry/read_jsonl.ps1) —

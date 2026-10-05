@@ -10,12 +10,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -T
 ```
 
 Options:
-`-Target ai-vs-ai|unit-readout|move-probe|manual|roster-capture|archer-range|enemy-layout|nn-arena|lord-swarm|map-capture`
+`-Target ai-vs-ai|unit-readout|move-probe|manual|roster-capture|archer-range|enemy-layout|nn-arena|lord-swarm|map-capture|human`
 (required; the target must be [built](build.md) first),
 `-TimeoutSeconds` (default 240 s for loading + the battle's deadline `deadline_s` from
 `manifest.json`; 1200 without one), `-KeepGameOpen` (leave the game running after completion),
 `-LingerSeconds` (after the result keep the game open this long, or until the user closes it, then
-clean up as usual; 0 by default). To watch the network command our side, use
+clean up as usual; 0 by default), `-Graphics ultra` (the 'ultra' graphics for this run only,
+[below](#a-battle-played-by-a-human)). To watch the network command our side, use
 [watching the network](watch.md): it starts the companion and calls this launcher.
 
 > **Status:** the launcher was verified in game on 2026-09-27 with the
@@ -103,6 +104,45 @@ update, the hash no longer matches and runs stop: review the new version and
 record it in `mod-dependencies.json`.
 Decision history (Russian): [dependency research](../../ru/research/launch/dependencies.md).
 
+## A battle played by a human
+
+The `human` target is the same arena battle, but a human commands our side: the script gives no orders,
+it only records. It is there to compare how many orders a human gives with our network.
+
+```powershell
+.venv/Scripts/python -m tools.build human --army-seed 1000900014 --army-swap
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -Target human -Graphics ultra -LingerSeconds 120
+.venv/Scripts/python -m tools.nn.human_orders
+```
+
+- The battle is battle 16 of the [gate](gate.md) (`python -m tools.nn.gate plan --battles 2 --offset 14`):
+  seed 1000900014, armies swapped, the human leads **the Empire (14 units) and defends**, the game's AI
+  leads **the Skaven (20 units) and attacks**; Normal difficulty, as every battle. No deployment (as for
+  the network): the battle starts after a second.
+- Speed x1 (the `human` default): the script puts x1 back if it is changed; pause is allowed. Battle limit
+  3600 s of game time, as in the gate; the battle ends on a win, on the timeout, when nobody takes damage
+  for 10 minutes, or after 2 hours of real time.
+- `-Graphics ultra`: for the run the launcher sets every quality setting of the preferences file to
+  'ultra' (`tools/launcher/preferences.ps1`: textures, shadows 3, TAA and so on; resolution, DLSS and
+  blood stay the user's) and restores the file byte for byte afterwards, as the difficulty. `launch.json`
+  has `graphics`.
+- The recording, `build/human/runs/<time>/events.jsonl`: every second `nn_sample` with the arena's fields
+  ([nn_arena](../apps/entries.md#nn_arena)) plus the ordered bearing and width, "no order", visibility,
+  under fire, taking and inflicting damage; on change, effects (`nn_effects`) and both sides' ability
+  readiness (`nn_ability_ready`: a use shows as true -> false); every 5 s every soldier's place
+  (`nn_soldiers`, `--soldiers-every`); [observer_adapter](../apps/telemetry.md#observer_adapter).
+
+**How many orders.** A human has no `nn_orders`, so `tools/nn/human_orders.py` infers the orders from the
+recording: an order is a standing unit's ordered point moving more than 1 m in a second (not on the first
+second after the start or after a rally); an attack when the unit has a target, a halt when the unit
+stands within 3 m of the new point, else a move. These orders are then counted by **the same** function
+as the network's (`gate.liveliness`): order changes, attack-target switches, A->B->A flips, move jitter,
+per unit-minute. The command prints side by side: the human; the network in the same battle (the newest
+gate that played it), from inferred orders and from its real `nn_orders`; the network in the newest gate
+in the same role; the game AI's own target switches. Checked on 4 network battles (inferred / real order
+changes): 911/890, 248/234, 12/11, 228/322. Not seen: a repeated order to the same point, an attack whose
+point did not move (a new target from where the unit stands), an order replaced within the same second.
+
 ## Timing
 
 From the research measurements: about 83 s to the first `ready`, about 11 s
@@ -124,5 +164,5 @@ the reset of 30.09.2026):
 
 ## Limits
 
-- Graphics presets before a run (minimum quality, Ultra unit size in the
-  research) are not ported yet: the script for them was missing from the kit.
+- Of the graphics presets only 'ultra' is ported (`-Graphics ultra`); the research's minimum quality
+  is not.

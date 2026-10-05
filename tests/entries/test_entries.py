@@ -572,6 +572,38 @@ class TestNnArena:
         assert (result["nn_regiven"], result["nn_released"], result["nn_resumed"]) == (1, 1, 1)
         assert result["nn_aims_kept"] == 1
 
+    def test_human_gives_no_orders_and_records_everything_it_can(self, lua, tmp_path):
+        # A human plays our side: no planner, no bridge; the observer's fields and change events.
+        lua.execute(self.SETUP + """
+            CONFIG.own_ai, CONFIG.timeout_ms, CONFIG.soldiers_every = 'human', 8000, 5
+            own[1].abilities = {ability_x = true}
+            fake.cco['uid_own_spear_1'] = {IsUnderMissileAttack = true, IsTakingDamage = false,
+                DamageInflictedRecently = 12.345, ['ActiveEffectList.Size'] = 1,
+                ['ActiveEffectList.At(0).PhaseRecordContext.Key'] = 'phase_fatigue'}
+            local state = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            bm:tick(); bm:tick()
+            own[1].abilities = {ability_x = false}   -- used: ready turns false
+            for _ = 1, 8 do bm:tick() end
+            assert(state.finished and state.planner == nil and state.net == nil)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        kinds = [r["event"] for r in rows]
+        assert "error" not in kinds, [r for r in rows if r["event"] == "error"]
+        assert next(r for r in rows if r["event"] == "own_ai")["mode"] == "human"
+        assert list(lua.eval("bm.planner_log").values()) == []
+        assert all(r["policy"] == "nn_arena_human" for r in rows)
+        spear = next(u for u in [r for r in rows if r["event"] == "nn_sample"][-1]["units"] if u["n"] == "own_spear_1")
+        assert (spear["ob"], spear["ow"], spear["idle"], spear["v"]) == (0, 30, True, True)
+        assert (spear["uma"], spear["td"], spear["dir"]) == (True, False, 12.345)
+        effects = [r for r in rows if r["event"] == "nn_effects" and r["u"] == "own_spear_1"]
+        assert [(r["fx"], r["side"]) for r in effects] == [(["phase_fatigue"], 1)]
+        ready = [(r["ready"], r["side"]) for r in rows if r["event"] == "nn_ability_ready" and r["u"] == "own_lord"]
+        assert ready == [(True, 1), (False, 1)]
+        soldiers = [r for r in rows if r["event"] == "nn_soldiers"]
+        assert len(soldiers) == 2 and len(soldiers[0]["units"]) == 4   # ticks 1 and 6; both sides
+        assert soldiers[0]["units"][0]["xz_dm"] == [13, -25, 13, -25]
+
     def test_an_unknown_own_ai_is_an_error(self, lua, tmp_path):
         lua.execute(self.SETUP + """
             CONFIG.own_ai = 'dance'

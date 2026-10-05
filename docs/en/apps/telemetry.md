@@ -38,6 +38,20 @@ ordered position, distances between attackers and damaged units.
 | `sample(state, time_ms)` | One telemetry frame |
 | `entity_hit(state, event, time_ms)`, `drain_hits(state)` | Hits from a game event |
 
+<a id="observer_adapter"></a>
+
+## observer_adapter — everything about a human's battle
+
+Extra recording of a battle a human plays ([nn_arena](entries.md#nn_arena), mode `human`): everything
+the game gives about every unit of both sides beyond the `nn_sample` row. Full view, never an AI's input.
+
+| Function | What it does |
+|---|---|
+| `new(opts)` | `units` (name, unit, side), `alliances`, `cco`, `emit`, `now_ms`, `soldiers_every` |
+| `decorate(row)` | Adds to a unit's row: `ob`, `ow` — bearing and width of the order in force; `idle` — the unit has no order; `v` — visible to the other side; `uma`, `td`, `dir` — under missile fire, taking damage, damage inflicted recently (CCO) |
+| `changes()` | On change: `nn_effects` (a unit's active effects) and `nn_ability_ready` (an ability's readiness; a use is true -> false), both sides |
+| `soldiers()` | Every `soldiers_every`-th call: `nn_soldiers`, every soldier's place, dm |
+
 ## Outside the game
 
 - [tools/telemetry/read_jsonl.ps1](../../../tools/telemetry/read_jsonl.ps1) —

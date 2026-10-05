@@ -13,6 +13,7 @@ Usage:
     python -m tools.build nn-arena --own-ai net --speed 1   # the network commands our side (companion)
     python -m tools.build nn-arena --army-seed 1000900000 --own-role attack   # a generated battle, the network
     python -m tools.build lord-swarm --repeats 2   # a lord swarmed by 1-4 units (tools/nn/lord_swarm.py)
+    python -m tools.build human --army-seed 1000900014 --army-swap   # a human plays our side (x1, recorded)
 
 Output: build/<target>/ with the .pack, the bundled script and manifest.json.
 Install and launch with tools/launcher/launch.ps1.
@@ -92,6 +93,16 @@ TARGETS = {
         "scenario": "nn_arena.xml",
         "packed_scenario": "nn_arena.xml",
     },
+    # A human plays our side of an arena battle (entries.nn_arena, own_ai 'human'): its own build folder,
+    # so the gate's and the arena's runs (build/nn-arena/runs) never mix with a human's.
+    "human": {
+        "entry": "entries.nn_arena",
+        "pack": "tww3_bai_human.pack",
+        "script": "tww3_bai_human",
+        "folder": "tww3_bai",
+        "scenario": "nn_arena.xml",
+        "packed_scenario": "human.xml",
+    },
     "lord-swarm": {
         "entry": "entries.lord_swarm",
         "pack": "tww3_bai_lord_swarm.pack",
@@ -124,6 +135,9 @@ NET_POLL_MS = 100
 LORD_SWARM_TICK_MS = 200
 # nn-arena: the battle file's own time limit is past the script's (the script ends the battle first).
 TIMEOUT_MARGIN_S = 60
+# human: every soldier's position every this many ticks (a reading of all men takes ~50 ms).
+HUMAN_SOLDIERS_EVERY = 5
+ARENA_TARGETS = ("nn-arena", "human")
 
 
 def load_move_plan(name):
@@ -220,7 +234,7 @@ def nn_arena_config(args, run_config):
     # The side that wins on timeout defends: ours when the planner defends,
     # the game's AI when ours attacks; the network's role is --own-role (default defend).
     own_role = {"attack": "attack", "defend": "defend", "hold": "defend",
-                "net": args.own_role or "defend"}[args.own_ai]
+                "net": args.own_role or "defend", "human": args.own_role or "defend"}[args.own_ai]
     enemy_role = "defend" if own_role == "attack" else "attack"
     defender = "enemy" if enemy_role == "defend" else "own"
     duration_s = max(3600, args.timeout + TIMEOUT_MARGIN_S)
@@ -233,7 +247,7 @@ def nn_arena_config(args, run_config):
             arena = dict(arena, name=f"{arena['name']}_swap",
                          sides={"own": arena["sides"]["enemy"], "enemy": arena["sides"]["own"]})
         # A generated battle is not a scenario of the repository: its file goes next to the build.
-        path = project.BUILD / "nn-arena" / f"{arena['name']}.xml"
+        path = project.BUILD / args.target / f"{arena['name']}.xml"
         path.parent.mkdir(parents=True, exist_ok=True)
         nn_scenario.write_scenario(defender, arena, path, duration_s)
         run_config["army"] = {"seed": args.army_seed, "split": generate.split(args.army_seed), "swap": args.army_swap,
@@ -243,19 +257,27 @@ def nn_arena_config(args, run_config):
                               "cost": {s: arena["sides"][s]["cost"] for s in nn_scenario.SIDES},
                               "men": {s: sum(u["men"] for u in arena["sides"][s]["units"])
                                       for s in nn_scenario.SIDES}}
-    else:
+    elif args.target == "nn-arena":
         arena = nn_scenario.write_scenario(defender, nn_scenario.load_arena(args.arena), duration_s=duration_s)
+    else:
+        # the human target never rewrites scenarios/nn_arena.xml: its battle file goes next to its build
+        arena = nn_scenario.load_arena(args.arena)
+        path = project.BUILD / args.target / f"{arena['name']}.xml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        nn_scenario.write_scenario(defender, arena, path, duration_s)
     run_config.update(nn_scenario.run_config(arena), own_ai=args.own_ai, enemy_role=enemy_role)
     if args.own_ai == "net":
         run_config.update(own_role=own_role, decide_ms=args.decide_ms, poll_ms=NET_POLL_MS)
+    if args.own_ai == "human":
+        run_config.update(own_role=own_role, soldiers_every=args.soldiers_every)
     return path
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("target", choices=sorted(TARGETS))
-    parser.add_argument("--speed", type=int, choices=(1, 3, 10, 20), default=20)
-    parser.add_argument("--timeout", type=int, default=600, help="model seconds, 30..3600")
+    parser.add_argument("--speed", type=int, choices=(1, 3, 10, 20), help="battle speed (default 20; human: 1)")
+    parser.add_argument("--timeout", type=int, help="model seconds, 30..3600 (default 600; human: 3600, the gate's)")
     parser.add_argument("--tick-ms", type=int, help="ms between samples (default 1000; lord-swarm 200)")
     parser.add_argument("--step", type=int, choices=(1, 2, 3, 5), default=5, help="map-capture: cell size, m")
     parser.add_argument("--deadline", type=int, help="real seconds per battle before the script ends it "
@@ -282,8 +304,10 @@ def main(argv=None):
                              "(tools/nn/companion) commands our side (its role: --own-role). "
                              "Default: net with --army-seed, else attack")
     parser.add_argument("--own-role", choices=("attack", "defend"),
-                        help="nn-arena --own-ai net: our side attacks (the game's AI defends and wins on "
+                        help="nn-arena --own-ai net, human: our side attacks (the game's AI defends and wins on "
                              "timeout) or defends (default: the game's AI attacks)")
+    parser.add_argument("--soldiers-every", type=int, default=HUMAN_SOLDIERS_EVERY,
+                        help="human: every soldier's position every this many ticks (0: never)")
     parser.add_argument("--army-seed", type=int,
                         help="nn-arena: a generated battle (tools/nn/armies, generate.battle(seed)): "
                              "armies of a lord and 0-19 units a side; EVAL seeds for checks")
@@ -302,10 +326,20 @@ def main(argv=None):
     parser.add_argument("--features", action="store_true",
                         help="map-capture: also read objects and reachability after deployment")
     args = parser.parse_args(argv)
+    if args.target == "human":
+        if args.own_ai not in (None, "human"):
+            parser.error("the human target is our side under a human: no --own-ai")
+        args.own_ai = "human"
+    if args.speed is None:
+        args.speed = 1 if args.target == "human" else 20
+    if args.timeout is None:
+        args.timeout = 3600 if args.target == "human" else 600
     if args.own_ai is None:
         args.own_ai = "net" if args.army_seed is not None else "attack"
-    if args.own_role and args.own_ai != "net":
-        parser.error("--own-role is for --own-ai net (the planner modes set our role themselves)")
+    if args.own_role and args.own_ai not in ("net", "human"):
+        parser.error("--own-role is for --own-ai net and the human target (the planner modes set our role themselves)")
+    if args.soldiers_every < 0:
+        parser.error("--soldiers-every must be 0 or more")
     if args.army_swap and args.army_seed is None:
         parser.error("--army-swap is for --army-seed")
     if args.army_seed is not None and args.arena != "arena":
@@ -350,7 +384,7 @@ def main(argv=None):
             run_config.update(layout=args.layout, hold_s=ENEMY_LAYOUT_HOLD_S, enemy_mode=args.enemy_mode)
             model_s = ENEMY_LAYOUT_HOLD_S + 10
             stall_ms = max(stall_ms, int((model_s + 120) * 1000))
-        if args.target == "nn-arena":
+        if args.target in ARENA_TARGETS:
             scenario_file = nn_arena_config(args, run_config)
         if args.target == "lord-swarm":
             from tools.nn import lord_swarm
@@ -364,7 +398,7 @@ def main(argv=None):
             model_s = None
         run_config["deadline_s"] = args.deadline or (3600 if model_s is None else deadline_seconds(model_s, args.speed))
         run_config["stall_ms"] = stall_ms
-    if args.target == "nn-arena" and scenario_file and not args.scenario:
+    if args.target in ARENA_TARGETS and scenario_file and not args.scenario:
         args.scenario = str(scenario_file)
     manifest = build(args.target, run_config, scenario=args.scenario)
     print(json.dumps(manifest, indent=2))

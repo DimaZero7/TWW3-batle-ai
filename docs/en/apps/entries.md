@@ -184,6 +184,9 @@ the battle. The side that wins on timeout defends:
   outside the game, its orders come back and are given to our units ([bridge](bridge.md),
   [watching the network](../launch/watch.md)); the game's AI attacks. Events `nn_orders`,
   `nn_miss`; `nn_sample` is recorded as in the other modes.
+- `human` (the `human` build target) — a human commands our side, the script gives no orders; the
+  recording adds [observer_adapter](telemetry.md#observer_adapter); the game's AI attacks
+  ([a battle played by a human](../launch/run.md#a-battle-played-by-a-human)).
 
 Every second `nn_sample` records every unit of both sides (the full view):
 

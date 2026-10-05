@@ -23,6 +23,7 @@
 | `enemy-layout` | `entries.enemy_layout` | `scenarios/enemy_layout.xml` (из `config/armies/defender_layouts.json`) | `tww3_bai_enemy_layout.pack` |
 | `roster-capture` | `entries.roster_capture` | `scenarios/roster_capture.xml` (из `config/roster/capture.json`) | `tww3_bai_roster_capture.pack` |
 | `nn-arena` | `entries.nn_arena` | `scenarios/nn_arena.xml` (`tools/nn/scenario.py`) | `tww3_bai_nn_arena.pack` |
+| `human` | `entries.nn_arena` (`own_ai` `human`) | бой арены в `build/human/` ([бой, который играет человек](run.md#бой-который-играет-человек)) | `tww3_bai_human.pack` |
 | `map-capture` | `entries.map_capture` | `scenarios/map_capture.xml` | `tww3_bai_map_capture.pack` |
 
 Что делает каждая точка входа — [точки входа](../apps/entries.md).
@@ -31,7 +32,7 @@
 
 | Параметр | Цели | Значение |
 |---|---|---|
-| `--speed 1/3/10/20` | все, кроме map-capture и manual | Скорость боя (по умолчанию 20) |
+| `--speed 1/3/10/20` | все, кроме map-capture и manual | Скорость боя (по умолчанию 20; у `human` — 1) |
 | `--timeout 30..3600` | ai-vs-ai, nn-arena | Лимит модельного времени боя, с (600); из него считается срок боя. Бои арены 30.09.2026 записаны с 900, [проверка сети](gate.md) — с 3600, как в симуляторе |
 | `--tick-ms` | все, кроме map-capture | Период тика, мс (1000) |
 | `--step 1/2/3/5` | map-capture | Размер клетки сетки, м |
@@ -41,6 +42,7 @@
 | `--own-ai net` | nn-arena | Нашей стороной командует сеть в помощнике ([смотреть бой сети](watch.md)) |
 | `--own-role attack\|defend` | nn-arena `net` | Сеть атакует (ИИ игры обороняется и побеждает, когда время вышло) или обороняется (по умолчанию: ИИ игры атакует) |
 | `--army-seed N` | nn-arena | Бой из [генератора армий](../training/armies.md): `generate.battle(N)`, у стороны лорд и 0–19 отрядов. Без `--own-ai` нашей стороной командует сеть. Файл боя — `build/nn-arena/random_<N>.xml`, `scenarios/` не трогается. В манифест — `army` (зерно, train/eval, бюджет, шаблоны, бойцы) |
+| `--soldiers-every N` | human | Место каждого бойца каждые N тиков (5; 0 — никогда) |
 | `--army-swap` | nn-arena `--army-seed` | Армии зерна меняются местами: нашей стороне — армия противника из генератора, ИИ игры — наша (`random_<N>_swap.xml`, в манифесте `army.swap` — true): второй бой пары [проверки в игре](gate.md#какие-бои) |
 | `--decide-ms 250..5000` | nn-arena `net` | Время боя между двумя решениями сети, мс (1000) |
 | `--layout`, `--enemy-mode native\|defend` | enemy-layout | Состав врага; штатный ИИ как есть или с задачей «обороняй» (по умолчанию) |

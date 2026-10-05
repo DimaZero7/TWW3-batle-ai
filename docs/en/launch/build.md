@@ -23,6 +23,7 @@ Building never touches the game; it only writes `build/<target>/`.
 | `enemy-layout` | `entries.enemy_layout` | `scenarios/enemy_layout.xml` (from `config/armies/defender_layouts.json`) | `tww3_bai_enemy_layout.pack` |
 | `roster-capture` | `entries.roster_capture` | `scenarios/roster_capture.xml` (from `config/roster/capture.json`) | `tww3_bai_roster_capture.pack` |
 | `nn-arena` | `entries.nn_arena` | `scenarios/nn_arena.xml` (`tools/nn/scenario.py`) | `tww3_bai_nn_arena.pack` |
+| `human` | `entries.nn_arena` (`own_ai` `human`) | an arena battle in `build/human/` ([a battle played by a human](run.md#a-battle-played-by-a-human)) | `tww3_bai_human.pack` |
 | `map-capture` | `entries.map_capture` | `scenarios/map_capture.xml` | `tww3_bai_map_capture.pack` |
 
 What every entry does: [entry points](../apps/entries.md).
@@ -31,7 +32,7 @@ What every entry does: [entry points](../apps/entries.md).
 
 | Option | Targets | Meaning |
 |---|---|---|
-| `--speed 1/3/10/20` | all but map-capture and manual | Battle speed (default 20) |
+| `--speed 1/3/10/20` | all but map-capture and manual | Battle speed (default 20; `human`: 1) |
 | `--timeout 30..3600` | ai-vs-ai, nn-arena | Model-time limit per battle, s (600); the battle's deadline is computed from it. The arena battles of 30.09.2026 were recorded with 900, the [network check](gate.md) uses 3600, as the simulator |
 | `--tick-ms` | all but map-capture | Tick period, ms (1000) |
 | `--step 1/2/3/5` | map-capture | Grid cell size, m |
@@ -41,6 +42,7 @@ What every entry does: [entry points](../apps/entries.md).
 | `--own-ai net` | nn-arena | The network in the companion commands our side ([watching the network](watch.md)) |
 | `--own-role attack\|defend` | nn-arena `net` | The network attacks (the game's AI defends and wins when time is out) or defends (default: the game's AI attacks) |
 | `--army-seed N` | nn-arena | A battle from the [army generator](../training/armies.md): `generate.battle(N)`, a lord and 0-19 units a side. Without `--own-ai` the network commands our side. The battle file is `build/nn-arena/random_<N>.xml`; `scenarios/` is not touched. The manifest gets `army` (seed, train/eval, budget, templates, men) |
+| `--soldiers-every N` | human | Every soldier's place every N ticks (5; 0: never) |
 | `--army-swap` | nn-arena `--army-seed` | The seed's armies swapped: our side gets the generator's enemy army, the game's AI its own army (`random_<N>_swap.xml`, `army.swap` true in the manifest): the second battle of a swapped pair of the [gate](gate.md#which-battles) |
 | `--decide-ms 250..5000` | nn-arena `net` | Battle time between two decisions of the network, ms (1000) |
 | `--layout`, `--enemy-mode native\|defend` | enemy-layout | Enemy layout; the game AI as is or told to defend (default) |
