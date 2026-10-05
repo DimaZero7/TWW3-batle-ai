@@ -1,4 +1,4 @@
-# The working process: a chain step, the run card, leftovers
+# The working process: a chain step, the run card, metric profiles, the gap card, leftovers
 
 [← Back](README.md) · [Documentation](../README.md) › [Data for training](README.md) › Workflow · [Русский](../../ru/training/workflow.md)
 
@@ -20,6 +20,8 @@ flowchart LR
 | Waiting for a run or a test | `bash tools/ops/wait.sh -t 5400 build/steps/n4.log '^written:\|Traceback'` — a timeout, case-insensitive, exit 2 on time | `until grep …; do sleep 60; done` — ran for hours when `FAILED` came in capitals |
 | A simulator or drill change is ready, the previous step still trains | `.venv/Scripts/python -m tools.ops.baselines --build <main checkout>/build --run` from the worktree with the change — the new version's references on the CPU, ~8 min ([the cache](#the-baselines-cache-and-the-canary)) | the step waited 25–50 min for them at its "before" evaluation |
 | Judging the step | `.venv/Scripts/python -m tools.ops.card build/nn-train/test5/n4 --prev build/nn-train/test5/n3_consolidate` | reading ~200 lines of `trend.md` for ten numbers |
+| Computing only what is needed | `--profile drills,transfer` of `tools.ops.step`, `test5` and `tools.nn.gate summary` ([metric profiles](#metric-profiles)) | every evaluation computed everything: drills, transfer, liveliness, capacity |
+| Where the simulator differs from the game after a gate | `DOCK_NAME=agent-gap bash tools/nn/dock.sh tools.ops.gapcard build/nn-gate/<time>` ([gap card](#game-vs-sim-gap-card-toolsopsgapcardpy)) | one-off replay scripts in `build/…` for every question |
 
 ## The chain step (`tools/ops/step.py`)
 
@@ -33,7 +35,9 @@ options file. The tool prints the two-line script (or writes it with `--write`),
 critic it chose, whether the references' cache (the script baselines and the drill check scripts)
 will hit, and the expected wall time: training + (points + 2) evaluations of ~3.3 min (+ ~10 min on a
 cache miss; ahead of it: [`tools.ops.baselines`](#the-baselines-cache-and-the-canary)). It runs
-nothing: the orchestrator starts the script in the background and waits on its log.
+nothing: the orchestrator starts the script in the background and waits on its log. `--profile`
+(default: the options file's `test5.profile`, else `full`) goes to `test5`: which metrics each
+evaluation computes ([metric profiles](#metric-profiles)).
 
 The options file is outside `config/nn` on purpose: that folder is part of the simulator's
 version (below), and an edit there would make the baselines miss.
@@ -53,9 +57,85 @@ fall beyond noise between two points, the move share or lord deaths ×1.5, timeo
 drill's win falling ≥ 0.15), the capacity verdict, the training's minutes and updates. `--prev`
 adds the previous step's end point and the change from it; `--json` the data.
 
+The line `computed:` under the table names each point's metric profiles (`full` for older
+evaluations): a "-" in a row its profile did not compute means "not computed", not zero. The row
+"own unit-time exhausted" is the share of own units' time exhausted, "own moves running far from the fight"
+the run share of move orders far from the fight (profile `fatigue`; ~100 % in the gates' games).
+
 It reads `report.json`; while the run goes, `before.json` and the `eval_m<minute>.json` written so
 far (the fair metrics computed with `skill.py`, numpy), so the card of a running step is a command
 away.
+
+## Metric profiles
+
+Every evaluation used to compute everything. Now a small **mandatory set** is always computed and
+the rest by profiles chosen for the run's question (`tools/nn/train/profiles.py`). What a metric
+means does not depend on the profile: the profile only says whether it is computed.
+
+| Where | Always (mandatory) | Profiles (`--profile a,b`; `full` all, `mandatory` none) |
+|---|---|---|
+| `test5` (and `tools.ops.step --profile`) | the rating, pair gold against each script (with the script baselines), own lord deaths, wins and gold, order kinds | `behaviour` (alias `shooters`: missile units in melee, flanks, piles, abilities), `liveliness`, `fatigue` (the share of own units' time by fatigue state; the run share of move orders far from the fight), `transfer`, `drills`, `capacity`; default `full` |
+| `python -m tools.nn.gate summary <folder> --profile …` | outcomes, pairs, pair gold, own lord deaths (from the recordings) | `liveliness` (default), `routs`, `lords`, `fatigue`, `activity`, `shooters` — each recording's numbers (as in the gap card) |
+| `tools.ops.gapcard` | win, trade, own and enemy gold lost, own lord death, battle length | `routs`, `lords`, `fatigue`, `activity`, `shooters`; default `full` |
+
+The teachers add what they read: `--drill-teach auto` adds `drills`, an adaptive `--teach-normal`
+adds `transfer` (`test5` prints what it added). The chain runs both teachers now, so
+`--profile mandatory` there gives `mandatory+transfer+drills`. Every evaluation keeps its
+`profile`, `report.json` too; the run card shows it.
+
+The cost of one evaluation (CPU, 8 cores, `s6_fatigue/m20`, 64 battles per opponent = 192 of the
+network's battles, 32 per drill; the scripts' references left out — in a real run they are a cache
+file read): `mandatory` 470 s, `full` 1888 s, 4 times longer. The difference is the drills' battles
+and the behaviour, liveliness and transfer counters at every simulator step. On the GPU the counters
+are compiled and weigh less (`full` there is ~200 s at 512 battles per opponent); not measured there,
+the GPU is training.
+
+## Game-vs-sim gap card (`tools/ops/gapcard.py`)
+
+After a gate one command says where the simulator differs from the game on the same battles:
+
+    DOCK_NAME=agent-gap bash tools/nn/dock.sh tools.ops.gapcard build/nn-gate/<time> [--profile fatigue,lords] [--copies 8]
+    .venv/Scripts/python -m tools.ops.gapcard build/nn-gate/<time> --from-json [--profile routs]   # reprint, no simulator
+
+Each gate battle starts in the simulator from its recorded start (places, bearings, men, widths,
+factions — `scenario.from_recording`): side 1 is the gate's checkpoint (live, sampling its orders
+when the gate did), side 2 the `ai_like` script, at the game's cadence (a decision a second, the
+orders ~0.36 s late), `--copies` copies (default 8; the copies differ by the start's 2 m jitter and
+the sampled orders). Every copy is recorded once a second as the game records (`check.Recorder`),
+and the game's recording and the copies are measured by the same code (`tools/nn/battle_metrics.py`)
+up to the game battle's end time (the result and the length: the whole battle). The replay is
+`tools/nn/train/gapsim.py` (the closed loop from the analyses `build/fat/opus/gate_check`,
+`build/pos/opus`, `build/gap4/astra`; their probes — perturbed numbers, recorded-order replay,
+observation tweaks — stay there).
+
+The table: a row per metric, a column per battle "game / sim (mean of the copies)", then over all
+battles the game's and the simulator's means and their difference. A mark when the difference is
+beyond the noise: in one battle `!` when |game − sim| > max(2 × the copies' spread × √(1 + 1/n),
+threshold); over all battles `*` when |difference of the means| > max(2 × √Σ(spread² × (1 + 1/n)) / k,
+threshold). The copies' spread is the noise of one battle, the game's single battle is counted with
+it. The threshold is the smallest difference that matters (a share and the trade 0.05, a win 0.25,
+the length 30 s, routs 0.15 per unit, abilities 0.5, the first ability 30 s, a lord's health loss
+0.002 a second). Under the table the marked rows in words. The battles' numbers go to
+`<gate folder>/gapcard.json`.
+
+| Profile | What is measured |
+|---|---|
+| mandatory | win (1 / 0); trade = (enemy gold lost − ours) / budget; own and enemy gold lost / that army's cost (as the gate counts: dead, shattered or gone whole, routing half of what is left); own lord dead (health or men 0, or shattered); battle length |
+| `routs` | rout onsets per unit, own / enemy |
+| `lords` | a lord's health lost per second of his melee: ours ("lost") and the enemy's ("dealt"); enemy lord dead; our lord's ability uses (count, first use time; in the game the bridge's `nn_ability` events) |
+| `fatigue` | the share of the units on the field tired or worse in the bins 0–120 / 120–240 / 240–360 / 360+ s; exhausted over the whole window; own / enemy. The run share: of our units' time under a move / withdraw order far from the fight (before the battle's first melee and no standing enemy within 150 m, about a bow's range), the share that runs (the orders in force: in the game the bridge's given `nn_orders`, in the simulator `order_kind` / `order_run`; in `test5` the same rule in `behaviour.Fatigue`) |
+| `activity` | the share of standing units' time in melee / firing / moving / still; own / enemy |
+| `shooters` | missile units' (not the lord's) time in melee, own / enemy |
+
+Gate `20261005-161910` (`s6_fatigue/m20`, 4 battles, 8 copies, 246 s of simulation on 8 cores,
+~4.5 min with the container), game / sim mean, marked beyond noise: wins 0.00 / 0.78; trade −0.39 /
++0.10; own gold lost 0.96 / 0.67 of the army, the enemy's 0.57 / 0.76; own lord dead 0.75 / 0.25;
+routs per unit own 1.52 / 0.92, enemy 0.58 / 1.24; own time in melee 0.50 / 0.38; missile units in
+melee own 0.25 / 0.10, enemy 0.19 / 0.02; tired or worse at 240–360 s 0.97 / 0.80 (own) and 0.96 /
+0.79 (enemy); exhausted own 0.20 / 0.14. Matching: the lords' health loss per second of melee
+(0.0056 / 0.0059 ours, 0.0034 / 0.0036 the enemy's), abilities (2.75 / 2.50 a battle, the first at
+171 / 151 s), the firing and moving shares, running far from the fight (1.00 / 1.00). So in the
+simulator the enemy routs twice as often and missile units are hardly ever caught in melee.
 
 ## The baselines' cache and the canary
 

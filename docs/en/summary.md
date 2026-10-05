@@ -142,7 +142,9 @@ of 0.03 for drifting from the step's start) moves forward every 600 s: without a
 collapses. A step is 20–25 minutes, evaluated every 5–10 minutes. Standing options are in
 `config/train-chain.json` (now also drills on 20 % of battles and the `auto` teacher in drills
 and in normal battles). `tools.ops.step` builds a step's command, `tools.ops.card` shows its
-result ([workflow](training/workflow.md)).
+result ([workflow](training/workflow.md)). A metric profile (`--profile`) picks what the evaluations
+compute: always the rating, pair gold and lord deaths, the rest (drills, transfer, liveliness,
+fatigue, capacity) by the run's question ([metric profiles](training/workflow.md#metric-profiles)).
 
 **Fair metrics** (the factions are unequal, so a bare win rate says little about the network):
 
@@ -222,7 +224,9 @@ The latest gates — all three **0 of 6**, every pair lost both:
 | 20261005-071054 | `s4_collapse/m5` | 0 / 6 | −0.65 (−0.82…−0.48) | ×0.39 |
 
 So the game's AI trades about 2.5 times better with the same armies. These gates' recordings
-are the basis for finding the simulator's gaps (gate replay above).
+are the basis for finding the simulator's gaps (gate replay above). After a gate `tools.ops.gapcard`
+replays its battles in the simulator from the same starts (the network against `ai_like`) and prints
+one game / sim table, marking the gaps beyond noise ([gap card](training/workflow.md#game-vs-sim-gap-card-toolsopsgapcardpy)).
 
 Details: [in-game check](launch/gate.md) · [the game's own AI](game/game-ai.md) ·
 [difficulty](game/difficulty.md).
@@ -238,7 +242,7 @@ Details: [in-game check](launch/gate.md) · [the game's own AI](game/game-ai.md)
 | Chain options | `config/train-chain.json` (outside the version) |
 | Runs, checkpoints, script baselines | `build/nn-train/` (not in Git) |
 | Gates | `build/nn-gate/<time>/summary.json` (not in Git) |
-| Orchestrator tools | `tools/ops`: `step`, `card`, `leftovers`, `wait.sh` |
+| Orchestrator tools | `tools/ops`: `step`, `card`, `gapcard`, `leftovers`, `wait.sh` |
 
 All documentation sections: [contents](README.md) · [data for training](training/README.md) ·
 [game knowledge](game/README.md) · [research archive](research/README.md).

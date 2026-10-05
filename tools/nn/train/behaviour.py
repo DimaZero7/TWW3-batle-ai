@@ -240,3 +240,67 @@ class Tracker:
                 "twitch_share": float((rate >= TWITCH_PER_MIN).mean()) if long.any() else None,
                 "engine_switches_per_min": per("eng_switches", "eng_s"),
                 "opp_engine_switches_per_min": per("opp_eng_switches", "opp_unit_s")}
+
+
+FATIGUE_LEVELS = 6        # the simulator's u["fat"]: fresh, active, winded, tired, very tired, exhausted
+TIRED = 3                 # tired and worse
+FAR_M = 150.0             # "far from the fight": no standing enemy this near (about a bow's range), before first contact
+
+
+def far_from_fight(u, touched):
+    """[B, N] units far from the fight: their battle had no melee yet (touched [B] 0 / 1) and no standing
+    enemy is within FAR_M."""
+    stand = standing_mask(u)
+    dx = u["x"][:, :, None] - u["x"][:, None, :]
+    dz = u["z"][:, :, None] - u["z"][:, None, :]
+    enemy = (u["side"][:, :, None] != u["side"][:, None, :]) & stand[:, None, :]
+    near = (enemy & (dx * dx + dz * dz < FAR_M * FAR_M)).any(2)
+    return ~near & (touched[:, None] < 0.5)
+
+
+def fatigue_step(st, mine, live, sums, dt):
+    """Fatigue.update: adds this step's standing unit-seconds of mine's units by fatigue state, and of those
+    far from the fight under a move / withdraw order, running or not (in place)."""
+    u = st.u
+    m = mine & live[:, None] & standing_mask(u)
+    level = u["fat"].long().clamp(0, FATIGUE_LEVELS - 1)
+    hot = torch.nn.functional.one_hot(level, FATIGUE_LEVELS).float() * m[..., None].float()
+    sums["fat_s"] += hot.sum(1) * dt
+    moving = m & ((u["order_kind"] == O.MOVE) | (u["order_kind"] == O.WITHDRAW)) & far_from_fight(u, sums["touched"])
+    sums["far_move_s"] += moving.float().sum(1) * dt
+    sums["far_run_s"] += (moving & u["order_run"].bool()).float().sum(1) * dt
+    contact = (u["m"] & standing_mask(u)).any(1).float()
+    sums["touched"] += contact * (1 - sums["touched"])
+
+
+class Fatigue:
+    """Per battle [B, 6] the learner's standing unit-seconds in each fatigue state (the simulator's
+    u["fat"]) and its run share far from the fight (measured only: the "fatigue" metric profile,
+    tools/nn/train/profiles.py)."""
+
+    def __init__(self, st, params, mine, wrap=None):
+        self.dt = params.dt
+        self.mine = mine
+        z = (lambda: torch.zeros(st.B, device=st.device))
+        self.sums = {"fat_s": torch.zeros(st.B, FATIGUE_LEVELS, device=st.device), "far_move_s": z(),
+                     "far_run_s": z(), "touched": z()}
+        self._step = wrap(fatigue_step) if wrap else fatigue_step
+
+    def update(self, st, live):
+        self._step(st, self.mine, live, self.sums, self.dt)
+
+    def summary(self, sel):
+        """{fatigue_shares: [6] shares of the standing unit-time by state, fatigue_tired_share (tired or
+        worse), fatigue_exhausted_share, run_far_share: the share of the unit-time under a move / withdraw
+        order far from the fight (far_from_fight) that runs} over the battles sel [B] (numpy bool); None
+        without time."""
+        s = self.sums["fat_s"].cpu().numpy()[sel].sum(0)
+        tot = float(s.sum())
+        move = float(self.sums["far_move_s"].cpu().numpy()[sel].sum())
+        run = (float(self.sums["far_run_s"].cpu().numpy()[sel].sum()) / move) if move > 0 else None
+        if tot <= 0:
+            return {"fatigue_shares": None, "fatigue_tired_share": None, "fatigue_exhausted_share": None,
+                    "run_far_share": run}
+        return {"fatigue_shares": [round(float(x) / tot, 4) for x in s],
+                "fatigue_tired_share": float(s[TIRED:].sum()) / tot, "fatigue_exhausted_share": float(s[-1]) / tot,
+                "run_far_share": run}

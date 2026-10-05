@@ -78,7 +78,7 @@ def combined(opponents, per_scene, n_scenes, scene_attacker=None, attack_only=()
 @torch.no_grad()
 def play(actor, opponents=OPPONENTS, per_scene=512, past=None, device="cpu", limit_s=3600.0, greedy=False,
          seed=1, scene_list=scenes.SCENES, compile=None, hold_defend=False, generated=None, max_units=19, small=None,
-         together=False, paired=True, baseline=False, compact=True, cuda_graph=True, cadence=None):
+         together=False, paired=True, baseline=False, compact=True, cuda_graph=True, cadence=None, measure=None):
     """-> {"by_opponent": {name: {games, wins, win_rate, seconds, hp_own_lost, hp_enemy_lost, timeouts,
     gold_destroyed, gold_lost (mean gold a battle, reward.gold_sides at the end), gold_ratio (their sums'
     ratio), gold_trade (mean (destroyed - lost) / budget),
@@ -112,14 +112,18 @@ def play(actor, opponents=OPPONENTS, per_scene=512, past=None, device="cpu", lim
 
     "transfer" (tools/nn/train/drills/transfer.py): per drill with a transfer detector, the share of the
     unit-seconds in the drill's situation where the units apply its skill, the network's and (per
-    opponent) the opponent script's; "ai_like": the ai_like script's units, the reference."""
+    opponent) the opponent script's; "ai_like": the ai_like script's units, the reference.
+
+    measure: the metric profiles to compute (tools/nn/train/profiles.py TEST5: "behaviour", "liveliness",
+    "fatigue", "transfer"; None: all). Without "behaviour" / "liveliness" the "behaviour" blocks are {},
+    without "transfer" "transfer" is {}; the rest (wins, gold, pairs, lords, kinds, the rating) always."""
     out = {"by_opponent": {}, "by_scene": {}, "limit_s": limit_s, "greedy": greedy, "per_scene": per_scene,
            "battles": {}, "transfer": {}}
     only = () if hold_defend else league.ATTACK_ONLY
     groups = [tuple(opponents)] if together else [(n,) for n in opponents]
     for names in groups:
         res = _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, scene_list, compile, only,
-                         generated, max_units, small, paired, compact, cuda_graph, cadence)
+                         generated, max_units, small, paired, compact, cuda_graph, cadence, measure)
         for name, (mine, rows, per) in ((k, v) for k, v in res.items() if k != _TRANSFER):
             out["by_opponent"][name] = mine
             out["by_scene"][name] = rows
@@ -335,7 +339,8 @@ class _Full:
 
 
 # What Graphed walks for the tensors a decision reads and writes (the bank and the setup are only read).
-_WALK = (S.State, rollout.Battles, behaviour.Tracker, drill_transfer.Tracker, SimpleNamespace, rollout.ob.Memory,
+_WALK = (S.State, rollout.Battles, behaviour.Tracker, behaviour.Fatigue, drill_transfer.Tracker, SimpleNamespace,
+         rollout.ob.Memory,
          rollout.Frame)
 _SKIP = {"source", "bank", "setup", "params", "weights", "layout", "scripts", "past_actor", "gen"}
 
@@ -431,8 +436,10 @@ class Graphed:
 
 
 def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, scene_list, compile, attack_only,
-               generated=None, max_units=19, small=None, paired=True, compact=True, cuda_graph=True, cadence=None):
-    """{name: (result, rows by scene, per-battle lists)} of the opponents `names`, played in one batch."""
+               generated=None, max_units=19, small=None, paired=True, compact=True, cuda_graph=True, cadence=None,
+               measure=None):
+    """{name: (result, rows by scene, per-battle lists)} of the opponents `names`, played in one batch.
+    measure: as play()'s."""
     params = rollout.params_with_limit(limit_s)
     if generated and paired:
         n_pairs = pair_count(generated)
@@ -471,15 +478,20 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
     mine = env.st.u["side"] == learner_side[:, None]
     contact = torch.full((B,), -1.0, device=env.device)
     fired = torch.zeros(B, dtype=torch.bool, device=env.device)
-    watch = behaviour.Tracker(env.st, env.params, mine, wrap=lambda f: rollout.fast(f, env.compiled))
-    xfer = drill_transfer.Tracker(env.st, env.params, mine, wrap=lambda f: rollout.fast(f, env.compiled))
-    full = _Full(env, (watch, xfer)) if compact else None
+    want = (lambda p: measure is None or p in measure)
+    fast = (lambda f: rollout.fast(f, env.compiled))
+    watch = (behaviour.Tracker(env.st, env.params, mine, wrap=fast, lively=want("liveliness"))
+             if want("behaviour") or want("liveliness") else None)
+    xfer = drill_transfer.Tracker(env.st, env.params, mine, wrap=fast) if want("transfer") else None
+    fat = behaviour.Fatigue(env.st, env.params, mine, wrap=fast) if want("fatigue") else None
+    watches = tuple(w for w in (watch, xfer, fat) if w is not None)
+    full = _Full(env, watches) if compact else None
     acc = SimpleNamespace(contact=contact, fired=fired, mine=mine)
 
     def counts(live):
         """The evaluation's own per-battle counts, after every simulator step."""
-        watch.update(env.st, live)
-        xfer.update(env.st, live)
+        for w in watches:
+            w.update(env.st, live)
         u = env.st.u
         touch = (u["m"] & acc.mine).any(1)
         acc.contact = torch.where((acc.contact < 0) & touch, env.st.t, acc.contact)
@@ -499,7 +511,7 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
             if (cuda_graph and env.device.type == "cuda" and env.B in BUCKETS and n_steps - i > 4 * CHECK_EVERY
                     and (graph is None or graph.B != env.B)):
                 graph = None                     # (a graph of another size: its memory goes)
-                graph = Graphed(one, SimpleNamespace(env=env, watch=watch, xfer=xfer, acc=acc), env.B)
+                graph = Graphed(one, SimpleNamespace(env=env, watch=watch, xfer=xfer, fat=fat, acc=acc), env.B)
                 i += graph.warm
         elif bool(env.st.done.all()):
             break
@@ -536,6 +548,10 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
     kinds_b = env.kind_battle.cpu().numpy()
     orders_b = env.order_battle.cpu().numpy()                         # changes, switches, unit-steps
     minutes = params.dt / 60
+
+    def observed(sel):
+        """The behaviour block over the battles sel: the profiles' trackers that ran ({} without)."""
+        return {**(watch.summary(sel) if watch is not None else {}), **(fat.summary(sel) if fat is not None else {})}
     out = {}
     for name in names:
         this = lay.opponent == league.CODE[name]
@@ -550,7 +566,7 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
                        "orders_per_minute": float(ch / max(1e-9, steps * minutes)),
                        "switches_per_minute": float(sw / max(1e-9, steps * minutes)),
                        "kinds": {kd: float(k[i] / max(1, k.sum())) for i, kd in enumerate(O.KINDS)},
-                       "behaviour": watch.summary(this),
+                       "behaviour": observed(this),
                        "roles": {"attack": _summary(attacks, won, t, hp_own, hp_enemy, limit_s, *lords, gold=gold),
                                  "defend": _summary(this & ~attacks, won, t, hp_own, hp_enemy, limit_s, *lords,
                                                     gold=gold)}})
@@ -568,7 +584,7 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
                "lost": np.round(gold[0][this], 2).tolist(), "budget": np.round(gold[2][this], 2).tolist()}
         for role, sel in (("attack", attacks), ("defend", this & ~attacks)):
             if sel.any():
-                result["roles"][role]["behaviour"] = watch.summary(sel)
+                result["roles"][role]["behaviour"] = observed(sel)
         rows = {}
         if generated:
             for b in np.nonzero(this)[0]:
@@ -588,7 +604,8 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
         for r in rows.values():
             r["win_rate"] = r["wins"] / max(1, r["games"])
         out[name] = (result, rows, per)
-    out[_TRANSFER] = drill_transfer.report(xfer, {n: lay.opponent == league.CODE[n] for n in names})
+    out[_TRANSFER] = (drill_transfer.report(xfer, {n: lay.opponent == league.CODE[n] for n in names})
+                      if xfer is not None else {})
     return out
 
 

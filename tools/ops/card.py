@@ -15,7 +15,10 @@ order kinds hold / move / attack, missile time in melee, timeouts, the evaluatio
 distance from the start. The last column is the change from the first point to the last: a mark
 when it is beyond the noise (two standard errors where the numbers carry one; |change| >= 0.05
 otherwise, marked *); anomalies (a collapse between points, the move share x1.5, lord deaths x1.5, timeouts)
-are listed under the table; --prev adds the previous step's end point and the change from it.
+are listed under the table; --prev adds the previous step's end point and the change from it. The
+line "computed:" says which metric profiles each point computed (test5 --profile,
+tools/nn/train/profiles.py; "full" for evaluations older than the profiles): a row shown "-" was not
+computed there, not zero.
 """
 import argparse
 import json
@@ -37,7 +40,7 @@ Z = 2.0
 def point_from_eval(res):
     """The report's point of a raw evaluation (the subset of test5.metrics the card reads)."""
     out = {"skill": skill.summary(res)}
-    for k in ("drills", "transfer", "distance", "teach_auto", "teach_normal"):
+    for k in ("drills", "transfer", "distance", "teach_auto", "teach_normal", "profile"):
         if res.get(k):
             out[k] = res[k]
     out["seconds"] = res.get("seconds")
@@ -48,7 +51,9 @@ def point_from_eval(res):
             b = x.get("behaviour", {})
             out[f"{opp}/{role}"] = {"win": x.get("win_rate"), "lord_dead_own": x.get("lord_dead_own"), "games": x.get("games"),
                                     "timeouts": x.get("timeouts"), "gold_ratio": x.get("gold_ratio"),
-                                    "missile_melee_share": b.get("missile_melee_share")}
+                                    "missile_melee_share": b.get("missile_melee_share"),
+                                    "fatigue_exhausted_share": b.get("fatigue_exhausted_share"),
+                                    "run_far_share": b.get("run_far_share")}
         out[f"{opp}/all"] = {f"kind_{k}": v for k, v in o.get("kinds", {}).items()}
     return out
 
@@ -135,6 +140,10 @@ def rows(point):
                 "{:.2f}" + "".join(f" / {a[k]:.2f}" for k in ("kind_move", "kind_attack") if a.get(k) is not None)))
     out.append(("move", "kind move, ai_like", a.get("kind_move"), None, "{:.2f}"))
     out.append(("missile", "missile time in melee (mean of cells)", _mean([c.get("missile_melee_share") for c in cells]), None, "{:.3f}"))
+    out.append(("fatigue", "own unit-time exhausted (mean of cells)",
+                _mean([c.get("fatigue_exhausted_share") for c in cells]), None, "{:.3f}"))
+    out.append(("run_far", "own moves running far from the fight (mean of cells)",
+                _mean([c.get("run_far_share") for c in cells]), None, "{:.3f}"))
     out.append(("timeouts", "timeouts (max cell)", max([c.get("timeouts") or 0 for c in cells], default=None), None, "{:.3f}"))
     out.append(("seconds", "evaluation, s", point.get("seconds"), None, "{:.0f}"))
     out.append(("kl", "KL from the start (mean of the updates)", _g(point, "distance", "start_kl"), None, "{:.3f}"))
@@ -190,6 +199,14 @@ def anomalies(pts):
     return out
 
 
+def computed(pts, rep=None):
+    """The line naming the metric profiles of the points: one name when all agree, else per point."""
+    names = [p.get("profile") or (rep or {}).get("profile") or "full" for _, p in pts]
+    if len(set(names)) == 1:
+        return f"computed: {names[0]} (tools/nn/train/profiles.py)"
+    return "computed: " + "; ".join(f"min {m} {n}" for (m, _), n in zip(pts, names))
+
+
 def card(folder, prev=None):
     """The card's lines (markdown) and its data ({"points", "rows", "anomalies", "capacity"})."""
     pts, rep = points_of(folder)
@@ -223,13 +240,14 @@ def card(folder, prev=None):
         lines.append(f"| {title} | " + " | ".join(vals) + f" | {(f'{d:+.3f}' + (' ' + mark if mark else '') if d is not None else '-')}{extra} |")
         data.append(row)
     anomaly = anomalies(pts)
-    lines += ["", "anomalies: " + ("; ".join(anomaly) if anomaly else "none")]
+    lines += ["", computed(pts, rep), "anomalies: " + ("; ".join(anomaly) if anomaly else "none")]
     capacity = (rep or {}).get("capacity")
     if capacity:
         lines.append(f"capacity: {capacity.get('verdict')} - {'; '.join(capacity.get('reasons') or [])}")
     if rep and rep.get("train_s"):
         lines.append(f"training: {rep['train_s'] / 60:.0f} min, {rep.get('updates')} updates")
-    return lines, {"points": [m for m, _ in pts], "rows": data, "anomalies": anomaly, "capacity": capacity}
+    return lines, {"points": [m for m, _ in pts], "rows": data, "anomalies": anomaly, "capacity": capacity,
+                   "computed": computed(pts, rep)}
 
 
 def main(argv=None):

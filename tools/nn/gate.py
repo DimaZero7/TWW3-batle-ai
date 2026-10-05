@@ -3,6 +3,7 @@ battles it has never seen (docs/en/launch/gate.md). tools/launcher/gate.ps1 runs
 
     python -m tools.nn.gate plan --battles 4            # JSON: the battles (seed, role, limits)
     python -m tools.nn.gate summary build/nn-gate/<time>   # summary.json + a table; exit 1 unless passed
+    python -m tools.nn.gate summary build/nn-gate/<time> --profile fatigue,lords   # + those metrics
 
 Battles come from the gate block of the generator's EVAL seeds (GATE_BLOCK), never used in
 training, in swapped pairs (docs/en/training/training.md "Network evaluation: fair metrics"):
@@ -25,6 +26,12 @@ Liveliness (measured only, docs/en/launch/gate.md): from each recording our netw
 tools/nn/train/behaviour.py counts them in the simulator) and both sides' own current targets every
 second (nn_sample): the game's AI's target switches are the reference band.
 
+Metric profiles (--profile, tools/nn/train/profiles.py GAME): the summary always has the mandatory set
+(the outcomes, the pairs, the pair gold, own lord deaths from the recordings); "liveliness" (the
+default) adds the liveliness above; routs, lords, fatigue, activity, shooters add those numbers of
+each recording (tools/nn/battle_metrics.py, the gap card's game side); "full" all of them,
+"mandatory" none. summary.json keeps the "profile".
+
 Plain python (numpy through the generator): runs in the project's .venv.
 """
 import argparse
@@ -34,7 +41,8 @@ import sys
 from pathlib import Path
 
 from tools import config as project
-from tools.nn.train import matchups, skill
+from tools.nn import battle_metrics
+from tools.nn.train import matchups, profiles, skill
 
 GATE_BLOCK = range(1_000_900_000, 1_001_000_000)   # the last 100 000 of generate.EVAL_SEEDS
 SIZE_BINS = ((0, 4), (5, 9), (10, 14), (15, 19))  # our units besides the lord
@@ -47,6 +55,7 @@ SIM = project.CONFIG_DIR / "nn" / "sim.json"
 UNITS = project.CONFIG_DIR / "nn" / "units.json"
 ROUT_SHARE = 0.5                                   # = tools/nn/train/reward.py Weights.rout_share (no torch here)
 OUT = project.BUILD / "nn-gate"
+PROFILE = "liveliness"                             # the summary's default metric profiles
 
 
 def battle_limit_s():
@@ -341,9 +350,10 @@ def outcome(result, own_role):
     return None, status or "no_result"
 
 
-def battle_row(entry, costs=None):
+def battle_row(entry, costs=None, chosen=(PROFILE,)):
     """One battle of the gate from its run folder (build/nn-arena/runs/<time>/). costs: {unit key: gold}
-    (default: the passports)."""
+    (default: the passports). chosen: the metric profiles (profiles.GAME): "liveliness" the liveliness
+    counts, the others battle_metrics' groups ("metrics"; its mandatory set always: own lord dead)."""
     run = Path(entry["run"]) if entry.get("run") else None
     row = {"battle": entry["battle"], "pair": entry.get("pair"), "swap": bool(entry.get("swap")), "seed": entry["seed"],
            "role": entry["role"], "attempts": entry.get("attempts", 1), "run": run.name if run else None,
@@ -384,18 +394,21 @@ def battle_row(entry, costs=None):
         "wall_s": result.get("duration_wall_s"),
         "nn": {k[3:]: result.get(k) for k in ("nn_moves", "nn_answered", "nn_missed", "nn_orders_given",
                                                "nn_keeps", "nn_bad_files", "nn_reaims", "nn_empty_melees")},
-        "gold": g, "lively": liveliness(run / "events.jsonl"), "lua_errors": errors, "battle_difficulty": launch.get("battle_difficulty"),
+        "gold": g, "lively": liveliness(run / "events.jsonl") if "liveliness" in chosen else None,
+        "metrics": battle_metrics.game_battle(run, winner, chosen=[c for c in chosen if c in battle_metrics.GROUPS]),
+        "lua_errors": errors, "battle_difficulty": launch.get("battle_difficulty"),
         "launch_status": status.get("status"), "preferences_restored": bool(status.get("preferences_restored")),
         "build": cfg.get("build")})
     return row
 
 
-def summarize(gate_dir):
-    """Reads gate_dir/battles.json (written by gate.ps1), writes gate_dir/summary.json; returns it."""
+def summarize(gate_dir, chosen=(PROFILE,)):
+    """Reads gate_dir/battles.json (written by gate.ps1), writes gate_dir/summary.json; returns it.
+    chosen: the metric profiles (profiles.GAME) besides the mandatory set."""
     gate_dir = Path(gate_dir)
     doc = _json(gate_dir / "battles.json")
     costs = _costs()
-    rows = [battle_row(e, costs) for e in doc.get("battles", [])]
+    rows = [battle_row(e, costs, chosen=chosen) for e in doc.get("battles", [])]
     planned = doc.get("planned", len(rows))
     count = {k: sum(r["outcome"] == k for r in rows) for k in ("win", "loss", "no_result")}
     need = doc.get("min_wins") or min_wins(planned)
@@ -406,11 +419,43 @@ def summarize(gate_dir):
                "fair": all(r.get("battle_difficulty") == 1 for r in rows),
                "preferences_restored": all(r.get("preferences_restored") for r in rows),
                "by_faction": by_faction(rows), "pairs": pairs(rows), "pair_gold": pair_gold(rows),
-               "liveliness": lively_summary(rows), "battles": rows}
+               "liveliness": lively_summary(rows), "profile": profiles.text(chosen, profiles.GAME),
+               "lord_dead_own": metric_mean(rows, "lord_dead_own"), "metrics": metrics_summary(rows, chosen),
+               "battles": rows}
     summary["analyse"] = sorted(b for p in summary["pairs"]["each"] if "analyse" in p["verdict"]
                                 for b in p["battles"])
     (gate_dir / "summary.json").write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8", newline="\n")
     return summary
+
+
+def metric_mean(rows, key):
+    """The mean of a battle_metrics number over the battles that have it (None without)."""
+    return battle_metrics.pooled([(r.get("metrics") or {}).get(key) for r in rows])[0]
+
+
+def metrics_summary(rows, chosen):
+    """{key: mean over the battles} of battle_metrics' rows of the chosen profiles besides the mandatory
+    set (which the summary has apart); {} when none was chosen."""
+    return {k: metric_mean(rows, k) for k, group, _, _ in battle_metrics.rows_for(chosen) if group in chosen}
+
+
+def metric_lines(summary):
+    """The summary's lines of battle_metrics: own lord deaths, then a row per metric of the chosen profiles
+    (per battle and the mean)."""
+    rows = summary["battles"]
+    lord = [(r.get("metrics") or {}).get("lord_dead_own") for r in rows]
+    lines = ["own lord dead: " + " ".join("-" if v is None else f"{v:.0f}" for v in lord)
+             + ("" if summary.get("lord_dead_own") is None else f" (mean {summary['lord_dead_own']:.2f})")]
+    keys = summary.get("metrics") or {}
+    if keys:
+        lines.append(f"recordings' metrics ({summary.get('profile')}; tools/nn/battle_metrics.py), "
+                     f"battles {' '.join(str(r['battle']) for r in rows)} | mean:")
+        for key, _, title, fmt in battle_metrics.ROWS:
+            if key in keys:
+                f = (lambda v: "-" if v is None else fmt.format(v))
+                lines.append(f"  {title}: " + " ".join(f((r.get('metrics') or {}).get(key)) for r in rows)
+                             + f" | {f(keys[key])}")
+    return lines
 
 
 def by_faction(rows):
@@ -507,6 +552,7 @@ def table(summary):
         lines.append(f"pair gold (ours - game AI's, same armies, / budget): {pg}; exchange {ex}; "
                      f"weak army destroyed/lost net vs game AI: {weak}; over {g['pairs']} pairs")
     lines += lively_lines(summary.get("liveliness"))
+    lines += metric_lines(summary)
     return lines
 
 
@@ -538,6 +584,9 @@ def main(argv=None):
                    help="4 battles a seed: each army attacks and defends under either side (SYMMETRIC)")
     s = sub.add_parser("summary", help="summary.json and a table of a gate folder")
     s.add_argument("gate_dir", type=Path)
+    s.add_argument("--profile", default=PROFILE,
+                   help="metric profiles besides the mandatory set: liveliness (default), mandatory, full or a comma "
+                        "list of " + ", ".join(profiles.GAME))
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8")
     if args.cmd == "plan":
@@ -547,7 +596,11 @@ def main(argv=None):
         print(json.dumps({"timeout_s": timeout, "deadline_s": deadline_s(timeout), "min_wins": min_wins(args.battles),
                           "battles": plan(args.battles, args.offset, symmetric=args.symmetric)}))
         return 0
-    summary = summarize(args.gate_dir)
+    try:
+        chosen = profiles.parse(args.profile, profiles.GAME)
+    except ValueError as e:
+        parser.error(str(e))
+    summary = summarize(args.gate_dir, chosen)
     for line in table(summary):
         print(line)
     print("summary:", args.gate_dir / "summary.json")

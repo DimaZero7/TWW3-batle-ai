@@ -248,7 +248,7 @@ class TestSummary:
                 rows.append({"battle": 2 * pair - 1 + i, "pair": pair, "seed": pair, "swap": bool(i),
                              "outcome": outcome, "role": "defend" if i else "attack",
                              "gold": {"destroyed": destroyed, "own_lost": 500, "budget": 1000, "margin": 0.1}})
-        monkeypatch.setattr(gate, "battle_row", lambda entry, costs: entry)
+        monkeypatch.setattr(gate, "battle_row", lambda entry, costs, **kw: entry)
         (tmp_path / "battles.json").write_text(json.dumps({"battles": rows}))
         s = gate.summarize(tmp_path)
         saved = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))

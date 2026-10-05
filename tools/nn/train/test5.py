@@ -47,6 +47,17 @@ the final evaluation against the previous iteration's (--prev-report, else found
 --report-only rebuilds trend.md and report.json's blocks of a finished --label from its evaluations
 (no training, no GPU; the liveliness rows of an evaluation older than them stay "-").
 
+Metric profiles (--profile, tools/nn/train/profiles.py; docs/en/training/workflow.md "Metric profiles"):
+every evaluation computes the mandatory set (the rating, the pair gold against each script with the
+script baselines, own lord deaths, wins, gold, order kinds); --profile adds named blocks: behaviour
+(alias shooters: missile time in melee, flanks, piles, ability uses), liveliness, fatigue (the share of
+own standing unit-time by fatigue state; the share of own move / withdraw unit-time far from the fight,
+before first contact and no standing enemy within 150 m, that runs), transfer, drills, capacity; "full" (the default) is all of
+them. The adaptive teachers add what they read (--drill-teach auto: drills; an adaptive --teach-normal:
+transfer). Each evaluation keeps its "profile"; report.json too.
+
+    DOCK_NAME=t0-x bash tools/nn/dock.sh tools.nn.train.test5 --label x --profile mandatory -- ...
+
 A trend run: --updates 0 --minutes M --every K trains M minutes and runs the same evaluation every K
 minutes of training too (its time not counted), keeping each network (m<minute>.pt) and evaluation
 (eval_m<minute>.json); report.json and trend.md then hold the table minute 0 / K / ... / M:
@@ -64,7 +75,7 @@ from pathlib import Path
 import torch
 
 from tools.nn.train import cadence as cad
-from tools.nn.train import capacity, checkpoint, drills, evaluate, matchups, refs, run, skill, teach_auto
+from tools.nn.train import capacity, checkpoint, drills, evaluate, matchups, profiles, refs, run, skill, teach_auto
 
 OUT = checkpoint.DIR / "test5"
 LOCK = checkpoint.DIR.parent / "gpu-train.lock"
@@ -111,16 +122,25 @@ def gpu_lock(label, path=LOCK, poll_s=30.0, gap_s=60.0):
             path.unlink()
 
 
+def chosen(args):
+    """The metric profiles of this run (args.profiles, set by main(); without it every profile)."""
+    p = getattr(args, "profiles", None)
+    return profiles.TEST5 if p is None else p
+
+
 def evaluation(actor, args, device, cadence):
-    """The evaluation of every point; cadence: the training's (run.py --decide-s, --order-latency)."""
+    """The evaluation of every point; cadence: the training's (run.py --decide-s, --order-latency).
+    Computes the mandatory set and args.profiles (tools/nn/train/profiles.py)."""
     t = time.time()
+    prof = chosen(args)
     res = evaluate.play(actor, opponents=OPPONENTS, device=device, generated=args.eval, max_units=19, seed=1,
-                        together=True, paired=True, baseline=True, cadence=cadence)
-    if args.drill_eval:
+                        together=True, paired=True, baseline=True, cadence=cadence, measure=set(prof))
+    if args.drill_eval and "drills" in prof:
         # the drills (tools/nn/train/drills, the verified ones): win rate and gold trade per drill
         res["drills"] = evaluate.play_drills(actor, args.drill_eval, device, cadence=cadence)
     res["seconds"] = round(time.time() - t)
     res["cadence"] = cadence.meta()
+    res["profile"] = profiles.text(prof, profiles.TEST5)
     return res
 
 
@@ -223,6 +243,8 @@ def metrics(res):
     fair metrics (tools/nn/train/skill.py summary: rating, pairs, pair gold, advantage over the script,
     margin)."""
     out = {"skill": skill.summary(res)}
+    if res.get("profile"):
+        out["profile"] = res["profile"]              # the metric profiles computed (tools/nn/train/profiles.py)
     if res.get("drills"):
         out["drills"] = res["drills"]
     if res.get("transfer"):
@@ -259,7 +281,10 @@ ROWS = (("win", "win rate", "{:.3f}"), ("gold_destroyed", "enemy gold destroyed 
         ("flanked_share", "own melee hit flank/rear", "{:.3f}"),
         ("crowding_share", "decisions with a pile", "{:.3f}"),
         ("flank_attack_share", "own melee into flank/rear", "{:.3f}"),
-        ("abilities_per_battle", "ability uses / battle", "{:.2f}"), ("timeouts", "timeouts", "{:.3f}"))
+        ("abilities_per_battle", "ability uses / battle", "{:.2f}"),
+        ("fatigue_tired_share", "own unit-time tired or worse", "{:.3f}"),
+        ("fatigue_exhausted_share", "own unit-time exhausted", "{:.3f}"),
+        ("run_far_share", "own move orders running, far from the fight", "{:.3f}"), ("timeouts", "timeouts", "{:.3f}"))
 LIVELY = (("order_changes_per_min", "order changes / unit-min", "{:.2f}"),
           ("target_switches_per_min", "attack-target switches / unit-min", "{:.2f}"),
           ("flips_per_min", "flips A→B→A ≤10 s / unit-min", "{:.3f}"),
@@ -474,8 +499,15 @@ def main():
     ap.add_argument("--baseline-canary", type=int, default=0,
                     help="on a baseline cache miss play this many pairs first and adopt an older version's file "
                          "when they come out identical (evaluate.CANARY; 0: play the whole baseline)")
+    ap.add_argument("--profile", default=profiles.FULL,
+                    help="metric profiles besides the mandatory set: 'mandatory', 'full' (default) or a comma list of "
+                         + ", ".join(profiles.TEST5) + " (tools/nn/train/profiles.py)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args, rest = ap.parse_known_args()
+    try:
+        args.profiles = profiles.parse(args.profile, profiles.TEST5, profiles.TEST5_ALIASES)
+    except ValueError as e:
+        ap.error(str(e))
     rest = [a for a in rest if a != "--"]
     if args.report_only:
         return report_only(args)
@@ -488,8 +520,9 @@ def references(args):
     """The missing script references (the script baselines, the drills' check scripts) start on the CPU in
     parallel processes (tools/nn/train/refs.py, with the canary) while the GPU plays the network's own
     battles; the evaluation waits for them where it reads them (evaluate.REFS_READY)."""
+    drill = bool(args.drill_eval) and "drills" in chosen(args)
     pending = refs.start(canary=evaluate.CANARY, pairs=evaluate.pair_count(args.eval), drill_battles=args.drill_eval,
-                         scripts=OPPONENTS, drills=None if args.drill_eval else ())
+                         scripts=OPPONENTS, drills=None if drill else ())
     evaluate.REFS_READY = pending.wait if pending else None
 
 
@@ -501,6 +534,13 @@ def test(args, rest):
     targs = run.parser().parse_args(["--name", f"test5_{args.label}", "--init", args.init, "--minutes",
                                      str(args.minutes), "--updates", str(args.updates), "--device", args.device]
                                     + PROTOCOL + rest)
+    fixed_normal, normal_names = run.normal_drills(targs.teach_normal)
+    need = profiles.test5_needs(targs.drill_teach, bool(normal_names) and fixed_normal is None)
+    missing = {p: why for p, why in need.items() if p not in chosen(args)}
+    if missing:                                  # the adaptive teachers read these blocks from every evaluation
+        args.profiles = tuple(p for p in profiles.TEST5 if p in chosen(args) or p in missing)
+        print("metric profiles: added " + "; ".join(f"{p} ({why})" for p, why in missing.items()), flush=True)
+    print(f"metric profiles: {profiles.text(chosen(args), profiles.TEST5)}", flush=True)
     cadence = cad.of_args(targs)                 # the evaluations decide as the training does
     drills.BROAD = targs.drill_broad              # the drill evaluations play the training's mix of clean / broad frames
     drills.EMBED = targs.drill_embed              # ... and of embedded ones
@@ -526,7 +566,6 @@ def test(args, rest):
 
     # the teacher in normal battles, adaptive: first shares from the "before" transfer block, new after every point
     nauto = None
-    fixed_normal, normal_names = run.normal_drills(targs.teach_normal)
     if normal_names and fixed_normal is None:
         prior_t = ((before["transfer"], "test5 before") if before.get("transfer") else teach_auto.prior(args.init, "transfer"))
         nauto = teach_auto.Transfer(targs.teach_normal_k, targs.teach_normal_cap, targs.teach_normal_weight, *prior_t,
@@ -580,14 +619,15 @@ def test(args, rest):
     mb, ma = metrics(before), metrics(after)
     lines = table(mb, ma)
     report = {"label": args.label, "init": args.init, "updates": summary["updates"], "train_s": summary["seconds"],
-              "eval_battles": args.eval, "protocol": PROTOCOL, "options": rest, "train_args": vars(targs), "training": summary, "run": str(run_dir),
+              "eval_battles": args.eval, "profile": profiles.text(chosen(args), profiles.TEST5), "protocol": PROTOCOL, "options": rest, "train_args": vars(targs), "training": summary, "run": str(run_dir),
               "before": mb, "after": ma, "table": lines}
-    cap = capacity.report(out, args.prev_report, run_dir, start=before, end=after, rep=report)
+    cap = (capacity.report(out, args.prev_report, run_dir, start=before, end=after, rep=report)
+           if "capacity" in chosen(args) else None)
     report["capacity"] = cap
-    lines += [""] + capacity.lines(cap)
+    lines += [""] + (capacity.lines(cap) if cap else [])
     if args.every:
         report["trend"] = {str(m): p for m, p in points}
-        report["trend_table"] = trend(points) + [""] + capacity.lines(cap)
+        report["trend_table"] = trend(points) + [""] + (capacity.lines(cap) if cap else [])
         (out / "trend.md").write_text("\n".join(report["trend_table"]) + "\n", encoding="utf-8", newline="\n")
     (out / "report.json").write_text(json.dumps(report, indent=1), encoding="utf-8", newline="\n")
     print(f"\ntest5 {args.label}: {args.init}, {summary['updates']} updates in {summary['seconds']} s "
@@ -608,14 +648,16 @@ def report_only(args):
     before, after = load(out / "before.json"), load(out / "after.json")
     evs = sorted(out.glob("eval_m*.json"), key=lambda p: float(p.stem[6:]))
     mb, ma = metrics(before), metrics(after)
-    cap = capacity.report(out, args.prev_report, None, start=before, end=after, rep=rep)
-    rep.update(before=mb, after=ma, table=table(mb, ma) + [""] + capacity.lines(cap), capacity=cap)
+    prof = profiles.parse(rep.get("profile") or profiles.FULL, profiles.TEST5)
+    cap = capacity.report(out, args.prev_report, None, start=before, end=after, rep=rep) if "capacity" in prof else None
+    caplines = capacity.lines(cap) if cap else []
+    rep.update(before=mb, after=ma, table=table(mb, ma) + [""] + caplines, capacity=cap)
     if evs:
         last = (rep.get("train_args") or {}).get("minutes")
         points = [(0, mb)] + [(p.stem[6:], metrics(load(p))) for p in evs]
         points.append((f"{last:g}" if last is not None else "end", ma))
         rep["trend"] = {str(m): p for m, p in points}
-        rep["trend_table"] = trend(points) + [""] + capacity.lines(cap)
+        rep["trend_table"] = trend(points) + [""] + caplines
         (out / "trend.md").write_text("\n".join(rep["trend_table"]) + "\n", encoding="utf-8", newline="\n")
     (out / "report.json").write_text(json.dumps(rep, indent=1), encoding="utf-8", newline="\n")
     print("\n".join(rep.get("trend_table") or rep["table"]), flush=True)

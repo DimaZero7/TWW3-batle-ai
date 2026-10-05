@@ -10,6 +10,8 @@ and prints it, or writes it as a bash script (--write): the previous step's last
 config/train-chain.json (--set key=value overrides one, --drop key removes one, anything after `--`
 is appended to run.py's options as given), the container is named <dock_prefix><label>, the test
 plays a baseline canary (--baseline-canary) so an unrelated code change does not cost the baselines.
+--profile picks the evaluations' metric profiles (test5 --profile, tools/nn/train/profiles.py; default
+config/train-chain.json test5.profile, else full): the mandatory set always, "drills,transfer" adds those.
 It also says whether the baselines' cache will hit (tools/nn/train/version.py) and the expected wall
 time. It never runs anything itself.
 """
@@ -21,6 +23,7 @@ import sys
 from pathlib import Path
 
 from tools import config as project
+from tools.nn.train import profiles
 
 ROOT = project.ROOT
 CHAIN = ROOT / "config" / "train-chain.json"
@@ -120,9 +123,13 @@ def wall_minutes(minutes, every, miss):
     return (minutes * 60 + evals * EVAL_S + (MISS_S if miss else 0) + STARTUP_S) / 60, evals
 
 
-def build(label, prev, chain, minutes=None, every=None, sets=(), drops=(), extra=(), canary=None, prefix=None):
+def build(label, prev, chain, minutes=None, every=None, sets=(), drops=(), extra=(), canary=None, prefix=None,
+          profile=None):
     """(script lines, info) of the step."""
     t5 = chain.get("test5", {})
+    profile = t5.get("profile") if profile is None else profile
+    if profile:
+        profiles.parse(profile, profiles.TEST5, profiles.TEST5_ALIASES)     # a wrong name fails here, not in the run
     minutes = t5.get("minutes", 25) if minutes is None else minutes
     every = t5.get("every", 5) if every is None else every
     canary = t5.get("baseline_canary", 0) if canary is None else canary
@@ -134,12 +141,14 @@ def build(label, prev, chain, minutes=None, every=None, sets=(), drops=(), extra
     test5_args = ["--label", label, "--init", rel(init), "--updates", "0", "--minutes", f"{minutes:g}", "--every", f"{every:g}"]
     if canary:
         test5_args += ["--baseline-canary", str(canary)]
+    if profile and profile != profiles.FULL:
+        test5_args += ["--profile", profile]
     cmd = (f"DOCK_NAME={shlex.quote(prefix + label)} bash tools/nn/dock.sh tools.nn.train.test5 "
            + " ".join(shlex.quote(a) for a in test5_args) + " -- " + " ".join(shlex.quote(a) for a in run_opts))
     lines = [f'cd "{posix(ROOT)}"', cmd]
     info = {"label": label, "prev": prev_label, "init": rel(init), "critic": rel(critic) if critic else None,
             "minutes": minutes, "every": every, "canary": canary, "container": prefix + label, "options": options,
-            "extra": list(extra), "out": f"build/nn-train/test5/{label}"}
+            "extra": list(extra), "out": f"build/nn-train/test5/{label}", "profile": profile or profiles.FULL}
     return lines, info
 
 
@@ -153,13 +162,15 @@ def main(argv=None):
     ap.add_argument("--drop", action="append", default=[], metavar="KEY", help="remove a run.py option")
     ap.add_argument("--canary", type=int, help="baseline canary pairs (default: the config; 0 off)")
     ap.add_argument("--prefix", help="the container's name prefix (default: the config)")
+    ap.add_argument("--profile", help="metric profiles of the evaluations (test5 --profile: mandatory, full or a "
+                                      "comma list; default: the config's test5.profile, else full)")
     ap.add_argument("--chain", default=str(CHAIN), help="the options file")
     ap.add_argument("--write", help="write the script here (LF); print the command to run it")
     args, extra = ap.parse_known_args(argv)
     extra = [a for a in extra if a != "--"]
     chain = load_chain(args.chain)
     lines, info = build(args.label, args.prev, chain, args.minutes, args.every, args.set, args.drop, extra,
-                        args.canary, args.prefix)
+                        args.canary, args.prefix, args.profile)
     print("\n".join(lines))
     print()
     print(f"chain: {info['prev']} -> {info['label']}: init {info['init']}, critic {info['critic'] or 'NONE (warm start of the critic!)'}")
