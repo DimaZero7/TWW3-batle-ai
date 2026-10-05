@@ -53,19 +53,21 @@ game decides the direction. Conventions: [index](README.md).
   (`was_attacked_in_front` 0). Guides list −6 / −14 as stacking with "flanks exposed"; one player
   says the flank penalty lasts ~60 s. · [twwstats morale][tws-m], [fandom Flanking][fw-flank] ·
   high (values), medium (that it is tied to the first contact, from the key's description).
-  - Ours: the simulator applies −1 / −2 points continuously while struck from the flank / rear
-    (`morale.attacked_flank` / `_rear`, regressed on the recordings; the database's −6 / −14
-    applied continuously gave −14.5 for the rear). **Conflict in form, likely explained**: a
-    one-off −6 / −14 at first contact that decays (or times out) would look like a small average
-    in a per-second regression. Worth a test: the morale drop in the first seconds after a fresh
-    flank contact vs later seconds.
+  - Ours: `morale.attacked_event=true`: −6 / −14 for one 0.5 s tick at first contact
+    from a worse direction (`flank_hit` → `flank_event`). Threat flags `lf/rf/bf` do not
+    determine hit direction. Continuous −1 / −2 remain only the fallback mode.
 - **Flanks exposed / secure.** −3 if one flank is exposed, −6 if both; +5 if all flanks are secure.
   The "open flanks" range is 120 m (`open_flanks_effect_range`); neighbour range 120 m. ·
   [twwstats morale][tws-m], [fandom Flanking][fw-flank] · high ·
   `ume_concerned_flanks_exposed_single/_multiple`, `ume_encouraged_flanks_secure`.
-  - Ours: agreement on points (measured −3.9 / −8.1). The simulator decides "exposed" by a
-    non-routing enemy within 60 m in the left, right or rear sector (`threat.range_m`, not
-    calibrated); the database's range is 120 m for losing the "secure" bonus.
+  - Ours: −3 / −6 use the same `lf/rf/bf` that the network sees; the companion passes
+    native `is_left_flank_threatened/is_right_flank_threatened/is_rear_flank_threatened`.
+    Production geometry is ON (`threat.calibration.on=true`): non-routing enemy within
+    45 m, sectors 60°/150°, enemy facing the unit within 60°, after movement and turning.
+    Rear inputs are substantially closer to the game; side/out-of-melee rates still miss
+    noise. Game-AI checks fall 23 → 20/26 with mechanics 51/54; adoption prioritizes
+    direct input measurements and does not claim complete calibration.
+    [Results and rejected trials](../../training/simulator.md#threat-flag-calibration).
 - **Surrounded** is not a separate modifier in the tables; it is the sum of flank/rear contacts,
   exposed flanks and "a strong enemy near" (−3…−24). One test: removing the enemies around a unit
   raised it from 14 to 75 points. · [Steam thread][surround] · low.

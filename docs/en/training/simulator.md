@@ -129,7 +129,7 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 | Morale effects | lord +4 within 70 m, fading to 0 at 105 m; lord died or shattered: his aura only (`lord_fall` 0 / 0); neighbour within 120 m +5; casualties −2…−74; recent casualties −6…−80 (last 30 s, of the whole health); winning / losing the melee +3/+6/+8, −3/−8 (damage ratio 1.5 / 2.5 / 4); first struck in the flank −6, rear −14 for one 0.5 s tick; the army beaten as a whole (enemy strength ≥ 2.6× own, own ≤ 0.22 of the start) −120; flanks exposed (an enemy threatens the left, right or rear: `lf`, `rf`, `bf`) −3, two or more −6; routing friends −3 each; routing enemies +2.5 each; under fire −5; very tired −2, exhausted −6; a stronger enemy within 70 m −3 | DB points; window, ratios calibrated; attacked in the flank / rear measured ([flanks](#flanks-rear-and-charges-in-whole-battles)); a lord's fall measured in 75 recorded falls ([lords](#lords)) |
 | States | wavering below 16 points, rout at 0, shattered at the third rout or below −50 points during army destruction; no ordinary rout within 10 s of a rally | DB; shattering below −50 during army losses measured |
 | Rally | while the army is not collapsing and no standing enemy is within 90 m the router regains 2 points a second; rallies at MoralePercent 0.23 | measured: 0.23 and 90 m (365 rallies); 2 points calibrated (median rally 44 s) |
-| Fatigue | charge +34, melee +19, shooting +18, running +4, walking −1, standing −7, ×5 a second; states by the database thresholds; each state scales speed, melee attack and defence, armour, charge, AP damage and reload (`unit_fatigue_effects_tables`) | DB; ×5 fitted to 1315 recorded changes of state |
+| Fatigue | DB points/thresholds, ×5/s; ready −7/tick. The ×10, idle and contact-weighted trial is OFF (`fatigue.calibration.on=false`) | Isolated rates support ×10, but joint acceptance failed; below |
 | Lord abilities | the side the game's AI plays (`ai`, side 2 by default) fires its lord's active abilities by a rule; the network's side fires them by order (`Orders.ability`; a side the network plays should have `ai` false); passives are innate effects (below). Every number is the ability's passport (`config/nn/abilities.json`, the database; `sim.json` abilities says which are modelled and the AI's triggers); effects on the owner (phase targets self), his side's units within range (friends) and enemies within range (enemies): speed, charge speed, melee attack and defence, damage, AP, charge bonus, morale. Warlord: Deadly Onslaught (31 s, ready 90 s after: melee damage and AP ×1.25, charge bonus ×1.6) in melee; Verminous Valour (17 s / 60 s: speed ×1.25, +8 morale points; its 25 m blast has no damage) with an enemy within 60 m; Rally (14 s / 60 s: +16 to friends within 35 m) when a friend there wavers. General: Stand Your Ground (18 s / 90 s: melee defence +24, +16 within 35 m) in melee; Foe Seeker (25 s / 60 s: speed ×1.25) with an enemy within 60 m | DB (`config/nn/sim.json` abilities; owned per the game's roster readout); when the AI fires them is an assumption |
 | Innate effects | every attribute and passive or game-fired ability of a unit (`config/nn/effects.json`), one mechanism: on while its conditions hold, its stats on the owner (an aura also on friends in range), its rules for the step. Unbreakable (Flagellants: morale never below leadership, never wavers or routs), Expendable (its rout scares nobody), Encourage (the lord's aura), Charge Reflection (bracing), Fire Whilst Moving; Strength in Numbers (Skaven infantry: +6 leadership, +8 melee defence, speed ×0.9 while health ≥ 50 %), Scurry Away! (speed ×1.1 while wavering or routing), Hold the Line! (+5 melee defence, +4 leadership within 35 m of a standing General), Frenzy (+10 melee attack, ×1.1 damage, AP and charge while morale ≥ half of leadership), Strength of the Penitent (fired by the game when losing the melee: 20 s of +14 melee defence, +15 % physical resistance, ends out of melee, ready 3 s after). Schema only (the network sees them): Charge Defence vs. Large, Vanguard Deployment, Hide (forest), Immune to Psychology; left out by `sim.json` effects.off: Single Entity (lords: speed ×0.9, damage ×0.8 below 25 % health; no such speed drop in the recordings) | DB: the passports, `special_ability_to_auto_deactivate_flags`, `special_ability_to_recharge_contexts`; the attributes' rules: the knowledge base; measured: rout and running speeds, the morale drop at 50 % health ([below](#innate-effects)) |
 | Map | a square ±1020 m; a routing unit that crosses the edge leaves the battle | measured |
@@ -140,6 +140,75 @@ men striking at once, and a lord ~38 ([measurements](measurements.md)). With a f
 same losses need 12–17 men on a 30 m front in every pair and ~8 around a lord: one number fits
 all. So attack − defence counts at 0.1 of the rule. The flank and rear, which the pairs do not
 test, are fitted to the whole battles (below).
+
+## Fatigue calibration
+
+Fatigue remains OFF (`fatigue.calibration.on=false`); threat geometry is ON (`threat.calibration.on=true`). Production fatigue retains the legacy 5 ticks/s and ready recovery −7/tick; DB thresholds and effects are unchanged. Isolated activities support 10 ticks/s, but do not identify formation aggregation.
+
+Both ON on the frozen cohort (`build/agent-fatigue3`): mechanics 49/54, game-AI winners 22/26, network 100/132 versus production 51/54, 23/26, 99/132. Exhausted shares are 14.11% of all own inputs and 14.96% of standing sol56 inputs versus game 17.34% and 16.66%. Actual network observation own `fatigue_5` is 20.70% versus game 32.02% (previously about 2%); the remaining shift is supported by the 18-battle bootstrap. Game-end trade for gates 230630/071805/204730/031306 is −0.056/−0.084/−0.269/−0.105: two improvements and two regressions against the game; substantial optimistic bias remains.
+
+Both ON closed-loop melee flag shares (left/right/rear): own 0.205/0.189/0.054, enemy 0.213/0.200/0.050; game 0.181/0.259/0.072 and 0.154/0.190/0.044. Same three checkpoints and 18 starts, one copy each; denominator is time-weighted standing non-lords on each trajectory. This differs from fatigue's fixed-game-time denominator.
+
+Both new mechanics failures are `pair_warlord_v_spear`. The lord's sustained HP loss is 7.13/s versus game 5.50 (production 5.99). The lord exhausts at 159 s, but the spearmen remain merely active: the nine-man damage cap is not a valid fatigue-participation count. In all three recordings the spearmen exhaust at 226–230 s. Without their fatigue penalty, morale stays exactly 16 until army losses below 22% HP send them directly into routing, skipping wavering (game: 277 s after contact; production: 236 s). This contradicts a direct measurement, beyond losing a compensating pass.
+
+The only new game-AI winner failure is Empire mirror attack `20260930-131314`: all eight copies choose side 1 instead of game side 2; seven are cut at recording end. The enemy lord exhausts at 214–222 s versus game 533 s; own `spear_1` and `archer_2` never rout in any copy. Production's correct winner also concealed errors: its first-copy enemy archers routed at 171/197 s although neither routed in the game. Fatigue participation and battle trajectories need correction; damage should not be retuned merely to preserve an aggregate fatigue match.
+
+Trial: the melee model’s fighting share `F.sum / men` receives +19/tick; the remainder receives walking −1. Repositioning inside the formation is an assumption, not a measured entity activity. Ready −7 was also tested. Charging keeps priority +34. The switch also enables idle −18 without pending work and freezes dead/departed slots. OFF preserves the complete legacy model.
+
+Exhausted shares, %. First column: all original own inputs in 204 recordings. Second: game-standing units in `sol56` (18 battles, gates 230630/031306/071054). The latter denominator gives 16.7%; game-standing units across all 204 give 11.5%.
+
+| Model | All inputs | Standing sol56 |
+|---|---:|---:|
+| game | 17.34 | 16.66 |
+| final | 6.21 | 5.26 |
+| incoming10 | 42.35 | 29.44 |
+| contact_ready | 10.54 | 13.04 |
+| contact_walk | 14.74 | 16.72 |
+| clock6 | 13.45 | 9.25 |
+| clock7 | 21.66 | 14.94 |
+
+State shares over time, %. Cells are **game / incoming ×10 / contact+walk / final ×5**. Both recorded order streams, one copy, no jitter, game-end cutoff; identical game masks and seconds, terminal simulation frames held.
+
+| Time | Fresh | Active | Winded | Tired | Very tired | Exhausted |
+|---|---:|---:|---:|---:|---:|---:|
+| <120 s | 76.8 / 58.9 / 59.7 / 73.9 | 19.2 / 18.1 / 22.3 / 21.1 | 3.9 / 16.9 / 17.3 / 5.0 | 0.1 / 6.1 / 0.7 / 0.0 | 0.0 / 0.1 / 0.0 / 0.0 | 0.0 / 0.0 / 0.0 / 0.0 |
+| 120–240 s | 28.1 / 4.7 / 6.4 / 6.8 | 19.5 / 3.2 / 9.1 / 16.3 | 23.0 / 14.0 / 53.9 / 52.6 | 17.7 / 21.9 / 17.9 / 22.3 | 10.3 / 38.4 / 10.1 / 1.9 | 1.4 / 17.8 / 2.7 / 0.0 |
+| ≥240 s | 17.0 / 4.2 / 5.7 / 3.3 | 8.8 / 1.2 / 3.4 / 2.6 | 10.4 / 3.7 / 15.2 / 14.3 | 13.5 / 5.0 / 20.0 / 29.0 | 20.0 / 17.5 / 30.5 / 39.6 | 30.3 / 68.4 / 25.1 / 11.0 |
+| all | 32.5 / 16.3 / 17.7 / 19.6 | 13.4 / 5.3 / 8.8 / 9.7 | 11.7 / 8.8 / 24.1 / 20.6 | 11.5 / 8.9 / 15.3 / 21.2 | 13.5 / 18.2 / 19.4 / 22.7 | 17.3 / 42.4 / 14.7 / 6.2 |
+
+Frozen check, higher is better. Incoming whole-unit ×10: 49/54, 22/26, 101/132; original ×5: 51/54, 23/26, 99/132. Contact_walk alone received mechanics/game-AI checks; the selected threat geometry additionally received the 132-battle network check. Both ON is reported above.
+
+| Model | Mechanics | Game-AI | Network |
+|---|---:|---:|---:|
+| contact_walk | 49/54 | 22/26 | — |
+| threat (ON) | 51/54 | 20/26 | 100/132 |
+| production OFF | 51/54 | 23/26 | 99/132 |
+
+Trade at game end: positive is better for our side; four copies, seed 1, both recorded order streams.
+
+| Gate | Game | Incoming ×10 | Contact+walk | Threat ON | Final OFF |
+|---|---:|---:|---:|---:|---:|
+| 20261004-230630 | -0.306 | -0.075 | -0.081 | -0.067 | -0.069 |
+| 20261004-071805 | -0.260 | -0.092 | -0.090 | -0.083 | -0.091 |
+| 20261003-204730 | -0.407 | -0.289 | -0.276 | -0.271 | -0.255 |
+| 20261005-031306 | -0.329 | -0.097 | -0.120 | -0.093 | -0.100 |
+
+## Threat-flag calibration
+
+`lf/rf/bf` are native `is_left_flank_threatened/is_right_flank_threatened/is_rear_flank_threatened`, passed unchanged through the companion. The simulator keeps these three observation channels and uses the same flags for exposed-flank −3/−6 morale. Attacked-from-flank/rear −6/−14 events depend separately on the incoming first-contact sector, not these threat flags.
+
+48 range/sector/enemy-facing combinations were tested on 18 recorded battles and baseline replay trajectories. Candidate: 45 m, front boundary 60°, rear 150°, enemy facing the unit within 60°, geometry after movement/turning. No random observation thinning; the game adapter is unchanged.
+
+Closed-loop network flag shares: **left / right / rear**. Baseline 108 replays (6 per start), trial 18 (1 per start), the same three checkpoints and 18 starts, CPU.
+
+| Side / melee | Game | Before | Trial ON |
+|---|---|---|---|
+| 1/1 | 0.181 / 0.259 / 0.072 | 0.370 / 0.347 / 0.319 | 0.250 / 0.196 / 0.049 |
+| 2/1 | 0.154 / 0.190 / 0.044 | 0.327 / 0.340 / 0.306 | 0.195 / 0.187 / 0.047 |
+| 1/0 | 0.036 / 0.035 / 0.034 | 0.024 / 0.019 / 0.061 | 0.010 / 0.008 / 0.025 |
+| 2/0 | 0.031 / 0.037 / 0.018 | 0.026 / 0.022 / 0.093 | 0.016 / 0.015 / 0.038 |
+
+Threat geometry alone is enabled because it removes the main rear-input error (0.319/0.306 → 0.049/0.047 versus game 0.072/0.044). This is a decision based on direct measurement, not a claim of complete calibration: mechanics remains 51/54 and game-AI winners fall 23 → 20/26. Noise-level acceptance is unmet: on baseline trajectories, own-right melee is 0.177 versus game 95% interval 0.226–0.291; out-of-melee own left/right are 0.011/0.008 versus 0.029–0.041 / 0.025–0.049. Intervals use battle bootstrap. Artifacts: `build/agent-fatigue2`; combined checks and failure diagnostics: `build/agent-fatigue3`. Unobserved entity activities and replay inference for missing targets remain limitations; replay protocol was unchanged.
 
 ## Army destruction
 
@@ -364,7 +433,8 @@ mirror (69 %). Waiting (a reserve, a walk) loses: the side that waits fights out
 ## Checks against the game
 
 The synchronisation comparison below predates the strategic army-strength model.
-Current terminal-collapse checks are in [Army destruction](#army-destruction).
+Terminal-collapse checks before the fatigue change are in [Army destruction](#army-destruction);
+the current check is in [Fatigue calibration](#fatigue-calibration).
 
 `python -m tools.nn.sim.check`: every recorded run is replayed in the simulator from the recorded
 start with the recorded orders (`tools/nn/sim/replay.py`: a target fought or shot →
@@ -570,8 +640,8 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
   against 0.011 a second for those told to stay); what triggers it is not known.
 - **Simulated battles end later**: 54–72 % are not over when their recording ends.
 - **Replay is open-loop**: the recorded orders do not react to a battle that went differently.
-- **Fatigue** matches the recorded state exactly in 43 % of the samples (off by 0.86 of a state on
-  average); its effects come from the database (`unit_fatigue_effects_tables`).
+- **Fatigue:** isolated activities support ×10 ticks/s, but one scalar per formation does not
+  reproduce its heterogeneous tiring. Distribution checks are reported above.
 - **Not modelled**: terrain, a turn while walking (a moving unit faces where it goes at once),
   cavalry, monsters, magic, flying, artillery, experience ranks, the scaled "strong enemy near"
   (only −3: its combat power is not in the data), the database's rally timer (meaning unclear).
@@ -581,6 +651,9 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
 
 | What | Result | Why not |
 |---|---|---|
+| Contact share ×10, remainder ready / walking | Exhausted 10.54/14.74% vs 17.34%; standing sol56 13.04/16.72% vs 16.66%; walking: mechanics 49/54, game-AI 22/26 | `fatigue.calibration.on=false`; entity activity is unmeasured |
+| Global ×6 / ×7 with idle recovery | All inputs 13.45/21.66%; standing sol56 9.25/14.94% | neither jointly matches both shares; isolated activities need ×10 |
+| Treat ×10 as a complete formation-fatigue calibration | All own inputs: 42.4% exhausted versus game 17.3%; late sol56 55.3% versus 54.8% | the pooled gate match fails the full-population check |
 | Delaying defeat to shatter more routers | all 172 measured defeated sides end at the first frame with no standing units: delay 0 s | additional post-battle morale ticks are unsupported |
 | Shattering below −50 outside army losses | three-gate trade −0.09397/−0.08826/−0.24554 versus −0.09411/−0.08814/−0.24649 when limited to army losses | changes ordinary routing beyond terminal collapse and worsens the third gate |
 | Full strategic value for routers | balance-bar error 0.0121 versus 0.00041 at weight 0.5; gate trade −0.090/−0.081/−0.244 versus baseline −0.090/−0.080/−0.252 | the apparent 59/65 onset match often followed shattering rather than predicting it |

@@ -26,10 +26,8 @@ Stats are `scalar_speed`, `stat_melee_attack`, `stat_melee_defence`, `stat_armou
 same numbers ([thread][mod]). The fandom table (e.g. Exhausted −35 % reload, −10 % damage) and a
 WH1 guide differ — older or cumulative; trust the database. A 6.1.2 bug hid the Exhausted reload
 penalty on the card. · CA bug tracker · high. 6.0 shows vigour and terrain effects on the card.
-- Ours: **not modelled** — [simulator.md](../../training/simulator.md) says "what fatigue does to
-  attack, defence and speed is not in the database"; it is. **Gap / conflict with our docs.** With
-  units reaching Tired–Very tired in long melees, melee attack ×0.85–0.75 and speed ×0.9–0.85 are
-  material.
+- Ours: multipliers **are modelled** in `fatigue.effects()`; morale is separate in
+  `morale.py`. See the [simulator](../../training/simulator.md).
 - **Morale:** Very tired −2, Exhausted −6 (Tired 0). · DB · high. Ours: same.
 
 ## What tires and what rests
@@ -52,12 +50,26 @@ max 30000. · [twwstats][tws], [fandom Fatigue][fw-fat], [CA elevation blog][ele
 - **Tick length.** One player says the tick is 0.1 s (10 a second): then continuous melee
   (190/s) reaches Tired in ~66 s and Exhausted in ~142 s, and idle (−180/s) recovers from Exhausted
   in ~150 s. · [Steam][tick] · medium-low.
-  - Ours: regressing the recorded fatigue states gave **×5 a second** (melee 5.0, shooting 4.8,
-    running 6.2; 1315 transitions), so `fatigue.per_second` 5. **Conflict** with "10 ticks a second"
-    (×2). Our number is measured; the claim is a single forum post. Our resting test (Tired
-    and Very tired back to Fresh within 240 s, [states](../units/states.md)) does not separate them:
-    idle at ×5 takes 140–200 s, at ×10 70–100 s. A test timing the transitions of a resting unit
-    would settle it.
+  - Ours: production retains **5 ticks/s** and ready recovery. The measured **10 ticks/s**
+    clock, idle recovery and contact-weighted trial are behind `fatigue.calibration.on=false`.
+    DB points remain unchanged. In 204 fair recordings (`build/agent-fatigue`):
+    unopposed running to the first transition gives 39.44 points/s (512 intervals), single-entity
+    melee 186.21 (219), shooting arenas 173.08 (17), single-entity rest −180 (14). These are
+    medians: duration between consecutive same-direction transitions, width from the DB
+    thresholds. Running starts fresh; standing before running is excluded. Native
+    `fatigue_state()` and CCO states 0–5 agree in the old probe; all 3814 initial arena reads
+    are Fresh. Exact starting points within that band are unrecorded: zero remains an assumption.
+  - Ours, with the trial enabled: idle −18 per tick without unfinished movement, attack or aiming; completed movement
+    counts as rest. Ready is −7; walking recovers −1 rather than tiring. Combat and movement
+    override idle. This is an order-context approximation: arenas record neither `is_idle`
+    nor combat stance. The old probe sometimes retains `is_idle=false` after `halt` while
+    recovering at −180/s, so that flag alone does not identify the fatigue activity.
+    Charging, walking and ready are not separately fitted: insufficient isolated complete
+    intervals. Arena positions lack height; uphill is not modelled.
+  - **Limitation:** the global ×5 regression mixed formation activities. The melee flag does
+    not mean all soldiers tire at +19: the planner's spearmen stay fresh in all three pairs
+    against slaves while continuing to kill. ×10 identifies the clock, not this aggregation;
+    replay results and unmet acceptance criteria are in the [simulator](../../training/simulator.md).
 - **Perfect Vigour** units never tire (a WH3 bug leaves units that start tired stuck at that
   level). **Strider** ignores terrain/slope penalties. Campaign stances (march, raiding) lower the
   battle's starting and maximum vigour. · fandom, Steam · medium.

@@ -15,6 +15,31 @@ from tools.nn.sim import orders as O
 from tools.nn.sim.params import load
 
 
+def threat_flags(u, pw, params, *, alive=None, standing=None):
+    """Native lf/rf/bf proxies, shared by observation and exposed-flank morale.
+
+    The optional geometry trial requires the threatening enemy to face the unit.
+    It does not redefine the companion's native flags or the direction of a hit.
+    """
+    cal = params.sim["threat"]
+    trial = cal.get("calibration", {})
+    enabled = trial.get("on", False)
+    radius = trial["range_m"] if enabled else cal["range_m"]
+    front = trial["front_deg"] if enabled else 60
+    rear = trial["rear_deg"] if enabled else 120
+    if alive is None:
+        alive = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
+    if standing is None:
+        standing = alive & ~u["r"]
+    threat = pw["enemy"] & standing[:, None, :] & (pw["dist"] <= radius)
+    if enabled:
+        threat = threat & (pw["rel_j"].abs() <= trial["facing_deg"] * geometry.DEG)
+    rel = pw["rel_i"] / geometry.DEG
+    return {"lf": alive & (threat & (rel < -front) & (rel > -rear)).any(2),
+            "rf": alive & (threat & (rel > front) & (rel < rear)).any(2),
+            "bf": alive & (threat & (rel.abs() >= rear)).any(2)}
+
+
 def step(st, orders, params=None, dt=None):
     """Advance every unfinished battle of st by one step (in place). orders: tools/nn/sim/orders.Orders."""
     params = params or load()
@@ -102,7 +127,7 @@ def step(st, orders, params=None, dt=None):
     tired = fatigue.effects(u, params)
 
     # --- melee ---
-    rate, mhit, sector, _ = melee.strikes(u, pw, strike, params, charge_now, u["contact_s"])
+    rate, mhit, sector, fighting = melee.strikes(u, pw, strike, params, charge_now, u["contact_s"])
     hp_melee = rate * dt
 
     # --- shooting ---
@@ -248,8 +273,16 @@ def step(st, orders, params=None, dt=None):
     standing = alive & ~u["r"]
 
     # --- fatigue ---
+    # An ended move is rest too: KEEP preserves the order, not an eternal ready stance.
+    # Explicit attacks and aiming/turning shooters remain ready between active bouts.
+    # The recordings do not expose a combat-stance flag; pending work is our proxy.
+    # movement.velocity brakes to rest within 0.5 m of the destination.
+    pending_move = point & (((u["ox"] - u["x"]) ** 2 + (u["oz"] - u["z"]) ** 2) > 0.5 ** 2)
+    idle = standing & ~pending_move & (kind != O.ATTACK) & (aim_at < 0)
     activity = {"melee": engaged, "charging": engaged & (charge_now > 0), "shooting": firing,
-                "running": speed > u["walk"] + 0.3, "walking": speed > 0.3}
+                "running": speed > u["walk"] + 0.3, "walking": speed > 0.3,
+                "idle": idle, "active": alive,
+                "contact_share": (fighting.sum(2) / old["men"].clamp(min=1)).clamp(0, 1)}
     fatigue.step(u, activity, params, dt)
 
     # --- movement ---
@@ -337,12 +370,12 @@ def step(st, orders, params=None, dt=None):
     hold = standing & (kind == O.HOLD)
     u["ox"] = torch.where(hold, u["x"], torch.where(attack & standing, tx, u["ox"]))
     u["oz"] = torch.where(hold, u["z"], torch.where(attack & standing, tz, u["oz"]))
-    tr = cal["threat"]["range_m"]
-    threat = foes & standing[:, None, :] & (d <= tr)
-    rel = pw["rel_i"] / geometry.DEG
-    u["lf"] = alive & (threat & (rel < -60) & (rel > -120)).any(2)
-    u["rf"] = alive & (threat & (rel > 60) & (rel < 120)).any(2)
-    u["bf"] = alive & (threat & (rel.abs() >= 120)).any(2)
+    threat_cal = cal["threat"].get("calibration", {})
+    # A calibrated flag uses the position and bearing visible in this observation.
+    # OFF preserves the legacy pre-move geometry for exact baseline comparison.
+    threat_pw = geometry.pairwise(u, spacing) if threat_cal.get("on") else pw
+    masks = {} if threat_cal.get("on") else {"alive": alive, "standing": standing}
+    u.update(threat_flags(u, threat_pw, params, **masks))
     dead = present & ((u["men"] <= 0) | u["gone"])
     for k in ("m", "mv", "f", "fire", "w", "lf", "rf", "bf"):
         u[k] = u[k] & ~dead

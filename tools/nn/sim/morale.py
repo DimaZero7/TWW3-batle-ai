@@ -118,7 +118,9 @@ def target_points(u, ctx, params):
         flank = torch.where(u["flank_hit"] >= 2, cal.get("attacked_rear", R["was_attacked_in_rear"]),
                             torch.where(u["flank_hit"] >= 1, cal.get("attacked_flank", R["was_attacked_in_flank"]), 0.0))
         pts = pts + flank
-    # Flanks exposed: an enemy threatens one (-3) or several (-6) of the left, right and rear (lf, rf, bf).
+    # Flanks exposed: the same lf/rf/bf observed by the network, one (-3) or several (-6).
+    # These proximity threats are separate from flank_hit / flank_event above: an
+    # actual incoming blow keeps its contact sector even if threat geometry is calibrated.
     exposed = u["lf"].float() + u["rf"].float() + u["bf"].float()
     pts = pts + torch.where(exposed >= 2, R["ume_concerned_flanks_exposed_multiple"],
                             torch.where(exposed >= 1, R["ume_concerned_flanks_exposed_single"], 0.0))

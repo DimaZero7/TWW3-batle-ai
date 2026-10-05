@@ -99,6 +99,41 @@ class TestFunctions:
         st.u.update(old)
         assert all(torch.equal(st.u[k], v) for k, v in before.items())
 
+    @pytest.mark.parametrize("name,points", [("idle", -18), ("ready", -7), ("walking", -1),
+                                              ("running", 4), ("shooting", 18), ("melee", 19),
+                                              ("charging", 34)])
+    def test_fatigue_tiring_and_recovery_use_database_ticks(self, name, points):
+        u = {"fatigue": torch.tensor([15000.0]), "fat": torch.zeros(1)}
+        activity = {k: torch.tensor([k == name]) for k in
+                    ("idle", "walking", "running", "shooting", "melee", "charging")}
+        fatigue.step(u, activity, calibrated_fatigue(), 2.0)
+        assert float(u["fatigue"][0]) == pytest.approx(15000 + points * 20)
+
+    def test_fatigue_priority_clamping_immunity_and_inactive_slots(self):
+        u = {"fatigue": torch.tensor([29900., 100., 15000., 15000.]), "fat": torch.zeros(4),
+             "fatigue_immune": torch.tensor([False, False, True, False])}
+        activity = {k: torch.tensor([True, False, True, True]) for k in
+                    ("walking", "running", "shooting", "melee", "charging")}
+        activity["idle"] = torch.ones(4, dtype=torch.bool)
+        activity["active"] = torch.tensor([True, True, True, False])
+        fatigue.step(u, activity, calibrated_fatigue(), 1.)
+        assert u["fatigue"].tolist() == [30000., 0., 15000., 15000.]
+        activity["charging"].zero_()
+        activity["melee"].zero_()
+        activity["shooting"].zero_()
+        activity["running"].zero_()
+        activity["walking"].zero_()
+        fatigue.step(u, activity, calibrated_fatigue(), 1.)
+        assert u["fatigue"].tolist() == [29820., 0., 14820., 15000.]
+
+    def test_idle_recovery_crosses_all_state_boundaries(self):
+        u = {"fatigue": torch.tensor([27000., 18000., 12600., 6600., 2800.]), "fat": torch.zeros(5)}
+        activity = {k: torch.zeros(5, dtype=torch.bool) for k in
+                    ("walking", "running", "shooting", "melee", "charging")}
+        activity["idle"] = torch.ones(5, dtype=torch.bool)
+        fatigue.step(u, activity, calibrated_fatigue(), 1.)
+        assert u["fat"].tolist() == [4., 3., 2., 1., 0.]
+
     def test_state_and_orders_shapes_and_perspective(self):
         st = S.empty(2, 6)
         assert all(v.shape == (2, 6) for v in st.u.values())
@@ -590,6 +625,28 @@ class TestReplay:
 
 
 class TestBattle:
+    @pytest.mark.parametrize("order,expected", [("hold", True), ("keep", True), ("arrived", True),
+                                               ("move", False), ("attack", False), ("aim", False)])
+    def test_idle_recovery_tracks_pending_work(self, monkeypatch, order, expected):
+        st = face_off(ARCHER if order == "aim" else SPEAR, SLAVE, gap=80 if order == "aim" else 500)
+        seen = {}
+        def record(u, activity, params, dt):
+            seen.update({k: v.clone() for k, v in activity.items()})
+        monkeypatch.setattr(fatigue, "step", record)
+        cmd = O.hold(st.B, st.N)
+        if order == "keep":
+            cmd.kind.fill_(O.KEEP)
+        elif order in ("arrived", "move"):
+            cmd.kind[0, 0] = O.MOVE
+            cmd.x[0, 0] = st.u["x"][0, 0] + (30 if order == "move" else 0.4)
+            cmd.z[0, 0] = st.u["z"][0, 0]
+        elif order == "attack":
+            cmd.kind[0, 0] = O.ATTACK
+            cmd.target[0, 0] = 1
+        battle.step(st, cmd, P)
+        assert bool(seen["idle"][0, 0]) is expected
+        assert bool(seen["active"][0, 0])
+
     def test_spearmen_beat_slaves_and_the_battle_ends(self):
         st = scenario.build([scenario.from_arena("pair_spear_v_slave", "attack")], P)
         battle.run(st, replay.nearest_attack, P)
@@ -1189,3 +1246,86 @@ class TestInnateEffects:
 
 def bit_of(params, key):
     return 1 << effects.index(params)[key]
+
+
+def calibrated_fatigue():
+    import copy
+    p = copy.deepcopy(P)
+    p.sim["fatigue"]["calibration"]["on"] = True
+    return p
+
+
+def test_contact_fatigue_uses_fighting_population_and_ready_remainder():
+    p = calibrated_fatigue()
+    p.sim["fatigue"]["calibration"]["noncontact"] = "ready"
+    u = {"fatigue": torch.full((3,), 15000.), "fat": torch.zeros(3)}
+    activity = {k: torch.zeros(3, dtype=torch.bool) for k in
+                ("walking", "running", "shooting", "charging")}
+    activity.update(melee=torch.ones(3, dtype=torch.bool), contact_share=torch.tensor([0., .5, 1.]))
+    fatigue.step(u, activity, p, 1.)
+    assert u["fatigue"].tolist() == [14930., 15060., 15190.]
+    activity["charging"].fill_(True)
+    fatigue.step(u, activity, p, 1.)
+    assert u["fatigue"].tolist() == [15270., 15400., 15530.]
+
+
+def test_disabled_fatigue_trial_preserves_legacy_ready_clock():
+    import copy
+    p = copy.deepcopy(P)
+    p.sim["fatigue"]["calibration"]["on"] = False
+    u = {"fatigue": torch.full((2,), 15000.), "fat": torch.zeros(2)}
+    activity = {k: torch.zeros(2, dtype=torch.bool) for k in
+                ("walking", "running", "shooting", "charging", "melee")}
+    activity.update(idle=torch.ones(2, dtype=torch.bool), active=torch.zeros(2, dtype=torch.bool))
+    fatigue.step(u, activity, p, 1.)
+    assert u["fatigue"].tolist() == [14965., 14965.]
+
+
+@pytest.mark.parametrize("angle,flag", [(-90, "lf"), (90, "rf"), (180, "bf")])
+def test_threat_geometry_requires_range_facing_and_a_standing_enemy(angle, flag):
+    import copy
+    p = copy.deepcopy(P)
+    p.sim["threat"]["calibration"]["on"] = True
+    x, z = 40 * math.sin(math.radians(angle)), 40 * math.cos(math.radians(angle))
+    st = scenario.build([army([(SPEAR, 0, 0, 0)], [(SLAVE, x, z, angle + 180)])], p)
+    h = st.N // 2
+    def flags():
+        pw = geometry.pairwise(st.u, p.sim["formation"]["spacing_m"])
+        return battle.threat_flags(st.u, pw, p)
+    assert bool(flags()[flag][0, 0])
+    assert sum(bool(v[0, 0]) for v in flags().values()) == 1
+    st.u["b"][0, h] = angle
+    assert not any(bool(v[0, 0]) for v in flags().values())
+    st.u["b"][0, h] = angle + 180
+    st.u["r"][0, h] = True
+    assert not any(bool(v[0, 0]) for v in flags().values())
+    st.u["r"][0, h] = False
+    st.u["x"][0, h] *= 2
+    st.u["z"][0, h] *= 2
+    assert not any(bool(v[0, 0]) for v in flags().values())
+
+
+def test_disabled_threat_trial_keeps_legacy_rear_sector():
+    import copy
+    p = copy.deepcopy(P)
+    p.sim["threat"]["calibration"]["on"] = False
+    st = scenario.build([army([(SPEAR, 0, 0, 0)], [(SLAVE, 30, -30, 135)])], p)
+    pw = geometry.pairwise(st.u, p.sim["formation"]["spacing_m"])
+    assert bool(battle.threat_flags(st.u, pw, p)["bf"][0, 0])
+
+
+def test_battle_passes_actual_fighting_share_to_fatigue(monkeypatch):
+    st = face_off(SPEAR, SLAVE, gap=0)
+    expected = {}
+    original = melee.strikes
+    def strikes(u, pw, contact, params, charge, seconds):
+        result = original(u, pw, contact, params, charge, seconds)
+        expected["share"] = (result[3].sum(2) / u["men"].clamp(min=1)).clamp(0, 1)
+        return result
+    def fatigue_step(u, activity, params, dt):
+        assert torch.equal(activity["contact_share"], expected["share"])
+        expected["called"] = True
+    monkeypatch.setattr(melee, "strikes", strikes)
+    monkeypatch.setattr(fatigue, "step", fatigue_step)
+    battle.step(st, replay.nearest_attack(st), calibrated_fatigue())
+    assert expected["called"] and bool((expected["share"] > 0).any())

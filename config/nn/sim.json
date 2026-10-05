@@ -100,6 +100,7 @@
   },
   "fatigue": {
     "per_second": 5,
+    "calibration": {"on": false, "per_second": 10, "contact_weighted": true, "noncontact": "walking"},
     "effects": {
       "threshold_active": {"stat_melee_attack": 0.95},
       "threshold_winded": {"scalar_speed": 0.95, "stat_melee_attack": 0.95, "stat_melee_damage_ap": 0.9},
@@ -107,11 +108,12 @@
       "threshold_very_tired": {"scalar_speed": 0.85, "stat_melee_attack": 0.75, "stat_armour": 0.9, "stat_charge_bonus": 0.75, "stat_melee_damage_ap": 0.9},
       "threshold_exhausted": {"scalar_speed": 0.85, "stat_melee_attack": 0.7, "stat_melee_defence": 0.9, "stat_armour": 0.75, "stat_charge_bonus": 0.7, "stat_melee_damage_ap": 0.9, "stat_reloading": 0.9}
     },
-    "why": "effects: the database's unit_fatigue_effects_tables (21 rows, read from db.pack 02.10.2026 by build/simacc/fat_db.py; level, stat, multiplier; missing x1): fatigue.py effects() scales speed, melee attack and defence, armour, charge bonus, AP damage and reload (time / stat_reloading). per_second: the database gives points per activity but not the time (a forum claim: a 0.1 s tick, 10x a second, not taken); regressing the recorded fatigue states (18 mirror battles, 1315 transitions) gives 5.0x a second for melee, 4.8x for shooting, 6.2x for running"
+    "why": "Production retains 5 ticks/s and ready recovery; fatigue.calibration.on is OFF. DB thresholds and unit_fatigue_effects_tables multipliers are unchanged. Isolated activities in 204 recordings support 10 ticks/s, but damage-bearing population F.sum / pre-damage men is not fatigue participation. Trial: 10 ticks/s, contact-weighted combat +19 and walking -1 for the remainder, idle -18 without pending work, inactive slots frozen; charging keeps priority. Both ON: mechanics 49/54, game-AI 22/26, network 100/132 versus production 51/54, 23/26, 99/132. Exhausted all own inputs / game-standing sol56: 14.11/14.96% versus game 17.34/16.66%; actual own network fatigue_5 20.70% versus game 32.02%. Direct contradiction in pair_warlord_v_spear: game spearmen exhaust at 226-230 s, trial stays active because the damage model caps nine attackers. Lord sustained loss 7.13 HP/s versus game 5.50 (production 5.99); spearmen stay at 16 morale and rout directly on army losses, missing game wavering. The mirror 20260930-131314 also flips. Reject this aggregation, not the independently measured 10 ticks/s. Reproduction and diagnostics: build/agent-fatigue3; earlier trials: build/agent-fatigue2."
   },
   "threat": {
     "range_m": 60,
-    "why": "lf / rf / bf: a non-routing enemy within this distance in the left, right or rear sector; not calibrated"
+    "calibration": {"on": true, "range_m": 45, "front_deg": 60, "rear_deg": 150, "facing_deg": 60},
+    "why": "Enabled geometry: a non-routing enemy within 45 m, front/rear boundaries 60/150 degrees, facing the unit within 60 degrees, evaluated after movement and turning. Native lf/rf/bf remain is_left_flank_threatened/is_right_flank_threatened/is_rear_flank_threatened, unchanged through companion. Adoption prioritizes direct input correction: threat-only closed-loop rear flags own/enemy 0.049/0.047 versus game 0.072/0.044 and legacy 0.319/0.306. Not fully calibrated: side/out-of-melee residuals exceed battle-bootstrap noise; mechanics 51/54, game-AI 20/26, network 100/132 versus legacy 51/54, 23/26, 99/132. Both ON gives 49/54, 22/26, 100/132 and exposes an invalid fatigue-participation assumption, so fatigue remains OFF. Shared observation and exposed-flank morale flags; actual attacked-from-flank/rear events still use incoming contact sectors. No thinning or game-side remapping. Evidence: build/agent-fatigue2 and build/agent-fatigue3."
   },
   "effects": {
     "off": ["wh3_main_unit_passive_single_entity"],
