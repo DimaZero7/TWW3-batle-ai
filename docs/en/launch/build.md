@@ -44,6 +44,7 @@ What every entry does: [entry points](../apps/entries.md).
 | `--own-ai net` | nn-arena, lord-duel | The network in the companion commands our side ([watching the network](watch.md)); the default of `lord-duel` |
 | `--own-ai scripted` | lord-duel | Our lord under one attack order, like theirs (the duel's control) |
 | `--duel emp\|skv` | lord-duel | Both lords Empire Generals or Skaven Warlords ([lord duel](../apps/entries.md#lord_duel)); battle limit 900 s by default |
+| `--duel-variant solo\|escort` | lord-duel | The lords alone, or each with 2 infantry units of his faction (the scripted lord on the lord, infantry on infantry) |
 | `--faction emp\|skv\|vmp`, `--treatment kill\|rout\|none` | lord-fall | Whose army (its fearless opponent: Skaven for the Empire, else the Empire) and what happens to its lord: killed, routed or nothing (the control) ([lord fall](../apps/entries.md#lord_fall)). A sample every 0.5 s |
 | `--own-role attack\|defend` | nn-arena `net` | The network attacks (the game's AI defends and wins when time is out) or defends (default: the game's AI attacks) |
 | `--army-seed N` | nn-arena | A battle from the [army generator](../training/armies.md): `generate.battle(N)`, a lord and 0-19 units a side. Without `--own-ai` the network commands our side. The battle file is `build/nn-arena/random_<N>.xml`; `scenarios/` is not touched. The manifest gets `army` (seed, train/eval, budget, templates, men) |

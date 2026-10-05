@@ -16,6 +16,7 @@ Usage:
     python -m tools.build human --army-seed 1000900014 --army-swap   # a human plays our side (x1, recorded)
     python -m tools.build lord-fall --faction skv --treatment kill   # the lord killed / routed (tools/nn/lord_fall.py)
     python -m tools.build lord-duel --duel emp   # our network's lord v a lord under one attack order (tools/nn/lord_duel.py)
+    python -m tools.build lord-duel --duel skv --duel-variant escort   # the same, each lord with 2 infantry units
 
 Output: build/<target>/ with the .pack, the bundled script and manifest.json.
 Install and launch with tools/launcher/launch.ps1.
@@ -352,6 +353,8 @@ def main(argv=None):
                         help="lord-fall: the treated lord killed, routed, or left alone (the control)")
     parser.add_argument("--duel", choices=("emp", "skv"), default="emp",
                         help="lord-duel: both lords Empire Generals or Skaven Warlords")
+    parser.add_argument("--duel-variant", choices=("solo", "escort"), default="solo",
+                        help="lord-duel: the lords alone, or each with 2 infantry units of his faction (escort)")
     parser.add_argument("--features", action="store_true",
                         help="map-capture: also read objects and reachability after deployment")
     args = parser.parse_args(argv)
@@ -436,7 +439,7 @@ def main(argv=None):
         if args.target == "lord-duel":
             from tools.nn import lord_duel
             path, duel = lord_duel.build_config(args.duel, args.own_ai, args.own_role or "attack", args.decide_ms,
-                                                NET_POLL_MS, args.timeout)
+                                                NET_POLL_MS, args.timeout, args.duel_variant)
             run_config.update(duel)
             if not args.scenario:
                 args.scenario = str(path)

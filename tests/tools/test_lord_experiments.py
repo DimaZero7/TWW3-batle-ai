@@ -89,9 +89,29 @@ class TestBuilds:
     def test_the_duel_plan(self):
         p = lord_duel.plan(net=4, control=2)
         assert len(p) == 12
-        assert [b for b in p if b[0] == "emp" and b[1] == "net"] == [("emp", "net", r) for r in
+        assert [b for b in p if b[0] == "emp" and b[1] == "net"] == [("emp", "net", r, "solo") for r in
                                                                     ("attack", "defend", "attack", "defend")]
         assert sum(b[1] == "scripted" for b in p) == 4
+        assert {b[3] for b in lord_duel.plan(variant="escort")} == {"escort"}
+
+    @pytest.mark.parametrize("kind", sorted(lord_duel.LORDS))
+    def test_the_escort_arena_is_mirrored_with_two_infantry_units_beside_the_lord(self, kind):
+        a = lord_duel.arena(kind, "escort")
+        own, enemy = a["sides"]["own"]["units"], a["sides"]["enemy"]["units"]
+        assert own == enemy and [u["slot"] for u in own] == ["lord", "inf_1", "inf_2"]
+        assert {u["key"] for u in own[1:]} == {lord_duel.ESCORT[kind][0]}
+        p = places(a)
+        assert p["own_inf_1"]["z"] == p["enemy_inf_2"]["z"] and p["own_inf_2"]["z"] == p["enemy_inf_1"]["z"]   # face to face
+        assert dist(p["own_lord"], p["enemy_lord"]) == lord_duel.GAP_M
+
+    def test_escort_build_tells_the_script_lord_on_lord(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(project, "BUILD", tmp_path)
+        monkeypatch.setattr(lord_duel, "ROOT", tmp_path / "lord-duel")
+        assert build.main(["lord-duel", "--duel", "emp", "--duel-variant", "escort"]) == 0
+        cfg = json.loads((tmp_path / "lord-duel" / "manifest.json").read_text(encoding="utf-8"))["config"]
+        assert (cfg["variant"], cfg["scripted_targets"]) == ("escort", "like")
+        assert [u["script_name"] for u in cfg["units"]["own"]] == ["own_lord", "own_inf_1", "own_inf_2"]
+        assert (tmp_path / "lord-duel" / "lord_duel_emp_escort_attack.xml").exists()
 
 
 def write_run(folder, config, rows):
@@ -171,3 +191,32 @@ class TestLordDuelTable:
         assert m["abilities"] == {"stand": 1} and m["reissues"] == 1
         (row,) = lord_duel.summary([m])
         assert (row["own_wins"], row["enemy_wins"], row["trade"]) == (1, 0, 0.25)
+        assert m["variant"] == "solo" and m["side_trade"] is None
+
+    def test_escort_targeting_and_side_trade(self, tmp_path):
+        # 60 s: our lord's engine target enemy_lord, enemy_inf_1, (none), enemy_inf_1, enemy_lord; in melee
+        # from 10 s; the enemy lord stays on ours. The network's attack targets: lord, inf_1, lord (2 switches).
+        cfg = {"duel": "skv", "variant": "escort", "own_ai": "net", "own_role": "defend"}
+        rows = []
+        for k in range(0, 61):
+            tg = ("enemy_lord" if k < 20 else "enemy_inf_1" if k < 30 else "" if k < 35
+                  else "enemy_inf_1" if k < 40 else "enemy_lord")
+            units = [{"n": "own_lord", "hp": 1.0 - 0.002 * k, "t": tg, "m": k >= 10, "x": 0.0, "z": 0.0},
+                     {"n": "own_inf_1", "hp": 1.0 - 0.004 * k, "x": 0.0, "z": 0.0},
+                     {"n": "enemy_lord", "hp": 1.0 - 0.004 * k, "t": "own_lord", "m": k >= 10, "x": 0.0, "z": 0.0},
+                     {"n": "enemy_inf_1", "hp": 1.0 - 0.006 * k, "x": 0.0, "z": 0.0}]
+            rows.append({"event": "nn_sample", "t": 1000 * k, "units": units})
+        rows.append({"event": "nn_orders", "orders": [
+            {"u": "own_lord", "k": "attack", "tg": "enemy_lord", "status": "given"},
+            {"u": "own_inf_1", "k": "attack", "tg": "enemy_inf_1", "status": "given"}]})
+        rows.append({"event": "nn_orders", "orders": [{"u": "own_lord", "k": "attack", "tg": "enemy_inf_1", "status": "given"}]})
+        rows.append({"event": "nn_orders", "orders": [{"u": "own_lord", "k": "attack", "tg": "enemy_lord", "status": "given"}]})
+        rows.append({"event": "result", "status": "completed", "winner": 1})
+        m = lord_duel.measure(lord_duel.load_run(write_run(tmp_path / "r", cfg, rows)))
+        assert m["own_target_switches_per_min"] == 2 and m["enemy_target_switches_per_min"] == 0
+        assert m["order_switches_per_min"] == 2 and m["orders_given"] == 3
+        assert m["own_melee_s"] == 51 and m["own_on_lord"] == pytest.approx(31 / 51, abs=1e-3)
+        assert m["enemy_on_lord"] == 1.0
+        assert m["side_trade"] == pytest.approx((0.24 + 0.36) / 2 - (0.12 + 0.24) / 2)
+        (row,) = lord_duel.summary([m])
+        assert (row["variant"], row["own_on_lord"], row["order_switches"]) == ("escort", 0.608, 2.0)

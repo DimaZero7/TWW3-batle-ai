@@ -633,6 +633,24 @@ class TestNnArena:
         assert next(r for r in rows if r["event"] == "own_ai")["mode"] == "net"
         assert rows[-1]["event"] == "result" and rows[-1]["scripted_orders"] == 2
 
+    def test_lord_duel_escort_the_script_sends_lord_on_lord_and_infantry_on_infantry(self, lua, tmp_path):
+        # scripted_targets 'like': the enemy lord is nearer our spearmen, yet attacks our lord.
+        lua.execute(self.SETUP + """
+            CONFIG.own_ai, CONFIG.enemy_ai, CONFIG.scripted_targets = 'scripted', 'scripted', 'like'
+            enemy[1].pos = fake.vector_type.new(); enemy[1].pos.x = -170
+            local state = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            assert(enemy[1].attack_args.target == 'own_lord', enemy[1].attack_args.target)
+            assert(enemy[2].attack_args.target == 'own_spear_1' and own[1].attack_args.target == 'enemy_lord')
+            assert(own[2].attack_args.target == 'enemy_spear_1')
+            enemy[2].men = 0                       -- no enemy infantry left: our spearmen take the lord
+            own[2].target = nil
+            for _ = 1, 5 do bm:tick() end
+            assert(own[2].attack_args.target == 'enemy_lord', own[2].attack_args.target)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+
     def test_lord_duel_control_both_sides_scripted(self, lua, tmp_path):
         lua.execute(self.SETUP + """
             CONFIG.own_ai, CONFIG.enemy_ai = 'scripted', 'scripted'

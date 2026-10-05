@@ -63,7 +63,7 @@ end
 -- config: build, speed, tick_ms, deadline_s, stall_ms, timeout_ms, own_ai ('attack' | 'defend' | 'hold' | 'net'),
 -- units = {own = [...], enemy = [...]} (script names, slots, keys), defend_radius_m;
 -- 'net' also: decide_ms, poll_ms, factions = {own, enemy}, enemy_role; 'human': soldiers_every (ticks);
--- enemy_ai: nil (the game's AI) or 'scripted'.
+-- enemy_ai: nil (the game's AI) or 'scripted'; scripted_targets: nil (nearest) or 'like' (lord on lord).
 function M.main(bm, config, globals)
     if _G.tww3_bai_nn_arena then return end
     local state = {active = false, finished = false, batch = '', run_id = 'bootstrap', ticks = 0,
@@ -276,15 +276,17 @@ function M.main(bm, config, globals)
             poll_ms = config.poll_ms, state_file = bridge.STATE_FILE, orders_file = bridge.ORDERS_FILE})
     end
 
-    -- A scripted side: each unit under script attacks the nearest standing enemy ('scripted_order').
-    local function nearest_enemy(side, it)
+    -- A scripted side: each unit under script attacks the nearest standing enemy ('scripted_order');
+    -- config.scripted_targets 'like': a lord the nearest enemy lord, any other unit the nearest enemy
+    -- that is not a lord (slot 'lord'), else the nearest enemy (the lord duel with escorts).
+    local function nearest_enemy(side, it, wanted)
         local p = try(function() return it.unit:position() end)
         local best, best_d
         for _, e in ipairs(state.sides[3 - side]) do
             local q = try(function() return e.unit:position() end)
             local up = (try(function() return e.unit:number_of_men_alive() end) or 0) > 0
                 and not try(function() return e.unit:is_shattered() end)
-            if p and q and up then
+            if p and q and up and (not wanted or wanted(e)) then
                 local d = (p:get_x() - q:get_x()) ^ 2 + (p:get_z() - q:get_z()) ^ 2
                 if not best_d or d < best_d then best, best_d = e, d end
             end
@@ -292,7 +294,12 @@ function M.main(bm, config, globals)
         return best
     end
     local function scripted_attack(side, it, why)
-        local foe = nearest_enemy(side, it)
+        local foe
+        if config.scripted_targets == 'like' then
+            local lord = it.slot == 'lord'
+            foe = nearest_enemy(side, it, function(e) return (e.slot == 'lord') == lord end)
+        end
+        foe = foe or nearest_enemy(side, it)
         if not foe then return end
         orders.attack_melee(it.uc, foe.unit)
         it.lost_since = nil

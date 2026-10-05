@@ -206,6 +206,22 @@ enemy's loss - ours: higher is better for the network), the winner, the time to 
 orders to its lord (a minute, by kind), the abilities used, the metres both walked, the script's
 re-issued orders; then the mean by lord type and mode.
 
+**The escort variant** (`--variant escort`, build `--duel-variant escort`): each lord also has two infantry
+units of his faction (Empire spearmen, clanrat spearmen) 40 m to his sides, mirrored armies. The network
+commands its whole side; the scripted side (`scripted_targets` `like` in [nn_arena](#nn_arena)): the lord
+attacks the enemy lord, the infantry the nearest enemy infantry (the nearest enemy when none is left). The
+control is both sides so. The question: does the network's lord fight the enemy lord or switch to the
+infantry, and what does it cost. The table adds: both lords' switches of the engine's target
+(`unit:current_target`) a minute, the switches of the network's attack target for its lord a minute, the
+share of the lord's melee seconds with the enemy lord as his target, and the side trade (the enemy units'
+mean health lost - ours).
+
+```bash
+.venv/Scripts/python -m tools.nn.lord_duel run --variant escort --checkpoint build/nn-train/<label>/m15.pt
+```
+
+12 battles (4 network and 2 controls a lord type), ~2.5 min each with loading: ~30-35 min.
+
 <a id="enemy_layout"></a>
 
 ## enemy_layout — how the game AI deploys and stands
@@ -258,6 +274,7 @@ the battle. The side that wins on timeout defends:
   `nn_miss`; `nn_sample` is recorded as in the other modes.
 - `scripted` (the `lord-duel` target, the control) — each unit of ours under script with one order to
   attack the nearest enemy; `enemy_ai` `scripted` takes side 2 from the game's AI the same way ([lord duel](#lord_duel));
+  with `scripted_targets` `like` a lord attacks the nearest enemy lord, the others the nearest non-lord unit;
 - `human` (the `human` build target) — a human commands our side, the script gives no orders; the
   recording adds [observer_adapter](telemetry.md#observer_adapter); the game's AI attacks
   ([a battle played by a human](../launch/run.md#a-battle-played-by-a-human)).
