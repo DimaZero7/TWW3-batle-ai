@@ -24,7 +24,7 @@ from pathlib import Path
 
 from tools import config as project
 
-LOCK = project.BUILD / "nn-train" / "gpu-train.lock"
+LOCK = project.BUILD / "gpu-train.lock"            # test5.LOCK (checkpoint.DIR.parent)
 OUR_IMAGES = ("snake-ai-trainer",)
 OUR_NAMES = ("tww3-bai-companion",)
 LOOP = re.compile(r"\b(until|while)\b.*\bsleep\b", re.I | re.S)
