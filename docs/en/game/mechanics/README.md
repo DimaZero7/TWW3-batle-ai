@@ -85,13 +85,13 @@ better one; each is a candidate for a test.
 | 4 | "Attacked in flank / rear" morale | −6 / −14 at first contact (DB description) | −1 / −2 continuously (regressed) | [flanking](flanking.md#morale) |
 | 5 | Recent casualties window | last 4 s (DB description) | 30 s (calibrated) | [morale](morale.md#modifiers-points) |
 | 6 | Extended casualties | −4 … −60 for 10–80 % lost in the last 60 s (DB) | not modelled | [morale](morale.md#modifiers-points) |
-| 7 | Fatigue rate | tick 0.1 s → ×10 a second (one forum claim, medium-low) | ×5 a second (measured, 1315 transitions) | [fatigue](fatigue.md#what-tires-and-what-rests) |
-| 8 | Fatigue effects | in the DB table `unit_fatigue_effects_tables` (melee attack to ×0.7, speed to ×0.85, …) | not modelled; `simulator.md` says they are not in the database | [fatigue](fatigue.md) |
+| 7 | Fatigue rate | tick 0.1 s → ×10 a second (one forum claim, medium-low) | ×10 a second (calibration ON: melee tires only under an attack order — single entity +19, formation 13.7; shooting 7.5, walking 3.4, idle −18; fitted on 204 recordings) | [fatigue](fatigue.md#what-tires-and-what-rests) |
+| 8 | Fatigue effects | in the DB table `unit_fatigue_effects_tables` (melee attack to ×0.7, speed to ×0.85, …) | modelled from this table (`fatigue.effects()`) | [fatigue](fatigue.md) |
 | 9 | Formation spacing | `entity_formation_spacing` 1.8 m (DB) | 1.5 m (measured) | [movement](movement.md#formations) |
 | 10 | Charge reflection / bracing | braced reflectors deal ×2 weapon damage to chargers for 3.9 s; bracing is a mass multiplier (DB, CA) | a braced unit meets a frontal charge "as a charge" for 13 s (fitted to the measured 0.80) | [melee](melee.md#bracing-and-charge-defence) |
 | 11 | Charge impact | charge bonus + capped collision damage (≤ 70, 70 % AP) (DB) | extra ×(1 + 1.5 × speed share) damage for 13 s (fitted) | [melee](melee.md#charge) |
 | 12 | Splash | damage divided among targets (community, CA forum) | full hit on each target, capped at a man's HP | [melee](melee.md#splash) |
-| 13 | Lord's aura | +4 to 70 m, fading to 0 at 105 m (DB) | +4 to 70 m, none beyond | [morale](morale.md#modifiers-points) |
+| 13 | Lord's aura | +4 to 70 m, fading to 0 at 105 m (DB) | the same: +4 to 70 m, fading to 0 at 105 m | [morale](morale.md#modifiers-points) |
 | 14 | Rally timing | `broken_finish_base_timeout` 180 s + 10 s × rank (DB; meaning unclear) | rally after 44 s median (measured) | [morale](morale.md#waver-rout-rally-shatter) |
 | 15 | Strong enemy near | −3 … −24 by combat power within 70 m (DB) | −3 only | [morale](morale.md#modifiers-points) |
 

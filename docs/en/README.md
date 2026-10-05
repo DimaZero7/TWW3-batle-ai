@@ -7,6 +7,11 @@ measured, our tools to work with the game, and the battle network trained from s
 simulator and checked in the game. The project's earlier algorithmic AI was removed (the
 project owner's decision); it is in the Git history.
 
+## Project summary
+
+- **[Project summary](summary.md)** — the whole system on one page: simulator, training, drills,
+  bridge, in-game checks; current state, key numbers, what does not match the game yet. Read it first.
+
 ## Data for training the network
 
 - **[Data for training the network](training/README.md)** — the arena, recorded battles of
