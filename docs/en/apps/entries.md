@@ -139,9 +139,10 @@ simulator on the same trials); results — [a lord surrounded](../game/units/lor
 ## lord_fall — an army whose lord is killed or routs
 
 The question: does an army lose morale when its lord is **killed**, and how much, against when he
-**routs**. All 75 recorded lord falls were routs (the lord shattered with 2-50 % health), so the
-simulator has no shock from a lord's death (`morale.lord_fall` 0 / 0); the game's database has
-`general_died_recently` -16, `general_dead` -10 and `general_fled_recently` -16.
+**routs**. All 75 recorded lord falls of the fair battles were routs (the lord shattered with 2-50 %
+health), none a death; the game's database has `general_died_recently` -16, `general_dead` -10 and
+`general_fled_recently` -16. The result (below): a death costs the army -16, then -10, a rout on the field
+only his aura (leaving the map: -16 for ~120 s, from recorded battles); the simulator now does the same (`morale.lord_fall`, [a lord's fall](../training/simulator.md#lords)).
 
 Build: `python -m tools.build lord-fall --faction emp|skv|vmp --treatment kill|rout|none`; the battle
 file comes from `tools/nn/lord_fall.py`. MP Crossroads (flat). One battle = one army (side 1) and one
@@ -178,6 +179,18 @@ by faction, treatment and role; `net` subtracts the control's same role; the sha
 is flat, so the database's -16 points (0.27-0.46 MoralePercent) against the aura's -4 shows on 4 units;
 the control is needed only for the melee's drift. A borderline result: add battles to that cell
 (`--kill`, `--rout`, `--factions`).
+
+**The result** (15 battles, `build/lord-fall/analysis.json`; per sample: `build/lorddeath/timeline.py`).
+The lord **killed**: the idle units show "general died recently", -3 / -7 / -13.5 / -16 points 1 / 2 /
+5 / 10 s later, then a flat -16; at 45.5-46 s the effect turns into "general dead", and from ~50 s to
+the recording's end (60 s) the units stand at -10. Empire, Skaven and Vampire Counts alike. The ramp is
+the morale step itself (1 point or 15 % of the gap a 0.5 s tick), not a gradual effect. The fighting
+units within the aura: -6 / -10 / -17.5 / -21...-25 (the aura and the melee on top). The lord **routed**
+(Empire, Skaven): the idle units lose nothing, the fighting ones about the aura (-0.5...-6.8 at 10 s net
+of the control); "general fled" (-16 in the database) does not show while the lord is on the field (he did not
+leave the map within 60 s). **Vampire Counts'** routed lord
+crumbles (-12 % health a second), dies at 8-8.5 s, and the army gets the death's shock from 8.5 s. No
+unit routed within 60 s.
 
 <a id="lord_duel"></a>
 

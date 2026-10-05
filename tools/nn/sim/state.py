@@ -104,6 +104,8 @@ STATIC = {
     "aim_s": ("f", "first shot after halting, s (config/nn/sim.json)"),
     "friendly_fire": ("f", "share of its hits aimed at a unit in melee that land on its own side (config/nn/sim.json)"),
     "morale_bonus": ("f", "morale points at the start beyond leadership (config/nn/sim.json)"),
+    "rout_death_s": ("f", "a lord of this faction who routs counts as killed this long into his rout (the "
+                          "faction's lords crumble: Vampire Counts, config/nn/sim.json morale.lord_fall); 0 never"),
     "cost": ("f", "multiplayer cost"),
     "ai": ("b", "played by the game's AI: its lord fires his active abilities by the AI's rule (the network's "
                 "side by order: tools/nn/sim/orders.py ability)"),
@@ -143,6 +145,10 @@ INTERNAL = {
     "dealt": ("f", "HP dealt in melee recently (decaying)"),
     "taken": ("f", "HP taken in melee recently (decaying)"),
     "gone": ("b", "left the map (routed off it)"),
+    "dead_s": ("f", "seconds since the unit was killed (health 0; a lord whose faction's routed lord crumbles: "
+                    "since rout_death_s into his rout); 0 while not (battle.py, the lord-fall morale)"),
+    "gone_s": ("f", "seconds since the unit left the map alive (routed off it); 0 while not (battle.py, the "
+                    "lord-fall morale)"),
     "order_kind": ("i", "the order in force (tools/nn/sim/orders.py)"),
     "order_target": ("i", "its target slot"),
     "order_run": ("b", "its run flag"),

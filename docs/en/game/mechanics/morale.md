@@ -42,7 +42,7 @@ All values are WH3 9.0.0 = our `game_rules.json`; descriptions from WH2.
 | Morale shock | — | 25 % lost in 4 s triggers a "morale shock" (`recent_casualties_shock_threshold` 25) | not modelled |
 | Lord's aura | +4 | full within 70 m, then fading to 0 at 70 × 1.5 = 105 m (`inspiration_radius_max_effect_range_modifier` 1.5); scaled by command stars between min and max (both 4) | +4 within 70 m, no fade. Small conflict |
 | Encourage (unit) | +4 | flat, "adjusted for distance"; since 5.3 all Encourage is +4 and does not stack with the lord's aura | — |
-| Lord died recently / dead / fled | −16 / −10 / −16 | | same |
+| Lord died recently / dead / fled | −16 / −10 / −16 | | death: −16 for 45 s, then −10 to the end; rout on the field: the aura only; "fled" −16 when the lord leaves the map, ~120 s ([measured](../../apps/entries.md#lord_fall)) |
 | Winning slightly / winning / significantly | +3 / +6 / +8 | the ratios are not in the tables | ratios 1.5 / 2.5 / 4 calibrated |
 | Losing / significantly | −3 / −8 | | same |
 | Attacked in flank / rear | −6 / −14 | "first contact from flank / rear" | −1 / −2 continuously. See [flanking](flanking.md) |

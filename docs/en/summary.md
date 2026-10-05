@@ -56,7 +56,8 @@ the "canary" (the baseline's first 32 pairs) adopts the old ones.
 **Already modelled:** speeds, formation, contact and leaving melee, hit chance (flat: slope 0.1
 instead of the database's 1), damage and armour, charge and spear bracing, flank and rear
 (fitted: flank costs more than rear), volley fire, friendly fire and spill, lords (at most 9
-men hit them), morale with all main modifiers, rout, rally, army collapse (−120 by the
+men hit them), morale with all main modifiers (a lord's death: his army
+−16 for 45 s, then −10; his rout on the field: the aura only), rout, rally, army collapse (−120 by the
 database's strategic strength), flank-threat flags, fatigue, units' innate effects, lord
 abilities.
 

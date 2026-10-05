@@ -75,9 +75,9 @@ All numbers are morale points from `_kv_morale_tables`.
 | Cause | Points |
 |---|---:|
 | The lord near: within 70 m | +4 |
-| The lord died: first, the whole army | −16 |
-| The lord died: then the whole army, lasting | −10 |
-| The lord fled recently | −16 |
+| The lord died: first, the whole army (45 s) | −16 |
+| The lord died: then the whole army, to the battle's end | −10 |
+| The lord fled recently: left the map (~120 s; a rout on the field costs only the aura) | −16 |
 | Attacked in the flank / rear | −6 / −14 |
 | One flank exposed / several | −3 / −6 |
 | Flanks secure | +5 |

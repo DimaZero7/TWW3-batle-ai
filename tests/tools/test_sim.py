@@ -693,23 +693,89 @@ class TestBattle:
         assert bool(st.u["gone"][0, 0]) and not bool(st.done[0])
         assert not bool(st.u["mv"][0, 0]) and int(st.u["target"][0, 0]) == -1
 
-    def test_a_shattered_lord_counts_as_lost_for_morale(self):
-        # A shattered lord is lost as if he had died: his fall is timed (lord_dead_s) and his army
-        # loses sim.json morale.lord_fall (measured: about his aura only, so 0 / 0 on top of it).
-        # Battle 0: side 1's General shattered (far off, so his rout and his aura touch no one);
-        # battle 1: the same, the General steady.
+    @staticmethod
+    def lord_fall_gap(fall, seconds, factions=("wh_main_emp_empire", "wh2_main_skv_skaven")):
+        """Side 1's spearmen's morale, their General fallen (fall(st): battle 0) minus untouched (battle 1),
+        at each of `seconds`; the General 600 m off (his aura and his rout touch no one), the enemy 600 m off."""
+        sides = army([(GENERAL, -900, 0, 90, True), (SPEAR, -300, 0, 90)], [(SPEAR, 300, 0, 270)], factions=factions)
+        st = scenario.build([sides, sides], P)
+        fall(st)
+        out, t = [], 0.0
+        for s in seconds:
+            while t < s - 1e-6:
+                battle.step(st, replay.hold(st), P)
+                t += 0.5
+            out.append(float(st.u["morale"][0, 1] - st.u["morale"][1, 1]))
+        return st, out
+
+    def test_a_killed_lord_costs_his_army_16_then_10(self):
+        # sim.json morale.lord_fall (in-game, tools/nn/lord_fall.py): units out of the killed lord's aura drop
+        # -3 / -7 / -13.5 / -16 at 1 / 2 / 5 / 10 s (the morale update's own ramp to the database's -16),
+        # hold -16 to recent_s (45 s), then stand at the database's general_dead -10 to the end.
+        def kill(st):
+            st.u["men"][0, 0] = 0.0
+            st.u["hp_abs"][0, 0] = 0.0
+        fall = P.sim["morale"]["lord_fall"]
+        assert fall["killed"] and fall["recent_s"] == 45
+        st, gap = self.lord_fall_gap(kill, (1, 2, 5, 10, 40, 44, 52, 120))
+        assert gap[0] == pytest.approx(-4.4, abs=0.1) and gap[1] == pytest.approx(-7.6, abs=0.1)
+        assert gap[2] == pytest.approx(-14.0, abs=1.2) and gap[3] == pytest.approx(-16.0, abs=0.01)
+        assert gap[4] == pytest.approx(-16.0, abs=0.01) and gap[5] == pytest.approx(-16.0, abs=0.01)
+        assert gap[6] == pytest.approx(-10.0, abs=0.01) and gap[7] == pytest.approx(-10.0, abs=0.01)
+        assert float(st.u["dead_s"][0, 0]) == pytest.approx(120.0) and float(st.u["dead_s"][1, 0]) == 0
+        assert float(st.lord_dead_s[0, 0]) >= 0 and float(st.lord_dead_s[1, 0]) == -1     # the metrics' "lord lost"
+
+    def test_a_shattered_lord_on_the_field_costs_only_his_aura(self):
+        # A shattered (routed) lord is lost as a lord: his fall is timed (lord_dead_s, the metrics) and his aura
+        # goes, but while he is on the field his army gets no more (in-game: units out of his aura 0 at every
+        # moment; the 75 natural falls of the fair battles were all shatters on the field, about the aura alone).
+        def shatter(st):
+            st.u["r"][0, 0] = st.u["s"][0, 0] = True
+            st.u["morale"][0, 0] = -20.0
+        st, gap = self.lord_fall_gap(shatter, (1.5, 10))
+        assert float(st.u["men"][0, 0]) > 0 and not bool(st.u["gone"][0, 0])      # lost by shattering alone
+        assert float(st.lord_dead_s[0, 0]) == pytest.approx(9.5) and float(st.lord_dead_s[0, 1]) == -1
+        assert float(st.lord_dead_s[1, 0]) == -1
+        assert gap == pytest.approx([0.0, 0.0]) and float(st.u["dead_s"][0, 0]) == 0
+        assert not bool(st.done[0])
+
+    def test_a_lord_routed_off_the_map_costs_16_for_fled_s(self):
+        # Routed off the map edge (gone, men left): the database's general_fled_recently -16 for fled_s (120 s,
+        # recorded battles), then nothing - no general_dead after it.
+        fall = P.sim["morale"]["lord_fall"]
+        assert fall["fled"] and fall["fled_s"] == 120
         sides = army([(GENERAL, -900, 0, 90, True), (SPEAR, -300, 0, 90)], [(SPEAR, 300, 0, 270)])
         st = scenario.build([sides, sides], P)
         st.u["r"][0, 0] = st.u["s"][0, 0] = True
         st.u["morale"][0, 0] = -20.0
-        for _ in range(4):
+
+        def gap():
+            return float(st.u["morale"][0, 1] - st.u["morale"][1, 1])
+        t = 0.0
+        while not bool(st.u["gone"][0, 0]):
             battle.step(st, replay.hold(st), P)
-        assert float(st.u["men"][0, 0]) > 0 and not bool(st.u["gone"][0, 0])      # lost by shattering alone
-        assert float(st.lord_dead_s[0, 0]) == pytest.approx(1.5) and float(st.lord_dead_s[0, 1]) == -1
-        assert float(st.lord_dead_s[1, 0]) == -1
-        fall = P.sim["morale"]["lord_fall"]["recent"]
-        assert float(st.u["morale"][0, 1]) <= float(st.u["morale"][1, 1]) + min(fall, 0) * 0.15 + 1e-4
-        assert not bool(st.done[0])
+            t += 0.5
+            assert t < 120 and gap() == 0.0                    # on the field: nothing beyond the aura
+        t_gone = t
+        for until, want in ((t_gone + 10, -16.0), (t_gone + 119, -16.0), (t_gone + 140, 0.0)):
+            while t < until - 1e-6:
+                battle.step(st, replay.hold(st), P)
+                t += 0.5
+            assert gap() == pytest.approx(want, abs=0.01), (until, gap())
+        assert float(st.u["men"][0, 0]) > 0 and float(st.u["dead_s"][0, 0]) == 0
+
+    def test_a_crumbling_factions_routed_lord_counts_as_killed(self):
+        # Vampire Counts (sim.json lord_fall.rout_death_s 8): in-game the routed lord crumbles and dies 8-8.5 s
+        # into his rout, then his army gets the death's -16 / -10. Other factions: rout_death_s 0 (never).
+        vmp = "wh_main_vmp_vampire_counts"
+        assert P.static(GENERAL, vmp)["rout_death_s"] == 8 and P.static(GENERAL, "wh_main_emp_empire")["rout_death_s"] == 0
+
+        def rout(st):
+            st.u["r"][0, 0] = st.u["s"][0, 0] = True
+            st.u["morale"][0, 0] = -20.0
+        st, gap = self.lord_fall_gap(rout, (7.5, 9, 20, 60), factions=(vmp, "wh2_main_skv_skaven"))
+        assert gap[0] == 0.0 and gap[1] < -3.0
+        assert gap[2] == pytest.approx(-16.0, abs=0.01) and gap[3] == pytest.approx(-10.0, abs=0.01)
 
     def test_orders_move_attack_and_withdraw(self):
         st = scenario.build([army([(SPEAR, -100, 0, 90)], [(SLAVE, 100, 0, 270)])], P)

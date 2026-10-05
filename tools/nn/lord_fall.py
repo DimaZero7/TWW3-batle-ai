@@ -1,9 +1,10 @@
 """Lord killed or routed: how much morale does his army lose? (src/entries/lord_fall.lua)
 
-The user (05.10.2026): a killed lord shocks the army (Skaven most; Vampire Counts crumble). The
-simulator has no such shock (config/nn/sim.json morale lord_fall 0 / 0) because all 75 recorded lord
-falls were routs; the database has ume_concerned_general_died_recently -16 / general_dead -10 and
-general_fled_recently -16 (config/nn/game_rules.json).
+The user (05.10.2026): a killed lord shocks the army (Skaven most; Vampire Counts crumble). All 75
+recorded lord falls of the fair battles were routs; the database has ume_concerned_general_died_recently
+-16 / general_dead -10 and general_fled_recently -16 (config/nn/game_rules.json). Result: a death costs
+-16 for 45 s, then -10; a rout on the field only the aura (Vampire Counts' routed lord crumbles to death in
+~8 s) - the simulator's config/nn/sim.json morale.lord_fall.
 
 One battle = one treatment of one army (side 1, ours in the file): its lord is KILLED, ROUTED or left
 alone (the control) at a fixed moment, 20 s after the first contact. The other side is fearless (no

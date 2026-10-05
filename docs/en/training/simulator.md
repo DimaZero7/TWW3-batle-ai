@@ -126,7 +126,7 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 | Fire whilst moving | a unit with `mounted_fire_move` (the militia) aims and shoots while it moves, at targets within `missile.move_fire_arc_deg` 90° of the way it walks | DB attribute; the arc measured (our militia on the move: 0.52 of its full rate toward the enemy, 0.31 across, 0.16 away) |
 | Pistols (estimate) | hit rate 0.5 at the edge of range (×1.12–1.29 at 60–90 m), reload 10.8 s, first shot 3.8 s | estimate from the projectile's calibration area (2.0 m at 65 m against the arrow's 3.7 m at 95 m), not measured: `sim.json` missile.musket_why |
 | Morale | points: leadership + effects; MoralePercent = points / leadership; moves 1 point or 15 % of the gap per 0.5 s | DB; the step measured (+2 points a second in every recording) |
-| Morale effects | lord +4 within 70 m, fading to 0 at 105 m; lord died or shattered: his aura only (`lord_fall` 0 / 0); neighbour within 120 m +5; casualties −2…−74; recent casualties −6…−80 (last 30 s, of the whole health); winning / losing the melee +3/+6/+8, −3/−8 (damage ratio 1.5 / 2.5 / 4); first struck in the flank −6, rear −14 for one 0.5 s tick; the army beaten as a whole (enemy strength ≥ 2.6× own, own ≤ 0.22 of the start) −120; flanks exposed (an enemy threatens the left, right or rear: `lf`, `rf`, `bf`) −3, two or more −6; routing friends −3 each; routing enemies +2.5 each; under fire −5; very tired −2, exhausted −6; a stronger enemy within 70 m −3 | DB points; window, ratios calibrated; attacked in the flank / rear measured ([flanks](#flanks-rear-and-charges-in-whole-battles)); a lord's fall measured in 75 recorded falls ([lords](#lords)) |
+| Morale effects | lord +4 within 70 m, fading to 0 at 105 m; lord killed (health 0): the others −16 for 45 s, then −10 to the end; routed off the map: −16 for 120 s; shattered or routing on the field: his aura only (`lord_fall`); neighbour within 120 m +5; casualties −2…−74; recent casualties −6…−80 (last 30 s, of the whole health); winning / losing the melee +3/+6/+8, −3/−8 (damage ratio 1.5 / 2.5 / 4); first struck in the flank −6, rear −14 for one 0.5 s tick; the army beaten as a whole (enemy strength ≥ 2.6× own, own ≤ 0.22 of the start) −120; flanks exposed (an enemy threatens the left, right or rear: `lf`, `rf`, `bf`) −3, two or more −6; routing friends −3 each; routing enemies +2.5 each; under fire −5; very tired −2, exhausted −6; a stronger enemy within 70 m −3 | DB points; window, ratios calibrated; attacked in the flank / rear measured ([flanks](#flanks-rear-and-charges-in-whole-battles)); a lord's fall measured: routs in 75 recorded falls, death in 15 in-game battles ([lords](#lords)) |
 | States | wavering below 16 points, rout at 0, shattered at the third rout or below −50 points during army destruction; no ordinary rout within 10 s of a rally | DB; shattering below −50 during army losses measured |
 | Rally | while the army is not collapsing and no standing enemy is within 90 m the router regains 2 points a second; rallies at MoralePercent 0.23 | measured: 0.23 and 90 m (365 rallies); 2 points calibrated (median rally 44 s) |
 | Fatigue | The calibration is ON (`fatigue.calibration.on=true`): 10 ticks/s, DB thresholds; melee tires only under an attack order (single entity +19 a tick, formation 13.7), a move by its order's run flag (run +4, walk −1), routing +4, shooting 7.5, idle −18 with no standing enemy within 80 m, else ready −7 | Fitted on the units' activities in 204 recordings; exhausted shares as in the game ([below](#fatigue-calibration)) |
@@ -266,8 +266,8 @@ Local routing-friend penalties retain their database −3 each, at most four, wi
 Routers continue losing morale under army destruction and cannot rally away from
 enemies. During army destruction, below −50 points (`ums_broken_threshold_lower`) a unit shatters regardless
 of its rout count: all 274 recorded army-loss shatters before a third rout crossed
-this threshold. Unbreakable units remain immune. `lord_fall` stays 0 / 0: losing the
-lord removes his aura and does not substitute for army destruction.
+this threshold. Unbreakable units remain immune. A routed lord costs only his aura
+(`lord_fall`) and does not substitute for army destruction.
 
 **Gate verification** (`build/collapse`, CPU, 4 copies, seed 1, up to 2 m jitter,
 both recorded order streams, measured at the game end time). Gold loss is each unit's
@@ -444,10 +444,36 @@ mirror (69 %). Waiting (a reserve, a walk) loses: the side that waits fights out
 - **Lord against lord** (`contact.lord_v_lord` 0.73): a lord fought by the enemy lord alone loses
   14.6 HP/s (General) and 10.0 (Warlord) in the game, 19.4 / 15.0 in the simulator without the
   factor.
-- **A lord's fall** (`morale.lord_fall` 0 / 0: his aura only): in all 75 recorded falls the lord
-  shattered with 2–50 % of his health (none was killed), and his standing units lost −3 / −4.7 /
-  −4.8 points 2 / 6 / 10 s later (mean of 167 unit-falls) — about his aura. The army's collapse is
-  the [army-destruction rule's](#army-destruction), not the lord's.
+- **A lord's fall** (`morale.lord_fall`). Any fall takes his aura. **Killed** (health 0): the other
+  units of his army get "general died recently" (−16 from the database) for 45 s (`recent_s`), then
+  "general dead" (−10) to the battle's end. **Routed off the map** (left alive): "general fled recently"
+  (−16 from the database) for 120 s (`fled_s`), then nothing. **Shattered or routing on the field**: the
+  aura only (`routed` 0).
+  Measured in the game ([lord_fall](../apps/entries.md#lord_fall), 15 battles): at a death the units
+  out of the aura and far from enemies lose −3 / −7 / −13.5 / −16 points 1 / 2 / 5 / 10 s later, hold
+  −16, the effect turns into "general dead" at 45.5–46 s, and from ~50 s to the recording's end they
+  stand at −10 — the same in all three factions; the ramp is the morale step itself, so the points
+  are a step. At a rout (Empire, Skaven) the same units lose nothing; in all 75 recorded falls of the
+  fair battles the lord shattered with 2–50 % of his health (none was killed), and his standing units
+  lost −3 / −4.7 / −4.8 points 2 / 6 / 10 s later — about the aura. Leaving the map — from recorded
+  battles (`build/prespec/specs.md`, section 1): a shattered lord who leaves the map (4 cases) gives
+  "general fled recently", the standing units −14…−17 points within 10 s, the effect lasts ~120 s (2
+  cases with a measured end — medium confidence), no "general dead" follows. Vampire Counts' routed lord
+  crumbles and dies 8–8.5 s later, and the army gets the death's shock: `rout_death_s` 8 for the
+  faction (the simulator's data has no Vampire Counts: config only). The same battles in the simulator
+  (`build/lorddeath/sim_fall.py`, Empire and Skaven), points 1 / 2 / 5 / 10 / 20 / 40 / 60 s after
+  the death:
+
+  | | 1 | 2 | 5 | 10 | 20 | 40 | 60 |
+  |---|---:|---:|---:|---:|---:|---:|---:|
+  | out of the aura: game | −3 | −7 | −13.5 | −16 | −16 | −16 | −10 |
+  | out of the aura: simulator | −4.4 | −7.6 | −14 | −16 | −16 | −16 | −10 |
+  | out of the aura: simulator before the rule | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+  | in the aura, in melee, net of the control: game | −6.4 | −9.3 | −16.5 | −16 | −16.9 | −19.1 | −13.5 |
+  | the same: simulator | −5.5 | −9.6 | −16 | −20 | −20 | −20 | −14 |
+  | the same: simulator before the rule | −2 | −4 | −4 | −4 | −4 | −4 | −4 |
+
+  The army's collapse is the [army-destruction rule's](#army-destruction), not the lord's.
 - **Lord abilities** (`tools/nn/sim/abilities.py`). When the game's AI fires them is assumed, not
   measured (only the Warlord's speed in the recordings, 5–6.5 m/s, shows Verminous Valour in use);
   CA's planner on side 1 of the recorded whole battles gets no actives. The network's side fires
@@ -696,7 +722,7 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
 | The database's 4 s recent and 60 s extended casualty windows | 4 s: the archers' target wavered 90 % late, the slingers' never; 30 s + 60 s: the pairs wavered too early | the calibrated single 30 s window stays |
 | The charge's +15 morale (DB `charge_bonus` 15 / `charge_timeout` 60) | after 3343 recorded charges morale over the next 1–4 s falls as after 1500 contacts met standing | no +15 shows in the game |
 | The database's hit slope 1, flank ×0.6 / rear ×0.3, sectors 45° / 135°, spacing 1.8 m, bracing ×2 | worse against the pairs and the whole battles | the measured numbers kept (slope 0.1: the pairs need one flat number; flank 2.0 / rear 0.25; 60° / 120°; 1.5 m) |
-| The database's lord-fall morale (−16, then −10 to every unit) | the simulator routed 39 % of the army within 10 s of a fall (the game 21 %); the game's units lose −3 to −4.8 points | the fall is only the aura (`lord_fall` 0 / 0) |
+| The database's lord-fall morale (−16, then −10 to every unit) at every fall, routs too | the simulator routed 39 % of the army within 10 s of a fall (the game 21 %); the game's units lose −3 to −4.8 points — every recorded fall was a rout | a rout on the field is the aura only; −16 / −10 only at a death, −16 for 120 s on leaving the map (`lord_fall`, measured in the game) |
 | A continuous "attacked in the flank / rear" −1 / −2 | the recordings show a 1–2 s drop of 1.5 / 1.9 points | one 0.5 s tick of the database's −6 / −14 at the first strike |
 | A charge impact of 2.5 and instant turning in melee | a unit charged standing lost 2.7× its charger (the game 0.82), a flank attack on a free unit lasted one step | everything left standing when charged lost; now 1.5, bracing and 2°/s |
 | The lord rule "the strongest attacker's rate + 0.35 of the others'" (inferred from unit totals) | the lord, a lord and three units took half of what the lord alone took | the measured 9-men cap |

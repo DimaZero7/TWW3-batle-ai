@@ -202,7 +202,7 @@ def step(st, orders, params=None, dt=None):
     u["hp"] = torch.where(present, hp_new / u["hp0"].clamp(min=1e-6), torch.zeros_like(hp_new))
     # Casualty windows (decaying sums, time constant = the window): recent casualties
     # (casualties_s; the database: the last 4 s), extended casualties (extended_s; the last 60 s);
-    # recent_s: the melee balance (dealt / taken; reward.py reads the same) and the lord's fall.
+    # recent_s: the melee balance (dealt / taken; reward.py reads the same).
     cm = cal["morale"]
     tau = cm["recent_s"]
     u["recent"] = u["recent"] * math.exp(-dt / float(cm.get("casualties_s", tau))) + taken
@@ -226,20 +226,40 @@ def step(st, orders, params=None, dt=None):
     standing = alive & ~u["r"]
 
     # --- the lords ---
-    # A lord who falls (dead or shattered) takes his aura with him, and his army loses
-    # sim.json morale.lord_fall on top (0 / 0: the recordings show about the aura only; the
-    # database's -16 / -10 are not seen; the army collapse is its own rule below).
+    # A lord who falls (dead or shattered) takes his aura with him (the aura below counts standing
+    # lords only); st.lord_dead_s times the fall (the metrics' "lord lost").
     has_lord = torch.stack([(u["lord"] & (u["side"] == s)).any(1) for s in (1, 2)], 1)
     lord_alive = torch.stack([(u["lord"] & (u["side"] == s) & alive & ~u["s"]).any(1) for s in (1, 2)], 1)
     dead = has_lord & ~lord_alive
     st.lord_dead_s = torch.where(live[:, None] & dead, torch.where(st.lord_dead_s < 0, torch.zeros_like(st.lord_dead_s),
                                                                     st.lord_dead_s + dt), st.lord_dead_s)
-    side_idx = (u["side"] - 1).clamp(min=0)
-    since = st.lord_dead_s.gather(1, side_idx)
-    M = params.morale
+    # sim.json morale.lord_fall: a KILLED lord (health 0) costs the rest of his army the database's
+    # general_died_recently (-16) for recent_s, then general_dead (-10) to the end; one who routed OFF
+    # THE MAP (gone, men left) general_fled_recently (-16) for fled_s, then nothing; a routed or
+    # shattered one still on the field only his aura (+ `routed`, 0) - unless his faction's routed
+    # lord crumbles to death (rout_death_s: Vampire Counts, counted as killed that long into his rout).
     fall = cal["morale"]["lord_fall"]
-    fall_s = tau
-    lord_pts = torch.where(since < 0, 0.0, torch.where(since < fall_s, float(fall["recent"]), float(fall["lasting"])))
+    killed = present & (u["men"] <= 0) & ~u["gone"]
+    crumbled = alive & u["r"] & (u["rout_death_s"] > 0) & (u["rout_s"] >= u["rout_death_s"])
+    u["dead_s"] = torch.where(live[:, None] & (killed | crumbled | (u["dead_s"] > 0)), u["dead_s"] + dt, u["dead_s"])
+    left = present & u["gone"] & (u["men"] > 0) & (u["dead_s"] <= 0)
+    u["gone_s"] = torch.where(live[:, None] & (left | (u["gone_s"] > 0)), u["gone_s"] + dt, u["gone_s"])
+    side_idx = (u["side"] - 1).clamp(min=0)
+
+    def lords_max(x):           # [B, N]: the side's lords' largest x, for each unit of the side
+        return torch.stack([torch.where(u["lord"] & (u["side"] == s), x, torch.zeros_like(x)).amax(1)
+                            for s in (1, 2)], 1).gather(1, side_idx)
+    killed_s, fled_s = lords_max(u["dead_s"]), lords_max(u["gone_s"])
+    fallen = st.lord_dead_s.gather(1, side_idx) >= 0
+    M = params.morale
+    lord_pts = torch.where(fallen, float(fall.get("routed", 0.0)), 0.0)
+    if fall.get("fled"):
+        lord_pts = torch.where((fled_s > 0) & (fled_s <= float(fall["fled_s"])),
+                               M["ume_concerned_general_fled_recently"], lord_pts)
+    if fall.get("killed"):
+        lord_pts = torch.where(killed_s > 0, torch.where(killed_s <= float(fall["recent_s"]),
+                                                          M["ume_concerned_general_died_recently"],
+                                                          M["ume_concerned_general_dead"]), lord_pts)
 
     # --- morale ---
     d = pw["dist"]

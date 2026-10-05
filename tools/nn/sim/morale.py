@@ -4,7 +4,8 @@ Morale is points: leadership + a start bonus + the effects of the moment (the ga
 _kv_morale_tables). MoralePercent = points / leadership. Each 0.5 s tick the points move towards
 that sum by max(1, 15 % of the gap) (minimium_increment_update_per_tick, percent_update_per_tick).
 
-Effects (points): lord within 70 m +4 (fading to 0 at 105 m); extra lord-fall points configured (currently 0); neighbour within 120 m
+Effects (points): lord within 70 m +4 (fading to 0 at 105 m); the lord killed -16 for 45 s, then -10; routed
+off the map -16 for 120 s (routed on the field: his aura only; battle.py, sim.json morale.lord_fall); neighbour within 120 m
 (flanks secure) +5; casualties over the battle (share of HP) -2 ... -74; recent casualties
 -6 ... -80 (calibrated 30 s window); extended casualties optional; winning / losing the melee +3/+6/+8,
 -3/-8; attacked in the flank / rear -6 / -14 for the tick of the first contact from that side; flanks exposed (an enemy threatens the left, right or rear:
