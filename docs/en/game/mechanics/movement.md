@@ -58,13 +58,20 @@ Ours: [pace and fatigue](../units/pace.md), [simulator](../../training/simulator
   (values), low (meaning).
   - Ours: in the game a fight breaks off at 0.013/s (infantry), 0.030/s (lords), 0.033/s (missile
     units), cause unknown; a break-off with the 10 s immunity was tried in the simulator and
-    dropped. The public sources don't explain the trigger either.
+    dropped. The public sources don't explain the trigger either. Ordered away, a unit without a
+    missile weapon stays in melee ~21 s in the game (median, 163 network battles; near
+    `melee_breakoff_secs` 24), standing, taking ×1.23 damage; the simulator holds it 20 s
+    (`contact.pin_melee_s`), missile units 5 s.
 - **Pursuit.** All pursuer attacks on routers count as charges; 5.0.0 removed the cap of 35 % of a
   pursuing unit attacking. WH3 keys: `pursue_max_charge_time` 5 s, `pursue_charge_max_unit_separation`
   8 m, `melee_seconds_in_close_proximity_to_stop_pursue` 1.5 s (no descriptions). · twwstats,
   fandom · high (values), low (meaning).
+  - Ours: in the recordings a router chased by one pursuer loses 0.64 of what a standing target in
+    melee loses, without a charge burst in the first 5 s; the simulator strikes a router at 0.43 of
+    the rule (`contact.pursuit_rate`), from the rear, without the charge.
 - **Routing.** No public number for rout speed; Skaven Scurry Away +10 % at wavering or worse.
-  Ours: 0.80–0.96 of run measured, units leave the map at |x|, |z| = 1020 m. The WH2 key
+  Ours: 0.80–0.96 of run measured (fatigued; without it 0.98–1.0), units leave the map at |x|, |z| =
+  1020 m. The WH2 key
   `scaled_playable_area_size_min/max` is 1024 — consistent with our 1020 m edge (medium).
 
 [tws]: https://twwstats.com/kv/rules

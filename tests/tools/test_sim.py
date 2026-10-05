@@ -136,8 +136,9 @@ class TestFunctions:
         assert u["fat"].tolist() == [4., 3., 2., 1., 0.]
 
     def test_state_and_orders_shapes_and_perspective(self):
-        st = S.empty(2, 6)
-        assert all(v.shape == (2, 6) for v in st.u.values())
+        st = S.empty(2, 6, history=3)
+        assert all(v.shape == (2, 6) for k, v in st.u.items() if k not in S.HISTORY)
+        assert st.u["lost_hist"].shape == (2, 18)
         obs = st.observation()
         timers = {f"ab{k}_{t}" for k in range(3) for t in ("on", "cd")}
         assert set(obs) == set(S.OBSERVED) | {"side", "t", "fx_on", "gone"} | timers and obs["t"].shape == (2,)
@@ -795,7 +796,7 @@ class TestBattle:
         x0 = float(st.u["x"][0, 0])
         o = replay.hold(st)
         o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = O.WITHDRAW, -300.0, 0.0, True
-        for _ in range(20):
+        for _ in range(20 + int(P.sim["contact"]["pin_melee_s"] / P.dt)):      # held pin_melee_s, then out
             battle.step(st, o, P)
         assert not bool(st.u["m"][0, 0]) and float(st.u["x"][0, 0]) < x0 - 15
 
@@ -804,7 +805,7 @@ class TestBattle:
         """contact.leave_m: any unit (missile or melee) told to move that far walks out of the fight."""
         moved = {}
         for leave in (0.0, 10.0):
-            params = P.with_cal("contact", leave_m=leave, pin_s=0.0)
+            params = P.with_cal("contact", leave_m=leave, pin_s=0.0, pin_melee_s=0.0)
             st = face_off(key, SPEAR)
             H = st.N // 2
             o = replay.hold(st)
@@ -818,30 +819,6 @@ class TestBattle:
                 battle.step(st, o, params)
             moved[leave] = x0 - float(st.u["x"][0, 0])
         assert moved[0.0] == pytest.approx(0.0, abs=0.5) and moved[10.0] > 10
-
-    @pytest.mark.parametrize("key", [ARCHER, SPEAR])
-    def test_a_missile_unit_leaving_melee_is_pinned_for_pin_s_a_melee_unit_is_not(self, key):
-        """contact.pin_s: a missile unit told to leave melee stays held (in contact, struck) for pin_s seconds,
-        then walks out; a melee unit walks out at once (its enemies follow it, as in the game)."""
-        params = P.with_cal("contact", leave_m=10.0, pin_s=5.0)
-        st = face_off(key, SPEAR)
-        H = st.N // 2
-        o = replay.hold(st)
-        o.kind[0, H], o.target[0, H] = O.ATTACK, 0
-        battle.step(st, o, params)
-        x0, hp0 = float(st.u["x"][0, 0]), float(st.u["hp_abs"][0, 0])
-        xs = []
-        for _ in range(20):
-            o = replay.hold(st)
-            o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = O.MOVE, -200.0, 0.0, True
-            battle.step(st, o, params)
-            xs.append(x0 - float(st.u["x"][0, 0]))
-        held = int(5.0 / params.dt)
-        if key == ARCHER:
-            assert max(xs[:held]) == pytest.approx(0.0, abs=0.01) and float(st.u["hp_abs"][0, 0]) < hp0
-            assert xs[-1] > 10 and float(st.u["leave_s"][0, 0]) == 0      # out: the count is over
-        else:
-            assert xs[2] > 1 and xs[-1] > 10
 
     def test_a_melee_unit_moving_away_strikes_nobody_and_is_still_struck(self):
         params = P.with_cal("contact", leave_m=10.0)
@@ -1460,3 +1437,259 @@ def test_disabled_threat_trial_keeps_legacy_rear_sector():
     st = scenario.build([army([(SPEAR, 0, 0, 0)], [(SLAVE, 30, -30, 135)])], p)
     pw = geometry.pairwise(st.u, p.sim["formation"]["spacing_m"])
     assert bool(battle.threat_flags(st.u, pw, p)["bf"][0, 0])
+
+
+# --- the measured rules of batch 2 (config/nn/sim.json: contact.pursuit_why, pin_why, missile.physical_resist_why,
+# morale.windows_why, expendable_why, strong_enemy_why, the morale why on rout_speed) ---
+
+def _router_rate(params, charge=0.0, contact_s=0.0):
+    """HP/s the spearmen strike a routing slave unit they touch (melee.strikes)."""
+    st = face_off(SPEAR, SLAVE)
+    H = st.N // 2
+    st.u["r"][0, H] = True
+    pw = geometry.pairwise(st.u, params.sim["formation"]["spacing_m"])
+    contact = pw["enemy"] & (pw["gap"] <= 1.0)
+    rate = melee.strikes(st.u, pw, contact, params, torch.full_like(st.u["men"], charge),
+                         torch.full_like(st.u["men"], contact_s))[0]
+    return float(rate[0, 0, H])
+
+
+class TestPursuit:
+    def test_a_router_is_struck_at_the_pursuit_rate_with_all_its_men_and_no_charge(self):
+        full = _router_rate(P.with_cal("contact", pursuit_rate=1.0))
+        assert full > 0
+        assert _router_rate(P) == pytest.approx(P.sim["contact"]["pursuit_rate"] * full, rel=1e-5)
+        # the striker's charge and its contact clock (ramp) do not count against a router
+        assert _router_rate(P, charge=1.0) == pytest.approx(_router_rate(P), rel=1e-5)
+        assert _router_rate(P, contact_s=2.0) == pytest.approx(_router_rate(P), rel=1e-5)
+        # off (no pursuit_rate): a unit touching only routers strikes nothing, as before
+        assert _router_rate(P.with_cal("contact", pursuit_rate=None)) == 0.0
+
+    def test_a_lone_pursuer_hurts_a_router_and_the_router_strikes_nobody(self):
+        st = face_off(SPEAR, SLAVE)
+        H = st.N // 2
+        st.u["r"][0, H], st.u["morale"][0, H], st.u["rout_count"][0, H] = True, -30.0, 1.0
+        hp_spear, hp_slave = float(st.u["hp_abs"][0, 0]), float(st.u["hp_abs"][0, H])
+        o = replay.hold(st)
+        o.kind[0, 0], o.target[0, 0] = O.ATTACK, H
+        battle.step(st, o, P)
+        assert float(st.u["hp_abs"][0, H]) < hp_slave and float(st.u["hp_abs"][0, 0]) == hp_spear
+
+
+class TestRoutSpeed:
+    @pytest.mark.parametrize("tired", [False, True])
+    def test_a_router_runs_at_rout_speed_of_its_run_and_fatigue_counts_once(self, tired):
+        # (a standing unit a side far away keeps the battle going)
+        st = scenario.build([army([(SPEAR, -300, 0, 90), (SPEAR, -300, 700, 90)],
+                                  [(SPEAR, 300, 0, 270), (SPEAR, 300, 700, 270)])], P)
+        st.u["r"][0, 0], st.u["morale"][0, 0], st.u["rout_count"][0, 0], st.u["rally_s"][0, 0] = True, -40.0, 1.0, 0.0
+        if tired:
+            st.u["fatigue"][0, 0], st.u["fat"][0, 0] = 29000.0, 5.0     # exhausted: speed x0.85 (database)
+        for _ in range(6):
+            battle.step(st, replay.hold(st), P)
+        v = math.hypot(float(st.u["vx"][0, 0]), float(st.u["vz"][0, 0]))
+        assert P.sim["morale"]["rout_speed"] == 0.985
+        assert v / float(P.units[SPEAR]["speed"]["run"]) == pytest.approx(0.985 * (0.85 if tired else 1.0), rel=0.01)
+
+
+def _ctx_of(monkeypatch, st, orders_of, steps):
+    """The morale context battle.step hands morale.step, each step (morale itself still steps)."""
+    seen = []
+    real = morale.step
+
+    def spy(u, ctx, params, dt):
+        seen.append({k: (v.clone() if torch.is_tensor(v) else v) for k, v in ctx.items()})
+        return real(u, ctx, params, dt)
+    monkeypatch.setattr(morale, "step", spy)
+    for _ in range(steps):
+        battle.step(st, orders_of(st), P)
+    return seen
+
+
+class TestMoraleWindows:
+    def test_under_fire_holds_under_fire_s_after_the_last_hit(self, monkeypatch):
+        st = face_off(SPEAR, SLAVE, gap=400)
+        st.u["under_fire_s"][0, 0] = 0.0                       # hit on the step before
+        seen = _ctx_of(monkeypatch, st, replay.hold, 32)
+        flags = [bool(c["under_fire"][0, 0]) for c in seen]
+        held = int(P.sim["morale"]["under_fire_s"] / P.dt)     # 15 s: steps 0.5 ... 14.5 s after the hit
+        assert P.sim["morale"]["under_fire_s"] == 15
+        assert all(flags[:held - 1]) and not any(flags[held - 1:])
+
+    def test_recent_casualties_are_the_last_4_s_extended_the_last_60_s(self):
+        st = face_off(SPEAR, SLAVE)
+        u = st.u
+        assert u["lost_hist"].shape == (1, morale.history_steps(P, P.dt) * st.N)
+        hp0 = float(u["hp0"][0, 0])
+        lost = torch.zeros_like(u["men"])
+        lost[0, 0] = 0.15 * hp0
+        recent, extended = [], []
+        for k in range(130):
+            morale.casualty_windows(u, lost if k == 0 else torch.zeros_like(lost), P, P.dt)
+            recent.append(float(u["recent"][0, 0]))
+            extended.append(float(u["extended"][0, 0]))
+        assert recent[:8] == pytest.approx([0.15 * hp0] * 8) and recent[8:] == [0.0] * 122
+        assert extended[:120] == pytest.approx([0.15 * hp0] * 120) and extended[120:] == [0.0] * 10
+
+    def test_the_windows_give_the_database_points(self):
+        st = face_off(SPEAR, SLAVE)
+        u = st.u
+        ctx = TestMorale().ctx(st)
+        base = morale.target_points(u, ctx, P)
+        R = P.morale
+        u["recent"][0, 0] = 0.15 * u["hp0"][0, 0]
+        assert float((morale.target_points(u, ctx, P) - base)[0, 0]) == R["recent_casualties_penalty_15"] == -20
+        u["recent"][0, 0] = 0.0
+        u["extended"][0, 0] = 0.15 * u["hp0"][0, 0]
+        assert float((morale.target_points(u, ctx, P) - base)[0, 0]) == R["extended_casualties_penalty_15"] == -6
+
+    def test_decaying_windows_stay_behind_the_switch(self):
+        p = P.with_cal("morale", casualties_window="decay", casualties_s=30, extended_s=0)
+        assert morale.history_steps(p, p.dt) == 0
+        st = scenario.build([army([(SPEAR, -50, 0, 90)], [(SLAVE, 50, 0, 270)])], p)
+        assert st.u["lost_hist"].shape == (1, 0)
+        lost = torch.zeros_like(st.u["men"])
+        lost[0, 0] = 10.0
+        morale.casualty_windows(st.u, lost, p, p.dt)
+        morale.casualty_windows(st.u, torch.zeros_like(lost), p, p.dt)
+        assert float(st.u["recent"][0, 0]) == pytest.approx(10.0 * math.exp(-0.5 / 30))
+
+    def test_frozen_and_narrowed_battles_carry_the_history(self):
+        st = scenario.build([army([(SPEAR, -5, 0, 90)], [(SLAVE, 5, 0, 270)])] * 2, P)
+        st.done[1] = True
+        o = replay.hold(st)
+        o.kind[:, 0], o.target[:, 0] = O.ATTACK, st.N // 2
+        for _ in range(10):
+            battle.step(st, o, P)
+        assert float(st.u["lost_hist"][0].sum()) > 0 and float(st.u["lost_hist"][1].sum()) == 0
+        assert st.clone().u["lost_hist"].shape == st.u["lost_hist"].shape
+
+
+class TestExpendableAndStrongEnemy:
+    def test_a_routing_expendable_unit_scares_only_expendable_units(self, monkeypatch):
+        st = scenario.build([army([(SPEAR, -600, 0, 90)],
+                                  [(SLAVES, 300, 0, 270), (SLAVES, 300, 40, 270), (CLANRAT, 340, 0, 270)])], P)
+        H = st.N // 2
+        assert bool(st.u["expendable"][0, H]) and not bool(st.u["expendable"][0, H + 2])
+        st.u["r"][0, H], st.u["morale"][0, H], st.u["rout_count"][0, H] = True, -30.0, 1.0
+        seen = _ctx_of(monkeypatch, st, replay.hold, 1)
+        assert float(seen[0]["routing_friends"][0, H + 1]) == 1 and float(seen[0]["routing_friends"][0, H + 2]) == 0
+        st = scenario.build([army([(SPEAR, -600, 0, 90)],
+                                  [(CLANRAT, 300, 0, 270), (SLAVES, 300, 40, 270), (CLANRAT, 340, 0, 270)])], P)
+        st.u["r"][0, H], st.u["morale"][0, H], st.u["rout_count"][0, H] = True, -30.0, 1.0
+        seen = _ctx_of(monkeypatch, st, replay.hold, 1)
+        assert float(seen[0]["routing_friends"][0, H + 1]) == 1 and float(seen[0]["routing_friends"][0, H + 2]) == 1
+
+    def test_a_stronger_enemy_near_costs_strong_enemy_points(self):
+        """morale.strong_enemy_points: the database's -3 (kept: config/nn/sim.json strong_enemy_why); 0 measured."""
+        st = face_off(SPEAR, SLAVE)
+        ctx = TestMorale().ctx(st)
+        strong = TestMorale().ctx(st, strong_enemy=torch.ones_like(st.u["r"]))
+        assert float((morale.target_points(st.u, strong, P) - morale.target_points(st.u, ctx, P))[0, 0]) == -3
+        off = P.with_cal("morale", strong_enemy_points=0)
+        assert torch.equal(morale.target_points(st.u, strong, off), morale.target_points(st.u, ctx, off))
+
+
+class TestPhysicalResistanceAgainstMissiles:
+    def test_physical_resistance_cuts_missile_damage_capped_at_90_percent(self):
+        st = face_off(ARCHER, RUNNERS, gap=100)
+        H = st.N // 2
+        assert float(st.u["resist_physical"][0, H]) == pytest.approx(0.2)
+        pw = geometry.pairwise(st.u, 1.5)
+        target = torch.zeros((1, st.N), dtype=torch.long) - 1
+        target[0, 0] = H
+        hp = float(missile.volley(st.u, pw, target, 1.0, P)[1].sum())
+        off = float(missile.volley(st.u, pw, target, 1.0, P.with_cal("missile", physical_resist=False))[1].sum())
+        assert hp == pytest.approx(0.8 * off, rel=1e-4) and hp > 0
+        st.u["resist_missile"][0, H], st.u["resist_physical"][0, H] = 0.6, 0.5
+        capped = float(missile.volley(st.u, pw, target, 1.0, P)[1].sum())
+        assert capped == pytest.approx(0.1 * off, rel=1e-4)
+
+
+class TestLeavingMelee:
+    def _fight(self, key, n=2):
+        """n copies of: key (slot 0) and spearmen (slot H) in melee, both attacking."""
+        st = scenario.build([army([(key, -50, 0, 90)], [(SPEAR, 50, 0, 270)])] * n, P)
+        front, depth = geometry.dims(st.u, P.sim["formation"]["spacing_m"])
+        H = st.N // 2
+        st.u["x"][:, 0] = -depth[:, 0] / 2
+        st.u["x"][:, H] = depth[:, H] / 2
+        o = replay.hold(st)
+        o.kind[:, H], o.target[:, H] = O.ATTACK, 0
+        o.kind[:, 0], o.target[:, 0] = O.ATTACK, H
+        for _ in range(4):
+            battle.step(st, o, P)
+        assert bool(st.u["m"][:, 0].all())
+        return st, H
+
+    @pytest.mark.parametrize("key,held_s", [(SPEAR, 20.0), (ARCHER, 5.0), (GENERAL, 0.0)])
+    def test_a_unit_leaving_melee_is_held_pin_melee_s_a_missile_unit_pin_s_a_lord_not(self, key, held_s):
+        st, H = self._fight(key, 1)
+        x0, hp0 = float(st.u["x"][0, 0]), float(st.u["hp_abs"][0, 0])
+        xs = []
+        for _ in range(int(held_s / P.dt) + 12):
+            st.u["morale"][:] = 1000.0                           # nobody routs in this test
+            o = replay.hold(st)
+            o.kind[0, H], o.target[0, H] = O.ATTACK, 0
+            o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = O.MOVE, -200.0, 0.0, True
+            battle.step(st, o, P)
+            xs.append(x0 - float(st.u["x"][0, 0]))
+        held = int(held_s / P.dt)
+        if held:
+            assert max(xs[:held]) == pytest.approx(0.0, abs=0.01) and float(st.u["hp_abs"][0, 0]) < hp0
+        assert xs[-1] > 3
+
+    @pytest.mark.parametrize("key,mult", [(SPEAR, 1.25), (ARCHER, 0.55)])
+    def test_a_leaving_unit_takes_leave_taken_of_the_blows_and_deals_none(self, key, mult):
+        st, H = self._fight(key, 2)
+        hp0, k0 = st.u["hp_abs"][:, 0].clone(), st.u["k"][:, 0].clone()
+        o = replay.hold(st)
+        o.kind[:, H], o.target[:, H] = O.ATTACK, 0
+        o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = O.MOVE, -200.0, 0.0, True   # battle 0 leaves
+        battle.step(st, o, P)                                                        # battle 1 holds
+        lost = hp0 - st.u["hp_abs"][:, 0]
+        assert float(lost[0]) == pytest.approx(mult * float(lost[1]), rel=1e-3) and float(lost[1]) > 0
+        assert float(st.u["k"][0, 0]) == float(k0[0])
+
+    def test_off_leaving_melee_units_walk_out_and_take_the_rule(self):
+        p = P.with_cal("contact", pin_melee_s=0.0, leave_taken=None)
+        st = face_off(SPEAR, SPEAR)
+        H = st.N // 2
+        o = replay.hold(st)
+        o.kind[0, H], o.target[0, H] = O.ATTACK, 0
+        battle.step(st, o, p)
+        x0 = float(st.u["x"][0, 0])
+        for _ in range(6):
+            o = replay.hold(st)
+            o.kind[0, H], o.target[0, H] = O.ATTACK, 0
+            o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = O.MOVE, -200.0, 0.0, True
+            battle.step(st, o, p)
+        assert x0 - float(st.u["x"][0, 0]) > 1
+
+
+class TestReplayMeleeGaps:
+    def test_fill_gaps(self):
+        import numpy as np
+        f = np.array([1, 0, 0, 1, 0, 0, 0, 0, 1, 0], dtype=bool)
+        assert replay.fill_gaps(f, 3).tolist() == [True, True, True, True, False, False, False, False, True, False]
+        assert replay.fill_gaps(f, 0).tolist() == f.tolist()
+
+    def test_a_flickering_melee_flag_is_melee_for_a_non_leaver_only(self):
+        from tools.nn import gamedata
+        import numpy as np
+        T, N = 6, 2
+        f = {k: np.zeros((T, N)) for k in gamedata.FLOAT_FIELDS}
+        f.update({k: np.zeros((T, N), dtype=bool) for k in gamedata.BOOL_FIELDS})
+        f["x"][:, 1] = 10.0
+        f["ox"][:, 0], f["ox"][:, 1] = -30.0, 40.0            # far points (the planner's: the enemy's start)
+        f["men"][:] = 100
+        f["m"][:] = True
+        f["m"][2:4] = False                                   # the flag flickers off 2 s
+        b = gamedata.Battle(run="t", own_ai="attack", enemy_role="defend", result={}, t=np.arange(T, dtype=float),
+                            f=f, target=np.full((T, N), -1), names=("a", "b"), keys=("", ""), side=np.array([1, 2]))
+        rows = replay.recorded_orders(b, [0, 1], N, fight_nearest=True, leave_m=10.0, leavers=[True, False])
+        assert (rows["kind"][:, 1] == O.ATTACK).all() and (rows["phase"][:, 1] != 2).all()
+        assert (rows["kind"][2:4, 0] == O.MOVE).all()
+        gap0 = replay.recorded_orders(b, [0, 1], N, fight_nearest=True, leave_m=10.0, leavers=[True, False],
+                                      melee_gap=0)
+        assert (gap0["kind"][2:4, 1] == O.MOVE).all()

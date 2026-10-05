@@ -53,7 +53,8 @@ Artillery is in [artillery](artillery.md). Conventions: [index](README.md). Our 
 - **Armour against missiles** works as in melee (base part reduced by a random 50–100 % of
   armour, AP ignores it). Missile resistance and physical resistance (non-magical) apply; all
   resistances add up to a 90 % cap; a hit does at least 1 damage. · [CA damage blog][dmg] · high.
-  - Ours: same armour rule as melee; resistance from the passport. Agreement.
+  - Ours: same armour rule as melee; missile and physical resistance together, at most 90 %
+    (`missile.physical_resist`). Agreement.
 - **Large single-entity monsters** usually have +15 % missile resistance. · Steam · low.
 
 ## Friendly fire and line of fire

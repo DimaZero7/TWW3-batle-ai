@@ -37,8 +37,8 @@ All values are WH3 9.0.0 = our `game_rules.json`; descriptions from WH2.
 | Modifier | Points | What the table says | Ours |
 |---|---:|---|---|
 | Total casualties 10…90 % | −2, −4, −7, −11, −16, −22, −32, −47, −74 | share of HP lost in the battle (`use_hitpoints_instead_of_casualties_prop…` 1) | same |
-| **Recent casualties** 6/10/15/33/50 % | −6, −12, −20, −44, −80 | lost **in the last 4 s** | **window 30 s** (`morale.recent_s`, calibrated). **Conflict** |
-| **Extended casualties** 10/15/33/50/80 % | −4, −6, −14, −32, −60 | lost **in the last 60 s** | **not modelled. Gap** |
+| **Recent casualties** 6/10/15/33/50 % | −6, −12, −20, −44, −80 | lost **in the last 4 s** | same: a sliding 4 s window (`morale.casualties_s`; probes: 'HP lost recently' holds ~4 s after a volley) |
+| **Extended casualties** 10/15/33/50/80 % | −4, −6, −14, −32, −60 | lost **in the last 60 s** | same: a sliding 60 s window (`morale.extended_s`) |
 | Morale shock | — | 25 % lost in 4 s triggers a "morale shock" (`recent_casualties_shock_threshold` 25) | not modelled |
 | Lord's aura | +4 | full within 70 m, then fading to 0 at 70 × 1.5 = 105 m (`inspiration_radius_max_effect_range_modifier` 1.5); scaled by command stars between min and max (both 4) | +4 within 70 m, no fade. Small conflict |
 | Encourage (unit) | +4 | flat, "adjusted for distance"; since 5.3 all Encourage is +4 and does not stack with the lord's aura | — |
@@ -49,8 +49,8 @@ All values are WH3 9.0.0 = our `game_rules.json`; descriptions from WH2.
 | Flanks exposed one / both | −3 / −6 | lost within `open_flanks_effect_range` 120 m | same points, 60 m |
 | Flanks secure | +5 | | +5 (neighbour within 120 m) |
 | Routing units near | −3 per routing friend (≤ 4), +2.5 per routing enemy (≤ 5) | weighting × rout balance; within 100 m front/flank | same |
-| Strong enemy near | −3 … −24 | by enemy combat power 4 … 32, within `enemy_effect_range` 70 m | −3 only. Gap |
-| Under missile fire | −5 | "attacked by projectile" | same |
+| Strong enemy near | −3 … −24 | by enemy combat power 4 … 32, within `enemy_effect_range` 70 m | −3 only. Out of melee the recordings show not even −3 (3,244 cases, median 0), but with 0 the spearmen–clanrats pair departs from the game: −3 kept |
+| Under missile fire | −5 | "attacked by projectile" | same; holds 15 s after the last hit (probes: the game's flag goes off exactly 15 s later in 9 barrages of 9) |
 | Attacked / damaged by artillery | −8 / −10 | near miss = within 12 m (`artillery_near_miss_distance_squared` 144) | — |
 | Fear | −8 | enemy "is frightening"; range 20 m (fandom says 30 m) | — |
 | Very tired / exhausted | −2 / −6 | tired 0 | same |
@@ -114,11 +114,15 @@ Sources: [twwstats morale][tws-m] (high), [fandom Leadership][fw-lead], [fandom 
     `BalanceOfPowerPercent`) to find the trigger.
 - **Rout speed.** No public number. **Scurry Away!** (Skaven): +10 % speed at wavering or worse.
   · [fandom][fw-scurry] · high.
-  - Ours: measured routing speed (all recordings, 02.10.2026): Empire 0.865 of the run, Skaven
-    0.945 below half health and 0.866 above it — Scurry Away!'s ×1.1 and Strength in Numbers' ×0.9.
-    The simulator: `rout_speed` 0.86 and both passives as innate effects. Agreement.
+  - Ours: measured routing speed (all recordings): Empire 0.865 of the run, Skaven 0.945 below half
+    health and 0.866 above it — Scurry Away!'s ×1.1 and Strength in Numbers' ×0.9. That is the run with
+    fatigue: divided by the database's fatigue multiplier, routers run at 0.98–1.0 of the run in every
+    fatigue state. The simulator: `rout_speed` 0.985 of the fatigued run and both passives as innate
+    effects. Agreement.
 - **Expendable** units don't scare others when they rout (except other expendables); Knights
-  ignore routing peasants (3.1.0). · [fandom Attributes][fw-attr] · high. Ours: expendable handled.
+  ignore routing peasants (3.1.0). · [fandom Attributes][fw-attr] · high. Ours: a routing expendable
+  unit scares only expendable units (recordings: an expendable unit −3.0 points in 4 s, 350 cases; a
+  normal one 0.0, 178).
 
 [tws-m]: https://twwstats.com/kv/morale
 [1d6]: https://1d6chan.miraheze.org/wiki/Total_War_Warhammer/Tactics

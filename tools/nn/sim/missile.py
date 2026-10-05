@@ -170,7 +170,12 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None):
         landed = landed + torch.bmm(aimed, spill * lone[:, None, :])
     front = pw["rel_j"].abs() <= B["shield_defence_angle_missile"] * geometry.DEG
     shield = torch.where(front, u["shield"][:, None, :], torch.zeros_like(dist))
+    # Resistance: missile; with missile.physical_resist also physical (CA: physical resistance works against all
+    # non-magical damage, the sum at most 90 %; config/nn/sim.json missile.physical_resist_why).
+    resist = u["resist_missile"]
+    if ms.get("physical_resist"):
+        resist = (resist + u["resist_physical"]).clamp(max=0.9)
     hit = melee.per_hit(u["m_damage"][:, :, None], u["m_ap"][:, :, None], u["armour"][:, None, :],
-                        u["hp_man"][:, None, :], u["resist_missile"][:, None, :])
+                        u["hp_man"][:, None, :], resist[:, None, :])
     hp = landed * hit * (1 - shield)
     return shots, hp, hit

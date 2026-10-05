@@ -18,6 +18,9 @@ import torch
 
 from tools.nn.sim import orders as O
 
+MELEE_GAP = 20       # recorded seconds: a non-leaver's melee flag off this long or less between two fights is melee ...
+STAY_M = 10.0        # ... when the unit stayed within this of where the flag went off (it never left the fight)
+
 
 def hold(st):
     return O.hold(st.B, st.N, st.device)
@@ -49,7 +52,23 @@ def half_depth(men, width, spacing=1.5):
     return np.where(men > 1, np.ceil(np.maximum(men, 1) / files) * spacing / 2, 0.0)
 
 
-def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=True, leave_m=10.0, leavers=None):
+def fill_gaps(flag, gap, x=None, z=None, stay_m=None):
+    """flag [T] with runs of False of at most `gap` rows between two True rows set True (numpy); with x, z
+    and stay_m only where the unit stayed within stay_m of its place when the flag went off."""
+    out = np.asarray(flag, dtype=bool).copy()
+    if gap <= 0:
+        return out
+    on = np.flatnonzero(out)
+    for a, b in zip(on[:-1], on[1:]):
+        if 1 < b - a <= gap + 1:
+            if stay_m is not None and np.hypot(x[a + 1:b] - x[a], z[a + 1:b] - z[a]).max() > stay_m:
+                continue
+            out[a + 1:b] = True
+    return out
+
+
+def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=True, leave_m=10.0, leavers=None,
+                    melee_gap=MELEE_GAP, stay_m=STAY_M):
     """Orders implied by a recorded battle (tools/nn/gamedata.Battle), one row per recorded second:
     dict of arrays [T, N] kind, x, z, target, run in the simulator's slots (slot_of: recorded index
     -> slot). The game records the order's point at the formation's front (measured: half a depth
@@ -68,7 +87,13 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
     game's AI are not: in melee their recorded point lies anywhere (the planner's: often the enemy's
     start beyond it) while they fight on at the attack rate (build/simbatch/leave_dir.py: the planner's
     melee units with a point 10 m or more away kill 0.17-0.29 a second in every direction, the
-    network's under such a move 0.003-0.04 against 0.19 attacking)."""
+    network's under such a move 0.003-0.04 against 0.19 attacking).
+    melee_gap / stay_m: for a formation (more than one man) that is not a leaver, a gap of at most melee_gap
+    recorded seconds in its melee flag during which it stays within stay_m of where the flag went off counts as
+    melee: it never left the fight (CA's planner's spearmen against clanrats: the flag off 18 s and 1 s while the
+    unit stood in place, its order point 23-26 m away, the point it had through the whole fight; read as
+    seconds out of melee they gave a far MOVE and a break-off phase, so the replayed unit walked off and charged
+    back in, or, held by contact.pin_melee_s, stood 20 s without striking). A lord's gaps stay: lords break off."""
     f = battle.f
     T = len(battle.t)
     kind = np.full((T, N), O.HOLD, dtype=np.int64)
@@ -88,14 +113,18 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
     for i, s in enumerate(slot_of):
         tg = battle.target[:, i]
         ox, oz = np.nan_to_num(f["ox"][:, i]), np.nan_to_num(f["oz"][:, i])
+        leaver = leave_m > 0 and (leavers is None or leavers[i])
+        formation = np.nanmax(np.nan_to_num(f["men"][:, i])) > 1
+        m_i = (f["m"][:, i] if leaver or not formation else
+               fill_gaps(f["m"][:, i], melee_gap, np.nan_to_num(f["x"][:, i]), np.nan_to_num(f["z"][:, i]), stay_m))
         # In melee without a recorded target (CA's planner leaves it empty most of the time):
         # the nearest enemy, as the game's own AI records it - unless the unit is told to go
         # somewhere else (it leaves the fight).
         leaving = np.zeros(T, dtype=bool)
-        if leave_m > 0 and (leavers is None or leavers[i]):
+        if leaver:
             leaving = np.hypot(ox - np.nan_to_num(f["x"][:, i]), oz - np.nan_to_num(f["z"][:, i])) >= leave_m
         if nearest_of[i]:
-            tg = np.where((tg < 0) & f["m"][:, i] & ~leaving, nearest[:, i], tg)
+            tg = np.where((tg < 0) & m_i & ~leaving, nearest[:, i], tg)
         ok_t = tg >= 0
         mapped = np.where(ok_t, np.array(slot_of)[np.clip(tg, 0, None)], -1)
         attack = ok_t & (battle.side[np.clip(tg, 0, None)] != battle.side[i])
@@ -103,7 +132,7 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
             back = half_depth(np.nan_to_num(f["men"][:, i]), widths[i], spacing)
             br = np.radians(np.nan_to_num(f["b"][:, i]))
             ox, oz = ox - back * np.sin(br), oz - back * np.cos(br)
-        fighting = f["m"][:, i] & ~attack & ~leaving
+        fighting = m_i & ~attack & ~leaving
         kind[:, s] = np.where(attack, O.ATTACK, np.where(fighting, O.HOLD, O.MOVE))
         target[:, s] = np.where(attack, mapped, -1)
         x[:, s], z[:, s] = ox, oz
@@ -113,7 +142,7 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
         for ahead in (1, 2):
             run[:-ahead, s] |= running[ahead:]
         active = (f["men"][:, i] > 0) & ~f["r"][:, i] & ~f["s"][:, i]
-        contact = f["m"][:, i] & active
+        contact = m_i & active
         edges = np.diff(np.r_[False, contact, False].astype(int))
         for a, b in zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)):
             attacks = np.flatnonzero(attack[a:b]) + a

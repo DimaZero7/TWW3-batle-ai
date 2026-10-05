@@ -7,12 +7,13 @@ that sum by max(1, 15 % of the gap) (minimium_increment_update_per_tick, percent
 Effects (points): lord within 70 m +4 (fading to 0 at 105 m); the lord killed -16 for 45 s, then -10; routed
 off the map -16 for 120 s (routed on the field: his aura only; battle.py, sim.json morale.lord_fall); neighbour within 120 m
 (flanks secure) +5; casualties over the battle (share of HP) -2 ... -74; recent casualties
--6 ... -80 (calibrated 30 s window); extended casualties optional; winning / losing the melee +3/+6/+8,
+-6 ... -80 (HP lost in the last 4 s); extended casualties -4 ... -60 (the last 60 s); winning / losing the melee +3/+6/+8,
 -3/-8; attacked in the flank / rear -6 / -14 for the tick of the first contact from that side; flanks exposed (an enemy threatens the left, right or rear:
 lf / rf / bf) -3, several -6;
-routing friends within 100 m -3 each (at most 4; expendable units scare nobody); routing
-enemies within 100 m +2.5 each (at most 5); under fire -5; very tired -2, exhausted -6;
-a stronger enemy within 70 m -3; the army beaten as a whole -120 (army destruction).
+routing friends within 100 m -3 each (at most 4; a routing expendable unit scares only expendable units); routing
+enemies within 100 m +2.5 each (at most 5); under fire -5 until 15 s after the last projectile hit; very tired -2,
+exhausted -6; a stronger enemy within 70 m: the database's -3, 0 here (not seen in the recordings,
+morale.strong_enemy_points); the army beaten as a whole -120 (army destruction).
 
 States: wavering below 16 points; routing at 0 or below (not within 10 s of a rally); the third
 rout shatters, as does falling below the database's broken band (-50 points) during army destruction. A routing unit
@@ -59,6 +60,43 @@ def army_collapse(u, params):
               & (strength.flip(1) >= rules["army_destruction_enemy_strength_ratio"] * strength)
               & (strength <= rules["army_destruction_alliance_strength_ratio"] * initial))
     return beaten.gather(1, (u["side"] - 1).clamp(min=0)) & present
+
+
+def window_steps(seconds, dt):
+    """Steps in a sliding window of `seconds` (at least one)."""
+    return max(1, int(round(float(seconds) / dt)))
+
+
+def history_steps(params, dt):
+    """Steps of HP lost the state keeps (u["lost_hist"]) for the sliding casualty windows: the longer of
+    morale.casualties_s and extended_s; 0 when morale.casualties_window is not "sliding" (decaying sums)."""
+    cm = params.sim["morale"]
+    if cm.get("casualties_window") != "sliding":
+        return 0
+    return max(window_steps(cm["casualties_s"], dt), window_steps(cm.get("extended_s") or 0.0, dt))
+
+
+def casualty_windows(u, taken, params, dt):
+    """HP lost recently (u["recent"]: recent casualties, morale.casualties_s) and over the extended window
+    (u["extended"]: extended casualties, morale.extended_s; 0: off), with this step's losses `taken` [B, N]
+    (in place). casualties_window "sliding": exactly the HP lost in the last casualties_s / extended_s seconds
+    (u["lost_hist"]: the HP lost each step, newest first; the database's 'last 4 s' / 'last 60 s', measured: a
+    volley holds the game's PercentHpLostRecently 3 one-second samples, then 0); otherwise decaying sums with
+    those time constants (the old fit)."""
+    cm = params.sim["morale"]
+    ext_s = float(cm.get("extended_s") or 0.0)
+    K = history_steps(params, dt)
+    if K:
+        B, N = taken.shape
+        hist = torch.cat([taken[:, None, :], u["lost_hist"].reshape(B, K, N)[:, :K - 1]], 1)
+        u["lost_hist"] = hist.reshape(B, K * N)
+        u["recent"] = hist[:, :window_steps(cm["casualties_s"], dt)].sum(1)
+        if ext_s > 0:
+            u["extended"] = hist[:, :window_steps(ext_s, dt)].sum(1)
+        return
+    u["recent"] = u["recent"] * math.exp(-dt / float(cm.get("casualties_s", cm["recent_s"]))) + taken
+    if ext_s > 0:
+        u["extended"] = u["extended"] * math.exp(-dt / ext_s) + taken
 
 
 def table(rules, prefix, shares):
@@ -130,7 +168,9 @@ def target_points(u, ctx, params):
     pts = pts + torch.where(ctx["under_fire"], R["ume_concerned_attacked_by_projectile"], 0.0)
     pts = pts + torch.where(u["fat"] >= 5, R["ume_concerned_exhausted"],
                             torch.where(u["fat"] >= 4, R["ume_concerned_very_tired"], 0.0))
-    pts = pts + torch.where(ctx["strong_enemy"], R["enemy_morale_penalty_value_min"], 0.0)
+    # A stronger enemy within 70 m: the database's enemy_morale_penalty_value_min (-3) unless
+    # morale.strong_enemy_points says otherwise (measured 0: config/nn/sim.json morale.strong_enemy_why).
+    pts = pts + torch.where(ctx["strong_enemy"], float(cal.get("strong_enemy_points", R["enemy_morale_penalty_value_min"])), 0.0)
     # The army is beaten as a whole (army_collapse: the database's 2.6x / 0.22 thresholds).
     pts = pts + torch.where(ctx.get("collapse", torch.zeros_like(pts, dtype=torch.bool)),
                             R["ume_concerned_army_destruction"], 0.0)

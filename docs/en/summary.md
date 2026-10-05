@@ -53,10 +53,12 @@ again — the baselines and the drill check scripts, ~8 min on the CPU beside th
 (`tools/nn/train/refs.py`; ahead, while the previous step runs: `tools.ops.baselines --run`) — unless
 the "canary" (the baseline's first 32 pairs) adopts the old ones.
 
-**Already modelled:** speeds, formation, contact and leaving melee, hit chance (flat: slope 0.1
+**Already modelled:** speeds, formation, contact and leaving melee (ordered away, a unit without a
+missile weapon is held 20 s, a missile unit 5 s, as in the game), pursuit of routers, hit chance (flat: slope 0.1
 instead of the database's 1), damage and armour, charge and spear bracing, flank and rear
 (fitted: flank costs more than rear), volley fire, friendly fire and spill, lords (at most 9
-men hit them), morale with all main modifiers (a lord's death: his army
+men hit them), morale with all main modifiers (the 4 s and 60 s casualty windows and 'under fire' 15 s as in the
+game; a lord's death: his army
 −16 for 45 s, then −10; his rout on the field: the aura only), rout, rally, army collapse (−120 by the
 database's strategic strength), flank-threat flags, fatigue, units' innate effects, lord
 abilities.
@@ -73,8 +75,8 @@ frozen. Three scores, higher is better:
 | Score | Now |
 |---|---:|
 | Mechanics: unit pairs and shooting within 20 % of the game | 51 / 54 |
-| Same winner: the game's AI against itself | 22 / 26 |
-| Same winner: the network against the game's AI | 96 / 132 |
+| Same winner: the game's AI against itself | 21 / 26 |
+| Same winner: the network against the game's AI (157 recordings now) | 114 / 157 |
 
 **Gate replay** — the in-game gate battles replayed in the simulator (both sides from the
 recording). Gold trade at the game's end time: game −0.26…−0.41, simulator −0.05…−0.24 on the

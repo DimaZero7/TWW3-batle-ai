@@ -66,13 +66,16 @@ holds); the point `x`, `z` for move and withdraw (the unit's centre); `target` �
 slot for attack; `run` — run or walk; `ability` — the unit's ability slot to use now (−1 none;
 optional: orders made without it get −1; independent of `kind`). All `[B, N]`. A unit in melee
 leaves the fight on withdraw, or on a move to a point 10 m or more away (`contact.leave_m`, any
-unit): it strikes nobody and is not held in place, while the enemies in contact go on striking
-it. A missile unit is first pinned: it stays where it is, in contact and struck, for `contact.pin_s`
-5 s, then walks out (the game: our caught shooters told to move away get out after 6–7 s, still in
-melee 3 s later 0.85; the simulator walked them out in ~2 s; melee units already stay as long as in
-the game, their enemies follow them). As in the game: a melee unit moving away deals ~6 % of its attack rate and takes ~1.7× the
-damage ([measurements](measurements.md#leaving-melee)); before, the simulator let a unit under
-such a move fight on at full rate, and the network learned to use that. A unit without a missile
+unit): it strikes nobody, while the enemies in contact go on striking it. First it is held in place
+(standing in contact, struck): a unit without a missile weapon for `contact.pin_melee_s` 20 s, a missile
+unit for `contact.pin_s` 5 s, a lord not at all; then it walks out. While a leaving unit is in contact it
+takes ×1.25 the blows (no missile weapon) and ×0.55 (missile units) — `contact.leave_taken`. Measured in
+the game (163 network battles, 855 departures): a unit without a missile weapon told to leave is still
+in melee 4 / 10 / 20 s later in 0.94 / 0.84 / 0.51 of cases (out after 21 s, median; the database's
+`melee_breakoff_secs` 24), stands in place, kills nobody from its 2nd second and takes ×1.23 the damage
+(missile units ×0.62); our missile units get out after 6–7 s. The simulator walked infantry out in 3–4 s,
+missile units in ~2 s. Before, the simulator let a leaving unit fight on at full rate, and the network
+learned to use that ([measurements](measurements.md#leaving-melee)). A unit without a missile
 weapon standing in melee under hold (no attack order) strikes at `contact.hold_rate` 0.5 of its rate,
 every enemy it touches: in the game only such a unit's men in contact fight (the network's units,
 matched on own and enemy unit keys: 0.80 of the kills of the same unit attacking; with such a unit
@@ -102,12 +105,12 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 
 | Mechanic | How | Source |
 |---|---|---|
-| Speed | walk, run, acceleration, deceleration of the passport; routing units run at 0.86 of the run (before innate effects: a Skaven rout ×1.1 by Scurry Away!) | DB; the routing speed measured (Empire 0.865; Skaven 0.945 below half health, 0.866 above: [innate effects](#innate-effects)) |
+| Speed | walk, run, acceleration, deceleration of the passport; routing units run at 0.985 of the run with fatigue (before innate effects: a Skaven rout ×1.1 by Scurry Away!) | DB; the routing speed measured: routing / run divided by the database's fatigue multiplier — the Empire 0.989–1.000 in all 6 fatigue states, the Skaven 0.977 ([innate effects](#innate-effects)) |
 | Formation | front of the ordered width, ranks 1.5 m apart; a lord is a circle of his radius | measured: 120 spearmen, 30 m, 6 ranks |
-| Contact | edges within 1 m (2 m more for those already fighting); a unit leaves melee on withdraw or a move 10 m or more away (it strikes nobody, the enemies in contact strike it) | measured: centre distance at the first contact; leaving — the network's runs ([measurements](measurements.md#leaving-melee)) |
+| Contact | edges within 1 m (2 m more for those already fighting); a unit leaves melee on withdraw or a move 10 m or more away (it strikes nobody, the enemies in contact strike it ×1.25, missile units ×0.55); before it leaves it is held in place: no missile weapon 20 s, missile units 5 s, a lord not | measured: centre distance at the first contact; leaving — 163 network battles (above, "Orders") |
 | Facing | a moving unit faces where it goes, but a step of less than 10 m to its point goes without turning; a formation in melee turns at most 2° a second (a lord turns at once); out of melee a standing unit turns in place at most `turn.formation_deg_s` 80°/s (a lord, a single entity: `turn.single_deg_s` 40°/s) | measured: infantry in melee turns 1°/s (median; mean 2.3), a free unit struck in the flank turns 8° in 5 s (median); standing missile units out of melee whose engine target appears 60° or more off their facing face it (within 20°) after 1 s (median; mean 1.6 s at 60–120°, 1.7 s at 120–180°; ≥ 64°/s with 1 s samples), standing turns of lords 40°/s (median of 440) |
 | Order point | the game records the front's centre; the simulator goes to the unit's centre, half a depth behind | measured (spearmen 3.3–4.8 m, slaves 6.5–6.9 m) |
-| Men fighting | 0.75 of the files in contact; a unit shares out to each side of its formation (front, left, right, back) no more than that side holds; at most 9 men strike a lord in all, however many units, their rates summed; with the enemy lord on him the infantry at 0.35; a unit attacking another enemy strikes a lord it touches at 0.4; a melee unit under hold at 0.5 | calibrated; hold — on the kills of the network's units in the gate battles (above, "Orders"); per side — measured: a unit already fighting hits a newcomer on its flank 2.2× the rule in the first 15 s (with one shared front the simulator gave 1.2×); 9, the sum — measured ([a lord surrounded](../game/units/lord-swarm.md)); 0.35, 0.4 — whole battles (below, "Lords fought by several units") |
+| Men fighting | 0.75 of the files in contact; a unit shares out to each side of its formation (front, left, right, back) no more than that side holds; at most 9 men strike a lord in all, however many units, their rates summed; with the enemy lord on him the infantry at 0.35; a unit attacking another enemy strikes a lord it touches at 0.4; a melee unit under hold at 0.5; a router is struck by every man in contact (no 20 s ramp) at 0.43 of the rule, from the rear, without the charge | calibrated; hold — on the kills of the network's units in the gate battles (above, "Orders"); per side — measured: a unit already fighting hits a newcomer on its flank 2.2× the rule in the first 15 s (with one shared front the simulator gave 1.2×); 9, the sum — measured ([a lord surrounded](../game/units/lord-swarm.md)); 0.35, 0.4 — whole battles (below, "Lords fought by several units"); a router — measured (below, "Pursuit") |
 | Hit chance | 35 + 0.1 × (attack − defence), within 8–90 %; defence ×0.6 from the flank, ×0.3 from the rear; the defence lost counts 2.0× the rule from the flank, 0.25× from the rear (against a lord: none, measured) | DB numbers; the weights calibrated (see below and [flanks](#flanks-rear-and-charges-in-whole-battles)) |
 | Damage of a hit | armour-piercing + base × (1 − 0.75 × armour/100), no more than a man's health | DB (armour stops a random 50–100 %) |
 | Time between blows | `attack_interval_s` of the passport | DB |
@@ -116,7 +119,7 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 | Men lost | blows that do not kill wound: men share = max(1 − g × (1 − health share), health share), g = (hits to kill)^−0.5 | calibrated on men against health in the pairs |
 | Shooting | from standing only; first shot 3.3 s (arrows) / 4.3 s (sling) after halting; a new order (another kind or another attack target) makes the unit aim again (`missile.aim_reset_on_order`); standing, it shoots only at targets within `missile.stand_fire_arc_deg` 45° of its facing: a target beyond that is turned to first (Facing) and aimed at only once within the arc; without an ordered target it takes the nearest within the arc, else turns to the nearest beyond it; the men reload all the time (moving too) and the unit shoots once they are all loaded (`missile.volley_load` 1): whole-unit volleys 11.0 / 11.5 s apart (every loaded man starts reloading when the unit fires, also those whose line is blocked; the `fire` flag stays on between volleys); range from the formation's edge | measured (the range; the battles: a halt gives 0.55–0.76 projectiles a man in the next 12 s, the old volley-then-trickle 1.5–1.7, volleys 1.0; a firing unit given a new order shoots 0.6–0.75 as much in the next 10 s; the arc: 99 % of the game's standing volleys are within 45° of the direction to the target, 95 % within 31°; a new target 60–180° off: the first volley 3 s later against 2 s at 0–40°) |
 | Hits | 0.42 arrows, 0.47 sling at the edge of range; ×1.29 at 70 m, ×1.12 at 90 m | measured; the distance factor from the range test |
-| Shield, resistance | a shield blocks its chance within 60° of the front; missile resistance of the passport | DB |
+| Shield, resistance | a shield blocks its chance within 60° of the front; against a projectile missile and physical resistance together, at most 90 % (`missile.physical_resist`; the ward save `damage_mod_all` is in the physical) | DB; the rule — CA (Feature Focus "Damage") |
 | A lord as a target | 0.43 of the unit rule | measured: ~33k shots at lords out of melee for the whole flight (General by arrows ~0.5, by sling ~0.37, Warlord by arrows ~0.32) |
 | Friendly fire | of the hits aimed at a unit in melee, 0.26 (arrows) / 0.56 (sling) land on the shooter's own units in contact with it, split by their men (a lord among them ×0.43, as a lone target) | measured: the HP those units lose beyond the melee rule while their own side shoots (1.5k + 1.3k seconds) |
 | Spill | of the hits aimed at a unit, each unit of the target's side out of melee takes 0.115 within 30 m, 0.034 at 30–60 m, 0.015 at 60–90 m | measured: HP of units nobody shoots at, next to a unit that is shot (15.6k seconds) |
@@ -126,12 +129,12 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 | Fire whilst moving | a unit with `mounted_fire_move` (the militia) aims and shoots while it moves, at targets within `missile.move_fire_arc_deg` 90° of the way it walks | DB attribute; the arc measured (our militia on the move: 0.52 of its full rate toward the enemy, 0.31 across, 0.16 away) |
 | Pistols (estimate) | hit rate 0.5 at the edge of range (×1.12–1.29 at 60–90 m), reload 10.8 s, first shot 3.8 s | estimate from the projectile's calibration area (2.0 m at 65 m against the arrow's 3.7 m at 95 m), not measured: `sim.json` missile.musket_why |
 | Morale | points: leadership + effects; MoralePercent = points / leadership; moves 1 point or 15 % of the gap per 0.5 s | DB; the step measured (+2 points a second in every recording) |
-| Morale effects | lord +4 within 70 m, fading to 0 at 105 m; lord killed (health 0): the others −16 for 45 s, then −10 to the end; routed off the map: −16 for 120 s; shattered or routing on the field: his aura only (`lord_fall`); neighbour within 120 m +5; casualties −2…−74; recent casualties −6…−80 (last 30 s, of the whole health); winning / losing the melee +3/+6/+8, −3/−8 (damage ratio 1.5 / 2.5 / 4); first struck in the flank −6, rear −14 for one 0.5 s tick; the army beaten as a whole (enemy strength ≥ 2.6× own, own ≤ 0.22 of the start) −120; flanks exposed (an enemy threatens the left, right or rear: `lf`, `rf`, `bf`) −3, two or more −6; routing friends −3 each; routing enemies +2.5 each; under fire −5; very tired −2, exhausted −6; a stronger enemy within 70 m −3 | DB points; window, ratios calibrated; attacked in the flank / rear measured ([flanks](#flanks-rear-and-charges-in-whole-battles)); a lord's fall measured: routs in 75 recorded falls, death in 15 in-game battles ([lords](#lords)) |
+| Morale effects | lord +4 within 70 m, fading to 0 at 105 m; lord killed (health 0): the others −16 for 45 s, then −10 to the end; routed off the map: −16 for 120 s; shattered or routing on the field: his aura only (`lord_fall`); neighbour within 120 m +5; casualties −2…−74; recent casualties −6…−80 (lost in the last 4 s, of the whole health); extended casualties −4…−60 (the last 60 s); winning / losing the melee +3/+6/+8, −3/−8 (damage ratio 1.5 / 2.5 / 4); first struck in the flank −6, rear −14 for one 0.5 s tick; the army beaten as a whole (enemy strength ≥ 2.6× own, own ≤ 0.22 of the start) −120; flanks exposed (an enemy threatens the left, right or rear: `lf`, `rf`, `bf`) −3, two or more −6; routing friends −3 each (a routing expendable unit scares only expendable units); routing enemies +2.5 each; under fire −5 (15 s more after the last hit); very tired −2, exhausted −6; a stronger enemy within 70 m −3 (out of melee the recordings show 0, kept: [below](#expendable-units-resistance-a-stronger-enemy)) | DB points; the 4 and 60 s windows — DB, the 15 s under fire — probes ([below](#casualty-windows-and-under-fire)); ratios calibrated; attacked in the flank / rear measured ([flanks](#flanks-rear-and-charges-in-whole-battles)); a lord's fall measured: routs in 75 recorded falls, death in 15 in-game battles ([lords](#lords)) |
 | States | wavering below 16 points, rout at 0, shattered at the third rout or below −50 points during army destruction; no ordinary rout within 10 s of a rally | DB; shattering below −50 during army losses measured |
 | Rally | while the army is not collapsing and no standing enemy is within 90 m the router regains 2 points a second; rallies at MoralePercent 0.23 | measured: 0.23 and 90 m (365 rallies); 2 points calibrated (median rally 44 s) |
 | Fatigue | The calibration is ON (`fatigue.calibration.on=true`): 10 ticks/s, DB thresholds; melee tires only under an attack order (single entity +19 a tick, formation 13.7), a move by its order's run flag (run +4, walk −1), routing +4, shooting 7.5, idle −18 with no standing enemy within 80 m, else ready −7 | Fitted on the units' activities in 204 recordings; exhausted shares as in the game ([below](#fatigue-calibration)) |
 | Lord abilities | the side the game's AI plays (`ai`, side 2 by default) fires its lord's active abilities by a rule; the network's side fires them by order (`Orders.ability`; a side the network plays should have `ai` false); passives are innate effects (below). Every number is the ability's passport (`config/nn/abilities.json`, the database; `sim.json` abilities says which are modelled and the AI's triggers); effects on the owner (phase targets self), his side's units within range (friends) and enemies within range (enemies): speed, charge speed, melee attack and defence, damage, AP, charge bonus, morale. Warlord: Deadly Onslaught (31 s, ready 90 s after: melee damage and AP ×1.25, charge bonus ×1.6) in melee; Verminous Valour (17 s / 60 s: speed ×1.25, +8 morale points; its 25 m blast has no damage) with an enemy within 60 m; Rally (14 s / 60 s: +16 to friends within 35 m) when a friend there wavers. General: Stand Your Ground (18 s / 90 s: melee defence +24, +16 within 35 m) in melee; Foe Seeker (25 s / 60 s: speed ×1.25) with an enemy within 60 m | DB (`config/nn/sim.json` abilities; owned per the game's roster readout); when the AI fires them is an assumption |
-| Innate effects | every attribute and passive or game-fired ability of a unit (`config/nn/effects.json`), one mechanism: on while its conditions hold, its stats on the owner (an aura also on friends in range), its rules for the step. Unbreakable (Flagellants: morale never below leadership, never wavers or routs), Expendable (its rout scares nobody), Encourage (the lord's aura), Charge Reflection (bracing), Fire Whilst Moving; Strength in Numbers (Skaven infantry: +6 leadership, +8 melee defence, speed ×0.9 while health ≥ 50 %), Scurry Away! (speed ×1.1 while wavering or routing), Hold the Line! (+5 melee defence, +4 leadership within 35 m of a standing General), Frenzy (+10 melee attack, ×1.1 damage, AP and charge while morale ≥ half of leadership), Strength of the Penitent (fired by the game when losing the melee: 20 s of +14 melee defence, +15 % physical resistance, ends out of melee, ready 3 s after). Schema only (the network sees them): Charge Defence vs. Large, Vanguard Deployment, Hide (forest), Immune to Psychology; left out by `sim.json` effects.off: Single Entity (lords: speed ×0.9, damage ×0.8 below 25 % health; no such speed drop in the recordings) | DB: the passports, `special_ability_to_auto_deactivate_flags`, `special_ability_to_recharge_contexts`; the attributes' rules: the knowledge base; measured: rout and running speeds, the morale drop at 50 % health ([below](#innate-effects)) |
+| Innate effects | every attribute and passive or game-fired ability of a unit (`config/nn/effects.json`), one mechanism: on while its conditions hold, its stats on the owner (an aura also on friends in range), its rules for the step. Unbreakable (Flagellants: morale never below leadership, never wavers or routs), Expendable (its rout scares only expendable units), Encourage (the lord's aura), Charge Reflection (bracing), Fire Whilst Moving; Strength in Numbers (Skaven infantry: +6 leadership, +8 melee defence, speed ×0.9 while health ≥ 50 %), Scurry Away! (speed ×1.1 while wavering or routing), Hold the Line! (+5 melee defence, +4 leadership within 35 m of a standing General), Frenzy (+10 melee attack, ×1.1 damage, AP and charge while morale ≥ half of leadership), Strength of the Penitent (fired by the game when losing the melee: 20 s of +14 melee defence, +15 % physical resistance, ends out of melee, ready 3 s after). Schema only (the network sees them): Charge Defence vs. Large, Vanguard Deployment, Hide (forest), Immune to Psychology; left out by `sim.json` effects.off: Single Entity (lords: speed ×0.9, damage ×0.8 below 25 % health; no such speed drop in the recordings) | DB: the passports, `special_ability_to_auto_deactivate_flags`, `special_ability_to_recharge_contexts`; the attributes' rules: the knowledge base; measured: rout and running speeds, the morale drop at 50 % health ([below](#innate-effects)) |
 | Map | a square ±1020 m; a routing unit that crosses the edge leaves the battle | measured |
 | Visibility | everything is visible (`vis`, kept for later) | a flat empty map |
 
@@ -349,7 +352,7 @@ an effect by its key.
 into a rout): routing Empire units run at 0.865 of their run (115k s), routing Skaven at 0.945 below
 half health (186k s) and 0.866 above it (14k s); running in order, steady, above half health:
 Empire 0.97, Skaven 0.88. Scurry Away!'s ×1.1 and Strength in Numbers' ×0.9 (above half health)
-give exactly these ratios, so `morale.rout_speed` is the Empire's 0.86. Crossing 50 % health, Skaven
+give exactly these ratios, but those routers carry their fatigue; divided by the database's fatigue multiplier they run at 0.98–1.0 of the run, so `morale.rout_speed` is 0.985 of the fatigued run ([below](#routing-speed)). Crossing 50 % health, Skaven
 units drop 2.3 points more morale in the next 3 s than Empire units (7.7 against 5.5 over 1 039 and
 951 crossings; at 40 % and 60 % both drop the same): Strength in Numbers' +6 switches off there.
 The Skaven's former start bonus (`morale.faction_bonus` +6, fitted) was Strength in Numbers: it is 0
@@ -482,6 +485,94 @@ mirror (69 %). Waiting (a reserve, a walk) loses: the side that waits fights out
   spearmen, and the misses fall on those spearmen: spill reaches the target's units in melee too
   (the table above). One recorded swarm replayed 8 times: ours lost 12.2k HP (the game 14.7k), the
   Warlord 2.5k (the game 1.6k).
+
+## Pursuit, routing and casualty windows
+
+Seven rules measured in the game's recordings (`build/prespec/batch2.md`, `build/prespec/specs.md` items 2
+and 3). Each is a switch in `config/nn/sim.json` with its reason.
+
+### Pursuit
+
+A unit touching only routing enemies used to deal them **nothing**: the contact clock counts standing
+enemies only, so its share of men brought to bear stayed 0. Now a router is struck by every man in
+contact at `contact.pursuit_rate` **0.43** of the rule, from the rear, without the charge. Measured
+(171 battles): a target chased by one unit (centres within 12 m) loses 18.1 HP/s routing (6,090 s)
+against 28.4 standing in melee (54,292 s): 0.64 (95 % CI 0.56–0.75); the first 5 s of a pursuit hit as
+hard as later (17.9 against 18.2), so no charge burst. Fitted with the same measure on the gate
+battles in the simulator (8 copies, with every rule of this section): a share of 0.35 / 0.65 gives
+0.55 / 0.90 of a standing target, linear between, so 0.43 gives 0.64. With the old routing speed 0.86 the
+same 0.64 came at 0.65: routers now flee nearly as fast as their pursuers run, so the seconds within 12 m
+are more often the first of a rout. The share is relative to the simulator's own melee (a standing target
+loses 33 HP/s against the game's 28.4); in absolute HP/s the game's 18.1 comes already at 0.35.
+
+### Routing speed
+
+A routing unit runs at `morale.rout_speed` **0.985** of its run — the run **with fatigue**. The former
+0.86 was the median of the recorded routers, nearly all tired: fatigue counted twice. Divided by the
+database's fatigue multiplier, routing Empire units run at 0.989 / 1.000 / 0.994 / 0.997 / 0.992 / 0.990
+of the run in each fatigue state (fresh to exhausted, 13–49k s each), Skaven at 0.977 of "run × Scurry
+Away! × Strength in Numbers × fatigue" (132k s).
+
+### Casualty windows and "under fire"
+
+- **Recent casualties** — HP lost in exactly the last `morale.casualties_s` **4 s**; **extended
+  casualties** — in the last `extended_s` **60 s** (sliding windows, `casualties_window` "sliding": the state
+  keeps each step's losses for 60 s, `lost_hist`). The points are the database's (recent 6 / 10 / 15 / 33 /
+  50 % → −6 … −80, extended 10 / 15 / 33 / 50 / 80 % → −4 … −60).
+- **"Under fire"** (−5) holds `morale.under_fire_s` **15 s** after the last hit.
+
+In-game probes (1 s samples): the game's "under missile attack" flag goes off exactly 15 s after the
+last health loss in 9 barrages of 9, and morale starts to rise in that same second; "HP lost recently"
+holds 3 samples after a volley, then drops to 0 — a flat window of ~4 s, as the database says. The
+former single decaying 30 s window was fitted while "under fire" lasted 2 s and stood in for it. Only
+together do the rules hold the shooting: the archers' target wavers 46 s after the first shot (game
+39), with 15 s alone after 25 s; the slingers' target 173 s (game 154).
+
+### Expendable units, resistance, a stronger enemy
+
+- **Expendable units** (Skaven slaves): a routing expendable unit scares (−3, "routing friends") only
+  other expendable units within 100 m (`morale.expendable_scares_expendable`), not the others. The
+  database's attribute text; the recordings: an expendable unit next to a newly routing expendable one
+  −3.0 points in 4 s (median, 350 cases), a normal one 0.0 (178).
+- **Physical resistance against missiles** (`missile.physical_resist`): a projectile's damage is cut by
+  missile and physical resistance together, at most 90 % (CA: physical resistance works against all
+  non-magical damage). Today: the Night Runners (20 %) and Strength of the Penitent (+15 %).
+- **"A stronger enemy within 70 m"** stays at the database's −3 (`morale.strong_enemy_points`). The
+  recordings out of melee show 0 (3,244 cases, median 0 whatever the strength ratio), but with 0 the
+  spearmen–clanrats pair breaks (see ["Tried and rejected"](#tried-and-rejected)).
+
+### Replay: a pause in the melee flag
+
+For the units of CA's planner and the game's AI (not leavers, not lords) a pause in the melee flag of
+at most `replay.MELEE_GAP` 20 s, while the unit stays within `replay.STAY_M` 10 m of where the flag went
+off, counts as melee: the replay attacks the nearest enemy instead of moving to a far point. In the
+spearmen–clanrats pair the flag goes off for 18 s and 1 s while the spearmen stand in place, their order
+point 23–26 m away (the same point the whole fight). The replay used to walk them out of the fight and
+bring them back with a charge; with the 20 s hold they would have stood without striking (damage to the
+clanrats 13.7 HP/s, game 20.6). With the rule — 18.9. Lords break off for real: their pauses stay
+(otherwise the Warlord lost 6.8 HP/s against the game's 5.5).
+
+### What changed in the checks
+
+The same recordings before and after (26 game-AI battles, 157 decided network battles), CPU:
+
+| | Before | After | Game |
+|---|---|---|---|
+| Mechanics: within 20 % | 51 / 54 | 51 / 54 | |
+| Same winner: game-AI battles | 23 / 26 | 21 / 26 | |
+| Same winner: network battles | 114 / 157 | 114 / 157 | |
+| Spearmen–clanrats: clanrats lose, HP/s | 16.9 | 18.9 | 20.6 |
+| Archers' target wavers / routs after the first shot, s | 35 / 69 | 46 / 69 | 39 / 71 |
+| Slingers' target wavers / routs, s | 154 / 184 | 173 / 184 | 154 / 177 |
+| Gate card 20261005-161910: rout onsets per unit, own / enemy | 0.95 / 1.12 | 0.91 / 1.15 | 1.52 / 0.58 |
+| … gold trade | +0.062 | +0.078 | −0.385 |
+| … health a router loses per rout, own / enemy | 0.075 / 0.085 | 0.068 / 0.075 | 0.11 / 0.14 |
+| … routing / standing target, one pursuer | 0.15 | 0.70 | 0.64 |
+
+On the gap card everything is within noise (rout onsets per unit: noise 0.3–0.4): these rules take away
+what the network used for free in the simulator (leaving melee, unharmed routers), and the rout gap lies
+elsewhere (below, "What is missing": the rally and the rout again). The morale fits (`rally_rate`, `rally_mp`,
+`rout_floor_mp`, `hold_rate`, `unit_incidental`) were not changed: the mechanics hold without it.
 
 ## Checks against the game
 
@@ -645,6 +736,11 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
 
 ## What is missing
 
+- **A rally and a rout again.** In the gates' replay (both sides recorded, 4 gates × 6 copies) the AI's
+  rallied units rout again within 60 s in 0.65 of cases (game 0.39), after 19 s (game 34); half of the
+  rallies are units below 20 % health, and after a rally the simulator's morale falls (the big casualty
+  penalties) while the game's rises. The casualty-window rules did not fix it (0.59 before them). The
+  rally rule is the next task.
 - **The game AI's army routs more often than in the game.** On the 8 battles of gate 20261004-071805 a
   game-AI unit routs 0.92 times in the game, 1.9 in the simulator (both sides replaying the game's
   orders) and 1.65 (against network n3). Not morale: there is no AI morale extra at Normal (AI against
@@ -698,7 +794,7 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
   further from the game ([above](#fatigue-calibration)). Uphill is not modelled.
 - **Not modelled**: terrain, a turn while walking (a moving unit faces where it goes at once),
   cavalry, monsters, magic, flying, artillery, experience ranks, the scaled "strong enemy near"
-  (only −3: its combat power is not in the data), the database's rally timer (meaning unclear).
+  (only −3: its combat power is not in the data; out of melee the recordings show not even −3), the database's rally timer (meaning unclear).
 - `vis` is always true: line of sight is not modelled.
 
 ## Tried and rejected
@@ -719,7 +815,9 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
 | `unit_incidental` 0.3 / 0.6 with contact synchronisation | mean trade error at game end 0.278 / 0.225 against 0.184 at 1.0; at sim end 0.269 / 0.202 against 0.151; network winners 78 / 91 against 98 of 132 | use 1.0; the old fit (game 19.6 HP/s, sim 33.9 at 1 and 22.3 at 0.3) used clock-indexed replay and may have compensated for its errors |
 | The flank / rear striker by its own front (pending, above) | the lone flank / rear attacker right (1.62× / 1.94×), network's winners 47 → 52 of 93 | the early exchange ~40 % less exact (0.043 → 0.061), game-AI winners 22 → 20, the `counter` drill broken |
 | A break-off at the measured rates, with the database's 10 s immunity (`melee_breakoff_total_immunity_secs`) | fights in the pairs twice as long | broke the pairs, did not help the mirror; the trigger is unknown |
-| The database's 4 s recent and 60 s extended casualty windows | 4 s: the archers' target wavered 90 % late, the slingers' never; 30 s + 60 s: the pairs wavered too early | the calibrated single 30 s window stays |
+| The database's casualty windows (4 s and 60 s, decaying) with "under fire" 2 s | 4 s: the archers' target wavered 90 % late, the slingers' never; 30 s + 60 s: the pairs wavered too early | taken as sliding windows together with "under fire" 15 s ([above](#casualty-windows-and-under-fire)) |
+| "Under fire" 15 s with the old 30 s window | the archers' target wavers 25 s after the first shot (game 39), mechanics 50 of 54; with decaying 4 s and 60 s windows 66 s (50 of 54) | only together with the sliding 4 s and 60 s windows |
+| "A stronger enemy within 70 m" 0 (the recordings out of melee: median 0 over 3,244 cases) | with the rest of the rules the mechanics check 51 → 50 of 54: in the spearmen–clanrats pair the spearmen waver at 287 s (game 251; with −3: 253) and rout at 302 (game 275; with −3: 291), the clanrats waver at 295 s, which they never do in the game | the database's −3 kept (`morale.strong_enemy_points`); in melee the −3 (or what it stands in for) shows |
 | The charge's +15 morale (DB `charge_bonus` 15 / `charge_timeout` 60) | after 3343 recorded charges morale over the next 1–4 s falls as after 1500 contacts met standing | no +15 shows in the game |
 | The database's hit slope 1, flank ×0.6 / rear ×0.3, sectors 45° / 135°, spacing 1.8 m, bracing ×2 | worse against the pairs and the whole battles | the measured numbers kept (slope 0.1: the pairs need one flat number; flank 2.0 / rear 0.25; 60° / 120°; 1.5 m) |
 | The database's lord-fall morale (−16, then −10 to every unit) at every fall, routs too | the simulator routed 39 % of the army within 10 s of a fall (the game 21 %); the game's units lose −3 to −4.8 points — every recorded fall was a rout | a rout on the field is the aura only; −16 / −10 only at a death, −16 for 120 s on leaving the map (`lord_fall`, measured in the game) |
@@ -731,7 +829,8 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
 | A lord as a target at 0.9 of the unit rule | its 2-second loss windows overlapped and counted each loss twice | 0.43 over ~33k shots |
 | Leaving melee for missile units only | network units under a move away fought on at full rate (the game: ~6 % of the attack rate) | `contact.leave_m` 10 m for every unit |
 | Hold in melee at the measured 0.75 (one against one: 0.66–0.80) | n3 against ai_like on the 8 gate battles +0.19 → +0.07 (the game −0.27), but held units still killed 0.26–0.27 a second against the game's 0.17 (they touch 2.3 enemies and strike each), both sides replayed −0.100 → −0.065 | 0.5: kills 0.18, n3 −0.08, replay −0.089 (same winner 7 of 8 in both) |
-| Pinning every unit leaving melee for 5 s (melee units too) | melee units still in melee 3 s later 0.94 (the game 0.81; without the pin 0.82), escape 0.029 a second (game 0.041, without 0.048) | missile units only (`contact.pin_s`) |
+| Pinning every unit leaving melee for 5 s (melee units too), from 8 battles of one gate | melee units still in melee 3 s later 0.94 (the game 0.81; without the pin 0.82), escape 0.029 a second (game 0.041, without 0.048) | recounted on 163 network battles: the game 0.96 3 s later, out after 21 s (median) — the 20 s hold taken (`contact.pin_melee_s`) |
+| A replay pause of the melee flag up to 3 s for every non-leaver (lords too), without the place check | the Warlord lost 6.8 HP/s (game 5.5), mechanics 48 of 54; the spearmen's long pause (18 s) stayed a move | up to 20 s, formations standing in place only (above, "Replay") |
 
 ## Surprises
 
@@ -743,4 +842,5 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
 - The arena's close-range damage per arrow (~25 HP at 34 m) is more than an arrow's whole
   damage (19): melee losses are mixed in; the simulator takes the distance factor from the range
   test instead.
-- Routing units run slower than their run: the Empire's 0.80–0.86, the Skaven's 0.85–0.96.
+- Routing units run slower than their run (the Empire's 0.80–0.86, the Skaven's 0.85–0.96) because of
+  fatigue: divided by its multiplier they run at 0.98–1.0 of the run.

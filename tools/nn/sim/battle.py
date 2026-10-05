@@ -92,12 +92,15 @@ def step(st, orders, params=None, dt=None):
     striker = standing & ~leaving
     strike = touch & striker[:, :, None]
     engaged = standing & (touch & standing[:, None, :]).any(2)
-    # Pinned: a missile unit leaving melee stays held where it is (not striking, struck) until it has been leaving
-    # in contact for contact.pin_s seconds (measured in the game, config/nn/sim.json contact.pin_why; melee units
-    # already stay as long as in the game: their enemies follow them; a lone man is not held).
+    # Pinned: a unit leaving melee stays held where it is (not striking, struck) until it has been leaving in
+    # contact for contact.pin_s seconds (a missile unit) or contact.pin_melee_s (a unit without a missile weapon);
+    # a lone man (a lord) is not held (measured in the game, config/nn/sim.json contact.pin_why).
     pin_s = float(cal["contact"].get("pin_s", 0.0))
-    stuck = leaving & engaged & (u["men0"] > 1) & (u["range"] > 0)
-    pinned = stuck & (u["leave_s"] < pin_s)
+    pin_melee_s = float(cal["contact"].get("pin_melee_s", 0.0))
+    stuck = leaving & engaged & (u["men0"] > 1)
+    hold_for = torch.where(u["range"] > 0, torch.full_like(u["leave_s"], pin_s), torch.full_like(u["leave_s"], pin_melee_s))
+    stuck = stuck & (hold_for > 0)
+    pinned = stuck & (u["leave_s"] < hold_for)
     u["leave_s"] = torch.where(stuck, u["leave_s"] + dt, torch.zeros_like(u["leave_s"]))
     speed = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)
     # --- innate effects (attributes, passives, game-fired timed passives: config/nn/effects.json): their
@@ -129,6 +132,13 @@ def step(st, orders, params=None, dt=None):
     # --- melee ---
     rate, mhit, sector, _ = melee.strikes(u, pw, strike, params, charge_now, u["contact_s"])
     hp_melee = rate * dt
+    # A unit leaving melee (held or walking out) still in contact takes contact.leave_taken of the blows: melee
+    # units more (they turn their backs), missile units less (measured, config/nn/sim.json contact.pin_why).
+    taken_cal = cal["contact"].get("leave_taken")
+    if taken_cal:
+        out = (leaving & engaged & (u["men0"] > 1))[:, None, :]
+        mult = torch.where((u["range"] > 0)[:, None, :], float(taken_cal["missile"]), float(taken_cal["melee"]))
+        hp_melee = torch.where(out, hp_melee * mult, hp_melee)
 
     # --- shooting ---
     # (fire whilst moving, attribute mounted_fire_move: shoots and aims on the move too)
@@ -200,16 +210,10 @@ def step(st, orders, params=None, dt=None):
     u["k"] = u["k"] + credit.sum(2)
     u["hp_abs"], u["men"] = hp_new, men_new
     u["hp"] = torch.where(present, hp_new / u["hp0"].clamp(min=1e-6), torch.zeros_like(hp_new))
-    # Casualty windows (decaying sums, time constant = the window): recent casualties
-    # (casualties_s; the database: the last 4 s), extended casualties (extended_s; the last 60 s);
+    # Casualty windows (recent casualties: the last 4 s, extended: the last 60 s; morale.casualty_windows);
     # recent_s: the melee balance (dealt / taken; reward.py reads the same).
-    cm = cal["morale"]
-    tau = cm["recent_s"]
-    u["recent"] = u["recent"] * math.exp(-dt / float(cm.get("casualties_s", tau))) + taken
-    ext_s = float(cm.get("extended_s") or 0.0)
-    if ext_s > 0:
-        u["extended"] = u["extended"] * math.exp(-dt / ext_s) + taken
-    fade = math.exp(-dt / tau)
+    morale.casualty_windows(u, taken, params, dt)
+    fade = math.exp(-dt / cal["morale"]["recent_s"])
     melee_scaled = hp_melee * scale[:, None, :]
     u["dealt"] = u["dealt"] * fade + melee_scaled.sum(2)
     u["taken"] = u["taken"] * fade + melee_scaled.sum(1)
@@ -281,10 +285,14 @@ def step(st, orders, params=None, dt=None):
         "lord_dead_points": lord_pts,
         "neighbour": (friends & standing[:, None, :] & (d <= M["neighbour_effect_range"])).any(2),
         "in_melee": engaged,
-        "routing_friends": (friends & u["r"][:, None, :] & ~u["expendable"][:, None, :]
+        # A routing expendable unit scares nobody (morale.expendable_scares_expendable: only other expendable units;
+        # the database's attribute text, measured: config/nn/sim.json morale.expendable_why).
+        "routing_friends": (friends & u["r"][:, None, :] & ~(u["expendable"][:, None, :] & ~(
+            u["expendable"][:, :, None] & bool(cal["morale"].get("expendable_scares_expendable"))))
                             & (d <= M["routing_unit_effect_distance_front"])).float().sum(2),
         "routing_enemies": (foes & u["r"][:, None, :] & (d <= M["routing_unit_effect_distance_front"])).float().sum(2),
-        "under_fire": u["under_fire_s"] < 2.0,
+        # The game's "under missile attack" holds morale.under_fire_s after the last projectile hit (measured).
+        "under_fire": u["under_fire_s"] < float(cal["morale"].get("under_fire_s", 2.0)),
         "strong_enemy": (foes & standing[:, None, :] & (d <= M["enemy_effect_range"])
                          & (worth[:, None, :] > worth[:, :, None])).any(2),
         "enemy_near": (foes & standing[:, None, :] & (d <= cal["morale"]["rally_free_m"])).any(2),

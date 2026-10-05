@@ -102,8 +102,10 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
   (`pursuit_charge_bonus_modifier` 1). Patch 5.0 removed the old rule that only 35 % of a
   pursuing unit could attack routers. WH2 description; WH3 patch notes · [twwstats kv][tws],
   [fandom Leadership][fw-lead] · high.
-  - Ours: a routing unit is struck as from the rear (defence ×0.3), without the charge bonus.
-    **Gap.**
+  - Ours: a routing unit is struck as from the rear (defence ×0.3), by every man in contact at 0.43
+    of the rule, without the charge bonus: in the recordings a router chased by one pursuer loses 0.64
+    of what a standing target loses, and the first 5 s of a pursuit hit no harder than later (17.9
+    against 18.2 HP/s).
 - **Devastating Flanker** doubles the charge bonus against flank/rear
   (`devastating_flanker_charge_multiplier` 2); **Glorious Charge** (4.2.0, Empire/Kislev) doubles
   its duration and applies the flank morale penalty to the target. WH3 · fandom (snippets) · medium.

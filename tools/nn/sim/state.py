@@ -127,8 +127,8 @@ INTERNAL = {
     "hp_abs": ("f", "health left, HP"),
     "morale": ("f", "morale points"),
     "fatigue": ("f", "fatigue points"),
-    "recent": ("f", "HP lost recently (decaying sum)"),
-    "extended": ("f", "HP lost over the last minute or so (decaying sum; extended casualties)"),
+    "recent": ("f", "HP lost recently (the last morale.casualties_s seconds: recent casualties)"),
+    "extended": ("f", "HP lost over the last morale.extended_s seconds (extended casualties)"),
     "contact_s": ("f", "seconds in melee since the contact began"),
     "charge": ("f", "charge at the contact, 0-1 (1 = hit at full run)"),
     "aim": ("f", "seconds standing still able to shoot"),
@@ -167,6 +167,13 @@ INTERNAL = {
 
 GROUPS = {"observed": OBSERVED, "static": STATIC, "internal": INTERNAL}
 
+# Per-unit histories, [B, K * N] (K steps of N slots, newest step first): kept 2-D so that every [B, ...]
+# copy of a State (narrowing, putting back, restarting a battle from the bank) carries them unchanged.
+HISTORY = {
+    "lost_hist": "HP lost each step over the last K steps (morale.casualties_window \"sliding\": the recent and "
+                 "extended casualty windows; K = tools/nn/sim/morale.history_steps, 0 when the windows decay)",
+}
+
 
 def _dtype(code):
     return {"f": torch.float32, "b": torch.bool, "i": torch.int64}[code]
@@ -174,7 +181,8 @@ def _dtype(code):
 
 @dataclass
 class State:
-    """A batch of battles. u: every per-unit tensor [B, N] by name (OBSERVED, STATIC, INTERNAL);
+    """A batch of battles. u: every per-unit tensor [B, N] by name (OBSERVED, STATIC, INTERNAL) and the
+    per-unit histories [B, K * N] (HISTORY);
     t: battle time [B], s; attacker [B] (1 or 2); done [B]; winner [B] (0 none yet, 1 or 2);
     lord_dead_s [B, 2]: seconds since side 1's / side 2's lord died or shattered (-1: alive or none);
     bounds: the map's half-size, m (square, centre 0); keys [B][N] unit keys ("" empty slot)."""
@@ -224,12 +232,15 @@ class State:
                      [list(r) for r in self.keys])
 
 
-def empty(B, N, device="cpu"):
-    """B battles with N empty slots (side 0); tools/nn/sim/scenario.py fills them."""
+def empty(B, N, device="cpu", history=0):
+    """B battles with N empty slots (side 0); tools/nn/sim/scenario.py fills them. history: steps K of the
+    per-unit histories (HISTORY: [B, K * N])."""
     u = {}
     for group in GROUPS.values():
         for name, (code, _) in group.items():
             u[name] = torch.zeros((B, N), dtype=_dtype(code), device=device)
+    for name in HISTORY:
+        u[name] = torch.zeros((B, history * N), device=device)
     u["target"].fill_(-1)
     u["order_target"].fill_(-1)
     u["fxt0"].fill_(-1)

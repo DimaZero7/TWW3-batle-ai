@@ -25,6 +25,8 @@ Charge: a unit that meets the enemy running gets its charge bonus to attack and 
 harder (x (1 + impact)), fading over charge_decay_duration (13 s); a unit that did not charge
 brings its men to bear over ramp_s (calibrated on the first 15 s of the pairs); a braced unit
 with charge_reflection meets a frontal charge as a charge (battle.py).
+Pursuit: a routing target is struck from the rear with all the men in contact at contact.pursuit_rate
+of the rule and no charge (measured).
 """
 import torch
 
@@ -109,6 +111,13 @@ def strikes(u, pw, contact, params, charge_now, contact_s):
     coef = torch.where(sector == 0, 1.0, torch.where(sector == 1, B["melee_defence_direction_penalty_coefficient_flank"],
                                                      B["melee_defence_direction_penalty_coefficient_rear"]))
     ch = charge_now[:, :, None]
+    # Pursuit (contact.pursuit_rate; absent: off): a routing enemy is struck with every man the contact holds at
+    # pursuit_rate of the rule, without the striker's charge (measured: a router loses 0.64 of what a standing target
+    # loses to one pursuer, and the first 5 s of a pursuit hit no harder than later; config/nn/sim.json contact.pursuit_why).
+    # Without it a unit touching only routers struck nothing (its contact clock and so its ramp stay 0).
+    pursuit = cc.get("pursuit_rate")
+    if pursuit is not None:
+        ch = torch.where(routing_j, torch.zeros_like(pw["gap"]), ch)
     large_j = u["large"][:, None, :]
     bonus = torch.where(large_j, u["bonus_v_large"][:, :, None], u["bonus_v_inf"][:, :, None])
     attack = u["attack"][:, :, None] + u["charge_bonus"][:, :, None] * ch + bonus
@@ -130,11 +139,13 @@ def strikes(u, pw, contact, params, charge_now, contact_s):
     div = splash.clamp(min=1) if cal.get("splash_divides") else torch.ones_like(splash)
     hit = per_hit((dmg + extra * share) / div, (ap + extra * (1 - share)) / div, u["armour"][:, None, :],
                   u["hp_man"][:, None, :], u["resist_physical"][:, None, :])
-    ramp = torch.where(u["charge"] > 0, torch.ones_like(contact_s), (contact_s / cal["ramp_s"]).clamp(0, 1))
+    ramp = torch.where(u["charge"] > 0, torch.ones_like(contact_s), (contact_s / cal["ramp_s"]).clamp(0, 1))[:, :, None]
+    if pursuit is not None:
+        ramp = torch.where(routing_j, torch.full_like(F, float(pursuit)), ramp.expand_as(F))
     # The charge's impact brings more men to bear: not for a single man (his charge is his bonus),
     # nor against one (no more than lord_max_attackers reach him anyway).
     impact = torch.where(single_i | single_j, torch.zeros_like(ch), cal["impact"] * ch)
-    rate = F * splash * p * hit / u["interval"][:, :, None].clamp(min=1e-6) * (1 + impact) * ramp[:, :, None]
+    rate = F * splash * p * hit / u["interval"][:, :, None].clamp(min=1e-6) * (1 + impact) * ramp
     # A lone man (a lord) fought by infantry takes the sum of what the men around him strike (no
     # more than lord_max_attackers of them, however many units: the lord swarm probe). Fought by
     # the enemy lord too, the infantry's share counts only lord_rival_others (the probe's lord

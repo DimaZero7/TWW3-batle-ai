@@ -97,7 +97,9 @@ class Params:
             "splash": max(1, m.get("splash_max_attacks") or 1),
             "armour": u["armour"], "shield": (u.get("shield") or {}).get("missile_block_chance", 0) / 100,
             "leadership": u["leadership"], "resist_missile": resist.get("missile", 0) / 100,
-            "resist_physical": resist.get("physical", 0) / 100,
+            # damage_mod_all (a ward save) adds to physical: every damage here is physical (melee, and missiles
+            # through missile.physical_resist), so it counts once (0 for every unit today)
+            "resist_physical": (resist.get("physical", 0) + resist.get("all", 0)) / 100,
             "large": u.get("size", "small") != "small",
             # rule flags (expendable, encourages, reflect, unbreakable, fire_move, fatigue_immune), the
             # effects bitmask and the timed effects: from the unit's innate effects (config/nn/effects.json)

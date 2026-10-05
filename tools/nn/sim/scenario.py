@@ -18,7 +18,7 @@ from pathlib import Path
 import torch
 
 from tools.nn import scenario as arena_scenario
-from tools.nn.sim import replay
+from tools.nn.sim import morale, replay
 from tools.nn.sim import state as S
 from tools.nn.sim.params import load
 
@@ -30,7 +30,7 @@ def build(armies, params=None, device="cpu", per_side=None):
     params = params or load()
     B = len(armies)
     H = per_side or max(max(len(a["sides"][s]["units"]) for s in (1, 2)) for a in armies)
-    st = S.empty(B, 2 * H, device=device)
+    st = S.empty(B, 2 * H, device=device, history=morale.history_steps(params, params.dt))
     rows = {k: [[0.0] * (2 * H) for _ in range(B)] for k in S.STATIC}
     obs = {k: [[0.0] * (2 * H) for _ in range(B)] for k in ("x", "z", "b", "men")}
     attacker = []
