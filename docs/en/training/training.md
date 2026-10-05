@@ -218,6 +218,37 @@ prediction of the network's in-game trade on those battles: −0.245 (the game �
 `ai_like` piles two or more units on one of ours 0.26 of the time (the game 0.10), and its lord
 goes in sooner (6 s after the first contact against 12 s).
 
+**Local superiority is still not reproduced.** The `build/gangup/` check (scripts and JSON
+outside Git) covers all completed fair recordings with unit keys: 158 network battles, 40
+game-AI mirrors (both sides), and 6 hold battles with no observed attacks. Gate recordings
+are counted once by run name. The game AI's target is its observed engine target, not an
+accessible order log; the simulator uses ATTACK targets and, as in `build/ail/estats.py`,
+infers a flank MOVE's target when its destination is within 35 m of an engaged enemy.
+A "new target" is a target change by a standing melee unit, excluding lords and missile units,
+free both now and one second earlier. Isolation means the greatest distance to the target's
+nearest standing ally; weakness means the lowest health fraction among standing enemies;
+ties count. A melee entry is a transition into melee: flank 60–120°, rear ≥120° relative to
+the target's facing (nearest enemy if no target is available).
+
+| Metric | Game AI vs network, game | Game AI mirrors, game | `ai_like` vs `s4b_nolat/m15`, 64 pairs |
+|---|---:|---:|---:|
+| new target already in melee | 0.426 | 0.223 | 0.383 |
+| most isolated / weakest target | 0.120 / 0.197 | 0.227 / 0.197 | 0.147 / 0.250 |
+| nearest target / missile unit | 0.420 / 0.255 | 0.428 / 0.364 | 0.449 / 0.245 |
+| after first contact: join a fight / open a new one | 0.527 / 0.473 | 0.263 / 0.737 | 0.507 / 0.493 |
+| flank / rear entry | 0.266 / 0.224 | 0.237 / 0.205 | 0.371 / 0.124 |
+| local enemy power / support faced by the other side, 95% CI | 1.471 [1.364, 1.589] | 1.249 [1.196, 1.314] | 1.108 [1.032, 1.181] |
+| same ratio: first 120 s after contact / later | 1.357 / 1.534 | 1.208 / 1.277 | 1.162 / 1.057 |
+| share of melee time targeting missile units | 0.146 | 0.015 | 0.121 |
+
+Power = cost × health within 70 m; support includes the unit itself; numerator and denominator
+each add 1. Ratio sample: standing units in melee, excluding lords and unbreakable units,
+30–80% health. These are pooled unit-seconds, **not** the unit-key/health-bin matching of
+`build/gap7/sol56` (1.57); the two requested gates give 1.589 / 1.615 here.
+CIs use a battle-cluster percentile bootstrap, keeping both mirror sides or both generated
+pair sides in one cluster. Every simulation uses `s4b_nolat/m15.pt` at game cadence, 1 s / 0.36 s.
+Increasing joins alone does not close the gap: [rejected variants](#ai_like-local-superiority).
+
 ## Decisions
 
 **Cadence: a decision a second, the orders 0.36 s late, as in the game** (`cadence.py`;
@@ -833,6 +864,33 @@ on (`allow_tf32`).
 - More factions and unit kinds in the army generator; style rewards from the faction character.
 
 ## Tried and rejected
+
+### `ai_like` local superiority
+
+Target-selection and approach changes were tested on the same 64 generated pairs with
+`s4b_nolat/m15.pt`, game cadence, no training or simulator-rule changes. All were rejected;
+the original `opponents.py` was restored. Positive pair gold favours the network; this task
+requires a decrease alongside greater local enemy power and preserved game-AI behavior.
+
+| Variant | Local enemy power, 95% CI | Network pair gold, 95% CI | Post-contact joins |
+|---|---:|---:|---:|
+| original | 1.108 [1.032, 1.181] | +0.119 [+0.078, +0.161] | 0.507 |
+| support: −60 m × clipped log local power ratio, counting the arriving unit once; approach point 15 m behind | 1.110 [1.043, 1.188] | +0.135 [+0.095, +0.174] | 0.550 |
+| no flank MOVE | 1.075 [1.007, 1.148] | +0.107 [+0.071, +0.142] | 0.317 |
+| engaged-target bonus 60 m; nearby-own-fight and already-targeted penalties 0 | 1.067 [1.000, 1.141] | +0.137 [+0.102, +0.173] | 0.702 |
+| preceding variant without flank MOVE, bonus 10 m per existing attacker | 1.066 [0.994, 1.141] | +0.121 [+0.082, +0.159] | 0.660 |
+| finish the approach once; point 30 m behind; engaged bonus 40 m, nearby-own-fight penalty 15 m, already-targeted penalty 0 | 1.057 [0.986, 1.129] | +0.107 [+0.072, +0.143] | 0.463 |
+
+The support variant's paired ratio difference is +0.002 [−0.061, +0.062], pair gold +0.015
+[−0.008, +0.038]; melee time targeting missile units falls from 0.121 to 0.086. Finishing
+the approach gives ratio −0.051 [−0.108, +0.005], pair gold −0.012 [−0.038, +0.015].
+On starts from gates `20261004-230630` / `20261005-031306`, 8 copies of each of 6 battles,
+predicted network trade is: original +0.131 / +0.071, support +0.156 / +0.102, finish the
+approach +0.091 / +0.077; game −0.306 / −0.329. The second gate does not improve.
+As requested, these simulations all use `s4b_nolat/m15`; the recorded gates used other
+checkpoints, so the comparison with the game does not isolate opponent effects.
+The local-power deficit remains; these probes do not establish that increasing the tendency
+to join existing fights can remove it. Analysis: `build/gangup/`, outside Git.
 
 What was tried, the result in numbers, and why it is not used. Git keeps the code of each.
 
