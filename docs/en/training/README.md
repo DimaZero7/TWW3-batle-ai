@@ -176,7 +176,8 @@ The battles it learns and is checked on — [random armies](armies.md) (`tools/n
 simulator and the game.
 
 How the network is checked in the game against the game's AI — the [in-game check](../launch/gate.md)
-(`tools/launcher/gate.ps1`): 4 generated battles on held-out seeds, at least 3 wins.
+(`tools/launcher/gate.ps1 -Battles 6`): 6 generated battles on held-out seeds = 3 pairs with the armies
+swapped; each pair is judged (2–0 / 1–1 by pair gold / 0–2 — analyse).
 
 What is known about the mechanics:
 [morale](../game/units/morale.md) ·

@@ -6,9 +6,12 @@ One command: N real battles where our side is commanded by a trained network (a 
 the other by the game's AI at fair Normal difficulty. The armies come from the
 [army generator](../training/armies.md) on evaluation seeds the network never saw in training. The
 network attacks and defends in turn, in swapped pairs: every seed twice, the network on either army
-([fair metrics](../training/training.md#network-evaluation-fair-metrics)). The gate is passed with
-**4 battles (2 pairs), at least 3 wins**. It is
-a quick check before the night one ([readiness](../training/network.md#readiness)), not that check.
+([fair metrics](../training/training.md#network-evaluation-fair-metrics)). After every training
+plateau **6 battles = 3 pairs** are played (`gate.ps1 -Battles 6`) and **each pair** is judged, not the
+win count: 2–0 — the network is smarter than the game's AI with both armies; 1–1 — the army decides,
+look at the pair gold (strongly negative ≈ a soft 0–2); 0–2 — the game's AI is better with both armies,
+the battles are analysed for bugs and simulator-vs-game gaps ([pair verdicts](#what-the-gate-writes)).
+It is a quick check before the night one ([readiness](../training/network.md#readiness)), not that check.
 
 ## Launch
 
@@ -32,12 +35,14 @@ What happens in each battle:
    (`-Retries 1`).
 
 At the end: `build/nn-gate/<time>/summary.json` and a table. Exit code: 0 passed, 1 not passed,
-2 the gate stopped (for example, the game was already open).
+2 the gate stopped (for example, the game was already open). "Passed" in the code is the old rule
+(wins at least 0.75 of the battles: `gate.PASS_SHARE`, `min_wins`); the network is no longer judged by
+it — read the pair verdicts.
 
 | Parameter | Default | What it does |
 |---|---|---|
 | `-Checkpoint` | `build/nn-train/latest.pt` | The network's weights; a path inside the repository (the container sees it as `/repo`) |
-| `-Battles` | 4 | How many battles |
+| `-Battles` | 4 | How many battles; after a plateau 6 (3 pairs) |
 | `-Offset` | 0 | Skip this many battles of the plan: another set of battles |
 | `-Speed 1\|3\|10\|20` | 20 | Battle speed |
 | `-TimeoutModelSeconds` | 0, as the simulator | Battle limit, s of battle time; 0 is `battle_limit_s` of `config/nn/sim.json` (3600) |

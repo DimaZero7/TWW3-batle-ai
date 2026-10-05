@@ -56,7 +56,7 @@ sources are used and marked. Our own measurements in the game are elsewhere:
 2. **Flank/rear: defence ×0.6 / ×0.3, decided per attacking model**, ending when the struck entity
    turns to face the attacker — which explains why a lord shows no flank penalty — [flanking](flanking.md).
 3. **"Attacked in the flank / rear" (−6 / −14) is a first-contact effect** by the key's description,
-   not a continuous one — likely why we measured only −1 / −2 per second of contact — [morale](morale.md).
+   not a continuous one — likely why we measured only −1 / −2 per second of contact; the simulator now does it so (one tick) — [morale](morale.md).
 4. **Recent casualties are the last 4 s; extended casualties (−4…−60) the last 60 s** — [morale](morale.md).
 5. **Fatigue penalties are in the database** (`unit_fatigue_effects_tables`, read from our `db.pack`): melee attack ×0.95…0.7, speed
    ×0.95…0.85, armour, charge, AP damage, reload — [fatigue](fatigue.md).
@@ -82,7 +82,7 @@ better one; each is a candidate for a test.
 | 1 | Hit chance vs attack − defence | full slope 1 (CA, DB) | slope 0.1, fitted on 4 pairs | [melee](melee.md#hit-chance) |
 | 2 | Flank vs rear | rear costs more: defence ×0.3 vs ×0.6 (CA, DB) | flank costs more: fitted `flank_slope` 2.0, `rear_slope` 0.25 (measured 1.74× vs 1.31×) | [flanking](flanking.md#melee-defence) |
 | 3 | Direction sectors | per attacking model, by quadrant of the struck entity (CA; 45°/135° by our reading) | per unit, by the enemy centre, front < 60°, rear > 120° | [flanking](flanking.md#melee-defence) |
-| 4 | "Attacked in flank / rear" morale | −6 / −14 at first contact (DB description) | −1 / −2 continuously (regressed) | [flanking](flanking.md#morale) |
+| 4 | "Attacked in flank / rear" morale | −6 / −14 at first contact (DB description) | the same: −6 / −14 for one 0.5 s tick at the first blow from a worse side (`morale.attacked_event`; the recordings show −1.5 / −1.9 points over 1–2 s) | [flanking](flanking.md#morale) |
 | 5 | Recent casualties window | last 4 s (DB description) | 30 s (calibrated) | [morale](morale.md#modifiers-points) |
 | 6 | Extended casualties | −4 … −60 for 10–80 % lost in the last 60 s (DB) | not modelled | [morale](morale.md#modifiers-points) |
 | 7 | Fatigue rate | tick 0.1 s → ×10 a second (one forum claim, medium-low) | ×10 a second (calibration ON: melee tires only under an attack order — single entity +19, formation 13.7; shooting 7.5, walking 3.4, idle −18; fitted on 204 recordings) | [fatigue](fatigue.md#what-tires-and-what-rests) |

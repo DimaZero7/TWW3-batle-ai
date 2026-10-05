@@ -44,23 +44,26 @@ The first steps compile for 1–3 minutes (seconds once a run of the same shapes
 ### The chain's settings
 
 Training goes as a chain: each run starts from the last checkpoint of the previous one (its
-`m<minute>.pt`, with the critic of its `runs/test5_<label>/latest.pt`). The options the chain
+`m<minute>.pt`, with the critic of its `runs/test5_<label>/latest.pt`). The standing options live in
+`config/train-chain.json` (test5: 25 minutes, evaluated every 5, `--baseline-canary 32`);
+`tools.ops.step` builds a step's command from them ([workflow](workflow.md)). The options the chain
 passes after `--`:
 
 ```bash
 --critic-init <previous runs/test5_<label>/latest.pt> --critic-warmup 3 \
 --reference <init> --anchor 0.03 --anchor-end 0.03 --anchor-roll 600 --adv-norm role \
 --idle-rate 0.05 --lord-rout 0.5 --entropy-target 0.05 --entropy-max 0.03 \
---drills 0.1 --drill-weights '{"counter": 1}' \
+--drills 0.2 --drill-teach auto --teach-normal auto --gpu-duty 1.0 \
 --mix '{"self": 0.05, "past": 0.1, "nearest": 0.35, "hold_shoot": 0.15, "hold": 0.05, "ai_like": 0.3}'
 ```
 
-The reasons: a small KL to the network's own start that rolls forward every 10 minutes (training
+Without `--drill-weights` the drills are the default `drills.TRAIN` (`kiting`, `hold_fire`). The reasons: a small KL to the network's own start that rolls forward every 10 minutes (training
 without any leash collapses: [tried and rejected](#no-leash-and-a-leash-only-for-new-networks));
 advantages normalised per role (the attacker's, wider with its idle cost, no longer outweigh the
 defender's); the progress clock at 0.05 of the budget a minute (the network sees it:
-[model](model.md)); a shattered lord counted as dead; drills at 10 % (30 % made the small
-network forget: [drills](#drills)).
+[model](model.md)); a shattered lord counted as dead; drills on 20 % of battles with the adaptive
+teacher in drills and in normal battles (it switches itself off once the network catches the script;
+with the small network 30 % of `counter` alone cost old skills: [drills](#drills)).
 
 ### Training a widened network
 

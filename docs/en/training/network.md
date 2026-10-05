@@ -193,8 +193,9 @@ A proposal; the owner decides. The network is ready when all of these hold:
    has not seen. A draw and the attacker's timeout are not wins. The breakdown by army
    size, faction, attack and defence is a hint where the weak spot is: with 200 battles a
    threshold per group proves nothing. The price of victory counts too: our losses.
-   A quick check before the night one is the [in-game check](../launch/gate.md): 4 battles
-   (`tools/launcher/gate.ps1`), at least 3 wins; the same outcome rules and held-out seeds.
+   A quick check before the night one is the [in-game check](../launch/gate.md): 6 battles = 3 pairs
+   (`tools/launcher/gate.ps1 -Battles 6`) after every training plateau, each pair judged (2–0 / 1–1 by
+   pair gold / 0–2 — analyse); the same outcome rules and held-out seeds.
 2. **The style shows in numbers:** elves keep a straighter line and strike more
    simultaneously than orcs, by the margin the character sets.
 3. **The game's AI is an independent check.** The network learns only against itself;
