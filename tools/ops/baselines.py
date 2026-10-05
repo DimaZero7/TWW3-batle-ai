@@ -67,7 +67,16 @@ def status(folder, version=None, drill_version=None, drills=None, pairs=refs.PAI
 def command(build, name=CONTAINER, cpus=CPUS, root=ROOT):
     """(env, argv) of the container run that plays the missing references into `build`/nn-train/baselines."""
     env = dict(os.environ, DOCK_NAME=name, DOCK_CPUS=str(cpus), DOCK_BUILD=posix(build))
-    return env, ["bash", posix(Path(root) / "tools" / "nn" / "dock.sh"), "tools.nn.train.refs"]
+    return env, [bash(), posix(Path(root) / "tools" / "nn" / "dock.sh"), "tools.nn.train.refs"]
+
+
+def bash():
+    """Git Bash on Windows (a bare "bash" there resolves to WSL's, which cannot run dock.sh), else bash."""
+    if os.name == "nt":
+        git_bash = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "bash.exe"
+        if git_bash.exists():
+            return str(git_bash)
+    return "bash"
 
 
 def main(argv=None):

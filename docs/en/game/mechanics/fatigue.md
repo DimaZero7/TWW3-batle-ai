@@ -61,16 +61,21 @@ max 30000. · [twwstats][tws], [fandom Fatigue][fw-fat], [CA elevation blog][ele
     are Fresh. Exact starting points within that band are unrecorded: zero remains an assumption.
   - Ours (calibration ON): melee tires only a unit with an attack order — a single
     entity at +19 a tick, a formation at 13.7 (not all its men fight); in melee without an attack
-    order the unit walks or rests. Charging +34 also only with an attack order. Shooting 7.5,
-    walking +3.4 (not the DB +18 and −1). Idle −18 without unfinished movement, attack or aiming;
-    completed movement counts as rest; otherwise ready −7 (an order-context approximation: arenas
-    record neither `is_idle` nor combat stance, and `is_idle` sometimes stays false after `halt`
-    while recovering at −180/s). Dead and departed units are frozen. 13.7 / 7.5 / 3.4 are fitted
-    on the units' activities in the 204 recordings so that the accumulation reproduces the game's
-    recorded states (bootstrap 13.6–14.5 / 6.5–7.6 / 2.9–3.9). The simulator then reproduces the
-    game's exhausted shares (own 16.8 versus 17.3 %, enemy 28.7 versus 28.6 %; the legacy ×5 model
+    order the unit moves or rests. Charging +34 also only with an attack order. A move costs by its
+    order's run flag, not by speed: run +4, walk −1 (DB; clean walk spans of the game's AI, 2925 s:
+    0 crossings up, 6 down). A routing unit +4. Shooting 7.5 (not the DB +18). Idle −18 without
+    unfinished movement, attack or aiming and with no standing enemy within 80 m; otherwise ready
+    −7 (standing network units in the game recover at 0.48 / 0.62 / 0.79 / 1.00 of the idle rate
+    with the nearest enemy at 40 / 40–80 / 80–150 / 150–300 m). Completed movement counts as rest
+    (an order-context approximation: arenas record neither `is_idle` nor combat stance, and
+    `is_idle` sometimes stays false after `halt` while recovering at −180/s). Dead and departed
+    units are frozen. 13.7 / 7.5 are fitted on the units' activities in the 204 recordings so that
+    the accumulation reproduces the game's recorded states (bootstrap 13.6–14.5 / 6.5–7.6). The
+    simulator then reproduces the game's exhausted shares (own 17.1 versus 17.3 %, enemy 29.1
+    versus 28.6 %; the legacy ×5 model
     gave 5.7 and 9.2 % — a third as often as the game). The cost: network battles 96/132 in the
-    check instead of 100/132, and the gate trade a little further from the game; numbers in the
+    check instead of 100/132, and the gate trade a little further from the game. Late in a battle
+    our units in the simulator stand longer than in the game and some rest back; numbers in the
     [simulator](../../training/simulator.md#fatigue-calibration). Arena positions lack height;
     uphill is not modelled.
   - **Limitation:** the melee flag does not mean all soldiers tire at +19: the planner's spearmen

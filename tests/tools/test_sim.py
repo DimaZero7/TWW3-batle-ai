@@ -99,11 +99,11 @@ class TestFunctions:
         st.u.update(old)
         assert all(torch.equal(st.u[k], v) for k, v in before.items())
 
-    @pytest.mark.parametrize("name,points", [("idle", -18), ("ready", -7), ("walking", 3.4),
+    @pytest.mark.parametrize("name,points", [("idle", -18), ("ready", -7), ("walking", -1),
                                               ("running", 4), ("shooting", 7.5), ("melee", 13.7),
                                               ("charging", 34)])
     def test_fatigue_tiring_and_recovery_use_calibrated_ticks(self, name, points):
-        # Database points at 10 ticks/s; walking, shooting and a formation's melee are fitted.
+        # Database points at 10 ticks/s; shooting and a formation's melee are fitted.
         u = {"fatigue": torch.tensor([15000.0]), "fat": torch.zeros(1)}
         activity = {k: torch.tensor([k == name]) for k in
                     ("idle", "walking", "running", "shooting", "melee", "charging")}
@@ -1265,12 +1265,12 @@ def melee_activity(n, **flags):
 
 
 def test_melee_tires_only_under_an_attack_order():
-    # single entity +19, formation +13.7 a tick with the order; without it walking +3.4 or idle -18
+    # single entity +19, formation +13.7 a tick with the order; without it walking -1 or idle -18
     u = {"fatigue": torch.full((4,), 15000.), "fat": torch.zeros(4)}
     activity = melee_activity(4, attack=[True, True, False, False], single=[True, False, True, False],
                               walking=[False, False, True, False])
     fatigue.step(u, activity, calibrated_fatigue(), 1.)
-    assert u["fatigue"].tolist() == pytest.approx([15190., 15137., 15034., 14820.])
+    assert u["fatigue"].tolist() == pytest.approx([15190., 15137., 14990., 14820.])
 
 
 def test_charging_tires_only_under_an_attack_order():
@@ -1304,6 +1304,50 @@ def test_disabled_fatigue_trial_preserves_legacy_ready_clock():
     u = {"fatigue": torch.full((3,), 15000.), "fat": torch.zeros(3)}
     fatigue.step(u, activity, p, 1.)
     assert u["fatigue"].tolist() == [15095., 14995., 15090.]
+
+
+def test_a_move_costs_by_its_run_flag_whatever_the_speed():
+    # run order +4 even at a walking pace; walk order -1 (database); also while in melee without an attack order
+    u = {"fatigue": torch.full((3,), 15000.), "fat": torch.zeros(3)}
+    activity = melee_activity(3, melee=[False, False, True], walking=[True, True, True], running=[False, True, False],
+                              run_order=[True, False, True])
+    fatigue.step(u, activity, calibrated_fatigue(), 1.)
+    assert u["fatigue"].tolist() == [15040., 14990., 15040.]
+
+
+def test_routing_units_tire_at_the_running_rate():
+    u = {"fatigue": torch.full((2,), 15000.), "fat": torch.zeros(2)}
+    activity = melee_activity(2, melee=[False, False], idle=[False, False], routing=[True, False])
+    fatigue.step(u, activity, calibrated_fatigue(), 1.)
+    assert u["fatigue"].tolist() == [15040., 14930.]
+
+
+def test_idle_rest_needs_no_standing_enemy_near():
+    u = {"fatigue": torch.full((2,), 15000.), "fat": torch.zeros(2)}
+    activity = melee_activity(2, melee=[False, False], idle=[True, True], enemy_near=[True, False])
+    fatigue.step(u, activity, calibrated_fatigue(), 1.)
+    assert u["fatigue"].tolist() == [14930., 14820.]
+
+
+@pytest.mark.parametrize("gap,near", [(10, True), (200, False)])
+def test_battle_passes_run_flag_routing_and_enemy_near_to_fatigue(monkeypatch, gap, near):
+    st = face_off(SPEAR, SLAVE, gap=gap)
+    seen = {}
+    monkeypatch.setattr(fatigue, "step", lambda u, activity, params, dt: seen.update(activity))
+    st.u["r"][0, st.N // 2] = True
+    cmd = O.hold(st.B, st.N)
+    cmd.kind[0, 0] = O.MOVE
+    cmd.x[0, 0], cmd.z[0, 0], cmd.run[0, 0] = st.u["x"][0, 0] - 30, st.u["z"][0, 0], True
+    battle.step(st, cmd, P)
+    assert bool(seen["run_order"][0, 0]) and not bool(seen["run_order"][0, st.N // 2])
+    assert not bool(seen["routing"][0, 0])
+    if near:   # far from every standing enemy a router may rally at once
+        assert bool(seen["routing"][0, st.N // 2])
+    # a routing enemy is not a standing enemy
+    assert not bool(seen["enemy_near"][0, 0])
+    st.u["r"][0, st.N // 2] = False
+    battle.step(st, O.hold(st.B, st.N), P)
+    assert bool(seen["enemy_near"][0, 0]) is near
 
 
 @pytest.mark.parametrize("single", [True, False])

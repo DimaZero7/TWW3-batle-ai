@@ -281,7 +281,11 @@ def step(st, orders, params=None, dt=None):
     idle = standing & ~pending_move & (kind != O.ATTACK) & (aim_at < 0)
     activity = {"melee": engaged, "charging": engaged & (charge_now > 0), "shooting": firing,
                 "running": speed > u["walk"] + 0.3, "walking": speed > 0.3,
-                "idle": idle, "active": alive, "attack": kind == O.ATTACK, "single": u["men0"] <= 1}
+                "idle": idle, "active": alive, "attack": kind == O.ATTACK, "single": u["men0"] <= 1,
+                "run_order": u["order_run"].bool(), "routing": alive & u["r"]}
+    near_m = float(cal["fatigue"].get("calibration", {}).get("ready_enemy_m", 0.0))
+    if near_m > 0:
+        activity["enemy_near"] = (foes & standing[:, None, :] & (d <= near_m)).any(2)
     fatigue.step(u, activity, params, dt)
 
     # --- movement ---

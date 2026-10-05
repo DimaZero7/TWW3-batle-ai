@@ -330,7 +330,7 @@ class TestBaselines:
     def test_the_container_command_mounts_the_build_folder(self):
         env, cmd = baselines.command(r"C:\main\build", "orch-x", 6, root=r"C:\wt")
         assert env["DOCK_NAME"] == "orch-x" and env["DOCK_CPUS"] == "6" and env["DOCK_BUILD"] == "/c/main/build"
-        assert cmd == ["bash", "/c/wt/tools/nn/dock.sh", "tools.nn.train.refs"]
+        assert cmd == [baselines.bash(), "/c/wt/tools/nn/dock.sh", "tools.nn.train.refs"]
 
     def test_the_drill_version_follows_the_simulator_and_the_drills(self, tmp_path, monkeypatch):
         monkeypatch.setattr(version, "ROOT", tmp_path)

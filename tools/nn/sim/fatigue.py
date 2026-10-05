@@ -2,12 +2,13 @@
 
 Points per activity from the game's database (_kv_fatigue_tables): charging +34, melee +19,
 shooting +18, running +4, walking -1, standing ready -7, idle -18; thresholds fresh 0, active 2800,
-winded 6600, tired 12600, very tired 18000, exhausted 27000 (max 30000). Production is the
-legacy model: 5 ticks/s, ready recovery, every melee +19. The calibration (config/nn/sim.json
-fatigue.calibration, OFF: the network check got worse) runs 10 ticks/s, rests idle units, freezes
-dead and departed slots and charges melee only to a unit with an attack order: +19 a tick for a
-single entity, 13.7 for a formation; a unit in melee without one walks or rests. Walking +3.4 and
-shooting 7.5 are fitted on the 204 recordings. Tired states cost morale (morale.py) and scale
+winded 6600, tired 12600, very tired 18000, exhausted 27000 (max 30000). The calibration
+(config/nn/sim.json fatigue.calibration, ON) runs 10 ticks/s, freezes dead and departed slots and
+charges melee only to a unit with an attack order: +19 a tick for a single entity, 13.7 for a
+formation; a unit in melee without one moves or rests. A move costs by its order's run flag (run
++4, walk -1), a routing unit +4; shooting 7.5 (fitted on the 204 recordings); a standing unit
+rests at idle with no standing enemy within ready_enemy_m, else stands ready. OFF is the legacy
+model: 5 ticks/s, ready recovery, every melee +19. Tired states cost morale (morale.py) and scale
 speed, melee attack and defence, armour, charge bonus, AP damage and reload by the database's
 unit_fatigue_effects_tables (effects(); config/nn/sim.json fatigue.effects).
 """
@@ -20,8 +21,10 @@ LEVELS = ("threshold_fresh", "threshold_active", "threshold_winded", "threshold_
 def step(u, activity, params, dt):
     """Activity bools [B, N], highest priority charging > melee > shooting > run > walk > idle;
     the rest stands ready. The calibration also reads idle, active (alive and on the field),
-    attack (an attack order) and single (a single entity); a missing one means: not idle, active,
-    attacking, a formation. OFF keeps the legacy clock and rates, inactive slots included.
+    attack (an attack order), single (a single entity), run_order (the order's run flag),
+    enemy_near (a standing enemy within calibration.ready_enemy_m) and routing; a missing one means:
+    not idle, active, attacking, a formation, running by speed, no enemy near, not routing. OFF keeps the legacy clock and
+    rates, inactive slots included.
     """
     F = params.fatigue
     cal = params.sim["fatigue"]
@@ -30,11 +33,21 @@ def step(u, activity, params, dt):
     scale = (trial["per_second"] if enabled else cal["per_second"]) * dt
     rated = trial if enabled else {}
     walking = float(rated.get("walking", F["walking"]))
+    moving, running = activity["walking"], activity["running"]
+    if enabled and trial.get("move") == "order" and "run_order" in activity:
+        # A move costs by its order, whatever the speed: run +4, walk recovers (database -1).
+        running = moving & activity["run_order"]
+    move_rate = torch.where(running, F["running"], torch.full_like(u["fatigue"], walking))
     rate = torch.full_like(u["fatigue"], F["ready"])
     if enabled and "idle" in activity:
-        rate = torch.where(activity["idle"], F["idle"], rate)
-    rate = torch.where(activity["walking"], walking, rate)
-    rate = torch.where(activity["running"], F["running"], rate)
+        # Idle rest needs no standing enemy near; near one the unit stands ready.
+        idle = activity["idle"] & ~activity.get("enemy_near", torch.zeros_like(activity["idle"]))
+        rate = torch.where(idle, F["idle"], rate)
+    rate = torch.where(moving, move_rate, rate)
+    rate = torch.where(running, F["running"], rate)
+    if enabled and trial.get("routing") == "running" and "routing" in activity:
+        # A routing unit flees at a run: it keeps tiring at the running rate, never rests.
+        rate = torch.where(activity["routing"], F["running"], rate)
     rate = torch.where(activity["shooting"], float(rated.get("shooting", F["shooting"])), rate)
     melee, charging = activity["melee"], activity["charging"]
     if enabled and trial.get("melee") == "attack_order":
@@ -43,7 +56,7 @@ def step(u, activity, params, dt):
         attack = activity.get("attack", torch.ones_like(melee))
         single = activity.get("single", torch.zeros_like(melee))
         combat = torch.where(single, F["combat"], torch.full_like(rate, float(trial["multi_combat"])))
-        rest = torch.where(activity["walking"], walking, torch.full_like(rate, F["idle"]))
+        rest = torch.where(moving, move_rate, torch.full_like(rate, F["idle"]))
         rate = torch.where(melee, torch.where(attack, combat, rest), rate)
         charging = charging & attack
     else:
