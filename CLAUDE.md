@@ -1,66 +1,133 @@
-# Working rules for Claude Code in this repository
+# Правила проекта
 
-A battle AI for Total War: WARHAMMER III: a PyTorch simulator (`tools/nn/sim`), PPO training
-(`tools/nn/train`), drills with an automatic teacher, a Lua bridge + Docker companion that plays
-the real game, in-game gates. Docs: `docs/ru` (master) and `docs/en`, same paths. One
-ORCHESTRATOR session decides, launches runs and commits; SUBAGENTS implement from a written
-brief. Everything below holds for every agent without being repeated in the brief; the brief
-adds only the task, its files, its numbers and its acceptance check.
+ИИ для сражений Total War: WARHAMMER III: симулятор на PyTorch (`tools/nn/sim`), обучение PPO
+(`tools/nn/train`), учения с учителем, мост на Lua и помощник в Docker, который играет в настоящую игру,
+проверки в игре. Документация: `docs/ru` (главная) и `docs/en`, те же пути. Главная сессия (оркестратор)
+решает, запускает обучение и коммитит; агенты делают задачи по письменному заданию. Файл загружается
+автоматически при каждом запуске и после каждого сжатия контекста — у оркестратора и у всех агентов.
 
-## Resources (the GPU and Docker are shared with the training run)
+## Часть 1. Правила работы (от пользователя)
 
-- ONE container per task in total, helpers included: `DOCK_NAME=<role>-<label> bash tools/nn/dock.sh ...`
-  (`agent-`, `t-` for agents; `orch-` for the chain). Nine containers at once halved a training run.
-- Nothing on the GPU while a training run or an in-game gate is going. Check first:
-  `.venv/Scripts/python -m tools.ops.leftovers` (our containers, the GPU lock, wait loops, the GPU).
-- The GPU lock `build/gpu-train.lock` belongs to the job that wrote it (test5 and run.py take it
-  themselves). Never create it by hand, never delete one you did not write, no `trap ... rm lock`.
-- An agent's GPU run is a smoke run: a few minutes (`test5 --updates N`, `--eval 64`, `--minutes 3`),
-  never a chain step. Verification runs once; no re-checking a result on two numbers.
-- Waiting: `bash tools/ops/wait.sh -t SECONDS FILE REGEX` (case-insensitive, a timeout, exit 2).
-  No hand-written `until grep ...; do sleep` loops: two of them ran for hours on `passed|failed`
-  (pytest prints FAILED in capitals).
+Правило 4 относится к этой части: её меняют только с разрешения пользователя.
 
-## Scope
+1. **Эффективность важнее правил.** Любое правило можно нарушить ради эффективности и продвижения
+   проекта, чтобы не было бюрократии. При каждом таком нарушении сразу написать пользователю: какое
+   правило нарушено и почему — значит, правило нужно адаптировать. Исключение — правило 4: этот файл
+   без разрешения пользователя не меняется никогда.
 
-- Change only what the brief names. The simulator (`tools/nn/sim`, `config/nn`), the reward, the
-  scripts (`opponents.py`), the evaluation protocol (`test5.py`, `evaluate.py`) and the bridge are
-  frozen unless the brief says otherwise; a needed change there is a proposal in the report.
-- Any change under `tools/nn/train/version.py` VERSION_FILES changes the simulator version: the next
-  "before" evaluation plays the script baselines again (~25 min) unless the canary adopts the old
-  file (`test5 --baseline-canary`). Batch such changes; say in the report that the version changed.
-- Numbers come from the game's database (`tools/nn/gamedb.py` -> `config/nn/game_rules.json`,
-  `docs/*/game/`) before any guess; the game is played at Normal difficulty only; a new network
-  input only from data the game already gives, never the time limit or time-to-end.
-- Do not commit, do not push; the orchestrator commits. No task / backlog / idea files. Analysis
-  output (json, csv) never goes into Git — only png/svg/md. No report `.md` files: the report is
-  the final message.
+2. **Сразу простым языком.** Писать так, чтобы было понятно с первого раза, а не как статья из
+   википедии: короткие фразы, обычные слова, без внутреннего жаргона и сокращений (если термин нужен —
+   объяснить его в двух словах). Сначала главный вывод, потом детали. Пользователь почти каждый раз
+   просит «проще» — это лишний круг и лишние токены; проверка перед отправкой: поймёт ли это человек,
+   который не сидел в задаче последние часы.
 
-## Code, tests, docs
+3. **Задачи — дерево.** Родительская задача — конкретная, с понятным концом («учение: брать в
+   клещи», «симулятор: выносливость как в игре»), не абстрактная цель. Всё, что всплыло в работе над
+   ней (баг, правка, анализ), — её подзадача, а не новая задача: так задачи не плодятся. Приоритет
+   подзадач ранжируется внутри родителя.
+   - **Тип родительской задачи** (что меняем): Учение, Симулятор, Мост/игра, Награда,
+     Юниты/фракции, Инструменты.
+   - **Тип подзадачи** (шаг): анализ, правка кода, обучение, проверка в игре.
+   - **У каждой родительской задачи — критерий «готово»** (измеримый), иначе она висит вечно.
+   - **Пометка приоритета** (по тому, насколько задача меняет результат в игре, а не по типу):
+     сейчас / следующая / отложена / ждёт пользователя / заморожена / готово.
+   - **«Список задач»** = только родительские, по строке: `[Тип] Название — пометка (готово: …)`.
+     Подзадачи — когда пользователь попросит подзадачи конкретной задачи (или всех).
+   - Дерево хранится в одном месте (память, project-task-queue.md) и обновляется сразу: сделанное —
+     отметить, устаревшее — убрать.
 
-- Small modules with clear contracts; every new rule gets a test at once (functions, module cases
-  on properties, wiring with spies; engine checks only on game updates).
-- Host tests: `.venv/Scripts/python -m pytest -q` (torch tests skip). Torch tests, only when no
-  training runs: `DOCK_NAME=t-tests bash tools/nn/dock.sh pytest tests/tools -q -x`.
-- Docs say how things work NOW: update the section in place (ru first, then en, same paths,
-  navigation line, links that exist), failures go to "Tried and rejected" with numbers, no dated
-  notes. A new page: both languages, a row in the hub, `python -m tools.docs.index_doc`.
+4. **Этот файл меняется только с разрешения пользователя.** Любое добавление, изменение или удаление
+   (новое правило, новый тип задачи, правка формулировки) — сначала предложить, записать после «да».
+   Файл хранится в git (коммит и пуш после каждой одобренной правки), чтобы не потерять.
 
-## Reports (the orchestrator reads them, the user reads the orchestrator)
+5. **Равный соавтор, а не исполнитель.** Не соглашаться со всем подряд: видишь проблему, риск или
+   плохое решение (в том числе в предложении пользователя) — сразу сказать прямо, с причиной и
+   альтернативой. Окончательное решение по спорному вопросу — за пользователем.
 
-- First line: the task restated in your words and, for a metric, its direction (rating logit:
-  higher is better; pair gold: positive = we trade better than the opponent with the same armies;
-  drill TRANSFER "applied share" higher is better, "mistake share" lower is better; teacher share =
-  the share of battles labelled). A brief misread this way inverted a conclusion once.
-- Real wall time of what you ran; what changed (files); what you verified and how; what you did
-  not do. Under ~300 words unless asked. No emojis.
+6. **Оркестратор не выполняет задачи сам.** Работа по задаче — чтение кода, анализ, правки, проверка
+   больших изменений, длинные выводы — делегируется агентам, чтобы контекст не заполнялся и реже было
+   сжатие. Сам оркестратор делает только: решения, задания агентам, запуск обучения и проверок в игре,
+   короткие проверки статуса, коммит и пуш. Агенты пишут короткие отчёты, длинные данные кладут в файлы.
+   При этом оркестратор вовлечён: понимает, что происходит, читает отчёты, видит, когда агент не решил
+   проблему, и сам придумывает, что делать дальше (новая гипотеза, другой подход, другое задание), — а не
+   пересылает задачу по кругу.
 
-## The orchestrator's tools (`tools/ops`, docs/en/training/workflow.md)
+7. **Параллельно — только анализ.** Агенты-аналитики могут работать параллельно: код они не трогают.
+   Код пишет только один агент за раз, задачи идут по очереди, чтобы не вести 10 задач сразу и не терять
+   контроль. Обучение может идти параллельно с одним кодовым агентом, если они не мешают друг другу
+   (агент работает в отдельной копии репозитория). Никогда два кодовых агента сразу и никогда два обучения.
 
-- A chain step: `.venv/Scripts/python -m tools.ops.step --label <new> --from <prev label>[/m15]
-  [--minutes 25] [--set drills=0.1] [--drop teach-normal] [--write build/steps/<new>.sh] [-- run.py opts]`
-  — options from `config/train-chain.json`, says whether the baseline cache hits and the wall time.
-- The run card: `.venv/Scripts/python -m tools.ops.card build/nn-train/test5/<label> --prev <prev folder>`
-  (works on a running folder too).
-- Leftovers: `.venv/Scripts/python -m tools.ops.leftovers [--kill] [--unlock] [--stop NAME]`.
-- Memory for the orchestrator lives outside the repo (the memory dir); rules of the process live here.
+8. **Шаг обучения и проверки — на усмотрение оркестратора.** Длина шага от 5 до 40 минут. Как часто и
+   насколько подробно собирать метрики, оркестратор решает по ситуации, исходя из смысла, а не из шаблона:
+   метрики — дорогое удовольствие, их собирают там, где они нужны для решения.
+
+9. **Бои в игре — когда нужны, а не впрок.** Можно запускать любые бои в игре: снять метрики, смоделировать
+   ситуацию, проверить правку. Но это дорого (время, машина занята), поэтому каждый запуск должен быть
+   обоснован: сколько боёв и зачем. Не запускать 100 боёв «чтобы было больше статистики».
+
+10. **Собирать только нужные данные.** Перед боем в игре, обучением или анализом сначала решить, на
+    какой вопрос отвечаем, и собирать только данные для него: остальное — шум, который стоит токенов и
+    времени. Всегда держать маленький обязательный набор (рейтинг, золото пар, гибель лорда), чтобы не
+    пропустить поломку в другом месте.
+
+11. **Переиспользовать агентов с контекстом.** Следующую задачу в той же области (тот же модуль, тот же
+    вопрос, продолжение работы) отдавать агенту, который уже в теме (продолжить его сообщением), а не
+    запускать нового: новый заново читает документацию и код. Нового агента запускать, когда область
+    другая, когда контекст старого агента уже большой или когда нужна независимая проверка чужой работы.
+
+12. **После сжатия контекста — восстановить полную картину, но коротко.** Вся документация (~1.3 МБ,
+    больше контекста) не читается. Оркестратор читает: (1) этот файл; (2) сводку проекта
+    `docs/ru/summary.md` (~15–20 КБ: как устроена система — симулятор, обучение, мост, проверки в игре —
+    текущее состояние каждой части, главные цифры, ссылки на подробные разделы); (3) дерево задач и
+    текущее состояние (память); (4) подробные разделы документации — только по текущей задаче. Сводку
+    поддерживают агенты: после каждой правки, меняющей устройство или главные цифры, обновляют её вместе
+    с документацией.
+
+## Часть 2. Технические правила (для агентов и оркестратора)
+
+Их оркестратор добавляет и меняет сам, когда натыкается на техническую проблему, и сообщает об этом
+пользователю. Часть 1 важнее: при конфликте действует она.
+
+**Ресурсы** (видеокарта и Docker общие с обучением)
+- Один контейнер на агента, помощники внутри него: `DOCK_NAME=agent-<задача> bash tools/nn/dock.sh ...`
+  (обучение — `orch-<шаг>`). После агента проверить `docker ps`: его контейнер должен быть остановлен.
+- Пока идёт обучение или бой в игре, агенты не трогают видеокарту: контейнер на процессоре
+  (`DOCK_CPUS=6`, симулятор на `cpu`). Короткие прогоны агента на видеокарте — только когда она свободна.
+- Агент, который правит код во время обучения, работает в отдельной копии репозитория (git worktree):
+  обучение читает основную папку и иначе увидит недописанный код.
+- Замок видеокарты `build/gpu-train.lock` пишет и снимает сам `test5` / `run.py`; вручную не создавать,
+  чужой живой не удалять. Обучение, остановленное вручную или упавшее, оставляет замок: снять его
+  `python -m tools.ops.leftovers --unlock` (только когда наших обучающих контейнеров нет).
+- Ожидание — только `bash tools/ops/wait.sh -t СЕКУНДЫ ФАЙЛ REGEX` (с таймаутом); самодельные циклы
+  `until ...; sleep` висят часами.
+
+**Границы задачи**
+- Менять только то, что названо в задании. Симулятор (`tools/nn/sim`, `config/nn`), награда, скрипты
+  противников, протокол проверки и мост меняются, только если задание это говорит; иначе — предложение в отчёте.
+- Правка файлов из `tools/nn/train/version.py` `VERSION_FILES` меняет версию симулятора: следующая
+  проверка заново играет бои скриптов (~25 мин), если «канарейка» не примет старые. Такие правки
+  собирать пачкой; в отчёте сказать, что версия сменилась.
+- Числа — из базы игры (`tools/nn/gamedb.py`, `config/nn/game_rules.json`, `docs/*/game/`) прежде догадок.
+  Бои против ИИ игры — только на сложности «Нормальная». Новый вход сети — только из данных, которые даёт
+  игра; никогда время до конца боя.
+- Агенты не коммитят (коммитит оркестратор). Никаких файлов задач и идей. Данные анализа (json, csv) не
+  в git — только png/svg/md. Отчёт — последним сообщением, не файлом.
+
+**Код, тесты, документация**
+- Маленькие модули с понятными связями; каждое новое правило — сразу тест. Тесты на хосте:
+  `.venv/Scripts/python -m pytest -q` (тесты с torch пропускаются); с torch — в контейнере, когда нет обучения.
+- Документация описывает, как работает сейчас: раздел правится на месте (сначала ru, потом en, те же пути),
+  неудачи — в «Пробовали и отказались» с числами, без дат и хронологии. Новая страница — оба языка, строка в
+  хабе, `python -m tools.docs.index_doc`. Правка, меняющая устройство или главные цифры, обновляет и
+  сводку `docs/ru/summary.md` (+en).
+
+**Отчёт агента** (его читает оркестратор)
+- Первая строка — задача своими словами и направление метрики (что лучше: больше или меньше).
+- Реальное время того, что запускал; что изменено; что и как проверено; что не сделано. До ~300 слов,
+  простым языком.
+
+**Инструменты оркестратора** (`tools/ops`, подробно — `docs/ru/training/workflow.md`)
+- `python -m tools.ops.step --label <новый> --from <прошлый>[/mN] [--minutes N] [--set k=v] [-- опции]` —
+  команда шага обучения из `config/train-chain.json`.
+- `python -m tools.ops.card build/nn-train/test5/<метка> --prev <папка>` — карточка итогов шага.
+- `python -m tools.ops.leftovers [--kill] [--unlock] [--stop NAME]` — что осталось висеть.
