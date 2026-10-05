@@ -64,7 +64,7 @@ from pathlib import Path
 import torch
 
 from tools.nn.train import cadence as cad
-from tools.nn.train import capacity, checkpoint, drills, evaluate, matchups, run, skill, teach_auto
+from tools.nn.train import capacity, checkpoint, drills, evaluate, matchups, refs, run, skill, teach_auto
 
 OUT = checkpoint.DIR / "test5"
 LOCK = checkpoint.DIR.parent / "gpu-train.lock"
@@ -484,6 +484,15 @@ def main():
         test(args, rest)
 
 
+def references(args):
+    """The missing script references (the script baselines, the drills' check scripts) start on the CPU in
+    parallel processes (tools/nn/train/refs.py, with the canary) while the GPU plays the network's own
+    battles; the evaluation waits for them where it reads them (evaluate.REFS_READY)."""
+    pending = refs.start(canary=evaluate.CANARY, pairs=evaluate.pair_count(args.eval), drill_battles=args.drill_eval,
+                         scripts=OPPONENTS, drills=None if args.drill_eval else ())
+    evaluate.REFS_READY = pending.wait if pending else None
+
+
 def test(args, rest):
     out = OUT / args.label
     out.mkdir(parents=True, exist_ok=True)
@@ -495,6 +504,7 @@ def test(args, rest):
     cadence = cad.of_args(targs)                 # the evaluations decide as the training does
     drills.BROAD = targs.drill_broad              # the drill evaluations play the training's mix of clean / broad frames
     drills.EMBED = targs.drill_embed              # ... and of embedded ones
+    references(args)
     if args.before:
         before = json.loads(Path(args.before).read_text(encoding="utf-8"))
         if before.get("cadence", cad.STEP.meta()) != cadence.meta():

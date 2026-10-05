@@ -16,7 +16,6 @@ edge (baselines(): cached in build/nn-train/baselines per opponent, seed set and
 one rating with a faction term is fitted over all battles.
 """
 import argparse
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -48,8 +47,13 @@ VERSION_FILES = sim_ver.VERSION_FILES
 # (baselines(); test5 --baseline-canary N; 0: always play the whole baseline). When those pairs come
 # out identical in every field (winner, gold lost, start, budget, factions, attacker) the older file
 # is adopted under the new version: a code change that cannot touch a script battle (the network, a
-# reward term) no longer costs the ~20-30 minutes of playing 256 pairs x 3 scripts again.
+# reward term) costs ~1 min instead of the whole baseline. The canary's pairs are the whole batch's
+# first ones (script_battles(first=...)): the start jitter is drawn over the batch.
 CANARY = 0
+# A callable that returns once the script references being played elsewhere are written (test5: the
+# missing ones run on the CPU while the GPU plays the network's battles, tools/nn/train/refs.start);
+# baselines() and drill_scripts() call it before they look at their files. None: nothing pending.
+REFS_READY = None
 SEP = (",", ":")          # compact, as the game writes events.jsonl (gamedata looks for '"event":"result"')
 
 
@@ -592,58 +596,81 @@ _SCRIPT_REF = {}
 
 
 def drill_version():
-    """sim_version() and the drills' code (tools/nn/train/drills): what a drill's script battles depend on."""
-    h = hashlib.sha256(sim_version().encode())
-    for f in sorted((ROOT / "tools/nn/train/drills").glob("*.py")):
-        h.update(f.name.encode())
-        h.update(f.read_bytes().replace(b"\r\n", b"\n"))
-    return h.hexdigest()[:12]
+    """sim_version() and the drills' code (tools/nn/train/drills): what a drill's script battles depend on
+    (tools/nn/train/version.py, the same hash on the host)."""
+    return sim_ver.drill_version()
 
 
-def drill_scripts(name, n, device="cpu"):
-    """{"naive", "skilled"}: the drill's two check scripts' win rate and gold trade on the evaluation's
-    battles (DRILL_EVAL_SEEDS, our side alternating; SPREAD), cached per process and on disk
-    (BASELINES/drill_<name>_<n>_broad<share>[_embed<share>]_<drill_version>.json: the broad and embedded
-    frames' long battles make them ~15 min of a test5 start). With more than one frame (drills.FRAMES) in
-    the battles, per frame too: {frame: {games, win_rate, gold_trade}}."""
+def drill_ref_path(name, n):
+    """The cache file of drill_scripts(name, n): BASELINES/drill_<name>_<n>_broad<share>[_embed<share>]_<drill_version>.json
+    (drills.BROAD and drills.EMBED in force; the embedded share only for a drill that has that frame)."""
     from tools.nn.train import drills as D
-    from tools.nn.train.drills import verify
     embed = D.EMBED if D.load([name])[name].embedded is not None else 0.0
-    key = (name, n, str(device), D.BROAD, embed)
-    path = BASELINES / f"drill_{name}_{n}_broad{D.BROAD:g}{f'_embed{embed:g}' if embed else ''}_{drill_version()}.json"
+    return BASELINES / f"drill_{name}_{n}_broad{D.BROAD:g}{f'_embed{embed:g}' if embed else ''}_{drill_version()}.json"
+
+
+DRILL_SCRIPTS = ("naive", "skilled")
+
+
+def write_drill_ref(path, doc):
+    """A drill's {"naive", "skilled"} written as drill_scripts reads it back."""
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps(doc, separators=SEP), encoding="utf-8", newline="\n")
+
+
+def drill_script(name, n, which, device="cpu", compile=None):
+    """drill_scripts(name, n)[which] played now (not cached): the check script `which` (naive, skilled) on
+    the drill's n evaluation battles -> {win_rate, gold_trade, play (drills/metrics.Tracker), frames, and per
+    frame with more than one}."""
+    from tools.nn.train import drills as D
+    from tools.nn.train.drills import metrics as drill_metrics
+    from tools.nn.train.drills import verify
+    drill = D.load([name])[name]
+    seeds = range(D.DRILL_EVAL_SEEDS.start, D.DRILL_EVAL_SEEDS.start + n)
+    box = {}
+
+    def extra(st, rows):
+        # st: the battles that stepped (rows: their places in the whole batch, None: all of it)
+        if "tr" not in box:
+            whole = SimpleNamespace(B=len(box["ours"]), N=st.N, device=st.device)
+            box["tr"] = drill_metrics.Tracker(whole, box["ours"], drill.roles)
+            box["done"] = (st.done.clone() if rows is None else      # (the first step: as it ended)
+                           torch.zeros(len(box["ours"]), dtype=torch.bool, device=st.device))
+        was = box["done"] if rows is None else box["done"][rows]
+        box["tr"].update(st, ~was, rows)                 # a battle counts the step it ended in
+        box["done"][slice(None) if rows is None else rows] = st.done
+    res, descs = verify.play(drill, getattr(drill, which), device=device, spread=SPREAD, seeds=seeds,
+                             extra=extra, ours_box=box, compile=bool(compile))   # (None: plain, as before)
+    out = {"win_rate": round(float(res["won"].mean()), 3), "gold_trade": round(float(res["trade"].mean()), 3),
+           "play": box["tr"].summary(None, box["st"]) if "tr" in box else None}
+    kinds = res["frame"]
+    out["frames"] = {k: int((kinds == k).sum()) for k in D.FRAMES if (kinds == k).any()}
+    if len(out["frames"]) > 1:
+        for tag in out["frames"]:
+            sel = kinds == tag
+            out[tag] = {"games": int(sel.sum()), "win_rate": round(float(res["won"][sel].mean()), 3),
+                        "gold_trade": round(float(res["trade"][sel].mean()), 3)}
+    return out
+
+
+def drill_scripts(name, n, device="cpu", compile=None):
+    """{"naive", "skilled"}: the drill's two check scripts' win rate and gold trade on the evaluation's
+    battles (DRILL_EVAL_SEEDS, our side alternating; SPREAD; drill_script), cached per process and on disk
+    (drill_ref_path; test5 plays a missing file first on the CPU: tools/nn/train/refs.py). With more than
+    one frame (drills.FRAMES) in the battles, per frame too: {frame: {games, win_rate, gold_trade}}."""
+    if REFS_READY is not None:
+        REFS_READY()
+    path = drill_ref_path(name, n)
+    key = (name, n, str(device), path.name)
     if key not in _SCRIPT_REF:
         try:
             _SCRIPT_REF[key] = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             pass
     if key not in _SCRIPT_REF:
-        drill = D.load([name])[name]
-        seeds = range(D.DRILL_EVAL_SEEDS.start, D.DRILL_EVAL_SEEDS.start + n)
-        out = {}
-        from tools.nn.train.drills import metrics as drill_metrics
-        for which in ("naive", "skilled"):
-            box = {}
-
-            def extra(st, box=box):
-                if "tr" not in box:
-                    box["tr"] = drill_metrics.Tracker(st, box["ours"], drill.roles)
-                box["tr"].update(st, ~box.get("done", st.done))
-                box["done"] = st.done.clone()
-                box["st"] = st
-            res, descs = verify.play(drill, getattr(drill, which), device=device, spread=SPREAD, seeds=seeds,
-                                     extra=extra, ours_box=box)
-            out[which] = {"win_rate": round(float(res["won"].mean()), 3), "gold_trade": round(float(res["trade"].mean()), 3),
-                          "play": box["tr"].summary(None, box["st"]) if "tr" in box else None}
-            kinds = res["frame"]
-            out[which]["frames"] = {k: int((kinds == k).sum()) for k in D.FRAMES if (kinds == k).any()}
-            if len(out[which]["frames"]) > 1:
-                for tag in out[which]["frames"]:
-                    sel = kinds == tag
-                    out[which][tag] = {"games": int(sel.sum()), "win_rate": round(float(res["won"][sel].mean()), 3),
-                                       "gold_trade": round(float(res["trade"][sel].mean()), 3)}
+        out = {which: drill_script(name, n, which, device, compile) for which in DRILL_SCRIPTS}
         _SCRIPT_REF[key] = out
-        BASELINES.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(out, separators=SEP), encoding="utf-8", newline="\n")
+        write_drill_ref(path, out)
     return _SCRIPT_REF[key]
 
 
@@ -733,10 +760,15 @@ def baseline_path(name, max_units, limit_s, version=None):
 
 
 @torch.no_grad()
-def script_battles(names, n_pairs, max_units=19, limit_s=3600.0, device="cpu", compile=None, seed=1):
+def script_battles(names, n_pairs, max_units=19, limit_s=3600.0, device="cpu", compile=None, seed=1, compact=True,
+                   first=None):
     """{name: {seed, winner, lost [n, 2], start [n, 2], budget, factions [n, 2], attacker}}: the first
     n_pairs EVAL seeds, each played once by the script `name` on both sides, with the armies and roles
-    of a paired evaluation (scenes.Generated: side 1 attacks at even positions, as in paired_order)."""
+    of a paired evaluation (scenes.Generated: side 1 attacks at even positions, as in paired_order).
+    compact: only the running battles step (a battle ends the same in a smaller batch). first: only the
+    first `first` pairs of each name are played (n = first), started as in the whole batch: the start
+    places' jitter is drawn over the batch (randomise.apply), so a smaller batch would be other battles
+    (the canary: the same battles as an older file's first pairs)."""
     params = rollout.params_with_limit(limit_s)
     seeds = eval_seeds(n_pairs)
     source = scenes.Generated(seeds * len(names), max_units, params, device, sequential=True)
@@ -746,6 +778,9 @@ def script_battles(names, n_pairs, max_units=19, limit_s=3600.0, device="cpu", c
                           compile=compile, source=source)
     ctrl = torch.as_tensor(np.stack([code, code], 1), device=env.device)
     sim_abilities.set_rule(env.st.u, torch.ones_like(ctrl, dtype=torch.bool))     # both sides by the game-AI rule
+    if first is not None and first < n_pairs:
+        keep = env.narrow(np.concatenate([i * n_pairs + np.arange(first) for i in range(len(names))]))
+        ctrl, n_pairs, seeds = ctrl[keep], first, seeds[:first]
     plays = tuple((league.CODE[n], scripts.SCRIPTS[n]) for n in names)
     full, orig, factions = env.st, torch.arange(env.B, device=env.device), env.setup.factions
     n_steps, i = int(limit_s / env.params.dt) + 2, 0
@@ -753,7 +788,9 @@ def script_battles(names, n_pairs, max_units=19, limit_s=3600.0, device="cpu", c
         n = int((~env.st.done).sum())
         if n == 0:
             break
-        size = bucket(n, env.B)
+        # compiled (CUDA): the BUCKETS sizes (each new size compiles); plain (CPU): exactly the running
+        # battles (the uncompiled step costs in proportion to the battles it steps)
+        size = (bucket(n, env.B) if env.compiled else n) if compact else env.B
         if size < env.B:
             _put(full, orig, env.st)
             keep = env.narrow(_ended(env, size))
@@ -782,6 +819,8 @@ def baselines(names, n_pairs, max_units=19, limit_s=3600.0, device="cpu", compil
     """{name: script_battles()[name] + {"cache": its file name}} of the script opponents `names`: read
     from build/nn-train/baselines (a file per opponent, units, limit and simulator version; one of more
     seeds serves a prefix), the missing ones played in one batch and written there."""
+    if REFS_READY is not None:
+        REFS_READY()
     version = sim_version()
     out, missing = {}, []
     for n in names:
@@ -804,7 +843,7 @@ def baselines(names, n_pairs, max_units=19, limit_s=3600.0, device="cpu", compil
             print(f"baselines {', '.join(names)} missing for simulator version {version}: playing a canary of "
                   f"{CANARY} pairs against the older files", flush=True)
             BASELINES.mkdir(parents=True, exist_ok=True)
-            for n, canary in script_battles(names, CANARY, max_units, limit_s, device, compile).items():
+            for n, canary in script_battles(names, n_pairs, max_units, limit_s, device, compile, first=CANARY).items():
                 for p, doc in old[n]:
                     if sim_ver.same_prefix(doc, canary, CANARY):
                         path = baseline_path(n, max_units, limit_s, version)

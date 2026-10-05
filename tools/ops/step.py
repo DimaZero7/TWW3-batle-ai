@@ -26,9 +26,8 @@ ROOT = project.ROOT
 CHAIN = ROOT / "config" / "train-chain.json"
 TEST5 = project.BUILD / "nn-train" / "test5"
 RUNS = project.BUILD / "nn-train" / "runs"
-OPPONENTS = ("ai_like", "nearest", "hold_shoot")
 EVAL_S = 200.0            # one full evaluation with the baselines cached (n3: 194 s)
-MISS_S = 1500.0           # extra on a baseline cache miss (n1: 1384 s, n2: 1843 s total "before")
+MISS_S = 600.0            # extra on a reference cache miss: tools/nn/train/refs.py on the CPU (~10 min, 8 cores)
 STARTUP_S = 120.0         # the container, the compile warm-up
 
 
@@ -102,15 +101,16 @@ def posix(path):
 
 
 def baseline_cache():
-    """(version, [missing opponents]) of the current simulator; the import of the generator may fail
-    outside the project's environment -> (None, [])."""
+    """(version, [missing references]) of the current code: the script baselines and the drills' check
+    scripts (tools/ops/baselines.py status); the import of the generator may fail outside the project's
+    environment -> (None, [])."""
     try:
         from tools.nn.train import version
-        v = version.sim_version()
+        from tools.ops import baselines
+        v, _, missing = baselines.status(version.BASELINES)
     except Exception as e:                    # noqa: BLE001 - a report, not a failure
         print(f"(baseline cache not checked: {e})", file=sys.stderr)
         return None, []
-    missing = [n for n in OPPONENTS if not (version.BASELINES / version.baseline_name(n, 19, 3600.0, v)).is_file()]
     return v, missing
 
 
@@ -166,14 +166,13 @@ def main(argv=None):
     version, missing = baseline_cache()
     if version is not None:
         if missing:
-            print(f"baseline cache: MISS for {', '.join(missing)} (simulator version {version}): the canary plays "
-                  f"{info['canary']} pairs and adopts an older file when identical, else ~25 min more" if info["canary"]
-                  else f"baseline cache: MISS for {', '.join(missing)} (version {version}): ~25 min more for the 'before' evaluation")
+            print(f"baseline cache: MISS for {', '.join(missing)} (simulator version {version}): the step plays them "
+                  f"on the CPU first (~{MISS_S / 60:.0f} min); ahead of it: .venv/Scripts/python -m tools.ops.baselines --run")
         else:
             print(f"baseline cache: hit (simulator version {version})")
-    wall, evals = wall_minutes(info["minutes"], info["every"], bool(missing) and not info["canary"])
+    wall, evals = wall_minutes(info["minutes"], info["every"], bool(missing))
     print(f"expected wall time ~{wall:.0f} min: {info['minutes']:g} min training + {evals} evaluations x ~{EVAL_S / 60:.1f} min"
-          + (f" (+ up to ~{MISS_S / 60:.0f} min if the canary finds no match)" if missing and info["canary"] else ""))
+          + (f" + ~{MISS_S / 60:.0f} min of script references" if missing else ""))
     if args.write:
         path = Path(args.write)
         path.parent.mkdir(parents=True, exist_ok=True)

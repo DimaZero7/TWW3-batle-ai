@@ -583,8 +583,9 @@ the clean one otherwise; the description carries `"broad": true`. The share appl
 (`drills/source.py`) and to test5's drill evaluation, which reports the win rate clean / broad apart
 (the scripts' beside). `verify.py --broad 1` checks the broad frame alone. The broad battles are longer
 (kiting skilled 836 s of battle against 311 s clean), so the check scripts' numbers on the drill evaluation's
-battles (~15 min of GPU at a test5 start) are cached on disk: `build/nn-train/baselines/drill_<name>_<n>_broad<share>[_embed<share>]_<version>.json`,
-the version a hash of the simulator's files and `tools/nn/train/drills`.
+battles are cached on disk: `build/nn-train/baselines/drill_<name>_<n>_broad<share>[_embed<share>]_<version>.json`,
+the version a hash of the simulator's files and `tools/nn/train/drills`; test5 plays the missing ones on the CPU
+beside the network's battles ([the cache](workflow.md#the-baselines-cache-and-the-canary)).
 
 | drill | broad frame | verify, broad only (naive / skilled) | verify, 50 % mix |
 |---|---|---|---|
@@ -727,10 +728,12 @@ time not counted), keeps each network (`m<minute>.pt`, the last with its critic)
 (`eval_m<minute>.json`) and writes the table minute 0 / K / … / M (`trend.md`, `report.json`).
 `--before PATH` reuses a "before" evaluation (only while the simulator has not changed);
 `--report-only` rebuilds the report of a finished label without the GPU; `--prev-report` names the
-previous iteration for the capacity block. `--baseline-canary N` (the chain passes 32): on a
-baseline cache miss the scripts play the first N pairs first, and when they are identical in every
-field to an older version's file that file is adopted — a change that cannot touch a script battle
-no longer costs the ~25 minutes of the whole baseline ([workflow](workflow.md#the-baselines-cache-and-the-canary)).
+previous iteration for the capacity block. The missing references (the script baselines, the drill
+check scripts) test5 starts on the CPU before its first evaluation (`tools/nn/train/refs.py`, ~8 min on
+8 cores while the GPU plays the network's battles). `--baseline-canary N` (the chain passes 32): on a
+baseline cache miss a script plays its first N pairs first (from the whole baseline's batch), and when
+they are identical in every field to an older version's file that file is adopted — a change that
+cannot touch a script battle costs ~1 min ([workflow](workflow.md#the-baselines-cache-and-the-canary)).
 
 The report's blocks: skill (the [fair metrics](#network-evaluation-fair-metrics), with the distance
 from the start: `start_kl`, the anchor KL, the anchor rolls), drills, win rate by opponent and role,
@@ -1064,9 +1067,14 @@ loss; continuing from older checkpoints; `--critic-init`, per-role advantages, `
 opponents in one batch); `test5`'s report, trend, liveliness and faction blocks, and the GPU lock.
 `tests/tools/test_nn_eval_pairs.py` (torch): the pairs' layout, a paired evaluation, the baselines and
 their cache, the canary adopting an older version's baseline, the version hash, a shrunk batch playing
-its battles as the whole one does. `tests/tools/test_nn_version.py` and `tests/tools/test_ops.py`
-(plain Python): the simulator version and the baseline comparison on the host; the working process's
-tools — the chain step, the run card, leftovers, the wait with a timeout ([workflow](workflow.md)).
+its battles as the whole one does, the canary's pairs being the whole baseline batch's first battles.
+`tests/tools/test_nn_refs_torch.py` (torch): a drill's battles and the drill metrics' counts are the same
+in a compacted batch, `refs.py` finds the missing files and writes a drill's file once both its scripts
+are in, test5 hands the wait to the evaluation; `tests/tools/test_nn_refs.py` (plain Python): processes
+and threads over the container's cores. `tests/tools/test_nn_version.py` and `tests/tools/test_ops.py`
+(plain Python): the simulator and drill versions and the baseline comparison on the host; the working
+process's tools — the chain step, the run card, leftovers, the wait with a timeout, the references ahead
+([workflow](workflow.md)).
 `tests/tools/test_nn_skill.py`, `test_nn_capacity.py`, `test_nn_matchups.py` (numpy): the rating,
 pairs, margins, pair gold, forgetting and the verdict, matchups. `tests/tools/test_nn_cadence.py`:
 the cadence. `tests/tools/test_nn_drills.py`, `test_nn_drill_*.py` and `test_nn_teach_auto.py`: the drill framework, the teacher, frames,

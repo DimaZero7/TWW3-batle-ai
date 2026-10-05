@@ -94,7 +94,8 @@ class TestPairedEvaluation:
         old.rename(other)                                               # the file of an "older version"
         played = []
         real = evaluate.script_battles
-        monkeypatch.setattr(evaluate, "script_battles", lambda names, n, *a, **k: played.append((list(names), n)) or real(names, n, *a, **k))
+        monkeypatch.setattr(evaluate, "script_battles", lambda names, n, *a, **k: played.append((list(names), k.get("first") or n))
+                            or real(names, n, *a, **k))
         monkeypatch.setattr(evaluate, "CANARY", 2)
         got = evaluate.baselines(["nearest"], 4, limit_s=4.0)["nearest"]
         assert played == [(["nearest"], 2)]                             # the canary only, not the 4 pairs
@@ -219,9 +220,18 @@ class TestCompact:
 
     def test_script_battles_end_the_same_in_a_shrinking_batch(self, monkeypatch):
         # the scripts draw nothing at random: every battle ends the same, whatever the batch around it
+        # (on the CPU the batch shrinks to exactly the running battles; compact=False steps them all)
         monkeypatch.setattr(evaluate, "CHECK_EVERY", 2)
-        monkeypatch.setattr(evaluate, "BUCKETS", tuple(range(2, 8)))
         x = evaluate.script_battles(["nearest"], 8, max_units=4, limit_s=900.0)
-        monkeypatch.setattr(evaluate, "BUCKETS", ())
-        y = evaluate.script_battles(["nearest"], 8, max_units=4, limit_s=900.0)
+        y = evaluate.script_battles(["nearest"], 8, max_units=4, limit_s=900.0, compact=False)
         assert x == y and len(set(x["nearest"]["winner"])) == 2
+
+    def test_the_canary_s_first_pairs_are_the_whole_batch_s_first_battles(self):
+        """The start places' jitter is drawn over the batch: the first pairs played alone would be other
+        battles (the canary never matched, 6 of 6 cache misses on 04-05.10); first= keeps the whole batch's start."""
+        whole = evaluate.script_battles(["nearest", "hold_shoot"], 6, max_units=4, limit_s=300.0)
+        part = evaluate.script_battles(["nearest", "hold_shoot"], 6, max_units=4, limit_s=300.0, first=2)
+        for n in ("nearest", "hold_shoot"):
+            assert part[n] == {k: v[:2] for k, v in whole[n].items()}
+        alone = evaluate.script_battles(["nearest"], 2, max_units=4, limit_s=300.0)["nearest"]
+        assert alone["lost"] != whole["nearest"]["lost"][:2]            # (why first= exists)

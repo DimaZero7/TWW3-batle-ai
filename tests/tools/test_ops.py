@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from tools.ops import card, leftovers, step
+from tools.nn.train import version
+from tools.ops import baselines, card, leftovers, step
 
 REPO = Path(__file__).resolve().parents[2]
 BASH = shutil.which("bash")
@@ -79,7 +80,7 @@ class TestStep:
     def test_the_wall_time_counts_before_every_point_and_after(self):
         wall, evals = step.wall_minutes(25, 5, miss=False)
         assert evals == 7 and 45 < wall < 55
-        assert step.wall_minutes(25, 5, miss=True)[0] > wall + 20
+        assert step.wall_minutes(25, 5, miss=True)[0] == wall + step.MISS_S / 60
 
     def test_posix_paths_for_git_bash(self):
         assert step.posix("C:\\Users\\x\\repo") == "/c/Users/x/repo"
@@ -304,3 +305,44 @@ class TestWait:
         assert self.run("-t", "2", "-i", "1", "gone", str(tmp_path / "nothere")).returncode == 0
         assert self.run().returncode == 1
         assert self.run("only-one").returncode == 1
+
+
+# --- baselines -------------------------------------------------------------------------------------
+
+class TestBaselines:
+    def test_ready_drills_read_from_the_source(self, tmp_path):
+        f = tmp_path / "init.py"
+        f.write_text('import torch\nNAMES = ("a", "b")\nREADY = ("kiting", "counter")  # note\n', encoding="utf-8")
+        assert baselines.ready_drills(f) == ("kiting", "counter")
+        assert "kiting" in baselines.ready_drills()
+
+    def test_status_names_the_missing_scripts_and_drills(self, tmp_path):
+        for n in ("ai_like", "nearest"):
+            name = version.baseline_name(n, 19, 3600.0, "v1")
+            (tmp_path / name).write_text(json.dumps({"seed": list(range(256))}), encoding="utf-8")
+        (tmp_path / version.baseline_name("hold_shoot", 19, 3600.0, "v1")).write_text(json.dumps({"seed": [1]}), encoding="utf-8")
+        (tmp_path / "drill_kiting_128_broad0.5_embed1_d1.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "drill_counter_128_broad0.5_d0.json").write_text("{}", encoding="utf-8")       # another drill version
+        v, dv, missing = baselines.status(tmp_path, "v1", "d1", drills=("kiting", "counter"))
+        assert (v, dv) == ("v1", "d1") and missing == ["hold_shoot", "drill:counter"]       # hold_shoot: too few seeds
+        assert baselines.status(tmp_path, "v2", "d1", drills=())[2] == ["ai_like", "nearest", "hold_shoot"]
+
+    def test_the_container_command_mounts_the_build_folder(self):
+        env, cmd = baselines.command(r"C:\main\build", "orch-x", 6, root=r"C:\wt")
+        assert env["DOCK_NAME"] == "orch-x" and env["DOCK_CPUS"] == "6" and env["DOCK_BUILD"] == "/c/main/build"
+        assert cmd == ["bash", "/c/wt/tools/nn/dock.sh", "tools.nn.train.refs"]
+
+    def test_the_drill_version_follows_the_simulator_and_the_drills(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(version, "ROOT", tmp_path)
+        monkeypatch.setattr(version, "sim_version", lambda: "s1")
+        (tmp_path / version.DRILL_FILES).mkdir(parents=True)
+        f = tmp_path / version.DRILL_FILES / "a.py"
+        f.write_text("x = 1\n", encoding="utf-8")
+        one = version.drill_version()
+        f.write_bytes(b"x = 1\r\n")
+        assert version.drill_version() == one                                   # line ends ignored
+        f.write_text("x = 2\n", encoding="utf-8")
+        assert version.drill_version() != one
+        monkeypatch.setattr(version, "sim_version", lambda: "s2")
+        f.write_text("x = 1\n", encoding="utf-8")
+        assert version.drill_version() != one

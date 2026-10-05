@@ -37,10 +37,13 @@ class Tracker:
         self.limit = torch.full((B,), float(limit_s), device=st.device)
 
     @torch.no_grad()
-    def update(self, st, live=None):
+    def update(self, st, live=None, rows=None):
+        """One simulator step of st; rows: st's battles are these places of the tracker's batch (a batch
+        narrowed to its running battles, drills/verify.run), None: the whole batch."""
         u = st.u
         live = ~st.done if live is None else live
-        mine = (u["side"] == self.ours[:, None]) & (u["men"] > 0) & ~u["gone"] & ~u["r"] & live[:, None]
+        ours = self.ours if rows is None else self.ours[rows]
+        mine = (u["side"] == ours[:, None]) & (u["men"] > 0) & ~u["gone"] & ~u["r"] & live[:, None]
         kind, tgt = u["order_kind"], u["order_target"]
         att = mine & (kind == O.ATTACK) & (tgt >= 0)
         parts = {"hold": mine & (kind == O.HOLD), "move": mine & (kind == O.MOVE),
@@ -51,14 +54,23 @@ class Tracker:
             on_correct = att & correct.gather(2, t).squeeze(2)
             on_bad = att & bad.gather(2, t).squeeze(2) & ~on_correct
             parts.update(correct=on_correct, bad=on_bad, other=att & ~on_correct & ~on_bad)
-            self.first = torch.where((self.first < 0) & on_correct, st.t[:, None].expand_as(self.first), self.first)
+            first = self.first if rows is None else self.first[rows]
+            first = torch.where((first < 0) & on_correct, st.t[:, None].expand_as(first), first)
+            if rows is None:
+                self.first = first
+            else:
+                self.first[rows] = first
         else:
             parts.update(correct=torch.zeros_like(att), bad=torch.zeros_like(att), other=att)
-        late = (st.t >= self.limit - self.tail_s)[:, None]
+        limit = self.limit if rows is None else self.limit[rows]
+        late = (st.t >= limit - self.tail_s)[:, None]
         for acc, m in ((self.all, mine), (self.tail, mine & late)):
-            acc["n"] += m.float().sum(1)
-            for k in KEYS:
-                acc[k] += (parts[k] & m).float().sum(1)
+            add = {"n": m.float().sum(1), **{k: (parts[k] & m).float().sum(1) for k in KEYS}}
+            for k, v in add.items():
+                if rows is None:
+                    acc[k] += v
+                else:
+                    acc[k][rows] += v
 
     def summary(self, sel=None, st=None):
         """{"all": {key: share}, "tail": {...}, "first_correct_s": median, "ever_correct": share of our units}

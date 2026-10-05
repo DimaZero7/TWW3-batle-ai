@@ -2,8 +2,9 @@
 version's baseline be adopted (docs/en/training/training.md "Test protocol").
 
 Plain Python (no torch): tools/ops/step.py asks it on the host whether the next run's "before"
-evaluation will find its baselines (a cache miss costs ~20-30 minutes: the three scripts play their
-256 pairs again), and tools/nn/train/evaluate.py imports it for the same hash.
+evaluation will find its baselines (a cache miss: the three scripts play their 256 pairs again, with
+the drills' check scripts ~8 min on the CPU, tools/nn/train/refs.py), and tools/nn/train/evaluate.py
+imports it for the same hash.
 
     python -m tools.nn.train.version            # the version and which baseline files exist for it
 """
@@ -22,6 +23,8 @@ BASELINES = project.BUILD / "nn-train" / "baselines"
 VERSION_FILES = ("tools/nn/sim", "tools/nn/armies", "tools/nn/train/opponents.py", "tools/nn/train/scenes.py",
                  "tools/nn/train/reward.py", "tools/nn/train/randomise.py", "tools/nn/scenario.py", "tools/nn/units.py",
                  "tools/nn/abilities.py", "tools/nn/model", "config/nn")
+# What the drills' script references depend on besides the simulator (drill_version()).
+DRILL_FILES = "tools/nn/train/drills"
 # The baseline document's battle fields (evaluate.script_battles): lists over the pairs, in seed order.
 FIELDS = ("seed", "winner", "lost", "start", "budget", "factions", "attacker")
 
@@ -38,6 +41,16 @@ def sim_version():
             if f.is_file() and f.suffix in (".py", ".json") and "__pycache__" not in f.parts:
                 h.update(f.relative_to(ROOT).as_posix().encode())
                 h.update(f.read_bytes().replace(b"\r\n", b"\n"))
+    return h.hexdigest()[:12]
+
+
+def drill_version():
+    """sim_version() and the drills' code (tools/nn/train/drills/*.py): what a drill's script references
+    (evaluate.drill_scripts: BASELINES/drill_<name>_..._<drill_version>.json) depend on."""
+    h = hashlib.sha256(sim_version().encode())
+    for f in sorted((ROOT / DRILL_FILES).glob("*.py")):
+        h.update(f.name.encode())
+        h.update(f.read_bytes().replace(b"\r\n", b"\n"))
     return h.hexdigest()[:12]
 
 
@@ -80,7 +93,7 @@ def main():
     have = sorted(p.name for p in BASELINES.glob(f"*_{v}.json")) if BASELINES.exists() else []
     print(f"simulator version {v}")
     print("baselines for it: " + (", ".join(have) if have else "none (the next 'before' evaluation plays the scripts' "
-                                                              "battles: ~20-30 min more; the canary may adopt an older one)"))
+                                                              "battles: ~8 min more on the CPU; the canary may adopt an older one)"))
 
 
 if __name__ == "__main__":

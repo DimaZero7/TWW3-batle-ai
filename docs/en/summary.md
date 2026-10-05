@@ -49,7 +49,9 @@ passports `config/nn/units.json`, effects `config/nn/effects.json`, abilities
 `config/nn/abilities.json`). Where the game behaves otherwise, a number is fitted to
 measurements, with its reason in `config/nn/sim.json`. Any change in `config/nn` or
 `tools/nn/sim` changes the "simulator version": the next evaluation plays the scripts' battles
-again (~25 min) unless the "canary" (a short check on 32 pairs) adopts the old ones.
+again — the baselines and the drill check scripts, ~8 min on the CPU beside the network's battles
+(`tools/nn/train/refs.py`; ahead, while the previous step runs: `tools.ops.baselines --run`) — unless
+the "canary" (the baseline's first 32 pairs) adopts the old ones.
 
 **Already modelled:** speeds, formation, contact and leaving melee, hit chance (flat: slope 0.1
 instead of the database's 1), damage and armour, charge and spear bracing, flank and rear

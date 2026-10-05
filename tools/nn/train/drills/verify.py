@@ -28,6 +28,7 @@ import numpy as np
 import torch
 
 from tools.nn.sim import battle, scenario
+from tools.nn.sim import state as S
 from tools.nn.train import randomise, reward
 from tools.nn.train import drills as D
 
@@ -36,28 +37,77 @@ PASS_SKILLED = 0.75      # ... the skilled one at least this
 EMBED_PASS_TRADE = 0.05  # an embedded frame: skilled - naive gold trade (paired) at least this, its 95 % interval above 0
 
 
+def narrowed(st, keep):
+    """The battles keep (indices, ascending) of the State st as a State of their own (the same tensors'
+    rows; the map's bounds and the unit keys go along)."""
+    kl = keep.tolist()
+    return S.State({k: v[keep] for k, v in st.u.items()}, st.t[keep], st.attacker[keep], st.done[keep],
+                   st.winner[keep], st.lord_dead_s[keep], st.bounds, [st.keys[i] for i in kl] if st.keys else [])
+
+
+def put_back(full, rows, cur):
+    """The running battles' State cur back into the whole batch's full at the places rows (in place)."""
+    for k, v in cur.u.items():
+        full.u[k][rows] = v
+    for k in ("t", "attacker", "done", "winner", "lord_dead_s"):
+        getattr(full, k)[rows] = getattr(cur, k)
+
+
+def run(st, ours, script, enemy, params, advance=None, extra=None, compact=True, check_every=8):
+    """Every battle of st to its end (in place): our side's `script` and the drill's `enemy` order every
+    simulator step. compact: once some battles have ended, only the running ones step (checked every
+    check_every steps; a battle is per battle in the simulator, so it ends the same in a smaller batch:
+    the uncompiled CPU step costs in proportion to the battles it steps). extra(st, rows), if given,
+    after every step: st the battles that stepped, rows their places in the whole batch (None: all)."""
+    advance = advance or battle.step
+    cur, rows, i = st, None, 0
+    while True:
+        if i % check_every == 0:
+            live = ~cur.done
+            n = int(live.sum())
+            if n == 0:
+                break
+            if compact and n < cur.B:
+                keep = live.nonzero().squeeze(1)
+                if rows is not None:
+                    put_back(st, rows, cur)
+                rows = keep if rows is None else rows[keep]
+                cur = narrowed(st, rows)
+        o = ours if rows is None else ours[rows]
+        advance(cur, D.merged(cur, o, script(cur), enemy(cur)), params, params.dt)
+        cur.u["lost_worst"] = reward.track(cur.u)          # a loss counts once (reward.gold_lost)
+        if extra is not None:
+            extra(cur, rows)
+        i += 1
+    if rows is not None:
+        put_back(st, rows, cur)
+    return st
+
+
 def play(drill, script, n=256, seed=0, device="cpu", spread=randomise.Spread(), seeds=None, extra=None, ours_box=None,
-         broad=None, embed=None):
+         broad=None, embed=None, compile=False, compact=None):
     """Battles of a drill with `script` on our side and the drill's enemy -> per-battle results:
     {"won", "trade", "seconds", "timeout", "ours", "broad", "frame"} (numpy) and the descriptions. broad, embed:
-    the shares of the broad and embedded frames (drills.battles; default drills.BROAD, drills.EMBED)."""
+    the shares of the broad and embedded frames (drills.battles; default drills.BROAD, drills.EMBED).
+    compile: the simulator's step by torch.compile on CUDA (battle.stepper; default off: plain, as before);
+    compact (default: when not compiled, as a new batch size would compile again): only the running battles
+    step (run()).
+    extra(st, rows): see run()."""
     seeds = list(seeds if seeds is not None else range(seed, seed + n))
     pairs = D.battles(drill, seeds, broad=broad, embed=embed)
     descs = [p[0] for p in pairs]
     ours = torch.tensor([p[1] for p in pairs], device=device)
     if ours_box is not None:
-        ours_box["ours"] = ours                  # (for an `extra` that needs our side per battle)
+        ours_box["ours"] = ours                  # (for an `extra` that needs our side per battle; "st": the end)
     st = scenario.build(descs, device=device)
     gen = torch.Generator(device=device).manual_seed(seed + 7)
     randomise.apply(st, torch.ones(st.B, dtype=torch.bool, device=device), spread, gen)
     from tools.nn.sim.params import load
     params = load()
-    while not bool(st.done.all()):
-        orders = D.merged(st, ours, script(st), drill.enemy(st))
-        battle.step(st, orders, params, params.dt)
-        st.u["lost_worst"] = reward.track(st.u)          # a loss counts once (reward.gold_lost)
-        if extra is not None:
-            extra(st)
+    advance = battle.stepper(device, compile)
+    run(st, ours, script, drill.enemy, params, advance, extra, compact=(advance is battle.step) if compact is None else compact)
+    if ours_box is not None:
+        ours_box["st"] = st                      # the whole batch at the end
     gold = reward.gold_sides(st.u).cpu().numpy()
     bud = reward.budget(st.u).cpu().numpy()
     o = ours.cpu().numpy()
