@@ -23,6 +23,12 @@ tools/nn/train/profiles.py GAME):
                bridge's given nn_orders in the game, the simulator's order_kind / order_run)
     activity   the share of standing unit-time (alive, not routing) in melee / firing / moving / still
     shooters   missile units' (passport ammo > 0, not the lord) standing time in melee, own / enemy
+    wrap       melee entries (a melee unit, not the lord nor a missile unit, going into melee) from the rear
+               (the angle between the enemy's facing and the enemy -> unit line >= REAR_DEG; the enemy: its
+               target when that one is in melee, else the nearest standing enemy), own / enemy; the share of the
+               melee time of the side's units (not the lord) with an enemy behind (the rear flag bf), own / enemy;
+               how far the enemy's melee line laps ours at the first melee, both ends summed, m (across the
+               line between the two melee lines' centres)
 
 Only numpy: the host runs it (gate.py).
 """
@@ -41,6 +47,7 @@ MAX_DT = 2.0              # s: a longer gap between two samples counts as this (
 SIDES = (("own", 1), ("enemy", 2))
 FAR_M = 150.0             # = tools/nn/train/behaviour.py FAR_M
 POINT_KINDS = ("move", "withdraw")
+REAR_DEG = 120.0          # = the simulator's rear sector (config/nn/sim.json threat), build/gangup's rear entry
 
 
 def _bin_name(lo, hi):
@@ -69,6 +76,9 @@ ROWS += [("run_far_own", "fatigue", f"own move orders running, far from the figh
 ROWS += [(f"{a}_{s}", "activity", f"standing time {a}, {s}", "{:.3f}")
          for s, _ in SIDES for a in ("melee", "fire", "move", "still")]
 ROWS += [(f"missile_melee_{s}", "shooters", f"missile units' time in melee, {s}", "{:.3f}") for s, _ in SIDES]
+ROWS += [(f"rear_entries_{s}", "wrap", f"melee entries from the rear, {s}", "{:.3f}") for s, _ in SIDES]
+ROWS += [(f"behind_{s}", "wrap", f"melee time with an enemy behind, {s}", "{:.3f}") for s, _ in SIDES]
+ROWS += [("lap_enemy", "wrap", "enemy line beyond ours at the first melee, m", "{:.0f}")]
 GROUPS = tuple(dict.fromkeys(g for _, g, _, _ in ROWS))
 
 
@@ -237,6 +247,49 @@ def measure(b, winner, cut_s=None, abilities=None, chosen=GROUPS, passports=None
             m = shooter & (side == n)
             st = stand[:, m] * dt[:, None]
             out[f"missile_melee_{s}"] = _share((st * f["m"][:, m]).sum(), st.sum())
+    if "wrap" in chosen:
+        out.update(wrap(b, w, stand, lord, ammo, dt))
+    return out
+
+
+def wrap(b, w, stand, lord, ammo, dt):
+    """The wrap group of measure() (module doc): {rear_entries_own/enemy, behind_own/enemy, lap_enemy}."""
+    f = b.f
+    side = np.asarray(b.side)
+    T, N = f["m"].shape
+    x, z = np.nan_to_num(f["x"]), np.nan_to_num(f["z"])
+    m = f["m"].astype(bool) & stand
+    body = stand & ~lord[None] & ~ammo[None]
+    out = {}
+    tg = b.target if b.target is not None else np.full((T, N), -1)
+    jj = np.clip(tg, 0, N - 1)
+    take = lambda a: np.take_along_axis(a, jj, axis=1)
+    foe = (side[:, None] != side[None, :])[None] & stand[:, None, :]
+    d2 = (x[:, :, None] - x[:, None, :]) ** 2 + (z[:, :, None] - z[:, None, :]) ** 2
+    ok = (tg >= 0) & take(m) & (side[jj] != side[None])
+    ej = np.where(ok, jj, np.where(foe, d2, np.inf).argmin(2))
+    ex, ez = np.take_along_axis(x, ej, axis=1), np.take_along_axis(z, ej, axis=1)
+    eb = np.take_along_axis(np.nan_to_num(f["b"]), ej, axis=1)
+    ang = np.abs((np.degrees(np.arctan2(x - ex, z - ez)) - eb + 180.0) % 360.0 - 180.0)
+    entry = m & ~np.vstack([np.zeros((1, N), bool), m[:-1]]) & body & w[:, None] & foe.any(2)
+    in_melee = m & ~lord[None]
+    bf = f["bf"].astype(bool)
+    for s, n in SIDES:
+        e = entry[:, side == n]
+        out[f"rear_entries_{s}"] = _share((e & (ang[:, side == n] >= REAR_DEG)).sum(), e.sum())
+        wt = in_melee[:, side == n] * dt[:, None]
+        out[f"behind_{s}"] = _share((wt * bf[:, side == n]).sum(), wt.sum())
+    out["lap_enemy"] = None
+    first = np.flatnonzero((m & w[:, None]).any(1))
+    if len(first):
+        i = first[0]
+        k1, k2 = body[i] & (side == 1), body[i] & (side == 2)
+        if k1.any() and k2.any():
+            c1, c2 = np.array([x[i, k1].mean(), z[i, k1].mean()]), np.array([x[i, k2].mean(), z[i, k2].mean()])
+            fwd = c1 - c2
+            fwd = fwd / max(float(np.hypot(*fwd)), 1e-6)
+            lat = (x[i] - c2[0]) * -fwd[1] + (z[i] - c2[1]) * fwd[0]
+            out["lap_enemy"] = float(max(0.0, lat[k1].min() - lat[k2].min()) + max(0.0, lat[k2].max() - lat[k1].max()))
     return out
 
 

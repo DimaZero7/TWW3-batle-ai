@@ -210,7 +210,8 @@ network-vs-game-AI gate battles ("pool"; the analysis scripts in `build/ail/`, n
 | a missile unit caught in melee breaks off (withdraw) for its first | 15 s | pool: the game's missile units in melee move 52 % of their first 5 s |
 | the lord stays behind his line's centre, never charges first: goes in when the line does, at his target within 90 m, or at an enemy within 50 m that already fights; withdraws below 30 % health | 20 m, 90 m | pool: 20–22 m behind the centre before contact, his first target at 90 m |
 | melee targets: score = distance − 20 m if the enemy is in melee (+30 m back if the unit stands within 40 m of an own fight) + 25 m for the enemy lord + 6 m for each other own unit already on it (up to 3) − 10 m × cos(the side's forward, the enemy) + 15 m if it wavers − 27 m × a fixed Gumbel draw per (battle row, unit, enemy); the lowest wins, a new one must be 15 m better | see left | a conditional logit fitted on the game AI's 3 397 new targets of melee units out of melee (`build/ail/choice.py`); hysteresis ours |
-| a free unit goes for an enemy already fighting via a point 12 m beside its flank | 12 m | the simulator's tactic scan |
+| a free unit goes for an enemy already fighting via a point 12 m beside its flank and 35 m behind its centre (along the enemy's facing); straight at it once the unit itself stands 140° or more off the enemy's facing | 12 m, 35 m, 140° | the simulator's tactic scan; going round to the rear: `build/wrap` (below) |
+| before contact the line widens to lap the enemy's melee line by 30 m at each end: each line unit shifts aside by its place in the line (on the march up to half a step aside; a holding defender sidesteps up to 8 m without turning), at most 40 m between neighbouring centres | 30 m, 40 m | `build/wrap`: the game AI's melee line 170 m wide 60 s before contact, 191 m at contact against the network's 157–165 m, 2.4 units beyond the network's end unit (31 m beyond on average), centres 33–35 m apart |
 
 The random part is an integer hash of (battle row, unit slot, enemy slot): the same every step,
 nothing to replay. Fitted against the game on the same 8 gate battle starts (side 2's behaviour;
@@ -220,6 +221,32 @@ distance (median) 91 / 93 m, the nearest enemy taken 0.48 / 0.49; new melee targ
 prediction of the network's in-game trade on those battles: −0.245 (the game −0.333). Left:
 `ai_like` piles two or more units on one of ours 0.26 of the time (the game 0.10), and its lord
 goes in sooner (6 s after the first contact against 12 s).
+
+**Envelopment.** The game's AI spreads its line wider than ours and goes round the ends into the
+rear; `ai_like` before the rules above went straight ahead, and a narrow network front was never
+punished. Analysis `build/wrap/` (scripts and JSON outside Git): all 162 fair network-vs-game-AI
+recordings with unit keys; the simulator: the same starts, one copy each, `s7_fat3/m15` against
+`ai_like`, game cadence. Game / `ai_like` before / after:
+
+| Metric | Game | Before | After |
+|---|---:|---:|---:|
+| the AI's melee entries from the rear / flank | 0.224 / 0.266 | 0.126 / 0.416 | 0.187 / 0.360 |
+| the network's melee time with an enemy behind (`bf`) | 0.093 | 0.055 | 0.069 |
+| the network's routs per unit | 1.56 | 1.21 | 1.27 |
+| the AI's / the network's melee line width at contact, m | 191 / 157 | 162 / 164 | 183 / 157 |
+| how far the AI's line laps the network's at contact, m | 42 | 15 | 34 |
+
+Gate gap cards (`--profile routs,wrap,shooters`, 8 copies, the gates' checkpoints), game / before /
+after: `20261005-161910` — rear entries 0.137 / 0.038 / 0.076, enemy behind 0.057 / 0.085 / 0.100,
+own routs 1.52 / 0.90 / 0.95, trade −0.385 / +0.080 / +0.062; `20261004-230630` — 0.317 / 0.067 /
+0.106, 0.065 / 0.067 / 0.091, 1.71 / 1.11 / 1.16, −0.317 / +0.064 / +0.041. Missile units' time in
+melee did not change (own 0.090 → 0.101 and 0.083 → 0.085, the AI's 0.030 → 0.015 and 0.028 → 0.034);
+the rules do not touch target choice. Pair gold of `s7_fat3/m15` against `ai_like` (64 pairs, CPU):
++0.207 ± 0.077 → +0.187 ± 0.071, paired difference −0.020 ± 0.054 — the right direction, within the
+noise. The 19–23 % of time with an enemy behind is from big battles of 11 against 20 units
+(`build/human_key`); over all recordings it is 9.3 %. Left: the game AI routs 0.92 times a unit,
+`ai_like` 1.9 — its units lose their fights, and our routs (1.27 against 1.56) cannot catch up through
+this rule; after contact `ai_like`'s line shrinks to ~100 m (the game 130–145 m).
 
 **Local superiority is still not reproduced.** The `build/gangup/` check (scripts and JSON
 outside Git) covers all completed fair recordings with unit keys: 158 network battles, 40
@@ -899,6 +926,23 @@ The local-power deficit remains; these probes do not establish that increasing t
 to join existing fights can remove it. Analysis: `build/gangup/`, outside Git.
 
 What was tried, the result in numbers, and why it is not used. Git keeps the code of each.
+
+### `ai_like` envelopment: variants
+
+The same 162 starts of `build/wrap`, one copy each (share noise ~±0.02), `s7_fat3/m15`. The line
+widening in every variant; the last one is used.
+
+| Variant | Rear / flank entries | Enemy behind the network | Network routs |
+|---|---:|---:|---:|
+| game | 0.224 / 0.266 | 0.093 | 1.56 |
+| before (approach point beside the flank, no widening) | 0.126 / 0.416 | 0.055 | 1.21 |
+| approach point 20 m behind, straight in from 120° | 0.210 / 0.335 | 0.065 | 1.25 |
+| + a unit more than 10 m beyond the enemy line's end goes round an enemy not yet fighting too | 0.209 / 0.360 | 0.063 | 1.27 |
+| the same, 35 m, 140° | 0.213 / 0.340 | 0.070 | 1.27 |
+| used: 35 m, 140°, no end rule | 0.187 / 0.360 | 0.069 | 1.27 |
+
+The end rule gave nothing and was dropped; 35 m / 140° against 20 m / 120° is within the noise, kept
+for the share with an enemy behind.
 
 ### Two networks, attack and defence
 

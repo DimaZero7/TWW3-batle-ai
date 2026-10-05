@@ -18,8 +18,8 @@ FULL = "full"
 TEST5 = ("behaviour", "liveliness", "fatigue", "transfer", "drills", "capacity")
 TEST5_ALIASES = {"shooters": "behaviour"}
 # the game's recordings and the gap card (tools/nn/battle_metrics.py GROUPS; gate.py liveliness)
-GAME = ("liveliness", "routs", "lords", "fatigue", "activity", "shooters")
-GAP = ("routs", "lords", "fatigue", "activity", "shooters")
+GAME = ("liveliness", "routs", "lords", "fatigue", "activity", "shooters", "wrap")
+GAP = ("routs", "lords", "fatigue", "activity", "shooters", "wrap")
 
 
 def parse(text, known, aliases=None):

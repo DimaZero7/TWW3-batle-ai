@@ -73,6 +73,20 @@ class TestBattleMetrics:
         assert m["win"] == 0.0 and m["length_s"] == 4.0 and m["lord_dead_own"] == 0.0
         assert set(m) == {k for k, g, _, _ in M.ROWS if g == "mandatory"}
 
+    def test_wrap_counts_rear_entries_and_time_with_an_enemy_behind(self):
+        b = battle()
+        b.target = np.full((5, 4), -1)
+        b.f["x"][:, 3], b.f["b"][:, 1] = -10.0, 90.0       # enemy spearmen 10 m behind our crossbowmen facing east
+        b.f["m"][2:, 1] = b.f["m"][2:, 3] = True            # melee from 2 s
+        b.target[2:, 3] = 1
+        b.f["bf"][3:, 1] = True                             # the rear flag from 3 s
+        m = M.measure(b, 0, passports=PASS, chosen=("wrap",))
+        assert m["rear_entries_enemy"] == 1.0 and m["rear_entries_own"] is None   # (our crossbowmen: missile)
+        assert m["behind_own"] == pytest.approx(0.5) and m["behind_enemy"] == 0.0
+        assert m["lap_enemy"] is None                       # no melee line of ours
+        b.f["x"][:, 3], b.f["z"][:, 3] = 10.0, 0.0          # in front of them: not a rear entry
+        assert M.measure(b, 0, passports=PASS, chosen=("wrap",))["rear_entries_enemy"] == 0.0
+
     def test_the_window_ends_at_cut_but_the_result_and_length_do_not(self):
         b = battle(T=10)
         b.f["men"][6:, 0] = 0                       # our lord dies at 6 s

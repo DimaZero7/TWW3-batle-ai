@@ -75,8 +75,8 @@ means does not depend on the profile: the profile only says whether it is comput
 | Where | Always (mandatory) | Profiles (`--profile a,b`; `full` all, `mandatory` none) |
 |---|---|---|
 | `test5` (and `tools.ops.step --profile`) | the rating, pair gold against each script (with the script baselines), own lord deaths, wins and gold, order kinds | `behaviour` (alias `shooters`: missile units in melee, flanks, piles, abilities), `liveliness`, `fatigue` (the share of own units' time by fatigue state; the run share of move orders far from the fight), `transfer`, `drills`, `capacity`; default `full` |
-| `python -m tools.nn.gate summary <folder> --profile …` | outcomes, pairs, pair gold, own lord deaths (from the recordings) | `liveliness` (default), `routs`, `lords`, `fatigue`, `activity`, `shooters` — each recording's numbers (as in the gap card) |
-| `tools.ops.gapcard` | win, trade, own and enemy gold lost, own lord death, battle length | `routs`, `lords`, `fatigue`, `activity`, `shooters`; default `full` |
+| `python -m tools.nn.gate summary <folder> --profile …` | outcomes, pairs, pair gold, own lord deaths (from the recordings) | `liveliness` (default), `routs`, `lords`, `fatigue`, `activity`, `shooters`, `wrap` — each recording's numbers (as in the gap card) |
+| `tools.ops.gapcard` | win, trade, own and enemy gold lost, own lord death, battle length | `routs`, `lords`, `fatigue`, `activity`, `shooters`, `wrap`; default `full` |
 
 The teachers add what they read: `--drill-teach auto` adds `drills`, an adaptive `--teach-normal`
 adds `transfer` (`test5` prints what it added). The chain runs both teachers now, so
@@ -114,7 +114,7 @@ beyond the noise: in one battle `!` when |game − sim| > max(2 × the copies' s
 threshold); over all battles `*` when |difference of the means| > max(2 × √Σ(spread² × (1 + 1/n)) / k,
 threshold). The copies' spread is the noise of one battle, the game's single battle is counted with
 it. The threshold is the smallest difference that matters (a share and the trade 0.05, a win 0.25,
-the length 30 s, routs 0.15 per unit, abilities 0.5, the first ability 30 s, a lord's health loss
+the length 30 s, routs 0.15 per unit, the line lap 15 m, abilities 0.5, the first ability 30 s, a lord's health loss
 0.002 a second). Under the table the marked rows in words. The battles' numbers go to
 `<gate folder>/gapcard.json`.
 
@@ -126,6 +126,7 @@ the length 30 s, routs 0.15 per unit, abilities 0.5, the first ability 30 s, a l
 | `fatigue` | the share of the units on the field tired or worse in the bins 0–120 / 120–240 / 240–360 / 360+ s; exhausted over the whole window; own / enemy. The run share: of our units' time under a move / withdraw order far from the fight (before the battle's first melee and no standing enemy within 150 m, about a bow's range), the share that runs (the orders in force: in the game the bridge's given `nn_orders`, in the simulator `order_kind` / `order_run`; in `test5` the same rule in `behaviour.Fatigue`) |
 | `activity` | the share of standing units' time in melee / firing / moving / still; own / enemy |
 | `shooters` | missile units' (not the lord's) time in melee, own / enemy |
+| `wrap` | the share of melee entries from the rear (a melee unit, not the lord nor a missile unit, going into melee at 120° or more off its enemy's facing; the enemy: its target when that one is in melee, else the nearest standing enemy), own / enemy; the share of the side's units' melee time (not the lord's) with an enemy behind (the rear flag `bf`), own / enemy; how far the enemy's melee line laps ours at the first melee, both ends summed, m (across the line between the two lines' centres) |
 
 Gate `20261005-161910` (`s6_fatigue/m20`, 4 battles, 8 copies, 246 s of simulation on 8 cores,
 ~4.5 min with the container), game / sim mean, marked beyond noise: wins 0.00 / 0.78; trade −0.39 /

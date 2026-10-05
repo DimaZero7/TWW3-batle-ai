@@ -34,7 +34,8 @@ from tools.nn.train import profiles
 
 Z = 2.0
 TOL = {"win": 0.25, "length_s": 30.0, "abilities_own": 0.5, "ability_first_s": 30.0,
-       "lord_lost_own": 0.002, "lord_lost_enemy": 0.002, "routs_own": 0.15, "routs_enemy": 0.15}
+       "lord_lost_own": 0.002, "lord_lost_enemy": 0.002, "routs_own": 0.15, "routs_enemy": 0.15,
+       "lap_enemy": 15.0}
 TOL_DEFAULT = 0.05          # shares and the trade
 
 

@@ -626,6 +626,47 @@ class TestProperties:
         a, b = opponents.ai_like(st), opponents.ai_like(st)
         assert torch.equal(a.kind, b.kind) and torch.equal(a.target, b.target)
 
+    def test_ai_like_line_widens_to_lap_a_wider_enemy_line(self):
+        st = line_army(attacker=1, gap=600)
+        H = st.N // 2
+        u = st.u
+        u["z"][0, H + 1], u["z"][0, H + 2] = -150.0, 150.0      # side 2's spearmen 300 m apart, side 1's 80 m
+        o = opponents.ai_like(st, opponents.Line(lap_space_m=40.0))
+        assert float(o.z[0, 1]) == pytest.approx(-40.0) and float(o.z[0, 2]) == pytest.approx(40.0)   # no room
+        p = opponents.Line(lap_space_m=200.0)                   # room 200 - 80: each end out 60 of the 140 wanted
+        o = opponents.ai_like(st, p)
+        assert (o.kind[0, 1:3] == O.MOVE).all() and (o.x[0, 1:3] > u["x"][0, 1:3]).all()     # still forward
+        assert float(o.z[0, 1]) == pytest.approx(-40.0 - p.step_m / 2)                     # aside, half a step
+        assert float(o.z[0, 2]) == pytest.approx(40.0 + p.step_m / 2)
+        o = opponents.ai_like(line_army(attacker=2, gap=600))                # side 1 defends with archers: holds
+        assert (o.kind[0, 1:3] == O.HOLD).all()                              # (no room to widen at 40 m)
+        st = line_army(attacker=2, gap=600)
+        st.u["z"][0, H + 1], st.u["z"][0, H + 2] = -150.0, 150.0
+        o = opponents.ai_like(st, p)
+        assert (o.kind[0, 1:3] == O.MOVE).all() and not o.run[0, 1:3].any()             # it sidesteps, walking
+        assert float(o.z[0, 1]) == pytest.approx(-48.0) and float(o.x[0, 1]) == pytest.approx(float(st.u["x"][0, 1]))
+
+    def test_ai_like_goes_round_behind_an_enemy_that_fights_its_line(self):
+        st = line_army(attacker=2, gap=600)
+        H = st.N // 2
+        u = st.u
+        p = opponents.Line(pick_noise_m=0.0)
+        u["x"][0, 1], u["z"][0, 1], u["b"][0, 1] = 0.0, 0.0, 90.0       # side 1's spearman faces east...
+        u["x"][0, H + 1], u["z"][0, H + 1] = 10.0, 0.0                  # ... fighting side 2's spearman
+        u["m"][0, 1] = u["m"][0, H + 1] = True
+        u["target"][0, 1], u["target"][0, H + 1] = H + 1, 1
+        u["x"][0, H + 2], u["z"][0, H + 2] = 60.0, 60.0                 # a free spearman of side 2 in front of it
+        o = opponents.ai_like(st, p)
+        assert int(o.kind[0, H + 2]) == O.MOVE and bool(o.run[0, H + 2])
+        assert float(o.x[0, H + 2]) == pytest.approx(-p.wrap_back_m)            # to a point behind it ...
+        assert float(o.z[0, H + 2]) == pytest.approx(float(u["width"][0, 1]) / 2 + p.flank_m)   # ... on the near side
+        u["x"][0, H + 2], u["z"][0, H + 2] = -40.0, 10.0                # once behind it: attacks
+        o = opponents.ai_like(st, p)
+        assert int(o.kind[0, H + 2]) == O.ATTACK and int(o.target[0, H + 2]) == 1
+        u["x"][0, H + 2], u["z"][0, H + 2] = 60.0, 60.0
+        o = opponents.ai_like(st, dataclasses.replace(p, flank_m=0.0))  # flank_m 0: straight at it
+        assert int(o.kind[0, H + 2]) == O.ATTACK
+
     def test_ai_like_lord_does_not_charge_alone(self):
         st = line_army(attacker=1, gap=600, lord_ahead=150)                      # side 1's lord far in front
         o = opponents.ai_like(st)

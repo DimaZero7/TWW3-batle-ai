@@ -16,9 +16,11 @@ of the side it plays.
                 within 50 m and break off melee, the lord 20 m behind the line, never first, a charge or
                 counter-charge from ~95-100 m, melee targets chosen as the game AI does (distance with a
                 fixed random part, enemies already fighting elsewhere, not the lord, spread over the
-                enemies), after the first fight every unit goes in (Line below has the numbers and where
-                they come from)
+                enemies), after the first fight every unit goes in; before contact the line widens to lap
+                the enemy's line, and free units go round to the rear of enemies already fighting (Line
+                below has the numbers and where they come from)
 """
+import math
 from dataclasses import dataclass
 
 import torch
@@ -125,6 +127,19 @@ class Line:
     #                               against 16 / 44 s for ai_like that never left)
     flank_m: float = 12.0         # a free unit goes for an engaged enemy via a point this far beside its flank
     #                               (0: straight at it); the simulator's tactic scan (simulator.md)
+    wrap_back_m: float = 35.0     # ... and this far behind its centre (its own facing), straight at it once the unit
+    #                               stands wrap_deg or more off the enemy's facing (behind it); build/wrap: the
+    #                               game AI's melee entries from the rear / flank 0.224 / 0.266, ai_like with
+    #                               the point beside the flank only 0.126 / 0.416, with this 0.187 / 0.360
+    wrap_deg: float = 140.0
+    # The line widens before contact to lap the enemy's line by overlap_m at both ends (each unit shifts aside
+    # in proportion to its place in the line, at most lap_space_m between neighbouring units' centres).
+    # build/wrap (the 162 fair net-vs-game-AI recordings): the game AI's melee line widened from 170 m (60 s
+    # before contact) to 191 m at contact against the network's 157-165 m, 2.4 units beyond the network's end
+    # unit at contact (31 m beyond, mean), which then went round (level with the network's line 40 s later);
+    # its centres 33-35 m apart. ai_like before: 175 -> 162 m against 166, 0-1 units beyond.
+    overlap_m: float = 30.0
+    lap_space_m: float = 40.0
     focus_lord: bool = True       # missile units shoot the enemy lord when it is in range (battles 1-3)
     lord_in_melee: bool = True    # ... in melee too: in the 63 network gate battles the game's missile units, the
     #                               network's lord in range, shot him 89 % of their firing seconds, 91 % while he
@@ -157,6 +172,40 @@ def pick_noise(B, N, device):
     h = h ^ (h >> 15)
     q = ((h & 0xFFFFFF).float() + 0.5) / float(1 << 24)
     return -torch.log(-torch.log(q))
+
+
+def lap_shift(st, p, fx, fz, cx, cz, line, foe, missile, lord):
+    """[B, N] the shift aside (m, along the side's left (-fz, fx)) that takes a unit of the line to its place
+    in a line lapping the enemy's line (its melee units, else all its standing units) by p.overlap_m at both
+    ends: each line unit keeps its share of the way along its line, the line at most p.lap_space_m between
+    neighbouring centres; 0 for other units, a line of one unit or one narrower than 5 m, no enemy."""
+    u = st.u
+    x, z, side = u["x"], u["z"], u["side"]
+    lx, lz = -fz, fx
+    lat = (x - cx) * lx + (z - cz) * lz                         # across the side's forward, from its centre
+    elat = (x[:, None, :] - cx[:, :, None]) * lx[:, :, None] + (z[:, None, :] - cz[:, :, None]) * lz[:, :, None]
+    eb = foe & ~(missile | lord)[:, None, :]
+    eb = torch.where(eb.any(2, keepdim=True), eb, foe)
+    has_e = eb.any(2)
+    elo = torch.where(eb, elat, torch.full_like(elat, BIG)).min(2).values
+    ehi = torch.where(eb, elat, torch.full_like(elat, -BIG)).max(2).values
+    lo, hi, n = torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x)
+    for s in (1, 2):
+        mine = side == s
+        ln = line & mine
+        lo = torch.where(mine, torch.where(ln, lat, torch.full_like(lat, BIG)).min(1, keepdim=True).values, lo)
+        hi = torch.where(mine, torch.where(ln, lat, torch.full_like(lat, -BIG)).max(1, keepdim=True).values, hi)
+        n = torch.where(mine, ln.sum(1, keepdim=True).to(x.dtype), n)
+    ok = line & has_e & (n >= 2) & (hi - lo >= 5.0)
+    lo, hi = torch.where(ok, lo, torch.zeros_like(lo)), torch.where(ok, hi, torch.ones_like(hi))
+    elo, ehi = torch.where(ok, elo, lo), torch.where(ok, ehi, hi)
+    out_lo = (lo - (elo - p.overlap_m)).clamp(min=0.0)          # how far each end has to go out
+    out_hi = ((ehi + p.overlap_m) - hi).clamp(min=0.0)
+    room = ((n - 1) * p.lap_space_m - (hi - lo)).clamp(min=0.0)
+    k = (room / (out_lo + out_hi).clamp(min=1e-6)).clamp(max=1.0)
+    dlo, dhi = lo - out_lo * k, hi + out_hi * k
+    frac = (lat - lo) / (hi - lo)
+    return torch.where(ok, dlo + frac * (dhi - dlo) - lat, torch.zeros_like(lat))
 
 
 def ai_like(st, p=Line()):
@@ -275,20 +324,38 @@ def ai_like(st, p=Line()):
     # The line: charge, or advance with the line (attacker), or hold.
     walk = (line | lone_lord) & has & ~charge & advance_side & behind
     put(walk, O.MOVE, fwd_x, fwd_z, r=p.advance_run)
+    if p.overlap_m > 0:
+        # Before contact the line widens to lap the enemy's line at both ends: a marching unit adds the shift
+        # aside to its point (at most half a step), a holding one sidesteps (within the simulator's step_m it
+        # does not turn: a formation steps aside facing the enemy).
+        shift = lap_shift(st, p, fx, fz, cx, cz, line, foe, missile, lord)
+        free = line & has & ~charge & ~fighting & ~cur_ok & ~side_fought
+        sh = shift.clamp(-p.step_m / 2, p.step_m / 2)
+        put(walk & free, O.MOVE, fwd_x - fz * sh, fwd_z + fx * sh, r=p.advance_run)
+        side_step = free & ~walk & (shift.abs() > 3.0)
+        sh = shift.clamp(-8.0, 8.0)
+        put(side_step, O.MOVE, x - fz * sh, z + fx * sh, r=False)
     put(charge, O.ATTACK, tg=tgt, r=True)
     if p.flank_m > 0:
         # A free unit going for an enemy that already fights ours runs first to a point beside the
-        # enemy's flank (the nearer side), then attacks.
+        # enemy's flank (the nearer side) and wrap_back_m behind it, then attacks once it is behind
+        # (wrap_deg off the enemy's facing) or at that point.
         bj = torch.deg2rad(u["b"])
         rx, rz = torch.cos(bj), -torch.sin(bj)                # the right of a unit facing (sin b, cos b)
+        hx, hz = torch.sin(bj), torch.cos(bj)                 # its facing
         off = u["width"] / 2 + p.flank_m
         take = lambda a: a.gather(1, tgt)
-        p1x, p1z = take(x + rx * off), take(z + rz * off)
-        p2x, p2z = take(x - rx * off), take(z - rz * off)
+        bx, bz = x - hx * p.wrap_back_m, z - hz * p.wrap_back_m
+        p1x, p1z = take(bx + rx * off), take(bz + rz * off)
+        p2x, p2z = take(bx - rx * off), take(bz - rz * off)
         d1 = torch.sqrt((p1x - x) ** 2 + (p1z - z) ** 2)
         d2 = torch.sqrt((p2x - x) ** 2 + (p2z - z) ** 2)
         gx, gz = torch.where(d1 <= d2, p1x, p2x), torch.where(d1 <= d2, p1z, p2z)
-        via = charge & ~fighting & take(fighting) & (torch.minimum(d1, d2) > 8.0) & (tgt_d > p.flank_m)
+        vx_, vz_ = x - take(x), z - take(z)                    # from the enemy to the unit
+        cos_off = (vx_ * take(hx) + vz_ * take(hz)) / torch.sqrt(vx_ * vx_ + vz_ * vz_).clamp(min=1e-6)
+        behind_it = cos_off <= math.cos(math.radians(p.wrap_deg))
+        via = (charge & ~fighting & take(fighting) & (torch.minimum(d1, d2) > 8.0) & (tgt_d > p.flank_m)
+               & ~behind_it)
         put(via, O.MOVE, gx, gz, r=True)
 
     # Missile units: the enemy lord when in range; else shoot at will; attackers walk up to range;
