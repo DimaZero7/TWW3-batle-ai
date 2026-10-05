@@ -127,8 +127,8 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 | Pistols (estimate) | hit rate 0.5 at the edge of range (×1.12–1.29 at 60–90 m), reload 10.8 s, first shot 3.8 s | estimate from the projectile's calibration area (2.0 m at 65 m against the arrow's 3.7 m at 95 m), not measured: `sim.json` missile.musket_why |
 | Morale | points: leadership + effects; MoralePercent = points / leadership; moves 1 point or 15 % of the gap per 0.5 s | DB; the step measured (+2 points a second in every recording) |
 | Morale effects | lord +4 within 70 m, fading to 0 at 105 m; lord died or shattered: his aura only (`lord_fall` 0 / 0); neighbour within 120 m +5; casualties −2…−74; recent casualties −6…−80 (last 30 s, of the whole health); winning / losing the melee +3/+6/+8, −3/−8 (damage ratio 1.5 / 2.5 / 4); first struck in the flank −6, rear −14 for one 0.5 s tick; the army beaten as a whole (enemy strength ≥ 2.6× own, own ≤ 0.22 of the start) −120; flanks exposed (an enemy threatens the left, right or rear: `lf`, `rf`, `bf`) −3, two or more −6; routing friends −3 each; routing enemies +2.5 each; under fire −5; very tired −2, exhausted −6; a stronger enemy within 70 m −3 | DB points; window, ratios calibrated; attacked in the flank / rear measured ([flanks](#flanks-rear-and-charges-in-whole-battles)); a lord's fall measured in 75 recorded falls ([lords](#lords)) |
-| States | wavering below 16 points, rout at 0, shattered at the third rout, no new rout within 10 s of a rally | DB |
-| Rally | while no standing enemy is within 90 m the router regains 2 points a second; rallies at MoralePercent 0.23 | measured: 0.23 and 90 m (365 rallies); 2 points calibrated (median rally 44 s) |
+| States | wavering below 16 points, rout at 0, shattered at the third rout or below −50 points during army destruction; no ordinary rout within 10 s of a rally | DB; shattering below −50 during army losses measured |
+| Rally | while the army is not collapsing and no standing enemy is within 90 m the router regains 2 points a second; rallies at MoralePercent 0.23 | measured: 0.23 and 90 m (365 rallies); 2 points calibrated (median rally 44 s) |
 | Fatigue | charge +34, melee +19, shooting +18, running +4, walking −1, standing −7, ×5 a second; states by the database thresholds; each state scales speed, melee attack and defence, armour, charge, AP damage and reload (`unit_fatigue_effects_tables`) | DB; ×5 fitted to 1315 recorded changes of state |
 | Lord abilities | the side the game's AI plays (`ai`, side 2 by default) fires its lord's active abilities by a rule; the network's side fires them by order (`Orders.ability`; a side the network plays should have `ai` false); passives are innate effects (below). Every number is the ability's passport (`config/nn/abilities.json`, the database; `sim.json` abilities says which are modelled and the AI's triggers); effects on the owner (phase targets self), his side's units within range (friends) and enemies within range (enemies): speed, charge speed, melee attack and defence, damage, AP, charge bonus, morale. Warlord: Deadly Onslaught (31 s, ready 90 s after: melee damage and AP ×1.25, charge bonus ×1.6) in melee; Verminous Valour (17 s / 60 s: speed ×1.25, +8 morale points; its 25 m blast has no damage) with an enemy within 60 m; Rally (14 s / 60 s: +16 to friends within 35 m) when a friend there wavers. General: Stand Your Ground (18 s / 90 s: melee defence +24, +16 within 35 m) in melee; Foe Seeker (25 s / 60 s: speed ×1.25) with an enemy within 60 m | DB (`config/nn/sim.json` abilities; owned per the game's roster readout); when the AI fires them is an assumption |
 | Innate effects | every attribute and passive or game-fired ability of a unit (`config/nn/effects.json`), one mechanism: on while its conditions hold, its stats on the owner (an aura also on friends in range), its rules for the step. Unbreakable (Flagellants: morale never below leadership, never wavers or routs), Expendable (its rout scares nobody), Encourage (the lord's aura), Charge Reflection (bracing), Fire Whilst Moving; Strength in Numbers (Skaven infantry: +6 leadership, +8 melee defence, speed ×0.9 while health ≥ 50 %), Scurry Away! (speed ×1.1 while wavering or routing), Hold the Line! (+5 melee defence, +4 leadership within 35 m of a standing General), Frenzy (+10 melee attack, ×1.1 damage, AP and charge while morale ≥ half of leadership), Strength of the Penitent (fired by the game when losing the melee: 20 s of +14 melee defence, +15 % physical resistance, ends out of melee, ready 3 s after). Schema only (the network sees them): Charge Defence vs. Large, Vanguard Deployment, Hide (forest), Immune to Psychology; left out by `sim.json` effects.off: Single Entity (lords: speed ×0.9, damage ×0.8 below 25 % health; no such speed drop in the recordings) | DB: the passports, `special_ability_to_auto_deactivate_flags`, `special_ability_to_recharge_contexts`; the attributes' rules: the knowledge base; measured: rout and running speeds, the morale drop at 50 % health ([below](#innate-effects)) |
@@ -140,6 +140,74 @@ men striking at once, and a lord ~38 ([measurements](measurements.md)). With a f
 same losses need 12–17 men on a 30 m front in every pair and ~8 around a lord: one number fits
 all. So attack − defence counts at 0.1 of the rule. The flank and rear, which the pairs do not
 test, are fitted to the whole battles (below).
+
+## Army destruction
+
+`morale.army_collapse` applies `ume_concerned_army_destruction` (−120 points) when
+enemy strength is ≥ 2.6× own and own strength is ≤ 0.22 of its start. Both thresholds
+come from the database. Strength approximates recorded `unit:strategic_value()`:
+cost × HP share, lords worth ×1.65, missile units weighted by ammunition remaining.
+Routers count at half strength; shattered, dead and departed units do not. A normalised sigmoid
+(slope 14, midpoint 0.25 of initial ammunition) reduces missile value from 1 to 0.32
+when empty, or 0.57 for direct fire. The latter is measured on Free Company; other
+missile classes are unverified. Parameters and evidence are in `sim.json morale.collapse`.
+The rule has no recording-end time or winner input.
+
+Source: 175 completed fair battles (28 game-AI, 147 network), 69 with the newer CCO
+fields. `MoraleGreatestEffect` identifies “Army losses” on 65 sides. Across all 350 sides,
+the ≥0.4 MoralePercent drop in 60% of standing units within 3 s occurs on 135 sides;
+actual routing/shattering of 60% within 3 s occurs on 80. The detector requires at least
+two initially standing units and a complete three-second window.
+The database thresholds on strategic value with routers weighted 0.5 locate 64/65 onsets within
+5 s, median error 0 s. This strength reconstructs BalanceOfPowerPercent with mean
+absolute error 0.00041 (full router weight: 0.0121). The simulator approximation
+locates 58/65 onsets within 5 s, misses none, median error 0 s. Three additional
+triggers occur only in the final frame after the last standing unit has routed. Of 275 units
+standing just before onset, 271 show the effect, median delay 0 s. The median number
+of non-expendable routing friends within 100 m is 0: propagation is army-wide.
+Local routing-friend penalties retain their database −3 each, at most four, within 100 m.
+
+Routers continue losing morale under army destruction and cannot rally away from
+enemies. During army destruction, below −50 points (`ums_broken_threshold_lower`) a unit shatters regardless
+of its rout count: all 274 recorded army-loss shatters before a third rout crossed
+this threshold. Unbreakable units remain immune. `lord_fall` stays 0 / 0: losing the
+lord removes his aura and does not substitute for army destruction.
+
+**Gate verification** (`build/collapse`, CPU, 4 copies, seed 1, up to 2 m jitter,
+both recorded order streams, measured at the game end time). Gold loss is each unit's
+worst state through that time, divided by budget; trade = AI loss minus own loss.
+Each cell is **game / before / after**.
+
+| Gate | Trade | Own gold lost | AI gold lost |
+|---|---:|---:|---:|
+| 20261004-230630 | -0.306 / -0.090 / -0.094 | 0.941 / 0.747 / 0.751 | 0.635 / 0.657 / 0.657 |
+| 20261004-071805 | -0.260 / -0.080 / -0.088 | 0.920 / 0.787 / 0.794 | 0.660 / 0.707 / 0.706 |
+| 20261003-204730 | -0.407 / -0.252 / -0.246 | 0.957 / 0.856 / 0.857 | 0.550 / 0.604 / 0.611 |
+
+Mean absolute trade error across the three gates is 0.18356 → 0.18137, but the third
+gate regresses: the requirement to improve all three is **not met**. At least 60% of
+standing units breaking within 3 s (at least two initially standing): game 52/176 sides,
+simulator 8/176 → 10/176. Mean absolute timing error among pairs with a detected event
+is 55.8 → 28.1 s, but only 6 → 8 pairs are matched; this is not a complete timing score.
+The broader MoralePercent-drop ≥0.4 detector gives game 64/176, simulator 11/176 → 11/176.
+The denominator is 22 battles × 4 copies × 2 sides; game events are repeated per copy.
+By game end the replay's strength often differs substantially: in the first copies,
+only 3/22 own armies reach the measured conditions. A correct trigger on recorded states
+does not remove accumulated combat divergence. The rule never uses the game end time.
+`tools.nn.sim.check` on the unchanged recording set of the preceding check, CPU,
+8 copies, seed 0, up to 2 m jitter:
+
+| Check | Before | After |
+|---|---:|---:|
+| Same winner: game AI | 23/26 | 23/26 |
+| Same winner: network | 98/132 | 99/132 |
+| Mechanics within 20% | 51/54 | 51/54 |
+
+The CPU harness skips already completed batch rows: every field was equal at each
+of 400 validation steps, and all 28 baseline game-AI result rows matched ordinary execution.
+Recordings and start jitter are identical before/after; new recordings from the running gate
+were excluded. All 105 simulator tests passed. The morale change alters the simulator version
+and baseline-evaluation cache key.
 
 ## Innate effects
 
@@ -283,7 +351,7 @@ mirror (69 %). Waiting (a reserve, a walk) loses: the side that waits fights out
 - **A lord's fall** (`morale.lord_fall` 0 / 0: his aura only): in all 75 recorded falls the lord
   shattered with 2–50 % of his health (none was killed), and his standing units lost −3 / −4.7 /
   −4.8 points 2 / 6 / 10 s later (mean of 167 unit-falls) — about his aura. The army's collapse is
-  the army-destruction rule's (below), not the lord's.
+  the [army-destruction rule's](#army-destruction), not the lord's.
 - **Lord abilities** (`tools/nn/sim/abilities.py`). When the game's AI fires them is assumed, not
   measured (only the Warlord's speed in the recordings, 5–6.5 m/s, shows Verminous Valour in use);
   CA's planner on side 1 of the recorded whole battles gets no actives. The network's side fires
@@ -294,6 +362,9 @@ mirror (69 %). Waiting (a reserve, a walk) loses: the side that waits fights out
   Warlord 2.5k (the game 1.6k).
 
 ## Checks against the game
+
+The synchronisation comparison below predates the strategic army-strength model.
+Current terminal-collapse checks are in [Army destruction](#army-destruction).
 
 `python -m tools.nn.sim.check`: every recorded run is replayed in the simulator from the recorded
 start with the recorded orders (`tools/nn/sim/replay.py`: a target fought or shot →
@@ -480,13 +551,10 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
   16 %, in melee 53 % of their time against 45 %: the game's lords break off and shatter with health
   left). In the network's gate runs a lord fought by the enemy lord and one unit loses 20.9 HP/s
   against the game's 13.5: not the infantry, partly missile spill; the rest not found.
-- **The army collapse.** In the game a losing army breaks all at once — in 68 of 182 recorded sides
-  60 % of the standing units lose 0.4 MoralePercent or rout within 3 s, near the end. The
-  database's rule (`ume_concerned_army_destruction` −120 at `army_destruction_enemy_strength_ratio`
-  2.6 and `…_alliance_strength_ratio` 0.22) is on, with strength = cost × health of the units not
-  shattered; it times 32 of the 68 collapses (median 2 s after the trigger), 36 have no trigger. The
-  game's own measure (`bop`, recorded every second now: [measurements](measurements.md#morale-events-and-the-army-collapse))
-  is to replace that strength.
+- **The army collapse.** [Army destruction](#army-destruction) uses a strategic-value approximation
+  and the database thresholds. On recorded states it locates 58 of 65 army-loss onsets within 5 s;
+  the others have larger timing errors. In open-loop replay its timing also depends on accumulated HP, ammunition and
+  earlier-routing errors.
 - **Morale at contact**: units that run into contact gain ~3 points over the last 6 s in the game
   and lose them fast after; the simulator keeps falling (−2) there. Before contact the simulator's
   units stand 6–10 points lower than the game's (its exposed-flank flags fire 1.5–3× as often: in
@@ -513,6 +581,11 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
 
 | What | Result | Why not |
 |---|---|---|
+| Delaying defeat to shatter more routers | all 172 measured defeated sides end at the first frame with no standing units: delay 0 s | additional post-battle morale ticks are unsupported |
+| Shattering below −50 outside army losses | three-gate trade −0.09397/−0.08826/−0.24554 versus −0.09411/−0.08814/−0.24649 when limited to army losses | changes ordinary routing beyond terminal collapse and worsens the third gate |
+| Full strategic value for routers | balance-bar error 0.0121 versus 0.00041 at weight 0.5; gate trade −0.090/−0.081/−0.244 versus baseline −0.090/−0.080/−0.252 | the apparent 59/65 onset match often followed shattering rather than predicting it |
+| Linear ammunition strength | mean strategic-value error / starting value 0.0240 versus sigmoid 0.00186 (exact starting values) | recorded strategic value is nonlinear in ammunition |
+| Strength = cost × HP without lord value or ammunition | 41/65 onsets within 5 s, 2 false triggers, 11 misses | strategic value includes both contributions |
 | `unit_incidental` 0.3 / 0.6 with contact synchronisation | mean trade error at game end 0.278 / 0.225 against 0.184 at 1.0; at sim end 0.269 / 0.202 against 0.151; network winners 78 / 91 against 98 of 132 | use 1.0; the old fit (game 19.6 HP/s, sim 33.9 at 1 and 22.3 at 0.3) used clock-indexed replay and may have compensated for its errors |
 | The flank / rear striker by its own front (pending, above) | the lone flank / rear attacker right (1.62× / 1.94×), network's winners 47 → 52 of 93 | the early exchange ~40 % less exact (0.043 → 0.061), game-AI winners 22 → 20, the `counter` drill broken |
 | A break-off at the measured rates, with the database's 10 s immunity (`melee_breakoff_total_immunity_secs`) | fights in the pairs twice as long | broke the pairs, did not help the mirror; the trigger is unknown |

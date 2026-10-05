@@ -228,21 +228,7 @@ def step(st, orders, params=None, dt=None):
     aura = torch.where(same_side & standing[:, None, :] & u["encourages"][:, None, :], reach_share,
                        torch.zeros_like(d)).amax(2)
     worth = u["cost"] * u["hp"]
-    # Army destruction (database: ume_concerned_army_destruction -120 when the enemy's strength is
-    # army_destruction_enemy_strength_ratio (2.6) x own or more and own strength is
-    # army_destruction_alliance_strength_ratio (0.22) of the start or less). Strength: sim.json
-    # morale.collapse (the game's balance of power is not recorded yet).
-    collapse = torch.zeros_like(standing)
-    cc = cal["morale"].get("collapse") or {}
-    if cc.get("on"):
-        hp_w = u["hp"] ** float(cc.get("hp_power", 1.0))
-        count = standing if cc.get("count", "standing") == "standing" else (alive & ~u["s"])
-        power = u["cost"] * hp_w * count.float()
-        start = u["cost"] * present.float()
-        strength = torch.stack([(power * (u["side"] == s)).sum(1) for s in (1, 2)], 1)
-        start_s = torch.stack([(start * (u["side"] == s)).sum(1) for s in (1, 2)], 1)
-        beaten = (strength.flip(1) >= M["army_destruction_enemy_strength_ratio"] * strength)             & (strength <= M["army_destruction_alliance_strength_ratio"] * start_s)
-        collapse = beaten.gather(1, side_idx) & present
+    collapse = morale.army_collapse(u, params)
     ctx = {
         "aura": aura * standing.float(),
         "flank_event": flank_event,

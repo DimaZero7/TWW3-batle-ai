@@ -460,6 +460,95 @@ class TestMorale:
             morale.step(st.u, self.ctx(st, collapse=hit), P, 0.5)
         assert bool(st.u["r"].all())
 
+    def test_army_losses_use_ammunition_and_count_routers_until_shattered(self):
+        st = face_off(ARCHER, SPEAR)
+        u = st.u
+        # Equal initial value; at 40% HP the missile unit is above the 22% threshold.
+        u["cost"][:] = 100
+        u["hp"][0, 0] = 0.4
+        assert not bool(morale.army_collapse(u, P)[0, 0])
+        u["a"][0, 0] = 0
+        assert bool(morale.army_collapse(u, P)[0, 0])
+        # A routing enemy still contributes strength; a shattered or departed one does not.
+        u["r"][0, 1] = True
+        assert bool(morale.army_collapse(u, P)[0, 0])
+        u["s"][0, 1] = True
+        assert not bool(morale.army_collapse(u, P)[0, 0])
+        u["s"][0, 1] = False
+        u["gone"][0, 1] = True
+        assert not bool(morale.army_collapse(u, P)[0, 0])
+
+    def test_army_destruction_requires_both_database_thresholds(self):
+        st = face_off(SPEAR, SLAVE)
+        u = st.u
+        u["cost"][:] = 100
+        u["hp"][:] = 0.2
+        assert not bool(morale.army_collapse(u, P).any())  # both depleted, neither outmatched
+        u["hp"][0, 1] = 1
+        assert morale.army_collapse(u, P).tolist() == [[True, False]]
+        u["hp"][0, 0] = 0.3
+        assert not bool(morale.army_collapse(u, P).any())  # outmatched, but not depleted
+        off = P.with_cal("morale", collapse={"on": False})
+        u["hp"][0, 0] = 0.1
+        assert not bool(morale.army_collapse(u, off).any())
+
+    def test_routing_reduces_army_power_without_removing_the_unit(self):
+        st = scenario.build([army([(SPEAR, -300, 0, 90), (SPEAR, -300, 100, 90)],
+                                  [(SPEAR, 300, 0, 270), (SPEAR, 300, 100, 270)])], P)
+        u = st.u
+        u["hp"][0, :2] = 0.28
+        assert not bool(morale.army_collapse(u, P)[0, :2].any())
+        # One friend routes: 0.28 * (1 + 0.5) / 2 = 0.21 of starting army power.
+        u["r"][0, 0] = True
+        assert bool(morale.army_collapse(u, P)[0, :2].all())
+        # Routing the equally strong opposing army halves its strength, but does not zero it.
+        u["hp"][0, :2] = 0.4
+        u["r"][0, 2:] = True
+        assert not bool(morale.army_collapse(u, P).any())
+
+    def test_terminal_routers_lose_morale_at_distance_and_shatter_before_third_rout(self):
+        st = face_off(SPEAR, SLAVE)
+        st.u["r"][:] = True
+        st.u["rout_count"][:] = 1
+        st.u["morale"][:] = -49
+        hit = torch.ones_like(st.u["r"])
+        ctx = self.ctx(st, enemy_near=~hit, collapse=hit)
+        for _ in range(8):
+            morale.step(st.u, ctx, P, 0.5)
+        assert bool(st.u["s"].all()) and bool(st.u["r"].all())
+        assert bool((st.u["morale"] < -50).all())
+        assert bool((st.u["rout_count"] == 1).all())
+
+    def test_unbreakable_survives_terminal_morale_and_recovery_still_works(self):
+        st = face_off(SPEAR, SLAVE)
+        st.u["unbreakable"][0, 0] = True
+        hit = torch.ones_like(st.u["r"])
+        for _ in range(30):
+            morale.step(st.u, self.ctx(st, collapse=hit), P, 0.5)
+        assert not bool(st.u["r"][0, 0]) and not bool(st.u["s"][0, 0])
+        assert bool(st.u["s"][0, 1])
+        # Without army losses, a distant router still recovers normally.
+        st = face_off(SPEAR, SLAVE)
+        st.u["r"][:] = True
+        st.u["morale"][:] = -10
+        morale.step(st.u, self.ctx(st, enemy_near=~hit), P, 0.5)
+        assert bool((st.u["morale"] == -9).all())
+
+    def test_terminal_shatter_switch_and_post_rally_immunity(self):
+        st = face_off(SPEAR, SLAVE)
+        hit = torch.ones_like(st.u["r"])
+        st.u["rout_count"][:] = 1
+        st.u["rally_s"][:] = 0
+        st.u["morale"][:] = -60
+        # The ordinary ten-second protection after rally does not make a destroyed army immortal.
+        morale.step(st.u, self.ctx(st, collapse=hit), P, 0.5)
+        assert bool(st.u["s"].all()) and bool(st.u["r"].all())
+        st = face_off(SPEAR, SLAVE)
+        st.u["morale"][:] = -60
+        cal = dict(P.sim["morale"]["collapse"], shatter_below_broken=False)
+        morale.step(st.u, self.ctx(st, collapse=hit), P.with_cal("morale", collapse=cal), 0.5)
+        assert not bool(st.u["s"].any()) and bool(st.u["r"].all())
+
     def test_the_third_rout_shatters_and_a_free_unit_rallies(self):
         st = face_off(SPEAR, SLAVE)
         st.u["morale"][0, 0] = -20.0

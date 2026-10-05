@@ -4,9 +4,9 @@ Morale is points: leadership + a start bonus + the effects of the moment (the ga
 _kv_morale_tables). MoralePercent = points / leadership. Each 0.5 s tick the points move towards
 that sum by max(1, 15 % of the gap) (minimium_increment_update_per_tick, percent_update_per_tick).
 
-Effects (points): lord within 70 m +4 (fading to 0 at 105 m); lord died recently -16, dead -10; neighbour within 120 m
+Effects (points): lord within 70 m +4 (fading to 0 at 105 m); extra lord-fall points configured (currently 0); neighbour within 120 m
 (flanks secure) +5; casualties over the battle (share of HP) -2 ... -74; recent casualties
--6 ... -80 (last 4 s); extended casualties -4 ... -60 (last 60 s); winning / losing the melee +3/+6/+8,
+-6 ... -80 (calibrated 30 s window); extended casualties optional; winning / losing the melee +3/+6/+8,
 -3/-8; attacked in the flank / rear -6 / -14 for the tick of the first contact from that side; flanks exposed (an enemy threatens the left, right or rear:
 lf / rf / bf) -3, several -6;
 routing friends within 100 m -3 each (at most 4; expendable units scare nobody); routing
@@ -14,11 +14,51 @@ enemies within 100 m +2.5 each (at most 5); under fire -5; very tired -2, exhaus
 a stronger enemy within 70 m -3; the army beaten as a whole -120 (army destruction).
 
 States: wavering below 16 points; routing at 0 or below (not within 10 s of a rally); the third
-rout shatters. A routing unit regains rally_rate points a second while no standing enemy is
-within rally_free_m and rallies at MoralePercent rally_mp; then its morale follows the effects
+rout shatters, as does falling below the database's broken band (-50 points) during army destruction. A routing unit
+regains rally_rate points a second while no standing enemy is within rally_free_m and its army
+is not collapsing, and rallies at MoralePercent rally_mp; then its morale follows the effects
 again (a unit that lost much soon routs again, as in the game).
 """
+import math
+
 import torch
+
+
+def army_collapse(u, params):
+    """Army destruction [B, N], from current combat strength and the database thresholds.
+
+    Strategic strength approximates recorded unit:strategic_value(): HP times unit value,
+    with the missile part falling sigmoidally as ammunition runs out. Balance of power counts
+    routers at half strength; shattered, dead and departed units contribute nothing.
+    No recording clock or winner is consulted.
+    """
+    cal = params.sim["morale"].get("collapse") or {}
+    present = u["side"] > 0
+    if not cal.get("on"):
+        return torch.zeros_like(present)
+    alive = present & (u["men"] > 0) & ~u["gone"] & ~u["s"]
+    count = alive & ~u["r"] if cal.get("count") == "standing" else alive
+    value = u["cost"]
+    weight = torch.ones_like(value)
+    if cal.get("strength") == "strategic":
+        value = value * torch.where(u["lord"], float(cal["lord_value_scale"]), 1.0)
+        ammo = (u["a"] / u["ammo0"].clamp(min=1)).clamp(0, 1)
+        slope, midpoint = float(cal["ammo_slope"]), float(cal["ammo_midpoint"])
+        lo = 1 / (1 + math.exp(slope * midpoint))
+        hi = 1 / (1 + math.exp(-slope * (1 - midpoint)))
+        available = (torch.sigmoid(slope * (ammo - midpoint)) - lo) / (hi - lo)
+        floor = torch.where(u["direct"], float(cal["ammo_empty_direct"]), float(cal["ammo_empty"]))
+        weight = torch.where(u["ammo0"] > 0, floor + (1 - floor) * available, weight)
+        weight = weight * torch.where(u["r"], float(cal["routing_weight"]), 1.0)
+    power = value * u["hp"].clamp(0, 1).pow(float(cal.get("hp_power", 1.0))) * weight * count
+    strength = torch.stack([(power * (u["side"] == s)).sum(1) for s in (1, 2)], 1)
+    initial = torch.stack([(value * (u["side"] == s)).sum(1) for s in (1, 2)], 1)
+    rules = params.morale
+    beaten = ((initial > 0) & (strength.flip(1) > 0)
+              & (strength.flip(1) >= rules["army_destruction_enemy_strength_ratio"] * strength)
+              & (strength <= rules["army_destruction_alliance_strength_ratio"] * initial))
+    return beaten.gather(1, (u["side"] - 1).clamp(min=0)) & present
+
 
 def table(rules, prefix, shares):
     """[(share, points)] from _kv_morale_tables keys like total_casualties_penalty_10."""
@@ -88,7 +128,7 @@ def target_points(u, ctx, params):
     pts = pts + torch.where(u["fat"] >= 5, R["ume_concerned_exhausted"],
                             torch.where(u["fat"] >= 4, R["ume_concerned_very_tired"], 0.0))
     pts = pts + torch.where(ctx["strong_enemy"], R["enemy_morale_penalty_value_min"], 0.0)
-    # The army is beaten as a whole (battle.py: enemy strength >= 2.6x own and own <= 0.22 of the start).
+    # The army is beaten as a whole (army_collapse: the database's 2.6x / 0.22 thresholds).
     pts = pts + torch.where(ctx.get("collapse", torch.zeros_like(pts, dtype=torch.bool)),
                             R["ume_concerned_army_destruction"], 0.0)
     return pts
@@ -110,7 +150,8 @@ def step(u, ctx, params, dt):
     stepped = M + torch.clamp(gap, -move, move)
     routing = u["r"]
     # Routing: morale does not follow the fight; it recovers once no standing enemy is near.
-    free = ~ctx["enemy_near"]
+    # Army losses continue even far from enemies: a terminal router cannot recover out of it.
+    free = ~ctx["enemy_near"] & ~ctx.get("collapse", torch.zeros_like(alive))
     routed_M = torch.where(free, M + cal["rally_rate"] * dt, torch.minimum(M, stepped))
     M = torch.where(routing, routed_M, stepped)
     u["rout_s"] = torch.where(routing, u["rout_s"] + dt, torch.zeros_like(u["rout_s"]))
@@ -130,6 +171,13 @@ def step(u, ctx, params, dt):
     u["r"] = u["r"] | start
     u["rout_count"] = u["rout_count"] + start.float()
     u["s"] = u["s"] | (start & (u["rout_count"] >= R["shatter_after_rout_count"]))
+    if (cal.get("collapse") or {}).get("shatter_below_broken"):
+        # The lower edge of the DB's broken band is -50 points. In the CCO recordings,
+        # all 274 army-loss shatters before a third rout have crossed this edge.
+        shattered = (alive & ctx.get("collapse", torch.zeros_like(alive))
+                     & ~u["unbreakable"] & (M < R["ums_broken_threshold_lower"]))
+        u["s"] = u["s"] | shattered
+        u["r"] = u["r"] | shattered
     M = torch.where(start, torch.minimum(M, cal["rout_floor_mp"] * L), M)
     u["morale"] = torch.where(alive, M, u["morale"])
     u["w"] = alive & ~u["r"] & (M < R["ums_wavering_threshold_upper"])
