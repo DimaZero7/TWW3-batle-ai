@@ -127,7 +127,7 @@ def step(st, orders, params=None, dt=None):
     tired = fatigue.effects(u, params)
 
     # --- melee ---
-    rate, mhit, sector, fighting = melee.strikes(u, pw, strike, params, charge_now, u["contact_s"])
+    rate, mhit, sector, _ = melee.strikes(u, pw, strike, params, charge_now, u["contact_s"])
     hp_melee = rate * dt
 
     # --- shooting ---
@@ -281,8 +281,7 @@ def step(st, orders, params=None, dt=None):
     idle = standing & ~pending_move & (kind != O.ATTACK) & (aim_at < 0)
     activity = {"melee": engaged, "charging": engaged & (charge_now > 0), "shooting": firing,
                 "running": speed > u["walk"] + 0.3, "walking": speed > 0.3,
-                "idle": idle, "active": alive,
-                "contact_share": (fighting.sum(2) / old["men"].clamp(min=1)).clamp(0, 1)}
+                "idle": idle, "active": alive, "attack": kind == O.ATTACK, "single": u["men0"] <= 1}
     fatigue.step(u, activity, params, dt)
 
     # --- movement ---

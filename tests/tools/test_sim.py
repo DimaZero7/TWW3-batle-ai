@@ -99,10 +99,11 @@ class TestFunctions:
         st.u.update(old)
         assert all(torch.equal(st.u[k], v) for k, v in before.items())
 
-    @pytest.mark.parametrize("name,points", [("idle", -18), ("ready", -7), ("walking", -1),
-                                              ("running", 4), ("shooting", 18), ("melee", 19),
+    @pytest.mark.parametrize("name,points", [("idle", -18), ("ready", -7), ("walking", 3.4),
+                                              ("running", 4), ("shooting", 7.5), ("melee", 13.7),
                                               ("charging", 34)])
-    def test_fatigue_tiring_and_recovery_use_database_ticks(self, name, points):
+    def test_fatigue_tiring_and_recovery_use_calibrated_ticks(self, name, points):
+        # Database points at 10 ticks/s; walking, shooting and a formation's melee are fitted.
         u = {"fatigue": torch.tensor([15000.0]), "fat": torch.zeros(1)}
         activity = {k: torch.tensor([k == name]) for k in
                     ("idle", "walking", "running", "shooting", "melee", "charging")}
@@ -1255,18 +1256,36 @@ def calibrated_fatigue():
     return p
 
 
-def test_contact_fatigue_uses_fighting_population_and_ready_remainder():
-    p = calibrated_fatigue()
-    p.sim["fatigue"]["calibration"]["noncontact"] = "ready"
-    u = {"fatigue": torch.full((3,), 15000.), "fat": torch.zeros(3)}
-    activity = {k: torch.zeros(3, dtype=torch.bool) for k in
-                ("walking", "running", "shooting", "charging")}
-    activity.update(melee=torch.ones(3, dtype=torch.bool), contact_share=torch.tensor([0., .5, 1.]))
-    fatigue.step(u, activity, p, 1.)
-    assert u["fatigue"].tolist() == [14930., 15060., 15190.]
-    activity["charging"].fill_(True)
-    fatigue.step(u, activity, p, 1.)
-    assert u["fatigue"].tolist() == [15270., 15400., 15530.]
+def melee_activity(n, **flags):
+    activity = {k: torch.zeros(n, dtype=torch.bool) for k in
+                ("idle", "walking", "running", "shooting", "charging", "attack", "single")}
+    activity.update(melee=torch.ones(n, dtype=torch.bool), active=torch.ones(n, dtype=torch.bool))
+    activity.update({k: torch.tensor(v) for k, v in flags.items()})
+    return activity
+
+
+def test_melee_tires_only_under_an_attack_order():
+    # single entity +19, formation +13.7 a tick with the order; without it walking +3.4 or idle -18
+    u = {"fatigue": torch.full((4,), 15000.), "fat": torch.zeros(4)}
+    activity = melee_activity(4, attack=[True, True, False, False], single=[True, False, True, False],
+                              walking=[False, False, True, False])
+    fatigue.step(u, activity, calibrated_fatigue(), 1.)
+    assert u["fatigue"].tolist() == pytest.approx([15190., 15137., 15034., 14820.])
+
+
+def test_charging_tires_only_under_an_attack_order():
+    u = {"fatigue": torch.full((2,), 15000.), "fat": torch.zeros(2)}
+    activity = melee_activity(2, attack=[True, False], charging=[True, True])
+    fatigue.step(u, activity, calibrated_fatigue(), 1.)
+    assert u["fatigue"].tolist() == [15340., 14820.]
+
+
+def test_calibrated_melee_without_attack_flags_is_a_formation_attacking():
+    u = {"fatigue": torch.full((1,), 15000.), "fat": torch.zeros(1)}
+    activity = {k: torch.zeros(1, dtype=torch.bool) for k in ("walking", "running", "shooting", "charging")}
+    activity["melee"] = torch.ones(1, dtype=torch.bool)
+    fatigue.step(u, activity, calibrated_fatigue(), 1.)
+    assert u["fatigue"].tolist() == pytest.approx([15137.])
 
 
 def test_disabled_fatigue_trial_preserves_legacy_ready_clock():
@@ -1279,6 +1298,25 @@ def test_disabled_fatigue_trial_preserves_legacy_ready_clock():
     activity.update(idle=torch.ones(2, dtype=torch.bool), active=torch.zeros(2, dtype=torch.bool))
     fatigue.step(u, activity, p, 1.)
     assert u["fatigue"].tolist() == [14965., 14965.]
+    # every engaged unit +19, walking -1, shooting +18 at 5 ticks/s, attack order or not
+    activity = melee_activity(3, walking=[False, True, False], shooting=[False, False, True])
+    activity["melee"] = torch.tensor([True, False, False])
+    u = {"fatigue": torch.full((3,), 15000.), "fat": torch.zeros(3)}
+    fatigue.step(u, activity, p, 1.)
+    assert u["fatigue"].tolist() == [15095., 14995., 15090.]
+
+
+@pytest.mark.parametrize("single", [True, False])
+def test_battle_passes_the_attack_order_and_single_entities_to_fatigue(monkeypatch, single):
+    st = face_off("wh2_main_skv_cha_warlord_0" if single else SPEAR, SLAVE, gap=0)
+    seen = {}
+    monkeypatch.setattr(fatigue, "step", lambda u, activity, params, dt: seen.update(activity))
+    cmd = O.hold(st.B, st.N)
+    cmd.kind[0, 0] = O.ATTACK
+    cmd.target[0, 0] = st.N // 2
+    battle.step(st, cmd, P)
+    assert bool(seen["attack"][0, 0]) and not bool(seen["attack"][0, st.N // 2])
+    assert bool(seen["single"][0, 0]) is single and not bool(seen["single"][0, st.N // 2])
 
 
 @pytest.mark.parametrize("angle,flag", [(-90, "lf"), (90, "rf"), (180, "bf")])
@@ -1312,20 +1350,3 @@ def test_disabled_threat_trial_keeps_legacy_rear_sector():
     st = scenario.build([army([(SPEAR, 0, 0, 0)], [(SLAVE, 30, -30, 135)])], p)
     pw = geometry.pairwise(st.u, p.sim["formation"]["spacing_m"])
     assert bool(battle.threat_flags(st.u, pw, p)["bf"][0, 0])
-
-
-def test_battle_passes_actual_fighting_share_to_fatigue(monkeypatch):
-    st = face_off(SPEAR, SLAVE, gap=0)
-    expected = {}
-    original = melee.strikes
-    def strikes(u, pw, contact, params, charge, seconds):
-        result = original(u, pw, contact, params, charge, seconds)
-        expected["share"] = (result[3].sum(2) / u["men"].clamp(min=1)).clamp(0, 1)
-        return result
-    def fatigue_step(u, activity, params, dt):
-        assert torch.equal(activity["contact_share"], expected["share"])
-        expected["called"] = True
-    monkeypatch.setattr(melee, "strikes", strikes)
-    monkeypatch.setattr(fatigue, "step", fatigue_step)
-    battle.step(st, replay.nearest_attack(st), calibrated_fatigue())
-    assert expected["called"] and bool((expected["share"] > 0).any())

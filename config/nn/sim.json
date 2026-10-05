@@ -100,7 +100,8 @@
   },
   "fatigue": {
     "per_second": 5,
-    "calibration": {"on": false, "per_second": 10, "contact_weighted": true, "noncontact": "walking"},
+    "calibration": {"on": true, "per_second": 10, "melee": "attack_order", "multi_combat": 13.7, "walking": 3.4, "shooting": 7.5,
+      "why": "OFF: the network check got worse. Rule: 10 ticks/s; melee costs points only under an attack order, +19 a tick for a single entity, 13.7 for a formation; in melee without one walking if moving, else idle -18; charging +34 only with the order; shooting 7.5, walking +3.4, running +4, idle -18 without pending work, ready -7, dead and departed slots frozen. Evidence: per-unit activity classes of the 204 fair recordings replayed against the game's fatigue states (build/fat/opus classes.py): formation melee with a target 13.86, shooting 7.15, walking 3.40 a tick, bootstrap of 25 resamples 13.6-14.5 / 6.5-7.6 / 2.9-3.9; a lord fighting fits the database +19; units in melee without a target recover. Replayed in the simulator: exhausted share own / enemy 16.83 / 28.72% versus game 17.34 / 28.61% (legacy 5.66 / 9.17%), late own 28.66 versus 30.29%, network battles own 17.97 versus 19.47%; the warlord pair's spearmen exhaust at 231/232/232 s versus game 226/229/230 s (legacy never). Frozen check: mechanics 51/54, game-AI 22/26, network 96/132 versus production 51/54, 20/26, 100/132 (6 network battles lost, 2 gained). Trade at the game end on gates 230630/071805/204730/031306: -0.047/-0.052/-0.243/-0.088 versus production -0.067/-0.083/-0.271/-0.093, game -0.306/-0.260/-0.407/-0.329: all four further from the game. Data: build/fat/opus, build/agent_fatv2."},
     "effects": {
       "threshold_active": {"stat_melee_attack": 0.95},
       "threshold_winded": {"scalar_speed": 0.95, "stat_melee_attack": 0.95, "stat_melee_damage_ap": 0.9},
@@ -108,7 +109,7 @@
       "threshold_very_tired": {"scalar_speed": 0.85, "stat_melee_attack": 0.75, "stat_armour": 0.9, "stat_charge_bonus": 0.75, "stat_melee_damage_ap": 0.9},
       "threshold_exhausted": {"scalar_speed": 0.85, "stat_melee_attack": 0.7, "stat_melee_defence": 0.9, "stat_armour": 0.75, "stat_charge_bonus": 0.7, "stat_melee_damage_ap": 0.9, "stat_reloading": 0.9}
     },
-    "why": "Production retains 5 ticks/s and ready recovery; fatigue.calibration.on is OFF. DB thresholds and unit_fatigue_effects_tables multipliers are unchanged. Isolated activities in 204 recordings support 10 ticks/s, but damage-bearing population F.sum / pre-damage men is not fatigue participation. Trial: 10 ticks/s, contact-weighted combat +19 and walking -1 for the remainder, idle -18 without pending work, inactive slots frozen; charging keeps priority. Both ON: mechanics 49/54, game-AI 22/26, network 100/132 versus production 51/54, 23/26, 99/132. Exhausted all own inputs / game-standing sol56: 14.11/14.96% versus game 17.34/16.66%; actual own network fatigue_5 20.70% versus game 32.02%. Direct contradiction in pair_warlord_v_spear: game spearmen exhaust at 226-230 s, trial stays active because the damage model caps nine attackers. Lord sustained loss 7.13 HP/s versus game 5.50 (production 5.99); spearmen stay at 16 morale and rout directly on army losses, missing game wavering. The mirror 20260930-131314 also flips. Reject this aggregation, not the independently measured 10 ticks/s. Reproduction and diagnostics: build/agent-fatigue3; earlier trials: build/agent-fatigue2."
+    "why": "per_second 5 with the database rates (melee +19 for every engaged unit, ready -7 as rest, inactive slots included) is the legacy model, used only when calibration.on is false. DB thresholds and unit_fatigue_effects_tables multipliers apply in both."
   },
   "threat": {
     "range_m": 60,

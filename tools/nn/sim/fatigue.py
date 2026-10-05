@@ -1,13 +1,15 @@
-"""Fatigue (docs/en/training/simulator.md, docs/en/game/units/pace.md).
+"""Fatigue (docs/en/training/simulator.md, docs/en/game/mechanics/fatigue.md).
 
 Points per activity from the game's database (_kv_fatigue_tables): charging +34, melee +19,
-shooting +18, running +4, walking -1, standing ready -7, idle -18. The database gives no time;
-isolated activity and recovery transitions give 10 ticks/s. The unaccepted calibration is
-switched off: production retains 5 ticks/s (config/nn/sim.json fatigue). States by the database
-thresholds: fresh 0, active 2800, winded 6600, tired 12600, very tired 18000, exhausted 27000
-(max 30000). Tired states cost morale (morale.py) and scale speed, melee attack and defence,
-armour, charge bonus, AP damage and reload by the database's unit_fatigue_effects_tables
-(effects(); config/nn/sim.json fatigue.effects).
+shooting +18, running +4, walking -1, standing ready -7, idle -18; thresholds fresh 0, active 2800,
+winded 6600, tired 12600, very tired 18000, exhausted 27000 (max 30000). Production is the
+legacy model: 5 ticks/s, ready recovery, every melee +19. The calibration (config/nn/sim.json
+fatigue.calibration, OFF: the network check got worse) runs 10 ticks/s, rests idle units, freezes
+dead and departed slots and charges melee only to a unit with an attack order: +19 a tick for a
+single entity, 13.7 for a formation; a unit in melee without one walks or rests. Walking +3.4 and
+shooting 7.5 are fitted on the 204 recordings. Tired states cost morale (morale.py) and scale
+speed, melee attack and defence, armour, charge bonus, AP damage and reload by the database's
+unit_fatigue_effects_tables (effects(); config/nn/sim.json fatigue.effects).
 """
 import torch
 
@@ -16,31 +18,37 @@ LEVELS = ("threshold_fresh", "threshold_active", "threshold_winded", "threshold_
 
 
 def step(u, activity, params, dt):
-    """Activity bools [B, N], highest priority charging > melee > shooting > run > walk > idle.
-    The calibration switch enables idle recovery, contact-weighted melee and the active mask.
-    Missing idle means ready; missing contact_share means whole-unit melee.
-    OFF retains the legacy clock and ready recovery, including inactive slots.
+    """Activity bools [B, N], highest priority charging > melee > shooting > run > walk > idle;
+    the rest stands ready. The calibration also reads idle, active (alive and on the field),
+    attack (an attack order) and single (a single entity); a missing one means: not idle, active,
+    attacking, a formation. OFF keeps the legacy clock and rates, inactive slots included.
     """
     F = params.fatigue
     cal = params.sim["fatigue"]
     trial = cal.get("calibration", {})
     enabled = trial.get("on", False)
     scale = (trial["per_second"] if enabled else cal["per_second"]) * dt
+    rated = trial if enabled else {}
+    walking = float(rated.get("walking", F["walking"]))
     rate = torch.full_like(u["fatigue"], F["ready"])
     if enabled and "idle" in activity:
         rate = torch.where(activity["idle"], F["idle"], rate)
-    rate = torch.where(activity["walking"], F["walking"], rate)
+    rate = torch.where(activity["walking"], walking, rate)
     rate = torch.where(activity["running"], F["running"], rate)
-    rate = torch.where(activity["shooting"], F["shooting"], rate)
-    combat = F["combat"]
-    if enabled and trial.get("contact_weighted") and "contact_share" in activity:
-        share = activity["contact_share"].clamp(0, 1)
-        # Non-contact men use the trial's DB activity; the contact estimate is the melee model's
-        # weapon-bearing population, before damage/ramp/hold rate multipliers.
-        rest = F[trial.get("noncontact", "ready")]
-        combat = share * F["combat"] + (1 - share) * rest
-    rate = torch.where(activity["melee"], combat, rate)
-    rate = torch.where(activity["charging"], F["charging"], rate)
+    rate = torch.where(activity["shooting"], float(rated.get("shooting", F["shooting"])), rate)
+    melee, charging = activity["melee"], activity["charging"]
+    if enabled and trial.get("melee") == "attack_order":
+        # Only a unit told to attack pays for melee; a formation pays less than a single entity
+        # (its men are not all fighting). Without the order it walks or rests while engaged.
+        attack = activity.get("attack", torch.ones_like(melee))
+        single = activity.get("single", torch.zeros_like(melee))
+        combat = torch.where(single, F["combat"], torch.full_like(rate, float(trial["multi_combat"])))
+        rest = torch.where(activity["walking"], walking, torch.full_like(rate, F["idle"]))
+        rate = torch.where(melee, torch.where(attack, combat, rest), rate)
+        charging = charging & attack
+    else:
+        rate = torch.where(melee, F["combat"], rate)
+    rate = torch.where(charging, F["charging"], rate)
     # Perfect Vigour (attribute fatigue_immune, an innate effect): never tires
     if "fatigue_immune" in u:
         rate = torch.where(u["fatigue_immune"], torch.clamp(rate, max=0.0), rate)

@@ -51,7 +51,7 @@ max 30000. · [twwstats][tws], [fandom Fatigue][fw-fat], [CA elevation blog][ele
   (190/s) reaches Tired in ~66 s and Exhausted in ~142 s, and idle (−180/s) recovers from Exhausted
   in ~150 s. · [Steam][tick] · medium-low.
   - Ours: production retains **5 ticks/s** and ready recovery. The measured **10 ticks/s**
-    clock, idle recovery and contact-weighted trial are behind `fatigue.calibration.on=false`.
+    clock, idle recovery and attack-order melee (below) are behind `fatigue.calibration.on=false`.
     DB points remain unchanged. In 204 fair recordings (`build/agent-fatigue`):
     unopposed running to the first transition gives 39.44 points/s (512 intervals), single-entity
     melee 186.21 (219), shooting arenas 173.08 (17), single-entity rest −180 (14). These are
@@ -59,17 +59,22 @@ max 30000. · [twwstats][tws], [fandom Fatigue][fw-fat], [CA elevation blog][ele
     thresholds. Running starts fresh; standing before running is excluded. Native
     `fatigue_state()` and CCO states 0–5 agree in the old probe; all 3814 initial arena reads
     are Fresh. Exact starting points within that band are unrecorded: zero remains an assumption.
-  - Ours, with the trial enabled: idle −18 per tick without unfinished movement, attack or aiming; completed movement
-    counts as rest. Ready is −7; walking recovers −1 rather than tiring. Combat and movement
-    override idle. This is an order-context approximation: arenas record neither `is_idle`
-    nor combat stance. The old probe sometimes retains `is_idle=false` after `halt` while
-    recovering at −180/s, so that flag alone does not identify the fatigue activity.
-    Charging, walking and ready are not separately fitted: insufficient isolated complete
-    intervals. Arena positions lack height; uphill is not modelled.
-  - **Limitation:** the global ×5 regression mixed formation activities. The melee flag does
-    not mean all soldiers tire at +19: the planner's spearmen stay fresh in all three pairs
-    against slaves while continuing to kill. ×10 identifies the clock, not this aggregation;
-    replay results and unmet acceptance criteria are in the [simulator](../../training/simulator.md).
+  - Ours, with the calibration on: melee tires only a unit with an attack order — a single
+    entity at +19 a tick, a formation at 13.7 (not all its men fight); in melee without an attack
+    order the unit walks or rests. Charging +34 also only with an attack order. Shooting 7.5,
+    walking +3.4 (not the DB +18 and −1). Idle −18 without unfinished movement, attack or aiming;
+    completed movement counts as rest; otherwise ready −7 (an order-context approximation: arenas
+    record neither `is_idle` nor combat stance, and `is_idle` sometimes stays false after `halt`
+    while recovering at −180/s). Dead and departed units are frozen. 13.7 / 7.5 / 3.4 are fitted
+    on the units' activities in the 204 recordings so that the accumulation reproduces the game's
+    recorded states (bootstrap 13.6–14.5 / 6.5–7.6 / 2.9–3.9). The simulator then reproduces the
+    game's exhausted shares (own 16.8 versus 17.3 %, enemy 28.7 versus 28.6 %), but the network
+    battle check is worse, so the calibration is OFF; numbers in the
+    [simulator](../../training/simulator.md#fatigue-calibration). Arena positions lack height;
+    uphill is not modelled.
+  - **Limitation:** the melee flag does not mean all soldiers tire at +19: the planner's spearmen
+    stay fresh in the pairs against slaves while continuing to kill. The production ×5 model
+    exhausts a third as often as the game.
 - **Perfect Vigour** units never tire (a WH3 bug leaves units that start tired stuck at that
   level). **Strider** ignores terrain/slope penalties. Campaign stances (march, raiding) lower the
   battle's starting and maximum vigour. · fandom, Steam · medium.
