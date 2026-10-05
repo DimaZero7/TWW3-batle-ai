@@ -40,6 +40,7 @@ Options:
 | `-TimeoutModelSeconds` | 600 | Battle limit, s of battle time |
 | `-LingerSeconds` | 30 | How long the game stays open after the result |
 | `-NoBuild` | off | Use the net build already in `build/nn-arena/` |
+| `-Target nn-arena\|lord-duel` | `nn-arena` | Whose build and runs folder; `lord-duel` ([lord duel](../apps/entries.md#lord_duel)) only with `-NoBuild`, the companion's log goes to `build/lord-duel/companion/` |
 
 A quick check: `-Speed 20 -LingerSeconds 0`.
 

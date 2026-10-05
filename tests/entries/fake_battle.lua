@@ -98,6 +98,16 @@ local function controller(log)
     -- Arrives at once: entry tests check wiring, not movement.
     function uc:goto_location_angle_width(p) self.unit.pos = vec(p:get_x(), p:get_y(), p:get_z()) end
     function uc:rotate() end
+    -- Morale behaviour and death, as the engine's controller has them (lord_fall, lord_swarm).
+    function uc:morale_behavior_fearless() self.unit.fearless = true end
+    function uc:morale_behavior_rout()
+        self.unit.routing = true
+        log[#log + 1] = 'rout ' .. self.unit:name()
+    end
+    function uc:kill()
+        self.unit.men = 0
+        log[#log + 1] = 'kill ' .. self.unit:name()
+    end
     -- Like the engine: the target is mandatory. The ability is then on recharge.
     function uc:perform_special_ability(key, target)
         assert(target, 'perform_special_ability needs a target')

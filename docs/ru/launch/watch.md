@@ -40,6 +40,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/watch.ps1
 | `-TimeoutModelSeconds` | 600 | Предел боя, с времени боя |
 | `-LingerSeconds` | 30 | Сколько игра остаётся открытой после итога |
 | `-NoBuild` | нет | Взять сборку `net`, которая уже лежит в `build/nn-arena/` |
+| `-Target nn-arena\|lord-duel` | `nn-arena` | Чью сборку и папку прогонов брать; `lord-duel` ([дуэль лордов](../apps/entries.md#lord_duel)) — только с `-NoBuild`, журнал помощника — `build/lord-duel/companion/` |
 
 Быстрая проверка: `-Speed 20 -LingerSeconds 0`.
 

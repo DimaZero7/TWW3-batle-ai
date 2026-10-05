@@ -24,6 +24,8 @@ Building never touches the game; it only writes `build/<target>/`.
 | `roster-capture` | `entries.roster_capture` | `scenarios/roster_capture.xml` (from `config/roster/capture.json`) | `tww3_bai_roster_capture.pack` |
 | `nn-arena` | `entries.nn_arena` | `scenarios/nn_arena.xml` (`tools/nn/scenario.py`) | `tww3_bai_nn_arena.pack` |
 | `human` | `entries.nn_arena` (`own_ai` `human`) | an arena battle in `build/human/` ([a battle played by a human](run.md#a-battle-played-by-a-human)) | `tww3_bai_human.pack` |
+| `lord-fall` | `entries.lord_fall` | `scenarios/lord_fall.xml` (Empire) or `build/lord-fall/lord_fall_<faction>.xml` (`tools/nn/lord_fall.py`) | `tww3_bai_lord_fall.pack` |
+| `lord-duel` | `entries.nn_arena` (`enemy_ai` `scripted`) | `build/lord-duel/lord_duel_<lord>_<role>.xml` (`tools/nn/lord_duel.py`; `scenarios/lord_duel.xml` by default) | `tww3_bai_lord_duel.pack` |
 | `map-capture` | `entries.map_capture` | `scenarios/map_capture.xml` | `tww3_bai_map_capture.pack` |
 
 What every entry does: [entry points](../apps/entries.md).
@@ -39,7 +41,10 @@ What every entry does: [entry points](../apps/entries.md).
 | `--features` | map-capture | After deployment also read objects and cell reachability |
 | `--window MIN_X MAX_X MIN_Z MAX_Z` | map-capture | Capture only this part of the map |
 | `--own-ai attack\|defend` | nn-arena | Our side under CA's planner attacks (the game's AI defends) or defends (the game's AI attacks) |
-| `--own-ai net` | nn-arena | The network in the companion commands our side ([watching the network](watch.md)) |
+| `--own-ai net` | nn-arena, lord-duel | The network in the companion commands our side ([watching the network](watch.md)); the default of `lord-duel` |
+| `--own-ai scripted` | lord-duel | Our lord under one attack order, like theirs (the duel's control) |
+| `--duel emp\|skv` | lord-duel | Both lords Empire Generals or Skaven Warlords ([lord duel](../apps/entries.md#lord_duel)); battle limit 900 s by default |
+| `--faction emp\|skv\|vmp`, `--treatment kill\|rout\|none` | lord-fall | Whose army (its fearless opponent: Skaven for the Empire, else the Empire) and what happens to its lord: killed, routed or nothing (the control) ([lord fall](../apps/entries.md#lord_fall)). A sample every 0.5 s |
 | `--own-role attack\|defend` | nn-arena `net` | The network attacks (the game's AI defends and wins when time is out) or defends (default: the game's AI attacks) |
 | `--army-seed N` | nn-arena | A battle from the [army generator](../training/armies.md): `generate.battle(N)`, a lord and 0-19 units a side. Without `--own-ai` the network commands our side. The battle file is `build/nn-arena/random_<N>.xml`; `scenarios/` is not touched. The manifest gets `army` (seed, train/eval, budget, templates, men) |
 | `--soldiers-every N` | human | Every soldier's place every N ticks (5; 0: never) |

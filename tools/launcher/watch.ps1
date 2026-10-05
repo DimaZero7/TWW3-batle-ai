@@ -7,7 +7,9 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/watch.ps1
 #   ... -Speed 20 -LingerSeconds 0      (a quick check)
 #   ... -Checkpoint build/nn-train/random.pt -Greedy
+#   ... -Target lord-duel -NoBuild        (another build of entries.nn_arena under the network: tools/nn/lord_duel.py)
 param(
+    [ValidateSet('nn-arena', 'lord-duel')][string]$Target = 'nn-arena',
     [ValidateSet(1, 3, 10, 20)][int]$Speed = 1,
     [string]$Arena = 'arena',
     [int]$DecideMs = 1000,
@@ -40,20 +42,21 @@ $running = docker ps -a --filter "name=^$container$" --format '{{.Names}}'
 if ($running) { throw "Container $container exists (a previous companion?). Remove it: docker rm -f $container" }
 
 if (-not $NoBuild) {
+    if ($Target -ne 'nn-arena') { throw "Build $Target yourself (python -m tools.build $Target ...) and pass -NoBuild" }
     & $python -m tools.build nn-arena --own-ai net --speed $Speed --arena $Arena --decide-ms $DecideMs --timeout $TimeoutModelSeconds | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
 }
-$manifest = Get-Content -LiteralPath (Join-Path $repo 'build\nn-arena\manifest.json') -Raw | ConvertFrom-Json
-if ($manifest.config.own_ai -ne 'net') { throw 'build/nn-arena is not a net build; run without -NoBuild' }
+$manifest = Get-Content -LiteralPath (Join-Path $repo ('build\' + $Target + '\manifest.json')) -Raw | ConvertFrom-Json
+if ($manifest.config.own_ai -ne 'net') { throw "build/$Target is not a net build; run without -NoBuild" }
 Write-Output ("Build {0}: arena {1}, speed x{2}, a decision every {3} ms" -f $manifest.build, $manifest.config.arena, $manifest.config.speed, $manifest.config.decide_ms)
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$logRel = "build/nn-arena/companion/$stamp.jsonl"
+$logRel = "build/$Target/companion/$stamp.jsonl"
 $dockerArgs = "run --rm --init --name $container -v `"${repo}:/repo`" -v `"${game}:/game`" -w /repo -e PYTHONPATH=/repo " +
     "-e PYTHONUNBUFFERED=1 snake-ai-trainer python -m tools.nn.companion --game /game --log /repo/$logRel"
 if ($Checkpoint) { $dockerArgs += ' --checkpoint /repo/' + ($Checkpoint -replace '\\', '/') }
 if ($Greedy) { $dockerArgs += ' --greedy' }
-$runs = Join-Path $repo 'build\nn-arena\runs'
+$runs = Join-Path $repo ('build\' + $Target + '\runs')
 $before = Get-ChildItem -LiteralPath $runs -Directory -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 1
 $companion = Start-Process -FilePath docker -ArgumentList $dockerArgs -NoNewWindow -PassThru
 $code = 1
@@ -61,7 +64,7 @@ $run = $null
 try {
     for ($i = 0; $i -lt 30 -and -not (docker ps --filter "name=^$container$" --format '{{.Names}}'); $i++) { Start-Sleep -Seconds 1 }
     if ($companion.HasExited) { throw 'The companion did not start' }
-    & (Join-Path $PSScriptRoot 'launch.ps1') -Target nn-arena -LingerSeconds $LingerSeconds
+    & (Join-Path $PSScriptRoot 'launch.ps1') -Target $Target -LingerSeconds $LingerSeconds
     $code = $LASTEXITCODE
 } finally {
     $ErrorActionPreference = 'Continue'

@@ -13,7 +13,12 @@
 --            (apps.bridge.adapter; the game's AI attacks);
 --   own_ai = 'human'  — a human commands our units (the player's side); the script gives no
 --            orders, records as for the others plus apps.telemetry.observer_adapter (ordered
---            bearing and width, idle, visibility, damage flags, effects, abilities, soldiers).
+--            bearing and width, idle, visibility, damage flags, effects, abilities, soldiers);
+--   own_ai = 'scripted' — every unit of ours under script, one attack order on the nearest enemy
+--            (the lord duel's control, tools/nn/lord_duel.py).
+-- config.enemy_ai = 'scripted' takes side 2 from the game's AI the same way (the lord duel: the
+-- other lord under one plain attack order); absent, side 2 is the game's AI. A scripted unit gets its
+-- attack again only when the engine dropped it: not in melee, no target, for M.SCRIPTED_LOST_MS.
 -- Each side may have its own army (tools/nn/scenario.py: named arenas).
 -- Every tick 'nn_sample' records every unit of both sides (full view: trusted
 -- research telemetry); 'nn_final' is the last such record.
@@ -31,6 +36,7 @@ local planner = require('apps.orders.planner_adapter')
 local map = require('apps.map.adapter')
 local bridge = require('apps.bridge.adapter')
 local observer = require('apps.telemetry.observer_adapter')
+local orders = require('apps.orders.adapter')
 
 local M = {}
 
@@ -38,7 +44,9 @@ local LOG = 'tww3_bai_events.jsonl'
 local TIMER = 'tww3_bai_nn_arena_tick'
 local DECIDE, POLL = 'tww3_bai_nn_arena_decide', 'tww3_bai_nn_arena_poll'
 M.REISSUE_MS = 15000
-M.OWN_AI = {attack = true, defend = true, hold = true, net = true, human = true}
+M.OWN_AI = {attack = true, defend = true, hold = true, net = true, human = true, scripted = true}
+M.ENEMY_AI = {scripted = true}
+M.SCRIPTED_LOST_MS = 3000
 
 local function try(fn, ...)
     local ok, v = pcall(fn, ...)
@@ -54,7 +62,8 @@ end
 
 -- config: build, speed, tick_ms, deadline_s, stall_ms, timeout_ms, own_ai ('attack' | 'defend' | 'hold' | 'net'),
 -- units = {own = [...], enemy = [...]} (script names, slots, keys), defend_radius_m;
--- 'net' also: decide_ms, poll_ms, factions = {own, enemy}, enemy_role; 'human': soldiers_every (ticks).
+-- 'net' also: decide_ms, poll_ms, factions = {own, enemy}, enemy_role; 'human': soldiers_every (ticks);
+-- enemy_ai: nil (the game's AI) or 'scripted'.
 function M.main(bm, config, globals)
     if _G.tww3_bai_nn_arena then return end
     local state = {active = false, finished = false, batch = '', run_id = 'bootstrap', ticks = 0,
@@ -181,6 +190,7 @@ function M.main(bm, config, globals)
         row.duration_wall_s = clock.elapsed_wall_seconds(started_wall)
         row.rejoined = state.planner and state.planner.rejoined or 0
         row.idle_kicks = state.planner and state.planner.kicks or 0
+        if state.scripted then row.scripted_orders = state.scripted_orders or 0 end
         if state.net then
             state.net.finish()
             for k, v in pairs(state.net.stats()) do row[k] = v end
@@ -205,6 +215,8 @@ function M.main(bm, config, globals)
         end
     end
 
+    local scripted_check   -- below, with the scripted side's helpers
+
     local function tick()
         if not state.active then return end
         if state.stall.update(bm:time_elapsed_ms(), battle.health_signature(state.all_units)) then
@@ -223,6 +235,7 @@ function M.main(bm, config, globals)
             return
         end
         if state.planner then lead(now) end
+        if state.scripted then scripted_check(now) end
         if config.own_ai == 'attack' and now - last_reissue >= M.REISSUE_MS then
             last_reissue = now
             state.planner.attack()
@@ -263,6 +276,58 @@ function M.main(bm, config, globals)
             poll_ms = config.poll_ms, state_file = bridge.STATE_FILE, orders_file = bridge.ORDERS_FILE})
     end
 
+    -- A scripted side: each unit under script attacks the nearest standing enemy ('scripted_order').
+    local function nearest_enemy(side, it)
+        local p = try(function() return it.unit:position() end)
+        local best, best_d
+        for _, e in ipairs(state.sides[3 - side]) do
+            local q = try(function() return e.unit:position() end)
+            local up = (try(function() return e.unit:number_of_men_alive() end) or 0) > 0
+                and not try(function() return e.unit:is_shattered() end)
+            if p and q and up then
+                local d = (p:get_x() - q:get_x()) ^ 2 + (p:get_z() - q:get_z()) ^ 2
+                if not best_d or d < best_d then best, best_d = e, d end
+            end
+        end
+        return best
+    end
+    local function scripted_attack(side, it, why)
+        local foe = nearest_enemy(side, it)
+        if not foe then return end
+        orders.attack_melee(it.uc, foe.unit)
+        it.lost_since = nil
+        state.scripted_orders = (state.scripted_orders or 0) + 1
+        emit('scripted_order', {t = bm:time_elapsed_ms() - started_ms, u = it.name, tg = foe.name, why = why})
+    end
+    local function scripted_start(side)
+        local army = side == 1 and state.own_army or state.enemy_army
+        for _, it in ipairs(state.sides[side]) do
+            it.uc = orders.take_control(army, it.unit)
+            scripted_attack(side, it, 'start')
+        end
+        state.scripted = state.scripted or {}
+        state.scripted[#state.scripted + 1] = side
+        emit('scripted_side', {side = side})
+    end
+    scripted_check = function(now)
+        for _, side in ipairs(state.scripted or {}) do
+            for _, it in ipairs(state.sides[side]) do
+                local u = it.unit
+                local standing = (try(function() return u:number_of_men_alive() end) or 0) > 0
+                    and not try(function() return u:is_routing() end)
+                local lost = standing and not try(function() return u:is_in_melee() end)
+                    and name_of(try(function() return u:current_target() end)) == ''
+                if not lost then
+                    it.lost_since = nil
+                elseif not it.lost_since then
+                    it.lost_since = now
+                elseif now - it.lost_since >= M.SCRIPTED_LOST_MS then
+                    scripted_attack(side, it, 'lost')
+                end
+            end
+        end
+    end
+
     local function hand_over()
         local own_units, enemy_units = {}, {}
         for _, it in ipairs(state.sides[1]) do own_units[#own_units + 1] = it.unit end
@@ -283,6 +348,11 @@ function M.main(bm, config, globals)
             return
         end
         if config.own_ai == 'net' then return net_start() end
+        if config.own_ai == 'scripted' then
+            scripted_start(1)
+            emit('own_ai', {mode = 'scripted', own_ai = config.own_ai})
+            return
+        end
         state.planner = planner.hand_over(bm, 'tww3_bai_nn_own', state.own_alliance, own_units, enemy_units)
         if config.own_ai == 'defend' then
             local sx, sz = 0, 0
@@ -305,6 +375,7 @@ function M.main(bm, config, globals)
             emit('speed_restored', {from_speed = from, to_speed = config.speed})
         end)
         hand_over()
+        if config.enemy_ai == 'scripted' then scripted_start(2) end
         last_reissue = bm:time_elapsed_ms()
         state.stall = battle_services.new_stall_detector(config.stall_ms)
         emit('start', {speed = config.speed, timeout_ms = config.timeout_ms, deadline_s = config.deadline_s})
@@ -335,9 +406,10 @@ function M.main(bm, config, globals)
             return
         end
         assert(common and vector_type, 'common and battle_vector globals required')
-        assert(M.OWN_AI[config.own_ai], 'own_ai must be attack, defend, hold, net or human')
+        assert(M.OWN_AI[config.own_ai], 'own_ai must be attack, defend, hold, net, human or scripted')
+        assert(config.enemy_ai == nil or M.ENEMY_AI[config.enemy_ai], 'enemy_ai must be absent or scripted')
         local sides = battle.read_sides(bm)
-        state.own_alliance, state.own_army = sides[1].alliance, sides[1].army
+        state.own_alliance, state.own_army, state.enemy_army = sides[1].alliance, sides[1].army, sides[2].army
         state.alliances = {sides[1].alliance, sides[2].alliance}
         -- The side whose balance of power the top bar shows (sides are bm:alliances() in order).
         local player = try(function() return bm:get_player_alliance_num() end)

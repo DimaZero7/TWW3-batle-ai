@@ -134,6 +134,78 @@ men, kills, melee flag, place; every 1 s `swarm_men`: the attackers' soldiers wi
 the lord (CCO `ManList` positions). Analysis: `python -m tools.nn.lord_swarm` (`--sim`: the
 simulator on the same trials); results — [a lord surrounded](../game/units/lord-swarm.md).
 
+<a id="lord_fall"></a>
+
+## lord_fall — an army whose lord is killed or routs
+
+The question: does an army lose morale when its lord is **killed**, and how much, against when he
+**routs**. All 75 recorded lord falls were routs (the lord shattered with 2-50 % health), so the
+simulator has no shock from a lord's death (`morale.lord_fall` 0 / 0); the game's database has
+`general_died_recently` -16, `general_dead` -10 and `general_fled_recently` -16.
+
+Build: `python -m tools.build lord-fall --faction emp|skv|vmp --treatment kill|rout|none`; the battle
+file comes from `tools/nn/lord_fall.py`. MP Crossroads (flat). One battle = one army (side 1) and one
+thing done to its lord; the opponent (Skaven against the Empire, the Empire against Skaven and the
+Vampire Counts) is fearless, so its routs never lift our army's morale. The army: the lord 20 m behind
+his line, two infantry units in melee with two of the enemy's (`fight`, ~63 m from the lord: inside
+his aura), two standing idle 130-166 m to the side (`idle`: out of the aura, 115+ m from any enemy -
+the shock alone, without the melee's drift). Units from the game's database: Empire spearmen (120,
+leadership 60), clanrat spearmen (160, 45), skeleton spearmen `wh_main_vmp_inf_skeleton_warriors_1`
+and the vampire lord `wh_main_vmp_cha_vampire_lord_0` (160, 35; not in the simulator's data).
+
+20 s after the first contact (at the latest 60 s after the start) the lord is: `kill` - killed
+(`unit:reduce_hitpoints_unary(1)`, then `uc:kill()` if he still stands 1 s later, event
+`lord_fall_fallback`), `rout` - routed (`uc:morale_behavior_rout()`), `none` - left alone (the
+control; the moment is marked the same way). 60 s later the battle ends. Every 0.5 s `fall_sample`:
+every unit's place, men, health, CCO `MoralePercent`, `MoraleState`, `MoraleGreatestEffect`,
+`IsAlive`, `PercentCasualtiesRecently`, `PercentHpLostRecently`, routing / shattered / wavering / in
+melee, role (`lord`, `fight`, `idle`). `lord_fall` marks the moment with the lord's row before it; a
+fight unit out of melee for 5 s gets its attack again (`fall_reissue`).
+
+The series and the table:
+
+```bash
+.venv/Scripts/python -m tools.nn.lord_fall plan     # 15 battles
+.venv/Scripts/python -m tools.nn.lord_fall run      # build + launch each (launch.ps1), then the table
+.venv/Scripts/python -m tools.nn.lord_fall          # the table from build/lord-fall/runs
+```
+
+The table: each unit's morale change from the last sample before the moment to +1 ... +60 s in points
+(MoralePercent x leadership, as in [measurements](../training/measurements.md#morale-events-and-the-army-collapse)),
+by faction, treatment and role; `net` subtracts the control's same role; the share routed within
+10 / 60 s, the idle units' health lost (undead crumbling), the strongest morale effect after the moment.
+15 battles (2 `kill`, 2 `rout`, 1 control a faction, ~2 min each with loading): the idle units' morale
+is flat, so the database's -16 points (0.27-0.46 MoralePercent) against the aura's -4 shows on 4 units;
+the control is needed only for the melee's drift. A borderline result: add battles to that cell
+(`--kill`, `--rout`, `--factions`).
+
+<a id="lord_duel"></a>
+
+## lord_duel — the network's lord against a lord under one order
+
+The question: what the network's extra moves and orders cost in a duel of lords. The `lord-duel`
+build target is the same entry [nn_arena](#nn_arena) in its own folder `build/lord-duel/` (its battles
+never mix with the arena's and the gate's). `tools/nn/lord_duel.py` writes the arena: two lords of one
+type only (Empire Generals or Skaven Warlords), mirrored, 100 m apart. The network commands our lord
+through the companion (`--own-ai net`, as in the [gate](../launch/gate.md)); the script takes theirs
+(`enemy_ai` `scripted`) and gives it one order to attack the nearest enemy (`scripted_order`, `why`
+`start`); again only when the engine lost it: out of melee and without a target for 3 s (`why` `lost`).
+The control is both lords so (`--own-ai scripted`): the trade of two plain lords.
+
+```bash
+.venv/Scripts/python -m tools.nn.lord_duel plan
+.venv/Scripts/python -m tools.nn.lord_duel run --checkpoint build/nn-train/<label>/m15.pt
+.venv/Scripts/python -m tools.nn.lord_duel          # the table from build/lord-duel/runs
+```
+
+`run` builds and launches every battle: the network's through [watch.ps1](../launch/watch.md)
+`-Target lord-duel -NoBuild` with the companion, the controls through `launch.ps1`. The default plan is
+12 battles: for each lord type 4 network battles (attacking and defending in turn: the defender wins on
+the 900 s timeout) and 2 controls. The table per battle: both lords' health at the end, the trade (the
+enemy's loss - ours: higher is better for the network), the winner, the time to contact, the network's
+orders to its lord (a minute, by kind), the abilities used, the metres both walked, the script's
+re-issued orders; then the mean by lord type and mode.
+
 <a id="enemy_layout"></a>
 
 ## enemy_layout — how the game AI deploys and stands
@@ -184,6 +256,8 @@ the battle. The side that wins on timeout defends:
   outside the game, its orders come back and are given to our units ([bridge](bridge.md),
   [watching the network](../launch/watch.md)); the game's AI attacks. Events `nn_orders`,
   `nn_miss`; `nn_sample` is recorded as in the other modes.
+- `scripted` (the `lord-duel` target, the control) — each unit of ours under script with one order to
+  attack the nearest enemy; `enemy_ai` `scripted` takes side 2 from the game's AI the same way ([lord duel](#lord_duel));
 - `human` (the `human` build target) — a human commands our side, the script gives no orders; the
   recording adds [observer_adapter](telemetry.md#observer_adapter); the game's AI attacks
   ([a battle played by a human](../launch/run.md#a-battle-played-by-a-human)).

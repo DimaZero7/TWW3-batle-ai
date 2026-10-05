@@ -14,6 +14,8 @@ Usage:
     python -m tools.build nn-arena --army-seed 1000900000 --own-role attack   # a generated battle, the network
     python -m tools.build lord-swarm --repeats 2   # a lord swarmed by 1-4 units (tools/nn/lord_swarm.py)
     python -m tools.build human --army-seed 1000900014 --army-swap   # a human plays our side (x1, recorded)
+    python -m tools.build lord-fall --faction skv --treatment kill   # the lord killed / routed (tools/nn/lord_fall.py)
+    python -m tools.build lord-duel --duel emp   # our network's lord v a lord under one attack order (tools/nn/lord_duel.py)
 
 Output: build/<target>/ with the .pack, the bundled script and manifest.json.
 Install and launch with tools/launcher/launch.ps1.
@@ -111,6 +113,24 @@ TARGETS = {
         "scenario": "lord_swarm.xml",
         "packed_scenario": "lord_swarm.xml",
     },
+    "lord-fall": {
+        "entry": "entries.lord_fall",
+        "pack": "tww3_bai_lord_fall.pack",
+        "script": "tww3_bai_lord_fall",
+        "folder": "tww3_bai",
+        "scenario": "lord_fall.xml",
+        "packed_scenario": "lord_fall.xml",
+    },
+    # The lord duel (entries.nn_arena, enemy_ai 'scripted'): its own build folder, so its runs never mix
+    # with the arena's and the gate's (build/nn-arena/runs: data for the simulator).
+    "lord-duel": {
+        "entry": "entries.nn_arena",
+        "pack": "tww3_bai_lord_duel.pack",
+        "script": "tww3_bai_lord_duel",
+        "folder": "tww3_bai",
+        "scenario": "lord_duel.xml",
+        "packed_scenario": "lord_duel.xml",
+    },
     "map-capture": {
         "entry": "entries.map_capture",
         "pack": "tww3_bai_map_capture.pack",
@@ -138,6 +158,8 @@ TIMEOUT_MARGIN_S = 60
 # human: every soldier's position every this many ticks (a reading of all men takes ~50 ms).
 HUMAN_SOLDIERS_EVERY = 5
 ARENA_TARGETS = ("nn-arena", "human")
+# lord-fall: ms between samples (the moment's step is read at +1, +2 s).
+LORD_FALL_TICK_MS = 500
 
 
 def load_move_plan(name):
@@ -297,12 +319,13 @@ def main(argv=None):
                              "or shoot a fearless target at fixed distances until out of arrows (damage)")
     parser.add_argument("--damage-rotate", type=int, default=0,
                         help="archer-range --range-mode damage: shift the distances by this many lanes")
-    parser.add_argument("--own-ai", choices=("attack", "defend", "hold", "net"),
+    parser.add_argument("--own-ai", choices=("attack", "defend", "hold", "net", "scripted"),
                         help="nn-arena: CA's script AI planner attacks or defends with our side; "
                              "the game's AI does the other; hold: our side gets no orders and stands "
                              "(a target for the game's AI to attack); net: the network in the companion "
-                             "(tools/nn/companion) commands our side (its role: --own-role). "
-                             "Default: net with --army-seed, else attack")
+                             "(tools/nn/companion) commands our side (its role: --own-role); "
+                             "scripted (lord-duel): one attack order on the nearest enemy. "
+                             "Default: net with --army-seed, else attack; lord-duel: net")
     parser.add_argument("--own-role", choices=("attack", "defend"),
                         help="nn-arena --own-ai net, human: our side attacks (the game's AI defends and wins on "
                              "timeout) or defends (default: the game's AI attacks)")
@@ -323,6 +346,12 @@ def main(argv=None):
                         help="lord-swarm: how many times each layout runs in the battle")
     parser.add_argument("--swarm", dest="plan_swarm", choices=("infantry", "lords", "all"), default="infantry",
                         help="lord-swarm: infantry around each lord, the other lord (with units) on him, or both")
+    parser.add_argument("--faction", choices=("emp", "skv", "vmp"), default="emp",
+                        help="lord-fall: the treated army (its fearless opponent: Skaven for emp, else Empire)")
+    parser.add_argument("--treatment", choices=("kill", "rout", "none"), default="none",
+                        help="lord-fall: the treated lord killed, routed, or left alone (the control)")
+    parser.add_argument("--duel", choices=("emp", "skv"), default="emp",
+                        help="lord-duel: both lords Empire Generals or Skaven Warlords")
     parser.add_argument("--features", action="store_true",
                         help="map-capture: also read objects and reachability after deployment")
     args = parser.parse_args(argv)
@@ -333,10 +362,14 @@ def main(argv=None):
     if args.speed is None:
         args.speed = 1 if args.target == "human" else 20
     if args.timeout is None:
-        args.timeout = 3600 if args.target == "human" else 600
+        args.timeout = {"human": 3600, "lord-duel": 900}.get(args.target, 600)
     if args.own_ai is None:
-        args.own_ai = "net" if args.army_seed is not None else "attack"
-    if args.own_role and args.own_ai not in ("net", "human"):
+        args.own_ai = "net" if args.army_seed is not None or args.target == "lord-duel" else "attack"
+    if args.target == "lord-duel" and args.own_ai not in ("net", "scripted"):
+        parser.error("lord-duel: --own-ai net (the network) or scripted (the control)")
+    if args.own_ai == "scripted" and args.target != "lord-duel":
+        parser.error("--own-ai scripted is for lord-duel")
+    if args.own_role and args.own_ai not in ("net", "human") and args.target != "lord-duel":
         parser.error("--own-role is for --own-ai net and the human target (the planner modes set our role themselves)")
     if args.soldiers_every < 0:
         parser.error("--soldiers-every must be 0 or more")
@@ -355,7 +388,7 @@ def main(argv=None):
             run_config["window"] = dict(zip(("min_x", "max_x", "min_z", "max_z"), args.window))
     else:
         scenario_file = None
-        tick_ms = args.tick_ms or (LORD_SWARM_TICK_MS if args.target == "lord-swarm" else 1000)
+        tick_ms = args.tick_ms or {"lord-swarm": LORD_SWARM_TICK_MS, "lord-fall": LORD_FALL_TICK_MS}.get(args.target, 1000)
         run_config = {"speed": args.speed, "timeout_ms": args.timeout * 1000, "tick_ms": tick_ms,
                       "scenario": TARGETS[args.target]["scenario"].removesuffix(".xml")}
         model_s = READOUT_MODEL_S if args.target == "unit-readout" else args.timeout
@@ -392,6 +425,21 @@ def main(argv=None):
             swarm, model_s = lord_swarm.run_config(args.repeats, plan=args.plan_swarm)
             run_config.update(swarm)
             stall_ms = max(stall_ms, int((model_s + 120) * 1000))
+        if args.target == "lord-fall":
+            from tools.nn import lord_fall
+            path = lord_fall.write_scenario(args.faction)
+            fall, model_s = lord_fall.run_config(args.faction, args.treatment)
+            run_config.update(fall)
+            stall_ms = max(stall_ms, int((model_s + 120) * 1000))
+            if not args.scenario:
+                args.scenario = str(path)
+        if args.target == "lord-duel":
+            from tools.nn import lord_duel
+            path, duel = lord_duel.build_config(args.duel, args.own_ai, args.own_role or "attack", args.decide_ms,
+                                                NET_POLL_MS, args.timeout)
+            run_config.update(duel)
+            if not args.scenario:
+                args.scenario = str(path)
         if args.target == "manual":
             # The player sets the pace: no forced speed, an hour by default.
             run_config.pop("speed")

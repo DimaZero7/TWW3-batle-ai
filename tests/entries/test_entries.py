@@ -604,6 +604,49 @@ class TestNnArena:
         assert len(soldiers) == 2 and len(soldiers[0]["units"]) == 4   # ticks 1 and 6; both sides
         assert soldiers[0]["units"][0]["xz_dm"] == [13, -25, 13, -25]
 
+    def test_lord_duel_the_enemy_lord_takes_one_attack_and_again_only_when_lost(self, lua, tmp_path):
+        # tools/nn/lord_duel.py: our lord under the network, theirs under one scripted attack order.
+        lua.execute("""
+            own = {fake.unit('own_lord', 'lord', -50, 0)}
+            enemy = {fake.unit('enemy_lord', 'lord', 50, 0)}
+            bm = fake.manager({own, enemy})
+            local function lord(side) return {{script_name = side .. '_lord', slot = 'lord', key = 'lord'}} end
+            CONFIG = {build = 'test', speed = 20, tick_ms = 1000, deadline_s = 600, stall_ms = 600000,
+                timeout_ms = 600000, defend_radius_m = 150, units = {own = lord('own'), enemy = lord('enemy')},
+                own_ai = 'net', enemy_ai = 'scripted', enemy_role = 'defend', decide_ms = 1000, poll_ms = 100,
+                factions = {own = 'wh_main_emp_empire', enemy = 'wh_main_emp_empire'}}
+            STATE = require('entries.nn_arena').main(bm, CONFIG, {common = fake.common, battle_vector = fake.vector_type})
+            bm:pump()
+            assert(enemy[1].controlled and enemy[1].attack_args.target == 'own_lord')
+            enemy[1].target = own[1]
+            for _ = 1, 5 do bm:tick() end            -- has its target: nothing new
+            enemy[1].target = nil                     -- the engine dropped it: again after 3 s
+            for _ = 1, 5 do bm:tick() end
+            bm.outcome, bm.winner = true, 1
+            bm:tick()
+            assert(STATE.finished)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        given = [(r["u"], r["tg"], r["why"]) for r in rows if r["event"] == "scripted_order"]
+        assert given == [("enemy_lord", "own_lord", "start"), ("enemy_lord", "own_lord", "lost")]
+        assert next(r for r in rows if r["event"] == "own_ai")["mode"] == "net"
+        assert rows[-1]["event"] == "result" and rows[-1]["scripted_orders"] == 2
+
+    def test_lord_duel_control_both_sides_scripted(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            CONFIG.own_ai, CONFIG.enemy_ai = 'scripted', 'scripted'
+            local state = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            assert(state.planner == nil and state.net == nil)
+            assert(own[1].attack_args.target == 'enemy_spear_1' and own[2].attack_args.target == 'enemy_spear_1')
+            assert(enemy[2].attack_args.target == 'own_spear_1')
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        assert [r["side"] for r in rows if r["event"] == "scripted_side"] == [1, 2]
+        assert list(lua.eval("bm.planner_log").values()) == []
+
     def test_an_unknown_own_ai_is_an_error(self, lua, tmp_path):
         lua.execute(self.SETUP + """
             CONFIG.own_ai = 'dance'
@@ -746,3 +789,97 @@ class TestLordSwarm:
             {"kind": "lord", "name": "own_lord", "side": "front"}, {"kind": "spear", "name": "own_spear_1", "side": "back"}]}]
         assert [r["lane"] for r in rows if r["event"] == "swarm_lane_end"] == ["warlord"]
         assert all(x["lane"] == "warlord" for r in rows if r["event"] == "swarm_sample" for x in r["lanes"])
+
+
+class TestLordFall:
+    # The treated army (side 1): lord, two fight units, one idle; the fearless side 2 the same minus one idle.
+    SETUP = """
+        own = {fake.unit('own_lord', 'lord', -60, 0), fake.unit('own_fight_1', 'spears', -40, 18),
+               fake.unit('own_fight_2', 'spears', -40, -18), fake.unit('own_idle_1', 'spears', -40, -130)}
+        enemy = {fake.unit('enemy_lord', 'lord', 60, 0), fake.unit('enemy_fight_1', 'spears', 40, 18),
+                 fake.unit('enemy_fight_2', 'spears', 40, -18)}
+        bm = fake.manager({own, enemy})
+        CONFIG = {build = 'test', speed = 20, tick_ms = 500, deadline_s = 100, treated_side = 1,
+            treatment = 'kill', lords = {own = 'own_lord', enemy = 'enemy_lord'},
+            fight = {{'own_fight_1', 'enemy_fight_1'}, {'own_fight_2', 'enemy_fight_2'}}, idle = {'own_idle_1'},
+            treat_after_ms = 20000, treat_latest_ms = 60000, observe_ms = 10000,
+            factions = {own = 'emp', enemy = 'skv'}}
+        GLOBALS = {common = fake.common, battle_vector = fake.vector_type}
+        fake.cco['uid_own_idle_1'] = {MoralePercent = 0.9, MoraleGreatestEffect = 'General died'}
+    """
+
+    def test_due_after_contact_or_at_the_latest(self, lua):
+        due = lua.eval("require('entries.lord_fall').due")
+        assert due(25000, 0, 5000, 20000, 60000) and not due(24000, 0, 5000, 20000, 60000)
+        assert not due(59000, 0, None, 20000, 60000) and due(60000, 0, None, 20000, 60000)
+
+    def test_kill_after_contact_records_everyone_and_ends(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            STATE = require('entries.lord_fall').main(bm, CONFIG, GLOBALS)
+            own[1].reduce_hitpoints_unary = function(self, p) self.men = 0 end
+            bm:pump()
+            for _ = 1, 10 do bm:tick(500) end      -- 5 s: no contact yet
+            own[2].melee = true                     -- contact at 5.5 s
+            for _ = 1, 80 do bm:tick(500) end       -- the kill at 25.5 s, the end 10 s later
+            assert(STATE.finished and bm.ended, 'the probe did not end')
+            assert(enemy[1].fearless and enemy[2].fearless and not own[2].fearless)
+            assert(own[2].attack_args.target == 'enemy_fight_1' and enemy[3].attack_args.target == 'own_fight_2')
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        kinds = [r["event"] for r in rows]
+        assert "error" not in kinds, [r for r in rows if r["event"] == "error"]
+        (contact,) = [r for r in rows if r["event"] == "contact"]
+        (fall,) = [r for r in rows if r["event"] == "lord_fall"]
+        assert contact["t"] == 5500 and fall["t"] == 25500
+        assert fall["method"] == "reduce_hitpoints_unary" and fall["lord"] == "own_lord" and fall["before"]["men"] == 120
+        assert "lord_fall_fallback" not in kinds
+        sample = [r for r in rows if r["event"] == "fall_sample"][-1]
+        assert sample["treated"] is True
+        roles = {u["n"]: (u["side"], u["role"]) for u in sample["units"]}
+        assert roles["own_idle_1"] == (1, "idle") and roles["enemy_fight_2"] == (2, "fight") and roles["own_lord"] == (1, "lord")
+        idle = next(u for u in sample["units"] if u["n"] == "own_idle_1")
+        assert (idle["mp"], idle["mge"]) == (0.9, "General died")
+        assert next(u for u in sample["units"] if u["n"] == "own_lord")["men"] == 0
+        result = rows[-1]
+        assert result["event"] == "result" and result["lord_dead"] == "damage" and result["treated_ms"] == 25500
+        assert kinds[-2] == "fall_final"
+
+    def test_kill_falls_back_to_uc_kill_and_rout_routs(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            STATE = require('entries.lord_fall').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 140 do bm:tick(500) end      -- no contact: the kill at 60 s, no damage method
+            assert(STATE.finished)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        fall = next(r for r in rows if r["event"] == "lord_fall")
+        assert fall["t"] == 60000 and fall["error"]
+        assert next(r for r in rows if r["event"] == "lord_fall_fallback")["method"] == "uc_kill"
+        assert "kill own_lord" in list(lua.eval("bm.orders").values())
+        assert rows[-1]["lord_dead"] == "uc_kill"
+
+    def test_rout_and_control(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            CONFIG.treatment = 'rout'
+            STATE = require('entries.lord_fall').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 140 do bm:tick(500) end
+            assert(STATE.finished and own[1].routing)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert next(r for r in rows if r["event"] == "lord_fall")["method"] == "morale_behavior_rout"
+        assert rows[-1]["event"] == "result" and rows[-1].get("lord_dead") is None
+
+    def test_a_fight_unit_out_of_melee_gets_its_attack_again(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            CONFIG.treatment = 'none'
+            STATE = require('entries.lord_fall').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            own[2].melee, enemy[2].melee = true, true
+            own[3].melee, enemy[3].melee = true, true
+            for _ = 1, 4 do bm:tick(500) end
+            own[2].melee = false                    -- dropped out of the fight for 5 s
+            for _ = 1, 12 do bm:tick(500) end
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert [(r["u"], r["tg"]) for r in rows if r["event"] == "fall_reissue"] == [("own_fight_1", "enemy_fight_1")]

@@ -24,6 +24,8 @@
 | `roster-capture` | `entries.roster_capture` | `scenarios/roster_capture.xml` (из `config/roster/capture.json`) | `tww3_bai_roster_capture.pack` |
 | `nn-arena` | `entries.nn_arena` | `scenarios/nn_arena.xml` (`tools/nn/scenario.py`) | `tww3_bai_nn_arena.pack` |
 | `human` | `entries.nn_arena` (`own_ai` `human`) | бой арены в `build/human/` ([бой, который играет человек](run.md#бой-который-играет-человек)) | `tww3_bai_human.pack` |
+| `lord-fall` | `entries.lord_fall` | `scenarios/lord_fall.xml` (Империя) или `build/lord-fall/lord_fall_<фракция>.xml` (`tools/nn/lord_fall.py`) | `tww3_bai_lord_fall.pack` |
+| `lord-duel` | `entries.nn_arena` (`enemy_ai` `scripted`) | `build/lord-duel/lord_duel_<лорд>_<роль>.xml` (`tools/nn/lord_duel.py`; `scenarios/lord_duel.xml` — по умолчанию) | `tww3_bai_lord_duel.pack` |
 | `map-capture` | `entries.map_capture` | `scenarios/map_capture.xml` | `tww3_bai_map_capture.pack` |
 
 Что делает каждая точка входа — [точки входа](../apps/entries.md).
@@ -39,7 +41,10 @@
 | `--features` | map-capture | После расстановки прочитать объекты и достижимость клеток |
 | `--window MIN_X MAX_X MIN_Z MAX_Z` | map-capture | Снять только этот участок карты |
 | `--own-ai attack\|defend` | nn-arena | Наша сторона под планировщиком CA атакует (ИИ игры обороняется) или обороняется (ИИ игры атакует) |
-| `--own-ai net` | nn-arena | Нашей стороной командует сеть в помощнике ([смотреть бой сети](watch.md)) |
+| `--own-ai net` | nn-arena, lord-duel | Нашей стороной командует сеть в помощнике ([смотреть бой сети](watch.md)); у `lord-duel` — по умолчанию |
+| `--own-ai scripted` | lord-duel | Наш лорд под одним приказом атаки, как чужой (контроль дуэли) |
+| `--duel emp\|skv` | lord-duel | Оба лорда — генералы Империи или военачальники скавенов ([дуэль лордов](../apps/entries.md#lord_duel)); предел боя по умолчанию 900 с |
+| `--faction emp\|skv\|vmp`, `--treatment kill\|rout\|none` | lord-fall | Чья армия (её бесстрашный противник: скавены для Империи, иначе Империя) и что с её лордом: убит, обращён в бегство или ничего (контроль) ([гибель лорда](../apps/entries.md#lord_fall)). Замер каждые 0,5 с |
 | `--own-role attack\|defend` | nn-arena `net` | Сеть атакует (ИИ игры обороняется и побеждает, когда время вышло) или обороняется (по умолчанию: ИИ игры атакует) |
 | `--army-seed N` | nn-arena | Бой из [генератора армий](../training/armies.md): `generate.battle(N)`, у стороны лорд и 0–19 отрядов. Без `--own-ai` нашей стороной командует сеть. Файл боя — `build/nn-arena/random_<N>.xml`, `scenarios/` не трогается. В манифест — `army` (зерно, train/eval, бюджет, шаблоны, бойцы) |
 | `--soldiers-every N` | human | Место каждого бойца каждые N тиков (5; 0 — никогда) |
