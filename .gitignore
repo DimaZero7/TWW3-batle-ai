@@ -30,3 +30,6 @@ research/analysis/**
 !research/analysis/**/*.png
 !research/analysis/**/*.svg
 !research/analysis/**/*.md
+
+# personal working rules of the orchestrator with the user (auto-loaded by Claude Code)
+CLAUDE.local.md
