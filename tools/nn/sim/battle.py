@@ -261,14 +261,15 @@ def step(st, orders, params=None, dt=None):
     melee_scaled = hp_melee * scale[:, None, :]
     u["dealt"] = u["dealt"] * fade + melee_scaled.sum(2)
     u["taken"] = u["taken"] * fade + melee_scaled.sum(1)
+    # the same balance of missile HP between enemies (the morale's winning / losing the fight counts both)
+    shot_scaled = hp_missile * scale[:, None, :] * pw["enemy"]
+    u["shot_dealt"] = u["shot_dealt"] * fade + shot_scaled.sum(2)
+    u["shot_taken"] = u["shot_taken"] * fade + shot_scaled.sum(1)
     shot_at = (hp_missile * pw["enemy"]).sum(1) > 0      # friendly fire does not count (ume_concerned_under_friendly_fire 0)
     u["under_fire_s"] = torch.where(shot_at, torch.zeros_like(u["under_fire_s"]), u["under_fire_s"] + dt)
     attackers = strike & standing[:, :, None]
+    # the worst side it is struck from this step (morale: attacked in the flank / rear while it lasts)
     u["flank_hit"] = torch.where(attackers, sector, torch.zeros_like(sector)).amax(1).float()
-    # First struck from a worse side (flank, rear) this step: the database's was_attacked_in_flank / _rear.
-    worse = u["flank_hit"] > old["flank_hit"]
-    flank_event = torch.where(worse & (u["flank_hit"] >= 2), params.morale["was_attacked_in_rear"],
-                              torch.where(worse & (u["flank_hit"] >= 1), params.morale["was_attacked_in_flank"], 0.0))
 
     alive = present & (u["men"] > 0) & ~u["gone"]
     standing = alive & ~u["r"]
@@ -326,13 +327,62 @@ def step(st, orders, params=None, dt=None):
     aura = torch.where(giver, reach_share, torch.zeros_like(d)).amax(2)
     worth = u["cost"] * u["hp"]
     collapse = morale.army_collapse(u, params)
+    mcal = cal["morale"]
+    # Flanks secure (morale.secure, the morale probe): no standing enemy within enemy_m (centre to centre), or friends
+    # (not lords) within side_m at both sides (side_deg off the unit's facing, left and right); never while a flank is
+    # threatened (lf / rf / bf).
+    sc = mcal["secure"]
+    enemy_d = torch.where(foes & standing[:, None, :], d, torch.full_like(d, 1e9)).amin(2)
+    rel = pw["rel_i"] / geometry.DEG
+    side_lo, side_hi = float(sc["side_deg"][0]), float(sc["side_deg"][1])
+    beside = friends & standing[:, None, :] & (u["men0"][:, None, :] > 1) & (d <= float(sc["side_m"]))
+    covered = ((beside & (rel <= -side_lo) & (rel >= -side_hi)).any(2)
+               & (beside & (rel >= side_lo) & (rel <= side_hi)).any(2))
+    secure = ~(u["lf"] | u["rf"] | u["bf"]) & ((enemy_d >= float(sc["enemy_m"])) | covered)
+    # In a fight (the morale's winning / losing): in melee, shooting, or shot at by an enemy shooting at it now.
+    slot = torch.arange(N, device=st.device)
+    aimed = (firing & (m_target >= 0))[:, :, None] & (m_target.clamp(min=0)[:, :, None] == slot[None, None, :])
+    shot_now = (aimed & pw["enemy"]).any(1)
+    # the share of health lost by the enemies it fights (in contact, or the target it shoots): winning shows only
+    # once one of them has lost morale.combat_lost
+    fought = (touch | aimed | aimed.transpose(1, 2)) & pw["enemy"] & alive[:, None, :]
+    lost_j = (1 - u["hp_abs"] / u["hp0"].clamp(min=1e-6))[:, None, :]
+    foe_lost = torch.where(fought, lost_j, torch.zeros_like(lost_j)).amax(2)
+    # The charge's morale (+15, morale.charge): a block of block_s from the charge pose (an attack order, its target's
+    # edge within the unit's charge_pose distance - the database's charge_distance_adopt_charge_pose, inside the
+    # sprint's charge_dist - not yet in melee), a next one when it ends while the unit still charges or its charge
+    # has landed, at most `blocks` a charge; none while routing.
+    ti = tgt.clamp(min=0)
+    shooter = (u["range"] > 0) & (u["a"] > 0)
+    t_reach = pw["gap"].gather(2, ti[:, :, None]).squeeze(2)
+    # a shooter under an attack order walks until its target's centre is within range and stops there (the scripted
+    # range: archers stopped ~131 m centre to centre, range 130; missile.range_why); range_centre false: the old
+    # edge-to-edge 0.95 x range
+    if cal["missile"].get("range_centre"):
+        in_range = pw["dist"].gather(2, ti[:, :, None]).squeeze(2) <= u["range"]
+    else:
+        in_range = t_reach <= 0.95 * u["range"]
+    close_in = (kind == O.ATTACK) & ~(shooter & in_range)
+    mc = mcal["charge"]
+    charging = standing & close_in & ~engaged & (t_reach <= u["charge_pose"])
+    landed = standing & engaged & (kind == O.ATTACK) & (charge_now > 0)
+    left_s = (u["chm_s"] - dt).clamp(min=0)
+    first_block = charging & (u["chm_n"] <= 0)
+    next_block = ((u["chm_s"] > 0) & (left_s <= 0) & (charging | landed) & (u["chm_n"] >= 1)
+                  & (u["chm_n"] < float(mc["blocks"])))
+    new_block = first_block | next_block
+    u["chm_s"] = torch.where(new_block, torch.full_like(left_s, float(mc["block_s"])), left_s)
+    u["chm_n"] = torch.where(new_block, u["chm_n"] + 1, u["chm_n"])
+    u["chm_n"] = torch.where(~charging & ~engaged & (u["chm_s"] <= 0), torch.zeros_like(u["chm_n"]), u["chm_n"])
+    u["chm_s"] = torch.where(standing, u["chm_s"], torch.zeros_like(u["chm_s"]))
     ctx = {
         "aura": aura * standing.float(),
-        "flank_event": flank_event,
         "collapse": collapse,
         "lord_dead_points": lord_pts,
-        "neighbour": (friends & standing[:, None, :] & (d <= M["neighbour_effect_range"])).any(2),
+        "secure": secure,
         "in_melee": engaged,
+        "in_combat": engaged | firing | shot_now,
+        "foe_lost": foe_lost,
         # A routing expendable unit scares nobody (morale.expendable_scares_expendable: only other expendable units;
         # the database's attribute text, measured: config/nn/sim.json morale.expendable_why).
         "routing_friends": (friends & u["r"][:, None, :] & ~(u["expendable"][:, None, :] & ~(
@@ -341,9 +391,11 @@ def step(st, orders, params=None, dt=None):
         "routing_enemies": (foes & u["r"][:, None, :] & (d <= M["routing_unit_effect_distance_front"])).float().sum(2),
         # The game's "under missile attack" holds morale.under_fire_s after the last projectile hit (measured).
         "under_fire": u["under_fire_s"] < float(cal["morale"].get("under_fire_s", 2.0)),
+        # A standing enemy within enemy_effect_range (70 m) worth morale.strong_ratio times the unit or more (cost x
+        # health): the game's 'enemies superior in strength and speed' (the morale probe; speed is not needed).
         "strong_enemy": (foes & standing[:, None, :] & (d <= M["enemy_effect_range"])
-                         & (worth[:, None, :] > worth[:, :, None])).any(2),
-        "enemy_near": (foes & standing[:, None, :] & (d <= cal["morale"]["rally_free_m"])).any(2),
+                         & (worth[:, None, :] >= float(mcal["strong_ratio"]) * worth[:, :, None])).any(2),
+        "enemy_near": (foes & standing[:, None, :] & (d <= mcal["rally_free_m"])).any(2),
     }
     morale.step(u, ctx, params, dt)
     standing = alive & ~u["r"]
@@ -370,19 +422,9 @@ def step(st, orders, params=None, dt=None):
     gx, gz = u["x"].clone(), u["z"].clone()
     gx = torch.where(point, u["ox"], gx)
     gz = torch.where(point, u["oz"], gz)
-    ti = tgt.clamp(min=0)
     tx, tz = u["x"].gather(1, ti), u["z"].gather(1, ti)
     attack = kind == O.ATTACK
-    shooter = (u["range"] > 0) & (u["a"] > 0)
-    t_reach = pw["gap"].gather(2, ti[:, :, None]).squeeze(2)
-    # a shooter under an attack order walks until its target's centre is within range and stops there (the scripted
-    # range: archers stopped ~131 m centre to centre, range 130; missile.range_why); range_centre false: the old
-    # edge-to-edge 0.95 x range
-    if cal["missile"].get("range_centre"):
-        in_range = pw["dist"].gather(2, ti[:, :, None]).squeeze(2) <= u["range"]
-    else:
-        in_range = t_reach <= 0.95 * u["range"]
-    close_in = attack & ~(shooter & in_range)
+    # (t_reach, in_range, close_in: the target's reach above, at the charge's morale)
     gx = torch.where(close_in, tx, gx)
     gz = torch.where(close_in, tz, gz)
     want = torch.where(run, u["run"], u["walk"])

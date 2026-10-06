@@ -75,6 +75,8 @@ STATIC = {
     "charge_speed": ("f", "charge speed, m/s"),
     "charge_dist": ("f", "charge distance, m: under an attack order the unit closes the last this many metres to its "
                          "target at its charge speed (the database's battle_entities: 30 infantry, 35 lords)"),
+    "charge_pose": ("f", "charge pose distance, m: under an attack order the unit takes its charge pose this far from "
+                         "its target (the database's battle_entities: 25 infantry, 30 lords; the charge's morale)"),
     "accel": ("f", "acceleration, m/s2"),
     "decel": ("f", "deceleration, m/s2"),
     "attack": ("f", "melee attack"),
@@ -168,6 +170,10 @@ INTERNAL = {
                         "share, out whole), kept by the reward's caller, not the simulator: a rally gives nothing back"),
     "dealt": ("f", "HP dealt in melee recently (decaying)"),
     "taken": ("f", "HP taken in melee recently (decaying)"),
+    "shot_dealt": ("f", "HP dealt by its missiles to enemies recently (decaying like dealt: the morale's fight balance)"),
+    "shot_taken": ("f", "HP taken from enemy missiles recently (decaying like taken: the morale's fight balance)"),
+    "chm_s": ("f", "seconds left of the charge's morale block (+15; morale.charge, battle.py)"),
+    "chm_n": ("f", "the charge's morale blocks so far in this charge (0 when not charging)"),
     "gone": ("b", "left the map (routed off it)"),
     "dead_s": ("f", "seconds since the unit was killed (health 0; a lord whose faction's routed lord crumbles: "
                     "since rout_death_s into his rout); 0 while not (battle.py, the lord-fall morale)"),

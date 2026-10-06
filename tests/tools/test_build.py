@@ -45,7 +45,7 @@ class TestTargets:
     def test_the_kept_targets(self):
         assert sorted(build.TARGETS) == ["ai-vs-ai", "archer-range", "charge-probe", "enemy-layout", "human", "lord-ai", "lord-duel", "lord-fall",
                                          "lord-swarm",
-                                         "manual", "map-capture", "missile-probe",
+                                         "manual", "map-capture", "missile-probe", "morale-probe",
                                          "move-probe", "nn-arena", "roster-capture", "unit-readout"]
 
     @pytest.mark.parametrize("target", sorted(build.TARGETS))

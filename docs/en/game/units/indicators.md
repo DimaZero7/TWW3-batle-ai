@@ -96,7 +96,7 @@ fire (section 4).
 | B12 | Shooting: hits | K32, K22, K23 | a physical projectile: a dense and big target catches more, a loose and thinned one less | FITTED (the spread model, k 1.1); a target running at the shooter ×1.2-1.3 in the game, pistols, a thinned target: open | `build/accuracy`, `build/missile` | done ([probe](missile-probe.md), recordings) | high |
 | B13 | Shooting: pace and range | K28, K30, K31, K36 | volleys once a cycle, range from the centre, each man's arc, 3 s after a target change, into melee once out of ammunition | MODELLED: range, arc, volleys, keeping the target; FITTED: the cycle (K31), aiming, 3 s after a target change (recordings); out of ammunition MISSING (R14); skipping volleys as the target thins: open | `build/missile` | done ([probe](missile-probe.md)); T13 not | medium |
 | B14 | Friendly fire and spill | K33 | a projectile hits whoever it hits | FITTED: shares for friends and neighbours (R11–R13) | `build/accuracy` | done (recordings) | medium |
-| B15 | Morale | K14, K27, K1, K2 | leadership + modifiers: casualties (4 s and 60 s), under fire 15 s, winning/losing the melee, a charge +15, flank/rear, exposed flanks, friends routing nearby, a strong enemy, army collapse −120, rally (L1–L53) | MODELLED: the base, casualties, under fire, exposed flanks, friends routing nearby, collapse (thresholds), rout, shatter; FITTED: winning/losing (thresholds), a strong enemy −3, army strength, rally; DIFFERS: winning/losing only in melee (L4), flank/rear 0.5 s instead of ~5 s (L16); MISSING: a charge's +15 (L9) | `build/morale_spec`, `build/charge` (`charge_morale.txt`: +2.5–3.2 points at contact on a running charge) | done (27.09 probes, `lord-fall`, morale labels in 217 recordings) | high |
+| B15 | Morale | K14, K27, K1, K2 | leadership + modifiers: casualties (4 s and 60 s), under fire 15 s, winning/losing the fight (melee and shooting, from 10 % lost), a charge +15 (6 + 6 s blocks from the charge pose), flank/rear (while struck), flanks secure (enemy beyond 146 m or friends at both sides), exposed flanks, friends routing nearby, a strong enemy (worth 3×), army collapse −120, rout and rally (L1–L53) | MODELLED: the base, casualties, under fire, the charge, flank/rear, secure and exposed flanks, friends routing nearby, collapse (thresholds), rout, rally, shatter; FITTED: winning/losing thresholds 1.5 / 2.5 / 4, army strength; MEASURED (the morale probe): secure 146 / 40 m, charge 6 s × 2, the fight's 10 % threshold, rally 95 m / 18 s, strong enemy 3×; DIFFERS: the strong enemy's scale to −24 (the General next to slaves −9) | `build/morale_spec`, `build/morale` (the morale probe: 7 battles, simulator twins) | done (27.09 probes, `lord-fall`, morale labels in 217 recordings, the morale probe 06.10) | high |
 | B16 | Fatigue | K18, K31 (level multipliers on attack, defence, armour, charge, speed, reload) | a 0.1 s tick, thresholds and penalties from `unit_fatigue_effects`; melee +19 a tick | the tick, thresholds, penalties MODELLED (F1–F3); melee 13.7 / a lord 15, shooting, rest FITTED (F4, F5, F7, F8); a charge +34 only 2 s after the charge blow MODELLED (F6, 06.10.2026); reload DIFFERS (F12) | — | done (a lord goes "tired" after 60–62 s); T13 planned | medium |
 | B17 | Turning and formation movement | K17, K18, K25 | a model's turn rate from the database, re-forming 7–17 s per 90°, not instant on the move | FITTED (V2, V3); on the move DIFFERS (V4); own-unit stacking DIFFERS (V10); routers' path DIFFERS (V13) | — | done (formation), T9, T14, T16 planned | medium |
 
@@ -123,7 +123,7 @@ Experience (ranks) has no effect: everyone is rank 0, a level-1 lord with no ski
 | E14 | Hold the Line! (passive) | Gen: himself and friends within 35 m | defence +5, leadership +4 | MODELLED (A9); the weight — through B1 | `build/hitchance` | done (the General hits 41 % with +5) | medium |
 | E15 | Foe-Seeker | Gen: 25 s, recharge 60 s | speed and charge speed ×1.25; vigour +1 % a second (`special_ability_phases`, field −0.01) | MISSING: vigour (A2); speed and charge speed MODELLED (K19, melee core 2) | — | planned T4 (`FatigueState`) | high (the General) |
 | E16 | Stand Your Ground | Gen: himself and friends within 35 m, 18 s, recharge 90 s | defence +24, leadership +16 | FITTED: the +24 defence weight through B1 (−2.4 points of hit chance instead of −24); the numbers MODELLED (A8) | `build/hitchance` | planned T1 (on / off) | high |
-| E17 | Rally | War: himself and friends within 35 m, 14 s, recharge 60 s | leadership +16; by its description it helps routers rally | DIFFERS: for routers (A4); the numbers MODELLED (A10) | `build/morale_spec` | planned T3 / T16 | medium |
+| E17 | Rally | War: himself and friends within 35 m, 14 s, recharge 60 s | leadership +16; by its description it helps routers rally | MODELLED: the +16 enters a router's morale target (a router's morale follows its target, the morale probe 06.10); whether the order itself rallies faster is not checked (A4) | `build/morale_spec` | planned T3 / T16 | medium |
 | E18 | Verminous Valour | War: 17 s, recharge 60 s | speed ×1.25, leadership +8 | MODELLED (A12) | — | none | low |
 | E19 | Deadly Onslaught | War: 31 s, recharge 90 s | charge ×1.6, damage ×1.25 | MODELLED (A13); the game's AI never fires it | `build/charge` | none | low |
 | E20 | How effects stack | everyone | additions to the base, multipliers multiply; one ability from two sources does not stack | MODELLED (A28, A29); two identical ones — DIFFERS, but our battles have only one lord each (A27) | — | none | none |
@@ -162,12 +162,12 @@ and ranks, the lord's skills and items.
 
 1. **Target density for arrows** (B12, MISSING) — every target; preliminary `build/accuracy` data: hits
    on loose slingers 0.41 against 0.62 on spearmen.
-2. **A charge's +15 morale** (B15 / L9, MISSING) — every unit that attacks with a run-up.
-3. **Winning/losing the melee from shooting** (L4, DIFFERS) — Arc, Sln, Mil, NR and their targets.
+2. ~~A charge's +15 morale~~ (B15 / L9) — done (the morale batch 06.10: 6 + 6 s blocks from the charge pose).
+3. ~~Winning/losing the melee from shooting~~ (L4) — done (the morale batch: shooting / shot at, from 10 % lost).
 4. **Foe-Seeker: vigour** (E15, MISSING) — Gen.
 5. ~~Charge speed~~ (K19) — done (melee core 2); Foe-Seeker's ×1.25 to charge speed now acts.
-6. **"Attacked from the flank / rear" ~5 s instead of 0.5 s** (L16, DIFFERS) — every unit.
-7. **Rally for routers** (E17, DIFFERS) — War.
+6. ~~"Attacked from the flank / rear" ~5 s instead of 0.5 s~~ (L16) — done (the morale batch: while struck).
+7. **Rally for routers** (E17) — the +16 now enters a router's target; check in the game whether the order rallies faster — War.
 8. **Range from the shooter's middle** (K30, DIFFERS) and **into melee once out of ammunition** (B13 /
    R14, MISSING) — the 4 shooters.
 9. **Knockback by a lord's mass** (LD12, MISSING) and **a lord's resistance to interrupts** (LD13,

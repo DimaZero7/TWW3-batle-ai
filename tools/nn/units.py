@@ -74,6 +74,9 @@ FIELDS = {
     "speed.charge_distance": ("battle_entities.charge_distance_commence_run (inferred), m: an attacking unit closes "
                               "the last this many metres to its target at its charge speed (30 infantry, 35 lords; "
                               "the melee probe: the last 30 m at 3.65-3.88 m/s, run 3.0)", None),
+    "speed.charge_pose_distance": ("battle_entities.charge_distance_adopt_charge_pose (inferred), m: an attacking unit "
+                                   "takes its charge pose this far from its target (25 infantry, 30 lords; the morale "
+                                   "probe: the charge's +15 morale starts at a gap of 24.6-27.5 m)", None),
     "speed.acceleration": ("battle_entities.acceleration (inferred)", None),
     "speed.deceleration": ("battle_entities.deceleration (inferred)", None),
     "melee.attack": ("land_units.melee_attack", "card stat_melee_attack"),
@@ -173,6 +176,7 @@ def passport(key, t):
         "height_m": entity["height"], "radius_m": entity["radius"],
         "speed": {"walk": entity["walk_speed"], "run": entity["run_speed"], "charge": entity["charge_speed"],
                   "charge_distance": entity["charge_distance_commence_run"],
+                  "charge_pose_distance": entity["charge_distance_adopt_charge_pose"],
                   "acceleration": entity["acceleration"], "deceleration": entity["deceleration"]},
         "melee": {"attack": land["melee_attack"], "defence": land["melee_defence"],
                   "charge_bonus": land["charge_bonus"], "weapon": weapon["key"], "damage": weapon["damage"],

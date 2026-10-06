@@ -1034,3 +1034,54 @@ class TestMissileProbe:
         assert (round(L.sx), round(L.sz), L.sb, round(L.tx), round(L.tz), round(L.tb)) == (10, 0, 0, 110, 0, 90)
         fx, fz = lua.eval("require('entries.missile_probe').frame")(0, 0, 90, 10, 5)
         assert (round(fx, 6), round(fz, 6)) == (10, -5)
+
+
+class TestMoraleProbe:
+    """The morale probe (entries.morale_probe; lanes from tools/nn/morale_probe.py)."""
+    SETUP = """
+        own = {fake.unit('own_lord', 'lord', -60, 0), fake.unit('own_spear_1', 'spear', 0, 0)}
+        enemy = {fake.unit('enemy_lord', 'lord', 60, 0), fake.unit('enemy_slave_1', 'slave', 0, 0)}
+        bm = fake.manager({own, enemy})
+        CONFIG = {build = 'test', speed = 20, tick_ms = 500, deadline_s = 400, settle_ms = 4000,
+            fearless = {'own_spear_1'},
+            lanes = {{name = 'L1', x = 0, z = 0, max_s = 120,
+                      units = {{role = 'U', name = 'enemy_slave_1', x = 0, z = -9, b = 0, width = 30},
+                               {role = 'E', name = 'own_spear_1', x = 0, z = 45, b = 180, width = 30}},
+                      steps = {{on = 'go', ['do'] = 'attack', unit = 'E', target = 'U', delay_s = 0},
+                               {on = 'rout', of = 'U', ['do'] = 'halt', unit = 'E', delay_s = 0},
+                               {on = 'step', of = 2, ['do'] = 'shadow', unit = 'E', target = 'U', d = 50, delay_s = 1},
+                               {on = 'rally', of = 'U', ['do'] = 'end', delay_s = 5}}}},
+            park = {{name = 'own_lord', x = -900, z = 600, bearing = 0}, {name = 'enemy_lord', x = 900, z = 600,
+                     bearing = 0}}}
+        GLOBALS = {common = fake.common, battle_vector = fake.vector_type}
+    """
+
+    def test_steps_fire_by_their_triggers(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            STATE = require('entries.morale_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            assert(own[2].fearless == true and enemy[2].fearless ~= true, 'only the listed units are fearless')
+            assert(own[2].attack_args.target == 'enemy_slave_1' and own[2].attack_args.run == true)
+            enemy[2].melee, own[2].melee = true, true
+            for _ = 1, 4 do bm:tick(500); bm:pump() end
+            enemy[2].routing = true
+            enemy[2].pos = fake.vector_type.new()
+            enemy[2].pos.z = -200
+            for _ = 1, 6 do bm:tick(500); bm:pump() end
+            enemy[2].routing = false
+            for _ = 1, 30 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        kinds = [(r["kind"], r["role"]) for r in rows if r["event"] == "probe_event"]
+        assert ("contact", "U") in kinds and ("rout", "U") in kinds and ("rally", "U") in kinds
+        assert [r["i"] for r in rows if r["event"] == "probe_step"] == [1, 2, 3, 4]
+        sample = next(r for r in rows if r["event"] == "probe_sample")
+        assert set(sample["lanes"][0]["u"]) == {"U", "E"}
+        assert {r["lane"]: r["why"] for r in rows if r["event"] == "probe_lane_end"} == {"L1": "step"}
+
+    def test_shadow_point(self, lua):
+        x, z = lua.eval("require('entries.morale_probe').shadow_point")(0, 100, 0, 0, 50)
+        assert (x, z) == (0, 50)

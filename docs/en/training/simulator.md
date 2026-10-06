@@ -129,9 +129,9 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 | Fire whilst moving | a unit with `mounted_fire_move` (the militia) aims and shoots while it moves, at targets within `missile.move_fire_arc_deg` 90° of the way it walks | DB attribute; the arc measured (our militia on the move: 0.52 of its full rate toward the enemy, 0.31 across, 0.16 away) |
 | Pistols | hits: the same spread model; reload 10.8 s, first shot 3.8 s | the probe: volley intervals 10.5–11.5 s; hits 0.87 / 0.63 / 0.53 / 0.47 at 41 / 60 / 82 / 97 m, the model 0.68 / 0.67 / 0.65 - open; they fired at 97.5 m with range 90 too |
 | Morale | points: leadership + effects; MoralePercent = points / leadership; moves 1 point or 15 % of the gap per 0.5 s | DB; the step measured (+2 points a second in every recording) |
-| Morale effects | lord +4 within 70 m, fading to 0 at 105 m (to his units, not himself: `morale.lord_own_aura`); lord killed (health 0): the others −16 for 45 s, then −10 to the end; routed off the map: −16 for 120 s; shattered or routing on the field: his aura only (`lord_fall`); neighbour within 120 m +5; casualties −2…−74; recent casualties −6…−80 (lost in the last 4 s, of the whole health); extended casualties −4…−60 (the last 60 s); winning / losing the melee +3/+6/+8, −3/−8 (damage ratio 1.5 / 2.5 / 4; a single entity in melee always −3, `morale.single_combat`); first struck in the flank −6, rear −14 for one 0.5 s tick; the army beaten as a whole (enemy strength ≥ 2.6× own, own ≤ 0.22 of the start) −120; flanks exposed (an enemy threatens the left, right or rear: `lf`, `rf`, `bf`) −3, two or more −6; routing friends −3 each (a routing expendable unit scares only expendable units); routing enemies +2.5 each; under fire −5 (15 s more after the last hit); very tired −2, exhausted −6; a stronger enemy within 70 m −3 (out of melee the recordings show 0, kept: [below](#expendable-units-resistance-a-stronger-enemy)) | DB points; the 4 and 60 s windows — DB, the 15 s under fire — probes ([below](#casualty-windows-and-under-fire)); ratios calibrated; attacked in the flank / rear measured ([flanks](#flanks-rear-and-charges-in-whole-battles)); a lord's fall measured: routs in 75 recorded falls, death in 15 in-game battles ([lords](#lords)) |
+| Morale effects | lord +4 within 70 m, fading to 0 at 105 m (to his units, not himself: `morale.lord_own_aura`); lord killed (health 0): the others −16 for 45 s, then −10 to the end; routed off the map: −16 for 120 s; shattered or routing on the field: his aura only (`lord_fall`); flanks secure +5: no standing enemy within 146 m (centre to centre) or friendly units (not lords) within 40 m at both sides, and no flank threatened (`morale.secure`); casualties −2…−74; recent casualties −6…−80 (lost in the last 4 s, of the whole health); extended casualties −4…−60 (the last 60 s); winning / losing the fight +3/+6/+8, −3/−8 by the damage ratio in melee and by missiles (1.5 / 2.5 / 4) while the unit is in melee, shooting or shot at by an enemy; losing only once the unit has lost 10 % of its health, winning only once the enemy it fights has (`morale.combat_lost`); a single entity in melee always −3 (`morale.single_combat`); attacked in the flank −6, in the rear −14 while struck from that side; the charge +15 in 6 s blocks from the charge pose (an attack order, the target within `charge_pose` — 25 m, lords 30 m, the database), a second block right after the first if the unit still runs at its target or its charge has landed (`morale.charge`); the army beaten as a whole (enemy strength ≥ 2.6× own, own ≤ 0.22 of the start) −120; flanks exposed (an enemy threatens the left, right or rear: `lf`, `rf`, `bf`) −3, two or more −6; routing friends −3 each (a routing expendable unit scares only expendable units); routing enemies +2.5 each; under fire −5 (15 s more after the last hit); very tired −2, exhausted −6; an enemy worth 3 times as much or more (cost × health) within 70 m −3 (`morale.strong_ratio`); a router has no flanks secure, fight balance, flank / rear, flanks exposed or charge | DB points; the 4 and 60 s windows — DB, the 15 s under fire — probes ([below](#casualty-windows-and-under-fire)); when the flank / rear, flanks secure, the charge, winning by shooting and the 10 % threshold hold — the in-game morale probe ([below](#morale-by-the-games-rules-the-morale-probe)); the fight ratio thresholds calibrated; a lord's fall measured ([lords](#lords)) |
 | States | wavering below 16 points, rout at 0, shattered at the third rout or below −50 points during army destruction; no ordinary rout within 10 s of a rally | DB; shattering below −50 during army losses measured |
-| Rally | while the army is not collapsing and no standing enemy is within 90 m the router regains 2 points a second; rallies at MoralePercent 0.23 (`morale.rally_rule` "fixed"; the rule "rally near the morale target" is measured and left off: [what is missing](#what-is-missing)) | measured: 0.23 and 90 m (365 rallies); 2 points calibrated (median rally 44 s) |
+| Rally | a router's morale follows its target like any other's; it rallies once its morale is above 0, it has routed at least 18 s (`morale.rally_after_s`), no standing enemy is within 95 m (`morale.rally_free_m`, centre to centre) and the army is not collapsing | the in-game morale probe: rallies as soon as the enemy is beyond 94–96 m, and not before 18.5 s into the rout; the recordings: rout age at a rally 10 % 20 s, the enemy at a rally 10 % 94 m ([below](#morale-by-the-games-rules-the-morale-probe)) |
 | Fatigue | The calibration is ON (`fatigue.calibration.on=true`): 10 ticks/s, DB thresholds; melee tires only under an attack order (single entity 15 a tick, his charge +34 only in the first 2 s of a contact; formation 13.7), a move by its order's run flag (run +4, walk −1), routing +4, shooting 7.5, idle −18 with no standing enemy within 80 m, else ready −7 | Fitted on the units' activities in 204 recordings; exhausted shares as in the game ([below](#fatigue-calibration)) |
 | Lord abilities | the side the game's AI plays (`ai`, side 2 by default) fires its lord's active abilities by a rule; the network's side fires them by order (`Orders.ability`; a side the network plays should have `ai` false); passives are innate effects (below). Every number is the ability's passport (`config/nn/abilities.json`, the database; `sim.json` abilities says which are modelled and the AI's triggers); effects on the owner (phase targets self), his side's units within range (friends) and enemies within range (enemies): speed, charge speed, melee attack and defence, damage, AP, charge bonus, morale. Warlord: Deadly Onslaught (31 s, ready 90 s after: melee damage and AP ×1.25, charge bonus ×1.6) — never by the AI; Verminous Valour (17 s / 60 s: speed ×1.25, +8 morale points; its 25 m blast has no damage) in melee; Rally (14 s / 60 s: +16 to friends within 35 m) in melee with at least two friendly units within 35 m. General: Stand Your Ground (18 s / 90 s: melee defence +24, +16 within 35 m) in melee with a friendly unit within 35 m (`abilities.friends_min`; never in a lone duel); Foe Seeker (25 s / 60 s: speed and charge speed ×1.25) in melee. Each again as soon as it is ready, while its rule holds. At the start an ability is on cooldown for its passport's `initial_s` (the database's `initial_recharge`: 0 for the lords' actives, 3 s Strength of the Penitent) | DB (`config/nn/sim.json` abilities; owned per the game's roster readout); when the AI fires them: measured, 139 gate battles (926 uses by the AI's lords) and the lord duels ([below](#lords)) |
 | Innate effects | every attribute and passive or game-fired ability of a unit (`config/nn/effects.json`), one mechanism: on while its conditions hold, its stats on the owner (an aura also on friends in range), its rules for the step. Unbreakable (Flagellants: morale never below leadership, never wavers or routs), Expendable (its rout scares only expendable units), Encourage (the lord's aura), Charge Reflection (bracing), Fire Whilst Moving; Strength in Numbers (Skaven infantry: +6 leadership, +8 melee defence, speed ×0.9 while health ≥ 50 %), Scurry Away! (speed ×1.1 while wavering or routing), Hold the Line! (+5 melee defence, +4 leadership within 35 m of a standing General), Frenzy (+10 melee attack, ×1.1 damage, AP and charge while morale ≥ half of leadership), Strength of the Penitent (fired by the game when losing the melee: 20 s of +14 melee defence, +15 % physical resistance, ends out of melee, ready 3 s after). Schema only (the network sees them): Charge Defence vs. Large, Vanguard Deployment, Hide (forest), Immune to Psychology; left out by `sim.json` effects.off: Single Entity (lords: speed ×0.9, damage ×0.8 below 25 % health; no such speed drop in the recordings) | DB: the passports, `special_ability_to_auto_deactivate_flags`, `special_ability_to_recharge_contexts`; the attributes' rules: the knowledge base; measured: rout and running speeds, the morale drop at 50 % health ([below](#innate-effects)) |
@@ -610,9 +610,54 @@ together do the rules hold the shooting: the archers' target wavers 46 s after t
 - **Physical resistance against missiles** (`missile.physical_resist`): a projectile's damage is cut by
   missile and physical resistance together, at most 90 % (CA: physical resistance works against all
   non-magical damage). Today: the Night Runners (20 %) and Strength of the Penitent (+15 %).
-- **"A stronger enemy within 70 m"** stays at the database's −3 (`morale.strong_enemy_points`). The
-  recordings out of melee show 0 (3,244 cases, median 0 whatever the strength ratio), but with 0 the
-  spearmen–clanrats pair breaks (see ["Tried and rejected"](#tried-and-rejected)).
+- **"A stronger enemy within 70 m"**: the database's −3 (`enemy_morale_penalty_value_min`) when a standing
+  enemy within 70 m is worth `morale.strong_ratio` 3 times the unit or more (cost × health); speed is not
+  needed. The morale probe: archers next to the Warlord (1.5×) and Night Runners (1.3×), spearmen next to
+  clanrats (1.2×) — 0; skavenslaves next to swordsmen (3×) −3 / −4, next to the General (4.8×, slower than
+  them) −7 at 65 m and −9 at 45 / 30 m. The scale to −24 by "combat power" 4…32 and the reach beyond 70 m
+  (the General's from ~120 m) are not modelled: no formula (searched 06.10.2026).
+
+### Morale by the game's rules (the morale probe)
+
+The morale batch of 06.10.2026 (`morale.py` `terms`, `battle.py`; numbers and the why — `sim.json` morale): every morale
+term holds when it holds in the game, by the morale probe (7 battles at Normal, `tools/nn/morale_probe.py`,
+[morale](../game/units/morale.md#the-morale-probe-in-the-game)); every lane has a simulator twin with the same places
+and orders (`python -m tools.nn.morale_probe report --sim`). Removed fits: `attacked_event`, `attacked_flank`,
+`attacked_rear`, `rally_rule`, `rally_mp`, `rally_rate`, `rally_gap_mp`, `rally_target_min_mp`, `rout_floor_mp`,
+`strong_enemy_points` (["Tried and rejected"](#tried-and-rejected)). New measurements: `secure` 146 / 40 m, `charge`
+6 s × 2, `combat_lost` 0.1, `rally_free_m` 95, `rally_after_s` 18, `strong_ratio` 3; from the database `charge_pose`
+(`charge_distance_adopt_charge_pose`, the unit passport).
+
+| Probe (points = MoralePercent × leadership) | Game | Simulator before | After |
+|---|---|---|---|
+| Spearmen in melee before the flank attack (5–18 s) / the same with two friends at the sides | 58–60 / 65 | 54 / 59 | 60 / 65 |
+| A rear attack: points 8 s in / before it leaves / 20 s after | 28 / 28–33 / 47 | 43 / 41 / 44 | 29 / 27 / 44 |
+| A flank attack: 8 s in / before it leaves | 36 / 36 | 43 / 43 | 37 / 37 |
+| The charge: start before contact, length | −4.5…−6.5 s, 12 s | none | −5.5…−7.5 s, 12 s |
+| Archers shooting without an answer, 15–30 s / 30–40 s / 40–50 s | 56–58 / 53 / 50 | 50 / 50 / 50 | 58 / 52 / 50 |
+| Spearmen under slings, 15–30 s / 30–40 s | 48 / 45 | 49 / 44 | 43 / 42 |
+| Flanks secure: enemy at 150 m / 130 m; one friend at the side at 130 m | 65 / 60; 60 | 60 / 60; 65 | 65* / 60; 60 |
+| A router 10 s into the rout; the rally … s after the rout | +5…+9; 18.5–24.5 | −12; 23–35 | −5; 27–28 |
+| A strong enemy: the General next to slaves (4.8×) / swordsmen (3×) / the Warlord next to archers (1.5×) | −9 / −3…−4 / 0 | −3 / −3 / −3 | −3 / −3 / 0 |
+
+\* in the twin the enemy stops at 144 m (in the game at 150 m): no +5 there any more; the rule is 146 m.
+
+The check (the same recordings): mechanics 29 → 24 of 54, the game-AI battles 18 → 16 of 26, the network's battles
+132 → 132 of 165; routs / rallies a battle 19.6 / 11.9 → 16.8 / 9.4 (game 22.5 / 13.0), rally (median) 40 → 35 s
+(game 44); health lost 60 / 120 / 180 s after contact: Empire 0.253 / 0.419 / 0.528 (game 0.246 / 0.413 / 0.528; was
+0.259 / 0.424 / 0.543), Skaven 0.197 / 0.339 / 0.435 (game 0.212 / 0.342 / 0.421; was 0.202 / 0.353 / 0.453). The
+gates' replay (4 gates × 6 copies, the AI's units): routed again 10 / 20 / 30 / 45 s after a rally 0.11 / 0.18 /
+0.28 / 0.40 (game 0.07 / 0.13 / 0.16 / 0.23; was 0.37 / 0.41 / 0.44 / 0.49), rallies / re-routs per unit 0.61 / 0.45
+(game 0.61 / 0.42; was 0.61 / 0.47), health at the rally 0.33 (game 0.32; was 0.24), MoralePercent 0 / 5 / 10 / 20 s
+after a rally 0.18 / 0.23 / 0.29 / 0.30 (game 0.17 / 0.22 / 0.29 / 0.35).
+
+OPEN (no fitting): in the spearmen–clanrats pair, without the old −3 "strong enemy", the spearmen waver at 313 s (game
+251) and the clanrats rout at 343 (they never do in the game) — the probe showed the game gives no such −3 (spearmen
+next to clanrats 0; in melee 60 points flat until 10 % lost), the cause is elsewhere; the archers' target wavers at
+21 s (game 39, was 32): the −8 "losing" under fire is right, but the simulator's archers deal 1.5× the game's damage
+(open in shooting); the losing level (in one lane the game gives −8 at a balance of 0.32, the rule −3 above 1 / 4);
+the strong enemy's scale to −24 and its reach beyond 70 m; the rally probe's slaves rout later than in the game (247
+against 179–212 s) and lose more health (70 against 61 %), so their target in the rout is lower (−5 against +9).
 
 ### Replay: a pause in the melee flag
 
@@ -644,8 +689,8 @@ The same recordings before and after (26 game-AI battles, 157 decided network ba
 
 On the gap card everything is within noise (rout onsets per unit: noise 0.3–0.4): these rules take away
 what the network used for free in the simulator (leaving melee, unharmed routers), and the rout gap lies
-elsewhere (below, "What is missing": the rally and the rout again). The morale fits (`rally_rate`, `rally_mp`,
-`rout_floor_mp`, `hold_rate`, `unit_incidental`) were not changed: the mechanics hold without it.
+elsewhere (below, "What is missing": the rally and the rout again). The fits (`hold_rate`, `unit_incidental`)
+were not changed: the mechanics hold without them.
 
 ## Checks against the game
 
@@ -825,21 +870,12 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
 
 ## What is missing
 
-- **A rally and a rout again.** In the gates' replay (both sides recorded, 22 battles × 6 copies) the AI's
-  rallied units rout again within 60 s in 0.62 of cases (game 0.39); 10 / 20 / 30 / 45 s after a rally
-  0.40 / 0.43 / 0.46 / 0.51 have routed again (game 0.07 / 0.13 / 0.16 / 0.23): nearly all exactly when the
-  10 s post-rally protection ends. The simulator rallies a unit at MoralePercent 0.23 even when its morale
-  target is far lower (half the AI's rallies are below 20 % health): its morale falls after the rally (0.23 →
-  0.09 in 5 s), the game's rises (0.17 → 0.29 in 10 s). What the game does (3,678 rallies in 235 recordings):
-  MoralePercent at the rally depends on health, 0.08 / 0.24 / 0.47 (median) below 0.2 / 0.2–0.4 / 0.4–0.7 of
-  it, 0.22 / 0.42 / 0.64 at 45 s: a rally comes 0.14–0.18 of leadership below the level the morale then
-  settles at. The DB casualty table applies to rallied units as to never-routed ones (calm Empire units): a
-  rally does not reset it. The rule **"rally near the morale target"** (`morale.rally_rule` "target",
-  `rally_gap_mp` 0.17, `rally_target_min_mp` 0; tested) — rally once the morale is above 0 and no lower than
-  the target − 0.17 of leadership, and only if the target is above 0 — repeats the timing of the re-routs and
-  the rise after a rally but rallies fewer units than the game. Left **off** (numbers in
-  [tried and rejected](#tried-and-rejected) and `sim.json` morale.rally_why): the game also rallies units
-  with nothing left, and they rout again gradually, not at the 10th second; that rule is not found.
+- **A rally and a rout again.** With the morale probe's rally rule (a router's morale follows its target; it
+  rallies above 0, after 18 s of rout and with no enemy within 95 m) the gates' replay (both sides recorded,
+  4 gates × 6 copies) gives: routed again 10 / 20 / 30 / 45 s after a rally 0.10 / 0.18 / 0.25 / 0.37 (game
+  0.07 / 0.13 / 0.16 / 0.23; was 0.40 / 0.43 / 0.46 / 0.51), MoralePercent 0 / 5 / 10 / 20 s after a rally
+  0.15 / 0.22 / 0.29 / 0.32 (game 0.17 / 0.22 / 0.29 / 0.35). Left: late re-routs more often than in the
+  game; whole battles rally earlier (median 33 s, game 44 s).
 - **The game AI's army routs more often than in the game.** On the 8 battles of gate 20261004-071805 a
   game-AI unit routs 0.92 times in the game, 1.9 in the simulator (both sides replaying the game's
   orders) and 1.65 (against network n3). Not morale: there is no AI morale extra at Normal (AI against
@@ -893,13 +929,17 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
   further from the game ([above](#fatigue-calibration)). Uphill is not modelled.
 - **Not modelled**: terrain, a turn while walking (a moving unit faces where it goes at once),
   cavalry, monsters, magic, flying, artillery, experience ranks, the scaled "strong enemy near"
-  (only −3: its combat power is not in the data; out of melee the recordings show not even −3), the database's rally timer (meaning unclear).
+  (only −3 with an enemy worth 3 times as much: no combat-power formula), the database's `broken_finish_base_timeout` 180 and `charge_timeout` 60 (meaning not found).
 - `vis` is always true: line of sight is not modelled.
 
 ## Tried and rejected
 
 | What | Result | Why not |
 |---|---|---|
+| Rally at MoralePercent 0.23 (`morale.rally_rule` "fixed", `rally_mp`), +2 points a second away from enemies (`rally_rate`), morale at most −0.3 of leadership when a rout begins (`rout_floor_mp`) | gates' replay: routed again 10 / 20 / 30 / 45 s after a rally 0.40 / 0.43 / 0.46 / 0.51 (game 0.07 / 0.13 / 0.16 / 0.23); morale after a rally 0.23 → 0.09 in 5 s (game 0.17 → 0.29) | fits: the router's morale stood still, the rally at one number; the morale probe showed the game's rule (morale follows the target, the rally by distance and rout time) |
+| "Flanks secure" with any standing friend (lords too) within 120 m (`neighbour_effect_range`) | +5 nearly always, in melee too; agreement with the game's label in the recordings 73 % | the morale probe: only friends at both sides secure, or no enemy within 146 m (87 % in the recordings) |
+| The flank / rear attack −6 / −14 for one 0.5 s tick at the first blow (`morale.attacked_event`) | a drop of 1.5 / 1.9 points over 1–2 s | the morale probe: "attacked in the rear" holds while struck (29 s), +19 points as the attacker leaves; now −6 / −14 all the time of the attack |
+| "Strong enemy" −3 with any enemy worth more within 70 m (`morale.strong_enemy_points`) | nearly all the time in melee | it stood in for the +5 flanks secure the old rule gave in melee; the probe: 1.2–1.5× gives 0; now an enemy worth 3 times as much |
 | Attack − defence weight 0.1 in formations, lost-defence flank / rear weights 2.0 / 0.25, charge blow `impact` 1.5, bringing men in `ramp_s` 20 s, `contact.lord_hit_slope` / `lord_v_lord` | mechanics 51 / 54, game-AI 20 / 26, network 126 / 165; but every addition to attack and defence worked ten times weaker, rear was cheaper than flank, the burst after contact 5.6–8.3× (game 1.3–2.2×), the "leave — return" cycle 2.1–2.6× (game 1.0×), the Empire lost 0.32 / 0.51 / 0.63 in whole battles (game 0.25 / 0.41 / 0.53) | not the game's rules: replaced by CA's and the database's formulas (the melee core) |
 | The melee core without gathering around a lord (`lord_gather_s` 0) | a lord loses 130 / 119 HP in the first 15 s of a pair (game 38 / 45) | infantry does not surround a lord at once |
 | The gather around a lord in every fight (before melee core 2) | the lord swarm probe's first 15 s: the simulator 2.6–3.0 HP/s, the game 4.9–9.7 (1.11 × steady) | infantry running onto a standing lord strikes in full at once; the gather only when the lord runs in (now 7.1–8.8) |
@@ -932,11 +972,11 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
 | The database's casualty windows (4 s and 60 s, decaying) with "under fire" 2 s | 4 s: the archers' target wavered 90 % late, the slingers' never; 30 s + 60 s: the pairs wavered too early | taken as sliding windows together with "under fire" 15 s ([above](#casualty-windows-and-under-fire)) |
 | "Under fire" 15 s with the old 30 s window | the archers' target wavers 25 s after the first shot (game 39), mechanics 50 of 54; with decaying 4 s and 60 s windows 66 s (50 of 54) | only together with the sliding 4 s and 60 s windows |
 | "A stronger enemy within 70 m" 0 (the recordings out of melee: median 0 over 3,244 cases) | with the rest of the rules the mechanics check 51 → 50 of 54: in the spearmen–clanrats pair the spearmen waver at 287 s (game 251; with −3: 253) and rout at 302 (game 275; with −3: 291), the clanrats waver at 295 s, which they never do in the game | the database's −3 kept (`morale.strong_enemy_points`); in melee the −3 (or what it stands in for) shows |
-| The charge's +15 morale (DB `charge_bonus` 15 / `charge_timeout` 60) | after 3343 recorded charges morale over the next 1–4 s falls as after 1500 contacts met standing | no +15 shows in the game |
+| Not modelling the charge's +15 morale (DB `charge_bonus` 15 / `charge_timeout` 60) | after 3343 recorded charges morale over the next 1–4 s falls as after 1500 contacts met standing | a wrong reading: the +15 starts 4–6 s before contact and is smoothed (the morale probe: blocks of 6 + 6 s); modelled now |
 | The database's hit slope 1, flank ×0.6 / rear ×0.3, sectors 45° / 135°, spacing 1.8 m, bracing ×2 | worse against the pairs and the whole battles | the measured numbers kept (slope 0.1: the pairs need one flat number; flank 2.0 / rear 0.25; 60° / 120°; 1.5 m) |
 | Lord against lord at the flat slope 0.1 with one shared factor `lord_v_lord` 0.73 (fitted on whole battles 02.10: General 14.6 HP/s from a lord in the game, Warlord 10.0) | lord duels: General 0.39–0.40 / 0.37–0.38 %/s (game 0.59–0.71 / 0.60–0.61), Warlord 0.35–0.36 / 0.33 (game 0.25–0.26 / 0.25–0.28) | one factor for every lord cannot give the types' difference: it lies in attack against defence, which the flat slope erases; now `lord_hit_slope` 1 |
 | The database's lord-fall morale (−16, then −10 to every unit) at every fall, routs too | the simulator routed 39 % of the army within 10 s of a fall (the game 21 %); the game's units lose −3 to −4.8 points — every recorded fall was a rout | a rout on the field is the aura only; −16 / −10 only at a death, −16 for 120 s on leaving the map (`lord_fall`, measured in the game) |
-| A continuous "attacked in the flank / rear" −1 / −2 | the recordings show a 1–2 s drop of 1.5 / 1.9 points | one 0.5 s tick of the database's −6 / −14 at the first strike |
+| A continuous "attacked in the flank / rear" −1 / −2 (`attacked_flank` / `attacked_rear`) | the recordings show a 1–2 s drop of 1.5 / 1.9 points | a regression on our geometric flag, not a rule; now the database's −6 / −14 while struck (the morale probe) |
 | A charge impact of 2.5 and instant turning in melee | a unit charged standing lost 2.7× its charger (the game 0.82), a flank attack on a free unit lasted one step | everything left standing when charged lost; now 1.5, bracing and 2°/s |
 | The lord rule "the strongest attacker's rate + 0.35 of the others'" (inferred from unit totals) | the lord, a lord and three units took half of what the lord alone took | the measured 9-men cap |
 | A Skaven start morale bonus (`faction_bonus` +6, fitted) | it was Strength in Numbers in disguise (Skaven drop 2.3 points more crossing 50 % health) | the effect models it; the bonus is 0 |

@@ -28,7 +28,7 @@ flowchart LR
   steady["Steady"] --> shaken["Shaken"]
   shaken --> wavering["Wavering"]
   wavering --> broken["Routing<br/>MoralePercent ≤ 0"]
-  broken -- "after ~45 s,<br/>MoralePercent ≈ 0.23" --> rallied["Rallied<br/>no rout for 10 s"]
+  broken -- "morale > 0, routed ≥ 18 s,<br/>enemy beyond 95 m" --> rallied["Rallied<br/>no rout for 10 s"]
   rallied --> wavering
   broken -- "3rd rout" --> shattered["Shattered<br/>never rallies"]
 ```
@@ -70,23 +70,25 @@ From `land_units_tables` (the arena's units, rank 0):
 
 ## What changes morale
 
-All numbers are morale points from `_kv_morale_tables`.
+All numbers are morale points from `_kv_morale_tables`. When each holds: the in-game morale probe (below,
+["The morale probe"](#the-morale-probe-in-the-game)) and the game's labels in the recordings (`build/morale_spec`).
 
-| Cause | Points |
-|---|---:|
-| The lord near: within 70 m | +4 |
-| The lord died: first, the whole army (45 s) | −16 |
-| The lord died: then the whole army, to the battle's end | −10 |
-| The lord fled recently: left the map (~120 s; a rout on the field costs only the aura) | −16 |
-| Attacked in the flank / rear | −6 / −14 |
-| One flank exposed / several | −3 / −6 |
-| Flanks secure | +5 |
-| Under fire | −5 |
-| Winning the fight: slightly / yes / significantly | +3 / +6 / +8 |
-| Losing the fight: yes / significantly | −3 / −8 |
-| A strong enemy near (by its combat power) | −3 to −24 |
-| Very tired / exhausted | −2 / −6 |
-| Very Hard difficulty — for the player | −4 ([difficulty](../difficulty.md)) |
+| Cause | Points | When it holds |
+|---|---:|---|
+| The lord near: within 70 m | +4 | fading to 0 at 105 m; not to the lord himself |
+| The lord died: first, the whole army (45 s) | −16 | |
+| The lord died: then the whole army, to the battle's end | −10 | |
+| The lord fled recently: left the map (~120 s; a rout on the field costs only the aura) | −16 | |
+| Attacked in the flank / rear | −6 / −14 | while an enemy strikes from that side (the rear instead of the flank); it ends when that enemy leaves |
+| One flank exposed / several | −3 / −6 | an enemy threatens the flank |
+| Flanks secure | +5 | no standing enemy within ~146 m (centre to centre) **or** friendly units (not the lord) at both sides within ~40 m; one neighbour, a neighbour in front or the lord near do not secure |
+| Under fire | −5 | 15 s more after the last hit |
+| Winning the fight: slightly / yes / significantly | +3 / +6 / +8 | in melee **and by shooting**: a shooter hitting without an answer gets +8 while it shoots; only once the enemy has lost ≥ 10 % of its health |
+| Losing the fight: yes / significantly | −3 / −8 | in melee and under a shooting enemy's fire; only once the unit itself has lost ≥ 10 % of its health |
+| The charge | +15 | in 6 s blocks: the first when a unit under an attack order comes within ~25 m of its target (the charge pose), the second right after; ~12 s in all, from ~6 s before contact to ~6 s after |
+| A strong enemy near (by its combat power) | −3 to −24 | the label "superior in strength and speed"; a much stronger enemy (the probe: worth 3 times as much or more), speed not needed; grows as it comes closer |
+| Very tired / exhausted | −2 / −6 | |
+| Very Hard difficulty — for the player | −4 ([difficulty](../difficulty.md)) | |
 
 Routing friendly units within 100 m also lower morale (weight 3).
 
@@ -126,11 +128,37 @@ a rallied unit cannot rout again for 10 s (`post_rally_no_rout_timer`);
 - **Rout.** A unit routs when `MoralePercent` reaches 0 (median just before the
   rout 0.00). Its health at that moment: median 19 % (9 to 43 % in 80 % of
   routs).
-- **Rally.** A routing unit rallies after 45 s (median; 25–83 s), when
-  `MoralePercent` climbs to about 0.23.
+- **Rally.** A routing unit rallies after 45 s (median; 25–83 s); the morale probe
+  showed the rule (below).
 - **How often.** 243 routs and 132 rallies in 13 battles — about 19 routs and 10
   rallies a battle. Units often rout and rally several times; the winner chases
   routers for a long time, a battle lasts 350–900 s of game time.
+
+## The morale probe in the game
+
+06.10.2026, 7 battles at Normal (`tools/nn/morale_probe.py`, `src/entries/morale_probe.lua`): 3–5 lanes a
+battle, the side under test with normal morale, the enemy fearless; every 0.5 s `MoralePercent` and the label
+of the strongest effect (`MoraleGreatestEffect`). Data: `build/morale`.
+
+- **Flanks secure.** Standing spearmen, an enemy closing by steps: +5 at 150–310 m, gone between 148 and
+  144 m (centre to centre). One friend 32 m at the side, a friend 30 m in front or the lord 30 m away give
+  no +5. In melee with two friends at both sides (34 m) +5 holds (65 points against 60 without them).
+- **A flank / rear attack.** The label "attacked in the rear" holds all the time the unit behind strikes
+  (~29 s) and goes when it leaves; morale then rises by 19 points. A flank attack hides behind "taking
+  losses" (−8); +9 when it leaves.
+- **The charge.** Four lanes (attack at a run from 150 and 40 m, at a walk from 80 m, a walk to 10 m then an
+  attack): the label "charge" starts 4.5–6.5 s before contact, at an edge-to-edge gap of 25–28 m (the
+  database's `charge_distance_adopt_charge_pose` 25 m), and lasts 6 + 6 s in all four.
+- **Winning by shooting.** Archers hitting without an answer: "winning" +8 from the second their target has
+  lost 10 % of its health to 1.5–2 s after the shooting ends (10 s between volleys without a break).
+  Spearmen under slings: nothing after the first volley (6 %), −8 from the second (12 %) to the end of the
+  fire. Spearmen in melee: −3 or −8 appears exactly as they pass 10 % lost.
+- **A strong enemy.** An enemy stops at 65, 45 and 30 m: archers next to the Warlord (worth 1.5×, faster) or
+  Night Runners and spearmen next to clanrats — nothing; skavenslaves next to swordsmen (3×, slower) −3 / −4,
+  next to the General (4.8×, slower) −7 at 65 m and −9 closer; the General's starts at ~120 m.
+- **Rout and rally.** A router's morale follows its target as usual (−1 → +7 in 4 s → +9), enemy near or
+  not. The rally: once the nearest enemy is beyond 94–96 m (at once) and not before 18.5 s into the rout;
+  morale at the rally 0.26.
 
 ## How to read it
 
@@ -150,5 +178,8 @@ a rallied unit cannot rout again for 10 s (`post_rally_no_rout_timer`);
 - How exactly the engine adds up the effects: the formula is in the engine, the
   database has only the numbers.
 - Ranks above 0, other units and factions.
-- The table also has `charge_bonus` 15, `shatter_after_first_rout_if_casulties_higher_than`
-  0.05 and `…_second_rout_…` 0.1 — their meaning was not checked.
+- `charge_timeout` 60 is not a cooldown of the charge's morale (a unit gets +15 again after ~19 s); its
+  meaning is not found. `shatter_after_first_rout_if_casulties_higher_than` 0.05 and `…_second_rout_…` 0.1 —
+  their meaning was not checked.
+- How the game computes the fight's balance (a ratio of what, over what window, the thresholds) and a strong
+  enemy's "combat power".

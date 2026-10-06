@@ -761,7 +761,7 @@ class TestShieldRules:
 class TestMorale:
     def ctx(self, st, **over):
         z = torch.zeros_like(st.u["men"], dtype=torch.bool)
-        c = {"aura": z, "lord_dead_points": torch.zeros_like(st.u["men"]), "neighbour": z, "in_melee": z,
+        c = {"aura": z, "lord_dead_points": torch.zeros_like(st.u["men"]), "secure": z, "in_melee": z,
              "routing_friends": torch.zeros_like(st.u["men"]), "routing_enemies": torch.zeros_like(st.u["men"]),
              "under_fire": z, "strong_enemy": z, "enemy_near": z | True}
         c.update(over)
@@ -774,16 +774,16 @@ class TestMorale:
         dead = morale.target_points(st.u, self.ctx(st, lord_dead_points=torch.full_like(st.u["men"], -16.0)), P)
         assert (aura - base)[0, 0] == 4 and (dead - base)[0, 0] == -16
 
-    def test_a_first_strike_in_the_rear_costs_more_than_in_the_flank(self):
-        # The database's was_attacked_in_flank / _rear (-6 / -14) for the step a worse side is first
-        # struck (sim.json morale.attacked_event; battle.py gives the points).
-        after = []
-        for pts in (0.0, -6.0, -14.0):
-            st = face_off(SPEAR, SLAVE)
-            st.u["morale"] = morale.target_points(st.u, self.ctx(st), P)
-            morale.step(st.u, self.ctx(st, flank_event=torch.full_like(st.u["men"], pts)), P, 0.5)
-            after.append(float(st.u["morale"][0, 0]))
-        assert after[2] < after[1] < after[0]
+    def test_attacked_in_the_flank_or_rear_holds_while_struck_from_there(self):
+        """M3: the database's was_attacked_in_flank / _rear (-6 / -14) in the target every step a blow comes from
+        that side (u flank_hit), the rear instead of the flank, 0 once the attacker is gone (the morale probe T-A)."""
+        st = face_off(SPEAR, SLAVE)
+        base = morale.target_points(st.u, self.ctx(st), P)
+        got = []
+        for side in (1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 2.0, 0.0):
+            st.u["flank_hit"][0, 0] = side
+            got.append(float((morale.target_points(st.u, self.ctx(st), P) - base)[0, 0]))
+        assert got == [-6.0] * 5 + [0.0, -14.0, 0.0]
 
     def test_the_army_beaten_as_a_whole_routs(self):
         # Army destruction: -120 to every unit of the side (battle.py decides when).
@@ -860,12 +860,13 @@ class TestMorale:
             morale.step(st.u, self.ctx(st, collapse=hit), P, 0.5)
         assert not bool(st.u["r"][0, 0]) and not bool(st.u["s"][0, 0])
         assert bool(st.u["s"][0, 1])
-        # Without army losses, a distant router still recovers normally.
+        # Without army losses, a distant router still recovers normally: its morale heads for its target.
         st = face_off(SPEAR, SLAVE)
         st.u["r"][:] = True
         st.u["morale"][:] = -10
+        target = morale.target_points(st.u, self.ctx(st, enemy_near=~hit), P)
         morale.step(st.u, self.ctx(st, enemy_near=~hit), P, 0.5)
-        assert bool((st.u["morale"] == -9).all())
+        assert torch.allclose(st.u["morale"], -10 + 0.15 * (target + 10))
 
     def test_terminal_shatter_switch_and_post_rally_immunity(self):
         st = face_off(SPEAR, SLAVE)
@@ -892,7 +893,8 @@ class TestMorale:
             morale.step(st.u, free, P, 0.5)
             if not st.u["r"][0, 0]:
                 break
-        assert not st.u["r"][0, 0] and st.u["mp"][0, 0] >= P.sim["morale"]["rally_mp"]
+        assert not st.u["r"][0, 0] and st.u["morale"][0, 0] > 0
+        assert float(st.u["rally_s"][0, 0]) == 0 and P.sim["morale"]["rally_after_s"] > 0
         st.u["rout_count"][0, 0] = 2
         st.u["rally_s"][0, 0] = 100.0
         st.u["morale"][0, 0] = -20.0
@@ -996,6 +998,8 @@ class TestBattle:
         at each of `seconds`; the General 600 m off (his aura and his rout touch no one), the enemy 600 m off."""
         sides = army([(GENERAL, -900, 0, 90, True), (SPEAR, -300, 0, 90)], [(SPEAR, 300, 0, 270)], factions=factions)
         st = scenario.build([sides, sides], P)
+        for _ in range(40):          # settle first (flanks secure: no enemy within 146 m, +5 from the start)
+            battle.step(st, replay.hold(st), P)
         fall(st)
         out, t = [], 0.0
         for s in seconds:
@@ -1152,7 +1156,7 @@ class TestFlanksAndRoles:
     def test_exposed_flanks_lower_morale(self):
         st = face_off(SPEAR, SLAVE)
         z = torch.zeros_like(st.u["r"])
-        ctx = {"aura": z, "lord_dead_points": torch.zeros_like(st.u["men"]), "neighbour": z, "in_melee": z,
+        ctx = {"aura": z, "lord_dead_points": torch.zeros_like(st.u["men"]), "secure": z, "in_melee": z,
                "routing_friends": torch.zeros_like(st.u["men"]), "routing_enemies": torch.zeros_like(st.u["men"]),
                "under_fire": z, "strong_enemy": z, "enemy_near": z | True}
         base = morale.target_points(st.u, ctx, P)
@@ -1884,14 +1888,12 @@ class TestExpendableAndStrongEnemy:
         seen = _ctx_of(monkeypatch, st, replay.hold, 1)
         assert float(seen[0]["routing_friends"][0, H + 1]) == 1 and float(seen[0]["routing_friends"][0, H + 2]) == 1
 
-    def test_a_stronger_enemy_near_costs_strong_enemy_points(self):
-        """morale.strong_enemy_points: the database's -3 (kept: config/nn/sim.json strong_enemy_why); 0 measured."""
+    def test_a_stronger_enemy_near_costs_the_database_minimum(self):
+        """ctx strong_enemy: the database's enemy_morale_penalty_value_min (-3; config/nn/sim.json strong_enemy_why)."""
         st = face_off(SPEAR, SLAVE)
         ctx = TestMorale().ctx(st)
         strong = TestMorale().ctx(st, strong_enemy=torch.ones_like(st.u["r"]))
         assert float((morale.target_points(st.u, strong, P) - morale.target_points(st.u, ctx, P))[0, 0]) == -3
-        off = P.with_cal("morale", strong_enemy_points=0)
-        assert torch.equal(morale.target_points(st.u, strong, off), morale.target_points(st.u, ctx, off))
 
 
 class TestPhysicalResistanceAgainstMissiles:
@@ -2068,32 +2070,188 @@ class TestLordFragility:
         assert u["fatigue"].tolist() == pytest.approx([15340., 15150., 15340., 15137.])
 
 
-class TestRallyNearTarget:
-    """morale.rally_rule "target": a routing unit free of enemies rallies once its morale is above 0 and within
-    rally_gap_mp of its target, and only if the target is above 0 (config/nn/sim.json morale.rally_why)."""
+def _keep(st):
+    o = O.hold(st.B, st.N)
+    o.kind[:] = O.KEEP
+    return o
 
-    def rally_at(self, params, left, steps=200):
-        st = face_off(SPEAR, SLAVE)
-        st.u["hp_abs"][0, 0] = left * st.u["hp0"][0, 0]
-        st.u["r"][0, 0] = True
-        st.u["rout_count"][0, 0] = 1
-        st.u["morale"][0, 0] = -10.0
-        free = TestMorale().ctx(st, enemy_near=torch.zeros_like(st.u["r"]))
-        target = float(morale.target_points(st.u, free, params)[0, 0])
+
+class TestMoraleBatch:
+    """The morale batch (06.10.2026, build/morale_spec/spec.md section 4, the morale probe build/morale): flanks secure,
+    attacked in the flank / rear while struck, the charge's +15 in blocks, winning the fight by shooting, a router's
+    morale following its target and the rally rule, a stronger and faster enemy."""
+
+    def ctx_of(self, st, steps=1, orders=None, monkeypatch=None):
+        seen = []
+        real = morale.step
+
+        def spy(u, ctx, params, dt):
+            seen.append({k: (v.clone() if torch.is_tensor(v) else v) for k, v in ctx.items()})
+            return real(u, ctx, params, dt)
+        monkeypatch.setattr(morale, "step", spy)
         for _ in range(steps):
-            before = float(st.u["morale"][0, 0])
-            morale.step(st.u, free, params, 0.5)
-            if not bool(st.u["r"][0, 0]):
-                return before + params.sim["morale"]["rally_rate"] * 0.5, target, float(st.u["leadership"][0, 0])
-        return None, target, float(st.u["leadership"][0, 0])
+            battle.step(st, (orders or replay.hold)(st), P)
+        return seen
 
-    def test_a_unit_rallies_near_its_target_and_not_with_nothing_left(self):
-        p = P.with_cal("morale", rally_rule="target", rally_gap_mp=0.17)
-        m, target, L = self.rally_at(p, 0.25)
-        assert target > 0 and m >= target - 0.17 * L and m < target - 0.17 * L + 1.01
-        fixed, _, _ = self.rally_at(P.with_cal("morale", rally_rule="fixed"), 0.25)
-        assert fixed >= P.sim["morale"]["rally_mp"] * L and fixed < m
-        never, target, _ = self.rally_at(p, 0.05)
-        assert target <= 0 and never is None
-        capped, _, _ = self.rally_at(P.with_cal("morale", rally_rule="target", rally_gap_mp=0.17, rally_cap=True), 0.9)
-        assert capped < P.sim["morale"]["rally_mp"] * L + 1.01
+    def test_flanks_secure_by_enemy_distance_or_friends_at_both_sides(self, monkeypatch):
+        """M1, M2: +5 with no standing enemy within morale.secure.enemy_m, or friends (not lords) within side_m at both
+        sides; one side, a friend in front or only the lord: no; a threatened flank: no."""
+        sc = P.sim["morale"]["secure"]
+        far = sc["enemy_m"] + 20
+        near = sc["enemy_m"] - 40
+
+        def secure(friends, enemy_z, lf=False):
+            # the unit faces +z (bearing 0): its sides are -x / +x
+            own = [(SPEAR, 0, 0, 0)] + [(k, x, z, 0) for k, x, z in friends]
+            st = scenario.build([army(own, [(SLAVE, 0, enemy_z, 180)])], P)
+            st.u["lf"][0, 0] = lf
+            return bool(self.ctx_of(st, monkeypatch=monkeypatch)[-1]["secure"][0, 0])
+        assert secure([], far) and not secure([], near)
+        assert secure([(SPEAR, 34, 0), (SPEAR, -34, 0)], near)
+        assert not secure([(SPEAR, 34, 0)], near)
+        assert not secure([(SPEAR, 0, 30)], near)
+        assert not secure([(GENERAL, 30, 0), (GENERAL, -30, 0)], near)
+        assert not secure([(SPEAR, 34, 0), (SPEAR, -34, 0)], near, lf=True)
+
+    def test_the_charge_gives_15_in_blocks_from_the_sprint(self):
+        """M4: an attack order at a run from far: +15 from the charge sprint's start (target within the charge
+        distance), block_s long; a second block when the first ends at the contact; none on a move order."""
+        mc = P.sim["morale"]["charge"]
+        st = face_off(SWORD, CLANRAT, gap=120)
+        H = st.N // 2
+        st.u["leadership"][0, H] += 1e4
+        st.u["morale"][0, H] += 1e4
+        on, gaps, contact = [], [], None
+        for k in range(160):
+            o = O.hold(st.B, st.N)
+            o.kind[0, 0], o.target[0, 0], o.run[0, 0] = O.ATTACK, H, True
+            battle.step(st, o if k == 0 else _keep(st), P)
+            on.append(float(st.u["chm_s"][0, 0]) > 0)
+            gaps.append(float(geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])["gap"][0, 0, H]))
+            if contact is None and bool(st.u["m"][0, 0]):
+                contact = k
+        first = on.index(True)
+        assert gaps[first - 1] > st.u["charge_pose"][0, 0] - 1 and contact is not None
+        run = on[first:].index(False) if False in on[first:] else len(on) - first
+        assert run * 0.5 == pytest.approx(min(mc["blocks"] * mc["block_s"],
+                                              (contact - first) * 0.5 + mc["block_s"] + 0.5), abs=0.51)
+        st = face_off(SWORD, CLANRAT, gap=120)
+        for k in range(120):
+            o = O.hold(st.B, st.N)
+            o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = O.MOVE, float(st.u["x"][0, H]), float(st.u["z"][0, H]), True
+            battle.step(st, o if k == 0 else _keep(st), P)
+            assert float(st.u["chm_s"][0, 0]) == 0
+
+    def test_charge_term_and_none_while_routing(self):
+        st = face_off(SPEAR, SLAVE)
+        ctx = TestMorale().ctx(st)
+        base = morale.target_points(st.u, ctx, P)
+        st.u["chm_s"][0, 0] = 3.0
+        assert float((morale.target_points(st.u, ctx, P) - base)[0, 0]) == 15
+        st.u["r"][0, 0] = True
+        parts = morale.terms(st.u, ctx, P)
+        assert all(float(parts[k][0, 0]) == 0 for k in morale.FIGHT_TERMS)
+
+    def test_a_shooter_wins_the_fight_while_shooting(self):
+        """M5: missile HP dealt counts in the fight's balance while the unit shoots (in_combat); out of a fight: 0."""
+        st = face_off(SPEAR, SLAVE)
+        st.u["shot_dealt"][0, 0] = 50.0
+        firing = TestMorale().ctx(st, in_combat=torch.ones_like(st.u["r"]))
+        idle = TestMorale().ctx(st, in_combat=torch.zeros_like(st.u["r"]))
+        assert float(morale.terms(st.u, firing, P)["combat"][0, 0]) == P.morale["winning_combat_significantly"]
+        assert float(morale.terms(st.u, idle, P)["combat"][0, 0]) == 0
+        st.u["shot_taken"][0, 0] = 5000.0
+        st.u["hp_abs"][0, 0] = 0.85 * st.u["hp0"][0, 0]           # past morale.combat_lost
+        assert float(morale.terms(st.u, firing, P)["combat"][0, 0]) == P.morale["losing_combat_significantly"]
+
+    def test_archers_shooting_are_in_a_fight_and_their_target_too(self, monkeypatch):
+        st = shooter_and([(0, 100, SPEAR, 180)])
+        seen = []
+        real = morale.step
+
+        def spy(u, ctx, params, dt):
+            seen.append(ctx["in_combat"].clone())
+            return real(u, ctx, params, dt)
+        monkeypatch.setattr(morale, "step", spy)
+        H = st.N // 2
+        for k in range(40):
+            o = O.hold(st.B, st.N)
+            o.kind[0, 0], o.target[0, 0] = O.ATTACK, H
+            battle.step(st, o if k == 0 else _keep(st), P)
+        assert any(bool(x[0, 0]) and bool(x[0, H]) for x in seen)
+        assert float(st.u["shot_dealt"][0, 0]) > 0 and float(st.u["shot_taken"][0, H]) > 0
+
+    def test_a_router_follows_its_target_and_does_not_rally_near_an_enemy(self):
+        """M6: a router's morale moves by the usual 15 % (at least 1) a tick towards its target; with an enemy within
+        rally_free_m no rally."""
+        st = face_off(SPEAR, SLAVE)
+        st.u["r"][0, 0], st.u["rout_count"][0, 0], st.u["morale"][0, 0] = True, 1.0, -5.0
+        near = TestMorale().ctx(st)
+        for _ in range(40):
+            target = float(morale.target_points(st.u, near, P)[0, 0])
+            before = float(st.u["morale"][0, 0])
+            morale.step(st.u, near, P, 0.5)
+            step_ = max(1.0, 0.15 * abs(target - before))
+            assert float(st.u["morale"][0, 0]) == pytest.approx(before + min(step_, target - before), abs=1e-4)
+            assert bool(st.u["r"][0, 0])
+
+    def test_rally_after_rally_after_s_free_and_above_0_and_never_below(self):
+        """M7: free of enemies, above 0: the rally comes at rally_after_s into the rout, not before; a router whose
+        target is below 0 never rallies."""
+        after = P.sim["morale"]["rally_after_s"]
+        st = face_off(SPEAR, SLAVE)
+        st.u["r"][0, 0], st.u["rout_count"][0, 0], st.u["morale"][0, 0] = True, 1.0, 5.0
+        free = TestMorale().ctx(st, enemy_near=torch.zeros_like(st.u["r"]))
+        t = 0.0
+        while bool(st.u["r"][0, 0]) and t < 100:
+            morale.step(st.u, free, P, 0.5)
+            t += 0.5
+        assert t == pytest.approx(after, abs=0.51)
+        st = face_off(SPEAR, SLAVE)
+        st.u["hp_abs"][0, 0] = 0.05 * st.u["hp0"][0, 0]
+        st.u["r"][0, 0], st.u["rout_count"][0, 0], st.u["morale"][0, 0] = True, 1.0, -5.0
+        assert float(morale.target_points(st.u, free, P)[0, 0]) < 0
+        for _ in range(400):
+            morale.step(st.u, free, P, 0.5)
+        assert bool(st.u["r"][0, 0])
+
+    def test_a_rallied_unit_with_a_target_below_0_routs_again_after_10_s(self):
+        """M8: the database's post_rally_no_rout_timer: no rout in the 10 s after a rally, then at morale <= 0."""
+        st = face_off(SPEAR, SLAVE)
+        st.u["rout_count"][0, 0], st.u["rally_s"][0, 0], st.u["morale"][0, 0] = 1.0, 0.0, 1.0
+        st.u["hp_abs"][0, 0] = 0.05 * st.u["hp0"][0, 0]
+        ctx = TestMorale().ctx(st)
+        t = 0.0
+        while not bool(st.u["r"][0, 0]) and t < 60:
+            morale.step(st.u, ctx, P, 0.5)
+            t += 0.5
+        assert t == pytest.approx(P.morale["post_rally_no_rout_timer"], abs=0.51)
+
+    def test_a_strong_enemy_must_be_worth_strong_ratio_times_as_much(self, monkeypatch):
+        """M9: within 70 m, worth 1.5x: 0; worth morale.strong_ratio x (3), faster or slower: -3 (the morale probe)."""
+        def strong(ratio, run_enemy=0.5):
+            st = face_off(SPEAR, SLAVE, gap=40)
+            H = st.N // 2
+            st.u["cost"][0, H] = st.u["cost"][0, 0] * ratio
+            st.u["run"][0, H] = run_enemy
+            return bool(self.ctx_of(st, monkeypatch=monkeypatch)[-1]["strong_enemy"][0, 0])
+        assert not strong(1.5, 20.0) and strong(P.sim["morale"]["strong_ratio"]) and strong(4.8, 0.5)
+
+
+
+    def test_the_fight_shows_only_once_the_loser_has_lost_a_tenth(self):
+        """morale.combat_lost (the morale probe): losing only once the unit has lost 10 % of its health, winning only
+        once an enemy it fights has."""
+        st = face_off(SPEAR, SLAVE)
+        st.u["taken"][0, 0] = 500.0
+        fight = TestMorale().ctx(st, in_combat=torch.ones_like(st.u["r"]),
+                                 foe_lost=torch.zeros_like(st.u["men"]))
+        assert float(morale.terms(st.u, fight, P)["combat"][0, 0]) == 0
+        st.u["hp_abs"][0, 0] = 0.89 * st.u["hp0"][0, 0]
+        assert float(morale.terms(st.u, fight, P)["combat"][0, 0]) == P.morale["losing_combat_significantly"]
+        st = face_off(SPEAR, SLAVE)
+        st.u["shot_dealt"][0, 0] = 500.0
+        fight = TestMorale().ctx(st, in_combat=torch.ones_like(st.u["r"]), foe_lost=torch.full_like(st.u["men"], 0.05))
+        assert float(morale.terms(st.u, fight, P)["combat"][0, 0]) == 0
+        fight["foe_lost"] = torch.full_like(st.u["men"], 0.12)
+        assert float(morale.terms(st.u, fight, P)["combat"][0, 0]) == P.morale["winning_combat_significantly"]

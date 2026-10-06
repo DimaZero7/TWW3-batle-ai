@@ -67,8 +67,7 @@ blow); **the charge sprint** - under any attack order, at a walk too, the last 3
 database's charge speed; abilities' initial recharge from the database. Shooting by the game's rules ([missile probe](game/units/missile-probe.md), 10 battles): volleys once a cycle (archers 10 s = the database, sling 11.5, Night Runners 10.2, militia 10.8: measured), range centre to centre, each man's fire arc ±30° (militia ±35°), no turn when firing at will, 3 s after a target change, hits from the database's spread model (one calibration k 1.1 from 62k recorded shots), a shield against small arms only, the line of fire with the True Sight mod; friendly fire and spill, lords (at most 6.5 men hit them, gathering over
 20 s only when the lord himself ran into the formation; a lord without an order strikes in full; the lord as fragile as in the game: his own aura does not reach him, in melee he is
 always 'losing' (−3), projectiles hit him whole in melee, he tires slower than a formation; a lord duel: General v
-General x0.8 of the game, Warlord v Warlord x1.2), morale with all main modifiers (the 4 s and 60 s casualty windows and 'under fire' 15 s as in the
-game; a lord's death: his army
+General x0.8 of the game, Warlord v Warlord x1.2), morale with all main modifiers by the game's rules (the 4 s and 60 s casualty windows and 'under fire' 15 s; by the morale probe of 06.10: flank / rear −6 / −14 while struck; 'flanks secure' +5 with no enemy within 146 m or friends at both sides; the charge +15 in 6 + 6 s blocks; winning by shooting too, from 10 % lost; a strong enemy worth 3×; a router's morale follows its target, the rally with no enemy within 95 m after at least 18 s of rout, [simulator](training/simulator.md#morale-by-the-games-rules-the-morale-probe); a lord's death: his army
 −16 for 45 s, then −10; his rout on the field: the aura only), rout, rally, army collapse (−120 by the
 database's strategic strength), flank-threat flags, fatigue, units' innate effects, lord
 abilities (the game's AI fires them by a measured rule: the speed ones in melee, Stand Your Ground only
@@ -87,9 +86,9 @@ frozen. Three scores, higher is better:
 
 | Score | Now |
 |---|---:|
-| Mechanics: unit pairs and shooting within 20 % of the game | 29 / 54 (51 before the melee core; core 2 - 37; shooting by the rules - 29) |
-| Same winner: the game's AI against itself | 18 / 26 (20 before the core, the core 21, core 2 and shooting 18) |
-| Same winner: the network against the game's AI (165 recordings now) | 132 / 165 (126 before the core, the core 127, core 2 and shooting 132) |
+| Mechanics: unit pairs and shooting within 20 % of the game | 24 / 54 (51 before the melee core; core 2 - 37; shooting by the rules - 29; morale by the rules - 24: the spearmen-clanrats pair without the fitted −3 and the archers' target) |
+| Same winner: the game's AI against itself | 16 / 26 (20 before the core, the core 21, core 2 and shooting 18, morale 16) |
+| Same winner: the network against the game's AI (165 recordings now) | 132 / 165 (126 before the core, the core 127, core 2 and shooting 132, morale 132) |
 
 Mechanics dropped from 51 to 37 not because of winners (all 12 pairs are as in the game) but because of
 pace: the first 15 s of formation contact are stronger in the game than the rule (the target loses
@@ -124,8 +123,9 @@ same battles. **The simulator is too kind to the network** — the main measured
   (21–112 s); what triggers leaving melee is unknown;
 - morale right at contact and the open-flank flags match only partly;
 - army collapse finds 58 of 65 onsets in the recordings, but in a free battle its time drifts;
-- rallied units rout again nearly all exactly 10 s after the rally (in the game gradually); the rule
-  'rally near the morale target' fixes that but rallies a third fewer units — left off;
+- rallied units rout again 10 / 45 s after the rally in 0.11 / 0.40 of cases (game 0.07 / 0.23; before the morale
+  probe's rally rule 0.37 / 0.49); fewer routs a battle than in the game (16.8 against 22.5);
+- morale: the level of 'losing' in melee and the 'strong enemy' scale (the General next to slaves −9, ours −3) are open;
 - order delay in the game is 0.6–0.8 s in small battles, 0.36 s in the simulator;
 - the second wave of units (Flagellants, Greatswords, militia, Skavenslaves, shielded Clanrats,
   Night Runners) is not checked against recordings;
