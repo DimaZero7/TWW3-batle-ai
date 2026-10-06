@@ -241,6 +241,24 @@ class TestAdaptiveShare:
             assert bool(t["valid"][:, drill_rows].any())                         # labels on every drill row still
         assert 0 < int((drill_rows & (draw < 0.5)).sum()) < int(drill_rows.sum())
 
+    def test_a_share_of_0_runs_the_teacher_s_script_on_the_probe_decisions_only(self, monkeypatch):
+        env = kiting_env(8)
+        calls = []
+
+        def counted(f):
+            return lambda st: calls.append(env.decisions) or f(st)
+        monkeypatch.setattr(env, "teach", {k: (i, counted(f), m) for k, (i, f, m) in env.teach.items()})
+        actor, crit = nets()
+        env.set_teach_shares({"kiting": 0.0})
+        t = rollout.collect(env, actor, crit, 2 * rollout.TEACH_PROBE)["teach"]
+        assert calls == [0, rollout.TEACH_PROBE] and not bool(t["picked"].any())   # nothing labelled
+        on = t["valid"].flatten(1).any(1)                                           # [T]: a step with labels
+        assert bool(on[0]) and bool(on[rollout.TEACH_PROBE]) and int(on.sum()) == 2   # the agreement measured there
+        calls.clear()
+        env.set_teach_shares({"kiting": 0.5})
+        rollout.collect(env, actor, crit, 3)
+        assert len(calls) == 3
+
     def test_a_new_battle_draws_again(self):
         env = kiting_env(8)
         before = env.teach_draw.clone()
@@ -279,6 +297,7 @@ class TestAdaptiveShare:
         init = checkpoint.save(tmp_path / "init.pt", actor, crit)
         monkeypatch.setattr(checkpoint, "DIR", tmp_path)
         monkeypatch.setattr(checkpoint, "RANDOM", init)
+        monkeypatch.setattr(rollout, "TEACH_PROBE", 1)          # at share 0 the agreement on every decision
         base = ["--init", str(init), "--battles", "16", "--steps", "4", "--updates", "4", "--minutes", "3",
                 "--device", "cpu", "--no-eval", "--mix", '{"nearest": 1.0}', "--drills", "0.5",
                 "--drill-weights", '{"kiting": 1}', "--drill-bank", "16", "--bank", "8", "--max-units", "4",

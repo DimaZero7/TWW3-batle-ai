@@ -1107,6 +1107,26 @@ class TestLoop:
         _, _, out = run.train(args)
         assert [json.loads(x)["anchor_rolls"] for x in (out / "log.jsonl").read_text(encoding="utf-8").splitlines()] == [0, 0]
 
+    def test_the_next_bank_is_built_ahead_in_a_thread(self, tmp_path, monkeypatch):
+        # building a bank is mostly Python (17-48 s on the 2048 battles): the training no longer waits for it
+        import threading
+        from tools.nn.train import run
+        monkeypatch.setattr(checkpoint, "DIR", tmp_path)
+        where = []
+        real = scenes.Generated.__init__
+
+        def spy(self, *a, **k):
+            where.append(threading.current_thread().name)
+            real(self, *a, **k)
+        monkeypatch.setattr(scenes.Generated, "__init__", spy)
+        base = ["--battles", "4", "--steps", "2", "--updates", "3", "--minutes", "5", "--device", "cpu", "--no-eval",
+                "--mix", '{"nearest": 1.0}', "--bank-refresh", "0"] + SMALL_RUN
+        run.train(run.parser().parse_args(["--name", "ahead"] + base))
+        assert where[0] == "MainThread" and len(where) >= 3 and all(w.startswith("bank") for w in where[1:])
+        where.clear()
+        run.train(run.parser().parse_args(["--name", "due", "--no-bank-ahead"] + base))
+        assert len(where) == 4 and set(where) == {"MainThread"}                 # the first and one per update
+
     def test_per_role_normalisation_gives_each_role_mean_0_std_1(self):
         a = torch.tensor([[1.0, 10.0], [3.0, 30.0], [5.0, 50.0]])
         g = torch.tensor([[True, False]] * 3)
@@ -1210,6 +1230,65 @@ class TestProtocol:
         t = time.time()
         with test5.gpu_lock("t", path=lock, poll_s=0.02):
             assert time.time() - t >= 0.15
+
+    @pytest.mark.skipif(not hasattr(__import__("signal"), "SIGKILL"), reason="POSIX signals")
+    def test_the_gpu_lock_is_freed_on_sigterm(self, tmp_path):
+        # docker stop sends SIGTERM to the container's first process, which ignores it without a handler
+        import os
+        import signal
+        import time
+        from tools.nn.train import test5
+        lock = tmp_path / "gpu-train.lock"
+        before = signal.getsignal(signal.SIGTERM)
+        with pytest.raises(SystemExit):
+            with test5.gpu_lock("t", path=lock, poll_s=0.01):
+                assert lock.exists()
+                os.kill(os.getpid(), signal.SIGTERM)
+                time.sleep(2.0)                      # (the handler runs at the next bytecode)
+        assert not lock.exists() and signal.getsignal(signal.SIGTERM) == before
+
+    def test_the_before_evaluation_runs_with_tf32_as_the_training_does(self, tmp_path, monkeypatch):
+        # torch.compile's graphs are guarded on the TF32 switch: run.train turned it on after a "before" compiled
+        # without it, and the first evaluation after training compiled every graph again
+        from types import SimpleNamespace
+        from tools.nn.train import test5
+        seen = []
+
+        class Stop(Exception):
+            pass
+
+        def evaluation(*a, **k):
+            seen.append(torch.backends.cuda.matmul.allow_tf32)
+            raise Stop
+        monkeypatch.setattr(test5, "evaluation", evaluation)
+        monkeypatch.setattr(test5, "references", lambda args: None)
+        monkeypatch.setattr(test5, "OUT", tmp_path)
+        monkeypatch.setattr(torch.backends.cuda.matmul, "allow_tf32", False)
+        ck = checkpoint.save(tmp_path / "init.pt", *nets())
+        args = SimpleNamespace(label="x", init=str(ck), minutes=1.0, updates=1, device="cpu", eval=8, drill_eval=0,
+                               profiles=(), before=None, fresh_before=True)
+        with pytest.raises(Stop):
+            test5.test(args, [])
+        assert seen == [True]
+
+    def test_the_before_is_the_previous_step_s_last_evaluation_of_the_same_key(self, tmp_path):
+        from types import SimpleNamespace
+        from tools.nn.train import test5
+        actor, crit = nets()
+        ck = checkpoint.save(tmp_path / "prev" / "m20.pt", actor, crit)
+        args = SimpleNamespace(eval=8, drill_eval=4, profiles=("behaviour", "drills"))
+        key = test5.eval_key(actor, args, cad.GAME)
+        assert key == test5.eval_key(checkpoint.load_policy(ck), args, cad.GAME)     # in memory = loaded back
+        assert test5.eval_key(nets(seed=1)[0], args, cad.GAME)["actor"] != key["actor"]
+        after = {"by_opponent": {}, "key": key, "seconds": 200, "distance": {"start_kl": 0.1}, "teach": {"kiting": {}},
+                 "teach_auto": [], "update": 70}
+        (tmp_path / "prev" / "after.json").write_text(json.dumps(after), encoding="utf-8")
+        (tmp_path / "prev" / "eval_m10.json").write_text(json.dumps(dict(after, key=dict(key, actor="x"))), encoding="utf-8")
+        path, before = test5.reusable(ck, key)
+        assert path.name == "after.json" and before == {"by_opponent": {}, "key": key, "seconds": 200}
+        assert test5.reusable(ck, dict(key, eval=16)) is None                    # other settings: played again
+        assert test5.reusable(ck, dict(key, actor="x"))[0].name == "eval_m10.json"
+        assert test5.reusable(tmp_path / "none" / "m5.pt", key) is None
 
     def test_a_job_started_right_after_a_release_lets_the_queue_go_first(self, tmp_path):
         import time

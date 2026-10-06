@@ -1,4 +1,4 @@
-# The working process: a chain step, the run card, metric profiles, the gap card, leftovers
+# The working process: a chain step, the run card, metric profiles, the gap card, leftovers, speed
 
 [← Back](README.md) · [Documentation](../README.md) › [Data for training](README.md) › Workflow · [Русский](../../ru/training/workflow.md)
 
@@ -170,6 +170,12 @@ the new version (the version is a hash of the files' contents, the commit gives 
 next step finds them. `tools.ops.step` says whether the cache will miss (drills included) and names
 this command.
 
+**One file, one process.** While a process plays a reference file, a marker `<file>.computing` lies next to
+it; a thread of that process touches it every 30 s. Another `test5` or `tools.ops.baselines` that finds a
+live marker waits for the file instead of playing it a second time (`test5` used to repeat
+`orch-baselines`' work). A marker untouched for 150 s is a crashed process's: it is taken over. If the
+process with the marker stops without writing the file, the evaluation plays it itself.
+
 **The canary** (`test5 --baseline-canary 32`, the chain's default; `refs.py` the same): on a miss a
 script's baseline plays its first 32 pairs first; when they come out identical in every field (winner,
 gold lost, start, budget, factions, attacker) to an older version's file, that file is adopted under
@@ -195,7 +201,43 @@ cells the same way. The drill check scripts, CPU against GPU: kiting naive 0.742
 0.828 / 0.805; hold_fire 0.203 / 0.164 and 0.867 / 0.844; counter 1.0 / 1.0 and 0.992 / 1.0; the trade
 within 0.02. The drill teacher takes the gap skilled − network, so its share moves by ~0.01.
 
+## Step speed
+
+A 20-minute step with a baseline-cache hit took ~28–30 min of wall time, an evaluation a median ~3.3 min
+(245–515 s). What was done (measurements and scripts: `build/speed1`). A check step (6 min from
+`s11b_noteach/m20.pt`, the chain's options): "before" 181 s (with compiling), the minute-3 evaluation 107 s,
+the "after" 123 s, against 167–177 s with the old code on the same network. A faster rollout and bank do not
+shorten a step (it is capped in minutes): they give more updates in the same minutes.
+
+| What | How now | Gain |
+|---|---|---|
+| The "before" evaluation is not repeated | A chain step starts from the previous step's last network, whose last evaluation (`after.json`) exists already. `test5` looks in the folder of `--init` (`after.json`, `eval_m*.json`, `before.json`) for an evaluation of the same key and takes it as the "before" (field `reused`: from where; without the training's blocks: `distance`, `teach`, `teach_auto`, `teach_normal`). The key (`test5.eval_key`): a hash of the network's weights, the code of the simulator, the drills and the evaluation itself (`version.eval_version`, `EVAL_FILES`), the battles, the profile, the cadence, the drills' frame shares. `--fresh-before` plays it again | 166–355 s a step |
+| TF32 from the start | `run.train` turned TF32 on after the "before" evaluation, and the compiled graphs are guarded on that switch: the first evaluation after training compiled everything again (`TORCH_LOGS=recompiles`: `GLOBAL_STATE changed: allow_tf32`). Now `test5` turns TF32 on before the first evaluation | the first evaluation after training compiles nothing again (+17 s on a warm compile cache here, 60–150 s in the audit) |
+| The drills' evaluation steps the running battles only | The drills' evaluation (3 × 128 battles) stepped its whole batch until the last battle ended (up to 3600 s): 90–120 s of a ~175 s evaluation. Now the batch shrinks to the 64 running battles and the shrunk batch's decision is replayed as one CUDA graph, as in the main evaluation | drills 66–70 → 55 s, the whole evaluation 112–120 → 106 s (one network, one process) |
+| A teacher at share 0 | The teacher's script labelled every decision (~20 % of the rollout), also at share 0, when no label reaches the training. Now at share 0 the script runs on every 8th decision only (`rollout.TEACH_PROBE`): the log's agreement is still measured, on a smaller sample | rollout 5.8 → 4.7 s an update at shares 0: ~6 % more updates in the same minutes |
+| The next bank of armies built ahead | A bank (2048 battles and the drills' battles) took 33–49 s every 5 min while the GPU waited (logs `s10_lord`–`s11b_noteach`: 3–4 times a step, 110–140 s). Now the next bank is built in a thread while training goes on (an evaluation inside the step waits for a build in progress: it captures CUDA graphs); `--no-bank-ahead`: as before | instead of 33–49 s idle, ~18 s of two slower updates (the thread shares the Python interpreter with the training) |
+
+Small ones: `docker stop` used to leave the GPU lock behind (a container's first process without a handler
+does not get SIGTERM and is killed after 10 s); now `test5` exits normally on SIGTERM and frees the lock.
+`DOCK_CPUS=N bash tools/nn/dock.sh …` also sets `OMP_NUM_THREADS` / `MKL_NUM_THREADS` = N: a 6-core
+container ran torch with a thread per host core.
+
+The evaluation's numbers do not change: the "before" from the previous step is the same network on the
+same battles (a fresh evaluation would differ only by the sampled orders: two evaluations of one
+`s10_lord/m20.pt` gave a rating of 0.76 and 0.64, 30 % of the battles identical). The drills' compaction
+changes only the sampled orders of the battles still running (on the CPU with greedy orders the shrunk
+and the whole batch give the same battles, `tests/tools/test_nn_eval_pairs.py`).
+
+`evaluate.TRACE = []` records at every check of the batch (step, running battles, batch size, time): how
+the evaluation's time was measured.
+
 ## Tried and rejected
+
+- Intermediate compaction sizes in the main evaluation (1024, 512, 256, 128 and 64 instead of 64 alone):
+  95 s instead of 56 s on the same network (`s11b_noteach/m20.pt`). Every new size is a new CUDA graph and
+  a new compilation of the order assembly (its shape depends on how many of the network's units are on
+  each side, which changes in almost every evaluation); the whole 1536-battle batch steps at ~40 ms a
+  decision and gets down to 64 running battles in 30–40 s: there is little to save.
 
 - The references on the GPU inside the "before" evaluation: the baselines ~5 min, the drill check
   scripts ~25–37 min (uncompiled and not compacted: a batch of 128 battles stepped until its last one

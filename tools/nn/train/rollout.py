@@ -37,7 +37,8 @@ The teacher in normal battles (teach_normal= {drill name: Drill}; run.py --teach
 drill (the ordinary training battles) the drill's teacher script labels our units at the drill's `moments`
 only (e.g. kiting: a slower melee enemy closing in, and the run-back it keeps going), under the name
 "<drill>@normal" with a share of its own (the same per-battle draw). The labels' drill index and the share's
-pick are per unit ([R, N]).
+pick are per unit ([R, N]). A teacher whose share is 0 labels nothing: its script runs only every TEACH_PROBE-th
+decision (~20 % of a decision's time otherwise), its labels there only measure the agreement (PPO's log).
 """
 import warnings
 
@@ -68,6 +69,8 @@ ROLES = ("attack", "defend")
 # Outcome counters: the opponents, and the untrained network as "past" on its own.
 STAT_NAMES = league.OPPONENTS + ("untrained",)
 UNTRAINED = len(league.OPPONENTS) + 1
+# A teacher with a share of 0 runs its script every this many decisions only (the agreement is still measured)
+TEACH_PROBE = 8
 
 
 _OBSERVE = {}
@@ -337,6 +340,8 @@ class Battles:
         assert all(m is not None for _, _, m in self.teach_normal), "a teacher in normal battles needs the drill's moments"
         # the share of each taught drill's battles labelled ([drills], default all) and each battle's draw [B]
         self.teach_share = torch.ones(len(self.teach_names), device=self.device)
+        self.share_host = [1.0] * len(self.teach_names)              # the same on the host (no read-back)
+        self.decisions = 0                                            # step() calls (TEACH_PROBE)
         self.teach_gen = torch.Generator(device=self.device).manual_seed(seed + 7919)
         self.teach_draw = torch.zeros(self.B, device=self.device)
         self.stats = torch.zeros(2 * (len(STAT_NAMES) + 1), 3, device=self.device)    # games, wins, seconds
@@ -389,7 +394,8 @@ class Battles:
         """{drill: the share of its battles the teacher labels} (drills not given keep theirs)."""
         for i, n in enumerate(self.teach_names):
             if n in shares:
-                self.teach_share[i] = float(min(1.0, max(0.0, shares[n])))
+                self.share_host[i] = float(min(1.0, max(0.0, shares[n])))
+                self.teach_share[i] = self.share_host[i]
 
     def teach_shares(self):
         return {n: float(self.teach_share[i]) for i, n in enumerate(self.teach_names)}
@@ -465,6 +471,7 @@ class Battles:
             parts.append((self.rows_past, o_past))
         lp = self._log_prob(logits, action, obs_r["ctrl"])
         taught = self._teach_labels(actor.cfg, obs_r, frame) if self.teach_names and self.R else None
+        self.decisions += 1
         value = None
         if critic is not None:
             value = self._values(critic, c)
@@ -523,7 +530,11 @@ class Battles:
         live = ~self.st.done[b]
         frame_r = frame_rows(frame, self.rows_learn)
         emb = drills.embedded_rows(self.st)[b]                                           # [R]
+        # a share of 0 labels nothing: the script runs on the probe decisions only (the agreement)
+        idle = (lambda i: self.share_host[i] <= 0 and self.decisions % TEACH_PROBE != 0)
         for code, (i, script, moments) in self.teach.items():
+            if idle(i):
+                continue
             mine = self.row_opp == code                                                  # [R]
             o = script(self.st)
             lab, ok = drill_teach.label(cfg, o, obs_r, frame_r, self.rows_learn, self.B)
@@ -535,6 +546,8 @@ class Battles:
             valid = valid | sel
             drill = torch.where(mine[:, None], torch.full_like(drill, i), drill)
         for i, script, moments in self.teach_normal:
+            if idle(i):
+                continue
             o = script(self.st)
             lab, ok = drill_teach.label(cfg, o, obs_r, frame_r, self.rows_learn, self.B)
             sel = self.row_normal[:, None] & ok & moments(self.st, o)[b] & live[:, None] & (drill < 0)

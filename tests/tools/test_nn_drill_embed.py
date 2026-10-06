@@ -224,6 +224,8 @@ class TestTeacher:
         assert bool((drill[valid] == 0).all()) and bool((drill[~valid] == -1).all())
         env.set_teach_shares({"kiting@normal": 0.0})
         assert not bool(env._teach_labels(actor.cfg, obs_r, frame)[3].any())
+        env.decisions = 1                                            # not a probe decision: the script is not run
+        assert not bool(env._teach_labels(actor.cfg, obs_r, frame)[1].any())
         batch = rollout.collect(env, actor, crit, 2)
         assert batch["teach"]["names"] == ("kiting@normal",) and batch["teach"]["drill"].shape == batch["teach"]["valid"].shape
 

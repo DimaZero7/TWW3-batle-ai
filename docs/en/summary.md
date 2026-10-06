@@ -142,7 +142,9 @@ takes no part in training: it is the independent check.
 
 **The chain.** Every step starts from the previous step's last checkpoint. A leash (a KL penalty
 of 0.03 for drifting from the step's start) moves forward every 600 s: without a leash training
-collapses. A step is 20–25 minutes, evaluated every 5–10 minutes. Standing options are in
+collapses. A step is 20–25 minutes, evaluated every 5–10 minutes; the "before" evaluation is not played
+again: it is the previous step's last one (the same network and code; [step speed](training/workflow.md#step-speed)).
+Standing options are in
 `config/train-chain.json` (now also drills on 20 % of battles and the `auto` teacher in drills
 and in normal battles). `tools.ops.step` builds a step's command, `tools.ops.card` shows its
 result ([workflow](training/workflow.md)). A metric profile (`--profile`) picks what the evaluations

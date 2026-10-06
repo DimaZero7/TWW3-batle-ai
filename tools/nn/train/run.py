@@ -24,6 +24,7 @@ import json
 import math
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import torch
@@ -301,6 +302,11 @@ def train(args, every=None, teacher=None, normal=None):
     print(f"warm-up {time.time() - t_warm:.0f} s", flush=True)
     t0 = time.time()
     t_bank = t0
+    # The next bank of armies is built in a thread while training goes on (--bank-ahead): building one is mostly
+    # Python (the armies, the drills' battles: 17-48 s that held the GPU idle every --bank-refresh minutes); the
+    # swap then only waits if it is not ready yet.
+    builder = ThreadPoolExecutor(1, thread_name_prefix="bank") if args.bank_ahead else None
+    ahead = builder.submit(source) if builder is not None else None
     update, decisions, total, window, best = 0, 0, {}, {}, -1.0
     floor_w = None                                # the entropy floor's current weight (--entropy-target)
     paused = 0.0
@@ -319,7 +325,11 @@ def train(args, every=None, teacher=None, normal=None):
         t_u = time.time()
         done_share = share_done()
         if time.time() - t_bank >= args.bank_refresh * 60:
-            env.source = source()
+            if ahead is not None:
+                env.source = ahead.result()
+                ahead = builder.submit(source)
+            else:
+                env.source = source()
             env.bank = env.source.bank
             t_bank = time.time()
         if teacher is not None:
@@ -431,6 +441,8 @@ def train(args, every=None, teacher=None, normal=None):
             pick_past()
         if every and time.time() - t0 - paused >= next_mark * 60 and time.time() - t0 - paused < args.minutes * 60:
             t_e = time.time()
+            if ahead is not None:
+                ahead.result()           # no bank build during an evaluation: it captures CUDA graphs (evaluate.Graphed)
             torch.cuda.empty_cache()
             every[1](actor, critic, next_mark, update)
             actor.eval()
@@ -439,6 +451,8 @@ def train(args, every=None, teacher=None, normal=None):
             paused += time.time() - t_e
             next_mark += every[0]
     seconds = time.time() - t0
+    if builder is not None:
+        builder.shutdown(wait=True, cancel_futures=True)      # (no build left running into the evaluations)
     meta = {"update": update, "battles": env.battles, "seconds": round(seconds), "decisions": decisions,
             "battles_at_once": env.B, "steps_per_update": args.steps, "limit_s": args.limit, "run": args.name,
             "cadence": cadence.meta(),
@@ -611,6 +625,8 @@ def parser():
     ap.add_argument("--drill-teach-minutes", type=float, default=10.0,
                     help="minutes of training over which the teacher's weight goes to 0")
     ap.add_argument("--bank-refresh", type=float, default=5.0, help="minutes between new banks of armies")
+    ap.add_argument("--no-bank-ahead", dest="bank_ahead", action="store_false",
+                    help="build each new bank when it is due (the training waits) instead of in a thread ahead")
     ap.add_argument("--gpu-duty", type=float, default=1.0,
                     help="share of the time the GPU works (e.g. 0.9: after each update rest 1/9 of its time; "
                          "quieter fans, a responsive desktop; the rest is not counted as training time)")

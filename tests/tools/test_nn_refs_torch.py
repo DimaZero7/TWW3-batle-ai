@@ -137,3 +137,19 @@ class TestRefs:
         monkeypatch.setattr(refs, "start", lambda **k: got.append(k) or None)       # nothing missing
         test5.references(SimpleNamespace(eval=512, drill_eval=0))
         assert got[-1]["drills"] == () and evaluate.REFS_READY is None
+
+    def test_a_file_another_process_plays_is_waited_for_not_played_again(self, tmp_path, monkeypatch):
+        import threading
+        monkeypatch.setattr(refs, "POLL_S", 0.02)
+        path = refs.target("nearest", tmp_path)
+        assert refs.claim(refs.marker(path))                                # another process holds it
+
+        def missing(out=None, scripts=refs.SCRIPTS, drills=None, *rest):
+            return ["nearest"] if "nearest" in scripts and not path.exists() else []
+        monkeypatch.setattr(refs, "missing", missing)
+        threading.Timer(0.2, lambda: path.write_text("{}", encoding="utf-8")).start()
+        said = []
+        pending = refs.start(tmp_path, scripts=("nearest",), drills=(), log=said.append)
+        assert pending.pool is None and pending.others == {"nearest": path}  # nothing played here
+        assert list(pending.wait()) == ["nearest"] and any("another process" in x for x in said)
+        assert refs.ensure(tmp_path, scripts=("nearest",), drills=()) == {}  # written: nothing missing

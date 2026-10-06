@@ -218,6 +218,36 @@ class TestCompact:
         assert evaluate.bucket(3, 1536) == 64
         assert evaluate.bucket(3, 64) == 64
 
+    def test_the_network_s_battles_end_the_same_in_a_batch_that_shrinks_step_by_step(self, monkeypatch):
+        # several sizes: the batch shrinks again and again as its battles end (greedy, the orders a fixed step
+        # late: nothing drawn at random, so the batch's size cannot change a battle)
+        from tools.nn.train import cadence as cad
+        monkeypatch.setattr(evaluate, "BUCKETS", (2, 4, 8))
+        monkeypatch.setattr(evaluate, "CHECK_EVERY", 2)
+        kw = dict(opponents=("nearest", "hold_shoot"), generated=8, max_units=4, limit_s=300.0, greedy=True,
+                  together=True, cadence=cad.Cadence(1.0, 0.5))
+        sizes = []
+        real = evaluate.bucket
+        monkeypatch.setattr(evaluate, "bucket", lambda n, B: sizes.append(real(n, B)) or sizes[-1])
+        a = evaluate.play(actor(), **kw)
+        assert min(sizes) < 16                                            # it did shrink
+        b = evaluate.play(actor(), compact=False, **kw)
+        for n in kw["opponents"]:
+            assert a["battles"][n] == b["battles"][n]
+            assert a["by_opponent"][n]["behaviour"] == pytest.approx(b["by_opponent"][n]["behaviour"])
+
+    def test_the_drill_evaluation_ends_the_same_in_a_shrinking_batch(self, monkeypatch):
+        from tools.nn.train import cadence as cad
+        from tools.nn.train import rollout
+        monkeypatch.setattr(evaluate, "BUCKETS", (2, 4))
+        monkeypatch.setattr(evaluate, "CHECK_EVERY", 2)
+        real = rollout.params_with_limit
+        monkeypatch.setattr(rollout, "params_with_limit", lambda limit_s=None: real(300.0))
+        kw = dict(names=["counter"], greedy=True, scripts=False, cadence=cad.Cadence(1.0, 0.5))
+        a = evaluate.play_drills(actor(), 6, **kw)
+        b = evaluate.play_drills(actor(), 6, compact=False, **kw)
+        assert a == b and a["counter"]["games"] == 6
+
     def test_script_battles_end_the_same_in_a_shrinking_batch(self, monkeypatch):
         # the scripts draw nothing at random: every battle ends the same, whatever the batch around it
         # (on the CPU the batch shrinks to exactly the running battles; compact=False steps them all)

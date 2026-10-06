@@ -18,6 +18,7 @@ one rating with a faction term is fitted over all battles.
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -240,6 +241,9 @@ def padded(seeds, small):
 # step then needs a C++ compiler the container lacks.
 BUCKETS = (64,)
 CHECK_EVERY = 8           # steps between the checks (each reads the GPU's answer back)
+# A list to append (step, running battles, batch size, time.time()) to at every check of play()'s batch
+# (speed measurements); None: nothing recorded.
+TRACE = None
 
 
 def bucket(n_live, B):
@@ -515,6 +519,8 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
                 i += graph.warm
         elif bool(env.st.done.all()):
             break
+        if TRACE is not None:
+            TRACE.append((i, int((~env.st.done).sum()), env.B, time.time()))
         # between checks: a battle that ended stays frozen (the simulator, the counters skip it)
         for _ in range(min(CHECK_EVERY if compact else 1, n_steps - i)):
             if graph is not None and graph.ok:
@@ -692,13 +698,16 @@ def drill_scripts(name, n, device="cpu", compile=None):
 
 
 @torch.no_grad()
-def play_drills(actor, n=128, device="cpu", names=None, greedy=False, seed=1, compile=None, scripts=True, cadence=None):
+def play_drills(actor, n=128, device="cpu", names=None, greedy=False, seed=1, compile=None, scripts=True, cadence=None,
+                compact=True, cuda_graph=True):
     """The drills (tools/nn/train/drills; default the verified ones, drills.READY): n battles of each on
     DRILL_EVAL_SEEDS (our side alternating, SPREAD) against the drill's enemy script -> {drill: {games, wins,
     win_rate, gold_trade (mean (enemy gold destroyed - own lost) / budget), gold_destroyed, gold_lost, seconds,
     timeouts, scripts: {naive, skilled: {win_rate, gold_trade}} (scripts: the drill's check scripts on the same
     battles), frames: {frame: battles} (drills.FRAMES: clean, broad, embedded; drills.BROAD, drills.EMBED), with
-    more than one frame in the battles {frame: {games, win_rate, gold_trade}} of each}}; {} without drills. cadence: the network's (tools/nn/train/cadence.py; default the game's)."""
+    more than one frame in the battles {frame: {games, win_rate, gold_trade}} of each}}; {} without drills. cadence: the network's (tools/nn/train/cadence.py; default the game's).
+    compact, cuda_graph: as play()'s (the batch shrinks to BUCKETS sizes as its battles end, the trackers keep
+    the whole batch: drills/metrics.Tracker.update(rows=)); the last battle no longer drags all of them."""
     from tools.nn.train import drills as D
     from tools.nn.train.drills import metrics as drill_metrics
     from tools.nn.train.drills import source as drill_source
@@ -718,15 +727,43 @@ def play_drills(actor, n=128, device="cpu", names=None, greedy=False, seed=1, co
                                                              torch.zeros_like(side_t)), loaded[n].roles,
                                                 limit_s=params.limit_s)
                 for n in names}
-    for i in range(steps):
-        if i % CHECK_EVERY == 0 and bool(env.st.done.all()):
-            break
-        def track(live):
-            for tr in trackers.values():
-                tr.update(env.st, live)
-        env.step(actor, None, greedy, each=track)
-    side = lay.learner
     B = env.B
+    full, at = env.st, SimpleNamespace(rows=None)          # the whole batch; the running battles' places in it
+
+    def track(live):
+        for tr in trackers.values():
+            tr.update(env.st, live, at.rows)
+
+    def one():
+        env.step(actor, None, greedy, each=track)
+    graph, i = None, 0
+    while i < steps:
+        n_live = int((~env.st.done).sum())
+        if n_live == 0:
+            break
+        if TRACE is not None:
+            TRACE.append((i, n_live, env.B, time.time()))
+        size = bucket(n_live, env.B) if compact else env.B
+        if size < env.B:
+            _put(full, torch.arange(B, device=env.device) if at.rows is None else at.rows, env.st)
+            keep = env.narrow(_ended(env, size))
+            at.rows = keep if at.rows is None else at.rows[keep]
+            graph = None
+        if (at.rows is not None and cuda_graph and env.device.type == "cuda" and env.B in BUCKETS and steps - i > 4 * CHECK_EVERY
+                and graph is None):
+            graph = Graphed(one, SimpleNamespace(env=env), env.B)
+            i += graph.warm
+        for _ in range(min(CHECK_EVERY, steps - i)):
+            if graph is not None and graph.ok:
+                graph.replay()
+            else:
+                one()
+            i += 1
+    graph = None
+    if at.rows is not None:
+        _put(full, at.rows, env.st)
+        env.st = full
+    side = lay.learner
     won = env.st.winner.cpu().numpy() == side
     gold_b = reward.gold_sides(env.st.u, env.weights.rout_share).cpu().numpy()
     own, enemy = gold_b[np.arange(B), side - 1], gold_b[np.arange(B), 2 - side]

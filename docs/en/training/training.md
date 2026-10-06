@@ -165,7 +165,8 @@ the networks decide), `ppo.py`, `evaluate.py` (evaluation and replays), `skill.p
 
 **Battles.** Random armies of the [army generator](armies.md): equal budget, a lord and up to
 `--max-units` units a side, half the bank with side 1 attacking. Training seeds only; the bank
-(`--bank` battles) is renewed every `--bank-refresh` minutes; evaluation uses `EVAL_SEEDS`, never
+(`--bank` battles) is renewed every `--bank-refresh` minutes (the next one built ahead in a thread,
+`--no-bank-ahead`: when it is due); evaluation uses `EVAL_SEEDS`, never
 trained on. `--small 0.35:6` keeps 35 % of every bank at ≤ 6 units a side. A finished battle takes
 a new one from the bank with new randomised numbers. The learner plays side 1 in some battles and
 side 2 in others: every army in both roles. The network sees the map as the game shows it (the
@@ -527,7 +528,9 @@ battle draws a number when it starts and is labelled, whole, while the number is
 share (a larger share keeps the battles a smaller one had); battles of no drill are never labelled.
 The weight on a labelled unit is a fixed `--drill-teach-weight`, and the term is summed over the
 labelled units / *all* the drill's units, so the pull is weight × share (share 1 = the manual teacher at
-that weight); the agreement is logged over all the drill's units, labelled or not. Until the run's
+that weight); the agreement is logged over all the drill's units, labelled or not. At share 0 the
+teacher's script runs on every 8th decision only (`rollout.TEACH_PROBE`): the labels there only measure
+the agreement, and the script on every decision cost ~20 % of the rollout. Until the run's
 first evaluation the shares come from the previous numbers: test5's "before" evaluation of the
 starting network, else the init checkpoint's own test5 evaluation (`m<minute>.pt` → its
 `eval_m<minute>.json` / report.json's trend / after.json; a test5 run's `latest.pt` → that folder's
@@ -727,8 +730,10 @@ target switches, the behaviour and liveliness metrics.
 **Only the running battles.** An evaluation runs until its longest battle ends. Once at most 64
 battles are left, the batch shrinks to them (`rollout.Battles.narrow`: padded with ended battles,
 which stay frozen; `evaluate.BUCKETS`) and the shrunk batch's decision is replayed as one CUDA graph
-(`evaluate.Graphed`). The same seeds give the same battles; the graph's replay gives bit for bit
-the battles of stepping. `play(compact=False, cuda_graph=False)` steps the whole batch.
+(`evaluate.Graphed`). The drills' battles go the same way (`play_drills`: the drills' counters keep the
+whole batch, `drills/metrics.Tracker.update(rows=)`). The same seeds give the same battles; the graph's
+replay gives bit for bit the battles of stepping. `play(compact=False, cuda_graph=False)` and
+`play_drills(compact=False)` step the whole batch.
 
 ### Test protocol (`test5`)
 
@@ -753,7 +758,10 @@ with it, so tests can be compared with each other.
 A **trend run** (`--updates 0 --minutes M --every K`) evaluates every K minutes of training (their
 time not counted), keeps each network (`m<minute>.pt`, the last with its critic) and evaluation
 (`eval_m<minute>.json`) and writes the table minute 0 / K / … / M (`trend.md`, `report.json`).
-`--before PATH` reuses a "before" evaluation (only while the simulator has not changed);
+`--before PATH` reuses a "before" evaluation (only while the simulator has not changed). Without it
+the "before" is taken from the folder of `--init` when an evaluation there is of the same network with the
+same code and settings (a chain step: the previous step's `after.json`; [step speed](workflow.md#step-speed));
+`--fresh-before` plays it again.
 `--report-only` rebuilds the report of a finished label without the GPU; `--prev-report` names the
 previous iteration for the capacity block. The missing references (the script baselines, the drill
 check scripts) test5 starts on the CPU before its first evaluation (`tools/nn/train/refs.py`, ~8 min on

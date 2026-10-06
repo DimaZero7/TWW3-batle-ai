@@ -25,6 +25,11 @@ VERSION_FILES = ("tools/nn/sim", "tools/nn/armies", "tools/nn/train/opponents.py
                  "tools/nn/abilities.py", "tools/nn/model", "config/nn")
 # What the drills' script references depend on besides the simulator (drill_version()).
 DRILL_FILES = "tools/nn/train/drills"
+# What an evaluation's numbers depend on besides the simulator and the drills (eval_version()): test5 takes the
+# previous step's last evaluation as its "before" only when these are the same too.
+EVAL_FILES = ("tools/nn/train/evaluate.py", "tools/nn/train/rollout.py", "tools/nn/train/behaviour.py",
+              "tools/nn/train/skill.py", "tools/nn/train/matchups.py", "tools/nn/train/profiles.py",
+              "tools/nn/train/cadence.py", "tools/nn/train/league.py")
 # The baseline document's battle fields (evaluate.script_battles): lists over the pairs, in seed order.
 FIELDS = ("seed", "winner", "lost", "start", "budget", "factions", "attacker")
 
@@ -51,6 +56,16 @@ def drill_version():
     for f in sorted((ROOT / DRILL_FILES).glob("*.py")):
         h.update(f.name.encode())
         h.update(f.read_bytes().replace(b"\r\n", b"\n"))
+    return h.hexdigest()[:12]
+
+
+def eval_version():
+    """drill_version() and the evaluation's own code (EVAL_FILES): what test5's evaluation of a network depends on
+    besides the network and the settings (test5.eval_key)."""
+    h = hashlib.sha256(drill_version().encode())
+    for rel in EVAL_FILES:
+        h.update(rel.encode())
+        h.update((ROOT / rel).read_bytes().replace(b"\r\n", b"\n"))
     return h.hexdigest()[:12]
 
 

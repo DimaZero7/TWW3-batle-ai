@@ -16,6 +16,16 @@ class TestVersion:
         v = version.sim_version()
         assert len(v) == 12 and v == version.sim_version()
 
+    def test_the_evaluation_s_version_follows_its_own_code_not_the_simulator_s(self, tmp_path, monkeypatch):
+        f = tmp_path / "evaluate.py"
+        f.write_text("A = 1\n", encoding="utf-8")
+        monkeypatch.setattr(version, "EVAL_FILES", (str(f),))
+        v, sim = version.eval_version(), version.sim_version()
+        f.write_text("A = 2\n", encoding="utf-8")
+        assert version.eval_version() != v and version.sim_version() == sim
+        f.write_bytes(b"A = 1\r\n")                                   # line ends do not count
+        assert version.eval_version() == v
+
     def test_the_baseline_file_name(self):
         assert version.baseline_name("ai_like", 19, 3600.0, "abc") == "ai_like_19u_3600s_abc.json"
 

@@ -26,7 +26,11 @@ a test on a busy GPU takes longer but learns as much; --minutes only caps the ti
    one enemy while another enemy strikes an own unit in flank or rear); the share of own melee
    seconds striking an enemy's flank or rear; attack target switches a minute; ability uses
    (tools/nn/train/behaviour.py).
---before PATH reuses a "before" evaluation (a before.json of the same --init and code).
+--before PATH reuses a "before" evaluation (a before.json of the same --init and code). Without it the
+"before" is taken from the folder of --init when an evaluation there has the same key (eval_key: the
+network's weights, the code of the simulator, drills and evaluation, the settings): the chain's next step
+starts from the previous step's last network, whose final evaluation (after.json) is that measurement
+already (a fresh one differs only by the sampled orders' random draws); --fresh-before plays it anyway.
 
 With the drills' teacher (`-- --drill-teach '{"kiting": 0.5}'`, run.py) a "teacher" block per taught
 drill from the training log: the imitation weight, its cross-entropy and the agreement (the policy's
@@ -66,8 +70,10 @@ minutes of training too (its time not counted), keeping each network (m<minute>.
 """
 import argparse
 import contextlib
+import hashlib
 import json
 import os
+import signal
 import sys
 import time
 from pathlib import Path
@@ -76,6 +82,7 @@ import torch
 
 from tools.nn.train import cadence as cad
 from tools.nn.train import capacity, checkpoint, drills, evaluate, matchups, profiles, refs, run, skill, teach_auto
+from tools.nn.train import version
 
 OUT = checkpoint.DIR / "test5"
 LOCK = checkpoint.DIR.parent / "gpu-train.lock"
@@ -86,9 +93,17 @@ PROTOCOL = ["--small", "0.35:6", "--critic-warmup", "3",
             "--pool-extra", "build/nn-train/runs/long19/latest.pt", "--snapshot-every", "10", "--no-eval"]
 
 
+def _stop(signum, frame):
+    """SIGTERM (docker stop) -> SystemExit: the stack unwinds and gpu_lock frees the lock (as on Ctrl+C). The
+    container's first process ignores SIGTERM without a handler: docker stop then killed it after 10 s, and
+    the lock stayed until tools.ops.leftovers --unlock."""
+    raise SystemExit(128 + signum)
+
+
 @contextlib.contextmanager
 def gpu_lock(label, path=LOCK, poll_s=30.0, gap_s=60.0):
-    """Wait until no other heavy GPU job holds `path`, hold it while the block runs, then free it."""
+    """Wait until no other heavy GPU job holds `path`, hold it while the block runs, then free it (also on
+    SIGTERM: _stop)."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     released = path.with_suffix(".released")
@@ -113,9 +128,14 @@ def gpu_lock(label, path=LOCK, poll_s=30.0, gap_s=60.0):
             time.sleep(poll_s)
     with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
         f.write(f"{label} {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+    old = None
+    with contextlib.suppress(ValueError):        # (signal handlers only in the main thread)
+        old = signal.signal(signal.SIGTERM, _stop)
     try:
         yield
     finally:
+        if old is not None:
+            signal.signal(signal.SIGTERM, old)
         with contextlib.suppress(OSError):
             released.write_text(f"{time.time():.3f} {label}\n", encoding="utf-8", newline="\n")
         with contextlib.suppress(FileNotFoundError):
@@ -126,6 +146,48 @@ def chosen(args):
     """The metric profiles of this run (args.profiles, set by main(); without it every profile)."""
     p = getattr(args, "profiles", None)
     return profiles.TEST5 if p is None else p
+
+
+def weights_hash(module):
+    """A hash of a module's weights (names and values; a compiled module's prefix dropped): the same network
+    in memory and loaded back from its checkpoint give the same hash; None without a module."""
+    if module is None:
+        return None
+    h = hashlib.sha256()
+    for k, v in sorted(module.state_dict().items()):
+        x = v.detach().reshape(-1).cpu().contiguous()
+        h.update(f"{k.removeprefix('_orig_mod.')} {x.dtype} {tuple(v.shape)}".encode())
+        h.update(x.view(torch.uint8).numpy().tobytes())
+    return h.hexdigest()[:16]
+
+
+def eval_key(actor, args, cadence):
+    """What an evaluation's numbers depend on: the network's weights (weights_hash), the code
+    (version.eval_version: the simulator, the drills, the evaluation's own files), the battles and profiles,
+    the cadence, the drills' frames. Two evaluations of one key differ only by the sampled orders' draws."""
+    prof = chosen(args)
+    key = {"actor": weights_hash(actor), "code": version.eval_version(), "eval": args.eval,
+           "drill_eval": args.drill_eval if "drills" in prof else 0, "profile": profiles.text(prof, profiles.TEST5),
+           "cadence": cadence.meta(), "broad": drills.BROAD, "embed": drills.EMBED, "opponents": list(OPPONENTS)}
+    return json.loads(json.dumps(key))                  # as it reads back from a file
+
+
+# What an evaluation gets from the training around it (test5's hook, the "after"): not part of the measurement.
+TRAINING_KEYS = ("distance", "teach", "teach_auto", "teach_normal", "update")
+
+
+def reusable(init, key):
+    """(path, evaluation without TRAINING_KEYS) of an evaluation with this key in the folder of the checkpoint
+    `init` (after.json, eval_m*.json, before.json: the previous step of a chain), else None."""
+    folder = Path(init).parent
+    for p in [folder / "after.json", *sorted(folder.glob("eval_m*.json"), reverse=True), folder / "before.json"]:
+        try:
+            doc = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(doc, dict) and doc.get("key") == key:
+            return p, {k: v for k, v in doc.items() if k not in TRAINING_KEYS}
+    return None
 
 
 def evaluation(actor, args, device, cadence):
@@ -141,6 +203,7 @@ def evaluation(actor, args, device, cadence):
     res["seconds"] = round(time.time() - t)
     res["cadence"] = cadence.meta()
     res["profile"] = profiles.text(prof, profiles.TEST5)
+    res["key"] = eval_key(actor, args, cadence)
     return res
 
 
@@ -487,6 +550,8 @@ def main():
     ap.add_argument("--minutes", type=float, default=30.0, help="the training's time cap")
     ap.add_argument("--eval", type=int, default=512, help="EVAL_SEEDS battles per opponent (half in each role)")
     ap.add_argument("--before", help="reuse this before.json")
+    ap.add_argument("--fresh-before", action="store_true",
+                    help="play the 'before' evaluation even when the folder of --init has one of the same key")
     ap.add_argument("--every", type=float, default=0,
                     help="minutes of training between full evaluations (a trend run; 0: before and after only)")
     ap.add_argument("--no-lock", action="store_true", help="do not take the GPU lock (small smoke runs only)")
@@ -530,6 +595,10 @@ def test(args, rest):
     out = OUT / args.label
     out.mkdir(parents=True, exist_ok=True)
     device = torch.device(args.device)
+    # TF32 matrix products from the start, as run.train sets them: torch.compile's graphs are guarded on this
+    # global switch, and the "before" compiled without it made the first evaluation after training compile
+    # every graph again (+60-150 s)
+    torch.backends.cuda.matmul.allow_tf32 = True
 
     targs = run.parser().parse_args(["--name", f"test5_{args.label}", "--init", args.init, "--minutes",
                                      str(args.minutes), "--updates", str(args.updates), "--device", args.device]
@@ -551,7 +620,16 @@ def test(args, rest):
             print(f"WARNING: --before was evaluated at cadence {before.get('cadence', cad.STEP.meta())}, "
                   f"this run's is {cadence.meta()}", flush=True)
     else:
-        before = evaluation(checkpoint.load_policy(args.init, device), args, device, cadence)
+        start = checkpoint.load_policy(args.init, device)
+        found = None if args.fresh_before else reusable(args.init, eval_key(start, args, cadence))
+        if found:
+            path, before = found
+            before.update(reused=str(path), seconds=0)          # (no time spent on it here)
+            print(f"before: the same evaluation as {path} (same network, code and settings; --fresh-before plays "
+                  f"it again)", flush=True)
+        else:
+            before = evaluation(start, args, device, cadence)
+        del start
     (out / "before.json").write_text(json.dumps(before, indent=1), encoding="utf-8", newline="\n")
     print(f"before: {before.get('seconds')} s", flush=True)
 
