@@ -102,14 +102,13 @@ def from_arena(name, own_ai="attack", arena_path=None):
     places = arena_scenario.placements(arena)
     sides = arena_scenario.armies(arena)
     params = load()
-    spacing = params.sim["formation"]["spacing_m"]
     out = {"attacker": 1 if own_ai == "attack" else 2, "sides": {}}
     for side, tag in ((1, "own"), (2, "enemy")):
         units = []
         for p in places[tag]:
             # A placement is the formation's front centre (as the game's order point): step back
             # half a depth to the centre.
-            back = float(replay.half_depth(p["men"], p["width"], spacing)) if p["men"] > 1 else 0.0
+            back = float(replay.half_depth(p["men"], p["width"], params.spacing_of(p["key"]))) if p["men"] > 1 else 0.0
             br = math.radians(p["bearing_deg"])
             units.append({"key": p["key"], "x": p["x"] - back * math.sin(br), "z": p["z"] - back * math.cos(br),
                           "b": float(p["bearing_deg"]), "width": p["width"], "general": p["general"],

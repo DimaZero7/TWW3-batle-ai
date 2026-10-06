@@ -57,6 +57,7 @@ flowchart LR
 | `projectiles_tables` | projectile: range, damage, reload, flight | `units.json` |
 | `unit_armour_types_tables` | armour: key → number | `units.json` |
 | `unit_shield_types_tables` | shield: key → chance to block an arrow | `units.json` |
+| `unit_spacings_tables` | formation template (`land_units.spacing`): spacing across the front and between ranks, scatter, chaotic formation | `units.json` (`spacing`) |
 | `unit_attributes_to_groups_junctions_tables` | the unit's attributes (`expendable`, `encourages`…) | `units.json` |
 | `land_units_to_unit_abilites_junctions_tables` | the unit's abilities (keys) | `units.json` |
 
@@ -87,6 +88,7 @@ flowchart LR
 | `projectiles` | 53 | 58 | 1093 |
 | `unit_armour_types` | 6 | 4 | 106 |
 | `unit_shield_types` | 6 | 5 | 24 |
+| `unit_spacings` | 7 | 19 | 164 |
 | `unit_attributes_to_groups_junctions` | 2 | 3 | 8559 |
 | `land_units_to_unit_abilites_junctions` | 1 | 3 | 9686 |
 
@@ -102,7 +104,10 @@ flowchart LR
 - Inferred from the values, not checked in battle: acceleration, deceleration,
   charge speed, radius, height, size class (`battle_entities`); bonuses against
   large and infantry, time between blows, hitting several (`melee_weapons`); the
-  projectile's flight (`projectiles`); the shield's chance (`unit_shield_types`).
+  projectile's flight (`projectiles`); the shield's chance (`unit_shield_types`); the close formation's spacing (`unit_spacings`: nine numbers come
+  before the key - that way the table reads to its last byte; the first three are the spacing across the front h,
+  the scatter and the spacing between ranks v; checked on the roster: the game's front (files - 1) x h within ~1 %,
+  files = floor(width / h)).
   Why: [what we inferred](../training/units.md#what-we-inferred).
 - Fields whose meaning we do not know are named by number: `f07`, `f12`…
 - **`unit_experience_bonuses_tables`**: a stat, an int32 flag and two float32

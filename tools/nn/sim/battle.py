@@ -82,7 +82,11 @@ def step(st, orders, params=None, dt=None):
     both = alive[:, :, None] & alive[:, None, :]
     # Units already fighting stay in contact a little longer (formations thin as men fall).
     held = (u["m"][:, :, None] | u["m"][:, None, :]).float() * cal["contact"]["hold_m"]
-    touch = pw["enemy"] & both & (pw["gap"] <= reach + held)
+    # Formations touch when their edges overlap by -reach_m (the game's formations step into each other at the
+    # contact); a lone man (a lord) stops at a formation's edge (contact.lord_reach_m).
+    lone = (u["men0"] <= 1)
+    reach_ij = torch.where(lone[:, :, None] | lone[:, None, :], float(cal["contact"].get("lord_reach_m", reach)), reach)
+    touch = pw["enemy"] & both & (pw["gap"] <= reach_ij + held)
     # Leaving melee: a withdraw order, or any unit told to move contact.leave_m or more away (0: off).
     # It walks out of the fight: it strikes nobody and is not held in place, the enemies in contact
     # still strike it (measured in the game, config/nn/sim.json contact.why).
@@ -106,22 +110,26 @@ def step(st, orders, params=None, dt=None):
     # --- innate effects (attributes, passives, game-fired timed passives: config/nn/effects.json): their
     # stats and rule flags hold for this step ---
     innate = effects.apply(u, params, dt, standing, engaged, pw["dist"], same_side)
-    new = engaged & (u["contact_s"] <= 0)
-    fast = speed >= 0.5 * u["run"]
-    factor = torch.where(fast, (speed / u["run"].clamp(min=0.1)).clamp(max=1), torch.zeros_like(speed))
-    # Bracing: a unit with charge_reflection that stands still meets an infantry charge coming within
-    # bracing_attack_angle of its front as if it charged too (measured in the whole battles: the
-    # charger gains nothing). The database's charge_reflect_min_charge_factor_threshold (0.7) is not
-    # applied: chargers here meet their target at 0.55-0.9 of their run (median 0.75).
-    braced = new & u["reflect"] & (speed < cal["melee"]["braced_speed"])
-    incoming = torch.where(touch & (new & (u["men0"] > 1))[:, None, :]
-                           & (pw["rel_i"].abs() <= R["bracing_attack_angle"] * geometry.DEG),
-                           factor[:, None, :], torch.zeros_like(pw["gap"])).amax(2)
-    factor = torch.where(braced & (incoming > 0), incoming, factor)
-    u["charge"] = torch.where(new, factor, torch.where(engaged, u["charge"], torch.zeros_like(u["charge"])))
+    # The melee clock: seconds since the contact began; it goes on through gaps out of contact shorter than
+    # contact.reset_s (the game: pull-outs of 4-7 s do not restart a fight, build/cyclecharge).
+    reset_s = float(cal["contact"].get("reset_s", 0.0))
+    u["out_s"] = torch.where(engaged, torch.zeros_like(u["out_s"]), u["out_s"] + dt)
+    u["contact_s"] = torch.where(engaged, u["contact_s"] + dt,
+                                 torch.where(u["out_s"] < reset_s, u["contact_s"], torch.zeros_like(u["contact_s"])))
+    # --- the charge (CA Feature Focus #2, build/charge/spec.md): an attack order and a run-up - charge.min_runup_m
+    # run at charge.min_speed_share of the run speed or faster - give the full charge bonus at the contact (an
+    # attack order given within charge.order_grace_s after the contact still counts); it fades on its own clock,
+    # linear to 0 over charge_decay_duration from the first blow, in contact or out of it; a new charge restarts it.
+    ccal = cal["charge"]
     decay = R["charge_decay_duration"]
-    charge_now = u["charge"] * (1 - u["contact_s"] / decay).clamp(min=0)
-    u["contact_s"] = torch.where(engaged, u["contact_s"] + dt, torch.zeros_like(u["contact_s"]))
+    u["charge"] = (u["charge"] - dt / decay).clamp(min=0)
+    fire = engaged & (kind == O.ATTACK) & (u["runup"] >= float(ccal["min_runup_m"]))
+    u["charge"] = torch.where(fire, torch.ones_like(u["charge"]), u["charge"])
+    charge_now = u["charge"]
+    fast = (speed >= float(ccal["min_speed_share"]) * u["run"]) & (speed > 0.1)
+    grace = engaged & (u["contact_s"] < float(ccal["order_grace_s"])) & ~fire
+    u["runup"] = torch.where(engaged, torch.where(grace, u["runup"], torch.zeros_like(u["runup"])),
+                             torch.where(fast, u["runup"] + speed * dt, torch.zeros_like(u["runup"])))
 
     # --- lord abilities cast by the game's AI by its rule or by the network's order: their effects hold
     # for this step ---
@@ -130,7 +138,7 @@ def step(st, orders, params=None, dt=None):
     tired = fatigue.effects(u, params)
 
     # --- melee ---
-    rate, mhit, sector, _ = melee.strikes(u, pw, strike, params, charge_now, u["contact_s"])
+    rate, mhit, sector, _ = melee.strikes(u, pw, strike, params, charge_now)
     hp_melee = rate * dt
     # A unit leaving melee (held or walking out) still in contact takes contact.leave_taken of the blows: melee
     # units more (they turn their backs), missile units less (measured, config/nn/sim.json contact.pin_why).
@@ -311,10 +319,12 @@ def step(st, orders, params=None, dt=None):
     # movement.velocity brakes to rest within 0.5 m of the destination.
     pending_move = point & (((u["ox"] - u["x"]) ** 2 + (u["oz"] - u["z"]) ** 2) > 0.5 ** 2)
     idle = standing & ~pending_move & (kind != O.ATTACK) & (aim_at < 0)
-    activity = {"melee": engaged, "charging": engaged & (charge_now > 0), "shooting": firing,
+    # The charge's fatigue (+34) only in the first fatigue.calibration.charge_s seconds after its first blow.
+    charge_s = float(cal["fatigue"].get("calibration", {}).get("charge_s", decay))
+    activity = {"melee": engaged, "charging": engaged & (charge_now > 1 - charge_s / decay), "shooting": firing,
                 "running": speed > u["walk"] + 0.3, "walking": speed > 0.3,
                 "idle": idle, "active": alive, "attack": kind == O.ATTACK, "single": u["men0"] <= 1,
-                "run_order": u["order_run"].bool(), "routing": alive & u["r"], "contact_s": u["contact_s"]}
+                "run_order": u["order_run"].bool(), "routing": alive & u["r"]}
     near_m = float(cal["fatigue"].get("calibration", {}).get("ready_enemy_m", 0.0))
     if near_m > 0:
         activity["enemy_near"] = (foes & standing[:, None, :] & (d <= near_m)).any(2)
@@ -334,6 +344,11 @@ def step(st, orders, params=None, dt=None):
     gx = torch.where(close_in, tx, gx)
     gz = torch.where(close_in, tz, gz)
     want = torch.where(run, u["run"], u["walk"])
+    # charge.rush_m (0: off): a unit running at its attack target closes the last rush_m at its charge speed (the
+    # database's charge_speed; whole battles show no such rush, build/mass/spec.md S4 - kept as a switch).
+    rush_m = float(cal["charge"].get("rush_m", 0.0))
+    if rush_m > 0:
+        want = torch.where(close_in & run & (t_reach <= rush_m), u["charge_speed"], want)
     moving = standing & (point | close_in)
     fx, fz = movement.flee_goal(u, pw, alive, st.bounds)
     routing = alive & u["r"]

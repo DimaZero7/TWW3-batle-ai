@@ -56,6 +56,7 @@ flowchart LR
 | `projectiles_tables` | снаряд: дальность, урон, перезарядка, полёт | `units.json` |
 | `unit_armour_types_tables` | броня: ключ → число | `units.json` |
 | `unit_shield_types_tables` | щит: ключ → шанс отбить стрелу | `units.json` |
+| `unit_spacings_tables` | шаблон строя (`land_units.spacing`): шаг по фронту и в глубину, разброс, хаотичный строй | `units.json` (`spacing`) |
 | `unit_attributes_to_groups_junctions_tables` | свойства отряда (`expendable`, `encourages`…) | `units.json` |
 | `land_units_to_unit_abilites_junctions_tables` | способности отряда (ключи) | `units.json` |
 
@@ -86,6 +87,7 @@ flowchart LR
 | `projectiles` | 53 | 58 | 1093 |
 | `unit_armour_types` | 6 | 4 | 106 |
 | `unit_shield_types` | 6 | 5 | 24 |
+| `unit_spacings` | 7 | 19 | 164 |
 | `unit_attributes_to_groups_junctions` | 2 | 3 | 8559 |
 | `land_units_to_unit_abilites_junctions` | 1 | 3 | 9686 |
 
@@ -101,7 +103,9 @@ flowchart LR
 - Выведены по значениям, в бою не проверены: разгон, торможение, скорость
   натиска, радиус, рост, класс размера (`battle_entities`); бонусы против больших
   и пехоты, время между ударами, удар по нескольким (`melee_weapons`); полёт
-  снаряда (`projectiles`); шанс щита (`unit_shield_types`). Почему так —
+  снаряда (`projectiles`); шанс щита (`unit_shield_types`); шаг сомкнутого строя (`unit_spacings`: девять
+  чисел стоят до ключа — так таблица читается до последнего байта; первые три — шаг по фронту h, разброс, шаг
+  в глубину v; сверены с ростером: фронт игры (ряды − 1) × h с точностью ~1 %, рядов = floor(ширина / h)). Почему так —
   [что выведено нами](../training/units.md#что-выведено-нами).
 - Поля, смысла которых мы не знаем, названы по номеру: `f07`, `f12`…
 - **`unit_experience_bonuses_tables`**: показатель, int32-флаг и два float32

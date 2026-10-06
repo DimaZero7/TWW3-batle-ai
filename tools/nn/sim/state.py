@@ -67,7 +67,9 @@ STATIC = {
     "hp0": ("f", "health of the unit at the start"),
     "mass": ("f", "a man's mass"),
     "radius": ("f", "a man's radius, m"),
-    "width": ("f", "frontage at the start, m"),
+    "width": ("f", "frontage ordered at the start, m (files = floor(width / sp_h))"),
+    "sp_h": ("f", "a man's place across the front, m (the formation template's close spacing, the database)"),
+    "sp_v": ("f", "a man's place between ranks, m (the same)"),
     "walk": ("f", "walk speed, m/s"),
     "run": ("f", "run speed, m/s"),
     "charge_speed": ("f", "charge speed, m/s"),
@@ -129,8 +131,13 @@ INTERNAL = {
     "fatigue": ("f", "fatigue points"),
     "recent": ("f", "HP lost recently (the last morale.casualties_s seconds: recent casualties)"),
     "extended": ("f", "HP lost over the last morale.extended_s seconds (extended casualties)"),
-    "contact_s": ("f", "seconds in melee since the contact began"),
-    "charge": ("f", "charge at the contact, 0-1 (1 = hit at full run)"),
+    "contact_s": ("f", "seconds in melee since the contact began (it goes on through gaps shorter than "
+                       "contact.reset_s out of contact)"),
+    "out_s": ("f", "seconds out of contact since the last contact (contact.reset_s)"),
+    "charge": ("f", "the charge left, 0-1: 1 at the charge's first blow, then down by its own clock over "
+                    "charge_decay_duration (13 s), in contact or not"),
+    "runup": ("f", "run-up, m: run at charge.min_speed_share of the run speed or faster since the last stop, "
+                   "walk or contact (charge.min_runup_m)"),
     "aim": ("f", "seconds standing still able to shoot"),
     "leave_s": ("f", "seconds leaving melee while still touching an enemy (contact.pin_s)"),
     "shots": ("f", "fractional shots carried to the next step"),

@@ -181,7 +181,8 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None):
     resist = u["resist_missile"]
     if ms.get("physical_resist"):
         resist = (resist + u["resist_physical"]).clamp(max=0.9)
+    # the same damage rule as a blow (melee.per_hit: armour roll, overkill; a lone man loses the mean)
     hit = melee.per_hit(u["m_damage"][:, :, None], u["m_ap"][:, :, None], u["armour"][:, None, :],
-                        u["hp_man"][:, None, :], resist[:, None, :])
+                        u["hp_man"][:, None, :], resist[:, None, :], single=(u["men0"] <= 1)[:, None, :])
     hp = landed * hit * (1 - shield)
     return shots, hp, hit

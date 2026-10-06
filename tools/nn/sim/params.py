@@ -68,6 +68,14 @@ class Params:
         return Params(self.units, self.rules, sim, self.abilities, self.effects)
 
     # --- per unit ---
+    def spacing_of(self, key):
+        """(h, v), m: a man's place across the front and between ranks in the unit's close formation (the
+        database's unit_spacings of its template, config/nn/units.json spacing); sim.json formation.spacing_m for a
+        unit without one."""
+        sp = (self.units.get(key) or {}).get("spacing") or {}
+        d = float(self.sim["formation"]["spacing_m"])
+        return float(sp.get("h") or d), float(sp.get("v") or d)
+
     def static(self, key, faction=None):
         """The STATIC fields (tools/nn/sim/state.py) of a unit key, without its place."""
         u = self.units[key]
@@ -83,12 +91,13 @@ class Params:
             reload_s = (ms["reload_s"][cat] * (missile.get("reload_s", ref) / ref if ref else 1.0)
                         if cat in ms["reload_s"] else missile.get("reload_s", 0) * ms["reload_scale_other"])
         resist = u.get("damage_resist") or {}
-        spacing = self.sim["formation"]["spacing_m"]
+        h, v = self.spacing_of(key)
         men = u["men"]
         return {
             "men0": men, "hp_man": u["hp_per_man"], "hp0": u["hp_total"], "mass": u["mass"],
-            "radius": u["radius_m"],
-            "width": (men / max(1, u.get("rank_depth") or 1)) * spacing if men > 1 else 2 * u["radius_m"],
+            "radius": u["radius_m"], "sp_h": h, "sp_v": v,
+            # the default order: men / rank_depth files (the database's ranks), h apart
+            "width": (men / max(1, u.get("rank_depth") or 1)) * h if men > 1 else 2 * u["radius_m"],
             "walk": u["speed"]["walk"], "run": u["speed"]["run"], "charge_speed": u["speed"]["charge"],
             "accel": u["speed"]["acceleration"], "decel": u["speed"]["deceleration"],
             "attack": m["attack"], "defence": m["defence"], "charge_bonus": m["charge_bonus"],

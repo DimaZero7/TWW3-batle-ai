@@ -13,6 +13,7 @@ September 2026, **v9.0.1, build 50381**.
 - [Commands tested in battle](commands.md) — Which unit orders from Lua we checked in battle and how the engine carries them out
 - [Starting deployment](deployment.md) — Verified on 26 September 2026 in five controlled diagnostic launches on [The Moorlands Route](../maps/moorlands-route.md), using 15 Empire units per side (Gener…
 - [Live experiments and reproducibility](evidence.md) — Ten completed automatic runs, **55,356 samples**, with raw orders/state transitions and verified cleanup records
+- [Indicator registry of our units](indicators.md) — Every indicator of our 17 units that the simulator must count the way the game does: card numbers, the mechanics that depend on them, attributes, innate effects…
 - [A lord surrounded](lord-swarm.md) — How much a lord loses when one to four infantry units attack him from different sides, and what an armour-piercing unit or the enemy lord adds
 - [Melee](melee.md) — How the game counts blows in melee and how many men really fight
 - [Missile damage](missile-damage.md) — How much health an Empire archers' arrow takes, how often they shoot and at whom
@@ -27,6 +28,8 @@ September 2026, **v9.0.1, build 50381**.
 <!-- /generated -->
 
 **Battle mechanics:** [morale](morale.md) · [melee](melee.md) · [missile damage](missile-damage.md) · [pace and fatigue](pace.md) · [a lord surrounded](lord-swarm.md) — rules from the game's database and arena battle recordings.
+
+**[Indicator registry of our units](indicators.md)** — every indicator of our 17 units: the game's rule, status in the simulator, the in-game check; a new unit adds its own there.
 
 ## Test conditions
 

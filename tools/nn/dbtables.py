@@ -87,6 +87,14 @@ LAYOUTS = {
     # morale_is_lower_than_half_of_base_morale for Frenzy).
     "special_ability_to_recharge_contexts": (None, _layout("context:s special_ability:s")),
     "special_ability_to_auto_deactivate_flags": (None, _layout("flag:s special_ability:s")),
+    # A formation template's spacing (land_units.spacing; 06.10.2026, the same build): nine floats BEFORE the key
+    # (the close formation across the front h, its scatter, between ranks v, then six more), the key, the loose
+    # formation's four, the chaotic-formation flag and four more. This layout reads all 164 rows to the last byte;
+    # the close formation fits the game's own formations (data/roster: front = (files - 1) h, depth = (ranks - 1)
+    # v, files = floor(ordered width / h); docs/*/game/database.md).
+    "unit_spacings": (7, _layout("""
+        close_h:f close_scatter:f close_v:f f03:f f04:f f05:f f06:f f07:f f08:f key:s
+        loose_h:f loose_scatter:f loose_v:f routing_scatter:f chaotic:b f15:f f16:f f17:f f18:f""")),
 }
 # Tables too wide to decode whole (unit_special_abilities: version 74, ~80 fields, rows of 200-500
 # bytes): only the fields right after the key, which sit at fixed offsets (decode_prefix).
@@ -108,6 +116,8 @@ INFERRED = {
                     "shots_per_volley"},
     "unit_armour_types": {"material"},
     "unit_shield_types": {"missile_block_chance", "material"},
+    "unit_spacings": {"close_h", "close_scatter", "close_v", "loose_h", "loose_scatter", "loose_v", "routing_scatter",
+                      "chaotic"},
     "special_ability_to_special_ability_phase_junctions": {"order", "target_self", "target_friends",
                                                            "target_enemies"},
     "special_ability_phase_stat_effects": {"phase", "value", "stat", "how"},

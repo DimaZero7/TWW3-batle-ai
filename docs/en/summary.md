@@ -53,11 +53,16 @@ again — the baselines and the drill check scripts, ~8 min on the CPU beside th
 (`tools/nn/train/refs.py`; ahead, while the previous step runs: `tools.ops.baselines --run`) — unless
 the "canary" (the baseline's first 32 pairs) adopts the old ones.
 
-**Already modelled:** speeds, formation, contact and leaving melee (ordered away, a unit without a
-missile weapon is held 20 s, a missile unit 5 s, as in the game), pursuit of routers, hit chance (flat in formations: slope 0.1
-instead of the database's 1; lord against lord by the database's formula), damage and armour, charge and spear bracing, flank and rear
-(fitted: flank costs more than rear), volley fire, friendly fire and spill, lords (at most 9
-men hit them; the lord as fragile as in the game: his own aura does not reach him, in melee he is
+**Already modelled:** speeds, formation (each unit's step from its formation template in the database),
+contact and leaving melee (ordered away, a unit without a missile weapon is held 20 s, a missile unit
+5 s, as in the game), pursuit of routers. **Melee is by the game's formulas now** (the melee core): hit
+chance 35 + attack − defence at weight 1 for everyone (a miss costs 0.5 s: a man lands p / (p × interval
++ 0.5) hits a second), damage — armour-piercing in full + base less the armour roll, overkill beyond a
+man's health is lost (smoothed), a lord's blow is divided by 4 and hits an average of 2.07 men, flank and
+rear — defence ×0.6 / ×0.3, charge — only the charge bonus, on an attack order with a run-up, 13 s on its
+own clock, spearmen's charge reflection ×2 for 3.9 s; the fitted "slope 0.1", "charge blow" and "bringing
+men in" are gone. Volley fire, friendly fire and spill, lords (at most 6.5 men hit them, gathering over
+20 s; the lord as fragile as in the game: his own aura does not reach him, in melee he is
 always 'losing' (−3), projectiles hit him whole in melee, he tires slower than a formation; a lord duel: General v
 General x0.8 of the game, Warlord v Warlord x1.2), morale with all main modifiers (the 4 s and 60 s casualty windows and 'under fire' 15 s as in the
 game; a lord's death: his army
@@ -67,7 +72,8 @@ abilities (the game's AI fires them by a measured rule: the speed ones in melee,
 next to friends, Deadly Onslaught never).
 
 **Fatigue** (switched on by the latest change): 10 ticks a second; melee tires only a unit with
-an attack order (single entity 15 a tick and his charge only in the first 2 s of a contact, formation 13.7), shooting 7.5, walking 3.4, idle −18.
+an attack order (single entity 15 a tick, formation 13.7; a charge +34 for everyone only in the first
+2 s after the charge blow), shooting 7.5, walking 3.4, idle −18.
 Exhausted shares (replay of the 204 recordings): own 14.9 % (game 17.3 %), enemy 25.8 % (game 28.6 %);
 lords 13.6 / 25.3 % (game 22.0 / 22.9 %).
 
@@ -78,9 +84,17 @@ frozen. Three scores, higher is better:
 
 | Score | Now |
 |---|---:|
-| Mechanics: unit pairs and shooting within 20 % of the game | 51 / 54 |
-| Same winner: the game's AI against itself | 20 / 26 (21 at other seeds) |
-| Same winner: the network against the game's AI (163 recordings now) | 125 / 163 |
+| Mechanics: unit pairs and shooting within 20 % of the game | 37 / 54 (51 before the melee core) |
+| Same winner: the game's AI against itself | 21 / 26 (20 before the core) |
+| Same winner: the network against the game's AI (165 recordings now) | 127 / 165 (126 before the core) |
+
+Mechanics dropped from 51 to 37 not because of winners (all 12 pairs are as in the game) but because of
+pace: the first 15 s of formation contact are stronger in the game than the rule (the target loses
+499–764 HP, the rule gives 396–446; the fitted "charge blow" used to cover this), and lords against one
+unit hit 13–31 % harder than the game, ending their pairs sooner. The answer is in-game experiments
+([simulator](training/simulator.md#mechanics-the-pairs-and-shooting)). The Empire's whole-battle losses
+at 60 / 120 / 180 s are now as in the game: 0.25 / 0.43 / 0.55 (game 0.25 / 0.41 / 0.53; was 0.32 / 0.51 /
+0.63).
 
 **Gate replay** — the in-game gate battles replayed in the simulator (both sides from the
 recording). Gold trade at the game's end time: game −0.26…−0.41, simulator −0.05…−0.24 on the
@@ -105,15 +119,16 @@ same battles. **The simulator is too kind to the network** — the main measured
 - the second wave of units (Flagellants, Greatswords, militia, Skavenslaves, shielded Clanrats,
   Night Runners) is not checked against recordings;
 - not modelled: terrain, forests, visibility (`vis` is always true), cavalry, monsters, magic,
-  flying, artillery, experience ranks. Hit chance and the casualty window are fitted, not taken
-  from the database ([conflict table](game/mechanics/README.md#conflicts-with-our-simulator)).
+  flying, artillery, experience ranks. The casualty window is fitted, not taken from the database
+  ([conflict table](game/mechanics/README.md#conflicts-with-our-simulator)).
 
 Pending: the flank attacker by its own front (right for a lone attacker, but worsens the early
 trade and breaks the `counter` drill).
 
 Details: [simulator](training/simulator.md) · [unit passports](training/units.md) ·
 [in-game measurements](training/measurements.md) · [game mechanics](game/mechanics/README.md) ·
-[game database](game/database.md).
+[game database](game/database.md) · [indicator registry of our units](game/units/indicators.md) (the
+game's rule and the simulator's status for every indicator; a new unit adds its own there).
 
 ## The network
 

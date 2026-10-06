@@ -51,9 +51,9 @@ sources are used and marked. Our own measurements in the game are elsewhere:
 ## Ten facts that matter most for our simulator
 
 1. **The hit-chance formula is confirmed by CA** (2023): 35 + attack + bonus vs type + current
-   charge bonus − defence, 8–90 %; no patch changed it. Our flat `hit_slope` 0.1 is therefore a
-   stand-in for something else (blow cycle, matched combat, reach) in formations; a lord against a lord
-   hits exactly by the formula (measured in duels) — [melee](melee.md).
+   charge bonus − defence, 8–90 %; no patch changed it. The simulator counts every blow by it (weight
+   1); the flat pairs turned out to come from a miss costing ~0.5 s, with the interval starting after a
+   hit, and from overkill — [melee](melee.md).
 2. **Flank/rear: defence ×0.6 / ×0.3, decided per attacking model**, ending when the struck entity
    turns to face the attacker — which explains why a lord shows no flank penalty — [flanking](flanking.md).
 3. **"Attacked in the flank / rear" (−6 / −14) is a first-contact effect** by the key's description,
@@ -80,18 +80,18 @@ better one; each is a candidate for a test.
 
 | # | Mechanic | The game (source) | Ours | Page |
 |---|---|---|---|---|
-| 1 | Hit chance vs attack − defence | full slope 1 (CA, DB) | slope 0.1, fitted on 4 pairs | [melee](melee.md#hit-chance) |
-| 2 | Flank vs rear | rear costs more: defence ×0.3 vs ×0.6 (CA, DB) | flank costs more: fitted `flank_slope` 2.0, `rear_slope` 0.25 (measured 1.74× vs 1.31×) | [flanking](flanking.md#melee-defence) |
+| 1 | Hit chance vs attack − defence | full slope 1 (CA, DB) | the same; hits a second p / (p × interval + 0.5) (measured) | [melee](melee.md#hit-chance) |
+| 2 | Flank vs rear | rear costs more: defence ×0.3 vs ×0.6 (CA, DB) | the same, weight 1 (a lone attacker in the recordings: flank 1.53×, rear 1.92×) | [flanking](flanking.md#melee-defence) |
 | 3 | Direction sectors | per attacking model, by quadrant of the struck entity (CA; 45°/135° by our reading) | per unit, by the enemy centre, front < 60°, rear > 120° | [flanking](flanking.md#melee-defence) |
 | 4 | "Attacked in flank / rear" morale | −6 / −14 at first contact (DB description) | the same: −6 / −14 for one 0.5 s tick at the first blow from a worse side (`morale.attacked_event`; the recordings show −1.5 / −1.9 points over 1–2 s) | [flanking](flanking.md#morale) |
 | 5 | Recent casualties window | last 4 s (DB description) | 30 s (calibrated) | [morale](morale.md#modifiers-points) |
 | 6 | Extended casualties | −4 … −60 for 10–80 % lost in the last 60 s (DB) | not modelled | [morale](morale.md#modifiers-points) |
 | 7 | Fatigue rate | tick 0.1 s → ×10 a second (one forum claim, medium-low) | ×10 a second (calibration ON: melee tires only under an attack order — single entity +19, formation 13.7; shooting 7.5, walking 3.4, idle −18; fitted on 204 recordings) | [fatigue](fatigue.md#what-tires-and-what-rests) |
 | 8 | Fatigue effects | in the DB table `unit_fatigue_effects_tables` (melee attack to ×0.7, speed to ×0.85, …) | modelled from this table (`fatigue.effects()`) | [fatigue](fatigue.md) |
-| 9 | Formation spacing | `entity_formation_spacing` 1.8 m (DB) | 1.5 m (measured) | [movement](movement.md#formations) |
-| 10 | Charge reflection / bracing | braced reflectors deal ×2 weapon damage to chargers for 3.9 s; bracing is a mass multiplier (DB, CA) | a braced unit meets a frontal charge "as a charge" for 13 s (fitted to the measured 0.80) | [melee](melee.md#bracing-and-charge-defence) |
-| 11 | Charge impact | charge bonus + capped collision damage (≤ 70, 70 % AP) (DB) | extra ×(1 + 1.5 × speed share) damage for 13 s (fitted) | [melee](melee.md#charge) |
-| 12 | Splash | damage divided among targets (community, CA forum) | full hit on each target, capped at a man's HP | [melee](melee.md#splash) |
+| 9 | Formation spacing | the formation template's step `unit_spacings` (the Empire 1.48 × 1.6 m, …); `entity_formation_spacing` 1.8 m — without a template (DB) | the same | [movement](movement.md#formations) |
+| 10 | Charge reflection / bracing | braced reflectors deal ×2 weapon damage to chargers for 3.9 s; bracing is a mass multiplier (DB, CA) | reflection — the same; bracing as a mass multiplier is not modelled | [melee](melee.md#bracing-and-charge-defence) |
+| 11 | Charge impact | charge bonus + capped collision damage (≤ 70, 70 % AP) — only for large models (DB) | charge bonus only (all our models are small) | [melee](melee.md#charge) |
+| 12 | Splash | damage divided among targets (CA 5.1.0) | divided by 4, hits an average of 2.07 (measured) | [melee](melee.md#splash) |
 | 13 | Lord's aura | +4 to 70 m, fading to 0 at 105 m (DB) | the same: +4 to 70 m, fading to 0 at 105 m | [morale](morale.md#modifiers-points) |
 | 14 | Rally timing | `broken_finish_base_timeout` 180 s + 10 s × rank (DB; meaning unclear) | rally after 44 s median (measured) | [morale](morale.md#waver-rout-rally-shatter) |
 | 15 | Strong enemy near | −3 … −24 by combat power within 70 m (DB) | −3 only | [morale](morale.md#modifiers-points) |

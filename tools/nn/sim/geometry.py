@@ -1,7 +1,8 @@
 """Where units are relative to each other: formation size, pairwise distances, sides, contact.
 
-A unit is a rectangle: `width` m of front (fixed at the start) and a depth of as many ranks as
-its men fill (config/nn/sim.json formation.spacing_m between files and ranks); a lord is a
+A unit is a rectangle: `width` m of front ordered (fixed at the start), files = floor(width / h) men h apart
+and as many ranks as its men fill, v apart (h, v: the unit's formation template in the game's database,
+config/nn/units.json spacing; config/nn/sim.json formation.spacing_m where a unit has none); a lord is a
 circle of his radius. Bearing b in degrees: facing (sin b, cos b) in (x, z).
 """
 import math
@@ -12,14 +13,21 @@ DEG = math.pi / 180
 
 
 def dims(u, spacing):
-    """(front, depth) [B, N], m."""
+    """(front, depth) [B, N], m: files = floor(ordered width / h) (at least 1, at most the men), front = files x h,
+    depth = ceil(men / files) x v (the game's own formations, data/roster: front (files - 1) h, depth (ranks - 1)
+    v, within 1 % / 10 % at 15-40 m; build/meleecore/spacing_check.py). spacing: h and v of a unit without its own."""
     men = u["men"].clamp(min=0)
     single = u["men0"] <= 1
-    files = torch.clamp(torch.round(u["width"] / spacing), min=1)
+    if "sp_h" in u:
+        h = torch.where(u["sp_h"] > 0, u["sp_h"], torch.full_like(u["sp_h"], float(spacing)))
+        v = torch.where(u["sp_v"] > 0, u["sp_v"], torch.full_like(u["sp_v"], float(spacing)))
+    else:
+        h = v = torch.full_like(men, float(spacing))
+    files = torch.clamp(torch.floor(u["width"] / h + 1e-4), min=1)
     files = torch.minimum(files, men.clamp(min=1))
     ranks = torch.ceil(men.clamp(min=1) / files)
-    front = files * spacing
-    depth = ranks * spacing
+    front = files * h
+    depth = ranks * v
     lord = 2 * u["radius"]
     return torch.where(single, lord, front), torch.where(single, lord, depth)
 

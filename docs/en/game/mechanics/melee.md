@@ -12,15 +12,15 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
   35 + melee attack + bonus vs the target's type + the current charge bonus − melee defence,
   clamped to 8–90 %. WH3, CA blog 2023 · [CA damage blog][dmg] · high ·
   `_kv_rules` `melee_hit_chance_base` 35, `_min` 8, `_max` 90.
-  - Ours: the simulator keeps 35 / 8 / 90 but counts attack − defence at 0.1 of the rule
-    (`melee.hit_slope` 0.1): the four measured pairs need a nearly flat 30–38 % whatever
-    attack − defence is (−35…+31). **Conflict** with CA's formula; see the possible causes below.
-  - Ours: **lord against lord by the formula** (`contact.lord_hit_slope` 1). In duels of two lords alone on
-    the field the blows were counted as health drops (28 battles, 06.10.2026): General on General hits 41 % of
-    his blows (formula 40 %: 55 against 45 + 5 Hold the Line), Warlord on Warlord 19 % (formula 30 % fresh,
-    ~22 % with fatigue); a blow takes 245 / 223 HP — exactly the passport and armour at its mean 75 %. The
-    flat slope gave both ~35 %. So CA's formula holds, and formations flatten it by something of their own
-    ([simulator](../../training/simulator.md#lords)).
+  - Ours: **by the formula, at weight 1 for every blow** (since 06.10.2026). Why the pairs looked "flat"
+    (weight 0.1 suited them): the attack interval only starts after a hit, and a miss costs ~0.5 s — a man
+    in formation lands p / (p × interval + 0.5) hits a second, not p / interval (fitted on 121 recorded
+    formation-vs-formation battles, 52 pairs, 20,034 s, `build/hitchance`); the other half is smoothed
+    overkill (below).
+  - Ours: **lord against lord** — one blow per interval, p / interval. In duels of two lords alone on the
+    field the blows were counted as health drops (28 battles): General on General hits 41 % of his blows
+    (formula 40 %: 55 against 45 + 5 Hold the Line), Warlord on Warlord 19 % (formula 30 % fresh, ~22 % with
+    fatigue); a blow takes 245 / 223 HP — exactly the passport and armour at its mean 75 %.
 - **The stats in the formula are the modified ones**: abilities, fatigue, flank/rear
   multipliers and difficulty are applied before the roll. WH2–WH3 · [fandom Melee Attack][fw-ma],
   [CA damage blog][dmg] · medium.
@@ -46,10 +46,22 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
   *base* part only; a result above 100 % counts as 100 %, so armour 200+ stops all base damage.
   AP damage ignores armour. WH3 · [CA damage blog][dmg], [WH3 kv guide][g3] · high ·
   `armour_roll_lower_cap` 0.5.
-  - Ours: agrees (mean 75 % of armour; our units have armour ≤ 90, so the 100 % cap never bites).
+  - Ours: agrees — the mean of the roll (75 % of armour up to 100; above 100 — the mean capped at 100 %
+    per roll: 2 − 100/A − A/400, 95.8 % at 150; `melee.armour_cut`). The recordings match to single
+    digits: a General-on-General blow is 244.9 HP on average in the game, 245.1 by the rule (334 blows);
+    infantry blows on a lord are whole numbers within the rule, rounded to the nearest
+    (`build/damage/spec.md` D2).
 - **Order of modifiers**: base → bonus vs type → charge → height → armour (base only) →
   resistances (summed, capped at 90 %) → rounding (base and AP rounded separately). Overkill
   is lost. Base damage has no floor (can be 0). WH3 · [CA damage blog][dmg] · high.
+  - Ours: **smoothed overkill** (`melee.per_hit`): a unit loses hp / E[N] per blow, where E[N] is how many
+    blows a fresh man needs — the first blow is exact (it kills if even the best armour roll leaves no
+    more than his health), after that the mean: E[N] = 1 + P(first did not kill) × max(1, (hp − mean first
+    blow) / mean blow + ½). A single entity (a lord) gets no overkill: his health is one pool. Examples:
+    Greatswords on Night Runners 38.4 → 28 HP a blow, the General's share on Stormvermin 58.6 → 38.6, an
+    arrow on spearmen 15.2 → 13.7. The exact step (whole blows per man) explains the 121 battles worse
+    (error 0.174 against 0.146 without overkill), the smoothed version as well or better (0.144) and is
+    right where overkill shows (a lord against infantry).
 - **Height in melee.** Damage changes with the height difference per entity pair, reaching the
   full ±30 % already at 1 m. WH2–WH3 · [CA elevation blog][elev] · high ·
   `melee_height_damage_modifier_max_coefficient` 0.3, `_max_difference` 1 m. See [terrain](terrain.md).
@@ -67,8 +79,10 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
 - **Only models that reach strike.** Damage needs an attack animation that physically reaches
   a target; any model with an enemy within weapon reach tries to attack, so a wider front means
   more attackers. WH1–WH3 guides · [WH3 kv guide][g3], [WH1 kv guide][g1] · medium.
-  - Ours: agrees in kind — 0.75 of the files in contact strike (`melee.fighting_files`), i.e.
-    13–18 % of a 120-man unit; the database has no such number.
+  - Ours: 0.5 of the files in contact strike (`melee.fighting_files`, fitted on the pairs); a file is the
+    contact length / this unit's formation step from the database (h across the front, v across the
+    flank: `unit_spacings`, the Empire 1.48 × 1.6 m, clanrats 1.6 × 1.7, slaves 1.6 × 1.8). The database
+    has no number for how many strike.
 - **Matched combat.** A share of blows is played as paired "matched combat" animations
   instead of free strikes: `matched_combat_percentage` WH2 100 → WH3 50; in a formed charge 20 %,
   formed vs formed 40 %, formed vs free 60 %. An entity below 15 % HP cannot start one; while in
@@ -88,12 +102,21 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
   [CA damage blog][dmg], [MARS notes][mars] · high · `charge_decay_duration` 13 (WH2 name
   `charge_cool_down_time`: "time over which to fade out charge bonus after charge complete").
   WH1-era guides said 15 s (outdated).
-  - Ours: agrees (charge bonus to attack and damage, 13 s). On top, the simulator multiplies a
-    charging unit's damage by 1 + 1.5 × speed share for those 13 s (`melee.impact`) — a fitted
-    stand-in for collision and more men reaching; the game has no such rule (see collisions).
+  - Ours: agrees — a bonus to attack (weight 1) and to damage (at the weapon's AP share), given in full
+    on the first blow, fading to 0 over 13 s on its own clock: leaving contact does not stop or reset it,
+    a new charge starts it over. Nothing beyond the bonus (the fitted `melee.impact` ×2.5 charge blow and
+    the 20 s "bringing men in" for a unit that did not charge were removed on 06.10.2026). Recordings:
+    damage in the first 5 s after contact is 1.31× the 10–20 s pace at a charge bonus ≤ 6 and 2.24× at
+    ≥ 8; the weight-1 rule gives 1.2× and 1.6–1.9× on top of an overall ~1.1× decay
+    (`build/charge/spec.md` 2.1).
 - **Only a real charge counts.** The bonus applies only if the entity reaches its hidden charge
   speed before contact; walking into melee gives none. Charge speed is ~20–40 % above run speed.
   WH3 community · [WH3 kv guide][g3], [charge speed thread][chspeed] · medium.
+  - Ours: a charge counts if the unit has an attack order and a run-up ≥ 10 m at ≥ 0.75 of run speed
+    (`sim.json charge`: the Empire's walk is 0.5 of run, not a charge; an attack order in the first 2 s of
+    contact counts too, if there was a run-up). Charge speed while moving is a switch, `charge.rush_m`,
+    off: in whole battles, in the last 7 s before contact units move at 0.90–0.98 of run, no burst (3,729
+    approaches of the game's AI and 2,801 of ours).
 - **Charge distances** are per entity (`battle_entities`): `charge_distance_commence_run`,
   `_adopt_charge_pose`, `_pick_target`; typical switch to charge speed 20–60 m, pose ~35 m.
   WH3 · [twwstats][tws], [charge distance thread][chdist] · high (fields), medium (values).
@@ -135,11 +158,9 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
   them and reflects no impact damage. Update 1.1 made it require bracing. WH3 · [CA damage blog][dmg]
   (3.9 s), [reflection thread][reflect] · high (3.9 s, ×2), the 0.7 link is our inference ·
   `charge_reflect_damage_multiplier` 2, `charge_reflect_min_charge_factor_threshold` 0.7.
-  - Ours: a braced spearman unit (slower than 0.5 m/s, `melee.braced_speed`) meets a frontal
-    infantry charge "as a charge" for 13 s, and `sim.json` notes the 0.7 threshold is not
-    applied. **Conflict in form**: the game doubles weapon damage for 3.9 s; the simulator was
-    fitted to the measured outcome (braced spearmen charged head-on lose 0.80 of what the
-    charger loses).
+  - Ours: by the database — a unit with reflection that is braced (standing: slower than 0.5 m/s,
+    `melee.braced_speed`) deals the charger ×2 damage within 80° of its front while the charger's charge
+    factor is ≥ 0.7 (3.9 s); it gets no charge bonus of its own.
 - Update 1.1 also fixed impact maths so the defender uses its own mass (it used the attacker's). WH3 ·
   CA notes via press · high.
 
@@ -174,10 +195,12 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
   single entities only). Before: infantry 1, monstrous infantry ~4, lords/heroes ~6, monsters
   10–12; 5.1/5.3 cut many monster caps (e.g. Great Unclean One 12 → 5). · CA 6.0.0 notes
   (via [fandom][fw-60]), [5.3.0 notes][p530] · high.
-  - Ours: the General's passport splash is 4, matching 430 weapon strength / 100. **Conflict in
-    form**: the simulator gives each splash target the full per-hit damage (capped at a man's
-    health) instead of dividing it. While damage / targets still exceeds a man's HP (General vs
-    spearmen: 430 / 4 ≫ 69) the kills are the same; it matters against tougher men.
+  - Ours: a lord's blow is divided by the cap (4) but hits an average of **2.07 men**
+    (`contact.lord_splash_struck`): that is what the "lord surrounded" probe's recordings show (506
+    blows, 1–4 units around him, 1.84–2.30 by layout); each man hit gets ¼ of the blow, then armour and
+    overkill. Dividing by the cap rather than the number hit shows up in the General's blows on
+    Stormvermin: 47–57 HP — not lethal (¼ of a blow after armour), whereas dividing by the number hit
+    would kill each one. A single entity (a lord) takes the whole blow.
 
 ## Unit size
 
@@ -193,13 +216,24 @@ No public source explains `melee_breakoff_secs` 24 / `melee_breakoff_total_immun
 (WH3-only keys; see [movement](movement.md)), `entity_action_attack_formed_combat_distance`
 2.5 / `_tether_distance` 2, or how many models can physically reach one target.
 
-## Possible causes of the flat hit chance (for our simulator)
+## What is still unclear
 
-Not established; listed so that tests can target them: (1) a blow cycle longer than 4 s
-(the delay starts after the hit, plus the animation); (2) matched combat in 50 % of blows (long
-paired animations, a target below 15 % HP not eligible); (3) only entities whose animation
-physically connects deal damage, so attackers with high hit chance may still "miss" by reach;
-(4) per-entity defence multipliers from the flank inside a melee blob (see [flanking](flanking.md)).
+- **The first 15 s of contact are stronger in the game than the rule.** In the pairs the target loses
+  499–764 HP in the first 15 s, while the rule (the charge bonus, no blow) gives the simulator 396–446;
+  spearmen only have a charge bonus of 4, so charging does not explain it. Candidates: formations
+  overlap by 2.5–4.8 m in the first second (more men strike), matched combat, fresh units. Test: an
+  in-game charge probe (`build/charge/spec.md` section 7).
+- **A lord against one infantry unit hits less often in the game than against a crowd.** At 2.07 men hit
+  (measured on 1–4 units around him) a lord in a pair takes 13–31 % more off infantry than in the game.
+
+## Tried and rejected
+
+| What | Result | Why not |
+|---|---|---|
+| Attack − defence at weight 0.1 in formations (before 06.10.2026) | held the four pairs (51 of 54 within 20 %), but every addition to attack and defence — abilities, fatigue, charge, flanks — worked ten times weaker | not the game's rule; the flat pairs are explained by the cost of a miss and overkill |
+| A fixed interval, p / interval, at weight 1 in formations | worse on 121 battles than p / (p × interval + 0.5) (`build/hitchance` fit2) | a miss in the game costs less than the interval |
+| The exact overkill step (whole blows per man) | loss-rate error 0.174 against 0.146 without overkill and 0.144 smoothed; worse across all 200 resamples | the step is blurred in formations (candidates: height between models, blows on the wounded) |
+| The formation step from `build/mass/spec.md` (the Empire 1.65 × 1.75) | the Empire's roster depth ×0.77–0.92 | these are the numbers from the table's neighbouring row: in the `unit_spacings` row nine numbers come before the key |
 
 [dmg]: https://community.creative-assembly.com/total-war/total-war-warhammer/blogs/6-feature-focus-2-damage-part-1
 [elev]: https://community.creative-assembly.com/total-war/total-war-warhammer/blogs/11-feature-focus-1-elevation

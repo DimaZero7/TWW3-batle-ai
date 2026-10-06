@@ -41,7 +41,7 @@ UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_e
          "wh2_main_skv_inf_skavenslaves_0", "wh2_main_skv_inf_clanrats_1", "wh2_main_skv_inf_night_runners_1")
 TABLES = ("main_units", "land_units", "battle_entities", "melee_weapons", "missile_weapons", "projectiles",
           "unit_armour_types", "unit_shield_types", "unit_attributes_to_groups_junctions",
-          "land_units_to_unit_abilites_junctions")
+          "land_units_to_unit_abilites_junctions", "unit_spacings")
 
 # Where each passport field comes from. checked: compared with the unit card from battle
 # (check_card); inferred: the column's meaning is ours, from its values (docs/*/game/database.md).
@@ -55,6 +55,12 @@ FIELDS = {
     "num_mounts": ("land_units.num_mounts", None),
     "engine": ("land_units.engine", None),
     "rank_depth": ("land_units.rank_depth", None),
+    "spacing.template": ("land_units.spacing (the formation template)", None),
+    "spacing.h": ("unit_spacings.close_h (inferred): a man's place across the front in close formation, m",
+                  "data/roster widths: front = (files - 1) h, files = floor(width / h)"),
+    "spacing.v": ("unit_spacings.close_v (inferred): between ranks, m", "data/roster: depth = (ranks - 1) v"),
+    "spacing.scatter": ("unit_spacings.close_scatter (inferred), m", None),
+    "spacing.chaotic": ("unit_spacings.chaotic (inferred): a chaotic (loose, irregular) formation", None),
     "entity": ("land_units.man_entity", None),
     "hp_per_man": ("battle_entities.hit_points + land_units.bonus_hit_points", "card HealthMax / men"),
     "hp_total": ("hp_per_man * men", "card HealthMax"),
@@ -147,11 +153,14 @@ def passport(key, t):
     weapon = _index(t["melee_weapons"], "key")[land["primary_melee_weapon"]]
     armour = _index(t["unit_armour_types"], "key")[land["armour"]]
     shield = _index(t["unit_shield_types"], "key")[land["shield"]]
+    sp = _index(t["unit_spacings"], "key")[land["spacing"]]
     hp = entity["hit_points"] + land["bonus_hit_points"]
     out = {
         "land_unit": land["key"], "caste": main["caste"], "category": land["category"], "class": land["class"],
         "men": main["num_men"], "mount": land["mount"], "num_mounts": land["num_mounts"], "engine": land["engine"],
         "rank_depth": land["rank_depth"], "entity": land["man_entity"],
+        "spacing": {"template": land["spacing"], "h": sp["close_h"], "v": sp["close_v"],
+                    "scatter": sp["close_scatter"], "chaotic": sp["chaotic"]},
         "hp_per_man": hp, "hp_total": hp * main["num_men"], "mass": entity["mass"], "size": entity["size"],
         "height_m": entity["height"], "radius_m": entity["radius"],
         "speed": {"walk": entity["walk_speed"], "run": entity["run_speed"], "charge": entity["charge_speed"],

@@ -186,7 +186,9 @@ class TestMeasure:
         assert measure.hit_chance(spear, slave) == 0.39            # 35 + 20 - 16
         assert measure.hit_chance(slave, spear) == 0.10            # 35 + 9 - 34
         assert measure.per_hit(290, 140, 0, 60) == 60               # a hit takes no more than a man has
-        assert measure.per_hit(12, 4, 30, 69) == pytest.approx(4 + 12 * 0.775)
+        # many blows to kill a man: the overkill of the last is lost (smoothed: hp / (hp / mean + 1/2) here)
+        assert measure.per_hit(12, 4, 30, 69, single=True) == pytest.approx(4 + 12 * 0.775)
+        assert measure.per_hit(12, 4, 30, 69) == pytest.approx(69 / (1 + (69 - (12.4 + 14.2) / 2) / 13.3 + 0.5))
 
     def test_a_missile_run(self, tmp_path, monkeypatch):
         monkeypatch.setattr(gamedata, "RUNS", tmp_path)
@@ -203,7 +205,9 @@ class TestMeasure:
         assert row["shots_per_man_per_s"] == pytest.approx(0.1) and row["implied_reload_s"] == pytest.approx(10)
         (bin_,) = row["by_distance"]
         assert bin_["distance_m"] == [90, 110] and bin_["hp_per_shot"] == pytest.approx(10, abs=0.01)
-        assert bin_["implied_hit_rate"] == pytest.approx(10 / 19, abs=0.01)   # armour 0: 17 + 2
+        # armour 0: 17 + 2 a hit; the slave's 50 HP take 3 such hits, the last one's overkill lost (measure.per_hit)
+        hp_man = measure.passports()[SLAVE]["hp_per_man"]
+        assert bin_["implied_hit_rate"] == pytest.approx(10 / measure.per_hit(17, 2, 0, hp_man), abs=0.01)
 
     def test_a_whole_battle(self, tmp_path, monkeypatch):
         monkeypatch.setattr(gamedata, "RUNS", tmp_path)

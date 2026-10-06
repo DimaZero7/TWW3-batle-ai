@@ -106,16 +106,16 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 | Mechanic | How | Source |
 |---|---|---|
 | Speed | walk, run, acceleration, deceleration of the passport; routing units run at 0.985 of the run with fatigue (before innate effects: a Skaven rout ×1.1 by Scurry Away!) | DB; the routing speed measured: routing / run divided by the database's fatigue multiplier — the Empire 0.989–1.000 in all 6 fatigue states, the Skaven 0.977 ([innate effects](#innate-effects)) |
-| Formation | front of the ordered width, ranks 1.5 m apart; a lord is a circle of his radius | measured: 120 spearmen, 30 m, 6 ranks |
-| Contact | edges within 1 m (2 m more for those already fighting); a unit leaves melee on withdraw or a move 10 m or more away (it strikes nobody, the enemies in contact strike it ×1.25, missile units ×0.55); before it leaves it is held in place: no missile weapon 20 s, missile units 5 s, a lord not | measured: centre distance at the first contact; leaving — 163 network battles (above, "Orders") |
+| Formation | front of the ordered width: ranks = floor(width / h), front = ranks × h, depth = ceil(men / ranks) × v; h, v — the unit's formation-template step from the DB (`unit_spacings`: the Empire and lords 1.48 × 1.6 m, clanrats, Flagellants, militia 1.6 × 1.7, slaves 1.6 × 1.8, Greatswords 1.7 × 1.75, Stormvermin 1.8 × 1.9, archers 2.0 × 2.1, slingers and Night Runners 2.2 × 2.8); `formation.spacing_m` — only for a unit without a template; a lord is a circle of his radius | DB; checked against the roster (6 units, 15–80 m): the game's front (ranks − 1) × h to 1.3 % (median), depth (ranks − 1) × v to 14 % (`build/meleecore/spacing_check.py`) |
+| Contact | formations touch when they overlap by 2.5 m (`contact.reach_m` −2.5); a lord — at the formation's edge, within 1 m (`contact.lord_reach_m`); 2 m more for those already fighting; a unit leaves melee on withdraw or a move 10 m or more away (it strikes nobody, the enemies in contact strike it ×1.25, missile units ×0.55); before it leaves it is held in place: no missile weapon 20 s, missile units 5 s, a lord not; the melee clock (`contact_s`) keeps running through gaps in contact shorter than 10 s (`contact.reset_s`) | measured: in the first second of contact the game's formations overlap by 2.5–4.8 m (centre distance in the pairs against half the sum of depths from the DB step: −2.1 / −2.9); leaving — 163 network battles (above, "Orders"); 10 s — gaps of 4–7 s in the game do not start the fight over (`build/cyclecharge`) |
 | Facing | a moving unit faces where it goes, but a step of less than 10 m to its point goes without turning; a formation in melee turns at most 2° a second (a lord turns at once); out of melee a standing unit turns in place at most `turn.formation_deg_s` 80°/s (a lord, a single entity: `turn.single_deg_s` 40°/s) | measured: infantry in melee turns 1°/s (median; mean 2.3), a free unit struck in the flank turns 8° in 5 s (median); standing missile units out of melee whose engine target appears 60° or more off their facing face it (within 20°) after 1 s (median; mean 1.6 s at 60–120°, 1.7 s at 120–180°; ≥ 64°/s with 1 s samples), standing turns of lords 40°/s (median of 440) |
 | Order point | the game records the front's centre; the simulator goes to the unit's centre, half a depth behind | measured (spearmen 3.3–4.8 m, slaves 6.5–6.9 m) |
-| Men fighting | 0.75 of the files in contact; a unit shares out to each side of its formation (front, left, right, back) no more than that side holds; at most 9 men strike a lord in all, however many units, their rates summed; with the enemy lord on him the infantry at 0.35; a unit attacking another enemy strikes a lord it touches at 0.4; a melee unit under hold at 0.5; a router is struck by every man in contact (no 20 s ramp) at 0.43 of the rule, from the rear, without the charge | calibrated; hold — on the kills of the network's units in the gate battles (above, "Orders"); per side — measured: a unit already fighting hits a newcomer on its flank 2.2× the rule in the first 15 s (with one shared front the simulator gave 1.2×); 9, the sum — measured ([a lord surrounded](../game/units/lord-swarm.md)); 0.35, 0.4 — whole battles (below, "Lords fought by several units"); a router — measured (below, "Pursuit") |
-| Hit chance | 35 + 0.1 × (attack − defence), within 8–90 %; defence ×0.6 from the flank, ×0.3 from the rear; the defence lost counts 2.0× the rule from the flank, 0.25× from the rear (against a lord: none, measured) | DB numbers; the weights calibrated (see below and [flanks](#flanks-rear-and-charges-in-whole-battles)) |
-| Damage of a hit | armour-piercing + base × (1 − 0.75 × armour/100), no more than a man's health | DB (armour stops a random 50–100 %) |
-| Time between blows | `attack_interval_s` of the passport | DB |
-| A lord's blow | hits up to `splash` (4) men | DB; agrees with the measured 0.36 kills a second |
-| Charge | the charge bonus to attack and damage, fading over 13 s; a unit that meets the enemy running hits ×(1 + 1.5 × its speed share) for those 13 s; one that did not charge brings its men in over 20 s. Bracing: a unit with `charge_reflection` (spearmen, clanrats) standing still (under 0.5 m/s) meets an infantry charge within `bracing_attack_angle` (80°) of its front as a charge of the same speed | DB (13 s, 80°, the attribute); 1.5 fitted to the first 15 s of the whole battles and the pairs, 20 s to the pairs; bracing measured (whole battles: a braced unit charged head-on loses 0.8× what its charger loses) |
+| Men fighting | 0.5 of the files in contact (a file is the contact length / the unit's step: h across the front and rear, v across the flank); a unit shares out to each side of its formation (front, left, right, back) no more than that side holds; at most 6.5 men strike a lord in all, however many units, their rates summed, and they gather around him over 20 s from contact (`contact.lord_gather_s`); with the enemy lord on him the infantry at 0.35; a unit attacking another enemy strikes a lord it touches at 0.4; a melee unit under hold at 0.5; a router is struck by every man in contact at 0.43 of the rule, from the rear, without the charge | fitted on the pairs (0.5, 6.5, 20 s); hold — on the kills of the network's units in the gate battles (above, "Orders"); per side — measured: a unit already fighting hits a newcomer on its flank 2.2× the rule in the first 15 s (with one shared front the simulator gave 1.2×); the sum — measured ([a lord surrounded](../game/units/lord-swarm.md)); 0.35, 0.4 — whole battles (below, "Lords fought by several units"); a router — measured (below, "Pursuit") |
+| Hit chance | 35 + attack + charge bonus × remaining charge + bonus vs type − defence × side, within 8–90 % (weight 1); defence ×0.6 from the flank, ×0.3 from the rear (against a lord: none, measured); hits a second for a man in formation p / (p × interval + 0.5): the interval starts after a hit, a miss costs 0.5 s (`melee.miss_s`); lord against lord — p / interval | DB and CA (Feature Focus #2); 0.5 s — fitted on 121 recorded formation-vs-formation battles (`build/hitchance`); lord against lord — duels ([lords](#lords)) |
+| Damage of a hit | AP in full + base × (1 − the mean armour roll: 0.75 × armour/100 up to 100, above — 2 − 100/A − A/400), then resistance (≤ 90 %); damage beyond a man's health is lost — smoothed: a unit loses hp / E[blows per man] per blow, the first blow exact, the rest a mean (`melee.per_hit`); a single entity (a lord) gets no overkill; the same for projectiles | DB, CA (the 50–100 % roll, overkill); smoothing — 121 battles (`build/damage/spec.md` D3) |
+| Time between blows | `attack_interval_s` of the passport, after a hit (above) | DB |
+| A lord's blow | divided by `splash` (4), hits an average of 2.07 men (`contact.lord_splash_struck`), each gets ¼, then armour and overkill; a single entity takes the whole blow | DB, CA 5.1.0 (divided); 2.07 — measured, 506 blows of the "lord surrounded" probe |
+| Charge | an attack order and a run-up ≥ 10 m at ≥ 0.75 of run (`charge.min_runup_m`, `min_speed_share`; an attack order in the first 2 s of contact too, if there was a run-up) give the full charge bonus: + to attack (weight 1) and to damage at the AP share, fading to 0 over 13 s on its own clock from the first blow (leaving contact does not stop it); nothing more. A unit with `charge_reflection` that is braced (under 0.5 m/s) deals the charger ×2 damage within 80° of its front while its charge is ≥ 0.7 (3.9 s). Charge speed while moving — `charge.rush_m`, off | DB and CA (13 s, 80°, ×2, 0.7); the run-up and run share are ours (the game: "a run-up to play the animation"; lords give none after < 20 m or a burst at a walk); no burst in whole battles (0.90–0.98 of run) |
 | Men lost | blows that do not kill wound: men share = max(1 − g × (1 − health share), health share), g = (hits to kill)^−0.5 | calibrated on men against health in the pairs |
 | Shooting | from standing only; first shot 3.3 s (arrows) / 4.3 s (sling) after halting; a new order (another kind or another attack target) makes the unit aim again (`missile.aim_reset_on_order`); standing, it shoots only at targets within `missile.stand_fire_arc_deg` 45° of its facing: a target beyond that is turned to first (Facing) and aimed at only once within the arc; without an ordered target it takes the nearest within the arc, else turns to the nearest beyond it; the men reload all the time (moving too) and the unit shoots once they are all loaded (`missile.volley_load` 1): whole-unit volleys 11.0 / 11.5 s apart (every loaded man starts reloading when the unit fires, also those whose line is blocked; the `fire` flag stays on between volleys); range from the formation's edge | measured (the range; the battles: a halt gives 0.55–0.76 projectiles a man in the next 12 s, the old volley-then-trickle 1.5–1.7, volleys 1.0; a firing unit given a new order shoots 0.6–0.75 as much in the next 10 s; the arc: 99 % of the game's standing volleys are within 45° of the direction to the target, 95 % within 31°; a new target 60–180° off: the first volley 3 s later against 2 s at 0–40°) |
 | Hits | 0.42 arrows, 0.47 sling at the edge of range; ×1.29 at 70 m, ×1.12 at 90 m | measured; the distance factor from the range test |
@@ -149,8 +149,8 @@ test, are fitted to the whole battles (below).
 Fatigue follows the calibration `fatigue.calibration` (ON, `on=true`): the shares of exhausted units are as in the game. The legacy model (5 ticks/s, DB points, melee +19 for every engaged unit, ready −7 as rest, dead and departed slots still counted) is kept only for `on=false`. DB thresholds and effects apply in both. Threat geometry is ON (`threat.calibration.on=true`).
 
 The rule (10 ticks/s, each unit in one activity):
-- melee costs points only under an attack order: a single entity (`men0` ≤ 1) 15 a tick (`single_combat`; his charge +34 only in the first 2 s of a contact, `single_charge_s`: [lords](#lords)), a formation 13.7; in melee without an attack order the unit walks if moving, else rests −18;
-- charging +34 only with an attack order;
+- melee costs points only under an attack order: a single entity (`men0` ≤ 1) 15 a tick (`single_combat`: [lords](#lords)), a formation 13.7; in melee without an attack order the unit walks if moving, else rests −18;
+- charging +34 only with an attack order and only in the first 2 s after the first charge blow, for everyone (`charge_s`; after a running contact the game's units leave "fresh" after 17 s median over 456 contacts; +34 for all 13 s of the charge gave ~8 s);
 - a move costs by its order's run flag whatever the speed: run +4, walk −1 (DB); a routing unit +4;
 - shooting 7.5; a unit standing without unfinished movement, attack or aiming rests −18 when no standing enemy is within 80 m, otherwise ready −7; dead and departed slots are frozen.
 
@@ -391,11 +391,15 @@ New contacts (infantry i struck by infantry j): HP i loses in the first 15 s ove
 
 - **In the game a charge buys little.** A unit charged while standing loses no more than its
   charger (0.82); braced spearmen (`charge_reflection`, 87 of the 102) 0.80, units without it
-  about the same (1.02, 15 contacts). Hence bracing and a charge impact of 1.5.
+  about the same (1.02, 15 contacts). (The simulator in the table is the old fitted version: a charge
+  impact of 1.5 and "a braced unit meets a charge with a charge"; charging and reflection are now by
+  CA's rule, and whole battles have not been re-measured against it.)
 - **In the game formations do not turn round in melee** (1°/s): an enemy on the flank or rear
   stays there. The simulator turns a unit in melee at 2°/s.
 - **The flank costs more than the rear by this count** (1.74 against 1.31), against the database's
-  defence ×0.6 / ×0.3; the simulator is fitted to it (`flank_slope` 2.0, `rear_slope` 0.25).
+  defence ×0.6 / ×0.3; the simulator used to be fitted to it (lost-defence weights 2.0 / 0.25), now it
+  is the database's rule at weight 1: a lone attacker in the recordings gives 1.53× / 1.92× (below), as
+  in the database.
 - **A lone attacker from the flank or rear, counted apart**
   ([measurements](measurements.md#flank-and-rear-a-lone-attacker): infantry only, nobody shooting,
   contacts older than 10 s) takes 1.53× (flank) and 1.92× (rear) of what a lone frontal one takes;
@@ -444,9 +448,9 @@ mirror (69 %). Waiting (a reserve, a walk) loses: the side that waits fights out
   trials replayed (`python -m tools.nn.lord_swarm --sim`; game / simulator): one spear unit 7.8 /
   7.7 and 6.2 / 6.1; four 7.4 / 8.0 and 4.8 / 6.3; halberds 21.5 / 17.1 and 11.2 / 11.7; the other
   lord and three units 29.8 / 21.8 and 27.6 / 22.4; mean error over the 24 layouts 18 %.
-- **Lord against lord** (`contact.lord_hit_slope` 1; `contact.lord_v_lord` 1, off): a lone man strikes a
-  lone man by the database's hit chance (35 + attack − defence), not by the formations' flat slope 0.1.
-  Measured on duels of two lords of one type alone on the field ([the game AI's lord in a
+- **Lord against lord**: a lone man strikes a lone man by the database's hit chance (35 + attack −
+  defence), one blow per interval (p / interval; the database's formula now applies to every blow, a
+  miss in formation costs 0.5 s). Measured on duels of two lords of one type alone on the field ([the game AI's lord in a
   duel](../game/game-ai.md#the-game-ais-lord-in-a-duel), 28 battles, blows counted as health drops,
   `build/lordduel/hits.py`): General on General 0.103 blows a second of 245 HP (the passport exactly:
   140 AP + 290 × (1 − 0.75 × 85 %)), so 41 % of the blows every 4 s hit (database 40 %: attack 55 against
@@ -729,18 +733,22 @@ archers' target's wavering after the first shot to 22 s):
 
 | Case | The game | The simulator |
 |---|---|---|
-| Spearmen — slaves: fight, s | 232 (208–252) | 260 |
-| … slaves lose HP/s / spearmen | 22.7 / 12.4 | 23.3 / 14.1 |
-| … slaves waver / rout, s | 195 / 232 | 181 / 260 |
-| Spearmen — clanrats: fight, s | 275 (219–353) | 290 |
-| … spearmen lose / clanrats HP/s | 25.7 / 20.6 | 22.1 / 19.5 |
-| … spearmen waver / rout, s | 251 / 275 | 269 / 290 |
-| General — clanrats: fight, s | 348 (340–357) | 335 |
-| … the General / clanrats lose HP/s | 8.2 / 21.8 | 6.9 / 22.9 |
-| … clanrats waver / rout, s | 254 / 348 | 254 / 335 |
-| Warlord — spearmen: fight, s | 309 (264–338) | 264 |
-| … the Warlord / spearmen lose HP/s | 5.5 / 21.2 | 5.4 / 25.3 |
-| … spearmen waver / rout, s | 277 / 309 | 229 / 264 |
+| Spearmen — slaves: fight, s | 232 (208–252) | 208 |
+| … slaves lose HP/s / spearmen | 22.7 / 12.4 | 25.7 / 10.7 |
+| … first 15 s: slaves / spearmen, HP | 675 / 84 | 423 / 171 |
+| … slaves waver / rout, s | 195 / 232 | 175 / 208 |
+| Spearmen — clanrats: fight, s | 275 (219–353) | 320 |
+| … spearmen lose / clanrats HP/s | 25.7 / 20.6 | 20.5 / 22.0 |
+| … first 15 s: spearmen / clanrats, HP | 567 / 764 | 441 / 403 |
+| … spearmen waver / rout, s | 251 / 275 | 280 / 320 |
+| General — clanrats: fight, s | 348 (340–357) | 272 |
+| … the General / clanrats lose HP/s | 8.2 / 21.8 | 7.7 / 24.8 |
+| … first 15 s: the General / clanrats, HP | 38 / 500 | 48 / 396 |
+| … clanrats waver / rout, s | 254 / 348 | 198 / 272 |
+| Warlord — spearmen: fight, s | 309 (264–338) | 230 |
+| … the Warlord / spearmen lose HP/s | 5.5 / 21.2 | 6.8 / 27.9 |
+| … first 15 s: the Warlord / spearmen, HP | 45 / 459 | 46 / 446 |
+| … spearmen waver / rout, s | 277 / 309 | 207 / 230 |
 | Winner of each pair | 12 of 12 | 12 of 12 |
 | Archers → slaves: reload, s / hit rate / HP/s | 11.0 / 0.42 / 66 | 11.6 / 0.43 / 62 |
 | … the first shot after halting, s | 3.3 | 3.7 |
@@ -748,24 +756,31 @@ archers' target's wavering after the first shot to 22 s):
 | Slingers → spearmen: reload, s / hit rate / HP/s | 11.5 / 0.47 / 36 | 11.5 / 0.47 / 37 |
 | … the target wavers / routs, s | 154 / 177 | 160 / 183 |
 
-Outside 20 %: the HP lost in the first 15 s of contact (the charge) — the clanrats against the
-General (−28 %) and against the spearmen (−33 %), the Warlord (−22 %): the charge is noisy in the
-game too; and in the spearmen–clanrats pair the clanrats waver on the last tick of one replay as
-the spearmen rout (their Strength in Numbers' +6 is off below half health; the game's clanrats
-reached 13 points there, below the 16 of wavering, without wavering).
+Current check: mechanics 37 of 54 within 20 %, the same winner in the game-AI battles 21 of 26, in the
+network battles 127 of 165 (with the fits before the melee core: 51 / 20 / 126). Outside 20 %: (1) the
+first 15 s of formation contact — the target loses 499–764 HP in the game, 396–446 by the rule (the
+fitted 1.5 charge blow used to cover this); spearmen's charge bonus is 4, so charging does not explain
+it, and in the game slaves answer spearmen in the first 15 s at half the settled rate (84 against 171);
+(2) lords hit 13 / 31 % harder than the game against one unit (2.07 hit — measured on 1–4 units around
+him), ending their pairs 22–26 % sooner; infantry hits the Warlord 24 % harder (6.5 men on a lord is the
+midpoint between the General and the Warlord); (3) the archers' slave target wavers 22 % later
+(overkill: arrows deal 50 HP; `missile.hit_rate` is fitted without overkill, recalibrating it is part of
+the shooting batch). The answer to (1) and (2) is in-game experiments (`build/charge/spec.md` section 7,
+`build/damage/spec.md` section 4).
 
 ### Whole battles
 
 | | The game | The simulator |
 |---|---|---|
-| Empire HP lost 60 / 120 / 180 s after the first contact | 0.25 / 0.41 / 0.53 | 0.29 / 0.49 / 0.63 |
-| Skaven HP lost 60 / 120 / 180 s after the first contact | 0.21 / 0.34 / 0.42 | 0.20 / 0.34 / 0.44 |
+| Empire HP lost 60 / 120 / 180 s after the first contact | 0.25 / 0.41 / 0.53 | 0.25 / 0.43 / 0.55 |
+| Skaven HP lost 60 / 120 / 180 s after the first contact | 0.21 / 0.34 / 0.42 | 0.19 / 0.34 / 0.44 |
 | Mirror: HP lost by side 1 / side 2 at the end | 0.74 / 0.75 | 0.83 / 0.72 |
-| Routs / rallies a battle | 22.5 / 13.0 | 22.2 / 14.8 |
-| A rally takes (median), s | 44 | 44 |
-| A battle lasts (mean), s | 613 | 579 (stopped at the recording's end) |
+| Routs / rallies a battle | 22.5 / 13.0 | 18.6 / 11.7 |
+| A rally takes (median), s | 44 | 39 |
+| A battle lasts (mean), s | 613 | 556 (stopped at the recording's end) |
 
-(Measured with the flank rules, before the leave and volley rules.)
+(Losses and routs — with the melee core; the mirror arena is measured before the leaving-melee and
+volley rules. Before the melee core the Empire lost 0.32 / 0.51 / 0.63.)
 
 **Friendly fire and spill** are why the whole battles cost the Skaven more than the pairs suggest.
 Replaying the melee rule on the recorded seconds shows the Skaven infantry in whole battles losing
@@ -790,9 +805,10 @@ compiling on the CPU.
 
 Measured, ready as a switch, not in `config/nn/sim.json`:
 
-- **The flank / rear striker by its own front** (`melee.flank_face` "striker", `flank_slope` 3.8,
-  `rear_slope` 5.5; the values in `build/sim-pending/flank.json`, the switch and its test in the
-  code, default "min": the old rule). A unit striking through the target's flank brings men by its
+- **The flank / rear striker by its own front** (`melee.flank_face` "striker"; the weights
+  `flank_slope` 3.8 / `rear_slope` 5.5 from `build/sim-pending/flank.json` no longer exist — flank and
+  rear are now the database's rule at weight 1, needs rechecking; the switch and its test in the code,
+  default "min": the old rule). A unit striking through the target's flank brings men by its
   own front, not by the target's depth; the replay then gives 1.62× / 1.94× for a lone flank / rear
   attacker (the game 1.53× / 1.92×). On top of the current rules: game-AI battles 22 → 20 of 26
   (mirror 12 → 10), network's battles 47 → 52 of 93, mechanics 51 → 51, but the HP lost 60 s after
@@ -877,6 +893,13 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
 
 | What | Result | Why not |
 |---|---|---|
+| Attack − defence weight 0.1 in formations, lost-defence flank / rear weights 2.0 / 0.25, charge blow `impact` 1.5, bringing men in `ramp_s` 20 s, `contact.lord_hit_slope` / `lord_v_lord` | mechanics 51 / 54, game-AI 20 / 26, network 126 / 165; but every addition to attack and defence worked ten times weaker, rear was cheaper than flank, the burst after contact 5.6–8.3× (game 1.3–2.2×), the "leave — return" cycle 2.1–2.6× (game 1.0×), the Empire lost 0.32 / 0.51 / 0.63 in whole battles (game 0.25 / 0.41 / 0.53) | not the game's rules: replaced by CA's and the database's formulas (the melee core) |
+| The melee core without gathering around a lord (`lord_gather_s` 0) | a lord loses 130 / 119 HP in the first 15 s of a pair (game 38 / 45) | infantry does not surround a lord at once |
+| Charge reflection without lords (against formations only) | a lord's first 15 s: 45 / 44 against 48 / 46 HP with it (game 38 / 45) | the difference is small; the database's rule makes no exception |
+| `contact.reach_m` −3.5 (from `build/mass/spec.md`) and one reach for everyone | lords barely touched infantry: their pairs 0.35–2.9 HP/s against 5.5–8.2 | a lord stops at the formation's edge (`lord_reach_m` 1.0); formations — −2.5 by half the sum of depths with the DB step (−3.5 and −2 do not tell the pairs apart) |
+| `melee.fighting_files` 0.55 / 0.6 | 38 / 34 of 54; spearmen against clanrats −13 / −5 % and +18 / +28 %, against slaves −6 / +1 % and +25 / +36 % (own losses / enemy losses) | at 0.5 the error is more even: −20 / +7 %, −14 / +13 % |
+| `contact.lord_max_attackers` 5.5 | the General loses −20 %, the Warlord +5 % (at 6.5: −6 / +24 %) | one number for both lords; 6.5 is the midpoint |
+| The formation step from `build/mass/spec.md` (the Empire 1.65 × 1.75, slaves 1.8 × 1.8, archers 2.5 × 2.4) | the Empire's roster depth ×0.77–0.92, archers' at a narrow front ×0.67–0.81 | the numbers of the neighbouring `unit_spacings` row: in that row nine numbers come before the key (so the table reads down to the last byte) |
 | Rally near the morale target (`morale.rally_rule` "target", off, see what is missing) | gates' replay, the AI's units: routed again 10 / 20 / 30 / 45 s after a rally 0.06 / 0.14 / 0.20 / 0.29 (game 0.07 / 0.13 / 0.16 / 0.23; now 0.40 / 0.43 / 0.46 / 0.51), within 60 s 0.41 (game 0.39; now 0.62); per unit rallies / re-routs / routs 0.27 / 0.16 / 0.55 (game 0.42 / 0.24 / 0.61; now 0.46 / 0.35 / 0.74); our routs 0.93 (game 1.57; now 1.09); mechanics 51 / 54; gap card of gate 20261005-161910: routs per unit own / enemy 0.85 / 0.84 (game 1.52 / 0.58; now 1.04 / 1.08), trade +0.022 (game −0.385; now +0.037); the whole check: routs / rallies a battle 13.0 / 5.9 (game 22.5 / 13.0; now 18.1 / 10.9), same winner game-AI 21 / 26 (now 22), network 123 / 163 (now 122) | a third fewer rallies than the game, half in whole battles; gaps 0.10 / 0.25 and "no later than 0.23" change almost nothing |
 | The same, rallying with a target down to −0.17 of leadership | per AI unit rallies / re-routs / routs 0.35 / 0.24 / 0.63 (as the game), but routed again 10 s after 0.29 (game 0.07), within 60 s 0.58; card: routs 1.02 / 0.92, trade +0.009 | brings back the cliff at the 10th second |
 | A single entity in melee without the winning bonus (melee points at most 0) instead of "always −3" | mechanics 51 / 54 | measured −3.8 in melee (CI −4.7…−3.0) whatever the balance: closer to −3 |

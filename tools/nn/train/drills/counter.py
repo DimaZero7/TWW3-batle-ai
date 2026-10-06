@@ -39,7 +39,9 @@ Scripts:
 """
 import torch
 
+from tools.nn.sim import melee
 from tools.nn.sim import orders as O
+from tools.nn.sim.params import load
 from tools.nn.train import drills as D
 
 EMPIRE = "wh_main_emp_empire"
@@ -62,8 +64,8 @@ GAP_M = (110.0, 200.0)
 WIDTH_M = 30.0
 LAT_GAP_M = (20.0, 60.0)
 
-# The skilled script's matchup (tools/nn/sim/melee.py strikes(), per man in contact, front on).
-HIT_BASE, HIT_SLOPE = 35.0, 0.1
+# The skilled script's matchup: the simulator's own rule (tools/nn/sim/melee.py strikes(), per man in contact,
+# front on): the database's hit chance, p / (p x interval + melee.miss_s) blows a second, per_hit with overkill.
 BREAK_SHARE = 0.45       # a breakable unit routs at about this share of its health lost (1 v 1 runs)
 CHARGE_W = 0.5           # the attacker's charge bonus counts at this weight (it fades over the fight)
 BEATS = 1.15             # i beats j: j's health goes this many times faster than i's
@@ -145,15 +147,20 @@ def rates(u, charge_w=0.0):
     i's charge bonus at charge_w)."""
     bonus = torch.where(u["large"][:, None, :], u["bonus_v_large"][:, :, None], u["bonus_v_inf"][:, :, None])
     bonus = bonus + charge_w * u["charge_bonus"][:, :, None]
-    p = torch.clamp(HIT_BASE + HIT_SLOPE * (u["attack"][:, :, None] + bonus - u["defence"][:, None, :]), 8.0, 90.0) / 100
+    params = load()
+    R = params.battle
+    p = melee.hit_chance(u["attack"][:, :, None] + bonus, u["defence"][:, None, :],
+                         R["melee_hit_chance_normalisation_coefficient"], R["melee_hit_chance_base"],
+                         R["melee_hit_chance_min"], R["melee_hit_chance_max"])
     dmg, ap = u["damage"][:, :, None], u["ap_damage"][:, :, None]
     share = dmg / (dmg + ap).clamp(min=1e-6)
     base, pierce = dmg + bonus * share, ap + bonus * (1 - share)
-    hit = pierce + base * torch.clamp(1 - 0.75 * u["armour"][:, None, :] / 100, min=0)
-    hit = torch.minimum(hit * (1 - u["resist_physical"][:, None, :]), u["hp_man"][:, None, :])
+    hit = melee.per_hit(base, pierce, u["armour"][:, None, :], u["hp_man"][:, None, :],
+                        u["resist_physical"][:, None, :], single=(u["men0"] <= 1)[:, None, :])
     keep = torch.where(u["unbreakable"], torch.ones_like(u["men"]), torch.full_like(u["men"], BREAK_SHARE))
     hp = u["hp_man"] * u["men"].clamp(min=1) * keep
-    return p * hit / u["interval"][:, :, None].clamp(min=1e-6) / hp[:, None, :].clamp(min=1e-6)
+    per_s = p / (p * u["interval"][:, :, None].clamp(min=1e-6) + float(params.sim["melee"]["miss_s"]))
+    return per_s * hit / hp[:, None, :].clamp(min=1e-6)
 
 
 def _choice(st, v):

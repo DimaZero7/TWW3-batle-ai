@@ -31,6 +31,7 @@ PASSPORTS = project.CONFIG_DIR / "nn" / "units.json"
 KINDS = ("pair", "missile", "whole")
 FLIGHT_S = 2          # damage is counted this many seconds after the shots (arrow flight, 1 s samples)
 DISTANCE_BINS = (0, 60, 90, 110, 140)
+MISS_S = 0.5          # a missed blow costs this long (config/nn/sim.json melee.miss_s, build/hitchance)
 CHARGE_S = 15         # the first seconds of contact are the charge; the rest is the steady fight
 CURVE_EVERY_S = 30
 
@@ -77,18 +78,29 @@ def hit_chance(attacker, target):
     return min(90, max(8, 35 + attacker["melee"]["attack"] - target["melee"]["defence"])) / 100
 
 
-def per_hit(damage, ap_damage, armour, hp_per_man):
-    """HP a hit takes: armour stops 50-100 % of its value (mean 75 %) of the normal damage;
-    a hit cannot take more than a man has."""
-    return min(hp_per_man, ap_damage + damage * max(0.0, 1 - 0.75 * armour / 100))
+def per_hit(damage, ap_damage, armour, hp_per_man, single=False):
+    """HP a hit takes (the simulator's rule, tools/nn/sim/melee.py per_hit, in plain Python): the armour-piercing
+    part whole, the base part less the armour roll (U(0.5, 1) x armour %, at most 100 %); damage beyond the struck
+    man's health is lost (overkill, smoothed); a lone man (single) loses the mean."""
+    a = max(0.0, armour / 100)
+    cut = 0.75 * a if a <= 1 else (2 - 1 / a - a / 4 if a < 2 else 1.0)
+    lo = max(1.0, ap_damage + damage * max(0.0, 1 - a))
+    hi = max(1.0, ap_damage + damage * max(0.0, 1 - a / 2))
+    mu = max(1.0, ap_damage + damage * (1 - cut))
+    if single:
+        return mu
+    p1 = min(1.0, max(0.0, (hp_per_man - lo) / (hi - lo))) if hi - lo > 1e-6 else float(lo < hp_per_man)
+    tail = max(1.0, (hp_per_man - (lo + min(hi, hp_per_man)) / 2) / mu + 0.5)
+    return hp_per_man / (1 + p1 * tail)
 
 
 def melee_per_fighter(attacker, target):
-    """HP per second one fighting man of attacker takes from target, by the database rule and
-    the passport's attack interval."""
+    """HP per second one fighting man of attacker takes from target, by the database rule: p / (p x attack
+    interval + MISS_S) blows a second (the simulator's rule, config/nn/sim.json melee.miss_s)."""
     m = attacker["melee"]
-    return hit_chance(attacker, target) * per_hit(m["damage"], m["ap_damage"], target["armour"],
-                                                  target["hp_per_man"]) / m["attack_interval_s"]
+    p = hit_chance(attacker, target)
+    return p * per_hit(m["damage"], m["ap_damage"], target["armour"], target["hp_per_man"],
+                       single=target["men"] <= 1) / (p * m["attack_interval_s"] + MISS_S)
 
 
 def rallied(b, i, start=0):
@@ -209,7 +221,7 @@ def missile_run(b, p):
         men = float(men_lost[counted & in_bin[at]].sum())
         if shots:
             expected = per_hit(shooter["missile"]["damage"], shooter["missile"]["ap_damage"], target["armour"],
-                               target["hp_per_man"])
+                               target["hp_per_man"], single=target["men"] <= 1)
             bins.append({"distance_m": [lo, hi], "shots": shots, "hp_per_shot": round(hp_lost / shots, 3),
                          "men_per_100_shots": round(100 * men / shots, 2),
                          "implied_hit_rate": round(hp_lost / shots / expected, 3)})

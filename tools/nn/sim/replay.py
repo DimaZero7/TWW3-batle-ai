@@ -46,10 +46,12 @@ def nearest_attack(st, run=True):
 
 
 def half_depth(men, width, spacing=1.5):
-    """Half the depth of a formation of `men` with a `width` front (numpy); 0 for a single man."""
-    files = np.maximum(1, np.round(np.asarray(width, float) / spacing))
+    """Half the depth of a formation of `men` with a `width` front (numpy); 0 for a single man. spacing: one number
+    (h = v) or (h, v), m - as tools/nn/sim/geometry.dims: files = floor(width / h), ranks v apart."""
+    h, v = (spacing, spacing) if np.isscalar(spacing) else spacing
+    files = np.maximum(1, np.floor(np.asarray(width, float) / h + 1e-4))
     files = np.minimum(files, np.maximum(men, 1))
-    return np.where(men > 1, np.ceil(np.maximum(men, 1) / files) * spacing / 2, 0.0)
+    return np.where(men > 1, np.ceil(np.maximum(men, 1) / files) * v / 2, 0.0)
 
 
 def fill_gaps(flag, gap, x=None, z=None, stay_m=None):
@@ -129,7 +131,8 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
         mapped = np.where(ok_t, np.array(slot_of)[np.clip(tg, 0, None)], -1)
         attack = ok_t & (battle.side[np.clip(tg, 0, None)] != battle.side[i])
         if widths is not None and widths[i]:
-            back = half_depth(np.nan_to_num(f["men"][:, i]), widths[i], spacing)
+            back = half_depth(np.nan_to_num(f["men"][:, i]), widths[i],
+                              spacing if np.isscalar(spacing) else spacing[i])
             br = np.radians(np.nan_to_num(f["b"][:, i]))
             ox, oz = ox - back * np.sin(br), oz - back * np.cos(br)
         fighting = m_i & ~attack & ~leaving

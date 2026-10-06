@@ -31,10 +31,15 @@ def army(side1, side2, attacker=1, factions=("wh_main_emp_empire", "wh2_main_skv
                                             2: {"faction": factions[1], "units": units(side2)}}}
 
 
+# Formations touch when their edges overlap by -contact.reach_m (the game's formations step into each other).
+TOUCH = min(0.0, P.sim["contact"]["reach_m"])
+
+
 def face_off(key1, key2, gap=0.0, per_side=None):
-    """Two units facing each other along x, their fronts `gap` m apart."""
+    """Two units facing each other along x, their fronts `gap` m apart (0: in contact, overlapping by TOUCH)."""
     st = scenario.build([army([(key1, -50, 0, 90)], [(key2, 50, 0, 270)])], P, per_side=per_side)
     front, depth = geometry.dims(st.u, P.sim["formation"]["spacing_m"])
+    gap = gap + TOUCH
     st.u["x"][0, 0] = -(depth[0, 0] / 2 + gap / 2)
     H = st.N // 2
     st.u["x"][0, H] = depth[0, H] / 2 + gap / 2
@@ -51,8 +56,9 @@ class TestFunctions:
 
     def test_armour_stops_base_damage_not_armour_piercing(self):
         hp = torch.tensor(100.0)
-        bare = melee.per_hit(torch.tensor(20.0), torch.tensor(5.0), torch.tensor(0.0), hp)
-        armoured = melee.per_hit(torch.tensor(20.0), torch.tensor(5.0), torch.tensor(100.0), hp)
+        lone = torch.tensor(True)
+        bare = melee.per_hit(torch.tensor(20.0), torch.tensor(5.0), torch.tensor(0.0), hp, single=lone)
+        armoured = melee.per_hit(torch.tensor(20.0), torch.tensor(5.0), torch.tensor(100.0), hp, single=lone)
         assert float(bare) == pytest.approx(25) and float(armoured) == pytest.approx(5 + 20 * 0.25)
         assert float(melee.per_hit(torch.tensor(400.0), torch.tensor(0.0), torch.tensor(0.0), torch.tensor(60.0))) == 60
 
@@ -176,8 +182,8 @@ class TestMelee:
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
         contact = pw["enemy"] & (pw["gap"] <= 1.0)
         ch = torch.zeros_like(st.u["men"])
-        cs = torch.full_like(st.u["men"], 100.0)
-        rate, _, sector, _ = melee.strikes(st.u, pw, contact, P, ch, cs)
+        st.u["contact_s"] = torch.full_like(st.u["men"], 100.0)
+        rate, _, sector, _ = melee.strikes(st.u, pw, contact, P, ch)
         j = st.N // 2 if j is None else j
         return float(rate[0, i, j]), int(sector[0, i, j])
 
@@ -192,15 +198,15 @@ class TestMelee:
         assert self.rate(st)[0] < base
 
     def test_a_rear_attack_hits_more(self):
-        p = P.with_cal("melee", hit_slope=1.0)
+        p = P
         st = face_off(SPEAR, SLAVE)
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
         contact = pw["enemy"] & (pw["gap"] <= 1.0)
         z = torch.zeros_like(st.u["men"])
-        front = melee.strikes(st.u, pw, contact, p, z, z + 100)[0][0, 0, 1]
+        front = melee.strikes(st.u, pw, contact, p, z)[0][0, 0, 1]
         st.u["b"][0, 1] = 90.0            # the slaves turn their back to the spearmen
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
-        rate, _, sector, _ = melee.strikes(st.u, pw, contact, p, z, z + 100)
+        rate, _, sector, _ = melee.strikes(st.u, pw, contact, p, z)
         assert int(sector[0, 0, 1]) == 2 and float(rate[0, 0, 1]) > float(front)
 
     def test_a_flank_attacker_strikes_with_its_own_front(self):
@@ -216,10 +222,10 @@ class TestMelee:
         z = torch.zeros_like(st.u["men"])
         F = {}
         for mode in ("min", "striker"):
-            _, _, sector, f = melee.strikes(st.u, pw, contact, P.with_cal("melee", flank_face=mode), z, z + 100)
+            _, _, sector, f = melee.strikes(st.u, pw, contact, P.with_cal("melee", flank_face=mode), z)
             assert int(sector[0, 0, H]) == 1
             F[mode] = float(f[0, 0, H])
-        ff, sp = P.sim["melee"]["fighting_files"], P.sim["formation"]["spacing_m"]
+        ff, sp = P.sim["melee"]["fighting_files"], P.spacing_of(SPEAR)[0]
         assert F["min"] == pytest.approx(ff * float(depth[0, H]) / sp, rel=1e-4)
         assert F["striker"] == pytest.approx(ff * float(front[0, 0]) / sp, rel=1e-4)
         assert F["striker"] > F["min"]
@@ -231,10 +237,16 @@ class TestMelee:
         z = torch.zeros_like(st.u["men"])
         st.u["order_kind"][0, 0] = O.ATTACK
         st.u["order_target"][0, 0] = st.N // 2   # attacking the lord: the whole rate
-        rate, hit, _, _ = melee.strikes(st.u, pw, contact, P, z, z + 100)
-        p = melee.hit_chance(torch.tensor(20.0), torch.tensor(45.0), P.sim["melee"]["hit_slope"])
+        st.u["contact_s"] = torch.full_like(st.u["men"], 100.0)
+        rate, hit, _, _ = melee.strikes(st.u, pw, contact, P, z)
+        p = float(melee.hit_chance(torch.tensor(20.0), torch.tensor(45.0)))
         cap = P.sim["contact"]["lord_max_attackers"]
-        assert float(rate[0, 0, 1]) == pytest.approx(cap * float(p) * float(hit[0, 0, 1]) / 5.7, rel=1e-4)
+        per_s = p / (p * 5.7 + P.sim["melee"]["miss_s"])
+        assert float(rate[0, 0, 1]) == pytest.approx(cap * per_s * float(hit[0, 0, 1]), rel=1e-4)
+        # men gather round him over contact.lord_gather_s: half way, half the rate
+        st.u["contact_s"] = torch.full_like(st.u["men"], P.sim["contact"]["lord_gather_s"] / 2)
+        half = float(melee.strikes(st.u, pw, contact, P, z)[0][0, 0, 1])
+        assert half == pytest.approx(float(rate[0, 0, 1]) / 2, rel=1e-4)
 
     @staticmethod
     def surrounded(n, rival=False):
@@ -249,6 +261,7 @@ class TestMelee:
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
         contact = pw["enemy"] & (torch.arange(st.N)[None, None, :] == 0)
         z = torch.zeros_like(st.u["men"])
+        st.u["contact_s"] = torch.full_like(st.u["men"], 100.0)     # the steady fight (contact.lord_gather_s)
         return st, pw, contact, z
 
     def test_more_units_round_a_lord_share_the_same_men(self):
@@ -256,7 +269,7 @@ class TestMelee:
         lost = []
         for n in (1, 2, 4):
             st, pw, contact, z = self.surrounded(n)
-            rate, _, _, F = melee.strikes(st.u, pw, contact, P, z, z + 100)
+            rate, _, _, F = melee.strikes(st.u, pw, contact, P, z)
             lost.append(float(rate[0, :, 0].sum()))
             assert float(F[0, :, 0].sum()) == pytest.approx(P.sim["contact"]["lord_max_attackers"], rel=1e-4)
         assert lost[1] == pytest.approx(lost[0], rel=0.01) and lost[2] == pytest.approx(lost[0], rel=0.01)
@@ -266,9 +279,9 @@ class TestMelee:
         H = st.N // 2
         st.u["order_kind"][0, H] = O.ATTACK
         st.u["order_target"][0, H] = 0          # attacking the lord: the whole rate
-        full = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, H, 0])
+        full = float(melee.strikes(st.u, pw, contact, P, z)[0][0, H, 0])
         st.u["order_target"][0, H] = 1          # told to attack another slot, touching the lord
-        busy = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, H, 0])
+        busy = float(melee.strikes(st.u, pw, contact, P, z)[0][0, H, 0])
         assert busy == pytest.approx(full * P.sim["contact"]["lord_incidental"], rel=1e-4)
 
     @pytest.mark.parametrize("share", [0.3, 0.6, 1.0])
@@ -281,9 +294,9 @@ class TestMelee:
         H = st.N // 2
         st.u["order_kind"][0, 0] = O.ATTACK
         st.u["order_target"][0, 0] = H         # its own target: the whole rate
-        full = float(melee.strikes(st.u, pw, contact, params, z, z + 100)[0][0, 0, H])
+        full = float(melee.strikes(st.u, pw, contact, params, z)[0][0, 0, H])
         st.u["order_target"][0, 0] = H + 1     # told to attack another slot, touching the slaves
-        busy = float(melee.strikes(st.u, pw, contact, params, z, z + 100)[0][0, 0, H])
+        busy = float(melee.strikes(st.u, pw, contact, params, z)[0][0, 0, H])
         assert busy == pytest.approx(full * share, rel=1e-4)
 
     def test_a_melee_unit_holding_in_melee_strikes_at_the_hold_rate_a_missile_unit_in_full(self):
@@ -297,49 +310,41 @@ class TestMelee:
             H = st.N // 2
             st.u["order_kind"][0, 0] = O.ATTACK
             st.u["order_target"][0, 0] = H
-            attacking = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, 0, H])
+            attacking = float(melee.strikes(st.u, pw, contact, P, z)[0][0, 0, H])
             st.u["order_kind"][0, 0] = O.HOLD
             st.u["order_target"][0, 0] = -1
-            held = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, 0, H])
+            held = float(melee.strikes(st.u, pw, contact, P, z)[0][0, 0, H])
             assert attacking > 0 and held == pytest.approx(share * attacking, rel=1e-5), key
 
     def test_the_enemy_lord_keeps_his_blow_and_the_infantry_counts_less(self):
         st, pw, contact, z = self.surrounded(0, rival=True)
-        alone = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, :, 0].sum())
+        alone = float(melee.strikes(st.u, pw, contact, P, z)[0][0, :, 0].sum())
         st, pw, contact, z = self.surrounded(3, rival=True)
-        rate = melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, :, 0]
+        rate = melee.strikes(st.u, pw, contact, P, z)[0][0, :, 0]
         H = st.N // 2
         assert float(rate[H]) == pytest.approx(alone, rel=1e-4)
         st3, pw3, c3, z3 = self.surrounded(3)
-        infantry = float(melee.strikes(st3.u, pw3, c3, P, z3, z3 + 100)[0][0, :, 0].sum())
+        infantry = float(melee.strikes(st3.u, pw3, c3, P, z3)[0][0, :, 0].sum())
         k = P.sim["contact"]["lord_rival_others"]
         # The rival takes one of the cap's places: the infantry share the rest.
         cap = P.sim["contact"]["lord_max_attackers"]
         assert float(rate.sum()) - alone == pytest.approx(k * infantry * (cap - 1) / cap, rel=1e-3)
 
-    def test_a_lord_strikes_a_lord_at_lord_v_lord_of_the_rule(self):
-        st, pw, contact, z = self.surrounded(0, rival=True)
-        H = st.N // 2
-        full = float(melee.strikes(st.u, pw, contact, P.with_cal("contact", lord_v_lord=1.0), z, z + 100)[0][0, H, 0])
-        less = float(melee.strikes(st.u, pw, contact, P.with_cal("contact", lord_v_lord=0.73), z, z + 100)[0][0, H, 0])
-        assert full > 0 and less == pytest.approx(0.73 * full, rel=1e-4)
-
     def test_a_lord_strikes_a_lord_by_the_database_hit_chance(self):
-        # contact.lord_hit_slope: lord against lord, hit = 35 + attack - defence (the Warlord's 50 against the
-        # General's 45: 40 %); a blow 120 AP + 280 x (1 - 0.75 x 85 %) every 4 s. Infantry on the lord keeps
-        # the flat hit_slope.
-        assert P.sim["contact"]["lord_hit_slope"] == 1.0 and P.sim["melee"]["hit_slope"] < 1.0
+        # Lord against lord: hit = 35 + attack - defence (the Warlord's 50 against the General's 45: 40 %), a whole
+        # blow 120 AP + 280 x (1 - 0.75 x 85 %) every 4 s (no splash share, no overkill: one pool of health).
+        # The infantry on him: the same hit chance rule, p / (p x interval + miss_s) blows a second.
         st, pw, contact, z = self.surrounded(1, rival=True)
         H = st.N // 2
         st.u["order_kind"][0, H:H + 2] = O.ATTACK               # attacking him (not held: contact.hold_rate)
         st.u["order_target"][0, H:H + 2] = 0
-        p = P.with_cal("contact", lord_v_lord=1.0)
-        rate = melee.strikes(st.u, pw, contact, p, z, z + 100)[0][0, :, 0]
-        assert float(rate[H]) == pytest.approx(0.40 * (120 + 280 * (1 - 0.75 * 0.85)) / 4.0, rel=1e-4)
-        flat = melee.strikes(st.u, pw, contact, p.with_cal("contact", lord_hit_slope=P.sim["melee"]["hit_slope"]),
-                             z, z + 100)[0][0, :, 0]
-        assert float(flat[H]) == pytest.approx(0.355 * (120 + 280 * (1 - 0.75 * 0.85)) / 4.0, rel=1e-4)
-        assert float(rate[H + 1]) == pytest.approx(float(flat[H + 1]), rel=1e-6) and float(rate[H + 1]) > 0
+        rate, hit, _, F = melee.strikes(st.u, pw, contact, P, z)
+        assert float(rate[0, H, 0]) == pytest.approx(0.40 * (120 + 280 * (1 - 0.75 * 0.85)) / 4.0, rel=1e-4)
+        p = 0.35 + (20 - 45) / 100
+        per_s = p / (p * 5.7 + P.sim["melee"]["miss_s"])
+        k = P.sim["contact"]["lord_rival_others"]
+        assert float(rate[0, H + 1, 0]) == pytest.approx(k * float(F[0, H + 1, 0]) * per_s * float(hit[0, H + 1, 0]),
+                                                         rel=1e-4)
 
     def test_swordsmen_out_strike_spearmen_against_clanrats(self):
         # Same men, armour and shield class; the sword: attack 32 (spear 20), 21 + 7 damage, a blow every 4.3 s
@@ -351,18 +356,30 @@ class TestMelee:
             pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
             contact = pw["enemy"] & (pw["gap"] <= 1.0)
             z = torch.zeros_like(st.u["men"])
-            rates[key] = float(melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, 0, 1])
-        assert rates[SWORD] > 1.5 * rates[SPEAR] > 0
+            rates[key] = float(melee.strikes(st.u, pw, contact, P, z)[0][0, 0, 1])
+        assert rates[SWORD] > 1.4 * rates[SPEAR] > 0
 
-    def test_a_charge_hits_harder(self):
-        st = face_off(SPEAR, SLAVE)
+    def test_a_charge_adds_only_its_bonus(self):
+        # CA: +charge bonus to attack and to damage (split by the weapon's AP share), no impact multiplier.
+        st = face_off(SWORD, CLANRAT)
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
         contact = pw["enemy"] & (pw["gap"] <= 1.0)
         z = torch.zeros_like(st.u["men"])
-        steady = melee.strikes(st.u, pw, contact, P, z, z + 100)[0][0, 0, 1]
-        st.u["charge"][0, 0] = 1.0
-        charged = melee.strikes(st.u, pw, contact, P, st.u["charge"], z)[0][0, 0, 1]
-        assert float(charged) > 2 * float(steady)
+        H = st.N // 2
+        steady = float(melee.strikes(st.u, pw, contact, P, z)[0][0, 0, H])
+        full = float(melee.strikes(st.u, pw, contact, P, z + 1.0)[0][0, 0, H])
+        sw, cr = P.units[SWORD], P.units[CLANRAT]
+        cb, md = sw["melee"]["charge_bonus"], cr["melee"]["defence"]
+
+        def rule(bonus):
+            p = (35 + sw["melee"]["attack"] + bonus - md) / 100
+            d, a = sw["melee"]["damage"], sw["melee"]["ap_damage"]
+            hit = melee.per_hit(torch.tensor(d + bonus * d / (d + a)), torch.tensor(a + bonus * a / (d + a)),
+                                torch.tensor(float(cr["armour"])), torch.tensor(float(cr["hp_per_man"])),
+                                torch.tensor(float(cr["damage_resist"]["physical"]) / 100))
+            return p / (p * sw["melee"]["attack_interval_s"] + P.sim["melee"]["miss_s"]) * float(hit)
+        assert full / steady == pytest.approx(rule(cb) / rule(0), rel=1e-4)
+        assert 1.3 < full / steady < 2.5
 
 
 class TestMissile:
@@ -853,26 +870,6 @@ class TestBattle:
         o.kind[0, H], o.target[0, H] = O.ATTACK, 0
         battle.step(st, o, params)
         assert float(st.u["hp_abs"][0, H]) == pytest.approx(hpH) and float(st.u["hp_abs"][0, 0]) < hp0
-
-    def _charge(self, defender_key, run_defender):
-        """A spearmen unit charges defender_key head-on; returns the step's state after contact."""
-        st = scenario.build([army([(defender_key, 0, 0, 90)], [(SPEAR, 60, 0, 270)])], P)
-        H = st.N // 2
-        for _ in range(80):
-            o = replay.hold(st)
-            o.kind[0, H], o.target[0, H], o.run[0, H] = O.ATTACK, 0, True
-            if run_defender:
-                o.kind[0, 0], o.target[0, 0], o.run[0, 0] = O.ATTACK, H, True
-            battle.step(st, o, P)
-            if st.u["m"][0, 0]:
-                return st, H
-        raise AssertionError("no contact")
-
-    def test_braced_spearmen_meet_a_charge_as_a_charge(self):
-        braced, H = self._charge(SPEAR, run_defender=False)       # spearmen: charge_reflection
-        assert float(braced.u["charge"][0, H]) > 0.5 and float(braced.u["charge"][0, 0]) > 0.5
-        caught, H = self._charge(SLAVE, run_defender=False)       # slaves: no charge_reflection
-        assert float(caught.u["charge"][0, H]) > 0.5 and float(caught.u["charge"][0, 0]) == 0
 
     def test_a_unit_in_melee_does_not_turn_to_a_flanker(self):
         # A fights B to the east; C comes at A's north flank: A keeps facing B, C hits a flank.
@@ -1487,15 +1484,14 @@ def test_disabled_threat_trial_keeps_legacy_rear_sector():
 # --- the measured rules of batch 2 (config/nn/sim.json: contact.pursuit_why, pin_why, missile.physical_resist_why,
 # morale.windows_why, expendable_why, strong_enemy_why, the morale why on rout_speed) ---
 
-def _router_rate(params, charge=0.0, contact_s=0.0):
+def _router_rate(params, charge=0.0):
     """HP/s the spearmen strike a routing slave unit they touch (melee.strikes)."""
     st = face_off(SPEAR, SLAVE)
     H = st.N // 2
     st.u["r"][0, H] = True
     pw = geometry.pairwise(st.u, params.sim["formation"]["spacing_m"])
     contact = pw["enemy"] & (pw["gap"] <= 1.0)
-    rate = melee.strikes(st.u, pw, contact, params, torch.full_like(st.u["men"], charge),
-                         torch.full_like(st.u["men"], contact_s))[0]
+    rate = melee.strikes(st.u, pw, contact, params, torch.full_like(st.u["men"], charge))[0]
     return float(rate[0, 0, H])
 
 
@@ -1504,11 +1500,10 @@ class TestPursuit:
         full = _router_rate(P.with_cal("contact", pursuit_rate=1.0))
         assert full > 0
         assert _router_rate(P) == pytest.approx(P.sim["contact"]["pursuit_rate"] * full, rel=1e-5)
-        # the striker's charge and its contact clock (ramp) do not count against a router
+        # the striker's charge does not count against a router
         assert _router_rate(P, charge=1.0) == pytest.approx(_router_rate(P), rel=1e-5)
-        assert _router_rate(P, contact_s=2.0) == pytest.approx(_router_rate(P), rel=1e-5)
-        # off (no pursuit_rate): a unit touching only routers strikes nothing, as before
-        assert _router_rate(P.with_cal("contact", pursuit_rate=None)) == 0.0
+        # off (no pursuit_rate): the full rule from the rear (no ramp holds it back any more)
+        assert _router_rate(P.with_cal("contact", pursuit_rate=None)) == pytest.approx(full, rel=1e-5)
 
     def test_a_lone_pursuer_hurts_a_router_and_the_router_strikes_nobody(self):
         st = face_off(SPEAR, SLAVE)
@@ -1645,10 +1640,16 @@ class TestPhysicalResistanceAgainstMissiles:
         target[0, 0] = H
         hp = float(missile.volley(st.u, pw, target, 1.0, P)[1].sum())
         off = float(missile.volley(st.u, pw, target, 1.0, P.with_cal("missile", physical_resist=False))[1].sum())
-        assert hp == pytest.approx(0.8 * off, rel=1e-4) and hp > 0
+        a, r = P.units[ARCHER]["missile"], P.units[RUNNERS]
+
+        def per(resist):
+            return float(melee.per_hit(torch.tensor(float(a["damage"])), torch.tensor(float(a["ap_damage"])),
+                                       torch.tensor(float(r["armour"])), torch.tensor(float(r["hp_per_man"])),
+                                       torch.tensor(resist)))
+        assert hp == pytest.approx(per(0.2) / per(0.0) * off, rel=1e-4) and 0 < hp < off
         st.u["resist_missile"][0, H], st.u["resist_physical"][0, H] = 0.6, 0.5
         capped = float(missile.volley(st.u, pw, target, 1.0, P)[1].sum())
-        assert capped == pytest.approx(0.1 * off, rel=1e-4)
+        assert capped == pytest.approx(per(0.9) / per(0.0) * off, rel=1e-4)
 
 
 class TestLeavingMelee:
@@ -1657,8 +1658,8 @@ class TestLeavingMelee:
         st = scenario.build([army([(key, -50, 0, 90)], [(SPEAR, 50, 0, 270)])] * n, P)
         front, depth = geometry.dims(st.u, P.sim["formation"]["spacing_m"])
         H = st.N // 2
-        st.u["x"][:, 0] = -depth[:, 0] / 2
-        st.u["x"][:, H] = depth[:, H] / 2
+        st.u["x"][:, 0] = -depth[:, 0] / 2 - TOUCH / 2
+        st.u["x"][:, H] = depth[:, H] / 2 + TOUCH / 2
         o = replay.hold(st)
         o.kind[:, H], o.target[:, H] = O.ATTACK, 0
         o.kind[:, 0], o.target[:, 0] = O.ATTACK, H
@@ -1788,23 +1789,14 @@ class TestLordFragility:
         assert float(fight[0, H + 1, 0]) / float(free[0, H + 1, 0]) == pytest.approx((1 - ff) / lone, rel=1e-3)
         assert float(old[0, H + 1, 0]) / float(free[0, H + 1, 0]) == pytest.approx(1 - ff, rel=1e-3)
 
-    def test_a_lord_tires_slower_in_melee_and_pays_the_charge_only_at_contact(self):
-        # single entity in melee: single_combat (15) a tick, the charge (+34) only in the first single_charge_s (2) s;
-        # a formation keeps 13.7 and charges while its charge lasts.
+    def test_a_lord_tires_slower_in_melee_and_the_charge_costs_while_the_caller_says(self):
+        # single entity in melee: single_combat (15) a tick, a formation 13.7; the charge (+34) for both while
+        # `charging` (battle.py: the first fatigue.calibration.charge_s seconds after the charge's first blow).
         u = {"fatigue": torch.full((4,), 15000.), "fat": torch.zeros(4)}
         activity = melee_activity(4, attack=[True] * 4, single=[True, True, False, False],
-                                  charging=[True, True, True, False])
-        activity["contact_s"] = torch.tensor([1.0, 3.0, 3.0, 3.0])
+                                  charging=[True, False, True, False])
         fatigue.step(u, activity, calibrated_fatigue(), 1.)
         assert u["fatigue"].tolist() == pytest.approx([15340., 15150., 15340., 15137.])
-        u = {"fatigue": torch.full((1,), 15000.), "fat": torch.zeros(1)}
-        old = calibrated_fatigue()
-        old.sim["fatigue"]["calibration"].pop("single_combat")
-        old.sim["fatigue"]["calibration"].pop("single_charge_s")
-        a = melee_activity(1, attack=[True], single=[True], charging=[True])
-        a["contact_s"] = torch.tensor([3.0])
-        fatigue.step(u, a, old, 1.)
-        assert u["fatigue"].tolist() == pytest.approx([15340.])
 
 
 class TestRallyNearTarget:

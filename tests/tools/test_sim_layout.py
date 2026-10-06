@@ -57,11 +57,12 @@ class TestCalibration:
         # the Skaven's +6 start reserve is Strength in Numbers' (an innate effect), not a faction bonus
         assert slingers["reload"] == 11.5 and slingers["morale_bonus"] == 0 and slingers["fx"] > 0
         spear = p.static("wh_main_emp_inf_spearmen_0")
-        assert spear["range"] == 0 and spear["width"] == 30.0
+        # the default order: men / rank_depth files (20) of the template's spacing across the front (1.48 m)
+        assert spear["range"] == 0 and abs(spear["width"] - 20 * 1.48) < 1e-6 and spear["sp_v"] == 1.6
 
     def test_changing_a_calibrated_number_keeps_the_rest(self):
         p = params.load()
-        before = p.sim["melee"]["hit_slope"]
-        q = p.with_cal("melee", hit_slope=before + 1)
-        assert q.sim["melee"]["hit_slope"] == before + 1 and p.sim["melee"]["hit_slope"] == before
-        assert q.sim["missile"] == p.sim["missile"] and q.sim["melee"]["impact"] == p.sim["melee"]["impact"]
+        before = p.sim["melee"]["fighting_files"]
+        q = p.with_cal("melee", fighting_files=before + 1)
+        assert q.sim["melee"]["fighting_files"] == before + 1 and p.sim["melee"]["fighting_files"] == before
+        assert q.sim["missile"] == p.sim["missile"] and q.sim["melee"]["miss_s"] == p.sim["melee"]["miss_s"]
