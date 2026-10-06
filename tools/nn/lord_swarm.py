@@ -54,24 +54,39 @@ LORD_LAYOUTS = [
     ("lord_s3", [("front", "lord"), ("back", "spear"), ("left", "spear"), ("right", "spear")]),
     ("lord_ap1", [("front", "lord"), ("back", "ap")]),
 ]
-PLANS = ("infantry", "lords", "all")
 
 
-def arena():
-    """The probe's armies in the shape of a named arena (tools/nn/scenario.py)."""
+# The damage plan (build/damage/spec.md section 4): one unit in front of each lord, swordsmen or greatswords
+# (+14 against infantry: does it count against a lord on foot?) on the Warlord, clanrats or Stormvermin on the
+# General; the lord's splash on an armoured many-man target.
+SWORDS, GREATSWORDS = "wh_main_emp_inf_swordsmen", "wh_main_emp_inf_greatswords"
+CLANRATS = "wh2_main_skv_inf_clanrats_1"
+DAMAGE_LAYOUTS = [("sw1", [("front", "spear")]), ("gs1", [("front", "ap")])]
+PLANS = ("infantry", "lords", "all", "damage")
+
+
+def arena(plan="infantry"):
+    """The probe's armies in the shape of a named arena (tools/nn/scenario.py); the damage plan has its own
+    units (2 of each kind a side: they take turns)."""
     base = nn_scenario.load_arena()
+    damage = plan == "damage"
+    n_spears, n_ap = (2, 2) if damage else (N_SPEARS, N_AP)
 
     def army(faction, lord, spear, spear_men, ap, ap_men):
         units = [{"slot": "lord", "key": lord, "men": 1, "general": True, "forward": -60, "lateral": 0, "width": 5}]
         units += [{"slot": f"spear_{i}", "key": spear, "men": spear_men, "forward": 0, "lateral": 36 * (i - 4.5),
-                   "width": WIDTH_M} for i in range(1, N_SPEARS + 1)]
+                   "width": WIDTH_M} for i in range(1, n_spears + 1)]
         units += [{"slot": f"ap_{i}", "key": ap, "men": ap_men, "forward": -40, "lateral": 36 * (i - 1.5),
-                   "width": WIDTH_M} for i in range(1, N_AP + 1)]
+                   "width": WIDTH_M} for i in range(1, n_ap + 1)]
         return {"faction": faction, "units": units}
     out = {k: v for k, v in base.items() if k not in ("faction", "units", "description")}
-    out.update(name="lord_swarm", gap_m=400, defend_radius_m=150,
-               sides={"own": army("wh_main_emp_empire", GENERAL, SPEAR, 120, HALBERD, 120),
-                      "enemy": army("wh2_main_skv_skaven", WARLORD, CLANRAT, 160, STORM, 160)})
+    if damage:
+        sides = {"own": army("wh_main_emp_empire", GENERAL, SWORDS, 120, GREATSWORDS, 120),
+                 "enemy": army("wh2_main_skv_skaven", WARLORD, CLANRATS, 160, STORM, 160)}
+    else:
+        sides = {"own": army("wh_main_emp_empire", GENERAL, SPEAR, 120, HALBERD, 120),
+                 "enemy": army("wh2_main_skv_skaven", WARLORD, CLANRAT, 160, STORM, 160)}
+    out.update(name="lord_swarm", gap_m=400, defend_radius_m=150, sides=sides)
     return out
 
 
@@ -80,8 +95,8 @@ def depth(men, width=WIDTH_M, spacing=SPACING_M):
     return -(-men // files) * spacing
 
 
-def write_scenario(path=SCENARIO):
-    a = arena()
+def write_scenario(path=SCENARIO, plan="infantry"):
+    a = arena(plan)
     path.write_text(nn_scenario.scenario_xml(a, "enemy", 3600), encoding="utf-8", newline="\n")
     return a
 
@@ -90,7 +105,8 @@ def run_config(repeats=2, fight_s=40, max_s=90, plan="infantry"):
     """The entry's config and the model seconds it takes at most. plan: the infantry layouts
     (both lanes at once), the rival-lord layouts (one lane at a time) or both."""
     assert plan in PLANS
-    a = arena()
+    a = arena(plan)
+    n_spears, n_ap = (2, 2) if plan == "damage" else (N_SPEARS, N_AP)
     widths, depths = {}, {}
     for side in nn_scenario.SIDES:
         for u in a["sides"][side]["units"]:
@@ -99,13 +115,17 @@ def run_config(repeats=2, fight_s=40, max_s=90, plan="infantry"):
             depths[name] = depth(u["men"]) if u["men"] > 1 else 0
     names = lambda side, kind, n: [f"{side}_{kind}_{i}" for i in range(1, n + 1)]
     lanes = [{"name": "general", "lord": "own_lord", "rival": "enemy_lord", "x": -300, "z": 0, "bearing": 0,
-              "spears": names("enemy", "spear", N_SPEARS), "ap": names("enemy", "ap", N_AP),
+              "spears": names("enemy", "spear", n_spears), "ap": names("enemy", "ap", n_ap),
               "park": {"x": -700, "z": 600, "bearing": 0}},
              {"name": "warlord", "lord": "enemy_lord", "rival": "own_lord", "x": 300, "z": 0, "bearing": 0,
-              "spears": names("own", "spear", N_SPEARS), "ap": names("own", "ap", N_AP),
+              "spears": names("own", "spear", n_spears), "ap": names("own", "ap", n_ap),
               "park": {"x": 250, "z": -600, "bearing": 180}}]
     trials = []
     for r in range(repeats):
+        if plan == "damage":
+            order = DAMAGE_LAYOUTS if r % 2 == 0 else DAMAGE_LAYOUTS[::-1]
+            trials += [{"name": name, "attackers": [{"side": s, "kind": k} for s, k in places]}
+                       for name, places in order]
         if plan in ("infantry", "all"):
             order = LAYOUTS if r % 2 == 0 else LAYOUTS[::-1]
             trials += [{"name": name, "attackers": [{"side": s, "kind": k} for s, k in places]}
@@ -117,7 +137,7 @@ def run_config(repeats=2, fight_s=40, max_s=90, plan="infantry"):
     settle_ms = 3000
     config = {"start_m": 20, "settle_ms": settle_ms, "fight_s": fight_s, "max_s": max_s, "min_hp": 0.3,
               "soldier_ms": 1000, "radii": RADII, "near_m": 6.0, "lanes": lanes, "trials": trials,
-              "widths": widths, "depths": depths}
+              "widths": widths, "depths": depths, "plan": plan}
     model_s = len(trials) * (max_s + 2 * settle_ms / 1000) + 30
     return config, model_s
 
@@ -133,13 +153,17 @@ def events(run_dir):
 
 
 def trials_of(run_dir):
-    """[{trial, name, lane, attackers, samples [(t, lord, att)], men [(t, att counts)], end}]."""
+    """[{trial, name, lane, attackers, samples [(t, lord, att)], men [(t, att counts)], end, plan}]."""
     out = {}
+    manifest = Path(run_dir) / "manifest.json"
+    plan = (json.loads(manifest.read_text(encoding="utf-8"))["config"].get("plan", "infantry")
+            if manifest.exists() else "infantry")
     for r in events(run_dir):
         ev = r["event"]
         if ev == "swarm_trial":
             for lane in r["lanes"]:
-                out[(r["trial"], lane["lane"])] = {"run": Path(run_dir).name, "trial": r["trial"], "name": r["name"],
+                out[(r["trial"], lane["lane"])] = {"run": Path(run_dir).name, "plan": plan, "trial": r["trial"],
+                                                   "name": r["name"],
                                                    "lane": lane["lane"], "attackers": lane["attackers"],
                                                    "samples": [], "men": [], "end": None}
         elif ev == "swarm_sample":
@@ -201,6 +225,10 @@ def measure(tr):
         idx = np.nonzero(steady & np.isfinite(men))[0]
         if len(idx) >= 2 and t[idx[-1]] > t[idx[0]]:
             u["men_lost_per_s"] = float((men[idx[0]] - men[idx[-1]]) / (t[idx[-1]] - t[idx[0]]))
+        hpa = series("hp")
+        idx = np.nonzero(steady & np.isfinite(hpa))[0]
+        if len(idx) >= 2 and t[idx[-1]] > t[idx[0]]:
+            u["hp_lost_per_s"] = float((hpa[idx[0]] - hpa[idx[-1]]) / (t[idx[-1]] - t[idx[0]]))
         units.append(u)
     # Soldiers near the lord (mean over the steady window), per unit and in all.
     near = [x for x in tr["men"] if x["t"] / 1000 >= t0 + STEADY_FROM_S]
@@ -216,6 +244,60 @@ def measure(tr):
             u["near"] = dict(zip(map(str, RADII), [round(float(v), 2) for v in mean[j]]))
         out["near_total"] = dict(zip(map(str, RADII), [round(float(v), 2) for v in mean.sum(axis=0)]))
     out["units"] = units
+    return out
+
+
+def blows(tr, merge_s=0.6, min_drop=3.0):
+    """Discrete blows in one trial with ONE attacking unit (the damage plan; integer HP every 200 ms, the lord
+    in melee): the lord's HP drops a tick (each mostly one infantry blow: build/damage/spec.md D5), and the
+    attacker's HP drops merged within merge_s (one lord blow, splash: build/damage/lord_splash.py) with the
+    men it lost over the trial. None if the lord never fought."""
+    s = [x for x in tr["samples"] if x["lord"].get("m") and x["att"]]
+    if len(s) < 10 or len(tr["attackers"]) != 1:
+        return None
+    t = np.array([x["t"] / 1000 for x in s])
+    lord = np.array([x["lord"]["hp"] for x in s], float)
+    att = np.array([x["att"][0]["hp"] for x in s], float)
+    men = np.array([x["att"][0]["men"] for x in s], float)
+    drops = -np.diff(lord)
+    on_lord = drops[drops > 0.5]
+    dh, tt, lord_blows, last = -np.diff(att), t[1:], [], -9.0
+    for k in np.nonzero(dh > min_drop)[0]:
+        if tt[k] - last <= merge_s and lord_blows:
+            lord_blows[-1] += dh[k]
+        else:
+            lord_blows.append(dh[k])
+        last = tt[k]
+    secs = float(t[-1] - t[0])
+    return {"lane": tr["lane"], "name": tr["name"], "secs": secs, "on_lord": on_lord.tolist(),
+            "lord_blows": lord_blows, "att_hp": float(att[0] - att[-1]), "att_men": float(men[0] - men[-1]),
+            "lord_hp": float(lord[0] - lord[-1])}
+
+
+def blows_table(trials):
+    """Per lane and layout: the infantry's blows on the lord (HP a drop: median, quartiles, share in the two
+    predicted ranges of the greatswords' blow) and the lord's blows (a second, HP and men a blow)."""
+    groups = {}
+    for tr in trials:
+        b = blows(tr)
+        if b:
+            groups.setdefault((b["lane"], b["name"]), []).append(b)
+    out = []
+    for (lane, name), bs in sorted(groups.items()):
+        on = np.array([x for b in bs for x in b["on_lord"]])
+        lb = np.array([x for b in bs for x in b["lord_blows"]])
+        secs = sum(b["secs"] for b in bs)
+        row = {"lane": lane, "layout": name, "trials": len(bs), "melee_s": round(secs, 1),
+               "lord_drops": int(len(on)), "lord_drop_median": float(np.median(on)) if len(on) else None,
+               "lord_drop_q": [float(np.percentile(on, 25)), float(np.percentile(on, 75))] if len(on) else None,
+               "share_26_31": float(((on >= 25.5) & (on <= 31.5)).mean()) if len(on) else None,
+               "share_36_43": float(((on >= 35.5) & (on <= 43.5)).mean()) if len(on) else None,
+               "lord_hp_per_s": sum(b["lord_hp"] for b in bs) / secs,
+               "lord_blows": int(len(lb)), "lord_blows_per_s": len(lb) / secs,
+               "att_hp_per_lord_blow": float(sum(b["att_hp"] for b in bs) / max(1, len(lb))),
+               "att_men_per_lord_blow": float(sum(b["att_men"] for b in bs) / max(1, len(lb))),
+               "att_hp_per_s": sum(b["att_hp"] for b in bs) / secs, "att_men_per_s": sum(b["att_men"] for b in bs) / secs}
+        out.append(row)
     return out
 
 
@@ -279,10 +361,11 @@ def simulate(trials, params=None, device="cpu", until_s=None):
     from tools.nn.sim.params import load
     params = params or load()
     keys = {}
-    for side in nn_scenario.SIDES:
-        for u in arena()["sides"][side]["units"]:
-            keys[f"{side}_{u['slot']}"] = u["key"]
-    armies = [sim_army(tr, keys) for tr in trials]
+    for plan in {tr.get("plan", "infantry") for tr in trials}:
+        for side in nn_scenario.SIDES:
+            for u in arena(plan)["sides"][side]["units"]:
+                keys[(plan, f"{side}_{u['slot']}")] = u["key"]
+    armies = [sim_army(tr, {n: k for (p, n), k in keys.items() if p == tr.get("plan", "infantry")}) for tr in trials]
     H = max(len(a["sides"][2]["units"]) for a in armies)
     st = sim_scenario.build(armies, params, device=device, per_side=H)
     u = st.u
@@ -296,25 +379,28 @@ def simulate(trials, params=None, device="cpu", until_s=None):
         o.target = torch.where(att, torch.zeros_like(o.target), o.target)
         o.run = att.clone()
         return o
-    rec_t, rec_hp, rec_m = [], [], []
+    rec_t, rec_hp, rec_m, rec_ahp, rec_amen = [], [], [], [], []
 
     def record(st):
         rec_t.append(float(st.t.max()))
         rec_hp.append(st.u["hp_abs"][:, 0].detach().cpu().numpy().copy())
         rec_m.append(st.u["m"][:, 0].detach().cpu().numpy().copy())
+        rec_ahp.append(st.u["hp_abs"][:, H].detach().cpu().numpy().copy())     # the first attacker (side 2's slot 0)
+        rec_amen.append(st.u["men"][:, H].detach().cpu().numpy().copy())
     battle.run(st, policy, params, until_s=until_s or 100.0, record=record)
     t = np.array(rec_t)
-    hp, m = np.stack(rec_hp), np.stack(rec_m)
+    hp, m, ahp, amen = np.stack(rec_hp), np.stack(rec_m), np.stack(rec_ahp), np.stack(rec_amen)
     out = []
     for b, tr in enumerate(trials):
         fight = (tr["end"] or {}).get("t", 0) / 1000 - ((tr["end"] or {}).get("contact_ms") or 0) / 1000
-        samples = [{"t": int(1000 * tk), "lord": {"hp": float(hp[k, b]), "m": bool(m[k, b])}, "att": []}
+        samples = [{"t": int(1000 * tk), "lord": {"hp": float(hp[k, b]), "m": bool(m[k, b])},
+                    "att": [{"hp": float(ahp[k, b]), "men": float(amen[k, b]), "m": bool(m[k, b])}]}
                    for k, tk in enumerate(t)]
         if m[:, b].any():
             c = int(np.argmax(m[:, b]))
             samples = [x for x in samples if x["t"] / 1000 <= t[c] + max(fight, STEADY_FROM_S + 5)]
         r = measure({"run": "sim", "trial": tr["trial"], "name": tr["name"], "lane": tr["lane"],
-                     "attackers": [], "samples": samples, "men": [], "end": None})
+                     "attackers": tr["attackers"][:1], "samples": samples, "men": [], "end": None})
         out.append(r)
     return out
 
@@ -393,9 +479,53 @@ def main(argv=None):
     parser.add_argument("runs", nargs="*", type=Path, help="run folders (default: every run in build/lord-swarm/runs)")
     parser.add_argument("--out", type=Path, default=OUT)
     parser.add_argument("--sim", action="store_true", help="also the simulator on the same trials (needs torch)")
+    parser.add_argument("--blows", action="store_true",
+                        help="the damage plan's blows (infantry on the lord, the lord's splash) and, with --sim, rates")
     parser.add_argument("--plot", type=Path, help="draw the table (and the simulator from compare.json) to this png")
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8")
+    if args.blows:
+        trials = [tr for d in (args.runs or runs()) for tr in trials_of(d) if tr.get("plan") == "damage"]
+        table = blows_table(trials)
+        f = lambda v, p=1: "-" if v is None else f"{v:.{p}f}"
+        print("infantry blows on the lord (HP a 0.2 s drop) and the lord's blows on the attacker (drops within 0.6 s)")
+        for r in table:
+            print(f"{r['lane']:8} {r['layout']:4} trials {r['trials']} melee {r['melee_s']:.0f} s | on lord: {r['lord_drops']} "
+                  f"drops, median {f(r['lord_drop_median'])} (q {r['lord_drop_q']}), in 26-31 {f(r['share_26_31'], 2)}, "
+                  f"in 36-43 {f(r['share_36_43'], 2)}, lord HP/s {f(r['lord_hp_per_s'], 2)} | lord blows {r['lord_blows']} "
+                  f"({f(r['lord_blows_per_s'], 3)}/s), HP {f(r['att_hp_per_lord_blow'])} and men "
+                  f"{f(r['att_men_per_lord_blow'], 2)} a blow; attacker HP/s {f(r['att_hp_per_s'], 1)}, men/s "
+                  f"{f(r['att_men_per_s'], 3)}")
+        result = {"blows": table}
+        if args.sim:
+            game = [m for m in (measure(tr) for tr in trials) if m]
+            keep = [tr for tr in trials if measure(tr)]
+            sim = simulate(keep)
+            rows = {}
+            for g, sm in zip(game, sim):
+                r = rows.setdefault((g["lane"], g["name"]), {"game": [], "sim": []})
+                r["game"].append(g)
+                r["sim"].append(sm)
+            out = []
+            for (lane, name), r in sorted(rows.items()):
+                def mean(items, get):
+                    v = [get(x) for x in items if x and get(x) is not None]
+                    return float(np.mean(v)) if v else None
+                row = {"lane": lane, "layout": name}
+                for who in ("game", "sim"):
+                    row[f"{who}_lord_hp_per_s"] = mean(r[who], lambda x: x.get("lord_hp_per_s"))
+                    row[f"{who}_att_hp_per_s"] = mean(r[who], lambda x: (x.get("units") or [{}])[0].get("hp_lost_per_s"))
+                    row[f"{who}_att_men_per_s"] = mean(r[who], lambda x: (x.get("units") or [{}])[0].get("men_lost_per_s"))
+                out.append(row)
+                print(f"{lane:8} {name:4} steady: lord HP/s game {f(row['game_lord_hp_per_s'], 2)} sim {f(row['sim_lord_hp_per_s'], 2)}; "
+                      f"attacker HP/s game {f(row['game_att_hp_per_s'], 1)} sim {f(row['sim_att_hp_per_s'], 1)}; "
+                      f"men/s game {f(row['game_att_men_per_s'], 3)} sim {f(row['sim_att_men_per_s'], 3)}")
+            result["compare"] = out
+        path = args.out.with_name("blows.json")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(result, indent=1), encoding="utf-8")
+        print(path)
+        return 0
     if args.sim:
         rows = compare(args.runs or None)
         print(f"{'lane':8} {'layout':12} {'n':>2} {'game HP/s':>10} {'sim':>7} {'err':>6} {'game first 15 s':>16} {'sim':>7}")

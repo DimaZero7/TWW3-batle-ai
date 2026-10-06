@@ -210,6 +210,83 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
   See [battle rules](battle-rules.md).
   - Ours: the arena units have Ultra sizes (spearmen 120, clanrats 160, slaves 180).
 
+## In-game check: the melee probe
+
+One mechanic, one scenario, the game and the simulator alike ([melee probe](../../apps/entries.md#charge_probe)):
+in a lane an attacker and a target, everyone held by script and fearless; the simulator plays the same lane
+from the same places with the same orders (8 copies). 11 battles, ~21 min of the machine: the `charge` plan
+8 battles, the `hit` plan 2, the lord swarm's `damage` 1. Recordings and tables: `build/meleetests` (not in
+git). Until the simulator has every base indicator, each mismatch is **OPEN** with candidates, not a bug; no
+fitting on these numbers.
+
+**Charge: a volley in the first second.** HP the target loses (swordsmen on clanrats - 4 lanes each, the rest
+1-2):
+
+| Attacker → target, order | Game 0-1 s | Sim 0-1 s | Game 1-5 s | Sim 1-5 s | Game 5-15 s | Sim 5-15 s | Game / sim from 15 s, HP/s |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| swordsmen → clanrats, attack at a run | 220 | 50 | 218 | 189 | 391 | 382 | 32 / 34 |
+| swordsmen → clanrats, attack at a walk | 248 | 35 | 184 | 138 | 537 | 345 | 35 / 34 |
+| swordsmen → clanrats, move order | 78 | 35 | 102 | 138 | 180 | 345 | 21 / 35 |
+| clanrats → braced spearmen | 148 | 38 | 232 | 142 | 326 | 292 | 26 / 26 |
+| clanrats → spearmen facing away | 189 | 42 | 342 | 160 | 326 | 340 | 27 / 31 |
+| swordsmen → skavenslaves | 268 | 48 | 144 | 189 | 654 | 435 | 52 / 40 |
+| greatswords → skavenslaves | 300 | 86 | 400 | 342 | 1,224 | 714 | 69 / 41 |
+| flagellants → clanrats | 296 | 52 | 303 | 207 | 639 | 459 | 49 / 40 |
+| spearmen → skavenslave spearmen (150 m / 20 m) | 98 / 141 | 30 | 178 / 92 | 118 | 378 / 362 | 274 | 37 / 26 |
+
+- Nearly all of the game's extra damage is in the first 0.5-1 s after contact (x6-17 the steady pace); from
+  1 s the pace is close to the rule. In blows: the first second's extra HP / (hit chance × damage with the
+  charge bonus) - median **8** (3-12) a unit over 15 lanes; the simulator has 9-10 men striking in contact
+  (0.5 of the front's files). A candidate (a rule, not a fit): the attack interval runs only after a hit (the
+  `melee_attack_interval` key's description), so every man who reaches the enemy in a charge strikes at once -
+  one blow with the full bonus at the moment of contact.
+- OPEN: a target ordered to attack at the moment of contact gives no volley (the attacker loses 11 HP in
+  0.5 s), a target standing without orders does (clanrats lose 42-130 HP in 0.5 s on spearmen and swordsmen);
+  a recharge after backing off 35-40 m gives no volley (0-50 HP in 1 s against 136-291 for the first); a move
+  order into contact - half a volley, then x0.6 of the simulator for 30 s (candidate: standing without an
+  attack order, B8).
+- Attackers within 2.5 m of an enemy: 20-36 in the first second, 10-16 after 15 s; at 5-15 s there are more
+  than at 15-30 s with the same pace - the number of men in contact does not explain the difference by itself.
+
+**Charge: speed and order.** With an attack order (at a run and **at a walk**) a unit covers the last ~30 m at
+charge speed: 3.6-3.9 m/s on average over 30 m and 3.9-4.7 m/s over 10 m against a run of 3.0 (clanrats 4.3 =
+4.8 × 0.9); the same from 150 m and from 20 m. An attack at a walk: 1.56 m/s, then the sprint and the same
+volley as an attack at a run - in the game it is a charge. A move order gives no sprint (2.8 m/s). The
+simulator: no sprint (switch `charge.rush_m`), an attack at a walk walks to contact without a charge - contact
+15 s later (63 against 48 s). A proposal by the database's rule: charge speed `charge_speed` over the last
+`charge_distance_commence_run` (30 m, lords 35) under any attack order; an attack at a walk with that sprint
+is a charge.
+
+**Braced spearmen.** Clanrats lose 250 HP in the first 5 s on braced spearmen (attack at a walk 224, spearmen
+facing away 63, swordsmen without reflection 131); the simulator 84 / 57 / 57 / 86. OPEN: candidates - charge
+reflection not triggering for a unit standing under script in the simulator, a standing unit's x0.5
+(`hold_rate`, B8), the receiving side's volley.
+
+**Hit chance (`hit` plan, from 15 s to the end).** The target's HP/s, game / simulator: swordsmen →
+skavenslaves 46 / 39, greatswords → skavenslaves 63 / 41, spearmen with shields → skavenslaves 37 / 33,
+flagellants → clanrats 53 / 39; the skavenslaves back 16 / 15, 10 / 9, 13 / 11; clanrat spearmen → spearmen
+20 / 18 and back 21 / 22. Blows a second a man with 10 striking (unarmoured skavenslaves: HP / the blow's
+damage): 0.15-0.25 against the rule's 0.14-0.20 - the slope in hit chance is right. Skavenslaves die faster
+in the game: 0.89 / 0.51, 1.00 / 0.58, 0.58 / 0.42 men a second (OPEN: candidates - `kills.exponent`, the
+smoothed overkill, blows on fresh or wounded men).
+
+**Stand Your Ground.** Spearmen lose 107 HP in the first 15 s with the ability against 440 without (x0.24,
+one battle each); hit chance 25 % → 8 % gives x0.32, the rule p / (p × interval + 0.5) x0.62, the simulator
+x0.70. OPEN: candidates - the miss cost of 0.5 s (fitted) too small at a low hit chance, one battle's spread.
+
+**Lords charging** (1 battle each): the General's first blow comes 3-5 s after contact (0 HP in 0-3 s), the
+Warlord takes 272 HP in the first 0.5 s; over 0-5 s the General 237 / sim 136, the Warlord 617 / 155. OPEN.
+
+**Damage per blow (`damage` plan, 8 trials).** A greatswords blow on the Warlord - median 41 HP (quartiles
+39-45; 71 % in 36-43, none in 26-31): **the +14 against infantry counts against a lord on foot** (as in the
+simulator). Swordsmen on the Warlord 14 (rule 9-19), clanrats on the General 14 (9-18), Stormvermin on the
+General 27 (24-28). A lord's blow: on greatswords 105 HP and 0.60 killed (2.1 struck × a share of 50 HP after
+armour - 2.07 holds on armour too), on swordsmen 136 and 1.97, on clanrats 143 and 2.45, on Stormvermin 102
+and 0.79; 0.18-0.19 lord blows a second (rule ~0.2). The lord loses HP/s, game / sim: 23 / 21, 10 / 8,
+32 / 40, 8 / 10. The unit loses 18-29 HP/s to the lord in the game, 8-14 in the simulator: OPEN - in the
+simulator a holding lord strikes at `hold_rate` 0.5 (B8), in the game a lord held by script strikes by the
+rule.
+
 ## Not found
 
 No public source explains `melee_breakoff_secs` 24 / `melee_breakoff_total_immunity_secs` 10
@@ -219,10 +296,10 @@ No public source explains `melee_breakoff_secs` 24 / `melee_breakoff_total_immun
 ## What is still unclear
 
 - **The first 15 s of contact are stronger in the game than the rule.** In the pairs the target loses
-  499–764 HP in the first 15 s, while the rule (the charge bonus, no blow) gives the simulator 396–446;
-  spearmen only have a charge bonus of 4, so charging does not explain it. Candidates: formations
-  overlap by 2.5–4.8 m in the first second (more men strike), matched combat, fresh units. Test: an
-  in-game charge probe (`build/charge/spec.md` section 7).
+  499–764 HP in the first 15 s, while the rule (the charge bonus, no blow) gives the simulator 396–446. The
+  melee probe showed where the difference is: nearly all of it in the first second of a charge's contact (a
+  volley, ~8 blows a unit), after that the pace is the rule's ([in-game check](#in-game-check-the-melee-probe)).
+  Why a target ordered at the moment of contact and a recharge give no volley - OPEN.
 - **A lord against one infantry unit hits less often in the game than against a crowd.** At 2.07 men hit
   (measured on 1–4 units around him) a lord in a pair takes 13–31 % more off infantry than in the game.
 

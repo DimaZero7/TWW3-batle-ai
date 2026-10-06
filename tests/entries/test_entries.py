@@ -934,3 +934,65 @@ class TestLordFall:
         """)
         rows = events(tmp_path / "tww3_bai_events.jsonl")
         assert [(r["u"], r["tg"]) for r in rows if r["event"] == "fall_reissue"] == [("own_fight_1", "enemy_fight_1")]
+
+
+class TestChargeProbe:
+    """The melee probe (entries.charge_probe; lanes from tools/nn/charge_probe.py)."""
+    SETUP = """
+        own = {fake.unit('own_lord', 'lord', -60, 0), fake.unit('own_swords_1', 'swords', 0, 0),
+               fake.unit('own_swords_2', 'swords', 0, 0)}
+        enemy = {fake.unit('enemy_lord', 'lord', 60, 0), fake.unit('enemy_clanrat_1', 'clanrat', 0, 0),
+                 fake.unit('enemy_clanrat_2', 'clanrat', 0, 0)}
+        own[1].abilities = {syg = true}
+        bm = fake.manager({own, enemy})
+        CONFIG = {build = 'test', speed = 20, tick_ms = 500, men_ms = 1000, men_near_m = 60, men_after_s = 30,
+            deadline_s = 100, settle_ms = 4000,
+            lanes = {{name = 'L1', attacker = 'own_swords_1', target = 'enemy_clanrat_1', x = -120, z = 0, gap_m = 80,
+                      a_depth = 9, t_depth = 12, a_width = 30, t_width = 30, mode = 'recharge', target_mode = 'stand',
+                      answer = true, fight_s = 20, max_s = 60, move_beyond_m = 5, recharge_after_s = 2, back_m = 40,
+                      recharge_max_s = 3},
+                     {name = 'L2', attacker = 'enemy_clanrat_2', target = 'own_swords_2', x = 120, z = 0, gap_m = 40,
+                      a_depth = 9, t_depth = 12, a_width = 30, t_width = 30, mode = 'attack_walk',
+                      target_mode = 'stand', answer = true, fight_s = 5, max_s = 60, move_beyond_m = 5,
+                      lord = {name = 'own_lord', ability = 'syg', dz = 8}}},
+            park = {{name = 'enemy_lord', x = 700, z = -400, bearing = 0}}}
+        GLOBALS = {common = fake.common, battle_vector = fake.vector_type}
+    """
+
+    def test_orders_contacts_recharge_and_ability(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            assert(own[2].attack_args.run == true, 'recharge starts with an attack at a run')
+            assert(enemy[3].attack_args.run == false, 'attack_walk walks')
+            own[2].melee, enemy[3].melee = true, true
+            for _ = 1, 200 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        kinds = [r["event"] for r in rows]
+        assert "error" not in kinds, [r for r in rows if r["event"] == "error"]
+        contacts = [(r["lane"], r["n"]) for r in rows if r["event"] == "probe_contact"]
+        assert ("L1", 1) in contacts and ("L2", 1) in contacts and ("L1", 2) in contacts
+        assert [r["phase"] for r in rows if r["event"] == "probe_phase"] == ["out", "back"]
+        (ab,) = [r for r in rows if r["event"] == "probe_ability"]
+        assert ab["lane"] == "L2" and ab["status"] == "used"
+        sample = next(r for r in rows if r["event"] == "probe_sample")
+        assert {x["lane"] for x in sample["lanes"]} == {"L1", "L2"} and "l" in sample["lanes"][1]
+        assert any(r["event"] == "probe_men" for r in rows)
+        ends = {r["lane"]: r["why"] for r in rows if r["event"] == "probe_lane_end"}
+        assert ends == {"L1": "fight_s", "L2": "fight_s"}
+        assert rows[-1]["event"] == "result"
+
+    def test_layout_and_recharge_step(self, lua):
+        L = lua.eval("""require('entries.charge_probe').layout({x = 10, z = 0, gap_m = 80, a_depth = 10,
+            t_depth = 12, target_mode = 'rear'})""")
+        assert (L.ax, L.az, L.ab, L.tx, L.tz, L.tb) == (10, 85, 180, 10, -6, 180)
+        step = lua.eval("require('entries.charge_probe').recharge_step")
+        lane = lua.table_from({"recharge_after_s": 10, "back_m": 40, "recharge_max_s": 25})
+        assert step("in", 9000, 0, 0, 0, True, lane) == "in"
+        assert step("in", 10000, 0, 0, 0, True, lane) == "out"
+        assert step("out", 12000, 0, 10000, 36, False, lane) == "back"
+        assert step("out", 12000, 0, 10000, 36, True, lane) == "out"
+        assert step("out", 35000, 0, 10000, 3, True, lane) == "back"

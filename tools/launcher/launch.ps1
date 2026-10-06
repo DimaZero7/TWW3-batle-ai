@@ -20,7 +20,7 @@
 #  * -Graphics ultra sets the graphics preset for this run only (preferences.ps1), restored with
 #    the same backup (a battle a human plays: build human).
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('ai-vs-ai', 'unit-readout', 'move-probe', 'manual', 'roster-capture', 'enemy-layout', 'map-capture', 'archer-range', 'nn-arena', 'lord-swarm', 'human', 'lord-fall', 'lord-duel', 'lord-ai')][string]$Target,
+    [Parameter(Mandatory = $true)][ValidateSet('ai-vs-ai', 'unit-readout', 'move-probe', 'manual', 'roster-capture', 'enemy-layout', 'map-capture', 'archer-range', 'nn-arena', 'lord-swarm', 'charge-probe', 'human', 'lord-fall', 'lord-duel', 'lord-ai')][string]$Target,
     [int]$TimeoutSeconds = 0,
     [switch]$KeepGameOpen,
     # After the result the game stays open this long (or until the user closes it), so a watcher

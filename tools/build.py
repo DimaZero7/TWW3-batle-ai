@@ -18,6 +18,7 @@ Usage:
     python -m tools.build lord-duel --duel emp   # our network's lord v a lord under one attack order (tools/nn/lord_duel.py)
     python -m tools.build lord-duel --duel skv --duel-variant escort   # the same, each lord with 2 infantry units
     python -m tools.build lord-ai --duel skv --own-role defend   # a scripted lord v the game AI's lord (tools/nn/lord_ai.py)
+    python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # the melee probe (tools/nn/charge_probe.py)
 
 Output: build/<target>/ with the .pack, the bundled script and manifest.json.
 Install and launch with tools/launcher/launch.ps1.
@@ -114,6 +115,15 @@ TARGETS = {
         "folder": "tww3_bai",
         "scenario": "lord_swarm.xml",
         "packed_scenario": "lord_swarm.xml",
+    },
+    # The melee probe (one melee indicator in lanes, game and simulator alike): tools/nn/charge_probe.py.
+    "charge-probe": {
+        "entry": "entries.charge_probe",
+        "pack": "tww3_bai_charge_probe.pack",
+        "script": "tww3_bai_charge_probe",
+        "folder": "tww3_bai",
+        "scenario": "lord_swarm.xml",
+        "packed_scenario": "charge_probe.xml",
     },
     "lord-fall": {
         "entry": "entries.lord_fall",
@@ -356,8 +366,12 @@ def main(argv=None):
                              "or a named arena in config/nn/arenas.json")
     parser.add_argument("--repeats", type=int, default=2,
                         help="lord-swarm: how many times each layout runs in the battle")
-    parser.add_argument("--swarm", dest="plan_swarm", choices=("infantry", "lords", "all"), default="infantry",
-                        help="lord-swarm: infantry around each lord, the other lord (with units) on him, or both")
+    parser.add_argument("--probe-plan", choices=("charge", "hit"), default="charge",
+                        help="charge-probe: the plan (tools/nn/charge_probe.py)")
+    parser.add_argument("--probe-battle", type=int, default=1, help="charge-probe: the plan's battle, 1-based")
+    parser.add_argument("--swarm", dest="plan_swarm", choices=("infantry", "lords", "all", "damage"), default="infantry",
+                        help="lord-swarm: infantry around each lord, the other lord (with units) on him, both, or the "
+                             "damage plan (one swordsmen / greatswords / clanrat / Stormvermin unit on a lord)")
     parser.add_argument("--faction", choices=("emp", "skv", "vmp"), default="emp",
                         help="lord-fall: the treated army (its fearless opponent: Skaven for emp, else Empire)")
     parser.add_argument("--treatment", choices=("kill", "rout", "none"), default="none",
@@ -407,7 +421,8 @@ def main(argv=None):
             run_config["window"] = dict(zip(("min_x", "max_x", "min_z", "max_z"), args.window))
     else:
         scenario_file = None
-        tick_ms = args.tick_ms or {"lord-swarm": LORD_SWARM_TICK_MS, "lord-fall": LORD_FALL_TICK_MS}.get(args.target, 1000)
+        tick_ms = args.tick_ms or {"lord-swarm": LORD_SWARM_TICK_MS, "lord-fall": LORD_FALL_TICK_MS,
+                                   "charge-probe": 500}.get(args.target, 1000)
         run_config = {"speed": args.speed, "timeout_ms": args.timeout * 1000, "tick_ms": tick_ms,
                       "scenario": TARGETS[args.target]["scenario"].removesuffix(".xml")}
         model_s = READOUT_MODEL_S if args.target == "unit-readout" else args.timeout
@@ -440,10 +455,26 @@ def main(argv=None):
             scenario_file = nn_arena_config(args, run_config)
         if args.target == "lord-swarm":
             from tools.nn import lord_swarm
-            lord_swarm.write_scenario()
+            if args.plan_swarm == "damage":
+                # its own armies: the battle file goes next to the build, scenarios/lord_swarm.xml stays
+                path = project.BUILD / "lord-swarm" / "lord_swarm_damage.xml"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                lord_swarm.write_scenario(path, plan="damage")
+                if not args.scenario:
+                    args.scenario = str(path)
+            else:
+                lord_swarm.write_scenario()
             swarm, model_s = lord_swarm.run_config(args.repeats, plan=args.plan_swarm)
             run_config.update(swarm)
             stall_ms = max(stall_ms, int((model_s + 120) * 1000))
+        if args.target == "charge-probe":
+            from tools.nn import charge_probe
+            path = charge_probe.write_scenario(args.probe_plan, args.probe_battle)
+            probe, model_s, _ = charge_probe.run_config(args.probe_plan, args.probe_battle)
+            run_config.update(probe)
+            stall_ms = max(stall_ms, int((model_s + 120) * 1000))
+            if not args.scenario:
+                args.scenario = str(path)
         if args.target == "lord-fall":
             from tools.nn import lord_fall
             path = lord_fall.write_scenario(args.faction)

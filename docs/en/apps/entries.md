@@ -133,6 +133,40 @@ Every 0.2 s `swarm_sample` per lane: the lord's and each attacker's health (CCO 
 men, kills, melee flag, place; every 1 s `swarm_men`: the attackers' soldiers within 1.5-6 m of
 the lord (CCO `ManList` positions). Analysis: `python -m tools.nn.lord_swarm` (`--sim`: the
 simulator on the same trials); results — [a lord surrounded](../game/units/lord-swarm.md).
+The `damage` plan (`--swarm damage --repeats 4`): one unit in front of each lord in turn - Empire swordsmen
+or greatswords on the Warlord, clanrats or Stormvermin on the General; `--blows` - the blows: the lord's
+health per drop (one infantry blow, 0.2 s) and the attackers' health and men per lord blow (drops within
+0.6 s); `--blows --sim` - the same rates in the simulator.
+
+<a id="charge_probe"></a>
+
+## charge_probe - the melee probe (one mechanic, game and simulator alike)
+
+Build: `python -m tools.build charge-probe --probe-plan charge|hit --probe-battle N`; every battle of a plan in
+turn: `python -m tools.nn.charge_probe run --plan charge|hit [--battles 1,2]` (a build and `launch.ps1` each).
+MP Crossroads (flat), 2-5 lanes 240 m apart. In a lane an attacker and a target `gap_m` apart (front to
+front); everyone is held by script and fearless. The attacker's order: attack at a run (`attack_run`), attack
+at a walk (`attack_walk`), a move order at a run to a point 5 m past the target's front (`move_run`), a
+recharge (`recharge`: 10 s into contact a run 40 m back, then attack again). The target stands and at its
+first second of contact is ordered to attack the attacker (`stand`), stands and is never ordered (`hold`:
+braced spears), attacks too (`both`) or stands facing away (`rear`). A lane may have a lord behind the target
+who at the moment of contact uses an ability (Stand Your Ground) or not (the control). Unused lords stand far.
+
+Plans: `charge` - 8 battles (swordsmen on clanrats under the four orders; clanrats on braced spearmen, at a
+walk, from behind and on swordsmen; the General and the Warlord charging; spearmen on skavenslave spearmen
+from 150 and from 20 m - the charge speed); `hit` - 2 battles (swordsmen, greatswords, spearmen with shields
+on unarmoured skavenslaves, flagellants on clanrats; clanrat spearmen on Empire spearmen with the General
+behind them: in the first battle he uses Stand Your Ground at contact, in the second not).
+
+Every 0.5 s `probe_sample` per lane: men, health (CCO `HealthValue`), melee / moving / running flags, place,
+bearing, kills, fatigue, status keys (CCO `StatusList`: `braced`, `melee`...) of the attacker, the target and
+the lord; `probe_contact` (the first and second contact), `probe_phase` (recharge), `probe_ability`; every
+1 s while the units are within 60 m and up to 30 s after contact, every soldier's place of both (`probe_men`,
+CCO `ManList`). A lane ends `fight_s` after its first contact. Analysis: `python -m tools.nn.charge_probe
+report [--sim]` - the speed on the way in (the last 30 and 10 m), the target's and the attacker's health
+lost in 0-1, 0-2, 0-5, 5-15, 15-30 s after contact and per second from 15 s, men within 1.5 / 2.5 / 3.5 m of
+an enemy; `--sim` - the same analysis of the simulator on the same lanes (same places and orders, 8 copies).
+Results: [melee](../game/mechanics/melee.md#in-game-check-the-melee-probe).
 
 <a id="lord_fall"></a>
 

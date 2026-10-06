@@ -91,8 +91,11 @@ frozen. Three scores, higher is better:
 Mechanics dropped from 51 to 37 not because of winners (all 12 pairs are as in the game) but because of
 pace: the first 15 s of formation contact are stronger in the game than the rule (the target loses
 499–764 HP, the rule gives 396–446; the fitted "charge blow" used to cover this), and lords against one
-unit hit 13–31 % harder than the game, ending their pairs sooner. The answer is in-game experiments
-([simulator](training/simulator.md#mechanics-the-pairs-and-shooting)). The Empire's whole-battle losses
+unit hit 13–31 % harder than the game, ending their pairs sooner. The melee probe (11 in-game battles, the
+same scenario in the simulator) found where the difference is: a volley in the first second of a charge's
+contact, ~8 blows a unit, after which the pace is the rule's; an attack at a run and at a walk covers the
+last ~30 m at charge speed; the bonus against infantry counts against a lord on foot; the other mismatches
+are OPEN ([melee](game/mechanics/melee.md#in-game-check-the-melee-probe)). The Empire's whole-battle losses
 at 60 / 120 / 180 s are now as in the game: 0.25 / 0.43 / 0.55 (game 0.25 / 0.41 / 0.53; was 0.32 / 0.51 /
 0.63).
 

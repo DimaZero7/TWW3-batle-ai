@@ -48,9 +48,10 @@ function M.halt(uc)
     uc:halt()
 end
 
-function M.attack_melee(uc, enemy)
+-- At a run (the charge) unless walk is true (attack_unit's third argument, as attack_ranged).
+function M.attack_melee(uc, enemy, walk)
     uc:melee(true)
-    uc:attack_unit(enemy, false, true)
+    uc:attack_unit(enemy, false, walk ~= true)
 end
 
 -- Explicit fire at a target works even with free fire disabled.

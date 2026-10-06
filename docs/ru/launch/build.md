@@ -19,6 +19,7 @@
 | `move-probe` | `entries.move_probe` | `scenarios/move_probe.xml` | `tww3_bai_move_probe.pack` |
 | `manual` | `entries.manual_record` | `scenarios/manual_hamlet.xml` | `tww3_bai_manual.pack` |
 | `lord-swarm` | `entries.lord_swarm` | `scenarios/lord_swarm.xml` (`tools/nn/lord_swarm.py`) | `tww3_bai_lord_swarm.pack` |
+| `charge-probe` | `entries.charge_probe` | `build/charge-probe/charge_probe_<план>_<бой>.xml` (`tools/nn/charge_probe.py`) | `tww3_bai_charge_probe.pack` |
 | `archer-range` | `entries.archer_range` | `scenarios/archer_range.xml` (`tools/archer_range.py`) | `tww3_bai_archer_range.pack` |
 | `enemy-layout` | `entries.enemy_layout` | `scenarios/enemy_layout.xml` (из `config/armies/defender_layouts.json`) | `tww3_bai_enemy_layout.pack` |
 | `roster-capture` | `entries.roster_capture` | `scenarios/roster_capture.xml` (из `config/roster/capture.json`) | `tww3_bai_roster_capture.pack` |
@@ -56,7 +57,8 @@
 | `--layout`, `--enemy-mode native\|defend` | enemy-layout | Состав врага; штатный ИИ как есть или с задачей «обороняй» (по умолчанию) |
 | `--range-mode fire_at_will\|attack\|damage` | archer-range | Когда лучники начинают стрелять при разной глубине блока; `damage` — урон по бесстрашной цели на 70–120 м |
 | `--damage-rotate N` | archer-range `damage` | Сдвинуть дистанции на N полос (та же дистанция на другом грунте) |
-| `--swarm infantry\|lords\|all`, `--repeats N` | lord-swarm | Пехота вокруг каждого лорда, другой лорд (с отрядами) на нём или всё вместе; каждая раскладка N раз (2). Замеры каждые 0,2 с (`--tick-ms`) |
+| `--swarm infantry\|lords\|all\|damage`, `--repeats N` | lord-swarm | Пехота вокруг каждого лорда, другой лорд (с отрядами) на нём, всё вместе или `damage` — один отряд спереди (мечники или большие мечи на военачальника, кланкрысы или штурмкрысы на генерала: урон за удар, [урон](../game/mechanics/melee.md)); каждая раскладка N раз (2). Замеры каждые 0,2 с (`--tick-ms`) |
+| `--probe-plan charge\|hit`, `--probe-battle N` | charge-probe | План [зонда рукопашной](../apps/entries.md#charge_probe) и номер его боя (с 1). Замер каждые 0,5 с |
 | `--plan` | move-probe | План из `config/move-plans/<имя>.json` (по умолчанию `hamlet`) |
 | `--capture` | roster-capture | Другой список отрядов вместо `config/roster/capture.json` |
 | `--scenario` | все | Другой файл из `scenarios/` вместо сценария цели |
