@@ -60,10 +60,13 @@ max 30000. · [twwstats][tws], [fandom Fatigue][fw-fat], [CA elevation blog][ele
     `fatigue_state()` and CCO states 0–5 agree in the old probe; all 3814 initial arena reads
     are Fresh. Exact starting points within that band are unrecorded: zero remains an assumption.
   - Ours (calibration ON): melee tires only a unit with an attack order — a single
-    entity at 15 a tick, a formation at 13.7 (not all its men fight); in melee without an attack
+    entity at the DB's +19 a tick, a formation at 13.7 (measured); in melee without an attack
     order the unit moves or rests. Charging +34 also only with an attack order, for a single entity
     only in the first 2 s of a contact (the game's lords first turn tired after 60–62 s of melee; with
-    +19 and the charge for all 13 s the simulator gave 37–47 s; [lords](../../training/simulator.md#lords)). A move costs by its
+    +19 and the charge for all 13 s the simulator gave 37–47 s; [lords](../../training/simulator.md#lords)). Foe-Seeker,
+    while active, takes 1 % of the maximum a second (−300 points/s; the DB's `special_ability_phases`
+    fatigue_change_ratio −0.01, fandom "Vigour per second −1%"): in the probe the General in melee with it turned
+    tired 91.5 s after contact, the rule gives 90.5 s, without the vigour ~51 s (`build/movelords`). A move costs by its
     order's run flag, not by speed: run +4, walk −1 (DB; clean walk spans of the game's AI, 2925 s:
     0 crossings up, 6 down). A routing unit +4. Shooting 7.5 (not the DB +18). Idle −18 without
     unfinished movement, attack or aiming and with no standing enemy within 80 m; otherwise ready
@@ -80,9 +83,14 @@ max 30000. · [twwstats][tws], [fandom Fatigue][fw-fat], [CA elevation blog][ele
     our units in the simulator stand longer than in the game and some rest back; numbers in the
     [simulator](../../training/simulator.md#fatigue-calibration). Arena positions lack height;
     uphill is not modelled.
-  - **Limitation:** the melee flag does not mean all soldiers tire at +19: the planner's spearmen
+  - **Limitation:** the melee flag does not mean a unit tires at +19: the planner's spearmen
     stay fresh in the pairs against slaves while continuing to kill (hence 13.7 for a formation,
-    not +19).
+    not +19). Fatigue is **not counted per man**: in the melee probe (42 lanes, `build/movelords/fat`) units
+    with 1–2 % of their men in contact (against a lone lord) tire like those with 20 % (active after 26–35 s).
+    A unit under an attack order gains ~110–120 points/s for the first ~50 s, then ~210/s (above the DB's +19) —
+    why is **open**; lone lords 186–200/s (= +19). Also **open**: in the probe the General reached contact already
+    "active" (≥ 2800 points after 80 m at a run and the charge), the simulator with ~940: the charge (+34) seems
+    to cost on the run-in before contact too.
 - **Perfect Vigour** units never tire (a WH3 bug leaves units that start tired stuck at that
   level). **Strider** ignores terrain/slope penalties. Campaign stances (march, raiding) lower the
   battle's starting and maximum vigour. · fandom, Steam · medium.

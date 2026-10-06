@@ -78,6 +78,8 @@ FIELDS = {
                                    "takes its charge pose this far from its target (25 infantry, 30 lords; the morale "
                                    "probe: the charge's +15 morale starts at a gap of 24.6-27.5 m)", None),
     "speed.acceleration": ("battle_entities.acceleration (inferred)", None),
+    "speed.turn_deg_s": ("battle_entities.turn_rate, deg/s: how fast a man (a model) turns (named by patch 6.1: horse "
+                         "cavalry 100 -> 120 deg/s, and 120 in the DB)", None),
     "speed.deceleration": ("battle_entities.deceleration (inferred)", None),
     "melee.attack": ("land_units.melee_attack", "card stat_melee_attack"),
     "melee.defence": ("land_units.melee_defence", "card stat_melee_defence"),
@@ -103,6 +105,10 @@ FIELDS = {
     "attributes": ("unit_attributes_to_groups_junctions for land_units.attribute_group", None),
     "abilities": ("land_units_to_unit_abilites_junctions.ability", "card owned abilities"),
     "multiplayer_cost": ("main_units.multiplayer_cost", None),
+    "combat_potential.melee": ("main_units.melee_cp: the unit's melee combat potential (the army-destruction "
+                               "strength with its abilities' cp, config/nn/abilities.json; build/movelords)", None),
+    "combat_potential.missile": ("main_units.missile_cp: its missile combat potential (counts by the ammunition "
+                                 "left)", None),
     "missile.weapon": ("land_units.primary_missile_weapon", None),
     "missile.projectile": ("missile_weapons.default_projectile", None),
     "missile.ammo": ("land_units.primary_ammo, per man", "card stat_ammo"),
@@ -177,7 +183,8 @@ def passport(key, t):
         "speed": {"walk": entity["walk_speed"], "run": entity["run_speed"], "charge": entity["charge_speed"],
                   "charge_distance": entity["charge_distance_commence_run"],
                   "charge_pose_distance": entity["charge_distance_adopt_charge_pose"],
-                  "acceleration": entity["acceleration"], "deceleration": entity["deceleration"]},
+                  "acceleration": entity["acceleration"], "deceleration": entity["deceleration"],
+                  "turn_deg_s": entity["turn_rate"]},
         "melee": {"attack": land["melee_attack"], "defence": land["melee_defence"],
                   "charge_bonus": land["charge_bonus"], "weapon": weapon["key"], "damage": weapon["damage"],
                   "ap_damage": weapon["ap_damage"], "bonus_v_large": weapon["bonus_v_large"],
@@ -196,6 +203,7 @@ def passport(key, t):
         "abilities": sorted(r["ability"] for r in t["land_units_to_unit_abilites_junctions"]
                             if r["land_unit"] == land["key"]),
         "multiplayer_cost": main["multiplayer_cost"],
+        "combat_potential": {"melee": main["melee_cp"], "missile": main["missile_cp"]},
         "missile": None,
     }
     if land["primary_missile_weapon"]:

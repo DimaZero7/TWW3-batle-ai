@@ -105,6 +105,7 @@ class Params:
             "charge_dist": u["speed"].get("charge_distance", 0.0),
             "charge_pose": u["speed"].get("charge_pose_distance", 0.0),
             "accel": u["speed"]["acceleration"], "decel": u["speed"]["deceleration"],
+            "turn": u["speed"].get("turn_deg_s", 120.0),
             "attack": m["attack"], "defence": m["defence"], "charge_bonus": m["charge_bonus"],
             "damage": m["damage"], "ap_damage": m["ap_damage"], "bonus_v_large": m["bonus_v_large"],
             "bonus_v_inf": m["bonus_v_infantry"], "interval": m["attack_interval_s"],
@@ -138,6 +139,10 @@ class Params:
             "morale_bonus": self.sim["morale"]["faction_bonus"].get(faction, 0),
             "rout_death_s": (self.sim["morale"]["lord_fall"].get("rout_death_s") or {}).get(faction, 0),
             "cost": u.get("multiplayer_cost", 0),
+            # the army destruction's strength (morale.army_collapse): the database's combat potential
+            "cp_fixed": (u.get("combat_potential") or {}).get("melee", u.get("multiplayer_cost", 0)) + sum(
+                sum((self.abilities.get(k) or {}).get("cp") or (0, 0)) for k in u.get("abilities") or ()),
+            "cp_missile": (u.get("combat_potential") or {}).get("missile", 0),
             "ai": False,
             **{f"ab{k}": i for k, i in enumerate(abilities.slots_of(self, key))},
         }

@@ -28,12 +28,22 @@ import math
 import torch
 
 
+def ammo_share(u, slope, midpoint):
+    """The missile part of the combat potential left [B, N]: 1 / (1 + exp(-slope (ammo share - midpoint))) - the
+    curve of the game's recorded strategic value (build/movelords: 298k samples of shooters, error 0.04 %; slope 14,
+    midpoint 0.25)."""
+    ammo = (u["a"] / u["ammo0"].clamp(min=1)).clamp(0, 1)
+    return torch.sigmoid(slope * (ammo - midpoint))
+
+
 def army_collapse(u, params):
     """Army destruction [B, N], from current combat strength and the database thresholds.
 
-    Strategic strength approximates recorded unit:strategic_value(): HP times unit value,
-    with the missile part falling sigmoidally as ammunition runs out. Balance of power counts
-    routers at half strength; shattered, dead and departed units contribute nothing.
+    strength "cp" (the game's rule, build/movelords: 89 recorded battles): a unit's strategic value = (the database's
+    combat potential: main_units melee_cp + its abilities' cp + missile_cp x ammo_share) x health - exactly the
+    recorded unit:strategic_value() (lords 950 / 900 x health); the side's strength (the balance of power) counts a
+    routing unit at routing_weight (0.5, the recorded balance-of-power bar), shattered, dead and departed units
+    nothing. "strategic": the old fit (cost, the lord x lord_value_scale, empty-quiver floors).
     No recording clock or winner is consulted.
     """
     cal = params.sim["morale"].get("collapse") or {}
@@ -44,7 +54,13 @@ def army_collapse(u, params):
     count = alive & ~u["r"] if cal.get("count") == "standing" else alive
     value = u["cost"]
     weight = torch.ones_like(value)
-    if cal.get("strength") == "strategic":
+    initial_value = value
+    if cal.get("strength") == "cp":
+        slope, midpoint = float(cal["ammo_slope"]), float(cal["ammo_midpoint"])
+        value = u["cp_fixed"] + u["cp_missile"] * ammo_share(u, slope, midpoint)
+        initial_value = u["cp_fixed"] + u["cp_missile"] * (1 / (1 + math.exp(-slope * (1 - midpoint))))
+        weight = torch.where(u["r"], float(cal["routing_weight"]), 1.0) * torch.ones_like(value)
+    elif cal.get("strength") == "strategic":
         value = value * torch.where(u["lord"], float(cal["lord_value_scale"]), 1.0)
         ammo = (u["a"] / u["ammo0"].clamp(min=1)).clamp(0, 1)
         slope, midpoint = float(cal["ammo_slope"]), float(cal["ammo_midpoint"])
@@ -54,9 +70,10 @@ def army_collapse(u, params):
         floor = torch.where(u["direct"], float(cal["ammo_empty_direct"]), float(cal["ammo_empty"]))
         weight = torch.where(u["ammo0"] > 0, floor + (1 - floor) * available, weight)
         weight = weight * torch.where(u["r"], float(cal["routing_weight"]), 1.0)
+        initial_value = value
     power = value * u["hp"].clamp(0, 1).pow(float(cal.get("hp_power", 1.0))) * weight * count
     strength = torch.stack([(power * (u["side"] == s)).sum(1) for s in (1, 2)], 1)
-    initial = torch.stack([(value * (u["side"] == s)).sum(1) for s in (1, 2)], 1)
+    initial = torch.stack([(initial_value * (u["side"] == s)).sum(1) for s in (1, 2)], 1)
     rules = params.morale
     beaten = ((initial > 0) & (strength.flip(1) > 0)
               & (strength.flip(1) >= rules["army_destruction_enemy_strength_ratio"] * strength)

@@ -106,6 +106,15 @@ def step(st, orders, params=None, dt=None):
     stuck = stuck & (hold_for > 0)
     pinned = stuck & (u["leave_s"] < hold_for)
     u["leave_s"] = torch.where(stuck, u["leave_s"] + dt, torch.zeros_like(u["leave_s"]))
+    # The melee exit's window (the database's melee_breakoff_secs, 24 s; contact.breakoff on): a unit still touching
+    # an enemy that long after it began to leave melee drops its order and fights again (the melee probe,
+    # build/movelords: chased swordsmen and spearmen struck nothing for 24 s after a withdraw order, then fought on).
+    # exit_s: seconds since it began to leave in contact, out of contact too, while it keeps leaving.
+    if "exit_s" in u:
+        u["exit_s"] = torch.where(leaving & (stuck | (u["exit_s"] > 0)), u["exit_s"] + dt, torch.zeros_like(u["exit_s"]))
+    # (the order is dropped at the end of this step: it fights from the next one)
+    brk = float(R.get("melee_breakoff_secs", 0.0)) if cal["contact"].get("breakoff") and "exit_s" in u else 0.0
+    broke_off = (stuck & (u["exit_s"] >= brk)) if brk > 0 else None
     speed = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)
     # --- innate effects (attributes, passives, game-fired timed passives: config/nn/effects.json): their
     # stats and rule flags hold for this step ---
@@ -144,6 +153,7 @@ def step(st, orders, params=None, dt=None):
     # --- lord abilities cast by the game's AI by its rule or by the network's order: their effects hold
     # for this step ---
     base = abilities.apply(u, params, dt, standing, engaged, pw["dist"], same_side, orders.ability)
+    vigour = abilities.vigour(u, params, standing)
     # --- fatigue's stat multipliers (the database's unit_fatigue_effects_tables), for this step ---
     tired = fatigue.effects(u, params)
 
@@ -254,6 +264,10 @@ def step(st, orders, params=None, dt=None):
     u["k"] = u["k"] + credit.sum(2)
     u["hp_abs"], u["men"] = hp_new, men_new
     u["hp"] = torch.where(present, hp_new / u["hp0"].clamp(min=1e-6), torch.zeros_like(hp_new))
+    # seconds since its health first fell below a quarter (never back: the Wounds, effects.py)
+    if "low_s" in u:
+        low = present & ((u["hp"] < 0.25) | (u["low_s"] > 0))
+        u["low_s"] = torch.where(low, u["low_s"] + dt, u["low_s"])
     # Casualty windows (recent casualties: the last 4 s, extended: the last 60 s; morale.casualty_windows);
     # recent_s: the melee balance (dealt / taken; reward.py reads the same).
     morale.casualty_windows(u, taken, params, dt)
@@ -412,7 +426,7 @@ def step(st, orders, params=None, dt=None):
     activity = {"melee": engaged, "charging": engaged & (charge_now > 1 - charge_s / decay), "shooting": firing,
                 "running": speed > u["walk"] + 0.3, "walking": speed > 0.3,
                 "idle": idle, "active": alive, "attack": kind == O.ATTACK, "single": u["men0"] <= 1,
-                "run_order": u["order_run"].bool(), "routing": alive & u["r"]}
+                "run_order": u["order_run"].bool(), "routing": alive & u["r"], "vigour": vigour}
     near_m = float(cal["fatigue"].get("calibration", {}).get("ready_enemy_m", 0.0))
     if near_m > 0:
         activity["enemy_near"] = (foes & standing[:, None, :] & (d <= near_m)).any(2)
@@ -451,8 +465,26 @@ def step(st, orders, params=None, dt=None):
     gz = torch.where(closing, cz, gz)
     want = torch.where(closing, u["walk"], want)
     moving = moving | closing
-    vx, vz = movement.velocity(u, gx, gz, want, moving, dt)
     locked = engaged & (~leaving | pinned) & ~closing
+    # Turning on the move (turn.move_turn; the database's battle_entities turn_rate, the turning probe
+    # build/movelords): a unit heading for a point off its facing turns towards it at its men's turn rate (a formation's
+    # men about-face where they stand: its front becomes the old back rank) and runs only the way it faces - its speed
+    # towards the point is its speed x cos(the angle between its facing and the way), none beyond 90 deg. A formation
+    # stepping a few metres back or aside (contact.step_m) and a unit held in melee do not turn so.
+    t_cal = cal.get("turn") or {}
+    steer = torch.zeros_like(moving)
+    if t_cal.get("move_turn"):
+        dxg, dzg = gx - u["x"], gz - u["z"]
+        d2 = dxg * dxg + dzg * dzg
+        step_m = float(cal["contact"]["step_m"])
+        sidestep = standing & point & ~routing & (d2 < step_m ** 2) & (u["men0"] > 1)
+        steer = moving & alive & ~locked & ~sidestep & (d2 > 0.25)
+        before_b = u["b"].clone()
+        movement.face(u, dxg, dzg, steer)
+        movement.limit_turn(u, before_b, steer, u["turn"] * dt)
+        off = torch.remainder(torch.rad2deg(torch.atan2(dxg, dzg)) - u["b"] + 180, 360) - 180
+        want = torch.where(steer, want * torch.cos(torch.deg2rad(off)).clamp(min=0), want)
+    vx, vz = movement.velocity(u, gx, gz, want, moving, dt)
     stop = locked | ~alive
     vx = torch.where(stop, torch.zeros_like(vx), vx)
     vz = torch.where(stop, torch.zeros_like(vz), vz)
@@ -471,12 +503,13 @@ def step(st, orders, params=None, dt=None):
     # A formation steps a few metres back or aside to its point without turning round.
     goal_d = torch.sqrt((gx - u["x"]) ** 2 + (gz - u["z"]) ** 2)
     shuffle = standing & point & ~routing & (goal_d < cal["contact"]["step_m"]) & (u["men0"] > 1)
-    movement.face(u, vx, vz, mv & ~shuffle)
+    # (a unit turning on the move keeps the facing it turned to above)
+    movement.face(u, vx, vz, mv & ~shuffle & ~steer)
     near_foe = torch.where(touch & standing[:, None, :], d, torch.full_like(d, 1e9))
     opp = near_foe.argmin(2)
     has_opp = near_foe.min(2).values < 1e9
     ox_, oz_ = u["x"].gather(1, opp), u["z"].gather(1, opp)
-    movement.face(u, ox_ - u["x"], oz_ - u["z"], has_opp & ~mv & standing)
+    movement.face(u, ox_ - u["x"], oz_ - u["z"], has_opp & ~mv & standing & ~steer)
     wt = aim_at.clamp(min=0)
     if done_deg is not None:
         # a standing shooter keeps its facing; it turns only to a target beyond stand_fire_arc_deg (turning above)
@@ -490,13 +523,14 @@ def step(st, orders, params=None, dt=None):
                       (aim_at >= 0) & ~firing & ~mv & ~has_opp & standing)
     # A formation in melee turns slowly (measured): an enemy on its flank or rear stays there.
     movement.limit_turn(u, old["b"], engaged & ~leaving & (u["men0"] > 1), cal["contact"]["melee_turn_deg_s"] * dt)
-    # Out of melee a standing unit turns in place at turn.formation_deg_s (a lord or another single entity:
-    # turn.single_deg_s); measured, config/nn/sim.json turn.why. A walking unit faces the way it walks.
-    t_cal = cal.get("turn") or {}
+    # Out of melee a standing unit turns in place at turn.formation_deg_s (measured, config/nn/sim.json turn.why); a
+    # lord or another single entity at his turn rate (the database's battle_entities turn_rate; turn.single_deg_s, if
+    # set, overrides it). A unit on the move turns as above (turn.move_turn), else it faces the way it walks.
     if t_cal.get("formation_deg_s"):
-        rate = torch.where(u["men0"] > 1, torch.full_like(u["b"], float(t_cal["formation_deg_s"])),
-                           torch.full_like(u["b"], float(t_cal.get("single_deg_s", t_cal["formation_deg_s"]))))
-        movement.limit_turn(u, old["b"], standing & ~mv & ~engaged, rate * dt)
+        single = (torch.full_like(u["b"], float(t_cal["single_deg_s"])) if t_cal.get("single_deg_s") is not None
+                  else u["turn"])
+        rate = torch.where(u["men0"] > 1, torch.full_like(u["b"], float(t_cal["formation_deg_s"])), single)
+        movement.limit_turn(u, old["b"], standing & ~mv & ~engaged & ~steer, rate * dt)
     router_hit = torch.where(strike & u["r"][:, None, :], d, torch.full_like(d, 1e9))
     router = router_hit.argmin(2)
     has_router = router_hit.min(2).values < 1e9
@@ -510,6 +544,14 @@ def step(st, orders, params=None, dt=None):
     hold = standing & (kind == O.HOLD)
     u["ox"] = torch.where(hold, u["x"], torch.where(attack & standing, tx, u["ox"]))
     u["oz"] = torch.where(hold, u["z"], torch.where(attack & standing, tz, u["oz"]))
+    if broke_off is not None:
+        # the melee exit's window is over in contact: HOLD from the next step (contact.breakoff above)
+        u["order_kind"] = torch.where(broke_off, torch.full_like(u["order_kind"], O.HOLD), u["order_kind"])
+        u["order_target"] = torch.where(broke_off, torch.full_like(u["order_target"], -1), u["order_target"])
+        u["ox"] = torch.where(broke_off, u["x"], u["ox"])
+        u["oz"] = torch.where(broke_off, u["z"], u["oz"])
+        u["leave_s"] = torch.where(broke_off, torch.zeros_like(u["leave_s"]), u["leave_s"])
+        u["exit_s"] = torch.where(broke_off, torch.zeros_like(u["exit_s"]), u["exit_s"])
     threat_cal = cal["threat"].get("calibration", {})
     # A calibrated flag uses the position and bearing visible in this observation.
     # OFF preserves the legacy pre-move geometry for exact baseline comparison.

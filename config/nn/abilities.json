@@ -6,6 +6,8 @@
   "recharge_s": "unit_special_abilities.recharge_time (inferred), s; -1: none",
   "initial_s": "unit_special_abilities.initial_recharge (inferred), s: the ability is on cooldown this long from the battle's start (-1 and 0: ready at once; Steam guide 1698960734 'most abilities start at 0'; Gate of Khorne 60 = fandom)",
   "uses": "unit_special_abilities.num_uses (inferred); -1: unlimited",
+  "vigour_per_s": "special_ability_phases.fatigue_change_ratio of the ability's phases (the column name: the community, twwstats; its place: the first float after the key, -0.01 for Foe-Seeker = fandom 'Vigour per second: -1%'): the share of the maximum fatigue (30000) the owner loses each second while it is active (negative: recovers; the in-game probe build/movelords: -300 points/s)",
+  "cp": "unit_special_abilities.additional_melee_cp / additional_missile_cp (ABILITY_CP: copied from twwstats' mirror of the table, the values stand in the db rows): the ability's combat potential",
   "range_m": "unit_special_abilities.effect_range (inferred), m: the reach around the caster (0: itself)",
   "passive": "active_s and recharge_s both -1 (inferred); checked against the cards' owned_passive lists",
   "targets_own": "unit_special_abilities field 5 (inferred): 1 for abilities cast on the caster or a friend",
@@ -31,6 +33,11 @@
    "recharge_s": 60.0,
    "initial_s": 0.0,
    "uses": -1,
+   "vigour_per_s": 0.0,
+   "cp": [
+    50,
+    50
+   ],
    "range_m": 0.0,
    "passive": false,
    "targets_own": true,
@@ -75,6 +82,11 @@
    "recharge_s": -1.0,
    "initial_s": 0.0,
    "uses": -1,
+   "vigour_per_s": 0.0,
+   "cp": [
+    0,
+    0
+   ],
    "range_m": 0.0,
    "passive": true,
    "targets_own": true,
@@ -112,6 +124,11 @@
    "recharge_s": -1.0,
    "initial_s": 0.0,
    "uses": -1,
+   "vigour_per_s": 0.0,
+   "cp": [
+    0,
+    0
+   ],
    "range_m": 0.0,
    "passive": true,
    "targets_own": true,
@@ -167,6 +184,11 @@
    "recharge_s": -1.0,
    "initial_s": 5.0,
    "uses": -1,
+   "vigour_per_s": 0.0,
+   "cp": [
+    0,
+    0
+   ],
    "range_m": 0.0,
    "passive": true,
    "targets_own": true,
@@ -222,6 +244,11 @@
    "recharge_s": 3.0,
    "initial_s": 3.0,
    "uses": -1,
+   "vigour_per_s": 0.0,
+   "cp": [
+    25,
+    0
+   ],
    "range_m": 0.0,
    "passive": false,
    "targets_own": true,
@@ -270,6 +297,11 @@
    "recharge_s": 90.0,
    "initial_s": 0.0,
    "uses": -1,
+   "vigour_per_s": 0.0,
+   "cp": [
+    150,
+    0
+   ],
    "range_m": 0.0,
    "passive": false,
    "targets_own": true,
@@ -323,6 +355,11 @@
    "recharge_s": 60.0,
    "initial_s": 0.0,
    "uses": -1,
+   "vigour_per_s": -0.01,
+   "cp": [
+    50,
+    50
+   ],
    "range_m": 0.0,
    "passive": false,
    "targets_own": true,
@@ -367,6 +404,11 @@
    "recharge_s": 60.0,
    "initial_s": 0.0,
    "uses": -1,
+   "vigour_per_s": 0.0,
+   "cp": [
+    50,
+    50
+   ],
    "range_m": 35.0,
    "passive": false,
    "targets_own": true,
@@ -403,6 +445,11 @@
    "recharge_s": 90.0,
    "initial_s": 0.0,
    "uses": -1,
+   "vigour_per_s": 0.0,
+   "cp": [
+    100,
+    50
+   ],
    "range_m": 35.0,
    "passive": false,
    "targets_own": true,
@@ -449,6 +496,11 @@
    "recharge_s": -1.0,
    "initial_s": 0.0,
    "uses": -1,
+   "vigour_per_s": 0.0,
+   "cp": [
+    75,
+    25
+   ],
    "range_m": 35.0,
    "passive": true,
    "targets_own": true,
@@ -495,6 +547,11 @@
    "recharge_s": -1.0,
    "initial_s": 0.0,
    "uses": -1,
+   "vigour_per_s": 0.0,
+   "cp": [
+    0,
+    0
+   ],
    "range_m": 0.0,
    "passive": true,
    "targets_own": true,

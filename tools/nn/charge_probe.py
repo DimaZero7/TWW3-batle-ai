@@ -12,7 +12,13 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
   hit     formation pairs over a span of attack - defence (swordsmen, greatswords, spearmen with
           shields on unarmoured skavenslaves, flagellants on clanrats) and clanrat spearmen on Empire
           spearmen with the General behind them using Stand Your Ground at contact (battle 1) or not
-          (battle 2, the control) - 2 battles.
+          (battle 2, the control) - 2 battles;
+  move    turning and leaving melee (build/movelords): battle 1 turns - spearmen turn in place 90 deg and
+          back, then 180 deg (a facing order); spearmen run to a point 150 m behind them and 120 m to their
+          side; the General and the Warlord turn in place 180 and 90 deg, then run to a point behind them
+          (soldier places all the way); battle 2 melee exit - swordsmen / spearmen withdraw 10 s after contact
+          and never change the order, chased by clanrats ordered to attack them or left standing; the General
+          attacks clanrats and uses Foe-Seeker 50 s after contact (vigour) - 2 battles.
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -63,6 +69,7 @@ LORDS = {EMP: "general", SKV: "warlord"}
 SHORT = {key: short for short, (key, _, _) in UNITS.items()}
 FACTION = {key: faction for key, _, faction in UNITS.values()}
 SYG = "wh_main_character_abilities_stand_your_ground"
+FOE_SEEKER = "wh_main_character_abilities_foe_seeker"
 WIDTH_M = 30
 LANE_DX = 240          # lanes this far apart across x (the General's auras reach 35-40 m)
 GAP_M = 80
@@ -74,7 +81,8 @@ STEADY_FROM_S = 15.0   # the charge bonus fades over 13 s (charge_decay_duration
 RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
-PLANS = ("charge", "hit")
+PLANS = ("charge", "hit", "move")
+TURN_TICK_MS = 250     # the turning battle: 0.25 s samples (a lord turns 180 deg in 1-2 s)
 
 
 def lane(attacker, target, mode="attack_run", target_mode="stand", gap_m=GAP_M, fight_s=40, **extra):
@@ -83,6 +91,8 @@ def lane(attacker, target, mode="attack_run", target_mode="stand", gap_m=GAP_M, 
            "fight_s": fight_s, "answer": target_mode == "stand"}
     if mode == "recharge":
         out.update(recharge_after_s=10, back_m=40, recharge_max_s=25, fight_s=max(fight_s, 70))
+    if mode == "withdraw":
+        out.update(recharge_after_s=10, back_m=150, recharge_max_s=10 ** 6)
     out.update(extra)
     return out
 
@@ -105,6 +115,26 @@ def battles(plan):
         rush = [lane("spear", "sspear", "attack_run", gap_m=150), lane("spear", "sspear", "attack_run", gap_m=20)]
         out += [[lane("general", "clanrat", "attack_run"), lane("warlord", "swords", "attack_run")] + rush,
                 [lane("general", "clanrat", "attack_walk"), lane("warlord", "swords", "recharge")] + rush[::-1]]
+    elif plan == "move":
+        # bearings: the attacker starts facing 180 (towards -z, its target 250 m away, never ordered)
+        far = dict(target_mode="hold", gap_m=250, answer=False)
+        spin = [{"at_s": 1, "kind": "face", "bearing": 270}, {"at_s": 16, "kind": "face", "bearing": 180},
+                {"at_s": 31, "kind": "face", "bearing": 0}]
+        lord_spin = [{"at_s": 1, "kind": "face", "bearing": 0}, {"at_s": 11, "kind": "face", "bearing": 270},
+                     {"at_s": 21, "kind": "move", "dx": 100, "dz": 0, "run": True}]
+        out.append([
+            lane("spear", "clanrat", "script", steps=spin, men_all_s=50, max_s=50, **far),
+            lane("spear", "slave", "script", steps=[{"at_s": 1, "kind": "move", "dx": 0, "dz": 150, "run": True}],
+                 men_all_s=25, max_s=60, **far),
+            lane("spear", "sspear", "script", steps=[{"at_s": 1, "kind": "move", "dx": 120, "dz": 0, "run": True}],
+                 men_all_s=25, max_s=55, **far),
+            lane("general", "clanrat", "script", steps=lord_spin, max_s=50, **far),
+            lane("warlord", "swords", "script", steps=lord_spin, max_s=50, **far)])
+        out.append([
+            lane("swords", "clanrat", "withdraw", gap_m=40, fight_s=75),
+            lane("swords", "clanrat", "withdraw", target_mode="hold", gap_m=40, fight_s=50),
+            lane("spear", "clanrat", "withdraw", gap_m=40, fight_s=75),
+            lane("general", "clanrat", "attack_run", fight_s=100, a_ability=FOE_SEEKER, a_ability_after_s=50)])
     else:
         pairs = [lane("swords", "slave", gap_m=40, fight_s=90), lane("gs", "slave", gap_m=40, fight_s=90),
                  lane("spearsh", "slave", gap_m=40, fight_s=90), lane("flag", "clanrat", gap_m=40, fight_s=90)]
@@ -155,7 +185,7 @@ def layout(specs):
                    target=add(spec["target"], k), a_key=a_key, t_key=t_key,
                    a_depth=round(depth(a_key, a_men), 2), t_depth=round(depth(t_key, t_men), 2),
                    a_width=5 if a_men == 1 else WIDTH_M, t_width=5 if t_men == 1 else WIDTH_M,
-                   move_beyond_m=5.0, max_s=round(spec["gap_m"] / 1.4 + spec["fight_s"] + 40))
+                   move_beyond_m=5.0, max_s=spec.get("max_s") or round(spec["gap_m"] / 1.4 + spec["fight_s"] + 40))
         if spec.get("lord"):
             row["lord"] = dict(spec["lord"], name=add(spec["lord"]["name"], k))
         lanes.append(row)
@@ -177,10 +207,12 @@ def run_config(plan, index):
     """(entry config, model seconds, arena) of battle `index` (1-based) of a plan."""
     specs = battles(plan)[index - 1]
     lanes, park, arena = layout(specs)
-    config = {"plan": plan, "battle": index, "settle_ms": SETTLE_MS, "tick_ms": TICK_MS, "men_ms": MEN_MS,
+    turn = plan == "move" and any(l["mode"] == "script" for l in lanes)
+    config = {"plan": plan, "battle": index, "settle_ms": SETTLE_MS, "tick_ms": TURN_TICK_MS if turn else TICK_MS,
+              "men_ms": 500 if turn else MEN_MS,
               "men_near_m": 60,
               # the soldiers' places: the first 30 s (the charge plan) or the whole fight (hit: men in contact)
-              "men_after_s": 90 if plan == "hit" else 30, "lanes": lanes, "park": park}
+              "men_after_s": 90 if plan in ("hit", "move") else 30, "lanes": lanes, "park": park}
     model_s = max(l["max_s"] for l in lanes) + SETTLE_MS / 1000 + 20
     return config, model_s, arena
 
@@ -307,12 +339,17 @@ def measure(lane):
             out["speed_peak30"] = float(np.max((db[:-w] - db[w:]) / (tb[w:] - tb[:-w])))
     out["approach_s"] = float(c - t[0])
     end_t = t[-1]
+    # a window from the contact starts at the sample before it (the game's first contact sample already holds the
+    # blows struck since that sample: a lord's first blow; the simulator's contact time is that sample already)
+    before_c = t[t < c - 1e-6]
+    c0 = float(before_c[-1]) if lane["run"] != "sim" and len(before_c) else c
     for who in ("tg", "a"):
         hp, men = series(s, who, "hp"), series(s, who, "men")
         for lo, hi in WINDOWS:
             if c + hi <= end_t + 1e-6:
-                out[f"{who}_hp_{lo}_{hi}"] = at(t, hp, c + lo) - at(t, hp, c + hi)
-                out[f"{who}_men_{lo}_{hi}"] = at(t, men, c + lo) - at(t, men, c + hi)
+                start = c0 if lo == 0 else c + lo
+                out[f"{who}_hp_{lo}_{hi}"] = at(t, hp, start) - at(t, hp, c + hi)
+                out[f"{who}_men_{lo}_{hi}"] = at(t, men, start) - at(t, men, c + hi)
         stop = min(end_t, c + spec["fight_s"])
         if lane["contacts"].get(2) is not None:
             stop = min(stop, lane["contacts"][2] - 1)
@@ -410,9 +447,15 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
     syg_slot = sim_abilities.slot_keys(UNITS["general"][0], params.units, params.abilities).index(SYG) \
         if SYG in sim_abilities.slot_keys(UNITS["general"][0], params.units, params.abilities) else -1
     st_ = {"contact": [None] * B, "contact2": [None] * B, "phase": ["in"] * B, "out_t": [0.0] * B,
-           "out_from": [None] * B, "fired": [False] * B, "last": {}, "phases": [[] for _ in range(B)]}
+           "out_from": [None] * B, "fired": [False] * B, "last": {}, "phases": [[] for _ in range(B)],
+           "a_ability": [False] * B, "start": [None] * B, "faced": set()}
     rec = {"t": [], "rows": []}
-    fields = ("x", "z", "b", "men", "hp_abs", "m")
+    fields = ("x", "z", "b", "men", "hp_abs", "m", "fatigue", "fat", "k")
+    a_slot = {}
+    for sp in specs:
+        if sp.get("a_ability") and sp["a_key"] not in a_slot:
+            keys = sim_abilities.slot_keys(sp["a_key"], params.units, params.abilities)
+            a_slot[sp["a_key"]] = keys.index(sp["a_ability"]) if sp["a_ability"] in keys else -1
 
     def policy(st):
         u = st.u
@@ -433,8 +476,27 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                 if L >= 0 and sp["lord"].get("ability") and syg_slot >= 0:
                     ab[b, L] = syg_slot
             c = st_["contact"][b]
+            if st_["start"][b] is None:
+                st_["start"][b] = (float(ax[b]), float(az[b]))
+            # the attacker's own ability (Foe-Seeker) a_ability_after_s after the contact, once
+            if sp.get("a_ability") and c is not None and not st_["a_ability"][b]                     and t - c >= sp.get("a_ability_after_s", 0) and a_slot.get(sp["a_key"], -1) >= 0:
+                ab[b, A] = a_slot[sp["a_key"]]
+                st_["a_ability"][b] = True
             # the attacker
-            if mode[b] == "recharge":
+            if mode[b] == "script":
+                # a 'move' step: MOVE to its start + (dx, dz); a 'face' step has no order in the simulator (it has no
+                # facing order): the unit holds and the twin turns it to the step's bearing at once (so that a later
+                # move starts from the game's facing)
+                due = [x for x in sp.get("steps", []) if t >= x["at_s"]]
+                for j, x_ in enumerate(due):
+                    if x_["kind"] == "face" and (b, j) not in st_["faced"]:
+                        st_["faced"].add((b, j))
+                        st.u["b"][b, A] = float(x_["bearing"])
+                if due and due[-1]["kind"] == "move":
+                    sx, sz = st_["start"][b]
+                    kind[b, A], x[b, A], z[b, A] = O.MOVE, sx + due[-1].get("dx", 0), sz + due[-1].get("dz", 0)
+                    run_[b, A] = bool(due[-1].get("run"))
+            elif mode[b] in ("recharge", "withdraw"):
                 ph = st_["phase"][b]
                 if ph == "in" and c is not None and t - c >= sp["recharge_after_s"]:
                     st_["phase"][b], st_["out_t"][b], st_["out_from"][b] = "out", t, (float(ax[b]), float(az[b]))
@@ -442,7 +504,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                 elif ph == "out":
                     fx, fz = st_["out_from"][b]
                     moved = math.hypot(ax[b] - fx, az[b] - fz)
-                    if (not m_a[b] and moved >= sp["back_m"] - 5) or t - st_["out_t"][b] >= sp["recharge_max_s"]:
+                    if mode[b] == "recharge" and ((not m_a[b] and moved >= sp["back_m"] - 5)
+                                                  or t - st_["out_t"][b] >= sp["recharge_max_s"]):
                         st_["phase"][b] = "back"
                         st_["phases"][b].append({"phase": "back", "t": t * 1000})
                 if st_["phase"][b] == "back" and st_["contact2"][b] is None and m_a[b]:
@@ -476,7 +539,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
             return
         next_t[0] = t + TICK_MS / 1000
         rec["t"].append(t)
-        rec["rows"].append({k: st.u[k].detach().cpu().numpy().copy() for k in fields})
+        rec["rows"].append({k: st.u[k].detach().cpu().numpy().copy() for k in fields if k in st.u})
     until = max((ln["end"] or {}).get("t", 0) / 1000 for ln in lanes) + 5 if any(ln["end"] for ln in lanes) else 200
     battle.run(st, policy, params, until_s=until, record=record)
     out = []
@@ -487,8 +550,12 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
             def row(i):
                 if i < 0:
                     return None
-                return {"x": float(r["x"][b, i]), "z": float(r["z"][b, i]), "b": float(r["b"][b, i]),
-                        "men": float(r["men"][b, i]), "hp": float(r["hp_abs"][b, i]), "m": bool(r["m"][b, i])}
+                out = {"x": float(r["x"][b, i]), "z": float(r["z"][b, i]), "b": float(r["b"][b, i]),
+                       "men": float(r["men"][b, i]), "hp": float(r["hp_abs"][b, i]), "m": bool(r["m"][b, i])}
+                for k in ("fatigue", "fat", "k"):
+                    if k in r:
+                        out[k] = float(r[k][b, i])
+                return out
             samples.append((t, row(A), row(T), row(L)))
         contacts = {}
         if st_["contact"][b] is not None:
@@ -498,6 +565,162 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
         out.append({"run": "sim", "spec": ln["spec"], "samples": samples, "men": [], "contacts": contacts,
                     "end": None, "abilities": ln.get("abilities") and [{"status": "sim"}], "phases": st_["phases"][b]})
     return out
+
+
+# ---------------------------------------------------------------- turning (plan move, battle 1)
+
+def _ang(a):
+    """Degrees wrapped to -180..180."""
+    return (np.asarray(a, float) + 180) % 360 - 180
+
+
+def turn_measure(lane, run_speed=None):
+    """A script lane's turns and starts, per step: the bearing's change over time (s to within 10 deg of the
+    facing ordered, or of the way to the point), the centre's speed 1..6 s after the order (share of the run) and
+    when it first reaches 0.9 of the run; from the soldiers' places (game): how far the men moved in the first
+    10 s and whether the formation turned as a rigid block (each man keeps his rank: +1) or about-faced in place
+    (the front rank becomes the back: -1)."""
+    spec, smp = lane["spec"], lane["samples"]
+    t = np.array([x[0] for x in smp])
+    b, x, z = series(smp, "a", "b"), series(smp, "a", "x"), series(smp, "a", "z")
+    starts = {}
+    for ph in lane.get("phases", []):
+        if str(ph.get("phase", "")).startswith("step"):
+            starts[int(ph["phase"][4:].split(":")[0])] = ph["t"] / 1000
+    steps = spec.get("steps") or []
+    out = []
+    for i, step in enumerate(steps, 1):
+        t0 = starts.get(i, step["at_s"])
+        t1 = starts.get(i + 1, steps[i]["at_s"] if i < len(steps) else t[-1])
+        sel = (t >= t0 - 1e-6) & (t <= t1 + 1e-6) & np.isfinite(b)
+        if sel.sum() < 2:
+            continue
+        tt, bb, xx, zz = t[sel] - t0, b[sel], x[sel], z[sel]
+        if step["kind"] == "face":
+            goal = float(step["bearing"])
+        else:
+            goal = float(np.degrees(np.arctan2(step.get("dx", 0), step.get("dz", 0))) % 360)
+        off = np.abs(_ang(bb - goal))
+        done = np.nonzero(off <= 10)[0]
+        row = {"step": i, "kind": step["kind"], "goal_deg": round(goal), "turn_deg": round(float(abs(_ang(bb[0] - goal)))),
+               "s_to_10deg": round(float(tt[done[0]]), 2) if len(done) else None,
+               "bearing": [(round(float(a), 2), round(float(v))) for a, v in zip(tt, bb)][:40]}
+        if step["kind"] == "move":
+            d = np.hypot(xx - xx[0], zz - zz[0])
+            moved = np.nonzero(d > 1.0)[0]
+            row["s_to_move_1m"] = round(float(tt[moved[0]]), 2) if len(moved) else None
+            sp = []
+            for k in range(1, 9):
+                lo, hi = at(tt, d, k - 1.0), at(tt, d, k + 0.0)
+                sp.append(None if not np.isfinite(lo) or not np.isfinite(hi) else round(hi - lo, 2))
+            row["speed_by_s"] = sp
+            if run_speed:
+                row["run_share_by_s"] = [None if v is None else round(v / run_speed, 2) for v in sp]
+                fast = [k + 1 for k, v in enumerate(sp) if v is not None and v >= 0.9 * run_speed]
+                row["s_to_0.9_run"] = fast[0] if fast else None
+        men = [(tm - t0, a) for tm, a, _ in lane.get("men", []) if t0 - 0.6 <= tm <= t0 + 12 and len(a) >= 4]
+        if len(men) >= 3:
+            p0 = np.asarray(men[0][1], float).reshape(-1, 2) / 10
+            p_end = np.asarray(men[-1][1], float).reshape(-1, 2) / 10
+            n = min(len(p0), len(p_end))
+            p0, p_end = p0[:n], p_end[:n]
+            row["men_moved_m"] = round(float(np.median(np.hypot(*(p_end - p0).T))), 1)
+            # each man's place along the facing, before (old facing) and after (new facing, from the centre)
+            fb, fe = np.radians(bb[0]), np.radians(bb[-1])
+            c0, ce = p0.mean(0), p_end.mean(0)
+            along0 = (p0 - c0) @ np.array([np.sin(fb), np.cos(fb)])
+            along1 = (p_end - ce) @ np.array([np.sin(fe), np.cos(fe)])
+            if np.std(along0) > 0.1 and np.std(along1) > 0.1:
+                row["rank_kept_corr"] = round(float(np.corrcoef(along0, along1)[0, 1]), 2)
+            row["men_window_s"] = round(float(men[-1][0]), 1)
+        out.append(row)
+    return out
+
+
+def turn_report(run_dirs, sim=False, device="cpu", copies=4, out=None, params=None):
+    """The turning lanes (mode script) of the runs: the game's table and, with sim, the simulator's on the same
+    lanes. Writes build/charge-probe/turns.json (not in Git)."""
+    units = json.loads(UNITS_JSON.read_text(encoding="utf-8"))["units"]
+    lanes = [ln for d in run_dirs for ln in load_run(d) if ln["spec"]["mode"] == "script"]
+    result = {"game": [], "sim": []}
+    for ln in lanes:
+        run = units[ln["spec"]["a_key"]]["speed"]["run"]
+        result["game"].append({"cell": cell(ln["spec"]), "run": ln["run"], "steps": turn_measure(ln, run)})
+    if sim and lanes:
+        for ln in sim_lanes(lanes, params=params, device=device, copies=copies):
+            run = units[ln["spec"]["a_key"]]["speed"]["run"]
+            result["sim"].append({"cell": cell(ln["spec"]), "run": "sim", "steps": turn_measure(ln, run)})
+    keys = ("turn_deg", "s_to_10deg", "s_to_move_1m", "s_to_0.9_run", "run_share_by_s", "men_moved_m", "rank_kept_corr")
+    for who in ("game", "sim"):
+        for r in result[who]:
+            for st in r["steps"]:
+                print(who, r["cell"], st["step"], st["kind"], {k: st.get(k) for k in keys if st.get(k) is not None})
+    out = out or ROOT / "turns.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(result, indent=1, default=float), encoding="utf-8")
+    print(out)
+    return result
+
+
+# ---------------------------------------------------------------- melee exit and vigour (plan move, battle 2)
+
+FAT_LEVELS = ("threshold_fresh", "threshold_active", "threshold_winded", "threshold_tired", "threshold_very_tired",
+              "threshold_exhausted")
+
+
+def _level(v):
+    """A fatigue level index from the game's name or the simulator's index."""
+    if v is None:
+        return np.nan
+    if isinstance(v, str):
+        return float(FAT_LEVELS.index(v)) if v in FAT_LEVELS else np.nan
+    return float(v)
+
+
+def exit_measure(lane):
+    """A withdraw lane after its order ('out'): seconds the leaver stays in melee (the last melee sample), its kills
+    and the HP its enemy lost in 0-24 s and 26-50 s after the order, its own HP lost in 0-24 s; an attack lane with
+    a_ability: the attacker's fatigue level times (first sample at each level after contact) and the ability's time."""
+    spec, smp = lane["spec"], lane["samples"]
+    t = np.array([x[0] for x in smp])
+    out = {"cell": cell(spec), "run": lane["run"]}
+    outs = [p["t"] / 1000 for p in lane.get("phases", []) if p["phase"] == "out"]
+    if spec["mode"] == "withdraw" and outs:
+        o = outs[0]
+        m = np.array([bool((x[1] or {}).get("m")) for x in smp])
+        after = (t >= o) & m
+        out["in_melee_s"] = round(float(t[after][-1] - o), 1) if after.any() else 0.0
+        k, ehp, hp = series(smp, "a", "k"), series(smp, "tg", "hp"), series(smp, "a", "hp")
+        def r(v, p=0):
+            return None if not np.isfinite(v) else round(float(v), p)
+        for lo, hi in ((0, 24), (26, 50)):
+            out[f"kills_{lo}_{hi}"] = r(at(t, k, o + hi) - at(t, k, o + lo), 1)
+            out[f"enemy_hp_{lo}_{hi}"] = r(at(t, ehp, o + lo) - at(t, ehp, o + hi))
+        out["own_hp_0_24"] = r(at(t, hp, o) - at(t, hp, o + 24))
+    if spec.get("a_ability"):
+        c = lane["contacts"].get(1) or 0.0
+        lv = np.array([_level((x[1] or {}).get("fat")) for x in smp])
+        out["ability_at_s"] = spec.get("a_ability_after_s")
+        out["level_at_s"] = {FAT_LEVELS[j][10:]: round(float(t[np.nonzero(lv >= j)[0][0]] - c), 1)
+                             for j in range(1, 6) if (lv >= j).any()}
+        pts = series(smp, "a", "fatigue")
+        if np.isfinite(pts).any():
+            out["points_by_10s"] = [None if not np.isfinite(at(t, pts, c + s)) else round(at(t, pts, c + s))
+                                    for s in range(0, 101, 10)]
+    return out
+
+
+def exit_report(run_dirs, sim=False, device="cpu", copies=4, params=None):
+    """The melee-exit and vigour lanes (plan move battle 2) of the runs: the game's numbers and, with sim, the
+    simulator's on the same lanes."""
+    lanes = [ln for d in run_dirs for ln in load_run(d)
+             if ln["spec"]["mode"] == "withdraw" or ln["spec"].get("a_ability")]
+    rows = [exit_measure(ln) for ln in lanes]
+    if sim and lanes:
+        rows += [exit_measure(ln) for ln in sim_lanes(lanes, params=params, device=device, copies=copies)]
+    for r in rows:
+        print(r)
+    return rows
 
 
 # ---------------------------------------------------------------- tables
@@ -562,7 +785,7 @@ def report(run_dirs, sim=False, out=OUT, device="cpu", copies=8):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", nargs="?", choices=("report", "plan", "run"), default="report")
+    parser.add_argument("command", nargs="?", choices=("report", "plan", "run", "turns", "exits"), default="report")
     parser.add_argument("runs", nargs="*", type=Path, help="report: run folders (default: build/charge-probe/runs/*)")
     parser.add_argument("--plan", choices=PLANS, default="charge")
     parser.add_argument("--battles", help="run: battle numbers, comma separated (default: all of the plan)")
@@ -582,6 +805,13 @@ def main(argv=None):
         done = run(args.plan, which, dry=args.dry)
         print("done:", done)
         return 0 if all(d[-1] == 0 for d in done) else 1
+    if args.command == "exits":
+        exit_report(args.runs or runs(), sim=args.sim, device=args.device, copies=min(args.copies, 4))
+        return 0
+    if args.command == "turns":
+        turn_report(args.runs or runs(), sim=args.sim, device=args.device, copies=min(args.copies, 4),
+                    out=None if args.out == OUT else args.out)
+        return 0
     report(args.runs or runs(), sim=args.sim, out=args.out, device=args.device, copies=args.copies)
     return 0
 

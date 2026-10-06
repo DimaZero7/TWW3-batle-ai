@@ -314,8 +314,11 @@ formation the lord himself ran into (the pairs: the lord loses 38 / 45 HP in the
 
 ## Not found
 
-No public source explains `melee_breakoff_secs` 24 / `melee_breakoff_total_immunity_secs` 10
-(WH3-only keys; see [movement](movement.md)), `entity_action_attack_formed_combat_distance`
+No public CA source explains `melee_breakoff_secs` 24 / `melee_breakoff_total_immunity_secs` 10
+(WH3-only keys; see [movement](movement.md)); by the melee-exit probe (`build/movelords`) 24 s is the window a
+leaving unit keeps its order: chased swordsmen and spearmen strike nothing for 24–26 s after a withdraw order
+(kills flat, the chasing clanrats lose no health), then fight on (the clanrats lose ~20 HP/s); not chased, a
+unit is out in 8 s (the simulator: `contact.breakoff`; a Steam player also writes of a ~25 s window); `entity_action_attack_formed_combat_distance`
 2.5 / `_tether_distance` 2, or how many models can physically reach one target.
 
 ## What is still unclear

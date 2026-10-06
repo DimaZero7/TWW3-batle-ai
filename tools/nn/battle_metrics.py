@@ -186,8 +186,9 @@ def collapse_rules(sim=None, rules=None):
 def beaten(b, passports=None, cal=None, ratios=None):
     """[T, 2] bools: side 1 / side 2 meets the database's army destruction rule at each sample (own strength
     <= ratios[0] of its start, the enemy's >= ratios[1] times its own); strength as the simulator's
-    morale.army_collapse (tools/nn/sim/morale.py): cost (the lord x lord_value_scale) x health x the missile
-    units' ammunition weight x routing_weight when routing, units alive and not shattered."""
+    morale.army_collapse (tools/nn/sim/morale.py): strength "cp" - the database's combat potential (fixed + missile
+    x the ammunition curve) x health x routing_weight when routing, units alive and not shattered; the old
+    "strategic" - cost (the lord x lord_value_scale) x health x the missile units' ammunition weight."""
     if cal is None or ratios is None:
         c, r = collapse_rules()
         cal, ratios = (c if cal is None else cal), (r if ratios is None else ratios)
@@ -205,7 +206,15 @@ def beaten(b, passports=None, cal=None, ratios=None):
     first = np.where(np.isfinite(a).any(0), a[np.isfinite(a).argmax(0), np.arange(a.shape[1])], 0.0)
     a0 = np.nan_to_num(first, nan=0.0)
     weight = np.ones_like(hp)
-    if cal.get("strength") == "strategic":
+    init_value = value
+    if cal.get("strength") == "cp":
+        fixed, missile = passport.combat_potential(keys, passports)
+        sl, mid = float(cal["ammo_slope"]), float(cal["ammo_midpoint"])
+        amm = np.clip(np.nan_to_num(a, nan=0.0) / np.maximum(a0, 1.0), 0.0, 1.0)
+        value = fixed[None, :] + missile[None, :] / (1 + np.exp(-sl * (amm - mid)))
+        init_value = fixed + missile / (1 + np.exp(-sl * (1 - mid)))
+        weight = np.where(f["r"].astype(bool), float(cal["routing_weight"]), 1.0)
+    elif cal.get("strength") == "strategic":
         amm = np.clip(np.nan_to_num(a, nan=0.0) / np.maximum(a0, 1.0), 0.0, 1.0)
         sl, mid = float(cal["ammo_slope"]), float(cal["ammo_midpoint"])
         lo, hi = 1 / (1 + np.exp(sl * mid)), 1 / (1 + np.exp(-sl * (1 - mid)))
@@ -214,9 +223,9 @@ def beaten(b, passports=None, cal=None, ratios=None):
         weight = np.where((a0 > 0)[None, :], floor + (1 - floor) * avail, 1.0)
         weight = weight * np.where(f["r"].astype(bool), float(cal["routing_weight"]), 1.0)
     count = alive & ~f["r"].astype(bool) if cal.get("count") == "standing" else alive
-    power = value[None, :] * hp * weight * count
+    power = (value if value.ndim == 2 else value[None, :]) * hp * weight * count
     st = np.stack([power[:, side == 1].sum(1), power[:, side == 2].sum(1)], 1)
-    init = np.array([value[side == 1].sum(), value[side == 2].sum()])
+    init = np.array([init_value[side == 1].sum(), init_value[side == 2].sum()])
     other = st[:, ::-1]
     return (init[None, :] > 0) & (other > 0) & (other >= ratios[1] * st) & (st <= ratios[0] * init[None, :])
 

@@ -306,8 +306,11 @@
 
 ## Не найдено
 
-Ни один открытый источник не объясняет `melee_breakoff_secs` 24 / `melee_breakoff_total_immunity_secs` 10
-(ключи только WH3; см. [движение](movement.md)), `entity_action_attack_formed_combat_distance`
+Ни один открытый источник CA не объясняет `melee_breakoff_secs` 24 / `melee_breakoff_total_immunity_secs` 10
+(ключи только WH3; см. [движение](movement.md)); по пробе выхода из боя (`build/movelords`) 24 с — окно, в
+которое уходящий держит приказ: догоняемые мечники и копейщики 24–26 с после приказа «отойти» не бьют
+(убитые не растут, догоняющие кланкрысы не теряют здоровья), потом бьются дальше (кланкрысы теряют ~20 HP/с);
+без погони отряд выходит за 8 с (симулятор: `contact.breakoff`; игрок в Steam тоже пишет об окне ~25 с); `entity_action_attack_formed_combat_distance`
 2,5 / `_tether_distance` 2 и сколько моделей могут физически дотянуться до одной цели.
 
 ## Что осталось непонятным

@@ -8,7 +8,15 @@
 --   'move_run'     a move order at a run to a point move_beyond_m behind the target's front;
 --   'recharge'     attack_run; recharge_after_s after the first contact a move back_m away at a run,
 --                  then (arrived, or recharge_max_s later) attack_run again;
---   'hold'         no order.
+--   'hold'         no order;
+--   'withdraw'     attack_run; recharge_after_s after the first contact a move back_m away at a run,
+--                  never changed again (the melee exit: is the order kept, dropped after melee_breakoff_secs?);
+--   'script'       lane.steps {{at_s, kind = 'face' | 'move', bearing, width, dx, dz, run}}: at at_s after the
+--                  go a 'face' (goto_location_angle_width at its place: turn in place to the world bearing) or a
+--                  'move' (goto_location to its start + (dx, dz)); the turning tests.
+-- lane.a_ability (optional): the attacker uses it on himself a_ability_after_s after the first contact
+-- (Foe-Seeker's vigour). lane.men_all_s (optional): the attacker's soldier places every men_ms from the go
+-- to men_all_s, wherever the enemy is (how a formation turns).
 -- The target (lane.target_mode): 'stand' halts and, with lane.answer, is ordered to attack the
 -- attacker at its first contact (both then fight under an attack order); 'hold' halts and is never
 -- ordered (braced spears); 'both' attacks the attacker at a run from the start; 'rear' halts facing
@@ -32,7 +40,8 @@ local M = {}
 
 local LOG = 'tww3_bai_events.jsonl'
 local TIMER, MEN_TIMER = 'tww3_bai_charge_probe_tick', 'tww3_bai_charge_probe_men'
-M.MODES = {attack_run = true, attack_walk = true, move_run = true, recharge = true, hold = true}
+M.MODES = {attack_run = true, attack_walk = true, move_run = true, recharge = true, hold = true, withdraw = true,
+    script = true}
 M.TARGET_MODES = {stand = true, hold = true, both = true, rear = true}
 
 local function round(v, k)
@@ -57,7 +66,7 @@ function M.recharge_step(phase, now_ms, contact_ms, out_ms, moved_m, in_melee, l
     if phase == 'in' and contact_ms and now_ms - contact_ms >= lane.recharge_after_s * 1000 then
         return 'out'
     end
-    if phase == 'out' and ((not in_melee and moved_m >= lane.back_m - 5)
+    if phase == 'out' and lane.mode ~= 'withdraw' and ((not in_melee and moved_m >= lane.back_m - 5)
             or now_ms - out_ms >= lane.recharge_max_s * 1000) then
         return 'back'
     end
@@ -205,7 +214,7 @@ function M.main(bm, config, globals)
                             status = ok and (used and 'used' or 'not_ready') or 'failed'})
                     end
                 end
-                if lane.mode == 'recharge' then
+                if lane.mode == 'recharge' or lane.mode == 'withdraw' then
                     local p = read(function() return lane.a.unit:position() end)
                     local moved = (p and lane.out_from) and
                         math.sqrt((p:get_x() - lane.out_from[1]) ^ 2 + (p:get_z() - lane.out_from[2]) ^ 2) or 0
@@ -227,6 +236,30 @@ function M.main(bm, config, globals)
                         lane.contact2 = now
                         emit('probe_contact', {lane = lane.name, t = now - lane.t0, n = 2})
                     end
+                end
+                if lane.mode == 'script' then
+                    for i, step in ipairs(lane.steps or {}) do
+                        if not step.done and now - lane.t0 >= step.at_s * 1000 then
+                            step.done = true
+                            local p = read(function() return lane.a.unit:position() end)
+                            if step.kind == 'face' and p then
+                                orders.move_formation(lane.a.uc, vec(p:get_x(), p:get_z()), step.bearing,
+                                    step.width or lane.a_width, step.run == true)
+                            elseif step.kind == 'move' then
+                                local L = lane.layout
+                                orders.move(lane.a.uc, vec(L.ax + (step.dx or 0), L.az + (step.dz or 0)), step.run == true)
+                            end
+                            emit('probe_phase', {lane = lane.name, phase = 'step' .. i .. ':' .. tostring(step.kind),
+                                t = now - lane.t0})
+                        end
+                    end
+                end
+                if lane.a_ability and lane.contact and not lane.a_ability_done
+                        and now - lane.contact >= (lane.a_ability_after_s or 0) * 1000 then
+                    lane.a_ability_done = true
+                    local ok, used = pcall(orders.use_ability_on_self, lane.a.uc, lane.a.unit, lane.a_ability)
+                    emit('probe_ability', {lane = lane.name, who = 'a', key = lane.a_ability, t = now - lane.t0,
+                        status = ok and (used and 'used' or 'not_ready') or 'failed'})
                 end
                 local r = {lane = lane.name, t = now - lane.t0, a = unit_row(lane.a.unit), tg = unit_row(lane.t.unit)}
                 if lane.lord then r.l = unit_row(state.units[lane.lord.name].unit) end
@@ -251,7 +284,11 @@ function M.main(bm, config, globals)
         local rows, now = {}, now_ms()
         for _, lane in ipairs(state.lanes) do
             local last = lane.contact2 or lane.contact
-            if lane.running and (not last or now - last <= config.men_after_s * 1000) then
+            if lane.running and lane.men_all_s then
+                if now - lane.t0 <= lane.men_all_s * 1000 then
+                    rows[#rows + 1] = {lane = lane.name, t = now - lane.t0, a = soldiers(lane.a.unit)}
+                end
+            elseif lane.running and (not last or now - last <= config.men_after_s * 1000) then
                 local d = dist(lane.a.unit, lane.t.unit)
                 if d and d <= config.men_near_m then
                     rows[#rows + 1] = {lane = lane.name, t = now - lane.t0, a = soldiers(lane.a.unit),
@@ -267,7 +304,7 @@ function M.main(bm, config, globals)
             lane.t0, lane.running, lane.phase = now_ms(), true, 'in'
             if lane.target_mode == 'both' then attack(lane, lane.t, lane.a, false) end
             local m = lane.mode
-            if m == 'attack_run' or m == 'recharge' then
+            if m == 'attack_run' or m == 'recharge' or m == 'withdraw' then
                 attack(lane, lane.a, lane.t, false)
             elseif m == 'attack_walk' then
                 attack(lane, lane.a, lane.t, true)

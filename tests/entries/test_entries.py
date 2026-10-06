@@ -985,6 +985,41 @@ class TestChargeProbe:
         assert ends == {"L1": "fight_s", "L2": "fight_s"}
         assert rows[-1]["event"] == "result"
 
+    def test_script_withdraw_and_attacker_ability(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            CONFIG.lanes[1].mode = 'withdraw'
+            CONFIG.lanes[1].recharge_after_s = 2
+            CONFIG.lanes[1].back_m = 150
+            CONFIG.lanes[1].recharge_max_s = 1000000
+            CONFIG.lanes[2].mode = 'script'
+            CONFIG.lanes[2].lord = nil
+            CONFIG.lanes[2].target_mode = 'hold'
+            CONFIG.lanes[2].answer = false
+            CONFIG.lanes[2].max_s = 30
+            CONFIG.lanes[2].men_all_s = 10
+            CONFIG.lanes[2].steps = {{at_s = 1, kind = 'face', bearing = 270}, {at_s = 5, kind = 'move', dx = 0, dz = 150,
+                                      run = true}}
+            CONFIG.lanes[1].a_ability = 'syg'
+            CONFIG.lanes[1].a_ability_after_s = 1
+            own[2].abilities = {syg = true}
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            own[2].melee, enemy[2].melee = true, true
+            for _ = 1, 200 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        phases = [(r["lane"], r["phase"]) for r in rows if r["event"] == "probe_phase"]
+        # the withdraw goes out and never back; the script's steps fire in order
+        assert ("L1", "out") in phases and ("L1", "back") not in phases
+        assert [p for lane, p in phases if lane == "L2"] == ["step1:face", "step2:move"]
+        (ab,) = [r for r in rows if r["event"] == "probe_ability"]
+        assert ab["lane"] == "L1" and ab["who"] == "a" and ab["status"] == "used"
+        men = [x for r in rows if r["event"] == "probe_men" for x in r["lanes"] if x["lane"] == "L2"]
+        assert men and all(x["t"] <= 10000 for x in men)
+
     def test_layout_and_recharge_step(self, lua):
         L = lua.eval("""require('entries.charge_probe').layout({x = 10, z = 0, gap_m = 80, a_depth = 10,
             t_depth = 12, target_mode = 'rear'})""")

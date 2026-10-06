@@ -78,6 +78,9 @@ STATIC = {
     "charge_pose": ("f", "charge pose distance, m: under an attack order the unit takes its charge pose this far from "
                          "its target (the database's battle_entities: 25 infantry, 30 lords; the charge's morale)"),
     "accel": ("f", "acceleration, m/s2"),
+    "turn": ("f", "a man's turn rate, deg/s (the database's battle_entities turn_rate: 120 infantry and the General, "
+                  "180 archers and the Warlord, 240 militia): a unit on the move turns at it (movement.py), a lone man "
+                  "standing too"),
     "decel": ("f", "deceleration, m/s2"),
     "attack": ("f", "melee attack"),
     "defence": ("f", "melee defence"),
@@ -122,6 +125,9 @@ STATIC = {
     "rout_death_s": ("f", "a lord of this faction who routs counts as killed this long into his rout (the "
                           "faction's lords crumble: Vampire Counts, config/nn/sim.json morale.lord_fall); 0 never"),
     "cost": ("f", "multiplayer cost"),
+    "cp_fixed": ("f", "combat potential that does not run out: the database's main_units melee_cp + its abilities' "
+                      "additional melee and missile cp (the army-destruction strength, morale.army_collapse)"),
+    "cp_missile": ("f", "combat potential of its missiles (main_units missile_cp): counts by the ammunition left"),
     "ai": ("b", "played by the game's AI: its lord fires his active abilities by the AI's rule (the network's "
                 "side by order: tools/nn/sim/orders.py ability)"),
     "ab0": ("i", "the unit's first ability slot: index in the ability passports (tools/nn/sim/abilities.py keys), "
@@ -159,6 +165,11 @@ INTERNAL = {
     "turn_on": ("b", "a standing shooter turning to its target (missile.stand_fire_arc_deg starts it, "
                      "missile.turn_done_deg ends it)"),
     "leave_s": ("f", "seconds leaving melee while still touching an enemy (contact.pin_s)"),
+    "exit_s": ("f", "seconds since it began to leave melee (a withdraw or a far move while in contact), in contact or "
+                    "not, while it keeps leaving: at the database's melee_breakoff_secs still in contact it drops the "
+                    "order (battle.py, contact.breakoff)"),
+    "low_s": ("f", "seconds since its health first fell below a quarter (0 before; never back: the Wounds of a single "
+                   "entity come on its initial cooldown after that and stay to the end, effects.py)"),
     "shots": ("f", "fractional shots carried to the next step"),
     "unready": ("f", "share of the men still reloading, 0-1 (0: all loaded, the start; missile.py volley)"),
     "rout_count": ("f", "times routed"),

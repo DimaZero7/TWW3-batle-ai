@@ -26,12 +26,15 @@ infantry, missiles at him, abilities. Monsters are in [monsters](monsters.md). C
 - **The general can't die early.** `general_auto_survive_threshold` 0.5: while more than 50 % of the
   entities of the general's unit are alive, the general can't be killed (matters for lords with a
   bodyguard/crew). · [twwstats][tws] (WH2 description) · high (value), medium (WH3).
-- **"Wounded" state.** WH3 single entities get stat penalties at low health; 2.0 made it harder to
-  heal back from very low HP. Thresholds not found. · [GameWatcher][gw] · high (exists).
-  - Ours: the database's passive Single Entity (both our lords) has speed ×0.9 and melee damage and
-    AP ×0.8 with the recharge context `health_below_25%` (`config/nn/effects.json`); the recordings
-    show no speed drop below 25 % (lords running out of melee: 0.84–0.85 of their run in every
-    health band), so the simulator leaves it out (`sim.json` effects.off); the network sees it.
+- **"Wounded" state (Wounds).** In WH3 a single entity below 25 % health gets speed ×0.9, damage and AP
+  damage ×0.8; since 2.0 it stays to the end of the battle, even after healing. · [GameWatcher][gw], fandom
+  Wounds (snippet), Update 2.0 · high.
+  - Ours: the database's passive Single Entity (both our lords): speed ×0.9, damage and AP ×0.8; on 5 s (the
+    DB's initial cooldown) after health first falls below 25 %, to the end of the battle. The recordings
+    (`build/movelords/lords`, 301 lords below 25 %): the effect is in the active list of 170 of 170 lords who
+    lived 6 s more, after 5 s (154) or 6 s (16), never above 25 %; it stays until death or leaving the map; the
+    card: damage ×0.800 (3 of 3), speed ×0.90. It was off before: the routing lords' speed (0.84–0.85 of the run
+    in every health band) mixed fatigue and other effects.
 
 ## A lord against infantry
 

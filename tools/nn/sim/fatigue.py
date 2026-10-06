@@ -1,11 +1,12 @@
 """Fatigue (docs/en/training/simulator.md, docs/en/game/mechanics/fatigue.md).
 
-Points per activity from the game's database (_kv_fatigue_tables): charging +34, melee +19,
+Points per activity from the game's database (_kv_fatigue_tables): charging +34, melee +19 (a single entity: the
+database's +19, measured 186-200/s in the probes; a formation calibration.multi_combat),
 shooting +18, running +4, walking -1, standing ready -7, idle -18; thresholds fresh 0, active 2800,
 winded 6600, tired 12600, very tired 18000, exhausted 27000 (max 30000). The calibration
 (config/nn/sim.json fatigue.calibration, ON) runs 10 ticks/s, freezes dead and departed slots and
-charges melee only to a unit with an attack order: +15 a tick for a single entity (calibration.single_combat),
-13.7 for a formation; charging (+34) only in the first calibration.charge_s (2) s after a charge's first blow
+charges melee only to a unit with an attack order: the database's +19 a tick for a single entity, 13.7 for a
+formation (measured; a formation's men are not tired one by one - build/movelords); charging (+34) only in the first calibration.charge_s (2) s after a charge's first blow
 (battle.py, every unit); a unit in melee without one moves or rests. A move costs by its order's run flag (run
 +4, walk -1), a routing unit +4; shooting 7.5 (fitted on the 204 recordings); a standing unit
 rests at idle with no standing enemy within ready_enemy_m, else stands ready. OFF is the legacy
@@ -71,7 +72,12 @@ def step(u, activity, params, dt):
         rate = torch.where(u["fatigue_immune"], torch.clamp(rate, max=0.0), rate)
     if enabled and "active" in activity:
         rate = torch.where(activity["active"], rate, torch.zeros_like(rate))
-    u["fatigue"] = (u["fatigue"] + rate * scale).clamp(0, F["threshold_max"])
+    # an ability's vigour (Foe-Seeker: the database's fatigue_change_ratio -0.01): that share of the maximum a second
+    # (abilities.vigour), on top of the activity's rate
+    change = rate * scale
+    if "vigour" in activity:
+        change = change + activity["vigour"] * F["threshold_max"] * dt
+    u["fatigue"] = (u["fatigue"] + change).clamp(0, F["threshold_max"])
     th = torch.tensor([F[k] for k in LEVELS], dtype=u["fatigue"].dtype, device=u["fatigue"].device)
     u["fat"] = (torch.bucketize(u["fatigue"], th, right=True) - 1).clamp(min=0).float()
 

@@ -45,7 +45,8 @@ SIM_STATS = {("scalar_speed", "mult"): "speed", ("scalar_charge_speed", "mult"):
              ("stat_melee_damage_base", "mult"): "damage", ("stat_melee_damage_ap", "mult"): "ap",
              ("stat_charge_bonus", "mult"): "charge", ("stat_morale", "add"): "leadership",
              ("stat_resistance_physical", "add"): "resist_physical"}
-HEAD = ("active_s", "recharge_s", "passive", "trigger", "range_m", "self_cast", "modelled", "auto", "friends_min") + tuple(
+HEAD = ("active_s", "recharge_s", "passive", "trigger", "range_m", "self_cast", "modelled", "auto", "friends_min",
+        "vigour") + tuple(
     f"off_{f}" for f in OFF)
 COLS = HEAD + tuple(f"{g}_{s}" for g in GROUPS for s in STATS)
 COL = {c: i for i, c in enumerate(COLS)}
@@ -104,7 +105,7 @@ def row(params, key):
     eff = effects(p)
     out = [float(p["active_s"]), float(p["recharge_s"]), float(p["passive"]), float(TRIGGERS[trigger]),
            float(p["range_m"]), float(p["self_cast"]) * float(not auto), float(key in cal["model"]), float(auto),
-           float((cal.get("friends_min") or {}).get(key, 0))]
+           float((cal.get("friends_min") or {}).get(key, 0)), float(p.get("vigour_per_s", 0.0))]
     out += [float(f in (p.get("off_when") or ())) for f in OFF]
     for g in GROUPS:
         for s in STATS:
@@ -200,6 +201,20 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None):
 
 def restore(u, old):
     u.update(old)
+
+
+def vigour(u, params, standing):
+    """[B, N] the share of the maximum fatigue each unit loses a second from its own active abilities (the
+    database's special_ability_phases fatigue_change_ratio, abilities.json vigour_per_s: Foe-Seeker -0.01, 1 % of
+    30000 a second; the in-game probe build/movelords). Call after apply() (the timers of this step)."""
+    T = table(params, u["men"].device)
+    out = torch.zeros_like(u["men"])
+    for k in range(SLOTS):
+        r = T[u[f"ab{k}"]]
+        has = (u[f"ab{k}"] >= 0) & ~(r[..., COL["passive"]] > 0) & ~(r[..., COL["auto"]] > 0)
+        active = has & standing & (r[..., COL["modelled"]] > 0) & (u[f"ab{k}_on"] > 0)
+        out = out + torch.where(active, r[..., COL["vigour"]], torch.zeros_like(out))
+    return out
 
 
 def set_rule(u, by_rule):

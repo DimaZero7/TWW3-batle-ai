@@ -142,12 +142,16 @@ health per drop (one infantry blow, 0.2 s) and the attackers' health and men per
 
 ## charge_probe - the melee probe (one mechanic, game and simulator alike)
 
-Build: `python -m tools.build charge-probe --probe-plan charge|hit --probe-battle N`; every battle of a plan in
-turn: `python -m tools.nn.charge_probe run --plan charge|hit [--battles 1,2]` (a build and `launch.ps1` each).
+Build: `python -m tools.build charge-probe --probe-plan charge|hit|move --probe-battle N`; every battle of a plan in
+turn: `python -m tools.nn.charge_probe run --plan charge|hit|move [--battles 1,2]` (a build and `launch.ps1` each).
 MP Crossroads (flat), 2-5 lanes 240 m apart. In a lane an attacker and a target `gap_m` apart (front to
 front); everyone is held by script and fearless. The attacker's order: attack at a run (`attack_run`), attack
 at a walk (`attack_walk`), a move order at a run to a point 5 m past the target's front (`move_run`), a
-recharge (`recharge`: 10 s into contact a run 40 m back, then attack again). The target stands and at its
+recharge (`recharge`: 10 s into contact a run 40 m back, then attack again), a melee exit (`withdraw`: 10 s
+into contact a run 150 m back, the order never changed again) or a script (`script`: at given seconds a facing
+order in place - `goto_location_angle_width` with a new bearing - or a move to a point; the turning tests). The
+attacker may use its own ability `a_ability_after_s` after contact (`a_ability`: Foe-Seeker). `men_all_s`: the
+attacker's soldier places every `men_ms` from the start, wherever the enemy is. The target stands and at its
 first second of contact is ordered to attack the attacker (`stand`), stands and is never ordered (`hold`:
 braced spears), attacks too (`both`) or stands facing away (`rear`). A lane may have a lord behind the target
 who at the moment of contact uses an ability (Stand Your Ground) or not (the control). Unused lords stand far.
@@ -156,7 +160,11 @@ Plans: `charge` - 8 battles (swordsmen on clanrats under the four orders; clanra
 walk, from behind and on swordsmen; the General and the Warlord charging; spearmen on skavenslave spearmen
 from 150 and from 20 m - the charge speed); `hit` - 2 battles (swordsmen, greatswords, spearmen with shields
 on unarmoured skavenslaves, flagellants on clanrats; clanrat spearmen on Empire spearmen with the General
-behind them: in the first battle he uses Stand Your Ground at contact, in the second not).
+behind them: in the first battle he uses Stand Your Ground at contact, in the second not); `move` - 2 battles
+(`build/movelords`): turning (spearmen facing 90 deg and back, then 180 deg; spearmen at a run to a point 150 m
+behind and 120 m to the side; the General and the Warlord facing 180 and 90 deg, then at a run to a point behind;
+0.25 s samples, soldier places) and the melee exit (swordsmen and spearmen leave 10 s into contact, chased by
+clanrats ordered to attack them or left standing; the General fights clanrats and uses Foe-Seeker 50 s in).
 
 Every 0.5 s `probe_sample` per lane: men, health (CCO `HealthValue`), melee / moving / running flags, place,
 bearing, kills, fatigue, status keys (CCO `StatusList`: `braced`, `melee`...) of the attacker, the target and
@@ -165,7 +173,12 @@ the lord; `probe_contact` (the first and second contact), `probe_phase` (recharg
 CCO `ManList`). A lane ends `fight_s` after its first contact. Analysis: `python -m tools.nn.charge_probe
 report [--sim]` - the speed on the way in (the last 30 and 10 m), the target's and the attacker's health
 lost in 0-1, 0-2, 0-5, 5-15, 15-30 s after contact and per second from 15 s, men within 1.5 / 2.5 / 3.5 m of
-an enemy; `--sim` - the same analysis of the simulator on the same lanes (same places and orders, 8 copies).
+an enemy; `--sim` - the same analysis of the simulator on the same lanes (same places and orders, 8 copies);
+the "0-..." windows start at the sample before contact (a blow in the contact sample counts). `turns [--sim]` -
+turning (seconds to within 10 deg of the new bearing, the centre's speed by seconds, whether the men kept their
+ranks); `exits [--sim]` - the melee exit (how long the leaver stays in melee, its kills and the enemy's HP lost
+in 0-24 and 26-50 s after the order) and the lord's fatigue with the ability. The simulator has no facing order:
+the twin sets the bearing at once.
 Results: [melee](../game/mechanics/melee.md#in-game-check-the-melee-probe).
 
 <a id="lord_fall"></a>

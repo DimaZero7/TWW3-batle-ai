@@ -163,7 +163,21 @@ def predicates(u, engaged, params):
             "losing_melee": engaged & ((u["taken"] + 1.0) >= ratio * (u["dealt"] + 1.0)),
             "morale_below_half": u["morale"] < 0.5 * L,
             "not_wavering": ~(u["w"] | u["r"]),
-            "hp_below_half": u["hp"] < 0.5, "hp_below_quarter": u["hp"] < 0.25}
+            "hp_below_half": u["hp"] < 0.5,
+            # below a quarter: once fallen there, for the effect's initial cooldown (Wounds: 5 s, the database's
+            # initial_recharge; the recordings: on 5-6 s after, to the end - Update 2.0), never back (u low_s)
+            "hp_below_quarter": (u["low_s"] >= quarter_delay(params)) if "low_s" in u else u["hp"] < 0.25}
+
+
+def quarter_delay(params):
+    """Seconds below a quarter of health before an effect that needs it comes on: the largest initial cooldown
+    (abilities.json initial_s) of the effects that need hp_below_quarter (Wounds: 5)."""
+    out = 0.0
+    for k in order(params):
+        e = (params.effects.get("effects") or {}).get(k) or {}
+        if "hp_below_quarter" in (e.get("needs") or ()):
+            out = max(out, float((params.abilities.get(k) or {}).get("initial_s") or 0.0))
+    return out
 
 
 def owned(u, E):

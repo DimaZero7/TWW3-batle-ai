@@ -66,16 +66,20 @@ fight moving or charging strikes once at once with every man in contact (the int
 blow); **the charge sprint** - under any attack order, at a walk too, the last 30 m (lords 35) at the
 database's charge speed; abilities' initial recharge from the database. Shooting by the game's rules ([missile probe](game/units/missile-probe.md), 10 battles): volleys once a cycle (archers 10 s = the database, sling 11.5, Night Runners 10.2, militia 10.8: measured), range centre to centre, each man's fire arc ±30° (militia ±35°), no turn when firing at will, 3 s after a target change, hits from the database's spread model (one calibration k 1.1 from 62k recorded shots), a shield against small arms only, the line of fire with the True Sight mod; friendly fire and spill, lords (at most 6.5 men hit them, gathering over
 20 s only when the lord himself ran into the formation; a lord without an order strikes in full; the lord as fragile as in the game: his own aura does not reach him, in melee he is
-always 'losing' (−3), projectiles hit him whole in melee, he tires slower than a formation; a lord duel: General v
+always 'losing' (−3), projectiles hit him whole in melee; he tires by the database (+19 a tick), Foe-Seeker takes 1 %
+of the maximum vigour a second; Wounds - 5 s after 25 % health speed x0.9, damage x0.8 to the end; a lord duel: General v
 General x0.8 of the game, Warlord v Warlord x1.2), morale with all main modifiers by the game's rules (the 4 s and 60 s casualty windows and 'under fire' 15 s; by the morale probe of 06.10: flank / rear −6 / −14 while struck; 'flanks secure' +5 with no enemy within 146 m or friends at both sides; the charge +15 in 6 + 6 s blocks; winning by shooting too, from 10 % lost; a strong enemy worth 3×; a router's morale follows its target, the rally with no enemy within 95 m after at least 18 s of rout, [simulator](training/simulator.md#morale-by-the-games-rules-the-morale-probe); a lord's death: his army
-−16 for 45 s, then −10; his rout on the field: the aura only), rout, rally, army collapse (−120 by the
-database's strategic strength), flank-threat flags, fatigue, units' innate effects, lord
+−16 for 45 s, then −10; his rout on the field: the aura only), rout, rally, army collapse (−120; the strength is the database's combat potential:
+melee_cp + the abilities' potential + missile_cp by the ammunition left, × health - as the recorded `strategic_value`),
+turning on the move at the model's turn rate from the database (a formation about-faces where it stands and runs the
+way it faces), leaving melee with the database's 24 s window (one still in contact drops its order and fights),
+flank-threat flags, fatigue, units' innate effects, lord
 abilities (the game's AI fires them by a measured rule: the speed ones in melee, Stand Your Ground only
 next to friends, Deadly Onslaught never).
 
 **Fatigue** (switched on by the latest change): 10 ticks a second; melee tires only a unit with
-an attack order (single entity 15 a tick, formation 13.7; a charge +34 for everyone only in the first
-2 s after the charge blow), shooting 7.5, walking 3.4, idle −18.
+an attack order (single entity the database's +19 a tick, formation 13.7 - measured; a charge +34 for everyone only in
+the first 2 s after the charge blow), shooting 7.5, walking 3.4, idle −18; Foe-Seeker −300 points/s while active.
 Exhausted shares (replay of the 204 recordings): own 14.9 % (game 17.3 %), enemy 25.8 % (game 28.6 %);
 lords 13.6 / 25.3 % (game 22.0 / 22.9 %).
 
@@ -86,9 +90,9 @@ frozen. Three scores, higher is better:
 
 | Score | Now |
 |---|---:|
-| Mechanics: unit pairs and shooting within 20 % of the game | 24 / 54 (51 before the melee core; core 2 - 37; shooting by the rules - 29; morale by the rules - 24: the spearmen-clanrats pair without the fitted −3 and the archers' target) |
-| Same winner: the game's AI against itself | 16 / 26 (20 before the core, the core 21, core 2 and shooting 18, morale 16) |
-| Same winner: the network against the game's AI (165 recordings now) | 132 / 165 (126 before the core, the core 127, core 2 and shooting 132, morale 132) |
+| Mechanics: unit pairs and shooting within 20 % of the game | 24 / 54 (51 before the melee core; core 2 - 37; shooting by the rules - 29; morale by the rules - 24, movement and lords - 24: the spearmen-clanrats pair without the fitted −3 and the archers' target) |
+| Same winner: the game's AI against itself | 15 / 26 (20 before the core, the core 21, core 2 and shooting 18, morale 16, movement and lords 15: an arena with split copies) |
+| Same winner: the network against the game's AI (165 recordings now) | 137 / 165 (126 before the core, the core 127, core 2 and shooting 132, movement and lords 137, morale 132) |
 
 Mechanics dropped from 51 to 37 not because of winners (all 12 pairs are as in the game) but because of
 pace: the first 15 s of formation contact are stronger in the game than the rule (the target loses
@@ -122,7 +126,13 @@ same battles. **The simulator is too kind to the network** — the main measured
 - in the game fights are short and often break off (median 17 s), in the simulator they do not
   (21–112 s); what triggers leaving melee is unknown;
 - morale right at contact and the open-flank flags match only partly;
-- army collapse finds 58 of 65 onsets in the recordings, but in a free battle its time drifts;
+- army collapse: the combat-potential strength catches the onset in the recordings in the same second in 0.94 of
+  cases, but in the replay army destruction comes by the end in 0.15 of the battles against 0.96 in the game - the
+  losing army in the replay loses health too slowly in the last two minutes;
+- leaving melee: a unit the enemy does not chase is not held in the game (out of contact in 8 s), the simulator holds it
+  20 s (the whole-battle measurement); a formation turning 90 deg on the move starts slower in the game (it re-forms);
+  the Warlord on a facing order turns 75 deg/s against 180 in the database; a formation in melee tires ~110-120
+  points/s for the first 50 s, then ~210/s, and the charge tires before contact too;
 - rallied units rout again 10 / 45 s after the rally in 0.11 / 0.40 of cases (game 0.07 / 0.23; before the morale
   probe's rally rule 0.37 / 0.49); fewer routs a battle than in the game (16.8 against 22.5);
 - morale: the level of 'losing' in melee and the 'strong enemy' scale (the General next to slaves −9, ours −3) are open;

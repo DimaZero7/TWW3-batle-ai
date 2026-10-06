@@ -26,6 +26,22 @@ TABLES = ("special_ability_to_special_ability_phase_junctions", "special_ability
           "special_ability_phase_attribute_effects", "special_ability_to_recharge_contexts",
           "special_ability_to_auto_deactivate_flags")
 PREFIX = "unit_special_abilities"
+PHASES = "special_ability_phases"
+# The abilities' combat potential (unit_special_abilities.additional_melee_cp / additional_missile_cp): the two
+# float32 values stand together in each ability's row of the game's db.pack (checked 06.10.2026 for every key
+# below), but the row's other fields before them are not decoded (variable-length), so the values are copied here
+# from twwstats' mirror of the same table (build/conform/cards_cp.json). A unit's strength for the army destruction
+# is main_units melee_cp + missile_cp + these (the recorded strategic value at the start: General 950, Warlord 900,
+# build/movelords). An ability missing here counts 0.
+ABILITY_CP = {
+    "wh2_main_character_abilities_verminous_valour": (50, 50),
+    "wh_dlc04_unit_passive_strength_of_the_penitent": (25, 0),
+    "wh_main_character_abilities_deadly_onslaught": (150, 0),
+    "wh_main_character_abilities_foe_seeker": (50, 50),
+    "wh_main_character_abilities_rally": (50, 50),
+    "wh_main_character_abilities_stand_your_ground": (100, 50),
+    "wh_main_lord_passive_hold_the_line": (75, 25),
+}
 
 # Where each passport field comes from (inferred: the column's meaning is ours, from its values).
 FIELDS = {
@@ -35,6 +51,12 @@ FIELDS = {
                  "the battle's start (-1 and 0: ready at once; Steam guide 1698960734 'most abilities start at 0'; "
                  "Gate of Khorne 60 = fandom)",
     "uses": "unit_special_abilities.num_uses (inferred); -1: unlimited",
+    "vigour_per_s": "special_ability_phases.fatigue_change_ratio of the ability's phases (the column name: the "
+                    "community, twwstats; its place: the first float after the key, -0.01 for Foe-Seeker = fandom "
+                    "'Vigour per second: -1%'): the share of the maximum fatigue (30000) the owner loses each second "
+                    "while it is active (negative: recovers; the in-game probe build/movelords: -300 points/s)",
+    "cp": "unit_special_abilities.additional_melee_cp / additional_missile_cp (ABILITY_CP: copied from twwstats' "
+          "mirror of the table, the values stand in the db rows): the ability's combat potential",
     "range_m": "unit_special_abilities.effect_range (inferred), m: the reach around the caster (0: itself)",
     "passive": "active_s and recharge_s both -1 (inferred); checked against the cards' owned_passive lists",
     "targets_own": "unit_special_abilities field 5 (inferred): 1 for abilities cast on the caster or a friend",
@@ -75,6 +97,25 @@ def phases_of(key, junctions):
     return own or rows
 
 
+def phase_fatigue(b, phases):
+    """{phase: fatigue_change_ratio} from special_ability_phases (bytes b): a phase's row starts with its key (the
+    table's rows are sorted by key: the first place the key is written), then three flags, then the ratio (float).
+    A phase whose row does not read so raises: never a guess."""
+    import struct
+    out = {}
+    for key in phases:
+        raw = key.encode("utf-8")
+        at = b.find(struct.pack("<H", len(raw)) + raw)
+        if at < 0:
+            raise ValueError(f"{PHASES}: no row for {key}")
+        p = at + 2 + len(raw)
+        flags, ratio = b[p:p + 3], struct.unpack("<f", b[p + 3:p + 7])[0]
+        if any(x not in (0, 1) for x in flags) or not -1.0 <= ratio <= 1.0:
+            raise ValueError(f"{PHASES}: {key} does not read as flags and a ratio")
+        out[key] = round(ratio, 6)
+    return out
+
+
 def passport(key, prefix, t):
     """One ability's passport from its unit_special_abilities prefix and the decoded tables t."""
     p = prefix[key]
@@ -98,6 +139,10 @@ def passport(key, prefix, t):
         "active_s": p["active_time"], "recharge_s": p["recharge_time"],
         "initial_s": max(0.0, p.get("initial_recharge", 0.0)),
         "uses": p["num_uses"],
+        # the owner's own phases (targets self): what his fatigue does while it is active
+        "vigour_per_s": round(sum(t.get("phase_fatigue", {}).get(ph["phase"], 0.0) for ph in phases
+                                  if ph["target_self"]), 6),
+        "cp": list(ABILITY_CP.get(key, (0, 0))),
         "range_m": p["effect_range"], "passive": passive, "targets_own": p["targets_own"],
         "friendly_units": friendly, "enemy_units": enemy,
         "self_cast": (not passive) and not auto and p["targets_own"] and friendly in (0, -1) and enemy in (0, -1),
@@ -143,10 +188,14 @@ def owned(units):
     return sorted({k for u in units.values() for k in u.get("abilities") or ()})
 
 
-def build(raw, tables, keys, units, roster=ROSTER):
+def build(raw, tables, keys, units, roster=ROSTER, phases_raw=None):
     """{key: passport}; raw: the unit_special_abilities bytes, tables: the decoded others."""
     from tools.nn import dbtables
     prefix = dbtables.decode_prefix(raw, PREFIX, keys)
+    if phases_raw is not None:
+        names = sorted({r["phase"] for k in keys
+                        for r in phases_of(k, tables["special_ability_to_special_ability_phase_junctions"])})
+        tables = dict(tables, phase_fatigue=phase_fatigue(phases_raw, names))
     out = {k: passport(k, prefix, tables) for k in keys}
     bad = check_cards(out, units, roster)
     assert not bad, "passports differ from the cards:\n" + "\n".join(bad)
@@ -169,10 +218,11 @@ def main(argv=None):
     from tools.nn.gamedb import read_entries
     game = Path(project.load()["game_dir"]) / "data" / "db.pack"
     tables = dbtables.read_tables(game, TABLES)
-    raw = read_entries(game, {dbtables.entry_name(PREFIX)})[dbtables.entry_name(PREFIX)]
+    got = read_entries(game, {dbtables.entry_name(PREFIX), dbtables.entry_name(PHASES)})
+    raw, phases_raw = got[dbtables.entry_name(PREFIX)], got[dbtables.entry_name(PHASES)]
     units = json.loads(UNITS.read_text(encoding="utf-8"))["units"]
     keys = sorted(set(owned(units)) | set(args.abilities.split(",") if args.abilities else ()))
-    abilities = build(raw, tables, keys, units)
+    abilities = build(raw, tables, keys, units, phases_raw=phases_raw)
     args.out.write_text(json.dumps(document(abilities, game), indent=1, ensure_ascii=False) + "\n",
                         encoding="utf-8", newline="\n")
     for k, a in abilities.items():

@@ -248,3 +248,14 @@ class TestRunFarFromTheFight:
         assert M.measure(b, 1, passports=PASS, chosen=("fatigue",))["run_far_own"] is None
         far = M.far_from_fight(b, np.ones((6, 4), dtype=bool))
         assert far[:3, 0].all() and not far[3:, 0].any()
+
+
+def test_combat_potential_of_the_real_passports():
+    """The army destruction's strength (morale.collapse strength cp): main_units melee_cp + the abilities' cp, and
+    missile_cp - the recorded strategic value at the start (General 950, Warlord 900; build/movelords)."""
+    from tools.nn.model import passport
+    keys = ["wh_main_emp_cha_general_0", "wh2_main_skv_cha_warlord_0", "wh2_dlc13_emp_inf_archers_0",
+            "wh_main_emp_inf_spearmen_0", ""]
+    fixed, missile = passport.combat_potential(keys)
+    assert fixed.tolist() == [950.0, 900.0, 100.0, 325.0, 0.0]
+    assert missile.tolist() == [0.0, 0.0, 250.0, 0.0, 0.0]

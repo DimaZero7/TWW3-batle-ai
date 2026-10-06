@@ -58,7 +58,7 @@ All values are WH3 9.0.0 = our `game_rules.json`; descriptions from WH2.
 | Charging | +15 | morale bonus of a charge, timeout 60 s (guides: lasts ~10 s) | **not modelled. Gap** |
 | Surprised / panic | −30 / −50 | (ambush; panic not described) | — |
 | Inspired | +30 | "a friendly is having an inspiring effect" (abilities) | — |
-| Army on the brink | −120 | when enemy/own current strength ≥ 2.6 **and** own strength ≤ 0.22 of the start | **not modelled** |
+| Army on the brink | −120 | when enemy/own current strength ≥ 2.6 **and** own strength ≤ 0.22 of the start | modelled (strength: the DB's combat potential × health) |
 | Night battle unprepared | −5 | WH3 seems to have no night battles | — |
 | Difficulty | player: Easy +4, Normal 0, Hard −2, Very Hard −4 | AI: WH2 −4 / 0 / +4 / +10; WH3 replaced it with a range (`difficulty_modifier_ai_extra_multiplier_low/high` 0.4 / 0.8) | Normal: 0 |
 
@@ -106,7 +106,10 @@ Sources: [twwstats morale][tws-m] (high), [fandom Leadership][fw-lead], [fandom 
   except unbreakable ones; one source says the trigger moved from ~92 % of the balance-of-power
   bar (WH2) to ~75 % (WH3); 2.6 : 1 is 72 % of the bar. · [fandom][fw-lead], Steam · medium.
   - Ours: modelled (`sim.json` `morale.collapse`: −120 at enemy / own strength 2.6 and own 22 % of
-    the start, strength = cost × health of the units not shattered, routing ones included). In the
+    the start; a unit's strength is its combat potential from the DB, as the recorded `strategic_value`:
+    (`melee_cp` + the abilities' potential + `missile_cp` × the ammunition curve) × health — the General 950,
+    the Warlord 900; routers at 0.5 in the side's sum, shattered units 0; 89 recorded battles: error
+    0.01–0.04 %, the onset in the same second in 0.94 of cases, `build/movelords/cp`). Before: In the
     network's gate battles (14, 02.10.2026) the Skaven armies collapsed all at once (every unit's
     `MoralePercent` −1…−2.7 within 1–2 s) at strength 0.31–0.42 of the start and enemy / own
     1.2–1.9 by that measure (standing units only: 0.12–0.26 and 1.7–5.9): the rule with these numbers

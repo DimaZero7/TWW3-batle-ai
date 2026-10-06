@@ -58,7 +58,7 @@
 | `--range-mode fire_at_will\|attack\|damage` | archer-range | Когда лучники начинают стрелять при разной глубине блока; `damage` — урон по бесстрашной цели на 70–120 м |
 | `--damage-rotate N` | archer-range `damage` | Сдвинуть дистанции на N полос (та же дистанция на другом грунте) |
 | `--swarm infantry\|lords\|all\|damage`, `--repeats N` | lord-swarm | Пехота вокруг каждого лорда, другой лорд (с отрядами) на нём, всё вместе или `damage` — один отряд спереди (мечники или большие мечи на военачальника, кланкрысы или штурмкрысы на генерала: урон за удар, [урон](../game/mechanics/melee.md)); каждая раскладка N раз (2). Замеры каждые 0,2 с (`--tick-ms`) |
-| `--probe-plan charge\|hit`, `--probe-battle N` | charge-probe | План [зонда рукопашной](../apps/entries.md#charge_probe) и номер его боя (с 1). Замер каждые 0,5 с |
+| `--probe-plan charge\|hit\|move`, `--probe-battle N` | charge-probe | План [зонда рукопашной](../apps/entries.md#charge_probe) и номер его боя (с 1). Замер каждые 0,5 с |
 | `--plan` | move-probe | План из `config/move-plans/<имя>.json` (по умолчанию `hamlet`) |
 | `--capture` | roster-capture | Другой список отрядов вместо `config/roster/capture.json` |
 | `--scenario` | все | Другой файл из `scenarios/` вместо сценария цели |

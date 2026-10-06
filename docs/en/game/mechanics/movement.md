@@ -14,8 +14,24 @@ Ours: [pace and fatigue](../units/pace.md), [simulator](../../training/simulator
 - **Hidden fields per entity** (`battle_entities`): `charge_speed`, `flying_charge_speed`,
   `acceleration`, `deceleration`, `turn_speed`, `combat_reaction_radius`, and the charge distances
   `charge_distance_commence_run`, `_adopt_charge_pose`, `_pick_target`. · [twwstats][tws] · high.
-  - Ours: the passports carry walk, run, charge speed, acceleration and deceleration; the simulator
-    has no turn rate out of melee ("Not modelled" in `simulator.md`). **Gap**: `turn_speed` exists.
+  - Ours: the passports carry walk, run, charge speed, acceleration, deceleration and a model's turn rate
+    (`speed.turn_deg_s` from `battle_entities` turn_rate: infantry and the General 120 °/s, archers and the
+    Warlord 180, militia 240). A unit on the move turns to its point at it and runs only the way it faces
+    (speed × cos of the angle, standing beyond 90°); a standing lord turns at it too
+    ([turning](#turning-on-the-move-probe)).
+
+<a id="turning-on-the-move-probe"></a>
+- **Turning on the move and in place (the turning probe, `build/movelords`).** No game rule for a formation
+  was found online (CA bugs 8606, 6374: a formation pivots on a point near its edge, men circle while
+  re-forming). The probe (1 battle, 0.25 s samples, soldier places): spearmen sent at a run to a point 150 m
+  behind them **about-face where they stand** — every man turns, the front rank becomes the back (each man's
+  place along the front before and after: correlation −0.98), the unit's bearing turns 180° in ~1 s; the men's
+  centre reaches the run after 2 s (0.45 / 1.1 / 2.3 / 3.0 m/s at 0.5 / 1 / 1.5 / 2 s). To a point 120 m to the
+  side — 2.3 m/s at 1.3 s, the run at 2 s. Lords on a move order turn at the model's rate (the General ~120 °/s,
+  the Warlord ~200 °/s) and move off after 1.2 s. A facing order in place (`goto_location_angle_width`):
+  spearmen 90° in 5–6 s (the formation re-forms, men walk ~8 m), 180° in 4.8 s (an about-face); the General
+  ~110 °/s after ~0.7 s, the Warlord ~75 °/s — slower than on a move order and than the database's 180
+  (**open**). · probe · high.
 - **Charge speed** is ~20–40 % above run speed (a Cold One rider measured at ~10 m/s against card
   6.8). Units switch to it 20–60 m from the target (Cold Ones 40 m; Chaos Knights speed at 40 m,
   pose at 35 m); typical ~35 m. · [charge speed][chspeed], [charge distance][chdist] · medium.

@@ -815,6 +815,7 @@ class TestMorale:
         st = face_off(SPEAR, SLAVE)
         u = st.u
         u["cost"][:] = 100
+        u["cp_fixed"][:] = 100                  # the strength is the combat potential (morale.collapse strength cp)
         u["hp"][:] = 0.2
         assert not bool(morale.army_collapse(u, P).any())  # both depleted, neither outmatched
         u["hp"][0, 1] = 1
@@ -1535,15 +1536,16 @@ class TestInnateEffects:
         assert share[0] == pytest.approx(rout, rel=0.01) and share[H] == pytest.approx(1.1 * rout, rel=0.01)
 
     def test_single_entity_weakens_a_lord_below_a_quarter_of_his_health_unless_left_out(self):
-        """sim.json effects.off leaves Single Entity out (the recordings show no such speed drop); the
-        mechanism itself, with the switch empty: below 25 % health, speed x0.9 and damage x0.8."""
+        """Single Entity (Wounds, on since 06.10.2026: the recordings show it 5-6 s after a lord falls below 25 %):
+        on, the effect's initial cooldown (5 s) after health first falls below a quarter, speed x0.9 and damage x0.8;
+        sim.json effects.off can still leave it out."""
         import dataclasses
         import json
         sim = json.loads(json.dumps(P.sim))
-        assert "wh3_main_unit_passive_single_entity" in sim["effects"]["off"]
-        sim["effects"]["off"] = []
+        assert "wh3_main_unit_passive_single_entity" not in sim["effects"]["off"]
+        sim["effects"]["off"] = ["wh3_main_unit_passive_single_entity"]
         Q = dataclasses.replace(P, sim=sim)
-        for params, on in ((Q, True), (P, False)):
+        for params, on in ((P, True), (Q, False)):
             st = scenario.build([army([(GENERAL, -100, 0, 90, True)], [(WARLORD, 100, 0, 270, True)])], params)
             H = st.N // 2
             u = st.u
@@ -1551,6 +1553,10 @@ class TestInnateEffects:
             _, a = innate(st, params=params)
             assert float(a["damage"][0, H]) == dmg
             u["hp"][0, H] = 0.2
+            u["low_s"][0, H] = 4.5                       # below a quarter for 4.5 s: not yet
+            _, a = innate(st, params=params)
+            assert float(a["damage"][0, H]) == dmg
+            u["low_s"][0, H] = 5.0
             _, a = innate(st, params=params)
             k = (0.8, 0.9) if on else (1.0, 1.0)
             assert float(a["damage"][0, H]) == pytest.approx(k[0] * dmg) and float(a["run"][0, H]) == pytest.approx(k[1] * run)
@@ -1617,13 +1623,12 @@ def melee_activity(n, **flags):
 
 
 def test_melee_tires_only_under_an_attack_order():
-    # single entity +15 (fatigue.calibration.single_combat), formation +13.7 a tick with the order; without it
-    # walking -1 or idle -18
+    # single entity the database's +19, formation +13.7 a tick with the order; without it walking -1 or idle -18
     u = {"fatigue": torch.full((4,), 15000.), "fat": torch.zeros(4)}
     activity = melee_activity(4, attack=[True, True, False, False], single=[True, False, True, False],
                               walking=[False, False, True, False])
     fatigue.step(u, activity, calibrated_fatigue(), 1.)
-    assert u["fatigue"].tolist() == pytest.approx([15150., 15137., 14990., 14820.])
+    assert u["fatigue"].tolist() == pytest.approx([15190., 15137., 14990., 14820.])
 
 
 def test_charging_tires_only_under_an_attack_order():
@@ -2061,13 +2066,13 @@ class TestLordFragility:
                                                                                    rel=1e-3)
 
     def test_a_lord_tires_slower_in_melee_and_the_charge_costs_while_the_caller_says(self):
-        # single entity in melee: single_combat (15) a tick, a formation 13.7; the charge (+34) for both while
+        # single entity in melee: the database's 19 a tick, a formation 13.7; the charge (+34) for both while
         # `charging` (battle.py: the first fatigue.calibration.charge_s seconds after the charge's first blow).
         u = {"fatigue": torch.full((4,), 15000.), "fat": torch.zeros(4)}
         activity = melee_activity(4, attack=[True] * 4, single=[True, True, False, False],
                                   charging=[True, False, True, False])
         fatigue.step(u, activity, calibrated_fatigue(), 1.)
-        assert u["fatigue"].tolist() == pytest.approx([15340., 15150., 15340., 15137.])
+        assert u["fatigue"].tolist() == pytest.approx([15340., 15190., 15340., 15137.])
 
 
 def _keep(st):

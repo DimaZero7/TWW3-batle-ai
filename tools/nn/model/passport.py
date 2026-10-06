@@ -118,6 +118,25 @@ def cost(keys, passports=None):
     return np.array([passports[k].get("multiplayer_cost", 0) if k else 0 for k in keys], dtype=np.float32)
 
 
+def combat_potential(keys, passports=None, abilities=None):
+    """(fixed, missile) [len(keys)] float32: the database's combat potential per unit (0 for padding) - main_units
+    melee_cp + its abilities' cp (config/nn/abilities.json cp), and missile_cp (counts by the ammunition left): the
+    simulator's cp_fixed / cp_missile (tools/nn/sim/params.py, the army destruction's strength). A passport without
+    combat_potential counts its cost as fixed."""
+    passports = passports or load()
+    if abilities is None:
+        path = PASSPORTS.parent / "abilities.json"
+        abilities = json.loads(path.read_text(encoding="utf-8"))["abilities"] if path.exists() else {}
+    fixed, missile = [], []
+    for k in keys:
+        p = passports[k] if k else {}
+        cp = p.get("combat_potential")
+        abil = sum(sum((abilities.get(a) or {}).get("cp") or (0, 0)) for a in p.get("abilities") or ())
+        fixed.append((cp["melee"] if cp else p.get("multiplayer_cost", 0)) + abil if k else 0)
+        missile.append(cp["missile"] if cp and k else 0)
+    return np.array(fixed, dtype=np.float32), np.array(missile, dtype=np.float32)
+
+
 def lords(keys, passports=None):
     """True for the army's general (caste lord) per unit; False for padding."""
     passports = passports or load()
