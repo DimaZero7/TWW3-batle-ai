@@ -19,6 +19,9 @@
 -- config.enemy_ai = 'scripted' takes side 2 from the game's AI the same way (the lord duel: the
 -- other lord under one plain attack order); absent, side 2 is the game's AI. A scripted unit gets its
 -- attack again only when the engine dropped it: not in melee, no target, for M.SCRIPTED_LOST_MS.
+-- config.observe = true adds the human's observer (apps.telemetry.observer_adapter) to any mode, without
+-- the soldiers; config.cards = true also records every unit's card on change (nn_card), both sides
+-- (the lord against the game's AI: tools/nn/lord_ai.py).
 -- Each side may have its own army (tools/nn/scenario.py: named arenas).
 -- Every tick 'nn_sample' records every unit of both sides (full view: trusted
 -- research telemetry); 'nn_final' is the last such record.
@@ -335,6 +338,18 @@ function M.main(bm, config, globals)
         end
     end
 
+    -- The observer over every unit of both sides (the human's battle, or config.observe).
+    local function observe(soldiers_every)
+        if state.observer then return end
+        local units = {}
+        for side = 1, 2 do
+            for _, it in ipairs(state.sides[side]) do units[#units + 1] = it end
+        end
+        state.observer = observer.new({units = units, alliances = state.alliances, cco = cco, emit = emit,
+            now_ms = function() return bm:time_elapsed_ms() - started_ms end,
+            soldiers_every = soldiers_every, cards = config.cards == true})
+    end
+
     local function hand_over()
         local own_units, enemy_units = {}, {}
         for _, it in ipairs(state.sides[1]) do own_units[#own_units + 1] = it.unit end
@@ -344,13 +359,7 @@ function M.main(bm, config, globals)
             return
         end
         if config.own_ai == 'human' then
-            local units = {}
-            for side = 1, 2 do
-                for _, it in ipairs(state.sides[side]) do units[#units + 1] = it end
-            end
-            state.observer = observer.new({units = units, alliances = state.alliances, cco = cco, emit = emit,
-                now_ms = function() return bm:time_elapsed_ms() - started_ms end,
-                soldiers_every = config.soldiers_every})
+            observe(config.soldiers_every)
             emit('own_ai', {mode = 'human', own_ai = config.own_ai, soldiers_every = config.soldiers_every})
             return
         end
@@ -383,6 +392,8 @@ function M.main(bm, config, globals)
         end)
         hand_over()
         if config.enemy_ai == 'scripted' then scripted_start(2) end
+        if config.observe then observe(0) end
+        if state.observer then state.observer.changes() end
         last_reissue = bm:time_elapsed_ms()
         state.stall = battle_services.new_stall_detector(config.stall_ms)
         emit('start', {speed = config.speed, timeout_ms = config.timeout_ms, deadline_s = config.deadline_s})

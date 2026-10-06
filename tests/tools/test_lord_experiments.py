@@ -1,4 +1,4 @@
-"""tools.nn.lord_fall and tools.nn.lord_duel: the battles' layout, the builds, the plans and the tables."""
+"""tools.nn.lord_fall, tools.nn.lord_duel and tools.nn.lord_ai: the battles' layout, the builds, the plans and the tables."""
 import json
 import math
 
@@ -6,7 +6,7 @@ import pytest
 
 from tools import build
 from tools import config as project
-from tools.nn import lord_duel, lord_fall
+from tools.nn import lord_ai, lord_duel, lord_fall
 from tools.nn import scenario as nn_scenario
 
 
@@ -220,3 +220,107 @@ class TestLordDuelTable:
         assert m["side_trade"] == pytest.approx((0.24 + 0.36) / 2 - (0.12 + 0.24) / 2)
         (row,) = lord_duel.summary([m])
         assert (row["variant"], row["own_on_lord"], row["order_switches"]) == ("escort", 0.608, 2.0)
+
+
+class TestLordAi:
+    @pytest.mark.parametrize("enemy,role", [("game", "attack"), ("game", "defend"), ("scripted", "attack")])
+    def test_build_side_2_the_game_ai_or_the_script_and_everything_recorded(self, tmp_path, monkeypatch, enemy, role):
+        monkeypatch.setattr(project, "BUILD", tmp_path)
+        monkeypatch.setattr(lord_ai, "ROOT", tmp_path / "lord-ai")
+        assert build.main(["lord-ai", "--duel", "skv", "--own-role", role, "--duel-enemy", enemy]) == 0
+        cfg = json.loads((tmp_path / "lord-ai" / "manifest.json").read_text(encoding="utf-8"))["config"]
+        assert (cfg["own_ai"], cfg["duel_enemy"], cfg["own_role"], cfg["duel"]) == ("scripted", enemy, role, "skv")
+        assert cfg.get("enemy_ai") == ("scripted" if enemy == "scripted" else None)   # absent: the game's AI
+        assert cfg["observe"] is True and cfg["cards"] is True and "decide_ms" not in cfg
+        assert cfg["timeout_ms"] == 900_000
+        xml = (tmp_path / "lord-ai" / f"lord_duel_skv_{role}.xml").read_text(encoding="utf-8")
+        assert xml.count("wh2_main_skv_cha_warlord_0") == 2
+        assert lord_ai.mode_of(cfg) == ("ai" if enemy == "game" else "control")
+
+    def test_build_refuses_a_network_or_a_planner(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(project, "BUILD", tmp_path)
+        monkeypatch.setattr(lord_ai, "ROOT", tmp_path / "lord-ai")
+        with pytest.raises(SystemExit):
+            build.main(["lord-ai", "--own-ai", "net"])
+
+    def test_plan(self):
+        p = lord_ai.plan(ai=4, control=2)
+        assert len(p) == 12 and sum(b[1] == "game" for b in p) == 8
+        assert [b[2] for b in p if b[:2] == ("emp", "game")] == ["attack", "defend", "attack", "defend"]
+        assert {b[2] for b in p if b[1] == "scripted"} == {"attack"}
+
+    def test_old_duels_count_only_as_scripted_solo_controls(self):
+        assert lord_ai.mode_of({"own_ai": "scripted", "enemy_ai": "scripted"}) == "control"
+        assert lord_ai.mode_of({"own_ai": "net", "enemy_ai": "scripted"}) is None
+        assert lord_ai.mode_of({"own_ai": "scripted", "variant": "escort"}) is None
+
+
+def ai_run(folder, enemy, rate_on_own, rate_on_enemy, ability_at=None):
+    """Lords in melee from 10 s to 70 s, the health falling linearly; the enemy lord's card and (ability_at)
+    his ability used then: ready true -> false, the phase in his effects for 10 s, his damage card up."""
+    cfg = {"duel": "emp", "own_ai": "scripted", "duel_enemy": enemy, "own_role": "attack"}
+    if enemy == "scripted":
+        cfg["enemy_ai"] = "scripted"
+    rows = []
+    for k in range(0, 81):
+        m = 10 <= k < 70
+        d = max(0, min(k, 70) - 10)
+        own = {"n": "own_lord", "hp": 1.0 - rate_on_own * d / 100, "m": m, "bf": 20 <= k < 30}
+        en = {"n": "enemy_lord", "hp": 1.0 - rate_on_enemy * d / 100, "m": m and k != 40}
+        rows.append({"event": "nn_sample" if k < 80 else "nn_final", "t": 1000 * k, "units": [own, en]})
+    card = lambda dmg: [{"k": "stat_melee_attack", "v": 55, "b": 55}, {"k": "stat_weapon_damage", "v": dmg, "b": 430}]
+    rows += [{"event": "nn_card", "t": 0, "u": "own_lord", "side": 1, "stats": card(430), "rank": 1, "xp": 0},
+             {"event": "nn_card", "t": 0, "u": "enemy_lord", "side": 2, "stats": card(430), "rank": 1, "xp": 0},
+             {"event": "nn_ability_ready", "t": 0, "u": "enemy_lord", "side": 2, "key": "x_abilities_rage", "ready": True},
+             {"event": "nn_effects", "t": 0, "u": "enemy_lord", "side": 2, "fx": []}]
+    if ability_at is not None:
+        rows += [{"event": "nn_ability_ready", "t": ability_at * 1000, "u": "enemy_lord", "side": 2,
+                  "key": "x_abilities_rage", "ready": False},
+                 {"event": "nn_effects", "t": ability_at * 1000, "u": "enemy_lord", "side": 2, "fx": ["x_abilities_rage"]},
+                 {"event": "nn_card", "t": ability_at * 1000, "u": "enemy_lord", "side": 2, "stats": card(537)},
+                 {"event": "nn_effects", "t": (ability_at + 10) * 1000, "u": "enemy_lord", "side": 2, "fx": []}]
+    rows.sort(key=lambda r: r["t"])
+    rows.append({"event": "result", "status": "completed", "winner": 2})
+    return write_run(folder, cfg, rows)
+
+
+class TestLordAiTable:
+    def test_rates_abilities_cards_and_behaviour(self, tmp_path):
+        m = lord_ai.measure(lord_ai.load_run(ai_run(tmp_path / "a", "game", 1.0, 0.5, ability_at=15)))
+        # the step 40 -> 41 has the enemy out of melee: 59 duel seconds
+        assert m["mode"] == "ai" and m["contact_s"] == 10 and m["duel_s"] == 59
+        assert m["on_own"] == pytest.approx(1.0) and m["on_enemy"] == pytest.approx(0.5)
+        assert m["fresh_s"] == 30 and m["fresh_on_own"] == pytest.approx(1.0)
+        assert m["enemy_reengaged"] == 1 and m["own_rear_share"] == pytest.approx(10 / 59, abs=1e-3)
+        assert m["enemy_abilities"] == [("x_abilities_rage", 15.0, 5.0)] and m["own_abilities"] == []
+        assert m["enemy_effects"] == ["x_abilities_rage"] and m["ability_on_s"] == 10
+        assert m["enemy_card"]["stats"]["stat_weapon_damage"] == (430, 430) and m["enemy_card"]["rank"] == 1
+        assert m["enemy_card_changes"] == [(15.0, "stat_weapon_damage", 537)] and m["own_card_changes"] == []
+
+    def test_an_ai_ability_shows_by_its_phase_alone_and_passives_are_no_uses(self):
+        # The game's AI side: can_perform_special_ability stays true; the phase in the effects is the use.
+        windows = [(0.0, ["x_lord_passive_hold"]), (13.0, ["x_lord_passive_hold", "x_abilities_seek"]),
+                   (38.0, ["x_lord_passive_hold"]), (98.0, ["x_abilities_seek", "x_unit_passive_single"])]
+        ready = [{"u": "enemy_lord", "t": 0, "key": "x_abilities_seek", "ready": True}]
+        assert lord_ai.ability_uses(ready, windows, "enemy_lord") == [(13.0, "x_abilities_seek"), (98.0, "x_abilities_seek")]
+        # ours: a ready true -> false without the phase in the effects still counts
+        ready += [{"u": "own_lord", "t": 0, "key": "x_abilities_stand", "ready": True},
+                  {"u": "own_lord", "t": 20000, "key": "x_abilities_stand", "ready": False}]
+        assert lord_ai.ability_uses(ready, [], "own_lord") == [(20.0, "x_abilities_stand")]
+
+    def test_the_ratio_ai_over_control(self, tmp_path):
+        ai = [lord_ai.measure(lord_ai.load_run(ai_run(tmp_path / f"a{k}", "game", 1.2, 0.6))) for k in range(3)]
+        ctrl = [lord_ai.measure(lord_ai.load_run(ai_run(tmp_path / f"c{k}", "scripted", 0.8, 0.6))) for k in range(2)]
+        (row,) = lord_ai.summary(ai + ctrl)
+        assert (row["n_ai"], row["n_control"]) == (3, 2)
+        assert row["ratio_on_own"] == pytest.approx(1.5) and row["ratio_lo"] == pytest.approx(1.5)
+        assert row["ratio_on_enemy"] == pytest.approx(1.0)
+        assert row["ai_enemy_wins"] == 3
+
+    def test_report_writes_its_json(self, tmp_path, capsys):
+        ai_run(tmp_path / "runs" / "a", "game", 1.0, 0.5, ability_at=15)
+        rows, table = lord_ai.report(lord_ai.runs(tmp_path / "runs"), out=tmp_path / "analysis.json")
+        assert len(rows) == 1 and table[0]["ai_abilities"]["x_abilities_rage"]["uses"] == 1
+        assert json.loads((tmp_path / "analysis.json").read_text(encoding="utf-8"))["battles"]
+        out = capsys.readouterr().out
+        assert "weapon_damage=430/430" in out and "(15.0, 'stat_weapon_damage', 537)" in out

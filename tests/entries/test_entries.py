@@ -665,6 +665,39 @@ class TestNnArena:
         assert [r["side"] for r in rows if r["event"] == "scripted_side"] == [1, 2]
         assert list(lua.eval("bm.planner_log").values()) == []
 
+    def test_lord_ai_side_2_stays_the_game_ai_and_both_sides_cards_and_abilities_are_recorded(self, lua, tmp_path):
+        # tools/nn/lord_ai.py: our side scripted, side 2 the game's AI; observe + cards on both sides.
+        lua.execute(self.SETUP + """
+            CONFIG.own_ai, CONFIG.observe, CONFIG.cards = 'scripted', true, true
+            enemy[1].abilities = {rage = true}
+            fake.cco['uid_enemy_lord'] = {CharacterRank = 1, HasCharacterRank = true, ExperienceLevel = 0,
+                ['ActiveEffectList.Size'] = 1, ['ActiveEffectList.At(0).PhaseRecordContext.Key'] = 'rage'}
+            local state = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            assert(not enemy[1].controlled and own[1].controlled)
+            bm:tick(); bm:tick()
+            fake.cco['uid_enemy_lord']['UnitDetailsContext.StatList.At(0).Value'] = 45   -- a buff on the card
+            enemy[1].abilities = {rage = false}                                          -- used
+            for _ = 1, 3 do bm:tick() end
+            bm.outcome, bm.winner = true, 2
+            bm:tick()
+            assert(state.finished and state.observer ~= nil)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        assert [r["side"] for r in rows if r["event"] == "scripted_side"] == [1]
+        cards = [r for r in rows if r["event"] == "nn_card"]
+        assert sorted(r["u"] for r in cards if r["t"] == 0) == ["enemy_lord", "enemy_spear_1", "own_lord", "own_spear_1"]
+        lord = [r for r in cards if r["u"] == "enemy_lord"]
+        assert len(lord) == 2 and (lord[0]["rank"], lord[0]["has_rank"], lord[0]["xp"]) == (1, True, 0)
+        assert [s["v"] for s in lord[0]["stats"]] == [30, 30] and [s["k"] for s in lord[0]["stats"]] == [
+            "stat_armour", "stat_morale"]
+        assert [s["v"] for s in lord[1]["stats"]] == [45, 30] and lord[1]["t"] > 0
+        ready = [(r["ready"], r["side"]) for r in rows if r["event"] == "nn_ability_ready" and r["u"] == "enemy_lord"]
+        assert ready == [(True, 2), (False, 2)]
+        assert [r["fx"] for r in rows if r["event"] == "nn_effects" and r["u"] == "enemy_lord"] == [["rage"]]
+        assert not [r for r in rows if r["event"] == "nn_soldiers"]
+
     def test_an_unknown_own_ai_is_an_error(self, lua, tmp_path):
         lua.execute(self.SETUP + """
             CONFIG.own_ai = 'dance'

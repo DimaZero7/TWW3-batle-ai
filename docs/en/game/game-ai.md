@@ -88,6 +88,42 @@ units charged one unit at a time, spread over up to 50 s.
 - Leads its units back into battle after they rally.
 - Under arrows its units stand idle only 0–3 % of the time they are shot at.
 
+## The game AI's lord in a duel
+
+Is a lord under the game's AI stronger than a plain lord? No. Measured 06.10.2026, Normal difficulty, the
+True Sight mod ([lord_ai](../apps/entries.md#lord_ai), `build/lord-ai/`): two lords of one type alone on
+the field, ours under one attack order with no abilities, theirs under the game's AI (6 battles a type)
+or the same order (the control, 4 battles a type). The rate: a lord's health lost a second while both
+are in melee and neither routs, %/s.
+
+| | Empire General | Skaven Warlord |
+|---|---|---|
+| Theirs on ours: AI / control | 0.71 / 0.70 — **1.02** [0.83, 1.25] | 0.26 / 0.34 — **0.75** [0.57, 0.99] |
+| First 30 s of the duel: AI / control | 0.69 / 0.75 — 0.93 [0.53, 1.96] | 0.35 / 0.43 — 0.81 [0.41, 1.66] |
+| Ours on theirs: AI / control | 0.60 / 0.63 — 0.94 | 0.28 / 0.23 — 1.22 |
+| Duel seconds: AI / control | 627 / 454 | 1449 / 868 |
+| The AI's abilities | Foe-Seeker only (speed x1.25): 0-1 s after contact, again as soon as ready (85-86 s later); Stand Your Ground never | Verminous Valour only (speed x1.25, +8 morale): 0-1 s after contact, again every 77-78 s; Deadly Onslaught and Rally never |
+
+In brackets the 95 % bootstrap interval over battles. Both types together: 0.87 [0.73, 1.04].
+
+- **The same stats.** The AI lord's card (CCO `UnitDetailsContext.StatList`) at the start equals ours to
+  the number: rank 1, experience 0, health 4068; the General armour 85, attack 55, defence 45, damage 430,
+  charge 40, morale 70; the Warlord 90, 50, 55, 400, 35, 60. Normal difficulty does not change the AI's
+  stats. Later the card changes alike for the AI and the control (fatigue, morale, Hold the Line +5
+  defence). The CCO card refreshes about every 40 s, so a short buff cannot be caught on it - abilities
+  show in the active effects (`nn_effects`); `can_perform_special_ability` stays true on an AI unit.
+- **The AI's abilities are speed only.** They add no damage, and the rate on ours with them on is the same
+  (the General 0.70 with Foe-Seeker, the Warlord 0.33 with Valour).
+- **Behaviour.** The AI Warlord leaves melee and comes back more often (5.2 times a battle, the control
+  1.5) and in the end hits less. The AI does not go round to our lord's rear (share of seconds with the
+  rear threatened <= 0.01).
+
+**What it means for the simulator.** The extra x1.4 of the AI lord's damage on the network's lord in
+the gate battles is not an AI advantage. The same duel in the simulator (a replay of these 20 battles,
+8 copies each): General v General 0.38-0.40 %/s both ways against 0.60-0.71 in the game (x0.56-0.63),
+Warlord v Warlord 0.33-0.36 against 0.23-0.34 (matches). So the Empire lord's melee damage on a lord is
+too low, whoever commands him (`build/lord-ai/simduel.json`).
+
 ## CA's planner weaknesses and our fixes
 
 Found in arena recordings, fixed in `apps/orders/planner_adapter.lua`

@@ -26,6 +26,7 @@ Building never touches the game; it only writes `build/<target>/`.
 | `human` | `entries.nn_arena` (`own_ai` `human`) | an arena battle in `build/human/` ([a battle played by a human](run.md#a-battle-played-by-a-human)) | `tww3_bai_human.pack` |
 | `lord-fall` | `entries.lord_fall` | `scenarios/lord_fall.xml` (Empire) or `build/lord-fall/lord_fall_<faction>.xml` (`tools/nn/lord_fall.py`) | `tww3_bai_lord_fall.pack` |
 | `lord-duel` | `entries.nn_arena` (`enemy_ai` `scripted`) | `build/lord-duel/lord_duel_<lord>_<role>.xml` (`tools/nn/lord_duel.py`; `scenarios/lord_duel.xml` by default) | `tww3_bai_lord_duel.pack` |
+| `lord-ai` | `entries.nn_arena` (`own_ai` `scripted`, side 2 the game's AI; `observe`, `cards`) | `build/lord-ai/lord_duel_<lord>_<role>.xml` (`tools/nn/lord_ai.py`) | `tww3_bai_lord_ai.pack` |
 | `map-capture` | `entries.map_capture` | `scenarios/map_capture.xml` | `tww3_bai_map_capture.pack` |
 
 What every entry does: [entry points](../apps/entries.md).
@@ -42,8 +43,9 @@ What every entry does: [entry points](../apps/entries.md).
 | `--window MIN_X MAX_X MIN_Z MAX_Z` | map-capture | Capture only this part of the map |
 | `--own-ai attack\|defend` | nn-arena | Our side under CA's planner attacks (the game's AI defends) or defends (the game's AI attacks) |
 | `--own-ai net` | nn-arena, lord-duel | The network in the companion commands our side ([watching the network](watch.md)); the default of `lord-duel` |
-| `--own-ai scripted` | lord-duel | Our lord under one attack order, like theirs (the duel's control) |
-| `--duel emp\|skv` | lord-duel | Both lords Empire Generals or Skaven Warlords ([lord duel](../apps/entries.md#lord_duel)); battle limit 900 s by default |
+| `--own-ai scripted` | lord-duel, lord-ai | Our lord under one attack order, like theirs (the duel's control); the only mode of `lord-ai` |
+| `--duel-enemy game\|scripted` | lord-ai | Their lord under the game's battle AI (default) or under one attack order (the control) ([the lord against the game's AI](../apps/entries.md#lord_ai)) |
+| `--duel emp\|skv` | lord-duel, lord-ai | Both lords Empire Generals or Skaven Warlords ([lord duel](../apps/entries.md#lord_duel)); battle limit 900 s by default |
 | `--duel-variant solo\|escort` | lord-duel | The lords alone, or each with 2 infantry units of his faction (the scripted lord on the lord, infantry on infantry) |
 | `--faction emp\|skv\|vmp`, `--treatment kill\|rout\|none` | lord-fall | Whose army (its fearless opponent: Skaven for the Empire, else the Empire) and what happens to its lord: killed, routed or nothing (the control) ([lord fall](../apps/entries.md#lord_fall)). A sample every 0.5 s |
 | `--own-role attack\|defend` | nn-arena `net` | The network attacks (the game's AI defends and wins when time is out) or defends (default: the game's AI attacks) |

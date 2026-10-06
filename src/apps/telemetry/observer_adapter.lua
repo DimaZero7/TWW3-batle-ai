@@ -10,10 +10,14 @@
 --   changes()      emits on change only, as the network's bridge does: nn_effects (a unit's active
 --                  phases, CCO ActiveEffectList) and nn_ability_ready (a unit's active ability:
 --                  can_perform_special_ability turned true or false - a use shows as true -> false),
---                  both sides, with the side;
+--                  both sides, with the side; with opts.cards also nn_card (the unit card as the
+--                  player sees it, CCO UnitDetailsContext.StatList: key, Value, DisplayedValue,
+--                  ValueBase a row, plus CCO CharacterRank, HasCharacterRank, ExperienceLevel,
+--                  HealthMax) on change, so an ability's or a skill's effect on the stats shows;
 --   soldiers()     every soldiers_every-th call: nn_soldiers, every soldier's x, z in decimetres
 --                  of every unit (CCO ManList; ~50 ms for 2000 men, so not every second).
 local services = require('apps.bridge.services')
+local card = require('apps.units.card_adapter')
 local formation = require('apps.units.formation_adapter')
 local value = require('apps.core.value')
 
@@ -21,6 +25,8 @@ local M = {}
 
 M.CCO_NUMBERS = {dir = 'DamageInflictedRecently'}
 M.CCO_BOOLEANS = {uma = 'IsUnderMissileAttack', td = 'IsTakingDamage'}
+-- The card's fields outside the stat list (nn_card).
+M.CARD_CCO = {rank = 'CharacterRank', has_rank = 'HasCharacterRank', xp = 'ExperienceLevel', hpmax = 'HealthMax'}
 
 local function read(fn)
     local ok, v = pcall(fn)
@@ -35,9 +41,9 @@ local function round(v, k)
 end
 
 -- opts: units = {{name, unit, side}}, alliances = {side 1's, side 2's engine alliance},
--- cco(unit, field), emit(event, fields), now_ms(), soldiers_every (calls; 0 or nil: never).
+-- cco(unit, field), emit(event, fields), now_ms(), soldiers_every (calls; 0 or nil: never), cards (bool).
 function M.new(opts)
-    local by_name, owned, fx_was, ready_was = {}, {}, {}, {}
+    local by_name, owned, fx_was, ready_was, card_was = {}, {}, {}, {}, {}
     local calls = 0
     for _, it in ipairs(opts.units) do
         by_name[it.name] = it
@@ -72,8 +78,43 @@ function M.new(opts)
         return row
     end
 
+    -- The unit card: {stats = {{k, v, d, b}}, rank, has_rank, xp, hpmax} and its text for the change test.
+    local function card_row(u)
+        local function cco(field) return opts.cco(u, field) end
+        local row, parts = {}, {}
+        local stats = card.stats(opts.cco, u)
+        if stats.status == 'ok' then
+            row.stats = {}
+            for _, s in ipairs(stats.list) do
+                row.stats[#row.stats + 1] = {k = s.key, v = s.Value, d = s.DisplayedValue, b = s.ValueBase}
+                parts[#parts + 1] = table.concat({tostring(s.key), tostring(s.Value), tostring(s.DisplayedValue),
+                    tostring(s.ValueBase)}, ':')
+            end
+        else
+            row.stats = 'unavailable:' .. tostring(stats.reason)
+            parts[1] = row.stats
+        end
+        for key, field in pairs(M.CARD_CCO) do
+            local x = read(function() return cco(field) end)
+            if type(x) == 'number' or type(x) == 'boolean' or type(x) == 'string' then
+                row[key] = x
+                parts[#parts + 1] = key .. '=' .. tostring(x)
+            end
+        end
+        table.sort(parts)
+        return row, table.concat(parts, ';')
+    end
+
     function self.changes()
         for _, it in ipairs(opts.units) do
+            if opts.cards then
+                local row, text = card_row(it.unit)
+                if text ~= card_was[it.name] then
+                    card_was[it.name] = text
+                    row.t, row.u, row.side = opts.now_ms(), it.name, it.side
+                    opts.emit('nn_card', row)
+                end
+            end
             local fx = services.active_effects(function(field)
                 return read(function() return opts.cco(it.unit, field) end)
             end)

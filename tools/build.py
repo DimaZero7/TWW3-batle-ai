@@ -17,6 +17,7 @@ Usage:
     python -m tools.build lord-fall --faction skv --treatment kill   # the lord killed / routed (tools/nn/lord_fall.py)
     python -m tools.build lord-duel --duel emp   # our network's lord v a lord under one attack order (tools/nn/lord_duel.py)
     python -m tools.build lord-duel --duel skv --duel-variant escort   # the same, each lord with 2 infantry units
+    python -m tools.build lord-ai --duel skv --own-role defend   # a scripted lord v the game AI's lord (tools/nn/lord_ai.py)
 
 Output: build/<target>/ with the .pack, the bundled script and manifest.json.
 Install and launch with tools/launcher/launch.ps1.
@@ -131,6 +132,16 @@ TARGETS = {
         "folder": "tww3_bai",
         "scenario": "lord_duel.xml",
         "packed_scenario": "lord_duel.xml",
+    },
+    # The lord against the game's AI (entries.nn_arena, side 1 one scripted attack order, side 2 the game's
+    # battle AI or (the control) scripted; both lords' cards and abilities recorded): tools/nn/lord_ai.py.
+    "lord-ai": {
+        "entry": "entries.nn_arena",
+        "pack": "tww3_bai_lord_ai.pack",
+        "script": "tww3_bai_lord_ai",
+        "folder": "tww3_bai",
+        "scenario": "lord_duel.xml",
+        "packed_scenario": "lord_ai.xml",
     },
     "map-capture": {
         "entry": "entries.map_capture",
@@ -352,7 +363,9 @@ def main(argv=None):
     parser.add_argument("--treatment", choices=("kill", "rout", "none"), default="none",
                         help="lord-fall: the treated lord killed, routed, or left alone (the control)")
     parser.add_argument("--duel", choices=("emp", "skv"), default="emp",
-                        help="lord-duel: both lords Empire Generals or Skaven Warlords")
+                        help="lord-duel, lord-ai: both lords Empire Generals or Skaven Warlords")
+    parser.add_argument("--duel-enemy", choices=("game", "scripted"), default="game",
+                        help="lord-ai: the other lord under the game's battle AI, or under one attack order (the control)")
     parser.add_argument("--duel-variant", choices=("solo", "escort"), default="solo",
                         help="lord-duel: the lords alone, or each with 2 infantry units of his faction (escort)")
     parser.add_argument("--features", action="store_true",
@@ -365,14 +378,17 @@ def main(argv=None):
     if args.speed is None:
         args.speed = 1 if args.target == "human" else 20
     if args.timeout is None:
-        args.timeout = {"human": 3600, "lord-duel": 900}.get(args.target, 600)
+        args.timeout = {"human": 3600, "lord-duel": 900, "lord-ai": 900}.get(args.target, 600)
     if args.own_ai is None:
-        args.own_ai = "net" if args.army_seed is not None or args.target == "lord-duel" else "attack"
+        args.own_ai = ("scripted" if args.target == "lord-ai"
+                       else "net" if args.army_seed is not None or args.target == "lord-duel" else "attack")
     if args.target == "lord-duel" and args.own_ai not in ("net", "scripted"):
         parser.error("lord-duel: --own-ai net (the network) or scripted (the control)")
-    if args.own_ai == "scripted" and args.target != "lord-duel":
-        parser.error("--own-ai scripted is for lord-duel")
-    if args.own_role and args.own_ai not in ("net", "human") and args.target != "lord-duel":
+    if args.target == "lord-ai" and args.own_ai != "scripted":
+        parser.error("lord-ai: our lord is scripted (one attack order)")
+    if args.own_ai == "scripted" and args.target not in ("lord-duel", "lord-ai"):
+        parser.error("--own-ai scripted is for lord-duel and lord-ai")
+    if args.own_role and args.own_ai not in ("net", "human") and args.target not in ("lord-duel", "lord-ai"):
         parser.error("--own-role is for --own-ai net and the human target (the planner modes set our role themselves)")
     if args.soldiers_every < 0:
         parser.error("--soldiers-every must be 0 or more")
@@ -440,6 +456,12 @@ def main(argv=None):
             from tools.nn import lord_duel
             path, duel = lord_duel.build_config(args.duel, args.own_ai, args.own_role or "attack", args.decide_ms,
                                                 NET_POLL_MS, args.timeout, args.duel_variant)
+            run_config.update(duel)
+            if not args.scenario:
+                args.scenario = str(path)
+        if args.target == "lord-ai":
+            from tools.nn import lord_ai
+            path, duel = lord_ai.build_config(args.duel, args.own_role or "attack", args.duel_enemy, args.timeout)
             run_config.update(duel)
             if not args.scenario:
                 args.scenario = str(path)

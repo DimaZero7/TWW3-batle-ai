@@ -77,15 +77,23 @@ def write_scenario(kind="emp", path=SCENARIO, defender="enemy", duration_s=3600,
     return path
 
 
-def build_config(kind, own_ai, own_role, decide_ms, poll_ms, timeout_s, variant="solo"):
-    """The battle file (next to the build) and the entry's config (entries.nn_arena)."""
+def build_config(kind, own_ai, own_role, decide_ms, poll_ms, timeout_s, variant="solo", enemy_ai="scripted",
+                 root=None, record=False):
+    """The battle file (next to the build) and the entry's config (entries.nn_arena). enemy_ai 'game': side 2
+    is the game's own battle AI (tools/nn/lord_ai.py; no enemy_ai in the entry's config); record: the
+    observer (effects, abilities ready) and both sides' unit cards (nn_card) on change."""
     assert own_ai in ("net", "scripted"), own_ai
+    assert enemy_ai in ("scripted", "game"), enemy_ai
     a = arena(kind, variant)
     enemy_role = "defend" if own_role == "attack" else "attack"
-    path = ROOT / f"{a['name']}_{own_role}.xml"
+    path = (root or ROOT) / f"{a['name']}_{own_role}.xml"
     write_scenario(kind, path, "enemy" if enemy_role == "defend" else "own", max(3600, timeout_s + 60), variant)
-    config = dict(nn_scenario.run_config(a), duel=kind, variant=variant, own_ai=own_ai, enemy_ai="scripted",
+    config = dict(nn_scenario.run_config(a), duel=kind, variant=variant, own_ai=own_ai, duel_enemy=enemy_ai,
                   own_role=own_role, enemy_role=enemy_role)
+    if enemy_ai == "scripted":
+        config["enemy_ai"] = "scripted"
+    if record:
+        config.update(observe=True, cards=True)
     if variant == "escort":
         config["scripted_targets"] = "like"   # the scripted lord on the enemy lord, infantry on infantry
     if own_ai == "net":

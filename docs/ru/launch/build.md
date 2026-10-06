@@ -26,6 +26,7 @@
 | `human` | `entries.nn_arena` (`own_ai` `human`) | бой арены в `build/human/` ([бой, который играет человек](run.md#бой-который-играет-человек)) | `tww3_bai_human.pack` |
 | `lord-fall` | `entries.lord_fall` | `scenarios/lord_fall.xml` (Империя) или `build/lord-fall/lord_fall_<фракция>.xml` (`tools/nn/lord_fall.py`) | `tww3_bai_lord_fall.pack` |
 | `lord-duel` | `entries.nn_arena` (`enemy_ai` `scripted`) | `build/lord-duel/lord_duel_<лорд>_<роль>.xml` (`tools/nn/lord_duel.py`; `scenarios/lord_duel.xml` — по умолчанию) | `tww3_bai_lord_duel.pack` |
+| `lord-ai` | `entries.nn_arena` (`own_ai` `scripted`, сторона 2 — ИИ игры; `observe`, `cards`) | `build/lord-ai/lord_duel_<лорд>_<роль>.xml` (`tools/nn/lord_ai.py`) | `tww3_bai_lord_ai.pack` |
 | `map-capture` | `entries.map_capture` | `scenarios/map_capture.xml` | `tww3_bai_map_capture.pack` |
 
 Что делает каждая точка входа — [точки входа](../apps/entries.md).
@@ -42,8 +43,9 @@
 | `--window MIN_X MAX_X MIN_Z MAX_Z` | map-capture | Снять только этот участок карты |
 | `--own-ai attack\|defend` | nn-arena | Наша сторона под планировщиком CA атакует (ИИ игры обороняется) или обороняется (ИИ игры атакует) |
 | `--own-ai net` | nn-arena, lord-duel | Нашей стороной командует сеть в помощнике ([смотреть бой сети](watch.md)); у `lord-duel` — по умолчанию |
-| `--own-ai scripted` | lord-duel | Наш лорд под одним приказом атаки, как чужой (контроль дуэли) |
-| `--duel emp\|skv` | lord-duel | Оба лорда — генералы Империи или военачальники скавенов ([дуэль лордов](../apps/entries.md#lord_duel)); предел боя по умолчанию 900 с |
+| `--own-ai scripted` | lord-duel, lord-ai | Наш лорд под одним приказом атаки, как чужой (контроль дуэли); у `lord-ai` — единственный режим |
+| `--duel-enemy game\|scripted` | lord-ai | Чужой лорд под боевым ИИ игры (по умолчанию) или под одним приказом атаки (контроль) ([лорд против ИИ игры](../apps/entries.md#lord_ai)) |
+| `--duel emp\|skv` | lord-duel, lord-ai | Оба лорда — генералы Империи или военачальники скавенов ([дуэль лордов](../apps/entries.md#lord_duel)); предел боя по умолчанию 900 с |
 | `--duel-variant solo\|escort` | lord-duel | Лорды одни или у каждого ещё 2 отряда пехоты его фракции (скриптовый лорд — на лорда, пехота — на пехоту) |
 | `--faction emp\|skv\|vmp`, `--treatment kill\|rout\|none` | lord-fall | Чья армия (её бесстрашный противник: скавены для Империи, иначе Империя) и что с её лордом: убит, обращён в бегство или ничего (контроль) ([гибель лорда](../apps/entries.md#lord_fall)). Замер каждые 0,5 с |
 | `--own-role attack\|defend` | nn-arena `net` | Сеть атакует (ИИ игры обороняется и побеждает, когда время вышло) или обороняется (по умолчанию: ИИ игры атакует) |

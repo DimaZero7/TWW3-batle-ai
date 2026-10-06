@@ -235,6 +235,38 @@ mean health lost - ours).
 
 12 battles (4 network and 2 controls a lord type), ~2.5 min each with loading: ~30-35 min.
 
+<a id="lord_ai"></a>
+
+## lord_ai — a plain lord against a lord under the game's AI
+
+The question: does the game AI's lord hit harder than a plain lord of the same type, and why: stats
+(level, skills, difficulty), abilities or behaviour. The `lord-ai` build target is the entry
+[nn_arena](#nn_arena) in its own folder `build/lord-ai/`; the arena is the [lord duel](#lord_duel)'s (two
+lords of one type, mirrored, 100 m apart). Our lord is under script: one order to attack their lord, no
+abilities. Theirs is led by the game's battle AI (`--duel-enemy game`, no `enemy_ai` in the config) or,
+the control, by the same script (`--duel-enemy scripted`); the scripted-v-scripted battles of
+`build/lord-duel/runs` are controls too. Normal difficulty (the launcher), the True Sight mod as always.
+The config has `observe` and `cards`: both sides record `nn_effects`, `nn_ability_ready` and `nn_card`
+([observer_adapter](telemetry.md#observer_adapter)), so the AI lord's card (attack, defence, damage,
+armour, charge, morale, rank, experience) is read directly.
+
+```bash
+.venv/Scripts/python -m tools.nn.lord_ai plan
+.venv/Scripts/python -m tools.nn.lord_ai run --ai 4 --control 2
+.venv/Scripts/python -m tools.nn.lord_ai          # the table from build/lord-ai/runs and the build/lord-duel/runs controls
+```
+
+The default plan is 12 battles: for each lord type 4 against the game's AI (ours attacking and defending
+in turn) and 2 controls. Duel seconds: both lords in melee, neither routing. The rate on a lord: his
+health lost in duel seconds over their length, %/s; 'fresh': the first 30 duel seconds. Per battle: their
+lord's rate on ours and ours on theirs (all and fresh), the winner, how often their lord left melee and
+came back, the share of seconds ours has his rear threatened, their abilities (when, seconds after
+contact), their effects, both lords' first card and the changes of theirs. Per lord type: the pooled rate
+against the AI and in the control, the ratio AI / control with a 95 % bootstrap interval over battles.
+An ability's use: its phase appears in the active effects (`can_perform_special_ability` stays true on a
+unit of the game's AI) or, for ours, its ready turns true -> false. Writes `build/lord-ai/analysis.json`.
+Results: [the game AI's lord in a duel](../game/game-ai.md#the-game-ais-lord-in-a-duel).
+
 <a id="enemy_layout"></a>
 
 ## enemy_layout — how the game AI deploys and stands
@@ -288,6 +320,7 @@ the battle. The side that wins on timeout defends:
 - `scripted` (the `lord-duel` target, the control) — each unit of ours under script with one order to
   attack the nearest enemy; `enemy_ai` `scripted` takes side 2 from the game's AI the same way ([lord duel](#lord_duel));
   with `scripted_targets` `like` a lord attacks the nearest enemy lord, the others the nearest non-lord unit;
+  without `enemy_ai` side 2 stays the game's AI ([the lord against the game's AI](#lord_ai));
 - `human` (the `human` build target) — a human commands our side, the script gives no orders; the
   recording adds [observer_adapter](telemetry.md#observer_adapter); the game's AI attacks
   ([a battle played by a human](../launch/run.md#a-battle-played-by-a-human)).
