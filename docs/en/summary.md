@@ -86,16 +86,25 @@ the first 2 s after the charge blow), shooting 7.5, walking 3.4, idle −18; Foe
 Exhausted shares (replay of the 204 recordings): own 14.9 % (game 17.3 %), enemy 25.8 % (game 28.6 %);
 lords 13.6 / 25.3 % (game 22.0 / 22.9 %).
 
-**Check against the game** (`python -m tools.nn.sim.check`): every battle recorded in the game
-is replayed in the simulator from its recorded orders (8 copies with starts shifted up to 2 m,
-the outcome by majority) and measured by the same code as the game. The set of recordings is
-frozen. Three scores, higher is better:
+**Check against the game** (`python -m tools.nn.sim.check`, ~12 min on 8 CPU cores): every battle recorded in
+the game is replayed in the simulator from its recorded orders 19 times with starts shifted up to 2 m and
+measured by the same code as the game. The 19 copies are the simulator's forecast. The main score is **the share
+of game values inside the copies' 90 % interval** (`tools/nn/simskill.py`): 90 % for a simulator that matches the
+game, its noise included. Beside it the CRPSS skill (how much better the copies are than "the typical game value":
+0 no better, 100 % exact) and the old counts; 95 % confidence intervals in brackets ([how it is computed, the worst
+quantities, the old count's errors](training/simulator.md#the-checks-score-the-simulator-as-a-forecast)). The
+set of recordings is frozen.
 
-| Score | Now |
-|---|---:|
-| Mechanics: unit pairs and shooting within 20 % of the game | 24 / 54 (51 before the melee core; core 2 - 37; shooting by the rules - 29; morale by the rules - 24, movement and lords - 24: the spearmen-clanrats pair without the fitted −3 and the archers' target) |
-| Same winner: the game's AI against itself | 15 / 26 (20 before the core, the core 21, core 2 and shooting 18, morale 16, movement and lords 15: an arena with split copies) |
-| Same winner: the network against the game's AI (165 recordings now) | 137 / 165 (126 before the core, the core 127, core 2 and shooting 132, movement and lords 137, morale 132) |
+| Family | Inside 90 % | Skill | Old count |
+|---|---:|---:|---|
+| Mechanics: unit pairs and shooting (18 recordings) | 20 % (14-26) | -69 % (-108 to -7) | 25 / 54 within 20 % (without repeats 23 / 48; 24 before the charge fix; 51 before the melee core; core 2 - 37; shooting by the rules - 29; morale by the rules - 24) |
+| The game's AI against itself (28) | 35 % (30-41) | -52 % (-67 to -18) | same winner 16 / 26 (20 before the core, the core 21, core 2 and shooting 18, morale 16, movement and lords 15) |
+| The network against the game's AI (170) | 40 % (38-43) | 24 % (15-31) | same winner 139 / 169 (126 before the core, the core 127, core 2 and shooting 132, movement and lords 137) |
+| Gates: the network itself against ai_like (10 battles, 8 copies) | 80 % (76-84) | 7 % (-11 to 33) | - |
+
+The shortfall from 90 % comes mostly from the copies being too alike: their spread is a third of their miss (a
+hundredth in mechanics): the game is noisy, the simulator computes averages. The "same winner" count of
+coin-flip battles is noise: the same code on the GPU and the CPU gets different battles.
 
 Mechanics dropped from 51 to 37 not because of winners (all 12 pairs are as in the game) but because of
 pace: the first 15 s of formation contact are stronger in the game than the rule (the target loses

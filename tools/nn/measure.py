@@ -114,10 +114,14 @@ def rallied(b, i, start=0):
 
 
 def melee_pair(b, p):
-    """One unit against one: the fight from first contact to the first rout (or the end)."""
+    """One unit against one: the fight from first contact to the first rout (or the end). Times count from the
+    first record with the melee flag (c); the charge's HP from the record before it (c0): the blows of the contact
+    second land before the flag is first recorded (the first strike), and a sample of the flag alone would miss
+    them (charge_hp_lost: c0 to CHARGE_S after c; contact_s_hp_lost: c0 to c)."""
     c = first(b.f["m"].any(axis=1))
     if c is None:
         return {"run": b.run, "contact": False}
+    c0 = max(c - 1, 0)
     routs = b.f["r"] | b.f["s"]
     e = first(routs.any(axis=1), c)
     e = len(b.t) - 1 if e is None else e
@@ -134,8 +138,9 @@ def melee_pair(b, p):
         dur = max(b.t[e] - b.t[c], 1e-9)
         row["men_per_s"] = round((row["men_start"] - row["men_end"]) / dur, 4)
         row["hp_per_s"] = round((hp[c] - hp[e]) / dur, 2)
+        row["contact_s_hp_lost"] = round(float(hp[c0] - hp[c]), 1)
         if steady is not None and steady < e:
-            row["charge_hp_lost"] = round(float(hp[c] - hp[steady]), 1)
+            row["charge_hp_lost"] = round(float(hp[c0] - hp[steady]), 1)
             row["steady_hp_per_s"] = round(float((hp[steady] - hp[e]) / (b.t[e] - b.t[steady])), 2)
             row["steady_men_per_s"] = round(float((b.f["men"][steady, i] - b.f["men"][e, i]) /
                                                   (b.t[e] - b.t[steady])), 4)

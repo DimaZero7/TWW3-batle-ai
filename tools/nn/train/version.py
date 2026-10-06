@@ -20,6 +20,8 @@ BASELINES = project.BUILD / "nn-train" / "baselines"
 # cache misses, also when the change cannot touch a script battle (the network's code in tools/nn/model):
 # the canary (evaluate.baselines, test5 --baseline-canary) then recovers the old baseline when the first
 # pairs come out identical.
+# Files inside VERSION_FILES that script-vs-script battles never run (the replay check of recordings).
+VERSION_SKIP = ("tools/nn/sim/check.py",)
 VERSION_FILES = ("tools/nn/sim", "tools/nn/armies", "tools/nn/train/opponents.py", "tools/nn/train/scenes.py",
                  "tools/nn/train/reward.py", "tools/nn/train/randomise.py", "tools/nn/scenario.py", "tools/nn/units.py",
                  "tools/nn/abilities.py", "tools/nn/model", "config/nn")
@@ -43,7 +45,8 @@ def sim_version():
     for rel in VERSION_FILES:
         p = ROOT / rel
         for f in (sorted(p.rglob("*")) if p.is_dir() else [p]):
-            if f.is_file() and f.suffix in (".py", ".json") and "__pycache__" not in f.parts:
+            if (f.is_file() and f.suffix in (".py", ".json") and "__pycache__" not in f.parts
+                    and f.relative_to(ROOT).as_posix() not in VERSION_SKIP):
                 h.update(f.relative_to(ROOT).as_posix().encode())
                 h.update(f.read_bytes().replace(b"\r\n", b"\n"))
     return h.hexdigest()[:12]

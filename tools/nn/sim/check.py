@@ -5,9 +5,14 @@ simulator (tools/nn/sim/replay.py: recorded orders synchronised to contact, from
 simulated battle is written down per second like a recording (a gamedata.Battle) and measured
 by the same code as the game (tools/nn/measure.py). Then the speed: many battles at once.
 
+Each recorded battle is replayed COPIES times from starts moved by up to JITTER_M: the copies are the simulator's
+forecast of the game, scored per family and quantity by tools/nn/simskill.py (the share of game values inside the
+copies' 90 % interval, the CRPS skill score, 95 % bootstrap CIs over battles). The older counts (mechanics rows
+within 20 %, same winner by the copies' majority) are printed too.
+
     python -m tools.nn.sim.check                    # all checks, CPU
     bash tools/nn/dock.sh tools.nn.sim.check        # in the container: CPU and GPU
-    python -m tools.nn.sim.check --only mechanics   # mechanics | battles | speed
+    python -m tools.nn.sim.check --only mechanics   # a comma list of mechanics, battles, gates, speed
 
 Prints a table; writes build/nn-sim/check.json (not in Git).
 """
@@ -21,19 +26,23 @@ import numpy as np
 import torch
 
 from tools import config as project
-from tools.nn import gamedata, measure
+from tools.nn import gamedata, measure, simskill
 from tools.nn import scenario as arena_scenario
 from tools.nn.sim import battle, replay, scenario
-from tools.nn.sim.params import load
+from tools.nn.sim.params import load as load_params
 
 OUT = project.BUILD / "nn-sim" / "check.json"
 TOLERANCE = 0.2
 FIGHT_NEAREST = True             # replay: a unit in melee without a recorded target attacks the nearest enemy
 PLANNER = ("attack", "defend")   # battles of CA's planner against the game's AI (not the network's own runs)
 NET = "net"          # the network's battles against the game's AI on generated armies (the gate): reported apart
-COPIES = 8           # whole battles: replays of each recorded battle
+COPIES = 19          # replays of each recorded battle: the range of 19 copies is a 90 % prediction interval
 CURVE_S = (60, 120, 180)   # share of HP lost this long after the first contact
 JITTER_M = 2.0       # ... from starts moved by up to this much
+CHUNK = 160          # simulated battles per batch, recordings of similar length together (CPU: a done battle
+                     # still costs its steps until the batch's longest is over; the per-second recording grows
+                     # with the batch)
+GATES = project.BUILD / "nn-gate"   # gap cards (tools/ops/gapcard.py): <gate>/gapcard.json
 BOOLS = gamedata.BOOL_FIELDS
 FLOATS = gamedata.FLOAT_FIELDS
 
@@ -41,17 +50,18 @@ FLOATS = gamedata.FLOAT_FIELDS
 class Recorder:
     """Writes the batch down once a simulated second, like the game's recordings."""
 
-    def __init__(self, st, every_s=1.0):
+    def __init__(self, st, every_s=1.0, fields=None):
         self.every = every_s
         self.next = 0.0
         self.t = []
         self.rows = []
+        self.fields = tuple(fields) if fields else FLOATS + BOOLS + ("target", "fat")
         self.done_at = [None] * st.B
         self.take(st)
 
     def take(self, st):
         u = st.u
-        snap = {k: u[k].detach().cpu().numpy().copy() for k in FLOATS + BOOLS + ("target", "fat")}
+        snap = {k: u[k].detach().cpu().numpy().copy() for k in self.fields}
         self.rows.append(snap)
         self.t.append(st.t.detach().cpu().numpy().copy())
 
@@ -61,8 +71,8 @@ class Recorder:
             self.next += self.every
             self.take(st)
         done = st.done.cpu().numpy()
-        for b in range(st.B):
-            if done[b] and self.done_at[b] is None:
+        for b in np.flatnonzero(done):
+            if self.done_at[b] is None:
                 self.done_at[b] = len(self.rows)
 
     def battle(self, b, names, keys, side, slot_of, winner, own_ai, arena):
@@ -70,19 +80,44 @@ class Recorder:
         end = self.done_at[b] or len(self.rows)
         rows = self.rows[:end + 1]
         idx = np.array(slot_of)
-        f = {k: np.stack([r[k][b, idx] for r in rows]).astype(bool if k in BOOLS else float) for k in FLOATS + BOOLS}
-        f["fat"] = np.stack([r["fat"][b, idx] for r in rows]).astype(float)
-        inv = {s: i for i, s in enumerate(slot_of)}
-        tg = np.stack([r["target"][b, idx] for r in rows])
-        target = np.vectorize(lambda s: inv.get(int(s), -1))(tg) if tg.size else tg
+        f = {k: np.stack([r[k][b, idx] for r in rows]).astype(bool if k in BOOLS else float)
+             for k in FLOATS + BOOLS if k in self.fields}
+        if "fat" in self.fields:
+            f["fat"] = np.stack([r["fat"][b, idx] for r in rows]).astype(float)
+        if "target" in self.fields:
+            tg = np.stack([r["target"][b, idx] for r in rows]).astype(np.int64)
+            lut = np.full(max(max(slot_of), int(tg.max(initial=0))) + 2, -1, dtype=np.int64)   # slot -> index
+            lut[np.array(slot_of)] = np.arange(len(slot_of))
+            target = lut[tg]
+        else:
+            target = np.full((len(rows), len(slot_of)), -1, dtype=np.int64)
         t = np.array([r[b] for r in self.t[:end + 1]])
         return gamedata.Battle(run=f"sim-{b}", own_ai=own_ai, enemy_role="?", result={"winner": int(winner),
                                "status": "completed"}, t=t, f=f, target=target, arena=arena, names=names,
                                keys=keys, side=side)
 
 
+_LOADED = {}
+
+
+def load(run_dir):
+    """gamedata.load, parsed once per process (the checks read the same recordings several times; a changed
+    events.jsonl is parsed again)."""
+    f = Path(run_dir) / "events.jsonl"
+    st = f.stat()
+    key = (str(Path(run_dir).resolve()), st.st_mtime_ns, st.st_size)
+    if key not in _LOADED:
+        _LOADED[key] = gamedata.load(run_dir)
+    return _LOADED[key]
+
+
+def config(run_dir):
+    """The run's manifest config: arena and own_ai without parsing the recording."""
+    return json.loads((Path(run_dir) / "manifest.json").read_text(encoding="utf-8"))["config"]
+
+
 def factions_of(run_dir, arena):
-    cfg = json.loads((Path(run_dir) / "manifest.json").read_text(encoding="utf-8"))["config"]
+    cfg = config(run_dir)
     fac = cfg.get("factions") or {}
     if not fac:
         base = arena_scenario.load_arena(arena)
@@ -99,14 +134,92 @@ def ahead(st):
     return torch.where(share[0] >= share[1], 1, 2)
 
 
-def simulate(run_dirs, params=None, device="cpu", copies=1, jitter_m=0.0, seed=0, end_at_recording=False):
-    """Replay recorded runs in one batch, `copies` times each (start places moved by up to
-    jitter_m, so the copies differ); returns [(game Battle, [sim Battle per copy], factions)].
+def jitter(seed, run, copy, n, jitter_m):
+    """[2, n] start offsets (x, z) of the n recorded units of one copy of one recorded battle, up to jitter_m: drawn
+    from (seed, run name, copy) alone, so a battle's copies do not depend on its batch (what else is in it, its
+    slots per side)."""
+    h = int.from_bytes(run.encode("utf-8"), "little") % (2 ** 31)
+    gen = torch.Generator(device="cpu").manual_seed((seed * 1000003 + h * 101 + copy) % (2 ** 63))
+    return (torch.rand((2, n), generator=gen) * 2 - 1) * jitter_m
+
+
+LEAN = ("x", "z", "men", "hp", "mp", "ms", "a", "r", "s", "w", "m", "mv")   # what measure.py and this file read
+WORKERS = 8          # processes (CPU): torch runs an operation on fewer than ~32 000 numbers on one thread, and
+                     # most of a step's are that small, so one batch per process on one thread each
+
+
+def units_a_side(run_dir):
+    """The most units either side of a recorded run has (its manifest; the mirror arena's 7 when not listed)."""
+    listed = config(run_dir).get("units") or {}
+    return max(len(listed.get("own", [])), len(listed.get("enemy", []))) or len(gamedata.SLOTS)
+
+
+def simulate(run_dirs, params=None, device="cpu", copies=1, jitter_m=0.0, seed=0, end_at_recording=False,
+             chunk=None, zero_first=False, measure_fn=None, workers=None):
+    """Replay recorded runs, `copies` times each (start places moved by up to jitter_m, so the copies differ;
+    zero_first: copy 0 from the recorded places); returns [(game Battle, [sim Battle per copy], factions)], or with
+    measure_fn [measure_fn(game, sims, factions)] (computed where the batch ran: the copies are not kept).
     end_at_recording: a simulated battle stops when its recording ends; if it is not over by
     then, the side with more standing health is taken as the winner (Battle.result "cut": True).
-    Otherwise replay continues through its contact phases and holds the last recorded orders."""
-    params = params or load()
-    games = [gamedata.load(d) for d in run_dirs]
+    Otherwise replay continues through its contact phases and holds the last recorded orders.
+    chunk: simulated battles per batch, recordings alike in units a side and length together (a batch steps until
+    its longest battle is over; the step's cost grows with the slots). workers: batches at once in processes of one
+    thread (CPU; default WORKERS; 1 or a GPU: here, one after another). Each copy's start offsets are its own, and a
+    battle in a batch does not see the others; but the batching changes the order of float sums (threads, slots a
+    side), and a long battle can grow such a rounding into another course (as CPU against GPU): a single copy may
+    differ, the copies' spread is what holds (7 battles x 3 copies in one batch against batches of one: 9 of 70
+    numbers differed, most by less than 0.1 %)."""
+    run_dirs = [Path(d) for d in run_dirs]
+    hs = [units_a_side(d) for d in run_dirs]
+    size = [(d / "events.jsonl").stat().st_size / max(hs[k], 1) for k, d in enumerate(run_dirs)]   # ~ length
+    order = sorted(range(len(run_dirs)), key=lambda k: (hs[k], size[k]))
+    workers = WORKERS if workers is None else workers
+    pooled = workers > 1 and device == "cpu"
+    per = max(1, int(chunk or CHUNK) // max(copies, 1))
+    # A batch's cost ~ its longest recording x (slots a side + 2)^2 x its battles; in processes, batches of about
+    # equal cost, three a worker (the costliest go first), each at most `per` recordings.
+    cost = [(hs[k] + 2) ** 2 * size[k] * copies for k in range(len(run_dirs))]
+    target = sum(cost) / (3 * workers) if pooled else float("inf")
+    parts, part = [], []
+    for k in order:
+        if part and (len(part) >= per or (hs[k] + 2) ** 2 * size[k] * copies * (len(part) + 1) > target):
+            parts.append(part)
+            part = []
+        part.append(k)
+    if part:
+        parts.append(part)
+    jobs = []
+    for part in parts:
+        jobs.append((part, [str(run_dirs[k]) for k in part], copies, jitter_m, seed, end_at_recording,
+                     max(hs[k] for k in part), zero_first, measure_fn, device, params))
+    jobs.sort(key=lambda j: -j[6] ** 2 * max(size[k] for k in j[0]))         # the costliest first
+    pooled = pooled and len(jobs) > 1
+    out = {}
+    t0 = time.perf_counter()
+    if pooled:
+        import multiprocessing as mp
+        pool = mp.get_context("spawn").Pool(min(workers, len(jobs)))
+        results = pool.imap_unordered(_work, [j[:-1] + (None,) for j in jobs])  # params: each loads its own
+    else:
+        results = map(_work, jobs)
+    for n, got in enumerate(results, 1):
+        out.update(got)
+        if n % max(1, len(jobs) // 8) == 0 or n == len(jobs):
+            print(f"  [{n} of {len(jobs)} batches (up to {per} recordings x {copies}), "
+                  f"{time.perf_counter() - t0:.0f} s]", flush=True)
+    if pooled:
+        pool.close()
+        pool.join()
+    return [out[k] for k in range(len(run_dirs))]
+
+
+def _work(job):
+    """One batch: simulate, then measure_fn per recording (or the Battles) -> {index: result}."""
+    idx, run_dirs, copies, jitter_m, seed, end_at_recording, H, zero_first, measure_fn, device, params = job
+    if params is None:                  # a worker process: one thread
+        torch.set_num_threads(1)
+    params = params or load_params()
+    games = [load(d) for d in run_dirs]
     armies, facs = [], []
     for d, g in zip(run_dirs, games):
         fac = factions_of(d, g.arena)
@@ -115,19 +228,30 @@ def simulate(run_dirs, params=None, device="cpu", copies=1, jitter_m=0.0, seed=0
         army["sides"][2]["faction"] = fac.get("enemy")
         armies.append(army)
         facs.append(fac)
-    H = max(len(a["sides"][s]["units"]) for a in armies for s in (1, 2))
+    sims = _simulate_batch(games, armies, params, device, copies, jitter_m, seed, end_at_recording, H, zero_first,
+                           fields=LEAN if measure_fn else None)
+    return {k: (measure_fn(g, s, f) if measure_fn else (g, s, f)) for k, g, s, f in zip(idx, games, sims, facs)}
+
+
+def _simulate_batch(games, armies, params, device, copies, jitter_m, seed, end_at_recording, H, zero_first,
+                    fields=None):
+    """simulate() for one batch: [[sim Battle per copy] per game]."""
     batch = [a for a in armies for _ in range(copies)]
     st = scenario.build(batch, params, device=device, per_side=H)
-    if jitter_m:
-        gen = torch.Generator(device="cpu").manual_seed(seed)
-        for k in ("x", "z"):
-            noise = (torch.rand(st.u[k].shape, generator=gen) * 2 - 1) * jitter_m
-            st.u[k] = st.u[k] + noise.to(device)
-    slot_maps, rows = [], []
+    slot_maps = []
     for a, g in zip(armies, games):
         m = scenario.slots(a, H)
-        slot_of = [m[n] for n in g.names]
-        slot_maps.append(slot_of)
+        slot_maps.append([m[n] for n in g.names])
+    if jitter_m:
+        noise = torch.zeros((st.B, 2, st.N))
+        for k, (g, slot_of) in enumerate(zip(games, slot_maps)):
+            for c in range(copies):
+                if not (zero_first and c == 0):
+                    noise[k * copies + c][:, slot_of] = jitter(seed, g.run, c, len(slot_of), jitter_m)
+        st.u["x"] = st.u["x"] + noise[:, 0].to(device)
+        st.u["z"] = st.u["z"] + noise[:, 1].to(device)
+    rows = []
+    for a, g, slot_of in zip(armies, games, slot_maps):
         width = {x["name"]: x.get("width") for side in (1, 2) for x in a["sides"][side]["units"]}
         # who leaves melee on a far recorded point: missile units, and the network's own units (side 1
         # of its runs: their point is the network's move order; replay.recorded_orders)
@@ -139,7 +263,7 @@ def simulate(run_dirs, params=None, device="cpu", copies=1, jitter_m=0.0, seed=0
         orders = replay.recorded_orders(g, slot_of, 2 * H, [width.get(n) for n in g.names], spacing, nearest,
                                         params.sim["contact"].get("leave_m", 0.0), leavers)
         rows.extend([orders] * copies)
-    rec = Recorder(st)
+    rec = Recorder(st, fields=fields)
     ends = torch.tensor([float(g.t[-1]) for g in games for _ in range(copies)], device=device)
     cut = torch.zeros(st.B, dtype=torch.bool, device=device)
 
@@ -161,7 +285,7 @@ def simulate(run_dirs, params=None, device="cpu", copies=1, jitter_m=0.0, seed=0
                            g.arena) for c in range(copies)]
         for c, sim in enumerate(sims):
             sim.result["cut"] = bool(cuts[k * copies + c])
-        out.append((g, sims, facs[k]))
+        out.append(sims)
     return out
 
 
@@ -176,20 +300,100 @@ def mean(values):
     return float(np.mean(v)) if v else None
 
 
-def mechanics(params=None, device="cpu"):
-    """The melee pairs and the shooting runs: game against simulator, per measured number."""
-    params = params or load()
-    p = measure.passports()
-    runs = [d for d in gamedata.runs() if measure.kind(gamedata.load(d).arena) in ("pair", "missile")]
-    pairs = simulate(runs, params, device)
-    by_arena = {}
-    for g, (s,), _ in pairs:
-        k = measure.kind(g.arena)
-        if k == "pair":
-            gm, sm = measure.melee_pair(g, p), measure.melee_pair(s, p)
-        else:
-            gm, sm = measure.missile_run(g, p), measure.missile_run(s, p)
-        by_arena.setdefault(g.arena, []).append((gm, sm))
+DUPLICATE_ROWS = ("implied_reload_s",)   # 1 / shots_per_man_per_s: the same number twice in the old count
+
+
+def won(winner, side=1):
+    """1.0 if `side` won, 0.0 if the other did, None for no winner."""
+    return {side: 1.0, 3 - side: 0.0}.get(int(winner or 0))
+
+
+def pair_quantities(m):
+    """What a melee pair is scored on (tools/nn/measure.melee_pair; None: not there). The loser's rout time is the
+    fight's length (the fight ends at the first rout): only fight_s; who routed or wavered at all is who lost (in
+    every recorded pair): only own_won."""
+    if not m.get("contact"):
+        return {}
+    q = {"fight_s": m.get("fight_s"), "own_won": won(m.get("winner_side"))}
+    for u in m["units"]:
+        tag = "own" if u["side"] == 1 else "enemy"
+        q[f"{tag}.steady_hp_per_s"] = u.get("steady_hp_per_s")
+        q[f"{tag}.charge_hp_lost"] = u.get("charge_hp_lost")
+        q[f"{tag}.waver_after_s"] = u.get("waver_after_s")
+    return q
+
+
+def pooled_hit_rate(m):
+    """The implied hit rate over every counted shot of a missile run (all distance bins: game and simulator need not
+    have the same last bin)."""
+    bins = m.get("by_distance") or []
+    shots = sum(b["shots"] for b in bins)
+    return sum(b["implied_hit_rate"] * b["shots"] for b in bins) / shots if shots else None
+
+
+def missile_quantities(m):
+    """What a shooting run is scored on (tools/nn/measure.missile_run)."""
+    if not m.get("shooting"):
+        return {}
+    q = {k: m.get(k) for k in ("first_shot_after_stop_s", "shots_per_man_per_s", "hp_per_s_while_shooting")}
+    q["hit_rate"] = pooled_hit_rate(m)
+    for ev in ("waver", "rout"):
+        t = m.get(f"target_{ev}_after_first_shot_s")
+        q[f"target.{ev}ed" if ev == "waver" else "target.routed"] = float(t is not None)
+        q[f"target.{ev}_after_first_shot_s"] = t
+    return q
+
+
+def cases_of(run, game_q, sims_q):
+    """simskill cases of one recorded battle: every quantity the game has, against the copies that have it."""
+    return [simskill.case(run, k, v, [s.get(k) for s in sims_q]) for k, v in game_q.items()]
+
+
+_PASSPORTS = {}
+
+
+def passports():
+    if "p" not in _PASSPORTS:
+        _PASSPORTS["p"] = measure.passports()
+    return _PASSPORTS["p"]
+
+
+def measure_mechanics(g, sims, fac):
+    """simulate()'s measure_fn of a pair or shooting run: the game's and copy 0's measure dicts, the cases of copies
+    1.., and the evidence rows (first strike, distance bins)."""
+    p = passports()
+    k = measure.kind(g.arena)
+    f, qf = (measure.melee_pair, pair_quantities) if k == "pair" else (measure.missile_run, missile_quantities)
+    gm, sms = f(g, p), [f(s, p) for s in sims]
+    out = {"arena": g.arena, "game": gm, "copy0": sms[0], "cases": cases_of(g.run, qf(gm), [qf(m) for m in sms[1:]]),
+           "first_strike": [], "bins": []}
+    if k == "pair" and gm.get("contact") and sms[0].get("contact"):
+        for ug, us in zip(gm["units"], sms[0]["units"]):
+            out["first_strike"].append({"run": g.run, "arena": g.arena, "unit": ug["slot"],
+                                        "game": ug.get("contact_s_hp_lost"), "sim": us.get("contact_s_hp_lost")})
+    if k == "missile":
+        last = lambda m: ((m.get("by_distance") or [{}])[-1].get("distance_m"))
+        out["bins"].append({"run": g.run, "arena": g.arena, "game_last_bin": last(gm), "sim_last_bin": last(sms[0]),
+                            "game_bins": [x["distance_m"] for x in gm.get("by_distance") or []],
+                            "sim_bins": [x["distance_m"] for x in sms[0].get("by_distance") or []]})
+    return out
+
+
+def mechanics(params=None, device="cpu", copies=COPIES, jitter_m=JITTER_M):
+    """The melee pairs and the shooting runs: game against simulator, per measured number. Copy 0 replays the
+    recorded start as it is (the old per-arena rows, means of the runs); copies 1..copies from starts moved by up
+    to jitter_m are the forecast (cases for simskill). -> {"rows", "cases", "hit_bins"}."""
+    from tools.nn.sim import check as here          # measure_fn by its importable name (worker processes)
+    params = params or load_params()
+    runs = [d for d in gamedata.runs() if measure.kind(config(d).get("arena", "arena")) in ("pair", "missile")]
+    measured = simulate(runs, params, device, copies + 1, jitter_m, end_at_recording=False, zero_first=True,
+                        measure_fn=here.measure_mechanics)
+    by_arena, cases, bins, first_strike = {}, [], [], []
+    for m in measured:
+        by_arena.setdefault(m["arena"], []).append((m["game"], m["copy0"]))
+        cases += m["cases"]
+        first_strike += m["first_strike"]
+        bins += m["bins"]
     rows = []
     for arena, items in sorted(by_arena.items()):
         k = measure.kind(arena)
@@ -212,94 +416,173 @@ def mechanics(params=None, device="cpu"):
         for name, get in metrics:
             game = [get(gm) for gm, _ in items]
             sim = [get(sm) for _, sm in items]
+            # a duplicate: implied_reload_s = 1 / shots_per_man_per_s; a pair's loser routs when the fight ends
+            dup = name in DUPLICATE_ROWS or (name.endswith(".rout_after_s") and all(
+                x is not None and gm.get("fight_s") is not None and abs(x - gm["fight_s"]) < 1e-6
+                for x, (gm, _) in zip(game, items)))
             if name == "winner_side":
                 agree = sum(a == b for a, b in zip(game, sim))
                 rows.append({"arena": arena, "metric": name, "game": game, "sim": sim, "match": f"{agree}/{len(game)}",
-                             "ok": agree == len(game)})
+                             "ok": agree == len(game), "duplicate": False})
                 continue
             gmean, smean = mean(game), mean(sim)
             err = rel_err(smean, gmean)
             if gmean is None:       # the game never saw it (the winner never wavered): nor should the simulator
                 rows.append({"arena": arena, "metric": name, "game": None, "game_range": [None, None], "sim": smean,
-                             "rel_err": None, "ok": smean is None})
+                             "rel_err": None, "ok": smean is None, "duplicate": dup})
                 continue
             rows.append({"arena": arena, "metric": name, "game": gmean,
                          "game_range": [min((x for x in game if x is not None), default=None),
                                         max((x for x in game if x is not None), default=None)],
-                         "sim": smean, "rel_err": err, "ok": err is not None and abs(err) <= TOLERANCE})
-    return rows
+                         "sim": smean, "rel_err": err, "ok": err is not None and abs(err) <= TOLERANCE,
+                         "duplicate": dup})
+    return {"rows": rows, "cases": cases, "hit_bins": bins, "first_strike": first_strike}
 
 
 def routs(b):
-    """Routs, rallies and how long each rally took (s) over a battle's units."""
+    """Routs, rallies and how long each rally took (s) over a battle's units. A rout starts when the flag comes on
+    after the first record; a rally is its end with men left and the unit not shattered (a unit routing from the
+    first record has no start: its end is not a rally)."""
     n_rout, n_rally, spans = 0, 0, []
+    r_all = np.asarray(b.f["r"], dtype=bool)
     for i in range(len(b.names)):
-        r = b.f["r"][:, i].astype(bool)
-        start = None
-        for t in range(1, len(r)):
-            if r[t] and not r[t - 1]:
-                n_rout += 1
-                start = t
-            elif r[t - 1] and not r[t] and start is not None and b.f["men"][t, i] > 0 and not b.f["s"][t, i]:
-                n_rally += 1
-                spans.append(float(b.t[t] - b.t[start]))
-                start = None
+        r = r_all[:, i]
+        on = np.flatnonzero(r[1:] & ~r[:-1]) + 1
+        off = np.flatnonzero(r[:-1] & ~r[1:]) + 1
+        n_rout += len(on)
+        if r[0]:
+            off = off[1:]
+        off = off[:len(on)]
+        ok = (b.f["men"][off, i] > 0) & ~np.asarray(b.f["s"][off, i], dtype=bool)
+        n_rally += int(ok.sum())
+        spans += [float(b.t[e] - b.t[a]) for a, e in zip(on[:len(off)][ok], off[ok])]
     return n_rout, n_rally, spans
+
+
+def whole_quantities(b, p):
+    """What a whole battle is scored on, the same for the game and a simulated copy (cut at the game's end):
+    own_won, the first contact (s), per side the HP lost at the end and 60/120/180 s after the first contact and the
+    share of units that routed at least once, routs and rallies per unit."""
+    q = {"own_won": won(b.winner)}
+    c = measure.first(b.f["m"].any(axis=1))
+    q["first_contact_s"] = None if c is None else float(b.t[c])
+    for side, tag in ((1, "own"), (2, "enemy")):
+        idx = np.nonzero(b.side == side)[0]
+        hp = sum(measure.hp_abs(b, i, p) for i in idx)
+        q[f"{tag}.hp_lost_end"] = float(1 - hp[-1] / hp[0])
+        for after in CURVE_S:
+            k = None if c is None else measure.first(b.t >= b.t[c] + after)
+            k = len(b.t) - 1 if k is None else k
+            q[f"{tag}.hp_lost_{after}s"] = float(1 - hp[k] / hp[0])
+        q[f"{tag}.routed_share"] = float(np.mean([bool(b.f["r"][:, i].any()) for i in idx]))
+    n_rout, n_rally, _ = routs(b)
+    q["routs_per_unit"] = n_rout / len(b.names)
+    q["rallies_per_unit"] = n_rally / len(b.names)
+    return q
+
+
+def majority(winners):
+    """The copies' winner (1 or 2) by majority, 0 on a tie (an even split is no prediction)."""
+    n1, n2 = sum(int(w) == 1 for w in winners), sum(int(w) == 2 for w in winners)
+    return 1 if n1 > n2 else 2 if n2 > n1 else 0
+
+
+def battle_runs(net=False):
+    """The recorded whole battles of a family: CA's planner against the game's AI (the Empire-Skaven runs and the
+    mirror arena), or (net) the network's battles against the game's AI on generated armies. From the manifests,
+    without parsing the recordings. The network's few runs on the fixed arenas belong to neither (left out)."""
+    out = []
+    for d in gamedata.runs():
+        cfg = config(d)
+        arena, own = cfg.get("arena", "arena"), cfg.get("own_ai")
+        if net and own == NET and arena.startswith("random"):
+            out.append(d)
+        elif not net and own in PLANNER and (arena.startswith("whole") or arena == "arena"):
+            out.append(d)
+    return out
 
 
 def battles(params=None, device="cpu", copies=COPIES, jitter_m=JITTER_M, net=False):
     """Whole battles: the 10 Empire-Skaven runs and the fair mirror-arena runs, each replayed
-    `copies` times from slightly moved starts; the simulator's winner is the majority's.
+    `copies` times from slightly moved starts; the simulator's winner is the majority's (a tie counts half).
     net: instead the network's battles against the game's AI on generated armies (both sides'
-    recorded orders replayed)."""
-    params = params or load()
-    p = measure.passports()
-    if net:
-        runs = [d for d in gamedata.runs(own_ai=NET) if gamedata.load(d).arena.startswith("random")]
-    else:
-        runs = [d for d in gamedata.runs() if (gamedata.load(d).arena.startswith("whole")
-                                               or gamedata.load(d).arena == "arena") and gamedata.load(d).own_ai in PLANNER]
-    out = []
-    for g, sims, fac in simulate(runs, params, device, copies, jitter_m, end_at_recording=True):
-        names = {1: fac.get("own", "?"), 2: fac.get("enemy", "?")}
-        votes = [int(x.winner) for x in sims]
-        sw = max((1, 2), key=votes.count)
-        s = next(x for x in sims if int(x.winner) == sw)
-        gw = g.winner
-        row = {"run": g.run, "arena": g.arena, "own_ai": g.own_ai, "game_winner": int(gw), "sim_winner": int(sw),
-               "sim_winner_share": round(votes.count(sw) / len(votes), 2),
-               "sim_cut": round(sum(x.result.get("cut", False) for x in sims) / len(sims), 2),
-               "game_s": float(g.t[-1]), "sim_s": float(np.median([x.t[-1] for x in sims])),
-               "match": bool(gw == sw) if gw else None}
-        for side in (1, 2):
-            idx = np.nonzero(g.side == side)[0]
-            for tag, b in (("game", g), ("sim", s)):
+    recorded orders replayed). Row numbers "sim_*" are means over the copies. -> rows; each row's "cases" are the
+    simskill cases of the battle (popped by main)."""
+    from tools.nn.sim import check as here          # measure_fn by its importable name (worker processes)
+    params = params or load_params()
+    return simulate(battle_runs(net), params, device, copies, jitter_m, end_at_recording=True,
+                    measure_fn=here.measure_battle)
+
+
+def measure_battle(g, sims, fac):
+    """simulate()'s measure_fn of a whole battle: battles()'s row, with its simskill "cases"."""
+    p = passports()
+    names = {1: fac.get("own", "?"), 2: fac.get("enemy", "?")}
+    votes = [int(x.winner) for x in sims]
+    sw = majority(votes)
+    gw = g.winner
+    row = {"run": g.run, "arena": g.arena, "own_ai": g.own_ai, "game_winner": int(gw), "sim_winner": int(sw),
+           "sim_winner_share": round(max(votes.count(1), votes.count(2)) / len(votes), 2),
+           "sim_own_won_share": round(votes.count(1) / len(votes), 3),
+           "sim_cut": round(sum(x.result.get("cut", False) for x in sims) / len(sims), 2),
+           "game_s": float(g.t[-1]), "sim_s": float(np.median([x.t[-1] for x in sims])),
+           "match": (0.5 if sw == 0 else float(gw == sw)) if gw else None}
+    for side in (1, 2):
+        idx = np.nonzero(g.side == side)[0]
+        for tag, bs in (("game", [g]), ("sim", sims)):
+            vals = []
+            for b in bs:
                 hp = sum(measure.hp_abs(b, i, p) for i in idx)
-                row[f"{tag}_hp_lost_{side}"] = round(float(1 - hp[-1] / hp[0]), 3)
-                row[f"{tag}_men_end_{side}"] = float(np.nansum(b.f["men"][-1, idx]))
-                row[f"{tag}_routed_{side}"] = int(sum(bool(b.f["r"][:, i].any()) for i in idx))
-        for tag, b in (("game", g), ("sim", s)):
-            c = measure.first(b.f["m"].any(axis=1))
-            for side in (1, 2):
-                idx = np.nonzero(g.side == side)[0]
-                hp = sum(measure.hp_abs(b, i, p) for i in idx)
-                curve = []
-                for after in CURVE_S:
-                    k = None if c is None else measure.first(b.t >= b.t[c] + after)
-                    k = len(b.t) - 1 if k is None else k
-                    curve.append(round(float(1 - hp[k] / hp[0]), 3))
-                row[f"{tag}_hp_lost_after_contact_{side}"] = curve
-            n_rout, n_rally, spans = routs(b)
-            row[f"{tag}_routs"], row[f"{tag}_rallies"], row[f"{tag}_rally_s"] = n_rout, n_rally, spans
-        row["factions"] = names
-        out.append(row)
-    return out
+                vals.append((float(1 - hp[-1] / hp[0]), float(np.nansum(b.f["men"][-1, idx])),
+                             sum(bool(b.f["r"][:, i].any()) for i in idx)))
+            m = np.mean(vals, axis=0)
+            row[f"{tag}_hp_lost_{side}"] = round(float(m[0]), 3)
+            row[f"{tag}_men_end_{side}"] = float(m[1])
+            row[f"{tag}_routed_{side}"] = round(float(m[2]), 2)
+    gq = whole_quantities(g, p)
+    sq = [whole_quantities(s, p) for s in sims]
+    for tag, qs in (("game", [gq]), ("sim", sq)):
+        for side, st in ((1, "own"), (2, "enemy")):
+            row[f"{tag}_hp_lost_after_contact_{side}"] = [round(float(np.mean([q[f"{st}.hp_lost_{a}s"] for q in qs])), 3)
+                                                          for a in CURVE_S]
+    for tag, bs in (("game", [g]), ("sim", sims)):
+        rr = [routs(b) for b in bs]
+        row[f"{tag}_routs"] = float(np.mean([r[0] for r in rr]))
+        row[f"{tag}_rallies"] = float(np.mean([r[1] for r in rr]))
+        row[f"{tag}_rally_s"] = [x for r in rr for x in r[2]]
+    row["factions"] = names
+    row["cases"] = cases_of(g.run, gq, sq)
+    return row
+
+
+def gate_cases(root=GATES):
+    """simskill cases of every gap card (tools/ops/gapcard.py: the gate's network against ai_like in the simulator,
+    copies of each gate battle, measured by tools/nn/battle_metrics): -> (cases, gates)."""
+    cases, gates = [], []
+    for path in sorted(Path(root).glob("*/gapcard.json")):
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        gates.append(path.parent.name)
+        for b in doc.get("battles", []):
+            game, sims = b.get("game") or {}, b.get("sims") or []
+            for k, v in game.items():
+                if isinstance(v, bool):
+                    v = float(v)
+                if not isinstance(v, (int, float)):
+                    continue
+                xs = [float(s.get(k)) if isinstance(s.get(k), (int, float)) else None for s in sims]
+                cases.append(simskill.case(f"{path.parent.name}/{b.get('battle')}", k, v, xs))
+    return cases, gates
+
+
+def forecast(cases, boot=simskill.BOOT):
+    """simskill.summary of a family's cases (scored here)."""
+    return simskill.summary(simskill.score([c for c in cases if c is not None]), boot=boot)
 
 
 def speed(device="cpu", batch=1024, params=None, seconds=None):
     """Battles a second: `batch` copies of the Empire-Skaven battle (11 slots a side), every unit
     attacking the nearest enemy, run to the end."""
-    params = params or load()
+    params = params or load_params()
     army = scenario.from_arena("whole_emp_v_skv", "attack")
 
     def fresh():
@@ -339,19 +622,46 @@ def fmt(x, nd=2):
 
 
 def main(argv=None):
+    global CHUNK, WORKERS
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", choices=("mechanics", "battles", "speed"))
+    parser.add_argument("--only", help="a comma list of mechanics, battles, gates, speed (default: all)")
     parser.add_argument("--device", default=None, help="cpu or cuda (default: both where cuda exists, for speed)")
     parser.add_argument("--batch", type=int, default=1024)
+    parser.add_argument("--copies", type=int, default=COPIES, help="replays of each recorded battle (19: the "
+                        "copies' range is a 90 %% interval)")
+    parser.add_argument("--chunk", type=int, default=None, help=f"simulated battles per batch (default {CHUNK}; "
+                        "on a GPU 4096: one big batch)")
+    parser.add_argument("--workers", type=int, default=WORKERS, help="batches at once, in processes of one thread "
+                        "(CPU)")
+    parser.add_argument("--boot", type=int, default=simskill.BOOT, help="bootstrap draws of the CIs")
     parser.add_argument("--out", type=Path, default=OUT)
     args = parser.parse_args(argv)
+    only = set((args.only or "mechanics,battles,gates,speed").split(","))
+    bad = only - {"mechanics", "battles", "gates", "speed"}
+    if bad:
+        parser.error(f"--only: unknown {', '.join(sorted(bad))}")
     sys.stdout.reconfigure(encoding="utf-8")
-    params = load()
-    report = {}
     dev = args.device or "cpu"
-    if args.only in (None, "mechanics"):
-        rows = mechanics(params, dev)
+    CHUNK = args.chunk or (CHUNK if dev == "cpu" else 4096)
+    WORKERS = args.workers
+    params = load_params()
+    report = {"copies": args.copies, "forecast": {}, "cases": {}}
+    forecast_lines = []
+    t0 = time.perf_counter()
+
+    def family(key, title, cases):
+        cases = [c for c in cases if c is not None]
+        report["cases"][key] = [{"battle": c["battle"], "q": c["q"], "game": c["game"],
+                                 "sims": [round(float(x), 5) for x in c["sims"]]} for c in cases]
+        s = forecast(cases, args.boot)
+        report["forecast"][key] = dict(s or {}, title=title)
+        forecast_lines.extend(simskill.lines(title, s, worst=10))
+    if "mechanics" in only:
+        mech = mechanics(params, dev, args.copies)
+        rows = mech["rows"]
         report["mechanics"] = rows
+        report["missile_bins"] = mech["hit_bins"]
+        family("mechanics", "mechanics (melee pairs and shooting runs)", mech["cases"])
         print("== mechanics: game (mean of 3 runs) against the simulator (same recorded orders)")
         print(f"{'arena':26} {'metric':34} {'game':>10} {'range':>17} {'sim':>10} {'err':>7}  ok")
         for r in rows:
@@ -364,9 +674,24 @@ def main(argv=None):
                   f"{fmt(r['sim']):>10} {fmt(r['rel_err'] and 100 * r['rel_err'], 0) + '%':>7}  "
                   f"{'yes' if r['ok'] else 'NO'}")
         ok = [r["ok"] for r in rows]
-        print(f"within {int(TOLERANCE * 100)} %: {sum(ok)} of {len(ok)}")
-    if args.only in (None, "battles"):
-        rows = battles(params, dev)
+        uniq = [r["ok"] for r in rows if not r.get("duplicate")]
+        print(f"within {int(TOLERANCE * 100)} %: {sum(ok)} of {len(ok)} (without the rows that repeat another "
+              f"number - implied_reload_s, a pair loser's rout time: {sum(uniq)} of {len(uniq)})")
+        for x in mech["hit_bins"]:
+            if x["game_last_bin"] != x["sim_last_bin"]:
+                print(f"  hit_rate row of {x['run']} ({x['arena']}): game's last distance bin {x['game_last_bin']}, "
+                      f"simulator's {x['sim_last_bin']} - the old row compares different distances")
+        report["first_strike"] = mech["first_strike"]
+        by = {}
+        for x in mech["first_strike"]:
+            by.setdefault((x["arena"], x["unit"]), []).append(x)
+        print("HP lost in the contact second (the record before the first melee flag to the first), mean of the runs, "
+              "game / simulator: " + "; ".join(f"{a} {u} {mean([x['game'] for x in v]):.0f} / "
+                                               f"{mean([x['sim'] for x in v]):.0f}" for (a, u), v in sorted(by.items())))
+        print(f"[mechanics: {time.perf_counter() - t0:.0f} s]")
+    if "battles" in only:
+        rows = battles(params, dev, args.copies)
+        family("game_ai", "battles of CA's planner against the game's AI", [c for r in rows for c in r.pop("cases")])
         report["battles"] = rows
         print("== whole battles: recorded orders replayed with contact-phase synchronisation")
         print(f"{'run':16} {'arena':16} {'own_ai':6} {'winner game/sim (share)':>24} {'s game/sim':>12} "
@@ -417,9 +742,13 @@ def main(argv=None):
         for k in ("whole", "arena", "all"):
             if k in summary:
                 v = summary[k]
-                print(f"same winner, {k}: {v['same_winner']} of {v['decided']} ({100 * v['share']:.0f} %)")
+                print(f"same winner, {k}: {v['same_winner']:g} of {v['decided']} ({100 * v['share']:.0f} %; "
+                      f"majority of {args.copies} copies, a tie counts half)")
+        print(f"[battles of the game's AI: {time.perf_counter() - t0:.0f} s]")
         # The network's gate battles (generated armies), apart: both sides' recorded orders replayed.
-        net_rows = battles(params, dev, net=True)
+        net_rows = battles(params, dev, args.copies, net=True)
+        family("network", "the network's battles against the game's AI (recorded orders)",
+               [c for r in net_rows for c in r.pop("cases")])
         report["battles_net"] = net_rows
         print("== the network's battles against the game's AI (generated armies), contact-phase replay")
         for r in net_rows:
@@ -428,8 +757,17 @@ def main(argv=None):
                   f"{r['game_hp_lost_1']:.2f}/{r['sim_hp_lost_1']:.2f}  2 {r['game_hp_lost_2']:.2f}/{r['sim_hp_lost_2']:.2f}")
         decided = [r for r in net_rows if r["match"] is not None]
         report["battles_net_summary"] = {"decided": len(decided), "same_winner": sum(r["match"] for r in decided)}
-        print(f"same winner, the network's battles: {sum(r['match'] for r in decided)} of {len(decided)}")
-    if args.only in (None, "speed"):
+        print(f"same winner, the network's battles: {sum(r['match'] for r in decided):g} of {len(decided)} "
+              f"(majority of {args.copies} copies, a tie counts half)")
+        print(f"[battles of the network: {time.perf_counter() - t0:.0f} s]")
+    if "gates" in only:
+        cases, gates = gate_cases()
+        family("gates", f"gate battles: the gate's network against ai_like ({len(gates)} gap cards)", cases)
+    if forecast_lines:
+        print("== the simulator as a forecast of the game (tools/nn/simskill.py): per family, the 10 worst-covered "
+              "quantities")
+        print(chr(10).join(forecast_lines))
+    if "speed" in only:
         devices = [args.device] if args.device else (["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"])
         report["speed"] = []
         for d in devices:
@@ -439,6 +777,7 @@ def main(argv=None):
                   f"{r['wall_s']} s wall -> {r['battles_per_s']} battles/s, {r['steps_per_s']} steps/s "
                   f"({r['done']} finished)")
     args.out.parent.mkdir(parents=True, exist_ok=True)
+    report["wall_s"] = round(time.perf_counter() - t0)
     args.out.write_text(json.dumps(report, indent=1, ensure_ascii=False, default=str), encoding="utf-8")
     print(args.out)
     return 0

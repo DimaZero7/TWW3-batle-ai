@@ -772,7 +772,9 @@ point), written down once a second like a recording and measured by the same cod
 (`tools/nn/measure.py`). A pair or shooting replay runs on its last recorded orders until a unit
 routs; a whole battle stops when its recording ends and is compared then (if it is not over, the
 side with more health left in standing units counts as the winner). Each recorded battle is played
-8 times from starts moved by up to 2 m; the simulator's winner is the majority's. A unit in melee
+19 times from starts moved by up to 2 m; the simulator's winner is the copies' majority (a tie counts
+half); the main score is the share of game values inside the copies' 90 % interval
+([below](#the-checks-score-the-simulator-as-a-forecast)). A unit in melee
 without a recorded target whose recorded point is 10 m or more away moves there (it leaves the
 fight) only if that point is a move order in force: the network's units and missile units; the
 melee units of CA's planner and of the game's AI fight on. The network's battles against the game's
@@ -838,6 +840,118 @@ Mean absolute trade error across the three gates at game end / sim end: previous
 that game movement is reproduced or the 98% requirement is met. The replay and coefficient
 changes alter the simulator version and its baseline evaluation cache.
 
+### The check's score: the simulator as a forecast
+
+**The point.** The simulator matches the game if the game behaves like one more copy of the replay. The
+measure is the share of game values inside the copies' 90 % interval: a simulator that matches the game (its
+noise included) scores 90 %. Now the network's battles score 40 % (38–43), the game's AI battles 35 % (30–41), mechanics
+20 % (14–26), gates 80 % (76–84) (95 % confidence interval in brackets). The main reason for the shortfall: the copies
+are too alike - their spread is a third of their miss (in mechanics a hundredth: moving the start by 2 m hardly
+changes a one-on-one pair). The game is noisy, the simulator computes averages, so the game often lands outside
+all the copies at once.
+
+**How it is computed** (`tools/nn/simskill.py`; `sim.check` prints it at the end, per family with the 10 worst
+quantities; `python -m tools.nn.simskill build/nn-sim/check.json [--all]` rescores the saved cases without the
+simulator):
+
+- Every recorded battle is replayed 19 times from starts moved by up to 2 m. The 19 copies are the simulator's
+  forecast, the game's recording is the outcome. Quantities of a whole battle: did side 1 win (yes/no), the HP
+  each side lost by the end and 60 / 120 / 180 s after the first contact, the share of a side's units that
+  routed at least once, routs and rallies per unit, the time of the first contact. A pair: the fight's length,
+  the winner, each side's charge damage and steady rate, the time to wavering. Shooting: time to the first
+  shot, shots per man per second, the hit rate over all shots, damage per second, the target's wavering and
+  rout. Gates: the numbers of the gap card (`tools/ops/gapcard.py`, 8 copies; there the network plays itself
+  against ai_like).
+- **Inside the 90 %.** The game's place among the copies: how many copies are below it. If the game is like one
+  more copy, all 20 places among 19 copies are equally likely, and it is the extreme one (below or above all)
+  with probability 2 / 20. So a matching simulator has it inside the copies' range 90 % of the time - the
+  nonparametric prediction interval of order statistics; in weather forecasting the rank histogram (Hamill
+  2001). Equal values (yes/no, counts) share their places evenly - the randomised PIT (Czado, Gneiting, Held
+  2009) - so the expectation is exactly 90 % for any number of copies (the gates have 8). Printed apart: how
+  often the game is below the copies' 5 % (the simulator overestimates) and above their 95 % (underestimates):
+  5 % each when matching.
+- **Skill (CRPSS).** The CRPS is a strictly proper score of a forecast (Gneiting & Raftery 2007): it rewards a
+  right centre and an honest spread at once and cannot be gamed by spreading the copies. The copies' CRPS is the
+  fair one (Ferro 2014: unbiased for few copies); for yes/no it is the Brier score. Skill = 1 - CRPS of the
+  simulator / CRPS of "the typical game value" (the same quantity in the family's other battles), as ECMWF
+  scores. 100 % exact, 0 no better than the typical value, below 0 worse. A family's skill is the median over
+  its quantities: one quantity the game hardly varies (a share near 1 in every battle gives -700 ... -1300 % for
+  a small error) decides the mean. Even a perfect simulator of a noisy game stays below 100 %, so the measure of
+  correspondence is the coverage, the skill measures usefulness and guards against spread-out copies.
+- **Spread / miss.** The copies' spread divided by the miss of their mean (Fortin et al. 2014): 1 for an honest
+  forecast, below 1 the copies are too alike (the game then leaves them on both sides).
+- **Confidence interval.** 95 % bootstrap over battles (Efron & Tibshirani 1993): battles drawn with
+  replacement, all quantities of a battle together (they are related).
+- Synthetic check (`tests/tools/test_nn_simskill.py`): a forecast from the outcome's own distribution scores
+  90 % ± 2; one three times too narrow below 60 %, missing evenly on both sides; a shifted one on one side; one
+  three times too wide above 95 % but with less skill.
+
+| Family | Battles | Inside 90 % (95 % CI) | Below / above | Skill, median (95 % CI) | Spread / miss | Old count |
+|---|---:|---:|---:|---:|---:|---:|
+| Mechanics: pairs and shooting | 18 | 20 % (14–26) | 41 / 40 % | −69 % (−108 to −7) | 0.01 | 25 / 54 within 20 % (without repeats 23 / 48) |
+| The game's AI battles (CA's planner) | 28 | 35 % (30–41) | 33 / 32 % | −52 % (−67 to −18) | 0.34 | same winner 16 / 26 |
+| The network against the game's AI | 170 | 40 % (38–43) | 26 / 34 % | 24 % (15–31) | 0.33 | same winner 139 / 169 |
+| Gates (2 gap cards) | 10 | 80 % (76–84) | 11 / 9 % | 7 % (−11 to 33) | 0.66 | - |
+
+Worst matching (the game outside the copies; game / simulator in brackets):
+
+- Mechanics: the copies are all alike, so almost everything is outside. Biases one way: shooting is stronger
+  than the game's (shots per man per second 0.089 / 0.108, hit rate 0.50 / 0.61, damage 51 / 75 HP/s: the game
+  below all copies in 100 % of the runs), the archers' target wavers and routs sooner (96 / 69 and 124 / 90 s),
+  pairs end sooner (291 / 262 s), a pair's loser loses faster (21.6 / 25.0 HP/s).
+- The game's AI battles: own side (CA's planner) loses more 60 / 120 / 180 s after contact (0.21 / 0.25,
+  0.35 / 0.43, 0.47 / 0.56; the game below the copies in 86-89 %); the enemy routs less (units routed 0.76 /
+  0.41, routs per unit 1.45 / 1.10) and loses less by the end (0.74 / 0.63).
+- The network's battles: losses 60-120 s after contact - the mean is right (0.25 / 0.25), but the copies spread
+  4-5 times narrower than their miss, 14-30 % inside; fewer routs per unit (1.30 / 1.02, the game above the
+  copies in 58 %), fewer own units routed (0.87 / 0.68).
+- Gates: own gold kept by the end (0.94 / 0.69), the trade (-0.30 / +0.04), standing still (0.02 / 0.09).
+
+### Errors of the old count
+
+Fixed in `tools/nn/sim/check.py` and `tools/nn/measure.py` (no battle rule changed):
+
+1. **A tie of the copies went to side 1.** `max((1, 2), key=votes.count)` gives 1 at 4 : 4: battle
+   20261006-053128 (copies 4 : 4, the game side 2) counted as a miss. Now a tie counts half; 19 copies have no
+   ties.
+2. **A battle row's "simulator" numbers came from one copy.** Losses, routs, loss curves, rallies came from the
+   first copy with the majority's winner - a sample picked by the winner. Now the mean of all copies.
+3. **A pair's charge did not see the simulator's first strike.** The "first 15 s" window began at the first
+   record with the melee flag, and the simulator's blow lands in that very second: in the contact second the
+   simulator takes 103 HP (General - clanrats), 154 HP (Warlord - spearmen), 84 HP (spearmen - slaves), the game
+   0 / 0 / 42. Now the charge damage counts from the record before contact (`measure.melee_pair`, new field
+   `contact_s_hp_lost`), times as before. The Warlord's charge on the spearmen: simulator 445 -> 599 HP with the
+   game at 459 (was "within 3 %", now +31 %); on the slaves 423 -> 507 with the game 675 -> 717.
+4. **Repeats in the mechanics count.** `implied_reload_s` = 1 / `shots_per_man_per_s` (2 rows) and a pair
+   loser's rout time = the fight's length (4 rows): 6 of 54 rows count one number twice. The count is printed
+   without them too. The new measure has no repeats (nor a pair's "wavered at all" - the winner again).
+5. **A recording was parsed up to 4 times.** To learn its arena, the family filter parsed the whole recording
+   (mechanics: all 221 for 18). Now arena and role come from the manifest, each recording is parsed once.
+6. **A batch waited for its longest battle.** A family ran as one batch to the end of its longest battle: a
+   190 s network battle waited 1347 s, a battle of two units a side was computed in 20 slots. Now batches go by
+   units a side and length, of about equal cost, in 8 processes of one thread (a torch operation on fewer than
+   ~32 000 numbers runs on one thread anyway).
+7. **"Same winner" is rounding noise.** The same code on the GPU and on the CPU gave 5 / 10 and 4 / 10 in whole
+   battles, 10 / 16 and 11 / 16 on the arena; another split into batches changes 9 of 70 numbers (almost all by
+   less than 0.1 %, one by 5 %: a long battle grows a rounding error into another course). A majority count of
+   coin-flip battles is noise; the new measure takes the share of copies.
+8. **Latent:** the `hit_rate` row took the last distance bin of the game and of the simulator separately - they
+   could compare different distances. All 6 recordings have one bin (110-140 m), the numbers were not affected;
+   the new measure takes the hit rate over all shots.
+
+Not fixed: 5 network battles on the fixed arenas belong to no family; `check.ahead` gives a tie to side 1; the
+battle's length is not compared (a copy is cut at the end of the game's recording, its length would be the
+game's by construction); the replay follows the recorded orders after the simulated battle has gone another
+way; the simulator has none of the game's noise (hit rolls), so the coverage mixes "a wrong average" and "no
+noise" - telling them apart needs the game's spread over repeats of one battle.
+
+**Speed of the check** (mechanics + battles + gates, CPU, 8 cores, training running alongside): 709 s at 19
+copies (mechanics 32 s, the game's AI battles 115 s, the network's 561 s), peak memory ~5 GB. The old check at
+8 copies did not finish in 1923 s: after the game's AI battles (4 min) it spent 27 min on the network's
+battles as one batch and died without output, its container at 8.3 GB and growing (every second of every field
+of all 1360 battles recorded; now only the needed fields, batch by batch). Per replay 7 times faster (1.2 s ->
+0.17 s).
+
 ### Mechanics: the pairs and shooting
 
 The detail behind the mechanics count (measured before the volley rule; the volley moves the
@@ -875,7 +989,8 @@ without it, 5 with it; in the network battles the sprint changes nothing, the fi
 20 %: (1) the first 15 s of formation contact — the target loses 499–764 HP in the game, 396–446 by the rule
 (the fitted 1.5 charge blow used to cover this); the first strike fires in the pairs, but the check does not
 see it: "the first 15 s" count from the first recorded second with the melee flag, and the burst is already in
-it (all of it in the simulator, part of it in the game) — OPEN, the contact alignment in `measure.melee_pair`;
+it (all of it in the simulator, part of it in the game) — fixed: the charge counts from the record before
+contact ([Errors of the old count](#errors-of-the-old-count), item 3; mechanics 25 / 54 with it);
 in the game slaves answer spearmen in the first 15 s at half the settled rate (84 against 171);
 (2) lords hit 13 / 31 % harder than the game against one unit (2.07 hit — measured on 1–4 units around
 him), ending their pairs 22–26 % sooner; infantry hits the Warlord 24 % harder (6.5 men on a lord is the

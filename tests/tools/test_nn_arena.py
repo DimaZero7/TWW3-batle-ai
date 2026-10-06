@@ -181,6 +181,23 @@ class TestMeasure:
         assert [x["slot"] for x in row["approach"]] == ["own_spear"]      # the slaves stood
         assert row["approach"][0]["top_m_s"] == pytest.approx(12, abs=0.01)
 
+    def test_the_first_strike_in_the_contact_second_counts_in_the_charge(self, tmp_path, monkeypatch):
+        # The slaves lose 10 men between the last record without the melee flag (t=1) and the first with it
+        # (t=2): the charge counts from t=1, the times from t=2.
+        monkeypatch.setattr(gamedata, "RUNS", tmp_path)
+        frames = pair_frames()
+        for t in range(2, 30):
+            slave = frames[t][1]
+            slave["men"] -= 10
+            slave["hp"] = slave["men"] / 180
+        write_run(tmp_path, "20260101-000001", "pair_x", [("own_spear", SPEAR)], [("enemy_slave", SLAVE)], frames)
+        row = measure.targets()["pair_x"]["runs"][0]
+        slave = row["units"][1]
+        per_man = PASSPORTS[SLAVE]["hp_total"] / 180
+        assert row["contact_t_s"] == 2 and row["fight_s"] == 24
+        assert slave["contact_s_hp_lost"] == pytest.approx(10 * per_man, abs=0.1)
+        assert slave["charge_hp_lost"] == pytest.approx((10 + 15) * per_man, abs=0.1)   # t=1 to t=17
+
     def test_the_database_melee_rule(self):
         spear, slave = PASSPORTS[SPEAR], PASSPORTS[SLAVE]
         assert measure.hit_chance(spear, slave) == 0.39            # 35 + 20 - 16
