@@ -54,15 +54,17 @@ again — the baselines and the drill check scripts, ~8 min on the CPU beside th
 the "canary" (the baseline's first 32 pairs) adopts the old ones.
 
 **Already modelled:** speeds, formation, contact and leaving melee (ordered away, a unit without a
-missile weapon is held 20 s, a missile unit 5 s, as in the game), pursuit of routers, hit chance (flat: slope 0.1
-instead of the database's 1), damage and armour, charge and spear bracing, flank and rear
+missile weapon is held 20 s, a missile unit 5 s, as in the game), pursuit of routers, hit chance (flat in formations: slope 0.1
+instead of the database's 1; lord against lord by the database's formula), damage and armour, charge and spear bracing, flank and rear
 (fitted: flank costs more than rear), volley fire, friendly fire and spill, lords (at most 9
 men hit them; the lord as fragile as in the game: his own aura does not reach him, in melee he is
-always 'losing' (−3), projectiles hit him whole in melee, he tires slower than a formation), morale with all main modifiers (the 4 s and 60 s casualty windows and 'under fire' 15 s as in the
+always 'losing' (−3), projectiles hit him whole in melee, he tires slower than a formation; a lord duel: General v
+General x0.8 of the game, Warlord v Warlord x1.2), morale with all main modifiers (the 4 s and 60 s casualty windows and 'under fire' 15 s as in the
 game; a lord's death: his army
 −16 for 45 s, then −10; his rout on the field: the aura only), rout, rally, army collapse (−120 by the
 database's strategic strength), flank-threat flags, fatigue, units' innate effects, lord
-abilities.
+abilities (the game's AI fires them by a measured rule: the speed ones in melee, Stand Your Ground only
+next to friends, Deadly Onslaught never).
 
 **Fatigue** (switched on by the latest change): 10 ticks a second; melee tires only a unit with
 an attack order (single entity 15 a tick and his charge only in the first 2 s of a contact, formation 13.7), shooting 7.5, walking 3.4, idle −18.
@@ -77,8 +79,8 @@ frozen. Three scores, higher is better:
 | Score | Now |
 |---|---:|
 | Mechanics: unit pairs and shooting within 20 % of the game | 51 / 54 |
-| Same winner: the game's AI against itself | 22 / 26 |
-| Same winner: the network against the game's AI (163 recordings now) | 122 / 163 |
+| Same winner: the game's AI against itself | 20 / 26 (21 at other seeds) |
+| Same winner: the network against the game's AI (163 recordings now) | 125 / 163 |
 
 **Gate replay** — the in-game gate battles replayed in the simulator (both sides from the
 recording). Gold trade at the game's end time: game −0.26…−0.41, simulator −0.05…−0.24 on the

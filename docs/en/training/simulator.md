@@ -133,7 +133,7 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 | States | wavering below 16 points, rout at 0, shattered at the third rout or below −50 points during army destruction; no ordinary rout within 10 s of a rally | DB; shattering below −50 during army losses measured |
 | Rally | while the army is not collapsing and no standing enemy is within 90 m the router regains 2 points a second; rallies at MoralePercent 0.23 (`morale.rally_rule` "fixed"; the rule "rally near the morale target" is measured and left off: [what is missing](#what-is-missing)) | measured: 0.23 and 90 m (365 rallies); 2 points calibrated (median rally 44 s) |
 | Fatigue | The calibration is ON (`fatigue.calibration.on=true`): 10 ticks/s, DB thresholds; melee tires only under an attack order (single entity 15 a tick, his charge +34 only in the first 2 s of a contact; formation 13.7), a move by its order's run flag (run +4, walk −1), routing +4, shooting 7.5, idle −18 with no standing enemy within 80 m, else ready −7 | Fitted on the units' activities in 204 recordings; exhausted shares as in the game ([below](#fatigue-calibration)) |
-| Lord abilities | the side the game's AI plays (`ai`, side 2 by default) fires its lord's active abilities by a rule; the network's side fires them by order (`Orders.ability`; a side the network plays should have `ai` false); passives are innate effects (below). Every number is the ability's passport (`config/nn/abilities.json`, the database; `sim.json` abilities says which are modelled and the AI's triggers); effects on the owner (phase targets self), his side's units within range (friends) and enemies within range (enemies): speed, charge speed, melee attack and defence, damage, AP, charge bonus, morale. Warlord: Deadly Onslaught (31 s, ready 90 s after: melee damage and AP ×1.25, charge bonus ×1.6) in melee; Verminous Valour (17 s / 60 s: speed ×1.25, +8 morale points; its 25 m blast has no damage) with an enemy within 60 m; Rally (14 s / 60 s: +16 to friends within 35 m) when a friend there wavers. General: Stand Your Ground (18 s / 90 s: melee defence +24, +16 within 35 m) in melee; Foe Seeker (25 s / 60 s: speed ×1.25) with an enemy within 60 m | DB (`config/nn/sim.json` abilities; owned per the game's roster readout); when the AI fires them is an assumption |
+| Lord abilities | the side the game's AI plays (`ai`, side 2 by default) fires its lord's active abilities by a rule; the network's side fires them by order (`Orders.ability`; a side the network plays should have `ai` false); passives are innate effects (below). Every number is the ability's passport (`config/nn/abilities.json`, the database; `sim.json` abilities says which are modelled and the AI's triggers); effects on the owner (phase targets self), his side's units within range (friends) and enemies within range (enemies): speed, charge speed, melee attack and defence, damage, AP, charge bonus, morale. Warlord: Deadly Onslaught (31 s, ready 90 s after: melee damage and AP ×1.25, charge bonus ×1.6) — never by the AI; Verminous Valour (17 s / 60 s: speed ×1.25, +8 morale points; its 25 m blast has no damage) in melee; Rally (14 s / 60 s: +16 to friends within 35 m) in melee with at least two friendly units within 35 m. General: Stand Your Ground (18 s / 90 s: melee defence +24, +16 within 35 m) in melee with a friendly unit within 35 m (`abilities.friends_min`; never in a lone duel); Foe Seeker (25 s / 60 s: speed ×1.25) in melee. Each again as soon as it is ready, while its rule holds | DB (`config/nn/sim.json` abilities; owned per the game's roster readout); when the AI fires them: measured, 139 gate battles (926 uses by the AI's lords) and the lord duels ([below](#lords)) |
 | Innate effects | every attribute and passive or game-fired ability of a unit (`config/nn/effects.json`), one mechanism: on while its conditions hold, its stats on the owner (an aura also on friends in range), its rules for the step. Unbreakable (Flagellants: morale never below leadership, never wavers or routs), Expendable (its rout scares only expendable units), Encourage (the lord's aura), Charge Reflection (bracing), Fire Whilst Moving; Strength in Numbers (Skaven infantry: +6 leadership, +8 melee defence, speed ×0.9 while health ≥ 50 %), Scurry Away! (speed ×1.1 while wavering or routing), Hold the Line! (+5 melee defence, +4 leadership within 35 m of a standing General), Frenzy (+10 melee attack, ×1.1 damage, AP and charge while morale ≥ half of leadership), Strength of the Penitent (fired by the game when losing the melee: 20 s of +14 melee defence, +15 % physical resistance, ends out of melee, ready 3 s after). Schema only (the network sees them): Charge Defence vs. Large, Vanguard Deployment, Hide (forest), Immune to Psychology; left out by `sim.json` effects.off: Single Entity (lords: speed ×0.9, damage ×0.8 below 25 % health; no such speed drop in the recordings) | DB: the passports, `special_ability_to_auto_deactivate_flags`, `special_ability_to_recharge_contexts`; the attributes' rules: the knowledge base; measured: rout and running speeds, the morale drop at 50 % health ([below](#innate-effects)) |
 | Map | a square ±1020 m; a routing unit that crosses the edge leaves the battle | measured |
 | Visibility | everything is visible (`vis`, kept for later) | a flat empty map |
@@ -444,9 +444,37 @@ mirror (69 %). Waiting (a reserve, a walk) loses: the side that waits fights out
   trials replayed (`python -m tools.nn.lord_swarm --sim`; game / simulator): one spear unit 7.8 /
   7.7 and 6.2 / 6.1; four 7.4 / 8.0 and 4.8 / 6.3; halberds 21.5 / 17.1 and 11.2 / 11.7; the other
   lord and three units 29.8 / 21.8 and 27.6 / 22.4; mean error over the 24 layouts 18 %.
-- **Lord against lord** (`contact.lord_v_lord` 0.73): a lord fought by the enemy lord alone loses
-  14.6 HP/s (General) and 10.0 (Warlord) in the game, 19.4 / 15.0 in the simulator without the
-  factor.
+- **Lord against lord** (`contact.lord_hit_slope` 1; `contact.lord_v_lord` 1, off): a lone man strikes a
+  lone man by the database's hit chance (35 + attack − defence), not by the formations' flat slope 0.1.
+  Measured on duels of two lords of one type alone on the field ([the game AI's lord in a
+  duel](../game/game-ai.md#the-game-ais-lord-in-a-duel), 28 battles, blows counted as health drops,
+  `build/lordduel/hits.py`): General on General 0.103 blows a second of 245 HP (the passport exactly:
+  140 AP + 290 × (1 − 0.75 × 85 %)), so 41 % of the blows every 4 s hit (database 40 %: attack 55 against
+  defence 45 + 5 Hold the Line); Warlord on Warlord 0.047 blows of 223 HP, 19 % hit (database 30 % fresh,
+  ~22 % with the card's fatigue). At slope 0.1 both hit ~35 %, so there was no difference between the
+  types (in the game the General's rate is 2.4 times higher); one shared factor 0.73 cannot give it. Rate
+  (% health a duel second, on ours / on theirs), game — before — now:
+
+  | Duel | Game | Before (0.1 and ×0.73) | Now |
+  |---|---|---|---|
+  | General, the other under the AI (6 battles) | 0.71 / 0.60 | 0.40 / 0.38 | 0.54 / 0.51 |
+  | General, both under order (8) | 0.59 / 0.61 | 0.39 / 0.37 | 0.50 / 0.50 |
+  | Warlord, the other under the AI (6) | 0.26 / 0.28 | 0.36 / 0.33 | 0.33 / 0.31 |
+  | Warlord, both under order (8) | 0.25 / 0.25 | 0.35 / 0.33 | 0.31 / 0.31 |
+
+  Left: General ×0.8 (the simulator's duel lasts 165–180 s against 105–125 in the game; late in it the
+  simulator's lords tire and strike weaker, while the game AI's General stays fresh: fatigue 1.3–1.5 against
+  2–3.4), Warlord ×1.2 (hits less often than the database says, cause not found — perhaps his blow cycle is
+  longer than 4 s). A lord's charge (+40 / +35 attack) at slope 1 gives the first 5 s ×1.5–2 the rate; the
+  game shows no such burst for the General and a smaller one for the Warlord — kept for now.
+
+  Together with the AI ability rule (below), the check on the CPU before / after: mechanics 51 / 51 of 54;
+  game-AI battles 22 / 20 of 26 (seed 0; at seeds 1 and 2: 21 / 21 and 21 / 21 — two close battles, winner
+  share 0.5–0.75), each rule alone 20 as well; network battles 122 / 125 of 163. Gap card of the gate
+  20261006-052934 (8 copies; game — before — after): trade −0.241 — +0.006 — +0.021, our lord's loss a melee
+  second 0.0068 — 0.0108 — 0.0100, the enemy lord's 0.0039 — 0.0036 — 0.0044, our lord dead 0.50 — 0.42 —
+  0.46, the enemy's 0.17 — 0.06 — 0.12, routs a unit ours / theirs 1.48 / 0.96 — 1.11 / 1.10 — 1.15 / 1.21;
+  all within the noise.
 - **The lord as fragile as in the game** (four rules, each a switch in `config/nn/sim.json` with its reason).
   1. **His own aura does not reach the lord** (`morale.lord_own_aura` false): his units get +4, he does not.
      Measured: a lord at full health, calm, with a unit of his within 120 m stands at MoralePercent 1.129
@@ -508,10 +536,17 @@ mirror (69 %). Waiting (a reserve, a walk) loses: the side that waits fights out
   | the same: simulator before the rule | −2 | −4 | −4 | −4 | −4 | −4 | −4 |
 
   The army's collapse is the [army-destruction rule's](#army-destruction), not the lord's.
-- **Lord abilities** (`tools/nn/sim/abilities.py`). When the game's AI fires them is assumed, not
-  measured (only the Warlord's speed in the recordings, 5–6.5 m/s, shows Verminous Valour in use);
-  CA's planner on side 1 of the recorded whole battles gets no actives. The network's side fires
-  them by order.
+- **Lord abilities** (`tools/nn/sim/abilities.py`). When the game's AI fires them is measured from the
+  active effects (`nn_effects`) of 139 gate battles (85 Generals, 54 Warlords, 926 uses;
+  `build/lordduel/abilities/`): Foe Seeker and Verminous Valour in melee (the rule fits 218 of 318 and
+  182 of 245 uses, 19 / 13 false seconds; the old 'enemy within 60 m' 160 / 119, false 2050 / 1537 s):
+  ~30 % at contact, ~40 % the moment they are ready again, the rest a few seconds before contact (median
+  12 m); Stand Your Ground in melee with a friendly unit within 35 m (136 of 206; without the friend 116,
+  false 3014 s); Rally in melee with two friends within 35 m (69 of 157 — the loosest: a wavering friend
+  near at only 27 % of its uses; the old 'a friend wavers' 24); Deadly Onslaught never ('in melee' held
+  10,588 ready seconds in 53 of 54 battles). In one-on-one duels the AI fires only the speed abilities: at
+  contact and again 77–86 s later. The lord's health changes none of them. CA's planner on side 1 of the
+  recorded whole battles gets no actives. The network's side fires them by order.
 - **Shots at a lord in a crowd.** The game's AI slingers shoot a General fighting among his own
   spearmen, and the misses fall on those spearmen: spill reaches the target's units in melee too
   (the table above). One recorded swarm replayed 8 times: ours lost 12.2k HP (the game 14.7k), the
@@ -866,6 +901,7 @@ Measured, ready as a switch, not in `config/nn/sim.json`:
 | "A stronger enemy within 70 m" 0 (the recordings out of melee: median 0 over 3,244 cases) | with the rest of the rules the mechanics check 51 → 50 of 54: in the spearmen–clanrats pair the spearmen waver at 287 s (game 251; with −3: 253) and rout at 302 (game 275; with −3: 291), the clanrats waver at 295 s, which they never do in the game | the database's −3 kept (`morale.strong_enemy_points`); in melee the −3 (or what it stands in for) shows |
 | The charge's +15 morale (DB `charge_bonus` 15 / `charge_timeout` 60) | after 3343 recorded charges morale over the next 1–4 s falls as after 1500 contacts met standing | no +15 shows in the game |
 | The database's hit slope 1, flank ×0.6 / rear ×0.3, sectors 45° / 135°, spacing 1.8 m, bracing ×2 | worse against the pairs and the whole battles | the measured numbers kept (slope 0.1: the pairs need one flat number; flank 2.0 / rear 0.25; 60° / 120°; 1.5 m) |
+| Lord against lord at the flat slope 0.1 with one shared factor `lord_v_lord` 0.73 (fitted on whole battles 02.10: General 14.6 HP/s from a lord in the game, Warlord 10.0) | lord duels: General 0.39–0.40 / 0.37–0.38 %/s (game 0.59–0.71 / 0.60–0.61), Warlord 0.35–0.36 / 0.33 (game 0.25–0.26 / 0.25–0.28) | one factor for every lord cannot give the types' difference: it lies in attack against defence, which the flat slope erases; now `lord_hit_slope` 1 |
 | The database's lord-fall morale (−16, then −10 to every unit) at every fall, routs too | the simulator routed 39 % of the army within 10 s of a fall (the game 21 %); the game's units lose −3 to −4.8 points — every recorded fall was a rout | a rout on the field is the aura only; −16 / −10 only at a death, −16 for 120 s on leaving the map (`lord_fall`, measured in the game) |
 | A continuous "attacked in the flank / rear" −1 / −2 | the recordings show a 1–2 s drop of 1.5 / 1.9 points | one 0.5 s tick of the database's −6 / −14 at the first strike |
 | A charge impact of 2.5 and instant turning in melee | a unit charged standing lost 2.7× its charger (the game 0.82), a flank attack on a free unit lasted one step | everything left standing when charged lost; now 1.5, bracing and 2°/s |

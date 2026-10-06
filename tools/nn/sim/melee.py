@@ -12,7 +12,8 @@ Per pair of units in contact (i strikes j), per second:
                       contact.unit_incidental (a lord: lord_incidental) of its rate; a unit without
                       a missile weapon under HOLD (no attack order) strikes at contact.hold_rate of it
     hit chance p    = 35 + hit_slope x (attack + charge - defence x direction) within 8-90 %
-                      (the database rule is hit_slope 1; calibrated, config/nn/sim.json)
+                      (the database rule is hit_slope 1; calibrated, config/nn/sim.json); a lone
+                      man striking a lone man (lord against lord): contact.lord_hit_slope (measured 1)
     per hit         = ap + base x (1 - 0.75 armour / 100)   (armour stops 50-100 %: mean 75 %),
                       not more than a man's health; a splash blow's damage is divided among its targets
     HP/s            = F x splash x p x per hit / interval x (1 + impact x charge)
@@ -127,8 +128,14 @@ def strikes(u, pw, contact, params, charge_now, contact_s):
     # infantry on his back or flank hurts him hardly more than on his front).
     slope = torch.where(sector == 2, cal.get("rear_slope", cal["flank_slope"]), cal["flank_slope"])
     slope = torch.where(single_j, torch.full_like(slope, float(cc.get("lord_direction", 1.0))), slope)
-    exposed = defence * (1 - coef) * (slope / max(cal["hit_slope"], 1e-6) - 1)
-    p = hit_chance(attack + exposed, defence * coef, cal["hit_slope"], B["melee_hit_chance_base"],
+    # The hit chance's weight of attack - defence: hit_slope (calibrated, flat) for formations; a lone man
+    # striking a lone man (lord against lord) at contact.lord_hit_slope (1: the database rule; measured in the
+    # lone lord duels: General v General 0.60-0.71 %HP/s, Warlord v Warlord 0.23-0.34, config/nn/sim.json).
+    k_hit = torch.full_like(slope, float(cal["hit_slope"]))
+    k_hit = torch.where(single_i & single_j, torch.full_like(k_hit, float(cc.get("lord_hit_slope", cal["hit_slope"]))),
+                        k_hit)
+    exposed = defence * (1 - coef) * (slope / k_hit.clamp(min=1e-6) - 1)
+    p = hit_chance(attack + exposed, defence * coef, k_hit, B["melee_hit_chance_base"],
                    B["melee_hit_chance_min"], B["melee_hit_chance_max"])
     dmg, ap = u["damage"][:, :, None], u["ap_damage"][:, :, None]
     share = dmg / (dmg + ap).clamp(min=1e-6)

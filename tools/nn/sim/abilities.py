@@ -6,9 +6,11 @@ from the ability passports (config/nn/abilities.json, the game's database); conf
 their slots alone (effects.py shows a timed one's timers in its slot).
 
 Who fires an active ability:
-* a side played by the game's AI (STATIC `ai`) by a rule (an assumption, not measured): `melee`
-  when its owner is in melee, `near` when a standing enemy is within near_m of him, `waver` when a
-  friend within the ability's range wavers or routs;
+* a side played by the game's AI (STATIC `ai`) by a rule (measured in 139 gate battles and the lone
+  lord duels, config/nn/sim.json abilities.why): `melee` when its owner is in melee, `near` when a
+  standing enemy is within near_m of him, `waver` when a friend within the ability's range wavers or
+  routs, `never` not at all; and, for an ability in `friends_min`, only with at least that many
+  standing friends within its range (none in a lone duel);
 * any unit when ordered (Orders.ability: the slot to use, -1 none; the network's side) - only a
   self-cast ability (passport self_cast: used on the owner, no target to choose), ready and not
   active. A side the network plays should have `ai` false, or its lord also fires by the rule.
@@ -30,7 +32,7 @@ except ImportError:          # slots_of() is used without torch (params)
     torch = None
 
 SLOTS = 3
-TRIGGERS = {"passive": 0, "melee": 1, "near": 2, "waver": 3, "losing": 4, "ready": 5}
+TRIGGERS = {"passive": 0, "melee": 1, "near": 2, "waver": 3, "losing": 4, "ready": 5, "never": 6}
 AUTO_TRIGGERS = {"losing_melee_combat": "losing", "engaged_in_melee": "melee"}
 OFF = ("out_of_melee", "morale_is_lower_than_half_of_base_morale", "morale_is_higher_than_wavering",
        "health_below_50%_base")
@@ -43,7 +45,7 @@ SIM_STATS = {("scalar_speed", "mult"): "speed", ("scalar_charge_speed", "mult"):
              ("stat_melee_damage_base", "mult"): "damage", ("stat_melee_damage_ap", "mult"): "ap",
              ("stat_charge_bonus", "mult"): "charge", ("stat_morale", "add"): "leadership",
              ("stat_resistance_physical", "add"): "resist_physical"}
-HEAD = ("active_s", "recharge_s", "passive", "trigger", "range_m", "self_cast", "modelled", "auto") + tuple(
+HEAD = ("active_s", "recharge_s", "passive", "trigger", "range_m", "self_cast", "modelled", "auto", "friends_min") + tuple(
     f"off_{f}" for f in OFF)
 COLS = HEAD + tuple(f"{g}_{s}" for g in GROUPS for s in STATS)
 COL = {c: i for i, c in enumerate(COLS)}
@@ -101,7 +103,8 @@ def row(params, key):
         trigger = cal["triggers"].get(key, cal["default_trigger"])
     eff = effects(p)
     out = [float(p["active_s"]), float(p["recharge_s"]), float(p["passive"]), float(TRIGGERS[trigger]),
-           float(p["range_m"]), float(p["self_cast"]) * float(not auto), float(key in cal["model"]), float(auto)]
+           float(p["range_m"]), float(p["self_cast"]) * float(not auto), float(key in cal["model"]), float(auto),
+           float((cal.get("friends_min") or {}).get(key, 0))]
     out += [float(f in (p.get("off_when") or ())) for f in OFF]
     for g in GROUPS:
         for s in STATS:
@@ -150,6 +153,8 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None):
         friend_shaky = (friends & shaky[:, None, :]).any(2)
         want = torch.where(trig == 1, engaged, torch.where(trig == 2, foe_near, torch.where(
             trig == 3, friend_shaky, torch.where(trig == 4, losing, trig == 5))))
+        # friends_min: the game's AI fires it only with that many standing friends within its range
+        want = want & ((friends & standing[:, None, :]).sum(2) >= c("friends_min"))
         off = torch.zeros_like(engaged)
         for f in OFF:
             off = off | ((c(f"off_{f}") > 0) & off_now[f])

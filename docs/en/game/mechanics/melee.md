@@ -15,6 +15,12 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
   - Ours: the simulator keeps 35 / 8 / 90 but counts attack − defence at 0.1 of the rule
     (`melee.hit_slope` 0.1): the four measured pairs need a nearly flat 30–38 % whatever
     attack − defence is (−35…+31). **Conflict** with CA's formula; see the possible causes below.
+  - Ours: **lord against lord by the formula** (`contact.lord_hit_slope` 1). In duels of two lords alone on
+    the field the blows were counted as health drops (28 battles, 06.10.2026): General on General hits 41 % of
+    his blows (formula 40 %: 55 against 45 + 5 Hold the Line), Warlord on Warlord 19 % (formula 30 % fresh,
+    ~22 % with fatigue); a blow takes 245 / 223 HP — exactly the passport and armour at its mean 75 %. The
+    flat slope gave both ~35 %. So CA's formula holds, and formations flatten it by something of their own
+    ([simulator](../../training/simulator.md#lords)).
 - **The stats in the formula are the modified ones**: abilities, fatigue, flank/rear
   multipliers and difficulty are applied before the roll. WH2–WH3 · [fandom Melee Attack][fw-ma],
   [CA damage blog][dmg] · medium.

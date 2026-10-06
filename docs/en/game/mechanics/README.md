@@ -52,7 +52,8 @@ sources are used and marked. Our own measurements in the game are elsewhere:
 
 1. **The hit-chance formula is confirmed by CA** (2023): 35 + attack + bonus vs type + current
    charge bonus − defence, 8–90 %; no patch changed it. Our flat `hit_slope` 0.1 is therefore a
-   stand-in for something else (blow cycle, matched combat, reach) — [melee](melee.md).
+   stand-in for something else (blow cycle, matched combat, reach) in formations; a lord against a lord
+   hits exactly by the formula (measured in duels) — [melee](melee.md).
 2. **Flank/rear: defence ×0.6 / ×0.3, decided per attacking model**, ending when the struck entity
    turns to face the attacker — which explains why a lord shows no flank penalty — [flanking](flanking.md).
 3. **"Attacked in the flank / rear" (−6 / −14) is a first-contact effect** by the key's description,

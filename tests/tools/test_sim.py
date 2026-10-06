@@ -324,6 +324,23 @@ class TestMelee:
         less = float(melee.strikes(st.u, pw, contact, P.with_cal("contact", lord_v_lord=0.73), z, z + 100)[0][0, H, 0])
         assert full > 0 and less == pytest.approx(0.73 * full, rel=1e-4)
 
+    def test_a_lord_strikes_a_lord_by_the_database_hit_chance(self):
+        # contact.lord_hit_slope: lord against lord, hit = 35 + attack - defence (the Warlord's 50 against the
+        # General's 45: 40 %); a blow 120 AP + 280 x (1 - 0.75 x 85 %) every 4 s. Infantry on the lord keeps
+        # the flat hit_slope.
+        assert P.sim["contact"]["lord_hit_slope"] == 1.0 and P.sim["melee"]["hit_slope"] < 1.0
+        st, pw, contact, z = self.surrounded(1, rival=True)
+        H = st.N // 2
+        st.u["order_kind"][0, H:H + 2] = O.ATTACK               # attacking him (not held: contact.hold_rate)
+        st.u["order_target"][0, H:H + 2] = 0
+        p = P.with_cal("contact", lord_v_lord=1.0)
+        rate = melee.strikes(st.u, pw, contact, p, z, z + 100)[0][0, :, 0]
+        assert float(rate[H]) == pytest.approx(0.40 * (120 + 280 * (1 - 0.75 * 0.85)) / 4.0, rel=1e-4)
+        flat = melee.strikes(st.u, pw, contact, p.with_cal("contact", lord_hit_slope=P.sim["melee"]["hit_slope"]),
+                             z, z + 100)[0][0, :, 0]
+        assert float(flat[H]) == pytest.approx(0.355 * (120 + 280 * (1 - 0.75 * 0.85)) / 4.0, rel=1e-4)
+        assert float(rate[H + 1]) == pytest.approx(float(flat[H + 1]), rel=1e-6) and float(rate[H + 1]) > 0
+
     def test_swordsmen_out_strike_spearmen_against_clanrats(self):
         # Same men, armour and shield class; the sword: attack 32 (spear 20), 21 + 7 damage, a blow every 4.3 s
         # (the plain spear 5.7 s); no bonus against infantry in the database (bonus_v_infantry 0).
@@ -936,17 +953,44 @@ class TestAbilities:
         engaged[0, 0] = engaged[0, H] = True
         dmg, ap, defence, run = (float(u[k][0, i]) for k, i in (("damage", H), ("ap_damage", H), ("defence", 1),
                                                                     ("run", H)))
+        engaged[0, 0] = engaged[0, H] = False
+        abilities.apply(u, P, 0.5, standing, engaged, dist, same)         # touching but not in melee: nothing
+        assert float(u["ab0_on"][0, H]) == 0
+        engaged[0, 0] = engaged[0, H] = True
         old = abilities.apply(u, P, 0.5, standing, engaged, dist, same)
-        assert float(u["damage"][0, H]) == pytest.approx(1.25 * dmg)      # Deadly Onslaught (in melee)
-        assert float(u["ap_damage"][0, H]) == pytest.approx(1.25 * ap)
-        assert float(u["run"][0, H]) == pytest.approx(1.25 * run)         # Verminous Valour (enemy near)
-        assert float(u["ab1_on"][0, H]) == 31 and float(u["ab1_cd"][0, H]) == 31 + 90
+        assert float(u["run"][0, H]) == pytest.approx(1.25 * run)         # Verminous Valour (at contact)
+        assert float(u["ab0_on"][0, H]) == 17 and float(u["ab0_cd"][0, H]) == 17 + 60
+        assert float(u["damage"][0, H]) == pytest.approx(dmg)              # Deadly Onslaught: never by the AI
+        assert float(u["ap_damage"][0, H]) == pytest.approx(ap) and float(u["ab1_cd"][0, H]) == 0
+        assert float(u["ab2_cd"][0, H]) == 0                               # Rally: no 2 friends within 35 m
         assert float(u["ab0_on"][0, 0]) == 0 and float(u["ab1_on"][0, 0]) == 0   # our General: no order, no use
         assert float(u["defence"][0, 1]) == defence                        # Hold the Line: an innate effect
         abilities.restore(u, old)
-        assert float(u["damage"][0, H]) == dmg
-        abilities.apply(u, P, 31.0, standing, engaged, dist, same)  # 31 s later: over, recharging
-        assert float(u["ab1_on"][0, H]) == 0 and float(u["ab1_cd"][0, H]) == 90
+        assert float(u["run"][0, H]) == run
+        abilities.apply(u, P, 17.0, standing, engaged, dist, same)  # 17 s later: over, recharging
+        assert float(u["ab0_on"][0, H]) == 0 and float(u["ab0_cd"][0, H]) == 60
+
+    def test_the_game_ai_stands_its_ground_only_with_friends_near(self):
+        # Stand Your Ground: the game's AI fires it in melee with at least one standing friend within 35 m
+        # (never in a lone duel); Rally with at least two (config/nn/sim.json abilities.friends_min).
+        from tools.nn.sim import abilities
+        assert P.sim["abilities"]["friends_min"] == {"wh_main_character_abilities_stand_your_ground": 1,
+                                                     "wh_main_character_abilities_rally": 2}
+        for friend_z, fired in ((20, True), (50, False)):
+            st = scenario.build([army([(self.WARLORD, 2, 0, 270)], [(GENERAL, 0, 0, 90), (SPEAR, 0, friend_z, 90)])], P)
+            u = st.u
+            H = st.N // 2
+            abilities.set_rule(u, torch.tensor([[False, True]]))
+            pw = geometry.pairwise(u, 1.5)
+            same = u["side"][:, :, None] == u["side"][:, None, :]
+            standing = u["men"] > 0
+            engaged = torch.zeros_like(standing)
+            engaged[0, 0] = engaged[0, H] = True
+            defence = float(u["defence"][0, H])
+            abilities.apply(u, P, 0.5, standing, engaged, pw["dist"], same)
+            assert (float(u["ab1_on"][0, H]) == 18) == fired, friend_z          # slot 1: Stand Your Ground
+            assert (float(u["defence"][0, H]) == defence + 24) == fired
+            assert float(u["ab0_on"][0, H]) == 25                                # Foe-Seeker: in melee, always
 
     def test_the_network_fires_a_ready_self_cast_ability_by_order(self):
         from tools.nn.sim import abilities

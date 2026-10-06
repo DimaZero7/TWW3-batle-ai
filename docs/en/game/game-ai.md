@@ -120,9 +120,18 @@ In brackets the 95 % bootstrap interval over battles. Both types together: 0.87 
 
 **What it means for the simulator.** The extra x1.4 of the AI lord's damage on the network's lord in
 the gate battles is not an AI advantage. The same duel in the simulator (a replay of these 20 battles,
-8 copies each): General v General 0.38-0.40 %/s both ways against 0.60-0.71 in the game (x0.56-0.63),
-Warlord v Warlord 0.33-0.36 against 0.23-0.34 (matches). So the Empire lord's melee damage on a lord is
-too low, whoever commands him (`build/lord-ai/simduel.json`).
+8 copies each) gave General v General 0.38-0.40 %/s both ways against 0.60-0.71 in the game
+(x0.56-0.63), Warlord v Warlord 0.33-0.36 against 0.23-0.34. The cause is the hit chance: the blows,
+counted as health drops, follow CA's formula exactly (the General hits 41 %, the Warlord 19 %), while the
+simulator gave both a flat ~35 %. Now a lord against a lord hits by the formula
+([simulator](../training/simulator.md#lords)): General x0.8 of the game, Warlord x1.2.
+
+**When the AI fires its lord's abilities in whole battles** (139 gate battles, 926 uses,
+`build/lordduel/abilities/`): Foe Seeker and Verminous Valour in melee (at contact or the moment they are
+ready again; some a few seconds before contact); Stand Your Ground in melee with a friendly unit within
+35 m; Rally in melee next to two friends (the loosest rule: 69 of 157 uses); Deadly Onslaught never. The
+lord's health does not matter. The simulator's scripted opponents now fire them the same way
+([simulator](../training/simulator.md#lords)).
 
 ## CA's planner weaknesses and our fixes
 
