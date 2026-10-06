@@ -1308,12 +1308,13 @@ def melee_activity(n, **flags):
 
 
 def test_melee_tires_only_under_an_attack_order():
-    # single entity +19, formation +13.7 a tick with the order; without it walking -1 or idle -18
+    # single entity +15 (fatigue.calibration.single_combat), formation +13.7 a tick with the order; without it
+    # walking -1 or idle -18
     u = {"fatigue": torch.full((4,), 15000.), "fat": torch.zeros(4)}
     activity = melee_activity(4, attack=[True, True, False, False], single=[True, False, True, False],
                               walking=[False, False, True, False])
     fatigue.step(u, activity, calibrated_fatigue(), 1.)
-    assert u["fatigue"].tolist() == pytest.approx([15190., 15137., 14990., 14820.])
+    assert u["fatigue"].tolist() == pytest.approx([15150., 15137., 14990., 14820.])
 
 
 def test_charging_tires_only_under_an_attack_order():
@@ -1693,3 +1694,101 @@ class TestReplayMeleeGaps:
         gap0 = replay.recorded_orders(b, [0, 1], N, fight_nearest=True, leave_m=10.0, leavers=[True, False],
                                       melee_gap=0)
         assert (gap0["kind"][2:4, 1] == O.MOVE).all()
+
+
+class TestLordFragility:
+    """Batch 3: the lord as fragile as in the game (config/nn/sim.json morale.lord_why, missile.single_in_melee_why,
+    fatigue.lord_why)."""
+
+    def test_the_lords_aura_reaches_his_units_not_himself(self, monkeypatch):
+        st = scenario.build([army([(GENERAL, 0, 0, 90, True), (SPEAR, 0, 20, 90)], [(SLAVE, 400, 0, 270)])], P)
+        seen = _ctx_of(monkeypatch, st, lambda s: O.hold(s.B, s.N), 1)
+        assert float(seen[0]["aura"][0, 1]) == 1.0 and float(seen[0]["aura"][0, 0]) == 0.0
+        st = scenario.build([army([(GENERAL, 0, 0, 90, True), (SPEAR, 0, 20, 90)], [(SLAVE, 400, 0, 270)])], P)
+        own = P.with_cal("morale", lord_own_aura=True)
+        seen = []
+        real = morale.step
+        monkeypatch.setattr(morale, "step", lambda u, ctx, params, dt: (seen.append(ctx["aura"].clone()),
+                                                                         real(u, ctx, params, dt))[1])
+        battle.step(st, O.hold(st.B, st.N), own)
+        assert float(seen[0][0, 0]) == 1.0
+
+    def test_a_single_entity_in_melee_is_always_losing(self):
+        st = face_off(GENERAL, SLAVE)
+        H = st.N // 2
+        st.u["dealt"][0, 0], st.u["taken"][0, 0] = 500.0, 0.0      # the lord wins by HP
+        st.u["dealt"][0, H], st.u["taken"][0, H] = 500.0, 0.0      # so do the slaves (a formation)
+        melee_ctx = TestMorale().ctx(st, in_melee=torch.ones_like(st.u["r"]))
+        calm_ctx = TestMorale().ctx(st)
+        now = morale.target_points(st.u, melee_ctx, P) - morale.target_points(st.u, calm_ctx, P)
+        old_p = P.with_cal("morale", single_combat=None)
+        old = morale.target_points(st.u, melee_ctx, old_p) - morale.target_points(st.u, calm_ctx, old_p)
+        assert float(now[0, 0]) == P.morale["losing_combat"] == -3
+        assert float(old[0, 0]) == float(old[0, H]) == float(now[0, H]) == P.morale["winning_combat_significantly"]
+
+    def test_a_lord_in_melee_takes_the_hits_aimed_at_him_whole(self):
+        st = scenario.build([army([(GENERAL, 0, 0, 90), (SPEAR, 0, 30, 90)],
+                                  [(SPEAR, 6, 0, 270), (SLINGER, 120, 0, 270)])], P)
+        H = st.N // 2
+        pw = geometry.pairwise(st.u, 1.5)
+        target = torch.full((1, st.N), -1)
+        target[0, H + 1] = 0                                  # the slingers shoot our General
+        contact = torch.zeros((1, st.N, st.N), dtype=torch.bool)
+        contact[0, 0, H] = contact[0, H, 0] = True            # he fights the enemy spearmen
+        _, fight, _ = missile.volley(st.u, pw, target, 1.0, P, contact=contact)
+        _, free, _ = missile.volley(st.u, pw, target, 1.0, P, contact=torch.zeros_like(contact))
+        _, old, _ = missile.volley(st.u, pw, target, 1.0, P.with_cal("missile", single_entity_in_melee=None),
+                                   contact=contact)
+        ff = P.sim["missile"]["friendly_fire"]["sling"]
+        lone = P.sim["missile"]["single_entity_factor"]
+        assert float(fight[0, H + 1, 0]) / float(free[0, H + 1, 0]) == pytest.approx((1 - ff) / lone, rel=1e-3)
+        assert float(old[0, H + 1, 0]) / float(free[0, H + 1, 0]) == pytest.approx(1 - ff, rel=1e-3)
+
+    def test_a_lord_tires_slower_in_melee_and_pays_the_charge_only_at_contact(self):
+        # single entity in melee: single_combat (15) a tick, the charge (+34) only in the first single_charge_s (2) s;
+        # a formation keeps 13.7 and charges while its charge lasts.
+        u = {"fatigue": torch.full((4,), 15000.), "fat": torch.zeros(4)}
+        activity = melee_activity(4, attack=[True] * 4, single=[True, True, False, False],
+                                  charging=[True, True, True, False])
+        activity["contact_s"] = torch.tensor([1.0, 3.0, 3.0, 3.0])
+        fatigue.step(u, activity, calibrated_fatigue(), 1.)
+        assert u["fatigue"].tolist() == pytest.approx([15340., 15150., 15340., 15137.])
+        u = {"fatigue": torch.full((1,), 15000.), "fat": torch.zeros(1)}
+        old = calibrated_fatigue()
+        old.sim["fatigue"]["calibration"].pop("single_combat")
+        old.sim["fatigue"]["calibration"].pop("single_charge_s")
+        a = melee_activity(1, attack=[True], single=[True], charging=[True])
+        a["contact_s"] = torch.tensor([3.0])
+        fatigue.step(u, a, old, 1.)
+        assert u["fatigue"].tolist() == pytest.approx([15340.])
+
+
+class TestRallyNearTarget:
+    """morale.rally_rule "target": a routing unit free of enemies rallies once its morale is above 0 and within
+    rally_gap_mp of its target, and only if the target is above 0 (config/nn/sim.json morale.rally_why)."""
+
+    def rally_at(self, params, left, steps=200):
+        st = face_off(SPEAR, SLAVE)
+        st.u["hp_abs"][0, 0] = left * st.u["hp0"][0, 0]
+        st.u["r"][0, 0] = True
+        st.u["rout_count"][0, 0] = 1
+        st.u["morale"][0, 0] = -10.0
+        free = TestMorale().ctx(st, enemy_near=torch.zeros_like(st.u["r"]))
+        target = float(morale.target_points(st.u, free, params)[0, 0])
+        for _ in range(steps):
+            before = float(st.u["morale"][0, 0])
+            morale.step(st.u, free, params, 0.5)
+            if not bool(st.u["r"][0, 0]):
+                return before + params.sim["morale"]["rally_rate"] * 0.5, target, float(st.u["leadership"][0, 0])
+        return None, target, float(st.u["leadership"][0, 0])
+
+    def test_a_unit_rallies_near_its_target_and_not_with_nothing_left(self):
+        p = P.with_cal("morale", rally_rule="target", rally_gap_mp=0.17)
+        m, target, L = self.rally_at(p, 0.25)
+        assert target > 0 and m >= target - 0.17 * L and m < target - 0.17 * L + 1.01
+        fixed, _, _ = self.rally_at(P.with_cal("morale", rally_rule="fixed"), 0.25)
+        assert fixed >= P.sim["morale"]["rally_mp"] * L and fixed < m
+        never, target, _ = self.rally_at(p, 0.05)
+        assert target <= 0 and never is None
+        capped, _, _ = self.rally_at(P.with_cal("morale", rally_rule="target", rally_gap_mp=0.17, rally_cap=True), 0.9)
+        assert capped < P.sim["morale"]["rally_mp"] * L + 1.01

@@ -4,7 +4,8 @@ Points per activity from the game's database (_kv_fatigue_tables): charging +34,
 shooting +18, running +4, walking -1, standing ready -7, idle -18; thresholds fresh 0, active 2800,
 winded 6600, tired 12600, very tired 18000, exhausted 27000 (max 30000). The calibration
 (config/nn/sim.json fatigue.calibration, ON) runs 10 ticks/s, freezes dead and departed slots and
-charges melee only to a unit with an attack order: +19 a tick for a single entity, 13.7 for a
+charges melee only to a unit with an attack order: +15 a tick for a single entity (charging only in
+the first 2 s of a contact; calibration.single_combat / single_charge_s), 13.7 for a
 formation; a unit in melee without one moves or rests. A move costs by its order's run flag (run
 +4, walk -1), a routing unit +4; shooting 7.5 (fitted on the 204 recordings); a standing unit
 rests at idle with no standing enemy within ready_enemy_m, else stands ready. OFF is the legacy
@@ -55,7 +56,12 @@ def step(u, activity, params, dt):
         # (its men are not all fighting). Without the order it walks or rests while engaged.
         attack = activity.get("attack", torch.ones_like(melee))
         single = activity.get("single", torch.zeros_like(melee))
-        combat = torch.where(single, F["combat"], torch.full_like(rate, float(trial["multi_combat"])))
+        # A single entity: single_combat a tick (missing: the database's melee +19) and the charge cost only in the
+        # first single_charge_s seconds of a contact (missing: while his charge lasts); config/nn/sim.json fatigue.lord_why.
+        combat = torch.where(single, torch.full_like(rate, float(trial.get("single_combat", F["combat"]))),
+                             torch.full_like(rate, float(trial["multi_combat"])))
+        if trial.get("single_charge_s") is not None and "contact_s" in activity:
+            charging = charging & (~single | (activity["contact_s"] < float(trial["single_charge_s"])))
         rest = torch.where(moving, move_rate, torch.full_like(rate, F["idle"]))
         rate = torch.where(melee, torch.where(attack, combat, rest), rate)
         charging = charging & attack

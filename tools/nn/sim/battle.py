@@ -274,8 +274,12 @@ def step(st, orders, params=None, dt=None):
     r0 = M["general_aura_radius"]
     r1 = r0 * (M["inspiration_radius_max_effect_range_modifier"] if cal["morale"].get("aura_fade") else 1.0)
     reach_share = ((r1 - d) / max(r1 - r0, 1e-6)).clamp(0, 1) if r1 > r0 else (d <= r0).float()
-    aura = torch.where(same_side & standing[:, None, :] & u["encourages"][:, None, :], reach_share,
-                       torch.zeros_like(d)).amax(2)
+    # morale.lord_own_aura false: the aura reaches the lord's units, not the lord himself (measured: a lord at full
+    # health with a friend near stands at leadership + flanks secure, no +4; config/nn/sim.json morale.lord_why).
+    giver = same_side & standing[:, None, :] & u["encourages"][:, None, :]
+    if not cal["morale"].get("lord_own_aura", True):
+        giver = giver & ~eye
+    aura = torch.where(giver, reach_share, torch.zeros_like(d)).amax(2)
     worth = u["cost"] * u["hp"]
     collapse = morale.army_collapse(u, params)
     ctx = {
@@ -310,7 +314,7 @@ def step(st, orders, params=None, dt=None):
     activity = {"melee": engaged, "charging": engaged & (charge_now > 0), "shooting": firing,
                 "running": speed > u["walk"] + 0.3, "walking": speed > 0.3,
                 "idle": idle, "active": alive, "attack": kind == O.ATTACK, "single": u["men0"] <= 1,
-                "run_order": u["order_run"].bool(), "routing": alive & u["r"]}
+                "run_order": u["order_run"].bool(), "routing": alive & u["r"], "contact_s": u["contact_s"]}
     near_m = float(cal["fatigue"].get("calibration", {}).get("ready_enemy_m", 0.0))
     if near_m > 0:
         activity["enemy_near"] = (foes & standing[:, None, :] & (d <= near_m)).any(2)

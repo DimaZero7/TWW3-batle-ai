@@ -57,15 +57,17 @@ the "canary" (the baseline's first 32 pairs) adopts the old ones.
 missile weapon is held 20 s, a missile unit 5 s, as in the game), pursuit of routers, hit chance (flat: slope 0.1
 instead of the database's 1), damage and armour, charge and spear bracing, flank and rear
 (fitted: flank costs more than rear), volley fire, friendly fire and spill, lords (at most 9
-men hit them), morale with all main modifiers (the 4 s and 60 s casualty windows and 'under fire' 15 s as in the
+men hit them; the lord as fragile as in the game: his own aura does not reach him, in melee he is
+always 'losing' (−3), projectiles hit him whole in melee, he tires slower than a formation), morale with all main modifiers (the 4 s and 60 s casualty windows and 'under fire' 15 s as in the
 game; a lord's death: his army
 −16 for 45 s, then −10; his rout on the field: the aura only), rout, rally, army collapse (−120 by the
 database's strategic strength), flank-threat flags, fatigue, units' innate effects, lord
 abilities.
 
 **Fatigue** (switched on by the latest change): 10 ticks a second; melee tires only a unit with
-an attack order (single entity +19 a tick, formation 13.7), shooting 7.5, walking 3.4, idle −18.
-Exhausted shares as in the game: own 16.8 % (game 17.3 %), enemy 28.7 % (game 28.6 %).
+an attack order (single entity 15 a tick and his charge only in the first 2 s of a contact, formation 13.7), shooting 7.5, walking 3.4, idle −18.
+Exhausted shares (replay of the 204 recordings): own 14.9 % (game 17.3 %), enemy 25.8 % (game 28.6 %);
+lords 13.6 / 25.3 % (game 22.0 / 22.9 %).
 
 **Check against the game** (`python -m tools.nn.sim.check`): every battle recorded in the game
 is replayed in the simulator from its recorded orders (8 copies with starts shifted up to 2 m,
@@ -75,8 +77,8 @@ frozen. Three scores, higher is better:
 | Score | Now |
 |---|---:|
 | Mechanics: unit pairs and shooting within 20 % of the game | 51 / 54 |
-| Same winner: the game's AI against itself | 21 / 26 |
-| Same winner: the network against the game's AI (157 recordings now) | 114 / 157 |
+| Same winner: the game's AI against itself | 22 / 26 |
+| Same winner: the network against the game's AI (163 recordings now) | 122 / 163 |
 
 **Gate replay** — the in-game gate battles replayed in the simulator (both sides from the
 recording). Gold trade at the game's end time: game −0.26…−0.41, simulator −0.05…−0.24 on the
@@ -95,6 +97,8 @@ same battles. **The simulator is too kind to the network** — the main measured
   (21–112 s); what triggers leaving melee is unknown;
 - morale right at contact and the open-flank flags match only partly;
 - army collapse finds 58 of 65 onsets in the recordings, but in a free battle its time drifts;
+- rallied units rout again nearly all exactly 10 s after the rally (in the game gradually); the rule
+  'rally near the morale target' fixes that but rallies a third fewer units — left off;
 - order delay in the game is 0.6–0.8 s in small battles, 0.36 s in the simulator;
 - the second wave of units (Flagellants, Greatswords, militia, Skavenslaves, shielded Clanrats,
   Night Runners) is not checked against recordings;

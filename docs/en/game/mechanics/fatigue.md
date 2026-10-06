@@ -60,8 +60,10 @@ max 30000. · [twwstats][tws], [fandom Fatigue][fw-fat], [CA elevation blog][ele
     `fatigue_state()` and CCO states 0–5 agree in the old probe; all 3814 initial arena reads
     are Fresh. Exact starting points within that band are unrecorded: zero remains an assumption.
   - Ours (calibration ON): melee tires only a unit with an attack order — a single
-    entity at +19 a tick, a formation at 13.7 (not all its men fight); in melee without an attack
-    order the unit moves or rests. Charging +34 also only with an attack order. A move costs by its
+    entity at 15 a tick, a formation at 13.7 (not all its men fight); in melee without an attack
+    order the unit moves or rests. Charging +34 also only with an attack order, for a single entity
+    only in the first 2 s of a contact (the game's lords first turn tired after 60–62 s of melee; with
+    +19 and the charge for all 13 s the simulator gave 37–47 s; [lords](../../training/simulator.md#lords)). A move costs by its
     order's run flag, not by speed: run +4, walk −1 (DB; clean walk spans of the game's AI, 2925 s:
     0 crossings up, 6 down). A routing unit +4. Shooting 7.5 (not the DB +18). Idle −18 without
     unfinished movement, attack or aiming and with no standing enemy within 80 m; otherwise ready

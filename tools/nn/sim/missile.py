@@ -153,7 +153,13 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None):
         ff = u["friendly_fire"][:, :, None] * engaged[:, None, :]  # [B, i, j]
         # A lone man among them (a lord) is hit as a lone target is: single_entity_factor of his
         # share (without it a lord in melee with shot enemies took the whole friendly fire).
-        landed = torch.bmm(aimed * ff, friends * lone[:, None, :]) + aimed * (1 - ff) * lone[:, None, :]
+        # The target's own share: a lone man in melee takes single_entity_in_melee of it (measured 1:
+        # config/nn/sim.json missile.single_in_melee_why); out of melee single_entity_factor.
+        own = lone
+        if ms.get("single_entity_in_melee") is not None:
+            own = torch.where((u["men0"] <= 1) & (engaged > 0), torch.full_like(men, float(ms["single_entity_in_melee"])),
+                              lone)
+        landed = torch.bmm(aimed * ff, friends * lone[:, None, :]) + aimed * (1 - ff) * own[:, None, :]
     # Spill: hits aimed at j also land on j's neighbours of its own side that are out of melee,
     # a share by distance between centres (measured).
     if ms.get("spill"):

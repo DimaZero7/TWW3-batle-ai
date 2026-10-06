@@ -51,7 +51,10 @@ infantry, missiles at him, abilities. Monsters are in [monsters](monsters.md). C
   (was 35 %). · [5.0.0 blog][p500] · high.
   - Ours: a lord loses 0.43 of the unit rule per projectile aimed at him out of melee
     (`missile.single_entity_factor`), measured on ~33k shots. Consistent with physical projectiles
-    that miss a single small body more often; no public number to compare.
+    that miss a single small body more often; no public number to compare. In melee whole
+    (`missile.single_entity_in_melee` 1): our lord in melee under the fire of 1 / 2+ units loses 0.62 / 0.82 %
+    of his health a second in the game, the simulator gave 0.42 / 0.50 with 0.43, 0.59 / 0.87 with 1
+    ([lords](../../training/simulator.md#lords)).
 - **Big single entities have bigger hitboxes** and get hit more; there is no hit-chance bonus
   against "large". · Steam, fandom · medium.
 

@@ -4,11 +4,11 @@ Morale is points: leadership + a start bonus + the effects of the moment (the ga
 _kv_morale_tables). MoralePercent = points / leadership. Each 0.5 s tick the points move towards
 that sum by max(1, 15 % of the gap) (minimium_increment_update_per_tick, percent_update_per_tick).
 
-Effects (points): lord within 70 m +4 (fading to 0 at 105 m); the lord killed -16 for 45 s, then -10; routed
+Effects (points): lord within 70 m +4 (fading to 0 at 105 m; not to himself: morale.lord_own_aura); the lord killed -16 for 45 s, then -10; routed
 off the map -16 for 120 s (routed on the field: his aura only; battle.py, sim.json morale.lord_fall); neighbour within 120 m
 (flanks secure) +5; casualties over the battle (share of HP) -2 ... -74; recent casualties
 -6 ... -80 (HP lost in the last 4 s); extended casualties -4 ... -60 (the last 60 s); winning / losing the melee +3/+6/+8,
--3/-8; attacked in the flank / rear -6 / -14 for the tick of the first contact from that side; flanks exposed (an enemy threatens the left, right or rear:
+-3/-8 (a single entity in melee always -3: morale.single_combat); attacked in the flank / rear -6 / -14 for the tick of the first contact from that side; flanks exposed (an enemy threatens the left, right or rear:
 lf / rf / bf) -3, several -6;
 routing friends within 100 m -3 each (at most 4; a routing expendable unit scares only expendable units); routing
 enemies within 100 m +2.5 each (at most 5); under fire -5 until 15 s after the last projectile hit; very tired -2,
@@ -18,8 +18,9 @@ morale.strong_enemy_points); the army beaten as a whole -120 (army destruction).
 States: wavering below 16 points; routing at 0 or below (not within 10 s of a rally); the third
 rout shatters, as does falling below the database's broken band (-50 points) during army destruction. A routing unit
 regains rally_rate points a second while no standing enemy is within rally_free_m and its army
-is not collapsing, and rallies at MoralePercent rally_mp; then its morale follows the effects
-again (a unit that lost much soon routs again, as in the game).
+is not collapsing, and rallies at MoralePercent rally_mp (rally_rule "fixed"; "target", measured and left
+off: above 0 and within rally_gap_mp of its morale target, if that target is above 0); then its morale
+follows the effects again (with "fixed" a unit that lost much routs again when the 10 s end).
 """
 import math
 
@@ -144,7 +145,12 @@ def target_points(u, ctx, params):
     if cal.get("extended_s"):
         ext = u["extended"] / u["hp0"].clamp(min=1e-6)
         pts = pts + steps(ext, table(R, "extended_casualties_penalty_", (10, 15, 33, 50, 80)))
-    pts = pts + combat_points(u["dealt"], u["taken"], ctx["in_melee"], cal, R)
+    combat = combat_points(u["dealt"], u["taken"], ctx["in_melee"], cal, R)
+    if cal.get("single_combat") == "losing":
+        # A single entity (a lord) in melee always gets the database's losing_combat (-3), whatever the HP balance
+        # (measured: config/nn/sim.json morale.lord_why).
+        combat = torch.where(ctx["in_melee"] & (u["men0"] <= 1), torch.full_like(combat, R["losing_combat"]), combat)
+    pts = pts + combat
     # Attacked in the flank / rear: measured points (the database's -6 / -14 is not what a unit
     # fighting on its flank or rear shows in the recordings).
     if cal.get("attacked_event"):
@@ -203,8 +209,18 @@ def step(u, ctx, params, dt):
     # at leadership or above, so they never waver or rout (docs/en/game/mechanics/abilities.md).
     M = torch.where(u["unbreakable"], torch.maximum(M, L), M)
 
-    # Rally.
-    rally = routing & ~u["s"] & free & (M >= cal["rally_mp"] * L) & alive
+    # Rally. "fixed": at MoralePercent rally_mp. "target": once the morale has climbed above 0 and to within
+    # rally_gap_mp (x leadership) of its target, and only if the target is above rally_target_min_mp (x leadership;
+    # 0: a rallied unit's morale rises, as in the game: config/nn/sim.json morale.rally_why); rally_cap: no later
+    # than at rally_mp.
+    if cal.get("rally_rule", "fixed") == "target":
+        level = target - float(cal["rally_gap_mp"]) * L
+        if cal.get("rally_cap"):
+            level = torch.minimum(level, cal["rally_mp"] * L)
+        ready = (M > 0) & (target > float(cal.get("rally_target_min_mp", 0.0)) * L) & (M >= level)
+    else:
+        ready = M >= cal["rally_mp"] * L
+    rally = routing & ~u["s"] & free & ready & alive
     u["r"] = u["r"] & ~rally
     u["rally_s"] = torch.where(rally, torch.zeros_like(u["rally_s"]), u["rally_s"])
 
