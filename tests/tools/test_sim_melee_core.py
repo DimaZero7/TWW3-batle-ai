@@ -147,13 +147,13 @@ def run_in(attacker, defender, kind=O.ATTACK, run=True, gap=40.0, steps=80, para
 
 
 class TestCharge:
-    def test_an_attack_order_and_a_run_charge(self):              # 1, 2
+    def test_an_attack_order_charges_at_a_run_or_a_walk(self):    # 1, 2 (melee core 2: the sprint)
         st, H = run_in(SWORD, CLANRATS)
         assert float(st.u["charge"][0, H]) == pytest.approx(1 - 0.0, abs=0.05)
         st, H = run_in(SWORD, CLANRATS, kind=O.MOVE)
         assert float(st.u["charge"][0, H]) == 0.0
-        st, H = run_in(SWORD, CLANRATS, run=False, steps=200)
-        assert float(st.u["charge"][0, H]) == 0.0
+        st, H = run_in(SWORD, CLANRATS, run=False, steps=200)      # walks, sprints the last 30 m: a charge
+        assert float(st.u["charge"][0, H]) == pytest.approx(1 - 0.0, abs=0.05)
 
     def test_a_run_up_is_needed(self):                            # 3
         st, H = run_in(SWORD, CLANRATS, gap=4.0)
@@ -254,9 +254,98 @@ class TestCharge:
         tick = P.sim["fatigue"]["calibration"]["per_second"]
         assert early == pytest.approx(34 * tick, rel=0.3) and late == pytest.approx(13.7 * tick, rel=1e-3)
 
-    def test_the_rush_is_a_switch_off(self):
-        assert P.sim["charge"]["rush_m"] == 0
-        on = P.with_cal("charge", rush_m=30.0)
-        st, H = run_in(SWORD, CLANRATS, gap=20.0, steps=6, params=on, until_contact=False)
-        speed = float(torch.sqrt(st.u["vx"][0, H] ** 2 + st.u["vz"][0, H] ** 2))
-        assert speed > P.units[SWORD]["speed"]["run"] + 0.1
+    def test_an_attack_sprints_the_last_charge_distance(self):
+        # The database's battle_entities: charge distance 30 m (lords 35) at the charge speed, at a run or a walk;
+        # a move order gives none (the melee probe, build/meleetests).
+        assert "rush_m" not in P.sim["charge"]
+        sp = P.units[SWORD]["speed"]
+        assert sp["charge_distance"] == 30 and P.units[GENERAL]["speed"]["charge_distance"] == 35
+        for run in (True, False):
+            st, H = run_in(SWORD, CLANRATS, gap=20.0, steps=6, run=run, until_contact=False)
+            speed = float(torch.sqrt(st.u["vx"][0, H] ** 2 + st.u["vz"][0, H] ** 2))
+            assert speed == pytest.approx(sp["charge"], abs=0.05), run
+        st, H = run_in(SWORD, CLANRATS, gap=50.0, steps=4, run=False, until_contact=False)     # 50 m: walks
+        assert float(torch.sqrt(st.u["vx"][0, H] ** 2 + st.u["vz"][0, H] ** 2)) == pytest.approx(sp["walk"], abs=0.05)
+        st, H = run_in(SWORD, CLANRATS, kind=O.MOVE, gap=20.0, steps=6, until_contact=False)
+        assert float(torch.sqrt(st.u["vx"][0, H] ** 2 + st.u["vz"][0, H] ** 2)) == pytest.approx(sp["run"], abs=0.05)
+
+
+# --- melee core 2 (build/melee2impl): the first strike, the lord's gather, the initial recharge ---
+
+def lost_per_step(attacker, defender, kind=O.ATTACK, run=True, gap=40.0, steps=4):
+    """attacker (side 2) comes at a standing defender; HP each side loses on the contact step and the steps after."""
+    st = scenario.build([army([(defender, 0, 0, 90)], [(attacker, 60, 0, 270)])], P)
+    H = st.N // 2
+    front, depth = geometry.dims(st.u, P.sim["formation"]["spacing_m"])
+    st.u["x"][0, H] = float(depth[0, 0]) / 2 + float(depth[0, H]) / 2 + gap
+    out = []
+    for _ in range(400):
+        o = replay.hold(st)
+        o.kind[0, H], o.target[0, H], o.run[0, H] = kind, 0, run
+        if kind == O.MOVE:
+            o.x[0, H], o.z[0, H] = 3.0, 0.0          # into the enemy, not beyond contact.leave_m (it would leave)
+        hp_d, hp_a = float(st.u["hp_abs"][0, 0]), float(st.u["hp_abs"][0, H])
+        battle.step(st, o, P)
+        if out or bool(st.u["m"][0, H]):
+            out.append((hp_d - float(st.u["hp_abs"][0, 0]), hp_a - float(st.u["hp_abs"][0, H])))
+        if len(out) > steps:
+            break
+    return out
+
+
+class TestMeleeCore2:
+    def test_one_swing_of_every_man_in_contact(self):
+        # The first strike: F x struck x p x per hit once, i.e. the rate x (p x interval + miss_s) of a formation.
+        st = scenario.build([army([(CLANRATS, 0, 0, 90)], [(SWORD, 10, 0, 270)])], P)
+        H = st.N // 2
+        pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
+        contact = pw["enemy"] & (pw["gap"] <= 1.0)
+        z = torch.zeros_like(st.u["men"])
+        rate, _, _, F, swing = melee.strikes(st.u, pw, contact, P, z, first=True)
+        u = P.units[SWORD]["melee"]
+        p = (35 + u["attack"] - P.units[CLANRATS]["melee"]["defence"]) / 100
+        assert float(F[0, H, 0]) > 1
+        assert float(swing[0, H, 0]) == pytest.approx(float(rate[0, H, 0]) * (p * u["attack_interval_s"]
+                                                                               + P.sim["melee"]["miss_s"]), rel=1e-4)
+
+    def test_a_unit_running_in_strikes_once_at_once_a_standing_one_does_not(self):
+        steps = lost_per_step(SWORD, CLANRATS)                       # a charge at a run
+        first, then = steps[0], steps[2]
+        assert first[0] > 4 * then[0]                                # the charger's burst on the contact step
+        assert first[1] < 1.5 * then[1] + 1                          # the standing clanrats answer at their rate
+        walk = lost_per_step(SWORD, CLANRATS, run=False)             # at a walk: sprints in, the same burst
+        assert walk[0][0] == pytest.approx(first[0], rel=0.15)
+        move = lost_per_step(SWORD, CLANRATS, kind=O.MOVE)           # a move order runs in: a burst, no charge
+        assert then[0] < move[0][0] < first[0]
+
+    def test_men_gather_round_a_lord_only_when_he_ran_in(self):
+        # build/melee2/spec.md L4: infantry running onto a standing lord strike him in full at once; the formation a
+        # lord runs into brings its men to bear over lord_gather_s.
+        st = scenario.build([army([(GENERAL, 0, 0, 90, True)], [(SPEAR, 6, 0, 270)])], P)
+        H = st.N // 2
+        pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
+        contact = pw["enemy"] & (torch.arange(st.N)[None, None, :] == 0)
+        z = torch.zeros_like(st.u["men"])
+        st.u["contact_s"] = torch.full_like(st.u["men"], 100.0)
+        full = float(melee.strikes(st.u, pw, contact, P, z)[0][0, H, 0])
+        st.u["contact_s"] = torch.full_like(st.u["men"], 2.0)
+        standing = float(melee.strikes(st.u, pw, contact, P, z)[0][0, H, 0])
+        st.u["ran_in"][0, 0] = True
+        ran = float(melee.strikes(st.u, pw, contact, P, z)[0][0, H, 0])
+        assert full > 0 and standing == pytest.approx(full, rel=1e-5)
+        assert ran == pytest.approx(full * 2.0 / P.sim["contact"]["lord_gather_s"], rel=1e-4)
+
+    def test_a_lord_that_charges_ran_in(self):
+        st, H = run_in(WARLORD, SPEAR)
+        assert bool(st.u["ran_in"][0, H]) and not bool(st.u["ran_in"][0, 0])
+
+    def test_initial_recharge_from_the_passport(self):
+        # unit_special_abilities.initial_recharge: the lords' actives ready at once, Strength of the Penitent in 3 s.
+        flag = "wh_dlc04_emp_inf_flagellants_0"
+        st = scenario.build([army([(GENERAL, 0, 0, 90, True), (flag, 0, 20, 90)], [(CLANRATS, 30, 0, 270)])], P)
+        assert all(float(st.u[f"ab{k}_cd"][0, 0]) == 0 for k in range(3))
+        cds = [float(st.u[f"fxt{j}_cd"][0, 1]) for j in range(2)]
+        assert 3.0 in cds
+        o = replay.hold(st)
+        battle.step(st, o, P)
+        assert max(float(st.u[f"fxt{j}_cd"][0, 1]) for j in range(2)) == pytest.approx(3.0 - P.dt)

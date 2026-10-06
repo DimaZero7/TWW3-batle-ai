@@ -99,6 +99,7 @@ class Params:
             # the default order: men / rank_depth files (the database's ranks), h apart
             "width": (men / max(1, u.get("rank_depth") or 1)) * h if men > 1 else 2 * u["radius_m"],
             "walk": u["speed"]["walk"], "run": u["speed"]["run"], "charge_speed": u["speed"]["charge"],
+            "charge_dist": u["speed"].get("charge_distance", 0.0),
             "accel": u["speed"]["acceleration"], "decel": u["speed"]["deceleration"],
             "attack": m["attack"], "defence": m["defence"], "charge_bonus": m["charge_bonus"],
             "damage": m["damage"], "ap_damage": m["ap_damage"], "bonus_v_large": m["bonus_v_large"],

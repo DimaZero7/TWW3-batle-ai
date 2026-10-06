@@ -40,6 +40,7 @@ class TestPrefix:
         got = dbtables.decode_prefix(b, "unit_special_abilities", ["b_aura", "a_buff"])
         assert got["b_aura"]["effect_range"] == 35 and got["b_aura"]["num_effected_friendly_units"] == -1
         assert got["a_buff"]["active_time"] == 25 and got["a_buff"]["targets_own"] is True
+        assert got["a_buff"]["initial_recharge"] == 0
 
     def test_a_key_written_inside_another_row_is_not_taken_and_a_missing_key_raises(self):
         inside = text("a_buff") + b"\xff" * 30          # the key as a reference: no sane numbers after it
@@ -116,6 +117,14 @@ class TestSaved:
         assert eff == {("stat_melee_defence", "add"): 24, ("stat_morale", "add"): 16}
         assert s[SYG]["targets"] == {"self": True, "friends": True, "enemies": False}
         assert s[FS]["targets"] == {"self": True, "friends": False, "enemies": False}
+
+    def test_initial_recharge_from_the_database(self):
+        # unit_special_abilities.initial_recharge: our lords' actives start ready, Strength of the Penitent after 3 s,
+        # Single Entity (Wounds) after 5 s (build/melee2/spec.md 5).
+        s = mab.load()
+        assert all(s[k]["initial_s"] == 0 for k in (FS, SYG, DO, VV, RALLY))
+        assert s["wh_dlc04_unit_passive_strength_of_the_penitent"]["initial_s"] == 3
+        assert s["wh3_main_unit_passive_single_entity"]["initial_s"] == 5
 
 
 class TestFeatures:

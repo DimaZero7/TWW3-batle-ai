@@ -109,7 +109,12 @@ flowchart LR
   the scatter and the spacing between ranks v; checked on the roster: the game's front (files - 1) x h within ~1 %,
   files = floor(width / h)).
   Why: [what we inferred](../training/units.md#what-we-inferred).
-- Fields whose meaning we do not know are named by number: `f07`, `f12`…
+- Inferred from the values and checked by the melee probe (`build/meleetests`): the charge distances
+  `battle_entities` `charge_distance_commence_run` / `_adopt_charge_pose` / `_pick_target` (30 / 25 / 25 m for
+  infantry, 35 / 30 / 30 for lords; under an attack order a unit covers the last 30 m at its charge speed); an
+  ability's initial recharge `unit_special_abilities.initial_recharge` (0 for the lords' active abilities, 3 s
+  Strength of the Penitent, 5 s Single Entity; Gate of Khorne 60 = fandom).
+- Fields whose meaning we do not know are named by number: `f12`, `f15`…
 - **`unit_experience_bonuses_tables`**: a stat, an int32 flag and two float32
   `a`, `b` per rank. For leadership `b` = 1.06 — what one rank adds.
 - **`unit_experience_thresholds_tables`**: the level name and an int32 —

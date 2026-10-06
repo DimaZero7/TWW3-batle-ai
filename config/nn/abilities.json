@@ -4,6 +4,7 @@
  "_fields": {
   "active_s": "unit_special_abilities.active_time (inferred), s; -1: no duration (passive or instant)",
   "recharge_s": "unit_special_abilities.recharge_time (inferred), s; -1: none",
+  "initial_s": "unit_special_abilities.initial_recharge (inferred), s: the ability is on cooldown this long from the battle's start (-1 and 0: ready at once; Steam guide 1698960734 'most abilities start at 0'; Gate of Khorne 60 = fandom)",
   "uses": "unit_special_abilities.num_uses (inferred); -1: unlimited",
   "range_m": "unit_special_abilities.effect_range (inferred), m: the reach around the caster (0: itself)",
   "passive": "active_s and recharge_s both -1 (inferred); checked against the cards' owned_passive lists",
@@ -22,13 +23,13 @@
  "_missing": {
   "area damage": "battle_vortexs / projectile bombardments are not decoded: no damage numbers yet (Verminous Valour's 25 m, 1 s blast has damage 0 and AP 0 by an earlier hand decode)",
   "conditions": "decoded: auto_when (special_ability_to_recharge_contexts) and off_when (special_ability_to_auto_deactivate_flags); a passive's effects are what it gives while on; passive and auto abilities are innate effects (config/nn/effects.json, python -m tools.nn.effects)",
-  "ui type": "unit_abilities (hex, augment, ...) is not decoded: the targets say the same",
-  "initial recharge": "not found among the decoded fields: abilities start ready (as the simulator assumed)"
+  "ui type": "unit_abilities (hex, augment, ...) is not decoded: the targets say the same"
  },
  "abilities": {
   "wh2_main_character_abilities_verminous_valour": {
    "active_s": 17.0,
    "recharge_s": 60.0,
+   "initial_s": 0.0,
    "uses": -1,
    "range_m": 0.0,
    "passive": false,
@@ -72,6 +73,7 @@
   "wh2_main_unit_passive_scurry_away": {
    "active_s": -1.0,
    "recharge_s": -1.0,
+   "initial_s": 0.0,
    "uses": -1,
    "range_m": 0.0,
    "passive": true,
@@ -108,6 +110,7 @@
   "wh2_main_unit_passive_strength_in_numbers": {
    "active_s": -1.0,
    "recharge_s": -1.0,
+   "initial_s": 0.0,
    "uses": -1,
    "range_m": 0.0,
    "passive": true,
@@ -162,6 +165,7 @@
   "wh3_main_unit_passive_single_entity": {
    "active_s": -1.0,
    "recharge_s": -1.0,
+   "initial_s": 5.0,
    "uses": -1,
    "range_m": 0.0,
    "passive": true,
@@ -216,6 +220,7 @@
   "wh_dlc04_unit_passive_strength_of_the_penitent": {
    "active_s": 20.0,
    "recharge_s": 3.0,
+   "initial_s": 3.0,
    "uses": -1,
    "range_m": 0.0,
    "passive": false,
@@ -263,6 +268,7 @@
   "wh_main_character_abilities_deadly_onslaught": {
    "active_s": 31.0,
    "recharge_s": 90.0,
+   "initial_s": 0.0,
    "uses": -1,
    "range_m": 0.0,
    "passive": false,
@@ -315,6 +321,7 @@
   "wh_main_character_abilities_foe_seeker": {
    "active_s": 25.0,
    "recharge_s": 60.0,
+   "initial_s": 0.0,
    "uses": -1,
    "range_m": 0.0,
    "passive": false,
@@ -358,6 +365,7 @@
   "wh_main_character_abilities_rally": {
    "active_s": 14.0,
    "recharge_s": 60.0,
+   "initial_s": 0.0,
    "uses": -1,
    "range_m": 35.0,
    "passive": false,
@@ -393,6 +401,7 @@
   "wh_main_character_abilities_stand_your_ground": {
    "active_s": 18.0,
    "recharge_s": 90.0,
+   "initial_s": 0.0,
    "uses": -1,
    "range_m": 35.0,
    "passive": false,
@@ -438,6 +447,7 @@
   "wh_main_lord_passive_hold_the_line": {
    "active_s": -1.0,
    "recharge_s": -1.0,
+   "initial_s": 0.0,
    "uses": -1,
    "range_m": 35.0,
    "passive": true,
@@ -483,6 +493,7 @@
   "wh_main_unit_passive_frenzy": {
    "active_s": -1.0,
    "recharge_s": -1.0,
+   "initial_s": 0.0,
    "uses": -1,
    "range_m": 0.0,
    "passive": true,

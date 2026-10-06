@@ -73,6 +73,8 @@ STATIC = {
     "walk": ("f", "walk speed, m/s"),
     "run": ("f", "run speed, m/s"),
     "charge_speed": ("f", "charge speed, m/s"),
+    "charge_dist": ("f", "charge distance, m: under an attack order the unit closes the last this many metres to its "
+                         "target at its charge speed (the database's battle_entities: 30 infantry, 35 lords)"),
     "accel": ("f", "acceleration, m/s2"),
     "decel": ("f", "deceleration, m/s2"),
     "attack": ("f", "melee attack"),
@@ -138,6 +140,9 @@ INTERNAL = {
                     "charge_decay_duration (13 s), in contact or not"),
     "runup": ("f", "run-up, m: run at charge.min_speed_share of the run speed or faster since the last stop, "
                    "walk or contact (charge.min_runup_m)"),
+    "ran_in": ("b", "it came into its present fight moving (or charging), not standing: set when its melee clock "
+                    "starts, cleared when the clock resets (battle.py: the first strike; melee.py: men gather round "
+                    "a lord only when he ran in)"),
     "aim": ("f", "seconds standing still able to shoot"),
     "leave_s": ("f", "seconds leaving melee while still touching an enemy (contact.pin_s)"),
     "shots": ("f", "fractional shots carried to the next step"),

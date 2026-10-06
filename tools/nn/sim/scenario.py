@@ -18,7 +18,7 @@ from pathlib import Path
 import torch
 
 from tools.nn import scenario as arena_scenario
-from tools.nn.sim import morale, replay
+from tools.nn.sim import abilities as sim_abilities, effects as sim_effects, morale, replay
 from tools.nn.sim import state as S
 from tools.nn.sim.params import load
 
@@ -73,10 +73,26 @@ def build(armies, params=None, device="cpu", per_side=None):
     u["ox"], u["oz"] = u["x"].clone(), u["z"].clone()
     u["rally_s"].fill_(1e6)
     u["under_fire_s"].fill_(1e6)
+    initial_cooldowns(u, params)
     u["vis"] = present.clone()
     st.attacker = torch.tensor(attacker, dtype=torch.int64, device=device)
     st.bounds = params.map_half
     return st
+
+
+def initial_cooldowns(u, params):
+    """Abilities and timed effects on cooldown from the battle's start for their passport's initial_s (the
+    database's unit_special_abilities.initial_recharge: 0 for our lords' actives, 3 s Strength of the Penitent;
+    config/nn/abilities.json)."""
+    passports = params.abilities or {}
+    init = [float(passports[k].get("initial_s", 0.0)) for k in sim_abilities.keys(params)] + [0.0]
+    table = torch.tensor(init, device=u["men"].device)
+    for k in range(sim_abilities.SLOTS):
+        u[f"ab{k}_cd"] = table[u[f"ab{k}"]].clone()
+    fx_init = [float((passports.get(k) or {}).get("initial_s", 0.0)) for k in sim_effects.order(params)] + [0.0]
+    fx_table = torch.tensor(fx_init, device=u["men"].device)
+    for j in range(sim_effects.TIMERS):
+        u[f"fxt{j}_cd"] = fx_table[u[f"fxt{j}"]].clone()
 
 
 def arena_of(arena, arena_path=None):

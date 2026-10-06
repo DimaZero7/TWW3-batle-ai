@@ -243,8 +243,12 @@ class TestMelee:
         cap = P.sim["contact"]["lord_max_attackers"]
         per_s = p / (p * 5.7 + P.sim["melee"]["miss_s"])
         assert float(rate[0, 0, 1]) == pytest.approx(cap * per_s * float(hit[0, 0, 1]), rel=1e-4)
-        # men gather round him over contact.lord_gather_s: half way, half the rate
+        # men gather round him over contact.lord_gather_s when he ran into them: half way, half the rate; standing
+        # (they ran onto him), the whole rate at once
         st.u["contact_s"] = torch.full_like(st.u["men"], P.sim["contact"]["lord_gather_s"] / 2)
+        standing = float(melee.strikes(st.u, pw, contact, P, z)[0][0, 0, 1])
+        assert standing == pytest.approx(float(rate[0, 0, 1]), rel=1e-4)
+        st.u["ran_in"][0, 1] = True
         half = float(melee.strikes(st.u, pw, contact, P, z)[0][0, 0, 1])
         assert half == pytest.approx(float(rate[0, 0, 1]) / 2, rel=1e-4)
 
@@ -299,10 +303,10 @@ class TestMelee:
         busy = float(melee.strikes(st.u, pw, contact, params, z)[0][0, 0, H])
         assert busy == pytest.approx(full * share, rel=1e-4)
 
-    def test_a_melee_unit_holding_in_melee_strikes_at_the_hold_rate_a_missile_unit_in_full(self):
+    def test_a_formation_holding_in_melee_strikes_at_the_hold_rate_a_missile_unit_and_a_lord_in_full(self):
         k = P.sim["contact"]["hold_rate"]
         assert 0 < k < 1
-        for key, share in ((SPEAR, k), (ARCHER, 1.0)):
+        for key, share in ((SPEAR, k), (ARCHER, 1.0), ("wh_main_emp_cha_general_0", 1.0)):
             st = face_off(key, SLAVE)
             pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
             contact = pw["enemy"] & (pw["gap"] <= 1.0)
@@ -336,7 +340,7 @@ class TestMelee:
         # The infantry on him: the same hit chance rule, p / (p x interval + miss_s) blows a second.
         st, pw, contact, z = self.surrounded(1, rival=True)
         H = st.N // 2
-        st.u["order_kind"][0, H:H + 2] = O.ATTACK               # attacking him (not held: contact.hold_rate)
+        st.u["order_kind"][0, H:H + 2] = O.ATTACK               # attacking him
         st.u["order_target"][0, H:H + 2] = 0
         rate, hit, _, F = melee.strikes(st.u, pw, contact, P, z)
         assert float(rate[0, H, 0]) == pytest.approx(0.40 * (120 + 280 * (1 - 0.75 * 0.85)) / 4.0, rel=1e-4)
@@ -1081,6 +1085,8 @@ class TestSecondWave:
         u["morale"][:] = u["leadership"]
         u["taken"][0, 0], u["dealt"][0, 0] = 500.0, 100.0          # losing the melee
         engaged = standing.clone()
+        assert float(u["fxt0_cd"][0, 0]) == 3                     # the penitent's initial recharge (the database)
+        u["fxt0_cd"][0, 0] = 0.0                                   # 3 s into the battle
         old = effects.apply(u, P, 0.5, standing, engaged, pw["dist"], same)
         assert float(u["attack"][0, 0]) == base_att + 10                          # frenzy
         assert float(u["defence"][0, 0]) == base_def + 14                         # the penitent

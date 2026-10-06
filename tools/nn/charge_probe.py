@@ -427,8 +427,9 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
         for b in range(B):
             A, T, L = int(slot["a"][b]), int(slot["tg"][b]), int(slot["l"][b])
             sp = specs[b]
+            # the contact began in the step that ended now (its blows are in this sample already): its start
             if st_["contact"][b] is None and (m_a[b] or m_t[b]):
-                st_["contact"][b] = t
+                st_["contact"][b] = t - params.dt
                 if L >= 0 and sp["lord"].get("ability") and syg_slot >= 0:
                     ab[b, L] = syg_slot
             c = st_["contact"][b]
@@ -445,7 +446,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                         st_["phase"][b] = "back"
                         st_["phases"][b].append({"phase": "back", "t": t * 1000})
                 if st_["phase"][b] == "back" and st_["contact2"][b] is None and m_a[b]:
-                    st_["contact2"][b] = t
+                    st_["contact2"][b] = t - params.dt
                 if st_["phase"][b] == "out":
                     fx, fz = st_["out_from"][b]
                     kind[b, A], x[b, A], z[b, A], run_[b, A] = O.MOVE, fx, fz + sp["back_m"], True

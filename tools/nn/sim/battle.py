@@ -113,6 +113,7 @@ def step(st, orders, params=None, dt=None):
     # The melee clock: seconds since the contact began; it goes on through gaps out of contact shorter than
     # contact.reset_s (the game: pull-outs of 4-7 s do not restart a fight, build/cyclecharge).
     reset_s = float(cal["contact"].get("reset_s", 0.0))
+    fresh = engaged & (u["contact_s"] <= 0)              # its fight starts this step
     u["out_s"] = torch.where(engaged, torch.zeros_like(u["out_s"]), u["out_s"] + dt)
     u["contact_s"] = torch.where(engaged, u["contact_s"] + dt,
                                  torch.where(u["out_s"] < reset_s, u["contact_s"], torch.zeros_like(u["contact_s"])))
@@ -130,6 +131,15 @@ def step(st, orders, params=None, dt=None):
     grace = engaged & (u["contact_s"] < float(ccal["order_grace_s"])) & ~fire
     u["runup"] = torch.where(engaged, torch.where(grace, u["runup"], torch.zeros_like(u["runup"])),
                              torch.where(fast, u["runup"] + speed * dt, torch.zeros_like(u["runup"])))
+    # The first strike (the game: a man's attack interval starts only after his blow, CA Feature Focus #2): a unit
+    # that comes into a fight moving - or whose charge lands - strikes once at once with every man in contact (the
+    # charge's full bonus with it), then at the steady rate; a standing unit it reaches does not (its men are
+    # struck, not striking: the melee probe, build/meleetests). ran_in keeps that it came in moving for the rest of
+    # the fight (melee.py: men gather round a lord only when he ran in).
+    # (an attack order given within order_grace_s of a contact it ran into charges then: no second first strike)
+    arrive = fresh & (speed > 0.3)
+    first = arrive | (fire & ~(u["ran_in"] & (u["contact_s"] <= float(ccal["order_grace_s"]) + dt)))
+    u["ran_in"] = (u["ran_in"] | arrive | fire) & (u["contact_s"] > 0)
 
     # --- lord abilities cast by the game's AI by its rule or by the network's order: their effects hold
     # for this step ---
@@ -138,8 +148,8 @@ def step(st, orders, params=None, dt=None):
     tired = fatigue.effects(u, params)
 
     # --- melee ---
-    rate, mhit, sector, _ = melee.strikes(u, pw, strike, params, charge_now)
-    hp_melee = rate * dt
+    rate, mhit, sector, _, swing = melee.strikes(u, pw, strike, params, charge_now, first=True)
+    hp_melee = rate * dt + torch.where(first[:, :, None], swing, torch.zeros_like(swing))
     # A unit leaving melee (held or walking out) still in contact takes contact.leave_taken of the blows: melee
     # units more (they turn their backs), missile units less (measured, config/nn/sim.json contact.pin_why).
     taken_cal = cal["contact"].get("leave_taken")
@@ -344,11 +354,12 @@ def step(st, orders, params=None, dt=None):
     gx = torch.where(close_in, tx, gx)
     gz = torch.where(close_in, tz, gz)
     want = torch.where(run, u["run"], u["walk"])
-    # charge.rush_m (0: off): a unit running at its attack target closes the last rush_m at its charge speed (the
-    # database's charge_speed; whole battles show no such rush, build/mass/spec.md S4 - kept as a switch).
-    rush_m = float(cal["charge"].get("rush_m", 0.0))
-    if rush_m > 0:
-        want = torch.where(close_in & run & (t_reach <= rush_m), u["charge_speed"], want)
+    # The charge sprint (the database's battle_entities charge distance and charge speed): under an attack order, at
+    # a run or a walk, a unit closes the last charge_dist metres (30 infantry, 35 lords) to its target at its charge
+    # speed - a charge then (the run-up above); a move order gives none (the melee probe: the last 30 m at 3.65-3.88
+    # m/s at a run of 3.0, the last 10 m 3.9-4.7, at a walk the same).
+    sprint = close_in & (t_reach <= u["charge_dist"])
+    want = torch.where(sprint, u["charge_speed"], want)
     moving = standing & (point | close_in)
     fx, fz = movement.flee_goal(u, pw, alive, st.bounds)
     routing = alive & u["r"]

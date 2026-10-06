@@ -10,8 +10,9 @@ Per pair of units in contact (i strikes j), per second:
                       units surround him (the lord swarm probe, docs/en/game/units/lord-swarm.md); a single man
                       strikes once; a unit in contact with several enemies shares out no more than its own front
                       holds; a unit attacking another enemy strikes one it only touches at contact.unit_incidental
-                      (a lord: lord_incidental) of its rate; a unit without a missile weapon under HOLD (no attack
-                      order) strikes at contact.hold_rate of it
+                      (a lord: lord_incidental) of its rate; a formation without a missile weapon under HOLD (no
+                      attack order) strikes at contact.hold_rate of it (measured: the melee probe's held units
+                      0.49-0.52 of the rule); a lone man (a lord) under HOLD strikes in full (the damage plan)
     hit chance p    = 35 + attack + charge bonus x charge left + bonus v target - defence x direction, within
                       8-90 % (the database rule, CA Feature Focus #2: weight 1, melee_hit_chance_*)
     hits a second   = p / (p x interval + miss_s) a fighting man: the interval runs after a hit, a miss costs
@@ -24,12 +25,16 @@ Per pair of units in contact (i strikes j), per second:
     struck          = men a blow strikes: 1; a lord's splash blow on a formation contact.lord_splash_struck
                       (measured 2.07), each taking 1 / splash_max_attacks of the blow (CA 5.1.0: divided)
     HP/s            = F x struck x hits a second x per hit
+    first strike    = F x struck x p x per hit, once (swing): the interval runs only after a blow, so a unit
+                      coming into a fight (moving in, or its charge landing) strikes once at once with every man in
+                      contact (battle.py decides when)
 
 Direction: defence x0.6 from the flank, x0.3 from the rear or against a routing unit (database, weight 1;
 a lone man: contact.lord_direction of it - the lord swarm probe). A unit brings to each side of its formation no
 more men than that side holds. A lone man fought by the enemy lord takes lord_rival_others of the infantry's rate.
 Charge (battle.py): an attack order, a run-up and the charge's own clock, linear to 0 over charge_decay_duration
-(13 s); nothing beyond the bonus (no impact, no ramp: CA, build/charge/spec.md). A braced unit with
+(13 s); its first blows are the first strike above; nothing beyond the bonus (no impact, no ramp: CA,
+build/charge/spec.md). A braced unit with
 charge_reflection strikes a charger in front of it (within bracing_attack_angle) whose charge is still at least
 charge_reflect_min_charge_factor_threshold at charge_reflect_damage_multiplier of its damage (database).
 Pursuit: a routing target is struck from the rear with all the men in contact at contact.pursuit_rate of the
@@ -90,9 +95,10 @@ def spacing_of(u, spacing):
     return h, v
 
 
-def strikes(u, pw, contact, params, charge_now):
+def strikes(u, pw, contact, params, charge_now, first=False):
     """HP per second each unit i takes from each j: rate [B, N, N] (i strikes j), the per-hit damage [B, N, N],
-    the direction sector of i seen from j and the men striking F [B, N, N]. charge_now [B, N]: the striker's
+    the direction sector of i seen from j and the men striking F [B, N, N]; with first, also swing [B, N, N]: the
+    HP of one blow of every man in contact at once (the first strike, battle.py). charge_now [B, N]: the striker's
     charge left (0-1, battle.py: its own clock from the charge's first blow)."""
     B = params.battle
     cal = params.sim["melee"]
@@ -197,11 +203,14 @@ def strikes(u, pw, contact, params, charge_now):
     interval = u["interval"][:, :, None].clamp(min=1e-6)
     per_s = torch.where(single_i & single_j, p / interval, p / (p * interval + float(cal["miss_s"])))
     rate = F * struck * per_s * hit
-    # Men gather round a lone man (a lord) over contact.lord_gather_s from the striker's contact (0: at once).
+    # Men gather round a lone man (a lord) who ran into their formation over contact.lord_gather_s from the
+    # striker's contact (0: at once); infantry that runs onto a standing lord strikes him in full at once (the lord
+    # swarm probe: his first 15 s 1.11 x his steady loss; build/melee2/spec.md L4).
     gather = float(cc.get("lord_gather_s", 0.0))
     if gather > 0:
         grow = (u["contact_s"] / gather).clamp(0, 1)[:, :, None]
-        rate = torch.where(single_j & ~single_i, rate * grow, rate)
+        ran_j = u["ran_in"][:, None, :] if "ran_in" in u else torch.ones_like(single_j)
+        rate = torch.where(single_j & ~single_i & ran_j, rate * grow, rate)
     if pursuit is not None:
         rate = torch.where(routing_j, rate * float(pursuit), rate)
     # A lone man (a lord) fought by infantry takes the sum of what the men around him strike (no
@@ -222,11 +231,15 @@ def strikes(u, pw, contact, params, charge_now):
     # a unit fought by one enemy unit took 19.6 HP/s in the game, 33.9 in the open-loop replay, when
     # other enemy units stood within 35 m of it; 16.5 against 20.7 when none did).
     rate = torch.where(~single_j & ~single_i & busy, rate * float(cc.get("unit_incidental", 1.0)), rate)
-    # A unit without a missile weapon standing under HOLD in melee (no attack order) fights only with the men
-    # that happen to be in contact: hold_rate of its rate on every enemy it touches (the network's units in the
-    # game: matched on own and enemy unit keys 0.80 of the kills of the same unit attacking; calibrated to the
-    # kills of held units in the gate battles, where they touch 2.3 enemy units; missile units 0.99-1.01;
-    # config/nn/sim.json contact.why).
-    held = (u["order_kind"] == O.HOLD) & (u["range"] <= 0)
+    # A formation without a missile weapon standing under HOLD in melee (no attack order) strikes at hold_rate of
+    # the rule (measured: the melee probe's held units - braced spearmen, spearmen facing away, swordsmen - strike
+    # clanrats at 0.49-0.52 of it from 5 s on, 6 lanes; the network's held units in the gates 0.80 of the kills of
+    # the same units attacking); missile units 0.99-1.01 and a lone man (a lord held by script strikes at 0.77-1.19
+    # of the rule, the damage plan): in full. The database's melee_attack_threshold_modifier_* (idle 0.14, ordered
+    # 0.22) are when a unit joins a fight, not its rate (build/melee2/spec.md 3): no rule for the rate found.
+    held = (u["order_kind"] == O.HOLD) & (u["range"] <= 0) & (u["men0"] > 1)
     rate = torch.where(held[:, :, None], rate * float(cc.get("hold_rate", 1.0)), rate)
-    return rate, hit, sector, F
+    if not first:
+        return rate, hit, sector, F
+    # One blow of every man in contact (the first strike): the rate's men and multipliers, one swing each.
+    return rate, hit, sector, F, rate * (p / per_s.clamp(min=1e-9))

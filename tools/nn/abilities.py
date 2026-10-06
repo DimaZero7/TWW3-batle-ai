@@ -31,6 +31,9 @@ PREFIX = "unit_special_abilities"
 FIELDS = {
     "active_s": "unit_special_abilities.active_time (inferred), s; -1: no duration (passive or instant)",
     "recharge_s": "unit_special_abilities.recharge_time (inferred), s; -1: none",
+    "initial_s": "unit_special_abilities.initial_recharge (inferred), s: the ability is on cooldown this long from "
+                 "the battle's start (-1 and 0: ready at once; Steam guide 1698960734 'most abilities start at 0'; "
+                 "Gate of Khorne 60 = fandom)",
     "uses": "unit_special_abilities.num_uses (inferred); -1: unlimited",
     "range_m": "unit_special_abilities.effect_range (inferred), m: the reach around the caster (0: itself)",
     "passive": "active_s and recharge_s both -1 (inferred); checked against the cards' owned_passive lists",
@@ -61,7 +64,6 @@ MISSING = {
                   "(special_ability_to_auto_deactivate_flags); a passive's effects are what it gives while on; "
                   "passive and auto abilities are innate effects (config/nn/effects.json, python -m tools.nn.effects)",
     "ui type": "unit_abilities (hex, augment, ...) is not decoded: the targets say the same",
-    "initial recharge": "not found among the decoded fields: abilities start ready (as the simulator assumed)",
 }
 
 
@@ -93,7 +95,9 @@ def passport(key, prefix, t):
     auto = not passive and "_passive_" in key
     friendly, enemy = p["num_effected_friendly_units"], p["num_effected_enemy_units"]
     return {
-        "active_s": p["active_time"], "recharge_s": p["recharge_time"], "uses": p["num_uses"],
+        "active_s": p["active_time"], "recharge_s": p["recharge_time"],
+        "initial_s": max(0.0, p.get("initial_recharge", 0.0)),
+        "uses": p["num_uses"],
         "range_m": p["effect_range"], "passive": passive, "targets_own": p["targets_own"],
         "friendly_units": friendly, "enemy_units": enemy,
         "self_cast": (not passive) and not auto and p["targets_own"] and friendly in (0, -1) and enemy in (0, -1),

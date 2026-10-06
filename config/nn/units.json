@@ -98,6 +98,10 @@
    "source": "battle_entities.charge_speed (inferred), m/s",
    "checked": null
   },
+  "speed.charge_distance": {
+   "source": "battle_entities.charge_distance_commence_run (inferred), m: an attacking unit closes the last this many metres to its target at its charge speed (30 infantry, 35 lords; the melee probe: the last 30 m at 3.65-3.88 m/s, run 3.0)",
+   "checked": null
+  },
   "speed.acceleration": {
    "source": "battle_entities.acceleration (inferred)",
    "checked": null
@@ -324,6 +328,7 @@
     "walk": 1.5,
     "run": 3.4,
     "charge": 4.1,
+    "charge_distance": 35.0,
     "acceleration": 2.0,
     "deceleration": 4.0
    },
@@ -400,6 +405,7 @@
     "walk": 1.5,
     "run": 3.0,
     "charge": 3.8,
+    "charge_distance": 30.0,
     "acceleration": 3.0,
     "deceleration": 4.0
    },
@@ -472,6 +478,7 @@
     "walk": 1.5,
     "run": 3.3,
     "charge": 4.0,
+    "charge_distance": 30.0,
     "acceleration": 3.5,
     "deceleration": 5.0
    },
@@ -564,6 +571,7 @@
     "walk": 1.5,
     "run": 4.0,
     "charge": 4.7,
+    "charge_distance": 35.0,
     "acceleration": 3.0,
     "deceleration": 4.0
    },
@@ -641,6 +649,7 @@
     "walk": 1.5,
     "run": 4.2,
     "charge": 4.8,
+    "charge_distance": 30.0,
     "acceleration": 2.0,
     "deceleration": 4.0
    },
@@ -716,6 +725,7 @@
     "walk": 1.5,
     "run": 4.2,
     "charge": 4.8,
+    "charge_distance": 30.0,
     "acceleration": 2.0,
     "deceleration": 4.0
    },
@@ -790,6 +800,7 @@
     "walk": 1.5,
     "run": 4.2,
     "charge": 4.8,
+    "charge_distance": 30.0,
     "acceleration": 2.0,
     "deceleration": 4.0
    },
@@ -886,6 +897,7 @@
     "walk": 1.5,
     "run": 3.0,
     "charge": 3.8,
+    "charge_distance": 30.0,
     "acceleration": 3.0,
     "deceleration": 4.0
    },
@@ -958,6 +970,7 @@
     "walk": 1.5,
     "run": 3.8,
     "charge": 4.5,
+    "charge_distance": 30.0,
     "acceleration": 2.0,
     "deceleration": 5.0
    },
@@ -1033,6 +1046,7 @@
     "walk": 1.5,
     "run": 3.0,
     "charge": 3.8,
+    "charge_distance": 30.0,
     "acceleration": 3.0,
     "deceleration": 4.0
    },
@@ -1105,6 +1119,7 @@
     "walk": 1.5,
     "run": 3.0,
     "charge": 3.8,
+    "charge_distance": 30.0,
     "acceleration": 3.0,
     "deceleration": 4.0
    },
@@ -1175,6 +1190,7 @@
     "walk": 1.5,
     "run": 3.6,
     "charge": 4.0,
+    "charge_distance": 30.0,
     "acceleration": 3.0,
     "deceleration": 4.0
    },
@@ -1249,6 +1265,7 @@
     "walk": 1.5,
     "run": 2.8,
     "charge": 3.5,
+    "charge_distance": 30.0,
     "acceleration": 2.0,
     "deceleration": 4.0
    },
@@ -1319,6 +1336,7 @@
     "walk": 1.5,
     "run": 3.6,
     "charge": 4.0,
+    "charge_distance": 30.0,
     "acceleration": 3.0,
     "deceleration": 4.0
    },
@@ -1413,6 +1431,7 @@
     "walk": 1.5,
     "run": 4.2,
     "charge": 4.8,
+    "charge_distance": 30.0,
     "acceleration": 2.0,
     "deceleration": 4.0
    },
@@ -1487,6 +1506,7 @@
     "walk": 1.5,
     "run": 4.2,
     "charge": 4.8,
+    "charge_distance": 30.0,
     "acceleration": 2.0,
     "deceleration": 4.0
    },
@@ -1560,6 +1580,7 @@
     "walk": 1.5,
     "run": 5.4,
     "charge": 6.0,
+    "charge_distance": 30.0,
     "acceleration": 5.0,
     "deceleration": 6.0
    },

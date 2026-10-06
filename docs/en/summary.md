@@ -61,8 +61,11 @@ chance 35 + attack − defence at weight 1 for everyone (a miss costs 0.5 s: a m
 man's health is lost (smoothed), a lord's blow is divided by 4 and hits an average of 2.07 men, flank and
 rear — defence ×0.6 / ×0.3, charge — only the charge bonus, on an attack order with a run-up, 13 s on its
 own clock, spearmen's charge reflection ×2 for 3.9 s; the fitted "slope 0.1", "charge blow" and "bringing
-men in" are gone. Volley fire, friendly fire and spill, lords (at most 6.5 men hit them, gathering over
-20 s; the lord as fragile as in the game: his own aura does not reach him, in melee he is
+men in" are gone. Melee core 2 (the game's rules, no fitting): **the first strike** - a unit coming into a
+fight moving or charging strikes once at once with every man in contact (the interval runs only after a
+blow); **the charge sprint** - under any attack order, at a walk too, the last 30 m (lords 35) at the
+database's charge speed; abilities' initial recharge from the database. Volley fire, friendly fire and spill, lords (at most 6.5 men hit them, gathering over
+20 s only when the lord himself ran into the formation; a lord without an order strikes in full; the lord as fragile as in the game: his own aura does not reach him, in melee he is
 always 'losing' (−3), projectiles hit him whole in melee, he tires slower than a formation; a lord duel: General v
 General x0.8 of the game, Warlord v Warlord x1.2), morale with all main modifiers (the 4 s and 60 s casualty windows and 'under fire' 15 s as in the
 game; a lord's death: his army
@@ -84,18 +87,21 @@ frozen. Three scores, higher is better:
 
 | Score | Now |
 |---|---:|
-| Mechanics: unit pairs and shooting within 20 % of the game | 37 / 54 (51 before the melee core) |
-| Same winner: the game's AI against itself | 21 / 26 (20 before the core) |
-| Same winner: the network against the game's AI (165 recordings now) | 127 / 165 (126 before the core) |
+| Mechanics: unit pairs and shooting within 20 % of the game | 37 / 54 (51 before the melee core; core 2 - 37) |
+| Same winner: the game's AI against itself | 18 / 26 (20 before the core, the core 21) |
+| Same winner: the network against the game's AI (165 recordings now) | 132 / 165 (126 before the core, the core 127) |
 
 Mechanics dropped from 51 to 37 not because of winners (all 12 pairs are as in the game) but because of
 pace: the first 15 s of formation contact are stronger in the game than the rule (the target loses
 499–764 HP, the rule gives 396–446; the fitted "charge blow" used to cover this), and lords against one
 unit hit 13–31 % harder than the game, ending their pairs sooner. The melee probe (11 in-game battles, the
 same scenario in the simulator) found where the difference is: a volley in the first second of a charge's
-contact, ~8 blows a unit, after which the pace is the rule's; an attack at a run and at a walk covers the
-last ~30 m at charge speed; the bonus against infantry counts against a lord on foot; the other mismatches
-are OPEN ([melee](game/mechanics/melee.md#in-game-check-the-melee-probe)). The Empire's whole-battle losses
+contact, after which the pace is the rule's; an attack at a run and at a walk covers the last ~30 m at
+charge speed; the bonus against infantry counts against a lord on foot. Melee core 2 put these in as rules:
+the simulator's first second of a charge 107–429 HP (was 27–86, game 78–300), an attack at a walk is a
+charge. The charge sprint cost three whole battles of the game's AI (Skaven against the Empire: 8 of 10
+without it, 5 with it) - whole battles show no sprint before contact; OPEN. The other mismatches are OPEN
+([melee](game/mechanics/melee.md#in-game-check-the-melee-probe)). The Empire's whole-battle losses
 at 60 / 120 / 180 s are now as in the game: 0.25 / 0.43 / 0.55 (game 0.25 / 0.41 / 0.53; was 0.32 / 0.51 /
 0.63).
 
