@@ -87,6 +87,21 @@ class TestBattleMetrics:
         b.f["x"][:, 3], b.f["z"][:, 3] = 10.0, 0.0          # in front of them: not a rear entry
         assert M.measure(b, 0, passports=PASS, chosen=("wrap",))["rear_entries_enemy"] == 0.0
 
+    def test_the_loss_30_s_before_the_end_and_the_army_destroyed(self):
+        b = battle(T=40)
+        b.f["hp"][5:, 1] = 0.5                      # own crossbowmen half lost from 5 s
+        b.f["men"][20:, 0] = 0                      # our lord dies at 20 s
+        m = M.measure(b, 2, passports=PASS, chosen=())
+        assert m["gold_own_e30"] == pytest.approx(300 / 1600)          # at 9 s (39 - 30)
+        assert m["trade_e30"] == pytest.approx(-300 / 1500)
+        assert m["gold_own"] == pytest.approx(1300 / 1600)
+        # own strength 300 of 1000 x 1.65 + 600 (<= 0.22) and the enemy's 1650 + 400 >= 2.6 x 300: destroyed
+        assert m["army_beaten_own"] == 1.0
+        assert M.measure(b, 2, cut_s=15, passports=PASS, chosen=())["army_beaten_own"] == 0.0
+        assert M.measure(battle(T=10), 2, passports=PASS, chosen=())["gold_own_e30"] is None     # shorter than 30 s
+        st = M.beaten(b, PASS)
+        assert st.shape == (40, 2) and not st[:20].any() and st[20:, 0].all() and not st[:, 1].any()
+
     def test_the_window_ends_at_cut_but_the_result_and_length_do_not(self):
         b = battle(T=10)
         b.f["men"][6:, 0] = 0                       # our lord dies at 6 s

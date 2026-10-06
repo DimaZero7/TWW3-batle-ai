@@ -12,8 +12,10 @@ of the side it plays.
     hold        every unit holds (shoots at will, fights back when attacked)
     ai_like     modelled on the game's AI in the recorded gate battles (build/gate-analysis, build/ail): a
                 line that marches together at its slowest unit's pace (at a run), missile units that halt
-                at range and shoot (the enemy lord first, in melee too), step back from enemy melee units
-                within 50 m and break off melee, the lord 20 m behind the line, never first, a charge or
+                at range and shoot (the enemy lord first, in melee too), step back only from enemy melee units
+                within 20 m and break off melee, after the first fight walk up only to a post 25 m behind the
+                line, the lord and the nearest free melee unit cut off an enemy closing on own missile units
+                (the guard), the lord 20 m behind the line, never first, a charge or
                 counter-charge from ~95-100 m, melee targets chosen as the game AI does (distance with a
                 fixed random part, enemies already fighting elsewhere, not the lord, spread over the
                 enemies), after the first fight every unit goes in; before contact the line widens to lap
@@ -91,10 +93,14 @@ class Line:
     #                               at 90 m median, 6 s before the first contact; ai_like at join_m 150: 136 m, 10 s)
     lord_retreat_hp: float = 0.3  # ours: a lord in melee below this share of health withdraws behind the line
     cover_m: float = 60.0         # ours: an enemy this close to an own missile unit draws the free melee units
-    skirmish_m: float = 50.0      # missile units step back from an enemy melee unit this close (pool: a free missile
-    #                               unit moves away from the nearest closing enemy melee unit 52-58 % of the seconds
-    #                               within 40 m, 42 % at 40-60 m, 23 % at 60-80 m, firing 4-9 / 33 / 56 %; ai_like
-    #                               at 40 m: 19-32 / 5 / 4 %)
+    skirmish_m: float = 20.0      # missile units keep shooting at a closing enemy melee unit and step back only from
+    #                               one this close (build/evade, 28 gate battles of the 5 ownloss gates, ai_like x 6
+    #                               copies: the game's approached missile units fire 79 % of the seconds at 20-40 m
+    #                               (n 7 battles) and 63 % at 40-60 m (n 14), move away in 24 % of the approaches;
+    #                               ai_like at 50 m fired 9 / 44 % and moved away in 56 %, with these rules 58 / 77 %
+    #                               and 18 %. Was 50 from the pool's "moves away 52-58 % within 40 m". The step back
+    #                               stays "away from it and back": straight away sent the units in front of their
+    #                               line (their depth behind it -55 m against -5, game +27; build/evade "shoot")
     step_m: float = 30.0          # the advance: a point this far ahead
     advance_run: bool = True      # the advance runs: the game's attacker covered 110 m in its first 30 s (battle 4,
     #                               3.6 m/s; the simulator's infantry walks 1.5, runs 3-3.4), 83 m in the next 30
@@ -151,6 +157,28 @@ class Line:
     #                                         units up to their range): the game AI's units after the first contact
     #                                         stand idle 1.6 % (melee) / 8.7 % (missile, enemy 61 m away: reloading) of
     #                                         the time, ai_like's without it 5.5-6.3 % / 20-27 % (enemy 150-175 m away)
+    missile_post_m: float = 25.0  # ... but a missile unit walks up to range only as far as a post this far behind its
+    #                               line's centre (0: off). build/evade + build/archers (28 gate battles x 6 copies):
+    #                               the game's free missile units stand 27 m behind their melee centre after the first
+    #                               fight (battle medians; 56-63 m in its first 120 s), ai_like's 5 m IN FRONT: they
+    #                               walked on to range past their own line (the walk-up was half of the orders of
+    #                               those in front; 43 m in front after 120 s). With this and the guard: 19 m behind
+    #                               (post 55: 20 m, the same; post 25 kept ai_like's trade and routs where they were,
+    #                               55 raised its routs 1.13 -> 1.21, game 0.68)
+    # The guard: an enemy melee unit (the lord too) out of melee that closes (>= guard_closing m/s) on an own free
+    # missile unit within guard_m of it is counter-charged by the own lord when within guard_lord_m of him (out of
+    # melee, health >= lord_retreat_hp) and by the own free melee unit nearest to it within guard_unit_m; only once
+    # the side has fought (the lord never goes first). build/evade/guard.py (28 gate battles): the game AI takes an
+    # enemy that chases one of its missile units when it is 73 m (lord) / 82 m (melee units) from it; our melee
+    # units' chases of its missile units last 13 s (median), an approacher ends in melee with an AI unit 80 % (with
+    # the AI lord 37 %); ai_like without the guard (it took them at 45-50 m, its lord at 25 m): 31 s, 62 %, 20 %;
+    # with the guard and the rules above (build/archers): 17 s, 69 %, 21 %
+    guard_m: float = 80.0         # 0: off
+    guard_lord_m: float = 90.0
+    guard_unit_m: float = 100.0
+    guard_closing: float = 0.5
+    flee_straight: bool = False   # a missile unit out of melee steps back straight away from the enemy (False: away
+    #                               from it and back, towards its own side)
 
 
 def _centroid(x, z, mask):
@@ -365,6 +393,8 @@ def ai_like(st, p=Line()):
     lord_d = torch.where(foe & aim[:, None, :], d, torch.full_like(d, BIG))
     ld, li = lord_d.min(2)
     closer = shooter & has & ~fighting & advance_side & behind & (near_d > p.missile_stop * u["range"])
+    if p.missile_post_m > 0:                                   # after the first fight: not past the post
+        closer = closer & ~(side_fought & (ahead >= -p.missile_post_m))
     put(closer, O.MOVE, fwd_x, fwd_z, r=p.advance_run)
     if p.focus_lord:
         put(shooter & (ld <= u["range"]) & ~fighting, O.ATTACK, tg=li)
@@ -376,6 +406,8 @@ def ai_like(st, p=Line()):
     ax, az = x - x.gather(1, from_i), z - z.gather(1, from_i)
     an = torch.sqrt(ax * ax + az * az).clamp(min=1e-6)
     wx, wz = ax / an - fx, az / an - fz                        # away from it, and back
+    if p.flee_straight:                                        # (free: straight away from it)
+        wx, wz = torch.where(fighting, wx, ax / an), torch.where(fighting, wz, az / an)
     wn = torch.sqrt(wx * wx + wz * wz).clamp(min=1e-6)
     wx, wz = torch.where(wn > 1e-3, wx / wn, -fx), torch.where(wn > 1e-3, wz / wn, -fz)
     back = shooter & ((~fighting & (md <= p.skirmish_m)) | (fighting & (u["contact_s"] < p.escape_s)))
@@ -398,6 +430,24 @@ def ai_like(st, p=Line()):
     put(join, O.ATTACK, tg=torch.where(bd <= p.lord_join_m, bi, tgt), r=True)
     hurt = the_lord & fighting & (u["hp"] < p.lord_retreat_hp) & has_line
     put(hurt, O.WITHDRAW, post_x - fx * p.lord_back_m, post_z - fz * p.lord_back_m, r=True)
+
+    if p.guard_m > 0:
+        # The guard (Line): the lord and the nearest free melee unit cut off an enemy closing on own missile units.
+        dn = d.clamp(min=1e-6)
+        clos = -(u["vx"][:, None, :] * dx + u["vz"][:, None, :] * dz) / dn      # [b, i, j]: j's speed towards i
+        raider = standing & ~missile & ~fighting                                 # free melee units (lords too)
+        thr = foe & (shooter & ~fighting)[:, :, None] & raider[:, None, :] & (d <= p.guard_m) & (clos >= p.guard_closing)
+        may = foe & thr.any(1)[:, None, :]                                       # [b, i, j]: i may take j
+        gd, gi = torch.where(may, d, torch.full_like(d, BIG)).min(2)
+        lord_go = the_lord & ~fighting & (u["hp"] >= p.lord_retreat_hp) & side_fought & (gd <= p.guard_lord_m)
+        free_line = line & ~fighting & side_fought
+        dl = torch.where(may & free_line[:, :, None], d, torch.full_like(d, BIG))  # [b, i, j]
+        nearest_i = dl.min(1).indices                                            # [b, j]: the nearest to each
+        pick = torch.zeros_like(may).scatter_(1, nearest_i[:, None, :], True) & (dl <= p.guard_unit_m)
+        ud, ui = torch.where(pick, d, torch.full_like(d, BIG)).min(2)
+        unit_go = free_line & (ud <= p.guard_unit_m)
+        put(lord_go, O.ATTACK, tg=gi, r=True)
+        put(unit_go, O.ATTACK, tg=ui, r=True)
 
     ok = standing & has
     kind = torch.where(ok | (kind == O.HOLD), kind, torch.full_like(kind, O.HOLD))

@@ -242,9 +242,52 @@ class TestLeftovers:
         monkeypatch.setattr(leftovers, "run", fake_run())                               # no container: the lock is stale
         lines, found = leftovers.report([], min_age=10)
         assert found and "STALE" in "\n".join(lines)
-        monkeypatch.setattr(leftovers, "run", fake_run(docker="a\tsnake-ai-trainer\tUp\t1h\n"))
+        monkeypatch.setattr(leftovers, "run", fake_run(docker="orch-s16\tsnake-ai-trainer\tUp\t1h\n"))
         lines, found = leftovers.report([], min_age=10)
         assert "STALE" not in "\n".join(lines)                                            # a training container holds it
+        monkeypatch.setattr(leftovers, "run", fake_run(docker="agent-x\tsnake-ai-trainer\tUp\t1h\tpython -m tools.nn.sim.check\n"))
+        lines, found = leftovers.report([], min_age=10)
+        assert "STALE" in "\n".join(lines)                                                # an agent's container does not
+
+    def test_only_training_containers_hold_the_lock(self, tmp_path, monkeypatch):
+        chain = tmp_path / "chain.json"
+        chain.write_text('{"test5": {"dock_prefix": "tr-"}}', encoding="utf-8")
+        assert leftovers.dock_prefix(chain) == "tr-" and leftovers.dock_prefix(tmp_path / "none.json") == "orch-"
+
+        def c(name, cmd="", image="snake-ai-trainer"):
+            return {"name": name, "image": image, "cmd": cmd}
+        assert leftovers.training(c("orch-s16_kite"), "orch-")
+        assert leftovers.training(c("t1", "python -m tools.nn.train.test5 --label x"), "orch-")
+        assert leftovers.training(c("t2", "python -m tools.nn.train.run --minutes 5"), "orch-")
+        assert not leftovers.training(c("agent-archers", "python -m tools.nn.sim.check"), "orch-")
+        assert not leftovers.training(c("t3", "python -m tools.nn.train.runner_x"), "orch-")
+        assert not leftovers.training(c("orch-x", image="postgres"), "orch-")
+        lock = tmp_path / "gpu-train.lock"
+        lock.write_text("test5 s16 2026-10-06\n", encoding="utf-8")
+        monkeypatch.setattr(leftovers, "LOCK", lock)
+        monkeypatch.setattr(leftovers, "processes", lambda: [])
+        monkeypatch.setattr(leftovers, "run", fake_run(docker='agent-x\tsnake-ai-trainer\tUp\t1h\t"python -m build.x"\n'))
+        assert leftovers.main(["--unlock"]) == 0 and not lock.exists()                      # removed while an agent runs
+
+    def test_stopping_a_training_removes_the_lock_it_left(self, tmp_path, monkeypatch, capsys):
+        lock = tmp_path / "gpu-train.lock"
+        monkeypatch.setattr(leftovers, "LOCK", lock)
+        monkeypatch.setattr(leftovers, "processes", lambda: [])
+        monkeypatch.setattr(leftovers, "dock_prefix", lambda path=None: "orch-")
+        state = {"ps": "orch-s16\tsnake-ai-trainer\tUp\t1h\t\nagent-x\tsnake-ai-trainer\tUp\t1h\t\n"}
+
+        def run(cmd, timeout=30):
+            if cmd[:2] == ["docker", "stop"]:
+                if cmd[-1] == "orch-s16":
+                    state["ps"] = "agent-x\tsnake-ai-trainer\tUp\t1h\t\n"
+                return cmd[-1]
+            return state["ps"] if cmd[0] == "docker" else ""
+        monkeypatch.setattr(leftovers, "run", run)
+        lock.write_text("test5 s16 2026-10-06\n", encoding="utf-8")
+        leftovers.main(["--stop", "agent-x"])                    # an agent's container: the lock stays
+        assert lock.exists()
+        leftovers.main(["--stop", "orch-s16"])
+        assert not lock.exists() and "removed the lock it left" in capsys.readouterr().out
 
     def test_nothing_left_is_quiet(self, tmp_path, monkeypatch):
         monkeypatch.setattr(leftovers, "run", fake_run())

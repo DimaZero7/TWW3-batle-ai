@@ -593,13 +593,21 @@ class TestProperties:
         st = line_army(attacker=1, gap=600)
         H = st.N // 2
         u = st.u
-        u["x"][0, H + 1] = u["x"][0, 3] + 30.0                  # an enemy spearman 30 m from side 1's archers
+        u["x"][0, H + 1] = u["x"][0, 3] + 15.0                  # an enemy spearman 15 m from side 1's archers
         u["z"][0, H + 1] = u["z"][0, 3]
         o = opponents.ai_like(st)
         assert int(o.kind[0, 3]) == O.WITHDRAW and bool(o.run[0, 3])
         assert float(o.x[0, 3]) < float(u["x"][0, 3]) - 30                  # away from it (west), not towards
-        u["x"][0, H + 1] = u["x"][0, 3] + 70.0                  # 70 m: beyond skirmish_m, the archers stay
+        u["x"][0, H + 1] = u["x"][0, 3] + 30.0                  # 30 m: beyond skirmish_m (20), the archers shoot on
         assert int(opponents.ai_like(st).kind[0, 3]) != O.WITHDRAW
+        assert int(opponents.ai_like(st, opponents.Line(skirmish_m=50.0)).kind[0, 3]) == O.WITHDRAW
+        u["x"][0, H + 1], u["z"][0, H + 1] = u["x"][0, 3] - 10.0, u["z"][0, 3] - 11.0   # behind them, to the south
+        o = opponents.ai_like(st)                                          # away and back: north, a little west
+        assert int(o.kind[0, 3]) == O.WITHDRAW and float(o.z[0, 3]) > float(u["z"][0, 3]) + 40
+        assert float(o.x[0, 3]) < float(u["x"][0, 3])
+        o = opponents.ai_like(st, opponents.Line(flee_straight=True))      # straight away: north-east
+        assert float(o.x[0, 3]) > float(u["x"][0, 3]) + 25 and float(o.z[0, 3]) > float(u["z"][0, 3]) + 25
+        u["x"][0, H + 1], u["z"][0, H + 1] = u["x"][0, 3] + 70.0, u["z"][0, 3]
         u["x"][0, H + 1] = u["x"][0, 3] + 8.0                   # caught in melee
         u["m"][0, 3] = u["m"][0, H + 1] = True
         u["target"][0, 3], u["target"][0, H + 1] = H + 1, 3
@@ -666,6 +674,39 @@ class TestProperties:
         u["x"][0, H + 2], u["z"][0, H + 2] = 60.0, 60.0
         o = opponents.ai_like(st, dataclasses.replace(p, flank_m=0.0))  # flank_m 0: straight at it
         assert int(o.kind[0, H + 2]) == O.ATTACK
+
+    def test_ai_like_guard_cuts_off_an_enemy_closing_on_its_missile_units(self):
+        st = line_army(attacker=1, gap=600)                      # side 1: lord (-320, 0), spearmen (-300, +-40),
+        H = st.N // 2                                            # archers (-340, 0)
+        u = st.u
+        p = opponents.Line(pick_noise_m=0.0)
+        u["x"][0, H + 1], u["z"][0, H + 1] = -340.0, 60.0        # side 2's spearman 60 m north of the archers ...
+        u["vz"][0, H + 1] = -3.0                                 # ... running at them
+        u["x"][0, H + 2], u["z"][0, H + 2] = -300.0, -10.0       # another, still, 22 m from side 1's lord
+        lord_on = lambda o: int(o.kind[0, 0]) == O.ATTACK and int(o.target[0, 0]) == H + 1
+        assert not lord_on(opponents.ai_like(st, p))             # before the first fight: the lord's own target
+        u["k"][0, 1] = 5.0                                       # side 1 has fought (a spearman's kills)
+        o = opponents.ai_like(st, p)
+        assert lord_on(o) and bool(o.run[0, 0])                  # the lord (63 m from it) cuts it off
+        assert int(o.kind[0, 2]) == O.ATTACK and int(o.target[0, 2]) == H + 1   # the nearest spearman (45 m) too
+        assert not lord_on(opponents.ai_like(st, dataclasses.replace(p, guard_m=0.0)))   # off: the nearer one
+        u["vz"][0, H + 1] = 3.0                                  # going away: no guard
+        assert not lord_on(opponents.ai_like(st, p))
+        u["vz"][0, H + 1] = -3.0
+        u["hp"][0, 0] = 0.2                                      # a hurt lord leaves it to the others
+        assert not lord_on(opponents.ai_like(st, p))
+
+    def test_ai_like_missile_units_walk_up_only_to_a_post_behind_the_line_after_the_fight(self):
+        st = line_army(attacker=1, gap=600)                      # side 1 attacks: its archers walk up to range
+        u = st.u
+        p = opponents.Line(missile_post_m=55.0)
+        assert int(opponents.ai_like(st, p).kind[0, 3]) == O.MOVE             # before the fight: 40 m behind, walks
+        u["k"][0, 2] = 5.0                                                    # side 1 has fought
+        assert int(opponents.ai_like(st, p).kind[0, 3]) == O.HOLD             # 40 m behind its line: at the post
+        u["x"][0, 3] = -400.0                                                 # 100 m behind: walks up
+        assert int(opponents.ai_like(st, p).kind[0, 3]) == O.MOVE
+        u["x"][0, 3] = -340.0
+        assert int(opponents.ai_like(st, dataclasses.replace(p, missile_post_m=0.0)).kind[0, 3]) == O.MOVE   # off
 
     def test_ai_like_lord_does_not_charge_alone(self):
         st = line_army(attacker=1, gap=600, lord_ahead=150)                      # side 1's lord far in front
@@ -1246,6 +1287,21 @@ class TestProtocol:
                 os.kill(os.getpid(), signal.SIGTERM)
                 time.sleep(2.0)                      # (the handler runs at the next bytecode)
         assert not lock.exists() and signal.getsignal(signal.SIGTERM) == before
+
+    def test_sigterm_frees_the_lock_at_once_even_if_the_unwinding_never_gets_there(self, tmp_path):
+        # a SystemExit raised inside a finaliser is swallowed; slow inner finally blocks outlast docker's 10 s
+        import signal
+        from tools.nn.train import test5
+        lock = tmp_path / "gpu-train.lock"
+        with test5.gpu_lock("t", path=lock, poll_s=0.01, gap_s=0):
+            try:
+                test5._stop(signal.SIGTERM, None)
+            except SystemExit as e:                   # (swallowed here)
+                assert e.code == 128 + signal.SIGTERM
+            assert not lock.exists() and lock.with_suffix(".released").read_text(encoding="utf-8").endswith(" t\n")
+            lock.write_text("test5 other\n", encoding="utf-8")       # another job takes the free lock
+        assert lock.read_text(encoding="utf-8") == "test5 other\n"   # ... and keeps it
+        assert not test5._HELD
 
     def test_the_before_evaluation_runs_with_tf32_as_the_training_does(self, tmp_path, monkeypatch):
         # torch.compile's graphs are guarded on the TF32 switch: run.train turned it on after a "before" compiled

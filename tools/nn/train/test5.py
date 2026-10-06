@@ -93,10 +93,26 @@ PROTOCOL = ["--small", "0.35:6", "--critic-warmup", "3",
             "--pool-extra", "build/nn-train/runs/long19/latest.pt", "--snapshot-every", "10", "--no-eval"]
 
 
+_HELD = {}                  # the GPU locks this process holds: path -> (its .released stamp, label)
+
+
+def _free(path, released, label):
+    with contextlib.suppress(OSError):
+        released.write_text(f"{time.time():.3f} {label}\n", encoding="utf-8", newline="\n")
+    with contextlib.suppress(FileNotFoundError):
+        path.unlink()
+
+
 def _stop(signum, frame):
-    """SIGTERM (docker stop) -> SystemExit: the stack unwinds and gpu_lock frees the lock (as on Ctrl+C). The
-    container's first process ignores SIGTERM without a handler: docker stop then killed it after 10 s, and
-    the lock stayed until tools.ops.leftovers --unlock."""
+    """SIGTERM (docker stop) -> the held lock freed at once, then SystemExit: the stack unwinds (as on Ctrl+C).
+    The container's first process ignores SIGTERM without a handler: docker stop then killed it after 10 s, and
+    the lock stayed until tools.ops.leftovers --unlock. Freed here, not only in gpu_lock's finally: the
+    unwinding (inner finally blocks, joins) may outlast docker's 10 s, and a SystemExit raised inside a
+    finaliser is swallowed (the lock of test5 s16_kite stayed after a docker stop; a docker stop of a test5
+    training 2 min in, build/archers/locktest, freed it in 2 s)."""
+    for path, (released, label) in list(_HELD.items()):
+        if _HELD.pop(path, None) is not None:
+            _free(path, released, label)
     raise SystemExit(128 + signum)
 
 
@@ -128,6 +144,7 @@ def gpu_lock(label, path=LOCK, poll_s=30.0, gap_s=60.0):
             time.sleep(poll_s)
     with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
         f.write(f"{label} {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+    _HELD[path] = (released, label)
     old = None
     with contextlib.suppress(ValueError):        # (signal handlers only in the main thread)
         old = signal.signal(signal.SIGTERM, _stop)
@@ -136,10 +153,8 @@ def gpu_lock(label, path=LOCK, poll_s=30.0, gap_s=60.0):
     finally:
         if old is not None:
             signal.signal(signal.SIGTERM, old)
-        with contextlib.suppress(OSError):
-            released.write_text(f"{time.time():.3f} {label}\n", encoding="utf-8", newline="\n")
-        with contextlib.suppress(FileNotFoundError):
-            path.unlink()
+        if _HELD.pop(path, None) is not None:     # (not when _stop freed it: it may be another job's by now)
+            _free(path, released, label)
 
 
 def chosen(args):

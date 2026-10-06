@@ -53,7 +53,7 @@ passes after `--`:
 --critic-init <previous runs/test5_<label>/latest.pt> --critic-warmup 3 \
 --reference <init> --anchor 0.03 --anchor-end 0.03 --anchor-roll 600 --adv-norm role \
 --idle-rate 0.05 --lord-rout 0.5 --entropy-target 0.05 --entropy-max 0.03 \
---drills 0.2 --drill-teach auto --teach-normal auto --gpu-duty 1.0 \
+--drills 0.2 --teach-normal kiting --gpu-duty 1.0 \
 --mix '{"self": 0.05, "past": 0.1, "nearest": 0.35, "hold_shoot": 0.15, "hold": 0.05, "ai_like": 0.3}'
 ```
 
@@ -61,9 +61,10 @@ Without `--drill-weights` the drills are the default `drills.TRAIN` (`kiting`, `
 without any leash collapses: [tried and rejected](#no-leash-and-a-leash-only-for-new-networks));
 advantages normalised per role (the attacker's, wider with its idle cost, no longer outweigh the
 defender's); the progress clock at 0.05 of the budget a minute (the network sees it:
-[model](model.md)); a shattered lord counted as dead; drills on 20 % of battles with the adaptive
-teacher in drills and in normal battles (it switches itself off once the network catches the script;
-with the small network 30 % of `counter` alone cost old skills: [drills](#drills)).
+[model](model.md)); a shattered lord counted as dead; drills on 20 % of battles (with the small network
+30 % of `counter` alone cost old skills: [drills](#drills)); a teacher of kiting only, in normal battles
+only (adaptive, it switches itself off once the transfer catches `ai_like`): kiting pays in the game; the
+drills' teacher is off ([tried and rejected](#the-drills-teacher-in-the-chain)).
 
 ### Training a widened network
 
@@ -207,13 +208,41 @@ network-vs-game-AI gate battles ("pool"; the analysis scripts in `build/ail/`, n
 | the defender counter-charges from | 100 m | pool: first targets at ~100 m |
 | an enemy that wavers is charged from | 150 m | ours |
 | missile units halt at a share of range and shoot; the enemy lord first when in range, in melee too | 0.9 | gate battles: with our lord in range the game's missile units shot him 89 % of their firing seconds |
-| missile units withdraw 50 m from an enemy melee unit within | 50 m | pool: a free missile unit moves away from a closing melee unit in 52–58 % of the seconds within 40 m, 42 % at 40–60 m |
+| missile units shoot at a closing enemy melee unit and step back (away from it and back, 50 m) only from one within | 20 m | `build/evade`, 28 gate battles: the game AI's missile units approached by one of our units fire 79 % of the seconds at 20–40 m and 63 % at 40–60 m and move away in 24 % of the approaches; `ai_like` at 50 m: 9 % / 44 %, moved away in 56 % |
+| after the first fight missile units walk up to range only as far as a post behind their line's centre | 25 m | `build/evade`: after the first fight the game AI's missile units stand 27 m behind their melee centre (56–63 m in the first 120 s); `ai_like` without the post walked to range through its own line (5 m in front of it) |
+| the guard: an enemy melee unit (or lord) out of melee running (>= 0.5 m/s) at an own free missile unit within 80 m is attacked by the own lord (if within 90 m, out of melee, health >= 30 %) and by the own free melee unit nearest to it (within 100 m); only after the first fight | 80 / 90 / 100 m | `build/evade/guard.py`: the game AI takes a unit chasing its missile units when it is 73 m (lord) / 82 m (units) from them; a chase of one of our units after an AI missile unit lasts 13 s (median), against 31 s for `ai_like` without the guard |
 | a missile unit caught in melee breaks off (withdraw) for its first | 15 s | pool: the game's missile units in melee move 52 % of their first 5 s |
 | the lord stays behind his line's centre, never charges first: goes in when the line does, at his target within 90 m, or at an enemy within 50 m that already fights; withdraws below 30 % health | 20 m, 90 m | pool: 20–22 m behind the centre before contact, his first target at 90 m |
 | the lord's abilities by the game AI's rule (shared by every scripted opponent, `config/nn/sim.json` abilities): Foe Seeker and Verminous Valour in melee, again as soon as ready; Stand Your Ground in melee with a friendly unit within 35 m; Rally with two; Deadly Onslaught never | 35 m | 139 gate battles, 926 uses by the AI's lords; the lord duels ([simulator](simulator.md#lords)) |
 | melee targets: score = distance − 20 m if the enemy is in melee (+30 m back if the unit stands within 40 m of an own fight) + 25 m for the enemy lord + 6 m for each other own unit already on it (up to 3) − 10 m × cos(the side's forward, the enemy) + 15 m if it wavers − 27 m × a fixed Gumbel draw per (battle row, unit, enemy); the lowest wins, a new one must be 15 m better | see left | a conditional logit fitted on the game AI's 3 397 new targets of melee units out of melee (`build/ail/choice.py`); hysteresis ours |
 | a free unit goes for an enemy already fighting via a point 12 m beside its flank and 35 m behind its centre (along the enemy's facing); straight at it once the unit itself stands 140° or more off the enemy's facing | 12 m, 35 m, 140° | the simulator's tactic scan; going round to the rear: `build/wrap` (below) |
 | before contact the line widens to lap the enemy's melee line by 30 m at each end: each line unit shifts aside by its place in the line (on the march up to half a step aside; a holding defender sidesteps up to 8 m without turning), at most 40 m between neighbouring centres | 30 m, 40 m | `build/wrap`: the game AI's melee line 170 m wide 60 s before contact, 191 m at contact against the network's 157–165 m, 2.4 units beyond the network's end unit (31 m beyond on average), centres 33–35 m apart |
+
+**Missile units and the guard** (the three rules above: stepping back only from 20 m, the post, the guard).
+`build/evade/` and `build/archers/` (scripts and JSON not in Git): 28 battles of the five `build/ownloss` gates;
+the simulator from the same starts, the gate's network against `ai_like`, 6 copies each, the game's cadence.
+Game / `ai_like` before / after:
+
+| Metric | Game | Before | After |
+|---|---:|---:|---:|
+| AI missile units behind their line's centre after the first fight, m (battle median) | 27 | −5 | 19 |
+| an approach of ours to an AI missile unit ended in melee with an AI unit / with the AI lord | 0.80 / 0.37 | 0.62 / 0.20 | 0.69 / 0.21 |
+| the AI missile unit moved away when approached | 0.24 | 0.56 | 0.18 |
+| the AI missile unit fires with the approacher at 20–40 / 40–60 m | 0.79 / 0.63 | 0.09 / 0.44 | 0.58 / 0.77 |
+| a chase of one of our units after an AI missile unit, s (median) | 13 | 31 | 17 |
+| the chased missile unit routed before contact | 0.04 | 0.15 | 0.12 |
+| our missile units shoot it (share of the chase) | 0.02 | 0.14 | 0.13 |
+| local enemy power around our units in melee | 1.71 | 1.46 | 1.49 |
+| own gold lost / trade | 0.939 / −0.321 | 0.694 / +0.020 | 0.723 / +0.020 |
+
+The gap card of gate `20261006-052934` (6 battles, 8 copies), game / before / after: own gold lost
+0.919 / 0.713 / 0.759, trade −0.241 / +0.021 / +0.006, 30 s before the end 0.760 / 0.677 / 0.705 and
+−0.106 / +0.016 / +0.010, own army destroyed by the end 0.83 / 0.04 / 0.12, wins 0.17 / 0.65 / 0.50,
+battle length 445 / 754 / 593 s; `ai_like`'s gold lost 0.678 / 0.734 / 0.765.
+What pulled the missile units forward: the "walk up to range" rule after the fight (half of the orders of those
+standing in front of their line; 120 s after the fight they were 43 m in front) and long chases (a missile unit
+ran from one of our units for 31 s). Left: the AI lord cuts off less often than in the game (0.21 against 0.37), as
+he gets into a fight himself earlier; `ai_like` loses more gold (0.74 against 0.62 in the game).
 
 The random part is an integer hash of (battle row, unit slot, enemy slot): the same every step,
 nothing to replay. Fitted against the game on the same 8 gate battle starts (side 2's behaviour;
@@ -936,6 +965,23 @@ to join existing fights can remove it. Analysis: `build/gangup/`, outside Git.
 
 What was tried, the result in numbers, and why it is not used. Git keeps the code of each.
 
+### `ai_like` missile units: variants
+
+`build/evade/`, `build/archers/` (28 gate battles x 6 copies; game / before: the table [above](#the-opponent-ai_like)):
+
+| Variant | Depth behind the line, m | Chase, s | Own gold | Trade |
+|---|---:|---:|---:|---:|
+| stepping back from 20 m straight away, no post, no guard | −55 | 32 | 0.702 | +0.020 |
+| post 55 m without the guard (straight away, from 20 m) | −3 | 32 | 0.711 | +0.020 |
+| guard, stepping back straight away | −7 | 18 | 0.724 | +0.009 |
+| guard, stepping back away and back | 3 | 15 | 0.725 | +0.016 |
+| guard, post 55 m | 20 | 18 | 0.718 | +0.033 |
+| **guard, post 25 m (adopted)** | 19 | 17 | 0.723 | +0.020 |
+
+Stepping back straight away takes the missile units in front of their line: a chase often comes from the side or
+behind. The post without the guard did not help: long chases pulled the units forward too. A 55 m post gives the
+same depth as 25 m but raises `ai_like`'s routs (1.21 against 1.15; game 0.68) and the trade.
+
 ### `ai_like` envelopment: variants
 
 The same 162 starts of `build/wrap`, one copy each (share noise ~±0.02), `s7_fat3/m15`. The line
@@ -1079,6 +1125,13 @@ from them (8 % drills for 15 minutes: drill win 0.18 → 0.20; 30 % for 25 minut
 first order on the correct target 146 s against the skilled script's 0.5 s): the naive play lost
 only on the clock it cannot see — at 900 s it won 1.00. Rebuilt to be decided by the fight under the
 standard limit, the `counter` drill was learned (above).
+
+### The drills' teacher in the chain
+
+`--drill-teach auto` (with `--teach-normal auto`) ran in the chain up to step s12. The `hold_fire` teacher in the
+drills clipped (PPO clip) 60 % of the updates, and the rating dropped by 0.25 and 0.22 in steps s11 and s12
+(`build/chaincheck`). The user's decision (06.10.2026): the teachers are off except kiting in normal battles
+(`--teach-normal kiting`, adaptive): kiting pays in the game.
 
 ### The Skaven at 0.8 of the budget
 

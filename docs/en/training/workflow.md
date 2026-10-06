@@ -15,7 +15,7 @@ flowchart LR
 
 | What | How | Instead of |
 |---|---|---|
-| Is anything left from the last step? | `.venv/Scripts/python -m tools.ops.leftovers` — our containers, the GPU lock, wait loops, the game, the GPU's load; exit 1 when something is left; `--kill` ends wait loops older than 10 min, `--unlock` removes a stale lock, `--stop NAME` stops one of our containers | `docker ps`, `ls build/*.lock`, `ps` by hand, and the misses: nine containers at once (training 2x slower), a trap that deleted another job's lock |
+| Is anything left from the last step? | `.venv/Scripts/python -m tools.ops.leftovers` — our containers, the GPU lock, wait loops, the game, the GPU's load; exit 1 when something is left; `--kill` ends wait loops older than 10 min, `--unlock` removes a stale lock (stale: no training container, one named `orch-` from the chain's options file or running `tools.nn.train.test5` / `run.py`; an agent's container does not hold it), `--stop NAME` stops one of our containers (30 s to exit; it removes a lock the stopped training left). `test5` itself frees the lock on SIGTERM (`docker stop`) at once, in the signal handler, before the stack unwinds | `docker ps`, `ls build/*.lock`, `ps` by hand, and the misses: nine containers at once (training 2x slower), a trap that deleted another job's lock |
 | The next step's command | `.venv/Scripts/python -m tools.ops.step --label n4 --from n3_consolidate [--minutes 25] [--set drills=0.1] [--drop teach-normal] [--write build/steps/n4.sh] [-- run.py options]` | sed-editing the previous step's script (a wrong critic or reference goes unnoticed) |
 | Waiting for a run or a test | `bash tools/ops/wait.sh -t 5400 build/steps/n4.log '^written:\|Traceback'` — a timeout, case-insensitive, exit 2 on time | `until grep …; do sleep 60; done` — ran for hours when `FAILED` came in capitals |
 | A simulator or drill change is ready, the previous step still trains | `.venv/Scripts/python -m tools.ops.baselines --build <main checkout>/build --run` from the worktree with the change — the new version's references on the CPU, ~8 min ([the cache](#the-baselines-cache-and-the-canary)) | the step waited 25–50 min for them at its "before" evaluation |
@@ -30,7 +30,7 @@ The step takes the previous label and derives what the chain needs
 named, `--from n3/m15`) is the `--init` and the `--reference`, its run's `runs/test5_<label>/latest.pt`
 the `--critic-init`; the standing options come from `config/train-chain.json` (`--set key=value`
 overrides one, `--drop key` removes one, options after `--` are appended as given; `run.py` takes the
-last value of a repeated option). The container is `orch-<label>`; `--gpu-duty 0.9` sits in the
+last value of a repeated option). The container is `orch-<label>`; `--gpu-duty` (1.0; 0.6 in game mode) sits in the
 options file. The tool prints the two-line script (or writes it with `--write`), the init and
 critic it chose, whether the references' cache (the script baselines and the drill check scripts)
 will hit, and the expected wall time: training + (points + 2) evaluations of ~3.3 min (+ ~10 min on a
@@ -76,11 +76,12 @@ means does not depend on the profile: the profile only says whether it is comput
 |---|---|---|
 | `test5` (and `tools.ops.step --profile`) | the rating, pair gold against each script (with the script baselines), own lord deaths, wins and gold, order kinds | `behaviour` (alias `shooters`: missile units in melee, flanks, piles, abilities), `liveliness`, `fatigue` (the share of own units' time by fatigue state; the run share of move orders far from the fight), `transfer`, `drills`, `capacity`; default `full` |
 | `python -m tools.nn.gate summary <folder> --profile …` | outcomes, pairs, pair gold, own lord deaths (from the recordings) | `liveliness` (default), `routs`, `lords`, `fatigue`, `activity`, `shooters`, `wrap` — each recording's numbers (as in the gap card) |
-| `tools.ops.gapcard` | win, trade, own and enemy gold lost, own lord death, battle length | `routs`, `lords`, `fatigue`, `activity`, `shooters`, `wrap`; default `full` |
+| `tools.ops.gapcard` | win, trade, own and enemy gold lost, own loss and trade 30 s before the end, own army destroyed by the end, own lord death, battle length | `routs`, `lords`, `fatigue`, `activity`, `shooters`, `wrap`; default `full` |
 
 The teachers add what they read: `--drill-teach auto` adds `drills`, an adaptive `--teach-normal`
-adds `transfer` (`test5` prints what it added). The chain runs both teachers now, so
-`--profile mandatory` there gives `mandatory+transfer+drills`. Every evaluation keeps its
+adds `transfer` (`test5` prints what it added). The chain runs only `--teach-normal kiting` now (the drills'
+teacher is off: [tried and rejected](training.md#the-drills-teacher-in-the-chain)), so `--profile mandatory`
+there gives `mandatory+transfer`. Every evaluation keeps its
 `profile`, `report.json` too; the run card shows it.
 
 The cost of one evaluation (CPU, 8 cores, `s6_fatigue/m20`, 64 battles per opponent = 192 of the
@@ -120,7 +121,7 @@ the length 30 s, routs 0.15 per unit, the line lap 15 m, abilities 0.5, the firs
 
 | Profile | What is measured |
 |---|---|
-| mandatory | win (1 / 0); trade = (enemy gold lost − ours) / budget; own and enemy gold lost / that army's cost (as the gate counts: dead, shattered or gone whole, routing half of what is left); own lord dead (health or men 0, or shattered); battle length |
+| mandatory | win (1 / 0); trade = (enemy gold lost − ours) / budget; own and enemy gold lost / that army's cost (as the gate counts: dead, shattered or gone whole, routing half of what is left); own loss and trade 30 s before the window's end (the game's last seconds, a pursuit of a broken army, apart); own army destroyed by the window's end (the game database's rule: own strength <= 0.22 of its start and the enemy's >= 2.6 times ours; strength as the simulator's `morale.army_collapse`, `config/nn/sim.json` morale.collapse; on the 28 battles of `build/ownloss`: game 0.96, simulator 0.10); own lord dead (health or men 0, or shattered); battle length |
 | `routs` | rout onsets per unit, own / enemy |
 | `lords` | a lord's health lost per second of his melee: ours ("lost") and the enemy's ("dealt"); enemy lord dead; our lord's ability uses (count, first use time; in the game the bridge's `nn_ability` events) |
 | `fatigue` | the share of the units on the field tired or worse in the bins 0–120 / 120–240 / 240–360 / 360+ s; exhausted over the whole window; own / enemy. The run share: of our units' time under a move / withdraw order far from the fight (before the battle's first melee and no standing enemy within 150 m, about a bow's range), the share that runs (the orders in force: in the game the bridge's given `nn_orders`, in the simulator `order_kind` / `order_run`; in `test5` the same rule in `behaviour.Fatigue`) |

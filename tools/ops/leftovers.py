@@ -4,11 +4,14 @@ cleanup of our own (docs/en/training/workflow.md).
     python -m tools.ops.leftovers                 # report; exit 1 when something is left
     python -m tools.ops.leftovers --kill          # end the wait loops older than --min-age minutes (bash with until/while ... sleep, and their sleep children)
     python -m tools.ops.leftovers --unlock        # remove a stale build/gpu-train.lock (no training container runs)
-    python -m tools.ops.leftovers --stop NAME     # docker stop one of OUR containers (image snake-ai-trainer or the companion)
+    python -m tools.ops.leftovers --stop NAME     # docker stop one of OUR containers (image snake-ai-trainer or the companion),
+                                                  # 30 s grace; a training one's lock is removed if it was left
 
 What is ours: containers from the image snake-ai-trainer or named tww3-bai-companion (the other
 projects' containers are not touched or listed), the lock build/gpu-train.lock (test5 / run.py
-write it; stale when no training container runs), bash processes whose command line is a wait loop
+write it; stale when no TRAINING container runs: one named with the chain's dock_prefix (config/train-chain.json,
+orch-) or running tools.nn.train.test5 / run.py; an agent's container does not hold it), bash processes whose
+command line is a wait loop
 (until|while ... sleep) with their sleep children. Also shown: Warhammer3.exe, python processes of
 tools.nn (a gate, the companion) and the GPU's load (nvidia-smi) when available. Nothing is ended or
 removed without its flag; the shell this runs from and its parents are never ended.
@@ -27,6 +30,8 @@ from tools import config as project
 LOCK = project.BUILD / "gpu-train.lock"            # test5.LOCK (checkpoint.DIR.parent)
 OUR_IMAGES = ("snake-ai-trainer",)
 OUR_NAMES = ("tww3-bai-companion",)
+TRAIN_CMD = re.compile(r"tools[./\\]nn[./\\]train[./\\](test5|run)\b")
+CHAIN = project.ROOT / "config" / "train-chain.json"
 LOOP = re.compile(r"\b(until|while)\b.*\bsleep\b", re.I | re.S)
 PS_LIST = ("Get-CimInstance Win32_Process -Filter \"name='sleep.exe' or name='bash.exe' or name='Warhammer3.exe' or "
            "name='python.exe' or name='powershell.exe'\" | Select-Object ProcessId,ParentProcessId,Name,CreationDate,CommandLine "
@@ -42,16 +47,35 @@ def run(cmd, timeout=30):
 
 
 def containers():
-    """[{name, image, status, since}] of OUR running containers."""
+    """[{name, image, status, since, cmd}] of OUR running containers."""
     out = []
-    for line in run(["docker", "ps", "--format", "{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.RunningFor}}"]).splitlines():
+    fmt = "{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.RunningFor}}\t{{.Command}}"
+    for line in run(["docker", "ps", "--no-trunc", "--format", fmt]).splitlines():
         parts = line.split("\t")
         if len(parts) < 4:
             continue
         name, image, status, since = parts[:4]
         if image.split(":")[0] in OUR_IMAGES or name in OUR_NAMES:
-            out.append({"name": name, "image": image, "status": status, "since": since})
+            out.append({"name": name, "image": image, "status": status, "since": since,
+                        "cmd": parts[4].strip('"') if len(parts) > 4 else ""})
     return out
+
+
+def dock_prefix(path=None):
+    """The chain's container name prefix (config/train-chain.json test5.dock_prefix, else orch-)."""
+    try:
+        doc = json.loads(Path(CHAIN if path is None else path).read_text(encoding="utf-8"))
+        return doc.get("test5", {}).get("dock_prefix") or "orch-"
+    except (OSError, ValueError):
+        return "orch-"
+
+
+def training(c, prefix=None):
+    """A training container (it holds the GPU lock): ours, named with the chain's prefix or running test5 /
+    run.py. An agent's container or the companion is not one."""
+    prefix = dock_prefix() if prefix is None else prefix
+    return (c["image"].split(":")[0] in OUR_IMAGES
+            and (c["name"].startswith(prefix) or bool(TRAIN_CMD.search(c.get("cmd") or ""))))
 
 
 def lock(path=None, training=False):
@@ -122,13 +146,13 @@ def report(procs=None, min_age=10.0):
     """(lines, found) of the current state; found: anything left (our containers, a stale lock, wait loops)."""
     procs = processes() if procs is None else procs
     cons = containers()
-    lk = lock(training=any(c["image"].split(":")[0] in OUR_IMAGES for c in cons))
+    lk = lock(training=any(training(c) for c in cons))
     cl = classify(procs)
     lines, found = [], False
     if cons:
         found = True
         lines += [f"containers (ours): {len(cons)}" + (" - MORE THAN ONE: the rule is one container in total" if len(cons) > 1 else "")]
-        lines += [f"  {c['name']}  {c['image']}  {c['status']}" for c in cons]
+        lines += [f"  {c['name']}  {c['image']}  {c['status']}" + ("  (training)" if training(c) else "") for c in cons]
     else:
         lines.append("containers (ours): none")
     if lk:
@@ -179,15 +203,22 @@ def main(argv=None):
         pids = kill(procs, args.min_age)
         print(f"ended: {pids or 'nothing'}")
     if args.unlock:
-        lk = lock(training=any(c["image"].split(":")[0] in OUR_IMAGES for c in containers()))
+        lk = lock(training=any(training(c) for c in containers()))
         if lk and lk["stale"]:
             LOCK.unlink()
             print(f"removed the stale lock {LOCK}")
         else:
             print("lock not removed: " + ("none" if not lk else "a training container runs"))
     if args.stop:
-        if any(c["name"] == args.stop for c in containers()):
-            print(run(["docker", "stop", "-t", "10", args.stop], 60).strip() or f"stopped {args.stop}")
+        mine = [c for c in containers() if c["name"] == args.stop]
+        if mine:
+            print(run(["docker", "stop", "-t", "30", args.stop], 90).strip() or f"stopped {args.stop}")
+            # A stopped training frees the lock itself (test5 on SIGTERM); one killed before it could (docker's
+            # grace over, SIGKILL) leaves it: remove it when no training container runs any more.
+            lk = lock(training=any(training(c) for c in containers()))
+            if training(mine[0]) and lk and lk["stale"]:
+                LOCK.unlink(missing_ok=True)
+                print(f"removed the lock it left: {lk['text']!r}")
         else:
             print(f"not stopped: {args.stop} is not one of our running containers")
     return 1 if found and not (args.kill or args.unlock or args.stop) else 0

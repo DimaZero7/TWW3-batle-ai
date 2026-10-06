@@ -151,8 +151,8 @@ of 0.03 for drifting from the step's start) moves forward every 600 s: without a
 collapses. A step is 20–25 minutes, evaluated every 5–10 minutes; the "before" evaluation is not played
 again: it is the previous step's last one (the same network and code; [step speed](training/workflow.md#step-speed)).
 Standing options are in
-`config/train-chain.json` (now also drills on 20 % of battles and the `auto` teacher in drills
-and in normal battles). `tools.ops.step` builds a step's command, `tools.ops.card` shows its
+`config/train-chain.json` (now also drills on 20 % of battles and a teacher of kiting only, in normal
+battles: `--teach-normal kiting`; the drills' teacher is off: [tried and rejected](training/training.md#the-drills-teacher-in-the-chain)). `tools.ops.step` builds a step's command, `tools.ops.card` shows its
 result ([workflow](training/workflow.md)). A metric profile (`--profile`) picks what the evaluations
 compute: always the rating, pair gold and lord deaths, the rest (drills, transfer, liveliness,
 fatigue, capacity) by the run's question ([metric profiles](training/workflow.md#metric-profiles)).
@@ -238,6 +238,9 @@ So the game's AI trades about 2.5 times better with the same armies. These gates
 are the basis for finding the simulator's gaps (gate replay above). After a gate `tools.ops.gapcard`
 replays its battles in the simulator from the same starts (the network against `ai_like`) and prints
 one game / sim table, marking the gaps beyond noise ([gap card](training/workflow.md#game-vs-sim-gap-card-toolsopsgapcardpy)).
+It also shows the loss and the trade 30 s before the battle's end and "own army destroyed by the end" (the game
+database's rule): in the game the network's army is almost always broken by the end (0.96 of the battles), in the
+simulator rarely (0.10), the main gap in gold.
 
 Details: [in-game check](launch/gate.md) · [the game's own AI](game/game-ai.md) ·
 [difficulty](game/difficulty.md).

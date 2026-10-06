@@ -11,7 +11,11 @@ tools/nn/train/profiles.py GAME):
     mandatory  win (1 / 0), trade = (enemy gold lost - own gold lost) / budget (budget = the two armies'
                cost / 2), own / enemy gold lost as a share of that army's cost (gold as the gate counts
                it: dead, shattered or gone whole, routing half of what is left), own lord dead
-               (hp or men 0), battle length s
+               (hp or men 0), battle length s; own gold lost and the trade 30 s before the window's end
+               (E30_S: the game's last seconds, a pursuit of a broken army, apart); own army destroyed by
+               the window's end (the database's army destruction rule on the recording: own strength <= 0.22
+               of its start and the enemy's >= 2.6 times ours, strength as the simulator's
+               morale.army_collapse: config/nn/sim.json morale.collapse)
     routs      rout onsets (r false -> true) per unit, own / enemy
     lords      lord HP lost per second of that lord in melee: ours ("lost") and the enemy's ("dealt" by
                our army); enemy lord dead; our lord's ability uses (count, first use s)
@@ -48,6 +52,8 @@ SIDES = (("own", 1), ("enemy", 2))
 FAR_M = 150.0             # = tools/nn/train/behaviour.py FAR_M
 POINT_KINDS = ("move", "withdraw")
 REAR_DEG = 120.0          # = the simulator's rear sector (config/nn/sim.json threat), build/gangup's rear entry
+E30_S = 30.0              # the own loss and the trade also this long before the window's end
+CONFIG = Path(__file__).resolve().parents[2] / "config" / "nn"
 
 
 def _bin_name(lo, hi):
@@ -59,6 +65,9 @@ ROWS = [("win", "mandatory", "win (1 / 0)", "{:.2f}"),
         ("trade", "mandatory", "trade (enemy - own gold lost) / budget", "{:+.3f}"),
         ("gold_own", "mandatory", "own gold lost / own army", "{:.3f}"),
         ("gold_enemy", "mandatory", "enemy gold lost / enemy army", "{:.3f}"),
+        ("gold_own_e30", "mandatory", f"own gold lost / own army, {E30_S:g} s before the end", "{:.3f}"),
+        ("trade_e30", "mandatory", f"trade, {E30_S:g} s before the end", "{:+.3f}"),
+        ("army_beaten_own", "mandatory", "own army destroyed by the end (army destruction rule)", "{:.2f}"),
         ("lord_dead_own", "mandatory", "own lord dead", "{:.2f}"),
         ("length_s", "mandatory", "battle length, s", "{:.0f}"),
         ("routs_own", "routs", "rout onsets per unit, own", "{:.2f}"),
@@ -166,6 +175,52 @@ def gold_lost(f, i, cost):
     return share * cost
 
 
+def collapse_rules(sim=None, rules=None):
+    """(config/nn/sim.json morale.collapse, (alliance ratio 0.22, enemy ratio 2.6) from game_rules.json morale)."""
+    sim = sim if sim is not None else json.loads((CONFIG / "sim.json").read_text(encoding="utf-8"))["morale"]["collapse"]
+    rules = rules if rules is not None else json.loads((CONFIG / "game_rules.json").read_text(encoding="utf-8"))["morale"]
+    return sim, (float(rules["army_destruction_alliance_strength_ratio"]),
+                 float(rules["army_destruction_enemy_strength_ratio"]))
+
+
+def beaten(b, passports=None, cal=None, ratios=None):
+    """[T, 2] bools: side 1 / side 2 meets the database's army destruction rule at each sample (own strength
+    <= ratios[0] of its start, the enemy's >= ratios[1] times its own); strength as the simulator's
+    morale.army_collapse (tools/nn/sim/morale.py): cost (the lord x lord_value_scale) x health x the missile
+    units' ammunition weight x routing_weight when routing, units alive and not shattered."""
+    if cal is None or ratios is None:
+        c, r = collapse_rules()
+        cal, ratios = (c if cal is None else cal), (r if ratios is None else ratios)
+    passports = passports or passport.load()
+    f = b.f
+    keys = list(b.keys)
+    side = np.asarray(b.side)
+    lord = passport.lords(keys, passports)
+    direct = np.array([bool(((passports[k].get("missile") or {}).get("direct"))) if k else False for k in keys])
+    value = passport.cost(keys, passports).astype(float) * np.where(lord, float(cal.get("lord_value_scale", 1.0)), 1.0)
+    men = np.nan_to_num(np.asarray(f["men"], dtype=float), nan=0.0)
+    alive = (men > 0) & ~f["s"].astype(bool)
+    hp = np.clip(np.nan_to_num(np.asarray(f["hp"], dtype=float), nan=0.0), 0.0, 1.0) ** float(cal.get("hp_power", 1.0))
+    a = np.asarray(f["a"], dtype=float)
+    first = np.where(np.isfinite(a).any(0), a[np.isfinite(a).argmax(0), np.arange(a.shape[1])], 0.0)
+    a0 = np.nan_to_num(first, nan=0.0)
+    weight = np.ones_like(hp)
+    if cal.get("strength") == "strategic":
+        amm = np.clip(np.nan_to_num(a, nan=0.0) / np.maximum(a0, 1.0), 0.0, 1.0)
+        sl, mid = float(cal["ammo_slope"]), float(cal["ammo_midpoint"])
+        lo, hi = 1 / (1 + np.exp(sl * mid)), 1 / (1 + np.exp(-sl * (1 - mid)))
+        avail = (1 / (1 + np.exp(-sl * (amm - mid))) - lo) / (hi - lo)
+        floor = np.where(direct, float(cal["ammo_empty_direct"]), float(cal["ammo_empty"]))
+        weight = np.where((a0 > 0)[None, :], floor + (1 - floor) * avail, 1.0)
+        weight = weight * np.where(f["r"].astype(bool), float(cal["routing_weight"]), 1.0)
+    count = alive & ~f["r"].astype(bool) if cal.get("count") == "standing" else alive
+    power = value[None, :] * hp * weight * count
+    st = np.stack([power[:, side == 1].sum(1), power[:, side == 2].sum(1)], 1)
+    init = np.array([value[side == 1].sum(), value[side == 2].sum()])
+    other = st[:, ::-1]
+    return (init[None, :] > 0) & (other > 0) & (other >= ratios[1] * st) & (st <= ratios[0] * init[None, :])
+
+
 def measure(b, winner, cut_s=None, abilities=None, chosen=GROUPS, passports=None, orders=None):
     """{key: value} (ROWS of the mandatory group and `chosen`) of one battle b (gamedata.Battle; side 1
     ours). winner: 1 ours, 2 theirs, else no result (win None); cut_s: the window's end (default the
@@ -194,6 +249,14 @@ def measure(b, winner, cut_s=None, abilities=None, chosen=GROUPS, passports=None
     out["trade"] = _share(lost[side == 2].sum() - lost[side == 1].sum(), budget)
     out["gold_own"] = _share(lost[side == 1].sum(), start["own"])
     out["gold_enemy"] = _share(lost[side == 2].sum(), start["enemy"])
+    w30 = t <= cut - E30_S + 1e-6
+    if w30.any():
+        lost30 = gold_lost(f, int(np.nonzero(w30)[0][-1]), cost)
+        out["gold_own_e30"] = _share(lost30[side == 1].sum(), start["own"])
+        out["trade_e30"] = _share(lost30[side == 2].sum() - lost30[side == 1].sum(), budget)
+    else:
+        out["gold_own_e30"] = out["trade_e30"] = None
+    out["army_beaten_own"] = float(beaten(b, passports)[:i_cut + 1, 0].any()) if len(t) else None
     dead = (np.nan_to_num(f["hp"], nan=1.0) <= 0) | ~(men > 0) | f["s"].astype(bool)     # as st.lord_dead_s
     for s, n in SIDES[:2 if "lords" in chosen else 1]:          # the enemy's: the lords group
         j = np.nonzero(lord & (side == n))[0]
