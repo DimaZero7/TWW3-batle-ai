@@ -19,6 +19,7 @@ Usage:
     python -m tools.build lord-duel --duel skv --duel-variant escort   # the same, each lord with 2 infantry units
     python -m tools.build lord-ai --duel skv --own-role defend   # a scripted lord v the game AI's lord (tools/nn/lord_ai.py)
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # the melee probe (tools/nn/charge_probe.py)
+    python -m tools.build missile-probe --mprobe-plan dist --mprobe-battle 1   # the missile probe (tools/nn/missile_probe.py)
 
 Output: build/<target>/ with the .pack, the bundled script and manifest.json.
 Install and launch with tools/launcher/launch.ps1.
@@ -124,6 +125,15 @@ TARGETS = {
         "folder": "tww3_bai",
         "scenario": "lord_swarm.xml",
         "packed_scenario": "charge_probe.xml",
+    },
+    # The missile probe (one shooting indicator in lanes, game and simulator alike): tools/nn/missile_probe.py.
+    "missile-probe": {
+        "entry": "entries.missile_probe",
+        "pack": "tww3_bai_missile_probe.pack",
+        "script": "tww3_bai_missile_probe",
+        "folder": "tww3_bai",
+        "scenario": "lord_swarm.xml",
+        "packed_scenario": "missile_probe.xml",
     },
     "lord-fall": {
         "entry": "entries.lord_fall",
@@ -369,6 +379,9 @@ def main(argv=None):
     parser.add_argument("--probe-plan", choices=("charge", "hit"), default="charge",
                         help="charge-probe: the plan (tools/nn/charge_probe.py)")
     parser.add_argument("--probe-battle", type=int, default=1, help="charge-probe: the plan's battle, 1-based")
+    parser.add_argument("--mprobe-plan", choices=("dist", "arc", "range", "targets", "shield", "moving", "rank"),
+                        default="dist", help="missile-probe: the plan (tools/nn/missile_probe.py)")
+    parser.add_argument("--mprobe-battle", type=int, default=1, help="missile-probe: the plan's battle, 1-based")
     parser.add_argument("--swarm", dest="plan_swarm", choices=("infantry", "lords", "all", "damage"), default="infantry",
                         help="lord-swarm: infantry around each lord, the other lord (with units) on him, both, or the "
                              "damage plan (one swordsmen / greatswords / clanrat / Stormvermin unit on a lord)")
@@ -422,7 +435,7 @@ def main(argv=None):
     else:
         scenario_file = None
         tick_ms = args.tick_ms or {"lord-swarm": LORD_SWARM_TICK_MS, "lord-fall": LORD_FALL_TICK_MS,
-                                   "charge-probe": 500}.get(args.target, 1000)
+                                   "charge-probe": 500, "missile-probe": 500}.get(args.target, 1000)
         run_config = {"speed": args.speed, "timeout_ms": args.timeout * 1000, "tick_ms": tick_ms,
                       "scenario": TARGETS[args.target]["scenario"].removesuffix(".xml")}
         model_s = READOUT_MODEL_S if args.target == "unit-readout" else args.timeout
@@ -471,6 +484,14 @@ def main(argv=None):
             from tools.nn import charge_probe
             path = charge_probe.write_scenario(args.probe_plan, args.probe_battle)
             probe, model_s, _ = charge_probe.run_config(args.probe_plan, args.probe_battle)
+            run_config.update(probe)
+            stall_ms = max(stall_ms, int((model_s + 120) * 1000))
+            if not args.scenario:
+                args.scenario = str(path)
+        if args.target == "missile-probe":
+            from tools.nn import missile_probe
+            path = missile_probe.write_scenario(args.mprobe_plan, args.mprobe_battle)
+            probe, model_s, _, _ = missile_probe.run_config(args.mprobe_plan, args.mprobe_battle)
             run_config.update(probe)
             stall_ms = max(stall_ms, int((model_s + 120) * 1000))
             if not args.scenario:

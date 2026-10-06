@@ -9,6 +9,9 @@
                                     (all unit numbers: tools/nn/units.py -> config/nn/units.json);
   unit_experience_bonuses_tables    what a rank adds (leadership, attack, defence, accuracy);
   unit_experience_thresholds_tables experience needed for each rank.
+Every battle of the project runs with the required mods (config/mod-dependencies.json: True Sight); their own
+_kv_*_tables rows replace the vanilla rows of the same key, as the game loads them (mods after db.pack), and
+game_rules.json "_mods" lists each replaced key with its vanilla and modded value.
 Writes config/nn/game_rules.json (data for training the network). The game's
 files are zstd-compressed: needs Python 3.14+ (compression.zstd).
 
@@ -56,6 +59,55 @@ def read_entries(pack, names):
                 got[name] = zstd.decompress(data[4:]) if comp else data
             off += size
     return got
+
+
+def read_prefixed(pack, prefixes):
+    """{entry name: bytes} of the pack's entries whose name starts with one of prefixes (a mod's own tables)."""
+    from compression import zstd
+    got = {}
+    with open(pack, "rb") as f:
+        magic, kind, pc, ps, fc, fs, ts = struct.unpack("<4s6I", f.read(28))
+        assert magic == b"PFH5"
+        ext = 20 if kind & 0x100 else 0
+        f.read(ext)
+        f.read(ps)
+        idx = f.read(fs)
+        pos, off = 0, 28 + ext + ps + fs
+        for _ in range(fc):
+            size = struct.unpack_from("<I", idx, pos)[0]
+            pos += 4 + (4 if kind & 0x40 else 0)
+            comp = idx[pos]
+            pos += 1
+            end = idx.index(0, pos)
+            name = idx[pos:end].decode("latin1")
+            pos = end + 1
+            if name.startswith(tuple(prefixes)):
+                f.seek(off)
+                data = f.read(size)
+                got[name] = zstd.decompress(data[4:]) if comp else data
+            off += size
+    return got
+
+
+MOD_TABLES = {"morale": "db\\_kv_morale_tables\\", "fatigue": "db\\_kv_fatigue_tables\\",
+              "battle": "db\\_kv_rules_tables\\"}
+
+
+def mod_rules(settings=None):
+    """[(pack, {section: {key: value}})] of the required mods (config/mod-dependencies.json), in load order."""
+    settings = settings or project.load()
+    deps = json.loads((project.ROOT / "config" / "mod-dependencies.json").read_text(encoding="utf-8"))
+    out = []
+    for mod in deps["mods"]:
+        pack = Path(settings["workshop_dir"]) / mod["workshop_id"] / mod["pack_name"]
+        raw = read_prefixed(pack, MOD_TABLES.values())
+        rows = {}
+        for section, prefix in MOD_TABLES.items():
+            for name, b in sorted(raw.items()):
+                if name.startswith(prefix):
+                    rows.setdefault(section, {}).update(kv_table(b))
+        out.append((mod["pack_name"], rows))
+    return out
 
 
 def _skip_header(b):
@@ -140,7 +192,15 @@ def main():
              "units": {t: dict(unit_row(land_units, k), key=k) for t, k in UNIT_KEYS.items()}}
     for t, u in rules["units"].items():
         assert (u["melee_attack"], u["melee_defence"]) == card_melee(u["key"]), (t, u)
-    OUT.write_text(json.dumps(rules, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    # the required mods' rows over the vanilla ones (True Sight: the line-of-fire checks and the melee thresholds)
+    rules["_mods"] = {}
+    for pack, sections in mod_rules():
+        for section, rows in sections.items():
+            for key, value in rows.items():
+                rules["_mods"].setdefault(pack, {}).setdefault(section, {})[key] = {
+                    "vanilla": rules[section].get(key), "modded": value}
+                rules[section][key] = value
+    OUT.write_text(json.dumps(rules, indent=1, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
     print(json.dumps(rules["units"], ensure_ascii=False), json.dumps(rules["experience_bonus"]))
     print("written", OUT)
 

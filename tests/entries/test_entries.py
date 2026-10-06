@@ -996,3 +996,41 @@ class TestChargeProbe:
         assert step("out", 12000, 0, 10000, 36, False, lane) == "back"
         assert step("out", 12000, 0, 10000, 36, True, lane) == "out"
         assert step("out", 35000, 0, 10000, 3, True, lane) == "back"
+
+class TestMissileProbe:
+    """The missile probe (entries.missile_probe; lanes from tools/nn/missile_probe.py)."""
+    SETUP = """
+        own = {fake.unit('own_lord', 'lord', -60, 0), fake.unit('own_archers_1', 'archers', 0, 0)}
+        enemy = {fake.unit('enemy_lord', 'lord', 60, 0), fake.unit('enemy_slave_1', 'slave', 0, 0)}
+        bm = fake.manager({own, enemy})
+        CONFIG = {build = 'test', speed = 20, tick_ms = 500, deadline_s = 100, settle_ms = 4000,
+            lanes = {{name = 'L1', shooter = 'own_archers_1', target = 'enemy_slave_1', x = 0, z = -80, s_b = 0,
+                      d = 150, t_angle = 0, t_rot = 0, s_width = 30, t_width = 30, mode = 'fire',
+                      target_mode = 'step', start_d = 150, step_m = 2, step_s = 2, max_s = 30, idle_s = 10,
+                      settle_s = 2}},
+            park = {{name = 'own_lord', x = -700, z = -400, bearing = 0}, {name = 'enemy_lord', x = 700, z = -400,
+                     bearing = 0}}}
+        GLOBALS = {common = fake.common, battle_vector = fake.vector_type}
+    """
+
+    def test_the_target_steps_in_and_the_lane_ends(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            STATE = require('entries.missile_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 100 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        kinds = [r["event"] for r in rows]
+        assert "error" not in kinds, [r for r in rows if r["event"] == "error"]
+        ds = [x["d"] for r in rows if r["event"] == "probe_sample" for x in r["lanes"]]
+        assert ds[0] == 150 and min(ds) < 150                        # stepped closer
+        ends = {r["lane"]: r["why"] for r in rows if r["event"] == "probe_lane_end"}
+        assert set(ends) == {"L1"} and rows[-1]["event"] == "result"
+
+    def test_layout_and_frame(self, lua):
+        L = lua.eval("""require('entries.missile_probe').layout({x = 10, z = 0, s_b = 0, t_angle = 90, t_rot = 180},
+            100)""")
+        assert (round(L.sx), round(L.sz), L.sb, round(L.tx), round(L.tz), round(L.tb)) == (10, 0, 0, 110, 0, 90)
+        fx, fz = lua.eval("require('entries.missile_probe').frame")(0, 0, 90, 10, 5)
+        assert (round(fx, 6), round(fz, 6)) == (10, -5)

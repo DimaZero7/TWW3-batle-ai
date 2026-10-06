@@ -52,7 +52,10 @@ class TestCalibration:
             row = p.static(key, "wh_main_emp_empire")
             assert set(row) == set(state.STATIC) - {"side", "lord", "tag"}, key
         archers = p.static("wh2_dlc13_emp_inf_archers_0")
-        assert archers["reload"] == 11.0 and archers["hit_rate"] == 0.42 and archers["ammo0"] == 90 * 20
+        assert archers["reload"] == 10.0 and archers["hit_rate"] == 0.42 and archers["ammo0"] == 90 * 20
+        # the spread and the fire arc from the database (missile.hit_chance, arc_share)
+        assert (archers["arc"], archers["acc"], archers["cal_area"], archers["cal_dist"], archers["muzzle_v"]) ==             (30.0, 20.0, 3.7, 95.0, 45.0) and archers["small_arms"]
+        assert p.static("wh_dlc04_emp_inf_free_company_militia_0")["arc"] == 35.0
         slingers = p.static("wh2_main_skv_inf_skavenslave_slingers_0", "wh2_main_skv_skaven")
         # the Skaven's +6 start reserve is Strength in Numbers' (an innate effect), not a faction bonus
         assert slingers["reload"] == 11.5 and slingers["morale_bonus"] == 0 and slingers["fx"] > 0

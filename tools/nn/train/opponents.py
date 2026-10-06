@@ -93,7 +93,26 @@ class Line:
     #                               at 90 m median, 6 s before the first contact; ai_like at join_m 150: 136 m, 10 s)
     lord_retreat_hp: float = 0.3  # ours: a lord in melee below this share of health withdraws behind the line
     cover_m: float = 60.0         # ours: an enemy this close to an own missile unit draws the free melee units
-    skirmish_m: float = 20.0      # missile units keep shooting at a closing enemy melee unit and step back only from
+    skirmish_targeted: bool = True  # the trigger of the step back: an enemy melee unit (the lord too) out of melee
+    #                               whose attack order is on this shooter and that closes (>= guard_closing m/s), within
+    #                               targeted_m; one hop of hop_m at a run, kept until it arrives, a new one only if the
+    #                               trigger still holds then. Measured on the game AI's shooters (build/missile/skirmish,
+    #                               one approach definition on the 28 gate battles of build/evade and the 123-battle
+    #                               pool of build/missile2): they back off in 39 % / 53 % of approaches, starting 48 / 60 m
+    #                               from the enemy, for 7 s at 2.7-3.0 m/s (~19-21 m), shooting on the way 4-10 %; the
+    #                               chance to start a second is 31-57 % with an enemy that attacks them and closes within
+    #                               50 m, 3-7 % at 60-80 m, 1-7 % with one closing on someone else. As a predictor of a
+    #                               start this trigger hits 0.15-0.20 of them, the old one (any enemy melee unit within
+    #                               20 m) 0.03-0.05, at the same false alarms. The ai_like twin on the 28 battles' starts
+    #                               (6 copies, with this rule and the shooting rules of 06.10.2026): backs off in 25 % of
+    #                               approaches (old rule 17 %, game 39 %: OPEN), from 50 m (game 48), hops of 5 s (7),
+    #                               fires 54 / 59 % of the seconds at 20-40 / 40-60 m (old rule 87 / 85 %, game 33 / 54 %).
+    #                               False: the old rule (any enemy melee unit within skirmish_m, withdraw_m every call)
+    targeted_m: float = 50.0
+    hop_m: float = 19.0
+    skirmish_m: float = 20.0      # the old rule (skirmish_targeted False; its 79 / 63 % firing shares below came from
+    #                               a looser approach definition: with build/missile/skirmish's one the game fires 33 / 54
+    #                               %): missile units keep shooting at a closing enemy melee unit and step back only from
     #                               one this close (build/evade, 28 gate battles of the 5 ownloss gates, ai_like x 6
     #                               copies: the game's approached missile units fire 79 % of the seconds at 20-40 m
     #                               (n 7 battles) and 63 % at 40-60 m (n 14), move away in 24 % of the approaches;
@@ -398,8 +417,14 @@ def ai_like(st, p=Line()):
     put(closer, O.MOVE, fwd_x, fwd_z, r=p.advance_run)
     if p.focus_lord:
         put(shooter & (ld <= u["range"]) & ~fighting, O.ATTACK, tg=li)
-    # ... away from it (and back) when it comes within skirmish_m; one caught in melee breaks off for escape_s.
+    # ... away from it (and back) when it comes within skirmish_m (skirmish_targeted: one that attacks this shooter
+    # and closes on it); one caught in melee breaks off for escape_s.
     melee_foe = foe & ~missile[:, None, :] & ~fighting[:, None, :]
+    if p.skirmish_targeted:
+        me = torch.arange(st.N, device=x.device)[None, :, None]
+        on_me = (u["order_kind"][:, None, :] == O.ATTACK) & (u["order_target"][:, None, :] == me)
+        clos_j = -(u["vx"][:, None, :] * dx + u["vz"][:, None, :] * dz) / d.clamp(min=1e-6)   # j's speed towards i
+        melee_foe = melee_foe & on_me & (clos_j >= p.guard_closing)
     md, mi = torch.where(melee_foe, d, torch.full_like(d, BIG)).min(2)
     opp_i = torch.where(opp_ok, opp, d_foe.min(2).indices)     # in melee: the enemy it fights (else the nearest)
     from_i = torch.where(fighting, opp_i, mi)
@@ -410,8 +435,19 @@ def ai_like(st, p=Line()):
         wx, wz = torch.where(fighting, wx, ax / an), torch.where(fighting, wz, az / an)
     wn = torch.sqrt(wx * wx + wz * wz).clamp(min=1e-6)
     wx, wz = torch.where(wn > 1e-3, wx / wn, -fx), torch.where(wn > 1e-3, wz / wn, -fz)
-    back = shooter & ((~fighting & (md <= p.skirmish_m)) | (fighting & (u["contact_s"] < p.escape_s)))
-    put(back, O.WITHDRAW, x + wx * p.withdraw_m, z + wz * p.withdraw_m, r=True)
+    if p.skirmish_targeted:
+        # a hop under way goes on to its point (out of melee, not just out of a fight: contact_s 0)
+        left = torch.sqrt((u["ox"] - x) ** 2 + (u["oz"] - z) ** 2)
+        hopping = (shooter & ~fighting & (u["order_kind"] == O.WITHDRAW) & (u["contact_s"] <= 0)
+                   & (left > 2.0) & (left <= p.hop_m + 1.0))
+        put(hopping, O.WITHDRAW, u["ox"], u["oz"], r=True)
+        put(shooter & ~fighting & ~hopping & (md <= p.targeted_m), O.WITHDRAW, x + wx * p.hop_m, z + wz * p.hop_m,
+            r=True)
+        put(shooter & fighting & (u["contact_s"] < p.escape_s), O.WITHDRAW, x + wx * p.withdraw_m,
+            z + wz * p.withdraw_m, r=True)
+    else:
+        back = shooter & ((~fighting & (md <= p.skirmish_m)) | (fighting & (u["contact_s"] < p.escape_s)))
+        put(back, O.WITHDRAW, x + wx * p.withdraw_m, z + wz * p.withdraw_m, r=True)
 
     # The lord: in the line, a little behind its centre; never charges first: goes in with the
     # line (or at a fight that comes to it); withdraws when hurt.

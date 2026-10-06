@@ -64,7 +64,7 @@ own clock, spearmen's charge reflection ×2 for 3.9 s; the fitted "slope 0.1", "
 men in" are gone. Melee core 2 (the game's rules, no fitting): **the first strike** - a unit coming into a
 fight moving or charging strikes once at once with every man in contact (the interval runs only after a
 blow); **the charge sprint** - under any attack order, at a walk too, the last 30 m (lords 35) at the
-database's charge speed; abilities' initial recharge from the database. Volley fire, friendly fire and spill, lords (at most 6.5 men hit them, gathering over
+database's charge speed; abilities' initial recharge from the database. Shooting by the game's rules ([missile probe](game/units/missile-probe.md), 10 battles): volleys once a cycle (archers 10 s = the database, sling 11.5, Night Runners 10.2, militia 10.8: measured), range centre to centre, each man's fire arc ±30° (militia ±35°), no turn when firing at will, 3 s after a target change, hits from the database's spread model (one calibration k 1.1 from 62k recorded shots), a shield against small arms only, the line of fire with the True Sight mod; friendly fire and spill, lords (at most 6.5 men hit them, gathering over
 20 s only when the lord himself ran into the formation; a lord without an order strikes in full; the lord as fragile as in the game: his own aura does not reach him, in melee he is
 always 'losing' (−3), projectiles hit him whole in melee, he tires slower than a formation; a lord duel: General v
 General x0.8 of the game, Warlord v Warlord x1.2), morale with all main modifiers (the 4 s and 60 s casualty windows and 'under fire' 15 s as in the
@@ -87,9 +87,9 @@ frozen. Three scores, higher is better:
 
 | Score | Now |
 |---|---:|
-| Mechanics: unit pairs and shooting within 20 % of the game | 37 / 54 (51 before the melee core; core 2 - 37) |
-| Same winner: the game's AI against itself | 18 / 26 (20 before the core, the core 21) |
-| Same winner: the network against the game's AI (165 recordings now) | 132 / 165 (126 before the core, the core 127) |
+| Mechanics: unit pairs and shooting within 20 % of the game | 29 / 54 (51 before the melee core; core 2 - 37; shooting by the rules - 29) |
+| Same winner: the game's AI against itself | 18 / 26 (20 before the core, the core 21, core 2 and shooting 18) |
+| Same winner: the network against the game's AI (165 recordings now) | 132 / 165 (126 before the core, the core 127, core 2 and shooting 132) |
 
 Mechanics dropped from 51 to 37 not because of winners (all 12 pairs are as in the game) but because of
 pace: the first 15 s of formation contact are stronger in the game than the rule (the target loses
@@ -115,7 +115,9 @@ same battles. **The simulator is too kind to the network** — the main measured
 - the game AI's army routs twice as often in the simulator (1.9 times a battle against 0.92):
   it loses more health in melee (0.45 against 0.38);
 - shooters in battle fire slower than on the range (0.05–0.07 projectiles per man per second
-  against 0.087–0.091 in the simulator);
+  against 0.087–0.091 in the simulator before each man's arc and the target-change pause); in the game men skip volleys as the target
+  thins and hits on a thinned target fall more than in the model - so the two shooting arenas of the mechanics check
+  dropped out (37 -> 29); a target running at the shooter takes x1.2-1.3 a shot; the militia's pistols are open;
 - the enemy lord breaks too easily (97 % of battles against 25 %), and our lords fall 130–145 s
   earlier than in the game;
 - in the game fights are short and often break off (median 17 s), in the simulator they do not

@@ -89,6 +89,15 @@ launcher его очищает**: когда игры нет, дописывае
 **Все бои проекта запускаются с [True Sight: Improved Line of Sight](https://steamcommunity.com/sharedfiles/filedetails/?id=3628832922)**
 (Workshop 3628832922, автор GunPawDa). Ванильного режима нет.
 
+**Что он меняет** (9 строк `_kv_rules_tables`, все — значение 1,0; чтение — `py -3.14 -m tools.nn.gamedb`,
+`config/nn/game_rules.json` `_mods`, симулятор берёт значения мода): проверка чистого выстрела — свои
+модели своего размера (`projectile_friendly_fire_man_radius_coefficient` 2,2 → 1, `_man_height_` 1,15 → 1,
+`_ignore_allies_radius_` 1,7 → 1, `_ignore_allies_height_` 1 → 1), линия огня отряда перекрыта, только когда
+не видит весь отряд (`unit_firing_line_of_sight_considered_obstructed_ratio` 0,75 → 1); готовность начать
+рукопашную без приказа `melee_attack_threshold_modifier_idle_default` / `_idle_ammo_remaining` / `_ordered`
+0,14 / 0,85 / 0,22 → 1 (`_artillery` 1 → 1). Дуги огня, дальности, перезарядку, точность и застрельщиков
+он не трогает.
+
 - Версия зафиксирована в [config/mod-dependencies.json](../../../config/mod-dependencies.json):
   `true_sight.pack`, 1065 байт, SHA-256 `790c54d3…ac511`, профиль `true-sight-v1`.
 - Сборка всегда прописывает `true_sight.pack` в заголовок нашего pack и в

@@ -9,6 +9,7 @@ step end to end on the CPU, checkpoints, recordings.
 """
 import dataclasses
 import json
+import math
 
 import numpy as np
 import pytest
@@ -590,22 +591,24 @@ class TestProperties:
         assert int(o.kind[0, H]) != O.ATTACK or bool(o.kind[0, H + 1:H + 3].eq(O.ATTACK).any())
 
     def test_ai_like_missile_units_step_back_from_close_melee_and_break_off_melee_for_a_while(self):
+        """The old trigger (skirmish_targeted False): any enemy melee unit within skirmish_m."""
+        old = opponents.Line(skirmish_targeted=False)
         st = line_army(attacker=1, gap=600)
         H = st.N // 2
         u = st.u
         u["x"][0, H + 1] = u["x"][0, 3] + 15.0                  # an enemy spearman 15 m from side 1's archers
         u["z"][0, H + 1] = u["z"][0, 3]
-        o = opponents.ai_like(st)
+        o = opponents.ai_like(st, old)
         assert int(o.kind[0, 3]) == O.WITHDRAW and bool(o.run[0, 3])
         assert float(o.x[0, 3]) < float(u["x"][0, 3]) - 30                  # away from it (west), not towards
         u["x"][0, H + 1] = u["x"][0, 3] + 30.0                  # 30 m: beyond skirmish_m (20), the archers shoot on
-        assert int(opponents.ai_like(st).kind[0, 3]) != O.WITHDRAW
-        assert int(opponents.ai_like(st, opponents.Line(skirmish_m=50.0)).kind[0, 3]) == O.WITHDRAW
+        assert int(opponents.ai_like(st, old).kind[0, 3]) != O.WITHDRAW
+        assert int(opponents.ai_like(st, opponents.Line(skirmish_targeted=False, skirmish_m=50.0)).kind[0, 3]) == O.WITHDRAW
         u["x"][0, H + 1], u["z"][0, H + 1] = u["x"][0, 3] - 10.0, u["z"][0, 3] - 11.0   # behind them, to the south
-        o = opponents.ai_like(st)                                          # away and back: north, a little west
+        o = opponents.ai_like(st, old)                                     # away and back: north, a little west
         assert int(o.kind[0, 3]) == O.WITHDRAW and float(o.z[0, 3]) > float(u["z"][0, 3]) + 40
         assert float(o.x[0, 3]) < float(u["x"][0, 3])
-        o = opponents.ai_like(st, opponents.Line(flee_straight=True))      # straight away: north-east
+        o = opponents.ai_like(st, opponents.Line(skirmish_targeted=False, flee_straight=True))   # straight: north-east
         assert float(o.x[0, 3]) > float(u["x"][0, 3]) + 25 and float(o.z[0, 3]) > float(u["z"][0, 3]) + 25
         u["x"][0, H + 1], u["z"][0, H + 1] = u["x"][0, 3] + 70.0, u["z"][0, 3]
         u["x"][0, H + 1] = u["x"][0, 3] + 8.0                   # caught in melee
@@ -615,6 +618,34 @@ class TestProperties:
         assert int(opponents.ai_like(st).kind[0, 3]) == O.WITHDRAW          # breaks off
         u["contact_s"][0, 3] = opponents.Line().escape_s + 1.0
         assert int(opponents.ai_like(st).kind[0, 3]) == O.HOLD              # then fights
+
+    def test_ai_like_shooters_hop_back_from_an_enemy_that_attacks_them_and_closes(self):
+        """skirmish_targeted (the game AI's hops, build/missile/skirmish): an enemy melee unit ordered to attack the
+        archers, closing, within targeted_m -> one WITHDRAW of hop_m at a run, kept until it arrives; the same unit
+        attacking someone else, or standing -> none."""
+        p = opponents.Line()
+        st = line_army(attacker=1, gap=600)
+        H = st.N // 2
+        u = st.u
+        u["x"][0, H + 1], u["z"][0, H + 1] = u["x"][0, 3] + 45.0, u["z"][0, 3]   # 45 m east of side 1's archers
+        u["vx"][0, H + 1] = -2.0                                                # running at them
+        u["order_kind"][0, H + 1], u["order_target"][0, H + 1] = O.ATTACK, 3
+        o = opponents.ai_like(st, p)
+        assert int(o.kind[0, 3]) == O.WITHDRAW and bool(o.run[0, 3])
+        hop = math.hypot(float(o.x[0, 3] - u["x"][0, 3]), float(o.z[0, 3] - u["z"][0, 3]))
+        assert hop == pytest.approx(p.hop_m, abs=0.01) and float(o.x[0, 3]) < float(u["x"][0, 3])   # away (west)
+        u["order_target"][0, H + 1] = 2                                         # attacking a neighbour instead
+        assert int(opponents.ai_like(st, p).kind[0, 3]) != O.WITHDRAW
+        u["order_target"][0, H + 1], u["vx"][0, H + 1] = 3, 0.0                  # attacks them but stands
+        assert int(opponents.ai_like(st, p).kind[0, 3]) != O.WITHDRAW
+        u["vx"][0, H + 1] = -2.0
+        u["x"][0, H + 1] = u["x"][0, 3] + 60.0                                   # beyond targeted_m (50)
+        assert int(opponents.ai_like(st, p).kind[0, 3]) != O.WITHDRAW
+        # a hop under way goes on to its point although the trigger is gone
+        u["order_kind"][0, 3] = O.WITHDRAW
+        u["ox"][0, 3], u["oz"][0, 3] = u["x"][0, 3] - 9.0, u["z"][0, 3]
+        o = opponents.ai_like(st, p)
+        assert int(o.kind[0, 3]) == O.WITHDRAW and float(o.x[0, 3]) == pytest.approx(float(u["ox"][0, 3]))
 
     def test_ai_like_melee_target_avoids_the_lord_and_its_random_part_is_fixed(self):
         st = line_army(attacker=1, gap=600)

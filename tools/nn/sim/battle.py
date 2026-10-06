@@ -167,26 +167,52 @@ def step(st, orders, params=None, dt=None):
     arc = float(cal["missile"].get("move_fire_arc_deg", 180.0))
     on_move = u["fire_move"] & (speed >= 0.2)
     behind = (on_move[:, :, None] & (pw["rel_i"].abs() > arc * geometry.DEG)) if arc < 180 else None
-    # Standing, a unit shoots only at targets within missile.stand_fire_arc_deg of its facing (measured,
-    # missile.stand_fire_why): one beyond it is turned to first (the facing below, at turn.*_deg_s), and the unit
-    # aims only once its target is within the arc. Without an ordered target it takes the nearest within the arc,
-    # else turns to the nearest beyond it.
-    aim_at = missile.choose_target(u, pw, ready, tgt, kind == O.ATTACK, exclude=behind)
-    s_arc = float(cal["missile"].get("stand_fire_arc_deg", 180.0))
+    # Standing, a unit keeps its facing while its target is within missile.stand_fire_arc_deg of it (measured,
+    # missile.stand_fire_why) and turns to a target beyond it first (the facing below, at turn.*_deg_s) until the
+    # target is within missile.turn_done_deg (then it keeps that facing again); it aims only once the turn is done.
+    # Without an ordered target it keeps its target while that stays in range and stands (missile.sticky_target),
+    # else takes the nearest within stand_fire_arc_deg, else turns to the nearest beyond it.
+    ms_cal = cal["missile"]
+    prev = u["aim_tgt"] if ms_cal.get("sticky_target") else None
+    aim_at = missile.choose_target(u, pw, ready, tgt, kind == O.ATTACK, exclude=behind, prev=prev)
+    s_arc = float(ms_cal.get("stand_fire_arc_deg", 180.0))
     turning = torch.zeros_like(ready)
+    done_deg = ms_cal.get("turn_done_deg")
     if s_arc < 180:
         on_stand = ready & (speed < 0.2)
         out = on_stand[:, :, None] & (pw["rel_i"].abs() > s_arc * geometry.DEG)
         ahead = missile.choose_target(u, pw, ready, tgt, kind == O.ATTACK,
-                                      exclude=out if behind is None else (out | behind))
+                                      exclude=out if behind is None else (out | behind), prev=prev)
         ordered = (kind == O.ATTACK) & (aim_at == tgt) & (aim_at >= 0)
         aim_at = torch.where(ordered | (ahead < 0), aim_at, ahead)
-        turning = (aim_at >= 0) & out.gather(2, aim_at.clamp(min=0)[:, :, None]).squeeze(2)
+        beyond = (aim_at >= 0) & out.gather(2, aim_at.clamp(min=0)[:, :, None]).squeeze(2)
+        if ms_cal.get("turn_ordered_only"):
+            # firing at will a unit never turns (the probe: a target 50 deg off, no turn, 6 % of the men fired);
+            # it turns only to the target of an attack order
+            beyond = beyond & (kind == O.ATTACK) & (aim_at == tgt)
+        if done_deg is not None:
+            off = pw["rel_i"].gather(2, aim_at.clamp(min=0)[:, :, None]).squeeze(2).abs()
+            go_on = u["turn_on"] & on_stand & (aim_at >= 0) & (off > float(done_deg) * geometry.DEG)
+            turning = beyond | go_on
+            u["turn_on"] = turning
+        else:
+            turning = beyond
+    # A new target (another enemy than last step's, an order's or its own) costs missile.retarget_s without fire
+    # (measured, missile.retarget_why): the aim clock goes back to retarget_s before aim_s.
+    retarget_s = ms_cal.get("retarget_s")
+    if retarget_s:
+        switched = ready & (u["aim_tgt"] >= 0) & (aim_at >= 0) & (aim_at != u["aim_tgt"])
+        u["aim"] = torch.where(switched, torch.minimum(u["aim"], u["aim_s"] - float(retarget_s)), u["aim"])
+    u["aim_tgt"] = torch.where(ready, aim_at, torch.full_like(aim_at, -1))
     u["aim"] = torch.where(ready & ~turning, u["aim"] + dt, torch.zeros_like(u["aim"]))
     can = ready & ~turning & (u["aim"] >= u["aim_s"])
     m_target = torch.where(can, aim_at, torch.full_like(aim_at, -1))
     # direct fire needs a clear line past friends (missile.py clear_shot); arcing fire: unchanged
     m_target, clear = missile.clear_shot(u, pw, m_target, can, tgt, kind == O.ATTACK, params)
+    # a standing unit's men fire only at a target centre within their fire arc (missile.arc_share; the database's
+    # battle_entities fire arc): out-of-arc men lose the volley like blocked ones (they reload too)
+    if ms_cal.get("per_man_arc"):
+        clear = torch.where(speed < 0.2, clear * missile.arc_share(u, pw, m_target), clear)
     if behind is not None:
         back = behind.gather(2, m_target.clamp(min=0)[:, :, None]).squeeze(2) & (m_target >= 0)
         m_target = torch.where(back, torch.full_like(m_target, -1), m_target)
@@ -349,7 +375,13 @@ def step(st, orders, params=None, dt=None):
     attack = kind == O.ATTACK
     shooter = (u["range"] > 0) & (u["a"] > 0)
     t_reach = pw["gap"].gather(2, ti[:, :, None]).squeeze(2)
-    in_range = t_reach <= 0.95 * u["range"]
+    # a shooter under an attack order walks until its target's centre is within range and stops there (the scripted
+    # range: archers stopped ~131 m centre to centre, range 130; missile.range_why); range_centre false: the old
+    # edge-to-edge 0.95 x range
+    if cal["missile"].get("range_centre"):
+        in_range = pw["dist"].gather(2, ti[:, :, None]).squeeze(2) <= u["range"]
+    else:
+        in_range = t_reach <= 0.95 * u["range"]
     close_in = attack & ~(shooter & in_range)
     gx = torch.where(close_in, tx, gx)
     gz = torch.where(close_in, tz, gz)
@@ -403,12 +435,17 @@ def step(st, orders, params=None, dt=None):
     has_opp = near_foe.min(2).values < 1e9
     ox_, oz_ = u["x"].gather(1, opp), u["z"].gather(1, opp)
     movement.face(u, ox_ - u["x"], oz_ - u["z"], has_opp & ~mv & standing)
-    mt = m_target.clamp(min=0)
-    movement.face(u, u["x"].gather(1, mt) - u["x"], u["z"].gather(1, mt) - u["z"], firing & ~mv & ~has_opp)
-    # A shooter that aims or turns to its target (not yet shooting) faces it too.
     wt = aim_at.clamp(min=0)
-    movement.face(u, u["x"].gather(1, wt) - u["x"], u["z"].gather(1, wt) - u["z"],
-                  (aim_at >= 0) & ~firing & ~mv & ~has_opp & standing)
+    if done_deg is not None:
+        # a standing shooter keeps its facing; it turns only to a target beyond stand_fire_arc_deg (turning above)
+        movement.face(u, u["x"].gather(1, wt) - u["x"], u["z"].gather(1, wt) - u["z"],
+                      turning & ~mv & ~has_opp & standing)
+    else:
+        mt = m_target.clamp(min=0)
+        movement.face(u, u["x"].gather(1, mt) - u["x"], u["z"].gather(1, mt) - u["z"], firing & ~mv & ~has_opp)
+        # A shooter that aims or turns to its target (not yet shooting) faces it too.
+        movement.face(u, u["x"].gather(1, wt) - u["x"], u["z"].gather(1, wt) - u["z"],
+                      (aim_at >= 0) & ~firing & ~mv & ~has_opp & standing)
     # A formation in melee turns slowly (measured): an enemy on its flank or rear stays there.
     movement.limit_turn(u, old["b"], engaged & ~leaving & (u["men0"] > 1), cal["contact"]["melee_turn_deg_s"] * dt)
     # Out of melee a standing unit turns in place at turn.formation_deg_s (a lord or another single entity:

@@ -235,8 +235,9 @@ def strikes(u, pw, contact, params, charge_now, first=False):
     # the rule (measured: the melee probe's held units - braced spearmen, spearmen facing away, swordsmen - strike
     # clanrats at 0.49-0.52 of it from 5 s on, 6 lanes; the network's held units in the gates 0.80 of the kills of
     # the same units attacking); missile units 0.99-1.01 and a lone man (a lord held by script strikes at 0.77-1.19
-    # of the rule, the damage plan): in full. The database's melee_attack_threshold_modifier_* (idle 0.14, ordered
-    # 0.22) are when a unit joins a fight, not its rate (build/melee2/spec.md 3): no rule for the rate found.
+    # of the rule, the damage plan): in full. The database's melee_attack_threshold_modifier_* (vanilla idle 0.14,
+    # ordered 0.22; all 1.0 with the required mod True Sight, config/nn/game_rules.json "_mods") are when a unit joins
+    # a fight, not its rate (build/melee2/spec.md 3): no rule for the rate found.
     held = (u["order_kind"] == O.HOLD) & (u["range"] <= 0) & (u["men0"] > 1)
     rate = torch.where(held[:, :, None], rate * float(cc.get("hold_rate", 1.0)), rate)
     if not first:

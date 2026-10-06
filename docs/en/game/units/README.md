@@ -17,6 +17,7 @@ September 2026, **v9.0.1, build 50381**.
 - [A lord surrounded](lord-swarm.md) — How much a lord loses when one to four infantry units attack him from different sides, and what an armour-piercing unit or the enemy lord adds
 - [Melee](melee.md) — How the game counts blows in melee and how many men really fight
 - [Missile damage](missile-damage.md) — How much health an Empire archers' arrow takes, how often they shoot and at whom
+- [Missile probe](missile-probe.md) — Short battles in the game, one shooting indicator at a time, and the same battle in the simulator (the "twin")
 - [Missile attack range](missile-range.md) — **Verified 2026-09-26:** Lua can read missile range for own units, a separate same-alliance army, and currently visible enemies
 - [Morale](morale.md) — Morale decides when a unit runs
 - [Pace: running, walking and fatigue](pace.md) — How fast units walk and run in battle and how fatigue builds up

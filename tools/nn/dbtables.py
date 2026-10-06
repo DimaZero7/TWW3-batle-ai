@@ -57,7 +57,7 @@ LAYOUTS = {
     "battle_entities": (39, _layout("""
         key:s type:s walk_speed:f run_speed:f acceleration:f deceleration:f charge_speed:f
         charge_distance_commence_run:f charge_distance_adopt_charge_pose:f charge_distance_pick_target:f
-        radius:f collision_shape:s f12:f mass:f height:f f15:f f16:f hit_points:i
+        radius:f collision_shape:s f12:f mass:f height:f fire_arc_close:f turn_rate:f hit_points:i
         f18:b f19:b f20:f f21:f f22:f size:s f24:f f25:s f26:s f27:f f28:s f29:i f30:i f31:f f32:b
         f33:f f34:f f35:i f36:o f37:o f38:f f39:f f40:f f41:b f42:o f43:b f44:b f45:o f46:f f47:f
         f48:i f49:s f50:b f51:f f52:f f53:f f54:f f55:o f56:b f57:b""")),
@@ -68,7 +68,7 @@ LAYOUTS = {
     "missile_weapons": (12, _layout("key:s f01:b default_projectile:s f03:o f04:b f05:b")),
     "projectiles": (53, _layout("""
         key:s category:s shot_type:s explosion_type:o spin_type:s projectile_number:i trajectory:s
-        effective_range:i minimum_range:i max_elevation:i muzzle_velocity:f f11:f f12:f damage:i
+        effective_range:i minimum_range:i max_elevation:i muzzle_velocity:f marksmanship:f f12:f damage:i
         ap_damage:i f15:b f16:b f17:f base_reload_time:f calibration_distance:f calibration_area:f
         f21:f f22:f display:o f24:o f25:o f26:f f27:b contact_stat_effect:o f29:f f30:i f31:f f32:f
         homing_params:o f34:o f35:f f36:b f37:b f38:b f39:i penetration:o f41:i f42:b f43:b f44:b
@@ -108,12 +108,12 @@ PREFIXES = {
 INFERRED = {
     "battle_entities": {"type", "acceleration", "deceleration", "charge_speed", "charge_distance_commence_run",
                         "charge_distance_adopt_charge_pose", "charge_distance_pick_target", "radius",
-                        "collision_shape", "height", "size"},
+                        "collision_shape", "height", "size", "fire_arc_close", "turn_rate"},
     "melee_weapons": {"bonus_v_large", "bonus_v_infantry", "splash_attack_target_size",
                       "splash_attack_max_attacks", "splash_attack_power_multiplier", "contact_phase",
                       "melee_attack_interval"},
     "projectiles": {"category", "shot_type", "explosion_type", "spin_type", "projectile_number", "trajectory",
-                    "minimum_range", "max_elevation", "muzzle_velocity", "calibration_distance",
+                    "minimum_range", "max_elevation", "muzzle_velocity", "marksmanship", "calibration_distance",
                     "calibration_area", "display", "contact_stat_effect", "homing_params", "penetration",
                     "shots_per_volley"},
     "unit_armour_types": {"material"},

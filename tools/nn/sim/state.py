@@ -104,7 +104,16 @@ STATIC = {
     "reload": ("f", "reload, s (measured where known, config/nn/sim.json)"),
     "m_damage": ("f", "projectile damage (base)"),
     "m_ap": ("f", "projectile armour-piercing damage"),
-    "hit_rate": ("f", "projectile hit rate at the edge of range (config/nn/sim.json)"),
+    "hit_rate": ("f", "projectile hit rate at the edge of range (config/nn/sim.json; missile.accuracy units 'rates' and "
+                      "a lone man in melee)"),
+    "arc": ("f", "fire arc each side of the facing, degrees: a man fires only at a target centre within it seen from "
+                 "where he stands (the database's battle_entities fire arc / 2: 30, militia 35)"),
+    "acc": ("f", "accuracy, 0-100: land_units accuracy + the projectile's marksmanship (the spread, missile.py)"),
+    "cal_area": ("f", "the projectile's calibration area, m (the spread at its calibration distance)"),
+    "cal_dist": ("f", "the projectile's calibration distance, m"),
+    "muzzle_v": ("f", "the projectile's muzzle velocity, m/s (the angle it comes down at)"),
+    "height": ("f", "a man's height, m (the shadow a falling projectile hits)"),
+    "small_arms": ("b", "small-arms projectile (arrow, musket, sling, javelin, axe): shields block it (missile.py)"),
     "aim_s": ("f", "first shot after halting, s (config/nn/sim.json)"),
     "friendly_fire": ("f", "share of its hits aimed at a unit in melee that land on its own side (config/nn/sim.json)"),
     "morale_bonus": ("f", "morale points at the start beyond leadership (config/nn/sim.json)"),
@@ -144,6 +153,9 @@ INTERNAL = {
                     "starts, cleared when the clock resets (battle.py: the first strike; melee.py: men gather round "
                     "a lord only when he ran in)"),
     "aim": ("f", "seconds standing still able to shoot"),
+    "aim_tgt": ("i", "the enemy it aimed at last step (-1 none): a change makes it wait missile.retarget_s"),
+    "turn_on": ("b", "a standing shooter turning to its target (missile.stand_fire_arc_deg starts it, "
+                     "missile.turn_done_deg ends it)"),
     "leave_s": ("f", "seconds leaving melee while still touching an enemy (contact.pin_s)"),
     "shots": ("f", "fractional shots carried to the next step"),
     "unready": ("f", "share of the men still reloading, 0-1 (0: all loaded, the start; missile.py volley)"),
@@ -255,6 +267,7 @@ def empty(B, N, device="cpu", history=0):
         u[name] = torch.zeros((B, history * N), device=device)
     u["target"].fill_(-1)
     u["order_target"].fill_(-1)
+    u["aim_tgt"].fill_(-1)
     u["fxt0"].fill_(-1)
     u["fxt1"].fill_(-1)
     u["vis"].fill_(True)

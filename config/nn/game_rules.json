@@ -318,9 +318,9 @@
   "maximum_bastion_artillery_per_settlement": 10.0,
   "melee_attack_interval": 4.0,
   "melee_attack_threshold_modifier_artillery": 1.0,
-  "melee_attack_threshold_modifier_idle_ammo_remaining": 0.85,
-  "melee_attack_threshold_modifier_idle_default": 0.14,
-  "melee_attack_threshold_modifier_ordered": 0.22,
+  "melee_attack_threshold_modifier_idle_ammo_remaining": 1.0,
+  "melee_attack_threshold_modifier_idle_default": 1.0,
+  "melee_attack_threshold_modifier_ordered": 1.0,
   "melee_breakoff_secs": 24.0,
   "melee_breakoff_total_immunity_secs": 10.0,
   "melee_defence_direction_penalty_coefficient_flank": 0.6,
@@ -365,9 +365,9 @@
   "pike_wall_formation_offset": 0.45,
   "projectile_aiming_target_size_modifier": 0.9,
   "projectile_friendly_fire_ignore_allies_height_coefficient": 1.0,
-  "projectile_friendly_fire_ignore_allies_radius_coefficient": 1.7,
-  "projectile_friendly_fire_man_height_coefficient": 1.15,
-  "projectile_friendly_fire_man_radius_coefficient": 2.2,
+  "projectile_friendly_fire_ignore_allies_radius_coefficient": 1.0,
+  "projectile_friendly_fire_man_height_coefficient": 1.0,
+  "projectile_friendly_fire_man_radius_coefficient": 1.0,
   "pursue_charge_max_unit_separation": 8.0,
   "pursue_max_charge_time": 5.0,
   "pursuit_charge_bonus_modifier": 1.0,
@@ -419,7 +419,7 @@
   "tower_target_priorities_armour_value": 30.0,
   "unit_braced_status_threshold": 0.75,
   "unit_died_event_timespan_seconds": 10.0,
-  "unit_firing_line_of_sight_considered_obstructed_ratio": 0.75,
+  "unit_firing_line_of_sight_considered_obstructed_ratio": 1.0,
   "unit_max_drag_width": 42.0,
   "unit_spawn_offset": -22.0,
   "unit_spawn_radius": 2.0,
@@ -498,6 +498,48 @@
    "melee_defence": 17,
    "leadership": 50,
    "key": "wh2_dlc13_emp_inf_archers_0"
+  }
+ },
+ "_mods": {
+  "true_sight.pack": {
+   "battle": {
+    "melee_attack_threshold_modifier_artillery": {
+     "vanilla": 1.0,
+     "modded": 1.0
+    },
+    "melee_attack_threshold_modifier_idle_ammo_remaining": {
+     "vanilla": 0.85,
+     "modded": 1.0
+    },
+    "melee_attack_threshold_modifier_idle_default": {
+     "vanilla": 0.14,
+     "modded": 1.0
+    },
+    "melee_attack_threshold_modifier_ordered": {
+     "vanilla": 0.22,
+     "modded": 1.0
+    },
+    "projectile_friendly_fire_ignore_allies_height_coefficient": {
+     "vanilla": 1.0,
+     "modded": 1.0
+    },
+    "projectile_friendly_fire_ignore_allies_radius_coefficient": {
+     "vanilla": 1.7,
+     "modded": 1.0
+    },
+    "projectile_friendly_fire_man_height_coefficient": {
+     "vanilla": 1.15,
+     "modded": 1.0
+    },
+    "projectile_friendly_fire_man_radius_coefficient": {
+     "vanilla": 2.2,
+     "modded": 1.0
+    },
+    "unit_firing_line_of_sight_considered_obstructed_ratio": {
+     "vanilla": 0.75,
+     "modded": 1.0
+    }
+   }
   }
  }
 }

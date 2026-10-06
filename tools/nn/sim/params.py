@@ -17,6 +17,9 @@ from tools.nn.sim import abilities
 from tools.nn.sim import effects as innate
 
 ROOT = Path(__file__).resolve().parents[3]
+# Projectile categories a shield blocks (small arms: tw-modding "Missiles and You", fandom "Shielded"; artillery,
+# misc, grenades and spells go through; build/shields/spec.md S4).
+SMALL_ARMS = ("arrow", "musket", "sling", "javelin", "axe")
 CONFIG = ROOT / "config" / "nn"
 
 
@@ -121,6 +124,14 @@ class Params:
             "m_damage": missile.get("damage", 0) if missile else 0,
             "m_ap": missile.get("ap_damage", 0) if missile else 0,
             "hit_rate": ms["hit_rate"].get(cat, ms["hit_rate_other"]) if missile else 0,
+            # the spread (missile.py hit_chance): the database's projectile and the unit's accuracy
+            "arc": missile.get("fire_arc_deg", 180.0) if missile else 0,
+            "acc": (missile.get("accuracy", 0) + missile.get("marksmanship", 0)) if missile else 0,
+            "cal_area": missile.get("calibration_area_m", 0.0) if missile else 0,
+            "cal_dist": missile.get("calibration_distance_m", 0.0) if missile else 0,
+            "muzzle_v": missile.get("muzzle_velocity", 0.0) if missile else 0,
+            "height": u.get("height_m", 1.8),
+            "small_arms": cat in SMALL_ARMS if missile else False,
             "aim_s": ms["aim_s"].get(cat, ms["aim_s_other"]) if missile else 0,
             "friendly_fire": ms["friendly_fire"].get(cat, ms["friendly_fire_other"]) if missile else 0,
             "morale_bonus": self.sim["morale"]["faction_bonus"].get(faction, 0),

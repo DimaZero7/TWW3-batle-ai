@@ -278,6 +278,14 @@
    "source": "projectiles.calibration_area (inferred)",
    "checked": null
   },
+  "missile.marksmanship": {
+   "source": "projectiles.marksmanship (inferred: the column after muzzle_velocity, 10 for our arrows, slings and pistol, 15 for the Night Runners' sling; added to land_units.accuracy in the spread, tools/nn/sim/missile.py)",
+   "checked": null
+  },
+  "missile.fire_arc_deg": {
+   "source": "battle_entities.fire_arc_close / 2 (inferred: the full angle, 60 / 70 for our shooters, 360 for throwing stars; mods name the column 'Fire Arc'), degrees each side",
+   "checked": null
+  },
   "missile.explosion": {
    "source": "projectiles.explosion_type (inferred)",
    "checked": null
@@ -537,6 +545,8 @@
     "max_elevation": 88,
     "calibration_distance_m": 95.0,
     "calibration_area_m": 3.7,
+    "marksmanship": 10.0,
+    "fire_arc_deg": 30.0,
     "explosion": null,
     "penetration": "very_low",
     "shot_type": "small_arm_default"
@@ -863,6 +873,8 @@
     "max_elevation": 88,
     "calibration_distance_m": 85.0,
     "calibration_area_m": 4.8,
+    "marksmanship": 10.0,
+    "fire_arc_deg": 30.0,
     "explosion": null,
     "penetration": "very_low",
     "shot_type": "small_arm_default"
@@ -1397,6 +1409,8 @@
     "max_elevation": 45,
     "calibration_distance_m": 65.0,
     "calibration_area_m": 2.0,
+    "marksmanship": 10.0,
+    "fire_arc_deg": 35.0,
     "explosion": null,
     "penetration": "low",
     "shot_type": "small_arm_default"
@@ -1643,6 +1657,8 @@
     "max_elevation": 88,
     "calibration_distance_m": 85.0,
     "calibration_area_m": 4.0,
+    "marksmanship": 15.0,
+    "fire_arc_deg": 30.0,
     "explosion": null,
     "penetration": "very_low",
     "shot_type": "small_arm_default"

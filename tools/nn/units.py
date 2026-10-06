@@ -121,6 +121,11 @@ FIELDS = {
     "missile.max_elevation": ("projectiles.max_elevation (inferred), degrees", None),
     "missile.calibration_distance_m": ("projectiles.calibration_distance (inferred)", None),
     "missile.calibration_area_m": ("projectiles.calibration_area (inferred)", None),
+    "missile.marksmanship": ("projectiles.marksmanship (inferred: the column after muzzle_velocity, 10 for our arrows, "
+                             "slings and pistol, 15 for the Night Runners' sling; added to land_units.accuracy in the "
+                             "spread, tools/nn/sim/missile.py)", None),
+    "missile.fire_arc_deg": ("battle_entities.fire_arc_close / 2 (inferred: the full angle, 60 / 70 for our shooters, "
+                             "360 for throwing stars; mods name the column 'Fire Arc'), degrees each side", None),
     "missile.explosion": ("projectiles.explosion_type (inferred)", None),
     "missile.penetration": ("projectiles.penetration (inferred)", None),
     "missile.shot_type": ("projectiles.shot_type (inferred)", None),
@@ -200,7 +205,8 @@ def passport(key, t):
             "trajectory": pr["trajectory"], "direct": pr["trajectory"] == "low",
             "muzzle_velocity": pr["muzzle_velocity"],
             "max_elevation": pr["max_elevation"], "calibration_distance_m": pr["calibration_distance"],
-            "calibration_area_m": pr["calibration_area"], "explosion": pr["explosion_type"],
+            "calibration_area_m": pr["calibration_area"], "marksmanship": pr["marksmanship"],
+            "fire_arc_deg": entity["fire_arc_close"] / 2, "explosion": pr["explosion_type"],
             "penetration": pr["penetration"], "shot_type": pr["shot_type"]}
     return out
 

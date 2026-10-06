@@ -89,6 +89,15 @@ is in `launch.json` (`battle_difficulty`, `user_battle_difficulty`), the result 
 **Every battle of the project runs with [True Sight: Improved Line of Sight](https://steamcommunity.com/sharedfiles/filedetails/?id=3628832922)**
 (Workshop 3628832922, by GunPawDa). There is no vanilla mode.
 
+**What it changes** (9 rows of `_kv_rules_tables`, each to 1.0; read by `py -3.14 -m tools.nn.gamedb`,
+`config/nn/game_rules.json` `_mods`, the simulator takes the mod's values): the clear-shot test counts friends
+at their own size (`projectile_friendly_fire_man_radius_coefficient` 2.2 -> 1, `_man_height_` 1.15 -> 1,
+`_ignore_allies_radius_` 1.7 -> 1, `_ignore_allies_height_` 1 -> 1), a unit's line of fire is blocked only
+when the whole unit cannot see (`unit_firing_line_of_sight_considered_obstructed_ratio` 0.75 -> 1); the
+willingness to start melee without an order `melee_attack_threshold_modifier_idle_default` /
+`_idle_ammo_remaining` / `_ordered` 0.14 / 0.85 / 0.22 -> 1 (`_artillery` 1 -> 1). Fire arcs, ranges, reload,
+accuracy and skirmishing it does not touch.
+
 - The version is pinned in [config/mod-dependencies.json](../../../config/mod-dependencies.json):
   `true_sight.pack`, 1065 bytes, SHA-256 `790c54d3…ac511`, profile `true-sight-v1`.
 - Every build writes `true_sight.pack` into our pack header and into

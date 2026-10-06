@@ -465,13 +465,16 @@ class TestMissile:
         assert ratio == pytest.approx(expect, rel=1e-3)
 
     def test_a_standing_shooter_turns_to_a_target_behind_before_it_aims(self):
-        """missile.stand_fire_arc_deg + turn.formation_deg_s: standing, a shooter facing away from its only
-        target turns at the formation rate and aims only once the target is within the arc."""
+        """missile.stand_fire_arc_deg + turn.formation_deg_s: standing, a shooter facing away from the target of
+        its attack order turns at the formation rate and aims only once the target is within the arc."""
         def first_shot(params, steps=24):
             st = scenario.build([army([(ARCHER, -100, 0, 270)], [(SLAVE, 0, 0, 270)])], params)
             b0, bearings = float(st.u["b"][0, 0]), []
+            H = st.N // 2
             for k in range(steps):
-                battle.step(st, replay.hold(st), params)
+                o = replay.hold(st)
+                o.kind[0, 0], o.target[0, 0] = O.ATTACK, H
+                battle.step(st, o, params)
                 bearings.append(float(st.u["b"][0, 0]))
                 if float(st.u["a"][0, 0]) < float(st.u["ammo0"][0, 0]):
                     return (k + 1) * params.dt, b0, bearings
@@ -483,7 +486,7 @@ class TestMissile:
         step = abs(((bearings[0] - b0) + 180) % 360 - 180)
         assert step == pytest.approx(rate * P.dt, abs=0.5)                       # one step of the turn
         assert t is not None and t >= (180 - arc) / rate + aim_s - P.dt         # turned, then aimed
-        off = P.with_cal("missile", stand_fire_arc_deg=180).with_cal("turn", formation_deg_s=0)
+        off = P.with_cal("missile", stand_fire_arc_deg=180, per_man_arc=0, turn_done_deg=None).with_cal("turn", formation_deg_s=0)
         t_off, _, bearings_off = first_shot(off)
         assert t_off is not None and t_off < t and abs(((bearings_off[0] - 90) + 180) % 360 - 180) < 1
 
@@ -498,6 +501,261 @@ class TestMissile:
         can = torch.tensor([[True, False]])
         t = missile.choose_target(st.u, pw, can, torch.tensor([[-1, -1]]), torch.tensor([[False, False]]))
         assert t.tolist() == [[-1, -1]]
+
+
+MILITIA_K, NR = "wh_dlc04_emp_inf_free_company_militia_0", "wh2_main_skv_inf_night_runners_1"
+
+
+def shooter_and(targets, key=ARCHER, b=0.0, width=None, t_width=None):
+    """A shooter at the origin facing bearing b (0 north) and enemy units at (x, z) [, key, bearing]; t_width: the
+    targets' front, m (narrow ones: the fire arc reaches their centre)."""
+    rows = [(t[2] if len(t) > 2 else SLAVE, t[0], t[1], t[3] if len(t) > 3 else 180.0) for t in targets]
+    st = scenario.build([army([(key, 0, 0, b)], rows)], P)
+    if width:
+        st.u["width"][0, 0] = width
+    if t_width:
+        H = st.N // 2
+        st.u["width"][0, H:H + len(targets)] = t_width
+    return st
+
+
+def at(d, deg):
+    a = math.radians(deg)
+    return d * math.sin(a), d * math.cos(a)
+
+
+def shots_over(st, seconds, params=P, every=None):
+    """Run HOLD orders; [(t, projectiles fired by slot 0 this step)] for the steps it fired."""
+    out = []
+    for k in range(int(round(seconds / params.dt))):
+        a0 = float(st.u["a"][0, 0])
+        battle.step(st, replay.hold(st), params)
+        if every:
+            every(st, k)
+        fired = a0 - float(st.u["a"][0, 0])
+        if fired > 1e-6:
+            out.append(((k + 1) * params.dt, fired))
+    return out
+
+
+class TestMissileRules:
+    """The shooting rules of 06.10.2026 (build/missile2/spec.md, build/accuracy, build/shields/spec.md)."""
+
+    def test_the_arc_share_is_the_men_whose_arc_holds_the_target_centre(self):
+        last = 2.0
+        for deg in (0, 20, 35, 50, 70):
+            for width in (6.0, 60.0):                  # a narrow target, a wide one (its front across the line)
+                st = shooter_and([at(60, deg)])
+                H = st.N // 2
+                st.u["width"][0, H] = width
+                st.u["b"][0, H] = 180.0 + deg                                   # facing the shooter
+                pw = geometry.pairwise(st.u, 1.5)
+                share = float(missile.arc_share(st.u, pw, torch.tensor([[H] + [-1] * (st.N - 1)]))[0, 0])
+                W, F = float(pw["front"][0, 0]), float(pw["front"][0, H])
+                lat, fwd = 60 * math.sin(math.radians(deg)), 60 * math.cos(math.radians(deg))
+                reach = fwd * math.tan(math.radians(30)) + F / 2 * abs(math.cos(math.radians(180 + deg)))
+                expect = max(0.0, min(lat + reach, W / 2) - max(lat - reach, -W / 2)) / W
+                assert share == pytest.approx(expect, abs=1e-3), (deg, width)
+                if deg == 0:
+                    assert share == pytest.approx(1.0)
+                if width == 6.0:
+                    assert share <= last + 1e-6                                  # fewer men the further off
+                    last = share
+            if deg == 35:
+                assert 0.25 < share                                               # the wide one: most of them
+
+    def test_the_militia_arc_is_35_degrees(self):
+        st = shooter_and([at(60, 30)], key=MILITIA_K, t_width=6.0)
+        assert float(st.u["arc"][0, 0]) == 35.0 and float(shooter_and([at(60, 0)]).u["arc"][0, 0]) == 30.0
+        pw = geometry.pairwise(st.u, 1.5)
+        H = st.N // 2
+        tg = torch.tensor([[H] + [-1] * (st.N - 1)])
+        wide = float(missile.arc_share(st.u, pw, tg)[0, 0])
+        st.u["arc"][0, 0] = 30.0
+        narrow = float(missile.arc_share(st.u, pw, tg)[0, 0])
+        assert wide > narrow + 0.1
+
+    def test_a_target_off_to_one_side_is_shot_by_the_near_flank_and_the_unit_keeps_its_facing(self):
+        st = shooter_and([at(80, 30)], t_width=6.0)
+        fired = shots_over(st, 16)
+        assert fired and abs(((float(st.u["b"][0, 0]) - 0) + 180) % 360 - 180) < 1   # bearing unchanged
+        straight = shots_over(shooter_and([at(80, 0)]), 16)
+        assert fired[0][1] < 0.8 * straight[0][1]                        # fewer men in the volley
+
+    def test_firing_at_will_a_unit_does_not_turn(self):
+        st = shooter_and([at(80, 60)])
+        fired = shots_over(st, 16)
+        assert abs(((float(st.u["b"][0, 0]) - 0) + 180) % 360 - 180) < 1
+        assert sum(f for _, f in fired) < 0.2 * float(st.u["men0"][0, 0])
+
+    def test_an_ordered_target_beyond_45_degrees_is_turned_to_then_shot_by_all(self):
+        st = shooter_and([at(80, 60)])
+        H = st.N // 2
+        fired = []
+        for k in range(32):
+            o = replay.hold(st)
+            o.kind[0, 0], o.target[0, 0] = O.ATTACK, H
+            a0 = float(st.u["a"][0, 0])
+            battle.step(st, o, P)
+            if a0 > float(st.u["a"][0, 0]):
+                fired.append(((k + 1) * P.dt, a0 - float(st.u["a"][0, 0])))
+        off = abs(((float(st.u["b"][0, 0]) - 60) + 180) % 360 - 180)
+        assert off <= P.sim["missile"]["turn_done_deg"] + 1                 # turned to within 10 deg
+        rate = P.sim["turn"]["formation_deg_s"]
+        assert fired[0][0] >= (60 - 10) / rate + P.sim["missile"]["aim_s"]["arrow"] - P.dt
+        assert fired[0][1] == pytest.approx(float(st.u["men0"][0, 0]), rel=0.15)
+
+    def test_a_target_straight_ahead_gets_whole_volleys_one_database_reload_apart(self):
+        st = shooter_and([(0, 100)])
+        fired = shots_over(st, 25)
+        assert len(fired) >= 2 and fired[0][1] == pytest.approx(90, abs=0.5)
+        assert fired[1][0] - fired[0][0] == pytest.approx(10.0, abs=P.dt + 1e-6)
+        assert float(st.u["reload"][0, 0]) == 10.0
+
+    def test_a_new_target_costs_three_seconds_without_fire(self):
+        H = None
+        kill_at = {}
+
+        def kill(st, k):
+            # 9 s after the first volley the nearer target dies: the men are loaded at 10 s
+            t = (k + 1) * P.dt
+            if "t0" in kill_at and abs(t - kill_at["t0"] - 9.0) < 1e-6:
+                st.u["men"][0, H] = 0.0
+                st.u["hp_abs"][0, H] = 0.0
+                kill_at["t"] = t
+        st = shooter_and([(0, 90), (8, 100)])
+        H = st.N // 2
+
+        def watch(st, k):
+            if "t0" not in kill_at and float(st.u["a"][0, 0]) < float(st.u["ammo0"][0, 0]):
+                kill_at["t0"] = (k + 1) * P.dt
+            kill(st, k)
+        fired = shots_over(st, 30, every=watch)
+        assert len(fired) >= 2
+        assert fired[1][0] - kill_at["t"] >= P.sim["missile"]["retarget_s"] - P.dt - 1e-6
+        none = shots_over(shooter_and([(0, 90)]), 30)
+        assert fired[1][0] - fired[0][0] > none[1][0] - none[0][0]          # later than one reload
+
+    def test_a_shooter_keeps_its_target_when_two_are_about_as_near(self):
+        def swap(st, k):
+            H = st.N // 2
+            z0, z1 = float(st.u["z"][0, H]), float(st.u["z"][0, H + 1])
+            st.u["z"][0, H], st.u["z"][0, H + 1] = z1, z0                    # the nearest flips every step
+        st = shooter_and([(-20, 100), (20, 101)])
+        fired = shots_over(st, 25, every=swap)
+        assert len(fired) >= 2 and fired[1][0] - fired[0][0] == pytest.approx(10.0, abs=P.dt + 1e-6)
+
+    def test_range_is_centre_to_centre(self):
+        for d, ok in ((129.0, True), (131.0, False)):
+            st = shooter_and([(0, d, SPEAR)])
+            pw = geometry.pairwise(st.u, 1.5)
+            t = missile.choose_target(st.u, pw, torch.tensor([[True] + [False] * (st.N - 1)]),
+                                      torch.full((1, st.N), -1), torch.zeros((1, st.N), dtype=torch.bool))
+            assert (int(t[0, 0]) >= 0) == ok, d
+        deep = shooter_and([(0, 129.0, SPEAR)], width=8)                   # a column 40+ m deep
+        fired = shots_over(deep, 8)
+        assert fired and fired[0][1] == pytest.approx(90, abs=0.5)           # the whole unit fires
+
+    def test_an_attacking_shooter_walks_until_the_target_centre_is_in_range(self):
+        st = shooter_and([(0, 200, SPEAR)])
+        H = st.N // 2
+
+        def attack(st):
+            o = replay.hold(st)
+            o.kind[0, 0] = O.ATTACK
+            o.target[0, 0] = H
+            return o
+        first = None
+        for k in range(120):
+            a0 = float(st.u["a"][0, 0])
+            battle.step(st, attack(st), P)
+            if first is None and float(st.u["a"][0, 0]) < a0:
+                first = float(torch.hypot(st.u["x"][0, 0] - st.u["x"][0, H], st.u["z"][0, 0] - st.u["z"][0, H]))
+        assert first is not None and 126.0 <= first <= 130.0
+
+    def test_the_spread_model_hits_less_far_off_loose_and_thinned(self):
+        d_near, d_far = shooter_and([(0, 60)]), shooter_and([(0, 120)])
+        p = [float(missile.hit_chance(s.u, geometry.pairwise(s.u, 1.5), P)[0, 0, s.N // 2]) for s in (d_near, d_far)]
+        assert 1 > p[0] > p[1] > 0.2
+        loose = shooter_and([(0, 100, SLINGER)])
+        dense = shooter_and([(0, 100, SLAVE)])
+        pl, pd = (float(missile.hit_chance(s.u, geometry.pairwise(s.u, 1.5), P)[0, 0, s.N // 2]) for s in (loose, dense))
+        assert pd > pl
+        thin = shooter_and([(0, 100, SLAVE)])
+        thin.u["men"][0, thin.N // 2] = 30.0
+        pt = float(missile.hit_chance(thin.u, geometry.pairwise(thin.u, 1.5), P)[0, 0, thin.N // 2])
+        assert pt < pd
+
+    def test_a_lone_man_by_the_closed_form(self):
+        st = shooter_and([(0, 100, "wh2_main_skv_cha_warlord_0")])
+        H = st.N // 2
+        p = float(missile.hit_chance(st.u, geometry.pairwise(st.u, 1.5), P)[0, 0, H])
+        m = P.units[ARCHER]["missile"]
+        lord = P.units["wh2_main_skv_cha_warlord_0"]
+        sig = 1.1 * m["calibration_area_m"] * 100 / m["calibration_distance_m"] * math.sqrt(1 - (10 + 10) / 100)
+        th = 0.5 * math.asin(100 * 9.81 / m["muzzle_velocity"] ** 2)
+        L = lord["height_m"] / math.tan(th)
+        r = lord["radius_m"]
+        expect = 1 - math.exp(-(math.pi * r * r + 2 * r * min(L, 3 * sig)) / (2 * math.pi * sig * sig))
+        assert p == pytest.approx(expect, rel=1e-4) and 0.05 < p < 0.3
+
+    def test_units_can_fall_back_to_the_measured_rates(self):
+        st = shooter_and([(0, 100, SPEAR)])
+        H = st.N // 2
+        pw = geometry.pairwise(st.u, 1.5)
+        tg = torch.tensor([[H] + [-1] * (st.N - 1)])
+        rates = P.with_cal("missile", accuracy=dict(P.sim["missile"]["accuracy"], units="rates"))
+        _, hp, hit = missile.volley(st.u, pw, tg, 1.0, rates)
+        shots = float(st.u["men"][0, 0]) / float(st.u["reload"][0, 0])
+        old = 0.42 * float(missile.distance_factor(pw["dist"][0, 0, H], P.sim["missile"]["distance_factor"]))
+        assert float(hp[0, 0, H]) == pytest.approx(shots * old * float(hit[0, 0, H]), rel=1e-4)
+
+
+class TestShieldRules:
+    """build/shields/spec.md: small arms only, a 60 deg cone each side of the facing, no side or rear block,
+    in melee too, the General's 55 %."""
+
+    def _lost(self, key, rot, shooter=SLINGER, melee=False, params=P):
+        # the target at the origin facing `rot` degrees off the direction to the shooter (100 m east); melee: an
+        # enemy spearmen unit (the shooter's side) fights it
+        st = scenario.build([army([(key, 0, 0, 90.0 - rot)], [(shooter, 100, 0, 270), (SPEAR, 0, 6, 180)])], params)
+        H = st.N // 2
+        pw = geometry.pairwise(st.u, 1.5)
+        target = torch.full((1, st.N), -1)
+        target[0, H] = 0
+        contact = torch.zeros((1, st.N, st.N), dtype=torch.bool)
+        if melee:
+            contact[0, 0, H + 1] = contact[0, H + 1, 0] = True
+        return float(missile.volley(st.u, pw, target, 1.0, params, contact=contact)[1][0, H, 0])
+
+    def test_shield_cone_is_60_degrees(self):
+        for rot, share in ((59.0, 0.65), (61.0, 1.0)):
+            assert self._lost(SHIELD_SPEAR, rot) == pytest.approx(share * self._lost(SPEAR, rot), rel=1e-4), rot
+
+    def test_side_takes_no_block(self):
+        assert self._lost(SHIELD_SPEAR, 90.0) == pytest.approx(self._lost(SPEAR, 90.0), rel=1e-4)
+        assert self._lost(SHIELD_SPEAR, 180.0) == pytest.approx(self._lost(SPEAR, 180.0), rel=1e-4)
+
+    def test_shield_blocks_in_melee(self):
+        fight, plain = self._lost(SHIELD_SPEAR, 0.0, melee=True), self._lost(SPEAR, 0.0, melee=True)
+        assert fight == pytest.approx(0.65 * plain, rel=1e-4)
+        assert fight < self._lost(SHIELD_SPEAR, 0.0)                       # friendly fire takes a share
+
+    def test_lord_shield_55(self):
+        front, back = self._lost(GENERAL, 0.0), self._lost(GENERAL, 180.0)
+        assert front == pytest.approx(0.45 * back, rel=1e-4)
+
+    def test_non_small_arms_ignore_shields(self):
+        st = scenario.build([army([(SHIELD_SPEAR, 0, 0, 90.0)], [(SLINGER, 100, 0, 270)])], P)
+        H = st.N // 2
+        pw = geometry.pairwise(st.u, 1.5)
+        target = torch.full((1, st.N), -1)
+        target[0, H] = 0
+        blocked = float(missile.volley(st.u, pw, target, 1.0, P)[1][0, H, 0])
+        st.u["small_arms"][0, H] = False                                    # an artillery-like projectile
+        through = float(missile.volley(st.u, pw, target, 1.0, P)[1][0, H, 0])
+        assert blocked == pytest.approx(0.65 * through, rel=1e-4)
+        assert all(P.static(k)["small_arms"] for k in (ARCHER, SLINGER, MILITIA_K, NR))
 
 
 class TestMorale:
@@ -1127,7 +1385,7 @@ class TestSecondWave:
         assert 0.2 * open_m < part_m < 0.8 * open_m
 
     def test_a_blocked_direct_fire_unit_shoots_another_target_it_can_see(self):
-        _, st = self._spent(MILITIA, ((SPEAR, -60, 0, 90),), enemies=((SPEAR, -20, 0, 270), (SLAVE, -30, 60, 270)),
+        _, st = self._spent(MILITIA, ((SPEAR, -60, 0, 90),), enemies=((SPEAR, -20, 0, 270), (SLAVE, -30, 50, 270)),
                             steps=30)
         H = st.N // 2
         assert int(st.u["target"][0, 0]) == H + 1 and bool(st.u["fire"][0, 0])
@@ -1792,8 +2050,13 @@ class TestLordFragility:
                                    contact=contact)
         ff = P.sim["missile"]["friendly_fire"]["sling"]
         lone = P.sim["missile"]["single_entity_factor"]
-        assert float(fight[0, H + 1, 0]) / float(free[0, H + 1, 0]) == pytest.approx((1 - ff) / lone, rel=1e-3)
-        assert float(old[0, H + 1, 0]) / float(free[0, H + 1, 0]) == pytest.approx(1 - ff, rel=1e-3)
+        # out of melee the spread model's lone-man chance; in melee the measured rule (hit_rate x distance factor)
+        model = float(missile.hit_chance(st.u, pw, P)[0, H + 1, 0])
+        rate = float(st.u["hit_rate"][0, H + 1] * missile.distance_factor(pw["dist"][0, H + 1, 0],
+                                                                          P.sim["missile"]["distance_factor"]))
+        assert float(fight[0, H + 1, 0]) / float(free[0, H + 1, 0]) == pytest.approx((1 - ff) * rate / model, rel=1e-3)
+        assert float(old[0, H + 1, 0]) / float(free[0, H + 1, 0]) == pytest.approx((1 - ff) * lone * rate / model,
+                                                                                   rel=1e-3)
 
     def test_a_lord_tires_slower_in_melee_and_the_charge_costs_while_the_caller_says(self):
         # single entity in melee: single_combat (15) a tick, a formation 13.7; the charge (+34) for both while
