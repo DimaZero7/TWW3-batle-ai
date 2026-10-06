@@ -35,3 +35,25 @@ def test_the_secure_steps_close_in_and_a_friend_stands_at_the_side():
     lane = mp.secure_lane("side")
     u, e, f = lane["units"]
     assert math.isclose(e["z"] - u["z"], 300) and f["x"] == 32 and not f["fearless"] and e["fearless"]
+
+
+def test_the_aura_lanes_ring_the_lord_and_cast_then_move():
+    lane = mp.aura_lane("htl")
+    lord, *ring = lane["units"]
+    assert lord["short"] == "general" and [x["ring_m"] for x in ring] == [30, 33, 36, 39, 42, 45]
+    for x in ring:
+        assert math.isclose(math.hypot(x["x"], x["z"]), x["ring_m"], abs_tol=0.1)
+        # facing the lord: the bearing from the unit to the centre; side-on: a quarter turn from the radius
+        assert x["b"] == round((x["ring_deg"] + (90 if x["side_on"] else 180)) % 360)
+    cast, out, inn, end = lane["steps"]
+    assert cast["do"] == "ability" and cast["key"] == mp.SYG and cast["delay_s"] == mp.AURA_CAST_S
+    assert out["unit"] == "U1" and math.isclose(math.hypot(out["x"], out["z"]), 70, abs_tol=0.2)
+    assert inn["unit"] == "U6" and math.isclose(math.hypot(inn["x"], inn["z"]), 20, abs_tol=0.2)
+    assert mp.aura_lane("rally")["steps"][0]["key"] == mp.RALLY
+
+
+def test_effect_lists_and_their_spans_are_read_from_the_samples():
+    lane = {"rows": {"F": [{"fx": ""}, {"fx": mp.PENITENT}, {"fx": mp.PENITENT + ",x"}, {}]}}
+    on = mp.has_fx(lane, "F", mp.PENITENT)
+    assert on.tolist() == [False, True, True, False]
+    assert mp.spans_of([0.0, 0.5, 1.0, 1.5], on, 0.5) == [(0.0, 1.0)]

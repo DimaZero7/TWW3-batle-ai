@@ -18,7 +18,10 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           side; the General and the Warlord turn in place 180 and 90 deg, then run to a point behind them
           (soldier places all the way); battle 2 melee exit - swordsmen / spearmen withdraw 10 s after contact
           and never change the order, chased by clanrats ordered to attack them or left standing; the General
-          attacks clanrats and uses Foe-Seeker 50 s after contact (vigour) - 2 battles.
+          attacks clanrats and uses Foe-Seeker 50 s after contact (vigour) - 2 battles;
+  vv      T-E3 of the effects (build/effects/spec.md 5): the Warlord attacks swordsmen and uses Verminous Valour
+          20 s after contact (its 25 m blast: are the men around him thrown back, do they stop striking?); the
+          soldiers' places all the fight; the control is the charge plan's Warlord lane - 1 battle.
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -81,7 +84,8 @@ STEADY_FROM_S = 15.0   # the charge bonus fades over 13 s (charge_decay_duration
 RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
-PLANS = ("charge", "hit", "move")
+PLANS = ("charge", "hit", "move", "vv")
+VV = "wh2_main_character_abilities_verminous_valour"
 TURN_TICK_MS = 250     # the turning battle: 0.25 s samples (a lord turns 180 deg in 1-2 s)
 
 
@@ -135,6 +139,10 @@ def battles(plan):
             lane("swords", "clanrat", "withdraw", target_mode="hold", gap_m=40, fight_s=50),
             lane("spear", "clanrat", "withdraw", gap_m=40, fight_s=75),
             lane("general", "clanrat", "attack_run", fight_s=100, a_ability=FOE_SEEKER, a_ability_after_s=50)])
+    elif plan == "vv":
+        # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
+        out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
+                    lane("swords", "clanrat", "attack_run", fight_s=45)])
     else:
         pairs = [lane("swords", "slave", gap_m=40, fight_s=90), lane("gs", "slave", gap_m=40, fight_s=90),
                  lane("spearsh", "slave", gap_m=40, fight_s=90), lane("flag", "clanrat", gap_m=40, fight_s=90)]
@@ -212,7 +220,7 @@ def run_config(plan, index):
               "men_ms": 500 if turn else MEN_MS,
               "men_near_m": 60,
               # the soldiers' places: the first 30 s (the charge plan) or the whole fight (hit: men in contact)
-              "men_after_s": 90 if plan in ("hit", "move") else 30, "lanes": lanes, "park": park}
+              "men_after_s": 90 if plan in ("hit", "move", "vv") else 30, "lanes": lanes, "park": park}
     model_s = max(l["max_s"] for l in lanes) + SETTLE_MS / 1000 + 20
     return config, model_s, arena
 

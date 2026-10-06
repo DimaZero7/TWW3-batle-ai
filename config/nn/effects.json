@@ -4,16 +4,16 @@
   "kind": "attribute (a rule flag of the engine), passive (on while its conditions hold), timed (fired by the game itself, active_s then recharge_s)",
   "rules": "rule flags it sets (attributes; ability attribute effects)",
   "stats": "the ability passport's stat effects: stat, how (add / mult), value, on (self, friends within range_m), sim (the simulator's stat; null: not modelled)",
-  "needs": "predicates that must hold for it to be on (the database's recharge contexts of a passive)",
+  "needs": "predicates that must hold for it to be on (the database's recharge contexts of a passive: its recharge runs only there)",
   "off_when": "predicates that hold it off (the database's auto-deactivate flags)",
-  "timed": "a timed passive: active_s, recharge_s, fires_when (the recharge contexts)",
+  "timed": "a timed passive: active_s, recharge_s, fires_when (predicates that must hold to fire besides being ready and nothing holding it off; the database has none: []), recharge_needs (the recharge contexts: its recharge runs only while they hold)",
   "when": "the condition in words",
   "source": "database tables and rows",
   "kb": "knowledge base page",
   "modelled": "the simulator acts on it",
   "sim": "what the simulator does",
   "why": "why not (all) of it",
-  "predicates": "the conditions the simulator evaluates: out_of_melee = out of melee, in_melee = in melee, losing_melee = losing its melee, morale_below_half = morale below half of leadership, not_wavering = steady (not wavering or routing), hp_below_half = health below 50 % of the start, hp_below_quarter = health below 25 % (db flag -> predicate: out_of_melee -> out_of_melee, engaged_in_melee -> in_melee, losing_melee_combat -> losing_melee, morale_is_lower_than_half_of_base_morale -> morale_below_half, morale_is_higher_than_wavering -> not_wavering, health_below_50%_base -> hp_below_half, health_below_25% -> hp_below_quarter)"
+  "predicates": "the conditions the simulator evaluates: out_of_melee = out of melee, in_melee = in melee, losing_melee = not winning its melee (out of melee too: the database's losing_melee_combat as the game acts on it), morale_below_half = morale below half of leadership, not_wavering = steady (not wavering or routing), hp_below_half = health below 50 % of the start, hp_below_quarter = health below 25 % (db flag -> predicate: out_of_melee -> out_of_melee, engaged_in_melee -> in_melee, losing_melee_combat -> losing_melee, morale_is_lower_than_half_of_base_morale -> morale_below_half, morale_is_higher_than_wavering -> not_wavering, health_below_50%_base -> hp_below_half, health_below_25% -> hp_below_quarter)"
  },
  "_missing": {
   "effect bundles": "effect_bundles / effect_bonus_value_*: campaign effects (skills, techs, the contexts of battle_context_unit_attribute_junctions such as causes_fear vs a culture); custom battles have none",
@@ -345,16 +345,17 @@
    "timed": {
     "active_s": 20.0,
     "recharge_s": 3.0,
-    "fires_when": [
+    "fires_when": [],
+    "recharge_needs": [
      "losing_melee"
     ]
    },
-   "when": "the game fires it when losing its melee: 20 s, ready again 3 s after; off while out of melee",
+   "when": "the game fires it whenever ready: 20 s, ready again after 3 s of not winning its melee (out of melee too: the database's losing_melee_combat as the game acts on it) (the recharge runs only then); off while out of melee",
    "source": "db: unit_special_abilities, special_ability_phase_stat_effects, special_ability_to_auto_deactivate_flags, special_ability_to_recharge_contexts (wh_dlc04_unit_passive_strength_of_the_penitent); config/nn/abilities.json",
    "kb": "docs/en/training/units.md#flagellants-greatswords-free-company-militia",
    "does": null,
    "modelled": true,
-   "sim": "stat_melee_defence add 14; stat_resistance_physical add 15 (the game fires it when losing its melee: 20 s, ready again 3 s after; off while out of melee)",
+   "sim": "stat_melee_defence add 14; stat_resistance_physical add 15 (the game fires it whenever ready: 20 s, ready again after 3 s of not winning its melee (out of melee too: the database's losing_melee_combat as the game acts on it) (the recharge runs only then); off while out of melee)",
    "why": null
   },
   "wh_main_lord_passive_hold_the_line": {

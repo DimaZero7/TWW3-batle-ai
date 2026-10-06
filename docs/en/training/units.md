@@ -158,7 +158,7 @@ no cards from battle yet (list `config/roster/capture_emp_wave2.json`, see "Reco
 |---|---|---|---|---|---|
 | Flagellants | Unbreakable | never loses leadership, never routs (also not when the army is destroyed) | DB attribute `unbreakable`; [abilities](../game/mechanics/abilities.md), [morale](../game/mechanics/morale.md) | innate effect (rule `unbreakable`): morale points never below leadership, never wavers or routs (`morale.py`) | passport attribute `unbreakable`; effect pair |
 | Flagellants | Frenzy (passive) | +10 melee attack, ×1.1 damage, AP and charge bonus, Immune to Psychology; off while morale is below half of leadership | DB: `special_ability_phase_stat_effects`, `_attribute_effects`, `special_ability_to_auto_deactivate_flags` (`morale_is_lower_than_half_of_base_morale`); knowledge base | innate effect; never off for these unbreakable men; Immune to Psychology has nothing to act on (no fear or terror in the simulator) | ability slot: effects, `immune_to_psychology`, `off_morale_below_half`; effect pair |
-| Flagellants | Strength of the Penitent (timed passive): the "defends better when losing" effect | the game fires it itself when the unit is in melee **and losing it**: 20 s of **+14 melee defence, +15 % physical resistance**, ends at once out of melee, ready again 3 s after | DB: `unit_special_abilities` (20 s, 3 s), `special_ability_to_recharge_contexts` (`losing_melee_combat`), auto-deactivate `out_of_melee`, the phase's effects. The fandom wiki gives 15 s (an older patch): the database wins | innate effect (timed) for either side; "losing" = HP taken ≥ 1.5 × dealt recently (the morale rule's ratio, ours); physical resistance added to the melee damage rule (cap 90 %) | ability slot: `auto`, `when_losing_melee`, `off_out_of_melee`, the effects, its timers; effect pair; never orderable |
+| Flagellants | Strength of the Penitent (timed passive): the "defends better when losing" effect | the game fires it itself as soon as it is ready, in melee: 20 s of **+14 melee defence, +15 % physical resistance**, ends at once out of melee; **its 3 s recharge stands only while the unit wins its melee** (losing, even or out of melee: it runs); the initial 3 s run from the battle's start | DB: `unit_special_abilities` (20 s, 3 s, initial 3 s), `special_ability_to_recharge_contexts` (`losing_melee_combat`: when the recharge runs), auto-deactivate `out_of_melee`, the phase's effects; CA hotfix 6.2.2 (15 -> 20 s); the wiki: "Enabled when in melee... recharges when losing". Recordings of 54 units: on 70 % of the melee seconds, gaps of exactly 3 s in 92 %; probe T-E1 (`build/effectsimpl`): winners - one fire at the contact and no other in 70 s, losers - gaps of exactly 3 s | innate effect (timed) for either side; "winning" = the morale's fight balance > 0 (`morale.combat_points`, the morale's own rule); the recordings replayed in the simulator - on 0.64 of the melee (the game 0.70, 0.13 before); physical resistance added to the melee damage rule (cap 90 %); the engine starts the fight 1-5 s before our contact - it comes on earlier there (not modelled) | ability slot: `auto`, `when_losing_melee`, `off_out_of_melee`, the effects, its timers; effect pair; never orderable |
 | Flagellants | Very low defence, no armour | the whole base damage of every hit lands, arrows and slings too | passport | the per-hit rule with armour 0 | passport |
 | Flagellants | Chaff | cheap and never runs: holds enemies in place | follows from the above | (from the numbers) | — |
 | Greatswords | Armour 95, armour-piercing two-handed sword, bonus 14 against infantry | most of their damage ignores armour; their armour stops 71 % of base damage on average | passport (the wiki's 32 / 23 AP / bonus 10 are older; the DB has 35 / 25 / 14); no Stubborn or other special attribute in the WH3 database | already modelled (AP split, bonus against infantry to attack and damage, armour); test: they bring armoured stormvermin down more than 1.5× faster than swordsmen | passport |
@@ -173,6 +173,8 @@ The bridge needs nothing for them: a blocked shooter under an attack order stand
 released to fire at will after 4 decisions (`services.missile_duty`), as any shooter; the
 Penitent is never ordered (not `self_cast`). In the game the companion cannot count the Penitent's
 timers (the bridge knows only the abilities it fired), so there the network sees it as not active.
+The passport field `recharge_when` is the database's recharge context; the network's
+input column `when_losing_melee` keeps its old name so that trained networks keep their weights.
 
 ### Recordings wanted
 
@@ -184,8 +186,8 @@ timers (the bridge knows only the abilities it fired), so there the network sees
 3. **Line of fire**: militia, a friendly spearmen unit 20 m in front of them across the whole line,
    clanrats 80 m away, fire at will, 60 s; then the spearmen moved aside by half their width
    (expected: no shots, then about half).
-4. **The Penitent**: flagellants against stormvermin (they lose), the bridge's `ActiveEffectList`
-   every second: when the phase comes on (HP taken against dealt), how long it stays.
+4. **The Penitent** - done (probe T-E1, `python -m tools.nn.morale_probe run --plan penitent`): fired at the
+   contact without any losing condition, again after 3 s while losing or even, never while winning.
 5. **Fire whilst moving**: militia walking past a standing enemy unit at 70 m: shots while moving.
 
 ## Skavenslaves, Clanrats with shields, Night Runners
@@ -289,9 +291,9 @@ The 14 effects of our 17 units:
 | Strength in Numbers | passive | +6 leadership, +8 melee defence, speed ×0.9 | health ≥ 50 % of the start | Skaven infantry (7) | modelled |
 | Scurry Away! | passive | speed ×1.1 | wavering or routing | Skaven infantry and the Warlord (8) | modelled |
 | Single Entity | passive | speed ×0.9, melee damage and AP ×0.8 | health < 25 % (its recharge context `health_below_25%`) | the two lords | left out (`sim.json` effects.off): the recordings show no ×0.9 speed below 25 % (lords running out of melee: 0.84–0.85 of the run in every health band); the reading of the context is ours (the cards, at full health, show the full damage) |
-| Hold the Line! | passive aura | +5 melee defence, +4 leadership to self and friends within 35 m | always (a standing lord) | the General | modelled |
+| Hold the Line! | passive aura | +5 melee defence, +4 leadership to self and friends within 35 m (centre to centre) | always while the lord lives: from a routing lord too, and on routing friends | the General | modelled |
 | Frenzy | passive | +10 melee attack, ×1.1 damage, AP and charge; Immune to Psychology | morale ≥ half of leadership | Flagellants | modelled (Immune to Psychology: nothing to act on) |
-| Strength of the Penitent | timed | 20 s of +14 melee defence, +15 % physical resistance; ready 3 s after | fired by the game when losing the melee; ends out of melee | Flagellants | modelled |
+| Strength of the Penitent | timed | 20 s of +14 melee defence, +15 % physical resistance; ready after 3 s of not winning | fired by the game itself as soon as it is ready, in melee; ends out of melee; the recharge stands only while the unit wins its melee | Flagellants | modelled |
 
 `sim.json` effects.off is the calibration switch for an effect the catalogue could model but the
 simulator leaves out (each with its reason): today Single Entity only.
@@ -317,7 +319,8 @@ above are the worked example.
 1. **Key and passport.** Find the main unit key (`main_units`), add it to `UNITS` in
    `tools/nn/units.py`, run `py -3.14 -m tools.nn.units`; its abilities: `py -3.14 -m tools.nn.abilities`.
 2. **Research every special feature.** The unit's attributes (the passport's `attributes`), its
-   abilities (effects, `auto`, `auto_when`: when the game fires it, `off_when`: when it is off; the
+   abilities (effects, `auto`, `recharge_when`: when the recharge runs (the database's context), `off_when`:
+   when it is off, `update_targets`: an aura following its owner or laid at the cast; the
    passive and game-fired ones become innate effects: `python -m tools.nn.effects` rebuilds
    `config/nn/effects.json` and prints which are modelled and why not),
    its projectile (trajectory, calibration, penetration) and its in-game description; then the

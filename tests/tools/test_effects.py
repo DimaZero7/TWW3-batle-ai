@@ -33,7 +33,9 @@ def test_effects_carry_the_database_values_and_conditions():
     assert sin["off_when"] == ["hp_below_half"] and sin["modelled"]
     assert built[SCURRY]["off_when"] == ["not_wavering"]
     pen = built[PENITENT]
-    assert pen["kind"] == "timed" and pen["timed"] == {"active_s": 20.0, "recharge_s": 3.0, "fires_when": ["losing_melee"]}
+    # fired whenever ready (in melee: off out of it); its recharge context is when its 3 s run (build/effects P1)
+    assert pen["kind"] == "timed" and pen["timed"] == {"active_s": 20.0, "recharge_s": 3.0, "fires_when": [],
+                                                       "recharge_needs": ["losing_melee"]}
     assert pen["off_when"] == ["out_of_melee"]
     assert built[FRENZY]["rules"] == ["immune_to_psychology"] and built[FRENZY]["modelled"]
     assert built["wh3_main_unit_passive_single_entity"]["needs"] == ["hp_below_quarter"]
@@ -43,7 +45,7 @@ def test_effects_carry_the_database_values_and_conditions():
 def test_what_the_simulator_lacks_is_schema_only_with_the_reason():
     p = {"passive": True, "auto": False, "active_s": -1, "recharge_s": -1, "range_m": 0,
          "effects": [{"stat": "stat_accuracy", "how": "add", "value": 10, "on": ["self"]}],
-         "attributes": [], "off_when": ["some_new_flag"], "auto_when": []}
+         "attributes": [], "off_when": ["some_new_flag"], "recharge_when": []}
     e = effects.ability_effect("x_passive_new", p)
     assert not e["modelled"] and "stat_accuracy" in e["why"] and "some_new_flag" in e["why"]
     assert not effects.attribute_effect("brand_new_attribute")["modelled"]

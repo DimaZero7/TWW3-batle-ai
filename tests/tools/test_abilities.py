@@ -69,11 +69,14 @@ def tables():
 
 class TestPassport:
     PREFIX = {"buff": {"active_time": 14.0, "recharge_time": 60.0, "num_uses": -1, "effect_range": 35.0,
-                       "targets_own": True, "num_effected_friendly_units": -1, "num_effected_enemy_units": 0},
+                       "targets_own": True, "num_effected_friendly_units": -1, "num_effected_enemy_units": 0,
+                       "update_targets": False},
               "hex": {"active_time": 13.0, "recharge_time": 0.0, "num_uses": 1, "effect_range": 35.0,
-                      "targets_own": False, "num_effected_friendly_units": 0, "num_effected_enemy_units": -1},
+                      "targets_own": False, "num_effected_friendly_units": 0, "num_effected_enemy_units": -1,
+                      "update_targets": False},
               "aura": {"active_time": -1.0, "recharge_time": -1.0, "num_uses": -1, "effect_range": 35.0,
-                       "targets_own": True, "num_effected_friendly_units": -1, "num_effected_enemy_units": 0}}
+                       "targets_own": True, "num_effected_friendly_units": -1, "num_effected_enemy_units": 0,
+                       "update_targets": True}}
 
     def test_the_phase_named_as_the_ability_wins_over_variants(self):
         p = abilities.passport("buff", self.PREFIX, tables())
@@ -117,6 +120,14 @@ class TestSaved:
         assert eff == {("stat_melee_defence", "add"): 24, ("stat_morale", "add"): 16}
         assert s[SYG]["targets"] == {"self": True, "friends": True, "enemies": False}
         assert s[FS]["targets"] == {"self": True, "friends": False, "enemies": False}
+
+    def test_update_targets_from_the_database(self):
+        # unit_special_abilities field 8 (update_targets_every_frame): Rally and Hold the Line pick their targets every
+        # frame (an aura that follows the lord), Stand Your Ground is laid once at the cast (build/effects/spec.md P2)
+        s = mab.load()
+        assert s[RALLY]["update_targets"] and s[HTL]["update_targets"] and not s[SYG]["update_targets"]
+        assert s["wh_dlc04_unit_passive_strength_of_the_penitent"]["recharge_when"] == ["losing_melee_combat"]
+        assert s["wh3_main_unit_passive_single_entity"]["recharge_when"] == ["health_below_25%"]
 
     def test_initial_recharge_from_the_database(self):
         # unit_special_abilities.initial_recharge: our lords' actives start ready, Strength of the Penitent after 3 s,

@@ -386,13 +386,14 @@ def main(argv=None):
                              "or a named arena in config/nn/arenas.json")
     parser.add_argument("--repeats", type=int, default=2,
                         help="lord-swarm: how many times each layout runs in the battle")
-    parser.add_argument("--probe-plan", choices=("charge", "hit", "move"), default="charge",
+    parser.add_argument("--probe-plan", choices=("charge", "hit", "move", "vv"), default="charge",
                         help="charge-probe: the plan (tools/nn/charge_probe.py)")
     parser.add_argument("--probe-battle", type=int, default=1, help="charge-probe: the plan's battle, 1-based")
     parser.add_argument("--mprobe-plan", choices=("dist", "arc", "range", "targets", "shield", "moving", "rank"),
                         default="dist", help="missile-probe: the plan (tools/nn/missile_probe.py)")
     parser.add_argument("--mprobe-battle", type=int, default=1, help="missile-probe: the plan's battle, 1-based")
-    parser.add_argument("--morale-plan", choices=("flank", "charge", "secure", "shoot", "rally", "strong"), default="flank",
+    parser.add_argument("--morale-plan", choices=("flank", "charge", "secure", "shoot", "rally", "strong", "penitent", "aura"),
+                        default="flank",
                         help="morale-probe: the plan (tools/nn/morale_probe.py)")
     parser.add_argument("--morale-battle", type=int, default=1, help="morale-probe: the plan's battle, 1-based")
     parser.add_argument("--swarm", dest="plan_swarm", choices=("infantry", "lords", "all", "damage"), default="infantry",

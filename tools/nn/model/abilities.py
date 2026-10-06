@@ -45,7 +45,9 @@ HEAD = ("passive", "active_s", "recharge_s", "uses_limited", "uses", "range_m", 
         "friendly_all", "friendly_n", "enemy_all", "enemy_n", "target_self", "target_friends", "target_enemies")
 # When the game fires it and when it is off (02.10.2026; appended last so that older checkpoints load
 # with zero weights for them, encoder.py): auto = a timed passive the game fires by itself (never by
-# order), its context (auto_when) and the conditions that hold it off (off_when), from the database.
+# order), its recharge context (recharge_when: its recharge runs only while this holds; the column names
+# when_* are kept so that trained networks keep their weights) and the conditions that hold it off
+# (off_when), from the database.
 WHEN = (("auto", None), ("when_losing_melee", "losing_melee_combat"), ("when_in_melee", "engaged_in_melee"),
         ("off_out_of_melee", "out_of_melee"), ("off_morale_below_half", "morale_is_lower_than_half_of_base_morale"),
         ("off_not_wavering", "morale_is_higher_than_wavering"), ("off_health_below_half", "health_below_50%_base"),
@@ -91,7 +93,7 @@ def features(p):
     given = {(g, a["attribute"]) for a in p.get("attributes") or () for g in _group(a.get("on") or ())}
     for g in GROUPS:
         out += [float((g, a) in given) for a in ATTRIBUTES]
-    conds = set(p.get("auto_when") or ()) | set(p.get("off_when") or ())
+    conds = set(p.get("recharge_when") or ()) | set(p.get("off_when") or ())
     known = {c for _, c in WHEN if c}
     out += [float(bool(p.get("auto")))] + [float(c in conds) for n, c in WHEN[1:-1]] + [float(bool(conds - known))]
     return out

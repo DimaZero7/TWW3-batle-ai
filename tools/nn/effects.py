@@ -7,9 +7,13 @@ An effect is known by what it does, from the game's database:
   its numbers (the _kv tables, config/nn/game_rules.json) are in ATTRIBUTES below, with the source;
 * a PASSIVE ability (the ability passport's `passive`, config/nn/abilities.json): stat modifiers on
   the owner (and on friends within range_m: an aura), on while its conditions hold (the passport's
-  off_when: special_ability_to_auto_deactivate_flags; auto_when: special_ability_to_recharge_contexts);
-* a TIMED passive (the passport's `auto`): the game fires it by itself when its context holds
-  (auto_when), it lasts active_s and is ready again recharge_s after.
+  off_when: special_ability_to_auto_deactivate_flags; recharge_when: special_ability_to_recharge_contexts -
+  a passive's recharge runs only there, so it is on only there: Wounds below a quarter of health);
+* a TIMED passive (the passport's `auto`): the game fires it by itself whenever it is ready and no
+  off_when holds (Strength of the Penitent: in melee), it lasts active_s, ends at once while an off_when
+  holds, and its recharge_s runs only while its recharge context holds (recharge_when: losing the
+  melee; CA hotfix 6.2.2 "recharges when losing"; as the game acts on it - the probe T-E1 and the
+  recordings: not winning its melee, out of melee too; gaps of exactly 3 s in 92 %).
 
 Which unit owns which effect comes from the database rows (the passports), never from a hand list.
 An effect is `modelled` by the simulator (tools/nn/sim/effects.py) when the simulator has every
@@ -46,7 +50,8 @@ CONDITIONS = {
     "health_below_25%": "hp_below_quarter",
 }
 # Words for the predicates (the `when` text).
-SAY = {"out_of_melee": "out of melee", "in_melee": "in melee", "losing_melee": "losing its melee",
+SAY = {"out_of_melee": "out of melee", "in_melee": "in melee",
+       "losing_melee": "not winning its melee (out of melee too: the database's losing_melee_combat as the game acts on it)",
        "morale_below_half": "morale below half of leadership", "not_wavering": "steady (not wavering or routing)",
        "hp_below_half": "health below 50 % of the start", "hp_below_quarter": "health below 25 %"}
 # (stat, how) of the database the simulator lays on a unit (the same as tools/nn/sim/abilities.SIM_STATS).
@@ -180,16 +185,17 @@ def ability_effect(key, p):
         rule = ABILITY_ATTRIBUTE_RULES.get(a["attribute"], a["attribute"])
         rules.append(rule)
     flags = sorted(set(p.get("off_when") or ()))
-    contexts = sorted(set(p.get("auto_when") or ()))
+    contexts = sorted(set(p.get("recharge_when") or ()))
     bad = [f for f in flags + contexts if f not in CONDITIONS]
     off = [CONDITIONS[f] for f in flags if f in CONDITIONS]
     ctx = [CONDITIONS[c] for c in contexts if c in CONDITIONS]
     timed = None
     if p.get("auto"):
-        timed = {"active_s": p["active_s"], "recharge_s": p["recharge_s"], "fires_when": ctx}
+        # fired whenever ready (fires_when: none); its recharge context is when the recharge runs
+        timed = {"active_s": p["active_s"], "recharge_s": p["recharge_s"], "fires_when": [], "recharge_needs": ctx}
         needs = []
-        when = (f"the game fires it {'when ' + _say(ctx) if ctx else 'whenever ready'}: {p['active_s']:g} s, "
-                f"ready again {p['recharge_s']:g} s after")
+        when = (f"the game fires it whenever ready: {p['active_s']:g} s, ready again after {p['recharge_s']:g} s "
+                + (f"of {_say(ctx)}" if ctx else "") + " (the recharge runs only then)" * bool(ctx))
     else:
         needs = ctx
         when = "always" if not needs else "while " + _say(needs)
@@ -259,9 +265,12 @@ def document(effects, links, order):
                 "rules": "rule flags it sets (attributes; ability attribute effects)",
                 "stats": "the ability passport's stat effects: stat, how (add / mult), value, on (self, friends "
                          "within range_m), sim (the simulator's stat; null: not modelled)",
-                "needs": "predicates that must hold for it to be on (the database's recharge contexts of a passive)",
+                "needs": "predicates that must hold for it to be on (the database's recharge contexts of a passive: "
+                         "its recharge runs only there)",
                 "off_when": "predicates that hold it off (the database's auto-deactivate flags)",
-                "timed": "a timed passive: active_s, recharge_s, fires_when (the recharge contexts)",
+                "timed": "a timed passive: active_s, recharge_s, fires_when (predicates that must hold to fire "
+                         "besides being ready and nothing holding it off; the database has none: []), "
+                         "recharge_needs (the recharge contexts: its recharge runs only while they hold)",
                 "when": "the condition in words", "source": "database tables and rows", "kb": "knowledge base page",
                 "modelled": "the simulator acts on it", "sim": "what the simulator does", "why": "why not (all) of it",
                 "predicates": "the conditions the simulator evaluates: " + ", ".join(

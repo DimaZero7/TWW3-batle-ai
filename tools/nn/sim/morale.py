@@ -235,6 +235,10 @@ def step(u, ctx, params, dt):
     parts = terms(u, ctx, params)
     if TRACE is not None:
         TRACE.append(parts)
+    # the fight balance (winning > 0, losing < 0) for the effects that need it (effects.py losing_melee: Strength
+    # of the Penitent recharges only while losing) - one rule of 'losing', the morale's
+    if "cmb" in u:
+        u["cmb"] = parts["combat"].float()
     target = target_points(u, ctx, params, parts)
     M = u["morale"]
     ticks = dt / 0.5

@@ -62,14 +62,23 @@ FIELDS = {
     "targets_own": "unit_special_abilities field 5 (inferred): 1 for abilities cast on the caster or a friend",
     "friendly_units": "unit_special_abilities.num_effected_friendly_units (inferred): -1 all in range, n, 0 none",
     "enemy_units": "unit_special_abilities.num_effected_enemy_units (inferred): -1 all in range, n, 0 none",
+    "update_targets": "unit_special_abilities field 8, after num_effected_enemy_units (inferred; the community's "
+                      "schemas call it update_targets_every_frame): 1 - the ability picks its targets in range every "
+                      "frame, an aura that follows the caster (Rally, Hold the Line); 0 - it is laid once at the cast "
+                      "on the units in range, and they keep it for active_s wherever they go, later arrivals get "
+                      "nothing (Stand Your Ground; 142 recorded battles, build/effects/spec.md 3.2)",
     "self_cast": "active, not auto, targets_own, friendly_units and enemy_units 0 or -1 (ours): used on the "
                  "caster himself, no target to choose (perform_special_ability(key, the lord))",
-    "auto_when": "special_ability_to_recharge_contexts.context of the ability (inferred): the battle context in "
-                 "which the game fires it by itself (Strength of the Penitent: losing_melee_combat)",
+    "recharge_when": "special_ability_to_recharge_contexts.context of the ability: its recharge runs only while "
+                     "this holds (Strength of the Penitent: losing_melee_combat - 3 s while losing, CA hotfix 6.2.2; as the "
+                     "game acts on it: while not winning its melee, out of melee too - build/effectsimpl; "
+                     "Wounds: health_below_25% - its 5 s initial recharge runs once below a quarter); a passive "
+                     "without an active time is on only once it has recharged so",
     "off_when": "special_ability_to_auto_deactivate_flags.flag (inferred): the effect switches off while this "
                 "holds (Frenzy: morale_is_lower_than_half_of_base_morale; Penitent: out_of_melee)",
     "auto": "a timed passive (ours): an active time, a key with '_passive_' (the game lists it among the "
-            "passives, unit_abilities) - the game fires it by itself (in auto_when, else whenever ready); "
+            "passives, unit_abilities) - the game fires it by itself whenever it is ready and nothing holds it off "
+            "(off_when; the recordings: Strength of the Penitent on at the contact, 53 of 54, without losses too); "
             "no player or network order",
     "phases": "special_ability_to_special_ability_phase_junctions for the ability: the phase named as the "
               "ability when there is one, else all its phases",
@@ -81,8 +90,10 @@ FIELDS = {
 }
 MISSING = {
     "area damage": "battle_vortexs / projectile bombardments are not decoded: no damage numbers yet "
-                   "(Verminous Valour's 25 m, 1 s blast has damage 0 and AP 0 by an earlier hand decode)",
-    "conditions": "decoded: auto_when (special_ability_to_recharge_contexts) and off_when "
+                   "(Verminous Valour's 25 m, 1 s blast has damage 0 and AP 0 by an earlier hand decode; it throws the "
+                   "men around the Warlord back: probe T-E3, 2 s after the cast no swordsman within 6 m, the nearest "
+                   "6.5-8.6 m away, in contact again after ~8 s - its force is not decoded, the simulator has no knockback)",
+    "conditions": "decoded: recharge_when (special_ability_to_recharge_contexts) and off_when "
                   "(special_ability_to_auto_deactivate_flags); a passive's effects are what it gives while on; "
                   "passive and auto abilities are innate effects (config/nn/effects.json, python -m tools.nn.effects)",
     "ui type": "unit_abilities (hex, augment, ...) is not decoded: the targets say the same",
@@ -146,9 +157,10 @@ def passport(key, prefix, t):
         "range_m": p["effect_range"], "passive": passive, "targets_own": p["targets_own"],
         "friendly_units": friendly, "enemy_units": enemy,
         "self_cast": (not passive) and not auto and p["targets_own"] and friendly in (0, -1) and enemy in (0, -1),
+        "update_targets": bool(p["update_targets"]),
         "auto": auto,
-        "auto_when": sorted(r["context"] for r in t.get("special_ability_to_recharge_contexts", ())
-                            if r["special_ability"] == key),
+        "recharge_when": sorted(r["context"] for r in t.get("special_ability_to_recharge_contexts", ())
+                                if r["special_ability"] == key),
         "off_when": sorted(r["flag"] for r in t.get("special_ability_to_auto_deactivate_flags", ())
                            if r["special_ability"] == key),
         "phases": [r["phase"] for r in phases], "targets": targets,
@@ -228,9 +240,10 @@ def main(argv=None):
     for k, a in abilities.items():
         eff = ", ".join(f"{e['stat']} {e['how']} {e['value']:g}" for e in a["effects"])
         kind = "passive" if a["passive"] else f"{a['active_s']:g} s / {a['recharge_s']:g} s" + (
-            f" auto {a['auto_when']}" if a["auto"] else "")
+            f" auto, recharges {a['recharge_when']}" if a["auto"] else "")
         kind += f" off {a['off_when']}" if a["off_when"] else ""
-        print(f"{k}: {kind}, range {a['range_m']:g} m, self_cast {a['self_cast']}: {eff}")
+        print(f"{k}: {kind}, range {a['range_m']:g} m, self_cast {a['self_cast']}, update_targets "
+              f"{a['update_targets']}: {eff}")
     print("written", args.out)
     return 0
 

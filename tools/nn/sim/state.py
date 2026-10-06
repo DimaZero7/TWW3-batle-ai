@@ -203,6 +203,14 @@ INTERNAL = {
     "fxt0_cd": ("f", "seconds until timed effect 0 is ready"),
     "fxt1_on": ("f", "seconds timed effect 1 stays on"),
     "fxt1_cd": ("f", "seconds until timed effect 1 is ready"),
+    "fxt0_used": ("b", "timed effect 0 has fired in this battle: its recharge runs only while its recharge context "
+                       "holds (the initial one, before the first fire, always; effects.py)"),
+    "fxt1_used": ("b", "timed effect 1 has fired in this battle"),
+    "cmb": ("f", "the morale's fight balance points of the last step (morale.combat_points: < 0 losing, > 0 winning; 0 "
+                 "out of a fight or routing): the 'losing its melee' of the effects (effects.py losing_melee)"),
+    "snap_s": ("f", "seconds left of an ability laid on it at a friend's cast (passport update_targets false: Stand "
+                    "Your Ground keeps on the units in range at the cast wherever they go; abilities.py)"),
+    "snap_ab": ("i", "that ability (index in the passports, -1 none)"),
     "fx_on": ("i", "the innate effects on in the last step: bitmask over config/nn/effects.json order"),
 }
 
@@ -287,6 +295,7 @@ def empty(B, N, device="cpu", history=0):
     u["aim_tgt"].fill_(-1)
     u["fxt0"].fill_(-1)
     u["fxt1"].fill_(-1)
+    u["snap_ab"].fill_(-1)
     u["vis"].fill_(True)
     zeros = torch.zeros(B, device=device)
     return State(u=u, t=zeros.clone(), attacker=torch.ones(B, dtype=torch.int64, device=device),

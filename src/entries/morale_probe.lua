@@ -11,10 +11,12 @@
 -- 'shoot' (unit shoots target), 'move' / 'move_walk' (to lane point x, z), 'halt', 'stop_fire',
 -- 'shadow' (each tick unit keeps d metres from role `target`: a move at a run to the point d from
 -- it on the line between them, once it is more than 8 m off; until a 'halt' of that unit),
+-- 'ability' (unit uses ability `key` on itself: a lord's Stand Your Ground, Rally),
 -- 'end' (the lane ends).
 -- Every tick_ms 'probe_sample': per running lane every role's place, bearing, men, health, melee,
 -- routing / wavering / shattered, CCO MoralePercent and MoraleGreatestEffect (the strongest morale
--- effect's text), PercentHpLostRecently, moving fast, firing. A lane also ends after max_s. The
+-- effect's text), PercentHpLostRecently, moving fast, firing, and its active effects (fx: the phase
+-- keys of CCO ActiveEffectList, as the bridge's nn_effects). A lane also ends after max_s. The
 -- battle ends when every lane is done.
 local battle = require('apps.battle.adapter')
 local clock = require('apps.core.clock')
@@ -23,6 +25,7 @@ local telemetry = require('apps.telemetry.adapter')
 local orders = require('apps.orders.adapter')
 local facing = require('apps.orders.facing')
 local map = require('apps.map.adapter')
+local services = require('apps.bridge.services')
 
 local M = {}
 
@@ -30,7 +33,7 @@ local LOG = 'tww3_bai_events.jsonl'
 local TIMER = 'tww3_bai_morale_probe_tick'
 M.TRIGGERS = {go = true, contact = true, rout = true, rally = true, step = true}
 M.ACTIONS = {attack = true, attack_walk = true, shoot = true, move = true, move_walk = true, halt = true,
-    stop_fire = true, shadow = true, ['end'] = true}
+    stop_fire = true, shadow = true, ability = true, ['end'] = true}
 
 local function round(v, k)
     if type(v) ~= 'number' or v ~= v then return nil end
@@ -109,6 +112,8 @@ function M.main(bm, config, globals)
             fire = read(cco, u, 'IsFiringMissiles')}
         local effect = read(cco, u, 'MoraleGreatestEffect')
         if type(effect) == 'string' and effect ~= '' then row.mge = effect end
+        local fx = services.active_effects(function(field) return read(cco, u, field) end)
+        if fx and #fx > 0 then row.fx = table.concat(fx, ',') end
         return row
     end
 
@@ -150,6 +155,10 @@ function M.main(bm, config, globals)
             orders.halt(it.uc)
         elseif d == 'stop_fire' then
             orders.stop_firing(it.uc)
+        elseif d == 'ability' then
+            local ok, used = pcall(orders.use_ability_on_self, it.uc, it.unit, s.key)
+            emit('probe_ability', {lane = lane.name, unit = s.unit, key = s.key, ok = ok and used == true,
+                t = now - lane.events.go})
         elseif d == 'shadow' then
             lane.shadows[s.unit] = {target = s.target, d = s.d}
         elseif d == 'end' then

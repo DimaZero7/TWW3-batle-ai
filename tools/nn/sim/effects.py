@@ -8,12 +8,22 @@ for every owned effect the catalogue marks `modelled` (and config/nn/sim.json ef
 leave out):
 * its conditions are evaluated (PREDICATES, from the unit's state at the step's start): it is on
   while all its `needs` hold and none of its `off_when` does; an attribute is always on;
-* a timed one (Strength of the Penitent) fires by itself when its `fires_when` holds and it is
-  ready, lasts active_s, ends at once while an off_when holds, and is ready again recharge_s after
-  it ends (timers fxt{j}_on / fxt{j}_cd for the unit's timed effects, STATIC fxt{j}: which);
+* a timed one (Strength of the Penitent) fires by itself as soon as it is ready and no off_when
+  holds (in melee: the recordings, 53 of 54 first fires at the contact, without losses too), lasts
+  active_s, ends at once while an off_when holds; after a fire its recharge_s runs only while its
+  `recharge_needs` hold (the database's recharge context losing_melee_combat, CA hotfix 6.2.2
+  "recharges when losing"; as the game acts on it: not winning its melee - out of melee too - by the
+  morale's fight balance, u cmb > 0 winning: the probe T-E1 - winning flagellants stall 70 s, losing
+  and even ones recharge in exactly 3 s; the recordings - 249 of 270 gaps in a continuous melee
+  exactly 3 s, the 21 long ones while dealing more than taking, and after a fire ended by leaving
+  melee the next one exactly 3 s later out of melee too, 17 of 17 with 1.5-3.5 s out); the initial
+  recharge (initial_s) runs always
+  (timers fxt{j}_on / fxt{j}_cd / fxt{j}_used for the unit's timed effects, STATIC fxt{j}: which);
 * while on, its stat modifiers lie on the owner (multipliers multiply, additions add) and, for an
-  aura (range_m > 0, stats on friends), on the friends within range_m of a standing owner; its
-  rules (RULES: unbreakable, expendable, ...) set the unit's rule flags for the step.
+  aura (range_m > 0, stats on friends), on the friends within range_m of a living owner - routing
+  too, and on routing friends (Hold the Line from a routing General: 1312 of 1312 recorded s, on
+  routing friends 2017 of 2017, build/effects/spec.md 3.4); its rules (RULES: unbreakable,
+  expendable, ...) set the unit's rule flags for the step.
 An effect lies on a unit that is alive (routing too: Scurry Away! speeds a rout); a timed one fires
 only for a standing unit. apply() returns the old values; restore() puts them back at the step's end.
 `fx_on` (INTERNAL) keeps the bitmask of the effects on in the last step (the network's input): an
@@ -40,8 +50,11 @@ RULES = {"unbreakable": "unbreakable", "expendable": "expendable", "encourages":
 TIMERS = 2          # timed effects a unit can carry (fxt0, fxt1)
 MAX_EFFECTS = 62    # the bitmask is an int64
 GROUPS = ("self", "friends")
+# A list to append each step's {effect key: [B, N] bool - on the unit, its own or an owner's aura} to, or None
+# (training: off); the probes' simulator twins read it (tools/nn/morale_probe.py).
+RECEIVED = None
 HEAD = ("modelled", "timed", "active_s", "recharge_s", "range_m", "ability")
-COLS = HEAD + tuple(f"{w}_{p}" for w in ("need", "off", "fire") for p in PREDICATES) + tuple(
+COLS = HEAD + tuple(f"{w}_{p}" for w in ("need", "off", "fire", "rcg") for p in PREDICATES) + tuple(
     f"rule_{r}" for r in RULES) + tuple(f"{g}_{s}" for g in GROUPS for s in STATS)
 COL = {c: i for i, c in enumerate(COLS)}
 
@@ -111,7 +124,7 @@ def row(params, key):
                range_m=float(e.get("range_m") or 0.0),
                ability=float(ab_keys.index(key)) if key in ab_keys else -1.0)
     for w, preds in (("need", e.get("needs") or ()), ("off", e.get("off_when") or ()),
-                     ("fire", t.get("fires_when") or ())):
+                     ("fire", t.get("fires_when") or ()), ("rcg", t.get("recharge_needs") or ())):
         for p in preds:
             out[f"{w}_{p}"] = 1.0
     for r in e.get("rules") or ():
@@ -158,9 +171,11 @@ def predicates(u, engaged, params):
     """{predicate: [B, N] bool} from the unit's state at the step's start."""
     L = u["leadership"].clamp(min=1)
     ratio = float(params.sim["morale"]["combat_ratio"]["slightly"])
-    return {"in_melee": engaged, "out_of_melee": ~engaged,
-            # losing the melee: HP taken / dealt recently at the morale rule's "losing" ratio (morale.combat_points)
-            "losing_melee": engaged & ((u["taken"] + 1.0) >= ratio * (u["dealt"] + 1.0)),
+    # the database's losing_melee_combat as the game acts on it: not winning its melee, out of melee too (module doc;
+    # winning = the morale's fight balance of the last step above 0: u cmb, morale.combat_points - HP dealt / taken
+    # recently, the database's ratios and the 10 % gate - one rule of winning and losing)
+    winning = (u["cmb"] > 0) if "cmb" in u else ((u["dealt"] + 1.0) >= ratio * (u["taken"] + 1.0))
+    return {"in_melee": engaged, "out_of_melee": ~engaged, "losing_melee": ~(engaged & winning),
             "morale_below_half": u["morale"] < 0.5 * L,
             "not_wavering": ~(u["w"] | u["r"]),
             "hp_below_half": u["hp"] < 0.5,
@@ -201,6 +216,7 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
     need = T[:E, [COL[f"need_{p}"] for p in PREDICATES]] > 0            # [E, Pn]
     offc = T[:E, [COL[f"off_{p}"] for p in PREDICATES]] > 0
     fire = T[:E, [COL[f"fire_{p}"] for p in PREDICATES]] > 0
+    rcg = T[:E, [COL[f"rcg_{p}"] for p in PREDICATES]] > 0
     Pf = P.float()
     unmet = torch.einsum("bnp,ep->bne", (~P).float(), need.float()) > 0
     off = torch.einsum("bnp,ep->bne", Pf, offc.float()) > 0
@@ -212,15 +228,23 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
         e = u[f"fxt{j}"]
         has = (e >= 0) & own.gather(2, e.clamp(min=0)[..., None]).squeeze(-1)
         r = T[e]                                                        # [B, N, COLS]; -1: the empty row
+        was_on = u[f"fxt{j}_on"] > 0
+        used = u[f"fxt{j}_used"] if f"fxt{j}_used" in u else torch.zeros_like(was_on)
         t_on = (u[f"fxt{j}_on"] - dt).clamp(min=0)
-        t_cd = (u[f"fxt{j}_cd"] - dt).clamp(min=0)
-        f_need = fire[e.clamp(min=0)]                                   # [B, N, Pn]
-        want = ~((~P) & f_need).any(-1)
+        # the cooldown (active time + recharge) runs while it is on, before its first fire (the initial recharge),
+        # and after a fire only while its recharge context holds (recharge_needs)
+        r_ok = ~((~P) & rcg[e.clamp(min=0)]).any(-1)
+        runs = was_on | ~used | r_ok
+        t_cd = torch.where(runs, (u[f"fxt{j}_cd"] - dt).clamp(min=0), u[f"fxt{j}_cd"])
+        want = ~((~P) & fire[e.clamp(min=0)]).any(-1)                   # fires_when (the database: none)
         e_off = off.gather(2, e.clamp(min=0)[..., None]).squeeze(-1)
-        ready = standing & has & (r[..., COL["modelled"]] > 0) & (t_on <= 0) & (t_cd <= 0) & ~e_off
+        e_unmet = unmet.gather(2, e.clamp(min=0)[..., None]).squeeze(-1)
+        ready = standing & has & (r[..., COL["modelled"]] > 0) & (t_on <= 0) & (t_cd <= 0) & ~e_off & ~e_unmet
         go = ready & want
         t_on = torch.where(go, r[..., COL["active_s"]], t_on)
         t_cd = torch.where(go, r[..., COL["active_s"]] + r[..., COL["recharge_s"]], t_cd)
+        if f"fxt{j}_used" in u:
+            u[f"fxt{j}_used"] = used | go
         # switched off while active: it ends now and recharges from now
         ended = (t_on > 0) & e_off
         t_cd = torch.where(ended, torch.minimum(t_cd, r[..., COL["recharge_s"]]), t_cd)
@@ -242,9 +266,13 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
     add = {s: torch.einsum("bne,e->bn", onf, c(f"self_{s}")) for s in STATS if s not in MULT}
     eye = torch.eye(u["men"].shape[1], dtype=torch.bool, device=u["men"].device)[None]
     present = u["side"] > 0
+    got = {}
     for i in auras(params):
+        # from a living owner, routing too, to friends in range, routing too (spec 3.4)
         give = (same_side & ~eye & present[:, None, :] & (dist <= T[i, COL["range_m"]])
-                & (on[..., i] & standing)[:, :, None]).float()          # owner i -> friend j
+                & (on[..., i] & alive)[:, :, None]).float()             # owner i -> friend j
+        if RECEIVED is not None:
+            got[i] = give.sum(1) > 0
         for s in STATS:
             v = T[i, COL[f"friends_{s}"]]
             if s in MULT:
@@ -269,6 +297,10 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
     u["resist_physical"] = (u["resist_physical"] + add["resist_physical"] / 100).clamp(max=0.9)
     for r, f in RULES.items():
         u[f] = torch.einsum("bne,e->bn", onf, c(f"rule_{r}")) > 0
+    if RECEIVED is not None:
+        keys = order(params)
+        RECEIVED.append({keys[i]: (on[..., i] | got.get(i, torch.zeros_like(on[..., i]))).clone()
+                         for i in range(E) if bool(on[..., i].any()) or i in got})
     return old
 
 

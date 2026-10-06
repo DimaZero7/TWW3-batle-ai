@@ -11,6 +11,25 @@ abilities of our lords are read from the database (`config/nn/abilities.json`, `
 - Abilities from several sources don't stack; passives show their recharge and condition in the
   UI; some start on cooldown (Gate of Khorne 60 s, counting only in melee). Whether a recharge
   starts at the cast or at the end of the active time: not found. · [fandom Abilities][fw-ab] · medium.
+- **The recharge context** (`special_ability_to_recharge_contexts`): the recharge runs only in this context, the
+  initial one always. Strength of the Penitent fires by itself as soon as it is ready, in melee; its 3 s ("while
+  losing", CA hotfix 6.2.2) stand only while the unit wins its melee and run while it loses, is even, and out of
+  melee (probe T-E1: winning flagellants - one fire at the contact and none for 70 s more, losing and even ones
+  exactly 3 s; recordings of 54 units - gaps of exactly 3 s in 92 %, after leaving melee the next fire 3 s later,
+  out of melee too). Wounds - 5 s below 25 % health. · database,
+  CA, recordings, probe · high.
+- **How an ability picks its targets** (`unit_special_abilities.update_targets`, the community's schemas:
+  `update_targets_every_frame`): 1 - every frame, an aura following its owner (Rally, Hold the Line): one coming in
+  gets it, one leaving loses it; 0 - once at the cast: the friends in range get it and keep it for the whole active
+  time wherever they go, later arrivals get nothing (Stand Your Ground). · database, 142 recorded battles, probe T-E2 ·
+  high.
+- **Auras and routing**: Hold the Line, Rally and Stand Your Ground act from a routing lord and on routing friends
+  (the recordings: 1312 of 1312 s and 2017 of 2017 s); a routing lord cannot cast. The lord's morale aura (+4) is
+  another rule: a routing lord loses it. · recordings · high.
+- **The range's edge**: the distance from the unit's centre to its owner's centre ≤ the range (35 m), not to the
+  nearest man: in probe T-E2 a unit at 34.8 m gets it, at 35.5 / 35.9 m none, a side-on unit at 40.1 m (its nearest men
+  ~25 m away) none. In the battle recordings the edge is softer (half at 36 m, none by 41 m) - the cause is not found
+  (likely movement and the 1 s sampling). · probe · medium.
 - **Healing cap** 75 % of maximum HP (`healing_percentage_cap`); life-steal ratio
   `damage_to_heal_ratio` 0.5. · [twwstats][tws] · high (values).
 - **Barrier** regenerates 30 s after the last hit at 20 per second (`barrier_replenishment_delay`,
@@ -23,7 +42,7 @@ abilities of our lords are read from the database (`config/nn/abilities.json`, `
 |---|---|---|
 | Strength in Numbers (Skaven) | +6 leadership, +8 melee defence, −10 % speed while HP > 50 % | high |
 | Scurry Away! (Skaven) | +10 % speed at wavering or worse | high |
-| Hold the Line! (Empire lord) | +5 melee defence, +4 leadership to allies within 35 m (WH3) | medium |
+| Hold the Line! (Empire lord) | +5 melee defence, +4 leadership to allies within 35 m (WH3); from a routing lord too, and on routers | medium |
 | Encourage | +4 leadership to nearby allies; doesn't stack with the lord's aura (5.3) | high |
 | Causes Fear / Terror | −8 within 20 m / rout for 14 s on a hit if morale ≤ 13 within 5 m | high |
 | Unbreakable | never loses leadership, never routs | high |

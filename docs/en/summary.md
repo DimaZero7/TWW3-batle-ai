@@ -66,16 +66,19 @@ fight moving or charging strikes once at once with every man in contact (the int
 blow); **the charge sprint** - under any attack order, at a walk too, the last 30 m (lords 35) at the
 database's charge speed; abilities' initial recharge from the database. Shooting by the game's rules ([missile probe](game/units/missile-probe.md), 10 battles): volleys once a cycle (archers 10 s = the database, sling 11.5, Night Runners 10.2, militia 10.8: measured), range centre to centre, each man's fire arc ±30° (militia ±35°), no turn when firing at will, 3 s after a target change, hits from the database's spread model (one calibration k 1.1 from 62k recorded shots), a shield against small arms only, the line of fire with the True Sight mod; friendly fire and spill, lords (at most 6.5 men hit them, gathering over
 20 s only when the lord himself ran into the formation; a lord without an order strikes in full; the lord as fragile as in the game: his own aura does not reach him, in melee he is
-always 'losing' (−3), projectiles hit him whole in melee; he tires by the database (+19 a tick), Foe-Seeker takes 1 %
+always 'losing' (−3), projectiles hit him whole in melee; he tires by the database (+19 a tick), Foe-Seeker restores 1 %
 of the maximum vigour a second; Wounds - 5 s after 25 % health speed x0.9, damage x0.8 to the end; a lord duel: General v
 General x0.8 of the game, Warlord v Warlord x1.2), morale with all main modifiers by the game's rules (the 4 s and 60 s casualty windows and 'under fire' 15 s; by the morale probe of 06.10: flank / rear −6 / −14 while struck; 'flanks secure' +5 with no enemy within 146 m or friends at both sides; the charge +15 in 6 + 6 s blocks; winning by shooting too, from 10 % lost; a strong enemy worth 3×; a router's morale follows its target, the rally with no enemy within 95 m after at least 18 s of rout, [simulator](training/simulator.md#morale-by-the-games-rules-the-morale-probe); a lord's death: his army
 −16 for 45 s, then −10; his rout on the field: the aura only), rout, rally, army collapse (−120; the strength is the database's combat potential:
 melee_cp + the abilities' potential + missile_cp by the ammunition left, × health - as the recorded `strategic_value`),
 turning on the move at the model's turn rate from the database (a formation about-faces where it stands and runs the
 way it faces), leaving melee with the database's 24 s window (one still in contact drops its order and fights),
-flank-threat flags, fatigue, units' innate effects, lord
+flank-threat flags, fatigue, units' innate effects (Strength of the Penitent fires by itself when ready, in melee;
+its 3 s recharge stands only while the unit wins its melee; auras from a routing lord too and on routers; the edge centre to
+centre 35 m, probe T-E2), lord
 abilities (the game's AI fires them by a measured rule: the speed ones in melee, Stand Your Ground only
-next to friends, Deadly Onslaught never).
+next to friends, Deadly Onslaught never; Stand Your Ground is laid at the cast - those that got it keep it 18 s
+anywhere, Rally is an aura following the lord; the database's `update_targets`).
 
 **Fatigue** (switched on by the latest change): 10 ticks a second; melee tires only a unit with
 an attack order (single entity the database's +19 a tick, formation 13.7 - measured; a charge +34 for everyone only in

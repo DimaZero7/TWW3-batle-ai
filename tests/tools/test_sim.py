@@ -1276,6 +1276,72 @@ class TestAbilities:
         assert float(u["ab2_on"][0, 0]) == 0 and float(u["ab2_cd"][0, 0]) == 0
         assert [float(u[f"ab{k}_cd"][0, 0]) for k in range(2)] == [cd[0], pytest.approx(cd[1] - 0.5)]
 
+    def _cast_and_move(self, lord, friend, slot, moves, steps):
+        """The lord (at 0, 0) casts the ability in `slot` by order at step 0; friends A (30 m) and B (80 m); at the
+        steps in moves {step: (role, z)} a friend jumps to z. Returns per step (A has it, B has it, the lord routs)
+        by the friends' leadership bonus."""
+        from tools.nn.sim import abilities
+        emp = lord == GENERAL
+        factions = ("wh_main_emp_empire", "wh2_main_skv_skaven") if emp else ("wh2_main_skv_skaven", "wh_main_emp_empire")
+        st = scenario.build([army([(lord, 0, 0, 90, True), (friend, 0, 30, 90), (friend, 0, 80, 90)],
+                                  [(SLAVE if emp else SPEAR, 300, 0, 270)], factions=factions)], P)
+        u = st.u
+        H = 0
+        same = u["side"][:, :, None] == u["side"][:, None, :]
+        standing = u["men"] > 0
+        engaged = torch.zeros_like(standing)
+        abilities.set_rule(u, torch.tensor([[False, False]]))
+        mb = [float(u["morale_bonus"][0, H + i]) for i in (1, 2)]
+        out = []
+        for k in range(steps):
+            for role, z in moves.get(k, ()):
+                u["z"][0, H + role] = z
+            dist = geometry.pairwise(u, 1.5)["dist"]
+            use = torch.full_like(u["ab0"], -1)
+            if k == 0:
+                use[0, H] = slot
+            old = abilities.apply(u, P, 0.5, standing & ~u["r"], engaged, dist, same, use)
+            out.append(tuple(float(u["morale_bonus"][0, H + i]) == mb[i - 1] + 16 for i in (1, 2)))
+            abilities.restore(u, old)
+        return out
+
+    def test_stand_your_ground_is_laid_at_the_cast_and_kept_wherever_they_go(self):
+        """The database's update_targets 0 (build/effects/spec.md P2; the recordings: of those that got it, 494 s
+        on and 4 off beyond 40 m; of those that came in later, 0 on and 768 off)."""
+        assert not P.abilities["wh_main_character_abilities_stand_your_ground"]["update_targets"]
+        # A (30 m) leaves to 60 m at 2 s, B (80 m) comes to 20 m at 5 s
+        got = self._cast_and_move(GENERAL, SPEAR, 1, {4: [(1, 60.0)], 10: [(2, 20.0)]}, 40)
+        assert all(a for a, _ in got[:36]) and not any(a for a, _ in got[36:])     # 18 s: 36 steps of 0.5 s
+        assert not any(b for _, b in got)
+
+    def test_rally_is_an_aura_that_follows_the_lord(self):
+        """The database's update_targets 1: who is within 35 m each step (the recordings: of those that came in later
+        917 s on; of those that left beyond 40 m 784 s off)."""
+        assert P.abilities["wh_main_character_abilities_rally"]["update_targets"]
+        got = self._cast_and_move(self.WARLORD, "wh2_main_skv_inf_clanrats_1", 2, {4: [(1, 60.0)], 10: [(2, 20.0)]},
+                                  28)
+        assert all(a for a, _ in got[:4]) and not any(a for a, _ in got[4:])
+        assert not any(b for _, b in got[:10]) and all(b for _, b in got[10:28])   # 14 s from the cast
+
+    def test_a_cast_ability_goes_on_when_its_lord_routs(self):
+        from tools.nn.sim import abilities
+        st, H, dist, same, standing, engaged = self.lords()
+        u = st.u
+        defence = float(u["defence"][0, 1])
+        use = torch.full_like(u["ab0"], -1)
+        use[0, 0] = 1                                                      # Stand Your Ground
+        abilities.restore(u, abilities.apply(u, P, 0.5, standing, engaged, dist, same, use))
+        u["r"][0, 0] = True                                                # the General routs: it goes on
+        old = abilities.apply(u, P, 0.5, standing & ~u["r"], engaged, dist, same)
+        assert float(u["defence"][0, 0]) == float(old["defence"][0, 0]) + 24
+        assert float(u["defence"][0, 1]) == defence + 24
+        abilities.restore(u, old)
+        u["ab1_cd"][0, 0] = 0.0
+        u["ab1_on"][0, 0] = 0.0
+        use[0, 0] = 1                                                      # a routing lord casts nothing
+        abilities.apply(u, P, 0.5, standing & ~u["r"], engaged, dist, same, use)
+        assert float(u["ab1_on"][0, 0]) == 0
+
     def test_a_network_side_fires_by_order_only_whichever_side_it_plays(self):
         from tools.nn.sim import abilities
         st = scenario.build([army([(GENERAL, 0, 0, 90)], [(self.WARLORD, 2, 0, 270)])] * 2, P)
@@ -1321,7 +1387,7 @@ class TestSecondWave:
         assert bool(st.u["r"][0, 0])
         assert not bool(st.u["r"][0, 1]) and not bool(st.u["w"][0, 1]) and float(st.u["morale"][0, 1]) >= 100
 
-    def test_flagellants_surrounded_fight_on_and_the_penitent_fires_when_losing(self):
+    def test_flagellants_surrounded_fight_on_and_the_penitent_fires_in_melee(self):
         st = scenario.build([army([(FLAG, 0, 0, 90)], [(CLANRAT, 40, 0, 270), (CLANRAT, 0, 50, 180),
                                                        (CLANRAT, -40, 0, 90)])], P)
         H = st.N // 2
@@ -1346,7 +1412,7 @@ class TestSecondWave:
         standing = u["side"] > 0
         base_att, base_def = float(u["attack"][0, 0]), float(u["defence"][0, 0])
         u["morale"][:] = u["leadership"]
-        u["taken"][0, 0], u["dealt"][0, 0] = 500.0, 100.0          # losing the melee
+        u["taken"][0, 0], u["dealt"][0, 0] = 100.0, 500.0          # winning: it fires anyway, in melee
         engaged = standing.clone()
         assert float(u["fxt0_cd"][0, 0]) == 3                     # the penitent's initial recharge (the database)
         u["fxt0_cd"][0, 0] = 0.0                                   # 3 s into the battle
@@ -1368,6 +1434,44 @@ class TestSecondWave:
         effects.restore(u, old)
         # the network cannot order them: they are the game's own
         assert not any(P.abilities[k]["self_cast"] for k in P.units[FLAG]["abilities"])
+
+    def test_the_penitent_fires_in_melee_and_recharges_only_while_losing(self):
+        """Strength of the Penitent (the database: 20 s, recharge 3 s in the context losing_melee_combat, initial 3 s,
+        off out of melee; build/effects/spec.md P1): fired by itself whenever ready in melee; after a fire its 3 s
+        stand while the unit wins its melee (the morale's balance, u cmb > 0) and run otherwise - losing, even, or
+        out of melee (the probe T-E1 and the recordings); the initial 3 s always."""
+        st = scenario.build([army([(FLAG, 0, 0, 90)], [(CLANRAT, 12, 0, 270)])], P)
+        u = st.u
+        pw = geometry.pairwise(u, P.sim["formation"]["spacing_m"])
+        same = u["side"][:, :, None] == u["side"][:, None, :]
+        standing = u["side"] > 0
+        melee, apart = standing.clone(), torch.zeros_like(standing)
+        base = float(u["defence"][0, 0])
+
+        def step(engaged, cmb=0.0):
+            u["cmb"][0, 0] = cmb
+            old = effects.apply(u, P, 0.5, standing, engaged, pw["dist"], same)
+            on = float(u["defence"][0, 0]) == base + 14
+            effects.restore(u, old)
+            assert on == (float(u["fxt0_on"][0, 0]) > 0)
+            return on
+        # the initial 3 s run out of melee and without losing; never on out of melee
+        assert not any(step(apart) for _ in range(10)) and float(u["fxt0_cd"][0, 0]) == 0
+        assert step(melee)                                      # the first step in melee, no losses: on
+        assert all(step(melee) for _ in range(39))              # 20 s in all
+        assert not step(melee) and float(u["fxt0_cd"][0, 0]) == 3
+        assert not any(step(melee, cmb=3.0) for _ in range(20))  # winning: the recharge stands
+        assert float(u["fxt0_cd"][0, 0]) == 3
+        assert not any(step(melee, cmb=-3.0) for _ in range(5))  # losing: 3 s to run (6 steps of 0.5 s)
+        assert step(melee, cmb=-3.0)
+        assert all(step(melee, cmb=0.0) for _ in range(39))      # 20 s
+        assert not any(step(melee, cmb=0.0) for _ in range(6))   # even: the 3 s run too
+        assert step(melee, cmb=0.0)
+        assert not step(apart, cmb=3.0)                           # out of melee: off at once
+        assert float(u["fxt0_cd"][0, 0]) == 3
+        assert not any(step(apart) for _ in range(20))            # never on out of melee, the 3 s run there
+        assert float(u["fxt0_cd"][0, 0]) == 0
+        assert step(melee, cmb=3.0)                               # on at the next contact
 
     def _spent(self, shooter, side1_more=(), enemies=((SPEAR, -20, 0, 270),), steps=40, orders=None):
         st = scenario.build([army([(shooter, -100, 0, 90), *side1_more], list(enemies))], P)
@@ -1562,16 +1666,22 @@ class TestInnateEffects:
             assert float(a["damage"][0, H]) == pytest.approx(k[0] * dmg) and float(a["run"][0, H]) == pytest.approx(k[1] * run)
             assert int(st.u["fx_on"][0, H]) & bit("wh3_main_unit_passive_single_entity")     # the network sees it
 
-    def test_hold_the_line_reaches_friends_in_range_from_a_standing_lord(self):
-        st = scenario.build([army([(GENERAL, 0, 0, 90, True), (SPEAR, 0, 30, 90), (SPEAR, 0, 120, 90)],
-                                  [(SLAVE, 20, 0, 270)])], P)
+    def test_hold_the_line_reaches_friends_in_range_from_a_living_lord_routing_or_not(self):
+        """From a routing General and on routing friends too (the recordings: 1312 of 1312 s and 2017 of 2017 s,
+        build/effects/spec.md 3.4); not from a dead one."""
+        st = scenario.build([army([(GENERAL, 0, 0, 90, True), (SPEAR, 0, 30, 90), (SPEAR, 0, 120, 90),
+                                   (SPEAR, 20, 0, 90)], [(SLAVE, 200, 0, 270)])], P)
         H = st.N // 2
         u = st.u
-        d = [float(u["defence"][0, i]) for i in (1, 2, H)]
+        d = [float(u["defence"][0, i]) for i in (1, 2, 3, H)]
         _, a = innate(st)
-        assert [float(a["defence"][0, i]) for i in (1, 2, H)] == [d[0] + 5, d[1], d[2] + 8]   # (slaves: SiN)
+        assert [float(a["defence"][0, i]) for i in (1, 2, 3, H)] == [d[0] + 5, d[1], d[2] + 5, d[3] + 8]  # (SiN)
         assert float(a["morale_bonus"][0, 1]) == float(u["morale_bonus"][0, 1]) + 4
-        u["r"][0, 0] = True                                        # a routing lord holds no line
+        u["r"][0, 0] = True                                        # a routing General still holds the line
+        u["r"][0, 3] = True                                        # and a routing friend gets it
+        _, a = innate(st)
+        assert float(a["defence"][0, 1]) == d[0] + 5 and float(a["defence"][0, 3]) == d[2] + 5
+        u["men"][0, 0] = 0                                         # a dead one does not
         _, a = innate(st)
         assert float(a["defence"][0, 1]) == d[0]
 

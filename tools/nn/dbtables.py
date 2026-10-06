@@ -102,7 +102,7 @@ LAYOUTS = {
 PREFIXES = {
     "unit_special_abilities": (74, _layout("""
         key:s active_time:f recharge_time:f num_uses:i effect_range:f targets_own:b
-        num_effected_friendly_units:i num_effected_enemy_units:i f08:b initial_recharge:f""")),
+        num_effected_friendly_units:i num_effected_enemy_units:i update_targets:b initial_recharge:f""")),
 }
 # Names we gave from the values, not from the game (why: docs/*/game/database.md).
 INFERRED = {
@@ -127,7 +127,8 @@ INFERRED = {
     "special_ability_to_recharge_contexts": {"context", "special_ability"},
     "special_ability_to_auto_deactivate_flags": {"flag", "special_ability"},
     "unit_special_abilities": {"active_time", "recharge_time", "num_uses", "effect_range", "targets_own",
-                               "num_effected_friendly_units", "num_effected_enemy_units", "initial_recharge"},
+                               "num_effected_friendly_units", "num_effected_enemy_units", "update_targets",
+                               "initial_recharge"},
 }
 
 

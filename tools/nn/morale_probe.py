@@ -19,6 +19,14 @@ Plans (battles):
           slingers shoot spearmen at 90 m for 30 s (winning the fight by shooting; its window);
   rally   T-E (1): skavenslaves (tested) against fearless Empire spearmen until they rout; then the enemy halts
           (lane 0) or keeps 50 / 90 / 150 m from the routers (rally: distance, wait, morale at rally).
+  penitent  T-E1 of the effects (build/effects/spec.md 5; 1 battle): flagellants attack fearless skavenslaves in
+          the rear (winning), fearless stormvermin and clanrats attack the flagellants front and rear (losing),
+          fearless stormvermin attack them in front (even), flagellants alone (no melee); 90 s from the contact.
+          Strength of the Penitent each sample (fx): its fires against the melee and the fight balance;
+  aura    T-E2 of the effects (1): the General stands, six spearmen around him centres at 30 / 33 / 36 / 39 / 42 /
+          45 m, facing him and side-on in turn (Hold the Line's edge: centre or nearest man); at 25 s he casts Stand
+          Your Ground, at 30 s the 30 m unit goes to 70 m and the 45 m one comes to 20 m (laid at the cast or an
+          aura); the Warlord with clanrats at 30 (facing) / 36 (side-on) / 42 m (facing) casts Rally, the same moves.
 
     python -m tools.nn.morale_probe plan [--plan flank]            # the battles
     python -m tools.build morale-probe --morale-plan flank --morale-battle 1
@@ -61,6 +69,7 @@ UNITS = {
     "storm": ("wh2_main_skv_inf_stormvermin_0", 160, SKV),
     "warlord": ("wh2_main_skv_cha_warlord_0", 1, SKV),
     "nr": ("wh2_main_skv_inf_night_runners_1", 120, SKV),
+    "flag": ("wh_dlc04_emp_inf_flagellants_0", 120, EMP),
 }
 LORDS = {EMP: "general", SKV: "warlord"}
 RESERVES = {EMP: ("gs", "gs"), SKV: ("storm", "storm")}     # parked far: the armies' strength (no army losses)
@@ -69,7 +78,10 @@ SETTLE_MS = 4000
 TICK_MS = 500
 WIDTH_M = 30
 PARK_Z = 650
-PLANS = ("flank", "charge", "secure", "shoot", "rally", "strong")
+PLANS = ("flank", "charge", "secure", "shoot", "rally", "strong", "penitent", "aura")
+PENITENT = "wh_dlc04_unit_passive_strength_of_the_penitent"
+HTL, SYG, RALLY = ("wh_main_lord_passive_hold_the_line", "wh_main_character_abilities_stand_your_ground",
+                   "wh_main_character_abilities_rally")
 # the game's strongest-effect texts (Russian client) this probe reads
 FLANK, REAR, CHARGE, WIN, SECURE = "Атакованы с фланга", "Атакованы с тыла", "Натиск", "Одерживают верх", "Фланги прикрыты"
 
@@ -210,6 +222,60 @@ def strong_lane(kind):
     return {"kind": kind, "units": units, "steps": steps, "max_s": STRONG_END_S + 10}
 
 
+PENITENT_S = 90
+
+
+def penitent_lane(kind):
+    """T-E1: F (flagellants, tested; unbreakable) - 'win': attacks fearless skavenslaves (S, facing away) in the rear
+    from 30 m; 'lose': fearless stormvermin (A) attack it in front and clanrats (B) in the rear from 40 m; 'even':
+    stormvermin alone in front; 'none': no enemy. The lane ends PENITENT_S after F's contact."""
+    dF = depth("flag")
+    units = [u("F", "flag", 0, -dF / 2, 0)]
+    if kind == "win":
+        dS = depth("slave")
+        units.append(u("S", "slave", 0, 30 + dS / 2, 0, True))
+        steps = [s("go", "attack", "F", target="S")]
+    elif kind in ("lose", "even"):
+        units.append(u("A", "storm", 0, 40 + depth("storm") / 2, 180, True))
+        steps = [s("go", "attack", "A", target="F")]
+        if kind == "lose":
+            units.append(u("B", "clanrat", 0, -dF - 40 - depth("clanrat") / 2, 0, True))
+            steps.append(s("go", "attack", "B", target="F"))
+    else:
+        return {"kind": kind, "units": units, "steps": [s("go", "end", delay_s=60)], "max_s": 70}
+    steps.append(s("contact", "end", of="F", delay_s=PENITENT_S))
+    return {"kind": kind, "units": units, "steps": steps, "max_s": PENITENT_S + 40}
+
+
+AURA_CAST_S, AURA_MOVE_S, AURA_END_S = 25, 30, 60
+
+
+def aura_lane(kind):
+    """T-E2: the lord L at the lane's centre; friends around him at angle a (deg, from +z) and centre distance r,
+    facing him ('f') or side-on ('s'): 'htl' the General with six spearmen (30 f, 33 s, 36 f, 39 s, 42 f, 45 s),
+    'rally' the Warlord with three clanrats (30 f, 36 s, 42 f). At AURA_CAST_S the lord casts (Stand Your Ground /
+    Rally); at AURA_MOVE_S the nearest friend (U1) goes to 70 m and the farthest comes to 20 m, both at a run."""
+    lord, short, key, ring = {"htl": ("general", "spear", SYG, ((30, "f"), (33, "s"), (36, "f"), (39, "s"), (42, "f"),
+                                                                 (45, "s"))),
+                              "rally": ("warlord", "clanrat", RALLY, ((30, "f"), (36, "s"), (42, "f")))}[kind]
+    units = [u("L", lord, 0, 0, 0)]
+    step = 360 / len(ring)
+    for k, (r, o) in enumerate(ring, 1):
+        a = step * (k - 1)
+        x, z = r * math.sin(math.radians(a)), r * math.cos(math.radians(a))
+        units.append(dict(u(f"U{k}", short, x, z, round((a + (180 if o == "f" else 90)) % 360)), ring_m=r, ring_deg=a,
+                          side_on=o == "s"))
+    far = len(ring)
+    a1, af = 0.0, step * (far - 1)
+    steps = [s("go", "ability", "L", delay_s=AURA_CAST_S, key=key),
+             s("go", "move", "U1", delay_s=AURA_MOVE_S, x=round(70 * math.sin(math.radians(a1)), 1),
+               z=round(70 * math.cos(math.radians(a1)), 1)),
+             s("go", "move", f"U{far}", delay_s=AURA_MOVE_S, x=round(20 * math.sin(math.radians(af)), 1),
+               z=round(20 * math.cos(math.radians(af)), 1)),
+             s("go", "end", delay_s=AURA_END_S)]
+    return {"kind": kind, "units": units, "steps": steps, "max_s": AURA_END_S + 5}
+
+
 def rotate(items, k):
     k %= len(items)
     return items[k:] + items[:k]
@@ -230,11 +296,15 @@ def battles(plan):
     if plan == "strong":
         return [[strong_lane(k) for k in ("archers:warlord", "archers:nr", "spear:clanrat", "slave:general",
                                           "slave:swords")]]
+    if plan == "penitent":
+        return [[penitent_lane(k) for k in ("win", "lose", "even", "none")]]
+    if plan == "aura":
+        return [[aura_lane(k) for k in ("htl", "rally")]]
     return [[rally_lane(k) for k in (0, 50, 90, 150)]]
 
 
 def lane_dx(plan):
-    return 450 if plan == "secure" else 330 if plan == "strong" else 350
+    return 450 if plan in ("secure", "aura") else 330 if plan == "strong" else 350
 
 
 def layout(specs, plan):
@@ -412,6 +482,92 @@ def dist(lane, a, b):
     return np.hypot(col(lane, a, "x") - col(lane, b, "x"), col(lane, a, "z") - col(lane, b, "z"))
 
 
+def has_fx(lane, role, key):
+    """[bool] per sample: the effect (phase key) is on the unit (the game's ActiveEffectList, the simulator's)."""
+    return np.array([key in (r.get("fx") or "").split(",") for r in lane["rows"][role]])
+
+
+def spans_of(t, on, t0=0.0):
+    """[(start, end)] of the runs of `on`, s from t0 (a sample stands for 0.5 s)."""
+    return [(round(float(t[i] - t0), 1), round(float(t[j - 1] + 0.5 - t0), 1)) for i, j in runs_of(list(on), True)]
+
+
+def measure_penitent(lane, out):
+    """T-E1: Strength of the Penitent on F against its melee (contact, share of the melee on, its fires and gaps)."""
+    t = np.array(lane["t"])
+    on, m = has_fx(lane, "F", PENITENT), flag(lane, "F", "m")
+    c = lane["events"]["contact"].get("F")
+    out["contact_s"] = None if c is None else round(float(c), 1)
+    first = t[on][0] if on.any() else None
+    out["first_on_s"] = None if first is None else round(float(first), 1)
+    out["first_vs_contact_s"] = None if first is None or c is None else round(float(first - c), 1)
+    out["melee_s"] = round(float(m.sum()) * TICK_MS / 1000, 1)
+    out["on_share_melee"] = round(float(on[m].mean()), 3) if m.any() else None
+    out["on_share_out"] = round(float(on[~m].mean()), 3) if (~m).any() else None
+    sp = spans_of(t, on, c or 0.0)
+    out["spans"] = sp
+    out["gaps"] = [round(b[0] - a[1], 1) for a, b in zip(sp, sp[1:])]
+    if c is not None:
+        age = t - c
+        out["on_by_age"] = {f"{a}-{a + 5}": (round(float(on[m & (age >= a) & (age < a + 5)].mean()), 2)
+                                             if (m & (age >= a) & (age < a + 5)).any() else None)
+                            for a in range(0, PENITENT_S, 5)}
+    out["hp_end"] = round(float(np.nanmin(col(lane, "F", "hp"))), 3) if lane["rows"]["F"] else None
+    foes = [x["role"] for x in lane["spec"]["units"] if x["role"] != "F"]
+    out["foe_hp_end"] = {r: round(float(np.nanmin(col(lane, r, "hp"))), 3) for r in foes}
+    if lane.get("sim"):
+        cmb = col(lane, "F", "cmb")
+        out["losing_share_melee"] = round(float((cmb[m] < 0).mean()), 3) if m.any() else None
+    else:
+        from collections import Counter
+        out["labels_melee"] = Counter(x for x, k in zip(labels(lane, "F"), m) if k and x).most_common(4)
+    return out
+
+
+def measure_aura(lane, out):
+    """T-E2: per friend - its place (centre distance, facing / side-on), Hold the Line before the cast (the edge), the
+    cast ability at the cast and after the moves (laid at the cast or an aura)."""
+    t = np.array(lane["t"])
+    spec = lane["spec"]
+    key = SYG if spec["kind"] == "htl" else RALLY
+    active = 18.0 if key == SYG else 14.0
+    cast = lane["steps"].get(1)
+    move = lane["steps"].get(2)
+    out["cast_s"] = None if cast is None else round(float(cast), 1)
+    if cast is not None:
+        win = (t >= cast) & (t < cast + active)
+        out["lord_has"] = round(float(has_fx(lane, "L", key)[win].mean()), 2) if win.any() else None
+    friends = {}
+    for x in spec["units"]:
+        if x["role"] == "L":
+            continue
+        role = x["role"]
+        d = dist(lane, role, "L")
+        row = {"ring_m": x.get("ring_m"), "side_on": x.get("side_on")}
+        pre = (t >= 5) & (t < (cast if cast is not None else AURA_CAST_S))
+        if spec["kind"] == "htl" and pre.any():
+            row["d_pre"] = round(float(np.nanmean(d[pre])), 1)
+            row["htl_pre"] = round(float(has_fx(lane, role, HTL)[pre].mean()), 2)
+        got = has_fx(lane, role, key)
+        if cast is not None:
+            at_cast = (t >= cast) & (t <= cast + 1.5)
+            row["got_at_cast"] = bool(got[at_cast].any())
+            row["d_cast"] = round(float(np.nanmean(d[at_cast])), 1) if at_cast.any() else None
+            after = (t >= (move or cast) + 1) & (t < cast + active - 0.5)
+            row["on_after_move"] = round(float(got[after].mean()), 2) if after.any() else None
+            row["d_after_move"] = ((round(float(np.nanmin(d[after])), 1), round(float(np.nanmax(d[after])), 1))
+                                   if after.any() else None)
+            row["spans"] = spans_of(t, got, cast)
+            if spec["kind"] == "htl":
+                row["htl_spans"] = spans_of(t, has_fx(lane, role, HTL), cast)
+            # when it changes after the move: (s from the cast, on, centre distance then)
+            ch = [i for i in range(1, len(t)) if got[i] != got[i - 1] and t[i] > (move or cast)]
+            row["changes"] = [(round(float(t[i] - cast), 1), bool(got[i]), round(float(d[i]), 1)) for i in ch]
+        friends[role] = row
+    out["friends"] = friends
+    return out
+
+
 def measure(lane):
     """One lane's numbers (game or simulator: the same row format)."""
     spec, t = lane["spec"], np.array(lane["t"])
@@ -419,6 +575,10 @@ def measure(lane):
     plan = lane["plan"]
     out = {"run": lane["run"], "lane": spec["name"], "plan": plan, "kind": spec["kind"]}
     r1 = lambda v: None if v is None else round(float(v), 1)
+    if plan == "penitent":
+        return measure_penitent(lane, out)
+    if plan == "aura":
+        return measure_aura(lane, out)
     if plan == "flank":
         pts, lab = points(lane, "U"), labels(lane, "U")
         c = ev["contact"].get("U")
@@ -543,7 +703,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=4, jitter_m=1.0, seed=0, 
     ('pts'), its leadership (L) and, if the simulator exposes it (tools.nn.sim.morale.TRACE), each morale
     term per sample (lane['terms'])."""
     import torch
-    from tools.nn.sim import battle, morale as sim_morale, orders as O, scenario as sim_scenario
+    from tools.nn.sim import abilities as sim_abilities, battle, effects as sim_effects
+    from tools.nn.sim import morale as sim_morale, orders as O, scenario as sim_scenario
     from tools.nn.sim.params import load
     params = params or load()
     if not collapse and (params.sim["morale"].get("collapse") or {}).get("on"):
@@ -595,8 +756,10 @@ def sim_lanes(lanes, params=None, device="cpu", copies=4, jitter_m=1.0, seed=0, 
     book = [{"go": 0.0, "contact": {}, "rout": {}, "rally": {}, "step": {}} for _ in range(B)]
     shadows = [dict() for _ in range(B)]
     last = {}
-    rec = {"t": [], "rows": [], "terms": []}
-    fields = ("x", "z", "b", "men", "hp", "m", "r", "morale", "f", "fire")
+    rec = {"t": [], "rows": [], "terms": [], "fx": []}
+    fields = ("x", "z", "b", "men", "hp", "m", "r", "morale", "f", "fire", "cmb")
+    # the effects on each unit, each step (tools/nn/sim/effects.py, abilities.py RECEIVED): the game's fx
+    fx_e, fx_a = [], []
 
     trace = []
     has_trace = hasattr(sim_morale, "TRACE")
@@ -609,6 +772,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=4, jitter_m=1.0, seed=0, 
         x, z = uu["x"].cpu().numpy(), uu["z"].cpu().numpy()
         o = O.hold(B, N, device)
         kind, target, run_, ox, oz = o.kind.clone(), o.target.clone(), o.run.clone(), o.x.clone(), o.z.clone()
+        ab = o.ability.clone()
         kind[:] = O.KEEP
         for b, ln in enumerate(meta):
             spec, ev = ln["spec"], book[b]
@@ -647,6 +811,9 @@ def sim_lanes(lanes, params=None, device="cpu", copies=4, jitter_m=1.0, seed=0, 
                         uu["a"][b, i] = 0
                 elif d == "shadow":
                     shadows[b][stp["unit"]] = (stp["target"], float(stp["d"]))
+                elif d == "ability":
+                    ukey = next(x["key"] for x in spec["units"] if x["role"] == stp["unit"])
+                    ab[b, i] = sim_abilities.slot_keys(ukey, params.units, params.abilities).index(stp["key"])
             for role, (tr, dd) in shadows[b].items():
                 i, j = slot[role][b], slot[tr][b]
                 vx, vz = x[b, i] - x[b, j], z[b, i] - z[b, j]
@@ -658,23 +825,32 @@ def sim_lanes(lanes, params=None, device="cpu", copies=4, jitter_m=1.0, seed=0, 
                 elif last.get((b, role)) == "move":
                     kind[b, i] = O.HOLD
                     last[(b, role)] = "hold"
-        return O.Orders(kind=kind, x=ox, z=oz, target=target, run=run_, ability=o.ability)
+        return O.Orders(kind=kind, x=ox, z=oz, target=target, run=run_, ability=ab)
 
     def record(st):
         rec["t"].append(float(st.t.max()))
-        rec["rows"].append({k: st.u[k].detach().float().cpu().numpy().copy() for k in fields})
+        rec["rows"].append({k: st.u[k].detach().float().cpu().numpy().copy() for k in fields if k in st.u})
+        on = {}
+        for d in (fx_e[-1:] + fx_a[-1:]):
+            for k, v in d.items():
+                on[k] = on.get(k, False) | v.detach().cpu().numpy()
+        rec["fx"].append(on)
+        fx_e.clear()
+        fx_a.clear()
         if has_trace and trace:
             rec["terms"].append({k: v.detach().float().cpu().numpy().copy() for k, v in trace[-1].items()})
             trace.clear()
     until = max(ln["spec"]["max_s"] for ln in meta) + 1
     if has_trace:
         sim_morale.TRACE = trace
+    sim_effects.RECEIVED, sim_abilities.RECEIVED = fx_e, fx_a
     try:
         record(st)
         battle.run(st, policy, params, until_s=until, record=record, compile=False)
     finally:
         if has_trace:
             sim_morale.TRACE = None
+        sim_effects.RECEIVED = sim_abilities.RECEIVED = None
     out = []
     t_all = np.array(rec["t"])
     for b, ln in enumerate(meta):
@@ -687,8 +863,10 @@ def sim_lanes(lanes, params=None, device="cpu", copies=4, jitter_m=1.0, seed=0, 
             rows[un["role"]] = [{"x": float(r["x"][b, i]), "z": float(r["z"][b, i]), "b": float(r["b"][b, i]),
                                  "men": float(r["men"][b, i]), "hp": float(r["hp"][b, i]), "m": bool(r["m"][b, i]),
                                  "r": bool(r["r"][b, i]), "fast": bool(r["f"][b, i]),
-                                 "pts": float(r["morale"][b, i]), "fire": bool(r["fire"][b, i])}
-                                for r, k in zip(rec["rows"], keep) if k]
+                                 "pts": float(r["morale"][b, i]), "fire": bool(r["fire"][b, i]),
+                                 "cmb": float(r["cmb"][b, i]) if "cmb" in r else 0.0,
+                                 "fx": ",".join(sorted(e for e, v in f.items() if v[b, i]))}
+                                for r, f, k in zip(rec["rows"], rec["fx"], keep) if k]
         terms = {}
         if rec["terms"]:
             tested = next((un for un in spec["units"] if not un["fearless"]), None)

@@ -15,11 +15,17 @@ Who fires an active ability:
   self-cast ability (passport self_cast: used on the owner, no target to choose), ready and not
   active. A side the network plays should have `ai` false, or its lord also fires by the rule.
 It then lasts active_s and is ready again recharge_s after it ends. Switching off (passport
-off_when): out_of_melee ends an active one at once (recharge from then).
+off_when): out_of_melee ends an active one at once (recharge from then). An active one goes on when
+its owner routs (only a standing one fires): the recordings show Rally and Stand Your Ground on
+from a routing lord, as Hold the Line (build/effects/spec.md 3.4).
 
 Effects (the passport's effects the simulator has a number for, SIM_STATS): on the owner himself
-(the phase targets self), on his side's units within range_m (targets friends) and on enemies
-within range_m (targets enemies). Multipliers multiply, additions add.
+(the phase targets self) while it is active, on enemies within range_m (targets enemies), and on his
+side's units (targets friends) by the passport's update_targets (the database): true - an aura that
+follows him, on the friends within range_m each step (Rally); false - laid once at the cast on the
+friends within range_m, who keep it active_s wherever they go, and a friend coming in later gets
+nothing (Stand Your Ground; state snap_s / snap_ab: one per unit, a new cast replaces it - one
+ability does not stack). Multipliers multiply, additions add.
 
 Slots: a unit shows up to SLOTS abilities (slot_keys): active ones first, then passives that reach
 other units, then the rest, each group by key. The network's input (tools/nn/model/abilities.py)
@@ -33,7 +39,6 @@ except ImportError:          # slots_of() is used without torch (params)
 
 SLOTS = 3
 TRIGGERS = {"passive": 0, "melee": 1, "near": 2, "waver": 3, "losing": 4, "ready": 5, "never": 6}
-AUTO_TRIGGERS = {"losing_melee_combat": "losing", "engaged_in_melee": "melee"}
 OFF = ("out_of_melee", "morale_is_lower_than_half_of_base_morale", "morale_is_higher_than_wavering",
        "health_below_50%_base")
 GROUPS = ("self", "friends", "enemies")
@@ -45,8 +50,11 @@ SIM_STATS = {("scalar_speed", "mult"): "speed", ("scalar_charge_speed", "mult"):
              ("stat_melee_damage_base", "mult"): "damage", ("stat_melee_damage_ap", "mult"): "ap",
              ("stat_charge_bonus", "mult"): "charge", ("stat_morale", "add"): "leadership",
              ("stat_resistance_physical", "add"): "resist_physical"}
+# A list to append each step's {ability key: [B, N] bool - on the unit, own or a friend's} to, or None (training:
+# off); the probes' simulator twins read it (tools/nn/morale_probe.py).
+RECEIVED = None
 HEAD = ("active_s", "recharge_s", "passive", "trigger", "range_m", "self_cast", "modelled", "auto", "friends_min",
-        "vigour") + tuple(
+        "vigour", "update") + tuple(
     f"off_{f}" for f in OFF)
 COLS = HEAD + tuple(f"{g}_{s}" for g in GROUPS for s in STATS)
 COL = {c: i for i, c in enumerate(COLS)}
@@ -99,13 +107,14 @@ def row(params, key):
     if p["passive"]:
         trigger = "passive"
     elif auto:
-        trigger = next((AUTO_TRIGGERS[c] for c in p.get("auto_when") or () if c in AUTO_TRIGGERS), "ready")
+        trigger = "ready"            # the game fires it whenever ready (tools/nn/sim/effects.py times it)
     else:
         trigger = cal["triggers"].get(key, cal["default_trigger"])
     eff = effects(p)
     out = [float(p["active_s"]), float(p["recharge_s"]), float(p["passive"]), float(TRIGGERS[trigger]),
            float(p["range_m"]), float(p["self_cast"]) * float(not auto), float(key in cal["model"]), float(auto),
-           float((cal.get("friends_min") or {}).get(key, 0)), float(p.get("vigour_per_s", 0.0))]
+           float((cal.get("friends_min") or {}).get(key, 0)), float(p.get("vigour_per_s", 0.0)),
+           float(p.get("update_targets", True))]
     out += [float(f in (p.get("off_when") or ())) for f in OFF]
     for g in GROUPS:
         for s in STATS:
@@ -130,9 +139,17 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None):
     present = u["side"] > 0
     foe_near = (~same_side & standing[:, None, :] & (dist <= near_m)).any(2)
     shaky = (u["w"] | u["r"]) & (u["men"] > 0)
-    # losing the melee: HP taken / dealt recently at the morale rule's "losing" ratio (morale.combat_points)
-    lose_ratio = float(params.sim["morale"]["combat_ratio"]["slightly"])
-    losing = engaged & ((u["taken"] + 1.0) >= lose_ratio * (u["dealt"] + 1.0))
+    alive = present & (u["men"] > 0) & ~u["gone"]
+    # losing the melee: the morale's fight balance of the last step below 0 (u cmb, morale.combat_points)
+    if "cmb" in u:
+        losing = engaged & (u["cmb"] < 0)
+    else:
+        lose_ratio = float(params.sim["morale"]["combat_ratio"]["slightly"])
+        losing = engaged & ((u["taken"] + 1.0) >= lose_ratio * (u["dealt"] + 1.0))
+    # an ability laid on a unit at a friend's cast (update_targets false): its seconds left, its index
+    snap = (u["snap_s"] - dt).clamp(min=0) if "snap_s" in u else None
+    snap_ab = u["snap_ab"].clone() if "snap_ab" in u else None
+    got = {} if RECEIVED is not None else None
     # conditions that hold an effect off (OFF)
     L = u["leadership"].clamp(min=1)
     off_now = {"out_of_melee": ~engaged, "morale_is_lower_than_half_of_base_morale": u["morale"] < 0.5 * L,
@@ -170,9 +187,25 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None):
         on = torch.where(ended, torch.zeros_like(on), on)
         u[f"ab{k}_on"] = torch.where(has, on, u[f"ab{k}_on"])
         u[f"ab{k}_cd"] = torch.where(has, cd, u[f"ab{k}_cd"])
-        active = has & standing & (c("modelled") > 0) & (on > 0)
-        reach = {"self": eye & active[:, :, None], "friends": friends & active[:, :, None],
+        # active: its owner alive (routing too: it goes on, spec 3.4)
+        active = has & alive & (c("modelled") > 0) & (on > 0)
+        follow = c("update") > 0                    # an aura that follows the owner (update_targets)
+        reach = {"self": eye & active[:, :, None], "friends": friends & (active & follow)[:, :, None],
                  "enemies": enemies & active[:, :, None]}
+        if snap is not None:
+            # laid once at the cast on the friends in range (update_targets false): they keep it active_s
+            cast = friends & (fire & ~follow & (c("modelled") > 0) & (c("active_s") > 0))[:, :, None]
+            hit = cast.any(1)
+            src = torch.where(cast, u[f"ab{k}"][:, :, None].expand_as(cast),
+                              torch.full_like(cast, -1, dtype=torch.long)).max(1).values
+            snap = torch.where(hit, T[src, COL["active_s"]], snap)
+            snap_ab = torch.where(hit, src, snap_ab)
+        if got is not None:
+            for a in range(T.shape[0] - 1):
+                mine = (u[f"ab{k}"] == a)[:, :, None]
+                g = ((reach["self"] | reach["friends"]) & mine).any(1)
+                if bool(g.any()):
+                    got[a] = got.get(a, torch.zeros_like(g)) | g
         for g in GROUPS:
             give = reach[g].float()
             for s in STATS:
@@ -181,6 +214,26 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None):
                     log[s] = log[s] + torch.einsum("bij,bi->bj", give, torch.log(v.clamp(min=1e-6)))
                 else:
                     add[s] = add[s] + torch.einsum("bij,bi->bj", give, v)
+    if snap is not None:
+        # the friends' stats of the ability laid on each unit at a cast (on a living unit)
+        held = (snap > 0) & (snap_ab >= 0) & alive
+        r = T[snap_ab]
+        for s in STATS:
+            v = r[..., COL[f"friends_{s}"]]
+            if s in MULT:
+                log[s] = log[s] + torch.where(held, torch.log(v.clamp(min=1e-6)), torch.zeros_like(v))
+            else:
+                add[s] = add[s] + torch.where(held, v, torch.zeros_like(v))
+        u["snap_s"] = torch.where(snap > 0, snap, torch.zeros_like(snap))
+        u["snap_ab"] = torch.where(snap > 0, snap_ab, torch.full_like(snap_ab, -1))
+        if got is not None:
+            for a in range(T.shape[0] - 1):
+                g = held & (snap_ab == a)
+                if bool(g.any()):
+                    got[a] = got.get(a, torch.zeros_like(g)) | g
+    if got is not None:
+        names = keys(params)
+        RECEIVED.append({names[a]: g for a, g in got.items()})
     old = {k: u[k] for k in ("walk", "run", "charge_speed", "damage", "ap_damage", "charge_bonus", "attack",
                               "defence", "morale_bonus", "resist_physical")}
     speed = torch.exp(log["speed"])
@@ -212,7 +265,8 @@ def vigour(u, params, standing):
     for k in range(SLOTS):
         r = T[u[f"ab{k}"]]
         has = (u[f"ab{k}"] >= 0) & ~(r[..., COL["passive"]] > 0) & ~(r[..., COL["auto"]] > 0)
-        active = has & standing & (r[..., COL["modelled"]] > 0) & (u[f"ab{k}_on"] > 0)
+        alive = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
+        active = has & alive & (r[..., COL["modelled"]] > 0) & (u[f"ab{k}_on"] > 0)
         out = out + torch.where(active, r[..., COL["vigour"]], torch.zeros_like(out))
     return out
 
