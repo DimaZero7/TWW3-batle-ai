@@ -717,6 +717,23 @@ class TestMissileRules:
             p.append(float(missile.hit_chance(st.u, geometry.pairwise(st.u, 1.5), P)[0, 0, st.N // 2]))
         assert p[0] > 1.3 * p[1]
 
+    def test_pistols_fire_whole_while_the_front_rank_reaches_the_centre_then_by_ranks(self):
+        """missile.per_man_range_direct (build/probes7 P2): militia (range 90, 7 ranks 1.7 m apart, 30 m front) on
+        skavenslaves 30 m wide (10 ranks 1.8 m): the whole unit while the target centre is within 90 m of the front
+        rank (centre <= 95.1 m), then the ranks within 90 m of the target's front rank (97.6 m: 4 of 7), none at
+        110 m; arcing fire (archers) keeps the centre rule."""
+        def share(d, key=MILITIA_K):
+            st = shooter_and([(0, d, SLAVES)], key=key, width=30.0, t_width=30.0)
+            pw = geometry.pairwise(st.u, 1.5)
+            return float(missile.rank_share(st.u, pw)[0, 0, st.N // 2]), st, pw
+        assert share(88)[0] == 1.0 and share(94.5)[0] == 1.0
+        assert share(97.6)[0] == pytest.approx(4 / 7) and share(110)[0] == 0.0
+        _, st, pw = share(97.6)
+        assert bool(missile.in_range(st.u, pw, per_man=True)[0, 0, st.N // 2])
+        assert not bool(missile.in_range(st.u, pw)[0, 0, st.N // 2])            # the centre rule
+        _, st, pw = share(132, key=ARCHER)
+        assert not bool(missile.in_range(st.u, pw, per_man=True)[0, 0, st.N // 2])  # not direct: centre
+
     def test_a_dense_block_near_is_hit_almost_every_time_and_less_far(self):
         p = []
         for d in (50, 130):

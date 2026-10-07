@@ -165,6 +165,14 @@ behind them: in the first battle he uses Stand Your Ground at contact, in the se
 behind and 120 m to the side; the General and the Warlord facing 180 and 90 deg, then at a run to a point behind;
 0.25 s samples, soldier places) and the melee exit (swordsmen and spearmen leave 10 s into contact, chased by
 clanrats ordered to attack them or left standing; the General fights clanrats and uses Foe-Seeker 50 s in).
+`syg2` - 2 battles (clanrat spearmen on Empire spearmen with the General casting Stand Your Ground once the centres
+are `lord.at_m` apart, the same pair without him; flagellants, swordsmen on clanrats; clanrats on held flagellants);
+`pair` - 1 battle (clanrat spearmen attack Empire spearmen from 80 m for 240 s; the spearmen hold, answer, or
+`push`: a move order at a walk to a point `push_m` 60 m ahead, through the attacker); `fatleave` - 1 battle (both
+attacking from 3 m without a run-up, also 60 m wide on 15 m wide - `a_w` / `t_w`; three units leaving held clanrats).
+Missile probe: `reform_men` (the target re-forms by a 5 m move with its width at that many men), `friend` (a friend
+placed `friend_fwd` / `friend_lat` from the shooter, sampled as `f`); plans `thin`, `pistol`, `moving2`, `lof`.
+Morale probe: plans `strong2` (the strong-enemy scale, 6 enemies, 120-30 m) and `rally2` (the rally clock).
 
 Every 0.5 s `probe_sample` per lane: men, health (CCO `HealthValue`), melee / moving / running flags, place,
 bearing, kills, fatigue, status keys (CCO `StatusList`: `braced`, `melee`...) of the attacker, the target and

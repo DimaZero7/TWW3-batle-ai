@@ -21,7 +21,16 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           attacks clanrats and uses Foe-Seeker 50 s after contact (vigour) - 2 battles;
   vv      T-E3 of the effects (build/effects/spec.md 5): the Warlord attacks swordsmen and uses Verminous Valour
           20 s after contact (its 25 m blast: are the men around him thrown back, do they stop striking?); the
-          soldiers' places all the fight; the control is the charge plan's Warlord lane - 1 battle.
+          soldiers' places all the fight; the control is the charge plan's Warlord lane - 1 battle;
+  syg2    melee P1 + P2 (build/open_melee/spec.md): clanrat spearmen -> Empire spearmen with the General 8 m
+          behind casting Stand Your Ground when the centres are 25 m + the half depths apart, the same pair without
+          him (control); flagellants -> clanrats, swordsmen -> clanrats, clanrats -> held flagellants (who deals
+          what with flagellants) - 2 battles, lanes rotated;
+  pair    melee P3: clanrat spearmen attack Empire spearmen from 80 m for 240 s; the spearmen hold / walk to a far
+          point through the attacker (push: the game's planner) / answer with an attack order / hold - 1 battle;
+  fatleave  fatigue and the leaver: swordsmen <-> clanrats both attacking from 3 m (no run-up, 150 s), the same
+          with the swordsmen 60 m wide (2 ranks) on clanrats 15 m wide (deep); swordsmen, spearmen, greatswords
+          leaving melee 10 s after contact from held clanrats (no chase) - 1 battle.
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -84,7 +93,7 @@ STEADY_FROM_S = 15.0   # the charge bonus fades over 13 s (charge_decay_duration
 RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
-PLANS = ("charge", "hit", "move", "vv")
+PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave")
 VV = "wh2_main_character_abilities_verminous_valour"
 TURN_TICK_MS = 250     # the turning battle: 0.25 s samples (a lord turns 180 deg in 1-2 s)
 
@@ -139,6 +148,22 @@ def battles(plan):
             lane("swords", "clanrat", "withdraw", target_mode="hold", gap_m=40, fight_s=50),
             lane("spear", "clanrat", "withdraw", gap_m=40, fight_s=75),
             lane("general", "clanrat", "attack_run", fight_s=100, a_ability=FOE_SEEKER, a_ability_after_s=50)])
+    elif plan == "syg2":
+        syg = lane("cspear", "spear", gap_m=40, fight_s=60, lord={"name": "general", "ability": SYG, "dz": 8, "at_m": 25})
+        base = [syg, lane("cspear", "spear", gap_m=40, fight_s=60), lane("flag", "clanrat", gap_m=40, fight_s=60),
+                lane("swords", "clanrat", gap_m=40, fight_s=60), lane("clanrat", "flag", "attack_run", "hold", gap_m=40,
+                                                                      fight_s=60)]
+        out += [base, rotate(base, 2)]
+    elif plan == "pair":
+        p = dict(gap_m=80, fight_s=240)
+        out.append([lane("cspear", "spear", target_mode="hold", **p), lane("cspear", "spear", target_mode="push", push_m=60, **p),
+                    lane("cspear", "spear", target_mode="stand", **p), lane("cspear", "spear", target_mode="hold", **p)])
+    elif plan == "fatleave":
+        out.append([lane("swords", "clanrat", "attack_walk", "both", gap_m=3, fight_s=150),
+                    lane("swords", "clanrat", "attack_walk", "both", gap_m=3, fight_s=150, a_w=60, t_w=15),
+                    lane("swords", "clanrat", "withdraw", target_mode="hold", gap_m=40, fight_s=40),
+                    lane("spear", "clanrat", "withdraw", target_mode="hold", gap_m=40, fight_s=40),
+                    lane("gs", "clanrat", "withdraw", target_mode="hold", gap_m=40, fight_s=40)])
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
@@ -189,13 +214,16 @@ def layout(specs):
         t_key, t_men, t_fac = UNITS[spec["target"]]
         assert a_fac != t_fac, spec
         x = LANE_DX * (k - 1 - (n - 1) / 2)
+        aw, tw = spec.get("a_w", WIDTH_M), spec.get("t_w", WIDTH_M)
         row = dict(spec, name=f"L{k}", x=round(x, 1), z=0.0, attacker=add(spec["attacker"], k),
                    target=add(spec["target"], k), a_key=a_key, t_key=t_key,
-                   a_depth=round(depth(a_key, a_men), 2), t_depth=round(depth(t_key, t_men), 2),
-                   a_width=5 if a_men == 1 else WIDTH_M, t_width=5 if t_men == 1 else WIDTH_M,
+                   a_depth=round(depth(a_key, a_men, aw), 2), t_depth=round(depth(t_key, t_men, tw), 2),
+                   a_width=5 if a_men == 1 else aw, t_width=5 if t_men == 1 else tw,
                    move_beyond_m=5.0, max_s=spec.get("max_s") or round(spec["gap_m"] / 1.4 + spec["fight_s"] + 40))
         if spec.get("lord"):
             row["lord"] = dict(spec["lord"], name=add(spec["lord"]["name"], k))
+            if row["lord"].get("at_m"):       # front to front -> centre to centre
+                row["lord"]["at_m"] = round(row["lord"]["at_m"] + (row["a_depth"] + row["t_depth"]) / 2, 1)
         lanes.append(row)
     base = nn_scenario.load_arena()
     armies = {}
@@ -481,7 +509,13 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
             # the contact began in the step that ended now (its blows are in this sample already): its start
             if st_["contact"][b] is None and (m_a[b] or m_t[b]):
                 st_["contact"][b] = t - params.dt
-                if L >= 0 and sp["lord"].get("ability") and syg_slot >= 0:
+                if L >= 0 and sp["lord"].get("ability") and syg_slot >= 0 and not sp["lord"].get("at_m"):
+                    ab[b, L] = syg_slot
+            if (L >= 0 and sp["lord"].get("at_m") and sp["lord"].get("ability") and syg_slot >= 0
+                    and st_["contact"][b] is None and b not in st_["faced"]):
+                tx_, tz_ = float(u["x"][b, T]), float(u["z"][b, T])
+                if math.hypot(ax[b] - tx_, az[b] - tz_) <= sp["lord"]["at_m"]:
+                    st_["faced"].add(b)
                     ab[b, L] = syg_slot
             c = st_["contact"][b]
             if st_["start"][b] is None:
@@ -530,6 +564,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
             # the target
             if tmode[b] == "both" or (sp.get("answer") and c is not None):
                 kind[b, T], target[b, T], run_[b, T] = O.ATTACK, A, tmode[b] == "both"
+            elif tmode[b] == "push":
+                kind[b, T], x[b, T], z[b, T], run_[b, T] = O.MOVE, sp["x"], sp["z"] + sp.get("push_m", 60), False
         # KEEP the orders in force (re-issuing every step would be a new order each time)
         key = torch.stack([kind.float(), target.float(), run_.float(), x, z], -1)
         last = st_["last"].get("key")

@@ -21,7 +21,10 @@
 -- attacker at its first contact (both then fight under an attack order); 'hold' halts and is never
 -- ordered (braced spears); 'both' attacks the attacker at a run from the start; 'rear' halts facing
 -- away. lane.lord (optional): a lord placed behind the target (dz m), who uses lane.lord.ability on
--- himself at the lane's first contact (Stand Your Ground) unless the key is empty (the control).
+-- himself at the lane's first contact (Stand Your Ground) unless the key is empty (the control); with
+-- lane.lord.at_m instead once the two units' centres are within at_m before the contact.
+-- target_mode 'push': at the go the target gets a move order at a walk to a point push_m ahead of its front
+-- (through the attacker: the game's own planner's far move point), never changed.
 -- Every tick_ms 'probe_sample': per running lane both units' (and the lord's) men, health
 -- (CCO HealthValue), melee flag, place, bearing, moving / moving fast, kills, fatigue, status keys
 -- (CCO StatusList: braced, melee...). Every men_ms while the two are within men_near_m of each
@@ -42,7 +45,7 @@ local LOG = 'tww3_bai_events.jsonl'
 local TIMER, MEN_TIMER = 'tww3_bai_charge_probe_tick', 'tww3_bai_charge_probe_men'
 M.MODES = {attack_run = true, attack_walk = true, move_run = true, recharge = true, hold = true, withdraw = true,
     script = true}
-M.TARGET_MODES = {stand = true, hold = true, both = true, rear = true}
+M.TARGET_MODES = {stand = true, hold = true, both = true, rear = true, push = true}
 
 local function round(v, k)
     if type(v) ~= 'number' or v ~= v then return nil end
@@ -207,11 +210,21 @@ function M.main(bm, config, globals)
                     if lane.answer and lane.target_mode ~= 'hold' and lane.target_mode ~= 'both' then
                         attack(lane, lane.t, lane.a, false)
                     end
-                    if lane.lord and lane.lord.ability and lane.lord.ability ~= '' then
+                    if lane.lord and lane.lord.ability and lane.lord.ability ~= '' and not lane.lord.at_m then
                         local it = state.units[lane.lord.name]
                         local ok, used = pcall(orders.use_ability_on_self, it.uc, it.unit, lane.lord.ability)
                         emit('probe_ability', {lane = lane.name, key = lane.lord.ability, t = now - lane.t0,
                             status = ok and (used and 'used' or 'not_ready') or 'failed'})
+                    end
+                end
+                if lane.lord and lane.lord.at_m and not lane.lord_cast and not lane.contact then
+                    local d = dist(lane.a.unit, lane.t.unit)
+                    if d and d <= lane.lord.at_m then
+                        lane.lord_cast = true
+                        local it = state.units[lane.lord.name]
+                        local ok, used = pcall(orders.use_ability_on_self, it.uc, it.unit, lane.lord.ability)
+                        emit('probe_ability', {lane = lane.name, key = lane.lord.ability, t = now - lane.t0,
+                            d = round(d), status = ok and (used and 'used' or 'not_ready') or 'failed'})
                     end
                 end
                 if lane.mode == 'recharge' or lane.mode == 'withdraw' then
@@ -303,6 +316,9 @@ function M.main(bm, config, globals)
         for _, lane in ipairs(state.lanes) do
             lane.t0, lane.running, lane.phase = now_ms(), true, 'in'
             if lane.target_mode == 'both' then attack(lane, lane.t, lane.a, false) end
+            if lane.target_mode == 'push' then
+                orders.move(lane.t.uc, vec(lane.layout.tx, lane.z + (lane.push_m or 60)), false)
+            end
             local m = lane.mode
             if m == 'attack_run' or m == 'recharge' or m == 'withdraw' then
                 attack(lane, lane.a, lane.t, false)

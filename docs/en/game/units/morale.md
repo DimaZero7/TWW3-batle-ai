@@ -164,7 +164,25 @@ of the strongest effect (`MoraleGreatestEffect`). Data: `build/morale`.
   next to the General (4.8×, slower) −7 at 65 m and −9 closer; the General's starts at ~120 m.
 - **Rout and rally.** A router's morale follows its target as usual (−1 → +7 in 4 s → +9), enemy near or
   not. The rally: once the nearest enemy is beyond 94–96 m (at once) and not before 18.5 s into the rout;
-  morale at the rally 0.26.
+  morale at the rally 0.26. Probe rally2 (5 lanes, `build/probes7`): the enemy 118–130 m away — the rally exactly
+  18.5 s into the rout (the conditions held from 15 s); the enemy following at 82–95 m — at 21.0 s, as soon as it was
+  92–96 m away. The "7 s after the conditions" wait (the whole-battle recordings' median) is not in the probe; what
+  holds rallies back in whole battles is not found.
+- **Strong enemy — the scale** (probe strong2, 2 battles: skavenslaves stand, a fearless enemy comes from 180 m in
+  steps; points from the level 41 left after "flanks secure" goes at ~140 m):
+
+  | Enemy (cost / the skavenslaves' cost) | 100 m | 80 m | 60 m | 40 m |
+  |---|---:|---:|---:|---:|
+  | spearmen (2.6) | 0 | 0 | 0 | 0 |
+  | swordsmen (3.2) | 0 | 0 | −3 | −4 |
+  | flagellants (5.0) | −3 | −4 | −5 | −6 |
+  | greatswords (6.8) | 0 | 0 | 0 | 0 |
+  | the General (7.6) | −5 (95 m) | −7 | −8 | −9 |
+  | swordsmen + spearmen side by side | −4 | −5 | −6 | −10 |
+
+  The penalty grows as the enemy comes and starts beyond 70 m (`enemy_effect_range`); greatswords (dearer than
+  swordsmen and flagellants) give nothing, two weaker units together more than each. So the "combat power" is not the
+  cost nor cost × health; no formula — OPEN.
 
 ## How to read it
 

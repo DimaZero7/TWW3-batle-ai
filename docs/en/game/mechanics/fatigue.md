@@ -88,7 +88,16 @@ max 30000. · [twwstats][tws], [fandom Fatigue][fw-fat], [CA elevation blog][ele
     not +19). Fatigue is **not counted per man**: in the melee probe (42 lanes, `build/movelords/fat`) units
     with 1–2 % of their men in contact (against a lone lord) tire like those with 20 % (active after 26–35 s).
     A unit under an attack order gains ~110–120 points/s for the first ~50 s, then ~210/s (above the DB's +19) —
-    why is **open**; lone lords 186–200/s (= +19). Also **open**: in the probe the General reached contact already
+    why is **open**; lone lords 186–200/s (= +19).
+    Probe `fatleave` (`build/probes7`, swordsmen and clanrats both under attack orders, no run-up, 150 s): levels
+    1 / 2 / 3 / 4 at 28–30 / 56–61 / 88–90 / 129–138 s after contact (simulator 20 / 48 / 92 / 131–133): the totals to
+    "tired" and "very tired" agree, but in the game the first level comes ~9 s later and the 3 → 4 stretch (5400 points)
+    takes 40–47 s — slower than 2 → 3 (6000 points in 30 s), so neither "the rate grows with the level" nor "with the
+    time in the fight" fits — **open**. A wide line (2 ranks) against a deep block (8) tires alike (28 / 60.5 / 89 /
+    136.5 s) — the number of men fighting does not matter. Attackers with a run-up (clanrat spearmen, 4 lanes):
+    7.5–23 / 38–51 / 79.5–83.5 / 115–130.5 / 178–204.5 s, simulator 10.5–13 / 38.5–40.5 / 82–84.5 / 121.5–123.5 /
+    187–189.5 — agree; a held unit without an order never tires in either; one answering with an attack order at
+    contact: game 35 / 67 / 95 / 142.5 s, simulator 21 / 49 / 92.5 / 132. Also **open**: in the probe the General reached contact already
     "active" (≥ 2800 points after 80 m at a run and the charge), the simulator with ~940: the charge (+34) seems
     to cost on the run-in before contact too.
 - **Perfect Vigour** units never tire (a WH3 bug leaves units that start tired stuck at that

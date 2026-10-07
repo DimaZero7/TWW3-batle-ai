@@ -86,18 +86,57 @@ came into range.
 
 **Rank 9:** archers 0.83 against 0.74 at rank 0 (x1.12), slingers 0.75 against 0.55 (x1.36).
 
+## Probes P1–P4 (thinned target, pistols, running target, friends in the line of fire)
+
+5 battles, plans `thin` (2), `pistol`, `moving2`, `lof`; recordings and analysis — `build/probes7` (`mband.py`,
+`mcum.py`, `mvolley.py`; the twin — the same battle in the simulator, 4 copies).
+
+**P1. A thinned target closes ranks, no holes.** Archers on skavenslaves at ~100 m: a full target of 180 (thinned
+by the fire), fresh 90 and 45 (the same 30 m front, fewer ranks), 180 ordered to shift 5 m at 60 men. Hits a
+projectile at the same men left, the game (2 battles):
+
+| Target men | 180 thinning | fresh 90 | fresh 45 | re-formed |
+|---|---|---|---|---|
+| 60–90 | 0.52 / 0.47 | 0.52 / 0.53 | — | 0.41 / 0.46 |
+| 40–60 | 0.32 / 0.41 | 0.45 / 0.34 | 0.42 / 0.42 | 0.43 / 0.39 |
+| 20–40 | 0.21 / 0.31 | 0.28 / 0.28 | 0.32 / 0.28 | 0.18 / 0.22 |
+
+A thinned target is hit as often as a fresh one with the same men: the formation closes up (its centre also moves
+4–6 m towards the shooter, the rear men step up). The "holes where the dead fell" rule is rejected; the simulator
+(the formation by the men left now) follows the rule. The mismatch is elsewhere: for the same health lost fewer men
+die in the simulator (after 720 arrows the target has 8 % health and 86 men, in the game 15 % and 47–49), so a thinned
+target stays "thicker" in it and is hit more late on. That is the missile kill rule (`kills.exponent`), not the hit
+chance — OPEN.
+
+**P2. Pistol range — by ranks.** Militia (range 90, 7 ranks 1.7 m apart) on skavenslaves (10 ranks):
+
+| Centre to centre, m | 85 | 90 | 94.5 | 97.6 | 89 (target 80 m wide) |
+|---|---|---|---|---|---|
+| game: share of the men in a volley | 0.99 | 0.97 | 0.94–0.99 | a stream at 0.54 of the full rate, firing flag off | 1.00 |
+| the rank rule | 1 | 1 | 1 | 4 of 7 = 0.57 | 1 |
+| simulator before (centre) | 1 | 1 | 0 | 0 | 1 |
+
+The whole unit fires while the target's centre is within range of its front rank (94.5 − 5.1 = 89.4 m); beyond
+that only the ranks within 90 m of the target's nearest men. Now so in the simulator (`missile.per_man_range_direct`,
+direct fire only); archers stay centre to centre.
+
+**P3. A running target.** Archers on skavenslaves, each lane's first volley: running at the shooters at 125–126 m —
+0.94 and 0.96 a projectile, standing at 122 m — 0.82 (x1.15–1.17; simulator 0.75 and 0.75); running away at 84–85 m —
+0.73 / 0.59 against 0.75 standing at 89 m, at 117–122 m — 0.53 / 0.17 against 0.77–0.82. The sign is clear (towards
+the shooter more, away less), the size scattered; the simulator's hit chance has no target motion — OPEN.
+
+**P4. Friends in the line of fire (militia, spearmen 40 m in front of them, the target 70 m away).** Friends right in
+front: the first volley 0.44 of the men, 0.19 a projectile on the target, 295 HP to the friends; after that the unit
+hardly fires (5 % of the rate). Friends shifted by half a front: 0.7–0.9 of the rate all fight, 3313 HP to the friends
+(45 killed), 0.76 of the damage on the target without friends. Shifted by 3/4: almost the full rate, 912 HP to the
+friends. The simulator: right in front — not a shot, half — 0.54 of the men, 0 to the friends (blocked men do not
+fire). In the game blocked men fire and the bullets hit friends — who fires and the friendly damage are not
+established — OPEN.
+
 ## What does not match (open)
 
-- Over a whole fight a man fires less often than the volley interval (12.3-14.7 s): as the target thins, more
-  men skip a volley. No rule in the database or from the community. Now the simulator re-aims: a man keeps his
-  target man and, if that man dies, aims again (`missile.reaim`); shots model / game at the end of the lanes -
-  arrows 1.10-1.26 (still ~10 % high), slings 0.99-1.02, Night Runners 0.96-1.05.
-- Pistols: with the spread in the plane the fall with distance is there (above), but the pistols' range is not
-  centre to centre, and they fire as a stream from the first volley - probe P2 (a per-man range).
-- A target running at the shooter: per volley at the same distance x1.2 a shot (few data); the model has no
-  motion - probe P3.
-- The game's hits fall more as the target thins (between "the formation re-formed" and "holes where the dead
-  were"); with the spread in the plane the model hits a thinned target too easily - probe P1.
-- Rank: the simulator has no ranks (every battle is rank 0).
-- The first shot at a target that has just run into range comes 1.5-2.5 s later in the game - now in the
-  simulator too (a target taken when there was none costs 3 s without fire, `missile.retarget_from_none`).
+- Pistols fire as a stream from the first volley; arrows ~10 % more often than the game by the end of a lane (re-aim).
+- Fewer men die of arrows than in the game for the same health lost (P1), so a thinned target is hit more.
+- A target running at the shooter x1.15–1.25 a projectile, running away less (P3); no motion in the model.
+- Fire through friends: in the game blocked men fire and hit friends (P4); in the simulator they do not fire.
+- Rank: the simulator has no ranks (all battles rank 0).

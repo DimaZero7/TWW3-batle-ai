@@ -125,6 +125,34 @@ class TestHoldRate:
         assert cut == pytest.approx(P.sim["contact"]["hold_rate"] * full, rel=1e-4)
 
 
+class TestMoveThrough:
+    """contact.leave_away_only (build/probes7 P3): a move order to a far point THROUGH the enemy it touches keeps the
+    unit fighting (CA's planner's far move points); a far point away from it is a leave (no strikes)."""
+    def dealt(self, point_x, params=P):
+        st = face_off(SPEAR, CLANRAT)          # spearmen west facing east, clanrat spearmen east
+        H = st.N // 2
+        o = orders(st, **{str(H): (O.ATTACK, 0, False)})
+        for _ in range(6):
+            battle.step(st, o, params)
+        hp = float(st.u["hp_abs"][0, H])
+        o = orders(st, **{"0": (O.MOVE, (point_x, 0.0), False), str(H): (O.ATTACK, 0, False)})
+        for _ in range(10):
+            battle.step(st, o, params)
+        return hp - float(st.u["hp_abs"][0, H]), bool(st.u["m"][0, 0])
+
+    def test_a_far_point_through_the_enemy_fights_on_one_away_leaves(self):
+        through, m_through = self.dealt(60.0)
+        away, _ = self.dealt(-200.0)
+        assert through > 0 and m_through and away == pytest.approx(0.0, abs=1e-3)
+        off, _ = self.dealt(60.0, P.with_cal("contact", leave_away_only=0))
+        assert off == pytest.approx(0.0, abs=1e-3)
+
+    def test_a_far_point_through_the_enemy_strikes_in_full_a_near_one_held(self):
+        far, _ = self.dealt(60.0, P.with_cal("contact", move_far_full=1))       # (off in sim.json: one lane)
+        held, _ = self.dealt(60.0)
+        assert far > held > 0
+
+
 # --- C2 / R4: leaving melee, the chase and its 24 s window ---
 
 class TestMeleeExit:

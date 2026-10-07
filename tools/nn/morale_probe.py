@@ -27,6 +27,11 @@ Plans (battles):
           45 m, facing him and side-on in turn (Hold the Line's edge: centre or nearest man); at 25 s he casts Stand
           Your Ground, at 30 s the 30 m unit goes to 70 m and the 45 m one comes to 20 m (laid at the cast or an
           aura); the Warlord with clanrats at 30 (facing) / 36 (side-on) / 42 m (facing) casts Rally, the same moves.
+  strong2 the strong-enemy scale (build/open_battle/spec.md 4; 2 battles): skavenslaves stand, a fearless enemy
+          from 200 m stops at 120 / 90 / 70 / 50 / 30 m (centre to centre): spearmen, swordsmen, flagellants |
+          greatswords, the General, swordsmen + spearmen side by side;
+  rally2  the rally clock (1 battle): as rally, the enemy keeps 150 m (twice), or keeps 60 m and halts 20 / 28 / 36 s
+          after the rout (the router then runs clear of 95 m): rally at once, 7 s later, or at an 18 s cycle?
 
     python -m tools.nn.morale_probe plan [--plan flank]            # the battles
     python -m tools.build morale-probe --morale-plan flank --morale-battle 1
@@ -78,7 +83,7 @@ SETTLE_MS = 4000
 TICK_MS = 500
 WIDTH_M = 30
 PARK_Z = 650
-PLANS = ("flank", "charge", "secure", "shoot", "rally", "strong", "penitent", "aura")
+PLANS = ("flank", "charge", "secure", "shoot", "rally", "strong", "penitent", "aura", "strong2", "rally2")
 PENITENT = "wh_dlc04_unit_passive_strength_of_the_penitent"
 HTL, SYG, RALLY = ("wh_main_lord_passive_hold_the_line", "wh_main_character_abilities_stand_your_ground",
                    "wh_main_character_abilities_rally")
@@ -225,6 +230,41 @@ def strong_lane(kind):
 PENITENT_S = 90
 
 
+STRONG2_STEPS = ((0, 120), (30, 90), (45, 70), (60, 50), (75, 30))
+STRONG2_END_S = 95
+
+
+def strong2_lane(kind):
+    """The strong-enemy scale: U (skavenslaves, tested) stands; E (fearless; 'a+b': two units side by side, 32 m
+    apart) 200 m away runs to each STRONG2_STEPS distance (centre to centre) at its time."""
+    a, b = kind.split(":")
+    dU = depth(a)
+    z0 = -dU / 2
+    es = b.split("+")
+    units = [u("U", a, 0, z0, 0)]
+    steps = []
+    for k, e in enumerate(es):
+        role = "E" if k == 0 else f"E{k + 1}"
+        dx = 0 if len(es) == 1 else (k - 0.5) * 32
+        units.append(u(role, e, dx, z0 + 200, 180, True))
+        steps += [s("go", "move", role, delay_s=t, x=dx, z=round(z0 + d, 1)) for t, d in STRONG2_STEPS]
+    steps.append(s("go", "end", delay_s=STRONG2_END_S))
+    return {"kind": kind, "units": units, "steps": steps, "max_s": STRONG2_END_S + 10}
+
+
+def rally2_lane(kind):
+    """The rally clock: as rally_lane; kind 150: E keeps 150 m from the rout on; 'h20' / 'h28' / 'h36': E keeps 60 m
+    and halts that many seconds after the rout (the router then runs clear of 95 m)."""
+    if isinstance(kind, (int, float)):
+        out = rally_lane(kind)
+        out["kind"] = f"k{kind}"
+        return out
+    out = rally_lane(60)
+    out["kind"] = kind
+    out["steps"].insert(3, s("rout", "halt", "E", of="U", delay_s=float(kind[1:])))
+    return out
+
+
 def penitent_lane(kind):
     """T-E1: F (flagellants, tested; unbreakable) - 'win': attacks fearless skavenslaves (S, facing away) in the rear
     from 30 m; 'lose': fearless stormvermin (A) attack it in front and clanrats (B) in the rear from 40 m; 'even':
@@ -300,11 +340,16 @@ def battles(plan):
         return [[penitent_lane(k) for k in ("win", "lose", "even", "none")]]
     if plan == "aura":
         return [[aura_lane(k) for k in ("htl", "rally")]]
+    if plan == "strong2":
+        return [[strong2_lane(k) for k in ("slave:spear", "slave:swords", "slave:flag")],
+                [strong2_lane(k) for k in ("slave:gs", "slave:general", "slave:swords+spear")]]
+    if plan == "rally2":
+        return [[rally2_lane(k) for k in (150, "h20", "h28", 150, "h36")]]
     return [[rally_lane(k) for k in (0, 50, 90, 150)]]
 
 
 def lane_dx(plan):
-    return 450 if plan in ("secure", "aura") else 330 if plan == "strong" else 350
+    return 450 if plan in ("secure", "aura", "strong2") else 330 if plan == "strong" else 350
 
 
 def layout(specs, plan):
@@ -661,7 +706,7 @@ def measure(lane):
         out["last_fire_s"] = r1(t[np.nonzero(fire)[0][-1]]) if fire.any() else None
         out["win_last_s"] = r1(t[[i for i, x in enumerate(lab) if x == WIN][-1]]) if WIN in lab else None
         out["hp_lost_T"] = r1(1 - np.nanmin(col(lane, "T", "hp"))) if "hp" in lane["rows"]["T"][0] else None
-    elif plan == "rally":
+    elif plan in ("rally", "rally2"):
         pts = points(lane, "U")
         rout, rally = ev["rout"].get("U"), ev["rally"].get("U")
         out["rout_s"], out["rally_s"] = r1(rout), r1(rally)

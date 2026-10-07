@@ -19,7 +19,15 @@ Plans (each battle 4-5 lanes):
            facing them, both turned 90 deg, and clanrats turned 180 (1 battle);
   moving   skavenslaves running at the archers (145 -> 25 m), crossing at a walk at ~100 m (-40 -> +40 m across),
            running away (40 -> 170 m); flagellants running at Night Runners (150 -> 25 m) (1 battle);
-  rank     archers rank 0 / 9 on skavenslaves, slingers rank 0 / 9 on flagellants, all at 100 m (1 battle).
+  rank     archers rank 0 / 9 on skavenslaves, slingers rank 0 / 9 on flagellants, all at 100 m (1 battle);
+  thin     P1 holes or re-formed: archers at ~100 m on skavenslaves 180 (control, thinned by the fire), fresh 90,
+           fresh 45 (30 m wide: fewer ranks), and 180 re-formed by a 5 m move order once down to 60 (2 battles);
+  pistol   P2 militia's range: on skavenslaves at ~86 / 90 / 94 / 98 m centre, and a 2-rank target (80 m wide) at
+           ~94 m (1 battle);
+  moving2  P3: skavenslaves running at the archers (160 -> 40 m, twice), running away (50 -> 175 m, twice), a
+           standing twin at ~120 m: hits per volley at the same distance (1 battle);
+  lof      P4 the line of fire past friends: militia, Empire spearmen 40 m in front of them offset 0 / 15 / 22.5 m
+           sideways, skavenslaves ~70 m away; and no friend (1 battle): who fires, the friends' HP lost.
 
     python -m tools.nn.missile_probe plan [--plan dist]
     python -m tools.build missile-probe --mprobe-plan dist --mprobe-battle 1   # one battle's build
@@ -60,6 +68,7 @@ UNITS = {
     "cspear": ("wh2_main_skv_inf_clanrat_spearmen_0", 160, SKV),
     "clanrat": ("wh2_main_skv_inf_clanrats_1", 160, SKV),
     "flag": ("wh_dlc04_emp_inf_flagellants_0", 120, EMP),
+    "spear": ("wh_main_emp_inf_spearmen_0", 120, EMP),
     "general": ("wh_main_emp_cha_general_0", 1, EMP),
     "warlord": ("wh2_main_skv_cha_warlord_0", 1, SKV),
 }
@@ -70,7 +79,7 @@ LANE_DX = 240
 Z0 = -80               # the shooters' line
 SETTLE_MS = 4000
 TICK_MS = 500
-PLANS = ("dist", "arc", "range", "targets", "shield", "moving", "rank")
+PLANS = ("dist", "arc", "range", "targets", "shield", "moving", "rank", "thin", "pistol", "moving2", "lof")
 DIST = {"archers": (40, 80, 120, 128), "militia": (30, 50, 70, 88), "slingers": (40, 80, 110, 118),
         "nr": (40, 80, 120, 138)}
 TARGET_OF = {"archers": "slave", "militia": "slave", "slingers": "flag", "nr": "flag"}
@@ -117,6 +126,21 @@ def battles(plan):
                       move_fwd=100, move_lat=40, move_run=False),
                  lane("archers", "slave", 40, target_mode="move", t_rot=180, move_fwd=170, move_lat=0, move_run=True),
                  lane("nr", "flag", 150, target_mode="move", move_fwd=25, move_lat=0, move_run=True)]]
+    if plan == "thin":
+        base = [lane("archers", "slave", 90), lane("archers", "slave", 90, t_men=90),
+                lane("archers", "slave", 90, t_men=45), lane("archers", "slave", 90, reform_men=60)]
+        return [base, rotate(base, 2)]
+    if plan == "pistol":
+        return [[lane("militia", "slave", d) for d in (76, 80, 84, 88)] + [lane("militia", "slave", 84, t_width=80)]]
+    if plan == "moving2":
+        at = dict(target_mode="move", move_fwd=40, move_lat=0, move_run=True)
+        away = dict(target_mode="move", t_rot=180, move_fwd=175, move_lat=0, move_run=True)
+        return [[lane("archers", "slave", 150, **at), lane("archers", "slave", 40, **away), lane("archers", "slave", 110),
+                 lane("archers", "slave", 150, **at), lane("archers", "slave", 40, **away)]]
+    if plan == "lof":
+        fr = dict(friend="spear", friend_fwd=40, friend_width=30)
+        return [[lane("militia", "slave", 60, friend_lat=0, **fr), lane("militia", "slave", 60, friend_lat=15, **fr),
+                 lane("militia", "slave", 60, friend_lat=22.5, **fr), lane("militia", "slave", 60)]]
     return [[lane("archers", "slave", 100), lane("archers", "slave", 100, s_rank=9),
              lane("slingers", "flag", 100), lane("slingers", "flag", 100, s_rank=9)]]
 
@@ -146,6 +170,9 @@ def layout(specs):
         x = LANE_DX * (k - 1 - (n - 1) / 2)
         row = dict(spec, name=f"L{k}", x=round(x, 1), z=Z0, s_b=0.0, shooter=add(spec["shooter"], k),
                    target=add(spec["target"], k, spec.get("t_men")), s_key=s_key, t_key=t_key)
+        if spec.get("friend"):
+            row["friend"] = add(spec["friend"], k)
+            row["f_key"] = UNITS[spec["friend"]][0]
         if t_key in (UNITS["general"][0], UNITS["warlord"][0]):
             row["t_width"] = 5
         if spec.get("s_rank"):
@@ -221,14 +248,14 @@ def load_run(run_dir):
         if r["event"] == "probe_sample":
             for x in r["lanes"]:
                 if x["lane"] in lanes:
-                    lanes[x["lane"]]["samples"].append((x["t"] / 1000, x["s"], x["tg"], x.get("d")))
+                    lanes[x["lane"]]["samples"].append((x["t"] / 1000, x["s"], x["tg"], x.get("d"), x.get("f")))
         elif r["event"] == "probe_lane_end":
             lanes[r["lane"]]["end"] = r
     return [x for x in lanes.values() if x["samples"]]
 
 
 def series(samples, who, key):
-    i = {"s": 1, "tg": 2}[who]
+    i = {"s": 1, "tg": 2, "f": 4}[who]
     return np.array([np.nan if (s[i] or {}).get(key) is None else float(s[i][key]) for s in samples])
 
 
@@ -367,6 +394,10 @@ def cell(spec):
             name += f" to({spec['move_fwd']},{spec['move_lat']}){' run' if spec.get('move_run') else ''}"
     if spec.get("s_rank"):
         name += f" rank{spec['s_rank']}"
+    if spec.get("reform_men"):
+        name += f" reform{spec['reform_men']}"
+    if spec.get("friend"):
+        name += f" friend({spec.get('friend_fwd')},{spec.get('friend_lat')})"
     if spec["mode"] != "fire":
         name += f" {spec['mode']}"
     return name
@@ -411,14 +442,19 @@ def sim_lanes(lanes, params=None, device="cpu", copies=4, jitter_m=0.5, seed=0):
             lord = key in (UNITS["general"][0], UNITS["warlord"][0])
             sides[fac]["units"].append({"key": key, "x": row["x"], "z": row["z"], "b": row["b"], "men": row["men"],
                                         "width": None if lord else width, "general": lord, "name": role})
+        if spec.get("friend") and len(s0) > 4 and s0[4]:
+            r = s0[4]
+            sides[1]["units"].append({"key": spec["f_key"], "x": r["x"], "z": r["z"], "b": r["b"], "men": r["men"],
+                                      "width": spec.get("friend_width", 30), "general": False, "name": "f"})
         army = {"attacker": 1, "sides": sides}
         for _ in range(copies):
             armies.append(army)
             meta.append(ln)
-    per_side = 1
+    per_side = max(len(a["sides"][k]["units"]) for a in armies for k in (1, 2))
     st = sim_scenario.build(armies, params, device=device, per_side=per_side)
     B, N = st.B, st.N
-    slot = {r: torch.tensor([sim_scenario.slots(a, per_side)[r] for a in armies], device=device) for r in ("s", "tg")}
+    slot = {r: torch.tensor([sim_scenario.slots(a, per_side).get(r, -1) for a in armies], device=device)
+            for r in ("s", "tg", "f")}
     gen = torch.Generator().manual_seed(seed)
     jit = ((torch.rand((B, 2), generator=gen) * 2 - 1) * jitter_m).to(device)
     b_idx = torch.arange(B, device=device)
@@ -477,7 +513,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=4, jitter_m=0.5, seed=0):
     battle.run(st, policy, params, until_s=until, record=record, compile=False)
     out = []
     for b, ln in enumerate(meta):
-        S, T = int(slot["s"][b]), int(slot["tg"][b])
+        S, T, F = int(slot["s"][b]), int(slot["tg"][b]), int(slot["f"][b])
         end = ln["samples"][-1][0]
         samples = []
         for t, r in zip(rec["t"], rec["rows"]):
@@ -486,7 +522,9 @@ def sim_lanes(lanes, params=None, device="cpu", copies=4, jitter_m=0.5, seed=0):
             samples.append((t, {"x": float(r["x"][b, S]), "z": float(r["z"][b, S]), "b": float(r["b"][b, S]),
                                 "men": float(r["men"][b, S]), "ammo": float(r["a"][b, S])},
                             {"x": float(r["x"][b, T]), "z": float(r["z"][b, T]), "b": float(r["b"][b, T]),
-                             "men": float(r["men"][b, T]), "hp": float(r["hp_abs"][b, T])}, None))
+                             "men": float(r["men"][b, T]), "hp": float(r["hp_abs"][b, T])}, None,
+                            None if F < 0 else {"x": float(r["x"][b, F]), "z": float(r["z"][b, F]),
+                                                "men": float(r["men"][b, F]), "hp": float(r["hp_abs"][b, F])}))
         out.append({"run": "sim", "spec": ln["spec"], "samples": samples, "end": None})
     return out
 

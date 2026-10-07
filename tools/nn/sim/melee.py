@@ -246,7 +246,14 @@ def strikes(u, pw, contact, params, charge_now, first=False):
     # not step into the gaps - the probe's move lanes struck 0.70 of the same units attacking, men within 2.5 m 0.73).
     held_kind = u["order_kind"] == O.HOLD
     if cc.get("hold_move"):
-        held_kind = held_kind | (u["order_kind"] == O.MOVE)
+        move = u["order_kind"] == O.MOVE
+        if cc.get("move_far_full") and cc.get("leave_m"):
+            # a MOVE to a far point through the enemy (contact.leave_away_only: not a leave) keeps pushing and strikes
+            # in full (contact.move_far_full; build/probes7 P3: spearmen walking to a point 60 m beyond their attacker
+            # struck 29 HP/s, answering with an attack order 21); a point within leave_m (R3's 5 m) - held
+            far = torch.sqrt((u["ox"] - u["x"]) ** 2 + (u["oz"] - u["z"]) ** 2) >= float(cc["leave_m"])
+            move = move & ~far
+        held_kind = held_kind | move
     held = held_kind & (u["range"] <= 0) & (u["men0"] > 1)
     # A braced unit's blows while it reflects a charge are not cut (contact.hold_reflect_full; R2: braced spearmen
     # struck 52 HP/s in 1-5 s after a charge = the full rule x2, held swordsmen 12 HP/s = hold_rate).

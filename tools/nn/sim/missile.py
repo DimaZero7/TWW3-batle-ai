@@ -80,16 +80,49 @@ def distance_factor(dist, table):
     return v0 + w * (v1 - v0)
 
 
-def choose_target(u, pw, can_shoot, order_target, order_attack, exclude=None, prev=None):
+def rank_share(u, pw):
+    """[B, i, j] share of direct-fire shooter i's men that fire at target j (missile.per_man_range_direct; the probe
+    build/probes7 P2, militia with pistols, range 90, 7 ranks 1.7 m apart, on skavenslaves 10 ranks deep):
+    - the whole unit fires (the IsFiringMissiles flag on) while j's centre is within range of i's FRONT RANK (i's centre
+      + (ranks - 1) / 2 x v_i ahead): full volleys at 85 / 88 / 90 m centre to centre and 0.94-0.99 at 94.5 m (front
+      rank 89.4 m from the target centre), the flag off at 97.6 m (92.5 m);
+    - beyond that only the ranks within range of j's nearest men fire (the flag off): rank r (0 the front) stands
+      g0 + r v_i from them, g0 = the edge gap + v_i / 2 + v_j / 2 (the men stand half a spacing inside the edges);
+      at 97.6 m 4 of 7 ranks = 0.57, the game a steady stream at 0.54 of the full rate for 200 s.
+    A lone shooter or target: no ranks (spacing 0)."""
+    v = torch.where(u["sp_v"] > 0, u["sp_v"], torch.full_like(u["sp_v"], 2.0))
+    lone = u["men0"] <= 1
+    vi = torch.where(lone, torch.zeros_like(v), v)
+    ranks = torch.where(lone, torch.ones_like(v), (pw["depth"] / v).round().clamp(min=1))
+    front_off = ((ranks - 1) / 2 * vi)[:, :, None]
+    rng = u["range"][:, :, None]
+    whole = pw["dist"] - front_off <= rng
+    g0 = pw["gap"] + vi[:, :, None] / 2 + vi[:, None, :] / 2
+    n = torch.floor((rng - g0) / vi.clamp(min=1e-3)[:, :, None]) + 1
+    n = torch.where(lone[:, :, None], (g0 <= rng).float(), n)
+    part = (n.clamp(min=0) / ranks[:, :, None]).clamp(0, 1)
+    return torch.where(whole, torch.ones_like(part), part)
+
+
+def in_range(u, pw, per_man=False):
+    """[B, i, j] j within i's range: centre to centre; with per_man a direct-fire shooter's men each to the target's
+    nearest men (rank_share > 0)."""
+    centre = pw["dist"] <= u["range"][:, :, None]
+    if not per_man:
+        return centre
+    return torch.where(u["direct"][:, :, None], rank_share(u, pw) > 0, centre)
+
+
+def choose_target(u, pw, can_shoot, order_target, order_attack, exclude=None, prev=None, per_man=False):
     """[B, N] slot each shooter aims at (-1 none). exclude [B, N, N]: targets i may not take. prev [B, N]: last
-    step's target, kept while it is in range (centre to centre), standing and not excluded (the game keeps its
-    target; without it the nearest-each-step flips between two close enemies)."""
+    step's target, kept while it is in range (centre to centre; per_man: in_range), standing and not excluded (the
+    game keeps its target; without it the nearest-each-step flips between two close enemies)."""
     alive = (u["men"] > 0) & ~u["gone"]
-    in_range = pw["enemy"] & alive[:, None, :] & (pw["dist"] <= u["range"][:, :, None])
+    rng = pw["enemy"] & alive[:, None, :] & in_range(u, pw, per_man)
     if exclude is not None:
-        in_range = in_range & ~exclude
-    standing = in_range & ~u["r"][:, None, :]
-    score = torch.where(standing, pw["dist"], torch.where(in_range, pw["dist"] + 1e5, torch.full_like(pw["dist"], FAR)))
+        rng = rng & ~exclude
+    standing = rng & ~u["r"][:, None, :]
+    score = torch.where(standing, pw["dist"], torch.where(rng, pw["dist"] + 1e5, torch.full_like(pw["dist"], FAR)))
     nearest = score.argmin(dim=2)
     has = score.min(dim=2).values < FAR
     if prev is not None:
@@ -99,7 +132,7 @@ def choose_target(u, pw, can_shoot, order_target, order_attack, exclude=None, pr
         has = has | keep
     ordered = order_attack & (order_target >= 0)
     ot = order_target.clamp(min=0)
-    ordered_ok = ordered & in_range.gather(2, ot[:, :, None]).squeeze(2)
+    ordered_ok = ordered & rng.gather(2, ot[:, :, None]).squeeze(2)
     target = torch.where(ordered_ok, ot, torch.where(has, nearest, torch.full_like(nearest, -1)))
     return torch.where(can_shoot, target, torch.full_like(target, -1))
 
@@ -243,12 +276,17 @@ def clear_shot(u, pw, target, can_shoot, order_target, order_attack, params):
     blocked = blocked_share(u, pw, target, params)
     bad = direct & (target >= 0) & (blocked >= ratio)
     exclude = torch.zeros_like(pw["enemy"]).scatter_(2, target.clamp(min=0)[:, :, None], True) & bad[:, :, None]
-    again = choose_target(u, pw, can_shoot & bad, order_target, order_attack, exclude=exclude)
+    per_man = bool(params.sim["missile"].get("per_man_range_direct"))
+    again = choose_target(u, pw, can_shoot & bad, order_target, order_attack, exclude=exclude, per_man=per_man)
     target = torch.where(bad, again, target)
     blocked = torch.where(bad, blocked_share(u, pw, target, params), blocked)
     held = direct & (target >= 0) & (blocked >= ratio)
     target = torch.where(held, torch.full_like(target, -1), target)
     clear = torch.where(direct, 1 - blocked, torch.ones_like(blocked))
+    if per_man:
+        # only the ranks within range of the target's nearest men shoot (rank_share)
+        share = rank_share(u, pw).gather(2, target.clamp(min=0)[:, :, None]).squeeze(2)
+        clear = torch.where(direct, clear * share, clear)
     return target, torch.where(target >= 0, clear, torch.zeros_like(clear))
 
 

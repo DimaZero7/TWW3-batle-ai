@@ -13,7 +13,7 @@ def test_plans_have_few_battles_and_lanes_on_both_sides():
     for plan in cp.PLANS:
         for i in range(1, len(cp.battles(plan)) + 1):
             config, model_s, arena = cp.run_config(plan, i)
-            assert 2 <= len(config["lanes"]) <= 5 and model_s < 300
+            assert 2 <= len(config["lanes"]) <= 5 and model_s < 400
             names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}
             for lane in config["lanes"]:
                 assert lane["attacker"] in names and lane["target"] in names

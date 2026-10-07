@@ -321,13 +321,21 @@ rule's 0.14–0.20 - the slope in the hit chance is right. Skavenslaves lose mor
 0.89 / 0.51, 1.00 / 0.58, 0.58 / 0.42. Kills are now counted by the wounded pool (above, "Damage and armour");
 it covers about half of the skavenslaves' gap, the rest is the HP rate (swordsmen on skavenslaves 39 against
 46 HP/s, greatswords 41 against 63) — OPEN. Flagellants: both sides strike ×1.4–2 the rule (flagellants →
-clanrats 53 against 39 HP/s, back 51 against 31) — OPEN, probe P2 (flagellants, swordsmen, militia against
-fearless clanrats, soldiers' places).
+clanrats 53 against 39 HP/s, back 51 against 31). Probe P2 (`build/probes7`, plan `syg2`, 2 lanes each): flagellants
+→ clanrats, the target loses 784 / 806 HP at 0–5 / 5–15 s, the simulator 485 / 464 (×1.6–1.7), from 15 s 51 against
+39 HP/s; the flagellants in return 264 / 250, from 15 s 51 against 31; clanrats → held flagellants: the flagellants
+lose 520 / 534 against 296 / 329 (×1.6–1.75), the clanrats 286 / 298 against 205 / 200; for comparison swordsmen →
+clanrats 493 / 530 against 380 / 389 (×1.3). The gap is largest in the first 15 s and where the hit chance is high
+(flagellants have almost no defence) — OPEN, together with Stand Your Ground (below).
 
-**Stand Your Ground.** Spearmen lose 107 HP in the first 15 s with the ability against 440 without (x0.24,
-one battle each); a hit chance of 25 % → 8 % gives x0.32, the rule p / (p × interval + 0.5) x0.62, the
-simulator x0.70. OPEN: candidates - the 0.5 s cost of a miss (fitted) is small at a low hit chance, the spread
-of one battle; probe P1 (2 battles of 4 lanes, the ability in two lanes of four).
+**Stand Your Ground** (+24 defence, DB). Spearmen lose 107 HP in the first 15 s with the ability against 440
+without (x0.24, one battle). Probe P1 (`syg2`, 2 battles; one General a battle, so one ability lane a battle, cast when
+the centres are 25 m + the half depths apart): 0–5 s 34 against 129 HP (x0.26), 5–15 s 136 against 264 (x0.52),
+0–15 s x0.43 (lanes 0.33–0.56); after it ends (15–30 s) 336 against 300. The simulator x0.54 / x0.71, over 0–15 s
+x0.63. A hit chance of 25 % → 8 % (with the charge) and 19 % → 8 % give x0.32 / x0.42 — the game sits at those, the
+simulator at the law p / (p × interval + miss cost). With the flagellants (P2, a high hit chance: the game above the
+simulator) this points to a blow rate steeper in the hit chance than the simulator's law — OPEN (the law comes from
+121 battles; too early to change it on 4 lanes).
 
 **Damage a blow (plan `damage`, 8 trials).** A greatswords' blow on the Warlord - median 41 HP (quartiles
 39–45; 71 % in 36–43, none in 26–31): **the +14 bonus against infantry counts against a foot lord** (as in the
@@ -366,7 +374,19 @@ unit is out of contact ~4 s after the order (its own melee flag goes off only af
   same (0.70 of attacking), a lord without an order at the rule. No rule for a holding formation's rate found
   (`contact.hold_rate` 0.5 - FITTED).
 - **The pair of CA's planner's spearmen** (its "held" spearmen are under a far move order): at 60–120 s the
-  exchange in the game is twice the simulator's on both sides — cause not found, probe P3.
+  exchange in the game is twice the simulator's on both sides. Probe P3 (`pair`, 240 s): spearmen under a move to a
+  point 60 m through the clanrat spearmen attacking them fight — they deal 213 / 317 / 521 HP at 0–5 / 5–15 / 15–30 s
+  and 29 HP/s after (answering with an attack order 361 / 319 / 377 and 21 HP/s, held 221 / 161 / 166 and 13); the
+  simulator had them leaving (0 / 0 / 98). Now only a point away from the enemy is a leave (`contact.leave_away_only`):
+  the simulator 187 / 112 / 169 and 11 HP/s. OPEN: in the game such a unit strikes like an attacker or more (1 lane),
+  in the simulator at the move share 0.5.
+- **Leaving melee unchased is slower than in the simulator.** Probe `fatleave` (swordsmen, spearmen, greatswords
+  withdraw from held clanrats 10 s after contact): the about-face (150°) takes 1.5 s — as in the simulator; but the
+  centre gets 1.5 / 4.6 / 9.3 m away in 2 / 4 / 6 s (simulator 3.7 / 9.7 / 15.7), the leaver loses health until
+  3.0–5.5 s (simulator 1.5–2.5), the enemy's melee flag goes off at 5.5–6 s (simulator 1.5–2.5), and the leaver still
+  strikes for 1–1.5 s after the order (the enemy loses 23–88 HP; simulator 0). A free about-face to a run (no enemy)
+  covers 2.6 m in 2 s in the game, so in contact a unit gets out about half as fast; no rule found — OPEN (a suspect
+  for the network battles' drop in correspondence).
 - **A lord against one infantry unit hits less often in the game than against a crowd.** At 2.07 men hit
   (measured on 1–4 units around him) a lord in a pair takes 13–31 % more off infantry than in the game.
 

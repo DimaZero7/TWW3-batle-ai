@@ -7,6 +7,10 @@
 -- step_s seconds until the shooter's first shot (the range test); 'move' at the go is ordered to a point
 -- (move_fwd, move_lat: metres ahead of and across from the shooter, in the shooter's frame), at a run with
 -- move_run (a crossing, running at the shooter, running away).
+-- lane.reform_men (optional): once the target is down to that many men it is ordered to a point 5 m to its right
+-- with its starting width (goto_location_angle_width: the thinned unit re-forms), then stands.
+-- lane.friend (optional): a unit of the shooter's side placed friend_fwd m ahead of and friend_lat m right of the
+-- shooter, facing as it does, held (the line of fire past friends); its row is sampled as 'f'.
 -- Every tick_ms 'probe_sample': per running lane the shooter's ammo, men, firing flag, place, bearing,
 -- moving; the target's men, health (CCO HealthValue), unary hit points, place, bearing, moving. A lane ends
 -- when the shooter is out of ammo or the target dead (and settle_s more for the projectiles in the air), when
@@ -149,7 +153,16 @@ function M.main(bm, config, globals)
                     local L = M.layout(lane, lane.d)
                     place(lane.t, L.tx, L.tz, L.tb, lane.t_width)
                 end
-                rows[#rows + 1] = {lane = lane.name, t = now - lane.t0, d = lane.d, s = s, tg = t}
+                if lane.reform_men and not lane.reformed and t.men and t.men <= lane.reform_men and t.x then
+                    lane.reformed = now
+                    local tb = M.layout(lane, lane.d).tb      -- its placed facing (the place() convention)
+                    local rx, rz = M.frame(t.x, t.z, tb, 0, 5)
+                    orders.move_formation(lane.t.uc, vec(rx, rz), tb, lane.t_width, false)
+                    emit('probe_reform', {lane = lane.name, t = now - lane.t0, men = t.men})
+                end
+                local row = {lane = lane.name, t = now - lane.t0, d = lane.d, s = s, tg = t}
+                if lane.f then row.f = unit_row(lane.f.unit) end
+                rows[#rows + 1] = row
                 local over = (s.ammo == 0) or (t.men == 0)
                 if over and not lane.over_ms then lane.over_ms = now end
                 if lane.over_ms and now - lane.over_ms >= lane.settle_s * 1000 then
@@ -202,6 +215,10 @@ function M.main(bm, config, globals)
             local L = M.layout(lane, lane.d)
             place(lane.s, L.sx, L.sz, L.sb, lane.s_width)
             place(lane.t, L.tx, L.tz, L.tb, lane.t_width)
+            if lane.f then
+                local fx, fz = M.frame(lane.x, lane.z, L.sb, lane.friend_fwd or 0, lane.friend_lat or 0)
+                place(lane.f, fx, fz, L.sb, lane.friend_width or 30)
+            end
         end
         emit('start', {speed = config.speed, lanes = config.lanes})
         state.cancel_deadline = battle.deadline(bm, config.deadline_s * 1000, guarded(function()
@@ -241,6 +258,10 @@ function M.main(bm, config, globals)
             lane.s, lane.t = state.units[l.shooter], state.units[l.target]
             assert(lane.s, 'scenario unit missing: ' .. tostring(l.shooter))
             assert(lane.t, 'scenario unit missing: ' .. tostring(l.target))
+            if l.friend then
+                lane.f = state.units[l.friend]
+                assert(lane.f, 'scenario unit missing: ' .. tostring(l.friend))
+            end
             if l.target_mode == 'step' then lane.d = l.start_d end
             state.lanes[i] = lane
         end

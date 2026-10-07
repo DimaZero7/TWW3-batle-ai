@@ -92,6 +92,16 @@ def step(st, orders, params=None, dt=None):
     # still strike it (measured in the game, config/nn/sim.json contact.why).
     leave_m = float(cal["contact"].get("leave_m", 0.0))
     far_point = torch.sqrt((u["ox"] - u["x"]) ** 2 + (u["oz"] - u["z"]) ** 2) >= leave_m
+    if cal["contact"].get("leave_away_only"):
+        # A move order through the enemy it touches is not a leave (contact.leave_away_only; the probe build/probes7
+        # P3: spearmen ordered to walk to a point 60 m beyond the clanrat spearmen attacking them, as CA's planner
+        # does, fought on - 213 / 317 / 521 HP dealt at 0-5 / 5-15 / 15-30 s, the simulator's leaver none): it leaves
+        # only when its point lies away from every enemy it touches (the way to the point at more than 90 deg from
+        # the way to that enemy's centre).
+        mdx, mdz = u["ox"] - u["x"], u["oz"] - u["z"]
+        dx, dz = u["x"][:, None, :] - u["x"][:, :, None], u["z"][:, None, :] - u["z"][:, :, None]
+        toward = (mdx[:, :, None] * dx + mdz[:, :, None] * dz) > 0
+        far_point = far_point & ~(touch & toward).any(2)
     leaving = (kind == O.WITHDRAW) | ((kind == O.MOVE) & far_point & (leave_m > 0))
     striker = standing & ~leaving
     strike = touch & striker[:, :, None]
@@ -225,7 +235,8 @@ def step(st, orders, params=None, dt=None):
     # else takes the nearest within stand_fire_arc_deg, else turns to the nearest beyond it.
     ms_cal = cal["missile"]
     prev = u["aim_tgt"] if ms_cal.get("sticky_target") else None
-    aim_at = missile.choose_target(u, pw, ready, tgt, kind == O.ATTACK, exclude=behind, prev=prev)
+    per_man = bool(ms_cal.get("per_man_range_direct"))
+    aim_at = missile.choose_target(u, pw, ready, tgt, kind == O.ATTACK, exclude=behind, prev=prev, per_man=per_man)
     s_arc = float(ms_cal.get("stand_fire_arc_deg", 180.0))
     turning = torch.zeros_like(ready)
     done_deg = ms_cal.get("turn_done_deg")
@@ -233,7 +244,7 @@ def step(st, orders, params=None, dt=None):
         on_stand = ready & (speed < 0.2)
         out = on_stand[:, :, None] & (pw["rel_i"].abs() > s_arc * geometry.DEG)
         ahead = missile.choose_target(u, pw, ready, tgt, kind == O.ATTACK,
-                                      exclude=out if behind is None else (out | behind), prev=prev)
+                                      exclude=out if behind is None else (out | behind), prev=prev, per_man=per_man)
         ordered = (kind == O.ATTACK) & (aim_at == tgt) & (aim_at >= 0)
         aim_at = torch.where(ordered | (ahead < 0), aim_at, ahead)
         beyond = (aim_at >= 0) & out.gather(2, aim_at.clamp(min=0)[:, :, None]).squeeze(2)
