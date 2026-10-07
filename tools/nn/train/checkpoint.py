@@ -35,6 +35,7 @@ from tools.nn.sim.orders import KINDS
 FORMAT = 2
 DIR = project.BUILD / "nn-train"
 RANDOM = DIR / "random.pt"
+RANDOM_V2 = DIR / "random_v2.pt"     # the untrained v2 network (ModelConfig.sectors > 0): v2 starts from it
 LATEST = DIR / "latest.pt"
 POOL = DIR / "pool"
 
@@ -90,6 +91,15 @@ def load_critic(path, device="cpu"):
 
 def meta(path):
     return read(path).get("meta", {})
+
+
+def random_for(cfg):
+    """The untrained network of cfg's kind: random_v2.pt for v2 (written if missing), else random.pt."""
+    if not cfg.sectors:
+        return RANDOM
+    if not RANDOM_V2.exists():
+        write_random(RANDOM_V2, "v2")
+    return RANDOM_V2
 
 
 def write_random(path=RANDOM, preset="small", seed=0):

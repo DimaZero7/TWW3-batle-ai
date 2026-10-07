@@ -5,7 +5,9 @@
     python -m tools.nn.companion --game /game [--checkpoint build/nn-train/random.pt] [--greedy]
 
 One line per decision: move number, battle time, how long the network took, the orders.
-A new battle (a new batch in the state) starts the network's memory afresh.
+A new battle (a new batch in the state) starts the network's memory afresh (and a v2 network's commitment: its
+units held by their commitment keep, an event in the game's state - melee, a threat, the target gone, a rout or rally,
+the lord's death - frees them; tools/nn/model/commit.py).
 """
 import argparse
 import json
@@ -33,20 +35,22 @@ class Brain:
         self.battle, self.memory, self.h = None, None, None
         self.given, self.points = {}, {}     # the orders in force, the order points (exchange.order_points)
         self.moved = None                    # the last positions and time (exchange.running_by_speed)
+        self.commit = {}                     # v2: the commitment's state (tools/nn/model/commit.py), per battle
 
     def decide(self, doc):
         """-> (orders list, think ms, abilities to use [{unit, key}]) for one state document."""
         t0 = time.perf_counter()
         if self.battle is None or self.battle.batch != doc["batch"]:
             self.battle, self.memory, self.h = exchange.battle(doc), None, None
-            self.given, self.points, self.moved = {}, {}, None
+            self.given, self.points, self.moved, self.commit = {}, {}, None, {}
         b = self.battle
         state = exchange.arrays(doc, b.names, b.slots)
         self.moved = exchange.running_by_speed(state, b.walk, self.moved)
         exchange.engaged_targets(state, b.side)
         self.points = exchange.order_points(state, b.names, b.side, self.given, self.points)
         obs, self.memory = ob.observe(state, b.setup, SIDE, self.memory)
-        orders, self.h, _, _ = decide.act(self.actor, obs, b.setup, self.h, self.greedy, self.temperature)
+        orders, self.h, _, _ = decide.act(self.actor, obs, b.setup, self.h, self.greedy, self.temperature,
+                                          commit_state=self.commit, t=state["t"])
         cols = [getattr(orders, k)[0].cpu().numpy() for k in ("kind", "x", "z", "target", "run")]
         out = exchange.orders_list(b.names, b.side, *cols)
         ctrl = np.asarray(obs.ctrl[0])

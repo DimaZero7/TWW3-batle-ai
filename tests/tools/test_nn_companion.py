@@ -329,6 +329,17 @@ class TestCompanion:
         brain.decide(dict(state_doc(), batch="b-2"))    # a new battle: memory starts afresh
         assert brain.battle.batch == "b-2"
 
+    def test_a_v2_network_keeps_its_commitment_between_the_games_states(self):
+        from tools.nn.companion import loop, policy
+        brain = loop.Brain(policy.fresh(seed=1, preset="v2"))
+        orders, _, _ = brain.decide(state_doc())
+        held = {o["unit"] for o in orders if o["kind"] != "keep" and not o.get("out")}
+        assert held and brain.commit["until"].max() >= 2.0
+        again, _, _ = brain.decide(state_doc(move=2))          # the same moment: nothing happened, all held
+        assert all(o["kind"] == "keep" for o in again if o["unit"] in held)
+        brain.decide(dict(state_doc(), batch="b-2"))            # a new battle: the commitment starts afresh
+        assert brain.battle.batch == "b-2" and len(brain.commit) and brain.commit["until"].max() <= 16.0
+
     def test_the_loop_answers_each_new_state_once(self, tmp_path):
         from tools.nn.companion import loop, policy
         exchange.write_atomic(tmp_path / exchange.STATE, json.dumps(state_doc(move=1)))   # an earlier run's

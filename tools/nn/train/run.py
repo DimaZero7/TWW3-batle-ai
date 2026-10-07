@@ -58,7 +58,7 @@ def networks(preset, device, start=None, critic_from=None):
     critic_from when given (e.g. the run's latest.pt beside a test5 m<minute>.pt saved without it); a
     checkpoint without one starts a fresh critic (then give --critic-warmup updates)."""
     if start is None:
-        start = checkpoint.RANDOM
+        start = checkpoint.RANDOM_V2 if model_config.PRESETS[preset].sectors else checkpoint.RANDOM
         if not compatible(start, preset):
             checkpoint.write_random(start, preset)
     data = checkpoint.read(start)
@@ -162,6 +162,18 @@ def eval_drills(args):
     return drills.set_extra(names)
 
 
+# --reward v2 (the base v2's reward, 08.10.2026): the battle's end (win / loss), the gold trade and the order change
+# cost (keep and a repeated order free); no lord term, no idle cost, no retarget cost
+REWARD_PRESETS = {"v2": {"order_cost": 0.006, "lord": 0.0, "idle": 0.0, "retarget": 0.0}}
+
+
+def reward_preset(args):
+    """--reward NAME: its values replace the options' (in place)."""
+    for k, v in REWARD_PRESETS.get(args.reward or "", {}).items():
+        setattr(args, k, v)
+    return args
+
+
 def train(args, every=None, teacher=None, normal=None):
     """every: (minutes, hook) - hook(actor, critic, minute, update) after every `minutes` of training
     (its time not counted as training: e.g. a full evaluation). teacher: with --drill-teach auto, the
@@ -175,6 +187,7 @@ def train(args, every=None, teacher=None, normal=None):
     drills.BROAD = args.drill_broad              # the drills' broad frames: their share of every drill's battles
     drills.EMBED = args.drill_embed              # the embedded frames: their share (of the drills that have one)
     eval_drills(args)                            # the run's own drills beside READY (the hook's evaluations)
+    reward_preset(args)
     out = checkpoint.DIR / "runs" / args.name
     out.mkdir(parents=True, exist_ok=True)
     if args.preset is None:          # the record follows the network: --init's preset (e.g. "wide"), else small
@@ -202,7 +215,8 @@ def train(args, every=None, teacher=None, normal=None):
                         epochs=args.epochs, minibatch=args.minibatch,
                         entropy=args.entropy, anchor=args.anchor, adv_norm=args.adv_norm)
     width = actor.cfg.d / model_config.SMALL.d
-    opt = optimizer(actor, critic, cfg.lr, width)
+    # (v2 is trained from scratch, not widened from a small network: no lr / width on the stream's readers)
+    opt = optimizer(actor, critic, cfg.lr, 1.0 if actor.cfg.sectors else width)
     weights = reward.Weights(order_change=args.order_cost, idle=args.idle, lord=args.lord, retarget=args.retarget,
                              idle_tau_s=args.idle_tau, idle_cap=args.idle_cap, idle_pause_s=args.idle_pause,
                              idle_step=args.idle_step, idle_rate=args.idle_rate, idle_window_s=args.idle_window,
@@ -216,7 +230,7 @@ def train(args, every=None, teacher=None, normal=None):
     entropy_end = args.entropy if args.entropy_end is None else args.entropy_end
     anchor_end = args.anchor if args.anchor_end is None else args.anchor_end
     pool = league.Pool(out / "pool", size=args.pool)
-    pool.add(checkpoint.RANDOM)
+    pool.add(checkpoint.random_for(actor.cfg))
     if args.init:
         pool.add(args.init)
     for extra in filter(None, (args.pool_extra or "").split(",")):
@@ -293,7 +307,9 @@ def train(args, every=None, teacher=None, normal=None):
                           attack_only=defend_only)
     if normal_s:
         env.set_teach_shares(normal_s)
-    step_cfg = sized(cfg, env.N, width=width)
+    # v2: one part more (its 256 sector tokens a decision; 2 parts peaked at 11.9 GB of the 16 GB card, wide 11.7, and
+    # a little more pushed the card into its shared memory: an update 10 s -> 157 s)
+    step_cfg = sized(cfg, env.N, width=width + (1.0 if actor.cfg.sectors else 0.0))
     log = (out / "log.jsonl").open("w", encoding="utf-8", newline="\n")
     print(f"{args.name}: battles {env.B} (learner rows {env.R}), slots {env.N}, up to {args.max_units} units a side, "
           f"steps per update {args.steps} ({args.steps * env.decision_s:g} s of battle), "
@@ -563,6 +579,9 @@ def parser():
     ap.add_argument("--entropy-max", type=float, default=0.1, help="the floor's weight at most this")
     ap.add_argument("--entropy-rate", type=float, default=1.25, help="the floor's factor per update")
     ap.add_argument("--order-cost", type=float, default=reward.Weights.order_change)
+    ap.add_argument("--reward", choices=sorted(REWARD_PRESETS),
+                    help="a reward preset: its values replace --order-cost, --lord, --idle, --retarget (v2: win / loss "
+                         "+ gold trade + order change 0.006; lord, idle and retarget 0)")
     ap.add_argument("--grid", type=int, default=0,
                     help="> 0: the move point as a cell of a grid x grid map grid (tools/nn/model/heads.py); a checkpoint "
                          "of the bin head keeps every other weight, the grid head starts fresh")

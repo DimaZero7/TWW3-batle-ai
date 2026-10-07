@@ -46,6 +46,13 @@ class Action:
     target: torch.Tensor   # [B, N] long: unit index, -1 none
     run: torch.Tensor      # [B, N] bool
     ability: torch.Tensor = None   # [B, N] long: ability slot to use, -1 none; None: not chosen
+    commit: torch.Tensor = None    # [B, N] long: the commitment's duration (commit.DURATIONS index; v2 only, chain.py)
+
+    FIELDS = ("kind", "point", "target", "run", "ability", "commit")
+
+    def parts(self):
+        """The fields that are set (not None), in order."""
+        return tuple(f for f in self.FIELDS if getattr(self, f) is not None)
 
 
 class Heads(nn.Module):
@@ -151,8 +158,11 @@ def log_prob(logits, a, ctrl):
 
     kind always (keep has nothing else); point for move and withdraw; target for attack; run for
     move and attack; the ability choice when the action has one (Action.ability not None). Zero for
-    units that take no orders (ctrl false).
+    units that take no orders (ctrl false). The chained heads' logits (v2: a "sector" part) go to chain.log_prob.
     """
+    if "sector" in logits:
+        from tools.nn.model import chain
+        return chain.log_prob(logits, a, ctrl)
     kind, point, target, run = _dists(logits)
     move, attack = a.kind == MOVE, a.kind == ATTACK
     lp = kind.log_prob(a.kind)
@@ -186,10 +196,20 @@ def cell_centres(cfg, device=None):
     return torch.stack([f.reshape(-1), l.reshape(-1)], -1)
 
 
+def _cell_order(cfg, point):
+    """A v2 grid cell -> its row in sectors.cells(cfg).reshape(-1, 2) (sector-major)."""
+    from tools.nn.model import sectors
+    sector, fine = sectors.split(cfg, point)
+    return sector * cfg.fine * cfg.fine + fine
+
+
 def point_world(cfg, a, obs_t, frame, bounds):
     """World (x, z) [B, N, 2] of the move point, inside the map: the unit's position + the bin's offset, or
-    (cfg.grid) the cell's centre."""
-    if cfg.grid:
+    (cfg.grid; v2 cfg.sectors) the cell's centre."""
+    if cfg.sectors:        # v2: the fine cell of the (sectors x fine)^2 grid (sectors.py, chain.py)
+        from tools.nn.model import sectors
+        pos = sectors.cells(cfg, a.point.device).reshape(-1, 2).to(obs_t["pos"].dtype)[_cell_order(cfg, a.point)]
+    elif cfg.grid:
         pos = cell_centres(cfg, a.point.device).to(obs_t["pos"].dtype)[a.point]   # [B, N, 2]
     else:
         pos = obs_t["pos"] * ob.POS + point_offsets(cfg, a.point.device)[a.point]

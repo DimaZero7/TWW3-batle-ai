@@ -129,12 +129,24 @@ def distance(actor, other, batch, minibatch):
     idx = torch.arange(min(R, max(1, minibatch // T)), device=batch["reward"].device)
     with torch.no_grad():
         obs = full_obs({k: v[:, idx] for k, v in batch["obs"].items()}, batch.get("abil_static"))
-        a, _ = actor.sequence(obs, batch["h0"][idx], batch["reset"][:, idx])
-        b, _ = other.sequence(obs, batch["h0"][idx], batch["reset"][:, idx])
+        act = chunk_action(batch["action"], idx)
+        a, _ = actor.sequence(obs, batch["h0"][idx], batch["reset"][:, idx], act)
+        b, _ = other.sequence(obs, batch["h0"][idx], batch["reset"][:, idx], act)
         a = {k: v.reshape(-1, *v.shape[2:]) for k, v in a.items()}
         b = {k: v.reshape(-1, *v.shape[2:]) for k, v in b.items()}
         ctrl = obs["ctrl"].reshape(-1, obs["ctrl"].shape[-1])
         return float(anchor_kl(a, b, ctrl))
+
+
+def chunk_action(action, idx):
+    """The actions [T, R, ...] of the rows idx, kept [T, len(idx), ...] (the chained heads' logits are those under
+    the actions taken: Actor.sequence's action)."""
+    return hd.Action(**{f: getattr(action, f)[:, idx] for f in action.parts()})
+
+
+def deciding(obs):
+    """[.., N] the units that decide: v2's "free" (not held by a commitment, tools/nn/model/commit.py), else ctrl."""
+    return obs["free"] if "free" in obs else obs["ctrl"]
 
 
 def normalise(a, groups=None):
@@ -201,7 +213,7 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
     n, stop = 0, False
     actor.train()
     critic.train()
-    kinds = ("kind", "point", "target", "run") + (("ability",) if batch["action"].ability is not None else ())
+    kinds = batch["action"].parts()
     taught = batch.get("teach")
     teach_acc = {n: [0.0] * 7 for n in taught["names"]} if taught else {}
     for _ in range(cfg.epochs):
@@ -219,21 +231,23 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                 pidx = idx[part]
                 obs = full_obs({k: v[:, pidx] for k, v in batch["obs"].items()}, batch.get("abil_static"))
                 cobs = {k: _rows(v, pidx) for k, v in batch["critic_obs"].items()}
-                act = hd.Action(*(_rows(getattr(batch["action"], k), pidx) for k in kinds))
+                act = hd.Action(**{k: _rows(getattr(batch["action"], k), pidx) for k in kinds})
+                seq_act = chunk_action(batch["action"], pidx)
                 a = a_all[:, part].reshape(-1)
                 # The critic's warm-up (train_policy False): the actor runs without a graph, for the stats
                 # only; with one its activations took ~3.5 GB more at the peak (13.5 GB on a 16 GB card).
                 with torch.set_grad_enabled(train_policy):
-                    logits, _ = actor.sequence(obs, batch["h0"][pidx], batch["reset"][:, pidx])
+                    logits, _ = actor.sequence(obs, batch["h0"][pidx], batch["reset"][:, pidx], seq_act)
                     logits = {k: v.reshape(-1, *v.shape[2:]) for k, v in logits.items()}
                     ctrl = obs["ctrl"].reshape(-1, obs["ctrl"].shape[-1])
                     lp, ent = hd.log_prob(logits, act, ctrl)
                     old = _rows(batch["lp"], pidx)
                     pl, clipped = policy_loss(lp, old, a, ctrl, cfg.clip)
-                    entropy = masked_mean(kind_entropy(logits), ctrl)
+                    free = deciding(obs).reshape(-1, ctrl.shape[-1])
+                    entropy = masked_mean(kind_entropy(logits), free)
                     if reference is not None and cfg.anchor:
                         with torch.no_grad():
-                            ref, _ = reference.sequence(obs, batch["h0"][pidx], batch["reset"][:, pidx])
+                            ref, _ = reference.sequence(obs, batch["h0"][pidx], batch["reset"][:, pidx], seq_act)
                             ref = {k: v.reshape(-1, *v.shape[2:]) for k, v in ref.items()}
                         anchored = anchor_kl(logits, ref, ctrl)
                     else:

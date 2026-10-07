@@ -312,6 +312,75 @@ every restart: the bank's rows bring `scenario.build`'s default, side 2); the Li
 `abil`, `abil_owned`, `abil_use`. A stored transition keeps only the slots' state (5 numbers) and
 the battle's bank row; `rollout.full_obs` puts the passports back for the update.
 
+## Variant v2: map sectors, chained heads, commitment
+
+A new base of the network (preset `v2`, `tools/nn/model/config.py`: field `sectors` > 0). The same base as
+`wide`: unit tokens by passport, 3 attention layers, a GRU memory. Three differences.
+
+```mermaid
+flowchart TB
+  tok["Unit tokens + commitment<br/>(seconds left, held now)"] --> b1["Attention layer 1"]
+  sec["16 × 16 sector tokens<br/>own and visible enemy strength,<br/>routers, map edge"] --> sa["Units look at the sectors"]
+  b1 --> sa --> b2["Attention layer 2"] --> gru["GRU"] --> b3["Attention layer 3"]
+  b3 --> kind["Order kind"] --> tgt["Target (for attack)"] --> place["Sector → 4 × 4 cell (~25 m)<br/>(for move / withdraw)"] --> com["Keep the order 2 / 4 / 8 / 16 s"]
+  sec --> place
+```
+
+- **Map sectors** (`tools/nn/model/sectors.py`). The square ±800 m around the map's centre in the side's frame
+  (fixed for the battle, as the `--grid` head's) is cut into 16 × 16 sectors of 100 m. A sector has 8 features, only
+  from what the side sees: own strength (cost × share of health left, summed), own units, strength and number of
+  the enemies visible now, strength of the enemies seen earlier (at their last place, cost only), whether an own
+  unit / a visible enemy unit there routs, the share of its cells inside the map. A sector token = a learned
+  embedding of its place + a small network of its features (width 64). The units look at the sectors with one
+  attention layer after the first layer (2 heads, a learned bias for the distance from the unit to the sector's
+  centre). Sectors do not look at each other: 256 × 256 a decision would cost more than all the units' attention.
+  The geometry (the side frame's origin and axis, the map's bounds: 8 numbers, input `geo`) comes with a decision,
+  so the network knows the cells beyond the map's edge and never picks them.
+- **Chained heads** (`tools/nn/model/chain.py`): order kind → target pointer (for attack) → place (for move and
+  withdraw): first a sector (the unit's query against the sector tokens; a fresh head prefers the near ones), then
+  a 4 × 4 cell inside the chosen sector (the point: the cell's centre, 25 m) → the commitment's length. Every later
+  part sees the earlier ones: condition = the unit's token + an embedding of the kind + the target's token. With the
+  kinds as they are only an attack has a target and only move / withdraw have a place, so the place knows the
+  kind and its target part is always empty. Run depends on the kind; the ability as before, apart. The parts are
+  chosen in order, so the network samples itself (`Actor.act`); in training the logits are those under the
+  choice made (`Actor.sequence(..., action)`).
+- **Commitment** (`tools/nn/model/commit.py`). With every new order (hold, move, attack, withdraw) the unit chooses
+  how long to keep it: 2, 4, 8 or 16 s. While it runs the unit's only allowed choice is keep (a mask: probability
+  1, nothing to learn, entropy 0). It ends at once when: the unit comes into melee; an enemy comes to threaten its
+  flank or rear (the threat flags: how an attack on the unit shows); the attack's target died, routs or is no
+  longer seen; the unit routed or rallied; the own lord died. A keep chosen by the unit itself starts none. The
+  network sees the seconds left (÷ 16) and whether the unit is held. All from the side's observation and the
+  battle time: the simulator (`rollout.Battles.cstate`) and the companion (`loop.Brain.commit`, from the game's
+  state) keep it the same way. The log's order-kind counter counts only the units that decide (not held ones).
+- **Reward v2** (`run.py --reward v2`): win / loss + the gold trade + order change cost 0.006 (keep and a
+  repeated order free); lord, idle and retarget 0.
+- **From scratch.** `--preset v2` without `--init` starts from `build/nn-train/random_v2.pt` (written if missing);
+  it is also the untrained opponent in the pool (for test5: `--init build/nn-train/random_v2.pt`). No widening from
+  `small`: one learning rate for every weight (`lr`, not divided by the width). No teachers with v2 (the rollout
+  checks it).
+- **Memory in training.** The sector branch's insides are not kept for the update but recomputed in the backward
+  pass (activation checkpointing), and the minibatch is computed in 3 parts, not 2 as `wide`'s.
+- **The old untouched.** `small`, `wide`, `target` and their checkpoints work as before; `Actor(cfg)` with
+  `sectors` > 0 builds an `ActorV2` itself, so a v2 checkpoint loads everywhere (training, evaluation, companion).
+
+Speed (RTX 5070 Ti, 1024 battles, a decision a second; `build/v2/bench_v2.py`):
+
+| | `wide` (s46, grid 32) | `v2` |
+|---|---:|---:|
+| Actor, M weights | 3.37 | 3.51 |
+| The network on one decision of 1024 rows (19 v 19), ms | 19.3 | 21.4 |
+| Training: battle seconds per second | 4,690 | 4,320 |
+| Collecting 64 decisions / the update, s | 5.1 / 9.1 (2 parts) | 4.5 / 11.1 (3 parts) |
+| GPU memory peak at the update, GB | 11.7 | 9.5 |
+| Updates / battles finished in 5 min | 22 / 3,438 | 20 / 1,435 |
+
+v2 is ~8 % slower than `wide` (the goal: not more than 2 times). Fewer battles finish because an untrained
+network's battles last longer, not because of the speed.
+
+**Tried and rejected.** v2's minibatch in 2 parts without recomputing the sector branch: a 12.5 GB peak of 16, the
+card spilled into shared memory, an update 10 s → 157 s. Recomputed in 2 parts: 11.9 GB (at the edge, like
+`wide`); in 3 parts: 9.5 GB, the update +7 % time.
+
 ## Sizes
 
 `tools/nn/model/config.py`, count with `bash tools/nn/dock.sh tools.nn.model.bench`:
@@ -321,9 +390,11 @@ the battle's bank row; `rollout.full_obs` puts the passports back for the update
 | `small` | 128 | 4 | 3 | 0.85 M | 0.70 M |
 | `wide` | 256 | 8 | 3 | 3.23 M | 2.75 M |
 | `target` | 512 | 8 | 4 | 15.52 M | 20.32 M (6 layers) |
+| `v2` | 256 | 8 | 3 + sectors | 3.51 M | 2.75 M |
 
 `wide` is `small` × 2 in every width (the head width stays 32); it is made from a trained `small`
-network by widening (below), not trained from scratch.
+network by widening (below), not trained from scratch. `v2` is `wide`'s base + the map sectors, the chained heads and the
+commitment (above); it is trained from scratch.
 
 ## Widening
 
@@ -467,6 +538,17 @@ An int8 export of the actor looks practical; not done yet:
   0.05 (blows, scratches, a rout, a rally, a rout again counted once, a unit leaving the map, restarts), and the companion,
   given the same states as the game's rows, computes the same; training
   continues from `m20.pt` (one PPO update).
+- `tests/tools/test_nn_v2.py` (torch): `Actor(cfg)` with sectors is an `ActorV2`; the sectors' cells are the same
+  64 × 64 grid as `cell_centres`; the sector features count own and visible enemy units where they stand, hidden
+  ones not; cells beyond the map's edge are never chosen, the point is the cell's centre; the logits when sampling
+  and in training agree, the place depends on the kind, the cell on the sector; `log_prob` counts each part only
+  where it matters; a held unit may only keep, its share is 0; a commitment starts with a new order, ends on time,
+  keep starts none; each event (melee, threat, target gone or routing, lord, rally) ends it, the same flag
+  unchanged does not; the companion keeps it between the game's states; a v2 checkpoint loads and acts the same;
+  `sequence` = decisions one by one; in the rollout held units keep, a restarted battle and a narrowed batch
+  clear / keep the commitment; one PPO step changes the chain's, the commitment's and the sector branch's
+  weights; the evaluation plays v2 against a v1 past version; `run --preset v2 --reward v2` writes
+  `random_v2.pt`, and the lord and idle terms are 0.
 
 The `snake-ai-trainer` image has no pytest. The torch tests were run with the pure-Python
 pytest of `.venv` put on `PYTHONPATH` in the container.

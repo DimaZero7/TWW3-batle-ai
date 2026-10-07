@@ -39,6 +39,11 @@ only (e.g. kiting: a slower melee enemy closing in, and the run-back it keeps go
 "<drill>@normal" with a share of its own (the same per-battle draw). The labels' drill index and the share's
 pick are per unit ([R, N]). A teacher whose share is 0 labels nothing: its script runs only every TEACH_PROBE-th
 decision (~20 % of a decision's time otherwise), its labels there only measure the agreement (PPO's log).
+
+v2 networks (ModelConfig.sectors > 0; the learner's or the past version's): the commitment's state of every row
+(Battles.cstate, tools/nn/model/commit.py; afresh when a battle restarts) gives each decision its inputs ("free",
+"commit") and the geometry ("geo", sectors.geo); they are stored with the observation for the update. The kinds'
+counters count the units that decide (not those held by their commitment). No teachers with v2.
 """
 import warnings
 
@@ -46,9 +51,11 @@ import numpy as np
 import torch
 
 from tools.nn.model import abilities as mab
+from tools.nn.model import commit as mcommit
 from tools.nn.model import heads as hd
 from tools.nn.model import observation as ob
 from tools.nn.model import policy
+from tools.nn.model import sectors as msectors
 from tools.nn.model.decide import to_orders
 from tools.nn.model.frame import Frame
 from tools.nn.sim import abilities as sim_abilities
@@ -242,9 +249,15 @@ def _decide(actor, obs, h, frame, bounds, greedy):
     """The actor's decision: (logits, sampled Action, Orders, new memory). Compiled with fast(), the
     network's weights are the graph's inputs (the learner, the past version and their updates share
     it); the sampling then draws from the compiled code's own random stream (the same distribution)."""
-    logits, h_new = actor(obs, h)
-    action = hd.sample(logits, greedy, abilities=True)
+    logits, action, h_new = actor.act(obs, h, greedy, abilities=True)
     return logits, action, to_orders(actor.cfg, action, obs, frame, bounds), h_new
+
+
+def _v2_inputs(state, obs, t, frame, bounds):
+    """A v2 decision's extra inputs (module doc): the commitment's and the geometry."""
+    out = mcommit.inputs(state, obs, t)
+    out["geo"] = msectors.geo(frame, bounds)
+    return out
 
 
 def _log_prob(logits, action, ctrl):
@@ -313,6 +326,8 @@ class Battles:
         self._decide = fast(_decide, use)
         self._log_prob = fast(_log_prob, use)
         self._values = fast(_values, use)
+        self._v2_inputs = fast(_v2_inputs, use)
+        self._commit_apply = fast(mcommit.apply, use)
         # the attack_only opponents (`hold`; training: run.py --defend-only) are met only as the defender:
         # their battles must have the learner attacking.
         only = np.isin(layout.opponent, [league.CODE[n] for n in attack_only])
@@ -384,6 +399,7 @@ class Battles:
         self.cmem = {s: ob.start(state, self.setup, s) for s in (1, 2)}
         self.h_learn = None
         self.h_past = None
+        self.cstate = mcommit.start(2 * self.B, self.N, self.device)     # v2's commitment, per row
         self.health = reward.measure(self.st, self.weights.rout_share, self.weights.lord_rout)
         # [B] the battle time of the attacker's last damage (reward.idle_cost), -1 before its first
         self.last_hit = torch.full((self.B,), -1.0, device=self.device)
@@ -427,10 +443,19 @@ class Battles:
     # --- orders ---
     def _act(self, actor, a, frame, rows, h, greedy):
         obs_r = rows_of(a, rows)
+        fr, bounds = frame_rows(frame, rows), self.bounds2[rows]
+        v2 = bool(actor.cfg.sectors)
+        if v2:
+            t = self.st.t[rows % self.B]
+            cs = {k: v[rows] for k, v in self.cstate.items()}
+            obs_r = self._v2_inputs(cs, obs_r, t, fr, bounds)
         if h is None:
             h = actor.initial(obs_r)
-        logits, action, orders, h_new = self._decide(actor, obs_r, h, frame_rows(frame, rows), self.bounds2[rows],
-                                                     greedy)
+        logits, action, orders, h_new = self._decide(actor, obs_r, h, fr, bounds, greedy)
+        if v2:
+            new = self._commit_apply(cs, obs_r, t, action)
+            for k in mcommit.KEYS:
+                self.cstate[k][rows] = new[k]
         return obs_r, h, logits, action, orders, h_new
 
     def assemble(self, parts):
@@ -474,12 +499,13 @@ class Battles:
             *_, o_past, h_past_new = self._act(self.past_actor, a, frame, self.rows_past, self.h_past, False)
             parts.append((self.rows_past, o_past))
         lp = self._log_prob(logits, action, obs_r["ctrl"])
+        assert not (self.teach_names and actor.cfg.sectors), "no teachers with a v2 network"
         taught = self._teach_labels(actor.cfg, obs_r, frame) if self.teach_names and self.R else None
         self.decisions += 1
         value = None
         if critic is not None:
             value = self._values(critic, c)
-        acting = obs_r["ctrl"] & ~self.st.done[self.rows_learn % self.B][:, None]
+        acting = obs_r.get("free", obs_r["ctrl"]) & ~self.st.done[self.rows_learn % self.B][:, None]
         # (a comparison, not bincount / one_hot: they read the GPU's answer back to size their output)
         kinds = action.kind[..., None] == torch.arange(len(O.KINDS), device=self.device)
         per_row = (kinds & acting[..., None]).sum(1)                                    # [R, kinds]
@@ -705,6 +731,7 @@ class Battles:
         self.last_hit = torch.where(finished, torch.full_like(self.last_hit, -1.0), self.last_hit)
         self.hit_rate = torch.where(finished, torch.zeros_like(self.hit_rate), self.hit_rate)
         sim_abilities.set_rule(self.st.u, self.by_rule)
+        mcommit.reset(self.cstate, torch.cat([finished, finished]))
         self.bank_row = torch.where(finished, idx, self.bank_row)
         randomise.apply(self.st, finished, self.spread, self.gen)
         if self.teach_names:                     # a new battle: a new draw for the teacher's share
@@ -744,6 +771,7 @@ class Battles:
             return ob.Memory(Frame(*(getattr(m.frame, k)[keep] for k in FRAME)), *(take(getattr(m, k)) for k in MEMORY))
         self.mem = {s: memory(m) for s, m in self.mem.items()}
         self.cmem = {s: memory(m) for s, m in self.cmem.items()}
+        self.cstate = {k: v[two] for k, v in self.cstate.items()}
         if self.h_learn is not None:
             self.h_learn = self.h_learn[sel_learn]
         if self.h_past is not None:
@@ -800,8 +828,8 @@ def collect(env, actor, critic, T):
     out["h0"] = h0 if h0 is not None else actor.initial(rows_of(steps[0]["obs"], slice(None)))
     done = torch.stack([s["done"] for s in steps])
     out["reset"] = torch.cat([torch.zeros_like(done[:1]), done[:-1]])
-    fields = ("kind", "point", "target", "run") + (("ability",) if steps[0]["action"].ability is not None else ())
-    out["action"] = hd.Action(*(torch.stack([getattr(s["action"], f) for s in steps]) for f in fields))
+    out["action"] = hd.Action(**{f: torch.stack([getattr(s["action"], f) for s in steps])
+                                 for f in steps[0]["action"].parts()})
     out["abil_static"] = getattr(env.bank.setup.arrays, "abil", None)
     for k in ("lp", "value", "reward", "done", "attacks"):
         out[k] = torch.stack([s[k] for s in steps])
