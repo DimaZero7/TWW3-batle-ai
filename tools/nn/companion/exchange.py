@@ -145,6 +145,8 @@ def arrays(doc, names, slots=None):
     out.update({k: np.zeros((1, N), dtype=bool) for k in BOOL_FIELDS})
     out["fat"] = np.full((1, N), np.nan)
     out["target"] = np.full((1, N), -1, dtype=np.int64)
+    out["order_kind"] = np.full((1, N), -1, dtype=np.int64)     # own units: order_points
+    out["order_target"] = np.full((1, N), -1, dtype=np.int64)
     out["vis"] = np.ones((1, N), dtype=bool)
     fatigue = {name: float(i) for i, name in enumerate(FATIGUE_LEVELS)}
     for u in doc["units"]:
@@ -178,13 +180,22 @@ def order_points(state, names, side, given, last=None):
     simulator (docs/en/apps/bridge.md "Order point"). given: {name: the last order the companion gave
     the unit, not keep} (orders_list's dicts); a unit without one holds. An attack on a target that
     is gone (no men) holds, as the simulator turns it to HOLD. Routing or shattered units keep the
-    point they had (the simulator does not update them). Enemy rows are left as read."""
+    point they had (the simulator does not update them). Enemy rows are left as read. Also the order in force
+    as the simulator keeps it (`order_kind` code, `order_target` slot; the observation's ORDER input): the last
+    order given, hold without one; an attack whose target is gone holds."""
     last = dict(last or {})
     index = {n: i for i, n in enumerate(names)}
     x, z, men = state["x"][0], state["z"][0], state["men"][0]
     for i, name in enumerate(names):
         if side[i] != 1:
             continue
+        o = given.get(name) or {}
+        code = KINDS.index(o["kind"]) if o.get("kind") in KINDS[:4] else 0
+        j = index.get(o.get("target"), -1) if code == 2 else -1
+        if code == 2 and not (j >= 0 and men[j] > 0):
+            code, j = 0, -1
+        if "order_kind" in state:
+            state["order_kind"][0, i], state["order_target"][0, i] = code, j
         if (state["r"][0, i] or state["s"][0, i]) and name in last:
             state["ox"][0, i], state["oz"][0, i] = last[name]
             continue

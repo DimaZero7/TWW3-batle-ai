@@ -32,6 +32,9 @@ def point_bins(cfg, obs_t, frame, x, z):
     (the bin's point: the unit's position + the bin's offset in the side's frame, before the map's
     clip; heads.point_world)."""
     f, l = frame.point(x, z)
+    if cfg.grid:            # the grid head: the cell whose centre is nearest the point
+        cells = hd.cell_centres(cfg, f.device).to(f.dtype)
+        return ((torch.stack([f, l], -1)[..., None, :] - cells) ** 2).sum(-1).argmin(-1)
     off = torch.stack([f, l], -1) - obs_t["pos"] * ob.POS                      # [R, N, 2]
     bins = hd.point_offsets(cfg, off.device).to(off.dtype)                     # [P, 2]
     return ((off[..., None, :] - bins) ** 2).sum(-1).argmin(-1)

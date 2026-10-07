@@ -73,6 +73,17 @@ def networks(preset, device, start=None, critic_from=None):
     return actor.to(device).eval(), critic.to(device).eval()
 
 
+def with_grid(actor, grid):
+    """The actor with the grid move-point head (ModelConfig.grid, tools/nn/model/heads.py; 0: as it is): an actor
+    of the bin head keeps every weight but the point head's, the grid head starts fresh."""
+    if not grid or actor.cfg.grid == grid:
+        return actor
+    device = next(actor.parameters()).device
+    new = model_policy.Actor(dataclasses.replace(actor.cfg, grid=grid))
+    new.load_state_dict({k: v for k, v in actor.state_dict().items() if not k.startswith("heads.point.")})
+    return new.to(device).eval()
+
+
 def sized(cfg, N, slots=22, width=1.0):
     """The PPO settings for battles of N slots: fewer decisions per minibatch for bigger battles, so a
     minibatch holds about as many unit tokens as at 22 slots (the memory of a 16 GB card). A wider
@@ -169,9 +180,12 @@ def train(args, every=None, teacher=None, normal=None):
     if args.preset is None:          # the record follows the network: --init's preset (e.g. "wide"), else small
         args.preset = checkpoint.read(args.init).get("preset", "small") if args.init else "small"
     actor, critic = networks(args.preset, device, args.init, args.critic_init)
+    actor = with_grid(actor, args.grid)
     reference = None
     if args.anchor:
-        reference = checkpoint.load_policy(args.reference or args.init, device)
+        # the grid's reference too (its fresh head is never compared: the anchor's KL is on the kind and target),
+        # so --anchor-roll can copy the learner into it
+        reference = with_grid(checkpoint.load_policy(args.reference or args.init, device), args.grid)
         for p in reference.parameters():
             p.requires_grad_(False)
     # The network the run started from, frozen: the distance from the start (ppo.distance, start_kl in
@@ -549,6 +563,9 @@ def parser():
     ap.add_argument("--entropy-max", type=float, default=0.1, help="the floor's weight at most this")
     ap.add_argument("--entropy-rate", type=float, default=1.25, help="the floor's factor per update")
     ap.add_argument("--order-cost", type=float, default=reward.Weights.order_change)
+    ap.add_argument("--grid", type=int, default=0,
+                    help="> 0: the move point as a cell of a grid x grid map grid (tools/nn/model/heads.py); a checkpoint "
+                         "of the bin head keeps every other weight, the grid head starts fresh")
     ap.add_argument("--idle", type=float, default=reward.Weights.idle)
     ap.add_argument("--gold", type=float, default=reward.Weights.gold,
                     help="(enemy gold destroyed - own gold lost) / budget, per step")

@@ -47,6 +47,12 @@ The rule: the AI sees only what a human player sees.
   config/nn/effects.json, owned (both sides: the unit's card) and on now (own units; enemies while
   seen: the game lists a seen unit's active effects). On comes from the simulator's `fx_on` or, in a
   recorded battle or the game, from the token's own fields (health, morale state, melee, own morale).
+* The order in force (ORDER, own units only, the token's last columns, 07.10.2026): its kind one-hot (hold, move,
+  attack, withdraw) and how long it has been in force, s / ORDER_AGE capped at 1. From the state's optional
+  `order_kind` and `order_target` [B, N] (the simulator's order in force; the companion's last order given,
+  exchange.order_points) and the order point ox, oz: a new kind, a new attack target or a point moved more than
+  ORDER_MOVE_M (as reward.order_changes) starts the clock again (Memory.ord_*). Missing: all 0. Older
+  checkpoints load with zero weights for these columns.
 Everything is in the side's frame (tools/nn/model/frame.py), scaled to about -1..1.
 
 State: a dict of arrays [B, N] with the names of recorded `nn_sample` (tools/nn/gamedata.py):
@@ -66,6 +72,7 @@ import numpy as np
 
 from tools.nn.model import abilities, effects, factions, passport
 from tools.nn.model.frame import Frame, army_axis, edge_distances, xp
+from tools.nn.sim.orders import ATTACK, HOLD, MOVE, WITHDRAW
 
 POS = 500.0      # m: positions and order points
 VEL = 5.0        # m/s
@@ -81,6 +88,8 @@ RATE_MIN = 0.05      # the attacker's progress (PROGRESS): the reward's idle_rat
 RATE_WINDOW = 30.0   # ... its idle_window_s (s) ...
 ROUT_SHARE = 0.5     # ... and its rout_share (reward.Weights)
 RATE_CAP = 4.0       # the rate input: rate / RATE_MIN, at most this
+ORDER_AGE = 60.0     # s: the order in force's age / ORDER_AGE, capped at 1 (ORDER)
+ORDER_MOVE_M = 10.0  # m: a move point moved more than this is a new order (= reward.Weights.order_move_m)
 
 # The token's dynamic features: (name, who sees it). "both": own units and visible enemies;
 # "own": own units only (zero for enemies; the critic's full view fills them for all units).
@@ -105,11 +114,14 @@ VOLLEY = ("volley_ready",)
 # side / 180 (passport.fire_arc) - appended at the token's end, not among the passport's features, so the columns
 # before it keep their places.
 ARC = ("fire_arc",)
+# Then ORDER (07.10.2026, own units only; older checkpoints: zero weights): the order in force, kind and age (module doc).
+ORDER = ("order_hold", "order_move", "order_attack", "order_withdraw", "order_age")
 NAMES = (tuple(n for n, _ in DYNAMIC) + FLAGS + tuple(f"passport_{i}" for i in range(passport.SIZE)) + effects.NAMES
-         + VOLLEY + ARC)
+         + VOLLEY + ARC + ORDER)
 INDEX = {n: i for i, n in enumerate(NAMES)}
 TOKEN = len(NAMES)
-OWN_ONLY = tuple(INDEX[n] for n, who in DYNAMIC if who == "own") + tuple(INDEX[n] for n in VOLLEY)
+OWN_ONLY = (tuple(INDEX[n] for n, who in DYNAMIC if who == "own") + tuple(INDEX[n] for n in VOLLEY)
+            + tuple(INDEX[n] for n in ORDER))
 # character; attack, defend, 2 lord levels, map width and depth, 2 counts; own lord slain and how
 # recently, the enemy lord the same (CONTEXT_BASE: the context before the damage timers); then TIMERS:
 # the fine clock, we dealt damage yet and seconds since we last did (0 before), the enemy the same.
@@ -230,6 +242,11 @@ class Memory:
     rate_t: object = None         # [B] time it last was at least RATE_MIN (-1 not yet)
     prev_ammo: object = None      # [B, N] projectiles left at the last observation that read them (-1 unknown)
     volley_t: object = None       # [B, N] time they last fell (VOLLEY: the last volley; -1 not yet)
+    ord_kind: object = None       # [B, N] the order in force at the last observation (ORDER; -1 unknown) ...
+    ord_tgt: object = None        # ... its attack target, its point
+    ord_x: object = None
+    ord_z: object = None
+    ord_t: object = None          # [B, N] time it was first seen in force (-1 never)
 
 
 @dataclass
@@ -279,7 +296,7 @@ def start(state, setup, side):
     zero, false = xs * 0, xs != xs
     return Memory(frame, zero, zero, zero, false, false, zero, zero, zero - 1, false, zero - 1, zero - 1,
                   zero[:, :2] - 1, zero - 1, zero[:, :2] - 1, zero - 1, zero[:, 0], zero[:, 0] - 1, zero - 1,
-                  zero - 1)
+                  zero - 1, ord_kind=zero - 1, ord_tgt=zero - 1, ord_x=zero, ord_z=zero, ord_t=zero - 1)
 
 
 def observe(state, setup, side, memory=None, full=False):
@@ -376,7 +393,9 @@ def observe(state, setup, side, memory=None, full=False):
     late = m.stack([m.where(see_all & S.present, cols[n], cols[n] * 0) for n in VOLLEY], -1)
     arc = getattr(S, "arc", None)
     arc = xs * 0 if arc is None else _f(m, arc)
-    tokens = _cat(m, [dyn, _f(m, S.passport), fx, late, arc[..., None]], -1) * _f(m, S.present)[..., None]
+    order, ord_mem = _order(m, state, memory, tn, xs)
+    order = m.stack([m.where(see_all & S.present, c, c * 0) for c in order], -1)
+    tokens = _cat(m, [dyn, _f(m, S.passport), fx, late, arc[..., None], order], -1) * _f(m, S.present)[..., None]
 
     attend = S.present & ~dead & ~(own & ~alive)
     ctrl = own & alive & (ms < 6)
@@ -395,7 +414,8 @@ def observe(state, setup, side, memory=None, full=False):
     pos = m.stack([fwd, lat], -1) / POS
     pos = m.where(seen[..., None], pos, pos * 0)
     new = Memory(fr, last_x, last_z, last_t, seen, dead, m.where(sees, xs, xs * 0), m.where(sees, zs, zs * 0),
-                 tn, sees, last_melee, last_rout, lord_dead, hp_now, hit_t, gold, rate, rate_t, prev_ammo, volley_t)
+                 tn, sees, last_melee, last_rout, lord_dead, hp_now, hit_t, gold, rate, rate_t, prev_ammo, volley_t,
+                 *ord_mem)
     if full:   # the critic also knows the enemy's character
         other = setup.character(3 - side)
         ctx = _cat(m, [ctx, _f(m, other if m is np else m.as_tensor(other, device=x.device))], -1)
@@ -492,6 +512,30 @@ def _volley(m, state, S, memory, tn, like):
     since = m.clip((tn - volley_t) / m.where(shooter, reload, reload * 0 + 1), 0, 1)
     ready = m.where(shooter, m.where(volley_t >= 0, since, since * 0 + 1), since * 0)
     return _f(m, ready), m.where(known, a, memory.prev_ammo), volley_t
+
+
+def _order(m, state, memory, tn, like):
+    """(the ORDER columns [B, N] each, (ord_kind, ord_tgt, ord_x, ord_z, ord_t) for the Memory): module doc."""
+    zero = like * 0
+    old = [zero - 1, zero - 1, zero, zero, zero - 1] if memory.ord_kind is None else         [memory.ord_kind, memory.ord_tgt, memory.ord_x, memory.ord_z, memory.ord_t]
+    k = state.get("order_kind")
+    if k is None:
+        return [zero] * len(ORDER), old
+    k = m.nan_to_num(k * 1.0, nan=-1.0)
+    k = m.where(k == k, k, zero - 1)
+    tgt = state.get("order_target")
+    tgt = zero - 1 if tgt is None else m.nan_to_num(tgt * 1.0, nan=-1.0)
+    ox, oz = _f(m, state["ox"]), _f(m, state["oz"])
+    o_kind, o_tgt, o_x, o_z, o_t = old
+    point = (k == MOVE) | (k == WITHDRAW)
+    moved = point & ((ox - o_x) ** 2 + (oz - o_z) ** 2 > ORDER_MOVE_M ** 2)
+    changed = (k != o_kind) | ((k == ATTACK) & (tgt != o_tgt)) | moved | (o_t < 0)
+    o_t = m.where(changed, tn, o_t)
+    known = k >= 0
+    age = m.where(known, m.clip((tn - o_t) / ORDER_AGE, 0, 1), zero)
+    cols = [_f(m, k == c) for c in (HOLD, MOVE, ATTACK, WITHDRAW)] + [_f(m, age)]
+    keep = changed | ~point
+    return cols, [k, tgt, m.where(keep, ox, o_x), m.where(keep, oz, o_z), o_t]
 
 
 def _recent(m, now, when):

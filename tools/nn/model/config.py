@@ -15,6 +15,9 @@ class ModelConfig:
     n_dist: int = 8          # ... x 8 distances from the unit, geometric dist_min..dist_max
     dist_min: float = 10.0
     dist_max: float = 400.0
+    grid: int = 0            # > 0: the move point is a cell of a grid x grid map grid in the side's frame (fixed for
+    #                          the battle, so a cell is one place on the map), not a bin from the unit (heads.py)
+    grid_half: float = 800.0  # ... the grid covers +-grid_half m forward and lateral from the map's centre
     pointer: int = 64        # width of the target pointer's query and key
     critic_d: int = 128      # the centralised critic (training only)
     critic_layers: int = 3
@@ -22,7 +25,7 @@ class ModelConfig:
 
     @property
     def points(self):
-        return self.n_dir * self.n_dist
+        return self.grid * self.grid if self.grid else self.n_dir * self.n_dist
 
 
 SMALL = ModelConfig()

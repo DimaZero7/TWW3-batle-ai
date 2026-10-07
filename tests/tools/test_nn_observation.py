@@ -470,10 +470,47 @@ class TestVolley:
             assert cobs.tokens[0, :2, I["volley_ready"]].tolist() == pytest.approx([w, 0]), t
         # the critic sees the archers' too: their last fall at 14 s, the one before at 3 s
         assert cobs.tokens[0, 2, I["volley_ready"]] == 0
-        assert I["volley_ready"] == ob.TOKEN - 1 - len(ob.ARC) and I["volley_ready"] in ob.OWN_ONLY   # ARC after it
+        assert I["volley_ready"] == ob.TOKEN - 1 - len(ob.ARC) - len(ob.ORDER) and I["volley_ready"] in ob.OWN_ONLY
 
     def test_a_new_memory_starts_ready(self):
         setup, state = self.setup_state()
         s = with_state(state, t=np.array([50.0]), a=np.array([[100.0, 0, 50, 0]]))
         obs, mem = ob.observe(s, setup, 1)
         assert obs.tokens[0, 0, I["volley_ready"]] == 1 and mem.volley_t[0, 0] == -1
+
+
+class TestOrderInForce:
+    """ORDER: the order in force's kind (own units) and how long it has been in force."""
+
+    def test_kind_and_age_restart_only_on_a_real_change(self):
+        setup, state = battle(batch=1, own=2, enemy=2)
+        N = state["x"].shape[1]
+        cols = [I[n] for n in ob.ORDER]
+
+        def at(t, kind, ox, tgt=-1):
+            k = np.zeros((1, N), np.int64)
+            k[0, 0] = kind
+            g = np.full((1, N), -1, np.int64)
+            g[0, 0] = tgt
+            o = np.array(state["ox"], float)
+            o[0, 0] = ox
+            return with_state(state, t=np.array([float(t)]), order_kind=k, order_target=g, ox=o)
+
+        mem = cmem = None
+        # (t, kind, point x, target, the age expected in s)
+        rows = [(0, 1, 100.0, -1, 0), (6, 1, 100.0, -1, 6), (12, 1, 105.0, -1, 12),   # 5 m: the same order
+                (18, 1, 160.0, -1, 0), (30, 2, 0.0, 3, 0), (45, 2, 0.0, 3, 15), (50, 2, 0.0, 2, 0),
+                (200, 0, 0.0, -1, 0), (290, 0, 0.0, -1, 60)]                          # capped at ORDER_AGE
+        for t, k, ox, tgt, age in rows:
+            obs, mem = ob.observe(at(t, k, ox, tgt), setup, 1, mem)
+            cobs, cmem = ob.observe(at(t, k, ox, tgt), setup, 1, cmem, full=True)
+            v = obs.tokens[0, 0, cols]
+            assert v[:4].tolist() == [float(k == c) for c in range(4)], t
+            assert v[4] == pytest.approx(age / ob.ORDER_AGE), t
+            assert np.all(obs.tokens[0][setup.side[0] == 2][:, cols] == 0)            # enemies: never shown
+            assert cobs.tokens[0, 0, cols].tolist() == pytest.approx(v.tolist())
+
+    def test_without_the_order_fields_the_columns_are_zero(self):
+        setup, state = battle()
+        obs, _ = ob.observe(state, setup, 1)
+        assert np.all(obs.tokens[..., [I[n] for n in ob.ORDER]] == 0)

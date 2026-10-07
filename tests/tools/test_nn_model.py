@@ -463,8 +463,9 @@ NEW_ABILITY = 8               # abilities.WHEN
 NEW_EFFECTS = mfx.SIZE        # the innate effects' columns (appended after the second wave)
 NEW_VOLLEY = len(ob.VOLLEY)   # the volley input, appended after the effects (03.10.2026)
 NEW_ARC = len(ob.ARC)         # the fire arc, appended after the volley input (07.10.2026)
-T0 = ob.TOKEN - NEW_VOLLEY - NEW_ARC    # the token before the volley input
-T1 = ob.TOKEN - NEW_ARC       # the token before the fire arc
+NEW_ORDER = len(ob.ORDER)     # the order in force, appended after the fire arc (07.10.2026)
+T0 = ob.TOKEN - NEW_ORDER - NEW_VOLLEY - NEW_ARC    # the token before the volley input
+T1 = ob.TOKEN - NEW_ORDER - NEW_ARC       # the token before the fire arc
 
 
 def test_the_second_wave_is_seen_in_the_passport_and_the_ability_slots():
@@ -846,7 +847,7 @@ def test_the_fire_arc_input_is_the_passports_arc_on_both_sides():
     col = obs.tokens[..., ob.INDEX["fire_arc"]]
     want = {"wh2_main_skv_inf_night_runners_0": 1.0, "wh2_dlc13_emp_inf_archers_0": 30 / 180,
             "wh_main_emp_inf_swordsmen": 0.0, "wh_main_emp_inf_handgunners": 30 / 180}
-    assert ob.NAMES[-1] == "fire_arc" and ob.INDEX["fire_arc"] == T1
+    assert ob.NAMES[T1] == "fire_arc" and ob.NAMES[T1 + 1:] == ob.ORDER
     for b, keys in enumerate(setup.keys):
         for i, k in enumerate(keys):
             assert col[b, i] == pytest.approx(want[k], abs=1e-6), (b, i, k)     # own (0-3) and enemy (4-7)
@@ -921,3 +922,105 @@ def test_a_checkpoint_saved_before_the_fire_arc_acts_as_before(path):
     new_crit = critic.Critic(cfg).eval()
     new_crit.load(dict(crit_data))
     same_without_arc(old, new, old_crit, new_crit, atol=1e-4)
+
+
+# --- the grid move point (ModelConfig.grid) and the order-in-force input (ORDER), 07.10.2026 ---
+
+GRID = config.preset("small", d=64, layers=2, heads=4, critic_d=64, critic_layers=2, critic_heads=4, grid=32)
+
+
+def test_the_grid_head_picks_a_cell_whose_centre_is_the_point_inside_the_map():
+    setup, state, obs = setup_obs()
+    actor = model(GRID)
+    o = policy.to_torch(obs)
+    with torch.no_grad():
+        logits, _ = actor(o)
+    assert logits["point"].shape[-1] == 32 * 32 == GRID.points
+    a = heads.sample(logits)
+    a.kind = torch.where(o["ctrl"], torch.full_like(a.kind, heads.MOVE), a.kind)
+    bounds = torch.as_tensor(setup.bounds)
+    orders = decide.to_orders(GRID, a, o, decide.frame_to(obs.frame, None), bounds)
+    own = o["ctrl"]
+    assert ((orders.x >= bounds[:, :1] - 1e-3) & (orders.x <= bounds[:, 1:2] + 1e-3))[own].all()
+    assert ((orders.z >= bounds[:, 2:3] - 1e-3) & (orders.z <= bounds[:, 3:4] + 1e-3))[own].all()
+    # the cell's point does not depend on where the unit stands: the same cell is the same place
+    fr = decide.frame_to(obs.frame, None)
+    f, l = fr.point(orders.x, orders.z)
+    want = heads.cell_centres(GRID)[a.point]
+    inside = (want.abs() < 700).all(-1) & own                  # cells away from the map's edge: not clipped
+    assert torch.allclose(torch.stack([f, l], -1)[inside], want[inside], atol=1e-2)
+    lp, ent = heads.log_prob(logits, a, o["ctrl"])
+    assert torch.isfinite(lp).all() and torch.isfinite(ent).all()
+
+
+def test_a_fresh_grid_head_prefers_the_cells_near_the_unit():
+    setup, state, obs = setup_obs()
+    o = policy.to_torch(obs)
+    with torch.no_grad():
+        logits, _ = model(GRID)(o)
+    c = heads.cell_centres(GRID)
+    pos = o["pos"] * ob.POS
+    best = c[logits["point"].argmax(-1)]
+    step = 2 * GRID.grid_half / GRID.grid
+    near = ((best - pos) ** 2).sum(-1).sqrt() < 2 * step
+    assert near[o["own"]].all()
+
+
+def test_a_bin_checkpoint_loads_into_the_grid_actor_with_only_the_point_head_fresh(tmp_path):
+    from tools.nn.train import checkpoint, ppo, run
+    old = model(CFG, seed=3)
+    new = run.with_grid(old, 32)
+    assert new.cfg.grid == 32 and not hasattr(new.heads, "point")
+    ns, os_ = new.state_dict(), old.state_dict()
+    for k, v in os_.items():
+        if not k.startswith("heads.point."):
+            assert torch.equal(ns[k], v), k
+    assert {k for k in ns if k not in os_} == {"heads.cell_q.weight", "heads.cell_q.bias", "heads.cell_k",
+                                               "heads.cell_near.weight", "heads.cell_near.bias"}
+    setup, state, obs = setup_obs()
+    o = policy.to_torch(obs)
+    with torch.no_grad():
+        lo, _ = old(o)
+        ln, _ = new(o)
+    for k in ("kind", "target", "run"):
+        assert torch.allclose(lo[k], ln[k], atol=1e-5), k
+    # a bin actor's whole state dict (with its point head) loads into a grid actor too
+    policy.Actor(GRID if CFG.d == GRID.d else new.cfg).load_state_dict(old.state_dict())
+    # a grid checkpoint round trip: the config carries the grid
+    path = checkpoint.save(tmp_path / "g.pt", new)
+    back = checkpoint.load_policy(path)
+    assert back.cfg.grid == 32 and torch.equal(back.heads.cell_k, new.heads.cell_k)
+    # the anchor's KL needs only the kind and the target: it is defined between a grid and a bin actor
+    assert torch.isfinite(ppo.anchor_kl(ln, lo, o["ctrl"]))
+
+
+def test_the_teachers_label_on_the_grid_is_the_nearest_cell():
+    from tools.nn.train.drills import teach
+    setup, state, obs = setup_obs()
+    o = policy.to_torch(obs)
+    fr = decide.frame_to(obs.frame, None)
+    c = heads.cell_centres(GRID)
+    B, N = o["pos"].shape[:2]
+    want = torch.tensor([5, 700])[:B, None].expand(B, N)
+    x, z = fr.world(c[want][..., 0] + 3.0, c[want][..., 1] - 4.0)
+    assert torch.equal(teach.point_bins(GRID, o, fr, x, z), want)
+
+
+def test_a_repeated_cell_target_or_kind_is_free_and_a_new_one_is_a_change():
+    from tools.nn.sim import orders as O
+    from tools.nn.train import reward
+    u = {"order_kind": torch.tensor([[O.MOVE, O.MOVE, O.ATTACK, O.HOLD]]),
+         "order_target": torch.tensor([[-1, -1, 2, -1]]),
+         "ox": torch.tensor([[100.0, 100.0, 0, 0]]), "oz": torch.tensor([[50.0, 50.0, 0, 0]]),
+         "side": torch.tensor([[1, 1, 1, 1]]), "men": torch.ones(1, 4), "r": torch.zeros(1, 4, dtype=torch.bool),
+         "s": torch.zeros(1, 4, dtype=torch.bool), "gone": torch.zeros(1, 4, dtype=torch.bool),
+         "ms": torch.full((1, 4), 2)}
+    no = torch.zeros(1, 4, dtype=torch.bool)
+    same = O.Orders(kind=torch.tensor([[O.MOVE, O.KEEP, O.ATTACK, O.HOLD]]), x=torch.tensor([[100.0, 0, 0, 0]]),
+                    z=torch.tensor([[50.0, 0, 0, 0]]), target=torch.tensor([[-1, -1, 2, -1]]), run=no)
+    assert not reward.order_changes(u, same).any()
+    cell = 2 * GRID.grid_half / GRID.grid
+    other = O.Orders(kind=torch.tensor([[O.MOVE, O.MOVE, O.ATTACK, O.MOVE]]),
+                     x=torch.tensor([[100.0 + cell, 0, 0, 0]]), z=torch.tensor([[50.0, 0, 0, 0]]),
+                     target=torch.tensor([[-1, -1, 3, -1]]), run=no)
+    assert reward.order_changes(u, other).tolist() == [[True, True, True, True]]

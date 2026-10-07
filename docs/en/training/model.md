@@ -39,7 +39,8 @@ takes a recorded battle and the simulator's batch: both have the fields of the r
 | Input | Who sees it | Scale |
 |---|---|---|
 | Passport of every unit, own and enemy ([passports](units.md)): men, health, mass, speeds, attack, defence, charge, weapon damage and bonuses, armour, shield, leadership, resistances, missile (range, ammo, damage, reload, accuracy; at the end: direct fire, spread, muzzle velocity), cost, caste, size, attributes (unbreakable, fire whilst moving, …) | both sides | ~0–1; wide numbers (health, mass, cost, damage) on a log scale; caste, size, attributes as 0/1 |
-| Fire arc (the token's end, after the volley readiness; [below](#fire-arc-both-sides-the-tokens-last-input)) | both sides | the arc each side / 180 deg: 1.0 for the Night Runners' throwing stars, 0.17 for bows, slings, crossbows, handguns; 0 without a missile weapon |
+| Fire arc (after the volley readiness; [below](#fire-arc-both-sides)) | both sides | the arc each side / 180 deg: 1.0 for the Night Runners' throwing stars, 0.17 for bows, slings, crossbows, handguns; 0 without a missile weapon |
+| Order in force (the token's end; [below](#order-in-force-own-units-the-tokens-last-inputs)) | own side only | its kind (hold / move / attack / withdraw) 0/1; how long it has been in force, s / 60, at most 1 |
 | Experience rank | both sides | rank / 9 |
 | Faction character (5 numbers, `config/nn/factions.json`) | own side | 0–1 as written |
 | Role: attack or defend | own side | 0/1 |
@@ -205,7 +206,7 @@ What it shows differs a little between the two worlds, from their shooting, not 
   fires whole-unit volleys one reload apart ([measurements](measurements.md)), so there it goes
   0 → 1 between volleys while standing too. While the unit runs (the kiting drill) both rise alike.
 
-### Fire arc (both sides, the token's last input)
+### Fire arc (both sides)
 
 One input (`fire_arc`, `observation.ARC`, 07.10.2026): a man's fire arc each side from the passport
 (`missile.fire_arc_deg`, the database's `battle_entities.fire_arc_close` / 2) over 180 deg. It is 1.0 for the Night
@@ -218,17 +219,30 @@ columns before it keep their places, and a checkpoint saved before it loads with
 before (`encoder.pad_inputs`; checked on `test5/s44_defonly/m20.pt`, the chain's last step before it - the same
 logits, memory, orders and value, `tests/tools/test_nn_model.py`).
 
+### Order in force (own units, the token's last inputs)
+
+Five inputs (`observation.ORDER`, 07.10.2026): the kind of the order the unit has in force now (hold, move,
+attack, withdraw - one 0/1 each), and how many seconds it has been in force, over 60 (at most 1). An order is new
+as in the reward: another kind, another attack target or a point more than 10 m from the old one. The same order
+again and "keep" do not reset the clock. Without these inputs the network did not know how long a unit had been
+walking to its point, and re-issued "move ahead" every second (the drift, `build/drift`).
+
+Where from: the state's fields `order_kind`, `order_target` (the simulator: the order in force; the companion: the
+last order given, `exchange.order_points`) and the order point `ox`, `oz`; the clock is in the observation's memory
+(`Memory.ord_*`). Without the fields (recorded battles) all five are 0. An older checkpoint loads with zero weights
+for them and acts as before.
+
 ## Model
 
 ```mermaid
 flowchart TB
-  tok["Unit tokens: 150 numbers each<br/>(69 of them the passport, 28 the innate effects,<br/>1 the volley readiness, 1 the fire arc)"] --> enc["Shared encoder<br/>the same weights for every unit"]
+  tok["Unit tokens: 155 numbers each<br/>(69 of them the passport, 28 the innate effects,<br/>1 the volley readiness, 1 the fire arc,<br/>5 the order in force)"] --> enc["Shared encoder<br/>the same weights for every unit"]
   ctx["Context: character, role, counts, lords,<br/>time elapsed, damage timers,<br/>the attacker's progress"] --> enc
   enc --> att["Attention layers<br/>+ distance bias, masks"]
   att --> gru["Memory: a GRU per unit<br/>and one for the army"]
   gru --> last["Last attention layer"]
   last --> kind["Order: hold / move / attack / withdraw / keep"]
-  last --> point["Point: 16 directions × 8 distances"]
+  last --> point["Point: 16 directions × 8 distances<br/>or a cell of a 32 × 32 map grid"]
   last --> ptr["Target: pointer at an enemy"]
   last --> run["Run or walk"]
   last --> abil["Ability: none or a pointer at a slot"]
@@ -256,6 +270,17 @@ flowchart TB
     enemy) × 8 distances from the unit, 10–400 m on a log scale, clipped to the map. Bins,
     not a normal distribution: the choice can have several peaks ("left flank or right flank"),
     survives int8, and the best bin is found without randomness;
+  - **a map grid** (the model option `grid`, training `--grid 32`) instead of the bins: the point is the centre of
+    one of 32 × 32 cells of a square ±800 m around the map's centre in the side's frame. The side's frame is fixed
+    at the start of battle, so a cell is the same place on the map all battle: the same cell again is the same
+    order, and the reward does not charge it. With the bins, "30 m ahead of me" every second was a new point 1-3 m
+    from the old one each time (not counted as a change), and units walked off 1-2 km (the drift, `build/drift`).
+    The cells' logits: the unit's query against a learned key per cell minus a learned weight of the unit
+    (softplus, 1 at first) × the distance from the unit to the cell in cells - a fresh head prefers the near
+    cells. A checkpoint of the bins loads into such a network (`run.with_grid`): everything but the point head
+    comes from it, the grid head starts fresh. The anchor's KL is on the order kind and the target only, so the
+    reference may have the bins. The teacher turns a script's point into the nearest cell. The companion needs no
+    flag: the grid is in the checkpoint's config;
   - target: a pointer at a visible living enemy (the unit's query against each enemy's key),
     as in AlphaStar;
   - run or walk;

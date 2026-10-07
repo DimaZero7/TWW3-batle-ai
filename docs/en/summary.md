@@ -198,10 +198,11 @@ game's rule and the simulator's status for every indicator; a new unit adds its 
 
 One network for all factions and both roles (attack or defence is an input). It sees only what a
 human would: own units fully, enemies while visible, and only their morale state, never the exact
-percentage. Every unit is a "token" (a row of 150 numbers: the database passport, the state, the
-effects, the fire arc). Then: a shared encoder → 3 attention layers with a distance bias → memory (GRU) →
+percentage. Every unit is a "token" (a row of 155 numbers: the database passport, the state, the
+effects, the fire arc, the order in force and how long it has been). Then: a shared encoder → 3 attention layers with a distance bias → memory (GRU) →
 "heads" for every own unit: order kind (hold / move / attack / withdraw / keep), point (16
-directions × 8 distances), target (a pointer to an enemy), run, ability. The network never sees
+directions × 8 distances from the unit; the option `--grid 32`: a cell of a 32 × 32 map grid, against the
+drift), target (a pointer to an enemy), run, ability. The network never sees
 the time to the battle's end. Sizes: `small` 0.85 M weights, `wide` 3.23 M. The chain is on
 `wide` now; it was made from a trained `small` by widening, not from scratch.
 

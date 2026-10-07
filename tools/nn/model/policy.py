@@ -15,6 +15,8 @@ from tools.nn.model.memory import TokenMemory
 OBS_KEYS = ("tokens", "ctx", "own", "attend", "ctrl", "target_ok", "pos", "abil", "abil_ok")
 # Parameters an actor saved before abilities lacks: they start fresh when it is loaded.
 ABILITY_PARAMS = ("abilities.", "heads.ability_")
+# ... and one of the bin head loaded into a grid actor (cfg.grid): its grid head starts fresh.
+FRESH_PARAMS = ABILITY_PARAMS + ("heads.cell_",)
 
 
 def to_torch(obs, device=None):
@@ -96,7 +98,7 @@ class Actor(nn.Module):
         """As nn.Module's, but an actor saved before abilities loads: its ability parts start fresh
         (the encoder's adds nothing until trained; the head chooses at random among ready abilities)."""
         missing, unexpected = super().load_state_dict(state_dict, strict=False, assign=assign)
-        bad = [k for k in missing if not k.startswith(ABILITY_PARAMS)] + list(unexpected)
+        bad = [k for k in missing if not k.startswith(FRESH_PARAMS)] + list(unexpected)
         if strict and bad:
             raise RuntimeError(f"actor state does not match: {bad[:5]}")
         return missing, unexpected

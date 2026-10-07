@@ -270,7 +270,8 @@ class State:
         [B, N], `side` [B, N], `t` [B] (s), the abilities' timers ab{k}_on / ab{k}_cd [B, N] (s:
         active left, until ready; the observation shows them for own units, `on` for seen enemies),
         `fx_on` [B, N]: the innate effects on now (bitmask, tools/nn/sim/effects.py) and `gone` [B, N]
-        (left the map: its gold is lost whole, the attacker's progress in the observation)."""
+        (left the map: its gold is lost whole, the attacker's progress in the observation), the order in force
+        `order_kind`, `order_target` [B, N] (the observation's ORDER)."""
         out = {k: self.u[k] for k in OBSERVED}
         for k in range(3):
             for t in ("on", "cd"):
@@ -278,6 +279,8 @@ class State:
         out["fx_on"] = self.u["fx_on"]
         out["gone"] = self.u["gone"]
         out["side"] = self.u["side"]
+        out["order_kind"] = self.u["order_kind"]      # the order in force (observation ORDER)
+        out["order_target"] = self.u["order_target"]
         out["t"] = self.t
         return out
 

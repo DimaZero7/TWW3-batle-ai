@@ -8,6 +8,12 @@
   and a distance from the unit (geometric, dist_min..dist_max). Bins, not a Gaussian: the choice
   may have several peaks ("left flank or right flank"), stays exact under int8, and argmax is
   deterministic. The point is clipped to the map.
+  With cfg.grid > 0 instead: one of grid x grid cells of a square map grid in the side's frame (+-cfg.grid_half m
+  around the map's centre; the frame is fixed for the whole battle, so a cell is one place on the map, and the
+  same cell again is the same order - free in the reward, where "29 m ahead of me" every second walked the
+  unit off: the drift, build/drift). The point is the cell's centre, clipped to the map. Logits: the unit's
+  query against a learned key per cell, minus a learned per-unit weight (softplus, starts at 1) x the
+  distance from the unit to the cell in cells (a fresh head prefers the near cells).
 * target: a pointer, as in AlphaStar: the unit's query against every enemy's key; only enemies
   that are visible and alive now.
 * run: run or walk (for move and attack).
@@ -49,7 +55,14 @@ class Heads(nn.Module):
         self.cfg = cfg
         self.norm = nn.LayerNorm(d)
         self.kind = nn.Linear(d, len(KINDS))
-        self.point = nn.Linear(d, cfg.points)
+        if cfg.grid:
+            self.cell_q = nn.Linear(d, cfg.pointer)
+            self.cell_k = nn.Parameter(torch.randn(cfg.points, cfg.pointer) * 0.02)
+            self.cell_near = nn.Linear(d, 1)
+            nn.init.zeros_(self.cell_near.weight)
+            nn.init.constant_(self.cell_near.bias, math.log(math.e - 1))     # softplus = 1
+        else:
+            self.point = nn.Linear(d, cfg.points)
         self.run = nn.Linear(d, 1)
         self.q = nn.Linear(d, cfg.pointer)
         self.k = nn.Linear(d, cfg.pointer)
@@ -60,6 +73,9 @@ class Heads(nn.Module):
     def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
         """Ability features appended since the checkpoint load with zero weights (encoder.pad_inputs)."""
         from tools.nn.model.encoder import pad_inputs
+        if self.cfg.grid:      # a checkpoint of the bin head: its point head is not used (the grid starts fresh)
+            for k in [k for k in state_dict if k.startswith(prefix + "point.")]:
+                state_dict.pop(k)
         pad_inputs(state_dict, prefix + "ability_k.0.weight", self.ability_k[0].in_features)
         super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
@@ -74,7 +90,8 @@ class Heads(nn.Module):
         kind = kind.masked_fill(~allowed, NEG)
         target = self.q(u) @ self.k(u).transpose(1, 2) / math.sqrt(self.cfg.pointer)
         target = target.masked_fill(~ok[:, None, :], NEG)
-        out = {"kind": kind, "point": self.point(u), "target": target, "run": self.run(u)[..., 0]}
+        point = self._grid(u, obs_t) if self.cfg.grid else self.point(u)
+        out = {"kind": kind, "point": point, "target": target, "run": self.run(u)[..., 0]}
         if obs_t.get("abil") is not None:
             usable = obs_t["abil_ok"] & ctrl[..., None]                                   # [B, N, SLOTS]
             if torch.compiler.is_compiling():
@@ -90,6 +107,17 @@ class Heads(nn.Module):
                 slot = slot.index_put((b, n, k), score / math.sqrt(self.cfg.pointer))
             out["ability"] = torch.cat([self.ability_none(u), slot], -1)
         return out
+
+
+    def _grid(self, u, obs_t):
+        """[B, N, grid^2] the cells' logits (module doc)."""
+        cfg = self.cfg
+        score = self.cell_q(u) @ self.cell_k.t() / math.sqrt(cfg.pointer)
+        pos = obs_t["pos"].to(u.dtype) * ob.POS                                  # [B, N, 2]
+        c = cell_centres(cfg, u.device).to(u.dtype)                              # [P, 2]
+        dist = ((pos[..., None, :] - c) ** 2).sum(-1).clamp(min=1e-6).sqrt()      # [B, N, P]
+        near = nn.functional.softplus(self.cell_near(u))                         # [B, N, 1]
+        return score - near * dist / (2 * cfg.grid_half / cfg.grid)
 
 
 def _dists(logits, temperature=1.0):
@@ -149,10 +177,22 @@ def point_offsets(cfg, device=None):
     return torch.stack([f.reshape(-1), l.reshape(-1)], -1)
 
 
+def cell_centres(cfg, device=None):
+    """(forward, lateral) in metres of every cell's centre in the side's frame: [grid^2, 2], cell i * grid + j
+    i-th forward, j-th lateral."""
+    step = 2 * cfg.grid_half / cfg.grid
+    c = -cfg.grid_half + (torch.arange(cfg.grid, device=device, dtype=torch.float32) + 0.5) * step
+    f, l = torch.meshgrid(c, c, indexing="ij")
+    return torch.stack([f.reshape(-1), l.reshape(-1)], -1)
+
+
 def point_world(cfg, a, obs_t, frame, bounds):
-    """World (x, z) [B, N, 2] of the move point: the unit's position + the bin's offset, inside the map."""
-    off = point_offsets(cfg, a.point.device)[a.point]                     # [B, N, 2]
-    pos = obs_t["pos"] * ob.POS + off
+    """World (x, z) [B, N, 2] of the move point, inside the map: the unit's position + the bin's offset, or
+    (cfg.grid) the cell's centre."""
+    if cfg.grid:
+        pos = cell_centres(cfg, a.point.device).to(obs_t["pos"].dtype)[a.point]   # [B, N, 2]
+    else:
+        pos = obs_t["pos"] * ob.POS + point_offsets(cfg, a.point.device)[a.point]
     x, z = frame.world(pos[..., 0], pos[..., 1])
     x = torch.minimum(torch.maximum(x, bounds[:, 0:1]), bounds[:, 1:2])
     z = torch.minimum(torch.maximum(z, bounds[:, 2:3]), bounds[:, 3:4])

@@ -194,6 +194,8 @@ def test_order_points_are_the_simulators():
     assert (ox[5], oz[5]) == (-125.0, -45.0)               # routing: the point it had
     assert (s["ox"][0, 2:4] == enemy_ox).all()             # enemies: as read
     assert last["own_spear_1"] == (175.0, 0.0) and last["own_spear_3"] == (-125.0, -45.0)
+    assert s["order_kind"][0].tolist()[:2] == [0, 2] and s["order_kind"][0, 4] == 1    # the order in force (ORDER)
+    assert s["order_target"][0, 1] == 3 and s["order_kind"][0, 2] == -1                  # enemies: not known
     obs, _ = ob.observe(s, exchange.battle(doc).setup, 1)
     assert obs.tokens[0, 0, ob.INDEX["has_order"]] == 0 and obs.tokens[0, 1, ob.INDEX["has_order"]] == 1
     assert obs.tokens[0, 1, ob.INDEX["order_fwd"]] == pytest.approx(0.7)   # 350 m ahead / POS, not ~10 m off
