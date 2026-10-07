@@ -18,7 +18,8 @@
 #    restored byte for byte afterwards (user, 30.09.2026: never Very Hard
 #    against the game's AI — we train for people, not a cheating AI);
 #  * -Graphics ultra sets the graphics preset for this run only (preferences.ps1), restored with
-#    the same backup (a battle a human plays: build human).
+#    the same backup (a battle a human plays: build human); -Graphics low (or the environment variable
+#    BAI_GRAPHICS=low for every launch of a session) is the lightest run, for measurements while the user plays.
 param(
     [Parameter(Mandatory = $true)][ValidateSet('ai-vs-ai', 'unit-readout', 'move-probe', 'manual', 'roster-capture', 'enemy-layout', 'map-capture', 'archer-range', 'nn-arena', 'lord-swarm', 'charge-probe', 'missile-probe', 'morale-probe', 'human', 'lord-fall', 'lord-duel', 'lord-ai')][string]$Target,
     [int]$TimeoutSeconds = 0,
@@ -27,9 +28,10 @@ param(
     # sees the end of the battle; then the usual cleanup (tools/launcher/watch.ps1 uses it).
     [int]$LingerSeconds = 0,
     # A graphics preset for this run only (tools/launcher/preferences.ps1); empty: the user's own.
-    [ValidateSet('', 'ultra')][string]$Graphics = ''
+    [ValidateSet('', 'ultra', 'low')][string]$Graphics = ''
 )
 $ErrorActionPreference = 'Stop'
+if (-not $Graphics -and $env:BAI_GRAPHICS) { $Graphics = $env:BAI_GRAPHICS }
 $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $repo 'tools\telemetry\read_jsonl.ps1')
 . (Join-Path $PSScriptRoot 'event_log.ps1')

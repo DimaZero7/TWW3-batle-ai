@@ -15,6 +15,17 @@ $GraphicsPresets = @{
         gfx_lighting_quality = 1; gfx_unit_size = 3; gfx_effects_quality = 3; gfx_screen_space_reflections = 'true';
         gfx_screen_space_shadows = 'true'; gfx_cloth_simulation = 'true'
     }
+    # The lightest the game runs at, for measurement battles while the user plays (user 07.10): a small
+    # window, the 3D scene at half resolution, every quality setting at its lowest. Unit size is left as
+    # the user has it (it sets the men per unit).
+    low = [ordered]@{
+        x_res = 1024; y_res = 576; gfx_fullscreen = 'false'; gfx_resolution_scale = 0.5; gfx_dlss = 0;
+        gfx_aa = 0; gfx_texture_filtering = 0; gfx_texture_quality = 0; gfx_ssao = 'false'; gfx_depth_of_field = 0;
+        gfx_fog = 0; gfx_sky_quality = 0; gfx_unit_quality = 0; gfx_building_quality = 0; gfx_water_quality = 0;
+        gfx_shadow_quality = 0; gfx_tree_quality = 0; gfx_grass_quality = 0; gfx_terrain_quality = 0;
+        gfx_lighting_quality = 0; gfx_effects_quality = 0; gfx_screen_space_reflections = 'false';
+        gfx_screen_space_shadows = 'false'; gfx_cloth_simulation = 'false'
+    }
 }
 
 function Set-PreferenceValues {
