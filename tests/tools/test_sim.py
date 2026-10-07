@@ -753,6 +753,10 @@ class TestMissileRules:
         lord = shots_over(shooter_and([(0, 90, "wh2_main_skv_cha_warlord_0")]), 32)
         assert len(lord) >= 3 and all(b[0] - a[0] == pytest.approx(10.0, abs=P.dt + 1e-6) for a, b in zip(lord, lord[1:]))
         st = shooter_and([(0, 100, SLAVES)], t_width=30.0)
+        # half its health gone already: its wounded men die under the next volleys (kills.missile_uniform: on fresh
+        # men the first volleys mostly wound)
+        st.u["hp_abs"][0, st.N // 2] = st.u["hp_abs"][0, st.N // 2] * 0.5
+        st.u["leadership"] = st.u["leadership"] + 1e4            # (it does not run off)
         men0 = float(st.u["men"][0, st.N // 2])
         fired = shots_over(st, 62)
         gaps = [b[0] - a[0] for a, b in zip(fired, fired[1:])]

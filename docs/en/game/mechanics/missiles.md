@@ -78,6 +78,17 @@ Artillery is in [artillery](artillery.md). Conventions: [index](README.md). Our 
   - Ours: same armour rule as melee; missile and physical resistance together, at most 90 %
     (`missile.physical_resist`). Agreement.
 - **Large single-entity monsters** usually have +15 % missile resistance. · Steam · low.
+- **Whom an arrow kills.** Every model has its own health and damage beyond it is lost (CA); a projectile strikes
+  one model, and the hits fall nearly evenly over the target's living men. The health steps of the probe's recording
+  show it: archers on skavenslaves (50 HP) take 19 a wound and 12 a killing third hit (two arrows leave 12 HP). ·
+  CA ([damage blog][dmg]), probe P1 (`build/probes7`, analysed by `build/open2/poisson_test.py`) · high.
+  - Ours: a man's hits are Poisson (`kills.missile_uniform`, `melee.shot_kills`): with tau hits a man and K = HP a
+    man / HP a hit (the smoothed E[N]) the living share is Q(K, tau) (the regularised upper gamma: "fewer than K
+    hits"); tau comes from the unit's own wounded (W = men x HP a man - the unit's HP; the living men's mean hits
+    tau Q(K-1, tau) / Q(K, tau) = W / (living x HP a hit)). No fitted number. With the game's own hits the rule gives
+    its men: 180 slaves at 25-120 s 167 / 146 / 109 / 70 / 37 / 16 against 157 / 133 / 101 / 68 / 42 / 22, 45 slaves
+    36 / 15 against 38 / 14. Left: mid-way the game kills 5-10 % more than the rule and at the end leaves a few
+    more alive (the front ranks catch more arrows - not modelled).
 
 ## Friendly fire and line of fire
 

@@ -69,8 +69,8 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
     enemy men striking it); health lost beyond the pool is whole men. The probe's health series: flagellants →
     clanrats — 4–7 men's worth wounded while 87 die, slaves 10–20; greatswords → slaves — 0 while one blow kills
     (49 + charge ≥ 50 HP), 13–20 once the charge fades. Men killed at 15–30 s 1.00 → 1.10 of the game, at
-    60–90 s 0.82 → 1.15 (the old `kills.exponent` 0.5 rule kept the wounded for ever). Missiles keep the old
-    rule (no data), a lord is one pool.
+    60–90 s 0.82 → 1.15 (the old `kills.exponent` 0.5 rule kept the wounded for ever). Missiles: even hits on
+    men with their own health (`kills.missile_uniform`, [missiles](missiles.md)), a lord is one pool.
 - **Height in melee.** Damage changes with the height difference per entity pair, reaching the
   full ±30 % already at 1 m. WH2–WH3 · [CA elevation blog][elev] · high ·
   `melee_height_damage_modifier_max_coefficient` 0.3, `_max_difference` 1 m. See [terrain](terrain.md).
@@ -385,8 +385,17 @@ unit is out of contact ~4 s after the order (its own melee flag goes off only af
   centre gets 1.5 / 4.6 / 9.3 m away in 2 / 4 / 6 s (simulator 3.7 / 9.7 / 15.7), the leaver loses health until
   3.0–5.5 s (simulator 1.5–2.5), the enemy's melee flag goes off at 5.5–6 s (simulator 1.5–2.5), and the leaver still
   strikes for 1–1.5 s after the order (the enemy loses 23–88 HP; simulator 0). A free about-face to a run (no enemy)
-  covers 2.6 m in 2 s in the game, so in contact a unit gets out about half as fast; no rule found — OPEN (a suspect
-  for the network battles' drop in correspondence).
+  covers 2.6 m in 2 s in the game, so in contact a unit gets out about half as fast. Per 0.5 s (`build/open2/leave_trace.py`,
+  with the earlier unchased swordsmen of `build/movelords` 1.6 / 6.2 / 10.2 m): the centre moves 2–6 s after the order
+  stop-and-go (stands 0.5–1.5 s, then 3 m/s), from ~6 s at the run; the leaver's own melee flag stays on 7.5–10 s
+  (about `melee_breakoff_total_immunity_secs` 10). The simulator reaches the run 1.5 s after the order even free (the
+  game's turning probe: 2.0 s). Not found: no CA or community rule for the exit (the internet: players' claims only —
+  men finish the animation in progress, a unit "drags along one or two models", a ~5 s delay); the database has no exit
+  speed (`break_off_*` 0, `melee_attack_interval` 4, `matched_combat_*`). Tried as a test, not kept: a melee leaver
+  held 2 s (`contact.pin_melee_s` 2) — the twin 0 / 3.7 / 9.7 m, out of contact at 4.5–5 s like the game, but the check
+  does not move (game-AI battles 39 % / −41 → −39 %, network battles 40 % / +24 % both, same winner 137 → 138 of 169):
+  the slow exit does not explain the network battles' gap (there the simulator takes the enemy's health faster than
+  the game at 60–180 s: below the interval 51–57 %). OPEN.
 - **A lord against one infantry unit hits less often in the game than against a crowd.** At 2.07 men hit
   (measured on 1–4 units around him) a lord in a pair takes 13–31 % more off infantry than in the game.
 

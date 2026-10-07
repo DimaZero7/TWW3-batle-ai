@@ -61,7 +61,8 @@ is by the game's formulas now** (the melee core): hit
 chance 35 + attack − defence at weight 1 for everyone (a miss costs 0.5 s: a man lands p / (p × interval
 + 0.5) hits a second), damage — armour-piercing in full + base less the armour roll, overkill beyond a
 man's health is lost (smoothed), melee kills — **the wounded pool** (the wounded among the living at most
-the men in contact × the health a blow leaves; the rest is whole men), a lord's blow is divided by 4 and
+the men in contact × the health a blow leaves; the rest is whole men), missile kills — hits
+spread evenly over the living, each man with his own health, a lord's blow is divided by 4 and
 hits an average of 2.07 men, flank and rear — defence ×0.6 / ×0.3 (the flank is an enemy beyond 45° of the
 front, the rear beyond 135°, by CA), charge — only the charge bonus, on an attack order with a run-up
 towards the target, 13 s on its own clock, spearmen's charge reflection ×2 for 3.9 s (not cut by the hold
@@ -106,11 +107,11 @@ set of recordings is frozen.
 | Family | Inside 90 % | Skill | Old count |
 |---|---:|---:|---|
 | Mechanics: unit pairs and shooting (18 recordings) | 22 % (before the shooting, melee and whole-battle rules 20 %) | -65 % (-69 %) | 27 / 54 within 20 % (28 before probes P1–P4; 25 before these rules, without repeats 23 / 48; 24 before the charge fix; 51 before the melee core; core 2 - 37; shooting by the rules - 29; morale by the rules - 24) |
-| The game's AI against itself (28) | 36 % (35 %) | -42 % (-52 %) | same winner 15 / 26 (16 before probes P1–P4; 16 before these rules; 20 before the core, the core 21, core 2 and shooting 18, morale 16, movement and lords 15) |
-| The network against the game's AI (170) | 39 % (40 %) | +23 % (+24 %) | same winner 132 / 169 (139 before probes P1–P4; 139 before these rules; 126 before the core, the core 127, core 2 and shooting 132, movement and lords 137) |
+| The game's AI against itself (28) | 39 % (35 %) | -41 % (-52 %) | same winner 15 / 26 (16 before probes P1–P4; 16 before these rules; 20 before the core, the core 21, core 2 and shooting 18, morale 16, movement and lords 15) |
+| The network against the game's AI (170) | 40 % (40 %) | +24 % (+24 %) | same winner 137 / 169 (132 before even missile kills; 139 before probes P1–P4; 139 before these rules; 126 before the core, the core 127, core 2 and shooting 132, movement and lords 137) |
 | Gates: the network itself against ai_like (10 battles, 8 copies) | 80 % (80 %) | +7 % (+7 %) | - |
 
-Probes P1–P4 and the whole-battle probes (`build/probes7`, 12 battles in the game): pistol range by ranks, a rally without the 7 s wait, a move order through the enemy is not a melee exit; before them mechanics 22 % / -68 %, the game's AI 37 % / -31 %, the network 37 % / +22 %; without the exit rule the game's AI 39 % / -35 %, the network 38 % / +22 %.
+Probes P1–P4 and the whole-battle probes (`build/probes7`, 12 battles in the game): pistol range by ranks, a rally without the 7 s wait, a move order through the enemy is not a melee exit; before them mechanics 22 % / -68 %, the game's AI 37 % / -31 %, the network 37 % / +22 %; without the exit rule the game's AI 39 % / -35 %, the network 38 % / +22 %. Missile kills — hits evenly over the living (`kills.missile_uniform`, `build/open2`): before them the game's AI 36 % / -42 %, the network 39 % / +23 %, mechanics the same.
 
 By batch (shooting; melee and whole battle) and the worst quantities —
 [the score by change](training/simulator.md#the-score-by-the-shooting-melee-and-whole-battle-changes). The

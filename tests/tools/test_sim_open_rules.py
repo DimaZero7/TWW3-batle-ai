@@ -226,6 +226,48 @@ def test_the_wounded_pool_turns_melee_hp_into_whole_men_beyond_its_cap():
     assert men0 - float(st2.u["men"][0, H]) < lost_men
 
 
+# --- O1: projectile kills - hits spread evenly over the living men, each with his own health ---
+
+def _poisson_alive(K, tau):
+    return sum(math.exp(-tau) * tau ** k / math.factorial(k) for k in range(K))
+
+
+def test_shot_kills_follow_even_hits_on_men_with_their_own_health():
+    # 180 men of 50 HP, hits of 50/3 HP (3 to kill): volleys of 60 hits; the unit's own bookkeeping (HP lost = hits x
+    # HP a hit, men by the rule) keeps the Poisson living share 180 Q(3, hits / man so far)
+    men, hp_man, hit = torch.tensor([180.0]), torch.tensor([50.0]), torch.tensor([50.0 / 3])
+    hp, total, tau = torch.tensor([9000.0]), 0.0, 0.0
+    for v in range(6):
+        k = melee.shot_kills(torch.tensor([60.0]), men, hp_man, hp, hit)
+        tau += 60.0 / float(men)
+        men, hp, total = men - k, hp - 60.0 * hit, total + 60
+        assert float(men) == pytest.approx(180 * _poisson_alive(3, tau), rel=0.06, abs=1.5)
+    assert float(men) < 0.75 * 180                   # more men die than the old HP-share rule kept late
+
+
+def test_a_first_volley_on_fresh_men_kills_only_the_men_struck_k_times():
+    k = melee.shot_kills(torch.tensor([64.0]), torch.tensor([180.0]), torch.tensor([50.0]), torch.tensor([9000.0]),
+                         torch.tensor([50.0 / 3]))
+    assert float(k) == pytest.approx(180 * (1 - _poisson_alive(3, 64 / 180)), rel=0.05)   # ~1 man (the game: 0-3)
+    one = melee.shot_kills(torch.tensor([10.0]), torch.tensor([90.0]), torch.tensor([10.0]), torch.tensor([900.0]),
+                           torch.tensor([10.0]))
+    assert float(one) == pytest.approx(10.0)          # a hit that kills is a man
+
+
+def test_a_shot_unit_keeps_fewer_men_for_its_health_than_the_exponent_rule():
+    st = face_off(SPEAR, SLAVE, gap=80.0)
+    H = st.N // 2
+    hm = float(st.u["hp_man"][0, H])
+    men0 = float(st.u["men"][0, H])
+    # half its men's worth of wounds among the living already: the next hits kill more often
+    st.u["hp_abs"][0, H] = men0 * hm * 0.5
+    hits = torch.tensor([30.0])
+    k_new = float(melee.shot_kills(hits, st.u["men"][0, H:H + 1], st.u["hp_man"][0, H:H + 1],
+                                   st.u["hp_abs"][0, H:H + 1], torch.tensor([hm / 3])))
+    k_old = float(30 * (hm / 3) / hm * melee.kill_share(torch.tensor(hm), torch.tensor(hm / 3), 0.5))
+    assert k_new > 1.5 * k_old
+
+
 # --- C1: shattering by the database's thresholds ---
 
 class TestShatter:

@@ -343,6 +343,16 @@ def step(st, orders, params=None, dt=None):
         k_m = torch.minimum((W + D - W_cap).clamp(min=0), D) / hm
         pool_k = dm / D.clamp(min=1e-9)[:, None, :] * k_m[:, None, :]
         shot_k = (dmg - dm) / hm[:, None, :] * melee.kill_share(u["hp_man"][:, None, :], shit, cal["kills"]["exponent"])
+        if cal["kills"].get("missile_uniform"):
+            # kills.missile_uniform (build/open2): projectile hits spread evenly over the living men, each with his
+            # own health (melee.shot_kills: Poisson hits a man, tau from the unit's wounded); per pair by its hits
+            h_pair = (dmg - dm).clamp(min=0) / shit.clamp(min=1e-6)
+            H = h_pair.sum(1)
+            # the hits' mean HP (HP a man / their hits-weighted E[N] to kill)
+            K_t = (h_pair * hm[:, None, :] / shit.clamp(min=1e-6)).sum(1) / H.clamp(min=1e-9)
+            eff_t = torch.where(H > 0, hm / K_t.clamp(min=1e-6), hm)
+            k_t = melee.shot_kills(H, u["men"], u["hp_man"], u["hp_abs"], eff_t)
+            shot_k = h_pair / H.clamp(min=1e-9)[:, None, :] * k_t[:, None, :]
         kills = torch.where((u["men0"] > 1)[:, None, :], pool_k + shot_k, kills)
     hp_new = (u["hp_abs"] - taken).clamp(min=0)
     floor = torch.ceil(hp_new / u["hp_man"].clamp(min=1e-6) - 1e-6)

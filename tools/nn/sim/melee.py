@@ -88,6 +88,36 @@ def kill_share(hp_man, hit, exponent):
     return n.pow(-exponent)
 
 
+def shot_kills(hits, men, hp_man, hp_abs, per_hit):
+    """Men killed by `hits` projectile hits on a unit [B, N] (kills.missile_uniform; build/open2: the thin probe).
+    Every man has his own health and a projectile strikes one man; the hits spread evenly over the living men, so
+    a man's hits are Poisson: with tau hits a man so far and K = HP a man / per_hit hits to kill him (E[N],
+    smoothed as per_hit), the living share is Q(K, tau) (the regularised upper gamma: P(fewer than K hits)) and
+    `hits` more on A living men kill A x (1 - Q(K, tau + hits / A) / Q(K, tau)). tau comes from the unit's own
+    wounded: the living men's mean hits so far E[k | k < K] = tau Q(K - 1, tau) / Q(K, tau) = W / (A x per_hit),
+    W = men x HP a man - the unit's HP (the wounds of any source). A hit that kills (K <= 1) is a man."""
+    A = men.clamp(min=1e-6)
+    K = (hp_man / per_hit.clamp(min=1e-6)).clamp(min=1.0)
+    m_obs = ((men * hp_man - hp_abs).clamp(min=0) / (A * per_hit.clamp(min=1e-6)))
+    Ks = K.clamp(min=1.02)
+    m_obs = torch.minimum(m_obs, 0.95 * (Ks - 1))
+    lo, hi = torch.zeros_like(K), 4 * Ks + 30
+    lg = torch.lgamma(Ks)
+    for _ in range(16):                     # E[k | k < K] grows with tau: bisection (to ~1e-3 of a hit)
+        mid = (lo + hi) / 2
+        q = torch.special.gammaincc(Ks, mid).clamp(min=1e-30)
+        # Q(K - 1, tau) = Q(K, tau) - tau^(K-1) e^-tau / Gamma(K)
+        pk = torch.exp((Ks - 1) * torch.log(mid.clamp(min=1e-30)) - mid - lg)
+        m = mid * (1 - pk / q)
+        up = m < m_obs
+        lo, hi = torch.where(up, mid, lo), torch.where(up, hi, mid)
+    tau = (lo + hi) / 2
+    s0 = torch.special.gammaincc(Ks, tau).clamp(min=1e-30)
+    s1 = torch.special.gammaincc(Ks, tau + hits / A)
+    k = A * (1 - s1 / s0).clamp(0, 1)
+    return torch.where(K < 1.02, hits, k).clamp(min=0) * (men > 0)
+
+
 def spacing_of(u, spacing):
     """(h, v) [B, N]: a man's place across the front and between ranks, m (the unit's formation template,
     config/nn/units.json spacing; `spacing` where a unit has none)."""

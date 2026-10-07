@@ -105,8 +105,15 @@ A thinned target is hit as often as a fresh one with the same men: the formation
 4–6 m towards the shooter, the rear men step up). The "holes where the dead fell" rule is rejected; the simulator
 (the formation by the men left now) follows the rule. The mismatch is elsewhere: for the same health lost fewer men
 die in the simulator (after 720 arrows the target has 8 % health and 86 men, in the game 15 % and 47–49), so a thinned
-target stays "thicker" in it and is hit more late on. That is the missile kill rule (`kills.exponent`), not the hit
-chance — OPEN.
+target stays "thicker" in it and is hit more late on. The cause is the missile kill rule (`kills.exponent`), not the
+hit chance. The target's health steps in the recording are 19 (a wound) and 12 (a killing third hit on a 50-HP
+slave), so the game's hits are rebuilt exactly; with them the rule "hits evenly over the living" (a man's hits
+Poisson, nothing fitted) gives the game's men: 180 slaves at 25 / 41 / 60 / 80 / 100 / 120 s 167 / 146 / 109 / 70 /
+37 / 16 against 157 / 133 / 101 / 68 / 42 / 22 (`build/open2/poisson_test.py`). The simulator now does so
+(`kills.missile_uniform`): the twin after 720 arrows has 42–44 men (game 47–49, was 86). OPEN: the twin's health after
+720 arrows is 8–9 % (game 15–16 %): on a fresh target the simulator lands 0.77 arrows a shot, the game 0.63–0.70
+(down to 150 men), while its HP a hit is the mean 16 instead of a wound's 19 — the errors cancel in the first
+volleys' health and part towards the end.
 
 **P2. Pistol range — by ranks.** Militia (range 90, 7 ranks 1.7 m apart) on skavenslaves (10 ranks):
 
@@ -136,7 +143,7 @@ established — OPEN.
 ## What does not match (open)
 
 - Pistols fire as a stream from the first volley; arrows ~10 % more often than the game by the end of a lane (re-aim).
-- Fewer men die of arrows than in the game for the same health lost (P1), so a thinned target is hit more.
+- On a fresh target the simulator lands 0.77 arrows a shot, the game 0.63–0.70; its HP a hit is the mean 16 instead of a wound's 19 (P1): the errors cancel in the first volleys' health.
 - A target running at the shooter x1.15–1.25 a projectile, running away less (P3); no motion in the model.
 - Fire through friends: in the game blocked men fire and hit friends (P4); in the simulator they do not fire.
 - Rank: the simulator has no ranks (all battles rank 0).
