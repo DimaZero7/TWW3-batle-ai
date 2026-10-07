@@ -310,6 +310,11 @@ def nn_arena_config(args, run_config):
             # the other half of a swapped pair (tools/nn/gate.py): our network takes the other army
             arena = dict(arena, name=f"{arena['name']}_swap",
                          sides={"own": arena["sides"]["enemy"], "enemy": arena["sides"]["own"]})
+        if args.army_add or args.army_remove:
+            # our side's army changed by hand (tools/nn/army_edit.py): a battle for the game only
+            from tools.nn import army_edit
+            arena = army_edit.edit(arena, "own", add=[army_edit.parse(x) for x in args.army_add or ()],
+                                   remove=[army_edit.parse(x) for x in args.army_remove or ()])
         # A generated battle is not a scenario of the repository: its file goes next to the build.
         path = project.BUILD / args.target / f"{arena['name']}.xml"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -321,6 +326,8 @@ def nn_arena_config(args, run_config):
                               "cost": {s: arena["sides"][s]["cost"] for s in nn_scenario.SIDES},
                               "men": {s: sum(u["men"] for u in arena["sides"][s]["units"])
                                       for s in nn_scenario.SIDES}}
+        if "edit" in arena["sides"]["own"]:
+            run_config["army"]["edit"] = arena["sides"]["own"]["edit"]
     elif args.target == "nn-arena":
         arena = nn_scenario.write_scenario(defender, nn_scenario.load_arena(args.arena), duration_s=duration_s)
     else:
@@ -379,6 +386,12 @@ def main(argv=None):
     parser.add_argument("--army-swap", action="store_true",
                         help="nn-arena --army-seed: the seed's armies swapped (our side gets the generator's "
                              "enemy army): the second battle of a swapped pair (tools/nn/gate.py)")
+    parser.add_argument("--army-add", action="append", metavar="KEY[=N]",
+                        help="nn-arena --army-seed: add N (1) units of KEY (a unit of the side's pool, "
+                             "config/nn/pools.json) to our side (after --army-swap), deployed again by the "
+                             "generator's rule; repeatable. The file gets '_edit' (tools/nn/army_edit.py)")
+    parser.add_argument("--army-remove", action="append", metavar="KEY[=N]",
+                        help="nn-arena --army-seed: remove N (1) units of KEY from our side; repeatable")
     parser.add_argument("--decide-ms", type=int, default=1000,
                         help="nn-arena --own-ai net: model ms between two decisions (250..5000)")
     parser.add_argument("--arena", default="arena",
@@ -435,6 +448,14 @@ def main(argv=None):
         parser.error("--soldiers-every must be 0 or more")
     if args.army_swap and args.army_seed is None:
         parser.error("--army-swap is for --army-seed")
+    if (args.army_add or args.army_remove) and args.army_seed is None:
+        parser.error("--army-add/--army-remove are for --army-seed")
+    for spec in (args.army_add or []) + (args.army_remove or []):
+        from tools.nn import army_edit
+        try:
+            army_edit.parse(spec)
+        except ValueError:
+            parser.error(f"--army-add/--army-remove {spec!r}: KEY or KEY=N with N >= 1")
     if args.army_seed is not None and args.arena != "arena":
         parser.error("--army-seed and --arena are two sources of armies: give one")
     if not 30 <= args.timeout <= 3600:
