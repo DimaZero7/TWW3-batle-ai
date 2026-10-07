@@ -807,6 +807,18 @@ keep no such clock: their recorded orders go by the recorded time, with no wait 
 whose clock waited went on with an old order on another unit in 0.28 of the seconds the game's enemy lord
 fought ours. This is a rule of the replay (the check tool), not of the simulator.
 
+**A shooter whose target routs only in the simulation** (`missile.replay_router_release` 1, a replay rule too): a
+shooter's recorded ATTACK on a unit that routs in the simulation while in the recording it stood at that second is
+released - the shooter picks its own target (HOLD: the nearest standing enemy in range, else a routing one). In the
+game (`build/midfight/router_fire.py`, 170 network battles, 2430 routs of a shot target) a shooter is on another target
+1 s after its target routs in 42 % of the cases, 3 s after in 60 %, 17-21 % stay on it; the game's AI fires at a
+router with a standing enemy in range in 11 % of such seconds (621 of 5799). Where the target was routing in the
+recording too (the controller chose to shoot a router) the order stays. Before, routing enemies in the network's
+battles were shot 1.9-4.8x as long as in the game (0-180 s after the first contact: 888 / 1603 / 1332 s against 184 /
+525 / 682). The check (19 copies): the game's AI's battles 39 -> 43 % / skill -41 -> -37 %, the network's 40 % / +24 ->
++23 % (same winner 137 -> 134 of 169), mechanics unchanged (22 % / -65 %). It did not remove the network battles'
+excess at 60-180 s: a shooter released from a router strikes standing units, so the damage moves to them.
+
 A recorded break-off waits for actual separation. The `leave_m` inference is unchanged: a far
 point in recorded melee means leaving only for network units and missile units; other AI infantry
 still attack. A MOVE first recorded after separation also waits for separation, without skipping

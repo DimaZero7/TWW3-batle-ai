@@ -21,7 +21,7 @@ BASELINES = project.BUILD / "nn-train" / "baselines"
 # the canary (evaluate.baselines, test5 --baseline-canary) then recovers the old baseline when the first
 # pairs come out identical.
 # Files inside VERSION_FILES that script-vs-script battles never run (the replay check of recordings).
-VERSION_SKIP = ("tools/nn/sim/check.py",)
+VERSION_SKIP = ("tools/nn/sim/check.py", "tools/nn/sim/replay.py")
 VERSION_FILES = ("tools/nn/sim", "tools/nn/armies", "tools/nn/train/opponents.py", "tools/nn/train/scenes.py",
                  "tools/nn/train/reward.py", "tools/nn/train/randomise.py", "tools/nn/scenario.py", "tools/nn/units.py",
                  "tools/nn/abilities.py", "tools/nn/model", "config/nn")

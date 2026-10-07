@@ -275,7 +275,8 @@ def _simulate_batch(games, armies, params, device, copies, jitter_m, seed, end_a
                 s.done = s.done | over
                 cut.copy_(cut | over)
         rec(s)
-    policy = replay.Replay(rows, device=device, grace_s=0.0 if end_at_recording else 1e9)
+    policy = replay.Replay(rows, device=device, grace_s=0.0 if end_at_recording else 1e9,
+                           router_release=params.sim["missile"].get("replay_router_release", False))
     battle.run(st, policy, params, record=record)
     winners = st.winner.cpu().numpy()
     cuts = cut.cpu().numpy()

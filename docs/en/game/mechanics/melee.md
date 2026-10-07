@@ -396,6 +396,23 @@ unit is out of contact ~4 s after the order (its own melee flag goes off only af
   does not move (game-AI battles 39 % / −41 → −39 %, network battles 40 % / +24 % both, same winner 137 → 138 of 169):
   the slow exit does not explain the network battles' gap (there the simulator takes the enemy's health faster than
   the game at 60–180 s: below the interval 51–57 %). OPEN.
+- **In whole battles the melee rate falls with the contact's age more steeply than in the simulator**
+  (`build/midfight`, 170 network battles, 4 copies, `diag.py` / `agg*.py`). HP/s of a melee unit under one enemy in
+  melee by time since the contact began (0–5 / 5–15 / 15–30 / 30–60 / 60–120 / 120+ s): struck by the game's AI —
+  game 39 / 35 / 27 / 24 / 24 / 20, simulator 31 / 25 / 23 / 23 / 25 / 22; struck by the network — game 24 / 23 /
+  20 / 17 / 14 / 13, simulator 27 / 21 / 20 / 19 / 19 / 17. So in the game the rate after 60 s of contact is ~0.55
+  of the first 5 s, in the simulator ~0.7: early the simulator is weaker than the game, late stronger (this is the
+  network battles' excess at 60–180 s: the enemy's health in melee x1.08–1.16, out of melee x1.2–1.4, most of it
+  routers, below). What does not explain it: (1) reach — in the probe (`build/midfight/near_age.py`, plan `hit` and
+  P2) 23–26 men are within 2.5 m of an enemy in the first 5 s, 13 by 15–20 s and 12–14 on to 90 s; (2) men lost —
+  the game's formation keeps its front while men die (slaves 180 → 63: width 26.8 → 23.1 m, depth 16.7 → 4.1 m;
+  `width.py`), and in the probe's 90 s lanes a unit down to 58 % of its men strikes no slower (flagellants →
+  clanrats 48 → 56 HP/s; `lane_rate.py`); (3) fatigue — for the game's AI's strikers at one fatigue level the
+  simulator matches (x0.98–1.01 at levels 3–5), for the network's it does not (x1.1–1.46). In the 121 recorded
+  pairs (isolated pairs, `age_pairs.py`) the residual to the rule depends most on the striker's share of men (0.69
+  / 0.84 / 0.94 / 1.15 at 20–40 / 40–60 / 60–80 / 80–100 %), but the probe rules this out for fresh units — so it
+  travels with long fights (fatigue, morale, orders) and is not a rule. No rule found (online: nothing on a
+  miss's time or the tempo after a miss; `unit_fatigue_effects` do not touch the attack speed) — OPEN.
 - **A lord against one infantry unit hits less often in the game than against a crowd.** At 2.07 men hit
   (measured on 1–4 units around him) a lord in a pair takes 13–31 % more off infantry than in the game.
 

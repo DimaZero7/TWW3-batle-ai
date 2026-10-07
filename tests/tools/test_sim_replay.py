@@ -173,3 +173,46 @@ def test_a_lords_orders_keep_the_recorded_time():
     assert not r["phase"][:, 0].any()
     assert r["phase"][5, 1] == 2                     # the formation keeps its latch
 
+
+
+def shooting_rows(target_routing):
+    """Unit 0 (a shooter) ordered to attack unit 1 for 3 recorded seconds; target_r: unit 1 routing in the recording."""
+    r = {k: v for k, v in rows().items() if k not in ("phase", "end", "phase_target")}
+    r["kind"] = np.array([[O.ATTACK, O.HOLD]] * 5); r["target"] = np.array([[1, -1]] * 5)
+    r["target_r"] = np.array([[target_routing, False]] * 5)
+    return r
+
+
+def shooter_state():
+    st = state()
+    st.u["range"] = torch.tensor([[130., 0.]])
+    return st
+
+
+def test_router_release_frees_a_shooter_whose_target_routs_only_in_the_simulation():
+    st = shooter_state(); policy = replay.Replay([shooting_rows(False)], router_release=True)
+    assert policy(st).kind[0, 0] == O.ATTACK
+    st.u["r"][0, 1] = True; st.t[:] = 1.
+    o = policy(st)
+    assert o.kind[0, 0] == O.HOLD and o.target[0, 0] == -1      # fire at will: a standing enemy in range first
+
+
+def test_router_release_keeps_an_order_on_a_router_the_recording_shot_and_is_off_by_default():
+    st = shooter_state(); st.u["r"][0, 1] = True
+    o = replay.Replay([shooting_rows(True)], router_release=True)(st)
+    assert o.kind[0, 0] == O.ATTACK and o.target[0, 0] == 1    # the controller chose a router
+    o = replay.Replay([shooting_rows(False)])(st)
+    assert o.kind[0, 0] == O.ATTACK and o.target[0, 0] == 1    # off: the recorded order
+
+
+def test_router_release_leaves_melee_units_and_shooters_in_melee():
+    st = shooter_state(); st.u["r"][0, 1] = True; st.u["m"][0, 0] = True
+    assert replay.Replay([shooting_rows(False)], router_release=True)(st).kind[0, 0] == O.ATTACK
+    st = state(); st.u["range"] = torch.zeros(1, 2); st.u["r"][0, 1] = True
+    assert replay.Replay([shooting_rows(False)], router_release=True)(st).kind[0, 0] == O.ATTACK
+
+
+def test_recorded_orders_mark_attacks_on_a_recorded_router():
+    b = recording(); b.f["m"][:] = False; b.f["fire"][:] = True; b.f["r"][3, 1] = True
+    r = replay.recorded_orders(b, [0, 1], 2)
+    assert r["target_r"][:, 0].tolist() == [False, False, False, True, False, False, False]

@@ -111,6 +111,7 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
     phase = np.zeros((T, N), dtype=np.int64)
     end = np.broadcast_to(np.arange(1, T + 1)[:, None], (T, N)).copy()
     phase_target = np.full((T, N), -1, dtype=np.int64)
+    target_r = np.zeros((T, N), dtype=bool)
     # The nearest living enemy of each unit each second (for fights without a recorded target).
     xs, zs = np.nan_to_num(f["x"], nan=1e6), np.nan_to_num(f["z"], nan=1e6)
     dist = np.hypot(xs[:, :, None] - xs[:, None, :], zs[:, :, None] - zs[:, None, :])
@@ -143,6 +144,7 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
         fighting = m_i & ~attack & ~leaving
         kind[:, s] = np.where(attack, O.ATTACK, np.where(fighting, O.HOLD, O.MOVE))
         target[:, s] = np.where(attack, mapped, -1)
+        target_r[:, s] = attack & np.asarray(f["r"], bool)[np.arange(T), np.clip(tg, 0, None)]
         x[:, s], z[:, s] = ox, oz
         running = f["f"][:, i]
         # Look ahead without wrapping the recording's first flags into its last seconds.
@@ -191,7 +193,7 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
                 phase[b, s] = 2
                 end[b, s] = b + 1
     return {"kind": kind, "x": x, "z": z, "target": target, "run": run,
-            "phase": phase, "end": end, "phase_target": phase_target}
+            "phase": phase, "end": end, "phase_target": phase_target, "target_r": target_r}
 
 
 class Replay:
@@ -204,7 +206,7 @@ class Replay:
     One instance belongs to one simulation; decreasing battle time resets its clocks.
     """
 
-    def __init__(self, rows, device="cpu", after=nearest_attack, grace_s=120.0):
+    def __init__(self, rows, device="cpu", after=nearest_attack, grace_s=120.0, router_release=False):
         T = max(r["kind"].shape[0] for r in rows)
         N = rows[0]["kind"].shape[1]
         B = len(rows)
@@ -214,8 +216,18 @@ class Replay:
         keys = ("kind", "x", "z", "target", "run")
         if self.phased:
             keys += ("phase", "end", "phase_target")
+        # router_release (missile.replay_router_release): a shooter's recorded ATTACK on a unit that routs in the
+        # simulation but stood in the recording at that second is released to fire at will (HOLD: the nearest
+        # standing enemy in range first) - in the game a shooter whose target starts routing takes another target
+        # within 1-3 s (build/midfight/router_fire.py: 170 network battles, 2430 routs of a shot target: +1 s 42 %,
+        # +3 s 60 % on another target, 17-21 % stay on it); the game's AI fires at a router with a standing enemy in
+        # range in 11 % of its router-firing seconds (621 of 5799). The recorded order stays where the recording's
+        # target was routing too (the controller chose to shoot a router).
+        self.router_release = bool(router_release) and all("target_r" in r for r in rows)
+        if self.router_release:
+            keys += ("target_r",)
         for k in keys:
-            fill = {"kind": O.HOLD, "target": -1}.get(k, 0)
+            fill = {"kind": O.HOLD, "target": -1, "target_r": False}.get(k, 0)
             arr = np.full((B, T, N), fill, dtype=rows[0][k].dtype)
             for b, r in enumerate(rows):
                 arr[b, :r[k].shape[0]] = r[k]
@@ -269,6 +281,12 @@ class Replay:
             waiting = (gather(self.stack["phase"]) == 1) & (self.clock >= gather(self.stack["end"]) - 0.0011)
             o.kind = torch.where(waiting & valid, O.ATTACK, o.kind)
             o.target = torch.where((o.kind == O.ATTACK) & valid, tg, o.target)
+        if self.router_release:
+            u = st.u
+            routs = (o.target >= 0) & u["r"].gather(1, o.target.clamp(min=0))
+            free = ((o.kind == O.ATTACK) & routs & ~gather(self.stack["target_r"]) & (u["range"] > 0) & ~u["m"])
+            o.kind = torch.where(free, O.HOLD, o.kind)
+            o.target = torch.where(free, torch.full_like(o.target, -1), o.target)
         over = (sec >= self.length + self.grace)[:, None].expand(-1, st.N)
         if bool(over.any()):
             o = O.merge(o, self.after(st), over)
