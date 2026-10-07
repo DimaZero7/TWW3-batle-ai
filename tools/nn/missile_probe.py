@@ -46,6 +46,16 @@ Plans (each battle 4-5 lanes):
            ahead (not offset) and the target 60 m (the militia's P4) and 80 m off (the handgunners' hglof), and
            handgunners with the spearmen 60 m ahead, the target 80 m (1 battle): does the weapon or the friends'
            distance to the target decide whether a covered unit fires;
+  lofthresh  the threshold of fire past friends (the arc of a flat shot over their heads, build/lof_research): handgunners
+           with our spearmen 40 m ahead and the target's centre ~70 / 75 / 80 / 85 m off, militia the same at ~80 m
+           (1 battle): from which target distance a covered unit fires - with lofheight, the muzzle's and the aim
+           point's heights;
+  lofheight  the same arc along the line: handgunners, the target's centre ~85 m off, our spearmen 15 / 25 / 50 / 60 m
+           ahead (a friend near the shooter tests the muzzle's height, near the target the aim point's); and the
+           throwing stars on a standing target ~90 m off (with rangestand) (1 battle);
+  rangestand  direct fire that moves on a STANDING target past the range: militia (range 90) on skavenslaves ~100 /
+           105 / 110 m off, throwing stars (range 70) on flagellants ~80 / 85 m off (1 battle): do they shoot that
+           far without the target stepping in (rangenew: 113 / 92 m at a stepping target);
   meleefire  shooting into a melee (the fire-position drill, build/drill_fire/design.md): handgunners at will on
            clanrat spearmen that Empire spearmen walk into melee with - from behind our men, at 45 deg, along the
            contact (90 deg) - and the same melee without fire (control) (1 battle): the fire rate, the target's and
@@ -106,7 +116,11 @@ Z0 = -80               # the shooters' line
 SETTLE_MS = 4000
 TICK_MS = 500
 PLANS = ("dist", "arc", "range", "targets", "shield", "moving", "rank", "thin", "pistol", "moving2", "lof",
-         "newdist", "starsmove", "meleefire", "hglof", "rangenew", "lofab")
+         "newdist", "starsmove", "meleefire", "hglof", "rangenew", "lofab", "lofthresh", "lofheight", "rangestand")
+# The game places a lane's target with its front, not its centre, at d (the recordings: centre ~9-10 m farther, the
+# skavenslaves' and the flagellants' half depth plus the shooter's own offset): plans that want a centre distance take
+# d = centre - CENTRE_OFFSET (the analysis reads the recorded places anyway).
+CENTRE_OFFSET = 9.5
 DIST = {"archers": (40, 80, 120, 128), "militia": (30, 50, 70, 88), "slingers": (40, 80, 110, 118),
         "nr": (40, 80, 120, 138)}
 TARGET_OF = {"archers": "slave", "militia": "slave", "slingers": "flag", "nr": "flag"}
@@ -191,6 +205,17 @@ def battles(plan):
         return [[lane("hg", "slave", 160, start_d=160, **step), lane("hg", "slave", 160, start_d=160, t_width=60, **step),
                  lane("xb", "slave", 175, start_d=175, **step), lane("stars", "flag", 85, start_d=85, **step),
                  lane("militia", "slave", 105, start_d=105, **step)]]
+    if plan == "lofthresh":
+        fr = dict(friend="spear", friend_width=30, friend_lat=0, friend_fwd=40)
+        return [[lane("hg", "slave", c - CENTRE_OFFSET, **fr) for c in (70, 75, 80, 85)]
+                + [lane("militia", "slave", 80 - CENTRE_OFFSET, **fr)]]
+    if plan == "lofheight":
+        fr = dict(friend="spear", friend_width=30, friend_lat=0)
+        return [[lane("hg", "slave", 85 - CENTRE_OFFSET, friend_fwd=f, **fr) for f in (15, 25, 50, 60)]
+                + [lane("stars", "flag", 90 - CENTRE_OFFSET)]]
+    if plan == "rangestand":
+        return [[lane("militia", "slave", c - CENTRE_OFFSET) for c in (100, 105, 110)]
+                + [lane("stars", "flag", c - CENTRE_OFFSET) for c in (80, 85)]]
     if plan == "lofab":
         fr = dict(friend="spear", friend_width=30, friend_lat=0)
         return [[lane("militia", "slave", 60, friend_fwd=40, **fr), lane("militia", "slave", 80, friend_fwd=40, **fr),

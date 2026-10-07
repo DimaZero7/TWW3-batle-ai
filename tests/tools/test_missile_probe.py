@@ -114,3 +114,20 @@ def test_the_simulator_twin_runs_the_new_lanes():
     assert abs(f["z"] - t["z"]) < 20 and melee["samples"][-1][2]["hp"] < melee["samples"][0][2]["hp"]
     m0, m1 = moving["samples"][0][1], moving["samples"][-1][1]
     assert abs(m1["x"] - m0["x"]) > 20
+
+
+def test_the_fire_past_friends_and_standing_range_plans():
+    """lofthresh: handgunners, friends 40 m ahead, the target's centre ~70-85 m (d = centre - CENTRE_OFFSET), militia
+    at ~80; lofheight: the target ~85 m, friends 15 / 25 / 50 / 60 m ahead, and stars at ~90; rangestand: militia
+    ~100 / 105 / 110 m and stars ~80 / 85 m, standing targets, no friends."""
+    off = mp.CENTRE_OFFSET
+    th = mp.battles("lofthresh")[0]
+    assert [(l["shooter"], round(l["d"] + off), l["friend_fwd"]) for l in th] == [
+        ("hg", 70, 40), ("hg", 75, 40), ("hg", 80, 40), ("hg", 85, 40), ("militia", 80, 40)]
+    ht = mp.battles("lofheight")[0]
+    assert [l.get("friend_fwd") for l in ht if l["shooter"] == "hg"] == [15, 25, 50, 60]
+    assert all(round(l["d"] + off) == 85 for l in ht if l["shooter"] == "hg")
+    rs = mp.battles("rangestand")[0]
+    assert all(l["target_mode"] == "stand" and not l.get("friend") for l in rs)
+    assert sorted(round(l["d"] + off) for l in rs if l["shooter"] == "militia") == [100, 105, 110]
+    assert sorted(round(l["d"] + off) for l in rs + ht if l["shooter"] == "stars") == [80, 85, 90]

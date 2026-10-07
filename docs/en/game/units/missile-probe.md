@@ -212,9 +212,17 @@ Also OPEN:
 - crossbows at the range's edge: hits a shot 0.45 at 160 m (the game) against 0.72 (the simulator); at 119 m 0.69 / 0.77;
 - the thinned target (P1): the game needs more shots (handguns 1669 against 1170).
 
-Minimal measurements next (1 battle each): (1) militia and stars on a **standing** target at 100 / 105 / 110 and 80 / 85 /
-90 m - do they shoot that far without the target stepping in; (2) handguns with friends 40 m ahead and the target at
-70 / 75 / 80 / 85 m + militia at 80 m - the distance from which a covered unit fires.
+Measurements next (3 battles, prepared, `build/steps/newunits_probe.ps1 -Only probes -Plans lofthresh,lofheight,rangestand`).
+A web search (`build/lof_research/notes.md`) explained fire past friends: a check per man along the bullet's real arc (`low`:
+a fixed speed, the angle rises with the range), friends at their real size (the True Sight mod); two numbers are missing - the
+muzzle's height and the aim point's height. The probes give them (the target's centre is `d` + `CENTRE_OFFSET` 9.5 m: the game
+places the target with its front at `d`):
+
+| Plan | Lanes | What it gives |
+|---|---|---|
+| `lofthresh` | handguns, friends 40 m ahead, the target's centre ~70 / 75 / 80 / 85 m; militia the same at ~80 m | the target distance from which a covered unit fires: the muzzle's and aim point's heights together (and the pistol against the handgun) |
+| `lofheight` | handguns, the target ~85 m, friends 15 / 25 / 50 / 60 m ahead; stars on a standing target ~90 m | friends near the shooter test the muzzle's height, near the target the aim point's (by the arc the clearance changes sign in these lanes for a muzzle at 1.3–1.7 m and an aim point at 0.9–1.2 m) |
+| `rangestand` | militia on a standing target ~100 / 105 / 110 m, stars ~80 / 85 m | do units that fire on the move shoot that far without the target stepping in (`rangenew`: 113 / 92 m at a stepping one) |
 
 
 ## What does not match (open)
