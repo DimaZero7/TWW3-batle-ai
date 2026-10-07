@@ -212,17 +212,56 @@ Also OPEN:
 - crossbows at the range's edge: hits a shot 0.45 at 160 m (the game) against 0.72 (the simulator); at 119 m 0.69 / 0.77;
 - the thinned target (P1): the game needs more shots (handguns 1669 against 1170).
 
-Measurements next (3 battles, prepared, `build/steps/newunits_probe.ps1 -Only probes -Plans lofthresh,lofheight,rangestand`).
-A web search (`build/lof_research/notes.md`) explained fire past friends: a check per man along the bullet's real arc (`low`:
-a fixed speed, the angle rises with the range), friends at their real size (the True Sight mod); two numbers are missing - the
-muzzle's height and the aim point's height. The probes give them (the target's centre is `d` + `CENTRE_OFFSET` 9.5 m: the game
-places the target with its front at `d`):
+### Fire past friends by the bullet's arc, and the range of units that fire on the move (`lofthresh`, `lofheight`, `rangestand`)
 
-| Plan | Lanes | What it gives |
+Played 07.10.2026 (runs `20261007-144040` - the game quit at second 280 of 300, the data whole up to it; `-144523`,
+`-144644`; analysis `build/step4c`). The web (`build/lof_research/notes.md`): the line of fire is checked man by man along
+the bullet's real arc (`low`: a fixed speed, the angle rises with the range), friends at their real size (the True Sight mod).
+The two unknown heights are measured.
+
+**Heights (measured).** The share of the men firing in the first volley in 16 lanes (handgunners and militia behind Empire
+spearmen 1.8 m at skavenslaves 1.3 m: `lofthresh`, `lofheight`, `lofab`, `hglof`) against the arc computed man by man (5 / 7
+shooter ranks × 9 points of the target's depth, `build/step4c/fit.py`): best **muzzle 1.50 m, aim point 0.80 m** (next 1.50 /
+0.85 and 1.55 / 0.75; by the steady fire rate 1.55 / 0.75), an error of 0.12 share per lane. The aim point is measured on
+skavenslaves only - whether it rises with the target's height is OPEN.
+
+| Friends ahead / target centre | Game: share of men (1st volley) / friends' HP lost | Arc | Simulator before: shots / friends' HP | After |
+|---|---|---|---|---|
+| handguns, 38 m / 67.5 m | 0.06 / 452 | 0.04 | 0 / 0 | 0 / 0 |
+| handguns, 37 m / 72 m | 0.46 / 4827 | 0.36 | 0 / 0 | 810 / 6809 |
+| handguns, 38 m / 79 m | 0.87 / 7989 | 0.71 | 0 / 0 | 1001 / 6600 |
+| handguns, 38 m / 84 m | 0.99 / 7749 | 0.96 | 0 / 0 | 1260 / 7796 |
+| handguns, 15 m / 84 m | 0.37 / 7020 | 0.47 | 0 / 0 | 692 / 4418 |
+| handguns, 23 m / 83 m | 0.99 / 7800 | 0.96 | 0 / 0 | 1232 / 6645 |
+| handguns, 48 m / 84 m | 0.69 / 7107 | 0.62 | 0 / 0 | 934 / 6442 |
+| handguns, 58 m / 87 m | 0.04 / 2679 | 0.42 | 0 / 0 | 900 / 7100 |
+| handguns, 58 m / 88 m (`lofab`) | 0.54 / 6432 | 0.51 | 0 / 0 | 900 / 6833 |
+| militia, 41 m / 80.5 m | 1.00 / 7429 | 0.95 | 0 / 0 | 2160 / 8280 |
+| militia, 39.5 m / 68.5 m (`lofab`) | 0.42, then stop / 986 | 0.37 | 0 / 0 | 1238 / 6042 |
+
+The rule in the simulator (`missile.arc_los`, `arc_lines`): a friendly unit in the way covers only the lines whose arc does
+not pass over its men's heads (height × `projectile_friendly_fire_man_height_coefficient`, 1.0 with True Sight); a 2 × 2 grid
+(the shooter's ranks and the target's men, Gauss nodes); the clearing lines' bullets that pass below the friends' heads by the
+spread hit the friends (`friend_catch`; the game 0.22–0.27 hits a shot of a covered unit, the simulator 0.21–0.30). Arcing fire
+(arrows, slings) is not checked. Cost: the simulator's step on the CPU ~+10 %.
+
+Does not match (OPEN): the militia with the target at 68.5 m fall silent after the first volley in the game (0.42 - as the arc's
+0.37), the simulator fires a third of the rate; handguns 58 / 87 m - the game 0.04 against 0.54 in the same setting of `lofab`
+(noise at the edge). Friends off to the side (offset 22.5 m): the game 0.07 hits a shot, the simulator 0.004 - the simulator
+converges the lines on the target's centre, while the game's standing shooters take a random man of the target (excerpt of
+CA bug report 7955) - a fix of the geometry across the line, separately.
+
+**The range of units that fire on the move (`rangestand`, a standing target)** - no rule, OPEN:
+
+| Unit, target centre | Game: 1st volley / rate | Simulator |
 |---|---|---|
-| `lofthresh` | handguns, friends 40 m ahead, the target's centre ~70 / 75 / 80 / 85 m; militia the same at ~80 m | the target distance from which a covered unit fires: the muzzle's and aim point's heights together (and the pistol against the handgun) |
-| `lofheight` | handguns, the target ~85 m, friends 15 / 25 / 50 / 60 m ahead; stars on a standing target ~90 m | friends near the shooter test the muzzle's height, near the target the aim point's (by the arc the clearance changes sign in these lanes for a muzzle at 1.3–1.7 m and an aim point at 0.9–1.2 m) |
-| `rangestand` | militia on a standing target ~100 / 105 / 110 m, stars ~80 / 85 m | do units that fire on the move shoot that far without the target stepping in (`rangenew`: 113 / 92 m at a stepping one) |
+| militia (range 90), 103 / 103.6 / 111 m | 1.00 / 0.07 / 0.98; rate 0.49–0.53 of the full | 0.14 at 103 m, then 0 |
+| stars (range 70), 79 / 85 / 89.5 m | 1.00 / 1.00 / 1.00; rate 0.49 / 0.54 / 0.64 | 0.22 at 79 m, then 0 |
+
+Units that fire on the move shoot a standing target past their range with a whole volley and then at about half the rate -
+up to the farthest measured point (+21 / +19.5 m). The per-rank rule (from the pistols' P2) does not give this; there is no
+upper limit (the pistol's and stars' `f41` 200 in the database - perhaps the projectile's expiry range). 1 battle needed:
+militia on a standing target at ~120 / 135 / 150 m and stars at ~95 / 110 m - where this fire ends.
 
 
 ## What does not match (open)

@@ -286,7 +286,7 @@ def step(st, orders, params=None, dt=None):
     can = ready & ~turning & (u["aim"] >= u["aim_s"])
     m_target = torch.where(can, aim_at, torch.full_like(aim_at, -1))
     # direct fire needs a clear line past friends (missile.py clear_shot); arcing fire: unchanged
-    m_target, clear = missile.clear_shot(u, pw, m_target, can, tgt, kind == O.ATTACK, params)
+    m_target, clear, catch = missile.clear_shot(u, pw, m_target, can, tgt, kind == O.ATTACK, params, with_catch=True)
     # a standing unit's men fire only at a target centre within their fire arc (missile.arc_share; the database's
     # battle_entities fire arc): out-of-arc men lose the volley like blocked ones (they reload too)
     if ms_cal.get("per_man_arc"):
@@ -316,7 +316,7 @@ def step(st, orders, params=None, dt=None):
     # (between volleys the unit is still shooting at its target: the game's IsFiringMissiles, the `fire` flag)
     volley_target = torch.where(full, m_target, torch.full_like(m_target, -1))
     shots, hp_missile, shit = missile.volley(u, pw, volley_target, dt, params, contact=touch, clear=clear,
-                                             loaded=loaded.clamp(max=1.0))
+                                             loaded=loaded.clamp(max=1.0), catch=catch)
     u["unready"] = torch.where(shots > 0, torch.ones_like(unready), unready)
     if reaim:
         u["late"] = torch.where(shots > 0, torch.zeros_like(u["late"]), u["late"])

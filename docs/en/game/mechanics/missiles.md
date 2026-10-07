@@ -111,6 +111,10 @@ Artillery is in [artillery](artillery.md). Conventions: [index](README.md). Our 
   1.3.0 let overlapping friends count as one unit for line of fire; abused by stacking, reverted in
   1.3.1. 8.0: shooters with a blocked line no longer walk up into melee. · [twwstats][tws],
   [PCGamesN][pcg131], [8.0 notes][p80] · high.
+  - Ours (`missile.arc_los`): the check along the bullet's arc - a friendly unit covers the line only if the arc does
+    not pass over its men's heads; the muzzle 1.5 m and the aim point 0.8 m are measured ([probe](../units/missile-probe.md));
+    bullets below the heads by the spread hit the friends. With the True Sight mod this is "fire through any gap their
+    projectiles can physically pass through" (the mod's description). · measured · high.
 - **Fire at will may shoot into melee** (`allow_fire_at_will_into_melee` 1). · DB · high.
   - Ours: agreement; 57 % of arena shots went at enemies in melee when there were some.
 

@@ -179,9 +179,9 @@ same battles. **The simulator is too kind to the network** — the main measured
   Night Runners) is not checked against recordings; the third wave is checked by the missile probe
   ([results](game/units/missile-probe.md#the-third-waves-results-the-game--the-simulator-before--after-the-changes)): the
   handguns' and stars' reload and the stars' fire behind on the move are measured; the handguns' range is the centre rule, the share of
-  bullets on friends in a melee is measured 0.08; open - fire past friends (at a target ~90 m off the game fires at the full
-  rate and hits its friends, at ~70 m it holds; the simulator always holds) and the militia's and stars' fire at a
-  stepping target 20 m beyond their range;
+  bullets on friends in a melee is measured 0.08; fire past friends by the bullet's arc (muzzle 1.5 m and aim point 0.8 m - measured
+  in 16 lanes; friends catch the bullets below their heads); open - the militia and stars shoot a standing target too
+  20 m beyond their range (at half the rate), the aim point on a target of another height;
 - not modelled: terrain, forests, visibility (`vis` is always true), cavalry, monsters, magic,
   flying, artillery, experience ranks. The casualty window is fitted, not taken from the database
   ([conflict table](game/mechanics/README.md#conflicts-with-our-simulator)).

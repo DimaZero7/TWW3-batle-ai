@@ -1587,29 +1587,58 @@ class TestSecondWave:
         assert float(u["fxt0_cd"][0, 0]) == 0
         assert step(melee, cmb=3.0)                               # on at the next contact
 
-    def _spent(self, shooter, side1_more=(), enemies=((SPEAR, -20, 0, 270),), steps=40, orders=None):
-        st = scenario.build([army([(shooter, -100, 0, 90), *side1_more], list(enemies))], P)
+    def _spent(self, shooter, side1_more=(), enemies=((SPEAR, -20, 0, 270),), steps=40, orders=None, params=P):
+        st = scenario.build([army([(shooter, -100, 0, 90), *side1_more], list(enemies))], params)
         for _ in range(steps):
             o = replay.hold(st) if orders is None else orders(st)
-            battle.step(st, o, P)
+            battle.step(st, o, params)
         return float(st.u["ammo0"][0, 0] - st.u["a"][0, 0]), st
 
     def test_direct_fire_is_blocked_by_a_friendly_unit_in_between_arcing_fire_is_not(self):
+        """The line's geometry across (a straight line, missile.arc_los off: whether the arc clears the friends is
+        test_direct_fire_past_friends_follows_the_bullets_arc)."""
         screen = ((SPEAR, -60, 0, 90),)
-        open_m, _ = self._spent(MILITIA)
-        blocked_m, st = self._spent(MILITIA, screen)
+        line = P.with_cal("missile", arc_los=None)
+        open_m, _ = self._spent(MILITIA, params=line)
+        blocked_m, st = self._spent(MILITIA, screen, params=line)
         assert bool(st.u["direct"][0, 0]) and open_m > 0 and blocked_m == 0
         open_a, _ = self._spent(ARCHER)
         over_a, st = self._spent(ARCHER, screen)
         assert not bool(st.u["direct"][0, 0]) and open_a > 0 and over_a == pytest.approx(open_a, rel=0.05)
         # a screen half way, off to one side, blocks about half of the men (their lines converge on the
         # target's centre: half way a line is at half its offset)
-        part_m, _ = self._spent(MILITIA, ((SPEAR, -60, 16, 90),))
+        part_m, _ = self._spent(MILITIA, ((SPEAR, -60, 16, 90),), params=line)
         assert 0.2 * open_m < part_m < 0.8 * open_m
+
+    def test_direct_fire_past_friends_follows_the_bullets_arc(self):
+        """missile.arc_los (probes lofthresh, lofheight, lofab, hglof; muzzle 1.5 m, aim point 0.8 m measured): handgunners
+        with our spearmen 40 m ahead hold fire at skavenslaves ~68 m off (the arc too low over the friends' heads; the
+        game 0.04-0.06 of the men) and fire at ~90 m (the game: the full rate, the friends catching 0.22-0.27 hits a
+        shot); without arc_los (a straight line) they hold at both; arcing fire (archers) is not checked at all."""
+        hg = "wh_main_emp_inf_handgunners"
+        screen = ((SPEAR, -60, 0, 90),)
+
+        def fire(d, params=P, key=hg):
+            st = scenario.build([army([(key, -100, 0, 90), *screen], [(SLAVES, -100 + d, 0, 270)])], params)
+            hp0 = float(st.u["hp_abs"][0, 1])
+            for _ in range(80):
+                battle.step(st, replay.hold(st), params)
+            return float(st.u["ammo0"][0, 0] - st.u["a"][0, 0]), hp0 - float(st.u["hp_abs"][0, 1]), st
+        near, f_near, _ = fire(68.0)
+        far, f_far, st = fire(90.0)
+        men = float(st.u["men0"][0, 0])
+        assert near < 0.25 * far and far >= 0.8 * 3 * men                    # ~3 volleys in 40 s at the full rate
+        per_hit = 17 + 5 * (1 - 0.75 * 0.30)                                  # the rule's HP a bullet takes from spearmen
+        assert 0.1 < f_far / far / per_hit < 0.4                              # the friends catch part of the bullets
+        line = P.with_cal("missile", arc_los=None)
+        assert fire(90.0, line)[0] == 0
+        arch, _, _ = fire(90.0, key=ARCHER)
+        arch_line, _, _ = fire(90.0, line, key=ARCHER)
+        assert arch == pytest.approx(arch_line) and arch > 0
 
     def test_a_blocked_direct_fire_unit_shoots_another_target_it_can_see(self):
         _, st = self._spent(MILITIA, ((SPEAR, -60, 0, 90),), enemies=((SPEAR, -20, 0, 270), (SLAVE, -30, 50, 270)),
-                            steps=30)
+                            steps=30, params=P.with_cal("missile", arc_los=None))
         H = st.N // 2
         assert int(st.u["target"][0, 0]) == H + 1 and bool(st.u["fire"][0, 0])
 

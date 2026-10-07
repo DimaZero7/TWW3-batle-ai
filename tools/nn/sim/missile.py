@@ -58,6 +58,10 @@ do not shoot; at unit_firing_line_of_sight_considered_obstructed_ratio (vanilla 
 wholly blocked unit) the unit holds fire at that target and takes the next one in range (an ordered target too:
 the bridge releases a blocked shooter to fire at will), or holds fire. (config/nn/game_rules.json "_mods".) Enemies in the way do not block (the game's clear-shot
 test is about friends). Flat map: no fire over friends from higher ground.
+With missile.arc_los (07.10.2026) the line is the bullet's arc (arc_lines): a friend in the way blocks only the lines
+whose arc does not clear its men's heads (a flat shot keeps its speed, so a far target's arc rises higher - the probes:
+a target ~70 m behind friends 40 m ahead stops the fire, ~85-90 m does not); the shots of the clearing lines that pass
+below the friends' heads by the spread hit them (friend_catch; the game: 0.22-0.27 hits a shot of a covered unit).
 """
 import math
 
@@ -249,9 +253,21 @@ def hit_chance_plane(u, pw):
     return torch.where((u["men0"] <= 1)[:, None, :], p_lone, p_form).clamp(0, 1)
 
 
-def blocked_share(u, pw, target, params):
-    """[B, N] share of shooter i's men whose line to its target (slot, -1 none: 0) passes through a
-    friendly unit (module docstring). Rectangles across the line: front x |cos| + depth x |sin|."""
+G = 9.81
+
+
+def _arc_tan(v, L, dh):
+    """tan of the low launch angle that puts a shot of speed v (m/s) dh m higher at L m: a flat shot keeps its speed and
+    its angle rises with the range (tw-modding 'Missiles and You'); out of reach: 45 deg."""
+    disc = v ** 4 - G * (G * L * L + 2 * dh * v * v)
+    tan = (v * v - torch.sqrt(disc.clamp(min=0))) / (G * L.clamp(min=1e-3))
+    return torch.where(disc >= 0, tan, torch.ones_like(tan))
+
+
+def _cover(u, pw, target, params):
+    """(cover, along, between) [B, i, k]: the share of shooter i's lines to its target that friend k covers across the
+    line, k's distance along the line, and whether k stands between i and the target's edge (module docstring).
+    Rectangles across the line: front x |cos| + depth x |sin|."""
     t = target.clamp(min=0)[:, :, None]
     theta = pw["theta"].gather(2, t)                              # [B, i, 1] bearing to the target
     dist = pw["dist"].gather(2, t).clamp(min=1e-3)
@@ -277,23 +293,103 @@ def blocked_share(u, pw, target, params):
     friend = ((u["side"][:, :, None] == u["side"][:, None, :]) & ~eye & (u["side"][:, None, :] > 0)
               & ((u["men"] > 0) & ~u["gone"])[:, None, :])
     between = friend & (along > 0) & (along < near_edge)
-    blocked = torch.where(between, cover, torch.zeros_like(cover)).sum(2).clamp(max=1)
-    return torch.where(target >= 0, blocked, torch.zeros_like(blocked))
+    return cover, along, between
 
 
-def clear_shot(u, pw, target, can_shoot, order_target, order_attack, params):
+def arc_lines(u, pw, target, params):
+    """(blocked [B, i, k], low [B, i, k]) of direct-fire shooter i at its target past friend k (missile.arc_los,
+    build/step4c): the shot's arc (a fixed speed - the passport's muzzle velocity, gravity 9.81) from a muzzle muzzle_m
+    above the ground to an aim point aim_m above the ground at a target man, checked over k's span along the line
+    against its men's height x projectile_friendly_fire_man_height_coefficient (1.0 with True Sight: friends at their
+    own size). Over a 2 x 2 grid of the shooter's ranks and the target's men (the two-point Gauss nodes of a uniform
+    depth, +-0.577 of each half depth): blocked - the share of those lines that do not clear k; low - the share of the
+    shots that pass below k's heads by the spread (hit_chance_plane's sigma, scaled to k's distance along the line),
+    over the grid (a blocked line counts 0). The arc is lowest at an end of k's span: its two ends are checked."""
+    cal = params.sim["missile"]["arc_los"]
+    hm, ha = float(cal["muzzle_m"]), float(cal["aim_m"])
+    coef_h = params.battle.get("projectile_friendly_fire_man_height_coefficient", 1.15)
+    t = target.clamp(min=0)
+    theta = pw["theta"].gather(2, t[:, :, None])
+    dist = pw["dist"].gather(2, t[:, :, None])                     # [B, i, 1]
+    along = pw["dist"] * torch.cos(pw["theta"] - theta)            # [B, i, k]
+    phi = (u["b"] * geometry.DEG)[:, None, :] - theta
+    span = (pw["depth"][:, None, :] * torch.cos(phi).abs() + pw["front"][:, None, :] * torch.sin(phi).abs()) / 2
+    hf = (u["height"] * coef_h)[:, None, :]
+    v = u["muzzle_v"].clamp(min=1.0)[:, :, None]
+    ds = (pw["depth"] / 2)[:, :, None]                             # the shooter's half depth
+    dt_ = pw["depth"].gather(1, t)[:, :, None] / 2                 # the target's half depth
+    sig = (torch.sqrt(u["cal_area"].clamp(min=0))[:, :, None] * dist / u["cal_dist"].clamp(min=1.0)[:, :, None]
+           * torch.sqrt((1 - u["acc"] / 100).clamp(min=0))[:, :, None]).clamp(min=1e-3)
+    blocked = torch.zeros_like(along)
+    low = torch.zeros_like(along)
+    nodes = (-0.57735, 0.57735)
+    for sr in nodes:
+        s = sr * ds
+        for tr in nodes:
+            L = (dist + tr * dt_ - s).clamp(min=1.0)
+            tan = _arc_tan(v, L, ha - hm)
+            clear = torch.ones_like(along, dtype=torch.bool)
+            below = torch.zeros_like(along)
+            for e in (-1.0, 1.0):
+                x = torch.minimum((along + e * span - s).clamp(min=0.0), L)
+                c = hm + x * tan - G * x * x * (1 + tan * tan) / (2 * v * v) - hf
+                clear = clear & (c > 0)
+                below = torch.maximum(below, _phi(-c / (sig * x / L).clamp(min=1e-3)))
+            blocked = blocked + (~clear).float() / 4
+            low = low + torch.where(clear, below, torch.zeros_like(below)) / 4
+    return blocked, low
+
+
+def _lines(u, pw, target, params, arc_on):
+    """(blocked [B, N], catch [B, N, N] or None) for shooter i at its target: blocked - the share of i's men whose line
+    a friend between covers (module docstring; with missile.arc_los only the lines whose arc does not clear it); catch -
+    the share of i's shots (of the men that fire) that hit friend k: k's cover across the line x the share of the
+    clearing lines' shots passing below k's heads (arc_lines), over the share of i's men that fire; direct fire only,
+    never more than all the shots."""
+    cover, _, between = _cover(u, pw, target, params)
+    between = between.float()
+    catch = None
+    if arc_on:
+        arc_blocked, low = arc_lines(u, pw, target, params)
+        eff = cover * arc_blocked * between
+        blocked = eff.sum(2).clamp(max=1)
+        catch = cover * low * between / (1 - blocked).clamp(min=1e-3)[:, :, None]
+        catch = torch.where((u["direct"] & (target >= 0))[:, :, None], catch, torch.zeros_like(catch))
+        catch = catch / catch.sum(2, keepdim=True).clamp(min=1.0)
+    else:
+        blocked = (cover * between).sum(2).clamp(max=1)
+    return torch.where(target >= 0, blocked, torch.zeros_like(blocked)), catch
+
+
+def blocked_share(u, pw, target, params, arc=None):
+    """[B, N] share of shooter i's men whose line to its target (slot, -1 none: 0) passes through a friendly unit
+    (module docstring); arc (any value): by the bullet's arc (missile.arc_los, arc_lines)."""
+    return _lines(u, pw, target, params, arc is not None)[0]
+
+
+def friend_catch(u, pw, target, params):
+    """[B, i, k] share of shooter i's shots that hit friend k between it and its target (_lines, missile.arc_los)."""
+    return _lines(u, pw, target, params, True)[1]
+
+
+def clear_shot(u, pw, target, can_shoot, order_target, order_attack, params, with_catch=False):
     """Direct fire's line of fire (module docstring): (target [B, N], clear [B, N] share of the men
-    that shoot). A direct-fire unit blocked at its target beyond the obstructed ratio takes the next
+    that shoot) and, with_catch, the shots' catch by friends between ([B, N, N], None without missile.arc_los).
+    A direct-fire unit blocked at its target beyond the obstructed ratio takes the next
     target in range; blocked there too, it holds fire (-1). Other shooters: as given, clear 1."""
     ratio = params.battle.get("unit_firing_line_of_sight_considered_obstructed_ratio", 0.75)
     direct = u["direct"]
-    blocked = blocked_share(u, pw, target, params)
+    arc_on = params.sim["missile"].get("arc_los") is not None
+    blocked, catch = _lines(u, pw, target, params, arc_on)
     bad = direct & (target >= 0) & (blocked >= ratio)
     exclude = torch.zeros_like(pw["enemy"]).scatter_(2, target.clamp(min=0)[:, :, None], True) & bad[:, :, None]
     per_man = per_man_mask(u, params)
     again = choose_target(u, pw, can_shoot & bad, order_target, order_attack, exclude=exclude, per_man=per_man)
     target = torch.where(bad, again, target)
-    blocked = torch.where(bad, blocked_share(u, pw, target, params), blocked)
+    blocked2, catch2 = _lines(u, pw, target, params, arc_on)
+    blocked = torch.where(bad, blocked2, blocked)
+    if catch is not None:
+        catch = torch.where(bad[:, :, None], catch2, catch)
     held = direct & (target >= 0) & (blocked >= ratio)
     target = torch.where(held, torch.full_like(target, -1), target)
     clear = torch.where(direct, 1 - blocked, torch.ones_like(blocked))
@@ -301,10 +397,11 @@ def clear_shot(u, pw, target, can_shoot, order_target, order_attack, params):
         # only the ranks within range of the target's nearest men shoot (rank_share)
         share = rank_share(u, pw).gather(2, target.clamp(min=0)[:, :, None]).squeeze(2)
         clear = torch.where(per_man, clear * share, clear)
-    return target, torch.where(target >= 0, clear, torch.zeros_like(clear))
+    out = (target, torch.where(target >= 0, clear, torch.zeros_like(clear)))
+    return out + (catch,) if with_catch else out
 
 
-def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None):
+def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, catch=None):
     """Shots, and HP taken per pair [B, N, N] (i shoots, f is hit) this step; per-hit damage
     [B, N, N]. clear [B, N]: share of the shooter's men with a clear line (clear_shot; None: all).
     loaded [B, N]: share of the men loaded, who all shoot now (None: men x dt / reload, the steady rate).
@@ -337,8 +434,16 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None):
         own_out = torch.ones_like(men)
     else:
         rate, own_out = old, lone
-    aimed = onehot * shots[:, :, None] * rate                 # [B, i, j] hits aimed at j
-    aimed_old = onehot * shots[:, :, None] * old
+    caught = None
+    shots_on = shots
+    if ms.get("arc_los") is not None:
+        # direct fire past friends (missile.arc_los): the shots that pass below a friend's heads hit it, the rest go on
+        if catch is None:
+            catch = friend_catch(u, pw, target, params)             # [B, i, k] (clear_shot's, when given)
+        caught = catch * shots[:, :, None]
+        shots_on = shots * (1 - catch.sum(2))
+    aimed = onehot * shots_on[:, :, None] * rate              # [B, i, j] hits aimed at j
+    aimed_old = onehot * shots_on[:, :, None] * old
     if contact is None:
         landed = aimed * own_out[:, None, :]
     else:
@@ -362,6 +467,8 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None):
         if ms.get("single_entity_in_melee") is not None:
             own = torch.where(in_melee, torch.full_like(men, float(ms["single_entity_in_melee"])), own_out)
         landed = torch.bmm(aimed * ff, friends * lone[:, None, :]) + aimed * (1 - ff) * own[:, None, :]
+    if caught is not None:
+        landed = landed + caught
     # Spill: hits aimed at j also land on j's neighbours of its own side that are out of melee,
     # a share by distance between centres (measured).
     if ms.get("spill"):
