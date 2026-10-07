@@ -280,7 +280,7 @@ def restart_rows(st, setup, source, rows, want=None):
 class Battles:
     def __init__(self, layout, scene_list=scenes.SCENES, device="cpu", params=None, spread=randomise.Spread(),
                  weights=reward.Weights(), seed=0, auto_reset=True, compile=None, source=None, cadence=None,
-                 teach=None, teach_normal=None):
+                 teach=None, teach_normal=None, attack_only=league.ATTACK_ONLY):
         self.device = torch.device(device)
         self.params = params or load()
         # how often the networks decide and how late their orders land (cadence.py; default: the game's)
@@ -313,8 +313,9 @@ class Battles:
         self._decide = fast(_decide, use)
         self._log_prob = fast(_log_prob, use)
         self._values = fast(_values, use)
-        # `hold` is met only as the defender: its battles must have the learner attacking.
-        only = np.isin(layout.opponent, [league.CODE[n] for n in league.ATTACK_ONLY])
+        # the attack_only opponents (`hold`; training: run.py --defend-only) are met only as the defender:
+        # their battles must have the learner attacking.
+        only = np.isin(layout.opponent, [league.CODE[n] for n in attack_only])
         self.want = torch.as_tensor(np.where(only, layout.learner, 0), device=self.device)
         self.ctrl = torch.as_tensor(layout.controllers(), device=self.device)           # [B, 2]
         flat = torch.cat([self.ctrl[:, 0], self.ctrl[:, 1]])

@@ -416,6 +416,25 @@ class TestFunctions:
         assert (lay.learner[hold] == np.array([1, 2])[lay.scene[hold]]).all()
         assert set(lay.learner[~hold]) == {1, 2}
 
+    def test_defend_only_scripts_have_the_learner_attacking_in_training(self):
+        from tools.nn.train import run
+        assert league.names_list(run.parser().parse_args([]).defend_only) == league.ATTACK_ONLY   # default as before
+        only = league.names_list(run.parser().parse_args(["--defend-only", "hold,hold_shoot"]).defend_only)
+        assert only == ("hold", "hold_shoot")
+        with pytest.raises(ValueError):
+            league.names_list("hold,nope")
+        mix = {"hold": 0.25, "hold_shoot": 0.25, "nearest": 0.5}
+        lay = league.layout(48, 2, mix, scene_attacker=[1, 2], attack_only=only)
+        sel = np.isin(lay.opponent, [league.CODE[n] for n in only])
+        assert sel.sum() == 24 and (lay.learner[sel] == np.array([1, 2])[lay.scene[sel]]).all()
+        assert set(lay.learner[~sel]) == {1, 2}
+        env = rollout.Battles(lay, MIRROR * 2, params=rollout.params_with_limit(1.0), attack_only=only)
+        want = env.want.cpu().numpy()
+        assert (want[sel] == lay.learner[sel]).all() and (want[sel] != 0).all() and (want[~sel] == 0).all()
+        env = rollout.Battles(lay, MIRROR * 2, params=rollout.params_with_limit(1.0))   # the evaluation's default
+        shoot = lay.opponent == league.CODE["hold_shoot"]
+        assert (env.want.cpu().numpy()[shoot] == 0).all()
+
     def test_the_layout_meets_every_opponent_in_every_scene_from_both_sides(self):
         lay = league.layout(240, 6, {"self": 0.25, "nearest": 0.25, "hold": 0.5})
         assert lay.B == 240

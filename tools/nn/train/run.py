@@ -204,7 +204,9 @@ def train(args, every=None, teacher=None, normal=None):
         # drills: --drills of the battles, shared by --drill-weights (default: the verified ones equally)
         shares = json.loads(args.drill_weights) if args.drill_weights else {n: 1.0 for n in drills.TRAIN}
         mix = league.with_drills(mix, args.drills, shares)
-    lay = league.layout(args.battles, len(scenes.SCENES), mix, scene_attacker=scenes.attackers())
+    # the scripts met only as the defender in training (the learner attacks); the evaluation keeps league.ATTACK_ONLY
+    defend_only = league.names_list(args.defend_only)
+    lay = league.layout(args.battles, len(scenes.SCENES), mix, scene_attacker=scenes.attackers(), attack_only=defend_only)
     # the drills' teacher (drills/teach.py): manual {drill: the imitation term's starting weight}, annealed
     # to 0; or auto (teach_auto.py): every READY drill the run plays, a share of its battles from its deficit
     played = set(np.unique(lay.opponent).tolist())
@@ -262,7 +264,8 @@ def train(args, every=None, teacher=None, normal=None):
     env = rollout.Battles(lay, scenes.SCENES, device, params, randomise.Spread(), weights, seed=args.seed,
                           source=source(), cadence=cadence,
                           teach=drills.load(list(teach0)) if teach0 else None,
-                          teach_normal={n: loaded_normal[n] for n in normal_names} if normal_names else None)
+                          teach_normal={n: loaded_normal[n] for n in normal_names} if normal_names else None,
+                          attack_only=defend_only)
     if normal_s:
         env.set_teach_shares(normal_s)
     step_cfg = sized(cfg, env.N, width=width)
@@ -546,6 +549,9 @@ def parser():
     ap.add_argument("--retarget", type=float, default=reward.Weights.retarget,
                     help="cost of switching an attack to another target while the old one stands")
     ap.add_argument("--mix", help='opponent shares as json, e.g. {"self": 0.2, "nearest": 0.4}')
+    ap.add_argument("--defend-only", default=",".join(league.ATTACK_ONLY),
+                    help="training: these opponents (comma-separated) play only the defender, the learner attacks "
+                         "(default: league.ATTACK_ONLY; the evaluation always uses that one)")
     ap.add_argument("--critic-warmup", type=int, default=0, help="first updates train only the critic")
     ap.add_argument("--anchor", type=float, default=ppo.PPOConfig.anchor, help="KL weight to the reference actor")
     ap.add_argument("--anchor-end", type=float, help="... at the end of the run (linear; default: no change)")

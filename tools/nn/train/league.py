@@ -73,6 +73,16 @@ def counts(B, mix):
 
 
 ATTACK_ONLY = ("hold",)   # `hold` never attacks: as the attacker it only waits out the hour
+# (the evaluation's set; training takes its own from run.py --defend-only, default this one)
+
+
+def names_list(text):
+    """('a', 'b') of 'a,b' (run.py --defend-only); every name must be an opponent."""
+    names = tuple(n.strip() for n in (text or "").split(",") if n.strip())
+    bad = [n for n in names if n not in CODE]
+    if bad:
+        raise ValueError(f"not opponents: {bad} (league.OPPONENTS)")
+    return names
 
 
 def layout(B, n_scenes, mix=None, opponent=None, scene_attacker=None, attack_only=ATTACK_ONLY):

@@ -191,7 +191,11 @@ network does not see the factors.
 | `drill_<name>` | `--drills` | a drill's enemy on that drill's battles ([drills](#drills)) |
 
 Within each opponent's share the layout cycles the learner's side, so every opponent meets every
-army in both roles. The game's AI takes no part in training: it stays an independent check
+army in both roles. The exception is the opponents in `--defend-only` (comma-separated, default
+`hold`): in training they only defend and the learner attacks (e.g. `--defend-only hold,hold_shoot`:
+the attacking `hold_shoot` waits 5 minutes, while the game's AI attacks at once). The evaluation
+ignores the option: there only `hold` is always the defender (`league.ATTACK_ONLY`), so the rating
+stays comparable between steps. The game's AI takes no part in training: it stays an independent check
 ([network model](network.md#readiness)).
 
 ### The opponent `ai_like`
