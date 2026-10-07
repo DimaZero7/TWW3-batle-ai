@@ -172,9 +172,15 @@ INTERNAL = {
                    "entity come on its initial cooldown after that and stay to the end, effects.py)"),
     "shots": ("f", "fractional shots carried to the next step"),
     "unready": ("f", "share of the men still reloading, 0-1 (0: all loaded, the start; missile.py volley)"),
+    "late": ("f", "share of a shooter's men whose target man died since their last shot (missile.reaim: they aim "
+                  "again before the next shot): 1 - prod(1 - the target's men lost a step / its men), 0 at a volley "
+                  "and at a new target"),
+    "loaded_s": ("f", "seconds a shooter has been loaded for its next volley, waiting for its late men to aim "
+                      "(missile.reaim; 0 while reloading)"),
     "rout_count": ("f", "times routed"),
     "rout_s": ("f", "seconds since the rout began"),
     "rally_s": ("f", "seconds since the last rally"),
+    "rally_ok_s": ("f", "seconds a routing unit has met the rally's conditions without a break (morale.rally_wait_s)"),
     "flank_hit": ("f", "worst direction attacked from now: 0 front, 1 flank, 2 rear"),
     "under_fire_s": ("f", "seconds since last hit by a projectile"),
     "lost_worst": ("f", "the worst share of the unit lost so far (tools/nn/train/reward.py track: health, a rout's "

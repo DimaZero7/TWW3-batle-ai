@@ -67,6 +67,12 @@ Mean |log(sim / game)| over 29 lanes of standing targets: before 0.406, after 0.
 slings 0.364 -> 0.126, Night Runners 0.378 -> 0.123, pistols 0.227 -> 0.257). Over the whole fight (the target
 thins) 0.223 -> 0.182.
 
+**Now** - spread in the plane across the line of fire, the calibration area an area in m², no fitted k
+([missiles](../mechanics/missiles.md#accuracy-and-hitting)). Over 27 lanes of standing full-strength targets the
+error is 0.096 (arrows 0.101, pistols 0.104, slings 0.050, Night Runners 0.121) against 0.171 for the "after"
+model with k 1.1. Pistols at 41 / 60 / 82 / 98 m - 0.71 / 0.58 / 0.49 / 0.45 (game 0.87 / 0.63 / 0.53 / 0.47),
+archers at 50 m 0.88 (0.90), the Warlord 0.13 (0.13), the General 0.08 (0.09).
+
 **Shields** (archers, 90-100 m; clanrats with a 35 % shield and clanrat spearmen without one: the same body):
 facing the archers 0.54 against 0.82 - lets through 0.66 (database 0.65; simulator 0.47 / 0.72 = 0.65); flank
 on 0.86 (the shield does nothing), back on 0.79. A target without a shield turned flank on: 0.86 against 0.82
@@ -83,11 +89,15 @@ came into range.
 ## What does not match (open)
 
 - Over a whole fight a man fires less often than the volley interval (12.3-14.7 s): as the target thins, more
-  men skip a volley. No rule in the database or from the community; not in the simulator.
-- Pistols: their hits fall fast with distance in the game (0.87 -> 0.47 at 41-97 m), the model's barely; the
-  pistols' range is not centre to centre.
-- A target running at the shooter takes x1.2-1.3 a shot; the model has no motion.
-- Near, dense targets: the model is 10-20 % low (archers on spearmen 0.84 against 0.71).
-- The game's hits fall more as the target thins.
+  men skip a volley. No rule in the database or from the community. Now the simulator re-aims: a man keeps his
+  target man and, if that man dies, aims again (`missile.reaim`); shots model / game at the end of the lanes -
+  arrows 1.10-1.26 (still ~10 % high), slings 0.99-1.02, Night Runners 0.96-1.05.
+- Pistols: with the spread in the plane the fall with distance is there (above), but the pistols' range is not
+  centre to centre, and they fire as a stream from the first volley - probe P2 (a per-man range).
+- A target running at the shooter: per volley at the same distance x1.2 a shot (few data); the model has no
+  motion - probe P3.
+- The game's hits fall more as the target thins (between "the formation re-formed" and "holes where the dead
+  were"); with the spread in the plane the model hits a thinned target too easily - probe P1.
 - Rank: the simulator has no ranks (every battle is rank 0).
-- The first shot at a target that has just run into range comes ~3 s later than in the simulator.
+- The first shot at a target that has just run into range comes 1.5-2.5 s later in the game - now in the
+  simulator too (a target taken when there was none costs 3 s without fire, `missile.retarget_from_none`).

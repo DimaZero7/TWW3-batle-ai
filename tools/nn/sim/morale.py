@@ -261,6 +261,13 @@ def step(u, ctx, params, dt):
     free = ~ctx["enemy_near"] & ~ctx.get("collapse", torch.zeros_like(alive))
     ready = (M > 0) & (u["rout_s"] >= float(cal["rally_after_s"]))
     rally = routing & ~u["s"] & free & ready & alive
+    wait_s = float(cal.get("rally_wait_s", 0.0))
+    if wait_s > 0 and "rally_ok_s" in u:
+        # The rally is not at once (morale.rally_wait_s; build/open_battle/spec.md 4): the conditions above must hold
+        # this long without a break (the recordings: from the first second they hold to the rally, median 7 s).
+        u["rally_ok_s"] = torch.where(rally, u["rally_ok_s"] + dt, torch.zeros_like(u["rally_ok_s"]))
+        rally = rally & (u["rally_ok_s"] >= wait_s - 1e-6)
+        u["rally_ok_s"] = torch.where(rally, torch.zeros_like(u["rally_ok_s"]), u["rally_ok_s"])
     u["r"] = u["r"] & ~rally
     u["rally_s"] = torch.where(rally, torch.zeros_like(u["rally_s"]), u["rally_s"])
 
@@ -275,6 +282,20 @@ def step(u, ctx, params, dt):
         # all 274 army-loss shatters before a third rout have crossed this edge.
         shattered = (alive & ctx.get("collapse", torch.zeros_like(alive))
                      & ~u["unbreakable"] & (M < R["ums_broken_threshold_lower"]))
+        u["s"] = u["s"] | shattered
+        u["r"] = u["r"] | shattered
+    if cal.get("shatter_rules"):
+        # Shattering by the game's kv_rules (morale.shatter_rules; build/open_battle/spec.md 1a, Goumin's WH3 kv_rules
+        # guide): a unit whose morale reaches the floor of the broken band (ums_broken_threshold_lower, -50) shatters,
+        # army collapse or not; a routing unit shatters when its health (share of the start; the database's
+        # use_hitpoints_instead_of_casualties 1) falls below shatter_after_first_rout_if_casulties_higher_than (0.05) on
+        # its first rout, below shatter_after_second_rout_if_casulties_higher_than (0.1) on its second (the third rout
+        # shatters, above). The recordings (221 battles): all 153 shatters on the run of a 1st / 2nd rout explained,
+        # 0.1-0.3 % of the rallied units ever met one of them.
+        floor = alive & ~u["unbreakable"] & (M <= R["ums_broken_threshold_lower"] + 1e-6)
+        low = alive & u["r"] & (((u["rout_count"] == 1) & (u["hp"] < R["shatter_after_first_rout_if_casulties_higher_than"]))
+                                | ((u["rout_count"] == 2) & (u["hp"] < R["shatter_after_second_rout_if_casulties_higher_than"])))
+        shattered = floor | low
         u["s"] = u["s"] | shattered
         u["r"] = u["r"] | shattered
     u["morale"] = torch.where(alive, M, u["morale"])

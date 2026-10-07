@@ -62,6 +62,15 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
     arrow on spearmen 15.2 → 13.7. The exact step (whole blows per man) explains the 121 battles worse
     (error 0.174 against 0.146 without overkill), the smoothed version as well or better (0.144) and is
     right where overkill shows (a lord against infantry).
+  - Ours: **melee kills — the wounded pool** (`kills.wound_pool`). Since every model has its own health and
+    overkill is lost, the wounded among the living (W = men × a man's health − the unit's health) cannot grow
+    without end: each struck man is cut down in E[N] = a man's health / blow, so W stays at most W* = its own
+    men in contact × (a man's health − the health-weighted blow of its strikers) (a unit not striking back: the
+    enemy men striking it); health lost beyond the pool is whole men. The probe's health series: flagellants →
+    clanrats — 4–7 men's worth wounded while 87 die, slaves 10–20; greatswords → slaves — 0 while one blow kills
+    (49 + charge ≥ 50 HP), 13–20 once the charge fades. Men killed at 15–30 s 1.00 → 1.10 of the game, at
+    60–90 s 0.82 → 1.15 (the old `kills.exponent` 0.5 rule kept the wounded for ever). Missiles keep the old
+    rule (no data), a lord is one pool.
 - **Height in melee.** Damage changes with the height difference per entity pair, reaching the
   full ±30 % already at 1 m. WH2–WH3 · [CA elevation blog][elev] · high ·
   `melee_height_damage_modifier_max_coefficient` 0.3, `_max_difference` 1 m. See [terrain](terrain.md).
@@ -81,8 +90,12 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
   probe, below).
   - Ours (melee core 2): a unit that comes into a fight moving (its melee clock has just started and it was
     moving) or whose charge lands strikes **once at once with every man in contact** (F × struck × hit chance ×
-    blow, with the charge's full bonus), then at the usual rate. A standing unit it reaches gives no burst.
-    No fitted numbers.
+    blow, with the charge's full bonus), then at the usual rate. A unit standing under hold that an enemy
+    reaches strikes once at once too — with its men in contact facing the enemy (within `contact.front_deg` 45°
+    of its front; `contact.stand_first_strike`); the first strike is not cut by the hold share (0.5): every man
+    in reach swings. The probe: the charger loses in the first second 106–194 HP to braced spearmen, 120 to
+    swordsmen, 60–131 to units given an attack order at contact, 0 to a target facing away; the struck side's
+    first-second error 1.05 → 0.41. No fitted numbers.
 - **Only models that reach strike.** Damage needs an attack animation that physically reaches
   a target; any model with an enemy within weapon reach tries to attack, so a wider front means
   more attackers. WH1–WH3 guides · [WH3 kv guide][g3], [WH1 kv guide][g1] · medium.
@@ -125,13 +138,22 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
     under any attack order - at a run or at a walk - a unit covers the last `charge_distance_commence_run`
     (30 m, lords 35; `battle_entities`) to its target at its charge speed (`charge_speed`), and the run-up
     counts - an attack at a walk is a charge too. A move order gives no sprint. The probe: running 3.0 m/s →
-    the last 30 m at 3.65–3.88, the last 10 m 3.9–4.7.
+    the last 30 m at 3.65–3.88, the last 10 m 3.9–4.7. The run-up counts only the speed towards the attack
+    target (without one, towards the nearest enemy), not running away (`charge.runup_towards`: a Warlord that
+    ran ~10 m off came back at 1.5 m/s and struck an ordinary blow 3.5 s after his melee flag).
 - **Charge distances** are per entity (`battle_entities`): `charge_distance_commence_run`,
   `_adopt_charge_pose`, `_pick_target`; typical switch to charge speed 20–60 m, pose ~35 m.
   WH3 · [twwstats][tws], [charge distance thread][chdist] · high (fields), medium (values).
 - **Blocked chargers don't charge.** Since WH2 1.12.1 an entity whose path is blocked by a
   friend makes no charge attack (back ranks of a counter-charge): ~35 % less counter-charge
-  damage. Still the WH3 base · [1.12.1 notes][p1121] · high.
+  damage. Still the WH3 base · [1.12.1 notes][p1121] · high. CA (WH2): no charge when the path is
+  blocked by one's own unit · [pcgamesn][pcgcav] · high.
+  - Ours: no sprint and no charge when the attack target is already in melee with another of our units — it
+    comes in at a run (`charge.free_target_only`: entering a fight where the target is surrounded by friends is
+    a blocked path). The recordings of 221 battles (the centre's speed 2 s before contact / the card's run,
+    median): into a free target of its own order the game's AI 1.12 (standing) / 1.02 (moving), the network 1.09
+    (p75 1.20–1.26 — the charge speed); into one already fighting 0.79–0.86. Whether entering another unit's
+    fight gives the charge bonus — open (no data, a probe).
 - **Charge morale.** A charging unit gets +15 leadership; `charge_timeout` 60 s is the timeout of
   that morale bonus. WH2 descriptions, same values in WH3 · [twwstats kv][tws] · high (values),
   medium (duration: guides say ~10 s). See [morale](morale.md).
@@ -169,7 +191,9 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
   `charge_reflect_damage_multiplier` 2, `charge_reflect_min_charge_factor_threshold` 0.7.
   - Ours: by the database — a unit with reflection that is braced (standing: slower than 0.5 m/s,
     `melee.braced_speed`) deals the charger ×2 damage within 80° of its front while the charger's charge
-    factor is ≥ 0.7 (3.9 s); it gets no charge bonus of its own.
+    factor is ≥ 0.7 (3.9 s); it gets no charge bonus of its own. These blows are not cut by the hold share
+    (0.5) (`contact.hold_reflect_full`): the probe — braced spearmen 52 HP/s in 1–5 s after a charge = the rule
+    ×2, held swordsmen without reflection 12 HP/s; Steam players: braced models strike whatever is adjacent.
 - Update 1.1 also fixed impact maths so the defender uses its own mass (it used the attacker's). WH3 ·
   CA notes via press · high.
 
@@ -257,14 +281,17 @@ is the start of the step in which the units met):
   the swordsmen's on skavenslaves below (129 and 201 against 210 and 268); the General's first blow in the game
   comes 3–5 s after contact (0 HP in 0–3 s), in the simulator at once (139); the Warlord's burst is below the
   game (157 against 272).
-- OPEN: a recharge (pull back 35–40 m and attack again) gives no burst in the game: the target loses 250 HP in
-  5 s after the second contact (Warlord: 204), the simulator 242 (154) before, 380 (276) now - the rule "the
-  first strike in a new fight" is too much here (candidates: a pull-out shorter than `contact.reset_s`,
-  pursuit).
+- The "recharge" (pull back 35–40 m and attack again) turned out to be a chase: the swordsmen never left melee
+  (nearest men 0.8–1.8 m apart, the melee flag on for all 25 s), the "second contact" is the lane's end just
+  after the `melee_breakoff_secs` 24 s window. The simulator released them after 20 s and they came back with a
+  fresh first strike (the target lost 341 HP in 5 s, game 250); with the chase (`contact.chase`) 164; the
+  Warlord's lane 143 → 215 (game 204). A new strike by every man after a pause in striking is not modelled (it
+  added nothing in these lanes).
 - OPEN: a target ordered to attack in the second of contact gives no burst (the attacker loses 16–22 HP in
-  1 s), one standing without an order does (clanrats lose 42–172 HP in 1 s on spearmen and swordsmen; the
-  simulator 17–19 - a standing unit has no first strike); a move order into contact gives a smaller burst (78)
-  and then ×0.5–0.6 of the rule.
+  1 s). One standing without an order does (clanrats lose 42–172 HP in 1 s on spearmen and swordsmen) — now
+  in the simulator too (the first strike of a standing unit, above). A move order into contact gives a smaller
+  burst (78) and then ×0.5–0.6 of the rule: now a formation under a move in contact strikes at the 0.5 share
+  (`contact.hold_move`; the target in 5–15 s 345 → 173 HP, game 180).
 - The attacker has 20–36 men within 2.5 m of an enemy in the first second, 10–16 after 15 s; there are more of
   them at 5–15 s than at 15–30 s at the same pace - the number of men in contact alone does not explain it.
 
@@ -282,21 +309,25 @@ slower than the game.
 facing away 10 (20), swordsmen 17 (35); a unit with an attack order strikes at the rule (clanrats 29 / 27). So
 `contact.hold_rate` 0.5 stays for formations (FITTED, no rule for the rate: the keys
 `melee_attack_threshold_modifier_*` are the threshold for joining a fight, B8), and a lord without an order
-strikes in full (below). OPEN: in the first second a holding unit strikes hard in the game (42–172 HP, braced
-ones with reflection), the simulator 17–19.
+strikes in full (below). In the first second a holding unit strikes hard in the game (42–172 HP, braced ones
+with reflection) — now this is the first strike of a standing unit and the reflection without the 0.5 share
+(above).
 
 **Hit chance (plan `hit`, from 15 s to the end).** Target HP/s, game / simulator: swordsmen → skavenslaves
 46 / 39, greatswords → skavenslaves 63 / 41, spearmen with shields → skavenslaves 37 / 33, flagellants →
 clanrats 53 / 39; the skavenslaves back 16 / 15, 10 / 9, 13 / 11; clanrat spearmen → spearmen 20 / 18 and back
 21 / 22. Blows a second a man at 10 strikers (unarmoured skavenslaves: HP / blow damage): 0.15–0.25 against the
 rule's 0.14–0.20 - the slope in the hit chance is right. Skavenslaves lose more men a second in the game:
-0.89 / 0.51, 1.00 / 0.58, 0.58 / 0.42 (OPEN: candidates - `kills.exponent`, the smoothed overkill, blows on
-fresh or wounded men).
+0.89 / 0.51, 1.00 / 0.58, 0.58 / 0.42. Kills are now counted by the wounded pool (above, "Damage and armour");
+it covers about half of the skavenslaves' gap, the rest is the HP rate (swordsmen on skavenslaves 39 against
+46 HP/s, greatswords 41 against 63) — OPEN. Flagellants: both sides strike ×1.4–2 the rule (flagellants →
+clanrats 53 against 39 HP/s, back 51 against 31) — OPEN, probe P2 (flagellants, swordsmen, militia against
+fearless clanrats, soldiers' places).
 
 **Stand Your Ground.** Spearmen lose 107 HP in the first 15 s with the ability against 440 without (x0.24,
 one battle each); a hit chance of 25 % → 8 % gives x0.32, the rule p / (p × interval + 0.5) x0.62, the
 simulator x0.70. OPEN: candidates - the 0.5 s cost of a miss (fitted) is small at a low hit chance, the spread
-of one battle.
+of one battle; probe P1 (2 battles of 4 lanes, the ability in two lanes of four).
 
 **Damage a blow (plan `damage`, 8 trials).** A greatswords' blow on the Warlord - median 41 HP (quartiles
 39–45; 71 % in 36–43, none in 26–31): **the +14 bonus against infantry counts against a foot lord** (as in the
@@ -318,7 +349,9 @@ No public CA source explains `melee_breakoff_secs` 24 / `melee_breakoff_total_im
 (WH3-only keys; see [movement](movement.md)); by the melee-exit probe (`build/movelords`) 24 s is the window a
 leaving unit keeps its order: chased swordsmen and spearmen strike nothing for 24–26 s after a withdraw order
 (kills flat, the chasing clanrats lose no health), then fight on (the clanrats lose ~20 HP/s); not chased, a
-unit is out in 8 s (the simulator: `contact.breakoff`; a Steam player also writes of a ~25 s window); `entity_action_attack_formed_combat_distance`
+unit is out of contact ~4 s after the order (its own melee flag goes off only after ~9 s — probably
+`melee_breakoff_total_immunity_secs` 10), chased, the chasers run 10–15 m behind it (the simulator:
+`contact.breakoff`, `contact.chase`; a Steam player also writes of a ~25 s window); `entity_action_attack_formed_combat_distance`
 2.5 / `_tether_distance` 2, or how many models can physically reach one target.
 
 ## What is still unclear
@@ -327,10 +360,13 @@ unit is out in 8 s (the simulator: `contact.breakoff`; a Steam player also write
   499–764 HP in the first 15 s, while the rule (the charge bonus, no blow) gave the simulator 396–446. The
   melee probe showed where the difference is: nearly all of it in the first second of a charge's contact (a
   volley), after that the pace is the rule's; the simulator now gives the volley by the rule "the first blow at
-  once" ([in-game check](#in-game-check-the-melee-probe)). Why a target ordered at the moment of contact and a
-  recharge give no volley while a holding unit does - OPEN.
-- **A holding unit strikes at half the rule** (0.49–0.52, the probe), a lord without an order at the rule. No
-  rule for a holding formation's rate found (`contact.hold_rate` 0.5 - FITTED).
+  once" ([in-game check](#in-game-check-the-melee-probe)), and for a standing unit too; the "recharge" was a
+  chase. Why a target ordered at the moment of contact gives no volley - OPEN.
+- **A holding unit strikes at half the rule** (0.49–0.52, the probe), a formation under a move in contact the
+  same (0.70 of attacking), a lord without an order at the rule. No rule for a holding formation's rate found
+  (`contact.hold_rate` 0.5 - FITTED).
+- **The pair of CA's planner's spearmen** (its "held" spearmen are under a far move order): at 60–120 s the
+  exchange in the game is twice the simulator's on both sides — cause not found, probe P3.
 - **A lord against one infantry unit hits less often in the game than against a crowd.** At 2.07 men hit
   (measured on 1–4 units around him) a lord in a pair takes 13–31 % more off infantry than in the game.
 
@@ -359,6 +395,7 @@ unit is out in 8 s (the simulator: `contact.breakoff`; a Steam player also write
 [chdist]: https://steamcommunity.com/app/1142710/discussions/0/4630357120384001354/
 [p1121]: https://updatecrazy.com/total-war-warhammer-2-update-1-12-1-patch-notes-sep-8-2021/
 [reflect]: https://steamcommunity.com/app/1142710/discussions/0/688619343242657770/
+[pcgcav]: https://www.pcgamesn.com/total-war-warhammer-2/cavalry-overhaul-beta
 [p510]: https://community.creative-assembly.com/total-war/total-war-warhammer/blogs/23-total-war-warhammer-iii-patch-5-1-0
 [p530]: https://community.creative-assembly.com/total-war/total-war-warhammer/forums/7-total-war-warhammer/threads/7586-total-war-warhammer-iii-patch-5-3-0-battle-balance-details
 [splash]: https://community.creative-assembly.com/total-war/total-war-warhammer/forums/10-battles/threads/6818-dividing-damage-among-models-during-splash-attacks-is-a-bad-design-decision

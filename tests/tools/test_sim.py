@@ -687,17 +687,83 @@ class TestMissileRules:
         assert pt < pd
 
     def test_a_lone_man_by_the_closed_form(self):
+        # the spread in the plane across the line of fire (missile.accuracy.plane; build/open_missile/spec.md S1)
         st = shooter_and([(0, 100, "wh2_main_skv_cha_warlord_0")])
         H = st.N // 2
         p = float(missile.hit_chance(st.u, geometry.pairwise(st.u, 1.5), P)[0, 0, H])
         m = P.units[ARCHER]["missile"]
         lord = P.units["wh2_main_skv_cha_warlord_0"]
-        sig = 1.1 * m["calibration_area_m"] * 100 / m["calibration_distance_m"] * math.sqrt(1 - (10 + 10) / 100)
+        sig = math.sqrt(m["calibration_area_m"]) * 100 / m["calibration_distance_m"] * math.sqrt(1 - (10 + 10) / 100)
         th = 0.5 * math.asin(100 * 9.81 / m["muzzle_velocity"] ** 2)
         L = lord["height_m"] / math.tan(th)
-        r = lord["radius_m"]
-        expect = 1 - math.exp(-(math.pi * r * r + 2 * r * min(L, 3 * sig)) / (2 * math.pi * sig * sig))
+        sa, c, r = sig / math.sin(th), L / 2, lord["radius_m"]
+
+        def phi(x):
+            return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+        expect = math.erf(r / (math.sqrt(2) * sig)) * (phi((L + r - c) / sa) - phi((-r - c) / sa))
         assert p == pytest.approx(expect, rel=1e-4) and 0.05 < p < 0.3
+        assert "k" not in P.sim["missile"]["accuracy"]                       # no fitted number
+
+    def test_the_spread_is_the_square_root_of_the_calibration_area(self):
+        m, unit = P.units[MILITIA_K]["missile"], P.units[MILITIA_K]
+        acc = (unit["missile"].get("accuracy", 0) or 0) + (m.get("marksmanship", 0) or 0)
+        sig = math.sqrt(m["calibration_area_m"]) * 65 / m["calibration_distance_m"] * math.sqrt(1 - acc / 100)
+        assert sig == pytest.approx(1.26, abs=0.02)                          # militia at 65 m (spec S1 d)
+
+    def test_direct_fire_on_a_lone_man_falls_with_distance(self):
+        p = []
+        for d in (40, 100):
+            st = shooter_and([(0, d, "wh2_main_skv_cha_warlord_0")], key=MILITIA_K)
+            p.append(float(missile.hit_chance(st.u, geometry.pairwise(st.u, 1.5), P)[0, 0, st.N // 2]))
+        assert p[0] > 1.3 * p[1]
+
+    def test_a_dense_block_near_is_hit_almost_every_time_and_less_far(self):
+        p = []
+        for d in (50, 130):
+            st = shooter_and([(0, d, SLAVES)], t_width=30.0)
+            p.append(float(missile.hit_chance(st.u, geometry.pairwise(st.u, 1.5), P)[0, 0, st.N // 2]))
+        assert p[0] >= 0.85 and 0.6 <= p[1] <= 0.8, p
+
+    def test_a_flat_shot_crossing_many_ranks_meets_more_men_than_one_rank(self):
+        deep = shooter_and([(0, 40, SLAVES)], key=MILITIA_K, t_width=30.0)
+        line = shooter_and([(0, 40, SLAVES)], key=MILITIA_K, t_width=290.0)
+        pd, pl = (float(missile.hit_chance(s.u, geometry.pairwise(s.u, 1.5), P)[0, 0, s.N // 2]) for s in (deep, line))
+        assert pd > pl
+
+    def test_a_shooter_aims_again_when_its_target_men_die(self):
+        # missile.reaim (spec S3): against a lone lord whole volleys one reload apart; against a formation that loses
+        # men the next volley waits aim_s x the share of the men whose target died
+        lord = shots_over(shooter_and([(0, 90, "wh2_main_skv_cha_warlord_0")]), 32)
+        assert len(lord) >= 3 and all(b[0] - a[0] == pytest.approx(10.0, abs=P.dt + 1e-6) for a, b in zip(lord, lord[1:]))
+        st = shooter_and([(0, 100, SLAVES)], t_width=30.0)
+        men0 = float(st.u["men"][0, st.N // 2])
+        fired = shots_over(st, 62)
+        gaps = [b[0] - a[0] for a, b in zip(fired, fired[1:])]
+        assert len(gaps) >= 3 and all(g >= 10.0 - 1e-6 for g in gaps) and max(gaps) >= 10.0 + P.dt - 1e-6
+        assert float(st.u["men"][0, st.N // 2]) < men0
+        # the target's men lost between volleys: the wait is aim_s x their share
+        assert max(gaps) <= 10.0 + P.sim["missile"]["aim_s"]["arrow"] + P.dt
+
+    def test_a_target_running_into_range_is_shot_after_the_retarget_pause(self):
+        st = shooter_and([(0, 160, SPEAR, 180.0)])
+        H = st.N // 2
+        entered, first = None, None
+        for k in range(80):
+            o = replay.hold(st)
+            o.kind[0, H], o.x[0, H], o.z[0, H], o.run[0, H] = O.MOVE, 0.0, 40.0, True
+            a0 = float(st.u["a"][0, 0])
+            battle.step(st, o, P)
+            t = (k + 1) * P.dt
+            d = float(torch.hypot(st.u["x"][0, H] - st.u["x"][0, 0], st.u["z"][0, H] - st.u["z"][0, 0]))
+            if entered is None and d <= float(st.u["range"][0, 0]):
+                entered = t
+            if first is None and float(st.u["a"][0, 0]) < a0:
+                first = t
+        assert entered is not None and first is not None
+        assert first - entered >= P.sim["missile"]["retarget_s"] - P.dt - 1e-6
+        # a halted shooter with a target already in range: aim_s as before
+        fired = shots_over(shooter_and([(0, 100)]), 8)
+        assert fired[0][0] == pytest.approx(P.sim["missile"]["aim_s"]["arrow"], abs=P.dt + 1e-6)
 
     def test_units_can_fall_back_to_the_measured_rates(self):
         st = shooter_and([(0, 100, SPEAR)])
@@ -881,7 +947,7 @@ class TestMorale:
         st = face_off(SPEAR, SLAVE)
         st.u["morale"][:] = -60
         cal = dict(P.sim["morale"]["collapse"], shatter_below_broken=False)
-        morale.step(st.u, self.ctx(st, collapse=hit), P.with_cal("morale", collapse=cal), 0.5)
+        morale.step(st.u, self.ctx(st, collapse=hit), P.with_cal("morale", collapse=cal, shatter_rules=False), 0.5)
         assert not bool(st.u["s"].any()) and bool(st.u["r"].all())
 
     def test_the_third_rout_shatters_and_a_free_unit_rallies(self):
@@ -1097,7 +1163,7 @@ class TestBattle:
         x0 = float(st.u["x"][0, 0])
         o = replay.hold(st)
         o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = O.WITHDRAW, -300.0, 0.0, True
-        for _ in range(20 + int(P.sim["contact"]["pin_melee_s"] / P.dt)):      # held pin_melee_s, then out
+        for _ in range(20):                                                   # unchased: it walks out
             battle.step(st, o, P)
         assert not bool(st.u["m"][0, 0]) and float(st.u["x"][0, 0]) < x0 - 15
 
@@ -2049,8 +2115,9 @@ class TestLeavingMelee:
         assert bool(st.u["m"][:, 0].all())
         return st, H
 
-    @pytest.mark.parametrize("key,held_s", [(SPEAR, 20.0), (ARCHER, 5.0), (GENERAL, 0.0)])
-    def test_a_unit_leaving_melee_is_held_pin_melee_s_a_missile_unit_pin_s_a_lord_not(self, key, held_s):
+    @pytest.mark.parametrize("key,held_s", [(SPEAR, 0.0), (ARCHER, 5.0), (GENERAL, 0.0)])
+    def test_a_missile_unit_leaving_melee_is_held_pin_s_a_melee_unit_and_a_lord_not(self, key, held_s):
+        # (a melee unit is not held: chased, it walks on with its chaser in contact - contact.chase)
         st, H = self._fight(key, 1)
         x0, hp0 = float(st.u["x"][0, 0]), float(st.u["hp_abs"][0, 0])
         xs = []
@@ -2321,7 +2388,7 @@ class TestMoraleBatch:
         while bool(st.u["r"][0, 0]) and t < 100:
             morale.step(st.u, free, P, 0.5)
             t += 0.5
-        assert t == pytest.approx(after, abs=0.51)
+        assert t == pytest.approx(after + P.sim["morale"].get("rally_wait_s", 0.0), abs=1.01)
         st = face_off(SPEAR, SLAVE)
         st.u["hp_abs"][0, 0] = 0.05 * st.u["hp0"][0, 0]
         st.u["r"][0, 0], st.u["rout_count"][0, 0], st.u["morale"][0, 0] = True, 1.0, -5.0

@@ -82,7 +82,7 @@ better one; each is a candidate for a test.
 |---|---|---|---|---|
 | 1 | Hit chance vs attack − defence | full slope 1 (CA, DB) | the same; hits a second p / (p × interval + 0.5) (measured) | [melee](melee.md#hit-chance) |
 | 2 | Flank vs rear | rear costs more: defence ×0.3 vs ×0.6 (CA, DB) | the same, weight 1 (a lone attacker in the recordings: flank 1.53×, rear 1.92×) | [flanking](flanking.md#melee-defence) |
-| 3 | Direction sectors | per attacking model, by quadrant of the struck entity (CA; 45°/135° by our reading) | per unit, by the enemy centre, front < 60°, rear > 120° | [flanking](flanking.md#melee-defence) |
+| 3 | Direction sectors | per attacking model, by quadrant of the struck entity: front ±45°, rear > 135° (CA, forum) | per unit, by the enemy centre, front < 45°, rear > 135° (a step instead of a share by men) | [flanking](flanking.md#melee-defence) |
 | 4 | "Attacked in flank / rear" morale | −6 / −14 at first contact (DB description) | the same: −6 / −14 for one 0.5 s tick at the first blow from a worse side (`morale.attacked_event`; the recordings show −1.5 / −1.9 points over 1–2 s) | [flanking](flanking.md#morale) |
 | 5 | Recent casualties window | last 4 s (DB description) | 30 s (calibrated) | [morale](morale.md#modifiers-points) |
 | 6 | Extended casualties | −4 … −60 for 10–80 % lost in the last 60 s (DB) | not modelled | [morale](morale.md#modifiers-points) |
@@ -93,13 +93,13 @@ better one; each is a candidate for a test.
 | 11 | Charge impact | charge bonus + capped collision damage (≤ 70, 70 % AP) — only for large models (DB) | charge bonus only (all our models are small) | [melee](melee.md#charge) |
 | 12 | Splash | damage divided among targets (CA 5.1.0) | divided by 4, hits an average of 2.07 (measured) | [melee](melee.md#splash) |
 | 13 | Lord's aura | +4 to 70 m, fading to 0 at 105 m (DB) | the same: +4 to 70 m, fading to 0 at 105 m | [morale](morale.md#modifiers-points) |
-| 14 | Rally timing | `broken_finish_base_timeout` 180 s + 10 s × rank (DB; meaning unclear) | rally after 44 s median (measured) | [morale](morale.md#waver-rout-rally-shatter) |
+| 14 | Rally timing | `broken_finish_base_timeout` 180 s + 10 s × rank (DB; meaning unclear) | the rally: at least 18 s of rout, no living enemy within 95 m, and so for 7 s in a row (measured; in the game a rally after 44 s, median) | [morale](morale.md#waver-rout-rally-shatter) |
 | 15 | Strong enemy near | −3 … −24 by combat power within 70 m (DB) | −3 only | [morale](morale.md#modifiers-points) |
 
 **Gaps** — game mechanics our simulator does not have, by likely impact on our battles:
 army-losses collapse (−120, ends battles), charge morale (+15), pursuit
 blows counting as charges, shooters going into melee when out of ammunition, the entity
-`turn_speed` out of melee, the morale shock (25 % lost in 4 s), shattering by casualties.
+`turn_speed` out of melee, the morale shock (25 % lost in 4 s).
 
 **Agreements worth knowing** (the simulator's measured numbers match public facts): map edge
 1020 m vs playable area 1024; `lord_max_attackers` 9 vs "~9 small entities around one"; no flank

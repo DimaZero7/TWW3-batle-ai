@@ -96,14 +96,14 @@ def step(st, orders, params=None, dt=None):
     striker = standing & ~leaving
     strike = touch & striker[:, :, None]
     engaged = standing & (touch & standing[:, None, :]).any(2)
-    # Pinned: a unit leaving melee stays held where it is (not striking, struck) until it has been leaving in
-    # contact for contact.pin_s seconds (a missile unit) or contact.pin_melee_s (a unit without a missile weapon);
-    # a lone man (a lord) is not held (measured in the game, config/nn/sim.json contact.pin_why).
+    # Pinned: a missile unit leaving melee stays held where it is (not striking, struck) until it has been leaving in
+    # contact for contact.pin_s seconds; a unit without a missile weapon for contact.pin_melee_s (absent: 0, not held:
+    # it walks out unless it is chased, below); a lone man (a lord) is not held (config/nn/sim.json contact.pin_why).
     pin_s = float(cal["contact"].get("pin_s", 0.0))
     pin_melee_s = float(cal["contact"].get("pin_melee_s", 0.0))
-    stuck = leaving & engaged & (u["men0"] > 1)
+    in_exit = leaving & engaged & (u["men0"] > 1)
     hold_for = torch.where(u["range"] > 0, torch.full_like(u["leave_s"], pin_s), torch.full_like(u["leave_s"], pin_melee_s))
-    stuck = stuck & (hold_for > 0)
+    stuck = in_exit & (hold_for > 0)
     pinned = stuck & (u["leave_s"] < hold_for)
     u["leave_s"] = torch.where(stuck, u["leave_s"] + dt, torch.zeros_like(u["leave_s"]))
     # The melee exit's window (the database's melee_breakoff_secs, 24 s; contact.breakoff on): a unit still touching
@@ -111,10 +111,21 @@ def step(st, orders, params=None, dt=None):
     # build/movelords: chased swordsmen and spearmen struck nothing for 24 s after a withdraw order, then fought on).
     # exit_s: seconds since it began to leave in contact, out of contact too, while it keeps leaving.
     if "exit_s" in u:
-        u["exit_s"] = torch.where(leaving & (stuck | (u["exit_s"] > 0)), u["exit_s"] + dt, torch.zeros_like(u["exit_s"]))
+        u["exit_s"] = torch.where(leaving & (in_exit | (u["exit_s"] > 0)), u["exit_s"] + dt, torch.zeros_like(u["exit_s"]))
     # (the order is dropped at the end of this step: it fights from the next one)
     brk = float(R.get("melee_breakoff_secs", 0.0)) if cal["contact"].get("breakoff") and "exit_s" in u else 0.0
-    broke_off = (stuck & (u["exit_s"] >= brk)) if brk > 0 else None
+    broke_off = (in_exit & (u["exit_s"] >= brk)) if brk > 0 else None
+    # The chase (contact.chase; build/open_battle/spec.md 2, build/open_melee/spec.md R4): a unit with an attack order
+    # on an enemy that is leaving melee in contact with it is not held in the fight: it follows the leaver at its own
+    # speed (closing up whenever the formations overlap by less than contact.reach_m) and strikes it while they touch -
+    # so a chased unit stays in contact and the 24 s window drops its order, an unchased one walks out (the game's
+    # probe: out of contact ~4 s after a withdraw order without a chaser; with one the chasers ran 10-15 m behind,
+    # centre to centre, and kept striking until the window).
+    chasing = torch.zeros_like(leaving)
+    if cal["contact"].get("chase"):
+        ti0 = tgt.clamp(min=0)
+        chasing = (engaged & (kind == O.ATTACK) & (tgt >= 0) & leaving.gather(1, ti0)
+                   & touch.gather(2, ti0[:, :, None]).squeeze(2))
     speed = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)
     # --- innate effects (attributes, passives, game-fired timed passives: config/nn/effects.json): their
     # stats and rule flags hold for this step ---
@@ -133,18 +144,39 @@ def step(st, orders, params=None, dt=None):
     ccal = cal["charge"]
     decay = R["charge_decay_duration"]
     u["charge"] = (u["charge"] - dt / decay).clamp(min=0)
-    fire = engaged & (kind == O.ATTACK) & (u["runup"] >= float(ccal["min_runup_m"]))
+    # The attack target is already fighting another of our units (charge.free_target_only; build/open_battle/spec.md
+    # 5): the way in is blocked by our own men - no charge sprint and no charge (CA: no charge when the path is blocked
+    # by one's own unit; the recordings: 2 s before contact 1.09-1.12 of the run speed into a free target, 0.79-0.86
+    # into one already in melee).
+    busy_t = torch.zeros_like(standing)
+    if ccal.get("free_target_only"):
+        rows = touch.gather(1, tgt.clamp(min=0)[:, :, None].expand(-1, -1, N))        # [B, i, k]: i's target touches k
+        busy_t = (tgt >= 0) & (rows & same_side & ~eye & standing[:, None, :]).any(2)
+    fire = engaged & (kind == O.ATTACK) & (u["runup"] >= float(ccal["min_runup_m"])) & ~busy_t
     u["charge"] = torch.where(fire, torch.ones_like(u["charge"]), u["charge"])
     charge_now = u["charge"]
     fast = (speed >= float(ccal["min_speed_share"]) * u["run"]) & (speed > 0.1)
+    speed_to = speed
+    if ccal.get("runup_towards"):
+        # (build/open_melee/spec.md R6) the run-up counts only the speed towards the attack target, else towards the
+        # nearest enemy - not running away from it (the game: a Warlord that ran 10 m off came back at 1.5 m/s and
+        # struck one ordinary blow)
+        dd = torch.where(pw["enemy"] & both, pw["dist"], torch.full_like(pw["dist"], 1e9))
+        toward = torch.where(tgt >= 0, tgt, dd.argmin(2))
+        dxt = u["x"].gather(1, toward) - u["x"]
+        dzt = u["z"].gather(1, toward) - u["z"]
+        v_to = (u["vx"] * dxt + u["vz"] * dzt) / torch.sqrt(dxt ** 2 + dzt ** 2).clamp(min=1e-6)
+        v_to = torch.where((tgt >= 0) | (dd.min(2).values < 1e9), v_to, torch.zeros_like(v_to))
+        fast = (v_to >= float(ccal["min_speed_share"]) * u["run"]) & (v_to > 0.1)
+        speed_to = v_to.clamp(min=0)
     grace = engaged & (u["contact_s"] < float(ccal["order_grace_s"])) & ~fire
     u["runup"] = torch.where(engaged, torch.where(grace, u["runup"], torch.zeros_like(u["runup"])),
-                             torch.where(fast, u["runup"] + speed * dt, torch.zeros_like(u["runup"])))
+                             torch.where(fast, u["runup"] + speed_to * dt, torch.zeros_like(u["runup"])))
     # The first strike (the game: a man's attack interval starts only after his blow, CA Feature Focus #2): a unit
     # that comes into a fight moving - or whose charge lands - strikes once at once with every man in contact (the
-    # charge's full bonus with it), then at the steady rate; a standing unit it reaches does not (its men are
-    # struck, not striking: the melee probe, build/meleetests). ran_in keeps that it came in moving for the rest of
-    # the fight (melee.py: men gather round a lord only when he ran in).
+    # charge's full bonus with it), then at the steady rate; a standing unit under HOLD that it reaches strikes once
+    # at once too with its men facing it (contact.stand_first_strike, below). ran_in keeps that it came in moving for
+    # the rest of the fight (melee.py: men gather round a lord only when he ran in).
     # (an attack order given within order_grace_s of a contact it ran into charges then: no second first strike)
     arrive = fresh & (speed > 0.3)
     first = arrive | (fire & ~(u["ran_in"] & (u["contact_s"] <= float(ccal["order_grace_s"]) + dt)))
@@ -158,8 +190,17 @@ def step(st, orders, params=None, dt=None):
     tired = fatigue.effects(u, params)
 
     # --- melee ---
-    rate, mhit, sector, _, swing = melee.strikes(u, pw, strike, params, charge_now, first=True)
-    hp_melee = rate * dt + torch.where(first[:, :, None], swing, torch.zeros_like(swing))
+    rate, mhit, sector, F_men, swing = melee.strikes(u, pw, strike, params, charge_now, first=True)
+    first_pair = first[:, :, None]
+    if cal["contact"].get("stand_first_strike"):
+        # (build/open_melee/spec.md R1) a unit standing under HOLD that an enemy reaches strikes once at once too, with
+        # every man in contact facing it (within contact.front_deg of its front): its men's intervals have run out (CA
+        # Feature Focus #2: the interval runs after a blow); the probe: a charger lost 106-194 HP in the first second
+        # to braced spearmen, 120 to swordsmen, 0 to a target facing away
+        stand = fresh & (speed <= 0.3) & (kind == O.HOLD)
+        facing = pw["rel_i"].abs() <= float(cal["contact"]["front_deg"]) * geometry.DEG
+        first_pair = first_pair | (stand[:, :, None] & facing)
+    hp_melee = rate * dt + torch.where(first_pair, swing, torch.zeros_like(swing))
     # A unit leaving melee (held or walking out) still in contact takes contact.leave_taken of the blows: melee
     # units more (they turn their backs), missile units less (measured, config/nn/sim.json contact.pin_why).
     taken_cal = cal["contact"].get("leave_taken")
@@ -209,10 +250,18 @@ def step(st, orders, params=None, dt=None):
             turning = beyond
     # A new target (another enemy than last step's, an order's or its own) costs missile.retarget_s without fire
     # (measured, missile.retarget_why): the aim clock goes back to retarget_s before aim_s.
+    # Taking a target from none is a new target too (missile.retarget_from_none; the probe, build/open_missile S4: a
+    # standing unit's first projectile came 1.5-2.5 s after a running target entered its range, not at once).
     retarget_s = ms_cal.get("retarget_s")
+    new_tgt = (aim_at >= 0) & (aim_at != u["aim_tgt"])
     if retarget_s:
-        switched = ready & (u["aim_tgt"] >= 0) & (aim_at >= 0) & (aim_at != u["aim_tgt"])
+        from_none = bool(ms_cal.get("retarget_from_none"))
+        switched = ready & new_tgt & ((u["aim_tgt"] >= 0) | from_none)
         u["aim"] = torch.where(switched, torch.minimum(u["aim"], u["aim_s"] - float(retarget_s)), u["aim"])
+    reaim = bool(ms_cal.get("reaim"))
+    if reaim:
+        # a new target: every man has a living target man again
+        u["late"] = torch.where(new_tgt | (aim_at < 0), torch.zeros_like(u["late"]), u["late"])
     u["aim_tgt"] = torch.where(ready, aim_at, torch.full_like(aim_at, -1))
     u["aim"] = torch.where(ready & ~turning, u["aim"] + dt, torch.zeros_like(u["aim"]))
     can = ready & ~turning & (u["aim"] >= u["aim_s"])
@@ -235,11 +284,24 @@ def step(st, orders, params=None, dt=None):
     # missile.volley_load: the unit shoots only once this share of its men is loaded (1: whole-unit volleys one
     # reload apart, as the game; 0: every loaded man at once, the volley then a steady trickle).
     load_min = float(cal["missile"].get("volley_load", 0.0))
+    full = loaded >= load_min - 1e-3
+    if reaim:
+        # Re-aim (missile.reaim; build/open_missile spec S3): a man keeps his target man; when that man has died since
+        # his last shot he aims again (aim_s) before the next one. The unit's volley waits the mean of it, aim_s x
+        # the share of its men whose target died (late): its men's interval is reload + aim_s x that share (a lone
+        # lord, who does not die man by man: the reload alone).
+        # (the wait rounded to the step: the volley comes in the step nearest to aim_s x late after the men loaded)
+        waited = u["loaded_s"] >= u["aim_s"] * u["late"] - dt / 2 - 1e-6
+        u["loaded_s"] = torch.where(full & (m_target >= 0), u["loaded_s"] + dt, torch.zeros_like(u["loaded_s"]))
+        full = full & waited
     # (between volleys the unit is still shooting at its target: the game's IsFiringMissiles, the `fire` flag)
-    volley_target = torch.where(loaded >= load_min - 1e-3, m_target, torch.full_like(m_target, -1))
+    volley_target = torch.where(full, m_target, torch.full_like(m_target, -1))
     shots, hp_missile, shit = missile.volley(u, pw, volley_target, dt, params, contact=touch, clear=clear,
-                                             loaded=loaded)
+                                             loaded=loaded.clamp(max=1.0))
     u["unready"] = torch.where(shots > 0, torch.ones_like(unready), unready)
+    if reaim:
+        u["late"] = torch.where(shots > 0, torch.zeros_like(u["late"]), u["late"])
+        u["loaded_s"] = torch.where(shots > 0, torch.zeros_like(u["loaded_s"]), u["loaded_s"])
     u["a"] = (u["a"] - shots).clamp(min=0)
     firing = (m_target >= 0) & ((shots > 0) | (load_min > 0))
 
@@ -252,6 +314,25 @@ def step(st, orders, params=None, dt=None):
     taken = dmg.sum(1)
     share = melee.kill_share(u["hp_man"][:, None, :], hit, cal["kills"]["exponent"])
     kills = dmg / u["hp_man"][:, None, :].clamp(min=1e-6) * share
+    if cal["kills"].get("wound_pool"):
+        # The wounded pool (kills.wound_pool; build/open_melee/spec.md R7): the game keeps every man's health and the
+        # blows beyond a man's health are lost (CA), so the wounded among the living - W = men x HP a man - the unit's
+        # HP - stay at most W* = the unit's own men in contact x (HP a man - the HP-weighted hit of its strikers) (each
+        # man struck is cut down in E[N] = HP a man / hit blows); the melee HP beyond the pool is whole men. Missiles
+        # keep the exponent rule; a lone man (a lord) is one pool of health.
+        hm = u["hp_man"].clamp(min=1e-6)
+        dm = hp_melee * scale[:, None, :]
+        D = dm.sum(1)
+        hit_m = (dm * mhit).sum(1) / D.clamp(min=1e-9)
+        own = F_men.sum(2)                                   # its own men striking in contact
+        own = torch.where(own > 0, own, F_men.sum(1)).clamp(max=u["men"].clamp(min=0))   # (not striking back: the
+        # men striking it)
+        W = (u["men"] * u["hp_man"] - u["hp_abs"]).clamp(min=0)
+        W_cap = own * (u["hp_man"] - hit_m).clamp(min=0)
+        k_m = torch.minimum((W + D - W_cap).clamp(min=0), D) / hm
+        pool_k = dm / D.clamp(min=1e-9)[:, None, :] * k_m[:, None, :]
+        shot_k = (dmg - dm) / hm[:, None, :] * melee.kill_share(u["hp_man"][:, None, :], shit, cal["kills"]["exponent"])
+        kills = torch.where((u["men0"] > 1)[:, None, :], pool_k + shot_k, kills)
     hp_new = (u["hp_abs"] - taken).clamp(min=0)
     floor = torch.ceil(hp_new / u["hp_man"].clamp(min=1e-6) - 1e-6)
     men_new = torch.maximum(u["men"] - kills.sum(1), floor)
@@ -259,6 +340,12 @@ def step(st, orders, params=None, dt=None):
     men_new = torch.where(u["men0"] <= 1, (hp_new > 0).float(), men_new)
     men_new = torch.where(hp_new <= 0, torch.zeros_like(men_new), men_new)
     drop = u["men"] - men_new
+    if reaim:
+        # the shooter's men whose target man died this step: the share of its target's men lost (a lone man: none)
+        lost_share = torch.where(u["men0"] > 1, drop / u["men"].clamp(min=1e-6), torch.zeros_like(drop)).clamp(0, 1)
+        at = u["aim_tgt"]
+        died = lost_share.gather(1, at.clamp(min=0))
+        u["late"] = torch.where(at >= 0, 1 - (1 - u["late"]) * (1 - died), torch.zeros_like(u["late"]))
     want = kills.sum(1)
     credit = kills * (drop / want.clamp(min=1e-9)).clamp(max=10)[:, None, :] * pw["enemy"]
     u["k"] = u["k"] + credit.sum(2)
@@ -409,7 +496,10 @@ def step(st, orders, params=None, dt=None):
         # health): the game's 'enemies superior in strength and speed' (the morale probe; speed is not needed).
         "strong_enemy": (foes & standing[:, None, :] & (d <= M["enemy_effect_range"])
                          & (worth[:, None, :] >= float(mcal["strong_ratio"]) * worth[:, :, None])).any(2),
-        "enemy_near": (foes & standing[:, None, :] & (d <= mcal["rally_free_m"])).any(2),
+        # (morale.rally_any_enemy: any enemy blocks the rally, routing ones too - the recordings: within 95 m of a
+        # routing enemy 0.9 % rallied a second, 12.6 % with none; build/open_battle/spec.md 4)
+        "enemy_near": (foes & (standing[:, None, :] | bool(mcal.get("rally_any_enemy")))
+                       & (d <= mcal["rally_free_m"])).any(2),
     }
     morale.step(u, ctx, params, dt)
     standing = alive & ~u["r"]
@@ -446,7 +536,7 @@ def step(st, orders, params=None, dt=None):
     # a run or a walk, a unit closes the last charge_dist metres (30 infantry, 35 lords) to its target at its charge
     # speed - a charge then (the run-up above); a move order gives none (the melee probe: the last 30 m at 3.65-3.88
     # m/s at a run of 3.0, the last 10 m 3.9-4.7, at a walk the same).
-    sprint = close_in & (t_reach <= u["charge_dist"])
+    sprint = close_in & (t_reach <= u["charge_dist"]) & ~busy_t
     want = torch.where(sprint, u["charge_speed"], want)
     moving = standing & (point | close_in)
     fx, fz = movement.flee_goal(u, pw, alive, st.bounds)
@@ -466,6 +556,9 @@ def step(st, orders, params=None, dt=None):
     want = torch.where(closing, u["walk"], want)
     moving = moving | closing
     locked = engaged & (~leaving | pinned) & ~closing
+    if cal["contact"].get("chase"):
+        # a chaser in contact with its leaving target (above) is not held in place: it moves with it (below)
+        locked = locked & ~chasing
     # Turning on the move (turn.move_turn; the database's battle_entities turn_rate, the turning probe
     # build/movelords): a unit heading for a point off its facing turns towards it at its men's turn rate (a formation's
     # men about-face where they stand: its front becomes the old back rank) and runs only the way it faces - its speed
@@ -488,6 +581,14 @@ def step(st, orders, params=None, dt=None):
     stop = locked | ~alive
     vx = torch.where(stop, torch.zeros_like(vx), vx)
     vz = torch.where(stop, torch.zeros_like(vz), vz)
+    if cal["contact"].get("chase"):
+        # a chaser in contact keeps pace with its leaving target, at most at its own run speed (it falls behind a faster
+        # leaver; out of contact it runs at the target like any attacker)
+        tvx, tvz = vx.gather(1, ti), vz.gather(1, ti)
+        cap = (u["run"] / torch.sqrt(tvx * tvx + tvz * tvz).clamp(min=1e-6)).clamp(max=1.0)
+        keep_pace = chasing & standing
+        vx = torch.where(keep_pace, tvx * cap, vx)
+        vz = torch.where(keep_pace, tvz * cap, vz)
     u["vx"], u["vz"] = vx, vz
     u["x"] = u["x"] + vx * dt
     u["z"] = u["z"] + vz * dt

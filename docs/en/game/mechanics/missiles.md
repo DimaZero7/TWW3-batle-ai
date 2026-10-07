@@ -19,15 +19,24 @@ Artillery is in [artillery](artillery.md). Conventions: [index](README.md). Our 
   and 100 · [Steam][acc] · medium.
 - **Calibration distance.** Each projectile has a range at which it has full accuracy (usually
   ~60–80 % of its maximum range); beyond it shots spread more. The "calibration area" is "the size of the
-  circle that the projectile is calibrated to and lands in"; whether a radius, an area or a spread limit is
-  said nowhere. · [tw-modding][twm] · medium.
-  - Ours: the hit comes from the database's spread model (`missile.hit_chance`): a shot aimed at a random man
-    of the target lands off by σ = k × calibration area × d / calibration distance × √(1 − (accuracy +
-    marksmanship) / 100); a man is hit within his radius or in his "shadow" height / tan(the angle it comes
-    down at, from the muzzle velocity); a formation by its files and ranks with the database's spacing (a loose
-    or thinned formation catches less), a lone man by a circle. k = 1.1 is the one calibration: it does not
-    follow from the definition, it is fitted on 62k recorded shots and confirmed by the probe (29 lanes: error
-    0.154 against 0.406 with the old measured rates).
+  circle that the projectile is calibrated to and lands in" · [tw-modding][twm] · medium. It is **an area in
+  m²**: a modder — "valuated in square meters", accuracy "reduces the targeting area by a percentage of the
+  calibration area", beyond the calibration distance accuracy falls linearly · [Steam WH3][accarea] · medium;
+  in Empire the key is described as "area of calibration target in square metres" (a TWC search excerpt) ·
+  medium.
+  - Ours: the hit comes from the database's spread model with no fitted number (`missile.hit_chance`,
+    `missile.accuracy.plane`): a shot aims at the middle of a random man of the target and lands at a Gaussian
+    offset in the plane across the line of fire at the target (like a range's target): σ² = calibration area ×
+    (d / calibration distance)² × (1 − (accuracy + marksmanship) / 100). The area read as σ × σ is ours (the
+    1 σ circle gives an error of 0.273). On the ground the spread along the line is σ / sin(the angle it comes
+    down at, from the muzzle velocity), the aim point lies h / (2 tan of the angle) beyond the man's feet; a man
+    is hit within his radius or in his "shadow" h / tan of the angle; the men of a formation are not in exact
+    files: a projectile passing over n ranks at head height meets a man with 1 − (1 − 2r / the front step)^n;
+    a formation by its files and ranks with the database's spacing (a loose or thinned formation catches
+    less), a lone man by a circle. The probe, 27 standing lanes of full-strength targets: error 0.096 (arrows
+    0.101, pistols 0.104, slings 0.050, Night Runners 0.121) against 0.171 for the old ground model with the
+    fitted k 1.1. Open: the game hits a thinned target less than the model (probe P1), a target running at the
+    shooter — ×1.2 (P3).
 - **No damage fall-off with range** in Warhammer, only spread (Attila had 1/5 damage past maximum
   range). The keys `missile_lethality_coefficient_effective_range` 40 / `_extreme_range` 120 are
   described as "lethality due to range, inside / beyond effective range" — whether WH uses them is
@@ -103,7 +112,12 @@ Artillery is in [artillery](artillery.md). Conventions: [index](README.md). Our 
     Night Runners 10.5 (database 8), militia 11 (database 9); rank 9 cuts the whole cycle by 2 % a rank, as the
     database says, so it is not an "animation floor". Why the slings and the pistol are ~1.25-1.3x slower than
     the database: no source. Whole-unit volleys; as the target thins the men skip volleys (12-15 s a man over a
-    fight): no rule found, not in the simulator.
+    fight). No rule in the database or from the community; the probe explains it so: a man keeps his target
+    man and, if that man dies, aims again before his next shot (against a lord, who does not die man by man,
+    the volley stays whole all fight; against a formation it turns into a stream from the first deaths). The
+    simulator does the same (`missile.reaim`): the volley waits the aim time × the share of men whose target
+    died; shots model / game at the end of the lanes 1.10-1.26 (arrows), 0.99-1.02 (slings), 0.96-1.05 (Night
+    Runners), without re-aim 1.18-1.39 / 1.05-1.13 / 1.03-1.16.
 - **First volley delay** grows with poor training (`fire_volley_max_aim_delay_training_ratio`:
   WH2 0.11, WH3 0). · [twwstats][tws] · medium. Ours: first shot 3.3 s (arrows) / 4.3 s (sling)
   after halting.
@@ -145,12 +159,15 @@ Artillery is in [artillery](artillery.md). Conventions: [index](README.md). Our 
   [player.one on 2.3.0][p230], [fandom 2.3.0][fw-23] · high.
   - Ours: at Normal the arena's archers shot the nearest enemy 55 % of the time, the second nearest
     19 %. The simulator keeps a target while it is in range and stands (`missile.sticky_target`), else takes the
-    nearest; a new target costs 3 s without fire (`missile.retarget_s`, recordings).
+    nearest; a new target costs 3 s without fire (`missile.retarget_s`, recordings), and so does a target taken
+    when there was none (`missile.retarget_from_none`; the probe: the first projectile 1.5-2.5 s after the centre
+    of a running target came within range).
 - **Morale.** Being shot at: −5 (`ume_concerned_attacked_by_projectile`); the wiki says −8 for
   archers too (outdated; −8 is artillery). · DB · high. See [morale](morale.md).
 
 [twm]: https://tw-modding.com/wiki/Tutorial:Missiles_and_You
 [acc]: https://steamcommunity.com/app/594570/discussions/0/3040481180139589116/
+[accarea]: https://steamcommunity.com/app/1142710/discussions/0/4357872216491592056/
 [phys]: https://steamcommunity.com/app/364360/discussions/0/1732090362040597429/
 [tws]: https://twwstats.com/kv/rules
 [g3]: https://steamcommunity.com/sharedfiles/filedetails/?id=2776861563

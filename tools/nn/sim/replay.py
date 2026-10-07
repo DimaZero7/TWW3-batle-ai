@@ -8,7 +8,8 @@ Replay: for every recorded second and unit, the order that recording implies -
                                             game's AI in ~6 %: HOLD made the two sides differ)
     otherwise                            -> MOVE to the recorded order point (ox, oz),
                                             running if the unit was running.
-Each unit's replay clock waits for actual contact/separation at recorded approaches/break-offs.
+Each unit's replay clock waits for actual contact/separation at recorded approaches/break-offs (a formation's; a
+lord's orders keep the recorded time, LORD_PHASES).
 The approach's running flag and target survive a late contact; melee keeps that phase's target.
 Phases continue until the wall-clock recording end plus `grace_s` (120 s), then every unit attacks the nearest enemy
 (check.py stops a whole battle when its recording ends, and keeps a pair on its last orders).
@@ -20,6 +21,10 @@ from tools.nn.sim import orders as O
 
 MELEE_GAP = 20       # recorded seconds: a non-leaver's melee flag off this long or less between two fights is melee ...
 STAY_M = 10.0        # ... when the unit stayed within this of where the flag went off (it never left the fight)
+LORD_PHASES = False  # a lone man's (a lord's) clock waits for contact / separation too (False: his orders keep the
+                     # recorded time - the game's lords break off melee 1.3 times a minute and switch targets; a lord
+                     # whose clock waited for a contact or a separation went on with an old order on another unit in
+                     # 0.28 of the seconds the game's enemy lord fought ours, build/open_battle/spec.md 1)
 
 
 def hold(st):
@@ -158,7 +163,8 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
                    and not f["fire"][start - 1, i]
                    and (run[start - 1, s] or attack[start - 1])):
                 start -= 1
-            if start < a and t >= 0:
+            latch = formation or LORD_PHASES
+            if start < a and t >= 0 and latch:
                 phase[start:a, s] = 1
                 end[start:a, s] = a
                 phase_target[start:a, s] = t
@@ -169,7 +175,7 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
             # Preserve leave_m's inference: only authorised leavers with no attack target
             # get a break-off. A far planner/AI melee point is still an attack, never a move.
             leaves = np.flatnonzero((kind[a:b, s] == O.MOVE) & leaving[a:b]) + a
-            if len(leaves):
+            if len(leaves) and latch:
                 first = int(leaves[0])
                 # Do not turn a cancelled move (a later attack/hold) into a break-off.
                 if np.all(kind[first:b, s] == O.MOVE):
@@ -181,7 +187,7 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
         # Assign after approaches: the first separated sample is a barrier even if
         # the next running approach begins there. Never skip separation for a new charge.
         for b in np.flatnonzero(edges == -1):
-            if leave_m > 0 and b < T and active[b] and kind[b, s] == O.MOVE:
+            if leave_m > 0 and b < T and active[b] and kind[b, s] == O.MOVE and (formation or LORD_PHASES):
                 phase[b, s] = 2
                 end[b, s] = b + 1
     return {"kind": kind, "x": x, "z": z, "target": target, "run": run,

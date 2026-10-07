@@ -25,16 +25,23 @@ A new order (another kind or another attack target) makes it aim again (missile.
     per hit = ap + base x (1 - 0.75 armour / 100); a shield blocks its chance of small arms from the front
               (within shield_defence_angle_missile, 60 deg); x (1 - missile resistance)
 
-The hit chance (hit_chance; build/accuracy model2, the one calibration missile.accuracy.k 1.1): a projectile
-aimed at a random man of the target lands at a Gaussian offset, sigma = k x calibration_area x d /
-calibration_distance x sqrt(1 - accuracy / 100) (the database's projectile: calibration area and distance;
-accuracy = land_units accuracy + the projectile's marksmanship). It comes down at the low arc's angle theta
-(muzzle velocity), so a man of height h is hit within his radius r or in his shadow L = h / tan(theta) behind him.
-    a lone man   p = 1 - exp(-(pi r^2 + 2 r min(L, 3 sigma)) / (2 pi sigma^2))
-    a formation  p = max(2r / s_h, erf(r / (sqrt2 sigma))) x mean over its ranks y0 of
-                     [Phi((D + L - y0) / sigma) - Phi((-r - y0) / sigma)]
+The hit chance (hit_chance, missile.accuracy.plane; build/open_missile/spec.md S1): a projectile aimed at the middle
+of a random man of the target lands at a Gaussian offset in the plane across the line of fire at the target (a
+calibration target, like a range's), sigma^2 = calibration_area x (d / calibration_distance)^2 x (1 - accuracy / 100):
+the database's calibration area is an AREA in m^2 (modders: "valuated in square meters", Empire's setting "area of
+calibration target in square metres") and accuracy (land_units accuracy + the projectile's marksmanship) cuts that area
+by its percent - no fitted number. It comes down at the low arc's angle theta (muzzle velocity): on the ground the
+spread along the line is sigma_a = sigma / sin(theta) and the aim point (a man's middle, height h / 2) lies
+c = h / (2 tan theta) beyond his feet; a man of height h is hit within his radius r or in his shadow L = h / tan(theta).
+    a lone man   p = erf(r / (sqrt2 sigma)) x [Phi((L + r - c) / sigma_a) - Phi((-r - c) / sigma_a)]
+    a formation  p = max(cover, erf(r / (sqrt2 sigma))) x mean over its ranks y0 of
+                     [Phi((D + L - c - y0) / sigma_a) - Phi((-r - c - y0) / sigma_a)]
                  files s_h apart across the line and ranks s_v apart along it, D = (ranks - 1) s_v: the target's own
-                 formation now (geometry.dims; the database's close spacing), so a loose or thinned unit is hit less.
+                 formation now (geometry.dims; the database's close spacing), so a loose or thinned unit is hit less;
+                 the men are not in exact files: a projectile passing at head height over n = clamp((min(L, D) + 2r) /
+                 s_v, 1, ranks) ranks meets a man with cover = 1 - (1 - min(2r / s_h, 1))^n.
+(missile.accuracy.plane false: the older ground model, sigma = k x calibration_area x d / calibration_distance x
+sqrt(1 - accuracy / 100) with a fitted k, aimed at the feet, exact files.)
 A lone man in melee keeps hit_rate x distance factor x single_entity_in_melee (measured, batch 3); spill and
 friendly fire are measured shares of those old-rule hits.
 
@@ -132,6 +139,8 @@ def hit_chance(u, pw, params):
     missile.accuracy.spacing "db": the target's own close spacing (sp_h, sp_v) and formation (geometry.dims);
     a number: that spacing for all, the same files and ranks (the prototype's 2.0, build/accuracy/proto.py)."""
     cfg = params.sim["missile"]["accuracy"]
+    if cfg.get("plane"):
+        return hit_chance_plane(u, pw)
     k = float(cfg["k"])
     d = pw["dist"].clamp(min=5.0)
     shrink = torch.sqrt((1 - u["acc"] / 100).clamp(min=0))[:, :, None]
@@ -158,6 +167,38 @@ def hit_chance(u, pw, params):
         y0 = D * (q + 0.5) / n
         along = along + _phi((D + shadow - y0) / sig) - _phi((-r - y0) / sig)
     p_form = lateral * along / n
+    return torch.where((u["men0"] <= 1)[:, None, :], p_lone, p_form).clamp(0, 1)
+
+
+def hit_chance_plane(u, pw):
+    """[B, i, j] the hit chance with the spread in the plane across the line of fire (module docstring; missile.accuracy
+    plane): sigma from the calibration AREA, the aim at a man's middle, ranks not in exact files."""
+    d = pw["dist"].clamp(min=5.0)
+    shrink = torch.sqrt((1 - u["acc"] / 100).clamp(min=0))[:, :, None]
+    sig = (torch.sqrt(u["cal_area"].clamp(min=0))[:, :, None] * d / u["cal_dist"].clamp(min=1.0)[:, :, None]
+           * shrink).clamp(min=1e-3)
+    v = u["muzzle_v"].clamp(min=1.0)[:, :, None]
+    theta = (0.5 * torch.asin((d * 9.81 / (v * v)).clamp(max=1.0))).clamp(min=1e-3)
+    L = u["height"][:, None, :] / torch.tan(theta)
+    sa = sig / torch.sin(theta)                      # the spread along the line, on the ground
+    c = 0.5 * L                                      # the aim point (a man's middle) beyond his feet
+    r = u["radius"][:, None, :]
+    lat_lone = torch.erf(r / (math.sqrt(2) * sig))
+    p_lone = lat_lone * (_phi((L + r - c) / sa) - _phi((-r - c) / sa))
+    h = torch.where(u["sp_h"] > 0, u["sp_h"], torch.full_like(u["sp_h"], 2.0))[:, None, :]
+    sv = torch.where(u["sp_v"] > 0, u["sp_v"], torch.full_like(u["sp_v"], 2.0))[:, None, :]
+    depth = pw["depth"][:, None, :]
+    D = (depth - sv).clamp(min=0)                    # the target's formation (geometry.dims)
+    ranks = (depth / sv).clamp(min=1)
+    n = torch.minimum(((torch.minimum(L, D) + 2 * r) / sv).clamp(min=1.0), ranks)
+    cover = 1 - (1 - (2 * r / h).clamp(max=1.0)) ** n
+    lateral = torch.maximum(cover, lat_lone)
+    along = torch.zeros_like(sig)
+    q_n = 7
+    for q in range(q_n):
+        y0 = D * (q + 0.5) / q_n
+        along = along + _phi((D + L - c - y0) / sa) - _phi((-r - c - y0) / sa)
+    p_form = lateral * along / q_n
     return torch.where((u["men0"] <= 1)[:, None, :], p_lone, p_form).clamp(0, 1)
 
 

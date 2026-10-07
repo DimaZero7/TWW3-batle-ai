@@ -83,18 +83,29 @@ Sources: [twwstats morale][tws-m] (high), [fandom Leadership][fw-lead], [fandom 
 - **Broken → rally timer.** `broken_finish_base_timeout` 180 s is "the base timeout for going
   from broken to rally", plus 10 s × experience level (`broken_finish_timer_experience_bonus`). ·
   [twwstats morale][tws-m] · high (value), low (how it applies in WH3).
-  - Ours: measured rallies take 44 s (median, 25–83 s), at `MoralePercent` ~0.23 with no standing
-    enemy within ~90 m. **Unresolved**: 180 s may be a maximum, not a minimum.
+  - Ours: a rally when morale is above 0, the unit has routed at least 18 s (the morale probe: not before
+    18.5 s), no living enemy is within 95 m, and all this has held without a break for 7 s
+    (`morale.rally_wait_s`: the recordings' median from the first such second to the rally, p25 4, p75 12;
+    points, fire on it and the enemy's target do not matter). Measured rallies in the game take 44 s
+    (median, 25–83 s). **Unresolved**: the game's own clock — rout length to the rally peaks at 18–19 and
+    36–37 s; 180 = 18 s if the morale timers run in 0.1 s ticks (a guess; morale probe T-E).
 - **Rally needs distance.** Players report routers within ~10–15 m of enemies or under fire keep
-  running. WH2 · Steam · low. Ours: 90 m measured (365 rallies) — our number is better.
+  running. WH2 · Steam · low. Ours: the morale probe — a rally once the enemy is beyond 94–96 m; the
+  simulator 95 m (`morale.rally_free_m`), and **any** living enemy blocks the rally, routing ones too
+  (`morale.rally_any_enemy`; the recordings: next to a routing enemy within 95 m 0.9 % of 4285 seconds rallied
+  within 1 s, with none 12.6 % of 17,319). Our number is better.
 - **No re-rout for 10 s after a rally** (`post_rally_no_rout_timer` 10). · high. Ours: same.
-- **Shattering.** Always after 3 routs (`shatter_after_rout_count`); also earlier by casualty
-  rules (`shatter_after_first_rout_if_casulties_higher_than` 0.05, `…_second_…` 0.1 — their
-  description is garbled: "[(THIS × starting men) < current men]"); a sudden very large drop
-  (below −50, the bottom of "broken") shatters at once. · [twwstats][tws-m], [fandom][fw-lead] ·
-  high (3 routs), low (the rest).
-  - Ours: the third rout shatters; the casualty rules and the −50 floor are not modelled
-    (`morale.rout_floor_mp` −0.3).
+- **Shattering.** Always after 3 routs (`shatter_after_rout_count`); when the points reach the floor −50
+  (`ums_broken_threshold_lower`, the bottom of "broken": the game never goes below) — at once; after the
+  1st / 2nd rout — by casualty rules (`shatter_after_first_rout_if_casulties_higher_than` 0.05, `…_second_…`
+  0.1; the key's description is garbled: "[(THIS × starting men) < current men]";
+  `use_hitpoints_instead_of_casualties` 1 — counted by health). · [twwstats][tws-m], [fandom][fw-lead],
+  [Goumin's WH3 kv guide][g3] · high (3 routs), medium (the rest: the guide and the recordings).
+  - Ours: the same (`morale.shatter_rules`): shattered at the 3rd rout; at the −50 floor always, army
+    destruction or not (unbreakable units never); a router on its 1st rout below 0.05 of its starting health,
+    on its 2nd below 0.10. The recordings of 221 battles (1st and 2nd routs of infantry and missile units,
+    army-destruction waves excluded): all 92 + 61 shatters on the run met one of the conditions (the floor
+    0.75 / 0.54, the health 0.46 / 0.84), the rallied 0.000–0.003 of 3205; shattered units sit at −48…−50.
 - **Terror.** A terror-causer's melee hit makes an enemy within 5 m with morale ≤ 13 points rout
   for 14 s; the same enemy can't do it again for 85 s; 4 terror routs shatter (3 for normal
   routs). Every terror-causer also causes fear. · [twwstats][tws-m], [fandom Causes Terror][fw-ter],

@@ -169,8 +169,9 @@ class TestMeleeExit:
         st.u["leadership"][:] = 1e6
         brk = P.rules["battle"]["melee_breakoff_secs"]
         assert brk == 24.0
-        kinds, kills = [], []
+        kinds, kills = [], []                                   # (kills: the target's HP lost)
         d0 = float(st.u["x"][0, H] - st.u["x"][0, 0])
+        hp_h0 = float(st.u["hp_abs"][0, H])
         for n in range(int(40 / P.dt)):
             o = replay.hold(st)
             o.kind[0, H], o.target[0, H] = O.ATTACK, 0
@@ -182,7 +183,7 @@ class TestMeleeExit:
             st.u["x"][0, 0] = st.u["x"][0, H] - d0
             battle.step(st, o, P)
             kinds.append(int(st.u["order_kind"][0, 0]))
-            kills.append(float(st.u["k"][0, 0]))
+            kills.append(hp_h0 - float(st.u["hp_abs"][0, H]))
         drop = kinds.index(O.HOLD)
         assert (drop + 1) * P.dt == pytest.approx(brk + P.dt, abs=P.dt)
         assert kills[drop - 1] - kills[4] == pytest.approx(0.0, abs=1e-6)      # no blows while leaving

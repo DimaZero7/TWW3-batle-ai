@@ -272,7 +272,7 @@ class TestCharge:
 
 # --- melee core 2 (build/melee2impl): the first strike, the lord's gather, the initial recharge ---
 
-def lost_per_step(attacker, defender, kind=O.ATTACK, run=True, gap=40.0, steps=4):
+def lost_per_step(attacker, defender, kind=O.ATTACK, run=True, gap=40.0, steps=4, params=P):
     """attacker (side 2) comes at a standing defender; HP each side loses on the contact step and the steps after."""
     st = scenario.build([army([(defender, 0, 0, 90)], [(attacker, 60, 0, 270)])], P)
     H = st.N // 2
@@ -285,7 +285,7 @@ def lost_per_step(attacker, defender, kind=O.ATTACK, run=True, gap=40.0, steps=4
         if kind == O.MOVE:
             o.x[0, H], o.z[0, H] = 3.0, 0.0          # into the enemy, not beyond contact.leave_m (it would leave)
         hp_d, hp_a = float(st.u["hp_abs"][0, 0]), float(st.u["hp_abs"][0, H])
-        battle.step(st, o, P)
+        battle.step(st, o, params)
         if out or bool(st.u["m"][0, H]):
             out.append((hp_d - float(st.u["hp_abs"][0, 0]), hp_a - float(st.u["hp_abs"][0, H])))
         if len(out) > steps:
@@ -301,18 +301,27 @@ class TestMeleeCore2:
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
         contact = pw["enemy"] & (pw["gap"] <= 1.0)
         z = torch.zeros_like(st.u["men"])
+        st.u["order_kind"][0, H], st.u["order_target"][0, H] = O.ATTACK, 0
         rate, _, _, F, swing = melee.strikes(st.u, pw, contact, P, z, first=True)
         u = P.units[SWORD]["melee"]
         p = (35 + u["attack"] - P.units[CLANRATS]["melee"]["defence"]) / 100
         assert float(F[0, H, 0]) > 1
         assert float(swing[0, H, 0]) == pytest.approx(float(rate[0, H, 0]) * (p * u["attack_interval_s"]
                                                                                + P.sim["melee"]["miss_s"]), rel=1e-4)
+        # held (HOLD): its rate is cut by hold_rate, its one swing is not (every man in reach swings; spec R1)
+        st.u["order_kind"][0, H], st.u["order_target"][0, H] = O.HOLD, -1
+        rate_h, _, _, _, swing_h = melee.strikes(st.u, pw, contact, P, z, first=True)
+        assert float(rate_h[0, H, 0]) == pytest.approx(P.sim["contact"]["hold_rate"] * float(rate[0, H, 0]), rel=1e-4)
+        assert float(swing_h[0, H, 0]) == pytest.approx(float(swing[0, H, 0]), rel=1e-4)
 
-    def test_a_unit_running_in_strikes_once_at_once_a_standing_one_does_not(self):
+    def test_a_unit_running_in_strikes_once_at_once_and_a_standing_one_facing_it_too(self):
         steps = lost_per_step(SWORD, CLANRATS)                       # a charge at a run
         first, then = steps[0], steps[2]
         assert first[0] > 4 * then[0]                                # the charger's burst on the contact step
-        assert first[1] < 1.5 * then[1] + 1                          # the standing clanrats answer at their rate
+        # the standing clanrats facing it strike once at once too (build/open_melee/spec.md R1)
+        assert first[1] > 2 * then[1]
+        off = lost_per_step(SWORD, CLANRATS, params=P.with_cal("contact", stand_first_strike=0))
+        assert off[0][1] < 1.5 * off[2][1] + 1                       # (without the rule: at their rate)
         walk = lost_per_step(SWORD, CLANRATS, run=False)             # at a walk: sprints in, the same burst
         assert walk[0][0] == pytest.approx(first[0], rel=0.15)
         move = lost_per_step(SWORD, CLANRATS, kind=O.MOVE)           # a move order runs in: a burst, no charge

@@ -13,23 +13,26 @@ game decides the direction. Conventions: [index](README.md).
   [CA forum thread][t10108], [WH3 kv guide][g3] · high ·
   `melee_defence_direction_penalty_coefficient_flank` 0.6, `_rear` 0.3 (WH2 description:
   "coefficient by which defender's melee defence is multiplied").
-  - Ours: the simulator uses ×0.6 / ×0.3, but the defence lost counts at `flank_slope` 2.0 /
-    `rear_slope` 0.25 of the rule, fitted to the 28 whole battles where infantry fought on the
-    flank lost 1.74× and on the rear 1.31× of the front. **Conflict**: by the database the rear
-    must cost more than the flank; that count says the opposite. Counted apart, a lone attacker
-    (infantry only, nobody shooting, contacts older than 10 s) takes 1.53× from the flank and
-    1.92× from the rear ([measurements](../../training/measurements.md#flank-and-rear-a-lone-attacker)):
-    the rear costs more, as the database says. The simulator keeps the old fit (its rule with the
-    striker's own front fits these ratios but made whole battles worse: `simulator.md`).
+  - Ours: the simulator uses ×0.6 / ×0.3 at weight 1, as the database (the former fitted weights
+    `flank_slope` 2.0 / `rear_slope` 0.25 are gone). A lone attacker (infantry only, nobody shooting,
+    contacts older than 10 s) takes 1.53× from the flank and 1.92× from the rear
+    ([measurements](../../training/measurements.md#flank-and-rear-a-lone-attacker)): the rear costs more,
+    as the database says.
 - **Per model, by quadrant.** The penalty is decided for each attacking model against the struck
   entity: a blow from the target entity's left, right or rear quadrant is a flank/rear blow; it
-  stops once that model turns to face its attacker. WH3 · [CA damage blog][dmg], [CA forum thread][t10108] ·
-  high (per entity), medium (quadrant boundaries).
+  stops once that model turns to face its attacker. The quadrants: front ±45°, rear beyond 135°. WH3 ·
+  [CA damage blog][dmg], [CA forum thread][t10108] · high (per entity), medium (quadrant boundaries).
   - Ours: the simulator decides per unit, by the angle of the enemy's centre off the unit's
-    facing: front within 60°, rear beyond 120° (`contact.front_deg`, `rear_deg`) — quadrants
-    would put the boundaries at 45° / 135°. A single entity turns at once, which matches the
-    measured "no flank/rear rule against a lord" (`contact.lord_direction` 0). **Partial conflict**
-    (boundaries); agreement on lords.
+    facing: front within 45°, rear beyond 135° (`contact.front_deg`, `rear_deg`) — CA's quadrant
+    boundaries. The recordings (135k seconds, one standing formation against one whose target it is): the
+    damage rises smoothly from ~45° to ~85° (0–45° 0.93–0.97 of the pair's mean, 45–60° 1.07, 60–75° 1.23,
+    75–120° 1.34–1.39, 120–180° 1.27–1.30) — no step, the rear no dearer than the flank: just what the
+    per-model rule gives (the share of the enemy's men in the side quadrant grows with the angle, the men
+    turn). With 45° / 135° instead of the former 60° / 120° the game's AI battles 15 → 17 of 26 same winner,
+    mechanics unchanged. A single entity turns at once, which matches the measured "no flank/rear rule
+    against a lord" (`contact.lord_direction` 0). **Partial conflict**: CA's rule is per model, ours a
+    unit-level step (OPEN; the next step: a share of the blows from the flank, linear from 45° to 90°, and the
+    rear turning into a flank as the men turn); agreement on lords.
 - **Formations don't turn in melee.** Not stated by any source as a number; players note
   engaged units stay "glued". Ours: measured 1°/s turning in melee (`contact.melee_turn_deg_s` 2).
 
@@ -84,8 +87,8 @@ game decides the direction. Conventions: [index](README.md).
 
 ## Not found
 
-Exact sector boundaries in degrees (quadrant = 90° sectors is our reading), how long
-"attacked in the flank" lasts, and any "encirclement" mechanic beyond the sum above.
+How long "attacked in the flank" lasts, and any "encirclement" mechanic beyond the sum above. The
+quadrant boundaries (±45°, rear beyond 135°) come only from the CA forum thread (medium).
 
 [dmg]: https://community.creative-assembly.com/total-war/total-war-warhammer/blogs/6-feature-focus-2-damage-part-1
 [t10108]: https://community.creative-assembly.com/total-war/total-war-warhammer/forums/10-battles/threads/10108-flank-attack-damage-increase

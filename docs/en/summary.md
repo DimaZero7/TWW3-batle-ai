@@ -54,22 +54,30 @@ again — the baselines and the drill check scripts, ~8 min on the CPU beside th
 the "canary" (the baseline's first 32 pairs) adopts the old ones.
 
 **Already modelled:** speeds, formation (each unit's step from its formation template in the database),
-contact and leaving melee (ordered away, a unit without a missile weapon is held 20 s, a missile unit
-5 s, as in the game), pursuit of routers. **Melee is by the game's formulas now** (the melee core): hit
+contact and leaving melee (ordered away, a missile unit is held 5 s; a unit without a missile weapon walks
+out unless it is chased; **the chase** - a unit with an attack order on the leaver follows it and strikes
+it, so a chased unit stays in contact until the 24 s window, as in the game), pursuit of routers. **Melee
+is by the game's formulas now** (the melee core): hit
 chance 35 + attack − defence at weight 1 for everyone (a miss costs 0.5 s: a man lands p / (p × interval
 + 0.5) hits a second), damage — armour-piercing in full + base less the armour roll, overkill beyond a
-man's health is lost (smoothed), a lord's blow is divided by 4 and hits an average of 2.07 men, flank and
-rear — defence ×0.6 / ×0.3, charge — only the charge bonus, on an attack order with a run-up, 13 s on its
-own clock, spearmen's charge reflection ×2 for 3.9 s; the fitted "slope 0.1", "charge blow" and "bringing
-men in" are gone. Melee core 2 (the game's rules, no fitting): **the first strike** - a unit coming into a
-fight moving or charging strikes once at once with every man in contact (the interval runs only after a
-blow); **the charge sprint** - under any attack order, at a walk too, the last 30 m (lords 35) at the
-database's charge speed; abilities' initial recharge from the database. Shooting by the game's rules ([missile probe](game/units/missile-probe.md), 10 battles): volleys once a cycle (archers 10 s = the database, sling 11.5, Night Runners 10.2, militia 10.8: measured), range centre to centre, each man's fire arc ±30° (militia ±35°), no turn when firing at will, 3 s after a target change, hits from the database's spread model (one calibration k 1.1 from 62k recorded shots), a shield against small arms only, the line of fire with the True Sight mod; friendly fire and spill, lords (at most 6.5 men hit them, gathering over
+man's health is lost (smoothed), melee kills — **the wounded pool** (the wounded among the living at most
+the men in contact × the health a blow leaves; the rest is whole men), a lord's blow is divided by 4 and
+hits an average of 2.07 men, flank and rear — defence ×0.6 / ×0.3 (the flank is an enemy beyond 45° of the
+front, the rear beyond 135°, by CA), charge — only the charge bonus, on an attack order with a run-up
+towards the target, 13 s on its own clock, spearmen's charge reflection ×2 for 3.9 s (not cut by the hold
+share); no charge into a target already fighting our units (the path is blocked by friends); the fitted
+"slope 0.1", "charge blow" and "bringing men in" are gone. Melee core 2 (the game's rules, no fitting):
+**the first strike** - a unit coming into a fight moving or charging, and a standing unit an enemy
+reaches, strike once at once with every man in contact (the interval runs only after a blow); **the
+charge sprint** - under any attack order, at a walk too, the last 30 m (lords 35) at the database's
+charge speed; abilities' initial recharge from the database. A formation under hold, or under a move while
+in contact, strikes at 0.5 (fitted on the melee probe: no rule for the rate). Shooting by the game's rules ([missile probe](game/units/missile-probe.md), 10 battles): volleys once a cycle (archers 10 s = the database, sling 11.5, Night Runners 10.2, militia 10.8: measured), range centre to centre, each man's fire arc ±30° (militia ±35°), no turn when firing at will, 3 s after a target change and after taking a target "from none", re-aim: a man whose target died aims again, and the volley waits; hits from the database's spread model with no fitted number (spread in the plane across the line of fire, the calibration area an area in m²; the probe: error 0.096 against 0.171 with the old fitted k 1.1), a shield against small arms only, the line of fire with the True Sight mod; friendly fire and spill, lords (at most 6.5 men hit them, gathering over
 20 s only when the lord himself ran into the formation; a lord without an order strikes in full; the lord as fragile as in the game: his own aura does not reach him, in melee he is
 always 'losing' (−3), projectiles hit him whole in melee; he tires by the database (+19 a tick), Foe-Seeker restores 1 %
 of the maximum vigour a second; Wounds - 5 s after 25 % health speed x0.9, damage x0.8 to the end; a lord duel: General v
-General x0.8 of the game, Warlord v Warlord x1.2), morale with all main modifiers by the game's rules (the 4 s and 60 s casualty windows and 'under fire' 15 s; by the morale probe of 06.10: flank / rear −6 / −14 while struck; 'flanks secure' +5 with no enemy within 146 m or friends at both sides; the charge +15 in 6 + 6 s blocks; winning by shooting too, from 10 % lost; a strong enemy worth 3×; a router's morale follows its target, the rally with no enemy within 95 m after at least 18 s of rout, [simulator](training/simulator.md#morale-by-the-games-rules-the-morale-probe); a lord's death: his army
-−16 for 45 s, then −10; his rout on the field: the aura only), rout, rally, army collapse (−120; the strength is the database's combat potential:
+General x0.8 of the game, Warlord v Warlord x1.2), morale with all main modifiers by the game's rules (the 4 s and 60 s casualty windows and 'under fire' 15 s; by the morale probe of 06.10: flank / rear −6 / −14 while struck; 'flanks secure' +5 with no enemy within 146 m or friends at both sides; the charge +15 in 6 + 6 s blocks; winning by shooting too, from 10 % lost; a strong enemy worth 3×; a router's morale follows its target, the rally with no living enemy (routing ones too) within 95 m, after at least 18 s of rout and for 7 s in a row (measured on the recordings), [simulator](training/simulator.md#morale-by-the-games-rules-the-morale-probe); a lord's death: his army
+−16 for 45 s, then −10; his rout on the field: the aura only), rout, rally, a unit's shattering by the database's rules (the morale floor −50 —
+always; on the 1st / 2nd rout below 0.05 / 0.10 health; at the 3rd rout), army collapse (−120; the strength is the database's combat potential:
 melee_cp + the abilities' potential + missile_cp by the ammunition left, × health - as the recorded `strategic_value`),
 turning on the move at the model's turn rate from the database (a formation about-faces where it stands and runs the
 way it faces), leaving melee with the database's 24 s window (one still in contact drops its order and fights),
@@ -91,16 +99,21 @@ the game is replayed in the simulator from its recorded orders 19 times with sta
 measured by the same code as the game. The 19 copies are the simulator's forecast. The main score is **the share
 of game values inside the copies' 90 % interval** (`tools/nn/simskill.py`): 90 % for a simulator that matches the
 game, its noise included. Beside it the CRPSS skill (how much better the copies are than "the typical game value":
-0 no better, 100 % exact) and the old counts; 95 % confidence intervals in brackets ([how it is computed, the worst
+0 no better, 100 % exact) and the old counts; in brackets — before the shooting, melee and whole-battle rules ([how it is computed, the worst
 quantities, the old count's errors](training/simulator.md#the-checks-score-the-simulator-as-a-forecast)). The
 set of recordings is frozen.
 
 | Family | Inside 90 % | Skill | Old count |
 |---|---:|---:|---|
-| Mechanics: unit pairs and shooting (18 recordings) | 20 % (14-26) | -69 % (-108 to -7) | 25 / 54 within 20 % (without repeats 23 / 48; 24 before the charge fix; 51 before the melee core; core 2 - 37; shooting by the rules - 29; morale by the rules - 24) |
-| The game's AI against itself (28) | 35 % (30-41) | -52 % (-67 to -18) | same winner 16 / 26 (20 before the core, the core 21, core 2 and shooting 18, morale 16, movement and lords 15) |
-| The network against the game's AI (170) | 40 % (38-43) | 24 % (15-31) | same winner 139 / 169 (126 before the core, the core 127, core 2 and shooting 132, movement and lords 137) |
-| Gates: the network itself against ai_like (10 battles, 8 copies) | 80 % (76-84) | 7 % (-11 to 33) | - |
+| Mechanics: unit pairs and shooting (18 recordings) | 22 % (before the shooting, melee and whole-battle rules 20 %) | -68 % (-69 %) | 28 / 54 within 20 % (25 before these rules, without repeats 23 / 48; 24 before the charge fix; 51 before the melee core; core 2 - 37; shooting by the rules - 29; morale by the rules - 24) |
+| The game's AI against itself (28) | 37 % (35 %) | -31 % (-52 %) | same winner 16 / 26 (16 before these rules; 20 before the core, the core 21, core 2 and shooting 18, morale 16, movement and lords 15) |
+| The network against the game's AI (170) | 37 % (40 %) | +22 % (+24 %) | same winner 139 / 169 (139 before these rules; 126 before the core, the core 127, core 2 and shooting 132, movement and lords 137) |
+| Gates: the network itself against ai_like (10 battles, 8 copies) | 80 % (80 %) | +7 % (+7 %) | - |
+
+By batch (shooting; melee and whole battle) and the worst quantities —
+[the score by change](training/simulator.md#the-score-by-the-shooting-melee-and-whole-battle-changes). The
+confidence intervals before the changes: mechanics 14-26, the game's AI battles 30-41, network battles 38-43,
+gates 76-84.
 
 The shortfall from 90 % comes mostly from the copies being too alike: their spread is a third of their miss (a
 hundredth in mechanics): the game is noisy, the simulator computes averages. The "same winner" count of
@@ -130,9 +143,10 @@ same battles. **The simulator is too kind to the network** — the main measured
 - the game AI's army routs twice as often in the simulator (1.9 times a battle against 0.92):
   it loses more health in melee (0.45 against 0.38);
 - shooters in battle fire slower than on the range (0.05–0.07 projectiles per man per second
-  against 0.087–0.091 in the simulator before each man's arc and the target-change pause); in the game men skip volleys as the target
-  thins and hits on a thinned target fall more than in the model - so the two shooting arenas of the mechanics check
-  dropped out (37 -> 29); a target running at the shooter takes x1.2-1.3 a shot; the militia's pistols are open;
+  against 0.087–0.091 in the simulator before each man's arc and the target-change pause; skipping volleys as the
+  target thins - now re-aim); hits on a thinned target fall more in the game than in the model (archers on slaves:
+  model 0.73 a shot, game 0.50 - probe P1); a target running at the shooter takes x1.2 a shot (P3); the pistols'
+  per-man range (P2) - open;
 - the enemy lord breaks too easily (97 % of battles against 25 %), and our lords fall 130–145 s
   earlier than in the game;
 - in the game fights are short and often break off (median 17 s), in the simulator they do not
@@ -141,13 +155,20 @@ same battles. **The simulator is too kind to the network** — the main measured
 - army collapse: the combat-potential strength catches the onset in the recordings in the same second in 0.94 of
   cases, but in the replay army destruction comes by the end in 0.15 of the battles against 0.96 in the game - the
   losing army in the replay loses health too slowly in the last two minutes;
-- leaving melee: a unit the enemy does not chase is not held in the game (out of contact in 8 s), the simulator holds it
-  20 s (the whole-battle measurement); a formation turning 90 deg on the move starts slower in the game (it re-forms);
+- leaving melee: an unchased leaver in the simulator is out of contact ~2 s after the order (game ~4-4.5 s: during
+  the about-face the formation turns as a rectangle); whether the chase holds missile units 5 s - open;
+  a formation turning 90 deg on the move starts slower in the game (it re-forms);
   the Warlord on a facing order turns 75 deg/s against 180 in the database; a formation in melee tires ~110-120
   points/s for the first 50 s, then ~210/s, and the charge tires before contact too;
 - rallied units rout again 10 / 45 s after the rally in 0.11 / 0.40 of cases (game 0.07 / 0.23; before the morale
-  probe's rally rule 0.37 / 0.49); fewer routs a battle than in the game (16.8 against 22.5);
+  probe's rally rule 0.37 / 0.49); fewer routs a battle than in the game (16.8 against 22.5); the melee and
+  whole-battle changes lowered the routs and rallies in the network's battles further (routs per unit 0.93, game
+  1.30) - the cause is being measured; the game's own rally clock (rout length peaks at 18-19 and 36-37 s) - open
+  (probe T-E);
 - morale: the level of 'losing' in melee and the 'strong enemy' scale (the General next to slaves −9, ours −3) are open;
+- melee: Stand Your Ground, fights with flagellants (both sides strike x1.4-2 the rule), the pair of CA's planner's
+  spearmen - probes P1-P3; whether entering another unit's fight gives the charge bonus - a probe; CA's flank
+  sectors are per man, ours a unit-level step;
 - order delay in the game is 0.6–0.8 s in small battles, 0.36 s in the simulator;
 - the second wave of units (Flagellants, Greatswords, militia, Skavenslaves, shielded Clanrats,
   Night Runners) is not checked against recordings;

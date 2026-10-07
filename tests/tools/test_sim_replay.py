@@ -164,3 +164,12 @@ def test_phase_target_overrides_later_target_only_while_available():
     assert policy(st).target[0, 0] == 1
     st.u["r"][0, 1] = True
     assert policy(st).target[0, 0] == -1
+
+
+def test_a_lords_orders_keep_the_recorded_time():
+    # a lone man (a lord) gets no approach or exit latch: his clock is the recording's (replay.LORD_PHASES)
+    b = recording(); b.f["men"][:, 0] = 1
+    r = replay.recorded_orders(b, [0, 1], 2, fight_nearest=[False, True], leavers=[True, False])
+    assert not r["phase"][:, 0].any()
+    assert r["phase"][5, 1] == 2                     # the formation keeps its latch
+

@@ -107,7 +107,8 @@ switches on "count by hit points, not by men"):
 
 The table does not say how many seconds count as "recent".
 
-**Timers:** after the third rout the unit is shattered (`shatter_after_rout_count` 3);
+**Timers:** after the third rout the unit is shattered (`shatter_after_rout_count` 3), at the floor of
+−50 points (`ums_broken_threshold_lower`) at once;
 a rallied unit cannot rout again for 10 s (`post_rally_no_rout_timer`);
 `waver_base_timeout` 25 s; morale changes smoothly (`percent_update_per_tick` 0.15).
 
@@ -129,7 +130,12 @@ a rallied unit cannot rout again for 10 s (`post_rally_no_rout_timer`);
   rout 0.00). Its health at that moment: median 19 % (9 to 43 % in 80 % of
   routs).
 - **Rally.** A routing unit rallies after 45 s (median; 25–83 s); the morale probe
-  showed the rule (below).
+  showed the rule (below). All recordings: any living enemy within 95 m, a routing one too, nearly
+  forbids the rally (0.9 % of 4285 such seconds rallied within 1 s, with none 12.6 % of 17,319); and
+  without one the rally is not at once — from the first second the conditions hold, median 7 s (p25 4, p75 12).
+- **Shattering.** All 92 + 61 shatters on the run of a 1st / 2nd rout (221 battles, army-destruction waves
+  excluded) met one of the conditions: points at the floor −50 or health below 0.05 / 0.10 of the start;
+  rallied units reached them in 0.000–0.003 of 3205.
 - **How often.** 243 routs and 132 rallies in 13 battles — about 19 routs and 10
   rallies a battle. Units often rout and rally several times; the winner chases
   routers for a long time, a battle lasts 350–900 s of game time.
@@ -180,6 +186,7 @@ of the strongest effect (`MoraleGreatestEffect`). Data: `build/morale`.
 - Ranks above 0, other units and factions.
 - `charge_timeout` 60 is not a cooldown of the charge's morale (a unit gets +15 again after ~19 s); its
   meaning is not found. `shatter_after_first_rout_if_casulties_higher_than` 0.05 and `…_second_rout_…` 0.1 —
-  their meaning was not checked.
+  by the recordings: a shatter below 0.05 / 0.10 of the starting health on the 1st / 2nd rout (above).
+- The game's own rally clock: rout length to the rally peaks at 18–19 and 36–37 s (morale probe T-E).
 - How the game computes the fight's balance (a ratio of what, over what window, the thresholds) and a strong
   enemy's "combat power".

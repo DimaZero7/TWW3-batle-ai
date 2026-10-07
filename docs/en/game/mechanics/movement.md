@@ -75,9 +75,11 @@ Ours: [pace and fatigue](../units/pace.md), [simulator](../../training/simulator
   - Ours: in the game a fight breaks off at 0.013/s (infantry), 0.030/s (lords), 0.033/s (missile
     units), cause unknown; a break-off with the 10 s immunity was tried in the simulator and
     dropped. The public sources don't explain the trigger either. Ordered away, a unit without a
-    missile weapon stays in melee ~21 s in the game (median, 163 network battles; near
-    `melee_breakoff_secs` 24), standing, taking ×1.23 damage; the simulator holds it 20 s
-    (`contact.pin_melee_s`), missile units 5 s.
+    missile weapon stays in melee in the game only if it is chased: the melee-exit probe — unchased out of
+    contact after ~4 s, chased 24–26 s (until the `melee_breakoff_secs` 24 window); 46 episodes of the
+    network's battles — chased in melee for all of the first 6 s, unchased 0.58 at 6 s; the leaver takes ×1.23
+    damage. The simulator: a unit with an attack order on the leaver follows it and strikes it
+    (`contact.chase`), missile units are held 5 s.
 - **Pursuit.** All pursuer attacks on routers count as charges; 5.0.0 removed the cap of 35 % of a
   pursuing unit attacking. WH3 keys: `pursue_max_charge_time` 5 s, `pursue_charge_max_unit_separation`
   8 m, `melee_seconds_in_close_proximity_to_stop_pursue` 1.5 s (no descriptions). · twwstats,

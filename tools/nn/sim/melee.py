@@ -11,8 +11,10 @@ Per pair of units in contact (i strikes j), per second:
                       strikes once; a unit in contact with several enemies shares out no more than its own front
                       holds; a unit attacking another enemy strikes one it only touches at contact.unit_incidental
                       (a lord: lord_incidental) of its rate; a formation without a missile weapon under HOLD (no
-                      attack order) strikes at contact.hold_rate of it (measured: the melee probe's held units
-                      0.49-0.52 of the rule); a lone man (a lord) under HOLD strikes in full (the damage plan)
+                      attack order) or under a MOVE still in contact (contact.hold_move) strikes at contact.hold_rate
+                      of it (measured: the melee probe's held units 0.49-0.52 of the rule, move lanes 0.70 of
+                      attacking), except its blows reflecting a charge (contact.hold_reflect_full); a lone man (a lord)
+                      under HOLD strikes in full (the damage plan)
     hit chance p    = 35 + attack + charge bonus x charge left + bonus v target - defence x direction, within
                       8-90 % (the database rule, CA Feature Focus #2: weight 1, melee_hit_chance_*)
     hits a second   = p / (p x interval + miss_s) a fighting man: the interval runs after a hit, a miss costs
@@ -25,9 +27,10 @@ Per pair of units in contact (i strikes j), per second:
     struck          = men a blow strikes: 1; a lord's splash blow on a formation contact.lord_splash_struck
                       (measured 2.07), each taking 1 / splash_max_attacks of the blow (CA 5.1.0: divided)
     HP/s            = F x struck x hits a second x per hit
-    first strike    = F x struck x p x per hit, once (swing): the interval runs only after a blow, so a unit
-                      coming into a fight (moving in, or its charge landing) strikes once at once with every man in
-                      contact (battle.py decides when)
+    first strike    = F x struck x p x per hit, once (swing), not cut by hold_rate (contact.first_strike_full): the
+                      interval runs only after a blow, so a unit coming into a fight (moving in, or its charge landing)
+                      or a standing one reached by an enemy it faces strikes once at once with every man in contact
+                      (battle.py decides when)
 
 Direction: defence x0.6 from the flank, x0.3 from the rear or against a routing unit (database, weight 1;
 a lone man: contact.lord_direction of it - the lord swarm probe). A unit brings to each side of its formation no
@@ -238,9 +241,23 @@ def strikes(u, pw, contact, params, charge_now, first=False):
     # of the rule, the damage plan): in full. The database's melee_attack_threshold_modifier_* (vanilla idle 0.14,
     # ordered 0.22; all 1.0 with the required mod True Sight, config/nn/game_rules.json "_mods") are when a unit joins
     # a fight, not its rate (build/melee2/spec.md 3): no rule for the rate found.
-    held = (u["order_kind"] == O.HOLD) & (u["range"] <= 0) & (u["men0"] > 1)
-    rate = torch.where(held[:, :, None], rate * float(cc.get("hold_rate", 1.0)), rate)
+    # A formation under a MOVE order still in contact (not leaving it: a far point is a leaving unit, which strikes
+    # nobody) strikes like a held one (contact.hold_move; build/open_melee/spec.md R3: blocked by the enemy its men do
+    # not step into the gaps - the probe's move lanes struck 0.70 of the same units attacking, men within 2.5 m 0.73).
+    held_kind = u["order_kind"] == O.HOLD
+    if cc.get("hold_move"):
+        held_kind = held_kind | (u["order_kind"] == O.MOVE)
+    held = held_kind & (u["range"] <= 0) & (u["men0"] > 1)
+    # A braced unit's blows while it reflects a charge are not cut (contact.hold_reflect_full; R2: braced spearmen
+    # struck 52 HP/s in 1-5 s after a charge = the full rule x2, held swordsmen 12 HP/s = hold_rate).
+    cut = held[:, :, None]
+    if cc.get("hold_reflect_full"):
+        cut = cut & (reflect <= 1.0)
+    full = rate
+    rate = torch.where(cut, rate * float(cc.get("hold_rate", 1.0)), rate)
     if not first:
         return rate, hit, sector, F
-    # One blow of every man in contact (the first strike): the rate's men and multipliers, one swing each.
-    return rate, hit, sector, F, rate * (p / per_s.clamp(min=1e-9))
+    # One blow of every man in contact (the first strike): the rate's men and multipliers, one swing each; every man in
+    # reach swings, hold_rate is about the men who step in later (contact.first_strike_full; R1).
+    swing_rate = full if cc.get("first_strike_full") else rate
+    return rate, hit, sector, F, swing_rate * (p / per_s.clamp(min=1e-9))
