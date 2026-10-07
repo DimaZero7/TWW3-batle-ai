@@ -35,6 +35,8 @@ from tools.nn.train import drills as D
 PASS_NAIVE = 0.25        # the naive script wins at most this share ...
 PASS_SKILLED = 0.75      # ... the skilled one at least this
 EMBED_PASS_TRADE = 0.05  # an embedded frame: skilled - naive gold trade (paired) at least this, its 95 % interval above 0
+RECKLESS_VARIANT = "hunter"  # a drill with a reckless script: on its battles of this variant (the description's meta
+#                              "variant") skilled - reckless must be above 0 at 95 % (the unsafe case is real)
 
 
 def narrowed(st, keep):
@@ -159,7 +161,7 @@ def check(name, n=256, seed=0, device="cpu", show=0, broad=None, embed=None):
     (EMBED_PASS_TRADE), the others on the win rates (PASS_NAIVE, PASS_SKILLED)."""
     drill = D.load([name])[name]
     out, raw = {}, {}
-    for which in ("naive", "skilled"):
+    for which in ("naive", "skilled") + (("reckless",) if drill.reckless is not None else ()):
         t0 = time.time()
         res, descs = play(drill, getattr(drill, which), n, seed, device, broad=broad, embed=embed)
         raw[which] = res
@@ -180,9 +182,28 @@ def check(name, n=256, seed=0, device="cpu", show=0, broad=None, embed=None):
           f"win {p['win']:+.4f} ± {p['win_ci95']:.4f}; skilled traded better in {p['better']:.3f}, worse in "
           f"{p['worse']:.3f}" + "".join(f"; {k} {v['trade']:+.4f} ± {v['trade_ci95']:.4f}" for k, v in p.items()
                                         if isinstance(v, dict)), flush=True)
+    variants = np.array([(d.get("meta") or {}).get("variant", "") for d in descs], dtype=object)
+    if (variants != "").any():
+        out["by_variant"] = {v: {"skilled-naive": paired(raw["naive"], raw["skilled"], variants == v)}
+                             for v in dict.fromkeys(variants.tolist())}
+    if "reckless" in raw:
+        # the skill without its caution: the skilled script must beat it where the unsafe case is (RECKLESS_VARIANT)
+        out["skilled_vs_reckless"] = paired(raw["reckless"], raw["skilled"])
+        for v, row in out.get("by_variant", {}).items():
+            row["skilled-reckless"] = paired(raw["reckless"], raw["skilled"], variants == v)
+            row["reckless-naive"] = paired(raw["naive"], raw["reckless"], variants == v)
+        r = out["skilled_vs_reckless"]
+        print(f"{name} skilled - reckless (paired): gold trade {r['trade']:+.4f} ± {r['trade_ci95']:.4f}", flush=True)
+    for v, row in out.get("by_variant", {}).items():
+        print(f"   {v or '-':8s} " + " | ".join(f"{k} {x['trade']:+.4f} ± {x['trade_ci95']:.4f} ({x['battles']})"
+                                              for k, x in row.items()), flush=True)
     if (kinds == "embedded").all():
         out["pass"] = p["trade"] >= EMBED_PASS_TRADE and p["trade"] - p["trade_ci95"] > 0
         rule = f"paired gold trade >= {EMBED_PASS_TRADE} and above 0 at 95 %"
+        unsafe = out.get("by_variant", {}).get(RECKLESS_VARIANT, {}).get("skilled-reckless")
+        if unsafe is not None:
+            out["pass"] = out["pass"] and unsafe["trade"] - unsafe["trade_ci95"] > 0
+            rule += f"; skilled - reckless above 0 at 95 % on the '{RECKLESS_VARIANT}' battles"
     else:
         out["pass"] = out["naive"]["win_rate"] <= PASS_NAIVE and out["skilled"]["win_rate"] >= PASS_SKILLED
         rule = f"win rates naive <= {PASS_NAIVE}, skilled >= {PASS_SKILLED}"

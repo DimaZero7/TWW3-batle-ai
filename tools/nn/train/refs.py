@@ -111,7 +111,7 @@ def missing(out=None, scripts=SCRIPTS, drills=None, pairs=PAIRS, drill_battles=D
             ok = False
         if not ok:
             tasks.append(n)
-    for n in (D.READY if drills is None else drills):
+    for n in (D.evaluated() if drills is None else drills):
         if not (folder / evaluate.drill_ref_path(n, drill_battles).name).is_file():
             tasks.append(f"drill:{n}")
     return tasks

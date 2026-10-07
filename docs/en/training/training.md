@@ -521,6 +521,7 @@ In the training log the drills appear as opponents (`drill_counter/attack`, ...)
 | `pincer` | 2–3 Empire greatswords holding 120–180 m apart; two of ours per greatsword in a column opposite it, 140–240 m away; we attack | `hold` | `nearest`: 0.223 (the pair piles on the front) | front pin + flank: 0.922 | needs the pending flank rule ([simulator](simulator.md#pending-changes)): with the current simulator both 0.00; with the flank rule 0.281 / 0.922 (naive above 0.25); not in `READY` |
 | `defend` | Skaven defenders (a line + 4 missile units) against L + 2 stronger attackers playing `ai_like` | `ai_like` | marching out | holding the line and shooting | built, being tuned; not in `READY` |
 | `reserve` | a reserve that must intercept flankers instead of joining the main melee | scripted flankers | joins the melee | intercepts | module written, not in `NAMES` (not loaded) |
+| `direct_fire` | embedded only: a normal battle, our direct-fire units (militia, handgunners, Night Runners with throwing stars) in the second line behind our infantry; variant: nothing / enemy flankers / an enemy "hunter" on a flank | `ai_like`; the flankers go round the end of our line and strike a flank; the hunter waits and attacks our direct-fire unit within 90 m | `ai_like` (the shooters keep their post behind their own men) | `ai_like`, the direct-fire units to a place with a clear line / at the best target, only where the place is safe | below, "The `direct_fire` drill"; not in `READY`, switched on by a step's options |
 
 `READY` = `kiting`, `counter`, `hold_fire` (verified; test5 evaluates them); the drills trained by
 default (`--drill-weights`) are `drills.TRAIN` = `kiting`, `hold_fire` — `counter` costs in normal battles
@@ -610,6 +611,7 @@ better)".
 | `kiting` | a standing missile unit (with ammunition, not a lord) with a melee enemy at least 1.0 m/s slower (run speeds) within 60 m that comes at it (≥ 0.5 m/s towards it) or holds it in melee | it runs back: out of melee, moving away from that enemy at ≥ 1 m/s | it is in melee |
 | `counter` | a standing melee unit (not a lord) with, within 200 m, a hard counter (an enemy taking its health ≥ 1.5× faster than it takes the enemy's: the skilled script's matchup without the charge) and a free (not in melee) better target, one that beats it ≥ 1.5× less than that counter (the drill's X: spearmen with flagellants opposite, ×3.2, swordsmen free, ×1.5) | it goes for any other enemy | its attack order (else its melee opponent) is a hard counter while a target 1.5× better is free |
 | `hold_fire` | a standing missile unit (not a lord) with an enemy single entity (lord, hero) in melee with one of its side's units (within 30 m) inside its range + 10 m | it does not fire at that single entity | it fires at it |
+| `direct_fire` | a standing direct-fire unit (`missile.direct`, ammunition, out of melee, not a lord) where the drill's evaluator says "go to a place with a clear line" or "shoot another target", or where going is unsafe (a free enemy melee unit reaches the place first), or where it moves needlessly (someone to shoot from here, no better place, nobody reaches it here) | moves to the place (>= 0.5 m/s towards it) / aims at the best target / in the unsafe case does not go | goes to the unsafe place; a needless move |
 
 The detectors were checked on the drills' own battles (64 each, clean frame, the share of the
 situation's unit-steps): kiting naive 0.00 / skilled 0.64 applied (naive caught in melee 0.90 of them);
@@ -750,6 +752,100 @@ to ~0.1 by update 4) came without `--critic-warmup` (the chain's options have it
 `counter` stays `READY` (verified, evaluated by test5, its code kept) but is not trained by default: the
 same check showed counter-picking as the drill defines it COSTS in normal battles (−0.09 gold trade, −12 pp
 win: it pulls units out of their fights).
+
+**The `direct_fire` drill** (`drills/direct_fire.py`): direct-fire units (`missile.direct`: the militia's pistols,
+handgunners, the Night Runners' throwing stars; arcing archers, slings, crossbows are untouched) find a place with a
+clear line of fire - beside their own men, at an angle into the enemy's flank - and shoot the enemies going round our
+infantry ("break the pincer"); but they do not step out where a free enemy melee unit gets first.
+
+*The evaluator* (`evaluate`, `plan`) decides by the simulator's own rules, not by eye: for every standing direct-fire
+unit (ammunition, out of melee, not a lord), its fire's worth in gold a second here and at 4 places beside it (+-25 and
++-45 m across the line to the nearest enemy), at its 3 nearest enemies within range + 40 m: shots a second x the share
+of its men in range (by ranks or centre to centre) x the share of its lines clear past friends (the bullet's arc,
+`missile.arc_los`) x the hit chance x HP a hit (the target's armour) x (1 - shield, from the front only) x (1 - 2 x the
+friendly-fire share when the target is in melee) x the target's gold / health, less the bullets that hit our own men
+on the way; an enemy at the flank or rear of one of our infantry units (within 50 m, beyond 45 deg off its front)
+x1.5 (the pincer). A place's score = the best worth x (30 s - the time to get there, turn and aim; a unit that fires
+on the move loses none). A place is **unsafe** when a free enemy melee unit runs to it within 20 s. The skilled
+decision: go to the best safe place (any, if staying is unsafe too) when it beats staying by 1.25; else shoot the
+best target from here when the one it aims at is worse (by 1.25) or the best is beyond its fire arc. The "reckless"
+decision: the same without the safety check. Computed once a second of battle time on the same state (`PLAN_EVERY_S`).
+
+*Does it pay in normal simulator battles* (`build/drill_fire/cf.py`, as `build/why`: test5's normal battles against
+`ai_like`, `nearest`, `hold_shoot`, 256 each, network `s45_units/m30`, paired on the same seeds; the network's
+direct-fire units get the evaluator's order at every decision where it gives one): gold trade **+0.022 +- 0.009** a
+battle (`ai_like` +0.030 +- 0.016, `nearest` +0.009 +- 0.017, `hold_shoot` +0.028 +- 0.014), wins +3 / +0.4 / +4 pp;
+46 % of the battles changed, the evaluator ordered at 4.5 % of the shooters' decisions (a move 2.9 %, another target
+1.6 %). Kiting's order (+0.014...+0.041): the skill pays in the simulator too.
+
+*The frame* - embedded only (`frame` = `embedded`: the actor told clean and broad frames apart at AUC 1.00): a
+generated normal battle (factions at random, both lords, attack or defence) where our side swaps 1-2 units of nearest
+cost for direct-fire units of its faction and is **deployed again with them by the generator's rule** (the shooters
+in the second line behind the infantry, as in every normal battle); all our direct-fire units are tagged
+(`TAG_OURS`). The battle's variant: "plain" 0.4 - nothing more; "pincer" 0.3 - 1-2 enemy melee units beyond the end of
+their front line go round the end of our line once our infantry unit is within 160 m (by a waypoint beside its front)
+to a point 15 m beyond its flank and strike it there; "hunter" 0.3 - one enemy unit beyond the end of their line,
+30-70 m back, stays in reserve and attacks any direct-fire unit of ours within 90 m (and any enemy within 50 m) - the
+unsafe place. Each inserted enemy unit is paid for by the unit of nearest cost, the gold evened (`balance`). The
+enemy: `ai_like`, the tagged units by their variant. Check scripts: `naive` - `ai_like` for our whole army (the
+shooters keep their post behind their own men), `skilled` - `ai_like` with the direct-fire units on the evaluator,
+`reckless` - the same with the reckless decision. `verify.py` passes on skilled - naive >= 0.05 gold trade (95 % above
+0) **and** skilled - reckless above 0 at 95 % on the "hunter" battles (else the unsafe case is not real), and prints
+the differences per variant.
+
+*The frame check* (`verify.py --drill direct_fire --battles 64 --device cpu`, without the GPU - preliminary, 64
+battles are few): naive 0.438 wins / -0.049 trade, skilled 0.547 / -0.022, reckless 0.516 / -0.032; skilled - naive
+**+0.027 +- 0.058** trade, +0.11 +- 0.11 wins; skilled - reckless +0.010 +- 0.029; per variant (skilled - naive /
+skilled - reckless): plain -0.028 +- 0.070 / +0.003 +- 0.024 (36 battles), hunter +0.086 +- 0.106 / +0.073 +- 0.105 (14),
+pincer +0.107 +- 0.152 / -0.033 +- 0.041 (14) - the frame does **not pass yet** (>= 0.05 and above 0 at 95 % needed);
+the direction is right, a 256-battle run on the GPU is needed. Before the fix "a shooter with a target from here
+stands" (in `position`) skilled - naive was -0.020 +- 0.055: `ai_like` walked a shooter that had stepped aside back to
+its post behind the infantry every second. The drill's scripts in `position`: a shooter with someone to shoot from
+where it stands is not walked away by the base's order (HOLD).
+
+*The teacher* - in normal battles only (`--teach-normal ...,direct_fire`), at the detector's moments (below); the label
+is the evaluator's order on a hold base: in the unsafe case the label is "hold". The drill's own battles are pure PPO
+(the drills' teacher is off in the chain). The drill's own settings in `teach_auto.Transfer` (fields
+`Drill.transfer_ref`, `teach_cap`, `teach_stop`): the reference is not `ai_like`'s share (it never does this) but a
+fixed applied share 0.6; the share's cap 0.05 (a pull of at most 0.1 x 0.05 = 0.005; kiting's 0.015); the stop - the
+rating more than 0.15 below the run's first evaluation, or the network's mistake share of the drill more than 0.1
+above it, switches the drill's teacher off for the rest of the run ("stopped" in the teacher's table). The labels are
+balanced: "go" at the go moments, "stand and shoot" in the unsafe case and at a needless move (the shooter moves
+although it has someone to shoot from where it stands and nobody reaches it there) - the lesson of step s45: the
+kiting teacher at its cap 0.15, 87 % of its labels "run", and the network ran its shooters out of danger too.
+
+*A heavy drill* (`Drill.heavy`): the evaluator is costly - overriding the network with it in normal battles cost an
+evaluation ~x3 (888 s against 289 s on the GPU). So its transfer detector runs **only in a step's final evaluation**
+(`drills.HEAVY_ON`, test5 turns it on before "after"); "before" and the trend points go without it (the drill block on
+the drill's own battles is in every evaluation: no evaluator there, the scripts' references are cached). Before /
+after of `direct_fire`'s transfer: against the previous step's final evaluation (its `after.json`; when "before" is
+reused from it, `before` has these numbers already); a step with no previous step of this drill has no comparison.
+The adaptive teacher keeps its share between evaluations (a drill without numbers keeps its share) and takes the first
+one from the previous step's `after.json`. In training the `direct_fire` teacher's script runs only on the battles
+whose units it may label now (a normal row, the battle's draw below the teacher's share - <= 0.05), not on the whole
+batch (`rollout.Battles._heavy_teacher`); at share 0 nowhere. Measured on the CPU (`build/drill_fire/cost.py`, 16 battles
+an opponent; 128 training battles, 3 updates): an evaluation without the drill 306 s, with it at a trend point 305 s,
+at the final one 321 s (+5 %); a training update without the teacher 28.0 s, with it on the labelled battles 26.7 s,
+on the whole batch 29.7 s (within the noise). On the GPU the override cost x3: the Python evaluator breaks the
+evaluation's CUDA graph (it runs "without the graph"), now in the final evaluation only; not measured again on the GPU
+(busy with training). Alone, without training: `tools.nn.train.drills.transfer
+--checkpoint ... --drills direct_fire`.
+
+*How to switch it on* (not in `READY` nor `TRAIN`: the other drills' defaults are unchanged): `--drill-weights
+'{"kiting": 1, "hold_fire": 1, "direct_fire": 2}'` (with `--drills 0.2`: 0.1 of the battles) and `--teach-normal
+kiting,direct_fire`. The drills of `--drill-weights` (weight > 0) and `--teach-normal` are evaluated beside `READY`
+(`drills.evaluated()`, `run.eval_drills`): test5's drill block, the transfer, the scripts' references; test5's
+evaluation key gets `drills_extra` (the old keys stay the same).
+
+*Done* (the network has learnt it): in the drill the network's trade >= 0.7 of the way from naive to skilled; in
+normal battles `direct_fire`'s applied share >= 0.6 (the teacher's reference), its mistake share (stepping out to an
+unsafe place) <= 0.2, the rating, pair gold, lord deaths not worse than at the start beyond the noise.
+
+Tests: `tests/tools/test_nn_drill_direct_fire.py` (torch, in the container: the frame - our direct-fire units tagged
+and behind the infantry line, both lords, the variants, the gold; the evaluator on hand-made scenes - militia blocked
+by its own men goes aside, an unsafe place - skilled stays, reckless goes, archers get no orders, an enemy at the
+flank is a flanker; envelop and hunt; the detector; the scripts in the simulator), `tests/tools/test_nn_teach_auto.py`
+(the teacher's own reference, cap and stop).
 
 ## Evaluation
 

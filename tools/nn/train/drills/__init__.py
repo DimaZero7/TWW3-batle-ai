@@ -22,6 +22,9 @@ a DRILL = Drill(...):
                                        battles() draws it for a share EMBED of the seeds (before the broad draw)
     teacher(st) -> Orders              optional: the script whose orders label our units for the teacher
                                        (drills/teach.py; default `skilled`): the skill alone, tag-blind
+    reckless(st) -> Orders             optional: a third check script, the skill without its caution (verify.py plays
+                                       it beside naive and skilled: the skilled script must beat it where the
+                                       drill's "unsafe" case is, else that case is not real)
     moments(st, orders) -> [B, N]      optional: the units at the situation's moments, where the teacher's
                                        orders are labels in an embedded or a normal battle (the clean and broad
                                        frames label every unit); also the teacher in normal battles
@@ -51,12 +54,30 @@ import torch
 
 from tools.nn.sim import orders as O
 
-NAMES = ("pincer", "kiting", "counter", "hold_fire", "defend")   # the drills, in the order they were built
+NAMES = ("pincer", "kiting", "counter", "hold_fire", "defend", "direct_fire")   # the drills, in the order they were built
 READY = ("kiting", "counter", "hold_fire")   # the drills that passed verify.py (naive loses, skilled wins): evaluated by test5
 # the drills trained by default (run.py --drill-weights): READY without counter - counter-picking as the drill
 # defines it COSTS in normal battles (build/why, 04.10.2026: overriding the network with it at the detector's
 # moments -0.09 gold trade, -12 pp win: it pulls units out of their fights); its code stays
 TRAIN = ("kiting", "hold_fire")
+# drills evaluated beside READY in this process (test5 / run.py set it from the step's options: the drills trained by
+# --drill-weights and taught by --teach-normal), so a drill switched on by a step's options is measured (its drill
+# block, its transfer, its scripts' references) without joining READY for every step
+EVAL_EXTRA = []
+
+
+HEAVY_ON = [False]       # test5 switches it on for the step's final evaluation only (heavy drills' transfer)
+
+
+def evaluated():
+    """The drills evaluated: READY, then EVAL_EXTRA (in NAMES order)."""
+    return tuple(n for n in NAMES if n in READY or n in EVAL_EXTRA)
+
+
+def set_extra(names):
+    """EVAL_EXTRA = the drills of `names` that exist and are not READY (in place, for this process)."""
+    EVAL_EXTRA[:] = [n for n in NAMES if n in set(names or ()) and n not in READY]
+    return list(EVAL_EXTRA)
 PREFIX = "drill_"
 MAP_HALF_M = 700.0       # a generated battle stays within this of the map's centre (the network's map frame,
 #                          tools/nn/model/sources.py CROSSROADS, is -768..768 x -800..736)
@@ -88,6 +109,17 @@ class Drill:
     embedded: Callable = None       # optional: rng -> the situation inside a normal battle (tagged units)
     teacher: Callable = None        # optional: State -> Orders the teacher labels with (default skilled)
     moments: Callable = None        # optional: (State, Orders) -> [B, N] where the labels count outside clean frames
+    reckless: Callable = None       # optional: State -> Orders, the skill without its caution (verify.py)
+    # the teacher in normal battles (teach_auto.Transfer), per drill when set: the applied share it aims at instead of
+    # ai_like's (a skill ai_like never uses), the share's cap instead of --teach-normal-cap, and the stop - the
+    # rating falling this far below the run's first evaluation switches the drill's teacher off for the run
+    transfer_ref: float = None
+    teach_cap: float = None
+    teach_stop: float = None
+    teach_stop_mistake: float = None    # ... and the network's mistake share rising this far above the first evaluation's
+    # heavy (direct_fire: its position evaluator): its transfer detector runs only in a step's final evaluation
+    # (HEAVY_ON, test5), its teacher in normal battles only on the battles it may label (rollout.Battles)
+    heavy: bool = False
 
 
 def opponent(name):

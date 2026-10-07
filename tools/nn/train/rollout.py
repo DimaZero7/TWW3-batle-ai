@@ -338,6 +338,9 @@ class Battles:
         self.teach = {league.CODE[drills.opponent(n)]: (i, *_teacher_of(f)) for i, (n, f) in enumerate(teach.items())
                       if league.CODE[drills.opponent(n)] in used}
         self.teach_normal = tuple((len(teach) + i, *_teacher_of(d)) for i, d in enumerate(teach_normal.values()))
+        # a heavy drill's teacher script (drills.Drill.heavy: direct_fire's position evaluator) runs only on the battles
+        # whose units it may label now (a normal row drawn below its share), not on the whole batch
+        self.teach_heavy = tuple(bool(getattr(d, "heavy", False)) for d in teach_normal.values())
         assert all(m is not None for _, _, m in self.teach_normal), "a teacher in normal battles needs the drill's moments"
         # the share of each taught drill's battles labelled ([drills], default all) and each battle's draw [B]
         self.teach_share = torch.ones(len(self.teach_names), device=self.device)
@@ -546,18 +549,43 @@ class Battles:
                 setattr(a, f, torch.where(mine[:, None], getattr(lab, f), getattr(a, f)))
             valid = valid | sel
             drill = torch.where(mine[:, None], torch.full_like(drill, i), drill)
-        for i, script, moments in self.teach_normal:
+        for k, (i, script, moments) in enumerate(self.teach_normal):
             if idle(i):
                 continue
-            o = script(self.st)
+            if self.teach_heavy[k]:
+                o, mom = self._heavy_teacher(i, script, moments, b, live)
+                if o is None:
+                    continue
+            else:
+                o = script(self.st)
+                mom = moments(self.st, o)
             lab, ok = drill_teach.label(cfg, o, obs_r, frame_r, self.rows_learn, self.B)
-            sel = self.row_normal[:, None] & ok & moments(self.st, o)[b] & live[:, None] & (drill < 0)
+            sel = self.row_normal[:, None] & ok & mom[b] & live[:, None] & (drill < 0)
             for f in ("kind", "point", "target", "run"):
                 setattr(a, f, torch.where(sel, getattr(lab, f), getattr(a, f)))
             valid = valid | sel
             drill = torch.where(sel, torch.full_like(drill, i), drill)
         picked = (drill >= 0) & (self.teach_draw[b][:, None] < self.teach_share[drill.clamp(min=0)])
         return a, valid, drill, picked
+
+    def _heavy_teacher(self, i, script, moments, b, live):
+        """(Orders [B, N], moments [B, N]) of a heavy teacher computed only on the battles of the normal learner rows
+        drawn below its share now (the rest: hold, no moment); (None, None) when there is none."""
+        rows = self.row_normal & live & (self.teach_draw[b] < self.teach_share[i])
+        keep = torch.unique(b[rows])
+        if keep.numel() == 0:
+            return None, None
+        sub = S.State({k: v[keep] for k, v in self.st.u.items()}, self.st.t[keep], self.st.attacker[keep],
+                      self.st.done[keep], self.st.winner[keep], self.st.lord_dead_s[keep], self.st.bounds,
+                      [self.st.keys[j] for j in keep.tolist()] if self.st.keys else [])
+        o_s = script(sub)
+        m_s = moments(sub, o_s)
+        o = O.hold(self.B, self.N, self.device)
+        for f in O.FIELDS:
+            getattr(o, f)[keep] = getattr(o_s, f)
+        mom = torch.zeros((self.B, self.N), dtype=torch.bool, device=self.device)
+        mom[keep] = m_s
+        return o, mom
 
     def _sim_step(self, parts, attacks, rb, rs, was_done):
         """One simulator step with the networks' orders `parts` and the scripts': -> (the learner rows'

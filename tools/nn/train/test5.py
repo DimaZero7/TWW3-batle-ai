@@ -184,6 +184,8 @@ def eval_key(actor, args, cadence):
     key = {"actor": weights_hash(actor), "code": version.eval_version(), "eval": args.eval,
            "drill_eval": args.drill_eval if "drills" in prof else 0, "profile": profiles.text(prof, profiles.TEST5),
            "cadence": cadence.meta(), "broad": drills.BROAD, "embed": drills.EMBED, "opponents": list(OPPONENTS)}
+    if drills.EVAL_EXTRA:                        # a step's own drills (run.eval_drills): only then, old keys stay
+        key["drills_extra"] = list(drills.EVAL_EXTRA)
     return json.loads(json.dumps(key))                  # as it reads back from a file
 
 
@@ -596,6 +598,12 @@ def main():
         test(args, rest)
 
 
+def rating_of(res):
+    """The overall rating of an evaluation (evaluate.play's "skill"), or None."""
+    r = ((res or {}).get("skill") or {}).get("overall") or {}
+    return r.get("value") if isinstance(r, dict) else None
+
+
 def references(args):
     """The missing script references (the script baselines, the drills' check scripts) start on the CPU in
     parallel processes (tools/nn/train/refs.py, with the canary) while the GPU plays the network's own
@@ -619,6 +627,9 @@ def test(args, rest):
                                      str(args.minutes), "--updates", str(args.updates), "--device", args.device]
                                     + PROTOCOL + rest)
     fixed_normal, normal_names = run.normal_drills(targs.teach_normal)
+    extra = run.eval_drills(targs)               # a step's own drills are evaluated beside drills.READY
+    if extra:
+        print(f"drills evaluated beside READY: {', '.join(extra)}", flush=True)
     need = profiles.test5_needs(targs.drill_teach, bool(normal_names) and fixed_normal is None)
     missing = {p: why for p, why in need.items() if p not in chosen(args)}
     if missing:                                  # the adaptive teachers read these blocks from every evaluation
@@ -663,6 +674,7 @@ def test(args, rest):
         prior_t = ((before["transfer"], "test5 before") if before.get("transfer") else teach_auto.prior(args.init, "transfer"))
         nauto = teach_auto.Transfer(targs.teach_normal_k, targs.teach_normal_cap, targs.teach_normal_weight, *prior_t,
                                     match=targs.teach_normal_match)
+        nauto.rating0 = rating_of(before)          # the stops' reference (teach_auto.Transfer.observe)
 
     def observe(res):
         """The adaptive teachers see an evaluation: new shares; their tables go into the evaluation."""
@@ -674,7 +686,7 @@ def test(args, rest):
         if nauto is not None:
             if nauto.history and not points[0][1].get("teach_normal"):
                 before["teach_normal"] = points[0][1]["teach_normal"] = nauto.history[0]
-            res["teach_normal"] = nauto.observe(res.get("transfer"), agree)
+            res["teach_normal"] = nauto.observe(res.get("transfer"), agree, rating=rating_of(res))
 
     def hook(actor, critic, minute, update):
         actor.eval()
@@ -694,7 +706,14 @@ def test(args, rest):
 
     actor, summary, run_dir = run.train(targs, (args.every, hook) if args.every else None, teacher=auto, normal=nauto)
     actor.eval()
-    after = evaluation(actor, args, device, cadence)
+    # the heavy drills' transfer (drills.Drill.heavy: direct_fire's position evaluator, ~3x an evaluation) only here,
+    # in the step's final evaluation: "before" and the trend points go without it (compare with the previous step's
+    # after.json, which has it)
+    drills.HEAVY_ON[0] = True
+    try:
+        after = evaluation(actor, args, device, cadence)
+    finally:
+        drills.HEAVY_ON[0] = False
     after["distance"] = distance(run_dir, last[0], summary["updates"])
     after["teach"] = teacher(run_dir, last[0], summary["updates"])
     observe(after)

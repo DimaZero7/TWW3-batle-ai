@@ -45,6 +45,11 @@ normal battles: the transfer block, drills/transfer.py), per drill d with a tran
     share_d = 0                    if gap_d <= NORMAL_MATCH (the network applies the skill as often as ai_like)
               min(cap, k x gap_d)  else
 
+A drill may set its own reference, cap and stop (drills.Drill transfer_ref, teach_cap, teach_stop; direct_fire:
+ai_like never uses that skill, so its reference is a fixed applied share 0.6, its cap 0.05, and the overall rating
+falling 0.15 below the run's first evaluation, or the network's mistake share of the drill rising 0.1 above it,
+switches it off for the rest of the run - the kiting teacher of step s45 sat at its cap all the step and the network
+took "the shooter runs" wider than taught).
 share_d is the share of the NORMAL battles whose units the script labels at the moments (under the name
 "<drill>@normal"); the weight a fixed --teach-normal-weight; the pull weight x share. Smaller than the drills'
 (NORMAL_CAP, NORMAL_WEIGHT): it acts on the battles the network is judged by; it switches itself off as the
@@ -62,6 +67,7 @@ MATCH = 0.05
 NORMAL_WEIGHT = 0.1
 NORMAL_K = 0.5
 NORMAL_CAP = 0.15
+NORMAL = "@normal"       # a drill's teacher in normal battles: "<drill>@normal" (= drills.NORMAL; no torch here)
 NORMAL_MATCH = 0.1       # the applied share within 10 % of ai_like's: matched (a 512-battle evaluation's noise ~0.02-0.05)
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -111,6 +117,11 @@ def transfer_numbers(transfer_eval, name):
     test5's eval json "transfer"); (None, None) without it."""
     x = (transfer_eval or {}).get(name) or {}
     return (x.get("network") or {}).get("share"), (x.get("ai_like") or {}).get("share")
+
+
+def transfer_mistake(transfer_eval, name):
+    """The network's mistake share of a drill in an evaluation's transfer block, or None."""
+    return (((transfer_eval or {}).get(name) or {}).get("network") or {}).get("mistake")
 
 
 def _load(path):
@@ -178,8 +189,16 @@ class Auto:
         """The taught drills (the READY ones the run plays); their shares from the prior numbers (UNKNOWN
         without) -> the table rows."""
         self.names = tuple(names)
-        self.shares = {n: self.unknown for n in self.names}
+        self.shares = {n: self._cap(n) / 2 for n in self.names}
         return self.observe(self.prior, source=self.source or ("default" if self.prior is None else "prior"))
+
+    def _cap(self, name):
+        """The share's cap of one taught name (Transfer: a drill's own teach_cap)."""
+        return self.cap
+
+    def _stopped(self, name):
+        """Whether this name's teacher is off for the rest of the run (Transfer: a drill's teach_stop)."""
+        return False
 
     def weights(self):
         """{drill: the imitation weight on its labelled units} (fixed)."""
@@ -200,14 +219,17 @@ class Auto:
         for n in self.names:
             net, sk = self._numbers(drills_eval, n)
             d = deficit(net, sk)
-            s = share(d, self.k, self.cap, self.match)
-            was = self.shares.get(n, self.unknown)
+            s = share(d, self.k, self._cap(n), self.match)
+            was = self.shares.get(n, self._cap(n) / 2)
             if s is not None:
                 self.shares[n] = s
+            stopped = self._stopped(n)
+            if stopped:
+                self.shares[n] = 0.0
             rows.append({"drill": n, "net": net, "skilled": sk, "deficit": None if d is None else round(d, 4),
                          "share_was": round(was, 4), "share": round(self.shares[n], 4),
                          "agree": (agreement or {}).get(n), "source": source,
-                         "measure": self._measure(drills_eval, n)})
+                         "measure": self._measure(drills_eval, n), **({"stopped": True} if stopped else {})})
         self.rows = rows
         self.history.append(rows)
         return rows
@@ -224,14 +246,53 @@ class Transfer(Auto):
 
     def __init__(self, k=NORMAL_K, cap=NORMAL_CAP, weight=NORMAL_WEIGHT, prior=None, source=None, match=NORMAL_MATCH):
         super().__init__(k, cap, weight, prior, source, match)
+        self.caps, self.refs, self.stops, self.stops_mistake = {}, {}, {}, {}
+        self.rating0 = None                      # the run's first evaluation's rating (the stops' reference)
+        self.mistake0 = {}                       # the first evaluation's mistake share of each drill (its stop's)
+        self.stopped = set()
 
     def bind(self, drills):
+        """The drills taught in normal battles; a drill's own transfer_ref, teach_cap, teach_stop (drills.Drill)
+        replace ai_like's applied share as the reference and the cap, and add the stop."""
         from tools.nn.train import drills as D
+        loaded = D.load(list(drills))
+        for n in drills:
+            d, key = loaded.get(n), D.normal_name(n)
+            for attr, store in (("teach_cap", self.caps), ("transfer_ref", self.refs), ("teach_stop", self.stops),
+                                ("teach_stop_mistake", self.stops_mistake)):
+                if d is not None and getattr(d, attr, None) is not None:
+                    store[key] = float(getattr(d, attr))
         return super().bind([D.normal_name(d) for d in drills])
 
+    def _cap(self, name):
+        return self.caps.get(name, self.cap)
+
+    def _stopped(self, name):
+        return name in self.stopped
+
     def _numbers(self, evaluation, name):
-        from tools.nn.train import drills as D
-        return transfer_numbers(evaluation, name[:-len(D.NORMAL)] if name.endswith(D.NORMAL) else name)
+        net, ref = transfer_numbers(evaluation, name[:-len(NORMAL)] if name.endswith(NORMAL) else name)
+        if name in self.refs and net is not None:
+            ref = self.refs[name]
+        return net, ref
+
+    def observe(self, drills_eval, agreement=None, source="evaluation", rating=None):
+        """Auto.observe with the stops: `rating` (the evaluation's overall rating) below the first one seen
+        (rating0) by more than a drill's teach_stop switches that drill's teacher off for the rest of the run."""
+        if rating is not None:
+            if self.rating0 is None:
+                self.rating0 = float(rating)
+            for n, drop in self.stops.items():
+                if float(rating) < self.rating0 - drop:
+                    self.stopped.add(n)
+        for n, rise in self.stops_mistake.items():
+            m = transfer_mistake(drills_eval, n[:-len(NORMAL)] if n.endswith(NORMAL) else n)
+            if m is None:
+                continue
+            self.mistake0.setdefault(n, m)
+            if m > self.mistake0[n] + rise:
+                self.stopped.add(n)
+        return super().observe(drills_eval, agreement, source)
 
     def _measure(self, evaluation, name):
         return "applied share"

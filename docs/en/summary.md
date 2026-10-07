@@ -270,6 +270,16 @@ is generated from a seed (units, distances, place on the map). The drill's enemy
 - **Transfer to normal battles** (`drills/transfer.py`): winning a drill is not enough, the
   skill has to be applied in a normal battle. Applied share — higher is better; mistake share —
   lower is better; `ai_like` is the reference.
+- **The `direct_fire` drill** (direct-fire units - militia, handgunners, Night Runners with throwing stars: a place
+  with a clear line of fire past their own men, shoot the enemies going round our infantry, do not step out where a
+  free enemy gets first). Embedded frame only; the teacher decides by an evaluator on the simulator's rules (the fire's
+  worth here and beside, the place's danger). In normal simulator battles the network's direct-fire units given the
+  evaluator's decisions: gold trade +0.022 ± 0.009 a battle. Not in `READY`: switched on by a step's options
+  (`--drill-weights` with `direct_fire`, `--teach-normal kiting,direct_fire`); its teacher has its own reference
+  (applied share 0.6), cap 0.05, labels both "go" and "stand and shoot", a stop on a 0.15
+  rating drop or a 0.1 rise of its mistake share. The evaluator is heavy: the drill's transfer is measured
+  only in a step's final evaluation, the teacher computes it only on the battles it labels. The frame check on 64 battles (CPU): skilled - naive +0.027 +- 0.058 -
+  not passed yet, a GPU run is needed.
 
 Now (`s5_threat`): the drills are won (kiting 0.95, counter 1.00, hold_fire 0.84). Applied share
 in normal battles: kiting 0.46 against 0.70 for `ai_like` (0.003 before the teacher), counter

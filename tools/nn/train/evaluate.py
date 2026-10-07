@@ -711,7 +711,7 @@ def play_drills(actor, n=128, device="cpu", names=None, greedy=False, seed=1, co
     from tools.nn.train import drills as D
     from tools.nn.train.drills import metrics as drill_metrics
     from tools.nn.train.drills import source as drill_source
-    names = [x for x in D.NAMES if x in (names if names is not None else D.READY)]
+    names = [x for x in D.NAMES if x in (names if names is not None else D.evaluated())]
     if not names or n <= 0:
         return {}
     params = rollout.params_with_limit(None)

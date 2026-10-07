@@ -34,10 +34,13 @@ KEYS = ("sit_s", "applied_s", "mistake_s")
 
 
 def detectors(names=None):
-    """{drill name: its transfer detector} of the drills (default: drills.READY) that have one."""
+    """{drill name: its transfer detector} of the drills (default: drills.evaluated(), READY and the step's own) that
+    have one; by default a heavy drill's only while drills.HEAVY_ON (names given: as asked)."""
     from tools.nn.train import drills as D
-    loaded = D.load([n for n in D.NAMES if n in (names if names is not None else D.READY)])
-    return {n: d.transfer for n, d in loaded.items() if d.transfer is not None}
+    loaded = D.load([n for n in D.NAMES if n in (names if names is not None else D.evaluated())])
+    # a heavy drill (drills.Drill.heavy) only while drills.HEAVY_ON (test5: the step's final evaluation)
+    return {n: d.transfer for n, d in loaded.items() if d.transfer is not None
+            and (not getattr(d, "heavy", False) or D.HEAVY_ON[0] or names is not None)}
 
 
 def _count(st, dt, mine, live, sums, fns):
@@ -131,8 +134,14 @@ def main():
     ap.add_argument("--eval", type=int, default=512, help="battles per opponent (test5's --eval)")
     ap.add_argument("--out", help="write the whole evaluation as json")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    ap.add_argument("--drills", help="comma-separated drills to measure (default drills.READY; a heavy drill such as "
+                                     "direct_fire only when named)")
     cad.add_args(ap)
     args = ap.parse_args()
+    from tools.nn.train import drills as D
+    if args.drills:
+        D.set_extra(args.drills.split(","))
+        D.HEAVY_ON[0] = True
     actor = checkpoint.load_policy(args.checkpoint, args.device)
     t0 = time.time()
     res = evaluate.play(actor, opponents=test5.OPPONENTS, device=args.device, generated=args.eval, max_units=19, seed=1,

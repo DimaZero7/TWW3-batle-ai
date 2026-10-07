@@ -141,6 +141,16 @@ def normal_drills(spec):
     return None, names
 
 
+def eval_drills(args):
+    """drills.set_extra: the drills this run trains (--drill-weights above 0) or teaches in normal battles
+    (--teach-normal) are evaluated beside drills.READY (their drill block, transfer, references) -> the extra ones."""
+    names = []
+    if args.drills and args.drill_weights:
+        names += [n for n, w in json.loads(args.drill_weights).items() if float(w) > 0]
+    names += normal_drills(args.teach_normal)[1]
+    return drills.set_extra(names)
+
+
 def train(args, every=None, teacher=None, normal=None):
     """every: (minutes, hook) - hook(actor, critic, minute, update) after every `minutes` of training
     (its time not counted as training: e.g. a full evaluation). teacher: with --drill-teach auto, the
@@ -153,6 +163,7 @@ def train(args, every=None, teacher=None, normal=None):
     torch.backends.cuda.matmul.allow_tf32 = True
     drills.BROAD = args.drill_broad              # the drills' broad frames: their share of every drill's battles
     drills.EMBED = args.drill_embed              # the embedded frames: their share (of the drills that have one)
+    eval_drills(args)                            # the run's own drills beside READY (the hook's evaluations)
     out = checkpoint.DIR / "runs" / args.name
     out.mkdir(parents=True, exist_ok=True)
     if args.preset is None:          # the record follows the network: --init's preset (e.g. "wide"), else small
@@ -212,7 +223,7 @@ def train(args, every=None, teacher=None, normal=None):
     played = set(np.unique(lay.opponent).tolist())
     auto = args.drill_teach == "auto"
     if auto:
-        names = [n for n in drills.READY if league.CODE[drills.opponent(n)] in played]
+        names = [n for n in drills.evaluated() if league.CODE[drills.opponent(n)] in played]
         if not names:
             raise SystemExit("--drill-teach auto: the run plays no READY drill (--drills, --drill-weights)")
         if teacher is None:

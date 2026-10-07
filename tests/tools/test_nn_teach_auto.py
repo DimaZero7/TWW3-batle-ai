@@ -110,3 +110,51 @@ class TestPrior:
     def test_nothing_found(self, tmp_path):
         assert T.prior(None) == (None, None)
         assert T.prior(tmp_path / "best.pt") == (None, None)
+
+
+class TestTransferOwnSettings:
+    """A drill's own reference, cap and stop for the teacher in normal battles (drills.Drill transfer_ref,
+    teach_cap, teach_stop: direct_fire, a skill ai_like never uses). Set by hand here (bind reads them from the
+    drill: tests/tools/test_nn_drill_direct_fire.py needs torch)."""
+
+    @staticmethod
+    def _teacher():
+        t = T.Transfer()
+        key = "direct_fire@normal"
+        t.caps[key], t.refs[key], t.stops[key] = 0.08, 0.6, 0.15
+        T.Auto.bind(t, [key, "kiting@normal"])
+        return t, key
+
+    @staticmethod
+    def _xfer(df, ai_df, kit, ai_kit):
+        return {"direct_fire": {"network": {"share": df}, "ai_like": {"share": ai_df}},
+                "kiting": {"network": {"share": kit}, "ai_like": {"share": ai_kit}}}
+
+    def test_the_own_reference_and_cap(self):
+        t, key = self._teacher()
+        assert t.shares[key] == pytest.approx(0.04) and t.shares["kiting@normal"] == pytest.approx(T.NORMAL_CAP / 2)
+        rows = {r["drill"]: r for r in t.observe(self._xfer(0.0, 0.0, 0.0, 0.7))}
+        assert rows[key]["skilled"] == 0.6 and t.shares[key] == pytest.approx(0.08)      # ai_like's 0 is not the reference
+        assert t.shares["kiting@normal"] == pytest.approx(T.NORMAL_CAP)                    # the others as before
+        t.observe(self._xfer(0.57, 0.0, 0.7, 0.7))                                         # within the match of 0.6
+        assert t.shares[key] == 0.0
+
+    def test_the_stop_switches_the_drill_off_for_the_run(self):
+        t, key = self._teacher()
+        t.observe(self._xfer(0.0, 0.0, 0.0, 0.7), rating=1.0)
+        assert t.shares[key] > 0
+        rows = {r["drill"]: r for r in t.observe(self._xfer(0.0, 0.0, 0.0, 0.7), rating=0.8)}
+        assert t.shares[key] == 0.0 and rows[key].get("stopped") and t.shares["kiting@normal"] > 0
+        t.observe(self._xfer(0.0, 0.0, 0.0, 0.7), rating=1.2)                             # stays off
+        assert t.shares[key] == 0.0
+
+    def test_the_mistake_stop(self):
+        t, key = self._teacher()
+        t.stops_mistake[key] = 0.1
+        x = self._xfer(0.0, 0.0, 0.0, 0.7)
+        x["direct_fire"]["network"]["mistake"] = 0.2
+        t.observe(x)
+        assert t.shares[key] > 0 and t.mistake0[key] == 0.2
+        x["direct_fire"]["network"]["mistake"] = 0.35
+        t.observe(x)
+        assert t.shares[key] == 0.0 and key in t.stopped and t.shares["kiting@normal"] > 0
