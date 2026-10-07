@@ -184,11 +184,38 @@ edge needs a probe of its own (`rangenew`, below).
 Cards: all six new passports equal their cards from battle (`check_card`: men, health, mass, speeds, attack, defence,
 charge, damage, armour, abilities, ammo, range, missile damage per 10 s).
 
-Still needed (2 battles, `build/steps/newunits_probe.ps1 -Only probes -Plans rangenew,lofab`): `rangenew` - the first
-shot of handgunners (on slaves 30 and 60 m wide), crossbowmen, stars and militia (the P2 control) at a target stepping
-2 m closer every 2 s; `lofab` - militia and handgunners with friends 40 m ahead and the target 60 and 80 m off, and
-handgunners with friends 60 m ahead: whether the weapon or the friends' distance to the target decides if a covered unit
-fires.
+### Probes `rangenew` and `lofab` (the game / the simulator before / after)
+
+Played 07.10.2026 (runs `20261007-134716`, `-134807`; analysis `build/step4b`).
+
+| Indicator | Game | Before | After | Source |
+|---|---|---|---|---|
+| Handguns, a target stepping in (30 m wide): the first shot | 146.9 m centre to centre (range 145), then at the full rate | 153.2 m, 0.55 of the men (the per-rank rule) | 142.2 m (the centre rule) | measured: only units that fire whilst moving count their range per rank (`missile.per_man_range_fire_move_only`) |
+| Handguns, a target standing at 153 / 153 / 159 m | not one shot in 300 s | 630 / 792 projectiles | 0 / 0 | the same |
+| Handguns, a 60 m wide target stepping in | one volley of 0.18 of the men at 150 m, then 30 s without a shot | 149.1 m, 0.40 | 142.1 m, 1.0 | the same; the lone volley at the target's teleport is a transient |
+| Crossbows, a target stepping in | 159.6 m (range 160) | 157.0 | 157.0 | the centre rule (arrows) holds |
+| Militia / stars, a target stepping in | **112.9 / 91.8 m** (range 90 / 70), then at the full rate | 100.2 / 78.4 | the same | **OPEN**: a standing target at 97.6 / 78.7 m they shoot by a stream / one volley (P2, `newdist`); a stepping one 20 m beyond any rule |
+| Friends 40 m straight ahead, the target at 69 m: militia / handguns | 199 / 25 projectiles (a volley, then stop), friends −986 / −399 HP | 0 / 0 | 0 / 0 | matches: fire held |
+| the same, the target at 90 m | 2160 / 1279–1315 projectiles (the full rate), friends −6183 / −6268 HP | 0 / 0 | 0 / 0 | **OPEN**: the distance to the target decides, not the weapon |
+| Friends 60 m ahead, the target at 88 m: handguns | 1141 projectiles (0.6 of the rate), friends −6432 HP | 0 | 0 | OPEN |
+| Friends catch bullets fired past them | 0.22–0.27 hits a shot (5 lanes, both weapons) | 0 | 0 | the number is there, the rule "when it fires" is not |
+| Fire into a melee at 45° / 90° (in 60 s, beyond the control) | friends +0.8 / +1.2 HP a shot; the target +10.5 / +13.3 | +3.9 / +3.8; +8.4 / +8.6 | +0.7 / +0.8; +11.5 / +11.7 | measured: `missile.friendly_fire.musket` 0.08 (was the mean of arrows and slings, 0.41) |
+| Fire into a melee from behind our men | 1 volley (friends +6.8 HP a shot), then stop | 0 | 0 | close: the simulator does not fire through its men |
+
+Fire past friends, in short: militia and handguns behave alike - the weapon does not decide. A target ~70 m off behind friends
+40 m ahead - stop after a volley (and the militia's P4, target at 71 m); a target ~90 m off - fire at the full rate, and the
+friends catch ~¼ of the bullets; friends 60 m and 15 m ahead with the target at 90 m - fire at ~0.6 of the rate. It looks
+like the bullet's arc over the friends' heads (at 90 m the bullet rises higher than at 70), but the database has neither the
+muzzle's height nor the aim point - no rule follows.
+
+Also OPEN:
+- crossbows at the range's edge: hits a shot 0.45 at 160 m (the game) against 0.72 (the simulator); at 119 m 0.69 / 0.77;
+- the thinned target (P1): the game needs more shots (handguns 1669 against 1170).
+
+Minimal measurements next (1 battle each): (1) militia and stars on a **standing** target at 100 / 105 / 110 and 80 / 85 /
+90 m - do they shoot that far without the target stepping in; (2) handguns with friends 40 m ahead and the target at
+70 / 75 / 80 / 85 m + militia at 80 m - the distance from which a covered unit fires.
+
 
 ## What does not match (open)
 

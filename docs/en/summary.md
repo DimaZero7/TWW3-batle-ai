@@ -178,10 +178,10 @@ same battles. **The simulator is too kind to the network** — the main measured
 - the second wave of units (Flagellants, Greatswords, militia, Skavenslaves, shielded Clanrats,
   Night Runners) is not checked against recordings; the third wave is checked by the missile probe
   ([results](game/units/missile-probe.md#the-third-waves-results-the-game--the-simulator-before--after-the-changes)): the
-  handguns' and stars' reload and the stars' fire behind on the move are measured; open - handguns past the range (the
-  game holds, the simulator's front ranks fire), fire past friends (the game fires at the full rate and hits its friends,
-  the simulator holds) and fire into a melee at an angle (the share on friends three times the game's) - probes
-  `rangenew`, `lofab` needed;
+  handguns' and stars' reload and the stars' fire behind on the move are measured; the handguns' range is the centre rule, the share of
+  bullets on friends in a melee is measured 0.08; open - fire past friends (at a target ~90 m off the game fires at the full
+  rate and hits its friends, at ~70 m it holds; the simulator always holds) and the militia's and stars' fire at a
+  stepping target 20 m beyond their range;
 - not modelled: terrain, forests, visibility (`vis` is always true), cavalry, monsters, magic,
   flying, artillery, experience ranks. The casualty window is fitted, not taken from the database
   ([conflict table](game/mechanics/README.md#conflicts-with-our-simulator)).

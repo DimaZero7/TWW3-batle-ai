@@ -243,7 +243,7 @@ def step(st, orders, params=None, dt=None):
     # else takes the nearest within stand_fire_arc_deg, else turns to the nearest beyond it.
     ms_cal = cal["missile"]
     prev = u["aim_tgt"] if ms_cal.get("sticky_target") else None
-    per_man = bool(ms_cal.get("per_man_range_direct"))
+    per_man = missile.per_man_mask(u, params)
     aim_at = missile.choose_target(u, pw, ready, tgt, kind == O.ATTACK, exclude=behind, prev=prev, per_man=per_man)
     s_arc = float(ms_cal.get("stand_fire_arc_deg", 180.0))
     turning = torch.zeros_like(ready)

@@ -734,6 +734,33 @@ class TestMissileRules:
         _, st, pw = share(132, key=ARCHER)
         assert not bool(missile.in_range(st.u, pw, per_man=True)[0, 0, st.N // 2])  # not direct: centre
 
+    def test_only_units_firing_whilst_moving_count_their_range_per_man(self):
+        """missile.per_man_range_fire_move_only (probes newdist, rangenew, 07.10.2026): handgunners (direct fire, no
+        fire whilst moving, range 145) take the centre rule - no fire at 153 m centre to centre where the per-rank rule
+        would let their front ranks fire; the militia (fire whilst moving) keep the per-man rule."""
+        hg = "wh_main_emp_inf_handgunners"
+        st = shooter_and([(0, 153, SLAVES)], key=hg, width=30.0, t_width=30.0)
+        pw = geometry.pairwise(st.u, 1.5)
+        H = st.N // 2
+        assert float(missile.rank_share(st.u, pw)[0, 0, H]) > 0                   # the per-rank rule would fire
+        mask = missile.per_man_mask(st.u, P)
+        assert not bool(mask[0, 0]) and not bool(missile.in_range(st.u, pw, per_man=mask)[0, 0, H])
+        assert sum(x for _, x in shots_over(st, 30)) == 0
+        st = shooter_and([(0, 97.6, SLAVES)], key=MILITIA_K, width=30.0, t_width=30.0)
+        pw = geometry.pairwise(st.u, 1.5)
+        mask = missile.per_man_mask(st.u, P)
+        assert bool(mask[0, 0]) and bool(missile.in_range(st.u, pw, per_man=mask)[0, 0, st.N // 2])
+        off = P.with_cal("missile", per_man_range_fire_move_only=0)
+        assert bool(missile.per_man_mask(shooter_and([(0, 153, SLAVES)], key=hg).u, off)[0, 0])
+
+    def test_bullets_into_a_melee_hit_our_men_by_the_measured_share(self):
+        """missile.friendly_fire.musket 0.08 (the probe meleefire: handgunners at 45 / 90 deg to the contact, 0.07 /
+        0.08 of the hits on our men); arrows and slings keep their recorded shares."""
+        ff = P.sim["missile"]["friendly_fire"]
+        assert ff["musket"] == 0.08 and ff["arrow"] == 0.26 and ff["sling"] == 0.56
+        assert P.static("wh_main_emp_inf_handgunners")["friendly_fire"] == pytest.approx(0.08)
+        assert P.static("wh_dlc04_emp_inf_free_company_militia_0")["friendly_fire"] == pytest.approx(0.08)
+
     def test_a_dense_block_near_is_hit_almost_every_time_and_less_far(self):
         p = []
         for d in (50, 130):
