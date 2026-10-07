@@ -105,15 +105,24 @@ def inside(cfg, g):
     return (x >= b[:, 0]) & (x <= b[:, 1]) & (z >= b[:, 2]) & (z <= b[:, 3])
 
 
+def where(cfg, obs_t):
+    """(the sector of every unit's position, current or last seen [B, N], whether it is on the grid [B, N])."""
+    pos = obs_t["pos"].float() * ob.POS
+    n = cfg.sectors
+    ij = torch.floor((pos + cfg.grid_half) / step(cfg)).long()
+    on = (ij >= 0).all(-1) & (ij < n).all(-1)
+    return ij[..., 0].clamp(0, n - 1) * n + ij[..., 1].clamp(0, n - 1), on
+
+
+def one_hot(cfg, idx, dtype):
+    """[B, N, S] 1 at each unit's sector (a comparison: no read-back of sizes, compiles)."""
+    return (idx[..., None] == torch.arange(cfg.sectors * cfg.sectors, device=idx.device)).to(dtype)
+
+
 def features(cfg, obs_t, cells_in):
     """[B, S, len(FEATURES)] (module doc). cells_in: inside() [B, S, k2]."""
     tok = obs_t["tokens"]
-    S = cfg.sectors * cfg.sectors
-    pos = obs_t["pos"].float() * ob.POS                                       # [B, N, 2] current or last seen
-    n, s = cfg.sectors, step(cfg)
-    ij = torch.floor((pos + cfg.grid_half) / s).long()
-    on = (ij >= 0).all(-1) & (ij < n).all(-1)
-    idx = ij[..., 0].clamp(0, n - 1) * n + ij[..., 1].clamp(0, n - 1)        # [B, N]
+    idx, on = where(cfg, obs_t)
     seen = tok[..., ob.INDEX["seen"]] > 0.5
     vis = tok[..., ob.INDEX["visible"]] > 0.5
     own = obs_t["own"] & obs_t["attend"] & on
@@ -121,7 +130,7 @@ def features(cfg, obs_t, cells_in):
     cost = torch.expm1(tok[..., COST] * math.log1p(COST_TOP))
     strength = cost * tok[..., ob.INDEX["hp"]]
     rout = (tok[..., ob.INDEX["state_routing"]] + tok[..., ob.INDEX["state_shattered"]]) > 0.5
-    one = (idx[..., None] == torch.arange(S, device=idx.device)).to(tok.dtype)           # [B, N, S]
+    one = one_hot(cfg, idx, tok.dtype)                                                    # [B, N, S]
     cols = torch.stack([strength * own, own.to(tok.dtype), strength * (enemy & vis), (enemy & vis).to(tok.dtype),
                         cost * (enemy & ~vis), (own & rout).to(tok.dtype), (enemy & vis & rout).to(tok.dtype)], -1)
     per = torch.einsum("bns,bnf->bsf", one, cols)                                         # [B, S, 7]

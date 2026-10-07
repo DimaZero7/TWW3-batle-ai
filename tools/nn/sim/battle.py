@@ -331,6 +331,8 @@ def step(st, orders, params=None, dt=None):
     scale = torch.where(taken > u["hp_abs"], u["hp_abs"] / taken.clamp(min=1e-9), torch.ones_like(taken))
     dmg = dmg * scale[:, None, :]
     taken = dmg.sum(1)
+    # bookkeeping (no effect on the battle): the gold of enemy health each unit destroyed (dmg [B, striker, struck])
+    u["gold_out"] = u["gold_out"] + (dmg * pw["enemy"] * (u["cost"] / u["hp0"].clamp(min=1e-6))[:, None, :]).sum(2)
     share = melee.kill_share(u["hp_man"][:, None, :], hit, cal["kills"]["exponent"])
     kills = dmg / u["hp_man"][:, None, :].clamp(min=1e-6) * share
     if cal["kills"].get("wound_pool"):

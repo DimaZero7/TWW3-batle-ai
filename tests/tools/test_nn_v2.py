@@ -8,7 +8,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from tools.nn.model import chain, commit, config, decide, heads, policy, sectors, sources  # noqa: E402
+from tools.nn.model import chain, commit, config, decide, eyes, heads, policy, sectors, sources  # noqa: E402
 from tools.nn.model import observation as ob  # noqa: E402
 from tools.nn.model.frame import Frame  # noqa: E402
 from tools.nn.sim.orders import ATTACK, HOLD, KEEP, MOVE, WITHDRAW  # noqa: E402
@@ -327,8 +327,9 @@ def test_the_rollout_holds_committed_units_and_restarts_their_commitment():
     del dataclasses
 
 
-def test_a_tiny_v2_training_step_trains_the_chain_and_the_commitment():
+def test_a_tiny_v2_training_step_trains_the_chain_and_the_commitment(monkeypatch):
     import dataclasses
+    monkeypatch.setattr(eyes, "HORIZONS_S", (1.0, 2.0))         # windows inside the 3-decision chunk
     actor, crit = tiny()
     before = {n: p.detach().clone() for n, p in actor.named_parameters()}
     env = rollout.Battles(league.layout(6, 1, {"self": 0.34, "past": 0.33, "hold_shoot": 0.33}), MIRROR)
@@ -341,8 +342,11 @@ def test_a_tiny_v2_training_step_trains_the_chain_and_the_commitment():
                     reference=ref)
     assert all(np.isfinite(v) for v in st.values() if isinstance(v, float))
     changed = {n for n, p in actor.named_parameters() if not torch.equal(before[n], p)}
+    assert batch["eyes"]["own"].shape == (3, env.R, env.N, 2)
+    for h in eyes.HEADS:
+        assert np.isfinite(st[f"eyes_{h}"]) and f"eyes_ev_{h}" in st
     for part in ("heads.kind.", "heads.commit.", "heads.place_q.", "heads.fine.", "sector_enc.", "sector_att.",
-                 "commit_in."):
+                 "commit_in.", "eyes.own.", "eyes.threat.", "eyes.danger.", "eyes.own_in."):
         assert any(n.startswith(part) for n in changed), part
     assert ppo.distance(actor, actor, batch, 6) == pytest.approx(0.0, abs=1e-6)
 
@@ -362,11 +366,84 @@ def test_run_starts_v2_from_its_own_untrained_network_with_the_v2_reward(tmp_pat
     monkeypatch.setitem(config.PRESETS, "v2", TINY)
     args = run.parser().parse_args(["--name", "v2", "--preset", "v2", "--reward", "v2", "--battles", "4", "--steps",
                                     "2", "--updates", "2", "--minutes", "5", "--device", "cpu", "--no-eval",
-                                    "--mix", '{"self": 0.5, "nearest": 0.5}', "--bank", "8", "--max-units", "4"])
+                                    "--mix", '{"self": 0.5, "nearest": 0.5}', "--bank", "8", "--max-units", "4",
+                                    "--keep-every", "1e-6"])
     trained, summary, out = run.train(args)
     assert isinstance(trained, policy.ActorV2) and (tmp_path / "random_v2.pt").exists()
     assert (args.order_cost, args.lord, args.idle, args.retarget) == (0.006, 0.0, 0.0, 0.0)
     rows = [json.loads(x) for x in (out / "log.jsonl").read_text(encoding="utf-8").splitlines()]
     assert len(rows) == 2 and all(r["reward_parts"] for r in rows)
+    assert isinstance(checkpoint.load_policy(out / "m0.pt"), policy.ActorV2)          # --keep-every: kept copies
+    assert all("eyes_ev_own10" in r for r in rows[1:])                                # the eyes in the log
     for role in rows[-1]["reward_parts"].values():
         assert role.get("lord", 0) == 0 and role.get("idle", 0) == 0
+
+
+# --- the eyes ---
+
+def test_the_eyes_targets_are_the_change_over_the_window_cut_at_the_battles_end_and_masked_past_the_chunk():
+    T, R, N = 6, 2, 1
+    before = torch.zeros(T, R, N)
+    after = torch.zeros(T, R, N)
+    hp = torch.tensor([1.0, 0.9, 0.7, 0.6, 0.6, 0.5])          # row 0: health share at each decision's observation
+    before[:, 0, 0] = hp
+    after[:-1, 0, 0] = hp[1:]
+    after[-1, 0, 0] = 0.4
+    done = torch.zeros(T, R, dtype=torch.bool)
+    done[2, 1] = True                                            # row 1's battle ends after decision 2
+    before[:, 1, 0] = torch.tensor([1.0, 0.8, 0.5, 1.0, 1.0, 1.0])     # a new battle from decision 3
+    after[:, 1, 0] = torch.tensor([0.8, 0.5, 0.2, 1.0, 1.0, 0.9])
+    ch, ok = eyes.change(before, after, done, 3)                 # 3 decisions ahead
+    assert torch.allclose(ch[:4, 0, 0], torch.tensor([0.6, 0.6, 0.5, 0.4]) - hp[:4])
+    assert ok[:, 0].tolist() == [True, True, True, True, False, False]
+    assert torch.allclose(ch[:3, 1, 0], torch.tensor([0.2, 0.2, 0.2]) - before[:3, 1, 0])   # cut at the end
+    assert ok[:, 1].tolist() == [True, True, True, True, False, False]
+    tg = eyes.targets({"hp": before, "gold": torch.zeros(T, R, N)}, {"hp": after, "gold": torch.ones(T, R, N)},
+                      done, torch.full((T, R), 2.0), 10.0)       # decisions of 10 s: 10 s = 1, 30 s = 3 decisions
+    assert torch.allclose(tg["own"][0, 0, 0], torch.tensor([0.1, 0.4]))
+    assert torch.allclose(tg["threat"][0, 0, 0], torch.tensor(1.0 / 2.0 * eyes.THREAT_SCALE))
+
+
+def test_the_eyes_feed_back_detached_and_learn_only_from_their_loss():
+    setup, state, obs = setup_obs()
+    o = v2_obs(obs, setup)
+    net = model()
+    logits, a, _ = net.act(o)
+    lp, _ = heads.log_prob(logits, a, o["ctrl"])
+    net.zero_grad()
+    (-lp.sum()).backward(retain_graph=True)
+    for name in ("own", "threat", "danger"):
+        g = getattr(net.eyes, name)[-1].weight.grad
+        assert g is None or float(g.abs().sum()) == 0.0, name        # the policy does not train the eyes
+    assert net.eyes.own_in.weight.grad is not None                   # ... it trains how it reads them
+    net.zero_grad()
+    B, N = o["own"].shape
+    tg = {"own": torch.full((B, N, 2), 0.2), "threat": torch.ones(B, N), "ok": torch.ones(B, 2, dtype=torch.bool)}
+    total, parts = eyes.loss(CFG, logits, tg, o)
+    own = o["own"] & o["attend"]
+    assert torch.allclose(parts["own10"][0], ((logits["eyes_own"][..., 0] - 0.2) ** 2)[own].mean())
+    assert all(float(v[0]) >= 0 for v in parts.values())
+    total.backward()
+    assert set(parts) == set(eyes.HEADS)
+    for name in ("own", "threat", "danger"):
+        assert float(getattr(net.eyes, name)[-1].weight.grad.abs().sum()) > 0, name
+    assert logits["eyes_own"].shape == (B, N, 2) and logits["eyes_danger"].shape == (B, CFG.sectors ** 2)
+
+
+def test_the_simulators_gold_out_is_the_gold_of_health_the_other_side_lost():
+    # (melee only: an own archer's arrows into our own men are lost health no enemy's gold_out counts)
+    from tools.nn.sim import battle, scenario
+    from tools.nn.train import opponents
+    army = {"attacker": 1, "sides": {
+        1: {"faction": "wh_main_emp_empire", "units": [{"key": "wh_main_emp_inf_spearmen_0", "x": -30, "z": 0, "b": 90},
+                                                       {"key": "wh_main_emp_inf_spearmen_0", "x": -30, "z": 40, "b": 90}]},
+        2: {"faction": "wh_main_emp_empire", "units": [{"key": "wh_main_emp_inf_spearmen_0", "x": 30, "z": 0, "b": 270}]}}}
+    st = scenario.build([army])
+    for _ in range(60):
+        battle.step(st, opponents.nearest(st))
+    u = st.u
+    lost = u["cost"] * (1 - u["hp_abs"] / u["hp0"].clamp(min=1e-6))
+    for s in (1, 2):
+        dealt = float((u["gold_out"] * (u["side"] == s)).sum())
+        took = float((lost * (u["side"] == 3 - s)).sum())
+        assert took > 0 and dealt == pytest.approx(took, rel=1e-3), s

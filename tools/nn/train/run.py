@@ -48,7 +48,8 @@ def compatible(path, preset):
         cfg = checkpoint.config_of(data)
         model_policy.Actor(cfg).load_state_dict(data["actor"])
         model_critic.Critic(cfg).load(data["critic"])
-        return data.get("preset") == preset
+        # (a v2 network of an older v2 config, e.g. without the eyes, is not the preset's)
+        return data.get("preset") == preset and (not cfg.sectors or cfg == model_config.PRESETS[preset])
     except (FileNotFoundError, ValueError, RuntimeError, KeyError):
         return False
 
@@ -213,7 +214,7 @@ def train(args, every=None, teacher=None, normal=None):
     # seconds, so the horizon in seconds stays whatever the cadence (cadence.py)
     cfg = ppo.PPOConfig(lr=args.lr, gamma=cadence.discount(args.gamma), lam=cadence.discount(ppo.PPOConfig.lam),
                         epochs=args.epochs, minibatch=args.minibatch,
-                        entropy=args.entropy, anchor=args.anchor, adv_norm=args.adv_norm)
+                        entropy=args.entropy, anchor=args.anchor, adv_norm=args.adv_norm, eyes=args.eyes_weight)
     width = actor.cfg.d / model_config.SMALL.d
     # (v2 is trained from scratch, not widened from a small network: no lr / width on the stream's readers)
     opt = optimizer(actor, critic, cfg.lr, 1.0 if actor.cfg.sectors else width)
@@ -356,6 +357,7 @@ def train(args, every=None, teacher=None, normal=None):
     paused = 0.0
     rolls, rolled_at = 0, 0.0                     # --anchor-roll: renewals of the reference, training s of the last
     followed_at = 0.0                             # --anchor-ema: training s of the reference's last step
+    next_keep = args.keep_every                   # --keep-every: training minutes of the next kept copy
     if args.anchor_ema and args.anchor_roll:
         raise SystemExit("--anchor-ema and --anchor-roll: one of them")
     next_mark = every[0] if every else None
@@ -424,6 +426,12 @@ def train(args, every=None, teacher=None, normal=None):
             rolls, rolled_at = rolls + 1, trained_s
             print(f"   anchor roll {rolls}: the KL reference is now the actor of update {update} "
                   f"({trained_s / 60:.1f} min of training)", flush=True)
+        if args.keep_every and trained_s >= next_keep * 60:
+            # --keep-every: a copy of the network (with its critic) every that many minutes of training: m<minute>.pt
+            checkpoint.save(out / f"m{int(round(next_keep))}.pt", actor, critic, args.preset,
+                            {"update": update, "battles": env.battles, "minute": next_keep, "run": args.name,
+                             "cadence": cadence.meta()})
+            next_keep += args.keep_every
         decisions += env.B * args.steps
         stats = env.take_stats()
         lords = env.lords()
@@ -460,6 +468,10 @@ def train(args, every=None, teacher=None, normal=None):
                   f"adv std attack {st.get('adv_std_attack', 0):.3f} defend {st.get('adv_std_defend', 0):.3f}; "
                   "reward a minute " + "; ".join(f"{r} " + " ".join(f"{k} {v:+.3f}" for k, v in p.items())
                                                  for r, p in row["reward_parts"].items()), flush=True)
+            if "eyes_own10" in st:
+                print("      eyes mse / explained " + "; ".join(
+                    f"{h} {st['eyes_' + h]:.4f} / {st['eyes_ev_' + h]:+.2f}" for h in ("own10", "own30", "threat30",
+                                                                                     "danger10")), flush=True)
             if taught:
                 active = (lambda v: "-" if v["agree_active"] is None else f"{v['agree_active']:.3f}")
                 share = (lambda v: f"share {v['share']:.2f} (labelled {v['labelled']:.2f}) " if "share" in v else "")
@@ -579,6 +591,8 @@ def parser():
     ap.add_argument("--entropy-max", type=float, default=0.1, help="the floor's weight at most this")
     ap.add_argument("--entropy-rate", type=float, default=1.25, help="the floor's factor per update")
     ap.add_argument("--order-cost", type=float, default=reward.Weights.order_change)
+    ap.add_argument("--eyes-weight", type=float, default=ppo.PPOConfig.eyes,
+                    help="weight of the eyes' loss (v2 with eyes: auxiliary heads on the simulator's truth)")
     ap.add_argument("--reward", choices=sorted(REWARD_PRESETS),
                     help="a reward preset: its values replace --order-cost, --lord, --idle, --retarget (v2: win / loss "
                          "+ gold trade + order change 0.006; lord, idle and retarget 0)")
@@ -615,6 +629,9 @@ def parser():
     ap.add_argument("--pool", type=int, default=8)
     ap.add_argument("--pool-extra", help="more past opponents for the pool (checkpoints, comma-separated)")
     ap.add_argument("--snapshot-every", type=int, default=20)
+    ap.add_argument("--keep-every", type=float, default=0.0,
+                    help="> 0: also keep a copy of the network every this many minutes of training (m<minute>.pt in "
+                         "the run's folder; 0: only latest.pt and best.pt)")
     ap.add_argument("--print-every", type=int, default=5)
     ap.add_argument("--eval-past", help="the network behind 'past' in the final evaluation (default: random.pt)")
     ap.add_argument("--small", help="share:units - that share of every generated bank with at most `units` a side")

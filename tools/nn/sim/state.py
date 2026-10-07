@@ -189,6 +189,8 @@ INTERNAL = {
     "taken": ("f", "HP taken in melee recently (decaying)"),
     "shot_dealt": ("f", "HP dealt by its missiles to enemies recently (decaying like dealt: the morale's fight balance)"),
     "shot_taken": ("f", "HP taken from enemy missiles recently (decaying like taken: the morale's fight balance)"),
+    "gold_out": ("f", "the gold of enemy health it has destroyed so far (HP dealt to an enemy / its starting HP x its "
+                      "cost, summed; bookkeeping only: the network's 'eyes' learn from it, tools/nn/model/eyes.py)"),
     "chm_s": ("f", "seconds left of the charge's morale block (+15; morale.charge, battle.py)"),
     "chm_n": ("f", "the charge's morale blocks so far in this charge (0 when not charging)"),
     "gone": ("b", "left the map (routed off it)"),

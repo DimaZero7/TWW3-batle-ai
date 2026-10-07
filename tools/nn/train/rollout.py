@@ -44,6 +44,8 @@ v2 networks (ModelConfig.sectors > 0; the learner's or the past version's): the 
 (Battles.cstate, tools/nn/model/commit.py; afresh when a battle restarts) gives each decision its inputs ("free",
 "commit") and the geometry ("geo", sectors.geo); they are stored with the observation for the update. The kinds'
 counters count the units that decide (not those held by their commitment). No teachers with v2.
+A learner with eyes (ModelConfig.eyes, tools/nn/model/eyes.py): every transition carries the truth of its rows before
+and after the decision's simulator steps ("truth"); collect() turns a chunk of them into the eyes' targets ("eyes").
 """
 import warnings
 
@@ -52,6 +54,7 @@ import torch
 
 from tools.nn.model import abilities as mab
 from tools.nn.model import commit as mcommit
+from tools.nn.model import eyes as meyes
 from tools.nn.model import heads as hd
 from tools.nn.model import observation as ob
 from tools.nn.model import policy
@@ -514,6 +517,9 @@ class Battles:
 
         attacks = self.st.attacker[self.rows_learn % self.B] == self.rows_learn // self.B + 1   # [R], this battle
         rb, rs = self.rows_learn % self.B, self.rows_learn // self.B
+        truth = None
+        if getattr(actor.cfg, "eyes", False):
+            truth = (meyes.truth(self.st.u, rb), meyes.own_cost(self.st.u, rb, rs + 1))
         # When the decision's orders land: a fixed step, or (a latency between steps) at random per battle.
         whole, frac = self.cadence.delay(self.params.dt)
         delay = self.cadence.delays(self.params.dt, self.B, self.device) if frac else None
@@ -529,6 +535,8 @@ class Battles:
             if each is not None:
                 each(~was_done)
         d_rows = finished[rb]
+        if truth is not None:                        # after the steps, before a finished battle restarts
+            truth = (truth[0], meyes.truth(self.st.u, rb), truth[1])
 
         if self.auto_reset:
             self._reset(finished)
@@ -542,7 +550,7 @@ class Battles:
             # a copy: a slice (view) would keep the whole input of every step alive (~60 MB each)
             obs_r = dict(obs_r, abil=obs_r["abil"][..., :mab.DYNAMIC].clone(), abil_row=abil_row)
         return {"obs": obs_r, "action": action, "lp": lp, "value": value, "reward": r_rows,
-                "done": d_rows, "critic_obs": c, "attacks": attacks, "teach": taught}
+                "done": d_rows, "critic_obs": c, "attacks": attacks, "teach": taught, "truth": truth}
 
     def _teach_labels(self, cfg, obs_r, frame):
         """The teachers' labels of the learner rows at this decision (drills/teach.py): (Action [R, N],
@@ -842,5 +850,10 @@ def collect(env, actor, critic, T):
                         "drill": torch.stack([s["teach"][2] for s in steps]),
                         "picked": torch.stack([s["teach"][3] for s in steps]), "names": env.teach_names,
                         "shares": env.teach_shares()}
+    if steps[0].get("truth") is not None:
+        before = {k: torch.stack([s["truth"][0][k] for s in steps]) for k in steps[0]["truth"][0]}
+        after = {k: torch.stack([s["truth"][1][k] for s in steps]) for k in steps[0]["truth"][1]}
+        cost = torch.stack([s["truth"][2] for s in steps])
+        out["eyes"] = meyes.targets(before, after, done, cost, env.decision_s)
     out["last_value"] = env.value(critic)
     return out

@@ -125,7 +125,7 @@ class Actor(nn.Module):
 
 class ActorV2(Actor):
     """v2 (module doc): encoder -> blocks with the units -> sectors attention after cfg.sector_at of them -> GRU per
-    token -> the last block -> the chained heads."""
+    token -> the eyes (cfg.eyes; their predictions added to the tokens) -> the last block -> the chained heads."""
 
     def __init__(self, cfg):
         from tools.nn.model import chain, sectors
@@ -140,6 +140,9 @@ class ActorV2(Actor):
         self.sector_att = sectors.SectorAttention(cfg)
         self.memory = TokenMemory(cfg.d) if cfg.memory else None
         self.heads = chain.ChainHeads(cfg)
+        if cfg.eyes:
+            from tools.nn.model.eyes import Eyes
+            self.eyes = Eyes(cfg)
         assert cfg.sector_at <= self._split(), "the sectors' attention comes before the memory"
 
     def encode(self, obs_t):
@@ -181,9 +184,15 @@ class ActorV2(Actor):
 
     def _finish(self, x, pack, obs_t, action, greedy, temperature, abilities):
         bias, s, cells_in = pack
+        seen = None
+        if self.cfg.eyes:                    # the eyes (eyes.py): predicted, then added to the tokens
+            x, s, seen = self.eyes(x, s, obs_t)
         for block in self.blocks[self._split():]:
             x = block(x, bias)
-        return self.heads(x, s, cells_in, obs_t, action, greedy, temperature, abilities)
+        logits, a = self.heads(x, s, cells_in, obs_t, action, greedy, temperature, abilities)
+        if seen is not None:
+            logits.update(seen)
+        return logits, a
 
     def act(self, obs_t, h=None, greedy=False, temperature=1.0, abilities=True, action=None):
         x, pack = self.encode(obs_t)

@@ -97,7 +97,7 @@ def random_for(cfg):
     """The untrained network of cfg's kind: random_v2.pt for v2 (written if missing), else random.pt."""
     if not cfg.sectors:
         return RANDOM
-    if not RANDOM_V2.exists():
+    if not RANDOM_V2.exists() or config_of(read(RANDOM_V2)) != cfg:
         write_random(RANDOM_V2, "v2")
     return RANDOM_V2
 

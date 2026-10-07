@@ -352,6 +352,22 @@ flowchart TB
   network sees the seconds left (÷ 16) and whether the unit is held. All from the side's observation and the
   battle time: the simulator (`rollout.Battles.cstate`) and the companion (`loop.Brain.commit`, from the game's
   state) keep it the same way. The log's order-kind counter counts only the units that decide (not held ones).
+- **Eyes** (`tools/nn/model/eyes.py`, field `eyes`, on in the `v2` preset). Auxiliary heads after the memory, before
+  the last attention block and the decision heads; they learn from the simulator's truth with a loss of their own
+  (squared error, the 4 heads summed × weight 5, `--eyes-weight`): an own unit — the share of its health it will lose
+  in 10 s and in 30 s; an enemy unit — its "threat": the gold of our health it will destroy in 30 s (share of our
+  army's cost × 10); a sector — its "danger": the sum of the health shares our units standing in it will lose in
+  10 s (from the sector token and the sums of the own and enemy unit tokens in it). The predictions go back: through
+  a small linear layer, added to the own / enemy unit's token and to the sector token (the place head reads it). They
+  go back without a gradient (detach): the eyes learn only from the truth, PPO cannot turn them into a code of its
+  own; the shared trunk under them gets both gradients. The truth comes from the rollout: at every decision the
+  units' health and the simulator's `gold_out` counter (gold of enemy health destroyed; bookkeeping only, no effect
+  on the battle) before and after its simulator steps; the target is the change over 10 / 30 decisions within the
+  64-decision chunk; a battle that ended sooner — its end (nothing after); a window past the chunk's end — masked.
+  Weight 5: on the first chunks against `nearest` the eyes' gradient at weight 1 was 0.05 of PPO's (0.004 vs 0.08),
+  at 5 ~0.25. The log has each head's error and explained share (`eyes_<head>`, `eyes_ev_<head>`). Fresh heads start
+  predicting about 0 (as almost every target is): from 0.5 the first error (~23, mostly the 256 sectors) gave the eyes
+  a gradient 1000 × PPO's. The critic gets no eyes (it sees the whole field anyway). Picture: `build/v2/eyes_png.py`.
 - **Reward v2** (`run.py --reward v2`): win / loss + the gold trade + order change cost 0.006 (keep and a
   repeated order free); lord, idle and retarget 0.
 - **From scratch.** `--preset v2` without `--init` starts from `build/nn-train/random_v2.pt` (written if missing);
@@ -374,7 +390,7 @@ Speed (RTX 5070 Ti, 1024 battles, a decision a second; `build/v2/bench_v2.py`):
 | GPU memory peak at the update, GB | 11.7 | 9.5 |
 | Updates / battles finished in 5 min | 22 / 3,438 | 20 / 1,435 |
 
-v2 is ~8 % slower than `wide` (the goal: not more than 2 times). Fewer battles finish because an untrained
+v2 is ~8 % slower than `wide` (the goal: not more than 2 times). With the eyes (10 min of training): 3,920 battle seconds per second, collecting / update 5.0 / 11.9 s, peak 9.9 GB — ~9 % slower again; the eye heads' explained share went from −0.1 to 0.49–0.68 in 10 min. Fewer battles finish because an untrained
 network's battles last longer, not because of the speed.
 
 **Tried and rejected.** v2's minibatch in 2 parts without recomputing the sector branch: a 12.5 GB peak of 16, the
@@ -548,7 +564,9 @@ An int8 export of the actor looks practical; not done yet:
   `sequence` = decisions one by one; in the rollout held units keep, a restarted battle and a narrowed batch
   clear / keep the commitment; one PPO step changes the chain's, the commitment's and the sector branch's
   weights; the evaluation plays v2 against a v1 past version; `run --preset v2 --reward v2` writes
-  `random_v2.pt`, and the lord and idle terms are 0.
+  `random_v2.pt`, and the lord and idle terms are 0, `--keep-every` keeps copies; the eyes: the targets are the change over the window
+  cut at the battle's end, masked past the chunk; fed back without a gradient, they learn only from their own loss;
+  the simulator's `gold_out` equals the gold of health the other side lost.
 
 The `snake-ai-trainer` image has no pytest. The torch tests were run with the pure-Python
 pytest of `.venv` put on `PYTHONPATH` in the container.

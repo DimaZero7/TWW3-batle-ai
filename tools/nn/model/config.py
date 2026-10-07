@@ -27,6 +27,7 @@ class ModelConfig:
     sector_d: int = 64       # ... the sector tokens' width
     sector_heads: int = 2    # ... heads of the units -> sectors attention (head width sector_d / sector_heads)
     sector_at: int = 1       # ... it comes after this many of the units' attention blocks
+    eyes: bool = False       # v2: the eyes, auxiliary heads on the simulator's truth fed back into the network (eyes.py)
     critic_d: int = 128      # the centralised critic (training only)
     critic_layers: int = 3
     critic_heads: int = 4
@@ -44,7 +45,8 @@ SMALL = ModelConfig()
 WIDE = ModelConfig(d=256, heads=8, pointer=128, critic_d=256, critic_heads=8)
 TARGET = ModelConfig(d=512, layers=4, heads=8, pointer=128, critic_d=512, critic_layers=6, critic_heads=8)
 # v2 (08.10.2026): wide's base (unit tokens by passport, attention, a GRU per token) + 16 x 16 map sectors of 100 m
-V2 = ModelConfig(d=256, heads=8, pointer=128, critic_d=256, critic_heads=8, sectors=16)
+# + the eyes
+V2 = ModelConfig(d=256, heads=8, pointer=128, critic_d=256, critic_heads=8, sectors=16, eyes=True)
 PRESETS = {"small": SMALL, "wide": WIDE, "target": TARGET, "v2": V2}
 
 

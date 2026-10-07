@@ -338,7 +338,7 @@ class TestCompanion:
         again, _, _ = brain.decide(state_doc(move=2))          # the same moment: nothing happened, all held
         assert all(o["kind"] == "keep" for o in again if o["unit"] in held)
         brain.decide(dict(state_doc(), batch="b-2"))            # a new battle: the commitment starts afresh
-        assert brain.battle.batch == "b-2" and len(brain.commit) and brain.commit["until"].max() <= 16.0
+        assert brain.battle.batch == "b-2" and float(brain.commit["until"].max()) <= state_doc().get("t", 0) / 1000 + 16
 
     def test_the_loop_answers_each_new_state_once(self, tmp_path):
         from tools.nn.companion import loop, policy

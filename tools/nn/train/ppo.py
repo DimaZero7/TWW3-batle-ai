@@ -26,9 +26,17 @@ from dataclasses import dataclass
 
 import torch
 
+from tools.nn.model import eyes as meyes
 from tools.nn.model import heads as hd
 from tools.nn.train.drills import teach as drill_teach
 from tools.nn.train.rollout import full_obs
+
+
+# The eyes' loss weight: the four heads' squared errors summed x this. On a fresh v2 batch (vs nearest, 3-5 min into
+# the battles) the eyes' gradient on the actor at weight 1 was 0.05 of the policy loss's (0.004 vs 0.08); at 5 ~0.25:
+# it shapes the shared trunk without outweighing PPO (the eyes' own heads learn at Adam's pace whatever the weight)
+# (docs/en/training/model.md "Eyes")
+EYES_WEIGHT = 5.0
 
 
 @dataclass(frozen=True)
@@ -49,6 +57,7 @@ class PPOConfig:
     value: float = 0.5
     max_grad: float = 0.5
     anchor: float = 0.0        # weight of KL(policy || reference) on the order kind and target (0: off)
+    eyes: float = EYES_WEIGHT  # weight of the eyes' loss (v2 with eyes, tools/nn/model/eyes.py; batch["eyes"])
     adv_norm: str = "batch"    # normalise the side's advantage over the minibatch ("batch") or over each
     #                            role's rows apart ("role": the attacker's, bigger with its idle cost, no
     #                            longer outweighs the defender's)
@@ -215,6 +224,11 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
     critic.train()
     kinds = batch["action"].parts()
     taught = batch.get("teach")
+    eyes_tg = batch.get("eyes") if cfg.eyes else None
+    if eyes_tg is not None:
+        for h in meyes.HEADS:
+            stats[f"eyes_{h}"] = 0.0
+            stats[f"eyes_ev_{h}"] = 0.0
     teach_acc = {n: [0.0] * 7 for n in taught["names"]} if taught else {}
     for _ in range(cfg.epochs):
         order = torch.randperm(R, device=adv.device)
@@ -225,7 +239,8 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                               and batch.get("attacks") is not None else None).reshape(T, len(idx))
             parts = torch.arange(len(idx), device=idx.device).tensor_split(max(1, min(cfg.accum, len(idx))))
             opt.zero_grad(set_to_none=True)
-            step = dict.fromkeys(("policy_loss", "value_loss", "entropy", "kl", "clip", "entropy_all", "anchor_kl"), 0.0)
+            step = dict.fromkeys(("policy_loss", "value_loss", "entropy", "kl", "clip", "entropy_all", "anchor_kl")
+                                 + tuple(k for k in stats if k.startswith("eyes_")), 0.0)
             for part in parts:
                 share = len(part) / len(idx)
                 pidx = idx[part]
@@ -261,8 +276,16 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                                                             picked)
                         for name, v in sums.items():
                             teach_acc[name] = [x + y for x, y in zip(teach_acc[name], v)]
+                    seen = torch.zeros((), device=adv.device)
+                    if eyes_tg is not None and train_policy:
+                        flat = {k: obs[k].reshape(-1, *obs[k].shape[2:]) for k in ("own", "attend", "pos")}
+                        seen, parts_e = meyes.loss(actor.cfg, logits, {k: _rows(v, pidx) for k, v in eyes_tg.items()},
+                                                   flat)
+                        for h, (mse, ref) in parts_e.items():
+                            step[f"eyes_{h}"] += float(mse.detach()) * share
+                            step[f"eyes_ev_{h}"] += (1.0 - float(mse.detach()) / max(float(ref), 1e-9)) * share
                 vl = ((critic(cobs) - _rows(ret, pidx)) ** 2).mean()
-                policy_part = pl - cfg.entropy * entropy + cfg.anchor * anchored + imitation
+                policy_part = pl - cfg.entropy * entropy + cfg.anchor * anchored + imitation + cfg.eyes * seen
                 loss = cfg.value * vl + (policy_part if train_policy else 0.0)
                 (loss * share).backward()
                 with torch.no_grad():

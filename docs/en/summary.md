@@ -207,7 +207,7 @@ the time to the battle's end. Sizes: `small` 0.85 M weights, `wide` 3.23 M. The 
 `wide` now; it was made from a trained `small` by widening, not from scratch.
 A new base `v2` (`--preset v2 --reward v2`, from scratch, 3.51 M): the same base + 16 × 16 map sectors the units
 look at, chained heads (kind → target → sector → 25 m cell → length) and a commitment to keep the order 2–16 s
-(events end it); ~8 % slower than `wide` ([details](training/model.md#variant-v2-map-sectors-chained-heads-commitment)).
+(events end it), "eyes" (auxiliary heads on the simulator's truth: own losses, enemy threat, sector danger — their predictions fed back); ~8 % slower than `wide` ([details](training/model.md#variant-v2-map-sectors-chained-heads-commitment)).
 
 Details: [inputs and model](training/model.md) · [idea](training/network.md).
 
