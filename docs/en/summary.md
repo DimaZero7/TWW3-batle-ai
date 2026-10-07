@@ -176,9 +176,12 @@ same battles. **The simulator is too kind to the network** — the main measured
   sectors are per man, ours a unit-level step;
 - order delay in the game is 0.6–0.8 s in small battles, 0.36 s in the simulator;
 - the second wave of units (Flagellants, Greatswords, militia, Skavenslaves, shielded Clanrats,
-  Night Runners) is not checked against recordings; the third wave rests on estimates: the reload of the handguns and
-  stars (the base × 1.2), the stars do not shoot behind on the move (the ±90° fit from the militia), flat fire is
-  measured at 90 m only - the probes are prepared ([missile probe](game/units/missile-probe.md#the-third-waves-probes));
+  Night Runners) is not checked against recordings; the third wave is checked by the missile probe
+  ([results](game/units/missile-probe.md#the-third-waves-results-the-game--the-simulator-before--after-the-changes)): the
+  handguns' and stars' reload and the stars' fire behind on the move are measured; open - handguns past the range (the
+  game holds, the simulator's front ranks fire), fire past friends (the game fires at the full rate and hits its friends,
+  the simulator holds) and fire into a melee at an angle (the share on friends three times the game's) - probes
+  `rangenew`, `lofab` needed;
 - not modelled: terrain, forests, visibility (`vis` is always true), cavalry, monsters, magic,
   flying, artillery, experience ranks. The casualty window is fitted, not taken from the database
   ([conflict table](game/mechanics/README.md#conflicts-with-our-simulator)).

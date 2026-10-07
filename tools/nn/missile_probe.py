@@ -39,6 +39,13 @@ Plans (each battle 4-5 lanes):
   hglof    the line of fire past friends with handgunners (the P4 rule's data at another range and gun): Empire
            spearmen 40 m in front offset 0 / 15 / 22.5 m sideways, 15 m in front offset 0, and no friend; skavenslaves
            80 m away (1 battle): who fires, the friends' HP lost;
+  rangenew  the first shot of the third wave's shooters: the target steps 2 m closer every 2 s from past the range until
+           the first projectile - handgunners on skavenslaves 30 and 60 m wide, crossbowmen on skavenslaves, throwing
+           stars on flagellants, militia on skavenslaves (the P2 control) (1 battle): the range rule of direct fire;
+  lofab    the line of fire past friends, weapon against geometry: militia and handgunners each with our spearmen 40 m
+           ahead (not offset) and the target 60 m (the militia's P4) and 80 m off (the handgunners' hglof), and
+           handgunners with the spearmen 60 m ahead, the target 80 m (1 battle): does the weapon or the friends'
+           distance to the target decide whether a covered unit fires;
   meleefire  shooting into a melee (the fire-position drill, build/drill_fire/design.md): handgunners at will on
            clanrat spearmen that Empire spearmen walk into melee with - from behind our men, at 45 deg, along the
            contact (90 deg) - and the same melee without fire (control) (1 battle): the fire rate, the target's and
@@ -99,7 +106,7 @@ Z0 = -80               # the shooters' line
 SETTLE_MS = 4000
 TICK_MS = 500
 PLANS = ("dist", "arc", "range", "targets", "shield", "moving", "rank", "thin", "pistol", "moving2", "lof",
-         "newdist", "starsmove", "meleefire", "hglof")
+         "newdist", "starsmove", "meleefire", "hglof", "rangenew", "lofab")
 DIST = {"archers": (40, 80, 120, 128), "militia": (30, 50, 70, 88), "slingers": (40, 80, 110, 118),
         "nr": (40, 80, 120, 138)}
 TARGET_OF = {"archers": "slave", "militia": "slave", "slingers": "flag", "nr": "flag"}
@@ -179,6 +186,16 @@ def battles(plan):
         fr = dict(friend="spear", friend_engage=25, friend_width=30)
         return [[lane("hg", "cspear", 80, **fr), lane("hg", "cspear", 80, t_rot=45, **fr),
                  lane("hg", "cspear", 80, t_rot=90, **fr), lane("hg", "cspear", 80, mode="hold", **fr)]]
+    if plan == "rangenew":
+        step = dict(target_mode="step", step_m=2, step_s=2)
+        return [[lane("hg", "slave", 160, start_d=160, **step), lane("hg", "slave", 160, start_d=160, t_width=60, **step),
+                 lane("xb", "slave", 175, start_d=175, **step), lane("stars", "flag", 85, start_d=85, **step),
+                 lane("militia", "slave", 105, start_d=105, **step)]]
+    if plan == "lofab":
+        fr = dict(friend="spear", friend_width=30, friend_lat=0)
+        return [[lane("militia", "slave", 60, friend_fwd=40, **fr), lane("militia", "slave", 80, friend_fwd=40, **fr),
+                 lane("hg", "slave", 60, friend_fwd=40, **fr), lane("hg", "slave", 80, friend_fwd=40, **fr),
+                 lane("hg", "slave", 80, friend_fwd=60, **fr)]]
     if plan == "hglof":
         fr = dict(friend="spear", friend_width=30)
         return [[lane("hg", "slave", 80, friend_fwd=40, friend_lat=0, **fr),

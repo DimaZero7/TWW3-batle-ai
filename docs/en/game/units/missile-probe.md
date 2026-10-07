@@ -142,7 +142,7 @@ established — OPEN.
 
 ## The third wave's probes
 
-Prepared 07.10.2026, not played yet (run: `build/steps/newunits_probe.ps1`, Normal difficulty). They answer the
+Played 07.10.2026 (`build/steps/newunits_probe.ps1`, Normal difficulty; runs `build/missile-probe/runs/20261007-1247…1254`, analysis `build/step4`). They answer the
 questions the simulator's estimates for the new shooters rest on ([passports](../../training/units.md#handgunners-crossbowmen-clanrats-stormvermin-throwing-stars)).
 
 | Plan | Battles | Lanes | Question |
@@ -157,6 +157,38 @@ New in the probe: a shooter mode `hold` (no fire - a control), the shooter's own
 (`friend_hp_lost`), the target's angle off the front and whether the shooter moved at each volley (`rel_at_volleys`,
 `moving_at_volleys`). The simulator's twin gives the same orders (the shooter's move, our men's attack, the control
 without range).
+
+### The third wave's results (the game / the simulator before / after the changes)
+
+In the game the target's centre stands ~9–10 m farther than planned (`d` 50 → 60 m centre to centre), so the lanes "at the
+edge" (handguns 143 and 150, crossbows 158) ended past the range: hits by distance exist at 60–110 m only, and the range's
+edge needs a probe of its own (`rangenew`, below).
+
+| Indicator | Game | Simulator before | After | Source of the change |
+|---|---|---|---|---|
+| A man's cycle, handgunners (database 13 s) | 14.8 s (14.6–15.1, 8 lanes) | 16.0–16.2 (13 × 1.2) | 15.0 | measured: `missile.reload_projectile_s` 14.8 |
+| A man's cycle, throwing stars (database 7 s) | 8.1 s (8.0–8.2, 4 lanes) | 8.5 (7 × 1.2) | 8.5 (0.5 s steps) | measured: 8.1 |
+| A man's cycle, crossbowmen (database 13 s) | 12.7–14.1 | 13.0–13.25 | unchanged | the arrows' rule (cycle = database) holds |
+| First shot, `musket` | 1.5–2.5 s (the militia too) | 4.0 | 3.0 (the 3 s of a new target) | measured: `missile.aim_s.musket` 2.0 |
+| Hits per shot on a full target: handguns → slaves 60 / 90 / 110 m | 0.82 / 0.72 / 0.53 | 0.78 / 0.64 / 0.58 | the same | no change: the spread model matches |
+| the same: handguns → stormvermin (armour 90) 62 / 112 m | 0.79 / 0.68 | 0.84 / 0.65 | the same | armour-piercing by the blow rule |
+| the same: stars → flagellants 34 / 60 / 79 m | 0.78 / 0.59 / 0.54 | 0.78 / 0.60 / 0.55 | the same | — |
+| the same: crossbows → slaves 59 / 119 m | 0.82 / 0.69 | 0.86 / 0.77 | the same | +12 % at 119 m - within the probe |
+| Stars walking away, the target behind | 1200 projectiles, first after 2 s, volleys 178° off the front on the move | 600, first after 111 s (after the halt) | 1200, after 3 s | database: the 360° arc (`missile.move_fire_own_arc`) |
+| Stars walking / running across the target | 324 / 237 projectiles (82–151°) | 0 / 0 | 600 / 232 | the same; the walking stream across is lower in the game - open |
+| Stars standing, the target 90° / 180° off | turn 82° / 180°, then volleys | no turn, the same hits | the same | open: a standing unit's turn to a target off its front |
+| Handguns past the range: 153 / 153 / 159 m centre to centre | not one shot in 300 s | the front ranks fire: 612 / 774 projectiles | the same | **open**: the per-rank rule (from the pistols) does not fit the handgun - probe `rangenew` |
+| Friends 40 m ahead (offset 0 / 15 / 22.5 m), 15 m ahead; target 90 m | fire at the full rate (1214–1315 projectiles); the friends lose 6054 / 3303 / 1926 / 7512 HP | 0 / 660 / 893 / 11 projectiles, friends 0 | the same | **open**: the militia in P4 (target 71 m) hardly fire - probe `lofab` |
+| Fire into a melee: from behind our men / 45° / 90° (in 60 s, beyond the no-fire control) | 1 volley, then stop (friends +6.8 HP a shot, target +7.7) / 0.69 of the rate (friends +0.8, target +10.5) / 0.95 (friends +1.2, target +13.3) | 0 / full (friends +3.9, target +8.4) / full (+3.9 / +8.6) | the same | **open**: the (fitted) share on friends in melee is three times the game's at an angle - a rule after `lofab` |
+
+Cards: all six new passports equal their cards from battle (`check_card`: men, health, mass, speeds, attack, defence,
+charge, damage, armour, abilities, ammo, range, missile damage per 10 s).
+
+Still needed (2 battles, `build/steps/newunits_probe.ps1 -Only probes -Plans rangenew,lofab`): `rangenew` - the first
+shot of handgunners (on slaves 30 and 60 m wide), crossbowmen, stars and militia (the P2 control) at a target stepping
+2 m closer every 2 s; `lofab` - militia and handgunners with friends 40 m ahead and the target 60 and 80 m off, and
+handgunners with friends 60 m ahead: whether the weapon or the friends' distance to the target decides if a covered unit
+fires.
 
 ## What does not match (open)
 

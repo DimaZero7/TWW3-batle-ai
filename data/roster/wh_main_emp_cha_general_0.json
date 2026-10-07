@@ -1,10 +1,10 @@
 {
   "key": "wh_main_emp_cha_general_0",
   "card": {
-    "date": "2026-09-27",
+    "date": "2026-10-07",
     "game_version": "v9.0.1  Build 50381.4347557 (modded)",
-    "build": "9311677532973b64",
-    "run": "20260927T170740-roster-29",
+    "build": "a2cad80a00a48b01",
+    "run": "20261007T124603-roster-596",
     "profile": {
       "commanding": true,
       "fast_speed": 3.4000000953674,

@@ -224,10 +224,18 @@ def step(st, orders, params=None, dt=None):
     still = (speed < 0.2) | u["fire_move"]
     ready = standing & ~engaged & (u["a"] > 0) & (u["range"] > 0) & still
     # On the move (fire whilst moving) a unit shoots only at targets within missile.move_fire_arc_deg of its
-    # facing (the way it walks): walking away it holds fire (measured, config/nn/sim.json missile.move_fire_why).
+    # facing (the way it walks): walking away it holds fire (measured, config/nn/sim.json missile.move_fire_why) -
+    # unless its own fire arc (the database's, passport missile.fire_arc_deg) is wider: the Night Runners' throwing
+    # stars (360) shoot behind on the move (missile.move_fire_own_arc; the probe starsmove: volleys at 178 deg off
+    # the facing while walking away, at 82-151 deg walking and running across).
     arc = float(cal["missile"].get("move_fire_arc_deg", 180.0))
     on_move = u["fire_move"] & (speed >= 0.2)
-    behind = (on_move[:, :, None] & (pw["rel_i"].abs() > arc * geometry.DEG)) if arc < 180 else None
+    behind = None
+    if arc < 180:
+        lim = torch.full_like(u["arc"], arc)
+        if cal["missile"].get("move_fire_own_arc"):
+            lim = torch.maximum(lim, u["arc"])
+        behind = on_move[:, :, None] & (pw["rel_i"].abs() > (lim * geometry.DEG)[:, :, None])
     # Standing, a unit keeps its facing while its target is within missile.stand_fire_arc_deg of it (measured,
     # missile.stand_fire_why) and turns to a target beyond it first (the facing below, at turn.*_deg_s) until the
     # target is within missile.turn_done_deg (then it keeps that facing again); it aims only once the turn is done.

@@ -250,8 +250,8 @@ The bridge needs nothing for them: nothing is orderable (their abilities are inn
 ## Handgunners, crossbowmen, clanrats, stormvermin, throwing stars
 
 The third wave (07.10.2026): long-range shooters for the Empire, line units and the second Night Runners for the
-Skaven. Passports from the database; no cards from battle yet (lists `config/roster/capture_wave3_emp.json` and
-`_skv.json`, captured by `build/steps/newunits_probe.ps1`). Put off: the Gutter Runners (Stalk - hidden on the move,
+Skaven. Passports from the database, all six equal their cards from battle (lists `config/roster/capture_wave3_emp.json`
+and `_skv.json`, 07.10.2026). Put off: the Gutter Runners (Stalk - hidden on the move,
 and the simulator has no sight) and the Pistoliers (cavalry: none in the simulator; the passport builder takes
 health, mass and speed from the rider, while a cavalry unit's are its horse's). The Russian game's "Пистольеры" are
 the handgunners, not the cavalry.
@@ -276,10 +276,10 @@ Every Skaven unit of the wave has Strength in Numbers and Scurry Away!.
 | Unit | Feature | What it does | Source | Simulator | Network |
 |---|---|---|---|---|---|
 | Handgunners | Armour-piercing bullet 5 + 17 | 17 of 22 damage go through armour: against stormvermin (90) and the Warlord | DB `projectiles` | the blow rule (armour roll, `melee.per_hit`) | passport |
-| Handgunners | Flat fire at 145 m | needs a clear line past friends; range per rank | DB `trajectory` `low` | as the militia's pistols (`missile.clear_shot`, `rank_share`); measured at 90 m only - probes `newdist`, `hglof` | passport `direct` |
-| Handgunners, stars | Reload 13 / 7 s (`musket`) | — | DB | **an estimate**: no `musket` in `reload_s`, the database's × 1.2 (`reload_scale_other`, from the pistols): 15.6 / 8.4 s - probe `newdist` | passport |
+| Handgunners | Flat fire at 145 m | needs a clear line past friends; range per rank | DB `trajectory` `low` | hits on a full target match the game (60–110 m); as the militia's pistols (`missile.clear_shot`, `rank_share`) - but in the game they do not fire past the range (153 m) and fire past friends at the full rate: open, probes `rangenew`, `lofab` ([probe](../game/units/missile-probe.md#the-third-waves-results-the-game--the-simulator-before--after-the-changes)) | passport `direct` |
+| Handgunners, stars | Reload 13 / 7 s (`musket`) | a man's cycle in the game 14.8 / 8.1 s | DB; measured `newdist` | measured: `missile.reload_projectile_s` 14.8 / 8.1 s; the first shot 2.0 s (`missile.aim_s.musket`) | passport |
 | Crossbowmen | A bolt at 160 m, reload 13 s | the longest of ours | DB | as the archers' arrows; the arrow cycle was measured at a 10 s base (= the base), 13 s by the ratio - probe `newdist` | passport |
-| Night Runners (stars) | A 360° fire arc and fire whilst moving | shoot all round, on the move too | DB `battle_entities.fire_arc_close` 360 (`..._fast_360`), attribute `mounted_fire_move` | standing - the passport's arc; on the move - the ±90° fit from the militia (`missile.move_fire_arc_deg`): no fire behind - probe `starsmove` | **input `fire_arc`** ([model](model.md#fire-arc-both-sides-the-tokens-last-input)) |
+| Night Runners (stars) | A 360° fire arc and fire whilst moving | shoot all round, on the move too (probe `starsmove`: volleys 178° off the front walking away) | DB `battle_entities.fire_arc_close` 360 (`..._fast_360`), attribute `mounted_fire_move` | standing - the passport's arc; on the move - the wider of ±90° (fitted to the militia) and its own arc (`missile.move_fire_own_arc`) | **input `fire_arc`** ([model](model.md#fire-arc-both-sides-the-tokens-last-input)) |
 | Night Runners (stars) | Vanguard, skirmish, resistance 20 % | as the slingers | DB | as theirs | passport |
 | Clanrat spearmen with shields | Shield 35 %, charge reflection | as the spearmen without a shield + a shield | DB | the shield and bracing rules | passport |
 | Stormvermin (sword and shield) | Attack 38, armour 90, shield 35 % | the Skaven's strongest line infantry | DB | from the numbers | passport |

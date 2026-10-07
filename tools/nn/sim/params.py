@@ -88,8 +88,12 @@ class Params:
         ms = self.sim["missile"]
         # measured reload of the category, for the passport reload it was measured on (reload_ref_s); another
         # unit of the category scales with its passport (Night Runners' sling 8 s against the slaves' 9 s)
+        # a projectile measured on its own (missile.reload_projectile_s) takes its measured cycle
         reload_s = 0
-        if missile:
+        own = (ms.get("reload_projectile_s") or {}).get(missile.get("projectile")) if missile else None
+        if own is not None:
+            reload_s = float(own)
+        elif missile:
             ref = (ms.get("reload_ref_s") or {}).get(cat)
             reload_s = (ms["reload_s"][cat] * (missile.get("reload_s", ref) / ref if ref else 1.0)
                         if cat in ms["reload_s"] else missile.get("reload_s", 0) * ms["reload_scale_other"])

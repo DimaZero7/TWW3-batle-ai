@@ -1882,7 +1882,7 @@
     "penetration": "very_low",
     "shot_type": "small_arm_default"
    },
-   "card_check": "no card"
+   "card_check": "equal"
   },
   "wh_main_emp_inf_crossbowmen": {
    "land_unit": "wh_main_emp_inf_crossbowmen",
@@ -1983,7 +1983,7 @@
     "penetration": "very_low",
     "shot_type": "small_arm_default"
    },
-   "card_check": "no card"
+   "card_check": "equal"
   },
   "wh2_main_skv_inf_clanrats_0": {
    "land_unit": "wh2_main_skv_inf_clanrats_0",
@@ -2063,7 +2063,7 @@
     "missile": 0.0
    },
    "missile": null,
-   "card_check": "no card"
+   "card_check": "equal"
   },
   "wh2_main_skv_inf_clanrat_spearmen_1": {
    "land_unit": "wh2_main_skv_inf_clanrat_spearmen_1",
@@ -2145,7 +2145,7 @@
     "missile": 0.0
    },
    "missile": null,
-   "card_check": "no card"
+   "card_check": "equal"
   },
   "wh2_main_skv_inf_stormvermin_1": {
    "land_unit": "wh2_main_skv_inf_stormvermin_1",
@@ -2225,7 +2225,7 @@
     "missile": 0.0
    },
    "missile": null,
-   "card_check": "no card"
+   "card_check": "equal"
   },
   "wh2_main_skv_inf_night_runners_0": {
    "land_unit": "wh2_main_skv_inf_night_runners_0",
@@ -2331,7 +2331,7 @@
     "penetration": "very_low",
     "shot_type": "small_arm_default"
    },
-   "card_check": "no card"
+   "card_check": "equal"
   }
  }
 }

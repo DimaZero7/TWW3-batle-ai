@@ -1,0 +1,157 @@
+{
+  "key": "wh2_main_skv_inf_stormvermin_1",
+  "card": {
+    "date": "2026-10-07",
+    "game_version": "v9.0.1  Build 50381.4347557 (modded)",
+    "build": "7b29e15b9c0ba48f",
+    "run": "20261007T124711-roster-597",
+    "profile": {
+      "commanding": false,
+      "fast_speed": 3.7999999523163,
+      "flags": {
+        "is_anti_cavalry_infantry": false,
+        "is_artillery": false,
+        "is_cavalry": false,
+        "is_chariot": false,
+        "is_elephants": false,
+        "is_infantry": true,
+        "is_lancers": false,
+        "is_pikemen": false,
+        "is_war_beasts": false,
+        "is_war_machine": false
+      },
+      "initial_number_of_men": 160,
+      "missile_range": 0,
+      "owned_non_passive_special_abilities": {},
+      "owned_passive_special_abilities": [
+        "wh2_main_unit_passive_strength_in_numbers",
+        "wh2_main_unit_passive_scurry_away"
+      ],
+      "slow_speed": 1.5,
+      "starting_ammo": 0,
+      "type": "wh2_main_skv_inf_stormvermin_1",
+      "unit_class": "inf_mel"
+    },
+    "details": {
+      "HealthMax": 9920,
+      "Mass": 150,
+      "Name": "Штормокрысы (мечи и щиты)",
+      "NumEntitiesInitial": 160
+    },
+    "stats": {
+      "stat_armour": {
+        "value": 90,
+        "displayed": 90,
+        "base": 90
+      },
+      "stat_morale": {
+        "value": 0,
+        "displayed": 0,
+        "base": 0
+      },
+      "scalar_speed": {
+        "value": 38,
+        "displayed": 38,
+        "base": 38
+      },
+      "stat_melee_attack": {
+        "value": 38,
+        "displayed": 38,
+        "base": 38
+      },
+      "stat_melee_defence": {
+        "value": 36,
+        "displayed": 36,
+        "base": 36
+      },
+      "stat_weapon_damage": {
+        "value": 34,
+        "displayed": 34,
+        "base": 34
+      },
+      "stat_charge_bonus": {
+        "value": 18,
+        "displayed": 18,
+        "base": 18
+      }
+    }
+  },
+  "formation": {
+    "date": "2026-10-07",
+    "game_version": "v9.0.1  Build 50381.4347557 (modded)",
+    "build": "7b29e15b9c0ba48f",
+    "run": "20261007T124711-roster-597",
+    "widths": [
+      {
+        "ordered_m": 80,
+        "front_m": 77.6,
+        "depth_m": 6.5,
+        "reform_s": 22.0,
+        "ended": "arrived",
+        "men": 160
+      },
+      {
+        "ordered_m": 60,
+        "front_m": 57.8,
+        "depth_m": 9.5,
+        "reform_s": 15.0,
+        "ended": "arrived",
+        "men": 160
+      },
+      {
+        "ordered_m": 40,
+        "front_m": 38.2,
+        "depth_m": 13.9,
+        "reform_s": 8.0,
+        "ended": "stopped",
+        "men": 160
+      },
+      {
+        "ordered_m": 30,
+        "front_m": 27.4,
+        "depth_m": 17.6,
+        "reform_s": 2.0,
+        "ended": "stopped",
+        "men": 160
+      },
+      {
+        "ordered_m": 20,
+        "front_m": 18.6,
+        "depth_m": 27.1,
+        "reform_s": 13.0,
+        "ended": "stopped",
+        "men": 160
+      },
+      {
+        "ordered_m": 15,
+        "front_m": 13.1,
+        "depth_m": 36.6,
+        "reform_s": 18.0,
+        "ended": "stopped",
+        "men": 160
+      },
+      {
+        "ordered_m": 10,
+        "front_m": 8.1,
+        "depth_m": 59.4,
+        "reform_s": 37.0,
+        "ended": "stopped",
+        "men": 160
+      },
+      {
+        "ordered_m": 8,
+        "front_m": 8.1,
+        "depth_m": 68.9,
+        "reform_s": 41.0,
+        "ended": "timeout",
+        "men": 160
+      }
+    ]
+  },
+  "ours": {
+    "fire": null,
+    "roles": [],
+    "notes": ""
+  },
+  "battle": {}
+}

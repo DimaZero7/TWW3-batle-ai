@@ -1601,6 +1601,29 @@ class TestSecondWave:
         moving_a, _ = self._spent(ARCHER, steps=30, orders=walk(-40.0))
         assert moving_a == 0
 
+    def test_throwing_stars_shoot_behind_on_the_move(self):
+        """missile.move_fire_own_arc (the probe starsmove, 07.10.2026): on the move a unit shoots within the wider of
+        move_fire_arc_deg and its own fire arc - the Night Runners' throwing stars (360) at a target behind them while
+        walking away; the militia (35 each side) still hold fire walking away; off: the stars hold fire too."""
+        stars = "wh2_main_skv_inf_night_runners_0"
+        near = ((SPEAR, -55, 0, 270),)
+
+        def walk(x):
+            def orders(st):
+                o = replay.hold(st)
+                o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = O.MOVE, x, 0.0, False
+                return o
+            return orders
+        away, st = self._spent(stars, enemies=near, steps=30, orders=walk(-300.0))
+        assert float(st.u["arc"][0, 0]) == 180 and bool(st.u["mv"][0, 0]) and away > 0
+        mil, _ = self._spent(MILITIA, enemies=near, steps=30, orders=walk(-300.0))
+        assert mil == 0
+        st = scenario.build([army([(stars, -100, 0, 90)], list(near))], P.with_cal("missile", move_fire_own_arc=0))
+        params = P.with_cal("missile", move_fire_own_arc=0)
+        for _ in range(30):
+            battle.step(st, walk(-300.0)(st), params)
+        assert float(st.u["ammo0"][0, 0] - st.u["a"][0, 0]) == 0
+
     def test_a_new_order_makes_a_shooter_aim_again(self):
         """missile.aim_reset_on_order: another kind or another attack target restarts the aim; the same order
         given again does not."""
@@ -2458,3 +2481,18 @@ class TestMoraleBatch:
         assert float(morale.terms(st.u, fight, P)["combat"][0, 0]) == 0
         fight["foe_lost"] = torch.full_like(st.u["men"], 0.12)
         assert float(morale.terms(st.u, fight, P)["combat"][0, 0]) == P.morale["winning_combat_significantly"]
+
+
+def test_measured_reloads_and_aim_of_the_third_wave():
+    """missile.reload_projectile_s (the probe newdist, 07.10.2026): the handgunners' bullet and the throwing stars take
+    their measured cycles (14.8 / 8.1 s against 13 / 7 in the database); the crossbowmen's bolt follows the arrows'
+    rule (13 s = its database reload, the arrows' cycle equals theirs); the militia's pistol keeps the category rule
+    (9 x 1.2). musket aims 2.0 s (missile.aim_s: militia, handgunners and stars first shot 1.5-2.5 s)."""
+    s = {k: P.static(k) for k in ("wh_main_emp_inf_handgunners", "wh2_main_skv_inf_night_runners_0",
+                                  "wh_main_emp_inf_crossbowmen", "wh_dlc04_emp_inf_free_company_militia_0")}
+    assert s["wh_main_emp_inf_handgunners"]["reload"] == pytest.approx(14.8)
+    assert s["wh2_main_skv_inf_night_runners_0"]["reload"] == pytest.approx(8.1)
+    assert s["wh_main_emp_inf_crossbowmen"]["reload"] == pytest.approx(13.0)
+    assert s["wh_dlc04_emp_inf_free_company_militia_0"]["reload"] == pytest.approx(10.8)
+    assert all(s[k]["aim_s"] == pytest.approx(2.0) for k in s if k != "wh_main_emp_inf_crossbowmen")
+    assert s["wh_main_emp_inf_crossbowmen"]["aim_s"] == pytest.approx(3.3)

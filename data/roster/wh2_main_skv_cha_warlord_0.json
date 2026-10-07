@@ -1,10 +1,10 @@
 {
   "key": "wh2_main_skv_cha_warlord_0",
   "card": {
-    "date": "2026-09-27",
+    "date": "2026-10-07",
     "game_version": "v9.0.1  Build 50381.4347557 (modded)",
-    "build": "ed6db434d8414818",
-    "run": "20260927T212729-roster-56",
+    "build": "7b29e15b9c0ba48f",
+    "run": "20261007T124711-roster-597",
     "profile": {
       "commanding": true,
       "fast_speed": 4,
