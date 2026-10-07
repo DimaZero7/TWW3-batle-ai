@@ -1782,6 +1782,556 @@
     "shot_type": "small_arm_default"
    },
    "card_check": "no card"
+  },
+  "wh_main_emp_inf_handgunners": {
+   "land_unit": "wh_main_emp_inf_handgunners",
+   "caste": "missile_infantry",
+   "category": "inf_ranged",
+   "class": "inf_mis",
+   "men": 90,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 3,
+   "entity": "wh_main_infantry_handgunners_blood_dismembers",
+   "spacing": {
+    "template": "wh_main_infantry_ranged",
+    "h": 1.4,
+    "v": 1.7,
+    "scatter": 0.5,
+    "chaotic": false
+   },
+   "hp_per_man": 69,
+   "hp_total": 6210,
+   "mass": 90.0,
+   "size": "small",
+   "height_m": 1.8,
+   "radius_m": 0.6,
+   "speed": {
+    "walk": 1.5,
+    "run": 3.3,
+    "charge": 4.0,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 25.0,
+    "acceleration": 3.5,
+    "deceleration": 5.0,
+    "turn_deg_s": 180.0
+   },
+   "melee": {
+    "attack": 16,
+    "defence": 17,
+    "charge_bonus": 4,
+    "weapon": "wh_main_emp_sword_short",
+    "damage": 21,
+    "ap_damage": 3,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0
+   },
+   "armour": 20,
+   "armour_material": "leather",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 50,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": true,
+   "can_brace": true,
+   "hiding_scalar": 1.0,
+   "attributes": [
+    "hide_forest"
+   ],
+   "abilities": [],
+   "multiplayer_cost": 600,
+   "combat_potential": {
+    "melee": 120.0,
+    "missile": 480.0
+   },
+   "missile": {
+    "weapon": "wh_main_emp_rifle",
+    "projectile": "wh_emp_rifle_bullet",
+    "ammo": 22,
+    "accuracy": 10,
+    "category": "musket",
+    "range_m": 145,
+    "min_range_m": 0,
+    "reload_s": 13.0,
+    "damage": 5,
+    "ap_damage": 17,
+    "projectile_number": 1,
+    "shots_per_volley": 1,
+    "trajectory": "low",
+    "direct": true,
+    "muzzle_velocity": 100.0,
+    "max_elevation": 88,
+    "calibration_distance_m": 100.0,
+    "calibration_area_m": 1.8,
+    "marksmanship": 10.0,
+    "fire_arc_deg": 30.0,
+    "explosion": null,
+    "penetration": "very_low",
+    "shot_type": "small_arm_default"
+   },
+   "card_check": "no card"
+  },
+  "wh_main_emp_inf_crossbowmen": {
+   "land_unit": "wh_main_emp_inf_crossbowmen",
+   "caste": "missile_infantry",
+   "category": "inf_ranged",
+   "class": "inf_mis",
+   "men": 90,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 4,
+   "entity": "wh_main_infantry_standard_light_blood_dismembers",
+   "spacing": {
+    "template": "wh_main_infantry_ranged",
+    "h": 1.4,
+    "v": 1.7,
+    "scatter": 0.5,
+    "chaotic": false
+   },
+   "hp_per_man": 69,
+   "hp_total": 6210,
+   "mass": 90.0,
+   "size": "small",
+   "height_m": 1.8,
+   "radius_m": 0.6,
+   "speed": {
+    "walk": 1.5,
+    "run": 3.3,
+    "charge": 4.0,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 25.0,
+    "acceleration": 3.5,
+    "deceleration": 5.0,
+    "turn_deg_s": 180.0
+   },
+   "melee": {
+    "attack": 14,
+    "defence": 17,
+    "charge_bonus": 4,
+    "weapon": "wh_main_emp_sword_short",
+    "damage": 21,
+    "ap_damage": 3,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0
+   },
+   "armour": 20,
+   "armour_material": "leather",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 50,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": true,
+   "can_brace": true,
+   "hiding_scalar": 1.0,
+   "attributes": [
+    "hide_forest"
+   ],
+   "abilities": [],
+   "multiplayer_cost": 475,
+   "combat_potential": {
+    "melee": 100.0,
+    "missile": 400.0
+   },
+   "missile": {
+    "weapon": "wh_main_emp_crossbow",
+    "projectile": "wh_emp_crossbow_bolt",
+    "ammo": 22,
+    "accuracy": 10,
+    "category": "arrow",
+    "range_m": 160,
+    "min_range_m": 0,
+    "reload_s": 13.0,
+    "damage": 18,
+    "ap_damage": 6,
+    "projectile_number": 1,
+    "shots_per_volley": 1,
+    "trajectory": "dual_low_fixed",
+    "direct": false,
+    "muzzle_velocity": 45.0,
+    "max_elevation": 88,
+    "calibration_distance_m": 120.0,
+    "calibration_area_m": 5.1,
+    "marksmanship": 10.0,
+    "fire_arc_deg": 30.0,
+    "explosion": null,
+    "penetration": "very_low",
+    "shot_type": "small_arm_default"
+   },
+   "card_check": "no card"
+  },
+  "wh2_main_skv_inf_clanrats_0": {
+   "land_unit": "wh2_main_skv_inf_clanrats_0",
+   "caste": "melee_infantry",
+   "category": "inf_melee",
+   "class": "inf_mel",
+   "men": 160,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 8,
+   "entity": "wh2_main_skv_infantry",
+   "spacing": {
+    "template": "wh_main_infantry_rabble",
+    "h": 1.6,
+    "v": 1.7,
+    "scatter": 0.7,
+    "chaotic": false
+   },
+   "hp_per_man": 60,
+   "hp_total": 9600,
+   "mass": 100.0,
+   "size": "small",
+   "height_m": 1.5,
+   "radius_m": 0.65,
+   "speed": {
+    "walk": 1.5,
+    "run": 4.2,
+    "charge": 4.8,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 25.0,
+    "acceleration": 2.0,
+    "deceleration": 4.0,
+    "turn_deg_s": 120.0
+   },
+   "melee": {
+    "attack": 24,
+    "defence": 18,
+    "charge_bonus": 10,
+    "weapon": "wh2_main_skv_sword",
+    "damage": 20,
+    "ap_damage": 6,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0
+   },
+   "armour": 25,
+   "armour_material": "leather",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 45,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": true,
+   "hiding_scalar": 0.8,
+   "attributes": [
+    "hide_forest"
+   ],
+   "abilities": [
+    "wh2_main_unit_passive_scurry_away",
+    "wh2_main_unit_passive_strength_in_numbers"
+   ],
+   "multiplayer_cost": 300,
+   "combat_potential": {
+    "melee": 300.0,
+    "missile": 0.0
+   },
+   "missile": null,
+   "card_check": "no card"
+  },
+  "wh2_main_skv_inf_clanrat_spearmen_1": {
+   "land_unit": "wh2_main_skv_inf_clanrat_spearmen_1",
+   "caste": "melee_infantry",
+   "category": "inf_melee",
+   "class": "inf_mel",
+   "men": 160,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 8,
+   "entity": "wh2_main_skv_infantry",
+   "spacing": {
+    "template": "wh_main_infantry_rabble",
+    "h": 1.6,
+    "v": 1.7,
+    "scatter": 0.7,
+    "chaotic": false
+   },
+   "hp_per_man": 60,
+   "hp_total": 9600,
+   "mass": 100.0,
+   "size": "small",
+   "height_m": 1.5,
+   "radius_m": 0.65,
+   "speed": {
+    "walk": 1.5,
+    "run": 4.2,
+    "charge": 4.8,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 25.0,
+    "acceleration": 2.0,
+    "deceleration": 4.0,
+    "turn_deg_s": 120.0
+   },
+   "melee": {
+    "attack": 18,
+    "defence": 28,
+    "charge_bonus": 6,
+    "weapon": "wh2_main_skv_spear",
+    "damage": 18,
+    "ap_damage": 5,
+    "bonus_v_large": 9,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0
+   },
+   "armour": 25,
+   "armour_material": "leather",
+   "shield": {
+    "key": "wh_missile_block_35_wood",
+    "missile_block_chance": 35
+   },
+   "leadership": 45,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": true,
+   "hiding_scalar": 0.8,
+   "attributes": [
+    "charge_defense_vs_large",
+    "charge_reflection",
+    "hide_forest"
+   ],
+   "abilities": [
+    "wh2_main_unit_passive_scurry_away",
+    "wh2_main_unit_passive_strength_in_numbers"
+   ],
+   "multiplayer_cost": 375,
+   "combat_potential": {
+    "melee": 375.0,
+    "missile": 0.0
+   },
+   "missile": null,
+   "card_check": "no card"
+  },
+  "wh2_main_skv_inf_stormvermin_1": {
+   "land_unit": "wh2_main_skv_inf_stormvermin_1",
+   "caste": "melee_infantry",
+   "category": "inf_melee",
+   "class": "inf_mel",
+   "men": 160,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 8,
+   "entity": "wh2_main_skv_infantry_heavy",
+   "spacing": {
+    "template": "wh2_main_infantry_medium_rabble",
+    "h": 1.8,
+    "v": 1.9,
+    "scatter": 0.4,
+    "chaotic": false
+   },
+   "hp_per_man": 62,
+   "hp_total": 9920,
+   "mass": 150.0,
+   "size": "small",
+   "height_m": 1.6,
+   "radius_m": 0.7,
+   "speed": {
+    "walk": 1.5,
+    "run": 3.8,
+    "charge": 4.5,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 25.0,
+    "acceleration": 2.0,
+    "deceleration": 5.0,
+    "turn_deg_s": 120.0
+   },
+   "melee": {
+    "attack": 38,
+    "defence": 36,
+    "charge_bonus": 18,
+    "weapon": "wh2_main_skv_sword_stormvermin",
+    "damage": 25,
+    "ap_damage": 9,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.6,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0
+   },
+   "armour": 90,
+   "armour_material": "heavy_metal",
+   "shield": {
+    "key": "wh_missile_block_35_wood",
+    "missile_block_chance": 35
+   },
+   "leadership": 70,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": true,
+   "hiding_scalar": 1.0,
+   "attributes": [
+    "hide_forest"
+   ],
+   "abilities": [
+    "wh2_main_unit_passive_scurry_away",
+    "wh2_main_unit_passive_strength_in_numbers"
+   ],
+   "multiplayer_cost": 850,
+   "combat_potential": {
+    "melee": 950.0,
+    "missile": 0.0
+   },
+   "missile": null,
+   "card_check": "no card"
+  },
+  "wh2_main_skv_inf_night_runners_0": {
+   "land_unit": "wh2_main_skv_inf_night_runners_0",
+   "caste": "missile_infantry",
+   "category": "inf_ranged",
+   "class": "inf_mis",
+   "men": 120,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 5,
+   "entity": "wh2_main_skv_infantry_fast_360",
+   "spacing": {
+    "template": "wh2_main_inf_chaotic_formation",
+    "h": 1.9,
+    "v": 1.9,
+    "scatter": 2.8,
+    "chaotic": true
+   },
+   "hp_per_man": 56,
+   "hp_total": 6720,
+   "mass": 90.0,
+   "size": "small",
+   "height_m": 1.5,
+   "radius_m": 0.6,
+   "speed": {
+    "walk": 1.5,
+    "run": 5.4,
+    "charge": 6.0,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 25.0,
+    "acceleration": 5.0,
+    "deceleration": 6.0,
+    "turn_deg_s": 120.0
+   },
+   "melee": {
+    "attack": 24,
+    "defence": 14,
+    "charge_bonus": 12,
+    "weapon": "wh2_main_skv_sword",
+    "damage": 20,
+    "ap_damage": 6,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0
+   },
+   "armour": 10,
+   "armour_material": "body",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 48,
+   "damage_resist": {
+    "all": 0,
+    "physical": 20,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": true,
+   "can_brace": true,
+   "hiding_scalar": 0.9,
+   "attributes": [
+    "guerrilla_deploy",
+    "hide_forest",
+    "mounted_fire_move"
+   ],
+   "abilities": [
+    "wh2_main_unit_passive_scurry_away",
+    "wh2_main_unit_passive_strength_in_numbers"
+   ],
+   "multiplayer_cost": 450,
+   "combat_potential": {
+    "melee": 150.0,
+    "missile": 350.0
+   },
+   "missile": {
+    "weapon": "wh2_main_skv_throwing_stars",
+    "projectile": "wh2_main_skv_throwing_star",
+    "ammo": 10,
+    "accuracy": 10,
+    "category": "musket",
+    "range_m": 70,
+    "min_range_m": 0,
+    "reload_s": 7.0,
+    "damage": 10,
+    "ap_damage": 2,
+    "projectile_number": 1,
+    "shots_per_volley": 1,
+    "trajectory": "low",
+    "direct": true,
+    "muzzle_velocity": 48.0,
+    "max_elevation": 88,
+    "calibration_distance_m": 40.0,
+    "calibration_area_m": 1.8,
+    "marksmanship": 10.0,
+    "fire_arc_deg": 180.0,
+    "explosion": null,
+    "penetration": "very_low",
+    "shot_type": "small_arm_default"
+   },
+   "card_check": "no card"
   }
  }
 }

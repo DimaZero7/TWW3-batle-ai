@@ -247,6 +247,51 @@ The bridge needs nothing for them: nothing is orderable (their abilities are inn
    bridge's `ActiveEffectList` and his speed and kills a second: does the "wounded" effect come on, and
    what does it do.
 
+## Handgunners, crossbowmen, clanrats, stormvermin, throwing stars
+
+The third wave (07.10.2026): long-range shooters for the Empire, line units and the second Night Runners for the
+Skaven. Passports from the database; no cards from battle yet (lists `config/roster/capture_wave3_emp.json` and
+`_skv.json`, captured by `build/steps/newunits_probe.ps1`). Put off: the Gutter Runners (Stalk - hidden on the move,
+and the simulator has no sight) and the Pistoliers (cavalry: none in the simulator; the passport builder takes
+health, mass and speed from the rider, while a cavalry unit's are its horse's). The Russian game's "Пистольеры" are
+the handgunners, not the cavalry.
+
+| | Handgunners | Crossbowmen | Clanrats | Clanrat spearmen with shields | Stormvermin (sword and shield) | Night Runners (stars) |
+|---|---:|---:|---:|---:|---:|---:|
+| Key | `wh_main_emp_inf_handgunners` | `wh_main_emp_inf_crossbowmen` | `wh2_main_skv_inf_clanrats_0` | `wh2_main_skv_inf_clanrat_spearmen_1` | `wh2_main_skv_inf_stormvermin_1` | `wh2_main_skv_inf_night_runners_0` |
+| Men; health per man / unit | 90; 69 / 6210 | 90; 69 / 6210 | 160; 60 / 9600 | 160; 60 / 9600 | 160; 62 / 9920 | 120; 56 / 6720 |
+| Attack / defence; charge | 16 / 17; 4 | 14 / 17; 4 | 24 / 18; 10 | 18 / 28; 6 | 38 / 36; 18 | 24 / 14; 12 |
+| Damage: base + armour-piercing | 21 + 3 | 21 + 3 | 20 + 6 | 18 + 5, vs large +9 | 25 + 9 | 20 + 6 |
+| Armour; shield | 20; none | 20; none | 25; none | 25; 35 % | 90; 35 % | 10; none |
+| Leadership; mass; run | 50; 90; 3.3 | 50; 90; 3.3 | 45; 100; 4.2 | 45; 100; 4.2 | 70; 150; 3.8 | 48; 90; 5.4 |
+| Attributes | hide_forest | hide_forest | hide_forest | charge_reflection, charge_defense_vs_large, hide_forest | hide_forest | guerrilla_deploy, mounted_fire_move, hide_forest; physical resistance 20 % |
+| Shooting | bullet: **flat** (`low`), **145 m**, 22, **5 + 17**, 13 s, 1.8 m² at 100 m, 100 m/s, arc ±30°, standing only | bolt: arcing, **160 m**, 22, 18 + 6, 13 s, 5.1 m² at 120 m | — | — | — | stars (`musket`): flat, 70 m, 10, 10 + 2, 7 s, 1.8 m² at 40 m, 48 m/s, **a 360° arc, on the move** |
+| Cost (multiplayer) | 600 | 475 | 300 | 375 | 850 | 450 |
+
+The stormvermin with halberds (`stormvermin_0`, 950) - the passport from the lord swarm probe, now in the pool too.
+Every Skaven unit of the wave has Strength in Numbers and Scurry Away!.
+
+### What each feature does and where it comes from
+
+| Unit | Feature | What it does | Source | Simulator | Network |
+|---|---|---|---|---|---|
+| Handgunners | Armour-piercing bullet 5 + 17 | 17 of 22 damage go through armour: against stormvermin (90) and the Warlord | DB `projectiles` | the blow rule (armour roll, `melee.per_hit`) | passport |
+| Handgunners | Flat fire at 145 m | needs a clear line past friends; range per rank | DB `trajectory` `low` | as the militia's pistols (`missile.clear_shot`, `rank_share`); measured at 90 m only - probes `newdist`, `hglof` | passport `direct` |
+| Handgunners, stars | Reload 13 / 7 s (`musket`) | — | DB | **an estimate**: no `musket` in `reload_s`, the database's × 1.2 (`reload_scale_other`, from the pistols): 15.6 / 8.4 s - probe `newdist` | passport |
+| Crossbowmen | A bolt at 160 m, reload 13 s | the longest of ours | DB | as the archers' arrows; the arrow cycle was measured at a 10 s base (= the base), 13 s by the ratio - probe `newdist` | passport |
+| Night Runners (stars) | A 360° fire arc and fire whilst moving | shoot all round, on the move too | DB `battle_entities.fire_arc_close` 360 (`..._fast_360`), attribute `mounted_fire_move` | standing - the passport's arc; on the move - the ±90° fit from the militia (`missile.move_fire_arc_deg`): no fire behind - probe `starsmove` | **input `fire_arc`** ([model](model.md#fire-arc-both-sides-the-tokens-last-input)) |
+| Night Runners (stars) | Vanguard, skirmish, resistance 20 % | as the slingers | DB | as theirs | passport |
+| Clanrat spearmen with shields | Shield 35 %, charge reflection | as the spearmen without a shield + a shield | DB | the shield and bracing rules | passport |
+| Stormvermin (sword and shield) | Attack 38, armour 90, shield 35 % | the Skaven's strongest line infantry | DB | from the numbers | passport |
+
+The bridge needs nothing for them: nothing to order (their abilities are innate).
+
+### Recordings needed
+
+`build/steps/newunits_probe.ps1` ([plan](../game/units/missile-probe.md#the-third-waves-probes)): 2 card captures
+and 6 missile-probe battles - `newdist` (3), `starsmove`, `meleefire` (the fire-position drill), `hglof` (the
+handgunners' fire past friends).
+
 ## Innate effects
 
 Every attribute and every passive or game-fired ability of a unit is an **innate effect**, one
@@ -276,7 +321,7 @@ The game's condition flags and what the simulator checks for them (`_fields.pred
 | `out_of_melee`, `engaged_in_melee` | out_of_melee, in_melee | in melee with a standing enemy |
 | `losing_melee_combat` | losing_melee | in melee and HP taken ≥ 1.5 × dealt recently (the morale rule's ratio; ours) |
 
-The 14 effects of our 17 units:
+The 14 effects of our 23 units:
 
 | Effect | Kind | What it does | When | Owners | Simulator |
 |---|---|---|---|---|---|
@@ -284,10 +329,10 @@ The 14 effects of our 17 units:
 | Expendable (`expendable`) | attribute | its rout scares only other expendables | always | slave spearmen, slingers, skavenslaves | modelled: not counted among routing friends |
 | Encourage (`encourages`) | attribute | +4 leadership to friends within 70 m, to 0 at 105 m | always | the two lords | modelled: the lord's aura |
 | Charge Reflection (`charge_reflection`) | attribute | braced, meets a frontal charge as a charge | always | spearmen, halberdiers, clanrat spearmen, stormvermin | modelled (bracing) |
-| Fire Whilst Moving (`mounted_fire_move`) | attribute | shoots on the move | always | militia | modelled |
+| Fire Whilst Moving (`mounted_fire_move`) | attribute | shoots on the move | always | militia, Night Runners (stars) | modelled |
 | Charge Defence vs. Large (`charge_defense_vs_large`) | attribute | braced, cancels a large charger's bonus | always | the spear units | schema only: no large units in our pools |
-| Vanguard (`guerrilla_deploy`) | attribute | deploys ahead | always | militia, Night Runners | schema only: placements are the generator's |
-| Hide (forest) (`hide_forest`) | attribute | hidden in woods | always | all 17 units | schema only: no woods, no hiding |
+| Vanguard (`guerrilla_deploy`) | attribute | deploys ahead | always | militia, Night Runners (both) | schema only: placements are the generator's |
+| Hide (forest) (`hide_forest`) | attribute | hidden in woods | always | all 23 units | schema only: no woods, no hiding |
 | Strength in Numbers | passive | +6 leadership, +8 melee defence, speed ×0.9 | health ≥ 50 % of the start | Skaven infantry (7) | modelled |
 | Scurry Away! | passive | speed ×1.1 | wavering or routing | Skaven infantry and the Warlord (8) | modelled |
 | Single Entity | passive | speed ×0.9, melee damage and AP ×0.8 | health < 25 % (its recharge context `health_below_25%`) | the two lords | left out (`sim.json` effects.off): the recordings show no ×0.9 speed below 25 % (lords running out of melee: 0.84–0.85 of the run in every health band); the reading of the context is ours (the cards, at full health, show the full damage) |

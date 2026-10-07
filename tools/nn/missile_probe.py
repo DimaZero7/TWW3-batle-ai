@@ -27,7 +27,22 @@ Plans (each battle 4-5 lanes):
   moving2  P3: skavenslaves running at the archers (160 -> 40 m, twice), running away (50 -> 175 m, twice), a
            standing twin at ~120 m: hits per volley at the same distance (1 battle);
   lof      P4 the line of fire past friends: militia, Empire spearmen 40 m in front of them offset 0 / 15 / 22.5 m
-           sideways, skavenslaves ~70 m away; and no friend (1 battle): who fires, the friends' HP lost.
+           sideways, skavenslaves ~70 m away; and no friend (1 battle): who fires, the friends' HP lost;
+  newdist  the third wave's shooters standing, one distance a battle (3 battles): handgunners on skavenslaves and on
+           stormvermin with halberds (armour 90: the armour-piercing shot) at 50 / 100 / 143 m, crossbowmen on
+           skavenslaves at 50 / 110 / 158, Night Runners with throwing stars on flagellants at 25 / 50 / 68; the third
+           battle also handgunners on skavenslaves at 150 m centre to centre (past the range: the per-rank rule):
+           reload (13 / 13 / 7 s in the database), hits per projectile by distance, the damage through armour;
+  starsmove  Night Runners with throwing stars (fire arc 360, fire whilst moving) walking away from flagellants that
+           walk after them, walking and running 100 m across standing flagellants 50 m ahead, standing with the
+           target 90 and 180 deg off their facing (1 battle): do they shoot behind and aside, on the move and standing;
+  hglof    the line of fire past friends with handgunners (the P4 rule's data at another range and gun): Empire
+           spearmen 40 m in front offset 0 / 15 / 22.5 m sideways, 15 m in front offset 0, and no friend; skavenslaves
+           80 m away (1 battle): who fires, the friends' HP lost;
+  meleefire  shooting into a melee (the fire-position drill, build/drill_fire/design.md): handgunners at will on
+           clanrat spearmen that Empire spearmen walk into melee with - from behind our men, at 45 deg, along the
+           contact (90 deg) - and the same melee without fire (control) (1 battle): the fire rate, the target's and
+           our men's HP lost beyond the control's.
 
     python -m tools.nn.missile_probe plan [--plan dist]
     python -m tools.build missile-probe --mprobe-plan dist --mprobe-battle 1   # one battle's build
@@ -69,6 +84,10 @@ UNITS = {
     "clanrat": ("wh2_main_skv_inf_clanrats_1", 160, SKV),
     "flag": ("wh_dlc04_emp_inf_flagellants_0", 120, EMP),
     "spear": ("wh_main_emp_inf_spearmen_0", 120, EMP),
+    "hg": ("wh_main_emp_inf_handgunners", 90, EMP),
+    "xb": ("wh_main_emp_inf_crossbowmen", 90, EMP),
+    "stars": ("wh2_main_skv_inf_night_runners_0", 120, SKV),
+    "storm": ("wh2_main_skv_inf_stormvermin_0", 160, SKV),
     "general": ("wh_main_emp_cha_general_0", 1, EMP),
     "warlord": ("wh2_main_skv_cha_warlord_0", 1, SKV),
 }
@@ -79,10 +98,12 @@ LANE_DX = 240
 Z0 = -80               # the shooters' line
 SETTLE_MS = 4000
 TICK_MS = 500
-PLANS = ("dist", "arc", "range", "targets", "shield", "moving", "rank", "thin", "pistol", "moving2", "lof")
+PLANS = ("dist", "arc", "range", "targets", "shield", "moving", "rank", "thin", "pistol", "moving2", "lof",
+         "newdist", "starsmove", "meleefire", "hglof")
 DIST = {"archers": (40, 80, 120, 128), "militia": (30, 50, 70, 88), "slingers": (40, 80, 110, 118),
         "nr": (40, 80, 120, 138)}
 TARGET_OF = {"archers": "slave", "militia": "slave", "slingers": "flag", "nr": "flag"}
+NEWDIST = {"hg": (50, 100, 143), "xb": (50, 110, 158), "stars": (25, 50, 68)}     # inside 145 / 160 / 70 m
 
 
 def lane(shooter, target, d, mode="fire", target_mode="stand", s_width=30, t_width=30, **extra):
@@ -137,6 +158,33 @@ def battles(plan):
         away = dict(target_mode="move", t_rot=180, move_fwd=175, move_lat=0, move_run=True)
         return [[lane("archers", "slave", 150, **at), lane("archers", "slave", 40, **away), lane("archers", "slave", 110),
                  lane("archers", "slave", 150, **at), lane("archers", "slave", 40, **away)]]
+    if plan == "newdist":
+        out = []
+        for k in range(3):
+            b = [lane("hg", "slave", NEWDIST["hg"][k]), lane("hg", "storm", NEWDIST["hg"][k]),
+                 lane("xb", "slave", NEWDIST["xb"][k]), lane("stars", "flag", NEWDIST["stars"][k])]
+            if k == 2:
+                b.append(lane("hg", "slave", 150))
+            out.append(rotate(b, k))
+        return out
+    if plan == "starsmove":
+        return [[lane("stars", "flag", 40, target_mode="move", move_fwd=-110, move_lat=0, move_run=False,
+                      s_move_fwd=-150, s_move_lat=0),
+                 # across (the left one to the left, the right one to the right: 140 m from the next lanes)
+                 lane("stars", "flag", 50, s_move_fwd=0, s_move_lat=-100),
+                 lane("stars", "flag", 50, s_move_fwd=0, s_move_lat=100, s_move_run=True),
+                 lane("stars", "flag", 50, t_angle=90),
+                 lane("stars", "flag", 50, t_angle=180)]]
+    if plan == "meleefire":
+        fr = dict(friend="spear", friend_engage=25, friend_width=30)
+        return [[lane("hg", "cspear", 80, **fr), lane("hg", "cspear", 80, t_rot=45, **fr),
+                 lane("hg", "cspear", 80, t_rot=90, **fr), lane("hg", "cspear", 80, mode="hold", **fr)]]
+    if plan == "hglof":
+        fr = dict(friend="spear", friend_width=30)
+        return [[lane("hg", "slave", 80, friend_fwd=40, friend_lat=0, **fr),
+                 lane("hg", "slave", 80, friend_fwd=40, friend_lat=15, **fr),
+                 lane("hg", "slave", 80, friend_fwd=40, friend_lat=22.5, **fr),
+                 lane("hg", "slave", 80, friend_fwd=15, friend_lat=0, **fr), lane("hg", "slave", 80)]]
     if plan == "lof":
         fr = dict(friend="spear", friend_fwd=40, friend_width=30)
         return [[lane("militia", "slave", 60, friend_lat=0, **fr), lane("militia", "slave", 60, friend_lat=15, **fr),
@@ -289,7 +337,14 @@ def measure(lane, per_hit=None):
     tx, tz = series(s, "tg", "x"), series(s, "tg", "z")
     vs = volleys(t, ammo, smen)
     out["volleys"] = len(vs)
+    # our friend's HP lost (the line of fire past friends, fire into a melee: minus the control lane's)
+    if any(len(x) > 4 and x[4] for x in s):
+        fhp = series(s, "f", "hp")
+        okf = np.isfinite(fhp)
+        out["friend_hp_lost"] = float(fhp[okf][0] - fhp[okf][-1]) if okf.sum() > 1 else None
     if not vs:
+        ok0 = np.isfinite(hp)          # a control lane (no fire): the target's HP lost all the same
+        out["hp_lost"] = float(hp[ok0][0] - hp[ok0][-1]) if ok0.sum() > 1 else None
         return out
     t1 = vs[0][0]
     k1 = int(np.searchsorted(t, t1))
@@ -368,8 +423,18 @@ def measure(lane, per_hit=None):
             lost_b = float(hp[j0] - hp[j1]) if np.isfinite(hp[j0]) and np.isfinite(hp[j1]) else None
             bands.append(None if (shots_b < 50 or lost_b is None) else round(lost_b / shots_b / per_hit, 3))
         out["hits_by_men"] = bands
+    # a moving shooter: the target's angle off its facing (deg, + right) and whether it moved, at each volley
+    if spec.get("s_move_fwd") or spec.get("s_move_lat"):
+        smv = series(s, "s", "mv")
+        rel, mov = [], []
+        for v in vs:
+            k = min(len(t) - 1, int(np.searchsorted(t, v[0])))
+            ang = math.degrees(math.atan2(tx[k] - sx[k], tz[k] - sz[k]))
+            rel.append(round(float((ang - sb[k] + 180) % 360 - 180), 0))
+            mov.append(bool(smv[k] > 0.5) if np.isfinite(smv[k]) else None)
+        out["rel_at_volleys"], out["moving_at_volleys"] = rel, mov
     # the target's motion while shot (a moving lane): mean speed and the centre distance at the volleys
-    if spec["target_mode"] == "move":
+    if spec["target_mode"] == "move" or spec.get("s_move_fwd") or spec.get("s_move_lat"):
         dist = np.hypot(sx - tx, sz - tz)
         out["d_at_volleys"] = [round(float(dist[min(len(t) - 1, int(np.searchsorted(t, v[0])))]), 0) for v in vs]
     out["end"] = (lane.get("end") or {}).get("why")
@@ -396,8 +461,12 @@ def cell(spec):
         name += f" rank{spec['s_rank']}"
     if spec.get("reform_men"):
         name += f" reform{spec['reform_men']}"
-    if spec.get("friend"):
+    if spec.get("friend") and spec.get("friend_engage"):
+        name += f" melee({spec['friend_engage']})"
+    elif spec.get("friend"):
         name += f" friend({spec.get('friend_fwd')},{spec.get('friend_lat')})"
+    if spec.get("s_move_fwd") or spec.get("s_move_lat"):
+        name += f" sgo({spec.get('s_move_fwd', 0)},{spec.get('s_move_lat', 0)}){' run' if spec.get('s_move_run') else ''}"
     if spec["mode"] != "fire":
         name += f" {spec['mode']}"
     return name
@@ -463,6 +532,9 @@ def sim_lanes(lanes, params=None, device="cpu", copies=4, jitter_m=0.5, seed=0):
     st.u["leadership"] = st.u["leadership"] + 1e4
     st.u["morale"] = st.u["morale"] + 1e4
     specs = [ln["spec"] for ln in meta]
+    for b, sp in enumerate(specs):             # a control lane's shooter never shoots (no range; it keeps its ammo)
+        if sp["mode"] == "hold":
+            st.u["range"][b, slot["s"][b]] = 0
     # a moving target's recorded path (t, x, z, b), a stepping target's schedule
     paths = []
     for ln in meta:
@@ -486,6 +558,16 @@ def sim_lanes(lanes, params=None, device="cpu", copies=4, jitter_m=0.5, seed=0):
                 fired[b] = True
             if sp["mode"] == "attack":
                 o.kind[b, S], o.target[b, S] = O.ATTACK, T
+            if sp.get("s_move_fwd") or sp.get("s_move_lat"):    # the shooter's own move (its starting frame)
+                r = math.radians(sp.get("s_b", 0.0))
+                fwd, lat = sp.get("s_move_fwd", 0.0), sp.get("s_move_lat", 0.0)
+                o.kind[b, S] = O.MOVE
+                o.x[b, S] = sp["x"] + math.sin(r) * fwd + math.cos(r) * lat
+                o.z[b, S] = sp["z"] + math.cos(r) * fwd - math.sin(r) * lat
+                o.run[b, S] = bool(sp.get("s_move_run"))
+            F = int(slot["f"][b])
+            if sp.get("friend_engage") and F >= 0:              # our men walk into melee with the target
+                o.kind[b, F], o.target[b, F], o.run[b, F] = O.ATTACK, T, False
             if sp["target_mode"] == "step" and not fired[b]:
                 k = int(t // sp["step_s"])
                 d = sp["start_d"] - sp["step_m"] * k
@@ -532,7 +614,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=4, jitter_m=0.5, seed=0):
 # ---------------------------------------------------------------- tables
 
 KEYS = ("first_s", "first_d", "first_share", "turn_deg", "interval_s", "reload_s", "reload_s_full", "volley_share", "shots", "hp_per_shot",
-        "hp_per_shot_full", "hits_per_shot", "hits_per_shot_full")
+        "hp_per_shot_full", "hits_per_shot", "hits_per_shot_full", "hp_lost", "friend_hp_lost")
 
 
 def summary(rows):
@@ -550,7 +632,7 @@ def summary(rows):
         if bands:
             row["hits_by_men"] = [None if not [b[i] for b in bands if b[i] is not None] else
                                   round(float(np.mean([b[i] for b in bands if b[i] is not None])), 3) for i in range(4)]
-        for k in ("d_at_volleys",):
+        for k in ("d_at_volleys", "rel_at_volleys", "moving_at_volleys"):
             if rs and rs[0].get(k):
                 row[k] = rs[0][k]
         out[name] = row

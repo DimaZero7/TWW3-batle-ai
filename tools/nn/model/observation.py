@@ -33,13 +33,16 @@ The rule: the AI sees only what a human player sees.
   seconds active left (the ability bar). Enemies: owned, and active now only while the unit is seen
   (the game draws the ability's effect on the unit and lists it among the unit's active effects;
   its timers are not shown). Obs.abil_ok: own abilities the network may use now.
-* Volley readiness (VOLLEY, own units only, the token's last column, 03.10.2026): seconds since the
+* Volley readiness (VOLLEY, own units only, the column before ARC, 03.10.2026): seconds since the
   unit's projectiles left (`a`) last fell between two observations (its last volley) / its passport
   reload_s, clipped to 0..1; 1 before its first shot; 0 for units without missiles. Seen at the
   decisions only (Memory.prev_ammo, volley_t), so the simulator (its ammo counter at the network's 1 s
   cadence) and the companion (the game's ammo_left() each second) compute it the same way, from the
   same code. The simulator's men load fully only after its measured reload (missile.py: ~1.1-1.3x the
   passport's), so 1 means "the passport's reload has passed", not "every man is loaded".
+* Fire arc (ARC, both sides, the token's last column, 07.10.2026): the passport's fire arc each side / 180
+  (passport.fire_arc): 1.0 for the Night Runners' throwing stars, which shoot all round and on the move; 0.17 for
+  archers and slings. It stands at the token's end, after VOLLEY, so older checkpoints load with zero weights for it.
 * Innate effects (tools/nn/model/effects.py, the columns before VOLLEY): per effect of
   config/nn/effects.json, owned (both sides: the unit's card) and on now (own units; enemies while
   seen: the game lists a seen unit's active effects). On comes from the simulator's `fx_on` or, in a
@@ -98,8 +101,12 @@ FLAGS = ("is_own", "visible", "seen", "age", "rank")
 # them, encoder.py): per effect (owned, on), tools/nn/model/effects.py. Then VOLLEY (03.10.2026, own units
 # only; older checkpoints: zero weights): seconds since the last volley / passport reload (module doc).
 VOLLEY = ("volley_ready",)
+# Then ARC (07.10.2026, both sides: the unit's card; older checkpoints: zero weights): the passport's fire arc each
+# side / 180 (passport.fire_arc) - appended at the token's end, not among the passport's features, so the columns
+# before it keep their places.
+ARC = ("fire_arc",)
 NAMES = (tuple(n for n, _ in DYNAMIC) + FLAGS + tuple(f"passport_{i}" for i in range(passport.SIZE)) + effects.NAMES
-         + VOLLEY)
+         + VOLLEY + ARC)
 INDEX = {n: i for i, n in enumerate(NAMES)}
 TOKEN = len(NAMES)
 OWN_ONLY = tuple(INDEX[n] for n, who in DYNAMIC if who == "own") + tuple(INDEX[n] for n in VOLLEY)
@@ -144,6 +151,7 @@ class Setup:
         self.men0 = np.stack([passport.men(k) for k in self.keys])            # [B, N]
         self.ammo0 = np.stack([passport.ammo(k) for k in self.keys])          # [B, N]
         self.reload = np.stack([passport.reload(k) for k in self.keys])       # [B, N] s (VOLLEY; 0: no missile)
+        self.arc = np.stack([passport.fire_arc(k) for k in self.keys])        # [B, N] fire arc / 180 (ARC)
         ab = [abilities.slots(k) for k in self.keys]
         self.abil = np.stack([a[0] for a in ab])                               # [B, N, SLOTS, STATIC]
         self.abil_owned = np.stack([a[1] for a in ab])                         # [B, N, SLOTS]
@@ -167,7 +175,7 @@ class Setup:
                                        present=t(self.present), attacker=t(self.attacker), lord=t(self.lord),
                                        abil=t(self.abil), abil_owned=t(self.abil_owned),
                                        abil_use=t(self.abil_use), fx_owned=t(self.fx_owned), cost=t(self.cost),
-                                       reload=t(self.reload))
+                                       reload=t(self.reload), arc=t(self.arc))
         return self._cache[key]
 
     def character(self, side):
@@ -196,6 +204,7 @@ class _Arrays:
     fx_owned: object = None    # [B, N, E] innate effects owned (Setup.fx_owned); None: none known
     cost: object = None        # [B, N] multiplayer cost (Setup.cost); None: unknown, every unit counts 1
     reload: object = None      # [B, N] passport reload_s (Setup.reload, VOLLEY); None: unknown, the input 0
+    arc: object = None         # [B, N] passport fire arc / 180 (Setup.arc, ARC); None: unknown, the input 0
 
 
 @dataclass
@@ -365,7 +374,9 @@ def observe(state, setup, side, memory=None, full=False):
         fx_own = np.zeros(xs.shape + (E,), np.float32) if m is np else xs.new_zeros(xs.shape + (E,))
     fx = effects.features(m, state, fx_own, S.present if full else (own | sees))
     late = m.stack([m.where(see_all & S.present, cols[n], cols[n] * 0) for n in VOLLEY], -1)
-    tokens = _cat(m, [dyn, _f(m, S.passport), fx, late], -1) * _f(m, S.present)[..., None]
+    arc = getattr(S, "arc", None)
+    arc = xs * 0 if arc is None else _f(m, arc)
+    tokens = _cat(m, [dyn, _f(m, S.passport), fx, late, arc[..., None]], -1) * _f(m, S.present)[..., None]
 
     attend = S.present & ~dead & ~(own & ~alive)
     ctrl = own & alive & (ms < 6)

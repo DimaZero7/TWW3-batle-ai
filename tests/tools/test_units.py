@@ -79,8 +79,9 @@ def test_passports_hold_the_v1_units_and_equal_their_cards():
             checked += 1
     # The v1 units, the shielded spearmen and the swordsmen (02.10.2026) have cards from battle; the
     # probe's halberds and stormvermin (lord swarm, 01.10.2026) do not, nor (yet: list
-    # config/roster/capture_emp_wave2.json) the flagellants, greatswords and militia (02.10.2026).
-    assert checked >= 9 and len(units.UNITS) == 17
+    # config/roster/capture_emp_wave2.json) the flagellants, greatswords and militia (02.10.2026), nor the
+    # third wave (07.10.2026).
+    assert checked >= 9 and len(units.UNITS) == 23
 
 
 def test_v1_spears_have_no_shield_and_missile_units_have_missiles():
@@ -92,7 +93,9 @@ def test_v1_spears_have_no_shield_and_missile_units_have_missiles():
     assert u["wh_main_emp_inf_spearmen_1"]["multiplayer_cost"] > u["wh_main_emp_inf_spearmen_0"]["multiplayer_cost"]
     shooters = ("wh2_dlc13_emp_inf_archers_0", "wh2_main_skv_inf_skavenslave_slingers_0",
                 "wh2_main_skv_inf_night_runners_1",
-                "wh_dlc04_emp_inf_free_company_militia_0")
+                "wh_dlc04_emp_inf_free_company_militia_0",
+                # the third wave (07.10.2026)
+                "wh_main_emp_inf_handgunners", "wh_main_emp_inf_crossbowmen", "wh2_main_skv_inf_night_runners_0")
     for key in shooters:
         assert u[key]["missile"]["range_m"] > 0 and u[key]["missile"]["ammo"] > 0
     assert all(u[k]["missile"] is None for k in u if k not in shooters)
@@ -161,3 +164,23 @@ def test_the_skaven_wave():
     assert runners["missile"]["category"] == "sling" and not runners["missile"]["direct"]
     for p in (slaves, clanrats, runners):
         assert set(p["abilities"]) == {"wh2_main_unit_passive_scurry_away", "wh2_main_unit_passive_strength_in_numbers"}
+
+
+def test_the_third_wave():
+    """Handgunners (the game's "Пистольеры"): flat (direct) armour-piercing fire at 145 m, standing only;
+    crossbowmen: arcing bolts at 160 m; Night Runners with throwing stars: direct fire at 70 m all round
+    (a 360 deg fire arc) and whilst moving; clanrats without shields, clanrat spearmen and stormvermin with them."""
+    u = saved()["units"]
+    hg, xb, stars = (u[k] for k in ("wh_main_emp_inf_handgunners", "wh_main_emp_inf_crossbowmen",
+                                    "wh2_main_skv_inf_night_runners_0"))
+    assert hg["men"] == 90 and hg["multiplayer_cost"] == 600
+    assert hg["missile"]["direct"] and hg["missile"]["range_m"] == 145
+    assert hg["missile"]["ap_damage"] > hg["missile"]["damage"] and "mounted_fire_move" not in hg["attributes"]
+    assert xb["missile"]["category"] == "arrow" and not xb["missile"]["direct"] and xb["missile"]["range_m"] == 160
+    assert stars["missile"]["direct"] and stars["missile"]["range_m"] == 70 and stars["missile"]["fire_arc_deg"] == 180
+    assert {"mounted_fire_move", "guerrilla_deploy"} <= set(stars["attributes"]) and "stalk" not in stars["attributes"]
+    assert u["wh2_main_skv_inf_clanrats_0"]["shield"]["missile_block_chance"] == 0
+    for k in ("wh2_main_skv_inf_clanrat_spearmen_1", "wh2_main_skv_inf_stormvermin_1"):
+        assert u[k]["shield"]["missile_block_chance"] == 35
+    assert "charge_reflection" in u["wh2_main_skv_inf_clanrat_spearmen_1"]["attributes"]
+    assert u["wh2_main_skv_inf_stormvermin_1"]["armour"] == 90

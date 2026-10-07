@@ -25,7 +25,7 @@ class TestBuild:
     def test_a_generated_battle_under_the_network(self, role, enemy_role, timeout_winner, attacker, tmp_path,
                                                    monkeypatch):
         written = capture(monkeypatch, tmp_path)
-        seed = 1_000_900_008
+        seed = 1_000_900_795     # 20 Skaven units (1_000_900_008 before the 07.10.2026 third wave)
         assert build.main(["nn-arena", "--army-seed", str(seed), "--own-role", role, "--timeout", "3600"]) == 0
         (config, scenario), = written
         assert config["own_ai"] == "net" and config["own_role"] == role and config["enemy_role"] == enemy_role
@@ -48,7 +48,7 @@ class TestBuild:
 
     def test_the_swapped_battle_gives_our_side_the_other_army(self, tmp_path, monkeypatch):
         written = capture(monkeypatch, tmp_path)
-        seed = 1_000_900_008
+        seed = 1_000_900_795     # 20 Skaven units (1_000_900_008 before the 07.10.2026 third wave)
         assert build.main(["nn-arena", "--army-seed", str(seed), "--army-swap", "--own-role", "defend"]) == 0
         (config, scenario), = written
         arena = generate.battle(seed)

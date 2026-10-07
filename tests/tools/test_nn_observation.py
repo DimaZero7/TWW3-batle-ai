@@ -470,7 +470,7 @@ class TestVolley:
             assert cobs.tokens[0, :2, I["volley_ready"]].tolist() == pytest.approx([w, 0]), t
         # the critic sees the archers' too: their last fall at 14 s, the one before at 3 s
         assert cobs.tokens[0, 2, I["volley_ready"]] == 0
-        assert I["volley_ready"] == ob.TOKEN - 1 and I["volley_ready"] in ob.OWN_ONLY
+        assert I["volley_ready"] == ob.TOKEN - 1 - len(ob.ARC) and I["volley_ready"] in ob.OWN_ONLY   # ARC after it
 
     def test_a_new_memory_starts_ready(self):
         setup, state = self.setup_state()

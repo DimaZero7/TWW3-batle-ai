@@ -2,7 +2,10 @@
 -- simulator alike: lanes far apart, in each a shooter facing bearing s_b and a target whose centre is d metres
 -- away at t_angle degrees off the shooter's facing, the target facing the shooter turned by t_rot degrees
 -- (0: its front to the shooter, 90: its flank, 180: its back). Everyone is held by script and fearless.
--- The shooter (lane.mode): 'fire' fire at will, no order; 'attack' an attack order on its target.
+-- The shooter (lane.mode): 'fire' fire at will, no order; 'attack' an attack order on its target; 'hold' no
+-- fire at all (a control lane). lane.s_move_fwd / s_move_lat (optional): at the go the shooter is also ordered to a
+-- point that far ahead of / right of its start (its starting frame), at a run with s_move_run, firing at will on the
+-- way (a unit that fires whilst moving: the fire arc on the move).
 -- The target (lane.target_mode): 'stand' halts; 'step' starts at start_d and steps step_m closer every
 -- step_s seconds until the shooter's first shot (the range test); 'move' at the go is ordered to a point
 -- (move_fwd, move_lat: metres ahead of and across from the shooter, in the shooter's frame), at a run with
@@ -10,7 +13,9 @@
 -- lane.reform_men (optional): once the target is down to that many men it is ordered to a point 5 m to its right
 -- with its starting width (goto_location_angle_width: the thinned unit re-forms), then stands.
 -- lane.friend (optional): a unit of the shooter's side placed friend_fwd m ahead of and friend_lat m right of the
--- shooter, facing as it does, held (the line of fire past friends); its row is sampled as 'f'.
+-- shooter, facing as it does, held (the line of fire past friends); its row is sampled as 'f'. With
+-- lane.friend_engage (metres) the friend is placed that far in front of the target's centre instead, facing it, and
+-- at the go walks into melee with it (fire into a melee: from behind our men, at an angle, along the contact).
 -- Every tick_ms 'probe_sample': per running lane the shooter's ammo, men, firing flag, place, bearing,
 -- moving; the target's men, health (CCO HealthValue), unary hit points, place, bearing, moving. A lane ends
 -- when the shooter is out of ammo or the target dead (and settle_s more for the projectiles in the air), when
@@ -28,7 +33,7 @@ local M = {}
 
 local LOG = 'tww3_bai_events.jsonl'
 local TIMER = 'tww3_bai_missile_probe_tick'
-M.MODES = {fire = true, attack = true}
+M.MODES = {fire = true, attack = true, hold = true}
 M.TARGET_MODES = {stand = true, step = true, move = true}
 
 local function round(v, k)
@@ -58,7 +63,8 @@ end
 
 -- config: build, speed, tick_ms, deadline_s, settle_ms, lanes = {{name, shooter, target, x, z, s_b, d, t_angle,
 -- t_rot, s_width, t_width, mode, target_mode, start_d, step_m, step_s, move_fwd, move_lat, move_run, max_s,
--- idle_s, settle_s}}, park = {{name, x, z, bearing}}. globals: common, battle_vector.
+-- idle_s, settle_s, s_move_fwd, s_move_lat, s_move_run, friend, friend_fwd, friend_lat, friend_width,
+-- friend_engage}}, park = {{name, x, z, bearing}}. globals: common, battle_vector.
 function M.main(bm, config, globals)
     if _G.tww3_bai_missile_probe then return end
     local state = {active = false, finished = false, batch = '', run_id = 'bootstrap', units = {}, lanes = {}}
@@ -185,8 +191,15 @@ function M.main(bm, config, globals)
             lane.t0, lane.running, lane.step_at = now_ms(), true, now_ms()
             if lane.mode == 'attack' then
                 orders.attack_ranged(lane.s.uc, lane.t.unit, false, true)
-            else
+            elseif lane.mode == 'fire' then
                 orders.set_fire_at_will(lane.s.uc, true)
+            end
+            if lane.s_move_fwd or lane.s_move_lat then
+                local mx, mz = M.frame(lane.x, lane.z, lane.s_b or 0, lane.s_move_fwd or 0, lane.s_move_lat or 0)
+                orders.move(lane.s.uc, vec(mx, mz), lane.s_move_run == true)
+            end
+            if lane.f and lane.friend_engage then
+                orders.attack_melee(lane.f.uc, lane.t.unit, true)
             end
             if lane.target_mode == 'move' then
                 local mx, mz = M.frame(lane.x, lane.z, lane.s_b or 0, lane.move_fwd, lane.move_lat or 0)
@@ -215,7 +228,10 @@ function M.main(bm, config, globals)
             local L = M.layout(lane, lane.d)
             place(lane.s, L.sx, L.sz, L.sb, lane.s_width)
             place(lane.t, L.tx, L.tz, L.tb, lane.t_width)
-            if lane.f then
+            if lane.f and lane.friend_engage then
+                local fx, fz = M.frame(L.tx, L.tz, L.tb, lane.friend_engage, 0)
+                place(lane.f, fx, fz, (L.tb + 180) % 360, lane.friend_width or 30)
+            elseif lane.f then
                 local fx, fz = M.frame(lane.x, lane.z, L.sb, lane.friend_fwd or 0, lane.friend_lat or 0)
                 place(lane.f, fx, fz, L.sb, lane.friend_width or 30)
             end

@@ -462,7 +462,9 @@ NEW_PASSPORT = 2 + 3          # attributes mounted_fire_move, guerrilla_deploy; 
 NEW_ABILITY = 8               # abilities.WHEN
 NEW_EFFECTS = mfx.SIZE        # the innate effects' columns (appended after the second wave)
 NEW_VOLLEY = len(ob.VOLLEY)   # the volley input, appended after the effects (03.10.2026)
-T0 = ob.TOKEN - NEW_VOLLEY    # the token before the volley input
+NEW_ARC = len(ob.ARC)         # the fire arc, appended after the volley input (07.10.2026)
+T0 = ob.TOKEN - NEW_VOLLEY - NEW_ARC    # the token before the volley input
+T1 = ob.TOKEN - NEW_ARC       # the token before the fire arc
 
 
 def test_the_second_wave_is_seen_in_the_passport_and_the_ability_slots():
@@ -818,3 +820,104 @@ def test_a_checkpoint_saved_before_the_volley_input_acts_as_before(path):
     new_crit = critic.Critic(cfg).eval()
     new_crit.load(dict(crit_data))
     same_without_volley(old, new, old_crit, new_crit, atol=1e-4)
+
+
+
+# --- the fire arc (observation.ARC, 07.10.2026): one column, both sides, appended after the volley input ---
+
+ARC_KEYS = ["wh2_main_skv_inf_night_runners_0", "wh2_dlc13_emp_inf_archers_0", "wh_main_emp_inf_swordsmen",
+            "wh_main_emp_inf_handgunners"]
+
+
+def arc_states(batch=2):
+    """(setup, three decisions) of a made-up battle with throwing stars (arc 1.0), archers and handgunners (30 deg
+    each side: 1/6) and swordsmen (no missile: 0) on both sides."""
+    setup, state = sources.synthetic(batch=batch, own=4, enemy=4, seed=22, keys=ARC_KEYS)
+    N = 8
+    for k in range(3):
+        for t in ("on", "cd"):
+            state[f"ab{k}_{t}"] = np.zeros((batch, N))
+    return setup, [dict(state, t=np.full(batch, 30.0 + i)) for i in range(3)]
+
+
+def test_the_fire_arc_input_is_the_passports_arc_on_both_sides():
+    setup, states = arc_states()
+    obs, _ = ob.observe(states[0], setup, 1)
+    col = obs.tokens[..., ob.INDEX["fire_arc"]]
+    want = {"wh2_main_skv_inf_night_runners_0": 1.0, "wh2_dlc13_emp_inf_archers_0": 30 / 180,
+            "wh_main_emp_inf_swordsmen": 0.0, "wh_main_emp_inf_handgunners": 30 / 180}
+    assert ob.NAMES[-1] == "fire_arc" and ob.INDEX["fire_arc"] == T1
+    for b, keys in enumerate(setup.keys):
+        for i, k in enumerate(keys):
+            assert col[b, i] == pytest.approx(want[k], abs=1e-6), (b, i, k)     # own (0-3) and enemy (4-7)
+
+
+def pre_arc_networks(cfg):
+    """An actor and critic as saved before the fire arc: NEW_ARC fewer token inputs."""
+    actor, crit = policy.Actor(cfg), critic.Critic(cfg)
+    actor.encoder.unit[0] = torch.nn.Linear(T1, cfg.d)
+    crit.encoder.unit[0] = torch.nn.Linear(T1, cfg.critic_d)
+    return actor.eval(), crit.eval()
+
+
+def same_without_arc(old, new, old_crit, new_crit, atol=1e-5):
+    """Old (no fire arc) and new networks through the decisions of arc_states (memory carried): equal logits,
+    memory, greedy orders and values, while the new input is not zero."""
+    setup, states = arc_states()
+    m = mc = h_old = h_new = None
+    keys = ("tokens", "own", "attend", "pos", "ctx")
+    for st in states:
+        obs, m = ob.observe(st, setup, 1, m)
+        cobs, mc = ob.observe(st, setup, 1, mc, full=True)
+        o, c = policy.to_torch(obs), policy.to_torch(cobs)
+        assert o["tokens"][..., T1:].abs().sum() > 0
+        cut = lambda d: dict(d, tokens=d["tokens"][..., :T1])
+        with torch.no_grad():
+            lo, h_old = old(cut(o), h_old)
+            ln, h_new = new(o, h_new)
+            vo = old_crit(cut({k: c[k] for k in keys}))
+            vn = new_crit({k: c[k] for k in keys})
+        for k in lo:
+            assert torch.allclose(lo[k], ln[k], atol=atol), k
+        assert torch.allclose(h_old, h_new, atol=atol) and torch.allclose(vo, vn, atol=atol)
+        a, b = heads.sample(lo, greedy=True, abilities=True), heads.sample(ln, greedy=True, abilities=True)
+        assert torch.equal(a.kind, b.kind) and torch.equal(a.target, b.target) and torch.equal(a.point, b.point)
+
+
+def test_networks_saved_before_the_fire_arc_load_act_the_same_and_learn_it():
+    torch.manual_seed(7)
+    old, old_crit = pre_arc_networks(CFG)
+    new, new_crit = model(seed=16), critic.Critic(CFG).eval()
+    new.load_state_dict(old.state_dict())
+    new_crit.load(old_crit.state_dict())
+    assert torch.all(new.encoder.unit[0].weight[:, T1:] == 0) and torch.all(new_crit.encoder.unit[0].weight[:, T1:] == 0)
+    same_without_arc(old, new, old_crit, new_crit)
+    setup, states = arc_states()
+    obs, _ = ob.observe(states[0], setup, 1)
+    new.train()
+    out, _ = new(policy.to_torch(obs))
+    sum(v.masked_fill(v < -1e8, 0).sum() for v in out.values()).backward()
+    assert new.encoder.unit[0].weight.grad[:, T1:].abs().sum() > 0
+
+
+PRE_ARC = [p for p in (ROOT / "build/nn-train/test5/s44_defonly/m20.pt",)      # the chain's last step before it
+           if p.exists()]
+
+
+@pytest.mark.skipif(not PRE_ARC, reason="no checkpoint saved before the fire arc (build/ is not in Git)")
+@pytest.mark.parametrize("path", PRE_ARC, ids=[p.parent.name + "/" + p.name for p in PRE_ARC])
+def test_a_checkpoint_saved_before_the_fire_arc_acts_as_before(path):
+    from tools.nn.train import checkpoint
+    data = checkpoint.read(path)
+    cfg = checkpoint.config_of(data)
+    new = checkpoint.load_policy(path)
+    assert data["actor"]["encoder.unit.0.weight"].shape[1] == T1 and torch.all(new.encoder.unit[0].weight[:, T1:] == 0)
+    old, old_crit = pre_arc_networks(cfg)
+    torch.nn.Module.load_state_dict(old, data["actor"])
+    crit_path = path.with_name(path.stem + "_critic.pt")
+    crit_data = (critic_state(data) if "critic" in data else
+                 critic_state(checkpoint.read(crit_path)) if crit_path.exists() else old_crit.state_dict())
+    torch.nn.Module.load_state_dict(old_crit, crit_data)
+    new_crit = critic.Critic(cfg).eval()
+    new_crit.load(dict(crit_data))
+    same_without_arc(old, new, old_crit, new_crit, atol=1e-4)

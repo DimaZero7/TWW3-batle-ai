@@ -53,8 +53,42 @@ class TestPools:
         assert shares == pytest.approx((1 / 3, 1 / 3, 1 / 3))
         assert P.family_shares({"naval": 5}, ["a_trash", "b"], parents) is None
         for pool in POOLS.values():
-            for _, weight, s in pool.templates:
-                assert weight > 0 and sum(s) == pytest.approx(1.0)
+            for t in pool.templates:
+                assert t.weight > 0 and sum(t.shares) == pytest.approx(1.0)
+
+    def test_group_asks_go_to_the_subtree_then_up_the_parents(self):
+        # a: a_high, a_low under it; b alone. The template asks a (no unit of its own: its subtree), a_high (no pool
+        # unit: up to a), b, and artillery (no unit anywhere: dropped).
+        parents = {"a_high": "a", "a_low": "a", "a": "root"}
+        asks = P.group_asks({"a": 30, "a_high": 10, "b": 20, "artillery": 40}, [["a_low"], ["a_low"], ["b"]], parents)
+        assert asks == ((30.0, ((0, 1), (0, 1))), (10.0, ((0, 1), (0, 1))), (20.0, ((2,),)))
+        t = P.Template("x", 1.0, (), asks)
+        assert list(t.weights(np.ones(3, bool))) == [20, 20, 20]
+        assert list(t.weights(np.array([False, True, False]))) == [0, 40, 0]     # the group keeps its ratio
+
+    def test_the_game_templates_reach_the_high_quality_groups(self):
+        """Under the group rule the stormvermin take the templates' high-quality ratios (spears 15 / swords 10 of
+        WH_Skaven_land), the Empire's greatswords the swords' high-quality ratio; the skavenslaves sit at the root of
+        the melee tree, which no Skaven template asks."""
+        assert json.loads(P.POOLS.read_text(encoding="utf-8"))["template_rule"] == "group"
+        skv = {t.name: dict(zip([u.slot for u in POOLS[SKV].units], t.shares)) for t in POOLS[SKV].templates}
+        land = skv["WH_Skaven_land"]
+        assert land["stormvermin"] > land["stormvermin_shield"] > land["clanrat"] > 0
+        assert all(t["slave"] == 0 for t in skv.values())
+        emp = {t.name: dict(zip([u.slot for u in POOLS[EMP].units], t.shares)) for t in POOLS[EMP].templates}
+        assert emp["WH_Empire_land"]["greatsword"] == max(emp["WH_Empire_land"].values())
+
+    def test_the_family_rule_is_kept_as_an_option(self, tmp_path):
+        doc = json.loads(P.POOLS.read_text(encoding="utf-8"))
+        doc["template_rule"] = "family"
+        path = tmp_path / "pools.json"
+        path.write_text(json.dumps(doc), encoding="utf-8")
+        for pool in P.load(path).values():
+            fam = [u.family for u in pool.units]
+            for t in pool.templates:       # even within a family
+                for f in set(fam):
+                    vals = {round(s, 9) for s, g in zip(t.shares, fam) if g == f}
+                    assert len(vals) == 1
 
     def test_the_mix_is_three_quarters_templates(self):
         assert P.mix() == {"template": 0.75, "random": 0.25}
@@ -74,7 +108,7 @@ class TestMarket:
         for budget in np.linspace(m.totals.min(), m.totals.max(), 60):
             if not m.can_spend(budget):
                 continue
-            for shares in [t[2] for t in pool.templates] + [None]:
+            for shares in list(pool.templates) + [t.shares for t in pool.templates] + [None]:
                 bought = m.template_army(rng, budget, shares) if shares else m.random_army(rng, budget)
                 cost = pool.lord.cost + sum(pool.units[i].cost for i in bought)
                 assert budget * (1 - G.TOLERANCE) - 1e-6 <= cost <= budget + 1e-6
@@ -277,3 +311,23 @@ class TestConsumers:
             assert int((st.u["side"][b] == 1).sum()) == len(a["sides"]["own"]["units"])
             assert int((st.u["side"][b] == 2).sum()) == len(a["sides"]["enemy"]["units"])
         assert math.isfinite(float(st.u["x"].abs().max()))
+
+
+class TestRichBattles:
+    def test_by_default_no_rich_battle_and_no_extra_draw(self):
+        assert P.budget_rare() == (0.0, None)
+        assert G.Generator().rare == (0.0, None)
+
+    def test_a_rich_share_draws_above_the_usual_top(self, tmp_path):
+        doc = json.loads(P.POOLS.read_text(encoding="utf-8"))
+        doc["budget_rare"] = {"share": 0.5, "max": 12400}
+        path = tmp_path / "pools.json"
+        path.write_text(json.dumps(doc), encoding="utf-8")
+        assert P.budget_rare(path) == (0.5, 12400.0)
+        gen = G.Generator()
+        gen.rare = P.budget_rare(path)
+        lo, hi = gen.budget_bounds((EMP, SKV))
+        rng = np.random.default_rng(3)
+        budgets = [gen.generate(rng, sides=(EMP, SKV))["budget"] for _ in range(60)]
+        rich = [b for b in budgets if b > hi + 1]
+        assert 10 <= len(rich) <= 50 and max(budgets) <= 12400 + 1

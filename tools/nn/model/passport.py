@@ -112,6 +112,15 @@ def reload(keys, passports=None):
                      for k in keys], dtype=np.float32)
 
 
+def fire_arc(keys, passports=None):
+    """The fire arc per unit, each side of the facing / 180 deg (0: no missile weapon, or padding): the token's ARC
+    (tools/nn/model/observation.py, 07.10.2026) - archers and slings 30 deg (0.17), militia 35, Night Runners'
+    throwing stars 180 (1.0: they shoot all round, on the move too). The passport's missile.fire_arc_deg."""
+    passports = passports or load()
+    return np.array([float((passports[k].get("missile") or {}).get("fire_arc_deg") or 0) / 180 if k else 0
+                     for k in keys], dtype=np.float32)
+
+
 def cost(keys, passports=None):
     """Multiplayer cost per unit, gold (0 for padding): the simulator's `cost` (tools/nn/sim/params.py)."""
     passports = passports or load()

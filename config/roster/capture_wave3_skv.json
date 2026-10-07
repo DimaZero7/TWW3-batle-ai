@@ -1,0 +1,15 @@
+{
+  "description": "Roster capture of the Skaven's third wave (07.10.2026, for the unit passports): Clanrats wh2_main_skv_inf_clanrats_0 (sword, no shield), Clanrat Spearmen with shields wh2_main_skv_inf_clanrat_spearmen_1, Stormvermin with sword and shield wh2_main_skv_inf_stormvermin_1, Night Runners with throwing stars wh2_main_skv_inf_night_runners_0 (ammo 10, range 70, damage per 10 s = (10 + 2) x 10 / 7; the card's passive list checks Strength in Numbers and Scurry Away!). Captured with the warlord only. Same widths as config/roster/capture.json.",
+  "faction": "wh2_main_skv_skaven",
+  "units": [
+    {"key": "wh2_main_skv_cha_warlord_0", "men": 1, "general": true},
+    {"key": "wh2_main_skv_inf_clanrats_0", "men": 160},
+    {"key": "wh2_main_skv_inf_clanrat_spearmen_1", "men": 160},
+    {"key": "wh2_main_skv_inf_stormvermin_1", "men": 160},
+    {"key": "wh2_main_skv_inf_night_runners_0", "men": 120}
+  ],
+  "slots": [[0, -100], [100, -200], [210, -120], [370, -50], [-80, -140]],
+  "widths": [80, 60, 40, 30, 20, 15, 10, 8],
+  "baseline_width": 30,
+  "shape_timeout_s": 40
+}

@@ -13,7 +13,9 @@ a training step come from the run card (`tools.ops.card`), fresh in-game numbers
 A neural network that commands an army in Total War: WARHAMMER III battles. It learns from
 scratch in our battle simulator (PyTorch, thousands of battles at once on the GPU) and then plays
 real battles in the game against the game's AI at Normal difficulty. Two factions for now: the
-Empire and the Skaven, a flat empty map, a lord and up to 19 units a side. The goal is a network
+Empire and the Skaven, a flat empty map, a lord and up to 19 units a side (21 units and 2 lords in the pools:
+since 07.10 the third wave - the Empire's handgunners and crossbowmen, the Skaven's clanrats, stormvermin and Night
+Runners with throwing stars, [passports](training/units.md#handgunners-crossbowmen-clanrats-stormvermin-throwing-stars)). The goal is a network
 that beats the game's AI in ≥ 97 % of battles and plays "in character" for its faction
 ([idea and readiness](training/network.md)).
 
@@ -174,7 +176,9 @@ same battles. **The simulator is too kind to the network** — the main measured
   sectors are per man, ours a unit-level step;
 - order delay in the game is 0.6–0.8 s in small battles, 0.36 s in the simulator;
 - the second wave of units (Flagellants, Greatswords, militia, Skavenslaves, shielded Clanrats,
-  Night Runners) is not checked against recordings;
+  Night Runners) is not checked against recordings; the third wave rests on estimates: the reload of the handguns and
+  stars (the base × 1.2), the stars do not shoot behind on the move (the ±90° fit from the militia), flat fire is
+  measured at 90 m only - the probes are prepared ([missile probe](game/units/missile-probe.md#the-third-waves-probes));
 - not modelled: terrain, forests, visibility (`vis` is always true), cavalry, monsters, magic,
   flying, artillery, experience ranks. The casualty window is fitted, not taken from the database
   ([conflict table](game/mechanics/README.md#conflicts-with-our-simulator)).
@@ -191,8 +195,8 @@ game's rule and the simulator's status for every indicator; a new unit adds its 
 
 One network for all factions and both roles (attack or defence is an input). It sees only what a
 human would: own units fully, enemies while visible, and only their morale state, never the exact
-percentage. Every unit is a "token" (a row of 149 numbers: the database passport, the state, the
-effects). Then: a shared encoder → 3 attention layers with a distance bias → memory (GRU) →
+percentage. Every unit is a "token" (a row of 150 numbers: the database passport, the state, the
+effects, the fire arc). Then: a shared encoder → 3 attention layers with a distance bias → memory (GRU) →
 "heads" for every own unit: order kind (hold / move / attack / withdraw / keep), point (16
 directions × 8 distances), target (a pointer to an enemy), run, ability. The network never sees
 the time to the battle's end. Sizes: `small` 0.85 M weights, `wide` 3.23 M. The chain is on
@@ -207,7 +211,8 @@ advantage, the critic (position evaluator) sees the whole field and never goes i
 1024 battles at once, a decision every second, orders arrive 0.36 s later on average, as in the
 game. Speed ~9,900 s of battle per second of training. Battles are
 [random armies](training/armies.md): equal budget (±5 %), a lord and 0–19 units, ¾ of armies
-from the game AI's templates, numbers jittered ±15 %.
+from the game AI's templates (shares by the game's template groups, the `group` rule since 07.10), numbers jittered
+±15 %; rare rich battles above `budget_max` - option `budget_rare` (off).
 
 **Reward:** win ±1; gold trade every step (enemy gold we destroyed minus our own, over the
 budget; a unit's loss counts once, at its worst state); lord fall 0.3 (a shattered lord counts

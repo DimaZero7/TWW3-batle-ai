@@ -709,12 +709,13 @@ class TestNnArena:
 
     def test_net_commands_a_generated_army_of_twenty_units(self, lua, tmp_path):
         # A large gate battle (tools/nn/gate.py): 10+ Empire units v 20 Skaven, lords of both factions (the
-        # Empire's count follows config/nn/pools.json: 18 before the 02.10.2026 second wave, 12 after),
+        # Empire's count follows config/nn/pools.json: 18 before the 02.10.2026 second wave, 12 after; the
+        # 07.10.2026 third wave moved the seed from 1_000_900_008 to 1_000_900_795),
         # several unit types. Our network attacks: the state says so, and every one of our units takes its order.
         from tools.nn import scenario as nn_scenario
         from tools.nn.armies import generate
         from tools.nn.companion import exchange
-        arena = generate.battle(1_000_900_008)
+        arena = generate.battle(1_000_900_795)
         places = nn_scenario.placements(arena)
         cfg = nn_scenario.run_config(arena)
         assert len(places["own"]) >= 10 and len(places["enemy"]) == 20
@@ -1062,6 +1063,43 @@ class TestMissileProbe:
         assert ds[0] == 150 and min(ds) < 150                        # stepped closer
         ends = {r["lane"]: r["why"] for r in rows if r["event"] == "probe_lane_end"}
         assert set(ends) == {"L1"} and rows[-1]["event"] == "result"
+
+    def test_a_melee_lane_sends_our_men_in_and_a_control_shooter_holds_fire(self, lua, tmp_path):
+        # meleefire (tools/nn/missile_probe.py): the friend walks into melee with the target at the go; a 'hold'
+        # shooter never fires; a shooter with s_move goes to its point (starsmove) firing at will.
+        lua.execute("""
+            own = {fake.unit('own_lord', 'lord', -60, 0), fake.unit('own_hg_1', 'hg', 0, 0),
+                   fake.unit('own_spear_1', 'spear', 0, 0), fake.unit('own_hg_2', 'hg', 0, 0)}
+            enemy = {fake.unit('enemy_lord', 'lord', 60, 0), fake.unit('enemy_cspear_1', 'cspear', 0, 0),
+                     fake.unit('enemy_flag_2', 'flag', 0, 0)}
+            own[2].ammo, own[4].ammo = 1980, 1980
+            bm = fake.manager({own, enemy})
+            CONFIG = {build = 'test', speed = 20, tick_ms = 500, deadline_s = 100, settle_ms = 4000,
+                lanes = {{name = 'L1', shooter = 'own_hg_1', target = 'enemy_cspear_1', x = 0, z = -80, s_b = 0,
+                          d = 80, t_angle = 0, t_rot = 45, s_width = 30, t_width = 30, mode = 'hold',
+                          target_mode = 'stand', max_s = 10, idle_s = 10, settle_s = 2, friend = 'own_spear_1',
+                          friend_engage = 25, friend_width = 30},
+                         {name = 'L2', shooter = 'own_hg_2', target = 'enemy_flag_2', x = 240, z = -80, s_b = 0,
+                          d = 50, t_angle = 0, t_rot = 0, s_width = 30, t_width = 30, mode = 'fire',
+                          target_mode = 'stand', max_s = 10, idle_s = 10, settle_s = 2, s_move_lat = 100,
+                          s_move_run = true}},
+                park = {{name = 'own_lord', x = -700, z = -400, bearing = 0}, {name = 'enemy_lord', x = 700,
+                         z = -400, bearing = 0}}}
+            GLOBALS = {common = fake.common, battle_vector = fake.vector_type}
+            STATE = require('entries.missile_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 12 do bm:tick(500); bm:pump() end     -- past the go (settle 4 s), the lanes running
+            assert(own[3].attack_args.target == 'enemy_cspear_1' and own[3].attack_args.run == false)
+            assert(own[3].melee_mode == true)
+            assert(own[2].free_fire == false)          -- the control lane's shooter never fires
+            assert(own[4].free_fire == true and own[4].moving)
+            for _ = 1, 60 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        samples = [x for r in rows if r["event"] == "probe_sample" for x in r["lanes"] if x["lane"] == "L1"]
+        assert samples and all("f" in x for x in samples)
 
     def test_layout_and_frame(self, lua):
         L = lua.eval("""require('entries.missile_probe').layout({x = 10, z = 0, s_b = 0, t_angle = 90, t_rot = 180},

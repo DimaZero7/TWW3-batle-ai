@@ -5,7 +5,11 @@
     "template": 0.75,
     "random": 0.25
   },
+  "template_rule": "group",
+  "_template_rule": "How a template's ratios reach the pool's units (tools/nn/armies/pools.py, docs/en/training/armies.md): 'group' (07.10.2026) - a ratio on a generator group goes to the pool's units under that group (the templates ask groups that hold no unit themselves, e.g. melee_infantry 54 times: a group stands for its subtree), and to the parent group's units when none of those can be bought; an even split within the group reached (the quality tier's rule is not known). 'family' (before) - the ratios summed by the root of the group chain, split evenly over the pool's units of that family.",
   "budget_max": 7725,
+  "budget_rare": {"share": 0.0, "max": null},
+  "_budget_rare": "Rich battles of elite units (tools/nn/armies/generate.py): this share of battles draws B log-uniform between the usual top (budget_max, the factions' budget_max) and max (at most what both sides can reach with 19 units and the lord); share 0 or max null: none, and no random draw is made (every battle as before). Raise step by step (docs/en/training/armies.md).",
   "_budget_max": "The largest budget B drawn (tools/nn/armies/pools.py budget_max): 7725 = the Empire's most before 02.10.2026 (the general and 19 swordsmen). The greatswords (850) would raise an Empire mirror's top to 16750 and shift every Empire mirror to richer armies; the cap keeps the budgets as they were.",
   "caps": {
     "_description": "Template armies only: share of an army's units (the lord counted) that may be of one passport category, rounded down, at least 1. Random armies have no caps.",
@@ -22,7 +26,9 @@
         {"key": "wh2_dlc13_emp_inf_archers_0", "slot": "archer", "width": 40},
         {"key": "wh_dlc04_emp_inf_flagellants_0", "slot": "flagellant", "width": 30},
         {"key": "wh_main_emp_inf_greatswords", "slot": "greatsword", "width": 30},
-        {"key": "wh_dlc04_emp_inf_free_company_militia_0", "slot": "militia", "width": 30}
+        {"key": "wh_dlc04_emp_inf_free_company_militia_0", "slot": "militia", "width": 30},
+        {"key": "wh_main_emp_inf_handgunners", "slot": "handgun", "width": 40},
+        {"key": "wh_main_emp_inf_crossbowmen", "slot": "crossbow", "width": 30}
       ]
     },
     "wh2_main_skv_skaven": {
@@ -37,7 +43,12 @@
         {"key": "wh2_main_skv_inf_skavenslave_slingers_0", "slot": "sling", "width": 35},
         {"key": "wh2_main_skv_inf_skavenslaves_0", "slot": "slave_sword", "width": 30},
         {"key": "wh2_main_skv_inf_clanrats_1", "slot": "clanrat_shield", "width": 30},
-        {"key": "wh2_main_skv_inf_night_runners_1", "slot": "night_runner", "width": 30}
+        {"key": "wh2_main_skv_inf_night_runners_1", "slot": "night_runner", "width": 30},
+        {"key": "wh2_main_skv_inf_clanrats_0", "slot": "clanrat_sword", "width": 30},
+        {"key": "wh2_main_skv_inf_clanrat_spearmen_1", "slot": "clanrat_spear_shield", "width": 30},
+        {"key": "wh2_main_skv_inf_stormvermin_0", "slot": "stormvermin", "width": 30},
+        {"key": "wh2_main_skv_inf_stormvermin_1", "slot": "stormvermin_shield", "width": 30},
+        {"key": "wh2_main_skv_inf_night_runners_0", "slot": "night_runner_stars", "width": 30}
       ]
     }
   }

@@ -102,7 +102,7 @@ class TestBuild:
         monkeypatch.setattr(nn_scenario, "SCENARIO", tmp_path / "nn_arena.xml")
         written = []
         monkeypatch.setattr(build, "build", lambda target, config, scenario=None: written.append((target, config, scenario)) or {})
-        seed = 1_000_900_014
+        seed = 1_000_900_057     # the gate plan's battle 16 (1_000_900_014 before the 07.10.2026 third wave)
         assert build.main(["human", "--army-seed", str(seed), "--army-swap"]) == 0
         (target, config, scenario), = written
         plan = gate.plan(2, offset=14)[1]

@@ -32,7 +32,7 @@ flowchart LR
 |---|---|
 | `config/nn/pools.json` | each faction's units for training, its budget factor (`budget_factor`), the share of template armies (`mix`), limits (`caps`) |
 | `config/nn/army_templates.json` | the factions' army templates from the game's database (written by `templates.py`) |
-| `tools/nn/armies/pools.py` | pools: unit passports, families, template shares |
+| `tools/nn/armies/pools.py` | pools: unit passports, the generator's groups, template shares (`Template`), budgets |
 | `tools/nn/armies/generate.py` | budget, buying units, a battle from a seed |
 | `tools/nn/armies/place.py` | deployment |
 | `tools/nn/armies/export.py` | the game's battle file, the `arenas.json` format, army descriptions for the simulator |
@@ -59,6 +59,12 @@ flowchart LR
      spearmen): the Night Runners (450) and the clanrats with shields (350) would otherwise raise
      every battle with Skaven to richer armies. Their cheapest unit, the skavenslaves (125), lowers
      the least Skaven-mirror budget from 675 to 650.
+   - **Rich battles** (`budget_rare` in `pools.json`: `share`, `max`; by default `share` 0 - none, and the
+     generator draws no extra random number: every battle as before). That share of battles draws B log-uniform
+     between the usual top (`budget_max` and the factions' caps) and `max` (at most what both sides can field with
+     19 units and the lord). More gold - by the templates more dear units (greatswords, stormvermin); the limit of
+     20 units as in the game. Raise it step by step: each step changes the simulator's version (`config/nn`), the
+     scripts' baselines are played again ([steps](#rich-battles-steps)).
 3. **Buying.** Each side spends 0.95 to 1 of its budget, the lord included, so sides with
    the same factor differ by at most 5%. A unit is taken only if the army can still end
    inside that window. For this
@@ -94,52 +100,64 @@ last byte (`tools/nn/dbtables.decode`). The field names are ours, from the value
   leads to `WH_Empire_land` … `_4`.
 - A faction's config is named in `pools.json` (`generator`), by name. A "faction →
   config" table in the database was not searched for.
-- A group's **family** is the end of its parent chain: all melee infantry ends at
-  `melee_infantry_trash`, missile infantry at `ranged_infantry`. A template's shares are
-  summed over the families the pool has. The rest (artillery, cavalry, monsters, heroes)
-  is dropped, then the shares are normalised.
-- Inside a family the share is split **evenly** between the pool's units. Which unit of a
-  family the game's AI takes depends on the quality step (`tier_1_step_2` for slaves,
-  `tier_1_step_4` for clanrats) and on how rich the army is. How the generator picks the
-  step is not in the tables. Here the budget decides cheap against dear.
+- **How a template's shares reach the units** (`pools.json` `template_rule`, `group` since 07.10.2026). The
+  generator's groups form a tree: `cdir_military_generator_unit_group_overrides` gives each group a parent
+  (`..._frontline_spears_high_quality` → `..._frontline_spears` → `..._frontline` → `..._main` → `melee_infantry` →
+  `melee_infantry_trash`). Units sit in the leaves, while the templates also ask general groups that hold no unit
+  at all: `melee_infantry` 54 times in the whole database, `melee_infantry_main` 7, `ranged_infantry_main` 21. So a
+  template's group stands for its whole subtree. The rule: a group's share goes to the pool's units in its subtree;
+  if none of them can be bought (not in the pool, or no longer fitting the budget), the share goes to the parent's
+  subtree, and so on up; a share that reaches nobody (artillery, cavalry, monsters) is dropped and the rest are
+  normalised. Inside the group reached, an even split.
+  - Ours, not the game's: "up to the parent" stands in for the units our pool lacks (the game has the faction's
+    whole roster); "an even split" - the quality step (`unit_qualities`, "the recruitment priority within a group"
+    by the modders) has no known rule in numbers; the shares are checked at every purchase (a unit that no longer
+    fits the budget window passes its group's share up instead of losing it). When no kind of the template has a
+    unit that can be bought, a unit is taken evenly among those that still fit (the market must spend the budget):
+    this is how skavenslaves and slingers, which no Skaven template asks, get into the armies.
+  - The former rule (`template_rule: family`, before 07.10.2026; kept as an option): a template's shares summed
+    by the chain's root (all melee infantry `melee_infantry_trash`, missile infantry `ranged_infantry`) and split
+    evenly over the pool's units of that root. It erased the high-quality groups: a stormvermin (950) got the same
+    share as a slave (125).
 - Not checked in the game: whether the campaign AI recruits exactly by these templates.
-  They are the templates of the game's army generator.
 
-Shares by number of units (lord not counted), per template:
+Template shares under the `group` rule (by number of units, lord not counted, when every unit can be bought):
 
-| Faction | Template | Spearmen | Spearmen with shields | Swordsmen | Flagellants | Greatswords | Archers | Militia |
-|---|---|---:|---:|---:|---:|---:|---:|---:|
-| Empire | `WH_Empire_land` | 12% | 12% | 12% | 12% | 12% | 19% | 19% |
-| | `WH_Empire_land_2` | 13% | 13% | 13% | 13% | 13% | 17% | 17% |
-| | `WH_Empire_land_3` | 12% | 12% | 12% | 12% | 12% | 19% | 19% |
-| | `WH_Empire_land_4` | 11% | 11% | 11% | 11% | 11% | 21% | 21% |
+| Template | Spearmen | Spearmen with shields | Swordsmen | Flagellants | Greatswords | Archers | Militia | Handgunners | Crossbowmen |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `WH_Empire_land` | 15% | 15% | 0 | 0 | 31% | 0 | 0 | 19% | 19% |
+| `WH_Empire_land_2` | 17% | 17% | 0 | 8% | 25% | 2% | 2% | 15% | 15% |
+| `WH_Empire_land_3` | 15% | 15% | 3% | 3% | 26% | 0 | 0 | 19% | 19% |
+| `WH_Empire_land_4` | 14% | 14% | 3% | 3% | 24% | 4% | 4% | 18% | 18% |
 
-The second wave ([unit passports](units.md#flagellants-greatswords-free-company-militia)):
-the flagellants are in `..._melee_infantry_main_flanking`, the greatswords in
-`..._melee_infantry_main_frontline_swords_high_quality`, both of the family `melee_infantry_trash`;
-the militia in `..._ranged_infantry_trash`, of the family `ranged_infantry` with the archers. A
-family's share is split evenly among its units (five melee, two missile).
+Where from: high-quality spears (none in the Empire's pool) → plain spears: both spearmen; high-quality swords - the
+greatswords; `main_flanking` - the flagellants; `ranged_infantry_main_light_backline` - crossbowmen and handgunners;
+archers and militia (`ranged_infantry_trash`) only through the general `ranged_infantry`; swordsmen
+(`frontline_swords`) only through the general `melee_infantry_main` / `melee_infantry`.
 
-The spearmen (both) are in group `..._melee_infantry_main_frontline_spears`, the swordsmen
-in `..._melee_infantry_main_frontline_swords` (quality step `tier_1_step_4` all three).
-Both groups end at the family `melee_infantry_trash`, like all melee infantry, so the
-templates' spear and sword shares (e.g. 20 + 20 in `WH_Empire_land`) are summed into one
-melee share, split evenly among the pool's melee units.
+| Template | Clanrat spearmen | Clanrats | Clanrats with shields | Spearmen with shields | Stormvermin (halberds) | Stormvermin (sword, shield) | Night Runners (slings) | Night Runners (stars) | Slaves (both), slingers |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `WH_Skaven_land` | 4% | 4% | 4% | 4% | 27% | 19% | 19% | 19% | 0 |
+| `WH_Skaven_land_2` | 6% | 6% | 6% | 6% | 22% | 22% | 15% | 15% | 0 |
+| `WH_Skaven_land_3` | 6% | 6% | 6% | 6% | 22% | 22% | 17% | 17% | 0 |
+| `WH_Skaven_land_4` | 8% | 8% | 8% | 8% | 23% | 23% | 12% | 12% | 0 |
+| `WH_Skaven_land_5` | 4% | 4% | 4% | 4% | 19% | 27% | 19% | 19% | 0 |
 
-| Faction | Template | Clanrat spearmen | Skavenslave spearmen | Skavenslaves | Clanrats with shields | Skavenslave slingers | Night Runners |
-|---|---|---:|---:|---:|---:|---:|---:|
-| Skaven | `WH_Skaven_land` | 15% | 15% | 15% | 15% | 19% | 19% |
-| | `WH_Skaven_land_2` | 17% | 17% | 17% | 17% | 15% | 15% |
-| | `WH_Skaven_land_3` | 17% | 17% | 17% | 17% | 17% | 17% |
-| | `WH_Skaven_land_4` | 19% | 19% | 19% | 19% | 12% | 12% |
-| | `WH_Skaven_land_5` | 15% | 15% | 15% | 15% | 19% | 19% |
+Where from: high-quality spears / swords - the stormvermin with halberds / with swords; `main`, `main_flanking`,
+`melee_infantry` - all six line units (clanrats and stormvermin); the Skaven templates' shooters are heavy
+(`heavy_long_range`, `heavy_short_range`: jezzails, ratling guns - not in the pool) → up to `ranged_infantry_main` →
+the Night Runners (`light_skirmisher`); skavenslaves (`melee_infantry_trash`, the root) and slingers
+(`ranged_infantry_trash`) are asked by no Skaven template.
 
-The Skaven wave ([unit passports](units.md#skavenslaves-clanrats-with-shields-night-runners)): the
-skavenslaves are in `..._melee_infantry_trash` (`tier_1_step_2`), the clanrats with shields in
-`..._melee_infantry_main_frontline_swords` (`tier_1_step_4`), both of the family
-`melee_infantry_trash`; the Night Runners in `..._ranged_infantry_main_light_skirmisher`
-(`tier_1_step_5`), of the family `ranged_infantry` with the slingers. Four melee units share the
-melee share, two the missile share.
+What the armies get (template armies, budgets as in training, share of units):
+
+| | The former rule (`family`) | The `group` rule |
+|---|---|---|
+| Empire | spearmen 17%, with shields 13%, swordsmen 14%, flagellants 11%, greatswords 9%, archers 10%, militia 10%, handgunners 8%, crossbowmen 9% | spearmen 20%, with shields 15%, swordsmen 7%, flagellants 3%, greatswords 18%, archers 4%, militia 2%, handgunners 14%, crossbowmen 17% |
+| Skaven | clanrat spearmen 8%, slave spearmen 12%, slingers 12%, skavenslaves 16%, with shields 8%, Night Runners (slings) 9%, clanrats 9%, spearmen with shields 8%, stormvermin 5% + 5%, Night Runners (stars) 8% | clanrat spearmen 8%, slave spearmen 5%, slingers 6%, skavenslaves 9%, with shields 7%, Night Runners (slings) 11%, clanrats 10%, spearmen with shields 7%, stormvermin 13% + 13%, Night Runners (stars) 12% |
+
+Slaves and slingers stay (5–9%): they fill the budget when a kind of the template no longer fits. The armies cost
+more per unit: 5.3 units a side on average against 7.3 before the third wave (the summary below).
 
 ## Limits
 
@@ -169,33 +187,39 @@ its front.
   (350 m). The deepest army (3 melee lines, 2 missile lines) ends with the lord at about
   −140 m.
 - A unit's width comes from `pools.json` (as in the arenas: spearmen and slaves 30 m,
-  archers 40, slingers 35; skavenslaves, clanrats with shields and Night Runners 30), otherwise
+  archers 40, slingers 35; skavenslaves, clanrats with shields and Night Runners 30; handgunners 40, crossbowmen
+  and the other units of the third wave 30), otherwise
   men / `rank_depth` × 1.5 m.
 
 ## Summary over 10,000 battles
 
-`python -m tools.nn.armies`, seeds 5 … 10,004 (every `budget_factor` 1.0, the Empire's pool with
-the second wave and the Skaven's with their wave, budgets capped at `budget_max` 7725 and the
-Skaven's side at 6700, as before the waves):
+`python -m tools.nn.armies`, seeds 5 … 10,004 (every `budget_factor` 1.0, the pools with the third wave, the
+`group` template rule, budgets capped at `budget_max` 7725 and the Skaven's side at 6700, no rich battles):
 
 | What | Value |
 |---|---|
 | Mirror battles | 50% |
 | Armies: template / random | 75% / 25% |
-| Budget B | 651 … 7725, median 2548 |
-| Units per side (lord not counted) | mean 7.3; 1–4: 39%, 5–9: 31%, 10–14: 18%, 15–18: 8%, 19: 5% |
-| Cost difference between sides of equal budgets | mean 1.5%, at most 4.9% |
-| Skaven cost / Empire cost | mean 1.001, 0.951 … 1.052 (4996 battles) |
-| Skaven / Skaven, Empire / Empire | mean 1.000 and 0.999, 0.952 … 1.050 |
-| One side has x times the other's units | x ≥ 1.5: 49.1%; x ≥ 2: 26.2%; x ≥ 3: 7.2% |
-| Missile share of a side | mean 32%; no missile: 22%; ≥ 50%: 28%; missile only: 3.6% |
-| Empire template armies | spearmen 17%, with shields 13%, swordsmen 13%, flagellants 11%, greatswords 9%, archers 19%, militia 19% |
-| Skaven template armies | clanrat spearmen 15%, slave spearmen 19%, skavenslaves 20%, clanrats with shields 15%, slingers 17%, Night Runners 15% |
+| Budget B | 651 … 7725, median 2528 |
+| Units per side (lord not counted) | mean 5.3 (7.3 before the third wave); 1–4: 52%, 5–9: 34%, 10–14: 11%, 15–18: 2%, 19: 0.5% |
+| Cost difference between sides of equal budgets | mean 1.4%, at most 5.0% |
+| Skaven cost / Empire cost | mean 1.004, 0.950 … 1.052 (4996 battles) |
+| One side has x times the other's units | x ≥ 1.5: 37.3%; x ≥ 2: 18.7%; x ≥ 3: 5.9% |
+| Missile share of a side | mean 31%; no missile: 28%; ≥ 50%: 30%; missile only: 4.3% |
+| Empire template armies | spearmen 20%, with shields 15%, swordsmen 7%, flagellants 3%, greatswords 18%, archers 4%, militia 2%, handgunners 14%, crossbowmen 17% |
+| Skaven template armies | clanrat spearmen 8%, slave spearmen 5%, slingers 5%, skavenslaves 8%, clanrats with shields 7%, Night Runners (slings) 12%, clanrats 8%, spearmen with shields 7%, stormvermin 13% + 14%, Night Runners (stars) 12% |
 
-Within the same melee share the cheapest unit, the plain spearmen (300), is bought most
-(17 % against 9–13 % for the dearer ones): the market fills the budget window, and how the
-dearer units split is the luck of that fit. The many-cheap-against-few-elite battles are mostly
-Skaven against Empire.
+### Rich battles: steps
+
+Today B is at most 7725 (the Empire; the Skaven 6700): the most of the armies before the second wave. In the game
+custom and multiplayer battles run on funds the player sets; in WH1 the Domination mode raised the starting funds
+from 9000 to 12,400 (a search excerpt, Steam discussions); the WH3 multiplayer standard is not confirmed by a source.
+A campaign army is up to 20 units. Proposal: `share` 0.1 and `max` 10,000 → 12,400 → 15,000, a step after each
+plateau; at each step watch the rating and the pair gold (dearer battles are longer, training is slower per battle).
+
+The Empire's commonest unit is the plain spearmen (300, 20 %): they share the plain spears' share with the
+shielded spearmen, but filling the budget when a dear kind no longer fits ends more often with the cheap one. The
+many-cheap-against-few-elite battles are mostly Skaven against Empire.
 
 An equal budget is not equal strength ([measurements](measurements.md): Skaven fielded 1601
 men against the Empire's 661 and won all 10 whole battles); the fair metrics of training take

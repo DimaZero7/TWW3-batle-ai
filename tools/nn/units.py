@@ -38,7 +38,13 @@ UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_e
          # 02.10.2026, the Skaven wave: the cheapest chaff (plain skavenslaves, expendable), clanrats with
          # sword and shield (the shield blocks arrows and pistols from the front) and Night Runners with
          # slings (fast, vanguard, long-ranged): units.md "Skavenslaves, Clanrats with shields, Night Runners"
-         "wh2_main_skv_inf_skavenslaves_0", "wh2_main_skv_inf_clanrats_1", "wh2_main_skv_inf_night_runners_1")
+         "wh2_main_skv_inf_skavenslaves_0", "wh2_main_skv_inf_clanrats_1", "wh2_main_skv_inf_night_runners_1",
+         # 07.10.2026, the third wave: the Empire's handgunners (in-game name "Пистольеры": flat armour-piercing fire
+         # at 145 m) and crossbowmen (160 m); the Skaven's clanrats with swords (no shield), clanrat spearmen with
+         # shields, stormvermin with sword and shield and Night Runners with throwing stars (70 m, a 360 deg fire arc,
+         # fire whilst moving): units.md "Handgunners, crossbowmen, clanrats, stormvermin, throwing stars"
+         "wh_main_emp_inf_handgunners", "wh_main_emp_inf_crossbowmen", "wh2_main_skv_inf_clanrats_0",
+         "wh2_main_skv_inf_clanrat_spearmen_1", "wh2_main_skv_inf_stormvermin_1", "wh2_main_skv_inf_night_runners_0")
 TABLES = ("main_units", "land_units", "battle_entities", "melee_weapons", "missile_weapons", "projectiles",
           "unit_armour_types", "unit_shield_types", "unit_attributes_to_groups_junctions",
           "land_units_to_unit_abilites_junctions", "unit_spacings")

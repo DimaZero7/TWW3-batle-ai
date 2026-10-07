@@ -140,6 +140,24 @@ friends. The simulator: right in front — not a shot, half — 0.54 of the men,
 fire). In the game blocked men fire and the bullets hit friends — who fires and the friendly damage are not
 established — OPEN.
 
+## The third wave's probes
+
+Prepared 07.10.2026, not played yet (run: `build/steps/newunits_probe.ps1`, Normal difficulty). They answer the
+questions the simulator's estimates for the new shooters rest on ([passports](../../training/units.md#handgunners-crossbowmen-clanrats-stormvermin-throwing-stars)).
+
+| Plan | Battles | Lanes | Question |
+|---|---:|---|---|
+| `newdist` | 3 | handgunners → skavenslaves and → stormvermin with halberds (armour 90) at 50 / 100 / 143 m; crossbowmen → skavenslaves at 50 / 110 / 158; stars → flagellants at 25 / 50 / 68; the 3rd battle also handgunners → skavenslaves at 150 m (past the range 145) | the reload of `musket` (13 and 7 s in the database; the pistols' cycle ×1.2) and of the crossbow (13 s); hits of flat fire by distance (open for the pistols); damage through armour 90; the per-rank range rule at 145 m |
+| `starsmove` | 1 | stars walking away from flagellants that walk after them; walking and running 100 m across standing flagellants 50 m off; standing with the target 90° and 180° off the front | the 360° arc on the move and standing: do they shoot behind and aside (on the move now ±90°, fitted to the militia) |
+| `meleefire` | 1 | Empire spearmen walk into melee with clanrat spearmen; handgunners 80 m off fire at will: from behind our men, at 45°, along the contact (90°); a control - the same melee without fire | the fire-position drill (`build/drill_fire/design.md`): the fire rate, the damage to the target and to our men beyond the control's |
+| `hglof` | 1 | handgunners, our spearmen 40 m ahead offset 0 / 15 / 22.5 m, 15 m ahead not offset; no friends; skavenslaves 80 m off | fire past friends (P4 with pistols): who fires, how much our men catch - the data for the rule |
+
+New in the probe: a shooter mode `hold` (no fire - a control), the shooter's own move (`s_move_fwd`, `s_move_lat`,
+`s_move_run`), friends walking into melee with the target (`friend_engage`); in the report our men's HP
+(`friend_hp_lost`), the target's angle off the front and whether the shooter moved at each volley (`rel_at_volleys`,
+`moving_at_volleys`). The simulator's twin gives the same orders (the shooter's move, our men's attack, the control
+without range).
+
 ## What does not match (open)
 
 - Pistols fire as a stream from the first volley; arrows ~10 % more often than the game by the end of a lane (re-aim).

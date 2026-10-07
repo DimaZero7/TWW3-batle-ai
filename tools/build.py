@@ -402,7 +402,8 @@ def main(argv=None):
     parser.add_argument("--probe-plan", choices=("charge", "hit", "move", "vv", "syg2", "pair", "fatleave"), default="charge",
                         help="charge-probe: the plan (tools/nn/charge_probe.py)")
     parser.add_argument("--probe-battle", type=int, default=1, help="charge-probe: the plan's battle, 1-based")
-    parser.add_argument("--mprobe-plan", choices=("dist", "arc", "range", "targets", "shield", "moving", "rank", "thin", "pistol", "moving2", "lof"),
+    parser.add_argument("--mprobe-plan", choices=("dist", "arc", "range", "targets", "shield", "moving", "rank", "thin", "pistol", "moving2", "lof",
+                                                    "newdist", "starsmove", "meleefire", "hglof"),
                         default="dist", help="missile-probe: the plan (tools/nn/missile_probe.py)")
     parser.add_argument("--mprobe-battle", type=int, default=1, help="missile-probe: the plan's battle, 1-based")
     parser.add_argument("--morale-plan", choices=("flank", "charge", "secure", "shoot", "rally", "strong", "penitent", "aura", "strong2", "rally2"),

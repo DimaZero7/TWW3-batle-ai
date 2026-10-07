@@ -64,7 +64,8 @@ class LiveSetup:
               "abil", "abil_owned", "abil_use",      # abil: the ability slots' passports [B, N, SLOTS, STATIC]
               "fx_owned",                            # innate effects owned [B, N, E] (tools/nn/model/effects.py)
               "cost",                                # multiplayer cost [B, N] (the attacker's progress)
-              "reload")                              # passport reload_s [B, N] (the volley input, VOLLEY)
+              "reload",                              # passport reload_s [B, N] (the volley input, VOLLEY)
+              "arc")                                 # passport fire arc / 180 [B, N] (the token's ARC)
 
     def __init__(self, arrays, char, factions):
         self.arrays, self.char, self.factions = arrays, char, factions

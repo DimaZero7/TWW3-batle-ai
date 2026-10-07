@@ -2,7 +2,7 @@
 
 [← Back](README.md) · [Documentation](../../README.md) › [Game knowledge](../README.md) › [Units](README.md) › Indicator registry · [Русский](../../../ru/game/units/indicators.md)
 
-Every indicator of our 17 units that the simulator must count the way the game does: card numbers, the
+Every indicator of our 23 units that the simulator must count the way the game does: card numbers, the
 mechanics that depend on them, attributes, innate effects, abilities, and lord-only rules — with the
 game's rule, its source, the simulator's status, and the in-game check.
 
@@ -18,7 +18,10 @@ rows — `build/conform/master.md` (the H, M, L, F, R, V, A, C numbers come from
 Halberdiers; **Swd** — Swordsmen; **Flg** — Flagellants; **GSw** — Greatswords; **Mil** — Free Company
 Militia (pistols); **Arc** — Archers. Skaven: **War** — Warlord; **CSpr** — Clanrat spearmen; **CShd** —
 Clanrats with shields; **Slv** — Slaves; **SlvS** — Slave spearmen; **Sln** — Slave slingers; **Stm** —
-Stormvermin; **NR** — Night Runners.
+Stormvermin; **NR** — Night Runners. The third wave (07.10.2026, values in [section 6a](#6a-the-third-wave-values-and-new-rows)):
+**Hgn** — Handgunners (the Russian game's "Пистольеры"), **Xbw** — Crossbowmen; **Crt** — Clanrats (sword, no shield),
+**CSprS** — Clanrat spearmen with shields, **StmS** — Stormvermin with sword and shield, **NRS** — Night Runners with
+throwing stars.
 
 **Status in the simulator:** MODELLED — done by the game's rule and numbers; FITTED — a fitted number
 instead of the game's rule; DIFFERS — there is a rule, but a different one; MISSING — none.
@@ -198,6 +201,34 @@ contact 0.5 (B2), the cost of a miss 0.5 s (B1), gathering around a lord in 20 s
 hit-chance weight 0.1, flank / rear 2.0 / 0.25, `impact` 1.5, bringing men in over 20 s, `lord_hit_slope`, a
 1.5 m formation step for everyone; later — the arrows' spread k 1.1, holding a leaver 20 s, sectors 60° / 120°,
 `kills.exponent` in melee and for missiles ([simulator](../../training/simulator.md#tried-and-rejected)).
+
+## 6a. The third wave: values and new rows
+
+The new units' values in the rows of section 1 (the game's database; [passports](../../training/units.md#handgunners-crossbowmen-clanrats-stormvermin-throwing-stars)).
+Every one of these indicators is already modelled by its row; new are the rows K41–K43 below.
+
+| # | Hgn | Xbw | Crt | CSprS | StmS | NRS |
+|---|---|---|---|---|---|---|
+| K1 men; K2 HP per man | 90; 69 | 90; 69 | 160; 60 | 160; 60 | 160; 62 | 120; 56 |
+| K3 / K4 attack / defence | 16 / 17 | 14 / 17 | 24 / 18 | 18 / 28 | 38 / 36 | 24 / 14 |
+| K5 + K6 damage | 21 + 3 | 21 + 3 | 20 + 6 | 18 + 5 | 25 + 9 | 20 + 6 |
+| K7 vs large; K9 charge | 0; 4 | 0; 4 | 0; 10 | 9; 6 | 0; 18 | 0; 12 |
+| K12 armour; K13 shield | 20; — | 20; — | 25; — | 25; 35 % | 90; 35 % | 10; — |
+| K14 leadership; K15 physical resistance | 50; — | 50; — | 45; — | 45; — | 70; — | 48; 20 % |
+| K18 run; K21 mass | 3.3; 90 | 3.3; 90 | 4.2; 100 | 4.2; 100 | 3.8; 150 | 5.4; 90 |
+| K23 spacing; K24 ranks | 1.4 × 1.7; 3 | 1.4 × 1.7; 4 | 1.6 × 1.7; 8 | 1.6 × 1.7; 8 | 1.8 × 1.9; 8 | 1.9 × 1.9 (loose); 5 |
+| K27 cost; melee / missile potential | 600; 120 / 480 | 475; 100 / 400 | 300; 300 / 0 | 375; 375 / 0 | 850; 950 / 0 | 450; 150 / 350 |
+| K28 ammo; K29 projectile damage | 22; 5 + 17 | 22; 18 + 6 | — | — | — | 10; 10 + 2 |
+| K30 range; K31 reload (base) | 145; 13 | 160; 13 | — | — | — | 70; 7 |
+| K32 spread; K33 trajectory | 1.8 m² at 100 m; flat | 5.1 at 120; arcing | — | — | — | 1.8 at 40; flat |
+| K36 fire arc | ±30° | ±30° | — | — | — | **±180°** |
+| E4 charge reflection; E6 fire whilst moving; E7 vanguard | —; —; — | —; —; — | —; —; — | yes; —; — | —; —; — | —; **yes**; yes |
+
+| # | Indicator | Units | What it is in the game (source) | Simulator: status, where | Research | In-game test | Priority |
+|---|---|---|---|---|---|---|---|
+| K41 | A 360° fire arc on the move | NRS | shoots all round and on the move (DB `battle_entities.fire_arc_close` 360 of `wh2_main_skv_infantry_fast_360`, attribute `mounted_fire_move`; the community gives only "Fire Whilst Moving", no arc) | standing - MODELLED (each man's arc from the passport, K36); on the move - DIFFERS: the shared ±90° fit from the militia (`missile.move_fire_arc_deg`), no fire behind; the network sees the arc - input `fire_arc` | `build/newunits` | planned: `starsmove` | medium (high for NRS) |
+| K42 | The reload of category `musket` and of the crossbow, 13 s | Hgn (13), NRS (7), Xbw (13) | `projectiles.base_reload_time` | FITTED estimate: `musket` - the base × 1.2 (`reload_scale_other`, the pistols' measurement): 15.6 / 8.4 s; the crossbow - the arrow cycle's ratio (10 → 13 s) | `build/newunits` | planned: `newdist` | medium |
+| K43 | Flat armour-piercing fire at 145 m | Hgn | the line past friends, range per rank, the armour roll (K29, K30, K33) | MODELLED by the rules measured on the pistols at 90 m; how flat fire's hits fall with distance is open (pistols: the game 0.87 → 0.47, the model nearly flat) | `build/newunits` | planned: `newdist`, `hglof` | high (Hgn) |
 
 ## 7. Rule: what to add to the registry when a new unit arrives
 

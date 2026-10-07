@@ -11,7 +11,10 @@ follows, or "random").
 A battle:
 1. factions - each side one of `factions`, independently (mirrors included);
 2. budget B - log-uniform between what both can field (the dearer lord and the cheapest unit)
-   and what both can reach with max_units units; redrawn until both sides can spend it;
+   and what both can reach with max_units units, at most budget_max (config/nn/pools.json, and a faction's own
+   budget_max); redrawn until both sides can spend it. A rich battle (pools.json "budget_rare": share, max; share 0
+   by default - then no draw is made and every battle is as before): with that probability B is drawn
+   log-uniform between the usual top and `max` (at most what both can reach with max_units units);
    a side's budget is B x its faction's budget_factor / the larger factor of the two sides
    (config/nn/pools.json; Skaven 0.8: against the Empire they get 0.8 B, in a mirror both B);
 3. each side spends between (1 - TOLERANCE) and 1 of its budget (lord included), so with equal
@@ -123,7 +126,7 @@ class Market:
             ok = np.array(ok)
             if not ok.any():
                 break
-            w = np.where(ok, weights, 0.0)
+            w = weights(ok) if callable(weights) else np.where(ok, weights, 0.0)
             w = w / w.sum() if w.sum() > 0 else ok / ok.sum()
             u = int(rng.choice(len(w), p=w))
             bought.append(u)
@@ -131,10 +134,13 @@ class Market:
             k += 1
         return bought
 
-    def template_army(self, rng, budget, shares):
-        """Units (indices) following a template's shares until the budget is spent, under the caps."""
+    def template_army(self, rng, budget, template):
+        """Units (indices) following a template until the budget is spent, under the caps. template: a
+        pools.Template (each pick: its weights of the units that can still be bought, Template.weights) or plain
+        shares per unit."""
         final = self.capok[..., None] & self._in_window(budget)
-        return self._walk(rng, self._reach(final), np.asarray(shares, float))
+        weights = template.weights if hasattr(template, "weights") else np.asarray(template, float)
+        return self._walk(rng, self._reach(final), weights)
 
     def counts(self, budget):
         """Numbers of units an uncapped army can spend the budget with."""
@@ -161,6 +167,7 @@ class Generator:
         self.mix = mix or P.mix()
         # the config's budget cap goes with the config's pools (pools given: no cap)
         self.budget_max = P.budget_max() if pools is None else None
+        self.rare = P.budget_rare() if pools is None else (0.0, None)
         self.max_units = max_units
         self.base = base or arena_scenario.load_arena()
         self._markets = {}
@@ -176,11 +183,14 @@ class Generator:
         top = max(self.pools[f].budget_factor for f in factions)
         return {f: self.pools[f].budget_factor / top for f in factions}
 
-    def budget_bounds(self, factions, max_units=None):
-        """(least, most) budget B every faction of `factions` can field (its share of B)."""
+    def budget_bounds(self, factions, max_units=None, capped=True):
+        """(least, most) budget B every faction of `factions` can field (its share of B); capped=False: without
+        budget_max and the factions' budget_max (a rich battle's top, budget_rare)."""
         share = self.shares(factions)
         lo = max((self.pools[f].lord.cost + min(u.cost for u in self.pools[f].units)) / share[f] for f in factions)
         hi = min(float(self.market(f, max_units).totals.max()) / share[f] for f in factions)
+        if not capped:
+            return lo, hi
         if self.budget_max is not None:
             hi = min(hi, self.budget_max)
         # a faction's own cap on what its side spends (B x its share), when a dear unit joins its pool
@@ -192,6 +202,11 @@ class Generator:
         factions = list(factions or self.pools)
         own, enemy = sides or (factions[rng.integers(len(factions))], factions[rng.integers(len(factions))])
         lo, hi = self.budget_bounds((own, enemy), max_units)
+        share_rare, most = self.rare
+        if share_rare > 0 and rng.random() < share_rare:        # a rich battle: above the usual top
+            top = min(most, self.budget_bounds((own, enemy), max_units, capped=False)[1])
+            if top > hi:
+                lo, hi = hi, top
         if budget_range:
             lo, hi = max(lo, budget_range[0]), min(hi, budget_range[1])
         assert lo <= hi, f"no budget both {own} and {enemy} can field in {budget_range}"
@@ -210,9 +225,9 @@ class Generator:
         for side, faction in (("own", own), ("enemy", enemy)):
             m, pool, side_budget = markets[side], self.pools[faction], budget * share[side]
             if pool.templates and rng.random() < self.mix.get("template", 0.0):
-                names, weights, shares = zip(*pool.templates)
-                t = int(rng.choice(len(names), p=np.asarray(weights) / sum(weights)))
-                bought, army = m.template_army(rng, side_budget, shares[t]), names[t]
+                weights = np.asarray([t.weight for t in pool.templates])
+                t = int(rng.choice(len(weights), p=weights / weights.sum()))
+                bought, army = m.template_army(rng, side_budget, pool.templates[t]), pool.templates[t].name
             else:
                 bought, army = m.random_army(rng, side_budget), "random"
             units = [pool.units[i] for i in bought]

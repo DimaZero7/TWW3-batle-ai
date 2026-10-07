@@ -11,8 +11,14 @@ from tools.nn import army_edit
 from tools.nn import scenario as nn_scenario
 from tools.nn.armies import generate
 
-SEED = 1_000_900_014                     # Skaven (own) against the Empire (enemy)
+SEED = 1_000_901_824                     # Skaven (own, 19 units) against the Empire (enemy, 2 spearmen); 1_000_900_014
+                                         # before the 07.10.2026 third wave changed the pools
 ARCHERS, SPEARMEN = "wh2_dlc13_emp_inf_archers_0", "wh_main_emp_inf_spearmen_0"
+
+
+def passports():
+    import json
+    return json.loads((project.CONFIG_DIR / "nn" / "units.json").read_text(encoding="utf-8"))["units"]
 
 
 def keys(units):
@@ -40,8 +46,8 @@ def test_added_archers_stand_with_the_shooters_and_the_cost_follows():
     edited = army_edit.edit(arena, "enemy", add=[(ARCHERS, 3)], remove=[(SPEARMEN, 1)])["sides"]["enemy"]
     assert keys(edited["units"]) == keys(before["units"]) + Counter({ARCHERS: 3}) - Counter({SPEARMEN: 1})
     assert edited["cost"] == before["cost"] + 3 * 350 - 300 and edited["budget"] == before["budget"]
-    melee = [u["forward"] for u in edited["units"] if not u.get("general") and u["key"] not in
-             (ARCHERS, "wh_dlc04_emp_inf_free_company_militia_0")]
+    shooter = {k for k, p in passports().items() if p.get("missile")}
+    melee = [u["forward"] for u in edited["units"] if not u.get("general") and u["key"] not in shooter]
     assert all(u["forward"] < min(melee) for u in edited["units"] if u["key"] == ARCHERS)
     assert edited["edit"] == {"add": {ARCHERS: 3}, "remove": {SPEARMEN: 1}}
     with pytest.raises(ValueError):

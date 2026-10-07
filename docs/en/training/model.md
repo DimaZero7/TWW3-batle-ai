@@ -39,6 +39,7 @@ takes a recorded battle and the simulator's batch: both have the fields of the r
 | Input | Who sees it | Scale |
 |---|---|---|
 | Passport of every unit, own and enemy ([passports](units.md)): men, health, mass, speeds, attack, defence, charge, weapon damage and bonuses, armour, shield, leadership, resistances, missile (range, ammo, damage, reload, accuracy; at the end: direct fire, spread, muzzle velocity), cost, caste, size, attributes (unbreakable, fire whilst moving, …) | both sides | ~0–1; wide numbers (health, mass, cost, damage) on a log scale; caste, size, attributes as 0/1 |
+| Fire arc (the token's end, after the volley readiness; [below](#fire-arc-both-sides-the-tokens-last-input)) | both sides | the arc each side / 180 deg: 1.0 for the Night Runners' throwing stars, 0.17 for bows, slings, crossbows, handguns; 0 without a missile weapon |
 | Experience rank | both sides | rank / 9 |
 | Faction character (5 numbers, `config/nn/factions.json`) | own side | 0–1 as written |
 | Role: attack or defend | own side | 0/1 |
@@ -62,7 +63,7 @@ ones by lore.
 | Exact morale (`MoralePercent`) | yes | **no** | — | / 2, clipped to ±1.5 |
 | Detailed morale state 1–7 | yes | **no** | — | 0/1 |
 | Ammunition, kills | yes | no | — | share of the start; kills / 200 |
-| Volley ready: seconds since the ammunition last fell (the last volley) / the passport's reload ([below](#volley-readiness-own-units-the-tokens-last-input)) | yes | no | — | 0–1; 1 before the first shot; 0 without a missile weapon |
+| Volley ready: seconds since the ammunition last fell (the last volley) / the passport's reload ([below](#volley-readiness-own-units)) | yes | no | — | 0–1; 1 before the first shot; 0 without a missile weapon |
 | Fatigue state (6), known or not | yes | no | — | 0/1 |
 | Order point, has an order, has a target | yes | no | — | m / 500; 0/1 |
 | Threat to the left flank, right flank, rear | yes | no | — | 0/1 |
@@ -177,7 +178,7 @@ timer is not known (the Penitent) counts as off. A new effect appends its pair a
 (before the volley input below): an older network loads with zero weights for it
 (`encoder.pad_inputs`) and acts as before.
 
-### Volley readiness (own units, the token's last input)
+### Volley readiness (own units)
 
 The kiting skill is "halt when the volley is ready, run while reloading", and nothing else in the
 token tells when a missile unit has reloaded. One input (`volley_ready`, `observation.VOLLEY`,
@@ -204,11 +205,24 @@ What it shows differs a little between the two worlds, from their shooting, not 
   fires whole-unit volleys one reload apart ([measurements](measurements.md)), so there it goes
   0 → 1 between volleys while standing too. While the unit runs (the kiting drill) both rise alike.
 
+### Fire arc (both sides, the token's last input)
+
+One input (`fire_arc`, `observation.ARC`, 07.10.2026): a man's fire arc each side from the passport
+(`missile.fire_arc_deg`, the database's `battle_entities.fire_arc_close` / 2) over 180 deg. It is 1.0 for the Night
+Runners' throwing stars, which shoot all round and on the move (the entity `..._fast_360`), 0.17 for bows, slings,
+crossbows and handguns (±30 deg), 0.19 for the militia (±35 deg), 0 for a unit without a missile weapon. Without it
+the network cannot tell stars from a sling by where the unit can shoot. It is on the unit's card: both sides see it.
+
+The input stands at the very end of the token, after the volley readiness, not among the passport's features: the
+columns before it keep their places, and a checkpoint saved before it loads with zero weights for it and acts as
+before (`encoder.pad_inputs`; checked on `test5/s44_defonly/m20.pt`, the chain's last step before it - the same
+logits, memory, orders and value, `tests/tools/test_nn_model.py`).
+
 ## Model
 
 ```mermaid
 flowchart TB
-  tok["Unit tokens: 149 numbers each<br/>(69 of them the passport, 28 the innate effects,<br/>1 the volley readiness)"] --> enc["Shared encoder<br/>the same weights for every unit"]
+  tok["Unit tokens: 150 numbers each<br/>(69 of them the passport, 28 the innate effects,<br/>1 the volley readiness, 1 the fire arc)"] --> enc["Shared encoder<br/>the same weights for every unit"]
   ctx["Context: character, role, counts, lords,<br/>time elapsed, damage timers,<br/>the attacker's progress"] --> enc
   enc --> att["Attention layers<br/>+ distance bias, masks"]
   att --> gru["Memory: a GRU per unit<br/>and one for the army"]
