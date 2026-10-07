@@ -15,7 +15,7 @@
     "idle-rate": 0.05,
     "drills": 0.2,
     "drill-teach": null,
-    "teach-normal": "kiting",
+    "teach-normal": null,
     "lord-rout": 0.5,
     "entropy-target": 0.05,
     "entropy-max": 0.03,
