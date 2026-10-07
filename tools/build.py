@@ -14,6 +14,7 @@ Usage:
     python -m tools.build nn-arena --army-seed 1000900000 --own-role attack   # a generated battle, the network
     python -m tools.build lord-swarm --repeats 2   # a lord swarmed by 1-4 units (tools/nn/lord_swarm.py)
     python -m tools.build human --army-seed 1000900014 --army-swap   # a human plays our side (x1, recorded)
+    python -m tools.build nn-arena --army-from-run build/nn-arena/runs/20261007-091416 --army-swap   # an old run's armies
     python -m tools.build lord-fall --faction skv --treatment kill   # the lord killed / routed (tools/nn/lord_fall.py)
     python -m tools.build lord-duel --duel emp   # our network's lord v a lord under one attack order (tools/nn/lord_duel.py)
     python -m tools.build lord-duel --duel skv --duel-variant escort   # the same, each lord with 2 infantry units
@@ -303,6 +304,10 @@ def nn_arena_config(args, run_config):
     defender = "enemy" if enemy_role == "defend" else "own"
     duration_s = max(3600, args.timeout + TIMEOUT_MARGIN_S)
     path = None
+    if args.army_from_run is not None:
+        # an old run's armies and deployment (tools/nn/army_from_run.py): its manifest, not the generator
+        from tools.nn import army_from_run
+        arena, army = army_from_run.load(args.army_from_run, swap=args.army_swap)
     if args.army_seed is not None:
         from tools.nn.armies import generate
         arena = generate.battle(args.army_seed)
@@ -310,6 +315,11 @@ def nn_arena_config(args, run_config):
             # the other half of a swapped pair (tools/nn/gate.py): our network takes the other army
             arena = dict(arena, name=f"{arena['name']}_swap",
                          sides={"own": arena["sides"]["enemy"], "enemy": arena["sides"]["own"]})
+        army = {"seed": args.army_seed, "split": generate.split(args.army_seed), "swap": args.army_swap,
+                "budget": arena["budget"],
+                "side_budget": {s: arena["sides"][s]["budget"] for s in nn_scenario.SIDES},
+                "template": {s: arena["sides"][s]["army"] for s in nn_scenario.SIDES}}
+    if args.army_seed is not None or args.army_from_run is not None:
         if args.army_add or args.army_remove:
             # our side's army changed by hand (tools/nn/army_edit.py): a battle for the game only
             from tools.nn import army_edit
@@ -319,13 +329,9 @@ def nn_arena_config(args, run_config):
         path = project.BUILD / args.target / f"{arena['name']}.xml"
         path.parent.mkdir(parents=True, exist_ok=True)
         nn_scenario.write_scenario(defender, arena, path, duration_s)
-        run_config["army"] = {"seed": args.army_seed, "split": generate.split(args.army_seed), "swap": args.army_swap,
-                              "budget": arena["budget"],
-                              "side_budget": {s: arena["sides"][s]["budget"] for s in nn_scenario.SIDES},
-                              "template": {s: arena["sides"][s]["army"] for s in nn_scenario.SIDES},
-                              "cost": {s: arena["sides"][s]["cost"] for s in nn_scenario.SIDES},
-                              "men": {s: sum(u["men"] for u in arena["sides"][s]["units"])
-                                      for s in nn_scenario.SIDES}}
+        run_config["army"] = dict(army, cost={s: arena["sides"][s]["cost"] for s in nn_scenario.SIDES},
+                                  men={s: sum(u["men"] for u in arena["sides"][s]["units"])
+                                       for s in nn_scenario.SIDES})
         if "edit" in arena["sides"]["own"]:
             run_config["army"]["edit"] = arena["sides"]["own"]["edit"]
     elif args.target == "nn-arena":
@@ -386,6 +392,11 @@ def main(argv=None):
     parser.add_argument("--army-swap", action="store_true",
                         help="nn-arena --army-seed: the seed's armies swapped (our side gets the generator's "
                              "enemy army): the second battle of a swapped pair (tools/nn/gate.py)")
+    parser.add_argument("--army-from-run", type=Path, metavar="RUN_DIR",
+                        help="nn-arena: the armies, deployment, gap and defend radius of an old arena run "
+                             "(its manifest.json, e.g. build/nn-arena/runs/20261007-091416) instead of the "
+                             "generator: a battle of an older generator again; --army-swap exchanges its sides "
+                             "(tools/nn/army_from_run.py)")
     parser.add_argument("--army-add", action="append", metavar="KEY[=N]",
                         help="nn-arena --army-seed: add N (1) units of KEY (a unit of the side's pool, "
                              "config/nn/pools.json) to our side (after --army-swap), deployed again by the "
@@ -436,7 +447,8 @@ def main(argv=None):
         args.timeout = {"human": 3600, "lord-duel": 900, "lord-ai": 900}.get(args.target, 600)
     if args.own_ai is None:
         args.own_ai = ("scripted" if args.target == "lord-ai"
-                       else "net" if args.army_seed is not None or args.target == "lord-duel" else "attack")
+                       else "net" if (args.army_seed is not None or args.army_from_run is not None
+                                      or args.target == "lord-duel") else "attack")
     if args.target == "lord-duel" and args.own_ai not in ("net", "scripted"):
         parser.error("lord-duel: --own-ai net (the network) or scripted (the control)")
     if args.target == "lord-ai" and args.own_ai != "scripted":
@@ -447,10 +459,18 @@ def main(argv=None):
         parser.error("--own-role is for --own-ai net and the human target (the planner modes set our role themselves)")
     if args.soldiers_every < 0:
         parser.error("--soldiers-every must be 0 or more")
-    if args.army_swap and args.army_seed is None:
-        parser.error("--army-swap is for --army-seed")
-    if (args.army_add or args.army_remove) and args.army_seed is None:
-        parser.error("--army-add/--army-remove are for --army-seed")
+    if args.army_from_run is not None:
+        if args.target not in ARENA_TARGETS:
+            parser.error("--army-from-run is for nn-arena and human")
+        if args.army_seed is not None or args.arena != "arena":
+            parser.error("--army-from-run, --army-seed and --arena are sources of armies: give one")
+        if not (args.army_from_run / "manifest.json").exists():
+            parser.error(f"--army-from-run: no manifest.json in {args.army_from_run}")
+    generated = args.army_seed is not None or args.army_from_run is not None
+    if args.army_swap and not generated:
+        parser.error("--army-swap is for --army-seed and --army-from-run")
+    if (args.army_add or args.army_remove) and not generated:
+        parser.error("--army-add/--army-remove are for --army-seed and --army-from-run")
     for spec in (args.army_add or []) + (args.army_remove or []):
         from tools.nn import army_edit
         try:
