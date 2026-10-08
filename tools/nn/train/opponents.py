@@ -189,6 +189,19 @@ class Line:
     #                                         units up to their range): the game AI's units after the first contact
     #                                         stand idle 1.6 % (melee) / 8.7 % (missile, enemy 61 m away: reloading) of
     #                                         the time, ai_like's without it 5.5-6.3 % / 20-27 % (enemy 150-175 m away)
+    flank_post_m: float = 60.0    # missile units that fire whilst moving (direct fire: the militia's pistols, the
+    flank_back_m: float = 40.0    # throwing stars) keep, out of melee, to a post flank_post_m beyond the nearer end of
+    #                               their melee line (across the side's forward) and flank_back_m behind its centre,
+    #                               instead of walking up to range (0: off). build/shotgap/flank_runs.py,
+    #                               flank_short.py (the game recordings of the gate sets it1-it7; it5-it7 against
+    #                               their twins): the game AI's short-range shooters (range < 100 m) stand beyond their
+    #                               line's end 56 / 44 / 71 m (it6 / it7 / it5, medians at the first melee; 86 % of
+    #                               them outside it, it1-it7), 48 / 13 / 38 m behind its centre, walking 24 deg outward
+    #                               before it (outward +0.36, forward +0.81 of the distance); the long-range ones -11 /
+    #                               -19 / 0 m (43 % outside), 13 deg. ai_like before: the short ones -43 / +33 / -34 m
+    #                               beyond the end, 10 / -1 / 12 m behind, 30 s before the first melee 3-9 m IN FRONT
+    #                               of their line (the walk up to 0.9 of the range) where the game's stood 50 m behind;
+    #                               they shot their targets from 55-74 m (the game's 77-88 m).
     missile_post_m: float = 25.0  # ... but a missile unit walks up to range only as far as a post this far behind its
     #                               line's centre (0: off). build/evade + build/archers (28 gate battles x 6 copies):
     #                               the game's free missile units stand 27 m behind their melee centre after the first
@@ -496,6 +509,21 @@ def ai_like(st, p=Line()):
     if p.missile_post_m > 0:                                   # after the first fight: not past the post
         closer = closer & ~(side_fought & (ahead >= -p.missile_post_m))
     put(closer, O.MOVE, fwd_x, fwd_z, r=p.advance_run)
+    if p.flank_post_m > 0:
+        # short-range skirmishers (Line flank_post_m): a post beyond the nearer end of the own melee line
+        lx, lz = -fz, fx                                       # the side's left
+        lat = (x - cx) * lx + (z - cz) * lz
+        half = torch.zeros_like(x)
+        for s in (1, 2):
+            mine = side == s
+            h = torch.where(line & mine, lat.abs(), torch.zeros_like(lat)).max(1, keepdim=True).values
+            half = torch.where(mine, h, half)
+        off = torch.where(lat >= 0, half + p.flank_post_m, -(half + p.flank_post_m))
+        px, pz = cx + lx * off - fx * p.flank_back_m, cz + lz * off - fz * p.flank_back_m
+        skirm = shooter & u["direct"] & u["fire_move"] & ~fighting & has_line
+        away = torch.sqrt((px - x) ** 2 + (pz - z) ** 2) > 8.0
+        put(skirm & away, O.MOVE, px, pz, r=p.advance_run)
+        put(skirm & ~away, O.HOLD, x, z)                          # at its post: holds (fires at will)
     if p.focus_lord:
         go, tg_lo = lord_or_other(st, p, shooter & ~fighting, foe, lord, fighting, d, ld, li)
         put(go, O.ATTACK, tg=tg_lo)

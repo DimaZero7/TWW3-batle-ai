@@ -828,6 +828,33 @@ class TestProperties:
         u["x"][0, 3] = -340.0
         assert int(opponents.ai_like(st, dataclasses.replace(p, missile_post_m=0.0)).kind[0, 3]) == O.MOVE   # off
 
+    def test_ai_like_short_range_skirmishers_take_a_post_beyond_their_lines_end(self):
+        """flank_post_m / flank_back_m (build/shotgap/flank_short.py): a missile unit that fires whilst moving
+        (direct: the militia's pistols) goes to a post flank_post_m beyond the nearer end of its melee line and
+        flank_back_m behind its centre, and holds there; archers keep the walk up to range."""
+        def side(sign, faces):
+            x0 = sign * 300
+            return {"faction": "wh_main_emp_empire", "units": [
+                {"key": "wh_main_emp_cha_general_0", "general": True, "x": x0 + sign * 20, "z": 0, "b": faces},
+                {"key": "wh_main_emp_inf_spearmen_0", "x": x0, "z": -40, "b": faces},
+                {"key": "wh_main_emp_inf_spearmen_0", "x": x0, "z": 40, "b": faces},
+                {"key": "wh2_dlc13_emp_inf_archers_0", "x": x0 + sign * 40, "z": 10, "b": faces},
+                {"key": "wh_dlc04_emp_inf_free_company_militia_0", "x": x0 + sign * 40, "z": -10, "b": faces}]}
+        st = scenario.build([{"attacker": 2, "sides": {1: side(-1, 90), 2: side(1, 270)}}])
+        H = st.N // 2
+        mil, arch = H + 4, H + 3
+        p = opponents.Line()
+        o = opponents.ai_like(st, p)
+        assert int(o.kind[0, mil]) == O.MOVE
+        assert float(o.z[0, mil]) == pytest.approx(-(40 + p.flank_post_m), abs=1.0)   # beyond the south end (z -40)
+        assert float(o.x[0, mil]) == pytest.approx(300 + p.flank_back_m, abs=1.0)     # behind the line's centre
+        assert int(o.kind[0, arch]) == O.MOVE and float(o.x[0, arch]) < float(st.u["x"][0, arch])   # walks up
+        st.u["x"][0, mil], st.u["z"][0, mil] = float(o.x[0, mil]), float(o.z[0, mil])
+        o = opponents.ai_like(st, p)
+        assert int(o.kind[0, mil]) == O.HOLD                                           # at its post
+        off = opponents.ai_like(st, dataclasses.replace(p, flank_post_m=0.0))
+        assert int(off.kind[0, mil]) == O.MOVE and float(off.x[0, mil]) < float(st.u["x"][0, mil])   # the walk up
+
     def test_ai_like_lord_does_not_charge_alone(self):
         st = line_army(attacker=1, gap=600, lord_ahead=150)                      # side 1's lord far in front
         o = opponents.ai_like(st)
