@@ -106,6 +106,18 @@ Ours: [pace and fatigue](../units/pace.md), [simulator](../../training/simulator
   1020 m. The WH2 key
   `scaled_playable_area_size_min/max` is 1024 — consistent with our 1020 m edge (medium).
 
+## Tried and rejected
+
+- **The rout's direction as a mix of directions** (`morale.rout_direction`): a router's way the sum of "away from the
+  enemies within 150 m" (weighted 1/d), "away from the standing enemies' centre" and "to the nearest map edge" with
+  weights 0.5 / 0.5 / 0 to 20 s, 0.5 / 0.4 / 0.1 from 20 s, 0.2 / 0.6 / 0.2 from 45 s (estimated from 4.8k / 22k / 54k /
+  67k routing seconds of the recordings, not a formula of the game; `build/routgap/rout_dir.py`). The twin of 24 it3-it5
+  battles, the network's Skaven, before -> after (game): running away from the near enemies 0.96-1.00 -> 0.42-0.95
+  (0.60-0.72), away from the enemies' centre 0.67-0.87 -> 0.92-0.99 (0.47-0.83 - past the game); rally after 33 -> 32 s
+  (54); an enemy within 95 m after 18 s of a rout 0.55 -> 0.69 (0.79); morale <= 0 0.54 -> 0.37 (0.33); shattered for good
+  0.27 -> 0.24 (0.41); our losses while routing 0.025 -> 0.025 (0.070); the it6 card: 0.022 -> 0.019 (0.067). Rejected:
+  the weights are fitted and the main gap (losses while routing) did not move.
+
 [tws]: https://twwstats.com/kv/rules
 [chspeed]: https://steamcommunity.com/app/1142710/discussions/0/3589960830790650436/
 [chdist]: https://steamcommunity.com/app/1142710/discussions/0/4630357120384001354/
