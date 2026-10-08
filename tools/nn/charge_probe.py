@@ -35,7 +35,12 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           game against 0.38 in the simulator): swordsmen and clanrats attacking each other from 3 m, a second clanrat
           unit standing 4 m beside the clanrats (never ordered; in every lane alike); 10 s after contact the
           swordsmen get (a) an attack on the second unit, (b) the same attack again, (c) a halt (the bridge's hold),
-          (d) a move 5 m back at a walk, (e) nothing (the control) - 2 battles, lanes rotated.
+          (d) a move 5 m back at a walk, (e) nothing (the control) - 2 battles, lanes rotated;
+  meleeorders  hold and move in melee (OPEN after fresh: the network's units in melee killed 0.08/s under hold and
+          0.03/s under move in the game, 0.21 / 0.14 in the simulator): swordsmen <-> clanrats attacking each other
+          from 3 m; 10 s after contact the swordsmen get a halt (the bridge's hold), a move at a run to a point 5 / 15
+          / 40 m ahead (through the clanrats) or 5 / 15 m aside, or nothing (the control) - 2 battles of 5 lanes
+          (battle 1: halt, ahead 5 / 15 / 40, control; battle 2: aside 5 / 15, ahead 15, halt, control).
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -98,7 +103,7 @@ STEADY_FROM_S = 15.0   # the charge bonus fades over 13 s (charge_decay_duration
 RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
-PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh")
+PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders")
 # the fresh plan's orders 10 s after contact (entries/charge_probe.lua lane.after.kind)
 FRESH = ("attack_t2", "attack_same", "halt", "move_near", "none")
 VV = "wh2_main_character_abilities_verminous_valour"
@@ -176,6 +181,14 @@ def battles(plan):
                      after={"at_s": 10, "kind": kind, "dx": 0, "dz": 5, "walk": kind == "move_near"})
                 for kind in FRESH]
         out += [base, rotate(base, 2)]
+    elif plan == "meleeorders":
+        # the attacker faces -z (its target): ahead = dz < 0 (through the clanrats), aside = dx > 0; at a run (the
+        # network's move orders: 951 of 1054 at a run in the it1 battles)
+        def mo(kind, dx=0, dz=0):
+            return lane("swords", "clanrat", "attack_walk", "both", gap_m=3, fight_s=45,
+                        after={"at_s": 10, "kind": kind, "dx": dx, "dz": dz, "walk": False})
+        out.append([mo("halt"), mo("move_near", dz=-5), mo("move_near", dz=-15), mo("move_near", dz=-40), mo("none")])
+        out.append([mo("move_near", dx=5), mo("move_near", dx=15), mo("move_near", dz=-15), mo("halt"), mo("none")])
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),

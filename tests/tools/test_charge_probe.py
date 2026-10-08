@@ -43,6 +43,16 @@ def test_the_fresh_plan_puts_every_order_in_every_lane_with_a_second_target():
         assert lane["t2_dx"] == 34 and lane["after"]["at_s"] == 10 and lane["target_mode"] == "both"
 
 
+def test_the_meleeorders_plan_gives_hold_moves_and_a_control_10_s_after_contact():
+    b = cp.battles("meleeorders")
+    assert len(b) == 2 and all(len(x) == 5 for x in b)
+    orders = [(l["after"]["kind"], l["after"]["dx"], l["after"]["dz"]) for x in b for l in x]
+    assert ("halt", 0, 0) in orders and ("none", 0, 0) in orders
+    assert {o for o in orders if o[0] == "move_near"} == {("move_near", 0, -5), ("move_near", 0, -15),
+                                                           ("move_near", 0, -40), ("move_near", 5, 0), ("move_near", 15, 0)}
+    assert all(l["after"]["at_s"] == 10 and not l["after"]["walk"] and l["target_mode"] == "both" for x in b for l in x)
+
+
 def test_battle_file_is_written(tmp_path):
     path = cp.write_scenario("hit", 1, tmp_path / "x.xml")
     xml = path.read_text(encoding="utf-8")
