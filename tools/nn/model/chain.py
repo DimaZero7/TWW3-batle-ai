@@ -34,11 +34,13 @@ from tools.nn.sim.orders import ATTACK, KEEP, KINDS, MOVE, WITHDRAW
 
 
 def _cat(logits, temperature=1.0):
+    # (a non-finite logit as masked: sampling never asserts on the GPU; it was never seen with finite inputs)
+    logits = torch.nan_to_num(logits, nan=NEG, posinf=-NEG, neginf=NEG)
     return Categorical(logits=logits / max(temperature, 1e-6), validate_args=False)
 
 
 def _pick(logits, greedy, temperature):
-    return logits.argmax(-1) if greedy else _cat(logits, temperature).sample()
+    return torch.nan_to_num(logits, nan=NEG).argmax(-1) if greedy else _cat(logits, temperature).sample()
 
 
 class ChainHeads(nn.Module):

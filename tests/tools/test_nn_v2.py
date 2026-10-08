@@ -547,3 +547,40 @@ def test_a_flank_threat_ends_a_commitment_only_once_it_has_lasted_2_s():
         st = commit.apply(st, x, torch.full((B,), float(t)), a)
         st["until"][:, 0] = 100.0                                   # (kept committed, to see every event)
     assert free == [False, False, False, False, False, False, True, False, False]
+
+
+def test_the_eyes_targets_and_what_they_feed_back_are_bounded_and_finite():
+    T, R, N = 3, 1, 2
+    before = {"hp": torch.ones(T, R, N), "gold": torch.zeros(T, R, N)}
+    after = {"hp": torch.tensor([[[0.5, float("nan")]]] * T), "gold": torch.full((T, R, N), 1e6)}
+    tg = eyes.targets(before, after, torch.zeros(T, R, dtype=torch.bool), torch.zeros(T, R), 1.0)
+    assert torch.isfinite(tg["own"]).all() and torch.isfinite(tg["threat"]).all()
+    assert float(tg["threat"].max()) == eyes.THREAT_CAP * eyes.THREAT_SCALE           # cost 0 and a huge damage
+    assert float(tg["own"][0, 0, 1, 0]) == 0.0                                        # a NaN health: 0
+    # an extreme prediction (the threat head's last layer pushed to +1e6) changes the tokens no more than the cap
+    setup, state, obs = setup_obs()
+    o = v2_obs(obs, setup)
+    net = model()
+    x = torch.randn(2, 1 + o["own"].shape[1], CFG.d)
+    s = torch.randn(2, CFG.sectors ** 2, CFG.sector_d)
+    with torch.no_grad():
+        net.eyes.threat[-1].bias.fill_(1e6)
+        net.eyes.danger[-1].bias.fill_(float("nan"))
+        x2, s2, seen = net.eyes(x, s, o)
+    assert float(seen["eyes_threat"].max()) > 1e5
+    assert torch.isfinite(x2).all() and torch.isfinite(s2).all()
+    w = net.eyes.threat_in.weight.abs().sum() * eyes.THREAT_CAP * eyes.THREAT_SCALE + net.eyes.threat_in.bias.abs().sum()
+    assert float((x2 - x).abs().max()) <= float(w + net.eyes.own_in.weight.abs().sum() + net.eyes.own_in.bias.abs().sum())
+
+
+def test_a_non_finite_gradient_skips_the_step():
+    import dataclasses
+    actor, crit = tiny()
+    env = rollout.Battles(league.layout(4, 1, {"self": 0.5, "nearest": 0.5}), MIRROR)
+    batch = rollout.collect(env, actor, crit, 2)
+    batch["value"] = batch["value"] * float("nan")              # a NaN return: every gradient NaN
+    before = [p.detach().clone() for p in actor.parameters()]
+    opt = torch.optim.Adam(list(actor.parameters()) + list(crit.parameters()), lr=1e-3)
+    st = ppo.update(actor, crit, opt, batch, dataclasses.replace(ppo.PPOConfig(), epochs=1, minibatch=4))
+    assert st["skipped"] >= 1
+    assert all(torch.equal(a, b) for a, b in zip(before, actor.parameters()))

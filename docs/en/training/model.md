@@ -368,7 +368,7 @@ flowchart TB
   Weight 5: on the first chunks against `nearest` the eyes' gradient at weight 1 was 0.05 of PPO's (0.004 vs 0.08),
   at 5 ~0.25. The log has each head's error and explained share (`eyes_<head>`, `eyes_ev_<head>`). Fresh heads start
   predicting about 0 (as almost every target is): from 0.5 the first error (~23, mostly the 256 sectors) gave the eyes
-  a gradient 1000 × PPO's. The critic gets no eyes (it sees the whole field anyway). Picture: `build/v2/eyes_png.py`.
+  a gradient 1000 × PPO's. The targets are bounded (health shares 0–1, the threat at most our army's cost), so is what goes back into the network (threat ≤ 1 army cost, danger ≤ 4), a non-number as 0; a step with a non-finite gradient is skipped (`skipped` in the log); the explained share is over the whole update (per minibatch it gave −270 where the targets were nearly all 0). The critic gets no eyes (it sees the whole field anyway). Picture: `build/v2/eyes_png.py`.
 - **Reward v2** (`run.py --reward v2`): win / loss + the gold trade + order change cost 0.006 (keep and a
   repeated order free); lord, idle and retarget 0.
 - **From scratch.** `--preset v2` without `--init` starts from `build/nn-train/random_v2.pt` (written if missing);

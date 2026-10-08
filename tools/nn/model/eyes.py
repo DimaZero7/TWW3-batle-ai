@@ -27,6 +27,8 @@ from tools.nn.model import sectors
 
 HORIZONS_S = (10.0, 30.0)
 THREAT_SCALE = 10.0
+THREAT_CAP = 1.0      # the threat target at most this share of our army's cost (x THREAT_SCALE)
+DANGER_CAP = 4.0      # a sector's danger fed back at most this (health shares; 4 units losing all)
 HEADS = ("own10", "own30", "threat30", "danger10")
 PRED_KEYS = ("eyes_own", "eyes_threat", "eyes_danger")
 
@@ -62,9 +64,13 @@ class Eyes(nn.Module):
         p = self.unit_proj(u)
         agg = torch.cat([torch.einsum("bns,bnk->bsk", one, p * own), torch.einsum("bns,bnk->bsk", one, p * enemy)], -1)
         danger_p = F.softplus(self.danger(torch.cat([s, agg], -1)))[..., 0]
-        back = self.own_in(own_p.detach()) * own + self.threat_in(threat_p.detach()[..., None]) * enemy
+        # fed back bounded (and a stray non-finite value as 0): an extreme prediction cannot blow up the tokens
+        own_b = torch.nan_to_num(own_p.detach(), nan=0.0).clamp(0, 1)
+        threat_b = torch.nan_to_num(threat_p.detach(), nan=0.0, posinf=0.0).clamp(0, THREAT_CAP * THREAT_SCALE)
+        danger_b = torch.nan_to_num(danger_p.detach(), nan=0.0, posinf=0.0).clamp(0, DANGER_CAP)
+        back = self.own_in(own_b) * own + self.threat_in(threat_b[..., None]) * enemy
         x = x + F.pad(back, (0, 0, 1, 0))
-        s = s + self.danger_in(danger_p.detach()[..., None])
+        s = s + self.danger_in(danger_b[..., None])
         return x, s, {"eyes_own": own_p, "eyes_threat": threat_p, "eyes_danger": danger_p}
 
 
@@ -110,8 +116,10 @@ def targets(before, after, done, cost, decision_s):
     hp10, ok10 = change(before["hp"], after["hp"], done, k10)
     hp30, ok30 = change(before["hp"], after["hp"], done, k30)
     gold30, _ = change(before["gold"], after["gold"], done, k30)
-    return {"own": torch.stack([(-hp10).clamp(0, 1), (-hp30).clamp(0, 1)], -1),
-            "threat": (gold30 / cost[..., None]).clamp(min=0) * THREAT_SCALE, "ok": torch.stack([ok10, ok30], -1)}
+    # every target bounded and finite (a stray NaN as 0; the cost at least 1 gold)
+    own = torch.nan_to_num(torch.stack([-hp10, -hp30], -1), nan=0.0).clamp(0, 1)
+    threat = torch.nan_to_num(gold30 / cost.clamp(min=1.0)[..., None], nan=0.0, posinf=0.0).clamp(0, THREAT_CAP)
+    return {"own": own, "threat": threat * THREAT_SCALE, "ok": torch.stack([ok10, ok30], -1)}
 
 
 def _mean_var(err, y, m):

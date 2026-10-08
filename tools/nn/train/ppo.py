@@ -228,7 +228,7 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
     if eyes_tg is not None:
         for h in meyes.HEADS:
             stats[f"eyes_{h}"] = 0.0
-            stats[f"eyes_ev_{h}"] = 0.0
+            stats[f"eyes_ref_{h}"] = 0.0
     teach_acc = {n: [0.0] * 7 for n in taught["names"]} if taught else {}
     for _ in range(cfg.epochs):
         order = torch.randperm(R, device=adv.device)
@@ -283,7 +283,7 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                                                    flat)
                         for h, (mse, ref) in parts_e.items():
                             step[f"eyes_{h}"] += float(mse.detach()) * share
-                            step[f"eyes_ev_{h}"] += (1.0 - float(mse.detach()) / max(float(ref), 1e-9)) * share
+                            step[f"eyes_ref_{h}"] += float(ref) * share
                 vl = ((critic(cobs) - _rows(ret, pidx)) ** 2).mean()
                 policy_part = pl - cfg.entropy * entropy + cfg.anchor * anchored + imitation + cfg.eyes * seen
                 loss = cfg.value * vl + (policy_part if train_policy else 0.0)
@@ -293,9 +293,14 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                 for k, x in (("policy_loss", pl), ("value_loss", vl), ("entropy", entropy), ("kl", kl),
                              ("clip", clipped), ("entropy_all", masked_mean(ent, ctrl)), ("anchor_kl", anchored)):
                     step[k] += float(x.detach()) * share
+            # one norm clip for the actor's whole loss (PPO + anchor + teacher + the eyes), one for the critic's
             grad_norm = torch.nn.utils.clip_grad_norm_(actor_params, cfg.max_grad)
             grad_norm_critic = torch.nn.utils.clip_grad_norm_(critic_params, cfg.max_grad)
-            opt.step()
+            if torch.isfinite(grad_norm) and torch.isfinite(grad_norm_critic):
+                opt.step()
+            else:                                    # a non-finite gradient: no step (it would poison the weights)
+                stats["skipped"] = stats.get("skipped", 0.0) + 1.0
+                opt.zero_grad(set_to_none=True)
             step["grad_norm"], step["grad_norm_critic"] = float(grad_norm), float(grad_norm_critic)
             kl = step["kl"]
             for k, x in step.items():
@@ -310,6 +315,12 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
     critic.eval()
     out = {k: v / max(1, n) for k, v in stats.items()}
     out["minibatches"] = n
+    out["skipped"] = stats.get("skipped", 0.0)
+    for h in meyes.HEADS:
+        # explained share over the whole update (one minibatch whose targets are all ~0 gave -270 averaged per
+        # minibatch: a ratio of two tiny numbers, not an error of the eyes)
+        if f"eyes_ref_{h}" in out:
+            out[f"eyes_ev_{h}"] = 1.0 - out[f"eyes_{h}"] / max(out.pop(f"eyes_ref_{h}"), 1e-9)
     if taught:
         out["teach"] = drill_teach.summary(teach_acc, teach, taught.get("shares"))
     out["reward"] = float(batch["reward"].sum(0).mean())
