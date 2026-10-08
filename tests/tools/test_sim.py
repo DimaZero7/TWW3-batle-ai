@@ -300,8 +300,12 @@ class TestMelee:
         st.u["order_target"][0, 0] = H         # its own target: the whole rate
         full = float(melee.strikes(st.u, pw, contact, params, z)[0][0, 0, H])
         st.u["order_target"][0, 0] = H + 1     # told to attack another slot, touching the slaves
+        st.u["order_s"][:] = 100.0             # a settled order (given before the fight or over 24 s ago)
         busy = float(melee.strikes(st.u, pw, contact, params, z)[0][0, 0, H])
         assert busy == pytest.approx(full * share, rel=1e-4)
+        st.u["order_s"][:] = 3.0               # given in melee 3 s ago: contact.fresh_incidental within the window
+        fresh = float(melee.strikes(st.u, pw, contact, params, z)[0][0, 0, H])
+        assert fresh == pytest.approx(full * P.sim["contact"]["fresh_incidental"], abs=1e-6)
 
     def test_a_formation_holding_in_melee_strikes_at_the_hold_rate_a_missile_unit_and_a_lord_in_full(self):
         k = P.sim["contact"]["hold_rate"]

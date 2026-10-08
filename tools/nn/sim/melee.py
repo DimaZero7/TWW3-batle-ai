@@ -263,7 +263,15 @@ def strikes(u, pw, contact, params, charge_now, first=False):
     # The same for an enemy unit it only touches: unit_incidental of its rate (gate battles, 02.10.2026:
     # a unit fought by one enemy unit took 19.6 HP/s in the game, 33.9 in the open-loop replay, when
     # other enemy units stood within 35 m of it; 16.5 against 20.7 when none did).
-    rate = torch.where(~single_j & ~single_i & busy, rate * float(cc.get("unit_incidental", 1.0)), rate)
+    inc = torch.full_like(rate, float(cc.get("unit_incidental", 1.0)))
+    if cc.get("fresh_incidental") is not None and "order_s" in u:
+        # Within the database's melee_breakoff_secs (24 s) of an attack order given in melee on another enemy, it
+        # strikes the units it only touches at contact.fresh_incidental (the fresh-order probe,
+        # build/charge-probe/runs/20261008-145559 / -145641: swordsmen told to attack clanrats 4 m beside the clanrats
+        # they fought dealt those 0 HP for 25 s in 2 lanes of 2, still touching them, then fought them again).
+        fresh = (u["order_s"] < float(B.get("melee_breakoff_secs", 0.0)))[:, :, None]
+        inc = torch.where(fresh, float(cc["fresh_incidental"]), inc)
+    rate = torch.where(~single_j & ~single_i & busy, rate * inc, rate)
     # A formation without a missile weapon standing under HOLD in melee (no attack order) strikes at hold_rate of
     # the rule (measured: the melee probe's held units - braced spearmen, spearmen facing away, swordsmen - strike
     # clanrats at 0.49-0.52 of it from 5 s on, 6 lanes; the network's held units in the gates 0.80 of the kills of

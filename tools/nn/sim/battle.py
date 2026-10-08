@@ -68,6 +68,9 @@ def step(st, orders, params=None, dt=None):
     kind = torch.where((kind == O.ATTACK) & ~t_ok, torch.full_like(kind, O.HOLD), kind)
     tgt = torch.where(kind == O.ATTACK, tgt, torch.full_like(tgt, -1))
     point = (kind == O.MOVE) | (kind == O.WITHDRAW)
+    # another order than the one in force (kind, target or a point moved over 1 m): ends a latched leave (below)
+    new_order = (kind != u["order_kind"]) | (tgt != u["order_target"]) | (
+        take & point & (((orders.x - u["ox"]) ** 2 + (orders.z - u["oz"]) ** 2) > 1.0))
     u["ox"] = torch.where(take & point, orders.x, u["ox"])
     u["oz"] = torch.where(take & point, orders.z, u["oz"])
     # A new order (another kind, or another attack target) makes a shooter aim again (missile.aim_reset_on_order;
@@ -76,6 +79,12 @@ def step(st, orders, params=None, dt=None):
         changed = (kind != u["order_kind"]) | (tgt != u["order_target"])
         u["aim"] = torch.where(changed, torch.zeros_like(u["aim"]), u["aim"])
     u["order_kind"], u["order_target"], u["order_run"] = kind, tgt, run
+    if "order_s" in u:
+        # the order's clock (contact.fresh_incidental, melee.py): a new order given in melee starts it at 0, out of
+        # melee at the window (an order given before the fight is not a fresh order in melee)
+        win = float(R.get("melee_breakoff_secs", 0.0))
+        u["order_s"] = torch.where(new_order, torch.where(u["m"], torch.zeros_like(u["order_s"]),
+                                                          torch.full_like(u["order_s"], win)), u["order_s"] + dt)
 
     # --- contacts ---
     pw = geometry.pairwise(u, spacing)
@@ -91,7 +100,8 @@ def step(st, orders, params=None, dt=None):
     # It walks out of the fight: it strikes nobody and is not held in place, the enemies in contact
     # still strike it (measured in the game, config/nn/sim.json contact.why).
     leave_m = float(cal["contact"].get("leave_m", 0.0))
-    far_point = torch.sqrt((u["ox"] - u["x"]) ** 2 + (u["oz"] - u["z"]) ** 2) >= leave_m
+    point_d = torch.sqrt((u["ox"] - u["x"]) ** 2 + (u["oz"] - u["z"]) ** 2)
+    far_point = point_d >= leave_m
     if cal["contact"].get("leave_away_only"):
         # A move order through the enemy it touches is not a leave (contact.leave_away_only; the probe build/probes7
         # P3: spearmen ordered to walk to a point 60 m beyond the clanrat spearmen attacking them, as CA's planner
@@ -101,8 +111,17 @@ def step(st, orders, params=None, dt=None):
         mdx, mdz = u["ox"] - u["x"], u["oz"] - u["z"]
         dx, dz = u["x"][:, None, :] - u["x"][:, :, None], u["z"][:, None, :] - u["z"][:, :, None]
         toward = (mdx[:, :, None] * dx + mdz[:, :, None] * dz) > 0
-        far_point = far_point & ~(touch & toward).any(2)
+        # A point away from every enemy it touches is a leave from contact.leave_away_m on (the fresh-order probe,
+        # build/charge-probe/runs/20261008-145559 / -145641: swordsmen in melee told to walk 5 m back turned about
+        # and struck nothing for 21-25 s, 2 lanes of 2; config/nn/sim.json contact.leave_away_why); absent: leave_m.
+        away_m = float(cal["contact"].get("leave_away_m", leave_m))
+        far_point = ~(touch & toward).any(2) & (point_d >= away_m)
     leaving = (kind == O.WITHDRAW) | ((kind == O.MOVE) & far_point & (leave_m > 0))
+    if cal["contact"].get("leave_latch") and "exit_s" in u:
+        # A move that began as a leave in contact stays one while its order stands (contact.leave_latch): arrived at
+        # a near point, the unit still strikes nobody until the 24 s window drops the order (the same probe: the
+        # 5 m leavers stood chased at their point, moving, 0 HP dealt until 21-25 s, then fought on).
+        leaving = leaving | ((kind == O.MOVE) & (u["exit_s"] > 0) & ~new_order)
     if cal["contact"].get("attack_leave"):
         # An attack order on an enemy it does not touch, its edge contact.leave_m or more away, given to a formation
         # without a missile weapon that touches a standing enemy, is a leave too (contact.attack_leave;
@@ -592,12 +611,23 @@ def step(st, orders, params=None, dt=None):
     close_to = foe_gap.argmin(2)
     close_gap = foe_gap.min(2).values
     closing = engaged & ~leaving & (close_gap > 0) & (close_gap < 1e9)
+    retarget = torch.zeros_like(closing)
+    if cal["contact"].get("retarget_walk"):
+        # A formation in melee told to attack an enemy it does not touch (and not leaving: the target nearer than
+        # attack_leave's leave_m) is not held where it fights nor closes on its nearest foe: it walks to its target
+        # (contact.retarget_walk; the fresh-order probe: swordsmen told to attack clanrats 4 m beside the clanrats
+        # they fought turned 75-80 deg and walked 8 m to them in 6-8 s, moving 0.85-0.90 of the first 10 s).
+        ti_r = tgt.clamp(min=0)[:, :, None]
+        retarget = (engaged & ~leaving & (kind == O.ATTACK) & (tgt >= 0) & ~touch.gather(2, ti_r).squeeze(2)
+                    & (u["men0"] > 1) & (u["range"] <= 0))
+        closing = closing & ~retarget
+        want = torch.where(retarget, u["walk"], want)
     cx, cz = u["x"].gather(1, close_to), u["z"].gather(1, close_to)
     gx = torch.where(closing, cx, gx)
     gz = torch.where(closing, cz, gz)
     want = torch.where(closing, u["walk"], want)
     moving = moving | closing
-    locked = engaged & (~leaving | pinned) & ~closing
+    locked = engaged & (~leaving | pinned) & ~closing & ~retarget
     if cal["contact"].get("chase"):
         # a chaser in contact with its leaving target (above) is not held in place: it moves with it (below)
         locked = locked & ~chasing

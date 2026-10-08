@@ -138,6 +138,7 @@ without it, 5 with it) - whole battles show no sprint before contact; OPEN. The 
 at 60 / 120 / 180 s are now as in the game: 0.25 / 0.43 / 0.55 (game 0.25 / 0.41 / 0.53; was 0.32 / 0.51 /
 0.63).
 An attack order on a target out of contact (its edge 10 m or more away) given to a unit in melee is a leave like a withdraw (`contact.attack_leave`; in the game such a unit kills 0.01-0.03 men a second against 0.27-0.40): the twin of 24 battles against `ai_like` - v2 wins 16 -> 6 and 16 -> 3 of 32, grid_s46 16 -> 16 (game 0 / 0 / 3 of 8) ([melee](game/mechanics/melee.md#in-game-check-the-melee-probe)).
+A new order in melee (the `fresh` probe): an attack given in melee strikes only its target for 24 s (`contact.fresh_incidental` 0), a unit walks to a near target out of contact, a point away from the enemy is a leave from 1 m on and lasts to the 24 s window: the twin of the 8 it1 battles - melee HP dealt 0.439 -> 0.428 (game 0.447), a new attack on a near target 0.38 -> 0.23 kills a second (game 0.20); hold and move in melee - OPEN ([melee](game/mechanics/melee.md#in-game-check-the-melee-probe)).
 
 **Gate replay** — the in-game gate battles replayed in the simulator (both sides from the
 recording). Gold trade at the game's end time: game −0.26…−0.41, simulator −0.05…−0.24 on the

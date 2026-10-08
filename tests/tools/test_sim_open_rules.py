@@ -178,12 +178,65 @@ class TestAttackLeave:
         assert P.sim["contact"]["attack_leave"] == 1
         assert self.dealt("far") == pytest.approx(0.0, abs=1e-3)
         assert self.dealt("near") > 0
-        assert self.dealt("far", P.with_cal("contact", attack_leave=0)) > 0          # off: fights on (the old rule)
+        # off (and the old full strikes on a touched non-target): fights on
+        assert self.dealt("far", P.with_cal("contact", attack_leave=0, fresh_incidental=None)) > 0
 
     def test_a_missile_unit_is_not_concerned(self):
         archers = "wh_main_emp_inf_crossbowmen"
         assert self.dealt("far", key=archers) == pytest.approx(self.dealt("far", P.with_cal("contact", attack_leave=0),
                                                                                key=archers))
+
+
+# --- the fresh-order probe (build/charge-probe/runs/20261008-145559, -145641): a new order in melee ---
+
+class TestFreshOrders:
+    """Swordsmen and clanrats attack each other from 3 m, a second clanrat unit 4 m beside the clanrats (held); 10 s
+    after contact the swordsmen get a new order (tools/nn/charge_probe.py plan fresh)."""
+    def lane(self, params=P):
+        st = scenario.build([army([(SWORD, 0, 20, 180)], [(CLANRATS, 0, -10, 0), (CLANRATS, 34, -10, 0)])], P)
+        front, depth = geometry.dims(st.u, P.sim["formation"]["spacing_m"])
+        H = st.N // 2
+        st.u["z"][0, H] = st.u["z"][0, H + 1] = -depth[0, H] / 2
+        st.u["x"][0, H + 1] = 34.0
+        st.u["z"][0, 0] = 3.0 + depth[0, 0] / 2
+        st.u["unbreakable"][:] = True
+        for _ in range(int(12 / params.dt)):
+            battle.step(st, orders(st, **{"0": (O.ATTACK, H, False), str(H): (O.ATTACK, 0, False)}), params)
+        assert bool(st.u["m"][0, 0])
+        return st, H
+
+    def after(self, order, seconds, params=P):
+        """HP the first clanrats and the second lose in `seconds` after the order; the swordsmen's x moved."""
+        st, H = self.lane(params)
+        hp0, hp1, x0 = float(st.u["hp_abs"][0, H]), float(st.u["hp_abs"][0, H + 1]), float(st.u["x"][0, 0])
+        kind, arg = order
+        if kind == O.MOVE:
+            arg = (float(st.u["x"][0, 0]), float(st.u["z"][0, 0]) + arg)
+        elif kind == O.ATTACK:
+            arg = H + arg
+        for k in range(int(seconds / params.dt)):
+            o = orders(st, **{"0": (kind, arg, kind == O.ATTACK), str(H): (O.ATTACK, 0, False)})
+            if k > 0:
+                o.kind[0, 0] = O.KEEP
+            battle.step(st, o, params)
+        return hp0 - float(st.u["hp_abs"][0, H]), hp1 - float(st.u["hp_abs"][0, H + 1]), float(st.u["x"][0, 0]) - x0
+
+    def test_attacking_the_near_second_unit_spares_the_first_and_walks_to_the_second(self):
+        # the game: the first clanrats lost 0 HP for 30 s, the swordsmen walked 8 m to the second unit in 6-8 s
+        first, second, dx = self.after((O.ATTACK, 1), 10.0)
+        assert first == pytest.approx(0.0, abs=1e-3) and dx > 3.0
+        old = P.with_cal("contact", fresh_incidental=None, retarget_walk=0)
+        first_old, _, dx_old = self.after((O.ATTACK, 1), 10.0, old)
+        assert first_old > 100.0 and abs(dx_old) < 1.0                      # the old rule: fights on where it stands
+
+    def test_a_walk_5_m_back_is_a_leave_until_the_window(self):
+        # the game: swordsmen told to walk 5 m back struck nothing for 21-25 s (chased by the clanrats attacking them)
+        first, _, _ = self.after((O.MOVE, 5.0), 15.0)
+        assert first == pytest.approx(0.0, abs=1e-3)
+        held, _, _ = self.after((O.MOVE, 5.0), 15.0, P.with_cal("contact", leave_away_m=10.0))
+        assert held > 50.0                                                  # within leave_m: fought on at hold_rate
+        unlatched, _, _ = self.after((O.MOVE, 5.0), 15.0, P.with_cal("contact", leave_latch=0))
+        assert unlatched > 0.0                                              # arrived, it would fight again at once
 
 
 # --- C2 / R4: leaving melee, the chase and its 24 s window ---

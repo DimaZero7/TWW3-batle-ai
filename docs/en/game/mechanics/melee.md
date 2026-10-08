@@ -368,6 +368,29 @@ centre 35–50 / 50–80 / 80+ m): 0.06 / 0.06, 0.07 / 0.05, 0.12 / 0.10 a secon
 ordinary long fight 0.33 -> 0.32 kills a second (game 0.27). No rule online: players only say a unit in contact drops
 its order and fights its neighbour and that the exit window is ~25 s; the database has only `melee_breakoff_secs` 24.
 
+**A new order in melee (the `fresh` probe).** Swordsmen and clanrats attack each other from 3 m, a second clanrat
+unit stands 4 m aside; 10 s after contact the swordsmen get one more order (2 battles, 2 lanes a variant,
+`build/charge-probe/runs/20261008-145559`, `-145641`). Kills by the swordsmen a second (HP the clanrats lose a second)
+at 0–5 / 5–10 / 10–20 / 20–30 s after the order:
+
+| Order | Game | Simulator before | Simulator after |
+|---|---|---|---|
+| none (control) | 0.80 (52) / 0.40 (33) / 0.45 (32) / 0.70 (32) | 0.59 (35) throughout | the same |
+| the same attack again | 0.50 (60) / 0.40 (43) / 0.35 (35) / 0.60 (31) | 0.59 (35) | the same |
+| attack the second unit | 0.20 (12) / 0.10 (35) / 0.05 (11) / 0.25 (29) | 0.59 (35) | 0 (0) / 0 (10) / 0.09 (17) / 0.50 (30) |
+| walk 5 m back | 0.30 (22) / 0 (0) / 0 (0) / 0 (16) | 0.30 (18) | 0 (0) / 0 (0) / 0 (0) / 0.18 (11) |
+| halt (the bridge's hold) | 0.70 (34) / 0.10 (39) / 0.35 (18) / 0.30 (23) | 0.30 (18) | the same |
+
+Repeating the same attack costs nothing. Attacking the second unit, the swordsmen turn 75–80 deg, walk 8 m to it in
+6–8 s and strike the clanrats they still touch not at all for 25 s after the order, then again - the
+`melee_breakoff_secs` 24 s window. A unit told to walk 5 m back turns about, is chased and strikes nothing for
+21–25 s. Rules (`contact.fresh_incidental` 0, `retarget_walk`, `leave_away_m` 1, `leave_latch`): an attack order given
+in melee strikes only its target for 24 s; a unit in melee whose target is near but not touched walks to it; a point
+away from every touched enemy is a leave from 1 m on (the smallest measured 5 m), and the leave lasts while the order
+stands, up to the 24 s window. The twin of the 8 it1 battles: melee HP dealt 0.439 -> 0.428 (game 0.447); a new attack
+on a near target 0.38 -> 0.23 kills a second (game 0.20), a settled fight 0.39 -> 0.30 (0.31); grid_s46 0.482 -> 0.486
+(0.517). Online only: a unit in contact drops its order and fights its neighbour, the exit window is ~25 s.
+
 ## Not found
 
 No public CA source explains `melee_breakoff_secs` 24 / `melee_breakoff_total_immunity_secs` 10
@@ -381,9 +404,10 @@ unit is out of contact ~4 s after the order (its own melee flag goes off only af
 
 ## What is still unclear
 
-- **A fresh attack order on a near target strikes less.** In the game a unit in melee told to attack an enemy
-  within 35 m (centre) kills 0.14–0.24 a second for 20 s after the order, then 0.45–0.51 (v2 greedy; grid_s46 the
-  same). Mechanism unknown (re-forming on the new target, or which units the network gives new orders) - not modelled.
+- **Hold and move in melee.** In whole battles the network's units in melee kill 0.08 a second under hold (simulator
+  0.21) and 0.03 under move (simulator 0.14). The `fresh` probe: a halt after attacking strikes 0.7 of the control
+  (rule `hold_rate` 0.5); a move towards or through the enemy is unmeasured - a probe with points ahead and aside at
+  several distances is needed.
 - **The first 15 s of contact are stronger in the game than the rule.** In the pairs the target loses
   499–764 HP in the first 15 s, while the rule (the charge bonus, no blow) gave the simulator 396–446. The
   melee probe showed where the difference is: nearly all of it in the first second of a charge's contact (a

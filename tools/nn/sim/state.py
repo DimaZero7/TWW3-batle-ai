@@ -165,6 +165,9 @@ INTERNAL = {
     "turn_on": ("b", "a standing shooter turning to its target (missile.stand_fire_arc_deg starts it, "
                      "missile.turn_done_deg ends it)"),
     "leave_s": ("f", "seconds leaving melee while still touching an enemy (contact.pin_s)"),
+    "order_s": ("f", "seconds since the order in force was given while the unit was in melee (another kind, target or "
+                     "point given in melee restarts it; given out of melee it starts at the window, already over): "
+                     "melee.py contact.fresh_incidental within the database's melee_breakoff_secs"),
     "exit_s": ("f", "seconds since it began to leave melee (a withdraw or a far move while in contact), in contact or "
                     "not, while it keeps leaving: at the database's melee_breakoff_secs still in contact it drops the "
                     "order (battle.py, contact.breakoff)"),
