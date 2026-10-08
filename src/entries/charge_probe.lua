@@ -335,7 +335,7 @@ function M.main(bm, config, globals)
                 local d = dist(lane.a.unit, lane.t.unit)
                 if d and d <= config.men_near_m then
                     rows[#rows + 1] = {lane = lane.name, t = now - lane.t0, a = soldiers(lane.a.unit),
-                        tg = soldiers(lane.t.unit)}
+                        tg = soldiers(lane.t.unit), t2 = lane.t2 and soldiers(lane.t2.unit) or nil}
                 end
             end
         end

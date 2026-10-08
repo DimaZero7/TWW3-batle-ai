@@ -67,6 +67,15 @@ def test_the_damaged_plan_damages_the_clanrats_two_on_one_and_a_shooting_lane():
     assert all(l.get("target2", l["target"]) in names for l in config["lanes"])
 
 
+def test_the_reform_plan_records_the_soldiers_all_fight():
+    (b,) = cp.battles("reform")
+    assert len(b) == 5 and all(l["fight_s"] == 240 and l["gap_m"] == 3 for l in b)
+    config, model_s, _ = cp.run_config("reform", 1)
+    assert config["men_after_s"] >= 250 and model_s < 400
+    assert [l.get("t2_mode") for l in config["lanes"]].count("attack") == 1
+    assert sum(1 for l in config["lanes"] if l.get("damage")) == 1 and "spear" in config["lanes"][2]["attacker"]
+
+
 def test_battle_file_is_written(tmp_path):
     path = cp.write_scenario("hit", 1, tmp_path / "x.xml")
     xml = path.read_text(encoding="utf-8")
