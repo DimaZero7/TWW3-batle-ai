@@ -76,6 +76,16 @@ def test_the_reform_plan_records_the_soldiers_all_fight():
     assert sum(1 for l in config["lanes"] if l.get("damage")) == 1 and "spear" in config["lanes"][2]["attacker"]
 
 
+def test_the_reform2_plan_separates_own_losses_blow_and_depth():
+    (b,) = cp.battles("reform2")
+    assert len(b) == 5 and all(l["fight_s"] == 240 for l in b)
+    assert b[0]["damage"]["a"]["method"] == "kill" and b[1]["attacker"] == "gs"
+    assert [l.get("t_w") for l in b[2:4]] == [15, 50]
+    config, model_s, _ = cp.run_config("reform2", 1)
+    assert config["men_after_s"] >= 250 and model_s < 400
+    assert config["lanes"][2]["t_depth"] > config["lanes"][4]["t_depth"] > config["lanes"][3]["t_depth"]
+
+
 def test_battle_file_is_written(tmp_path):
     path = cp.write_scenario("hit", 1, tmp_path / "x.xml")
     xml = path.read_text(encoding="utf-8")

@@ -52,7 +52,12 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
   reform  how a formation re-forms as it loses men (build/v2gap: the twin's units fight with the same front at any
           strength, the game's thin out): the soldiers' places every second for the whole fight (men_after_s 260),
           240 s fights from 3 m (both attack): swordsmen v clanrats 1 v 1 (twice), v clanrats brought to 30 % before the
-          go (kill_number_of_men), Empire spearmen v clanrats, and two clanrat units on one swordsmen unit - 1 battle.
+          go (kill_number_of_men), Empire spearmen v clanrats, and two clanrat units on one swordsmen unit - 1 battle;
+  reform2 what makes a unit's blows fall as the fight goes on (reform: the clanrats' fell with their men, the
+          swordsmen's did not): swordsmen brought to 30 % (kill_number_of_men) v full clanrats (the striker's own losses
+          against the target's), greatswords v clanrats (another blow), clanrats 15 m wide (deep) and 50 m wide
+          (shallow) v swordsmen (the depth), and the swordsmen v clanrats control - 240 s from 3 m, the soldiers' places
+          all fight - 1 battle.
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -116,7 +121,8 @@ STEADY_FROM_S = 15.0   # the charge bonus fades over 13 s (charge_decay_duration
 RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
-PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform")
+PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
+         "reform2")
 # the reform plan: soldier places this long after contact (the whole fight)
 REFORM_MEN_S = 260
 # the fresh plan's orders 10 s after contact (entries/charge_probe.lua lane.after.kind)
@@ -229,6 +235,13 @@ def battles(plan):
                     lane("spear", "clanrat", "attack_walk", "both", **f),
                     lane("swords", "clanrat", "attack_walk", "both", target2="clanrat", t2_gap_m=4, t2_mode="attack", **f),
                     lane("swords", "clanrat", "attack_walk", "both", **f)])
+    elif plan == "reform2":
+        f = dict(gap_m=3, fight_s=240)
+        out.append([lane("swords", "clanrat", "attack_walk", "both", damage={"a": {"method": "kill", "share": 0.7}}, **f),
+                    lane("gs", "clanrat", "attack_walk", "both", **f),
+                    lane("swords", "clanrat", "attack_walk", "both", t_w=15, **f),
+                    lane("swords", "clanrat", "attack_walk", "both", t_w=50, **f),
+                    lane("swords", "clanrat", "attack_walk", "both", **f)])
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
@@ -318,7 +331,7 @@ def run_config(plan, index):
               "men_ms": 500 if turn else MEN_MS,
               "men_near_m": 60,
               # the soldiers' places: the first 30 s (the charge plan) or the whole fight (hit: men in contact)
-              "men_after_s": REFORM_MEN_S if plan == "reform" else 90 if plan in ("hit", "move", "vv") else 30,
+              "men_after_s": REFORM_MEN_S if plan in ("reform", "reform2") else 90 if plan in ("hit", "move", "vv") else 30,
               "lanes": lanes, "park": park}
     model_s = max(l["max_s"] for l in lanes) + SETTLE_MS / 1000 + 20
     return config, model_s, arena
