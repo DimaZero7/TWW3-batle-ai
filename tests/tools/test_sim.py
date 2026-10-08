@@ -803,6 +803,28 @@ class TestMissileRules:
         off = P.with_cal("missile", per_man_range_fire_move_only=0)
         assert bool(missile.per_man_mask(shooter_and([(0, 153, SLAVES)], key=hg).u, off)[0, 0])
 
+    def test_units_firing_whilst_moving_reach_25_m_past_their_range_at_half_their_men(self):
+        """missile.fire_move_reach_m / _rate (probes rangestand, rangenew; the gate sets' records, build/shotgap/reach*):
+        the militia (range 90) fire at a standing target 103 / 111 m off centre to centre, the stars (range 70) at
+        89.5 m, with at least half the men; nothing past range + 25 m; the handgunners still never at 153 m."""
+        reach = missile.reach_of(P)
+        assert reach == (25.0, 0.5)
+        for key, d, want in ((MILITIA_K, 103, 0.5), (MILITIA_K, 111, 0.5), (MILITIA_K, 116, 0.0),
+                             ("wh2_main_skv_inf_night_runners_0", 89.5, 0.5), ("wh2_main_skv_inf_night_runners_0", 96, 0.0)):
+            st = shooter_and([(0, d, SLAVES)], key=key, width=30.0, t_width=30.0)
+            pw = geometry.pairwise(st.u, 1.5)
+            H = st.N // 2
+            assert float(missile.rank_share(st.u, pw, *reach)[0, 0, H]) == pytest.approx(want), (key, d)
+            assert float(missile.rank_share(st.u, pw)[0, 0, H]) <= 1 / 7 + 1e-6       # the rank rule alone: 0-1 rank
+            mask = missile.per_man_mask(st.u, P)
+            assert bool(missile.in_range(st.u, pw, per_man=mask, reach=reach)[0, 0, H]) == (want > 0)
+        st = shooter_and([(0, 111, SLAVES)], key=MILITIA_K, width=30.0, t_width=30.0)
+        assert sum(x for _, x in shots_over(st, 30)) > 0
+        st = shooter_and([(0, 111, SLAVES)], key=MILITIA_K, width=30.0, t_width=30.0)
+        assert sum(x for _, x in shots_over(st, 30, P.with_cal("missile", fire_move_reach_m=0.0))) == 0
+        st = shooter_and([(0, 153, SLAVES)], key="wh_main_emp_inf_handgunners", width=30.0, t_width=30.0)
+        assert sum(x for _, x in shots_over(st, 30)) == 0
+
     def test_bullets_into_a_melee_hit_our_men_by_the_measured_share(self):
         """missile.friendly_fire.musket 0.08 (the probe meleefire: handgunners at 45 / 90 deg to the contact, 0.07 /
         0.08 of the hits on our men); arrows and slings keep their recorded shares."""

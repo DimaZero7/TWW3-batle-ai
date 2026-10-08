@@ -194,7 +194,7 @@ Played 07.10.2026 (runs `20261007-134716`, `-134807`; analysis `build/step4b`).
 | Handguns, a target standing at 153 / 153 / 159 m | not one shot in 300 s | 630 / 792 projectiles | 0 / 0 | the same |
 | Handguns, a 60 m wide target stepping in | one volley of 0.18 of the men at 150 m, then 30 s without a shot | 149.1 m, 0.40 | 142.1 m, 1.0 | the same; the lone volley at the target's teleport is a transient |
 | Crossbows, a target stepping in | 159.6 m (range 160) | 157.0 | 157.0 | the centre rule (arrows) holds |
-| Militia / stars, a target stepping in | **112.9 / 91.8 m** (range 90 / 70), then at the full rate | 100.2 / 78.4 | the same | **OPEN**: a standing target at 97.6 / 78.7 m they shoot by a stream / one volley (P2, `newdist`); a stepping one 20 m beyond any rule |
+| Militia / stars, a target stepping in | **112.9 / 91.8 m** (range 90 / 70), then at the full rate | 100.2 / 78.4 | 107.1 / 87.7 (`missile.fire_move_reach_m` 25, `rangestand` below) | the reach rule of units firing on the move: range + 25 m, at least half the men |
 | Friends 40 m straight ahead, the target at 69 m: militia / handguns | 199 / 25 projectiles (a volley, then stop), friends −986 / −399 HP | 0 / 0 | 0 / 0 | matches: fire held |
 | the same, the target at 90 m | 2160 / 1279–1315 projectiles (the full rate), friends −6183 / −6268 HP | 0 / 0 | 0 / 0 | **OPEN**: the distance to the target decides, not the weapon |
 | Friends 60 m ahead, the target at 88 m: handguns | 1141 projectiles (0.6 of the rate), friends −6432 HP | 0 | 0 | OPEN |
@@ -251,17 +251,23 @@ Does not match (OPEN): the militia with the target at 68.5 m fall silent after t
 converges the lines on the target's centre, while the game's standing shooters take a random man of the target (excerpt of
 CA bug report 7955) - a fix of the geometry across the line, separately.
 
-**The range of units that fire on the move (`rangestand`, a standing target)** - no rule, OPEN:
+**The range of units that fire on the move (`rangestand`, a standing target)** - the rule `missile.fire_move_reach_m`
+25 / `fire_move_reach_rate` 0.5:
 
-| Unit, target centre | Game: 1st volley / rate | Simulator |
-|---|---|---|
-| militia (range 90), 103 / 103.6 / 111 m | 1.00 / 0.07 / 0.98; rate 0.49–0.53 of the full | 0.14 at 103 m, then 0 |
-| stars (range 70), 79 / 85 / 89.5 m | 1.00 / 1.00 / 1.00; rate 0.49 / 0.54 / 0.64 | 0.22 at 79 m, then 0 |
+| Unit, target centre | Game: 1st volley / rate, projectiles | Simulator before (per-rank rule) | After |
+|---|---|---|---|
+| militia (range 90), 103 / 103.6 / 111 m | 1.00 / 0.07 / 0.98; rate 0.49–0.53 of the full; 1658 / 1750 / 1871 | 0.14 at 103 m (480), then 0 | 0.50; 1620 / 1620 / 1620 |
+| stars (range 70), 79 / 85 / 89.5 m | 1.00 / 1.00 / 1.00; rate 0.49 / 0.54 / 0.64; 544 / 1200 / 1200 | 0.16–0.28 (206 / 0 / 540) | 0.50; 660 / 1020 / 1020 |
 
-Units that fire on the move shoot a standing target past their range with a whole volley and then at about half the rate -
-up to the farthest measured point (+21 / +19.5 m). The per-rank rule (from the pistols' P2) does not give this; there is no
-upper limit (the pistol's and stars' `f41` 200 in the database - perhaps the projectile's expiry range). 1 battle needed:
-militia on a standing target at ~120 / 135 / 150 m and stars at ~95 / 110 m - where this fire ends.
+Units that fire on the move (direct fire) shoot past their range: in the simulator at least half the men while the
+target's centre is within range + 25 m. 25 m - from the first shots at a target stepping in (`rangenew`: 112.9 / 91.8 m
+at range 90 / 70, i.e. +22.9 / +21.8, and ~3 m more for the 2 s aim at a walk). The game records of the gate sets it1-it6
+(`build/shotgap/reach*.py`; the shooter standing - moved less than 0.6 m over the 2 s around the second, which takes out
+the 1 s lag of the recorded positions): standing militia / stars fire 0.059 / 0.075 shots a man a second with an enemy in
+range, 0.070 / 0.086 with the nearest enemy 0-10 m beyond, 0.050 / 0.050 at 10-20 m, 0.020 / 0.023 at 20-30 m, 0.018 /
+0.002 beyond 30 m. The others (archers, crossbows, slings, handgunners) keep the centre rule: their shots recorded at a
+target beyond range, both standing, came with another enemy within range in 73-98 % of the cases (the recorded target is
+not the shot's). The full first volley beyond the rank rule is not modelled.
 
 
 ## What does not match (open)

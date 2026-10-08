@@ -290,7 +290,9 @@ def step(st, orders, params=None, dt=None):
     ms_cal = cal["missile"]
     prev = u["aim_tgt"] if ms_cal.get("sticky_target") else None
     per_man = missile.per_man_mask(u, params)
-    aim_at = missile.choose_target(u, pw, ready, tgt, kind == O.ATTACK, exclude=behind, prev=prev, per_man=per_man)
+    reach = missile.reach_of(params)
+    aim_at = missile.choose_target(u, pw, ready, tgt, kind == O.ATTACK, exclude=behind, prev=prev, per_man=per_man,
+                                   reach=reach)
     s_arc = float(ms_cal.get("stand_fire_arc_deg", 180.0))
     turning = torch.zeros_like(ready)
     done_deg = ms_cal.get("turn_done_deg")
@@ -298,7 +300,8 @@ def step(st, orders, params=None, dt=None):
         on_stand = ready & (speed < 0.2)
         out = on_stand[:, :, None] & (pw["rel_i"].abs() > s_arc * geometry.DEG)
         ahead = missile.choose_target(u, pw, ready, tgt, kind == O.ATTACK,
-                                      exclude=out if behind is None else (out | behind), prev=prev, per_man=per_man)
+                                      exclude=out if behind is None else (out | behind), prev=prev, per_man=per_man,
+                                      reach=reach)
         ordered = (kind == O.ATTACK) & (aim_at == tgt) & (aim_at >= 0)
         aim_at = torch.where(ordered | (ahead < 0), aim_at, ahead)
         beyond = (aim_at >= 0) & out.gather(2, aim_at.clamp(min=0)[:, :, None]).squeeze(2)
