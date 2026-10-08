@@ -502,7 +502,10 @@ class TestMissile:
         for i in (0, 1):
             contact[0, i, H] = contact[0, H, i] = True
         _, hp, _ = missile.volley(st.u, pw, target, 1.0, P, contact=contact)
-        assert float(hp[0, H + 1, 1]) > float(hp[0, H + 1, 0]) > 0   # the crowd takes more than the lord
+        assert float(hp[0, H + 1, 1]) > 0 == float(hp[0, H + 1, 0])  # the crowd takes the spill, the lord none
+        _, whole, _ = missile.volley(st.u, pw, target, 1.0, P.with_cal("missile", single_entity_in_melee=1.0),
+                                     contact=contact)
+        assert float(whole[0, H + 1, 1]) > float(whole[0, H + 1, 0]) > 0   # (the old 1: the crowd more than him)
         free = contact.clone()
         free[0, 1, H] = free[0, H, 1] = False                 # our spearmen out of melee: the ordinary spill
         _, out, _ = missile.volley(st.u, pw, target, 1.0, P, contact=free)
@@ -2490,7 +2493,7 @@ class TestLordFragility:
         assert float(now[0, 0]) == P.morale["losing_combat"] == -3
         assert float(old[0, 0]) == float(old[0, H]) == float(now[0, H]) == P.morale["winning_combat_significantly"]
 
-    def test_a_lord_in_melee_takes_the_hits_aimed_at_him_whole(self):
+    def test_a_lord_in_melee_takes_none_of_the_hits_aimed_at_him_and_his_attackers_keep_the_friendly_fire(self):
         st = scenario.build([army([(GENERAL, 0, 0, 90), (SPEAR, 0, 30, 90)],
                                   [(SPEAR, 6, 0, 270), (SLINGER, 120, 0, 270)])], P)
         H = st.N // 2
@@ -2509,7 +2512,13 @@ class TestLordFragility:
         model = float(missile.hit_chance(st.u, pw, P)[0, H + 1, 0])
         rate = float(st.u["hit_rate"][0, H + 1] * missile.distance_factor(pw["dist"][0, H + 1, 0],
                                                                           P.sim["missile"]["distance_factor"]))
-        assert float(fight[0, H + 1, 0]) / float(free[0, H + 1, 0]) == pytest.approx((1 - ff) * rate / model, rel=1e-3)
+        assert P.sim["missile"]["single_entity_in_melee"] == 0.0         # measured (sim.json single_in_melee_why)
+        assert float(fight[0, H + 1, 0]) == 0.0
+        assert float(fight[0, H + 1, H]) > 0                          # the slingers' own spearmen in contact: ff
+        _, whole, _ = missile.volley(st.u, pw, target, 1.0, P.with_cal("missile", single_entity_in_melee=1.0),
+                                     contact=contact)
+        assert float(whole[0, H + 1, 0]) / float(free[0, H + 1, 0]) == pytest.approx((1 - ff) * rate / model, rel=1e-3)
+        assert float(whole[0, H + 1, H]) == pytest.approx(float(fight[0, H + 1, H]), rel=1e-6)
         assert float(old[0, H + 1, 0]) / float(free[0, H + 1, 0]) == pytest.approx((1 - ff) * lone * rate / model,
                                                                                    rel=1e-3)
 

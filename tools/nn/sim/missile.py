@@ -42,7 +42,7 @@ c = h / (2 tan theta) beyond his feet; a man of height h is hit within his radiu
                  s_v, 1, ranks) ranks meets a man with cover = 1 - (1 - min(2r / s_h, 1))^n.
 (missile.accuracy.plane false: the older ground model, sigma = k x calibration_area x d / calibration_distance x
 sqrt(1 - accuracy / 100) with a fitted k, aimed at the feet, exact files.)
-A lone man in melee keeps hit_rate x distance factor x single_entity_in_melee (measured, batch 3); spill and
+A lone man in melee keeps hit_rate x distance factor x single_entity_in_melee (measured 0: his share is lost, sim.json single_in_melee_why); spill and
 friendly fire are measured shares of those old-rule hits.
 
 Target: the ATTACK order's target if in range, else the nearest standing enemy in range, else
@@ -577,7 +577,7 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, cat
         aimed = torch.where(lone_melee, aimed_old, aimed)
         # A lone man among them (a lord) is hit as a lone target is: single_entity_factor of his
         # share (without it a lord in melee with shot enemies took the whole friendly fire).
-        # The target's own share: a lone man in melee takes single_entity_in_melee of it (measured 1:
+        # The target's own share: a lone man in melee takes single_entity_in_melee of it (measured 0:
         # config/nn/sim.json missile.single_in_melee_why); out of melee single_entity_factor.
         in_melee = (u["men0"] <= 1) & (engaged > 0)
         own = torch.where(in_melee, lone, own_out)
