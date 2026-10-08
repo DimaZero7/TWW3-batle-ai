@@ -53,6 +53,20 @@ def test_the_meleeorders_plan_gives_hold_moves_and_a_control_10_s_after_contact(
     assert all(l["after"]["at_s"] == 10 and not l["after"]["walk"] and l["target_mode"] == "both" for x in b for l in x)
 
 
+def test_the_damaged_plan_damages_the_clanrats_two_on_one_and_a_shooting_lane():
+    b = cp.battles("damaged")
+    assert len(b) == 2 and all(len(x) == 5 for x in b)
+    methods = [((l.get("damage") or {}).get("t") or {}).get("method") for x in b for l in x if l["mode"] != "shoot"]
+    assert methods.count(None) == 3 and methods.count("reduce") == 3 and methods.count("kill") == 2
+    shoot = [l for l in b[0] if l["mode"] == "shoot"]
+    assert sorted(l["t2_gap_m"] for l in shoot) == [15, 40] and all(l["target_mode"] == "hold" for l in shoot)
+    twos = [l for l in b[1] if l.get("t2_mode") == "attack"]
+    assert len(twos) == 3 and all(l["target2"] == "clanrat" for l in twos)
+    config, _, arena = cp.run_config("damaged", 1)
+    names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}
+    assert all(l.get("target2", l["target"]) in names for l in config["lanes"])
+
+
 def test_battle_file_is_written(tmp_path):
     path = cp.write_scenario("hit", 1, tmp_path / "x.xml")
     xml = path.read_text(encoding="utf-8")

@@ -11,6 +11,7 @@
 --   'hold'         no order;
 --   'withdraw'     attack_run; recharge_after_s after the first contact a move back_m away at a run,
 --                  never changed again (the melee exit: is the order kept, dropped after melee_breakoff_secs?);
+--   'shoot'        a ranged attack on the target at a walk (fire at will on), never changed;
 --   'script'       lane.steps {{at_s, kind = 'face' | 'move', bearing, width, dx, dz, run}}: at at_s after the
 --                  go a 'face' (goto_location_angle_width at its place: turn in place to the world bearing) or a
 --                  'move' (goto_location to its start + (dx, dz)); the turning tests.
@@ -28,6 +29,10 @@
 -- walk}: at_s after the first contact the attacker gets one more order (the fresh-order probe): 'attack_t2' (attack
 -- the second target), 'attack_same' (the same attack again), 'halt' (the bridge's hold), 'move_near' (a move to its
 -- place + (dx, dz)), 'none' (the control); emitted as probe_phase 'after:<kind>'.
+-- lane.t2_mode 'attack' (optional): the second target attacks the attacker at a walk at the go (two on one).
+-- lane.damage (optional) {t = {method, share}, t2 = ..., a = ...}: once placed (settle_ms before the go) the unit is
+-- brought down: method 'reduce' unit:reduce_hitpoints_unary(share), 'kill' unit:kill_number_of_men(floor(men x share))
+-- (the engine's own calls); event probe_damage with the men and health before and after.
 -- target_mode 'push': at the go the target gets a move order at a walk to a point push_m ahead of its front
 -- (through the attacker: the game's own planner's far move point), never changed.
 -- Every tick_ms 'probe_sample': per running lane both units' (and the lord's) men, health
@@ -49,7 +54,7 @@ local M = {}
 local LOG = 'tww3_bai_events.jsonl'
 local TIMER, MEN_TIMER = 'tww3_bai_charge_probe_tick', 'tww3_bai_charge_probe_men'
 M.MODES = {attack_run = true, attack_walk = true, move_run = true, recharge = true, hold = true, withdraw = true,
-    script = true}
+    script = true, shoot = true}
 M.TARGET_MODES = {stand = true, hold = true, both = true, rear = true, push = true}
 M.AFTER_KINDS = {attack_t2 = true, attack_same = true, halt = true, move_near = true, none = true}
 
@@ -145,7 +150,8 @@ function M.main(bm, config, globals)
             m = read(function() return u:is_in_melee() end), x = p and round(p:get_x()), z = p and round(p:get_z()),
             b = round(read(function() return u:bearing() end), 0),
             mv = read(function() return u:is_moving() end), fast = read(function() return u:is_moving_fast() end),
-            k = read(cco, u, 'NumKills'), fat = read(function() return u:fatigue_state() end), st = statuses(u)}
+            k = read(cco, u, 'NumKills'), fat = read(function() return u:fatigue_state() end), st = statuses(u),
+            uma = read(function() return u:is_under_missile_attack() end), cuma = read(cco, u, 'IsUnderMissileAttack')}
     end
 
     -- Soldier places of a unit in decimetres (flat x1, z1, x2, z2 ...), or nil.
@@ -340,6 +346,7 @@ function M.main(bm, config, globals)
         for _, lane in ipairs(state.lanes) do
             lane.t0, lane.running, lane.phase = now_ms(), true, 'in'
             if lane.target_mode == 'both' then attack(lane, lane.t, lane.a, false) end
+            if lane.t2 and lane.t2_mode == 'attack' then attack(lane, lane.t2, lane.a, true) end
             if lane.target_mode == 'push' then
                 orders.move(lane.t.uc, vec(lane.layout.tx, lane.z + (lane.push_m or 60)), false)
             end
@@ -348,6 +355,9 @@ function M.main(bm, config, globals)
                 attack(lane, lane.a, lane.t, false)
             elseif m == 'attack_walk' then
                 attack(lane, lane.a, lane.t, true)
+            elseif m == 'shoot' then
+                orders.set_fire_at_will(lane.a.uc, true)
+                orders.attack_ranged(lane.a.uc, lane.t.unit, false, true)
             elseif m == 'move_run' then
                 local L = lane.layout
                 orders.move(lane.a.uc, vec(L.tx, lane.z - lane.move_beyond_m), true)
@@ -377,6 +387,25 @@ function M.main(bm, config, globals)
             place(lane.a, L.ax, L.az, L.ab, lane.a_width)
             place(lane.t, L.tx, L.tz, L.tb, lane.t_width)
             if lane.t2 then place(lane.t2, L.tx + (lane.t2_dx or 0), L.tz, L.tb, lane.t_width) end
+            for who, d in pairs(lane.damage or {}) do
+                local it = ({a = lane.a, t = lane.t, t2 = lane.t2})[who]
+                if it then
+                    local u = it.unit
+                    local men0 = read(function() return u:number_of_men_alive() end)
+                    local hp0 = read(function() return u:unary_hitpoints() end)
+                    local ok, e = pcall(function()
+                        if d.method == 'kill' then
+                            u:kill_number_of_men(math.floor((men0 or 0) * d.share), false)
+                        else
+                            u:reduce_hitpoints_unary(d.share, false)
+                        end
+                    end)
+                    emit('probe_damage', {lane = lane.name, who = who, method = d.method, share = d.share,
+                        status = ok and 'done' or 'failed', error = (not ok) and tostring(e) or nil, men0 = men0,
+                        hp0 = round(hp0, 4), men1 = read(function() return u:number_of_men_alive() end),
+                        hp1 = round(read(function() return u:unary_hitpoints() end), 4)})
+                end
+            end
             if lane.lord then
                 place(state.units[lane.lord.name], L.tx, lane.z - (lane.t_depth or 0) - lane.lord.dz, 0, 5)
             end

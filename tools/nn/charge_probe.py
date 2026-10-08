@@ -40,7 +40,15 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           0.03/s under move in the game, 0.21 / 0.14 in the simulator): swordsmen <-> clanrats attacking each other
           from 3 m; 10 s after contact the swordsmen get a halt (the bridge's hold), a move at a run to a point 5 / 15
           / 40 m ahead (through the clanrats) or 5 / 15 m aside, or nothing (the control) - 2 battles of 5 lanes
-          (battle 1: halt, ahead 5 / 15 / 40, control; battle 2: aside 5 / 15, ahead 15, halt, control).
+          (battle 1: halt, ahead 5 / 15 / 40, control; battle 2: aside 5 / 15, ahead 15, halt, control);
+  damaged  damaged units in melee and the under-fire flag (build/routgap: the twin's battered units lose health
+          1.5-2.7x faster than the game's, fresh ones slower; at 30 % health the twin keeps 85-92 men where the game
+          keeps 63-74): swordsmen <-> clanrats from 3 m with the clanrats at 100 % or brought to 30 % before the go -
+          the engine's unit:reduce_hitpoints_unary(0.7) ('reduce') or unit:kill_number_of_men(70 %) ('kill');
+          battle 1: 1 v 1 at 100 / 30 reduce / 30 kill, and crossbowmen shooting held clanrats with a second clanrat
+          unit 15 / 40 m (edge to edge) beside them (is_under_missile_attack of the bystander); battle 2: two clanrat
+          units on the swordsmen (the second attacks from the side) at 100 / 30 reduce / 30 kill, 1 v 1 30 reduce and
+          100 again.
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -81,6 +89,7 @@ UNITS = {
     "spearsh": ("wh_main_emp_inf_spearmen_1", 120, EMP),
     "flag": ("wh_dlc04_emp_inf_flagellants_0", 120, EMP),
     "general": ("wh_main_emp_cha_general_0", 1, EMP),
+    "xbow": ("wh_main_emp_inf_crossbowmen", 90, EMP),
     "clanrat": ("wh2_main_skv_inf_clanrats_1", 160, SKV),
     "cspear": ("wh2_main_skv_inf_clanrat_spearmen_0", 160, SKV),
     "slave": ("wh2_main_skv_inf_skavenslaves_0", 180, SKV),
@@ -103,7 +112,7 @@ STEADY_FROM_S = 15.0   # the charge bonus fades over 13 s (charge_decay_duration
 RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
-PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders")
+PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged")
 # the fresh plan's orders 10 s after contact (entries/charge_probe.lua lane.after.kind)
 FRESH = ("attack_t2", "attack_same", "halt", "move_near", "none")
 VV = "wh2_main_character_abilities_verminous_valour"
@@ -189,6 +198,24 @@ def battles(plan):
                         after={"at_s": 10, "kind": kind, "dx": dx, "dz": dz, "walk": False})
         out.append([mo("halt"), mo("move_near", dz=-5), mo("move_near", dz=-15), mo("move_near", dz=-40), mo("none")])
         out.append([mo("move_near", dx=5), mo("move_near", dx=15), mo("move_near", dz=-15), mo("halt"), mo("none")])
+    elif plan == "damaged":
+        def dm(method):
+            return None if method is None else {"method": method, "share": 0.7}
+
+        def one(method):
+            d = dm(method)
+            return lane("swords", "clanrat", "attack_walk", "both", gap_m=3, fight_s=60, **({"damage": {"t": d}} if d else {}))
+
+        def two(method):
+            d = dm(method)
+            return lane("swords", "clanrat", "attack_walk", "both", gap_m=3, fight_s=60, target2="clanrat", t2_gap_m=4,
+                        t2_mode="attack", **({"damage": {"t": d, "t2": d}} if d else {}))
+
+        def fire(gap):
+            return lane("xbow", "clanrat", "shoot", "hold", gap_m=100, fight_s=30, answer=False, target2="clanrat",
+                        t2_gap_m=gap, max_s=120)
+        out.append([one(None), one("reduce"), one("kill"), fire(15), fire(40)])
+        out.append([two(None), two("reduce"), two("kill"), one("reduce"), one(None)])
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),

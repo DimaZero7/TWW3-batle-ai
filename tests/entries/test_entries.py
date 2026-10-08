@@ -1051,6 +1051,36 @@ class TestChargeProbe:
         sample = next(r for r in rows if r["event"] == "probe_sample")
         assert "t2" in sample["lanes"][0]
 
+    def test_damage_shoot_and_two_on_one(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            CONFIG.lanes = {CONFIG.lanes[1], CONFIG.lanes[2]}
+            CONFIG.lanes[1].mode = 'attack_walk'
+            CONFIG.lanes[1].target_mode = 'both'
+            CONFIG.lanes[1].target2 = 'enemy_clanrat_2'
+            CONFIG.lanes[1].t2_dx = 34
+            CONFIG.lanes[1].t2_mode = 'attack'
+            CONFIG.lanes[1].damage = {t = {method = 'kill', share = 0.7}, t2 = {method = 'reduce', share = 0.7}}
+            CONFIG.lanes[2] = {name = 'L2', attacker = 'own_swords_2', target = 'enemy_lord', x = 120, z = 0, gap_m = 100,
+                a_depth = 9, t_depth = 0, a_width = 30, t_width = 5, mode = 'shoot', target_mode = 'hold', answer = false,
+                fight_s = 5, max_s = 20, move_beyond_m = 5}
+            CONFIG.park = {{name = 'own_lord', x = -700, z = -400, bearing = 0}}
+            enemy[2].kill_number_of_men = function(self, n) self.men = self.men - n end
+            enemy[3].reduce_hitpoints_unary = function(self, s) self.hp_reduced = s end
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            assert(enemy[3].attack_args.target == 'own_swords_1' and enemy[3].attack_args.run == false, 'two on one')
+            assert(own[3].attack_args.target == 'enemy_lord' and own[3].attack_args.primary == true, 'ranged attack')
+            assert(enemy[3].hp_reduced == 0.7)
+            for _ = 1, 200 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        dmg = {r["who"]: r for r in rows if r["event"] == "probe_damage"}
+        assert dmg["t"]["method"] == "kill" and dmg["t"]["status"] == "done" and dmg["t2"]["method"] == "reduce"
+        assert dmg["t"]["men1"] < dmg["t"]["men0"]
+
     def test_layout_and_recharge_step(self, lua):
         L = lua.eval("""require('entries.charge_probe').layout({x = 10, z = 0, gap_m = 80, a_depth = 10,
             t_depth = 12, target_mode = 'rear'})""")
