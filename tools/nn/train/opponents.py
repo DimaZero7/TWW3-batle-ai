@@ -88,6 +88,18 @@ class Line:
     lord_back_m: float = 20.0     # the lord keeps this far behind the line's centre (pool: 20-22 m behind the centre
     #                               before contact, 45-50 m from the first contact when it happens, his first melee
     #                               12 s after it; ai_like at 10 m: 16 m, 29 m, 3 s; at 20 m: 27 m, 50 m, 6 s)
+    lord_back_after_m: float = 0.0  # ... and once his side has fought, this far behind it: at the line (0). The game
+    #                               AI's lord in the gate recordings it1-it8 (64 battles, build/fable/lord2.py): out
+    #                               of contact (nearest enemy beyond 15 m) after the first contact he stands at the
+    #                               line's centre, 6 m AHEAD of it (median; p25-p75 -17..57 m), 47 m from the nearest
+    #                               enemy, moving 92 % of the time; ai_like with the 20 m post: 16 m behind (-31..10),
+    #                               37 m from the enemy. By geometry his fight matches the game already: within 8 m of
+    #                               an enemy 0.60 of his standing time (game 0.65), losing 0.23 % HP/s there (0.21),
+    #                               first within 8 m 17 s after the first contact (12); he never dies in either, he
+    #                               routs at 0.29 health (0.33) - more often in the twins (0.60 of battles, game 0.25-
+    #                               0.38) because the battle lasts longer and his army breaks (own units standing at
+    #                               his rout 0.60, game 0.90). The melee flag (0.74 vs 0.39) misleads: the game's
+    #                               flickers off 40-50 % of a lord's seconds in contact
     lord_join_m: float = 50.0     # ours: the lord attacks an enemy this close that is already fighting own units
     lord_charge_m: float = 90.0   # ... or, once his line goes in, his target this close (pool: the lord's first target
     #                               at 90 m median, 6 s before the first contact; ai_like at join_m 150: 136 m, 10 s)
@@ -562,7 +574,8 @@ def ai_like(st, p=Line()):
     # The lord: in the line, a little behind its centre; never charges first: goes in with the
     # line (or at a fight that comes to it); withdraws when hurt.
     the_lord = lord & standing & ~lone_lord
-    post_x, post_z = cx - fx * p.lord_back_m, cz - fz * p.lord_back_m
+    back = torch.where(side_fought, torch.full_like(x, p.lord_back_after_m), torch.full_like(x, p.lord_back_m))
+    post_x, post_z = cx - fx * back, cz - fz * back
     far = torch.sqrt((post_x - x) ** 2 + (post_z - z) ** 2) > 8.0
     put(the_lord & far & ~fighting, O.MOVE, post_x, post_z, r=p.advance_run)
     going = line & (charge | cur_ok | fighting)

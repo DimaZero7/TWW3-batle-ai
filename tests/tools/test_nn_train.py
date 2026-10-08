@@ -855,6 +855,18 @@ class TestProperties:
         off = opponents.ai_like(st, dataclasses.replace(p, flank_post_m=0.0))
         assert int(off.kind[0, mil]) == O.MOVE and float(off.x[0, mil]) < float(st.u["x"][0, mil])   # the walk up
 
+    def test_ai_like_lord_rests_at_the_line_once_his_side_has_fought(self):
+        st = line_army(attacker=2, gap=600, lord_ahead=-30)                     # side 2's lord 50 m behind its line
+        o = opponents.ai_like(st)
+        H = st.N // 2
+        lord_x = float(st.u["x"][0, H])
+        line_x = float(st.u["x"][0, H + 1])
+        assert int(o.kind[0, H]) == O.MOVE and float(o.x[0, H]) == pytest.approx(line_x + 20.0, abs=3.0)   # 20 m behind
+        st.u["k"][0, H + 1] = 1.0                                                # a melee unit of side 2 has killed
+        o = opponents.ai_like(st)
+        assert int(o.kind[0, H]) == O.MOVE and float(o.x[0, H]) == pytest.approx(line_x, abs=3.0)          # at the line
+        assert float(o.x[0, H]) < lord_x
+
     def test_ai_like_lord_does_not_charge_alone(self):
         st = line_army(attacker=1, gap=600, lord_ahead=150)                      # side 1's lord far in front
         o = opponents.ai_like(st)
