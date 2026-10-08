@@ -86,6 +86,28 @@ def test_the_reform2_plan_separates_own_losses_blow_and_depth():
     assert config["lanes"][2]["t_depth"] > config["lanes"][4]["t_depth"] > config["lanes"][3]["t_depth"]
 
 
+def test_the_defender_plan_gives_the_swordsmen_four_orders_1_s_after_contact():
+    b = cp.battles("defender")
+    assert len(b) == 2 and all(sorted(l["after"]["kind"] for l in x) == sorted(cp.DEFENDER) for x in b)
+    assert [l["after"]["kind"] for l in b[0]][:2] != [l["after"]["kind"] for l in b[1]][:2]      # rotated
+    for i in (1, 2):
+        config, model_s, arena = cp.run_config("defender", i)
+        assert config["men_after_s"] >= 90 and model_s < 400
+        xs = [l["x"] for l in config["lanes"]]
+        assert min(b_ - a for a, b_ in zip(xs, xs[1:])) == cp.DEFENDER_LANE_DX
+        for lane in config["lanes"]:
+            assert lane["attacker"].startswith("own_swords") and lane["target_mode"] == "both" and lane["gap_m"] == 3
+            assert lane["after"]["at_s"] == 1 and not lane["after"]["walk"]
+            if lane["after"]["kind"] == "attack_t2":
+                assert abs(lane["t2_dx"]) == 180 and abs(lane["x"] + lane["t2_dx"]) < abs(lane["x"])   # inward
+                others = [l["x"] for l in config["lanes"] if l is not lane]
+                assert min(abs(lane["x"] + lane["t2_dx"] - o) for o in others) >= 120
+            elif lane["after"]["kind"] == "move_near":
+                assert lane["after"]["dx"] == 30
+            else:
+                assert "target2" not in lane
+
+
 def test_battle_file_is_written(tmp_path):
     path = cp.write_scenario("hit", 1, tmp_path / "x.xml")
     xml = path.read_text(encoding="utf-8")

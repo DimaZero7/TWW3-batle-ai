@@ -57,7 +57,15 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           swordsmen's did not): swordsmen brought to 30 % (kill_number_of_men) v full clanrats (the striker's own losses
           against the target's), greatswords v clanrats (another blow), clanrats 15 m wide (deep) and 50 m wide
           (shallow) v swordsmen (the depth), and the swordsmen v clanrats control - 240 s from 3 m, the soldiers' places
-          all fight - 1 battle.
+          all fight - 1 battle;
+  defender  the order of a unit attacked in melee (build/shotgap/hold_pair.py, the replay of the it1-it9 gate battles: in
+          clean 1 v 1 contacts the network's unit under hold / an attack on another unit / a move / a withdraw lost 0.62 /
+          0.57 / 0.53 / 0.51 % of its health a second in the game against 0.24 / 0.28 / 0.28 / 0.30 in the simulator,
+          under an attack on the enemy it touched 0.41 against 0.28 - while its enemy lost about the same): swordsmen and
+          clanrats attacking each other from 3 m, the clanrats never re-ordered (they keep attacking the swordsmen);
+          1 s after contact the swordsmen get (a) the same attack again, (b) a halt (the bridge's hold), (c) an attack on
+          a second clanrat unit 150 m aside (edge to edge, towards the middle of the field), (d) a move at a run 30 m
+          aside; 90 s fights, the soldiers' places all fight; lanes 320 m apart - 2 battles of 4 lanes, rotated.
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -122,11 +130,15 @@ RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
-         "reform2")
+         "reform2", "defender")
 # the reform plan: soldier places this long after contact (the whole fight)
 REFORM_MEN_S = 260
 # the fresh plan's orders 10 s after contact (entries/charge_probe.lua lane.after.kind)
 FRESH = ("attack_t2", "attack_same", "halt", "move_near", "none")
+# the defender plan's orders 1 s after contact (lane.after.kind; move_near 30 m aside at a run)
+DEFENDER = ("attack_same", "halt", "attack_t2", "move_near")
+DEFENDER_LANE_DX = 320  # (its second target stands 180 m aside, inward: 140 m from the next lane; |x| <= 480 as in
+#                         the other probes)
 VV = "wh2_main_character_abilities_verminous_valour"
 TURN_TICK_MS = 250     # the turning battle: 0.25 s samples (a lord turns 180 deg in 1-2 s)
 
@@ -242,6 +254,14 @@ def battles(plan):
                     lane("swords", "clanrat", "attack_walk", "both", t_w=15, **f),
                     lane("swords", "clanrat", "attack_walk", "both", t_w=50, **f),
                     lane("swords", "clanrat", "attack_walk", "both", **f)])
+    elif plan == "defender":
+        def dl(kind):
+            extra = dict(target2="clanrat", t2_gap_m=150, t2_inward=True) if kind == "attack_t2" else {}
+            return lane("swords", "clanrat", "attack_walk", "both", gap_m=3, fight_s=90, lane_dx=DEFENDER_LANE_DX,
+                        after={"at_s": 1, "kind": kind, "dx": 30 if kind == "move_near" else 0, "dz": 0, "walk": False},
+                        **extra)
+        base = [dl(k) for k in DEFENDER]
+        out += [base, rotate(base, 2)]
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
@@ -291,7 +311,7 @@ def layout(specs):
         a_key, a_men, a_fac = UNITS[spec["attacker"]]
         t_key, t_men, t_fac = UNITS[spec["target"]]
         assert a_fac != t_fac, spec
-        x = LANE_DX * (k - 1 - (n - 1) / 2)
+        x = max(s.get("lane_dx", LANE_DX) for s in specs) * (k - 1 - (n - 1) / 2)
         aw, tw = spec.get("a_w", WIDTH_M), spec.get("t_w", WIDTH_M)
         row = dict(spec, name=f"L{k}", x=round(x, 1), z=0.0, attacker=add(spec["attacker"], k),
                    target=add(spec["target"], k), a_key=a_key, t_key=t_key,
@@ -303,6 +323,8 @@ def layout(specs):
             assert UNITS[spec["target2"]][2] == t_fac, spec
             row["target2"] = add(spec["target2"], k, "b")
             row["t2_dx"] = round(tw + spec.get("t2_gap_m", 4), 1)
+            if spec.get("t2_inward") and x > 0:      # towards the middle of the field (the lanes' outer ones)
+                row["t2_dx"] = -row["t2_dx"]
         if spec.get("lord"):
             row["lord"] = dict(spec["lord"], name=add(spec["lord"]["name"], k))
             if row["lord"].get("at_m"):       # front to front -> centre to centre
@@ -331,7 +353,8 @@ def run_config(plan, index):
               "men_ms": 500 if turn else MEN_MS,
               "men_near_m": 60,
               # the soldiers' places: the first 30 s (the charge plan) or the whole fight (hit: men in contact)
-              "men_after_s": REFORM_MEN_S if plan in ("reform", "reform2") else 90 if plan in ("hit", "move", "vv") else 30,
+              "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2") else 95 if plan == "defender"
+                              else 90 if plan in ("hit", "move", "vv") else 30),
               "lanes": lanes, "park": park}
     model_s = max(l["max_s"] for l in lanes) + SETTLE_MS / 1000 + 20
     return config, model_s, arena
