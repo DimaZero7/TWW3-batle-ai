@@ -253,17 +253,25 @@ def hit_chance_plane(u, pw):
     return torch.where((u["men0"] <= 1)[:, None, :], p_lone, p_form).clamp(0, 1)
 
 
-_GH = None
+def _hermite_table(n_max=32):
+    """Standard-normal quadrature points and weights (Gauss-Hermite) for 1..n_max points, as plain floats. Built once
+    at import, outside torch.compile: numpy inside the compiled simulator step is traced as CPU tensors, and inductor
+    then needs a C++ compiler for them (none in the image)."""
+    import numpy as np
+    out = {}
+    for n in range(1, n_max + 1):
+        x, w = np.polynomial.hermite_e.hermegauss(n)
+        out[n] = ([float(v) for v in x], [float(v) for v in w / w.sum()])
+    return out
+
+
+_GH_TABLE = _hermite_table()
 
 
 def _hermite(device, dtype, n):
-    """Standard-normal quadrature points and weights (Gauss-Hermite), cached."""
-    global _GH
-    if _GH is None or _GH[0].device != device or _GH[0].dtype != dtype or len(_GH[0]) != n:
-        import numpy as np
-        x, w = np.polynomial.hermite_e.hermegauss(n)
-        _GH = (torch.tensor(x, device=device, dtype=dtype), torch.tensor(w / w.sum(), device=device, dtype=dtype))
-    return _GH
+    """Standard-normal quadrature points and weights (Gauss-Hermite) on the state's device."""
+    x, w = _GH_TABLE[n]
+    return torch.tensor(x, device=device, dtype=dtype), torch.tensor(w, device=device, dtype=dtype)
 
 
 def _uniform_phi(s, half, sig):

@@ -421,6 +421,15 @@ class TestMissile:
         old, _ = self._spill(0.0, 18.0, params=self.OLD)
         assert 0 < old < aside                               # (the table: a share of the old rate-based hits)
 
+    def test_the_spill_quadrature_is_built_at_import_not_in_the_step(self):
+        """spill_geometry's Gauss-Hermite points come from a table built at import (numpy inside the compiled step
+        becomes CPU tensors, which inductor cannot compile without a C++ compiler): standard normal moments, the
+        state's dtype."""
+        x, w = missile._hermite(torch.device("cpu"), torch.float64, 8)
+        assert x.dtype == torch.float64 and len(x) == 8
+        assert abs(float(w.sum()) - 1) < 1e-12 and abs(float((w * x * x).sum()) - 1) < 1e-9
+        assert abs(float((w * x ** 4).sum()) - 3) < 1e-9
+
     def test_a_shield_blocks_from_the_front_only(self):
         st = face_off(ARCHER, "wh2_main_skv_cha_warlord_0", gap=100)
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
