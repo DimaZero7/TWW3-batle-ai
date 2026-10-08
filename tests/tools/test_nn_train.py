@@ -604,10 +604,46 @@ class TestProperties:
     def test_ai_like_counter_charges_close_enemies_and_shoots_the_lord_in_range(self):
         st = line_army(attacker=1, gap=80, lord_ahead=30)        # spearmen 80 m apart, the lord 110 m from the archers
         H = st.N // 2
-        o = opponents.ai_like(st)
+        o = opponents.ai_like(st, opponents.Line(lord_share=(1.0, 1.0)))
         assert (o.kind[0, H + 1:H + 3] == O.ATTACK).all() and o.run[0, H + 1:H + 3].all()   # counter-charge
         assert int(o.kind[0, H + 3]) == O.ATTACK and int(o.target[0, H + 3]) == 0        # archers: the lord
         assert int(o.kind[0, H]) != O.ATTACK or bool(o.kind[0, H + 1:H + 3].eq(O.ATTACK).any())
+
+    def test_ai_like_shooters_take_the_lord_in_range_by_a_draw_per_period_else_another_enemy_in_melee_first(self):
+        """lord_share / lord_redraw_s (build/shotgap/lord_rule.py): a free missile unit with the enemy lord in range
+        shoots him when its draw for the period is below the share (him the nearest / another nearer), else the
+        nearest other enemy in range in melee, else the nearest other in range; no other in range: no order."""
+        st = line_army(attacker=1, gap=80, lord_ahead=30)        # side 2's archers: the lord 110 m, spearmen 126 m
+        H = st.N // 2
+        u = st.u
+        arch = H + 3
+
+        def tg(p):
+            o = opponents.ai_like(st, p)
+            return int(o.kind[0, arch]), int(o.target[0, arch])
+        assert tg(opponents.Line(lord_share=(1.0, 1.0))) == (O.ATTACK, 0)
+        assert tg(opponents.Line(lord_share=(0.0, 0.0))) == (O.ATTACK, 1)                 # the nearest other
+        u["m"][0, 2] = True                                      # side 1's spearman 2 in melee: taken first
+        assert tg(opponents.Line(lord_share=(0.0, 0.0))) == (O.ATTACK, 2)
+        u["m"][0, 2] = False
+        assert tg(opponents.Line(lord_share=(0.0, 1.0))) == (O.ATTACK, 1)                 # he is the nearest: 0
+        u["x"][0, 1], u["z"][0, 1] = 0.0, 0.0                    # a spearman nearer than him: the second share
+        assert tg(opponents.Line(lord_share=(0.0, 1.0))) == (O.ATTACK, 0)
+        u["x"][0, 1:3] = -400.0                                  # no other enemy in range: no order (fire at will)
+        assert tg(opponents.Line(lord_share=(0.0, 0.0)))[0] != O.ATTACK
+        u["x"][0, 1], u["z"][0, 1] = -40.0, -40.0
+        u["x"][0, 2] = -40.0
+        # the default: the period's fixed draw against the share (the lord is the nearest here)
+        p = opponents.Line()
+        seen = set()
+        for k in range(12):
+            st.t[:] = (k + 0.5) * p.lord_redraw_s
+            draw = float(opponents.tick_uniform(1, st.N, torch.tensor([k]), "cpu")[0, arch])
+            assert (tg(p) == (O.ATTACK, 0)) == (draw < p.lord_share[0])
+            st.t[:] = (k + 0.9) * p.lord_redraw_s                # the same within the period
+            assert (tg(p) == (O.ATTACK, 0)) == (draw < p.lord_share[0])
+            seen.add(draw < p.lord_share[0])
+        assert seen == {True, False}                             # both within 12 periods
 
     def test_ai_like_missile_units_step_back_from_close_melee_and_break_off_melee_for_a_while(self):
         """The old trigger (skirmish_targeted False): any enemy melee unit within skirmish_m."""

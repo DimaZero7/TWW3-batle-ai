@@ -165,11 +165,24 @@ class Line:
     # its centres 33-35 m apart. ai_like before: 175 -> 162 m against 166, 0-1 units beyond.
     overlap_m: float = 30.0
     lap_space_m: float = 40.0
-    focus_lord: bool = True       # missile units shoot the enemy lord when it is in range (battles 1-3)
-    lord_in_melee: bool = True    # ... in melee too: in the 63 network gate battles the game's missile units, the
-    #                               network's lord in range, shot him 89 % of their firing seconds, 91 % while he
-    #                               was in melee, 86 % while free (02.10.2026; ai_like without it: 34 % of its
-    #                               firing on him, the game's AI 57 % of all its firing)
+    focus_lord: bool = True       # missile units shoot the enemy lord when it is in range (by lord_share below)
+    lord_in_melee: bool = True    # ... in melee too (the game: 46 % of the ammo while he is in melee, 51 % free)
+    # The lord or another: a missile unit out of melee with the enemy lord standing within its range (centre to
+    # centre) draws every lord_redraw_s whether it shoots him - a fixed draw per (battle row, unit, period) below
+    # lord_share (lord the nearest standing enemy / another enemy nearer); else it shoots the nearest other enemy in
+    # range that is in melee, else the nearest other in range. build/shotgap/lord_rule.py, lord_per_shooter.py,
+    # lord_else.py (the 40 game recordings of the gate sets it1-it5, 08.10.2026; the game AI's shooters, our lord in
+    # range, 8,756 firing seconds): on him 49 % of the ammo (42 % of the seconds); the lord the nearest 57 %, another
+    # nearer 45 %; by distance <40 / 40-70 / 70-100 / 100+ m 47 / 67 / 47 / 47 %; it keeps its target from second to
+    # second (98 %) in runs of 17 s on average on him and elsewhere (median 6-7 s), so a shooter mixes both (of 129
+    # shooter-battles 30 % almost never on him, 25 % almost always); a draw every 8 s at p 0.5 gives runs of 16 s.
+    # Not on him (else_choice.py), with both an enemy in melee and a free one in range: into melee 76 % (the nearest
+    # free 14 %). The old rule (always the lord, 89 % of the firing seconds in the gate battles of 02.10.2026) made
+    # the twin of it3-it5 shoot him 81-93 % of those seconds and 50 % of all its ammo (the game 26 %); with this rule
+    # the it5 twin (build/shotgap/it5_after) 28 % of all its ammo (the game 29 %), 39-48 % with him in range (game
+    # 46-51 %). (1.0, 1.0): the old rule.
+    lord_share: tuple = (0.57, 0.45)
+    lord_redraw_s: float = 8.0
     advance_without_missiles: bool = True   # battle 2: a defender with no missile units met the attacker half-way
     advance_after_contact: bool = True      # once own units have fought (in melee now, or a melee unit has kills),
     #                                         the free units go forward and join enemies within join_m (missile
@@ -237,6 +250,40 @@ def pick_uniform(B, N, device, salt=12345):
 def pick_noise(B, N, device):
     """[B, N, N] a fixed standard Gumbel draw per (battle row, unit, enemy slot) (pick_uniform)."""
     return -torch.log(-torch.log(pick_uniform(B, N, device)))
+
+
+def tick_uniform(B, N, k, device, salt=24680):
+    """[B, N] a uniform (0, 1) draw per (battle row, unit, period k [B] (an integer)): pick_uniform's hash with the
+    period in the enemy slot's place - the same within a period, a new one in the next."""
+    b = torch.arange(B, device=device)[:, None]
+    i = torch.arange(N, device=device)[None, :]
+    h = (b * 1000003 + i * 7919 + k.long()[:, None] * 104729 + salt) & 0x7FFFFFFF
+    h = ((h ^ (h >> 13)) * 1274126177) & 0x7FFFFFFF
+    h = ((h ^ (h >> 16)) * 668265263) & 0x7FFFFFFF
+    h = h ^ (h >> 15)
+    return ((h & 0xFFFFFF).float() + 0.5) / float(1 << 24)
+
+
+def lord_or_other(st, p, free_shooter, foe, lord, fighting, d, ld, li):
+    """(mask [B, N], target [B, N]): the attack orders of free missile units with the enemy lord within range (Line
+    lord_share): on him by the period's draw below the share (him the nearest standing enemy / another nearer), else
+    on the nearest other enemy in range that is in melee, else the nearest other in range (none: no order)."""
+    u = st.u
+    rng = u["range"]
+    in_reach = free_shooter & (ld <= rng)
+    d_foe = torch.where(foe, d, torch.full_like(d, BIG))
+    lord_nearest = ld <= d_foe.min(2).values
+    share = torch.where(lord_nearest, torch.full_like(ld, float(p.lord_share[0])),
+                        torch.full_like(ld, float(p.lord_share[1])))
+    period = torch.floor(st.t / max(float(p.lord_redraw_s), 1e-6))
+    on_lord = tick_uniform(st.B, st.N, period, ld.device) < share
+    other = foe & ~lord[:, None, :] & (d <= rng[:, :, None])
+    od_m = torch.where(other & fighting[:, None, :], d, torch.full_like(d, BIG)).min(2)
+    od_a = torch.where(other, d, torch.full_like(d, BIG)).min(2)
+    alt = torch.where(od_m.values < BIG, od_m.indices, od_a.indices)
+    has_alt = od_a.values < BIG
+    mask = in_reach & (on_lord | has_alt)
+    return mask, torch.where(on_lord | ~has_alt, li, alt)
 
 
 def lap_shift(st, p, fx, fz, cx, cz, line, foe, missile, lord):
@@ -450,7 +497,8 @@ def ai_like(st, p=Line()):
         closer = closer & ~(side_fought & (ahead >= -p.missile_post_m))
     put(closer, O.MOVE, fwd_x, fwd_z, r=p.advance_run)
     if p.focus_lord:
-        put(shooter & (ld <= u["range"]) & ~fighting, O.ATTACK, tg=li)
+        go, tg_lo = lord_or_other(st, p, shooter & ~fighting, foe, lord, fighting, d, ld, li)
+        put(go, O.ATTACK, tg=tg_lo)
     # ... away from it (and back) when it comes within skirmish_m (skirmish_targeted: one that attacks this shooter
     # and closes on it); one caught in melee breaks off for escape_s.
     melee_foe = foe & ~missile[:, None, :] & ~fighting[:, None, :]
