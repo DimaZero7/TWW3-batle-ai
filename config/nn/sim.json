@@ -116,6 +116,8 @@
     "physical_resist": true,
     "physical_resist_why": "physical_resist: a projectile's damage is cut by the target's missile and physical resistance together, at most 90 % (CA, Feature Focus 'Damage': physical resistance works against all non-magical damage; the resistances add, capped at 90 %). Before only missile resistance counted. It touches the Night Runners (physical 20 %) and Strength of the Penitent (+15 % physical) today. damage_mod_all (a ward save, 0 for every unit) is read into the physical resistance (params.py), so it counts once for melee and missiles. Alone it leaves the mechanics check at 51 of 54 (build/prespec/mech_resist.json).",
     "volley_load": 1.0,
+    "fire_flag_aiming": 1,
+    "fire_flag_why": "fire_flag_aiming 1: the observed 'fire' flag (the network's firing input, the game's CCO IsFiringMissiles) is on while a standing shooter has a target and aims at it (not turning, aim clock < aim_s), not only once it can shoot; the target is shown with it. The gate recordings it5+it6 (16 battles, build/idlegap/flag_vs_shot.py): after a stop with a target in range and within 45 deg, the game's flag came on a median 1.5 s after the stop and 4.5 s before the first ammo drop (before it in 94 % of 140 stops), the old twin's at the shot (4 s, before it in 29 %); after a new attack order to a shooter firing standing the game's flag stayed on in 61 % of the next second and 85-90 % after (build/idlegap/latency.py). The shots, the aim clock and the fatigue/morale activity keep the real fire. 0: the flag only from the moment the unit can shoot.",
     "aim_reset_on_order": 1,
     "move_fire_arc_deg": 90,
     "move_fire_own_arc": 1,

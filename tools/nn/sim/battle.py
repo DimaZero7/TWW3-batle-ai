@@ -369,6 +369,16 @@ def step(st, orders, params=None, dt=None):
         u["loaded_s"] = torch.where(shots > 0, torch.zeros_like(u["loaded_s"]), u["loaded_s"])
     u["a"] = (u["a"] - shots).clamp(min=0)
     firing = (m_target >= 0) & ((shots > 0) | (load_min > 0))
+    # The observed flag (u["fire"], the network's "firing" input; the game's CCO IsFiringMissiles) and the target shown
+    # with it: with missile.fire_flag_aiming the flag is on from the moment a standing shooter has taken a target and
+    # aims at it (not turning, its aim clock still running), as the game's - its flag came on a median 1.5 s after a stop
+    # with a target in range and arc, 4.5 s before the first shot (ammo drop), and a new order hardly put it out
+    # (missile.fire_flag_why). The shots, the aim clock and everything inside the step keep `firing`.
+    if ms_cal.get("fire_flag_aiming"):
+        aiming = ready & ~turning & (aim_at >= 0) & (u["aim"] < u["aim_s"]) & ~firing
+        shown, shown_tgt = firing | aiming, torch.where(firing, m_target, aim_at)
+    else:
+        shown, shown_tgt = firing, m_target
 
     # --- damage, men, kills ---
     dmg = hp_melee + hp_missile
@@ -760,7 +770,7 @@ def step(st, orders, params=None, dt=None):
     router_hit = torch.where(strike & u["r"][:, None, :], d, torch.full_like(d, 1e9))
     router = router_hit.argmin(2)
     has_router = router_hit.min(2).values < 1e9
-    target = torch.where(has_opp & standing, opp, torch.where(firing, m_target,
+    target = torch.where(has_opp & standing, opp, torch.where(shown, shown_tgt,
                                                                torch.where(has_router, router, torch.full_like(opp, -1))))
     u["target"] = torch.where(alive, target, torch.full_like(target, -1))
     # a router in its rout's exit touched by a standing enemy is in melee too (the game's flag: median 7 s after a rout
@@ -769,7 +779,7 @@ def step(st, orders, params=None, dt=None):
     u["m"] = alive & (engaged | has_router | held_router)
     u["mv"] = mv
     u["f"] = mv & (spd > u["walk"] + 0.3)
-    u["fire"] = firing
+    u["fire"] = shown
     hold = standing & (kind == O.HOLD)
     u["ox"] = torch.where(hold, u["x"], torch.where(attack & standing, tx, u["ox"]))
     u["oz"] = torch.where(hold, u["z"], torch.where(attack & standing, tz, u["oz"]))

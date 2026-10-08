@@ -863,6 +863,28 @@ class TestMissileRules:
         fired = shots_over(shooter_and([(0, 100)]), 8)
         assert fired[0][0] == pytest.approx(P.sim["missile"]["aim_s"]["arrow"], abs=P.dt + 1e-6)
 
+    def test_the_fire_flag_is_on_while_the_shooter_aims_as_the_games(self):
+        """missile.fire_flag_aiming: the observed flag (and the target shown) from the first step a standing shooter
+        aims at a target in range, before its first shot; the shot itself still waits aim_s. Off: from the shot."""
+        for on in (1, 0):
+            params = P.with_cal("missile", fire_flag_aiming=on)
+            st = shooter_and([(0, 100)])
+            H = st.N // 2
+            flag, shot = [], None
+            for k in range(int(round(6.0 / params.dt))):
+                a0 = float(st.u["a"][0, 0])
+                battle.step(st, replay.hold(st), params)
+                flag.append(bool(st.u["fire"][0, 0]))
+                if shot is None and float(st.u["a"][0, 0]) < a0:
+                    shot = k
+            assert shot is not None and shot * params.dt == pytest.approx(P.sim["missile"]["aim_s"]["arrow"],
+                                                                          abs=params.dt + 1e-6)
+            if on:
+                assert flag[0] and all(flag[:shot + 1])
+                assert int(st.u["target"][0, 0]) == H
+            else:
+                assert not any(flag[:shot - 1]) and flag[shot]
+
     def test_units_can_fall_back_to_the_measured_rates(self):
         st = shooter_and([(0, 100, SPEAR)])
         H = st.N // 2
