@@ -116,6 +116,15 @@ def step(st, orders, params=None, dt=None):
         # and struck nothing for 21-25 s, 2 lanes of 2; config/nn/sim.json contact.leave_away_why); absent: leave_m.
         away_m = float(cal["contact"].get("leave_away_m", leave_m))
         far_point = ~(touch & toward).any(2) & (point_d >= away_m)
+        if cal["contact"].get("move_melee_leave") and "order_s" in u:
+            # A move order given in melee is a leave in any direction, through the enemy too (contact.move_melee_leave;
+            # the meleeorders probe, build/charge-probe/runs/20261008-162358 / -162441: swordsmen in melee told to run
+            # 5 / 15 / 40 m ahead through the clanrats or 5 / 15 m aside struck 0-17 HP/s in 0-5 s and none at 5-20 s,
+            # moving all the time, 7 lanes of 7, then fought again at 20-30 s - the 24 s window). One given before the
+            # contact keeps pushing and fighting (P3 above; R3: walking into the target 0.70 of attacking): order_s
+            # starts at the window for an order given out of melee.
+            in_melee = u["order_s"] < float(R.get("melee_breakoff_secs", 0.0))
+            far_point = far_point | (in_melee & (point_d >= away_m))
     leaving = (kind == O.WITHDRAW) | ((kind == O.MOVE) & far_point & (leave_m > 0))
     if cal["contact"].get("leave_latch") and "exit_s" in u:
         # A move that began as a leave in contact stays one while its order stands (contact.leave_latch): arrived at

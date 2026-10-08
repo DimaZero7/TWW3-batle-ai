@@ -128,17 +128,25 @@ class TestHoldRate:
 class TestMoveThrough:
     """contact.leave_away_only (build/probes7 P3): a move order to a far point THROUGH the enemy it touches keeps the
     unit fighting (CA's planner's far move points); a far point away from it is a leave (no strikes)."""
-    def dealt(self, point_x, params=P):
+    def dealt(self, point_x, params=P, in_melee=False):
+        """The spearmen's move order given before the contact (P3: the planner's push from the go), or in melee."""
         st = face_off(SPEAR, CLANRAT)          # spearmen west facing east, clanrat spearmen east
         H = st.N // 2
-        o = orders(st, **{str(H): (O.ATTACK, 0, False)})
+        move = orders(st, **{"0": (O.MOVE, (point_x, 0.0), False), str(H): (O.ATTACK, 0, False)})
+        o = orders(st, **{str(H): (O.ATTACK, 0, False)}) if in_melee else move
         for _ in range(6):
             battle.step(st, o, params)
         hp = float(st.u["hp_abs"][0, H])
-        o = orders(st, **{"0": (O.MOVE, (point_x, 0.0), False), str(H): (O.ATTACK, 0, False)})
         for _ in range(10):
-            battle.step(st, o, params)
+            battle.step(st, move, params)
         return hp - float(st.u["hp_abs"][0, H]), bool(st.u["m"][0, 0])
+
+    def test_a_move_through_the_enemy_given_in_melee_is_a_leave(self):
+        # the meleeorders probe: run 5 / 15 / 40 m ahead through the clanrats from melee - 0 HP dealt at 5-20 s
+        through, _ = self.dealt(60.0, in_melee=True)
+        assert through == pytest.approx(0.0, abs=1e-3)
+        old, _ = self.dealt(60.0, P.with_cal("contact", move_melee_leave=0), in_melee=True)
+        assert old > 0
 
     def test_a_far_point_through_the_enemy_fights_on_one_away_leaves(self):
         through, m_through = self.dealt(60.0)

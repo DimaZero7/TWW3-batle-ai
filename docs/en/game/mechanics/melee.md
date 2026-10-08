@@ -391,6 +391,19 @@ stands, up to the 24 s window. The twin of the 8 it1 battles: melee HP dealt 0.4
 on a near target 0.38 -> 0.23 kills a second (game 0.20), a settled fight 0.39 -> 0.30 (0.31); grid_s46 0.482 -> 0.486
 (0.517). Online only: a unit in contact drops its order and fights its neighbour, the exit window is ~25 s.
 
+**Move in melee (the `meleeorders` probe).** 10 s after contact the swordsmen run to a point 5 / 15 / 40 m ahead
+through the clanrats or 5 / 15 m aside (`build/charge-probe/runs/20261008-162358`, `-162441`). In all 7 lanes the unit
+is "moving" all the time, but the clanrats hold it and it barely strikes: kills a second (the clanrats' HP a second) at
+0–5 / 5–10 / 10–20 / 20–30 s - ahead 5 m 0 (5) / 0 (0) / 0 (0) / 0.10 (15), ahead 15 m 0.10 (7) / 0 / 0 / 0.25 (47),
+ahead 40 m 0 (17) / 0 / 0 / 0.30 (52), aside 5 m 0 (6) / 0 / 0 / 0.20 (24), aside 15 m 0.20 (21) / 0 / 0 / 0.40 (28);
+control 0.60 (61) / 0.70 (42) / 0.55 (33) / 0.40 (33). After the 24 s window it strikes again. So a move order given
+in melee is a leave in any direction (`contact.move_melee_leave`); one given before the contact is not (P3: the
+planner's push through the enemy from the go fought on; R3: walking into the target 0.70 of attacking). The order's
+clock `order_s` tells them apart, no new number. The twin of the probe: ahead 5 / 15 / 40 m was 0.30 (18) in every
+window, now 0 / 0 / 0 / 0.18 (11). The twin of the 8 it3 battles: move in melee 0.12 -> 0.03 kills a second (game 0.02),
+melee HP dealt 0.486 -> 0.497 (0.468), wins 19 -> 14 of 32 (game 2 of 8); it1 move 0.14 -> 0.04 (0.03); grid_s46 melee
+HP 0.486 -> 0.486 (0.517).
+
 ## Not found
 
 No public CA source explains `melee_breakoff_secs` 24 / `melee_breakoff_total_immunity_secs` 10
@@ -404,10 +417,10 @@ unit is out of contact ~4 s after the order (its own melee flag goes off only af
 
 ## What is still unclear
 
-- **Hold and move in melee.** In whole battles the network's units in melee kill 0.08 a second under hold (simulator
-  0.21) and 0.03 under move (simulator 0.14). The `fresh` probe: a halt after attacking strikes 0.7 of the control
-  (rule `hold_rate` 0.5); a move towards or through the enemy is unmeasured - a probe with points ahead and aside at
-  several distances is needed.
+- **Hold in melee.** In whole battles the network's units in melee kill 0.08 a second under hold (twin 0.21), while
+  in the probes a halt after attacking strikes 0.69–0.73 of the control (4 lanes; rule `hold_rate` 0.5) - the gap
+  points the other way. The whole battles' hold episodes need a look: who touches the unit, from which side, what the
+  bridge does after the order.
 - **The first 15 s of contact are stronger in the game than the rule.** In the pairs the target loses
   499–764 HP in the first 15 s, while the rule (the charge bonus, no blow) gave the simulator 396–446. The
   melee probe showed where the difference is: nearly all of it in the first second of a charge's contact (a
