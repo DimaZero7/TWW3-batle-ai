@@ -346,8 +346,9 @@ flowchart TB
   choice made (`Actor.sequence(..., action)`).
 - **Commitment** (`tools/nn/model/commit.py`). With every new order (hold, move, attack, withdraw) the unit chooses
   how long to keep it: 2, 4, 8 or 16 s. While it runs the unit's only allowed choice is keep (a mask: probability
-  1, nothing to learn, entropy 0). It ends at once when: the unit comes into melee; an enemy comes to threaten its
-  flank or rear (the threat flags: how an attack on the unit shows); the attack's target died, routs or is no
+  1, nothing to learn, entropy 0). It ends at once when: the unit comes into melee; an enemy has threatened its
+  flank or rear for 2 s in a row (the threat flags: how an attack on the unit shows; in the game they flicker, 2.4–3.4
+  rising edges a unit-minute vs the simulator's 0.9, so only a steady threat counts, once per spell); the attack's target died, routs or is no
   longer seen; the unit routed or rallied; the own lord died. A keep chosen by the unit itself starts none. The
   network sees the seconds left (÷ 16) and whether the unit is held. All from the side's observation and the
   battle time: the simulator (`rollout.Battles.cstate`) and the companion (`loop.Brain.commit`, from the game's

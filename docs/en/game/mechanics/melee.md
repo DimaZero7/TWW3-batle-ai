@@ -391,11 +391,15 @@ unit is out of contact ~4 s after the order (its own melee flag goes off only af
   (about `melee_breakoff_total_immunity_secs` 10). The simulator reaches the run 1.5 s after the order even free (the
   game's turning probe: 2.0 s). Not found: no CA or community rule for the exit (the internet: players' claims only —
   men finish the animation in progress, a unit "drags along one or two models", a ~5 s delay); the database has no exit
-  speed (`break_off_*` 0, `melee_attack_interval` 4, `matched_combat_*`). Tried as a test, not kept: a melee leaver
-  held 2 s (`contact.pin_melee_s` 2) — the twin 0 / 3.7 / 9.7 m, out of contact at 4.5–5 s like the game, but the check
-  does not move (game-AI battles 39 % / −41 → −39 %, network battles 40 % / +24 % both, same winner 137 → 138 of 169):
-  the slow exit does not explain the network battles' gap (there the simulator takes the enemy's health faster than
-  the game at 60–180 s: below the interval 51–57 %). OPEN.
+  speed (`break_off_*` 0, `melee_attack_interval` 4, `matched_combat_*`). The simulator holds a leaver without a missile
+  weapon 2 s (`contact.pin_melee_s` 2, source: this probe, `build/probes7/leavefat.py`, `build/open2/leave_trace.py`):
+  the twin 0 / 3.4 / 9.3 m at 2 / 4 / 6 s (game 1.5 / 4.6 / 9.3), the leaver loses health until 3.5–4.5 s (game
+  3.0–5.5), 60 HP in 10 s (game 47); without the hold 3.4 / 9.3 / 15.2 m and until 1.5–2.5 s; with 1.5 s 0 / 4.9 /
+  10.8 m, with 2.5 s 0 / 2.0 / 7.8 m; 2 s is the nearest to the trajectory, not fitted to an outcome. On since 08.10:
+  network v2 used the cheap exit (4–6 exits a unit-minute in melee). The overall check did not move with it (game-AI
+  battles 39 % / −41 → −39 %, network battles 40 % / +24 %): it is not what explains the network battles' gap. In the
+  game the centre moves in jerks from 2 to 6 s — the hold is only the simulator's shape of it; the game's leaver
+  still strikes 1–1.5 s (the simulator's does not). OPEN: the exit's rule.
 - **In whole battles the melee rate falls with the contact's age more steeply than in the simulator**
   (`build/midfight`, 170 network battles, 4 copies, `diag.py` / `agg*.py`). HP/s of a melee unit under one enemy in
   melee by time since the contact began (0–5 / 5–15 / 15–30 / 30–60 / 60–120 / 120+ s): struck by the game's AI —

@@ -5,7 +5,9 @@ The chained heads (chain.py) choose, with a new order (hold, move, attack, withd
 choice is only keep (masked: its log-probability is 0, no gradient, no entropy), except when an INTERRUPT happens -
 then the unit decides again at once:
 * it came into melee (a fight began: it attacked or was attacked; the token's `melee` was off at the last decision);
-* an enemy came to threaten its flank or rear (the token's threat_left / right / rear came on: a charge coming in);
+* an enemy has threatened its flank or rear for THREAT_HOLD_S (the token's threat_left / right / rear on at every
+  decision since: a charge coming in; once per such spell - in the game the flags flicker, 2.4-3.4 rising edges a
+  unit-minute against the simulator's 0.9, and every flicker freed the unit: build/v2/ana_game2.py, 08.10.2026);
 * its attack's target died, routs or shatters, or is no longer seen (no longer in Obs.target_ok, or routing);
 * it routed or rallied (its routing state changed);
 * its own lord died (the context's own-lord-slain came on).
@@ -14,7 +16,8 @@ A unit that chooses keep itself starts no commitment. Routing units take no orde
 All from the side's own observation (the unit tokens, Obs.target_ok, the context) and the battle time: the simulator
 (tools/nn/train/rollout.py) and the companion (tools/nn/companion, the game's state each second) keep it the same way.
 The state is a dict of tensors [B, N] (until: battle time it ends, -1 none; target: the committed attack's target,
--1 none; melee, threat, rout: the flags at the last decision) and lord [B] (own lord dead at the last decision).
+-1 none; melee, rout: the flags at the last decision; threat_t: the time the threat came on, -1 off; threat: its
+spell has counted as an event) and lord [B] (own lord dead at the last decision).
 
 The network sees it (Obs "commit" [B, N, 2]): the seconds left / LEFT_MAX and whether the unit is held now; and
 Obs "free" [B, N]: the units that decide now (take orders and are not held).
@@ -27,9 +30,10 @@ from tools.nn.sim.orders import ATTACK, KEEP
 
 DURATIONS = (2.0, 4.0, 8.0, 16.0)
 LEFT_MAX = 16.0
+THREAT_HOLD_S = 2.0                   # s: a flank / rear threat ends a commitment once it has lasted this long
 OWN_LORD = factions.SIZE + 8          # the context's own lord slain (observation._context + lords)
 THREAT = tuple(ob.INDEX[n] for n in ("threat_left", "threat_right", "threat_rear"))
-KEYS = ("until", "target", "melee", "threat", "rout", "lord")
+KEYS = ("until", "target", "melee", "threat", "threat_t", "rout", "lord")
 
 
 def start(B, N, device=None):
@@ -37,7 +41,8 @@ def start(B, N, device=None):
     z = torch.zeros((B, N), device=device)
     f = torch.zeros((B, N), dtype=torch.bool, device=device)
     return {"until": z - 1, "target": torch.full((B, N), -1, dtype=torch.long, device=device), "melee": f,
-            "threat": f.clone(), "rout": f.clone(), "lord": torch.zeros(B, dtype=torch.bool, device=device)}
+            "threat": f.clone(), "threat_t": z - 1, "rout": f.clone(),
+            "lord": torch.zeros(B, dtype=torch.bool, device=device)}
 
 
 def _flags(obs_t):
@@ -49,14 +54,22 @@ def _flags(obs_t):
     return melee, threat, rout, lord
 
 
-def interrupts(state, obs_t):
-    """[B, N] the units whose commitment an event ends now (module doc)."""
+def _threat(state, threat, t):
+    """(since [B, N]: the time the threat came on, -1 off; steady [B, N]: on for THREAT_HOLD_S or longer)."""
+    since = torch.where(threat, torch.where(state["threat_t"] >= 0, state["threat_t"], t.expand_as(state["threat_t"])),
+                        torch.full_like(state["threat_t"], -1.0))
+    return since, threat & (t - since >= THREAT_HOLD_S - 1e-6)
+
+
+def interrupts(state, obs_t, t):
+    """[B, N] the units whose commitment an event ends now (module doc); t [B, 1] the battle time."""
     melee, threat, rout, lord = _flags(obs_t)
+    _, steady = _threat(state, threat, t)
     tgt = state["target"]
     has = tgt >= 0
     t = tgt.clamp(min=0)
     gone = has & (~obs_t["target_ok"].gather(1, t) | rout.gather(1, t))
-    return ((melee & ~state["melee"]) | (threat & ~state["threat"]) | (rout != state["rout"]) | gone
+    return ((melee & ~state["melee"]) | (steady & ~state["threat"]) | (rout != state["rout"]) | gone
             | (lord & ~state["lord"])[:, None])
 
 
@@ -64,7 +77,7 @@ def inputs(state, obs_t, t):
     """obs_t with the commitment's inputs: "free" [B, N] (decides now), "commit" [B, N, 2] (seconds left / LEFT_MAX,
     held now). t: the battle time [B] (s)."""
     t = torch.as_tensor(t, device=obs_t["own"].device).float().reshape(-1, 1)
-    held = obs_t["ctrl"] & (state["until"] > t) & ~interrupts(state, obs_t)
+    held = obs_t["ctrl"] & (state["until"] > t) & ~interrupts(state, obs_t, t)
     left = torch.where(held, state["until"] - t, torch.zeros_like(state["until"]))
     out = dict(obs_t)
     out["free"] = obs_t["ctrl"] & ~held
@@ -83,7 +96,9 @@ def apply(state, obs_t, t, action):
     target = torch.where(new, torch.where(action.kind == ATTACK, action.target, torch.full_like(action.target, -1)),
                          torch.where(held, state["target"], torch.full_like(state["target"], -1)))
     melee, threat, rout, lord = _flags(obs_t)
-    return {"until": until, "target": target, "melee": melee, "threat": threat, "rout": rout, "lord": lord}
+    since, steady = _threat(state, threat, t)
+    return {"until": until, "target": target, "melee": melee, "threat": steady, "threat_t": since, "rout": rout,
+            "lord": lord}
 
 
 def reset(state, rows):

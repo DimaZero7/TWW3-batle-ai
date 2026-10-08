@@ -169,7 +169,9 @@ def test_a_held_unit_may_only_keep_and_its_choice_has_no_log_prob():
 
 def settled(st, o):
     """The state as if the last decision saw the same flags (no event now)."""
-    st["melee"], st["threat"], st["rout"], st["lord"] = commit._flags(o)
+    st["melee"], threat, st["rout"], st["lord"] = commit._flags(o)
+    st["threat"] = threat                                          # (a threat already on counted, since long ago)
+    st["threat_t"] = torch.where(threat, torch.zeros_like(st["threat_t"]), st["threat_t"])
     return st
 
 
@@ -214,11 +216,12 @@ def test_an_event_interrupts_the_commitment(event):
     st = settled(commit.start(B, N), o)
     st["until"][:, 0] = 100.0
     st["target"][:, 0] = 7
-    assert torch.all(~commit.inputs(st, o, torch.zeros(B))["free"][:, 0])
+    assert torch.all(~commit.inputs(st, o, torch.full((B,), 10.0))["free"][:, 0])
     if event == "melee":
         o = _obs_with(obs, melee=(0, 1.0))
     elif event == "threat":
         o = _obs_with(obs, threat_rear=(0, 1.0))
+        st["threat_t"][:, 0] = 8.0                                 # on since 2 s before (t 10)
     elif event == "target_gone":
         o = dict(o, target_ok=o["target_ok"].clone())
         o["target_ok"][:, 7] = False
@@ -230,12 +233,12 @@ def test_an_event_interrupts_the_commitment(event):
         o = dict(o, ctx=ctx)
     elif event == "rally":
         st["rout"][:, 0] = True                              # it was routing at the last decision, now it is not
-    assert torch.all(commit.inputs(st, o, torch.zeros(B))["free"][:, 0])
+    assert torch.all(commit.inputs(st, o, torch.full((B,), 10.0))["free"][:, 0])
     # the same flag on at the last decision too: no new event, the commitment holds (except the target's, the lord's
     # and the rally's, which are states, not edges)
     if event in ("melee", "threat"):
         st2 = dict(st, melee=st["melee"] | (event == "melee"), threat=st["threat"] | (event == "threat"))
-        assert torch.all(~commit.inputs(st2, o, torch.zeros(B))["free"][:, 0])
+        assert torch.all(~commit.inputs(st2, o, torch.full((B,), 10.0))["free"][:, 0])
 
 
 def test_the_companion_path_keeps_the_commitment_between_decisions():
@@ -447,3 +450,100 @@ def test_the_simulators_gold_out_is_the_gold_of_health_the_other_side_lost():
         dealt = float((u["gold_out"] * (u["side"] == s)).sum())
         took = float((lost * (u["side"] == 3 - s)).sum())
         assert took > 0 and dealt == pytest.approx(took, rel=1e-3), s
+
+
+# --- the companion and the simulator see the same v2 inputs on the same state ---
+
+def _game_doc(st, ours, move):
+    """The bridge's state document of battle 0 (src/entries/nn_arena.lua): our side is the document's side 1."""
+    from tools.nn.companion import exchange
+    u = {k: v[0].tolist() for k, v in st.u.items()}
+    name = lambda i: f"{'own' if u['side'][i] == ours else 'enemy'}_{i}"
+    units = []
+    for i, key in enumerate(st.keys[0]):
+        if not key:
+            continue
+        tgt = u["target"][i]
+        units.append({"n": name(i), "side": 1 if u["side"][i] == ours else 2, "key": key, "x": u["x"][i],
+                      "z": u["z"][i], "b": u["b"][i], "men": u["men"][i], "hp": u["hp"][i], "mp": u["mp"][i],
+                      "ms": u["ms"][i], "r": u["r"][i], "s": u["s"][i], "w": u["w"][i], "m": u["m"][i],
+                      "mv": u["mv"][i], "f": False, "a": u["a"][i], "fire": u["fire"][i],
+                      "t": name(tgt) if tgt >= 0 else "", "fat": exchange.FATIGUE_LEVELS[int(u["fat"][i])],
+                      "k": u["k"][i], "ox": u["ox"][i], "oz": u["oz"][i], "lf": u["lf"][i], "rf": u["rf"][i],
+                      "bf": u["bf"][i], "v": True})
+    attacker = int(st.attacker[0])
+    return {"batch": "twin", "move": move, "t": round(float(st.t[0]) * 1000), "done": False,
+            "attacker": 1 if attacker == ours else 2, "decide_ms": 1000,
+            "factions": {"own": "wh_main_emp_empire", "enemy": "wh_main_emp_empire"}, "units": units}
+
+
+@pytest.mark.parametrize("ours", [1, 2])
+def test_the_companion_sees_the_v2_inputs_as_the_simulator_on_one_state(ours, monkeypatch):
+    from tools.nn.companion import loop
+    from tools.nn.model import sources as msources
+    from tools.nn.sim import battle, scenario
+    from tools.nn.train import opponents, scenes as mscenes
+    left = [{"key": "wh_main_emp_inf_spearmen_0", "x": -60, "z": z, "b": 90} for z in (-80, 0, 80)]
+    right = [{"key": "wh_main_emp_inf_swordsmen", "x": 60, "z": z, "b": 270} for z in (-40, 40)]
+    left.append({"key": "wh_main_emp_cha_general_0", "general": True, "x": -140, "z": 0, "b": 90})
+    st = scenario.build([{"attacker": 1, "sides": {1: {"faction": "wh_main_emp_empire", "units": left},
+                                                   2: {"faction": "wh_main_emp_empire", "units": right}}}])
+    for _ in range(50):                                          # 25 s: they meet, fight, lose men
+        battle.step(st, opponents.nearest(st))
+    assert bool(st.u["m"][0].any())
+    setup, _ = msources.from_sim(st)
+    setup = ob.Setup(keys=setup.keys, side=setup.side, bounds=np.tile(np.array(msources.CROSSROADS, np.float32),
+                     (st.B, 1)), factions=setup.factions, attacker=setup.attacker)
+    live = mscenes.LiveSetup.of(setup, "cpu")
+    net = model()
+    # the simulator's decision (rollout.Battles: observe, then the v2 inputs)
+    obs, _ = ob.observe(st.observation(), live, ours, None)
+    o_sim = policy.to_torch(obs)
+    o_sim = rollout._v2_inputs(commit.start(1, st.N), o_sim, st.t, decide.frame_to(obs.frame, "cpu"), live.bounds)
+    # the companion's (loop.Brain on the bridge's document), the actor's input caught
+    seen = {}
+    real = net.act
+
+    def spy(o, *a, **k):
+        seen["o"] = o
+        return real(o, *a, **k)
+    monkeypatch.setattr(net, "act", spy)
+    brain = loop.Brain(net, greedy=True)
+    brain.decide(_game_doc(st, ours, 1))
+    o_game = seen["o"]
+    names = brain.battle.names
+    idx = [int(n.split("_")[1]) for n in names]                   # the document's units -> the simulator's slots
+    for k in ("own", "attend", "ctrl", "free"):
+        assert torch.equal(o_game[k][0], o_sim[k][0, idx]), k
+    assert torch.allclose(o_game["pos"][0], o_sim["pos"][0, idx], atol=1e-4)
+    assert torch.equal(o_game["target_ok"][0], o_sim["target_ok"][0, idx])
+    cols = [ob.INDEX[n] for n in ("hp", "visible", "seen", "state_routing", "state_shattered", "melee", "threat_left",
+                                  "threat_right", "threat_rear")] + [sectors.COST]
+    assert torch.allclose(o_game["tokens"][0][:, cols], o_sim["tokens"][0, idx][:, cols], atol=1e-5)
+    assert torch.allclose(o_game["geo"], o_sim["geo"], atol=1e-4)
+    f_game = sectors.features(CFG, o_game, sectors.inside(CFG, o_game["geo"]))
+    f_sim = sectors.features(CFG, o_sim, sectors.inside(CFG, o_sim["geo"]))
+    assert torch.allclose(f_game, f_sim, atol=1e-5) and float(f_sim[..., 0].sum()) > 0
+    # the frame: forward points from our army to the enemy's whichever side we are
+    fwd_enemy = o_sim["pos"][0][~o_sim["own"][0] & o_sim["attend"][0], 0].mean()
+    fwd_own = o_sim["pos"][0][o_sim["own"][0] & o_sim["attend"][0], 0].mean()
+    assert fwd_enemy > fwd_own
+
+
+def test_a_flank_threat_ends_a_commitment_only_once_it_has_lasted_2_s():
+    setup, state, obs = calm()
+    o = policy.to_torch(obs)
+    B, N = o["own"].shape
+    on = _obs_with(obs, threat_left=(0, 1.0))
+    st = settled(commit.start(B, N), o)
+    st["until"][:, 0] = 100.0
+    a = heads.Action(torch.full((B, N), KEEP), torch.zeros((B, N), dtype=torch.long), torch.full((B, N), -1),
+                     torch.zeros((B, N), dtype=torch.bool), None, torch.zeros((B, N), dtype=torch.long))
+    free = []
+    # flickers (on 1 s, off, on 1 s): never 2 s on - held throughout; then on for good: freed once, at 2 s
+    for t, obs_now in enumerate([on, o, on, o, on, on, on, on, on]):
+        x = commit.inputs(st, obs_now, torch.full((B,), float(t)))
+        free.append(bool(x["free"][0, 0]))
+        st = commit.apply(st, x, torch.full((B,), float(t)), a)
+        st["until"][:, 0] = 100.0                                   # (kept committed, to see every event)
+    assert free == [False, False, False, False, False, False, True, False, False]
