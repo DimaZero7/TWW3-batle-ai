@@ -2085,6 +2085,60 @@ class TestRoutSpeed:
         assert v / float(P.units[SPEAR]["speed"]["run"]) == pytest.approx(0.985 * (0.85 if tired else 1.0), rel=0.01)
 
 
+def _rout_from_melee(params, seconds=10.0):
+    """Spearmen (HOLD) in contact with skavenslaves for 2 s, then the slaves rout (morale pushed below 0); a standing
+    unit far away on each side keeps the battle going. Per step after the rout: (s since the rout, slaves routing,
+    in melee, HP, speed, rout-exit clock)."""
+    st = scenario.build([army([(SPEAR, -50, 0, 90), (SPEAR, -300, 700, 90)],
+                              [(SLAVE, 50, 0, 270), (SLAVE, 300, 700, 270)])], params)
+    H = st.N // 2
+    front, depth = geometry.dims(st.u, params.sim["formation"]["spacing_m"])
+    st.u["x"][0, 0] = -(depth[0, 0] / 2 + TOUCH / 2)
+    st.u["x"][0, H] = depth[0, H] / 2 + TOUCH / 2
+    dt = params.dt
+    for _ in range(int(round(2.0 / dt))):
+        battle.step(st, replay.hold(st), params)
+    assert bool(st.u["m"][0, H]) and not bool(st.u["r"][0, H])
+    st.u["morale"][0, H] = -30.0
+    rows = []
+    for k in range(int(round(seconds / dt))):
+        battle.step(st, replay.hold(st), params)
+        u = st.u
+        rows.append(((k + 1) * dt, bool(u["r"][0, H]), bool(u["m"][0, H]), float(u["hp_abs"][0, H]),
+                     math.hypot(float(u["vx"][0, H]), float(u["vz"][0, H])), float(u["rpin_s"][0, H])))
+    full = float(st.u["run"][0, H]) * params.sim["morale"]["rout_speed"]
+    return rows, full
+
+
+class TestRoutExit:
+    def test_a_formation_routing_from_melee_stays_in_contact_and_is_struck_for_rout_pin_s(self):
+        pin = P.sim["contact"]["rout_pin_s"]
+        assert pin == 7
+        on, full = _rout_from_melee(P)
+        off, _ = _rout_from_melee(P.with_cal("contact", rout_pin_s=0))
+        assert all(r for _, r, *_ in on) and all(r for _, r, *_ in off)
+        at = lambda rows, t: next(x for x in rows if x[0] >= t - 1e-6)
+        # in melee (the game's flag) through the exit, out of it after; off: out of contact at once
+        assert at(on, 3.0)[2] and at(on, 6.0)[2]
+        assert not at(on, 9.0)[2] and at(on, 9.0)[5] == 0.0
+        assert not at(off, 2.0)[2]
+        # struck while it pulls away: more HP lost in the 7 s than without the exit
+        lost_on = on[0][3] - at(on, 7.0)[3]
+        lost_off = off[0][3] - at(off, 7.0)[3]
+        assert lost_on > 1.5 * lost_off and lost_on > 0
+        # it gathers speed by rout_pin_speed once it has turned and sped up (0.81 of its free rout speed in s 3-4, 0.97
+        # in s 6-7), all of it after the exit; off: all of it from s 3
+        assert at(on, 4.0)[4] / full == pytest.approx(0.81, abs=0.04)
+        assert at(on, 6.5)[4] / full == pytest.approx(0.95, abs=0.04)
+        assert at(on, 9.5)[4] == pytest.approx(full, rel=0.03)
+        assert at(off, 4.0)[4] == pytest.approx(full, rel=0.03)
+
+    def test_the_ramp_is_linear_between_its_points(self):
+        table = P.sim["contact"]["rout_pin_speed"]
+        v = movement.ramp(torch.tensor([0.0, 0.5, 1.0, 7.5, 20.0]), table).tolist()
+        assert v == pytest.approx([0.41, 0.41, 0.535, 1.0, 1.0])
+
+
 def _ctx_of(monkeypatch, st, orders_of, steps):
     """The morale context battle.step hands morale.step, each step (morale itself still steps)."""
     seen = []

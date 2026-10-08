@@ -746,6 +746,40 @@ class TestProperties:
         u["hp"][0, 0] = 0.2                                      # a hurt lord leaves it to the others
         assert not lord_on(opponents.ai_like(st, p))
 
+    def test_ai_like_pursues_a_routing_target_by_the_game_ais_shares(self):
+        """pursue_share / pursue_mean_s / pursue_drop_m (build/routgap/ai_chase.py): a melee unit whose attack target
+        routs keeps attacking it when its fixed draw is below the share for the nearest other standing enemy's
+        distance, for its fixed exponential chase time, while the router is within pursue_drop_m; else it takes a
+        standing enemy."""
+        st = line_army(attacker=1, gap=600)
+        H = st.N // 2
+        u = st.u
+        u["x"][0, H + 1], u["z"][0, H + 1] = -280.0, 0.0          # side 2's spearman 20 m from side 1's spearman 1
+        u["x"][0, 1], u["z"][0, 1] = -300.0, 0.0
+        u["order_kind"][0, H + 1], u["order_target"][0, H + 1] = O.ATTACK, 1
+        u["r"][0, 1] = True                                      # its target routs
+        draw = float(opponents.pick_uniform(1, st.N, "cpu", salt=54321)[0, H + 1, 1])
+        always = opponents.Line(pursue_share=((1e9, 1.0),))
+        never = opponents.Line(pursue_share=((1e9, 0.0),))
+        on = lambda o: int(o.kind[0, H + 1]) == O.ATTACK and int(o.target[0, H + 1]) == 1
+        o = opponents.ai_like(st, always)
+        assert on(o) and bool(o.run[0, H + 1])
+        assert not on(opponents.ai_like(st, never))
+        # the default shares: by the draw against the share for the nearest other enemy
+        d_other = float(torch.sqrt((u["x"][0, [0, 2, 3]] - u["x"][0, H + 1]) ** 2
+                                   + (u["z"][0, [0, 2, 3]] - u["z"][0, H + 1]) ** 2).min())
+        share = next(sh for lim, sh in opponents.Line().pursue_share if d_other <= lim)
+        assert on(opponents.ai_like(st)) == (draw < share)
+        u["x"][0, 1] = -345.0                                    # the router 65 m off: beyond pursue_drop_m (40)
+        assert not on(opponents.ai_like(st, always))
+        u["x"][0, 1] = -300.0
+        life = -always.pursue_mean_s * math.log(float(opponents.pick_uniform(1, st.N, "cpu", salt=98765)[0, H + 1, 1]))
+        u["rout_s"][0, 1] = life + 1.0                          # routing longer than its fixed chase time: gives up
+        assert not on(opponents.ai_like(st, always))
+        u["rout_s"][0, 1] = 0.0
+        u["x"][0, 1], u["r"][0, 1] = -300.0, False               # standing again: an ordinary target
+        assert on(opponents.ai_like(st, never))
+
     def test_ai_like_missile_units_walk_up_only_to_a_post_behind_the_line_after_the_fight(self):
         st = line_army(attacker=1, gap=600)                      # side 1 attacks: its archers walk up to range
         u = st.u

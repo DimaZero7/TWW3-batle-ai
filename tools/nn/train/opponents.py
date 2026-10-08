@@ -198,6 +198,20 @@ class Line:
     guard_closing: float = 0.5
     flee_straight: bool = False   # a missile unit out of melee steps back straight away from the enemy (False: away
     #                               from it and back, towards its own side)
+    # The pursuit: a melee unit (not the lord) whose attack target routs keeps attacking it - a fixed draw per (battle
+    # row, unit, router) below pursue_share of the nearest OTHER standing enemy's distance - for a fixed exponential
+    # time of mean pursue_mean_s from the rout's start (another draw), while the router stays within pursue_drop_m of
+    # it (centre to centre); else it takes a new target as before. build/routgap/ai_chase.py, ai_chase2.py (all fair
+    # recordings, the game AI's 2,587 melee units whose melee target routed): still on the router at +5 / +10 / +15 s
+    # 0.26 / 0.21 / 0.17 (from +5 s about 4 % give up a second: mean 24 s); at +5 s by the nearest other standing enemy
+    # within 30 / 30-60 / 60-100 / beyond 100 m 0.16 / 0.20 / 0.24 / 0.61 (1,054 / 702 / 419 / 412 routs); the router
+    # 12-14 m from its chaser (median) through the first 25 s of a chase; 858 chases of 3 s or more given up with the
+    # router alive and routing at 10 / 15 / 25 / 41 m (p25 / 50 / 75 / 90): pursue_drop_m 40 (~p90). ai_like before:
+    # 0.12 / 0.04 / 0.01 at +5 / +8 / +15 s (the twin of the 8 it3 gate battles, build/routgap/auto_pursue.py; the
+    # game there 0.27 / 0.26 / 0.21). pursue_drop_m 0: off.
+    pursue_share: tuple = ((30.0, 0.16), (60.0, 0.20), (100.0, 0.24), (BIG, 0.61))
+    pursue_mean_s: float = 24.0
+    pursue_drop_m: float = 40.0
 
 
 def _centroid(x, z, mask):
@@ -206,19 +220,23 @@ def _centroid(x, z, mask):
     return (x * w).sum(1) / n, (z * w).sum(1) / n
 
 
-def pick_noise(B, N, device):
-    """[B, N, N] a fixed standard Gumbel draw per (battle row, unit, enemy slot): an integer hash, the same
+def pick_uniform(B, N, device, salt=12345):
+    """[B, N, N] a fixed uniform (0, 1) draw per (battle row, unit, enemy slot): an integer hash, the same
     every step (no flip-flop between steps, nothing random to replay; a restarted row puts other units in
-    the slots)."""
+    the slots). Another salt: an independent draw."""
     b = torch.arange(B, device=device)[:, None, None]
     i = torch.arange(N, device=device)[None, :, None]
     j = torch.arange(N, device=device)[None, None, :]
-    h = (b * 1000003 + i * 7919 + j * 104729 + 12345) & 0x7FFFFFFF
+    h = (b * 1000003 + i * 7919 + j * 104729 + salt) & 0x7FFFFFFF
     h = ((h ^ (h >> 13)) * 1274126177) & 0x7FFFFFFF
     h = ((h ^ (h >> 16)) * 668265263) & 0x7FFFFFFF
     h = h ^ (h >> 15)
-    q = ((h & 0xFFFFFF).float() + 0.5) / float(1 << 24)
-    return -torch.log(-torch.log(q))
+    return ((h & 0xFFFFFF).float() + 0.5) / float(1 << 24)
+
+
+def pick_noise(B, N, device):
+    """[B, N, N] a fixed standard Gumbel draw per (battle row, unit, enemy slot) (pick_uniform)."""
+    return -torch.log(-torch.log(pick_uniform(B, N, device)))
 
 
 def lap_shift(st, p, fx, fz, cx, cz, line, foe, missile, lord):
@@ -404,6 +422,22 @@ def ai_like(st, p=Line()):
         via = (charge & ~fighting & take(fighting) & (torch.minimum(d1, d2) > 8.0) & (tgt_d > p.flank_m)
                & ~behind_it)
         put(via, O.MOVE, gx, gz, r=True)
+
+    if p.pursue_drop_m > 0:
+        # The pursuit (Line): keep attacking a target that routs, by the game AI's shares.
+        ot = u["order_target"].clamp(min=0)
+        enemy_t = (side.gather(1, ot) != side) & (side.gather(1, ot) > 0)
+        on_router = ((u["order_kind"] == O.ATTACK) & (u["order_target"] >= 0) & enemy_t
+                     & alive.gather(1, ot) & u["r"].gather(1, ot))
+        rd = d.gather(2, ot[:, :, None]).squeeze(2)
+        share = torch.full_like(near_d, float(p.pursue_share[-1][1]))
+        for lim, sh in reversed(p.pursue_share[:-1]):
+            share = torch.where(near_d <= lim, torch.full_like(share, float(sh)), share)
+        draw = pick_uniform(st.B, st.N, x.device, salt=54321).gather(2, ot[:, :, None]).squeeze(2)
+        life = -p.pursue_mean_s * torch.log(pick_uniform(st.B, st.N, x.device, salt=98765).gather(2, ot[:, :, None]).squeeze(2))
+        pursue = (line & on_router & ~opp_ok & (rd <= p.pursue_drop_m) & (draw < share)
+                  & (u["rout_s"].gather(1, ot) < life))
+        put(pursue, O.ATTACK, tg=ot, r=True)
 
     # Missile units: the enemy lord when in range; else shoot at will; attackers walk up to range;
     # step back from enemy melee units that come close.

@@ -245,7 +245,12 @@ def strikes(u, pw, contact, params, charge_now, first=False):
         ran_j = u["ran_in"][:, None, :] if "ran_in" in u else torch.ones_like(single_j)
         rate = torch.where(single_j & ~single_i & ran_j, rate * grow, rate)
     if pursuit is not None:
-        rate = torch.where(routing_j, rate * float(pursuit), rate)
+        share = torch.full_like(rate, float(pursuit))
+        if cc.get("rout_pin_s") and cc.get("rout_pin_rate") is not None and "rpin_s" in u:
+            # a router in its rout's exit (battle.py, contact.rout_pin_s), still among the men it fought, is struck at
+            # contact.rout_pin_rate of the rule (the recordings: 0.77 of a standing unit's loss in melee)
+            share = torch.where((u["rpin_s"] > 0)[:, None, :], float(cc["rout_pin_rate"]), share)
+        rate = torch.where(routing_j, rate * share, rate)
     # A lone man (a lord) fought by infantry takes the sum of what the men around him strike (no
     # more than lord_max_attackers of them, however many units: the lord swarm probe). Fought by
     # the enemy lord too, the infantry's share counts only lord_rival_others (the probe's lord

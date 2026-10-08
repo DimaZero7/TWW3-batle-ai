@@ -87,6 +87,11 @@ Ours: [pace and fatigue](../units/pace.md), [simulator](../../training/simulator
   - Ours: in the recordings a router chased by one pursuer loses 0.64 of what a standing target in
     melee loses, without a charge burst in the first 5 s; the simulator strikes a router at 0.43 of
     the rule (`contact.pursuit_rate`), from the rear, without the charge.
+  - **A router's exit.** In the recordings (216 battles, 3,987 routs from melee) a unit that routs from melee
+    stays in melee 7 s more (median; p25 5, p75 12), without a chase too (median 6 s), gathers speed over ~7 s
+    (0.41 of its rout speed in the first second, 0.81 in the fourth) and all that time loses 0.77 of what a
+    standing unit in melee loses. Simulator: `contact.rout_pin_s` 7 s in contact, struck at 0.83, the speed by
+    `contact.rout_pin_speed` ([simulator](../../training/simulator.md#a-routers-exit-from-the-fight)).
 - **Routing.** No public number for rout speed; Skaven Scurry Away +10 % at wavering or worse.
   Ours: 0.80–0.96 of run measured (fatigued; without it 0.98–1.0), units leave the map at |x|, |z| =
   1020 m. The WH2 key

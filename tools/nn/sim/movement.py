@@ -11,6 +11,15 @@ not pass through each other: overlapping units are pushed apart along the line o
 import torch
 
 
+def ramp(t, table):
+    """Linear in t between the points [(t, value), ...] of table (sorted by t), the end values beyond them."""
+    out = torch.full_like(t, float(table[0][1]))
+    for (t0, v0), (t1, v1) in zip(table[:-1], table[1:]):
+        w = ((t - float(t0)) / max(float(t1) - float(t0), 1e-9)).clamp(0, 1)
+        out = torch.where(t > float(t0), float(v0) + w * (float(v1) - float(v0)), out)
+    return out
+
+
 def velocity(u, goal_x, goal_z, speed_goal, moving, dt):
     """New velocity [B, N] towards the goal (per-unit acceleration / deceleration, stop on the point)."""
     dx, dz = goal_x - u["x"], goal_z - u["z"]

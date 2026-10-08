@@ -95,7 +95,14 @@ def step(st, orders, params=None, dt=None):
     # contact); a lone man (a lord) stops at a formation's edge (contact.lord_reach_m).
     lone = (u["men0"] <= 1)
     reach_ij = torch.where(lone[:, :, None] | lone[:, None, :], float(cal["contact"].get("lord_reach_m", reach)), reach)
-    touch = pw["enemy"] & both & (pw["gap"] <= reach_ij + held)
+    # The rout's exit (contact.rout_pin_s; config/nn/sim.json contact.rout_pin_why): a formation that began to rout in
+    # melee keeps its men in contact for rout_pin_s seconds - the contact test does not count the way it has run since
+    # (rpin_d), so the enemies it fought go on striking it (at the pursuit rate, melee.py) while it pulls away.
+    gap_c = pw["gap"]
+    if cal["contact"].get("rout_pin_s") and "rpin_s" in u:
+        back = torch.where(alive & u["r"] & (u["rpin_s"] > 0), u["rpin_d"], torch.zeros_like(u["rpin_d"]))
+        gap_c = gap_c - back[:, :, None] - back[:, None, :]
+    touch = pw["enemy"] & both & (gap_c <= reach_ij + held)
     # Leaving melee: a withdraw order, or any unit told to move contact.leave_m or more away (0: off).
     # It walks out of the fight: it strikes nobody and is not held in place, the enemies in contact
     # still strike it (measured in the game, config/nn/sim.json contact.why).
@@ -571,8 +578,19 @@ def step(st, orders, params=None, dt=None):
         "enemy_near": (foes & (standing[:, None, :] | bool(mcal.get("rally_any_enemy")))
                        & (d <= mcal["rally_free_m"])).any(2),
     }
-    morale.step(u, ctx, params, dt)
+    began = morale.step(u, ctx, params, dt)
     standing = alive & ~u["r"]
+    pin_s = float(cal["contact"].get("rout_pin_s") or 0.0)
+    r_pin = torch.zeros_like(alive)
+    if pin_s > 0 and "rpin_s" in u:
+        # the rout's exit starts for a formation that routs from melee (in melee the step before); it ends after
+        # rout_pin_s, at a rally, or when the unit is gone
+        start_pin = began & u["m"] & (u["men0"] > 1)
+        keep = alive & u["r"] & ((u["rpin_s"] > 0) | start_pin)
+        u["rpin_s"] = torch.where(start_pin, torch.full_like(u["rpin_s"], 1e-6),
+                                  torch.where(keep, u["rpin_s"], torch.zeros_like(u["rpin_s"])))
+        u["rpin_d"] = torch.where(keep & ~start_pin, u["rpin_d"], torch.zeros_like(u["rpin_d"]))
+        r_pin = keep
 
     # --- fatigue ---
     # An ended move is rest too: KEEP preserves the order, not an eternal ready stance.
@@ -614,6 +632,10 @@ def step(st, orders, params=None, dt=None):
     gx = torch.where(routing, fx, gx)
     gz = torch.where(routing, fz, gz)
     want = torch.where(routing, u["run"] * cal["morale"]["rout_speed"], want)
+    if pin_s > 0 and cal["contact"].get("rout_pin_speed"):
+        # in its rout's exit it gathers speed: the recordings' share of its own free rout speed by second (0.41 in the
+        # first second to 1.0 by the seventh; contact.rout_pin_speed)
+        want = torch.where(r_pin, want * movement.ramp(u["rpin_s"], cal["contact"]["rout_pin_speed"]), want)
     moving = moving | routing
     # A unit in melee closes up to its nearest opponent (walking) until the formations touch.
     foe_gap = torch.where(touch & standing[:, None, :], pw["gap"], torch.full_like(pw["gap"], 1e9))
@@ -673,6 +695,13 @@ def step(st, orders, params=None, dt=None):
     u["vx"], u["vz"] = vx, vz
     u["x"] = u["x"] + vx * dt
     u["z"] = u["z"] + vz * dt
+    if pin_s > 0 and "rpin_s" in u:
+        # the rout's exit: the way run since it began (the contact test above leaves it out) and its clock
+        u["rpin_d"] = torch.where(r_pin, u["rpin_d"] + torch.sqrt(vx * vx + vz * vz) * dt, u["rpin_d"])
+        u["rpin_s"] = torch.where(r_pin, u["rpin_s"] + dt, u["rpin_s"])
+        over = r_pin & (u["rpin_s"] >= pin_s)
+        u["rpin_s"] = torch.where(over, torch.zeros_like(u["rpin_s"]), u["rpin_s"])
+        u["rpin_d"] = torch.where(over, torch.zeros_like(u["rpin_d"]), u["rpin_d"])
     pw2 = geometry.pairwise(u, spacing)
     px, pz = movement.separate(pw2, standing[:, :, None] & standing[:, None, :] & same_side & ~eye)
     u["x"] = u["x"] + px
@@ -719,7 +748,10 @@ def step(st, orders, params=None, dt=None):
     target = torch.where(has_opp & standing, opp, torch.where(firing, m_target,
                                                                torch.where(has_router, router, torch.full_like(opp, -1))))
     u["target"] = torch.where(alive, target, torch.full_like(target, -1))
-    u["m"] = alive & (engaged | has_router)
+    # a router in its rout's exit touched by a standing enemy is in melee too (the game's flag: median 7 s after a rout
+    # from melee, contact.rout_pin_why)
+    held_router = r_pin & (u["rpin_s"] > 0) & (touch & standing[:, None, :]).any(2) if pin_s > 0 else torch.zeros_like(alive)
+    u["m"] = alive & (engaged | has_router | held_router)
     u["mv"] = mv
     u["f"] = mv & (spd > u["walk"] + 0.3)
     u["fire"] = firing

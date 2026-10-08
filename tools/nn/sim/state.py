@@ -183,6 +183,9 @@ INTERNAL = {
     "rout_count": ("f", "times routed"),
     "rout_s": ("f", "seconds since the rout began"),
     "rally_s": ("f", "seconds since the last rally"),
+    "rpin_s": ("f", "seconds into the rout's exit of a formation that routed from melee (contact.rout_pin_s: its men "
+                    "stay in contact that long; 0: not in one)"),
+    "rpin_d": ("f", "metres run since its rout's exit began (left out of its contact test while the exit lasts)"),
     "rally_ok_s": ("f", "seconds a routing unit has met the rally's conditions without a break (morale.rally_wait_s)"),
     "flank_hit": ("f", "worst direction attacked from now: 0 front, 1 flank, 2 rear"),
     "under_fire_s": ("f", "seconds since last hit by a projectile"),

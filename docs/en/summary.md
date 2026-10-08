@@ -83,7 +83,7 @@ General x0.8 of the game, Warlord v Warlord x1.2), morale with all main modifier
 always; on the 1st / 2nd rout below 0.05 / 0.10 health; at the 3rd rout), army collapse (−120; the strength is the database's combat potential:
 melee_cp + the abilities' potential + missile_cp by the ammunition left, × health - as the recorded `strategic_value`),
 turning on the move at the model's turn rate from the database (a formation about-faces where it stands and runs the
-way it faces), leaving melee with the database's 24 s window (one still in contact drops its order and fights),
+way it faces), leaving melee with the database's 24 s window (one still in contact drops its order and fights), a unit that routs from melee stays in contact 7 s more and gathers speed (the recordings: the flag 7 s, losses 0.77 of a standing unit),
 flank-threat flags, fatigue, units' innate effects (Strength of the Penitent fires by itself when ready, in melee;
 its 3 s recharge stands only while the unit wins its melee; auras from a routing lord too and on routers; the edge centre to
 centre 35 m, probe T-E2), lord
@@ -149,8 +149,12 @@ same battles. **The simulator is too kind to the network** — the main measured
 **Known not to match the game** (details:
 ["What is missing"](training/simulator.md#what-is-missing)):
 
-- the game AI's army routs twice as often in the simulator (1.9 times a battle against 0.92):
-  it loses more health in melee (0.45 against 0.38);
+- the game AI's army routs more often in the simulator (the twin of 8 it3 battles: 1.3 routs a unit against
+  0.8), and our army loses less (0.67 against 0.80): the morale terms agree with the game (a regression on 404k
+  unit-seconds), the difference is the course of the fight: the AI's worn units lose health faster in melee,
+  enemies stay near routers longer in the game (8 s after the target's rout 0.57 of its attackers within 20 m of
+  it against 0.16), rallies happen with the enemy farther away (121 m against 96); the router's exit and
+  `ai_like`'s pursuit follow the recordings, these gaps are OPEN;
 - shooters in battle fire slower than on the range (0.05–0.07 projectiles per man per second
   against 0.087–0.091 in the simulator before each man's arc and the target-change pause; skipping volleys as the
   target thins - now re-aim); hits on a thinned target fall more in the game than in the model (archers on slaves:
