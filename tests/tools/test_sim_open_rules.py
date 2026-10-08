@@ -153,6 +153,39 @@ class TestMoveThrough:
         assert far > held > 0
 
 
+# --- an attack order on an enemy it does not touch, given in melee, is a leave (contact.attack_leave) ---
+
+class TestAttackLeave:
+    """Spearmen fighting clanrat spearmen are told to attack a second clanrat unit 150 m off (the game: such units
+    strike 0.01-0.03 men/s for 10 s, moving 0.90-0.98 of the time; build/v2gap/game_far_sh.py)."""
+    def dealt(self, target, params=P, key=SPEAR):
+        st = scenario.build([army([(key, -50, 0, 90)], [(CLANRAT, 50, 0, 270), (CLANRAT, 0, 150, 270)])], P)
+        front, depth = geometry.dims(st.u, P.sim["formation"]["spacing_m"])
+        H = st.N // 2
+        st.u["x"][0, 0] = -(depth[0, 0] / 2 + TOUCH / 2)
+        st.u["x"][0, H] = depth[0, H] / 2 + TOUCH / 2
+        o = orders(st, **{"0": (O.ATTACK, H, False), str(H): (O.ATTACK, 0, False)})
+        for _ in range(6):
+            battle.step(st, o, params)
+        assert bool(st.u["m"][0, 0])
+        hp = float(st.u["hp_abs"][0, H])
+        o = orders(st, **{"0": (O.ATTACK, H if target == "near" else H + 1, False), str(H): (O.HOLD, None, False)})
+        for _ in range(int(1.5 / params.dt)):                       # within contact.pin_melee_s: still in contact
+            battle.step(st, o, params)
+        return hp - float(st.u["hp_abs"][0, H])
+
+    def test_attacking_a_far_enemy_from_melee_strikes_nobody_the_touched_one_is_fought(self):
+        assert P.sim["contact"]["attack_leave"] == 1
+        assert self.dealt("far") == pytest.approx(0.0, abs=1e-3)
+        assert self.dealt("near") > 0
+        assert self.dealt("far", P.with_cal("contact", attack_leave=0)) > 0          # off: fights on (the old rule)
+
+    def test_a_missile_unit_is_not_concerned(self):
+        archers = "wh_main_emp_inf_crossbowmen"
+        assert self.dealt("far", key=archers) == pytest.approx(self.dealt("far", P.with_cal("contact", attack_leave=0),
+                                                                               key=archers))
+
+
 # --- C2 / R4: leaving melee, the chase and its 24 s window ---
 
 class TestMeleeExit:

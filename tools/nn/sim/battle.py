@@ -103,6 +103,17 @@ def step(st, orders, params=None, dt=None):
         toward = (mdx[:, :, None] * dx + mdz[:, :, None] * dz) > 0
         far_point = far_point & ~(touch & toward).any(2)
     leaving = (kind == O.WITHDRAW) | ((kind == O.MOVE) & far_point & (leave_m > 0))
+    if cal["contact"].get("attack_leave"):
+        # An attack order on an enemy it does not touch, its edge contact.leave_m or more away, given to a formation
+        # without a missile weapon that touches a standing enemy, is a leave too (contact.attack_leave;
+        # config/nn/sim.json contact.attack_leave_why): it walks off towards its target, strikes nobody, is held
+        # pin_melee_s and chased like a withdraw; the 24 s window (breakoff) drops the order if it is still in contact
+        # then. Any direction: through the enemy or away.
+        ti_a = tgt.clamp(min=0)[:, :, None]
+        tgt_away = ~touch.gather(2, ti_a).squeeze(2) & (pw["gap"].gather(2, ti_a).squeeze(2) >= leave_m)
+        fighting = (touch & standing[:, None, :]).any(2)
+        leaving = leaving | ((kind == O.ATTACK) & (tgt >= 0) & tgt_away & fighting & (u["range"] <= 0)
+                             & (u["men0"] > 1) & (leave_m > 0))
     striker = standing & ~leaving
     strike = touch & striker[:, :, None]
     engaged = standing & (touch & standing[:, None, :]).any(2)

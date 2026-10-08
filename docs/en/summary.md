@@ -137,6 +137,7 @@ without it, 5 with it) - whole battles show no sprint before contact; OPEN. The 
 ([melee](game/mechanics/melee.md#in-game-check-the-melee-probe)). The Empire's whole-battle losses
 at 60 / 120 / 180 s are now as in the game: 0.25 / 0.43 / 0.55 (game 0.25 / 0.41 / 0.53; was 0.32 / 0.51 /
 0.63).
+An attack order on a target out of contact (its edge 10 m or more away) given to a unit in melee is a leave like a withdraw (`contact.attack_leave`; in the game such a unit kills 0.01-0.03 men a second against 0.27-0.40): the twin of 24 battles against `ai_like` - v2 wins 16 -> 6 and 16 -> 3 of 32, grid_s46 16 -> 16 (game 0 / 0 / 3 of 8) ([melee](game/mechanics/melee.md#in-game-check-the-melee-probe)).
 
 **Gate replay** — the in-game gate battles replayed in the simulator (both sides from the
 recording). Gold trade at the game's end time: game −0.26…−0.41, simulator −0.05…−0.24 on the

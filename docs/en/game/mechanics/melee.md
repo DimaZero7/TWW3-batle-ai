@@ -351,6 +351,23 @@ first 15 s (1–4 spear or clanrat units) the lord loses 4.9–9.7 HP/s in the g
 (a 20 s gather), now 7.1–8.8; the steady pace is unchanged. The gather `lord_gather_s` 20 s stays only for a
 formation the lord himself ran into (the pairs: the lord loses 38 / 45 HP in the first 15 s in the game).
 
+**An attack order on a far target from melee is a leave.** Infantry that is fighting and is told to attack an
+enemy it does not touch (35 m or more away) nearly stops striking in the game: 0.01–0.03 men killed a second
+against 0.27–0.40 for a unit long attacking its target; it is moving 90–98 % of the time but still in melee 87 % of
+the time 10 s later and loses men as before. Whether the target lies beyond the enemy or the other way does not
+matter (0.04 / 0.03 a second); kills come back at 25–30 s (0.34) - the `melee_breakoff_secs` 24 s window. Missile
+units are not concerned (0.11–0.12, moving 15–18 % of the time). Measured on 24 network battles in the game (v2
+sampled and greedy, grid_s46; `build/v2gap`). The simulator kept such a unit fighting in full (0.33 at any distance),
+and the v2 network used it: in the game 60 % of its attacking melee seconds were on targets 40 m or more away
+(grid_s46 16 %). Now it is a leave like a withdraw (`contact.attack_leave`): the target not touched and its edge
+`leave_m` 10 m or more away, a unit without a missile weapon touching a standing enemy - it strikes nobody, is held
+`pin_melee_s` 2 s, can be chased, the 24 s window drops the order. Fresh orders, game / simulator (v2 greedy, target
+centre 35–50 / 50–80 / 80+ m): 0.06 / 0.06, 0.07 / 0.05, 0.12 / 0.10 a second (before 0.29–0.33). The twin of the same
+24 battles against `ai_like` (4 copies): v2 sampled wins 16 -> 6 of 32, greedy 16 -> 3, grid_s46 16 -> 16 (game 0 / 0 /
+3 of 8); the enemy's HP lost in melee 0.47 -> 0.34 (game 0.23), 0.48 -> 0.31 (0.38), grid 0.48 -> 0.48 (0.52); grid's
+ordinary long fight 0.33 -> 0.32 kills a second (game 0.27). No rule online: players only say a unit in contact drops
+its order and fights its neighbour and that the exit window is ~25 s; the database has only `melee_breakoff_secs` 24.
+
 ## Not found
 
 No public CA source explains `melee_breakoff_secs` 24 / `melee_breakoff_total_immunity_secs` 10
@@ -364,6 +381,9 @@ unit is out of contact ~4 s after the order (its own melee flag goes off only af
 
 ## What is still unclear
 
+- **A fresh attack order on a near target strikes less.** In the game a unit in melee told to attack an enemy
+  within 35 m (centre) kills 0.14–0.24 a second for 20 s after the order, then 0.45–0.51 (v2 greedy; grid_s46 the
+  same). Mechanism unknown (re-forming on the new target, or which units the network gives new orders) - not modelled.
 - **The first 15 s of contact are stronger in the game than the rule.** In the pairs the target loses
   499–764 HP in the first 15 s, while the rule (the charge bonus, no blow) gave the simulator 396–446. The
   melee probe showed where the difference is: nearly all of it in the first second of a charge's contact (a
