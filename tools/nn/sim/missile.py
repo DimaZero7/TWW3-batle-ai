@@ -253,6 +253,110 @@ def hit_chance_plane(u, pw):
     return torch.where((u["men0"] <= 1)[:, None, :], p_lone, p_form).clamp(0, 1)
 
 
+_GH = None
+
+
+def _hermite(device, dtype, n):
+    """Standard-normal quadrature points and weights (Gauss-Hermite), cached."""
+    global _GH
+    if _GH is None or _GH[0].device != device or _GH[0].dtype != dtype or len(_GH[0]) != n:
+        import numpy as np
+        x, w = np.polynomial.hermite_e.hermegauss(n)
+        _GH = (torch.tensor(x, device=device, dtype=dtype), torch.tensor(w / w.sum(), device=device, dtype=dtype))
+    return _GH
+
+
+def _uniform_phi(s, half, sig):
+    """E over y uniform on [-half, half] of Phi((s - y) / sig) (closed form: G(t) = t Phi(t) + phi(t))."""
+    def g(t):
+        return t * _phi(t) + torch.exp(-0.5 * t * t) / math.sqrt(2 * math.pi)
+    return sig / (2 * half).clamp(min=1e-6) * (g((s + half) / sig) - g((s - half) / sig))
+
+
+def spill_geometry(u, pw, target, params):
+    """(on_k [B, i, k], keep_j [B, i]): of shooter i's shots at its target j, the expected hits on each other formation
+    k of j's side, and the share of j's own hits that stays j's (k in front of it or among its men takes the shot
+    first). The same spread as hit_chance_plane (missile.spill_geometry; build/routgap/spill_analytic2.py checks it
+    against a Monte Carlo of real men): the aim a random man of j (uniform over its rectangle), the landing point
+    Gaussian across sigma and along sigma / sin(theta), the shot low over its last L = height / tan(theta) m. Across:
+    the share of shots landing in k's span (closed form). Along: quadrature over the landing point; each formation's
+    ranks inside the low band [x - L - r, x + r] give its chance 1 - (1 - 2r / files' step)^ranks; the one whose men in
+    the band start nearer the shooter is hit first, interleaved bands share the union."""
+    cfg = params.sim["missile"]["spill_geometry"]
+    qa, qg = int(cfg.get("aim_points", 4)), int(cfg.get("gauss_points", 8))
+    t = target.clamp(min=0)
+    B, N = target.shape
+    tj = t[:, :, None]
+    d_ij = pw["dist"].gather(2, tj).clamp(min=5.0)                          # [B, i, 1]
+    th_ij = pw["theta"].gather(2, tj)                                       # bearing i -> j
+    shrink = torch.sqrt((1 - u["acc"] / 100).clamp(min=0))[:, :, None]
+    sig = (torch.sqrt(u["cal_area"].clamp(min=0))[:, :, None] * d_ij / u["cal_dist"].clamp(min=1.0)[:, :, None]
+           * shrink).clamp(min=1e-3)
+    v0 = u["muzzle_v"].clamp(min=1.0)[:, :, None]
+    theta = (0.5 * torch.asin((d_ij * 9.81 / (v0 * v0)).clamp(max=1.0))).clamp(min=1e-3)
+    sa = sig / torch.sin(theta)
+    r = u["radius"][:, None, :]                                             # [B, 1, k]
+    Lk = u["height"][:, None, :] / torch.tan(theta)                         # [B, i, k]
+    Lj = Lk.gather(2, tj)
+    c = 0.5 * Lj
+    # each formation in shooter i's line-of-fire frame (along +: away from i; across)
+    xj, zj = u["x"].gather(1, t)[:, :, None], u["z"].gather(1, t)[:, :, None]
+    ex, ez = torch.sin(th_ij), torch.cos(th_ij)
+    dx, dz = u["x"][:, None, :] - xj, u["z"][:, None, :] - zj              # [B, i, k] from j's centre
+    b = dx * ex + dz * ez
+    a = dx * ez - dz * ex
+    phi = u["b"][:, None, :] * geometry.DEG - th_ij                          # k's facing against the line
+    cs, sn = torch.cos(phi).abs(), torch.sin(phi).abs()
+    front, depth = pw["front"][:, None, :], pw["depth"][:, None, :]
+    half_w = front / 2 * cs + depth / 2 * sn                               # across
+    half_d = front / 2 * sn + depth / 2 * cs                               # along
+    h = torch.where(u["sp_h"] > 0, u["sp_h"], torch.full_like(u["sp_h"], 2.0))[:, None, :]
+    sv = torch.where(u["sp_v"] > 0, u["sp_v"], torch.full_like(u["sp_v"], 2.0))[:, None, :]
+    step_across = h * cs + sv * sn
+    step_along = sv * cs + h * sn
+    cov1 = (2 * r / step_across).clamp(max=1.0)
+    hw_j, hd_j = half_w.gather(2, tj), half_d.gather(2, tj)
+    # across: the share of j-aimed shots landing in k's span, and in j's own
+    lat_k = (_uniform_phi(a + half_w, hw_j, sig) - _uniform_phi(a - half_w, hw_j, sig)).clamp(0, 1)
+    lat_j = lat_k.gather(2, tj)
+    both = torch.minimum(lat_k, lat_j)
+    # along: landing points x = aim (uniform over j's depth) + c + sa * g
+    gx, gw = _hermite(sig.device, sig.dtype, qg)
+    aim = (torch.arange(qa, device=sig.device, dtype=sig.dtype) + 0.5) / qa * 2 - 1     # [-1, 1]
+    xl = (aim[:, None] * hd_j[..., None, None] + c[..., None, None] + sa[..., None, None] * gx[None, :])   # [B, i, 1, qa, qg]
+    w = (gw[None, :] / qa).expand(qa, qg)
+
+    def band(L_, c0, hd, step, cv):
+        lo = torch.maximum(xl - L_[..., None, None] - r[..., None, None], (c0 - hd)[..., None, None])
+        hi = torch.minimum(xl + r[..., None, None], (c0 + hd)[..., None, None])
+        inside = (hi - lo).clamp(min=0)
+        n = torch.where(inside > 0, (inside / step[..., None, None]).clamp(min=1.0), torch.zeros_like(inside))
+        return 1 - (1 - cv[..., None, None]) ** n, lo
+    pk, sk = band(Lk, b, half_d, step_along, cov1)                           # [B, i, k, qa, qg]
+    pj, sj = band(Lj, torch.zeros_like(hd_j), hd_j, step_along.gather(2, tj), cov1.gather(2, tj))
+    sv_k = step_along[..., None, None]
+    k_first = sk < sj - sv_k
+    j_first = sj < sk - sv_k
+    union = 1 - (1 - pj) * (1 - pk)
+    share = union / (pj + pk).clamp(min=1e-9)
+    hk = torch.where(k_first, pk, torch.where(j_first, pk * (1 - pj), pk * share))
+    hj = torch.where(j_first, pj, torch.where(k_first, pj * (1 - pk), pj * share))
+    hk = (hk * w).sum((-1, -2))                                              # [B, i, k]
+    hj = (hj * w).sum((-1, -2))
+    pj_alone = (pj * w).sum((-1, -2))                                        # [B, i, 1]
+    on_k = both * hk
+    # j keeps its hits outside k's span in full; inside, hj of its pj_alone
+    keep_jk = 1 - both * (1 - hj / pj_alone.clamp(min=1e-9)) / lat_j.clamp(min=1e-9)
+    side_j = u["side"].gather(1, t)[:, :, None]
+    eye = torch.arange(N, device=t.device)[None, None, :] == tj
+    other = (u["side"][:, None, :] == side_j) & ~eye & ((u["men"] > 0) & ~u["gone"])[:, None, :] & (u["men0"] > 1)[:, None, :]
+    far = pw["dist"].gather(1, t[:, :, None].expand(B, N, N)) > float(cfg.get("max_m", 120.0))   # j to k
+    other = other & ~far & (target >= 0)[:, :, None]
+    on_k = torch.where(other, on_k, torch.zeros_like(on_k))
+    keep_j = torch.where(other, keep_jk.clamp(0, 1), torch.ones_like(keep_jk)).prod(2)
+    return on_k, keep_j
+
+
 G = 9.81
 
 
@@ -442,6 +546,11 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, cat
             catch = friend_catch(u, pw, target, params)             # [B, i, k] (clear_shot's, when given)
         caught = catch * shots[:, :, None]
         shots_on = shots * (1 - catch.sum(2))
+    geo = None
+    if ms.get("spill_geometry") and acc and acc.get("plane"):
+        # the spill from the spread itself (spill_geometry): k's hits, and j's own hits left after k took its share
+        geo = spill_geometry(u, pw, target, params)
+        rate = rate * geo[1][:, :, None]
     aimed = onehot * shots_on[:, :, None] * rate              # [B, i, j] hits aimed at j
     aimed_old = onehot * shots_on[:, :, None] * old
     if contact is None:
@@ -469,9 +578,11 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, cat
         landed = torch.bmm(aimed * ff, friends * lone[:, None, :]) + aimed * (1 - ff) * own[:, None, :]
     if caught is not None:
         landed = landed + caught
+    if geo is not None:
+        landed = landed + geo[0] * shots_on[:, :, None]
     # Spill: hits aimed at j also land on j's neighbours of its own side that are out of melee,
-    # a share by distance between centres (measured).
-    if ms.get("spill"):
+    # a share by distance between centres (measured; off with spill_geometry).
+    elif ms.get("spill"):
         same = (u["side"][:, :, None] == u["side"][:, None, :]) & (u["side"][:, :, None] > 0)
         eye = torch.eye(men.shape[1], dtype=torch.bool, device=men.device)[None]
         free = (men > 0) if contact is None else (men > 0) & ~contact.any(2)

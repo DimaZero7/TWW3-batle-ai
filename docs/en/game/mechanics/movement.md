@@ -59,6 +59,12 @@ Ours: [pace and fatigue](../units/pace.md), [simulator](../../training/simulator
 
 - **Pushing.** Entities have soft collision; braced mass over 600 can't be pushed by small entities.
   Knock-backs and knock-downs come from mass ratios and speed changes (see [melee](melee.md#mass-collisions-knockdowns)).
+  - **Own formations in each other.** In the recordings (all fair battles, 5.3 M pair-seconds of own standing formations)
+    own centres come within 2 / 2–4 / 4–6 / 6–8 m in 0.2–0.3 / 0.5–0.6 / 0.6 / 0.6–0.7 % of pair-seconds; two still
+    formations out of melee within 4 m keep their distance over 5 s (median 0.00 m), in melee they drift 0.25–0.44 m.
+    Own formations are not pushed apart. Simulator: `contact.friend_push` false ([simulator](../../training/simulator.md));
+    before it pushed them apart, and the network that piles its units up in the game (13–34 % of seconds with an own
+    unit within 8 m) never got a pile in the twin (0 %).
 - **Pathing costs** (WH2): default 2, climb/jump/wall door 10. · twwstats · high.
 - **Patch fixes:** 6.1.0 made infantry "stickier" (a player report); 7.2 fixed spaghetti lines into
   minor settlements; 8.0 fixed an army clumping when every unit got the same order; 8.1 fixed

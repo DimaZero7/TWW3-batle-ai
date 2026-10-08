@@ -173,6 +173,27 @@ def strikes(u, pw, contact, params, charge_now, first=False):
         hold = cal["fighting_files"] * (front_i / h_u[:, :, None] if g in (0, 3) else depth_i / v_u[:, :, None])
         tot = torch.where(in_g, F, torch.zeros_like(F)).sum(dim=2, keepdim=True)
         F = torch.where(in_g & ~single_i & (tot > hold), F * hold / tot.clamp(min=1e-6), F)
+    if cal.get("target_face_cap"):
+        # The target's side is only so long (melee.target_face_cap): the units coming at j through the same side of j
+        # (front, left, right, back - seen from j) share its length - each brings fighting_files of the files it
+        # lines up along it (F x its own spacing / fighting_files metres), together no more than the side is long (or
+        # than the longest single attacker brings), a lone target keeps lord_max_attackers.
+        # Measured (build/routgap/overlap_melee.py, all fair recordings): an enemy formation struck by two of ours
+        # standing in each other (centres within 8 m) loses 26.5 HP/s, by one 26.9, by two apart 32.5; three 29.0 /
+        # 39.4.
+        s_j, c_j = torch.sin(pw["rel_j"]), torch.cos(pw["rel_j"])
+        front_j, depth_j = pw["front"][:, None, :], pw["depth"][:, None, :]
+        thru_j = s_j.abs() * depth_j <= c_j.abs() * front_j
+        side_j = torch.where(thru_j, torch.where(c_j >= 0, 0, 3), torch.where(s_j >= 0, 1, 2))
+        used = F * along / cal["fighting_files"]                 # metres of j's side each striker's men take
+        for g in range(4):
+            in_g = side_j == g
+            u_g = torch.where(in_g & ~single_i, used, torch.zeros_like(used))
+            # (a lone attacker keeps what it brings - through a flank by its own front, melee.flank_face: the cap is
+            # the side's length or the longest single attacker's, whichever is more)
+            side_len = torch.maximum(front_j if g in (0, 3) else depth_j, u_g.amax(dim=1, keepdim=True))
+            tot = u_g.sum(dim=1, keepdim=True)
+            F = torch.where(in_g & ~single_j & ~single_i & (tot > side_len), F * side_len / tot.clamp(min=1e-6), F)
     own = torch.where(single_i, torch.ones_like(men_i), men_i)
     total = F.sum(dim=2, keepdim=True)
     F = F * torch.where(total > own, own / total.clamp(min=1e-6), torch.ones_like(total))

@@ -12,6 +12,10 @@ Artillery is in [artillery](artillery.md). Conventions: [index](README.md). Our 
 - **Projectiles are physical.** A shot flies as a body and must touch a model; there is no
   to-hit roll against the target's stats, so melee defence does nothing against missiles and
   big or densely packed targets catch more shots. WH1–WH3 · [Steam thread][phys], [tw-modding][twm] · medium.
+  - A pile under fire (the recordings, all fair battles, `build/routgap/spill_game.py`): a unit nobody shot at loses
+    0.85 / 0.54 / 0.28 / 0.15 / 0.069 of what the shot-at unit loses when it stands 0–8 / 8–15 / 15–22 / 22–30 / 30–45 m
+    from it. The database's spread over the neighbour's real men gives the same (a Monte Carlo, no fit); the simulator
+    computes the spill so (`missile.spill_geometry`, [simulator](../../training/simulator.md)).
 - **Accuracy.** The chance of an exact hit is the unit's accuracy (`land_units`) plus the
   projectile's marksmanship bonus (`projectiles_tables`), in %. A shot that misses lands at random
   inside the "calibration area" around the aim point and can still hit someone. · [tw-modding][twm] · medium.

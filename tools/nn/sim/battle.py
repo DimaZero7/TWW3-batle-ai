@@ -702,10 +702,13 @@ def step(st, orders, params=None, dt=None):
         over = r_pin & (u["rpin_s"] >= pin_s)
         u["rpin_s"] = torch.where(over, torch.zeros_like(u["rpin_s"]), u["rpin_s"])
         u["rpin_d"] = torch.where(over, torch.zeros_like(u["rpin_d"]), u["rpin_d"])
-    pw2 = geometry.pairwise(u, spacing)
-    px, pz = movement.separate(pw2, standing[:, :, None] & standing[:, None, :] & same_side & ~eye)
-    u["x"] = u["x"] + px
-    u["z"] = u["z"] + pz
+    if cal["contact"].get("friend_push", True):
+        # (contact.friend_push false: own formations stand in each other as in the game - the recordings show own
+        # centres within 2 m in 0.2-0.3 % of pair-seconds and no drift apart; config/nn/sim.json contact.friend_push_why)
+        pw2 = geometry.pairwise(u, spacing)
+        px, pz = movement.separate(pw2, standing[:, :, None] & standing[:, None, :] & same_side & ~eye)
+        u["x"] = u["x"] + px
+        u["z"] = u["z"] + pz
     movement.clamp_to_map(u, st.bounds)
 
     # --- facing and the observed flags ---

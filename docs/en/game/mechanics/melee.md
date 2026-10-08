@@ -112,6 +112,10 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
     the formula expects.
 - **Secondary attacker.** `melee_secondary_attack_probability` 1: a second attacker on the same
   target is always allowed to strike. WH2 description · [twwstats kv][tws] · medium.
+- **A pile at one side of the target.** In the recordings (all fair battles) an enemy formation struck by two of ours
+  standing in each other (centres within 8 m) loses 26.5 HP/s - as from one (26.9); two apart 32.5; three 29.0 in a
+  pile / 39.4 apart. A side of the target holds as many men as it has room for. Ours: the units striking a target
+  through one of its sides share its length (`melee.target_face_cap`, [simulator](../../training/simulator.md)).
 - **Hit reactions.** After `melee_max_hit_reactions` 2 interrupts in a row an entity ignores
   further hit reactions so it can attack. WH2 description · [twwstats kv][tws] · high.
 

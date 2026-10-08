@@ -391,6 +391,36 @@ class TestMelee:
 
 
 class TestMissile:
+    OLD = P.with_cal("missile", spill_geometry=None)
+
+    @staticmethod
+    def _spill(dx, dz, key=SLAVE, shooter=ARCHER, gap=100.0, params=None):
+        """(neighbour's HP / target's HP, target's HP) of one volley: the shooter at x = -gap shoots a formation at
+        the origin; another formation of the target's side stands at (dx, dz), both facing the shooter."""
+        params = params or P
+        st = scenario.build([army([(shooter, -gap, 0, 90)], [(key, 0, 0, 270), (key, dx, dz, 270)])], params)
+        H = st.N // 2
+        pw = geometry.pairwise(st.u, params.sim["formation"]["spacing_m"])
+        target = torch.full((1, st.N), -1)
+        target[0, 0] = H
+        _, hp, _ = missile.volley(st.u, pw, target, 1.0, params)
+        return float(hp[0, 0, H + 1]) / float(hp[0, 0, H]), float(hp[0, 0, H])
+
+    def test_the_spill_comes_from_the_spread_a_pile_shares_the_shots(self):
+        """missile.spill_geometry: a neighbour standing in the target's men (4 m behind its centre) takes about as
+        much as the target, one 18 m aside a part, one 60 m aside nothing; the target keeps less in a pile; a flat
+        shot (handgun) reaches a neighbour behind the target farther than an arrow; off: the old table."""
+        pile, hj_pile = self._spill(4.0, 0.0)
+        aside, _ = self._spill(0.0, 18.0)
+        far, hj_alone = self._spill(0.0, 60.0)
+        assert 0.6 < pile < 1.1 and 0.1 < aside < 0.6 and far < 0.01
+        assert hj_pile < 0.85 * hj_alone
+        arrow_behind, _ = self._spill(30.0, 0.0)
+        bullet_behind, _ = self._spill(30.0, 0.0, shooter="wh_main_emp_inf_handgunners")
+        assert bullet_behind > arrow_behind
+        old, _ = self._spill(0.0, 18.0, params=self.OLD)
+        assert 0 < old < aside                               # (the table: a share of the old rate-based hits)
+
     def test_a_shield_blocks_from_the_front_only(self):
         st = face_off(ARCHER, "wh2_main_skv_cha_warlord_0", gap=100)
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
@@ -429,6 +459,8 @@ class TestMissile:
 
     def test_shots_into_a_melee_hit_friends_and_shots_spill_on_neighbours(self):
         # side 1: archers far west, spearmen at x=0; side 2: spearmen touching ours, more spearmen 10 m behind.
+        # (the old spill tables: missile.spill_geometry off)
+        P = TestMissile.OLD
         st = scenario.build([army([(ARCHER, -100, 0, 90), (SPEAR, 0, 0, 90)],
                                   [(SPEAR, 10, 0, 270), (SPEAR, 30, 0, 270)])], P)
         H = st.N // 2
@@ -449,6 +481,8 @@ class TestMissile:
 
     def test_shots_at_a_lord_in_melee_spill_on_his_units_fighting_beside_him(self):
         # side 1: our General and spearmen beside him, both fighting the enemy; side 2: slingers shoot the General.
+        # (the old spill tables: missile.spill_geometry off)
+        P = TestMissile.OLD
         st = scenario.build([army([(GENERAL, 0, 0, 90), (SPEAR, 0, 8, 90)],
                                   [(SPEAR, 6, 0, 270), (SLINGER, 120, 0, 270)])], P)
         H = st.N // 2
@@ -2083,6 +2117,52 @@ class TestRoutSpeed:
         v = math.hypot(float(st.u["vx"][0, 0]), float(st.u["vz"][0, 0]))
         assert P.sim["morale"]["rout_speed"] == 0.985
         assert v / float(P.units[SPEAR]["speed"]["run"]) == pytest.approx(0.985 * (0.85 if tired else 1.0), rel=0.01)
+
+
+class TestTargetFace:
+    def test_two_units_on_one_face_of_the_target_share_it(self):
+        """melee.target_face_cap: two spearmen units standing in each other at the target's front strike it hardly
+        harder than one (they share its front's files); off: twice as hard; one on its front and one on its flank: more."""
+        def rate(params, second_at):
+            st = scenario.build([army([(SPEAR, -50, 0, 90), (SPEAR, -50, 0, 90), (SPEAR, -300, 600, 90)],
+                                      [(SLAVE, 50, 0, 270)])], params)
+            H = st.N // 2
+            front, depth = geometry.dims(st.u, params.sim["formation"]["spacing_m"])
+            st.u["x"][0, 0] = st.u["x"][0, 1] = -(depth[0, 0] / 2 + TOUCH / 2)
+            st.u["x"][0, H] = depth[0, H] / 2 + TOUCH / 2
+            if second_at == "flank":                     # beside the slaves' left flank, facing it
+                st.u["x"][0, 1] = st.u["x"][0, H]
+                st.u["z"][0, 1] = front[0, H] / 2 + depth[0, 1] / 2 + TOUCH / 2
+                st.u["b"][0, 1] = 180.0
+            if second_at == "none":
+                st.u["x"][0, 1], st.u["z"][0, 1] = -300.0, -600.0
+            pw = geometry.pairwise(st.u, params.sim["formation"]["spacing_m"])
+            contact = pw["enemy"] & (pw["gap"] <= 1.0)
+            r = melee.strikes(st.u, pw, contact, params, torch.zeros_like(st.u["men"]))[0]
+            return float(r[0, 0, H] + r[0, 1, H])
+        one = rate(P, "none")
+        assert P.sim["melee"]["target_face_cap"] is True
+        assert one < rate(P, "pile") < 1.3 * one          # (the slaves' front is a little longer than the spearmen's)
+        assert rate(P.with_cal("melee", target_face_cap=False), "pile") == pytest.approx(2 * one, rel=0.02)
+        assert rate(P, "flank") > 1.3 * one
+
+
+class TestFriendPush:
+    def test_own_formations_may_stand_in_each_other_unless_friend_push(self):
+        """contact.friend_push false (the game): two own formations sent to the same point end there together; true
+        (the old rule): they are pushed apart."""
+        def end_gap(params):
+            st = scenario.build([army([(SPEAR, -300, -20, 90), (SPEAR, -300, 20, 90), (SPEAR, -300, 600, 90)],
+                                      [(SPEAR, 300, 0, 270)])], params)
+            for _ in range(int(round(20 / params.dt))):
+                o = replay.hold(st)
+                o.kind[0, :2] = O.MOVE
+                o.x[0, :2], o.z[0, :2] = -280.0, 0.0
+                battle.step(st, o, params)
+            return math.hypot(float(st.u["x"][0, 0] - st.u["x"][0, 1]), float(st.u["z"][0, 0] - st.u["z"][0, 1]))
+        assert P.sim["contact"]["friend_push"] is False
+        assert end_gap(P) < 2.0
+        assert end_gap(P.with_cal("contact", friend_push=True)) > 10.0
 
 
 def _rout_from_melee(params, seconds=10.0):
