@@ -358,6 +358,7 @@ def train(args, every=None, teacher=None, normal=None):
     rolls, rolled_at = 0, 0.0                     # --anchor-roll: renewals of the reference, training s of the last
     followed_at = 0.0                             # --anchor-ema: training s of the reference's last step
     next_keep = args.keep_every                   # --keep-every: training minutes of the next kept copy
+    saved_at = time.time()                        # --save-every: wall time of the last latest.pt
     if args.anchor_ema and args.anchor_roll:
         raise SystemExit("--anchor-ema and --anchor-roll: one of them")
     next_mark = every[0] if every else None
@@ -426,6 +427,13 @@ def train(args, every=None, teacher=None, normal=None):
             rolls, rolled_at = rolls + 1, trained_s
             print(f"   anchor roll {rolls}: the KL reference is now the actor of update {update} "
                   f"({trained_s / 60:.1f} min of training)", flush=True)
+        if args.save_every and time.time() - saved_at >= args.save_every * 60:
+            # --save-every: latest.pt (with the critic) every that many minutes, whatever the snapshots' rhythm (a run
+            # that dies restarts from it: build/steps/v2_iter.sh)
+            checkpoint.save(out / "latest.pt", actor, critic, args.preset,
+                            {"update": update, "battles": env.battles, "seconds": round(trained_s), "run": args.name,
+                             "cadence": cadence.meta()})
+            saved_at = time.time()
         if args.keep_every and trained_s >= next_keep * 60:
             # --keep-every: a copy of the network (with its critic) every that many minutes of training: m<minute>.pt
             checkpoint.save(out / f"m{int(round(next_keep))}.pt", actor, critic, args.preset,
@@ -447,7 +455,7 @@ def train(args, every=None, teacher=None, normal=None):
                "entropy_weight": round(u_cfg.entropy, 5), "anchor_weight": round(u_cfg.anchor, 4),
                "anchor_rolls": rolls,
                "lord_dead_own": round(lords["own"], 3), "lord_dead_enemy": round(lords["enemy"], 3),
-               "abilities_per_battle": round(env.abilities(), 2),
+               "abilities_per_battle": round(env.abilities(), 2), "nan_fixed": env.nan_fixed(),
                "switches_per_minute": round(lords["switches_per_minute"], 2),
                "orders_per_minute": round(env.orders_per_minute(), 2), "kinds": env.kinds(),
                "reward_parts": {r: {k: round(v, 4) for k, v in p.items()} for r, p in env.reward_parts().items()},
@@ -468,6 +476,9 @@ def train(args, every=None, teacher=None, normal=None):
                   f"adv std attack {st.get('adv_std_attack', 0):.3f} defend {st.get('adv_std_defend', 0):.3f}; "
                   "reward a minute " + "; ".join(f"{r} " + " ".join(f"{k} {v:+.3f}" for k, v in p.items())
                                                  for r, p in row["reward_parts"].items()), flush=True)
+            if row["nan_fixed"] or st.get("skipped"):
+                print(f"      non-finite: logits taken as masked {row['nan_fixed']:.0f}, update steps skipped "
+                      f"{st.get('skipped', 0):.0f}", flush=True)
             if "eyes_own10" in st:
                 print("      eyes mse / explained " + "; ".join(
                     f"{h} {st['eyes_' + h]:.4f} / {st['eyes_ev_' + h]:+.2f}" for h in ("own10", "own30", "threat30",
@@ -629,6 +640,8 @@ def parser():
     ap.add_argument("--pool", type=int, default=8)
     ap.add_argument("--pool-extra", help="more past opponents for the pool (checkpoints, comma-separated)")
     ap.add_argument("--snapshot-every", type=int, default=20)
+    ap.add_argument("--save-every", type=float, default=5.0,
+                    help="minutes between saves of latest.pt (with the critic) besides the snapshots' (0: only those)")
     ap.add_argument("--keep-every", type=float, default=0.0,
                     help="> 0: also keep a copy of the network every this many minutes of training (m<minute>.pt in "
                          "the run's folder; 0: only latest.pt and best.pt)")

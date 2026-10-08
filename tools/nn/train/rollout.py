@@ -381,6 +381,7 @@ class Battles:
         # network plays (the learner, self-play, a past version) fires them by its own order.
         self.by_rule = self.ctrl >= league.CODE["nearest"]                              # [B, 2]
         self.ability_stats = torch.zeros(2, device=self.device)   # the learner's ability uses, its ended battles
+        self.nan_stats = torch.zeros((), device=self.device)       # non-finite logits taken as masked (v2: nan_fixed)
         # The learner's reward by term (reward.PARTS) and its decisions, by role (attack, defend)
         self.part_stats = torch.zeros(2, len(reward.PARTS), device=self.device)
         self.part_steps = torch.zeros(2, device=self.device)
@@ -499,9 +500,14 @@ class Battles:
         parts = [(self.rows_learn, orders)]
         h_past_new = None
         if len(self.rows_past) and self.past_actor is not None:
-            *_, o_past, h_past_new = self._act(self.past_actor, a, frame, self.rows_past, self.h_past, False)
+            _, _, lg_past, _, o_past, h_past_new = self._act(self.past_actor, a, frame, self.rows_past, self.h_past,
+                                                             False)
+            if "nan_fixed" in lg_past:
+                self.nan_stats += lg_past["nan_fixed"].sum()
             parts.append((self.rows_past, o_past))
         lp = self._log_prob(logits, action, obs_r["ctrl"])
+        if "nan_fixed" in logits:
+            self.nan_stats += logits["nan_fixed"].sum()
         assert not (self.teach_names and actor.cfg.sectors), "no teachers with a v2 network"
         taught = self._teach_labels(actor.cfg, obs_r, frame) if self.teach_names and self.R else None
         self.decisions += 1
@@ -697,6 +703,14 @@ class Battles:
         u = self.st.u
         cd = torch.stack([u[f"ab{k}_cd"] for k in range(sim_abilities.SLOTS)], -1)
         return cd * self._learner_units(torch.ones_like(u["m"])).float()[..., None]
+
+    def nan_fixed(self, reset=True):
+        """Non-finite logits of the networks' decisions (learner and past) since the last call, taken as masked
+        (tools/nn/model/chain.py; 0 in a healthy run)."""
+        n = float(self.nan_stats)
+        if reset:
+            self.nan_stats.zero_()
+        return n
 
     def abilities(self, reset=True):
         """The learner's ability uses per its ended battle since the last call (uses / battles)."""

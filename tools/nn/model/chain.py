@@ -33,14 +33,43 @@ from tools.nn.model.heads import NEG, Action
 from tools.nn.sim.orders import ATTACK, KEEP, KINDS, MOVE, WITHDRAW
 
 
+CAP = 30.0     # every head's logits are soft-capped: CAP x tanh(x / CAP) (no change while |x| < ~10)
+
+
+def _cap(x, bad):
+    """(x soft-capped, bad + its non-finite values per row [B]): a finite logit stays within +-CAP, so no softmax,
+    logsumexp or sum of the choice overflows however far the weights drift; a non-finite one is counted (the log's
+    nan_fixed) and later taken as masked (_clean)."""
+    nonfinite = (~torch.isfinite(x)).reshape(x.shape[0], -1).sum(-1).to(torch.float32)
+    return CAP * torch.tanh(x / CAP), bad + nonfinite
+
+
+def _clean(logits, temperature=1.0):
+    """The logits as a sampler takes them: a non-finite one as masked (NEG), / temperature."""
+    return torch.nan_to_num(logits, nan=NEG, posinf=-NEG, neginf=NEG) / max(temperature, 1e-6)
+
+
 def _cat(logits, temperature=1.0):
-    # (a non-finite logit as masked: sampling never asserts on the GPU; it was never seen with finite inputs)
-    logits = torch.nan_to_num(logits, nan=NEG, posinf=-NEG, neginf=NEG)
-    return Categorical(logits=logits / max(temperature, 1e-6), validate_args=False)
+    return Categorical(logits=_clean(logits, temperature), validate_args=False)
+
+
+def _gumbel(shape, like):
+    """Gumbel(0, 1) noise: -log(-log(u)), u uniform in (0, 1) kept off its ends (finite whatever u is drawn)."""
+    u = torch.rand(shape, device=like.device, dtype=like.dtype).clamp(1e-20, 1.0 - 1e-7)
+    return -torch.log(-torch.log(u))
 
 
 def _pick(logits, greedy, temperature):
-    return torch.nan_to_num(logits, nan=NEG).argmax(-1) if greedy else _cat(logits, temperature).sample()
+    """A choice of softmax(logits / temperature) per row: the most likely (greedy) or a sample by the Gumbel-max
+    trick, argmax(logits / T + Gumbel noise) - the same distribution as Categorical(logits).sample(), but no softmax
+    and no torch.multinomial in the graph. Compiled whole (rollout.fast), the sector head's fused logsumexp + online
+    softmax handed torch.multinomial a row it refused ('probability tensor contains either inf, nan or element < 0',
+    a device assert that killed three v2 runs at 8-40 min, 08.10.2026; the same rows ran clean eagerly for 50 min).
+    A masked choice (NEG) never wins against an allowed one: the noise is at most ~46. A row with nothing allowed
+    (all masked, or all non-finite) takes its first choice (the kind's: hold)."""
+    x = _clean(logits, 1.0 if greedy else temperature)
+    pick = x.argmax(-1) if greedy else (x + _gumbel(x.shape, x)).argmax(-1)
+    return torch.where(x.max(-1).values > NEG / 2, pick, torch.zeros_like(pick))
 
 
 class ChainHeads(nn.Module):
@@ -76,8 +105,11 @@ class ChainHeads(nn.Module):
         free = obs_t.get("free", ctrl)
         # hold, move, attack, withdraw, keep (tools/nn/sim/orders.py KINDS order); a held unit only keeps
         allowed = torch.stack([~ctrl | free, free, free & ok.any(-1, keepdim=True), free, ctrl], -1)
-        kind = self.kind(u).masked_fill(~allowed, NEG)
-        target = (self.q(u) @ self.k(u).transpose(1, 2) / math.sqrt(cfg.pointer)).masked_fill(~ok[:, None, :], NEG)
+        bad = torch.zeros(u.shape[0], device=u.device)
+        kind, bad = _cap(self.kind(u), bad)
+        kind = kind.masked_fill(~allowed, NEG)
+        target, bad = _cap(self.q(u) @ self.k(u).transpose(1, 2) / math.sqrt(cfg.pointer), bad)
+        target = target.masked_fill(~ok[:, None, :], NEG)
         a_kind = _pick(kind, greedy, temperature) if action is None else action.kind
         has_target = target.max(-1).values > NEG / 2
         if action is None:
@@ -93,7 +125,7 @@ class ChainHeads(nn.Module):
         sector = self.place_q(c) @ self.place_k(s).transpose(1, 2) / math.sqrt(cfg.sector_d)
         pos = obs_t["pos"].to(u.dtype) * sc.ob.POS
         dist = (pos[..., None, :] - sc.centres(cfg, u.device).to(u.dtype)).square().sum(-1).clamp(min=1e-6).sqrt()
-        sector = sector - nn.functional.softplus(self.place_near(c)) * dist / sc.step(cfg)
+        sector, bad = _cap(sector - nn.functional.softplus(self.place_near(c)) * dist / sc.step(cfg), bad)
         sector = sector.masked_fill(~sec_ok[:, None, :], NEG)
         if action is None:
             a_sector = _pick(sector, greedy, temperature)
@@ -101,31 +133,34 @@ class ChainHeads(nn.Module):
             a_sector, a_fine_given = sc.split(cfg, action.point)
         idx = a_sector[..., None].expand(-1, -1, s.shape[-1])
         s_at = s.gather(1, idx)                                                   # [B, N, ds]
-        fine = self.fine(torch.cat([c, s_at], -1))
+        fine, bad = _cap(self.fine(torch.cat([c, s_at], -1)), bad)
         fine_ok = cells_in.gather(1, a_sector[..., None].expand(-1, -1, cells_in.shape[-1]))
         fine = fine.masked_fill(~fine_ok, NEG)
         a_fine = _pick(fine, greedy, temperature) if action is None else a_fine_given
-        commit = self.commit(c)
-        run = self.run(c)[..., 0]
+        commit, bad = _cap(self.commit(c), bad)
+        run, bad = _cap(self.run(c)[..., 0], bad)
         out = {"kind": kind, "target": target, "sector": sector, "fine": fine, "commit": commit, "run": run}
         if action is None:
             a_commit = _pick(commit, greedy, temperature)
-            a_run = (run > 0) if greedy else Bernoulli(logits=run / max(temperature, 1e-6),
-                                                       validate_args=False).sample() > 0.5
+            # (a uniform draw against the probability: Bernoulli's own sample, without its kernel's checks)
+            p_run = torch.sigmoid(_clean(run, temperature))
+            a_run = (run > 0) if greedy else torch.rand_like(p_run) < p_run
         else:
             a_commit, a_run = action.commit, action.run
         a_ability = None
         if obs_t.get("abil") is not None:
             usable = obs_t["abil_ok"] & ctrl[..., None]
             abil = torch.where(usable[..., None], obs_t["abil"], torch.zeros_like(obs_t["abil"]))
-            score = (self.ability_q(u)[:, :, None] * self.ability_k(abil)).sum(-1) / math.sqrt(cfg.pointer)
+            score, bad = _cap((self.ability_q(u)[:, :, None] * self.ability_k(abil)).sum(-1) / math.sqrt(cfg.pointer), bad)
             slot = torch.where(usable, score, torch.full_like(score, NEG))
-            out["ability"] = torch.cat([self.ability_none(u), slot], -1)
+            none, bad = _cap(self.ability_none(u), bad)
+            out["ability"] = torch.cat([none, slot], -1)
             if action is None and abilities:
                 a_ability = _pick(out["ability"], greedy, temperature) - 1
             elif action is not None:
                 a_ability = action.ability
         point = sc.point_index(cfg, a_sector, a_fine)
+        out["nan_fixed"] = bad                     # [B] non-finite logits of the row (taken as masked)
         return out, Action(a_kind, point, a_target, a_run, a_ability, a_commit)
 
 
@@ -134,6 +169,7 @@ def log_prob(logits, a, ctrl):
     only choice, keep, gives 0); the target for an attack; the sector and the cell for move and withdraw; run for move
     and attack; the commitment with a new order (not keep); the ability when the action has one. Zero where ctrl is
     off. The entropy: the kind's + each later part's weighted by the chance of a kind that uses it (a held unit: 0)."""
+    logits = {k: torch.nan_to_num(v, nan=NEG) for k, v in logits.items()}     # (a non-finite logit: masked)
     kind = Categorical(logits=logits["kind"], validate_args=False)
     move, attack = a.kind == MOVE, a.kind == ATTACK
     place = move | (a.kind == WITHDRAW)

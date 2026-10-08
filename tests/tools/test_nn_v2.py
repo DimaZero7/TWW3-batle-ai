@@ -584,3 +584,38 @@ def test_a_non_finite_gradient_skips_the_step():
     st = ppo.update(actor, crit, opt, batch, dataclasses.replace(ppo.PPOConfig(), epochs=1, minibatch=4))
     assert st["skipped"] >= 1
     assert all(torch.equal(a, b) for a, b in zip(before, actor.parameters()))
+
+
+def test_the_gumbel_sampler_draws_the_softmax_never_a_masked_choice_and_survives_bad_logits():
+    torch.manual_seed(0)
+    logits = torch.tensor([[1.0, 0.0, -1.0, heads.NEG, 2.0]]).expand(200000, -1)
+    picks = chain._pick(logits, False, 1.0)
+    freq = torch.bincount(picks, minlength=5).float() / len(picks)
+    assert torch.allclose(freq, torch.softmax(logits[0], -1), atol=0.005) and int(freq[3] * len(picks)) == 0
+    hot = chain._pick(logits[:20000], False, 0.5)                 # the temperature sharpens it as softmax(x / T)
+    f2 = torch.bincount(hot, minlength=5).float() / len(hot)
+    assert torch.allclose(f2, torch.softmax(logits[0] / 0.5, -1), atol=0.01)
+    bad = torch.tensor([[float("nan")] * 4, [float("inf"), 0, 0, 0], [3e38, -3e38, heads.NEG, 0],
+                        [heads.NEG] * 4, [float("-inf"), 1.0, float("nan"), 0.0]])
+    for _ in range(50):
+        a = chain._pick(bad, False, 1.0)
+        assert ((a >= 0) & (a < 4)).all() and a[1] == 0 and a[2] == 0 and a[4] in (1, 3)
+    assert chain._pick(bad, True, 1.0)[2] == 0
+
+
+def test_the_heads_logits_are_soft_capped_and_a_non_finite_one_is_counted_and_masked():
+    setup, state, obs = setup_obs()
+    o = v2_obs(obs, setup)
+    net = model()
+    with torch.no_grad():
+        net.heads.place_near.bias.fill_(1e4)                        # the near term blown up: sector logits ~ -1e6
+        net.heads.commit.weight.fill_(float("nan"))                 # a head gone NaN
+        logits, a, _ = net.act(o)
+    for k in ("kind", "target", "sector", "fine", "run", "ability"):
+        v = logits[k]
+        allowed = v > heads.NEG / 2
+        assert float(v[allowed].abs().max()) <= chain.CAP + 1e-4, k
+    assert float(logits["nan_fixed"].sum()) > 0                     # the NaN commit logits counted ...
+    assert ((a.commit >= 0) & (a.commit < len(commit.DURATIONS))).all()        # ... and a valid choice made
+    lp, _ = heads.log_prob(logits, a, o["ctrl"])
+    assert torch.isfinite(lp).all()
