@@ -1021,6 +1021,36 @@ class TestChargeProbe:
         men = [x for r in rows if r["event"] == "probe_men" for x in r["lanes"] if x["lane"] == "L2"]
         assert men and all(x["t"] <= 10000 for x in men)
 
+    def test_fresh_order_after_contact_and_second_target(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            CONFIG.lanes = {CONFIG.lanes[1]}
+            CONFIG.lanes[1].mode = 'attack_walk'
+            CONFIG.lanes[1].target_mode = 'both'
+            CONFIG.lanes[1].fight_s = 6
+            CONFIG.lanes[1].target2 = 'enemy_clanrat_2'
+            CONFIG.lanes[1].t2_dx = 34
+            CONFIG.lanes[1].after = {at_s = 2, kind = 'attack_t2', walk = false}
+            CONFIG.park = {{name = 'enemy_lord', x = 700, z = -400, bearing = 0},
+                           {name = 'own_lord', x = -700, z = -400, bearing = 0}}
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            assert(own[2].attack_args.target == 'enemy_clanrat_1' and enemy[2].attack_args.target == 'own_swords_1')
+            own[2].melee, enemy[2].melee = true, true
+            for _ = 1, 3 do bm:tick(500); bm:pump() end
+            assert(own[2].attack_args.target == 'enemy_clanrat_1', 'no new order before at_s')
+            for _ = 1, 3 do bm:tick(500); bm:pump() end
+            assert(own[2].attack_args.target == 'enemy_clanrat_2' and own[2].attack_args.run == true)
+            assert(enemy[3].attack_args == nil, 'the second target is never ordered')
+            for _ = 1, 200 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        assert [r["phase"] for r in rows if r["event"] == "probe_phase"] == ["after:attack_t2"]
+        sample = next(r for r in rows if r["event"] == "probe_sample")
+        assert "t2" in sample["lanes"][0]
+
     def test_layout_and_recharge_step(self, lua):
         L = lua.eval("""require('entries.charge_probe').layout({x = 10, z = 0, gap_m = 80, a_depth = 10,
             t_depth = 12, target_mode = 'rear'})""")

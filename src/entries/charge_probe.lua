@@ -23,6 +23,11 @@
 -- away. lane.lord (optional): a lord placed behind the target (dz m), who uses lane.lord.ability on
 -- himself at the lane's first contact (Stand Your Ground) unless the key is empty (the control); with
 -- lane.lord.at_m instead once the two units' centres are within at_m before the contact.
+-- lane.target2 (optional): a second target unit placed t2_dx m beside the target (+x), facing the same way, halted
+-- and never ordered (it fights only what touches it); sampled as 't2'. lane.after (optional) {at_s, kind, dx, dz,
+-- walk}: at_s after the first contact the attacker gets one more order (the fresh-order probe): 'attack_t2' (attack
+-- the second target), 'attack_same' (the same attack again), 'halt' (the bridge's hold), 'move_near' (a move to its
+-- place + (dx, dz)), 'none' (the control); emitted as probe_phase 'after:<kind>'.
 -- target_mode 'push': at the go the target gets a move order at a walk to a point push_m ahead of its front
 -- (through the attacker: the game's own planner's far move point), never changed.
 -- Every tick_ms 'probe_sample': per running lane both units' (and the lord's) men, health
@@ -46,6 +51,7 @@ local TIMER, MEN_TIMER = 'tww3_bai_charge_probe_tick', 'tww3_bai_charge_probe_me
 M.MODES = {attack_run = true, attack_walk = true, move_run = true, recharge = true, hold = true, withdraw = true,
     script = true}
 M.TARGET_MODES = {stand = true, hold = true, both = true, rear = true, push = true}
+M.AFTER_KINDS = {attack_t2 = true, attack_same = true, halt = true, move_near = true, none = true}
 
 local function round(v, k)
     if type(v) ~= 'number' or v ~= v then return nil end
@@ -188,6 +194,7 @@ function M.main(bm, config, globals)
         lane.running = false
         orders.halt(lane.a.uc)
         orders.halt(lane.t.uc)
+        if lane.t2 then orders.halt(lane.t2.uc) end
         emit('probe_lane_end', {lane = lane.name, why = why, t = now_ms() - lane.t0,
             contact_ms = lane.contact and lane.contact - lane.t0,
             contact2_ms = lane.contact2 and lane.contact2 - lane.t0})
@@ -267,6 +274,22 @@ function M.main(bm, config, globals)
                         end
                     end
                 end
+                local af = lane.after
+                if af and lane.contact and not lane.after_done and now - lane.contact >= af.at_s * 1000 then
+                    lane.after_done = true
+                    local walk = af.walk == true
+                    if af.kind == 'attack_t2' then
+                        attack(lane, lane.a, lane.t2, walk)
+                    elseif af.kind == 'attack_same' then
+                        attack(lane, lane.a, lane.t, walk)
+                    elseif af.kind == 'halt' then
+                        orders.halt(lane.a.uc)
+                    elseif af.kind == 'move_near' then
+                        local p = read(function() return lane.a.unit:position() end)
+                        if p then orders.move(lane.a.uc, vec(p:get_x() + (af.dx or 0), p:get_z() + (af.dz or 0)), not walk) end
+                    end
+                    emit('probe_phase', {lane = lane.name, phase = 'after:' .. af.kind, t = now - lane.t0})
+                end
                 if lane.a_ability and lane.contact and not lane.a_ability_done
                         and now - lane.contact >= (lane.a_ability_after_s or 0) * 1000 then
                     lane.a_ability_done = true
@@ -276,6 +299,7 @@ function M.main(bm, config, globals)
                 end
                 local r = {lane = lane.name, t = now - lane.t0, a = unit_row(lane.a.unit), tg = unit_row(lane.t.unit)}
                 if lane.lord then r.l = unit_row(state.units[lane.lord.name].unit) end
+                if lane.t2 then r.t2 = unit_row(lane.t2.unit) end
                 rows[#rows + 1] = r
                 if beaten(lane.a.unit) or beaten(lane.t.unit) then
                     end_lane(lane, 'dead')
@@ -352,6 +376,7 @@ function M.main(bm, config, globals)
             local L = lane.layout
             place(lane.a, L.ax, L.az, L.ab, lane.a_width)
             place(lane.t, L.tx, L.tz, L.tb, lane.t_width)
+            if lane.t2 then place(lane.t2, L.tx + (lane.t2_dx or 0), L.tz, L.tb, lane.t_width) end
             if lane.lord then
                 place(state.units[lane.lord.name], L.tx, lane.z - (lane.t_depth or 0) - lane.lord.dz, 0, 5)
             end
@@ -395,6 +420,11 @@ function M.main(bm, config, globals)
             assert(lane.a, 'scenario unit missing: ' .. tostring(l.attacker))
             assert(lane.t, 'scenario unit missing: ' .. tostring(l.target))
             if l.lord then assert(state.units[l.lord.name], 'scenario unit missing: ' .. tostring(l.lord.name)) end
+            if l.target2 then
+                lane.t2 = state.units[l.target2]
+                assert(lane.t2, 'scenario unit missing: ' .. tostring(l.target2))
+            end
+            if l.after then assert(M.AFTER_KINDS[l.after.kind], 'unknown after kind ' .. tostring(l.after.kind)) end
             lane.layout = M.layout(l)
             state.lanes[i] = lane
         end

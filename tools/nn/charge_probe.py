@@ -30,7 +30,12 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           point through the attacker (push: the game's planner) / answer with an attack order / hold - 1 battle;
   fatleave  fatigue and the leaver: swordsmen <-> clanrats both attacking from 3 m (no run-up, 150 s), the same
           with the swordsmen 60 m wide (2 ranks) on clanrats 15 m wide (deep); swordsmen, spearmen, greatswords
-          leaving melee 10 s after contact from held clanrats (no chase) - 1 battle.
+          leaving melee 10 s after contact from held clanrats (no chase) - 1 battle;
+  fresh   a new order in melee (OPEN, build/v2gap: the network's fresh orders on a near target killed 0.20/s in the
+          game against 0.38 in the simulator): swordsmen and clanrats attacking each other from 3 m, a second clanrat
+          unit standing 4 m beside the clanrats (never ordered; in every lane alike); 10 s after contact the
+          swordsmen get (a) an attack on the second unit, (b) the same attack again, (c) a halt (the bridge's hold),
+          (d) a move 5 m back at a walk, (e) nothing (the control) - 2 battles, lanes rotated.
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -93,7 +98,9 @@ STEADY_FROM_S = 15.0   # the charge bonus fades over 13 s (charge_decay_duration
 RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
-PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave")
+PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh")
+# the fresh plan's orders 10 s after contact (entries/charge_probe.lua lane.after.kind)
+FRESH = ("attack_t2", "attack_same", "halt", "move_near", "none")
 VV = "wh2_main_character_abilities_verminous_valour"
 TURN_TICK_MS = 250     # the turning battle: 0.25 s samples (a lord turns 180 deg in 1-2 s)
 
@@ -164,6 +171,11 @@ def battles(plan):
                     lane("swords", "clanrat", "withdraw", target_mode="hold", gap_m=40, fight_s=40),
                     lane("spear", "clanrat", "withdraw", target_mode="hold", gap_m=40, fight_s=40),
                     lane("gs", "clanrat", "withdraw", target_mode="hold", gap_m=40, fight_s=40)])
+    elif plan == "fresh":
+        base = [lane("swords", "clanrat", "attack_walk", "both", gap_m=3, fight_s=45, target2="clanrat", t2_gap_m=4,
+                     after={"at_s": 10, "kind": kind, "dx": 0, "dz": 5, "walk": kind == "move_near"})
+                for kind in FRESH]
+        out += [base, rotate(base, 2)]
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
@@ -199,12 +211,12 @@ def layout(specs):
     side_of = {EMP: "own", SKV: "enemy"}
     lanes, used_lords = [], set()
 
-    def add(short, k):
+    def add(short, k, tag=""):
         key, men, faction = UNITS[short]
         if short in LORDS.values():
             used_lords.add(short)
             return f"{side_of[faction]}_lord"
-        slot = f"{short}_{k}"
+        slot = f"{short}{tag}_{k}"
         sides[faction].append({"slot": slot, "key": key, "men": men, "forward": -20 - 40 * (len(sides[faction]) // 4),
                                "lateral": 40 * (len(sides[faction]) % 4 - 1.5), "width": WIDTH_M})
         return f"{side_of[faction]}_{slot}"
@@ -220,6 +232,11 @@ def layout(specs):
                    a_depth=round(depth(a_key, a_men, aw), 2), t_depth=round(depth(t_key, t_men, tw), 2),
                    a_width=5 if a_men == 1 else aw, t_width=5 if t_men == 1 else tw,
                    move_beyond_m=5.0, max_s=spec.get("max_s") or round(spec["gap_m"] / 1.4 + spec["fight_s"] + 40))
+        if spec.get("target2"):
+            # a second target beside the first, t2_gap_m from its edge (+x), facing the same way, never ordered
+            assert UNITS[spec["target2"]][2] == t_fac, spec
+            row["target2"] = add(spec["target2"], k, "b")
+            row["t2_dx"] = round(tw + spec.get("t2_gap_m", 4), 1)
         if spec.get("lord"):
             row["lord"] = dict(spec["lord"], name=add(spec["lord"]["name"], k))
             if row["lord"].get("at_m"):       # front to front -> centre to centre

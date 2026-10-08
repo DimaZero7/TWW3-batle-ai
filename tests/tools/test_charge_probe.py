@@ -33,6 +33,16 @@ def test_the_charge_set_puts_every_order_in_every_lane_place():
     assert [b[-1]["lord"]["ability"] for b in hit] == [cp.SYG, ""]
 
 
+def test_the_fresh_plan_puts_every_order_in_every_lane_with_a_second_target():
+    b = cp.battles("fresh")
+    assert len(b) == 2 and all(sorted(l["after"]["kind"] for l in x) == sorted(cp.FRESH) for x in b)
+    config, _, arena = cp.run_config("fresh", 1)
+    names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}
+    for lane in config["lanes"]:
+        assert lane["target2"] in names and lane["target2"] != lane["target"]
+        assert lane["t2_dx"] == 34 and lane["after"]["at_s"] == 10 and lane["target_mode"] == "both"
+
+
 def test_battle_file_is_written(tmp_path):
     path = cp.write_scenario("hit", 1, tmp_path / "x.xml")
     xml = path.read_text(encoding="utf-8")
