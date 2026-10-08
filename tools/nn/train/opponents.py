@@ -194,7 +194,18 @@ class Line:
     # the it5 twin (build/shotgap/it5_after) 28 % of all its ammo (the game 29 %), 39-48 % with him in range (game
     # 46-51 %). (1.0, 1.0): the old rule.
     lord_share: tuple = (0.57, 0.45)
-    lord_redraw_s: float = 8.0
+    lord_redraw_s: float = 16.0
+    # The target is kept (since 09.10.2026): a free missile unit keeps the target of its attack order while that
+    # stands (not routing) within its reach (range; + fire_move_reach_m 25 for the militia's pistols and the stars,
+    # config/nn/sim.json); the lord-or-other choice above is made only when the period's draw says 'lord' and he is
+    # in reach, or the kept target is the lord and the draw says 'other' - so the target changes only on a period
+    # boundary (every lord_redraw_s) or when the target is lost. build/shotgap/tchange.py, tchange2.py (the game
+    # recordings of the gate sets it1-it7; the game AI's shooters out of melee, 49,450 s with a target): 3.06 changes
+    # per 100 s with the old target alive, standing and in reach while our lord is in reach, 1.45 otherwise (forced:
+    # dead / routing / out of reach 0.69 / 2.02); a target held 12 s median, 25 s mean. The twin of it7 with the draw
+    # every 8 s and the 'other' re-taken each step: 9.94 / 2.23 free changes per 100 s, held 8 s median / 15 s mean.
+    # 16 s: a draw at p ~0.5 flips about every other period, 0.5 / 16 s = 3.1 per 100 s (the game's 3.06).
+    fire_move_reach_m: float = 25.0   # = config/nn/sim.json missile.fire_move_reach_m (the kept target's reach)
     advance_without_missiles: bool = True   # battle 2: a defender with no missile units met the attacker half-way
     advance_after_contact: bool = True      # once own units have fought (in melee now, or a melee unit has kills),
     #                                         the free units go forward and join enemies within join_m (missile
@@ -290,11 +301,18 @@ def tick_uniform(B, N, k, device, salt=24680):
 
 
 def lord_or_other(st, p, free_shooter, foe, lord, fighting, d, ld, li):
-    """(mask [B, N], target [B, N]): the attack orders of free missile units with the enemy lord within range (Line
-    lord_share): on him by the period's draw below the share (him the nearest standing enemy / another nearer), else
-    on the nearest other enemy in range that is in melee, else the nearest other in range (none: no order)."""
+    """(mask [B, N], target [B, N]): the attack orders of free missile units (Line lord_share, lord_redraw_s): with
+    the enemy lord within range, on him by the period's draw below the share (him the nearest standing enemy /
+    another nearer), else on the kept target (the attack order's, standing and within reach, not the lord), else on
+    the nearest other enemy in range that is in melee, else the nearest other in range (none: no order); without the
+    lord in range, on the kept target (none: no order, fire at will)."""
     u = st.u
     rng = u["range"]
+    reach = rng + float(p.fire_move_reach_m) * (u["direct"] & u["fire_move"]).float()
+    cur = u["order_target"].clamp(min=0)
+    cur_ok = (free_shooter & (u["order_kind"] == O.ATTACK) & (u["order_target"] >= 0)
+              & foe.gather(2, cur[:, :, None]).squeeze(2) & (d.gather(2, cur[:, :, None]).squeeze(2) <= reach))
+    cur_other = cur_ok & ~lord.gather(1, cur)
     in_reach = free_shooter & (ld <= rng)
     d_foe = torch.where(foe, d, torch.full_like(d, BIG))
     lord_nearest = ld <= d_foe.min(2).values
@@ -307,8 +325,10 @@ def lord_or_other(st, p, free_shooter, foe, lord, fighting, d, ld, li):
     od_a = torch.where(other, d, torch.full_like(d, BIG)).min(2)
     alt = torch.where(od_m.values < BIG, od_m.indices, od_a.indices)
     has_alt = od_a.values < BIG
-    mask = in_reach & (on_lord | has_alt)
-    return mask, torch.where(on_lord | ~has_alt, li, alt)
+    alt = torch.where(cur_other, cur, alt)
+    has_alt = has_alt | cur_other
+    mask = (in_reach & (on_lord | has_alt)) | (~in_reach & cur_other)
+    return mask, torch.where(in_reach & (on_lord | ~has_alt), li, alt)
 
 
 def lap_shift(st, p, fx, fz, cx, cz, line, foe, missile, lord):

@@ -645,6 +645,29 @@ class TestProperties:
             seen.add(draw < p.lord_share[0])
         assert seen == {True, False}                             # both within 12 periods
 
+    def test_ai_like_shooters_keep_their_target_while_it_stands_in_reach(self):
+        """Line lord_redraw_s / the kept target (build/shotgap/tchange2.py): a free shooter keeps the target of its
+        attack order while it stands within reach; the lord only by the period's draw; a routing or far target is
+        dropped."""
+        st = line_army(attacker=1, gap=80, lord_ahead=30)
+        H = st.N // 2
+        u = st.u
+        arch = H + 3
+        u["order_kind"][0, arch], u["order_target"][0, arch] = O.ATTACK, 2      # on spearman 2 (126 m)
+
+        def tg(p):
+            o = opponents.ai_like(st, p)
+            return int(o.kind[0, arch]), int(o.target[0, arch])
+        assert tg(opponents.Line(lord_share=(0.0, 0.0))) == (O.ATTACK, 2)     # kept, not re-taken (spearman 1 / melee)
+        assert tg(opponents.Line(lord_share=(1.0, 1.0))) == (O.ATTACK, 0)     # the draw says the lord
+        u["x"][0, 0] = -400.0                                                 # the lord out of reach: kept
+        assert tg(opponents.Line(lord_share=(1.0, 1.0))) == (O.ATTACK, 2)
+        u["r"][0, 2] = True                                                   # routing: dropped
+        assert tg(opponents.Line(lord_share=(1.0, 1.0))) != (O.ATTACK, 2)
+        u["r"][0, 2] = False
+        u["x"][0, 2] = -400.0                                                 # out of reach: dropped
+        assert tg(opponents.Line(lord_share=(0.0, 0.0)))[1] != 2
+
     def test_ai_like_missile_units_step_back_from_close_melee_and_break_off_melee_for_a_while(self):
         """The old trigger (skirmish_targeted False): any enemy melee unit within skirmish_m."""
         old = opponents.Line(skirmish_targeted=False)
