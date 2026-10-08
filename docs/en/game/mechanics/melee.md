@@ -417,6 +417,25 @@ unit is out of contact ~4 s after the order (its own melee flag goes off only af
 
 ## What is still unclear
 
+- **The opening wave and a weakening unit's blows (the `reform`, `reform2` probes).** 240 s fights from 3 m, the
+  soldiers' places every second (`build/charge-probe/runs/20261008-180435`, `-181311`; `build/v2gap/reform_report.py`).
+  Men within 2.5 m of an enemy: 43 in the first 10 s, 21 in the next 10, ~13 by 20–40 s, then 10–12 to the end - in
+  every lane. Health goes 2.6x faster than the steady pace in the first 10 s while 3.4x as many men touch: each man
+  in contact strikes less at first. The blows follow the men in contact; with few men alive ~0.42 of the living touch.
+  The striker's losses cut its blows (swordsmen at 30 % deal 58 / 38 / 24 / 6 HP/s while they go 34 -> 10), the
+  target's do not (the clanrats strike battered swordsmen as usual; the swordsmen strike clanrats at 30 % as usual
+  until about ten are left). The formation's depth matters only at first: the wave grows with the length of the
+  fronts' contact (clanrats 15 m wide - 28 in contact, 30 and 50 m - 41–43), then 10 / 11–12 / 13–14 touch at nearly
+  any width. The simulator's men fighting are `fighting_files` x the front's width - not proportional to the width in
+  the game; no wave (35 HP/s flat against the game's 85 / 46 / 36 / 32). Unexplained: full clanrats' blows fall
+  38 -> 15 with 145 -> 46 men alive, the swordsmen's stay ~32 to the end (both sides exhausted by then). An
+  estimate of a "wave" rule (an estimate, not taken): men fighting x 1 + 3.0·e^(−t/7.2 s) from the fight's start and
+  at most 0.42 of the living - the probe twin's opening as the game (87 / 48 / 37), no fall of a weakening clanrat
+  unit's blows; the twin of the 8 it3 battles: wins 14 -> 13 of 32 (game 2 of 8), enemy routs a unit 1.33 -> 1.18
+  (game 0.84), melee HP dealt 0.497 -> 0.443 (0.468), our losses 0.68 -> 0.68 (0.80); grid_s46 wins 15 -> 14 (3 of 8).
+  Not taken: the multiplier comes from the same health losses it is checked on (close to fitting), and the shift of
+  the 8 battles is small - the main gaps (enemy routs, our losses) do not come from the melee pace's shape.
+
 - **Hold in melee.** In whole battles the network's units in melee kill 0.08 a second under hold (twin 0.21), while
   in the probes a halt after attacking strikes 0.69–0.73 of the control (4 lanes; rule `hold_rate` 0.5) - the gap
   points the other way. The whole battles' hold episodes need a look: who touches the unit, from which side, what the
