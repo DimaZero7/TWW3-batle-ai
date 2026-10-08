@@ -636,6 +636,18 @@ def step(st, orders, params=None, dt=None):
         # in its rout's exit it gathers speed: the recordings' share of its own free rout speed by second (0.41 in the
         # first second to 1.0 by the seventh; contact.rout_pin_speed)
         want = torch.where(r_pin, want * movement.ramp(u["rpin_s"], cal["contact"]["rout_pin_speed"]), want)
+    crowd = cal["morale"].get("rout_crowd")
+    if crowd:
+        # A router among other formations is slowed by their men (morale.rout_crowd; soft collision of the models): a
+        # share of its rout speed by the standing formations (any, lords too) whose centres are within crowd["m"] of
+        # its own - own and enemy counted apart, the lower share taken; not in its rout's exit (that has its ramp).
+        near = (pw["dist"] < float(crowd["m"])) & standing[:, None, :] & ~eye
+        n_own = (near & same_side).sum(2).clamp(max=len(crowd["own"]) - 1)
+        n_en = (near & ~same_side & (u["side"][:, None, :] > 0)).sum(2).clamp(max=len(crowd["enemy"]) - 1)
+        f_own = torch.tensor(crowd["own"], dtype=want.dtype, device=want.device)[n_own]
+        f_en = torch.tensor(crowd["enemy"], dtype=want.dtype, device=want.device)[n_en]
+        slow = routing & (u["men0"] > 1) & ~r_pin
+        want = torch.where(slow, want * torch.minimum(f_own, f_en), want)
     moving = moving | routing
     # A unit in melee closes up to its nearest opponent (walking) until the formations touch.
     foe_gap = torch.where(touch & standing[:, None, :], pw["gap"], torch.full_like(pw["gap"], 1e9))

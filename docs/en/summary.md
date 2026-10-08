@@ -83,7 +83,7 @@ General x0.8 of the game, Warlord v Warlord x1.2), morale with all main modifier
 always; on the 1st / 2nd rout below 0.05 / 0.10 health; at the 3rd rout), army collapse (−120; the strength is the database's combat potential:
 melee_cp + the abilities' potential + missile_cp by the ammunition left, × health - as the recorded `strategic_value`),
 turning on the move at the model's turn rate from the database (a formation about-faces where it stands and runs the
-way it faces), leaving melee with the database's 24 s window (one still in contact drops its order and fights), a unit that routs from melee stays in contact 7 s more and gathers speed (the recordings: the flag 7 s, losses 0.77 of a standing unit),
+way it faces), leaving melee with the database's 24 s window (one still in contact drops its order and fights), a unit that routs from melee stays in contact 7 s more and gathers speed (the recordings: the flag 7 s, losses 0.77 of a standing unit), a router in a crowd is slowed (the recordings: one / two own near - 0.68 / 0.43 of the run),
 flank-threat flags, fatigue, units' innate effects (Strength of the Penitent fires by itself when ready, in melee;
 its 3 s recharge stands only while the unit wins its melee; auras from a routing lord too and on routers; the edge centre to
 centre 35 m, probe T-E2), lord

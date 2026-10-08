@@ -678,6 +678,16 @@ database's fatigue multiplier, routing Empire units run at 0.989 / 1.000 / 0.994
 of the run in each fatigue state (fresh to exhausted, 13–49k s each), Skaven at 0.977 of "run × Scurry
 Away! × Strength in Numbers × fatigue" (132k s).
 
+**A router in a crowd** (`morale.rout_crowd`). A routing formation among other formations is slowed by their men - the
+soft collision of the models (no number in the database): its rout speed × a share by the standing formations (and
+lords) whose centres are within 15 m: own 0 / 1 / 2+ - 1 / 0.73 / 0.46, enemy - 1 / 0.84 / 0.55; the lower one; not in
+its rout's exit (that has its own ramp). Measured (`build/routgap/router_crowd.py`, all fair recordings, routers in s
+3-30 of a rout, speed / card run, median): none near 0.93 / 0.94, one own 0.68, two+ 0.43, one enemy 0.79, two+ 0.51;
+the shares are these over the free 0.93 / 0.94. Before the rule the twin of the it3-it5 sets gave 0.91 / 0.83 (own) and
+0.84 / 0.79 (enemy): the network's routers were in a crowd 28-35 % of the time in the game and 13-14 % in the twin,
+rallied after 54 s (Skaven, median) against 31 s, an enemy within 95 m 79 % of the time after 18 s of a rout against 48 %
+(`build/routgap/rally_an.py`).
+
 ### Casualty windows and "under fire"
 
 - **Recent casualties** — HP lost in exactly the last `morale.casualties_s` **4 s**; **extended

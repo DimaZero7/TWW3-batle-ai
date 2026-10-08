@@ -2228,6 +2228,30 @@ class TestRoutExit:
         assert v == pytest.approx([0.41, 0.41, 0.535, 1.0, 1.0])
 
 
+class TestRoutCrowd:
+    def test_a_router_among_other_formations_is_slowed(self):
+        """morale.rout_crowd: a router with two own standing formations around it runs at own[2] of its rout speed,
+        with one enemy formation at enemy[1]; alone at the full rout speed; off: full."""
+        def speed(params, friends=0, enemy=False):
+            rows1 = [(SPEAR, -300, 0, 90)] + [(SPEAR, -300, 4.0 * (k + 1), 90) for k in range(friends)] + [(SPEAR, -300, 700, 90)]
+            rows2 = [(SPEAR, 300, 0, 270), (SPEAR, 300, 700, 270)]
+            if enemy:
+                rows2.append((SPEAR, -300, -6.0, 270))
+            st = scenario.build([army(rows1, rows2)], params)
+            st.u["r"][0, 0], st.u["morale"][0, 0], st.u["rout_count"][0, 0], st.u["rally_s"][0, 0] = True, -40.0, 1.0, 0.0
+            vs = []
+            for _ in range(int(round(3.0 / params.dt))):
+                battle.step(st, replay.hold(st), params)
+                vs.append(math.hypot(float(st.u["vx"][0, 0]), float(st.u["vz"][0, 0])))
+            return max(vs)
+        crowd = P.sim["morale"]["rout_crowd"]
+        alone = speed(P)
+        assert speed(P, friends=2) == pytest.approx(alone * crowd["own"][2], rel=0.05)
+        assert speed(P, enemy=True) == pytest.approx(alone * crowd["enemy"][1], rel=0.05)
+        off = P.with_cal("morale", rout_crowd=None)
+        assert speed(off, friends=2) == pytest.approx(speed(off), rel=0.02)
+
+
 def _ctx_of(monkeypatch, st, orders_of, steps):
     """The morale context battle.step hands morale.step, each step (morale itself still steps)."""
     seen = []

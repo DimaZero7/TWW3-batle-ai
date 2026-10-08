@@ -65,6 +65,9 @@ Ours: [pace and fatigue](../units/pace.md), [simulator](../../training/simulator
     Own formations are not pushed apart. Simulator: `contact.friend_push` false ([simulator](../../training/simulator.md));
     before it pushed them apart, and the network that piles its units up in the game (13–34 % of seconds with an own
     unit within 8 m) never got a pile in the twin (0 %).
+  - **A router in a crowd is slowed.** In the recordings a routing formation with one / two or more own standing
+    formations within 15 m runs at 0.68 / 0.43 of its card run (one / two or more enemy: 0.79 / 0.51), a free one at 0.93.
+    Simulator: `morale.rout_crowd` ([simulator](../../training/simulator.md)).
 - **Pathing costs** (WH2): default 2, climb/jump/wall door 10. · twwstats · high.
 - **Patch fixes:** 6.1.0 made infantry "stickier" (a player report); 7.2 fixed spaghetti lines into
   minor settlements; 8.0 fixed an army clumping when every unit got the same order; 8.1 fixed
