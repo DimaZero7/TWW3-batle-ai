@@ -11,7 +11,7 @@ Per pair of units in contact (i strikes j), per second:
                       strikes once; a unit in contact with several enemies shares out no more than its own front
                       holds; a unit attacking another enemy strikes one it only touches at contact.unit_incidental
                       (a lord: lord_incidental) of its rate; a formation without a missile weapon under HOLD (no
-                      attack order) or under a MOVE still in contact (contact.hold_move) strikes at contact.hold_rate
+                      attack order; a missile unit too: contact.hold_missile) or under a MOVE still in contact (contact.hold_move) strikes at contact.hold_rate
                       of it (measured: the melee probe's held units 0.49-0.52 of the rule, move lanes 0.70 of
                       attacking), except its blows reflecting a charge (contact.hold_reflect_full); a lone man (a lord)
                       under HOLD strikes in full (the damage plan)
@@ -201,6 +201,15 @@ def strikes(u, pw, contact, params, charge_now, first=False):
         # melee (the younger of the two clocks: a fresh unit meets its enemy's front anew); formations only.
         t_pair = torch.minimum(u["contact_s"][:, :, None], u["contact_s"][:, None, :])
         w = 1.0 + float(wave["amp"]) * torch.exp(-t_pair / float(wave["tau_s"]))
+        floor = wave.get("missile_attack_floor")
+        if floor:
+            # A missile unit fighting under an attack order (the wavemiss probes, build/routmorale/wavemiss_report.py):
+            # its loose block does not part from the enemy as formations do - the fronts stay 2.1-2.6 m apart (unordered
+            # shooters and formations: 3.0-3.3 m) and the enemy's men within reach of it stay at 22.6 against 16.4 for the
+            # same shooters unordered, 10-90 s after contact (8 / 4 lanes): the men striking it keep at least
+            # missile_attack_floor (1.38) of the steady level.
+            shot_at = ((u["range"] > 0) & (u["order_kind"] == O.ATTACK))[:, None, :]
+            w = torch.where(shot_at, w.clamp(min=float(floor)), w)
         F = torch.where(single_i | single_j, F, F * w)
     own = torch.where(single_i, torch.ones_like(men_i), men_i)
     total = F.sum(dim=2, keepdim=True)
@@ -326,7 +335,11 @@ def strikes(u, pw, contact, params, charge_now, first=False):
             far = torch.sqrt((u["ox"] - u["x"]) ** 2 + (u["oz"] - u["z"]) ** 2) >= float(cc["leave_m"])
             move = move & ~far
         held_kind = held_kind | move
-    held = held_kind & (u["range"] <= 0) & (u["men0"] > 1)
+    # contact.hold_missile: a missile unit under HOLD is held too (the wavemiss probes: unordered shooters struck clanrats
+    # at 0.45 HP/s a man within reach, the same shooters under an attack order 0.80 - 0.56 of it; the twin's held
+    # shooters dealt 3.4x the game's); absent: missile units strike in full (the old note: 0.99-1.01, source not kept)
+    missile_held = bool(cc.get("hold_missile"))
+    held = held_kind & ((u["range"] <= 0) | missile_held) & (u["men0"] > 1)
     # A braced unit's blows while it reflects a charge are not cut (contact.hold_reflect_full; R2: braced spearmen
     # struck 52 HP/s in 1-5 s after a charge = the full rule x2, held swordsmen 12 HP/s = hold_rate).
     cut = held[:, :, None]

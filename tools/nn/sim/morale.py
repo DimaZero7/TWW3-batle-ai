@@ -154,8 +154,16 @@ def combat_points(dealt, taken, in_combat, cal, rules, own_lost=None, foe_lost=N
     pts = torch.where(ratio >= c["slightly"], rules["winning_combat_slightly"], pts)
     pts = torch.where(ratio >= c["yes"], rules["winning_combat"], pts)
     pts = torch.where(ratio >= c["significantly"], rules["winning_combat_significantly"], pts)
-    pts = torch.where(ratio <= 1 / c["slightly"], rules["losing_combat"], pts)
-    pts = torch.where(ratio <= 1 / c["significantly"], rules["losing_combat_significantly"], pts)
+    if c.get("losing") is not None:
+        # the losing side's own thresholds (combat_ratio losing / losing_significantly: the enemy's advantage, taken /
+        # dealt): losing (-3) once it takes more than it deals x losing (1: Goumin's WH3 guide - 'a unit is losing if
+        # engaged with an enemy taking less damage than it', no even band), losing significantly (-8) from
+        # losing_significantly (the morale probe T-D: an HP balance of 0.32 showed -8, 0.58-0.63 showed -3)
+        pts = torch.where(ratio < 1 / float(c["losing"]), rules["losing_combat"], pts)
+        pts = torch.where(ratio <= 1 / float(c["losing_significantly"]), rules["losing_combat_significantly"], pts)
+    else:
+        pts = torch.where(ratio <= 1 / c["slightly"], rules["losing_combat"], pts)
+        pts = torch.where(ratio <= 1 / c["significantly"], rules["losing_combat_significantly"], pts)
     gate = cal.get("combat_lost")
     if gate is not None and own_lost is not None:
         pts = torch.where((pts < 0) & (own_lost < float(gate)), torch.zeros_like(pts), pts)

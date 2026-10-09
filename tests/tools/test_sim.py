@@ -71,6 +71,18 @@ class TestFunctions:
         x = torch.tensor([0.05, 0.1, 0.55, 0.95])
         assert morale.steps(x, points).tolist() == [0.0, -2.0, -16.0, -74.0]
 
+    def test_losing_thresholds_of_their_own_leave_no_even_band(self):
+        dealt = torch.tensor([99.0, 59.0, 31.0, 38.0, 100.0, 300.0])     # +1 each: ratios 1, 0.6, 0.32, 0.39, ~1.01, ~3
+        taken = torch.full_like(dealt, 99.0)
+        on = torch.ones_like(dealt, dtype=torch.bool)
+        old = {"combat_ratio": {"slightly": 1.5, "yes": 2.5, "significantly": 4}}
+        new = {"combat_ratio": dict(old["combat_ratio"], losing=1.0, losing_significantly=2.5)}
+        assert morale.combat_points(dealt, taken, on, old, P.morale).tolist() == [0, -3, -3, -3, 0, 6]
+        assert morale.combat_points(dealt, taken, on, new, P.morale).tolist() == [0, -3, -8, -8, 0, 6]
+        # on by default (config/nn/sim.json morale.combat_why: Goumin's rule, the probe's 0.32 -> -8)
+        assert P.sim["morale"]["combat_ratio"].get("losing") == 1.0
+        assert P.sim["morale"]["combat_ratio"].get("losing_significantly") == 2.5
+
     def test_distance_factor_interpolates_and_holds_at_the_ends(self):
         table = P.sim["missile"]["distance_factor"]
         x = torch.tensor([10.0, table[0][0], (table[0][0] + table[1][0]) / 2, 200.0])
@@ -251,6 +263,26 @@ class TestMelee:
         assert F(wave["tau_s"], 300.0) == pytest.approx(late * (1 + wave["amp"] / math.e), rel=1e-4)
         assert F(0.0, 0.0, P.with_cal("melee", wave=None)) == pytest.approx(late, rel=1e-3)
 
+    def test_the_men_striking_a_missile_unit_under_an_attack_order_keep_a_floor_of_the_wave(self):
+        """melee.wave missile_attack_floor (the wavemiss probes): the enemy's men striking a missile unit that fights
+        under an attack order stay at least floor x the steady level; unordered (HOLD) the wave fades as for formations."""
+        st = face_off(SLAVE, ARCHER)
+        H = st.N // 2
+        pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
+        contact = pw["enemy"] & (pw["gap"] <= 1.0)
+        z = torch.zeros_like(st.u["men"])
+        floor = P.sim["melee"]["wave"]["missile_attack_floor"]
+        assert floor > 1
+        st.u["contact_s"][:] = 300.0                                     # past the opening wave
+        def F(kind):
+            st.u["order_kind"][0, H] = kind
+            st.u["order_target"][0, H] = 0 if kind == O.ATTACK else -1
+            return float(melee.strikes(st.u, pw, contact, P, z)[3][0, 0, H])
+        held, attacking = F(O.HOLD), F(O.ATTACK)
+        assert attacking == pytest.approx(floor * held, rel=1e-4)
+        st.u["contact_s"][:] = 0.0                                       # at contact the wave is above the floor
+        assert F(O.ATTACK) == pytest.approx(F(O.HOLD), rel=1e-4)
+
     def test_at_most_the_cap_reach_a_lord(self):
         st = face_off(SPEAR, GENERAL)
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
@@ -328,10 +360,12 @@ class TestMelee:
         fresh = float(melee.strikes(st.u, pw, contact, params, z)[0][0, 0, H])
         assert fresh == pytest.approx(full * P.sim["contact"]["fresh_incidental"], abs=1e-6)
 
-    def test_a_formation_holding_in_melee_strikes_at_the_hold_rate_a_missile_unit_and_a_lord_in_full(self):
+    def test_a_formation_or_missile_unit_holding_in_melee_strikes_at_the_hold_rate_a_lord_in_full(self):
         k = P.sim["contact"]["hold_rate"]
         assert 0 < k < 1
-        for key, share in ((SPEAR, k), (ARCHER, 1.0), ("wh_main_emp_cha_general_0", 1.0)):
+        missile = k if P.sim["contact"].get("hold_missile") else 1.0      # contact.hold_missile (the wavemiss probes)
+        assert P.sim["contact"].get("hold_missile")
+        for key, share in ((SPEAR, k), (ARCHER, missile), ("wh_main_emp_cha_general_0", 1.0)):
             st = face_off(key, SLAVE)
             pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
             contact = pw["enemy"] & (pw["gap"] <= 1.0)

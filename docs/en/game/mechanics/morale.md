@@ -44,7 +44,7 @@ All values are WH3 9.0.0 = our `game_rules.json`; descriptions from WH2.
 | Encourage (unit) | +4 | flat, "adjusted for distance"; since 5.3 all Encourage is +4 and does not stack with the lord's aura | — |
 | Lord died recently / dead / fled | −16 / −10 / −16 | | death: −16 for 45 s, then −10 to the end; rout on the field: the aura only; "fled" −16 when the lord leaves the map, ~120 s ([measured](../../apps/entries.md#lord_fall)) |
 | Winning slightly / winning / significantly | +3 / +6 / +8 | the ratios are not in the tables | ratios 1.5 / 2.5 / 4 calibrated; never for a single entity (a lord) |
-| Losing / significantly | −3 / −8 | | same; a single entity in melee always −3 (measured: the game lords' morale in melee −3.8 points, 95 % CI −4.7…−3.0, whatever the balance) |
+| Losing / significantly | −3 / −8 | | −3 once the unit takes more damage than it deals (no even band: Goumin's WH3 kv_rules guide), −8 once 2.5 times as much (the morale probe: a balance of 0.32 showed −8 in the game, 0.58–0.63 −3); a single entity in melee always −3 (measured: the game lords' morale in melee −3.8 points, 95 % CI −4.7…−3.0, whatever the balance) |
 | Attacked in flank / rear | −6 / −14 | "first contact from flank / rear" | −1 / −2 continuously. See [flanking](flanking.md) |
 | Flanks exposed one / both | −3 / −6 | lost within `open_flanks_effect_range` 120 m | same points, 60 m |
 | Flanks secure | +5 | | +5 (neighbour within 120 m) |
