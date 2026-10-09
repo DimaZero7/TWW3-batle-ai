@@ -237,6 +237,11 @@ HISTORY = {
                  "extended casualty windows; K = tools/nn/sim/morale.history_steps, 0 when the windows decay)",
 }
 
+# The battle's id [B, N] (int64, the same on every slot; empty() sets it, nothing per unit fills it): its row in the
+# batch it was built in. The hash draws (morale's rally, the rout's dodge side, the scripts' picks) key on it, so a
+# battle draws the same whatever batch it later runs in - narrowed, compacted or restarted from a bank.
+BATTLE_ID = "row"
+
 
 def _dtype(code):
     return {"f": torch.float32, "b": torch.bool, "i": torch.int64}[code]
@@ -314,6 +319,7 @@ def empty(B, N, device="cpu", history=0):
     u["fxt1"].fill_(-1)
     u["snap_ab"].fill_(-1)
     u["vis"].fill_(True)
+    u[BATTLE_ID] = torch.arange(B, device=device)[:, None].expand(B, N).clone()
     zeros = torch.zeros(B, device=device)
     return State(u=u, t=zeros.clone(), attacker=torch.ones(B, dtype=torch.int64, device=device),
                  done=torch.zeros(B, dtype=torch.bool, device=device),

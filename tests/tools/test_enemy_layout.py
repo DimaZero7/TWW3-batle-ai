@@ -1,7 +1,11 @@
 """tools.analysis.enemy_layout: group links from soldier positions."""
 import numpy as np
 
-from tools.analysis import enemy_layout as el
+import pytest
+
+pytest.importorskip("matplotlib", reason="matplotlib: on the host, not in the training container")
+
+from tools.analysis import enemy_layout as el  # noqa: E402
 
 
 def block(name, key, x, z):

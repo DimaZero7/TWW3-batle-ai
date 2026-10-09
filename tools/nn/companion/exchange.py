@@ -58,6 +58,7 @@ class Battle:
     setup: Setup
     slots: list = None     # per unit: its ability keys by slot ("" empty), as the network's input has them
     walk: np.ndarray = None   # [N] walk speed (m/s, passport; 0 unknown): running_by_speed
+    shape: dict = None     # the formations as the simulator lays them out (formation_shape): engaged_targets' contact
 
     @property
     def own(self):
@@ -79,7 +80,71 @@ def battle(doc, bounds=CROSSROADS):
              for u in units]
     walk = np.array([float(((units_db.get(u.get("key") or "") or {}).get("speed") or {}).get("walk") or 0.0)
                      for u in units])
-    return Battle(doc["batch"], names, side[0], setup, slots, walk)
+    return Battle(doc["batch"], names, side[0], setup, slots, walk, formation_shape(doc))
+
+
+def formation_shape(doc, params=None):
+    """{width, sp_h, sp_v, men0, radius: [N] arrays; reach_m, lord_reach_m, hold_m} - each unit's formation as the
+    simulator's scenario.build lays it out (the passport's STATIC fields; the width of the state's layout when it has
+    one, as the enemy's script builds its simulator state, tools/nn/companion/script.py) and the simulator's contact
+    distances (config/nn/sim.json contact); a key the simulator does not know: NaN (it touches nobody)."""
+    from tools.nn.sim.params import load
+    params = params or load()
+    layout = {u["n"]: u for u in doc.get("layout") or ()}
+    out = {k: np.full(len(doc["units"]), np.nan) for k in ("width", "sp_h", "sp_v", "men0", "radius")}
+    for i, u in enumerate(doc["units"]):
+        key = u.get("key") or ""
+        if key not in params.units:
+            continue
+        row = params.static(key)
+        width = (layout.get(u["n"]) or {}).get("width")
+        if width and row["men0"] > 1:
+            row["width"] = float(width)
+        for k in out:
+            out[k][i] = float(row[k])
+    c = params.sim["contact"]
+    out.update(reach_m=float(c["reach_m"]), lord_reach_m=float(c.get("lord_reach_m", c["reach_m"])),
+               hold_m=float(c["hold_m"]), spacing=float(params.sim["formation"]["spacing_m"]))
+    return out
+
+
+def touching(state, shape):
+    """[N, N] unit i touches enemy j as in the simulator (tools/nn/sim/battle.py `touch`, geometry.pairwise): the edges
+    of the two formations' rectangles (geometry.dims: files = floor(width / h), at most the men; ranks = ceil(men /
+    files); a lone man 2 x radius) within contact.reach_m of each other (an overlap of 2.5 m; a lone man lord_reach_m),
+    hold_m more when either is in melee (state m); both alive (men > 0, a position) on different sides."""
+    x, z = state["x"][0].astype(float), state["z"][0].astype(float)
+    b = np.radians(np.nan_to_num(state["b"][0].astype(float)))
+    men = np.nan_to_num(state["men"][0].astype(float))
+    side = np.asarray(shape["side"])
+    h = np.where(shape["sp_h"] > 0, shape["sp_h"], shape["spacing"])
+    v = np.where(shape["sp_v"] > 0, shape["sp_v"], shape["spacing"])
+    with np.errstate(invalid="ignore"):
+        files = np.minimum(np.maximum(np.floor(shape["width"] / h + 1e-4), 1), np.maximum(men, 1))
+        ranks = np.ceil(np.maximum(men, 1) / files)
+    single = shape["men0"] <= 1
+    front = np.where(single, 2 * shape["radius"], files * h)
+    depth = np.where(single, 2 * shape["radius"], ranks * v)
+    dx, dz = x[None, :] - x[:, None], z[None, :] - z[:, None]
+    dist = np.sqrt(dx * dx + dz * dz + 1e-9)
+    theta = np.arctan2(dx, dz)
+
+    def wrap(a):
+        return np.remainder(a + math.pi, 2 * math.pi) - math.pi
+
+    def half(f, d, phi):
+        s, c = np.maximum(np.abs(np.sin(phi)), 1e-6), np.maximum(np.abs(np.cos(phi)), 1e-6)
+        return np.minimum((f / 2) / s, (d / 2) / c)
+    ext = half(front[:, None], depth[:, None], wrap(theta - b[:, None])) + \
+        half(front[None, :], depth[None, :], wrap(theta + math.pi - b[None, :]))
+    gap = dist - ext
+    reach = np.where(single[:, None] | single[None, :], shape["lord_reach_m"], shape["reach_m"])
+    m = np.asarray(state["m"][0], dtype=bool)
+    held = (m[:, None] | m[None, :]) * shape["hold_m"]
+    alive = (men > 0) & np.isfinite(x) & np.isfinite(z)
+    enemy = (side[:, None] != side[None, :]) & (side[:, None] > 0) & (side[None, :] > 0)
+    with np.errstate(invalid="ignore"):
+        return enemy & alive[:, None] & alive[None, :] & (gap <= reach + held)
 
 
 RUN_MARGIN = 0.3   # m/s: running = moving faster than the walk + this (the simulator's `f`, tools/nn/sim/battle.py)
@@ -108,7 +173,7 @@ def running_by_speed(state, walk, prev=None):
     return x.copy(), z.copy(), t
 
 
-def engaged_targets(state, side, own=1):
+def engaged_targets(state, side, own=1, shape=None):
     """Own units' `target` as the simulator has it (tools/nn/sim/battle.py: the enemy fought or shot at
     now, -1 otherwise), in place in `state` (exchange.arrays); the observation's has_target input.
 
@@ -119,18 +184,32 @@ def engaged_targets(state, side, own=1):
     of 03.10.2026, build/gap2/hastarget.py); the same shift in the simulator (build/gap2/sim2.py
     --gametarget) lowered its trade against ai_like by 0.105 a battle and moved its orders to the
     game's mix (hold 0.73 -> 0.63, attack 0.17 -> 0.24, move 0.10 -> 0.13; game 0.61 / 0.23 / 0.16).
-    So: an own unit in melee keeps the engine's target when it is a present enemy, else takes the
-    nearest present enemy; a firing unit keeps the engine's target; any other own unit has none.
+    So: an own unit in melee takes the simulator's opponent - the nearest (centre to centre) standing enemy it
+    touches (touching, with shape: Battle.shape / formation_shape), as tools/nn/sim/battle.py `opp`; touching none
+    by that geometry while the game says melee (the game's fronts reach further), the engine's target when it is a
+    present enemy, else the nearest present enemy (the simulator never shows 'in melee, no target'); a firing unit
+    keeps the engine's target; any other own unit has none. Before (no shape), a unit in melee kept the engine's
+    target whenever present: in the game that is the attack ORDER's target, kept ~25 s, not the enemy it fights - the
+    enemy's script then saw its unit 'fighting' our shooter it was ordered onto and kept that order (62 % of re-orders
+    held 5 s, the twin 7 %; build/bench2/o_revert_p1.txt), and the network saw the same shift in its has_target.
     Enemy rows are left as read (has_target is an own-only input). own: the side whose rows are set
     (1 the network's; the enemy's script sets side 2's too, tools/nn/companion/script.py)."""
     tg = state["target"][0]
     x, z, men = state["x"][0], state["z"][0], state["men"][0]
     enemy = (np.asarray(side) != own) & (men > 0) & np.isfinite(x) & np.isfinite(z)
+    opp = np.full(len(tg), -1)
+    if shape is not None:
+        standing = enemy & ~np.asarray(state["r"][0], dtype=bool) & ~np.asarray(state["s"][0], dtype=bool)
+        touch = touching(state, dict(shape, side=np.asarray(side))) & standing[None, :]
+        d = np.where(touch, np.hypot(x[None, :] - x[:, None], z[None, :] - z[:, None]), np.inf)
+        opp = np.where(touch.any(1), d.argmin(1), -1)
     for i in np.nonzero(np.asarray(side) == own)[0]:
         j = int(tg[i])
         valid = 0 <= j < len(tg) and bool(enemy[j])
         if state["m"][0, i]:
-            if not valid and enemy.any() and np.isfinite(x[i]) and np.isfinite(z[i]):
+            if opp[i] >= 0:
+                j, valid = int(opp[i]), True
+            elif not valid and enemy.any() and np.isfinite(x[i]) and np.isfinite(z[i]):
                 d = np.where(enemy, np.hypot(x - x[i], z - z[i]), np.inf)
                 j, valid = int(d.argmin()), True
             tg[i] = j if valid else -1

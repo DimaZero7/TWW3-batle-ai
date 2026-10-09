@@ -269,11 +269,17 @@ def _centroid(x, z, mask):
     return (x * w).sum(1) / n, (z * w).sum(1) / n
 
 
-def pick_uniform(B, N, device, salt=12345):
-    """[B, N, N] a fixed uniform (0, 1) draw per (battle row, unit, enemy slot): an integer hash, the same
+def _ids(ids, B, device):
+    """[B] the battles' ids for the hash draws (the state's `row`: the same in any batch; None: the rows)."""
+    return torch.arange(B, device=device) if ids is None else ids.long()
+
+
+def pick_uniform(B, N, device, salt=12345, ids=None):
+    """[B, N, N] a fixed uniform (0, 1) draw per (battle id, unit, enemy slot): an integer hash, the same
     every step (no flip-flop between steps, nothing random to replay; a restarted row puts other units in
-    the slots). Another salt: an independent draw."""
-    b = torch.arange(B, device=device)[:, None, None]
+    the slots). Another salt: an independent draw. ids [B]: the battles' ids (st.u["row"][:, 0]: a battle draws
+    the same whatever batch it runs in; None: the rows)."""
+    b = _ids(ids, B, device)[:, None, None]
     i = torch.arange(N, device=device)[None, :, None]
     j = torch.arange(N, device=device)[None, None, :]
     h = (b * 1000003 + i * 7919 + j * 104729 + salt) & 0x7FFFFFFF
@@ -283,15 +289,20 @@ def pick_uniform(B, N, device, salt=12345):
     return ((h & 0xFFFFFF).float() + 0.5) / float(1 << 24)
 
 
-def pick_noise(B, N, device):
-    """[B, N, N] a fixed standard Gumbel draw per (battle row, unit, enemy slot) (pick_uniform)."""
-    return -torch.log(-torch.log(pick_uniform(B, N, device)))
+def battle_ids(st):
+    """[B] the battles' ids for the hash draws: the state's `row` (None for a state without it: the rows)."""
+    return st.u["row"][:, 0] if "row" in st.u else None
 
 
-def tick_uniform(B, N, k, device, salt=24680):
-    """[B, N] a uniform (0, 1) draw per (battle row, unit, period k [B] (an integer)): pick_uniform's hash with the
+def pick_noise(B, N, device, ids=None):
+    """[B, N, N] a fixed standard Gumbel draw per (battle id, unit, enemy slot) (pick_uniform)."""
+    return -torch.log(-torch.log(pick_uniform(B, N, device, ids=ids)))
+
+
+def tick_uniform(B, N, k, device, salt=24680, ids=None):
+    """[B, N] a uniform (0, 1) draw per (battle id, unit, period k [B] (an integer)): pick_uniform's hash with the
     period in the enemy slot's place - the same within a period, a new one in the next."""
-    b = torch.arange(B, device=device)[:, None]
+    b = _ids(ids, B, device)[:, None]
     i = torch.arange(N, device=device)[None, :]
     h = (b * 1000003 + i * 7919 + k.long()[:, None] * 104729 + salt) & 0x7FFFFFFF
     h = ((h ^ (h >> 13)) * 1274126177) & 0x7FFFFFFF
@@ -319,7 +330,7 @@ def lord_or_other(st, p, free_shooter, foe, lord, fighting, d, ld, li):
     share = torch.where(lord_nearest, torch.full_like(ld, float(p.lord_share[0])),
                         torch.full_like(ld, float(p.lord_share[1])))
     period = torch.floor(st.t / max(float(p.lord_redraw_s), 1e-6))
-    on_lord = tick_uniform(st.B, st.N, period, ld.device) < share
+    on_lord = tick_uniform(st.B, st.N, period, ld.device, ids=battle_ids(st)) < share
     other = foe & ~lord[:, None, :] & (d <= rng[:, :, None])
     od_m = torch.where(other & fighting[:, None, :], d, torch.full_like(d, BIG)).min(2)
     od_a = torch.where(other, d, torch.full_like(d, BIG)).min(2)
@@ -433,7 +444,7 @@ def ai_like(st, p=Line()):
              + p.lord_penalty_m * (~lord[:, :, None] & lord[:, None, :]).float() + p.taken_m * taken - p.ahead_bonus_m * cos_ahead
              + p.wavering_m * u["w"][:, None, :].float())
     if p.pick_noise_m > 0:
-        score = score - p.pick_noise_m * pick_noise(st.B, st.N, x.device)
+        score = score - p.pick_noise_m * pick_noise(st.B, st.N, x.device, ids=battle_ids(st))
     score = torch.where(foe, score, torch.full_like(score, BIG))
     best_sc, best = score.min(2)
     cur = u["order_target"].clamp(min=0)
@@ -525,8 +536,9 @@ def ai_like(st, p=Line()):
         share = torch.full_like(near_d, float(p.pursue_share[-1][1]))
         for lim, sh in reversed(p.pursue_share[:-1]):
             share = torch.where(near_d <= lim, torch.full_like(share, float(sh)), share)
-        draw = pick_uniform(st.B, st.N, x.device, salt=54321).gather(2, ot[:, :, None]).squeeze(2)
-        life = -p.pursue_mean_s * torch.log(pick_uniform(st.B, st.N, x.device, salt=98765).gather(2, ot[:, :, None]).squeeze(2))
+        draw = pick_uniform(st.B, st.N, x.device, salt=54321, ids=battle_ids(st)).gather(2, ot[:, :, None]).squeeze(2)
+        life = -p.pursue_mean_s * torch.log(pick_uniform(st.B, st.N, x.device, salt=98765,
+                                                         ids=battle_ids(st)).gather(2, ot[:, :, None]).squeeze(2))
         pursue = (line & on_router & ~opp_ok & (rd <= p.pursue_drop_m) & (draw < share)
                   & (u["rout_s"].gather(1, ot) < life))
         put(pursue, O.ATTACK, tg=ot, r=True)

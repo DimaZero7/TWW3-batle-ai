@@ -82,6 +82,8 @@ class TestStep:
         assert evals == 7 and 45 < wall < 55
         assert step.wall_minutes(25, 5, miss=True)[0] == wall + step.MISS_S / 60
 
+    @pytest.mark.skipif(os.name != "nt", reason="Windows paths (C:\\...) for Git Bash: only on the Windows host, not in the "
+                                                "Linux container (a C:\\ path is not absolute there)")
     def test_posix_paths_for_git_bash(self):
         assert step.posix("C:\\Users\\x\\repo") == "/c/Users/x/repo"
 
@@ -370,6 +372,8 @@ class TestBaselines:
         assert (v, dv) == ("v1", "d1") and missing == ["hold_shoot", "drill:counter"]       # hold_shoot: too few seeds
         assert baselines.status(tmp_path, "v2", "d1", drills=())[2] == ["ai_like", "nearest", "hold_shoot"]
 
+    @pytest.mark.skipif(os.name != "nt", reason="Windows paths (C:\\...) for Git Bash: only on the Windows host, not in the "
+                                                "Linux container (a C:\\ path is not absolute there)")
     def test_the_container_command_mounts_the_build_folder(self):
         env, cmd = baselines.command(r"C:\main\build", "orch-x", 6, root=r"C:\wt")
         assert env["DOCK_NAME"] == "orch-x" and env["DOCK_CPUS"] == "6" and env["DOCK_BUILD"] == "/c/main/build"

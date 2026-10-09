@@ -41,8 +41,15 @@ sequenceDiagram
   Measured by speed, the game AI's units in melee run 9 % of the time, as the simulator's. Recordings
   keep the game's raw value (the replay uses it as the run order).
 - **Target** (`t` of our units, the network's `has_target`): the companion replaces the game's reading
-  with the simulator's (`exchange.engaged_targets`): a unit has a target exactly while it fights (the
-  engine's target if it is a present enemy, else the nearest one) or shoots (the engine's target).
+  with the simulator's (`exchange.engaged_targets`): a unit has a target exactly while it fights or shoots (the
+  engine's target). A fighting unit gets the simulator's: the nearest standing enemy it touches (the formations'
+  rectangles by the passport and the layout's width, edges overlapping 2.5 m, a lone man 1 m, 2 m more when either
+  is already in melee: `contact.reach_m`, `lord_reach_m`, `hold_m`); touching nobody by that geometry while the
+  game says melee, the engine's target if it is a present enemy, else the nearest one. Before, a fighting unit took
+  the engine's target, and in the game that is the attack order's target (kept ~25 s), not the enemy it fights: the
+  enemy's `ai_like` script "saw" its unit fighting our shooter it had sent it onto and kept the order (62 % of
+  re-orders held 5 s, the twin 7 %, `build/bench2/o_revert_p1.txt`). The network's side (`loop.Brain`) reads the
+  same input - fixed for both.
   The game's `t` is the engine's target: an attack order's target from the moment it is given (99 % of
   free units under an attack), none for most units fighting under a hold (74 %) or a move (100 %). In
   a gate: the same shift put into the simulator cut the network's trade against `ai_like` by 0.105

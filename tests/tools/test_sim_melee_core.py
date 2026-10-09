@@ -1,6 +1,8 @@
 """The melee core by the game's rules (docs/en/game/mechanics/melee.md, docs/en/training/simulator.md): the damage of
 a blow (armour roll, overkill, a lord's splash), the hit chance, the charge (attack order, run-up, its own clock,
 reflection), the melee clock and the formation spacing from the database. Needs torch (the container)."""
+import math
+
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -120,6 +122,7 @@ class TestSpacing:
         st.u["x"][0, 0], st.u["x"][0, H] = -float(depth[0, 0]) / 2, float(depth[0, H]) / 2
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
         contact = pw["enemy"] & (pw["gap"] <= 1.0)
+        st.u["contact_s"] = torch.full_like(st.u["men"], 1e4)     # long in melee: past the opening wave (melee.wave)
         _, _, _, F = melee.strikes(st.u, pw, contact, P, torch.zeros_like(st.u["men"]))
         length = min(float(front[0, 0]), float(front[0, H]))
         ff = P.sim["melee"]["fighting_files"]
@@ -188,9 +191,14 @@ class TestCharge:
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
         contact = pw["enemy"] & (pw["gap"] <= 1.0)
         now = melee.strikes(st.u, pw, contact, P, st.u["charge"])[0][0, 0, H]
+        wave = P.sim["melee"]["wave"]
+        t0 = min(float(st.u["contact_s"][0, 0]), float(st.u["contact_s"][0, H]))
         st.u["contact_s"] = torch.full_like(st.u["men"], 60.0)
         later = melee.strikes(st.u, pw, contact, P, st.u["charge"])[0][0, 0, H]
-        assert float(now) > 0 and float(now) == pytest.approx(float(later), rel=1e-5)
+        # no ramp up from less; the only change is the opening wave's men striking x (1 + amp exp(-t / tau_s))
+        w = lambda t: 1 + wave["amp"] * math.exp(-t / wave["tau_s"])
+        assert float(now) > 0 and float(now) >= float(later)
+        assert float(now) / float(later) == pytest.approx(w(t0) / w(60.0), rel=1e-4)
 
     def test_the_charge_bonus_weighs_in_full(self):               # 9
         st = scenario.build([army([(SPEAR, 0, 0, 90)], [(GENERAL, 6, 0, 270, True)])], P)

@@ -4,7 +4,9 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from tools import roster
+pytest.importorskip("matplotlib", reason="matplotlib: on the host, not in the training container")
+
+from tools import roster  # noqa: E402
 
 
 def capture(tmp_path, units):

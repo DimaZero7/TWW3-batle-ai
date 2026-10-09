@@ -72,6 +72,7 @@ class ScriptSide:
                 entry["men"] = float(u["men"])
             army["sides"][side]["units"].append(entry)
         self.st = sim_scenario.build([army], self.params, "cpu")
+        self.shape = exchange.formation_shape(doc, self.params)
         sim_abilities.set_rule(self.st.u, torch.tensor([[self.side == 1, self.side == 2]]))
         slot = sim_scenario.slots(army, self.st.N // 2)
         self.names = [u["n"] for u in doc["units"]]
@@ -89,7 +90,7 @@ class ScriptSide:
         """The simulator state for this decision (in place); returns the state dict in the names' order."""
         s = exchange.arrays(doc, self.names)
         for own in (1, 2):
-            exchange.engaged_targets(s, self.sides, own=own)
+            exchange.engaged_targets(s, self.sides, own=own, shape=self.shape)
         self.points = exchange.order_points(s, self.names, self.sides, self.given, self.points, own=self.side)
         self.other_points = exchange.order_points(s, self.names, self.sides, others or {}, self.other_points,
                                                   own=3 - self.side)

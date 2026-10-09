@@ -1,7 +1,11 @@
 """tools.analysis.obstacles on a synthetic map: clusters, gaps, corners, fence lines."""
 import numpy as np
 
-from tools.analysis import obstacles
+import pytest
+
+pytest.importorskip("scipy", reason="scipy: on the host, not in the training container")
+
+from tools.analysis import obstacles  # noqa: E402
 
 
 def synthetic():

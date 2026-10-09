@@ -2,11 +2,13 @@
 import json
 
 import pytest
-from lupa.lua51 import LuaRuntime
+pytest.importorskip("lupa", reason="the Lua runtime (lupa): on the host, not in the training container")
 
-from tools import build
-from tools import config as project
-from tools.pack import bundle, pfh5
+from lupa.lua51 import LuaRuntime  # noqa: E402
+
+from tools import build  # noqa: E402
+from tools import config as project  # noqa: E402
+from tools.pack import bundle, pfh5  # noqa: E402
 
 
 class TestPfh5:

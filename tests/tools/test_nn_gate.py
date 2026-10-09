@@ -61,6 +61,8 @@ class TestBuild:
             build.main(["nn-arena", "--army-swap"])
 
     def test_the_build_reads_a_battle_file_outside_scenarios(self, tmp_path, monkeypatch):
+        pytest.importorskip("lupa", reason="the build's Lua syntax check (tools/build.py check_syntax) needs lupa: on "
+                                           "the host, not in the training container")
         monkeypatch.setattr(project, "BUILD", tmp_path)
         xml = tmp_path / "random_1.xml"
         xml.write_text("<battle/>", encoding="utf-8")

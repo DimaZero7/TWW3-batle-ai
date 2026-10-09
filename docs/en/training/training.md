@@ -250,7 +250,7 @@ standing in front of their line; 120 s after the fight they were 43 m in front) 
 ran from one of our units for 31 s). Left: the AI lord cuts off less often than in the game (0.21 against 0.37), as
 he gets into a fight himself earlier; `ai_like` loses more gold (0.74 against 0.62 in the game).
 
-The random part is an integer hash of (battle row, unit slot, enemy slot): the same every step,
+The random part is an integer hash of (battle id, unit slot, enemy slot; the battle id is its row in the batch it was built in, the state's `row`: the same when the batch is compacted or the battle restarts from a bank, so a battle draws the same numbers): the same every step,
 nothing to replay. Fitted against the game on the same 8 gate battle starts (side 2's behaviour;
 game AI / `ai_like` with these rules): missile units' time in melee 0.11 / 0.10; melee target
 distance (median) 91 / 93 m, the nearest enemy taken 0.48 / 0.49; new melee targets a battle 27 /

@@ -927,9 +927,13 @@ class TestProperties:
         a = st.clone()
         H = st.N // 2
         swap = torch.cat([torch.arange(H, 2 * H), torch.arange(0, H)])
+        from tools.nn.sim.state import HISTORY
         b = st.clone()
         for k, v in b.u.items():
-            b.u[k] = v[:, swap]
+            if k in HISTORY:                         # [B, K * N]: K steps of N slots
+                b.u[k] = v.reshape(v.shape[0], -1, st.N)[:, :, swap].reshape(v.shape[0], -1)
+            else:
+                b.u[k] = v[:, swap]
         b.u["side"] = torch.where(b.u["side"] > 0, 3 - b.u["side"], b.u["side"])
         b.attacker = 3 - a.attacker
         P = load()

@@ -55,7 +55,7 @@ def flee_goal(u, pw, alive, bounds, near_m=0.0):
 
 def dodge_goal(u, pw, alive, fx, fz, within_m, deg, bounds):
     """The flee goal (fx, fz) of a routing formation with a standing enemy formation within within_m: the line from
-    the nearest such enemy to the unit turned by deg, to a side fixed per (battle row, unit) (an integer hash);
+    the nearest such enemy to the unit turned by deg, to a side fixed per (battle id - state `row` -, unit) (an integer hash);
     others keep (fx, fz)."""
     enemy = pw["enemy"] & alive[:, None, :] & ~u["r"][:, None, :] & (u["men0"][:, None, :] > 1)
     d = torch.where(enemy, pw["dist"], torch.full_like(pw["dist"], 1e9))
@@ -66,7 +66,7 @@ def dodge_goal(u, pw, alive, fx, fz, within_m, deg, bounds):
     n = torch.sqrt(ax * ax + az * az).clamp(min=1e-6)
     ax, az = ax / n, az / n
     B, N = u["x"].shape
-    b = torch.arange(B, device=u["x"].device)[:, None]
+    b = u["row"][:, :1].long() if "row" in u else torch.arange(B, device=u["x"].device)[:, None]
     i = torch.arange(N, device=u["x"].device)[None, :]
     h = (b * 1000003 + i * 7919 + 55511) & 0x7FFFFFFF
     h = ((h ^ (h >> 13)) * 1274126177) & 0x7FFFFFFF

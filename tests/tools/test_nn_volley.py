@@ -59,8 +59,9 @@ def test_the_simulator_and_the_companion_see_the_same_value_on_one_trajectory(mo
     pairs = [p for p in D.battles(D.load(["kiting"])["kiting"], range(16)) if p[1] == 1]
     runners = [sum(u["key"].endswith("night_runners_1") for u in p[0]["sides"][1]["units"]) for p in pairs]
     st = scenario.build([pairs[int(np.argmax(runners))][0]])          # one battle, ours side 1, two units if any
-    shooters = [i for i, k in enumerate(st.keys[0]) if k and st.u["side"][0, i] == 1]
-    assert shooters and all(st.u["range"][0, i] > 0 for i in shooters)
+    # our missile units (the drill's side may hold others too - a lord: their volley input is not this test's)
+    shooters = [i for i, k in enumerate(st.keys[0]) if k and st.u["side"][0, i] == 1 and st.u["range"][0, i] > 0]
+    assert shooters
     live = live_setup(st)
     # Projectiles left per simulator step (0.5 s): a volley at 2.5 s (between two decisions), a straggler
     # at 4 s, then 14 s and 20.5 s; the second unit (if any) shoots once at 6 s. At the decisions (whole

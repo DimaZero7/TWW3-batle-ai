@@ -82,10 +82,19 @@ def army_collapse(u, params):
     return beaten.gather(1, (u["side"] - 1).clamp(min=0)) & present
 
 
-def _hash_uniform(B, N, k, device, salt=86413):
-    """[B, N] a uniform (0, 1) draw per (battle row, unit, period k [B], an integer): an integer hash, the same every
-    call for the same inputs (opponents.tick_uniform's; here so the simulator stays free of torch's generators)."""
-    b = torch.arange(B, device=device)[:, None]
+def battle_ids(u):
+    """[B, 1] each battle's id for the hash draws: state `row` (fixed when the batch is built, carried through every
+    narrowing), else the row now."""
+    if "row" in u:
+        return u["row"][:, :1].long()
+    return torch.arange(u["side"].shape[0], device=u["side"].device)[:, None]
+
+
+def _hash_uniform(B, N, k, device, salt=86413, ids=None):
+    """[B, N] a uniform (0, 1) draw per (battle id, unit, period k [B], an integer): an integer hash, the same every
+    call for the same inputs (opponents.tick_uniform's; here so the simulator stays free of torch's generators).
+    ids [B, 1]: the battles' ids (battle_ids; missing: the rows)."""
+    b = torch.arange(B, device=device)[:, None] if ids is None else ids
     i = torch.arange(N, device=device)[None, :]
     h = (b * 1000003 + i * 7919 + k.long()[:, None] * 104729 + salt) & 0x7FFFFFFF
     h = ((h ^ (h >> 13)) * 1274126177) & 0x7FFFFFFF
@@ -287,7 +296,7 @@ def step(u, ctx, params, dt):
         # The rally as the game's measured process (morale.rally_hazard, config/nn/sim.json rally_hazard_why): a
         # router past rally_after_s with morale above 0 rallies in a second with a chance set by the nearest standing
         # enemy's centre distance (bins edges_m, chances p_per_s), instead of the 95 m gate: a fixed hash draw per
-        # (battle row, unit, step) - nothing random to replay, as opponents.tick_uniform. The first bin is any living
+        # (battle id, unit, step) - nothing random to replay, as opponents.tick_uniform. The first bin is any living
         # enemy (routing too: rally_any_enemy) within rally_free_m - the game's rare rally there (p_per_s[0]) - the
         # rest by the nearest standing enemy beyond it; the table is measured on routers with morale above 0, the
         # condition it is applied on.
@@ -298,7 +307,8 @@ def step(u, ctx, params, dt):
             p_s = torch.where(fd >= float(edge), torch.full_like(fd, float(probs[k + 1])), p_s)
         p_s = torch.where(ctx["enemy_near"], torch.full_like(fd, float(probs[0])), p_s)
         p_step = 1.0 - (1.0 - p_s) ** dt
-        draw = _hash_uniform(fd.shape[0], fd.shape[1], torch.round(ctx["t"] / dt).long(), fd.device)
+        draw = _hash_uniform(fd.shape[0], fd.shape[1], torch.round(ctx["t"] / dt).long(), fd.device,
+                             ids=battle_ids(u))
         not_beaten = ~ctx.get("collapse", torch.zeros_like(alive))
         rally = routing & ~u["s"] & ready & alive & not_beaten & (draw < p_step)
     wait_s = float(cal.get("rally_wait_s", 0.0))

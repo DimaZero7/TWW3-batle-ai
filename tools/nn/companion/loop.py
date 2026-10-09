@@ -58,7 +58,7 @@ class Brain:
         self.before = (doc["batch"], doc["move"], dict(self.given))
         state = exchange.arrays(doc, b.names, b.slots)
         self.moved = exchange.running_by_speed(state, b.walk, self.moved)
-        exchange.engaged_targets(state, b.side)
+        exchange.engaged_targets(state, b.side, shape=b.shape)
         self.points = exchange.order_points(state, b.names, b.side, self.given, self.points)
         obs, self.memory = ob.observe(state, b.setup, SIDE, self.memory)
         orders, self.h, _, _ = decide.act(self.actor, obs, b.setup, self.h, self.greedy, self.temperature,

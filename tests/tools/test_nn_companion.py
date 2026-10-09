@@ -373,3 +373,45 @@ def test_units_that_take_no_orders_count_as_out_not_hold():
     assert "own_b" not in text                                  # no line: the network's HOLD is a filler
     assert exchange.parse_orders(text)["orders"] == {"own_a": {"kind": "hold"},
                                                      "own_c": {"kind": "attack", "target": "enemy_a", "run": True}}
+
+
+def test_a_unit_in_melee_has_the_enemy_it_touches_not_the_orders_target():
+    # The game's t of a unit in melee is its attack order's target (kept ~25 s), not the enemy it fights; the
+    # simulator's target in melee is the nearest standing enemy it touches (battle.py opp; build/bench2/o_revert_p1).
+    import math
+    doc = state_doc()
+    doc["units"] = [unit("own_spear_1", 1, SPEAR, 0.0, m=True, t="enemy_far"),
+                    unit("enemy_near", 2, SPEAR, 0.0, m=True, b=270), unit("enemy_far", 2, SPEAR, 60.0, b=270)]
+    b = exchange.battle(doc)
+    sh = b.shape
+    h, v = sh["sp_h"][0], sh["sp_v"][0]
+    files = min(max(math.floor(sh["width"][0] / h + 1e-4), 1), 100)
+    depth = math.ceil(100 / files) * v
+    for g, touches in ((-1.0, True), (-0.4, False)):              # edges within reach_m + hold_m (-2.5 + 2 in melee)
+        doc["units"][1]["x"] = depth + g                           # two equal formations face to face: gap = d - depth
+        s = exchange.arrays(doc, b.names)
+        assert bool(exchange.touching(s, dict(sh, side=b.side))[0, 1]) is touches
+        exchange.engaged_targets(s, b.side, shape=sh)
+        assert s["target"][0, 0] == (1 if touches else 2)          # not touching: the engine's target, as before
+    doc["units"][1]["x"] = depth - 1.0
+    doc["units"][1]["r"] = True                                    # a routing enemy is nobody's opponent
+    s = exchange.arrays(doc, b.names)
+    exchange.engaged_targets(s, b.side, shape=sh)
+    assert s["target"][0, 0] == 2
+    for u in doc["units"]:
+        u["m"] = False                                             # out of melee the hold-on distance is gone
+    doc["units"][1].update(r=False, x=depth - 1.0)
+    s = exchange.arrays(doc, b.names)
+    assert not exchange.touching(s, dict(sh, side=b.side))[0, 1]
+    doc["units"][1]["x"] = depth - 3.0
+    s = exchange.arrays(doc, b.names)
+    assert exchange.touching(s, dict(sh, side=b.side))[0, 1]
+
+
+def test_the_network_and_the_enemy_script_read_the_melee_target_by_contact():
+    # both sides' readers pass the formations: the network's companion (loop.Brain) and the script's (script.py)
+    # (the sources read as text: both modules need torch, absent in the host's .venv)
+    from pathlib import Path
+    root = Path(exchange.__file__).parent
+    assert "engaged_targets(state, b.side, shape=b.shape)" in (root / "loop.py").read_text(encoding="utf-8")
+    assert "engaged_targets(s, self.sides, own=own, shape=self.shape)" in (root / "script.py").read_text(encoding="utf-8")
