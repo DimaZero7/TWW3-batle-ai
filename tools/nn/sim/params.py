@@ -139,6 +139,10 @@ class Params:
             "height": u.get("height_m", 1.8),
             "small_arms": cat in SMALL_ARMS if missile else False,
             "aim_s": ms["aim_s"].get(cat, ms["aim_s_other"]) if missile else 0,
+            # by category, measured (missile.order_quiet_why): arcing fire keeps quiet after a new order or target,
+            # whatever its reload; direct fire and throwing weapons lose nothing (-1: the rule of all)
+            "quiet_s": float((ms.get("order_quiet_cat_s") or {}).get(cat, 0.0)) if missile else 0.0,
+            "rt_s": float((ms.get("retarget_cat_s") or {}).get(cat, -1.0)) if missile else -1.0,
             "friendly_fire": ms["friendly_fire"].get(cat, ms["friendly_fire_other"]) if missile else 0,
             "morale_bonus": self.sim["morale"]["faction_bonus"].get(faction, 0),
             "rout_death_s": (self.sim["morale"]["lord_fall"].get("rout_death_s") or {}).get(faction, 0),

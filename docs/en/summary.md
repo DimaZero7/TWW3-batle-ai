@@ -81,7 +81,9 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
   strikes only its own target for 24 s; an unchased leaver is held 2 s; the chase has no charge sprint.
 - **Shooting by the game's rules:** range centre to centre, a fire arc per man, the database's scatter
   model with no fitting, spill onto neighbours, fire past own men by the bullet's arc, firing on the move
-  (militia, throwing stars); shooters in melee strike weakly, as in the game.
+  (militia, throwing stars); shooters in melee strike weakly, as in the game; a new order or target: arcing fire (arrows, bolts,
+  slings) is silent 8.5 s whatever the reload, each order restarting the window; handguns and stars fire at once
+  (probes `retarget`, `retarget2`, `retarget3`).
 - **Morale by the game's rules:** casualty windows 4 / 60 s, "under fire", flank / rear, "flanks secure",
   charge, outnumbering, "losing the fight" (−3 / −8 by the combat ratio, as in the database), a strong
   enemy, the lord's death (−16 for 45 s, then −10), shattering of a unit and of the army; the rally is the

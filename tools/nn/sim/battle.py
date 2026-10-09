@@ -79,9 +79,14 @@ def step(st, orders, params=None, dt=None):
     u["oz"] = torch.where(take & point, orders.z, u["oz"])
     # A new order (another kind, or another attack target) makes a shooter aim again (missile.aim_reset_on_order;
     # measured: a firing unit given one in the game shoots its next 10 s at 0.6-0.75 of the rate of one given none).
+    # By category, measured (missile.order_quiet_why): direct fire and throwing weapons lose nothing (rt_s 0: loaded men
+    # fire at the new target at once); arcing fire already aiming keeps quiet_s (8.5 s) without a shot from each new
+    # order whatever its reload (the window does not hide in it), then fires by its reload.
+    changed = (kind != u["order_kind"]) | (tgt != u["order_target"])
     if cal["missile"].get("aim_reset_on_order"):
-        changed = (kind != u["order_kind"]) | (tgt != u["order_target"])
-        u["aim"] = torch.where(changed, torch.zeros_like(u["aim"]), u["aim"])
+        own_rt = u["rt_s"] >= 0
+        u["aim"] = torch.where(changed, torch.where(own_rt, torch.minimum(u["aim"], u["aim_s"] - u["rt_s"]),
+                                                    torch.zeros_like(u["aim"])), u["aim"])
     u["order_kind"], u["order_target"], u["order_run"] = kind, tgt, run
     if "order_s" in u:
         # the order's clock (contact.fresh_incidental, melee.py): a new order given in melee starts it at 0, out of
@@ -329,14 +334,23 @@ def step(st, orders, params=None, dt=None):
     if retarget_s:
         from_none = bool(ms_cal.get("retarget_from_none"))
         switched = ready & new_tgt & ((u["aim_tgt"] >= 0) | from_none)
-        u["aim"] = torch.where(switched, torch.minimum(u["aim"], u["aim_s"] - float(retarget_s)), u["aim"])
+        # (a unit's own cost, missile.retarget_cat_s, for a switch from a target it had; taking one from none keeps
+        # retarget_s: the handgunners' first shot from the go 2.5-4 s, as before)
+        own_rt = (u["rt_s"] >= 0) & (u["aim_tgt"] >= 0)
+        cost = torch.where(own_rt, u["rt_s"], torch.full_like(u["rt_s"], float(retarget_s)))
+        u["aim"] = torch.where(switched, torch.minimum(u["aim"], u["aim_s"] - cost), u["aim"])
+    # the quiet window (missile.order_quiet_cat_s): a new order or a new target to a unit already aiming starts it again
+    hush = (u["quiet_s"] > 0) & (u["aim_tgt"] >= 0) & (changed | (ready & new_tgt))
+    u["quiet"] = torch.where(hush, u["quiet_s"], u["quiet"])
     reaim = bool(ms_cal.get("reaim"))
     if reaim:
         # a new target: every man has a living target man again
         u["late"] = torch.where(new_tgt | (aim_at < 0), torch.zeros_like(u["late"]), u["late"])
     u["aim_tgt"] = torch.where(ready, aim_at, torch.full_like(aim_at, -1))
     u["aim"] = torch.where(ready & ~turning, u["aim"] + dt, torch.zeros_like(u["aim"]))
-    can = ready & ~turning & (u["aim"] >= u["aim_s"])
+    quiet = u["quiet"] > 1e-6
+    u["quiet"] = (u["quiet"] - dt).clamp(min=0)
+    can = ready & ~turning & (u["aim"] >= u["aim_s"]) & ~quiet
     m_target = torch.where(can, aim_at, torch.full_like(aim_at, -1))
     # direct fire needs a clear line past friends (missile.py clear_shot); arcing fire: unchanged
     m_target, clear, catch = missile.clear_shot(u, pw, m_target, can, tgt, kind == O.ATTACK, params, with_catch=True)
@@ -382,7 +396,7 @@ def step(st, orders, params=None, dt=None):
     # with a target in range and arc, 4.5 s before the first shot (ammo drop), and a new order hardly put it out
     # (missile.fire_flag_why). The shots, the aim clock and everything inside the step keep `firing`.
     if ms_cal.get("fire_flag_aiming"):
-        aiming = ready & ~turning & (aim_at >= 0) & (u["aim"] < u["aim_s"]) & ~firing
+        aiming = ready & ~turning & (aim_at >= 0) & ((u["aim"] < u["aim_s"]) | quiet) & ~firing
         shown, shown_tgt = firing | aiming, torch.where(firing, m_target, aim_at)
     else:
         shown, shown_tgt = firing, m_target

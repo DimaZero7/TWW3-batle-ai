@@ -120,6 +120,11 @@ STATIC = {
     "height": ("f", "a man's height, m (the shadow a falling projectile hits)"),
     "small_arms": ("b", "small-arms projectile (arrow, musket, sling, javelin, axe): shields block it (missile.py)"),
     "aim_s": ("f", "first shot after halting, s (config/nn/sim.json)"),
+    "quiet_s": ("f", "seconds without a shot after a new order or target to a shooter already aiming, whatever its "
+                     "reload (missile.order_quiet_cat_s by category: arcing arrows, bolts, slings 8.5; 0 none)"),
+    "rt_s": ("f", "seconds a new order or a new target takes off the aim clock (missile.retarget_cat_s by category: "
+                  "musket - handguns, pistols, throwing stars - 0; -1: the rule of all, aim_s on an order, retarget_s "
+                  "on a target)"),
     "friendly_fire": ("f", "share of its hits aimed at a unit in melee that land on its own side (config/nn/sim.json)"),
     "morale_bonus": ("f", "morale points at the start beyond leadership (config/nn/sim.json)"),
     "rout_death_s": ("f", "a lord of this faction who routs counts as killed this long into his rout (the "
@@ -161,6 +166,7 @@ INTERNAL = {
                     "starts, cleared when the clock resets (battle.py: the first strike; melee.py: men gather round "
                     "a lord only when he ran in)"),
     "aim": ("f", "seconds standing still able to shoot"),
+    "quiet": ("f", "seconds left of the quiet window after a new order or target (quiet_s; no shot while > 0)"),
     "aim_tgt": ("i", "the enemy it aimed at last step (-1 none): a change makes it wait missile.retarget_s"),
     "turn_on": ("b", "a standing shooter turning to its target (missile.stand_fire_arc_deg starts it, "
                      "missile.turn_done_deg ends it)"),

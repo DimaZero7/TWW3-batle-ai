@@ -1882,6 +1882,62 @@ class TestSecondWave:
             battle.step(s, o, params)
             assert (float(s.u["aim"][0, 0]) == pytest.approx(P.dt)) == reset
 
+    @staticmethod
+    def _retarget_lane(key, params):
+        """A shooter 100 m from two skavenslave units; returns (state, H, step(order target or None) -> shots)."""
+        st = scenario.build([army([(key, -100, 0, 90)], [(SLAVE, 0, -20, 270), (SLAVE, 0, 40, 270)])], params)
+        H = st.N // 2
+
+        def step(target=None):
+            o = replay.hold(st)
+            o.kind[:] = O.KEEP
+            if target is not None:
+                o.kind[0, 0], o.target[0, 0] = O.ATTACK, H + target
+            before = float(st.u["a"][0, 0])
+            battle.step(st, o, params)
+            return before - float(st.u["a"][0, 0])
+        return st, H, step
+
+    @pytest.mark.parametrize("key", ["wh_main_emp_inf_crossbowmen", ARCHER, SLINGER])
+    def test_arcing_fire_keeps_quiet_after_each_new_order(self, key):
+        """missile.order_quiet_cat_s (the probes retarget / retarget2 / retarget3, 09.10.2026): arcing fire (bolts,
+        arrows, slings) already aiming fires nothing 8.5 s after each new order whatever its reload, a second order
+        restarts the window, then those loaded fire; the first order from the go has no window; off: the old aim reset
+        hides in the reload."""
+        quiet = P.sim["missile"]["order_quiet_cat_s"][P.units[key]["missile"]["category"]]
+        assert P.static(key)["quiet_s"] == quiet == 8.5
+        n = int(round(quiet / P.dt))
+        for params, window in ((P, True), (P.with_cal("missile", order_quiet_cat_s={}), False)):
+            st, H, step = self._retarget_lane(key, params)
+            first = [step(0 if k == 0 else None) for k in range(16)]
+            volley = next(k for k, x in enumerate(first) if x > 0)
+            assert volley * P.dt < quiet                                         # the go: no window
+            reload_s = float(st.u["reload"][0, 0])
+            for _ in range(int(round((reload_s - 2.0) / P.dt)) - (16 - volley)):    # nearly reloaded
+                assert step() == 0
+            shots = [step(1)] + [step() for _ in range(4)]                      # a new target; again 2.5 s later
+            shots += [step(0)] + [step() for _ in range(n + 4)]
+            if window:
+                assert sum(shots[:5 + n]) == 0 and shots[5 + n] > 0.8 * float(st.u["men"][0, 0])
+            else:
+                assert sum(shots[:5 + n]) > 0
+
+    def test_handgunners_lose_no_aim_on_a_new_target(self):
+        """missile.retarget_cat_s (the probes retarget / retarget2, 09.10.2026): a new order or a new target takes nothing
+        off the aim of direct fire and throwing weapons (loaded handgunners fired at the new target 0.5 s after the
+        order, stars lost nothing); off: the rule of all."""
+        hg = "wh_main_emp_inf_handgunners"
+        assert P.static(hg)["rt_s"] == 0 and P.static(ARCHER)["rt_s"] == -1 and P.static(hg)["quiet_s"] == 0
+        assert P.static("wh2_main_skv_inf_night_runners_0")["rt_s"] == 0           # throwing stars too
+        for params, keep in ((P, True), (P.with_cal("missile", retarget_cat_s={}), False)):
+            st, H, step = self._retarget_lane(hg, params)
+            for _ in range(12):
+                step()
+            aim = float(st.u["aim"][0, 0])
+            assert aim > float(st.u["aim_s"][0, 0])
+            step(1)
+            assert (float(st.u["aim"][0, 0]) >= float(st.u["aim_s"][0, 0])) == keep
+
     def test_greatswords_cut_through_armour(self):
         """Armour-piercing greatswords (10 + 25, bonus 14 v infantry) beat armoured stormvermin faster than
         swordsmen (21 + 7) of about the same attack do."""

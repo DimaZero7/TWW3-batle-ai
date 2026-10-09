@@ -14,7 +14,9 @@ Volleys: the men reload all the time (moving too) and the unit shoots once missi
 (1: all) are loaded, so it fires whole-unit volleys one reload apart (measured: archers on the range,
 build/archer-range/runs 28.09.2026, ~80 of 90 arrows within 1 s of the first, then ~10 s nothing; in
 battle a halt gives about one volley in the next 12 s, not a volley and then the steady rate at once).
-A new order (another kind or another attack target) makes it aim again (missile.aim_reset_on_order).
+A new order (another kind or another attack target) makes it aim again (missile.aim_reset_on_order); by category
+(missile.order_quiet_why): arcing fire (arrows, bolts, slings) already aiming then keeps 8.5 s without a shot whatever
+its reload, each new order or target starting it again; direct fire and throwing weapons lose nothing.
 
     hits   = shots x hit chance (hit_chance: the database's spread and the target's men; units fall back to
              hit_rate x distance factor with missile.accuracy.units "rates"); aimed
