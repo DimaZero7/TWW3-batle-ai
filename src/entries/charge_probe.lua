@@ -42,7 +42,8 @@
 -- routing mob's shape); the sample rows carry r (routing) and sh (shattered) too. lane.rout_at_s (optional): a
 -- t_morale target not routed that long after the first contact is routed by script (morale_behavior_rout; emitted as
 -- probe_phase 'rout_forced'). lane.extras (optional) {{name, dx, dz, fire}}: units of the attacker's side placed
--- (dx, dz) from the target's centre facing the attacker's way, halted, fearless, never ordered; with fire, fire at will.
+-- (dx, dz) from the target's centre facing the attacker's way, halted, fearless, never ordered; with fire, fire at will;
+-- sampled as the list 'e' in probe_sample (unit rows) and probe_men (soldier places after the rout).
 -- Every tick_ms 'probe_sample': per running lane both units' (and the lord's) men, health
 -- (CCO HealthValue), melee flag, place, bearing, moving / moving fast, kills, fatigue, status keys
 -- (CCO StatusList: braced, melee...). Every men_ms while the two are within men_near_m of each
@@ -332,6 +333,10 @@ function M.main(bm, config, globals)
                 end
                 local r = {lane = lane.name, t = now - lane.t0, a = unit_row(lane.a.unit), tg = unit_row(lane.t.unit)}
                 if lane.lord then r.l = unit_row(state.units[lane.lord.name].unit) end
+                if lane.extras and #lane.extras > 0 then
+                    r.e = {}
+                    for _, e in ipairs(lane.extras) do r.e[#r.e + 1] = unit_row(state.units[e.name].unit) end
+                end
                 if lane.t2 then r.t2 = unit_row(lane.t2.unit) end
                 rows[#rows + 1] = r
                 if beaten(lane.a.unit) or beaten(lane.t.unit) then
@@ -359,8 +364,12 @@ function M.main(bm, config, globals)
             if lane.running and lane.rout_ms and config.men_after_rout_s then
                 -- the routing mob: both units' men for men_after_rout_s after the rout, wherever the enemy is
                 if now - lane.rout_ms <= config.men_after_rout_s * 1000 then
-                    rows[#rows + 1] = {lane = lane.name, t = now - lane.t0, a = soldiers(lane.a.unit),
-                        tg = soldiers(lane.t.unit)}
+                    local row = {lane = lane.name, t = now - lane.t0, a = soldiers(lane.a.unit), tg = soldiers(lane.t.unit)}
+                    if lane.extras and #lane.extras > 0 then
+                        row.e = {}
+                        for _, e in ipairs(lane.extras) do row.e[#row.e + 1] = soldiers(state.units[e.name].unit) end
+                    end
+                    rows[#rows + 1] = row
                 end
             elseif lane.running and lane.men_all_s then
                 if now - lane.t0 <= lane.men_all_s * 1000 then

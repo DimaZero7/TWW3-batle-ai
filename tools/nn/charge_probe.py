@@ -498,10 +498,14 @@ def load_run(run_dir):
             for x in r["lanes"]:
                 if x["lane"] in lanes:
                     lanes[x["lane"]]["samples"].append((x["t"] / 1000, x["a"], x["tg"], x.get("l")))
+                    if x.get("e"):
+                        lanes[x["lane"]].setdefault("extras", []).append((x["t"] / 1000, x["e"]))
         elif ev == "probe_men":
             for x in r["lanes"]:
                 if x["lane"] in lanes:
                     lanes[x["lane"]]["men"].append((x["t"] / 1000, x.get("a") or [], x.get("tg") or []))
+                    if x.get("e"):
+                        lanes[x["lane"]].setdefault("extra_men", []).append((x["t"] / 1000, x["e"]))
         elif ev == "probe_contact":
             lanes[r["lane"]]["contacts"][r["n"]] = r["t"] / 1000
         elif ev == "probe_lane_end":
@@ -785,7 +789,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
             # rout_at_s: not routed that long after the contact, it is routed by script (morale_behavior_rout)
             if (sp.get("t_morale") and sp.get("rout_at_s") and st_["rout"][b] is None and c is not None
                     and t - c >= sp["rout_at_s"] and not r_t[b]):
-                st.u["morale"][b, T] = -60.0
+                st.u["morale"][b, T] = -10.0                    # below 0: a rout (the broken floor -50 would shatter)
                 st_["phases"][b].append({"phase": "rout_forced", "t": t * 1000})
             if sp.get("t_morale") and st_["rout"][b] is None and r_t[b]:
                 st_["rout"][b] = t - params.dt

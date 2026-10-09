@@ -1153,6 +1153,10 @@ class TestChargeProbe:
         phases = [r["phase"] for r in rows if r["event"] == "probe_phase"]
         assert phases == ["rout_forced", "rout"]
         assert {r["lane"]: r["why"] for r in rows if r["event"] == "probe_lane_end"} == {"L1": "after_rout"}
+        sample = next(r for r in rows if r["event"] == "probe_sample")
+        assert len(sample["lanes"][0]["e"]) == 1 and "men" in sample["lanes"][0]["e"][0]      # the extra's unit row
+        men = [x for r in rows if r["event"] == "probe_men" for x in r["lanes"] if x.get("e")]
+        assert men and len(men[0]["e"]) == 1
 
         L = lua.eval("""require('entries.charge_probe').layout({x = 10, z = 0, gap_m = 80, a_depth = 10,
             t_depth = 12, target_mode = 'rear'})""")
