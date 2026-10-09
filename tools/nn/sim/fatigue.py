@@ -6,9 +6,12 @@ shooting +18, running +4, walking -1, standing ready -7, idle -18; thresholds fr
 winded 6600, tired 12600, very tired 18000, exhausted 27000 (max 30000). The calibration
 (config/nn/sim.json fatigue.calibration, ON) runs 10 ticks/s, freezes dead and departed slots and
 charges melee only to a unit with an attack order: the database's +19 a tick for a single entity, 13.7 for a
-formation (measured; a formation's men are not tired one by one - build/movelords); charging (+34) only in the first calibration.charge_s (2) s after a charge's first blow
-(battle.py, every unit); a unit in melee without one moves or rests. A move costs by its order's run flag (run
-+4, walk -1), a routing unit +4; shooting 7.5 (fitted on the 204 recordings); a standing unit
+formation (measured; a formation's men are not tired one by one - build/movelords); charging (+34) while the unit
+sprints at its target under the attack order, up to the contact (calibration.charging "sprint", battle.py); a
+formation in melee without the order stands ready (-7), under a move / withdraw order -2.5, a missile formation in
+melee -1.2 with the attack order / -4.9 without (measured, build/fatigue2); a single entity without the order moves or
+rests. A move costs by its order's run flag (run +4, walk -1), a routing unit +4; shooting 11.4 a tick on the seconds
+it shoots (measured, build/fatigue2; aiming stands ready); a standing unit
 rests at idle with no standing enemy within ready_enemy_m, else stands ready. OFF is the legacy
 model: 5 ticks/s, ready recovery, every melee +19. Tired states cost morale (morale.py) and scale
 speed, melee attack and defence, armour, charge bonus, AP damage and reload by the database's
@@ -24,8 +27,10 @@ def step(u, activity, params, dt):
     """Activity bools [B, N], highest priority charging > melee > shooting > run > walk > idle;
     the rest stands ready. The calibration also reads idle, active (alive and on the field),
     attack (an attack order), single (a single entity), run_order (the order's run flag),
-    enemy_near (a standing enemy within calibration.ready_enemy_m) and routing; a missing one means:
-    not idle, active, attacking, a formation, running by speed, no enemy near, not routing. OFF keeps the legacy clock and
+    enemy_near (a standing enemy within calibration.ready_enemy_m), routing, move_order (a move or withdraw order)
+    and shooter (a missile unit); a missing one means: not idle, active, attacking, a formation, running by speed,
+    no enemy near, not routing, no move order, not a shooter. `charging` is the caller's: with calibration.charging
+    "sprint" the charge sprint up to the contact (battle.py). OFF keeps the legacy clock and
     rates, inactive slots included.
     """
     F = params.fatigue
@@ -62,7 +67,24 @@ def step(u, activity, params, dt):
         combat = torch.where(single, torch.full_like(rate, float(trial.get("single_combat", F["combat"]))),
                              torch.full_like(rate, float(trial["multi_combat"])))
         rest = torch.where(moving, move_rate, torch.full_like(rate, F["idle"]))
-        rate = torch.where(melee, torch.where(attack, combat, rest), rate)
+        form = ~single
+        if "melee_hold" in trial:
+            # A formation in melee without the attack order (89 % of it under hold, the engine giving it no target)
+            # stands ready: the database's ready -7 (calibration.melee_hold "ready"; fatigue.calibration.why).
+            hold = trial["melee_hold"]
+            hold = F["ready"] if hold == "ready" else float(hold)
+            rest = torch.where(form, torch.full_like(rate, hold), rest)
+        if "melee_move" in trial and "move_order" in activity:
+            # ... under a move or withdraw order: the measured -2.5 a tick (calibration.melee_move)
+            rest = torch.where(form & activity["move_order"], torch.full_like(rate, float(trial["melee_move"])), rest)
+        melee_rate = torch.where(attack, combat, rest)
+        if "shooter_melee" in trial and "shooter" in activity:
+            # A missile formation in melee: measured, with the attack order / with another (calibration.shooter_melee)
+            with_attack, other = (float(v) for v in trial["shooter_melee"])
+            melee_rate = torch.where(form & activity["shooter"],
+                                     torch.where(attack, torch.full_like(rate, with_attack), torch.full_like(rate, other)),
+                                     melee_rate)
+        rate = torch.where(melee, melee_rate, rate)
         charging = charging & attack
     else:
         rate = torch.where(melee, F["combat"], rate)

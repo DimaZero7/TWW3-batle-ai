@@ -91,7 +91,8 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
   only when none stands ([where a router runs](training/simulator.md#where-a-router-runs)).
 - **Lords:** as fragile as in the game (no own aura, always "losing" in melee), a blow split over 4 men,
   the lord duel by the game's formula, abilities (the game's AI uses them by the measured rule), "Wounds".
-- **Fatigue** by the database (10 ticks a second, melee tires under an attack order), units' innate
+- **Fatigue** by the database (10 ticks a second, melee tires under an attack order; the charge +34 on the sprint in,
+  no surcharge after the blow; in melee without an attack — ready; shooting 11.4 — measured), units' innate
   effects, turning at the database's turn rate, formation by the database's template.
 - **Not modelled:** terrain, forest, visibility, cavalry, monsters, magic, flight, artillery, experience.
 

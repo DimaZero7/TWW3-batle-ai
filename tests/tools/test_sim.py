@@ -118,10 +118,10 @@ class TestFunctions:
         assert all(torch.equal(st.u[k], v) for k, v in before.items())
 
     @pytest.mark.parametrize("name,points", [("idle", -18), ("ready", -7), ("walking", -1),
-                                              ("running", 4), ("shooting", 7.5), ("melee", 13.7),
+                                              ("running", 4), ("shooting", 11.4), ("melee", 13.7),
                                               ("charging", 34)])
     def test_fatigue_tiring_and_recovery_use_calibrated_ticks(self, name, points):
-        # Database points at 10 ticks/s; shooting and a formation's melee are fitted.
+        # Database points at 10 ticks/s; shooting and a formation's melee are measured (build/fatigue2).
         u = {"fatigue": torch.tensor([15000.0]), "fat": torch.zeros(1)}
         activity = {k: torch.tensor([k == name]) for k in
                     ("idle", "walking", "running", "shooting", "melee", "charging")}
@@ -2083,19 +2083,32 @@ def melee_activity(n, **flags):
 
 
 def test_melee_tires_only_under_an_attack_order():
-    # single entity the database's +19, formation +13.7 a tick with the order; without it walking -1 or idle -18
-    u = {"fatigue": torch.full((4,), 15000.), "fat": torch.zeros(4)}
-    activity = melee_activity(4, attack=[True, True, False, False], single=[True, False, True, False],
-                              walking=[False, False, True, False])
+    # single entity the database's +19, formation +13.7 a tick with the order; without it a lord walks -1 or rests
+    # -18, a formation stands ready -7 (the database's ready: calibration.melee_hold)
+    u = {"fatigue": torch.full((5,), 15000.), "fat": torch.zeros(5)}
+    activity = melee_activity(5, attack=[True, True, False, False, False], single=[True, False, True, True, False],
+                              walking=[False, False, True, False, True])
     fatigue.step(u, activity, calibrated_fatigue(), 1.)
-    assert u["fatigue"].tolist() == pytest.approx([15190., 15137., 14990., 14820.])
+    assert u["fatigue"].tolist() == pytest.approx([15190., 15137., 14990., 14820., 14930.])
+
+
+def test_a_formation_in_melee_without_the_attack_order_by_its_order_and_kind():
+    # (build/fatigue2/table.md rows 13, 15, 18, 19) hold: ready -7; a move / withdraw order: -2.5 (measured); a
+    # missile formation: -1.2 with the attack order, -4.9 with another (measured); a lord under a move order walks
+    u = {"fatigue": torch.full((6,), 15000.), "fat": torch.zeros(6)}
+    activity = melee_activity(6, attack=[False, False, True, False, False, False],
+                              move_order=[False, True, False, False, True, True],
+                              shooter=[False, False, True, True, True, False],
+                              single=[False, False, False, False, False, True], walking=[False] * 5 + [True])
+    fatigue.step(u, activity, calibrated_fatigue(), 1.)
+    assert u["fatigue"].tolist() == pytest.approx([14930., 14975., 14988., 14951., 14951., 14990.])
 
 
 def test_charging_tires_only_under_an_attack_order():
     u = {"fatigue": torch.full((2,), 15000.), "fat": torch.zeros(2)}
     activity = melee_activity(2, attack=[True, False], charging=[True, True])
     fatigue.step(u, activity, calibrated_fatigue(), 1.)
-    assert u["fatigue"].tolist() == [15340., 14820.]
+    assert u["fatigue"].tolist() == [15340., 14930.]
 
 
 def test_calibrated_melee_without_attack_flags_is_a_formation_attacking():
@@ -2125,12 +2138,13 @@ def test_disabled_fatigue_trial_preserves_legacy_ready_clock():
 
 
 def test_a_move_costs_by_its_run_flag_whatever_the_speed():
-    # run order +4 even at a walking pace; walk order -1 (database); also while in melee without an attack order
+    # run order +4 even at a walking pace; walk order -1 (database); in melee a formation under a move order pays
+    # the measured -2.5 whatever its flag (calibration.melee_move)
     u = {"fatigue": torch.full((3,), 15000.), "fat": torch.zeros(3)}
     activity = melee_activity(3, melee=[False, False, True], walking=[True, True, True], running=[False, True, False],
-                              run_order=[True, False, True])
+                              run_order=[True, False, True], move_order=[True, True, True])
     fatigue.step(u, activity, calibrated_fatigue(), 1.)
-    assert u["fatigue"].tolist() == [15040., 14990., 15040.]
+    assert u["fatigue"].tolist() == pytest.approx([15040., 14990., 14975.])
 
 
 def test_routing_units_tire_at_the_running_rate():
@@ -2179,6 +2193,20 @@ def test_battle_passes_the_attack_order_and_single_entities_to_fatigue(monkeypat
     battle.step(st, cmd, P)
     assert bool(seen["attack"][0, 0]) and not bool(seen["attack"][0, st.N // 2])
     assert bool(seen["single"][0, 0]) is single and not bool(seen["single"][0, st.N // 2])
+    assert not bool(seen["move_order"][0, 0]) and not bool(seen["shooter"][0, 0])
+
+
+def test_battle_passes_the_move_order_and_shooters_to_fatigue(monkeypatch):
+    st = face_off(ARCHER, SLAVE, gap=0)
+    seen = {}
+    monkeypatch.setattr(fatigue, "step", lambda u, activity, params, dt: seen.update(activity))
+    for kind, moving in ((O.MOVE, True), (O.WITHDRAW, True), (O.HOLD, False)):
+        cmd = O.hold(st.B, st.N)
+        cmd.kind[0, 0] = kind
+        cmd.x[0, 0], cmd.z[0, 0] = st.u["x"][0, 0] - 30, st.u["z"][0, 0]
+        battle.step(st, cmd, P)
+        assert bool(seen["move_order"][0, 0]) is moving and bool(seen["shooter"][0, 0])
+        assert not bool(seen["shooter"][0, st.N // 2])
 
 
 @pytest.mark.parametrize("angle,flag", [(-90, "lf"), (90, "rf"), (180, "bf")])
@@ -2744,7 +2772,7 @@ class TestLordFragility:
 
     def test_a_lord_tires_slower_in_melee_and_the_charge_costs_while_the_caller_says(self):
         # single entity in melee: the database's 19 a tick, a formation 13.7; the charge (+34) for both while
-        # `charging` (battle.py: the first fatigue.calibration.charge_s seconds after the charge's first blow).
+        # `charging` (battle.py: the charge sprint up to the contact, fatigue.calibration.charging "sprint").
         u = {"fatigue": torch.full((4,), 15000.), "fat": torch.zeros(4)}
         activity = melee_activity(4, attack=[True] * 4, single=[True, True, False, False],
                                   charging=[True, False, True, False])

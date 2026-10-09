@@ -624,12 +624,29 @@ def step(st, orders, params=None, dt=None):
     # movement.velocity brakes to rest within 0.5 m of the destination.
     pending_move = point & (((u["ox"] - u["x"]) ** 2 + (u["oz"] - u["z"]) ** 2) > 0.5 ** 2)
     idle = standing & ~pending_move & (kind != O.ATTACK) & (aim_at < 0)
-    # The charge's fatigue (+34) only in the first fatigue.calibration.charge_s seconds after its first blow.
-    charge_s = float(cal["fatigue"].get("calibration", {}).get("charge_s", decay))
-    activity = {"melee": engaged, "charging": engaged & (charge_now > 1 - charge_s / decay), "shooting": firing,
+    # The charge sprint (the database's battle_entities charge distance and charge speed): under an attack order, at
+    # a run or a walk, a unit closes the last charge_dist metres (30 infantry, 35 lords) to its target at its charge
+    # speed - a charge then (the run-up above); a move order gives none (the melee probe: the last 30 m at 3.65-3.88
+    # m/s at a run of 3.0, the last 10 m 3.9-4.7, at a walk the same). Movement below runs it; fatigue pays for it.
+    sprint = close_in & (t_reach <= u["charge_dist"]) & ~busy_t
+    if not cal["contact"].get("pursuit_sprint", True):
+        # (contact.pursuit_sprint false: no sprint after a routing target - the pursuit has no charge, pursuit_why; a
+        # pursuer runs at its run speed and falls behind a faster router: the routmob probe, contact.pursuit_sprint_why)
+        sprint = sprint & ~u["r"].gather(1, ti)
+    fcal = cal["fatigue"].get("calibration", {})
+    if fcal.get("charging") == "sprint":
+        # The charge's fatigue (the database's charging +34 a tick) while the unit sprints at its target under the
+        # attack order, up to the contact; nothing after the blow (fatigue.calibration.charging_why).
+        fat_charge = standing & sprint & ~engaged
+    else:
+        # (the old rule: +34 only in the first fatigue.calibration.charge_s seconds after a charge's first blow)
+        charge_s = float(fcal.get("charge_s", decay))
+        fat_charge = engaged & (charge_now > 1 - charge_s / decay)
+    activity = {"melee": engaged, "charging": fat_charge, "shooting": firing,
                 "running": speed > u["walk"] + 0.3, "walking": speed > 0.3,
                 "idle": idle, "active": alive, "attack": kind == O.ATTACK, "single": u["men0"] <= 1,
-                "run_order": u["order_run"].bool(), "routing": alive & u["r"], "vigour": vigour}
+                "run_order": u["order_run"].bool(), "routing": alive & u["r"], "vigour": vigour,
+                "move_order": (kind == O.MOVE) | (kind == O.WITHDRAW), "shooter": u["range"] > 0}
     near_m = float(cal["fatigue"].get("calibration", {}).get("ready_enemy_m", 0.0))
     if near_m > 0:
         activity["enemy_near"] = (foes & standing[:, None, :] & (d <= near_m)).any(2)
@@ -645,15 +662,7 @@ def step(st, orders, params=None, dt=None):
     gx = torch.where(close_in, tx, gx)
     gz = torch.where(close_in, tz, gz)
     want = torch.where(run, u["run"], u["walk"])
-    # The charge sprint (the database's battle_entities charge distance and charge speed): under an attack order, at
-    # a run or a walk, a unit closes the last charge_dist metres (30 infantry, 35 lords) to its target at its charge
-    # speed - a charge then (the run-up above); a move order gives none (the melee probe: the last 30 m at 3.65-3.88
-    # m/s at a run of 3.0, the last 10 m 3.9-4.7, at a walk the same).
-    sprint = close_in & (t_reach <= u["charge_dist"]) & ~busy_t
-    if not cal["contact"].get("pursuit_sprint", True):
-        # (contact.pursuit_sprint false: no sprint after a routing target - the pursuit has no charge, pursuit_why; a
-        # pursuer runs at its run speed and falls behind a faster router: the routmob probe, contact.pursuit_sprint_why)
-        sprint = sprint & ~u["r"].gather(1, ti)
+    # (the charge sprint: `sprint` above, at the fatigue)
     want = torch.where(sprint, u["charge_speed"], want)
     moving = standing & (point | close_in)
     # (morale.flee_near_m: 0 - away from every standing enemy weighted 1/d, the own edge only with none standing;

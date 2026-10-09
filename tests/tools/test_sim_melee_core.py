@@ -237,22 +237,30 @@ class TestCharge:
         st, H = run_in(CLANRATS, SPEAR)
         assert float(st.u["charge"][0, 0]) == 0.0                  # the braced unit gets no charge of its own
 
-    def test_the_charge_costs_fatigue_two_seconds(self):          # 8
-        st, H = run_in(SWORD, CLANRATS)
-        f0 = float(st.u["fatigue"][0, H])
-        o = replay.hold(st)
-        o.kind[0, H], o.target[0, H] = O.ATTACK, 0
-        battle.step(st, o, P)
-        battle.step(st, o, P)
-        early = (float(st.u["fatigue"][0, H]) - f0) / 1.0          # the charge's first 2 s: +34 a tick
-        battle.step(st, o, P)
-        battle.step(st, o, P)
-        f1 = float(st.u["fatigue"][0, H])
-        for _ in range(6):
-            battle.step(st, o, P)
-        late = (float(st.u["fatigue"][0, H]) - f1) / 3.0           # then the melee's 13.7
+    def test_the_charge_costs_fatigue_on_the_run_in_not_after_the_blow(self):     # 8
+        # fatigue.calibration.charging "sprint" (build/fatigue2/table.md rows 8-10): the database's charging +34 a
+        # tick while the attacker sprints its last charge_dist metres under the attack order; the run before it +4; in
+        # melee from the first blow the formation's 13.7, no surcharge; a move order: no charge.
         tick = P.sim["fatigue"]["calibration"]["per_second"]
-        assert early == pytest.approx(34 * tick, rel=0.3) and late == pytest.approx(13.7 * tick, rel=1e-3)
+
+        def gain(st, H, kind, steps=1):
+            o = replay.hold(st)
+            o.kind[0, H], o.target[0, H], o.run[0, H] = kind, 0, True
+            if kind == O.MOVE:
+                o.x[0, H], o.z[0, H] = -40.0, 0.0
+            f0 = float(st.u["fatigue"][0, H])
+            for _ in range(steps):
+                battle.step(st, o, P)
+            return (float(st.u["fatigue"][0, H]) - f0) / (steps * P.dt)
+
+        st, H = run_in(SWORD, CLANRATS, gap=60.0, steps=4, until_contact=False)       # 60 m: running, no sprint
+        assert gain(st, H, O.ATTACK) == pytest.approx(4 * tick, rel=1e-3)
+        st, H = run_in(SWORD, CLANRATS, gap=20.0, steps=2, until_contact=False)       # 20 m: sprinting
+        assert gain(st, H, O.ATTACK) == pytest.approx(34 * tick, rel=1e-3) and not bool(st.u["m"][0, H])
+        st, H = run_in(SWORD, CLANRATS)                                               # the blow
+        assert gain(st, H, O.ATTACK, steps=4) == pytest.approx(13.7 * tick, rel=1e-3)
+        st, H = run_in(SWORD, CLANRATS, kind=O.MOVE, gap=20.0, steps=2, until_contact=False)
+        assert gain(st, H, O.MOVE) == pytest.approx(4 * tick, rel=1e-3)
 
     def test_an_attack_sprints_the_last_charge_distance(self):
         # The database's battle_entities: charge distance 30 m (lords 35) at the charge speed, at a run or a walk;
