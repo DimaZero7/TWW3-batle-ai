@@ -16,6 +16,10 @@ A file is a plain dict saved by torch.save (loads with weights_only=True):
     actor    the actor's state_dict (all the game needs)
     critic   the critic's state_dict (training only; may be missing)
     meta     dict: update, battles, steps, seconds, when written, notes
+    train    (training only; may be missing) what a run needs to go on seamlessly from this file (run.py --init):
+             "optim" the optimizer's state_dict (Adam's moments over the actor's then the critic's parameters),
+             "state" the trainer's counters (the entropy floor's weight, the entropy decay's seconds, updates and
+             seconds over the chain)
 
     policy = load_policy("build/nn-train/latest.pt")      # an Actor in eval mode
 """
@@ -49,8 +53,8 @@ def config_of(data):
     return model_config.ModelConfig(**{k: v for k, v in data["config"].items() if k in names})
 
 
-def save(path, actor, critic=None, preset="small", meta=None):
-    """Write a checkpoint atomically (a temporary file, then a rename)."""
+def save(path, actor, critic=None, preset="small", meta=None, train=None):
+    """Write a checkpoint atomically (a temporary file, then a rename). train: {"optim": state_dict, "state": dict}."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {"format": FORMAT, "kinds": list(KINDS), "preset": preset, "config": dataclasses.asdict(actor.cfg),
@@ -58,10 +62,25 @@ def save(path, actor, critic=None, preset="small", meta=None):
             "meta": dict(meta or {}, written=time.strftime("%Y-%m-%d %H:%M:%S"))}
     if critic is not None:
         data["critic"] = {k: v.detach().cpu() for k, v in critic.state_dict().items()}
+    if train is not None:
+        data["train"] = _to_cpu(train)
     tmp = path.with_suffix(path.suffix + ".tmp")
     torch.save(data, tmp)
     os.replace(tmp, path)
     return path
+
+
+def _to_cpu(x):
+    if isinstance(x, dict):
+        return {k: _to_cpu(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return type(x)(_to_cpu(v) for v in x)
+    return x.detach().cpu() if hasattr(x, "detach") else x
+
+
+def train_state(path):
+    """The checkpoint's "train" (the optimizer and the trainer's counters), None when it has none."""
+    return read(path).get("train")
 
 
 def read(path, device="cpu"):

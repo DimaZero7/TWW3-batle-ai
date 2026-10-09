@@ -4,19 +4,22 @@ Every battle of the batch has a fixed layout for the whole run: its scene, the s
 plays and the opponent. Opponents:
 
     self        the learner on both sides (both sides give training data)
-    past        a past version of the learner from the pool (one version for all such
-                battles, drawn again every update); the untrained network is always in the pool
+    past        a past version of the learner from the pool (Pool: drawn by its quality score; each battle
+                keeps the version it began with: rollout.Battles' past slots)
     nearest, hold_shoot, hold, ai_like   the scripted opponents (tools/nn/train/opponents.py)
     drill_<name>  a drill's enemy script on that drill's battles (tools/nn/train/drills; run.py --drills)
 
-The pool: build/nn-train/pool/*.pt in the checkpoint format (tools/nn/train/checkpoint.py).
+The pool: <pool folder>/*.pt in the checkpoint format (tools/nn/train/checkpoint.py) and q.json (Pool).
 """
+import json
+import os
 import random
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
+from tools import config as project
 from tools.nn.train import checkpoint
 from tools.nn.train import drills
 
@@ -105,26 +108,119 @@ def layout(B, n_scenes, mix=None, opponent=None, scene_attacker=None, attack_onl
 
 
 class Pool:
-    """Past versions of the learner, newest last; the untrained network stays first."""
+    """Past versions of the learner with quality scores, as OpenAI Five's (arXiv 1912.06680, appendix N): a version
+    is drawn with probability p_i ~ exp(q_i); a new one comes in with the highest q of the pool; every battle the
+    learner wins against version i lowers q_i by eta / (N p_i) (N: the pool's size, p_i: its probability when it was
+    drawn; a loss changes nothing). Beaten versions fade out, those that still win stay likely; the untrained
+    network is an ordinary entry (no lasting place: it is beaten and fades out). Over the size the lowest q leaves
+    the list (its file stays).
 
-    def __init__(self, root=checkpoint.POOL, size=8, seed=0):
+    The pool's state (versions, q, the clock in updates, games) is root/q.json: a pool folder shared by the parts of
+    a night (run.py --pool-dir) carries on where the last part left it. Paths inside the project are stored
+    relative to it (the container mounts the project elsewhere)."""
+
+    STATE = "q.json"
+
+    def __init__(self, root=checkpoint.POOL, size=8, seed=0, eta=0.01):
         self.root = Path(root)
         self.size = size
-        self.paths = []
-        self.rng = random.Random(seed)
+        self.eta = eta
+        self.entries = []        # {"path", "q", "added" (clock), "games", "wins", "untrained"}
+        self.clock = 0           # updates trained with this pool, over all its runs
+        state = self.root / self.STATE
+        if state.exists():
+            data = json.loads(state.read_text(encoding="utf-8"))
+            self.entries = [dict(e) for e in data["entries"]]
+            self.clock = int(data.get("clock", 0))
+        self.rng = random.Random(f"{seed}-{len(self.entries)}-{self.clock}")
 
-    def add(self, path):
-        self.paths.append(Path(path))
-        while len(self.paths) > self.size:
-            self.paths.pop(1)        # keep the untrained one (first)
+    def __len__(self):
+        return len(self.entries)
+
+    @staticmethod
+    def key(path):
+        """A path as stored: relative to the project when inside it, with forward slashes."""
+        p = Path(path)
+        try:
+            p = p.resolve().relative_to(project.ROOT)
+        except ValueError:
+            pass
+        return p.as_posix()
+
+    @staticmethod
+    def file(key):
+        p = Path(key)
+        return p if p.is_absolute() else project.ROOT / p
+
+    @property
+    def paths(self):
+        return [self.file(e["path"]) for e in self.entries]
+
+    def find(self, path):
+        k = self.key(path)
+        return next((e for e in self.entries if e["path"] == k), None)
+
+    def add(self, path, untrained=False):
+        """Add a version with q = the pool's highest (0 in an empty pool); one already in keeps its q."""
+        old = self.find(path)
+        if old is not None:
+            return old
+        e = {"path": self.key(path), "q": max((x["q"] for x in self.entries), default=0.0), "added": self.clock,
+             "games": 0, "wins": 0, "untrained": bool(untrained)}
+        self.entries.append(e)
+        while len(self.entries) > self.size:
+            self.entries.remove(min(self.entries[:-1], key=lambda x: x["q"]))
+        return e
 
     def save(self, actor, critic=None, preset="small", meta=None, name=None):
         path = self.root / (name or f"v{int((meta or {}).get('update', 0)):05d}.pt")
         checkpoint.save(path, actor, critic, preset, meta)
         self.add(path)
+        self.write()
         return path
 
+    def probs(self):
+        q = np.array([e["q"] for e in self.entries], float)
+        w = np.exp(q - q.max())
+        return w / w.sum()
+
     def sample(self):
-        """(path, is the untrained one)."""
-        i = self.rng.randrange(len(self.paths))
-        return self.paths[i], i == 0
+        """(path, is the untrained one, its probability now)."""
+        p = self.probs()
+        i = self.rng.choices(range(len(self.entries)), weights=p)[0]
+        e = self.entries[i]
+        return self.file(e["path"]), bool(e["untrained"]), float(p[i])
+
+    def result(self, path, games, wins, p):
+        """games battles against the version `path` (drawn with probability p), the learner won `wins` of them:
+        q -= eta * wins / (N p). A version no longer in the pool is left alone."""
+        e = self.find(path)
+        if e is None or not games:
+            return
+        e["games"] += int(games)
+        e["wins"] += int(wins)
+        e["q"] = float(e["q"] - self.eta * float(wins) / (len(self.entries) * max(float(p), 1e-9)))
+
+    def tick(self):
+        self.clock += 1
+
+    def write(self):
+        self.root.mkdir(parents=True, exist_ok=True)
+        tmp = self.root / (self.STATE + ".tmp")
+        tmp.write_text(json.dumps({"clock": self.clock, "eta": self.eta, "entries": self.entries}, indent=1),
+                       encoding="utf-8", newline="\n")
+        os.replace(tmp, self.root / self.STATE)
+
+    def top(self, k=5):
+        """[(name, q, p, age in updates)] of the k most probable versions."""
+        p = self.probs()
+        order = np.argsort(-p)[:k]
+        return [(Path(self.entries[i]["path"]).name, self.entries[i]["q"], float(p[i]),
+                 self.clock - self.entries[i]["added"]) for i in order]
+
+    def text(self, k=5):
+        """One line: the pool's size, versions above 5 % (a steep distribution: the learner outgrows its past fast;
+        a wide one: it stalls), the top k with q, p and age."""
+        p = self.probs()
+        return (f"pool {len(self)} versions (clock {self.clock}), p > 5 %: {int((p > 0.05).sum())}; top "
+                + ", ".join(f"{n} q {q:+.2f} p {pp:.2f} age {a}" for n, q, pp, a in self.top(k)))
