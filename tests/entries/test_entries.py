@@ -1081,6 +1081,49 @@ class TestChargeProbe:
         assert dmg["t"]["method"] == "kill" and dmg["t"]["status"] == "done" and dmg["t2"]["method"] == "reduce"
         assert dmg["t"]["men1"] < dmg["t"]["men0"]
 
+    def test_routmob_keeps_the_targets_morale_halts_at_the_rout_and_samples_the_mob(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            CONFIG.lanes = {CONFIG.lanes[1], CONFIG.lanes[2]}
+            CONFIG.men_after_rout_s = 40
+            for i = 1, 2 do
+                local l = CONFIG.lanes[i]
+                l.mode, l.target_mode, l.answer, l.fight_s, l.max_s = 'attack_run', 'stand', true, 200, 260
+                l.t_morale, l.after_rout_s, l.lord = true, 45, nil
+                l.recharge_after_s, l.back_m, l.recharge_max_s = nil, nil, nil
+            end
+            CONFIG.lanes[1].at_rout = 'halt'
+            CONFIG.lanes[2].at_rout = 'none'
+            CONFIG.park = {{name = 'enemy_lord', x = 700, z = -400, bearing = 0},
+                           {name = 'own_lord', x = -700, z = -400, bearing = 0}}
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            -- L1: own_swords_1 attacks enemy_clanrat_1; L2: enemy_clanrat_2 attacks own_swords_2 (the SETUP's lanes)
+            assert(own[2].fearless == true and enemy[3].fearless == true, 'the attackers are fearless')
+            assert(enemy[2].fearless ~= true and own[3].fearless ~= true, 'the targets keep their morale')
+            own[2].melee, enemy[2].melee = true, true
+            enemy[3].melee, own[3].melee = true, true
+            for _ = 1, 6 do bm:tick(500); bm:pump() end
+            assert(own[2].moving == true and enemy[3].moving == true, 'attacking')
+            enemy[2].routing, own[3].routing = true, true              -- both targets rout
+            for _ = 1, 4 do bm:tick(500); bm:pump() end
+            assert(own[2].moving == false, 'L1: the attacker halts at the rout')
+            assert(enemy[3].moving == true, 'L2: the attacker goes on (the chase)')
+            for _ = 1, 200 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        routs = {r["lane"]: r for r in rows if r["event"] == "probe_phase" and r["phase"] == "rout"}
+        assert set(routs) == {"L1", "L2"} and routs["L1"]["at_rout"] == "halt" and routs["L2"]["at_rout"] == "none"
+        ends = {r["lane"]: r["why"] for r in rows if r["event"] == "probe_lane_end"}
+        assert ends == {"L1": "after_rout", "L2": "after_rout"}
+        men = [x for r in rows if r["event"] == "probe_men" for x in r["lanes"]]
+        after = [x for x in men if x["t"] >= routs["L1"]["t"]]
+        assert after and all("tg" in x for x in after) and max(x["t"] for x in after) <= routs["L2"]["t"] + 41000
+        sample = next(r for r in rows if r["event"] == "probe_sample")
+        assert "r" in sample["lanes"][0]["tg"]
+
     def test_layout_and_recharge_step(self, lua):
         L = lua.eval("""require('entries.charge_probe').layout({x = 10, z = 0, gap_m = 80, a_depth = 10,
             t_depth = 12, target_mode = 'rear'})""")

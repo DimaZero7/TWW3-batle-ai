@@ -66,6 +66,14 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           1 s after contact the swordsmen get (a) the same attack again, (b) a halt (the bridge's hold), (c) an attack on
           a second clanrat unit 150 m aside (edge to edge, towards the middle of the field), (d) a move at a run 30 m
           aside; 90 s fights, the soldiers' places all fight; lanes 320 m apart - 2 battles of 4 lanes, rotated;
+  routmob the routing mob's shape (build/fable/reach.py: in the game a router loses 0.10-0.17 % of its health a second
+          with the nearest enemy's centre 12-35 m off and nobody targeting it, the chaser's melee flag on 13-19 %: the
+          strung-out tail is struck while the centre is far; the simulator's router is its formation box, 6 m along the
+          flight): the target keeps its morale (t_morale) and is attacked by fearless spearmen / swordsmen until it
+          routs; at the rout the attacker goes on attacking (at_rout 'none': the chase) or halts (at_rout 'halt': the
+          mob's own stretch); the soldiers' places every second to 40 s after the rout (men_after_rout_s), wherever the
+          enemy is: skavenslaves v spearmen (chase / halt), clanrats v swordsmen (chase / halt) - 2 battles, lanes
+          rotated; the lane ends 45 s after the rout;
   wave    the opening wave (build/shotgap/wave_geom.py: men within 2.5 m of an enemy 46-51 in the first 5 s, 12 from 20 s,
           the fronts 1.3 m apart then 2.9 m; is it the collision of the approach or the start inside reach?): swordsmen
           <-> clanrats, both attacking, 90 s, the soldiers' places all fight - (1) placed 1 m apart (front to front), both
@@ -136,7 +144,9 @@ RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
-         "reform2", "defender", "wave")
+         "reform2", "defender", "wave", "routmob")
+ROUTMOB_MEN_S = 40     # the routmob plan: the soldiers' places this long after the target's rout
+ROUTMOB_END_S = 45     # ... and the lane ends this long after it
 # the reform plan: soldier places this long after contact (the whole fight)
 REFORM_MEN_S = 260
 # the fresh plan's orders 10 s after contact (entries/charge_probe.lua lane.after.kind)
@@ -276,6 +286,13 @@ def battles(plan):
                 lane("swords", "clanrat", "attack_walk", "both", gap_m=3, **w),
                 lane("swords", "clanrat", "attack_walk", "both", gap_m=30, **w)]
         out += [base, rotate(base, 2)]
+    elif plan == "routmob":
+        def rm(attacker, target, at_rout):
+            return lane(attacker, target, "attack_run", "stand", gap_m=40, fight_s=200, t_morale=True, at_rout=at_rout,
+                        after_rout_s=ROUTMOB_END_S, max_s=260)
+        base = [rm("spear", "slave", "none"), rm("spear", "slave", "halt"), rm("swords", "clanrat", "none"),
+                rm("swords", "clanrat", "halt")]
+        out += [base, rotate(base, 2)]
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
@@ -370,6 +387,8 @@ def run_config(plan, index):
               "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2") else 95 if plan in ("defender", "wave")
                               else 90 if plan in ("hit", "move", "vv") else 30),
               "lanes": lanes, "park": park}
+    if plan == "routmob":
+        config["men_after_rout_s"] = ROUTMOB_MEN_S
     model_s = max(l["max_s"] for l in lanes) + SETTLE_MS / 1000 + 20
     return config, model_s, arena
 
@@ -592,6 +611,11 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
             r = s0[3]
             sides[1]["units"].append({"key": UNITS["general"][0], "x": r["x"], "z": r["z"], "b": r["b"],
                                       "general": True, "name": "l"})
+        if spec.get("t_morale"):
+            # the target can rout (the routmob plan): a far-off standing unit of its side keeps its battle going
+            sides[roles["tg"]]["units"].append({"key": spec["t_key"], "x": s0[2]["x"], "z": s0[2]["z"] - 400.0,
+                                                "b": s0[2]["b"], "men": s0[2]["men"], "width": spec["t_width"],
+                                                "general": False, "name": "keep"})
         army = {"attacker": roles["a"], "sides": sides}
         for _ in range(copies):
             armies.append(army)
@@ -601,11 +625,16 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
     gen = torch.Generator().manual_seed(seed)
     for k in ("x", "z"):
         st.u[k] = st.u[k] + ((torch.rand(st.u[k].shape, generator=gen) * 2 - 1) * jitter_m).to(device)
-    st.u["leadership"] = st.u["leadership"] + 1e4
-    st.u["morale"] = st.u["morale"] + 1e4
     B, N = st.B, st.N
     slot = {r: torch.tensor([sim_scenario.slots(a, per_side).get(r, -1) for a in armies], device=device)
             for r in ("a", "tg", "l", "t2")}
+    # everyone fearless but a target that keeps its morale (t_morale: the routmob plan)
+    keep = torch.zeros((B, N), dtype=torch.bool, device=device)
+    for b, ln in enumerate(meta):
+        if ln["spec"].get("t_morale") and int(slot["tg"][b]) >= 0:
+            keep[b, int(slot["tg"][b])] = True
+    st.u["leadership"] = torch.where(keep, st.u["leadership"], st.u["leadership"] + 1e4)
+    st.u["morale"] = torch.where(keep, st.u["morale"], st.u["morale"] + 1e4)
     specs = [ln["spec"] for ln in meta]
     mode = [sp["mode"] for sp in specs]
     tmode = [sp["target_mode"] for sp in specs]
@@ -613,9 +642,9 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
         if SYG in sim_abilities.slot_keys(UNITS["general"][0], params.units, params.abilities) else -1
     st_ = {"contact": [None] * B, "contact2": [None] * B, "phase": ["in"] * B, "out_t": [0.0] * B, "after": [None] * B,
            "out_from": [None] * B, "fired": [False] * B, "last": {}, "phases": [[] for _ in range(B)],
-           "a_ability": [False] * B, "start": [None] * B, "faced": set()}
+           "a_ability": [False] * B, "start": [None] * B, "faced": set(), "rout": [None] * B}
     rec = {"t": [], "rows": []}
-    fields = ("x", "z", "b", "men", "hp_abs", "m", "fatigue", "fat", "k")
+    fields = ("x", "z", "b", "men", "hp_abs", "m", "fatigue", "fat", "k", "r", "s")
     a_slot = {}
     for sp in specs:
         if sp.get("a_ability") and sp["a_key"] not in a_slot:
@@ -628,6 +657,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
         b_idx = torch.arange(B, device=device)
         m_a = u["m"][b_idx, slot["a"]].bool().cpu().numpy()
         m_t = u["m"][b_idx, slot["tg"]].bool().cpu().numpy()
+        r_t = u["r"][b_idx, slot["tg"]].bool().cpu().numpy()
         ax, az = u["x"][b_idx, slot["a"]].cpu().numpy(), u["z"][b_idx, slot["a"]].cpu().numpy()
         o = O.hold(B, N, device)
         kind, target, run_, x, z, ab = (o.kind.clone(), o.target.clone(), o.run.clone(), o.x.clone(), o.z.clone(),
@@ -688,6 +718,15 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                     kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, True
             elif mode[b] in ("attack_run", "attack_walk"):
                 kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, mode[b] == "attack_run"
+            # the target's rout (t_morale lanes): at_rout 'halt' halts the attacker there (entries/charge_probe.lua)
+            if sp.get("t_morale") and st_["rout"][b] is None and r_t[b]:
+                st_["rout"][b] = t - params.dt
+                st_["phases"][b].append({"phase": "rout", "t": (t - params.dt) * 1000})
+                if sp.get("at_rout") == "halt":
+                    st_["after"][b] = (float(ax[b]), float(az[b]))
+            if st_["rout"][b] is not None and sp.get("at_rout") == "halt":
+                kind[b, A], target[b, A], run_[b, A] = O.HOLD, -1, False
+                x[b, A], z[b, A] = st_["after"][b]
             elif mode[b] == "move_run":
                 kind[b, A], x[b, A], z[b, A], run_[b, A] = O.MOVE, sp["x"], sp["z"] - sp["move_beyond_m"], True
             # lane.after (entries/charge_probe.lua): at_s after the first contact the attacker gets one more order,
@@ -737,6 +776,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
         rec["t"].append(t)
         rec["rows"].append({k: st.u[k].detach().cpu().numpy().copy() for k in fields if k in st.u})
     until = max((ln["end"] or {}).get("t", 0) / 1000 for ln in lanes) + 5 if any(ln["end"] for ln in lanes) else 200
+    if any(ln["spec"].get("t_morale") for ln in lanes):
+        until = max(until, max(ln["spec"].get("max_s", 200) for ln in lanes))
     battle.run(st, policy, params, until_s=until, record=record)
     out = []
     for b, ln in enumerate(meta):
@@ -747,7 +788,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                 if i < 0:
                     return None
                 out = {"x": float(r["x"][b, i]), "z": float(r["z"][b, i]), "b": float(r["b"][b, i]),
-                       "men": float(r["men"][b, i]), "hp": float(r["hp_abs"][b, i]), "m": bool(r["m"][b, i])}
+                       "men": float(r["men"][b, i]), "hp": float(r["hp_abs"][b, i]), "m": bool(r["m"][b, i]),
+                       "r": bool(r["r"][b, i]) if "r" in r else None, "s": bool(r["s"][b, i]) if "s" in r else None}
                 for k in ("fatigue", "fat", "k"):
                     if k in r:
                         out[k] = float(r[k][b, i])

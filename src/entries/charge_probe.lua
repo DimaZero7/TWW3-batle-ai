@@ -35,6 +35,11 @@
 -- (the engine's own calls); event probe_damage with the men and health before and after.
 -- target_mode 'push': at the go the target gets a move order at a walk to a point push_m ahead of its front
 -- (through the attacker: the game's own planner's far move point), never changed.
+-- lane.t_morale (optional): the target keeps its morale (not fearless) - it can rout; its first rout is emitted as
+-- probe_phase 'rout' and lane.at_rout says what the attacker does then: 'halt' (halts where it is) or 'none' (goes
+-- on attacking: the chase); the lane ends lane.after_rout_s after the rout. With config.men_after_rout_s the
+-- soldiers' places of both units are sampled every men_ms for that long after the rout wherever the enemy is (the
+-- routing mob's shape); the sample rows carry r (routing) and sh (shattered) too.
 -- Every tick_ms 'probe_sample': per running lane both units' (and the lord's) men, health
 -- (CCO HealthValue), melee flag, place, bearing, moving / moving fast, kills, fatigue, status keys
 -- (CCO StatusList: braced, melee...). Every men_ms while the two are within men_near_m of each
@@ -57,6 +62,7 @@ M.MODES = {attack_run = true, attack_walk = true, move_run = true, recharge = tr
     script = true, shoot = true}
 M.TARGET_MODES = {stand = true, hold = true, both = true, both_walk = true, rear = true, push = true}
 M.AFTER_KINDS = {attack_t2 = true, attack_same = true, halt = true, move_near = true, none = true}
+M.AT_ROUT = {halt = true, none = true}
 
 local function round(v, k)
     if type(v) ~= 'number' or v ~= v then return nil end
@@ -151,7 +157,8 @@ function M.main(bm, config, globals)
             b = round(read(function() return u:bearing() end), 0),
             mv = read(function() return u:is_moving() end), fast = read(function() return u:is_moving_fast() end),
             k = read(cco, u, 'NumKills'), fat = read(function() return u:fatigue_state() end), st = statuses(u),
-            uma = read(function() return u:is_under_missile_attack() end), cuma = read(cco, u, 'IsUnderMissileAttack')}
+            uma = read(function() return u:is_under_missile_attack() end), cuma = read(cco, u, 'IsUnderMissileAttack'),
+            r = read(function() return u:is_routing() end), sh = read(function() return u:is_shattered() end)}
     end
 
     -- Soldier places of a unit in decimetres (flat x1, z1, x2, z2 ...), or nil.
@@ -304,12 +311,23 @@ function M.main(bm, config, globals)
                     emit('probe_ability', {lane = lane.name, who = 'a', key = lane.a_ability, t = now - lane.t0,
                         status = ok and (used and 'used' or 'not_ready') or 'failed'})
                 end
+                if lane.t_morale and not lane.rout_ms then
+                    local t_r = read(function() return lane.t.unit:is_routing() end)
+                    if t_r then
+                        lane.rout_ms = now
+                        if lane.at_rout == 'halt' then orders.halt(lane.a.uc) end
+                        emit('probe_phase', {lane = lane.name, phase = 'rout', t = now - lane.t0,
+                            at_rout = lane.at_rout or 'none'})
+                    end
+                end
                 local r = {lane = lane.name, t = now - lane.t0, a = unit_row(lane.a.unit), tg = unit_row(lane.t.unit)}
                 if lane.lord then r.l = unit_row(state.units[lane.lord.name].unit) end
                 if lane.t2 then r.t2 = unit_row(lane.t2.unit) end
                 rows[#rows + 1] = r
                 if beaten(lane.a.unit) or beaten(lane.t.unit) then
                     end_lane(lane, 'dead')
+                elseif lane.rout_ms and now - lane.rout_ms >= (lane.after_rout_s or 45) * 1000 then
+                    end_lane(lane, 'after_rout')
                 elseif lane.contact and now - lane.contact >= lane.fight_s * 1000 then
                     end_lane(lane, 'fight_s')
                 elseif now - lane.t0 >= lane.max_s * 1000 then
@@ -328,7 +346,13 @@ function M.main(bm, config, globals)
         local rows, now = {}, now_ms()
         for _, lane in ipairs(state.lanes) do
             local last = lane.contact2 or lane.contact
-            if lane.running and lane.men_all_s then
+            if lane.running and lane.rout_ms and config.men_after_rout_s then
+                -- the routing mob: both units' men for men_after_rout_s after the rout, wherever the enemy is
+                if now - lane.rout_ms <= config.men_after_rout_s * 1000 then
+                    rows[#rows + 1] = {lane = lane.name, t = now - lane.t0, a = soldiers(lane.a.unit),
+                        tg = soldiers(lane.t.unit)}
+                end
+            elseif lane.running and lane.men_all_s then
                 if now - lane.t0 <= lane.men_all_s * 1000 then
                     rows[#rows + 1] = {lane = lane.name, t = now - lane.t0, a = soldiers(lane.a.unit)}
                 end
@@ -433,13 +457,17 @@ function M.main(bm, config, globals)
         end
         assert(common and vector_type, 'common and battle_vector globals required')
         local sides = battle.read_sides(bm)
+        local keep_morale = {}
+        for _, l in ipairs(config.lanes) do
+            if l.t_morale then keep_morale[l.target] = true end
+        end
         for side = 1, 2 do
             for _, u in ipairs(sides[side].units) do
                 local name = u:name()
                 local uc = orders.take_control(sides[side].army, u)
                 orders.set_fire_at_will(uc, false)
                 orders.halt(uc)
-                pcall(function() uc:morale_behavior_fearless() end)
+                if not keep_morale[name] then pcall(function() uc:morale_behavior_fearless() end) end
                 state.units[name] = {name = name, unit = u, uc = uc, side = side}
             end
         end
@@ -457,6 +485,7 @@ function M.main(bm, config, globals)
                 assert(lane.t2, 'scenario unit missing: ' .. tostring(l.target2))
             end
             if l.after then assert(M.AFTER_KINDS[l.after.kind], 'unknown after kind ' .. tostring(l.after.kind)) end
+            if l.at_rout then assert(M.AT_ROUT[l.at_rout], 'unknown at_rout ' .. tostring(l.at_rout)) end
             lane.layout = M.layout(l)
             state.lanes[i] = lane
         end

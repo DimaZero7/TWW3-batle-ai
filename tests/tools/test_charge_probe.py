@@ -119,6 +119,19 @@ def test_the_wave_plan_varies_the_start_gap_and_the_clanrats_pace():
     assert config["men_after_s"] >= 90 and model_s < 400
 
 
+def test_the_routmob_plan_keeps_the_targets_morale_and_samples_the_mob_after_the_rout():
+    b = cp.battles("routmob")
+    assert len(b) == 2 and all(len(x) == 4 for x in b)
+    for x in b:
+        assert all(l["t_morale"] and l["mode"] == "attack_run" and l["target_mode"] == "stand" for l in x)
+        assert sorted((l["attacker"], l["target"], l["at_rout"]) for l in x) == [
+            ("spear", "slave", "halt"), ("spear", "slave", "none"), ("swords", "clanrat", "halt"), ("swords", "clanrat", "none")]
+        assert all(l["after_rout_s"] == cp.ROUTMOB_END_S and l["max_s"] >= l["after_rout_s"] + 60 for l in x)
+    assert b[1][0] == b[0][2]                                                # the lanes rotated
+    config, model_s, _ = cp.run_config("routmob", 1)
+    assert config["men_after_rout_s"] == cp.ROUTMOB_MEN_S and model_s < 400
+
+
 def test_battle_file_is_written(tmp_path):
     path = cp.write_scenario("hit", 1, tmp_path / "x.xml")
     xml = path.read_text(encoding="utf-8")
