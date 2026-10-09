@@ -2898,25 +2898,30 @@ class TestMoraleBatch:
         assert bool(st.u["r"][0, 0])
 
     def test_the_rally_is_a_chance_a_second_by_the_nearest_enemys_distance(self):
-        """morale.rally_hazard: past rally_after_s a router rallies with the table's chance a second by the nearest
-        standing enemy's distance (0 within 95 m), by a fixed draw; two 0.5 s steps give the one-second chance."""
+        """morale.rally_hazard: past rally_after_s a router with morale above 0 rallies with the table's chance a
+        second by the nearest standing enemy's distance (any enemy within 95 m: the first bin), by a fixed draw; two
+        0.5 s steps give the one-second chance; at morale 0 or below it never rallies (the table is measured on routers
+        above 0: build/bench/r20_cc_rally_all.py)."""
         hz = P.sim["morale"]["rally_hazard"]
         B = 3000
-        def share(foe_d, dt, steps):
+        def share(foe_d, dt, steps, near=False, points=5.0):
             st = scenario.build([army([(SPEAR, -50, 0, 90)], [(SLAVE, 50, 0, 270)])] * B, P)
-            st.u["r"][:, 0], st.u["rout_count"][:, 0], st.u["morale"][:, 0], st.u["rout_s"][:, 0] = True, 1.0, 5.0, 30.0
-            ctx = TestMorale().ctx(st, enemy_near=torch.zeros_like(st.u["r"]), foe_d=torch.full_like(st.u["men"], foe_d),
-                                   t=torch.zeros(B))
+            st.u["r"][:, 0], st.u["rout_count"][:, 0], st.u["morale"][:, 0], st.u["rout_s"][:, 0] = True, 1.0, points, 30.0
+            ctx = TestMorale().ctx(st, enemy_near=torch.full_like(st.u["r"], near),
+                                   foe_d=torch.full_like(st.u["men"], foe_d), t=torch.zeros(B))
             for _ in range(steps):
                 morale.step(st.u, ctx, P, dt)
                 ctx["t"] = ctx["t"] + dt
             return float((~st.u["r"][:, 0]).float().mean())
-        assert share(50.0, 1.0, 1) == 0.0
-        assert share(130.0, 1.0, 1) == pytest.approx(hz["p_per_s"][2], abs=0.02)         # 110-125 m: 0.095
-        assert share(100.0, 1.0, 1) == pytest.approx(hz["p_per_s"][1], abs=0.015)        # 95-110 m: 0.043
-        assert share(1000.0, 1.0, 1) == pytest.approx(hz["p_per_s"][4], abs=0.01)        # 150 m and beyond: 0.013
-        assert share(130.0, 0.5, 2) == pytest.approx(hz["p_per_s"][2], abs=0.02)         # two half steps = a second
+        assert share(50.0, 1.0, 1, near=True) == pytest.approx(hz["p_per_s"][0], abs=0.003)   # within 95 m: 0.003
+        assert share(500.0, 1.0, 1, near=True) == pytest.approx(hz["p_per_s"][0], abs=0.003)  # a routing enemy near
+        assert share(100.0, 1.0, 1) == pytest.approx(hz["p_per_s"][1], abs=0.015)        # 95-110 m: 0.080
+        assert share(115.0, 1.0, 1) == pytest.approx(hz["p_per_s"][2], abs=0.02)         # 110-125 m: 0.174
+        assert share(130.0, 1.0, 1) == pytest.approx(hz["p_per_s"][3], abs=0.025)        # 125-150 m: 0.265
+        assert share(1000.0, 1.0, 1) == pytest.approx(hz["p_per_s"][4], abs=0.02)        # 150 m and beyond: 0.198
+        assert share(130.0, 0.5, 2) == pytest.approx(hz["p_per_s"][3], abs=0.025)        # two half steps = a second
         assert share(130.0, 1.0, 1) == share(130.0, 1.0, 1)                               # the draw is fixed
+        assert share(130.0, 1.0, 1, points=-60.0) == 0.0                                  # morale below 0: never
 
     def test_a_rallied_unit_with_a_target_below_0_routs_again_after_10_s(self):
         """M8: the database's post_rally_no_rout_timer: no rout in the 10 s after a rally, then at morale <= 0."""

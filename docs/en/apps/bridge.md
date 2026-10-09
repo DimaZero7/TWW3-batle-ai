@@ -310,7 +310,7 @@ enemy's answer waited 400 model ms (median) against the network's 300 - it is wr
 | `missile_duty(duty, me, target)` | One decision of a shooter under an attack order: `release`, `resume` or `nil` (`RELEASE_AFTER`, `FREE_MIN`) |
 | `firing(me, recent)` | Shoots standing: up, not moving, not in melee, the fire flag on now or within `FIRE_RECENT` decisions (`recent`) |
 | `on_target(me, target, recent)` | `firing` and the engine's target (`t`) is that unit: giving it again would restart the aim |
-| `reaim_target(watch, me, rows, range, preferred, recent)` | After `REAIM_AFTER` = 3 decisions without a suitable target: the network's in-range target, otherwise the nearest valid enemy; `nil` when no intervention is needed; count in `watch.n` |
+| `reaim_target(watch, me, rows, range, preferred, recent)` | After `REAIM_AFTER` = 3 decisions without a suitable target: the network's in-range target (even a routing one), otherwise the nearest standing enemy, a routing one only when no standing enemy is in range (as the simulator's `choose_target`); the engine's current target is kept unless it routs while a standing enemy is in range; before, the nearest enemy was taken even when routing, and both sides' shooters in the game (the network's and `ai_like`'s) were turned onto a fleeing mob; `nil` when no intervention is needed; count in `watch.n` |
 
 ## exchange_adapter — files
 

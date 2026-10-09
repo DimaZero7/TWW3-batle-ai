@@ -85,7 +85,7 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
 - **Morale by the game's rules:** casualty windows 4 / 60 s, "under fire", flank / rear, "flanks secure",
   charge, outnumbering, "losing the fight" (−3 / −8 by the combat ratio, as in the database), a strong
   enemy, the lord's death (−16 for 45 s, then −10), shattering of a unit and of the army; the rally is the
-  measured process (`morale.rally_hazard`: a chance a second by the distance to the nearest enemy).
+  measured process (`morale.rally_hazard`: a chance a second by the distance to the nearest enemy for routers with morale above 0; measured on the same condition over 360 game recordings).
 - **Rout:** the first 7 s the router stays in contact; it is slowed in a crowd; it dodges its chaser at
   an angle; far from the enemy it flees from all standing enemies (weight 1 / distance), to its own edge
   only when none stands ([where a router runs](training/simulator.md#where-a-router-runs)).

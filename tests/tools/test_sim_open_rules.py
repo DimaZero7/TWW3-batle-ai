@@ -407,8 +407,9 @@ class TestShatter:
 # --- C5: the rally ---
 
 class TestRally:
-    def rally_after(self, enemy_x, enemy_routing, seconds=40):
+    def rally_after(self, enemy_x, enemy_routing, seconds=40, params=P):
         # (a second unit of ours far off keeps the army from collapsing)
+        P = params
         st = scenario.build([army([(SPEAR, 0, 0, 90), (SPEAR, -600, 0, 90)],
                                   [(SLAVE, enemy_x, 0, 270), (SLAVE, 700, 400, 270)])], P)   # (the battle goes on)
         H = st.N // 2
@@ -427,16 +428,23 @@ class TestRally:
                 return (k + 1) * P.dt
         return None
 
-    def test_a_routing_enemy_near_blocks_the_rally(self):
-        assert self.rally_after(80.0, enemy_routing=True) is None
-        # (beyond 95 m a routing enemy does not block; the nearest standing one is 800 m off: 1.3 % a second,
-        # morale.rally_hazard - long enough to be sure)
+    @staticmethod
+    def near_shut():
+        """P with the first bin of morale.rally_hazard (any enemy within 95 m: the game's 0.3 % a second) at 0 - to
+        see that a near enemy puts the router in that bin."""
+        hz = dict(P.sim["morale"]["rally_hazard"])
+        hz["p_per_s"] = [0.0] + list(hz["p_per_s"][1:])
+        return P.with_cal("morale", rally_hazard=hz)
+
+    def test_a_routing_enemy_near_holds_the_rally_to_the_first_bin(self):
+        assert self.rally_after(80.0, enemy_routing=True, params=self.near_shut()) is None
+        # (beyond 95 m a routing enemy does not hold it; the nearest standing one is 800 m off: 150 m and beyond)
         assert self.rally_after(120.0, enemy_routing=True, seconds=900) is not None
 
     def test_the_rally_comes_after_the_wait(self):
-        t = self.rally_after(130.0, enemy_routing=False, seconds=300)      # 110-125 / 125-150 m: 9.5 / 8.5 % a second
+        t = self.rally_after(130.0, enemy_routing=False, seconds=300)      # 125-150 m
         assert t is not None and t >= P.sim["morale"]["rally_wait_s"] - P.dt - 1e-6
-        assert self.rally_after(80.0, enemy_routing=False) is None          # within 95 m: chance 0
+        assert self.rally_after(80.0, enemy_routing=False, params=self.near_shut()) is None   # within 95 m: first bin
 
 
 # --- C3: no charge into a target already fighting our units ---

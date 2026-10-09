@@ -246,6 +246,16 @@ def test_targetless_recovery_prefers_the_order_then_nearest_valid_enemy(lua):
         assert cycle(dict(me, **busy), [near, preferred]) == [None] * after
     # Engine edge-to-edge range can exceed centre range: keep its recent firing target.
     assert cycle(dict(me, t="ordered"), [near, dict(preferred, x=125)], True) == [None] * after
+    # A standing enemy first, as the simulator's choose_target: a nearer routing one is taken only when no standing
+    # enemy is in range; the ordered target stays first even when it routs.
+    mob = dict(near, n="mob", x=20, r=True)
+    assert cycle(me, [mob, near])[-1] == "near"
+    assert cycle(me, [mob, dict(near, x=121)])[-1] == "mob"
+    assert cycle(me, [mob, near, dict(preferred, r=True, m=False)])[-1] == "ordered"
+    # the engine's routing target is left for a standing one in range (not when it is the ordered one or alone)
+    assert cycle(dict(me, t="mob"), [mob, near])[-1] == "near"
+    assert cycle(dict(me, t="mob"), [mob]) == [None] * after
+    assert cycle(dict(me, t="ordered"), [near, dict(preferred, r=True)]) == [None] * after
     watch, rows = t({}), t([t(near)])
     assert [recover(watch, t(me), rows, 120, None, False) for _ in range(6)] == [
         None, None, "near", None, None, "near"]  # rejected engine orders retry only every 3 decisions

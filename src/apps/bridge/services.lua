@@ -221,6 +221,12 @@ end
 -- Missing/invalid engine target under ATTACK/HOLD: explicit aim after three decisions (3 s
 -- at the default cadence). Unlike ordinary duty, this may target an enemy still in melee.
 -- Strict centre range avoids pulling a held shooter forward during its walk cooldown.
+-- The pick is the simulator's (tools/nn/sim/missile.py choose_target): the ordered target while in
+-- range, routing or not; else the nearest STANDING enemy in range; a routing one only when no
+-- standing enemy is in range. The engine's current target is kept as there: unless it routs while a
+-- standing enemy is in range (and it is not the ordered one). Before, the nearest enemy was taken
+-- even when routing: our shooters (the network's and ai_like's alike) were turned onto a fleeing mob
+-- while a standing enemy stood in range (the rout-mob analysis, build/fable/routmob2).
 M.REAIM_AFTER = 3
 function M.reaim_target(watch, me, rows, range, preferred, recent)
     if not (up(me) and me.m ~= true and me.fire ~= true and (me.a or 0) > 0 and (range or 0) > 0
@@ -228,20 +234,25 @@ function M.reaim_target(watch, me, rows, range, preferred, recent)
         watch.n = 0
         return nil
     end
-    local best, best_d, wanted
+    local keep, best, best_d, routing, routing_d, wanted
     for _, row in ipairs(rows or {}) do
         local d = in_reach(me, row, range, 0)
         -- Keep a real target between volleys, including the engine's edge-to-edge range.
-        if row.n == me.t and (d or M.on_target(me, row, recent)) then
-            watch.n = 0
-            return nil
-        end
+        if row.n == me.t and (d or M.on_target(me, row, recent)) then keep = row end
         if d then
             if row.n == preferred then wanted = row.n end
-            if not best_d or d < best_d then best, best_d = row.n, d end
+            if row.r ~= true then
+                if not best_d or d < best_d then best, best_d = row.n, d end
+            elseif not routing_d or d < routing_d then
+                routing, routing_d = row.n, d
+            end
         end
     end
-    local pick = wanted or best
+    if keep and (keep.r ~= true or not best or keep.n == preferred) then
+        watch.n = 0
+        return nil
+    end
+    local pick = wanted or best or routing
     watch.n = pick and (watch.n or 0) + 1 or 0
     if watch.n >= M.REAIM_AFTER then
         watch.n = 0

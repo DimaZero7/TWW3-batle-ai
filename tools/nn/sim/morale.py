@@ -21,7 +21,8 @@ States: wavering below 16 points; routing at 0 or below (not within 10 s of a ra
 rout shatters, as does falling below the database's broken band (-50 points) during army destruction. A routing
 unit's morale follows its target like any other's (without the fight terms) and it rallies once the morale is above
 0, it has routed morale.rally_after_s and no standing enemy is within morale.rally_free_m (its army not collapsing);
-a rallied unit whose target is below 0 routs again when the database's 10 s end.
+with morale.rally_hazard on, past rally_after_s and above 0 it rallies with a chance a second by the nearest enemy's
+distance (measured on such routers) instead of that gate; a rallied unit whose target is below 0 routs again when the database's 10 s end.
 """
 import math
 
@@ -284,19 +285,22 @@ def step(u, ctx, params, dt):
     hz = cal.get("rally_hazard") or {}
     if hz.get("on") and "foe_d" in ctx:
         # The rally as the game's measured process (morale.rally_hazard, config/nn/sim.json rally_hazard_why): a
-        # router past rally_after_s rallies in a second with a chance set by the nearest standing enemy's centre
-        # distance (bins edges_m, chances p_per_s; 0 within the first edge), instead of the 95 m gate: a fixed hash
-        # draw per (battle row, unit, step) - nothing random to replay, as opponents.tick_uniform.
+        # router past rally_after_s with morale above 0 rallies in a second with a chance set by the nearest standing
+        # enemy's centre distance (bins edges_m, chances p_per_s), instead of the 95 m gate: a fixed hash draw per
+        # (battle row, unit, step) - nothing random to replay, as opponents.tick_uniform. The first bin is any living
+        # enemy (routing too: rally_any_enemy) within rally_free_m - the game's rare rally there (p_per_s[0]) - the
+        # rest by the nearest standing enemy beyond it; the table is measured on routers with morale above 0, the
+        # condition it is applied on.
         edges, probs = hz["edges_m"], hz["p_per_s"]
         fd = ctx["foe_d"]
         p_s = torch.full_like(fd, float(probs[0]))
         for k, edge in enumerate(edges):
             p_s = torch.where(fd >= float(edge), torch.full_like(fd, float(probs[k + 1])), p_s)
+        p_s = torch.where(ctx["enemy_near"], torch.full_like(fd, float(probs[0])), p_s)
         p_step = 1.0 - (1.0 - p_s) ** dt
         draw = _hash_uniform(fd.shape[0], fd.shape[1], torch.round(ctx["t"] / dt).long(), fd.device)
-        # (free keeps the block by a routing enemy within rally_free_m - rally_any_enemy, measured apart; a standing one
-        # that close is the table's first bin, chance 0)
-        rally = routing & ~u["s"] & ready & alive & free & (draw < p_step)
+        not_beaten = ~ctx.get("collapse", torch.zeros_like(alive))
+        rally = routing & ~u["s"] & ready & alive & not_beaten & (draw < p_step)
     wait_s = float(cal.get("rally_wait_s", 0.0))
     if wait_s > 0 and "rally_ok_s" in u:
         # The rally is not at once (morale.rally_wait_s; build/open_battle/spec.md 4): the conditions above must hold
