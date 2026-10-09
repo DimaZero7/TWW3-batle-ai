@@ -16,7 +16,7 @@ def test_plans_have_few_battles_and_lanes_on_both_sides():
         for i in range(1, len(cp.battles(plan)) + 1):
             config, model_s, arena = cp.run_config(plan, i)
             # (reengage: its tired pair runs up to 540 s before its fight; retarget2 / 3: 10 / 7 short lanes)
-            assert 2 <= len(config["lanes"]) <= {"retarget2": 10, "retarget3": 7}.get(plan, 5)
+            assert 2 <= len(config["lanes"]) <= {"retarget2": 10, "retarget3": 7, "leave": 6}.get(plan, 5)
             assert model_s < (720 if plan == "reengage" else 400)
             assert all(len(side["units"]) <= 20 for side in arena["sides"].values())
             names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}
@@ -380,6 +380,62 @@ def test_the_retarget3_plan_puts_the_targets_in_line_or_across():
             for o in config["lanes"]:
                 if o is not l:
                     assert math.hypot(o["x"] + o.get("a_dx", 0) - l["x"], o["z"] - l["z"]) > 250
+
+
+def test_the_leave_plan_withdraws_from_a_fight_with_and_without_a_chase():
+    b = cp.battles("leave")
+    assert len(b) == 2 and all(len(x) == 6 for x in b)
+    assert [cp.cell(l) for l in b[0]] != [cp.cell(l) for l in b[1]]              # the lanes rotated
+    assert sorted(cp.cell(l) for l in b[0]) == sorted(cp.cell(l) for l in b[1]) and len({cp.cell(l) for l in b[0]}) == 6
+    for l in b[0]:
+        assert l["target_mode"] == "both" and l["gap_m"] == 3 and l["fight_s"] == 70
+        if l["kind"] == "control":
+            assert l["mode"] == "attack_run" and "t_at_leave" not in l
+        else:
+            assert l["mode"] == "withdraw" and l["recharge_after_s"] == 30 and l["back_m"] == 60 and l["as_withdraw"]
+            assert l.get("t_at_leave") == ("halt" if l["kind"] == "stand" else None)
+    assert {(l["attacker"], l["target"], l["kind"]) for l in b[0]} == set(cp.LEAVE_LANES)
+    for i in (1, 2):
+        config, model_s, arena = cp.run_config("leave", i)
+        assert config["men_near_m"] >= 120 and config["men_after_s"] >= 70 and model_s < 200
+        for l in config["lanes"]:
+            # the withdraw point (60 m straight back, +z) stays on the map
+            if l["mode"] == "withdraw":
+                assert l["z"] + l["gap_m"] + l["a_depth"] + l["back_m"] <= 480
+            others = [o for o in config["lanes"] if o is not l]
+            assert all(abs(o["x"] - l["x"]) >= 250 or abs(o["z"] - l["z"]) >= 250 for o in others)
+
+
+def test_the_leave_twin_withdraws_and_halts_the_target_when_told():
+    """sim_lanes on the leave plan's lanes at their layout places: the leaver ends up far behind (the simulator's
+    withdraw), a 'stand' target stays where it was at the withdraw, a 'chase' target follows, the control fights on."""
+    pytest.importorskip("torch")
+    lanes, _, _ = cp.layout(cp.battles("leave")[0])
+    recs = []
+    for l in lanes:
+        a_key, t_key = l["a_key"], l["t_key"]
+        az = l["z"] + l["gap_m"] + l["a_depth"] / 2
+        tz = l["z"] - l["t_depth"] / 2
+        men = lambda k: next(m for key, m, _ in cp.UNITS.values() if key == k)
+        recs.append({"run": "r", "spec": l, "t2": [], "men": [], "contacts": {}, "end": None, "abilities": [],
+                     "phases": [], "samples": [(0.5, {"x": l["x"], "z": az, "b": 180, "men": men(a_key)},
+                                                {"x": l["x"], "z": tz, "b": 0, "men": men(t_key)}, None)]})
+    sims = cp.sim_lanes(recs, copies=1)
+    by = {(s["spec"]["attacker"].split("_")[1], s["spec"]["kind"]): s for s in sims}
+    for (who, kind), s in by.items():
+        first, last = s["samples"][0], s["samples"][-1]
+        out = [p for p in s["phases"] if p["phase"] == "out"]
+        if kind == "control":
+            assert not out and last[1]["m"]
+            continue
+        assert out and last[1]["z"] - first[1]["z"] > 40                              # the leaver ran off
+        t_out = out[0]["t"] / 1000
+        at_out = min(s["samples"], key=lambda r: abs(r[0] - t_out))[2]
+        moved_t = math.hypot(last[2]["x"] - at_out["x"], last[2]["z"] - at_out["z"])
+        if kind == "stand":
+            assert moved_t < 5
+        elif who != "lord":
+            assert moved_t > 20                                                        # the chase
 
 
 def _retarget_lane(switch_s=10):

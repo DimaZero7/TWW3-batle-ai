@@ -11,6 +11,7 @@
 --   'hold'         no order;
 --   'withdraw'     attack_run; recharge_after_s after the first contact a move back_m away at a run,
 --                  never changed again (the melee exit: is the order kept, dropped after melee_breakoff_secs?);
+--                  lane.t_at_leave 'halt' (the leave plan's 'stand'): the target halts at that moment (no chase);
 --   'shoot'        a ranged attack on the target at a walk (fire at will on), never changed;
 --   'script'       lane.steps {{at_s, kind = 'face' | 'move', bearing, width, dx, dz, run}}: at at_s after the
 --                  go a 'face' (goto_location_angle_width at its place: turn in place to the world bearing) or a
@@ -358,6 +359,7 @@ function M.main(bm, config, globals)
                             local r = math.rad(away)
                             orders.move(lane.a.uc, vec(p:get_x() + lane.back_m * math.sin(r),
                                 p:get_z() + lane.back_m * math.cos(r)), true)
+                            if lane.t_at_leave == 'halt' then orders.halt(lane.t.uc) end
                         elseif phase == 'back' then
                             attack(lane, lane.a, lane.t, false)
                         end

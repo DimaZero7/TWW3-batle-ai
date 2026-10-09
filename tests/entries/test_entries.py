@@ -1053,6 +1053,33 @@ class TestChargeProbe:
         assert ends == {"L1": "fight_s", "L2": "fight_s"}
         assert rows[-1]["event"] == "result"
 
+    def test_leave_halts_the_target_only_when_told(self, lua, tmp_path):
+        """The leave plan: both lanes withdraw recharge_after_s after the contact; L1's target halts then (t_at_leave
+        'halt': no chase), L2's keeps its attack (the chase)."""
+        lua.execute(self.SETUP + """
+            for k = 1, 2 do
+                local L = CONFIG.lanes[k]
+                L.mode, L.recharge_after_s, L.back_m, L.recharge_max_s, L.lord = 'withdraw', 2, 60, 1000000, nil
+            end
+            CONFIG.lanes[1].t_at_leave = 'halt'
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            own[2].melee, enemy[2].melee, own[3].melee, enemy[3].melee = true, true, true, true
+            for _ = 1, 2 do bm:tick(500); bm:pump() end
+            enemy[2].moving, enemy[3].moving = true, true
+            for _ = 1, 4 do bm:tick(500); bm:pump() end
+            assert(enemy[2].moving == false, 'the halted target')
+            assert(enemy[3].moving == true, 'the chasing target keeps its attack')
+            assert(own[2].moving == true and own[3].moving == true, 'both attackers withdraw')
+            for _ = 1, 200 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        phases = [(r["lane"], r["phase"]) for r in rows if r["event"] == "probe_phase"]
+        assert ("L1", "out") in phases and ("L2", "out") in phases
+
     def test_script_withdraw_and_attacker_ability(self, lua, tmp_path):
         lua.execute(self.SETUP + """
             CONFIG.lanes[1].mode = 'withdraw'

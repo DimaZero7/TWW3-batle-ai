@@ -146,6 +146,14 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           (throwing stars) one order / every 5 s on two held fearless Empire spearmen ~70 % of their range off (slings
           ~84 m, stars ~49 m centre to centre); 10 lanes a battle (RETARGET2_PLACES), 2 battles, lanes rotated; the
           'retarget' table reads its runs too;
+  leave   the exit from melee (build/nightdip: the simulator's leaving unit is out of contact in ~2 s, the game's in
+          4-4.5 s): a pair fights from 3 m (both attack) 30 s after the first contact, then the attacker withdraws -
+          a move 60 m straight back at a run, as the bridge gives the network's withdraw - and the lane ends 40 s
+          later; the target keeps its attack (chase) or halts at the withdraw (stand): swordsmen from clanrats chase /
+          stand, shield spearmen from stormvermin chase / stand, the Empire General from clanrats chase, and a
+          control pair that never leaves; every 0.5 s both units' health, men, melee flag, place, bearing (speed from
+          the places), the soldiers' places every 1 s to 95 s after the contact within 150 m; 6 lanes, 2 battles,
+          lanes rotated; --sim: the simulator's withdraw (orders.WITHDRAW) on the same lanes;
   retarget3 is the switch cost the formation's turn? (RETARGET3_LANES): crossbowmen C5 / B7 and archers C5 with the
           second target right behind the first on the line of fire ('ray', ~98 / ~122 m) or 60 m across ('side'),
           and a crossbow A control; the shooter's bearing every 0.5 s; 7 lanes, 2 battles, lanes rotated;
@@ -164,6 +172,7 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe retarget [runs...] [--sim]          # the retarget plan's table
     python -m tools.nn.charge_probe run --plan retarget2                # 10 more shooter lanes (the same table)
     python -m tools.nn.charge_probe run --plan retarget3                # targets in line / across (the turn?)
+    python -m tools.nn.charge_probe run --plan leave                    # the exit from melee (report --sim)
 
 Measures per lane (the game's recording, and the simulator's run of the same lane from the same start):
 the attacker's speed on the way in (the last 30 m, the peak), the first contact; HP lost by the target
@@ -229,7 +238,7 @@ NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
-         "dmgmelee", "reengage", "retarget", "retarget2", "retarget3")
+         "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "leave")
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
 WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
@@ -275,6 +284,13 @@ RETARGET2_PLACES = tuple((x, z) for z in (-430, -30, 370) for x in (-440, -150, 
 RETARGET3_LANES = (("xbow", 5, "ray"), ("xbow", 5, "side"), ("xbow", 7, "ray"), ("xbow", 7, "side"),
                    ("archer", 5, "ray"), ("archer", 5, "side"), ("xbow", None, "side"))
 RETARGET3_RAY_GAP_M = 6
+# the leave plan: a pair fights (both attack from gap_m) fight_s after the first contact, then the attacker withdraws
+# (a move back_m straight back at a run - the bridge's withdraw: goto_location(point, run)); the lane ends after_s after
+# that. (attacker, target, kind): 'chase' - the target's attack order stays (it follows); 'stand' - the target halts at
+# the withdraw; 'control' - nobody leaves. Lanes on the retarget2 grid (300+ m apart), 2 battles, lanes rotated
+LEAVE = {"gap_m": 3, "fight_s": 30, "back_m": 60, "after_s": 40}
+LEAVE_LANES = (("swords", "clanrat", "chase"), ("swords", "clanrat", "stand"), ("spearsh", "svsh", "chase"),
+               ("spearsh", "svsh", "stand"), ("general", "clanrat", "chase"), ("swords", "clanrat", "control"))
 RETARGET3_RAY_D_M = 98.0        # as the 'side' lanes' (80 m front to front, 30 m aside)
 RETARGET = {"fire_s": 120, "gap_m": 80, "t2_gap_m": 30}   # 80 m front to front: ~98 m centre to centre
 RETARGET_PLACES = DMGMELEE_PLACES
@@ -533,6 +549,18 @@ def battles(plan):
         base = [rt3(*x) for x in RETARGET3_LANES]
         for b in (base, rotate(base, 3)):
             out.append([dict(l, place=p) for l, p in zip(b, RETARGET2_PLACES)])
+    elif plan == "leave":
+        def lv(attacker, target, kind):
+            leave = kind != "control"
+            extra = dict(recharge_after_s=LEAVE["fight_s"], back_m=LEAVE["back_m"], recharge_max_s=10 ** 6,
+                         as_withdraw=True) if leave else {}
+            if kind == "stand":
+                extra["t_at_leave"] = "halt"
+            return lane(attacker, target, "withdraw" if leave else "attack_run", "both", gap_m=LEAVE["gap_m"],
+                        fight_s=LEAVE["fight_s"] + LEAVE["after_s"], answer=False, kind=kind, **extra)
+        base = [lv(*x) for x in LEAVE_LANES]
+        for b in (base, rotate(base, 3)):
+            out.append([dict(l, place=p) for l, p in zip(b, RETARGET2_PLACES)])
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
@@ -643,9 +671,9 @@ def run_config(plan, index):
     config = {"plan": plan, "battle": index, "settle_ms": SETTLE_MS, "tick_ms": TURN_TICK_MS if turn else TICK_MS,
               "men_ms": 500 if turn else MEN_MS,
               # (reengage: the pair 30 + 30 m apart between its two fights, centre to centre ~75 m)
-              "men_near_m": 100 if plan == "reengage" else 60,
+              "men_near_m": 100 if plan == "reengage" else 150 if plan == "leave" else 60,
               # the soldiers' places: the first 30 s (the charge plan) or the whole fight (hit: men in contact)
-              "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2", "dmgmelee", "reengage") else 95 if plan in ("defender", "wave", "wavemiss", "wavemiss2")
+              "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2", "dmgmelee", "reengage") else 95 if plan in ("defender", "wave", "wavemiss", "wavemiss2", "leave")
                               else 90 if plan in ("hit", "move", "vv") else 30),
               "lanes": lanes, "park": park}
     if plan in ("routmob", "routmob2"):
@@ -947,7 +975,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
     st_ = {"contact": [None] * B, "contact2": [None] * B, "phase": ["in"] * B, "out_t": [0.0] * B, "after": [None] * B,
            "out_from": [None] * B, "fired": [False] * B, "last": {}, "phases": [[] for _ in range(B)],
            "a_ability": [False] * B, "start": [None] * B, "faced": set(), "rout": [None] * B,
-           "re": [{"phase": "in", "clear": False} for _ in range(B)], "tire": [None] * B, "aim": [None] * B}
+           "re": [{"phase": "in", "clear": False} for _ in range(B)], "tire": [None] * B, "aim": [None] * B,
+           "t_halt": {}}
     # the retarget plan's switches run on the game's clock from the go: the twin starts at the first sample
     t_first = [float(ln["samples"][0][0]) for ln in meta]
     rec = {"t": [], "rows": []}
@@ -1024,7 +1053,9 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                     st_["contact2"][b] = t - params.dt
                 if st_["phase"][b] == "out":
                     fx, fz = st_["out_from"][b]
-                    kind[b, A], x[b, A], z[b, A], run_[b, A] = O.MOVE, fx, fz + sp["back_m"], True
+                    # (as_withdraw: the network's own withdraw order, as the bridge gives it in the game - a run)
+                    kind[b, A], x[b, A], z[b, A], run_[b, A] = (O.WITHDRAW if sp.get("as_withdraw") else O.MOVE,
+                                                                fx, fz + sp["back_m"], True)
                 else:
                     kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, True
             elif mode[b] in ("attack_run", "attack_walk"):
@@ -1079,7 +1110,13 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
             if sp.get("t2_mode") == "attack" and int(slot["t2"][b]) >= 0:
                 kind[b, int(slot["t2"][b])], target[b, int(slot["t2"][b])], run_[b, int(slot["t2"][b])] = O.ATTACK, A, False
             # the target
-            if tmode[b] in ("both", "both_walk") or (sp.get("answer") and c is not None):
+            if sp.get("t_at_leave") == "halt" and st_["phase"][b] == "out":
+                # the leave plan's 'stand': the target halts where it is at the withdraw (entries/charge_probe.lua)
+                if st_["t_halt"].get(b) is None:
+                    st_["t_halt"][b] = (float(u["x"][b, T]), float(u["z"][b, T]))
+                kind[b, T], target[b, T], run_[b, T] = O.HOLD, -1, False
+                x[b, T], z[b, T] = st_["t_halt"][b]
+            elif tmode[b] in ("both", "both_walk") or (sp.get("answer") and c is not None):
                 kind[b, T], target[b, T], run_[b, T] = O.ATTACK, A, tmode[b] == "both"
             elif tmode[b] == "push":
                 kind[b, T], x[b, T], z[b, T], run_[b, T] = O.MOVE, sp["x"], sp["z"] + sp.get("push_m", 60), False
