@@ -4,6 +4,7 @@ import json
 import math
 
 import numpy as np
+import pytest
 
 from tools.nn import charge_probe as cp
 from tools.nn import lord_swarm as ls
@@ -14,8 +15,10 @@ def test_plans_have_few_battles_and_lanes_on_both_sides():
     for plan in cp.PLANS:
         for i in range(1, len(cp.battles(plan)) + 1):
             config, model_s, arena = cp.run_config(plan, i)
-            # (reengage: its tired pair runs up to 540 s before its fight)
-            assert 2 <= len(config["lanes"]) <= 5 and model_s < (720 if plan == "reengage" else 400)
+            # (reengage: its tired pair runs up to 540 s before its fight; retarget2: 10 short lanes, 15 / 17 units a side)
+            assert 2 <= len(config["lanes"]) <= (10 if plan == "retarget2" else 5)
+            assert model_s < (720 if plan == "reengage" else 400)
+            assert all(len(side["units"]) <= 20 for side in arena["sides"].values())
             names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}
             for lane in config["lanes"]:
                 assert lane["attacker"] in names and lane["target"] in names
@@ -309,6 +312,44 @@ def test_the_retarget_plan_switches_crossbows_and_handguns_between_two_targets()
                 if o is not l:
                     assert math.hypot(o["x"] + o["a_dx"] - l["x"], o["z"] - l["z"]) > 250
         assert {p["name"] for p in config["park"]} == {"own_lord", "enemy_lord"}
+
+
+def test_the_retarget2_plan_adds_switches_bows_handguns_and_the_skavens_shooters():
+    b = cp.battles("retarget2")
+    assert len(b) == 2 and all(len(x) == 10 for x in b)
+    want = sorted((s, sw or 0) for s, sw in cp.RETARGET2_LANES)
+    assert ("xbow", 3) in cp.RETARGET2_LANES and ("xbow", 7) in cp.RETARGET2_LANES and ("xbow", None) in cp.RETARGET2_LANES
+    assert {s for s, _ in cp.RETARGET2_LANES} == {"xbow", "archer", "hgun", "slinger", "nrun"}
+    for x in b:
+        assert sorted((l["attacker"], l.get("switch_s") or 0) for l in x) == want
+        assert len({cp.cell(l) for l in x}) == 10
+        for l in x:
+            assert l["mode"] == "retarget" and l["target"] == l["target2"] and l["target_mode"] == "hold"
+            assert not l["answer"] and l["max_s"] == 120 and l["kind"] == cp.RETARGET_KIND[l.get("switch_s")]
+            assert l["target"] == ("spear" if l["attacker"] in ("slinger", "nrun") else "slave")
+    assert [l["kind"] for l in b[0]] != [l["kind"] for l in b[1]]              # the lanes rotated
+    units = json.loads(cp.UNITS_JSON.read_text(encoding="utf-8"))["units"]
+    assert units[cp.UNITS["nrun"][0]]["missile"]["projectile"] == "wh2_main_skv_throwing_star"
+    assert cp.FACTION[cp.UNITS["slinger"][0]] == cp.SKV and cp.UNITS["slinger"][0].endswith("slingers_0")
+    for i in (1, 2):
+        config, model_s, arena = cp.run_config("retarget2", i)
+        assert model_s < 200 and sorted((l["x"], l["z"]) for l in config["lanes"]) == sorted(cp.RETARGET2_PLACES)
+        assert all(len(side["units"]) <= 20 for side in arena["sides"].values())
+        names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}
+        for l in config["lanes"]:
+            assert l["target2"] in names and l["target2"] != l["target"] and abs(l["t2_dx"]) == 60
+            assert l["a_dx"] == l["t2_dx"] / 2 and abs(l["x"] + l["t2_dx"]) <= 440    # the second target inward
+            d = math.hypot(l["a_dx"], l["gap_m"] + (l["a_depth"] + l["t_depth"]) / 2)
+            rng = units[l["a_key"]]["missile"]["range_m"]
+            if cp.SHORT[l["a_key"]] in cp.RETARGET2_RANGE_SHARE:
+                assert d == pytest.approx(0.7 * rng, abs=0.2)                     # slings ~84 m, stars ~49 m
+            else:
+                assert 90 <= d <= 105 and d < rng - 25
+            assert l["z"] + l["gap_m"] + l["a_depth"] <= 480 and l["z"] - l["t_depth"] >= -480
+        for l in config["lanes"]:
+            for o in config["lanes"]:
+                if o is not l:
+                    assert math.hypot(o["x"] + o["a_dx"] - l["x"], o["z"] - l["z"]) > 250
 
 
 def _retarget_lane(switch_s=10):

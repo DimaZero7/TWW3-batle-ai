@@ -141,6 +141,11 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           fire at will on (as the bridge). Every 0.5 s the shooter's ammo (its drop: the shots), fire flag, damage dealt,
           place, bearing, and both targets' health and men. Lanes on the dmgmelee grid (RETARGET_PLACES) - 2 battles,
           lanes rotated; 'retarget' prints the table (--sim: + the simulator on the same lanes);
+  retarget2 the same lanes for more shooters and switches (RETARGET2_LANES): crossbowmen every 3 / 7 s and one order
+          (the control), archers one order / every 5 s, handgunners every 5 s, the Skaven's slingers and Night Runners
+          (throwing stars) one order / every 5 s on two held fearless Empire spearmen ~70 % of their range off (slings
+          ~84 m, stars ~49 m centre to centre); 10 lanes a battle (RETARGET2_PLACES), 2 battles, lanes rotated; the
+          'retarget' table reads its runs too;
   wave    the opening wave (build/shotgap/wave_geom.py: men within 2.5 m of an enemy 46-51 in the first 5 s, 12 from 20 s,
           the fronts 1.3 m apart then 2.9 m; is it the collision of the approach or the start inside reach?): swordsmen
           <-> clanrats, both attacking, 90 s, the soldiers' places all fight - (1) placed 1 m apart (front to front), both
@@ -154,6 +159,7 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe report [runs...]                    # the game's table
     python -m tools.nn.charge_probe report --sim                        # + the simulator on the same lanes
     python -m tools.nn.charge_probe retarget [runs...] [--sim]          # the retarget plan's table
+    python -m tools.nn.charge_probe run --plan retarget2                # 10 more shooter lanes (the same table)
 
 Measures per lane (the game's recording, and the simulator's run of the same lane from the same start):
 the attacker's speed on the way in (the last 30 m, the peak), the first contact; HP lost by the target
@@ -191,6 +197,7 @@ UNITS = {
     "xbow": ("wh_main_emp_inf_crossbowmen", 90, EMP),
     "archer": ("wh2_dlc13_emp_inf_archers_0", 90, EMP),
     "hgun": ("wh_main_emp_inf_handgunners", 90, EMP),
+    "slinger": ("wh2_main_skv_inf_skavenslave_slingers_0", 140, SKV),
     "nrun": ("wh2_main_skv_inf_night_runners_0", 120, SKV),
     "clanrat": ("wh2_main_skv_inf_clanrats_1", 160, SKV),
     "cspear": ("wh2_main_skv_inf_clanrat_spearmen_0", 160, SKV),
@@ -218,7 +225,7 @@ NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
-         "dmgmelee", "reengage", "retarget")
+         "dmgmelee", "reengage", "retarget", "retarget2")
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
 WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
@@ -244,7 +251,18 @@ REENGAGE_LANE_DX = 300   # 4 lanes 300 m apart (x -450 .. 450); every unit moves
 # the retarget plan: (shooter, seconds between the switches of its target or None: one order) by lane, the lane
 # names, the timing, the places (the dmgmelee grid: lanes 300+ m apart, x and z within 480 m)
 RETARGET_LANES = (("xbow", None), ("xbow", 10), ("xbow", 5), ("hgun", None), ("hgun", 10))
-RETARGET_KIND = {None: "A", 10: "B10", 5: "C5"}
+RETARGET_KIND = {None: "A", 10: "B10", 5: "C5", 7: "B7", 3: "C3"}
+# the retarget2 plan: the crossbows' rule tried at other switches (3 / 7 s), bows, handguns every 5 s, the Skaven's
+# slings and throwing stars (one order / every 5 s, on held fearless Empire spearmen without shields), a crossbow A
+# control (the spread between runs); 10 lanes a battle on a 4 x 3 grid (places 400 m apart in z, 290 / 300 m in x: every
+# target 250+ m from the other lanes' shooters, |x| <= 440 with the second target inward), 2 battles, the lanes rotated
+RETARGET2_LANES = (("xbow", 3), ("xbow", 7), ("archer", None), ("archer", 5), ("hgun", 5), ("xbow", None),
+                   ("slinger", None), ("slinger", 5), ("nrun", None), ("nrun", 5))
+RETARGET2_TARGET = {"slinger": "spear", "nrun": "spear"}        # else the skavenslaves
+# centre to centre to each target ~70 % of the range for the Skaven (slings 120 m -> 84, stars 70 m -> 49); the others
+# keep the retarget plan's 80 m front to front (~98 m)
+RETARGET2_RANGE_SHARE = {"slinger": 0.7, "nrun": 0.7}
+RETARGET2_PLACES = tuple((x, z) for z in (-430, -30, 370) for x in (-440, -150, 150, 440))[:10]
 RETARGET = {"fire_s": 120, "gap_m": 80, "t2_gap_m": 30}   # 80 m front to front: ~98 m centre to centre
 RETARGET_PLACES = DMGMELEE_PLACES
 RETARGET_LAG_S = 2.0       # a shot's flight (bolts 45 m/s, bullets 100 m/s over ~110 m) and the health readout's lag
@@ -467,6 +485,26 @@ def battles(plan):
         base = [rt(s, sw) for s, sw in RETARGET_LANES]
         for b in (base, rotate(base, 2)):
             out.append([dict(l, place=p) for l, p in zip(b, RETARGET_PLACES)])
+    elif plan == "retarget2":
+        def rt2(shooter, switch_s):
+            target = RETARGET2_TARGET.get(shooter, "slave")
+            gap = RETARGET["gap_m"]
+            if shooter in RETARGET2_RANGE_SHARE:
+                # front to front for the centre distance: the shooter a_dx (half the targets' centre spacing) aside
+                a_key, a_men, _ = UNITS[shooter]
+                t_key, t_men, _ = UNITS[target]
+                with open(UNITS_JSON, encoding="utf-8") as f:
+                    rng = json.load(f)["units"][a_key]["missile"]["range_m"]
+                d, a_dx = RETARGET2_RANGE_SHARE[shooter] * rng, (WIDTH_M + RETARGET["t2_gap_m"]) / 2
+                gap = round(math.sqrt(d * d - a_dx * a_dx) - (depth(a_key, a_men, WIDTH_M)
+                                                              + depth(t_key, t_men, WIDTH_M)) / 2, 1)
+            return lane(shooter, target, "retarget", "hold", gap_m=gap, fight_s=RETARGET["fire_s"], answer=False,
+                        target2=target, t2_gap_m=RETARGET["t2_gap_m"], t2_inward=True, a_mid=True,
+                        max_s=RETARGET["fire_s"], kind=RETARGET_KIND[switch_s],
+                        **({"switch_s": switch_s} if switch_s else {}))
+        base = [rt2(s, sw) for s, sw in RETARGET2_LANES]
+        for b in (base, rotate(base, 5)):
+            out.append([dict(l, place=p) for l, p in zip(b, RETARGET2_PLACES)])
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
