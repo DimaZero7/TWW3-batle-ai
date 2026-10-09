@@ -2394,6 +2394,29 @@ class TestRoutDodge:
         assert away_share(on, -100.0) == pytest.approx(1.0, abs=0.05)                # on, none within 25 m: straight
         assert away_share(P, -15.0) == pytest.approx(1.0, abs=0.05)                  # off (the routmob probe): straight
 
+class TestFleeGoal:
+    def test_a_router_far_from_every_enemy_keeps_running_from_the_enemy_army(self):
+        """morale.flee_near_m 0: a routing formation heads away from every standing enemy weighted 1/distance - with the
+        enemy army 300 m north and no enemy within 150 m it runs south, not to its own (west) map edge; with the old
+        150 m cutoff (flee_near_m 150) it runs west, to its own edge (the recordings: far from every enemy the game's
+        routers keep running from the enemy army, 77-85 % within 30 deg, the own edge 35 %; sim.json flee_near_why)."""
+        def heading(params):
+            st = scenario.build([army([(SPEAR, 0, 0, 90), (SPEAR, -300, 700, 90)],
+                                      [(SLAVE, 0, 300, 180), (SLAVE, 300, 700, 270)])], params)
+            st.u["r"][0, 0], st.u["morale"][0, 0], st.u["rout_count"][0, 0], st.u["rout_s"][0, 0] = True, -100.0, 1.0, 20.0
+            for _ in range(int(round(6.0 / params.dt))):
+                battle.step(st, replay.hold(st), params)
+            vx, vz = float(st.u["vx"][0, 0]), float(st.u["vz"][0, 0])
+            n = math.hypot(vx, vz)
+            assert n > 1.0
+            return vx / n, vz / n
+        assert P.sim["morale"]["flee_near_m"] == 0
+        hx, hz = heading(P)
+        assert hz < -0.9                                           # south: away from the enemy army
+        hx, hz = heading(P.with_cal("morale", flee_near_m=150))
+        assert hx < -0.9                                           # the old rule: west, to its own edge
+
+
 class TestRoutCrowd:
     def test_a_router_among_other_formations_is_slowed(self):
         """morale.rout_crowd: a router with two own standing formations around it runs at own[2] of its rout speed,

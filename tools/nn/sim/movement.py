@@ -35,11 +35,12 @@ def velocity(u, goal_x, goal_z, speed_goal, moving, dt):
     return new * ux, new * uz
 
 
-def flee_goal(u, pw, alive, bounds):
-    """Where a routing unit runs: away from the standing enemies within 150 m, weighted by
-    nearness; with none near, towards its own side's edge (side 1 west, side 2 east)."""
+def flee_goal(u, pw, alive, bounds, near_m=0.0):
+    """Where a routing unit runs: away from the standing enemies, weighted by nearness (1/d) - every standing enemy
+    (near_m 0, morale.flee_near_m; the recordings: far from every enemy a router keeps running from the enemy army,
+    not to its own edge) or those within near_m; with none, towards its own side's edge (side 1 west, side 2 east)."""
     enemy = pw["enemy"] & alive[:, None, :] & ~u["r"][:, None, :]
-    near = enemy & (pw["dist"] < 150)
+    near = enemy & (pw["dist"] < near_m) if near_m > 0 else enemy
     w = torch.where(near, 1 / pw["dist"].clamp(min=1), torch.zeros_like(pw["dist"]))
     ax = -(w * torch.sin(pw["theta"])).sum(2)
     az = -(w * torch.cos(pw["theta"])).sum(2)

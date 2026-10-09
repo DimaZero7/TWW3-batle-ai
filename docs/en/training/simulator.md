@@ -662,6 +662,22 @@ same 0.64 came at 0.65: routers now flee nearly as fast as their pursuers run, s
 are more often the first of a rout. The share is relative to the simulator's own melee (a standing target
 loses 33 HP/s against the game's 28.4); in absolute HP/s the game's 18.1 comes already at 0.35.
 
+### Where a router runs
+
+A routing formation runs away from every standing enemy formation weighted 1/distance (`movement.flee_goal`,
+`morale.flee_near_m` **0**); to its own map edge (side 1 west, side 2 east) only when no enemy stands. A measurement,
+not the game's formula (`build/fable/routdir2.py`, 328 fair recordings, ~400k routing seconds; the heading = the move
+over the next 6 s, "explained" = within 30°): with an enemy within 150 m the 1/d rule explains the game's heading
+best - 48 / 57 / 65 / 69 / 67 % of the seconds at 1-3 / 3-7 / 7-15 / 15-30 / 30-60 s of the rout (cos 0.65-0.81)
+against "away from the chaser" 37-68 % (defined in 10-49 % of the seconds), "away from the nearest" 38-58 %, "to the
+own edge" 33-37 %, "to the deployment point" 3-27 %. With no standing enemy within 150 m (24 % of the routing seconds
+from the 15th s; the twin's 52 %) the game's routers keep running from the enemy army: "1/d over all" 85 % (cos
+0.92), "away from the standing enemies' centre" 77 %, "to the own edge" 35 %, "to the nearest edge" 58 %; the twin
+with the old 150 m cutoff: the own edge 97 %. Not the rejected `rout_direction` (a mix of three directions at every
+distance, below): the near rule is the same, only the fallback changes. An enemy formation ahead (within 40 m, 45° of
+the way): the game goes through it 12-34 %, around 46-54 %, back 16-33 %; the twin 17-22 / 60-65 / 14-22 - left
+alone. The heading's persistence over 3 s: the game cos 0.82-0.87, the twin 0.91-0.95 (the game's mob wavers).
+
 ### A router's exit from the fight
 
 A formation (not a lord) that routs from melee stays in contact for `contact.rout_pin_s` **7 s**: the contact

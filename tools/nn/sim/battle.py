@@ -656,7 +656,9 @@ def step(st, orders, params=None, dt=None):
         sprint = sprint & ~u["r"].gather(1, ti)
     want = torch.where(sprint, u["charge_speed"], want)
     moving = standing & (point | close_in)
-    fx, fz = movement.flee_goal(u, pw, alive, st.bounds)
+    # (morale.flee_near_m: 0 - away from every standing enemy weighted 1/d, the own edge only with none standing;
+    # absent / 150 - the old rule: only enemies within 150 m, the own edge beyond; config/nn/sim.json flee_near_why)
+    fx, fz = movement.flee_goal(u, pw, alive, st.bounds, float(cal["morale"].get("flee_near_m", 150.0)))
     routing = alive & u["r"]
     dodge = cal["morale"].get("rout_dodge")
     if dodge and dodge.get("on", True):

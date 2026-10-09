@@ -105,6 +105,16 @@ Ours: [pace and fatigue](../units/pace.md), [simulator](../../training/simulator
   Ours: 0.80–0.96 of run measured (fatigued; without it 0.98–1.0), units leave the map at |x|, |z| =
   1020 m. The WH2 key
   `scaled_playable_area_size_min/max` is 1024 — consistent with our 1020 m edge (medium).
+  - **Where it runs.** No public formula. The recordings (328 fair battles, ~400k routing seconds,
+    `build/fable/routdir2.py`; the heading = the move over the next 6 s, "explained" = within 30°): with an enemy
+    within 150 m the heading is best explained by "away from every standing enemy weighted 1/distance" - 48-69 % of
+    the seconds (cos 0.65-0.81); "away from the chaser" 37-68 % (defined in only 10-49 % of the seconds), "away from
+    the nearest" 38-58 %, "to the own map edge" 33-37 %, "to the deployment point" 3-27 % (they run from it). With no
+    standing enemy within 150 m (24 % of the seconds from the 15th s) a router still runs from the enemy army: "1/d
+    over all" 85 % (cos 0.92), "away from the standing enemies' centre" 77 %, "to the own edge" 35 %, "to the nearest
+    edge" 58 %. An enemy formation 40 m ahead: through it 12-34 %, around 46-54 %, back 16-33 %. Simulator:
+    `movement.flee_goal`, 1/d over every standing enemy (`morale.flee_near_m` 0), the own edge only with none standing
+    ([simulator](../../training/simulator.md#where-a-router-runs)).
 
 ## Tried and rejected
 
