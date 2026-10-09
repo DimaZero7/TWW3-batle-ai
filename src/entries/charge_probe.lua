@@ -44,6 +44,14 @@
 -- probe_phase 'rout_forced'). lane.extras (optional) {{name, dx, dz, fire}}: units of the attacker's side placed
 -- (dx, dz) from the target's centre facing the attacker's way, halted, fearless, never ordered; with fire, fire at will;
 -- sampled as the list 'e' in probe_sample (unit rows) and probe_men (soldier places after the rout).
+-- A t_morale target's sample row also carries its morale: mp (CCO MoralePercent), ms (MoraleState), mge
+-- (MoraleGreatestEffect, the strongest effect's text), fx (CCO ActiveEffectList keys) and w (wavering).
+-- at_rout 'away' (the rallysecure plan): at the rout the attacker is teleported to (x, z + away_dz) facing back and
+-- halted (no chase, no enemy near; probe_phase 'away'). The target's first stop of routing after the rout (not
+-- shattered) is its rally: probe_phase 'rally' (place, bearing, morale), the target halts and lane.rally_friends
+-- {{name, dx, dz, width, px, pz}} - units of the target's side parked at (px, pz) from the start - are teleported to
+-- dx m to its right and dz m ahead of its centre (its facing at the rally), facing its way (probe_phase 'friends');
+-- sampled as the list 'f'. The lane ends after_rally_s after the rally (then after_rout_s no longer applies).
 -- Every tick_ms 'probe_sample': per running lane both units' (and the lord's) men, health
 -- (CCO HealthValue), melee flag, place, bearing, moving / moving fast, kills, fatigue, status keys
 -- (CCO StatusList: braced, melee...). Every men_ms while the two are within men_near_m of each
@@ -57,6 +65,7 @@ local telemetry = require('apps.telemetry.adapter')
 local orders = require('apps.orders.adapter')
 local facing = require('apps.orders.facing')
 local map = require('apps.map.adapter')
+local services = require('apps.bridge.services')
 
 local M = {}
 
@@ -66,7 +75,7 @@ M.MODES = {attack_run = true, attack_walk = true, move_run = true, recharge = tr
     script = true, shoot = true}
 M.TARGET_MODES = {stand = true, hold = true, both = true, both_walk = true, rear = true, push = true}
 M.AFTER_KINDS = {attack_t2 = true, attack_same = true, halt = true, move_near = true, none = true}
-M.AT_ROUT = {halt = true, none = true}
+M.AT_ROUT = {halt = true, none = true, away = true}
 
 local function round(v, k)
     if type(v) ~= 'number' or v ~= v then return nil end
@@ -81,6 +90,13 @@ function M.layout(lane)
     local td, ad = lane.t_depth or 0, lane.a_depth or 0
     local tb = lane.target_mode == 'rear' and 180 or 0
     return {ax = lane.x, az = lane.z + lane.gap_m + ad / 2, ab = 180, tx = lane.x, tz = lane.z - td / 2, tb = tb}
+end
+
+-- A point dx m to the right and dz m ahead of (x, z) for a unit facing the world bearing (degrees; 0 = +z, 90 = +x).
+-- Pure. Returns x, z.
+function M.beside(x, z, bearing, dx, dz)
+    local r = math.rad(bearing or 0)
+    return x + (dz or 0) * math.sin(r) + (dx or 0) * math.cos(r), z + (dz or 0) * math.cos(r) - (dx or 0) * math.sin(r)
 end
 
 -- The recharge's phase after one tick (pure): 'in' (attacking) -> 'out' recharge_after_s after the
@@ -163,6 +179,19 @@ function M.main(bm, config, globals)
             k = read(cco, u, 'NumKills'), fat = read(function() return u:fatigue_state() end), st = statuses(u),
             uma = read(function() return u:is_under_missile_attack() end), cuma = read(cco, u, 'IsUnderMissileAttack'),
             r = read(function() return u:is_routing() end), sh = read(function() return u:is_shattered() end)}
+    end
+
+    -- A unit row with its morale (t_morale targets): MoralePercent, MoraleState, the strongest effect's text, the
+    -- active effects' keys, wavering.
+    local function morale_row(u)
+        local row = unit_row(u)
+        row.mp, row.ms = round(read(cco, u, 'MoralePercent'), 3), read(cco, u, 'MoraleState')
+        row.w = read(function() return u:is_wavering() end)
+        local effect = read(cco, u, 'MoraleGreatestEffect')
+        if type(effect) == 'string' and effect ~= '' then row.mge = effect end
+        local fx = services.active_effects(function(field) return read(cco, u, field) end)
+        if fx and #fx > 0 then row.fx = table.concat(fx, ',') end
+        return row
     end
 
     -- Soldier places of a unit in decimetres (flat x1, z1, x2, z2 ...), or nil.
@@ -329,9 +358,40 @@ function M.main(bm, config, globals)
                         if lane.at_rout == 'halt' then orders.halt(lane.a.uc) end
                         emit('probe_phase', {lane = lane.name, phase = 'rout', t = now - lane.t0,
                             at_rout = lane.at_rout or 'none'})
+                        if lane.at_rout == 'away' then
+                            local ax, az = lane.x, lane.z + (lane.away_dz or 400)
+                            local ok, e = pcall(place, lane.a, ax, az, 180, lane.a_width)
+                            emit('probe_phase', {lane = lane.name, phase = 'away', t = now - lane.t0, x = round(ax),
+                                z = round(az), status = ok and 'done' or 'failed', error = (not ok) and tostring(e) or nil})
+                        end
                     end
                 end
-                local r = {lane = lane.name, t = now - lane.t0, a = unit_row(lane.a.unit), tg = unit_row(lane.t.unit)}
+                if lane.after_rally_s and lane.rout_ms and not lane.rally_ms
+                        and read(function() return lane.t.unit:is_routing() end) == false
+                        and not read(function() return lane.t.unit:is_shattered() end) then
+                    lane.rally_ms = now
+                    orders.halt(lane.t.uc)
+                    local p = read(function() return lane.t.unit:position() end)
+                    local b = read(function() return lane.t.unit:bearing() end) or 0
+                    emit('probe_phase', {lane = lane.name, phase = 'rally', t = now - lane.t0,
+                        rout_s = round((now - lane.rout_ms) / 1000), x = p and round(p:get_x()), z = p and round(p:get_z()),
+                        b = round(b, 0), mp = round(read(cco, lane.t.unit, 'MoralePercent'), 3)})
+                    if p and lane.rally_friends and #lane.rally_friends > 0 then
+                        local placed = {}
+                        for _, f in ipairs(lane.rally_friends) do
+                            local fx, fz = M.beside(p:get_x(), p:get_z(), b, f.dx, f.dz)
+                            local ok = pcall(place, state.units[f.name], fx, fz, b, f.width or lane.t_width)
+                            placed[#placed + 1] = {name = f.name, x = round(fx), z = round(fz), status = ok and 'done' or 'failed'}
+                        end
+                        emit('probe_phase', {lane = lane.name, phase = 'friends', t = now - lane.t0, units = placed})
+                    end
+                end
+                local tg_row = lane.t_morale and morale_row or unit_row
+                local r = {lane = lane.name, t = now - lane.t0, a = unit_row(lane.a.unit), tg = tg_row(lane.t.unit)}
+                if lane.rally_friends and #lane.rally_friends > 0 then
+                    r.f = {}
+                    for _, f in ipairs(lane.rally_friends) do r.f[#r.f + 1] = unit_row(state.units[f.name].unit) end
+                end
                 if lane.lord then r.l = unit_row(state.units[lane.lord.name].unit) end
                 if lane.extras and #lane.extras > 0 then
                     r.e = {}
@@ -341,7 +401,10 @@ function M.main(bm, config, globals)
                 rows[#rows + 1] = r
                 if beaten(lane.a.unit) or beaten(lane.t.unit) then
                     end_lane(lane, 'dead')
-                elseif lane.rout_ms and now - lane.rout_ms >= (lane.after_rout_s or 45) * 1000 then
+                elseif lane.rally_ms and lane.after_rally_s and now - lane.rally_ms >= lane.after_rally_s * 1000 then
+                    end_lane(lane, 'after_rally')
+                elseif lane.rout_ms and not (lane.rally_ms and lane.after_rally_s)
+                        and now - lane.rout_ms >= (lane.after_rout_s or 45) * 1000 then
                     end_lane(lane, 'after_rout')
                 elseif lane.contact and now - lane.contact >= lane.fight_s * 1000 then
                     end_lane(lane, 'fight_s')
@@ -460,6 +523,9 @@ function M.main(bm, config, globals)
                 place(it, L.tx + (e.dx or 0), L.tz + (e.dz or 0), L.ab, lane.a_width)
                 if e.fire then orders.set_fire_at_will(it.uc, true) end
             end
+            for _, f in ipairs(lane.rally_friends or {}) do
+                place(state.units[f.name], f.px, f.pz, 0, f.width or lane.t_width)
+            end
         end
         emit('start', {speed = config.speed, lanes = config.lanes})
         state.cancel_deadline = battle.deadline(bm, config.deadline_s * 1000, guarded(function()
@@ -512,6 +578,9 @@ function M.main(bm, config, globals)
             if l.at_rout then assert(M.AT_ROUT[l.at_rout], 'unknown at_rout ' .. tostring(l.at_rout)) end
             for _, e in ipairs(l.extras or {}) do
                 assert(state.units[e.name], 'scenario unit missing: ' .. tostring(e.name))
+            end
+            for _, f in ipairs(l.rally_friends or {}) do
+                assert(state.units[f.name], 'scenario unit missing: ' .. tostring(f.name))
             end
             lane.layout = M.layout(l)
             state.lanes[i] = lane

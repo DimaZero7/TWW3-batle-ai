@@ -82,6 +82,17 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           halts at the rout; crossbowmen of its side 80 m beyond the target, fire at will), neighbours (halts; two
           spearmen units of its side 25 m to either side and 20 m behind the target, halted, striking only what touches
           them), the control (halts, nobody else); soldiers' places 40 s after the rout - 2 battles, lanes rotated;
+  rallysecure how 'flanks secure' comes back after a rally (the game: the rallied unit far from enemies gains +1/+2/+3/+4
+          /+7 morale 3/10/20/30/45 s after the rally, the simulator +5 at once): skavenslaves with half their men killed
+          at placement (damage kill 0.5), normal morale, held (never ordered), attacked by fearless spearmen from 40 m
+          until they rout by themselves (the engine's morale_behavior_rout shatters at once - lord_fall: is_shattered
+          true at the call - so it cannot be rallied from); at the rout the spearmen are teleported 400 m away (at_rout
+          'away': no chase, no enemy within 200 m); at the rally the target halts and, by lane, nothing more ('alone'),
+          two fearless clanrats of its side teleported 35 m (centre to centre) to its left and right ('neighbours',
+          rally_friends), its Warlord teleported 20 m behind it ('lord'); 'control': the same damaged slaves never
+          attacked, the spearmen standing 300 m off; every 0.5 s the target's MoralePercent, MoraleState,
+          MoraleGreatestEffect, ActiveEffectList, routing / wavering / shattered and place, to 60 s after the rally
+          (after_rally_s) - 2 battles of 4 lanes 300 m apart, rotated; no simulator twin yet;
   wavemiss the opening wave against shooters (build/routmorale: in the it1-it9 gate battles a shooter unit in melee loses
           0.54-0.69 % of its health a second in the game whatever its time in melee - x1.28 -> x1 from 0-10 s to 60+ s -
           while the replay's falls x1.95 -> x1, the opening wave measured formation on formation: do the fronts part from
@@ -170,12 +181,21 @@ RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
-         "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2")
+         "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure")
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
 WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
 ROUTMOB2_EXTRAS = {"fire": [{"short": "xbow", "dx": 0, "dz": 80, "fire": True}],
                    "neighbours": [{"short": "spear", "dx": -25, "dz": -20}, {"short": "spear", "dx": 25, "dz": -20}]}
+# the rallysecure plan: units of the target's side teleported beside the rallied target (dx to its right, dz ahead,
+# from its centre and facing at the rally; entries/charge_probe.lua rally_friends), parked far until then
+RALLYSECURE_FRIENDS = {"neighbours": [{"short": "clanrat", "dx": -35, "dz": 0, "width": 25},
+                                      {"short": "clanrat", "dx": 35, "dz": 0, "width": 25}],
+                       "lord": [{"short": "warlord", "dx": 0, "dz": -20, "width": 5}]}
+RALLYSECURE_LANE_DX = 300   # lanes 300 m apart (x -450 .. 450)
+RALLYSECURE_AWAY_DZ = 400   # at the rout the attacker is teleported this far beyond the target's start (+z)
+RALLYSECURE_PARK_Z = 600    # the rally friends wait here (+z, beyond the attackers) until the rally
+RALLYSECURE_AFTER_S = 60    # the lane ends this long after the rally
 ROUTMOB_MEN_S = 40     # the routmob plan: the soldiers' places this long after the target's rout
 ROUTMOB_END_S = 45     # ... and the lane ends this long after it
 # the reform plan: soldier places this long after contact (the whole fight)
@@ -332,6 +352,19 @@ def battles(plan):
                         damage={"t": {"method": "kill", "share": 0.5}}, rout_at_s=30, kind=kind, **extra)
         base = [rm2(k) for k in ("chase", "fire", "neighbours", "control")]
         out += [base, rotate(base, 2)]
+    elif plan == "rallysecure":
+        def rs(kind):
+            common = dict(t_morale=True, damage={"t": {"method": "kill", "share": 0.5}}, kind=kind,
+                          lane_dx=RALLYSECURE_LANE_DX)
+            if kind == "control":
+                # never attacked: the spearmen stand 300 m off, both held; the lane runs as long as a rallying one
+                return lane("spear", "slave", "hold", "hold", gap_m=300, fight_s=240, answer=False, max_s=180, **common)
+            extra = dict(rally_friends=RALLYSECURE_FRIENDS[kind]) if kind in RALLYSECURE_FRIENDS else {}
+            return lane("spear", "slave", "attack_run", "hold", gap_m=40, fight_s=240, answer=False, at_rout="away",
+                        away_dz=RALLYSECURE_AWAY_DZ, after_rout_s=200, after_rally_s=RALLYSECURE_AFTER_S, max_s=240,
+                        **common, **extra)
+        base = [rs(k) for k in ("alone", "neighbours", "control", "lord")]
+        out += [base, rotate(base, 2)]
     elif plan == "wavemiss":
         def wm(pair, mode):
             return lane(pair[0], pair[1], "attack_run", mode, gap_m=30, fight_s=90)
@@ -414,6 +447,14 @@ def layout(specs):
             # (fire: fire at will on); entries/charge_probe.lua start
             assert all(UNITS[e["short"]][2] == a_fac for e in spec["extras"]), spec
             row["extras"] = [dict(e, name=add(e["short"], k, f"e{j}")) for j, e in enumerate(spec["extras"], 1)]
+        if spec.get("rally_friends"):
+            # units of the target's side parked far (+z, px / pz) until the target rallies, then teleported beside it;
+            # entries/charge_probe.lua rally_friends
+            assert all(UNITS[f["short"]][2] == t_fac for f in spec["rally_friends"]), spec
+            n_f = len(spec["rally_friends"])
+            row["rally_friends"] = [dict(f, name=add(f["short"], k, f"f{j}"), px=round(x + 40 * (j - (n_f + 1) / 2), 1),
+                                         pz=float(RALLYSECURE_PARK_Z))
+                                    for j, f in enumerate(spec["rally_friends"], 1)]
         if spec.get("lord"):
             row["lord"] = dict(spec["lord"], name=add(spec["lord"]["name"], k))
             if row["lord"].get("at_m"):       # front to front -> centre to centre
@@ -500,6 +541,8 @@ def load_run(run_dir):
                     lanes[x["lane"]]["samples"].append((x["t"] / 1000, x["a"], x["tg"], x.get("l")))
                     if x.get("e"):
                         lanes[x["lane"]].setdefault("extras", []).append((x["t"] / 1000, x["e"]))
+                    if x.get("f"):
+                        lanes[x["lane"]].setdefault("friends", []).append((x["t"] / 1000, x["f"]))
         elif ev == "probe_men":
             for x in r["lanes"]:
                 if x["lane"] in lanes:
@@ -629,6 +672,8 @@ def cell(spec):
     ab = (spec.get("lord") or {}).get("ability")
     if ab is not None:
         name += " SYG" if ab else " noSYG"
+    if spec.get("kind"):                  # routmob2 / rallysecure: the lane's kind tells same-looking lanes apart
+        name += f" {spec['kind']}"
     return name
 
 
@@ -648,6 +693,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
     from tools.nn.sim import abilities as sim_abilities, battle, orders as O, scenario as sim_scenario
     from tools.nn.sim.params import load
     params = params or load()
+    if any(ln["spec"].get("at_rout") == "away" or ln["spec"].get("rally_friends") for ln in lanes):
+        raise NotImplementedError("the rallysecure lanes (teleports at the rout and the rally) have no simulator twin")
     armies, meta = [], []
     for ln in lanes:
         spec = ln["spec"]

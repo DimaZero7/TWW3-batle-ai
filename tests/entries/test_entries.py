@@ -1124,6 +1124,58 @@ class TestChargeProbe:
         sample = next(r for r in rows if r["event"] == "probe_sample")
         assert "r" in sample["lanes"][0]["tg"]
 
+    def test_rallysecure_sends_the_attacker_away_and_brings_friends_beside_the_rallied_target(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            CONFIG.lanes = {CONFIG.lanes[1]}
+            local l = CONFIG.lanes[1]
+            l.mode, l.target_mode, l.answer, l.fight_s, l.max_s = 'attack_run', 'hold', false, 240, 240
+            l.t_morale, l.at_rout, l.away_dz, l.after_rout_s, l.after_rally_s = true, 'away', 400, 200, 10
+            l.recharge_after_s, l.back_m, l.recharge_max_s = nil, nil, nil
+            l.rally_friends = {{name = 'enemy_clanrat_2', dx = -35, dz = 0, width = 25, px = -140, pz = 600},
+                               {name = 'enemy_lord', dx = 0, dz = -20, width = 5, px = -100, pz = 600}}
+            CONFIG.park = {{name = 'own_lord', x = -700, z = -400, bearing = 0}}
+            fake.cco['uid_enemy_clanrat_1'] = {MoralePercent = 0.42, MoraleGreatestEffect = 'secure',
+                ['ActiveEffectList.Size'] = 1, ['ActiveEffectList.At(0).PhaseRecordContext.Key'] = 'fx_one'}
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            TELEPORTS = {}
+            for name, it in pairs(STATE.units) do
+                it.uc.teleport_to_location = function(_, p) TELEPORTS[name] = {p:get_x(), p:get_z()} end
+            end
+            bm:pump()
+            assert(TELEPORTS['enemy_clanrat_2'][1] == -140 and TELEPORTS['enemy_clanrat_2'][2] == 600, 'parked')
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            assert(enemy[2].fearless ~= true and enemy[3].fearless == true, 'the target keeps its morale, friends not')
+            assert(enemy[2].attack_args == nil, 'the target is never ordered')
+            own[2].melee, enemy[2].melee = true, true
+            for _ = 1, 4 do bm:tick(500); bm:pump() end
+            enemy[2].routing = true
+            for _ = 1, 2 do bm:tick(500); bm:pump() end
+            assert(TELEPORTS['own_swords_1'][1] == -120 and TELEPORTS['own_swords_1'][2] == 400, 'the attacker away')
+            assert(own[2].moving == false, 'and halted')
+            enemy[2].pos = fake.vector_type.new()
+            enemy[2].pos.x, enemy[2].pos.z = -120, -150
+            enemy[2].routing = false
+            for _ = 1, 2 do bm:tick(500); bm:pump() end
+            assert(TELEPORTS['enemy_clanrat_2'][1] == -155 and TELEPORTS['enemy_clanrat_2'][2] == -150, 'left of it')
+            assert(TELEPORTS['enemy_lord'][1] == -120 and TELEPORTS['enemy_lord'][2] == -170, 'behind it')
+            for _ = 1, 200 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        phases = [r for r in rows if r["event"] == "probe_phase"]
+        assert [r["phase"] for r in phases] == ["rout", "away", "rally", "friends"]
+        assert phases[1]["status"] == "done" and phases[2]["mp"] == 0.42 and phases[2]["x"] == -120
+        assert [u["status"] for u in phases[3]["units"]] == ["done", "done"]
+        ends = [r for r in rows if r["event"] == "probe_lane_end"]
+        assert [r["why"] for r in ends] == ["after_rally"] and ends[0]["t"] - phases[2]["t"] >= 10000
+        sample = [x for r in rows if r["event"] == "probe_sample" for x in r["lanes"]][-1]
+        assert sample["tg"]["mp"] == 0.42 and sample["tg"]["mge"] == "secure" and sample["tg"]["fx"] == "fx_one"
+        assert len(sample["f"]) == 2 and "men" in sample["f"][0] and "mp" not in sample["a"]
+        beside = lua.eval("require('entries.charge_probe').beside")
+        x, z = beside(0, 0, 90, 10, 0)
+        assert (round(x, 6), round(z, 6)) == (0, -10)                             # right of a unit facing +x is -z
+
     def test_routmob2_forces_the_rout_and_places_fire_at_will_extras(self, lua, tmp_path):
         lua.execute(self.SETUP + """
             CONFIG.lanes = {CONFIG.lanes[1]}

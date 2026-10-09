@@ -1,6 +1,7 @@
 """The melee probe's plans, battle files and measures (tools/nn/charge_probe.py) and the lord swarm's damage
 plan (tools/nn/lord_swarm.py). The simulator twin needs torch (tested in the container by running it)."""
 import json
+import math
 
 import numpy as np
 
@@ -20,6 +21,7 @@ def test_plans_have_few_battles_and_lanes_on_both_sides():
                 assert lane["attacker"].split("_")[0] != lane["target"].split("_")[0]   # two sides
             # one lord a side, parked unless a lane uses him
             used = {n for l in config["lanes"] for n in (l["attacker"], l["target"], (l.get("lord") or {}).get("name"))}
+            used |= {f["name"] for l in config["lanes"] for f in l.get("rally_friends") or []}
             assert {p["name"] for p in config["park"]} == {"own_lord", "enemy_lord"} - used
             xs = sorted(l["x"] for l in config["lanes"])
             assert all(b - a >= 200 for a, b in zip(xs, xs[1:]))
@@ -149,6 +151,40 @@ def test_the_routmob2_plan_damages_the_slaves_forces_the_rout_and_adds_shooters_
         for e in lane.get("extras") or []:
             assert e["name"] in names and e["name"].startswith("own_")               # the attacker's (Empire) side
     assert config["men_after_rout_s"] == cp.ROUTMOB_MEN_S and model_s < 400
+
+
+def test_the_rallysecure_plan_routs_the_slaves_sends_the_attacker_away_and_brings_friends_at_the_rally():
+    b = cp.battles("rallysecure")
+    assert len(b) == 2 and all(len(x) == 4 for x in b)
+    for x in b:
+        kinds = {l["kind"]: l for l in x}
+        assert set(kinds) == {"alone", "neighbours", "control", "lord"}
+        assert all(l["t_morale"] and l["damage"] == {"t": {"method": "kill", "share": 0.5}} for l in x)
+        assert all(l["target_mode"] == "hold" and not l["answer"] and "rout_at_s" not in l for l in x)
+        for k in ("alone", "neighbours", "lord"):
+            l = kinds[k]
+            assert l["mode"] == "attack_run" and l["gap_m"] == 40 and l["at_rout"] == "away"
+            assert l["away_dz"] == cp.RALLYSECURE_AWAY_DZ and l["after_rally_s"] == cp.RALLYSECURE_AFTER_S
+        assert kinds["control"]["mode"] == "hold" and kinds["control"]["gap_m"] == 300
+        assert "at_rout" not in kinds["control"] and "rally_friends" not in kinds["alone"]
+        assert [(f["short"], f["dx"], f["dz"]) for f in kinds["neighbours"]["rally_friends"]] == [
+            ("clanrat", -35, 0), ("clanrat", 35, 0)]
+        assert [f["short"] for f in kinds["lord"]["rally_friends"]] == ["warlord"]
+    assert b[1][0] == b[0][2]                                                # the lanes rotated
+    for i in (1, 2):
+        config, model_s, arena = cp.run_config("rallysecure", i)
+        assert model_s < 400
+        xs = sorted(l["x"] for l in config["lanes"])
+        assert all(q - p >= 250 for p, q in zip(xs, xs[1:])) and max(abs(v) for v in xs) <= 480
+        names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]} | {"enemy_lord"}
+        lanes = {l["kind"]: l for l in config["lanes"]}
+        for f in lanes["neighbours"]["rally_friends"] + lanes["lord"]["rally_friends"]:
+            assert f["name"] in names and f["name"].startswith("enemy_") and f["pz"] == cp.RALLYSECURE_PARK_Z
+        assert lanes["lord"]["rally_friends"][0]["name"] == "enemy_lord"
+        assert "enemy_lord" not in {p["name"] for p in config["park"]}           # placed by the lane, not parked
+        # parked friends: far from every lane's start (the attackers go to z = away_dz, the targets run to -z)
+        for f in lanes["neighbours"]["rally_friends"]:
+            assert all(math.hypot(f["px"] - l["x"], f["pz"] - l["z"]) >= 500 for l in config["lanes"])
 
 
 def test_the_wavemiss_plan_charges_each_shooter_held_and_answering():
