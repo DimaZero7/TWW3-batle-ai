@@ -101,7 +101,11 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
   more attackers. WH1–WH3 guides · [WH3 kv guide][g3], [WH1 kv guide][g1] · medium.
   - Ours: 0.5 of the files in contact strike (`melee.fighting_files`, fitted on the pairs); a file is the
     contact length / this unit's formation step from the database (h across the front, v across the
-    flank: `unit_spacings`, the Empire 1.48 × 1.6 m, clanrats 1.6 × 1.7, slaves 1.6 × 1.8). The database
+    flank: `unit_spacings`, the Empire 1.48 × 1.6 m, clanrats 1.6 × 1.7, slaves 1.6 × 1.8). A thinned formation does
+    not close up: the striker's front is its ordered width, its men striking x the front's fill
+    (1 - e^(-r/1.5)) / (1 - e^(-r0/1.5)), r = men a file (`melee.front_fill_ranks` 1.5; measured from the soldiers'
+    places in the `dmgmelee` probe: a unit keeps 25-28 of its 30 m, 0.22 ... 1.0 of the whole unit's men reach the
+    enemy at 0.3 ... 5 men a file; no such rule in any source - [simulator](../../training/simulator.md)). The database
     has no number for how many strike.
 - **Matched combat.** A share of blows is played as paired "matched combat" animations
   instead of free strikes: `matched_combat_percentage` WH2 100 → WH3 50; in a formed charge 20 %,

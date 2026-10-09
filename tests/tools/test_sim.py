@@ -210,6 +210,40 @@ class TestMelee:
         st.u["armour"][0, st.N // 2] = 80.0
         assert self.rate(st)[0] < base
 
+    def test_a_thinned_formation_keeps_its_width_and_fewer_of_its_men_reach(self):
+        """melee.front_fill_ranks (1.5): a formation at half its men keeps its ordered width (its files do not shrink)
+        and its men striking are scaled by the fill of that front, (1 - e^(-r/1.5)) / (1 - e^(-r0/1.5)), r = men a
+        file; a whole unit is unchanged against the rule off (0), and so is a lone man (the dmgmelee probe: a unit at
+        30 % struck 1.6-1.9x the game before)."""
+        lam = P.sim["melee"]["front_fill_ranks"]
+        assert lam == 1.5
+        off = P.with_cal("melee", front_fill_ranks=0)
+        st = face_off(SPEAR, SLAVE)
+        pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
+        contact = pw["enemy"] & (pw["gap"] <= 1.0)
+        z = torch.zeros_like(st.u["men"])
+        st.u["contact_s"] = torch.full_like(st.u["men"], 100.0)
+        whole_on = float(melee.strikes(st.u, pw, contact, P, z)[3][0, 0, 1])
+        whole_off = float(melee.strikes(st.u, pw, contact, off, z)[3][0, 0, 1])
+        assert whole_on == pytest.approx(whole_off, rel=1e-4) and whole_on > 0
+        files0 = math.floor(float(st.u["width"][0, 0]) / float(st.u["sp_h"][0, 0]) + 1e-4)
+        men0 = float(st.u["men0"][0, 0])
+        st.u["men"][0, 0] = men0 / 2                         # half the men, the width ordered the same
+        half_on = float(melee.strikes(st.u, pw, contact, P, z)[3][0, 0, 1])
+        half_off = float(melee.strikes(st.u, pw, contact, off, z)[3][0, 0, 1])
+        fill = (1 - math.exp(-(men0 / 2 / files0) / lam)) / (1 - math.exp(-(men0 / files0) / lam))
+        assert 0.8 < fill < 0.95
+        assert half_on == pytest.approx(half_off * fill, rel=1e-3)
+        assert half_off == pytest.approx(whole_off, rel=1e-3)   # the old rule: the half unit struck as the whole one
+        # a lone man (the General) strikes his one blow whatever the rule
+        st2 = face_off(GENERAL, SLAVE) if "GENERAL" in globals() else None
+        if st2 is not None:
+            pw2 = geometry.pairwise(st2.u, P.sim["formation"]["spacing_m"])
+            c2 = pw2["enemy"] & (pw2["gap"] <= 1.0)
+            st2.u["contact_s"] = torch.full_like(st2.u["men"], 100.0)
+            assert float(melee.strikes(st2.u, pw2, c2, P, z)[3][0, 0, 1]) == pytest.approx(
+                float(melee.strikes(st2.u, pw2, c2, off, z)[3][0, 0, 1]), rel=1e-4)
+
     def test_a_rear_attack_hits_more(self):
         p = P
         st = face_off(SPEAR, SLAVE)

@@ -145,16 +145,33 @@ def strikes(u, pw, contact, params, charge_now, first=False):
     s, c = torch.sin(pw["rel_i"]), torch.cos(pw["rel_i"])
     through_front = s.abs() * depth_i <= c.abs() * front_i
     along = torch.where(through_front, h_u[:, :, None], v_u[:, :, None])
-    length = torch.minimum(pw["face_i"], pw["face_j"])
+    # The front's fill (melee.front_fill_ranks, lam; 0 / absent: off): a thinned formation does not close up - it keeps
+    # its ordered width (the dmgmelee probe: 25-28 of 30 m) and only part of its men reach the enemy. Its frontal face
+    # is the ordered width (files0 = floor(width / h), not the men's), and its men striking are scaled by the fill of
+    # that front, occ(r) = 1 - exp(-r / lam), r = men / files0 (men a file), against the whole unit's occ(r0): a whole
+    # unit keeps its calibrated F. MEASURED from the soldiers' places (config/nn/sim.json melee.front_fill_why).
+    lam = float(cal.get("front_fill_ranks") or 0.0)
+    if lam > 0:
+        files0 = torch.clamp(torch.floor(u["width"] / h_u + 1e-4), min=1)
+        r_i = (u["men"].clamp(min=0) / files0)[:, :, None]
+        r0_i = (u["men0"].clamp(min=1) / files0)[:, :, None]
+        face_i = torch.where(through_front, (files0 * h_u)[:, :, None], pw["face_i"])
+        fill = (1 - torch.exp(-r_i / lam)) / (1 - torch.exp(-r0_i / lam))
+    else:
+        face_i = pw["face_i"]
+        fill = None
+    length = torch.minimum(face_i, pw["face_j"])
     if cal.get("flank_face", "min") == "striker":
         # Through the target's flank (its side towards i is its depth) the striker brings men by
         # its own face, not by the target's short flank (measured: a lone flank attacker takes
         # 1.53x what a frontal one does; melee.flank_face, config/nn/sim.json).
         s_j, c_j = torch.sin(pw["rel_j"]).abs(), torch.cos(pw["rel_j"]).abs()
         flank_j = s_j * pw["depth"][:, None, :] > c_j * pw["front"][:, None, :]
-        length = torch.where(flank_j, pw["face_i"], length)
+        length = torch.where(flank_j, face_i, length)
     F = cal["fighting_files"] * length / along
     F = torch.minimum(F, men_i)
+    if fill is not None:
+        F = torch.where(single_i, F, F * fill)
     F = torch.where(single_j, torch.minimum(men_i, torch.full_like(F, float(cc["lord_max_attackers"]))), F)
     F = torch.where(single_i, torch.ones_like(F), F)
     # Fewer men left, fewer bring their weapons to bear (and fewer can be reached).
