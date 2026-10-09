@@ -74,6 +74,14 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           mob's own stretch); the soldiers' places every second to 40 s after the rout (men_after_rout_s), wherever the
           enemy is: skavenslaves v spearmen (chase / halt), clanrats v swordsmen (chase / halt) - 2 battles, lanes
           rotated; the lane ends 45 s after the rout;
+  routmob2 what bleeds a router far from its chaser (build/fable/passby.py: in the game a router with no enemy formation
+          within 12 m and nobody targeting it loses 0.08 % of its health a second, 0.035 beyond 30 m; the twin 0.039 /
+          0.013): skavenslaves with half their men killed at placement (damage kill 0.5), normal morale, attacked by
+          fearless spearmen from 40 m; if they have not routed rout_at_s after the contact they are routed by script
+          (morale_behavior_rout, probe_phase 'rout_forced'); lanes: the chase (at_rout none), missiles (the attacker
+          halts at the rout; crossbowmen of its side 80 m beyond the target, fire at will), neighbours (halts; two
+          spearmen units of its side 25 m to either side and 20 m behind the target, halted, striking only what touches
+          them), the control (halts, nobody else); soldiers' places 40 s after the rout - 2 battles, lanes rotated;
   wave    the opening wave (build/shotgap/wave_geom.py: men within 2.5 m of an enemy 46-51 in the first 5 s, 12 from 20 s,
           the fronts 1.3 m apart then 2.9 m; is it the collision of the approach or the start inside reach?): swordsmen
           <-> clanrats, both attacking, 90 s, the soldiers' places all fight - (1) placed 1 m apart (front to front), both
@@ -144,7 +152,9 @@ RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
-         "reform2", "defender", "wave", "routmob")
+         "reform2", "defender", "wave", "routmob", "routmob2")
+ROUTMOB2_EXTRAS = {"fire": [{"short": "xbow", "dx": 0, "dz": 80, "fire": True}],
+                   "neighbours": [{"short": "spear", "dx": -25, "dz": -20}, {"short": "spear", "dx": 25, "dz": -20}]}
 ROUTMOB_MEN_S = 40     # the routmob plan: the soldiers' places this long after the target's rout
 ROUTMOB_END_S = 45     # ... and the lane ends this long after it
 # the reform plan: soldier places this long after contact (the whole fight)
@@ -293,6 +303,14 @@ def battles(plan):
         base = [rm("spear", "slave", "none"), rm("spear", "slave", "halt"), rm("swords", "clanrat", "none"),
                 rm("swords", "clanrat", "halt")]
         out += [base, rotate(base, 2)]
+    elif plan == "routmob2":
+        def rm2(kind):
+            extra = dict(extras=ROUTMOB2_EXTRAS[kind]) if kind in ROUTMOB2_EXTRAS else {}
+            return lane("spear", "slave", "attack_run", "stand", gap_m=40, fight_s=200, t_morale=True,
+                        at_rout="none" if kind == "chase" else "halt", after_rout_s=ROUTMOB_END_S, max_s=260,
+                        damage={"t": {"method": "kill", "share": 0.5}}, rout_at_s=30, kind=kind, **extra)
+        base = [rm2(k) for k in ("chase", "fire", "neighbours", "control")]
+        out += [base, rotate(base, 2)]
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
@@ -356,6 +374,11 @@ def layout(specs):
             row["t2_dx"] = round(tw + spec.get("t2_gap_m", 4), 1)
             if spec.get("t2_inward") and x > 0:      # towards the middle of the field (the lanes' outer ones)
                 row["t2_dx"] = -row["t2_dx"]
+        if spec.get("extras"):
+            # units of the attacker's side placed (dx, dz) from the target's centre, halted, fearless, never ordered
+            # (fire: fire at will on); entries/charge_probe.lua start
+            assert all(UNITS[e["short"]][2] == a_fac for e in spec["extras"]), spec
+            row["extras"] = [dict(e, name=add(e["short"], k, f"e{j}")) for j, e in enumerate(spec["extras"], 1)]
         if spec.get("lord"):
             row["lord"] = dict(spec["lord"], name=add(spec["lord"]["name"], k))
             if row["lord"].get("at_m"):       # front to front -> centre to centre
@@ -387,7 +410,7 @@ def run_config(plan, index):
               "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2") else 95 if plan in ("defender", "wave")
                               else 90 if plan in ("hit", "move", "vv") else 30),
               "lanes": lanes, "park": park}
-    if plan == "routmob":
+    if plan in ("routmob", "routmob2"):
         config["men_after_rout_s"] = ROUTMOB_MEN_S
     model_s = max(l["max_s"] for l in lanes) + SETTLE_MS / 1000 + 20
     return config, model_s, arena
@@ -611,6 +634,11 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
             r = s0[3]
             sides[1]["units"].append({"key": UNITS["general"][0], "x": r["x"], "z": r["z"], "b": r["b"],
                                       "general": True, "name": "l"})
+        for j, e in enumerate(spec.get("extras") or [], 1):
+            # the attacker's side's extra units (dx, dz) from the target's centre, halted (a shooter fires at will)
+            sides[roles["a"]]["units"].append({"key": UNITS[e["short"]][0], "x": s0[2]["x"] + e["dx"],
+                                               "z": s0[2]["z"] + e["dz"], "b": s0[1]["b"], "men": UNITS[e["short"]][1],
+                                               "width": spec["a_width"], "general": False, "name": f"e{j}"})
         if spec.get("t_morale"):
             # the target can rout (the routmob plan): a far-off standing unit of its side keeps its battle going
             sides[roles["tg"]]["units"].append({"key": spec["t_key"], "x": s0[2]["x"], "z": s0[2]["z"] - 400.0,
@@ -718,7 +746,12 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                     kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, True
             elif mode[b] in ("attack_run", "attack_walk"):
                 kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, mode[b] == "attack_run"
-            # the target's rout (t_morale lanes): at_rout 'halt' halts the attacker there (entries/charge_probe.lua)
+            # the target's rout (t_morale lanes): at_rout 'halt' halts the attacker there (entries/charge_probe.lua);
+            # rout_at_s: not routed that long after the contact, it is routed by script (morale_behavior_rout)
+            if (sp.get("t_morale") and sp.get("rout_at_s") and st_["rout"][b] is None and c is not None
+                    and t - c >= sp["rout_at_s"] and not r_t[b]):
+                st.u["morale"][b, T] = -60.0
+                st_["phases"][b].append({"phase": "rout_forced", "t": t * 1000})
             if sp.get("t_morale") and st_["rout"][b] is None and r_t[b]:
                 st_["rout"][b] = t - params.dt
                 st_["phases"][b].append({"phase": "rout", "t": (t - params.dt) * 1000})

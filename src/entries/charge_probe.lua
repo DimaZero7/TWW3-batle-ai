@@ -39,7 +39,10 @@
 -- probe_phase 'rout' and lane.at_rout says what the attacker does then: 'halt' (halts where it is) or 'none' (goes
 -- on attacking: the chase); the lane ends lane.after_rout_s after the rout. With config.men_after_rout_s the
 -- soldiers' places of both units are sampled every men_ms for that long after the rout wherever the enemy is (the
--- routing mob's shape); the sample rows carry r (routing) and sh (shattered) too.
+-- routing mob's shape); the sample rows carry r (routing) and sh (shattered) too. lane.rout_at_s (optional): a
+-- t_morale target not routed that long after the first contact is routed by script (morale_behavior_rout; emitted as
+-- probe_phase 'rout_forced'). lane.extras (optional) {{name, dx, dz, fire}}: units of the attacker's side placed
+-- (dx, dz) from the target's centre facing the attacker's way, halted, fearless, never ordered; with fire, fire at will.
 -- Every tick_ms 'probe_sample': per running lane both units' (and the lord's) men, health
 -- (CCO HealthValue), melee flag, place, bearing, moving / moving fast, kills, fatigue, status keys
 -- (CCO StatusList: braced, melee...). Every men_ms while the two are within men_near_m of each
@@ -311,6 +314,13 @@ function M.main(bm, config, globals)
                     emit('probe_ability', {lane = lane.name, who = 'a', key = lane.a_ability, t = now - lane.t0,
                         status = ok and (used and 'used' or 'not_ready') or 'failed'})
                 end
+                if lane.t_morale and not lane.rout_ms and lane.rout_at_s and lane.contact and not lane.rout_forced
+                        and now - lane.contact >= lane.rout_at_s * 1000 then
+                    lane.rout_forced = true
+                    local ok = pcall(function() lane.t.uc:morale_behavior_rout() end)
+                    emit('probe_phase', {lane = lane.name, phase = 'rout_forced', t = now - lane.t0,
+                        status = ok and 'done' or 'failed'})
+                end
                 if lane.t_morale and not lane.rout_ms then
                     local t_r = read(function() return lane.t.unit:is_routing() end)
                     if t_r then
@@ -436,6 +446,11 @@ function M.main(bm, config, globals)
             if lane.lord then
                 place(state.units[lane.lord.name], L.tx, lane.z - (lane.t_depth or 0) - lane.lord.dz, 0, 5)
             end
+            for _, e in ipairs(lane.extras or {}) do
+                local it = state.units[e.name]
+                place(it, L.tx + (e.dx or 0), L.tz + (e.dz or 0), L.ab, lane.a_width)
+                if e.fire then orders.set_fire_at_will(it.uc, true) end
+            end
         end
         emit('start', {speed = config.speed, lanes = config.lanes})
         state.cancel_deadline = battle.deadline(bm, config.deadline_s * 1000, guarded(function()
@@ -486,6 +501,9 @@ function M.main(bm, config, globals)
             end
             if l.after then assert(M.AFTER_KINDS[l.after.kind], 'unknown after kind ' .. tostring(l.after.kind)) end
             if l.at_rout then assert(M.AT_ROUT[l.at_rout], 'unknown at_rout ' .. tostring(l.at_rout)) end
+            for _, e in ipairs(l.extras or {}) do
+                assert(state.units[e.name], 'scenario unit missing: ' .. tostring(e.name))
+            end
             lane.layout = M.layout(l)
             state.lanes[i] = lane
         end

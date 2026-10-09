@@ -660,15 +660,15 @@ A formation (not a lord) that routs from melee stays in contact for `contact.rou
 test leaves out the way it has run since the rout began (`rpin_d`). The enemies it fought go on striking it, at
 `contact.rout_pin_rate` **0.83** of the rule (from the rear, no charge), and it counts as in melee (the `m` flag).
 It gathers speed by `contact.rout_pin_speed`: shares of its own free rout speed by second 0.41 / 0.66 / 0.77 /
-0.81 / 0.87 / 0.92 / 0.97 / 1.0. After 7 s - the ordinary rout and pursuit (0.43, above). **A chased router does
-not run straight** (`morale.rout_dodge`): with a standing enemy formation within 25 m it heads 60 deg off the line
-from that enemy (the side fixed per unit), so it pulls away from it at cos 60 deg = 0.5 of its speed. Measured
-(recordings it1-it8, 64 battles, 1,192 routs of ours, `build/fable/chase.py`, `chase2.py`): with an AI chaser our
-router moves 2.0 / 2.9 / 2.9 m/s at 0-3 / 3-7 / 7-20 s but away from it along their line only +0.6 / +1.4 / +1.5 m/s
-(0.30 / 0.48 / 0.52 of its speed); the chaser towards it +1.1 / +1.7 / +1.8 (0.48-0.73 of its run), staying 13-15 m
-off for 20 s. The twin before the rule: away +1.8 / +3.0 / +2.1 (0.85-0.90 of its speed), its chasers following as
-the game's (54 % faster than 1 m/s towards the router, the game 60 %) - the chase was lost by 7 s. A measured
-kinematics, the game's reason not found; `rout_direction` (where a router heads overall) is another thing, rejected.
+0.81 / 0.87 / 0.92 / 0.97 / 1.0. After 7 s - the ordinary rout and pursuit (0.43, above). **A pursuer does not
+sprint after a router** (`contact.pursuit_sprint` false): a unit with an attack order on a routing target takes no
+charge sprint (the charge speed over the last 30 m) - it runs at its run speed and falls behind a faster router;
+contact after the exit only if it really catches up. The routmob probe (`build/charge-probe/runs/20261009-062431`,
+`-062605`; `build/fable/routmob_report.py`): spearmen (run 3.0) after routed skavenslaves (4.2) fall behind - centres
+6.2 -> 10.9 -> 14.2 -> 17.6 m at 0 / 4 / 6 / 10 s after the rout, the router's loss after the 3rd second 0.00-0.02 % of
+its health a second, the last man within 3 m of an enemy man at 12.5 s; the twin with the sprint stuck at 1.7 m for
+40 s (3.8 against 4.1 x 0.84 in the crowd), striking 0.33-0.42 %/s. The router heads straight from its enemies
+(`rout_dodge` off: the same probe, [below](#tried-and-rejected)).
 
 Measured (`build/routgap/rout_exit_game.py`, `contact_after*.py`, `flag_rate*.py`; all fair recordings, 216
 battles, 3,987 routs from melee): the game's melee flag stays on after the rout's start p10 / 25 / 50 / 75 / 90 =
@@ -1252,6 +1252,7 @@ Measured, ready as a switch, not in `config/nn/sim.json`: none now.
 
 | What | Result | Why not |
 |---|---|---|
+| A router heads 60 deg off the line from its nearest enemy (`morale.rout_dodge`: in battles our router pulled away from its chaser at only 0.30 / 0.48 / 0.52 of its speed at 0-3 / 3-7 / 7-20 s) | the it7 twin: seconds with a chaser 0.09/0.05 -> 0.21/0.11 (game 0.19/0.13), losses while routing 0.023 -> 0.028 (game 0.07) | the `routmob` probe (4 lanes of skavenslaves v fearless spearmen, 2 chased): in a 1 v 1 the router runs **straight** at full speed - centres 6 -> 18 m in 10 s (+1.1 m/s = 4.2 x 0.985 - 3.0), loss ~0 after 3 s; the obliqueness in battles is the crowd and the home heading, not a dodge; no mechanism - off |
 | A rally 7 s after the conditions hold (`morale.rally_wait_s` 7: the median of whole-battle recordings) | the gates' replay: rout to rally median 34 → 44 s (game 44) | probe rally2 (`build/probes7`, 5 lanes, one enemy): the rally comes at once — 18.5 s into the rout with the enemy 118–130 m away, 21.0 s as soon as the enemy is 92–96 m away; the number was fitted to whole battles, not the rule; what holds rallies back in whole battles — OPEN |
 | Leaving melee on any move order beyond 10 m (`contact.leave_m` without a direction) | spearmen under a move to a point through the enemy struck nothing in the simulator (0 / 0 / 98 HP at 0–5 / 5–15 / 15–30 s) | probe P3: in the game they fight (213 / 317 / 521); now only a point away from the enemy is a leave (`contact.leave_away_only`) |
 | Holding every unit leaving melee for 20 s (`contact.pin_melee_s` 20; 163 network battles: in melee 4 / 10 / 20 s later 0.94 / 0.84 / 0.51, out after 21 s, median) | the melee-exit probe (`build/movelords`): unchased, a unit in the game is out of contact after ~4 s and loses 22 HP, held 20 s - 22 s and 375 HP; 46 episodes of the network's battles: unchased in melee 0.75 at 4 s, 0.58 at 6 s | in the game only the chase holds it; "stands 21 s" came from short episodes (the network changes its order within 1–2 s); now the chase (`contact.chase`) |

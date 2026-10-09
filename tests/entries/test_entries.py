@@ -1124,7 +1124,36 @@ class TestChargeProbe:
         sample = next(r for r in rows if r["event"] == "probe_sample")
         assert "r" in sample["lanes"][0]["tg"]
 
-    def test_layout_and_recharge_step(self, lua):
+    def test_routmob2_forces_the_rout_and_places_fire_at_will_extras(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            CONFIG.lanes = {CONFIG.lanes[1]}
+            CONFIG.men_after_rout_s = 40
+            local l = CONFIG.lanes[1]
+            l.mode, l.target_mode, l.answer, l.fight_s, l.max_s = 'attack_run', 'stand', true, 200, 260
+            l.t_morale, l.at_rout, l.after_rout_s, l.rout_at_s = true, 'halt', 45, 3
+            l.recharge_after_s, l.back_m, l.recharge_max_s = nil, nil, nil
+            l.extras = {{name = 'own_swords_2', dx = 0, dz = 80, fire = true}}
+            CONFIG.park = {{name = 'enemy_lord', x = 700, z = -400, bearing = 0},
+                           {name = 'own_lord', x = -700, z = -400, bearing = 0}}
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            assert(own[3].free_fire == true, 'the extra shooter fires at will')
+            assert(own[3].attack_args == nil, 'the extra is never ordered')
+            own[2].melee, enemy[2].melee = true, true
+            for _ = 1, 8 do bm:tick(500); bm:pump() end
+            assert(enemy[2].routing == true, 'routed by script rout_at_s after the contact')
+            for _ = 1, 4 do bm:tick(500); bm:pump() end
+            assert(own[2].moving == false, 'the attacker halts at the rout')
+            for _ = 1, 200 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        phases = [r["phase"] for r in rows if r["event"] == "probe_phase"]
+        assert phases == ["rout_forced", "rout"]
+        assert {r["lane"]: r["why"] for r in rows if r["event"] == "probe_lane_end"} == {"L1": "after_rout"}
+
         L = lua.eval("""require('entries.charge_probe').layout({x = 10, z = 0, gap_m = 80, a_depth = 10,
             t_depth = 12, target_mode = 'rear'})""")
         assert (L.ax, L.az, L.ab, L.tx, L.tz, L.tb) == (10, 85, 180, 10, -6, 180)

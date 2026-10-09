@@ -650,12 +650,16 @@ def step(st, orders, params=None, dt=None):
     # speed - a charge then (the run-up above); a move order gives none (the melee probe: the last 30 m at 3.65-3.88
     # m/s at a run of 3.0, the last 10 m 3.9-4.7, at a walk the same).
     sprint = close_in & (t_reach <= u["charge_dist"]) & ~busy_t
+    if not cal["contact"].get("pursuit_sprint", True):
+        # (contact.pursuit_sprint false: no sprint after a routing target - the pursuit has no charge, pursuit_why; a
+        # pursuer runs at its run speed and falls behind a faster router: the routmob probe, contact.pursuit_sprint_why)
+        sprint = sprint & ~u["r"].gather(1, ti)
     want = torch.where(sprint, u["charge_speed"], want)
     moving = standing & (point | close_in)
     fx, fz = movement.flee_goal(u, pw, alive, st.bounds)
     routing = alive & u["r"]
     dodge = cal["morale"].get("rout_dodge")
-    if dodge:
+    if dodge and dodge.get("on", True):
         # A chased router does not run straight from its chaser (morale.rout_dodge; config/nn/sim.json rout_dodge_why):
         # with a standing enemy formation within dodge["m"] it heads dodge["deg"] off the line from that enemy, to a
         # side fixed per (battle row, unit), so its speed away from the chaser is cos(deg) of its speed (the game's

@@ -132,6 +132,25 @@ def test_the_routmob_plan_keeps_the_targets_morale_and_samples_the_mob_after_the
     assert config["men_after_rout_s"] == cp.ROUTMOB_MEN_S and model_s < 400
 
 
+def test_the_routmob2_plan_damages_the_slaves_forces_the_rout_and_adds_shooters_or_neighbours():
+    b = cp.battles("routmob2")
+    assert len(b) == 2 and all(len(x) == 4 for x in b)
+    for x in b:
+        assert all(l["t_morale"] and l["damage"] == {"t": {"method": "kill", "share": 0.5}} and l["rout_at_s"] == 30 for l in x)
+        kinds = {l["kind"]: l for l in x}
+        assert set(kinds) == {"chase", "fire", "neighbours", "control"}
+        assert kinds["chase"]["at_rout"] == "none" and all(kinds[k]["at_rout"] == "halt" for k in ("fire", "neighbours", "control"))
+        assert kinds["fire"]["extras"] == [{"short": "xbow", "dx": 0, "dz": 80, "fire": True}]
+        assert [(e["dx"], e["dz"]) for e in kinds["neighbours"]["extras"]] == [(-25, -20), (25, -20)]
+        assert "extras" not in kinds["control"] and "extras" not in kinds["chase"]
+    config, model_s, arena = cp.run_config("routmob2", 1)
+    names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}
+    for lane in config["lanes"]:
+        for e in lane.get("extras") or []:
+            assert e["name"] in names and e["name"].startswith("own_")               # the attacker's (Empire) side
+    assert config["men_after_rout_s"] == cp.ROUTMOB_MEN_S and model_s < 400
+
+
 def test_battle_file_is_written(tmp_path):
     path = cp.write_scenario("hit", 1, tmp_path / "x.xml")
     xml = path.read_text(encoding="utf-8")

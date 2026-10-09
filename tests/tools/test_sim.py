@@ -2267,6 +2267,42 @@ def _rout_from_melee(params, seconds=10.0):
     return rows, full
 
 
+def _attack_router(st):
+    """Orders: the spearmen (unit 0) attack the slaves (unit H), the rest hold."""
+    o = O.hold(st.B, st.N, st.device)
+    H = st.N // 2
+    o.kind[0, 0] = O.ATTACK
+    o.target[0, 0] = H
+    return o
+
+
+class TestPursuitSprint:
+    def test_a_pursuer_of_a_router_runs_at_its_run_speed_not_the_charge_sprint(self):
+        """contact.pursuit_sprint false: spearmen attacking routed skavenslaves beyond the exit run at their run speed
+        (3.0) and fall behind the faster router (4.2 x rout_speed); with the sprint (true) they take the charge speed."""
+        def chase(params):
+            st = scenario.build([army([(SPEAR, -50, 0, 90), (SPEAR, -300, 700, 90)],
+                                      [(SLAVE, 50, 0, 270), (SLAVE, 300, 700, 270)])], params)
+            H = st.N // 2
+            front, depth = geometry.dims(st.u, params.sim["formation"]["spacing_m"])
+            st.u["x"][0, 0] = -(depth[0, 0] / 2 + TOUCH / 2)
+            st.u["x"][0, H] = depth[0, H] / 2 + TOUCH / 2
+            for _ in range(int(round(2.0 / params.dt))):
+                battle.step(st, _attack_router(st), params)
+            st.u["morale"][0, H] = -30.0
+            speeds, gaps = [], []
+            for k in range(int(round(20.0 / params.dt))):
+                battle.step(st, _attack_router(st), params)
+                if (k + 1) * params.dt > 9.0:                        # past the exit (rout_pin_s 7) and its wake
+                    speeds.append(math.hypot(float(st.u["vx"][0, 0]), float(st.u["vz"][0, 0])))
+                    gaps.append(float(st.u["x"][0, H] - st.u["x"][0, 0]))
+            return speeds, gaps, float(st.u["run"][0, 0]), float(st.u["charge_speed"][0, 0])
+        speeds, gaps, run, charge = chase(P)
+        assert max(speeds) <= run + 0.05 and gaps[-1] > gaps[0] + 3.0            # at a run, falling behind
+        speeds, gaps, run, charge = chase(P.with_cal("contact", pursuit_sprint=True))
+        assert max(speeds) >= charge - 0.05                                      # the sprint: the charge speed
+
+
 class TestRoutExit:
     def test_a_formation_routing_from_melee_stays_in_contact_and_is_struck_for_rout_pin_s(self):
         pin = P.sim["contact"]["rout_pin_s"]
@@ -2288,9 +2324,7 @@ class TestRoutExit:
         assert at(on, 4.0)[4] / full == pytest.approx(0.81, abs=0.04)
         assert at(on, 6.5)[4] / full == pytest.approx(0.95, abs=0.04)
         assert at(on, 9.5)[4] == pytest.approx(full, rel=0.03)
-        # (off: all of it from s 3 - slowed by the standing enemy within 15 m, morale.rout_crowd, since it runs 60 deg off
-        # the line from that enemy and lingers near it, morale.rout_dodge)
-        assert at(off, 4.0)[4] == pytest.approx(full * P.sim["morale"]["rout_crowd"]["enemy"][1], rel=0.05)
+        assert at(off, 4.0)[4] == pytest.approx(full, rel=0.03)
 
     def test_the_ramp_is_linear_between_its_points(self):
         table = P.sim["contact"]["rout_pin_speed"]
@@ -2320,9 +2354,10 @@ class TestRoutDodge:
                 st.u["x"][0, H] = st.u["x"][0, 0] - lx / ln * abs(enemy_x)
                 st.u["z"][0, H] = st.u["z"][0, 0] - lz / ln * abs(enemy_x)
             return sum(shares[-4:]) / 4
-        assert away_share(P, -15.0) == pytest.approx(0.5, abs=0.08)                  # chaser 15 m behind: 60 deg off
-        assert away_share(P, -100.0) == pytest.approx(1.0, abs=0.05)                 # none within 25 m: straight
-        assert away_share(P.with_cal("morale", rout_dodge=None), -15.0) == pytest.approx(1.0, abs=0.05)
+        on = P.with_cal("morale", rout_dodge={"on": True, "m": 25, "deg": 60})
+        assert away_share(on, -15.0) == pytest.approx(0.5, abs=0.08)                 # on, chaser 15 m behind: 60 deg off
+        assert away_share(on, -100.0) == pytest.approx(1.0, abs=0.05)                # on, none within 25 m: straight
+        assert away_share(P, -15.0) == pytest.approx(1.0, abs=0.05)                  # off (the routmob probe): straight
 
 class TestRoutCrowd:
     def test_a_router_among_other_formations_is_slowed(self):
