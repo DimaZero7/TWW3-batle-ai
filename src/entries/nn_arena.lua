@@ -19,6 +19,11 @@
 -- config.enemy_ai = 'scripted' takes side 2 from the game's AI the same way (the lord duel: the
 -- other lord under one plain attack order); absent, side 2 is the game's AI. A scripted unit gets its
 -- attack again only when the engine dropped it: not in melee, no target, for M.SCRIPTED_LOST_MS.
+-- config.enemy_ai = 'companion' (with own_ai 'net'): side 2 under a script of the simulator in the
+-- companion (config.enemy_script, e.g. ai_like; tools/nn/companion/script.py) through a second bridge
+-- (apps.bridge.adapter) with its own files: the same state at the same decision, the same rules as
+-- ours (routing units the game's, rallies, shooters' duty, stalls), its events 'en_*' for 'nn_*'
+-- and its result fields 'en_*'. Its state carries config.units' slots and widths (layout).
 -- config.observe = true adds the human's observer (apps.telemetry.observer_adapter) to any mode, without
 -- the soldiers; config.cards = true also records every unit's card on change (nn_card), both sides
 -- (the lord against the game's AI: tools/nn/lord_ai.py).
@@ -48,7 +53,7 @@ local TIMER = 'tww3_bai_nn_arena_tick'
 local DECIDE, POLL = 'tww3_bai_nn_arena_decide', 'tww3_bai_nn_arena_poll'
 M.REISSUE_MS = 15000
 M.OWN_AI = {attack = true, defend = true, hold = true, net = true, human = true, scripted = true}
-M.ENEMY_AI = {scripted = true}
+M.ENEMY_AI = {scripted = true, companion = true}
 M.SCRIPTED_LOST_MS = 3000
 
 local function try(fn, ...)
@@ -66,7 +71,8 @@ end
 -- config: build, speed, tick_ms, deadline_s, stall_ms, timeout_ms, own_ai ('attack' | 'defend' | 'hold' | 'net'),
 -- units = {own = [...], enemy = [...]} (script names, slots, keys), defend_radius_m;
 -- 'net' also: decide_ms, poll_ms, factions = {own, enemy}, enemy_role; 'human': soldiers_every (ticks);
--- enemy_ai: nil (the game's AI) or 'scripted'; scripted_targets: nil (nearest) or 'like' (lord on lord).
+-- enemy_ai: nil (the game's AI), 'scripted' or 'companion' (enemy_script); scripted_targets: nil (nearest) or
+-- 'like' (lord on lord).
 function M.main(bm, config, globals)
     if _G.tww3_bai_nn_arena then return end
     local state = {active = false, finished = false, batch = '', run_id = 'bootstrap', ticks = 0,
@@ -198,6 +204,10 @@ function M.main(bm, config, globals)
             state.net.finish()
             for k, v in pairs(state.net.stats()) do row[k] = v end
         end
+        if state.enemy_net then
+            state.enemy_net.finish()
+            for k, v in pairs(state.enemy_net.stats()) do row['en_' .. k:gsub('^nn_', '')] = v end
+        end
         emit('result', row)
         cleanup()
         state.finished = true
@@ -268,15 +278,55 @@ function M.main(bm, config, globals)
         return rows
     end
 
+    -- The rows of one decision, read once for both bridges (the enemy's under a script).
+    local shared = {}
+    local function shared_rows()
+        local now = bm:time_elapsed_ms()
+        if shared.ms ~= now then shared.ms, shared.rows = now, net_rows() end
+        return shared.rows
+    end
+
+    -- The enemy side under a script in the companion: a second bridge, side 2 its own.
+    local function enemy_start()
+        local layout = {}
+        for _, key in ipairs({'own', 'enemy'}) do
+            for _, spec in ipairs(config.units[key]) do
+                layout[#layout + 1] = {n = spec.script_name, slot = spec.slot, width = spec.width}
+            end
+        end
+        state.enemy_net = bridge.start({army = state.enemy_army, own = state.sides[2], enemies = state.sides[1],
+            vector = vec, rows = shared_rows, cco = cco,
+            emit = function(event, fields) emit((event:gsub('^nn_', 'en_')), fields) end,
+            now_ms = function() return bm:time_elapsed_ms() - started_ms end,
+            model_ms = function() return bm:time_elapsed_ms() end,
+            state_file = bridge.ENEMY_STATE_FILE, orders_file = bridge.ENEMY_ORDERS_FILE,
+            meta = {batch = state.batch, factions = config.factions, decide_ms = config.decide_ms,
+                attacker = config.enemy_role == 'defend' and 1 or 2, control = 2, script = config.enemy_script,
+                layout = layout}})
+        emit('enemy_ai', {mode = 'companion', enemy_ai = config.enemy_ai, script = config.enemy_script,
+            state_file = bridge.ENEMY_STATE_FILE, orders_file = bridge.ENEMY_ORDERS_FILE})
+    end
+
     local function net_start()
         state.net = bridge.start({army = state.own_army, own = state.sides[1], enemies = state.sides[2],
-            vector = vec, rows = net_rows, emit = emit, cco = cco,
+            vector = vec, rows = shared_rows, emit = emit, cco = cco,
             now_ms = function() return bm:time_elapsed_ms() - started_ms end,
             model_ms = function() return bm:time_elapsed_ms() end,
             meta = {batch = state.batch, factions = config.factions, decide_ms = config.decide_ms,
                 attacker = config.enemy_role == 'defend' and 1 or 2}})
         emit('own_ai', {mode = 'net', own_ai = config.own_ai, decide_ms = config.decide_ms,
             poll_ms = config.poll_ms, state_file = bridge.STATE_FILE, orders_file = bridge.ORDERS_FILE})
+        if config.enemy_ai == 'companion' then enemy_start() end
+    end
+
+    -- Both bridges at a decision, ours first (the same state for both).
+    local function net_decide()
+        state.net.decide()
+        if state.enemy_net then state.enemy_net.decide() end
+    end
+    local function net_poll()
+        state.net.poll()
+        if state.enemy_net then state.enemy_net.poll() end
     end
 
     -- A scripted side: each unit under script attacks the nearest standing enemy ('scripted_order');
@@ -406,10 +456,10 @@ function M.main(bm, config, globals)
         state.active = true
         bm:repeat_callback(guarded(tick), config.tick_ms, TIMER)
         if state.net then
-            state.net.decide()
-            bm:repeat_callback(guarded(function() if state.active then state.net.decide() end end),
+            net_decide()
+            bm:repeat_callback(guarded(function() if state.active then net_decide() end end),
                 config.decide_ms, DECIDE)
-            bm:repeat_callback(guarded(function() if state.active then state.net.poll() end end),
+            bm:repeat_callback(guarded(function() if state.active then net_poll() end end),
                 config.poll_ms, POLL)
         end
     end
@@ -425,7 +475,8 @@ function M.main(bm, config, globals)
         end
         assert(common and vector_type, 'common and battle_vector globals required')
         assert(M.OWN_AI[config.own_ai], 'own_ai must be attack, defend, hold, net, human or scripted')
-        assert(config.enemy_ai == nil or M.ENEMY_AI[config.enemy_ai], 'enemy_ai must be absent or scripted')
+        assert(config.enemy_ai == nil or M.ENEMY_AI[config.enemy_ai], 'enemy_ai must be absent, scripted or companion')
+        assert(config.enemy_ai ~= 'companion' or config.own_ai == 'net', 'enemy_ai companion needs own_ai net')
         local sides = battle.read_sides(bm)
         state.own_alliance, state.own_army, state.enemy_army = sides[1].alliance, sides[1].army, sides[2].army
         state.alliances = {sides[1].alliance, sides[2].alliance}

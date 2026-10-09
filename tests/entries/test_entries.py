@@ -572,6 +572,71 @@ class TestNnArena:
         assert (result["nn_regiven"], result["nn_released"], result["nn_resumed"]) == (1, 1, 1)
         assert result["nn_aims_kept"] == 1
 
+    def test_enemy_under_a_companion_script_has_its_own_bridge(self, lua, tmp_path):
+        # nn-arena --enemy-ai ai_like: the enemy side under the companion's script through a second bridge;
+        # the test plays both answers (tools/nn/companion/exchange.py).
+        from tools.nn.companion import exchange
+        lua.execute(self.SETUP + """
+            CONFIG.own_ai, CONFIG.enemy_ai, CONFIG.enemy_script = 'net', 'companion', 'ai_like'
+            CONFIG.enemy_role, CONFIG.decide_ms, CONFIG.poll_ms = 'attack', 1000, 100
+            CONFIG.units.enemy[2].width = 32
+            CONFIG.factions = {own = 'wh_main_emp_empire', enemy = 'wh2_main_skv_skaven'}
+            enemy[1].abilities = {wh_main_character_abilities_rally = true}
+            STATE = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            assert(enemy[1]:is_script_controlled() and enemy[2]:is_script_controlled())
+        """)
+        ours, theirs = exchange.read_state(tmp_path / exchange.STATE), exchange.read_state(tmp_path / exchange.ENEMY_STATE)
+        assert ours["move"] == theirs["move"] == 1 and ours["batch"] == theirs["batch"]
+        assert ours["units"] == theirs["units"] and "layout" not in ours
+        assert theirs["control"] == 2 and theirs["script"] == "ai_like" and theirs["attacker"] == 2
+        assert {(r["n"], r["slot"], r.get("width")) for r in theirs["layout"]} >= {
+            ("enemy_lord", "lord", None), ("enemy_spear_1", "spear_1", 32)}
+        exchange.write_atomic(tmp_path / exchange.ORDERS, exchange.orders_text(
+            ours["batch"], 1, [{"unit": "own_spear_1", "kind": "attack", "target": "enemy_spear_1", "run": True}]))
+        exchange.write_atomic(tmp_path / exchange.ENEMY_ORDERS, exchange.orders_text(
+            theirs["batch"], 1, [{"unit": "enemy_spear_1", "kind": "move", "x": 150.0, "z": 0.0, "run": True},
+                                 {"unit": "enemy_lord", "kind": "attack", "target": "own_lord", "run": True},
+                                 {"unit": "own_lord", "kind": "hold"}],       # not its unit: ignored
+            abilities=[{"unit": "enemy_lord", "key": "wh_main_character_abilities_rally"}]))
+        lua.execute("""
+            bm:tick(100)
+            for _ = 1, 10 do bm:tick(100) end   -- move 2: both written again
+        """)
+        log = list(lua.eval("bm.orders").values())
+        assert log == ["attack enemy_spear_1", "attack own_lord", "goto enemy_spear_1 150 0 true",
+                       "ability enemy_lord wh_main_character_abilities_rally on enemy_lord"]
+        theirs = exchange.read_state(tmp_path / exchange.ENEMY_STATE)
+        assert theirs["move"] == 2 and "wh_main_character_abilities_rally" in theirs["abilities_used"]["enemy_lord"]
+        assert exchange.read_state(tmp_path / exchange.STATE)["abilities_used"] == {}
+        lua.execute("""
+            bm.outcome, bm.winner = true, 1
+            for _ = 1, 10 do bm:tick(100) end
+            assert(STATE.finished, 'the battle did not finish')
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        assert next(r for r in rows if r["event"] == "enemy_ai")["script"] == "ai_like"
+        mine = [r for r in rows if r["event"] == "nn_orders"]
+        theirs_given = [r for r in rows if r["event"] == "en_orders"]
+        assert [(o["u"], o["k"]) for r in mine for o in r["orders"]] == [("own_spear_1", "attack")]
+        assert [(o["u"], o["k"]) for r in theirs_given for o in r["orders"]] == [
+            ("enemy_lord", "attack"), ("enemy_spear_1", "move")]
+        assert [(r["u"], r["status"]) for r in rows if r["event"] == "en_ability"] == [("enemy_lord", "used")]
+        result = rows[-1]
+        assert result["nn_moves"] == result["en_moves"] == 3 and result["en_answered"] == 1
+        assert result["en_orders_given"] == 2 and result["en_abilities_used"] == 1 and result["nn_orders_given"] == 1
+        assert exchange.read_state(tmp_path / exchange.ENEMY_STATE)["done"] is True
+
+    def test_enemy_under_a_companion_needs_the_network_on_our_side(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            CONFIG.own_ai, CONFIG.enemy_ai = 'attack', 'companion'
+            STATE = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert any(r["event"] == "error" and "needs own_ai net" in r["message"] for r in rows)
+
     def test_human_gives_no_orders_and_records_everything_it_can(self, lua, tmp_path):
         # A human plays our side: no planner, no bridge; the observer's fields and change events.
         lua.execute(self.SETUP + """

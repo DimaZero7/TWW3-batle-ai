@@ -3,6 +3,7 @@
     bash tools/nn/dock.sh ...   (see docs/en/launch/watch.md: the watch launcher starts it in the
     snake-ai-trainer container with the game folder mounted at /game)
     python -m tools.nn.companion --game /game [--checkpoint build/nn-train/random.pt] [--greedy]
+        [--enemy-script ai_like]   (also the enemy side: the script answers the enemy's bridge, script.py)
 
 One line per decision: move number, battle time, how long the network took, the orders.
 A new battle (a new batch in the state) starts the network's memory afresh (and a v2 network's commitment: its
@@ -36,6 +37,16 @@ class Brain:
         self.given, self.points = {}, {}     # the orders in force, the order points (exchange.order_points)
         self.moved = None                    # the last positions and time (exchange.running_by_speed)
         self.commit = {}                     # v2: the commitment's state (tools/nn/model/commit.py), per battle
+        self.before = None                   # (batch, move, the orders in force before that move's answer)
+
+    def orders_before(self, batch, move):
+        """The network's orders in force as the simulator's opponent sees them at decision `move`: before
+        this move's answer (both sides decide on the same state). {} for another battle."""
+        if self.before is not None and self.before[:2] == (batch, move):
+            return self.before[2]
+        if self.battle is None or self.battle.batch != batch:
+            return {}
+        return dict(self.given)
 
     def decide(self, doc):
         """-> (orders list, think ms, abilities to use [{unit, key}]) for one state document."""
@@ -44,6 +55,7 @@ class Brain:
             self.battle, self.memory, self.h = exchange.battle(doc), None, None
             self.given, self.points, self.moved, self.commit = {}, {}, None, {}
         b = self.battle
+        self.before = (doc["batch"], doc["move"], dict(self.given))
         state = exchange.arrays(doc, b.names, b.slots)
         self.moved = exchange.running_by_speed(state, b.walk, self.moved)
         exchange.engaged_targets(state, b.side)
@@ -66,7 +78,7 @@ class Brain:
 def describe(orders, limit=4):
     parts = []
     for o in orders[:limit]:
-        name = o["unit"].removeprefix("own_")
+        name = o["unit"].removeprefix("own_").removeprefix("enemy_")
         if o["kind"] in ("move", "withdraw"):
             parts.append(f"{name} {o['kind']}({o['x']:.0f},{o['z']:.0f}){'!' if o['run'] else ''}")
         elif o["kind"] == "attack":
@@ -80,40 +92,62 @@ def describe(orders, limit=4):
 BUSY_S = 5.0     # after a state, look for the next one every poll_s; later (loading, menus) every idle_poll_s
 
 
-def run(game, brain, log=None, poll_s=0.005, idle_poll_s=0.1, exit_on_done=False, idle_exit_s=0, out=print):
-    """The loop. Returns when the battle is done (exit_on_done) or nothing new came for idle_exit_s."""
-    state_path, orders_path = Path(game) / exchange.STATE, Path(game) / exchange.ORDERS
-    first = exchange.read_state(state_path)
-    last = (first["batch"], first["move"]) if first else None   # a file of an earlier run: not answered
+class Seat:
+    """One side the companion answers: its state and orders files, who decides, its log and line prefix."""
+
+    def __init__(self, state, orders, decide, log=None, label=""):
+        self.state, self.orders, self.decide, self.log, self.label = Path(state), Path(orders), decide, log, label
+        first = exchange.read_state(self.state)
+        self.last = (first["batch"], first["move"]) if first else None   # a file of an earlier run: not answered
+        self.done = False
+
+
+def run(game, brain, log=None, poll_s=0.005, idle_poll_s=0.1, exit_on_done=False, idle_exit_s=0, out=print,
+        enemy=None, enemy_log=None):
+    """The loop. Returns when the battle is done (exit_on_done) or nothing new came for idle_exit_s.
+    enemy: a script.ScriptSide that answers the enemy's bridge too (exchange.ENEMY_STATE / ENEMY_ORDERS),
+    after our side's answer to the same move, seeing our orders in force before it (Brain.orders_before)."""
+    seats = [Seat(Path(game) / exchange.STATE, Path(game) / exchange.ORDERS, brain.decide, log)]
+    if enemy is not None:
+        seats.append(Seat(Path(game) / exchange.ENEMY_STATE, Path(game) / exchange.ENEMY_ORDERS,
+                          lambda doc: enemy.decide(doc, brain.orders_before(doc["batch"], doc["move"])),
+                          enemy_log, "enemy "))
     last_new, busy_until = time.monotonic(), 0.0
     while True:
-        doc = exchange.read_state(state_path)
-        if doc is None or (doc["batch"], doc["move"]) == last:
+        new = False
+        for seat in seats:
+            doc = exchange.read_state(seat.state)
+            if doc is None or (doc["batch"], doc["move"]) == seat.last:
+                continue
+            new = True
+            seen = time.perf_counter()
+            seat.last, last_new = (doc["batch"], doc["move"]), time.monotonic()
+            busy_until = last_new + BUSY_S
+            if doc.get("done"):
+                out(f"{seat.label}battle {doc['batch']} done after move {doc['move']}")
+                seat.done = True
+                continue
+            seat.done = False
+            orders, think_ms, uses = seat.decide(doc)
+            attempts = exchange.write_atomic(seat.orders, exchange.orders_text(doc["batch"], doc["move"], orders,
+                                                                               think_ms, uses))
+            turn_ms = (time.perf_counter() - seen) * 1000
+            used = "".join(f" | ability {a['unit'].removeprefix('own_').removeprefix('enemy_')} {a['key']}"
+                           for a in uses)
+            out(f"{seat.label}move {doc['move']:4d}  t {doc.get('t', 0) / 1000:6.1f} s  think {think_ms:5.1f} ms  "
+                f"turn {turn_ms:5.1f} ms  | {exchange.summary(orders)} | {describe(orders)}{used}")
+            if seat.log:
+                with open(seat.log, "a", encoding="utf-8", newline="\n") as f:
+                    f.write(json.dumps({"batch": doc["batch"], "move": doc["move"], "t": doc.get("t"),
+                                        "think_ms": round(think_ms, 2), "turn_ms": round(turn_ms, 2),
+                                        "write_attempts": attempts, "orders": orders, "abilities": uses}) + "\n")
+        if exit_on_done and all(seat.done for seat in seats[:1]):
+            return
+        if not new:
             if idle_exit_s and time.monotonic() - last_new > idle_exit_s:
                 out(f"nothing new for {idle_exit_s} s: stopping")
                 return
             time.sleep(poll_s if time.monotonic() < busy_until else idle_poll_s)
-            continue
-        seen = time.perf_counter()
-        last, last_new = (doc["batch"], doc["move"]), time.monotonic()
-        busy_until = last_new + BUSY_S
-        if doc.get("done"):
-            out(f"battle {doc['batch']} done after move {doc['move']}")
-            if exit_on_done:
-                return
-            continue
-        orders, think_ms, uses = brain.decide(doc)
-        attempts = exchange.write_atomic(orders_path, exchange.orders_text(doc["batch"], doc["move"], orders, think_ms,
-                                                                           uses))
-        turn_ms = (time.perf_counter() - seen) * 1000
-        used = "".join(f" | ability {a['unit'].removeprefix('own_')} {a['key']}" for a in uses)
-        out(f"move {doc['move']:4d}  t {doc.get('t', 0) / 1000:6.1f} s  think {think_ms:5.1f} ms  "
-            f"turn {turn_ms:5.1f} ms  | {exchange.summary(orders)} | {describe(orders)}{used}")
-        if log:
-            with open(log, "a", encoding="utf-8", newline="\n") as f:
-                f.write(json.dumps({"batch": doc["batch"], "move": doc["move"], "t": doc.get("t"),
-                                    "think_ms": round(think_ms, 2), "turn_ms": round(turn_ms, 2),
-                                    "write_attempts": attempts, "orders": orders, "abilities": uses}) + "\n")
 
 
 def main(argv=None):
@@ -128,6 +162,10 @@ def main(argv=None):
     parser.add_argument("--log", help="append every decision as a JSON line to this file")
     parser.add_argument("--exit-on-done", action="store_true", help="stop when the battle's last state comes")
     parser.add_argument("--idle-exit", type=float, default=0, help="stop after this many seconds without a state")
+    parser.add_argument("--enemy-script", help="also command the enemy side by this simulator script "
+                                               "(tools/nn/train/opponents.py, e.g. ai_like): nn-arena --enemy-ai")
+    parser.add_argument("--enemy-log", help="append every enemy decision as a JSON line to this file "
+                                            "(default: the --log file's name with _enemy)")
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(line_buffering=True)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
@@ -137,9 +175,17 @@ def main(argv=None):
           f"{args.threads} threads; watching {Path(args.game) / exchange.STATE}")
     if args.log:
         Path(args.log).parent.mkdir(parents=True, exist_ok=True)
+    enemy, enemy_log = None, None
+    if args.enemy_script:
+        from tools.nn.companion.script import ScriptSide
+        enemy = ScriptSide(args.enemy_script)
+        enemy_log = args.enemy_log or (str(Path(args.log).with_name(Path(args.log).stem + "_enemy.jsonl"))
+                                       if args.log else None)
+        print(f"companion: the enemy side by the script {args.enemy_script}; watching "
+              f"{Path(args.game) / exchange.ENEMY_STATE}")
     try:
         run(args.game, Brain(actor, args.greedy, args.temperature), args.log, exit_on_done=args.exit_on_done,
-            idle_exit_s=args.idle_exit)
+            idle_exit_s=args.idle_exit, enemy=enemy, enemy_log=enemy_log)
     except KeyboardInterrupt:
         pass
     return 0

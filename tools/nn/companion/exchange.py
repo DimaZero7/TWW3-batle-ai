@@ -26,6 +26,10 @@ from tools.nn.sim.orders import KINDS   # hold, move, attack, withdraw, keep (co
 
 STATE = "tww3_bai_nn_state.json"
 ORDERS = "tww3_bai_nn_orders.txt"
+# The enemy side under a script in the companion (nn-arena --enemy-ai ai_like; tools/nn/companion/script.py):
+# the bridge's second instance, side 2, writes and reads these.
+ENEMY_STATE = "tww3_bai_nn_state_enemy.json"
+ENEMY_ORDERS = "tww3_bai_nn_orders_enemy.txt"
 FORMAT = "tww3_bai_nn_orders 1"
 FLOAT_FIELDS = ("x", "z", "b", "men", "hp", "mp", "ms", "a", "k", "ox", "oz")
 BOOL_FIELDS = ("r", "s", "w", "m", "mv", "f", "fire", "lf", "rf", "bf")
@@ -104,7 +108,7 @@ def running_by_speed(state, walk, prev=None):
     return x.copy(), z.copy(), t
 
 
-def engaged_targets(state, side):
+def engaged_targets(state, side, own=1):
     """Own units' `target` as the simulator has it (tools/nn/sim/battle.py: the enemy fought or shot at
     now, -1 otherwise), in place in `state` (exchange.arrays); the observation's has_target input.
 
@@ -117,11 +121,12 @@ def engaged_targets(state, side):
     game's mix (hold 0.73 -> 0.63, attack 0.17 -> 0.24, move 0.10 -> 0.13; game 0.61 / 0.23 / 0.16).
     So: an own unit in melee keeps the engine's target when it is a present enemy, else takes the
     nearest present enemy; a firing unit keeps the engine's target; any other own unit has none.
-    Enemy rows are left as read (has_target is an own-only input)."""
+    Enemy rows are left as read (has_target is an own-only input). own: the side whose rows are set
+    (1 the network's; the enemy's script sets side 2's too, tools/nn/companion/script.py)."""
     tg = state["target"][0]
     x, z, men = state["x"][0], state["z"][0], state["men"][0]
-    enemy = (np.asarray(side) != 1) & (men > 0) & np.isfinite(x) & np.isfinite(z)
-    for i in np.nonzero(np.asarray(side) == 1)[0]:
+    enemy = (np.asarray(side) != own) & (men > 0) & np.isfinite(x) & np.isfinite(z)
+    for i in np.nonzero(np.asarray(side) == own)[0]:
         j = int(tg[i])
         valid = 0 <= j < len(tg) and bool(enemy[j])
         if state["m"][0, i]:
@@ -168,7 +173,7 @@ def arrays(doc, names, slots=None):
     return out
 
 
-def order_points(state, names, side, given, last=None):
+def order_points(state, names, side, given, last=None, own=1):
     """The order point (ox, oz) of own units as the simulator reports it (tools/nn/sim/battle.py), in
     place in `state` (exchange.arrays); returns the points kept for the next call (`last`).
 
@@ -182,12 +187,13 @@ def order_points(state, names, side, given, last=None):
     is gone (no men) holds, as the simulator turns it to HOLD. Routing or shattered units keep the
     point they had (the simulator does not update them). Enemy rows are left as read. Also the order in force
     as the simulator keeps it (`order_kind` code, `order_target` slot; the observation's ORDER input): the last
-    order given, hold without one; an attack whose target is gone holds."""
+    order given, hold without one; an attack whose target is gone holds. own: the side whose rows are set
+    (1 the network's; tools/nn/companion/script.py sets both sides')."""
     last = dict(last or {})
     index = {n: i for i, n in enumerate(names)}
     x, z, men = state["x"][0], state["z"][0], state["men"][0]
     for i, name in enumerate(names):
-        if side[i] != 1:
+        if side[i] != own:
             continue
         o = given.get(name) or {}
         code = KINDS.index(o["kind"]) if o.get("kind") in KINDS[:4] else 0
@@ -234,7 +240,7 @@ def _effects(row):
 TAKE_S = 1.5   # s after a use by which the card shows its phase (in game: by the next state, <= 1 s)
 
 
-def ability_timers(doc, names, slots, passports=None):
+def ability_timers(doc, names, slots, passports=None, own=1):
     """ab{k}_on / ab{k}_cd [1, N] (s) for tools/nn/model/observation.py.
 
     Own units (side 1): from the bridge's last use of each ability (abilities_used) and its passport:
@@ -243,7 +249,8 @@ def ability_timers(doc, names, slots, passports=None):
     after it did not take (ready again: on and cd 0; the game's can_perform_special_ability only says
     the lord owns it, so the bridge cannot refuse a use in recharge); a phase on the unit with no use
     known counts 1 s active. Enemies: only whether it is active now (fx: the game shows it on the
-    unit; the observation keeps it only while the unit is seen): `on` 1 s, timers 0."""
+    unit; the observation keeps it only while the unit is seen): `on` 1 s, timers 0. own: the side whose
+    uses the bridge counts (1; the enemy's script: 2, its own bridge's abilities_used)."""
     passports = passports or model_abilities.load()
     N = len(names)
     out = {f"ab{k}_{t}": np.zeros((1, N)) for k in range(SLOTS) for t in ("on", "cd")}
@@ -253,7 +260,7 @@ def ability_timers(doc, names, slots, passports=None):
     for i, name in enumerate(names):
         row = rows.get(name, {})
         fx = _effects(row)
-        mine = int(row.get("side", 0)) == 1
+        mine = int(row.get("side", 0)) == own
         last = used.get(name) if isinstance(used.get(name), dict) else {}
         for k, key in enumerate(slots[i]):
             if not key or key not in passports:
@@ -274,11 +281,11 @@ def ability_timers(doc, names, slots, passports=None):
     return out
 
 
-def orders_list(names, side, kind, x, z, target, run):
-    """The network's orders [N] (numpy, the simulator's layout) -> one dict per own unit."""
+def orders_list(names, side, kind, x, z, target, run, own=1):
+    """The network's orders [N] (numpy, the simulator's layout) -> one dict per unit of side `own`."""
     out = []
     for i, name in enumerate(names):
-        if side[i] != 1:
+        if side[i] != own:
             continue
         k = KINDS[int(kind[i])]
         o = {"unit": name, "kind": k}

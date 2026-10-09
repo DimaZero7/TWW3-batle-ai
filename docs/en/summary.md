@@ -190,6 +190,9 @@ Details: [training](training/training.md).
   and writes orders; ~40 ms from state to orders at speed ×20.
 - **The network gives:** hold, move, withdraw, attack a target, run, lord abilities. Routing units are
   controlled by the game.
+- **The enemy under `ai_like`:** the simulator's script the network trains against can command the
+  enemy in the game (`--enemy-ai ai_like`, a second bridge, the same companion): only the engine's
+  difference is left ([bridge](apps/bridge.md#the-enemy-under-the-simulators-script)).
 - **Starting a battle:** pack build (`tools.build nn-arena`), the launcher sets Normal difficulty and
   restores the player's settings; one battle per game launch (~2 min). The True Sight mod is required.
 

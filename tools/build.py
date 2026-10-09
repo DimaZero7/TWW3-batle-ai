@@ -15,6 +15,7 @@ Usage:
     python -m tools.build lord-swarm --repeats 2   # a lord swarmed by 1-4 units (tools/nn/lord_swarm.py)
     python -m tools.build human --army-seed 1000900014 --army-swap   # a human plays our side (x1, recorded)
     python -m tools.build nn-arena --army-from-run build/nn-arena/runs/20261007-091416 --army-swap   # an old run's armies
+    python -m tools.build nn-arena --army-seed 1000900014 --enemy-ai ai_like   # the enemy under the simulator's script
     python -m tools.build lord-fall --faction skv --treatment kill   # the lord killed / routed (tools/nn/lord_fall.py)
     python -m tools.build lord-duel --duel emp   # our network's lord v a lord under one attack order (tools/nn/lord_duel.py)
     python -m tools.build lord-duel --duel skv --duel-variant escort   # the same, each lord with 2 infantry units
@@ -194,6 +195,9 @@ MOVE_SETTLE_MS = 2000
 ENEMY_LAYOUT_HOLD_S = 90
 # nn-arena --own-ai net: how often the companion's orders file is read (model ms).
 NET_POLL_MS = 100
+# nn-arena --enemy-ai: the simulator's scripts the companion can play the enemy side with
+# (tools/nn/train/opponents.py SCRIPTS; not imported here: it needs torch).
+ENEMY_SCRIPTS = ("ai_like", "nearest", "hold_shoot", "hold")
 # lord-swarm: ms between samples of the lords and their attackers.
 LORD_SWARM_TICK_MS = 200
 # nn-arena: the battle file's own time limit is past the script's (the script ends the battle first).
@@ -345,6 +349,9 @@ def nn_arena_config(args, run_config):
     run_config.update(nn_scenario.run_config(arena), own_ai=args.own_ai, enemy_role=enemy_role)
     if args.own_ai == "net":
         run_config.update(own_role=own_role, decide_ms=args.decide_ms, poll_ms=NET_POLL_MS)
+        if args.enemy_ai != "game":
+            # side 2 under a script of the simulator in the companion (tools/nn/companion/script.py)
+            run_config.update(enemy_ai="companion", enemy_script=args.enemy_ai)
     if args.own_ai == "human":
         run_config.update(own_role=own_role, soldiers_every=args.soldiers_every)
     return path
@@ -381,6 +388,10 @@ def main(argv=None):
                              "(tools/nn/companion) commands our side (its role: --own-role); "
                              "scripted (lord-duel): one attack order on the nearest enemy. "
                              "Default: net with --army-seed, else attack; lord-duel: net")
+    parser.add_argument("--enemy-ai", choices=("game",) + ENEMY_SCRIPTS, default="game",
+                        help="nn-arena --own-ai net: the enemy side under the game's AI (default) or under a "
+                             "script of the simulator (tools/nn/train/opponents.py) in the companion, as the "
+                             "network's simulator opponent (the twin's: ai_like)")
     parser.add_argument("--own-role", choices=("attack", "defend"),
                         help="nn-arena --own-ai net, human: our side attacks (the game's AI defends and wins on "
                              "timeout) or defends (default: the game's AI attacks)")
@@ -457,6 +468,8 @@ def main(argv=None):
         parser.error("--own-ai scripted is for lord-duel and lord-ai")
     if args.own_role and args.own_ai not in ("net", "human") and args.target not in ("lord-duel", "lord-ai"):
         parser.error("--own-role is for --own-ai net and the human target (the planner modes set our role themselves)")
+    if args.enemy_ai != "game" and (args.target != "nn-arena" or args.own_ai != "net"):
+        parser.error("--enemy-ai is for nn-arena --own-ai net")
     if args.soldiers_every < 0:
         parser.error("--soldiers-every must be 0 or more")
     if args.army_from_run is not None:

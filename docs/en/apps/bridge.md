@@ -257,6 +257,45 @@ ability key to use now (any number of lines; a file without them is as before, t
 `tww3_bai_nn_orders 1`).
 Without the last line `end` the game takes nothing. A unit without a line keeps its order.
 
+## The enemy under the simulator's script
+
+To tell the engine's difference from the opponent's, the enemy in the game can be commanded by the very
+script the network trains against in the simulator (`ai_like`, `tools/nn/train/opponents.py`):
+`tools.build nn-arena --own-ai net --enemy-ai ai_like` (in the build `enemy_ai = 'companion'`,
+`enemy_script = 'ai_like'`). Then:
+
+- `nn_arena` takes the enemy army from the game's AI and starts a **second bridge** for side 2 with its own
+  files: `tww3_bai_nn_state_enemy.json` and `tww3_bai_nn_orders_enemy.txt` (the same format). The state is
+  ours, at the same moment (rows read once a decision), plus `control: 2`, `script` and `layout` (each
+  unit's slot and frontage from the build: widths and lords as the twin has them). The rules are our
+  side's: routing units are the game's, the order again after a rally, shooters, a dropped order given
+  again, abilities through `perform_special_ability`. The second bridge's events are `en_*` for `nn_*`, its
+  `result` counters `en_*`.
+- The companion (`--enemy-script ai_like`, `tools/nn/companion/script.py`) answers both every move: the
+  network first, then the script. The script sees everything, as in the simulator: the game's state is laid
+  over a simulator state built once a battle (`sim/scenario.build`: the same slots, passports, widths). What
+  the game does not give is made the simulator's way: `r` = routing or shattered; `target` - the enemy
+  fought or shot at; the order in force and its point (`order_kind`, `order_target`, `ox`, `oz`) - the
+  script's own orders and the network's orders in force before this move; the speed `vx`, `vz` from the
+  last two states; `contact_s` (through gaps shorter than `contact.reset_s`) and `rout_s` from the game's
+  flags.
+- The enemy lord's abilities fire by the simulator's game-AI rule (`sim/abilities.py`): ready (the
+  companion's count of the bridge's uses and the card), not switched off, its trigger (`melee`, `near`,
+  `waver`, `ready`) and `friends_min`. The `losing` trigger has no reading in the game: never (no ability
+  has it now).
+
+The check without the game (`tests/tools/test_nn_companion_script.py`): a simulated battle written move by
+move as the bridge writes it; the companion's orders to side 2 against `ai_like` on the simulator's own
+state - 3 seeds of 240 s: the order's kind the same in 99.2 / 100 / 100 %, the attack's target in
+100 / 100 / 99.9 %, a move's point and run in 100 %. The differences: the flank wrap (a move's point
+against an attack) where the game's speed and melee clock are seen once a second.
+
+The check battle in the game (seed 1000900014, network it20 against `ai_like`, x20): both sides commanded
+the whole battle; the enemy (attacking) marched as a line (centre 168 -> 14 m in 90 s), melee from 62 s,
+its lord used Foe-Seeker and Stand Your Ground 11 times, none refused; 714 moves, 1 answer missed; the
+enemy's answer waited 400 model ms (median) against the network's 300 - it is written after the network's.
+`ai_like` won.
+
 ## services — pure rules
 
 | Function | What it does |

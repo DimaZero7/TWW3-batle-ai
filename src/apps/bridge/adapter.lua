@@ -45,6 +45,9 @@
 -- can_perform_special_ability turned true or false) and nn_effects (a unit's active phases).
 -- The Lua side writes everything it reads; what a human would not see is hidden
 -- by the companion's observation (tools/nn/model/observation.py).
+-- A second instance commands the enemy side under a script in the companion (nn_arena enemy_ai
+-- 'companion'): opts.state_file / opts.orders_file name its own files, and rows that already carry
+-- their active effects (fx, read by the first instance at the same decision) are not read again.
 local json = require('apps.core.json')
 local orders = require('apps.orders.adapter')
 local exchange = require('apps.bridge.exchange_adapter')
@@ -54,6 +57,9 @@ local M = {}
 
 M.STATE_FILE = 'tww3_bai_nn_state.json'
 M.ORDERS_FILE = 'tww3_bai_nn_orders.txt'
+-- The enemy side's instance (nn_arena enemy_ai 'companion'; tools/nn/companion/exchange.py ENEMY_*).
+M.ENEMY_STATE_FILE = 'tww3_bai_nn_state_enemy.json'
+M.ENEMY_ORDERS_FILE = 'tww3_bai_nn_orders_enemy.txt'
 M.KEEP_TIMES = 20   -- moves whose write time is kept to measure the answer's wait
 
 local function read(fn)
@@ -86,8 +92,10 @@ end
 -- opts: army (our engine army), own / enemies = {{name, unit}}, vector(x, z) -> engine
 -- vector, rows() -> every unit's row, meta (put into every state: batch...), emit(event,
 -- fields), now_ms() (battle time since the start), model_ms() (engine time); optional
--- cco(unit, field) -> the unit's CcoBattleUnit value (active effects into the rows).
+-- cco(unit, field) -> the unit's CcoBattleUnit value (active effects into the rows); state_file,
+-- orders_file (default M.STATE_FILE, M.ORDERS_FILE).
 function M.start(opts)
+    local state_file, orders_file = opts.state_file or M.STATE_FILE, opts.orders_file or M.ORDERS_FILE
     local handle = {written = 0, applied = 0, answered = 0, missed = 0, given = 0, keeps = 0, bad = 0,
         regiven = 0, released = 0, resumed = 0, write_mode = nil, abilities_used = 0, abilities_refused = 0,
         hold_aims = 0, hold_halts = 0, stalls = 0, aims_kept = 0, reaims = 0, empty_melees = 0}
@@ -113,8 +121,8 @@ function M.start(opts)
             for _, k in ipairs(list) do owned[it.name][#owned[it.name] + 1] = tostring(k) end
         end
     end
-    exchange.remove(M.STATE_FILE)
-    exchange.remove(M.ORDERS_FILE)
+    exchange.remove(state_file)
+    exchange.remove(orders_file)
     for _, it in ipairs(opts.own) do
         it.uc = orders.take_control(opts.army, it.unit)
         orders.set_fire_at_will(it.uc, true)
@@ -229,7 +237,7 @@ function M.start(opts)
         if not opts.cco then return end
         for _, row in ipairs(rows) do
             local u = unit_by_name[row.n]
-            if u then
+            if u and row.fx == nil then
                 row.fx = services.active_effects(function(field)
                     return read(function() return opts.cco(u, field) end)
                 end)
@@ -261,7 +269,7 @@ function M.start(opts)
         effects(rows)
         readiness()
         local doc = services.state_document(opts.meta, handle.written, opts.now_ms(), rows, done, used)
-        handle.write_mode = exchange.write(M.STATE_FILE, json.encode(doc))
+        handle.write_mode = exchange.write(state_file, json.encode(doc))
         return rows
     end
 
@@ -448,7 +456,7 @@ function M.start(opts)
 
     function handle.poll()
         follow_morale()
-        local text = exchange.read(M.ORDERS_FILE)
+        local text = exchange.read(orders_file)
         if not text then return end
         local doc, reason = services.parse_orders(text)
         if not doc then

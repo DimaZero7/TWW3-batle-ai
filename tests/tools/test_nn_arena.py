@@ -71,6 +71,19 @@ class TestArenas:
         assert "<timeout_winning_alliance_index>0</timeout_winning_alliance_index>" in \
             (tmp_path / "nn_arena.xml").read_text(encoding="utf-8")
 
+    def test_the_enemy_under_a_script_of_the_simulator(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(project, "BUILD", tmp_path)
+        monkeypatch.setattr(nn_scenario, "SCENARIO", tmp_path / "nn_arena.xml")
+        written = []
+        monkeypatch.setattr(build, "build", lambda target, config, scenario=None: written.append(config) or {})
+        assert build.main(["nn-arena", "--own-ai", "net", "--enemy-ai", "ai_like"]) == 0
+        assert written[0]["enemy_ai"] == "companion" and written[0]["enemy_script"] == "ai_like"
+        assert written[0]["enemy_role"] == "attack" and all(u["width"] for u in written[0]["units"]["enemy"])
+        assert build.main(["nn-arena", "--own-ai", "net"]) == 0
+        assert "enemy_ai" not in written[1] and "enemy_script" not in written[1]
+        with pytest.raises(SystemExit):
+            build.main(["nn-arena", "--own-ai", "attack", "--enemy-ai", "ai_like"])
+
 
 def unit(n, side, **kw):
     row = {"n": n, "side": side, "x": 0, "z": 0, "men": 100, "hp": 1.0, "mp": 1.0, "ms": 1, "a": 0,

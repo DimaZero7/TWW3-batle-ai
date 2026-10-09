@@ -8,6 +8,8 @@
 #   ... -Speed 20 -LingerSeconds 0      (a quick check)
 #   ... -Checkpoint build/nn-train/random.pt -Greedy
 #   ... -Target lord-duel -NoBuild        (another build of entries.nn_arena under the network: tools/nn/lord_duel.py)
+#   ... -EnemyAi ai_like                 (the enemy side under the simulator's script in the companion, not the
+#                                         game's AI: build --enemy-ai; with -NoBuild the build's own setting is used)
 param(
     [ValidateSet('nn-arena', 'lord-duel')][string]$Target = 'nn-arena',
     [ValidateSet(1, 3, 10, 20)][int]$Speed = 1,
@@ -15,6 +17,7 @@ param(
     [int]$DecideMs = 1000,
     [int]$TimeoutModelSeconds = 600,
     [string]$Checkpoint = '',
+    [ValidateSet('', 'game', 'ai_like', 'nearest', 'hold_shoot', 'hold')][string]$EnemyAi = '',
     [switch]$Greedy,
     [int]$LingerSeconds = 30,
     [switch]$NoBuild
@@ -23,7 +26,8 @@ $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 $python = Join-Path $repo '.venv\Scripts\python.exe'
 $container = 'tww3-bai-companion'
-$exchangeFiles = @('tww3_bai_nn_state.json', 'tww3_bai_nn_state.json.tmp', 'tww3_bai_nn_orders.txt', 'tww3_bai_nn_orders.txt.tmp')
+$exchangeFiles = @('tww3_bai_nn_state.json', 'tww3_bai_nn_state.json.tmp', 'tww3_bai_nn_orders.txt', 'tww3_bai_nn_orders.txt.tmp',
+    'tww3_bai_nn_state_enemy.json', 'tww3_bai_nn_state_enemy.json.tmp', 'tww3_bai_nn_orders_enemy.txt', 'tww3_bai_nn_orders_enemy.txt.tmp')
 
 $settings = Get-Content -LiteralPath (Join-Path $repo 'config\default.json') -Raw | ConvertFrom-Json
 $localConfig = Join-Path $repo 'config\local.json'
@@ -43,11 +47,18 @@ if ($running) { throw "Container $container exists (a previous companion?). Remo
 
 if (-not $NoBuild) {
     if ($Target -ne 'nn-arena') { throw "Build $Target yourself (python -m tools.build $Target ...) and pass -NoBuild" }
-    & $python -m tools.build nn-arena --own-ai net --speed $Speed --arena $Arena --decide-ms $DecideMs --timeout $TimeoutModelSeconds | Out-Null
+    $enemyArgs = @()
+    if ($EnemyAi) { $enemyArgs = @('--enemy-ai', $EnemyAi) }
+    & $python -m tools.build nn-arena --own-ai net --speed $Speed --arena $Arena --decide-ms $DecideMs --timeout $TimeoutModelSeconds @enemyArgs | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
 }
 $manifest = Get-Content -LiteralPath (Join-Path $repo ('build\' + $Target + '\manifest.json')) -Raw | ConvertFrom-Json
 if ($manifest.config.own_ai -ne 'net') { throw "build/$Target is not a net build; run without -NoBuild" }
+$enemyScript = ''
+if ($manifest.config.enemy_ai -eq 'companion') { $enemyScript = [string]$manifest.config.enemy_script }
+if ($EnemyAi -and ($EnemyAi -ne 'game') -ne [bool]$enemyScript) { throw "build/$Target enemy ($($manifest.config.enemy_ai) $enemyScript) is not -EnemyAi $EnemyAi; build it again" }
+if ($EnemyAi -and $EnemyAi -ne 'game' -and $enemyScript -ne $EnemyAi) { throw "build/$Target enemy script is $enemyScript, not $EnemyAi; build it again" }
+if ($enemyScript) { Write-Output ("The enemy side: the simulator's script {0} in the companion" -f $enemyScript) }
 Write-Output ("Build {0}: arena {1}, speed x{2}, a decision every {3} ms" -f $manifest.build, $manifest.config.arena, $manifest.config.speed, $manifest.config.decide_ms)
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -56,6 +67,7 @@ $dockerArgs = "run --rm --init --name $container -v `"${repo}:/repo`" -v `"${gam
     "-e PYTHONUNBUFFERED=1 snake-ai-trainer python -m tools.nn.companion --game /game --log /repo/$logRel"
 if ($Checkpoint) { $dockerArgs += ' --checkpoint /repo/' + ($Checkpoint -replace '\\', '/') }
 if ($Greedy) { $dockerArgs += ' --greedy' }
+if ($enemyScript) { $dockerArgs += ' --enemy-script ' + $enemyScript }
 $runs = Join-Path $repo ('build\' + $Target + '\runs')
 $before = Get-ChildItem -LiteralPath $runs -Directory -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 1
 $companion = Start-Process -FilePath docker -ArgumentList $dockerArgs -NoNewWindow -PassThru
@@ -80,6 +92,8 @@ try {
     if ($run -and $before -and $run.Name -eq $before.Name) { $run = $null }
     $log = Join-Path $repo ($logRel -replace '/', '\')
     if ($run -and (Test-Path -LiteralPath $log)) { Copy-Item -LiteralPath $log -Destination (Join-Path $run.FullName 'companion.jsonl') }
+    $enemyLog = $log -replace '\.jsonl$', '_enemy.jsonl'
+    if ($run -and (Test-Path -LiteralPath $enemyLog)) { Copy-Item -LiteralPath $enemyLog -Destination (Join-Path $run.FullName 'companion_enemy.jsonl') }
 }
 if ($run) { Write-Output ("Companion stopped. Run: {0}" -f $run.FullName) } else { Write-Output 'Companion stopped.' }
 exit $code

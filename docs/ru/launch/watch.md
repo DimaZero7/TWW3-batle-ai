@@ -40,9 +40,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/watch.ps1
 | `-TimeoutModelSeconds` | 600 | Предел боя, с времени боя |
 | `-LingerSeconds` | 30 | Сколько игра остаётся открытой после итога |
 | `-NoBuild` | нет | Взять сборку `net`, которая уже лежит в `build/nn-arena/` |
+| `-EnemyAi game\|ai_like` | `game` | Враг — ИИ игры или скрипт симулятора в помощнике (сборка `--enemy-ai`; с `-NoBuild` берётся из сборки, несовпадение — ошибка); журнал скрипта — `companion_enemy.jsonl` ([bridge](../apps/bridge.md#враг-под-скриптом-симулятора)) |
 | `-Target nn-arena\|lord-duel` | `nn-arena` | Чью сборку и папку прогонов брать; `lord-duel` ([дуэль лордов](../apps/entries.md#lord_duel)) — только с `-NoBuild`, журнал помощника — `build/lord-duel/companion/` |
 
 Быстрая проверка: `-Speed 20 -LingerSeconds 0`.
+
+Набор из 8 боёв против `ai_like` вместо ИИ игры: `build/steps/watch_set8.ps1 -Ckpt build/v2/itN.pt -EnemyAi ai_like`.
 
 ## Что печатает помощник
 
