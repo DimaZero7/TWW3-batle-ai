@@ -118,6 +118,19 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           (morale_rows: MoralePercent, MoraleState, wavering), fatigue, melee flag, kills; every 1 s both units' soldier
           places, all fight (men_after_s 260). Lanes on a 3 + 2 grid (DMGMELEE_PLACES: 300 m apart in a row, rows 400 m
           apart: 5 lanes 250+ m apart do not fit in one row inside the map's |x| <= 480) - 2 battles, lanes rotated;
+  reengage  the opening wave of a second contact (sim.json melee.wave was measured on fresh pairs only; in the gate battles
+          tired units back in melee after 10+ s out of it lose little more in their first 10 s than later: x1.46 above half
+          health, x1.12 at or below it, fresh x2.44): both attack each other at a run from 30 m, fearless; (1) swordsmen v
+          clanrats and (2) greatswords v stormvermin with shields (mode 'reengage'): they fight 150 s (part_after_s), then
+          both get a move 30 m straight back at a run (part_m, probe_phase 'out'; 'clear' once neither is in melee), 15 s
+          later (part_s) both attack each other at a run again ('back'; contact 2 = the first melee flag after 'clear'),
+          the lane ends 60 s after contact 2 (after2_s); (3) the control: a fresh pair swordsmen v clanrats from 30 m, 60 s;
+          (4) the same pair tired by running, no fight (mode 'tire'): both shuttle at a run straight back tire_leg_m 100 m
+          and to their start until both are very tired by the game's own state (tire_until; the database's running +4 a
+          tick reaches threshold_very_tired 18000 in ~450 s; tire_max_s 540 caps it, probe_phase 'tire_end'), return to
+          their places facing each other ('tired' when there or after ready_max_s) and attack from 30 m, 60 s. Every 0.5 s
+          both units' health, men, fatigue state, melee flag, kills; every 1 s the soldier places, all fight (men_after_s
+          260; not while tiring). 4 lanes 300 m apart in one row - 2 battles, lanes rotated;
   wave    the opening wave (build/shotgap/wave_geom.py: men within 2.5 m of an enemy 46-51 in the first 5 s, 12 from 20 s,
           the fronts 1.3 m apart then 2.9 m; is it the collision of the approach or the start inside reach?): swordsmen
           <-> clanrats, both attacking, 90 s, the soldiers' places all fight - (1) placed 1 m apart (front to front), both
@@ -186,14 +199,15 @@ GAP_M = 80
 SETTLE_MS = 4000
 TICK_MS = 500
 MEN_MS = 1000
-WINDOWS = ((0, 1), (0, 2), (0, 5), (5, 15), (15, 30))
+WINDOWS = ((0, 1), (0, 2), (0, 5), (0, 10), (5, 15), (15, 30))
+WINDOWS2 = ((0, 1), (0, 3), (0, 5), (0, 10), (5, 15), (10, 20))   # after the second contact
 STEADY_FROM_S = 15.0   # the charge bonus fades over 13 s (charge_decay_duration)
 RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
-         "dmgmelee")
+         "dmgmelee", "reengage")
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
 WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
@@ -211,6 +225,11 @@ RALLYSECURE_AFTER_S = 60    # the lane ends this long after the rally
 # the dmgmelee plan: the lane places (x, z of the target's front), by lane index - a row of 3 300 m apart and a row of 2
 # 400 m behind it (the nearest lanes of two rows 427 m apart); the lanes rotate over the places between battles
 DMGMELEE_PLACES = ((-300, -200), (0, -200), (300, -200), (-150, 200), (150, 200))
+# the reengage plan: the second contact (lane mode 'reengage') and the pair tired by running (mode 'tire');
+# entries/charge_probe.lua
+REENGAGE = {"part_after_s": 150, "part_m": 30, "part_s": 15, "after2_s": 60}
+REENGAGE_TIRE = {"tire_leg_m": 100, "tire_until": "threshold_very_tired", "tire_max_s": 540, "ready_max_s": 40}
+REENGAGE_LANE_DX = 300   # 4 lanes 300 m apart (x -450 .. 450); every unit moves along its lane (z) only
 ROUTMOB_MEN_S = 40     # the routmob plan: the soldiers' places this long after the target's rout
 ROUTMOB_END_S = 45     # ... and the lane ends this long after it
 # the reform plan: soldier places this long after contact (the whole fight)
@@ -405,6 +424,22 @@ def battles(plan):
                 dmg("spearsh", "clanrat"), dmg("general", "svsh")]
         for b in (base, rotate(base, 2)):
             out.append([dict(l, place=p) for l, p in zip(b, DMGMELEE_PLACES)])
+    elif plan == "reengage":
+        def re(attacker, target, kind):
+            common = dict(gap_m=30, kind=kind, lane_dx=REENGAGE_LANE_DX)
+            if kind == "reengage":
+                # 30 m at a run, 150 s, 15 s apart, back in, 60 s
+                return lane(attacker, target, "reengage", "both", fight_s=REENGAGE["part_after_s"], max_s=310,
+                            **REENGAGE, **common)
+            if kind == "tired":
+                # tire_max_s + the way back and the wait + 30 m + 60 s
+                return lane(attacker, target, "tire", "both", fight_s=60,
+                            max_s=REENGAGE_TIRE["tire_max_s"] + REENGAGE_TIRE["ready_max_s"] + 90, **REENGAGE_TIRE,
+                            **common)
+            return lane(attacker, target, "attack_run", "both", fight_s=60, **common)
+        base = [re("swords", "clanrat", "reengage"), re("gs", "svsh", "reengage"), re("swords", "clanrat", "control"),
+                re("swords", "clanrat", "tired")]
+        out += [base, rotate(base, 2)]
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
@@ -510,9 +545,10 @@ def run_config(plan, index):
     turn = plan == "move" and any(l["mode"] == "script" for l in lanes)
     config = {"plan": plan, "battle": index, "settle_ms": SETTLE_MS, "tick_ms": TURN_TICK_MS if turn else TICK_MS,
               "men_ms": 500 if turn else MEN_MS,
-              "men_near_m": 60,
+              # (reengage: the pair 30 + 30 m apart between its two fights, centre to centre ~75 m)
+              "men_near_m": 100 if plan == "reengage" else 60,
               # the soldiers' places: the first 30 s (the charge plan) or the whole fight (hit: men in contact)
-              "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2", "dmgmelee") else 95 if plan in ("defender", "wave", "wavemiss", "wavemiss2")
+              "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2", "dmgmelee", "reengage") else 95 if plan in ("defender", "wave", "wavemiss", "wavemiss2")
                               else 90 if plan in ("hit", "move", "vv") else 30),
               "lanes": lanes, "park": park}
     if plan in ("routmob", "routmob2"):
@@ -626,9 +662,16 @@ def measure(lane):
     if c is None:
         return out
     # the way in: the attacker's mean speed over distance bands before contact (the engine moves a unit in
-    # steps, so speeds come from the times the distance crossed each band, not from 0.5 s differences)
+    # steps, so speeds come from the times the distance crossed each band, not from 0.5 s differences); a tired lane's
+    # way in starts at its 'tired' phase (before it the pair shuttles)
+    phase_t = {}
+    for p in lane.get("phases", []):
+        phase_t.setdefault(p["phase"], p["t"] / 1000)
+    t_in = phase_t.get("tired", float(t[0]))
+    if "tire_end" in phase_t:
+        out["tire_s"] = phase_t["tire_end"] - float(t[0])
     dist = np.hypot(ax - tx, az - tz)
-    before = (t <= c) & np.isfinite(dist)
+    before = (t >= t_in - 1e-6) & (t <= c) & np.isfinite(dist)
     tb, db = t[before], dist[before]
     if len(tb) > 3:
         reach = db[-1]
@@ -647,7 +690,7 @@ def measure(lane):
         w = int(round(2.0 / max(1e-6, float(np.median(np.diff(tb))))))
         if len(tb) > w:
             out["speed_peak30"] = float(np.max((db[:-w] - db[w:]) / (tb[w:] - tb[:-w])))
-    out["approach_s"] = float(c - t[0])
+    out["approach_s"] = float(c - t_in)
     end_t = t[-1]
     # a window from the contact starts at the sample before it (the game's first contact sample already holds the
     # blows struck since that sample: a lord's first blow; the simulator's contact time is that sample already)
@@ -671,15 +714,31 @@ def measure(lane):
             out[f"{who}_men_steady"] = (at(t, men, c + STEADY_FROM_S) - at(t, men, stop)) / (stop - c - STEADY_FROM_S)
         c2 = lane["contacts"].get(2)
         if c2 is not None:
-            for lo, hi in ((0, 1), (0, 3), (0, 5), (5, 15)):
+            for lo, hi in WINDOWS2:
                 if c2 + hi <= end_t + 1e-6:
                     out[f"{who}_hp2_{lo}_{hi}"] = at(t, hp, c2 + lo) - at(t, hp, c2 + hi)
+            # the second fight's steady rate (15 s on, to the lane's end) and both waves: the first 10 s over 10 s of it
+            stop2 = min(end_t, c2 + (spec.get("after2_s") or spec["fight_s"]))
+            if stop2 - (c2 + STEADY_FROM_S) >= 5:
+                out[f"{who}_hp2_steady"] = (at(t, hp, c2 + STEADY_FROM_S) - at(t, hp, stop2)) / (stop2 - c2 - STEADY_FROM_S)
+        for k, steady, first in (("wave_10", f"{who}_hp_steady", f"{who}_hp_0_10"),
+                                 ("wave2_10", f"{who}_hp2_steady", f"{who}_hp2_0_10")):
+            if out.get(steady) and out[steady] > 0 and out.get(first) is not None and np.isfinite(out[first]):
+                out[f"{who}_{k}"] = out[first] / (10 * out[steady])
         if who == "tg" and lane.get("abilities"):
             out["ability_status"] = lane["abilities"][0].get("status")
             if c + 18 <= end_t:
                 out["tg_hp_0_18"] = at(t, hp, c) - at(t, hp, c + 18)
                 out["a_hp_0_18"] = at(t, series(s, "a", "hp"), c) - at(t, series(s, "a", "hp"), c + 18)
     out["contact2_s"] = lane["contacts"].get(2)
+    # the fatigue state (0 fresh .. 5 exhausted) at each contact: the last sample at or before it
+    for n, ct in lane["contacts"].items():
+        k = np.nonzero(t <= ct + 1e-6)[0]
+        if len(k) and n in (1, 2):
+            for who, i in (("a", 1), ("tg", 2)):
+                v = _level((s[k[-1]][i] or {}).get("fat"))
+                if np.isfinite(v):
+                    out[f"{who}_fat_c{n}"] = v
     # men in contact (soldiers' places): per second after contact, the mean over 0-5, 5-15, 15-30 s
     if lane.get("men"):
         rows = [(tm - c, near_counts(a, b), near_counts(b, a)) for tm, a, b in lane["men"] if tm >= c - 0.01]
@@ -785,7 +844,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
         if SYG in sim_abilities.slot_keys(UNITS["general"][0], params.units, params.abilities) else -1
     st_ = {"contact": [None] * B, "contact2": [None] * B, "phase": ["in"] * B, "out_t": [0.0] * B, "after": [None] * B,
            "out_from": [None] * B, "fired": [False] * B, "last": {}, "phases": [[] for _ in range(B)],
-           "a_ability": [False] * B, "start": [None] * B, "faced": set(), "rout": [None] * B}
+           "a_ability": [False] * B, "start": [None] * B, "faced": set(), "rout": [None] * B,
+           "re": [{"phase": "in", "clear": False} for _ in range(B)], "tire": [None] * B}
     rec = {"t": [], "rows": []}
     fields = ("x", "z", "b", "men", "hp_abs", "m", "fatigue", "fat", "k", "r", "s")
     a_slot = {}
@@ -802,6 +862,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
         m_t = u["m"][b_idx, slot["tg"]].bool().cpu().numpy()
         r_t = u["r"][b_idx, slot["tg"]].bool().cpu().numpy()
         ax, az = u["x"][b_idx, slot["a"]].cpu().numpy(), u["z"][b_idx, slot["a"]].cpu().numpy()
+        tx, tz = u["x"][b_idx, slot["tg"]].cpu().numpy(), u["z"][b_idx, slot["tg"]].cpu().numpy()
+        fat_a, fat_t = u["fat"][b_idx, slot["a"]].cpu().numpy(), u["fat"][b_idx, slot["tg"]].cpu().numpy()
         o = O.hold(B, N, device)
         kind, target, run_, x, z, ab = (o.kind.clone(), o.target.clone(), o.run.clone(), o.x.clone(), o.z.clone(),
                                         o.ability.clone())
@@ -809,7 +871,9 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
             A, T, L = int(slot["a"][b]), int(slot["tg"][b]), int(slot["l"][b])
             sp = specs[b]
             # the contact began in the step that ended now (its blows are in this sample already): its start
-            if st_["contact"][b] is None and (m_a[b] or m_t[b]):
+            # (a tired lane's only once its fight is on: before it the pair shuttles)
+            fighting = mode[b] != "tire" or (st_["tire"][b] or {}).get("phase") == "fight"
+            if st_["contact"][b] is None and fighting and (m_a[b] or m_t[b]):
                 st_["contact"][b] = t - params.dt
                 if L >= 0 and sp["lord"].get("ability") and syg_slot >= 0 and not sp["lord"].get("at_m"):
                     ab[b, L] = syg_slot
@@ -905,6 +969,58 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                 kind[b, T], target[b, T], run_[b, T] = O.ATTACK, A, tmode[b] == "both"
             elif tmode[b] == "push":
                 kind[b, T], x[b, T], z[b, T], run_[b, T] = O.MOVE, sp["x"], sp["z"] + sp.get("push_m", 60), False
+            # the reengage plan (entries/charge_probe.lua): the attacker stands at +z facing the target at -z, so straight
+            # back is +z for it and -z for the target
+            if mode[b] == "reengage":
+                re_ = st_["re"][b]
+                if re_["phase"] == "in" and c is not None and t - c >= sp["part_after_s"] - 1e-6:
+                    re_.update(phase="out", t=t, a=(float(ax[b]), float(az[b]) + sp["part_m"]),
+                               tg=(float(tx[b]), float(tz[b]) - sp["part_m"]))
+                    st_["phases"][b].append({"phase": "out", "t": t * 1000})
+                elif re_["phase"] == "out":
+                    if not re_["clear"] and not m_a[b] and not m_t[b]:
+                        re_["clear"] = True
+                        st_["phases"][b].append({"phase": "clear", "t": t * 1000})
+                    if t - re_["t"] >= sp["part_s"] - 1e-6:
+                        re_["phase"] = "back"
+                        st_["phases"][b].append({"phase": "back", "t": t * 1000, "cleared": re_["clear"]})
+                if re_["phase"] == "back" and re_["clear"] and st_["contact2"][b] is None and (m_a[b] or m_t[b]):
+                    st_["contact2"][b] = t - params.dt
+                if re_["phase"] == "out":
+                    for who, i in (("a", A), ("tg", T)):
+                        kind[b, i], target[b, i], run_[b, i] = O.MOVE, -1, True
+                        x[b, i], z[b, i] = re_[who]
+                else:
+                    kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, True
+            elif mode[b] == "tire":
+                ti = st_["tire"][b]
+                if ti is None:
+                    ti = st_["tire"][b] = {"phase": "tire", "t0": t, "leg": {"a": 1, "tg": 1},
+                                           "start": {"a": (float(ax[b]), float(az[b])), "tg": (float(tx[b]), float(tz[b]))}}
+                pos = {"a": (float(ax[b]), float(az[b])), "tg": (float(tx[b]), float(tz[b]))}
+
+                def point(who, leg):
+                    sx, sz = ti["start"][who]
+                    return (sx, sz + (1 if who == "a" else -1) * sp["tire_leg_m"]) if leg % 2 else (sx, sz)
+                if ti["phase"] == "tire":
+                    for who in ("a", "tg"):
+                        if math.dist(pos[who], point(who, ti["leg"][who])) <= 5:
+                            ti["leg"][who] += 1
+                    lvl = FAT_LEVELS.index(sp["tire_until"])
+                    if (fat_a[b] >= lvl and fat_t[b] >= lvl) or t - ti["t0"] >= sp["tire_max_s"]:
+                        ti.update(phase="return", t=t)
+                        st_["phases"][b].append({"phase": "tire_end", "t": t * 1000})
+                elif ti["phase"] == "return":
+                    home = all(math.dist(pos[w], ti["start"][w]) <= 4 for w in ("a", "tg"))
+                    if home or t - ti["t"] >= sp["ready_max_s"]:
+                        ti["phase"] = "fight"
+                        st_["phases"][b].append({"phase": "tired", "t": t * 1000})
+                for who, i in (("a", A), ("tg", T)):
+                    if ti["phase"] == "fight":
+                        kind[b, i], target[b, i], run_[b, i] = O.ATTACK, (T if who == "a" else A), True
+                    else:
+                        kind[b, i], target[b, i], run_[b, i] = O.MOVE, -1, True
+                        x[b, i], z[b, i] = point(who, ti["leg"][who]) if ti["phase"] == "tire" else ti["start"][who]
         # KEEP the orders in force (re-issuing every step would be a new order each time)
         key = torch.stack([kind.float(), target.float(), run_.float(), x, z], -1)
         last = st_["last"].get("key")
@@ -1114,7 +1230,10 @@ def exit_report(run_dirs, sim=False, device="cpu", copies=4, params=None):
 KEYS = ("contact_s", "speed_30_60", "speed_last30", "speed_last10", "speed_peak30",
         "tg_hp_0_1", "tg_hp_0_2", "tg_hp_0_5", "tg_hp_5_15", "tg_hp_15_30", "tg_hp_steady", "tg_men_steady",
         "a_hp_0_1", "a_hp_0_2", "a_hp_0_5", "a_hp_5_15", "a_hp_15_30", "a_hp_steady", "a_men_steady",
-        "tg_hp2_0_5", "a_hp2_0_3", "tg_hp_0_18", "a_hp_0_18")
+        "tg_hp2_0_5", "a_hp2_0_3", "tg_hp_0_18", "a_hp_0_18",
+        # the reengage plan: the first 10 s and the steady rate of each fight, their ratio (the wave), the fatigue
+        "tg_hp_0_10", "a_hp_0_10", "tg_wave_10", "a_wave_10", "tire_s", "a_fat_c1", "tg_fat_c1",
+        "tg_hp2_0_10", "a_hp2_0_10", "tg_hp2_steady", "a_hp2_steady", "tg_wave2_10", "a_wave2_10", "a_fat_c2", "tg_fat_c2")
 
 
 def summary(rows):
@@ -1157,8 +1276,8 @@ def report(run_dirs, sim=False, out=OUT, device="cpu", copies=8):
             if k in r:
                 g = r[k]
                 sv = s.get(k)
-                extra = "" if not sim_table else f"   sim {f(sv[0], 2 if 'speed' in k or 'men' in k else 0)}"
-                p = 2 if "speed" in k or "men" in k else 0
+                p = 2 if any(w in k for w in ("speed", "men", "wave", "fat")) else 0
+                extra = "" if not sim_table else f"   sim {f(sv and sv[0], p)}"
                 print(f"  {k:14} {f(g[0], p):>8} ({f(g[1], p)}-{f(g[2], p)}){extra}")
         for k in NEAR_KEYS:
             if k in r:

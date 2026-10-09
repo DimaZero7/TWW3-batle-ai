@@ -1315,6 +1315,106 @@ class TestChargeProbe:
         assert step("out", 12000, 0, 10000, 36, True, lane) == "out"
         assert step("out", 35000, 0, 10000, 3, True, lane) == "back"
 
+    REENGAGE = """
+        CONFIG.lanes = {CONFIG.lanes[1]}
+        CONFIG.lanes[1].target_mode = 'both'
+        CONFIG.lanes[1].answer = false
+        CONFIG.lanes[1].max_s = 200
+        CONFIG.park = {{name = 'enemy_lord', x = 700, z = -400, bearing = 0},
+                       {name = 'own_lord', x = -700, z = -400, bearing = 0}}
+    """
+
+    def test_reengage_parts_the_pair_and_counts_the_second_contact(self, lua, tmp_path):
+        lua.execute(self.SETUP + self.REENGAGE + """
+            local L = CONFIG.lanes[1]
+            L.mode, L.fight_s, L.part_after_s, L.part_m, L.part_s, L.after2_s = 'reengage', 2, 2, 30, 3, 3
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            assert(own[2].attack_args.run == true and enemy[2].attack_args.target == 'own_swords_1')
+            own[2].melee, enemy[2].melee = true, true
+            for _ = 1, 6 do bm:tick(500); bm:pump() end
+            assert(not STATE.finished, 'fight_s does not end a reengage lane')
+            own[2].melee = false                        -- the clanrats still hold on: not clear yet
+            for _ = 1, 2 do bm:tick(500); bm:pump() end
+            enemy[2].melee = false
+            for _ = 1, 4 do bm:tick(500); bm:pump() end
+            assert(own[2].attack_args.target == 'enemy_clanrat_1' and enemy[2].attack_args.run == true)
+            own[2].melee = true
+            for _ = 1, 20 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        phases = [(r["phase"], r["t"]) for r in rows if r["event"] == "probe_phase"]
+        assert [p for p, _ in phases] == ["out", "clear", "back"]
+        t = dict(phases)
+        assert t["clear"] - t["out"] >= 1000 and t["back"] - t["out"] >= 3000
+        (out,) = [r for r in rows if r["event"] == "probe_phase" and r["phase"] == "out"]
+        # both straight back 30 m: the swordsmen (facing -z) to +z, the clanrats (facing +z) to -z
+        assert [round(z) for _, z in out["to"]] == [30, -30]
+        log = list(lua.eval("bm.orders").values())
+        assert any(x.startswith("goto own_swords_1 ") and x.endswith(" 30 true") for x in log)
+        assert any(x.startswith("goto enemy_clanrat_1 ") and x.endswith(" -30 true") for x in log)
+        contacts = {r["n"]: r["t"] for r in rows if r["event"] == "probe_contact"}
+        assert set(contacts) == {1, 2} and contacts[2] > t["back"]
+        assert {r["lane"]: r["why"] for r in rows if r["event"] == "probe_lane_end"} == {"L1": "after_contact2"}
+
+    def test_tire_shuttles_until_very_tired_then_both_attack(self, lua, tmp_path):
+        lua.execute(self.SETUP + self.REENGAGE + """
+            local L = CONFIG.lanes[1]
+            L.mode, L.fight_s, L.tire_leg_m, L.tire_until, L.tire_max_s, L.ready_max_s =
+                'tire', 2, 100, 'threshold_very_tired', 100, 3
+            for _, u in ipairs({own[2], enemy[2]}) do
+                u.fat = 'threshold_winded'
+                function u:fatigue_state() return self.fat end
+            end
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            assert(own[2].attack_args == nil and enemy[2].attack_args == nil, 'no attack while tiring')
+            own[2].melee = true                          -- a stray melee flag while tiring is no contact
+            for _ = 1, 2 do bm:tick(500); bm:pump() end
+            own[2].melee = false
+            own[2].pos = fake.vector_type.new(); own[2].pos.x, own[2].pos.z = -120, 184.5     -- leg 1's end
+            for _ = 1, 2 do bm:tick(500); bm:pump() end
+            own[2].fat = 'threshold_very_tired'
+            for _ = 1, 2 do bm:tick(500); bm:pump() end
+            assert(own[2].attack_args == nil, 'both must be very tired')
+            enemy[2].fat = 'threshold_exhausted'
+            for _ = 1, 2 do bm:tick(500); bm:pump() end
+            own[2].moving, enemy[2].moving = false, false
+            for _ = 1, 2 do bm:tick(500); bm:pump() end
+            assert(own[2].attack_args.target == 'enemy_clanrat_1' and own[2].attack_args.run == true)
+            assert(enemy[2].attack_args.target == 'own_swords_1')
+            own[2].melee, enemy[2].melee = true, true
+            for _ = 1, 20 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        log = list(lua.eval("bm.orders").values())
+        # leg 1 straight back for both, then the swordsmen's leg 2 to their place
+        assert "goto own_swords_1 -120 184.5 true" in log and "goto enemy_clanrat_1 -120 -106 true" in log
+        assert "goto own_swords_1 -120 84.5 true" in log
+        ph = {r["phase"]: r for r in rows if r["event"] == "probe_phase"}
+        assert list(ph) == ["tire_end", "tired"]
+        assert ph["tire_end"]["why"] == "tired" and ph["tire_end"]["legs"] == [2, 1]
+        assert ph["tired"]["why"] == "home"
+        contacts = [r for r in rows if r["event"] == "probe_contact"]
+        assert len(contacts) == 1 and contacts[0]["t"] > ph["tired"]["t"]
+        assert not [x for r in rows if r["event"] == "probe_men" for x in r["lanes"] if x["t"] < ph["tired"]["t"]]
+        assert {r["lane"]: r["why"] for r in rows if r["event"] == "probe_lane_end"} == {"L1": "fight_s"}
+        cp = "require('entries.charge_probe')"
+        assert lua.eval(cp + ".fatigue_level('threshold_very_tired')") == 4 and lua.eval(cp + ".fatigue_level('x')") is None
+        x, z = lua.eval(cp + ".shuttle_point(10, 0, 0, 1, 100)")
+        assert (round(x, 6), round(z, 6)) == (10, -100)
+        assert lua.eval(cp + ".shuttle_point(10, 0, 0, 2, 100)") == (10, 0)
+        step = lua.eval(cp + ".reengage_step")
+        lane = lua.table_from({"part_after_s": 150, "part_s": 15})
+        assert step("in", 159000, 10000, None, lane) == "in" and step("in", 160000, 10000, None, lane) == "out"
+        assert step("out", 174000, 10000, 160000, lane) == "out" and step("out", 175000, 10000, 160000, lane) == "back"
+
 class TestMissileProbe:
     """The missile probe (entries.missile_probe; lanes from tools/nn/missile_probe.py)."""
     SETUP = """

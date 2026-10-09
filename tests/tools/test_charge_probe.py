@@ -14,7 +14,8 @@ def test_plans_have_few_battles_and_lanes_on_both_sides():
     for plan in cp.PLANS:
         for i in range(1, len(cp.battles(plan)) + 1):
             config, model_s, arena = cp.run_config(plan, i)
-            assert 2 <= len(config["lanes"]) <= 5 and model_s < 400
+            # (reengage: its tired pair runs up to 540 s before its fight)
+            assert 2 <= len(config["lanes"]) <= 5 and model_s < (720 if plan == "reengage" else 400)
             names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}
             for lane in config["lanes"]:
                 assert lane["attacker"] in names and lane["target"] in names
@@ -244,6 +245,73 @@ def test_the_dmgmelee_plan_fights_whole_and_cut_units_one_on_one_on_a_far_grid()
         assert {p["name"] for p in config["park"]} == {"enemy_lord"}           # the General fights in a lane
         # the parked Warlord is far from every lane
         assert all(math.hypot(700 - x, -400 - z) > 250 for x, z in places)
+
+
+def test_the_reengage_plan_parts_and_rejoins_two_pairs_beside_a_fresh_and_a_tired_control():
+    b = cp.battles("reengage")
+    assert len(b) == 2 and all(len(x) == 4 for x in b)
+    for x in b:
+        kinds = sorted((l["attacker"], l["target"], l["kind"]) for l in x)
+        assert kinds == sorted([("swords", "clanrat", "reengage"), ("gs", "svsh", "reengage"),
+                                ("swords", "clanrat", "control"), ("swords", "clanrat", "tired")])
+        assert all(l["gap_m"] == 30 and l["target_mode"] == "both" and not l["answer"] for l in x)
+        for l in x:
+            if l["kind"] == "reengage":
+                assert l["mode"] == "reengage" and l["fight_s"] == 150
+                assert (l["part_after_s"], l["part_m"], l["part_s"], l["after2_s"]) == (150, 30, 15, 60)
+                assert l["max_s"] >= 30 / 4 + 150 + 15 + 60 / 4 + 60
+            elif l["kind"] == "tired":
+                assert l["mode"] == "tire" and l["fight_s"] == 60 and l["tire_until"] == "threshold_very_tired"
+                assert l["max_s"] >= l["tire_max_s"] + l["ready_max_s"] + 60
+                # the database's running cost (+4 a tick, 10 ticks a second) reaches very tired well inside the cap
+                rules = json.loads((cp.project.ROOT / "config" / "nn" / "game_rules.json").read_text(encoding="utf-8"))
+                fat = rules.get("fatigue", rules)
+                assert fat["threshold_very_tired"] / (fat["running"] * 10) < l["tire_max_s"]
+            else:
+                assert l["mode"] == "attack_run" and l["fight_s"] == 60 and "after2_s" not in l
+    assert [l["kind"] for l in b[1]] == [l["kind"] for l in cp.rotate(b[0], 2)] and b[0][0]["kind"] != b[1][0]["kind"]
+    for i in (1, 2):
+        config, model_s, arena = cp.run_config("reengage", i)
+        assert config["men_after_s"] >= 250 and config["men_ms"] == 1000 and config["tick_ms"] == 500
+        assert config["men_near_m"] >= 100 and model_s < 720
+        xs = sorted(l["x"] for l in config["lanes"])
+        assert all(q - p >= 250 for p, q in zip(xs, xs[1:])) and max(abs(v) for v in xs) <= 480
+        # every unit moves along its own lane (z): the tired pair's shuttle stays inside the map
+        tire = next(l for l in config["lanes"] if l["mode"] == "tire")
+        assert tire["z"] + tire["gap_m"] + tire["a_depth"] + tire["tire_leg_m"] < 480
+        assert {p["name"] for p in config["park"]} == {"own_lord", "enemy_lord"}
+
+
+def _reengage_lane(**kw):
+    """A reengage lane: contact at 10 s, the target losing 10 HP/s steady and 30 HP/s in the first 10 s of each fight;
+    out at 160 s, contact 2 at 180 s, the end at 240 s."""
+    spec = dict(cp.layout(cp.battles("reengage")[0])[0][0], **kw)
+    assert spec["mode"] == "reengage"
+    samples, hp = [], 9600.0
+    for k in range(0, 481):
+        t = k * 0.5
+        if k:
+            if 10 <= t - 0.5 < 160:
+                hp -= 0.5 * (30 if t - 10 <= 10 else 10)
+            elif t - 0.5 >= 180:
+                hp -= 0.5 * (15 if t - 180 <= 10 else 10)
+        fat = "threshold_active" if t < 180 else "threshold_tired"
+        m = 10 <= t < 165 or t >= 180
+        samples.append((t, {"x": 0, "z": 40, "hp": 8000, "men": 120, "m": m, "fat": fat},
+                        {"x": 0, "z": 0, "hp": hp, "men": 160, "m": m, "fat": fat}, None))
+    return {"run": "r", "spec": spec, "samples": samples, "men": [], "contacts": {1: 10.0, 2: 180.0}, "end": None,
+            "abilities": [], "phases": [{"phase": "out", "t": 160000}, {"phase": "clear", "t": 166000},
+                                        {"phase": "back", "t": 175000}]}
+
+
+def test_measure_the_second_contact_wave_and_fatigue():
+    m = cp.measure(_reengage_lane())
+    assert m["contact2_s"] == 180.0 and m["cell"].endswith(" reengage")
+    assert abs(m["tg_hp_steady"] - 10) < 0.2 and abs(m["tg_hp2_steady"] - 10) < 1e-6
+    assert abs(m["tg_wave2_10"] - 1.5) < 0.05 and m["tg_wave_10"] > 2.8
+    assert m["tg_fat_c1"] == 1 and m["tg_fat_c2"] == 3 and m["a_fat_c2"] == 3
+    rows = cp.summary([m])
+    assert "tg_wave2_10" in rows[0] and "a_fat_c2" in rows[0]
 
 
 def test_battle_file_is_written(tmp_path):

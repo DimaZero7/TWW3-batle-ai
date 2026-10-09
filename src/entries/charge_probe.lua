@@ -14,7 +14,15 @@
 --   'shoot'        a ranged attack on the target at a walk (fire at will on), never changed;
 --   'script'       lane.steps {{at_s, kind = 'face' | 'move', bearing, width, dx, dz, run}}: at at_s after the
 --                  go a 'face' (goto_location_angle_width at its place: turn in place to the world bearing) or a
---                  'move' (goto_location to its start + (dx, dz)); the turning tests.
+--                  'move' (goto_location to its start + (dx, dz)); the turning tests;
+--   'reengage'     attack_run (the target with target_mode 'both' too); part_after_s after the first contact both
+--                  get a move part_m straight back at a run (probe_phase 'out'; 'clear' the first tick neither is in
+--                  melee), part_s later both attack each other at a run ('back'); the first melee flag after 'clear'
+--                  is contact 2; the lane ends after2_s after it (fight_s does not end it);
+--   'tire'         no fight first: both units shuttle at a run straight back tire_leg_m and to their places
+--                  until both are at least tire_until (a fatigue_state key) or tire_max_s after the go ('tire_end'),
+--                  go back to their places facing each other, and once both are there (or ready_max_s later,
+--                  'tired') both attack each other at a run; contacts count only from then.
 -- lane.a_ability (optional): the attacker uses it on himself a_ability_after_s after the first contact
 -- (Foe-Seeker's vigour). lane.men_all_s (optional): the attacker's soldier places every men_ms from the go
 -- to men_all_s, wherever the enemy is (how a formation turns).
@@ -73,10 +81,13 @@ local M = {}
 local LOG = 'tww3_bai_events.jsonl'
 local TIMER, MEN_TIMER = 'tww3_bai_charge_probe_tick', 'tww3_bai_charge_probe_men'
 M.MODES = {attack_run = true, attack_walk = true, move_run = true, recharge = true, hold = true, withdraw = true,
-    script = true, shoot = true}
+    script = true, shoot = true, reengage = true, tire = true}
 M.TARGET_MODES = {stand = true, hold = true, both = true, both_walk = true, rear = true, push = true}
 M.AFTER_KINDS = {attack_t2 = true, attack_same = true, halt = true, move_near = true, none = true}
 M.AT_ROUT = {halt = true, none = true, away = true}
+-- The engine's fatigue states, fresh to exhausted (unit:fatigue_state()).
+M.FATIGUE = {'threshold_fresh', 'threshold_active', 'threshold_winded', 'threshold_tired', 'threshold_very_tired',
+    'threshold_exhausted'}
 
 local function round(v, k)
     if type(v) ~= 'number' or v ~= v then return nil end
@@ -98,6 +109,29 @@ end
 function M.beside(x, z, bearing, dx, dz)
     local r = math.rad(bearing or 0)
     return x + (dz or 0) * math.sin(r) + (dx or 0) * math.cos(r), z + (dz or 0) * math.cos(r) - (dx or 0) * math.sin(r)
+end
+
+-- A fatigue state's index (0 fresh .. 5 exhausted), nil for anything else. Pure.
+function M.fatigue_level(state)
+    for i, k in ipairs(M.FATIGUE) do
+        if k == state then return i - 1 end
+    end
+    return nil
+end
+
+-- The tire shuttle's point for a unit placed at (x, z) facing bearing: odd legs tire_leg_m straight back, even legs
+-- its place. Pure. Returns x, z.
+function M.shuttle_point(x, z, bearing, leg, leg_m)
+    if leg % 2 == 1 then return M.beside(x, z, bearing, 0, -leg_m) end
+    return x, z
+end
+
+-- The reengage lane's phase after one tick (pure): 'in' -> 'out' part_after_s after the first contact -> 'back'
+-- part_s after 'out'. Returns the new phase.
+function M.reengage_step(phase, now_ms, contact_ms, out_ms, lane)
+    if phase == 'in' and contact_ms and now_ms - contact_ms >= lane.part_after_s * 1000 then return 'out' end
+    if phase == 'out' and out_ms and now_ms - out_ms >= lane.part_s * 1000 then return 'back' end
+    return phase
 end
 
 -- The recharge's phase after one tick (pure): 'in' (attacking) -> 'out' recharge_after_s after the
@@ -258,7 +292,8 @@ function M.main(bm, config, globals)
             if lane.running then
                 local a_m = read(function() return lane.a.unit:is_in_melee() end)
                 local t_m = read(function() return lane.t.unit:is_in_melee() end)
-                if not lane.contact and (a_m or t_m) then
+                local fighting = lane.mode ~= 'tire' or lane.phase == 'fight'
+                if not lane.contact and fighting and (a_m or t_m) then
                     lane.contact = now
                     emit('probe_contact', {lane = lane.name, t = now - lane.t0, n = 1})
                     if lane.answer and lane.target_mode ~= 'hold' and lane.target_mode ~= 'both'
@@ -303,6 +338,94 @@ function M.main(bm, config, globals)
                     if lane.phase == 'back' and not lane.contact2 and a_m then
                         lane.contact2 = now
                         emit('probe_contact', {lane = lane.name, t = now - lane.t0, n = 2})
+                    end
+                end
+                if lane.mode == 'reengage' then
+                    local phase = M.reengage_step(lane.phase, now, lane.contact, lane.out_ms, lane)
+                    if phase ~= lane.phase then
+                        lane.phase = phase
+                        if phase == 'out' then
+                            lane.out_ms = now
+                            local moved = {}
+                            for _, it in ipairs({{lane.a, lane.layout.ab}, {lane.t, lane.layout.tb}}) do
+                                local p = read(function() return it[1].unit:position() end)
+                                if p then
+                                    local x, z = M.beside(p:get_x(), p:get_z(), it[2], 0, -lane.part_m)
+                                    orders.move(it[1].uc, vec(x, z), true)
+                                    moved[#moved + 1] = {round(x), round(z)}
+                                end
+                            end
+                            emit('probe_phase', {lane = lane.name, phase = 'out', t = now - lane.t0, to = moved})
+                        elseif phase == 'back' then
+                            attack(lane, lane.a, lane.t, false)
+                            attack(lane, lane.t, lane.a, lane.target_mode == 'both_walk')
+                            emit('probe_phase', {lane = lane.name, phase = 'back', t = now - lane.t0,
+                                cleared = lane.clear_ms ~= nil,
+                                a_fat = read(function() return lane.a.unit:fatigue_state() end),
+                                t_fat = read(function() return lane.t.unit:fatigue_state() end)})
+                        end
+                    end
+                    if lane.phase == 'out' and not lane.clear_ms and not a_m and not t_m then
+                        lane.clear_ms = now
+                        emit('probe_phase', {lane = lane.name, phase = 'clear', t = now - lane.t0,
+                            after_out_s = round((now - lane.out_ms) / 1000)})
+                    end
+                    if lane.phase == 'back' and lane.clear_ms and not lane.contact2 and (a_m or t_m) then
+                        lane.contact2 = now
+                        emit('probe_contact', {lane = lane.name, t = now - lane.t0, n = 2})
+                    end
+                end
+                if lane.mode == 'tire' then
+                    local L = lane.layout
+                    local homes = {a = {L.ax, L.az, L.ab, lane.a_width}, t = {L.tx, L.tz, L.tb, lane.t_width}}
+                    local fat = {a = read(function() return lane.a.unit:fatigue_state() end),
+                        t = read(function() return lane.t.unit:fatigue_state() end)}
+                    local function off(who, x, z)
+                        local p = read(function() return lane[who].unit:position() end)
+                        if not p then return math.huge end
+                        return math.sqrt((p:get_x() - x) ^ 2 + (p:get_z() - z) ^ 2)
+                    end
+                    local function moving(who) return read(function() return lane[who].unit:is_moving() end) end
+                    if lane.phase == 'tire' then
+                        for _, who in ipairs({'a', 't'}) do
+                            local h = homes[who]
+                            local x, z = M.shuttle_point(h[1], h[2], h[3], lane.legs[who], lane.tire_leg_m)
+                            -- the next leg once there, or once stopped 5 s into the leg (a formation may stop a few
+                            -- metres off its point; standing would rest it)
+                            if off(who, x, z) <= 8 or (not moving(who) and now - lane.leg_ms[who] >= 5000) then
+                                lane.legs[who], lane.leg_ms[who] = lane.legs[who] + 1, now
+                                x, z = M.shuttle_point(h[1], h[2], h[3], lane.legs[who], lane.tire_leg_m)
+                                orders.move(lane[who].uc, vec(x, z), true)
+                            end
+                        end
+                        local goal = M.fatigue_level(lane.tire_until)
+                        local tired = (M.fatigue_level(fat.a) or -1) >= goal and (M.fatigue_level(fat.t) or -1) >= goal
+                        if tired or now - lane.t0 >= lane.tire_max_s * 1000 then
+                            lane.phase, lane.return_ms = 'return', now
+                            for _, who in ipairs({'a', 't'}) do
+                                local h = homes[who]
+                                orders.move_formation(lane[who].uc, vec(h[1], h[2]), h[3], h[4], true)
+                            end
+                            emit('probe_phase', {lane = lane.name, phase = 'tire_end', t = now - lane.t0,
+                                why = tired and 'tired' or 'tire_max_s', a_fat = fat.a, t_fat = fat.t,
+                                legs = {lane.legs.a, lane.legs.t}})
+                        end
+                    elseif lane.phase == 'return' then
+                        -- home: both stopped, at their places or 5 s after the order
+                        local home = true
+                        for _, who in ipairs({'a', 't'}) do
+                            local h = homes[who]
+                            if moving(who) or (off(who, h[1], h[2]) > 8 and now - lane.return_ms < 5000) then
+                                home = false
+                            end
+                        end
+                        if home or now - lane.return_ms >= lane.ready_max_s * 1000 then
+                            lane.phase = 'fight'
+                            attack(lane, lane.a, lane.t, false)
+                            attack(lane, lane.t, lane.a, lane.target_mode == 'both_walk')
+                            emit('probe_phase', {lane = lane.name, phase = 'tired', t = now - lane.t0,
+                                why = home and 'home' or 'ready_max_s', a_fat = fat.a, t_fat = fat.t})
+                        end
                     end
                 end
                 if lane.mode == 'script' then
@@ -408,7 +531,9 @@ function M.main(bm, config, globals)
                 elseif lane.rout_ms and not (lane.rally_ms and lane.after_rally_s)
                         and now - lane.rout_ms >= (lane.after_rout_s or 45) * 1000 then
                     end_lane(lane, 'after_rout')
-                elseif lane.contact and now - lane.contact >= lane.fight_s * 1000 then
+                elseif lane.after2_s and lane.contact2 and now - lane.contact2 >= lane.after2_s * 1000 then
+                    end_lane(lane, 'after_contact2')
+                elseif lane.contact and not lane.after2_s and now - lane.contact >= lane.fight_s * 1000 then
                     end_lane(lane, 'fight_s')
                 elseif now - lane.t0 >= lane.max_s * 1000 then
                     end_lane(lane, 'max_s')
@@ -440,6 +565,8 @@ function M.main(bm, config, globals)
                 if now - lane.t0 <= lane.men_all_s * 1000 then
                     rows[#rows + 1] = {lane = lane.name, t = now - lane.t0, a = soldiers(lane.a.unit)}
                 end
+            elseif lane.running and lane.mode == 'tire' and lane.phase ~= 'fight' then
+                -- no soldier places while the pair shuttles (only the fight after it)
             elseif lane.running and (not last or now - last <= config.men_after_s * 1000) then
                 local d = dist(lane.a.unit, lane.t.unit)
                 if d and d <= config.men_near_m then
@@ -454,7 +581,15 @@ function M.main(bm, config, globals)
     local function go()
         for _, lane in ipairs(state.lanes) do
             lane.t0, lane.running, lane.phase = now_ms(), true, 'in'
-            if lane.target_mode == 'both' or lane.target_mode == 'both_walk' then
+            if lane.mode == 'tire' then
+                -- the shuttle's first leg: straight back, both at a run
+                lane.phase, lane.legs, lane.leg_ms = 'tire', {a = 1, t = 1}, {a = lane.t0, t = lane.t0}
+                local L = lane.layout
+                for who, h in pairs({a = {L.ax, L.az, L.ab}, t = {L.tx, L.tz, L.tb}}) do
+                    local x, z = M.shuttle_point(h[1], h[2], h[3], 1, lane.tire_leg_m)
+                    orders.move(lane[who].uc, vec(x, z), true)
+                end
+            elseif lane.target_mode == 'both' or lane.target_mode == 'both_walk' then
                 attack(lane, lane.t, lane.a, lane.target_mode == 'both_walk')
             end
             if lane.t2 and lane.t2_mode == 'attack' then attack(lane, lane.t2, lane.a, true) end
@@ -462,7 +597,7 @@ function M.main(bm, config, globals)
                 orders.move(lane.t.uc, vec(lane.layout.tx, lane.z + (lane.push_m or 60)), false)
             end
             local m = lane.mode
-            if m == 'attack_run' or m == 'recharge' or m == 'withdraw' then
+            if m == 'attack_run' or m == 'recharge' or m == 'withdraw' or m == 'reengage' then
                 attack(lane, lane.a, lane.t, false)
             elseif m == 'attack_walk' then
                 attack(lane, lane.a, lane.t, true)
@@ -578,6 +713,9 @@ function M.main(bm, config, globals)
             end
             if l.after then assert(M.AFTER_KINDS[l.after.kind], 'unknown after kind ' .. tostring(l.after.kind)) end
             if l.at_rout then assert(M.AT_ROUT[l.at_rout], 'unknown at_rout ' .. tostring(l.at_rout)) end
+            if l.mode == 'tire' then
+                assert(M.fatigue_level(l.tire_until), 'unknown tire_until ' .. tostring(l.tire_until))
+            end
             for _, e in ipairs(l.extras or {}) do
                 assert(state.units[e.name], 'scenario unit missing: ' .. tostring(e.name))
             end
