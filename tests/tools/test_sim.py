@@ -2288,13 +2288,41 @@ class TestRoutExit:
         assert at(on, 4.0)[4] / full == pytest.approx(0.81, abs=0.04)
         assert at(on, 6.5)[4] / full == pytest.approx(0.95, abs=0.04)
         assert at(on, 9.5)[4] == pytest.approx(full, rel=0.03)
-        assert at(off, 4.0)[4] == pytest.approx(full, rel=0.03)
+        # (off: all of it from s 3 - slowed by the standing enemy within 15 m, morale.rout_crowd, since it runs 60 deg off
+        # the line from that enemy and lingers near it, morale.rout_dodge)
+        assert at(off, 4.0)[4] == pytest.approx(full * P.sim["morale"]["rout_crowd"]["enemy"][1], rel=0.05)
 
     def test_the_ramp_is_linear_between_its_points(self):
         table = P.sim["contact"]["rout_pin_speed"]
         v = movement.ramp(torch.tensor([0.0, 0.5, 1.0, 7.5, 20.0]), table).tolist()
         assert v == pytest.approx([0.41, 0.41, 0.535, 1.0, 1.0])
 
+
+class TestRoutDodge:
+    def test_a_chased_router_runs_60_deg_off_the_line_from_its_chaser(self):
+        """morale.rout_dodge: with a standing enemy formation within 25 m a router's speed away from it is cos 60 deg =
+        0.5 of its speed, to a side fixed per unit; with none within 25 m it runs straight away (1.0); off: straight."""
+        def away_share(params, enemy_x):
+            st = scenario.build([army([(SPEAR, 0, 0, 90), (SPEAR, -300, 700, 90)],
+                                      [(SLAVE, enemy_x, 0, 270), (SLAVE, 300, 700, 270)])], params)
+            H = st.N // 2
+            st.u["r"][0, 0], st.u["rout_count"][0, 0], st.u["morale"][0, 0], st.u["rout_s"][0, 0] = True, 1.0, -20.0, 10.0
+            shares = []
+            for _ in range(int(round(6.0 / params.dt))):
+                lx, lz = float(st.u["x"][0, 0] - st.u["x"][0, H]), float(st.u["z"][0, 0] - st.u["z"][0, H])
+                ln = math.hypot(lx, lz)
+                battle.step(st, replay.hold(st), params)
+                vx, vz = float(st.u["vx"][0, 0]), float(st.u["vz"][0, 0])
+                sp = math.hypot(vx, vz)
+                if sp > 1.0:
+                    shares.append((vx * lx + vz * lz) / (sp * ln))          # speed away from the enemy, of its speed
+                # the enemy follows, kept enemy_x m from the router along the line (a chaser behind it)
+                st.u["x"][0, H] = st.u["x"][0, 0] - lx / ln * abs(enemy_x)
+                st.u["z"][0, H] = st.u["z"][0, 0] - lz / ln * abs(enemy_x)
+            return sum(shares[-4:]) / 4
+        assert away_share(P, -15.0) == pytest.approx(0.5, abs=0.08)                  # chaser 15 m behind: 60 deg off
+        assert away_share(P, -100.0) == pytest.approx(1.0, abs=0.05)                 # none within 25 m: straight
+        assert away_share(P.with_cal("morale", rout_dodge=None), -15.0) == pytest.approx(1.0, abs=0.05)
 
 class TestRoutCrowd:
     def test_a_router_among_other_formations_is_slowed(self):

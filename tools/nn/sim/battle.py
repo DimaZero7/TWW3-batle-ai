@@ -645,6 +645,13 @@ def step(st, orders, params=None, dt=None):
     moving = standing & (point | close_in)
     fx, fz = movement.flee_goal(u, pw, alive, st.bounds)
     routing = alive & u["r"]
+    dodge = cal["morale"].get("rout_dodge")
+    if dodge:
+        # A chased router does not run straight from its chaser (morale.rout_dodge; config/nn/sim.json rout_dodge_why):
+        # with a standing enemy formation within dodge["m"] it heads dodge["deg"] off the line from that enemy, to a
+        # side fixed per (battle row, unit), so its speed away from the chaser is cos(deg) of its speed (the game's
+        # routers: 0.48-0.52 at 3-20 s of the rout; the simulator's straight flight gave 0.85-0.90).
+        fx, fz = movement.dodge_goal(u, pw, alive, fx, fz, float(dodge["m"]), float(dodge["deg"]), st.bounds)
     gx = torch.where(routing, fx, gx)
     gz = torch.where(routing, fz, gz)
     want = torch.where(routing, u["run"] * cal["morale"]["rout_speed"], want)

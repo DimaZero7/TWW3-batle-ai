@@ -52,6 +52,31 @@ def flee_goal(u, pw, alive, bounds):
     return u["x"] + ax / n * far, u["z"] + az / n * far
 
 
+def dodge_goal(u, pw, alive, fx, fz, within_m, deg, bounds):
+    """The flee goal (fx, fz) of a routing formation with a standing enemy formation within within_m: the line from
+    the nearest such enemy to the unit turned by deg, to a side fixed per (battle row, unit) (an integer hash);
+    others keep (fx, fz)."""
+    enemy = pw["enemy"] & alive[:, None, :] & ~u["r"][:, None, :] & (u["men0"][:, None, :] > 1)
+    d = torch.where(enemy, pw["dist"], torch.full_like(pw["dist"], 1e9))
+    dn, j = d.min(2)
+    chased = alive & u["r"] & (u["men0"] > 1) & (dn <= within_m)
+    ex, ez = u["x"].gather(1, j), u["z"].gather(1, j)
+    ax, az = u["x"] - ex, u["z"] - ez                                 # from the chaser to the unit
+    n = torch.sqrt(ax * ax + az * az).clamp(min=1e-6)
+    ax, az = ax / n, az / n
+    B, N = u["x"].shape
+    b = torch.arange(B, device=u["x"].device)[:, None]
+    i = torch.arange(N, device=u["x"].device)[None, :]
+    h = (b * 1000003 + i * 7919 + 55511) & 0x7FFFFFFF
+    h = ((h ^ (h >> 13)) * 1274126177) & 0x7FFFFFFF
+    side = torch.where((h & 1) == 0, 1.0, -1.0)
+    a = torch.deg2rad(torch.full_like(ax, deg)) * side
+    c, s = torch.cos(a), torch.sin(a)
+    rx, rz = ax * c - az * s, ax * s + az * c
+    far = 4 * bounds
+    return (torch.where(chased, u["x"] + rx * far, fx), torch.where(chased, u["z"] + rz * far, fz))
+
+
 def separate(pw, pairs, strength=0.5):
     """Push overlapping formations apart: each unit of a pair (pairs [B, N, N] true) moves
     `strength` of the overlap away from the other. Returns the shift (px, pz) [B, N]."""

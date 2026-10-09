@@ -660,7 +660,15 @@ A formation (not a lord) that routs from melee stays in contact for `contact.rou
 test leaves out the way it has run since the rout began (`rpin_d`). The enemies it fought go on striking it, at
 `contact.rout_pin_rate` **0.83** of the rule (from the rear, no charge), and it counts as in melee (the `m` flag).
 It gathers speed by `contact.rout_pin_speed`: shares of its own free rout speed by second 0.41 / 0.66 / 0.77 /
-0.81 / 0.87 / 0.92 / 0.97 / 1.0. After 7 s - the ordinary rout and pursuit (0.43, above).
+0.81 / 0.87 / 0.92 / 0.97 / 1.0. After 7 s - the ordinary rout and pursuit (0.43, above). **A chased router does
+not run straight** (`morale.rout_dodge`): with a standing enemy formation within 25 m it heads 60 deg off the line
+from that enemy (the side fixed per unit), so it pulls away from it at cos 60 deg = 0.5 of its speed. Measured
+(recordings it1-it8, 64 battles, 1,192 routs of ours, `build/fable/chase.py`, `chase2.py`): with an AI chaser our
+router moves 2.0 / 2.9 / 2.9 m/s at 0-3 / 3-7 / 7-20 s but away from it along their line only +0.6 / +1.4 / +1.5 m/s
+(0.30 / 0.48 / 0.52 of its speed); the chaser towards it +1.1 / +1.7 / +1.8 (0.48-0.73 of its run), staying 13-15 m
+off for 20 s. The twin before the rule: away +1.8 / +3.0 / +2.1 (0.85-0.90 of its speed), its chasers following as
+the game's (54 % faster than 1 m/s towards the router, the game 60 %) - the chase was lost by 7 s. A measured
+kinematics, the game's reason not found; `rout_direction` (where a router heads overall) is another thing, rejected.
 
 Measured (`build/routgap/rout_exit_game.py`, `contact_after*.py`, `flag_rate*.py`; all fair recordings, 216
 battles, 3,987 routs from melee): the game's melee flag stays on after the rout's start p10 / 25 / 50 / 75 / 90 =
