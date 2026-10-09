@@ -23,8 +23,8 @@ def test_plans_have_few_battles_and_lanes_on_both_sides():
             used = {n for l in config["lanes"] for n in (l["attacker"], l["target"], (l.get("lord") or {}).get("name"))}
             used |= {f["name"] for l in config["lanes"] for f in l.get("rally_friends") or []}
             assert {p["name"] for p in config["park"]} == {"own_lord", "enemy_lord"} - used
-            xs = sorted(l["x"] for l in config["lanes"])
-            assert all(b - a >= 200 for a, b in zip(xs, xs[1:]))
+            places = [(l["x"], l["z"]) for l in config["lanes"]]
+            assert all(math.dist(p, q) >= 200 for k, p in enumerate(places) for q in places[k + 1:])
 
 
 def test_the_charge_set_puts_every_order_in_every_lane_place():
@@ -217,6 +217,33 @@ def test_the_wavemiss2_plan_has_each_shooter_answering_and_leaving():
     assert b[0][0]["attacker"] != b[1][0]["attacker"]                     # the lanes rotated
     config, model_s, _ = cp.run_config("wavemiss2", 1)
     assert config["men_after_s"] >= 90 and model_s < 400
+
+
+def test_the_dmgmelee_plan_fights_whole_and_cut_units_one_on_one_on_a_far_grid():
+    b = cp.battles("dmgmelee")
+    assert len(b) == 2 and all(len(x) == 5 for x in b)
+    cells = sorted((l["attacker"], l["target"], l["kind"], json.dumps(l.get("damage"), sort_keys=True)) for l in b[0])
+    cut = json.dumps({"method": "kill", "share": 0.7})
+    assert cells == sorted([("gs", "svsh", "full", "null"), ("gs", "svsh", "t30", '{"t": %s}' % cut),
+                            ("gs", "svsh", "a30", '{"a": %s}' % cut), ("spearsh", "clanrat", "full", "null"),
+                            ("general", "svsh", "full", "null")])
+    assert sorted(cp.cell(l) for l in b[0]) == sorted(cp.cell(l) for l in b[1]) and len({cp.cell(l) for l in b[0]}) == 5
+    assert all(l["mode"] == "attack_walk" and l["target_mode"] == "both" and l["gap_m"] == 3 and l["fight_s"] == 240
+               and l["morale_rows"] and "t_morale" not in l for x in b for l in x)
+    assert cp.UNITS["svsh"][0] == "wh2_main_skv_inf_stormvermin_1" and cp.UNITS["spearsh"][0].endswith("spearmen_1")
+    assert b[0][0]["kind"] != b[1][0]["kind"]                               # the lanes rotated
+    for i in (1, 2):
+        config, model_s, arena = cp.run_config("dmgmelee", i)
+        assert config["men_after_s"] >= 250 and config["men_ms"] <= 1000 and model_s < 400
+        places = [(l["x"], l["z"]) for l in config["lanes"]]
+        assert sorted(places) == sorted(cp.DMGMELEE_PLACES)
+        assert all(math.dist(p, q) > 250 for k, p in enumerate(places) for q in places[k + 1:])
+        assert all(abs(x) <= 480 and abs(z) <= 480 for x, z in places)
+        names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]} | {"own_lord"}
+        assert all(l["attacker"] in names and l["target"] in names for l in config["lanes"])
+        assert {p["name"] for p in config["park"]} == {"enemy_lord"}           # the General fights in a lane
+        # the parked Warlord is far from every lane
+        assert all(math.hypot(700 - x, -400 - z) > 250 for x, z in places)
 
 
 def test_battle_file_is_written(tmp_path):

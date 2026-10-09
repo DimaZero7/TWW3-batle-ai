@@ -108,6 +108,16 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           'move' lanes - the shooters stand unordered, the melee unit charges them from 30 m at a run, and 3 s after the
           contact the shooters get a move at a run 40 m straight back (the leaver: is it held, struck as it goes?);
           90 s, the soldiers' places all fight; battle 2 swaps stand / move and rotates the lanes - 2 battles of 4 lanes;
+  dmgmelee  damaged units one on one (the twin's units below half health, most below 0.3, lose health 1.2-1.8x faster
+          in 1 v 1 melee than the game's - the skaven more, the Empire less - while fresh ones match; does the game let
+          fewer enemy men strike a small unit, those with a target within reach, where the twin strikes with the whole
+          front?): both attack from 3 m, 240 s, fearless (no rout, the lane runs to the end): (1) greatswords v
+          stormvermin with shields, both whole; (2) the same, the stormvermin brought to 30 % of their men before the go
+          (kill_number_of_men, as the damaged plan); (3) the same, the greatswords at 30 %; (4) spearmen with shields v
+          clanrats with shields; (5) the Empire General v the stormvermin. Every 0.5 s both units' health, men, morale
+          (morale_rows: MoralePercent, MoraleState, wavering), fatigue, melee flag, kills; every 1 s both units' soldier
+          places, all fight (men_after_s 260). Lanes on a 3 + 2 grid (DMGMELEE_PLACES: 300 m apart in a row, rows 400 m
+          apart: 5 lanes 250+ m apart do not fit in one row inside the map's |x| <= 480) - 2 battles, lanes rotated;
   wave    the opening wave (build/shotgap/wave_geom.py: men within 2.5 m of an enemy 46-51 in the first 5 s, 12 from 20 s,
           the fronts 1.3 m apart then 2.9 m; is it the collision of the approach or the start inside reach?): swordsmen
           <-> clanrats, both attacking, 90 s, the soldiers' places all fight - (1) placed 1 m apart (front to front), both
@@ -163,6 +173,7 @@ UNITS = {
     "slave": ("wh2_main_skv_inf_skavenslaves_0", 180, SKV),
     "sspear": ("wh2_main_skv_inf_skavenslave_spearmen_0", 180, SKV),
     "warlord": ("wh2_main_skv_cha_warlord_0", 1, SKV),
+    "svsh": ("wh2_main_skv_inf_stormvermin_1", 160, SKV),     # stormvermin with sword and shield
 }
 LORDS = {EMP: "general", SKV: "warlord"}
 SHORT = {key: short for short, (key, _, _) in UNITS.items()}
@@ -181,7 +192,8 @@ RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
-         "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure")
+         "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
+         "dmgmelee")
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
 WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
@@ -196,6 +208,9 @@ RALLYSECURE_LANE_DX = 300   # lanes 300 m apart (x -450 .. 450)
 RALLYSECURE_AWAY_DZ = 400   # at the rout the attacker is teleported this far beyond the target's start (+z)
 RALLYSECURE_PARK_Z = 600    # the rally friends wait here (+z, beyond the attackers) until the rally
 RALLYSECURE_AFTER_S = 60    # the lane ends this long after the rally
+# the dmgmelee plan: the lane places (x, z of the target's front), by lane index - a row of 3 300 m apart and a row of 2
+# 400 m behind it (the nearest lanes of two rows 427 m apart); the lanes rotate over the places between battles
+DMGMELEE_PLACES = ((-300, -200), (0, -200), (300, -200), (-150, 200), (150, 200))
 ROUTMOB_MEN_S = 40     # the routmob plan: the soldiers' places this long after the target's rout
 ROUTMOB_END_S = 45     # ... and the lane ends this long after it
 # the reform plan: soldier places this long after contact (the whole fight)
@@ -379,6 +394,17 @@ def battles(plan):
                         after={"at_s": 3, "kind": "move_near", "dx": 0, "dz": 40, "walk": False})
         out.append([wm2(p, ("stand", "move")[k % 2]) for k, p in enumerate(WAVEMISS)])
         out.append(rotate([wm2(p, ("move", "stand")[k % 2]) for k, p in enumerate(WAVEMISS)], 2))
+    elif plan == "dmgmelee":
+        def dmg(attacker, target, damage=None):
+            # kind: which unit starts at 30 % ('t30' the target, 'a30' the attacker) or 'full' - the cell's name
+            kind = "full" if not damage else "a30" if "a" in damage else "t30"
+            return lane(attacker, target, "attack_walk", "both", gap_m=3, fight_s=240, morale_rows=True, kind=kind,
+                        **({"damage": damage} if damage else {}))
+        cut = {"method": "kill", "share": 0.7}
+        base = [dmg("gs", "svsh"), dmg("gs", "svsh", {"t": cut}), dmg("gs", "svsh", {"a": cut}),
+                dmg("spearsh", "clanrat"), dmg("general", "svsh")]
+        for b in (base, rotate(base, 2)):
+            out.append([dict(l, place=p) for l, p in zip(b, DMGMELEE_PLACES)])
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
@@ -429,8 +455,11 @@ def layout(specs):
         t_key, t_men, t_fac = UNITS[spec["target"]]
         assert a_fac != t_fac, spec
         x = max(s.get("lane_dx", LANE_DX) for s in specs) * (k - 1 - (n - 1) / 2)
+        z = 0.0
+        if spec.get("place"):                 # an explicit place (the dmgmelee plan's grid)
+            x, z = spec["place"]
         aw, tw = spec.get("a_w", WIDTH_M), spec.get("t_w", WIDTH_M)
-        row = dict(spec, name=f"L{k}", x=round(x, 1), z=0.0, attacker=add(spec["attacker"], k),
+        row = dict(spec, name=f"L{k}", x=round(float(x), 1), z=float(z), attacker=add(spec["attacker"], k),
                    target=add(spec["target"], k), a_key=a_key, t_key=t_key,
                    a_depth=round(depth(a_key, a_men, aw), 2), t_depth=round(depth(t_key, t_men, tw), 2),
                    a_width=5 if a_men == 1 else aw, t_width=5 if t_men == 1 else tw,
@@ -483,7 +512,7 @@ def run_config(plan, index):
               "men_ms": 500 if turn else MEN_MS,
               "men_near_m": 60,
               # the soldiers' places: the first 30 s (the charge plan) or the whole fight (hit: men in contact)
-              "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2") else 95 if plan in ("defender", "wave", "wavemiss", "wavemiss2")
+              "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2", "dmgmelee") else 95 if plan in ("defender", "wave", "wavemiss", "wavemiss2")
                               else 90 if plan in ("hit", "move", "vv") else 30),
               "lanes": lanes, "park": park}
     if plan in ("routmob", "routmob2"):
@@ -672,7 +701,7 @@ def cell(spec):
     ab = (spec.get("lord") or {}).get("ability")
     if ab is not None:
         name += " SYG" if ab else " noSYG"
-    if spec.get("kind"):                  # routmob2 / rallysecure: the lane's kind tells same-looking lanes apart
+    if spec.get("kind"):                  # routmob2 / rallysecure / dmgmelee: the lane's kind tells same-looking lanes apart
         name += f" {spec['kind']}"
     return name
 

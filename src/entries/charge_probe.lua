@@ -46,6 +46,7 @@
 -- sampled as the list 'e' in probe_sample (unit rows) and probe_men (soldier places after the rout).
 -- A t_morale target's sample row also carries its morale: mp (CCO MoralePercent), ms (MoraleState), mge
 -- (MoraleGreatestEffect, the strongest effect's text), fx (CCO ActiveEffectList keys) and w (wavering).
+-- lane.morale_rows (optional): both units' sample rows carry those morale fields (fearless or not; the dmgmelee plan).
 -- at_rout 'away' (the rallysecure plan): at the rout the attacker is teleported to (x, z + away_dz) facing back and
 -- halted (no chase, no enemy near; probe_phase 'away'). The target's first stop of routing after the rout (not
 -- shattered) is its rally: probe_phase 'rally' (place, bearing, morale), the target halts and lane.rally_friends
@@ -386,8 +387,9 @@ function M.main(bm, config, globals)
                         emit('probe_phase', {lane = lane.name, phase = 'friends', t = now - lane.t0, units = placed})
                     end
                 end
-                local tg_row = lane.t_morale and morale_row or unit_row
-                local r = {lane = lane.name, t = now - lane.t0, a = unit_row(lane.a.unit), tg = tg_row(lane.t.unit)}
+                local tg_row = (lane.t_morale or lane.morale_rows) and morale_row or unit_row
+                local a_row = lane.morale_rows and morale_row or unit_row
+                local r = {lane = lane.name, t = now - lane.t0, a = a_row(lane.a.unit), tg = tg_row(lane.t.unit)}
                 if lane.rally_friends and #lane.rally_friends > 0 then
                     r.f = {}
                     for _, f in ipairs(lane.rally_friends) do r.f[#r.f + 1] = unit_row(state.units[f.name].unit) end

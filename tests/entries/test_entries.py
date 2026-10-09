@@ -1081,6 +1081,35 @@ class TestChargeProbe:
         assert dmg["t"]["method"] == "kill" and dmg["t"]["status"] == "done" and dmg["t2"]["method"] == "reduce"
         assert dmg["t"]["men1"] < dmg["t"]["men0"]
 
+    def test_morale_rows_on_both_units_and_the_attacker_cut(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            CONFIG.lanes = {CONFIG.lanes[1]}
+            local l = CONFIG.lanes[1]
+            l.mode, l.target_mode, l.answer, l.gap_m, l.fight_s, l.max_s = 'attack_walk', 'both', true, 3, 6, 300
+            l.recharge_after_s, l.back_m, l.recharge_max_s = nil, nil, nil
+            l.x, l.z, l.morale_rows = 150, 200, true
+            l.damage = {a = {method = 'kill', share = 0.7}}
+            CONFIG.park = {{name = 'enemy_lord', x = 700, z = -400, bearing = 0},
+                           {name = 'own_lord', x = -700, z = -400, bearing = 0}}
+            own[2].kill_number_of_men = function(self, n) self.men = self.men - n end
+            fake.cco['uid_own_swords_1'] = {MoralePercent = 0.8}
+            fake.cco['uid_enemy_clanrat_1'] = {MoralePercent = 0.6}
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            assert(own[2].fearless == true and enemy[2].fearless == true, 'everyone fearless')
+            assert(own[2].attack_args.target == 'enemy_clanrat_1' and enemy[2].attack_args.target == 'own_swords_1')
+            own[2].melee, enemy[2].melee = true, true
+            for _ = 1, 200 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        sample = next(r for r in rows if r["event"] == "probe_sample")["lanes"][0]
+        assert sample["a"]["mp"] == 0.8 and sample["tg"]["mp"] == 0.6
+        (dmg,) = [r for r in rows if r["event"] == "probe_damage"]
+        assert dmg["who"] == "a" and dmg["men1"] < dmg["men0"]
+
     def test_routmob_keeps_the_targets_morale_halts_at_the_rout_and_samples_the_mob(self, lua, tmp_path):
         lua.execute(self.SETUP + """
             CONFIG.lanes = {CONFIG.lanes[1], CONFIG.lanes[2]}
