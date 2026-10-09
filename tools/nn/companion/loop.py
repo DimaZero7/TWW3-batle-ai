@@ -36,6 +36,8 @@ class Brain:
         self.battle, self.memory, self.h = None, None, None
         self.given, self.points = {}, {}     # the orders in force, the order points (exchange.order_points)
         self.moved = None                    # the last positions and time (exchange.running_by_speed)
+        self.mv = None                       # the game's mv at the last state (exchange.keep_still)
+        self.breakoff = None                 # the melee exit's clocks (exchange.Breakoff), per battle
         self.commit = {}                     # v2: the commitment's state (tools/nn/model/commit.py), per battle
         self.before = None                   # (batch, move, the orders in force before that move's answer)
 
@@ -54,12 +56,17 @@ class Brain:
         if self.battle is None or self.battle.batch != doc["batch"]:
             self.battle, self.memory, self.h = exchange.battle(doc), None, None
             self.given, self.points, self.moved, self.commit = {}, {}, None, {}
+            self.mv, self.breakoff = None, exchange.Breakoff(self.battle.names, self.battle.side, self.battle.shape)
         b = self.battle
-        self.before = (doc["batch"], doc["move"], dict(self.given))
         state = exchange.arrays(doc, b.names, b.slots)
         self.moved = exchange.running_by_speed(state, b.walk, self.moved)
         exchange.engaged_targets(state, b.side, shape=b.shape)
+        exchange.threat_flags(state, b.side, b.threat)
+        exchange.effects_on(state, doc, b.names, b.setup)
+        self.breakoff.update(state, self.given)          # the melee exit's window over: the order in force holds
+        self.before = (doc["batch"], doc["move"], dict(self.given))
         self.points = exchange.order_points(state, b.names, b.side, self.given, self.points)
+        self.mv = exchange.keep_still(self.memory, state, self.mv)
         obs, self.memory = ob.observe(state, b.setup, SIDE, self.memory)
         orders, self.h, _, _ = decide.act(self.actor, obs, b.setup, self.h, self.greedy, self.temperature,
                                           commit_state=self.commit, t=state["t"])

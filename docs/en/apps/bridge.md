@@ -55,6 +55,39 @@ sequenceDiagram
   a gate: the same shift put into the simulator cut the network's trade against `ai_like` by 0.105
   a battle and moved its orders to the game's mix (hold 0.73 -> 0.63, attack 0.17 -> 0.24, move 0.10 ->
   0.13; in the game 0.61 / 0.23 / 0.16). Recordings keep the game's raw value.
+- **Flank and rear threat** (`lf`, `rf`, `bf`, the inputs `threat_left` / `threat_right` / `threat_rear`): the
+  companion works them out itself by the simulator's rule on the game's positions and bearings
+  (`exchange.threat_flags`, the rule of `battle.threat_flags`, the numbers of `config/nn/sim.json`
+  `threat.calibration`): a standing enemy (not routing or shattered) within 45 m centre to centre, facing the unit
+  (the unit within 60 deg of its front), on the left or right 60-150 deg off the unit's facing or behind (150 deg
+  and more); every unit with men and a place, both sides. The flag's hold of >= 2 s (the end of the network's
+  commitment, `model/commit.py`) is the network's own, as in the simulator. The game's flag means something else:
+  the nearest enemy in a ~40 m sector, facing the unit in only 43-68 % of cases, no enemy in the sector at all in
+  12-27 % of the flags; on the same positions the simulator's rule held in only 17-47 % of the game's flags
+  (`build/audit_in/table.md`). Recordings keep the game's flag.
+- **Speed** (the inputs `vel_fwd` / `vel_lat`, the centre's shift between two decisions): in the simulator a unit's
+  centre moves only while the unit moves (a unit without a point, standing in melee or arrived has no velocity).
+  The game's centre of a formation drifts: in melee 0.5-0.7 m/s median (the twin 0), standing out of melee faster
+  than 0.5 m/s in 28 % of the seconds (the twin 5.5 %). So a unit the game shows not moving (`mv` off) at this
+  state and at the previous one gets no shift (`exchange.keep_still`: the input memory's previous position = the
+  current one); one that moved at either end keeps the measured shift. The check without the game (22 it20
+  battles, `build/audit_in/speed_check.py`, the orders in force from the recording): the speed input changes in
+  28 % of the unit-decisions (56 % in melee), the network's order (the most likely) in 1.3 % (one in ten of the
+  decisions where it does not keep its order in force; ~60 orders a battle).
+- **Timed effects** (the flagellants' Strength of the Penitent: the game fires it itself for 20 s, the simulator
+  keeps its timer): on while the unit's card in the game shows its phase (`fx` in the state; not read: off); the
+  other effects by the same conditions as before (health, morale, melee: the card agrees 99.3-99.8 %). The
+  companion puts it into the input as the simulator's mask `fx_on` (`exchange.effects_on`). Before, a timed effect
+  was always off in the game, while the card showed it in 21-53 % of the flagellants' seconds.
+- **The order after leaving melee** (the `ORDER` input, `ox` / `oz`): as in the simulator (`contact.breakoff`, the
+  window `melee_breakoff_secs` 24 s of the game's database), a unit leaving melee that still touches an enemy 24 s
+  after it began to leave drops its order and holds (fights again); the companion keeps the same clocks over the
+  game's states and turns the order in force to hold (`exchange.Breakoff`, both sides: the network and the
+  enemy's script). Leaving as in the simulator: a withdraw; a move away from every enemy it touches (or any move
+  given in melee within the window; one begun as a leave while it stands); an attack on an enemy it does not
+  touch, 10 m or more away, by a formation without a missile weapon that fights. In contact: the game's melee
+  flag (`m`) on a standing formation. Before, the companion kept an attack on a target over 40 m away after >= 24 s
+  in melee (~1 % of the attack seconds, both sides).
 - The companion answers with orders for that move. The game reads the file every 100 ms of battle
   time (`poll_ms`) and gives each of our units its order.
 - **Only a changed order is given again**: another kind, another target, run instead of walk, or a
@@ -288,8 +321,9 @@ script the network trains against in the simulator (`ai_like`, `tools/nn/train/o
   over a simulator state built once a battle (`sim/scenario.build`: the same slots, passports, widths). What
   the game does not give is made the simulator's way: `r` = routing or shattered; `target` - the enemy
   fought or shot at; the order in force and its point (`order_kind`, `order_target`, `ox`, `oz`) - the
-  script's own orders and the network's orders in force before this move; the speed `vx`, `vz` from the
-  last two states; `contact_s` (through gaps shorter than `contact.reset_s`) and `rout_s` from the game's
+  script's own orders and the network's orders in force before this move (an order whose melee exit's window is
+  over: hold, `exchange.Breakoff`); the speed `vx`, `vz` from the last two states, 0 for a unit with `mv` off (in
+  the simulator it is the step's velocity, and a unit that does not move has none; the game's centre drifts); `contact_s` (through gaps shorter than `contact.reset_s`) and `rout_s` from the game's
   flags.
 - The enemy lord's abilities fire by the simulator's game-AI rule (`sim/abilities.py`): ready (the
   companion's count of the bridge's uses and the card), not switched off, its trigger (`melee`, `near`,

@@ -415,3 +415,194 @@ def test_the_network_and_the_enemy_script_read_the_melee_target_by_contact():
     root = Path(exchange.__file__).parent
     assert "engaged_targets(state, b.side, shape=b.shape)" in (root / "loop.py").read_text(encoding="utf-8")
     assert "engaged_targets(s, self.sides, own=own, shape=self.shape)" in (root / "script.py").read_text(encoding="utf-8")
+
+
+def _flank_doc(**enemy):
+    """Our spearmen at the origin facing +x (b 90), one enemy spearmen unit placed by the test."""
+    doc = state_doc()
+    doc["units"] = [unit("own_spear_1", 1, SPEAR, 0.0, b=90, lf=True, rf=True, bf=True),
+                    unit("enemy_spear_1", 2, SPEAR, enemy.pop("x", 0.0), **enemy)]
+    return doc
+
+
+def test_threat_flags_are_the_simulators_rule_not_the_games_flag():
+    # The game's lf / rf / bf: an enemy in a ~40 m sector whether it faces the unit or not; the simulator's rule
+    # (config/nn/sim.json threat.calibration): a standing enemy within 45 m centre to centre that faces the unit
+    # (within 60 deg), 60-150 deg off the unit's facing left / right, 150+ behind (build/audit_in/table.md).
+    rule = exchange.threat_rule()
+    assert rule == {"radius": 45.0, "front": 60.0, "rear": 150.0, "facing": 60.0}
+    cases = [(dict(z=20.0, b=180), (True, False, False)),           # on the left (+z), facing us
+             (dict(z=-20.0, b=0), (False, True, False)),            # on the right, facing us
+             (dict(x=-20.0, b=90), (False, False, True)),           # behind, facing us
+             (dict(z=20.0, b=0), (False, False, False)),            # on the left, its back to us: no threat
+             (dict(z=50.0, b=180), (False, False, False)),          # facing us beyond 45 m
+             (dict(z=20.0, b=180, r=True), (False, False, False)),  # routing
+             (dict(z=20.0, b=180, s=True), (False, False, False)),  # shattered
+             (dict(x=20.0, b=270), (False, False, False))]          # in front
+    for enemy, want in cases:
+        doc = _flank_doc(**dict(enemy))
+        b = exchange.battle(doc)
+        s = exchange.arrays(doc, b.names)
+        exchange.threat_flags(s, b.side, b.threat)
+        assert (bool(s["lf"][0, 0]), bool(s["rf"][0, 0]), bool(s["bf"][0, 0])) == want, enemy
+    doc = _flank_doc(z=20.0, b=180)
+    doc["units"][0]["x"] = None                                     # no position: no flags
+    s = exchange.arrays(doc, [u["n"] for u in doc["units"]])
+    exchange.threat_flags(s, np.array([1, 2]), rule)
+    assert not (s["lf"][0, 0] or s["rf"][0, 0] or s["bf"][0, 0])
+    doc = _flank_doc(z=20.0, b=180)
+    b = exchange.battle(doc)
+    s = exchange.arrays(doc, b.names)
+    exchange.threat_flags(s, b.side, b.threat)
+    obs, _ = ob.observe(s, b.setup, 1)
+    assert obs.tokens[0, 0, ob.INDEX["threat_left"]] == 1 and obs.tokens[0, 0, ob.INDEX["threat_rear"]] == 0
+
+
+def test_threat_flags_match_the_simulator_on_random_positions():
+    torch = pytest.importorskip("torch")
+    from tools.nn.sim import geometry
+    from tools.nn.sim.battle import threat_flags
+    from tools.nn.sim.params import load
+    params = load()
+    rng = np.random.default_rng(3)
+    N = 16
+    side = np.array([1] * 8 + [2] * 8)
+    for _ in range(20):
+        s = {"x": rng.uniform(-60, 60, (1, N)), "z": rng.uniform(-60, 60, (1, N)), "b": rng.uniform(0, 360, (1, N)),
+             "men": np.where(rng.random((1, N)) < 0.1, 0.0, 100.0), "r": rng.random((1, N)) < 0.15,
+             "s": np.zeros((1, N), bool), **{k: np.zeros((1, N), bool) for k in ("lf", "rf", "bf")}}
+        exchange.threat_flags(s, side, exchange.threat_rule(params))
+        u = {"x": torch.tensor(s["x"], dtype=torch.float32), "z": torch.tensor(s["z"], dtype=torch.float32),
+             "b": torch.tensor(s["b"], dtype=torch.float32), "men": torch.tensor(s["men"], dtype=torch.float32),
+             "r": torch.tensor(s["r"]), "gone": torch.zeros(1, N, dtype=torch.bool),
+             "side": torch.tensor(side[None]), "men0": torch.full((1, N), 100.0),
+             "width": torch.full((1, N), 30.0), "radius": torch.ones(1, N)}
+        sim = threat_flags(u, geometry.pairwise(u, 1.5), params)
+        for k in ("lf", "rf", "bf"):
+            assert (sim[k].numpy() == s[k]).all(), k
+
+
+def test_a_unit_that_does_not_move_has_no_speed_as_in_the_simulator():
+    # The game's centre of a formation that stands (in melee or not) drifts 0.5-0.7 m/s; the simulator's centre moves
+    # only while the unit moves. Not moving (mv off) at both states: no shift; moving at either: the measured one.
+    doc = state_doc()
+    doc["units"].append(unit("own_spear_2", 1, SPEAR, -100.0, mv=True))       # walks on
+    doc["units"].append(unit("own_spear_3", 1, SPEAR, -50.0, mv=True))        # stops within the second
+    b = exchange.battle(doc)
+    s = exchange.arrays(doc, b.names)
+    mv = exchange.keep_still(None, s, None)
+    doc2 = dict(doc, t=6000)
+    doc2["units"] = [dict(u) for u in doc["units"]]
+    doc2["units"][1].update(x=-174.4, m=True)                       # drifts 0.6 m in melee, mv off
+    doc2["units"][4].update(x=-98.5)                                # walks 1.5 m
+    doc2["units"][5].update(x=-48.5, mv=False)                      # walked, now stands
+    s2 = exchange.arrays(doc2, b.names)
+    _, mem = ob.observe(s, b.setup, 1)
+    plain, _ = ob.observe(s2, b.setup, 1, mem)
+    assert plain.tokens[0, 1, ob.INDEX["vel_fwd"]] != 0             # as the game reads: the drift is a speed
+    _, mem = ob.observe(s, b.setup, 1)
+    mv2 = exchange.keep_still(mem, s2, mv)
+    obs, _ = ob.observe(s2, b.setup, 1, mem)
+    v = obs.tokens[0, :, ob.INDEX["vel_fwd"]]
+    assert v[1] == 0 and v[4] != 0 and v[5] != 0 and v[0] == 0
+    assert mv2.tolist() == [False, False, False, False, True, False]
+
+
+def test_a_timed_effect_is_on_while_the_units_card_shows_it():
+    # Strength of the Penitent: the game fires it itself (20 s); the simulator keeps its timer, the companion has
+    # none - it showed it never, the flagellants' card in 21-53 % of their seconds (build/audit_in/table.md).
+    flag, pen = "wh_dlc04_emp_inf_flagellants_0", "wh_dlc04_unit_passive_strength_of_the_penitent"
+    on = ob.INDEX[f"fx_{pen}_on"]
+    frenzy = ob.INDEX["fx_wh_main_unit_passive_frenzy_on"]
+    for fx, want in (([pen, "wh_main_unit_passive_frenzy"], 1), ([], 0), (None, 0)):
+        doc = state_doc()
+        extra = {} if fx is None else {"fx": fx}
+        doc["units"].append(unit("own_flag_1", 1, flag, -150.0, m=True, **extra))
+        doc["units"].append(unit("enemy_flag_1", 2, flag, 150.0, **extra))
+        b = exchange.battle(doc)
+        s = exchange.arrays(doc, b.names)
+        exchange.effects_on(s, doc, b.names, b.setup)
+        obs, _ = ob.observe(s, b.setup, 1)
+        assert obs.tokens[0, 4, on] == want and obs.tokens[0, 5, on] == want      # the enemy's card while seen
+        assert obs.tokens[0, 4, frenzy] == 1                         # a passive: by its predicates, as before
+        assert obs.tokens[0, 1, on] == 0                             # not owned: never
+    doc["units"][4]["mp"] = 0.3                                      # frenzy off below half morale, as before
+    s = exchange.arrays(doc, b.names)
+    exchange.effects_on(s, doc, b.names, b.setup)
+    assert ob.observe(s, b.setup, 1)[0].tokens[0, 4, frenzy] == 0
+
+
+def _exit_doc(t, enemy_x, m=True):
+    """Our spearmen at the origin facing +x fighting enemy spearmen in front; another enemy unit ~70 m off."""
+    doc = state_doc()
+    doc["t"] = t
+    doc["units"] = [unit("own_spear_1", 1, SPEAR, 0.0, b=90, m=m), unit("enemy_near", 2, SPEAR, enemy_x, b=270, m=m),
+                    unit("enemy_far", 2, SPEAR, 60.0, z=40.0)]
+    return doc
+
+
+def _contact_x(b):
+    """The enemy's x at which the two formations' edges overlap by 1 m (touching, reach_m -2.5 + hold_m 2)."""
+    import math
+    sh = b.shape
+    h, v = sh["sp_h"][0], sh["sp_v"][0]
+    files = min(max(math.floor(sh["width"][0] / h + 1e-4), 1), 100)
+    return math.ceil(100 / files) * v - 1.0
+
+
+def test_an_order_leaving_melee_holds_after_the_window_as_in_the_simulator():
+    # The simulator (battle.py contact.breakoff, melee_breakoff_secs 24 s): a unit still in contact 24 s after it began
+    # to leave melee drops its order and holds; the companion kept an attack on a far target (~1 % of attack seconds).
+    attack_far = {"unit": "own_spear_1", "kind": "attack", "target": "enemy_far", "run": True}
+    withdraw = {"unit": "own_spear_1", "kind": "withdraw", "x": -100.0, "z": 0.0, "run": True}
+    attack_near = {"unit": "own_spear_1", "kind": "attack", "target": "enemy_near", "run": True}
+    b = exchange.battle(_exit_doc(0, 10.0))
+    cx = _contact_x(b)
+    assert exchange.touching(exchange.arrays(_exit_doc(0, cx), b.names), dict(b.shape, side=b.side))[0, 1]
+    for order, dropped_at in ((attack_far, 24), (withdraw, 24), (attack_near, None)):
+        tracker = exchange.Breakoff(b.names, b.side, b.shape)
+        given = {"own_spear_1": dict(order)}
+        seen = None
+        for t in range(0, 31):
+            s = exchange.arrays(_exit_doc(t * 1000, cx), b.names)
+            if tracker.update(s, given):
+                seen = t
+        assert seen == dropped_at, order["kind"]
+        if dropped_at:
+            assert given["own_spear_1"] == {"unit": "own_spear_1", "kind": "hold"}
+            exchange.order_points(s, b.names, b.side, given)
+            assert s["order_kind"][0, 0] == 0 and (s["ox"][0, 0], s["oz"][0, 0]) == (0.0, 0.0)
+    # out of contact (the game's m off) after leaving: the window does not drop it
+    tracker, given = exchange.Breakoff(b.names, b.side, b.shape), {"own_spear_1": dict(withdraw)}
+    for t in range(0, 31):
+        s = exchange.arrays(_exit_doc(t * 1000, cx if t < 5 else 40.0, m=t < 5), b.names)
+        assert not tracker.update(s, given)
+    assert given["own_spear_1"]["kind"] == "withdraw"
+    # a move through the enemy given before the contact is not a leave (contact.leave_away_only, move_melee_leave:
+    # order_s starts at the window out of melee): it never drops
+    tracker = exchange.Breakoff(b.names, b.side, b.shape)
+    given = {"own_spear_1": {"unit": "own_spear_1", "kind": "move", "x": 50.0, "z": 0.0, "run": False}}
+    for t in range(0, 31):
+        s = exchange.arrays(_exit_doc(t * 1000, cx if t > 0 else 30.0, m=t > 0), b.names)
+        assert not tracker.update(s, given)
+    # the same move given in melee is a leave: it drops after the window
+    tracker = exchange.Breakoff(b.names, b.side, b.shape)
+    given = {}
+    dropped = []
+    for t in range(0, 31):
+        s = exchange.arrays(_exit_doc(t * 1000, cx), b.names)
+        dropped += [t] if tracker.update(s, given) else []
+        if t == 1:
+            given["own_spear_1"] = {"unit": "own_spear_1", "kind": "move", "x": 50.0, "z": 0.0, "run": False}
+    assert dropped == [25]
+
+
+def test_the_network_and_the_enemy_script_read_flags_effects_speed_and_exit_as_the_simulator():
+    from pathlib import Path
+    root = Path(exchange.__file__).parent
+    loop_src = (root / "loop.py").read_text(encoding="utf-8")
+    for call in ("exchange.threat_flags(state, b.side, b.threat)", "exchange.effects_on(state, doc, b.names, b.setup)",
+                 "self.breakoff.update(state, self.given)", "exchange.keep_still(self.memory, state, self.mv)"):
+        assert call in loop_src, call
+    script_src = (root / "script.py").read_text(encoding="utf-8")
+    assert "self.breakoff.update(s, self.given)" in script_src and "moving = seen & torch.as_tensor(" in script_src

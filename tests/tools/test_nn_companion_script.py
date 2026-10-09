@@ -191,10 +191,14 @@ def test_the_networks_orders_in_force_are_the_scripts_view_of_our_side():
     assert int(u["order_kind"][0, s_own]) == O.ATTACK and int(u["order_target"][0, s_own]) == s_en
     assert float(u["ox"][0, s_own]) == 100.0                                 # an attack's point: its target
     assert int(u["order_kind"][0, s_en]) == O.HOLD                           # the script's own: none yet
-    doc2 = dict(doc, move=2, t=2000, units=[dict(rows[0], x=-96.0), dict(rows[1], r=True, x=104.0)])
+    doc2 = dict(doc, move=2, t=2000, units=[dict(rows[0], x=-96.0, mv=True), dict(rows[1], r=True, x=104.0, mv=True)])
     side.decide(doc2, {})
     assert abs(float(u["vx"][0, s_own]) - 4.0) < 1e-4 and bool(u["r"][0, s_en])
     assert float(u["rout_s"][0, s_en]) == 1.0
+    # a unit the game shows not moving has no speed, as the simulator's (its centre drifts in the game)
+    doc3 = dict(doc, move=3, t=3000, units=[dict(rows[0], x=-95.4, mv=False), dict(rows[1], r=True, x=108.0, mv=True)])
+    side.decide(doc3, {})
+    assert float(u["vx"][0, s_own]) == 0.0 and abs(float(u["vx"][0, s_en]) - 4.0) < 1e-4
 
 
 def test_the_loop_answers_both_sides_each_move_once(tmp_path):

@@ -13,8 +13,10 @@ game does not show made the simulator's way:
     r          routing or shattered (the simulator's `r` counts both)
     target     the enemy fought or shot at now (exchange.engaged_targets, both sides)
     order_*, ox, oz   the order in force, the simulator's point (exchange.order_points): the script's own
-               orders for its side, the network's orders in force before this decision for ours
-    vx, vz     the speed between the last two states
+               orders for its side, the network's orders in force before this decision for ours; an order whose
+               melee exit's window is over holds (exchange.Breakoff, both sides)
+    vx, vz     the speed between the last two states; none for a unit the game shows not moving (mv off), as the
+               simulator's step velocity of a unit that does not move
     contact_s  seconds in melee since the contact began, through gaps shorter than contact.reset_s (battle.py)
     rout_s     seconds since the rout began (morale.py)
     gone       men alive but no position (off the map)
@@ -83,6 +85,7 @@ class ScriptSide:
         self.ab = [[int(self.st.u[f"ab{k}"][0, s]) for k in range(sim_abilities.SLOTS)] for s in self.slot]
         self.ab_keys = [[self.ability_keys[a] if a >= 0 else "" for a in row] for row in self.ab]
         self.given, self.points, self.other_points, self.prev = {}, {}, {}, None
+        self.breakoff = exchange.Breakoff(self.names, self.sides, self.shape, own=self.side)
         self.batch = doc["batch"]
 
     # --- the game's state laid over the simulator's ---
@@ -91,6 +94,7 @@ class ScriptSide:
         s = exchange.arrays(doc, self.names)
         for own in (1, 2):
             exchange.engaged_targets(s, self.sides, own=own, shape=self.shape)
+        self.breakoff.update(s, self.given)          # the melee exit's window over: the script's order holds
         self.points = exchange.order_points(s, self.names, self.sides, self.given, self.points, own=self.side)
         self.other_points = exchange.order_points(s, self.names, self.sides, others or {}, self.other_points,
                                                   own=3 - self.side)
@@ -116,8 +120,11 @@ class ScriptSide:
         u["order_kind"][0, sl] = torch.as_tensor(s["order_kind"][0])
         u["order_target"][0, sl] = torch.as_tensor(to_slot[s["order_target"][0]])
         if dt > 0:
-            u["vx"][0, sl] = torch.where(seen, (u["x"][0, sl] - old_x) / dt, torch.zeros_like(old_x))
-            u["vz"][0, sl] = torch.where(seen, (u["z"][0, sl] - old_z) / dt, torch.zeros_like(old_z))
+            # the simulator's velocity is the step's own: none for a unit that does not move (mv off) - the game's
+            # centre of a standing or fighting formation drifts 0.5-0.7 m/s (exchange.keep_still)
+            moving = seen & torch.as_tensor(np.asarray(s["mv"][0], dtype=bool))
+            u["vx"][0, sl] = torch.where(moving, (u["x"][0, sl] - old_x) / dt, torch.zeros_like(old_x))
+            u["vz"][0, sl] = torch.where(moving, (u["z"][0, sl] - old_z) / dt, torch.zeros_like(old_z))
             # the melee clock and the rout's (battle.py, morale.py) by the game's flags
             reset_s = float(self.params.sim["contact"].get("reset_s", 0.0))
             m, r = u["m"][0, sl], u["r"][0, sl]
