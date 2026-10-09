@@ -142,6 +142,8 @@ class Params:
             # by category, measured (missile.order_quiet_why): arcing fire keeps quiet after a new order or target,
             # whatever its reload; direct fire and throwing weapons lose nothing (-1: the rule of all)
             "quiet_s": float((ms.get("order_quiet_cat_s") or {}).get(cat, 0.0)) if missile else 0.0,
+            # (missile.reaim_broken_why) arrows and bolts: once the target lost this share of its men, each shot aims
+            "broken_at": float((ms.get("reaim_broken_cat_share") or {}).get(cat, 0.0)) if missile else 0.0,
             "rt_s": float((ms.get("retarget_cat_s") or {}).get(cat, -1.0)) if missile else -1.0,
             "friendly_fire": ms["friendly_fire"].get(cat, ms["friendly_fire_other"]) if missile else 0,
             "morale_bonus": self.sim["morale"]["faction_bonus"].get(faction, 0),

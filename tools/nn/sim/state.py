@@ -120,6 +120,8 @@ STATIC = {
     "height": ("f", "a man's height, m (the shadow a falling projectile hits)"),
     "small_arms": ("b", "small-arms projectile (arrow, musket, sling, javelin, axe): shields block it (missile.py)"),
     "aim_s": ("f", "first shot after halting, s (config/nn/sim.json)"),
+    "broken_at": ("f", "the share of its target's starting men lost from which every shot waits aim_s after the "
+                       "reload (missile.reaim_broken_cat_share by category: arrows and bolts 1/3; 0 never)"),
     "quiet_s": ("f", "seconds without a shot after a new order or target to a shooter already aiming, whatever its "
                      "reload (missile.order_quiet_cat_s by category: arcing arrows, bolts, slings 8.5; 0 none)"),
     "rt_s": ("f", "seconds a new order or a new target takes off the aim clock (missile.retarget_cat_s by category: "

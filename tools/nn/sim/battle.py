@@ -377,7 +377,17 @@ def step(st, orders, params=None, dt=None):
         # the share of its men whose target died (late): its men's interval is reload + aim_s x that share (a lone
         # lord, who does not die man by man: the reload alone).
         # (the wait rounded to the step: the volley comes in the step nearest to aim_s x late after the men loaded)
-        waited = u["loaded_s"] >= u["aim_s"] * u["late"] - dt / 2 - 1e-6
+        # A broken target (missile.reaim_broken_cat_share; arrows and bolts): once the unit's target has lost
+        # broken_at of its starting men, every man aims again (aim_s) after each reload - the volley splits and the
+        # men's cycle is reload + aim_s (a lone man: never).
+        late = u["late"]
+        if "broken_at" in u:
+            ti = aim_at.clamp(min=0)
+            men0_t = u["men0"].gather(1, ti)
+            lost_t = 1 - u["men"].gather(1, ti) / men0_t.clamp(min=1e-6)
+            broken = (u["broken_at"] > 0) & (aim_at >= 0) & (men0_t > 1) & (lost_t >= u["broken_at"] - 1e-6)
+            late = torch.where(broken, torch.ones_like(late), late)
+        waited = u["loaded_s"] >= u["aim_s"] * late - dt / 2 - 1e-6
         u["loaded_s"] = torch.where(full & (m_target >= 0), u["loaded_s"] + dt, torch.zeros_like(u["loaded_s"]))
         full = full & waited
     # (between volleys the unit is still shooting at its target: the game's IsFiringMissiles, the `fire` flag)

@@ -1898,6 +1898,27 @@ class TestSecondWave:
             return before - float(st.u["a"][0, 0])
         return st, H, step
 
+    def test_arrows_and_bolts_aim_each_shot_at_a_broken_target(self):
+        """missile.reaim_broken_cat_share (one-order lanes of the probes retarget 1-3 and the range): once the target has
+        lost a third of its starting men, crossbowmen / archers wait aim_s after every reload (cycle reload + 3.3 s);
+        a whole target, slings or the rule off: the reload (+ the small reaim wait)."""
+        xbow = "wh_main_emp_inf_crossbowmen"
+        assert P.static(xbow)["broken_at"] == P.static(ARCHER)["broken_at"] == pytest.approx(1 / 3, abs=0.01)
+        assert P.static(SLINGER)["broken_at"] == 0 and P.static("wh_main_emp_inf_handgunners")["broken_at"] == 0
+
+        def cycle(key, params, broken):
+            st, H, step = self._retarget_lane(key, params)
+            if broken:
+                st.u["men"][0, H] = 0.6 * st.u["men0"][0, H]
+            volleys = [k for k in range(80) if step(0 if k == 0 else None) > 0]
+            return (volleys[1] - volleys[0]) * P.dt
+        for key in (xbow, ARCHER):
+            reload_s, aim_s = P.static(key)["reload"], P.static(key)["aim_s"]
+            whole = cycle(key, P, False)
+            assert whole == pytest.approx(reload_s, abs=1.0)
+            assert cycle(key, P, True) == pytest.approx(reload_s + aim_s, abs=0.5)
+            assert cycle(key, P.with_cal("missile", reaim_broken_cat_share={}), True) < reload_s + 1.5
+
     @pytest.mark.parametrize("key", ["wh_main_emp_inf_crossbowmen", ARCHER, SLINGER])
     def test_arcing_fire_keeps_quiet_after_each_new_order(self, key):
         """missile.order_quiet_cat_s (the probes retarget / retarget2 / retarget3, 09.10.2026): arcing fire (bolts,
