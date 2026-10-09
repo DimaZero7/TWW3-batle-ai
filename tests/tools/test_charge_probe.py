@@ -164,6 +164,25 @@ def test_the_wavemiss_plan_charges_each_shooter_held_and_answering():
     assert all(cp.FACTION[cp.UNITS[l["attacker"]][0]] != cp.FACTION[cp.UNITS[l["target"]][0]] for x in b for l in x)
 
 
+def test_the_wavemiss2_plan_has_each_shooter_answering_and_leaving():
+    b = cp.battles("wavemiss2")
+    assert len(b) == 2 and all(len(x) == 4 for x in b)
+    shooters = {t for _, t in cp.WAVEMISS}
+    stand = sorted((l["attacker"], l["target"]) for x in b for l in x if l["target_mode"] == "stand")
+    move = sorted((l["target"], l["attacker"]) for x in b for l in x if l["target_mode"] == "both")
+    assert stand == move == sorted(cp.WAVEMISS)
+    for x in b:
+        for l in x:
+            if l["target_mode"] == "both":       # the shooter leaves: unordered, then a run 40 m back 3 s after contact
+                assert l["attacker"] in shooters and l["mode"] == "hold" and not l["answer"]
+                assert l["after"] == {"at_s": 3, "kind": "move_near", "dx": 0, "dz": 40, "walk": False}
+            else:
+                assert l["target"] in shooters and l["mode"] == "attack_run" and l["answer"]
+    assert b[0][0]["attacker"] != b[1][0]["attacker"]                     # the lanes rotated
+    config, model_s, _ = cp.run_config("wavemiss2", 1)
+    assert config["men_after_s"] >= 90 and model_s < 400
+
+
 def test_battle_file_is_written(tmp_path):
     path = cp.write_scenario("hit", 1, tmp_path / "x.xml")
     xml = path.read_text(encoding="utf-8")

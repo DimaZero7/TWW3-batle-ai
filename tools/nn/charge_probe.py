@@ -90,6 +90,13 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           shooters halt and are never ordered ('hold', they fight back on their own) or answer with an attack at contact
           ('stand'); 90 s, the soldiers' places all fight; battle 2 swaps hold / stand and rotates the lanes - 2 battles
           of 4 lanes;
+  wavemiss2 the shooters' orders in melee (wavemiss: a shooter that answers with an attack at contact keeps losing
+          0.7-0.8 % a second with the fronts 2.1-2.9 m apart and 25-28 of its men within reach, one never ordered falls
+          from 1.8 to 0.55 as the fronts part to 3.3 m; one lane a shooter and order): 'stand' lanes as wavemiss's
+          (clanrats / swordsmen charge the shooters from 30 m at a run, the shooters answer with an attack at contact);
+          'move' lanes - the shooters stand unordered, the melee unit charges them from 30 m at a run, and 3 s after the
+          contact the shooters get a move at a run 40 m straight back (the leaver: is it held, struck as it goes?);
+          90 s, the soldiers' places all fight; battle 2 swaps stand / move and rotates the lanes - 2 battles of 4 lanes;
   wave    the opening wave (build/shotgap/wave_geom.py: men within 2.5 m of an enemy 46-51 in the first 5 s, 12 from 20 s,
           the fronts 1.3 m apart then 2.9 m; is it the collision of the approach or the start inside reach?): swordsmen
           <-> clanrats, both attacking, 90 s, the soldiers' places all fight - (1) placed 1 m apart (front to front), both
@@ -163,7 +170,7 @@ RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
-         "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss")
+         "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2")
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
 WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
@@ -330,6 +337,15 @@ def battles(plan):
             return lane(pair[0], pair[1], "attack_run", mode, gap_m=30, fight_s=90)
         out.append([wm(p, ("hold", "stand")[k % 2]) for k, p in enumerate(WAVEMISS)])
         out.append(rotate([wm(p, ("stand", "hold")[k % 2]) for k, p in enumerate(WAVEMISS)], 2))
+    elif plan == "wavemiss2":
+        def wm2(pair, how):
+            if how == "stand":
+                return lane(pair[0], pair[1], "attack_run", "stand", gap_m=30, fight_s=90)
+            # the shooter is the lane's attacker (the unit lane.after orders), unordered; the melee unit charges it
+            return lane(pair[1], pair[0], "hold", "both", gap_m=30, fight_s=90, answer=False,
+                        after={"at_s": 3, "kind": "move_near", "dx": 0, "dz": 40, "walk": False})
+        out.append([wm2(p, ("stand", "move")[k % 2]) for k, p in enumerate(WAVEMISS)])
+        out.append(rotate([wm2(p, ("move", "stand")[k % 2]) for k, p in enumerate(WAVEMISS)], 2))
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
@@ -426,7 +442,7 @@ def run_config(plan, index):
               "men_ms": 500 if turn else MEN_MS,
               "men_near_m": 60,
               # the soldiers' places: the first 30 s (the charge plan) or the whole fight (hit: men in contact)
-              "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2") else 95 if plan in ("defender", "wave", "wavemiss")
+              "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2") else 95 if plan in ("defender", "wave", "wavemiss", "wavemiss2")
                               else 90 if plan in ("hit", "move", "vv") else 30),
               "lanes": lanes, "park": park}
     if plan in ("routmob", "routmob2"):
