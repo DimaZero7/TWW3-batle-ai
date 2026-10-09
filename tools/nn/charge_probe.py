@@ -65,7 +65,13 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           clanrats attacking each other from 3 m, the clanrats never re-ordered (they keep attacking the swordsmen);
           1 s after contact the swordsmen get (a) the same attack again, (b) a halt (the bridge's hold), (c) an attack on
           a second clanrat unit 150 m aside (edge to edge, towards the middle of the field), (d) a move at a run 30 m
-          aside; 90 s fights, the soldiers' places all fight; lanes 320 m apart - 2 battles of 4 lanes, rotated.
+          aside; 90 s fights, the soldiers' places all fight; lanes 320 m apart - 2 battles of 4 lanes, rotated;
+  wave    the opening wave (build/shotgap/wave_geom.py: men within 2.5 m of an enemy 46-51 in the first 5 s, 12 from 20 s,
+          the fronts 1.3 m apart then 2.9 m; is it the collision of the approach or the start inside reach?): swordsmen
+          <-> clanrats, both attacking, 90 s, the soldiers' places all fight - (1) placed 1 m apart (front to front), both
+          at a walk; (2) 2.5 m apart (the database's formed combat distance), both at a walk; (3) 3 m, both at a walk;
+          (4) 3 m, the clanrats at a run (the earlier probes' set-up, the control); (5) 30 m, the clanrats at a run (a
+          real charge), the swordsmen at a walk - 2 battles, lanes rotated.
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -130,7 +136,7 @@ RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
-         "reform2", "defender")
+         "reform2", "defender", "wave")
 # the reform plan: soldier places this long after contact (the whole fight)
 REFORM_MEN_S = 260
 # the fresh plan's orders 10 s after contact (entries/charge_probe.lua lane.after.kind)
@@ -262,6 +268,14 @@ def battles(plan):
                         **extra)
         base = [dl(k) for k in DEFENDER]
         out += [base, rotate(base, 2)]
+    elif plan == "wave":
+        w = dict(fight_s=90)
+        base = [lane("swords", "clanrat", "attack_walk", "both_walk", gap_m=1, **w),
+                lane("swords", "clanrat", "attack_walk", "both_walk", gap_m=2.5, **w),
+                lane("swords", "clanrat", "attack_walk", "both_walk", gap_m=3, **w),
+                lane("swords", "clanrat", "attack_walk", "both", gap_m=3, **w),
+                lane("swords", "clanrat", "attack_walk", "both", gap_m=30, **w)]
+        out += [base, rotate(base, 2)]
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
@@ -353,7 +367,7 @@ def run_config(plan, index):
               "men_ms": 500 if turn else MEN_MS,
               "men_near_m": 60,
               # the soldiers' places: the first 30 s (the charge plan) or the whole fight (hit: men in contact)
-              "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2") else 95 if plan == "defender"
+              "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2") else 95 if plan in ("defender", "wave")
                               else 90 if plan in ("hit", "move", "vv") else 30),
               "lanes": lanes, "park": park}
     model_s = max(l["max_s"] for l in lanes) + SETTLE_MS / 1000 + 20
@@ -700,7 +714,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
             if sp.get("t2_mode") == "attack" and int(slot["t2"][b]) >= 0:
                 kind[b, int(slot["t2"][b])], target[b, int(slot["t2"][b])], run_[b, int(slot["t2"][b])] = O.ATTACK, A, False
             # the target
-            if tmode[b] == "both" or (sp.get("answer") and c is not None):
+            if tmode[b] in ("both", "both_walk") or (sp.get("answer") and c is not None):
                 kind[b, T], target[b, T], run_[b, T] = O.ATTACK, A, tmode[b] == "both"
             elif tmode[b] == "push":
                 kind[b, T], x[b, T], z[b, T], run_[b, T] = O.MOVE, sp["x"], sp["z"] + sp.get("push_m", 60), False

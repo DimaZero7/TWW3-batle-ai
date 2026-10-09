@@ -108,6 +108,17 @@ def test_the_defender_plan_gives_the_swordsmen_four_orders_1_s_after_contact():
                 assert "target2" not in lane
 
 
+def test_the_wave_plan_varies_the_start_gap_and_the_clanrats_pace():
+    b = cp.battles("wave")
+    assert len(b) == 2 and all(len(x) == 5 for x in b)
+    cells = sorted((l["gap_m"], l["target_mode"]) for l in b[0])
+    assert cells == [(1, "both_walk"), (2.5, "both_walk"), (3, "both"), (3, "both_walk"), (30, "both")]
+    assert sorted((l["gap_m"], l["target_mode"]) for l in b[1]) == cells and b[0][0] != b[1][0]   # rotated
+    assert all(l["mode"] == "attack_walk" and l["fight_s"] == 90 and not l["answer"] for x in b for l in x)
+    config, model_s, _ = cp.run_config("wave", 1)
+    assert config["men_after_s"] >= 90 and model_s < 400
+
+
 def test_battle_file_is_written(tmp_path):
     path = cp.write_scenario("hit", 1, tmp_path / "x.xml")
     xml = path.read_text(encoding="utf-8")

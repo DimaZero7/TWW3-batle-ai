@@ -20,7 +20,7 @@
 -- to men_all_s, wherever the enemy is (how a formation turns).
 -- The target (lane.target_mode): 'stand' halts and, with lane.answer, is ordered to attack the
 -- attacker at its first contact (both then fight under an attack order); 'hold' halts and is never
--- ordered (braced spears); 'both' attacks the attacker at a run from the start; 'rear' halts facing
+-- ordered (braced spears); 'both' attacks the attacker at a run from the start ('both_walk': at a walk); 'rear' halts facing
 -- away. lane.lord (optional): a lord placed behind the target (dz m), who uses lane.lord.ability on
 -- himself at the lane's first contact (Stand Your Ground) unless the key is empty (the control); with
 -- lane.lord.at_m instead once the two units' centres are within at_m before the contact.
@@ -55,7 +55,7 @@ local LOG = 'tww3_bai_events.jsonl'
 local TIMER, MEN_TIMER = 'tww3_bai_charge_probe_tick', 'tww3_bai_charge_probe_men'
 M.MODES = {attack_run = true, attack_walk = true, move_run = true, recharge = true, hold = true, withdraw = true,
     script = true, shoot = true}
-M.TARGET_MODES = {stand = true, hold = true, both = true, rear = true, push = true}
+M.TARGET_MODES = {stand = true, hold = true, both = true, both_walk = true, rear = true, push = true}
 M.AFTER_KINDS = {attack_t2 = true, attack_same = true, halt = true, move_near = true, none = true}
 
 local function round(v, k)
@@ -220,7 +220,8 @@ function M.main(bm, config, globals)
                 if not lane.contact and (a_m or t_m) then
                     lane.contact = now
                     emit('probe_contact', {lane = lane.name, t = now - lane.t0, n = 1})
-                    if lane.answer and lane.target_mode ~= 'hold' and lane.target_mode ~= 'both' then
+                    if lane.answer and lane.target_mode ~= 'hold' and lane.target_mode ~= 'both'
+                            and lane.target_mode ~= 'both_walk' then
                         attack(lane, lane.t, lane.a, false)
                     end
                     if lane.lord and lane.lord.ability and lane.lord.ability ~= '' and not lane.lord.at_m then
@@ -345,7 +346,9 @@ function M.main(bm, config, globals)
     local function go()
         for _, lane in ipairs(state.lanes) do
             lane.t0, lane.running, lane.phase = now_ms(), true, 'in'
-            if lane.target_mode == 'both' then attack(lane, lane.t, lane.a, false) end
+            if lane.target_mode == 'both' or lane.target_mode == 'both_walk' then
+                attack(lane, lane.t, lane.a, lane.target_mode == 'both_walk')
+            end
             if lane.t2 and lane.t2_mode == 'attack' then attack(lane, lane.t2, lane.a, true) end
             if lane.target_mode == 'push' then
                 orders.move(lane.t.uc, vec(lane.layout.tx, lane.z + (lane.push_m or 60)), false)
