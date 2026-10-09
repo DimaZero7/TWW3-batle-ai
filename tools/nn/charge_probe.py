@@ -82,6 +82,14 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           halts at the rout; crossbowmen of its side 80 m beyond the target, fire at will), neighbours (halts; two
           spearmen units of its side 25 m to either side and 20 m behind the target, halted, striking only what touches
           them), the control (halts, nobody else); soldiers' places 40 s after the rout - 2 battles, lanes rotated;
+  wavemiss the opening wave against shooters (build/routmorale: in the it1-it9 gate battles a shooter unit in melee loses
+          0.54-0.69 % of its health a second in the game whatever its time in melee - x1.28 -> x1 from 0-10 s to 60+ s -
+          while the replay's falls x1.95 -> x1, the opening wave measured formation on formation: do the fronts part from
+          a loose shooter block as they do from swordsmen, or do the attackers stay inside it?): clanrats charge standing
+          crossbowmen / archers / handgunners and swordsmen charge standing night runners, from 30 m at a run; the
+          shooters halt and are never ordered ('hold', they fight back on their own) or answer with an attack at contact
+          ('stand'); 90 s, the soldiers' places all fight; battle 2 swaps hold / stand and rotates the lanes - 2 battles
+          of 4 lanes;
   wave    the opening wave (build/shotgap/wave_geom.py: men within 2.5 m of an enemy 46-51 in the first 5 s, 12 from 20 s,
           the fronts 1.3 m apart then 2.9 m; is it the collision of the approach or the start inside reach?): swordsmen
           <-> clanrats, both attacking, 90 s, the soldiers' places all fight - (1) placed 1 m apart (front to front), both
@@ -129,6 +137,9 @@ UNITS = {
     "flag": ("wh_dlc04_emp_inf_flagellants_0", 120, EMP),
     "general": ("wh_main_emp_cha_general_0", 1, EMP),
     "xbow": ("wh_main_emp_inf_crossbowmen", 90, EMP),
+    "archer": ("wh2_dlc13_emp_inf_archers_0", 90, EMP),
+    "hgun": ("wh_main_emp_inf_handgunners", 90, EMP),
+    "nrun": ("wh2_main_skv_inf_night_runners_0", 120, SKV),
     "clanrat": ("wh2_main_skv_inf_clanrats_1", 160, SKV),
     "cspear": ("wh2_main_skv_inf_clanrat_spearmen_0", 160, SKV),
     "slave": ("wh2_main_skv_inf_skavenslaves_0", 180, SKV),
@@ -152,7 +163,10 @@ RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
-         "reform2", "defender", "wave", "routmob", "routmob2")
+         "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss")
+# the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
+# the other way round
+WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
 ROUTMOB2_EXTRAS = {"fire": [{"short": "xbow", "dx": 0, "dz": 80, "fire": True}],
                    "neighbours": [{"short": "spear", "dx": -25, "dz": -20}, {"short": "spear", "dx": 25, "dz": -20}]}
 ROUTMOB_MEN_S = 40     # the routmob plan: the soldiers' places this long after the target's rout
@@ -311,6 +325,11 @@ def battles(plan):
                         damage={"t": {"method": "kill", "share": 0.5}}, rout_at_s=30, kind=kind, **extra)
         base = [rm2(k) for k in ("chase", "fire", "neighbours", "control")]
         out += [base, rotate(base, 2)]
+    elif plan == "wavemiss":
+        def wm(pair, mode):
+            return lane(pair[0], pair[1], "attack_run", mode, gap_m=30, fight_s=90)
+        out.append([wm(p, ("hold", "stand")[k % 2]) for k, p in enumerate(WAVEMISS)])
+        out.append(rotate([wm(p, ("stand", "hold")[k % 2]) for k, p in enumerate(WAVEMISS)], 2))
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
@@ -407,7 +426,7 @@ def run_config(plan, index):
               "men_ms": 500 if turn else MEN_MS,
               "men_near_m": 60,
               # the soldiers' places: the first 30 s (the charge plan) or the whole fight (hit: men in contact)
-              "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2") else 95 if plan in ("defender", "wave")
+              "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2") else 95 if plan in ("defender", "wave", "wavemiss")
                               else 90 if plan in ("hit", "move", "vv") else 30),
               "lanes": lanes, "park": park}
     if plan in ("routmob", "routmob2"):

@@ -151,6 +151,19 @@ def test_the_routmob2_plan_damages_the_slaves_forces_the_rout_and_adds_shooters_
     assert config["men_after_rout_s"] == cp.ROUTMOB_MEN_S and model_s < 400
 
 
+def test_the_wavemiss_plan_charges_each_shooter_held_and_answering():
+    b = cp.battles("wavemiss")
+    assert len(b) == 2 and all(len(x) == 4 for x in b)
+    cells = sorted((l["attacker"], l["target"], l["target_mode"]) for x in b for l in x)
+    assert cells == sorted((a, t, m) for a, t in cp.WAVEMISS for m in ("hold", "stand"))
+    assert all(l["mode"] == "attack_run" and l["gap_m"] == 30 and l["fight_s"] == 90 for x in b for l in x)
+    assert all(l["answer"] == (l["target_mode"] == "stand") for x in b for l in x)
+    assert b[0][0]["target"] != b[1][0]["target"]                         # the lanes rotated
+    config, model_s, _ = cp.run_config("wavemiss", 2)
+    assert config["men_after_s"] >= 90 and model_s < 400
+    assert all(cp.FACTION[cp.UNITS[l["attacker"]][0]] != cp.FACTION[cp.UNITS[l["target"]][0]] for x in b for l in x)
+
+
 def test_battle_file_is_written(tmp_path):
     path = cp.write_scenario("hit", 1, tmp_path / "x.xml")
     xml = path.read_text(encoding="utf-8")
