@@ -2744,6 +2744,38 @@ class TestLeavingMelee:
         assert float(lost[0]) == pytest.approx(mult * float(lost[1]), rel=1e-3) and float(lost[1]) > 0
         assert float(st.u["k"][0, 0]) == float(k0[0])
 
+    @pytest.mark.parametrize("key,vx,mult", [(SPEAR, -3.0, 0.43), (SPEAR, 0.0, 1.25), (GENERAL, -3.0, 0.43),
+                                             (GENERAL, 0.0, 1.0), (ARCHER, -3.0, 0.55)])
+    def test_a_leaver_on_the_move_takes_the_pursuit_rate_standing_leave_taken(self, key, vx, mult):
+        # contact.leave_run_pursuit 1 (the leave probe; off by default, config/nn/sim.json contact.leave_run_why): past
+        # its hold and on the move, a leaver without a missile weapon (a lord too) is struck at pursuit_rate; standing at
+        # its point it keeps leave_taken (a lord: the rule); a missile unit keeps leave_taken.missile
+        assert P.sim["contact"]["pursuit_rate"] == pytest.approx(0.43)
+        p = P.with_cal("contact", leave_run_pursuit=1)
+        st, H = self._fight(key, 2)
+        st.u["leave_s"][0, 0] = 10.0                                   # past pin_melee_s / pin_s
+        st.u["vx"][0, 0], st.u["vz"][0, 0] = vx, 0.0
+        hp0 = st.u["hp_abs"][:, 0].clone()
+        o = replay.hold(st)
+        o.kind[:, H], o.target[:, H] = O.ATTACK, 0
+        o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = O.MOVE, -200.0, 0.0, True   # battle 0 leaves
+        battle.step(st, o, p)                                                        # battle 1 holds
+        lost = hp0 - st.u["hp_abs"][:, 0]
+        assert float(lost[0]) == pytest.approx(mult * float(lost[1]), rel=1e-3) and float(lost[1]) > 0
+
+    def test_off_a_leaver_on_the_move_takes_leave_taken(self):
+        p = P.with_cal("contact", leave_run_pursuit=0)
+        st, H = self._fight(SPEAR, 2)
+        st.u["leave_s"][0, 0] = 10.0
+        st.u["vx"][0, 0] = -3.0
+        hp0 = st.u["hp_abs"][:, 0].clone()
+        o = replay.hold(st)
+        o.kind[:, H], o.target[:, H] = O.ATTACK, 0
+        o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = O.MOVE, -200.0, 0.0, True
+        battle.step(st, o, p)
+        lost = hp0 - st.u["hp_abs"][:, 0]
+        assert float(lost[0]) == pytest.approx(1.25 * float(lost[1]), rel=1e-3)
+
     def test_off_leaving_melee_units_walk_out_and_take_the_rule(self):
         p = P.with_cal("contact", pin_melee_s=0.0, leave_taken=None)
         st = face_off(SPEAR, SPEAR)

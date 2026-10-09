@@ -208,6 +208,37 @@ class TestMeleeExit:
             kinds.append(int(st.u["order_kind"][0, 0]))
         assert kinds.index(O.HOLD) * P.dt == pytest.approx(P.rules["battle"]["melee_breakoff_secs"], abs=1.0)
 
+    @pytest.mark.parametrize("on", [1, 0])
+    def test_a_chased_lord_fights_again_after_the_window_too(self, on):
+        # contact.breakoff_lord (the leave probe: the General leaving chasing clanrats fought again 24-25 s after the
+        # order); off: the window counts for formations only and the lord's withdraw never ends
+        from tests.tools.test_sim import face_off
+        p = P.with_cal("contact", breakoff_lord=on)
+        st = face_off(GENERAL, SLAVE)
+        H = st.N // 2
+        assert float(st.u["men0"][0, 0]) <= 1
+        st.u["morale"][:] = 1e6
+        st.u["leadership"][:] = 1e6
+        d0 = float(st.u["x"][0, H] - st.u["x"][0, 0])
+        hp_h0 = float(st.u["hp_abs"][0, H])
+        kinds, dealt = [], []
+        for n in range(int(32 / P.dt)):
+            o = replay.hold(st)
+            o.kind[0, H], o.target[0, H] = O.ATTACK, 0
+            o.kind[0, 0] = O.WITHDRAW if n == 0 else O.KEEP
+            o.x[0, 0], o.run[0, 0] = -300.0, True
+            st.u["x"][0, 0] = st.u["x"][0, H] - d0              # the chasers keep up: he stays in contact
+            battle.step(st, o, p)
+            kinds.append(int(st.u["order_kind"][0, 0]))
+            dealt.append(hp_h0 - float(st.u["hp_abs"][0, H]))
+        if on:
+            drop = kinds.index(O.HOLD)
+            assert (drop + 1) * P.dt == pytest.approx(P.rules["battle"]["melee_breakoff_secs"] + P.dt, abs=P.dt)
+            assert dealt[drop - 1] - dealt[2] == pytest.approx(0.0, abs=1e-6)      # no blows while leaving
+            assert dealt[-1] > dealt[drop]                                           # he fights again
+        else:
+            assert O.HOLD not in kinds and dealt[-1] - dealt[2] == pytest.approx(0.0, abs=1e-6)
+
     def test_off_a_leaver_never_strikes(self):
         p = P.with_cal("contact", breakoff=0)
         from tests.tools.test_sim import face_off

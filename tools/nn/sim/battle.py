@@ -175,11 +175,17 @@ def step(st, orders, params=None, dt=None):
     # an enemy that long after it began to leave melee drops its order and fights again (the melee probe,
     # build/movelords: chased swordsmen and spearmen struck nothing for 24 s after a withdraw order, then fought on).
     # exit_s: seconds since it began to leave in contact, out of contact too, while it keeps leaving.
+    # A lone man (a lord) too (contact.breakoff_lord; the leave probe: the Empire General leaving clanrats that chase
+    # him stood and fought 24-25 s after the order; config/nn/sim.json contact.breakoff_lord_why) - he is still never
+    # held (pin) and leave_taken stays the formations'.
+    exit_now = in_exit
+    if cal["contact"].get("breakoff_lord"):
+        exit_now = leaving & engaged
     if "exit_s" in u:
-        u["exit_s"] = torch.where(leaving & (in_exit | (u["exit_s"] > 0)), u["exit_s"] + dt, torch.zeros_like(u["exit_s"]))
+        u["exit_s"] = torch.where(leaving & (exit_now | (u["exit_s"] > 0)), u["exit_s"] + dt, torch.zeros_like(u["exit_s"]))
     # (the order is dropped at the end of this step: it fights from the next one)
     brk = float(R.get("melee_breakoff_secs", 0.0)) if cal["contact"].get("breakoff") and "exit_s" in u else 0.0
-    broke_off = (in_exit & (u["exit_s"] >= brk)) if brk > 0 else None
+    broke_off = (exit_now & (u["exit_s"] >= brk)) if brk > 0 else None
     # The chase (contact.chase; build/open_battle/spec.md 2, build/open_melee/spec.md R4): a unit with an attack order
     # on an enemy that is leaving melee in contact with it is not held in the fight: it follows the leaver at its own
     # speed (closing up whenever the formations overlap by less than contact.reach_m) and strikes it while they touch -
@@ -270,9 +276,20 @@ def step(st, orders, params=None, dt=None):
     # units more (they turn their backs), missile units less (measured, config/nn/sim.json contact.pin_why).
     taken_cal = cal["contact"].get("leave_taken")
     if taken_cal:
-        out = (leaving & engaged & (u["men0"] > 1))[:, None, :]
-        mult = torch.where((u["range"] > 0)[:, None, :], float(taken_cal["missile"]), float(taken_cal["melee"]))
-        hp_melee = torch.where(out, hp_melee * mult, hp_melee)
+        out = leaving & engaged & (u["men0"] > 1)
+        mult = torch.where(u["range"] > 0, float(taken_cal["missile"]), float(taken_cal["melee"]))
+        pursuit = cal["contact"].get("pursuit_rate")
+        if cal["contact"].get("leave_run_pursuit") and pursuit is not None:
+            # A leaver without a missile weapon (a lord too) on the move, not held, is struck as a router is: at
+            # contact.pursuit_rate of the rule (contact.leave_run_pursuit; the leave probe: chased swordsmen and shield
+            # spearmen running out lost 102 HP at 5-10 s against the twin's 213 with x1.25, 0.25-0.40 of it; standing
+            # at their point, their backs to the chasers, 43-93 HP/s - that keeps leave_taken). On the move: its
+            # speed last step over 0.3 m/s (the observed moving flag's threshold). Off for now (contact.leave_run_why:
+            # the game makes it up at the stopping point, which the chase here lacks).
+            run_out = leaving & engaged & (u["range"] <= 0) & ~pinned & (speed > 0.3)
+            out = out | run_out
+            mult = torch.where(run_out, torch.full_like(mult, float(pursuit)), mult)
+        hp_melee = torch.where(out[:, None, :], hp_melee * mult[:, None, :], hp_melee)
 
     # --- shooting ---
     # (fire whilst moving, attribute mounted_fire_move: shoots and aims on the move too)

@@ -12,8 +12,7 @@ seconds the same. Writes (build/ is not in Git), in build/nn-train/runs/<name>/:
 
     latest.pt, best.pt     the network (tools/nn/train/checkpoint.py); best: the best window of
                            training battles against the scripts (the worst opponent-role counts)
-    pool/v*.pt, pool/q.json  past versions, the opponents of self-play, and their quality scores (league.Pool;
-                           --pool-dir: a pool folder of its own, shared by the parts of a night)
+    pool/v*.pt             past versions, the opponents of self-play
     log.jsonl              one line per update: losses, entropy, reward, win rates by opponent and role
     eval.json              the final evaluation (tools/nn/train/evaluate.py)
     replays/*/             battles of the final network, like the game's recordings
@@ -26,7 +25,6 @@ import math
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
 import numpy as np
 import torch
@@ -116,35 +114,6 @@ def optimizer(actor, critic, lr, width=1.0):
     return torch.optim.Adam([{"params": readers, "lr": lr / width}, {"params": rest, "lr": lr}], lr=lr, eps=1e-5)
 
 
-def resume(opt, path):
-    """Adam's state from the checkpoint `path` (its "train", checkpoint.py) into opt, when it has one of the same
-    parameters (count and shapes, in order); the learning rates stay opt's (the options'). -> the trainer's
-    counters saved with it ({} if none), or None when nothing was resumed (why: printed)."""
-    tr = checkpoint.train_state(path) if path else None
-    if not tr or "optim" not in tr:
-        return None
-    saved = tr["optim"]
-    params = [p for g in opt.param_groups for p in g["params"]]
-    ids = [i for g in saved["param_groups"] for i in g["params"]]
-    if len(saved["param_groups"]) != len(opt.param_groups) or len(ids) != len(params):
-        print(f"{path}: the optimizer's state is of other parameters: Adam starts afresh", flush=True)
-        return None
-    for i, p in zip(ids, params):
-        st = saved["state"].get(i, {})
-        if "exp_avg" in st and tuple(st["exp_avg"].shape) != tuple(p.shape):
-            print(f"{path}: the optimizer's state is of other shapes: Adam starts afresh", flush=True)
-            return None
-    lrs = [g["lr"] for g in opt.param_groups]
-    opt.load_state_dict(saved)
-    for g, lr in zip(opt.param_groups, lrs):
-        g["lr"] = lr
-    return dict(tr.get("state") or {})
-
-
-def same_file(a, b):
-    return a is not None and b is not None and Path(a).resolve() == Path(b).resolve()
-
-
 @torch.no_grad()
 def follow(reference, actor, share):
     """The reference moves `share` of the way to the actor (Polyak averaging of the weights: --anchor-ema)."""
@@ -159,12 +128,6 @@ def schedule(start, end, share):
     """Linear from start (share 0) to end (share 1)."""
     share = min(1.0, max(0.0, share))
     return start + (end - start) * share
-
-
-def decay_share(minutes, seconds, run_share):
-    """The entropy schedule's share done: --entropy-decay's seconds over its minutes (carried over a chain's parts),
-    else the run's own share."""
-    return seconds / (minutes * 60) if minutes else run_share
 
 
 def rates(stats):
@@ -255,22 +218,6 @@ def train(args, every=None, teacher=None, normal=None):
     width = actor.cfg.d / model_config.SMALL.d
     # (v2 is trained from scratch, not widened from a small network: no lr / width on the stream's readers)
     opt = optimizer(actor, critic, cfg.lr, 1.0 if actor.cfg.sectors else width)
-    # Adam's moments and the trainer's counters from --init (saved with latest.pt and m<minute>.pt): the next part of
-    # a chain goes on as one run. Only when the critic comes from the same file (else its moments are another's).
-    carried = None
-    if args.init and args.resume and (args.critic_init is None or same_file(args.critic_init, args.init)):
-        carried = resume(opt, args.init)
-    warmup = args.critic_warmup
-    if carried is not None:
-        warmup = 0
-        print(f"resumed Adam's state and the counters {carried} from {args.init}"
-              + (f" (no --critic-warmup {args.critic_warmup}: the critic and Adam go on)" if args.critic_warmup else ""),
-              flush=True)
-    carried = carried or {}
-    chain_s0, chain_u0 = float(carried.get("chain_s", 0.0)), int(carried.get("chain_updates", 0))
-    decay_s0 = float(carried.get("entropy_decay_s", 0.0))
-    if args.entropy_decay and args.entropy_end is None:
-        raise SystemExit("--entropy-decay needs --entropy-end (the weight it goes to)")
     weights = reward.Weights(order_change=args.order_cost, idle=args.idle, lord=args.lord, retarget=args.retarget,
                              idle_tau_s=args.idle_tau, idle_cap=args.idle_cap, idle_pause_s=args.idle_pause,
                              idle_step=args.idle_step, idle_rate=args.idle_rate, idle_window_s=args.idle_window,
@@ -283,23 +230,15 @@ def train(args, every=None, teacher=None, normal=None):
         return float(share), int(units)
     entropy_end = args.entropy if args.entropy_end is None else args.entropy_end
     anchor_end = args.anchor if args.anchor_end is None else args.anchor_end
-    # The pool of past versions with quality scores (league.Pool); --pool-dir: shared by the parts of a night (it
-    # carries on from its q.json: the untrained network and --init only go into a new pool)
-    pool = league.Pool(Path(args.pool_dir) if args.pool_dir else out / "pool", size=args.pool, seed=args.seed,
-                       eta=args.pool_eta)
-    if not len(pool):
-        pool.add(checkpoint.random_for(actor.cfg), untrained=True)
-        if args.init:
-            pool.add(args.init)
+    pool = league.Pool(out / "pool", size=args.pool)
+    pool.add(checkpoint.random_for(actor.cfg))
+    if args.init:
+        pool.add(args.init)
     for extra in filter(None, (args.pool_extra or "").split(",")):
         pool.add(extra)
-    pool.write()
-    print(pool.text(), flush=True)
-    # The past slots (rollout.Battles): each holds a version; a battle keeps its slot's version from its start
-    slots = max(1, args.past_slots)
-    slot_path, slot_p = [None] * slots, [1.0] * slots
-    pasts = {}                                   # (slot, ModelConfig) -> its actor
-    deferred = 0                                 # draws that found no free slot (the active one goes on)
+    past = model_policy.Actor(actor.cfg).to(device).eval()
+    pasts = {actor.cfg: past}
+    past_path = None
     mix = json.loads(args.mix) if args.mix else league.MIX
     if args.drills:
         # drills: --drills of the battles, shared by --drill-weights (default: the verified ones equally)
@@ -363,7 +302,7 @@ def train(args, every=None, teacher=None, normal=None):
                                 small=small_arg())
 
     env = rollout.Battles(lay, scenes.SCENES, device, params, randomise.Spread(), weights, seed=args.seed,
-                          source=source(), cadence=cadence, past_slots=slots,
+                          source=source(), cadence=cadence,
                           teach=drills.load(list(teach0)) if teach0 else None,
                           teach_normal={n: loaded_normal[n] for n in normal_names} if normal_names else None,
                           attack_only=defend_only)
@@ -384,36 +323,19 @@ def train(args, every=None, teacher=None, normal=None):
           + (f", teacher in normal battles fixed shares {normal_s} weight {args.teach_normal_weight:g}" if normal_s else ""),
           flush=True)
 
-    def load_slot(k, path, untrained, p):
-        if path != slot_path[k] or slots == 1:
+    def pick_past():
+        nonlocal past, past_path
+        path, untrained = pool.sample()
+        if path != past_path:
             data = checkpoint.read(path, device)
             cfg_past = checkpoint.config_of(data)
             # a pool version of another size (random.pt beside a widened learner): its own actor, made once
-            if (k, cfg_past) not in pasts:
-                pasts[(k, cfg_past)] = model_policy.Actor(cfg_past).to(device).eval()
-            past = pasts[(k, cfg_past)]
+            if cfg_past not in pasts:
+                pasts[cfg_past] = model_policy.Actor(cfg_past).to(device).eval()
+            past = pasts[cfg_past]
             past.load_state_dict(data["actor"])
-            env.set_past(past, untrained, slot=k)
-        slot_path[k], slot_p[k] = path, p
-
-    def pick_past():
-        """A version drawn from the pool for the battles that start from now on: into a slot that holds no battle
-        (one that has it already first), made the active one; the same version as the active slot's goes on there.
-        One slot (--past-slots 1): the version changes in the running battles too, their memory afresh."""
-        nonlocal deferred
-        path, untrained, p = pool.sample()
-        a = env.active
-        if slots == 1 or slot_path[a] is None or path == slot_path[a]:
-            load_slot(a, path, untrained, p)
-            return
-        counts = env.slot_counts()
-        free = [k for k in range(slots) if k != a and counts[k] == 0]
-        if not free:
-            deferred += 1
-            return
-        k = next((k for k in free if slot_path[k] == path), free[0])
-        load_slot(k, path, untrained, p)
-        env.activate(k)
+            past_path = path
+        env.set_past(past, untrained)
 
     pick_past()
     t_warm = time.time()
@@ -440,16 +362,6 @@ def train(args, every=None, teacher=None, normal=None):
     if args.anchor_ema and args.anchor_roll:
         raise SystemExit("--anchor-ema and --anchor-roll: one of them")
     next_mark = every[0] if every else None
-    if "floor_w" in carried and carried["floor_w"] is not None and args.entropy_target:
-        floor_w = float(carried["floor_w"])      # the entropy floor's weight goes on where it was
-
-    def blob():
-        """What --init needs to go on seamlessly from a checkpoint (checkpoint.py "train")."""
-        trained = time.time() - t0 - paused
-        return {"optim": opt.state_dict(),
-                "state": {"floor_w": floor_w, "entropy_decay_s": decay_s0 + (trained if args.entropy_decay else 0.0),
-                          "chain_s": chain_s0 + trained, "chain_updates": chain_u0 + update}}
-
     def share_done():
         """The share of the run done: of the updates when --updates is set, else of the minutes."""
         if args.updates:
@@ -476,13 +388,11 @@ def train(args, every=None, teacher=None, normal=None):
         # Schedules: the kind's entropy bonus and the KL to the reference go linearly from their start to
         # their end value over the run (e.g. exploration fades out).
         # With --entropy-target the weight is the floor's (ppo.entropy_weight), never below the schedule.
-        # --entropy-decay: over that many minutes of training with it on, carried over the parts of a chain
-        decay_s = decay_s0 + (time.time() - t0 - paused if args.entropy_decay else 0.0)
-        scheduled = schedule(args.entropy, entropy_end, decay_share(args.entropy_decay, decay_s, done_share))
+        scheduled = schedule(args.entropy, entropy_end, done_share)
         floor_w = scheduled if floor_w is None else max(scheduled, floor_w)
         u_cfg = dataclasses.replace(step_cfg, entropy=floor_w if args.entropy_target else scheduled,
                                     anchor=schedule(args.anchor, anchor_end, done_share))
-        trains = update >= warmup
+        trains = update >= args.critic_warmup
         teach_w = (teacher.weights() if teacher is not None
                    else drill_teach.weights(teach0, args.drill_teach_minutes, (time.time() - t0 - paused) / 60))
         teach_w = {**teach_w, **(normal.weights() if normal is not None else normal_w)}
@@ -522,22 +432,16 @@ def train(args, every=None, teacher=None, normal=None):
             # that dies restarts from it: build/steps/v2_iter.sh)
             checkpoint.save(out / "latest.pt", actor, critic, args.preset,
                             {"update": update, "battles": env.battles, "seconds": round(trained_s), "run": args.name,
-                             "cadence": cadence.meta()}, blob())
+                             "cadence": cadence.meta()})
             saved_at = time.time()
         if args.keep_every and trained_s >= next_keep * 60:
             # --keep-every: a copy of the network (with its critic) every that many minutes of training: m<minute>.pt
             checkpoint.save(out / f"m{int(round(next_keep))}.pt", actor, critic, args.preset,
                             {"update": update, "battles": env.battles, "minute": next_keep, "run": args.name,
-                             "cadence": cadence.meta()}, blob())
+                             "cadence": cadence.meta()})
             next_keep += args.keep_every
         decisions += env.B * args.steps
         stats = env.take_stats()
-        # the learner's results against each slot's version -> the pool's quality scores (before a slot changes)
-        for k, (g, w) in enumerate(env.take_slot_stats()):
-            if g and slot_path[k] is not None:
-                pool.result(slot_path[k], g, w, slot_p[k])
-        pool.tick()
-        pool.write()
         lords = env.lords()
         for k, (g, w, s) in stats.items():
             for acc in (total, window):
@@ -556,10 +460,7 @@ def train(args, every=None, teacher=None, normal=None):
                "orders_per_minute": round(env.orders_per_minute(), 2), "kinds": env.kinds(),
                "reward_parts": {r: {k: round(v, 4) for k, v in p.items()} for r, p in env.reward_parts().items()},
                "games": {k: g for k, (g, _, _) in stats.items()}, "win_rate": rates(stats),
-               "seconds_per_battle": {k: round(s) for k, (_, _, s) in stats.items()},
-               "past": slot_path[env.active].name, "past_deferred": deferred,
-               "pool": {"n": len(pool), "wide": int((pool.probs() > 0.05).sum()),
-                        "top": [[n, round(q, 3), round(p, 3), age] for n, q, p, age in pool.top(5)]}}
+               "seconds_per_battle": {k: round(s) for k, (_, _, s) in stats.items()}, "past": str(past_path.name)}
         if taught:
             row["teach"] = taught
         log.write(json.dumps(row) + "\n")
@@ -591,9 +492,8 @@ def train(args, every=None, teacher=None, normal=None):
         if update % args.snapshot_every == 0:
             meta = {"update": update, "battles": env.battles, "seconds": row["seconds"], "run": args.name,
                     "cadence": cadence.meta()}
-            pool.save(actor, None, args.preset, meta, name=f"{args.name}_v{update:05d}.pt" if args.pool_dir else None)
-            checkpoint.save(out / "latest.pt", actor, critic, args.preset, meta, blob())
-            print("   " + pool.text() + (f"; draws without a free slot {deferred}" if slots > 1 else ""), flush=True)
+            pool.save(actor, None, args.preset, meta)
+            checkpoint.save(out / "latest.pt", actor, critic, args.preset, meta)
             sc, _ = score(window)
             print(f"   window: " + ", ".join(f"{k} {w / g:.2f} ({g})" for k, (g, w, _) in sorted(window.items())),
                   flush=True)
@@ -603,7 +503,8 @@ def train(args, every=None, teacher=None, normal=None):
                     checkpoint.save(out / "best.pt", actor, critic, args.preset, dict(meta, score=sc))
                     print(f"   best: worst scripted win rate {sc:.2f}", flush=True)
                 window = {}
-        if update % args.past_every == 0:
+            pick_past()
+        elif update % 2 == 0:
             pick_past()
         if every and time.time() - t0 - paused >= next_mark * 60 and time.time() - t0 - paused < args.minutes * 60:
             t_e = time.time()
@@ -623,8 +524,7 @@ def train(args, every=None, teacher=None, normal=None):
             "battles_at_once": env.B, "steps_per_update": args.steps, "limit_s": args.limit, "run": args.name,
             "cadence": cadence.meta(),
             "ppo": dataclasses.asdict(cfg), "reward": dataclasses.asdict(weights)}
-    checkpoint.save(out / "latest.pt", actor, critic, args.preset, meta, blob())
-    print(pool.text(), flush=True)
+    checkpoint.save(out / "latest.pt", actor, critic, args.preset, meta)
     if not (out / "best.pt").exists():
         checkpoint.save(out / "best.pt", actor, critic, args.preset, meta)
     log.close()
@@ -696,10 +596,6 @@ def parser():
     ap.add_argument("--minibatch", type=int, default=ppo.PPOConfig.minibatch, help="decisions per minibatch")
     ap.add_argument("--entropy", type=float, default=ppo.PPOConfig.entropy, help="weight of the kind's entropy")
     ap.add_argument("--entropy-end", type=float, help="... at the end of the run (linear; default: no change)")
-    ap.add_argument("--entropy-decay", type=float, default=0.0,
-                    help="> 0: --entropy goes to --entropy-end over this many minutes of training with this option on, "
-                         "counted over the parts of a chain (saved with the checkpoint) instead of over one run "
-                         "(e.g. 0.01 -> 0.003 over 120; 0: off)")
     ap.add_argument("--entropy-target", type=float, default=0.0,
                     help="> 0: an entropy floor - the weight goes up x --entropy-rate every update while the kind's "
                          "entropy is below this, back down to the schedule above it (0: the schedule only)")
@@ -741,21 +637,8 @@ def parser():
     ap.add_argument("--critic-init", help="take the critic from this checkpoint (default: --init's own)")
     ap.add_argument("--adv-norm", default=ppo.PPOConfig.adv_norm, choices=("batch", "role"),
                     help="normalise the side's advantage over the minibatch or over each role apart")
-    ap.add_argument("--pool", type=int, default=8, help="past versions in the pool at most (the lowest q leaves)")
-    ap.add_argument("--pool-extra", help="more past opponents for the pool (checkpoints, comma-separated; one already "
-                                         "in keeps its q)")
-    ap.add_argument("--pool-dir", help="the pool's folder (snapshots and q.json, league.Pool): shared by the parts of a "
-                                       "night, a part carries on from its q.json (default: the run's own pool/)")
-    ap.add_argument("--pool-eta", type=float, default=0.01,
-                    help="the quality score's step: a win against version i lowers its q by this / (N p_i) (OpenAI 0.01)")
-    ap.add_argument("--past-slots", type=int, default=3,
-                    help="past versions playing at once, each battle keeps the one it began with (1: one version, "
-                         "changed in the running battles with their memory afresh, the old way)")
-    ap.add_argument("--past-every", type=int, default=6,
-                    help="updates between draws of the past version for the battles that start next (6 ~ a battle)")
-    ap.add_argument("--no-resume", dest="resume", action="store_false",
-                    help="do not take Adam's state and the counters from --init (default: taken when it has them and "
-                         "the critic is its own; then no --critic-warmup)")
+    ap.add_argument("--pool", type=int, default=8)
+    ap.add_argument("--pool-extra", help="more past opponents for the pool (checkpoints, comma-separated)")
     ap.add_argument("--snapshot-every", type=int, default=20)
     ap.add_argument("--save-every", type=float, default=5.0,
                     help="minutes between saves of latest.pt (with the critic) besides the snapshots' (0: only those)")

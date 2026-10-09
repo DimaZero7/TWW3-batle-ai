@@ -25,13 +25,6 @@ A transition keeps only the abilities' state (abil [.., SLOTS, DYNAMIC]) and the
 (abil_row); full_obs() puts the passports back from the bank (batch["abil_static"]) for the update:
 the whole input would be ~3 GB for 1024 battles x 64 decisions.
 
-Past slots (past_slots=K; run.py --past-slots): up to K past versions play at once, each in a slot. A battle against
-a past version keeps the slot it began with to its end (battle_slot [B]; a restarting battle takes the active slot),
-so its version never changes mid-battle and its memory (GRU) runs on. The trainer loads a new version only into a
-slot that holds no battle (slot_counts) and makes it the active one (activate). Every slot in use decides on all past
-rows (one batch shape for the compiled step) and each row takes its own slot's orders; slot_stats counts the ended
-games and the learner's wins per slot (the pool's quality scores, league.Pool). One slot = the old single version.
-
 The drills' teacher (teach= {drill name: its skilled script}; tools/nn/train/drills/teach.py): at every
 decision the script labels the learner's units in that drill's battles on the same state (it does
 not act); the transition carries the labels ("teach") for PPO's imitation term. Only a share of a drill's
@@ -306,7 +299,7 @@ def restart_rows(st, setup, source, rows, want=None):
 class Battles:
     def __init__(self, layout, scene_list=scenes.SCENES, device="cpu", params=None, spread=randomise.Spread(),
                  weights=reward.Weights(), seed=0, auto_reset=True, compile=None, source=None, cadence=None,
-                 teach=None, teach_normal=None, attack_only=league.ATTACK_ONLY, past_slots=1):
+                 teach=None, teach_normal=None, attack_only=league.ATTACK_ONLY):
         self.device = torch.device(device)
         self.params = params or load()
         # how often the networks decide and how late their orders land (cadence.py; default: the game's)
@@ -356,16 +349,8 @@ class Battles:
         self.row_opp = torch.cat([opp, opp])[self.rows_learn]                          # [R]
         drill_codes = torch.tensor([league.CODE[drills.opponent(n)] for n in drills.NAMES], device=self.device)
         self.row_normal = ~torch.isin(self.row_opp, drill_codes)                         # [R] a row of no drill
-        # Past versions in slots (module doc "Past slots"): each battle against a past version keeps the slot it
-        # began with; a new battle takes the active slot
-        self.past_slots = max(1, int(past_slots))
-        self.past = [None] * self.past_slots                  # the slots' actors
-        self.slot_untrained = torch.zeros(self.past_slots, dtype=torch.bool, device=self.device)
-        self.slot_stats = torch.zeros(self.past_slots, 2, device=self.device)      # ended games, learner wins
-        self.active = 0
-        self.slot_used = {0}                                  # slots that may hold battles (a superset, host side)
-        self.is_past = (self.ctrl == league.CODE["past"]).any(1)                     # [B]
-        self.battle_slot = torch.zeros(self.B, dtype=torch.long, device=self.device)  # [B]
+        self.past_actor = None
+        self.past_untrained = False
         # the drills' teacher: {league code: (index, script, moments or None)} of the taught drills the layout
         # plays; the teacher in normal battles: ((index, script, moments), ...) on the rows of no drill
         teach, teach_normal = dict(teach or {}), dict(teach_normal or {})
@@ -420,7 +405,7 @@ class Battles:
         self.mem = {s: ob.start(state, self.setup, s) for s in (1, 2)}
         self.cmem = {s: ob.start(state, self.setup, s) for s in (1, 2)}
         self.h_learn = None
-        self.past_h = [None] * self.past_slots
+        self.h_past = None
         self.cstate = mcommit.start(2 * self.B, self.N, self.device)     # v2's commitment, per row
         self.health = reward.measure(self.st, self.weights.rout_share, self.weights.lord_rout)
         # [B] the battle time of the attacker's last damage (reward.idle_cost), -1 before its first
@@ -442,35 +427,10 @@ class Battles:
     def teach_shares(self):
         return {n: float(self.teach_share[i]) for i, n in enumerate(self.teach_names)}
 
-    @property
-    def past_actor(self):
-        return self.past[self.active]
-
-    def set_past(self, actor, untrained=False, slot=None):
-        """The past version of a slot (default: the active one; one slot: every past battle), its memory afresh.
-        Another slot than the active one must hold no battle (slot_counts): its battles would change version."""
-        k = self.active if slot is None else int(slot)
-        self.past[k] = actor
-        self.past_h[k] = None
-        self.slot_untrained[k] = bool(untrained)
-
-    def activate(self, slot):
-        """New battles against a past version take this slot from now on (the running ones keep theirs)."""
-        self.active = int(slot)
-        self.slot_used.add(self.active)
-
-    def slot_counts(self):
-        """[slots] past battles each slot holds now (reads the GPU); slots without any but the active one are
-        dropped from those the step computes."""
-        n = torch.bincount(self.battle_slot[self.is_past], minlength=self.past_slots).tolist()
-        self.slot_used = {k for k, c in enumerate(n) if c > 0} | {self.active}
-        return n
-
-    def take_slot_stats(self):
-        """[slots, 2] (ended games, the learner's wins) against each slot's version since the last call."""
-        s = self.slot_stats.cpu().numpy().copy()
-        self.slot_stats.zero_()
-        return s
+    def set_past(self, actor, untrained=False):
+        self.past_actor = actor
+        self.past_untrained = untrained
+        self.h_past = None
 
     # --- observation ---
     def observe(self, critic=True):
@@ -504,53 +464,6 @@ class Battles:
             for k in mcommit.KEYS:
                 self.cstate[k][rows] = new[k]
         return obs_r, h, logits, action, orders, h_new
-
-    def _act_past(self, a, frame):
-        """The past rows' Orders and {slot: new memory}: each slot's version decides for the rows of its battles
-        (every slot in use runs on all past rows - one batch shape for the compiled step - and the rows take their
-        own slot's orders); (None, None) without a version."""
-        live = [k for k in sorted(self.slot_used) if self.past[k] is not None]
-        if not live:
-            return None, None
-        rows = self.rows_past
-        if len(live) == 1:
-            k = live[0]
-            _, _, lg, _, orders, h_new = self._act(self.past[k], a, frame, rows, self.past_h[k], False)
-            if "nan_fixed" in lg:
-                self.nan_stats += lg["nan_fixed"].sum()
-            return orders, {k: h_new}
-        slot = self.battle_slot[rows % self.B]                                   # [P]
-        obs_r = rows_of(a, rows)
-        fr, bounds = frame_rows(frame, rows), self.bounds2[rows]
-        t = self.st.t[rows % self.B]
-        cs = {k: v[rows] for k, v in self.cstate.items()}
-        obs_v2 = None
-        orders, action, hs, v2 = None, None, {}, False
-        for k in live:
-            actor = self.past[k]
-            if actor.cfg.sectors:
-                v2 = True
-                if obs_v2 is None:
-                    obs_v2 = self._v2_inputs(cs, obs_r, t, fr, bounds)
-            o_in = obs_v2 if actor.cfg.sectors else obs_r
-            h = self.past_h[k] if self.past_h[k] is not None else actor.initial(o_in)
-            logits, act, o, hs[k] = self._decide(actor, o_in, h, fr, bounds, False)
-            mine = slot == k
-            if "nan_fixed" in logits:
-                nf = logits["nan_fixed"]
-                self.nan_stats += (nf * mine.reshape(-1, *[1] * (nf.dim() - 1))).sum()
-            if orders is None:
-                orders, action = o, act
-                continue
-            use = mine[:, None].expand_as(o.kind)
-            orders = O.merge(orders, o, use)
-            action = hd.Action(*(None if getattr(action, f) is None or getattr(act, f) is None
-                                 else torch.where(use, getattr(act, f), getattr(action, f)) for f in hd.Action.FIELDS))
-        if v2:
-            new = self._commit_apply(cs, obs_v2, t, action)
-            for k in mcommit.KEYS:
-                self.cstate[k][rows] = new[k]
-        return orders, hs
 
     def assemble(self, parts, base=None):
         """[(rows, Orders [len(rows), N])] and the scripts -> the batch's Orders [B, N]. base: the scripts'
@@ -604,10 +517,12 @@ class Battles:
         obs_r, h_prev, logits, action, orders, h_new = self._act(actor, a, frame, self.rows_learn, self.h_learn, greedy)
         parts = [(self.rows_learn, orders)]
         h_past_new = None
-        if len(self.rows_past):
-            o_past, h_past_new = self._act_past(a, frame)
-            if o_past is not None:
-                parts.append((self.rows_past, o_past))
+        if len(self.rows_past) and self.past_actor is not None:
+            _, _, lg_past, _, o_past, h_past_new = self._act(self.past_actor, a, frame, self.rows_past, self.h_past,
+                                                             False)
+            if "nan_fixed" in lg_past:
+                self.nan_stats += lg_past["nan_fixed"].sum()
+            parts.append((self.rows_past, o_past))
         lp = self._log_prob(logits, action, obs_r["ctrl"])
         if "nan_fixed" in logits:
             self.nan_stats += logits["nan_fixed"].sum()
@@ -655,8 +570,7 @@ class Battles:
         keep = (~finished).float()
         self.h_learn = h_new * keep[rb][:, None, None]
         if h_past_new is not None:
-            for k, h in h_past_new.items():
-                self.past_h[k] = h * keep[self.rows_past % self.B][:, None, None]
+            self.h_past = h_past_new * keep[self.rows_past % self.B][:, None, None]
         self.cur = self.observe(critic is not None)
         if "abil" in obs_r:                          # keep the state, not the passports (full_obs)
             # a copy: a slice (view) would keep the whole input of every step alive (~60 MB each)
@@ -776,12 +690,9 @@ class Battles:
 
     def _count(self, finished, rb, rs, d_rows):
         won = (self.st.winner[rb] == rs + 1).float()
-        past = self.row_opp == league.CODE["past"]
-        slot = self.battle_slot[rb]
-        code = torch.where(past & self.slot_untrained[slot], torch.full_like(self.row_opp, UNTRAINED), self.row_opp)
+        code = self.row_opp if not self.past_untrained else torch.where(
+            self.row_opp == league.CODE["past"], torch.full_like(self.row_opp, UNTRAINED), self.row_opp)
         d = d_rows.float()
-        dp = d * past.float()
-        self.slot_stats.index_add_(0, slot, torch.stack([dp, dp * won], 1))
         defends = (self.st.attacker[rb] != rs + 1).long()
         self.stats.index_add_(0, 2 * code + defends, torch.stack([d, d * won, d * self.st.t[rb]], 1))
         self.battle_count += finished.sum()
@@ -864,7 +775,6 @@ class Battles:
         sim_abilities.set_rule(self.st.u, self.by_rule)
         mcommit.reset(self.cstate, torch.cat([finished, finished]))
         self.bank_row = torch.where(finished, idx, self.bank_row)
-        self.battle_slot = torch.where(finished, torch.full_like(self.battle_slot, self.active), self.battle_slot)
         randomise.apply(self.st, finished, self.spread, self.gen)
         if self.teach_names:                     # a new battle: a new draw for the teacher's share
             self.teach_draw = torch.where(finished, torch.rand(self.B, generator=self.teach_gen, device=self.device),
@@ -906,13 +816,14 @@ class Battles:
         self.cstate = {k: v[two] for k, v in self.cstate.items()}
         if self.h_learn is not None:
             self.h_learn = self.h_learn[sel_learn]
-        self.past_h = [None if h is None else h[sel_past] for h in self.past_h]
+        if self.h_past is not None:
+            self.h_past = self.h_past[sel_past]
         if self.cur is not None:
             a, frame, c = self.cur
             self.cur = ({k: v[two] for k, v in a.items()}, frame_rows(frame, two),
                         None if c is None else {k: v[sel_learn] for k, v in c.items()})
         for k in ("health", "last_hit", "hit_rate", "bank_row", "want", "ctrl", "by_rule", "kind_battle",
-                  "order_battle", "teach_draw", "is_past", "battle_slot"):
+                  "order_battle", "teach_draw"):
             setattr(self, k, getattr(self, k)[keep])
         self.row_opp = self.row_opp[sel_learn]
         self.row_normal = self.row_normal[sel_learn]

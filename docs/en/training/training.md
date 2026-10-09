@@ -34,11 +34,11 @@ The first steps compile for 1–3 minutes (seconds once a run of the same shapes
 | run | `--name` (folder under `build/nn-train/runs/`), `--init` (start checkpoint; default `random.pt`), `--minutes` (5; wall time of training), `--updates` (0; if set, train that many updates and `--minutes` only caps the time; schedules follow the updates), `--seed`, `--device`, `--no-eval`, `--print-every` (5), `--snapshot-every` (20) |
 | battles | `--battles` (1024 at once), `--steps` (64 decisions per update), `--max-units` (19 units a side), `--small share:units` (that share of every bank with at most `units` a side), `--bank` (2048 ready battles), `--bank-refresh` (5 min), `--limit` (3600 s) |
 | cadence | `--decide-s` (1.0 s of battle between decisions), `--order-latency` (0.36 s): [decisions](#decisions) |
-| PPO | `--lr` (1e-4), `--gamma` (0.9997 per 0.5 s), `--epochs` (1), `--minibatch` (4096 decisions), `--adv-norm` (`batch` or `role`), `--critic-warmup` (0 updates that train the critic alone), `--critic-init` (the critic from another checkpoint), `--no-resume` (do not take Adam's state from `--init`) |
-| exploration | `--entropy` (0.01) and `--entropy-end` (linear over the run), `--entropy-decay` (0 min: off; else over that many minutes of training over the whole chain), `--entropy-target` (0: off), `--entropy-max` (0.1), `--entropy-rate` (1.25) |
+| PPO | `--lr` (1e-4), `--gamma` (0.9997 per 0.5 s), `--epochs` (1), `--minibatch` (4096 decisions), `--adv-norm` (`batch` or `role`), `--critic-warmup` (0 updates that train the critic alone), `--critic-init` (the critic from another checkpoint) |
+| exploration | `--entropy` (0.01) and `--entropy-end` (linear over the run), `--entropy-target` (0: off), `--entropy-max` (0.1), `--entropy-rate` (1.25) |
 | leash | `--anchor` (0: KL weight to the reference) and `--anchor-end`, `--reference` (default `--init`), `--anchor-roll` (0 s: seconds of training between renewals of the reference), `--anchor-ema` (0 s: instead, the reference follows the actor with this half-life) |
 | reward | `--gold` (1.0), `--rout-share` (0.5), `--lord` (0.3), `--lord-rout` (0), `--idle` (2e-4), `--idle-tau` (150 s), `--idle-pause` (30 s), `--idle-step` (0.5), `--idle-cap` (20), `--idle-rate` (0), `--idle-window` (30 s), `--order-cost` (0.001), `--retarget` (0.003): [reward](#reward) |
-| opponents | `--mix` (json shares), `--pool` (8: past versions at most), `--pool-extra` (more checkpoints for the pool), `--pool-dir` (the pool's folder for a whole night), `--pool-eta` (0.01), `--past-slots` (3), `--past-every` (6 updates): [past versions](#past-versions), `--eval-past`, `--eval-generated` (512) |
+| opponents | `--mix` (json shares), `--pool` (8 past versions), `--pool-extra` (more checkpoints for the pool), `--eval-past`, `--eval-generated` (512) |
 | drills | `--drills` (0: share of the battles), `--drill-weights` (json; default the `TRAIN` drills equally: kiting, hold_fire), `--drill-bank` (256 per drill), `--drill-embed` (1: share of the embedded frame, for the drills that have one), `--drill-broad` (0.5: of the rest, share of the broad frame), `--drill-teach` (`auto` or json {drill: weight}: the teacher, off by default), `--drill-teach-minutes` (10: manual), `--drill-teach-k` (0.5), `--drill-teach-cap` (0.25), `--drill-teach-weight` (0.15: auto), `--teach-normal` (`auto`, names or json {drill: share}: the teacher in normal battles, off by default), `--teach-normal-k` (0.5), `--teach-normal-cap` (0.15), `--teach-normal-weight` (0.1), `--teach-normal-match` (0.1): [drills](#drills) |
 
 ### The chain's settings
@@ -126,8 +126,8 @@ Everything goes to `build/nn-train/` (not in Git):
 |---|---|
 | `random.pt` | the untrained network (random weights), the untrained opponent |
 | `latest.pt` | the network of the last `run.py` (the companion's default) |
-| `runs/<name>/latest.pt`, `best.pt` | the run's last network (`latest.pt` and `m<minute>.pt` with Adam's state and the trainer's counters: the chain's next part goes on from them without a jolt); the one with the best window of training battles against the scripts (the worst opponent-role win rate with ≥ 20 battles, over ≥ 5 of them) |
-| `runs/<name>/pool/v*.pt`, `q.json` | past versions (the opponents of self-play) and their quality scores; with `--pool-dir` in that folder, one for all the parts of a night |
+| `runs/<name>/latest.pt`, `best.pt` | the run's last network; the one with the best window of training battles against the scripts (the worst opponent-role win rate with ≥ 20 battles, over ≥ 5 of them) |
+| `runs/<name>/pool/v*.pt` | past versions: the opponents of self-play |
 | `runs/<name>/log.jsonl` | one line per update: losses, entropy, KL, the entropy and KL weights in force, `start_kl` (distance from the start), `anchor_rolls`, reward and the same by term a minute of battle per role (`reward_parts`), the critic's quality (`ev`, per role), win rate by opponent and role, order changes, order kinds, lord deaths, target switches, ability uses, speed |
 | `runs/<name>/eval.json`, `replays/*/` | the final evaluation; battles of the final network written like the game's recordings |
 | `test5/<label>/` | `report.json`, `before.json`, `after.json`, a trend's `m<minute>.pt`, `eval_m<minute>.json`, `trend.md` |
@@ -183,7 +183,7 @@ network does not see the factors.
 | Opponent | Default share | What it does |
 |---|---:|---|
 | `self` | 10 % | the learner on both sides; both give training data |
-| `past` | 15 % | a past version from the pool by quality scores; a battle plays one version from its start to its end ([past versions](#past-versions)) |
+| `past` | 15 % | one network from the pool (`--pool` 8, the untrained one always in it, `--pool-extra` more), drawn again every 2 updates |
 | `ai_like` | 40 % | modelled on the game's AI ([below](#the-opponent-ai_like)) |
 | `nearest` | 20 % | every unit attacks the nearest standing enemy, running |
 | `hold_shoot` | 10 % | holds and shoots; a melee unit counter-charges an enemy within 80 m; as the attacker everyone attacks after 5 minutes |
@@ -197,37 +197,6 @@ the attacking `hold_shoot` waits 5 minutes, while the game's AI attacks at once)
 ignores the option: there only `hold` is always the defender (`league.ATTACK_ONLY`), so the rating
 stays comparable between steps. The game's AI takes no part in training: it stays an independent check
 ([network model](network.md#readiness)).
-
-### Past versions
-
-As OpenAI Five's (arXiv 1912.06680, appendix N), `league.Pool`:
-
-- **Drawn by quality scores.** Every version in the pool has a score q and is drawn with probability
-  p ∝ e^q. A new version (a snapshot every `--snapshot-every` updates) comes in with the pool's highest q.
-  Every win of the learner against version i lowers its q by η / (N · p_i): η = `--pool-eta` 0.01, N the
-  pool's size, p_i its probability when it was drawn (the correction that keeps rarely drawn versions from
-  freezing). A loss changes nothing. Beaten versions are hardly drawn, those that still win often. The
-  untrained network is an ordinary version: it is beaten and fades out. Over `--pool` versions the one of
-  the lowest q leaves the list (its file stays).
-- **One pool for the night.** The pool's state is `q.json` in its folder (versions, q, the clock in updates,
-  games). With `--pool-dir <folder>` the parts of a night go on with one pool: a new part reads `q.json` and
-  writes its snapshots there (`<name>_v<update>.pt`). The untrained network and `--init` go only into a new
-  pool; `--pool-extra` adds the versions not in yet (one already in keeps its q).
-- **One version a battle.** Up to `--past-slots` (3) versions play at once, each in a slot. A battle takes
-  the active slot when it begins and keeps it to its end: the opponent's version never changes mid-battle
-  and its memory (GRU) is not wiped. Every `--past-every` (6, about a battle) updates a version is drawn for
-  the battles that start next: it is loaded into a slot that holds no battle, which becomes the active one
-  (the active slot's own version: nothing changes). No free slot: the active one goes on (`past_deferred`
-  in the log). Every slot in use decides on all the past rows (one batch shape for the compiled step) and
-  each row takes its own slot's orders. `--past-slots 1` is the old way: one version, a change wipes the
-  memory of the running battles.
-- **A stall sensor.** Every snapshot prints the pool's line: its size, the versions above p 5 %, the five
-  most probable with q, p and age in updates; the same in the log (`pool`). A steep distribution (only the
-  newest likely): the network outgrows itself fast; a flat one with old versions likely: growth stalled.
-- **Seamless continuation.** `latest.pt` and `m<minute>.pt` keep Adam's state and the counters (the entropy
-  floor's weight, the entropy decay's minutes, the chain's updates and seconds). `--init` with such a file
-  (and its own critic) takes them; then `--critic-warmup` is not needed and is skipped. The learning rate
-  comes from the options, not the file. `--no-resume`: Adam afresh.
 
 ### The opponent `ai_like`
 
@@ -489,11 +458,11 @@ side share the side's advantage; the critic sees the whole field (and is never s
 | learning rate | 1e-4 (`test5` and the chain: 1.5e-4), Adam (eps 1e-5); in a widened network lr / width on the weights that read the copied stream (`run.optimizer`) | [a widened network](#training-a-widened-network) |
 | epochs, minibatch | 1, 4096 decisions of whole chunks (fewer for battles of more than 22 slots: `run.sized`); a widened network computes it in parts (`accum`) | the update costs more than the battles; the memory of a 16 GB card; [a widened network](#training-a-widened-network) |
 | stop at KL | 0.05 per unit | a guard against a too large step |
-| entropy | on the order kind only; `--entropy` → `--entropy-end` linearly (over the run; with `--entropy-decay M` over M minutes of training with the option on over the whole chain: the count is kept in the checkpoint, e.g. 0.01 → 0.003); with `--entropy-target` a floor: the weight × `--entropy-rate` every update while the kind's entropy is below the target, back down to the schedule above it, at most `--entropy-max` | a bonus on the move point's 128 bins would pay for moving |
+| entropy | on the order kind only; `--entropy` → `--entropy-end` linearly; with `--entropy-target` a floor: the weight × `--entropy-rate` every update while the kind's entropy is below the target, back down to the schedule above it, at most `--entropy-max` | a bonus on the move point's 128 bins would pay for moving |
 | KL to a reference | `--anchor` → `--anchor-end` on the order kind and target; the reference is `--reference` (default `--init`); `--anchor-roll` S: every S seconds of training the reference becomes the current actor (`anchor_rolls` in the log) | a leash that bounds drift within a window, not over the whole run |
 | advantage normalisation | `batch`, or `role`: the attacking and defending rows apart | the attacker's advantage is 2–3 times as wide |
 | value loss, gradient norm | 0.5; actor and critic clipped apart, each to 0.5 | clipped together, a large critic gradient shrank the actor's step below Adam's eps: the actor did not train at all |
-| critic warm-up | `--critic-warmup` N: the first N updates train the critic alone (skipped when Adam's state came with `--init`) | a fresh or foreign critic does not fit the actor's values |
+| critic warm-up | `--critic-warmup` N: the first N updates train the critic alone | a fresh or foreign critic does not fit the actor's values |
 
 - **Memory (GRU) through time.** A rollout is a chunk of 64 decisions of every battle; the update
   runs the actor over each chunk from the memory stored when the chunk began, emptied where a new
@@ -1325,6 +1294,3 @@ process's tools — the chain step, the run card, leftovers, the wait with a tim
 pairs, margins, pair gold, forgetting and the verdict, matchups. `tests/tools/test_nn_cadence.py`:
 the cadence. `tests/tools/test_nn_drills.py`, `test_nn_drill_*.py` and `test_nn_teach_auto.py`: the drill framework, the teacher, frames,
 scripts and metrics. `tests/tools/test_nn_gate.py`: the gate's pairs and liveliness from recordings.
-`tests/tools/test_nn_league_pool.py` (torch): a version drawn ∝ e^q, a new version with the highest q, a win lowers q
-by η / (N p), the pool goes on from `q.json`, a running battle keeps its slot's version, Adam's state into the
-checkpoint and back, a second part goes on with the pool, Adam and the entropy decay.

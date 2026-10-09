@@ -76,7 +76,7 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
   opening wave of a fight (`melee.wave`); a thinned formation keeps its width and only part of its men reach
   the enemy (`melee.front_fill_ranks` 1.5: the `dmgmelee` probe, a unit at 30 % struck 1.6-1.9x the game
   before); random blows (`noise.blows`: on in the replay and the twin, off in training).
-- **Leaving melee and orders in a fight:** the 24 s window from the database; a move order in a fight is
+- **Leaving melee and orders in a fight:** the 24 s window from the database (a lord's too); a move order in a fight is
   leaving in any direction; an attack on a target out of contact is leaving; a new attack in a fight
   strikes only its own target for 24 s; an unchased leaver is held 2 s; the chase has no charge sprint.
 - **Shooting by the game's rules:** range centre to centre, a fire arc per man, the database's scatter
@@ -170,7 +170,7 @@ templates, numbers jittered ±15 %.
 the budget) + a price for an order change 0.006 ("keep" and a repeat are free)
 ([reward](training/training.md#reward)).
 
-**Opponents** (`--mix`): self-play 0.2, past versions 0.3 (pool 12; drawn by quality scores as OpenAI Five's, one version a battle, [past versions](training/training.md#past-versions)), `ai_like` 0.3 (a script modelled on
+**Opponents** (`--mix`): self-play 0.2, past versions 0.3 (pool 12), `ai_like` 0.3 (a script modelled on
 the game's AI), `nearest` 0.2 (everyone runs at the nearest enemy)
 ([opponents](training/training.md#battles-and-opponents)); the scripts decide at the game's cadence - once a
 second, their orders as late as the network's. The game's AI takes no part in training - it is
