@@ -146,6 +146,9 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           (throwing stars) one order / every 5 s on two held fearless Empire spearmen ~70 % of their range off (slings
           ~84 m, stars ~49 m centre to centre); 10 lanes a battle (RETARGET2_PLACES), 2 battles, lanes rotated; the
           'retarget' table reads its runs too;
+  retarget3 is the switch cost the formation's turn? (RETARGET3_LANES): crossbowmen C5 / B7 and archers C5 with the
+          second target right behind the first on the line of fire ('ray', ~98 / ~122 m) or 60 m across ('side'),
+          and a crossbow A control; the shooter's bearing every 0.5 s; 7 lanes, 2 battles, lanes rotated;
   wave    the opening wave (build/shotgap/wave_geom.py: men within 2.5 m of an enemy 46-51 in the first 5 s, 12 from 20 s,
           the fronts 1.3 m apart then 2.9 m; is it the collision of the approach or the start inside reach?): swordsmen
           <-> clanrats, both attacking, 90 s, the soldiers' places all fight - (1) placed 1 m apart (front to front), both
@@ -160,6 +163,7 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe report --sim                        # + the simulator on the same lanes
     python -m tools.nn.charge_probe retarget [runs...] [--sim]          # the retarget plan's table
     python -m tools.nn.charge_probe run --plan retarget2                # 10 more shooter lanes (the same table)
+    python -m tools.nn.charge_probe run --plan retarget3                # targets in line / across (the turn?)
 
 Measures per lane (the game's recording, and the simulator's run of the same lane from the same start):
 the attacker's speed on the way in (the last 30 m, the peak), the first contact; HP lost by the target
@@ -225,7 +229,7 @@ NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
-         "dmgmelee", "reengage", "retarget", "retarget2")
+         "dmgmelee", "reengage", "retarget", "retarget2", "retarget3")
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
 WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
@@ -263,6 +267,15 @@ RETARGET2_TARGET = {"slinger": "spear", "nrun": "spear"}        # else the skave
 # keep the retarget plan's 80 m front to front (~98 m)
 RETARGET2_RANGE_SHARE = {"slinger": 0.7, "nrun": 0.7}
 RETARGET2_PLACES = tuple((x, z) for z in (-430, -30, 370) for x in (-440, -150, 150, 440))[:10]
+# the retarget3 plan: does the switch cost come from turning the formation between the targets? (shooter, switch_s,
+# geometry): 'ray' - the second target right behind the first on the line of fire (centres ~98 and ~122 m, 6 m between
+# the blocks: no turn needed), 'side' - the two 60 m apart across, the shooter between them (the retarget plan's, ~17 deg
+# each side); crossbows C5 / B7 both ways, archers C5 both ways, a crossbow A control; the shooter's bearing (b) is in its
+# 0.5 s sample row; 7 lanes on the retarget2 grid, 2 battles, lanes rotated
+RETARGET3_LANES = (("xbow", 5, "ray"), ("xbow", 5, "side"), ("xbow", 7, "ray"), ("xbow", 7, "side"),
+                   ("archer", 5, "ray"), ("archer", 5, "side"), ("xbow", None, "side"))
+RETARGET3_RAY_GAP_M = 6
+RETARGET3_RAY_D_M = 98.0        # as the 'side' lanes' (80 m front to front, 30 m aside)
 RETARGET = {"fire_s": 120, "gap_m": 80, "t2_gap_m": 30}   # 80 m front to front: ~98 m centre to centre
 RETARGET_PLACES = DMGMELEE_PLACES
 RETARGET_LAG_S = 2.0       # a shot's flight (bolts 45 m/s, bullets 100 m/s over ~110 m) and the health readout's lag
@@ -505,6 +518,21 @@ def battles(plan):
         base = [rt2(s, sw) for s, sw in RETARGET2_LANES]
         for b in (base, rotate(base, 5)):
             out.append([dict(l, place=p) for l, p in zip(b, RETARGET2_PLACES)])
+    elif plan == "retarget3":
+        def rt3(shooter, switch_s, geom):
+            where = (dict(t2_ray=True, t2_gap_m=RETARGET3_RAY_GAP_M) if geom == "ray"
+                     else dict(t2_gap_m=RETARGET["t2_gap_m"], t2_inward=True, a_mid=True))
+            gap = RETARGET["gap_m"]
+            if geom == "ray":                        # straight ahead: the first target's centre RETARGET3_RAY_D_M off
+                a_key, a_men, _ = UNITS[shooter]
+                t_key, t_men, _ = UNITS["slave"]
+                gap = round(RETARGET3_RAY_D_M - (depth(a_key, a_men) + depth(t_key, t_men)) / 2, 1)
+            return lane(shooter, "slave", "retarget", "hold", gap_m=gap, fight_s=RETARGET["fire_s"],
+                        answer=False, target2="slave", max_s=RETARGET["fire_s"],
+                        kind=f"{RETARGET_KIND[switch_s]}-{geom}", **where, **({"switch_s": switch_s} if switch_s else {}))
+        base = [rt3(*x) for x in RETARGET3_LANES]
+        for b in (base, rotate(base, 3)):
+            out.append([dict(l, place=p) for l, p in zip(b, RETARGET2_PLACES)])
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
@@ -569,6 +597,8 @@ def layout(specs):
             assert UNITS[spec["target2"]][2] == t_fac, spec
             row["target2"] = add(spec["target2"], k, "b")
             row["t2_dx"] = round(tw + spec.get("t2_gap_m", 4), 1)
+            if spec.get("t2_ray"):                   # right behind the target on the line of fire (retarget3)
+                row["t2_dx"], row["t2_dz"] = 0.0, -round(row["t_depth"] + spec.get("t2_gap_m", 4), 1)
             if spec.get("t2_inward") and x > 0:      # towards the middle of the field (the lanes' outer ones)
                 row["t2_dx"] = -row["t2_dx"]
             if spec.get("a_mid"):                    # the attacker between the two targets (the retarget plan)
@@ -872,7 +902,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
             t2_key = UNITS[t2][0]
             r2 = ln["t2"][0][1] if ln.get("t2") else None      # its recorded place (the retarget plan records it)
             sides[roles["tg"]]["units"].append({"key": t2_key, "x": r2["x"] if r2 else s0[2]["x"] + spec.get("t2_dx", 0),
-                                                "z": r2["z"] if r2 else s0[2]["z"], "b": r2["b"] if r2 else s0[2]["b"],
+                                                "z": r2["z"] if r2 else s0[2]["z"] + spec.get("t2_dz", 0),
+                                                "b": r2["b"] if r2 else s0[2]["b"],
                                                 "men": r2["men"] if r2 else UNITS[t2][1], "width": spec["t_width"],
                                                 "general": False, "name": "t2"})
         if spec.get("lord") and s0[3]:

@@ -15,8 +15,8 @@ def test_plans_have_few_battles_and_lanes_on_both_sides():
     for plan in cp.PLANS:
         for i in range(1, len(cp.battles(plan)) + 1):
             config, model_s, arena = cp.run_config(plan, i)
-            # (reengage: its tired pair runs up to 540 s before its fight; retarget2: 10 short lanes, 15 / 17 units a side)
-            assert 2 <= len(config["lanes"]) <= (10 if plan == "retarget2" else 5)
+            # (reengage: its tired pair runs up to 540 s before its fight; retarget2 / 3: 10 / 7 short lanes)
+            assert 2 <= len(config["lanes"]) <= {"retarget2": 10, "retarget3": 7}.get(plan, 5)
             assert model_s < (720 if plan == "reengage" else 400)
             assert all(len(side["units"]) <= 20 for side in arena["sides"].values())
             names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}
@@ -350,6 +350,36 @@ def test_the_retarget2_plan_adds_switches_bows_handguns_and_the_skavens_shooters
             for o in config["lanes"]:
                 if o is not l:
                     assert math.hypot(o["x"] + o["a_dx"] - l["x"], o["z"] - l["z"]) > 250
+
+
+def test_the_retarget3_plan_puts_the_targets_in_line_or_across():
+    b = cp.battles("retarget3")
+    assert len(b) == 2 and all(len(x) == 7 for x in b)
+    assert [l["kind"] for l in b[0]] != [l["kind"] for l in b[1]]              # the lanes rotated
+    assert sorted(l["kind"] for l in b[0]) == sorted(l["kind"] for l in b[1])
+    units = json.loads(cp.UNITS_JSON.read_text(encoding="utf-8"))["units"]
+    for i in (1, 2):
+        config, model_s, arena = cp.run_config("retarget3", i)
+        assert model_s < 200 and all(len(side["units"]) <= 20 for side in arena["sides"].values())
+        kinds = sorted(cp.cell(l) for l in config["lanes"])
+        assert len(set(kinds)) == 7
+        for l in config["lanes"]:
+            a = (l.get("a_dx", 0), l["gap_m"] + l["a_depth"] / 2)                 # the shooter from the target's front
+            t1 = (0.0, -l["t_depth"] / 2)
+            t2 = (l["t2_dx"], -l["t_depth"] / 2 + l.get("t2_dz", 0))
+            d1, d2 = math.dist(a, t1), math.dist(a, t2)
+            rng = units[l["a_key"]]["missile"]["range_m"]
+            if l["kind"].endswith("-ray"):
+                assert l["t2_dx"] == 0 and l.get("a_dx", 0) == 0 and 97 <= d1 <= 99 and 120 <= d2 <= 124 < rng
+                assert -l["t2_dz"] - l["t_depth"] == cp.RETARGET3_RAY_GAP_M          # the blocks 6 m apart
+                assert l["z"] + l["t2_dz"] - l["t_depth"] >= -480
+            else:
+                assert abs(l["t2_dx"]) == 60 and l["a_dx"] == l["t2_dx"] / 2 and l.get("t2_dz", 0) == 0
+                assert abs(d1 - d2) < 1e-6 and 90 <= d1 <= 105
+        for l in config["lanes"]:
+            for o in config["lanes"]:
+                if o is not l:
+                    assert math.hypot(o["x"] + o.get("a_dx", 0) - l["x"], o["z"] - l["z"]) > 250
 
 
 def _retarget_lane(switch_s=10):

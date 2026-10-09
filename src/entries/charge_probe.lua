@@ -38,7 +38,8 @@
 -- away. lane.lord (optional): a lord placed behind the target (dz m), who uses lane.lord.ability on
 -- himself at the lane's first contact (Stand Your Ground) unless the key is empty (the control); with
 -- lane.lord.at_m instead once the two units' centres are within at_m before the contact.
--- lane.target2 (optional): a second target unit placed t2_dx m beside the target (+x), facing the same way, halted
+-- lane.target2 (optional): a second target unit placed t2_dx m beside the target (+x) and t2_dz m along z (the
+-- retarget3 plan's targets one behind the other on the line of fire: t2_dz < 0, away from the shooter), facing the same way, halted
 -- and never ordered (it fights only what touches it); sampled as 't2'. lane.after (optional) {at_s, kind, dx, dz,
 -- walk}: at_s after the first contact the attacker gets one more order (the fresh-order probe): 'attack_t2' (attack
 -- the second target), 'attack_same' (the same attack again), 'halt' (the bridge's hold), 'move_near' (a move to its
@@ -108,6 +109,11 @@ function M.layout(lane)
     local td, ad = lane.t_depth or 0, lane.a_depth or 0
     local tb = lane.target_mode == 'rear' and 180 or 0
     return {ax = lane.x + (lane.a_dx or 0), az = lane.z + lane.gap_m + ad / 2, ab = 180, tx = lane.x, tz = lane.z - td / 2, tb = tb}
+end
+
+-- The second target's centre (x, z) for a lane's layout L: t2_dx beside the target, t2_dz along z. Pure.
+function M.t2_place(L, lane)
+    return L.tx + (lane.t2_dx or 0), L.tz + (lane.t2_dz or 0)
 end
 
 -- A point dx m to the right and dz m ahead of (x, z) for a unit facing the world bearing (degrees; 0 = +z, 90 = +x).
@@ -667,7 +673,10 @@ function M.main(bm, config, globals)
             local L = lane.layout
             place(lane.a, L.ax, L.az, L.ab, lane.a_width)
             place(lane.t, L.tx, L.tz, L.tb, lane.t_width)
-            if lane.t2 then place(lane.t2, L.tx + (lane.t2_dx or 0), L.tz, L.tb, lane.t_width) end
+            if lane.t2 then
+                local x2, z2 = M.t2_place(L, lane)
+                place(lane.t2, x2, z2, L.tb, lane.t_width)
+            end
             for who, d in pairs(lane.damage or {}) do
                 local it = ({a = lane.a, t = lane.t, t2 = lane.t2})[who]
                 if it then

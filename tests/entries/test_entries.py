@@ -1452,6 +1452,9 @@ class TestChargeProbe:
         cp = "require('entries.charge_probe')"
         L = lua.eval(cp + ".layout({x = 10, z = 0, gap_m = 80, a_depth = 10, t_depth = 12, a_dx = 30})")
         assert (L.ax, L.az, L.tx) == (40, 85, 10) and start["lanes"][0]["a_dx"] == 30
+        place = lua.eval(cp + ".t2_place")
+        assert tuple(place(L, lua.eval("{t2_dx = 60}"))) == (70, -6)
+        assert tuple(place(L, lua.eval("{t2_dz = -24}"))) == (10, -30)          # behind it on the line of fire
         aim = lua.eval(cp + ".retarget_aim")
         assert [aim(ms, 10) for ms in (0, 9999, 10000, 19999, 20000)] == [1, 1, 2, 2, 1] and aim(50000, None) == 1
 
