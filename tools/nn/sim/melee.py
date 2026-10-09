@@ -194,6 +194,14 @@ def strikes(u, pw, contact, params, charge_now, first=False):
             side_len = torch.maximum(front_j if g in (0, 3) else depth_j, u_g.amax(dim=1, keepdim=True))
             tot = u_g.sum(dim=1, keepdim=True)
             F = torch.where(in_g & ~single_j & ~single_i & (tot > side_len), F * side_len / tot.clamp(min=1e-6), F)
+    wave = cal.get("wave")
+    if wave and "contact_s" in u:
+        # The opening wave (melee.wave): two formations' fronts meet closer than they fight later and part over
+        # tau_s, so more men stand within reach early: men striking x (1 + amp exp(-t / tau_s)), t the pair's time in
+        # melee (the younger of the two clocks: a fresh unit meets its enemy's front anew); formations only.
+        t_pair = torch.minimum(u["contact_s"][:, :, None], u["contact_s"][:, None, :])
+        w = 1.0 + float(wave["amp"]) * torch.exp(-t_pair / float(wave["tau_s"]))
+        F = torch.where(single_i | single_j, F, F * w)
     own = torch.where(single_i, torch.ones_like(men_i), men_i)
     total = F.sum(dim=2, keepdim=True)
     F = F * torch.where(total > own, own / total.clamp(min=1e-6), torch.ones_like(total))

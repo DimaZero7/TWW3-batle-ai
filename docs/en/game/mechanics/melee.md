@@ -423,24 +423,22 @@ unit is out of contact ~4 s after the order (its own melee flag goes off only af
 
 ## What is still unclear
 
-- **The opening wave and a weakening unit's blows (the `reform`, `reform2` probes).** 240 s fights from 3 m, the
-  soldiers' places every second (`build/charge-probe/runs/20261008-180435`, `-181311`; `build/v2gap/reform_report.py`).
-  Men within 2.5 m of an enemy: 43 in the first 10 s, 21 in the next 10, ~13 by 20–40 s, then 10–12 to the end - in
-  every lane. Health goes 2.6x faster than the steady pace in the first 10 s while 3.4x as many men touch: each man
-  in contact strikes less at first. The blows follow the men in contact; with few men alive ~0.42 of the living touch.
-  The striker's losses cut its blows (swordsmen at 30 % deal 58 / 38 / 24 / 6 HP/s while they go 34 -> 10), the
-  target's do not (the clanrats strike battered swordsmen as usual; the swordsmen strike clanrats at 30 % as usual
-  until about ten are left). The formation's depth matters only at first: the wave grows with the length of the
-  fronts' contact (clanrats 15 m wide - 28 in contact, 30 and 50 m - 41–43), then 10 / 11–12 / 13–14 touch at nearly
-  any width. The simulator's men fighting are `fighting_files` x the front's width - not proportional to the width in
-  the game; no wave (35 HP/s flat against the game's 85 / 46 / 36 / 32). Unexplained: full clanrats' blows fall
-  38 -> 15 with 145 -> 46 men alive, the swordsmen's stay ~32 to the end (both sides exhausted by then). An
-  estimate of a "wave" rule (an estimate, not taken): men fighting x 1 + 3.0·e^(−t/7.2 s) from the fight's start and
-  at most 0.42 of the living - the probe twin's opening as the game (87 / 48 / 37), no fall of a weakening clanrat
-  unit's blows; the twin of the 8 it3 battles: wins 14 -> 13 of 32 (game 2 of 8), enemy routs a unit 1.33 -> 1.18
-  (game 0.84), melee HP dealt 0.497 -> 0.443 (0.468), our losses 0.68 -> 0.68 (0.80); grid_s46 wins 15 -> 14 (3 of 8).
-  Not taken: the multiplier comes from the same health losses it is checked on (close to fitting), and the shift of
-  the 8 battles is small - the main gaps (enemy routs, our losses) do not come from the melee pace's shape.
+- **The opening wave - explained (`melee.wave`, [simulator](../../training/simulator.md)).** The `reform`, `reform2`,
+  `defender`, `wave` probes (soldiers' places every second; `build/shotgap/wave_report.py`, `wave_radius.py`,
+  `wave_curve.py`). A unit's damage is proportional to the enemy's men within the database's reach: the formed combat
+  distance `entity_action_attack_formed_combat_distance` 2.5 m plus the model's radius (`battle_entities` 0.65 m) =
+  3.15 m centre to centre (log-log slope 1.06 for the swordsmen, 0.81 for the clanrats - their 'rabble' formation
+  scatters 0.7; 1.2-1.4 HP/s a man from 2 s on; at 2.5 m each man seemed to strike less at first - the wrong radius).
+  There are 2.5x as many of them at contact as 20 s on: the fronts meet (1.1-1.4 m apart) and part to 3.0 m over
+  ~20 s - the same from 1 / 2.5 / 3 m starts, walking or running (an attack at a walk turns into a run within 30 m,
+  the database's `charge_distance_commence_run`: closing ~5 m/s) and after a 30 m charge; the fronts' step back does
+  not follow the losses (corr -0.12 / -0.25) - not knockback by blows, not the collision. The rule: strikers x
+  (1 + 1.48·e^(−t/10.25 s)) by the pair's time in melee - the curve from the men in reach, not from the damage. Why
+  the fronts part as they do (back to the formation's places, `entity_action_attack_formed_tether_distance` 2 m?) -
+  not found.
+- **A weakening unit's blows (the `reform`, `reform2` probes).** The striker's losses cut its blows (swordsmen at 30 %
+  deal 58 / 38 / 24 / 6 HP/s while they go 34 -> 10), the target's do not. Unexplained: full clanrats' blows fall
+  38 -> 15 with 145 -> 46 men alive, the swordsmen's stay ~32 to the end.
 
 - **Hold in melee.** In whole battles the network's units in melee kill 0.08 a second under hold (twin 0.21), while
   in the probes a halt after attacking strikes 0.69–0.73 of the control (4 lanes; rule `hold_rate` 0.5) - the gap

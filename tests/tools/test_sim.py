@@ -220,6 +220,7 @@ class TestMelee:
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
         contact = pw["enemy"] & (pw["gap"] <= 1.0)
         z = torch.zeros_like(st.u["men"])
+        st.u["contact_s"][:] = 300.0          # a long fight: past the opening wave (melee.wave)
         F = {}
         for mode in ("min", "striker"):
             _, _, sector, f = melee.strikes(st.u, pw, contact, P.with_cal("melee", flank_face=mode), z)
@@ -232,6 +233,23 @@ class TestMelee:
         # on by default (config/nn/sim.json melee.flank_face_why: the defender probe - a unit turning its flank to its
         # attacker to leave or to attack another keeps being struck by the attacker's whole front)
         assert P.sim["melee"]["flank_face"] == "striker"
+
+    def test_the_opening_wave_brings_more_men_early_and_fades_with_the_pair_s_time_in_melee(self):
+        """melee.wave (config/nn/sim.json wave_why: the men within the database's reach early): men striking
+        x (1 + amp exp(-t / tau_s)), t the younger of the two units' contact clocks; off (None): the old rule."""
+        st = face_off(SPEAR, SLAVE)
+        H = st.N // 2
+        pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
+        contact = pw["enemy"] & (pw["gap"] <= 1.0)
+        z = torch.zeros_like(st.u["men"])
+        wave = P.sim["melee"]["wave"]
+        def F(t_own, t_enemy, params=P):
+            st.u["contact_s"][0, 0], st.u["contact_s"][0, H] = t_own, t_enemy
+            return float(melee.strikes(st.u, pw, contact, params, z)[3][0, 0, H])
+        late = F(300.0, 300.0)
+        assert F(0.0, 300.0) == pytest.approx(late * (1 + wave["amp"]), rel=1e-4)        # the younger clock
+        assert F(wave["tau_s"], 300.0) == pytest.approx(late * (1 + wave["amp"] / math.e), rel=1e-4)
+        assert F(0.0, 0.0, P.with_cal("melee", wave=None)) == pytest.approx(late, rel=1e-3)
 
     def test_at_most_the_cap_reach_a_lord(self):
         st = face_off(SPEAR, GENERAL)
