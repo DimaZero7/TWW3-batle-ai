@@ -1417,6 +1417,44 @@ class TestChargeProbe:
         assert step("in", 159000, 10000, None, lane) == "in" and step("in", 160000, 10000, None, lane) == "out"
         assert step("out", 174000, 10000, 160000, lane) == "out" and step("out", 175000, 10000, 160000, lane) == "back"
 
+    def test_retarget_switches_the_shooters_ranged_target_and_samples_its_ammo(self, lua, tmp_path):
+        lua.execute(self.SETUP + self.REENGAGE + """
+            local L = CONFIG.lanes[1]
+            L.mode, L.target_mode, L.max_s, L.switch_s, L.a_dx = 'retarget', 'hold', 12, 5, 30
+            L.recharge_after_s, L.back_m, L.recharge_max_s = nil, nil, nil
+            L.target2, L.t2_dx = 'enemy_clanrat_2', 60
+            own[2].ammo, own[2].range = 1980, 160
+            fake.cco['uid_own_swords_1'] = {IsFiringMissiles = true, DamageDealt = 12.4}
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 9 do bm:tick(500); bm:pump() end
+            assert(own[2].attack_args.target == 'enemy_clanrat_1' and own[2].attack_args.primary == true)
+            assert(own[2].free_fire == true and own[2].moving == false, 'fire at will on, standing')
+            assert(enemy[2].attack_args == nil and enemy[3].attack_args == nil, 'the targets are never ordered')
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            assert(own[2].attack_args.target == 'enemy_clanrat_2', 'the other target 5 s after the go')
+            own[2].ammo = 1930
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            assert(own[2].attack_args.target == 'enemy_clanrat_1', 'back 10 s after the go')
+            for _ = 1, 40 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        aims = [(r["target"], r["n"]) for r in rows if r["event"] == "probe_phase"]
+        assert aims == [(1, 0), (2, 1), (1, 2)]
+        lanes = [x for r in rows if r["event"] == "probe_sample" for x in r["lanes"]]
+        assert lanes[0]["a"]["ammo"] == 1980 and lanes[-1]["a"]["ammo"] == 1930
+        assert lanes[0]["a"]["fire"] is True and lanes[0]["a"]["dd"] == 12 and "men" in lanes[0]["t2"]
+        assert not [r for r in rows if r["event"] == "probe_contact"]
+        assert {r["lane"]: r["why"] for r in rows if r["event"] == "probe_lane_end"} == {"L1": "max_s"}
+        start = next(r for r in rows if r["event"] == "start")
+        cp = "require('entries.charge_probe')"
+        L = lua.eval(cp + ".layout({x = 10, z = 0, gap_m = 80, a_depth = 10, t_depth = 12, a_dx = 30})")
+        assert (L.ax, L.az, L.tx) == (40, 85, 10) and start["lanes"][0]["a_dx"] == 30
+        aim = lua.eval(cp + ".retarget_aim")
+        assert [aim(ms, 10) for ms in (0, 9999, 10000, 19999, 20000)] == [1, 1, 2, 2, 1] and aim(50000, None) == 1
+
 class TestMissileProbe:
     """The missile probe (entries.missile_probe; lanes from tools/nn/missile_probe.py)."""
     SETUP = """

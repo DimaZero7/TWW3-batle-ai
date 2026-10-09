@@ -131,6 +131,16 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           their places facing each other ('tired' when there or after ready_max_s) and attack from 30 m, 60 s. Every 0.5 s
           both units' health, men, fatigue state, melee flag, kills; every 1 s the soldier places, all fight (men_after_s
           260; not while tiring). 4 lanes 300 m apart in one row - 2 battles, lanes rotated;
+  retarget a shooter's new target (build/fable2 k_reaim, g_volley: in the gate battles a standing shooter given an attack on
+          another unit is silent ~5 s (median), then fires a few men at a time, and those first shots hit about half as well;
+          whole volleys are few; the simulator's aim reset on an order, missile.aim_reset_on_order 3.3 s, hides in the reload
+          and its first volley on the new target is whole and accurate; the network re-orders its shooters every ~11 s):
+          a shooter standing between two held fearless skavenslave units ~98 m off (centre to centre; 80 m front to
+          front; the two 30 m apart edge to edge, a_dx puts it between them); 'A' one ranged attack on target 1 at the go for 120 s, 'B10' / 'C5' a ranged
+          attack on the other target every 10 / 5 s (probe_phase 'aim'); crossbowmen A / B10 / C5 and handgunners A / B10,
+          fire at will on (as the bridge). Every 0.5 s the shooter's ammo (its drop: the shots), fire flag, damage dealt,
+          place, bearing, and both targets' health and men. Lanes on the dmgmelee grid (RETARGET_PLACES) - 2 battles,
+          lanes rotated; 'retarget' prints the table (--sim: + the simulator on the same lanes);
   wave    the opening wave (build/shotgap/wave_geom.py: men within 2.5 m of an enemy 46-51 in the first 5 s, 12 from 20 s,
           the fronts 1.3 m apart then 2.9 m; is it the collision of the approach or the start inside reach?): swordsmen
           <-> clanrats, both attacking, 90 s, the soldiers' places all fight - (1) placed 1 m apart (front to front), both
@@ -143,6 +153,7 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe run --plan hit [--battles 1,2]      # build + launch each, in turn
     python -m tools.nn.charge_probe report [runs...]                    # the game's table
     python -m tools.nn.charge_probe report --sim                        # + the simulator on the same lanes
+    python -m tools.nn.charge_probe retarget [runs...] [--sim]          # the retarget plan's table
 
 Measures per lane (the game's recording, and the simulator's run of the same lane from the same start):
 the attacker's speed on the way in (the last 30 m, the peak), the first contact; HP lost by the target
@@ -207,7 +218,7 @@ NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
-         "dmgmelee", "reengage")
+         "dmgmelee", "reengage", "retarget")
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
 WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
@@ -230,6 +241,13 @@ DMGMELEE_PLACES = ((-300, -200), (0, -200), (300, -200), (-150, 200), (150, 200)
 REENGAGE = {"part_after_s": 150, "part_m": 30, "part_s": 15, "after2_s": 60}
 REENGAGE_TIRE = {"tire_leg_m": 100, "tire_until": "threshold_very_tired", "tire_max_s": 540, "ready_max_s": 40}
 REENGAGE_LANE_DX = 300   # 4 lanes 300 m apart (x -450 .. 450); every unit moves along its lane (z) only
+# the retarget plan: (shooter, seconds between the switches of its target or None: one order) by lane, the lane
+# names, the timing, the places (the dmgmelee grid: lanes 300+ m apart, x and z within 480 m)
+RETARGET_LANES = (("xbow", None), ("xbow", 10), ("xbow", 5), ("hgun", None), ("hgun", 10))
+RETARGET_KIND = {None: "A", 10: "B10", 5: "C5"}
+RETARGET = {"fire_s": 120, "gap_m": 80, "t2_gap_m": 30}   # 80 m front to front: ~98 m centre to centre
+RETARGET_PLACES = DMGMELEE_PLACES
+RETARGET_LAG_S = 2.0       # a shot's flight (bolts 45 m/s, bullets 100 m/s over ~110 m) and the health readout's lag
 ROUTMOB_MEN_S = 40     # the routmob plan: the soldiers' places this long after the target's rout
 ROUTMOB_END_S = 45     # ... and the lane ends this long after it
 # the reform plan: soldier places this long after contact (the whole fight)
@@ -440,6 +458,15 @@ def battles(plan):
         base = [re("swords", "clanrat", "reengage"), re("gs", "svsh", "reengage"), re("swords", "clanrat", "control"),
                 re("swords", "clanrat", "tired")]
         out += [base, rotate(base, 2)]
+    elif plan == "retarget":
+        def rt(shooter, switch_s):
+            # the shooter between the two targets (a_mid), fire at will on, never in melee: the lane ends at max_s
+            return lane(shooter, "slave", "retarget", "hold", gap_m=RETARGET["gap_m"], fight_s=RETARGET["fire_s"],
+                        answer=False, target2="slave", t2_gap_m=RETARGET["t2_gap_m"], a_mid=True, max_s=RETARGET["fire_s"],
+                        kind=RETARGET_KIND[switch_s], **({"switch_s": switch_s} if switch_s else {}))
+        base = [rt(s, sw) for s, sw in RETARGET_LANES]
+        for b in (base, rotate(base, 2)):
+            out.append([dict(l, place=p) for l, p in zip(b, RETARGET_PLACES)])
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
@@ -506,6 +533,8 @@ def layout(specs):
             row["t2_dx"] = round(tw + spec.get("t2_gap_m", 4), 1)
             if spec.get("t2_inward") and x > 0:      # towards the middle of the field (the lanes' outer ones)
                 row["t2_dx"] = -row["t2_dx"]
+            if spec.get("a_mid"):                    # the attacker between the two targets (the retarget plan)
+                row["a_dx"] = round(row["t2_dx"] / 2, 1)
         if spec.get("extras"):
             # units of the attacker's side placed (dx, dz) from the target's centre, halted, fearless, never ordered
             # (fire: fire at will on); entries/charge_probe.lua start
@@ -608,6 +637,8 @@ def load_run(run_dir):
                         lanes[x["lane"]].setdefault("extras", []).append((x["t"] / 1000, x["e"]))
                     if x.get("f"):
                         lanes[x["lane"]].setdefault("friends", []).append((x["t"] / 1000, x["f"]))
+                    if x.get("t2"):
+                        lanes[x["lane"]].setdefault("t2", []).append((x["t"] / 1000, x["t2"]))
         elif ev == "probe_men":
             for x in r["lanes"]:
                 if x["lane"] in lanes:
@@ -801,8 +832,10 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
             t2 = spec["target2"]                     # the layout's script name: <side>_<short>b_<lane>
             t2 = t2 if t2 in UNITS else t2.split("_", 1)[1].rsplit("_", 1)[0][:-1]
             t2_key = UNITS[t2][0]
-            sides[roles["tg"]]["units"].append({"key": t2_key, "x": s0[2]["x"] + spec.get("t2_dx", 0), "z": s0[2]["z"],
-                                                "b": s0[2]["b"], "men": UNITS[t2][1], "width": spec["t_width"],
+            r2 = ln["t2"][0][1] if ln.get("t2") else None      # its recorded place (the retarget plan records it)
+            sides[roles["tg"]]["units"].append({"key": t2_key, "x": r2["x"] if r2 else s0[2]["x"] + spec.get("t2_dx", 0),
+                                                "z": r2["z"] if r2 else s0[2]["z"], "b": r2["b"] if r2 else s0[2]["b"],
+                                                "men": r2["men"] if r2 else UNITS[t2][1], "width": spec["t_width"],
                                                 "general": False, "name": "t2"})
         if spec.get("lord") and s0[3]:
             r = s0[3]
@@ -845,9 +878,11 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
     st_ = {"contact": [None] * B, "contact2": [None] * B, "phase": ["in"] * B, "out_t": [0.0] * B, "after": [None] * B,
            "out_from": [None] * B, "fired": [False] * B, "last": {}, "phases": [[] for _ in range(B)],
            "a_ability": [False] * B, "start": [None] * B, "faced": set(), "rout": [None] * B,
-           "re": [{"phase": "in", "clear": False} for _ in range(B)], "tire": [None] * B}
+           "re": [{"phase": "in", "clear": False} for _ in range(B)], "tire": [None] * B, "aim": [None] * B}
+    # the retarget plan's switches run on the game's clock from the go: the twin starts at the first sample
+    t_first = [float(ln["samples"][0][0]) for ln in meta]
     rec = {"t": [], "rows": []}
-    fields = ("x", "z", "b", "men", "hp_abs", "m", "fatigue", "fat", "k", "r", "s")
+    fields = ("x", "z", "b", "men", "hp_abs", "m", "fatigue", "fat", "k", "r", "s", "a")
     a_slot = {}
     for sp in specs:
         if sp.get("a_ability") and sp["a_key"] not in a_slot:
@@ -925,6 +960,16 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                     kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, True
             elif mode[b] in ("attack_run", "attack_walk"):
                 kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, mode[b] == "attack_run"
+            elif mode[b] == "retarget":
+                # a ranged attack on the target, with switch_s on the other one in turns (entries/charge_probe.lua
+                # retarget_aim); KEEP below makes each switch one new order
+                aim = retarget_aim(t + t_first[b], sp.get("switch_s"))
+                T2 = int(slot["t2"][b])
+                kind[b, A], target[b, A], run_[b, A] = O.ATTACK, (T2 if aim == 2 and T2 >= 0 else T), False
+                if st_["aim"][b] != aim:
+                    n = sum(1 for p in st_["phases"][b] if p["phase"] == "aim")
+                    st_["phases"][b].append({"phase": "aim", "target": aim, "t": t * 1000, "n": n})
+                    st_["aim"][b] = aim
             # the target's rout (t_morale lanes): at_rout 'halt' halts the attacker there (entries/charge_probe.lua);
             # rout_at_s: not routed that long after the contact, it is routed by script (morale_behavior_rout)
             if (sp.get("t_morale") and sp.get("rout_at_s") and st_["rout"][b] is None and c is not None
@@ -1046,7 +1091,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
     out = []
     for b, ln in enumerate(meta):
         A, T, L = int(slot["a"][b]), int(slot["tg"][b]), int(slot["l"][b])
-        samples = []
+        samples, t2_rows = [], []
         for t, r in zip(rec["t"], rec["rows"]):
             def row(i):
                 if i < 0:
@@ -1057,15 +1102,20 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                 for k in ("fatigue", "fat", "k"):
                     if k in r:
                         out[k] = float(r[k][b, i])
+                if "a" in r:
+                    out["ammo"] = float(r["a"][b, i])
                 return out
             samples.append((t, row(A), row(T), row(L)))
+            if int(slot["t2"][b]) >= 0:
+                t2_rows.append((t, row(int(slot["t2"][b]))))
         contacts = {}
         if st_["contact"][b] is not None:
             contacts[1] = st_["contact"][b]
         if st_["contact2"][b] is not None:
             contacts[2] = st_["contact2"][b]
         out.append({"run": "sim", "spec": ln["spec"], "samples": samples, "men": [], "contacts": contacts,
-                    "end": None, "abilities": ln.get("abilities") and [{"status": "sim"}], "phases": st_["phases"][b]})
+                    "end": None, "abilities": ln.get("abilities") and [{"status": "sim"}], "phases": st_["phases"][b],
+                    **({"t2": t2_rows} if t2_rows else {})})
     return out
 
 
@@ -1288,9 +1338,178 @@ def report(run_dirs, sim=False, out=OUT, device="cpu", copies=8):
     return result
 
 
+# ---------------------------------------------------------------- a shooter's new target (plan retarget)
+
+def retarget_aim(t_s, switch_s):
+    """The retarget lane's target t_s after the go: 1 without switch_s, else 1 and 2 in turns of switch_s seconds
+    (entries/charge_probe.lua retarget_aim)."""
+    if not switch_s:
+        return 1
+    return 1 if int(math.floor(t_s / switch_s + 1e-9)) % 2 == 0 else 2
+
+
+def _drop(t, v, lo, hi):
+    """How much v fell over (lo, hi] (NaN outside the recording)."""
+    return at(t, v, lo) - at(t, v, hi)
+
+
+def _fin(v):
+    return v is not None and np.isfinite(v)
+
+
+def retarget_measure(lane, lag_s=RETARGET_LAG_S):
+    """A retarget lane (game or simulator): per order (probe_phase 'aim') the seconds to its first shot, its shots per
+    man in 0-5 and 5-10 s after it, the first second of fire's share of the men (the first burst), the aimed target's
+    health lost per shot in the first 5 s of fire and later (the hits counted to lag_s after each span: the game's
+    projectiles fly and its health readout follows; the simulator lands them on the shot's step, lag 0), the other
+    target's (spill);
+    per lane the shots, whole volleys (>= 50 % of the men in one second) and partial ones (10-50 %), the fire flag's
+    share of the samples (game) and the men each target lost. Shots = the drop of the shooter's ammo (one a man)."""
+    spec, s = lane["spec"], lane["samples"]
+    lag_s = 0.0 if lane["run"] == "sim" else lag_s
+    t = np.array([x[0] for x in s])
+    ammo, men_a = series(s, "a", "ammo"), series(s, "a", "men")
+    t2 = lane.get("t2") or []
+    tt = {1: t, 2: np.array([x[0] for x in t2]) if t2 else t}
+    hp, men = {1: series(s, "tg", "hp")}, {1: series(s, "tg", "men")}
+    for key, d in (("hp", hp), ("men", men)):
+        d[2] = (np.array([np.nan if r.get(key) is None else float(r[key]) for _, r in t2]) if t2
+                else np.full(len(t), np.nan))
+    out = {"run": lane["run"], "lane": spec["name"], "cell": cell(spec), "shooter": SHORT[spec["a_key"]],
+           "kind": spec.get("kind"), "switch_s": spec.get("switch_s")}
+    ok = np.isfinite(ammo)
+    if ok.sum() < 3:
+        return out
+    shot_t = t[1:]
+    shots = np.where(ok[1:] & ok[:-1], np.maximum(0.0, ammo[:-1] - ammo[1:]), 0.0)
+    end = float(t[-1])
+    men0 = float(np.nanmax(men_a)) if np.isfinite(men_a).any() else np.nan
+
+    def n_shots(lo, hi):
+        return float(shots[(shot_t > lo + 1e-6) & (shot_t <= hi + 1e-6)].sum())
+    aims = sorted((p["t"] / 1000, int(p.get("target", 1))) for p in lane.get("phases", []) if p.get("phase") == "aim")
+    rows = []
+    for i, (o, who) in enumerate(aims):
+        e = aims[i + 1][0] if i + 1 < len(aims) else end
+        if e - o < 1:
+            continue
+        m = at(t, men_a, o)
+        m = m if np.isfinite(m) and m > 0 else men0
+        other = 2 if who == 1 else 1
+        r = {"t": round(o, 1), "target": who, "span_s": round(e - o, 1), "men": m, "shots": n_shots(o, e)}
+        fired = shot_t[(shot_t > o + 1e-6) & (shot_t <= e + 1e-6) & (shots > 0)]
+        r["first_s"] = round(float(fired[0] - o), 2) if len(fired) else None
+        for lo, hi in ((0, 5), (5, 10)):
+            if o + hi <= e + 1e-6:
+                r[f"per_man_{lo}_{hi}"] = n_shots(o + lo, o + hi) / m
+        if len(fired):
+            f0 = float(fired[0]) - 0.5                 # the drop shows at the sample after the shots
+            first_hi = min(f0 + 5.0, e)
+            r["burst_share"] = n_shots(f0, f0 + 1.0) / m
+            r["shots_first"] = n_shots(f0, first_hi)
+            r["hp_first"] = _drop(tt[who], hp[who], f0, first_hi + lag_s)
+            r["spill_first"] = _drop(tt[other], hp[other], f0, first_hi + lag_s)
+            if e > first_hi + 1:
+                r["shots_later"] = n_shots(first_hi, e)
+                r["hp_later"] = _drop(tt[who], hp[who], first_hi + lag_s, e + lag_s)
+                r["spill_later"] = _drop(tt[other], hp[other], first_hi + lag_s, e + lag_s)
+        rows.append(r)
+    out["orders"] = rows
+    out["shots"] = float(shots.sum())
+    out["men"] = men0
+    # volleys: the shots in each whole second of the lane over the men
+    bins = {}
+    for ts, n in zip(shot_t, shots):
+        if n > 0:
+            k = int(math.floor(ts - 1e-6))
+            bins[k] = bins.get(k, 0.0) + n
+    shares = [n / men0 for n in bins.values()] if np.isfinite(men0) and men0 > 0 else []
+    out["whole_volleys"] = sum(1 for x in shares if x >= 0.5)
+    out["partial_volleys"] = sum(1 for x in shares if 0.1 <= x < 0.5)
+    flags = [(x[1] or {}).get("fire") for x in s]
+    if any(f is not None for f in flags):
+        on = np.array([bool(f) for f in flags])
+        out["fire_share"] = float(on.mean())
+        # the fire flag on with no shot showing in that half second or the next
+        sh = np.concatenate([[0.0], shots])
+        nxt = np.concatenate([sh[1:], [0.0]])
+        out["flag_no_shot"] = float(np.mean((sh[on] + nxt[on]) == 0)) if on.any() else None
+    for who in (1, 2):
+        span = len(tt[who]) > 1
+        out[f"t{who}_men_lost"] = _drop(tt[who], men[who], float(tt[who][0]), float(tt[who][-1])) if span else None
+        out[f"t{who}_hp_lost"] = _drop(tt[who], hp[who], float(tt[who][0]), float(tt[who][-1])) if span else None
+    hp_all = sum(v for v in (out["t1_hp_lost"], out["t2_hp_lost"]) if _fin(v))
+    out["hp_per_shot"] = hp_all / out["shots"] if out["shots"] else None
+    return out
+
+
+RETARGET_KEYS = ("first_s_median", "per_man_0_5", "per_man_5_10", "burst_share", "hp_per_shot_first",
+                 "hp_per_shot_later", "spill_share", "hp_per_shot", "shots", "whole_volleys", "partial_volleys",
+                 "fire_share", "flag_no_shot", "t1_men_lost", "t2_men_lost")
+
+
+def retarget_summary(rows):
+    """{cell: {key: value}} over the lanes of each cell: per-order means; health per shot as sums over sums."""
+    groups = {}
+    for r in rows:
+        groups.setdefault(r["cell"], []).append(r)
+    out = {}
+    for name, rs in sorted(groups.items()):
+        orders = [o for r in rs for o in r.get("orders", [])]
+        row = {"cell": name, "n": len(rs), "orders_n": len(orders),
+               "no_shot_orders": sum(1 for o in orders if o.get("first_s") is None)}
+        first = [o["first_s"] for o in orders if o.get("first_s") is not None]
+        row["first_s_median"] = float(np.median(first)) if first else None
+        for k in ("per_man_0_5", "per_man_5_10", "burst_share"):
+            v = [o[k] for o in orders if _fin(o.get(k))]
+            row[k] = float(np.mean(v)) if v else None
+
+        def ratio(num, den):
+            pairs = [(o[num], o[den]) for o in orders if _fin(o.get(num)) and o.get(den)]
+            sd = sum(d for _, d in pairs)
+            return sum(n for n, _ in pairs) / sd if sd else None
+        row["hp_per_shot_first"] = ratio("hp_first", "shots_first")
+        row["hp_per_shot_later"] = ratio("hp_later", "shots_later")
+        aimed = sum(o[k] for o in orders for k in ("hp_first", "hp_later") if _fin(o.get(k)))
+        spill = sum(o[k] for o in orders for k in ("spill_first", "spill_later") if _fin(o.get(k)))
+        row["spill_share"] = spill / (aimed + spill) if aimed + spill > 0 else None
+        for k in ("hp_per_shot", "shots", "whole_volleys", "partial_volleys", "fire_share", "flag_no_shot",
+                  "t1_men_lost", "t2_men_lost"):
+            v = [r[k] for r in rs if _fin(r.get(k))]
+            row[k] = float(np.mean(v)) if v else None
+        out[name] = row
+    return out
+
+
+def retarget_report(run_dirs, sim=False, device="cpu", copies=8, out=None, params=None):
+    """The retarget lanes of the runs: the game's table and, with sim, the simulator's on the same lanes. Writes
+    build/charge-probe/retarget.json (not in Git)."""
+    lanes = [ln for d in run_dirs for ln in load_run(d) if ln["spec"]["mode"] == "retarget"]
+    game = [retarget_measure(ln) for ln in lanes]
+    result = {"lanes": game, "summary": retarget_summary(game)}
+    if sim and lanes:
+        sims = [retarget_measure(ln) for ln in sim_lanes(lanes, params=params, device=device, copies=copies)]
+        result["sim_lanes"] = sims
+        result["sim_summary"] = retarget_summary(sims)
+    f = lambda v: "-" if v is None else f"{v:.2f}"
+    print("A shooter's new target, per cell (A one order; B10 / C5 the other target every 10 / 5 s); sim = the "
+          "simulator on the same lanes")
+    for name, r in result["summary"].items():
+        s_ = (result.get("sim_summary") or {}).get(name, {})
+        print(f"\n{name}  (n={r['n']}, orders {r['orders_n']}, without a shot {r['no_shot_orders']})")
+        for k in RETARGET_KEYS:
+            print(f"  {k:18} {f(r.get(k)):>8}" + ("" if not sim else f"   sim {f(s_.get(k))}"))
+    out = out or ROOT / "retarget.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(result, indent=1, default=float), encoding="utf-8")
+    print(out)
+    return result
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", nargs="?", choices=("report", "plan", "run", "turns", "exits"), default="report")
+    parser.add_argument("command", nargs="?", choices=("report", "plan", "run", "turns", "exits", "retarget"),
+                        default="report")
     parser.add_argument("runs", nargs="*", type=Path, help="report: run folders (default: build/charge-probe/runs/*)")
     parser.add_argument("--plan", choices=PLANS, default="charge")
     parser.add_argument("--battles", help="run: battle numbers, comma separated (default: all of the plan)")
@@ -1312,6 +1531,10 @@ def main(argv=None):
         return 0 if all(d[-1] == 0 for d in done) else 1
     if args.command == "exits":
         exit_report(args.runs or runs(), sim=args.sim, device=args.device, copies=min(args.copies, 4))
+        return 0
+    if args.command == "retarget":
+        retarget_report(args.runs or runs(), sim=args.sim, device=args.device, copies=args.copies,
+                        out=None if args.out == OUT else args.out)
         return 0
     if args.command == "turns":
         turn_report(args.runs or runs(), sim=args.sim, device=args.device, copies=min(args.copies, 4),

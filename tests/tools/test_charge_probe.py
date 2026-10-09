@@ -282,6 +282,78 @@ def test_the_reengage_plan_parts_and_rejoins_two_pairs_beside_a_fresh_and_a_tire
         assert {p["name"] for p in config["park"]} == {"own_lord", "enemy_lord"}
 
 
+def test_the_retarget_plan_switches_crossbows_and_handguns_between_two_targets():
+    b = cp.battles("retarget")
+    assert len(b) == 2 and all(len(x) == 5 for x in b)
+    for x in b:
+        assert sorted((l["attacker"], l.get("switch_s") or 0) for l in x) == sorted(
+            (s, sw or 0) for s, sw in cp.RETARGET_LANES)
+        assert sorted(cp.cell(l) for l in x) == sorted(cp.cell(l) for l in b[0]) and len({cp.cell(l) for l in x}) == 5
+        assert all(l["mode"] == "retarget" and l["target"] == l["target2"] == "slave" and l["target_mode"] == "hold"
+                   and not l["answer"] and l["max_s"] == 120 for l in x)
+    assert b[0][0]["kind"] != b[1][0]["kind"]                               # the lanes rotated
+    assert cp.FACTION[cp.UNITS["hgun"][0]] == cp.EMP and cp.UNITS["xbow"][0].endswith("crossbowmen")
+    for i in (1, 2):
+        config, model_s, arena = cp.run_config("retarget", i)
+        assert model_s < 200 and sorted((l["x"], l["z"]) for l in config["lanes"]) == sorted(cp.RETARGET_PLACES)
+        names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}
+        units = json.loads(cp.UNITS_JSON.read_text(encoding="utf-8"))["units"]
+        for l in config["lanes"]:
+            assert l["target2"] in names and l["target2"] != l["target"] and l["t2_dx"] == 60 and l["a_dx"] == 30
+            # both targets ~100 m from the shooter's centre, well inside its range
+            d = math.hypot(l["a_dx"], l["gap_m"] + (l["a_depth"] + l["t_depth"]) / 2)
+            assert 90 <= d <= 105 and d < units[l["a_key"]]["missile"]["range_m"] - 30
+        # every target's centre 250+ m from every other lane's shooter
+        for l in config["lanes"]:
+            for o in config["lanes"]:
+                if o is not l:
+                    assert math.hypot(o["x"] + o["a_dx"] - l["x"], o["z"] - l["z"]) > 250
+        assert {p["name"] for p in config["park"]} == {"own_lord", "enemy_lord"}
+
+
+def _retarget_lane(switch_s=10):
+    """A retarget lane: 90 men, the target switched every switch_s s from the go; each order silent 5 s, then 20
+    shots in 0.5 s and 70 more 0.5 s later; the aimed target loses 2 HP a shot 2 s later for the first 20 of each
+    order, 4 for the rest; nothing ever lands on the other."""
+    spec = dict(cp.layout(cp.battles("retarget")[0])[0][1])
+    spec["switch_s"] = switch_s
+    samples, t2, ammo, hp = [], [], 1980.0, {1: 5400.0, 2: 5400.0}
+    aims = [(k * switch_s, 1 + k % 2) for k in range(int(60 // switch_s))]
+    pending = []
+    for k in range(1, 121):
+        t = k * 0.5
+        o, who = max(a for a in aims if a[0] <= t - 0.5 + 1e-9)
+        since = t - o
+        n = 20 if abs(since - 5.5) < 1e-9 else 70 if abs(since - 6.0) < 1e-9 else 0
+        ammo -= n
+        if n:
+            pending.append((t + 2, who, n * (2 if n == 20 else 4)))
+        for p in [p for p in pending if p[0] <= t + 1e-9]:
+            hp[p[1]] -= p[2]
+            pending.remove(p)
+        samples.append((t, {"x": 0, "z": 0, "men": 90, "hp": 7000, "ammo": ammo, "fire": n > 0},
+                        {"x": 0, "z": 0, "men": 180, "hp": hp[1]}, None))
+        t2.append((t, {"x": 60, "z": 0, "men": 180, "hp": hp[2]}))
+    phases = [{"phase": "aim", "target": who, "n": k, "t": o * 1000} for k, (o, who) in enumerate(aims)]
+    return {"run": "r", "spec": spec, "samples": samples, "t2": t2, "men": [], "contacts": {}, "end": None,
+            "abilities": [], "phases": phases}
+
+
+def test_retarget_measure_the_silence_the_first_burst_and_its_hits():
+    m = cp.retarget_measure(_retarget_lane())
+    assert len(m["orders"]) == 6 and m["shots"] == 540
+    o = m["orders"][1]
+    assert o["target"] == 2 and o["first_s"] == 5.5 and o["per_man_0_5"] == 0 and o["per_man_5_10"] == 1
+    assert abs(o["burst_share"] - 1) < 1e-9 and o["shots_first"] == 90 and o["hp_first"] == 20 * 2 + 70 * 4
+    assert o["spill_first"] == 0
+    assert m["whole_volleys"] == 6 and m["partial_volleys"] == 0 and m["fire_share"] > 0
+    assert m["t1_hp_lost"] + m["t2_hp_lost"] == 6 * 320 and abs(m["hp_per_shot"] - 6 * 320 / 540) < 1e-9
+    row = cp.retarget_summary([m])[m["cell"]]
+    assert row["first_s_median"] == 5.5 and row["orders_n"] == 6 and row["spill_share"] == 0
+    assert abs(row["hp_per_shot_first"] - 320 / 90) < 1e-9 and row["hp_per_shot_later"] is None
+    assert [cp.retarget_aim(t, 10) for t in (0, 9.99, 10, 25)] == [1, 1, 2, 1] and cp.retarget_aim(99, None) == 1
+
+
 def _reengage_lane(**kw):
     """A reengage lane: contact at 10 s, the target losing 10 HP/s steady and 30 HP/s in the first 10 s of each fight;
     out at 160 s, contact 2 at 180 s, the end at 240 s."""

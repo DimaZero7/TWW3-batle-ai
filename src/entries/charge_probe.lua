@@ -23,6 +23,12 @@
 --                  until both are at least tire_until (a fatigue_state key) or tire_max_s after the go ('tire_end'),
 --                  go back to their places facing each other, and once both are there (or ready_max_s later,
 --                  'tired') both attack each other at a run; contacts count only from then.
+--   'retarget'     the shooter (the attacker, placed a_dx m right of the lane's x: between its two targets) gets a ranged
+--                  attack on the target at the go (fire at will on, as the bridge gives it); with lane.switch_s every
+--                  switch_s seconds after the go a ranged attack on the other one (target2), back and forth; each
+--                  order is probe_phase 'aim' {target = 1 | 2, n}. No contact: the lane ends after max_s. The shooter's
+--                  sample row carries ammo (ammo_left: its drop is the shots of that half second, one a man), fire
+--                  (CCO IsFiringMissiles) and dd (CCO DamageDealt).
 -- lane.a_ability (optional): the attacker uses it on himself a_ability_after_s after the first contact
 -- (Foe-Seeker's vigour). lane.men_all_s (optional): the attacker's soldier places every men_ms from the go
 -- to men_all_s, wherever the enemy is (how a formation turns).
@@ -81,7 +87,7 @@ local M = {}
 local LOG = 'tww3_bai_events.jsonl'
 local TIMER, MEN_TIMER = 'tww3_bai_charge_probe_tick', 'tww3_bai_charge_probe_men'
 M.MODES = {attack_run = true, attack_walk = true, move_run = true, recharge = true, hold = true, withdraw = true,
-    script = true, shoot = true, reengage = true, tire = true}
+    script = true, shoot = true, reengage = true, tire = true, retarget = true}
 M.TARGET_MODES = {stand = true, hold = true, both = true, both_walk = true, rear = true, push = true}
 M.AFTER_KINDS = {attack_t2 = true, attack_same = true, halt = true, move_near = true, none = true}
 M.AT_ROUT = {halt = true, none = true, away = true}
@@ -97,11 +103,11 @@ end
 
 -- Where a lane puts its two units: {ax, az, ab, tx, tz, tb} (centres and bearings). The target's
 -- front line is at z = lane.z; the target faces +z (bearing 0; 'rear': 180), the attacker stands
--- gap_m beyond that front, facing back. Depths are the blocks' (0 for a lone man). Pure.
+-- gap_m beyond that front (a_dx m to the side, +x), facing back. Depths are the blocks' (0 for a lone man). Pure.
 function M.layout(lane)
     local td, ad = lane.t_depth or 0, lane.a_depth or 0
     local tb = lane.target_mode == 'rear' and 180 or 0
-    return {ax = lane.x, az = lane.z + lane.gap_m + ad / 2, ab = 180, tx = lane.x, tz = lane.z - td / 2, tb = tb}
+    return {ax = lane.x + (lane.a_dx or 0), az = lane.z + lane.gap_m + ad / 2, ab = 180, tx = lane.x, tz = lane.z - td / 2, tb = tb}
 end
 
 -- A point dx m to the right and dz m ahead of (x, z) for a unit facing the world bearing (degrees; 0 = +z, 90 = +x).
@@ -132,6 +138,13 @@ function M.reengage_step(phase, now_ms, contact_ms, out_ms, lane)
     if phase == 'in' and contact_ms and now_ms - contact_ms >= lane.part_after_s * 1000 then return 'out' end
     if phase == 'out' and out_ms and now_ms - out_ms >= lane.part_s * 1000 then return 'back' end
     return phase
+end
+
+-- The retarget lane's target elapsed_ms after the go (pure): 1 (the target) without switch_s, else 1 and 2 (target2)
+-- in turns of switch_s seconds.
+function M.retarget_aim(elapsed_ms, switch_s)
+    if not switch_s or switch_s <= 0 then return 1 end
+    return math.floor(elapsed_ms / (switch_s * 1000)) % 2 == 0 and 1 or 2
 end
 
 -- The recharge's phase after one tick (pure): 'in' (attacking) -> 'out' recharge_after_s after the
@@ -226,6 +239,15 @@ function M.main(bm, config, globals)
         if type(effect) == 'string' and effect ~= '' then row.mge = effect end
         local fx = services.active_effects(function(field) return read(cco, u, field) end)
         if fx and #fx > 0 then row.fx = table.concat(fx, ',') end
+        return row
+    end
+
+    -- A shooter's unit row with its projectiles left, the fire flag and the damage it has dealt (the retarget plan).
+    local function shooter_row(u)
+        local row = unit_row(u)
+        row.ammo = read(function() return u:ammo_left() end)
+        row.fire = read(cco, u, 'IsFiringMissiles')
+        row.dd = round(read(cco, u, 'DamageDealt'), 0)
         return row
     end
 
@@ -445,6 +467,15 @@ function M.main(bm, config, globals)
                         end
                     end
                 end
+                if lane.mode == 'retarget' then
+                    local want = M.retarget_aim(now - lane.t0, lane.switch_s)
+                    if want ~= lane.aim then
+                        lane.aim, lane.orders = want, (lane.orders or 0) + 1
+                        orders.attack_ranged(lane.a.uc, (want == 1 and lane.t or lane.t2).unit, false, true)
+                        emit('probe_phase', {lane = lane.name, phase = 'aim', target = want, n = lane.orders,
+                            t = now - lane.t0})
+                    end
+                end
                 local af = lane.after
                 if af and lane.contact and not lane.after_done and now - lane.contact >= af.at_s * 1000 then
                     lane.after_done = true
@@ -511,7 +542,7 @@ function M.main(bm, config, globals)
                     end
                 end
                 local tg_row = (lane.t_morale or lane.morale_rows) and morale_row or unit_row
-                local a_row = lane.morale_rows and morale_row or unit_row
+                local a_row = lane.morale_rows and morale_row or lane.mode == 'retarget' and shooter_row or unit_row
                 local r = {lane = lane.name, t = now - lane.t0, a = a_row(lane.a.unit), tg = tg_row(lane.t.unit)}
                 if lane.rally_friends and #lane.rally_friends > 0 then
                     r.f = {}
@@ -604,6 +635,10 @@ function M.main(bm, config, globals)
             elseif m == 'shoot' then
                 orders.set_fire_at_will(lane.a.uc, true)
                 orders.attack_ranged(lane.a.uc, lane.t.unit, false, true)
+            elseif m == 'retarget' then
+                lane.aim, lane.orders = 1, 0
+                orders.attack_ranged(lane.a.uc, lane.t.unit, false, true)
+                emit('probe_phase', {lane = lane.name, phase = 'aim', target = 1, n = 0, t = 0})
             elseif m == 'move_run' then
                 local L = lane.layout
                 orders.move(lane.a.uc, vec(L.tx, lane.z - lane.move_beyond_m), true)
@@ -713,6 +748,9 @@ function M.main(bm, config, globals)
             end
             if l.after then assert(M.AFTER_KINDS[l.after.kind], 'unknown after kind ' .. tostring(l.after.kind)) end
             if l.at_rout then assert(M.AT_ROUT[l.at_rout], 'unknown at_rout ' .. tostring(l.at_rout)) end
+            if l.mode == 'retarget' then
+                assert(l.target2, 'a retarget lane needs target2')
+            end
             if l.mode == 'tire' then
                 assert(M.fatigue_level(l.tire_until), 'unknown tire_until ' .. tostring(l.tire_until))
             end
