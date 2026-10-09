@@ -464,6 +464,8 @@ class TestNnArena:
         """)
         log = list(lua.eval("bm.orders").values())
         assert log == ["goto own_lord -200 30 true", "attack enemy_spear_1"]
+        # a melee attack at a walk as ordered (run False): the engine's attack_unit run argument false
+        assert lua.eval("own[2].attack_args.target") == "enemy_spear_1" and lua.eval("own[2].attack_args.run") is False
         doc = exchange.read_state(tmp_path / exchange.STATE)
         assert doc["move"] == 3
         exchange.write_atomic(tmp_path / exchange.ORDERS, exchange.orders_text(

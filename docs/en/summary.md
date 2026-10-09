@@ -169,7 +169,8 @@ the budget) + a price for an order change 0.006 ("keep" and a repeat are free)
 
 **Opponents** (`--mix`): self-play 0.2, past versions 0.3 (pool 12), `ai_like` 0.3 (a script modelled on
 the game's AI), `nearest` 0.2 (everyone runs at the nearest enemy)
-([opponents](training/training.md#battles-and-opponents)). The game's AI takes no part in training - it is
+([opponents](training/training.md#battles-and-opponents)); the scripts decide at the game's cadence - once a
+second, their orders as late as the network's. The game's AI takes no part in training - it is
 the independent check.
 
 **Off:** teachers and drills. The drills (`kiting`, `counter`, `hold_fire`, `direct_fire` and others) stay

@@ -178,11 +178,13 @@ end
 -- seconds under hold against 98 % under an attack order and 90-97 % for the game's AI (at 0-15 m
 -- beyond range between centres: 9 % against 100 %); one slinger unit stood 155 s with full ammunition.
 -- So the bridge aims a held shooter itself: hold_target picks the target (centre distance within
--- range + HOLD_REACH_M: the simulator measures range between the formations' edges, the game's AI
--- shoots from up to ~15 m beyond range between centres), and the adapter gives it as an attack
--- order would be given (fire_freely, missile_duty). A held shooter that starts walking under it
--- for HOLD_WALK decisions is halted to fire at will for FREE_MIN decisions: hold never walks.
-M.HOLD_REACH_M = 10
+-- range + HOLD_REACH_M), and the adapter gives it as an attack order would be given (fire_freely,
+-- missile_duty). A held shooter that starts walking under it for HOLD_WALK decisions is halted to
+-- fire at will for FREE_MIN decisions: hold never walks. HOLD_REACH_M 0: only a target within range
+-- by the centres - an explicit target beyond it makes the engine walk the shooter forward, which the
+-- simulator's holding shooter never does (the order audit, build/audit_orders: with 10 m ai_like's
+-- held shooters moved over 4 m in 3 s 17 % of their time, 15.8 halts a battle).
+M.HOLD_REACH_M = 0
 M.HOLD_WALK = 2
 
 local function in_reach(me, row, range, margin)
@@ -227,10 +229,26 @@ end
 -- standing enemy is in range (and it is not the ordered one). Before, the nearest enemy was taken
 -- even when routing: our shooters (the network's and ai_like's alike) were turned onto a fleeing mob
 -- while a standing enemy stood in range (the rout-mob analysis, build/fable/routmob2).
+-- A shooter walking to its ordered target (preferred: an attack's) while that target stands beyond its
+-- range is left alone, as the simulator's shooter walks under an attack until its target's centre is in
+-- range (battle.py close_in). Before, after 3 decisions the bridge stopped it and aimed it at the nearest
+-- enemy in range: the network's attack orders were overridden 6.9 times a battle (build/audit_orders).
 M.REAIM_AFTER = 3
+
+local function approaching(me, rows, range, preferred)
+    if preferred == nil or me.mv ~= true then return false end
+    for _, row in ipairs(rows or {}) do
+        if row.n == preferred then
+            return present(row) and row.side ~= me.side and row.r ~= true and row.v ~= false
+                and in_reach(me, row, range, 0) == nil
+        end
+    end
+    return false
+end
+
 function M.reaim_target(watch, me, rows, range, preferred, recent)
     if not (up(me) and me.m ~= true and me.fire ~= true and (me.a or 0) > 0 and (range or 0) > 0
-        and value.finite(me.x) and value.finite(me.z)) then
+        and value.finite(me.x) and value.finite(me.z)) or approaching(me, rows, range, preferred) then
         watch.n = 0
         return nil
     end

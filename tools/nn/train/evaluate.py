@@ -822,7 +822,9 @@ def script_battles(names, n_pairs, max_units=19, limit_s=3600.0, device="cpu", c
     compact: only the running battles step (a battle ends the same in a smaller batch). first: only the
     first `first` pairs of each name are played (n = first), started as in the whole batch: the start
     places' jitter is drawn over the batch (randomise.apply), so a smaller batch would be other battles
-    (the canary: the same battles as an older file's first pairs)."""
+    (the canary: the same battles as an older file's first pairs). The scripts decide at the game's cadence
+    (cadence.GAME: a decision a second on the state then, the orders landing ~0.36 s later - by a hash per battle,
+    the same in any batch - KEEP in between), as against the networks in Battles."""
     params = rollout.params_with_limit(limit_s)
     seeds = eval_seeds(n_pairs)
     source = scenes.Generated(seeds * len(names), max_units, params, device, sequential=True)
@@ -838,6 +840,9 @@ def script_battles(names, n_pairs, max_units=19, limit_s=3600.0, device="cpu", c
     plays = tuple((league.CODE[n], scripts.SCRIPTS[n]) for n in names)
     full, orig, factions = env.st, torch.arange(env.B, device=env.device), env.setup.factions
     n_steps, i = int(limit_s / env.params.dt) + 2, 0
+    cad = env.cadence
+    k = cad.steps(env.params.dt)
+    decided = None
     while i < n_steps:                                   # as play(compact=True): the running battles only
         n = int((~env.st.done).sum())
         if n == 0:
@@ -849,8 +854,15 @@ def script_battles(names, n_pairs, max_units=19, limit_s=3600.0, device="cpu", c
             _put(full, orig, env.st)
             keep = env.narrow(_ended(env, size))
             orig, ctrl = orig[keep], ctrl[keep]
+            decided = None if decided is None else O.Orders(*(getattr(decided, f)[keep] for f in O.FIELDS))
         for _ in range(min(CHECK_EVERY, n_steps - i)):
-            env.advance(env.st, env._assemble(env.st, ctrl, plays, ()), env.params, env.params.dt)
+            if i % k == 0:
+                decided = env._assemble(env.st, ctrl, plays, ())          # a decision on the state now
+            land = cad.lands(env.params.dt, i % k, env.st.u["row"][:, 0], i // k)
+            keep_o = O.Orders(torch.full_like(decided.kind, O.KEEP), decided.x, decided.z, decided.target,
+                              decided.run, torch.full_like(decided.ability, -1))
+            now = O.merge(keep_o, decided, land[:, None].expand_as(decided.kind))
+            env.advance(env.st, now, env.params, env.params.dt)
             env.st.u["lost_worst"] = env._track(env.st.u, env.weights.rout_share)   # as Battles: a loss counts once
             i += 1
     _put(full, orig, env.st)

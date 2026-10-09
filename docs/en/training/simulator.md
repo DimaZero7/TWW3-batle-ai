@@ -63,7 +63,9 @@ first; `side` = 0 is an empty slot). Three groups:
 **Orders** (`tools/nn/sim/orders.py`): per unit and decision step `kind` ∈ hold (0), move (1),
 attack (2), withdraw (3), keep (4: no new order, the one in force goes on; a unit with no order
 holds); the point `x`, `z` for move and withdraw (the unit's centre); `target` — the enemy's
-slot for attack; `run` — run or walk; `ability` — the unit's ability slot to use now (−1 none;
+slot for attack; `run` — run or walk (withdraw always runs, as the companion and the bridge give it in the game:
+withdrawing units ran 89 % of their seconds in the gates, median 3.0 m/s, `build/audit_orders`; before, the
+network's withdraw walked here); `ability` — the unit's ability slot to use now (−1 none;
 optional: orders made without it get −1; independent of `kind`). All `[B, N]`. A unit in melee
 leaves the fight on withdraw, or on a move to a point 10 m or more away (`contact.leave_m`, any
 unit) when that point lies away from every enemy it touches (more than 90° off the way to its centre,

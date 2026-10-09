@@ -7,8 +7,8 @@ of the networks, as often as in the game (tools/nn/train/cadence.py: by default 
 2 simulator steps of 0.5 s, the orders landing ~0.36 s late):
 
     observe both sides -> the learner acts for its rows (and the past version for its rows) ->
-    the simulator steps until the next decision (the networks' orders land after the latency, KEEP
-    otherwise; the scripts give theirs every simulator step) -> reward summed over them ->
+    the simulator steps until the next decision (the networks' and the scripts' orders land after the latency,
+    KEEP otherwise) -> reward summed over them ->
     finished battles start again (auto_reset) with fresh randomised numbers.
 
 The observation (and its memory: last sightings, speeds) is taken only at decisions, as the companion
@@ -172,12 +172,15 @@ def scripts_of(layout):
     return out
 
 
-def assemble_orders(st, ctrl, scripts, parts):
+def assemble_orders(st, ctrl, scripts, parts, base=None):
     """The batch's Orders [B, N]: scripts ((code, script), ...) give the orders of the sides whose
     controller (ctrl [B, 2]) is their code; parts ((placement, Orders [rows, N]), ...) those of the
-    networks' rows."""
+    networks' rows. base: Orders [B, N] to start from instead of HOLD (the scripts' orders of the decision,
+    landed or KEEP: Battles.step)."""
     B, N = st.B, st.N
-    side = {s: O.hold(B, N, st.device) for s in (1, 2)}
+    # (a copy per side: the networks' rows are written in place below, a whole battle row at a time)
+    side = {s: (O.hold(B, N, st.device) if base is None else O.Orders(*(getattr(base, k).clone() for k in O.FIELDS)))
+            for s in (1, 2)}
     for code, script in scripts:
         o = script(st)
         for s in (1, 2):
@@ -462,11 +465,22 @@ class Battles:
                 self.cstate[k][rows] = new[k]
         return obs_r, h, logits, action, orders, h_new
 
-    def assemble(self, parts):
-        """[(rows, Orders [len(rows), N])] and the scripts -> the batch's Orders [B, N]."""
+    def assemble(self, parts, base=None):
+        """[(rows, Orders [len(rows), N])] and the scripts -> the batch's Orders [B, N]. base: the scripts'
+        orders already made at the decision (scripted, landed or KEEP): the scripts are not asked again."""
         places = [(self.place_learn if rows is self.rows_learn else self.place_past if rows is self.rows_past
                    else placement(rows, self.B), o) for rows, o in parts]
+        if base is not None:
+            return self._assemble(self.st, self.ctrl, (), tuple(places), base)
         return self._assemble(self.st, self.ctrl, tuple(self.scripts.items()), tuple(places))
+
+    def scripted(self):
+        """The scripts' Orders [B, N] on the state now (HOLD for the networks' rows): asked once a decision, as the
+        enemy's script in the game (tools/nn/companion/script.py: a decision a second, both sides on the same
+        state); None without scripts."""
+        if not self.scripts:
+            return None
+        return self._assemble(self.st, self.ctrl, tuple(self.scripts.items()), ())
 
     @property
     def decision_s(self):
@@ -475,20 +489,24 @@ class Battles:
 
     def _landing(self, orders, rows, land):
         """The networks' rows' Orders of one simulator step of a decision: the decision's own where it
-        lands now (land [B] or a bool for all), KEEP elsewhere (the orders in force go on)."""
+        lands now (land [B] or a bool for all), KEEP elsewhere (the orders in force go on). rows None: orders of
+        the whole batch [B, N] (the scripts')."""
         if land is True:
             return orders
         keep = O.Orders(torch.full_like(orders.kind, O.KEEP), orders.x, orders.z, orders.target, orders.run,
                         torch.full_like(orders.ability, -1))
         if land is False:
             return keep
-        return O.merge(keep, orders, land[rows % self.B][:, None].expand_as(orders.kind))
+        at = land if rows is None else land[rows % self.B]
+        return O.merge(keep, orders, at[:, None].expand_as(orders.kind))
 
     # --- one decision and its simulator steps ---
     @torch.no_grad()
     def step(self, actor, critic=None, greedy=False, each=None):
         """One decision of the networks and the self.k simulator steps until the next (cadence.py): their
-        orders land after the cadence's latency (KEEP before and after), the scripts give theirs every step.
+        orders land after the cadence's latency (KEEP before and after); the scripts decide on the same state at
+        the decision and their orders land with the networks' (the game: the enemy's script decides a second
+        apart too, its orders as late; build/audit_orders: before, every 0.5 s step, at once).
         The reward and done of the learner rows are summed / any over the steps; finished battles restart
         (auto_reset) after the last. each(live [B]): called after every simulator step (live: the battles
         running before it), e.g. the evaluation's per-step counts."""
@@ -529,13 +547,15 @@ class Battles:
         # When the decision's orders land: a fixed step, or (a latency between steps) at random per battle.
         whole, frac = self.cadence.delay(self.params.dt)
         delay = self.cadence.delays(self.params.dt, self.B, self.device) if frac else None
+        scripted = self.scripted()                   # the scripts' orders of this decision, on the same state
         r_rows = None
         finished = torch.zeros_like(self.st.done)
         for j in range(self.k):
             land = (delay == j) if delay is not None and j in (whole, whole + 1) else (j == whole)
             now = [(rows, self._landing(o, rows, land)) for rows, o in parts]
+            base = None if scripted is None else self._landing(scripted, None, land)
             was_done = self.st.done.clone()
-            r, fin = self._sim_step(now, attacks, rb, rs, was_done)
+            r, fin = self._sim_step(now, attacks, rb, rs, was_done, base)
             r_rows = r if r_rows is None else r_rows + r
             finished = finished | fin
             if each is not None:
@@ -627,12 +647,12 @@ class Battles:
         mom[keep] = m_s
         return o, mom
 
-    def _sim_step(self, parts, attacks, rb, rs, was_done):
-        """One simulator step with the networks' orders `parts` and the scripts': -> (the learner rows'
-        reward [R], finished [B]); the counters (in place). A battle that had ended before the step is
-        frozen and gets no reward."""
+    def _sim_step(self, parts, attacks, rb, rs, was_done, base=None):
+        """One simulator step with the networks' orders `parts` and the scripts' (base: made at the decision,
+        landed or KEEP; None: asked now): -> (the learner rows' reward [R], finished [B]); the counters (in
+        place). A battle that had ended before the step is frozen and gets no reward."""
         marks = self._ability_marks()
-        orders = self.assemble(parts)
+        orders = self.assemble(parts, base)
         cost, switched = self._orders_cost(self.st, orders, was_done, self.ctrl, self.weights, self.orders_stats,
                                            self.order_battle)
         self.advance(self.st, orders, self.params, self.params.dt)

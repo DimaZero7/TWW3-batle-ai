@@ -223,7 +223,9 @@ function M.start(opts)
                 return aim(it, order.target, order.run)
             else
                 duty[it.name] = nil
-                orders.attack_melee(uc, enemy.unit)
+                -- at a run or a walk as the order says (the simulator's attack keeps its run flag; before, always
+                -- at a run - unseen while neither the network nor ai_like gave a walking attack, build/audit_orders)
+                orders.attack_melee(uc, enemy.unit, order.run ~= true)
                 if empty_shooter(it.unit) then
                     handle.empty_melees = handle.empty_melees + 1
                     opts.emit('nn_empty_melee', {t = opts.now_ms(), u = it.name, tg = order.target})

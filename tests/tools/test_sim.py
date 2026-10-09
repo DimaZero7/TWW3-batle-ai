@@ -3006,3 +3006,16 @@ def test_measured_reloads_and_aim_of_the_third_wave():
     assert s["wh_dlc04_emp_inf_free_company_militia_0"]["reload"] == pytest.approx(10.8)
     assert all(s[k]["aim_s"] == pytest.approx(2.0) for k in s if k != "wh_main_emp_inf_crossbowmen")
     assert s["wh_main_emp_inf_crossbowmen"]["aim_s"] == pytest.approx(3.3)
+
+
+def test_a_withdraw_runs_whatever_its_run_flag():
+    # in the game the companion and the bridge give every withdraw at a run (build/audit_orders); a move keeps its flag
+    for kind, run, want in ((O.WITHDRAW, False, True), (O.WITHDRAW, True, True), (O.MOVE, False, False)):
+        st = scenario.build([army([(SPEAR, -100, 0, 90)], [(SLAVE, 300, 0, 270)])], P)
+        o = replay.hold(st)
+        o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = kind, -300.0, 0.0, run
+        for _ in range(8):
+            battle.step(st, o, P)
+        speed = math.hypot(float(st.u["vx"][0, 0]), float(st.u["vz"][0, 0]))
+        assert bool(st.u["order_run"][0, 0]) is want
+        assert speed == pytest.approx(float(st.u["run" if want else "walk"][0, 0]), rel=0.05), (kind, run)

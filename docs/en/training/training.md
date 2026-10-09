@@ -147,7 +147,7 @@ every second and the `result`. `tools.nn.gamedata.load(folder)` reads them as a 
 ```mermaid
 flowchart LR
   obs["Observe both sides<br/>1024 battles"] --> act["Learner, past version<br/>and scripts give orders"]
-  act --> step["2 simulator steps of 0.5 s<br/>(the networks' orders land<br/>0.36 s late; scripts every step)"]
+  act --> step["2 simulator steps of 0.5 s<br/>(the networks' and scripts' orders<br/>land 0.36 s late)"]
   step --> rew["Reward per side<br/>(summed over the steps)"]
   rew --> reset["Finished battles take a new battle<br/>from the bank, new numbers"]
   reset --> obs
@@ -329,8 +329,15 @@ mean 0.36 s, p10–p90 0.2–0.6 s of battle time.
 - The networks' orders (the learner's and the past version's) land after the latency, rounded to
   whole steps at random so that its mean is 0.36 s: one step late with probability 0.72, at once
   otherwise; until then the orders in force go on (`KEEP`), as in the game between ticks.
-- The scripts (`nearest`, `ai_like`, the drills' enemies) give orders every simulator step: they
-  stand in for the game's AI, which has no tick of ours.
+- The scripts (`nearest`, `ai_like`, `hold_shoot`, the drills' enemies) decide at the same cadence: once a
+  decision, on the same state as the networks, their orders landing as late (`rollout.Battles.scripted`) - in
+  training, evaluation and the twin (`gapsim`). So in the game: `ai_like` decides for the enemy once a second
+  through the second bridge, its answer ~0.55 s late (`build/audit_orders`). Before, the scripts gave orders every
+  0.5 s step, at once - reacting ~0.8 s sooner than in the game. Script-against-script battles
+  (`evaluate.script_battles`, the baselines) run at the same cadence; their latency is drawn by a hash of the
+  battle id and the decision (`cadence.lands`) so a battle ends the same in any batch. The replay of recordings
+  (`check.simulate`) plays both sides' recorded orders - no scripts in it. The drills' scripts inside
+  `drills.verify` (the drills are not used now) still act every step.
 - The observation and its memory are taken only at decisions, as the companion reads the state
   once a second; the GRU steps once a decision.
 - The reward of a decision is the sum of its steps'; a battle that ends within a decision ends it.

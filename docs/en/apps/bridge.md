@@ -87,8 +87,10 @@ sequenceDiagram
   standing shooters with an enemy in range by the simulator's measure fired within 10 s in 40 % of
   the seconds under hold, 98 % under an attack order, 90-97 % for the game's AI; one slinger unit
   stood 155 s with full ammunition). So once per decision the bridge picks the target of each held
-  shooter (`services.hold_target`: nearest standing visible enemy within range + `HOLD_REACH_M` = 10 m
-  centre to centre, else the nearest routing one; the pick is kept while it qualifies) and gives it
+  shooter (`services.hold_target`: nearest standing visible enemy within range centre to centre,
+  `HOLD_REACH_M` = 0, else the nearest routing one - a target beyond range makes the engine walk the shooter
+  forward, and the simulator's holding shooter never walks; with the earlier 10 m `ai_like`'s held shooters moved
+  over 4 m in 3 s 17 % of their time, `build/audit_orders`; the pick is kept while it qualifies) and gives it
   as an attack order's target, walking, under the same duty (`fire_freely`, `missile_duty`). A held
   shooter that walks under it for `HOLD_WALK` = 2 decisions is halted to fire at will for `FREE_MIN`
   decisions (`services.hold_guard`): hold never walks. Event `nn_hold` (`aim`, `none`, `halt`);
@@ -164,7 +166,10 @@ sequenceDiagram
   and the engine has no suitable target. At `REAIM_AFTER` = 3 decisions (at most 3 s with the usual
   `decide_ms = 1000`), it picks the network's target if visible and in range, otherwise the nearest
   visible living, non-shattered enemy; routing enemies can also be shot. Range is strictly between
-  centres, without `HOLD_REACH_M`. No enemy resets the count; network target changes do not.
+  centres, without `HOLD_REACH_M`. A shooter walking to its ordered target (the attack's target standing beyond
+  its range) is left alone - so the simulator's shooter walks under an attack until its target is in range; before,
+  after 3 decisions the bridge stopped it and aimed it at the nearest enemy (6.9 times a battle for the network,
+  `build/audit_orders`). No enemy resets the count; network target changes do not.
   Explicit `attack_ranged` bypasses `fire_freely`, even while the enemy remains in melee:
   `melee(false)`, `fire_at_will(true)`, `attack_unit(enemy, true, run)` supply the engine with a
   target to turn toward and shoot. HOLD uses walk. Recovery also works during the cooldown after
@@ -184,7 +189,7 @@ Orders are given through the verified recipes of [orders](orders.md):
 | `hold` | `halt()`, `fire_at_will(true)`; a held shooter is then aimed by the bridge (below) |
 | `move` | `fire_at_will(true)`, `goto_location(point, run)` |
 | `withdraw` | `fire_at_will(true)`, `goto_location(point, true)` — a run out of the fight |
-| `attack` | a shooter with ammunition: `attack_ranged(uc, enemy, run, true)` — `melee(false)`, `fire_at_will(true)`, `attack_unit(enemy, true, run)`; everyone else, including a shooter with ammo 0: `attack_melee` — `melee(true)`, `attack_unit(enemy, false, true)`; an existing attack switches when ammo runs out |
+| `attack` | a shooter with ammunition: `attack_ranged(uc, enemy, run, true)` — `melee(false)`, `fire_at_will(true)`, `attack_unit(enemy, true, run)`; everyone else, including a shooter with ammo 0: `attack_melee` — `melee(true)`, `attack_unit(enemy, false, run)` — at a run or a walk as ordered (before, always at a run); an existing attack switches when ammo runs out |
 | ATTACK / HOLD target recovery | `nn_reaim`: explicit `attack_ranged` after 3 decisions without a suitable target, including enemies in melee; HOLD walks |
 | `keep` | nothing: the order in force goes on; a unit without one yet stands as it was taken |
 

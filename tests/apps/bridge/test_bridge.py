@@ -152,10 +152,11 @@ def test_a_held_shooter_takes_the_nearest_enemy_in_range_as_the_simulator_does(l
         return t({i + 1: t(r) for i, r in enumerate(items)})
 
     far = {"n": "e_far", "side": 2, "men": 100, "x": 120 + reach + 1, "z": 0}
-    melee = {"n": "e_melee", "side": 2, "men": 100, "m": True, "x": 125, "z": 0}
+    melee = {"n": "e_melee", "side": 2, "men": 100, "m": True, "x": 115, "z": 0}
     near = {"n": "e_near", "side": 2, "men": 100, "x": 0, "z": 90}
     friend = {"n": "own_spear", "side": 1, "men": 100, "x": 10, "z": 0}
-    assert pick(me, rows(far, friend), 120, None) is None                     # out of reach, a friend
+    assert reach == 0                                                         # by the centres, as in range
+    assert pick(me, rows(dict(far, x=121), friend), 120, None) is None        # out of range, a friend
     assert pick(me, rows(far, melee), 120, None) == "e_melee"                 # into melee too (the sim's)
     assert pick(me, rows(far, melee, near), 120, None) == "e_near"            # the nearest
     assert pick(me, rows(far, melee, near), 120, "e_melee") == "e_melee"      # kept while it qualifies
@@ -256,6 +257,13 @@ def test_targetless_recovery_prefers_the_order_then_nearest_valid_enemy(lua):
     assert cycle(dict(me, t="mob"), [mob, near])[-1] == "near"
     assert cycle(dict(me, t="mob"), [mob]) == [None] * after
     assert cycle(dict(me, t="ordered"), [near, dict(preferred, r=True)]) == [None] * after
+    # a shooter walking to its ordered target beyond range is left to walk (the simulator's attack walks in)
+    far_ordered = dict(preferred, x=200, m=False)
+    walking = dict(me, mv=True, t="ordered")
+    assert cycle(walking, [near, far_ordered]) == [None] * after
+    assert cycle(dict(me, mv=True), [near, far_ordered]) == [None] * after              # no engine target yet
+    assert cycle(dict(me, mv=False), [near, far_ordered])[-1] == "near"                 # stands: aimed as before
+    assert cycle(walking, [near, dict(far_ordered, r=True)])[-1] == "near"              # its target routs
     watch, rows = t({}), t([t(near)])
     assert [recover(watch, t(me), rows, 120, None, False) for _ in range(6)] == [
         None, None, "near", None, None, "near"]  # rejected engine orders retry only every 3 decisions

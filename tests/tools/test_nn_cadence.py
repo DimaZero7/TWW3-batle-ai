@@ -113,6 +113,42 @@ class TestBattles:
             assert not torch.equal(seen[land], seen[other])          # the decision's own orders (not all KEEP)
             assert seen[land].ne(O.KEEP).any()
 
+    def test_the_scripts_decide_once_a_decision_and_land_with_the_networks(self):
+        # (build/audit_orders: in the game ai_like decides a second apart on the state of the decision and its orders
+        # land late; before, the simulator asked the scripts every 0.5 s step, the orders at once)
+        import torch
+        from tools.nn.sim import orders as O
+        from tools.nn.train import rollout
+        for latency, land in ((0.0, 0), (0.5, 1)):
+            env = self.env(cad.Cadence(1.0, latency), opponent="ai_like")
+            asked, bases, made, given = [], [], [], []
+            orig_scripted, orig_step = env.scripted, env._sim_step
+
+            def scripted():
+                asked.append(float(env.st.t[0]))
+                made.append(orig_scripted())
+                return made[-1]
+            env.scripted = scripted
+
+            def wrapped(parts, attacks, rb, rs, was_done, base=None):
+                bases.append(O.Orders(*(getattr(base, f).clone() for f in O.FIELDS)))
+                given.append(env.assemble(parts, base))                # what the simulator is given
+                return orig_step(parts, attacks, rb, rs, was_done, base)
+            env._sim_step = wrapped
+            t0 = float(env.st.t[0])
+            env.step(self.actor())
+            env.step(self.actor())
+            assert asked == pytest.approx([t0, t0 + 1.0])                 # once a decision, on its state
+            assert len(bases) == 4 and all(b is not None for b in bases)
+            script_units = rollout.learner_units(env.st.u, env.ctrl) == 0
+            for j, b in enumerate(bases):
+                k = b.kind[script_units]
+                assert bool((k == O.KEEP).all()) is (j % 2 != land)        # KEEP but at the landing step
+            assert bool((bases[land].kind[script_units] != O.KEEP).all())
+            for j in (land, land + 2):                                    # the script's own orders reach its units
+                assert torch.equal(given[j].kind[script_units], made[j // 2].kind[script_units])
+                assert torch.equal(given[j].target[script_units], made[j // 2].target[script_units])
+
     def test_the_old_cadence_gives_every_step_the_decision(self):
         env = self.env(cad.STEP)
         seen, O = self.spy(env)
@@ -128,14 +164,24 @@ class TestBattles:
         assert float(d.float().mean()) * 0.5 == pytest.approx(0.36, abs=0.01)
         assert cad.Cadence(1.0, 0.5).delays(0.5, 4, "cpu").tolist() == [1] * 4
 
+    def test_a_hashed_landing_has_the_mean_latency_and_does_not_depend_on_the_batch(self):
+        import torch
+        c = cad.Cadence(1.0, 0.36)
+        ids = torch.arange(20000)
+        late = torch.stack([c.lands(0.5, 1, ids, d) for d in range(3)])
+        assert bool((late == ~torch.stack([c.lands(0.5, 0, ids, d) for d in range(3)])).all())   # one step or other
+        assert float(late.float().mean()) * 0.5 == pytest.approx(0.36, abs=0.01)
+        assert torch.equal(c.lands(0.5, 1, ids[5:9], 2), late[2, 5:9])                       # the same in a sub-batch
+        assert cad.Cadence(1.0, 0.5).lands(0.5, 1, ids[:3], 7).tolist() == [True] * 3
+
     def test_the_reward_is_summed_over_the_steps_and_the_hook_sees_each(self):
         import torch
         env = self.env(cad.Cadence(1.5, 0.0))
         orig = env._sim_step
         calls = []
 
-        def spy(parts, attacks, rb, rs, was_done):
-            r, fin = orig(parts, attacks, rb, rs, was_done)
+        def spy(parts, attacks, rb, rs, was_done, base=None):
+            r, fin = orig(parts, attacks, rb, rs, was_done, base)
             return torch.ones_like(r) * len(calls), fin            # 1, 2, 3 (counted before)
         env._sim_step = lambda *a: (calls.append(1), spy(*a))[1]
         hooks = []

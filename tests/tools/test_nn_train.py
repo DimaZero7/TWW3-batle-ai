@@ -937,6 +937,10 @@ class TestProperties:
         b.u["side"] = torch.where(b.u["side"] > 0, 3 - b.u["side"], b.u["side"])
         b.attacker = 3 - a.attacker
         P = load()
+        # (the hash draws key on the unit's slot - the rally's chance a second, morale.rally_hazard; the rout's dodge
+        # side: the mirror swaps the slots, so they draw other numbers; off here, the rest of the rules is symmetric)
+        P = P.with_cal("morale", rally_hazard=dict(P.sim["morale"]["rally_hazard"], on=False),
+                       rout_dodge=dict(P.sim["morale"].get("rout_dodge") or {}, on=False))
         for _ in range(400):
             ha, hb = reward.measure(a), reward.measure(b)
             oa = opponents.nearest(a)

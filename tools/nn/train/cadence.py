@@ -55,6 +55,19 @@ class Cadence:
             return torch.full((B,), whole, dtype=torch.long, device=device)
         return whole + (torch.rand(B, device=device) < frac).long()
 
+    def lands(self, dt, j, ids, decision):
+        """[B] bool: whether a decision's orders land at its step j - delays() drawn by a hash of (battle id,
+        decision number) instead of torch's generator, so a battle lands the same in any batch (script_battles:
+        compacted batches must end the same). ids [B]: the battles' ids (state `row`); decision: an int."""
+        import torch
+        from tools.nn.sim.morale import _hash_uniform
+        whole, frac = self.delay(dt)
+        if frac == 0:
+            return torch.full(ids.shape, j == whole, dtype=torch.bool, device=ids.device)
+        k = torch.full(ids.shape, int(decision), dtype=torch.long, device=ids.device)
+        late = _hash_uniform(ids.shape[0], 1, k, ids.device, salt=31337, ids=ids[:, None].long())[:, 0] < frac
+        return (whole + late.long()) == j
+
     def discount(self, x, dt=None):
         """A per-REF_S factor (gamma, lambda) -> per decision: x ** (decision seconds / REF_S)."""
         seconds = self.steps(dt) * dt if dt else self.decide_s

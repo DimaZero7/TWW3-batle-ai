@@ -63,7 +63,11 @@ def step(st, orders, params=None, dt=None):
     take = standing & (orders.kind != O.KEEP)
     kind = torch.where(take, orders.kind, u["order_kind"])
     tgt = torch.where(take, orders.target, u["order_target"])
-    run = torch.where(take, orders.run, u["order_run"])
+    # A withdraw always runs, whatever the order's run flag: in the game the companion and the bridge give it at a run
+    # (exchange.orders_list, goto_location(point, true); the gate's withdrawing units ran 89 % of their seconds at 3.0
+    # m/s median, build/audit_orders), as ai_like gives it. Before, the network's withdraw walked here (decide.to_orders
+    # keeps the run flag of MOVE and ATTACK only) and ran in the game.
+    run = torch.where(take, orders.run | (orders.kind == O.WITHDRAW), u["order_run"])
     t_ok = (tgt >= 0) & alive.gather(1, tgt.clamp(min=0)) & ~same_side.gather(2, tgt.clamp(min=0)[:, :, None]).squeeze(2)
     kind = torch.where((kind == O.ATTACK) & ~t_ok, torch.full_like(kind, O.HOLD), kind)
     tgt = torch.where(kind == O.ATTACK, tgt, torch.full_like(tgt, -1))
