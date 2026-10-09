@@ -427,11 +427,14 @@ class TestRally:
 
     def test_a_routing_enemy_near_blocks_the_rally(self):
         assert self.rally_after(80.0, enemy_routing=True) is None
-        assert self.rally_after(120.0, enemy_routing=True) is not None
+        # (beyond 95 m a routing enemy does not block; the nearest standing one is 800 m off: 1.3 % a second,
+        # morale.rally_hazard - long enough to be sure)
+        assert self.rally_after(120.0, enemy_routing=True, seconds=900) is not None
 
     def test_the_rally_comes_after_the_wait(self):
-        t = self.rally_after(300.0, enemy_routing=False)
+        t = self.rally_after(130.0, enemy_routing=False, seconds=300)      # 110-125 / 125-150 m: 9.5 / 8.5 % a second
         assert t is not None and t >= P.sim["morale"]["rally_wait_s"] - P.dt - 1e-6
+        assert self.rally_after(80.0, enemy_routing=False) is None          # within 95 m: chance 0
 
 
 # --- C3: no charge into a target already fighting our units ---

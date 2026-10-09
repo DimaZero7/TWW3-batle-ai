@@ -81,6 +81,18 @@ def army_collapse(u, params):
     return beaten.gather(1, (u["side"] - 1).clamp(min=0)) & present
 
 
+def _hash_uniform(B, N, k, device, salt=86413):
+    """[B, N] a uniform (0, 1) draw per (battle row, unit, period k [B], an integer): an integer hash, the same every
+    call for the same inputs (opponents.tick_uniform's; here so the simulator stays free of torch's generators)."""
+    b = torch.arange(B, device=device)[:, None]
+    i = torch.arange(N, device=device)[None, :]
+    h = (b * 1000003 + i * 7919 + k.long()[:, None] * 104729 + salt) & 0x7FFFFFFF
+    h = ((h ^ (h >> 13)) * 1274126177) & 0x7FFFFFFF
+    h = ((h ^ (h >> 16)) * 668265263) & 0x7FFFFFFF
+    h = h ^ (h >> 15)
+    return ((h & 0xFFFFFF).float() + 0.5) / float(1 << 24)
+
+
 def window_steps(seconds, dt):
     """Steps in a sliding window of `seconds` (at least one)."""
     return max(1, int(round(float(seconds) / dt)))
@@ -261,6 +273,22 @@ def step(u, ctx, params, dt):
     free = ~ctx["enemy_near"] & ~ctx.get("collapse", torch.zeros_like(alive))
     ready = (M > 0) & (u["rout_s"] >= float(cal["rally_after_s"]))
     rally = routing & ~u["s"] & free & ready & alive
+    hz = cal.get("rally_hazard") or {}
+    if hz.get("on") and "foe_d" in ctx:
+        # The rally as the game's measured process (morale.rally_hazard, config/nn/sim.json rally_hazard_why): a
+        # router past rally_after_s rallies in a second with a chance set by the nearest standing enemy's centre
+        # distance (bins edges_m, chances p_per_s; 0 within the first edge), instead of the 95 m gate: a fixed hash
+        # draw per (battle row, unit, step) - nothing random to replay, as opponents.tick_uniform.
+        edges, probs = hz["edges_m"], hz["p_per_s"]
+        fd = ctx["foe_d"]
+        p_s = torch.full_like(fd, float(probs[0]))
+        for k, edge in enumerate(edges):
+            p_s = torch.where(fd >= float(edge), torch.full_like(fd, float(probs[k + 1])), p_s)
+        p_step = 1.0 - (1.0 - p_s) ** dt
+        draw = _hash_uniform(fd.shape[0], fd.shape[1], torch.round(ctx["t"] / dt).long(), fd.device)
+        # (free keeps the block by a routing enemy within rally_free_m - rally_any_enemy, measured apart; a standing one
+        # that close is the table's first bin, chance 0)
+        rally = routing & ~u["s"] & ready & alive & free & (draw < p_step)
     wait_s = float(cal.get("rally_wait_s", 0.0))
     if wait_s > 0 and "rally_ok_s" in u:
         # The rally is not at once (morale.rally_wait_s; build/open_battle/spec.md 4): the conditions above must hold

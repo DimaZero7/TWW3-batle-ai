@@ -590,6 +590,9 @@ def step(st, orders, params=None, dt=None):
         # routing enemy 0.9 % rallied a second, 12.6 % with none; build/open_battle/spec.md 4)
         "enemy_near": (foes & (standing[:, None, :] | bool(mcal.get("rally_any_enemy")))
                        & (d <= mcal["rally_free_m"])).any(2),
+        # the nearest standing enemy's centre (m; morale.rally_hazard: the rally's chance a second by it) and the time
+        "foe_d": torch.where(foes & standing[:, None, :], d, torch.full_like(d, 1e9)).amin(2),
+        "t": st.t,
     }
     began = morale.step(u, ctx, params, dt)
     standing = alive & ~u["r"]

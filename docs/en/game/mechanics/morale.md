@@ -93,7 +93,13 @@ Sources: [twwstats morale][tws-m] (high), [fandom Leadership][fw-lead], [fandom 
   running. WH2 · Steam · low. Ours: the morale probe — a rally once the enemy is beyond 94–96 m; the
   simulator 95 m (`morale.rally_free_m`), and **any** living enemy blocks the rally, routing ones too
   (`morale.rally_any_enemy`; the recordings: next to a routing enemy within 95 m 0.9 % of 4285 seconds rallied
-  within 1 s, with none 12.6 % of 17,319). Our number is better.
+  within 1 s, with none 12.6 % of 17,319). Our number is better. The rally itself in the simulator is not the
+  "beyond 95 m" gate but the measured process (`morale.rally_hazard`): the chance to rally in a second by the nearest
+  standing enemy's distance - 0 / 4.3 / 9.5 / 8.5 / 1.3 % within 95 / 95-110 / 110-125 / 125-150 / beyond 150 m (the
+  recordings it1-it8, 64 battles, routers 18 s or more into the rout: ours 0.0 / 4.6 / 11.2 / 9.9 / 2.0 % over 30,457 /
+  3,597 / 2,054 / 1,512 / 4,201 seconds, the game AI's 0.3 / 3.6 / 6.6 / 6.5 / 0.9 % over 8,279 / 1,455 / 1,184 / 1,147 /
+  8,256; `build/fable/rallyhaz.py`). Estimated from the recordings, the mechanism not found: the probe rally2 (one
+  pursuer) rallies as soon as the enemy is 92-96 m away - the gap stays open.
 - **No re-rout for 10 s after a rally** (`post_rally_no_rout_timer` 10). · high. Ours: same.
 - **Shattering.** Always after 3 routs (`shatter_after_rout_count`); when the points reach the floor −50
   (`ums_broken_threshold_lower`, the bottom of "broken": the game never goes below) — at once; after the
