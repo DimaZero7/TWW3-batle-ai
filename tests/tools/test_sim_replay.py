@@ -216,3 +216,32 @@ def test_recorded_orders_mark_attacks_on_a_recorded_router():
     b = recording(); b.f["m"][:] = False; b.f["fire"][:] = True; b.f["r"][3, 1] = True
     r = replay.recorded_orders(b, [0, 1], 2)
     assert r["target_r"][:, 0].tolist() == [False, False, False, True, False, False, False]
+
+
+def test_the_network_s_hold_in_melee_is_replayed_as_hold():
+    """replay.recorded_orders holds (check.NET_HOLDS, build/shotgap/replay_vs_net.py): a unit under its controller's HOLD
+    in recorded melee holds there, though the recording has an engine target (an ATTACK) or a far order point (a
+    leave); out of melee the hold changes nothing."""
+    b = recording()
+    plain = replay.recorded_orders(b, [0, 1], 2, fight_nearest=[False, True], leavers=[True, False])
+    assert plain["kind"][2, 0] == O.ATTACK and plain["kind"][4, 0] == O.MOVE        # target / a far point (leave)
+    holds = np.zeros((7, 2), dtype=bool); holds[:, 0] = True
+    r = replay.recorded_orders(b, [0, 1], 2, fight_nearest=[False, True], leavers=[True, False], holds=holds)
+    assert r["kind"][2:5, 0].tolist() == [O.HOLD] * 3 and (r["target"][2:5, 0] == -1).all()
+    assert r["kind"][0, 0] == plain["kind"][0, 0] and r["kind"][:, 1].tolist() == plain["kind"][:, 1].tolist()
+    assert not (r["phase"][2:5, 0] == 2).any()
+
+
+def test_network_holds_follow_the_companion_s_last_decision(tmp_path, monkeypatch):
+    import json
+    from tools.nn.sim import check
+    run = tmp_path / "test"
+    run.mkdir()
+    rows = [{"t": 0, "orders": [{"unit": "a", "kind": "move"}, {"unit": "b", "kind": "hold"}]},
+            {"t": 2000, "orders": [{"unit": "a", "kind": "hold"}, {"unit": "b", "kind": "keep"}]},
+            {"t": 4000, "orders": [{"unit": "a", "kind": "keep"}, {"unit": "b", "kind": "attack", "target": "a"}]}]
+    (run / "companion.jsonl").write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+    monkeypatch.setattr(check.gamedata, "RUNS", tmp_path)
+    h = check.network_holds(recording())
+    assert h[:, 0].tolist() == [False, False, True, True, True, True, True]
+    assert h[:, 1].tolist() == [True, True, True, True, False, False, False]

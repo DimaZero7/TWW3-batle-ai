@@ -36,6 +36,9 @@ TOLERANCE = 0.2
 FIGHT_NEAREST = True             # replay: a unit in melee without a recorded target attacks the nearest enemy
 PLANNER = ("attack", "defend")   # battles of CA's planner against the game's AI (not the network's own runs)
 NET = "net"          # the network's battles against the game's AI on generated armies (the gate): reported apart
+# The network's HOLD in melee replayed as HOLD (replay.recorded_orders holds): its orders from the run's companion.jsonl
+# (build/shotgap/replay_vs_net.py: without it 53 % of its 'hold' unit-seconds in contact were replayed as a leave).
+NET_HOLDS = True
 COPIES = 19          # replays of each recorded battle: the range of 19 copies is a 90 % prediction interval
 CURVE_S = (60, 120, 180)   # share of HP lost this long after the first contact
 JITTER_M = 2.0       # ... from starts moved by up to this much
@@ -233,6 +236,37 @@ def _work(job):
     return {k: (measure_fn(g, s, f) if measure_fn else (g, s, f)) for k, g, s, f in zip(idx, games, sims, facs)}
 
 
+def network_holds(g):
+    """[T, N] bool: the network's last decision for the unit (keep: the one before) is 'hold' (companion.jsonl of the
+    run, matched to the recording's seconds); all False without the file."""
+    T, names = len(g.t), list(g.names)
+    out = np.zeros((T, len(names)), dtype=bool)
+    path = gamedata.RUNS / g.run / "companion.jsonl"
+    if not path.exists():
+        return out
+    idx = {n: i for i, n in enumerate(names)}
+    t = np.asarray(g.t, float)
+    ev = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        i = min(int(np.searchsorted(t, float(e.get("t", 0)) / 1000.0)), T - 1)
+        for o in e.get("orders") or []:
+            if o.get("unit") in idx and o.get("kind") not in (None, "keep"):
+                ev.append((i, idx[o["unit"]], o["kind"] == "hold"))
+    ev.sort(key=lambda r: r[0])
+    cur = np.zeros(len(names), dtype=bool)
+    k = 0
+    for i in range(T):
+        while k < len(ev) and ev[k][0] <= i:
+            cur[ev[k][1]] = ev[k][2]
+            k += 1
+        out[i] = cur
+    return out
+
+
 def _simulate_batch(games, armies, params, device, copies, jitter_m, seed, end_at_recording, H, zero_first,
                     fields=None):
     """simulate() for one batch: [[sim Battle per copy] per game]."""
@@ -260,8 +294,9 @@ def _simulate_batch(games, armies, params, device, copies, jitter_m, seed, end_a
         # the network's units in melee without a recorded target are under its HOLD (replay.recorded_orders)
         nearest = [FIGHT_NEAREST and not (g.own_ai == NET and int(s) == 1) for s in g.side]
         spacing = [params.spacing_of(k) for k in g.keys] if g.keys else params.sim["formation"]["spacing_m"]
+        holds = network_holds(g) if NET_HOLDS and g.own_ai == NET else None
         orders = replay.recorded_orders(g, slot_of, 2 * H, [width.get(n) for n in g.names], spacing, nearest,
-                                        params.sim["contact"].get("leave_m", 0.0), leavers)
+                                        params.sim["contact"].get("leave_m", 0.0), leavers, holds=holds)
         rows.extend([orders] * copies)
     rec = Recorder(st, fields=fields)
     ends = torch.tensor([float(g.t[-1]) for g in games for _ in range(copies)], device=device)

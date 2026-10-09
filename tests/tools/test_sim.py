@@ -229,6 +229,9 @@ class TestMelee:
         assert F["min"] == pytest.approx(ff * float(depth[0, H]) / sp, rel=1e-4)
         assert F["striker"] == pytest.approx(ff * float(front[0, 0]) / sp, rel=1e-4)
         assert F["striker"] > F["min"]
+        # on by default (config/nn/sim.json melee.flank_face_why: the defender probe - a unit turning its flank to its
+        # attacker to leave or to attack another keeps being struck by the attacker's whole front)
+        assert P.sim["melee"]["flank_face"] == "striker"
 
     def test_at_most_the_cap_reach_a_lord(self):
         st = face_off(SPEAR, GENERAL)

@@ -75,7 +75,7 @@ def fill_gaps(flag, gap, x=None, z=None, stay_m=None):
 
 
 def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=True, leave_m=10.0, leavers=None,
-                    melee_gap=MELEE_GAP, stay_m=STAY_M):
+                    melee_gap=MELEE_GAP, stay_m=STAY_M, holds=None):
     """Orders implied by a recorded battle (tools/nn/gamedata.Battle), one row per recorded second:
     dict of arrays [T, N] kind, x, z, target, run in the simulator's slots (slot_of: recorded index
     -> slot). The game records the order's point at the formation's front (measured: half a depth
@@ -100,7 +100,12 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
     melee: it never left the fight (CA's planner's spearmen against clanrats: the flag off 18 s and 1 s while the
     unit stood in place, its order point 23-26 m away, the point it had through the whole fight; read as
     seconds out of melee they gave a far MOVE and a break-off phase, so the replayed unit walked off and charged
-    back in, or, held by contact.pin_melee_s, stood 20 s without striking). A lord's gaps stay: lords break off."""
+    back in, or, held by contact.pin_melee_s, stood 20 s without striking). A lord's gaps stay: lords break off.
+    holds [T, len(slot_of)] (None: none): the seconds a unit is under its controller's HOLD (the network's, from
+    companion.jsonl: network_holds); in melee such a unit holds (HOLD), whatever the recording's target or order
+    point: the game records the engine's target and the last move's point for a halted unit, which the replay read
+    as an attack or a leave (the network's 'hold' in contact over the gate sets it1-it9, 20,749 unit-s: replayed as
+    MOVE 53 %, HOLD 26 %, ATTACK 21 %; build/shotgap/replay_vs_net.py)."""
     f = battle.f
     T = len(battle.t)
     kind = np.full((T, N), O.HOLD, dtype=np.int64)
@@ -131,11 +136,13 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
         leaving = np.zeros(T, dtype=bool)
         if leaver:
             leaving = np.hypot(ox - np.nan_to_num(f["x"][:, i]), oz - np.nan_to_num(f["z"][:, i])) >= leave_m
+        held = np.zeros(T, dtype=bool) if holds is None else (np.asarray(holds[:T, i], bool) & m_i)
+        leaving = leaving & ~held
         if nearest_of[i]:
-            tg = np.where((tg < 0) & m_i & ~leaving, nearest[:, i], tg)
+            tg = np.where((tg < 0) & m_i & ~leaving & ~held, nearest[:, i], tg)
         ok_t = tg >= 0
         mapped = np.where(ok_t, np.array(slot_of)[np.clip(tg, 0, None)], -1)
-        attack = ok_t & (battle.side[np.clip(tg, 0, None)] != battle.side[i])
+        attack = ok_t & (battle.side[np.clip(tg, 0, None)] != battle.side[i]) & ~held
         if widths is not None and widths[i]:
             back = half_depth(np.nan_to_num(f["men"][:, i]), widths[i],
                               spacing if np.isscalar(spacing) else spacing[i])

@@ -566,6 +566,14 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
             sides[fac]["units"].append({"key": key, "x": row["x"], "z": row["z"], "b": row["b"], "men": row["men"],
                                         "width": None if lord else width, "general": lord, "name": role})
             roles[role] = fac
+        if spec.get("target2"):
+            # the second target: tx + t2_dx, beside the target, facing its way (entries/charge_probe.lua place)
+            t2 = spec["target2"]                     # the layout's script name: <side>_<short>b_<lane>
+            t2 = t2 if t2 in UNITS else t2.split("_", 1)[1].rsplit("_", 1)[0][:-1]
+            t2_key = UNITS[t2][0]
+            sides[roles["tg"]]["units"].append({"key": t2_key, "x": s0[2]["x"] + spec.get("t2_dx", 0), "z": s0[2]["z"],
+                                                "b": s0[2]["b"], "men": UNITS[t2][1], "width": spec["t_width"],
+                                                "general": False, "name": "t2"})
         if spec.get("lord") and s0[3]:
             r = s0[3]
             sides[1]["units"].append({"key": UNITS["general"][0], "x": r["x"], "z": r["z"], "b": r["b"],
@@ -583,13 +591,13 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
     st.u["morale"] = st.u["morale"] + 1e4
     B, N = st.B, st.N
     slot = {r: torch.tensor([sim_scenario.slots(a, per_side).get(r, -1) for a in armies], device=device)
-            for r in ("a", "tg", "l")}
+            for r in ("a", "tg", "l", "t2")}
     specs = [ln["spec"] for ln in meta]
     mode = [sp["mode"] for sp in specs]
     tmode = [sp["target_mode"] for sp in specs]
     syg_slot = sim_abilities.slot_keys(UNITS["general"][0], params.units, params.abilities).index(SYG) \
         if SYG in sim_abilities.slot_keys(UNITS["general"][0], params.units, params.abilities) else -1
-    st_ = {"contact": [None] * B, "contact2": [None] * B, "phase": ["in"] * B, "out_t": [0.0] * B,
+    st_ = {"contact": [None] * B, "contact2": [None] * B, "phase": ["in"] * B, "out_t": [0.0] * B, "after": [None] * B,
            "out_from": [None] * B, "fired": [False] * B, "last": {}, "phases": [[] for _ in range(B)],
            "a_ability": [False] * B, "start": [None] * B, "faced": set()}
     rec = {"t": [], "rows": []}
@@ -668,6 +676,29 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                 kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, mode[b] == "attack_run"
             elif mode[b] == "move_run":
                 kind[b, A], x[b, A], z[b, A], run_[b, A] = O.MOVE, sp["x"], sp["z"] - sp["move_beyond_m"], True
+            # lane.after (entries/charge_probe.lua): at_s after the first contact the attacker gets one more order,
+            # kept from then on (attack_t2 / attack_same / halt / move_near to its place then + (dx, dz) / none)
+            af = sp.get("after")
+            if af and c is not None and t - c >= af["at_s"] - 1e-6 and af["kind"] != "none":
+                if st_["after"][b] is None:
+                    st_["after"][b] = (float(ax[b]), float(az[b]))
+                    st_["phases"][b].append({"phase": "after:" + af["kind"], "t": t * 1000})
+                T2 = int(slot["t2"][b])
+                walk = bool(af.get("walk"))
+                if af["kind"] == "attack_t2" and T2 >= 0:
+                    kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T2, not walk
+                elif af["kind"] == "attack_same":
+                    kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, not walk
+                elif af["kind"] == "halt":
+                    kind[b, A], target[b, A], run_[b, A] = O.HOLD, -1, False
+                    x[b, A], z[b, A] = st_["after"][b]
+                elif af["kind"] == "move_near":
+                    sx, sz = st_["after"][b]
+                    kind[b, A], target[b, A], run_[b, A] = O.MOVE, -1, not walk
+                    x[b, A], z[b, A] = sx + af.get("dx", 0), sz + af.get("dz", 0)
+            # the second target: halted unless it attacks (t2_mode)
+            if sp.get("t2_mode") == "attack" and int(slot["t2"][b]) >= 0:
+                kind[b, int(slot["t2"][b])], target[b, int(slot["t2"][b])], run_[b, int(slot["t2"][b])] = O.ATTACK, A, False
             # the target
             if tmode[b] == "both" or (sp.get("answer") and c is not None):
                 kind[b, T], target[b, T], run_[b, T] = O.ATTACK, A, tmode[b] == "both"
