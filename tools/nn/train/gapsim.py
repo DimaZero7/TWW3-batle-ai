@@ -92,11 +92,14 @@ def start_of(run_dir):
 
 
 @torch.no_grad()
-def play(starts, ckpt, copies=8, seed=1, greedy=False, device="cpu", limit_s=3600.0, cadence=None, log=print):
+def play(starts, ckpt, copies=8, seed=1, greedy=False, device="cpu", limit_s=3600.0, cadence=None, log=print,
+         noise=True):
     """starts: [(gamedata.Battle, army)] -> per start [{"battle": gamedata.Battle, "winner": 1 | 2 | 0,
     "t": end s, "abilities": [s of our lord's ability uses], "orders": {"move", "run"} [T, N] in force}] of
-    its copies."""
+    its copies. noise: the copies roll their blows (config/nn/sim.json noise.blows; the twin card's default)."""
     params = rollout.params_with_limit(limit_s)
+    if noise:
+        params = params.with_cal("noise", blows=True)
     H = max(len(a["sides"][s]["units"]) for _, a in starts for s in (1, 2))
     armies, game_of, names = [], [], []
     for k, (_, army) in enumerate(starts):

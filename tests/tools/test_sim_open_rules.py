@@ -472,3 +472,35 @@ def test_the_sectors_are_45_and_135_degrees():
     sector = geometry.sector(torch.tensor([40.0, 50.0, 130.0, 140.0]) * geometry.DEG, P.sim["contact"]["front_deg"],
                              P.sim["contact"]["rear_deg"])
     assert sector.tolist() == [0, 1, 1, 2]
+
+
+# --- noise.blows: the copies roll their blows ---
+
+def test_rolled_blows_keep_the_mean_and_spread_as_the_probes_identical_lanes():
+    """noise.blows (config/nn/sim.json noise.blows_why): off by default; on, a pair's HP a step is a Poisson number of
+    blows of the mean HP a blow - over 48 copies of swordsmen <-> clanrats the HP lost at 30 s keeps the mean (within
+    3 %) and spreads by a CV near the probes' identical lanes (0.10 at 30 s: between 0.05 and 0.16)."""
+    assert P.sim["noise"]["blows"] is False
+    copies = 48
+
+    def lost(params):
+        st = scenario.build([army([(SWORD, -50, 0, 90.0)], [(CLANRATS, 50, 0, 270)])] * copies, params)
+        front, depth = geometry.dims(st.u, params.sim["formation"]["spacing_m"])
+        H = st.N // 2
+        st.u["x"][:, 0] = -(depth[:, 0] / 2 + TOUCH / 2)
+        st.u["x"][:, H] = depth[:, H] / 2 + TOUCH / 2
+        hp0 = st.u["hp_abs"][:, H].clone()
+        o = replay.hold(st)
+        o.kind[:, 0], o.target[:, 0] = O.ATTACK, H
+        o.kind[:, H], o.target[:, H] = O.ATTACK, 0
+        for k in range(int(30 / params.dt)):
+            battle.step(st, o, params)
+            if k == 0:
+                o.kind[:] = O.KEEP
+        return (hp0 - st.u["hp_abs"][:, H]).numpy()
+    torch.manual_seed(7)
+    mean_det = float(lost(P).mean())
+    rolled = lost(P.with_cal("noise", blows=True))
+    assert abs(rolled.mean() / mean_det - 1) < 0.03
+    cv = rolled.std() / rolled.mean()
+    assert 0.05 < cv < 0.16, cv

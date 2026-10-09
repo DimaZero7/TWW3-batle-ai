@@ -933,7 +933,11 @@ all the copies at once.
 quantities; `python -m tools.nn.simskill build/nn-sim/check.json [--all]` rescores the saved cases without the
 simulator):
 
-- Every recorded battle is replayed 19 times from starts moved by up to 2 m. The 19 copies are the simulator's
+- Every recorded battle is replayed 19 times from starts moved by up to 2 m, and the copies roll their blows: a pair's HP a
+  step is a Poisson number of blows of the mean size (`noise.blows`: on in the replay and the twin card, off in training;
+  the game's identical melee-probe lanes differ by 0.12 / 0.10 / 0.07 of the health lost at 15 / 30 / 60 s - just as
+  independent blows do, `build/shotgap/noise_lanes.py`; without it the copies were nearly the same: 0.000 / 0.000 /
+  0.003). The 19 copies are the simulator's
   forecast, the game's recording is the outcome. Quantities of a whole battle: did side 1 win (yes/no), the HP
   each side lost by the end and 60 / 120 / 180 s after the first contact, the share of a side's units that
   routed at least once, routs and rallies per unit, the time of the first contact. A pair: the fight's length,

@@ -384,6 +384,15 @@ def step(st, orders, params=None, dt=None):
         shown, shown_tgt = firing, m_target
 
     # --- damage, men, kills ---
+    if (params.sim.get("noise") or {}).get("blows"):
+        # noise.blows: a Poisson number of blows / hits of the pair's mean HP a blow (the game rolls each; the probes'
+        # identical lanes differ as independent blows do, config/nn/sim.json noise.blows_why); off: the mean
+        def rolled(hp, per):
+            ok = (hp > 0) & (per > 0) & torch.isfinite(hp) & torch.isfinite(per)
+            lam = torch.where(ok, hp / torch.where(ok, per, torch.ones_like(per)), torch.zeros_like(hp))
+            return torch.where(ok, torch.poisson(lam) * per, hp)
+        hp_melee = rolled(hp_melee, mhit)
+        hp_missile = rolled(hp_missile, shit)
     dmg = hp_melee + hp_missile
     hit = torch.where(hp_missile > 0, shit, mhit)
     taken = dmg.sum(1)

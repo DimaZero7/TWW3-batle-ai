@@ -87,6 +87,11 @@
     "free_target_only": 1,
     "free_why": "runup_towards 1 (build/open_melee/spec.md R6): the run-up counts only the speed towards the attack target (else the nearest enemy), not running away (a Warlord that ran ~10 m off came back at 1.5 m/s and struck one ordinary blow, 3.5 s after his melee flag). free_target_only 1 (build/open_battle/spec.md 5): no charge sprint and no charge into an attack target already in melee with another of our units (CA, WH2: no charge when the path is blocked by one's own unit). The recordings (221 battles, the centre's speed 2 s before the first contact / the card's run, median): into a free target of its own order the game's AI 1.12 (standing) / 1.02 (moving), the network 1.09 (p75 1.20-1.26 = the card's charge speed / run 1.14-1.27); into a target already in melee 0.79-0.86. OPEN: whether entering another unit's fight gives the charge bonus (no data; probe)."
   },
+  "noise": {
+    "why": "the game's own randomness of blows and hits, for the replay and the twin card only (blows_why)",
+    "blows": false,
+    "blows_why": "blows (battle.step): the HP each pair deals in a step is drawn as a Poisson number of blows (melee) or hits (missiles) of the step's mean HP a blow, instead of the mean; off by default (training), on in the replay (tools/nn/sim/check.py NOISE) and the twin card (build/compare/set_vs_twin.py via tools/nn/train/gapsim.py noise). The game rolls every blow (hit chance, the armour roll) and every projectile: identical melee-probe lanes (build/shotgap/noise_lanes.py: 20 cells of 2+ identical lanes, 40 lanes) differ by a CV of 0.12 / 0.10 / 0.07 of the health lost at 15 / 30 / 60 s after contact, what independent blows give (0.13 / 0.10 / 0.08 at ~15 HP a blow); the deterministic twin's copies 0.000 / 0.000 / 0.003."
+  },
   "kills": {
     "exponent": 0.5,
     "why": "men lost per HP lost: blows that do not kill wound; men share = max(1 - g (1 - hp share), hp share), g = (hits to kill)^-exponent; fitted to men against health in the pairs (at half health: slaves 0.6 of men, spearmen 0.7-0.78; lords kill whole men: 1)",

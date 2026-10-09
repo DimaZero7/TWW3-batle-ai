@@ -39,6 +39,8 @@ NET = "net"          # the network's battles against the game's AI on generated 
 # The network's HOLD in melee replayed as HOLD (replay.recorded_orders holds): its orders from the run's companion.jsonl
 # (build/shotgap/replay_vs_net.py: without it 53 % of its 'hold' unit-seconds in contact were replayed as a leave).
 NET_HOLDS = True
+# The replay's copies roll their blows (config/nn/sim.json noise.blows): the copies spread as the game's identical lanes do.
+NOISE = True
 COPIES = 19          # replays of each recorded battle: the range of 19 copies is a 90 % prediction interval
 CURVE_S = (60, 120, 180)   # share of HP lost this long after the first contact
 JITTER_M = 2.0       # ... from starts moved by up to this much
@@ -270,6 +272,9 @@ def network_holds(g):
 def _simulate_batch(games, armies, params, device, copies, jitter_m, seed, end_at_recording, H, zero_first,
                     fields=None):
     """simulate() for one batch: [[sim Battle per copy] per game]."""
+    if NOISE:
+        params = params.with_cal("noise", blows=True)
+        torch.manual_seed((seed * 1000003 + sum(ord(ch) for g in games for ch in g.run)) % (2 ** 63))
     batch = [a for a in armies for _ in range(copies)]
     st = scenario.build(batch, params, device=device, per_side=H)
     slot_maps = []
