@@ -28,6 +28,9 @@ class ModelConfig:
     sector_heads: int = 2    # ... heads of the units -> sectors attention (head width sector_d / sector_heads)
     sector_at: int = 1       # ... it comes after this many of the units' attention blocks
     eyes: bool = False       # v2: the eyes, auxiliary heads on the simulator's truth fed back into the network (eyes.py)
+    pairs: bool = True       # v2: the pair features (reach, closing speed, bearing: pairs.py) in the units' attention
+    #                          bias and the target pointer; their weights start at 0, so a v2 checkpoint saved before
+    #                          them (its config has no `pairs`: True) loads and computes what it did
     critic_d: int = 128      # the centralised critic (training only)
     critic_layers: int = 3
     critic_heads: int = 4

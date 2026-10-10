@@ -7,6 +7,8 @@ the ones before it (autoregressive, as AlphaStar's action heads):
          its fine x fine cells (~25 m) given the sector chosen
       -> commitment: keep the new order 2 / 4 / 8 / 16 s (commit.py)
     run (move and attack) and the ability (as heads.py: independent of the order) beside them.
+The target's logits also get a learned number from the pair features of the unit and the enemy (cfg.pairs, pairs.py:
+reach, closing speed, bearing; 0 at the start).
 
 Every part after the kind reads the condition c = the unit's token + an embedding of the kind + the target's token
 (an attack's; zero otherwise). With the kinds as they are only an attack has a target and only move / withdraw have a
@@ -94,11 +96,16 @@ class ChainHeads(nn.Module):
         self.ability_q = nn.Linear(d, p)
         self.ability_k = nn.Sequential(nn.Linear(ab.SIZE, d), nn.GELU(), nn.Linear(d, p))
         self.ability_none = nn.Linear(d, 1)
+        if cfg.pairs:     # the pair features (pairs.py) -> + the logit of attacking j; 0 at the start
+            from tools.nn.model import pairs as pr
+            self.target_pair = nn.Linear(pr.SIZE, 1, bias=False)
+            nn.init.zeros_(self.target_pair.weight)
 
-    def forward(self, x, s, cells_in, obs_t, action=None, greedy=False, temperature=1.0, abilities=True):
+    def forward(self, x, s, cells_in, obs_t, action=None, greedy=False, temperature=1.0, abilities=True, pairs=None):
         """x [B, 1 + N, d] unit tokens, s [B, S, ds] sector tokens, cells_in [B, S, k2] (sectors.inside) -> (logits,
         action). logits: kind [B, N, 5], target [B, N, N], sector [B, N, S], fine [B, N, k2], commit [B, N, 4],
-        run [B, N], ability [B, N, 1 + SLOTS] - each under the action's earlier parts. action None: sampled."""
+        run [B, N], ability [B, N, 1 + SLOTS] - each under the action's earlier parts. action None: sampled.
+        pairs [B, 1 + N, 1 + N, pairs.SIZE]: the pair features (cfg.pairs), added to the target's logits."""
         cfg = self.cfg
         u = self.norm(x[:, 1:])
         ctrl, ok = obs_t["ctrl"], obs_t["target_ok"]
@@ -108,7 +115,10 @@ class ChainHeads(nn.Module):
         bad = torch.zeros(u.shape[0], device=u.device)
         kind, bad = _cap(self.kind(u), bad)
         kind = kind.masked_fill(~allowed, NEG)
-        target, bad = _cap(self.q(u) @ self.k(u).transpose(1, 2) / math.sqrt(cfg.pointer), bad)
+        target = self.q(u) @ self.k(u).transpose(1, 2) / math.sqrt(cfg.pointer)
+        if pairs is not None and getattr(self, "target_pair", None) is not None:
+            target = target + self.target_pair(pairs[:, 1:, 1:])[..., 0].to(target.dtype)
+        target, bad = _cap(target, bad)
         target = target.masked_fill(~ok[:, None, :], NEG)
         a_kind = _pick(kind, greedy, temperature) if action is None else action.kind
         has_target = target.max(-1).values > NEG / 2

@@ -10,7 +10,8 @@
   abilities sees exactly what it saw.
 * Block: attention + feed-forward. Masks: padding, own dead units and known-dead enemies are
   never looked at. Bias: a learned number per head for the distance between two units (buckets),
-  so "who is near" is easy; tokens without a known position use a bucket of their own.
+  so "who is near" is easy; tokens without a known position use a bucket of their own. v2 adds the pair
+  features' bias to it (pairs.py: reach, closing speed, bearing).
 """
 import math
 
@@ -103,11 +104,14 @@ def distance_buckets(pos, known, bins):
     return F.pad(b, (1, 0, 1, 0), value=bins)          # the context token
 
 
-def attention_bias(obs_t, bias_table, bins):
-    """Float mask [B, H, L, L]: learned distance bias, -inf for keys that may not be looked at."""
+def attention_bias(obs_t, bias_table, bins, extra=None):
+    """Float mask [B, H, L, L]: learned distance bias (+ extra [B, H, L, L]: v2's pair bias, pairs.py), -inf for keys
+    that may not be looked at."""
     known = obs_t["attend"] & (obs_t["tokens"][..., ob.INDEX["seen"]] > 0.5)
     buckets = distance_buckets(obs_t["pos"], known, bins)
     bias = bias_table(buckets).permute(0, 3, 1, 2)                     # [B, H, L, L]
+    if extra is not None:
+        bias = bias + extra.to(bias.dtype)
     keys = F.pad(obs_t["attend"], (1, 0), value=True)                  # [B, L]
     bias = bias.masked_fill(~keys[:, None, None, :], float("-inf"))
     # Made once in memory the attention kernel takes as it is: rows aligned to 16 numbers (a view

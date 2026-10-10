@@ -349,7 +349,8 @@ def test_a_tiny_v2_training_step_trains_the_chain_and_the_commitment(monkeypatch
     for h in eyes.HEADS:
         assert np.isfinite(st[f"eyes_{h}"]) and f"eyes_ev_{h}" in st
     for part in ("heads.kind.", "heads.commit.", "heads.place_q.", "heads.fine.", "sector_enc.", "sector_att.",
-                 "commit_in.", "eyes.own.", "eyes.threat.", "eyes.danger.", "eyes.own_in."):
+                 "commit_in.", "eyes.own.", "eyes.threat.", "eyes.danger.", "eyes.own_in.", "pair_bias.",
+                 "heads.target_pair."):
         assert any(n.startswith(part) for n in changed), part
     assert ppo.distance(actor, actor, batch, 6) == pytest.approx(0.0, abs=1e-6)
 
@@ -524,6 +525,11 @@ def test_the_companion_sees_the_v2_inputs_as_the_simulator_on_one_state(ours, mo
     f_game = sectors.features(CFG, o_game, sectors.inside(CFG, o_game["geo"]))
     f_sim = sectors.features(CFG, o_sim, sectors.inside(CFG, o_sim["geo"]))
     assert torch.allclose(f_game, f_sim, atol=1e-5) and float(f_sim[..., 0].sum()) > 0
+    # the pair features (pairs.py) too: from the same tokens and places
+    from tools.nn.model import pairs as mp
+    perm = [0] + [1 + i for i in idx]
+    p_game, p_sim = mp.features(o_game)[0], mp.features(o_sim)[0][perm][:, perm]
+    assert torch.allclose(p_game, p_sim, atol=1e-4) and float(p_sim.abs().sum()) > 0
     # the frame: forward points from our army to the enemy's whichever side we are
     fwd_enemy = o_sim["pos"][0][~o_sim["own"][0] & o_sim["attend"][0], 0].mean()
     fwd_own = o_sim["pos"][0][o_sim["own"][0] & o_sim["attend"][0], 0].mean()
@@ -619,3 +625,185 @@ def test_the_heads_logits_are_soft_capped_and_a_non_finite_one_is_counted_and_ma
     assert ((a.commit >= 0) & (a.commit < len(commit.DURATIONS))).all()        # ... and a valid choice made
     lp, _ = heads.log_prob(logits, a, o["ctrl"])
     assert torch.isfinite(lp).all()
+
+
+# --- the commitment's new events: an enemy coming at the unit, the unit bleeding ---
+
+def _place(o, unit, fwd_m, lat_m, vel=(0.0, 0.0)):
+    """o with the unit at (fwd_m, lat_m) m in the side's frame, moving at vel m/s (forward, lateral)."""
+    pos, tok = o["pos"].clone(), o["tokens"].clone()
+    pos[:, unit] = torch.tensor([fwd_m, lat_m]) / ob.POS
+    tok[:, unit, ob.INDEX["vel_fwd"]], tok[:, unit, ob.INDEX["vel_lat"]] = vel[0] / ob.VEL, vel[1] / ob.VEL
+    return dict(o, pos=pos, tokens=tok)
+
+
+def _far(o):
+    """Every unit far from the others (none near: no approach anywhere), standing."""
+    B, N = o["own"].shape
+    for i in range(N):
+        o = _place(o, i, -2000.0 + 300.0 * i, 0.0)
+    return o
+
+
+def _keep(B, N):
+    return heads.Action(torch.full((B, N), KEEP), torch.zeros((B, N), dtype=torch.long), torch.full((B, N), -1),
+                        torch.zeros((B, N), dtype=torch.bool), None, torch.zeros((B, N), dtype=torch.long))
+
+
+def _run(st, frames, unit=0):
+    """Decisions at t = 0, 1, ... on the frames, the unit kept committed: [freed at each]."""
+    B, N = frames[0]["own"].shape
+    free = []
+    for t, o in enumerate(frames):
+        st["until"][:, unit] = 100.0
+        x = commit.inputs(st, o, torch.full((B,), float(t)))
+        free.append(bool(x["free"][0, unit]))
+        st = commit.apply(st, x, torch.full((B,), float(t)), _keep(B, N))
+    return free
+
+
+def test_an_enemy_coming_at_the_unit_ends_its_commitment_once_per_approach():
+    setup, state, obs = calm()
+    base = _far(policy.to_torch(obs))
+    B, N = base["own"].shape
+    st = settled(commit.start(B, N), base)
+    o = _place(base, 0, 0.0, 0.0)
+    walk_in = [_place(o, 7, d, 0.0, (-3.0, 0.0)) for d in (60.0, 50.0, 40.0, 37.0, 34.0)]   # 3 m/s: from 40 m
+    away = _place(o, 7, 150.0, 0.0, (3.0, 0.0))
+    again = _place(o, 7, 35.0, 0.0, (-3.0, 0.0))
+    assert _run(st, walk_in + [away, again]) == [False, False, True, False, False, False, True]
+    # cavalry at 8 m/s is announced at 64 m (LEAD_S); farther than WARN_M never
+    st = settled(commit.start(B, N), base)
+    assert _run(st, [_place(o, 7, 70.0, 0.0, (-8.0, 0.0)), _place(o, 7, 62.0, 0.0, (-8.0, 0.0))]) == [False, True]
+    st = settled(commit.start(B, N), base)
+    assert _run(st, [_place(o, 7, 110.0, 0.0, (-20.0, 0.0))]) == [False]
+    # an enemy standing near, one walking past (across the line), our unit walking into a standing enemy, a friend
+    # coming, a routing enemy coming: no event
+    for frame in (_place(o, 7, 20.0, 0.0), _place(o, 7, 20.0, 0.0, (0.0, 3.0)),
+                  _place(_place(o, 0, 0.0, 0.0, (3.0, 0.0)), 7, 20.0, 0.0), _place(o, 2, 20.0, 0.0, (-3.0, 0.0)),
+                  _obs_with_t(_place(o, 7, 20.0, 0.0, (-3.0, 0.0)), state_routing=(7, 1.0))):
+        st = settled(commit.start(B, N), frame)
+        assert _run(st, [frame]) == [False]
+
+
+def _obs_with_t(o, **cols):
+    tok = o["tokens"].clone()
+    for name, (unit, v) in cols.items():
+        tok[:, unit, ob.INDEX[name]] = v
+    return dict(o, tokens=tok)
+
+
+def test_a_unit_that_bleeds_more_than_5_percent_in_4_s_is_freed_once_per_spell():
+    setup, state, obs = calm()
+    base = _far(policy.to_torch(obs))
+    B, N = base["own"].shape
+    hp = lambda v: _obs_with_t(base, hp=(0, v))
+    # 1 % a second: never 5 % within 4 s; then 3 % a second: 6 % at t 6 (0.98 at t 2); it goes on (no new event);
+    # it stops (from t 11 no 5 % within 4 s) and comes again: freed again at t 14 (0.86 -> 0.78)
+    seq = [1.0, 0.99, 0.98, 0.97, 0.96, 0.95, 0.92, 0.89, 0.86, 0.86, 0.86, 0.86, 0.86, 0.82, 0.78]
+    st = settled(commit.start(B, N), base)
+    free = _run(st, [hp(v) for v in seq])
+    assert [i for i, f in enumerate(free) if f] == [6, 14]
+    # an unknown hp (a NaN read: 0 in the token) is no loss
+    st = settled(commit.start(B, N), base)
+    assert _run(st, [hp(1.0), hp(1.0), hp(0.0), hp(1.0)]) == [False] * 4
+
+
+def test_the_new_events_keep_the_state_in_the_rollout_and_restart_with_a_battle():
+    actor, crit = tiny()
+    env = rollout.Battles(league.layout(4, 1, {"self": 0.5, "nearest": 0.5}), MIRROR)
+    for _ in range(3):
+        env.step(actor, crit)
+    cs = env.cstate
+    assert cs["warned"].shape == (2 * env.B, env.N, env.N) and cs["hp_h"].shape == (2 * env.B, env.N, commit.HIST)
+    assert float(cs["hp_t"].max()) > 0                                # the decisions' times kept
+    done = torch.zeros(env.B, dtype=torch.bool)
+    done[0] = True
+    env._reset(done)
+    assert torch.all(cs["hp_t"][[0, env.B]] == -1) and not bool(cs["warned"][[0, env.B]].any())
+
+
+# --- the pair features (pairs.py) and the surgery: an older network loads and computes what it did ---
+
+from tools.nn.model import pairs as mpairs  # noqa: E402
+
+
+def test_the_pair_features_tell_who_reaches_whom_who_closes_in_and_from_which_side():
+    setup, state, obs = calm()
+    o = _far(policy.to_torch(obs))
+    shooter, enemy = 3, 7                                    # own slingers; an enemy lord (no missiles)
+    rng = float(o["tokens"][0, shooter, mpairs.RANGE]) * mpairs.RANGE_SCALE
+    assert rng > 50 and float(o["tokens"][0, enemy, mpairs.RANGE]) == 0
+    o = _place(o, shooter, 0.0, 0.0, (1.0, 0.0))
+    o = _place(o, enemy, 0.0, 0.5 * rng, (0.0, -3.0))           # to the shooter's right, coming at 3 m/s
+    face = o["tokens"].clone()
+    face[:, shooter, ob.INDEX["face_cos"]], face[:, shooter, ob.INDEX["face_sin"]] = 1.0, 0.0     # facing forward
+    face[:, enemy, ob.INDEX["face_cos"]], face[:, enemy, ob.INDEX["face_sin"]] = 0.0, -1.0       # facing it
+    o = dict(o, tokens=face)
+    f = mpairs.features(o)
+    F = len(mpairs.FEATURES)
+    k = {n: i for i, n in enumerate(mpairs.FEATURES)}
+    i, j = 1 + shooter, 1 + enemy                                # (token 0 is the context)
+    ij, ji = f[0, i, j], f[0, j, i]
+    assert torch.all(ij[:F] == 0) and torch.all(ji[:F] == 0)     # opposite sides: the same-side half is 0
+    ij, ji = ij[F:], ji[F:]
+    assert ij[k["reach_i"]] == pytest.approx(0.5, abs=1e-4) and ij[k["in_range_i"]] == 1
+    assert ij[k["reach_j"]] == 0 and ij[k["in_range_j"]] == 0
+    assert ji[k["reach_j"]] == pytest.approx(0.5, abs=1e-4) and ji[k["in_range_j"]] == 1
+    assert ij[k["closing"]] == pytest.approx(3.0 / ob.VEL, abs=1e-4) == float(ji[k["closing"]])
+    assert ij[k["bearing_cos_i"]] == pytest.approx(0, abs=1e-5) and ij[k["bearing_sin_i"]] == pytest.approx(1)
+    assert ij[k["bearing_cos_j"]] == pytest.approx(1, abs=1e-5)  # the shooter right in front of the enemy
+    assert torch.all(f[:, 0] == 0) and torch.all(f[:, :, 0] == 0)
+    # an enemy never seen: nothing of its pairs
+    tok = o["tokens"].clone()
+    tok[:, enemy, ob.INDEX["seen"]] = 0
+    tok[:, enemy, ob.INDEX["visible"]] = 0
+    assert torch.all(mpairs.features(dict(o, tokens=tok))[:, :, j] == 0)
+    # two friends: the same-side half (the shooter reaches its friend 0 at more than its range)
+    sf = f[0, 1 + shooter, 1 + 0]
+    assert sf[k["reach_i"]] > 1 and sf[k["in_range_i"]] == 0 and torch.all(sf[F:] == 0)
+
+
+def _old_state(net):
+    return {k: v for k, v in net.state_dict().items() if not k.startswith(policy.PAIR_PARAMS)}
+
+
+def test_a_network_saved_before_the_pair_features_loads_and_computes_exactly_what_it_did(tmp_path):
+    import dataclasses
+    from tools.nn.train import checkpoint as ck
+    old = model(dataclasses.replace(CFG, pairs=False), seed=4)
+    new = policy.Actor(CFG).eval()
+    new.load_state_dict(old.state_dict())                        # its pair layers missing: they stay 0
+    assert all(float(p.abs().sum()) == 0 for n, p in new.named_parameters() if n.startswith(policy.PAIR_PARAMS))
+    setup, state, obs = setup_obs()
+    o = v2_obs(obs, setup)
+    torch.manual_seed(3)
+    l_old, a, h_old = old.act(o)
+    l_new, _, h_new = new.act(o, action=a)
+    for k in l_old:
+        assert torch.allclose(l_old[k], l_new[k], atol=1e-6), k
+    assert torch.allclose(h_old, h_new, atol=1e-6)
+    seq = {k: torch.stack([v] * 2) for k, v in o.items()}
+    act = heads.Action(**{f: torch.stack([getattr(a, f)] * 2) for f in a.parts()})
+    s_old, _ = old.sequence(seq, None, torch.zeros((2, 2), dtype=torch.bool), act)
+    s_new, _ = new.sequence(seq, None, torch.zeros((2, 2), dtype=torch.bool), act)
+    for k in s_old:
+        assert torch.allclose(s_old[k], s_new[k], atol=1e-6), k
+    # a checkpoint of the older code (its config without `pairs`) loads as the new network, the same outputs
+    path = ck.save(tmp_path / "old.pt", old, None, "v2")
+    data = torch.load(path, weights_only=True)
+    del data["config"]["pairs"]
+    data["actor"] = _old_state(old)
+    torch.save(data, path)
+    again = ck.load_policy(path)
+    assert again.cfg.pairs and hasattr(again, "pair_bias")
+    l_again, _, _ = again.act(o, action=a)
+    for k in l_old:
+        assert torch.allclose(l_old[k], l_again[k], atol=1e-6), k
+    # once its pair layers are not 0, the attention and the target's logits do change
+    with torch.no_grad():
+        new.pair_bias.lin.weight.normal_()
+        new.heads.target_pair.weight.normal_()
+    l_moved, _, _ = new.act(o, action=a)
+    assert not torch.allclose(l_old["target"], l_moved["target"], atol=1e-3)
+    assert not torch.allclose(l_old["kind"], l_moved["kind"], atol=1e-3)

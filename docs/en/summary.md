@@ -143,14 +143,16 @@ to the end of the battle. Preset `v2`, 3.51 M weights, trained from scratch
 ([details](training/model.md#variant-v2-map-sectors-chained-heads-commitment)):
 
 - **Unit tokens** (155 numbers each: passport, state, effects, fire arc, the order in force) → 3 attention
-  layers with a distance bias → GRU memory.
+  layers with a distance bias and pair features (who reaches whom, closing speed, flank / rear; also in the target
+  pointer) → GRU memory.
 - **Map sectors** 16 × 16 of 100 m: strength and count of own and visible enemy units, routers, the map
   edge; units look at the sectors through a separate attention layer.
 - **Chained heads:** order kind (hold / move / attack / withdraw / keep) → target → sector → 25 m cell →
   term. Sampling by the Gumbel-max trick (no `torch.multinomial`), logits with a soft cap
   (30 × tanh(x / 30)).
 - **Commitment:** each new order is held 2 / 4 / 8 / 16 s; events cut the term (melee, a flank threat,
-  the target died or routs, own lord died).
+  the target died or routs, own lord died, an enemy comes at the unit - within 40 m or 8 s of its run, the unit
+  lost > 5 % of its health in 4 s).
 - **"Eyes":** auxiliary heads learn from the simulator's truth (own losses in 10 / 30 s, an enemy's
   threat, a sector's danger); their predictions are fed back into the network.
 

@@ -22,7 +22,10 @@ V2_KEYS = ("free", "commit", "geo")
 # Parameters an actor saved before abilities lacks: they start fresh when it is loaded.
 ABILITY_PARAMS = ("abilities.", "heads.ability_")
 # ... and one of the bin head loaded into a grid actor (cfg.grid): its grid head starts fresh.
-FRESH_PARAMS = ABILITY_PARAMS + ("heads.cell_",)
+# ... and a v2 actor saved before the pair features (cfg.pairs, pairs.py): their layers start at zero (computes what
+# it did).
+PAIR_PARAMS = ("pair_bias.", "heads.target_pair.")
+FRESH_PARAMS = ABILITY_PARAMS + ("heads.cell_",) + PAIR_PARAMS
 
 
 def to_torch(obs, device=None):
@@ -125,7 +128,8 @@ class Actor(nn.Module):
 
 class ActorV2(Actor):
     """v2 (module doc): encoder -> blocks with the units -> sectors attention after cfg.sector_at of them -> GRU per
-    token -> the eyes (cfg.eyes; their predictions added to the tokens) -> the last block -> the chained heads."""
+    token -> the eyes (cfg.eyes; their predictions added to the tokens) -> the last block -> the chained heads. The
+    units' attention bias and the target pointer also read the pair features (cfg.pairs, pairs.py)."""
 
     def __init__(self, cfg):
         from tools.nn.model import chain, sectors
@@ -140,21 +144,26 @@ class ActorV2(Actor):
         self.sector_att = sectors.SectorAttention(cfg)
         self.memory = TokenMemory(cfg.d) if cfg.memory else None
         self.heads = chain.ChainHeads(cfg)
+        if cfg.pairs:
+            from tools.nn.model.pairs import PairBias
+            self.pair_bias = PairBias(cfg.heads)
         if cfg.eyes:
             from tools.nn.model.eyes import Eyes
             self.eyes = Eyes(cfg)
         assert cfg.sector_at <= self._split(), "the sectors' attention comes before the memory"
 
     def encode(self, obs_t):
-        """-> (x [B, 1 + N, d] after the blocks before the memory, (attention bias, sector tokens, cells inside))."""
-        from tools.nn.model import sectors
+        """-> (x [B, 1 + N, d] after the blocks before the memory, (attention bias, sector tokens, cells inside, pair
+        features or None))."""
+        from tools.nn.model import pairs, sectors
         x = self.encoder(obs_t["tokens"], obs_t["ctx"])
         pad = (lambda v: torch.nn.functional.pad(v, (0, 0, 1, 0)))
         if obs_t.get("abil") is not None:
             x = x + pad(self.abilities(obs_t["abil"]))
         if obs_t.get("commit") is not None:
             x = x + pad(self.commit_in(obs_t["commit"].to(x.dtype)))
-        bias = attention_bias(obs_t, self.dist, self.cfg.dist_bins)
+        pf = pairs.features(obs_t).to(x.dtype) if self.cfg.pairs else None
+        bias = attention_bias(obs_t, self.dist, self.cfg.dist_bins, None if pf is None else self.pair_bias(pf))
         g = obs_t.get("geo")
         S, k2 = self.cfg.sectors ** 2, self.cfg.fine ** 2
         cells_in = (sectors.inside(self.cfg, g) if g is not None
@@ -168,7 +177,7 @@ class ActorV2(Actor):
             x = block(x, bias)
         if self.cfg.sector_at == self._split():
             x, s = self._look(x, f, buckets)
-        return x, (bias, s, cells_in)
+        return x, (bias, s, cells_in, pf)
 
     def _look(self, x, f, buckets):
         """The sector tokens and the units' look at them -> (x, sector tokens). In training (with gradients) its
@@ -183,13 +192,13 @@ class ActorV2(Actor):
         return run(x, f)
 
     def _finish(self, x, pack, obs_t, action, greedy, temperature, abilities):
-        bias, s, cells_in = pack
+        bias, s, cells_in, pf = pack
         seen = None
         if self.cfg.eyes:                    # the eyes (eyes.py): predicted, then added to the tokens
             x, s, seen = self.eyes(x, s, obs_t)
         for block in self.blocks[self._split():]:
             x = block(x, bias)
-        logits, a = self.heads(x, s, cells_in, obs_t, action, greedy, temperature, abilities)
+        logits, a = self.heads(x, s, cells_in, obs_t, action, greedy, temperature, abilities, pairs=pf)
         if seen is not None:
             logits.update(seen)
         return logits, a

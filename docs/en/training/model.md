@@ -349,10 +349,41 @@ flowchart TB
   1, nothing to learn, entropy 0). It ends at once when: the unit comes into melee; an enemy has threatened its
   flank or rear for 2 s in a row (the threat flags: how an attack on the unit shows; in the game they flicker, 2.4–3.4
   rising edges a unit-minute vs the simulator's 0.9, so only a steady threat counts, once per spell); the attack's target died, routs or is no
-  longer seen; the unit routed or rallied; the own lord died. A keep chosen by the unit itself starts none. The
+  longer seen; the unit routed or rallied; the own lord died; **an enemy comes at the unit**: seen, not routing,
+  moving towards the unit at 1 m/s or faster (its own speed towards the unit: our unit walking into a standing enemy
+  is no event) and near - within 40 m or within what it covers in 8 s (infantry at 4 m/s: 40 m, cavalry at 8 m/s:
+  64 m), never beyond 100 m; once per unit-enemy pair: the pair stays warned while the enemy is within 100 m, seen
+  and not routing (the input's speed comes from two places a second apart; near the threshold it flickers and would
+  free the unit every second); **the unit bleeds**: it lost more than 5 % of its health over the last 4 s (its health
+  at the last 4 decisions), once per such spell. The numbers: 40 m - the game starts the charge sprint there
+  (`charge_distance_commence_run` 30 m edge to edge for infantry, 35 m for lords; the morale probe: the charge starts
+  at 36-40 m centre to centre) - the last moment to answer a charge; 8 s - half the longest term, the time to turn
+  and walk away or brace; 1 m/s - below any unit's walk (1.2-1.6 m/s), above a standing unit's centre jitter; 5 % in
+  4 s ≈ 75 % a minute - heavy fire or a fight going badly. Why: the audit of itK9 (`build/net_audit`) - the term had
+  come down to 2 s (47 %) and 16 s (41 %), and nothing ended a 16-s order: a shooter walked 16 s into a cavalry
+  charge. How often (itK3 vs `ai_like`, 16 battles, simulator), per unit-minute: the new events - an enemy comes
+  0.37, bleeding 0.19; the old ones - melee 0.46, threat 0.28, target 0.87; a unit is held 88 % of the time.
+  A keep chosen by the unit itself starts none. The
   network sees the seconds left (÷ 16) and whether the unit is held. All from the side's observation and the
   battle time: the simulator (`rollout.Battles.cstate`) and the companion (`loop.Brain.commit`, from the game's
   state) keep it the same way. The log's order-kind counter counts only the units that decide (not held ones).
+- **Pair features** (`tools/nn/model/pairs.py`, field `pairs`, on in v2). The attention between the units knew only
+  the distance of a pair (the bias over 16 buckets). Now for every pair "unit i looks at j", from what the side sees:
+  the distance / i's missile range and / j's (who reaches whom; 0 for a unit without missiles; at most 2) and whether
+  it reaches (0/1), both ways; the pair's closing speed (the relative velocity projected on the line between them,
+  m/s ÷ 5, within ±2; > 0: they close in); where j stands relative to i's front (cos, sin of the angle: cos < 0
+  behind, sin > 0 right) and where i stands relative to j's. Speed and angles only when both are seen now. Each
+  feature twice: for a pair of one side and for a pair of opposite sides (an enemy coming at us is not a friend
+  walking by), 18 numbers in all. They go to two places, each a linear layer started at zero: added to the attention
+  bias of every head (whom to look at) and to the attack target's logit (whom to hit). Not into the attention's
+  values: that needs an attention of our own instead of `scaled_dot_product_attention`, slower. The network computes
+  them itself from the tokens and places, so the companion and the simulator give the same (a test); nothing new to
+  send.
+- **Surgery: an older checkpoint in the new network.** A v2 checkpoint without the pair features (its config has no
+  `pairs`, default true) loads into the new network: its new layers stay zero (`policy.PAIR_PARAMS`), and it computes
+  exactly the same. Check: itK3 in the new code against the old code (HEAD before the change) on 80 decisions of 16
+  battles - every logit, the memory and the eyes match exactly (difference 0). Adam's state from such a checkpoint
+  does not fit (other weights): training starts a fresh Adam and says so.
 - **Eyes** (`tools/nn/model/eyes.py`, field `eyes`, on in the `v2` preset). Auxiliary heads after the memory, before
   the last attention block and the decision heads; they learn from the simulator's truth with a loss of their own
   (squared error, the 4 heads summed × weight 5, `--eyes-weight`): an own unit — the share of its health it will lose
@@ -392,7 +423,9 @@ Speed (RTX 5070 Ti, 1024 battles, a decision a second; `build/v2/bench_v2.py`):
 | Updates / battles finished in 5 min | 22 / 3,438 | 20 / 1,435 |
 
 v2 is ~8 % slower than `wide` (the goal: not more than 2 times). With the eyes (10 min of training): 3,920 battle seconds per second, collecting / update 5.0 / 11.9 s, peak 9.9 GB — ~9 % slower again; the eye heads' explained share went from −0.1 to 0.49–0.68 in 10 min. Fewer battles finish because an untrained
-network's battles last longer, not because of the speed.
+network's battles last longer, not because of the speed. The pair features and the commitment's two new events (CPU, 6 threads,
+`build/netv3/bench.py`, the mean of three runs, spread ~±8 %): a decision of 256 rows of 19 v 19 - 484 → 532 ms
+(+10 %), forward and backward over 8 × 32 decisions - 1,274 → 1,366 ms (+7 %); not measured on the GPU.
 
 **Tried and rejected.** v2's minibatch in 2 parts without recomputing the sector branch: a 12.5 GB peak of 16, the
 card spilled into shared memory, an update 10 s → 157 s. Recomputed in 2 parts: 11.9 GB (at the edge, like
@@ -561,7 +594,13 @@ An int8 export of the actor looks practical; not done yet:
   and in training agree, the place depends on the kind, the cell on the sector; `log_prob` counts each part only
   where it matters; a held unit may only keep, its share is 0; a commitment starts with a new order, ends on time,
   keep starts none; each event (melee, threat, target gone or routing, lord, rally) ends it, the same flag
-  unchanged does not; the companion keeps it between the game's states; a v2 checkpoint loads and acts the same;
+  unchanged does not; an enemy coming at the unit ends it once per approach (infantry from 40 m, cavalry from 64 m;
+  not one standing, walking past, a friend, a router, or our unit walking itself; gone past 100 m and back - again),
+  a loss of > 5 % health in 4 s once per spell, an unknown health is no loss; the rollout keeps and clears the new
+  events' state; the pair features: ranges, "reaches", closing speed, flank angles both ways, the same-side /
+  other-side half, zeros for a never-seen enemy, the companion and the simulator give the same; a network without
+  the pair features loads into the new one and computes the same (logits, memory, `sequence`, a checkpoint without
+  the `pairs` field), with non-zero layers no longer; the companion keeps it between the game's states; a v2 checkpoint loads and acts the same;
   `sequence` = decisions one by one; in the rollout held units keep, a restarted battle and a narrowed batch
   clear / keep the commitment; one PPO step changes the chain's, the commitment's and the sector branch's
   weights; the evaluation plays v2 against a v1 past version; `run --preset v2 --reward v2` writes
