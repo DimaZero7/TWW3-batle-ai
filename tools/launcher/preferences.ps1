@@ -32,7 +32,7 @@ $GraphicsPresets = @{
 $GraphicsPresets.lowigpu = [ordered]@{}
 foreach ($k in $GraphicsPresets.low.Keys) { $GraphicsPresets.lowigpu[$k] = $GraphicsPresets.low[$k] }
 $GraphicsPresets.lowigpu['gfx_gpu'] = '""Intel(R) Iris(R) Xe Graphics""'
-$GraphicsPresets.lowigpu['gfx_gpu_select'] = 0
+$GraphicsPresets.lowigpu['gfx_gpu_select'] = 1
 
 function Set-PreferenceValues {
     param([Parameter(Mandatory = $true)][string]$Text, [Parameter(Mandatory = $true)]$Values)
