@@ -27,6 +27,12 @@ $GraphicsPresets = @{
         gfx_screen_space_shadows = 'false'; gfx_cloth_simulation = 'false'
     }
 }
+# 'lowigpu': 'low' on the integrated GPU (Intel Iris Xe), so the game leaves the RTX's memory to training (10.10: the
+# game beside training filled the 16 GB and slowed training 6-7x). The game picks its adapter by gfx_gpu (the name).
+$GraphicsPresets.lowigpu = [ordered]@{}
+foreach ($k in $GraphicsPresets.low.Keys) { $GraphicsPresets.lowigpu[$k] = $GraphicsPresets.low[$k] }
+$GraphicsPresets.lowigpu['gfx_gpu'] = '""Intel(R) Iris(R) Xe Graphics""'
+$GraphicsPresets.lowigpu['gfx_gpu_select'] = 0
 
 function Set-PreferenceValues {
     param([Parameter(Mandatory = $true)][string]$Text, [Parameter(Mandatory = $true)]$Values)

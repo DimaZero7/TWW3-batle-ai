@@ -28,7 +28,7 @@ param(
     # sees the end of the battle; then the usual cleanup (tools/launcher/watch.ps1 uses it).
     [int]$LingerSeconds = 0,
     # A graphics preset for this run only (tools/launcher/preferences.ps1); empty: the user's own.
-    [ValidateSet('', 'ultra', 'low')][string]$Graphics = ''
+    [ValidateSet('', 'ultra', 'low', 'lowigpu')][string]$Graphics = ''
 )
 $ErrorActionPreference = 'Stop'
 if (-not $Graphics -and $env:BAI_GRAPHICS) { $Graphics = $env:BAI_GRAPHICS }
