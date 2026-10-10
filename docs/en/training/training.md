@@ -40,6 +40,7 @@ The first steps compile for 1–3 minutes (seconds once a run of the same shapes
 | reward | `--gold` (1.0), `--rout-share` (0.5), `--lord` (0.3), `--lord-rout` (0), `--idle` (2e-4), `--idle-tau` (150 s), `--idle-pause` (30 s), `--idle-step` (0.5), `--idle-cap` (20), `--idle-rate` (0), `--idle-window` (30 s), `--order-cost` (0.001), `--retarget` (0.003): [reward](#reward) |
 | opponents | `--mix` (json shares), `--pool` (8: past versions at most), `--pool-extra` (more checkpoints for the pool), `--pool-dir` (the pool's folder for a whole night), `--pool-eta` (0.01), `--past-slots` (3), `--past-every` (6 updates): [past versions](#past-versions), `--eval-past`, `--eval-generated` (512) |
 | drills | `--drills` (0: share of the battles), `--drill-weights` (json; default the `TRAIN` drills equally: kiting, hold_fire), `--drill-bank` (256 per drill), `--drill-embed` (1: share of the embedded frame, for the drills that have one), `--drill-broad` (0.5: of the rest, share of the broad frame), `--drill-teach` (`auto` or json {drill: weight}: the teacher, off by default), `--drill-teach-minutes` (10: manual), `--drill-teach-k` (0.5), `--drill-teach-cap` (0.25), `--drill-teach-weight` (0.15: auto), `--teach-normal` (`auto`, names or json {drill: share}: the teacher in normal battles, off by default), `--teach-normal-k` (0.5), `--teach-normal-cap` (0.15), `--teach-normal-weight` (0.1), `--teach-normal-match` (0.1): [drills](#drills) |
+| observation | `--observe-dir` (off: the folder of converted battles), `--observe-share` (0.1), `--observe-weight` (0.1), `--observe-decay` (0.95), `--observe-anchor` (0.2), `--observe-anchor-decay` (0.995), `--observe-adv` (`critic`), `--observe-beta` (1), `--observe-clip` (20), `--observe-steps` (0: `--steps`), `--observe-refresh` (20): [learning by observation](#learning-by-observation) |
 | kiting in self-play | `--kite-share` (0: share of the `self` / `past` battles started, planned 0.1), `--kite-bank` (256 battles ready): [kiting in self-play](#kiting-in-self-play) |
 
 ### The chain's settings
@@ -506,6 +507,82 @@ side share the side's advantage; the critic sees the whole field (and is never s
   to the network the run started from, on one minibatch of every update (`start_kl` in the log). A
   distance that grows while the rating rises means the search works; a flat rating with a stalled
   distance, a leash too short.
+
+## Learning by observation
+
+The network takes over another player's **good** orders from recorded battles: a human against the network
+(`tools.build human --enemy-ai net`, the human is side 1) and the game's AI against the game's AI (both sides).
+What is good is decided by **the network's own critic**, not by a rule of ours (a rule would be a hidden teacher).
+Off by default: without `--observe-dir` training does not change. The code: `tools/nn/observe/`.
+
+**1. Converting a recording** (`convert.py`, no GPU):
+
+```bash
+python -m tools.nn.observe.convert --human build/human/runs/20261010-165656
+python -m tools.nn.observe.convert --list build/observe/aivai_ok.txt [--limit 5] [--ckpt build/v2/itV2.pt] [--workers 6]
+```
+
+One file a battle, `build/observe/data/<battle>.npz`. For every second and every side of "another player":
+- **the network's input as that side sees it** - the companion's path (`record.py`: `exchange.arrays` and its
+  fixes, the visibility `v`, both sides' orders in force as the simulator keeps them: the network's from its log,
+  the other's read from the recording). An order point beyond the map (the game AI's skirmishers, ~5 km) is clipped
+  to the edge. The v2 inputs the recording does not have: every unit that takes orders is free, no commitment;
+- **the new orders in the network's language** (`labels.py`), only the seconds with a new order (a second with no
+  new order is not labelled: for a human that is a lack of hands, not a choice); the label sits on the decision a
+  second before the change. A new engine target (an enemy the side sees) -> attack; a shooter firing at a target of
+  its own choice - no label. Otherwise the order point moved more than 1 m -> hold when the unit does not move the
+  first second after the shift and the point is within 40 m, else move to a 25 m cell (the point at the
+  formation's front -> its centre, as `replay.half_depth`; the nearest cell of the grid inside the map). Withdraw
+  and a running move are one command in the game: the label is the set of both answers (the loss takes the log
+  of the sum of the probabilities). The AI's melee units in melee get no label (their point there lies anywhere),
+  a human's do. Only the heads that read well are taught: kind, target, cell, run; not the commitment's duration
+  nor the abilities;
+- **the advantage** (`advantage.py`): the return of the training's reward (the gold trade per step + the win
+  +-1, the worst share, a routing unit half of what it has left; the order change cost is left out: the other
+  player's changes are read, not known), the training's gamma and lambda per 1 s decision, to the battle's end,
+  minus V(s) of the network's critic on that side's critic input (points beyond 1500 m zeroed, as
+  `build/critic_arch/farfix.py`). Three are kept: `critic` (GAE), `mc` (lambda 1: the return minus V) and the
+  fallback `window20` - the trade of the 20 s after the decision minus the battle's mean (good when it and the
+  trade itself are above 0).
+
+How well the orders are read (12 network battles against the game's AI, the real orders known):
+
+| Label | Right | Detail | Real ones found |
+|---|---:|---|---:|
+| attack | 90 % | target 99.5 % | 94 % |
+| hold | 89 % | the errors mostly attacks whose target the engine shows later | 90 % |
+| move | 99.9 % | cell 100 %, run 99 % | 82 % |
+
+**2. Training** (`store.py`, `loss.py`, `ppo.update(observe=...)`): beside every PPO minibatch,
+`--observe-share` x the minibatch's decisions from the recordings (chunks of `--observe-steps`, only chunks with a
+selected label). The extra loss:
+
+`L = w · Σ c · (−log π(label | s)) / the number selected`, `c = min(exp(A / (β · std A)), 20)` where A > 0, else 0.
+
+- A - the decision's advantage chosen by `--observe-adv` (`critic` by default), std over all the store's labels.
+- w = `--observe-weight` x `--observe-decay`^update; the updates count over the whole chain (`observe_updates` in
+  the checkpoint).
+- The anchor: + `--observe-anchor` x 0.995^update x KL(policy || the frozen `--init`) on the PPO rows (kind and
+  target, as `--anchor`); needs `--init`.
+- A chunk's GRU memory is the actor's memory at the chunk's start, run through the battle from its beginning;
+  recomputed every `--observe-refresh` updates.
+- A label's log-probability below -50 counts as -50 (one bad label does not blow up the loss).
+
+The log (`observe` in the log row and the line `observe ...`): the weight now, the loss, nll, the mean weight c, the
+share of the selected labels the network's most likely kind and target agree with (does it grow), the anchor's
+weight and KL. At the start: the store - sides, decisions, labels, the share selected, A's quantiles, the selection
+against `window20`.
+
+Measured on the human battle and 5 AI battles (`--ckpt build/v2/itV2.pt`, ~10 s a battle on the CPU): 11 sides,
+5,988 seconds, 1,686 new orders (hold 162, move 1,013 of which running 972, attack 511). A > 0 for 63 % (by the
+return without lambda 67 %, by `window20` 32 %, both 26 %). The human battle: 622 s, 254 orders, A > 0 for 82 %
+(the human won, the critic underrated him). std A 0.12; a selected label's mean weight ~2.9. Under the current
+network ~40 % of the move labels have a sector probability below e^-30: the other player sends units far, the
+network picks sectors near the unit.
+
+Not done: the advantage recomputed by the current critic during training (A is the critic of the network that
+converted the recordings); the network's own good actions (SIL); training battles started from moments of the
+recordings; the field mirrored to double the data.
 
 ## Lord abilities
 
@@ -1330,6 +1407,14 @@ the rollout's by ~2·10⁻³ (TF32: 2·10⁻⁵), as much as a real update's KL;
 and the critic for the update gave nothing; the GRU's input weights hoisted out of the loop were
 slower; a graph for any batch size (`dynamic=True`) needs a C++ compiler the container lacks.
 
+### Reading hold by the distance to the point
+
+Learning by observation: hold when the new point is within 15 m of the unit and it does not move (as
+`build/observe/infer_acc.py`). On 12 network battles 16 % of the move labels were really holds: a unit stopped on
+the move goes on a second or two, its point up to 40 m ahead. The rule "stands the first second after the shift,
+the point within 40 m" gave move 99.9 % right. An attack on the target the engine shows a second after the point
+moved made attacks worse (93 -> 89 % right) - not kept.
+
 ### Evaluations during the run
 
 `--eval-every` with a `best_eval.pt` chosen by them: the evaluations fell after the first 10
@@ -1368,6 +1453,12 @@ process's tools — the chain step, the run card, leftovers, the wait with a tim
 pairs, margins, pair gold, forgetting and the verdict, matchups. `tests/tools/test_nn_cadence.py`:
 the cadence. `tests/tools/test_nn_drills.py`, `test_nn_drill_*.py` and `test_nn_teach_auto.py`: the drill framework, the teacher, frames,
 scripts and metrics. `tests/tools/test_nn_gate.py`: the gate's pairs and liveliness from recordings.
+`tests/tools/test_nn_observe.py` (numpy): the reading of new orders (an attack on the decision before the change,
+a shooter firing at will, an unseen target, move / the running set / hold, front -> centre, the AI in melee
+without a label, a human with one), the point clipped to the edge, the reward, GAE and the 20 s window.
+`tests/tools/test_nn_observe_torch.py` (torch): a point's cell, the store (selection by the advantage, `window20`,
+padded units without labels, a chunk's memory), the loss (the set running move / withdraw, the gradient), a PPO
+step with the demonstrations and the weights' decay.
 `tests/tools/test_nn_league_pool.py` (torch): a version drawn ∝ e^q, a new version with the highest q, a win lowers q
 by η / (N p), the pool goes on from `q.json`, a running battle keeps its slot's version, Adam's state into the
 checkpoint and back, a second part goes on with the pool, Adam and the entropy decay.

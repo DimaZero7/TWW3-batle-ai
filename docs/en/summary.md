@@ -181,6 +181,11 @@ the independent check.
 **Off:** teachers and drills. The drills (`kiting`, `counter`, `hold_fire`, `direct_fire` and others) stay
 in the code, but v2 does not use them ([drills](training/training.md#drills)).
 
+**Learning by observation** (ready, off by default: `--observe-dir`): the network takes over another player's
+orders (a human, the game's AI) from recorded battles, only those its critic found better than expected; an extra
+loss weighted 0.1 x 0.95 an update and a KL to the starting network
+([observation](training/training.md#learning-by-observation)).
+
 The chain of steps with checks in the simulator (`tools.ops.step`, `test5`, `tools.ops.card`,
 `config/train-chain.json`) remains but is not used in the v2 loop: the network is measured by battles in
 the game ([workflow](training/workflow.md)).

@@ -269,6 +269,7 @@ def train(args, every=None, teacher=None, normal=None):
     carried = carried or {}
     chain_s0, chain_u0 = float(carried.get("chain_s", 0.0)), int(carried.get("chain_updates", 0))
     decay_s0 = float(carried.get("entropy_decay_s", 0.0))
+    observe = observation(args, actor, start, cfg, int(carried.get("observe_updates", 0)), device)
     if args.entropy_decay and args.entropy_end is None:
         raise SystemExit("--entropy-decay needs --entropy-end (the weight it goes to)")
     weights = reward.Weights(order_change=args.order_cost, idle=args.idle, lord=args.lord, retarget=args.retarget,
@@ -457,7 +458,9 @@ def train(args, every=None, teacher=None, normal=None):
         trained = time.time() - t0 - paused
         return {"optim": opt.state_dict(),
                 "state": {"floor_w": floor_w, "entropy_decay_s": decay_s0 + (trained if args.entropy_decay else 0.0),
-                          "chain_s": chain_s0 + trained, "chain_updates": chain_u0 + update}}
+                          "chain_s": chain_s0 + trained, "chain_updates": chain_u0 + update,
+                          "observe_updates": observe.updates if observe is not None
+                          else int(carried.get("observe_updates", 0))}}
 
     def share_done():
         """The share of the run done: of the updates when --updates is set, else of the minutes."""
@@ -495,8 +498,10 @@ def train(args, every=None, teacher=None, normal=None):
         teach_w = (teacher.weights() if teacher is not None
                    else drill_teach.weights(teach0, args.drill_teach_minutes, (time.time() - t0 - paused) / 60))
         teach_w = {**teach_w, **(normal.weights() if normal is not None else normal_w)}
-        st = ppo.update(actor, critic, opt, batch, u_cfg, train_policy=trains, reference=reference, teach=teach_w)
+        st = ppo.update(actor, critic, opt, batch, u_cfg, train_policy=trains, reference=reference, teach=teach_w,
+                        observe=observe)
         taught = st.pop("teach", None)
+        observed = st.pop("observe", None)
         if start is not None:
             st["start_kl"] = ppo.distance(actor, start, batch, u_cfg.minibatch)
         if args.entropy_target and trains:
@@ -571,6 +576,8 @@ def train(args, every=None, teacher=None, normal=None):
                         "top": [[n, round(q, 3), round(p, 3), age] for n, q, p, age in pool.top(5)]}}
         if taught:
             row["teach"] = taught
+        if observed:
+            row["observe"] = {k: round(v, 4) for k, v in observed.items()}
         if args.kite_share:
             row["kite"] = env.kite_stats()
         log.write(json.dumps(row) + "\n")
@@ -595,6 +602,12 @@ def train(args, every=None, teacher=None, normal=None):
                                                                                      "danger10")), flush=True)
             if args.kite_share:
                 print("      " + kitesp.text(row["kite"]), flush=True)
+            if observed:
+                print(f"      observe weight {observed['weight_now']:.4f} loss {observed['loss']:.3f} nll "
+                      f"{observed['nll']:.3f} mean weight {observed['mean_c']:.2f} kind agree {observed['kind_acc']:.3f} "
+                      f"target agree {observed['target_acc']:.3f} ({observed['labels']:.0f} selected labels, "
+                      f"{observed['attack_labels']:.0f} attacks); "
+                      f"anchor weight {observed['anchor_now']:.4f} KL to the start {observed['anchor_kl']:.4f}", flush=True)
             if taught:
                 active = (lambda v: "-" if v["agree_active"] is None else f"{v['agree_active']:.3f}")
                 share = (lambda v: f"share {v['share']:.2f} (labelled {v['labelled']:.2f}) " if "share" in v else "")
@@ -650,6 +663,26 @@ def train(args, every=None, teacher=None, normal=None):
                "mean_battle_s": {k: round(s / g) for k, (g, _, s) in sorted(total.items()) if g}, "best_score": best}
     print("trained:", json.dumps(summary), flush=True)
     return actor, summary, out
+
+
+def observation(args, actor, start, cfg, updates, device):
+    """--observe-dir: the demonstrations' term for ppo.update (tools/nn/observe/store.py Observe), or None."""
+    if not args.observe_dir:
+        return None
+    from tools.nn.observe import store
+    if args.observe_anchor and start is None:
+        raise SystemExit("--observe-anchor needs --init (the frozen network the KL holds the policy near)")
+    T = args.observe_steps or args.steps
+    demos = store.Demos(args.observe_dir, T, args.observe_adv, args.observe_beta, args.observe_clip, actor.cfg)
+    chunks = max(1, round(args.observe_share * cfg.minibatch / T))
+    obs = store.Observe(demos, chunks, args.observe_weight, args.observe_decay, start if args.observe_anchor else None,
+                        args.observe_anchor, args.observe_anchor_decay, args.observe_refresh, updates, device, args.seed)
+    print(demos.text(), flush=True)
+    print(f"observation: {chunks} chunks of {T} decisions beside every minibatch of {cfg.minibatch}; weight "
+          f"{args.observe_weight:g} x {args.observe_decay:g} an update (now {obs.weight:.4f} after {updates} updates "
+          f"of the chain), KL to --init {args.observe_anchor:g} x {args.observe_anchor_decay:g} (now {obs.anchor:.4f}), "
+          f"memories again every {args.observe_refresh} updates", flush=True)
+    return obs
 
 
 def show(name, r):
@@ -843,6 +876,27 @@ def parser():
                     help="auto: the imitation weight on a labelled unit (fixed; the pull is weight x share)")
     ap.add_argument("--drill-teach-minutes", type=float, default=10.0,
                     help="minutes of training over which the teacher's weight goes to 0")
+    ap.add_argument("--observe-dir", help="learning by observation (tools/nn/observe): the converted battles "
+                                          "(build/observe/data); off without it")
+    ap.add_argument("--observe-share", type=float, default=0.1,
+                    help="demonstration decisions beside every minibatch, a share of the minibatch's (0.1-0.25)")
+    ap.add_argument("--observe-weight", type=float, default=0.1, help="the imitation term's weight at the start")
+    ap.add_argument("--observe-decay", type=float, default=0.95,
+                    help="... x this every update (carried over the chain's parts; 1: constant)")
+    ap.add_argument("--observe-anchor", type=float, default=0.2,
+                    help="weight of KL(policy || --init frozen) on the PPO rows while observing (0: off)")
+    ap.add_argument("--observe-anchor-decay", type=float, default=0.995, help="... x this every update")
+    ap.add_argument("--observe-adv", default="critic", choices=("critic", "mc", "window20"),
+                    help="which advantage selects the demonstrations (A > 0) and weighs them: critic (GAE of the "
+                         "reward v2 to the battle's end minus the network's critic), mc (the plain return minus the "
+                         "critic), window20 (the fallback without the critic: the gold trade of the next 20 s minus "
+                         "the battle's mean)")
+    ap.add_argument("--observe-beta", type=float, default=1.0,
+                    help="the weight exp(A / (beta x std A)) of a selected demonstration")
+    ap.add_argument("--observe-clip", type=float, default=20.0, help="... at most this")
+    ap.add_argument("--observe-steps", type=int, default=0, help="decisions per demonstration chunk (0: --steps)")
+    ap.add_argument("--observe-refresh", type=int, default=20,
+                    help="updates between recomputing the demonstrations' stored memories")
     ap.add_argument("--bank-refresh", type=float, default=5.0, help="minutes between new banks of armies")
     ap.add_argument("--no-bank-ahead", dest="bank_ahead", action="store_false",
                     help="build each new bank when it is due (the training waits) instead of in a thread ahead")
