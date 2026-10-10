@@ -62,6 +62,22 @@
   (`melee_mage_switch_to_melee_time`). · twwstats · высокая.
 - **Боезапас.** `battleai_ammo_threshold` 0.75 управляет только способностями, пополняющими боезапас. · высокая.
 
+## Режим застрельщиков (skirmish)
+
+- **Что это.** Стрелок с включённым режимом сам отходит, когда враг подходит слишком близко; более быстрый враг
+  его всё равно догоняет; отряду нужно время разогнаться. · [fandom][fw-sk], Steam · высокая (суть), чисел нет.
+- **Пока режим «сработал», приказы игрока стираются вскоре после отдачи**: отряд выполняет приказ, а потом режим
+  снова уводит его прочь. · twcenter (тема «Skirmish Mode makes the unit completely unresponsive…») · средняя.
+- **В базе дистанций нет.** Есть только флаг `land_units.can_skirmish` и группы ИИ `ai_usage_groups` с
+  `*_no_skirmish` (ИИ не включает режим таким отрядам). Наши стрелки — в группах `ranged`, `ranged_direct`,
+  `ranged_harasser`, `ranged_stalkers_flanker_harasser`, `hybrid_melee`, без `no_skirmish`. · база игры · высокая.
+  - У нас: ИИ игры держит режим включённым у всех своих стрелков (8 боёв с полем `sk`); мост у наших выключает.
+  - У нас: числа режима — из проб `skirmish`, `skirmish2` (порог 43,9 м от бойца до бойца у Империи, 33,1 м у
+    скавенов, остановка на ~82 м) и записей боёв; бег режима виден как дальняя точка приказа (≥ 1000 м).
+  - У нас: в 72 боях наборов **91 % отходов кончается новым приказом ИИ** (точка в 12 м от отряда, медиана), и в
+    44 % из них режим снова уводит отряд через ≤ 1 с — то самое «приказ стирается». Поэтому в симуляторе новый
+    приказ обрывает бег ([режим застрельщиков](../../training/simulator.md#режим-застрельщиков)).
+
 ## Известное поведение ИИ и исправления (заметки к патчам)
 
 - 7.0: стрелки держат дистанцию и лучше тратят остаток боезапаса. · [7.0][p70] · высокая.
@@ -113,6 +129,7 @@
 [nme]: https://www.nme.com/news/gaming-news/total-war-warhammer-3-will-make-ai-factions-smarter-and-less-biased-3491045
 [fw-40]: https://totalwarwarhammer.fandom.com/wiki/Update_4.0
 [fw-23]: https://totalwarwarhammer.fandom.com/wiki/Update_2.3.0
+[fw-sk]: https://totalwarwarhammer.fandom.com/wiki/Skirmishing
 [p230]: https://www.player.one/total-war-warhammer-iii-update-230-brings-major-improvements-ai-152358
 [tws]: https://twwstats.com/kv/rules
 [p70]: https://community.creative-assembly.com/total-war/total-war-warhammer/blogs/90-total-war-warhammer-iii-update-7-0-0

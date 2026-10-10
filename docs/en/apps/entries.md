@@ -177,8 +177,9 @@ go a ranged attack at a walk on the attacker, as the bridge aims a held shooter)
 from 60 m, 90 s: slave slingers and Night Runners (chased by swordsmen), the Empire's archers, crossbowmen and
 handgunners (chased by clanrats), each with the mode and without. The shooter's row has its ammo, fire flag,
 damage dealt and `sk`; the soldiers' places every 1 s within 200 m. Analysis: `python -m tools.nn.charge_probe
-skirmish [folders]` - from what distance the shooter starts to move away, where and how fast, does it shoot on
-the move, how many shots it got off, was it caught.
+skirmish [folders] [--sim]` - from what distance the shooter starts to move away, where and how fast, does it shoot on
+the move, how many shots it got off, was it caught, both sides' losses; `--sim` puts the simulator's twin beside it
+([skirmish mode](../training/simulator.md#skirmish-mode)).
 `skirmish2` - 2 battles of 12 lanes: what sets skirmish mode off. Slave slingers, archers and crossbowmen with
 the mode (standing as in `skirmish`); lane kinds: `pass` - enemy infantry (12 m front) runs past the shooter,
 centre 30 m beside it (edge ~9 m), to a point 100 m behind its front, never attacking it (the attacker's mode

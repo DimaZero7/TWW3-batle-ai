@@ -182,6 +182,7 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 | Target at will | the order's target if in range; else the last one while it is in range and stands; else the nearest standing enemy | as the game ([missile damage](../game/units/missile-damage.md)) |
 | Line of fire (direct fire) | only for direct (flat) fire, the passport's `missile.direct` (trajectory `low`: the Free Company Militia's pistols); the shooter's men aim at the target's centre, a friendly unit between (nearer than the target's edge) blocks the lines passing through its width across the line; blocked men do not shoot; when the whole unit is blocked it takes the next target in range, or holds fire. Arrows and slings arc over friends; enemies in the way do not block; no fire over friends from higher ground (flat map) | DB with the True Sight mod every battle runs with: `projectile_friendly_fire_man_radius_coefficient` 1.0 (2.2 without it), `unit_firing_line_of_sight_considered_obstructed_ratio` 1.0 (0.75 without it); `config/nn/game_rules.json` `_mods`; the knowledge base ([missiles](../game/mechanics/missiles.md)); the geometry is ours, not measured |
 | Fire whilst moving | a unit with `mounted_fire_move` (the militia) aims and shoots while it moves, at targets within `missile.move_fire_arc_deg` 90° of the way it walks | DB attribute; the arc measured (our militia on the move: 0.52 of its full rate toward the enemy, 0.31 across, 0.16 away) |
+| Skirmish mode | a shooter with the mode on runs away from an enemy that comes at it (its way within 40° of the line to the shooter) within 43.9 m (Skaven 33.1 m) man to man - over its order, at a run, not shooting; it stops when nobody comes at it within 82 m ([below](#skirmish-mode)) | the `skirmish`, `skirmish2` probes |
 | Pistols | hits: the same spread model; reload 10.8 s, first shot 3.8 s | the probe: volley intervals 10.5–11.5 s; hits 0.87 / 0.63 / 0.53 / 0.47 at 41 / 60 / 82 / 98 m, the model 0.71 / 0.58 / 0.49 / 0.45 (the flat shot loses its height error over the heads); they fired at 97.5 m with range 90 too, and as a stream from the first volley — a per-man range is open (probe P2) |
 | Morale | points: leadership + effects; MoralePercent = points / leadership; moves 1 point or 15 % of the gap per 0.5 s | DB; the step measured (+2 points a second in every recording) |
 | Morale effects | lord +4 within 70 m, fading to 0 at 105 m (to his units, not himself: `morale.lord_own_aura`); lord killed (health 0): the others −16 for 45 s, then −10 to the end; routed off the map: −16 for 120 s; shattered or routing on the field: his aura only (`lord_fall`); flanks secure +5: no standing enemy within 146 m (centre to centre) or friendly units (not lords) within 40 m at both sides, and no flank threatened (`morale.secure`); casualties −2…−74; recent casualties −6…−80 (lost in the last 4 s, of the whole health); extended casualties −4…−60 (the last 60 s); winning / losing the fight +3/+6/+8, −3/−8 by the damage ratio in melee and by missiles (winning from 1.5 / 2.5 / 4; losing −3 once it takes more than it deals, −8 once it takes 2.5 times as much: `combat_ratio` `losing` / `losing_significantly`, Goumin's WH3 kv_rules guide 'losing if the enemy takes less damage', the morale probe - an HP balance of 0.32 showed −8 in the game) while the unit is in melee, shooting or shot at by an enemy; losing only once the unit has lost 10 % of its health, winning only once the enemy it fights has (`morale.combat_lost`); a single entity in melee always −3 (`morale.single_combat`); attacked in the flank −6, in the rear −14 while struck from that side; the charge +15 in 6 s blocks from the charge pose (an attack order, the target within `charge_pose` — 25 m, lords 30 m, the database), a second block right after the first if the unit still runs at its target or its charge has landed (`morale.charge`); the army beaten as a whole (enemy strength ≥ 2.6× own, own ≤ 0.22 of the start) −120; flanks exposed (an enemy threatens the left, right or rear: `lf`, `rf`, `bf`) −3, two or more −6; routing friends −3 each (a routing expendable unit scares only expendable units); routing enemies +2.5 each; under fire −5 (15 s more after the last hit); very tired −2, exhausted −6; an enemy worth 3 times as much or more (cost × health) within 70 m −3 (`morale.strong_ratio`); a router has no flanks secure, fight balance, flank / rear, flanks exposed or charge | DB points; the 4 and 60 s windows — DB, the 15 s under fire — probes ([below](#casualty-windows-and-under-fire)); when the flank / rear, flanks secure, the charge, winning by shooting and the 10 % threshold hold — the in-game morale probe ([below](#morale-by-the-games-rules-the-morale-probe)); the winning thresholds calibrated, the losing ones Goumin's guide and the morale probe; a lord's fall measured ([lords](#lords)) |
@@ -198,6 +199,99 @@ the same 12–17 men on a 30 m front gave all four pairs' losses, while by the r
 at once ([measurements](measurements.md)). The answer was that a miss costs time (`melee.miss_s` 0.5 s: the
 attack interval runs after a hit): with it the 121 recorded formation battles fit the rule at weight 1
 (`build/hitchance`). The flank and rear are the database's defence multipliers ×0.6 / ×0.3, at weight 1 too.
+
+### Skirmish mode
+
+In the game a shooter has a "skirmish mode" toggle: when an enemy comes at the unit, the unit stops shooting and runs
+away by itself, whatever its order. The game's AI keeps it on for its shooters (all 8 battles checked), the bridge
+switches it off for ours (`--skirmish off`). So in the simulator the scripted opponents' shooters (`ai_like` and the
+others: like the game's AI) have it and the network's do not.
+
+How it works (`tools/nn/sim/skirmish.py`, `config/nn/sim.json` -> `skirmish`; the probes `skirmish` and `skirmish2`):
+
+- **Who.** A unit that can (`can_skirmish` in the database: archers, crossbowmen, handgunners, slingers, Night
+  Runners, the militia) and whose mode is on (`sk` in the state). `sk` is set by `scenario.build` (where the game's
+  AI plays: the `ai` field, side 2 by default; a side can say `"skirmish"` itself) and by `abilities.set_rule` with
+  `ai` (scripts yes, a network no). `skirmish.network 1` gives the mode to every unit that can - room for the network.
+- **What starts a run.** A standing enemy that moves (faster than 0.3 m/s) with its way within 40° of the line to the
+  shooter (`cone_deg`). No attack order is needed: in the `skirmish2` probe infantry running past (edge ~9 m away)
+  started the run at the same distance as an attacker. The run ended after 5-7.5 s (10-24 m), when the infantry's
+  way turned 28-53° off the line to the shooter (median 40°); the shooter's own attacker came at 2-12° and the run
+  never ended.
+- **When.** Such an enemy comes within 43.9 m (Skaven 33.1 m) nearest man to nearest man (`soldier_gap`: the
+  rectangles of the men's places). That is the simulator's own measure on the recorded places of both probes, the
+  median of 18 / 10 lanes (`build/skirmsim/conv2.py`). The formations' edge gap (`geometry.pairwise`) will not do: a
+  narrow deep column passing aside reached it 8-10 m later along its way, its way already 33-35° off, and the run
+  past lasted 2 s instead of 6-9.
+- **How it runs.** Straight away from that enemy at the passport's run speed, turning on the move (the fire stops
+  0.5-1.5 s before the unit moves, as in the game). It does not shoot; whoever shoots on the move (the Night Runners'
+  stars) shoots here too.
+- **When it stops.** With an enemy coming that attacks this very shooter, the run holds while it is within 82 m (in
+  the `skirmish` probe the shooters that got away stopped at 73-95 m). With one coming that attacks another, the run
+  ends with a chance of 0.18 a second at any distance (`other_end_per_s`: 338 ends in 1554 s in the 72 battles; the
+  probe's "infantry past" runs 5-7.5 s); the draw is fixed by the battle's id, as the rally's. Such an enemy starts a
+  run only as it comes within the gap from beyond it, not again while it stays inside. Nobody coming - the run ends
+  at once. Then the unit turns back to its target and shoots again. The rule v2 ("anyone coming within 82 m") would
+  have run on in 72 % of the seconds where the game's run ended (`build/skirm/k_run_ends.py`, `n_backoff_ends.py`).
+- **A new order ends the run** (`order_cuts`): another kind of order, another target or a point more than
+  `new_point_m` 5 m from the old one - the run ends at once, none starts this step, the unit carries out its order
+  until the gap starts a run again. So in the game: 91 % of the AI's runs in the 72 battles end with its own new order
+  (a point 12 m from the unit, median), and in 44 % of them the mode takes the unit away again within 1 s (median 3 s):
+  the community's "the order is erased shortly after it is given" (`build/skirm/q_gap_after.py`). Without it a run from an attacker went on to 82 m
+  over the AI's orders and the runs were 1.3 times the game's. The 5 m is the "same point" bound of the recordings'
+  analysis, not a fit. `ai_like` in the twin does the same: its 19 m "hop" ends the mode's run, as the game AI's orders.
+- **Caught**, it runs on (`melee_run`: the game's 73 % of the melee seconds, striking half as hard): a leave - it
+  strikes nobody, is held `contact.pin_s`, is struck. A new run does not start in melee.
+- **Replaying recordings.** The mode's run shows in a recording as a far order point (>= 1000 m). It is not the AI's
+  order, so such seconds take the order before them (`check.ENGINE_FAR_M`, `replay.engine_far_rows`).
+
+**The probes' twin** (`python -m tools.nn.charge_probe skirmish <4 runs> --sim`, 4 copies; game | simulator):
+
+| Lane | archers | crossbowmen | slingers |
+|---|---|---|---|
+| infantry past: seconds running | 7.3 \| 7.5 | 6.3 \| 6.9 | 8.8 \| 7.5 |
+| infantry on the neighbour: seconds running | 4.5 \| 6.9 | 2.3 \| 6.7 | 1.0 \| 2.6 |
+
+The Night Runners are not caught, their stars fly on the run, the chaser loses 0.41 \| 0.45 of its health. The
+Empire shooters of the 90-120 s lanes are caught by the clanrats in the simulator (they lose 0.25-0.41 of their
+health, game 0-0.32): in the game a shooter on a long run speeds up to x1.6 - not modelled.
+
+**The 72-battle replay** (sets it1-it9, both sides by the recording, 4 copies). A run is measured by its state:
+the far order point, breaks up to 2 s merged (`show_far_point`: the simulator shows it in `ox`, `oz` during the run,
+as the game).
+
+"Without the mode" - the replay with the mode off: the AI's shooters run by the recorded far point as by an order.
+
+| Quantity | Game | Without the mode | No cut by orders | With the mode |
+|---|---:|---:|---:|---:|
+| AI shooters: share of seconds in melee | 0.139 | 0.182 | 0.117 | 0.131 |
+| AI shooters: caught at least once | 0.72 | 0.83 | 0.74 | 0.77 |
+| AI shooters: a run, median a battle | 8.0 s | 7.6 s | 10.7 s | 8.5 s |
+| AI shooters: runs a minute | 0.45 | 0.42 | 0.52 | 0.53 |
+| AI shooters: share of seconds on a run | 0.085 | 0.072 | 0.134 | 0.118 |
+| AI shooters: back-offs by movement a minute | 0.89 | 0.44 | 0.70 | 0.91 |
+| AI shooters: health lost | 0.42 | 0.44 | 0.31 | 0.34 |
+| Our / enemy losses at the end | 0.784 / 0.571 | 0.687 / 0.548 | 0.687 / 0.518 | 0.684 / 0.523 |
+| Skill (median over quantities) | - | +6 % | -3 % | +2 % |
+| Same winner | - | 56 of 72 | 59 of 72 | 56 of 72 |
+
+With the cut by orders the runs' length, rate and the shooters' melee match the game. Open: the AI's shooters lose
+less than in the game (0.34 against 0.42), the enemy's loss at the end is 0.025 below the replay without the mode.
+Without the caught runner (`melee_run 0`) all the same within 0.01.
+
+**The sets' twin** (the network against `ai_like` from the 8 exam starts, 4 copies; `build/compare/set_vs_twin.py`;
+game | before | with the mode):
+
+| Quantity | itW1 | itW3 |
+|---|---|---|
+| AI shooters: share of seconds moving | 0.36 \| 0.23 \| 0.27 | 0.39 \| 0.23 \| 0.26 |
+| Our lord out (dead, routed) | 0.88 \| 0.56 \| 0.66 | 0.75 \| 0.66 \| 0.72 |
+| Our lord: share of seconds in melee | 0.35 \| 0.56 \| 0.58 | 0.30 \| 0.57 \| 0.56 |
+| Network wins of 8 | 2 \| 4.5 \| 5.0 | 2 \| 4.75 \| 5.5 |
+
+At 20-60 m from the enemy the twin's AI shooters now move as in the game (0.50 / 0.35 against 0.46 / 0.31); at 60-100 m
+(0.09-0.14 against 0.18-0.25) and on the approach beyond 140 m less: that is not the mode any more (it starts closer)
+but the AI's repositioning. The AI shooters' target changes (game 0.04 per 100 s, twin 2.9) are untouched by the mode.
 
 ## Fatigue calibration
 
@@ -1298,6 +1392,16 @@ Measured, ready as a switch, not in `config/nn/sim.json`: none now.
     through the enemy's men; how long he stays stuck needs a probe); the melee
     and whole-battle changes lowered routs and rallies in the network's battles (routs per unit 0.93 against
     the game's 1.30) — the cause is being measured.
+- **Skirmish mode** ([above](#skirmish-mode)): (1) what the 43.9 / 33.1 m threshold depends on - in the probes the
+  shooter's kind and the chaser's kind go together (the Empire chased by clanrats, the Skaven by swordsmen); (2) the
+  game's speed-up to x1.6 of the run on a long run and the chaser at its charge speed are not modelled; (3) the AI's
+  shooters lose less in the replay than in the game (0.34 health against 0.42; 0.44 without the mode) at the same
+  melee share: all of it in melee (0.19 against 0.26; out of melee 0.12 against 0.13), and the game's caught ones move
+  53 % of their melee seconds, ours 20 % - a caught shooter's way out of the fight (the chase, the blow in the back)
+  is to be analysed apart; (4) caught, the game's shooter strikes half as
+  hard, ours not at all; (5) without ammunition the mode stays on; (6) in the twin the AI's shooters move less than
+  in the game at 60-100 m and on the approach (not the mode); (7) the AI groups `*_no_skirmish` (the AI does not
+  switch the mode on) are not read: none of our units is in one.
 - **Replay is open-loop**: the recorded orders do not react to a battle that went differently.
 - **Fatigue:** the calibration (×10, melee under an attack order) reproduces the game's exhausted shares, but
   in the check gives network battles 96/132 versus 100/132 with the legacy model, and the gate trade is a little

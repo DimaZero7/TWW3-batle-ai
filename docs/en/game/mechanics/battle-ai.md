@@ -61,6 +61,26 @@ planner, and the AI weaknesses players exploit. Our own observations: [the game'
   (`melee_mage_switch_to_melee_time`). · twwstats · high.
 - **Ammo.** `battleai_ammo_threshold` 0.75 only drives ammo-replenishing abilities. · high.
 
+## Skirmish mode
+
+- **What it is.** A shooter with the mode on falls back by itself when an enemy comes too close; a faster enemy
+  still catches it; the unit needs time to accelerate. · [fandom][fw-sk], Steam · high (the gist), no numbers.
+- **While the mode is "triggered", the player's orders are erased shortly after they are given**: the unit carries
+  out the order, then the mode takes it away again. · twcenter (thread "Skirmish Mode makes the unit completely
+  unresponsive…") · medium.
+- **No distances in the database.** Only the flag `land_units.can_skirmish` and the AI usage groups
+  (`ai_usage_groups`) with `*_no_skirmish` (the AI does not switch the mode on for such units). Our shooters are in
+  `ranged`, `ranged_direct`, `ranged_harasser`, `ranged_stalkers_flanker_harasser`, `hybrid_melee` - none
+  `no_skirmish`. · game database · high.
+  - Ours: the game AI keeps the mode on for all its shooters (8 battles with the `sk` field); the bridge switches it
+    off for ours.
+  - Ours: the mode's numbers come from the probes `skirmish`, `skirmish2` (start at 43.9 m man to man for the
+    Empire, 33.1 m for the Skaven, stop at ~82 m) and the battle recordings; the mode's run shows as a far ordered
+    point (>= 1000 m).
+  - Ours: in the 72 gate-set battles **91 % of the runs end with a new order of the AI** (a point 12 m from the unit,
+    median), and in 44 % of them the mode takes the unit away again within 1 s - the "erased order". So in the
+    simulator a new order ends the run ([skirmish mode](../../training/simulator.md#skirmish-mode)).
+
 ## Known AI behaviours and fixes (patch notes)
 
 - 7.0: shooters keep their distance and spend leftover ammo better. · [7.0][p70] · high.
@@ -109,6 +129,7 @@ All community, mostly low-medium confidence.
 [nme]: https://www.nme.com/news/gaming-news/total-war-warhammer-3-will-make-ai-factions-smarter-and-less-biased-3491045
 [fw-40]: https://totalwarwarhammer.fandom.com/wiki/Update_4.0
 [fw-23]: https://totalwarwarhammer.fandom.com/wiki/Update_2.3.0
+[fw-sk]: https://totalwarwarhammer.fandom.com/wiki/Skirmishing
 [p230]: https://www.player.one/total-war-warhammer-iii-update-230-brings-major-improvements-ai-152358
 [tws]: https://twwstats.com/kv/rules
 [p70]: https://community.creative-assembly.com/total-war/total-war-warhammer/blogs/90-total-war-warhammer-iii-update-7-0-0

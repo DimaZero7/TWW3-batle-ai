@@ -85,6 +85,10 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
   slings) is silent 8.5 s whatever the reload, each order restarting the window; handguns and stars fire at once
   (probes `retarget`, `retarget2`, `retarget3`); arrows and bolts at a target that lost a third of its men: a
   cycle of reload + 3.3 s.
+- **Skirmish mode** (the `skirmish`, `skirmish2` probes): a shooter of the game's AI and the scripts runs away, not
+  shooting, from an enemy coming at it (its way within 40°) within 43.9 m (Skaven 33.1) man to man - over its order;
+  from its own attacker to 82 m, from one attacking another ending with a chance of 0.18 a second; a new order ends
+  the run (in the game 91 % of the AI's runs end with its own order); off for the network, as the bridge sets it ([details](training/simulator.md#skirmish-mode)).
 - **Morale by the game's rules:** casualty windows 4 / 60 s, "under fire", flank / rear, "flanks secure",
   charge, outnumbering, "losing the fight" (−3 / −8 by the combat ratio, as in the database), a strong
   enemy, the lord's death (−16 for 45 s, then −10), shattering of a unit and of the army; the rally is the
@@ -111,16 +115,19 @@ loop - the replay of the network's 72 set battles.
 
 | Quantity | Simulator | Game |
 |---|---:|---:|
-| Skill, median over quantities | ≈ 0 % (was −24 %) | — |
-| Our side's loss 60 / 120 / 180 s after first contact | 0.24 / 0.39 / 0.51 | 0.235 / 0.42 / 0.55 |
-| Routs per unit | 0.79 | 1.19 |
-| Rallies per unit | 0.40 | 0.60 |
+| Skill, median over quantities (4 copies) | +2 % | — |
+| Our side's loss 60 / 120 / 180 s after first contact | 0.23 / 0.39 / 0.51 | 0.235 / 0.42 / 0.55 |
+| Enemy loss at the end | 0.52 | 0.57 |
+| Routs per unit | 0.94 | 1.19 |
+| Rallies per unit | 0.53 | 0.60 |
 
 **Known mismatches** (details - ["What is missing"](training/simulator.md#what-is-missing)):
 
 - a worn unit in melee loses health faster than in the game (the `dmgmelee` probe is being analysed);
 - fewer routs and rallies than in the game; in the twin our units rout less than in the game, the AI's
   more;
+- the AI's shooters in skirmish mode lose less in the replay than in the game (0.34 health against 0.42) and move
+  less in the twin (0.26-0.27 of their seconds against 0.36-0.39: movement at 60-100 m and on the approach is missing);
 - "flanks secure" grows over ~45 s in the game (+1…+7), in the simulator +5 at once (the `rallysecure`
   probe);
 - order delay 0.6-0.8 s in small battles in the game, 0.36 s in the simulator;

@@ -230,7 +230,7 @@ the shield and 4 defence. The Night Runners added are the **slings** (`_1`); the
 | Night Runners | Long-ranged sling (140 m) with a tighter spread (4.0 m at 85 m against the slave slingers' 4.8 m) | outranges the archers (130 m) | DB `projectiles` | the measured sling hit rate 0.47 at the edge of range (the spread at 140 m about the slaves' at 120 m); reload 11.5 × 8 / 9 = 10.2 s (`sim.json` missile.reload_ref_s: an estimate, not measured) | passport (`spread`, range, reload) |
 | Night Runners | Physical resistance 20 % | every melee hit and every arrow / sling takes 20 % less | DB `land_units.damage_mod_physical` | the per-hit rule (melee; missiles: resistances are those of the passport) | passport |
 | Night Runners | Vanguard deployment | may deploy ahead of the deployment zone | DB attribute `guerrilla_deploy` | schema only: placements come from the army generator | effect pair; passport attribute |
-| Night Runners | Skirmish | can keep away from melee by itself | DB `land_units.can_skirmish` | not modelled (no skirmish mode) | passport `can_skirmish` |
+| Night Runners | Skirmish | can keep away from melee by itself | DB `land_units.can_skirmish` | modelled: [skirmish mode](simulator.md#skirmish-mode) (on for the game AI's and the scripts' shooters, off for the network's) | passport `can_skirmish` |
 | Night Runners | No Stalk | the WH3 database gives them no `stalk` (the sling Night Runners of older patches had it) | DB | — | — |
 
 The bridge needs nothing for them: nothing is orderable (their abilities are innate).

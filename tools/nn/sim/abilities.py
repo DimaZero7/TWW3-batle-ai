@@ -273,12 +273,17 @@ def vigour(u, params, standing):
 
 def set_rule(u, by_rule):
     """Who fires abilities by the game-AI rule, per battle and side: by_rule [B, 2] bool (side 1,
-    side 2). A side a network plays must be False (it fires by order), whichever side it is:
-    scenario.build sets `ai` for side 2 by default. Call it again after battles restart from a bank
+    side 2); the skirmish mode's toggle `sk` follows it (on for the rule's sides). A side a network
+    plays must be False (it fires by order), whichever side it is: scenario.build sets `ai` for side 2
+    by default. Call it again after battles restart from a bank
     (their rows bring the bank's `ai`). In place."""
     side = u["side"]
     rule = by_rule.to(torch.bool)
     u["ai"] = ((side == 1) & rule[:, 0:1]) | ((side == 2) & rule[:, 1:2])
+    if "sk" in u and "sk_m" in u:
+        # the skirmish mode's toggle goes with it (skirmish.py): on for the scripts' shooters, as the game's AI keeps it;
+        # off for a network's, as the bridge switches it off
+        u["sk"] = u["ai"] & (u["sk_m"] > 0)
 
 
 def timers(u):

@@ -86,8 +86,19 @@ def fill_gaps(flag, gap, x=None, z=None, stay_m=None):
     return out
 
 
+def engine_far_rows(battle, i, far_m):
+    """[T] index of the row whose order a unit's row stands for: itself, or - in the seconds the game records the
+    engine's own far ordered point (far_m or more from the unit, not routing: the skirmish mode's run, which is not
+    the controller's order) - the last row before them without one (-1: none yet)."""
+    f = battle.f
+    far = (np.hypot(np.nan_to_num(f["ox"][:, i]) - np.nan_to_num(f["x"][:, i]),
+                    np.nan_to_num(f["oz"][:, i]) - np.nan_to_num(f["z"][:, i])) >= far_m) & ~np.asarray(f["r"][:, i], bool)
+    src = np.where(far, -1, np.arange(len(far)))
+    return np.maximum.accumulate(src)
+
+
 def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=True, leave_m=10.0, leavers=None,
-                    melee_gap=MELEE_GAP, stay_m=STAY_M, holds=None):
+                    melee_gap=MELEE_GAP, stay_m=STAY_M, holds=None, engine_far_m=None):
     """Orders implied by a recorded battle (tools/nn/gamedata.Battle), one row per recorded second:
     dict of arrays [T, N] kind, x, z, target, run in the simulator's slots (slot_of: recorded index
     -> slot). The game records the order's point at the formation's front (measured: half a depth
@@ -118,7 +129,12 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
     companion.jsonl: network_holds); in melee such a unit holds (HOLD), whatever the recording's target or order
     point: the game records the engine's target and the last move's point for a halted unit, which the replay read
     as an attack or a leave (the network's 'hold' in contact over the gate sets it1-it9, 20,749 unit-s: replayed as
-    MOVE 53 %, HOLD 26 %, ATTACK 21 %; build/shotgap/replay_vs_net.py)."""
+    MOVE 53 %, HOLD 26 %, ATTACK 21 %; build/shotgap/replay_vs_net.py).
+    engine_far_m (None: off): the seconds a unit's recorded point is the engine's own far point (engine_far_rows: the
+    game's skirmish mode runs the unit to a point >= 1000 m away, over its order) keep the order of the second before
+    them (point, target, running, bearing; with none before: its own place, no target) - the simulator's skirmish mode
+    (tools/nn/sim/skirmish.py) makes such runs itself, from the simulated enemy (the gate sets it1-it9: 12,535 such
+    seconds of the game AI's shooters, 6 with a recorded target, in 1,269 runs of 4 s median)."""
     f = battle.f
     T = len(battle.t)
     kind = np.full((T, N), O.HOLD, dtype=np.int64)
@@ -140,6 +156,18 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
     for i, s in enumerate(slot_of):
         tg = battle.target[:, i]
         ox, oz = np.nan_to_num(f["ox"][:, i]), np.nan_to_num(f["oz"][:, i])
+        running = f["f"][:, i]
+        b_i = np.nan_to_num(f["b"][:, i])
+        if engine_far_m:
+            src = engine_far_rows(battle, i, engine_far_m)
+            if (src != np.arange(T)).any():
+                k = np.maximum(src, 0)
+                none = src < 0
+                tg = np.where(none, -1, tg[k])
+                ox = np.where(none, np.nan_to_num(f["x"][:, i]), ox[k])
+                oz = np.where(none, np.nan_to_num(f["z"][:, i]), oz[k])
+                running = np.where(none, False, np.asarray(running, bool)[k])
+                b_i = b_i[k]
         leaver = leave_m > 0 and (leavers is None or leavers[i])
         formation = np.nanmax(np.nan_to_num(f["men"][:, i])) > 1
         m_i = (f["m"][:, i] if leaver or not formation else
@@ -160,7 +188,7 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
         if widths is not None and widths[i]:
             back = half_depth(np.nan_to_num(f["men"][:, i]), widths[i],
                               spacing if np.isscalar(spacing) else spacing[i])
-            br = np.radians(np.nan_to_num(f["b"][:, i]))
+            br = np.radians(b_i)
             ox, oz = ox - back * np.sin(br), oz - back * np.cos(br)
         fighting = m_i & ~attack & ~leaving
         kind[:, s] = np.where(attack, O.ATTACK, np.where(fighting, O.HOLD, O.MOVE))
@@ -170,7 +198,6 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
         # moving in the game this second and the next (is_moving; the redirect keeps such a unit's recorded order)
         mv = np.asarray(f["mv"][:, i], bool) if "mv" in f else np.zeros(T, dtype=bool)
         moving[:, s] = mv & np.r_[mv[1:], False]
-        running = f["f"][:, i]
         # Look ahead without wrapping the recording's first flags into its last seconds.
         run[:, s] = running
         for ahead in (1, 2):

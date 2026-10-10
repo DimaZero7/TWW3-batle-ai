@@ -137,6 +137,15 @@ STATIC = {
     "cp_missile": ("f", "combat potential of its missiles (main_units missile_cp): counts by the ammunition left"),
     "ai": ("b", "played by the game's AI: its lord fires his active abilities by the AI's rule (the network's "
                 "side by order: tools/nn/sim/orders.py ability)"),
+    "sk_m": ("f", "skirmish mode: the start gap, m - the nearest standing enemy's formation edge this close (the "
+                  "simulator's rectangles, geometry.pairwise gap) starts the run away (skirmish.py; config/nn/sim.json "
+                  "skirmish.start_gap_m by unit); 0: the unit cannot skirmish (the database's can_skirmish) or the rule is off"),
+    "sk_stop_m": ("f", "skirmish mode: the stop gap, m - the run goes on until the nearest standing enemy is this far "
+                       "(skirmish.stop_gap_m)"),
+    "sk": ("b", "skirmish mode switched on (the game's toggle): the game's AI keeps it on for its shooters, the bridge "
+                "switches it off for the network's (--skirmish off); scenario.build: on for a side the game's AI plays "
+                "(`ai`) unless the side says \"skirmish\"; abilities.set_rule sets it with `ai` (the scripts' sides on, "
+                "a network's off); skirmish.network in config/nn/sim.json gives it to every unit"),
     "ab0": ("i", "the unit's first ability slot: index in the ability passports (tools/nn/sim/abilities.py keys), "
                  "-1 none"),
     "ab1": ("i", "its second ability (-1 none)"),
@@ -188,6 +197,15 @@ INTERNAL = {
                   "and at a new target"),
     "loaded_s": ("f", "seconds a shooter has been loaded for its next volley, waiting for its late men to aim "
                       "(missile.reaim; 0 while reloading)"),
+    "skr": ("b", "in a skirmish run now (skirmish.py): started at sk_m, kept until sk_stop_m, in melee or routing ended"),
+    "sk_in": ("b", "an enemy coming that attacks another unit was within sk_m last step (skirmish.py: such an enemy starts "
+                   "a run only as it comes within the gap)"),
+    "sk_shown": ("b", "ox, oz show the skirmish run's far point (skirmish.show_far_point, battle.py): the order's own point "
+                      "is in sk_ox, sk_oz and comes back at the next step's start"),
+    "sk_ox": ("f", "the order's own point x under a shown skirmish far point (sk_shown)"),
+    "sk_oz": ("f", "the order's own point z (sk_shown)"),
+    "skt": ("b", "a skirmish run ended out of melee: the unit turns back to its target once it stands (battle.py, the "
+                 "standing turn of a shooter; as the game's shooters faced back and shot 2.5-7 s after the run)"),
     "rout_count": ("f", "times routed"),
     "rout_s": ("f", "seconds since the rout began"),
     "rally_s": ("f", "seconds since the last rally"),

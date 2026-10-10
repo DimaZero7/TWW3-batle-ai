@@ -79,6 +79,18 @@ class Params:
         d = float(self.sim["formation"]["spacing_m"])
         return float(sp.get("h") or d), float(sp.get("v") or d)
 
+    def skirmish_gaps(self, key):
+        """{"sk_m", "sk_stop_m"} of a unit key (config/nn/sim.json skirmish: start_gap_m / stop_gap_m by key, else
+        "default"); both 0 for a unit that cannot skirmish (no can_skirmish or no missile weapon) or with the rule off."""
+        u = self.units[key]
+        cal = self.sim.get("skirmish") or {}
+        if not cal.get("on") or not u.get("can_skirmish") or not u.get("missile"):
+            return {"sk_m": 0.0, "sk_stop_m": 0.0}
+
+        def by_key(table):
+            return float(table.get(key, table["default"])) if isinstance(table, dict) else float(table)
+        return {"sk_m": by_key(cal["start_gap_m"]), "sk_stop_m": by_key(cal["stop_gap_m"])}
+
     def static(self, key, faction=None):
         """The STATIC fields (tools/nn/sim/state.py) of a unit key, without its place."""
         u = self.units[key]
@@ -154,6 +166,11 @@ class Params:
                 sum((self.abilities.get(k) or {}).get("cp") or (0, 0)) for k in u.get("abilities") or ()),
             "cp_missile": (u.get("combat_potential") or {}).get("missile", 0),
             "ai": False,
+            # skirmish mode (skirmish.py, sim.json skirmish): the start / stop gaps of a unit that can skirmish (the
+            # database's can_skirmish, a missile unit); 0 when it cannot or the rule is off. `sk` (the toggle) is set
+            # by scenario.build / abilities.set_rule
+            **self.skirmish_gaps(key),
+            "sk": False,
             **{f"ab{k}": i for k, i in enumerate(abilities.slots_of(self, key))},
         }
 

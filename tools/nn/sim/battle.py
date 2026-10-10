@@ -10,7 +10,7 @@ import math
 
 import torch
 
-from tools.nn.sim import abilities, effects, fatigue, geometry, melee, missile, morale, movement
+from tools.nn.sim import abilities, effects, fatigue, geometry, melee, missile, morale, movement, skirmish
 from tools.nn.sim import orders as O
 from tools.nn.sim.params import load
 
@@ -59,6 +59,10 @@ def step(st, orders, params=None, dt=None):
     N = st.N
     eye = torch.eye(N, dtype=torch.bool, device=st.device)[None]
 
+    # (the skirmish run's far point shown in ox, oz last step - skirmish.show_far_point, below: the order's own point back)
+    if "sk_shown" in u:
+        u["ox"] = torch.where(u["sk_shown"], u["sk_ox"], u["ox"])
+        u["oz"] = torch.where(u["sk_shown"], u["sk_oz"], u["oz"])
     # --- orders --- (KEEP: the order in force goes on)
     take = standing & (orders.kind != O.KEEP)
     kind = torch.where(take, orders.kind, u["order_kind"])
@@ -75,6 +79,10 @@ def step(st, orders, params=None, dt=None):
     # another order than the one in force (kind, target or a point moved over 1 m): ends a latched leave (below)
     new_order = (kind != u["order_kind"]) | (tgt != u["order_target"]) | (
         take & point & (((orders.x - u["ox"]) ** 2 + (orders.z - u["oz"]) ** 2) > 1.0))
+    # (the skirmish run's cut, skirmish.py: another kind, another target or a point moved new_point_m or more)
+    sk_cal = cal.get("skirmish") or {}
+    sk_new = (kind != u["order_kind"]) | (tgt != u["order_target"]) | (take & point & (
+        ((orders.x - u["ox"]) ** 2 + (orders.z - u["oz"]) ** 2) >= float(sk_cal.get("new_point_m", 5.0)) ** 2))
     u["ox"] = torch.where(take & point, orders.x, u["ox"])
     u["oz"] = torch.where(take & point, orders.z, u["oz"])
     # A new order (another kind, or another attack target) makes a shooter aim again (missile.aim_reset_on_order;
@@ -172,6 +180,15 @@ def step(st, orders, params=None, dt=None):
         fighting = (touch & standing[:, None, :]).any(2)
         leaving = leaving | ((kind == O.ATTACK) & (tgt >= 0) & tgt_away & fighting & (u["range"] <= 0)
                              & (u["men0"] > 1) & (leave_m > 0))
+    # --- the skirmish mode (skirmish.py; config/nn/sim.json skirmish): a shooter with the mode on runs, over its order
+    # and without shooting, while an enemy moving at it is within its gap; caught, it goes on running - a leave ---
+    sk_run = torch.zeros_like(standing)
+    if sk_cal.get("on") and "skr" in u:
+        in_touch = standing & (touch & standing[:, None, :]).any(2)
+        sk_run, sk_x, sk_z = skirmish.update(u, pw, standing, in_touch, st.bounds, sk_cal, spacing, st.t, dt,
+                                             new_order=sk_new if sk_cal.get("order_cuts", 1) else None)
+        if sk_cal.get("melee_run"):
+            leaving = leaving | (sk_run & in_touch)
     striker = standing & ~leaving
     strike = touch & striker[:, :, None]
     engaged = standing & (touch & standing[:, None, :]).any(2)
@@ -318,7 +335,7 @@ def step(st, orders, params=None, dt=None):
     # --- shooting ---
     # (fire whilst moving, attribute mounted_fire_move: shoots and aims on the move too)
     still = (speed < 0.2) | u["fire_move"]
-    ready = standing & ~engaged & (u["a"] > 0) & (u["range"] > 0) & still
+    ready = standing & ~engaged & (u["a"] > 0) & (u["range"] > 0) & still & (~sk_run | u["fire_move"])
     # On the move (fire whilst moving) a unit shoots only at targets within missile.move_fire_arc_deg of its
     # facing (the way it walks): walking away it holds fire (measured, config/nn/sim.json missile.move_fire_why) -
     # unless its own fire arc (the database's, passport missile.fire_arc_deg) is wider: the Night Runners' throwing
@@ -361,9 +378,13 @@ def step(st, orders, params=None, dt=None):
             beyond = beyond & (kind == O.ATTACK) & (aim_at == tgt)
         if done_deg is not None:
             off = pw["rel_i"].gather(2, aim_at.clamp(min=0)[:, :, None]).squeeze(2).abs()
-            go_on = u["turn_on"] & on_stand & (aim_at >= 0) & (off > float(done_deg) * geometry.DEG)
+            # (a skirmish run's end, skirmish.py `skt`: the unit turns back to its target once it stands, whatever its order)
+            back_on = u["turn_on"] | u["skt"] if "skt" in u else u["turn_on"]
+            go_on = back_on & on_stand & (aim_at >= 0) & (off > float(done_deg) * geometry.DEG)
             turning = beyond | go_on
             u["turn_on"] = turning
+            if "skt" in u:
+                u["skt"] = u["skt"] & ~on_stand
         else:
             turning = beyond
     # A new target (another enemy than last step's, an order's or its own) costs missile.retarget_s without fire
@@ -631,7 +652,7 @@ def step(st, orders, params=None, dt=None):
         in_range = pw["dist"].gather(2, ti[:, :, None]).squeeze(2) <= u["range"]
     else:
         in_range = t_reach <= 0.95 * u["range"]
-    close_in = (kind == O.ATTACK) & ~(shooter & in_range)
+    close_in = (kind == O.ATTACK) & ~(shooter & in_range) & ~sk_run
     mc = mcal["charge"]
     charging = standing & close_in & ~engaged & (t_reach <= u["charge_pose"])
     landed = standing & engaged & (kind == O.ATTACK) & (charge_now > 0)
@@ -692,7 +713,7 @@ def step(st, orders, params=None, dt=None):
     # The recordings do not expose a combat-stance flag; pending work is our proxy.
     # movement.velocity brakes to rest within 0.5 m of the destination.
     pending_move = point & (((u["ox"] - u["x"]) ** 2 + (u["oz"] - u["z"]) ** 2) > 0.5 ** 2)
-    idle = standing & ~pending_move & (kind != O.ATTACK) & (aim_at < 0)
+    idle = standing & ~pending_move & (kind != O.ATTACK) & (aim_at < 0) & ~sk_run
     # The charge sprint (the database's battle_entities charge distance and charge speed): under an attack order, at
     # a run or a walk, a unit closes the last charge_dist metres (30 infantry, 35 lords) to its target at its charge
     # speed - a charge then (the run-up above); a move order gives none (the melee probe: the last 30 m at 3.65-3.88
@@ -734,6 +755,12 @@ def step(st, orders, params=None, dt=None):
     # (the charge sprint: `sprint` above, at the fatigue)
     want = torch.where(sprint, u["charge_speed"], want)
     moving = standing & (point | close_in)
+    if sk_cal.get("on") and "skr" in u:
+        # the skirmish run: away from the nearest enemy at the run speed, whatever the order
+        gx = torch.where(sk_run, sk_x, gx)
+        gz = torch.where(sk_run, sk_z, gz)
+        want = torch.where(sk_run, u["run"], want)
+        moving = moving | sk_run
     # (morale.flee_near_m: 0 - away from every standing enemy weighted 1/d, the own edge only with none standing;
     # absent / 150 - the old rule: only enemies within 150 m, the own edge beyond; config/nn/sim.json flee_near_why)
     fx, fz = movement.flee_goal(u, pw, alive, st.bounds, float(cal["morale"].get("flee_near_m", 150.0)))
@@ -897,6 +924,15 @@ def step(st, orders, params=None, dt=None):
         u["oz"] = torch.where(broke_off, u["z"], u["oz"])
         u["leave_s"] = torch.where(broke_off, torch.zeros_like(u["leave_s"]), u["leave_s"])
         u["exit_s"] = torch.where(broke_off, torch.zeros_like(u["exit_s"]), u["exit_s"])
+    if sk_cal.get("on") and sk_cal.get("show_far_point") and "sk_shown" in u:
+        # the observed order point of a unit on a skirmish run is the run's far point, as the game shows it (its
+        # ordered position >= 1000 m away: build/skirm/f_farpoint.py); the order's own point is kept for the next step
+        shown = sk_run & standing
+        u["sk_ox"] = torch.where(shown, u["ox"], u["sk_ox"])
+        u["sk_oz"] = torch.where(shown, u["oz"], u["sk_oz"])
+        u["ox"] = torch.where(shown, sk_x, u["ox"])
+        u["oz"] = torch.where(shown, sk_z, u["oz"])
+        u["sk_shown"] = shown
     threat_cal = cal["threat"].get("calibration", {})
     # A calibrated flag uses the position and bearing visible in this observation.
     # OFF preserves the legacy pre-move geometry for exact baseline comparison.

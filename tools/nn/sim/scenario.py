@@ -50,6 +50,9 @@ def build(armies, params=None, device="cpu", per_side=None):
                 row["tag"] = int(unit.get("tag", 0))       # a drill's mark (state.py STATIC "tag"), not the simulator's
                 # The game's AI uses abilities; by default it plays side 2 (the arena's enemy).
                 row["ai"] = bool(spec.get("ai", side == 2))
+                # skirmish mode (skirmish.py): the side's "skirmish" if given, else on where the game's AI plays (it keeps
+                # the mode on for its shooters; the bridge switches it off for the network's)
+                row["sk"] = bool(spec.get("skirmish", row["ai"])) and row["sk_m"] > 0
                 for name in S.STATIC:
                     rows[name][bi][slot] = row[name]
                 obs["x"][bi][slot] = unit["x"]

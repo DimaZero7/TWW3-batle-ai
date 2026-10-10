@@ -41,6 +41,9 @@ NET = "net"          # the network's battles against the game's AI on generated 
 NET_HOLDS = True
 # The replay's copies roll their blows (config/nn/sim.json noise.blows): the copies spread as the game's identical lanes do.
 NOISE = True
+ENGINE_FAR_M = 1000.0   # replay with the simulator's skirmish mode on (config/nn/sim.json skirmish.on): the seconds a unit's
+                        # recorded point is the engine's far point (the game's skirmish run) keep the order before them -
+                        # the simulator runs the unit itself (replay.recorded_orders engine_far_m); mode off: as recorded
 COPIES = 19          # replays of each recorded battle: the range of 19 copies is a 90 % prediction interval
 CURVE_S = (60, 120, 180)   # share of HP lost this long after the first contact
 JITTER_M = 2.0       # ... from starts moved by up to this much
@@ -148,7 +151,7 @@ def jitter(seed, run, copy, n, jitter_m):
     return (torch.rand((2, n), generator=gen) * 2 - 1) * jitter_m
 
 
-LEAN = ("x", "z", "men", "hp", "mp", "ms", "a", "r", "s", "w", "m", "mv")   # what measure.py and this file read
+LEAN = ("x", "z", "men", "hp", "mp", "ms", "a", "r", "s", "w", "m", "mv", "ox", "oz")   # what measure.py and this file read (ox, oz: the skirmish run's far point)
 WORKERS = 8          # processes (CPU): torch runs an operation on fewer than ~32 000 numbers on one thread, and
                      # most of a step's are that small, so one batch per process on one thread each
 
@@ -300,8 +303,10 @@ def _simulate_batch(games, armies, params, device, copies, jitter_m, seed, end_a
         nearest = [FIGHT_NEAREST and not (g.own_ai == NET and int(s) == 1) for s in g.side]
         spacing = [params.spacing_of(k) for k in g.keys] if g.keys else params.sim["formation"]["spacing_m"]
         holds = network_holds(g) if NET_HOLDS and g.own_ai == NET else None
+        far_m = ENGINE_FAR_M if (params.sim.get("skirmish") or {}).get("on") else None
         orders = replay.recorded_orders(g, slot_of, 2 * H, [width.get(n) for n in g.names], spacing, nearest,
-                                        params.sim["contact"].get("leave_m", 0.0), leavers, holds=holds)
+                                        params.sim["contact"].get("leave_m", 0.0), leavers, holds=holds,
+                                        engine_far_m=far_m)
         rows.extend([orders] * copies)
     rec = Recorder(st, fields=fields)
     ends = torch.tensor([float(g.t[-1]) for g in games for _ in range(copies)], device=device)

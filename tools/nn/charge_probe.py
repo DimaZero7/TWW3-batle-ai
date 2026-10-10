@@ -164,7 +164,7 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           (4) 3 m, the clanrats at a run (the earlier probes' set-up, the control); (5) 30 m, the clanrats at a run (a
           real charge), the swordsmen at a walk - 2 battles, lanes rotated.
   skirmish the game's skirmish mode (a shooter steps back from an approaching enemy by itself, over its order; the
-          simulator has none; build/bench2/zo_chase: the game AI's shooters under the bridge get away from a chase even
+          simulator's tools/nn/sim/skirmish.py; build/bench2/zo_chase: the game AI's shooters under the bridge get away from a chase even
           under 'hold'): a shooter stands - halted, fire at will on and aimed at the chaser (as the bridge aims a held
           shooter) - and melee infantry attacks it at a run from 60 m (front to front), 90 s; the mode on or off by
           script (change_behaviour_active) for the Skaven's slave slingers and Night Runners (chased by swordsmen),
@@ -172,7 +172,8 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           0.5 s both units' place, bearing, melee flag, health, men, and the shooter's ammo, fire flag, damage dealt and
           the mode's flag (sk: unit:is_behaviour_active); the soldiers' places every 1 s within 200 m;
           probe_skirmish: the mode before and after it was set. 'skirmish' prints the table: when the shooter starts
-          moving away (the distance), its direction and speed, its fire and shots on the way, caught or not.
+          moving away (the distance), its direction and speed, its fire and shots on the way, caught or not, both sides'
+          losses; --sim: the simulator's twin beside it (the mode on / off as the lane set it).
   skirmish2 what sets the skirmish mode off (build/skirm: it starts at ~40 m for the Empire's shooters, ~33 m for the
           Skaven's; the shooter runs straight away, silent, and shoots again 70-105 m off; the Empire's speed up to x1.6
           on a long run): slave slingers, archers and crossbowmen with the mode on, standing as in 'skirmish'; four lane
@@ -205,7 +206,7 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe run --plan retarget3                # targets in line / across (the turn?)
     python -m tools.nn.charge_probe run --plan leave                    # the exit from melee (report --sim)
     python -m tools.nn.charge_probe run --plan skirmish                 # the shooters' skirmish mode
-    python -m tools.nn.charge_probe skirmish [runs...]                  # its table (skirmish2 too)
+    python -m tools.nn.charge_probe skirmish [runs...] [--sim]          # its table (skirmish2 too; --sim: + the twin)
     python -m tools.nn.charge_probe run --plan skirmish2                # what triggers the mode, the long run
     python -m tools.nn.charge_probe run --plan shootcontact             # a shooter moving in melee
     python -m tools.nn.charge_probe shootcontact [runs...]              # its table
@@ -1059,6 +1060,10 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
             sides[roles["tg"]]["units"].append({"key": spec["t_key"], "x": s0[2]["x"], "z": s0[2]["z"] - 400.0,
                                                 "b": s0[2]["b"], "men": s0[2]["men"], "width": spec["t_width"],
                                                 "general": False, "name": "keep"})
+        if spec.get("target_mode") == "skirmish":
+            # the skirmish plan: the shooter's mode on or off as the lane set it (change_behaviour_active); the twin's
+            # sides have no game AI, so the mode is off everywhere else (tools/nn/sim/skirmish.py)
+            sides[roles["tg"]]["skirmish"] = bool(spec.get("t_skirmish"))
         army = {"attacker": roles["a"], "sides": sides}
         for _ in range(copies):
             armies.append(army)
@@ -1091,7 +1096,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
     # the retarget plan's switches run on the game's clock from the go: the twin starts at the first sample
     t_first = [float(ln["samples"][0][0]) for ln in meta]
     rec = {"t": [], "rows": []}
-    fields = ("x", "z", "b", "men", "hp_abs", "m", "fatigue", "fat", "k", "r", "s", "a")
+    fields = ("x", "z", "b", "men", "hp_abs", "m", "fatigue", "fat", "k", "r", "s", "a", "fire")
     a_slot = {}
     for sp in specs:
         if sp.get("a_ability") and sp["a_key"] not in a_slot:
@@ -1171,6 +1176,14 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                     kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, True
             elif mode[b] in ("attack_run", "attack_walk"):
                 kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, mode[b] == "attack_run"
+            elif mode[b] == "pass":
+                # the skirmish2 plan's 'pass' (entries/charge_probe.lua): a run straight ahead from its own place to
+                # pass_beyond_m behind the lane's z, never attacking
+                sx, _ = st_["start"][b]
+                kind[b, A], x[b, A], z[b, A], run_[b, A] = O.MOVE, sx, sp["z"] - sp.get("pass_beyond_m", 100), True
+            elif mode[b] == "attack_t2" and int(slot["t2"][b]) >= 0:
+                # the skirmish2 plan's 'neighbour': a melee attack at a run on the target's neighbour
+                kind[b, A], target[b, A], run_[b, A] = O.ATTACK, int(slot["t2"][b]), True
             elif mode[b] == "retarget":
                 # a ranged attack on the target, with switch_s on the other one in turns (entries/charge_probe.lua
                 # retarget_aim); KEEP below makes each switch one new order
@@ -1321,6 +1334,8 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                         out[k] = float(r[k][b, i])
                 if "a" in r:
                     out["ammo"] = float(r["a"][b, i])
+                if "fire" in r:
+                    out["fire"] = float(r["fire"][b, i])
                 return out
             samples.append((t, row(A), row(T), row(L)))
             if int(slot["t2"][b]) >= 0:
@@ -1820,6 +1835,13 @@ def skirmish_measure(lane):
             last = [f for f in fat if lo < f[0] <= hi]
             out[f"fat_{lo}_{hi}"] = last[-1][1] if last else None
             out[f"chaser_fat_{lo}_{hi}"] = last[-1][2] if last else None
+    # the losses: the shooter's men and share of health, the chaser's share of health (the shooter's damage to it),
+    # the shooter's seconds in melee
+    tmen, thp, ahp, tm = (series(s, w, k) for w, k in (("tg", "men"), ("tg", "hp"), ("a", "hp"), ("tg", "m")))
+    out["men_lost"] = int(np.nan_to_num(tmen[0] - tmen[-1]))
+    out["hp_lost"] = round(float(1 - thp[-1] / thp[0]), 3) if thp[0] > 0 else None
+    out["chaser_hp_lost"] = round(float(1 - ahp[-1] / ahp[0]), 3) if ahp[0] > 0 else None
+    out["melee_s"] = round(float(np.nansum(tm)) / lag, 1)
     f_sk = sk[np.isfinite(sk)]
     out["sk_share"] = round(float(np.mean(f_sk)), 2) if len(f_sk) else None
     return out
@@ -1827,7 +1849,8 @@ def skirmish_measure(lane):
 
 SKIRMISH_KEYS = ("caught", "contact_s", "moves", "move_d_m", "move_s", "move_dir_deg", "move_speed", "move_peak",
                  "away_share", "fire_stand", "fire_moving", "shots_stand", "shots_moving", "secs_moving",
-                 "chaser_speed", "end_d_m", "min_d_m", "sk_share") + tuple(
+                 "chaser_speed", "end_d_m", "min_d_m", "men_lost", "hp_lost", "chaser_hp_lost", "melee_s",
+                 "sk_share") + tuple(
                      f"{k}_{lo}_{hi}" for lo, hi in SKIRMISH_WINDOWS for k in ("speed", "chaser_speed", "fast"))
 
 
@@ -1845,30 +1868,42 @@ def skirmish_summary(rows):
             v = [float(r[k]) for r in rs if r.get(k) is not None]
             row[k] = round(float(np.mean(v)), 2) if v else None
         for k in (f"{w}fat_{lo}_{hi}" for lo, hi in SKIRMISH_WINDOWS for w in ("", "chaser_")):
-            v = [r[k] for r in rs if r.get(k)]
+            v = [str(r[k]) for r in rs if r.get(k)]
             if v:
                 row[k] = ",".join(v)
         out[name] = row
     return out
 
 
-def skirmish_report(run_dirs, out=None):
-    """The skirmish lanes of the runs: a row per lane and the mean per shooter and mode. Writes
-    build/charge-probe/skirmish.json (not in Git)."""
+def skirmish_report(run_dirs, out=None, sim=False, device="cpu", copies=8, params=None):
+    """The skirmish lanes of the runs: a row per lane and the mean per shooter and mode; with sim the simulator's twin
+    of the same lanes beside the game (sim_lanes, `copies` each: the mode on / off as the lane set it,
+    tools/nn/sim/skirmish.py). Writes build/charge-probe/skirmish.json (not in Git)."""
     lanes = [ln for d in run_dirs for ln in load_run(d) if ln["spec"].get("target_mode") == "skirmish"]
     rows = [skirmish_measure(ln) for ln in lanes]
     table = skirmish_summary(rows)
+    sim_rows, sim_table = None, {}
+    if sim:
+        # (each copy cut at its game lane's end: the twin runs to the longest lane's end)
+        ends = [ln["samples"][-1][0] for ln in lanes for _ in range(copies)]
+        twins = sim_lanes(lanes, params=params, device=device, copies=copies)
+        sim_rows = [skirmish_measure(dict(sm, samples=[x for x in sm["samples"] if x[0] <= end + 1e-6]))
+                    for sm, end in zip(twins, ends)]
+        sim_table = skirmish_summary(sim_rows)
     f = lambda v: "-" if v is None else f"{v:g}"
-    print("The shooters' skirmish mode: per shooter and mode (on / off), the mean over its lanes")
+    print("The shooters' skirmish mode: per shooter and mode (on / off), the mean over its lanes"
+          + (" - game | simulator" if sim else ""))
     for name, r in table.items():
         print(f"\n{name}  (n={r['n']})")
         for k in SKIRMISH_KEYS:
-            if r[k] is not None:
-                print(f"  {k:20} {f(r[k]):>8}")
+            if r[k] is not None or sim_table.get(name, {}).get(k) is not None:
+                print(f"  {k:20} {f(r[k]):>8}" + (f" | {f(sim_table.get(name, {}).get(k)):>8}" if sim else ""))
         for k, v in r.items():
             if "fat_" in k:
                 print(f"  {k:20} {v}")
     result = {"lanes": rows, "summary": table}
+    if sim:
+        result.update(sim_lanes=sim_rows, sim_summary=sim_table)
     out = out or ROOT / "skirmish.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=1, default=float), encoding="utf-8")
@@ -1992,7 +2027,8 @@ def main(argv=None):
                         out=None if args.out == OUT else args.out)
         return 0
     if args.command == "skirmish":
-        skirmish_report(args.runs or runs(), out=None if args.out == OUT else args.out)
+        skirmish_report(args.runs or runs(), out=None if args.out == OUT else args.out, sim=args.sim, device=args.device,
+                        copies=args.copies)
         return 0
     if args.command == "shootcontact":
         shootcontact_report(args.runs or runs(), out=None if args.out == OUT else args.out)
