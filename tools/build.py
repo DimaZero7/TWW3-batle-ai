@@ -348,6 +348,8 @@ def nn_arena_config(args, run_config):
         path.parent.mkdir(parents=True, exist_ok=True)
         nn_scenario.write_scenario(defender, arena, path, duration_s)
     run_config.update(nn_scenario.run_config(arena), own_ai=args.own_ai, enemy_role=enemy_role)
+    if args.defend_radius is not None:
+        run_config["defend_radius_m"] = args.defend_radius
     if args.own_ai == "net":
         run_config.update(own_role=own_role, decide_ms=args.decide_ms, poll_ms=NET_POLL_MS)
         if args.enemy_ai != "game":
@@ -400,6 +402,9 @@ def main(argv=None):
                         help="nn-arena --own-ai net: the game's skirmish mode (a unit steps back from approaching "
                              "enemies by itself, over its order) as the game sets it (default) or off for every unit "
                              "the bridge commands - ours and a scripted enemy's (the simulator has no such mode)")
+    parser.add_argument("--defend-radius", type=float, default=None,
+                        help="nn-arena --own-ai defend: the planner's defend_position radius in m (arena default 150; "
+                             "a small one keeps the defenders standing and waiting, as the game's AI defends)")
     parser.add_argument("--own-role", choices=("attack", "defend"),
                         help="nn-arena --own-ai net, human: our side attacks (the game's AI defends and wins on "
                              "timeout) or defends (default: the game's AI attacks)")
