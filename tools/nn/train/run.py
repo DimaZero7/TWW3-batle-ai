@@ -939,6 +939,8 @@ def parser():
     ap.add_argument("--bank-refresh", type=float, default=5.0, help="minutes between new banks of armies")
     ap.add_argument("--no-bank-ahead", dest="bank_ahead", action="store_false",
                     help="build each new bank when it is due (the training waits) instead of in a thread ahead")
+    ap.add_argument("--gpu-mem", type=float, default=1.0,
+                    help="share of the GPU's memory training may hold (game mode: e.g. 0.5, so a game keeps memory)")
     ap.add_argument("--gpu-duty", type=float, default=1.0,
                     help="share of the time the GPU works (e.g. 0.9: after each update rest 1/9 of its time; "
                          "quieter fans, a responsive desktop; the rest is not counted as training time)")
@@ -951,6 +953,10 @@ def parser():
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     args = parser().parse_args()
+    if args.gpu_mem < 1.0 and torch.cuda.is_available():
+        # game mode (rule 15): cap the caching allocator so a game beside training keeps video memory (10.10: training
+        # held 15.7 of 16.3 GB and the user's game fell from 200 to 21 fps; --gpu-duty caps time, not memory)
+        torch.cuda.set_per_process_memory_fraction(args.gpu_mem)
     actor, summary, out = train(args)
     checkpoint.save(checkpoint.LATEST, actor, None, args.preset, checkpoint.meta(out / "latest.pt"))
     if not args.no_eval:
