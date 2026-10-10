@@ -40,6 +40,7 @@ The first steps compile for 1–3 minutes (seconds once a run of the same shapes
 | reward | `--gold` (1.0), `--rout-share` (0.5), `--lord` (0.3), `--lord-rout` (0), `--idle` (2e-4), `--idle-tau` (150 s), `--idle-pause` (30 s), `--idle-step` (0.5), `--idle-cap` (20), `--idle-rate` (0), `--idle-window` (30 s), `--order-cost` (0.001), `--retarget` (0.003): [reward](#reward) |
 | opponents | `--mix` (json shares), `--pool` (8: past versions at most), `--pool-extra` (more checkpoints for the pool), `--pool-dir` (the pool's folder for a whole night), `--pool-eta` (0.01), `--past-slots` (3), `--past-every` (6 updates): [past versions](#past-versions), `--eval-past`, `--eval-generated` (512) |
 | drills | `--drills` (0: share of the battles), `--drill-weights` (json; default the `TRAIN` drills equally: kiting, hold_fire), `--drill-bank` (256 per drill), `--drill-embed` (1: share of the embedded frame, for the drills that have one), `--drill-broad` (0.5: of the rest, share of the broad frame), `--drill-teach` (`auto` or json {drill: weight}: the teacher, off by default), `--drill-teach-minutes` (10: manual), `--drill-teach-k` (0.5), `--drill-teach-cap` (0.25), `--drill-teach-weight` (0.15: auto), `--teach-normal` (`auto`, names or json {drill: share}: the teacher in normal battles, off by default), `--teach-normal-k` (0.5), `--teach-normal-cap` (0.15), `--teach-normal-weight` (0.1), `--teach-normal-match` (0.1): [drills](#drills) |
+| kiting in self-play | `--kite-share` (0: share of the `self` / `past` battles started, planned 0.1), `--kite-bank` (256 battles ready): [kiting in self-play](#kiting-in-self-play) |
 
 ### The chain's settings
 
@@ -886,6 +887,48 @@ and behind the infantry line, both lords, the variants, the gold; the evaluator 
 by its own men goes aside, an unsafe place - skilled stays, reckless goes, archers get no orders, an enemy at the
 flank is a flanker; envelop and hunt; the detector; the scripts in the simulator), `tests/tools/test_nn_teach_auto.py`
 (the teacher's own reference, cap and stop).
+
+## Kiting in self-play
+
+Kiting without a teacher or a scripted enemy (`tools/nn/train/kitesp.py`, `--kite-share`). A share of the ordinary
+self-play battles (`self` and `past`: the network on both sides) is uneven on purpose: one side (the **shooters**) has
+a lord and only fast missile units, the other (the **infantry**) a lord, infantry slower than every shooter and a few
+missile units of its own. Equal gold; the map, deployment and distances as in normal battles ([random
+armies](armies.md)); who attacks and which side the shooters are, half and half. Nothing is imposed: the situation
+itself pays the shooters for shoot - run back - shoot and the infantry for chasing and cutting off. A battle need not
+be winnable for both sides (as in a campaign: "cannot win, take the most and live") - the gold-trade reward teaches
+that.
+
+- **Speed rule.** A shooter's run (passport `speed.run`) is at least 1.3 x every enemy infantry unit's run and above
+  its charge speed (`speed.charge`). Why 30 %: a shooter keeping its distance stands and shoots a share
+  1 - v_infantry / v_shooter of the time (it runs back what the infantry gained) - 23 % at 1.3; below it the
+  infantry's charge burst (3.8 against run 3.0 for the Empire, x 1.27) catches a shooter on the run, which the second
+  condition also excludes. With our pools: Night Runners (5.4) and slave slingers (4.2) against Empire infantry
+  (2.8-3.0; flagellants 3.6 only against Night Runners alone), Night Runners against stormvermin (3.8, charge 4.5).
+  Not: Night Runners against clanrats (4.2, charge 4.8: x 1.29), Empire militia (3.6) against greatswords (2.8:
+  x 1.29). The infantry's own missile units are slower than the slowest shooter (they do not out-kite them), at most
+  25 % of its units.
+- **Budget** as in normal battles (the same bounds), but at least 1500: "a lord and one unit" is no kiting battle.
+  Bought by the generator's market (`generate.Market`) from the allowed units: the sides differ by at most 5 %.
+- **In training.** The battles sit beside the normal bank (`--kite-bank`, renewed with it); a `self` / `past` battle
+  row that restarts takes a kite battle with probability `--kite-share`. Scripts and drills never get them.
+- **Log metric** (`log.jsonl` field `kite`, the `kite:` line of the output): the network's units of the shooters'
+  side only. A unit's episode: from entering the kiting situation (the kiting drill's detector: a slower melee enemy
+  within 60 m coming at it or in melee with it) until no such enemy is within 100 m, the unit falls or the battle
+  ends. `kited` - the share of episodes in which the unit ran back (out of melee, away from the enemy at >= 1 m/s) and
+  shot after that (its ammunition fell); `ran` - it ran back; `caught` - it was in melee; `applied` - the share of the
+  situation's decisions with a run-back; over the kite battles that ended, the shooters' trade ((gold lost by the
+  infantry - by the shooters) / budget) and their win rate.
+- **The frame's check** (`python -m tools.nn.train.kitesp --battles 64`): on the same battles (eval seeds) the shooters
+  with the "kiter" script (naive + the kiting drill's run-back: an enemy within 45 m - run back to 65 m) must trade
+  clearly better than the "naive" one (close to range, stand and shoot; the lord waits for an enemy within 60 m): the
+  trade difference >= 0.05 and above zero at 95 %. The infantry plays `ai_like` or `chase` (everyone runs at the
+  nearest shooter).
+  Result on 64 battles against `ai_like`: naive - win rate 0.42, trade -0.04; kiter - 0.73, +0.43; the trade
+  difference +0.47 ± 0.07, the kiter better in 92 % of the battles, worse in 3 % - the frame passes. Not run against `chase`.
+
+Tests: `tests/tools/test_nn_kitesp.py` (torch, in the container: the speed rule, a battle's units and gold, kite
+battles only for `self` / `past` rows at the share, the joined bank, the meter on scripted battles).
 
 ## Evaluation
 

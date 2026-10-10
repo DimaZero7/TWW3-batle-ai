@@ -36,7 +36,7 @@ from tools.nn.model import critic as model_critic
 from tools.nn.model import policy as model_policy
 from tools.nn.train import cadence as cad
 from tools.nn.train import checkpoint, drills, evaluate, league, matchups, ppo, randomise, reward, rollout, scenes
-from tools.nn.train import teach_auto
+from tools.nn.train import kitesp, teach_auto
 from tools.nn.train.drills import source as drill_source
 from tools.nn.train.drills import teach as drill_teach
 
@@ -357,12 +357,21 @@ def train(args, every=None, teacher=None, normal=None):
         from tools.nn.armies import generate
         seeds = rng.integers(generate.TRAIN_SEEDS.start, generate.TRAIN_SEEDS.stop, args.bank)
         if args.drills:
-            return drill_source.Mixed(seeds, args.max_units, params, device, lay, seed=int(rng.integers(1 << 30)),
-                                      small=small_arg(), per_drill=args.drill_bank)
-        return scenes.Generated(seeds, args.max_units, params, device, seed=int(rng.integers(1 << 30)),
-                                small=small_arg())
+            inner = drill_source.Mixed(seeds, args.max_units, params, device, lay, seed=int(rng.integers(1 << 30)),
+                                       small=small_arg(), per_drill=args.drill_bank)
+        else:
+            inner = scenes.Generated(seeds, args.max_units, params, device, seed=int(rng.integers(1 << 30)),
+                                     small=small_arg())
+        if not args.kite_share:
+            return inner
+        # --kite-share: kite battles (tools/nn/train/kitesp.py) beside the bank, taken by the self / past rows
+        kite = kitesp.armies(rng.integers(generate.TRAIN_SEEDS.start, generate.TRAIN_SEEDS.stop, args.kite_bank))
+        return kitesp.Source(inner, kite, args.kite_share, kitesp.rows_of(lay), params, device,
+                             seed=int(rng.integers(1 << 30)))
 
-    env = rollout.Battles(lay, scenes.SCENES, device, params, randomise.Spread(), weights, seed=args.seed,
+    if args.kite_share and not kitesp.rows_of(lay).any():
+        raise SystemExit("--kite-share: the run has no self / past battles (--mix)")
+    env = (kitesp.KiteBattles if args.kite_share else rollout.Battles)(lay, scenes.SCENES, device, params, randomise.Spread(), weights, seed=args.seed,
                           source=source(), cadence=cadence, past_slots=slots,
                           teach=drills.load(list(teach0)) if teach0 else None,
                           teach_normal={n: loaded_normal[n] for n in normal_names} if normal_names else None,
@@ -562,6 +571,8 @@ def train(args, every=None, teacher=None, normal=None):
                         "top": [[n, round(q, 3), round(p, 3), age] for n, q, p, age in pool.top(5)]}}
         if taught:
             row["teach"] = taught
+        if args.kite_share:
+            row["kite"] = env.kite_stats()
         log.write(json.dumps(row) + "\n")
         log.flush()
         if update % args.print_every == 0:
@@ -582,6 +593,8 @@ def train(args, every=None, teacher=None, normal=None):
                 print("      eyes mse / explained " + "; ".join(
                     f"{h} {st['eyes_' + h]:.4f} / {st['eyes_ev_' + h]:+.2f}" for h in ("own10", "own30", "threat30",
                                                                                      "danger10")), flush=True)
+            if args.kite_share:
+                print("      " + kitesp.text(row["kite"]), flush=True)
             if taught:
                 active = (lambda v: "-" if v["agree_active"] is None else f"{v['agree_active']:.3f}")
                 share = (lambda v: f"share {v['share']:.2f} (labelled {v['labelled']:.2f}) " if "share" in v else "")
@@ -787,6 +800,12 @@ def parser():
     ap.add_argument("--drill-weights", help="the drills' shares of --drills as json, e.g. {\"pincer\": 1, \"kiting\": 2} "
                                             "(default: drills.TRAIN equally - kiting, hold_fire; counter is READY but "
                                             "not trained by default: it costs in normal battles)")
+    ap.add_argument("--kite-share", type=float, default=0.0,
+                    help="share of the self / past battles started that are kite battles (tools/nn/train/kitesp.py: "
+                         "fast missile units against slower infantry, equal gold, the network on both sides, no "
+                         "script or teacher; e.g. 0.1); the log's \"kite\": the shooters' kiting episodes and trade")
+    ap.add_argument("--kite-bank", type=int, default=kitesp.BANK_DEFAULT,
+                    help="kite battles ready at once (renewed with the bank)")
     ap.add_argument("--drill-bank", type=int, default=256, help="battles of each drill ready at once (renewed with the bank)")
     ap.add_argument("--drill-broad", type=float, default=drills.BROAD_DEFAULT,
                     help="share of every drill's battles from its broad frame (the situation in a messier battle: more "
