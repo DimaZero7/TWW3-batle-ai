@@ -1563,6 +1563,37 @@ class TestChargeProbe:
         assert [x["tg"]["sk"] for x in lanes if x["lane"] == "L2"][0] is False
         assert {r["lane"]: r["why"] for r in rows if r["event"] == "probe_lane_end"} == {"L1": "max_s", "L2": "max_s"}
 
+    def test_skirmish2_passer_runs_past_and_the_neighbours_attacker_attacks_the_neighbour(self, lua, tmp_path):
+        """skirmish2: 'pass' - a move at a run straight ahead on its own x to pass_beyond_m behind the target's front,
+        no attack; 'attack_t2' - the attacker attacks the second target (the shooter's neighbour, placed with its own
+        width); the shooters are aimed at their lane's infantry with the mode on."""
+        lua.execute(self.SETUP + """
+            local L1, L2 = CONFIG.lanes[1], CONFIG.lanes[2]
+            for _, L in ipairs({L1, L2}) do
+                L.target_mode, L.answer, L.fight_s, L.max_s, L.gap_m, L.t_skirmish = 'skirmish', false, 60, 10, 60, true
+                L.recharge_after_s, L.back_m, L.recharge_max_s, L.lord, L.a_dx = nil, nil, nil, nil, 30
+            end
+            L1.mode, L1.pass_beyond_m = 'pass', 100
+            L2.mode, L2.target2, L2.t2_dx, L2.t2_width = 'attack_t2', 'own_lord', 30, 20
+            CONFIG.park = {{name = 'enemy_lord', x = 700, z = -400, bearing = 0}}
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            assert(own[2].attack_args == nil and own[2].moving == true, 'the passer moves, never attacks')
+            assert(enemy[3].attack_args.target == 'own_lord' and enemy[3].attack_args.run == true, 'the neighbour')
+            assert(enemy[2].attack_args.target == 'own_swords_1' and own[3].attack_args.target == 'enemy_clanrat_2')
+            assert(enemy[2]:is_behaviour_active('skirmish') and own[3]:is_behaviour_active('skirmish'))
+            for _ = 1, 40 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        log = list(lua.eval("bm.orders").values())
+        # the passer's point: its own x (-120 + 30), 100 m behind the target's front (z 0)
+        assert "goto own_swords_1 -90 -100 true" in log
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        lanes = [x for r in rows if r["event"] == "probe_sample" for x in r["lanes"] if x["lane"] == "L2"]
+        assert lanes and "t2" in lanes[0]
+
 class TestMissileProbe:
     """The missile probe (entries.missile_probe; lanes from tools/nn/missile_probe.py)."""
     SETUP = """

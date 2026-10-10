@@ -16,7 +16,7 @@ def test_plans_have_few_battles_and_lanes_on_both_sides():
         for i in range(1, len(cp.battles(plan)) + 1):
             config, model_s, arena = cp.run_config(plan, i)
             # (reengage: its tired pair runs up to 540 s before its fight; retarget2 / 3: 10 / 7 short lanes)
-            assert 2 <= len(config["lanes"]) <= {"retarget2": 10, "retarget3": 7, "leave": 6, "skirmish": 10}.get(plan, 5)
+            assert 2 <= len(config["lanes"]) <= {"retarget2": 10, "retarget3": 7, "leave": 6, "skirmish": 10, "skirmish2": 12}.get(plan, 5)
             assert model_s < (720 if plan == "reengage" else 400)
             assert all(len(side["units"]) <= 20 for side in arena["sides"].values())
             names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}
@@ -28,7 +28,9 @@ def test_plans_have_few_battles_and_lanes_on_both_sides():
             used |= {f["name"] for l in config["lanes"] for f in l.get("rally_friends") or []}
             assert {p["name"] for p in config["park"]} == {"own_lord", "enemy_lord"} - used
             places = [(l["x"], l["z"]) for l in config["lanes"]]
-            assert all(math.dist(p, q) >= 200 for k, p in enumerate(places) for q in places[k + 1:])
+            # (skirmish2: 150 m - its 12 lanes and the long lanes' runway; the mode starts within ~40 m)
+            apart = 150 if plan == "skirmish2" else 200
+            assert all(math.dist(p, q) >= apart for k, p in enumerate(places) for q in places[k + 1:])
 
 
 def test_the_charge_set_puts_every_order_in_every_lane_place():
@@ -459,6 +461,42 @@ def test_the_skirmish_plan_charges_each_shooter_with_its_mode_on_and_off():
             assert all(abs(o["x"] - l["x"]) >= 100 for o in below)
 
 
+def test_the_skirmish2_plan_has_passers_neighbours_controls_and_long_chases():
+    b = cp.battles("skirmish2")
+    assert len(b) == 2 and all(len(x) == 12 for x in b)
+    assert [l["place"] for l in b[0]] != [l["place"] for l in b[1]]                 # the lanes rotated
+    for battle in b:
+        assert sorted(cp.cell(l) for l in battle) == sorted(cp.cell(l) for l in b[0])
+        assert {(l["target"], l["kind"]) for l in battle} == {
+            (x[0], k) for x in cp.SKIRMISH2_SHOOTERS for k in cp.SKIRMISH2_KINDS + ("long",)}
+        for l in battle:
+            assert l["target_mode"] == "skirmish" and l["t_skirmish"] and not l["answer"] and l["gap_m"] == 60
+            shooter, infantry, fast, neighbour = next(x for x in cp.SKIRMISH2_SHOOTERS if x[0] == l["target"])
+            if l["kind"] == "long":
+                assert l["mode"] == "attack_run" and l["attacker"] == fast and l["max_s"] == 120
+                assert l["place"] in cp.SKIRMISH2_LONG
+                continue
+            assert l["attacker"] == infantry and l["max_s"] == 60 and l["place"] in cp.SKIRMISH2_SHORT
+            if l["kind"] == "pass":
+                assert l["mode"] == "pass" and l["a_dx"] == 30 and l["a_w"] == 12 and "target2" not in l
+            elif l["kind"] == "neighbour":
+                assert l["mode"] == "attack_t2" and l["target2"] == neighbour and l["a_dx"] == 30
+            else:
+                assert l["mode"] == "attack_run" and "a_dx" not in l
+    for i in (1, 2):
+        config, model_s, arena = cp.run_config("skirmish2", i)
+        assert config["men_near_m"] >= 200 and config["men_after_s"] >= 90 and model_s < 160
+        for l in config["lanes"]:
+            if l["kind"] == "neighbour":
+                assert l["t2_dx"] == 30 and l["t2_width"] == 20                    # the neighbour's centre 30 m off
+            if l["kind"] == "pass":                                                 # past, not into, the shooter
+                assert l["a_dx"] - (l["a_width"] + l["t_width"]) / 2 >= 5
+            assert l["z"] + l["gap_m"] + l["a_depth"] <= 600
+            if l["kind"] == "long":                                                 # its own column, ~1000 m down
+                assert l["z"] + 600 >= 1000
+                assert all(abs(o["x"] - l["x"]) >= 150 for o in config["lanes"] if o is not l)
+
+
 def _skirmish_lane(on=True):
     """A skirmish lane: the chaser runs 4 m/s from z = 70 down to the shooter at z = 0; with the mode on the shooter
     walks away (-z) at 3 m/s from 6 s (the chaser 46 m off) and is caught at 40 s; it fires (the ammo drops 10 a
@@ -491,6 +529,27 @@ def test_skirmish_measure_the_move_away_its_speed_fire_and_the_catch():
     assert off["away_share"] == 0 and off["sk_share"] == 0 and off["shots_moving"] == 0
     table = cp.skirmish_summary([m, off])
     assert set(table) == {f"{m['shooter']} on", f"{m['shooter']} off"} and table[f"{m['shooter']} on"]["moves"] == 1
+
+
+def test_skirmish_measure_a_neighbours_fight_is_no_catch_and_the_long_lanes_windows():
+    """skirmish2: the catch is the shooter's own melee flag (the lane's contact may be the neighbour's fight); a long
+    lane gets its speed, the run flag's share and fatigue per 30 s; the cells are per shooter and kind."""
+    lane = _skirmish_lane(True)
+    lane["spec"] = dict(lane["spec"], kind="neighbour")
+    lane["contacts"] = {1: 5.0}                                   # the neighbour's fight
+    lane["samples"] = [(t, a, dict(tg, m=False), x) for t, a, tg, x in lane["samples"]]
+    m = cp.skirmish_measure(lane)
+    assert not m["caught"] and m["contact_s"] is None and m["kind"] == "neighbour" and m["moves"] == 1
+    long_ = _skirmish_lane(True)
+    long_["spec"] = dict(long_["spec"], kind="long")
+    long_["samples"] = [(t, dict(a, fat="threshold_active"), dict(tg, fast=t > 6, fat="threshold_winded"), x)
+                        for t, a, tg, x in long_["samples"]]
+    m2 = cp.skirmish_measure(long_)
+    assert m2["speed_0_30"] > 1.5 and m2["fast_30_60"] == 1 and m2["fat_30_60"] == "threshold_winded"
+    assert m2["chaser_fat_0_30"] == "threshold_active" and m2["chaser_speed_0_30"] == pytest.approx(4.0, abs=0.01)
+    table = cp.skirmish_summary([m, m2])
+    assert set(table) == {f"{m['shooter']} on neighbour", f"{m['shooter']} on long"}
+    assert table[f"{m['shooter']} on long"]["fat_0_30"] == "threshold_winded"
 
 
 def _retarget_lane(switch_s=10):

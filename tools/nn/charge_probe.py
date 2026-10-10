@@ -173,6 +173,17 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           the mode's flag (sk: unit:is_behaviour_active); the soldiers' places every 1 s within 200 m;
           probe_skirmish: the mode before and after it was set. 'skirmish' prints the table: when the shooter starts
           moving away (the distance), its direction and speed, its fire and shots on the way, caught or not.
+  skirmish2 what sets the skirmish mode off (build/skirm: it starts at ~40 m for the Empire's shooters, ~33 m for the
+          Skaven's; the shooter runs straight away, silent, and shoots again 70-105 m off; the Empire's speed up to x1.6
+          on a long run): slave slingers, archers and crossbowmen with the mode on, standing as in 'skirmish'; four lane
+          kinds - 'pass': enemy infantry (12 m front) runs past the shooter, centre 30 m beside it (edge ~9 m), to a
+          point 100 m behind its front, never attacking it; 'neighbour': enemy infantry attacks the shooter's
+          neighbour (a unit of its side, 20 m front, centre 30 m beside it); 'control': the infantry attacks the
+          shooter (as 'skirmish'); 60 s each; 'long': fast infantry (clanrats 4.2 m/s; flagellants 3.6 for the
+          slingers) chases the shooter for 120 s from 60 m in a long lane (~1080 m of runway): the speed-up and its
+          cause (the samples' fatigue and run flags). 12 lanes a battle (the short ones on two rows of 5 columns 150 m
+          apart, the long ones in three columns of their own), 2 battles, lanes rotated. The 'skirmish' table reads
+          them per shooter and kind (+ speed per 30 s and fatigue for the long ones).
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -184,7 +195,8 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe run --plan retarget3                # targets in line / across (the turn?)
     python -m tools.nn.charge_probe run --plan leave                    # the exit from melee (report --sim)
     python -m tools.nn.charge_probe run --plan skirmish                 # the shooters' skirmish mode
-    python -m tools.nn.charge_probe skirmish [runs...]                  # its table
+    python -m tools.nn.charge_probe skirmish [runs...]                  # its table (skirmish2 too)
+    python -m tools.nn.charge_probe run --plan skirmish2                # what triggers the mode, the long run
 
 Measures per lane (the game's recording, and the simulator's run of the same lane from the same start):
 the attacker's speed on the way in (the last 30 m, the peak), the first contact; HP lost by the target
@@ -250,7 +262,7 @@ NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
-         "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "leave", "skirmish")
+         "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "leave", "skirmish", "skirmish2")
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
 WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
@@ -312,6 +324,17 @@ SKIRMISH_PAIRS = (("slinger", "swords"), ("archer", "clanrat"), ("xbow", "clanra
                   ("nrun", "swords"))
 SKIRMISH_PLACES = tuple((float(x), 500.0) for x in (-400, -200, 0, 200, 400)) + \
     tuple((float(x), -100.0) for x in (-500, -300, -100, 100, 300))
+# the skirmish2 plan: (shooter, infantry of the short lanes, the long lane's fast chaser, the shooter's neighbour); short
+# lanes on two rows (z 470 / -80) of five columns 150 m apart (x -525..75), the long ones in the columns x 225 / 375 /
+# 525 from z 480 down to the map's edge (-600: ~1080 m); battle 2 rotates the short lanes by 5 places, the long by 1
+SKIRMISH2 = {"gap_m": 60, "short_s": 60, "long_s": 120, "side_m": 30, "pass_beyond_m": 100, "pass_w": 12,
+             "neighbour_w": 20, "men_near_m": 200}
+SKIRMISH2_SHOOTERS = (("slinger", "swords", "flag", "clanrat"), ("archer", "clanrat", "clanrat", "spear"),
+                      ("xbow", "clanrat", "clanrat", "spear"))
+SKIRMISH2_KINDS = ("pass", "neighbour", "control")
+SKIRMISH2_SHORT = tuple((float(x), z) for z in (470.0, -80.0) for x in (-525, -375, -225, -75, 75))
+SKIRMISH2_LONG = ((225.0, 480.0), (375.0, 480.0), (525.0, 480.0))
+SKIRMISH_WINDOWS = ((0, 30), (30, 60), (60, 90), (90, 120))   # the long lanes' speed and fatigue windows, s
 SKIRMISH_MOVE_MPS = 1.0    # the shooter moves away: its speed away from the chaser above this (m/s) ...
 SKIRMISH_MOVE_S = 1.0      # ... for this long
 RETARGET3_RAY_D_M = 98.0        # as the 'side' lanes' (80 m front to front, 30 m aside)
@@ -591,6 +614,29 @@ def battles(plan):
         base = [sk(s_, c, on) for s_, c in SKIRMISH_PAIRS for on in (True, False)]
         for b in (base, rotate(base, 5)):
             out.append([dict(l, place=p) for l, p in zip(b, SKIRMISH_PLACES)])
+    elif plan == "skirmish2":
+        g = SKIRMISH2
+
+        def sk2(shooter, infantry, fast, neighbour, kind):
+            common = dict(gap_m=g["gap_m"], answer=False, kind=kind, t_skirmish=True)
+            if kind == "long":
+                return lane(fast, shooter, "attack_run", "skirmish", fight_s=g["long_s"], max_s=g["long_s"], **common)
+            short = dict(fight_s=g["short_s"], max_s=g["short_s"], **common)
+            if kind == "pass":
+                return lane(infantry, shooter, "pass", "skirmish", a_dx=g["side_m"], a_w=g["pass_w"],
+                            pass_beyond_m=g["pass_beyond_m"], **short)
+            if kind == "neighbour":
+                # the neighbour's centre side_m beside the shooter's (t2_dx = t_w + t2_gap_m), the infantry ahead of it
+                return lane(infantry, shooter, "attack_t2", "skirmish", target2=neighbour,
+                            t2_gap_m=g["side_m"] - WIDTH_M, t2_width=g["neighbour_w"], a_dx=g["side_m"],
+                            a_w=g["neighbour_w"], **short)
+            return lane(infantry, shooter, "attack_run", "skirmish", **short)
+        short = [sk2(*x, kind) for x in SKIRMISH2_SHOOTERS for kind in SKIRMISH2_KINDS]
+        long_ = [sk2(*x, "long") for x in SKIRMISH2_SHOOTERS]
+        for k in range(2):
+            places = rotate(list(SKIRMISH2_SHORT), 5 * k)
+            out.append([dict(l, place=p) for l, p in zip(short, places)]
+                       + [dict(l, place=p) for l, p in zip(long_, rotate(list(SKIRMISH2_LONG), k))])
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
@@ -702,9 +748,10 @@ def run_config(plan, index):
               "men_ms": 500 if turn else MEN_MS,
               # (reengage: the pair 30 + 30 m apart between its two fights, centre to centre ~75 m)
               "men_near_m": (100 if plan == "reengage" else 150 if plan == "leave"
-                             else SKIRMISH["men_near_m"] if plan == "skirmish" else 60),
+                             else SKIRMISH["men_near_m"] if plan == "skirmish"
+                             else SKIRMISH2["men_near_m"] if plan == "skirmish2" else 60),
               # the soldiers' places: the first 30 s (the charge plan) or the whole fight (hit: men in contact)
-              "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2", "dmgmelee", "reengage") else 95 if plan in ("defender", "wave", "wavemiss", "wavemiss2", "leave", "skirmish")
+              "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2", "dmgmelee", "reengage") else 95 if plan in ("defender", "wave", "wavemiss", "wavemiss2", "leave", "skirmish", "skirmish2")
                               else 90 if plan in ("hit", "move", "vv") else 30),
               "lanes": lanes, "park": park}
     if plan in ("routmob", "routmob2"):
@@ -1661,9 +1708,14 @@ def skirmish_measure(lane):
     t = np.array([x[0] for x in s])
     ax, az, tx, tz = (series(s, w, k) for w, k in (("a", "x"), ("a", "z"), ("tg", "x"), ("tg", "z")))
     ammo, fire, sk = series(s, "tg", "ammo"), series(s, "tg", "fire"), series(s, "tg", "sk")
-    c = lane["contacts"].get(1)
+    # the catch: the shooter's own melee flag (in skirmish2 'neighbour' the lane's contact is the neighbour's fight)
+    t_m = series(s, "tg", "m")
+    c = float(t[np.nan_to_num(t_m, nan=0.0) > 0][0]) if (np.nan_to_num(t_m, nan=0.0) > 0).any() else None
+    if c is None and not np.isfinite(t_m).any():
+        c = lane["contacts"].get(1)
     out = {"run": lane["run"], "lane": spec["name"], "shooter": SHORT[spec["t_key"]], "chaser": SHORT[spec["a_key"]],
-           "mode": "on" if spec.get("t_skirmish") else "off", "contact_s": c, "caught": c is not None,
+           "mode": "on" if spec.get("t_skirmish") else "off", "kind": spec.get("kind"), "contact_s": c,
+           "caught": c is not None, "min_d_m": None,
            "sk_set": next(({k: p.get(k) for k in ("can", "before", "after")} for p in lane.get("skirmish", [])), None)}
     if len(t) < 3:
         return out
@@ -1721,6 +1773,22 @@ def skirmish_measure(lane):
     if c is not None and "move_s" in out:
         out["contact_after_move_s"] = round(c - out["move_s"], 1)
     out["end_d_m"] = round(float(dist[-1]), 1)
+    pre_d = dist[before & np.isfinite(dist)]
+    out["min_d_m"] = round(float(pre_d.min()), 1) if len(pre_d) else None
+    if spec.get("kind") == "long":
+        # speed (m/s, from the places) and the last fatigue state per window; the run flags' share (is_moving_fast)
+        fat = [(x[0], (x[2] or {}).get("fat"), (x[1] or {}).get("fat")) for x in s]
+        fast = series(s, "tg", "fast")
+        sp, csp = np.hypot(vx, vz), np.hypot(cvx, cvz)
+        for lo, hi in SKIRMISH_WINDOWS:
+            w = (t > lo) & (t <= hi) & np.isfinite(sp)
+            out[f"speed_{lo}_{hi}"] = round(float(np.mean(sp[w])), 2) if w.any() else None
+            out[f"chaser_speed_{lo}_{hi}"] = round(float(np.nanmean(csp[w])), 2) if w.any() else None
+            f_ = fast[w]
+            out[f"fast_{lo}_{hi}"] = round(float(np.mean(f_[np.isfinite(f_)])), 2) if np.isfinite(f_).any() else None
+            last = [f for f in fat if lo < f[0] <= hi]
+            out[f"fat_{lo}_{hi}"] = last[-1][1] if last else None
+            out[f"chaser_fat_{lo}_{hi}"] = last[-1][2] if last else None
     f_sk = sk[np.isfinite(sk)]
     out["sk_share"] = round(float(np.mean(f_sk)), 2) if len(f_sk) else None
     return out
@@ -1728,20 +1796,27 @@ def skirmish_measure(lane):
 
 SKIRMISH_KEYS = ("caught", "contact_s", "moves", "move_d_m", "move_s", "move_dir_deg", "move_speed", "move_peak",
                  "away_share", "fire_stand", "fire_moving", "shots_stand", "shots_moving", "secs_moving",
-                 "chaser_speed", "end_d_m", "sk_share")
+                 "chaser_speed", "end_d_m", "min_d_m", "sk_share") + tuple(
+                     f"{k}_{lo}_{hi}" for lo, hi in SKIRMISH_WINDOWS for k in ("speed", "chaser_speed", "fast"))
 
 
 def skirmish_summary(rows):
     """{'<shooter> <mode>': {n, the mean of each SKIRMISH_KEYS over its lanes}}."""
     cells = {}
     for r in rows:
-        cells.setdefault(f"{r['shooter']} {r['mode']}", []).append(r)
+        kind = r.get("kind")
+        cells.setdefault(f"{r['shooter']} {r['mode']}" + (f" {kind}" if kind not in (None, "on", "off") else ""),
+                         []).append(r)
     out = {}
     for name, rs in sorted(cells.items()):
         row = {"n": len(rs)}
         for k in SKIRMISH_KEYS:
             v = [float(r[k]) for r in rs if r.get(k) is not None]
             row[k] = round(float(np.mean(v)), 2) if v else None
+        for k in (f"{w}fat_{lo}_{hi}" for lo, hi in SKIRMISH_WINDOWS for w in ("", "chaser_")):
+            v = [r[k] for r in rs if r.get(k)]
+            if v:
+                row[k] = ",".join(v)
         out[name] = row
     return out
 
@@ -1757,7 +1832,11 @@ def skirmish_report(run_dirs, out=None):
     for name, r in table.items():
         print(f"\n{name}  (n={r['n']})")
         for k in SKIRMISH_KEYS:
-            print(f"  {k:14} {f(r[k]):>8}")
+            if r[k] is not None:
+                print(f"  {k:20} {f(r[k]):>8}")
+        for k, v in r.items():
+            if "fat_" in k:
+                print(f"  {k:20} {v}")
     result = {"lanes": rows, "summary": table}
     out = out or ROOT / "skirmish.json"
     out.parent.mkdir(parents=True, exist_ok=True)

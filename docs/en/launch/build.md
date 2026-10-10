@@ -61,7 +61,7 @@ What every entry does: [entry points](../apps/entries.md).
 | `--range-mode fire_at_will\|attack\|damage` | archer-range | When archers start shooting by the depth of their block; `damage` — damage to a fearless target at 70–120 m |
 | `--damage-rotate N` | archer-range `damage` | Shift the distances by N lanes (the same distance on other ground) |
 | `--swarm infantry\|lords\|all\|damage`, `--repeats N` | lord-swarm | Infantry around each lord, the other lord (with units) on him, both, or `damage` - one unit in front (swordsmen or greatswords on the Warlord, clanrats or Stormvermin on the General: damage per blow, [melee](../game/mechanics/melee.md)); each layout N times (2). Samples every 0.2 s (`--tick-ms`) |
-| `--probe-plan charge\|hit\|move\|...\|skirmish`, `--probe-battle N` | charge-probe | The [melee probe](../apps/entries.md#charge_probe)'s plan and its battle number (from 1). Samples every 0.5 s |
+| `--probe-plan charge\|hit\|move\|...\|skirmish\|skirmish2`, `--probe-battle N` | charge-probe | The [melee probe](../apps/entries.md#charge_probe)'s plan and its battle number (from 1). Samples every 0.5 s |
 | `--plan` | move-probe | Plan from `config/move-plans/<name>.json` (default `hamlet`) |
 | `--capture` | roster-capture | Another unit list instead of `config/roster/capture.json` |
 | `--scenario` | all | Another file from `scenarios/` instead of the target's scenario |

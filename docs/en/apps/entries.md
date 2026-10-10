@@ -179,6 +179,16 @@ handgunners (chased by clanrats), each with the mode and without. The shooter's 
 damage dealt and `sk`; the soldiers' places every 1 s within 200 m. Analysis: `python -m tools.nn.charge_probe
 skirmish [folders]` - from what distance the shooter starts to move away, where and how fast, does it shoot on
 the move, how many shots it got off, was it caught.
+`skirmish2` - 2 battles of 12 lanes: what sets skirmish mode off. Slave slingers, archers and crossbowmen with
+the mode (standing as in `skirmish`); lane kinds: `pass` - enemy infantry (12 m front) runs past the shooter,
+centre 30 m beside it (edge ~9 m), to a point 100 m behind its front, never attacking it (the attacker's mode
+`pass`); `neighbour` - the infantry attacks the shooter's neighbour (a unit of its side, 20 m front, centre 30 m
+beside it; mode `attack_t2`, the neighbour's width `t2_width`); `control` - the infantry attacks the shooter;
+60 s each; `long` - fast infantry (clanrats 4.2 m/s, flagellants 3.6 after the slingers) chases the shooter for
+120 s in a long lane of its own (~1080 m): the speed-up and its cause (fatigue, the run flag). The short lanes on
+2 rows of 5 places 150 m apart, the long ones in 3 columns of their own; battle 2 rotates the lanes. The
+`skirmish` table splits them by shooter and kind; caught = the shooter's own melee flag; for `long` the speed,
+the run share and fatigue per 30 s.
 Missile probe: `reform_men` (the target re-forms by a 5 m move with its width at that many men), `friend` (a friend
 placed `friend_fwd` / `friend_lat` from the shooter, sampled as `f`); plans `thin`, `pistol`, `moving2`, `lof`.
 Morale probe: plans `strong2` (the strong-enemy scale, 6 enemies, 120-30 m) and `rally2` (the rally clock).

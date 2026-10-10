@@ -30,6 +30,9 @@
 --                  order is probe_phase 'aim' {target = 1 | 2, n}. No contact: the lane ends after max_s. The shooter's
 --                  sample row carries ammo (ammo_left: its drop is the shots of that half second, one a man), fire
 --                  (CCO IsFiringMissiles) and dd (CCO DamageDealt).
+--   'pass'         a move at a run straight ahead (its own x, placed a_dx m beside the target) to pass_beyond_m behind
+--                  the target's front: it goes past the target, never attacks it (the skirmish2 plan);
+--   'attack_t2'    attack the second target (lane.target2) at a run (the skirmish2 plan: the target's neighbour).
 -- lane.a_ability (optional): the attacker uses it on himself a_ability_after_s after the first contact
 -- (Foe-Seeker's vigour). lane.men_all_s (optional): the attacker's soldier places every men_ms from the go
 -- to men_all_s, wherever the enemy is (how a formation turns).
@@ -42,7 +45,7 @@
 -- shooter); its sample row is the shooter's (ammo, fire, dd) with sk (the mode on now). lane.lord (optional): a lord placed behind the target (dz m), who uses lane.lord.ability on
 -- himself at the lane's first contact (Stand Your Ground) unless the key is empty (the control); with
 -- lane.lord.at_m instead once the two units' centres are within at_m before the contact.
--- lane.target2 (optional): a second target unit placed t2_dx m beside the target (+x) and t2_dz m along z (the
+-- lane.target2 (optional; its front lane.t2_width, else t_width): a second target unit placed t2_dx m beside the target (+x) and t2_dz m along z (the
 -- retarget3 plan's targets one behind the other on the line of fire: t2_dz < 0, away from the shooter), facing the same way, halted
 -- and never ordered (it fights only what touches it); sampled as 't2'. lane.after (optional) {at_s, kind, dx, dz,
 -- walk}: at_s after the first contact the attacker gets one more order (the fresh-order probe): 'attack_t2' (attack
@@ -92,7 +95,7 @@ local M = {}
 local LOG = 'tww3_bai_events.jsonl'
 local TIMER, MEN_TIMER = 'tww3_bai_charge_probe_tick', 'tww3_bai_charge_probe_men'
 M.MODES = {attack_run = true, attack_walk = true, move_run = true, recharge = true, hold = true, withdraw = true,
-    script = true, shoot = true, reengage = true, tire = true, retarget = true}
+    script = true, shoot = true, reengage = true, tire = true, retarget = true, pass = true, attack_t2 = true}
 M.TARGET_MODES = {stand = true, hold = true, both = true, both_walk = true, rear = true, push = true,
     skirmish = true}
 M.AFTER_KINDS = {attack_t2 = true, attack_same = true, halt = true, move_near = true, none = true}
@@ -659,6 +662,11 @@ function M.main(bm, config, globals)
             elseif m == 'move_run' then
                 local L = lane.layout
                 orders.move(lane.a.uc, vec(L.tx, lane.z - lane.move_beyond_m), true)
+            elseif m == 'pass' then
+                local L = lane.layout
+                orders.move(lane.a.uc, vec(L.ax, lane.z - (lane.pass_beyond_m or 100)), true)
+            elseif m == 'attack_t2' then
+                attack(lane, lane.a, lane.t2, false)
             end
         end
         emit('probe_go', {lanes = #state.lanes})
@@ -686,7 +694,7 @@ function M.main(bm, config, globals)
             place(lane.t, L.tx, L.tz, L.tb, lane.t_width)
             if lane.t2 then
                 local x2, z2 = M.t2_place(L, lane)
-                place(lane.t2, x2, z2, L.tb, lane.t_width)
+                place(lane.t2, x2, z2, L.tb, lane.t2_width or lane.t_width)
             end
             for who, d in pairs(lane.damage or {}) do
                 local it = ({a = lane.a, t = lane.t, t2 = lane.t2})[who]
@@ -776,8 +784,8 @@ function M.main(bm, config, globals)
             end
             if l.after then assert(M.AFTER_KINDS[l.after.kind], 'unknown after kind ' .. tostring(l.after.kind)) end
             if l.at_rout then assert(M.AT_ROUT[l.at_rout], 'unknown at_rout ' .. tostring(l.at_rout)) end
-            if l.mode == 'retarget' then
-                assert(l.target2, 'a retarget lane needs target2')
+            if l.mode == 'retarget' or l.mode == 'attack_t2' then
+                assert(l.target2, 'a ' .. l.mode .. ' lane needs target2')
             end
             if l.mode == 'tire' then
                 assert(M.fatigue_level(l.tire_until), 'unknown tire_until ' .. tostring(l.tire_until))
