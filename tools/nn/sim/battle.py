@@ -142,11 +142,25 @@ def step(st, orders, params=None, dt=None):
             in_melee = u["order_s"] < float(R.get("melee_breakoff_secs", 0.0))
             far_point = far_point | (in_melee & (point_d >= away_m))
     leaving = (kind == O.WITHDRAW) | ((kind == O.MOVE) & far_point & (leave_m > 0))
+    # A move given before the contact (contact.pre_order_free; config/nn/sim.json contact.shootcontact_why): a
+    # formation with a missile weapon that an enemy catches while it already carries out a move or withdraw - one given
+    # out of melee (its order clock order_s started at the window, melee_breakoff_secs) or over the window before its
+    # exit began - is not held (pin_s) and the 24 s window (breakoff) does not drop its order: it goes on to its point
+    # (the shootcontact probe: archers and crossbowmen walking / running 300 m away from clanrats that caught them kept
+    # moving all 75 s, 4 lanes of 4); at its point the move is over (no leave_latch) and it fights. A move given in
+    # melee keeps both (the wavemiss2 probe: such a shooter strikes back 25-35 s after the order).
+    # pre_move: such a move of such a formation (contact.leave_run_missile below uses it too).
+    pre_move = torch.zeros_like(leaving)
+    if "order_s" in u and "exit_s" in u:
+        win = float(R.get("melee_breakoff_secs", 0.0))
+        pre_move = ((u["range"] > 0) & (u["men0"] > 1) & ((kind == O.MOVE) | (kind == O.WITHDRAW))
+                    & ((u["order_s"] - u["exit_s"]) >= win - 0.5 * dt))
+    pre_order = pre_move if cal["contact"].get("pre_order_free") else torch.zeros_like(leaving)
     if cal["contact"].get("leave_latch") and "exit_s" in u:
         # A move that began as a leave in contact stays one while its order stands (contact.leave_latch): arrived at
         # a near point, the unit still strikes nobody until the 24 s window drops the order (the same probe: the
         # 5 m leavers stood chased at their point, moving, 0 HP dealt until 21-25 s, then fought on).
-        leaving = leaving | ((kind == O.MOVE) & (u["exit_s"] > 0) & ~new_order)
+        leaving = leaving | ((kind == O.MOVE) & (u["exit_s"] > 0) & ~new_order & ~pre_order)
     if cal["contact"].get("attack_leave"):
         # An attack order on an enemy it does not touch, its edge contact.leave_m or more away, given to a formation
         # without a missile weapon that touches a standing enemy, is a leave too (contact.attack_leave;
@@ -168,7 +182,7 @@ def step(st, orders, params=None, dt=None):
     pin_melee_s = float(cal["contact"].get("pin_melee_s", 0.0))
     in_exit = leaving & engaged & (u["men0"] > 1)
     hold_for = torch.where(u["range"] > 0, torch.full_like(u["leave_s"], pin_s), torch.full_like(u["leave_s"], pin_melee_s))
-    stuck = in_exit & (hold_for > 0)
+    stuck = in_exit & (hold_for > 0) & ~pre_order
     pinned = stuck & (u["leave_s"] < hold_for)
     u["leave_s"] = torch.where(stuck, u["leave_s"] + dt, torch.zeros_like(u["leave_s"]))
     # The melee exit's window (the database's melee_breakoff_secs, 24 s; contact.breakoff on): a unit still touching
@@ -185,7 +199,7 @@ def step(st, orders, params=None, dt=None):
         u["exit_s"] = torch.where(leaving & (exit_now | (u["exit_s"] > 0)), u["exit_s"] + dt, torch.zeros_like(u["exit_s"]))
     # (the order is dropped at the end of this step: it fights from the next one)
     brk = float(R.get("melee_breakoff_secs", 0.0)) if cal["contact"].get("breakoff") and "exit_s" in u else 0.0
-    broke_off = (exit_now & (u["exit_s"] >= brk)) if brk > 0 else None
+    broke_off = (exit_now & (u["exit_s"] >= brk) & ~pre_order) if brk > 0 else None
     # The chase (contact.chase; build/open_battle/spec.md 2, build/open_melee/spec.md R4): a unit with an attack order
     # on an enemy that is leaving melee in contact with it is not held in the fight: it follows the leaver at its own
     # speed (closing up whenever the formations overlap by less than contact.reach_m) and strikes it while they touch -
@@ -273,7 +287,8 @@ def step(st, orders, params=None, dt=None):
         first_pair = first_pair | (stand[:, :, None] & facing)
     hp_melee = rate * dt + torch.where(first_pair, swing, torch.zeros_like(swing))
     # A unit leaving melee (held or walking out) still in contact takes contact.leave_taken of the blows: melee
-    # units more (they turn their backs), missile units less (measured, config/nn/sim.json contact.pin_why).
+    # units more (they turn their backs, config/nn/sim.json contact.pin_why), missile units in full (the shootcontact
+    # probe, contact.shootcontact_why).
     taken_cal = cal["contact"].get("leave_taken")
     if taken_cal:
         out = leaving & engaged & (u["men0"] > 1)
@@ -289,6 +304,15 @@ def step(st, orders, params=None, dt=None):
             run_out = leaving & engaged & (u["range"] <= 0) & ~pinned & (speed > 0.3)
             out = out | run_out
             mult = torch.where(run_out, torch.full_like(mult, float(pursuit)), mult)
+        if cal["contact"].get("leave_run_missile") and pursuit is not None:
+            # A formation with a missile weapon running on a move given before the contact (pre_move above; not held,
+            # its speed last step over its walk + 0.3 m/s: the simulator's running flag) is struck at
+            # contact.pursuit_rate of the rule (contact.leave_run_missile; the shootcontact probe: such a shooter loses
+            # 0.41 [0.16-0.63] of a standing one's HP a second in contact, 4 lanes; config/nn/sim.json
+            # contact.shootcontact_why); at a walk it takes leave_taken.missile. A run given in melee keeps
+            # leave_taken.missile (the wavemiss2 probe: such shooters lost ~0.8 %/s running, as standing ones).
+            run_sh = out & pre_move & ~pinned & (speed > u["walk"] + 0.3)
+            mult = torch.where(run_sh, torch.full_like(mult, float(pursuit)), mult)
         hp_melee = torch.where(out[:, None, :], hp_melee * mult[:, None, :], hp_melee)
 
     # --- shooting ---

@@ -80,14 +80,32 @@ chased. **The chase**
 (`contact.chase`): a unit with an attack order on a leaver that touches it does not stand in contact but
 follows it (at most at its own run speed) and strikes it; so a chased unit stays in contact until the 24 s
 window (below) drops its order. While a leaving unit is in contact it takes ×1.25 the blows (no missile
-weapon) and ×0.55 (missile units) — `contact.leave_taken` (measured: ×1.23 and ×0.62 of what a unit of its
-class takes attacking). The `leave` probe (swordsmen v clanrats and shield spearmen v stormvermin, 30 s of melee,
+weapon; measured: ×1.23 of what a unit of its class takes attacking) and ×1 (missile units) — `contact.leave_taken`.
+The game does not spare shooters (the `shootcontact` probe, below): per clanrat in reach a walking shooter loses 0.92
+[0.75–1.12] of what a standing one does; the old ×0.62 / 0.55 was a ratio of whole losses that already holds the
+chase falling behind, and the simulator counted the contact once more. The `leave` probe (swordsmen v clanrats and shield spearmen v stormvermin, 30 s of melee,
 then a withdraw 60 m straight back, the enemy chasing; `build/leave`, the twin `build/leavefix`): a formation leaves
 contact as in the game (unchased, out of contact 3.5 s after the order in both), but the chase strikes otherwise —
 on the run the game strikes the leaver lightly (11–15 HP/s, 102 HP at 5–10 s; the simulator ~40 HP/s, 213), at its
 stopping point hard (60–150 HP/s for the first 2–5 s, then 35–55; the simulator 26–29). The 10–40 s sums matched
 (game 1025, simulator 1011) only because the two errors cancel. The rule "on the run — as a router, 0.43"
-(`contact.leave_run_pursuit`) exists but is off: see "Tried and rejected". The melee-exit probe (`build/movelords`): without a chaser the unit about-faces in
+(`contact.leave_run_pursuit`) exists for formations without a missile weapon but is off: see "Tried and rejected".
+**A shooter caught on the move.** A move or withdraw given to shooters (a formation) before the contact
+(`contact.pre_order_free`; the order clock `order_s` minus the exit clock `exit_s` is the 24 s window or more) is not
+held 5 s and the 24 s window does not drop it: the unit goes on to its point, where the move is over and it fights. At
+a run such a shooter is struck at 0.43, as a router (`contact.leave_run_missile`; a run: speed over the walk + 0.3 m/s),
+at a walk ×1. The `shootcontact` probe (`build/charge-probe/runs/20261010-121521`, `-121615`; analysis and twin
+`build/shootcontact`): archers and crossbowmen charged by clanrats at a run stand and shoot, or before the contact walk /
+run 300 m straight away. In the game the walkers kept moving all 75 s (4 lanes of 4), the twin held them 5 s and stood
+them to fight at 24 s; a running shooter loses 0.41 [0.16–0.63] of a standing one. The shooter's loss in melee, %/s,
+game / before / after: archers walking 0.533 / 0.530 / 0.672, crossbowmen walking 0.482 / 0.530 / 0.670, archers
+running 0.350 / 0.503 / 0.370, crossbowmen running 0.340 / 0.517 / 0.337; standing ones unchanged. An order given in
+melee keeps the rules: held 5 s, dropped at 24 s, ×1 at a run too (the `wavemiss2` probe: such a shooter strikes back
+25–35 s after the order, loses ~0.8 %/s running; loss 5–24 s after the order: game 0.68, the twin with ×0.55 0.38, with
+×1 0.70). A formation without a missile weapon with an order given before the contact — as before (unmeasured). Open: at
+a walk the shooter loses more than in the game (0.67 v 0.51): the game's clanrats fall behind (centres 23–26 m at
+24–90 s, half the clanrats in reach of a standing shooter's), ours keep in contact (9–11 m) — this needs a model of the
+lagging chase, not a factor. The replay of the 72 gate battles (`build/leaveshoot`), before → after: our HP lost at the end 0.683 → 0.687 (game 0.784), the enemy's 0.546 → 0.547 (0.571), same winner 53.5 → 56.5 of 72, skill 10 → 8 %; with the skirmish mode 0.678 / 0.517 → 0.683 / 0.519. A small shift, probably (not checked) because in the replay the recorded orders are given again whenever the point moves, so a shooter's order would rarely count as given before the contact. The melee-exit probe (`build/movelords`): without a chaser the unit about-faces in
 ~1.5 s and is out of contact ~4 s after the order (22 HP lost); with one the chasers run 10–15 m behind it
 (centre to centre), the leaver loses ~22 HP/s and strikes nothing for 24–26 s. 46 episodes of the network's
 battles (`build/open_battle/leave2.py`): a leaver moves with or without a chaser (10–14 m in 6 s); chased it is
@@ -1271,7 +1289,8 @@ Measured, ready as a switch, not in `config/nn/sim.json`: none now.
     `broken_finish_base_timeout` 180 = 18 s if in 0.1 s ticks — a guess; morale probe T-E); whether entering
     another unit's fight gives the charge bonus (probe); CA's sector rule is per man (the share of blows from
     the flank grows with the angle, the rear turns into a flank as the men turn), ours a unit-level step;
-    whether the chase holds missile units for 5 s (`contact.pin_s`); the chase of a leaver (the `leave` probe): the
+    whether the chase holds missile units for 5 s (`contact.pin_s`); the chase of a shooter walking on an order given
+    before the contact (the `shootcontact` probe: the game's clanrats fall behind, loss 0.51 %/s, ours 0.67); the chase of a leaver (the `leave` probe): the
     game's chasers fall behind (2–10 of ~25 men in reach, the formations' edges 2–7 m apart) and catch the stopped
     leaver with 40–60 men, perhaps with a charge into its back — ours keeps pace in contact, no run-up; a lord leaving
     is stuck in the enemy's crowd (the game: 2.7 m in 6 s, ~0.5 m/s at 12.5–15.5 s, running free only from ~12 s;
@@ -1302,6 +1321,8 @@ Measured, ready as a switch, not in `config/nn/sim.json`: none now.
 | Holding every unit leaving melee for 20 s (`contact.pin_melee_s` 20; 163 network battles: in melee 4 / 10 / 20 s later 0.94 / 0.84 / 0.51, out after 21 s, median) | the melee-exit probe (`build/movelords`): unchased, a unit in the game is out of contact after ~4 s and loses 22 HP, held 20 s - 22 s and 375 HP; 46 episodes of the network's battles: unchased in melee 0.75 at 4 s, 0.58 at 6 s | in the game only the chase holds it; "stands 21 s" came from short episodes (the network changes its order within 1–2 s); now the chase (`contact.chase`) |
 | Not holding the leaver, but the chaser stands on touching | the 24 s window hardly fires (the contact breaks): the leaver's blows after 26 s 0.2 kills, 17 HP (game 5 and 538) | in the game the chasers run 10–15 m behind the leaver (centre to centre); now they follow it |
 | Strike a leaver on the run as a router: 0.43 of the rule instead of ×1.25 (`contact.leave_run_pursuit` 1; a leaver without a missile weapon or a lord, not held, faster than 0.3 m/s) | the `leave` probe, the leaver's loss at 0–5 / 5–10 / 10–40 s: game 165 / 102 / 1025, was 201 / 213 / 1011, became 145 / 73 / 650; the replay of the 72 gate battles: same winner 60 → 54.5 of 72, skill 1 → −4 %, our losses at the end (simulator − game) −0.094 → −0.129, routs a unit −0.32 → −0.41 | right on the run, but the game makes up at the stopping point (60–150 HP/s), which we lack — the network's leavers survive more than in the game; off until the lagging chase is modelled |
+| A shooter leaving in contact takes ×0.55 (`contact.leave_taken.missile`; measured ×0.62 over 855 episodes of the network's battles, `build/prespec/leave.py`) | the `wavemiss2` probe (a run back given in melee): the shooter's loss 5–24 s after the order 0.38 %/s against 0.68 in the game | a ratio of whole losses that already holds the chase falling behind (fewer men in reach); the game does not weaken blows at a walking shooter — per clanrat in reach 0.92 [0.75–1.12] of a standing one (the `shootcontact` probe); now ×1, giving 0.70 |
+| A shooter moving on an order given before the contact held 5 s (`contact.pin_s`) and its order dropped at 24 s (`contact.breakoff`), as an order given in melee | the twin of the `shootcontact` probe: walking shooters stood and fought at 24 s (speed 0.05 m/s, the clanrats lost 0.06–0.10 %/s) | in the game they kept moving all 75 s (4 lanes of 4, 1.6–2.0 m/s, the clanrats lost 0.01–0.04 %/s); now such an order is neither held nor dropped (`contact.pre_order_free`) |
 | Rally at MoralePercent 0.23 (`morale.rally_rule` "fixed", `rally_mp`), +2 points a second away from enemies (`rally_rate`), morale at most −0.3 of leadership when a rout begins (`rout_floor_mp`) | gates' replay: routed again 10 / 20 / 30 / 45 s after a rally 0.40 / 0.43 / 0.46 / 0.51 (game 0.07 / 0.13 / 0.16 / 0.23); morale after a rally 0.23 → 0.09 in 5 s (game 0.17 → 0.29) | fits: the router's morale stood still, the rally at one number; the morale probe showed the game's rule (morale follows the target, the rally by distance and rout time) |
 | "Flanks secure" with any standing friend (lords too) within 120 m (`neighbour_effect_range`) | +5 nearly always, in melee too; agreement with the game's label in the recordings 73 % | the morale probe: only friends at both sides secure, or no enemy within 146 m (87 % in the recordings) |
 | The flank / rear attack −6 / −14 for one 0.5 s tick at the first blow (`morale.attacked_event`) | a drop of 1.5 / 1.9 points over 1–2 s | the morale probe: "attacked in the rear" holds while struck (29 s), +19 points as the attacker leaves; now −6 / −14 all the time of the attack |

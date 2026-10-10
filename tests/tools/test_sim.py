@@ -2732,7 +2732,7 @@ class TestLeavingMelee:
             assert max(xs[:held]) == pytest.approx(0.0, abs=0.01) and float(st.u["hp_abs"][0, 0]) < hp0
         assert xs[-1] > 3
 
-    @pytest.mark.parametrize("key,mult", [(SPEAR, 1.25), (ARCHER, 0.55)])
+    @pytest.mark.parametrize("key,mult", [(SPEAR, 1.25), (ARCHER, 1.0)])
     def test_a_leaving_unit_takes_leave_taken_of_the_blows_and_deals_none(self, key, mult):
         st, H = self._fight(key, 2)
         hp0, k0 = st.u["hp_abs"][:, 0].clone(), st.u["k"][:, 0].clone()
@@ -2745,16 +2745,37 @@ class TestLeavingMelee:
         assert float(st.u["k"][0, 0]) == float(k0[0])
 
     @pytest.mark.parametrize("key,vx,mult", [(SPEAR, -3.0, 0.43), (SPEAR, 0.0, 1.25), (GENERAL, -3.0, 0.43),
-                                             (GENERAL, 0.0, 1.0), (ARCHER, -3.0, 0.55)])
+                                             (GENERAL, 0.0, 1.0), (ARCHER, -3.0, 1.0)])
     def test_a_leaver_on_the_move_takes_the_pursuit_rate_standing_leave_taken(self, key, vx, mult):
         # contact.leave_run_pursuit 1 (the leave probe; off by default, config/nn/sim.json contact.leave_run_why): past
         # its hold and on the move, a leaver without a missile weapon (a lord too) is struck at pursuit_rate; standing at
-        # its point it keeps leave_taken (a lord: the rule); a missile unit keeps leave_taken.missile
+        # its point it keeps leave_taken (a lord: the rule); a missile unit told to move in melee keeps
+        # leave_taken.missile (1) running too (contact.leave_run_missile: only a move given before the contact)
         assert P.sim["contact"]["pursuit_rate"] == pytest.approx(0.43)
         p = P.with_cal("contact", leave_run_pursuit=1)
         st, H = self._fight(key, 2)
         st.u["leave_s"][0, 0] = 10.0                                   # past pin_melee_s / pin_s
         st.u["vx"][0, 0], st.u["vz"][0, 0] = vx, 0.0
+        hp0 = st.u["hp_abs"][:, 0].clone()
+        o = replay.hold(st)
+        o.kind[:, H], o.target[:, H] = O.ATTACK, 0
+        o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = O.MOVE, -200.0, 0.0, True   # battle 0 leaves
+        battle.step(st, o, p)                                                        # battle 1 holds
+        lost = hp0 - st.u["hp_abs"][:, 0]
+        assert float(lost[0]) == pytest.approx(mult * float(lost[1]), rel=1e-3) and float(lost[1]) > 0
+
+    @pytest.mark.parametrize("vx,pre,mult,on", [(-3.0, True, 0.43, 1), (-1.0, True, 1.0, 1), (-3.0, False, 1.0, 1),
+                                                (-3.0, True, 1.0, 0)])
+    def test_a_shooter_running_on_a_move_given_before_the_contact_takes_the_pursuit_rate(self, vx, pre, mult, on):
+        # contact.leave_run_missile (the shootcontact probe: a shooter running away from clanrats that caught it loses
+        # 0.41 of a standing one's HP a second): a missile formation on a move given out of melee, at a run (over its
+        # walk + 0.3 m/s), is struck at pursuit_rate; walking, or on a move given in melee, at leave_taken.missile
+        p = P.with_cal("contact", leave_run_missile=on)
+        st, H = self._fight(ARCHER, 2)
+        st.u["leave_s"][0, 0] = 10.0                                   # past pin_s
+        st.u["vx"][0, 0], st.u["vz"][0, 0] = vx, 0.0
+        if pre:
+            st.u["m"][0, 0] = False                  # the order comes out of melee: its clock starts at the window
         hp0 = st.u["hp_abs"][:, 0].clone()
         o = replay.hold(st)
         o.kind[:, H], o.target[:, H] = O.ATTACK, 0

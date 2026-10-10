@@ -239,6 +239,65 @@ class TestMeleeExit:
         else:
             assert O.HOLD not in kinds and dealt[-1] - dealt[2] == pytest.approx(0.0, abs=1e-6)
 
+    def _shooter_chased(self, p, order_at, seconds=40.0, point_m=300.0, arrive_at=None):
+        """Archers (slot 0) against skavenslaves attacking them, kept in contact; the archers get a move point_m straight
+        back at step order_at (0: before the fight - the first step, out of melee; 4: in melee). arrive_at: the step the
+        archers are put on their point (the slaves against them). Returns the order kinds, leave_s and HP the slaves
+        lost, a step each."""
+        from tests.tools.test_sim import face_off
+        st = face_off(ARCHER, SLAVE)
+        H = st.N // 2
+        st.u["morale"][:] = 1e6
+        st.u["leadership"][:] = 1e6
+        d0 = float(st.u["x"][0, H] - st.u["x"][0, 0])
+        hp_h0 = float(st.u["hp_abs"][0, H])
+        kinds, leave, dealt = [], [], []
+        for n in range(int(seconds / P.dt)):
+            o = replay.hold(st)
+            o.kind[0, H], o.target[0, H] = O.ATTACK, 0
+            if n == order_at:
+                o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = O.MOVE, float(st.u["x"][0, 0]) - point_m, 0.0, False
+            elif n > order_at:
+                o.kind[0, 0] = O.KEEP
+            if arrive_at is not None and n >= arrive_at:
+                st.u["x"][0, 0] = st.u["ox"][0, 0]                 # at its point, the slaves against it
+                st.u["x"][0, H] = st.u["x"][0, 0] + d0
+            else:
+                st.u["x"][0, 0] = st.u["x"][0, H] - d0              # the chasers keep up: it stays in contact
+            battle.step(st, o, p)
+            kinds.append(int(st.u["order_kind"][0, 0]))
+            leave.append(float(st.u["leave_s"][0, 0]))
+            dealt.append(hp_h0 - float(st.u["hp_abs"][0, H]))
+        return kinds, leave, dealt
+
+    def test_a_shooters_move_given_before_the_contact_is_neither_held_nor_dropped(self):
+        # contact.pre_order_free (the shootcontact probe: archers and crossbowmen moving away when the clanrats caught
+        # them kept moving all 75 s): no pin_s, no 24 s window; it still strikes nobody while it leaves
+        assert P.sim["contact"]["pre_order_free"]
+        kinds, leave, dealt = self._shooter_chased(P, order_at=0)
+        assert O.HOLD not in kinds and set(kinds) == {O.MOVE}
+        assert max(leave) == 0.0
+        assert dealt[-1] - dealt[0] == pytest.approx(0.0, abs=1e-6)
+
+    def test_a_shooters_move_given_in_melee_is_held_and_dropped_at_the_window(self):
+        # the wavemiss2 probe: a shooter told to move in melee strikes back 25-35 s after the order
+        kinds, leave, dealt = self._shooter_chased(P, order_at=4)
+        assert max(leave) >= P.sim["contact"]["pin_s"] - P.dt
+        drop = kinds[4:].index(O.HOLD)                 # (steps 0-3: the archers hold before the order)
+        assert (drop + 1) * P.dt == pytest.approx(P.rules["battle"]["melee_breakoff_secs"] + P.dt, abs=P.dt)
+
+    def test_off_a_move_given_before_the_contact_is_held_and_dropped_too(self):
+        kinds, leave, _ = self._shooter_chased(P.with_cal("contact", pre_order_free=0), order_at=0)
+        assert max(leave) >= P.sim["contact"]["pin_s"] - P.dt and O.HOLD in kinds
+
+    def test_a_move_given_before_the_contact_ends_at_its_point_and_the_shooter_fights(self):
+        # no leave_latch for it: at its point the move is over and the shooter strikes (a move given in melee stays a
+        # leave there until the window drops it)
+        _, _, pre = self._shooter_chased(P, order_at=0, seconds=12.0, point_m=15.0, arrive_at=10)
+        assert pre[-1] - pre[10] > 0
+        _, _, melee_ord = self._shooter_chased(P, order_at=4, seconds=12.0, point_m=15.0, arrive_at=10)
+        assert melee_ord[-1] - melee_ord[10] == pytest.approx(0.0, abs=1e-6)
+
     def test_off_a_leaver_never_strikes(self):
         p = P.with_cal("contact", breakoff=0)
         from tests.tools.test_sim import face_off
