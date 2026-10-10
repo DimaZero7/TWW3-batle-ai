@@ -97,10 +97,12 @@ def load(run_dir):
             ui += 1
         frames.append((s["t"], s["units"], dict(fx), {k: dict(v) for k, v in used.items()}))
     widths = {u["script_name"]: u.get("width") for tag in ("own", "enemy") for u in (cfg.get("units") or {}).get(tag, [])}
+    human = 1 if manifest.get("target") == "human" else 0
+    # a human's battle: only his side (against the game's AI too: that side is not the one we learn from there)
+    observed = (human,) if human else tuple(s for s in (1, 2) if s not in logs)
     return Recording(run=d.name, path=d, cfg=cfg, battle=g, frames=frames, logs=logs,
                      winner=int(result.get("winner", 0) or 0), attacker=sim_scenario.attacker_of(g, cfg),
-                     observed=tuple(s for s in (1, 2) if s not in logs), widths=widths,
-                     human=1 if manifest.get("target") == "human" else 0)
+                     observed=observed, widths=widths, human=human)
 
 
 def clip_points(ox, oz, bounds):
