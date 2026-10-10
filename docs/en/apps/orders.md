@@ -20,6 +20,8 @@ Only recipes from [commands verified in battle](../game/units/commands.md):
 | `set_fire_at_will(uc, on)` | `fire_at_will(on)` |
 | `stop_firing(uc)` | `halt()` + `fire_at_will(false)` |
 | `set_guard(uc, unit, on)` | `change_behaviour_active('defend', on)` |
+| `set_skirmish(uc, unit, on)` | `change_behaviour_active('skirmish', on)` — skirmish mode (the unit steps back from an approaching enemy by itself, over its order); `false` when the unit has no such mode (`can_use_behaviour`) |
+| `skirmish_active(unit)` | `is_behaviour_active('skirmish')`: is the mode on now; `nil` without the mode |
 | `withdraw(uc)` | `withdraw(true)` |
 | `use_ability_on_self(uc, unit, key)` | `perform_special_ability(key, unit)` |
 | `teleport(uc, p, bearing, width)` | `teleport_to_location` |

@@ -10,6 +10,8 @@
 #   ... -Target lord-duel -NoBuild        (another build of entries.nn_arena under the network: tools/nn/lord_duel.py)
 #   ... -EnemyAi ai_like                 (the enemy side under the simulator's script in the companion, not the
 #                                         game's AI: build --enemy-ai; with -NoBuild the build's own setting is used)
+#   ... -Skirmish off                    (the game's skirmish mode off for every unit the bridges command: build
+#                                         --skirmish; with -NoBuild the build's own setting is used)
 param(
     [ValidateSet('nn-arena', 'lord-duel')][string]$Target = 'nn-arena',
     [ValidateSet(1, 3, 10, 20)][int]$Speed = 1,
@@ -18,6 +20,7 @@ param(
     [int]$TimeoutModelSeconds = 600,
     [string]$Checkpoint = '',
     [ValidateSet('', 'game', 'ai_like', 'nearest', 'hold_shoot', 'hold')][string]$EnemyAi = '',
+    [ValidateSet('', 'game', 'off')][string]$Skirmish = '',
     [switch]$Greedy,
     [int]$LingerSeconds = 30,
     [switch]$NoBuild
@@ -49,6 +52,7 @@ if (-not $NoBuild) {
     if ($Target -ne 'nn-arena') { throw "Build $Target yourself (python -m tools.build $Target ...) and pass -NoBuild" }
     $enemyArgs = @()
     if ($EnemyAi) { $enemyArgs = @('--enemy-ai', $EnemyAi) }
+    if ($Skirmish) { $enemyArgs += @('--skirmish', $Skirmish) }
     & $python -m tools.build nn-arena --own-ai net --speed $Speed --arena $Arena --decide-ms $DecideMs --timeout $TimeoutModelSeconds @enemyArgs | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
 }

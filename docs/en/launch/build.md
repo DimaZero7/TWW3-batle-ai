@@ -49,6 +49,7 @@ What every entry does: [entry points](../apps/entries.md).
 | `--duel emp\|skv` | lord-duel, lord-ai | Both lords Empire Generals or Skaven Warlords ([lord duel](../apps/entries.md#lord_duel)); battle limit 900 s by default |
 | `--duel-variant solo\|escort` | lord-duel | The lords alone, or each with 2 infantry units of his faction (the scripted lord on the lord, infantry on infantry) |
 | `--faction emp\|skv\|vmp`, `--treatment kill\|rout\|none` | lord-fall | Whose army (its fearless opponent: Skaven for the Empire, else the Empire) and what happens to its lord: killed, routed or nothing (the control) ([lord fall](../apps/entries.md#lord_fall)). A sample every 0.5 s |
+| `--skirmish game\|off` | nn-arena `net` | Skirmish mode of the units under the bridges: as the game sets it (default) or off for all (the network's and the enemy script's; the simulator has no such mode) ([bridge](../apps/bridge.md#skirmish-mode)) |
 | `--own-role attack\|defend` | nn-arena `net` | The network attacks (the game's AI defends and wins when time is out) or defends (default: the game's AI attacks) |
 | `--army-seed N` | nn-arena | A battle from the [army generator](../training/armies.md): `generate.battle(N)`, a lord and 0-19 units a side. Without `--own-ai` the network commands our side. The battle file is `build/nn-arena/random_<N>.xml`; `scenarios/` is not touched. The manifest gets `army` (seed, train/eval, budget, templates, men) |
 | `--soldiers-every N` | human | Every soldier's place every N ticks (5; 0: never) |
@@ -60,7 +61,7 @@ What every entry does: [entry points](../apps/entries.md).
 | `--range-mode fire_at_will\|attack\|damage` | archer-range | When archers start shooting by the depth of their block; `damage` — damage to a fearless target at 70–120 m |
 | `--damage-rotate N` | archer-range `damage` | Shift the distances by N lanes (the same distance on other ground) |
 | `--swarm infantry\|lords\|all\|damage`, `--repeats N` | lord-swarm | Infantry around each lord, the other lord (with units) on him, both, or `damage` - one unit in front (swordsmen or greatswords on the Warlord, clanrats or Stormvermin on the General: damage per blow, [melee](../game/mechanics/melee.md)); each layout N times (2). Samples every 0.2 s (`--tick-ms`) |
-| `--probe-plan charge\|hit\|move`, `--probe-battle N` | charge-probe | The [melee probe](../apps/entries.md#charge_probe)'s plan and its battle number (from 1). Samples every 0.5 s |
+| `--probe-plan charge\|hit\|move\|...\|skirmish`, `--probe-battle N` | charge-probe | The [melee probe](../apps/entries.md#charge_probe)'s plan and its battle number (from 1). Samples every 0.5 s |
 | `--plan` | move-probe | Plan from `config/move-plans/<name>.json` (default `hamlet`) |
 | `--capture` | roster-capture | Another unit list instead of `config/roster/capture.json` |
 | `--scenario` | all | Another file from `scenarios/` instead of the target's scenario |

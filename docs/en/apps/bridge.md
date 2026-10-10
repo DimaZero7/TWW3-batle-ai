@@ -342,6 +342,18 @@ its lord used Foe-Seeker and Stand Your Ground 11 times, none refused; 714 moves
 enemy's answer waited 400 model ms (median) against the network's 300 - it is written after the network's.
 `ai_like` won.
 
+## Skirmish mode
+
+In the game some shooters (archers, slingers, Night Runners...) have skirmish mode: the unit steps back from an
+approaching enemy by itself, over its order. The simulator has no such mode. The build `tools.build nn-arena
+--own-ai net --skirmish off` (`skirmish = 'off'` in the build) turns it off for every unit the bridges command
+(the network's and the enemy script's) - for a fair "network against `ai_like`" comparison with the simulator;
+`--skirmish game` (the default) leaves the mode alone. With `off` the bridge turns the mode off at the start
+(`orders.set_skirmish`) and again at every decision that finds it on (event `nn_skirmish`, counter
+`nn_skirmish_again`). Whether the mode is on now: the field `sk` of a unit's row (`unit:is_behaviour_active('skirmish')`;
+only for units that have the mode) in `nn_sample` and in the companion's state. How the mode moves a shooter:
+[the `skirmish` probe](entries.md#charge_probe).
+
 ## services — pure rules
 
 | Function | What it does |
@@ -386,7 +398,8 @@ card: with it every row gets `fx`. The entry [nn_arena](entries.md#nn_arena) wit
 | `nn_ability` | `move`, `u`, `key`, `status`: `used`, `not_ready` (`can_perform_special_ability` said no: in the game only for an ability not owned), `down` (the unit is not standing), `unknown_unit` (not ours), `error` |
 | `nn_ability_ready` | `u`, `key`, `ready` (`can_perform_special_ability`), when it changes |
 | `nn_effects` | `u`, `fx` (the phases on the unit, or `unknown`), when they change |
-| `result` (added) | `nn_moves`, `nn_answered`, `nn_missed`, `nn_orders_given`, `nn_keeps`, `nn_bad_files`, `nn_write_mode`, `nn_regiven` (orders given again at a rally), `nn_released`, `nn_resumed`, `nn_abilities_used`, `nn_abilities_refused`, `nn_hold_aims`, `nn_hold_halts`, `nn_stalls`, `nn_reaims`, `nn_empty_melees`, `nn_aims_kept` (orders not given: the shooter was on that target already) |
+| `nn_skirmish` | only with `skirmish = 'off'`: `action` `off` (at the start; `units` - whose mode was turned off, `was` - was it on before) or `again` (`u`: a decision found the mode on and turned it off again) |
+| `result` (added) | `nn_moves`, `nn_answered`, `nn_missed`, `nn_orders_given`, `nn_keeps`, `nn_bad_files`, `nn_write_mode`, `nn_regiven` (orders given again at a rally), `nn_released`, `nn_resumed`, `nn_abilities_used`, `nn_abilities_refused`, `nn_hold_aims`, `nn_hold_halts`, `nn_stalls`, `nn_reaims`, `nn_empty_melees`, `nn_aims_kept` (orders not given: the shooter was on that target already), `nn_skirmish` (`off` or `game`), `nn_skirmish_again` (only with `off`) |
 
 The result also includes `nn_reaims` and `nn_empty_melees`, counting these interventions.
 `tools/nn/gate.py` copies them into `battles[].nn.reaims` and `battles[].nn.empty_melees`.

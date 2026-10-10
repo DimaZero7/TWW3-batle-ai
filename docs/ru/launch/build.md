@@ -49,6 +49,7 @@
 | `--duel emp\|skv` | lord-duel, lord-ai | Оба лорда — генералы Империи или военачальники скавенов ([дуэль лордов](../apps/entries.md#lord_duel)); предел боя по умолчанию 900 с |
 | `--duel-variant solo\|escort` | lord-duel | Лорды одни или у каждого ещё 2 отряда пехоты его фракции (скриптовый лорд — на лорда, пехота — на пехоту) |
 | `--faction emp\|skv\|vmp`, `--treatment kill\|rout\|none` | lord-fall | Чья армия (её бесстрашный противник: скавены для Империи, иначе Империя) и что с её лордом: убит, обращён в бегство или ничего (контроль) ([гибель лорда](../apps/entries.md#lord_fall)). Замер каждые 0,5 с |
+| `--skirmish game\|off` | nn-arena `net` | Режим застрельщиков отрядов под мостами: как его ставит игра (по умолчанию) или выключен у всех (сеть и скрипт врага; в симуляторе режима нет) ([bridge](../apps/bridge.md#режим-застрельщиков)) |
 | `--own-role attack\|defend` | nn-arena `net` | Сеть атакует (ИИ игры обороняется и побеждает, когда время вышло) или обороняется (по умолчанию: ИИ игры атакует) |
 | `--army-seed N` | nn-arena | Бой из [генератора армий](../training/armies.md): `generate.battle(N)`, у стороны лорд и 0–19 отрядов. Без `--own-ai` нашей стороной командует сеть. Файл боя — `build/nn-arena/random_<N>.xml`, `scenarios/` не трогается. В манифест — `army` (зерно, train/eval, бюджет, шаблоны, бойцы) |
 | `--soldiers-every N` | human | Место каждого бойца каждые N тиков (5; 0 — никогда) |
@@ -60,7 +61,7 @@
 | `--range-mode fire_at_will\|attack\|damage` | archer-range | Когда лучники начинают стрелять при разной глубине блока; `damage` — урон по бесстрашной цели на 70–120 м |
 | `--damage-rotate N` | archer-range `damage` | Сдвинуть дистанции на N полос (та же дистанция на другом грунте) |
 | `--swarm infantry\|lords\|all\|damage`, `--repeats N` | lord-swarm | Пехота вокруг каждого лорда, другой лорд (с отрядами) на нём, всё вместе или `damage` — один отряд спереди (мечники или большие мечи на военачальника, кланкрысы или штурмкрысы на генерала: урон за удар, [урон](../game/mechanics/melee.md)); каждая раскладка N раз (2). Замеры каждые 0,2 с (`--tick-ms`) |
-| `--probe-plan charge\|hit\|move`, `--probe-battle N` | charge-probe | План [зонда рукопашной](../apps/entries.md#charge_probe) и номер его боя (с 1). Замер каждые 0,5 с |
+| `--probe-plan charge\|hit\|move\|…\|skirmish`, `--probe-battle N` | charge-probe | План [зонда рукопашной](../apps/entries.md#charge_probe) и номер его боя (с 1). Замер каждые 0,5 с |
 | `--plan` | move-probe | План из `config/move-plans/<имя>.json` (по умолчанию `hamlet`) |
 | `--capture` | roster-capture | Другой список отрядов вместо `config/roster/capture.json` |
 | `--scenario` | все | Другой файл из `scenarios/` вместо сценария цели |

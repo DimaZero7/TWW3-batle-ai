@@ -41,6 +41,7 @@ Options:
 | `-LingerSeconds` | 30 | How long the game stays open after the result |
 | `-NoBuild` | off | Use the net build already in `build/nn-arena/` |
 | `-EnemyAi game\|ai_like` | `game` | The enemy: the game's AI or the simulator's script in the companion (build `--enemy-ai`; with `-NoBuild` the build's, a mismatch is an error); the script's log `companion_enemy.jsonl` ([bridge](../apps/bridge.md#the-enemy-under-the-simulators-script)) |
+| `-Skirmish game\|off` | `game` | Skirmish mode under the bridges (build `--skirmish`; with `-NoBuild` the build's) ([bridge](../apps/bridge.md#skirmish-mode)) |
 | `-Target nn-arena\|lord-duel` | `nn-arena` | Whose build and runs folder; `lord-duel` ([lord duel](../apps/entries.md#lord_duel)) only with `-NoBuild`, the companion's log goes to `build/lord-duel/companion/` |
 
 A quick check: `-Speed 20 -LingerSeconds 0`.

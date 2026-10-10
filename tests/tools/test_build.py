@@ -127,6 +127,20 @@ class TestRecorders:
         with pytest.raises(SystemExit):
             build.main(["nn-arena", "--own-ai", "net", "--decide-ms", "100"])
 
+    def test_nn_arena_skirmish_off_only_for_the_bridge(self, tmp_path, monkeypatch):
+        """--skirmish off puts skirmish 'off' into the config (both bridges turn the mode off); the default leaves
+        the config as before; the planner modes have no bridge."""
+        from tools.nn import scenario as nn_scenario
+        monkeypatch.setattr(nn_scenario, "SCENARIO", tmp_path / "nn_arena.xml")
+        written = []
+        monkeypatch.setattr(build, "build", lambda target, config, scenario=None: written.append(config) or {})
+        assert build.main(["nn-arena", "--own-ai", "net", "--enemy-ai", "ai_like", "--skirmish", "off"]) == 0
+        assert written[-1]["skirmish"] == "off" and written[-1]["enemy_script"] == "ai_like"
+        assert build.main(["nn-arena", "--own-ai", "net"]) == 0
+        assert "skirmish" not in written[-1]
+        with pytest.raises(SystemExit):
+            build.main(["nn-arena", "--own-ai", "attack", "--skirmish", "off"])
+
     def test_enemy_layout_records_the_game_s_ai_only(self, tmp_path, monkeypatch):
         from tools import enemy_layout
         monkeypatch.setattr(enemy_layout, "SCENARIO", tmp_path / "enemy_layout.xml")

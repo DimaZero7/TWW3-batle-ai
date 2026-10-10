@@ -20,6 +20,8 @@
 | `set_fire_at_will(uc, on)` | `fire_at_will(on)` |
 | `stop_firing(uc)` | `halt()` + `fire_at_will(false)` |
 | `set_guard(uc, unit, on)` | `change_behaviour_active('defend', on)` |
+| `set_skirmish(uc, unit, on)` | `change_behaviour_active('skirmish', on)` — режим застрельщиков (отряд сам отходит от подходящего врага, перебивая приказ); `false`, если режима у отряда нет (`can_use_behaviour`) |
+| `skirmish_active(unit)` | `is_behaviour_active('skirmish')`: включён ли режим сейчас; `nil`, если режима нет |
 | `withdraw(uc)` | `withdraw(true)` |
 | `use_ability_on_self(uc, unit, key)` | `perform_special_ability(key, unit)` |
 | `teleport(uc, p, bearing, width)` | `teleport_to_location` |

@@ -83,6 +83,24 @@ function M.set_guard(uc, unit, enabled)
     return true
 end
 
+-- Skirmish mode (the unit steps back from approaching enemies by itself, over its order): on or off.
+-- false when the unit has no such mode (can_use_behaviour). CA's script library sets it the same way
+-- (script_unit:change_behaviour_active('skirmish', ...)).
+function M.set_skirmish(uc, unit, enabled)
+    if not unit:can_use_behaviour('skirmish') then return false end
+    uc:change_behaviour_active('skirmish', enabled == true)
+    return true
+end
+
+-- Is skirmish mode on now (unit:is_behaviour_active)? nil when the unit has no such mode or it cannot be read.
+function M.skirmish_active(unit)
+    local ok, can = pcall(function() return unit:can_use_behaviour('skirmish') end)
+    if not (ok and can) then return nil end
+    local ok2, on = pcall(function() return unit:is_behaviour_active('skirmish') end)
+    if ok2 and type(on) == 'boolean' then return on end
+    return nil
+end
+
 -- Requires <can_withdraw>true</can_withdraw> in the scenario XML;
 -- withdraw() without an argument errors in this build.
 function M.withdraw(uc)

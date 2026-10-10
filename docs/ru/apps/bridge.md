@@ -334,6 +334,17 @@ net --enemy-ai ai_like` (в сборке `enemy_ai = 'companion'`, `enemy_script
 Stand Your Ground 11 раз, отказов нет; 714 ходов, пропуск ответа 1; ожидание ответа врагу 400 мс боя
 (медиана) против 300 у сети — его ответ пишется после ответа сети. Победил `ai_like`.
 
+## Режим застрельщиков
+
+В игре у части стрелков (лучники, пращники, Ночные бегуны…) есть режим застрельщиков: отряд сам отходит от
+подходящего врага, перебивая приказ. В симуляторе такого режима нет. Сборка `tools.build nn-arena --own-ai net
+--skirmish off` (в сборке `skirmish = 'off'`) выключает его у всех отрядов, которыми командуют мосты (сеть и
+скрипт врага), — для честного сравнения «сеть против `ai_like`» с симулятором; `--skirmish game` (по умолчанию)
+режим не трогает. С `off` мост выключает режим при старте (`orders.set_skirmish`) и снова на каждом решении,
+где он оказался включён (событие `nn_skirmish`, счётчик `nn_skirmish_again`). Включён ли режим сейчас — поле
+`sk` строки отряда (`unit:is_behaviour_active('skirmish')`; только у отрядов, у которых режим есть) в
+`nn_sample` и в состоянии для помощника. Как режим отводит стрелка — [проба `skirmish`](entries.md#charge_probe).
+
 ## services — чистые правила
 
 | Функция | Что делает |
@@ -378,7 +389,8 @@ Stand Your Ground 11 раз, отказов нет; 714 ходов, пропус
 | `nn_ability` | `move`, `u`, `key`, `status`: `used`, `not_ready` (`can_perform_special_ability` ответила «нет»: в игре только если способности нет), `down` (отряд не стоит), `unknown_unit` (не наш), `error` |
 | `nn_ability_ready` | `u`, `key`, `ready` (`can_perform_special_ability`), при изменении |
 | `nn_effects` | `u`, `fx` (фазы на отряде или `unknown`), при изменении |
-| `result` (дополнено) | `nn_moves`, `nn_answered`, `nn_missed`, `nn_orders_given`, `nn_keeps`, `nn_bad_files`, `nn_write_mode`, `nn_regiven` (приказы, отданные снова при сборе), `nn_released`, `nn_resumed`, `nn_abilities_used`, `nn_abilities_refused`, `nn_hold_aims`, `nn_hold_halts`, `nn_stalls`, `nn_reaims`, `nn_empty_melees`, `nn_aims_kept` (не отданные приказы: стрелок уже был на этой цели) |
+| `nn_skirmish` | только при `skirmish = 'off'`: `action` `off` (при старте; `units` — у кого выключен, `was` — был ли включён до того) или `again` (`u`: на решении режим оказался включён и выключен снова) |
+| `result` (дополнено) | `nn_moves`, `nn_answered`, `nn_missed`, `nn_orders_given`, `nn_keeps`, `nn_bad_files`, `nn_write_mode`, `nn_regiven` (приказы, отданные снова при сборе), `nn_released`, `nn_resumed`, `nn_abilities_used`, `nn_abilities_refused`, `nn_hold_aims`, `nn_hold_halts`, `nn_stalls`, `nn_reaims`, `nn_empty_melees`, `nn_aims_kept` (не отданные приказы: стрелок уже был на этой цели), `nn_skirmish` (`off` или `game`), `nn_skirmish_again` (только при `off`) |
 
 В `result` также входят `nn_reaims` и `nn_empty_melees` — число этих вмешательств. Проверка
 `tools/nn/gate.py` переносит их в `battles[].nn.reaims` и `battles[].nn.empty_melees`.

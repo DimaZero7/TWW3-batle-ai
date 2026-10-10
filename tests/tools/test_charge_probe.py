@@ -16,7 +16,7 @@ def test_plans_have_few_battles_and_lanes_on_both_sides():
         for i in range(1, len(cp.battles(plan)) + 1):
             config, model_s, arena = cp.run_config(plan, i)
             # (reengage: its tired pair runs up to 540 s before its fight; retarget2 / 3: 10 / 7 short lanes)
-            assert 2 <= len(config["lanes"]) <= {"retarget2": 10, "retarget3": 7, "leave": 6}.get(plan, 5)
+            assert 2 <= len(config["lanes"]) <= {"retarget2": 10, "retarget3": 7, "leave": 6, "skirmish": 10}.get(plan, 5)
             assert model_s < (720 if plan == "reengage" else 400)
             assert all(len(side["units"]) <= 20 for side in arena["sides"].values())
             names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}
@@ -436,6 +436,61 @@ def test_the_leave_twin_withdraws_and_halts_the_target_when_told():
             assert moved_t < 5
         elif who != "lord":
             assert moved_t > 20                                                        # the chase
+
+
+def test_the_skirmish_plan_charges_each_shooter_with_its_mode_on_and_off():
+    b = cp.battles("skirmish")
+    assert len(b) == 2 and all(len(x) == 10 for x in b)
+    assert [cp.cell(l) for l in b[0]] != [cp.cell(l) for l in b[1]]              # the lanes rotated
+    assert sorted(cp.cell(l) for l in b[0]) == sorted(cp.cell(l) for l in b[1]) and len({cp.cell(l) for l in b[0]}) == 10
+    assert {(l["target"], l["attacker"], l["t_skirmish"]) for l in b[0]} == {
+        (s, c, on) for s, c in cp.SKIRMISH_PAIRS for on in (True, False)}
+    for l in b[0]:
+        assert l["mode"] == "attack_run" and l["target_mode"] == "skirmish" and not l["answer"]
+        assert l["gap_m"] == 60 and l["max_s"] == 90 and l["kind"] == ("on" if l["t_skirmish"] else "off")
+    for i in (1, 2):
+        config, model_s, arena = cp.run_config("skirmish", i)
+        assert config["men_near_m"] >= 200 and config["men_after_s"] >= 90 and model_s < 150
+        for l in config["lanes"]:
+            assert cp.UNITS[l["target"].split("_", 1)[1].rsplit("_", 1)[0]][0] == l["t_key"]
+            # the chaser's start on the map's flat square; the shooter's way back (-z, up to 360 m) misses the other row
+            assert l["z"] + l["gap_m"] + l["a_depth"] <= 600 and l["z"] - 360 >= -600 and abs(l["x"]) <= 500
+            below = [o for o in config["lanes"] if o["z"] < l["z"]]
+            assert all(abs(o["x"] - l["x"]) >= 100 for o in below)
+
+
+def _skirmish_lane(on=True):
+    """A skirmish lane: the chaser runs 4 m/s from z = 70 down to the shooter at z = 0; with the mode on the shooter
+    walks away (-z) at 3 m/s from 6 s (the chaser 46 m off) and is caught at 40 s; it fires (the ammo drops 10 a
+    second) standing and half as much moving; off: it stands, caught at 15 s."""
+    spec = dict(cp.layout(cp.battles("skirmish")[0])[0][0], t_skirmish=on)
+    samples, ammo, tz, az = [], 400.0, 0.0, 70.0
+    contact = 40.0 if on else 15.0
+    for k in range(1, 121):
+        t = k * 0.5
+        moving = on and t > 6 and t < contact
+        if t < contact:
+            az -= 2.0
+            tz -= 1.5 if moving else 0.0
+        ammo -= 2.5 if moving else 5.0
+        samples.append((t, {"x": 0.0, "z": az, "m": t >= contact},
+                        {"x": 0.0, "z": tz, "ammo": ammo, "fire": True, "sk": on, "m": t >= contact}, None))
+    return {"run": "r", "spec": spec, "samples": samples, "men": [], "contacts": {1: contact}, "end": None,
+            "abilities": [], "phases": [], "skirmish": [{"can": True, "before": False, "after": on}]}
+
+
+def test_skirmish_measure_the_move_away_its_speed_fire_and_the_catch():
+    m = cp.skirmish_measure(_skirmish_lane(True))
+    assert m["mode"] == "on" and m["caught"] and m["contact_s"] == 40
+    assert m["moves"] == 1 and m["move_s"] == 6 and 40 <= m["move_d_m"] <= 50 and m["move_dir_deg"] == 0
+    assert m["move_speed"] == pytest.approx(3.0, abs=0.1) and m["chaser_speed"] == pytest.approx(4.0, abs=0.01)
+    assert m["fire_moving"] == 1 and m["shots_moving"] < m["shots_stand"] + m["shots_moving"]
+    assert m["sk_share"] == 1 and m["sk_set"] == {"can": True, "before": False, "after": True}
+    off = cp.skirmish_measure(_skirmish_lane(False))
+    assert off["mode"] == "off" and off["moves"] == 0 and "move_s" not in off and off["contact_s"] == 15
+    assert off["away_share"] == 0 and off["sk_share"] == 0 and off["shots_moving"] == 0
+    table = cp.skirmish_summary([m, off])
+    assert set(table) == {f"{m['shooter']} on", f"{m['shooter']} off"} and table[f"{m['shooter']} on"]["moves"] == 1
 
 
 def _retarget_lane(switch_s=10):

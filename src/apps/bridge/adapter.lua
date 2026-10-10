@@ -48,6 +48,10 @@
 -- A second instance commands the enemy side under a script in the companion (nn_arena enemy_ai
 -- 'companion'): opts.state_file / opts.orders_file name its own files, and rows that already carry
 -- their active effects (fx, read by the first instance at the same decision) are not read again.
+-- Skirmish mode (the game's: a unit steps back from approaching enemies by itself, over its order; the simulator
+-- has no such mode): opts.skirmish 'off' turns it off for every own unit that has it at the start, and again at
+-- any decision that finds it on (event nn_skirmish: action 'off' at the start with the units and their state
+-- before, 'again' at a decision); absent or 'game': the game's own setting stays (as before).
 local json = require('apps.core.json')
 local orders = require('apps.orders.adapter')
 local exchange = require('apps.bridge.exchange_adapter')
@@ -93,7 +97,7 @@ end
 -- vector, rows() -> every unit's row, meta (put into every state: batch...), emit(event,
 -- fields), now_ms() (battle time since the start), model_ms() (engine time); optional
 -- cco(unit, field) -> the unit's CcoBattleUnit value (active effects into the rows); state_file,
--- orders_file (default M.STATE_FILE, M.ORDERS_FILE).
+-- orders_file (default M.STATE_FILE, M.ORDERS_FILE); skirmish ('off' | 'game', default 'game': module comment).
 function M.start(opts)
     local state_file, orders_file = opts.state_file or M.STATE_FILE, opts.orders_file or M.ORDERS_FILE
     local handle = {written = 0, applied = 0, answered = 0, missed = 0, given = 0, keeps = 0, bad = 0,
@@ -126,6 +130,28 @@ function M.start(opts)
     for _, it in ipairs(opts.own) do
         it.uc = orders.take_control(opts.army, it.unit)
         orders.set_fire_at_will(it.uc, true)
+    end
+    local skirmish_off = opts.skirmish == 'off'
+    handle.skirmish_again = 0
+    if skirmish_off then
+        local names, was = {}, {}
+        for _, it in ipairs(opts.own) do
+            local before = orders.skirmish_active(it.unit)
+            if before ~= nil and pcall(orders.set_skirmish, it.uc, it.unit, false) then
+                names[#names + 1], was[it.name] = it.name, before
+            end
+        end
+        opts.emit('nn_skirmish', {t = opts.now_ms(), action = 'off', units = names, was = was})
+    end
+
+    -- Skirmish mode found on again at a decision (opts.skirmish 'off'): off again.
+    local function keep_skirmish_off()
+        for _, it in ipairs(opts.own) do
+            if orders.skirmish_active(it.unit) == true and pcall(orders.set_skirmish, it.uc, it.unit, false) then
+                handle.skirmish_again = handle.skirmish_again + 1
+                opts.emit('nn_skirmish', {t = opts.now_ms(), action = 'again', u = it.name})
+            end
+        end
     end
 
     -- A shooter fires at will instead of holding a target it cannot hit (services.missile_duty).
@@ -407,6 +433,7 @@ function M.start(opts)
             if own_by_name[row.n] and services.down(row) then down_at[row.n] = handle.written end
         end
         watch_shooters(rows)
+        if skirmish_off then keep_skirmish_off() end
     end
 
     -- A unit that rallied goes on with the order it had when it broke, as in the simulator (an
@@ -515,7 +542,8 @@ function M.start(opts)
             nn_regiven = handle.regiven, nn_released = handle.released, nn_resumed = handle.resumed,
             nn_abilities_used = handle.abilities_used, nn_abilities_refused = handle.abilities_refused,
             nn_hold_aims = handle.hold_aims, nn_hold_halts = handle.hold_halts, nn_stalls = handle.stalls,
-            nn_aims_kept = handle.aims_kept, nn_reaims = handle.reaims, nn_empty_melees = handle.empty_melees}
+            nn_aims_kept = handle.aims_kept, nn_reaims = handle.reaims, nn_empty_melees = handle.empty_melees,
+            nn_skirmish = skirmish_off and 'off' or 'game', nn_skirmish_again = skirmish_off and handle.skirmish_again or nil}
     end
 
     return handle

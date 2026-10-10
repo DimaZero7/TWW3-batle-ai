@@ -36,7 +36,10 @@
 -- The target (lane.target_mode): 'stand' halts and, with lane.answer, is ordered to attack the
 -- attacker at its first contact (both then fight under an attack order); 'hold' halts and is never
 -- ordered (braced spears); 'both' attacks the attacker at a run from the start ('both_walk': at a walk); 'rear' halts facing
--- away. lane.lord (optional): a lord placed behind the target (dz m), who uses lane.lord.ability on
+-- away; 'skirmish' (the skirmish plan) is a shooter: at the start, placed, its fire at will on and the game's skirmish
+-- mode (it steps back from an approaching enemy by itself, over its order) set by lane.t_skirmish (on / off; event
+-- probe_skirmish {can, before, after}); at the go a ranged attack on the attacker at a walk (as the bridge aims a held
+-- shooter); its sample row is the shooter's (ammo, fire, dd) with sk (the mode on now). lane.lord (optional): a lord placed behind the target (dz m), who uses lane.lord.ability on
 -- himself at the lane's first contact (Stand Your Ground) unless the key is empty (the control); with
 -- lane.lord.at_m instead once the two units' centres are within at_m before the contact.
 -- lane.target2 (optional): a second target unit placed t2_dx m beside the target (+x) and t2_dz m along z (the
@@ -90,7 +93,8 @@ local LOG = 'tww3_bai_events.jsonl'
 local TIMER, MEN_TIMER = 'tww3_bai_charge_probe_tick', 'tww3_bai_charge_probe_men'
 M.MODES = {attack_run = true, attack_walk = true, move_run = true, recharge = true, hold = true, withdraw = true,
     script = true, shoot = true, reengage = true, tire = true, retarget = true}
-M.TARGET_MODES = {stand = true, hold = true, both = true, both_walk = true, rear = true, push = true}
+M.TARGET_MODES = {stand = true, hold = true, both = true, both_walk = true, rear = true, push = true,
+    skirmish = true}
 M.AFTER_KINDS = {attack_t2 = true, attack_same = true, halt = true, move_near = true, none = true}
 M.AT_ROUT = {halt = true, none = true, away = true}
 -- The engine's fatigue states, fresh to exhausted (unit:fatigue_state()).
@@ -249,12 +253,14 @@ function M.main(bm, config, globals)
         return row
     end
 
-    -- A shooter's unit row with its projectiles left, the fire flag and the damage it has dealt (the retarget plan).
+    -- A shooter's unit row with its projectiles left, the fire flag and the damage it has dealt (the retarget plan),
+    -- and sk: its skirmish mode on now (nil without the mode).
     local function shooter_row(u)
         local row = unit_row(u)
         row.ammo = read(function() return u:ammo_left() end)
         row.fire = read(cco, u, 'IsFiringMissiles')
         row.dd = round(read(cco, u, 'DamageDealt'), 0)
+        row.sk = orders.skirmish_active(u)
         return row
     end
 
@@ -549,7 +555,8 @@ function M.main(bm, config, globals)
                         emit('probe_phase', {lane = lane.name, phase = 'friends', t = now - lane.t0, units = placed})
                     end
                 end
-                local tg_row = (lane.t_morale or lane.morale_rows) and morale_row or unit_row
+                local tg_row = (lane.t_morale or lane.morale_rows) and morale_row
+                    or lane.target_mode == 'skirmish' and shooter_row or unit_row
                 local a_row = lane.morale_rows and morale_row or lane.mode == 'retarget' and shooter_row or unit_row
                 local r = {lane = lane.name, t = now - lane.t0, a = a_row(lane.a.unit), tg = tg_row(lane.t.unit)}
                 if lane.rally_friends and #lane.rally_friends > 0 then
@@ -634,6 +641,8 @@ function M.main(bm, config, globals)
             if lane.t2 and lane.t2_mode == 'attack' then attack(lane, lane.t2, lane.a, true) end
             if lane.target_mode == 'push' then
                 orders.move(lane.t.uc, vec(lane.layout.tx, lane.z + (lane.push_m or 60)), false)
+            elseif lane.target_mode == 'skirmish' then
+                orders.attack_ranged(lane.t.uc, lane.a.unit, false, true)
             end
             local m = lane.mode
             if m == 'attack_run' or m == 'recharge' or m == 'withdraw' or m == 'reengage' then
@@ -708,6 +717,14 @@ function M.main(bm, config, globals)
             end
             for _, f in ipairs(lane.rally_friends or {}) do
                 place(state.units[f.name], f.px, f.pz, 0, f.width or lane.t_width)
+            end
+            if lane.target_mode == 'skirmish' then
+                local u = lane.t.unit
+                local before = orders.skirmish_active(u)
+                orders.set_fire_at_will(lane.t.uc, true)
+                local ok, can = pcall(orders.set_skirmish, lane.t.uc, u, lane.t_skirmish == true)
+                emit('probe_skirmish', {lane = lane.name, want = lane.t_skirmish == true, can = ok and can or false,
+                    before = before, after = orders.skirmish_active(u), error = (not ok) and tostring(can) or nil})
             end
         end
         emit('start', {speed = config.speed, lanes = config.lanes})

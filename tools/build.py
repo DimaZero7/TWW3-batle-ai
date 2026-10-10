@@ -16,6 +16,7 @@ Usage:
     python -m tools.build human --army-seed 1000900014 --army-swap   # a human plays our side (x1, recorded)
     python -m tools.build nn-arena --army-from-run build/nn-arena/runs/20261007-091416 --army-swap   # an old run's armies
     python -m tools.build nn-arena --army-seed 1000900014 --enemy-ai ai_like   # the enemy under the simulator's script
+    python -m tools.build nn-arena --army-seed 1000900014 --enemy-ai ai_like --skirmish off   # no skirmish mode
     python -m tools.build lord-fall --faction skv --treatment kill   # the lord killed / routed (tools/nn/lord_fall.py)
     python -m tools.build lord-duel --duel emp   # our network's lord v a lord under one attack order (tools/nn/lord_duel.py)
     python -m tools.build lord-duel --duel skv --duel-variant escort   # the same, each lord with 2 infantry units
@@ -352,6 +353,9 @@ def nn_arena_config(args, run_config):
         if args.enemy_ai != "game":
             # side 2 under a script of the simulator in the companion (tools/nn/companion/script.py)
             run_config.update(enemy_ai="companion", enemy_script=args.enemy_ai)
+        if args.skirmish == "off":
+            # the game's skirmish mode off for every unit a bridge commands (the simulator has none)
+            run_config.update(skirmish="off")
     if args.own_ai == "human":
         run_config.update(own_role=own_role, soldiers_every=args.soldiers_every)
     return path
@@ -392,6 +396,10 @@ def main(argv=None):
                         help="nn-arena --own-ai net: the enemy side under the game's AI (default) or under a "
                              "script of the simulator (tools/nn/train/opponents.py) in the companion, as the "
                              "network's simulator opponent (the twin's: ai_like)")
+    parser.add_argument("--skirmish", choices=("game", "off"), default="game",
+                        help="nn-arena --own-ai net: the game's skirmish mode (a unit steps back from approaching "
+                             "enemies by itself, over its order) as the game sets it (default) or off for every unit "
+                             "the bridge commands - ours and a scripted enemy's (the simulator has no such mode)")
     parser.add_argument("--own-role", choices=("attack", "defend"),
                         help="nn-arena --own-ai net, human: our side attacks (the game's AI defends and wins on "
                              "timeout) or defends (default: the game's AI attacks)")
@@ -421,7 +429,7 @@ def main(argv=None):
                              "or a named arena in config/nn/arenas.json")
     parser.add_argument("--repeats", type=int, default=2,
                         help="lord-swarm: how many times each layout runs in the battle")
-    parser.add_argument("--probe-plan", choices=("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform", "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure", "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "leave"), default="charge",
+    parser.add_argument("--probe-plan", choices=("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform", "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure", "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "leave", "skirmish"), default="charge",
                         help="charge-probe: the plan (tools/nn/charge_probe.py)")
     parser.add_argument("--probe-battle", type=int, default=1, help="charge-probe: the plan's battle, 1-based")
     parser.add_argument("--mprobe-plan", choices=("dist", "arc", "range", "targets", "shield", "moving", "rank", "thin", "pistol", "moving2", "lof",
@@ -470,6 +478,8 @@ def main(argv=None):
         parser.error("--own-role is for --own-ai net and the human target (the planner modes set our role themselves)")
     if args.enemy_ai != "game" and (args.target != "nn-arena" or args.own_ai != "net"):
         parser.error("--enemy-ai is for nn-arena --own-ai net")
+    if args.skirmish != "game" and (args.target != "nn-arena" or args.own_ai != "net"):
+        parser.error("--skirmish is for nn-arena --own-ai net (the bridge's units)")
     if args.soldiers_every < 0:
         parser.error("--soldiers-every must be 0 or more")
     if args.army_from_run is not None:

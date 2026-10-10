@@ -34,7 +34,8 @@ function F.unit(name, kind, x, z)
     function u:is_script_controlled() return self.controlled end
     function u:ammo_left() return self.ammo or 0 end
     function u:starting_ammo() return 0 end
-    function u:is_behaviour_active() return false end
+    -- Behaviours (skirmish, defend...) a test or the controller turned on: u.behaviours[key] = true.
+    function u:is_behaviour_active(key) return (self.behaviours or {})[key] == true end
     function u:can_use_behaviour() return true end
     function u:is_valid_target() return true end
     function u:is_visible_to_alliance() return true end
@@ -78,7 +79,11 @@ local function controller(log)
     function uc:release_control() self.unit.controlled = false end
     -- The last free-fire switch and attack_unit's arguments stay on the unit (the log keeps its old lines).
     function uc:fire_at_will(on) self.unit.free_fire = on end
-    function uc:change_behaviour_active() end
+    function uc:change_behaviour_active(key, on)
+        self.unit.behaviours = self.unit.behaviours or {}
+        self.unit.behaviours[key] = on == true
+        self.unit.behaviour_calls = (self.unit.behaviour_calls or 0) + 1
+    end
     function uc:melee(on) self.unit.melee_mode = on end
     function uc:halt()
         self.unit.moving = false

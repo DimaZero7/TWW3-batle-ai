@@ -630,6 +630,47 @@ class TestNnArena:
         assert result["en_orders_given"] == 2 and result["en_abilities_used"] == 1 and result["nn_orders_given"] == 1
         assert exchange.read_state(tmp_path / exchange.ENEMY_STATE)["done"] is True
 
+    @pytest.mark.parametrize("mode", ["off", "game"])
+    def test_skirmish_mode_off_for_both_bridges_or_left_to_the_game(self, lua, tmp_path, mode):
+        """config.skirmish 'off': both bridges turn the mode off at the start (nn_skirmish / en_skirmish 'off', the
+        state before) and again when a decision finds it on ('again'); 'game' never touches it. The rows carry sk."""
+        from tools.nn.companion import exchange
+        lua.execute(self.SETUP + f"""
+            CONFIG.own_ai, CONFIG.enemy_ai, CONFIG.enemy_script = 'net', 'companion', 'ai_like'
+            CONFIG.enemy_role, CONFIG.decide_ms, CONFIG.poll_ms = 'attack', 1000, 100
+            CONFIG.skirmish = '{mode}'
+            own[2].behaviours, enemy[2].behaviours = {{skirmish = true}}, {{skirmish = true}}
+            STATE = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+        """)
+        off = mode == "off"
+        assert lua.eval("own[2]:is_behaviour_active('skirmish')") is (not off)
+        assert lua.eval("enemy[2]:is_behaviour_active('skirmish')") is (not off)
+        rows = {r["n"]: r for r in exchange.read_state(tmp_path / exchange.STATE)["units"]}
+        assert rows["own_spear_1"]["sk"] is (not off) and rows["enemy_spear_1"]["sk"] is (not off)
+        lua.execute("""
+            enemy[2].behaviours.skirmish = true        -- the game turned it on again
+            for _ = 1, 10 do bm:tick(100) end          -- the next decision
+            bm.outcome, bm.winner = true, 1
+            for _ = 1, 10 do bm:tick(100) end
+            assert(STATE.finished, 'the battle did not finish')
+        """)
+        assert lua.eval("enemy[2]:is_behaviour_active('skirmish')") is (not off)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        result = rows[-1]
+        assert result["nn_skirmish"] == result["en_skirmish"] == mode
+        sk = [(r["event"], r["action"], r.get("u")) for r in rows if r["event"] in ("nn_skirmish", "en_skirmish")]
+        if not off:
+            assert sk == [] and "nn_skirmish_again" not in result
+            return
+        assert sk == [("nn_skirmish", "off", None), ("en_skirmish", "off", None), ("en_skirmish", "again", "enemy_spear_1")]
+        start = next(r for r in rows if r["event"] == "en_skirmish")
+        assert set(start["units"]) == {"enemy_lord", "enemy_spear_1"} and start["was"]["enemy_spear_1"] is True
+        assert result["nn_skirmish_again"] == 0 and result["en_skirmish_again"] == 1
+        sample = next(r for r in rows if r["event"] == "nn_final")
+        assert all(u["sk"] is False for u in sample["units"])
+
     def test_enemy_under_a_companion_needs_the_network_on_our_side(self, lua, tmp_path):
         lua.execute(self.SETUP + """
             CONFIG.own_ai, CONFIG.enemy_ai = 'attack', 'companion'
@@ -1484,6 +1525,43 @@ class TestChargeProbe:
         assert tuple(place(L, lua.eval("{t2_dz = -24}"))) == (10, -30)          # behind it on the line of fire
         aim = lua.eval(cp + ".retarget_aim")
         assert [aim(ms, 10) for ms in (0, 9999, 10000, 19999, 20000)] == [1, 1, 2, 2, 1] and aim(50000, None) == 1
+
+    def test_skirmish_sets_the_shooters_mode_aims_it_at_the_chaser_and_samples_the_flag(self, lua, tmp_path):
+        """The skirmish plan's target: placed, fire at will on and its skirmish mode set (on in L1, off in L2: the game
+        had it on), at the go a ranged attack at a walk on the chaser, which attacks at a run; the shooter's row carries
+        ammo, fire and sk; the lane ends at max_s."""
+        lua.execute(self.SETUP + """
+            for k, on in ipairs({true, false}) do
+                local L = CONFIG.lanes[k]
+                L.mode, L.target_mode, L.answer, L.fight_s, L.max_s, L.gap_m = 'attack_run', 'skirmish', false, 90, 10, 60
+                L.recharge_after_s, L.back_m, L.recharge_max_s, L.lord, L.t_skirmish = nil, nil, nil, nil, on
+            end
+            enemy[2].ammo, enemy[2].range, own[3].ammo, own[3].range = 40, 120, 40, 120
+            own[3].behaviours = {skirmish = true}
+            CONFIG.park = {{name = 'enemy_lord', x = 700, z = -400, bearing = 0},
+                           {name = 'own_lord', x = -700, z = -400, bearing = 0}}
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            assert(enemy[2]:is_behaviour_active('skirmish') == true and own[3]:is_behaviour_active('skirmish') == false)
+            assert(enemy[2].free_fire == true and own[3].free_fire == true, 'fire at will on')
+            assert(enemy[2].attack_args.target == 'own_swords_1' and enemy[2].attack_args.primary == true
+                and enemy[2].attack_args.run == false, 'a ranged attack at a walk on the chaser')
+            assert(own[2].attack_args.target == 'enemy_clanrat_1' and own[2].attack_args.run == true, 'the charge')
+            enemy[2].ammo = 31
+            for _ = 1, 40 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        sk = {r["lane"]: r for r in rows if r["event"] == "probe_skirmish"}
+        assert (sk["L1"]["want"], sk["L1"]["can"], sk["L1"]["before"], sk["L1"]["after"]) == (True, True, False, True)
+        assert (sk["L2"]["want"], sk["L2"]["before"], sk["L2"]["after"]) == (False, True, False)
+        lanes = [x for r in rows if r["event"] == "probe_sample" for x in r["lanes"]]
+        l1 = [x["tg"] for x in lanes if x["lane"] == "L1"]
+        assert l1[0]["ammo"] == 40 and l1[-1]["ammo"] == 31 and l1[0]["sk"] is True
+        assert [x["tg"]["sk"] for x in lanes if x["lane"] == "L2"][0] is False
+        assert {r["lane"]: r["why"] for r in rows if r["event"] == "probe_lane_end"} == {"L1": "max_s", "L2": "max_s"}
 
 class TestMissileProbe:
     """The missile probe (entries.missile_probe; lanes from tools/nn/missile_probe.py)."""

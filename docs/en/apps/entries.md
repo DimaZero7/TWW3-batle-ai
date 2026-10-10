@@ -170,6 +170,15 @@ are `lord.at_m` apart, the same pair without him; flagellants, swordsmen on clan
 `pair` - 1 battle (clanrat spearmen attack Empire spearmen from 80 m for 240 s; the spearmen hold, answer, or
 `push`: a move order at a walk to a point `push_m` 60 m ahead, through the attacker); `fatleave` - 1 battle (both
 attacking from 3 m without a run-up, also 60 m wide on 15 m wide - `a_w` / `t_w`; three units leaving held clanrats).
+`skirmish` - 2 battles of 10 lanes (rows of 5, 200 m apart, the rows 600 m apart; battle 2 swaps the rows):
+skirmish mode. A shooter stands (the lane's target, `target_mode = 'skirmish'`: in place, fire at will, at the
+start the mode on or off by `t_skirmish`, event `probe_skirmish` - was the mode on before and is it now; at the
+go a ranged attack at a walk on the attacker, as the bridge aims a held shooter), infantry attacks it at a run
+from 60 m, 90 s: slave slingers and Night Runners (chased by swordsmen), the Empire's archers, crossbowmen and
+handgunners (chased by clanrats), each with the mode and without. The shooter's row has its ammo, fire flag,
+damage dealt and `sk`; the soldiers' places every 1 s within 200 m. Analysis: `python -m tools.nn.charge_probe
+skirmish [folders]` - from what distance the shooter starts to move away, where and how fast, does it shoot on
+the move, how many shots it got off, was it caught.
 Missile probe: `reform_men` (the target re-forms by a 5 m move with its width at that many men), `friend` (a friend
 placed `friend_fwd` / `friend_lat` from the shooter, sampled as `f`); plans `thin`, `pistol`, `moving2`, `lof`.
 Morale probe: plans `strong2` (the strong-enemy scale, 6 enemies, 120-30 m) and `rally2` (the rally clock).
@@ -398,6 +407,7 @@ Every second `nn_sample` records every unit of both sides (the full view):
 | `sv` | `unit:strategic_value()`: the game's strength estimate of the unit now (from 02.10.2026) |
 | `pcr`, `phr` | CCO `PercentCasualtiesRecently`, `PercentHpLostRecently`: men / HP lost in the last 4 s |
 | `mge` | CCO `MoraleGreatestEffect`: localised text of the effect weighing most on morale now (missing when empty) |
+| `sk` | Skirmish mode on now (`unit:is_behaviour_active('skirmish')`); only for units that have it. With `config.skirmish = 'off'` (build `--skirmish off`) the bridges turn it off ([bridge](bridge.md#skirmish-mode)) |
 
 The sample itself also carries `bop` — CCO `BattleRoot.BalanceOfPowerPercent`, the top bar for the
 player's alliance — and `bop_side`, that alliance as our side number (`bm:get_player_alliance_num()`,

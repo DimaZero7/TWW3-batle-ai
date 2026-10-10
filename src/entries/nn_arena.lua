@@ -28,6 +28,9 @@
 -- the soldiers; config.cards = true also records every unit's card on change (nn_card), both sides
 -- (the lord against the game's AI: tools/nn/lord_ai.py).
 -- Each side may have its own army (tools/nn/scenario.py: named arenas).
+-- config.skirmish (with own_ai 'net'): 'off' turns the game's skirmish mode off for every unit a bridge commands
+-- (ours, and the enemy's under a script), as the simulator has none (apps.bridge.adapter); absent or 'game': the
+-- game's own setting. Every row of a unit that has the mode carries sk = is it on now (unit:is_behaviour_active).
 -- Every tick 'nn_sample' records every unit of both sides (full view: trusted
 -- research telemetry); 'nn_final' is the last such record.
 -- A unit that routs and rallies is given back to the planner with its last
@@ -55,6 +58,7 @@ M.REISSUE_MS = 15000
 M.OWN_AI = {attack = true, defend = true, hold = true, net = true, human = true, scripted = true}
 M.ENEMY_AI = {scripted = true, companion = true}
 M.SCRIPTED_LOST_MS = 3000
+M.SKIRMISH = {game = true, off = true}
 
 local function try(fn, ...)
     local ok, v = pcall(fn, ...)
@@ -124,7 +128,7 @@ function M.main(bm, config, globals)
         local u = it.unit
         local p = try(function() return u:position() end)
         local o = try(function() return u:ordered_position() end)
-        return {n = it.name, x = p and round(p:get_x()), z = p and round(p:get_z()),
+        local row = {n = it.name, x = p and round(p:get_x()), z = p and round(p:get_z()),
             b = round(try(function() return u:bearing() end), 0),
             men = try(function() return u:number_of_men_alive() end),
             hp = round(try(function() return u:unary_hitpoints() end), 4),
@@ -139,6 +143,8 @@ function M.main(bm, config, globals)
             lf = try(function() return u:is_left_flank_threatened() end),
             rf = try(function() return u:is_right_flank_threatened() end),
             bf = try(function() return u:is_rear_flank_threatened() end)}
+        if it.can_sk then row.sk = orders.skirmish_active(u) end   -- (false must stay false: not an and-or)
+        return row
     end
 
     -- For the simulator's army collapse and morale rules (docs/en/training/measurements.md), in the
@@ -295,7 +301,7 @@ function M.main(bm, config, globals)
             end
         end
         state.enemy_net = bridge.start({army = state.enemy_army, own = state.sides[2], enemies = state.sides[1],
-            vector = vec, rows = shared_rows, cco = cco,
+            vector = vec, rows = shared_rows, cco = cco, skirmish = config.skirmish,
             emit = function(event, fields) emit((event:gsub('^nn_', 'en_')), fields) end,
             now_ms = function() return bm:time_elapsed_ms() - started_ms end,
             model_ms = function() return bm:time_elapsed_ms() end,
@@ -309,7 +315,7 @@ function M.main(bm, config, globals)
 
     local function net_start()
         state.net = bridge.start({army = state.own_army, own = state.sides[1], enemies = state.sides[2],
-            vector = vec, rows = shared_rows, emit = emit, cco = cco,
+            vector = vec, rows = shared_rows, emit = emit, cco = cco, skirmish = config.skirmish,
             now_ms = function() return bm:time_elapsed_ms() - started_ms end,
             model_ms = function() return bm:time_elapsed_ms() end,
             meta = {batch = state.batch, factions = config.factions, decide_ms = config.decide_ms,
@@ -477,6 +483,7 @@ function M.main(bm, config, globals)
         assert(M.OWN_AI[config.own_ai], 'own_ai must be attack, defend, hold, net, human or scripted')
         assert(config.enemy_ai == nil or M.ENEMY_AI[config.enemy_ai], 'enemy_ai must be absent, scripted or companion')
         assert(config.enemy_ai ~= 'companion' or config.own_ai == 'net', 'enemy_ai companion needs own_ai net')
+        assert(config.skirmish == nil or M.SKIRMISH[config.skirmish], 'skirmish must be absent, game or off')
         local sides = battle.read_sides(bm)
         state.own_alliance, state.own_army, state.enemy_army = sides[1].alliance, sides[1].army, sides[2].army
         state.alliances = {sides[1].alliance, sides[2].alliance}
@@ -489,7 +496,8 @@ function M.main(bm, config, globals)
             for _, spec in ipairs(config.units[key]) do
                 local u = battle.find_by_name(sides[side], spec.script_name)
                 assert(u, 'scenario unit missing: ' .. spec.script_name)
-                local it = {name = spec.script_name, slot = spec.slot, key = spec.key, unit = u, side = side}
+                local it = {name = spec.script_name, slot = spec.slot, key = spec.key, unit = u, side = side,
+                    can_sk = try(function() return u:can_use_behaviour('skirmish') end) == true}
                 state.sides[side][#state.sides[side] + 1] = it
                 state.by_uid[tostring(u:unique_ui_id())] = it
                 state.all_units[#state.all_units + 1] = u
