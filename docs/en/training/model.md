@@ -384,6 +384,9 @@ flowchart TB
   exactly the same. Check: itK3 in the new code against the old code (HEAD before the change) on 80 decisions of 16
   battles - every logit, the memory and the eyes match exactly (difference 0). Adam's state from such a checkpoint
   does not fit (other weights): training starts a fresh Adam and says so.
+- **Head reset.** The layers of single heads (the sector, the cell, the hold and others) can start again when a
+  checkpoint is loaded, the rest untouched (`run.py --reset-heads`), and every head can have a spread floor of its
+  own (`--head-entropy`): [per-head spread](training.md#per-head-spread).
 - **Eyes** (`tools/nn/model/eyes.py`, field `eyes`, on in the `v2` preset). Auxiliary heads after the memory, before
   the last attention block and the decision heads; they learn from the simulator's truth with a loss of their own
   (squared error, the 4 heads summed × weight 5, `--eyes-weight`): an own unit — the share of its health it will lose

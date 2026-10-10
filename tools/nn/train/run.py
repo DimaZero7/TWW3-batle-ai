@@ -36,7 +36,7 @@ from tools.nn.model import critic as model_critic
 from tools.nn.model import policy as model_policy
 from tools.nn.train import cadence as cad
 from tools.nn.train import checkpoint, drills, evaluate, league, matchups, ppo, randomise, reward, rollout, scenes
-from tools.nn.train import kitesp, teach_auto
+from tools.nn.train import head_entropy, head_reset, kitesp, teach_auto
 from tools.nn.train.drills import source as drill_source
 from tools.nn.train.drills import teach as drill_teach
 
@@ -232,6 +232,14 @@ def train(args, every=None, teacher=None, normal=None):
         args.preset = checkpoint.read(args.init).get("preset", "small") if args.init else "small"
     actor, critic = networks(args.preset, device, args.init, args.critic_init)
     actor = with_grid(actor, args.grid)
+    # --reset-heads: those heads start again as a new network's, the rest as loaded (head_reset.py); the KL anchors'
+    # frozen networks below get the same fresh heads, Adam's moments of them are dropped
+    reset_params = head_reset.reset(actor, head_reset.parse(args.reset_heads), args.seed)
+    if reset_params:
+        print(f"--reset-heads {args.reset_heads}: {len(reset_params)} tensors start afresh "
+              f"({sum(dict(actor.named_parameters())[n].numel() for n in reset_params)} weights): "
+              + ", ".join(sorted({n.split('.')[1] for n in reset_params})), flush=True)
+    head_targets = head_entropy.parse(args.head_entropy)
     reference = None
     if args.anchor:
         # the grid's reference too (its fresh head is never compared: the anchor's KL is on the kind and target),
@@ -239,6 +247,7 @@ def train(args, every=None, teacher=None, normal=None):
         reference = with_grid(checkpoint.load_policy(args.reference or args.init, device), args.grid)
         for p in reference.parameters():
             p.requires_grad_(False)
+        head_reset.copy(actor, reference, set(reset_params))
     # The network the run started from, frozen: the distance from the start (ppo.distance, start_kl in
     # the log) next to the rating, whatever the reference does (--anchor-roll moves it).
     start = None
@@ -246,6 +255,7 @@ def train(args, every=None, teacher=None, normal=None):
         start = checkpoint.load_policy(args.init, device)
         for p in start.parameters():
             p.requires_grad_(False)
+        head_reset.copy(actor, start, set(reset_params))
     cadence = cad.of_args(args)
     # gamma and lambda per decision: the --gamma given per 0.5 s (and the default lambda) over the decision's
     # seconds, so the horizon in seconds stays whatever the cadence (cadence.py)
@@ -267,6 +277,7 @@ def train(args, every=None, teacher=None, normal=None):
               + (f" (no --critic-warmup {args.critic_warmup}: the critic and Adam go on)" if args.critic_warmup else ""),
               flush=True)
     carried = carried or {}
+    head_reset.forget(opt, actor, reset_params)
     chain_s0, chain_u0 = float(carried.get("chain_s", 0.0)), int(carried.get("chain_updates", 0))
     decay_s0 = float(carried.get("entropy_decay_s", 0.0))
     observe = observation(args, actor, start, cfg, int(carried.get("observe_updates", 0)), device)
@@ -452,12 +463,18 @@ def train(args, every=None, teacher=None, normal=None):
     next_mark = every[0] if every else None
     if "floor_w" in carried and carried["floor_w"] is not None and args.entropy_target:
         floor_w = float(carried["floor_w"])      # the entropy floor's weight goes on where it was
+    # the per-head floors' weights (--head-entropy): from the start weight, or where the chain left them
+    head_w = {h: float((carried.get("head_w") or {}).get(h, args.head_entropy_start)) for h in head_targets}
+    if head_targets:
+        print("per-head entropy floors (share of the maximum): " + ", ".join(f"{h} {t:g}" for h, t in head_targets.items())
+              + f"; weights from {head_w} within [{args.head_entropy_start:g}, {args.head_entropy_max:g}] "
+              f"x {args.entropy_rate:g} an update", flush=True)
 
     def blob():
         """What --init needs to go on seamlessly from a checkpoint (checkpoint.py "train")."""
         trained = time.time() - t0 - paused
         return {"optim": opt.state_dict(),
-                "state": {"floor_w": floor_w, "entropy_decay_s": decay_s0 + (trained if args.entropy_decay else 0.0),
+                "state": {"floor_w": floor_w, "head_w": head_w, "entropy_decay_s": decay_s0 + (trained if args.entropy_decay else 0.0),
                           "chain_s": chain_s0 + trained, "chain_updates": chain_u0 + update,
                           "observe_updates": observe.updates if observe is not None
                           else int(carried.get("observe_updates", 0))}}
@@ -493,7 +510,7 @@ def train(args, every=None, teacher=None, normal=None):
         scheduled = schedule(args.entropy, entropy_end, decay_share(args.entropy_decay, decay_s, done_share))
         floor_w = scheduled if floor_w is None else max(scheduled, floor_w)
         u_cfg = dataclasses.replace(step_cfg, entropy=floor_w if args.entropy_target else scheduled,
-                                    anchor=schedule(args.anchor, anchor_end, done_share))
+                                    anchor=schedule(args.anchor, anchor_end, done_share), heads=tuple(head_w.items()))
         trains = update >= warmup
         teach_w = (teacher.weights() if teacher is not None
                    else drill_teach.weights(teach0, args.drill_teach_minutes, (time.time() - t0 - paused) / 60))
@@ -507,6 +524,10 @@ def train(args, every=None, teacher=None, normal=None):
         if args.entropy_target and trains:
             floor_w = ppo.entropy_weight(floor_w, st["entropy"], args.entropy_target, scheduled,
                                          max(scheduled, args.entropy_max), args.entropy_rate)
+        if head_targets and trains:
+            head_w = head_entropy.next_weights(head_w, {h: st.get(f"head_share_{h}") for h in head_targets},
+                                               head_targets, args.head_entropy_start, args.head_entropy_max,
+                                               args.entropy_rate)
         del batch
         update += 1
         if args.gpu_duty < 1.0:
@@ -563,7 +584,7 @@ def train(args, every=None, teacher=None, normal=None):
                "collect_s": round(t_c - t_u, 2), "update_s": round(time.time() - t_c, 2),
                **{k: round(v, 4) for k, v in st.items()},
                "entropy_weight": round(u_cfg.entropy, 5), "anchor_weight": round(u_cfg.anchor, 4),
-               "anchor_rolls": rolls,
+               "anchor_rolls": rolls, "head_entropy_weight": {h: round(w, 5) for h, w in dict(u_cfg.heads).items()},
                "lord_dead_own": round(lords["own"], 3), "lord_dead_enemy": round(lords["enemy"], 3),
                "abilities_per_battle": round(env.abilities(), 2), "nan_fixed": env.nan_fixed(),
                "switches_per_minute": round(lords["switches_per_minute"], 2),
@@ -593,6 +614,12 @@ def train(args, every=None, teacher=None, normal=None):
                   f"adv std attack {st.get('adv_std_attack', 0):.3f} defend {st.get('adv_std_defend', 0):.3f}; "
                   "reward a minute " + "; ".join(f"{r} " + " ".join(f"{k} {v:+.3f}" for k, v in p.items())
                                                  for r, p in row["reward_parts"].items()), flush=True)
+            if any(k.startswith("head_share_") for k in st):
+                print("      heads' spread (share of the maximum / nats) " + " ".join(
+                    f"{h} {st['head_share_' + h]:.2f}/{st['head_ent_' + h]:.2f}" for h in head_entropy.HEADS
+                    if "head_share_" + h in st)
+                      + ("; floors' weights " + " ".join(f"{h} {w:.4f}" for h, w in u_cfg.heads) if u_cfg.heads else ""),
+                      flush=True)
             if row["nan_fixed"] or st.get("skipped"):
                 print(f"      non-finite: logits taken as masked {row['nan_fixed']:.0f}, update steps skipped "
                       f"{st.get('skipped', 0):.0f}", flush=True)
@@ -750,7 +777,19 @@ def parser():
                     help="> 0: an entropy floor - the weight goes up x --entropy-rate every update while the kind's "
                          "entropy is below this, back down to the schedule above it (0: the schedule only)")
     ap.add_argument("--entropy-max", type=float, default=0.1, help="the floor's weight at most this")
-    ap.add_argument("--entropy-rate", type=float, default=1.25, help="the floor's factor per update")
+    ap.add_argument("--entropy-rate", type=float, default=1.25, help="the floor's factor per update (also the "
+                                                                      "per-head floors')")
+    ap.add_argument("--head-entropy", default="",
+                    help="v2: a floor of its own for each named head, as the share of its maximum entropy (0: one "
+                         "choice, 1: all alike; head_entropy.py), e.g. 'sector=0.4,cell=0.5,hold=0.5'; heads: "
+                         + ", ".join(head_entropy.HEADS))
+    ap.add_argument("--head-entropy-start", type=float, default=0.003,
+                    help="the per-head floors' starting and lowest weight")
+    ap.add_argument("--head-entropy-max", type=float, default=0.05, help="... and highest")
+    ap.add_argument("--reset-heads", default="",
+                    help="v2: these heads' layers start again as a new network's when --init is loaded, the rest "
+                         "kept (head_reset.py; against the primacy bias), e.g. 'sector,cell,hold'; heads: "
+                         + ", ".join(head_reset.PARTS) + ". Once: give it to one step of a chain, not to every step")
     ap.add_argument("--order-cost", type=float, default=reward.Weights.order_change)
     ap.add_argument("--eyes-weight", type=float, default=ppo.PPOConfig.eyes,
                     help="weight of the eyes' loss (v2 with eyes: auxiliary heads on the simulator's truth)")

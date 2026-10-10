@@ -35,7 +35,7 @@ The first steps compile for 1–3 minutes (seconds once a run of the same shapes
 | battles | `--battles` (1024 at once), `--steps` (64 decisions per update), `--max-units` (19 units a side), `--small share:units` (that share of every bank with at most `units` a side), `--bank` (2048 ready battles), `--bank-refresh` (5 min), `--limit` (3600 s) |
 | cadence | `--decide-s` (1.0 s of battle between decisions), `--order-latency` (0.36 s): [decisions](#decisions) |
 | PPO | `--lr` (1e-4), `--gamma` (0.9997 per 0.5 s), `--epochs` (1), `--minibatch` (4096 decisions), `--adv-norm` (`batch` or `role`), `--critic-warmup` (0 updates that train the critic alone), `--critic-init` (the critic from another checkpoint), `--no-resume` (do not take Adam's state from `--init`) |
-| exploration | `--entropy` (0.01) and `--entropy-end` (linear over the run), `--entropy-decay` (0 min: off; else over that many minutes of training over the whole chain), `--entropy-target` (0: off), `--entropy-max` (0.1), `--entropy-rate` (1.25) |
+| exploration | `--entropy` (0.01) and `--entropy-end` (linear over the run), `--entropy-decay` (0 min: off; else over that many minutes of training over the whole chain), `--entropy-target` (0: off), `--entropy-max` (0.1), `--entropy-rate` (1.25); per head in v2: `--head-entropy` (off; `head=share`), `--head-entropy-start` (0.003), `--head-entropy-max` (0.05), `--reset-heads` (off; once): [per-head spread](#per-head-spread) |
 | leash | `--anchor` (0: KL weight to the reference) and `--anchor-end`, `--reference` (default `--init`), `--anchor-roll` (0 s: seconds of training between renewals of the reference), `--anchor-ema` (0 s: instead, the reference follows the actor with this half-life) |
 | reward | `--gold` (1.0), `--rout-share` (0.5), `--lord` (0.3), `--lord-rout` (0), `--idle` (2e-4), `--idle-tau` (150 s), `--idle-pause` (30 s), `--idle-step` (0.5), `--idle-cap` (20), `--idle-rate` (0), `--idle-window` (30 s), `--order-cost` (0.001), `--retarget` (0.003): [reward](#reward) |
 | opponents | `--mix` (json shares), `--pool` (8: past versions at most), `--pool-extra` (more checkpoints for the pool), `--pool-dir` (the pool's folder for a whole night), `--pool-eta` (0.01), `--past-slots` (3), `--past-every` (6 updates): [past versions](#past-versions), `--eval-past`, `--eval-generated` (512) |
@@ -491,7 +491,7 @@ side share the side's advantage; the critic sees the whole field (and is never s
 | learning rate | 1e-4 (`test5` and the chain: 1.5e-4), Adam (eps 1e-5); in a widened network lr / width on the weights that read the copied stream (`run.optimizer`) | [a widened network](#training-a-widened-network) |
 | epochs, minibatch | 1, 4096 decisions of whole chunks (fewer for battles of more than 22 slots: `run.sized`); a widened network computes it in parts (`accum`) | the update costs more than the battles; the memory of a 16 GB card; [a widened network](#training-a-widened-network) |
 | stop at KL | 0.05 per unit | a guard against a too large step |
-| entropy | on the order kind only; `--entropy` → `--entropy-end` linearly (over the run; with `--entropy-decay M` over M minutes of training with the option on over the whole chain: the count is kept in the checkpoint, e.g. 0.01 → 0.003); with `--entropy-target` a floor: the weight × `--entropy-rate` every update while the kind's entropy is below the target, back down to the schedule above it, at most `--entropy-max` | a bonus on the move point's 128 bins would pay for moving |
+| entropy | on the order kind only; `--entropy` → `--entropy-end` linearly (over the run; with `--entropy-decay M` over M minutes of training with the option on over the whole chain: the count is kept in the checkpoint, e.g. 0.01 → 0.003); with `--entropy-target` a floor: the weight × `--entropy-rate` every update while the kind's entropy is below the target, back down to the schedule above it, at most `--entropy-max`; in v2 the other heads have floors of their own (`--head-entropy`, [below](#per-head-spread)) | a bonus on the move point's 128 bins would pay for moving |
 | KL to a reference | `--anchor` → `--anchor-end` on the order kind and target; the reference is `--reference` (default `--init`); `--anchor-roll` S: every S seconds of training the reference becomes the current actor (`anchor_rolls` in the log) | a leash that bounds drift within a window, not over the whole run |
 | advantage normalisation | `batch`, or `role`: the attacking and defending rows apart | the attacker's advantage is 2–3 times as wide |
 | value loss, gradient norm | 0.5; actor and critic clipped apart, each to 0.5 | clipped together, a large critic gradient shrank the actor's step below Adam's eps: the actor did not train at all |
@@ -507,6 +507,60 @@ side share the side's advantage; the critic sees the whole field (and is never s
   to the network the run started from, on one minibatch of every update (`start_kl` in the log). A
   distance that grows while the rating rises means the search works; a flat rating with a stalled
   distance, a leash too short.
+
+### Per-head spread
+
+A head is one part of the order's choice (kind, target, sector, cell, hold, run). The entropy bonus used to be on the
+order kind only. The other v2 heads collapsed to one choice: in itV3 (the audit `build/net_audit`, the CPU run
+below) the share of the sector's spread 0.01–0.02, the cell's 0.00, the hold's 0.00–0.03, run 0.00, the target
+0.1–0.3. The network no longer tries other places, so neither PPO finds far withdrawals nor the imitation: 89 % of
+the game AI's move orders were "impossible" for it (probability < e^−30, the imitation's `nll` 25–32).
+
+- **The scale is the share of the maximum** (`tools/nn/train/head_entropy.py`): the head's entropy ÷ log(the choices
+  allowed in that row), averaged over the rows where the head is used. 0 — always one choice, 1 — every allowed
+  choice alike. A share s means ~n^s choices in play: the sector (up to 256 on the map) at 0.4 — ~9 sectors, the cell
+  (16) at 0.5 — ~4 cells, the hold (4) at 0.5 — ~2. One scale for heads of 2 to 256 choices; in nats every head and
+  every map would need its own number (sectors outside the map are masked).
+- **Rows.** The kind — the units that decide; the target — where an attack was chosen; the sector and the cell —
+  move / withdraw (their logits are under that kind); the hold — a new order (not keep); run — move / attack. Rows
+  with fewer than 2 allowed choices are left out.
+- **A floor per head** (`--head-entropy 'sector=0.4,cell=0.5,hold=0.5'`; names: kind, target, sector, cell, hold,
+  run). Every head with a target has its own weight in the loss (− weight × share): × `--entropy-rate` every update
+  while the share is below the target, ÷ above it, within [`--head-entropy-start` 0.003, `--head-entropy-max` 0.05].
+  The weights are kept in the checkpoint and go on along the chain. The kind's floor in nats (`--entropy-target`)
+  stays as it was.
+- **Log**: every head's share and nats (`head_share_<head>`, `head_ent_<head>`) in every `log.jsonl` row of a v2
+  run, with a floor or without; the floors' weights — `head_entropy_weight`; on the console — the `heads' spread`
+  line.
+- **Partial reset** (`--reset-heads sector,cell,hold`; `tools/nn/train/head_reset.py`). When `--init` is loaded,
+  the named heads' layers start again as a new network's (the same init: the sector prefers the near ones, the near
+  weight softplus 1), the rest — the trunk, the other heads, the critic — as it was. A remedy for the primacy bias
+  (Nikishin et al., 2022: a network over-fitted to its early experience gains from resetting its last layers, the
+  data kept). Layers: sector — `place_q`, `place_k`, `place_near`; cell — `fine`; hold — `commit`; target — `q`,
+  `k`, `target_pair`; kind — `kind`; run — `run`; cond — the shared condition `cond` (read by the sector, the cell,
+  the hold and run). With the reset the same fresh heads are copied into the leashes' frozen networks
+  (`--reference` and the start network the observation's KL uses), or the KL would pull towards the collapsed ones;
+  Adam's moments of those weights are dropped. The reset is **once**: give the option to one step of a chain, not to
+  every step.
+- **With the observation.** The imitation (`--observe-dir`) goes on as it was: the reset heads give other players'
+  orders a non-zero probability again. The observation's leash is a KL on the kind and the target only; resetting
+  the place does not touch it.
+
+A CPU run (itV3, 16 battles × 32 decisions, 12 updates, observation on 12 battles, `--reset-heads
+sector,cell,hold --head-entropy sector=0.4,cell=0.5,hold=0.5`, 5 min):
+
+| | itV3 as is | after the reset, update 1 | update 12 |
+|---|---:|---:|---:|
+| sector: share / nats | 0.01–0.02 / 0.07–0.10 | 0.71 / 3.94 | 0.72 / 4.01 |
+| cell | 0.00 / 0.00 | 0.95 / 2.62 | 0.99 / 2.73 |
+| hold | 0.00–0.03 / 0.00–0.05 | 0.86 / 1.20 | 0.84 / 1.17 |
+| kind (not reset) | 0.77–0.91 | 0.89 | 0.90 |
+| target (not reset) | 0.10–0.31 | 0.26 | 0.25 |
+| imitation error `nll` | 25–32 | 7.8 | 5.5–5.9 |
+
+After the reset all three heads are above their targets, so the floors stay at the lowest weight 0.003: they are
+there to keep the heads from collapsing again. Run (`run`) collapsed too (0.00) but was not reset: run or walk is a
+choice where certainty may be right.
 
 ## Learning by observation
 
@@ -1459,6 +1513,10 @@ without a label, a human with one), the point clipped to the edge, the reward, G
 `tests/tools/test_nn_observe_torch.py` (torch): a point's cell, the store (selection by the advantage, `window20`,
 padded units without labels, a chunk's memory), the loss (the set running move / withdraw, the gradient), a PPO
 step with the demonstrations and the weights' decay.
+`tests/tools/test_nn_head_spread.py` (torch): every head's spread (the share's scale, the rows where the head is
+used, the floors up / down), the head reset (collapsed heads wide again, the kind and the target the same, copied
+into the leashes, Adam forgets), a sector floor widens it in an update, `run.py` with the reset and the floors, the
+weights in the checkpoint.
 `tests/tools/test_nn_league_pool.py` (torch): a version drawn ∝ e^q, a new version with the highest q, a win lowers q
 by η / (N p), the pool goes on from `q.json`, a running battle keeps its slot's version, Adam's state into the
 checkpoint and back, a second part goes on with the pool, Adam and the entropy decay.

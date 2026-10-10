@@ -12,6 +12,9 @@
   a minute in 20 updates, before any battle had ended.
   With an entropy floor (run.py --entropy-target) the bonus's weight follows the kind's entropy
   (entropy_weight): up while it is below the target, back down to the scheduled weight above it.
+  The other v2 heads (target, sector, cell, hold, run) have floors of their own (cfg.heads, run.py --head-entropy,
+  head_entropy.py): each its weight x its entropy's share of the maximum, on the rows where it is used. Every head's
+  entropy is logged (head_share_<head>, head_ent_<head>) whether it has a floor or not.
 * GAE over the rollout; the value of the last state bootstraps; a finished battle cuts it.
 * The memory (GRU) is trained through time: a minibatch is a set of whole chunks (T decisions of
   some battles); the actor runs its memory through each chunk from the memory stored when the
@@ -32,6 +35,7 @@ import torch
 
 from tools.nn.model import eyes as meyes
 from tools.nn.model import heads as hd
+from tools.nn.train import head_entropy
 from tools.nn.train.drills import teach as drill_teach
 from tools.nn.train.rollout import full_obs
 
@@ -62,6 +66,7 @@ class PPOConfig:
     max_grad: float = 0.5
     anchor: float = 0.0        # weight of KL(policy || reference) on the order kind and target (0: off)
     eyes: float = EYES_WEIGHT  # weight of the eyes' loss (v2 with eyes, tools/nn/model/eyes.py; batch["eyes"])
+    heads: tuple = ()          # ((head, weight), ...): the per-head entropy floors' weights now (head_entropy.py)
     adv_norm: str = "batch"    # normalise the side's advantage over the minibatch ("batch") or over each
     #                            role's rows apart ("role": the attacker's, bigger with its idle cost, no
     #                            longer outweighs the defender's)
@@ -239,6 +244,8 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
             stats[f"eyes_{h}"] = 0.0
             stats[f"eyes_ref_{h}"] = 0.0
     teach_acc = {n: [0.0] * 7 for n in taught["names"]} if taught else {}
+    head_w = dict(cfg.heads)
+    head_acc = {}                                # head -> [share x rows, nats x rows, rows] (head_entropy.measure)
     for _ in range(cfg.epochs):
         order = torch.randperm(R, device=adv.device)
         for idx in order.split(max(1, cfg.minibatch // T)):
@@ -269,6 +276,17 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                     pl, clipped = policy_loss(lp, old, a, ctrl, cfg.clip)
                     free = deciding(obs).reshape(-1, ctrl.shape[-1])
                     entropy = masked_mean(kind_entropy(logits), free)
+                    spread = None
+                    if "sector" in logits:                       # v2: every head's spread (head_entropy.py)
+                        measured = head_entropy.measure(logits, act, free, ctrl,
+                                                        grad=tuple(h for h, w in head_w.items() if w))
+                        spread = head_entropy.bonus(measured, head_w)
+                        for h, (sh, nats, rows) in measured.items():
+                            acc = head_acc.setdefault(h, [0.0, 0.0, 0.0])
+                            r = float(rows)
+                            acc[0] += float(sh.detach()) * r
+                            acc[1] += float(nats) * r
+                            acc[2] += r
                     if reference is not None and cfg.anchor:
                         with torch.no_grad():
                             ref, _ = reference.sequence(obs, batch["h0"][pidx], batch["reset"][:, pidx], seq_act)
@@ -302,7 +320,7 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                             step[f"eyes_ref_{h}"] += float(ref) * share
                 vl = ((critic(cobs) - _rows(ret, pidx)) ** 2).mean()
                 policy_part = (pl - cfg.entropy * entropy + cfg.anchor * anchored + imitation + cfg.eyes * seen
-                               + (obs_anchor * observed if obs_on else 0.0))
+                               + (obs_anchor * observed if obs_on else 0.0) - (spread if spread is not None else 0.0))
                 loss = cfg.value * vl + (policy_part if train_policy else 0.0)
                 (loss * share).backward()
                 with torch.no_grad():
@@ -347,6 +365,10 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
         # minibatch: a ratio of two tiny numbers, not an error of the eyes)
         if f"eyes_ref_{h}" in out:
             out[f"eyes_ev_{h}"] = 1.0 - out[f"eyes_{h}"] / max(out.pop(f"eyes_ref_{h}"), 1e-9)
+    for h, (s_sum, n_sum, r) in head_acc.items():
+        if r:
+            out[f"head_share_{h}"] = s_sum / r
+            out[f"head_ent_{h}"] = n_sum / r
     if taught:
         out["teach"] = drill_teach.summary(teach_acc, teach, taught.get("shares"))
     if obs_on:
