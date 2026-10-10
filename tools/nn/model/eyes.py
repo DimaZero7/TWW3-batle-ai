@@ -1,5 +1,8 @@
-"""The eyes (v2 with ModelConfig.eyes): auxiliary heads that learn what is coming from the simulator's truth, and
-whose predictions go back into the network before its decision layers (a light concept bottleneck).
+"""The eyes (v2 with ModelConfig.eyes): auxiliary heads that learn what is coming from the simulator's truth. With
+ModelConfig.eyes_feedback (every v2 checkpoint saved before 10.10.2026) their predictions also go back into the network
+before its decision layers (a light concept bottleneck); without it (the v2 preset now, eyes_cut.py) they are an
+auxiliary task only: their loss shapes the shared trunk, the decision does not read them, and a decision (Actor.act)
+does not compute them at all.
 
 Heads (after the memory, before the last attention block and the order heads; policy.ActorV2._finish):
 * own10, own30 - every own unit: the share of its health it will lose in the next 10 s / 30 s (0..1, sigmoid);
@@ -7,10 +10,12 @@ Heads (after the memory, before the last attention block and the order heads; po
   share of our army's starting cost x THREAT_SCALE (softplus);
 * danger10 - every sector (sectors.py): our units standing in it now - the sum of the health shares they will lose in
   the next 10 s (softplus; from the sector token and the sums of the own and the enemy unit tokens standing there).
-Back into the network: each prediction through a small linear layer, added to its own unit's / enemy unit's token
-and to the sector token (the place head reads the sector tokens). The predictions are DETACHED there: the eyes learn
-only from the truth, so PPO cannot bend what they mean into a private code; the trunk under them gets both
-gradients (PPO through the decision, the eyes' loss through the heads).
+Back into the network (eyes_feedback only): each prediction through a small linear layer (own_in, threat_in,
+danger_in: FEEDBACK_PARAMS), added to its own unit's / enemy unit's token and to the sector token (the place head reads
+the sector tokens). The predictions are DETACHED there: the eyes learn only from the truth, so PPO cannot bend what
+they mean into a private code; the trunk under them gets both gradients (PPO through the decision, the eyes' loss
+through the heads). Why it went (10.10.2026): the decisions barely depended on it (build/net_audit) - the eyes are
+computed from the same tokens they would feed back into, so they added nothing the network did not have.
 
 Truth (tools/nn/train/rollout.py): at every decision the learner rows' unit health share (`hp`) and gold of enemy
 health destroyed so far (`gold_out`, the simulator's bookkeeping) before the decision's simulator steps and after
@@ -31,6 +36,8 @@ THREAT_CAP = 1.0      # the threat target at most this share of our army's cost 
 DANGER_CAP = 4.0      # a sector's danger fed back at most this (health shares; 4 units losing all)
 HEADS = ("own10", "own30", "threat30", "danger10")
 PRED_KEYS = ("eyes_own", "eyes_threat", "eyes_danger")
+# the layers that feed the predictions back (ModelConfig.eyes_feedback): what eyes_cut.py drops from a checkpoint
+FEEDBACK_PARAMS = ("eyes.own_in.", "eyes.threat_in.", "eyes.danger_in.")
 
 
 class Eyes(nn.Module):
@@ -43,17 +50,19 @@ class Eyes(nn.Module):
         self.threat = nn.Sequential(nn.Linear(d, d), nn.GELU(), nn.Linear(d, 1))
         self.unit_proj = nn.Linear(d, 16)
         self.danger = nn.Sequential(nn.Linear(ds + 32, ds), nn.GELU(), nn.Linear(ds, 1))
-        self.own_in = nn.Linear(2, d)
-        self.threat_in = nn.Linear(1, d)
-        self.danger_in = nn.Linear(1, ds)
+        self.feedback = cfg.eyes_feedback
+        if self.feedback:
+            self.own_in = nn.Linear(2, d)
+            self.threat_in = nn.Linear(1, d)
+            self.danger_in = nn.Linear(1, ds)
         # fresh, every prediction starts near 0 (sigmoid / softplus of -6: 0.0025), as almost every target is: at 0.5 /
         # 0.69 the first updates' error (~23, mostly the 256 sectors) took the eyes' gradient 1000 x the policy's
         for head in (self.own, self.threat, self.danger):
             nn.init.constant_(head[-1].bias, -6.0)
 
     def forward(self, x, s, obs_t):
-        """x [B, 1 + N, d], s [B, S, ds] -> (x, s with the predictions added, {eyes_own [B, N, 2], eyes_threat [B, N],
-        eyes_danger [B, S]})."""
+        """x [B, 1 + N, d], s [B, S, ds] -> (x, s with the predictions added (eyes_feedback; else as they came),
+        {eyes_own [B, N, 2], eyes_threat [B, N], eyes_danger [B, S]})."""
         u = self.norm(x[:, 1:])
         own_p = torch.sigmoid(self.own(u))
         threat_p = F.softplus(self.threat(u))[..., 0]
@@ -64,6 +73,9 @@ class Eyes(nn.Module):
         p = self.unit_proj(u)
         agg = torch.cat([torch.einsum("bns,bnk->bsk", one, p * own), torch.einsum("bns,bnk->bsk", one, p * enemy)], -1)
         danger_p = F.softplus(self.danger(torch.cat([s, agg], -1)))[..., 0]
+        seen = {"eyes_own": own_p, "eyes_threat": threat_p, "eyes_danger": danger_p}
+        if not self.feedback:
+            return x, s, seen
         # fed back bounded (and a stray non-finite value as 0): an extreme prediction cannot blow up the tokens
         own_b = torch.nan_to_num(own_p.detach(), nan=0.0).clamp(0, 1)
         threat_b = torch.nan_to_num(threat_p.detach(), nan=0.0, posinf=0.0).clamp(0, THREAT_CAP * THREAT_SCALE)
@@ -71,7 +83,7 @@ class Eyes(nn.Module):
         back = self.own_in(own_b) * own + self.threat_in(threat_b[..., None]) * enemy
         x = x + F.pad(back, (0, 0, 1, 0))
         s = s + self.danger_in(danger_b[..., None])
-        return x, s, {"eyes_own": own_p, "eyes_threat": threat_p, "eyes_danger": danger_p}
+        return x, s, seen
 
 
 def truth(u, rows):

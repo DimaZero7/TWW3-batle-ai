@@ -388,21 +388,39 @@ flowchart TB
   checkpoint is loaded, the rest untouched (`run.py --reset-heads`), and every head can have a spread floor of its
   own (`--head-entropy`): [per-head spread](training.md#per-head-spread).
 - **Eyes** (`tools/nn/model/eyes.py`, field `eyes`, on in the `v2` preset). Auxiliary heads after the memory, before
-  the last attention block and the decision heads; they learn from the simulator's truth with a loss of their own
+  the last attention block and the decision heads - an auxiliary task only: their loss trains the shared trunk, but
+  the decision does not read their predictions; they learn from the simulator's truth with a loss of their own
   (squared error, the 4 heads summed × weight 5, `--eyes-weight`): an own unit — the share of its health it will lose
   in 10 s and in 30 s; an enemy unit — its "threat": the gold of our health it will destroy in 30 s (share of our
   army's cost × 10); a sector — its "danger": the sum of the health shares our units standing in it will lose in
-  10 s (from the sector token and the sums of the own and enemy unit tokens in it). The predictions go back: through
-  a small linear layer, added to the own / enemy unit's token and to the sector token (the place head reads it). They
-  go back without a gradient (detach): the eyes learn only from the truth, PPO cannot turn them into a code of its
-  own; the shared trunk under them gets both gradients. The truth comes from the rollout: at every decision the
+  10 s (from the sector token and the sums of the own and enemy unit tokens in it). The sector map (strength and count
+  of own and visible enemies, routing, the map's edge) stays as it was: only the eyes' feedback is gone. As the
+  decision does not read the eyes, a decision (`Actor.act`: the rollout, the evaluation, the companion) does not
+  compute them at all; only the update with gradients does (`sequence` with gradients on), the frozen networks of the
+  KL skip them. **The feedback** (field `eyes_feedback`; off in the `v2` preset, on for the v2 checkpoints saved
+  before it: their config has no such field, the default is yes, so K3, V3, itW1 and older in the pool of opponents
+  and in the companion play exactly as before). With it the predictions go through a small linear layer (`own_in`,
+  `threat_in`, `danger_in`) and are added to the own / enemy unit's token and to the sector token, without a gradient
+  (detach). Removed because the network's audit (`build/net_audit`) showed the decisions barely depend on it: the eyes
+  are computed from the same tokens they are fed back into, so the network gets nothing new from it. The truth comes
+  from the rollout: at every decision the
   units' health and the simulator's `gold_out` counter (gold of enemy health destroyed; bookkeeping only, no effect
   on the battle) before and after its simulator steps; the target is the change over 10 / 30 decisions within the
   64-decision chunk; a battle that ended sooner — its end (nothing after); a window past the chunk's end — masked.
   Weight 5: on the first chunks against `nearest` the eyes' gradient at weight 1 was 0.05 of PPO's (0.004 vs 0.08),
   at 5 ~0.25. The log has each head's error and explained share (`eyes_<head>`, `eyes_ev_<head>`). Fresh heads start
   predicting about 0 (as almost every target is): from 0.5 the first error (~23, mostly the 256 sectors) gave the eyes
-  a gradient 1000 × PPO's. The targets are bounded (health shares 0–1, the threat at most our army's cost), so is what goes back into the network (threat ≤ 1 army cost, danger ≤ 4), a non-number as 0; a step with a non-finite gradient is skipped (`skipped` in the log); the order's parts are sampled by the Gumbel-max trick (argmax(logits / T + Gumbel noise): the same distribution, no softmax and no `torch.multinomial`): the sector head compiled whole (fused logsumexp and online softmax) handed `torch.multinomial` a row it failed on with a GPU assert (three runs within 8–40 min; uncompiled the same battles ran 50 min without a single non-number); the explained share is over the whole update (per minibatch it gave −270 where the targets were nearly all 0). The critic gets no eyes (it sees the whole field anyway). Picture: `build/v2/eyes_png.py`.
+  a gradient 1000 × PPO's. The targets are bounded (health shares 0–1, the threat at most our army's cost), so is what goes back into the network (in the old networks: threat ≤ 1 army cost, danger ≤ 4), a non-number as 0; a step with a non-finite gradient is skipped (`skipped` in the log); the order's parts are sampled by the Gumbel-max trick (argmax(logits / T + Gumbel noise): the same distribution, no softmax and no `torch.multinomial`): the sector head compiled whole (fused logsumexp and online softmax) handed `torch.multinomial` a row it failed on with a GPU assert (three runs within 8–40 min; uncompiled the same battles ran 50 min without a single non-number); the explained share is over the whole update (per minibatch it gave −270 where the targets were nearly all 0). The critic gets no eyes (it sees the whole field anyway). Picture: `build/v2/eyes_png.py`.
+- **Surgery: cutting the eyes' feedback** (`tools/nn/model/eyes_cut.py`). A checkpoint with the feedback → one
+  without: the layers `own_in`, `threat_in`, `danger_in` dropped, `eyes_feedback` = no, everything else as it was -
+  the weights, the eye heads, the critic, the counters and Adam's state (the dropped weights' entries taken out, the
+  rest renumbered), so `run.py --init` goes on from such a file as from any `latest.pt`:
+  `bash tools/nn/dock.sh tools.nn.model.eyes_cut --src build/v2/itW1.pt --dst build/v2/itW1_cut.pt`.
+  A check follows (64 battles × 96 decisions against `ai_like`, CPU): both networks on the same observations and
+  actions, per head the KL, how much probability moved and how often the most likely choice changed. On itV3: the
+  order kind - KL 0.004, 3.1 % of the probability moved, the most likely choice changed in 12.6 % (near-equal
+  options); the target - KL 0.05, 5.0 %, 5.9 %; the sector - 0.007, 1.5 %, 0.2 %; the duration - 0.001, 0.3 %,
+  0.4 %; the cell, run, ability - ~0. The memory (GRU) comes before the eyes and does not change.
 - **Reward v2** (`run.py --reward v2`): win / loss + the gold trade + order change cost 0.006 (keep and a
   repeated order free); lord, idle and retarget 0.
 - **From scratch.** `--preset v2` without `--init` starts from `build/nn-train/random_v2.pt` (written if missing);
@@ -428,7 +446,11 @@ Speed (RTX 5070 Ti, 1024 battles, a decision a second; `build/v2/bench_v2.py`):
 v2 is ~8 % slower than `wide` (the goal: not more than 2 times). With the eyes (10 min of training): 3,920 battle seconds per second, collecting / update 5.0 / 11.9 s, peak 9.9 GB — ~9 % slower again; the eye heads' explained share went from −0.1 to 0.49–0.68 in 10 min. Fewer battles finish because an untrained
 network's battles last longer, not because of the speed. The pair features and the commitment's two new events (CPU, 6 threads,
 `build/netv3/bench.py`, the mean of three runs, spread ~±8 %): a decision of 256 rows of 19 v 19 - 484 → 532 ms
-(+10 %), forward and backward over 8 × 32 decisions - 1,274 → 1,366 ms (+7 %); not measured on the GPU.
+(+10 %), forward and backward over 8 × 32 decisions - 1,274 → 1,366 ms (+7 %); not measured on the GPU. Without the
+eyes' feedback (itV3 against the cut one, CPU, 6 threads, three runs): a decision of 256 rows - 10–13 % faster (no eyes
+at a decision), forward and backward over 8 × 32 - 1–4 % (the eyes stay in the update: their loss trains the network).
+The earlier ~9 % "cost of the eyes" was for the eyes as a whole, so the training as a whole speeds up less - by about
+the decision's share of a step's time.
 
 **Tried and rejected.** v2's minibatch in 2 parts without recomputing the sector branch: a 12.5 GB peak of 16, the
 card spilled into shared memory, an update 10 s → 157 s. Recomputed in 2 parts: 11.9 GB (at the edge, like

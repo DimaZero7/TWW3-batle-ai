@@ -27,7 +27,11 @@ class ModelConfig:
     sector_d: int = 64       # ... the sector tokens' width
     sector_heads: int = 2    # ... heads of the units -> sectors attention (head width sector_d / sector_heads)
     sector_at: int = 1       # ... it comes after this many of the units' attention blocks
-    eyes: bool = False       # v2: the eyes, auxiliary heads on the simulator's truth fed back into the network (eyes.py)
+    eyes: bool = False       # v2: the eyes, auxiliary heads on the simulator's truth (eyes.py)
+    eyes_feedback: bool = True  # ... their predictions also go back into the network (into the unit and sector
+    #                          tokens). True: what every v2 checkpoint saved before this field (its config has no
+    #                          `eyes_feedback`) did, so it loads and computes what it did; the v2 preset and
+    #                          eyes_cut.py's networks: False (the eyes only learn, as an auxiliary task)
     pairs: bool = True       # v2: the pair features (reach, closing speed, bearing: pairs.py) in the units' attention
     #                          bias and the target pointer; their weights start at 0, so a v2 checkpoint saved before
     #                          them (its config has no `pairs`: True) loads and computes what it did
@@ -48,8 +52,8 @@ SMALL = ModelConfig()
 WIDE = ModelConfig(d=256, heads=8, pointer=128, critic_d=256, critic_heads=8)
 TARGET = ModelConfig(d=512, layers=4, heads=8, pointer=128, critic_d=512, critic_layers=6, critic_heads=8)
 # v2 (08.10.2026): wide's base (unit tokens by passport, attention, a GRU per token) + 16 x 16 map sectors of 100 m
-# + the eyes
-V2 = ModelConfig(d=256, heads=8, pointer=128, critic_d=256, critic_heads=8, sectors=16, eyes=True)
+# + the eyes (10.10.2026: as an auxiliary task only, their predictions no longer fed back: eyes_cut.py)
+V2 = ModelConfig(d=256, heads=8, pointer=128, critic_d=256, critic_heads=8, sectors=16, eyes=True, eyes_feedback=False)
 PRESETS = {"small": SMALL, "wide": WIDE, "target": TARGET, "v2": V2}
 
 

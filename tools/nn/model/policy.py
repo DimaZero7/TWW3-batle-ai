@@ -128,8 +128,11 @@ class Actor(nn.Module):
 
 class ActorV2(Actor):
     """v2 (module doc): encoder -> blocks with the units -> sectors attention after cfg.sector_at of them -> GRU per
-    token -> the eyes (cfg.eyes; their predictions added to the tokens) -> the last block -> the chained heads. The
-    units' attention bias and the target pointer also read the pair features (cfg.pairs, pairs.py)."""
+    token -> the eyes (cfg.eyes; with cfg.eyes_feedback their predictions added to the tokens) -> the last block -> the
+    chained heads. The units' attention bias and the target pointer also read the pair features (cfg.pairs, pairs.py).
+    Eyes without the feedback do not change the decision: they are computed only when asked (`eyes`: act() never by
+    default, sequence() when gradients are on - the update; its frozen KL references and the critic's warm-up skip
+    them)."""
 
     def __init__(self, cfg):
         from tools.nn.model import chain, sectors
@@ -191,10 +194,11 @@ class ActorV2(Actor):
             return checkpoint(run, x, f, use_reentrant=False)
         return run(x, f)
 
-    def _finish(self, x, pack, obs_t, action, greedy, temperature, abilities):
+    def _finish(self, x, pack, obs_t, action, greedy, temperature, abilities, eyes=True):
         bias, s, cells_in, pf = pack
         seen = None
-        if self.cfg.eyes:                    # the eyes (eyes.py): predicted, then added to the tokens
+        # the eyes (eyes.py): predicted, then (eyes_feedback) added to the tokens; without the feedback only if asked
+        if self.cfg.eyes and (self.cfg.eyes_feedback or eyes):
             x, s, seen = self.eyes(x, s, obs_t)
         for block in self.blocks[self._split():]:
             x = block(x, bias)
@@ -203,12 +207,14 @@ class ActorV2(Actor):
             logits.update(seen)
         return logits, a
 
-    def act(self, obs_t, h=None, greedy=False, temperature=1.0, abilities=True, action=None):
+    def act(self, obs_t, h=None, greedy=False, temperature=1.0, abilities=True, action=None, eyes=False):
+        """One decision -> (logits, sampled Action, new memory). eyes: also the eyes' predictions (logits "eyes_*")
+        when they are not fed back (with the feedback they always are: the decision reads them)."""
         x, pack = self.encode(obs_t)
         h = self.initial(obs_t) if h is None else h
         if self.memory is not None:
             x, h = self.memory(x, h, self.keep(obs_t))
-        logits, a = self._finish(x, pack, obs_t, action, greedy, temperature, abilities)
+        logits, a = self._finish(x, pack, obs_t, action, greedy, temperature, abilities, eyes)
         return logits, a, h
 
     def forward(self, obs_t, h=None, action=None):
@@ -216,8 +222,9 @@ class ActorV2(Actor):
         logits, _, h = self.act(obs_t, h, action=action)
         return logits, h
 
-    def sequence(self, obs_seq, h0, reset, action=None):
-        """As Actor.sequence; the logits under the actions taken (action [T, B, ...]; None: sampled)."""
+    def sequence(self, obs_seq, h0, reset, action=None, eyes=None):
+        """As Actor.sequence; the logits under the actions taken (action [T, B, ...]; None: sampled). eyes: also the
+        eyes' predictions when they are not fed back (None: when gradients are on, i.e. the update that trains them)."""
         T, B = obs_seq["own"].shape[:2]
         flat = {k: v.reshape(T * B, *v.shape[2:]) for k, v in obs_seq.items()}
         x, pack = self.encode(flat)
@@ -228,7 +235,8 @@ class ActorV2(Actor):
         if action is not None:
             action = hd.Action(**{f: getattr(action, f).reshape(T * B, *getattr(action, f).shape[2:])
                                   for f in action.parts()})
-        logits, _ = self._finish(x, pack, flat, action, False, 1.0, True)
+        eyes = torch.is_grad_enabled() if eyes is None else eyes
+        logits, _ = self._finish(x, pack, flat, action, False, 1.0, True, eyes)
         return {k: v.reshape(T, B, *v.shape[1:]) for k, v in logits.items()}, h
 
 

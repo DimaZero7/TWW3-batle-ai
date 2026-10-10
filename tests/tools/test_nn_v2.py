@@ -349,7 +349,7 @@ def test_a_tiny_v2_training_step_trains_the_chain_and_the_commitment(monkeypatch
     for h in eyes.HEADS:
         assert np.isfinite(st[f"eyes_{h}"]) and f"eyes_ev_{h}" in st
     for part in ("heads.kind.", "heads.commit.", "heads.place_q.", "heads.fine.", "sector_enc.", "sector_att.",
-                 "commit_in.", "eyes.own.", "eyes.threat.", "eyes.danger.", "eyes.own_in.", "pair_bias.",
+                 "commit_in.", "eyes.own.", "eyes.threat.", "eyes.danger.", "eyes.unit_proj.", "pair_bias.",
                  "heads.target_pair."):
         assert any(n.startswith(part) for n in changed), part
     assert ppo.distance(actor, actor, batch, 6) == pytest.approx(0.0, abs=1e-6)
@@ -408,10 +408,14 @@ def test_the_eyes_targets_are_the_change_over_the_window_cut_at_the_battles_end_
     assert torch.allclose(tg["threat"][0, 0, 0], torch.tensor(1.0 / 2.0 * eyes.THREAT_SCALE))
 
 
+FEEDBACK = config.preset("v2", d=64, layers=2, heads=4, pointer=32, critic_d=64, critic_layers=2, critic_heads=4,
+                         sector_d=32, eyes_feedback=True)       # the eyes fed back (v2 checkpoints before 10.10.2026)
+
+
 def test_the_eyes_feed_back_detached_and_learn_only_from_their_loss():
     setup, state, obs = setup_obs()
     o = v2_obs(obs, setup)
-    net = model()
+    net = model(FEEDBACK)
     logits, a, _ = net.act(o)
     lp, _ = heads.log_prob(logits, a, o["ctrl"])
     net.zero_grad()
@@ -566,7 +570,7 @@ def test_the_eyes_targets_and_what_they_feed_back_are_bounded_and_finite():
     # an extreme prediction (the threat head's last layer pushed to +1e6) changes the tokens no more than the cap
     setup, state, obs = setup_obs()
     o = v2_obs(obs, setup)
-    net = model()
+    net = model(FEEDBACK)
     x = torch.randn(2, 1 + o["own"].shape[1], CFG.d)
     s = torch.randn(2, CFG.sectors ** 2, CFG.sector_d)
     with torch.no_grad():
@@ -807,3 +811,122 @@ def test_a_network_saved_before_the_pair_features_loads_and_computes_exactly_wha
     l_moved, _, _ = new.act(o, action=a)
     assert not torch.allclose(l_old["target"], l_moved["target"], atol=1e-3)
     assert not torch.allclose(l_old["kind"], l_moved["kind"], atol=1e-3)
+
+
+# --- the eyes without their feedback (eyes_feedback False) and eyes_cut.py ---
+
+from tools.nn.model import eyes_cut  # noqa: E402
+
+
+def test_new_v2_networks_have_no_eyes_feedback_and_an_older_config_keeps_it():
+    import dataclasses
+    assert config.V2.eyes and not config.V2.eyes_feedback
+    old = {k: v for k, v in dataclasses.asdict(config.V2).items() if k != "eyes_feedback"}   # saved before the field
+    assert checkpoint.config_of({"config": old}).eyes_feedback
+    assert not any(n.startswith(eyes.FEEDBACK_PARAMS) for n, _ in model().named_parameters())
+    assert any(n.startswith(eyes.FEEDBACK_PARAMS) for n, _ in model(FEEDBACK).named_parameters())
+
+
+def test_without_the_feedback_the_eyes_do_not_change_the_decision_and_are_computed_only_when_asked():
+    setup, state, obs = setup_obs()
+    o = v2_obs(obs, setup)
+    net = model()
+    torch.manual_seed(1)
+    plain, a, h = net.act(o)
+    torch.manual_seed(1)
+    seen, a2, h2 = net.act(o, eyes=True)
+    assert not any(k.startswith("eyes_") for k in plain) and set(eyes.PRED_KEYS) <= set(seen)
+    for k in plain:
+        assert torch.equal(plain[k], seen[k]), k
+    assert torch.equal(h, h2) and torch.equal(a.kind, a2.kind)
+    seq = {k: v[None] for k, v in o.items()}
+    act = heads.Action(**{f: getattr(a, f)[None] for f in a.parts()})
+    reset = torch.zeros((1, o["own"].shape[0]), dtype=torch.bool)
+    lg, _ = net.sequence(seq, None, reset, act)                      # gradients on: the update trains the eyes
+    assert set(eyes.PRED_KEYS) <= set(lg)
+    with torch.no_grad():                                            # a frozen reference: not needed
+        lg0, _ = net.sequence(seq, None, reset, act)
+    assert not any(k.startswith("eyes_") for k in lg0)
+    assert torch.allclose(lg["kind"], lg0["kind"])
+
+
+def test_an_older_checkpoint_with_the_feedback_loads_and_computes_what_it_did(tmp_path):
+    import dataclasses
+    setup, state, obs = setup_obs()
+    o = v2_obs(obs, setup)
+    net = model(FEEDBACK)
+    data_cfg = {k: v for k, v in dataclasses.asdict(FEEDBACK).items() if k != "eyes_feedback"}
+    torch.save({"format": checkpoint.FORMAT, "config": data_cfg, "actor": net.state_dict()}, tmp_path / "old.pt")
+    back = checkpoint.load_policy(tmp_path / "old.pt")
+    assert back.cfg.eyes_feedback
+    with torch.no_grad():
+        want, _, _ = net.act(o, greedy=True)
+        got, _, _ = back.act(o, greedy=True)
+    for k in want:
+        assert torch.equal(want[k], got[k]), k
+
+
+def _old_checkpoint(path, seed=0):
+    """A v2 checkpoint whose eyes feed back, with Adam's state after one step (as run.py saves it)."""
+    torch.manual_seed(seed)
+    cfg = dataclasses_replace(TINY, eyes_feedback=True)
+    actor, crit = policy.Actor(cfg).eval(), mcritic.Critic(cfg).eval()
+    params = list(actor.parameters()) + list(crit.parameters())
+    opt = torch.optim.Adam(params, lr=1e-3, eps=1e-5)
+    sum((p ** 2).sum() for p in params).backward()
+    opt.step()
+    checkpoint.save(path, actor, crit, "v2", {"update": 7}, {"optim": opt.state_dict(), "state": {"chain_s": 60.0}})
+    return actor, crit, opt
+
+
+def dataclasses_replace(cfg, **changes):
+    import dataclasses
+    return dataclasses.replace(cfg, **changes)
+
+
+def test_eyes_cut_drops_the_feedback_keeps_every_other_weight_and_adams_moments(tmp_path):
+    from tools.nn.train import run
+    actor, crit, opt = _old_checkpoint(tmp_path / "old.pt")
+    data, out, note = eyes_cut.cut_file(tmp_path / "old.pt", tmp_path / "cut.pt")
+    cut = checkpoint.load_policy(tmp_path / "cut.pt")
+    assert not cut.cfg.eyes_feedback and cut.cfg == dataclasses_replace(actor.cfg, eyes_feedback=False)
+    old_state = actor.state_dict()
+    for k, v in cut.state_dict().items():
+        assert torch.equal(v, old_state[k]), k
+    dropped = [k for k in old_state if k.startswith(eyes.FEEDBACK_PARAMS)]
+    assert len(dropped) == 6 and not any(k in cut.state_dict() for k in dropped)
+    assert out["meta"]["update"] == 7 and out["train"]["state"]["chain_s"] == 60.0
+    # the same network with its feedback layers at zero computes exactly what the cut one does
+    zeroed = policy.Actor(actor.cfg).eval()
+    zeroed.load_state_dict({k: torch.zeros_like(v) if k in dropped else v for k, v in old_state.items()})
+    setup, state, obs = setup_obs()
+    o = v2_obs(obs, setup)
+    with torch.no_grad():
+        want, _, _ = zeroed.act(o, greedy=True)
+        got, _, _ = cut.act(o, greedy=True, eyes=True)
+    for k in want:
+        assert torch.allclose(want[k], got[k], atol=1e-6), k
+    # run.py --init goes on from the cut file: Adam's moments of every kept parameter are the old ones
+    c2 = checkpoint.load_critic(tmp_path / "cut.pt")
+    new_opt = run.optimizer(cut, c2, 1e-3)
+    assert run.resume(new_opt, tmp_path / "cut.pt") == {"chain_s": 60.0}, note
+    old_by_param = {n: opt.state[p] for n, p in list(actor.named_parameters())}
+    for n, p in cut.named_parameters():
+        assert torch.equal(new_opt.state[p]["exp_avg"], old_by_param[n]["exp_avg"]), n
+    for n, p in c2.named_parameters():
+        assert torch.equal(new_opt.state[p]["exp_avg_sq"], opt.state[dict(crit.named_parameters())[n]]["exp_avg_sq"])
+    with pytest.raises(ValueError):                                  # nothing left to cut
+        eyes_cut.cut(checkpoint.read(tmp_path / "cut.pt"))
+
+
+def test_eyes_cut_compare_is_zero_for_the_same_logits_and_counts_changed_choices():
+    setup, state, obs = setup_obs()
+    o = v2_obs(obs, setup)
+    with torch.no_grad():
+        lg, a, _ = model().act(o)
+    same = eyes_cut.compare(lg, lg, a, o)
+    assert all(r["flip"] == 0.0 for r in same.values()) and all(r["kl"] == 0.0 for h, r in same.items() if h != "any")
+    assert same["kind"]["rows"] > 0
+    other = dict(lg, kind=lg["kind"].flip(-1))
+    moved = eyes_cut.compare(lg, other, a, o)
+    assert moved["kind"]["kl"] > 0 and moved["any"]["flip"] > 0

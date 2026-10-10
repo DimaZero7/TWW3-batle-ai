@@ -154,7 +154,10 @@ to the end of the battle. Preset `v2`, 3.51 M weights, trained from scratch
   the target died or routs, own lord died, an enemy comes at the unit - within 40 m or 8 s of its run, the unit
   lost > 5 % of its health in 4 s).
 - **"Eyes":** auxiliary heads learn from the simulator's truth (own losses in 10 / 30 s, an enemy's
-  threat, a sector's danger); their predictions are fed back into the network.
+  threat, a sector's danger) - as an auxiliary task only: their loss trains the shared trunk, they do not go into
+  the decision and are not computed at a decision. The feedback (predictions back into the tokens) is removed: the
+  decisions barely depended on it; old checkpoints play with it as before, `eyes_cut.py` moves a checkpoint to the
+  new design.
 
 The old presets `small` / `wide` and their checkpoints still work but are not trained.
 
