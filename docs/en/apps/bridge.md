@@ -342,6 +342,15 @@ its lord used Foe-Seeker and Stand Your Ground 11 times, none refused; 714 moves
 enemy's answer waited 400 model ms (median) against the network's 300 - it is written after the network's.
 `ai_like` won.
 
+**The network on side 2 (against a human).** `tools.build human --enemy-ai net`: a human plays side 1 (no bridge
+for it), the second bridge as above with `script: "net"`. The companion (`--enemy-script net --no-own`) answers
+only it: `loop.Brain(side=2)` - the same code as our side's, with everything "own" for side 2 (the observation
+`observe(..., 2)`, the order in force and its point, the melee target, the exit window, the ability timers from
+this bridge's uses, orders and abilities for its own units only). The simulator's observation does not depend on
+the side (its own frame from where the armies stand) and the network learns both sides. The human's battle
+(`--free-speed`) does not hold the speed: decisions run on battle time, a pause stops them
+([a human against the network](../launch/run.md#a-human-against-the-network)).
+
 ## Skirmish mode
 
 In the game some shooters (archers, slingers, Night Runners...) have skirmish mode: the unit steps back from an

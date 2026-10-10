@@ -330,9 +330,9 @@ def engaged_targets(state, side, own=1, shape=None):
     return state
 
 
-def arrays(doc, names, slots=None):
+def arrays(doc, names, slots=None, own=1):
     """The state for tools/nn/model/observation.py: dict of arrays [1, N] (NaN: not read), t [1] in s;
-    with slots (Battle.slots) also the abilities' timers (ability_timers)."""
+    with slots (Battle.slots) also the abilities' timers (ability_timers; own: the side whose bridge wrote doc)."""
     N = len(names)
     index = {n: i for i, n in enumerate(names)}
     out = {k: np.full((1, N), np.nan) for k in FLOAT_FIELDS}
@@ -358,7 +358,7 @@ def arrays(doc, names, slots=None):
     out["men"] = np.nan_to_num(out["men"], nan=0.0)
     out["t"] = np.array([doc.get("t", 0) / 1000.0])
     if slots is not None:
-        out.update(ability_timers(doc, names, slots))
+        out.update(ability_timers(doc, names, slots, own=own))
     return out
 
 
@@ -581,12 +581,12 @@ def orders_list(names, side, kind, x, z, target, run, own=1):
     return out
 
 
-def ability_list(names, side, ability, slots):
-    """The network's ability choice [N] (slot, -1 none) -> [{unit, key}] for own units."""
+def ability_list(names, side, ability, slots, own=1):
+    """The network's ability choice [N] (slot, -1 none) -> [{unit, key}] for units of side `own`."""
     out = []
     for i, name in enumerate(names):
         k = int(ability[i])
-        if side[i] == 1 and 0 <= k < len(slots[i]) and slots[i][k]:
+        if side[i] == own and 0 <= k < len(slots[i]) and slots[i][k]:
             out.append({"unit": name, "key": slots[i][k]})
     return out
 

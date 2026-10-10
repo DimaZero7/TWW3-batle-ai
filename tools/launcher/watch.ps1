@@ -12,17 +12,21 @@
 #                                         game's AI: build --enemy-ai; with -NoBuild the build's own setting is used)
 #   ... -Skirmish off                    (the game's skirmish mode off for every unit the bridges command: build
 #                                         --skirmish; with -NoBuild the build's own setting is used)
+#   ... -Target human -NoBuild -EnemyAi net   (a human plays side 1, the network side 2: build human --enemy-ai net;
+#                                         the companion answers only the enemy's bridge, build/steps/human_vs_net.ps1)
+#   ... -Graphics human2k                 (a graphics preset for the run, launch.ps1 -Graphics; default: BAI_GRAPHICS)
 param(
-    [ValidateSet('nn-arena', 'lord-duel')][string]$Target = 'nn-arena',
+    [ValidateSet('nn-arena', 'lord-duel', 'human')][string]$Target = 'nn-arena',
     [ValidateSet(1, 3, 10, 20)][int]$Speed = 1,
     [string]$Arena = 'arena',
     [int]$DecideMs = 1000,
     [int]$TimeoutModelSeconds = 600,
     [string]$Checkpoint = '',
-    [ValidateSet('', 'game', 'ai_like', 'nearest', 'hold_shoot', 'hold')][string]$EnemyAi = '',
+    [ValidateSet('', 'game', 'net', 'ai_like', 'nearest', 'hold_shoot', 'hold')][string]$EnemyAi = '',
     [ValidateSet('', 'game', 'off')][string]$Skirmish = '',
     [switch]$Greedy,
     [int]$LingerSeconds = 30,
+    [ValidateSet('', 'ultra', 'low', 'lowigpu', 'human2k')][string]$Graphics = '',
     [switch]$NoBuild
 )
 $ErrorActionPreference = 'Stop'
@@ -57,7 +61,10 @@ if (-not $NoBuild) {
     if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
 }
 $manifest = Get-Content -LiteralPath (Join-Path $repo ('build\' + $Target + '\manifest.json')) -Raw | ConvertFrom-Json
-if ($manifest.config.own_ai -ne 'net') { throw "build/$Target is not a net build; run without -NoBuild" }
+$human = $Target -eq 'human'
+if ($human) {
+    if ($manifest.config.own_ai -ne 'human' -or $manifest.config.enemy_ai -ne 'companion') { throw "build/human has no enemy under the companion: python -m tools.build human --enemy-ai net ..." }
+} elseif ($manifest.config.own_ai -ne 'net') { throw "build/$Target is not a net build; run without -NoBuild" }
 $enemyScript = ''
 if ($manifest.config.enemy_ai -eq 'companion') { $enemyScript = [string]$manifest.config.enemy_script }
 if ($EnemyAi -and ($EnemyAi -ne 'game') -ne [bool]$enemyScript) { throw "build/$Target enemy ($($manifest.config.enemy_ai) $enemyScript) is not -EnemyAi $EnemyAi; build it again" }
@@ -72,6 +79,7 @@ $dockerArgs = "run --rm --init --name $container -v `"${repo}:/repo`" -v `"${gam
 if ($Checkpoint) { $dockerArgs += ' --checkpoint /repo/' + ($Checkpoint -replace '\\', '/') }
 if ($Greedy) { $dockerArgs += ' --greedy' }
 if ($enemyScript) { $dockerArgs += ' --enemy-script ' + $enemyScript }
+if ($human) { $dockerArgs += ' --no-own' }   # a human plays side 1: nobody answers its bridge
 $runs = Join-Path $repo ('build\' + $Target + '\runs')
 $before = Get-ChildItem -LiteralPath $runs -Directory -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 1
 $companion = Start-Process -FilePath docker -ArgumentList $dockerArgs -NoNewWindow -PassThru
@@ -80,7 +88,9 @@ $run = $null
 try {
     for ($i = 0; $i -lt 30 -and -not (docker ps --filter "name=^$container$" --format '{{.Names}}'); $i++) { Start-Sleep -Seconds 1 }
     if ($companion.HasExited) { throw 'The companion did not start' }
-    & (Join-Path $PSScriptRoot 'launch.ps1') -Target $Target -LingerSeconds $LingerSeconds
+    $graphicsArgs = @{}
+    if ($Graphics) { $graphicsArgs['Graphics'] = $Graphics }
+    & (Join-Path $PSScriptRoot 'launch.ps1') -Target $Target -LingerSeconds $LingerSeconds @graphicsArgs
     $code = $LASTEXITCODE
 } finally {
     $ErrorActionPreference = 'Continue'

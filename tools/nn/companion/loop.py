@@ -4,6 +4,8 @@
     snake-ai-trainer container with the game folder mounted at /game)
     python -m tools.nn.companion --game /game [--checkpoint build/nn-train/random.pt] [--greedy]
         [--enemy-script ai_like]   (also the enemy side: the script answers the enemy's bridge, script.py)
+        [--enemy-script net --no-own]   (a human plays side 1, tools.build human --enemy-ai net: the network
+                                         answers only the enemy's bridge, seeing the battle as side 2)
 
 One line per decision: move number, battle time, how long the network took, the orders.
 A new battle (a new batch in the state) starts the network's memory afresh (and a v2 network's commitment: its
@@ -29,10 +31,14 @@ SIDE = 1   # our side in the arena (src/entries/nn_arena.lua)
 
 
 class Brain:
-    """The network with its memory for the current battle."""
+    """The network with its memory for the current battle. side: the side it commands - 1 (ours, the bridge's
+    first instance) or 2 (the enemy's bridge: a human plays side 1, tools.build human --enemy-ai net). The
+    observation is that side's own (its frame, its units own, the other side's as it sees them), as the
+    simulator's self-play gives either side to the network."""
 
-    def __init__(self, actor, greedy=False, temperature=1.0):
-        self.actor, self.greedy, self.temperature = actor, greedy, temperature
+    def __init__(self, actor, greedy=False, temperature=1.0, side=SIDE):
+        assert side in (1, 2), side
+        self.actor, self.greedy, self.temperature, self.side = actor, greedy, temperature, side
         self.battle, self.memory, self.h = None, None, None
         self.given, self.points = {}, {}     # the orders in force, the order points (exchange.order_points)
         self.moved = None                    # the last positions and time (exchange.running_by_speed)
@@ -56,29 +62,30 @@ class Brain:
         if self.battle is None or self.battle.batch != doc["batch"]:
             self.battle, self.memory, self.h = exchange.battle(doc), None, None
             self.given, self.points, self.moved, self.commit = {}, {}, None, {}
-            self.mv, self.breakoff = None, exchange.Breakoff(self.battle.names, self.battle.side, self.battle.shape)
-        b = self.battle
-        state = exchange.arrays(doc, b.names, b.slots)
+            self.mv = None
+            self.breakoff = exchange.Breakoff(self.battle.names, self.battle.side, self.battle.shape, own=self.side)
+        b, me = self.battle, self.side
+        state = exchange.arrays(doc, b.names, b.slots, own=me)
         self.moved = exchange.running_by_speed(state, b.walk, self.moved)
-        exchange.engaged_targets(state, b.side, shape=b.shape)
+        exchange.engaged_targets(state, b.side, own=me, shape=b.shape)
         exchange.threat_flags(state, b.side, b.threat)
         exchange.effects_on(state, doc, b.names, b.setup)
         self.breakoff.update(state, self.given)          # the melee exit's window over: the order in force holds
         self.before = (doc["batch"], doc["move"], dict(self.given))
-        self.points = exchange.order_points(state, b.names, b.side, self.given, self.points)
+        self.points = exchange.order_points(state, b.names, b.side, self.given, self.points, own=me)
         self.mv = exchange.keep_still(self.memory, state, self.mv)
-        obs, self.memory = ob.observe(state, b.setup, SIDE, self.memory)
+        obs, self.memory = ob.observe(state, b.setup, me, self.memory)
         orders, self.h, _, _ = decide.act(self.actor, obs, b.setup, self.h, self.greedy, self.temperature,
                                           commit_state=self.commit, t=state["t"])
         cols = [getattr(orders, k)[0].cpu().numpy() for k in ("kind", "x", "z", "target", "run")]
-        out = exchange.orders_list(b.names, b.side, *cols)
+        out = exchange.orders_list(b.names, b.side, *cols, own=me)
         ctrl = np.asarray(obs.ctrl[0])
         ctrl_names = {n for n, c in zip(b.names, ctrl) if c}
         for o in out:
             if o["unit"] not in ctrl_names:
                 o["out"] = True     # dead, routing or shattered: the network's HOLD is no order (summary)
         exchange.remember_orders(self.given, out, ctrl_names)
-        uses = exchange.ability_list(b.names, b.side, orders.ability[0].cpu().numpy(), b.slots)
+        uses = exchange.ability_list(b.names, b.side, orders.ability[0].cpu().numpy(), b.slots, own=me)
         return out, (time.perf_counter() - t0) * 1000, uses
 
 
@@ -112,13 +119,23 @@ class Seat:
 def run(game, brain, log=None, poll_s=0.005, idle_poll_s=0.1, exit_on_done=False, idle_exit_s=0, out=print,
         enemy=None, enemy_log=None):
     """The loop. Returns when the battle is done (exit_on_done) or nothing new came for idle_exit_s.
-    enemy: a script.ScriptSide that answers the enemy's bridge too (exchange.ENEMY_STATE / ENEMY_ORDERS),
-    after our side's answer to the same move, seeing our orders in force before it (Brain.orders_before)."""
-    seats = [Seat(Path(game) / exchange.STATE, Path(game) / exchange.ORDERS, brain.decide, log)]
-    if enemy is not None:
-        seats.append(Seat(Path(game) / exchange.ENEMY_STATE, Path(game) / exchange.ENEMY_ORDERS,
-                          lambda doc: enemy.decide(doc, brain.orders_before(doc["batch"], doc["move"])),
+    brain: the network for our side (side 1), or None when nobody answers it (a human plays it).
+    enemy: who answers the enemy's bridge too (exchange.ENEMY_STATE / ENEMY_ORDERS), after our side's answer to
+    the same move: a script.ScriptSide, seeing our orders in force before it (Brain.orders_before), or a Brain
+    of side 2 (the network against a human). No clock of its own: a paused battle writes no state, which is only
+    a long wait (idle_exit_s 0: forever)."""
+    seats = []
+    if brain is not None:
+        seats.append(Seat(Path(game) / exchange.STATE, Path(game) / exchange.ORDERS, brain.decide, log))
+    if isinstance(enemy, Brain):
+        seats.append(Seat(Path(game) / exchange.ENEMY_STATE, Path(game) / exchange.ENEMY_ORDERS, enemy.decide,
                           enemy_log, "enemy "))
+    elif enemy is not None:
+        seats.append(Seat(Path(game) / exchange.ENEMY_STATE, Path(game) / exchange.ENEMY_ORDERS,
+                          lambda doc: enemy.decide(doc, brain.orders_before(doc["batch"], doc["move"])
+                                                   if brain is not None else {}),
+                          enemy_log, "enemy "))
+    assert seats, "nobody to answer"
     last_new, busy_until = time.monotonic(), 0.0
     while True:
         new = False
@@ -170,7 +187,10 @@ def main(argv=None):
     parser.add_argument("--exit-on-done", action="store_true", help="stop when the battle's last state comes")
     parser.add_argument("--idle-exit", type=float, default=0, help="stop after this many seconds without a state")
     parser.add_argument("--enemy-script", help="also command the enemy side by this simulator script "
-                                               "(tools/nn/train/opponents.py, e.g. ai_like): nn-arena --enemy-ai")
+                                               "(tools/nn/train/opponents.py, e.g. ai_like): nn-arena --enemy-ai; "
+                                               "'net': by the network itself (its own memory, side 2's view)")
+    parser.add_argument("--no-own", action="store_true",
+                        help="do not answer our side's bridge: a human plays side 1 (tools.build human --enemy-ai)")
     parser.add_argument("--enemy-log", help="append every enemy decision as a JSON line to this file "
                                             "(default: the --log file's name with _enemy)")
     args = parser.parse_args(argv)
@@ -182,16 +202,23 @@ def main(argv=None):
           f"{args.threads} threads; watching {Path(args.game) / exchange.STATE}")
     if args.log:
         Path(args.log).parent.mkdir(parents=True, exist_ok=True)
+    if args.no_own and not args.enemy_script:
+        parser.error("--no-own needs --enemy-script: somebody must be answered")
     enemy, enemy_log = None, None
-    if args.enemy_script:
+    if args.enemy_script == "net":
+        enemy = Brain(actor, args.greedy, args.temperature, side=2)
+    elif args.enemy_script:
         from tools.nn.companion.script import ScriptSide
         enemy = ScriptSide(args.enemy_script)
+    if args.enemy_script:
         enemy_log = args.enemy_log or (str(Path(args.log).with_name(Path(args.log).stem + "_enemy.jsonl"))
                                        if args.log else None)
-        print(f"companion: the enemy side by the script {args.enemy_script}; watching "
+        who = "the network" if args.enemy_script == "net" else f"the script {args.enemy_script}"
+        print(f"companion: the enemy side by {who}; watching "
               f"{Path(args.game) / exchange.ENEMY_STATE}")
     try:
-        run(args.game, Brain(actor, args.greedy, args.temperature), args.log, exit_on_done=args.exit_on_done,
+        run(args.game, None if args.no_own else Brain(actor, args.greedy, args.temperature), args.log,
+            exit_on_done=args.exit_on_done,
             idle_exit_s=args.idle_exit, enemy=enemy, enemy_log=enemy_log)
     except KeyboardInterrupt:
         pass

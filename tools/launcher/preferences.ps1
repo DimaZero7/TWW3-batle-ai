@@ -33,6 +33,15 @@ $GraphicsPresets.lowigpu = [ordered]@{}
 foreach ($k in $GraphicsPresets.low.Keys) { $GraphicsPresets.lowigpu[$k] = $GraphicsPresets.low[$k] }
 $GraphicsPresets.lowigpu['gfx_gpu'] = '""Intel(R) Iris(R) Xe Graphics""'
 $GraphicsPresets.lowigpu['gfx_gpu_select'] = 1
+# 'human2k': a battle the user plays on the integrated GPU (user 10.10, tools.build human --enemy-ai net,
+# build/steps/human_vs_net.ps1): every quality setting as 'low', but full screen at 2560x1440 with the 3D scene at full
+# resolution; the adapter as 'lowigpu'.
+$GraphicsPresets.human2k = [ordered]@{}
+foreach ($k in $GraphicsPresets.lowigpu.Keys) { $GraphicsPresets.human2k[$k] = $GraphicsPresets.lowigpu[$k] }
+$GraphicsPresets.human2k['x_res'] = 2560
+$GraphicsPresets.human2k['y_res'] = 1440
+$GraphicsPresets.human2k['gfx_fullscreen'] = 'true'
+$GraphicsPresets.human2k['gfx_resolution_scale'] = '1.0'
 
 function Set-PreferenceValues {
     param([Parameter(Mandatory = $true)][string]$Text, [Parameter(Mandatory = $true)]$Values)

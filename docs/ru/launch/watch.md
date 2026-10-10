@@ -40,9 +40,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/watch.ps1
 | `-TimeoutModelSeconds` | 600 | Предел боя, с времени боя |
 | `-LingerSeconds` | 30 | Сколько игра остаётся открытой после итога |
 | `-NoBuild` | нет | Взять сборку `net`, которая уже лежит в `build/nn-arena/` |
-| `-EnemyAi game\|ai_like` | `game` | Враг — ИИ игры или скрипт симулятора в помощнике (сборка `--enemy-ai`; с `-NoBuild` берётся из сборки, несовпадение — ошибка); журнал скрипта — `companion_enemy.jsonl` ([bridge](../apps/bridge.md#враг-под-скриптом-симулятора)) |
+| `-EnemyAi game\|ai_like\|net` | `game` | Враг — ИИ игры или скрипт симулятора в помощнике (сборка `--enemy-ai`; с `-NoBuild` берётся из сборки, несовпадение — ошибка); журнал скрипта — `companion_enemy.jsonl` ([bridge](../apps/bridge.md#враг-под-скриптом-симулятора)); `net` — сеть на стороне 2, только с `-Target human` |
 | `-Skirmish game\|off` | `game` | Режим застрельщиков под мостами (сборка `--skirmish`; с `-NoBuild` берётся из сборки) ([bridge](../apps/bridge.md#режим-застрельщиков)) |
-| `-Target nn-arena\|lord-duel` | `nn-arena` | Чью сборку и папку прогонов брать; `lord-duel` ([дуэль лордов](../apps/entries.md#lord_duel)) — только с `-NoBuild`, журнал помощника — `build/lord-duel/companion/` |
+| `-Target nn-arena\|lord-duel\|human` | `nn-arena` | Чью сборку и папку прогонов брать; `lord-duel` ([дуэль лордов](../apps/entries.md#lord_duel)) — только с `-NoBuild`, журнал помощника — `build/lord-duel/companion/`; `human` — [человек против сети](run.md#человек-против-сети): только с `-NoBuild`, помощник отвечает только стороне 2 (`--no-own`) |
+| `-Graphics` | `BAI_GRAPHICS` | Набор графики на этот запуск (`launch.ps1 -Graphics`: `ultra`, `low`, `lowigpu`, `human2k`) |
 
 Быстрая проверка: `-Speed 20 -LingerSeconds 0`.
 

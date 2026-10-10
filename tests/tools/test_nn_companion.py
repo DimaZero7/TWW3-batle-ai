@@ -165,6 +165,19 @@ def test_ability_choices_become_lines_and_back():
     assert doc["abilities"] == uses and doc["orders"]["own_lord"] == {"kind": "keep"}
     with pytest.raises(ValueError):
         exchange.orders_text("b-1", 3, orders, None, [{"unit": "own lord", "key": SYG}])
+    # the network on side 2 (a human plays side 1): its own units' choices only
+    assert exchange.ability_list(names, side, np.array([1, 0, 2]), slots, own=2) == [{"unit": "enemy_lord", "key": HTL}]
+
+
+def test_side_2s_timers_count_its_own_bridges_uses():
+    # the enemy's bridge (a human plays side 1): abilities_used are side 2's own uses
+    doc = state_doc()
+    doc["t"] = 20000
+    doc["abilities_used"] = {"enemy_lord": {SYG: 10000}}
+    b = exchange.battle(doc)
+    s = exchange.arrays(doc, b.names, b.slots, own=2)
+    assert s["ab1_on"][0, 2] == pytest.approx(8) and s["ab1_cd"][0, 2] == pytest.approx(98)
+    assert exchange.arrays(doc, b.names, b.slots)["ab1_cd"][0, 2] == 0       # read as side 1's: an enemy's, unknown
 
 
 def _game_points_doc():
@@ -329,6 +342,48 @@ class TestCompanion:
         brain.decide(dict(state_doc(), batch="b-2"))    # a new battle: memory starts afresh
         assert brain.battle.batch == "b-2"
 
+    def test_the_network_plays_side_2_with_side_2s_view(self):
+        # a human plays side 1 (tools.build human --enemy-ai net): the brain answers the enemy's bridge
+        from tools.nn.companion import loop, policy
+        brain = loop.Brain(policy.fresh(seed=1), side=2)
+        captured = {}
+        real = loop.ob.observe
+
+        def spy(state, setup, side, *a, **k):
+            captured["side"], captured["order_kind"] = side, state["order_kind"][0].copy()
+            return real(state, setup, side, *a, **k)
+        loop.ob.observe = spy
+        try:
+            orders, _, uses = brain.decide(state_doc())
+        finally:
+            loop.ob.observe = real
+        assert captured["side"] == 2 and captured["order_kind"].tolist() == [-1, -1, 0, 0]   # its own: hold
+        assert [o["unit"] for o in orders] == ["enemy_lord", "enemy_spear_1"]
+        assert all(u["unit"] == "enemy_lord" for u in uses)
+        assert all(o["target"].startswith("own_") for o in orders if o["kind"] == "attack")
+        assert set(brain.given) <= {"enemy_lord", "enemy_spear_1"} and brain.breakoff.own == 2
+
+    def test_the_loop_answers_only_the_enemys_bridge_when_a_human_plays_side_1(self, tmp_path):
+        from tools.nn.companion import loop, policy
+        lines = []
+        worker = threading.Thread(target=loop.run, args=(tmp_path, None),
+                                  kwargs={"exit_on_done": True, "out": lines.append, "idle_exit_s": 20,
+                                          "enemy": loop.Brain(policy.fresh(), side=2),
+                                          "enemy_log": tmp_path / "companion_enemy.jsonl"})
+        worker.start()
+        doc = state_doc(move=1)
+        exchange.write_atomic(tmp_path / exchange.ENEMY_STATE, json.dumps(doc))
+        for _ in range(2000):
+            if (tmp_path / exchange.ENEMY_ORDERS).exists():
+                break
+            threading.Event().wait(0.005)
+        orders = exchange.parse_orders((tmp_path / exchange.ENEMY_ORDERS).read_text(encoding="utf-8"))
+        assert orders["move"] == 1 and set(orders["orders"]) <= {"enemy_lord", "enemy_spear_1"}
+        exchange.write_atomic(tmp_path / exchange.ENEMY_STATE, json.dumps(dict(doc, move=2, done=True)))
+        worker.join(10)
+        assert not worker.is_alive() and not (tmp_path / exchange.ORDERS).exists()
+        assert [ln.split()[0] for ln in lines] == ["enemy", "enemy"] and "done" in lines[-1]
+
     def test_a_v2_network_keeps_its_commitment_between_the_games_states(self):
         from tools.nn.companion import loop, policy
         brain = loop.Brain(policy.fresh(seed=1, preset="v2"))
@@ -413,7 +468,7 @@ def test_the_network_and_the_enemy_script_read_the_melee_target_by_contact():
     # (the sources read as text: both modules need torch, absent in the host's .venv)
     from pathlib import Path
     root = Path(exchange.__file__).parent
-    assert "engaged_targets(state, b.side, shape=b.shape)" in (root / "loop.py").read_text(encoding="utf-8")
+    assert "engaged_targets(state, b.side, own=me, shape=b.shape)" in (root / "loop.py").read_text(encoding="utf-8")
     assert "engaged_targets(s, self.sides, own=own, shape=self.shape)" in (root / "script.py").read_text(encoding="utf-8")
 
 

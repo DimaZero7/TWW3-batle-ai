@@ -14,6 +14,7 @@ Usage:
     python -m tools.build nn-arena --army-seed 1000900000 --own-role attack   # a generated battle, the network
     python -m tools.build lord-swarm --repeats 2   # a lord swarmed by 1-4 units (tools/nn/lord_swarm.py)
     python -m tools.build human --army-seed 1000900014 --army-swap   # a human plays our side (x1, recorded)
+    python -m tools.build human --army-seed 1000900014 --enemy-ai net --free-speed   # a human against the network
     python -m tools.build nn-arena --army-from-run build/nn-arena/runs/20261007-091416 --army-swap   # an old run's armies
     python -m tools.build nn-arena --army-seed 1000900014 --enemy-ai ai_like   # the enemy under the simulator's script
     python -m tools.build nn-arena --army-seed 1000900014 --enemy-ai ai_like --skirmish off   # no skirmish mode
@@ -360,6 +361,15 @@ def nn_arena_config(args, run_config):
             run_config.update(skirmish="off")
     if args.own_ai == "human":
         run_config.update(own_role=own_role, soldiers_every=args.soldiers_every)
+        if args.enemy_ai != "game":
+            # side 2 under the companion: the network as side 2 ('net') or a script (tools/nn/companion/loop.py)
+            run_config.update(enemy_ai="companion", enemy_script=args.enemy_ai, decide_ms=args.decide_ms,
+                              poll_ms=NET_POLL_MS)
+            if args.skirmish == "off":
+                run_config.update(skirmish="off")
+        if args.free_speed:
+            # the human sets the pace: may change the speed and pause (no speed guard)
+            run_config.update(free_speed=True)
     return path
 
 
@@ -394,10 +404,14 @@ def main(argv=None):
                              "(tools/nn/companion) commands our side (its role: --own-role); "
                              "scripted (lord-duel): one attack order on the nearest enemy. "
                              "Default: net with --army-seed, else attack; lord-duel: net")
-    parser.add_argument("--enemy-ai", choices=("game",) + ENEMY_SCRIPTS, default="game",
+    parser.add_argument("--enemy-ai", choices=("game", "net") + ENEMY_SCRIPTS, default="game",
                         help="nn-arena --own-ai net: the enemy side under the game's AI (default) or under a "
                              "script of the simulator (tools/nn/train/opponents.py) in the companion, as the "
-                             "network's simulator opponent (the twin's: ai_like)")
+                             "network's simulator opponent (the twin's: ai_like); human: also 'net', the "
+                             "network plays the enemy side (the companion's --enemy-script net --no-own)")
+    parser.add_argument("--free-speed", action="store_true",
+                        help="human: the battle starts at --speed and the human may change the speed and pause "
+                             "(no speed guard; the network's decisions stay decide_ms of battle time)")
     parser.add_argument("--skirmish", choices=("game", "off"), default="game",
                         help="nn-arena --own-ai net: the game's skirmish mode (a unit steps back from approaching "
                              "enemies by itself, over its order) as the game sets it (default) or off for every unit "
@@ -481,10 +495,15 @@ def main(argv=None):
         parser.error("--own-ai scripted is for lord-duel and lord-ai")
     if args.own_role and args.own_ai not in ("net", "human") and args.target not in ("lord-duel", "lord-ai"):
         parser.error("--own-role is for --own-ai net and the human target (the planner modes set our role themselves)")
-    if args.enemy_ai != "game" and (args.target != "nn-arena" or args.own_ai != "net"):
-        parser.error("--enemy-ai is for nn-arena --own-ai net")
-    if args.skirmish != "game" and (args.target != "nn-arena" or args.own_ai != "net"):
-        parser.error("--skirmish is for nn-arena --own-ai net (the bridge's units)")
+    net_arena = args.target == "nn-arena" and args.own_ai == "net"
+    if args.enemy_ai == "net" and args.target != "human":
+        parser.error("--enemy-ai net is for the human target (a human against the network)")
+    if args.enemy_ai != "game" and not (net_arena or args.target == "human"):
+        parser.error("--enemy-ai is for nn-arena --own-ai net and the human target")
+    if args.skirmish != "game" and not (net_arena or (args.target == "human" and args.enemy_ai != "game")):
+        parser.error("--skirmish is for nn-arena --own-ai net and human --enemy-ai (the bridge's units)")
+    if args.free_speed and args.target != "human":
+        parser.error("--free-speed is for the human target")
     if args.soldiers_every < 0:
         parser.error("--soldiers-every must be 0 or more")
     if args.army_from_run is not None:

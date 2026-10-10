@@ -712,6 +712,56 @@ class TestNnArena:
         assert len(soldiers) == 2 and len(soldiers[0]["units"]) == 4   # ticks 1 and 6; both sides
         assert soldiers[0]["units"][0]["xz_dm"] == [13, -25, 13, -25]
 
+    def test_a_human_against_the_network_the_enemys_bridge_only_and_a_free_speed(self, lua, tmp_path):
+        # tools.build human --enemy-ai net --free-speed: the human plays side 1 (no bridge, recorded as a human's),
+        # side 2 under the companion's network through the enemy's bridge; the speed and pause are the human's.
+        from tools.nn.companion import exchange
+        lua.execute(self.SETUP + """
+            CONFIG.own_ai, CONFIG.enemy_ai, CONFIG.enemy_script = 'human', 'companion', 'net'
+            CONFIG.enemy_role, CONFIG.decide_ms, CONFIG.poll_ms = 'attack', 1000, 100
+            CONFIG.speed, CONFIG.free_speed, CONFIG.soldiers_every = 1, true, 5
+            CONFIG.factions = {own = 'wh_main_emp_empire', enemy = 'wh2_main_skv_skaven'}
+            STATE = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            assert(STATE.net == nil and STATE.enemy_net ~= nil and STATE.observer ~= nil)
+            assert(enemy[1]:is_script_controlled() and not own[1]:is_script_controlled())
+        """)
+        assert not (tmp_path / exchange.STATE).exists()
+        theirs = exchange.read_state(tmp_path / exchange.ENEMY_STATE)
+        assert theirs["move"] == 1 and theirs["control"] == 2 and theirs["script"] == "net"
+        assert theirs["attacker"] == 2 and {u["side"] for u in theirs["units"]} == {1, 2}
+        exchange.write_atomic(tmp_path / exchange.ENEMY_ORDERS, exchange.orders_text(
+            theirs["batch"], 1, [{"unit": "enemy_spear_1", "kind": "attack", "target": "own_spear_1", "run": True},
+                                 {"unit": "own_lord", "kind": "hold"}]))    # not its unit: ignored
+        lua.execute("""
+            bm:tick(100)
+            bm.speed = 3                          -- the human speeds the battle up: kept
+            for _ = 1, 10 do bm:tick(100) end     -- 1 s of battle time: the next decision
+            assert(bm.speed == 3, 'the speed was forced back')
+            bm.speed = 0                          -- paused: no battle time passes, nothing is decided
+            bm.speed = 1
+            for _ = 1, 10 do bm:tick(100) end
+            bm.outcome, bm.winner = true, 1
+            for _ = 1, 10 do bm:tick(100) end
+            assert(STATE.finished, 'the battle did not finish')
+        """)
+        assert list(lua.eval("bm.orders").values()) == ["attack own_spear_1"]
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        kinds = [r["event"] for r in rows]
+        assert "error" not in kinds and "speed_restored" not in kinds, [r for r in rows if r["event"] == "error"]
+        assert next(r for r in rows if r["event"] == "own_ai")["mode"] == "human"
+        assert next(r for r in rows if r["event"] == "enemy_ai")["script"] == "net"
+        assert next(r for r in rows if r["event"] == "start")["free_speed"] is True
+        assert "nn_orders" not in kinds and [(o["u"], o["k"]) for r in rows if r["event"] == "en_orders"
+                                             for o in r["orders"]] == [("enemy_spear_1", "attack")]
+        # what rebuilds the human's orders: the engine's target, order point and run, every unit of both sides
+        sample = [r for r in rows if r["event"] == "nn_sample"][-1]
+        assert all({"t", "ox", "oz", "f", "mv", "ob", "ow", "idle"} <= set(u) for u in sample["units"])
+        assert any(r["event"] == "nn_soldiers" for r in rows)
+        result = rows[-1]
+        assert result["en_moves"] == 4 and result["en_answered"] == 1 and "nn_moves" not in result
+        assert exchange.read_state(tmp_path / exchange.ENEMY_STATE)["done"] is True
+
     def test_lord_duel_the_enemy_lord_takes_one_attack_and_again_only_when_lost(self, lua, tmp_path):
         # tools/nn/lord_duel.py: our lord under the network, theirs under one scripted attack order.
         lua.execute("""

@@ -50,3 +50,16 @@ def test_the_ultra_preset_sets_every_quality_to_its_ultra_value(tmp_path):
 def test_a_missing_key_stops_the_run(tmp_path):
     done = run(tmp_path, "Set-PreferenceValues -Text $text -Values @{gfx_tree_quality = 3}\n")
     assert done.returncode != 0 and "gfx_tree_quality not found" in done.stderr + done.stdout
+
+
+def test_the_human2k_preset_is_low_quality_full_screen_2k_on_the_integrated_gpu(tmp_path):
+    # the user's battle against the network (build/steps/human_vs_net.ps1, user 10.10)
+    done = run(tmp_path, "foreach ($p in 'low', 'human2k') { $GraphicsPresets[$p].Keys | "
+                         "ForEach-Object { '{0}:{1}={2}' -f $p, $_, $GraphicsPresets[$p][$_] } }\n")
+    assert done.returncode == 0, done.stderr
+    rows = [line.split(":", 1) for line in done.stdout.splitlines() if line]
+    low = dict(kv.split("=", 1) for p, kv in rows if p == "low")
+    h = dict(kv.split("=", 1) for p, kv in rows if p == "human2k")
+    assert (h["x_res"], h["y_res"], h["gfx_fullscreen"], h["gfx_resolution_scale"]) == ("2560", "1440", "true", "1.0")
+    assert h["gfx_gpu"] == '""Intel(R) Iris(R) Xe Graphics""' and h["gfx_gpu_select"] == "1"
+    assert all(h[k] == v for k, v in low.items() if k not in ("x_res", "y_res", "gfx_fullscreen", "gfx_resolution_scale"))

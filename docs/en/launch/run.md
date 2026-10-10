@@ -15,8 +15,10 @@ Options:
 `-TimeoutSeconds` (default 240 s for loading + the battle's deadline `deadline_s` from
 `manifest.json`; 1200 without one), `-KeepGameOpen` (leave the game running after completion),
 `-LingerSeconds` (after the result keep the game open this long, or until the user closes it, then
-clean up as usual; 0 by default), `-Graphics ultra` (the 'ultra' graphics for this run only,
-[below](#a-battle-played-by-a-human)). To watch the network command our side, use
+clean up as usual; 0 by default), `-Graphics ultra|low|lowigpu|human2k` (a graphics preset for this run only:
+`ultra` [below](#a-battle-played-by-a-human); `low` the lightest game in a small window, for measurements;
+`lowigpu` `low` on the integrated GPU; `human2k` [a human against the network](#a-human-against-the-network)).
+To watch the network command our side, use
 [watching the network](watch.md): it starts the companion and calls this launcher.
 
 > **Status:** the launcher was verified in game on 2026-09-27 with the
@@ -152,6 +154,38 @@ in the same role; the game AI's own target switches. Checked on 4 network battle
 changes): 911/890, 248/234, 12/11, 228/322. Not seen: a repeated order to the same point, an attack whose
 point did not move (a new target from where the unit stands), an order replaced within the same second.
 
+### A human against the network
+
+A human plays side 1, the network side 2 through the second bridge (the one of [the enemy under a
+script](../apps/bridge.md#the-enemy-under-the-simulators-script)). For recording a human's battles (learning
+by observation).
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File build/steps/human_vs_net.ps1 -Ckpt build/v2/itN.pt -Battle 1
+```
+
+- `-Battle 1..8`: a battle of the set `build/steps/watch_set8.ps1` (1 = seed 1000900014, 2 = the same with the armies
+  swapped; 3, 4 = 1000903669; 5, 6 = 1000901199; 7, 8 = the armies of run 20261007-091416). The human gets the army
+  the network had in that battle and defends; the network gets the game AI's army and attacks. `-Greedy`: the
+  network's most likely order.
+- The script builds `tools.build human ... --enemy-ai net --free-speed --timeout 3600 --stall-minutes 30
+  --deadline 21600` and runs [watch.ps1](watch.md) `-Target human -EnemyAi net`: the companion answers only side 2's
+  bridge (`--enemy-script net --no-own`); the network sees the battle as side 2 (its own frame, its own units,
+  the other side's as it sees them).
+- Speed: the battle starts at x1; pause and speed changes work as usual in the game, the script does not hold
+  them (`--free-speed`). The network decides every 1000 ms of battle time at any speed; paused, battle time
+  stands and the network waits. The companion has no clock of its own: a pause is only a long wait.
+- Limits: 3600 s of battle time, 30 minutes of battle time without damage, 6 hours of real time. Difficulty:
+  Normal (the launcher).
+- Graphics `human2k`: the quality of `low`, full screen 2560x1440, the 3D scene at full resolution, the integrated
+  GPU (`gfx_gpu` Intel Iris Xe, `gfx_gpu_select 1`): the RTX stays with training. The preferences file is restored
+  byte for byte after the battle.
+- The recording, `build/human/runs/<time>/`: `events.jsonl` has everything of the human's battle above
+  (`nn_sample` every second with the engine's target `t`, order point `ox`/`oz`, run `f` and the observer's fields
+  for **both** sides, `nn_soldiers` every 5 s, effects, ability readiness), plus the network's bridge events `en_*`
+  (`en_orders`: the network's orders) and the `en_*` counters in `result`; the network's answers in
+  `companion_enemy.jsonl`.
+
 ## Timing
 
 From the research measurements: about 83 s to the first `ready`, about 11 s
@@ -173,5 +207,4 @@ the reset of 30.09.2026):
 
 ## Limits
 
-- Of the graphics presets only 'ultra' is ported (`-Graphics ultra`); the research's minimum quality
-  is not.
+- Graphics presets: only `ultra`, `low`, `lowigpu` and `human2k` (`tools/launcher/preferences.ps1`).

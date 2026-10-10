@@ -24,6 +24,11 @@
 -- (apps.bridge.adapter) with its own files: the same state at the same decision, the same rules as
 -- ours (routing units the game's, rallies, shooters' duty, stalls), its events 'en_*' for 'nn_*'
 -- and its result fields 'en_*'. Its state carries config.units' slots and widths (layout).
+-- With own_ai 'human' (tools.build human --enemy-ai net): a human plays side 1 and side 2 is under the companion
+-- (config.enemy_script 'net': the network seeing the battle as side 2; or a script) - the enemy's bridge only.
+-- config.free_speed = true (the human's battle): the battle starts at config.speed and the human may change the
+-- speed and pause it (no speed guard); the bridge's decisions and polls run on battle time, so a pause stops them
+-- and the decision interval stays decide_ms of battle time at any speed.
 -- config.observe = true adds the human's observer (apps.telemetry.observer_adapter) to any mode, without
 -- the soldiers; config.cards = true also records every unit's card on change (nn_card), both sides
 -- (the lord against the game's AI: tools/nn/lord_ai.py).
@@ -327,11 +332,11 @@ function M.main(bm, config, globals)
 
     -- Both bridges at a decision, ours first (the same state for both).
     local function net_decide()
-        state.net.decide()
+        if state.net then state.net.decide() end
         if state.enemy_net then state.enemy_net.decide() end
     end
     local function net_poll()
-        state.net.poll()
+        if state.net then state.net.poll() end
         if state.enemy_net then state.enemy_net.poll() end
     end
 
@@ -417,6 +422,7 @@ function M.main(bm, config, globals)
         if config.own_ai == 'human' then
             observe(config.soldiers_every)
             emit('own_ai', {mode = 'human', own_ai = config.own_ai, soldiers_every = config.soldiers_every})
+            if config.enemy_ai == 'companion' then enemy_start() end
             return
         end
         if config.own_ai == 'net' then return net_start() end
@@ -443,16 +449,19 @@ function M.main(bm, config, globals)
         if state.active then return end
         started_ms, started_wall = bm:time_elapsed_ms(), clock.wall_seconds()
         bm:modify_battle_speed(config.speed)
-        battle.speed_guard(bm, config.speed, function(from)
-            emit('speed_restored', {from_speed = from, to_speed = config.speed})
-        end)
+        if not config.free_speed then
+            battle.speed_guard(bm, config.speed, function(from)
+                emit('speed_restored', {from_speed = from, to_speed = config.speed})
+            end)
+        end
         hand_over()
         if config.enemy_ai == 'scripted' then scripted_start(2) end
         if config.observe then observe(0) end
         if state.observer then state.observer.changes() end
         last_reissue = bm:time_elapsed_ms()
         state.stall = battle_services.new_stall_detector(config.stall_ms)
-        emit('start', {speed = config.speed, timeout_ms = config.timeout_ms, deadline_s = config.deadline_s})
+        emit('start', {speed = config.speed, timeout_ms = config.timeout_ms, deadline_s = config.deadline_s,
+            free_speed = config.free_speed == true})
         snapshot('nn_sample')
         flush()
         state.cancel_deadline = battle.deadline(bm, config.deadline_s * 1000, guarded(function()
@@ -461,7 +470,7 @@ function M.main(bm, config, globals)
         end), 'tww3_bai_nn_arena_deadline')
         state.active = true
         bm:repeat_callback(guarded(tick), config.tick_ms, TIMER)
-        if state.net then
+        if state.net or state.enemy_net then
             net_decide()
             bm:repeat_callback(guarded(function() if state.active then net_decide() end end),
                 config.decide_ms, DECIDE)
@@ -482,7 +491,8 @@ function M.main(bm, config, globals)
         assert(common and vector_type, 'common and battle_vector globals required')
         assert(M.OWN_AI[config.own_ai], 'own_ai must be attack, defend, hold, net, human or scripted')
         assert(config.enemy_ai == nil or M.ENEMY_AI[config.enemy_ai], 'enemy_ai must be absent, scripted or companion')
-        assert(config.enemy_ai ~= 'companion' or config.own_ai == 'net', 'enemy_ai companion needs own_ai net')
+        assert(config.enemy_ai ~= 'companion' or config.own_ai == 'net' or config.own_ai == 'human',
+            'enemy_ai companion needs own_ai net or human')
         assert(config.skirmish == nil or M.SKIRMISH[config.skirmish], 'skirmish must be absent, game or off')
         local sides = battle.read_sides(bm)
         state.own_alliance, state.own_army, state.enemy_army = sides[1].alliance, sides[1].army, sides[2].army

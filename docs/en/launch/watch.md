@@ -40,9 +40,10 @@ Options:
 | `-TimeoutModelSeconds` | 600 | Battle limit, s of battle time |
 | `-LingerSeconds` | 30 | How long the game stays open after the result |
 | `-NoBuild` | off | Use the net build already in `build/nn-arena/` |
-| `-EnemyAi game\|ai_like` | `game` | The enemy: the game's AI or the simulator's script in the companion (build `--enemy-ai`; with `-NoBuild` the build's, a mismatch is an error); the script's log `companion_enemy.jsonl` ([bridge](../apps/bridge.md#the-enemy-under-the-simulators-script)) |
+| `-EnemyAi game\|ai_like\|net` | `game` | The enemy: the game's AI or the simulator's script in the companion (build `--enemy-ai`; with `-NoBuild` the build's, a mismatch is an error); the script's log `companion_enemy.jsonl` ([bridge](../apps/bridge.md#the-enemy-under-the-simulators-script)); `net`: the network on side 2, only with `-Target human` |
 | `-Skirmish game\|off` | `game` | Skirmish mode under the bridges (build `--skirmish`; with `-NoBuild` the build's) ([bridge](../apps/bridge.md#skirmish-mode)) |
-| `-Target nn-arena\|lord-duel` | `nn-arena` | Whose build and runs folder; `lord-duel` ([lord duel](../apps/entries.md#lord_duel)) only with `-NoBuild`, the companion's log goes to `build/lord-duel/companion/` |
+| `-Target nn-arena\|lord-duel\|human` | `nn-arena` | Whose build and runs folder; `lord-duel` ([lord duel](../apps/entries.md#lord_duel)) only with `-NoBuild`, the companion's log goes to `build/lord-duel/companion/`; `human` ([a human against the network](run.md#a-human-against-the-network)) only with `-NoBuild`, the companion answers side 2 only (`--no-own`) |
+| `-Graphics` | `BAI_GRAPHICS` | A graphics preset for the run (`launch.ps1 -Graphics`: `ultra`, `low`, `lowigpu`, `human2k`) |
 
 A quick check: `-Speed 20 -LingerSeconds 0`.
 

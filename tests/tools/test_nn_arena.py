@@ -84,6 +84,28 @@ class TestArenas:
         with pytest.raises(SystemExit):
             build.main(["nn-arena", "--own-ai", "attack", "--enemy-ai", "ai_like"])
 
+    def test_a_human_against_the_network(self, tmp_path, monkeypatch):
+        """tools.build human --enemy-ai net: the human plays side 1 (defends), the network side 2 through the
+        companion; --free-speed lets the human change the speed and pause; long limits as given."""
+        monkeypatch.setattr(project, "BUILD", tmp_path)
+        written = []
+        monkeypatch.setattr(build, "build", lambda target, config, scenario=None: written.append(config) or {})
+        assert build.main(["human", "--army-seed", "1000900014", "--army-swap", "--enemy-ai", "net", "--free-speed",
+                           "--stall-minutes", "30", "--deadline", "21600"]) == 0
+        c = written[0]
+        assert (c["own_ai"], c["own_role"], c["enemy_role"]) == ("human", "defend", "attack")
+        assert (c["enemy_ai"], c["enemy_script"], c["decide_ms"], c["poll_ms"]) == ("companion", "net", 1000, 100)
+        assert c["free_speed"] is True and c["speed"] == 1 and c["timeout_ms"] == 3600000
+        assert c["deadline_s"] == 21600 and c["stall_ms"] == 30 * 60000 and c["soldiers_every"] == 5
+        assert c["army"]["seed"] == 1000900014 and c["army"]["swap"] is True and "skirmish" not in c
+        assert build.main(["human", "--army-seed", "1000900014"]) == 0          # the human's battle as before
+        assert not {"enemy_ai", "enemy_script", "free_speed", "decide_ms"} & set(written[1])
+        for bad in (["nn-arena", "--own-ai", "net", "--enemy-ai", "net"],     # the network on both sides: no
+                    ["nn-arena", "--own-ai", "net", "--free-speed"],
+                    ["human", "--skirmish", "off"]):                          # no bridge to turn it off for
+            with pytest.raises(SystemExit):
+                build.main(bad)
+
 
 def unit(n, side, **kw):
     row = {"n": n, "side": side, "x": 0, "z": 0, "men": 100, "hp": 1.0, "mp": 1.0, "ms": 1, "a": 0,

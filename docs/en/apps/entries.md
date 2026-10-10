@@ -397,7 +397,10 @@ the battle. The side that wins on timeout defends:
   without `enemy_ai` side 2 stays the game's AI ([the lord against the game's AI](#lord_ai));
 - `human` (the `human` build target) — a human commands our side, the script gives no orders; the
   recording adds [observer_adapter](telemetry.md#observer_adapter); the game's AI attacks
-  ([a battle played by a human](../launch/run.md#a-battle-played-by-a-human)).
+  ([a battle played by a human](../launch/run.md#a-battle-played-by-a-human)); with `enemy_ai` `companion`
+  the companion plays side 2 through the second bridge (`enemy_script` `net`: the network, [a human against the
+  network](../launch/run.md#a-human-against-the-network)); `free_speed`: the script does not hold the speed, pause
+  and speed are the human's.
 
 Every second `nn_sample` records every unit of both sides (the full view):
 
