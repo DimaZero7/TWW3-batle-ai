@@ -184,6 +184,16 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           cause (the samples' fatigue and run flags). 12 lanes a battle (the short ones on two rows of 5 columns 150 m
           apart, the long ones in three columns of their own), 2 battles, lanes rotated. The 'skirmish' table reads
           them per shooter and kind (+ speed per 30 s and fatigue for the long ones).
+  shootcontact does a shooter that moves in contact lose as one standing? (the 72 gate battles' replay: a moving
+          shooter in melee loses 0.47-0.58 %/s in the game, about half that in the replay): archers and crossbowmen,
+          each against clanrats one on one, the clanrats attacking at a run from 30 m (front to front), 90 s; four
+          lane kinds of the shooter (target_mode 'skirmish': halted, fire at will on, the rows with ammo, fire, sk) -
+          'stand' (mode off, a ranged attack on the clanrats at a walk: as the bridge holds a shooter), 'walk' / 'run'
+          (mode off, at the go a move 300 m straight away from them at a walk / a run: lane.t_move, never changed) and
+          'skirmish' (the mode on, aimed as 'stand'); every 0.5 s both units' place, melee flag, health, men, the
+          shooter's ammo; the soldiers' places every 1 s within 200 m; 8 lanes on the skirmish plan's places, 2 battles,
+          the rows swapped. 'shootcontact' prints per shooter and kind the shooter's HP lost %/s in melee, moving (the
+          game's is_moving flag) and not, the clanrats' HP lost to it and the shots.
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -197,6 +207,8 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe run --plan skirmish                 # the shooters' skirmish mode
     python -m tools.nn.charge_probe skirmish [runs...]                  # its table (skirmish2 too)
     python -m tools.nn.charge_probe run --plan skirmish2                # what triggers the mode, the long run
+    python -m tools.nn.charge_probe run --plan shootcontact             # a shooter moving in melee
+    python -m tools.nn.charge_probe shootcontact [runs...]              # its table
 
 Measures per lane (the game's recording, and the simulator's run of the same lane from the same start):
 the attacker's speed on the way in (the last 30 m, the peak), the first contact; HP lost by the target
@@ -262,7 +274,7 @@ NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
-         "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "leave", "skirmish", "skirmish2")
+         "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "leave", "skirmish", "skirmish2", "shootcontact")
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
 WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
@@ -335,6 +347,13 @@ SKIRMISH2_KINDS = ("pass", "neighbour", "control")
 SKIRMISH2_SHORT = tuple((float(x), z) for z in (470.0, -80.0) for x in (-525, -375, -225, -75, 75))
 SKIRMISH2_LONG = ((225.0, 480.0), (375.0, 480.0), (525.0, 480.0))
 SKIRMISH_WINDOWS = ((0, 30), (30, 60), (60, 90), (90, 120))   # the long lanes' speed and fatigue windows, s
+# the shootcontact plan: (shooter, infantry) one on one, the infantry attacking at a run from gap_m (front to front) for
+# max_s; the shooter's kinds (target_mode 'skirmish'): 'stand' (mode off, aimed), 'walk' / 'run' (mode off, at the go a
+# move back_m straight away, -z), 'skirmish' (mode on, aimed); on SKIRMISH_PLACES (a shooter's way back of up to ~300 m
+# passes between the lower row's lanes), battle 2 with the rows swapped
+SHOOTCONTACT = {"gap_m": 30, "max_s": 90, "back_m": 300, "men_near_m": 200}
+SHOOTCONTACT_PAIRS = (("archer", "clanrat"), ("xbow", "clanrat"))
+SHOOTCONTACT_KINDS = ("stand", "walk", "run", "skirmish")
 SKIRMISH_MOVE_MPS = 1.0    # the shooter moves away: its speed away from the chaser above this (m/s) ...
 SKIRMISH_MOVE_S = 1.0      # ... for this long
 RETARGET3_RAY_D_M = 98.0        # as the 'side' lanes' (80 m front to front, 30 m aside)
@@ -637,6 +656,16 @@ def battles(plan):
             places = rotate(list(SKIRMISH2_SHORT), 5 * k)
             out.append([dict(l, place=p) for l, p in zip(short, places)]
                        + [dict(l, place=p) for l, p in zip(long_, rotate(list(SKIRMISH2_LONG), k))])
+    elif plan == "shootcontact":
+        g = SHOOTCONTACT
+
+        def sc(shooter, infantry, kind):
+            move = {"t_move": {"back_m": g["back_m"], "run": kind == "run"}} if kind in ("walk", "run") else {}
+            return lane(infantry, shooter, "attack_run", "skirmish", gap_m=g["gap_m"], fight_s=g["max_s"],
+                        max_s=g["max_s"], answer=False, kind=kind, t_skirmish=kind == "skirmish", **move)
+        base = [sc(s_, i_, kind) for s_, i_ in SHOOTCONTACT_PAIRS for kind in SHOOTCONTACT_KINDS]
+        for k in range(2):
+            out.append([dict(l, place=p) for l, p in zip(base, rotate(list(SKIRMISH_PLACES), 5 * k))])
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
@@ -749,9 +778,11 @@ def run_config(plan, index):
               # (reengage: the pair 30 + 30 m apart between its two fights, centre to centre ~75 m)
               "men_near_m": (100 if plan == "reengage" else 150 if plan == "leave"
                              else SKIRMISH["men_near_m"] if plan == "skirmish"
-                             else SKIRMISH2["men_near_m"] if plan == "skirmish2" else 60),
+                             else SKIRMISH2["men_near_m"] if plan == "skirmish2"
+                             else SHOOTCONTACT["men_near_m"] if plan == "shootcontact" else 60),
               # the soldiers' places: the first 30 s (the charge plan) or the whole fight (hit: men in contact)
-              "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2", "dmgmelee", "reengage") else 95 if plan in ("defender", "wave", "wavemiss", "wavemiss2", "leave", "skirmish", "skirmish2")
+              "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2", "dmgmelee", "reengage") else 95 if plan in ("defender", "wave", "wavemiss", "wavemiss2", "leave", "skirmish", "skirmish2",
+                                                                                                  "shootcontact")
                               else 90 if plan in ("hit", "move", "vv") else 30),
               "lanes": lanes, "park": park}
     if plan in ("routmob", "routmob2"):
@@ -1845,9 +1876,94 @@ def skirmish_report(run_dirs, out=None):
     return result
 
 
+# ---------------------------------------------------------------- a shooter moving in melee (plan shootcontact)
+
+SHOOTCONTACT_KEYS = ("contact_s", "melee_s", "loss", "moving_share", "melee_s_moving", "loss_moving", "melee_s_still",
+                     "loss_still", "speed_melee", "inf_loss", "shots", "shots_melee", "hp_end")
+
+
+def shootcontact_measure(lane):
+    """A shootcontact lane (game): the shooter (the lane's target) in melee - its own melee flag on at both ends of a
+    sample interval. loss: its HP lost (unary_hitpoints, % of the full unit) a second in melee; _moving / _still by its
+    is_moving flag at the interval's end (melee_s_* the seconds); moving_share; speed_melee (m/s, from the places);
+    inf_loss: the infantry's HP lost %/s in the same intervals; shots: the ammo's drop (one a man), all and in melee;
+    hp_end: the shooter's health left at the end; contact_s: its first melee flag (s after the go)."""
+    spec, s = lane["spec"], lane["samples"]
+    t = np.array([x[0] for x in s])
+    out = {"run": lane["run"], "lane": spec["name"], "shooter": SHORT[spec["t_key"]], "infantry": SHORT[spec["a_key"]],
+           "kind": spec.get("kind")}
+    m = np.nan_to_num(series(s, "tg", "m"), nan=0.0) > 0
+    mv = np.nan_to_num(series(s, "tg", "mv"), nan=0.0) > 0
+    hp, a_hp = series(s, "tg", "hpu"), series(s, "a", "hpu")
+    x, z, ammo = series(s, "tg", "x"), series(s, "tg", "z"), series(s, "tg", "ammo")
+    out["contact_s"] = round(float(t[m][0]), 1) if m.any() else None
+    ok_hp = np.isfinite(hp)
+    out["hp_end"] = round(float(hp[ok_hp][-1]), 3) if ok_hp.any() else None
+    drop = np.concatenate([[0.0], -np.diff(ammo)])
+    shots = np.where(np.isfinite(drop), np.maximum(0.0, drop), 0.0)
+    out["shots"] = int(shots.sum())
+    if len(t) < 2:
+        return out
+    dt = np.diff(t)
+    both = m[1:] & m[:-1]
+    out["shots_melee"] = int(shots[1:][both].sum())
+    lost = 100 * np.maximum(0.0, hp[:-1] - hp[1:])
+    a_lost = 100 * np.maximum(0.0, a_hp[:-1] - a_hp[1:])
+    speed = np.hypot(np.diff(x), np.diff(z)) / np.maximum(dt, 1e-6)
+    moving = mv[1:]
+
+    def rate(sel, v):
+        sel = sel & np.isfinite(v)
+        return (round(float(v[sel].sum() / dt[sel].sum()), 3) if dt[sel].sum() > 0 else None), round(float(dt[sel].sum()), 1)
+    out["loss"], out["melee_s"] = rate(both, lost)
+    out["loss_moving"], out["melee_s_moving"] = rate(both & moving, lost)
+    out["loss_still"], out["melee_s_still"] = rate(both & ~moving, lost)
+    out["inf_loss"], _ = rate(both, a_lost)
+    out["moving_share"] = round(float(dt[both & moving].sum() / dt[both].sum()), 2) if dt[both].sum() > 0 else None
+    sp = both & np.isfinite(speed)
+    out["speed_melee"] = round(float(np.mean(speed[sp])), 2) if sp.any() else None
+    return out
+
+
+def shootcontact_summary(rows):
+    """{'<shooter> <kind>': {n, the mean of each SHOOTCONTACT_KEYS over its lanes}}."""
+    cells = {}
+    for r in rows:
+        cells.setdefault(f"{r['shooter']} {r['kind']}", []).append(r)
+    out = {}
+    for name, rs in sorted(cells.items()):
+        row = {"n": len(rs)}
+        for k in SHOOTCONTACT_KEYS:
+            v = [float(r[k]) for r in rs if r.get(k) is not None]
+            row[k] = round(float(np.mean(v)), 3) if v else None
+        out[name] = row
+    return out
+
+
+def shootcontact_report(run_dirs, out=None):
+    """The shootcontact lanes of the runs: a row per lane and the mean per shooter and kind. Writes
+    build/charge-probe/shootcontact.json (not in Git)."""
+    lanes = [ln for d in run_dirs for ln in load_run(d) if ln.get("plan") == "shootcontact"]
+    rows = [shootcontact_measure(ln) for ln in lanes]
+    table = shootcontact_summary(rows)
+    f = lambda v: "-" if v is None else f"{v:g}"
+    print("A shooter in melee (clanrats attacking from 30 m): per shooter and kind, the mean over its lanes; loss = "
+          "the shooter's HP lost %/s in melee (moving / still: its is_moving flag); inf_loss = the clanrats'")
+    print(f"  {'cell':18} {'n':>2} " + " ".join(f"{k:>13}" for k in SHOOTCONTACT_KEYS))
+    for name, r in table.items():
+        print(f"  {name:18} {r['n']:>2} " + " ".join(f"{f(r[k]):>13}" for k in SHOOTCONTACT_KEYS))
+    result = {"lanes": rows, "summary": table}
+    out = out or ROOT / "shootcontact.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(result, indent=1, default=float), encoding="utf-8")
+    print(out)
+    return result
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", nargs="?", choices=("report", "plan", "run", "turns", "exits", "retarget", "skirmish"),
+    parser.add_argument("command", nargs="?", choices=("report", "plan", "run", "turns", "exits", "retarget", "skirmish",
+                                                     "shootcontact"),
                         default="report")
     parser.add_argument("runs", nargs="*", type=Path, help="report: run folders (default: build/charge-probe/runs/*)")
     parser.add_argument("--plan", choices=PLANS, default="charge")
@@ -1877,6 +1993,9 @@ def main(argv=None):
         return 0
     if args.command == "skirmish":
         skirmish_report(args.runs or runs(), out=None if args.out == OUT else args.out)
+        return 0
+    if args.command == "shootcontact":
+        shootcontact_report(args.runs or runs(), out=None if args.out == OUT else args.out)
         return 0
     if args.command == "turns":
         turn_report(args.runs or runs(), sim=args.sim, device=args.device, copies=min(args.copies, 4),

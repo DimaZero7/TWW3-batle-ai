@@ -16,7 +16,7 @@ def test_plans_have_few_battles_and_lanes_on_both_sides():
         for i in range(1, len(cp.battles(plan)) + 1):
             config, model_s, arena = cp.run_config(plan, i)
             # (reengage: its tired pair runs up to 540 s before its fight; retarget2 / 3: 10 / 7 short lanes)
-            assert 2 <= len(config["lanes"]) <= {"retarget2": 10, "retarget3": 7, "leave": 6, "skirmish": 10, "skirmish2": 12}.get(plan, 5)
+            assert 2 <= len(config["lanes"]) <= {"retarget2": 10, "retarget3": 7, "leave": 6, "skirmish": 10, "skirmish2": 12, "shootcontact": 8}.get(plan, 5)
             assert model_s < (720 if plan == "reengage" else 400)
             assert all(len(side["units"]) <= 20 for side in arena["sides"].values())
             names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}
@@ -550,6 +550,59 @@ def test_skirmish_measure_a_neighbours_fight_is_no_catch_and_the_long_lanes_wind
     table = cp.skirmish_summary([m, m2])
     assert set(table) == {f"{m['shooter']} on neighbour", f"{m['shooter']} on long"}
     assert table[f"{m['shooter']} on long"]["fat_0_30"] == "threshold_winded"
+
+
+def test_the_shootcontact_plan_charges_each_shooter_standing_walking_running_and_skirmishing():
+    b = cp.battles("shootcontact")
+    assert len(b) == 2 and all(len(x) == 8 for x in b)
+    assert [l["place"] for l in b[0]] != [l["place"] for l in b[1]]                 # the rows swapped
+    assert sorted(cp.cell(l) for l in b[0]) == sorted(cp.cell(l) for l in b[1]) and len({cp.cell(l) for l in b[0]}) == 8
+    assert {(l["target"], l["attacker"], l["kind"]) for l in b[0]} == {
+        (s, i, k) for s, i in cp.SHOOTCONTACT_PAIRS for k in cp.SHOOTCONTACT_KINDS}
+    for l in b[0]:
+        assert l["mode"] == "attack_run" and l["target_mode"] == "skirmish" and not l["answer"]
+        assert l["gap_m"] == 30 and l["max_s"] == 90 and l["t_skirmish"] == (l["kind"] == "skirmish")
+        if l["kind"] in ("walk", "run"):
+            assert l["t_move"] == {"back_m": 300, "run": l["kind"] == "run"}
+        else:
+            assert "t_move" not in l
+    for i in (1, 2):
+        config, model_s, arena = cp.run_config("shootcontact", i)
+        assert config["men_near_m"] >= 200 and config["men_after_s"] >= 90 and config["men_ms"] == 1000
+        assert config["tick_ms"] == 500 and model_s < 150
+        for l in config["lanes"]:
+            assert l["z"] + l["gap_m"] + l["a_depth"] <= 600 and l["z"] - l["t_depth"] - 300 >= -600
+
+
+def _shootcontact_lane(kind="walk"):
+    """A shootcontact lane: the shooter caught at 5 s; in melee it moves (is_moving, 1 m/s) the first 10 s, losing 1 %
+    of its HP a second, then stands losing 0.5 %/s; the clanrats lose 0.2 %/s; 4 shots a second all along."""
+    spec = dict(cp.layout(cp.battles("shootcontact")[0])[0][1], kind=kind)
+    samples, hp, a_hp, ammo, z = [], 1.0, 1.0, 400.0, 0.0
+    for k in range(1, 61):
+        t = k * 0.5
+        m = t >= 5
+        mv = m and t <= 15
+        if m and k > 10:
+            hp -= (0.01 if mv else 0.005) * 0.5
+            a_hp -= 0.002 * 0.5
+        z -= 0.5 if mv else 0.0
+        ammo -= 2
+        samples.append((t, {"x": 0.0, "z": z + 3, "m": m, "hpu": a_hp},
+                        {"x": 0.0, "z": z, "m": m, "mv": mv, "hpu": hp, "ammo": ammo}, None))
+    return {"run": "r", "spec": spec, "samples": samples, "men": [], "contacts": {1: 5.0}, "end": None,
+            "abilities": [], "phases": []}
+
+
+def test_shootcontact_measure_splits_the_shooters_melee_loss_by_its_moving_flag():
+    m = cp.shootcontact_measure(_shootcontact_lane())
+    assert m["kind"] == "walk" and m["contact_s"] == 5 and m["melee_s"] == 25
+    assert m["loss_moving"] == pytest.approx(1.0) and m["loss_still"] == pytest.approx(0.5)
+    assert m["melee_s_moving"] == 10 and m["melee_s_still"] == 15 and m["moving_share"] == 0.4
+    assert m["inf_loss"] == pytest.approx(0.2) and m["speed_melee"] == pytest.approx(0.4)
+    assert m["shots"] == 118 and m["shots_melee"] == 100 and m["hp_end"] == pytest.approx(0.825)
+    table = cp.shootcontact_summary([m, cp.shootcontact_measure(_shootcontact_lane("stand"))])
+    assert set(table) == {f"{m['shooter']} walk", f"{m['shooter']} stand"}
 
 
 def _retarget_lane(switch_s=10):

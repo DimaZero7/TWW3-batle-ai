@@ -1594,6 +1594,38 @@ class TestChargeProbe:
         lanes = [x for r in rows if r["event"] == "probe_sample" for x in r["lanes"] if x["lane"] == "L2"]
         assert lanes and "t2" in lanes[0]
 
+    def test_shootcontact_shooter_moves_straight_away_at_the_go_instead_of_aiming(self, lua, tmp_path):
+        """shootcontact: a skirmish target with t_move gets at the go a move back_m straight away from its attacker
+        (-z from its place) at a run (L1) / a walk (L2), no ranged attack; the attacker charges; probe_phase t_move."""
+        lua.execute(self.SETUP + """
+            for k, run in ipairs({true, false}) do
+                local L = CONFIG.lanes[k]
+                L.mode, L.target_mode, L.answer, L.fight_s, L.max_s, L.gap_m = 'attack_run', 'skirmish', false, 90, 10, 30
+                L.recharge_after_s, L.back_m, L.recharge_max_s, L.lord, L.t_skirmish = nil, nil, nil, nil, false
+                L.t_move = {back_m = 300, run = run}
+            end
+            enemy[2].ammo, enemy[2].range, own[3].ammo, own[3].range = 40, 120, 40, 120
+            CONFIG.park = {{name = 'enemy_lord', x = 700, z = -400, bearing = 0},
+                           {name = 'own_lord', x = -700, z = -400, bearing = 0}}
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            assert(enemy[2].attack_args == nil and own[3].attack_args == nil, 'the shooters never aim')
+            assert(enemy[2].moving == true and enemy[2].free_fire == true)
+            assert(own[2].attack_args.target == 'enemy_clanrat_1' and own[2].attack_args.run == true, 'the charge')
+            for _ = 1, 40 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        log = list(lua.eval("bm.orders").values())
+        # the shooter's place (x, z - t_depth / 2 = -6) 300 m further from its attacker (-z)
+        assert "goto enemy_clanrat_1 -120 -306 true" in log and "goto own_swords_2 120 -306 false" in log
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        moves = {r["lane"]: r["at_run"] for r in rows if r["event"] == "probe_phase" and r["phase"] == "t_move"}
+        assert moves == {"L1": True, "L2": False}
+        lanes = [x for r in rows if r["event"] == "probe_sample" for x in r["lanes"] if x["lane"] == "L1"]
+        assert lanes[0]["tg"]["ammo"] == 40 and "mv" in lanes[0]["tg"] and "hpu" in lanes[0]["tg"]
+
 class TestMissileProbe:
     """The missile probe (entries.missile_probe; lanes from tools/nn/missile_probe.py)."""
     SETUP = """

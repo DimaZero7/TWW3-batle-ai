@@ -245,3 +245,68 @@ def test_network_holds_follow_the_companion_s_last_decision(tmp_path, monkeypatc
     h = check.network_holds(recording())
     assert h[:, 0].tolist() == [False, False, True, True, True, True, True]
     assert h[:, 1].tolist() == [True, True, True, True, False, False, False]
+
+
+def contact_params():
+    return SimpleNamespace(sim={"contact": {"reach_m": -2.5, "lord_reach_m": 1.0, "hold_m": 2.0},
+                                "formation": {"spacing_m": 1.5}})
+
+
+def melee_state(z_target=100., z_other=10.):
+    """Unit 0 (side 1, 100 men, 20 m front: 12 m deep) fighting unit 2 at z_other; unit 1 (its recorded target) at
+    z_target, both side 2 facing it."""
+    u = {k: torch.zeros(1, 3, dtype=torch.bool) for k in ("m", "r", "s", "gone")}
+    u["m"][:] = True
+    u.update(side=torch.tensor([[1, 2, 2]]), men=torch.full((1, 3), 100.), men0=torch.full((1, 3), 100.),
+             width=torch.full((1, 3), 20.), radius=torch.ones(1, 3), range=torch.zeros(1, 3),
+             x=torch.zeros(1, 3), z=torch.tensor([[0., z_target, z_other]]), b=torch.tensor([[0., 180., 180.]]))
+    return SimpleNamespace(B=1, N=3, device="cpu", t=torch.zeros(1), u=u)
+
+
+def attack_rows(moving=False):
+    T = 3
+    return dict(kind=np.array([[O.ATTACK, O.HOLD, O.HOLD]] * T), target=np.array([[1, -1, -1]] * T),
+                x=np.zeros((T, 3), dtype=np.float32), z=np.zeros((T, 3), dtype=np.float32),
+                run=np.zeros((T, 3), dtype=bool), moving=np.array([[moving, False, False]] * T))
+
+
+def test_redirect_fights_the_touched_enemy_when_the_recording_did_not_move():
+    """replay.REDIRECT: the recorded target far in the replay, another enemy touching - the unit attacks that one."""
+    o = replay.Replay([attack_rows()], params=contact_params())(melee_state())
+    assert o.kind[0, 0] == O.ATTACK and o.target[0, 0] == 2
+
+
+def test_redirect_keeps_the_order_of_a_unit_the_recording_shows_moving_and_is_off_without_params():
+    assert replay.Replay([attack_rows(moving=True)], params=contact_params())(melee_state()).target[0, 0] == 1
+    assert replay.Replay([attack_rows()])(melee_state()).target[0, 0] == 1
+
+
+def test_redirect_leaves_a_touched_target_shooters_lords_and_units_out_of_contact():
+    p = contact_params()
+    assert replay.Replay([attack_rows()], params=p)(melee_state(z_target=10.5, z_other=10.)).target[0, 0] == 1
+    st = melee_state(); st.u["range"][0, 0] = 150.
+    assert replay.Replay([attack_rows()], params=p)(st).target[0, 0] == 1
+    st = melee_state(); st.u["men0"][0, 0] = 1.; st.u["men"][0, 0] = 1.
+    assert replay.Replay([attack_rows()], params=p)(st).target[0, 0] == 1
+    st = melee_state(z_other=30.)
+    assert replay.Replay([attack_rows()], params=p)(st).target[0, 0] == 1
+
+
+def test_redirect_stays_on_the_enemy_it_chose_while_it_touches_it():
+    st = melee_state(z_target=100., z_other=10.)
+    policy = replay.Replay([attack_rows()], params=contact_params())
+    assert policy(st).target[0, 0] == 2
+    st.u["z"][0, 1] = 9.                      # the recorded target... now touching: the recorded order again
+    assert policy(st).target[0, 0] == 1
+    st.u["z"][0, 1] = 100.
+    st2 = melee_state(z_target=100., z_other=10.)
+    policy = replay.Replay([attack_rows()], params=contact_params())
+    policy(st2)
+    st2.u["r"][0, 2] = True                   # the chosen one routs: no standing enemy touches it - recorded order
+    assert policy(st2).target[0, 0] == 1
+
+
+def test_recorded_orders_mark_the_game_s_moving_seconds():
+    b = recording(); b.f["mv"][:, 0] = [True, True, False, True, False, True, True]
+    r = replay.recorded_orders(b, [0, 1], 2)
+    assert r["moving"][:, 0].tolist() == [True, False, False, False, False, True, False]

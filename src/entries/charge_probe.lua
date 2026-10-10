@@ -42,7 +42,9 @@
 -- away; 'skirmish' (the skirmish plan) is a shooter: at the start, placed, its fire at will on and the game's skirmish
 -- mode (it steps back from an approaching enemy by itself, over its order) set by lane.t_skirmish (on / off; event
 -- probe_skirmish {can, before, after}); at the go a ranged attack on the attacker at a walk (as the bridge aims a held
--- shooter); its sample row is the shooter's (ammo, fire, dd) with sk (the mode on now). lane.lord (optional): a lord placed behind the target (dz m), who uses lane.lord.ability on
+-- shooter; with lane.t_move {back_m, run} instead a move back_m straight away from the attacker (-z) at a walk / a run,
+-- never changed: the shootcontact plan, probe_phase 't_move'); its sample row is the shooter's (ammo, fire, dd) with sk
+-- (the mode on now). lane.lord (optional): a lord placed behind the target (dz m), who uses lane.lord.ability on
 -- himself at the lane's first contact (Stand Your Ground) unless the key is empty (the control); with
 -- lane.lord.at_m instead once the two units' centres are within at_m before the contact.
 -- lane.target2 (optional; its front lane.t2_width, else t_width): a second target unit placed t2_dx m beside the target (+x) and t2_dz m along z (the
@@ -644,6 +646,11 @@ function M.main(bm, config, globals)
             if lane.t2 and lane.t2_mode == 'attack' then attack(lane, lane.t2, lane.a, true) end
             if lane.target_mode == 'push' then
                 orders.move(lane.t.uc, vec(lane.layout.tx, lane.z + (lane.push_m or 60)), false)
+            elseif lane.target_mode == 'skirmish' and lane.t_move then
+                -- (the shootcontact plan) a move t_move.back_m straight away from the attacker (-z), never changed
+                local L = lane.layout
+                orders.move(lane.t.uc, vec(L.tx, L.tz - (lane.t_move.back_m or 300)), lane.t_move.run == true)
+                emit('probe_phase', {lane = lane.name, phase = 't_move', t = 0, at_run = lane.t_move.run == true})
             elseif lane.target_mode == 'skirmish' then
                 orders.attack_ranged(lane.t.uc, lane.a.unit, false, true)
             end

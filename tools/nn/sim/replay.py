@@ -13,11 +13,13 @@ lord's orders keep the recorded time, LORD_PHASES).
 The approach's running flag and target survive a late contact; melee keeps that phase's target.
 Phases continue until the wall-clock recording end plus `grace_s` (120 s), then every unit attacks the nearest enemy
 (check.py stops a whole battle when its recording ends, and keeps a pair on its last orders).
+A formation without a missile weapon that does not touch its recorded attack target in the simulation while it touches
+another standing enemy fights that enemy, unless the recording shows it moving then (Replay's params; REDIRECT).
 """
 import numpy as np
 import torch
 
-from tools.nn.sim import orders as O
+from tools.nn.sim import geometry, orders as O
 
 MELEE_GAP = 20       # recorded seconds: a non-leaver's melee flag off this long or less between two fights is melee ...
 STAY_M = 10.0        # ... when the unit stayed within this of where the flag went off (it never left the fight)
@@ -25,6 +27,16 @@ LORD_PHASES = False  # a lone man's (a lord's) clock waits for contact / separat
                      # recorded time - the game's lords break off melee 1.3 times a minute and switch targets; a lord
                      # whose clock waited for a contact or a separation went on with an old order on another unit in
                      # 0.28 of the seconds the game's enemy lord fought ours, build/open_battle/spec.md 1)
+REDIRECT = True      # Replay with params: a formation without a missile weapon that does not touch its recorded attack
+                     # target but touches another standing enemy attacks that enemy (the nearest by edge gap; the same
+                     # one while it still touches it), unless the recording shows it moving at that second and the next
+                     # (the game's is_moving flag: it really left or walked off). The recording's target is where the
+                     # game's units stood: in the replay they stand elsewhere, the target is often far while another
+                     # enemy touches the unit, and contact.attack_leave / retarget_walk walked it out of a fight it
+                     # stayed in (the 72 gate battles, build/latebattle/z3_target.txt: our infantry in melee with a far
+                     # recorded target and another enemy near 38 % of its seconds in the replay, 25 % in the game; the
+                     # enemy's 30 % against 7 %). In the game such seconds are moving ones for our infantry 0.78 of the
+                     # time (it left: kept), for the AI's 0.20; with the target near in the game 0.04-0.07.
 
 
 def hold(st):
@@ -81,7 +93,8 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
     -> slot). The game records the order's point at the formation's front (measured: half a depth
     ahead of the centre); widths [recorded index] (m) turn it into the centre the simulator goes to.
     phase (0: ordinary, 1: approach, 2: separation), end (exclusive row), and phase_target
-    describe the contact clock; Replay consumes them, not the combat engine.
+    describe the contact clock; Replay consumes them, not the combat engine. moving: the game's is_moving flag this
+    second and the next (Replay's redirect, REDIRECT).
     leavers [recorded index] (None: all): units whose recorded point in melee is a move order in force;
     such a unit in melee without a recorded target whose point is leave_m or more away moves there (it
     walks out of the fight, as in the game; leave_m 0: never) instead of attacking the nearest enemy.
@@ -117,6 +130,7 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
     end = np.broadcast_to(np.arange(1, T + 1)[:, None], (T, N)).copy()
     phase_target = np.full((T, N), -1, dtype=np.int64)
     target_r = np.zeros((T, N), dtype=bool)
+    moving = np.zeros((T, N), dtype=bool)
     # The nearest living enemy of each unit each second (for fights without a recorded target).
     xs, zs = np.nan_to_num(f["x"], nan=1e6), np.nan_to_num(f["z"], nan=1e6)
     dist = np.hypot(xs[:, :, None] - xs[:, None, :], zs[:, :, None] - zs[:, None, :])
@@ -153,6 +167,9 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
         target[:, s] = np.where(attack, mapped, -1)
         target_r[:, s] = attack & np.asarray(f["r"], bool)[np.arange(T), np.clip(tg, 0, None)]
         x[:, s], z[:, s] = ox, oz
+        # moving in the game this second and the next (is_moving; the redirect keeps such a unit's recorded order)
+        mv = np.asarray(f["mv"][:, i], bool) if "mv" in f else np.zeros(T, dtype=bool)
+        moving[:, s] = mv & np.r_[mv[1:], False]
         running = f["f"][:, i]
         # Look ahead without wrapping the recording's first flags into its last seconds.
         run[:, s] = running
@@ -200,7 +217,8 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
                 phase[b, s] = 2
                 end[b, s] = b + 1
     return {"kind": kind, "x": x, "z": z, "target": target, "run": run,
-            "phase": phase, "end": end, "phase_target": phase_target, "target_r": target_r}
+            "phase": phase, "end": end, "phase_target": phase_target, "target_r": target_r,
+            "moving": moving}
 
 
 class Replay:
@@ -211,9 +229,11 @@ class Replay:
     release a latch. Legacy rows without phase metadata remain clock-indexed. The wall-clock
     recording end plus grace_s still invokes `after`, even if a phase could not finish.
     One instance belongs to one simulation; decreasing battle time resets its clocks.
+    params (tools/nn/sim/params.Params; None: off): the redirect (REDIRECT) - its contact test is battle.step's
+    (formation.spacing_m, contact.reach_m / lord_reach_m / hold_m), from the units' places before the step.
     """
 
-    def __init__(self, rows, device="cpu", after=nearest_attack, grace_s=120.0, router_release=False):
+    def __init__(self, rows, device="cpu", after=nearest_attack, grace_s=120.0, router_release=False, params=None):
         T = max(r["kind"].shape[0] for r in rows)
         N = rows[0]["kind"].shape[1]
         B = len(rows)
@@ -233,8 +253,17 @@ class Replay:
         self.router_release = bool(router_release) and all("target_r" in r for r in rows)
         if self.router_release:
             keys += ("target_r",)
+        self.redirect = REDIRECT and params is not None and all("moving" in r for r in rows)
+        if self.redirect:
+            keys += ("moving",)
+            c = params.sim["contact"]
+            self.spacing = float(params.sim["formation"]["spacing_m"])
+            self.reach = float(c["reach_m"])
+            self.lord_reach = float(c.get("lord_reach_m", c["reach_m"]))
+            self.hold_m = float(c["hold_m"])
+        self.chosen = None
         for k in keys:
-            fill = {"kind": O.HOLD, "target": -1, "target_r": False}.get(k, 0)
+            fill = {"kind": O.HOLD, "target": -1, "target_r": False, "moving": False}.get(k, 0)
             arr = np.full((B, T, N), fill, dtype=rows[0][k].dtype)
             for b, r in enumerate(rows):
                 arr[b, :r[k].shape[0]] = r[k]
@@ -288,6 +317,8 @@ class Replay:
             waiting = (gather(self.stack["phase"]) == 1) & (self.clock >= gather(self.stack["end"]) - 0.0011)
             o.kind = torch.where(waiting & valid, O.ATTACK, o.kind)
             o.target = torch.where((o.kind == O.ATTACK) & valid, tg, o.target)
+        if self.redirect:
+            o = self._redirect(st, o, gather(self.stack["moving"]))
         if self.router_release:
             u = st.u
             routs = (o.target >= 0) & u["r"].gather(1, o.target.clamp(min=0))
@@ -297,4 +328,34 @@ class Replay:
         over = (sec >= self.length + self.grace)[:, None].expand(-1, st.N)
         if bool(over.any()):
             o = O.merge(o, self.after(st), over)
+        return o
+
+    def touching(self, st):
+        """([B, N, N] i touches standing enemy j, edge gaps, [B, N] standing): battle.step's contact test (edges within
+        reach_m, lord_reach_m for a lone man, + hold_m when either fights already) from the places before the step."""
+        u = st.u
+        pw = geometry.pairwise(u, self.spacing)
+        alive = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
+        standing = alive & ~u["r"]
+        lone = u["men0"] <= 1
+        reach = torch.where(lone[:, :, None] | lone[:, None, :], self.lord_reach, self.reach)
+        held = (u["m"][:, :, None] | u["m"][:, None, :]).float() * self.hold_m
+        touch = pw["enemy"] & alive[:, :, None] & standing[:, None, :] & (pw["gap"] <= reach + held)
+        return touch, pw["gap"], standing
+
+    def _redirect(self, st, o, moving):
+        """REDIRECT: an ATTACK of a standing formation without a missile weapon on a target it does not touch, while
+        it touches another standing enemy and the recording does not show it moving, goes to that enemy."""
+        u = st.u
+        touch, gap, standing = self.touching(st)
+        if self.chosen is None or self.chosen.shape != o.target.shape:
+            self.chosen = torch.full_like(o.target, -1)
+        on_target = touch.gather(2, o.target.clamp(min=0)[:, :, None]).squeeze(2)
+        want = ((o.kind == O.ATTACK) & (o.target >= 0) & ~on_target & touch.any(2) & standing & ~u["s"]
+                & (u["men0"] > 1) & (u["range"] <= 0) & ~moving)
+        keep = (self.chosen >= 0) & touch.gather(2, self.chosen.clamp(min=0)[:, :, None]).squeeze(2)
+        nearest = torch.where(touch, gap, torch.full_like(gap, 1e9)).argmin(2)
+        pick = torch.where(keep, self.chosen, nearest)
+        self.chosen = torch.where(want, pick, torch.full_like(pick, -1))
+        o.target = torch.where(want, pick, o.target)
         return o
