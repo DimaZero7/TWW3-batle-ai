@@ -285,6 +285,11 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                 act = hd.Action(**{k: _rows(getattr(batch["action"], k), pidx) for k in kinds})
                 seq_act = chunk_action(batch["action"], pidx)
                 a = a_all[:, part].reshape(-1)
+                # The critic first, its backward pass at once: the actor and the critic share no weights, so the
+                # gradients are those of one backward pass of the sum, and the critic's activations (~2.2 MB a
+                # decision) are freed before the actor's are made (the part's peak memory)
+                vl = ((critic(cobs) - _rows(ret, pidx)) ** 2).mean()
+                (cfg.value * vl * share).backward()
                 # The critic's warm-up (train_policy False): the actor runs without a graph, for the stats
                 # only; with one its activations took ~3.5 GB more at the peak (13.5 GB on a 16 GB card).
                 with torch.set_grad_enabled(train_policy):
@@ -292,6 +297,9 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                     logits = {k: v.reshape(-1, *v.shape[2:]) for k, v in logits.items()}
                     ctrl = obs["ctrl"].reshape(-1, obs["ctrl"].shape[-1])
                     lp, ent = hd.log_prob(logits, act, ctrl)
+                    # (the full entropy is for the log only: its graph - softmaxes over the 256 sectors - let go now)
+                    ent_all = masked_mean(ent.detach(), ctrl)
+                    del ent
                     old = _rows(batch["lp"], pidx)
                     pl, clipped = policy_loss(lp, old, a, ctrl, cfg.clip)
                     free = deciding(obs).reshape(-1, ctrl.shape[-1])
@@ -338,15 +346,14 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                         for h, (mse, ref) in parts_e.items():
                             step[f"eyes_{h}"] += _f(mse) * share
                             step[f"eyes_ref_{h}"] += _f(ref) * share
-                vl = ((critic(cobs) - _rows(ret, pidx)) ** 2).mean()
                 policy_part = (pl - cfg.entropy * entropy + cfg.anchor * anchored + imitation + cfg.eyes * seen
                                + (obs_anchor * observed if obs_on else 0.0) - (spread if spread is not None else 0.0))
-                loss = cfg.value * vl + (policy_part if train_policy else 0.0)
-                (loss * share).backward()
+                if train_policy:
+                    (policy_part * share).backward()
                 with torch.no_grad():
                     kl = masked_mean(old - lp, ctrl)
                 for k, x in (("policy_loss", pl), ("value_loss", vl), ("entropy", entropy), ("kl", kl),
-                             ("clip", clipped), ("entropy_all", masked_mean(ent, ctrl)), ("anchor_kl", anchored)):
+                             ("clip", clipped), ("entropy_all", ent_all), ("anchor_kl", anchored)):
                     step[k] += _f(x) * share
             if obs_on and obs_term:
                 # the demonstrations: their own chunks, one backward pass beside the minibatch's

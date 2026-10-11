@@ -1252,6 +1252,26 @@ class TestLoop:
         for other in after[1:]:
             assert all(torch.allclose(x, y, atol=1e-6) for x, y in zip(after[0], other))
 
+    def test_the_critic_has_its_own_backward_pass_and_the_warm_up_trains_only_the_critic(self):
+        # ppo.update runs the critic's backward pass right after its forward pass (its activations freed before the
+        # actor's are made): the actor and the critic share no weights, so the step is that of one backward pass
+        import copy
+        actor, crit = nets()
+        env = rollout.Battles(league.layout(8, 1, {"self": 0.5, "nearest": 0.5}), MIRROR)
+        batch = rollout.collect(env, actor, crit, 3)
+        assert not {id(p) for p in actor.parameters()} & {id(p) for p in crit.parameters()}
+        cfg = dataclasses.replace(ppo.PPOConfig(), epochs=1, minibatch=3 * env.R, accum=2, target_kl=0.0)
+        a, c = copy.deepcopy(actor), copy.deepcopy(crit)
+        opt = torch.optim.SGD(list(a.parameters()) + list(c.parameters()), lr=0.0)    # (lr 0: the gradients stay)
+        st = ppo.update(a, c, opt, batch, cfg)
+        assert all(p.grad is not None for p in c.parameters()) and np.isfinite(st["entropy_all"])
+        # the warm-up (train_policy False): the critic alone
+        a, c = copy.deepcopy(actor), copy.deepcopy(crit)
+        opt = torch.optim.Adam(list(a.parameters()) + list(c.parameters()), lr=1e-3)
+        ppo.update(a, c, opt, batch, cfg, train_policy=False)
+        assert all(torch.equal(x, y) for x, y in zip(a.parameters(), actor.parameters()))
+        assert not all(torch.equal(x, y) for x, y in zip(c.parameters(), crit.parameters()))
+
     def test_a_wider_network_keeps_the_minibatch_in_parts_and_its_stream_readers_take_lr_over_width(self):
         from tools.nn.model import widen
         from tools.nn.train import run

@@ -393,9 +393,13 @@ def train(args, every=None, teacher=None, normal=None):
         print(dr_cfg.text(), flush=True)
     if normal_s:
         env.set_teach_shares(normal_s)
-    # v2: one part more (its 256 sector tokens a decision; 2 parts peaked at 11.9 GB of the 16 GB card, wide 11.7, and
-    # a little more pushed the card into its shared memory: an update 10 s -> 157 s)
-    step_cfg = sized(cfg, env.N, width=width + (1.0 if actor.cfg.sectors else 0.0))
+    # v2 (d 256): 2 parts. Until the update freed the critic's activations and the full entropy's graph early
+    # (ppo.update; 8.1 -> 5.6 MB a decision) it took one part more: 3 parts peaked at 12.0 GB of the 16 GB card, and a
+    # little more pushed the card into its shared memory (an update 10 s -> 157 s); now 2 parts peak at 12.2 GB, 3 at
+    # 10.1 GB (line W's batch, 1024 battles x 64 decisions)
+    step_cfg = sized(cfg, env.N, width=width)
+    if args.parts:                                # --parts: the minibatch in this many parts, whatever the size
+        step_cfg = dataclasses.replace(step_cfg, accum=args.parts)
     log = (out / "log.jsonl").open("w", encoding="utf-8", newline="\n")
     print(f"{args.name}: battles {env.B} (learner rows {env.R}), slots {env.N}, up to {args.max_units} units a side, "
           f"steps per update {args.steps} ({args.steps * env.decision_s:g} s of battle), "
@@ -780,6 +784,8 @@ def parser():
     cad.add_args(ap)
     ap.add_argument("--epochs", type=int, default=ppo.PPOConfig.epochs)
     ap.add_argument("--minibatch", type=int, default=ppo.PPOConfig.minibatch, help="decisions per minibatch")
+    ap.add_argument("--parts", type=int, default=0,
+                    help="compute each minibatch in this many parts (gradient accumulation; 0: by the network's size, sized())")
     ap.add_argument("--entropy", type=float, default=ppo.PPOConfig.entropy, help="weight of the kind's entropy")
     ap.add_argument("--entropy-end", type=float, help="... at the end of the run (linear; default: no change)")
     ap.add_argument("--entropy-decay", type=float, default=0.0,

@@ -450,7 +450,10 @@ flowchart TB
   `small`: one learning rate for every weight (`lr`, not divided by the width). No teachers with v2 (the rollout
   checks it).
 - **Memory in training.** The sector branch's insides are not kept for the update but recomputed in the backward
-  pass (activation checkpointing), and the minibatch is computed in 3 parts, not 2 as `wide`'s.
+  pass (activation checkpointing). The update runs the critic's backward pass right after its forward pass (the
+  actor and the critic share no weights: the same gradients) and lets go of the full entropy's graph at once (it is
+  for the log only): 8.1 -> 5.6 MB a decision. So the minibatch is computed in 2 parts, as `wide`'s: a 12.2 GB peak
+  on line W's batch (1024 battles x 64 decisions), the update 16.3 -> 15.7 s; `--parts 3` as before (10.1 GB).
 - **The old untouched.** `small`, `wide`, `target` and their checkpoints work as before; `Actor(cfg)` with
   `sectors` > 0 builds an `ActorV2` itself, so a v2 checkpoint loads everywhere (training, evaluation, companion).
 
@@ -476,7 +479,8 @@ the decision's share of a step's time.
 
 **Tried and rejected.** v2's minibatch in 2 parts without recomputing the sector branch: a 12.5 GB peak of 16, the
 card spilled into shared memory, an update 10 s → 157 s. Recomputed in 2 parts: 11.9 GB (at the edge, like
-`wide`); in 3 parts: 9.5 GB, the update +7 % time.
+`wide`); in 3 parts: 9.5 GB, the update +7 % time. Later, with a bigger batch (the eyes, the pair features), 3 parts
+peaked at 12.0 GB; once the critic's and the entropy's memory was freed at once, 2 parts again (above).
 
 ## Sizes
 
