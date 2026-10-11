@@ -7,7 +7,8 @@
 --   'attack_walk'  attack it at a walk (no charge);
 --   'move_run'     a move order at a run to a point move_beyond_m behind the target's front;
 --   'recharge'     attack_run; recharge_after_s after the first contact a move back_m away at a run,
---                  then (arrived, or recharge_max_s later) attack_run again;
+--                  then (arrived, or recharge_max_s later) attack_run again; with lane.pause_s (the recontact plan)
+--                  probe_phase 'clear' (first out of melee) and 'arrived' (there), the attack pause_s after arriving;
 --   'hold'         no order;
 --   'withdraw'     attack_run; recharge_after_s after the first contact a move back_m away at a run,
 --                  never changed again (the melee exit: is the order kept, dropped after melee_breakoff_secs?);
@@ -168,13 +169,20 @@ end
 -- The recharge's phase after one tick (pure): 'in' (attacking) -> 'out' recharge_after_s after the
 -- first contact -> 'back' (attacking again) once out of melee and back_m away, or recharge_max_s
 -- after leaving. Returns the new phase.
-function M.recharge_step(phase, now_ms, contact_ms, out_ms, moved_m, in_melee, lane)
+-- With lane.pause_s (the recontact plan) 'back' comes pause_s after arrive_ms (when it got there, out of melee: the
+-- caller's 'arrived') instead of on getting there; recharge_max_s after 'out' either way.
+function M.recharge_step(phase, now_ms, contact_ms, out_ms, moved_m, in_melee, lane, arrive_ms)
     if phase == 'in' and contact_ms and now_ms - contact_ms >= lane.recharge_after_s * 1000 then
         return 'out'
     end
-    if phase == 'out' and lane.mode ~= 'withdraw' and ((not in_melee and moved_m >= lane.back_m - 5)
-            or now_ms - out_ms >= lane.recharge_max_s * 1000) then
-        return 'back'
+    if phase == 'out' and lane.mode ~= 'withdraw' then
+        local there
+        if lane.pause_s then
+            there = arrive_ms ~= nil and now_ms - arrive_ms >= lane.pause_s * 1000
+        else
+            there = not in_melee and moved_m >= lane.back_m - 5
+        end
+        if there or now_ms - out_ms >= lane.recharge_max_s * 1000 then return 'back' end
     end
     return phase
 end
@@ -377,7 +385,21 @@ function M.main(bm, config, globals)
                     local p = read(function() return lane.a.unit:position() end)
                     local moved = (p and lane.out_from) and
                         math.sqrt((p:get_x() - lane.out_from[1]) ^ 2 + (p:get_z() - lane.out_from[2]) ^ 2) or 0
-                    local phase = M.recharge_step(lane.phase, now, lane.contact, lane.out_ms or now, moved, a_m, lane)
+                    if lane.phase == 'out' and lane.pause_s then
+                        -- the recontact plan: out of melee ('clear'), there ('arrived'), pause_s, then 'back'
+                        if not lane.clear_ms and not a_m then
+                            lane.clear_ms = now
+                            emit('probe_phase', {lane = lane.name, phase = 'clear', t = now - lane.t0,
+                                after_out_s = round((now - lane.out_ms) / 1000), moved_m = round(moved)})
+                        end
+                        if not lane.arrive_ms and not a_m and moved >= lane.back_m - 5 then
+                            lane.arrive_ms = now
+                            emit('probe_phase', {lane = lane.name, phase = 'arrived', t = now - lane.t0,
+                                moved_m = round(moved)})
+                        end
+                    end
+                    local phase = M.recharge_step(lane.phase, now, lane.contact, lane.out_ms or now, moved, a_m, lane,
+                        lane.arrive_ms)
                     if phase ~= lane.phase then
                         lane.phase = phase
                         if phase == 'out' and p then

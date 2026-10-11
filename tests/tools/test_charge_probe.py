@@ -16,7 +16,7 @@ def test_plans_have_few_battles_and_lanes_on_both_sides():
         for i in range(1, len(cp.battles(plan)) + 1):
             config, model_s, arena = cp.run_config(plan, i)
             # (reengage: its tired pair runs up to 540 s before its fight; retarget2 / 3: 10 / 7 short lanes)
-            assert 2 <= len(config["lanes"]) <= {"retarget2": 10, "retarget3": 7, "leave": 6, "skirmish": 10, "skirmish2": 12, "shootcontact": 8}.get(plan, 5)
+            assert 2 <= len(config["lanes"]) <= {"retarget2": 10, "retarget3": 7, "leave": 6, "skirmish": 10, "skirmish2": 12, "shootcontact": 8, "recontact": 6}.get(plan, 5)
             assert model_s < (720 if plan == "reengage" else 400)
             assert all(len(side["units"]) <= 20 for side in arena["sides"].values())
             names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}
@@ -89,6 +89,83 @@ def test_the_holdlord_plan_gives_the_general_a_halt_the_same_attack_or_a_far_att
     names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}
     assert all(l["target2"] in names and l["t2_dx"] >= 25 for l in config["lanes"])
     assert model_s < 200
+
+
+def test_the_recontact_plan_charges_halted_clanrats_leaves_waits_and_charges_again():
+    b = cp.battles("recontact")
+    assert len(b) == 3 and all(sorted(l["kind"] for l in x) == sorted(cp.RECONTACT_KINDS) for x in b)
+    # every kind in three different lane places
+    assert all(len({[l["kind"] for l in x].index(k) for x in b}) == 3 for k in cp.RECONTACT_KINDS)
+    lanes = {l["kind"]: l for l in b[0]}
+    assert all(l["attacker"] == "swords" and l["target"] == "clanrat" and l["target_mode"] == "hold"
+               and l["gap_m"] == 40 and not l["answer"] for l in b[0])
+    assert lanes["none"]["mode"] == "attack_run" and "pause_s" not in lanes["none"]
+    assert lanes["none"]["fight_s"] >= cp.RECONTACT["none_ref_s"] + 20
+    for kind, (back_m, pause_s) in ((k, v) for k, v in cp.RECONTACT_KINDS.items() if v):
+        l = lanes[kind]
+        assert l["mode"] == "recharge" and l["recharge_after_s"] == 30 and l["after2_s"] == 30
+        assert (l["back_m"], l["pause_s"]) == (back_m, pause_s)
+        assert l["recharge_max_s"] > pause_s + 20 and l["max_s"] >= 10 + 30 + l["recharge_max_s"] + 30 + 30
+    assert (lanes["short"]["back_m"], lanes["short"]["pause_s"]) == (12, 0) and lanes["p60"]["pause_s"] == 60
+    config, model_s, arena = cp.run_config("recontact", 2)
+    assert config["men_near_m"] == 100 and config["men_after_s"] == 95
+    assert max(abs(l["x"]) for l in config["lanes"]) <= 500 and model_s < 250
+
+
+def test_layout_lanes_start_the_twin_where_the_entry_places_the_units():
+    lanes = cp.layout_lanes("recontact", [1])
+    assert len(lanes) == 6
+    for ln in lanes:
+        sp, (t0, a, tg, lord) = ln["spec"], ln["samples"][0]
+        assert t0 == 0 and lord is None and a["b"] == 180 and tg["b"] == 0
+        assert a["men"] == 120 and tg["men"] == 160 and a["x"] == tg["x"] == sp["x"]
+        # front to front gap_m (the entry's M.layout: centres half a depth behind each front)
+        assert abs((a["z"] - sp["a_depth"] / 2) - (tg["z"] + sp["t_depth"] / 2) - 40) < 1e-9
+        assert ln["end"]["t"] == sp["max_s"] * 1000
+
+
+def _recontact_lane(kind, run="r"):
+    """A recontact lane: contact 1 at 10 s, the clanrats losing 60 HP/s in its first 3 s and 20 later; out at 40 s, the
+    last melee sample 44 s, contact 2 at 70 s: 40 HP/s for 3 s, 20 later; the swordsmen lose 10 HP/s in melee; the end
+    at 100 s. 'none' fights on: 20 HP/s from 13 s to the end."""
+    spec = dict(next(l for l in cp.layout(cp.battles("recontact")[0])[0] if l["kind"] == kind))
+    samples, hp, hp_a = [], 9600.0, 8280.0
+    leaves = kind != "none"
+    def fight(s):
+        return (10 <= s < 44.5 or s >= 70) if leaves else s >= 10
+    for k in range(0, 201):
+        t, s = k * 0.5, k * 0.5 - 0.5        # the half second (s, t] before this sample
+        m = fight(t)
+        if k and fight(s):
+            hp -= 0.5 * (60 if s < 13 else 40 if leaves and 70 <= s < 73 else 20)
+            hp_a -= 0.5 * 10
+        fat = "threshold_active" if t < 70 else "threshold_winded"
+        samples.append((t, {"x": 0, "z": 40, "hp": hp_a, "men": 120, "m": m, "fat": fat},
+                        {"x": 0, "z": 0, "hp": hp, "men": 160, "m": m, "fat": fat}, None))
+    return {"run": run, "plan": "recontact", "battle": 1, "spec": spec, "samples": samples, "men": [],
+            "contacts": {1: 10.0, 2: 70.0} if leaves else {1: 10.0}, "end": None, "abilities": [],
+            "phases": [{"phase": "out", "t": 40000}, {"phase": "arrived", "t": 52000}, {"phase": "back", "t": 67000}]
+            if leaves else []}
+
+
+def test_recontact_measure_the_opening_of_each_contact_and_the_time_out_of_melee():
+    m = cp.recontact_measure(_recontact_lane("p15", run="sim"))
+    assert abs(m["first_tg_0_3"] - 60) < 1e-6 and abs(m["first_tg_10_20"] - 20) < 1e-6
+    assert abs(m["first_tg_open"] - 3) < 1e-6 and abs(m["first_a_open"] - 1) < 1e-6
+    assert abs(m["re_tg_0_3"] - 40) < 1e-6 and abs(m["re_tg_3_10"] - 20) < 1e-6 and abs(m["re_tg_open"] - 2) < 1e-6
+    assert m["out_s"] == 70 - 44 and m["leave_s"] == 4
+    assert m["re_a_fat"] == 2 and m["first_a_fat"] == 1
+    # the game's contact window starts at the sample before the contact (0.5 s more of the same rate)
+    g = cp.recontact_measure(_recontact_lane("p15"))
+    assert abs(g["re_tg_0_3"] - (40 * 3) / 3.5) < 1e-6
+    # the control never leaves: its reference is contact + none_ref_s, still fighting
+    n = cp.recontact_measure(_recontact_lane("none", run="sim"))
+    assert "out_s" not in n and abs(n["re_tg_open"] - 1) < 1e-6
+    table = cp.recontact_summary([m, n, cp.recontact_measure(_recontact_lane("p60", run="sim"))])
+    fresh = table[("sim", "first", "fresh (all lanes)")]
+    assert fresh["n"] == 3 and abs(fresh["tg_open"] - 3) < 1e-6
+    assert abs(table[("sim", "re", "p15")]["tg_open"] - 2) < 1e-6 and table[("sim", "re", "p15")]["out_s"] == 26
+    assert "out_s" not in table[("sim", "re", "none")]
 
 
 def test_run_passes_the_speed_to_the_build(capsys):

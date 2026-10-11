@@ -1265,6 +1265,54 @@ class TestChargeProbe:
         phases = [(r["phase"], r["n"]) for r in rows if r["event"] == "probe_phase"]
         assert phases == [("after:move_near", 1), ("after:halt", 2)]
 
+    def test_recontact_waits_pause_s_after_getting_back_then_attacks_again(self, lua, tmp_path):
+        """lane.pause_s (the recontact plan): 'clear' once out of melee, 'arrived' back_m - 5 m off, the attack at a run
+        pause_s later; the lane ends after2_s after contact 2. The target holds: never ordered."""
+        lua.execute(self.SETUP + """
+            CONFIG.lanes = {CONFIG.lanes[1]}
+            local L = CONFIG.lanes[1]
+            L.target_mode, L.answer, L.recharge_after_s, L.back_m, L.recharge_max_s = 'hold', false, 2, 12, 30
+            L.pause_s, L.after2_s = 2, 3
+            CONFIG.park = {{name = 'enemy_lord', x = 700, z = -400, bearing = 0},
+                           {name = 'own_lord', x = -700, z = -400, bearing = 0}}
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            assert(own[2].attack_args.run == true, 'the first attack at a run')
+            own[2].melee, enemy[2].melee = true, true
+            for _ = 1, 6 do bm:tick(500); bm:pump() end
+            assert(own[2].moving == true, 'the move back after recharge_after_s')
+            own[2].melee, enemy[2].melee = false, false
+            for _ = 1, 2 do bm:tick(500); bm:pump() end
+            own[2].attack_args = nil
+            own[2].pos.z = own[2].pos.z + 12
+            for _ = 1, 3 do bm:tick(500); bm:pump() end
+            assert(own[2].attack_args == nil, 'not before pause_s')
+            for _ = 1, 3 do bm:tick(500); bm:pump() end
+            assert(own[2].attack_args.run == true, 'the second attack at a run')
+            own[2].melee, enemy[2].melee = true, true
+            for _ = 1, 200 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+            assert(enemy[2].attack_args == nil, 'the held target is never ordered')
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        ph = {r["phase"]: r["t"] for r in rows if r["event"] == "probe_phase"}
+        assert list(ph) == ["out", "clear", "arrived", "back"]
+        assert ph["back"] - ph["arrived"] >= 2000 and ph["arrived"] > ph["clear"]
+        assert [r["n"] for r in rows if r["event"] == "probe_contact"] == [1, 2]
+        assert {r["lane"]: r["why"] for r in rows if r["event"] == "probe_lane_end"} == {"L1": "after_contact2"}
+        cp = "require('entries.charge_probe')"
+        step = lua.eval(cp + ".recharge_step")
+        lane = lua.table_from({"mode": "recharge", "recharge_after_s": 30, "back_m": 40, "recharge_max_s": 45,
+                               "pause_s": 15})
+        assert step("out", 60000, 0, 30000, 40, False, lane, None) == "out"       # there, but not 'arrived' yet
+        assert step("out", 54000, 0, 30000, 40, False, lane, 40000) == "out"
+        assert step("out", 55000, 0, 30000, 40, False, lane, 40000) == "back"     # pause_s after arriving
+        assert step("out", 75000, 0, 30000, 0, True, lane, None) == "back"        # recharge_max_s
+        lane = lua.table_from({"mode": "recharge", "recharge_after_s": 30, "back_m": 40, "recharge_max_s": 45})
+        assert step("out", 40000, 0, 30000, 36, False, lane) == "back"            # no pause_s: on getting there
+
     def test_damage_shoot_and_two_on_one(self, lua, tmp_path):
         lua.execute(self.SETUP + """
             CONFIG.lanes = {CONFIG.lanes[1], CONFIG.lanes[2]}

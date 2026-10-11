@@ -212,6 +212,19 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           unit ('far'), (e) the same and a halt 3 s later ('far_halt3'); the clanrats keep attacking him; 60 s from
           contact - 2 battles of 5 lanes, rotated. The samples' ct: the unit's engine target now (current_target, its
           script name, '' none). Its table: build/gaps/holdmelee_probe.py (by lane kind).
+  recontact  the opening of a second contact (build/gaps/melee_rout.md 1: in whole battles a unit back in melee after
+          10+ s out of it loses health evenly - its first 3 s about as its 10-20 s - while the simulator restarts the
+          opening wave and the full first strike after every contact.reset_s 10 s out of contact: x1.1-3.8): swordsmen
+          charge halted clanrats (target_mode 'hold': never ordered, they fight what touches them and never chase) at a
+          run from 40 m - every lane's first contact is a fresh one; 30 s after it the swordsmen get a move straight back
+          at a run (mode 'recharge'), once there (out of melee, back_m - 5 m off) they wait pause_s ('arrived') and attack
+          again at a run; lane kinds: 'short' 12 m back, no pause (out of contact < 10 s: under contact.reset_s, the
+          control), 'b25' 25 m back, no pause (~10-12 s out: at the reset), 'p5' / 'p15' / 'p60' 40 m back and 5 / 15 /
+          60 s, 'none' never leaves (its reference: contact + 60 s; an attack at a walk is no control without the
+          charge: in the game and the simulator it sprints the last 30 m all the same, contact.charge_dist); the
+          lane ends 30 s after contact 2 (after2_s) - 3 battles of 6 lanes 200 m apart, rotated. 'recontact' prints per
+          kind the HP lost a second in 0-3 / 3-10 / 10-20 s after each contact and 0-3 over 10-20; --sim adds the
+          simulator on the same lanes, --layout the simulator alone on the plan's own places (before the game).
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -229,6 +242,9 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe shootcontact [runs...]              # its table
     python -m tools.nn.charge_probe run --plan holdmelee --speed 10     # a halt after an order in melee
     python -m tools.nn.charge_probe run --plan holdlord --speed 10      # the same for a lord
+    python -m tools.nn.charge_probe run --plan recontact --speed 10     # the second contact's opening
+    python -m tools.nn.charge_probe recontact [runs...] [--sim]         # its table (+ the simulator on the same lanes)
+    python -m tools.nn.charge_probe recontact --layout --copies 4       # the simulator alone, before the game (torch)
 
 Measures per lane (the game's recording, and the simulator's run of the same lane from the same start):
 the attacker's speed on the way in (the last 30 m, the peak), the first contact; HP lost by the target
@@ -295,7 +311,7 @@ NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in N
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
          "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "leave", "skirmish", "skirmish2", "shootcontact",
-         "holdmelee", "holdlord")
+         "holdmelee", "holdlord", "recontact")
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
 WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
@@ -395,6 +411,14 @@ HOLDMELEE = {"leave3": ("move_near", 13), "leave10": ("move_near", 20), "att2_3"
 HOLDLORD = {"halt": ("halt", None), "none": ("none", None), "same": ("attack_same", None), "far": ("attack_t2", None),
             "far_halt3": ("attack_t2", 13)}
 HOLDLORD_T2_GAP_M = 25   # the second clanrat unit this far from the first one's edge (from the General ~40 m)
+# the recontact plan: the first charge from gap_m (front to front) at a run on halted clanrats, fight_s of melee, then
+# (mode 'recharge') a move back_m straight back at a run, pause_s once there, the attack again; the lane ends after2_s
+# after contact 2. Lane kinds: (back_m, pause_s) or None - never leaves (its reference none_ref_s after contact 1:
+# about when the p15 lanes touch again). Out of melee before contact 2 in the simulator: short ~5 s, p5 ~29, p15 ~40,
+# p60 ~84 (b25 between short and p5). 6 lanes lane_dx apart (|x| <= 500: the skirmish plan uses 525), 3 battles
+RECONTACT = {"gap_m": 40, "fight_s": 30, "after2_s": 30, "none_ref_s": 60, "lane_dx": 200}
+RECONTACT_KINDS = {"none": None, "short": (12, 0), "b25": (25, 0), "p5": (40, 5), "p15": (40, 15), "p60": (40, 60)}
+RECONTACT_WINDOWS = ((0, 3), (3, 10), (10, 20))   # s after a contact (the HP lost a second in each)
 # the defender plan's orders 1 s after contact (lane.after.kind; move_near 30 m aside at a run)
 DEFENDER = ("attack_same", "halt", "attack_t2", "move_near")
 DEFENDER_LANE_DX = 320  # (its second target stands 180 m aside, inward: 140 m from the next lane; |x| <= 480 as in
@@ -713,6 +737,20 @@ def battles(plan):
                         after={"at_s": 10, "kind": first, "dx": 0, "dz": 0, "walk": False}, **extra)
         base = [hl(k) for k in HOLDLORD]
         out += [base, rotate(base, 2)]
+    elif plan == "recontact":
+        def rc(kind):
+            common = dict(gap_m=RECONTACT["gap_m"], kind=kind, lane_dx=RECONTACT["lane_dx"])
+            if RECONTACT_KINDS[kind] is None:
+                return lane("swords", "clanrat", "attack_run", "hold", fight_s=RECONTACT["none_ref_s"] + 30, **common)
+            back_m, pause_s = RECONTACT_KINDS[kind]
+            # the cap on 'out' (never there: stuck in melee) - the exit ~5 s and 40 m at a run ~10 s, then the pause;
+            # the lane's end: ~10 s in, fight_s, the cap, the way back in (with room), after2_s
+            cap = 30 + pause_s
+            return lane("swords", "clanrat", "recharge", "hold", recharge_after_s=RECONTACT["fight_s"], back_m=back_m,
+                        pause_s=pause_s, recharge_max_s=cap, after2_s=RECONTACT["after2_s"],
+                        max_s=10 + RECONTACT["fight_s"] + cap + 30 + RECONTACT["after2_s"], **common)
+        base = [rc(k) for k in RECONTACT_KINDS]
+        out += [rotate(base, k) for k in (0, 2, 4)]
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
@@ -823,13 +861,13 @@ def run_config(plan, index):
     config = {"plan": plan, "battle": index, "settle_ms": SETTLE_MS, "tick_ms": TURN_TICK_MS if turn else TICK_MS,
               "men_ms": 500 if turn else MEN_MS,
               # (reengage: the pair 30 + 30 m apart between its two fights, centre to centre ~75 m)
-              "men_near_m": (100 if plan == "reengage" else 150 if plan == "leave"
+              "men_near_m": (100 if plan in ("reengage", "recontact") else 150 if plan == "leave"
                              else SKIRMISH["men_near_m"] if plan == "skirmish"
                              else SKIRMISH2["men_near_m"] if plan == "skirmish2"
                              else SHOOTCONTACT["men_near_m"] if plan == "shootcontact" else 60),
               # the soldiers' places: the first 30 s (the charge plan) or the whole fight (hit: men in contact)
               "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2", "dmgmelee", "reengage") else 95 if plan in ("defender", "wave", "wavemiss", "wavemiss2", "leave", "skirmish", "skirmish2",
-                                                                                                  "shootcontact")
+                                                                                                  "shootcontact", "recontact")
                               else 90 if plan in ("hit", "move", "vv") else 30),
               "lanes": lanes, "park": park}
     if plan in ("routmob", "routmob2"):
@@ -1138,7 +1176,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
            "out_from": [None] * B, "fired": [False] * B, "last": {}, "phases": [[] for _ in range(B)],
            "a_ability": [False] * B, "start": [None] * B, "faced": set(), "rout": [None] * B,
            "re": [{"phase": "in", "clear": False} for _ in range(B)], "tire": [None] * B, "aim": [None] * B,
-           "t_halt": {}, "after2": [None] * B}
+           "t_halt": {}, "after2": [None] * B, "arrive": [None] * B, "clear": [None] * B}
     # the retarget plan's switches run on the game's clock from the go: the twin starts at the first sample
     t_first = [float(ln["samples"][0][0]) for ln in meta]
     rec = {"t": [], "rows": []}
@@ -1207,8 +1245,19 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                 elif ph == "out":
                     fx, fz = st_["out_from"][b]
                     moved = math.hypot(ax[b] - fx, az[b] - fz)
-                    if mode[b] == "recharge" and ((not m_a[b] and moved >= sp["back_m"] - 5)
-                                                  or t - st_["out_t"][b] >= sp["recharge_max_s"]):
+                    there = not m_a[b] and moved >= sp["back_m"] - 5
+                    pause = sp.get("pause_s")
+                    if pause is not None:
+                        # the recontact plan (entries/charge_probe.lua): out of melee first ('clear'), there
+                        # ('arrived'), then pause_s more before the attack again
+                        if st_["clear"][b] is None and not m_a[b]:
+                            st_["clear"][b] = t
+                            st_["phases"][b].append({"phase": "clear", "t": t * 1000})
+                        if there and st_["arrive"][b] is None:
+                            st_["arrive"][b] = t
+                            st_["phases"][b].append({"phase": "arrived", "t": t * 1000})
+                        there = st_["arrive"][b] is not None and t - st_["arrive"][b] >= pause - 1e-6
+                    if mode[b] == "recharge" and (there or t - st_["out_t"][b] >= sp["recharge_max_s"]):
                         st_["phase"][b] = "back"
                         st_["phases"][b].append({"phase": "back", "t": t * 1000})
                 if st_["phase"][b] == "back" and st_["contact2"][b] is None and m_a[b]:
@@ -2047,10 +2096,156 @@ def shootcontact_report(run_dirs, out=None):
     return result
 
 
+# ---------------------------------------------------------------- the second contact's opening (plan recontact)
+
+def layout_lanes(plan, which=None):
+    """The plan's lanes as recordings holding only their start (the places entries/charge_probe.lua M.layout gives them
+    at the go): the simulator's twin before any game run (sim_lanes). Lanes with a second target, a lord or extras are
+    not covered."""
+    out = []
+    for i in which or range(1, len(battles(plan)) + 1):
+        config, _, _ = run_config(plan, i)
+        for l in config["lanes"]:
+            assert not (l.get("target2") or l.get("lord") or l.get("extras")), l["name"]
+            a_men, t_men = UNITS[SHORT[l["a_key"]]][1], UNITS[SHORT[l["t_key"]]][1]
+            a = {"x": l["x"] + l.get("a_dx", 0), "z": l["z"] + l["gap_m"] + l["a_depth"] / 2, "b": 180.0, "men": a_men}
+            tg = {"x": l["x"], "z": l["z"] - l["t_depth"] / 2, "b": 180.0 if l["target_mode"] == "rear" else 0.0,
+                  "men": t_men}
+            out.append({"run": "layout", "plan": plan, "battle": i, "spec": l, "samples": [(0.0, a, tg, None)],
+                        "men": [], "contacts": {}, "end": {"t": l["max_s"] * 1000}, "abilities": [], "phases": []})
+    return out
+
+
+def recontact_measure(lane):
+    """A recontact lane (game or simulator): the HP each side loses a second in RECONTACT_WINDOWS after its first contact
+    ('first': a fresh one) and after the second ('re'; the 'none' lane: none_ref_s after the first, still fighting), 0-3
+    over 10-20 (the opening), the seconds the swordsmen were out of melee before contact 2 (from their last melee sample
+    after the leave order), the fatigue level at each, and (game) the men within 2.5 m of an enemy."""
+    spec, s = lane["spec"], lane["samples"]
+    t = np.array([x[0] for x in s])
+    out = {"run": lane["run"], "lane": spec["name"], "kind": spec.get("kind"), "battle": lane.get("battle")}
+    c1, c2 = lane["contacts"].get(1), lane["contacts"].get(2)
+    if c1 is None:
+        return out
+    outs = [p["t"] / 1000 for p in lane.get("phases", []) if p["phase"] == "out"]
+    m_a = series(s, "a", "m")
+    if c2 is not None and outs:
+        inside = (t >= outs[0]) & (t < c2 - 1e-6) & (m_a > 0.5)
+        last = float(t[inside].max()) if inside.any() else outs[0]
+        out["leave_s"] = last - outs[0]          # the leave order to the last melee sample
+        out["out_s"] = c2 - last                 # out of melee before contact 2
+    anchors = {"first": (c1, True),
+               "re": (c2, True) if spec["mode"] == "recharge" else (c1 + RECONTACT["none_ref_s"], False)}
+    for tag, (a0, is_contact) in anchors.items():
+        if a0 is None:
+            continue
+        # a game contact's window starts at the sample before it (its first sample already holds the blows since then);
+        # the simulator's contact time is that sample already
+        prev = t[t < a0 - 1e-6]
+        start0 = float(prev[-1]) if is_contact and lane["run"] != "sim" and len(prev) else a0
+        for who in ("tg", "a"):
+            hp = series(s, who, "hp")
+            for lo, hi in RECONTACT_WINDOWS:
+                start = start0 if lo == 0 else a0 + lo
+                if a0 + hi <= t[-1] + 1e-6:
+                    v = (at(t, hp, start) - at(t, hp, a0 + hi)) / (a0 + hi - start)
+                    if np.isfinite(v):
+                        out[f"{tag}_{who}_{lo}_{hi}"] = v
+            r0, r1 = out.get(f"{tag}_{who}_0_3"), out.get(f"{tag}_{who}_10_20")
+            if r0 is not None and r1 and r1 > 0:
+                out[f"{tag}_{who}_open"] = r0 / r1
+        k = np.nonzero(t <= a0 + 1e-6)[0]
+        if len(k):
+            for who, i in (("a", 1), ("tg", 2)):
+                v = _level((s[k[-1]][i] or {}).get("fat"))
+                if np.isfinite(v):
+                    out[f"{tag}_{who}_fat"] = v
+        if lane.get("men"):
+            for lo, hi in ((0, 3), (10, 20)):
+                sel = [near_counts(a, b)[1] for tm, a, b in lane["men"] if a0 + lo - 0.01 <= tm < a0 + hi]
+                if sel:
+                    out[f"{tag}_a_near_{lo}_{hi}"] = float(np.mean(sel))
+    return out
+
+
+RECONTACT_COLS = tuple(f"{who}_{lo}_{hi}" for who in ("tg", "a") for lo, hi in RECONTACT_WINDOWS)
+
+
+def recontact_summary(rows):
+    """{(source, anchor, kind): row} - the mean of each number over the kind's lanes; 'open' = the mean 0-3 rate over
+    the mean 10-20 rate, with the lanes' own min and max. The first contacts of every lane are one more kind,
+    'fresh (all lanes)'."""
+    groups = {}
+    for r in rows:
+        src = "sim" if r["run"] == "sim" else "game"
+        groups.setdefault((src, "re", r["kind"]), []).append(r)
+        groups.setdefault((src, "first", "fresh (all lanes)"), []).append(r)
+    out = {}
+    for key, rs in groups.items():
+        _, tag, _ = key
+        row = {"n": sum(1 for r in rs if r.get(f"{tag}_tg_0_3") is not None)}
+        for col in RECONTACT_COLS + ("a_fat", "tg_fat", "a_near_0_3", "a_near_10_20"):
+            v = [r[f"{tag}_{col}"] for r in rs if r.get(f"{tag}_{col}") is not None]
+            if v:
+                row[col] = float(np.mean(v))
+        for k in ("out_s", "leave_s"):
+            v = [r[k] for r in rs if r.get(k) is not None]
+            if v and tag == "re":
+                row[k] = float(np.mean(v))
+        for who in ("tg", "a"):
+            if row.get(f"{who}_10_20"):
+                row[f"{who}_open"] = row[f"{who}_0_3"] / row[f"{who}_10_20"] if f"{who}_0_3" in row else None
+            v = [r[f"{tag}_{who}_open"] for r in rs if r.get(f"{tag}_{who}_open") is not None]
+            if v:
+                row[f"{who}_open_range"] = (float(min(v)), float(max(v)))
+        out[key] = row
+    return out
+
+
+def recontact_report(run_dirs, sim=False, layout=False, device="cpu", copies=4, out=None):
+    """The recontact lanes: the game's (run_dirs), with sim the simulator on the same lanes, with layout the simulator
+    alone on the plan's own places. Prints the table, writes build/charge-probe/recontact.json (not in Git)."""
+    lanes = [ln for d in run_dirs for ln in load_run(d) if ln.get("plan") == "recontact"]
+    rows = [recontact_measure(ln) for ln in lanes]
+    if sim and lanes:
+        rows += [recontact_measure(ln) for ln in sim_lanes([ln for ln in lanes if ln["contacts"].get(1) is not None],
+                                                           device=device, copies=copies)]
+    if layout:
+        rows += [recontact_measure(ln) for ln in sim_lanes(layout_lanes("recontact"), device=device, copies=copies)]
+    table = recontact_summary(rows)
+    f = lambda v, p=2: "-" if v is None else f"{v:.{p}f}"
+    print("The second contact's opening: HP lost a second after a contact (tg = the clanrats, a = the swordsmen); "
+          "open = 0-3 over 10-20 (1: no burst); out = s out of melee before contact 2; fat = the fatigue level "
+          "(0 fresh .. 5 exhausted); near = swordsmen within 2.5 m of an enemy (game)")
+    head = (f"  {'src':4} {'kind':17} {'n':>2} {'out':>5} " + " ".join(f"{c:>8}" for c in RECONTACT_COLS)
+            + f" {'tg_open':>8} {'(min-max)':>11} {'a_open':>7} {'(min-max)':>11} {'a_fat':>5} {'near':>11}")
+    print(head)
+    order = ["fresh (all lanes)"] + list(RECONTACT_KINDS)
+    for src in ("game", "sim"):
+        for kind in order:
+            tag = "first" if kind == "fresh (all lanes)" else "re"
+            r = table.get((src, tag, kind))
+            if not r:
+                continue
+            rng = lambda who: ("-" if f"{who}_open_range" not in r
+                               else f"{r[f'{who}_open_range'][0]:.1f}-{r[f'{who}_open_range'][1]:.1f}")
+            near = (f"{f(r.get('a_near_0_3'), 0)}/{f(r.get('a_near_10_20'), 0)}" if "a_near_0_3" in r else "-")
+            print(f"  {src:4} {kind:17} {r['n']:>2} {f(r.get('out_s'), 1):>5} "
+                  + " ".join(f"{f(r.get(c), 1):>8}" for c in RECONTACT_COLS)
+                  + f" {f(r.get('tg_open')):>8} {rng('tg'):>11} {f(r.get('a_open')):>7} {rng('a'):>11}"
+                  + f" {f(r.get('a_fat'), 1):>5} {near:>11}")
+    result = {"lanes": rows, "summary": [dict(r, source=k[0], anchor=k[1], kind=k[2]) for k, r in table.items()]}
+    out = out or ROOT / "recontact.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(result, indent=1, default=float), encoding="utf-8")
+    print(out)
+    return result
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", nargs="?", choices=("report", "plan", "run", "turns", "exits", "retarget", "skirmish",
-                                                     "shootcontact"),
+                                                     "shootcontact", "recontact"),
                         default="report")
     parser.add_argument("runs", nargs="*", type=Path, help="report: run folders (default: build/charge-probe/runs/*)")
     parser.add_argument("--plan", choices=PLANS, default="charge")
@@ -2060,6 +2255,8 @@ def main(argv=None):
     parser.add_argument("--copies", type=int, default=8)
     parser.add_argument("--out", type=Path, default=OUT)
     parser.add_argument("--dry", action="store_true")
+    parser.add_argument("--layout", action="store_true",
+                        help="recontact: the simulator alone on the plan's own places (no game run needed; torch)")
     parser.add_argument("--speed", type=int, choices=(1, 3, 10, 20),
                         help="run: the battle speed (tools.build --speed; default: its own, 20)")
     args = parser.parse_args(argv)
@@ -2086,6 +2283,10 @@ def main(argv=None):
         return 0
     if args.command == "shootcontact":
         shootcontact_report(args.runs or runs(), out=None if args.out == OUT else args.out)
+        return 0
+    if args.command == "recontact":
+        recontact_report(args.runs or runs(), sim=args.sim, layout=args.layout, device=args.device,
+                         copies=args.copies, out=None if args.out == OUT else args.out)
         return 0
     if args.command == "turns":
         turn_report(args.runs or runs(), sim=args.sim, device=args.device, copies=min(args.copies, 4),
