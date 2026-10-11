@@ -61,6 +61,28 @@ def test_the_meleeorders_plan_gives_hold_moves_and_a_control_10_s_after_contact(
     assert all(l["after"]["at_s"] == 10 and not l["after"]["walk"] and l["target_mode"] == "both" for x in b for l in x)
 
 
+def test_the_holdmelee_plan_halts_3_or_10_s_after_a_move_back_or_a_new_attack_in_melee():
+    b = cp.battles("holdmelee")
+    assert len(b) == 2 and all(sorted(l["kind"] for l in x) == sorted(cp.HOLDMELEE) for x in b)
+    lanes = {l["kind"]: l for l in b[0]}
+    assert lanes["leave3"]["after"] == {"at_s": 10, "kind": "move_near", "dx": 0, "dz": 15, "walk": False}
+    assert lanes["leave3"]["after2"]["kind"] == "halt" and lanes["leave3"]["after2"]["at_s"] == 13
+    assert lanes["leave10"]["after2"]["at_s"] == 20 and lanes["att2_3"]["after"]["kind"] == "attack_t2"
+    assert "after2" not in lanes["halt"] and lanes["halt"]["after"]["kind"] == "halt"
+    assert "after2" not in lanes["none"] and lanes["none"]["after"]["kind"] == "none"
+    config, model_s, arena = cp.run_config("holdmelee", 1)
+    names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}
+    assert all(l["target2"] in names and l["target_mode"] == "both" and l["gap_m"] == 3 for l in config["lanes"])
+    assert model_s < 200
+
+
+def test_run_passes_the_speed_to_the_build(capsys):
+    cp.run("holdmelee", [1], dry=True, speed=10)
+    assert "--probe-plan holdmelee --probe-battle 1 --deadline 900 --speed 10" in capsys.readouterr().out
+    cp.run("holdmelee", [1], dry=True)
+    assert "--speed" not in capsys.readouterr().out
+
+
 def test_the_damaged_plan_damages_the_clanrats_two_on_one_and_a_shooting_lane():
     b = cp.battles("damaged")
     assert len(b) == 2 and all(len(x) == 5 for x in b)

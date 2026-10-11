@@ -1236,6 +1236,35 @@ class TestChargeProbe:
         sample = next(r for r in rows if r["event"] == "probe_sample")
         assert "t2" in sample["lanes"][0]
 
+    def test_a_second_order_after_contact_halts_after_the_first(self, lua, tmp_path):
+        """lane.after2 (the holdmelee plan): a move back at after.at_s, then a halt at after2.at_s."""
+        lua.execute(self.SETUP + """
+            CONFIG.lanes = {CONFIG.lanes[1]}
+            CONFIG.lanes[1].mode = 'attack_walk'
+            CONFIG.lanes[1].target_mode = 'both'
+            CONFIG.lanes[1].fight_s = 8
+            CONFIG.lanes[1].target2 = 'enemy_clanrat_2'
+            CONFIG.lanes[1].t2_dx = 34
+            CONFIG.lanes[1].after = {at_s = 2, kind = 'move_near', dx = 0, dz = 15, walk = false}
+            CONFIG.lanes[1].after2 = {at_s = 4, kind = 'halt', dx = 0, dz = 0, walk = false}
+            CONFIG.park = {{name = 'enemy_lord', x = 700, z = -400, bearing = 0},
+                           {name = 'own_lord', x = -700, z = -400, bearing = 0}}
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            own[2].melee, enemy[2].melee = true, true
+            for _ = 1, 6 do bm:tick(500); bm:pump() end
+            assert(own[2].moving == true, 'the move back after at_s')
+            for _ = 1, 5 do bm:tick(500); bm:pump() end
+            assert(own[2].moving == false, 'halted after after2.at_s')
+            for _ = 1, 200 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        phases = [(r["phase"], r["n"]) for r in rows if r["event"] == "probe_phase"]
+        assert phases == [("after:move_near", 1), ("after:halt", 2)]
+
     def test_damage_shoot_and_two_on_one(self, lua, tmp_path):
         lua.execute(self.SETUP + """
             CONFIG.lanes = {CONFIG.lanes[1], CONFIG.lanes[2]}

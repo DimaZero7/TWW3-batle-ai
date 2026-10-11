@@ -195,6 +195,15 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           shooter's ammo; the soldiers' places every 1 s within 200 m; 8 lanes on the skirmish plan's places, 2 battles,
           the rows swapped. 'shootcontact' prints per shooter and kind the shooter's HP lost %/s in melee, moving (the
           game's is_moving flag) and not, the clanrats' HP lost to it and the shots.
+  holdmelee  a halt soon after another order given in melee (build/gaps/holdsplit.py, the S/W sets: the network's infantry
+          under hold in contact kills 0.00-0.03 a second in the game while the move / withdraw / attack it had before was
+          given in that contact less than 24 s ago (the database's melee_breakoff_secs) - the twin 0.12-0.23 - and 0.18-0.23
+          when that order is older, as the twin): swordsmen <-> clanrats attacking each other from 3 m, a second clanrat
+          unit 4 m beside (never ordered, as fresh); 10 s after contact the swordsmen get (a) a move 15 m straight back at a
+          run and a halt 3 s later ('leave3'), (b) the same, the halt 10 s later ('leave10'), (c) an attack on the second
+          unit and a halt 3 s later ('att2_3'), (d) a halt alone ('halt': fresh's halt lane) or (e) nothing ('none', the
+          control); the clanrats keep attacking them; 70 s from contact - 2 battles of 5 lanes, rotated (lane.after2: the
+          halt). Its table: build/gaps/holdmelee_probe.py.
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -210,6 +219,7 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe run --plan skirmish2                # what triggers the mode, the long run
     python -m tools.nn.charge_probe run --plan shootcontact             # a shooter moving in melee
     python -m tools.nn.charge_probe shootcontact [runs...]              # its table
+    python -m tools.nn.charge_probe run --plan holdmelee --speed 10     # a halt after an order in melee
 
 Measures per lane (the game's recording, and the simulator's run of the same lane from the same start):
 the attacker's speed on the way in (the last 30 m, the peak), the first contact; HP lost by the target
@@ -275,7 +285,8 @@ NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
-         "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "leave", "skirmish", "skirmish2", "shootcontact")
+         "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "leave", "skirmish", "skirmish2", "shootcontact",
+         "holdmelee")
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
 WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
@@ -367,6 +378,10 @@ ROUTMOB_END_S = 45     # ... and the lane ends this long after it
 REFORM_MEN_S = 260
 # the fresh plan's orders 10 s after contact (entries/charge_probe.lua lane.after.kind)
 FRESH = ("attack_t2", "attack_same", "halt", "move_near", "none")
+# the holdmelee plan's lanes: kind -> (the order 10 s after contact, at_s of the halt after it or None); the move is 15 m
+# straight back (+z: the attacker faces -z) at a run
+HOLDMELEE = {"leave3": ("move_near", 13), "leave10": ("move_near", 20), "att2_3": ("attack_t2", 13), "halt": ("halt", None),
+             "none": ("none", None)}
 # the defender plan's orders 1 s after contact (lane.after.kind; move_near 30 m aside at a run)
 DEFENDER = ("attack_same", "halt", "attack_t2", "move_near")
 DEFENDER_LANE_DX = 320  # (its second target stands 180 m aside, inward: 140 m from the next lane; |x| <= 480 as in
@@ -667,6 +682,15 @@ def battles(plan):
         base = [sc(s_, i_, kind) for s_, i_ in SHOOTCONTACT_PAIRS for kind in SHOOTCONTACT_KINDS]
         for k in range(2):
             out.append([dict(l, place=p) for l, p in zip(base, rotate(list(SKIRMISH_PLACES), 5 * k))])
+    elif plan == "holdmelee":
+        def hm(kind):
+            first, halt_at = HOLDMELEE[kind]
+            extra = {"after2": {"at_s": halt_at, "kind": "halt", "dx": 0, "dz": 0, "walk": False}} if halt_at else {}
+            return lane("swords", "clanrat", "attack_walk", "both", gap_m=3, fight_s=70, target2="clanrat", t2_gap_m=4,
+                        kind=kind, after={"at_s": 10, "kind": first, "dx": 0, "dz": 15 if first == "move_near" else 0,
+                                          "walk": False}, **extra)
+        base = [hm(k) for k in HOLDMELEE]
+        out += [base, rotate(base, 2)]
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
@@ -800,13 +824,13 @@ def write_scenario(plan, index, path=None):
     return path
 
 
-def run(plan, which=None, python=sys.executable, dry=False, deadline=900):
+def run(plan, which=None, python=sys.executable, dry=False, deadline=900, speed=None):
     """Builds and launches each battle in turn (tools/launcher/launch.ps1: Normal difficulty set and
-    restored by the launcher)."""
+    restored by the launcher; speed: tools.build --speed, None its default)."""
     done = []
     for i in which or range(1, len(battles(plan)) + 1):
         build = [python, "-m", "tools.build", "charge-probe", "--probe-plan", plan, "--probe-battle", str(i),
-                 "--deadline", str(deadline)]
+                 "--deadline", str(deadline)] + (["--speed", str(speed)] if speed else [])
         launch = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(LAUNCHER / "launch.ps1"),
                   "-Target", "charge-probe"]
         print(f"--- {plan} {i}", flush=True)
@@ -1092,7 +1116,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
            "out_from": [None] * B, "fired": [False] * B, "last": {}, "phases": [[] for _ in range(B)],
            "a_ability": [False] * B, "start": [None] * B, "faced": set(), "rout": [None] * B,
            "re": [{"phase": "in", "clear": False} for _ in range(B)], "tire": [None] * B, "aim": [None] * B,
-           "t_halt": {}}
+           "t_halt": {}, "after2": [None] * B}
     # the retarget plan's switches run on the game's clock from the go: the twin starts at the first sample
     t_first = [float(ln["samples"][0][0]) for ln in meta]
     rec = {"t": [], "rows": []}
@@ -1211,12 +1235,18 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
             elif mode[b] == "move_run":
                 kind[b, A], x[b, A], z[b, A], run_[b, A] = O.MOVE, sp["x"], sp["z"] - sp["move_beyond_m"], True
             # lane.after (entries/charge_probe.lua): at_s after the first contact the attacker gets one more order,
-            # kept from then on (attack_t2 / attack_same / halt / move_near to its place then + (dx, dz) / none)
-            af = sp.get("after")
+            # kept from then on (attack_t2 / attack_same / halt / move_near to its place then + (dx, dz) / none);
+            # lane.after2 the same, later (the holdmelee plan's halt), replacing it from its own at_s on
+            key = "after"
+            af2 = sp.get("after2")
+            if af2 and c is not None and t - c >= af2["at_s"] - 1e-6:
+                key = "after2"
+            af = sp.get(key)
             if af and c is not None and t - c >= af["at_s"] - 1e-6 and af["kind"] != "none":
-                if st_["after"][b] is None:
-                    st_["after"][b] = (float(ax[b]), float(az[b]))
-                    st_["phases"][b].append({"phase": "after:" + af["kind"], "t": t * 1000})
+                if st_[key][b] is None:
+                    st_[key][b] = (float(ax[b]), float(az[b]))
+                    st_["phases"][b].append({"phase": "after:" + af["kind"], "t": t * 1000,
+                                             "n": 2 if key == "after2" else 1})
                 T2 = int(slot["t2"][b])
                 walk = bool(af.get("walk"))
                 if af["kind"] == "attack_t2" and T2 >= 0:
@@ -1225,9 +1255,9 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                     kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, not walk
                 elif af["kind"] == "halt":
                     kind[b, A], target[b, A], run_[b, A] = O.HOLD, -1, False
-                    x[b, A], z[b, A] = st_["after"][b]
+                    x[b, A], z[b, A] = st_[key][b]
                 elif af["kind"] == "move_near":
-                    sx, sz = st_["after"][b]
+                    sx, sz = st_[key][b]
                     kind[b, A], target[b, A], run_[b, A] = O.MOVE, -1, not walk
                     x[b, A], z[b, A] = sx + af.get("dx", 0), sz + af.get("dz", 0)
             # the second target: halted unless it attacks (t2_mode)
@@ -2008,6 +2038,8 @@ def main(argv=None):
     parser.add_argument("--copies", type=int, default=8)
     parser.add_argument("--out", type=Path, default=OUT)
     parser.add_argument("--dry", action="store_true")
+    parser.add_argument("--speed", type=int, choices=(1, 3, 10, 20),
+                        help="run: the battle speed (tools.build --speed; default: its own, 20)")
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8")
     if args.command == "plan":
@@ -2016,7 +2048,7 @@ def main(argv=None):
         return 0
     if args.command == "run":
         which = [int(x) for x in args.battles.split(",")] if args.battles else None
-        done = run(args.plan, which, dry=args.dry)
+        done = run(args.plan, which, dry=args.dry, speed=args.speed)
         print("done:", done)
         return 0 if all(d[-1] == 0 for d in done) else 1
     if args.command == "exits":

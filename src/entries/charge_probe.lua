@@ -52,7 +52,9 @@
 -- and never ordered (it fights only what touches it); sampled as 't2'. lane.after (optional) {at_s, kind, dx, dz,
 -- walk}: at_s after the first contact the attacker gets one more order (the fresh-order probe): 'attack_t2' (attack
 -- the second target), 'attack_same' (the same attack again), 'halt' (the bridge's hold), 'move_near' (a move to its
--- place + (dx, dz)), 'none' (the control); emitted as probe_phase 'after:<kind>'.
+-- place + (dx, dz)), 'none' (the control); emitted as probe_phase 'after:<kind>' (n = 1). lane.after2 (optional,
+-- the same fields): a second order at its own at_s after the first contact (n = 2; the holdmelee plan: a halt 3 or
+-- 10 s after a move or an attack given in melee).
 -- lane.t2_mode 'attack' (optional): the second target attacks the attacker at a walk at the go (two on one).
 -- lane.damage (optional) {t = {method, share}, t2 = ..., a = ...}: once placed (settle_ms before the go) the unit is
 -- brought down: method 'reduce' unit:reduce_hitpoints_unary(share), 'kill' unit:kill_number_of_men(floor(men x share))
@@ -495,21 +497,25 @@ function M.main(bm, config, globals)
                             t = now - lane.t0})
                     end
                 end
-                local af = lane.after
-                if af and lane.contact and not lane.after_done and now - lane.contact >= af.at_s * 1000 then
-                    lane.after_done = true
-                    local walk = af.walk == true
-                    if af.kind == 'attack_t2' then
-                        attack(lane, lane.a, lane.t2, walk)
-                    elseif af.kind == 'attack_same' then
-                        attack(lane, lane.a, lane.t, walk)
-                    elseif af.kind == 'halt' then
-                        orders.halt(lane.a.uc)
-                    elseif af.kind == 'move_near' then
-                        local p = read(function() return lane.a.unit:position() end)
-                        if p then orders.move(lane.a.uc, vec(p:get_x() + (af.dx or 0), p:get_z() + (af.dz or 0)), not walk) end
+                -- lane.after, then lane.after2 (a second order later: the holdmelee plan's halt after a move or an
+                -- attack given in melee); each at its at_s after the first contact
+                for n, key in ipairs({'after', 'after2'}) do
+                    local af = lane[key]
+                    if af and lane.contact and not lane[key .. '_done'] and now - lane.contact >= af.at_s * 1000 then
+                        lane[key .. '_done'] = true
+                        local walk = af.walk == true
+                        if af.kind == 'attack_t2' then
+                            attack(lane, lane.a, lane.t2, walk)
+                        elseif af.kind == 'attack_same' then
+                            attack(lane, lane.a, lane.t, walk)
+                        elseif af.kind == 'halt' then
+                            orders.halt(lane.a.uc)
+                        elseif af.kind == 'move_near' then
+                            local p = read(function() return lane.a.unit:position() end)
+                            if p then orders.move(lane.a.uc, vec(p:get_x() + (af.dx or 0), p:get_z() + (af.dz or 0)), not walk) end
+                        end
+                        emit('probe_phase', {lane = lane.name, phase = 'after:' .. af.kind, n = n, t = now - lane.t0})
                     end
-                    emit('probe_phase', {lane = lane.name, phase = 'after:' .. af.kind, t = now - lane.t0})
                 end
                 if lane.a_ability and lane.contact and not lane.a_ability_done
                         and now - lane.contact >= (lane.a_ability_after_s or 0) * 1000 then
@@ -790,6 +796,7 @@ function M.main(bm, config, globals)
                 assert(lane.t2, 'scenario unit missing: ' .. tostring(l.target2))
             end
             if l.after then assert(M.AFTER_KINDS[l.after.kind], 'unknown after kind ' .. tostring(l.after.kind)) end
+            if l.after2 then assert(M.AFTER_KINDS[l.after2.kind], 'unknown after2 kind ' .. tostring(l.after2.kind)) end
             if l.at_rout then assert(M.AT_ROUT[l.at_rout], 'unknown at_rout ' .. tostring(l.at_rout)) end
             if l.mode == 'retarget' or l.mode == 'attack_t2' then
                 assert(l.target2, 'a ' .. l.mode .. ' lane needs target2')
