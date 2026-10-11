@@ -254,6 +254,7 @@ soldiers' places (game only) how many men of each side stand within 1.5 / 2.5 / 
 soldier, per second after contact. Writes build/charge-probe/analysis.json (not in Git).
 """
 import argparse
+import functools
 import json
 import math
 import subprocess
@@ -270,6 +271,9 @@ RUNS = ROOT / "runs"
 OUT = ROOT / "analysis.json"
 LAUNCHER = project.ROOT / "tools" / "launcher"
 UNITS_JSON = project.ROOT / "config" / "nn" / "units.json"
+# passports of units outside the training pool (the probes' only: the new units' plans, tools/nn/unit_probe.py), written
+# by the same code: py -3.14 -m tools.nn.units --units k1,k2,... --out data/units/probe-units.json (all the keys at once)
+PROBE_UNITS_JSON = project.ROOT / "data" / "units" / "probe-units.json"
 EMP, SKV = "wh_main_emp_empire", "wh2_main_skv_skaven"
 # short name -> (unit key, men, faction)
 UNITS = {
@@ -290,10 +294,57 @@ UNITS = {
     "sspear": ("wh2_main_skv_inf_skavenslave_spearmen_0", 180, SKV),
     "warlord": ("wh2_main_skv_cha_warlord_0", 1, SKV),
     "svsh": ("wh2_main_skv_inf_stormvermin_1", 160, SKV),     # stormvermin with sword and shield
+    # the new units (build/newunits/plan.md; men from their passports, PROBE_UNITS_JSON / units.json)
+    "halb": ("wh_main_emp_inf_halberdiers", 120, EMP),
+    "monks": ("wh2_main_skv_inf_plague_monks", 120, SKV),
+    "censer": ("wh2_main_skv_inf_plague_monk_censer_bearer", 120, SKV),
+    "ratling": ("wh2_dlc12_skv_inf_ratling_gun_0", 32, SKV),
+    "wolfrat": ("wh2_dlc16_skv_mon_wolf_rats_0", 80, SKV),
+    "wolfratp": ("wh2_dlc16_skv_mon_wolf_rats_1", 80, SKV),          # with poison
 }
+
+
+@functools.lru_cache(maxsize=None)
+def _passports():
+    out = {}
+    for path in (PROBE_UNITS_JSON, UNITS_JSON):          # the training pool's file wins
+        if path.exists():
+            out.update(json.loads(path.read_text(encoding="utf-8"))["units"])
+    return out
+
+
+def passport(key):
+    """The unit's passport (config/nn/units.json, else data/units/probe-units.json) or None."""
+    return _passports().get(key)
+
+
+class _Units(dict):
+    """short name -> (unit key, men, faction). A full unit key of the Empire (_emp_) or the Skaven (_skv_) with a passport
+    (passport()) resolves too, men from the passport: any unit of the game's database can stand in a lane."""
+
+    def __missing__(self, name):
+        p = passport(name)
+        faction = EMP if "_emp_" in name else SKV if "_skv_" in name else None
+        if p is None or faction is None:
+            raise KeyError(f"{name}: no short name, nor an Empire / Skaven unit key with a passport "
+                           f"(config/nn/units.json, {PROBE_UNITS_JSON.name})")
+        return name, int(p["men"]), faction
+
+
+class _Short(dict):
+    def __missing__(self, key):          # a unit named by its full key keeps it
+        return key
+
+
+class _Faction(dict):
+    def __missing__(self, key):
+        return UNITS[key][2]
+
+
+UNITS = _Units(UNITS)
 LORDS = {EMP: "general", SKV: "warlord"}
-SHORT = {key: short for short, (key, _, _) in UNITS.items()}
-FACTION = {key: faction for key, _, faction in UNITS.values()}
+SHORT = _Short({key: short for short, (key, _, _) in UNITS.items()})
+FACTION = _Faction({key: faction for key, _, faction in UNITS.values()})
 SYG = "wh_main_character_abilities_stand_your_ground"
 FOE_SEEKER = "wh_main_character_abilities_foe_seeker"
 WIDTH_M = 30
@@ -308,10 +359,12 @@ STEADY_FROM_S = 15.0   # the charge bonus fades over 13 s (charge_decay_duration
 RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
+# the new units' plans (tools/nn/unit_probe.py: their lanes, measures and table)
+UNIT_PLANS = ("ratling", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison")
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
          "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "leave", "skirmish", "skirmish2", "shootcontact",
-         "holdmelee", "holdlord", "recontact")
+         "holdmelee", "holdlord", "recontact") + UNIT_PLANS
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
 WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
@@ -448,6 +501,9 @@ def battles(plan):
     """[[lane spec]] of a plan: each inner list one battle."""
     assert plan in PLANS, plan
     out = []
+    if plan in UNIT_PLANS:
+        from tools.nn import unit_probe
+        return unit_probe.battles(plan)
     if plan == "charge":
         a = [lane("swords", "clanrat", m) for m in ("attack_run", "attack_walk", "move_run", "recharge")]
         out += [rotate(a, k) for k in range(4)]
@@ -765,7 +821,7 @@ def battles(plan):
 
 
 def spacing(key):
-    sp = json.loads(UNITS_JSON.read_text(encoding="utf-8"))["units"][key]["spacing"]
+    sp = passport(key)["spacing"]
     return float(sp["h"]), float(sp["v"])
 
 

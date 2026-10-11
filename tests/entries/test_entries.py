@@ -1753,6 +1753,47 @@ class TestChargeProbe:
         lanes = [x for r in rows if r["event"] == "probe_sample" for x in r["lanes"] if x["lane"] == "L1"]
         assert lanes[0]["tg"]["ammo"] == 40 and "mv" in lanes[0]["tg"] and "hpu" in lanes[0]["tg"]
 
+    def test_shoot_rows_carry_the_shooters_fields_and_card_rows_the_cards_values(self, lua, tmp_path):
+        """The new units' plans: a 'shoot' lane's attacker row is a shooter's (ammo, fire, dd); with morale_rows a skirmish
+        target keeps its shooter fields and gets the phases (fx); card_rows adds cs - the card's current values of
+        CARD_STATS by key, found again when the card's rows move."""
+        lua.execute(self.SETUP + """
+            local L1, L2 = CONFIG.lanes[1], CONFIG.lanes[2]
+            L1.mode, L1.target_mode, L1.answer, L1.max_s, L1.gap_m = 'shoot', 'hold', false, 10, 100
+            L1.recharge_after_s, L1.back_m, L1.recharge_max_s = nil, nil, nil
+            L1.morale_rows, L1.card_rows = true, true
+            L2.mode, L2.target_mode, L2.answer, L2.max_s, L2.lord, L2.t_skirmish = 'attack_walk', 'skirmish', false, 10, nil, false
+            L2.morale_rows, L2.card_rows, L2.t_stop_fire_s = true, true, 3
+            own[2].ammo, own[2].range, own[3].ammo, own[3].range = 8640, 145, 40, 120
+            fake.cco['uid_enemy_clanrat_1'] = {['ActiveEffectList.Size'] = 1,
+                ['ActiveEffectList.At(0).PhaseRecordContext.Key'] = 'suppressive_fire'}
+            fake.cco['uid_own_swords_1'], fake.cco['uid_own_swords_2'] = {MoralePercent = 0.8}, {MoralePercent = 0.7}
+            CONFIG.park = {{name = 'enemy_lord', x = 700, z = -400, bearing = 0},
+                           {name = 'own_lord', x = -700, z = -400, bearing = 0}}
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            assert(own[3].free_fire == false, 'silent t_stop_fire_s after the go')
+            own[2].ammo = 8064
+            -- the card's rows move: stat_morale first now, at 20
+            fake.cco['uid_enemy_clanrat_1']['UnitDetailsContext.StatList.At(0).Key'] = 'stat_morale'
+            fake.cco['uid_enemy_clanrat_1']['UnitDetailsContext.StatList.At(1).Key'] = 'stat_armour'
+            fake.cco['uid_enemy_clanrat_1']['UnitDetailsContext.StatList.At(0).Value'] = 20
+            for _ = 1, 40 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        l1 = [x for r in rows if r["event"] == "probe_sample" for x in r["lanes"] if x["lane"] == "L1"]
+        assert l1[0]["a"]["ammo"] == 8640 and l1[-1]["a"]["ammo"] == 8064 and "ammo" not in l1[0]["tg"]
+        assert l1[0]["tg"]["fx"] == "suppressive_fire" and "mp" in l1[0]["a"]
+        assert l1[0]["tg"]["cs"] == {"stat_morale": 30} and l1[-1]["tg"]["cs"] == {"stat_morale": 20}
+        assert l1[0]["a"]["cs"] == {"stat_morale": 30}
+        l2 = [x for r in rows if r["event"] == "probe_sample" for x in r["lanes"] if x["lane"] == "L2"]
+        assert l2[0]["tg"]["ammo"] == 40 and l2[0]["tg"]["mp"] == 0.7
+        assert [(r["lane"], r["phase"], r["t"]) for r in rows if r["event"] == "probe_phase"] == [("L2", "stop_fire", 3000)] and "cs" in l2[0]["a"] and "ammo" not in l2[0]["a"]
+
+
 class TestMissileProbe:
     """The missile probe (entries.missile_probe; lanes from tools/nn/missile_probe.py)."""
     SETUP = """

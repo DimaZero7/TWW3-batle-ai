@@ -74,6 +74,11 @@
 -- A t_morale target's sample row also carries its morale: mp (CCO MoralePercent), ms (MoraleState), mge
 -- (MoraleGreatestEffect, the strongest effect's text), fx (CCO ActiveEffectList keys) and w (wavering).
 -- lane.morale_rows (optional): both units' sample rows carry those morale fields (fearless or not; the dmgmelee plan).
+-- lane.card_rows (optional): both units' sample rows carry cs, the unit card's current values of M.CARD_STATS (leadership,
+-- speed, melee attack and defence, weapon and missile damage: what contact effects and frenzy change; the new units' plans
+-- of tools/nn/unit_probe.py). A 'shoot' lane's attacker row is a shooter's (ammo, fire, dd), as a 'retarget' one's.
+-- lane.t_stop_fire_s (optional, a 'skirmish' target): that long after the go the shooter's fire at will goes off and it
+-- halts (probe_phase 'stop_fire'): the suppressing fire's life after the last shot.
 -- at_rout 'away' (the rallysecure plan): at the rout the attacker is teleported to (x, z + away_dz) facing back and
 -- halted (no chase, no enemy near; probe_phase 'away'). The target's first stop of routing after the rout (not
 -- shattered) is its rally: probe_phase 'rally' (place, bearing, morale), the target halts and lane.rally_friends
@@ -105,6 +110,10 @@ M.TARGET_MODES = {stand = true, hold = true, both = true, both_walk = true, rear
     skirmish = true}
 M.AFTER_KINDS = {attack_t2 = true, attack_same = true, halt = true, move_near = true, none = true}
 M.AT_ROUT = {halt = true, none = true, away = true}
+-- The card values a lane with card_rows samples (its row's cs): leadership, speed, melee attack / defence, weapon damage,
+-- missile damage (the contact effects' stats: poison, the censer's contagion, suppressing fire; frenzy).
+M.CARD_STATS = {stat_morale = true, scalar_speed = true, stat_melee_attack = true, stat_melee_defence = true,
+    stat_weapon_damage = true, stat_missile_damage_over_time = true}
 -- The engine's fatigue states, fresh to exhausted (unit:fatigue_state()).
 M.FATIGUE = {'threshold_fresh', 'threshold_active', 'threshold_winded', 'threshold_tired', 'threshold_very_tired',
     'threshold_exhausted'}
@@ -269,10 +278,9 @@ function M.main(bm, config, globals)
             ct = target_name(u)}
     end
 
-    -- A unit row with its morale (t_morale targets): MoralePercent, MoraleState, the strongest effect's text, the
-    -- active effects' keys, wavering.
-    local function morale_row(u)
-        local row = unit_row(u)
+    -- A unit row's morale fields, added to it (t_morale targets, morale_rows): MoralePercent, MoraleState, the strongest
+    -- effect's text, the active effects' keys, wavering.
+    local function add_morale(row, u)
         row.mp, row.ms = round(read(cco, u, 'MoralePercent'), 3), read(cco, u, 'MoraleState')
         row.w = read(function() return u:is_wavering() end)
         local effect = read(cco, u, 'MoraleGreatestEffect')
@@ -290,6 +298,45 @@ function M.main(bm, config, globals)
         row.fire = read(cco, u, 'IsFiringMissiles')
         row.dd = round(read(cco, u, 'DamageDealt'), 0)
         row.sk = orders.skirmish_active(u)
+        return row
+    end
+
+    -- The unit card's current values of M.CARD_STATS ({stat key = Value}; CCO UnitDetailsContext.StatList, as the player
+    -- sees them: buffs and contact effects included). The key -> row index map is kept per unit and checked on each read.
+    local card_index = {}
+    local function card_stats(u)
+        local uid = read(function() return tostring(u:unique_ui_id()) end)
+        if not uid then return nil end
+        local idx = card_index[uid]
+        local function at(i, field) return read(cco, u, 'UnitDetailsContext.StatList.At(' .. i .. ').' .. field) end
+        local stale = idx == nil
+        for key, i in pairs(idx or {}) do
+            if at(i, 'Key') ~= key then stale = true end
+        end
+        if stale then
+            idx = {}
+            local n = read(cco, u, 'UnitDetailsContext.StatList.Size')
+            if type(n) ~= 'number' or n < 0 or n > 100 then return nil end
+            for i = 0, n - 1 do
+                local key = at(i, 'Key')
+                if type(key) == 'string' and M.CARD_STATS[key] then idx[key] = i end
+            end
+            card_index[uid] = idx
+        end
+        local out = {}
+        for key, i in pairs(idx) do out[key] = round(at(i, 'Value'), 2) end
+        return out
+    end
+
+    -- A lane unit's sample row: the shooter's fields for a shooter (the attacker of a 'retarget' / 'shoot' lane, a
+    -- 'skirmish' target), the morale fields with lane.morale_rows (both) or lane.t_morale (the target), the card's
+    -- values (cs) with lane.card_rows.
+    local function lane_row(lane, who, u)
+        local shooter = who == 'a' and (lane.mode == 'retarget' or lane.mode == 'shoot')
+            or who == 'tg' and lane.target_mode == 'skirmish'
+        local row = shooter and shooter_row(u) or unit_row(u)
+        if lane.morale_rows or (who == 'tg' and lane.t_morale) then add_morale(row, u) end
+        if lane.card_rows then row.cs = card_stats(u) end
         return row
     end
 
@@ -553,6 +600,14 @@ function M.main(bm, config, globals)
                         emit('probe_phase', {lane = lane.name, phase = 'after:' .. af.kind, n = n, t = now - lane.t0})
                     end
                 end
+                -- lane.t_stop_fire_s (a 'skirmish' target, the suppress2 plan): the shooter falls silent that long after
+                -- the go - fire at will off and a halt (its ranged attack dropped)
+                if lane.t_stop_fire_s and not lane.stop_fire_done and now - lane.t0 >= lane.t_stop_fire_s * 1000 then
+                    lane.stop_fire_done = true
+                    orders.set_fire_at_will(lane.t.uc, false)
+                    orders.halt(lane.t.uc)
+                    emit('probe_phase', {lane = lane.name, phase = 'stop_fire', t = now - lane.t0})
+                end
                 if lane.a_ability and lane.contact and not lane.a_ability_done
                         and now - lane.contact >= (lane.a_ability_after_s or 0) * 1000 then
                     lane.a_ability_done = true
@@ -602,10 +657,8 @@ function M.main(bm, config, globals)
                         emit('probe_phase', {lane = lane.name, phase = 'friends', t = now - lane.t0, units = placed})
                     end
                 end
-                local tg_row = (lane.t_morale or lane.morale_rows) and morale_row
-                    or lane.target_mode == 'skirmish' and shooter_row or unit_row
-                local a_row = lane.morale_rows and morale_row or lane.mode == 'retarget' and shooter_row or unit_row
-                local r = {lane = lane.name, t = now - lane.t0, a = a_row(lane.a.unit), tg = tg_row(lane.t.unit)}
+                local r = {lane = lane.name, t = now - lane.t0, a = lane_row(lane, 'a', lane.a.unit),
+                    tg = lane_row(lane, 'tg', lane.t.unit)}
                 if lane.rally_friends and #lane.rally_friends > 0 then
                     r.f = {}
                     for _, f in ipairs(lane.rally_friends) do r.f[#r.f + 1] = unit_row(state.units[f.name].unit) end
