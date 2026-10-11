@@ -1338,25 +1338,23 @@ class TestLoop:
         _, _, out = run.train(args)
         assert [json.loads(x)["anchor_rolls"] for x in (out / "log.jsonl").read_text(encoding="utf-8").splitlines()] == [0, 0]
 
-    def test_the_next_bank_is_built_ahead_in_a_thread(self, tmp_path, monkeypatch):
-        # building a bank is mostly Python (17-48 s on the 2048 battles): the training no longer waits for it
-        import threading
-        from tools.nn.train import run
+    def test_the_next_bank_is_built_ahead_in_a_process(self, tmp_path, monkeypatch):
+        # building a bank is mostly Python (17-48 s on the 2048 battles): the training no longer waits for it, and a
+        # process of its own (tools/nn/train/bankproc.py) does not share the training's interpreter
+        from tools.nn.train import bankproc, run
         monkeypatch.setattr(checkpoint, "DIR", tmp_path)
-        where = []
-        real = scenes.Generated.__init__
-
-        def spy(self, *a, **k):
-            where.append(threading.current_thread().name)
-            real(self, *a, **k)
-        monkeypatch.setattr(scenes.Generated, "__init__", spy)
+        here, taken = [], []
+        real, take = scenes.Generated.__init__, bankproc.Ahead.take
+        monkeypatch.setattr(scenes.Generated, "__init__", lambda self, *a, **k: (here.append(1), real(self, *a, **k))[1])
+        monkeypatch.setattr(bankproc.Ahead, "take", lambda self, *a: taken.append(1) or take(self, *a))
         base = ["--battles", "4", "--steps", "2", "--updates", "3", "--minutes", "5", "--device", "cpu", "--no-eval",
                 "--mix", '{"nearest": 1.0}', "--bank-refresh", "0"] + SMALL_RUN
         run.train(run.parser().parse_args(["--name", "ahead"] + base))
-        assert where[0] == "MainThread" and len(where) >= 3 and all(w.startswith("bank") for w in where[1:])
-        where.clear()
+        assert len(here) == 1 and len(taken) == 3             # the first bank here, one from the worker every update
+        here.clear()
+        taken.clear()
         run.train(run.parser().parse_args(["--name", "due", "--no-bank-ahead"] + base))
-        assert len(where) == 4 and set(where) == {"MainThread"}                 # the first and one per update
+        assert len(here) == 4 and not taken                   # the first and one per update, here
 
     def test_per_role_normalisation_gives_each_role_mean_0_std_1(self):
         a = torch.tensor([[1.0, 10.0], [3.0, 30.0], [5.0, 50.0]])

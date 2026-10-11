@@ -185,3 +185,13 @@ def test_run_resets_the_heads_and_keeps_the_floors_weights_in_the_chain(tmp_path
     assert set(state["head_w"]) == {"sector", "cell"}
     # the place's layers are not the collapsed ones any more
     assert not torch.equal(trained.heads.place_q.weight, actor.heads.place_q.weight)
+
+
+def test_a_head_without_rows_adds_nothing_to_the_bonus_nor_its_gradient():
+    x = torch.tensor([0.3, 0.7], requires_grad=True)
+    measured = {"sector": (x[0] * 2, x[0].detach(), torch.tensor(5.0)), "cell": (x[1] * 3, x[1].detach(), torch.tensor(0.0)),
+                "hold": (x.sum(), x.sum().detach(), torch.tensor(2.0))}
+    b = head_entropy.bonus(measured, {"sector": 0.5, "cell": 0.25, "hold": 0.0})
+    b.backward()
+    assert float(b.detach()) == pytest.approx(0.5 * 0.6) and x.grad.tolist() == [1.0, 0.0]   # cell (no rows), hold (weight 0): 0
+    assert head_entropy.bonus(measured, {"hold": 0.0}) is None

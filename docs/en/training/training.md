@@ -40,7 +40,7 @@ The first steps compile for 1–3 minutes (seconds once a run of the same shapes
 | reward | `--gold` (1.0), `--rout-share` (0.5), `--lord` (0.3), `--lord-rout` (0), `--idle` (2e-4), `--idle-tau` (150 s), `--idle-pause` (30 s), `--idle-step` (0.5), `--idle-cap` (20), `--idle-rate` (0), `--idle-window` (30 s), `--order-cost` (0.001), `--retarget` (0.003): [reward](#reward) |
 | opponents | `--mix` (json shares), `--pool` (8: past versions at most), `--pool-extra` (more checkpoints for the pool), `--pool-dir` (the pool's folder for a whole night), `--pool-eta` (0.01), `--past-slots` (3), `--past-every` (6 updates): [past versions](#past-versions), `--eval-past`, `--eval-generated` (512) |
 | drills | `--drills` (0: share of the battles), `--drill-weights` (json; default the `TRAIN` drills equally: kiting, hold_fire), `--drill-bank` (256 per drill), `--drill-embed` (1: share of the embedded frame, for the drills that have one), `--drill-broad` (0.5: of the rest, share of the broad frame), `--drill-teach` (`auto` or json {drill: weight}: the teacher, off by default), `--drill-teach-minutes` (10: manual), `--drill-teach-k` (0.5), `--drill-teach-cap` (0.25), `--drill-teach-weight` (0.15: auto), `--teach-normal` (`auto`, names or json {drill: share}: the teacher in normal battles, off by default), `--teach-normal-k` (0.5), `--teach-normal-cap` (0.15), `--teach-normal-weight` (0.1), `--teach-normal-match` (0.1): [drills](#drills) |
-| observation | `--observe-dir` (off: the folder of converted battles), `--observe-share` (0.1), `--observe-weight` (0.1), `--observe-decay` (0.95), `--observe-anchor` (0.2), `--observe-anchor-decay` (0.995), `--observe-adv` (`critic`), `--observe-beta` (1), `--observe-clip` (20), `--observe-steps` (0: `--steps`), `--observe-refresh` (20): [learning by observation](#learning-by-observation) |
+| observation | `--observe-dir` (off: the folder of converted battles), `--observe-share` (0.1), `--observe-weight` (0.1), `--observe-decay` (0.95), `--observe-anchor` (0.2), `--observe-anchor-decay` (0.995), `--observe-anchor-alone` (off: the anchor ends with the term), `--observe-adv` (`critic`), `--observe-beta` (1), `--observe-clip` (20), `--observe-steps` (0: `--steps`), `--observe-refresh` (20): [learning by observation](#learning-by-observation) |
 | kiting in self-play | `--kite-share` (0: share of the `self` / `past` battles started, planned 0.1), `--kite-bank` (256 battles ready): [kiting in self-play](#kiting-in-self-play) |
 
 ### The chain's settings
@@ -168,8 +168,9 @@ the networks decide), `ppo.py`, `evaluate.py` (evaluation and replays), `skill.p
 
 **Battles.** Random armies of the [army generator](armies.md): equal budget, a lord and up to
 `--max-units` units a side, half the bank with side 1 attacking. Training seeds only; the bank
-(`--bank` battles) is renewed every `--bank-refresh` minutes (the next one built ahead in a thread,
-`--no-bank-ahead`: when it is due); evaluation uses `EVAL_SEEDS`, never
+(`--bank` battles) is renewed every `--bank-refresh` minutes (the next one built ahead in a process of its own on
+the CPU and moved to the GPU when it is due, `bankproc.py`; `--no-bank-ahead`: built when it is due); evaluation
+uses `EVAL_SEEDS`, never
 trained on. `--small 0.35:6` keeps 35 % of every bank at ≤ 6 units a side. A finished battle takes
 a new one from the bank with new randomised numbers. The learner plays side 1 in some battles and
 side 2 in others: every army in both roles. The network sees the map as the game shows it (the
@@ -634,9 +635,16 @@ selected label). The extra loss:
 - w = `--observe-weight` x `--observe-decay`^update; the updates count over the whole chain (`observe_updates` in
   the checkpoint).
 - The anchor: + `--observe-anchor` x 0.995^update x KL(policy || the frozen `--init`) on the PPO rows (kind and
-  target, as `--anchor`); needs `--init`.
+  target, as `--anchor`); needs `--init`. The anchor goes off with the term (weight < 1e-6, below): by then its
+  weight is ~0.006 and the frozen network's forward pass cost ~13 % of an update (the user's decision, 11.10);
+  `--observe-anchor-alone` keeps it on after that, by its own weight.
 - A chunk's GRU memory is the actor's memory at the chunk's start, run through the battle from its beginning;
   recomputed every `--observe-refresh` updates.
+- A weight w < 1e-6 (`store.NEGLIGIBLE`) turns the term off: no demonstration chunks, no forward and backward pass
+  of them, no memory refresh (the log says "the term ... off" once; the line `observe off`). Such a weight moves
+  nothing, yet it cost ~12 % of an update and every 20 updates a refresh of 110-150 s (at 0.1 x 0.95^700 ~ 2e-17).
+  When the weight is negligible already at the start of a chain's part, the demonstrations are not loaded. The
+  anchor goes off with it (unless `--observe-anchor-alone`).
 - A label's log-probability below -50 counts as -50 (one bad label does not blow up the loss).
 
 The log (`observe` in the log row and the line `observe ...`): the weight now, the loss, nll, the mean weight c, the

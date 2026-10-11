@@ -170,3 +170,48 @@ def test_a_tiny_training_step_with_the_demonstrations(tmp_path, monkeypatch):
     assert o.updates == 2 and o.weight == pytest.approx(0.025)
     # off: the update has no observation stats
     assert "observe" not in ppo.update(actor, crit, opt, batch, cfg)
+
+
+def test_a_negligible_weight_turns_the_term_and_the_refresh_off_and_keeps_the_anchor(tmp_path, monkeypatch, capsys):
+    import dataclasses
+    from tools.nn.model import eyes
+    from tools.nn.train import league, ppo, rollout
+    monkeypatch.setattr(eyes, "HORIZONS_S", (1.0, 2.0))
+    write_demo(tmp_path / "b1.npz")
+    actor, crit = tiny()
+    start = tiny()[0]
+    for p in start.parameters():
+        p.requires_grad_(False)
+    env = rollout.Battles(league.layout(4, 1, {"self": 0.5, "nearest": 0.5}), [("arena", "attack")])
+    batch = rollout.collect(env, actor, crit, 3)
+    opt = torch.optim.Adam(list(actor.parameters()) + list(crit.parameters()), lr=1e-3)
+    cfg = dataclasses.replace(ppo.PPOConfig(), epochs=1, minibatch=6)
+    d = store.Demos(tmp_path, T=4, cfg=actor.cfg)
+    refreshed = []
+    monkeypatch.setattr(d, "refresh", lambda *a: refreshed.append(1))
+    # 0.1 x 0.5^24 = 6e-9 < NEGLIGIBLE: no term, no chunks, no refresh; the anchor by its own weight (anchor_alone)
+    o = store.Observe(d, 2, weight=0.1, decay=0.5, anchor_net=start, anchor=0.2, anchor_decay=0.99, refresh=1,
+                      updates=24, anchor_alone=True)
+    monkeypatch.setattr(o, "term", lambda actor: pytest.fail("the term ran"))
+    assert not o.on and o.anchor == pytest.approx(0.2 * 0.99 ** 24)
+    for _ in range(2):
+        s = ppo.update(actor, crit, opt, batch, cfg, observe=o)["observe"]
+        assert "loss" not in s and s["anchor_kl"] > 0 and s["anchor_now"] > 0
+    assert not refreshed and o.updates == 26
+    assert capsys.readouterr().out.count("memories' refresh are off") == 1            # told once
+    # by default the anchor ends with the term: its reference network does not run
+    gone = store.Observe(d, 2, weight=0.1, decay=0.5, anchor_net=start, anchor=0.2, refresh=1, updates=24)
+    monkeypatch.setattr(start, "sequence", lambda *a, **k: pytest.fail("the anchor's network ran"))
+    s = ppo.update(actor, crit, opt, batch, cfg, observe=gone)["observe"]
+    assert gone.anchor == 0.0 and s["anchor_now"] == 0.0 and s["anchor_kl"] == 0.0
+    assert "so is the KL anchor" in capsys.readouterr().out
+    assert store.Observe(d, 2, weight=0.1, decay=0.5, anchor_net=start, anchor=0.2, updates=16).anchor > 0   # term on
+    # just above it: on
+    d2 = store.Demos(tmp_path, T=4, cfg=actor.cfg)
+    real = d2.refresh
+    monkeypatch.setattr(d2, "refresh", lambda *a: (refreshed.append(1), real(*a)))
+    on = store.Observe(d2, 2, weight=0.1, decay=0.5, refresh=1, updates=16)               # 1.5e-6
+    assert on.on and "loss" in ppo.update(actor, crit, opt, batch, cfg, observe=on)["observe"] and refreshed
+    # off from the start: the store need not be loaded
+    off = store.Observe(None, 2, weight=1e-7, anchor_net=None)
+    assert "loss" not in ppo.update(actor, crit, opt, batch, cfg, observe=off)["observe"]

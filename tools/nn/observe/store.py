@@ -12,6 +12,11 @@ chunks of T decisions, a few chunks beside every PPO minibatch (loss.py's term).
   (not present, not attended, no orders).
 * v2's inputs the recording does not have: every unit that takes orders is free (no commitment), commit 0; geo from
   the side's frame and the map.
+* Off when negligible: once the term's weight (decaying every update) is below NEGLIGIBLE, the term, its chunks and the
+  memories' refresh are skipped (a weight of 1e-6 and less moves nothing: the term cost ~12 % of an update and every
+  --observe-refresh updates a refresh of 110-150 s at 0.1 x 0.95^700 ~ 2e-17). The KL anchor to the start goes off
+  with the term (user 11.10: at 0.2 x 0.995^700 ~ 0.006 it cost ~13 % of an update); anchor_alone (run.py
+  --observe-anchor-alone) keeps it on by its own weight, as before.
 """
 import json
 from pathlib import Path
@@ -24,6 +29,7 @@ from tools.nn.observe import loss as obs_loss
 OBS = ("tokens", "ctx", "own", "attend", "ctrl", "target_ok", "pos", "abil", "abil_ok")
 LABELS = ("kind", "target", "point", "run", "run_known", "alt")
 ADV = ("critic", "mc", "window20")
+NEGLIGIBLE = 1e-6       # the term's weight below this: off (module doc)
 
 
 def _pad(a, N, axis=1, value=0):
@@ -172,28 +178,47 @@ class Demos:
 class Observe:
     """What ppo.update needs of the observation: the demonstrations, the term's weight (decaying x decay an update),
     the KL anchor to the frozen network the run started from (its weight x anchor_decay an update), how many chunks
-    beside a PPO minibatch, the memory's refresh. updates: the updates of earlier parts of the chain (the decay goes on)."""
+    beside a PPO minibatch, the memory's refresh. updates: the updates of earlier parts of the chain (the decay goes on).
+    demos may be None when the term is off from the start (on False: its weight is negligible, module doc).
+    anchor_alone: the anchor stays after the term is off (else it ends with it)."""
 
     def __init__(self, demos, chunks, weight=0.1, decay=0.95, anchor_net=None, anchor=0.2, anchor_decay=0.995,
-                 refresh=20, updates=0, device="cpu", seed=0):
+                 refresh=20, updates=0, device="cpu", seed=0, anchor_alone=False):
         self.demos, self.chunks, self.refresh_every = demos, max(1, int(chunks)), max(1, int(refresh))
         self.w0, self.decay, self.a0, self.anchor_decay = weight, decay, anchor, anchor_decay
-        self.anchor_net = anchor_net
+        self.anchor_net, self.anchor_alone = anchor_net, anchor_alone
         self.updates = int(updates)
         self.device = device
         self.gen = torch.Generator().manual_seed(seed)
         self.since = None
+        self.told = False               # the term's end printed (before)
 
     @property
     def weight(self):
         return self.w0 * self.decay ** self.updates
 
     @property
+    def on(self):
+        """The term counts: its weight is NEGLIGIBLE or more (it only decays: once off, off for good)."""
+        return self.weight >= NEGLIGIBLE
+
+    @property
     def anchor(self):
-        return self.a0 * self.anchor_decay ** self.updates if self.anchor_net is not None else 0.0
+        """The anchor's weight now: 0 without its network, and once the term is off unless anchor_alone."""
+        if self.anchor_net is None or not (self.on or self.anchor_alone):
+            return 0.0
+        return self.a0 * self.anchor_decay ** self.updates
 
     def before(self, actor):
-        """Before an update: the stored memories again when due."""
+        """Before an update: the stored memories again when due (none while the term is off)."""
+        if not self.on:
+            if not self.told:
+                print(f"observation: the term's weight {self.weight:.2e} < {NEGLIGIBLE:g}: the term, its chunks and the "
+                      f"memories' refresh are off from now on"
+                      + ("" if self.anchor_net is None else "; the KL anchor goes on by its own weight"
+                         if self.anchor_alone else "; so is the KL anchor"), flush=True)
+                self.told = True
+            return
         if self.since is None or self.since >= self.refresh_every:
             self.demos.refresh(actor, self.device)
             self.since = 0

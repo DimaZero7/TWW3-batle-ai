@@ -27,7 +27,11 @@
 * Learning by observation (update's observe=, run.py --observe-dir; tools/nn/observe): beside every minibatch a few
   chunks of another player's recorded battles, + weight x the imitation of his orders the network's critic found
   better than expected (observe/loss.py; the weight decays every update), and + anchor x KL(policy || the network the
-  run started from) on the minibatch's own rows (its weight decays too). Its stats: out["observe"].
+  run started from) on the minibatch's own rows (its weight decays too). Its stats: out["observe"]. Once the term's
+  weight is negligible (store.NEGLIGIBLE) the term and its chunks are skipped; the anchor goes on by its own weight.
+* The stats are summed on the device in float64 (Python's float arithmetic: the same numbers) and read once at the end;
+  the GPU is read once a minibatch only (whether the gradient is finite, the KL for target_kl): a float() a stat (~30 a
+  part, ~3500 an update) made the CPU wait for the GPU each time.
 """
 from dataclasses import dataclass
 
@@ -109,6 +113,20 @@ def entropy_weight(weight, entropy, target, low, high, rate=1.25):
     87-99.7 % of the units' kind choices had a probability above 0.99: no exploration."""
     w = weight * rate if entropy < target else weight / rate
     return min(high, max(low, w))
+
+
+def _f(x):
+    """A 0-d stat for the update's sums, kept on its device: float64 as Python's float() gives it (no read of the GPU)."""
+    return x.detach().double()
+
+
+def _read(d):
+    """The dict's tensor values (0-d, one device) as Python floats, in one read of the GPU; the others as they are."""
+    keys = [k for k, v in d.items() if torch.is_tensor(v)]
+    if keys:
+        vals = torch.stack([d[k].reshape(()) for k in keys]).tolist()
+        d = {**d, **dict(zip(keys, vals))}
+    return d
 
 
 def masked_mean(x, mask):
@@ -234,6 +252,7 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
         observe.before(actor)                # the demonstrations' stored memories again when due
         obs_acc, obs_sums, obs_n = {"loss": 0.0, "anchor_kl": 0.0}, {}, 0
         obs_w, obs_anchor = observe.weight, observe.anchor
+        obs_term = observe.on                # its weight not negligible (store.NEGLIGIBLE): the term and its chunks
     actor.train()
     critic.train()
     kinds = batch["action"].parts()
@@ -246,6 +265,7 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
     teach_acc = {n: [0.0] * 7 for n in taught["names"]} if taught else {}
     head_w = dict(cfg.heads)
     head_acc = {}                                # head -> [share x rows, nats x rows, rows] (head_entropy.measure)
+    need_kl = bool(train_policy and cfg.target_kl)
     for _ in range(cfg.epochs):
         order = torch.randperm(R, device=adv.device)
         for idx in order.split(max(1, cfg.minibatch // T)):
@@ -283,9 +303,9 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                         spread = head_entropy.bonus(measured, head_w)
                         for h, (sh, nats, rows) in measured.items():
                             acc = head_acc.setdefault(h, [0.0, 0.0, 0.0])
-                            r = float(rows)
-                            acc[0] += float(sh.detach()) * r
-                            acc[1] += float(nats) * r
+                            r = _f(rows)
+                            acc[0] += _f(sh) * r
+                            acc[1] += _f(nats) * r
                             acc[2] += r
                     if reference is not None and cfg.anchor:
                         with torch.no_grad():
@@ -300,7 +320,7 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                             oref, _ = observe.anchor_net.sequence(obs, batch["h0"][pidx], batch["reset"][:, pidx], seq_act)
                             oref = {k: v.reshape(-1, *v.shape[2:]) for k, v in oref.items()}
                         observed = anchor_kl(logits, oref, ctrl)
-                        obs_acc["anchor_kl"] += float(observed.detach()) * share
+                        obs_acc["anchor_kl"] += _f(observed) * share
                     imitation = torch.zeros((), device=adv.device)
                     if taught:
                         label = hd.Action(*(_rows(getattr(taught["action"], k), pidx) for k in ("kind", "point", "target", "run")))
@@ -316,8 +336,8 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                         seen, parts_e = meyes.loss(actor.cfg, logits, {k: _rows(v, pidx) for k, v in eyes_tg.items()},
                                                    flat)
                         for h, (mse, ref) in parts_e.items():
-                            step[f"eyes_{h}"] += float(mse.detach()) * share
-                            step[f"eyes_ref_{h}"] += float(ref) * share
+                            step[f"eyes_{h}"] += _f(mse) * share
+                            step[f"eyes_ref_{h}"] += _f(ref) * share
                 vl = ((critic(cobs) - _rows(ret, pidx)) ** 2).mean()
                 policy_part = (pl - cfg.entropy * entropy + cfg.anchor * anchored + imitation + cfg.eyes * seen
                                + (obs_anchor * observed if obs_on else 0.0) - (spread if spread is not None else 0.0))
@@ -327,8 +347,8 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                     kl = masked_mean(old - lp, ctrl)
                 for k, x in (("policy_loss", pl), ("value_loss", vl), ("entropy", entropy), ("kl", kl),
                              ("clip", clipped), ("entropy_all", masked_mean(ent, ctrl)), ("anchor_kl", anchored)):
-                    step[k] += float(x.detach()) * share
-            if obs_on and obs_w > 0:
+                    step[k] += _f(x) * share
+            if obs_on and obs_term:
                 # the demonstrations: their own chunks, one backward pass beside the minibatch's
                 lo, so = observe.term(actor)
                 (obs_w * lo).backward()
@@ -340,23 +360,27 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
             # the critic's
             grad_norm = torch.nn.utils.clip_grad_norm_(actor_params, cfg.max_grad)
             grad_norm_critic = torch.nn.utils.clip_grad_norm_(critic_params, cfg.max_grad)
-            if torch.isfinite(grad_norm) and torch.isfinite(grad_norm_critic):
+            # the minibatch's one read of the GPU: is the gradient finite, and the KL (target_kl's early stop)
+            finite = (torch.isfinite(grad_norm) & torch.isfinite(grad_norm_critic)).double()
+            read = (torch.stack([finite, torch.as_tensor(step["kl"], dtype=torch.float64, device=finite.device)])
+                    if need_kl else finite[None]).tolist()
+            if read[0]:
                 opt.step()
             else:                                    # a non-finite gradient: no step (it would poison the weights)
                 stats["skipped"] = stats.get("skipped", 0.0) + 1.0
                 opt.zero_grad(set_to_none=True)
-            step["grad_norm"], step["grad_norm_critic"] = float(grad_norm), float(grad_norm_critic)
-            kl = step["kl"]
+            step["grad_norm"], step["grad_norm_critic"] = _f(grad_norm), _f(grad_norm_critic)
             for k, x in step.items():
                 stats[k] += x
             n += 1
-            if train_policy and cfg.target_kl and float(kl) > cfg.target_kl:
+            if need_kl and read[1] > cfg.target_kl:
                 stop = True
                 break
         if stop:
             break
     actor.eval()
     critic.eval()
+    stats = _read(stats)
     out = {k: v / max(1, n) for k, v in stats.items()}
     out["minibatches"] = n
     out["skipped"] = stats.get("skipped", 0.0)
@@ -365,7 +389,8 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
         # minibatch: a ratio of two tiny numbers, not an error of the eyes)
         if f"eyes_ref_{h}" in out:
             out[f"eyes_ev_{h}"] = 1.0 - out[f"eyes_{h}"] / max(out.pop(f"eyes_ref_{h}"), 1e-9)
-    for h, (s_sum, n_sum, r) in head_acc.items():
+    for h, acc in head_acc.items():
+        s_sum, n_sum, r = _read(dict(enumerate(acc))).values()
         if r:
             out[f"head_share_{h}"] = s_sum / r
             out[f"head_ent_{h}"] = n_sum / r
@@ -373,8 +398,10 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
         out["teach"] = drill_teach.summary(teach_acc, teach, taught.get("shares"))
     if obs_on:
         from tools.nn.observe import loss as obs_loss
-        out["observe"] = {"loss": obs_acc["loss"] / max(1, obs_n), "anchor_kl": obs_acc["anchor_kl"] / max(1, n),
-                          **obs_loss.summary(obs_sums), "weight_now": obs_w, "anchor_now": obs_anchor}
+        obs_acc = _read(obs_acc)
+        out["observe"] = {"anchor_kl": obs_acc["anchor_kl"] / max(1, n), "weight_now": obs_w, "anchor_now": obs_anchor}
+        if obs_term:                          # (the term's stats while it counts)
+            out["observe"].update(loss=obs_acc["loss"] / max(1, obs_n), **obs_loss.summary(obs_sums))
         observe.after()
     out["reward"] = float(batch["reward"].sum(0).mean())
     out["value_mean"] = float(batch["value"].mean())

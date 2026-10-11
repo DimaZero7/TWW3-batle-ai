@@ -88,8 +88,10 @@ def measure(logits, action, free, ctrl, heads=HEADS, grad=()):
 
 
 def bonus(measured, weights):
-    """sum over the heads with a weight of weight x share (subtracted from the loss)."""
-    terms = [w * measured[h][0] for h, w in weights.items() if w and h in measured and measured[h][2] > 0]
+    """sum over the heads with a weight of weight x share (subtracted from the loss); a head with no rows adds 0
+    (torch.where on the device: `rows > 0` in Python read the GPU, a wait a head and a part)."""
+    terms = [torch.where(measured[h][2] > 0, w * measured[h][0], torch.zeros_like(measured[h][0]))
+             for h, w in weights.items() if w and h in measured]
     return sum(terms) if terms else None
 
 

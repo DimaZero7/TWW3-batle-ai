@@ -25,7 +25,6 @@ import json
 import math
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -36,9 +35,8 @@ from tools.nn.model import critic as model_critic
 from tools.nn.model import policy as model_policy
 from tools.nn.train import cadence as cad
 from tools.nn.train import checkpoint, drills, evaluate, league, matchups, ppo, randomise, reward, rollout, scenes
-from tools.nn.train import head_entropy, head_reset, kitesp, teach_auto
+from tools.nn.train import bankproc, head_entropy, head_reset, kitesp, teach_auto
 from tools.nn.train import dr as uncertain
-from tools.nn.train.drills import source as drill_source
 from tools.nn.train.drills import teach as drill_teach
 
 SCRIPTED = ("nearest", "hold_shoot", "hold", "ai_like")
@@ -366,22 +364,23 @@ def train(args, every=None, teacher=None, normal=None):
     dr_cfg = uncertain.load(args.dr, params) if args.dr else None
     rng = np.random.default_rng(args.seed)
 
-    def source():
-        """A bank of random battles (tools/nn/armies) from fresh train seeds, with the drills' banks."""
+    def draw():
+        """The next bank's random numbers (bankproc.Spec): fresh train seeds of random battles (tools/nn/armies), with
+        the drills' banks; --kite-share: kite battles (tools/nn/train/kitesp.py) beside them, taken by the self / past
+        rows."""
         from tools.nn.armies import generate
         seeds = rng.integers(generate.TRAIN_SEEDS.start, generate.TRAIN_SEEDS.stop, args.bank)
-        if args.drills:
-            inner = drill_source.Mixed(seeds, args.max_units, params, device, lay, seed=int(rng.integers(1 << 30)),
-                                       small=small_arg(), per_drill=args.drill_bank)
-        else:
-            inner = scenes.Generated(seeds, args.max_units, params, device, seed=int(rng.integers(1 << 30)),
-                                     small=small_arg())
-        if not args.kite_share:
-            return inner
-        # --kite-share: kite battles (tools/nn/train/kitesp.py) beside the bank, taken by the self / past rows
-        kite = kitesp.armies(rng.integers(generate.TRAIN_SEEDS.start, generate.TRAIN_SEEDS.stop, args.kite_bank))
-        return kitesp.Source(inner, kite, args.kite_share, kitesp.rows_of(lay), params, device,
-                             seed=int(rng.integers(1 << 30)))
+        seed = int(rng.integers(1 << 30))
+        spec = bankproc.Spec(seeds, seed, args.max_units, params, lay, small_arg(), bool(args.drills), args.drill_bank)
+        if args.kite_share:
+            spec.kite_share = args.kite_share
+            spec.kite_seeds = rng.integers(generate.TRAIN_SEEDS.start, generate.TRAIN_SEEDS.stop, args.kite_bank)
+            spec.kite_seed = int(rng.integers(1 << 30))
+        return spec
+
+    def source():
+        """A bank of battles built here, on the device."""
+        return bankproc.build(draw(), device)
 
     if args.kite_share and not kitesp.rows_of(lay).any():
         raise SystemExit("--kite-share: the run has no self / past battles (--mix)")
@@ -450,11 +449,12 @@ def train(args, every=None, teacher=None, normal=None):
     print(f"warm-up {time.time() - t_warm:.0f} s", flush=True)
     t0 = time.time()
     t_bank = t0
-    # The next bank of armies is built in a thread while training goes on (--bank-ahead): building one is mostly
-    # Python (the armies, the drills' battles: 17-48 s that held the GPU idle every --bank-refresh minutes); the
-    # swap then only waits if it is not ready yet.
-    builder = ThreadPoolExecutor(1, thread_name_prefix="bank") if args.bank_ahead else None
-    ahead = builder.submit(source) if builder is not None else None
+    # The next bank of armies is built in a process of its own while training goes on (--bank-ahead, bankproc.py):
+    # building one is mostly Python (the armies, the drills' battles: 17-48 s that held the GPU idle every
+    # --bank-refresh minutes; in a thread it shared the GIL with the collection, 7.5 s -> 16-35 s); the swap then only
+    # waits if it is not ready yet.
+    builder = bankproc.Ahead() if args.bank_ahead else None
+    ahead = builder.submit(draw()) if builder is not None else None
     update, decisions, total, window, best = 0, 0, {}, {}, -1.0
     floor_w = None                                # the entropy floor's current weight (--entropy-target)
     paused = 0.0
@@ -494,8 +494,8 @@ def train(args, every=None, teacher=None, normal=None):
         done_share = share_done()
         if time.time() - t_bank >= args.bank_refresh * 60:
             if ahead is not None:
-                env.source = ahead.result()
-                ahead = builder.submit(source)
+                env.source = builder.take(ahead, device)
+                ahead = builder.submit(draw())
             else:
                 env.source = source()
             env.bank = env.source.bank
@@ -633,7 +633,10 @@ def train(args, every=None, teacher=None, normal=None):
                                                                                      "danger10")), flush=True)
             if args.kite_share:
                 print("      " + kitesp.text(row["kite"]), flush=True)
-            if observed:
+            if observed and "loss" not in observed:     # the term off (its weight negligible, observe/store.py)
+                print(f"      observe off (weight {observed['weight_now']:.1e}); anchor weight {observed['anchor_now']:.4f} "
+                      f"KL to the start {observed['anchor_kl']:.4f}", flush=True)
+            elif observed:
                 print(f"      observe weight {observed['weight_now']:.4f} loss {observed['loss']:.3f} nll "
                       f"{observed['nll']:.3f} mean weight {observed['mean_c']:.2f} kind agree {observed['kind_acc']:.3f} "
                       f"target agree {observed['target_acc']:.3f} ({observed['labels']:.0f} selected labels, "
@@ -664,8 +667,6 @@ def train(args, every=None, teacher=None, normal=None):
             pick_past()
         if every and time.time() - t0 - paused >= next_mark * 60 and time.time() - t0 - paused < args.minutes * 60:
             t_e = time.time()
-            if ahead is not None:
-                ahead.result()           # no bank build during an evaluation: it captures CUDA graphs (evaluate.Graphed)
             torch.cuda.empty_cache()
             every[1](actor, critic, next_mark, update)
             actor.eval()
@@ -675,7 +676,7 @@ def train(args, every=None, teacher=None, normal=None):
             next_mark += every[0]
     seconds = time.time() - t0
     if builder is not None:
-        builder.shutdown(wait=True, cancel_futures=True)      # (no build left running into the evaluations)
+        builder.close()                       # (the bank being built is not needed)
     meta = {"update": update, "battles": env.battles, "seconds": round(seconds), "decisions": decisions,
             "battles_at_once": env.B, "steps_per_update": args.steps, "limit_s": args.limit, "run": args.name,
             "cadence": cadence.meta(),
@@ -704,14 +705,19 @@ def observation(args, actor, start, cfg, updates, device):
     if args.observe_anchor and start is None:
         raise SystemExit("--observe-anchor needs --init (the frozen network the KL holds the policy near)")
     T = args.observe_steps or args.steps
-    demos = store.Demos(args.observe_dir, T, args.observe_adv, args.observe_beta, args.observe_clip, actor.cfg)
+    # (the term off from the start - its weight negligible after the chain's updates: the store is not loaded)
+    demos = (store.Demos(args.observe_dir, T, args.observe_adv, args.observe_beta, args.observe_clip, actor.cfg)
+             if args.observe_weight * args.observe_decay ** updates >= store.NEGLIGIBLE else None)
     chunks = max(1, round(args.observe_share * cfg.minibatch / T))
     obs = store.Observe(demos, chunks, args.observe_weight, args.observe_decay, start if args.observe_anchor else None,
-                        args.observe_anchor, args.observe_anchor_decay, args.observe_refresh, updates, device, args.seed)
-    print(demos.text(), flush=True)
+                        args.observe_anchor, args.observe_anchor_decay, args.observe_refresh, updates, device, args.seed,
+                        anchor_alone=args.observe_anchor_alone)
+    print(demos.text() if demos is not None else "observation: the term is off (its weight is negligible), the "
+          "demonstrations are not loaded", flush=True)
     print(f"observation: {chunks} chunks of {T} decisions beside every minibatch of {cfg.minibatch}; weight "
           f"{args.observe_weight:g} x {args.observe_decay:g} an update (now {obs.weight:.4f} after {updates} updates "
-          f"of the chain), KL to --init {args.observe_anchor:g} x {args.observe_anchor_decay:g} (now {obs.anchor:.4f}), "
+          f"of the chain), KL to --init {args.observe_anchor:g} x {args.observe_anchor_decay:g} (now {obs.anchor:.4f}; "
+          + ("on after the term too" if args.observe_anchor_alone else "off with the term") + "), "
           f"memories again every {args.observe_refresh} updates", flush=True)
     return obs
 
@@ -932,6 +938,9 @@ def parser():
     ap.add_argument("--observe-anchor", type=float, default=0.2,
                     help="weight of KL(policy || --init frozen) on the PPO rows while observing (0: off)")
     ap.add_argument("--observe-anchor-decay", type=float, default=0.995, help="... x this every update")
+    ap.add_argument("--observe-anchor-alone", action="store_true",
+                    help="keep the KL anchor after the term is off (its weight negligible, observe/store.py): by "
+                         "default it ends with the term")
     ap.add_argument("--observe-adv", default="critic", choices=("critic", "mc", "window20"),
                     help="which advantage selects the demonstrations (A > 0) and weighs them: critic (GAE of the "
                          "reward v2 to the battle's end minus the network's critic), mc (the plain return minus the "
@@ -945,7 +954,8 @@ def parser():
                     help="updates between recomputing the demonstrations' stored memories")
     ap.add_argument("--bank-refresh", type=float, default=5.0, help="minutes between new banks of armies")
     ap.add_argument("--no-bank-ahead", dest="bank_ahead", action="store_false",
-                    help="build each new bank when it is due (the training waits) instead of in a thread ahead")
+                    help="build each new bank when it is due (the training waits) instead of in a process ahead "
+                         "(tools/nn/train/bankproc.py)")
     ap.add_argument("--gpu-mem", type=float, default=1.0,
                     help="share of the GPU's memory training may hold (game mode: e.g. 0.5, so a game keeps memory)")
     ap.add_argument("--gpu-duty", type=float, default=1.0,
