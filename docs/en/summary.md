@@ -148,8 +148,8 @@ Details: [simulator](training/simulator.md) · [unit passports](training/units.m
 ## Network v2
 
 One network for both factions and both roles (attack or defence is an input). It sees only what a human
-would: its own units in full, enemies while visible, and only the state of their morale
-([visibility rule](training/model.md#the-rule-the-ai-sees-only-what-a-human-sees)). It never sees the time
+would: its own units in full, enemies while visible - everything the game shows about an enemy unit (exact
+morale, fatigue, ammunition, kills) except their orders ([visibility rule](training/model.md#the-rule-the-ai-sees-only-what-a-human-sees)). It never sees the time
 to the end of the battle. Preset `v2`, 3.51 M weights, trained from scratch
 ([details](training/model.md#variant-v2-map-sectors-chained-heads-commitment)):
 

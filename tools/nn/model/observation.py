@@ -3,10 +3,14 @@
 The rule: the AI sees only what a human player sees.
 * Before battle (static): both rosters (passports, experience rank), lord levels, who attacks,
   the map's bounds, the side's faction character and role.
-* In battle: own units — everything, exact morale too. Enemy units — only while visible:
-  position, facing, movement, men and health, what they do (melee, moving, running, firing) and the
-  morale STATE (steady / wavering / routing / shattered), never the exact morale. Not visible:
-  the last seen position and how long ago.
+* In battle: own units — everything. Enemy units — only while visible, everything the game's battle UI
+  shows for a selected or hovered enemy unit (Normal difficulty; Legendary hides the enemy's leadership):
+  position, facing, movement, men and health, what they do (melee, moving, running, firing), the exact
+  morale (the leadership bar under the banner and the leadership stat with its breakdown) and its state
+  1-7, ammunition, kills, fatigue state, flank / rear threats (the leadership breakdown lists them),
+  volley readiness (the volleys are seen: from the ammunition read while the unit is seen). Never the
+  enemy's orders (order point, has a target, the order in force: OWN_ONLY) or its ability timers (the bridge cannot read them).
+  Not visible: the last seen position and how long ago.
 * Events a player is told or sees: own and enemy lord slain and how long ago (the game announces
   it), and per unit how recently it fought in melee and how recently it routed (enemies: while
   seen).
@@ -33,12 +37,13 @@ The rule: the AI sees only what a human player sees.
   seconds active left (the ability bar). Enemies: owned, and active now only while the unit is seen
   (the game draws the ability's effect on the unit and lists it among the unit's active effects;
   its timers are not shown). Obs.abil_ok: own abilities the network may use now.
-* Volley readiness (VOLLEY, own units only, the column before ARC, 03.10.2026): seconds since the
+* Volley readiness (VOLLEY, own units and seen enemies, the column before ARC): seconds since the
   unit's projectiles left (`a`) last fell between two observations (its last volley) / its passport
   reload_s, clipped to 0..1; 1 before its first shot; 0 for units without missiles. Seen at the
   decisions only (Memory.prev_ammo, volley_t), so the simulator (its ammo counter at the network's 1 s
   cadence) and the companion (the game's ammo_left() each second) compute it the same way, from the
-  same code. The simulator's men load fully only after its measured reload (missile.py: ~1.1-1.3x the
+  same code. An enemy's ammunition is read only while it is seen: hidden, its reference is forgotten
+  (a fall across the time it was hidden is no volley; the last seen volley stays). The simulator's men load fully only after its measured reload (missile.py: ~1.1-1.3x the
   passport's), so 1 means "the passport's reload has passed", not "every man is loaded".
 * Fire arc (ARC, both sides, the token's last column, 07.10.2026): the passport's fire arc each side / 180
   (passport.fire_arc): 1.0 for the Night Runners' throwing stars, which shoot all round and on the move; 0.17 for
@@ -91,24 +96,26 @@ RATE_CAP = 4.0       # the rate input: rate / RATE_MIN, at most this
 ORDER_AGE = 60.0     # s: the order in force's age / ORDER_AGE, capped at 1 (ORDER)
 ORDER_MOVE_M = 10.0  # m: a move point moved more than this is a new order (= reward.Weights.order_move_m)
 
-# The token's dynamic features: (name, who sees it). "both": own units and visible enemies;
-# "own": own units only (zero for enemies; the critic's full view fills them for all units).
+# The token's dynamic features: (name, who sees it). "both": own units and visible enemies (the game's UI shows
+# them for an enemy unit, module doc); "own": own units only - the orders (zero for enemies; the critic's full view
+# fills them for all units). The columns keep their places (trained checkpoints load as before).
 DYNAMIC = (
     ("fwd", "both"), ("lat", "both"), ("face_cos", "both"), ("face_sin", "both"),
     ("vel_fwd", "both"), ("vel_lat", "both"), ("men", "both"), ("hp", "both"),
     ("state_steady", "both"), ("state_wavering", "both"), ("state_routing", "both"), ("state_shattered", "both"),
     ("melee", "both"), ("moving", "both"), ("running", "both"), ("firing", "both"),
     ("edge_fwd", "both"), ("edge_back", "both"), ("edge_right", "both"), ("edge_left", "both"),
-    ("morale", "own"), *((f"ms_{i}", "own") for i in range(1, 8)),
-    ("ammo", "own"), ("kills", "own"), *((f"fatigue_{i}", "own") for i in range(FATIGUE)), ("fatigue_known", "own"),
+    ("morale", "both"), *((f"ms_{i}", "both") for i in range(1, 8)),
+    ("ammo", "both"), ("kills", "both"), *((f"fatigue_{i}", "both") for i in range(FATIGUE)),
+    ("fatigue_known", "both"),
     ("order_fwd", "own"), ("order_lat", "own"), ("has_order", "own"), ("has_target", "own"),
-    ("threat_left", "own"), ("threat_right", "own"), ("threat_rear", "own"),
+    ("threat_left", "both"), ("threat_right", "both"), ("threat_rear", "both"),
     ("melee_recent", "both"), ("rout_recent", "both"),
 )
 FLAGS = ("is_own", "visible", "seen", "age", "rank")
 # Innate effects appended after the passport (02.10.2026; older checkpoints load with zero weights for
-# them, encoder.py): per effect (owned, on), tools/nn/model/effects.py. Then VOLLEY (03.10.2026, own units
-# only; older checkpoints: zero weights): seconds since the last volley / passport reload (module doc).
+# them, encoder.py): per effect (owned, on), tools/nn/model/effects.py. Then VOLLEY (03.10.2026, own units and
+# seen enemies; older checkpoints: zero weights): seconds since the last volley / passport reload (module doc).
 VOLLEY = ("volley_ready",)
 # Then ARC (07.10.2026, both sides: the unit's card; older checkpoints: zero weights): the passport's fire arc each
 # side / 180 (passport.fire_arc) - appended at the token's end, not among the passport's features, so the columns
@@ -120,8 +127,8 @@ NAMES = (tuple(n for n, _ in DYNAMIC) + FLAGS + tuple(f"passport_{i}" for i in r
          + VOLLEY + ARC + ORDER)
 INDEX = {n: i for i, n in enumerate(NAMES)}
 TOKEN = len(NAMES)
-OWN_ONLY = (tuple(INDEX[n] for n, who in DYNAMIC if who == "own") + tuple(INDEX[n] for n in VOLLEY)
-            + tuple(INDEX[n] for n in ORDER))
+# The token columns an enemy never shows (its orders): zero for enemies in the side's view.
+OWN_ONLY = tuple(INDEX[n] for n, who in DYNAMIC if who == "own") + tuple(INDEX[n] for n in ORDER)
 # character; attack, defend, 2 lord levels, map width and depth, 2 counts; own lord slain and how
 # recently, the enemy lord the same (CONTEXT_BASE: the context before the damage timers); then TIMERS:
 # the fine clock, we dealt damage yet and seconds since we last did (0 before), the enemy the same.
@@ -373,9 +380,9 @@ def observe(state, setup, side, memory=None, full=False):
     struck2 = m.stack([(fell & enemy).any(-1), (fell & own).any(-1)], -1)           # [B, 2] we, the enemy
     hit_t = m.where(struck2, tb, memory.hit_t)
     rate, rate_t, gold = _progress(m, state, S, memory, men, tb[:, 0])
-    cols["volley_ready"], prev_ammo, volley_t = _volley(m, state, S, memory, tn, xs)
-    # Who sees what: "both" fields only for units seen now; "own" fields only for own units
-    # (every unit in the critic's full view). Position and edges stay for the last sighting.
+    cols["volley_ready"], prev_ammo, volley_t = _volley(m, state, S, memory, tn, xs, sees)
+    # Who sees what: "both" fields only for units seen now (own units always); "own" fields (the orders)
+    # only for own units (every unit in the critic's full view). Position and edges stay for the last sighting.
     keep_last = ("fwd", "lat", "edge_fwd", "edge_back", "edge_right", "edge_left")
     see_all = S.present if full else own
     for name, who in DYNAMIC:
@@ -390,7 +397,7 @@ def observe(state, setup, side, memory=None, full=False):
         E = effects.SIZE // 2
         fx_own = np.zeros(xs.shape + (E,), np.float32) if m is np else xs.new_zeros(xs.shape + (E,))
     fx = effects.features(m, state, fx_own, S.present if full else (own | sees))
-    late = m.stack([m.where(see_all & S.present, cols[n], cols[n] * 0) for n in VOLLEY], -1)
+    late = m.stack([m.where(sees, cols[n], cols[n] * 0) for n in VOLLEY], -1)
     arc = getattr(S, "arc", None)
     arc = xs * 0 if arc is None else _f(m, arc)
     order, ord_mem = _order(m, state, memory, tn, xs)
@@ -495,15 +502,17 @@ def _progress(m, state, S, memory, men, now):
     return rate, rate_t, m.where(again[:, None], memory.prev_gold, worst)
 
 
-def _volley(m, state, S, memory, tn, like):
+def _volley(m, state, S, memory, tn, like, sees=None):
     """(ready [B, N], prev_ammo, volley_t): VOLLEY (module doc). The unit's projectiles left `a` fell
     since the previous observation that read them -> its last volley is now; ready = seconds since it /
     the passport reload_s, clipped to 0..1, 1 before the first; 0 without a missile (or a reload not
     known). `a` not read (NaN) or missing: nothing changes. The same time again (the critic's view or a
-    repeated state) finds no fall: the reference is the same number."""
+    repeated state) finds no fall: the reference is the same number. sees [B, N]: the units seen now
+    (None: all present) - a unit not seen is not read and its reference is forgotten (-1)."""
     a = state.get("a")
     a = like * 0 - 1 if a is None else m.nan_to_num(a * 1.0, nan=-1.0)
-    known = (a >= 0) & S.present
+    sees = S.present if sees is None else sees & S.present
+    known = (a >= 0) & sees
     fell = known & (memory.prev_ammo >= 0) & (a < memory.prev_ammo)
     volley_t = m.where(fell, tn, memory.volley_t)
     reload = getattr(S, "reload", None)
@@ -511,7 +520,8 @@ def _volley(m, state, S, memory, tn, like):
     shooter = reload > 0
     since = m.clip((tn - volley_t) / m.where(shooter, reload, reload * 0 + 1), 0, 1)
     ready = m.where(shooter, m.where(volley_t >= 0, since, since * 0 + 1), since * 0)
-    return _f(m, ready), m.where(known, a, memory.prev_ammo), volley_t
+    prev = m.where(known, a, m.where(sees, memory.prev_ammo, memory.prev_ammo * 0 - 1))
+    return _f(m, ready), prev, volley_t
 
 
 def _order(m, state, memory, tn, like):

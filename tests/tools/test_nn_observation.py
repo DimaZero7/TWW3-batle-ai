@@ -78,20 +78,39 @@ class TestObservation:
         assert np.all(obs.tokens[enemy][:, list(ob.OWN_ONLY)] == 0)
         assert np.any(obs.tokens[~enemy][:, list(ob.OWN_ONLY)] != 0)
 
-    def test_the_enemy_exact_morale_never_reaches_the_input(self):
+    def test_a_seen_enemy_shows_all_but_its_orders(self):
+        """What the game's UI shows for an enemy unit (exact morale, its state 1-7, ammunition, kills, fatigue,
+        threats, volley readiness) reaches the input while it is seen, as the critic sees it; its orders never."""
         setup, state = battle()
         enemy = setup.side == 2
-        base, _ = ob.observe(state, setup, 1)
+        fat = np.random.default_rng(2).integers(0, ob.FATIGUE, state["x"].shape).astype(float)
+        state = with_state(state, fat=fat)
+        obs, _ = ob.observe(state, setup, 1)
+        full, _ = ob.observe(state, setup, 1, full=True)
+        shown = [i for i in range(ob.TOKEN) if i not in ob.OWN_ONLY]
+        assert np.array_equal(obs.tokens[enemy][:, shown], full.tokens[enemy][:, shown])
+        assert np.all(obs.tokens[enemy][:, list(ob.OWN_ONLY)] == 0)
+        assert np.any(full.tokens[enemy][:, list(ob.OWN_ONLY)] != 0)          # the critic: the orders too
+        tok = obs.tokens[enemy]
+        assert np.allclose(tok[:, I["morale"]], np.clip(state["mp"][enemy] / ob.MORALE, -1.5, 1.5))
+        assert np.allclose(tok[:, I["kills"]], state["k"][enemy] / ob.KILLS)
+        assert np.all(tok[:, I["fatigue_known"]] == 1)
+        assert np.array_equal(tok[:, [I[f"fatigue_{i}"] for i in range(ob.FATIGUE)]].argmax(-1), fat[enemy])
         rng = np.random.default_rng(1)
-        steady = np.where(enemy, rng.integers(1, 5, state["ms"].shape), state["ms"])    # 1-4 all look "steady"
-        steady_now = np.where(enemy & (state["ms"] <= 4), steady, state["ms"])
-        changed = with_state(state, mp=np.where(enemy, rng.uniform(-2, 2, state["mp"].shape), state["mp"]),
-                             ms=steady_now)
+        changed = with_state(state, mp=np.where(enemy, rng.uniform(-2, 2, state["mp"].shape), state["mp"]))
+        other, _ = ob.observe(changed, setup, 1)
+        assert not np.array_equal(obs.tokens, other.tokens)
+
+    def test_a_hidden_enemy_shows_none_of_it(self):
+        setup, state = battle()
+        hidden = np.zeros_like(setup.present)
+        hidden[:, -1] = True
+        s = with_state(state, vis=~hidden, fat=np.zeros(state["x"].shape))
+        base, _ = ob.observe(s, setup, 1)
+        changed = with_state(s, mp=s["mp"] - 1 * hidden, a=s["a"] * (1 - 0.5 * hidden), k=s["k"] + 9 * hidden,
+                             fat=np.where(hidden, 5.0, 0.0), lf=s["lf"] | hidden)
         other, _ = ob.observe(changed, setup, 1)
         assert np.array_equal(base.tokens, other.tokens) and np.array_equal(base.ctx, other.ctx)
-        full, _ = ob.observe(state, setup, 1, full=True)          # the critic does see it
-        full2, _ = ob.observe(changed, setup, 1, full=True)
-        assert not np.array_equal(full.tokens, full2.tokens)
 
     def test_invisible_enemies_keep_only_the_last_seen_position(self):
         setup, state = battle()
@@ -460,17 +479,36 @@ class TestVolley:
                 (6, np.nan, 1710), (7, 2510, 1710), (12, 2510, 1710), (13, 2400, 1710), (13, 2400, 1710),
                 (14, 2400, 1700)]
         want = [1, 1, 0, 0, 1 / 8, 3 / 8, 4 / 8, 1, 0, 0, 1 / 8]
+        # the enemy archers (seen all the time: shown as the critic sees them): falls at 3 s and 14 s, reload 10 s
+        want_enemy = [1, 1, 1, 0, 0.1, 0.3, 0.4, 0.9, 1, 1, 0]
         mem = cmem = None
-        for (t, a_own, a_enemy), w in zip(rows, want):
+        for (t, a_own, a_enemy), w, we in zip(rows, want, want_enemy):
             s = with_state(state, t=np.array([float(t)]), a=np.array([[a_own, 0, a_enemy, 0]], float))
             obs, mem = ob.observe(s, setup, 1, mem)
             cobs, cmem = ob.observe(s, setup, 1, cmem, full=True)
             v = obs.tokens[0, :, I["volley_ready"]]
-            assert v.tolist() == pytest.approx([w, 0, 0, 0]), t                 # enemies: never shown
-            assert cobs.tokens[0, :2, I["volley_ready"]].tolist() == pytest.approx([w, 0]), t
-        # the critic sees the archers' too: their last fall at 14 s, the one before at 3 s
-        assert cobs.tokens[0, 2, I["volley_ready"]] == 0
-        assert I["volley_ready"] == ob.TOKEN - 1 - len(ob.ARC) - len(ob.ORDER) and I["volley_ready"] in ob.OWN_ONLY
+            assert v.tolist() == pytest.approx([w, 0, we, 0]), t
+            assert cobs.tokens[0, :, I["volley_ready"]].tolist() == pytest.approx([w, 0, we, 0]), t
+        assert I["volley_ready"] == ob.TOKEN - 1 - len(ob.ARC) - len(ob.ORDER) and I["volley_ready"] not in ob.OWN_ONLY
+
+    def test_a_hidden_enemys_ammunition_is_not_read(self):
+        """Hidden, the enemy's volley is not shown and its ammunition not read: a fall across the time it was hidden
+        is no volley (the last seen one stays); the critic reads it all the time."""
+        setup, state = self.setup_state()
+        # (t s, enemy archers' projectiles, seen)
+        rows = [(0, 1800, True), (1, 1710, True), (5, 1620, False), (9, 1530, False), (20, 1440, True),
+                (21, 1440, True), (22, 1350, True)]
+        want = [1, 0, 0, 0, 1, 1, 0]
+        cwant = [1, 0, 0, 0, 0, 0.1, 0]
+        mem = cmem = None
+        for (t, a, seen), w, cw in zip(rows, want, cwant):
+            vis = np.array([[True, True, seen, True]])
+            s = with_state(state, t=np.array([float(t)]), a=np.array([[0, 0, a, 0]], float), vis=vis)
+            obs, mem = ob.observe(s, setup, 1, mem)
+            cobs, cmem = ob.observe(s, setup, 1, cmem, full=True)
+            assert obs.tokens[0, 2, I["volley_ready"]] == pytest.approx(w), t
+            assert cobs.tokens[0, 2, I["volley_ready"]] == pytest.approx(cw), t
+            assert (mem.prev_ammo[0, 2] == -1) == (not seen), t
 
     def test_a_new_memory_starts_ready(self):
         setup, state = self.setup_state()

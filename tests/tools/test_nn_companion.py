@@ -29,7 +29,7 @@ def state_doc(move=1, **enemy):
 
 
 def test_a_state_becomes_the_observations_input():
-    doc = state_doc(fat="threshold_tired", mp=0.123)
+    doc = state_doc(fat="threshold_tired", mp=0.123, k=12)
     b = exchange.battle(doc)
     assert b.names == ["own_lord", "own_spear_1", "enemy_lord", "enemy_spear_1"] and b.own == ["own_lord", "own_spear_1"]
     assert b.setup.attacker[0] == 2 and b.setup.keys[0][1] == SPEAR
@@ -39,16 +39,22 @@ def test_a_state_becomes_the_observations_input():
     assert s["fat"][0, 3] == 3 and s["vis"].all()
     obs, _ = ob.observe(s, b.setup, 1)
     assert obs.tokens.shape == (1, 4, ob.TOKEN) and obs.ctrl[0].tolist() == [True, True, False, False]
-    assert obs.tokens[0, 3, ob.INDEX["morale"]] == 0     # never the enemy's exact morale
+    # a seen enemy: what the game's UI shows (exact morale, fatigue state, kills), never its orders
+    tok = obs.tokens[0, 3]
+    assert tok[ob.INDEX["morale"]] == pytest.approx(0.123 / ob.MORALE)
+    assert tok[ob.INDEX["fatigue_3"]] == 1 and tok[ob.INDEX["fatigue_known"]] == 1
+    assert tok[ob.INDEX["kills"]] == pytest.approx(s["k"][0, 3] / ob.KILLS)
+    assert np.all(tok[list(ob.OWN_ONLY)] == 0)
 
 
 def test_an_enemy_not_seen_is_hidden():
-    doc = state_doc(v=False)
+    doc = state_doc(v=False, fat="threshold_tired", mp=0.123)
     b = exchange.battle(doc)
     s = exchange.arrays(doc, b.names)
     assert s["vis"][0].tolist() == [True, True, True, False]
     obs, _ = ob.observe(s, b.setup, 1)
     assert obs.tokens[0, 3, ob.INDEX["visible"]] == 0 and obs.tokens[0, 3, ob.INDEX["men"]] == 0
+    assert obs.tokens[0, 3, ob.INDEX["morale"]] == 0 and obs.tokens[0, 3, ob.INDEX["fatigue_known"]] == 0
     assert not obs.target_ok[0, 3]
 
 

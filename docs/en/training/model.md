@@ -24,8 +24,28 @@ takes a recorded battle and the simulator's batch: both have the fields of the r
 `nn_sample` ([recordings](README.md#what-a-recording-holds)).
 
 - **Own units** — everything, exact morale too.
-- **Enemy units** — only while visible: place, facing, speed, men and health, what they do,
-  and the morale **state**. The exact morale percent never reaches the input (a test checks it).
+- **Enemy units** — only while visible, and then everything the game shows for a selected or
+  hovered enemy unit: place, facing, speed, men and health, what they do, the exact morale and its
+  state 1–7, ammunition, kills, fatigue, threats to the flanks and rear, volley readiness.
+  **Never their orders** (order point, has an order and a target, the order in force) nor their
+  abilities' timers: the bridge does not read them (tests check this). How we know the player sees it:
+  - morale: the grey bar under the health bar on the unit's banner and the "Leadership" stat in the
+    unit panel (key I), hovered — the breakdown of every modifier, for enemies too; closed only on
+    Legendary difficulty, we play on Normal
+    ([Steam: morale breakdown in battle](https://steamcommunity.com/app/594570/discussions/0/1743388044205750391/),
+    [Steam: the banner's bars](https://steamcommunity.com/app/594570/discussions/0/1744480967028403064/));
+  - fatigue: the state (fresh … exhausted) in the unit's tooltip; the player never sees a fatigue
+    number, so the input is the state;
+  - ammunition: the brown bar under the health and the number in the unit panel;
+  - kills: the counter in the unit panel (the sources speak of own units; that it shows for enemies
+    too is the user's word, an experienced player);
+  - flank and rear threats: the "attacked in the flank / rear" lines of the morale breakdown; they can
+    also be worked out from the units' visible places;
+  - volley readiness: the player sees the volleys and the ammunition bar; the input counts only the
+    ammunition read while the unit is seen.
+  The bridge (`nn_arena.lua` `sample`) writes all these fields for both sides' units, the companion
+  (`exchange.arrays`) passes them on as they are, the simulator keeps them for every unit, and only
+  `observation.py` picks — one rule for the simulator, the recordings and the game.
 - **Enemy not visible** — the last seen place and how long ago. Never seen — only its passport
   (the enemy's army is shown before battle).
 - **The side's frame.** The origin is the map's centre; "forward" points from the side's army
@@ -61,18 +81,18 @@ ones by lore.
 | Morale state: steady, wavering, routing, shattered | yes | yes | — | 0/1 |
 | In melee, moving, running, firing | yes | yes | — | 0/1 |
 | Distance to the map's edges | yes | yes | from the last seen place | m / 1000 |
-| Exact morale (`MoralePercent`) | yes | **no** | — | / 2, clipped to ±1.5 |
-| Detailed morale state 1–7 | yes | **no** | — | 0/1 |
-| Ammunition, kills | yes | no | — | share of the start; kills / 200 |
-| Volley ready: seconds since the ammunition last fell (the last volley) / the passport's reload ([below](#volley-readiness-own-units)) | yes | no | — | 0–1; 1 before the first shot; 0 without a missile weapon |
-| Fatigue state (6), known or not | yes | no | — | 0/1 |
-| Order point, has an order, has a target | yes | no | — | m / 500; 0/1 |
-| Threat to the left flank, right flank, rear | yes | no | — | 0/1 |
+| Exact morale (`MoralePercent`) | yes | yes | — | / 2, clipped to ±1.5 |
+| Detailed morale state 1–7 | yes | yes | — | 0/1 |
+| Ammunition, kills | yes | yes | — | share of the start; kills / 200 |
+| Volley ready: seconds since the ammunition last fell (the last volley) / the passport's reload ([below](#volley-readiness-own-units-and-visible-enemies)) | yes | yes | — | 0–1; 1 before the first shot; 0 without a missile weapon |
+| Fatigue state (6), known or not | yes | yes | — | 0/1 |
+| Order point, has an order, has a target | yes | **no** | — | m / 500; 0/1 |
+| Threat to the left flank, right flank, rear | yes | yes | — | 0/1 |
 | Own or enemy, visible now, ever seen, age of the sighting | yes | yes | yes | 0/1; age s / 60, up to 1 |
 | Fought in melee lately, routed lately | yes | yes (seen then) | — | 1 now, down to 0 after 120 s; 0 never |
 
-Morale states 1–4 of the game (eager … shaken) are all "steady" for the enemy: telling them
-apart would give away the exact morale.
+The columns kept their places (the token's size is the same), so trained networks load as they
+were; but these columns used to be zero for enemies, and the network learns to read them anew.
 
 Every decision also gets the side's context:
 
@@ -179,13 +199,15 @@ timer is not known (the Penitent) counts as off. A new effect appends its pair a
 (before the volley input below): an older network loads with zero weights for it
 (`encoder.pad_inputs`) and acts as before.
 
-### Volley readiness (own units)
+### Volley readiness (own units and visible enemies)
 
 The kiting skill is "halt when the volley is ready, run while reloading", and nothing else in the
 token tells when a missile unit has reloaded. One input (`volley_ready`, `observation.VOLLEY`,
 03.10.2026): seconds since the unit's projectiles left (`a`) last fell between two observations
 (its last volley), divided by the passport's `reload_s`, clipped to 0..1. 1 before the first shot,
-0 for a unit without a missile weapon; own units only (the critic sees all).
+0 for a unit without a missile weapon. Own units and enemies while seen (the critic sees all): an
+enemy's ammunition is read only while it is seen; hidden, the earlier reading is forgotten, so a fall
+over the time it was not seen is no volley, and the last volley seen stays.
 
 It is worked out in `observation.observe` from `a` at the decisions only (the memory keeps the
 last reading and the time of the last fall: `Memory.prev_ammo`, `volley_t`), so the simulator (its
@@ -567,7 +589,9 @@ An int8 export of the actor looks practical; not done yet:
 ## Tests
 
 - `tests/tools/test_nn_observation.py` (numpy, runs in `.venv`): frame, scaling, padding;
-  the enemy's exact morale never reaches the input; invisible enemies keep only the last seen
+  a visible enemy shows everything as the critic sees it except its orders (exact morale, fatigue,
+  ammunition, kills), a hidden one none of it; an enemy's volley readiness only from the ammunition
+  read while it is seen; invisible enemies keep only the last seen
   place; side symmetry; unit order; recorded battles; abilities: the own bar, the enemy's only
   active and seen, nothing ready without timers or for a routing lord; the damage timers restart
   at each damage, per side and per battle row, rising or unknown health is no damage, a new memory
