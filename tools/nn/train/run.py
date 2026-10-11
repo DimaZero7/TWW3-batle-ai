@@ -37,6 +37,7 @@ from tools.nn.model import policy as model_policy
 from tools.nn.train import cadence as cad
 from tools.nn.train import checkpoint, drills, evaluate, league, matchups, ppo, randomise, reward, rollout, scenes
 from tools.nn.train import head_entropy, head_reset, kitesp, teach_auto
+from tools.nn.train import dr as uncertain
 from tools.nn.train.drills import source as drill_source
 from tools.nn.train.drills import teach as drill_teach
 
@@ -362,6 +363,7 @@ def train(args, every=None, teacher=None, normal=None):
                 else {})
     normal_s = {drills.normal_name(n): v for n, v in (fixed_normal or {}).items()}
     params = rollout.params_with_limit(args.limit)
+    dr_cfg = uncertain.load(args.dr, params) if args.dr else None
     rng = np.random.default_rng(args.seed)
 
     def source():
@@ -387,7 +389,9 @@ def train(args, every=None, teacher=None, normal=None):
                           source=source(), cadence=cadence, past_slots=slots,
                           teach=drills.load(list(teach0)) if teach0 else None,
                           teach_normal={n: loaded_normal[n] for n in normal_names} if normal_names else None,
-                          attack_only=defend_only)
+                          attack_only=defend_only, dr=dr_cfg)
+    if dr_cfg is not None:
+        print(dr_cfg.text(), flush=True)
     if normal_s:
         env.set_teach_shares(normal_s)
     # v2: one part more (its 256 sector tokens a decision; 2 parts peaked at 11.9 GB of the 16 GB card, wide 11.7, and
@@ -761,6 +765,9 @@ def parser():
                     help="the size of a network started from random.pt (default: --init's, else small; a checkpoint "
                          "brings its own sizes)")
     ap.add_argument("--limit", type=float, default=3600.0, help="battle time limit, s (the defender wins at it)")
+    ap.add_argument("--dr", nargs="?", const=str(uncertain.DEFAULT), default=None, metavar="JSON",
+                    help="domain randomisation of the simulator's uncertain numbers (tools/nn/train/dr.py): each training "
+                         "battle draws them inside the ranges of this file (no value: config/nn/dr.json); off by default")
     ap.add_argument("--lr", type=float, default=ppo.PPOConfig.lr)
     ap.add_argument("--gamma", type=float, default=ppo.PPOConfig.gamma,
                     help="discount per 0.5 s of battle (per decision: gamma ** (--decide-s / 0.5); GAE's lambda too)")

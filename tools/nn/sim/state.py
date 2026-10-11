@@ -267,6 +267,8 @@ HISTORY = {
 # batch it was built in. The hash draws (morale's rally, the rout's dodge side, the scripts' picks) key on it, so a
 # battle draws the same whatever batch it later runs in - narrowed, compacted or restarted from a bank.
 BATTLE_ID = "row"
+# Per-battle values of the simulator's uncertain numbers (tools/nn/sim/knobs.py): u["k_<name>"] [B, N] (the same on every
+# slot), present only in training with domain randomisation on (tools/nn/train/dr.py); empty() makes none.
 
 
 def _dtype(code):

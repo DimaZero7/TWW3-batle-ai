@@ -125,10 +125,12 @@ class Bank:
 
 
 def take_rows(st, bank_state, rows, idx):
-    """Battles where rows [B] is true start again as bank battle idx[b] (in place)."""
+    """Battles where rows [B] is true start again as bank battle idx[b] (in place). A field the bank has not (the
+    per-battle draws of domain randomisation, tools/nn/train/dr.py: drawn again right after) stays as it was."""
     keep = ~rows
     for k, v in st.u.items():
-        st.u[k] = torch.where(rows[:, None], bank_state.u[k][idx], v)
+        if k in bank_state.u:
+            st.u[k] = torch.where(rows[:, None], bank_state.u[k][idx], v)
     st.t = torch.where(keep, st.t, bank_state.t[idx])
     st.done = torch.where(keep, st.done, bank_state.done[idx])
     st.winner = torch.where(keep, st.winner, bank_state.winner[idx])

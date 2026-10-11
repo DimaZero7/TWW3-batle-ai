@@ -45,7 +45,7 @@ rule and no charge (measured).
 """
 import torch
 
-from tools.nn.sim import geometry
+from tools.nn.sim import geometry, knobs
 from tools.nn.sim import orders as O
 
 
@@ -156,6 +156,7 @@ def strikes(u, pw, contact, params, charge_now, first=False):
         r_i = (u["men"].clamp(min=0) / files0)[:, :, None]
         r0_i = (u["men0"].clamp(min=1) / files0)[:, :, None]
         face_i = torch.where(through_front, (files0 * h_u)[:, :, None], pw["face_i"])
+        lam = knobs.get(u, "front_fill_ranks", lam, 3)      # (a per-battle draw in training: tools/nn/train/dr.py)
         fill = (1 - torch.exp(-r_i / lam)) / (1 - torch.exp(-r0_i / lam))
     else:
         face_i = pw["face_i"]
@@ -172,7 +173,8 @@ def strikes(u, pw, contact, params, charge_now, first=False):
     F = torch.minimum(F, men_i)
     if fill is not None:
         F = torch.where(single_i, F, F * fill)
-    F = torch.where(single_j, torch.minimum(men_i, torch.full_like(F, float(cc["lord_max_attackers"]))), F)
+    lord_max = knobs.get(u, "lord_max_attackers", float(cc["lord_max_attackers"]), 3)
+    F = torch.where(single_j, torch.minimum(men_i, knobs.full_like(F, lord_max)), F)
     F = torch.where(single_i, torch.ones_like(F), F)
     # Fewer men left, fewer bring their weapons to bear (and fewer can be reached).
     share_i = (u["men"] / u["men0"].clamp(min=1)).clamp(0, 1)[:, :, None]
@@ -217,7 +219,7 @@ def strikes(u, pw, contact, params, charge_now, first=False):
         # tau_s, so more men stand within reach early: men striking x (1 + amp exp(-t / tau_s)), t the pair's time in
         # melee (the younger of the two clocks: a fresh unit meets its enemy's front anew); formations only.
         t_pair = torch.minimum(u["contact_s"][:, :, None], u["contact_s"][:, None, :])
-        w = 1.0 + float(wave["amp"]) * torch.exp(-t_pair / float(wave["tau_s"]))
+        w = 1.0 + knobs.get(u, "wave_amp", float(wave["amp"]), 3) * torch.exp(-t_pair / float(wave["tau_s"]))
         floor = wave.get("missile_attack_floor")
         if floor:
             # A missile unit fighting under an attack order (the wavemiss probes, build/routmorale/wavemiss_report.py):
@@ -236,7 +238,7 @@ def strikes(u, pw, contact, params, charge_now, first=False):
     # share the rest.
     lone = (single_i & (F > 0)).float().sum(dim=1, keepdim=True)
     around = torch.where(single_i, torch.zeros_like(F), F).sum(dim=1, keepdim=True)
-    cap = (float(cc["lord_max_attackers"]) - lone).clamp(min=0)
+    cap = (lord_max - lone).clamp(min=0)
     F = torch.where(single_j & ~single_i & (around > cap), F * cap / around.clamp(min=1e-6), F)
 
     sector = geometry.sector(pw["rel_j"], cc["front_deg"], cc["rear_deg"])
@@ -278,7 +280,8 @@ def strikes(u, pw, contact, params, charge_now, first=False):
     # splash_max_attacks and the men left), each taking 1 / splash_max_attacks of it (CA 5.1.0: divided among the
     # targets; measured: single blows of 47-57 HP on stormvermin); a lone man takes the whole blow.
     n_max = u["splash"][:, :, None].expand_as(F)
-    struck = torch.minimum(n_max, torch.full_like(n_max, float(cc.get("lord_splash_struck", 4.0))))
+    struck = torch.minimum(n_max, knobs.full_like(n_max, knobs.get(u, "lord_splash_struck",
+                                                                   float(cc.get("lord_splash_struck", 4.0)), 3)))
     struck = torch.minimum(struck, u["men"][:, None, :].clamp(min=1))
     struck = torch.where(single_j, torch.ones_like(struck), struck)
     div = n_max.clamp(min=1) if cal.get("splash_divides") else torch.ones_like(n_max)
@@ -300,7 +303,7 @@ def strikes(u, pw, contact, params, charge_now, first=False):
         ran_j = u["ran_in"][:, None, :] if "ran_in" in u else torch.ones_like(single_j)
         rate = torch.where(single_j & ~single_i & ran_j, rate * grow, rate)
     if pursuit is not None:
-        share = torch.full_like(rate, float(pursuit))
+        share = knobs.full_like(rate, knobs.get(u, "pursuit_rate", float(pursuit), 3))
         if cc.get("rout_pin_s") and cc.get("rout_pin_rate") is not None and "rpin_s" in u:
             # a router in its rout's exit (battle.py, contact.rout_pin_s), still among the men it fought, is struck at
             # contact.rout_pin_rate of the rule (the recordings: 0.77 of a standing unit's loss in melee)
@@ -363,7 +366,7 @@ def strikes(u, pw, contact, params, charge_now, first=False):
     if cc.get("hold_reflect_full"):
         cut = cut & (reflect <= 1.0)
     full = rate
-    rate = torch.where(cut, rate * float(cc.get("hold_rate", 1.0)), rate)
+    rate = torch.where(cut, rate * knobs.get(u, "hold_rate", float(cc.get("hold_rate", 1.0)), 3), rate)
     if not first:
         return rate, hit, sector, F
     # One blow of every man in contact (the first strike): the rate's men and multipliers, one swing each; every man in

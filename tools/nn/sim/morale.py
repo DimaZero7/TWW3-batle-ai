@@ -28,6 +28,8 @@ import math
 
 import torch
 
+from tools.nn.sim import knobs
+
 
 def ammo_share(u, slope, midpoint):
     """The missile part of the combat potential left [B, N]: 1 / (1 + exp(-slope (ammo share - midpoint))) - the
@@ -153,17 +155,20 @@ def steps(x, points):
     return out
 
 
-def combat_points(dealt, taken, in_combat, cal, rules, own_lost=None, foe_lost=None):
+def combat_points(dealt, taken, in_combat, cal, rules, own_lost=None, foe_lost=None, win_scale=None):
     """Winning or losing the fight, by HP dealt / taken recently (melee and missiles), while the unit is in a
     fight (in melee, shooting, or shot at by an enemy shooting at it now: battle.py ctx in_combat); losing only
     once the unit has lost morale.combat_lost of its health, winning only once an enemy it fights has (own_lost,
-    foe_lost: shares of health lost; None: no such gate)."""
+    foe_lost: shares of health lost; None: no such gate). win_scale ([B, 1]; None: 1): the battle's factor on the
+    winning thresholds (fitted, combat_ratio slightly / yes / significantly: a per-battle draw in training,
+    tools/nn/sim/knobs.py)."""
     ratio = (dealt + 1.0) / (taken + 1.0)
     c = cal["combat_ratio"]
+    s = 1.0 if win_scale is None else win_scale         # (x 1.0: the same float)
     pts = torch.zeros_like(ratio)
-    pts = torch.where(ratio >= c["slightly"], rules["winning_combat_slightly"], pts)
-    pts = torch.where(ratio >= c["yes"], rules["winning_combat"], pts)
-    pts = torch.where(ratio >= c["significantly"], rules["winning_combat_significantly"], pts)
+    pts = torch.where(ratio >= c["slightly"] * s, rules["winning_combat_slightly"], pts)
+    pts = torch.where(ratio >= c["yes"] * s, rules["winning_combat"], pts)
+    pts = torch.where(ratio >= c["significantly"] * s, rules["winning_combat_significantly"], pts)
     if c.get("losing") is not None:
         # the losing side's own thresholds (combat_ratio losing / losing_significantly: the enemy's advantage, taken /
         # dealt): losing (-3) once it takes more than it deals x losing (1: Goumin's WH3 guide - 'a unit is losing if
@@ -214,7 +219,8 @@ def terms(u, ctx, params):
         out["extended"] = steps(ext, table(R, "extended_casualties_penalty_", (10, 15, 33, 50, 80)))
     in_combat = ctx.get("in_combat", ctx["in_melee"])
     combat = combat_points(u["dealt"] + u["shot_dealt"], u["taken"] + u["shot_taken"], in_combat, cal, R,
-                           own_lost=lost, foe_lost=ctx.get("foe_lost"))
+                           own_lost=lost, foe_lost=ctx.get("foe_lost"),
+                           win_scale=knobs.get(u, "combat_ratio_scale", None))
     if cal.get("single_combat") == "losing":
         # A single entity (a lord) in melee always gets the database's losing_combat (-3), whatever the HP balance
         # (measured: config/nn/sim.json morale.lord_why).
@@ -306,6 +312,9 @@ def step(u, ctx, params, dt):
         for k, edge in enumerate(edges):
             p_s = torch.where(fd >= float(edge), torch.full_like(fd, float(probs[k + 1])), p_s)
         p_s = torch.where(ctx["enemy_near"], torch.full_like(fd, float(probs[0])), p_s)
+        scale = knobs.get(u, "rally_hazard_scale", None)          # (a per-battle draw in training: knobs.py)
+        if scale is not None:
+            p_s = (p_s * scale).clamp(max=1.0)
         p_step = 1.0 - (1.0 - p_s) ** dt
         draw = _hash_uniform(fd.shape[0], fd.shape[1], torch.round(ctx["t"] / dt).long(), fd.device,
                              ids=battle_ids(u))

@@ -74,6 +74,7 @@ from tools.nn.sim import orders as O
 from tools.nn.sim import state as S
 from tools.nn.sim.params import load
 from tools.nn.train import drills, league, opponents, randomise, reward, scenes
+from tools.nn.train import dr as uncertain
 from tools.nn.train import cadence as cad
 from tools.nn.train.drills import teach as drill_teach
 
@@ -306,9 +307,11 @@ def restart_rows(st, setup, source, rows, want=None):
 class Battles:
     def __init__(self, layout, scene_list=scenes.SCENES, device="cpu", params=None, spread=randomise.Spread(),
                  weights=reward.Weights(), seed=0, auto_reset=True, compile=None, source=None, cadence=None,
-                 teach=None, teach_normal=None, attack_only=league.ATTACK_ONLY, past_slots=1):
+                 teach=None, teach_normal=None, attack_only=league.ATTACK_ONLY, past_slots=1, dr=None):
         self.device = torch.device(device)
         self.params = params or load()
+        # domain randomisation of the simulator's uncertain numbers (tools/nn/train/dr.py Config; None: off)
+        self.dr = dr
         # how often the networks decide and how late their orders land (cadence.py; default: the game's)
         self.cadence = cadence or cad.GAME
         self.k = self.cadence.steps(self.params.dt)
@@ -416,6 +419,8 @@ class Battles:
         self.bounds2 = torch.cat([self.setup.bounds, self.setup.bounds])
         every = torch.ones(self.B, dtype=torch.bool, device=self.device)
         randomise.apply(self.st, every, self.spread, self.gen)
+        if self.dr is not None:
+            uncertain.apply(self.st, every, self.dr, self.gen)
         state = self.st.observation()
         self.mem = {s: ob.start(state, self.setup, s) for s in (1, 2)}
         self.cmem = {s: ob.start(state, self.setup, s) for s in (1, 2)}
@@ -866,6 +871,8 @@ class Battles:
         self.bank_row = torch.where(finished, idx, self.bank_row)
         self.battle_slot = torch.where(finished, torch.full_like(self.battle_slot, self.active), self.battle_slot)
         randomise.apply(self.st, finished, self.spread, self.gen)
+        if self.dr is not None:
+            uncertain.apply(self.st, finished, self.dr, self.gen)
         if self.teach_names:                     # a new battle: a new draw for the teacher's share
             self.teach_draw = torch.where(finished, torch.rand(self.B, generator=self.teach_gen, device=self.device),
                                           self.teach_draw)

@@ -10,7 +10,7 @@ import math
 
 import torch
 
-from tools.nn.sim import abilities, effects, fatigue, geometry, melee, missile, morale, movement, skirmish
+from tools.nn.sim import abilities, effects, fatigue, geometry, knobs, melee, missile, morale, movement, skirmish
 from tools.nn.sim import orders as O
 from tools.nn.sim.params import load
 
@@ -82,7 +82,8 @@ def step(st, orders, params=None, dt=None):
     # (the skirmish run's cut, skirmish.py: another kind, another target or a point moved new_point_m or more)
     sk_cal = cal.get("skirmish") or {}
     sk_new = (kind != u["order_kind"]) | (tgt != u["order_target"]) | (take & point & (
-        ((orders.x - u["ox"]) ** 2 + (orders.z - u["oz"]) ** 2) >= float(sk_cal.get("new_point_m", 5.0)) ** 2))
+        ((orders.x - u["ox"]) ** 2 + (orders.z - u["oz"]) ** 2)
+        >= knobs.get(u, "sk_new_point_m", float(sk_cal.get("new_point_m", 5.0))) ** 2))
     u["ox"] = torch.where(take & point, orders.x, u["ox"])
     u["oz"] = torch.where(take & point, orders.z, u["oz"])
     # A new order (another kind, or another attack target) makes a shooter aim again (missile.aim_reset_on_order;
@@ -195,10 +196,11 @@ def step(st, orders, params=None, dt=None):
     # Pinned: a missile unit leaving melee stays held where it is (not striking, struck) until it has been leaving in
     # contact for contact.pin_s seconds; a unit without a missile weapon for contact.pin_melee_s (absent: 0, not held:
     # it walks out unless it is chased, below); a lone man (a lord) is not held (config/nn/sim.json contact.pin_why).
-    pin_s = float(cal["contact"].get("pin_s", 0.0))
-    pin_melee_s = float(cal["contact"].get("pin_melee_s", 0.0))
+    pin_s = knobs.get(u, "pin_s", float(cal["contact"].get("pin_s", 0.0)))
+    pin_melee_s = knobs.get(u, "pin_melee_s", float(cal["contact"].get("pin_melee_s", 0.0)))
     in_exit = leaving & engaged & (u["men0"] > 1)
-    hold_for = torch.where(u["range"] > 0, torch.full_like(u["leave_s"], pin_s), torch.full_like(u["leave_s"], pin_melee_s))
+    hold_for = torch.where(u["range"] > 0, knobs.full_like(u["leave_s"], pin_s),
+                           knobs.full_like(u["leave_s"], pin_melee_s))
     stuck = in_exit & (hold_for > 0) & ~pre_order
     pinned = stuck & (u["leave_s"] < hold_for)
     u["leave_s"] = torch.where(stuck, u["leave_s"] + dt, torch.zeros_like(u["leave_s"]))
@@ -254,7 +256,8 @@ def step(st, orders, params=None, dt=None):
     if ccal.get("free_target_only"):
         rows = touch.gather(1, tgt.clamp(min=0)[:, :, None].expand(-1, -1, N))        # [B, i, k]: i's target touches k
         busy_t = (tgt >= 0) & (rows & same_side & ~eye & standing[:, None, :]).any(2)
-    fire = engaged & (kind == O.ATTACK) & (u["runup"] >= float(ccal["min_runup_m"])) & ~busy_t
+    min_runup = knobs.get(u, "min_runup_m", float(ccal["min_runup_m"]))
+    fire = engaged & (kind == O.ATTACK) & (u["runup"] >= min_runup) & ~busy_t
     u["charge"] = torch.where(fire, torch.ones_like(u["charge"]), u["charge"])
     charge_now = u["charge"]
     fast = (speed >= float(ccal["min_speed_share"]) * u["run"]) & (speed > 0.1)
@@ -309,7 +312,8 @@ def step(st, orders, params=None, dt=None):
     taken_cal = cal["contact"].get("leave_taken")
     if taken_cal:
         out = leaving & engaged & (u["men0"] > 1)
-        mult = torch.where(u["range"] > 0, float(taken_cal["missile"]), float(taken_cal["melee"]))
+        taken_melee = knobs.get(u, "leave_taken_melee", float(taken_cal["melee"]))
+        mult = torch.where(u["range"] > 0, float(taken_cal["missile"]), taken_melee)
         pursuit = cal["contact"].get("pursuit_rate")
         if cal["contact"].get("leave_run_pursuit") and pursuit is not None:
             # A leaver without a missile weapon (a lord too) on the move, not held, is struck as a router is: at
@@ -320,7 +324,7 @@ def step(st, orders, params=None, dt=None):
             # the game makes it up at the stopping point, which the chase here lacks).
             run_out = leaving & engaged & (u["range"] <= 0) & ~pinned & (speed > 0.3)
             out = out | run_out
-            mult = torch.where(run_out, torch.full_like(mult, float(pursuit)), mult)
+            mult = torch.where(run_out, knobs.full_like(mult, knobs.get(u, "pursuit_rate", float(pursuit))), mult)
         if cal["contact"].get("leave_run_missile") and pursuit is not None:
             # A formation with a missile weapon running on a move given before the contact (pre_move above; not held,
             # its speed last step over its walk + 0.3 m/s: the simulator's running flag) is struck at
@@ -329,7 +333,7 @@ def step(st, orders, params=None, dt=None):
             # contact.shootcontact_why); at a walk it takes leave_taken.missile. A run given in melee keeps
             # leave_taken.missile (the wavemiss2 probe: such shooters lost ~0.8 %/s running, as standing ones).
             run_sh = out & pre_move & ~pinned & (speed > u["walk"] + 0.3)
-            mult = torch.where(run_sh, torch.full_like(mult, float(pursuit)), mult)
+            mult = torch.where(run_sh, knobs.full_like(mult, knobs.get(u, "pursuit_rate", float(pursuit))), mult)
         hp_melee = torch.where(out[:, None, :], hp_melee * mult[:, None, :], hp_melee)
 
     # --- shooting ---
@@ -684,7 +688,8 @@ def step(st, orders, params=None, dt=None):
         # A standing enemy within enemy_effect_range (70 m) worth morale.strong_ratio times the unit or more (cost x
         # health): the game's 'enemies superior in strength and speed' (the morale probe; speed is not needed).
         "strong_enemy": (foes & standing[:, None, :] & (d <= M["enemy_effect_range"])
-                         & (worth[:, None, :] >= float(mcal["strong_ratio"]) * worth[:, :, None])).any(2),
+                         & (worth[:, None, :] >= knobs.get(u, "strong_ratio", float(mcal["strong_ratio"]), 3)
+                            * worth[:, :, None])).any(2),
         # (morale.rally_any_enemy: any enemy blocks the rally, routing ones too - the recordings: within 95 m of a
         # routing enemy 0.9 % rallied a second, 12.6 % with none; build/open_battle/spec.md 4)
         "enemy_near": (foes & (standing[:, None, :] | bool(mcal.get("rally_any_enemy")))

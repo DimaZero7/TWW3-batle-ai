@@ -180,6 +180,23 @@ Crossroads minimap frame, as the companion), not the simulator's square. The fix
 by 1 ± 15 % (the same for both sides) and by 1 ± 5 % per side; start places move by up to 5 m. The
 network does not see the factors.
 
+**Spread of the simulator's uncertain numbers** (`dr.py`, ready, off by default: `run.py --dr`, ranges in
+`config/nn/dr.json`). Numbers not taken exactly from the game's database (measured in a few probes, fitted,
+estimated, a known residual gap) get a range; every training battle draws, at its start, a value of each such
+number inside its range, one for both sides. The centre does not move: half the battles below the `sim.json`
+number, half above (the number is the median). Each range comes from evidence: the measurements' spread, a
+confidence interval, disagreeing sources or an honest estimate - the reason is written by each number (`why`).
+Numbers straight from the database get no spread; errors that only scale the damage are already covered by the
+damage spread above. Now 23 numbers: 17 scalars (a worn formation's front fill, the opening wave of a fight, a
+held unit's blows, blows on routers, on a leaver, the hold when leaving melee, the men round a lord, a lord's blow
+on a formation, the charge's run-up, the 'strong enemy', the 'winning' thresholds, the rally chance, fatigue in
+melee, three numbers of the skirmish mode) and 6 unit fields (aim after a halt, the quiet after an order, the
+re-aim threshold, friendly fire, a skirmisher's start and stop gaps). A scalar lives in the battle's state as
+`k_<name>`, the simulator reads it there (`tools/nn/sim/knobs.py`) and the `sim.json` number without it, as
+before; off, no battle changes (the same hash of the battles before and after the patch). The network does not
+see the draws. The order latency (0.36 s; the game 0.6-0.8 s in small battles) is not in it: with a decision
+every 1 s and 0.5 s steps it cannot exceed 0.5 s.
+
 **Opponents** (`league.py`; `--mix` shares; the default `MIX` in brackets, the chain's above):
 
 | Opponent | Default share | What it does |

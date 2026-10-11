@@ -19,6 +19,8 @@ unit_fatigue_effects_tables (effects(); config/nn/sim.json fatigue.effects).
 """
 import torch
 
+from tools.nn.sim import knobs
+
 LEVELS = ("threshold_fresh", "threshold_active", "threshold_winded", "threshold_tired", "threshold_very_tired",
           "threshold_exhausted")
 
@@ -65,7 +67,7 @@ def step(u, activity, params, dt):
         # A single entity: single_combat a tick (missing: the database's melee +19); config/nn/sim.json
         # fatigue.lord_why. (The charge's cost lasts calibration.charge_s: the caller's `charging`.)
         combat = torch.where(single, torch.full_like(rate, float(trial.get("single_combat", F["combat"]))),
-                             torch.full_like(rate, float(trial["multi_combat"])))
+                             knobs.full_like(rate, knobs.get(u, "multi_combat", float(trial["multi_combat"]))))
         rest = torch.where(moving, move_rate, torch.full_like(rate, F["idle"]))
         form = ~single
         if "melee_hold" in trial:

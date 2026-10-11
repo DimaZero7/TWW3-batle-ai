@@ -21,7 +21,7 @@ import math
 
 import torch
 
-from tools.nn.sim import geometry
+from tools.nn.sim import geometry, knobs
 
 
 def mode_on(u, everyone=False):
@@ -65,12 +65,15 @@ def soldier_gap(u, spacing):
 
 def coming(u, pw, standing, cone_deg, moving_mps):
     """[B, i, j] enemy j is standing and moving at unit i: its speed over moving_mps, its velocity within cone_deg of
-    the line from j's centre to i's."""
+    the line from j's centre to i's. cone_deg: a float, or [B, 1, 1] (a per-battle draw, knobs.py)."""
     vx, vz = u["vx"][:, None, :], u["vz"][:, None, :]                  # j's velocity
     v = torch.sqrt(vx * vx + vz * vz)
     # pw theta [b, i, j]: the bearing from i to j; from j to i is its opposite: (-sin, -cos)
     toward = -(vx * torch.sin(pw["theta"]) + vz * torch.cos(pw["theta"]))
-    cos_min = math.cos(math.radians(float(cone_deg)))
+    if isinstance(cone_deg, torch.Tensor):               # (in double, then float: as the float's math.cos)
+        cos_min = torch.cos(torch.deg2rad(cone_deg.double())).float()
+    else:
+        cos_min = math.cos(math.radians(float(cone_deg)))
     return pw["enemy"] & standing[:, None, :] & (v > float(moving_mps)) & (toward >= cos_min * v)
 
 
@@ -90,7 +93,7 @@ def update(u, pw, standing, in_touch, bounds, cal, spacing=1.5, t=None, dt=0.5, 
     after it is given' while the enemy is near)."""
     from tools.nn.sim import morale
     from tools.nn.sim.orders import ATTACK
-    foe = coming(u, pw, standing, cal["cone_deg"], cal["moving_mps"])
+    foe = coming(u, pw, standing, knobs.get(u, "sk_cone_deg", cal["cone_deg"], 3), cal["moving_mps"])
     sg = soldier_gap(u, spacing)
     big = torch.full_like(sg, 1e9)
     me = torch.arange(u["x"].shape[1], device=u["x"].device)[None, :, None]
@@ -112,10 +115,13 @@ def update(u, pw, standing, in_touch, bounds, cal, spacing=1.5, t=None, dt=0.5, 
     draw = morale._hash_uniform(u["x"].shape[0], u["x"].shape[1], k, u["x"].device, salt=52361, ids=morale.battle_ids(u))
 
     def stays(p_end):
+        if isinstance(p_end, torch.Tensor):              # a per-battle draw: in double, then float (as a float's)
+            return draw >= (1.0 - (1.0 - p_end.double()) ** dt).float()
         return draw >= 1.0 - (1.0 - float(p_end)) ** dt
     chased = ga < u["sk_stop_m"]
     keep_att = can & u["skr"] & free & chased & stays(cal.get("attacker_end_per_s", 0.0))
-    keep_other = can & u["skr"] & free & ~chased & (go < u["sk_stop_m"]) & stays(cal.get("other_end_per_s", 0.0))
+    keep_other = can & u["skr"] & free & ~chased & (go < u["sk_stop_m"]) & stays(
+        knobs.get(u, "sk_other_end_per_s", cal.get("other_end_per_s", 0.0)))
     run = start | ((keep_att | keep_other) & ~cut)
     u["sk_in"] = near_other & can
     # a run that ends out of melee leaves the unit facing away: it turns back to its target once it stands (battle.py)

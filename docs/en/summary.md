@@ -196,6 +196,10 @@ orders (a human, the game's AI) from recorded battles, only those its critic fou
 loss weighted 0.1 x 0.95 an update and a KL to the starting network
 ([observation](training/training.md#learning-by-observation)).
 
+**Spread of the simulator's uncertain numbers** (ready, off by default: `--dr`): 23 numbers not taken exactly from
+the game's database (a few probes, fits, estimates), each battle draws them inside ranges from the evidence; the
+`sim.json` number stays the median ([spread](training/training.md), `config/nn/dr.json`).
+
 The chain of steps with checks in the simulator (`tools.ops.step`, `test5`, `tools.ops.card`,
 `config/train-chain.json`) remains but is not used in the v2 loop: the network is measured by battles in
 the game ([workflow](training/workflow.md)).
