@@ -53,6 +53,8 @@ RATLING_LANES = (("d60", "swords", 60, None), ("d100", "swords", 100, None), ("d
                  ("shield100", "spearsh", 100, None), ("half100", "swords", 100, 0.5), ("lord100", "general", 100, None))
 SUPPRESS_GAP = 120
 SUPPRESS2_STOP = {"walk_stop25": (True, 25), "run_stop15": (False, 15)}     # kind -> (walk, the gun silent after s)
+HITSLOW_SHOOTERS = ("hgun", "xbow")      # the hitslow plan's shooters (no contact effect): handguns flat, bolts arcing
+HITSLOW_RUNNER = "wh2_main_skv_inf_clanrats_0"     # ... and the runners at them: clanrats without shields
 PACE_M, PACE_BACK_S = 150, 20
 CHASE = dict(t_morale=True, at_rout="none", after_rout_s=45, max_s=200, rout_at_s=15,
              damage={"t": {"method": "kill", "share": 0.5}})
@@ -87,6 +89,17 @@ def battles(plan):
         base = [s("walk_fire", True, True), s("walk_quiet", True, False), s("run_fire", False, True),
                 s("run_quiet", False, False)]
         return [_placed(base, k) for k in (0, 2)]
+    if plan == "hitslow":
+        # (12.10.2026) the suppress plan's walk / run with clanrats without shields walking / running at handgunners
+        # (flat fire, no contact effect) and crossbowmen (arcing): do hits alone slow a unit as the gun's do beyond its
+        # x0.7 (the gun's walk 0.91 m/s, run 1.29 against 1.05 / 2.10 with x0.7)? quiet: the handgunners never fire
+        def hs(kind, shooter, walk, fire=True):
+            return cp.lane(HITSLOW_RUNNER, shooter, "attack_walk" if walk else "attack_run",
+                           "skirmish" if fire else "hold", gap_m=SUPPRESS_GAP, fight_s=15, max_s=200, answer=False,
+                           kind=kind, t_skirmish=False, **FX)
+        base = [hs(f"{gait}_{s}", s, gait == "walk") for s in HITSLOW_SHOOTERS for gait in ("walk", "run")]
+        base += [hs(f"{gait}_quiet", "hgun", gait == "walk", False) for gait in ("walk", "run")]
+        return [_placed(base, k) for k in (0, 3)]
     if plan == "suppress2":
         def s2(kind):
             walk, stop = SUPPRESS2_STOP[kind]
@@ -446,7 +459,7 @@ def wolfpoison_measure(lane):
 
 
 MEASURE = {"ratling": ratling_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
-           "censer": censer_measure,
+           "hitslow": suppress_measure, "censer": censer_measure,
            "wolfrats": wolfrats_measure, "wolfpoison": wolfpoison_measure}
 
 
@@ -480,16 +493,76 @@ def _fmt(v):
     return "/".join(v)
 
 
-def report(run_dirs, out=None):
-    """The five plans' lanes in the runs: one row per lane, the means (min-max) per plan and kind; prints the tables,
-    writes build/charge-probe/newunits.json (not in Git)."""
+# The numbers the simulator's twin is checked on (report --sim: game | sim side by side), per plan
+KEY = {"ratling": ("first_shot_s", "bullets_per_s", "bullets_per_man_s", "bursts", "burst_bullets", "burst_s",
+                   "burst_every_s", "hp_per_bullet", "tg_hp_per_s", "tg_men_lost", "tg_fx_first_s", "tg_card_speed_fx"),
+       "suppress": ("contact_s", "speed_way", "speed_way_fx", "fx_share_way", "card_speed_fx", "shots",
+                    "fx_after_last_shot_s"),
+       "suppress2": ("contact_s", "speed_way", "speed_way_fx", "speed_way_nofx", "fx_share_way", "shots",
+                     "fx_after_last_shot_s"),
+       "hitslow": ("contact_s", "speed_way", "a_hp_lost_way", "shots"),
+       "censer": ("contact_s", "tg_hp_0_5", "tg_hp_5_15", "tg_hp_15_30", "a_hp_0_5", "a_hp_5_15", "tg_fx_first_s",
+                  "a_stat_melee_attack", "a_stat_weapon_damage", "tg_mp_5", "tg_mp_10", "tg_mp_5_30", "rout_s",
+                  "tg_fx_after_clear_s", "leave_clear_s"),
+       "wolfrats": ("leg1_cruise", "leg1_to90_s", "leg2_cruise", "contact_s", "speed_peak30", "speed_last30",
+                    "speed_peak_way", "tg_hp_0_1", "tg_hp_0_2", "tg_hp_0_5", "tg_hp_5_15", "tg_hp_steady", "a_hp_0_5",
+                    "a_hp_steady", "first_tg_0_3", "re_tg_0_3", "chase_tg_hp_per_s", "chase_tg_men_lost"),
+       "wolfpoison": ("contact_s", "tg_hp_0_5", "tg_hp_5_15", "tg_hp_15_30", "a_hp_0_5", "a_hp_5_15", "a_hp_15_30",
+                      "tg_fx_first_s", "tg_scalar_speed_fight", "tg_stat_weapon_damage_fight", "tg_fx_after_clear_s",
+                      "leave_clear_s", "tg_speed_chase")}
+
+
+def measure_lanes(lanes):
     rows = []
-    for d in run_dirs:
-        for lane in cp.load_run(d):
-            if lane.get("plan") in MEASURE:
-                r = MEASURE[lane["plan"]](lane)
-                r.update(plan=lane["plan"], battle=lane.get("battle"), lane=lane["spec"]["name"])
-                rows.append(r)
+    for lane in lanes:
+        if lane.get("plan") in MEASURE:
+            r = MEASURE[lane["plan"]](lane)
+            r.update(plan=lane["plan"], battle=lane.get("battle"), lane=lane["spec"]["name"])
+            rows.append(r)
+    return rows
+
+
+def twin(lanes, device="cpu", copies=4, params=None):
+    """The simulator on the recorded lanes (tools/nn/charge_probe.sim_lanes: each lane its own battle, its units at
+    their places at the go, the same scripted orders), `copies` a lane, in the game's shape with each lane's plan."""
+    out = []
+    for plan in MEASURE:
+        mine = [ln for ln in lanes if ln.get("plan") == plan]
+        if not mine:
+            continue
+        for ln, s in zip([ln for ln in mine for _ in range(copies)],
+                         cp.sim_lanes(mine, params=params, device=device, copies=copies)):
+            s.update(plan=plan, battle=ln.get("battle"))
+            out.append(s)
+    return out
+
+
+def _side_by_side(game, sim):
+    """Prints game | sim of the KEY numbers per plan and kind (means; the game's min-max)."""
+    for plan, keys in KEY.items():
+        kinds = sorted({k for p, k in game if p == plan}, key=str)
+        if not kinds:
+            continue
+        print(f"== {plan} (game | sim)")
+        for kind in kinds:
+            g, s = game.get((plan, kind), {}), sim.get((plan, kind), {})
+            cells = []
+            for f in keys:
+                if f not in g and f not in s:
+                    continue
+                gs = _fmt(g[f]) if f in g else "-"
+                ss = _fmt((s[f][0], s[f][0], s[f][0], 1)) if isinstance(s.get(f), tuple) else (
+                    "/".join(s[f]) if f in s else "-")
+                cells.append(f"{f} {gs} | {ss}")
+            print(f"  {kind}: " + "; ".join(cells))
+
+
+def report(run_dirs, out=None, sim=False, device="cpu", copies=4):
+    """The five plans' lanes in the runs: one row per lane, the means (min-max) per plan and kind; prints the tables,
+    writes build/charge-probe/newunits.json (not in Git). sim: the simulator's twin on the same lanes beside them
+    (newunits_sim.json)."""
+    lanes = [ln for d in run_dirs for ln in cp.load_run(d) if ln.get("plan") in MEASURE]
+    rows = measure_lanes(lanes)
     table = summary(rows)
     for plan in MEASURE:
         keys = [k for k in table if k[0] == plan]
@@ -500,7 +573,12 @@ def report(run_dirs, out=None):
             r = table[key]
             print(f"  {key[1]} (n {r['n']}): " + "; ".join(f"{f} {_fmt(v)}" for f, v in r.items() if f != "n"))
     result = {"lanes": rows, "summary": [dict({k: v for k, v in r.items()}, plan=p, kind=k) for (p, k), r in table.items()]}
-    out = out or cp.ROOT / "newunits.json"
+    if sim:
+        srows = measure_lanes(twin(lanes, device=device, copies=copies))
+        stable = summary(srows)
+        _side_by_side(table, stable)
+        result["sim"] = {"lanes": srows, "summary": [dict(r, plan=p, kind=k) for (p, k), r in stable.items()]}
+    out = out or cp.ROOT / ("newunits_sim.json" if sim else "newunits.json")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=1, default=float), encoding="utf-8")
     print(out)
@@ -511,9 +589,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("runs", nargs="*", type=Path, help="run folders (default: build/charge-probe/runs/*)")
     parser.add_argument("--out", type=Path)
+    parser.add_argument("--sim", action="store_true", help="the simulator's twin on the same lanes beside the game's "
+                                                           "(torch; game | sim per plan and kind)")
+    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--copies", type=int, default=4)
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8")
-    report(args.runs or cp.runs(), out=args.out)
+    report(args.runs or cp.runs(), out=args.out, sim=args.sim, device=args.device, copies=args.copies)
     return 0
 
 

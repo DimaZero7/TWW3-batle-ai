@@ -183,7 +183,7 @@ state (recordings) nothing is ready.
 
 Every attribute and passive or game-fired ability of a unit is an innate effect of one catalogue
 (`config/nn/effects.json`, [unit passports](units.md#innate-effects)); the token ends with a pair of
-inputs per effect, in the catalogue's append-only `order` (14 effects, 28 inputs;
+inputs per effect, in the catalogue's append-only `order` (19 effects, 38 inputs;
 `tools/nn/model/effects.py`):
 
 | Input (per effect) | Own unit | Enemy, visible | Enemy, not visible | Scale |
@@ -195,9 +195,20 @@ Owned is on the unit's card (both armies' cards are seen before battle); the gam
 unit's active effects (CCO `ActiveEffectList`). In the simulator "on" is its `fx_on`; in a recorded
 battle or in the game (the companion) it is worked out from the token's own fields by the same
 conditions (health, the morale state, melee; own morale for half-morale), and a timed effect whose
-timer is not known (the Penitent) counts as off. A new effect appends its pair at the token's end
-(before the volley input below): an older network loads with zero weights for it
-(`encoder.pad_inputs`) and acts as before.
+timer is not known (the Penitent) counts as off. A new effect appends its pair after the older pairs
+(before the volley input below).
+
+**Contact effects** (poison, the censer's contagion, suppressing fire; the catalogue's kind `contact`): "owned" by
+the unit whose weapon lays it (the catalogue's `inflicts`: the censer bearers, the poisoned Giant Rats, the Ratling
+Gun), "on" for the unit it lies on now (which need not own the weapon). The simulator: by `fx_on`; the companion: by
+the unit card's list of active effects (`exchange.effects_on`: the phase key in the bridge's list); a recorded battle
+without that list: off.
+
+**Checkpoints before 11.10.2026** (14 effect pairs): after their pairs came the volley, the arc and the order. The
+encoder moves those columns to their new places by name (`observation.old_columns`) and gives the new pairs and the
+weapon inputs zero weights - the old network computes what it did (tested on the checkpoints from before the volley
+and the arc, `tests/tools/test_nn_model.py`, and a made-up 155-input one, `tests/tools/test_nn_newunits_model.py`).
+Adam's state of such a checkpoint has other shapes - `run.py` starts it afresh.
 
 ### Volley readiness (own units and visible enemies)
 
@@ -254,11 +265,18 @@ last order given, `exchange.order_points`) and the order point `ox`, `oz`; the c
 (`Memory.ord_*`). Without the fields (recorded battles) all five are 0. An older checkpoint loads with zero weights
 for them and acts as before.
 
+### Weapon: shots a volley and magic (both sides, the last inputs)
+
+Two inputs (`observation.WEAPON`, 11.10.2026), known from the unit card: the shots a man fires in a volley / 20
+(`passport.weapon`: the Ratling Gun's 18 -> 0.9, a plain shooter 0.05, no missile weapon 0) and the melee weapon's
+magical attacks (0/1: the censer, the plain Giant Rats). Without the first the network cannot tell the gun's burst
+from a handgun's shot. They stand at the token's very end; an older checkpoint gets zero weights for them.
+
 ## Model
 
 ```mermaid
 flowchart TB
-  tok["Unit tokens: 155 numbers each<br/>(69 of them the passport, 28 the innate effects,<br/>1 the volley readiness, 1 the fire arc,<br/>5 the order in force)"] --> enc["Shared encoder<br/>the same weights for every unit"]
+  tok["Unit tokens: 167 numbers each<br/>(69 of them the passport, 38 the innate effects,<br/>1 the volley readiness, 1 the fire arc,<br/>5 the order in force, 2 the weapon)"] --> enc["Shared encoder<br/>the same weights for every unit"]
   ctx["Context: character, role, counts, lords,<br/>time elapsed, damage timers,<br/>the attacker's progress"] --> enc
   enc --> att["Attention layers<br/>+ distance bias, masks"]
   att --> gru["Memory: a GRU per unit<br/>and one for the army"]

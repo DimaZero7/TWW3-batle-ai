@@ -247,6 +247,13 @@ def effects_on(state, doc, names, setup, catalogue=None, passports=None):
     on = np.array(effects.active(np, {k: v for k, v in state.items() if k != "fx_on"}, have.astype(np.float32), cat))
     rows = {u["n"]: u for u in doc["units"]}
     for e, key in enumerate(effects.keys(cat)):
+        if (cat["effects"].get(key) or {}).get("kind") == "contact":
+            # a contact effect (poison, the censer's contagion, suppressing fire): on while the unit's card shows its
+            # phase (the bridge's ActiveEffectList; the probes: the phase key itself), whoever laid it
+            for i, name in enumerate(names):
+                fx = _effects(rows.get(name, {}))
+                on[0, i, e] = fx is not None and key in fx
+            continue
         if not (cat["effects"].get(key) or {}).get("timed"):
             continue
         phases = set((passports.get(key) or {}).get("phases") or (key,))

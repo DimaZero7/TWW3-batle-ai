@@ -620,6 +620,67 @@ units drop 2.3 points more morale in the next 3 s than Empire units (7.7 against
 The Skaven's former start bonus (`morale.faction_bonus` +6, fitted) was Strength in Numbers: it is 0
 now.
 
+## Contact effects and the Ratling Gun's burst
+
+The mechanics of the new Skaven units ([passports](units.md#ratling-gun-plague-monks-censer-bearers-giant-rats)).
+
+- **A contact effect** (the Giant Rats' poison, the censer's contagion, the Ratling Gun's suppressing fire): a blow or
+  a hit of a weapon whose database row has a contact phase (`melee_weapons.contact_phase`,
+  `projectiles.contact_stat_effect`) lays that phase's stats on the unit hit for the phase's duration
+  (`special_ability_phases`, 10 s for all three; fandom says 10 s too), each hit starting it again. Different effects
+  stack, the same one refreshes (CA, update 8.1); friendly fire lays none. A step in which h hits of such a weapon
+  (expected) fall on a unit lays it with chance 1 - e^-h (a hash draw, as morale's). The timer is `cfx{j}_s` for each
+  effect of the catalogue's kind `contact`; while it runs the effect lies on the unit as its own (`effects.apply`)
+  and the network sees it (`fx_on`). Stats: suppressing fire - speed x0.7; contagion - leadership -10; poison - speed,
+  melee damage and missile damage x0.85 (a new missile-damage stat `m_damage`, `m_ap`).
+- **A burst** (`missile.burst_share`): a man's volley is the database's `shots_per_volley` (the gun's 18) at the
+  measured `missile.burst_rate_s` (4 bullets a second, 4.5 s; the database has no rate: the bullet's `burst_size` 1 and
+  `burst_shot_delay` 0 - names from the RPFM schema - the gun's animation sets it); the cycle from a burst's start to
+  the next is `reload_projectile_s` 12 s (measured; the database says 5 s, as the handgunners' 13 against a measured
+  14.8). The ammunition is one pool of the unit (`men x ammo`; crew losses do not cut it: the half-crew probe kept
+  8640). The gun fires in melee too (`missile.fire_in_melee`, the suppress probe).
+- **A burst cut short** (`missile.burst_reaim`): a man whose target died aims again (`aim_s`, 2 s for guns) and loses
+  those bullets of his burst; flat fire aims at the front rank, so a death there takes the gun's men / the target's
+  files out of the burst. The probe: on the lone General every burst was 576 bullets, on formations the first 576 and
+  then 364-482 - the rate halving within 0.5 s of 3-4 deaths.
+
+**The probe and the twin** (`python -m tools.nn.unit_probe <runs> --sim`: each lane in the simulator at the same
+places, 4 copies; the game - the mean of 2 lanes):
+
+| What | Game | Simulator |
+|---|---:|---:|
+| Gun: bullets a burst, General / swordsmen 60 / 100 / 135 m / shields 100 m | 576 / 364 / 424 / 470 / 482 | 576 / 502 / 521 / 520 / 526 |
+| Gun: the burst's cycle, s | 11.5-12.0 | 12.0 |
+| Gun: HP a bullet, swordsmen 60 / 100 / 135 m / shields | 2.16 / 1.62 / 1.37 / 1.60 | 2.20 / 1.63 / 1.44 / 1.62 |
+| Gun: the target's HP a second, swordsmen 60 / 100 / 135 m | 71 / 60 / 56 | 93 / 71 / 62 |
+| Suppression: the card's speed | 21 of 30 | 21 of 30 |
+| Suppression: walk under fire / after it (the effect still on), m/s | 0.91 / ~1.0 | 1.05 / 1.05 |
+| Suppression: run under fire, m/s | 1.29 | 2.10 |
+| Suppression: the effect after the last shot, s | 10.5-11 (with the bullet's flight) | 9.5 |
+| Censers / monks: the swordsmen's HP a second, 5-15 s | 90 / 71 | 81 / 81 |
+| Censers / monks: the swordsmen's morale after 10 s | 0.48 / 0.79 | 0.43 / 0.82 |
+| Censers: the swordsmen rout after, s | 46 | 41 |
+| Poison: the target card's speed and damage | 25.5 of 30; 24 of 28 | 25.5; 23.8 |
+| Poison / contagion: the effect after leaving melee, s | 5.0 / 5.0 | 5.2 / 5.8 |
+| Giant Rats: run, to 90 %, charge, m/s | 9.63; 3 s; 11.5-12.3 | 9.50; 3 s; 11.5 |
+
+Open (not these units' new mechanics - general ones):
+
+- **Bullet hits slow runners.** The `hitslow` probe (fire at running clanrats without shields, 2 battles): under the
+  handgunners' bullets the run is 2.59 m/s against 3.83 without fire (x0.68), the walk 1.25 against 1.33; under the
+  crossbowmen's bolts no difference (3.75 / 1.35). Suppression x0.7 with this slowing gives a run of 3.0 x 0.7 x 0.68
+  = 1.43 (the gun in the game 1.29) and a walk of 0.99 (0.91). The database has the mechanism: hit reactions
+  (`battle_entities.hit_reactions_ignore_chance` - the RPFM schema's name - 0 for all our infantry, 70-75 % for the
+  lords), but no number of the slowing. The simulator slows nobody by hits - a separate change.
+- The first 5 s of the censers', monks' and halberds' melee are twice the game's in the simulator (censers 443 against
+  230 HP/s) - the same charge hole as all infantry's (the melee change).
+- The Giant Rats strike half as hard as in the game (the charge's 0-5 s 800 against 1490 HP, then 18 against
+  42 HP/s): in the game 45-60 of the 80 beasts stand at the enemy (the `a_near` measure, within 2.5 m), in the simulator
+  as many as the front holds at the formation's 2.0 m step.
+- Bullets hit the lone General half as often as in the game (0.24 against 0.54 HP a bullet) - the general hole of hits
+  on a lord.
+- The gun's first burst begins after 3 s, in the game after 4.0-4.5 s (the general "first target - 3 s" rule).
+
 ## Flanks, rear and charges in whole battles
 
 Measured in the 28 whole battles (18 mirror, 10 Empire-Skaven), and in the simulator's open-loop

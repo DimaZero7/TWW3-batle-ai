@@ -136,6 +136,11 @@ class Params:
             # effects bitmask and the timed effects: from the unit's innate effects (config/nn/effects.json)
             **innate.static(self, key),
             "direct": bool(missile.get("direct")) if missile else False,
+            # a volley of several shots a man (the database's shots_per_volley) fired as a burst at the measured rate
+            # (missile.burst_rate_s by projectile; missile.py, battle.py)
+            "spv": float(missile.get("shots_per_volley") or 1) if missile else 1.0,
+            "bst_rate": float((ms.get("burst_rate_s") or {}).get(missile.get("projectile"), 0.0)) if missile else 0.0,
+            "melee_fire": bool(missile) and missile.get("projectile") in (ms.get("fire_in_melee") or ()),
             "ammo0": men * missile.get("ammo", 0) if missile else 0,
             "range": missile.get("range_m", 0) if missile else 0,
             "reload": reload_s,

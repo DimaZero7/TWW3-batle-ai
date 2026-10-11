@@ -21,6 +21,7 @@
   "stubborn, hatred": "not in the WH3 database as unit attributes or passive abilities (WH2 had them)",
   "phase flags": "special_ability_phases (unbreakable, cant_move, ... per phase) is not decoded: the phases of our passives carry their effects in the stat and attribute tables"
  },
+ "_inflicts": "contact effects (kind contact) a unit's weapons lay on the enemies they hit (the passport's melee.contact_phase, missile.contact_phase); the unit does not own them (units), the network sees them as its `owned` column of the effect, `on` while the unit itself is under one",
  "order": [
   "charge_defense_vs_large",
   "charge_reflection",
@@ -35,7 +36,12 @@
   "wh3_main_unit_passive_single_entity",
   "wh_dlc04_unit_passive_strength_of_the_penitent",
   "wh_main_lord_passive_hold_the_line",
-  "wh_main_unit_passive_frenzy"
+  "wh_main_unit_passive_frenzy",
+  "moulder_monster",
+  "strider",
+  "wh2_dlc12_unit_contact_suppressive_fire",
+  "wh2_main_unit_contact_plague_monk_censer_morale",
+  "wh_main_unit_contact_poison"
  ],
  "effects": {
   "charge_defense_vs_large": {
@@ -453,11 +459,188 @@
    "modelled": true,
    "sim": "stat_charge_bonus mult 1.1; stat_melee_attack add 10; stat_melee_damage_ap mult 1.1; stat_melee_damage_base mult 1.1 (off while morale below half of leadership)",
    "why": "rules with nothing to act on: immune_to_psychology"
+  },
+  "moulder_monster": {
+   "kind": "attribute",
+   "name": "Moulder Monster",
+   "rules": [
+    "moulder_monster"
+   ],
+   "stats": [],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "when": "always",
+   "source": "db: unit_attributes_to_groups_junctions (moulder_monster)",
+   "kb": "docs/en/game/mechanics/abilities.md#attributes-selection",
+   "does": "a mark for the campaign abilities of Clan Moulder's lords (Throt, the Packmaster); nothing in a battle by itself",
+   "modelled": false,
+   "sim": null,
+   "why": "nothing to act on in battle"
+  },
+  "strider": {
+   "kind": "attribute",
+   "name": "Strider",
+   "rules": [
+    "strider"
+   ],
+   "stats": [],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "when": "always",
+   "source": "db: unit_attributes_to_groups_junctions (strider)",
+   "kb": "docs/en/game/mechanics/abilities.md#attributes-selection",
+   "does": "ignores terrain penalties, passes trees",
+   "modelled": false,
+   "sim": null,
+   "why": "flat maps only"
+  },
+  "wh2_dlc12_unit_contact_suppressive_fire": {
+   "kind": "contact",
+   "name": "Suppressed!",
+   "rules": [],
+   "stats": [
+    {
+     "stat": "scalar_speed",
+     "how": "mult",
+     "value": 0.7,
+     "on": [
+      "hit"
+     ],
+     "sim": "speed"
+    }
+   ],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "duration_s": 10.0,
+   "when": "for 10 s after each hit of a weapon that lays it (refreshed by every hit; another contact effect stacks)",
+   "source": "db: melee_weapons.contact_phase / projectiles.contact_stat_effect, special_ability_phases (duration), special_ability_phase_stat_effects (wh2_dlc12_unit_contact_suppressive_fire); config/nn/units.json contact_phases",
+   "kb": "docs/en/game/mechanics/abilities.md#contact-effects",
+   "does": null,
+   "modelled": true,
+   "sim": "scalar_speed mult 0.7 (for 10 s after each hit of a weapon that lays it (refreshed by every hit; another contact effect stacks))",
+   "why": null
+  },
+  "wh2_main_unit_contact_plague_monk_censer_morale": {
+   "kind": "contact",
+   "name": "Contaminated!",
+   "rules": [],
+   "stats": [
+    {
+     "stat": "stat_morale",
+     "how": "add",
+     "value": -10.0,
+     "on": [
+      "hit"
+     ],
+     "sim": "leadership"
+    }
+   ],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "duration_s": 10.0,
+   "when": "for 10 s after each hit of a weapon that lays it (refreshed by every hit; another contact effect stacks)",
+   "source": "db: melee_weapons.contact_phase / projectiles.contact_stat_effect, special_ability_phases (duration), special_ability_phase_stat_effects (wh2_main_unit_contact_plague_monk_censer_morale); config/nn/units.json contact_phases",
+   "kb": "docs/en/game/mechanics/abilities.md#contact-effects",
+   "does": null,
+   "modelled": true,
+   "sim": "stat_morale add -10 (for 10 s after each hit of a weapon that lays it (refreshed by every hit; another contact effect stacks))",
+   "why": null
+  },
+  "wh_main_unit_contact_poison": {
+   "kind": "contact",
+   "name": "Poison!",
+   "rules": [],
+   "stats": [
+    {
+     "stat": "scalar_missile_damage_ap",
+     "how": "mult",
+     "value": 0.85,
+     "on": [
+      "hit"
+     ],
+     "sim": "m_ap"
+    },
+    {
+     "stat": "scalar_missile_damage_base",
+     "how": "mult",
+     "value": 0.85,
+     "on": [
+      "hit"
+     ],
+     "sim": "m_damage"
+    },
+    {
+     "stat": "scalar_speed",
+     "how": "mult",
+     "value": 0.85,
+     "on": [
+      "hit"
+     ],
+     "sim": "speed"
+    },
+    {
+     "stat": "stat_melee_damage_ap",
+     "how": "mult",
+     "value": 0.85,
+     "on": [
+      "hit"
+     ],
+     "sim": "ap"
+    },
+    {
+     "stat": "stat_melee_damage_base",
+     "how": "mult",
+     "value": 0.85,
+     "on": [
+      "hit"
+     ],
+     "sim": "damage"
+    }
+   ],
+   "range_m": 0.0,
+   "needs": [],
+   "off_when": [],
+   "timed": null,
+   "duration_s": 10.0,
+   "when": "for 10 s after each hit of a weapon that lays it (refreshed by every hit; another contact effect stacks)",
+   "source": "db: melee_weapons.contact_phase / projectiles.contact_stat_effect, special_ability_phases (duration), special_ability_phase_stat_effects (wh_main_unit_contact_poison); config/nn/units.json contact_phases",
+   "kb": "docs/en/game/mechanics/abilities.md#contact-effects",
+   "does": null,
+   "modelled": true,
+   "sim": "scalar_missile_damage_ap mult 0.85; scalar_missile_damage_base mult 0.85; scalar_speed mult 0.85; stat_melee_damage_ap mult 0.85; stat_melee_damage_base mult 0.85 (for 10 s after each hit of a weapon that lays it (refreshed by every hit; another contact effect stacks))",
+   "why": null
   }
  },
  "units": {
+  "wh2_dlc12_skv_inf_ratling_gun_0": [
+   "hide_forest",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_strength_in_numbers"
+  ],
   "wh2_dlc13_emp_inf_archers_0": [
    "hide_forest"
+  ],
+  "wh2_dlc16_skv_mon_wolf_rats_0": [
+   "guerrilla_deploy",
+   "hide_forest",
+   "moulder_monster",
+   "strider",
+   "wh2_main_unit_passive_scurry_away"
+  ],
+  "wh2_dlc16_skv_mon_wolf_rats_1": [
+   "guerrilla_deploy",
+   "hide_forest",
+   "moulder_monster",
+   "strider",
+   "wh2_main_unit_passive_scurry_away"
   ],
   "wh2_main_skv_cha_warlord_0": [
    "encourages",
@@ -501,6 +684,18 @@
    "hide_forest",
    "wh2_main_unit_passive_scurry_away",
    "wh2_main_unit_passive_strength_in_numbers"
+  ],
+  "wh2_main_skv_inf_plague_monk_censer_bearer": [
+   "hide_forest",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_strength_in_numbers",
+   "wh_main_unit_passive_frenzy"
+  ],
+  "wh2_main_skv_inf_plague_monks": [
+   "hide_forest",
+   "wh2_main_unit_passive_scurry_away",
+   "wh2_main_unit_passive_strength_in_numbers",
+   "wh_main_unit_passive_frenzy"
   ],
   "wh2_main_skv_inf_skavenslave_slingers_0": [
    "expendable",
@@ -575,6 +770,17 @@
   ],
   "wh_main_emp_inf_swordsmen": [
    "hide_forest"
+  ]
+ },
+ "inflicts": {
+  "wh2_dlc12_skv_inf_ratling_gun_0": [
+   "wh2_dlc12_unit_contact_suppressive_fire"
+  ],
+  "wh2_dlc16_skv_mon_wolf_rats_1": [
+   "wh_main_unit_contact_poison"
+  ],
+  "wh2_main_skv_inf_plague_monk_censer_bearer": [
+   "wh2_main_unit_contact_plague_monk_censer_morale"
   ]
  }
 }

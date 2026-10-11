@@ -464,8 +464,9 @@ NEW_EFFECTS = mfx.SIZE        # the innate effects' columns (appended after the 
 NEW_VOLLEY = len(ob.VOLLEY)   # the volley input, appended after the effects (03.10.2026)
 NEW_ARC = len(ob.ARC)         # the fire arc, appended after the volley input (07.10.2026)
 NEW_ORDER = len(ob.ORDER)     # the order in force, appended after the fire arc (07.10.2026)
-T0 = ob.TOKEN - NEW_ORDER - NEW_VOLLEY - NEW_ARC    # the token before the volley input
-T1 = ob.TOKEN - NEW_ORDER - NEW_ARC       # the token before the fire arc
+NEW_WEAPON = len(ob.WEAPON)   # the volley's shots and magical attacks, appended after the order (11.10.2026)
+T0 = ob.TOKEN - NEW_WEAPON - NEW_ORDER - NEW_VOLLEY - NEW_ARC    # the token before the volley input
+T1 = ob.TOKEN - NEW_WEAPON - NEW_ORDER - NEW_ARC       # the token before the fire arc
 
 
 def test_the_second_wave_is_seen_in_the_passport_and_the_ability_slots():
@@ -743,19 +744,24 @@ def volley_states(batch=2):
                    for i, n in enumerate((0, 0, 1, 1, 1, 2))]
 
 
-def pre_volley_networks(cfg):
-    """An actor and critic as saved before the volley input: NEW_VOLLEY fewer token inputs."""
+def pre_volley_networks(cfg, width=T0):
+    """An actor and critic as saved before the volley input: NEW_VOLLEY fewer token inputs (width: a checkpoint's)."""
     actor, crit = policy.Actor(cfg), critic.Critic(cfg)
-    actor.encoder.unit[0] = torch.nn.Linear(T0, cfg.d)
-    crit.encoder.unit[0] = torch.nn.Linear(T0, cfg.critic_d)
+    actor.encoder.unit[0] = torch.nn.Linear(width, cfg.d)
+    crit.encoder.unit[0] = torch.nn.Linear(width, cfg.critic_d)
     return actor.eval(), crit.eval()
 
 
-def without_volley(o):
-    return dict(o, tokens=o["tokens"][..., :T0])
+# the checkpoints saved before 11.10.2026 had 14 effect pairs (observation.OLD_EFFECTS): their token is the new one's
+# first columns (and, after VOLLEY came, those moved by observation.old_columns)
+LEGACY_PAIRS = 2 * (mfx.SIZE // 2 - 14)
 
 
-def same_without_volley(old, new, old_crit, new_crit, atol=1e-5):
+def without_volley(o, width=T0):
+    return dict(o, tokens=o["tokens"][..., :width])
+
+
+def same_without_volley(old, new, old_crit, new_crit, atol=1e-5, width=T0):
     """Old (no volley input) and new networks through the decisions of volley_states (memory carried):
     equal logits, memory, greedy orders and values, while the new input takes values inside 0..1."""
     setup, states = volley_states()
@@ -769,9 +775,9 @@ def same_without_volley(old, new, old_crit, new_crit, atol=1e-5):
         v = o["tokens"][..., ob.INDEX["volley_ready"]]
         inside += int(((v > 0) & (v < 1)).sum())
         with torch.no_grad():
-            lo, h_old = old(without_volley(o), h_old)
+            lo, h_old = old(without_volley(o, width), h_old)
             ln, h_new = new(o, h_new)
-            vo = old_crit(without_volley({k: c[k] for k in keys}))
+            vo = old_crit(without_volley({k: c[k] for k in keys}, width))
             vn = new_crit({k: c[k] for k in keys})
         for k in lo:
             assert torch.allclose(lo[k], ln[k], atol=atol), k
@@ -810,8 +816,10 @@ def test_a_checkpoint_saved_before_the_volley_input_acts_as_before(path):
     data = checkpoint.read(path)
     cfg = checkpoint.config_of(data)
     new = checkpoint.load_policy(path)
-    assert data["actor"]["encoder.unit.0.weight"].shape[1] == T0 and torch.all(new.encoder.unit[0].weight[:, T0:] == 0)
-    old, old_crit = pre_volley_networks(cfg)
+    width = T0 - LEGACY_PAIRS
+    assert data["actor"]["encoder.unit.0.weight"].shape[1] == width
+    assert torch.all(new.encoder.unit[0].weight[:, width:] == 0)
+    old, old_crit = pre_volley_networks(cfg, width)
     torch.nn.Module.load_state_dict(old, data["actor"])
     # the critic: in the checkpoint, or beside it (widen.py --critic-dst <stem>_critic.pt), else a fresh one
     crit_path = path.with_name(path.stem + "_critic.pt")
@@ -820,7 +828,7 @@ def test_a_checkpoint_saved_before_the_volley_input_acts_as_before(path):
     torch.nn.Module.load_state_dict(old_crit, crit_data)
     new_crit = critic.Critic(cfg).eval()
     new_crit.load(dict(crit_data))
-    same_without_volley(old, new, old_crit, new_crit, atol=1e-4)
+    same_without_volley(old, new, old_crit, new_crit, atol=1e-4, width=width)
 
 
 
@@ -847,32 +855,34 @@ def test_the_fire_arc_input_is_the_passports_arc_on_both_sides():
     col = obs.tokens[..., ob.INDEX["fire_arc"]]
     want = {"wh2_main_skv_inf_night_runners_0": 1.0, "wh2_dlc13_emp_inf_archers_0": 30 / 180,
             "wh_main_emp_inf_swordsmen": 0.0, "wh_main_emp_inf_handgunners": 30 / 180}
-    assert ob.NAMES[T1] == "fire_arc" and ob.NAMES[T1 + 1:] == ob.ORDER
+    assert ob.NAMES[T1] == "fire_arc" and ob.NAMES[T1 + 1:] == ob.ORDER + ob.WEAPON
     for b, keys in enumerate(setup.keys):
         for i, k in enumerate(keys):
             assert col[b, i] == pytest.approx(want[k], abs=1e-6), (b, i, k)     # own (0-3) and enemy (4-7)
 
 
-def pre_arc_networks(cfg):
-    """An actor and critic as saved before the fire arc: NEW_ARC fewer token inputs."""
+def pre_arc_networks(cfg, width=T1):
+    """An actor and critic as saved before the fire arc: NEW_ARC fewer token inputs (width: a checkpoint's)."""
     actor, crit = policy.Actor(cfg), critic.Critic(cfg)
-    actor.encoder.unit[0] = torch.nn.Linear(T1, cfg.d)
-    crit.encoder.unit[0] = torch.nn.Linear(T1, cfg.critic_d)
+    actor.encoder.unit[0] = torch.nn.Linear(width, cfg.d)
+    crit.encoder.unit[0] = torch.nn.Linear(width, cfg.critic_d)
     return actor.eval(), crit.eval()
 
 
-def same_without_arc(old, new, old_crit, new_crit, atol=1e-5):
+def same_without_arc(old, new, old_crit, new_crit, atol=1e-5, cols=None):
     """Old (no fire arc) and new networks through the decisions of arc_states (memory carried): equal logits,
-    memory, greedy orders and values, while the new input is not zero."""
+    memory, greedy orders and values, while the new input is not zero. cols: the new token's columns the old one
+    had (observation.old_columns; None: the first T1)."""
     setup, states = arc_states()
     m = mc = h_old = h_new = None
     keys = ("tokens", "own", "attend", "pos", "ctx")
+    cols = list(range(T1)) if cols is None else cols
     for st in states:
         obs, m = ob.observe(st, setup, 1, m)
         cobs, mc = ob.observe(st, setup, 1, mc, full=True)
         o, c = policy.to_torch(obs), policy.to_torch(cobs)
         assert o["tokens"][..., T1:].abs().sum() > 0
-        cut = lambda d: dict(d, tokens=d["tokens"][..., :T1])
+        cut = lambda d: dict(d, tokens=d["tokens"][..., cols])
         with torch.no_grad():
             lo, h_old = old(cut(o), h_old)
             ln, h_new = new(o, h_new)
@@ -912,8 +922,13 @@ def test_a_checkpoint_saved_before_the_fire_arc_acts_as_before(path):
     data = checkpoint.read(path)
     cfg = checkpoint.config_of(data)
     new = checkpoint.load_policy(path)
-    assert data["actor"]["encoder.unit.0.weight"].shape[1] == T1 and torch.all(new.encoder.unit[0].weight[:, T1:] == 0)
-    old, old_crit = pre_arc_networks(cfg)
+    width = T1 - LEGACY_PAIRS
+    cols = ob.old_columns(width)                   # its volley input moved behind the new effect pairs
+    assert data["actor"]["encoder.unit.0.weight"].shape[1] == width and ob.NAMES[cols[-1]] == "volley_ready"
+    w = new.encoder.unit[0].weight
+    assert torch.equal(w[:, cols], data["actor"]["encoder.unit.0.weight"].to(w.dtype))
+    assert torch.all(w[:, [i for i in range(ob.TOKEN) if i not in cols]] == 0)
+    old, old_crit = pre_arc_networks(cfg, width)
     torch.nn.Module.load_state_dict(old, data["actor"])
     crit_path = path.with_name(path.stem + "_critic.pt")
     crit_data = (critic_state(data) if "critic" in data else
@@ -921,7 +936,7 @@ def test_a_checkpoint_saved_before_the_fire_arc_acts_as_before(path):
     torch.nn.Module.load_state_dict(old_crit, crit_data)
     new_crit = critic.Critic(cfg).eval()
     new_crit.load(dict(crit_data))
-    same_without_arc(old, new, old_crit, new_crit, atol=1e-4)
+    same_without_arc(old, new, old_crit, new_crit, atol=1e-4, cols=cols)
 
 
 # --- the grid move point (ModelConfig.grid) and the order-in-force input (ORDER), 07.10.2026 ---

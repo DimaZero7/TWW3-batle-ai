@@ -568,6 +568,35 @@ def clear_shot(u, pw, target, can_shoot, order_target, order_attack, params, wit
     return out + (catch,) if with_catch else out
 
 
+def burst_share(u, volley_target, m_target, loaded, dt):
+    """A burst weapon's step (spv > 1 shots a man in a volley at bst_rate a second: the Ratling Gun's 18 at 4 a second,
+    measured - its bullets at a lone target: 64 every 0.5 s from 32 men, 576 = 32 x 18 a burst, build/newunits).
+    -> (burst [B, N] the burst units, start [B, N] a burst starts now, loaded [B, N] the share of a man's shots to fire
+    this step as volley() takes it, target [B, N]). A burst starts where a volley would (volley_target: the men loaded
+    and aimed) and goes on spv / bst_rate s at the unit's target now (m_target; none: no shot that step, the clock
+    runs); the other units keep their volley (loaded, volley_target). Updates bst, bst_s in place."""
+    burst = (u["spv"] > 1) & (u["bst_rate"] > 0)
+    start = burst & (volley_target >= 0) & (u["bst_s"] <= 1e-6)
+    length = u["spv"] / u["bst_rate"].clamp(min=1e-6)
+    bst_s = torch.where(start, length, u["bst_s"])
+    bst = torch.where(start, loaded, u["bst"])
+    going = burst & (bst_s > 1e-6) & (m_target >= 0)
+    now = torch.minimum(bst_s, torch.full_like(bst_s, dt))
+    # the men aiming again (burst_reaim: their target man died) come back at aim_s (on average: exp(-dt / aim_s)); a
+    # new burst starts with every man aimed
+    paused = torch.zeros_like(bst)
+    if "bst_p" in u:
+        back = torch.exp(-dt / u["aim_s"].clamp(min=1e-3))
+        paused = torch.where(start, torch.zeros_like(bst), u["bst_p"] * back)
+        u["bst_p"] = torch.where(burst, paused, u["bst_p"])
+    share = torch.where(burst, torch.where(going, bst * (1 - paused) * u["bst_rate"] * now, torch.zeros_like(bst)),
+                        loaded)
+    target = torch.where(burst, torch.where(going, m_target, torch.full_like(m_target, -1)), volley_target)
+    u["bst_s"] = torch.where(burst, (bst_s - dt).clamp(min=0), u["bst_s"])
+    u["bst"] = torch.where(burst & (u["bst_s"] > 0), bst, torch.zeros_like(bst))
+    return burst, start, share, target
+
+
 def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, catch=None):
     """Shots, and HP taken per pair [B, N, N] (i shoots, f is hit) this step; per-hit damage
     [B, N, N]. clear [B, N]: share of the shooter's men with a clear line (clear_shot; None: all).

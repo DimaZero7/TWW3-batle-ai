@@ -35,15 +35,22 @@ NAMES = tuple(f"fx_{k}_{w}" for k in keys() for w in ("owned", "on"))
 
 
 def owned(unit_keys, doc=None):
-    """[n, E] float32: the effects each unit owns (padding "": none)."""
+    """[n, E] float32: the effects each unit owns (padding "": none); for a contact effect (kind contact: poison, the
+    censer's contagion, suppressing fire) the units whose weapons lay it (the catalogue's inflicts)."""
     doc = doc or load()
     order = keys(doc)
     idx = {k: i for i, k in enumerate(order)}
     out = np.zeros((len(unit_keys), len(order)), np.float32)
     for i, u in enumerate(unit_keys):
-        for e in (doc["units"].get(u) or ()) if u else ():
+        for e in ((doc["units"].get(u) or []) + ((doc.get("inflicts") or {}).get(u) or [])) if u else ():
             out[i, idx[e]] = 1.0
     return out
+
+
+def contact(doc=None):
+    """[E] bool: the catalogue's contact effects (on a unit hit by a weapon that lays it; not owned by the unit)."""
+    doc = doc or load()
+    return np.array([(doc["effects"].get(k) or {}).get("kind") == "contact" for k in keys(doc)], bool)
 
 
 def _rows(doc):
@@ -65,20 +72,24 @@ def observed_predicates(m, state, like):
 
 
 def active(m, state, own_bits, doc=None):
-    """[B, N, E] bool: the owned effects on now (module doc). own_bits [B, N, E] (0/1)."""
+    """[B, N, E] bool: the owned effects on now (module doc). own_bits [B, N, E] (0/1). A contact effect is on
+    wherever the state's bitmask says (the unit hit by it does not own it); without a bitmask it is not known: off
+    (the companion reads it from the unit card's phases, exchange.effects_on)."""
     doc = doc or load()
     E = len(keys(doc))
     have = own_bits > 0.5
+    hit = contact(doc)
     fx = state.get("fx_on")
     if fx is not None:
         bit = np.arange(E) if m is np else m.arange(E, device=fx.device)
         on = ((fx[..., None] >> bit) & 1) > 0
-        return on & have
+        mask = (hit if m is np else m.as_tensor(hit, device=fx.device)) | have
+        return on & mask
     pred = observed_predicates(m, state, own_bits)
     cols = []
     for needs, off, timed in _rows(doc):
         ok = have[..., len(cols)]
-        if timed or any(pred.get(p) is None for p in needs):
+        if timed or hit[len(cols)] or any(pred.get(p) is None for p in needs):
             ok = ok & False
         for p in needs:
             if pred.get(p) is not None:

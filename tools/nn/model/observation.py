@@ -123,10 +123,33 @@ VOLLEY = ("volley_ready",)
 ARC = ("fire_arc",)
 # Then ORDER (07.10.2026, own units only; older checkpoints: zero weights): the order in force, kind and age (module doc).
 ORDER = ("order_hold", "order_move", "order_attack", "order_withdraw", "order_age")
+# Then WEAPON (11.10.2026, both sides: the unit's card; older checkpoints: zero weights, encoder.py): the passport's
+# shots a man fires in a volley (passport.volley_shots: the Ratling Gun's burst of 18 -> 0.9, 1 shot -> 0.05) and its
+# melee weapon's magical attacks (passport.magic).
+WEAPON = ("volley_shots", "magic_attacks")
 NAMES = (tuple(n for n, _ in DYNAMIC) + FLAGS + tuple(f"passport_{i}" for i in range(passport.SIZE)) + effects.NAMES
-         + VOLLEY + ARC + ORDER)
+         + VOLLEY + ARC + ORDER + WEAPON)
 INDEX = {n: i for i, n in enumerate(NAMES)}
 TOKEN = len(NAMES)
+# Effect pairs of the tokens of trained checkpoints before 11.10.2026 (14 effects, no WEAPON): old_columns maps them.
+OLD_EFFECTS = (14,)
+
+
+def old_columns(width):
+    """[the new token's column of each column of an older token `width` wide] for a token from before the effects
+    grew past OLD_EFFECTS (11.10.2026: the new units' attributes and contact effects, then WEAPON after ORDER) that had
+    columns after its effect pairs (VOLLEY 03.10, ARC and ORDER 07.10.2026): its effect pairs keep their places, those
+    columns move behind the new pairs to their places by name, the new columns get zero weights (encoder.TokenEncoder).
+    None: not such a token (a token that ended with its effect pairs, or older still, grew at the end only:
+    encoder.pad_inputs)."""
+    base = len(DYNAMIC) + len(FLAGS) + passport.SIZE
+    E, after = effects.SIZE // 2, VOLLEY + ARC + ORDER
+    for e_old in OLD_EFFECTS:
+        head = base + 2 * e_old
+        k = width - head
+        if e_old < E and k in (len(VOLLEY), len(VOLLEY) + len(ARC), len(after)):
+            return list(range(head)) + [INDEX[n] for n in after[:k]]
+    return None
 # The token columns an enemy never shows (its orders): zero for enemies in the side's view.
 OWN_ONLY = tuple(INDEX[n] for n, who in DYNAMIC if who == "own") + tuple(INDEX[n] for n in ORDER)
 # character; attack, defend, 2 lord levels, map width and depth, 2 counts; own lord slain and how
@@ -171,6 +194,7 @@ class Setup:
         self.ammo0 = np.stack([passport.ammo(k) for k in self.keys])          # [B, N]
         self.reload = np.stack([passport.reload(k) for k in self.keys])       # [B, N] s (VOLLEY; 0: no missile)
         self.arc = np.stack([passport.fire_arc(k) for k in self.keys])        # [B, N] fire arc / 180 (ARC)
+        self.weapon = np.stack([passport.weapon(k) for k in self.keys])       # [B, N, len(WEAPON)] (WEAPON)
         ab = [abilities.slots(k) for k in self.keys]
         self.abil = np.stack([a[0] for a in ab])                               # [B, N, SLOTS, STATIC]
         self.abil_owned = np.stack([a[1] for a in ab])                         # [B, N, SLOTS]
@@ -194,7 +218,7 @@ class Setup:
                                        present=t(self.present), attacker=t(self.attacker), lord=t(self.lord),
                                        abil=t(self.abil), abil_owned=t(self.abil_owned),
                                        abil_use=t(self.abil_use), fx_owned=t(self.fx_owned), cost=t(self.cost),
-                                       reload=t(self.reload), arc=t(self.arc))
+                                       reload=t(self.reload), arc=t(self.arc), weapon=t(self.weapon))
         return self._cache[key]
 
     def character(self, side):
@@ -224,6 +248,7 @@ class _Arrays:
     cost: object = None        # [B, N] multiplayer cost (Setup.cost); None: unknown, every unit counts 1
     reload: object = None      # [B, N] passport reload_s (Setup.reload, VOLLEY); None: unknown, the input 0
     arc: object = None         # [B, N] passport fire arc / 180 (Setup.arc, ARC); None: unknown, the input 0
+    weapon: object = None      # [B, N, len(WEAPON)] (Setup.weapon, WEAPON); None: unknown, the inputs 0
 
 
 @dataclass
@@ -402,7 +427,9 @@ def observe(state, setup, side, memory=None, full=False):
     arc = xs * 0 if arc is None else _f(m, arc)
     order, ord_mem = _order(m, state, memory, tn, xs)
     order = m.stack([m.where(see_all & S.present, c, c * 0) for c in order], -1)
-    tokens = _cat(m, [dyn, _f(m, S.passport), fx, late, arc[..., None], order], -1) * _f(m, S.present)[..., None]
+    weapon = getattr(S, "weapon", None)
+    weapon = m.stack([xs * 0] * len(WEAPON), -1) if weapon is None else _f(m, weapon)
+    tokens = _cat(m, [dyn, _f(m, S.passport), fx, late, arc[..., None], order, weapon], -1) * _f(m, S.present)[..., None]
 
     attend = S.present & ~dead & ~(own & ~alive)
     ctrl = own & alive & (ms < 6)

@@ -33,6 +33,15 @@ conditions hold, as in the game.
 The ability bar (ab{k}_on / ab{k}_cd, tools/nn/sim/abilities.py) of a slot holding a timed effect's
 ability shows that effect's timers, as before this module (the observation reads them).
 
+Contact effects (the catalogue's kind "contact": poison, the censer's contagion, suppressing fire): a unit
+does not own them; a weapon lays one on the enemy it hits (STATIC mfx: its blows' effect, sfx: its
+projectiles', indices in the order, -1 none). lay() keeps a timer per contact effect of the catalogue
+(INTERNAL cfx{j}_s, j over contact_keys): a step whose hits of such a weapon on a unit land (at least
+one: 1 - exp(-expected hits), a hash draw as morale's) starts it at the effect's duration_s (10 s, the
+database), each hit again; friendly fire lays none; different contact effects stack, the same one
+refreshes (CA, Update 8.1). While its timer runs it lies on the unit like an own effect (apply), and
+fx_on shows it.
+
 Only json in the table builders; the tensors need torch.
 """
 try:
@@ -42,7 +51,14 @@ except ImportError:          # the table's layout is importable without torch
 
 from tools.nn.sim.abilities import MULT, SIM_STATS, STATS
 
-PREDICATES = ("in_melee", "out_of_melee", "losing_melee", "morale_below_half", "not_wavering", "hp_below_half",
+# The effects' stats: the abilities' and the missile damage (poison: x0.85, scalar_missile_damage_base / _ap)
+E_STATS = STATS + ("m_damage", "m_ap")
+E_MULT = MULT + ("m_damage", "m_ap")
+E_SIM_STATS = {**SIM_STATS, ("scalar_missile_damage_base", "mult"): "m_damage",
+               ("scalar_missile_damage_ap", "mult"): "m_ap"}
+CONTACT_SLOTS = 4   # contact effects the catalogue may hold (INTERNAL cfx0_s .. cfx3_s)
+
+PREDICATES =("in_melee", "out_of_melee", "losing_melee", "morale_below_half", "not_wavering", "hp_below_half",
               "hp_below_quarter")
 # The catalogue's rules the simulator acts on -> the unit field that carries the flag for the step.
 RULES = {"unbreakable": "unbreakable", "expendable": "expendable", "encourages": "encourages",
@@ -53,9 +69,9 @@ GROUPS = ("self", "friends")
 # A list to append each step's {effect key: [B, N] bool - on the unit, its own or an owner's aura} to, or None
 # (training: off); the probes' simulator twins read it (tools/nn/morale_probe.py).
 RECEIVED = None
-HEAD = ("modelled", "timed", "active_s", "recharge_s", "range_m", "ability")
+HEAD = ("modelled", "timed", "active_s", "recharge_s", "range_m", "ability", "contact", "duration_s")
 COLS = HEAD + tuple(f"{w}_{p}" for w in ("need", "off", "fire", "rcg") for p in PREDICATES) + tuple(
-    f"rule_{r}" for r in RULES) + tuple(f"{g}_{s}" for g in GROUPS for s in STATS)
+    f"rule_{r}" for r in RULES) + tuple(f"{g}_{s}" for g in GROUPS for s in E_STATS)
 COL = {c: i for i, c in enumerate(COLS)}
 
 
@@ -73,6 +89,25 @@ def modelled(params, key):
     not leave it out (a calibration switch, with its why)."""
     e = (params.effects.get("effects") or {}).get(key) or {}
     return bool(e.get("modelled")) and key not in ((params.sim.get("effects") or {}).get("off") or ())
+
+
+def contact_keys(params):
+    """[(slot j, index in the order, key)] of the catalogue's contact effects the simulator acts on (modelled), in the
+    order's order: the j-th has the timer cfx{j}_s."""
+    eff = params.effects.get("effects") or {}
+    out = [(i, k) for i, k in enumerate(order(params)) if (eff.get(k) or {}).get("kind") == "contact"
+           and modelled(params, k)]
+    assert len(out) <= CONTACT_SLOTS, f"{len(out)} contact effects: the state holds {CONTACT_SLOTS}"
+    return [(j, i, k) for j, (i, k) in enumerate(out)]
+
+
+def laid_by(params, key):
+    """(melee, missile): the indices in the order of the contact effects a unit key's blows and projectiles lay (the
+    passport's melee.contact_phase, missile.contact_phase; -1 none or not modelled)."""
+    u = params.units.get(key) or {}
+    idx = {k: i for _, i, k in contact_keys(params)}
+    return (idx.get((u.get("melee") or {}).get("contact_phase"), -1),
+            idx.get((u.get("missile") or {}).get("contact_phase"), -1))
 
 
 def unit_effects(params, key):
@@ -110,7 +145,8 @@ def static(params, key):
                     rules[RULES[r]] = True
     assert len(timed) <= TIMERS, f"{key}: {len(timed)} timed effects, the state holds {TIMERS}"
     timed += [-1] * (TIMERS - len(timed))
-    return {"fx": bits, **{f"fxt{j}": t for j, t in enumerate(timed)}, **rules}
+    mfx, sfx = laid_by(params, key)
+    return {"fx": bits, **{f"fxt{j}": t for j, t in enumerate(timed)}, **rules, "mfx": mfx, "sfx": sfx}
 
 
 def row(params, key):
@@ -119,10 +155,12 @@ def row(params, key):
     ab_keys = sorted(params.abilities or {})
     t = e.get("timed") or {}
     out = {c: 0.0 for c in COLS}
+    contact = e.get("kind") == "contact"
     out.update(modelled=float(modelled(params, key)), timed=float(bool(t)),
                active_s=float(t.get("active_s", 0)), recharge_s=float(max(t.get("recharge_s", 0), 0)),
                range_m=float(e.get("range_m") or 0.0),
-               ability=float(ab_keys.index(key)) if key in ab_keys else -1.0)
+               ability=float(ab_keys.index(key)) if key in ab_keys else -1.0,
+               contact=float(contact), duration_s=float(e.get("duration_s") or 0.0))
     for w, preds in (("need", e.get("needs") or ()), ("off", e.get("off_when") or ()),
                      ("fire", t.get("fires_when") or ()), ("rcg", t.get("recharge_needs") or ())):
         for p in preds:
@@ -131,16 +169,17 @@ def row(params, key):
         if r in RULES:
             out[f"rule_{r}"] = 1.0
     for g in GROUPS:
-        for s in STATS:
-            out[f"{g}_{s}"] = 1.0 if s in MULT else 0.0
+        for s in E_STATS:
+            out[f"{g}_{s}"] = 1.0 if s in E_MULT else 0.0
     for st in e.get("stats") or ():
-        s = SIM_STATS.get((st["stat"], st["how"]))
+        s = E_SIM_STATS.get((st["stat"], st["how"]))
         if s is None:
             continue
-        for g in st.get("on") or ():
+        # (a contact effect's stats lie on the unit hit: "self" of the unit carrying it)
+        for g in ("self",) if contact else st.get("on") or ():
             if g in GROUPS:
                 k = f"{g}_{s}"
-                out[k] = out[k] * float(st["value"]) if s in MULT else out[k] + float(st["value"])
+                out[k] = out[k] * float(st["value"]) if s in E_MULT else out[k] + float(st["value"])
     return [out[c] for c in COLS]
 
 
@@ -148,7 +187,7 @@ def table(params, device):
     """[E + 1, COLS]: every effect of the catalogue; the last row (index -1) is none."""
     empty = [0.0] * len(COLS)
     for g in GROUPS:
-        for s in MULT:
+        for s in E_MULT:
             empty[COL[f"{g}_{s}"]] = 1.0
     empty[COL["ability"]] = -1.0
     # an effect in the order that no unit owns any more (the order is append-only) has an empty row
@@ -258,12 +297,14 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
             match = has & (ab >= 0) & (u[f"ab{k}"] == ab)
             u[f"ab{k}_on"] = torch.where(match, t_on, u[f"ab{k}_on"])
             u[f"ab{k}_cd"] = torch.where(match, t_cd, u[f"ab{k}_cd"])
+    # contact effects: on while their timer runs (lay(); a living unit)
+    on = on | contact_on(u, params, E, alive)
     bit = torch.arange(E, device=u["fx"].device)
     u["fx_on"] = (on.long() << bit).sum(-1)
     on = on & (c("modelled") > 0)
     onf = on.float()
-    log = {s: torch.einsum("bne,e->bn", onf, torch.log(c(f"self_{s}").clamp(min=1e-6))) for s in MULT}
-    add = {s: torch.einsum("bne,e->bn", onf, c(f"self_{s}")) for s in STATS if s not in MULT}
+    log = {s: torch.einsum("bne,e->bn", onf, torch.log(c(f"self_{s}").clamp(min=1e-6))) for s in E_MULT}
+    add = {s: torch.einsum("bne,e->bn", onf, c(f"self_{s}")) for s in E_STATS if s not in E_MULT}
     eye = torch.eye(u["men"].shape[1], dtype=torch.bool, device=u["men"].device)[None]
     present = u["side"] > 0
     got = {}
@@ -273,15 +314,17 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
                 & (on[..., i] & alive)[:, :, None]).float()             # owner i -> friend j
         if RECEIVED is not None:
             got[i] = give.sum(1) > 0
-        for s in STATS:
+        for s in E_STATS:
             v = T[i, COL[f"friends_{s}"]]
-            if s in MULT:
+            if s in E_MULT:
                 log[s] = log[s] + give.sum(1) * torch.log(v.clamp(min=1e-6))
             else:
                 add[s] = add[s] + give.sum(1) * v
     fields = ("walk", "run", "charge_speed", "damage", "ap_damage", "charge_bonus", "attack", "defence",
-              "morale_bonus", "resist_physical") + tuple(RULES.values())
+              "morale_bonus", "resist_physical", "m_damage", "m_ap") + tuple(RULES.values())
     old = {k: u[k] for k in fields}
+    u["m_damage"] = u["m_damage"] * torch.exp(log["m_damage"])
+    u["m_ap"] = u["m_ap"] * torch.exp(log["m_ap"])
     speed = torch.exp(log["speed"])
     # scalar_charge_speed, when an effect gives it, sets the charge speed; else scalar_speed scales it too
     charge_speed = torch.exp(torch.where(log["charge_speed"].abs() > 1e-9, log["charge_speed"], log["speed"]))
@@ -330,7 +373,60 @@ def refresh_on(u, params):
     bit = torch.arange(E, device=u["fx"].device)
     was = ((u["fx_on"][..., None] >> bit) & 1) > 0
     on = torch.where(timed, was & alive[..., None], own & alive[..., None] & ~unmet & ~off)
+    on = on | contact_on(u, params, E, alive)
     u["fx_on"] = (on.long() << bit).sum(-1)
+
+
+def card(u, params):
+    """{stat: [B, N]} of the effects on now (fx_on) as the unit card shows them: multipliers for the E_MULT stats,
+    additions for the others; their own stats only (no aura given, no ability, no fatigue). The probes' twins
+    (tools/nn/unit_probe.py) compare the card's speed, weapon damage, melee attack and leadership with the game's."""
+    if not params.effects or not order(params):
+        return {}
+    T = table(params, u["men"].device)
+    E = T.shape[0] - 1
+    bit = torch.arange(E, device=u["fx"].device)
+    on = ((((u["fx_on"][..., None] >> bit) & 1) > 0) & (T[:E, COL["modelled"]] > 0)).float()
+    out = {}
+    for s in E_STATS:
+        v = T[:E, COL[f"self_{s}"]]
+        out[s] = (torch.exp(torch.einsum("bne,e->bn", on, torch.log(v.clamp(min=1e-6)))) if s in E_MULT
+                  else torch.einsum("bne,e->bn", on, v))
+    return out
+
+
+def contact_on(u, params, E, alive):
+    """[B, N, E] bool: the contact effects on each living unit now (their timers cfx{j}_s, lay())."""
+    on = torch.zeros(u["men"].shape + (E,), dtype=torch.bool, device=u["men"].device)
+    for j, i, _ in contact_keys(params):
+        if f"cfx{j}_s" in u:
+            on[..., i] = (u[f"cfx{j}_s"] > 0) & alive
+    return on
+
+
+def lay(u, params, dt, hp_melee, mhit, hp_missile, shit, enemy, t):
+    """The contact effects laid this step (module doc), in place: each timer cfx{j}_s runs down by dt, then starts at
+    the effect's duration_s on every unit an enemy weapon of it hit this step. hp_melee / hp_missile [B, i, j]: HP i's
+    blows / projectiles took from j this step, mhit / shit [B, i, j] the HP a hit; enemy [B, i, j]. Hits land as
+    Poisson counts of the expected ones: at least one with 1 - exp(-hits) (a hash draw per battle, unit and step,
+    morale._hash_uniform, so a replay draws the same)."""
+    keys = contact_keys(params)
+    if not keys or "cfx0_s" not in u:
+        return
+    from tools.nn.sim import morale
+    B, N = u["men"].shape
+    k = torch.round(t / dt).long() if isinstance(t, torch.Tensor) else torch.full(
+        (B,), round(float(t) / dt), dtype=torch.long, device=u["men"].device)
+    ids = morale.battle_ids(u)
+    n_m = torch.where(mhit > 0, hp_melee / mhit.clamp(min=1e-6), torch.zeros_like(hp_melee)) * enemy
+    n_s = torch.where(shit > 0, hp_missile / shit.clamp(min=1e-6), torch.zeros_like(hp_missile)) * enemy
+    T = table(params, u["men"].device)
+    for j, i, _ in keys:
+        hits = ((u["mfx"] == i).float()[:, :, None] * n_m).sum(1) + ((u["sfx"] == i).float()[:, :, None] * n_s).sum(1)
+        draw = morale._hash_uniform(B, N, k, u["men"].device, salt=52817 + 131 * j, ids=ids)
+        hit = (hits > 0) & (draw < 1 - torch.exp(-hits))
+        left = (u[f"cfx{j}_s"] - dt).clamp(min=0)
+        u[f"cfx{j}_s"] = torch.where(hit, T[i, COL["duration_s"]].expand_as(left), left)
 
 
 def timers(u):

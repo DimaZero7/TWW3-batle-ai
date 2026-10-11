@@ -382,7 +382,10 @@ def step(st, orders, params=None, dt=None):
     # --- shooting ---
     # (fire whilst moving, attribute mounted_fire_move: shoots and aims on the move too)
     still = (speed < 0.2) | u["fire_move"]
-    ready = standing & ~engaged & (u["a"] > 0) & (u["range"] > 0) & still & (~sk_run | u["fire_move"])
+    # (a unit that shoots in melee too - missile.fire_in_melee, the Ratling Gun: the suppress probe's gun fired on at the
+    # swordsmen in contact with it)
+    free = ~engaged | u["melee_fire"] if "melee_fire" in u else ~engaged
+    ready = standing & free & (u["a"] > 0) & (u["range"] > 0) & still & (~sk_run | u["fire_move"])
     # On the move (fire whilst moving) a unit shoots only at targets within missile.move_fire_arc_deg of its
     # facing (the way it walks): walking away it holds fire (measured, config/nn/sim.json missile.move_fire_why) -
     # unless its own fire arc (the database's, passport missile.fire_arc_deg) is wider: the Night Runners' throwing
@@ -503,9 +506,16 @@ def step(st, orders, params=None, dt=None):
         full = full & waited
     # (between volleys the unit is still shooting at its target: the game's IsFiringMissiles, the `fire` flag)
     volley_target = torch.where(full, m_target, torch.full_like(m_target, -1))
+    share = loaded.clamp(max=1.0)
+    burst = None
+    if "bst_s" in u:
+        # A burst (missile.py burst_share): a volley of spv shots a man (the Ratling Gun's 18) leaves at the measured
+        # rate over spv / bst_rate s from its start; the reload runs from the start (the cycle start to start)
+        burst, start, share, volley_target = missile.burst_share(u, volley_target, m_target, share, dt)
     shots, hp_missile, shit = missile.volley(u, pw, volley_target, dt, params, contact=touch, clear=clear,
-                                             loaded=loaded.clamp(max=1.0), catch=catch)
-    u["unready"] = torch.where(shots > 0, torch.ones_like(unready), unready)
+                                             loaded=share, catch=catch)
+    fired = shots > 0 if burst is None else torch.where(burst, start, shots > 0)
+    u["unready"] = torch.where(fired, torch.ones_like(unready), unready)
     if reaim:
         u["late"] = torch.where(shots > 0, torch.zeros_like(u["late"]), u["late"])
         u["loaded_s"] = torch.where(shots > 0, torch.zeros_like(u["loaded_s"]), u["loaded_s"])
@@ -584,6 +594,19 @@ def step(st, orders, params=None, dt=None):
         at = u["aim_tgt"]
         died = lost_share.gather(1, at.clamp(min=0))
         u["late"] = torch.where(at >= 0, 1 - (1 - u["late"]) * (1 - died), torch.zeros_like(u["late"]))
+    if burst is not None and "bst_p" in u:
+        # A bursting man whose target man died aims again (missile.burst_reaim): its flat fire aims at the target's
+        # front rank, so a man lost there is the target of the target's files' share of the burst (files: its front /
+        # its spacing across); those men lose aim_s of their burst (burst_share). The probe: the gun's bursts on
+        # swordsmen fell from 576 to 364-482 bullets as their men died, the rate halving within 0.5 s of 3-4 deaths;
+        # on the lone General (no man dies) every burst was 576
+        at = u["aim_tgt"]
+        ti = at.clamp(min=0)
+        files = (pw["front"] / u["sp_h"].clamp(min=0.1)).clamp(min=1).gather(1, ti)
+        lost = torch.where(u["men0"] > 1, drop, torch.zeros_like(drop)).gather(1, ti)
+        front = (lost / files).clamp(0, 1)
+        on = burst & (at >= 0) & (u["bst_s"] > 0) & bool((cal["missile"].get("burst_reaim") or 0))
+        u["bst_p"] = torch.where(on, 1 - (1 - u["bst_p"]) * (1 - front), u["bst_p"])
     want = kills.sum(1)
     credit = kills * (drop / want.clamp(min=1e-9)).clamp(max=10)[:, None, :] * pw["enemy"]
     u["k"] = u["k"] + credit.sum(2)
@@ -604,6 +627,9 @@ def step(st, orders, params=None, dt=None):
     shot_scaled = hp_missile * scale[:, None, :] * pw["enemy"]
     u["shot_dealt"] = u["shot_dealt"] * fade + shot_scaled.sum(2)
     u["shot_taken"] = u["shot_taken"] * fade + shot_scaled.sum(1)
+    # contact effects (poison, the censer's contagion, suppressing fire): a hit of a weapon that lays one starts it on
+    # the enemy hit (effects.lay; friendly fire lays none); it acts from the next step
+    effects.lay(u, params, dt, melee_scaled, mhit, hp_missile * scale[:, None, :], shit, pw["enemy"].float(), st.t)
     shot_at = (hp_missile * pw["enemy"]).sum(1) > 0      # friendly fire does not count (ume_concerned_under_friendly_fire 0)
     u["under_fire_s"] = torch.where(shot_at, torch.zeros_like(u["under_fire_s"]), u["under_fire_s"] + dt)
     attackers = strike & standing[:, :, None]

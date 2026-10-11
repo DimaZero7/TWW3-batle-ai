@@ -292,6 +292,57 @@ The bridge needs nothing for them: nothing to order (their abilities are innate)
 and 6 missile-probe battles - `newdist` (3), `starsmove`, `meleefire` (the fire-position drill), `hglof` (the
 handgunners' fire past friends).
 
+## Ratling Gun, Plague Monks, Censer Bearers, Giant Rats
+
+The fifth wave (11.10.2026): new Skaven units and the Empire's halberdiers. **Only the v2 army scheme** fields them
+(training, `run.py --armies v2`; the `units_v2` list in `config/nn/pools.json`), the v1 scheme (the exams, the checks,
+the twin) gives the same armies bit for bit ([armies](armies.md#the-v2-scheme-numbers-of-units-first)). Passports from
+the database by the same code; no cards from battle yet. The game's numbers come from probes (`tools/nn/unit_probe.py`,
+plans `ratling`, `suppress`, `suppress2`, `censer`, `wolfrats`, `wolfpoison`, `hitslow`; 13 battles).
+
+| | Ratling Gun | Plague Monks | Censer Bearers | Giant Rats | Giant Rats (poison) | Halberdiers |
+|---|---:|---:|---:|---:|---:|---:|
+| Key | `wh2_dlc12_skv_inf_ratling_gun_0` | `wh2_main_skv_inf_plague_monks` | `wh2_main_skv_inf_plague_monk_censer_bearer` | `wh2_dlc16_skv_mon_wolf_rats_0` | `wh2_dlc16_skv_mon_wolf_rats_1` | `wh_main_emp_inf_halberdiers` |
+| Caste | missile | infantry | infantry | **war beasts** (`war_beast`) | war beasts | infantry |
+| Men; health a man | 32 (crews); 123 | 120; 76 | 120; 80 | 80; 83 | 80; 83 | 120; 73 |
+| Attack / defence; charge | 16 / 16; 2 | 28 / 25; 22 | 34 / 30; 34 | 28 / 19; 30 | 28 / 19; 30 | 26 / 42; 8 |
+| Damage: base + armour-piercing | 20 + 6 | 24 + 8, vs infantry +7 | 13 + 31, **magical** | 6 + 10, magical | 24 + 2 | 8 + 20, vs large +16 |
+| Contact effect | bullet: **suppression** | - | **contagion** | - | **poison** | - |
+| Walk / run / charge, m/s | 1.4 / 3.8 / 4.4 | 1.5 / 4.2 / 4.8 | 1.5 / 4.2 / 4.8 | 1.9 / **9.5 / 11.5** | the same | 1.5 / 3.0 / 3.8 |
+| Passives | Scurry Away!, Strength in Numbers | + Frenzy | + Frenzy | Scurry Away! | Scurry Away! | - |
+| Cost | 800 | 650 | 1000 | 550 | 550 | 550 |
+
+The gun's fire (`wh2_dlc12_skv_ratling_gun_bullet`): flat, 145 m, 2 + 6 damage a bullet, **18 bullets a volley**
+(`shots_per_volley`), 270 rounds a man - **one pool of the unit** (8640, crew losses do not cut it), it fires in melee
+too.
+
+### What each feature does and where it comes from
+
+| Unit | Feature | What it does | Source | Simulator | Network |
+|---|---|---|---|---|---|
+| Gun | A burst of 18 bullets | a man fires 18 bullets at 4 a second (4.5 s); 12 s from a burst's start to the next | DB `shots_per_volley`; the rate and the cycle measured (`ratling`: on the lone General 576 = 32 x 18 bullets a burst, 64 bullets every 0.5 s) | `missile.burst_rate_s` 4, `reload_projectile_s` 12 (`missile.py burst_share`) | input `volley_shots` |
+| Gun | A burst cut by a dead target | a man whose target (a front-rank man) died aims again (2 s) and loses those bullets: 364-482 bullets a burst on a formation instead of 576 | measured `ratling` | `missile.burst_reaim` | - |
+| Gun | Suppression | the target's speed x0.7 for 10 s from the last hit | DB (`contact_stat_effect`, a 10 s phase) | contact effect | the effect's pair |
+| Gun | Fire in melee | shoots the unit cutting it down | measured `suppress` | `missile.fire_in_melee` | - |
+| Censer Bearers | Contagion | the target's leadership -10 for 10 s from the last blow | DB (`contact_phase`) | contact effect | the effect's pair |
+| Monks, censers | Frenzy | +10 attack, damage and charge x1.1, off below half morale | DB | innate effect (as the flagellants') | the effect's pair |
+| Giant Rats (poison) | Poison | speed, melee and missile damage x0.85 for 10 s | DB | contact effect | the effect's pair |
+| Giant Rats | Run 9.5, charge 11.5, acceleration 6 | the fastest unit | DB | the common movement (matches the game: 9.5 / 11.5 m/s, 90 % of the run in 3 s) | passport |
+| Giant Rats | Caste `war_beast` | - | DB | - | the caste column (a typo `warbeast` put them among "other" before) |
+| Censers, Giant Rats | Magical attacks | against magic resistance (none of our units has it) | DB `melee_weapons.is_magical` | not needed | input `magic_attacks` |
+| Halberdiers | vs large +16, defence 42 | we have no large units | DB | rules exist | passport |
+
+Contact effects are in the effect catalogue (`kind: contact`, the duration from the database - `special_ability_phases`,
+10 s for all three); the unit whose weapon lays one counts as its owner (`inflicts`), it lies on the unit hit
+([simulator](simulator.md#contact-effects-and-the-ratling-guns-burst)). The bridge already reads them: the phase shows in
+the unit's list of active effects (the probes: the phase key is the effect key).
+
+### Recordings needed
+
+The probes `build/newunits/probe_newunits.ps1` (11 battles) and `hitslow` (2 battles, handgunners' and crossbowmen's
+fire at running clanrats); the tables - `python -m tools.nn.unit_probe [--sim]`. Cards - with the first battle a unit
+is in.
+
 ## Innate effects
 
 Every attribute and every passive or game-fired ability of a unit is an **innate effect**, one

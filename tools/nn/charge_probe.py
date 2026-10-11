@@ -360,7 +360,7 @@ RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 # the new units' plans (tools/nn/unit_probe.py: their lanes, measures and table)
-UNIT_PLANS = ("ratling", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison")
+UNIT_PLANS = ("ratling", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow")
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
          "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "leave", "skirmish", "skirmish2", "shootcontact",
@@ -1221,6 +1221,14 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
     for b, ln in enumerate(meta):
         if ln["spec"].get("t_morale") and int(slot["tg"][b]) >= 0:
             keep[b, int(slot["tg"][b])] = True
+    # the new units' plans (UNIT_PLANS): the entry turns every unit's fire at will off and only the 'shoot' attacker and
+    # a 'skirmish' target shoot - a held gun of the suppress plan's control lanes is silent (no range here)
+    for b, ln in enumerate(meta):
+        if ln.get("plan") in UNIT_PLANS:
+            if ln["spec"].get("mode") != "shoot" and int(slot["a"][b]) >= 0:
+                st.u["range"][b, int(slot["a"][b])] = 0.0
+            if ln["spec"].get("target_mode") != "skirmish" and int(slot["tg"][b]) >= 0:
+                st.u["range"][b, int(slot["tg"][b])] = 0.0
     st.u["leadership"] = torch.where(keep, st.u["leadership"], st.u["leadership"] + 1e4)
     st.u["morale"] = torch.where(keep, st.u["morale"], st.u["morale"] + 1e4)
     specs = [ln["spec"] for ln in meta]
@@ -1236,7 +1244,10 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
     # the retarget plan's switches run on the game's clock from the go: the twin starts at the first sample
     t_first = [float(ln["samples"][0][0]) for ln in meta]
     rec = {"t": [], "rows": []}
-    fields = ("x", "z", "b", "men", "hp_abs", "m", "fatigue", "fat", "k", "r", "s", "a", "fire")
+    fields = ("x", "z", "b", "men", "hp_abs", "m", "fatigue", "fat", "k", "r", "s", "a", "fire", "mp", "fx_on", "run",
+              "damage", "ap_damage", "attack", "leadership", "m_damage", "m_ap", "reload")
+    from tools.nn.sim import effects as sim_effects
+    fx_names = sim_effects.order(params)
     a_slot = {}
     for sp in specs:
         if sp.get("a_ability") and sp["a_key"] not in a_slot:
@@ -1327,6 +1338,12 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                     kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, True
             elif mode[b] in ("attack_run", "attack_walk"):
                 kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, mode[b] == "attack_run"
+            elif mode[b] == "shoot":
+                # the new units' ratling plan (tools/nn/unit_probe.py): one ranged attack on the target at a walk
+                kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, False
+            if sp.get("t_stop_fire_s") is not None and t >= float(sp["t_stop_fire_s"]) - 1e-6:
+                # the suppress2 plan: the target (a shooter) falls silent then (fire at will off, a halt): no range
+                st.u["range"][b, T] = 0.0
             elif mode[b] == "pass":
                 # the skirmish2 plan's 'pass' (entries/charge_probe.lua): a run straight ahead from its own place to
                 # pass_beyond_m behind the lane's z, never attacking
@@ -1470,7 +1487,9 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
             return
         next_t[0] = t + TICK_MS / 1000
         rec["t"].append(t)
-        rec["rows"].append({k: st.u[k].detach().cpu().numpy().copy() for k in fields if k in st.u})
+        row_ = {k: st.u[k].detach().cpu().numpy().copy() for k in fields if k in st.u}
+        row_["card"] = {k: v.detach().cpu().numpy().copy() for k, v in sim_effects.card(st.u, params).items()}
+        rec["rows"].append(row_)
     until = max((ln["end"] or {}).get("t", 0) / 1000 for ln in lanes) + 5 if any(ln["end"] for ln in lanes) else 200
     if any(ln["spec"].get("t_morale") for ln in lanes):
         until = max(until, max(ln["spec"].get("max_s", 200) for ln in lanes))
@@ -1493,6 +1512,23 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                     out["ammo"] = float(r["a"][b, i])
                 if "fire" in r:
                     out["fire"] = float(r["fire"][b, i])
+                if "mp" in r:
+                    out["mp"] = float(r["mp"][b, i])
+                if "fx_on" in r:
+                    bits = int(r["fx_on"][b, i])
+                    out["fx"] = ",".join(k for e, k in enumerate(fx_names) if (bits >> e) & 1)
+                c = r.get("card") or {}
+                if c and "run" in r:
+                    # the unit card's values with the effects on (sim effects.card), as the game's cs
+                    def v(k, s):
+                        return float(r[k][b, i]) * float(c[s][b, i])
+                    out["cs"] = {"scalar_speed": round(10 * v("run", "speed"), 3),
+                                 "stat_weapon_damage": round(v("damage", "damage") + v("ap_damage", "ap"), 3),
+                                 "stat_melee_attack": round(float(r["attack"][b, i]) + float(c["attack"][b, i]), 3),
+                                 "stat_morale": round(float(r["leadership"][b, i]) + float(c["leadership"][b, i]), 3),
+                                 "stat_missile_damage_over_time": round(
+                                     10 * (v("m_damage", "m_damage") + v("m_ap", "m_ap"))
+                                     / max(float(r["reload"][b, i]), 1e-6), 3) if float(r["reload"][b, i]) > 0 else None}
                 return out
             samples.append((t, row(A), row(T), row(L)))
             if int(slot["t2"][b]) >= 0:

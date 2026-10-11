@@ -190,8 +190,13 @@ def _templates(faction, units, doc, rule="group"):
     return units, tuple(out)
 
 
-def load(path=None, passports_path=None, templates_path=None):
-    """{faction: Pool}. templates_path=False: without the army templates."""
+SCHEMES = ("v1", "v2")
+
+
+def load(path=None, passports_path=None, templates_path=None, scheme="v1"):
+    """{faction: Pool}. templates_path=False: without the army templates. scheme "v2": a faction's units_v2 join its
+    units (the v2 army scheme's pools: the new units of 11.10.2026); "v1": `units` only (the old scheme's armies)."""
+    assert scheme in SCHEMES, f"scheme {scheme!r}: one of {SCHEMES}"
     doc = json.loads((path or POOLS).read_text(encoding="utf-8"))
     passports = json.loads((passports_path or PASSPORTS).read_text(encoding="utf-8"))["units"]
     tdoc = None
@@ -201,7 +206,8 @@ def load(path=None, passports_path=None, templates_path=None):
     out = {}
     for faction, spec in doc["factions"].items():
         lord = dataclasses.replace(_unit(spec["lord"], passports, "lord"), slot="lord")
-        units = tuple(_unit(u, passports, u["key"]) for u in spec["units"])
+        specs = list(spec["units"]) + (list(spec.get("units_v2") or ()) if scheme == "v2" else [])
+        units = tuple(_unit(u, passports, u["key"]) for u in specs)
         assert units, f"{faction}: an empty pool"
         slots = [u.slot for u in units]
         assert len(slots) == len(set(slots)) and "lord" not in slots, f"{faction}: slots must be unique"

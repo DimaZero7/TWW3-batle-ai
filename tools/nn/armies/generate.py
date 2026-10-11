@@ -216,6 +216,8 @@ class Generator:
 
     def __init__(self, pools=None, mix=None, max_units=MAX_UNITS, base=None):
         self.pools = pools or P.load()
+        # the v2 scheme's pools: the factions' units_v2 join (config/nn/pools.json; given pools: those)
+        self.pools_v2 = pools or P.load(scheme="v2")
         self.mix = mix or P.mix()
         # the config's budget cap goes with the config's pools (pools given: no cap)
         self.budget_max = P.budget_max() if pools is None else None
@@ -225,10 +227,10 @@ class Generator:
         self.base = base or arena_scenario.load_arena()
         self._markets = {}
 
-    def market(self, faction, max_units=None):
-        key = (faction, max_units or self.max_units)
+    def market(self, faction, max_units=None, scheme="v1"):
+        key = (faction, max_units or self.max_units, scheme)
         if key not in self._markets:
-            self._markets[key] = Market(self.pools[faction], key[1])
+            self._markets[key] = Market((self.pools_v2 if scheme == "v2" else self.pools)[faction], key[1])
         return self._markets[key]
 
     def shares(self, factions):
@@ -314,13 +316,14 @@ class Generator:
         own, enemy = sides or (factions[rng.integers(len(factions))], factions[rng.integers(len(factions))])
         top = max_units or self.max_units
         fac = {"own": own, "enemy": enemy}
-        markets = {s: self.market(f, max_units) for s, f in fac.items()}
+        pools = self.pools_v2           # the v2 scheme's pools (units_v2 too)
+        markets = {s: self.market(f, max_units, "v2") for s, f in fac.items()}
         share = self.shares((own, enemy))
         share = {s: share[f] for s, f in fac.items()}
         for _ in range(BUDGET_TRIES):
             n = {s: self.count(rng, top) for s in fac}
             ceiling = float(rng.uniform(*self.v2["ceiling"]))
-            tpl = {s: self._template(rng, self.pools[f]) for s, f in fac.items()}
+            tpl = {s: self._template(rng, pools[f]) for s, f in fac.items()}
             if n["own"] != n["enemy"]:
                 a = "own" if n["own"] < n["enemy"] else "enemy"
             else:
@@ -336,7 +339,7 @@ class Generator:
             price = float(rng.uniform(low, max(low, min(ceiling * share[a], tot[-1]))))
             fit = float(tot[tot <= price + 1e-9][-1])
             bought_a = ma.army_of(rng, n[a], min(fit, price * (1 - TOLERANCE)), price, tpl[a])
-            cost_a = self.pools[fac[a]].lord.cost + sum(self.pools[fac[a]].units[i].cost for i in bought_a)
+            cost_a = pools[fac[a]].lord.cost + sum(pools[fac[a]].units[i].cost for i in bought_a)
             # the second army: the same gold (its share), its number of units or the nearest that can spend it
             target = cost_a * share[b] / share[a]
             lo, hi = target * (1 - TOLERANCE), target * (1 + TOLERANCE)
@@ -360,7 +363,7 @@ class Generator:
         arena.update(name=name, budget=round(price / share[a]), sides={}, armies="v2", ceiling=round(ceiling),
                      note=f"random battle (armies v2): {own} against {enemy}, budget {round(price / share[a])}")
         for side, faction in fac.items():
-            pool = self.pools[faction]
+            pool = pools[faction]
             units = [pool.units[i] for i in bought[side]]
             arena["sides"][side] = {"faction": faction, "army": tpl[side].name if tpl[side] else "random",
                                     "budget": round(budget[side]),

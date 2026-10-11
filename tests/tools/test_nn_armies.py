@@ -390,12 +390,25 @@ class TestArmiesV2:
         assert np.mean(n >= 15) > 0.30 and np.mean(n <= 4) < 0.17 and np.mean((n >= 10) & (n <= 14)) > 0.25
         assert np.mean(b >= 5000) > 0.40 and np.mean(b > 7725) > 0.05 and b.max() <= 15000 * 1.06
 
+    def test_only_the_v2_scheme_fields_the_new_units(self, battles_v2):
+        new = {"wh_main_emp_inf_halberdiers", "wh2_dlc12_skv_inf_ratling_gun_0", "wh2_main_skv_inf_plague_monks",
+               "wh2_main_skv_inf_plague_monk_censer_bearer", "wh2_dlc16_skv_mon_wolf_rats_0",
+               "wh2_dlc16_skv_mon_wolf_rats_1"}
+        v1 = {u.key for p in POOLS.values() for u in p.units}
+        v2 = {u.key for p in P.load(scheme="v2").values() for u in p.units}
+        assert not (v1 & new) and v2 == v1 | new
+        seen = {u["key"] for a in battles_v2 for s in ("own", "enemy") for u in units_of(a["sides"][s])}
+        assert new <= seen
+        old = {u["key"] for s in range(300) for side in G.battle(s)["sides"].values() for u in units_of(side)}
+        assert not (old & new)
+
     def test_template_armies_keep_the_caps(self, battles_v2):
+        pools_v2 = P.load(scheme="v2")
         for a in battles_v2:
             for s in ("own", "enemy"):
                 side = a["sides"][s]
                 if side["army"] != "random":
-                    pool, units = POOLS[side["faction"]], units_of(side)
+                    pool, units = pools_v2[side["faction"]], units_of(side)
                     ranged = {u.key for u in pool.units if u.category == "inf_ranged"}
                     assert sum(u["key"] in ranged for u in units) <= pool.cap("inf_ranged", len(units))
 

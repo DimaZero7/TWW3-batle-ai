@@ -44,10 +44,16 @@ UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_e
          # shields, stormvermin with sword and shield and Night Runners with throwing stars (70 m, a 360 deg fire arc,
          # fire whilst moving): units.md "Handgunners, crossbowmen, clanrats, stormvermin, throwing stars"
          "wh_main_emp_inf_handgunners", "wh_main_emp_inf_crossbowmen", "wh2_main_skv_inf_clanrats_0",
-         "wh2_main_skv_inf_clanrat_spearmen_1", "wh2_main_skv_inf_stormvermin_1", "wh2_main_skv_inf_night_runners_0")
+         "wh2_main_skv_inf_clanrat_spearmen_1", "wh2_main_skv_inf_stormvermin_1", "wh2_main_skv_inf_night_runners_0",
+         # 11.10.2026, the new units (build/newunits/plan.md; the probes of commit bd0ad4e): the Skaven's Ratling Gun (a
+         # burst of 18 bullets a man, suppressing fire), Plague Monks and Plague Censer Bearers (frenzy; the censer's
+         # contagion), Giant Rats (war beasts, 9.5 m/s; _1 with poison). Only the v2 army scheme fields them
+         # (config/nn/pools.json units_v2): units.md "Ratling Gun, Plague Monks, Censer Bearers, Giant Rats"
+         "wh2_dlc12_skv_inf_ratling_gun_0", "wh2_main_skv_inf_plague_monks", "wh2_main_skv_inf_plague_monk_censer_bearer",
+         "wh2_dlc16_skv_mon_wolf_rats_0", "wh2_dlc16_skv_mon_wolf_rats_1")
 TABLES = ("main_units", "land_units", "battle_entities", "melee_weapons", "missile_weapons", "projectiles",
           "unit_armour_types", "unit_shield_types", "unit_attributes_to_groups_junctions",
-          "land_units_to_unit_abilites_junctions", "unit_spacings")
+          "land_units_to_unit_abilites_junctions", "unit_spacings", "special_ability_phase_stat_effects")
 
 # Where each passport field comes from. checked: compared with the unit card from battle
 # (check_card); inferred: the column's meaning is ours, from its values (docs/*/game/database.md).
@@ -99,6 +105,10 @@ FIELDS = {
     "melee.splash_target_size": ("melee_weapons.splash_attack_target_size (inferred)", None),
     "melee.splash_max_attacks": ("melee_weapons.splash_attack_max_attacks (inferred)", None),
     "melee.splash_power_multiplier": ("melee_weapons.splash_attack_power_multiplier (inferred)", None),
+    "melee.magic": ("melee_weapons.is_magical (f13 of tools/nn/dbtables.py; the name from the RPFM schema "
+                    "schema_wh3.ron): magical attacks - the censer, the plain Giant Rats' claws", None),
+    "melee.contact_phase": ("melee_weapons.contact_phase (inferred): the contact effect a blow lays on its target (its "
+                            "numbers in the document's contact_phases)", None),
     "armour": ("unit_armour_types.armour_value of land_units.armour", "card stat_armour"),
     "armour_material": ("unit_armour_types.material (inferred)", None),
     "shield.key": ("land_units.shield", None),
@@ -144,6 +154,15 @@ FIELDS = {
     "missile.explosion": ("projectiles.explosion_type (inferred)", None),
     "missile.penetration": ("projectiles.penetration (inferred)", None),
     "missile.shot_type": ("projectiles.shot_type (inferred)", None),
+    "missile.contact_phase": ("projectiles.contact_stat_effect (inferred): the contact effect a hit lays on its target "
+                              "(the Ratling Gun's suppressing fire)", None),
+}
+# The document's contact_phases: per contact phase a unit's weapon lays (melee.contact_phase, missile.contact_phase).
+PHASE_FIELDS = {
+    "duration_s": "special_ability_phases: the float before the key (inferred, tools/nn/dbtables.phase_heads; 10 for "
+                  "poison, the censer's contagion and suppressing fire - fandom: contact effects last 10 s)",
+    "effect": "special_ability_phases: the effect type before the key (positive / negative)",
+    "stats": "special_ability_phase_stat_effects rows of the phase: stat, how (add / mult), value",
 }
 # Asked for, but not in the tables read (or not decoded): why (docs/*/training/units.md).
 MISSING = {
@@ -198,7 +217,8 @@ def passport(key, t):
                   "attack_interval_s": weapon["melee_attack_interval"],
                   "splash_target_size": weapon["splash_attack_target_size"],
                   "splash_max_attacks": weapon["splash_attack_max_attacks"],
-                  "splash_power_multiplier": weapon["splash_attack_power_multiplier"]},
+                  "splash_power_multiplier": weapon["splash_attack_power_multiplier"],
+                  "magic": weapon["f13"], "contact_phase": weapon["contact_phase"]},
         "armour": armour["armour_value"], "armour_material": armour["material"],
         "shield": {"key": shield["key"], "missile_block_chance": shield["missile_block_chance"]},
         "leadership": land["morale"],
@@ -225,7 +245,26 @@ def passport(key, t):
             "max_elevation": pr["max_elevation"], "calibration_distance_m": pr["calibration_distance"],
             "calibration_area_m": pr["calibration_area"], "marksmanship": pr["marksmanship"],
             "fire_arc_deg": entity["fire_arc_close"] / 2, "explosion": pr["explosion_type"],
-            "penetration": pr["penetration"], "shot_type": pr["shot_type"]}
+            "penetration": pr["penetration"], "shot_type": pr["shot_type"],
+            "contact_phase": pr["contact_stat_effect"]}
+    return out
+
+
+def phase_keys(units):
+    """The contact phases the units' weapons lay (melee.contact_phase, missile.contact_phase), sorted."""
+    return sorted({p for u in units.values() for p in ((u.get("melee") or {}).get("contact_phase"),
+                                                       (u.get("missile") or {}).get("contact_phase")) if p})
+
+
+def contact_phases(units, t, heads):
+    """{phase key: {"duration_s", "effect", "stats"}} of the contact phases the units' weapons lay (PHASE_FIELDS);
+    heads: tools/nn/dbtables.phase_heads of those keys."""
+    out = {}
+    for k in phase_keys(units):
+        stats = sorted(({"stat": r["stat"], "how": r["how"], "value": r["value"]}
+                        for r in t["special_ability_phase_stat_effects"] if r["phase"] == k),
+                       key=lambda r: (r["stat"], r["how"]))
+        out[k] = {"duration_s": heads[k]["duration_s"], "effect": heads[k]["effect"], "stats": stats}
     return out
 
 
@@ -253,10 +292,12 @@ def check_card(p, c):
     m = p["missile"]
     if m or "stat_ammo" in s:
         m = m or {}
+        # (the card's damage over 10 s counts every shot of a volley: the Ratling Gun's 18 - twdatabase 288 = 8 x 18 x
+        # 10 / 5)
         pairs += [("missile.ammo", m.get("ammo"), s.get("stat_ammo")),
                   ("missile.range_m", m.get("range_m"), s.get("scalar_missile_range")),
-                  ("missile damage per 10 s", round((m.get("damage", 0) + m.get("ap_damage", 0)) * 10
-                                                    / m.get("reload_s", 1), 2),
+                  ("missile damage per 10 s", round((m.get("damage", 0) + m.get("ap_damage", 0))
+                                                    * (m.get("shots_per_volley") or 1) * 10 / m.get("reload_s", 1), 2),
                    round(s.get("stat_missile_damage_over_time", -1), 2))]
     return [f"{name}: passport {a!r}, card {b!r}" for name, a, b in pairs if a != b]
 
@@ -274,12 +315,14 @@ def build(tables, keys=UNITS, roster=ROSTER):
     return units
 
 
-def document(units, source):
+def document(units, source, phases=None):
     return {"_description": "Unit passports (step 1 of the battle simulator, docs/en/training/units.md): what "
                             "decides a fight, from the game's database. Written by py -3.14 -m tools.nn.units.",
             "_source": str(source),
             "_fields": {k: {"source": s, "checked": c} for k, (s, c) in FIELDS.items()},
             "_missing": MISSING,
+            "_contact_phases": PHASE_FIELDS,
+            "contact_phases": phases or {},
             "units": units}
 
 
@@ -293,8 +336,9 @@ def main(argv=None):
     game = Path(project.load()["game_dir"]) / "data" / "db.pack"
     tables = dbtables.read_tables(game, TABLES)
     units = build(tables, tuple(args.units.split(",")) if args.units else UNITS)
-    args.out.write_text(json.dumps(document(units, game), indent=1, ensure_ascii=False) + "\n", encoding="utf-8",
-                        newline="\n")
+    phases = contact_phases(units, tables, dbtables.read_phase_heads(game, phase_keys(units)))
+    args.out.write_text(json.dumps(document(units, game, phases), indent=1, ensure_ascii=False) + "\n",
+                        encoding="utf-8", newline="\n")
     for key, p in units.items():
         m = p["missile"]
         print(f"{key}: men {p['men']}, hp {p['hp_per_man']}, ma/md {p['melee']['attack']}/{p['melee']['defence']}, "

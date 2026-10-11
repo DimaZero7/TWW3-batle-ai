@@ -68,6 +68,16 @@ def test_the_suppress_plan_charges_the_gun_firing_or_silent_at_a_walk_and_a_run(
     assert stop["run_stop15"]["t_stop_fire_s"] == 15 and stop["run_stop15"]["target_mode"] == "skirmish"
 
 
+def test_the_hitslow_plan_runs_clanrats_at_shooters_without_a_contact_effect():
+    lanes = {l["kind"]: l for l in cp.battles("hitslow")[0]}
+    assert set(lanes) == {"walk_hgun", "run_hgun", "walk_xbow", "run_xbow", "walk_quiet", "run_quiet"}
+    assert all(l["attacker"] == up.HITSLOW_RUNNER and l["gap_m"] == up.SUPPRESS_GAP for l in lanes.values())
+    assert lanes["run_hgun"]["target"] == "hgun" and lanes["run_hgun"]["target_mode"] == "skirmish"
+    assert lanes["walk_xbow"]["target"] == "xbow" and lanes["walk_xbow"]["mode"] == "attack_walk"
+    assert lanes["run_quiet"]["target_mode"] == "hold" and lanes["run_quiet"]["mode"] == "attack_run"
+    assert up.MEASURE["hitslow"] is up.suppress_measure
+
+
 def test_the_censer_and_wolf_plans_lanes():
     c = {l["kind"]: l for l in cp.battles("censer")[0]}
     assert c["censer_leave"]["mode"] == "withdraw" and c["censer_leave"]["t_at_leave"] == "halt"

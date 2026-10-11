@@ -74,7 +74,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8")
     pack = Path(project.load()["game_dir"]) / "data" / "db.pack"
-    pools = P.load(templates_path=False)
+    pools = P.load(templates_path=False, scheme="v2")      # the v2 pools hold every unit (units_v2 too)
     doc = document(read(pack), pools, pack)
     args.out.write_text(json.dumps(doc, indent=1, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
     for faction, f in doc["factions"].items():

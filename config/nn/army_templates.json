@@ -176,6 +176,12 @@
       "group": "wh3_default_land_ranged_infantry_main_light_backline",
       "quality": "tier_1_step_5_units"
      }
+    ],
+    "wh_main_emp_inf_halberdiers": [
+     {
+      "group": "wh3_default_land_melee_infantry_main_frontline_spears_high_quality",
+      "quality": "tier_2_step_1_units"
+     }
     ]
    }
   },
@@ -334,6 +340,36 @@
      {
       "group": "wh3_default_land_ranged_infantry_main_light_skirmisher",
       "quality": "tier_1_step_5_units"
+     }
+    ],
+    "wh2_dlc12_skv_inf_ratling_gun_0": [
+     {
+      "group": "wh3_default_land_ranged_infantry_main_heavy_long_range",
+      "quality": "tier_2_step_4_units"
+     }
+    ],
+    "wh2_main_skv_inf_plague_monks": [
+     {
+      "group": "wh3_default_land_melee_infantry_main_flanking",
+      "quality": "tier_2_step_2_units"
+     }
+    ],
+    "wh2_main_skv_inf_plague_monk_censer_bearer": [
+     {
+      "group": "wh3_default_land_melee_infantry_main_flanking",
+      "quality": "tier_3_step_1_units"
+     }
+    ],
+    "wh2_dlc16_skv_mon_wolf_rats_0": [
+     {
+      "group": "wh3_default_land_monsters_flanking",
+      "quality": "tier_2_step_1_units"
+     }
+    ],
+    "wh2_dlc16_skv_mon_wolf_rats_1": [
+     {
+      "group": "wh3_default_land_monsters_flanking",
+      "quality": "tier_2_step_1_units"
      }
     ]
    }

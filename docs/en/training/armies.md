@@ -106,6 +106,11 @@ sides have 1–4 units, 15+ units only 2.5%. In v2 the numbers of units are set 
 4. **The second** buys for the same price ±5% (with its `budget_factor`) with its number of units. When even its
    cheapest units are too dear it takes the largest number that fits (the smallest larger one when too cheap).
 5. The `budget_max` caps (the common 7725 and the Skaven's 6700) and the rich battles do not apply in v2.
+6. **v2 units.** A faction in `pools.json` has, besides `units`, `units_v2` - units only v2 fields
+   (`pools.load(scheme="v2")`, the generator's own markets): the Empire's halberdiers; the Skaven's Ratling Gun, Plague
+   Monks, Plague Censer Bearers, Giant Rats of both kinds (11.10.2026, [passports](units.md#ratling-gun-plague-monks-censer-bearers-giant-rats)).
+   v1 does not see them: the seeds of the exams, the checks and the twin give the same armies bit for bit (the old
+   armies' hash test).
 
 Over 10,000 battles (seeds 5 … 10,004):
 
@@ -304,6 +309,7 @@ st = scenario.build(armies, per_side=generate.MAX_UNITS + 1)
    [how to add a unit](units.md#how-to-add-a-unit).
 1. The unit's passport — in `config/nn/units.json` (`py -3.14 -m tools.nn.units --units …`).
 2. An entry in `config/nn/pools.json`: `key`, `slot`, `width`; a new faction also needs
-   `lord` and `generator`, and `budget_factor` if it is stronger or weaker than its price.
+   `lord` and `generator`, and `budget_factor` if it is stronger or weaker than its price. A unit that must not
+   change the old scheme's armies (the exams, the checks) goes in `units_v2`: only the v2 scheme fields it.
 3. `py -3.14 -m tools.nn.armies.templates` — the unit needs a generator group.
 4. A new category (cavalry, monsters) — its own limit in `caps` if wanted.

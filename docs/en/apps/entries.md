@@ -199,12 +199,15 @@ walk and run at the gun, firing or silent: speed under suppressing fire), `suppr
 silent after 25 / 15 s - `t_stop_fire_s`: how long suppression lasts after the last shot), `censer` (censer bearers and monks on swordsmen
 and spearmen, the censers leaving, the rout, halberdiers on stormvermin), `wolfrats` (the wolf rats' run and turn, a
 charge from 120 m, into braced spears, the rear, the General, a recharge, the chase of routers and a clanrat control),
-`wolfpoison` (wolf rats with and without poison; leaving, the swordsmen halting or chasing) - 2 battles each (`suppress2` 1). A lane may
+`wolfpoison` (wolf rats with and without poison; leaving, the swordsmen halting or chasing), `hitslow` (clanrats
+without shields walk and run at handgunners and crossbowmen, silent handgunners the control: do hits alone slow a
+unit) - 2 battles each (`suppress2` 1). A lane may
 name any Empire or Skaven unit by its database key: the passport from `config/nn/units.json` or
 `data/units/probe-units.json` (written by `py -3.14 -m tools.nn.units --units ... --out data/units/probe-units.json`).
 `card_rows` - both units' rows carry `cs`: the card's current values (leadership, speed, attack and defence, weapon and
 missile damage); a `shoot` lane's attacker row is a shooter's (ammo, fire flag, damage dealt).
-Analysis: `python -m tools.nn.unit_probe [folders]` - per plan and lane kind the mean (min-max).
+Analysis: `python -m tools.nn.unit_probe [folders]` - per plan and lane kind the mean (min-max); `--sim` - the
+simulator's twin on the same lanes beside it (game | sim).
 
 Every 0.5 s `probe_sample` per lane: men, health (CCO `HealthValue`), melee / moving / running flags, place,
 bearing, kills, fatigue, status keys (CCO `StatusList`: `braced`, `melee`...) of the attacker, the target and

@@ -81,7 +81,7 @@ def test_passports_hold_the_v1_units_and_equal_their_cards():
     # probe's halberds and stormvermin (lord swarm, 01.10.2026) do not, nor (yet: list
     # config/roster/capture_emp_wave2.json) the flagellants, greatswords and militia (02.10.2026), nor the
     # third wave (07.10.2026).
-    assert checked >= 9 and len(units.UNITS) == 23
+    assert checked >= 9 and len(units.UNITS) == 28           # + the 5 new units of 11.10.2026 (no cards yet)
 
 
 def test_v1_spears_have_no_shield_and_missile_units_have_missiles():
@@ -95,7 +95,9 @@ def test_v1_spears_have_no_shield_and_missile_units_have_missiles():
                 "wh2_main_skv_inf_night_runners_1",
                 "wh_dlc04_emp_inf_free_company_militia_0",
                 # the third wave (07.10.2026)
-                "wh_main_emp_inf_handgunners", "wh_main_emp_inf_crossbowmen", "wh2_main_skv_inf_night_runners_0")
+                "wh_main_emp_inf_handgunners", "wh_main_emp_inf_crossbowmen", "wh2_main_skv_inf_night_runners_0",
+                # the Ratling Gun (11.10.2026)
+                "wh2_dlc12_skv_inf_ratling_gun_0")
     for key in shooters:
         assert u[key]["missile"]["range_m"] > 0 and u[key]["missile"]["ammo"] > 0
     assert all(u[k]["missile"] is None for k in u if k not in shooters)
@@ -184,3 +186,51 @@ def test_the_third_wave():
         assert u[k]["shield"]["missile_block_chance"] == 35
     assert "charge_reflection" in u["wh2_main_skv_inf_clanrat_spearmen_1"]["attributes"]
     assert u["wh2_main_skv_inf_stormvermin_1"]["armour"] == 90
+
+
+def test_the_new_units_and_their_contact_phases():
+    """The Ratling Gun (32 men, a volley of 18 bullets a man, suppressing fire), the Plague Monks and Censer Bearers
+    (the censer's contagion, magical), the Giant Rats (war beasts; _1 with poison), and the contact phases' numbers."""
+    doc = saved()
+    u, ph = doc["units"], doc["contact_phases"]
+    gun = u["wh2_dlc12_skv_inf_ratling_gun_0"]
+    assert gun["men"] == 32 and gun["missile"]["shots_per_volley"] == 18 and gun["missile"]["direct"]
+    assert gun["missile"]["contact_phase"] == "wh2_dlc12_unit_contact_suppressive_fire"
+    censer = u["wh2_main_skv_inf_plague_monk_censer_bearer"]
+    assert censer["melee"]["magic"] and censer["melee"]["contact_phase"] == "wh2_main_unit_contact_plague_monk_censer_morale"
+    rats, poison = u["wh2_dlc16_skv_mon_wolf_rats_0"], u["wh2_dlc16_skv_mon_wolf_rats_1"]
+    assert rats["caste"] == poison["caste"] == "war_beast" and rats["size"] == "small"
+    assert poison["melee"]["contact_phase"] == "wh_main_unit_contact_poison" and not poison["melee"]["magic"]
+    assert "wh_main_unit_passive_frenzy" in u["wh2_main_skv_inf_plague_monks"]["abilities"]
+    assert set(ph) == {"wh2_dlc12_unit_contact_suppressive_fire", "wh2_main_unit_contact_plague_monk_censer_morale",
+                       "wh_main_unit_contact_poison"}
+    assert all(p["duration_s"] == 10.0 and p["effect"] == "negative" for p in ph.values())
+    assert ph["wh2_main_unit_contact_plague_monk_censer_morale"]["stats"] == [
+        {"stat": "stat_morale", "how": "add", "value": -10.0}]
+    assert units.phase_keys(u) == sorted(ph)
+
+
+def test_the_card_counts_every_shot_of_a_volley():
+    p = copy.deepcopy(saved()["units"]["wh2_dlc12_skv_inf_ratling_gun_0"])
+    card = {"stats": {"scalar_speed": {"base": 38}, "stat_melee_attack": {"base": 16}, "stat_melee_defence": {"base": 16},
+                      "stat_charge_bonus": {"base": 2}, "stat_weapon_damage": {"base": 26}, "stat_armour": {"base": 70},
+                      "stat_ammo": {"base": 270}, "scalar_missile_range": {"base": 145},
+                      "stat_missile_damage_over_time": {"base": 288.0}},
+            "details": {"NumEntitiesInitial": 32, "HealthMax": 3936, "Mass": 150.0},
+            "profile": {"unit_class": "inf_mis", "slow_speed": 1.4, "fast_speed": 3.8,
+                        "owned_non_passive_special_abilities": [],
+                        "owned_passive_special_abilities": list(p["abilities"])}}
+    assert units.check_card(p, card) == []                     # twdatabase: 288 = (2 + 6) x 18 x 10 / 5
+
+
+def test_phase_heads_read_the_duration_and_effect_before_a_phase_key():
+    def phase(key, duration, effect):
+        return struct.pack("<f", duration) + text(effect) + text(key) + b"\x00" * 6
+    b = table(dbtables.PHASES_VERSION, [phase("a_contact", 10.0, "negative"), phase("b_passive", -1.0, "positive"),
+                                        text("a_contact") + b"\x01" + text("a_contact")])   # a reference: no head
+    assert dbtables.phase_heads(b, ["a_contact", "b_passive"]) == {
+        "a_contact": {"duration_s": 10.0, "effect": "negative"}, "b_passive": {"duration_s": -1.0, "effect": "positive"}}
+    with pytest.raises(ValueError, match="0 rows"):
+        dbtables.phase_heads(b, ["missing"])
+    with pytest.raises(ValueError, match="version"):
+        dbtables.phase_heads(table(3, []), ["a_contact"])

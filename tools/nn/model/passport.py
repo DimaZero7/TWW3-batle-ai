@@ -13,8 +13,10 @@ from tools import config as project
 
 PASSPORTS = project.ROOT / "config" / "nn" / "units.json"
 
+# (the database's caste of war beasts is "war_beast": "warbeast" here until 11.10.2026 sent the Giant Rats to "other";
+# its column keeps its place)
 CASTES = ("lord", "hero", "melee_infantry", "missile_infantry", "melee_cavalry", "missile_cavalry",
-          "monstrous_infantry", "monstrous_cavalry", "monster", "warbeast", "chariot", "war_machine")
+          "monstrous_infantry", "monstrous_cavalry", "monster", "war_beast", "chariot", "war_machine")
 SIZES = ("small", "medium", "large", "very_large")
 ATTRIBUTES = ("encourages", "expendable", "charge_defense_vs_large", "charge_reflection",
               "hide_forest", "stalk", "causes_fear", "causes_terror", "unbreakable", "strider",
@@ -119,6 +121,24 @@ def fire_arc(keys, passports=None):
     passports = passports or load()
     return np.array([float((passports[k].get("missile") or {}).get("fire_arc_deg") or 0) / 180 if k else 0
                      for k in keys], dtype=np.float32)
+
+
+VOLLEY_SHOTS = 20.0   # the volley's shots a man / this (the Ratling Gun's 18 -> 0.9)
+
+
+def weapon(keys, passports=None):
+    """[len(keys), 2] float32: the token's WEAPON columns (tools/nn/model/observation.py, 11.10.2026) - the shots a man
+    fires in a volley (missile.shots_per_volley / VOLLEY_SHOTS; 0 without a missile weapon) and the melee weapon's
+    magical attacks (melee.magic, 0 / 1); 0 for padding."""
+    passports = passports or load()
+    out = np.zeros((len(keys), 2), dtype=np.float32)
+    for i, k in enumerate(keys):
+        if k:
+            p = passports[k]
+            miss = p.get("missile") or {}
+            out[i] = ((miss.get("shots_per_volley") or 0) / VOLLEY_SHOTS if miss else 0.0,
+                      float(bool((p.get("melee") or {}).get("magic"))))
+    return out
 
 
 def cost(keys, passports=None):

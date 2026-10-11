@@ -232,6 +232,52 @@ def decode_prefix(b, table, keys, layout=None):
     return out
 
 
+# special_ability_phases (version 44, ~90 fields, not decoded whole): its first fields are duration (float, s; -1 for a
+# passive's phase), effect_type ('positive' / 'negative') and id (the key) - the RPFM schema's names (rpfm-schemas,
+# Frodo45127, schema_wh3.ron); phase_heads reads the two right before a key. 11.10.2026 on v9.0.1: Frenzy -1.0
+# positive, the contact phases poison / censer / suppressive fire 10.0 negative (fandom: contact effects last 10 s),
+# wh2_main_unit_contact_souls 3.0 negative.
+PHASES_TABLE, PHASES_VERSION = "special_ability_phases", 44
+EFFECT_TYPES = ("positive", "negative", "neutral")
+
+
+def phase_heads(b, keys):
+    """{phase key: {"duration_s", "effect"}} from special_ability_phases' bytes (PHASES_TABLE): the key written as text
+    (its row's key field) right after an effect-type text (EFFECT_TYPES) and a float duration. Every other place the
+    key is written (a reference in another row) has no effect type before it. A key found in no row or in two raises:
+    never a guess."""
+    got, _ = header(b)
+    if got != PHASES_VERSION:
+        raise ValueError(f"{PHASES_TABLE}: version {got}, the reader is for {PHASES_VERSION}")
+    out = {}
+    for key in keys:
+        raw = key.encode("utf-8")
+        mark = struct.pack("<H", len(raw)) + raw
+        found, at = [], b.find(mark)
+        while at >= 0:
+            for effect in EFFECT_TYPES:
+                e = effect.encode()
+                head = struct.pack("<H", len(e)) + e
+                if at >= len(head) + 4 and b[at - len(head):at] == head:
+                    duration = round(struct.unpack_from("<f", b, at - len(head) - 4)[0], 5)
+                    if duration == -1 or 0 <= duration <= 10000:
+                        found.append({"duration_s": duration, "effect": effect})
+            at = b.find(mark, at + 1)
+        if len(found) != 1:
+            raise ValueError(f"{PHASES_TABLE}: {len(found)} rows read for {key}")
+        out[key] = found[0]
+    return out
+
+
+def read_phase_heads(pack, keys):
+    """phase_heads of db.pack's special_ability_phases (Python 3.14+)."""
+    from tools.nn.gamedb import read_entries
+    name = entry_name(PHASES_TABLE)
+    raw = read_entries(pack, {name})
+    assert name in raw, f"not in {pack}: {PHASES_TABLE}"
+    return phase_heads(raw[name], keys)
+
+
 def _sane(row):
     """Numbers of a real row (not a key written inside another row): -1 or 0..10000."""
     for name, v in row.items():

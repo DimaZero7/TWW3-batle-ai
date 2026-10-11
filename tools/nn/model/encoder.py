@@ -53,6 +53,14 @@ class TokenEncoder(nn.Module):
                            w.new_zeros(w.shape[0], timers), w[:, ob.CONTEXT_BASE + 1:]], 1)
         if w is not None and w.shape[1] == n - progress:
             state_dict[key] = torch.cat([w[:, :at], w.new_zeros(w.shape[0], progress), w[:, at:]], 1)
+        # a token from before the new units (14 effect pairs, no WEAPON; observation.old_columns): its columns to their
+        # new places, zero weights for the new effect pairs and WEAPON - the old network computes what it did
+        uw = state_dict.get(prefix + "unit.0.weight")
+        cols = ob.old_columns(uw.shape[1]) if uw is not None and uw.dim() == 2 else None
+        if cols is not None and self.unit[0].in_features == ob.TOKEN:
+            new = uw.new_zeros(uw.shape[0], ob.TOKEN)
+            new[:, cols] = uw
+            state_dict[prefix + "unit.0.weight"] = new
         pad_inputs(state_dict, prefix + "unit.0.weight", self.unit[0].in_features)
         super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 

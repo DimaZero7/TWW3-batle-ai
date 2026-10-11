@@ -59,7 +59,9 @@ SIM_STATS = {("scalar_speed", "mult"): "speed", ("scalar_charge_speed", "mult"):
              ("stat_melee_attack", "add"): "attack", ("stat_melee_defence", "add"): "defence",
              ("stat_melee_damage_base", "mult"): "damage", ("stat_melee_damage_ap", "mult"): "ap",
              ("stat_charge_bonus", "mult"): "charge", ("stat_morale", "add"): "leadership",
-             ("stat_resistance_physical", "add"): "resist_physical"}
+             ("stat_resistance_physical", "add"): "resist_physical",
+             # the missile damage (poison's x0.85: the contact effects only, tools/nn/sim/effects.py E_STATS)
+             ("scalar_missile_damage_base", "mult"): "m_damage", ("scalar_missile_damage_ap", "mult"): "m_ap"}
 # Rules the simulator acts on (tools/nn/sim/effects.py RULES): rule -> what the simulator does.
 SIM_RULES = {
     "unbreakable": "morale points never below leadership: never wavers or routs (morale.py)",
@@ -120,7 +122,21 @@ ATTRIBUTES = {
                        "kb": KB + "fatigue.md"},
     "strider": {"name": "Strider", "rules": ["strider"], "does": "ignores terrain penalties, passes trees",
                 "kb": KB + "abilities.md#attributes-selection", "schema_why": "flat maps only"},
+    "moulder_monster": {"name": "Moulder Monster", "rules": ["moulder_monster"],
+                        "does": "a mark for the campaign abilities of Clan Moulder's lords (Throt, the Packmaster); "
+                                "nothing in a battle by itself",
+                        "kb": KB + "abilities.md#attributes-selection", "schema_why": "nothing to act on in battle"},
 }
+# Contact effects (fandom "Contact Effect"; docs/en/game/mechanics/abilities.md "Contact effects"): a weapon's blow
+# (melee_weapons.contact_phase) or projectile hit (projectiles.contact_stat_effect) lays its phase on the enemy it hits
+# for the phase's duration (special_ability_phases, 10 s), each hit starting it again; since Update 8.1 different
+# contact effects stack on a unit, the same one does not (CA, "Stacking Contact Effects - Update 8.1"); friendly fire
+# lays none. The game's probes (build/newunits/newunits_game.json): the censer's and the poison's phase gone 9.75-10.75 s
+# after the attacker began to leave melee, the suppressing fire's 10.5-11 s after the gun's last shot.
+CONTACT_NAMES = {"wh_main_unit_contact_poison": "Poison!",
+                 "wh2_main_unit_contact_plague_monk_censer_morale": "Contaminated!",
+                 "wh2_dlc12_unit_contact_suppressive_fire": "Suppressed!"}
+KB_CONTACT = KB + "abilities.md#contact-effects"
 # The ability attributes (special_ability_phase_attribute_effects) that are rules of the simulator.
 ABILITY_ATTRIBUTE_RULES = {"unbreakable": "unbreakable", "immune_to_psychology": "immune_to_psychology",
                            "fatigue_immune": "fatigue_immune"}
@@ -234,9 +250,39 @@ def innate(passport):
     return bool(passport.get("passive") or passport.get("auto"))
 
 
-def build(units, abilities, previous_order=()):
-    """(effects {key: effect}, unit links {unit key: [effect keys]}, order [keys])."""
-    effects, links = {}, {}
+def contact_effect(key, phase):
+    """A contact effect from the passports' contact phase (config/nn/units.json contact_phases): its stats lie on the
+    unit a weapon of it hit, for duration_s from the last hit (CONTACT_NAMES' comment)."""
+    stats, unknown = [], []
+    for e in phase.get("stats") or ():
+        sim = SIM_STATS.get((e["stat"], e["how"]))
+        stats.append({"stat": e["stat"], "how": e["how"], "value": e["value"], "on": ["hit"], "sim": sim})
+        if sim is None:
+            unknown.append(f"{e['stat']} {e['how']}")
+    d = float(phase.get("duration_s") or 0.0)
+    modelled = not unknown and d > 0
+    parts = [f"{s['stat']} {s['how']} {s['value']:g}" for s in stats if s["sim"]]
+    when = f"for {d:g} s after each hit of a weapon that lays it (refreshed by every hit; another contact effect stacks)"
+    return {"kind": "contact", "name": CONTACT_NAMES.get(key, name_of(key)), "rules": [], "stats": stats,
+            "range_m": 0.0, "needs": [], "off_when": [], "timed": None, "duration_s": d, "when": when,
+            "source": f"db: melee_weapons.contact_phase / projectiles.contact_stat_effect, special_ability_phases "
+                      f"(duration), special_ability_phase_stat_effects ({key}); config/nn/units.json contact_phases",
+            "kb": KB_CONTACT, "does": None, "modelled": modelled,
+            "sim": ("; ".join(parts) + f" ({when})") if modelled else None,
+            "why": ("stats the simulator lacks: " + ", ".join(unknown)) if unknown else None}
+
+
+def inflicted(unit):
+    """The contact effects a unit's weapons lay: [phase keys] (melee, then missile; none: [])."""
+    return sorted({p for p in ((unit.get("melee") or {}).get("contact_phase"),
+                               (unit.get("missile") or {}).get("contact_phase")) if p})
+
+
+def build(units, abilities, previous_order=(), phases=None):
+    """(effects {key: effect}, unit links {unit key: [effect keys]}, order [keys], inflicts {unit key: [contact effect
+    keys its weapons lay]}). phases: the passports' contact phases (config/nn/units.json contact_phases)."""
+    effects, links, inflicts = {}, {}, {}
+    phases = phases or {}
     for ukey, u in sorted(units.items()):
         own = []
         for a in u.get("attributes") or ():
@@ -248,12 +294,17 @@ def build(units, abilities, previous_order=()):
                 effects.setdefault(a, ability_effect(a, p))
                 own.append(a)
         links[ukey] = sorted(own)
+        lays = [k for k in inflicted(u) if k in phases]
+        for k in lays:
+            effects.setdefault(k, contact_effect(k, phases[k]))
+        if lays:
+            inflicts[ukey] = lays
     # append-only: an effect keeps its place (one no unit owns any more keeps it too, empty), new ones go last
     order = list(previous_order) + sorted(k for k in effects if k not in previous_order)
-    return effects, links, order
+    return effects, links, order, inflicts
 
 
-def document(effects, links, order):
+def document(effects, links, order, inflicts=None):
     return {"_description": "Innate unit effects (docs/en/training/units.md, Innate effects): every attribute and "
                             "passive or game-fired ability of the units in config/nn/units.json, from the game's "
                             "database. Written by python -m tools.nn.effects; the simulator "
@@ -277,9 +328,13 @@ def document(effects, links, order):
                     f"{p} = {SAY[p]}" for p in SAY) + " (db flag -> predicate: " + ", ".join(
                     f"{k} -> {v}" for k, v in CONDITIONS.items()) + ")"},
             "_missing": MISSING,
+            "_inflicts": "contact effects (kind contact) a unit's weapons lay on the enemies they hit (the passport's "
+                         "melee.contact_phase, missile.contact_phase); the unit does not own them (units), the network "
+                         "sees them as its `owned` column of the effect, `on` while the unit itself is under one",
             "order": order,
             "effects": {k: effects[k] for k in order if k in effects},
-            "units": links}
+            "units": links,
+            "inflicts": inflicts or {}}
 
 
 def load(path=None):
@@ -292,16 +347,17 @@ def main(argv=None):
     parser.add_argument("--out", type=Path, default=OUT)
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8")
-    units = json.loads(UNITS.read_text(encoding="utf-8"))["units"]
+    udoc = json.loads(UNITS.read_text(encoding="utf-8"))
+    units = udoc["units"]
     abilities = json.loads(ABILITIES.read_text(encoding="utf-8"))["abilities"]
     previous = load(args.out)["order"] if args.out.exists() else ()
-    effects, links, order = build(units, abilities, previous)
-    args.out.write_text(json.dumps(document(effects, links, order), indent=1, ensure_ascii=False) + "\n",
+    effects, links, order, inflicts = build(units, abilities, previous, udoc.get("contact_phases"))
+    args.out.write_text(json.dumps(document(effects, links, order, inflicts), indent=1, ensure_ascii=False) + "\n",
                         encoding="utf-8", newline="\n")
     for k in order:
         e = effects.get(k)
         if e:
-            owners = sum(k in v for v in links.values())
+            owners = sum(k in v for v in links.values()) + sum(k in v for v in inflicts.values())
             print(f"{k}: {e['kind']}, {'modelled' if e['modelled'] else 'schema only'} ({e['when']}), "
                   f"{owners} units" + (f" - {e['why']}" if e["why"] else ""))
     print("written", args.out)

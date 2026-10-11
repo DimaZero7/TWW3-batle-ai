@@ -11,7 +11,8 @@ numbers of an iteration are in its logs (`build/steps/`, `build/compare/`); here
 A neural network that commands an army in Total War: WARHAMMER III battles. It learns from scratch in
 our battle simulator (PyTorch, thousands of battles at once on the GPU) and then plays real battles in
 the game against the game's AI at Normal difficulty. Two factions for now - the Empire and the Skaven, a
-flat empty map, a lord and up to 19 units a side (21 units and 2 lords in the pools,
+flat empty map, a lord and up to 19 units a side (21 units and 2 lords in the pools; the v2 army scheme 6 more:
+halberdiers, the Ratling Gun, Plague Monks, Plague Censer Bearers, Giant Rats of two kinds;
 [passports](training/units.md)). The goal is a network that beats the game's AI in ≥ 97 % of battles and
 plays "in character" for its faction ([idea and readiness](training/network.md#readiness)).
 
@@ -108,7 +109,12 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
 - **Fatigue** by the database (10 ticks a second, melee tires under an attack order; the charge +34 on the sprint in,
   no surcharge after the blow; in melee without an attack — ready; shooting 11.4 — measured), units' innate
   effects, turning at the database's turn rate, formation by the database's template.
-- **Not modelled:** terrain, forest, visibility, cavalry, monsters, magic, flight, artillery, experience.
+- **Contact effects and bursts** ([details](training/simulator.md#contact-effects-and-the-ratling-guns-burst)):
+  poison, the censer's contagion, the Ratling Gun's suppressing fire - the database phase's stats on the unit hit for
+  10 s from the last hit, different ones stack, friendly fire lays none; the Ratling Gun - 18 bullets a volley at 4 a
+  second, a 12 s cycle, one ammunition pool, it fires in melee too; a man whose target died loses 2 s of his burst.
+- **Not modelled:** terrain, forest, visibility, cavalry, monsters, magic, flight, artillery, experience; runners
+  slowed by bullet hits (the `hitslow` probe: run x0.68 under handgun fire).
 
 **Checks against the game.** A recorded battle is replayed by its recorded orders 19 times with the start
 shifted up to 2 m; the copies are the forecast, the game's record is the outcome. The main score is **the
@@ -157,7 +163,8 @@ morale, fatigue, ammunition, kills) except their orders ([visibility rule](train
 to the end of the battle. Preset `v2`, 3.51 M weights, trained from scratch
 ([details](training/model.md#variant-v2-map-sectors-chained-heads-commitment)):
 
-- **Unit tokens** (155 numbers each: passport, state, effects, fire arc, the order in force) → 3 attention
+- **Unit tokens** (167 numbers each: passport, state, effects - contact effects too -, fire arc, the order in force,
+  shots a volley and magic; checkpoints of 155 inputs load with zero weights for the new ones) → 3 attention
   layers with a distance bias and pair features (who reaches whom, closing speed, flank / rear; also in the target
   pointer) → GRU memory.
 - **Map sectors** 16 × 16 of 100 m: strength and count of own and visible enemy units, routers, the map

@@ -31,7 +31,10 @@ def setup_obs(seed=0, own=5, enemy=6, batch=2, **changes):
 
 def calm(batch=2, own=5, enemy=6):
     """A synthetic battle where every unit stands steady, alive, seen, out of melee and unthreatened."""
-    setup, state = sources.synthetic(batch=batch, own=own, enemy=enemy, seed=0)
+    # (the passports before the units of 11.10.2026: the draws, and so the slots' units, stay as the tests know them)
+    from tools.nn.model import passport
+    keys = list(passport.load())[:23]
+    setup, state = sources.synthetic(batch=batch, own=own, enemy=enemy, seed=0, keys=keys)
     shape = state["ms"].shape
     state.update(ms=np.ones(shape), men=np.full(shape, 100.0), vis=np.ones(shape, bool), r=np.zeros(shape, bool),
                  m=np.zeros(shape, bool), lf=np.zeros(shape, bool), rf=np.zeros(shape, bool), bf=np.zeros(shape, bool))

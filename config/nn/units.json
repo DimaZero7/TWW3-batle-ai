@@ -166,6 +166,14 @@
    "source": "melee_weapons.splash_attack_power_multiplier (inferred)",
    "checked": null
   },
+  "melee.magic": {
+   "source": "melee_weapons.is_magical (f13 of tools/nn/dbtables.py; the name from the RPFM schema schema_wh3.ron): magical attacks - the censer, the plain Giant Rats' claws",
+   "checked": null
+  },
+  "melee.contact_phase": {
+   "source": "melee_weapons.contact_phase (inferred): the contact effect a blow lays on its target (its numbers in the document's contact_phases)",
+   "checked": null
+  },
   "armour": {
    "source": "unit_armour_types.armour_value of land_units.armour",
    "checked": "card stat_armour"
@@ -313,6 +321,10 @@
   "missile.shot_type": {
    "source": "projectiles.shot_type (inferred)",
    "checked": null
+  },
+  "missile.contact_phase": {
+   "source": "projectiles.contact_stat_effect (inferred): the contact effect a hit lays on its target (the Ratling Gun's suppressing fire)",
+   "checked": null
   }
  },
  "_missing": {
@@ -322,6 +334,66 @@
   "lord aura per unit": "no per-unit radius found; the aura is global (_kv_morale_tables: general_aura_radius, general_inspire_effect_amount_*); a lord is marked by the attribute 'encourages'",
   "ability and attribute effects": "only the keys here: the abilities' numbers are their passports (config/nn/abilities.json), the attributes' rules and every innate effect the catalogue config/nn/effects.json (python -m tools.nn.effects)",
   "experience": "per rank, global: config/nn/game_rules.json (experience_bonus, experience_levels)"
+ },
+ "_contact_phases": {
+  "duration_s": "special_ability_phases: the float before the key (inferred, tools/nn/dbtables.phase_heads; 10 for poison, the censer's contagion and suppressing fire - fandom: contact effects last 10 s)",
+  "effect": "special_ability_phases: the effect type before the key (positive / negative)",
+  "stats": "special_ability_phase_stat_effects rows of the phase: stat, how (add / mult), value"
+ },
+ "contact_phases": {
+  "wh2_dlc12_unit_contact_suppressive_fire": {
+   "duration_s": 10.0,
+   "effect": "negative",
+   "stats": [
+    {
+     "stat": "scalar_speed",
+     "how": "mult",
+     "value": 0.7
+    }
+   ]
+  },
+  "wh2_main_unit_contact_plague_monk_censer_morale": {
+   "duration_s": 10.0,
+   "effect": "negative",
+   "stats": [
+    {
+     "stat": "stat_morale",
+     "how": "add",
+     "value": -10.0
+    }
+   ]
+  },
+  "wh_main_unit_contact_poison": {
+   "duration_s": 10.0,
+   "effect": "negative",
+   "stats": [
+    {
+     "stat": "scalar_missile_damage_ap",
+     "how": "mult",
+     "value": 0.85
+    },
+    {
+     "stat": "scalar_missile_damage_base",
+     "how": "mult",
+     "value": 0.85
+    },
+    {
+     "stat": "scalar_speed",
+     "how": "mult",
+     "value": 0.85
+    },
+    {
+     "stat": "stat_melee_damage_ap",
+     "how": "mult",
+     "value": 0.85
+    },
+    {
+     "stat": "stat_melee_damage_base",
+     "how": "mult",
+     "value": 0.85
+    }
+   ]
+  }
  },
  "units": {
   "wh_main_emp_cha_general_0": {
@@ -370,7 +442,9 @@
     "attack_interval_s": 4.0,
     "splash_target_size": "medium",
     "splash_max_attacks": 4,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 85,
    "armour_material": "plate",
@@ -453,7 +527,9 @@
     "attack_interval_s": 5.7,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 30,
    "armour_material": "chainmail",
@@ -532,7 +608,9 @@
     "attack_interval_s": 4.3,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 20,
    "armour_material": "leather",
@@ -583,7 +661,8 @@
     "fire_arc_deg": 30.0,
     "explosion": null,
     "penetration": "very_low",
-    "shot_type": "small_arm_default"
+    "shot_type": "small_arm_default",
+    "contact_phase": null
    },
    "card_check": "equal"
   },
@@ -633,7 +712,9 @@
     "attack_interval_s": 4.0,
     "splash_target_size": "medium",
     "splash_max_attacks": 4,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 90,
    "armour_material": "heavy_metal",
@@ -717,7 +798,9 @@
     "attack_interval_s": 4.3,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 25,
    "armour_material": "leather",
@@ -799,7 +882,9 @@
     "attack_interval_s": 4.6,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 0,
    "armour_material": "body",
@@ -880,7 +965,9 @@
     "attack_interval_s": 4.3,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 0,
    "armour_material": "body",
@@ -935,7 +1022,8 @@
     "fire_arc_deg": 30.0,
     "explosion": null,
     "penetration": "very_low",
-    "shot_type": "small_arm_default"
+    "shot_type": "small_arm_default",
+    "contact_phase": null
    },
    "card_check": "equal"
   },
@@ -985,7 +1073,9 @@
     "attack_interval_s": 5.6,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 30,
    "armour_material": "chainmail",
@@ -1064,7 +1154,9 @@
     "attack_interval_s": 4.6,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 90,
    "armour_material": "heavy_metal",
@@ -1146,7 +1238,9 @@
     "attack_interval_s": 4.4,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 30,
    "armour_material": "chainmail",
@@ -1225,7 +1319,9 @@
     "attack_interval_s": 4.3,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 30,
    "armour_material": "chainmail",
@@ -1302,7 +1398,9 @@
     "attack_interval_s": 4.5,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 0.2
+    "splash_power_multiplier": 0.2,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 0,
    "armour_material": "body",
@@ -1383,7 +1481,9 @@
     "attack_interval_s": 4.3,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 95,
    "armour_material": "plate",
@@ -1460,7 +1560,9 @@
     "attack_interval_s": 4.2,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 25,
    "armour_material": "leather",
@@ -1513,7 +1615,8 @@
     "fire_arc_deg": 35.0,
     "explosion": null,
     "penetration": "low",
-    "shot_type": "small_arm_default"
+    "shot_type": "small_arm_default",
+    "contact_phase": null
    },
    "card_check": "no card"
   },
@@ -1563,7 +1666,9 @@
     "attack_interval_s": 4.3,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 0,
    "armour_material": "body",
@@ -1644,7 +1749,9 @@
     "attack_interval_s": 4.3,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 25,
    "armour_material": "leather",
@@ -1724,7 +1831,9 @@
     "attack_interval_s": 4.3,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 10,
    "armour_material": "body",
@@ -1779,7 +1888,8 @@
     "fire_arc_deg": 30.0,
     "explosion": null,
     "penetration": "very_low",
-    "shot_type": "small_arm_default"
+    "shot_type": "small_arm_default",
+    "contact_phase": null
    },
    "card_check": "no card"
   },
@@ -1829,7 +1939,9 @@
     "attack_interval_s": 4.3,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 20,
    "armour_material": "leather",
@@ -1880,7 +1992,8 @@
     "fire_arc_deg": 30.0,
     "explosion": null,
     "penetration": "very_low",
-    "shot_type": "small_arm_default"
+    "shot_type": "small_arm_default",
+    "contact_phase": null
    },
    "card_check": "equal"
   },
@@ -1930,7 +2043,9 @@
     "attack_interval_s": 4.3,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 20,
    "armour_material": "leather",
@@ -1981,7 +2096,8 @@
     "fire_arc_deg": 30.0,
     "explosion": null,
     "penetration": "very_low",
-    "shot_type": "small_arm_default"
+    "shot_type": "small_arm_default",
+    "contact_phase": null
    },
    "card_check": "equal"
   },
@@ -2031,7 +2147,9 @@
     "attack_interval_s": 4.3,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 25,
    "armour_material": "leather",
@@ -2111,7 +2229,9 @@
     "attack_interval_s": 4.3,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 25,
    "armour_material": "leather",
@@ -2193,7 +2313,9 @@
     "attack_interval_s": 4.6,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 90,
    "armour_material": "heavy_metal",
@@ -2273,7 +2395,9 @@
     "attack_interval_s": 4.3,
     "splash_target_size": null,
     "splash_max_attacks": 1,
-    "splash_power_multiplier": 1.0
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
    },
    "armour": 10,
    "armour_material": "body",
@@ -2329,9 +2453,451 @@
     "fire_arc_deg": 180.0,
     "explosion": null,
     "penetration": "very_low",
-    "shot_type": "small_arm_default"
+    "shot_type": "small_arm_default",
+    "contact_phase": null
    },
    "card_check": "equal"
+  },
+  "wh2_dlc12_skv_inf_ratling_gun_0": {
+   "land_unit": "wh2_dlc12_skv_inf_ratling_gun_0",
+   "caste": "missile_infantry",
+   "category": "inf_ranged",
+   "class": "inf_mis",
+   "men": 32,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 3,
+   "entity": "wh2_dlc12_skv_infantry_ratling_gun_team",
+   "spacing": {
+    "template": "wh2_main_skv_weaponteam",
+    "h": 3.4,
+    "v": 4.3,
+    "scatter": 1.0,
+    "chaotic": false
+   },
+   "hp_per_man": 123,
+   "hp_total": 3936,
+   "mass": 150.0,
+   "size": "small",
+   "height_m": 1.6,
+   "radius_m": 1.3,
+   "speed": {
+    "walk": 1.4,
+    "run": 3.8,
+    "charge": 4.4,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 25.0,
+    "acceleration": 2.0,
+    "deceleration": 4.0,
+    "turn_deg_s": 120.0
+   },
+   "melee": {
+    "attack": 16,
+    "defence": 16,
+    "charge_bonus": 2,
+    "weapon": "wh2_main_skv_sword",
+    "damage": 20,
+    "ap_damage": 6,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
+   },
+   "armour": 70,
+   "armour_material": "heavy_metal",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 50,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": true,
+   "can_brace": true,
+   "hiding_scalar": 1.0,
+   "attributes": [
+    "hide_forest"
+   ],
+   "abilities": [
+    "wh2_main_unit_passive_scurry_away",
+    "wh2_main_unit_passive_strength_in_numbers"
+   ],
+   "multiplayer_cost": 800,
+   "combat_potential": {
+    "melee": 50.0,
+    "missile": 750.0
+   },
+   "missile": {
+    "weapon": "wh2_dlc12_skv_ratling_gun_bullet",
+    "projectile": "wh2_dlc12_skv_ratling_gun_bullet",
+    "ammo": 270,
+    "accuracy": 20,
+    "category": "musket",
+    "range_m": 145,
+    "min_range_m": 0,
+    "reload_s": 5.0,
+    "damage": 2,
+    "ap_damage": 6,
+    "projectile_number": 1,
+    "shots_per_volley": 18,
+    "trajectory": "low",
+    "direct": true,
+    "muzzle_velocity": 100.0,
+    "max_elevation": 88,
+    "calibration_distance_m": 70.0,
+    "calibration_area_m": 2.7,
+    "marksmanship": 10.0,
+    "fire_arc_deg": 25.0,
+    "explosion": null,
+    "penetration": "very_low",
+    "shot_type": "small_arm_default",
+    "contact_phase": "wh2_dlc12_unit_contact_suppressive_fire"
+   },
+   "card_check": "no card"
+  },
+  "wh2_main_skv_inf_plague_monks": {
+   "land_unit": "wh2_main_skv_inf_plague_monks",
+   "caste": "melee_infantry",
+   "category": "inf_melee",
+   "class": "inf_mel",
+   "men": 120,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 6,
+   "entity": "wh2_main_skv_infantry_plague_monk",
+   "spacing": {
+    "template": "wh_main_infantry_rabble",
+    "h": 1.6,
+    "v": 1.7,
+    "scatter": 0.7,
+    "chaotic": false
+   },
+   "hp_per_man": 76,
+   "hp_total": 9120,
+   "mass": 100.0,
+   "size": "small",
+   "height_m": 1.6,
+   "radius_m": 0.7,
+   "speed": {
+    "walk": 1.5,
+    "run": 4.2,
+    "charge": 4.8,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 25.0,
+    "acceleration": 2.0,
+    "deceleration": 4.0,
+    "turn_deg_s": 120.0
+   },
+   "melee": {
+    "attack": 28,
+    "defence": 25,
+    "charge_bonus": 22,
+    "weapon": "wh2_main_skv_dual_swords",
+    "damage": 24,
+    "ap_damage": 8,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 7,
+    "attack_interval_s": 4.5,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": null
+   },
+   "armour": 10,
+   "armour_material": "body",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 68,
+   "damage_resist": {
+    "all": 0,
+    "physical": 15,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": true,
+   "hiding_scalar": 1.0,
+   "attributes": [
+    "hide_forest"
+   ],
+   "abilities": [
+    "wh2_main_unit_passive_scurry_away",
+    "wh2_main_unit_passive_strength_in_numbers",
+    "wh_main_unit_passive_frenzy"
+   ],
+   "multiplayer_cost": 650,
+   "combat_potential": {
+    "melee": 650.0,
+    "missile": 0.0
+   },
+   "missile": null,
+   "card_check": "no card"
+  },
+  "wh2_main_skv_inf_plague_monk_censer_bearer": {
+   "land_unit": "wh2_main_skv_inf_plague_monk_censer_bearer",
+   "caste": "melee_infantry",
+   "category": "inf_melee",
+   "class": "inf_mel",
+   "men": 120,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 6,
+   "entity": "wh2_main_skv_infantry_plague_monk_censer",
+   "spacing": {
+    "template": "wh2_main_infantry_chaotic_rabble",
+    "h": 1.8,
+    "v": 1.8,
+    "scatter": 0.85,
+    "chaotic": false
+   },
+   "hp_per_man": 80,
+   "hp_total": 9600,
+   "mass": 120.0,
+   "size": "small",
+   "height_m": 1.6,
+   "radius_m": 0.72,
+   "speed": {
+    "walk": 1.5,
+    "run": 4.2,
+    "charge": 4.8,
+    "charge_distance": 30.0,
+    "charge_pose_distance": 25.0,
+    "acceleration": 2.0,
+    "deceleration": 4.0,
+    "turn_deg_s": 120.0
+   },
+   "melee": {
+    "attack": 34,
+    "defence": 30,
+    "charge_bonus": 34,
+    "weapon": "wh2_main_skv_censer",
+    "damage": 13,
+    "ap_damage": 31,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.4,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": true,
+    "contact_phase": "wh2_main_unit_contact_plague_monk_censer_morale"
+   },
+   "armour": 10,
+   "armour_material": "body",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 72,
+   "damage_resist": {
+    "all": 0,
+    "physical": 15,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": true,
+   "hiding_scalar": 1.0,
+   "attributes": [
+    "hide_forest"
+   ],
+   "abilities": [
+    "wh2_main_unit_passive_scurry_away",
+    "wh2_main_unit_passive_strength_in_numbers",
+    "wh_main_unit_passive_frenzy"
+   ],
+   "multiplayer_cost": 1000,
+   "combat_potential": {
+    "melee": 1000.0,
+    "missile": 0.0
+   },
+   "missile": null,
+   "card_check": "no card"
+  },
+  "wh2_dlc16_skv_mon_wolf_rats_0": {
+   "land_unit": "wh2_dlc16_skv_mon_wolf_rats_0",
+   "caste": "war_beast",
+   "category": "inf_melee",
+   "class": "inf_mel",
+   "men": 80,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 6,
+   "entity": "wh2_dlc16_skv_monster_wolf_rat_blood",
+   "spacing": {
+    "template": "wh_main_war_beasts",
+    "h": 2.0,
+    "v": 3.5,
+    "scatter": 0.8,
+    "chaotic": false
+   },
+   "hp_per_man": 83,
+   "hp_total": 6640,
+   "mass": 150.0,
+   "size": "small",
+   "height_m": 1.2,
+   "radius_m": 0.9,
+   "speed": {
+    "walk": 1.9,
+    "run": 9.5,
+    "charge": 11.5,
+    "charge_distance": 35.0,
+    "charge_pose_distance": 30.0,
+    "acceleration": 6.0,
+    "deceleration": 7.0,
+    "turn_deg_s": 120.0
+   },
+   "melee": {
+    "attack": 28,
+    "defence": 19,
+    "charge_bonus": 30,
+    "weapon": "wh2_dlc16_skv_wolf_rat_ap",
+    "damage": 6,
+    "ap_damage": 10,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": true,
+    "contact_phase": null
+   },
+   "armour": 15,
+   "armour_material": "body",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 34,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": false,
+   "hiding_scalar": 1.0,
+   "attributes": [
+    "guerrilla_deploy",
+    "hide_forest",
+    "moulder_monster",
+    "strider"
+   ],
+   "abilities": [
+    "wh2_main_unit_passive_scurry_away"
+   ],
+   "multiplayer_cost": 550,
+   "combat_potential": {
+    "melee": 1000.0,
+    "missile": 0.0
+   },
+   "missile": null,
+   "card_check": "no card"
+  },
+  "wh2_dlc16_skv_mon_wolf_rats_1": {
+   "land_unit": "wh2_dlc16_skv_mon_wolf_rats_1",
+   "caste": "war_beast",
+   "category": "inf_melee",
+   "class": "inf_mel",
+   "men": 80,
+   "mount": null,
+   "num_mounts": 0,
+   "engine": null,
+   "rank_depth": 6,
+   "entity": "wh2_dlc16_skv_monster_wolf_rat_poison_blood",
+   "spacing": {
+    "template": "wh_main_war_beasts",
+    "h": 2.0,
+    "v": 3.5,
+    "scatter": 0.8,
+    "chaotic": false
+   },
+   "hp_per_man": 83,
+   "hp_total": 6640,
+   "mass": 150.0,
+   "size": "small",
+   "height_m": 1.2,
+   "radius_m": 0.9,
+   "speed": {
+    "walk": 1.9,
+    "run": 9.5,
+    "charge": 11.5,
+    "charge_distance": 35.0,
+    "charge_pose_distance": 30.0,
+    "acceleration": 6.0,
+    "deceleration": 7.0,
+    "turn_deg_s": 120.0
+   },
+   "melee": {
+    "attack": 28,
+    "defence": 19,
+    "charge_bonus": 30,
+    "weapon": "wh2_dlc16_skv_wolf_rat_poison",
+    "damage": 24,
+    "ap_damage": 2,
+    "bonus_v_large": 0,
+    "bonus_v_infantry": 0,
+    "attack_interval_s": 4.3,
+    "splash_target_size": null,
+    "splash_max_attacks": 1,
+    "splash_power_multiplier": 1.0,
+    "magic": false,
+    "contact_phase": "wh_main_unit_contact_poison"
+   },
+   "armour": 15,
+   "armour_material": "body",
+   "shield": {
+    "key": "none",
+    "missile_block_chance": 0
+   },
+   "leadership": 34,
+   "damage_resist": {
+    "all": 0,
+    "physical": 0,
+    "missile": 0,
+    "magic": 0,
+    "flame": 0
+   },
+   "can_skirmish": false,
+   "can_brace": false,
+   "hiding_scalar": 1.0,
+   "attributes": [
+    "guerrilla_deploy",
+    "hide_forest",
+    "moulder_monster",
+    "strider"
+   ],
+   "abilities": [
+    "wh2_main_unit_passive_scurry_away"
+   ],
+   "multiplayer_cost": 550,
+   "combat_potential": {
+    "melee": 1000.0,
+    "missile": 0.0
+   },
+   "missile": null,
+   "card_check": "no card"
   }
  }
 }

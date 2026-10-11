@@ -150,6 +150,14 @@ STATIC = {
                  "-1 none"),
     "ab1": ("i", "its second ability (-1 none)"),
     "ab2": ("i", "its third ability (-1 none)"),
+    "spv": ("f", "shots a man fires in one volley (the database's projectiles shots_per_volley: 18 the Ratling Gun, 1 "
+                 "the others)"),
+    "bst_rate": ("f", "shots a second a man fires in a burst (a volley of spv > 1 shots fired over spv / bst_rate s: the "
+                      "Ratling Gun 4, measured - config/nn/sim.json missile.burst_rate_s); 0: the volley at once"),
+    "melee_fire": ("b", "shoots in melee too (config/nn/sim.json missile.fire_in_melee: the Ratling Gun, measured)"),
+    "mfx": ("i", "the contact effect its blows lay on the enemy they hit: index in config/nn/effects.json order, -1 "
+                 "none (the passport's melee.contact_phase; tools/nn/sim/effects.py lay)"),
+    "sfx": ("i", "the contact effect its projectiles lay (missile.contact_phase), -1 none"),
     "fx": ("i", "its innate effects: bitmask over config/nn/effects.json order (tools/nn/sim/effects.py)"),
     "fxt0": ("i", "its first timed effect (index in that order, -1 none)"),
     "fxt1": ("i", "its second timed effect (-1 none)"),
@@ -196,6 +204,15 @@ INTERNAL = {
     "low_s": ("f", "seconds since its health first fell below a quarter (0 before; never back: the Wounds of a single "
                    "entity come on its initial cooldown after that and stay to the end, effects.py)"),
     "shots": ("f", "fractional shots carried to the next step"),
+    "bst": ("f", "share of its men firing their burst now (a volley of spv shots over spv / bst_rate s; missile.py)"),
+    "bst_s": ("f", "seconds left of its burst (0: none)"),
+    "bst_p": ("f", "share of its bursting men aiming again since their target man died (missile.burst_share: they lose "
+                   "those shots of their burst; back at aim_s)"),
+    "cfx0_s": ("f", "seconds left of the first contact effect of config/nn/effects.json on it (tools/nn/sim/effects.py "
+                    "contact_keys, lay: duration_s from each hit of a weapon that lays it)"),
+    "cfx1_s": ("f", "the second contact effect's (cfx0_s)"),
+    "cfx2_s": ("f", "the third contact effect's"),
+    "cfx3_s": ("f", "the fourth contact effect's"),
     "unready": ("f", "share of the men still reloading, 0-1 (0: all loaded, the start; missile.py volley)"),
     "late": ("f", "share of a shooter's men whose target man died since their last shot (missile.reaim: they aim "
                   "again before the next shot): 1 - prod(1 - the target's men lost a step / its men), 0 at a volley "
@@ -350,6 +367,8 @@ def empty(B, N, device="cpu", history=0):
     u["aim_tgt"].fill_(-1)
     u["fxt0"].fill_(-1)
     u["fxt1"].fill_(-1)
+    u["mfx"].fill_(-1)
+    u["sfx"].fill_(-1)
     u["snap_ab"].fill_(-1)
     u["vis"].fill_(True)
     u[BATTLE_ID] = torch.arange(B, device=device)[:, None].expand(B, N).clone()
