@@ -32,6 +32,22 @@ ADV = ("critic", "mc", "window20")
 NEGLIGIBLE = 1e-6       # the term's weight below this: off (module doc)
 
 
+def _tokens(a):
+    """A converted battle's tokens [L, N, F] in today's token: one converted before the new units (11.10.2026; 155
+    columns) gets its columns at their new places and zeros for the new ones (observation.old_columns), as the
+    network's weights (encoder.py); today's width as it is."""
+    from tools.nn.model import observation as ob
+    if a.shape[-1] == ob.TOKEN:
+        return a
+    cols = ob.old_columns(a.shape[-1])
+    if cols is None:
+        raise SystemExit(f"converted tokens of {a.shape[-1]} columns, the network's {ob.TOKEN}: convert again "
+                         "(python -m tools.nn.observe.convert)")
+    out = np.zeros(a.shape[:-1] + (ob.TOKEN,), a.dtype)
+    out[..., cols] = a
+    return out
+
+
 def _pad(a, N, axis=1, value=0):
     """a padded along the units' axis to N (value: of the new units; -1 for the labels' "none")."""
     if a.shape[axis] == N:
@@ -79,8 +95,8 @@ class Demos:
             w20 = (g["w20_adv"] > 0) & (g["w20_trade"] > 0)
             both.append(np.stack([good[rows], w20[rows]], -1))
             self.seqs.append({"name": g["name"], "L": len(g["t"]), "A": a, "good": good,
-                              "obs": {k: torch.as_tensor(g[k] if k == "ctx" else _pad(g[k], self.N))
-                                      for k in OBS if k in g},
+                              "obs": {k: torch.as_tensor(g[k] if k == "ctx" else _pad(
+                                          _tokens(g[k]) if k == "tokens" else g[k], self.N)) for k in OBS if k in g},
                               "geo": torch.as_tensor(g["geo"]),
                               "lab": {k: torch.as_tensor(_pad(g[k], self.N, value=-1 if g[k].dtype.kind == "i" else 0))
                                       for k in LABELS}})

@@ -123,21 +123,34 @@ def resume(opt, path):
     if not tr or "optim" not in tr:
         return None
     saved = tr["optim"]
+    counters = dict(tr.get("state") or {})
     params = [p for g in opt.param_groups for p in g["params"]]
     ids = [i for g in saved["param_groups"] for i in g["params"]]
     if len(saved["param_groups"]) != len(opt.param_groups) or len(ids) != len(params):
-        print(f"{path}: the optimizer's state is of other parameters: Adam starts afresh", flush=True)
-        return None
+        # (the trainer's counters go on all the same: the chain's updates keep the observation term off, its seconds
+        # the entropy decay)
+        print(f"{path}: the optimizer's state is of other parameters: Adam starts afresh, the counters go on", flush=True)
+        return counters
+    from tools.nn.model import observation as ob
     for i, p in zip(ids, params):
         st = saved["state"].get(i, {})
         if "exp_avg" in st and tuple(st["exp_avg"].shape) != tuple(p.shape):
-            print(f"{path}: the optimizer's state is of other shapes: Adam starts afresh", flush=True)
-            return None
+            # the token encoder's first layer of a checkpoint from before the new units (observation.old_columns):
+            # its moments to the columns' new places, zero for the new columns (as its weights, encoder.py)
+            cols = ob.old_columns(st["exp_avg"].shape[1]) if st["exp_avg"].dim() == 2 else None
+            if cols is not None and p.dim() == 2 and p.shape == (st["exp_avg"].shape[0], ob.TOKEN):
+                for k in ("exp_avg", "exp_avg_sq"):
+                    new = st[k].new_zeros(p.shape)
+                    new[:, cols] = st[k]
+                    st[k] = new
+                continue
+            print(f"{path}: the optimizer's state is of other shapes: Adam starts afresh, the counters go on", flush=True)
+            return counters
     lrs = [g["lr"] for g in opt.param_groups]
     opt.load_state_dict(saved)
     for g, lr in zip(opt.param_groups, lrs):
         g["lr"] = lr
-    return dict(tr.get("state") or {})
+    return counters
 
 
 def same_file(a, b):
