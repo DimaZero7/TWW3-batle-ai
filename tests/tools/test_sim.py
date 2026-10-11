@@ -3168,3 +3168,73 @@ def test_a_withdraw_runs_whatever_its_run_flag():
         speed = math.hypot(float(st.u["vx"][0, 0]), float(st.u["vz"][0, 0]))
         assert bool(st.u["order_run"][0, 0]) is want
         assert speed == pytest.approx(float(st.u["run" if want else "walk"][0, 0]), rel=0.05), (kind, run)
+
+
+class TestRouterKeep:
+    """missile.router_keep_s / _share: a free shooter keeps a target that routs by the game's measured share
+    (config/nn/sim.json missile.router_keep_why; build/holes/router_keep.py)."""
+
+    AGES, SHARES = P.sim["missile"]["router_keep_s"], P.sim["missile"]["router_keep_share"]
+
+    def test_the_share_is_one_at_the_rout_and_the_table_after(self):
+        a = torch.tensor([0.0, 0.5, 1.0, 5.5, 45.5, 100.0])
+        s = missile.router_share(a, self.AGES, self.SHARES).tolist()
+        assert s[0] == pytest.approx(1.0) and s[1] == pytest.approx(self.SHARES[0])
+        assert s[2] == pytest.approx((self.SHARES[0] + self.SHARES[1]) / 2)
+        assert s[3] == pytest.approx(self.SHARES[self.AGES.index(5.5)])
+        assert s[4] == pytest.approx(self.SHARES[-1]) and s[5] == pytest.approx(self.SHARES[-1])
+
+    def test_the_chain_of_steps_keeps_the_measured_share(self):
+        B, N = 6000, 2
+        u = {"r": torch.tensor([[False, True]]).repeat(B, 1), "rout_s": torch.zeros(B, N),
+             "side": torch.ones(B, N, dtype=torch.long)}
+        prev = torch.tensor([[1, -1]]).repeat(B, 1)
+        on = torch.ones(B, dtype=torch.bool)
+        dt = P.dt
+        seen = {}
+        for k in range(int(round(13.0 / dt))):
+            keep = missile.router_keep(u, prev, P, torch.full((B,), k * dt), dt)
+            on = on & keep[:, 0]
+            assert not bool(keep[:, 1].any())                                  # no target: nothing kept
+            u["rout_s"] = u["rout_s"] + dt
+            seen[round(float(u["rout_s"][0, 1]), 3)] = float(on.float().mean())
+        for age, got in seen.items():
+            want = float(missile.router_share(torch.tensor(age), self.AGES, self.SHARES))
+            assert got == pytest.approx(want, abs=0.03), age
+
+    def test_a_kept_router_wins_over_a_standing_enemy_and_off_drops_it(self):
+        st = shooter_and([(-10, 80), (10, 100)])
+        H = st.N // 2
+        st.u["r"][0, H] = True                                                 # the nearer one routs
+        pw = geometry.pairwise(st.u, 1.5)
+        can = torch.tensor([[True] + [False] * (st.N - 1)])
+        prev = torch.tensor([[H] + [-1] * (st.N - 1)])
+        none_t, none_a = torch.full((1, st.N), -1), torch.zeros((1, st.N), dtype=torch.bool)
+        mine = torch.tensor([[True] + [False] * (st.N - 1)])
+        kept = missile.choose_target(st.u, pw, can, none_t, none_a, prev=prev, keep_router=mine)
+        dropped = missile.choose_target(st.u, pw, can, none_t, none_a, prev=prev, keep_router=torch.zeros_like(mine))
+        assert int(kept[0, 0]) == H and int(dropped[0, 0]) == H + 1
+        off = P.with_cal("missile", router_keep_s=[], router_keep_share=[])
+        assert missile.router_keep(st.u, prev, off, torch.zeros(1), P.dt) is None
+        st.u["x"][0, H] = 400.0                                                # out of range: not kept
+        pw = geometry.pairwise(st.u, 1.5)
+        far = missile.choose_target(st.u, pw, can, none_t, none_a, prev=prev, keep_router=mine)
+        assert int(far[0, 0]) == H + 1
+
+    def test_in_battle_a_free_shooter_stays_on_a_fresh_router_by_the_share(self):
+        # 400 copies: archers on a slave unit 80 m off that has just routed, another standing 100 m off
+        def share_on_router(params, seconds=2.0):
+            st = scenario.build([army([(ARCHER, 0, 0, 0.0)], [(SLAVE, -10, 80, 180.0), (SLAVE, 10, 100, 180.0)])]
+                                * 400, params)
+            H = st.N // 2
+            st.u["aim_tgt"][:, 0] = H
+            for _ in range(int(round(seconds / params.dt))):
+                st.u["r"][:, H] = True
+                st.u["x"][:, H], st.u["z"][:, H] = -10.0, 80.0                # it stays put in range
+                battle.step(st, replay.hold(st), params)
+            return float((st.u["aim_tgt"][:, 0] == H).float().mean())
+        on = share_on_router(P)
+        off = share_on_router(P.with_cal("missile", router_keep_s=[], router_keep_share=[]))
+        want = float(missile.router_share(torch.tensor(2.0), self.AGES, self.SHARES))
+        assert off == pytest.approx(0.0, abs=0.01)
+        assert on == pytest.approx(want, abs=0.08)

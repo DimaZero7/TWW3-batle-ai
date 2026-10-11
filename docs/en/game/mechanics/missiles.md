@@ -178,7 +178,9 @@ Artillery is in [artillery](artillery.md). Conventions: [index](README.md). Our 
   [player.one on 2.3.0][p230], [fandom 2.3.0][fw-23] · high.
   - Ours: at Normal the arena's archers shot the nearest enemy 55 % of the time, the second nearest
     19 %. The simulator keeps a target while it is in range and stands (`missile.sticky_target`), else takes the
-    nearest; a new target costs 3 s without fire (`missile.retarget_s`, recordings), and so does a target taken
+    nearest; a routing (or shattered) target a shooter without an order on it keeps by the game engine's share: 0.5 /
+    1.5 / 5.5 / 12.5 / 30.5 s into the rout 64 / 33 / 30 / 19 / 12 % are still on it (`missile.router_keep_s` / `_share`;
+    789 network battles, [details](../../training/simulator.md#a-shooter-and-its-routing-target)); a new target costs 3 s without fire (`missile.retarget_s`, recordings), and so does a target taken
     when there was none (`missile.retarget_from_none`; the probe: the first projectile 1.5-2.5 s after the centre
     of a running target came within range).
 - **Morale.** Being shot at: −5 (`ume_concerned_attacked_by_projectile`); the wiki says −8 for

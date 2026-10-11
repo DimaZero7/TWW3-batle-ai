@@ -30,14 +30,15 @@ flowchart LR
 
 ## Where we are
 
-- **In the game the network nearly always loses:** 0-3 wins of 8 in every iteration (the last five: 0, 1,
-  1, 1, 0). The same 8 battles in the simulator (the "twin": the same armies, the network against the
-  `ai_like` script) - 4-4.5 of 8. So the simulator is still kinder to the network than the game, and the
-  network learns things that do not work in the game.
-- **Where the gap is:** almost all of it in one pairing - "the network as the Empire against the AI's
-  Skaven": twin 23.75 points of 24, game 4 of 24. The cause found: a worn unit (health below half) loses
-  health in melee 1.2-1.8x faster in the simulator than in the game. The `dmgmelee` probe is analysing it.
-- **Routs:** our units rout 1.6-1.8x more in the game than in the twin; the AI's units 0.5-0.7x the twin's.
+- **In the game the network wins less than half:** the exams of line S (sets of 8 battles,
+  `build/compare/itS*.json`) - 1-5 wins of 8, trade (enemy losses over ours, in gold) 0.75-1.06. The same 8 battles
+  in the simulator (the "twin": the same armies, the network against the `ai_like` script) - 5-7 of 8, trade
+  1.04-1.23. The simulator is still kinder to the network than the game.
+- **How we look for the gap:** the automatic hole finder (`build/holes`, report `build/holes/report.md`): a step
+  replay of ~640 recorded battles and the acceptance number A - how far the twins of the panel's 56 battles are from
+  the game (lower is better, ~0.30).
+- **The twin's largest gaps:** our units lose half the game's health while routing; the network's lord is in melee
+  1.9x as often as in the game; the AI's shooters move less in the twin.
 - **The simulator on the game's recordings** (the replay of 72 battles, below): the loss curves match;
   routs and rallies remain.
 
@@ -48,7 +49,7 @@ largest hole.
 
 | Step | What | How |
 |---|---|---|
-| 1. Training | 30 min from the previous network, no checks in the simulator | `bash build/steps/v2_iter.sh NAME 30 INIT` (survives a crash: the next attempt starts from `latest.pt`) |
+| 1. Training | 40 min from the previous network, no checks in the simulator | `bash build/steps/v2_iterW.sh NAME 40 INIT` (survives a crash: the next attempt starts from `latest.pt`) |
 | 2. Battles in the game | 8 battles: 3 evaluation seeds + the armies of run 20261007-091416, each twice with the armies swapped | `build/steps/watch_set8.ps1 -Ckpt build/v2/itN.pt` |
 | 3. Twin | the same 8 starts in the simulator (the network against `ai_like`, 4 copies); a "game / twin" table and the 3-5 largest behaviour gaps | `bash build/steps/compare_set.sh N` → `build/compare/set_vs_twin.py` |
 | 4. Probe | the largest gap is staged as one mechanic in the game and in the simulator alike (lanes of units, everything recorded) | `tools/nn/charge_probe.py` + `src/entries/charge_probe.lua`, plans `--plan` ([probe](apps/entries.md#charge_probe---the-melee-probe-one-mechanic-game-and-simulator-alike)) |
@@ -85,7 +86,9 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
   (militia, throwing stars); shooters in melee strike weakly, as in the game; a new order or target: arcing fire (arrows, bolts,
   slings) is silent 8.5 s whatever the reload, each order restarting the window; handguns and stars fire at once
   (probes `retarget`, `retarget2`, `retarget3`); arrows and bolts at a target that lost a third of its men: a
-  cycle of reload + 3.3 s.
+  cycle of reload + 3.3 s; a shooter without an order on its target keeps a target that routs (or shatters) as the
+  game's engine does: 1.5 / 5.5 / 30 s into the rout 33 / 30 / 12 % of the shooters are still on it (789 battles'
+  recordings; it used to drop it at once).
 - **Skirmish mode** (the `skirmish`, `skirmish2` probes): a shooter of the game's AI and the scripts runs away, not
   shooting, from an enemy coming at it (its way within 40°) within 43.9 m (Skaven 33.1) man to man - over its order;
   from its own attacker to 82 m, from one attacking another ending with a chance of 0.18 a second; a new order ends
@@ -187,23 +190,28 @@ templates, numbers jittered ±15 %.
 the budget) + a price for an order change 0.006 ("keep" and a repeat are free)
 ([reward](training/training.md#reward)).
 
-**Opponents** (`--mix`): self-play 0.2, past versions 0.3 (pool 12; drawn by quality scores as OpenAI Five's, one version a battle, [past versions](training/training.md#past-versions)), `ai_like` 0.3 (a script modelled on
-the game's AI), `nearest` 0.2 (everyone runs at the nearest enemy)
+**Opponents** (`--mix`, line S - `build/steps/v2_iterW.sh`): self-play 0.28, past versions 0.3 (pool 12 and the
+networks S9, S10; drawn by quality scores as OpenAI Five's, one version a battle, [past versions](training/training.md#past-versions)),
+`ai_like` 0.3 (a script modelled on the game's AI), `nearest` 0.02 (everyone runs at the nearest enemy); of the
+self / past battles 0.17 with kiting by situation (`--kite-share`, ~10 % of all battles)
 ([opponents](training/training.md#battles-and-opponents)); the scripts decide at the game's cadence - once a
 second, their orders as late as the network's. The game's AI takes no part in training - it is
 the independent check.
 
 **Off:** teachers and drills. The drills (`kiting`, `counter`, `hold_fire`, `direct_fire` and others) stay
-in the code, but v2 does not use them ([drills](training/training.md#drills)).
+in the code, but v2 does not use them, except kiting by situation ([drills](training/training.md#drills)).
 
-**Learning by observation** (ready, off by default: `--observe-dir`): the network takes over another player's
-orders (a human, the game's AI) from recorded battles, only those its critic found better than expected; an extra
-loss weighted 0.1 x 0.95 an update and a KL to the starting network
+**Learning by observation** (`--observe-dir`): the network takes over another player's orders (a human, the
+game's AI) from recorded battles, only those its critic found better than expected; weight 0.1 x 0.95 an update. In
+line S the flag is set, but the weight is already about 0 - off in effect (below 1e-6 nothing is computed)
 ([observation](training/training.md#learning-by-observation)).
 
-**Spread of the simulator's uncertain numbers** (ready, off by default: `--dr`): 23 numbers not taken exactly from
+**Spread of the simulator's uncertain numbers** (`--dr`, on in line S): 23 numbers not taken exactly from
 the game's database (a few probes, fits, estimates), each battle draws them inside ranges from the evidence; the
 `sim.json` number stays the median ([spread](training/training.md), `config/nn/dr.json`).
+
+**The enemy view:** the networks of line S (from S9) see about a visible enemy what a human sees (exact morale,
+fatigue, ammunition, kills; not its orders) - older networks rush with this input, so the pool holds S9 and newer only.
 
 The chain of steps with checks in the simulator (`tools.ops.step`, `test5`, `tools.ops.card`,
 `config/train-chain.json`) remains but is not used in the v2 loop: the network is measured by battles in

@@ -145,11 +145,47 @@ def in_range(u, pw, per_man=False, reach=(0.0, 0.0)):
     return torch.where(mask[:, :, None], rank_share(u, pw, *reach) > 0, centre)
 
 
+def router_share(age, ages, shares):
+    """The measured share of shooters still on a target `age` s [B, N] after it began to rout (missile.router_keep_*):
+    1 at 0, linear between the nodes (ages, shares), the last share beyond the last node."""
+    xs = [0.0] + [float(a) for a in ages]
+    ys = [1.0] + [float(s) for s in shares]
+    out = torch.full_like(age, ys[-1])
+    for k in range(len(xs) - 1, 0, -1):
+        f = ((age - xs[k - 1]) / max(xs[k] - xs[k - 1], 1e-9)).clamp(0, 1)
+        out = torch.where(age <= xs[k], ys[k - 1] + (ys[k] - ys[k - 1]) * f, out)
+    return out
+
+
+def router_keep(u, prev, params, t, dt):
+    """[B, N] shooters that keep last step's target this step though it routs (missile.router_keep_s / _share; None:
+    off): free shooters stay on a target that began to rout as the game's engine does, by the measured share still on
+    it `a` s into its rout - a step from a to a + dt stays with S(a + dt) / S(a) (an hash draw per battle, unit and
+    step, as morale's, so nothing random to replay). Routing and shattered targets alike (measured the same)."""
+    cal = params.sim["missile"]
+    ages, shares = cal.get("router_keep_s"), cal.get("router_keep_share")
+    if prev is None or not ages:
+        return None
+    from tools.nn.sim import morale
+    p = prev.clamp(min=0)
+    on_router = (prev >= 0) & u["r"].gather(1, p)
+    a = u["rout_s"].gather(1, p).clamp(min=0)
+    s_now = router_share(a, ages, shares)
+    stay = torch.where(s_now > 1e-9, router_share(a + dt, ages, shares) / s_now.clamp(min=1e-9),
+                       torch.zeros_like(s_now))
+    B, N = prev.shape
+    k = torch.round(t / dt).long() if isinstance(t, torch.Tensor) else torch.full((B,), round(float(t) / dt),
+                                                                                     dtype=torch.long, device=prev.device)
+    draw = morale._hash_uniform(B, N, k, prev.device, salt=40357, ids=morale.battle_ids(u))
+    return on_router & (draw < stay)
+
+
 def choose_target(u, pw, can_shoot, order_target, order_attack, exclude=None, prev=None, per_man=False,
-                  reach=(0.0, 0.0)):
+                  reach=(0.0, 0.0), keep_router=None):
     """[B, N] slot each shooter aims at (-1 none). exclude [B, N, N]: targets i may not take. prev [B, N]: last
     step's target, kept while it is in range (centre to centre; per_man: in_range), standing and not excluded (the
-    game keeps its target; without it the nearest-each-step flips between two close enemies)."""
+    game keeps its target; without it the nearest-each-step flips between two close enemies). keep_router [B, N]
+    (router_keep): shooters that keep prev though it routs (still in range and not excluded)."""
     alive = (u["men"] > 0) & ~u["gone"]
     rng = pw["enemy"] & alive[:, None, :] & in_range(u, pw, per_man, reach)
     if exclude is not None:
@@ -161,6 +197,8 @@ def choose_target(u, pw, can_shoot, order_target, order_attack, exclude=None, pr
     if prev is not None:
         p = prev.clamp(min=0)
         keep = (prev >= 0) & standing.gather(2, p[:, :, None]).squeeze(2)
+        if keep_router is not None:
+            keep = keep | ((prev >= 0) & keep_router & rng.gather(2, p[:, :, None]).squeeze(2))
         nearest = torch.where(keep, p, nearest)
         has = has | keep
     ordered = order_attack & (order_target >= 0)
