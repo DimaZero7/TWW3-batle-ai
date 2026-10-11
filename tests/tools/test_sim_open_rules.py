@@ -201,6 +201,15 @@ class TestAttackLeave:
         # off (and the old full strikes on a touched non-target): fights on
         assert self.dealt("far", P.with_cal("contact", attack_leave=0, fresh_incidental=None)) > 0
 
+    def test_a_lord_attacking_a_far_enemy_from_melee_strikes_nobody(self):
+        # contact.attack_leave_lord (build/gaps/lord.md: the network's lord in melee told to attack a target 15+ m away
+        # kills 0.02-0.09 a second in the game, moving 51-79 % of the time; the twin before 0.21-0.28)
+        general = "wh_main_emp_cha_general_0"
+        assert P.sim["contact"]["attack_leave_lord"] == 1
+        assert self.dealt("far", key=general) == pytest.approx(0.0, abs=1e-3)
+        assert self.dealt("near", key=general) > 0
+        assert self.dealt("far", P.with_cal("contact", attack_leave_lord=0), key=general) > 0
+
     def test_a_missile_unit_is_not_concerned(self):
         archers = "wh_main_emp_inf_crossbowmen"
         assert self.dealt("far", key=archers) == pytest.approx(self.dealt("far", P.with_cal("contact", attack_leave=0),
@@ -257,6 +266,49 @@ class TestFreshOrders:
         assert held > 50.0                                                  # within leave_m: fought on at hold_rate
         unlatched, _, _ = self.after((O.MOVE, 5.0), 15.0, P.with_cal("contact", leave_latch=0))
         assert unlatched > 0.0                                              # arrived, it would fight again at once
+
+
+class TestHoldBreakoff:
+    """The holdmelee probe (build/charge-probe/runs/20261011-090746, -090858): 10 s after contact the swordsmen get a
+    run 15 m back or an attack on the clanrats aside, then a halt 3 s later; or a halt only. contact.hold_breakoff."""
+    lane = TestFreshOrders.lane
+    def halted(self, first, params=P, halt_at=3.0, until=30.0):
+        """Both clanrat units' HP lost a second by the swordsmen at (halt, first order + 24 s) and after it to `until`."""
+        st, H = self.lane(params)
+        win = float(params.battle["melee_breakoff_secs"])
+        lost, k_end = [], int(until / params.dt)
+        for k in range(k_end):
+            t = k * params.dt
+            if first is None or t >= halt_at:
+                o = orders(st, **{"0": (O.HOLD, None, False), str(H): (O.ATTACK, 0, False)})
+                if k > 0 and (first is None or t > halt_at):
+                    o.kind[0, 0] = O.KEEP
+            else:
+                kind, arg = first
+                arg = (float(st.u["x"][0, 0]), float(st.u["z"][0, 0]) + arg) if kind == O.MOVE else H + arg
+                o = orders(st, **{"0": (kind, arg, True), str(H): (O.ATTACK, 0, False)})
+                if k > 0:
+                    o.kind[0, 0] = O.KEEP
+            before = float(st.u["hp_abs"][0, H] + st.u["hp_abs"][0, H + 1])
+            battle.step(st, o, params)
+            lost.append((t, before - float(st.u["hp_abs"][0, H] + st.u["hp_abs"][0, H + 1])))
+        quiet = sum(v for t, v in lost if halt_at + params.dt <= t < win - params.dt)
+        back = sum(v for t, v in lost if t >= win + params.dt)
+        return quiet / (win - halt_at - 2 * params.dt), back / (until - win - params.dt)
+
+    def test_a_halt_after_a_leave_or_an_attack_aside_strikes_nobody_to_the_window(self):
+        assert P.sim["contact"]["hold_breakoff"] == 1
+        for first in ((O.MOVE, 15.0), (O.ATTACK, 1)):
+            quiet, back = self.halted(first)
+            assert quiet == pytest.approx(0.0, abs=1e-3)                  # the game: 0 HP for 10-25 s, 6 lanes of 6
+            assert back > 5.0                                              # fights again from the window on
+            off_quiet, _ = self.halted(first, P.with_cal("contact", hold_breakoff=0))
+            assert off_quiet > 5.0                                         # off: the hold fights at once
+
+    def test_a_plain_halt_fights_on(self):
+        quiet, _ = self.halted(None)
+        assert quiet > 5.0
+        assert quiet == pytest.approx(self.halted(None, P.with_cal("contact", hold_breakoff=0))[0])
 
 
 # --- C2 / R4: leaving melee, the chase and its 24 s window ---

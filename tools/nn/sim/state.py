@@ -188,6 +188,9 @@ INTERNAL = {
     "exit_s": ("f", "seconds since it began to leave melee (a withdraw or a far move while in contact), in contact or "
                     "not, while it keeps leaving: at the database's melee_breakoff_secs still in contact it drops the "
                     "order (battle.py, contact.breakoff)"),
+    "brk_s": ("f", "seconds left of the melee exit's window (melee_breakoff_secs from a leave or an attack on an enemy "
+                   "it does not touch, given in melee) that a hold given in melee keeps: no strikes while > 0 under "
+                   "HOLD (battle.py, contact.hold_breakoff); 0: none"),
     "low_s": ("f", "seconds since its health first fell below a quarter (0 before; never back: the Wounds of a single "
                    "entity come on its initial cooldown after that and stay to the end, effects.py)"),
     "shots": ("f", "fractional shots carried to the next step"),

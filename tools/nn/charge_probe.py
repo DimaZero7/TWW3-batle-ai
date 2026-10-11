@@ -204,6 +204,14 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           unit and a halt 3 s later ('att2_3'), (d) a halt alone ('halt': fresh's halt lane) or (e) nothing ('none', the
           control); the clanrats keep attacking them; 70 s from contact - 2 battles of 5 lanes, rotated (lane.after2: the
           halt). Its table: build/gaps/holdmelee_probe.py.
+  holdlord  the same for a lord (build/gaps/lord.md: the network's General under hold in melee is left without a target
+          82 % of the first 2 s, 9 % after 20 s, and kills 0.04 a second then; told to attack a target 15+ m away he walks
+          off and kills 0.02-0.09; the twin 0.21-0.28 for both): the General <-> clanrats attacking each other from 3 m,
+          a second clanrat unit 25 m beside the clanrats (never ordered); 10 s after contact the General gets (a) a halt
+          ('halt'), (b) nothing ('none', the control), (c) the same attack again ('same'), (d) an attack on the second
+          unit ('far'), (e) the same and a halt 3 s later ('far_halt3'); the clanrats keep attacking him; 60 s from
+          contact - 2 battles of 5 lanes, rotated. The samples' ct: the unit's engine target now (current_target, its
+          script name, '' none). Its table: build/gaps/holdmelee_probe.py (by lane kind).
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -220,6 +228,7 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe run --plan shootcontact             # a shooter moving in melee
     python -m tools.nn.charge_probe shootcontact [runs...]              # its table
     python -m tools.nn.charge_probe run --plan holdmelee --speed 10     # a halt after an order in melee
+    python -m tools.nn.charge_probe run --plan holdlord --speed 10      # the same for a lord
 
 Measures per lane (the game's recording, and the simulator's run of the same lane from the same start):
 the attacker's speed on the way in (the last 30 m, the peak), the first contact; HP lost by the target
@@ -286,7 +295,7 @@ NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in N
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
          "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "leave", "skirmish", "skirmish2", "shootcontact",
-         "holdmelee")
+         "holdmelee", "holdlord")
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
 WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
@@ -382,6 +391,10 @@ FRESH = ("attack_t2", "attack_same", "halt", "move_near", "none")
 # straight back (+z: the attacker faces -z) at a run
 HOLDMELEE = {"leave3": ("move_near", 13), "leave10": ("move_near", 20), "att2_3": ("attack_t2", 13), "halt": ("halt", None),
              "none": ("none", None)}
+# the holdlord plan's lanes: kind -> (the General's order 10 s after contact, at_s of the halt after it or None)
+HOLDLORD = {"halt": ("halt", None), "none": ("none", None), "same": ("attack_same", None), "far": ("attack_t2", None),
+            "far_halt3": ("attack_t2", 13)}
+HOLDLORD_T2_GAP_M = 25   # the second clanrat unit this far from the first one's edge (from the General ~40 m)
 # the defender plan's orders 1 s after contact (lane.after.kind; move_near 30 m aside at a run)
 DEFENDER = ("attack_same", "halt", "attack_t2", "move_near")
 DEFENDER_LANE_DX = 320  # (its second target stands 180 m aside, inward: 140 m from the next lane; |x| <= 480 as in
@@ -690,6 +703,15 @@ def battles(plan):
                         kind=kind, after={"at_s": 10, "kind": first, "dx": 0, "dz": 15 if first == "move_near" else 0,
                                           "walk": False}, **extra)
         base = [hm(k) for k in HOLDMELEE]
+        out += [base, rotate(base, 2)]
+    elif plan == "holdlord":
+        def hl(kind):
+            first, halt_at = HOLDLORD[kind]
+            extra = {"after2": {"at_s": halt_at, "kind": "halt", "dx": 0, "dz": 0, "walk": False}} if halt_at else {}
+            return lane("general", "clanrat", "attack_walk", "both", gap_m=3, fight_s=60, target2="clanrat",
+                        t2_gap_m=HOLDLORD_T2_GAP_M, kind=kind,
+                        after={"at_s": 10, "kind": first, "dx": 0, "dz": 0, "walk": False}, **extra)
+        base = [hl(k) for k in HOLDLORD]
         out += [base, rotate(base, 2)]
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)

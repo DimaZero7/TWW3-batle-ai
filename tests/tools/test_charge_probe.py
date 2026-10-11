@@ -76,6 +76,21 @@ def test_the_holdmelee_plan_halts_3_or_10_s_after_a_move_back_or_a_new_attack_in
     assert model_s < 200
 
 
+def test_the_holdlord_plan_gives_the_general_a_halt_the_same_attack_or_a_far_attack_in_melee():
+    b = cp.battles("holdlord")
+    assert len(b) == 2 and all(sorted(l["kind"] for l in x) == sorted(cp.HOLDLORD) for x in b)
+    lanes = {l["kind"]: l for l in b[0]}
+    assert all(l["attacker"] == "general" and l["target"] == "clanrat" and l["target_mode"] == "both" for l in b[0])
+    assert lanes["halt"]["after"]["kind"] == "halt" and lanes["none"]["after"]["kind"] == "none"
+    assert lanes["same"]["after"]["kind"] == "attack_same" and lanes["far"]["after"]["kind"] == "attack_t2"
+    assert lanes["far_halt3"]["after2"] == {"at_s": 13, "kind": "halt", "dx": 0, "dz": 0, "walk": False}
+    assert all("after2" not in lanes[k] for k in ("halt", "none", "same", "far"))
+    config, model_s, arena = cp.run_config("holdlord", 1)
+    names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}
+    assert all(l["target2"] in names and l["t2_dx"] >= 25 for l in config["lanes"])
+    assert model_s < 200
+
+
 def test_run_passes_the_speed_to_the_build(capsys):
     cp.run("holdmelee", [1], dry=True, speed=10)
     assert "--probe-plan holdmelee --probe-battle 1 --deadline 900 --speed 10" in capsys.readouterr().out

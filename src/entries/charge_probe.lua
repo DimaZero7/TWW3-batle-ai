@@ -235,6 +235,19 @@ function M.main(bm, config, globals)
         return table.concat(keys, ',')
     end
 
+    -- The unit's engine target now (unit:current_target()): its script name, '' none, '?' not one of ours, nil unread.
+    local function target_name(u)
+        local ok, t = pcall(function() return u:current_target() end)
+        if not ok then return nil end
+        if not t then return '' end
+        local uid = read(function() return tostring(t:unique_ui_id()) end)
+        if not uid then return nil end
+        for name, it in pairs(state.units) do
+            if it.unit and read(function() return tostring(it.unit:unique_ui_id()) end) == uid then return name end
+        end
+        return '?'
+    end
+
     local function unit_row(u)
         local p = read(function() return u:position() end)
         return {men = read(function() return u:number_of_men_alive() end),
@@ -244,7 +257,8 @@ function M.main(bm, config, globals)
             mv = read(function() return u:is_moving() end), fast = read(function() return u:is_moving_fast() end),
             k = read(cco, u, 'NumKills'), fat = read(function() return u:fatigue_state() end), st = statuses(u),
             uma = read(function() return u:is_under_missile_attack() end), cuma = read(cco, u, 'IsUnderMissileAttack'),
-            r = read(function() return u:is_routing() end), sh = read(function() return u:is_shattered() end)}
+            r = read(function() return u:is_routing() end), sh = read(function() return u:is_shattered() end),
+            ct = target_name(u)}
     end
 
     -- A unit row with its morale (t_morale targets): MoralePercent, MoraleState, the strongest effect's text, the

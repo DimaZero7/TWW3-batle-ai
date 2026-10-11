@@ -182,12 +182,15 @@ def step(st, orders, params=None, dt=None):
         # without a missile weapon that touches a standing enemy, is a leave too (contact.attack_leave;
         # config/nn/sim.json contact.attack_leave_why): it walks off towards its target, strikes nobody, is held
         # pin_melee_s and chased like a withdraw; the 24 s window (breakoff) drops the order if it is still in contact
-        # then. Any direction: through the enemy or away.
+        # then. Any direction: through the enemy or away. A lone man (a lord) too (contact.attack_leave_lord; config/nn/
+        # sim.json contact.attack_leave_lord_why: the network's lord in melee told to attack an enemy 15 m or more away
+        # walks off and barely strikes in the game) - not held (pin: formations only), leave_taken the formations'.
         ti_a = tgt.clamp(min=0)[:, :, None]
         tgt_away = ~touch.gather(2, ti_a).squeeze(2) & (pw["gap"].gather(2, ti_a).squeeze(2) >= leave_m)
         fighting = (touch & standing[:, None, :]).any(2)
+        who = (u["men0"] > 1) | bool(cal["contact"].get("attack_leave_lord"))
         leaving = leaving | ((kind == O.ATTACK) & (tgt >= 0) & tgt_away & fighting & (u["range"] <= 0)
-                             & (u["men0"] > 1) & (leave_m > 0))
+                             & who & (leave_m > 0))
     # --- the skirmish mode (skirmish.py; config/nn/sim.json skirmish): a shooter with the mode on runs, over its order
     # and without shooting, while an enemy moving at it is within its gap; caught, it goes on running - a leave ---
     sk_run = torch.zeros_like(standing)
@@ -198,6 +201,25 @@ def step(st, orders, params=None, dt=None):
         if sk_cal.get("melee_run"):
             leaving = leaving | (sk_run & in_touch)
     striker = standing & ~leaving
+    if cal["contact"].get("hold_breakoff") and "brk_s" in u:
+        # A hold does not close the melee exit's window (contact.hold_breakoff; config/nn/sim.json
+        # contact.hold_breakoff_why): a formation without a missile weapon given in melee a leave (a withdraw, a far
+        # move, an attack_leave) or an attack on an enemy it does not touch, then a hold while still in melee, strikes
+        # nobody until the database's melee_breakoff_secs (24 s) from that first order are over, then fights as any
+        # held unit (the holdmelee probe, build/charge-probe/runs/20261011-090746 and -090858: swordsmen halted 3 / 10 s
+        # after a run 15 m back or an attack on clanrats 4 m aside dealt 0 HP for 10-25 s, 6 lanes of 6, back from
+        # 25-26 s after the first order; a plain halt fought on). brk_s: seconds left of that window. Another order
+        # (not a hold) ends it; the other rules (fresh_incidental, leave_latch, breakoff) go on as they were.
+        win = float(R.get("melee_breakoff_secs", 0.0))
+        form = (u["men0"] > 1) & (u["range"] <= 0)
+        ti_b = tgt.clamp(min=0)[:, :, None]
+        att_other = (kind == O.ATTACK) & (tgt >= 0) & ~touch.gather(2, ti_b).squeeze(2)
+        begin = new_order & u["m"] & standing & form & (leaving | att_other)
+        hold_on = new_order & take & (orders.kind == O.HOLD) & u["m"]      # (an order, not a dead target's hold)
+        u["brk_s"] = torch.where(begin, torch.full_like(u["brk_s"], win),
+                                 torch.where(new_order & ~hold_on, torch.zeros_like(u["brk_s"]),
+                                             (u["brk_s"] - dt).clamp(min=0)))
+        striker = striker & ~((kind == O.HOLD) & (u["brk_s"] > 0) & form)
     strike = touch & striker[:, :, None]
     engaged = standing & (touch & standing[:, None, :]).any(2)
     # Pinned: a missile unit leaving melee stays held where it is (not striking, struck) until it has been leaving in

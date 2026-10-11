@@ -378,6 +378,17 @@ centre 35–50 / 50–80 / 80+ m): 0.06 / 0.06, 0.07 / 0.05, 0.12 / 0.10 a secon
 ordinary long fight 0.33 -> 0.32 kills a second (game 0.27). No rule online: players only say a unit in contact drops
 its order and fights its neighbour and that the exit window is ~25 s; the database has only `melee_breakoff_secs` 24.
 
+The same for a lord (`contact.attack_leave_lord`): the network's lord in melee told to attack a target 15 m or more away
+walks off to it (moving 51–58 % of the seconds for the Empire, 68–79 % for the Skaven) and barely strikes — 96 battles
+of the sets S1–S10, W5, W6 (`build/gaps/lord.md`, `lordana2.py`), kills a second, game / twin before the change
+(Empire; Skaven): target 15–30 m away 0.092 / 0.276 (0.090 / 0.210), 30–60 m 0.032 / 0.235 (0.034 / 0.260), beyond
+60 m 0.044 / 0.257 (0.024 / 0.255); at 8–15 m almost the full rate (0.224 / 0.313), as the 10 m edge threshold
+`leave_m` expects. No new numbers; a lord is not held in place, ×1.25 is the formations' only, the 24 s window
+(`contact.breakoff_lord`) drops the order if he is still in contact.
+The twin of the 8 S9 battles (against `ai_like`, 4 copies), the network's lord, kills a second before → after (game): target
+30–60 m away Empire 0.249 → 0.028 (0.032), Skaven 0.242 → 0.020 (0.111); beyond 60 m 0.231 → 0.031 (0.073), 0.222 → 0.007
+(0.020); at 15–30 m 0.212 → 0.202 (0.071), 0.249 → 0.131 (0.136) — the threshold by the target's edge takes only part of this band.
+
 **A new order in melee (the `fresh` probe).** Swordsmen and clanrats attack each other from 3 m, a second clanrat
 unit stands 4 m aside; 10 s after contact the swordsmen get one more order (2 battles, 2 lanes a variant,
 `build/charge-probe/runs/20261008-145559`, `-145641`). Kills by the swordsmen a second (HP the clanrats lose a second)
@@ -413,6 +424,31 @@ clock `order_s` tells them apart, no new number. The twin of the probe: ahead 5 
 window, now 0 / 0 / 0 / 0.18 (11). The twin of the 8 it3 battles: move in melee 0.12 -> 0.03 kills a second (game 0.02),
 melee HP dealt 0.486 -> 0.497 (0.468), wins 19 -> 14 of 32 (game 2 of 8); it1 move 0.14 -> 0.04 (0.03); grid_s46 melee
 HP 0.486 -> 0.486 (0.517).
+
+**Hold after a leave or a new attack (the `holdmelee` probe).** Swordsmen and clanrats attack each other from 3 m, a
+second clanrat unit 4 m aside; 10 s after contact the swordsmen run 15 m back and get a halt 3 / 10 s later, or attack
+the second unit and get a halt 3 s later, or a halt only, or nothing (`build/charge-probe/runs/20261011-090746`,
+`-090858`, 2 lanes each; analysis `build/gaps/holdmelee_probe.py`). Kills a second (both clanrat units' HP a second) at
+0–5 / 5–10 / 10–15 / 15–25 s after the halt:
+
+| Lane | Game | Twin before | Twin after |
+|---|---|---|---|
+| 15 m back, halt 3 s later | 0 (0) / 0 (0) / 0 (0) / 0.10 (9) | 0.38 (23) / 0.18 (11) / 0.10 (6) / 0.11 (7) | 0 (0) / 0 (0) / 0 (0) / 0.06 (3) |
+| 15 m back, halt 10 s later | 0 (0) / 0 (0) / 0 (0) / 0.10 (25) | 0.33 (20) / 0.31 (19) / 0.30 (18) / 0.29 (18) | 0 (0) / 0 (0) / 0.06 (4) / 0.29 (18) |
+| attack the neighbour, halt 3 s later | 0 (0) / 0 (0) / 0 (0) / 0.10 (11) | 0.38 (23) / 0.34 (21) / 0.32 (19) / 0.30 (18) | 0 (0) / 0 (0) / 0 (0) / 0.12 (7) |
+| halt only | 0.50 (42) / 0.30 (30) / 0.10 (11) / 0.25 (27) | 0.41 (25) / 0.36 (22) / 0.33 (20) / 0.31 (19) | the same |
+| nothing (control) | 0.30 (35) / 0.60 (38) / 0.20 (32) / 0.45 (25) | 0.75 (45) / 0.68 (41) / 0.64 (38) / 0.60 (36) | the same |
+
+After a leave or an attack on the neighbour a halt does not bring the unit back into the fight: the swordsmen stand in
+contact (moving 0–10 % of the time, the melee flag on) but strike nobody; the kills come back 25–26 s after the first
+order (2 lanes), later in three (37–52 s), in one not to the end. A plain halt fights on (the clanrats' HP at 0–25 s
+0.88 of the control). So a hold does not close the `melee_breakoff_secs` 24 s window the previous order started
+(`contact.hold_breakoff`, no new number). The network's whole battles agree (`build/gaps/holdsplit.py`, the S/W sets):
+its held infantry in contact kills 0.00–0.03 a second while the order before the hold is younger than 24 s, 0.18–0.23
+later; the twin 0.12–0.23 throughout. The twin of the 8 S9 battles (against `ai_like`, 4 copies), a hold after a
+move / withdraw given in contact, before → after (game): under 10 s ago Empire 0.238 → 0.070 (0.008), Skaven 0.154 → 0.031
+(0.000); 10–24 s 0.187 → 0.037 (0.020), 0.153 → 0.023 (0.000). Open: a hold soon after an attack given before contact or on the same target (in
+whole battles "attack < 10 s ago, then hold" kills 0.015–0.021 against the twin's 0.13–0.23) — not probed.
 
 ## Not found
 
