@@ -14,12 +14,12 @@ from tools.nn.train import drills as D
 from tools.nn.train import league, scenes
 
 
-def generated_armies(seeds, max_units, small=None):
-    """[(army description, name)] of the generated battles of seeds (as scenes.Generated)."""
+def generated_armies(seeds, max_units, small=None, armies="v1"):
+    """[(army description, name)] of the generated battles of seeds (as scenes.Generated; armies: its scheme)."""
     from tools.nn.armies import generate
     seeds = [int(s) for s in seeds]
     n_small = int(round(small[0] * len(seeds))) if small else 0
-    arenas = [generate.battle(s, max_units=min(max_units, small[1]) if i < n_small else max_units)
+    arenas = [generate.battle(s, max_units=min(max_units, small[1]) if i < n_small else max_units, armies=armies)
               for i, s in enumerate(seeds)]
     roles = ["attack" if i % 2 == 0 else "defend" for i in range(len(seeds))]
     return [(scenario.from_arena(a, r), f"{a['name']}-{r}") for a, r in zip(arenas, roles)]
@@ -37,10 +37,10 @@ class Mixed:
     learner's). per_drill: battles of each drill in the bank; drill_seeds: their seed range."""
 
     def __init__(self, seeds, max_units, params, device, layout, seed=0, small=None, per_drill=256,
-                 drill_seeds=D.DRILL_SEEDS, sequential=False, drills=None):
+                 drill_seeds=D.DRILL_SEEDS, sequential=False, drills=None, armies="v1"):
         rng = np.random.default_rng(seed)
         self.max_units, self.sequential = max_units, sequential
-        gen = generated_armies(seeds, max_units, small) if len(seeds) else []
+        gen = generated_armies(seeds, max_units, small, armies) if len(seeds) else []
         codes = drill_codes(layout)
         drills = drills or D.load(list(codes))
         missing = [n for n in codes if n not in drills]

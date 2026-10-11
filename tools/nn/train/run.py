@@ -371,7 +371,8 @@ def train(args, every=None, teacher=None, normal=None):
         from tools.nn.armies import generate
         seeds = rng.integers(generate.TRAIN_SEEDS.start, generate.TRAIN_SEEDS.stop, args.bank)
         seed = int(rng.integers(1 << 30))
-        spec = bankproc.Spec(seeds, seed, args.max_units, params, lay, small_arg(), bool(args.drills), args.drill_bank)
+        spec = bankproc.Spec(seeds, seed, args.max_units, params, lay, small_arg(), bool(args.drills), args.drill_bank,
+                             armies=args.armies)
         if args.kite_share:
             spec.kite_share = args.kite_share
             spec.kite_seeds = rng.integers(generate.TRAIN_SEEDS.start, generate.TRAIN_SEEDS.stop, args.kite_bank)
@@ -401,7 +402,8 @@ def train(args, every=None, teacher=None, normal=None):
     if args.parts:                                # --parts: the minibatch in this many parts, whatever the size
         step_cfg = dataclasses.replace(step_cfg, accum=args.parts)
     log = (out / "log.jsonl").open("w", encoding="utf-8", newline="\n")
-    print(f"{args.name}: battles {env.B} (learner rows {env.R}), slots {env.N}, up to {args.max_units} units a side, "
+    print(f"{args.name}: battles {env.B} (learner rows {env.R}), slots {env.N}, up to {args.max_units} units a side "
+          f"(armies {args.armies}), "
           f"steps per update {args.steps} ({args.steps * env.decision_s:g} s of battle), "
           f"minibatch {step_cfg.minibatch} decisions in {step_cfg.accum} part(s), {cadence.text(params.dt)}, "
           f"model {args.preset} {model_policy.parameters(actor) / 1e6:.2f} M actor, limit {args.limit:.0f} s, "
@@ -885,6 +887,10 @@ def parser():
     ap.add_argument("--no-eval", action="store_true")
     ap.add_argument("--max-units", type=int, default=19, help="random armies (tools/nn/armies): units a side at most")
     ap.add_argument("--bank", type=int, default=2048, help="generated battles ready at once")
+    ap.add_argument("--armies", choices=("v1", "v2"), default="v1",
+                    help="the training banks' army scheme (tools/nn/armies/generate.py): v1 a budget, then armies under "
+                         "it; v2 (user 11.10) the numbers of units first (15-19 40%%, 10-14 30%%, 5-9 20%%, 1-4 10%%), "
+                         "a ceiling 2000-15000, the other side for the same gold. Evaluations keep v1")
     ap.add_argument("--drills", type=float, default=0.0,
                     help="share of the battles that are drills (tools/nn/train/drills; e.g. 0.08), taken from the "
                          "other opponents in proportion")

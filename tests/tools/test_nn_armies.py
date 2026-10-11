@@ -331,3 +331,110 @@ class TestRichBattles:
         budgets = [gen.generate(rng, sides=(EMP, SKV))["budget"] for _ in range(60)]
         rich = [b for b in budgets if b > hi + 1]
         assert 10 <= len(rich) <= 50 and max(budgets) <= 12400 + 1
+
+
+# The old scheme's armies of a few train and evaluation seeds (the budget, then per side the template, the cost and the
+# unit keys), hashed before the v2 scheme joined the generator (11.10.2026): v1 must give them bit for bit. A deliberate
+# change of the old scheme (pools.json, the templates) changes it; then the evaluation's battles change too.
+V1_SEEDS = (0, 1, 2, 3, 1_000_000_000, 1_000_900_795)
+V1_HASH = "0d3626c6a39c54a47b542a111de4190cd9db1f5ce6d69c3af3f723b649969f22"
+
+
+def composition(arena):
+    return [arena["budget"]] + [[arena["sides"][s]["army"], arena["sides"][s]["cost"],
+                                 [u["key"] for u in arena["sides"][s]["units"]]] for s in ("own", "enemy")]
+
+
+@pytest.fixture(scope="module")
+def battles_v2():
+    return [G.battle(s, armies="v2") for s in range(1500)]
+
+
+class TestArmiesV2:
+    def test_the_old_scheme_is_the_default_and_unchanged(self):
+        import hashlib
+        arenas = [G.battle(s) for s in V1_SEEDS]
+        assert hashlib.sha256(json.dumps([composition(a) for a in arenas]).encode()).hexdigest() == V1_HASH
+        assert all(G.battle(s, armies="v1") == a for s, a in zip(V1_SEEDS, arenas))
+        assert "armies" not in arenas[0] and "ceiling" not in arenas[0]
+
+    def test_the_same_seed_the_same_v2_battle_another_than_v1(self):
+        a = G.battle(17, armies="v2")
+        assert a == G.battle(17, armies="v2") and a["armies"] == "v2"
+        assert composition(a) != composition(G.battle(17))
+        with pytest.raises(AssertionError):
+            G.battle(17, armies="v3")
+
+    def test_the_count_bands_by_their_shares(self):
+        gen, rng = G.default(), np.random.default_rng(5)
+        n = np.asarray([gen.count(rng) for _ in range(10_000)])
+        assert n.min() == 1 and n.max() == 19
+        for (first, last, share) in P.armies_v2()["counts"]:
+            assert abs(np.mean((n >= first) & (n <= last)) - share) < 0.02
+        assert abs(np.mean(n == 15) - 0.08) < 0.015 and abs(np.mean(n == 19) - 0.08) < 0.015   # even inside a band
+        assert max(gen.count(rng, 6) for _ in range(200)) == 6                                   # max_units clips
+
+    def test_equal_gold_lord_and_one_to_nineteen_units(self, battles_v2):
+        for a in battles_v2:
+            costs = [a["sides"][s]["cost"] for s in ("own", "enemy")]
+            assert max(costs) <= min(costs) / (1 - G.TOLERANCE) + 1e-6
+            for s in ("own", "enemy"):
+                side = a["sides"][s]
+                assert sum(u.get("general", False) for u in side["units"]) == 1
+                assert 1 <= len(units_of(side)) <= G.MAX_UNITS
+            assert 2000 <= a["ceiling"] <= 15000
+
+    def test_big_armies_and_budgets_above_the_old_cap(self, battles_v2):
+        n = np.asarray([len(units_of(a["sides"][s])) for a in battles_v2 for s in ("own", "enemy")])
+        b = np.asarray([a["budget"] for a in battles_v2])
+        assert np.mean(n >= 15) > 0.30 and np.mean(n <= 4) < 0.17 and np.mean((n >= 10) & (n <= 14)) > 0.25
+        assert np.mean(b >= 5000) > 0.40 and np.mean(b > 7725) > 0.05 and b.max() <= 15000 * 1.06
+
+    def test_template_armies_keep_the_caps(self, battles_v2):
+        for a in battles_v2:
+            for s in ("own", "enemy"):
+                side = a["sides"][s]
+                if side["army"] != "random":
+                    pool, units = POOLS[side["faction"]], units_of(side)
+                    ranged = {u.key for u in pool.units if u.category == "inf_ranged"}
+                    assert sum(u["key"] in ranged for u in units) <= pool.cap("inf_ranged", len(units))
+
+    @staticmethod
+    def _gen(counts, ceiling):
+        gen = G.Generator()
+        gen.v2 = {"counts": counts, "ceiling": ceiling}
+        return gen
+
+    def test_the_ceiling_bounds_the_price(self):
+        gen, rng = self._gen(((3, 3, 1.0),), (2000.0, 2000.0)), np.random.default_rng(6)
+        for _ in range(40):
+            a = gen.generate(rng, sides=(EMP, SKV), armies="v2")
+            assert all(len(units_of(a["sides"][s])) == 3 for s in ("own", "enemy"))
+            costs = [a["sides"][s]["cost"] for s in ("own", "enemy")]
+            assert min(costs) <= 2000 and max(costs) <= 2000 / (1 - G.TOLERANCE)
+
+    def test_the_count_wins_over_a_low_ceiling(self):
+        # 19 Empire units cost at least 600 + 19 x 300 = 6300: the price is the cheapest army, not the ceiling
+        gen, rng = self._gen(((19, 19, 1.0),), (2000.0, 2000.0)), np.random.default_rng(7)
+        for _ in range(10):
+            a = gen.generate(rng, sides=(EMP, EMP), armies="v2")
+            assert all(len(units_of(a["sides"][s])) == 19 for s in ("own", "enemy"))
+            assert all(a["sides"][s]["cost"] <= 6300 / (1 - G.TOLERANCE) for s in ("own", "enemy"))
+
+    def test_the_bigger_army_shrinks_when_its_cheapest_units_are_too_dear(self):
+        # one Empire unit costs at most 600 + 850; 19 Empire units at least 6300: the second side takes what fits
+        gen, rng = self._gen(((1, 1, 0.5), (19, 19, 0.5)), (15000.0, 15000.0)), np.random.default_rng(8)
+        sizes = set()
+        for _ in range(40):
+            a = gen.generate(rng, sides=(EMP, EMP), armies="v2")
+            costs = [a["sides"][s]["cost"] for s in ("own", "enemy")]
+            assert max(costs) <= min(costs) / (1 - G.TOLERANCE) + 1e-6
+            sizes.add(tuple(sorted(len(units_of(a["sides"][s])) for s in ("own", "enemy"))))
+        assert (19, 19) in sizes and any(s[0] == 1 and s[1] <= 3 for s in sizes) and not any(s == (1, 19) for s in sizes)
+
+    def test_the_smaller_army_is_not_always_elite(self):
+        # 5 Skaven units against 5: the price spreads between the cheapest (5 slaves) and the dearest (5 stormvermin)
+        gen, rng = self._gen(((5, 5, 1.0),), (15000.0, 15000.0)), np.random.default_rng(9)
+        costs = [gen.generate(rng, sides=(SKV, SKV), armies="v2")["sides"]["own"]["cost"] for _ in range(60)]
+        cheapest, dearest = 525 + 5 * 125, 525 + 5 * 950
+        assert min(costs) < cheapest + 0.25 * (dearest - cheapest) and max(costs) > dearest - 0.25 * (dearest - cheapest)

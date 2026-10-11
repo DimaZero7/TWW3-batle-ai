@@ -28,6 +28,20 @@ A battle:
    Every pick is taken only if the army can still end inside the budget window (numpy tables
    of what the pool can buy), so a side never fails and never overspends.
 4. deployment - tools/nn/armies/place.py.
+
+Two schemes (armies=): "v1", the default, is the one above: the evaluation seeds, the gate, the twin and
+tools.build --army-seed stay on it, the same seed the same battle as always. "v2" (user 11.10.2026; training with
+run.py --armies v2 and AI-vs-AI battles) draws the numbers of units first (Generator.generate_v2):
+1. factions as in v1;
+2. each side's number of units besides the lord: a band of config/nn/pools.json "armies_v2" counts by its share
+   (15-19 40 %, 10-14 30 %, 5-9 20 %, 1-4 10 %), then evenly inside it (at most max_units); the budget ceiling
+   evenly in "ceiling" (2000-15000); each side template or random as in v1;
+3. the side with fewer units (a tie: either, at random) is built first: its price evenly between its cheapest army
+   of that many units and min(ceiling x its share, its dearest one), so a small army is not always elite (when the
+   ceiling is below its cheapest army the price is the cheapest: the number of units wins over the ceiling);
+4. the other side buys for that army's cost x its share / the first's share, +-TOLERANCE, with its drawn number of
+   units, or the nearest number that can (fewer when even its cheapest units are too dear);
+   the pools' and the factions' budget_max do not apply (the market of 19 units does).
 """
 import math
 
@@ -43,6 +57,7 @@ STYLE_ALPHA = 0.7              # Dirichlet concentration of a random army's pref
 TRAIN_SEEDS = range(0, 1_000_000_000)
 EVAL_SEEDS = range(1_000_000_000, 1_001_000_000)
 BUDGET_TRIES = 1000
+ARMIES = ("v1", "v2")          # the army schemes (module doc); v1 the default
 
 
 def _shift(a, offs, back=False):
@@ -85,6 +100,43 @@ class Market:
         self.capok = capok
         valid = (A & capok[..., None]).reshape(-1, self.S).any(0)
         self.totals = pool.lord.cost + self.q * np.nonzero(valid)[0]   # what a capped army can cost
+        self._of_count = {}
+
+    def totals_of(self, n, capped):
+        """What an army of the lord and exactly n units can cost (sorted; capped: under the caps)."""
+        key = (n, capped)
+        if key not in self._of_count:
+            a = self.A[n] & self.capok[n][..., None] if capped else self.A[n]
+            self._of_count[key] = self.pool.lord.cost + self.q * np.nonzero(a.reshape(-1, self.S).any(0))[0]
+        return self._of_count[key]
+
+    def fits(self, n, lo, hi, capped):
+        """An army of the lord and exactly n units can cost between lo and hi."""
+        t = self.totals_of(n, capped)
+        return bool(np.any((t >= lo - 1e-9) & (t <= hi + 1e-9)))
+
+    def _span(self, lo, hi):
+        """[S] the units' costs (steps of q) of an army costing lo..hi with the lord."""
+        a = max(0, math.ceil((lo - self.pool.lord.cost) / self.q - 1e-9))
+        b = min(math.floor((hi - self.pool.lord.cost) / self.q + 1e-9), self.S - 1)
+        m = np.zeros(self.S, bool)
+        if b >= a:
+            m[a:b + 1] = True
+        return m
+
+    def army_of(self, rng, n, lo, hi, template=None, alpha=STYLE_ALPHA):
+        """Units (indices): exactly n of them, the army costing lo..hi with the lord; a template under the caps
+        (as template_army), or (template None) random preferences without caps (as random_army)."""
+        final = np.zeros_like(self.A)
+        if template is not None:
+            final[n] = self.capok[n][..., None] & self._span(lo, hi)
+            weights = template.weights if hasattr(template, "weights") else np.asarray(template, float)
+        else:
+            final[n] = self._span(lo, hi)
+            weights = rng.dirichlet([alpha] * len(self.c))
+        bought = self._walk(rng, self._reach(final), weights, stop_at=n)
+        assert len(bought) == n
+        return bought
 
     def window(self, budget):
         """(lo, hi) of the units' cost in steps of q for a budget (lord excluded)."""
@@ -168,6 +220,7 @@ class Generator:
         # the config's budget cap goes with the config's pools (pools given: no cap)
         self.budget_max = P.budget_max() if pools is None else None
         self.rare = P.budget_rare() if pools is None else (0.0, None)
+        self.v2 = P.armies_v2()
         self.max_units = max_units
         self.base = base or arena_scenario.load_arena()
         self._markets = {}
@@ -197,8 +250,12 @@ class Generator:
         hi = min([hi] + [self.pools[f].budget_max / share[f] for f in factions if self.pools[f].budget_max])
         return lo, hi
 
-    def generate(self, rng, factions=None, budget_range=None, max_units=None, sides=None, name="random"):
-        """A random battle (an arena dict, see the module's doc)."""
+    def generate(self, rng, factions=None, budget_range=None, max_units=None, sides=None, name="random", armies="v1"):
+        """A random battle (an arena dict, see the module's doc); armies: the scheme (ARMIES)."""
+        if armies == "v2":
+            assert budget_range is None, "armies v2 draws no budget range"
+            return self.generate_v2(rng, factions, max_units, sides, name)
+        assert armies == "v1", f"armies {armies!r}: one of {ARMIES}"
         factions = list(factions or self.pools)
         own, enemy = sides or (factions[rng.integers(len(factions))], factions[rng.integers(len(factions))])
         lo, hi = self.budget_bounds((own, enemy), max_units)
@@ -236,6 +293,81 @@ class Generator:
                                     "units": placement.place(pool.lord, units, arena["deployment_m"])}
         return arena
 
+    def count(self, rng, max_units=None):
+        """A side's number of units besides the lord in the v2 scheme: a band by its share, then evenly inside it."""
+        bands = self.v2["counts"]
+        p = np.asarray([s for _, _, s in bands])
+        first, last, _ = bands[int(rng.choice(len(bands), p=p / p.sum()))]
+        return min(int(rng.integers(first, last + 1)), max_units or self.max_units)
+
+    def _template(self, rng, pool):
+        """A side's template (as v1 draws it), None: a random army."""
+        if pool.templates and rng.random() < self.mix.get("template", 0.0):
+            weights = np.asarray([t.weight for t in pool.templates])
+            return pool.templates[int(rng.choice(len(weights), p=weights / weights.sum()))]
+        return None
+
+    def generate_v2(self, rng, factions=None, max_units=None, sides=None, name="random"):
+        """A random battle of the v2 scheme (the module's doc): the numbers of units first, the smaller army's price
+        between its cheapest and the ceiling, the other army for the same gold."""
+        factions = list(factions or self.pools)
+        own, enemy = sides or (factions[rng.integers(len(factions))], factions[rng.integers(len(factions))])
+        top = max_units or self.max_units
+        fac = {"own": own, "enemy": enemy}
+        markets = {s: self.market(f, max_units) for s, f in fac.items()}
+        share = self.shares((own, enemy))
+        share = {s: share[f] for s, f in fac.items()}
+        for _ in range(BUDGET_TRIES):
+            n = {s: self.count(rng, top) for s in fac}
+            ceiling = float(rng.uniform(*self.v2["ceiling"]))
+            tpl = {s: self._template(rng, self.pools[f]) for s, f in fac.items()}
+            if n["own"] != n["enemy"]:
+                a = "own" if n["own"] < n["enemy"] else "enemy"
+            else:
+                a = ("own", "enemy")[int(rng.integers(2))]
+            b = "enemy" if a == "own" else "own"
+            # the first (smaller) army: a price between its cheapest and min(ceiling, its dearest); from what the
+            # second's cheapest army of its number of units costs when the first can reach that (the numbers kept)
+            ma, mb = markets[a], markets[b]
+            capped = tpl[b] is not None
+            tot = ma.totals_of(n[a], tpl[a] is not None)
+            need = mb.totals_of(n[b], capped)[0] * share[a] / share[b] / ((1 + TOLERANCE) * (1 - TOLERANCE))
+            low = max(tot[0], need) if need <= tot[-1] else tot[0]
+            price = float(rng.uniform(low, max(low, min(ceiling * share[a], tot[-1]))))
+            fit = float(tot[tot <= price + 1e-9][-1])
+            bought_a = ma.army_of(rng, n[a], min(fit, price * (1 - TOLERANCE)), price, tpl[a])
+            cost_a = self.pools[fac[a]].lord.cost + sum(self.pools[fac[a]].units[i].cost for i in bought_a)
+            # the second army: the same gold (its share), its number of units or the nearest that can spend it
+            target = cost_a * share[b] / share[a]
+            lo, hi = target * (1 - TOLERANCE), target * (1 + TOLERANCE)
+            can = [m for m in range(1, top + 1) if mb.fits(m, lo, hi, capped)]
+            if not can:
+                continue
+            m = n[b]
+            if m not in can:
+                tot_b = mb.totals_of(m, capped)
+                lower, higher = [c for c in can if c < m], [c for c in can if c > m]
+                if len(tot_b) == 0 or tot_b[0] > hi:          # too dear: fewer units
+                    m = max(lower) if lower else min(higher)
+                else:                                          # too cheap: more units
+                    m = min(higher) if higher else max(lower)
+            bought = {a: bought_a, b: mb.army_of(rng, m, lo, hi, tpl[b])}
+            budget = {a: price, b: target}
+            break
+        else:
+            raise ValueError(f"armies v2: no battle of {own} and {enemy} in {BUDGET_TRIES} draws")
+        arena = {k: v for k, v in self.base.items() if k not in ("faction", "units", "description")}
+        arena.update(name=name, budget=round(price / share[a]), sides={}, armies="v2", ceiling=round(ceiling),
+                     note=f"random battle (armies v2): {own} against {enemy}, budget {round(price / share[a])}")
+        for side, faction in fac.items():
+            pool = self.pools[faction]
+            units = [pool.units[i] for i in bought[side]]
+            arena["sides"][side] = {"faction": faction, "army": tpl[side].name if tpl[side] else "random",
+                                    "budget": round(budget[side]),
+                                    "cost": pool.lord.cost + sum(u.cost for u in units),
+                                    "units": placement.place(pool.lord, units, arena["deployment_m"])}
+        return arena
+
 
 _DEFAULT = None
 
@@ -247,13 +379,14 @@ def default():
     return _DEFAULT
 
 
-def generate(rng, factions=None, budget_range=None, max_units=None, sides=None, name="random"):
-    """A random battle from the default pools (config/nn/pools.json)."""
-    return default().generate(rng, factions, budget_range, max_units, sides, name)
+def generate(rng, factions=None, budget_range=None, max_units=None, sides=None, name="random", armies="v1"):
+    """A random battle from the default pools (config/nn/pools.json); armies: the scheme (ARMIES)."""
+    return default().generate(rng, factions, budget_range, max_units, sides, name, armies)
 
 
 def battle(seed, **kw):
-    """The battle of a seed: the same seed, the same battle. Train on TRAIN_SEEDS, evaluate on EVAL_SEEDS."""
+    """The battle of a seed: the same seed, the same battle. Train on TRAIN_SEEDS, evaluate on EVAL_SEEDS.
+    armies="v2": the second scheme's battle of the seed (another battle than v1's)."""
     return generate(np.random.default_rng(seed), name=f"random_{seed}", **kw)
 
 

@@ -316,12 +316,13 @@ def nn_arena_config(args, run_config):
         arena, army = army_from_run.load(args.army_from_run, swap=args.army_swap)
     if args.army_seed is not None:
         from tools.nn.armies import generate
-        arena = generate.battle(args.army_seed)
+        arena = generate.battle(args.army_seed, armies=args.armies)
         if args.army_swap:
             # the other half of a swapped pair (tools/nn/gate.py): our network takes the other army
             arena = dict(arena, name=f"{arena['name']}_swap",
                          sides={"own": arena["sides"]["enemy"], "enemy": arena["sides"]["own"]})
         army = {"seed": args.army_seed, "split": generate.split(args.army_seed), "swap": args.army_swap,
+                "armies": args.armies,
                 "budget": arena["budget"],
                 "side_budget": {s: arena["sides"][s]["budget"] for s in nn_scenario.SIDES},
                 "template": {s: arena["sides"][s]["army"] for s in nn_scenario.SIDES}}
@@ -427,6 +428,10 @@ def main(argv=None):
     parser.add_argument("--army-seed", type=int,
                         help="nn-arena: a generated battle (tools/nn/armies, generate.battle(seed)): "
                              "armies of a lord and 0-19 units a side; EVAL seeds for checks")
+    parser.add_argument("--armies", choices=("v1", "v2"), default="v1",
+                        help="nn-arena --army-seed: the generator's scheme (tools/nn/armies/generate.py): v1 (checks, "
+                             "the gate: the seed's battle as always) or v2 (user 11.10: the numbers of units first; "
+                             "AI-vs-AI battles, build/steps/aivai_batch.sh)")
     parser.add_argument("--army-swap", action="store_true",
                         help="nn-arena --army-seed: the seed's armies swapped (our side gets the generator's "
                              "enemy army): the second battle of a swapped pair (tools/nn/gate.py)")

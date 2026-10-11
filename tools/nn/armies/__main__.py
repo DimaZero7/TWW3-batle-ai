@@ -2,6 +2,7 @@
 
     python -m tools.nn.armies                          # 5 samples and statistics over 10000 battles
     python -m tools.nn.armies --samples 3 --xml build/nn-armies     # + scenarios/<name>.xml per sample
+    python -m tools.nn.armies --armies v2              # the second scheme (generate.py module doc)
     bash tools/nn/dock.sh tools.nn.armies --samples 8 --sim         # + a simulator batch (torch)
 """
 import argparse
@@ -32,7 +33,7 @@ def stats(arenas, pools):
     for a in arenas:
         budgets.append(a["budget"])
         sides = [a["sides"][s] for s in ("own", "enemy")]
-        if sides[0]["budget"] == sides[1]["budget"]:
+        if sides[0]["budget"] == sides[1]["budget"] or a.get("armies") == "v2":   # (v2: the second buys the first's cost)
             gaps.append(abs(sides[0]["cost"] - sides[1]["cost"]) / max(s["cost"] for s in sides))
         lo, hi = sorted(sides, key=lambda s: (pools[s["faction"]].budget_factor, s["faction"]))
         pairs.setdefault((lo["faction"], hi["faction"]), []).append(lo["cost"] / hi["cost"])
@@ -54,7 +55,10 @@ def stats(arenas, pools):
     hist = np.histogram(n_units, bins=[0, 1, 5, 10, 15, 19, 20])[0]
     out = [f"battles {N}: {mix['mirror'] / N:.0%} mirror; armies {modes['template'] / (2 * N):.0%} template, "
            f"{modes['random'] / (2 * N):.0%} random",
-           f"budget: min {min(budgets)}, median {int(np.median(budgets))}, max {max(budgets)}",
+           f"budget: min {min(budgets)}, median {int(np.median(budgets))}, max {max(budgets)}; "
+           + ", ".join(f"{lo}-{hi}: {np.mean((b >= lo) & (b < hi)):.0%}" for lo, hi, b in
+                       ((lo, hi, np.asarray(budgets)) for lo, hi in ((0, 3000), (3000, 5000), (5000, 8000),
+                                                                      (8000, 11000), (11000, 99999)))),
            f"units per side (lord not counted): mean {n_units.mean():.1f}; 0: {hist[0]}, 1-4: {hist[1]}, "
            f"5-9: {hist[2]}, 10-14: {hist[3]}, 15-18: {hist[4]}, 19: {hist[5]}",
            f"cost difference between sides of equal budgets: mean {gaps.mean():.1%}, max {gaps.max():.1%}",
@@ -78,6 +82,7 @@ def main(argv=None):
     parser.add_argument("--stats", type=int, default=10000, help="battles for the statistics (0: none)")
     parser.add_argument("--split", choices=("train", "eval"), default="train")
     parser.add_argument("--start", type=int, default=0, help="first seed, counted from the split's start")
+    parser.add_argument("--armies", choices=G.ARMIES, default="v1", help="the army scheme (generate.py module doc)")
     parser.add_argument("--xml", type=Path, help="write each sample's game battle file into this folder")
     parser.add_argument("--arenas", type=Path, help="write the samples as an arenas.json file")
     parser.add_argument("--sim", action="store_true", help="build a simulator batch of the samples and fight it out (torch)")
@@ -85,7 +90,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8")
     first = (G.TRAIN_SEEDS if args.split == "train" else G.EVAL_SEEDS).start + args.start
-    samples = [G.battle(first + i) for i in range(args.samples)]
+    samples = [G.battle(first + i, armies=args.armies) for i in range(args.samples)]
     for a in samples:
         print(describe(a))
     if args.xml:
@@ -108,7 +113,7 @@ def main(argv=None):
         print(f"every unit attacks the nearest enemy, {args.sim_s} s at most: winners {st.winner.tolist()}, "
               f"over {st.done.tolist()}, time {[round(float(t)) for t in st.t]} s")
     if args.stats:
-        arenas = [G.battle(first + args.samples + i) for i in range(args.stats)]
+        arenas = [G.battle(first + args.samples + i, armies=args.armies) for i in range(args.stats)]
         for line in stats(arenas, G.default().pools):
             print(line)
     return 0

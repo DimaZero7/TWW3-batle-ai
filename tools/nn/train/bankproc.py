@@ -41,6 +41,7 @@ class Spec:
     kite_share: float = 0.0      # --kite-share: kite battles beside the bank (kitesp.Source)
     kite_seeds: np.ndarray = None
     kite_seed: int = 0
+    armies: str = "v1"           # the generated battles' scheme (tools/nn/armies/generate.py ARMIES; run.py --armies)
 
 
 def build(spec, device):
@@ -49,9 +50,10 @@ def build(spec, device):
     from tools.nn.train.drills import source as drill_source
     if spec.drills:
         inner = drill_source.Mixed(spec.seeds, spec.max_units, spec.params, device, spec.layout, seed=spec.seed,
-                                   small=spec.small, per_drill=spec.per_drill)
+                                   small=spec.small, per_drill=spec.per_drill, armies=spec.armies)
     else:
-        inner = scenes.Generated(spec.seeds, spec.max_units, spec.params, device, seed=spec.seed, small=spec.small)
+        inner = scenes.Generated(spec.seeds, spec.max_units, spec.params, device, seed=spec.seed, small=spec.small,
+                                 armies=spec.armies)
     if not spec.kite_share:
         return inner
     kite = kitesp.armies(spec.kite_seeds)

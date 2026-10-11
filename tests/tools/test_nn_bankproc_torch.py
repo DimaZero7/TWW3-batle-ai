@@ -83,6 +83,27 @@ def test_a_used_generator_is_refused():
         bankproc._walk(src, bankproc._pack_leaf, {})
 
 
+def test_the_army_scheme_reaches_the_generator(monkeypatch):
+    from tools.nn.armies import generate
+    asked, battle = [], generate.battle
+
+    def spy(seed, **kw):
+        asked.append(kw.get("armies", "v1"))
+        return battle(seed, **kw)
+
+    monkeypatch.setattr(generate, "battle", spy)
+    for drill in (False, True):
+        s = spec(7, kite=False, drill=drill)
+        assert s.armies == "v1"                     # the default: the old scheme
+        bankproc.build(s, "cpu")
+        assert asked and set(asked) == {"v1"}
+        asked.clear()
+        s.armies = "v2"
+        bankproc.build(s, "cpu")
+        assert len(asked) == len(s.seeds) and set(asked) == {"v2"}
+        asked.clear()
+
+
 def test_a_failed_build_raises_in_the_training_process():
     w = bankproc.Ahead()
     try:

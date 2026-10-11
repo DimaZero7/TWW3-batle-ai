@@ -11,6 +11,11 @@
   "budget_rare": {"share": 0.0, "max": null},
   "_budget_rare": "Rich battles of elite units (tools/nn/armies/generate.py): this share of battles draws B log-uniform between the usual top (budget_max, the factions' budget_max) and max (at most what both sides can reach with 19 units and the lord); share 0 or max null: none, and no random draw is made (every battle as before). Raise step by step (docs/en/training/armies.md).",
   "_budget_max": "The largest budget B drawn (tools/nn/armies/pools.py budget_max): 7725 = the Empire's most before 02.10.2026 (the general and 19 swordsmen). The greatswords (850) would raise an Empire mirror's top to 16750 and shift every Empire mirror to richer armies; the cap keeps the budgets as they were.",
+  "armies_v2": {
+    "_description": "The second army scheme (user 11.10.2026; tools/nn/armies/generate.py generate_v2, docs/en/training/armies.md), for training (run.py --armies v2) and AI-vs-AI battles; the old scheme (budget B, then armies under B) stays for the evaluation seeds, the gate and the twin. counts: [first, last, share] - a side's number of units besides the lord is drawn per side: a band by its share, then evenly inside it (the game: 20 units with the lord). ceiling: [low, high] - the budget ceiling, evenly. The side of fewer units is built first, its price evenly between its cheapest and min(ceiling, its dearest) army of that many units; the other side buys for the same gold (+-5%), with fewer units when even its cheapest units do not fit. The pools' and factions' budget_max do not apply.",
+    "counts": [[15, 19, 0.40], [10, 14, 0.30], [5, 9, 0.20], [1, 4, 0.10]],
+    "ceiling": [2000, 15000]
+  },
   "caps": {
     "_description": "Template armies only: share of an army's units (the lord counted) that may be of one passport category, rounded down, at least 1. Random armies have no caps.",
     "inf_ranged": 0.6

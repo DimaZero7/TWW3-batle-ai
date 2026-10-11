@@ -160,13 +160,15 @@ class Generated:
     attacking; a battle that ends takes a random one (`want`: the side that must attack, per battle,
     0 for any). sequential: battle b is bank battle b (evaluation: every battle once)."""
 
-    def __init__(self, seeds, max_units=19, params=None, device="cpu", seed=0, sequential=False, small=None):
+    def __init__(self, seeds, max_units=19, params=None, device="cpu", seed=0, sequential=False, small=None,
+                 armies="v1"):
         """small: (share, units): that share of the bank with at most `units` units a side (the
-        generator's budget rarely gives such armies when up to 19 are allowed)."""
+        generator's budget rarely gives such armies when up to 19 are allowed); armies: the generator's scheme
+        (tools/nn/armies/generate.py ARMIES; v2 for training with run.py --armies v2)."""
         from tools.nn.armies import generate
         seeds = [int(s) for s in seeds]
         n_small = int(round(small[0] * len(seeds))) if small else 0
-        arenas = [generate.battle(s, max_units=min(max_units, small[1]) if i < n_small else max_units)
+        arenas = [generate.battle(s, max_units=min(max_units, small[1]) if i < n_small else max_units, armies=armies)
                   for i, s in enumerate(seeds)]
         roles = ["attack" if i % 2 == 0 else "defend" for i in range(len(seeds))]
         armies = [scenario.from_arena(a, r) for a, r in zip(arenas, roles)]
