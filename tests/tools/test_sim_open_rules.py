@@ -311,6 +311,129 @@ class TestHoldBreakoff:
         assert quiet == pytest.approx(self.halted(None, P.with_cal("contact", hold_breakoff=0))[0])
 
 
+class TestHoldBreakoffLord:
+    """The holdlord probe (build/charge-probe/runs/20261011-143705, -143803; build/hold/holdlord.md): the General fights
+    clanrats 10 s, then an attack on a second clanrat unit 25 m aside and a halt 3 s later - he strikes the clanrats he
+    touches nothing for 15 s after the halt, back 22.5 s / over 40 s after the attack order. contact.hold_breakoff_lord."""
+    GENERAL = "wh_main_emp_cha_general_0"
+
+    def lane(self, params=P):
+        st = scenario.build([army([(self.GENERAL, 0, 20, 180, True)], [(CLANRATS, 0, -10, 0), (CLANRATS, 60, -10, 0)])],
+                            P)
+        front, depth = geometry.dims(st.u, P.sim["formation"]["spacing_m"])
+        H = st.N // 2
+        st.u["z"][0, H] = st.u["z"][0, H + 1] = -depth[0, H] / 2
+        st.u["x"][0, H + 1] = 60.0
+        st.u["z"][0, 0] = 0.5
+        st.u["unbreakable"][:] = True
+        for _ in range(int(10 / params.dt)):
+            battle.step(st, orders(st, **{"0": (O.ATTACK, H, False), str(H): (O.ATTACK, 0, False)}), params)
+        assert bool(st.u["m"][0, 0])
+        return st, H
+
+    halted = TestHoldBreakoff.halted
+
+    def test_a_halt_after_an_attack_aside_keeps_the_lord_out_to_the_window(self):
+        assert P.sim["contact"]["hold_breakoff_lord"] == 1
+        quiet, back = self.halted((O.ATTACK, 1))
+        assert quiet == pytest.approx(0.0, abs=1e-3)                       # the game: 0 HP for 15 s after the halt
+        assert back > 5.0                                                   # fights again from the window on
+        off_quiet, _ = self.halted((O.ATTACK, 1), P.with_cal("contact", hold_breakoff_lord=0))
+        assert off_quiet > 5.0                                              # the old rule: the halt fought at once
+
+    def test_a_plain_halt_of_the_lord_is_not_concerned(self):
+        quiet, _ = self.halted(None)
+        assert quiet > 5.0
+        assert quiet == pytest.approx(self.halted(None, P.with_cal("contact", hold_breakoff_lord=0))[0])
+
+
+# --- the recontact probe: the opening (wave, first strike) comes at a formation's first contact only ---
+
+class TestOpeningOnce:
+    """Swordsmen charge held clanrats from 30 m, fight 20 s, run 40 m straight back, wait, charge again (the recontact
+    probe, build/charge-probe/runs/20261011-143904, -144020, -144146: the game's first 3 s after a second contact 0.24-1.35
+    of its 10-20 s rate after 2-80 s out, the first contact's 2.87). contact.opening_once."""
+    def run(self, params=P, wait_s=20.0):
+        """(HP the clanrats lose a second in 0-3 s after the first / the second contact, the same in 10-20 s after
+        the second; the swordsmen's loss 0-3 s after the second)."""
+        st = face_off(SWORD, CLANRATS, gap=30.0)
+        H = st.N // 2
+        st.u["unbreakable"][:] = True
+        dt = params.dt
+        log, phase, t_phase = [], "in1", 0.0
+        x_back = None
+        for k in range(int(200 / dt)):
+            if phase in ("in1", "in2"):
+                o = orders(st, **{"0": (O.ATTACK, H, True)})
+            elif phase == "fight":
+                o = orders(st, **{"0": (O.ATTACK, H, True)})
+                if t_phase >= 20.0:
+                    phase, t_phase = "back", 0.0
+                    x_back = float(st.u["x"][0, 0]) - 40.0
+            if phase == "back":
+                o = orders(st, **{"0": (O.MOVE, (x_back, float(st.u["z"][0, 0])), True)})
+                if not bool(st.u["m"][0, 0]) and abs(float(st.u["x"][0, 0]) - x_back) < 1.0:
+                    phase, t_phase = "wait", 0.0
+            if phase == "wait":
+                o = orders(st, **{"0": (O.HOLD, None, False)})
+                if t_phase >= wait_s:
+                    phase, t_phase = "in2", 0.0
+            hp_tg, hp_a, m0 = float(st.u["hp_abs"][0, H]), float(st.u["hp_abs"][0, 0]), bool(st.u["m"][0, 0])
+            battle.step(st, o, params)
+            m1 = bool(st.u["m"][0, 0])
+            if phase in ("in1", "in2") and m1 and not m0:
+                log.append(("c1" if phase == "in1" else "c2", k * dt))
+                phase = "fight" if phase == "in1" else "after"
+                t_phase = 0.0
+            log.append((k * dt, hp_tg - float(st.u["hp_abs"][0, H]), hp_a - float(st.u["hp_abs"][0, 0])))
+            t_phase += dt
+            if phase == "after" and t_phase > 21.0:
+                break
+        marks = {r[0]: r[1] for r in log if isinstance(r[0], str)}
+        rows = [r for r in log if not isinstance(r[0], str)]
+
+        def rate(c, lo, hi, i=1):
+            return sum(r[i] for r in rows if marks[c] + lo - 1e-6 <= r[0] < marks[c] + hi - 1e-6) / (hi - lo)
+        return rate("c1", 0, 3), rate("c2", 0, 3), rate("c2", 10, 20), rate("c2", 0, 3, 2), rate("c2", 10, 20, 2)
+
+    def test_a_second_contact_after_a_time_out_has_no_new_opening(self):
+        assert P.sim["contact"]["opening_once"] == 1
+        first, re_0_3, re_10_20, a_0_3, a_10_20 = self.run()
+        old = self.run(P.with_cal("contact", opening_once=0))
+        assert old[1] > 2.5 * old[2]                       # the old rule: the second contact bursts like the first
+        assert re_0_3 < 0.5 * old[1]
+        assert re_0_3 < 2.0 * re_10_20                     # what is left is the charge bonus (fading over 13 s)
+        assert first > 2.0 * re_0_3                        # the first contact keeps its opening
+        assert a_0_3 < 1.3 * a_10_20                       # the held clanrats strike no new first blow either
+        assert old[3] > 1.5 * a_0_3
+
+
+# --- the first strike swings the steady front, not the opening wave's men ---
+
+def test_the_first_strike_counts_the_steady_front_not_the_wave():
+    """contact.first_strike_steady: the charger's contact step with the wave at its peak (x2.48) - the swing is the
+    same as with no wave at all, the rate part keeps the wave."""
+    def contact_step(params):
+        st = face_off(SWORD, CLANRATS, gap=14.0)
+        H = st.N // 2
+        for _ in range(40):
+            hp0 = float(st.u["hp_abs"][0, H])
+            m0 = bool(st.u["m"][0, 0])
+            battle.step(st, orders(st, **{"0": (O.ATTACK, H, True)}), params)
+            if bool(st.u["m"][0, 0]) and not m0:
+                return hp0 - float(st.u["hp_abs"][0, H])
+        return None
+    assert P.sim["contact"]["first_strike_steady"] == 1
+    W = dict(P.sim["melee"]["wave"])
+    on = contact_step(P)
+    off = contact_step(P.with_cal("contact", first_strike_steady=0))
+    no_wave = contact_step(P.with_cal("melee", wave=dict(W, amp=0.0)))
+    no_wave_off = contact_step(P.with_cal("melee", wave=dict(W, amp=0.0)).with_cal("contact", first_strike_steady=0))
+    assert no_wave == pytest.approx(no_wave_off, rel=1e-4)    # without a wave the flag changes nothing
+    assert on < 0.7 * off                                      # the swing loses the wave's x2.48
+    assert on > no_wave                                        # the step's rate keeps the wave
+
+
 # --- C2 / R4: leaving melee, the chase and its 24 s window ---
 
 class TestMeleeExit:

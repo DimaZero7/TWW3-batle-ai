@@ -30,7 +30,8 @@ Per pair of units in contact (i strikes j), per second:
     first strike    = F x struck x p x per hit, once (swing), not cut by hold_rate (contact.first_strike_full): the
                       interval runs only after a blow, so a unit coming into a fight (moving in, or its charge landing)
                       or a standing one reached by an enemy it faces strikes once at once with every man in contact
-                      (battle.py decides when)
+                      (battle.py decides when: a formation at its first contact of the battle only, contact.opening_once);
+                      F without the opening wave (contact.first_strike_steady)
 
 Direction: defence x0.6 from the flank, x0.3 from the rear or against a routing unit (database, weight 1;
 a lone man: contact.lord_direction of it - the lord swarm probe). A unit brings to each side of its formation no
@@ -213,12 +214,19 @@ def strikes(u, pw, contact, params, charge_now, first=False):
             side_len = torch.maximum(front_j if g in (0, 3) else depth_j, u_g.amax(dim=1, keepdim=True))
             tot = u_g.sum(dim=1, keepdim=True)
             F = torch.where(in_g & ~single_j & ~single_i & (tot > side_len), F * side_len / tot.clamp(min=1e-6), F)
+    # the men striking without the opening wave: the first strike's (contact.first_strike_steady)
+    F0 = F if (first and cc.get("first_strike_steady")) else None
     wave = cal.get("wave")
     if wave and "contact_s" in u:
         # The opening wave (melee.wave): two formations' fronts meet closer than they fight later and part over
         # tau_s, so more men stand within reach early: men striking x (1 + amp exp(-t / tau_s)), t the pair's time in
         # melee (the younger of the two clocks: a fresh unit meets its enemy's front anew); formations only.
-        t_pair = torch.minimum(u["contact_s"][:, :, None], u["contact_s"][:, None, :])
+        # (contact.opening_once: the clock is the unit's seconds in melee over the battle, melee_s - a formation back
+        # in melee after a time out gets no new wave; battle.py. melee_s >= contact_s in a run; the larger of the two
+        # keeps a contact clock set from outside - a recording, a test - in force)
+        clock = (torch.maximum(u["contact_s"], u["melee_s"]) if cc.get("opening_once") and "melee_s" in u
+                 else u["contact_s"])
+        t_pair = torch.minimum(clock[:, :, None], clock[:, None, :])
         w = 1.0 + knobs.get(u, "wave_amp", float(wave["amp"]), 3) * torch.exp(-t_pair / float(wave["tau_s"]))
         floor = wave.get("missile_attack_floor")
         if floor:
@@ -229,10 +237,15 @@ def strikes(u, pw, contact, params, charge_now, first=False):
             # missile_attack_floor (1.38) of the steady level.
             shot_at = ((u["range"] > 0) & (u["order_kind"] == O.ATTACK))[:, None, :]
             w = torch.where(shot_at, w.clamp(min=float(floor)), w)
+            if F0 is not None:          # (the floor is the steady level)
+                F0 = torch.where(single_i | single_j | ~shot_at, F0, F0 * float(floor))
         F = torch.where(single_i | single_j, F, F * w)
     own = torch.where(single_i, torch.ones_like(men_i), men_i)
     total = F.sum(dim=2, keepdim=True)
     F = F * torch.where(total > own, own / total.clamp(min=1e-6), torch.ones_like(total))
+    if F0 is not None:
+        total0 = F0.sum(dim=2, keepdim=True)
+        F0 = F0 * torch.where(total0 > own, own / total0.clamp(min=1e-6), torch.ones_like(total0))
     # At most lord_max_attackers around a single man, however many units they belong to (the
     # lord swarm probe); an enemy lord among them keeps his place (one man) and the infantry
     # share the rest.
@@ -240,6 +253,9 @@ def strikes(u, pw, contact, params, charge_now, first=False):
     around = torch.where(single_i, torch.zeros_like(F), F).sum(dim=1, keepdim=True)
     cap = (lord_max - lone).clamp(min=0)
     F = torch.where(single_j & ~single_i & (around > cap), F * cap / around.clamp(min=1e-6), F)
+    if F0 is not None:
+        around0 = torch.where(single_i, torch.zeros_like(F0), F0).sum(dim=1, keepdim=True)
+        F0 = torch.where(single_j & ~single_i & (around0 > cap), F0 * cap / around0.clamp(min=1e-6), F0)
 
     sector = geometry.sector(pw["rel_j"], cc["front_deg"], cc["rear_deg"])
     routing_j = u["r"][:, None, :]
@@ -372,4 +388,10 @@ def strikes(u, pw, contact, params, charge_now, first=False):
     # One blow of every man in contact (the first strike): the rate's men and multipliers, one swing each; every man in
     # reach swings, hold_rate is about the men who step in later (contact.first_strike_full; R1).
     swing_rate = full if cc.get("first_strike_full") else rate
+    if F0 is not None:
+        # The first strike swings the men of the steady front, not the opening wave's (contact.first_strike_steady;
+        # config/nn/sim.json contact.first_strike_steady_why): the swing was checked against the game before the wave
+        # came in (the melee probe: 0-1 s 189 HP against the game's 220, swordsmen charging clanrats); multiplied by the
+        # wave (x2.48 at the contact) it gave 441 against 184-219, the recontact probe's 18 first contacts 211.
+        swing_rate = torch.where(F > 0, swing_rate * F0 / F.clamp(min=1e-9), torch.zeros_like(swing_rate))
     return rate, hit, sector, F, swing_rate * (p / per_s.clamp(min=1e-9))

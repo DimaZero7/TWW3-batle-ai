@@ -74,13 +74,13 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
 - **Melee by the game's formulas:** hit chance 35 + attack − defence (weight 1), a miss costs 0.5 s;
   damage - armour-piercing whole + base minus the armour roll; the wound pool; flank / rear - defence
   ×0.6 / ×0.3; charge from a run-up and the charge-speed sprint; the first strike on entering a fight; the
-  opening wave of a fight (`melee.wave`); a thinned formation keeps its width and only part of its men reach
+  opening wave of a fight (`melee.wave`) - both at a formation's first contact of the battle only (the `recontact` probe), the first strike by the men without the wave; a thinned formation keeps its width and only part of its men reach
   the enemy (`melee.front_fill_ranks` 1.5: the `dmgmelee` probe, a unit at 30 % struck 1.6-1.9x the game
   before); random blows (`noise.blows`: on in the replay and the twin, off in training).
 - **Leaving melee and orders in a fight:** the 24 s window from the database (a lord's too); a move order in a fight is
   leaving in any direction; an attack on a target out of contact is leaving (a lord's too); a new attack in a fight
   strikes only its own target for 24 s; a hold after a leave or an attack on an enemy out of contact does not
-  close the window (no strikes until 24 s from the first order); an unchased leaver is held 2 s; the chase has no charge sprint.
+  close the window (no strikes until 24 s from the first order; a lord's too); an unchased leaver is held 2 s; the chase has no charge sprint.
 - **Shooting by the game's rules:** range centre to centre, a fire arc per man, the database's scatter
   model with no fitting, spill onto neighbours, fire past own men by the bullet's arc, firing on the move
   (militia, throwing stars); shooters in melee strike weakly, as in the game; a new order or target: arcing fire (arrows, bolts,

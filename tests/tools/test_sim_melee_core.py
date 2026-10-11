@@ -317,6 +317,8 @@ class TestMeleeCore2:
         pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
         contact = pw["enemy"] & (pw["gap"] <= 1.0)
         z = torch.zeros_like(st.u["men"])
+        st.u["contact_s"] = torch.full_like(st.u["men"], 1e4)     # past the opening wave (the swing is the steady
+        #                                                           front's: contact.first_strike_steady)
         st.u["order_kind"][0, H], st.u["order_target"][0, H] = O.ATTACK, 0
         rate, _, _, F, swing = melee.strikes(st.u, pw, contact, P, z, first=True)
         u = P.units[SWORD]["melee"]
@@ -333,7 +335,9 @@ class TestMeleeCore2:
     def test_a_unit_running_in_strikes_once_at_once_and_a_standing_one_facing_it_too(self):
         steps = lost_per_step(SWORD, CLANRATS)                       # a charge at a run
         first, then = steps[0], steps[2]
-        assert first[0] > 4 * then[0]                                # the charger's burst on the contact step
+        # the charger's burst on the contact step (the swing of the steady front, contact.first_strike_steady: ~3.4x
+        # the step after, which keeps the opening wave)
+        assert first[0] > 3 * then[0]
         # the standing clanrats facing it strike once at once too (build/open_melee/spec.md R1)
         assert first[1] > 2 * then[1]
         off = lost_per_step(SWORD, CLANRATS, params=P.with_cal("contact", stand_first_strike=0))

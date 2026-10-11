@@ -96,6 +96,19 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
     in reach swings. The probe: the charger loses in the first second 106–194 HP to braced spearmen, 120 to
     swordsmen, 60–131 to units given an attack order at contact, 0 to a target facing away; the struck side's
     first-second error 1.05 → 0.41. No fitted numbers.
+  - The men of the steady front swing, not the opening wave's (`contact.first_strike_steady`): the swing was checked
+    against the game before the wave came in (x2.48 men at the contact); together they gave 441 HP/s at 0–1 s
+    against the game's 184–219 (swordsmen → clanrats), now 253; the other pairs game / before / now 88–186 /
+    251–407 / 147–228, the held side's answer 40–71 / 157–266 / 93–163. OPEN: still 1.2–1.9x the game at 0–1 s
+    and twice the game at 1–3 s.
+  - At a formation's first contact of the battle only (`contact.opening_once`), with the wave. The `recontact` probe
+    (`build/charge-probe/runs/20261011-143904`, `-144020`, `-144146`, 18 lanes): swordsmen charge halted clanrats,
+    fight 30 s, run 12 / 25 / 40 m back, wait 0–60 s and charge again at a run (the last 3 s at the same
+    3.8–6.8 m/s). Damage at 0–3 s over 10–20 s: the first contact 2.87 (1.9–6.2); the second after 2 / 6 / 21 / 30
+    / 80 s out of melee 0.78 / 0.24 / 1.02 / 0.65 / 1.35: no burst, and no threshold of rest. The simulator
+    restarted the wave and the first strike after 10 s out of contact (4.7), now 1.48 - the second run-in's charge
+    bonus (the database); the game shows none at 3–10 s either (0.97–1.20 of 10–20 s, the simulator 1.26) - OPEN.
+    A lord strikes his first blow at every contact (his interval; a lord's second contact is unmeasured).
 - **Only models that reach strike.** Damage needs an attack animation that physically reaches
   a target; any model with an enemy within weapon reach tries to attack, so a wider front means
   more attackers. WH1–WH3 guides · [WH3 kv guide][g3], [WH1 kv guide][g1] · medium.
@@ -296,7 +309,7 @@ is the start of the step in which the units met):
   after the `melee_breakoff_secs` 24 s window. The simulator released them after 20 s and they came back with a
   fresh first strike (the target lost 341 HP in 5 s, game 250); with the chase (`contact.chase`) 164; the
   Warlord's lane 143 → 215 (game 204). A new strike by every man after a pause in striking is not modelled (it
-  added nothing in these lanes).
+  added nothing in these lanes; the `recontact` probe confirmed it: no burst after 2–80 s out of a fight, above).
 - OPEN: a target ordered to attack in the second of contact gives no burst (the attacker loses 16–22 HP in
   1 s). One standing without an order does (clanrats lose 42–172 HP in 1 s on spearmen and swordsmen) — now
   in the simulator too (the first strike of a standing unit, above). A move order into contact gives a smaller
@@ -544,6 +557,7 @@ unit is out of contact ~4 s after the order (its own melee flag goes off only af
 
 | What | Result | Why not |
 |---|---|---|
+| The wave and the first strike anew after 10 s out of contact; the first strike by the wave's men | a second contact struck as the first (0–3 s over 10–20 s 4.7, game 0.24–1.35); the first 441 HP/s at 0–1 s (game 184–219) | the `recontact` probe and the melee probe ([simulator](../../training/simulator.md#tried-and-rejected)) |
 | Attack − defence at weight 0.1 in formations (before 06.10.2026) | held the four pairs (51 of 54 within 20 %), but every addition to attack and defence — abilities, fatigue, charge, flanks — worked ten times weaker | not the game's rule; the flat pairs are explained by the cost of a miss and overkill |
 | A fixed interval, p / interval, at weight 1 in formations | worse on 121 battles than p / (p × interval + 0.5) (`build/hitchance` fit2) | a miss in the game costs less than the interval |
 | The exact overkill step (whole blows per man) | loss-rate error 0.174 against 0.146 without overkill and 0.144 smoothed; worse across all 200 resamples | the step is blurred in formations (candidates: height between models, blows on the wounded) |

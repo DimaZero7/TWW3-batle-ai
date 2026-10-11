@@ -210,8 +210,11 @@ def step(st, orders, params=None, dt=None):
         # after a run 15 m back or an attack on clanrats 4 m aside dealt 0 HP for 10-25 s, 6 lanes of 6, back from
         # 25-26 s after the first order; a plain halt fought on). brk_s: seconds left of that window. Another order
         # (not a hold) ends it; the other rules (fresh_incidental, leave_latch, breakoff) go on as they were.
+        # A lone man (a lord) too (contact.hold_breakoff_lord; config/nn/sim.json contact.hold_breakoff_lord_why: the
+        # holdlord probe - the General told in melee to attack clanrats 25 m aside, halted 3 s later, struck the
+        # clanrats he touched nothing for 15 s after the halt and fought again 22.5 s / over 40 s after the attack order).
         win = float(R.get("melee_breakoff_secs", 0.0))
-        form = (u["men0"] > 1) & (u["range"] <= 0)
+        form = ((u["men0"] > 1) | bool(cal["contact"].get("hold_breakoff_lord"))) & (u["range"] <= 0)
         ti_b = tgt.clamp(min=0)[:, :, None]
         att_other = (kind == O.ATTACK) & (tgt >= 0) & ~touch.gather(2, ti_b).squeeze(2)
         begin = new_order & u["m"] & standing & form & (leaving | att_other)
@@ -268,6 +271,16 @@ def step(st, orders, params=None, dt=None):
     # contact.reset_s (the game: pull-outs of 4-7 s do not restart a fight, build/cyclecharge).
     reset_s = float(cal["contact"].get("reset_s", 0.0))
     fresh = engaged & (u["contact_s"] <= 0)              # its fight starts this step
+    # The opening once a battle (contact.opening_once; config/nn/sim.json contact.opening_once_why): a formation's
+    # opening - the wave (melee.py, its clock melee_s: seconds in melee over the whole battle, never reset) and the
+    # first strike below - comes at its first contact of the battle only; back in melee after any time out it fights at
+    # the steady rate from the first second (the recontact probe: swordsmen charging clanrats again after 2-80 s out
+    # struck 0.24-1.35 of their 10-20 s rate in the first 3 s, their first contact 2.87).
+    opened = torch.zeros_like(fresh)
+    if "melee_s" in u:
+        if cal["contact"].get("opening_once"):
+            opened = (u["melee_s"] > 0) & (u["men0"] > 1)
+        u["melee_s"] = torch.where(engaged, u["melee_s"] + dt, u["melee_s"])
     u["out_s"] = torch.where(engaged, torch.zeros_like(u["out_s"]), u["out_s"] + dt)
     u["contact_s"] = torch.where(engaged, u["contact_s"] + dt,
                                  torch.where(u["out_s"] < reset_s, u["contact_s"], torch.zeros_like(u["contact_s"])))
@@ -314,7 +327,7 @@ def step(st, orders, params=None, dt=None):
     # the rest of the fight (melee.py: men gather round a lord only when he ran in).
     # (an attack order given within order_grace_s of a contact it ran into charges then: no second first strike)
     arrive = fresh & (speed > 0.3)
-    first = arrive | (fire & ~(u["ran_in"] & (u["contact_s"] <= float(ccal["order_grace_s"]) + dt)))
+    first = (arrive | (fire & ~(u["ran_in"] & (u["contact_s"] <= float(ccal["order_grace_s"]) + dt)))) & ~opened
     u["ran_in"] = (u["ran_in"] | arrive | fire) & (u["contact_s"] > 0)
 
     # --- lord abilities cast by the game's AI by its rule or by the network's order: their effects hold
@@ -332,7 +345,7 @@ def step(st, orders, params=None, dt=None):
         # every man in contact facing it (within contact.front_deg of its front): its men's intervals have run out (CA
         # Feature Focus #2: the interval runs after a blow); the probe: a charger lost 106-194 HP in the first second
         # to braced spearmen, 120 to swordsmen, 0 to a target facing away
-        stand = fresh & (speed <= 0.3) & (kind == O.HOLD)
+        stand = fresh & (speed <= 0.3) & (kind == O.HOLD) & ~opened
         facing = pw["rel_i"].abs() <= float(cal["contact"]["front_deg"]) * geometry.DEG
         first_pair = first_pair | (stand[:, :, None] & facing)
     hp_melee = rate * dt + torch.where(first_pair, swing, torch.zeros_like(swing))

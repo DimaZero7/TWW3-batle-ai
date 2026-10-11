@@ -169,6 +169,8 @@ INTERNAL = {
     "contact_s": ("f", "seconds in melee since the contact began (it goes on through gaps shorter than "
                        "contact.reset_s out of contact)"),
     "out_s": ("f", "seconds out of contact since the last contact (contact.reset_s)"),
+    "melee_s": ("f", "seconds in melee over the whole battle, never reset: the opening wave's clock and 'it has fought "
+                     "already' (contact.opening_once; battle.py, melee.py)"),
     "charge": ("f", "the charge left, 0-1: 1 at the charge's first blow, then down by its own clock over "
                     "charge_decay_duration (13 s), in contact or not"),
     "runup": ("f", "run-up, m: run at charge.min_speed_share of the run speed or faster since the last stop, "
