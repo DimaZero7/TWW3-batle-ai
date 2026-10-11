@@ -80,6 +80,11 @@ planner, and the AI weaknesses players exploit. Our own observations: [the game'
   - Ours: in the 72 gate-set battles **91 % of the runs end with a new order of the AI** (a point 12 m from the unit,
     median), and in 44 % of them the mode takes the unit away again within 1 s - the "erased order". So in the
     simulator a new order ends the run ([skirmish mode](../../training/simulator.md#skirmish-mode)).
+  - Ours: **a caught shooter is taken out by the AI's own run move** (no target, point 10-1000 m; 17 % of its melee
+    seconds, the mode's far point only 2 %): it moves at once at 2.3-3.0 m/s, still flagged in melee (chased)
+    ([a caught shooter's way out](../../training/simulator.md#a-caught-shooters-way-out)).
+  - Ours: the AI's shooters change targets as often as the network's (2.0-3.0 per 100 s with a target); at a change the
+    fire flag drops for one recorded second (99 %), which made the twin's 'target changes while firing' row look ~20x lower.
 
 ## Known AI behaviours and fixes (patch notes)
 

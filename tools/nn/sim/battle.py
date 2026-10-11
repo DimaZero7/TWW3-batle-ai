@@ -141,6 +141,13 @@ def step(st, orders, params=None, dt=None):
         # and struck nothing for 21-25 s, 2 lanes of 2; config/nn/sim.json contact.leave_away_why); absent: leave_m.
         away_m = float(cal["contact"].get("leave_away_m", leave_m))
         far_point = ~(touch & toward).any(2) & (point_d >= away_m)
+        if cal["contact"].get("missile_leave_any"):
+            # A formation with a missile weapon leaves on a move leave_m or more away whatever its direction, through
+            # the enemy too, given before the contact or in it (contact.missile_leave_any; config/nn/sim.json
+            # contact.missile_leave_why: the 72 gate battles, the game AI's shooters in melee under a run move
+            # 10-1000 m away moved 0.92 of the seconds at 2.3 m/s with the point through the nearest enemy, 0.96 at
+            # 3.0 m/s with it away; P3 above - spearmen that fought on - is a melee unit's)
+            far_point = far_point | ((u["range"] > 0) & (u["men0"] > 1) & (point_d >= leave_m))
         if cal["contact"].get("move_melee_leave") and "order_s" in u:
             # A move order given in melee is a leave in any direction, through the enemy too (contact.move_melee_leave;
             # the meleeorders probe, build/charge-probe/runs/20261008-162358 / -162441: swordsmen in melee told to run
@@ -195,7 +202,8 @@ def step(st, orders, params=None, dt=None):
     engaged = standing & (touch & standing[:, None, :]).any(2)
     # Pinned: a missile unit leaving melee stays held where it is (not striking, struck) until it has been leaving in
     # contact for contact.pin_s seconds; a unit without a missile weapon for contact.pin_melee_s (absent: 0, not held:
-    # it walks out unless it is chased, below); a lone man (a lord) is not held (config/nn/sim.json contact.pin_why).
+    # it walks out unless it is chased, below); a lone man (a lord) is not held (config/nn/sim.json contact.pin_why;
+    # pin_s is 0 there: the game's shooters move from the order on).
     pin_s = knobs.get(u, "pin_s", float(cal["contact"].get("pin_s", 0.0)))
     pin_melee_s = knobs.get(u, "pin_melee_s", float(cal["contact"].get("pin_melee_s", 0.0)))
     in_exit = leaving & engaged & (u["men0"] > 1)

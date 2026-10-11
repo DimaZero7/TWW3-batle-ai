@@ -89,6 +89,9 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
   shooting, from an enemy coming at it (its way within 40°) within 43.9 m (Skaven 33.1) man to man - over its order;
   from its own attacker to 82 m, from one attacking another ending with a chance of 0.18 a second; a new order ends
   the run (in the game 91 % of the AI's runs end with its own order); off for the network, as the bridge sets it ([details](training/simulator.md#skirmish-mode)).
+- **A shooter's way out of melee**: a shooter told to move beyond 10 m leaves at once (no hold in place) and in any
+  direction, through the enemy too; the chase keeps it in melee. So in the records of 72 battles: the AI's and the
+  network's shooters under such a move move from the first second, 2.3-3.0 m/s ([details](training/simulator.md#a-caught-shooters-way-out)).
 - **Morale by the game's rules:** casualty windows 4 / 60 s, "under fire", flank / rear, "flanks secure",
   charge, outnumbering, "losing the fight" (−3 / −8 by the combat ratio, as in the database), a strong
   enemy, the lord's death (−16 for 45 s, then −10), shattering of a unit and of the army; the rally is the
@@ -126,8 +129,9 @@ loop - the replay of the network's 72 set battles.
 - a worn unit in melee loses health faster than in the game (the `dmgmelee` probe is being analysed);
 - fewer routs and rallies than in the game; in the twin our units rout less than in the game, the AI's
   more;
-- the AI's shooters in skirmish mode lose less in the replay than in the game (0.34 health against 0.42) and move
-  less in the twin (0.26-0.27 of their seconds against 0.36-0.39: movement at 60-100 m and on the approach is missing);
+- the AI's shooters lose less in the replay than in the game (0.34 health against 0.42): one running out of melee loses
+  more in the game (likely more chasers); they move less in the twin (0.27-0.29 of their seconds against 0.38-0.41: the
+  AI's short steps towards its target at 40-100 m - `ai_like`'s behaviour);
 - "flanks secure" grows over ~45 s in the game (+1…+7), in the simulator +5 at once (the `rallysecure`
   probe);
 - order delay 0.6-0.8 s in small battles in the game, 0.36 s in the simulator;

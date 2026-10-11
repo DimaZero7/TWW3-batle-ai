@@ -88,7 +88,9 @@ Ours: [pace and fatigue](../units/pace.md), [simulator](../../training/simulator
     contact after ~4 s, chased 24–26 s (until the `melee_breakoff_secs` 24 window); 46 episodes of the
     network's battles — chased in melee for all of the first 6 s, unchased 0.58 at 6 s; the leaver takes ×1.23
     damage. The simulator: a unit with an attack order on the leaver follows it and strikes it
-    (`contact.chase`), missile units are held 5 s.
+    (`contact.chase`); a missile unit is not held: it leaves at once, in any direction (`contact.pin_s` 0,
+    `contact.missile_leave_any`; the game AI's and the network's shooters told to move in melee move at 2.3-3.0 m/s
+    from the first second, [simulator](../../training/simulator.md#a-caught-shooters-way-out)).
 - **Pursuit.** All pursuer attacks on routers count as charges; 5.0.0 removed the cap of 35 % of a
   pursuing unit attacking. WH3 keys: `pursue_max_charge_time` 5 s, `pursue_charge_max_unit_separation`
   8 m, `melee_seconds_in_close_proximity_to_stop_pursue` 1.5 s (no descriptions). · twwstats,

@@ -2716,7 +2716,9 @@ class TestLeavingMelee:
 
     @pytest.mark.parametrize("key,held_s", [(SPEAR, 0.0), (ARCHER, 5.0), (GENERAL, 0.0)])
     def test_a_missile_unit_leaving_melee_is_held_pin_s_a_melee_unit_and_a_lord_not(self, key, held_s):
-        # (a melee unit is not held: chased, it walks on with its chaser in contact - contact.chase)
+        # (a melee unit is not held: chased, it walks on with its chaser in contact - contact.chase; pin_s 0 in
+        # sim.json since the shooters' leave of the 72 gate battles - here the rule at 5 s)
+        p = P.with_cal("contact", pin_s=5.0)
         st, H = self._fight(key, 1)
         x0, hp0 = float(st.u["x"][0, 0]), float(st.u["hp_abs"][0, 0])
         xs = []
@@ -2725,12 +2727,29 @@ class TestLeavingMelee:
             o = replay.hold(st)
             o.kind[0, H], o.target[0, H] = O.ATTACK, 0
             o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = O.MOVE, -200.0, 0.0, True
-            battle.step(st, o, P)
+            battle.step(st, o, p)
             xs.append(x0 - float(st.u["x"][0, 0]))
         held = int(held_s / P.dt)
         if held:
             assert max(xs[:held]) == pytest.approx(0.0, abs=0.01) and float(st.u["hp_abs"][0, 0]) < hp0
         assert xs[-1] > 3
+
+    def test_a_shooter_told_to_move_in_melee_moves_at_once(self):
+        # contact.pin_s 0 (contact.pin_why: the network's shooters told to move in melee in the 72 gate battles moved
+        # 2.8 / 5.1 / 8.1 m at 1 / 2 / 3 s at a run; the wavemiss2 probe 2.9 / 5.6 m at 2 / 4 s): no hold in place
+        assert P.sim["contact"]["pin_s"] == 0.0
+        st, H = self._fight(ARCHER, 1)
+        x0, hp0 = float(st.u["x"][0, 0]), float(st.u["hp_abs"][0, 0])
+        xs = []
+        for _ in range(int(2.0 / P.dt)):
+            st.u["morale"][:] = 1000.0
+            o = replay.hold(st)
+            o.kind[0, H], o.target[0, H] = O.ATTACK, 0
+            o.kind[0, 0], o.x[0, 0], o.z[0, 0], o.run[0, 0] = O.MOVE, -200.0, 0.0, True
+            battle.step(st, o, P)
+            xs.append(x0 - float(st.u["x"][0, 0]))
+        assert xs[-1] > 1 and float(st.u["hp_abs"][0, 0]) < hp0          # (turning about first: turn.move_turn)
+        assert float(st.u["leave_s"][0, 0]) == 0.0
 
     @pytest.mark.parametrize("key,mult", [(SPEAR, 1.25), (ARCHER, 1.0)])
     def test_a_leaving_unit_takes_leave_taken_of_the_blows_and_deals_none(self, key, mult):

@@ -17,6 +17,7 @@ P = load()
 SPEAR, SLAVE, CLANRAT = "wh_main_emp_inf_spearmen_0", "wh2_main_skv_inf_skavenslave_spearmen_0", \
     "wh2_main_skv_inf_clanrat_spearmen_0"
 SWORD, CLANRATS = "wh_main_emp_inf_swordsmen", "wh2_main_skv_inf_clanrats_1"
+ARCHER = "wh2_dlc13_emp_inf_archers_0"
 TOUCH = min(0.0, P.sim["contact"]["reach_m"])
 
 
@@ -128,9 +129,9 @@ class TestHoldRate:
 class TestMoveThrough:
     """contact.leave_away_only (build/probes7 P3): a move order to a far point THROUGH the enemy it touches keeps the
     unit fighting (CA's planner's far move points); a far point away from it is a leave (no strikes)."""
-    def dealt(self, point_x, params=P, in_melee=False):
+    def dealt(self, point_x, params=P, in_melee=False, key=SPEAR):
         """The spearmen's move order given before the contact (P3: the planner's push from the go), or in melee."""
-        st = face_off(SPEAR, CLANRAT)          # spearmen west facing east, clanrat spearmen east
+        st = face_off(key, CLANRAT)            # spearmen west facing east, clanrat spearmen east
         H = st.N // 2
         move = orders(st, **{"0": (O.MOVE, (point_x, 0.0), False), str(H): (O.ATTACK, 0, False)})
         o = orders(st, **{str(H): (O.ATTACK, 0, False)}) if in_melee else move
@@ -154,6 +155,17 @@ class TestMoveThrough:
         assert through > 0 and m_through and away == pytest.approx(0.0, abs=1e-3)
         off, _ = self.dealt(60.0, P.with_cal("contact", leave_away_only=0))
         assert off == pytest.approx(0.0, abs=1e-3)
+
+    def test_a_shooters_far_point_through_the_enemy_is_a_leave(self):
+        # contact.missile_leave_any (the 72 gate battles: the game AI's shooters in melee under a run move through the
+        # nearest enemy moved 0.92 of the seconds at 2.3 m/s): a formation with a missile weapon leaves whatever the
+        # direction; the spearmen of P3 still fight on
+        assert P.sim["contact"]["missile_leave_any"]
+        through, _ = self.dealt(60.0, key=ARCHER)
+        assert through == pytest.approx(0.0, abs=1e-3)
+        off, _ = self.dealt(60.0, P.with_cal("contact", missile_leave_any=0), key=ARCHER)
+        spear, _ = self.dealt(60.0)
+        assert off > 0 and spear > 0
 
     def test_a_far_point_through_the_enemy_strikes_in_full_a_near_one_held(self):
         far, _ = self.dealt(60.0, P.with_cal("contact", move_far_full=1))       # (off in sim.json: one lane)

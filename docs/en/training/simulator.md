@@ -70,10 +70,15 @@ optional: orders made without it get −1; independent of `kind`). All `[B, N]`.
 leaves the fight on withdraw, or on a move to a point 10 m or more away (`contact.leave_m`, any
 unit) when that point lies away from every enemy it touches (more than 90° off the way to its centre,
 `contact.leave_away_only`): it strikes nobody, while the enemies in contact go on striking it. A move to a point
-through the enemy (CA's planner gives such points 55–60 m on) is not a leave: the unit fights on (at the move-in-contact
+through the enemy (CA's planner gives such points 55–60 m on) is not a leave for a unit without a missile weapon: it fights on (at the move-in-contact
 share). Probe P3 (`build/probes7`): spearmen walking to a point 60 m through the clanrat spearmen attacking them dealt
-213 / 317 / 521 HP at 0–5 / 5–15 / 15–30 s (the simulator had them leaving: 0 / 0 / 98). A missile unit is first held in
-place for 5 s (`contact.pin_s`: standing in contact, struck), then it walks out. A unit without a missile
+213 / 317 / 521 HP at 0–5 / 5–15 / 15–30 s (the simulator had them leaving: 0 / 0 / 98). A missile unit
+leaves on a move beyond 10 m in any direction, through the enemy too and on an order given before the contact too
+(`contact.missile_leave_any`), and at once, with no hold in place (`contact.pin_s` 0): in the 72 gate battles the
+network's shooters told to move in melee were 2.8 / 5.1 / 8.1 m off at 1 / 2 / 3 s at a run (780 orders) and
+1.5 / 2.7 / 4.1 m at a walk (344), flagged in melee all along (the chasers 13–14 m behind); the game AI's shooters under
+a run move in melee move 0.92–0.99 of the seconds, 2.3 m/s through the nearest enemy and 3.0 m/s away from it
+([below](#a-caught-shooters-way-out)). A unit without a missile
 weapon is held 2 s (`contact.pin_melee_s`, probe `fatleave`: game 1.5 / 4.6 / 9.3 m at 2 / 4 / 6 s, twin 0 / 3.4 /
 9.3 m; [melee](../game/mechanics/melee.md)), a lord is not held; then it about-faces and walks out unless it is
 chased. **The chase**
@@ -241,7 +246,7 @@ How it works (`tools/nn/sim/skirmish.py`, `config/nn/sim.json` -> `skirmish`; th
   over the AI's orders and the runs were 1.3 times the game's. The 5 m is the "same point" bound of the recordings'
   analysis, not a fit. `ai_like` in the twin does the same: its 19 m "hop" ends the mode's run, as the game AI's orders.
 - **Caught**, it runs on (`melee_run`: the game's 73 % of the melee seconds, striking half as hard): a leave - it
-  strikes nobody, is held `contact.pin_s`, is struck. A new run does not start in melee.
+  strikes nobody, leaves at once, is struck. A new run does not start in melee.
 - **Replaying recordings.** The mode's run shows in a recording as a far order point (>= 1000 m). It is not the AI's
   order, so such seconds take the order before them (`check.ENGINE_FAR_M`, `replay.engine_far_rows`).
 
@@ -291,7 +296,65 @@ game | before | with the mode):
 
 At 20-60 m from the enemy the twin's AI shooters now move as in the game (0.50 / 0.35 against 0.46 / 0.31); at 60-100 m
 (0.09-0.14 against 0.18-0.25) and on the approach beyond 140 m less: that is not the mode any more (it starts closer)
-but the AI's repositioning. The AI shooters' target changes (game 0.04 per 100 s, twin 2.9) are untouched by the mode.
+but the AI's repositioning: at 40-100 m the game AI's shooter spends 0.13-0.15 of its seconds on a short step towards
+the enemy (point 16-22 m off, a target in 64 %), `ai_like` 0.05 (`build/skirm2` analysis, sets itS1, itS2). That is the
+script's behaviour, not a simulator mechanic.
+
+### A caught shooter's way out
+
+A shooter told in melee to move beyond 10 m leaves at once, with no hold in place (`contact.pin_s` 0), and in any
+direction - through the enemy too, on an order given before the contact too (`contact.missile_leave_any`). It is struck
+while in contact and strikes nobody; the chase (`contact.chase`) keeps it in melee.
+
+Where from (the records of the 72 gate battles it1-it9):
+- **The game's AI takes its caught shooters out itself with a run move** (no target, point 10-1000 m): 17 % of their
+  melee seconds. Not the skirmish mode: the mode's far point covers 2 % of their melee seconds. Under such a move the
+  shooter moves 0.92-0.99 of the seconds at 2.4-3.0 m/s (median) whatever the order's age, flagged in melee (chased);
+  through the nearest enemy 2.3 m/s, away from it 3.0 m/s; on a move given before the contact 2.8 m/s. The community:
+  the AI disengages cleanly because it repeats the move order faster than a human (Steam, 'how to disengage units').
+- **The network's shooters** (the order and its run flag known from the bridge): 2.8 / 5.1 / 8.1 m off at 1 / 2 / 3 s at
+  a run (780 orders), 1.5 / 2.7 / 4.1 m at a walk (344), melee flag 0.95-0.99, the chasers 13-14 m behind.
+- **The `wavemiss2` probe** (a run 40 m back given in melee, 4 lanes): game 2.9 / 5.6 / 9.6 / 22 m at 2 / 4 / 6 / 10 s;
+  the twin with the 5 s hold 0 / 0 / 1 / 14, without it 4.2 / 10.8 / 17.4 / 31 (the game starts slower - open). The
+  shooter's HP lost %/s 0-5 / 5-24 s after the order: game 0.90 / 0.68, twin 1.16 / 0.70 -> 1.08 / 0.73.
+
+Before, the simulator held such a shooter 5 s in place and did not take a move through the enemy given before the
+contact as a leave: in the replay half of the seconds under such a move were spent standing (0.17 m/s).
+
+**The 72-battle replay** (4 copies; game | before | after):
+
+| Quantity | Game | Before | After |
+|---|---:|---:|---:|
+| AI shooters in melee: share of seconds moving (flag) | 0.346 | 0.166 | 0.287 |
+| ... under the recorded run move: moving | 0.99 | 0.25 | 0.48 |
+| ... under it: speed, m/s | 3.42 | 1.03 | 1.77 |
+| AI shooters: health lost | 0.420 | 0.334 | 0.337 |
+| AI shooters: melee share of seconds / caught at least once | 0.139 / 0.72 | 0.131 / 0.76 | 0.123 / 0.74 |
+| Network shooters under a run move in melee: moving / m/s | 1.00 / 2.87 | 0.10 / 0.44 | 0.28 / 1.09 |
+| Our / enemy losses at the end | 0.784 / 0.571 | 0.684 / 0.522 | 0.681 / 0.523 |
+| Skill (median) / same winner | - | 2 % / 60.5 of 72 | 2 % / 57 of 72 |
+
+Under the recorded move the simulated shooter now always leaves (in the step: 3.9 m/s); in the other such seconds it is
+already at its point or elsewhere (the replay is open-loop), and the game's run with a chaser is slower (3.4 m/s).
+
+**The exam twin** (network vs `ai_like`, 8 starts x 4; itS1 / itS2; game | before | after): the AI's shooters in melee
+moving 0.19 | 0.15 | 0.24 and 0.33 | 0.14 | 0.25; the network's 0.33 | 0.22 | 0.32 and 0.20 | 0.11 | 0.30; the AI's
+shooters moving at all 0.38 | 0.27 | 0.29 and 0.41 | 0.25 | 0.27; our losses 0.76 | 0.60 | 0.62 and 0.81 | 0.64 | 0.62;
+the network's wins of 8 4 | 6.25 | 6.25 and 4 | 5.0 | 6.0.
+
+What is not a separate mechanic:
+- **The caught AI shooters' losses** (0.34 against 0.42) stay. In the game an AI shooter running out loses 0.0060 of
+  its health a second (0.0039 in melee on average), ours 0.0038; but the network's shooters running out lose less than
+  standing ones in the game (0.0046 against 0.0054) and more here (0.0055). The signs differ - one 'blow in the back'
+  multiplier does not fit; likely how many units chase (the network hunts shooters) - open.
+- **The AI shooters' target changes** (the twin's `sh_target_changes_100s` row: game 0.04-0.23, twin 2.6-3.2) are a
+  measure, not behaviour. Changes per 100 s with a target are about the same: game 2.0-3.0, twin 2.7-3.1 (AI), 2.9-3.2
+  and 3.3-4.0 (network). The row counts a change only when the fire flag is on that second; in the game, at the AI's
+  target change (mostly with a new order: the point moved in 55 %) the flag drops for exactly one sample in 99 % (the
+  network's in 50 %) and is back in the next; ours stays on while aiming too (`missile.fire_flag_aiming`). The changes
+  per 100 s with a target are the measure to use.
+- **The centre's speed in melee** jitters in the game: a unit standing in melee with its target near moves its centre
+  faster than 1 m/s in 40 % of the seconds (moving flag 15 %) - compare by the flag, not the speed.
 
 ## Fatigue calibration
 
@@ -1383,7 +1446,8 @@ Measured, ready as a switch, not in `config/nn/sim.json`: none now.
     `broken_finish_base_timeout` 180 = 18 s if in 0.1 s ticks — a guess; morale probe T-E); whether entering
     another unit's fight gives the charge bonus (probe); CA's sector rule is per man (the share of blows from
     the flank grows with the angle, the rear turns into a flank as the men turn), ours a unit-level step;
-    whether the chase holds missile units for 5 s (`contact.pin_s`); the chase of a shooter walking on an order given
+    a shooter starts its way out of melee slower in the game (the `wavemiss2` probe: 2.9 / 5.6 / 9.6 m at
+    2 / 4 / 6 s, ours a run at 3.3 m/s at once: 4.2 / 10.8 / 17.4) - the speed-up with a chaser on it is not modelled; the chase of a shooter walking on an order given
     before the contact (the `shootcontact` probe: the game's clanrats fall behind, loss 0.51 %/s, ours 0.67); the chase of a leaver (the `leave` probe): the
     game's chasers fall behind (2–10 of ~25 men in reach, the formations' edges 2–7 m apart) and catch the stopped
     leaver with 40–60 men, perhaps with a charge into its back — ours keeps pace in contact, no run-up; a lord leaving
@@ -1396,11 +1460,11 @@ Measured, ready as a switch, not in `config/nn/sim.json`: none now.
   shooter's kind and the chaser's kind go together (the Empire chased by clanrats, the Skaven by swordsmen); (2) the
   game's speed-up to x1.6 of the run on a long run and the chaser at its charge speed are not modelled; (3) the AI's
   shooters lose less in the replay than in the game (0.34 health against 0.42; 0.44 without the mode) at the same
-  melee share: all of it in melee (0.19 against 0.26; out of melee 0.12 against 0.13), and the game's caught ones move
-  53 % of their melee seconds, ours 20 % - a caught shooter's way out of the fight (the chase, the blow in the back)
-  is to be analysed apart; (4) caught, the game's shooter strikes half as
+  melee share: all of it in melee; a caught shooter's way out is now the game's
+  ([a caught shooter's way out](#a-caught-shooters-way-out)), but an AI shooter running out loses 0.0060 a second in
+  the game, ours 0.0038, and the network's the other way round - likely the number of chasers; (4) caught, the game's shooter strikes half as
   hard, ours not at all; (5) without ammunition the mode stays on; (6) in the twin the AI's shooters move less than
-  in the game at 60-100 m and on the approach (not the mode); (7) the AI groups `*_no_skirmish` (the AI does not
+  in the game at 40-100 m and on the approach - the AI's short steps towards its target, `ai_like`'s behaviour, not the mode; (7) the AI groups `*_no_skirmish` (the AI does not
   switch the mode on) are not read: none of our units is in one.
 - **Replay is open-loop**: the recorded orders do not react to a battle that went differently.
 - **Fatigue:** the calibration (×10, melee under an attack order) reproduces the game's exhausted shares, but
@@ -1427,6 +1491,7 @@ Measured, ready as a switch, not in `config/nn/sim.json`: none now.
 | Strike a leaver on the run as a router: 0.43 of the rule instead of ×1.25 (`contact.leave_run_pursuit` 1; a leaver without a missile weapon or a lord, not held, faster than 0.3 m/s) | the `leave` probe, the leaver's loss at 0–5 / 5–10 / 10–40 s: game 165 / 102 / 1025, was 201 / 213 / 1011, became 145 / 73 / 650; the replay of the 72 gate battles: same winner 60 → 54.5 of 72, skill 1 → −4 %, our losses at the end (simulator − game) −0.094 → −0.129, routs a unit −0.32 → −0.41 | right on the run, but the game makes up at the stopping point (60–150 HP/s), which we lack — the network's leavers survive more than in the game; off until the lagging chase is modelled |
 | A shooter leaving in contact takes ×0.55 (`contact.leave_taken.missile`; measured ×0.62 over 855 episodes of the network's battles, `build/prespec/leave.py`) | the `wavemiss2` probe (a run back given in melee): the shooter's loss 5–24 s after the order 0.38 %/s against 0.68 in the game | a ratio of whole losses that already holds the chase falling behind (fewer men in reach); the game does not weaken blows at a walking shooter — per clanrat in reach 0.92 [0.75–1.12] of a standing one (the `shootcontact` probe); now ×1, giving 0.70 |
 | A shooter moving on an order given before the contact held 5 s (`contact.pin_s`) and its order dropped at 24 s (`contact.breakoff`), as an order given in melee | the twin of the `shootcontact` probe: walking shooters stood and fought at 24 s (speed 0.05 m/s, the clanrats lost 0.06–0.10 %/s) | in the game they kept moving all 75 s (4 lanes of 4, 1.6–2.0 m/s, the clanrats lost 0.01–0.04 %/s); now such an order is neither held nor dropped (`contact.pre_order_free`) |
+| A shooter leaving melee on an order held in place for 5 s (`contact.pin_s` 5; it reproduced the network's melee flag: 0.95 / 0.82 / 0.57 at 2 / 4 / 6 s) | in the 72-battle replay shooters under a run move in melee moved 0.25 of the seconds at 1.03 m/s (AI) and 0.10 at 0.44 (network); the `wavemiss2` twin 0 / 0 / 1 m at 2 / 4 / 6 s | the game 0.99 / 1.00 at 3.4 / 2.9 m/s, the probe 2.9 / 5.6 / 9.6 m: the shooter leaves at once, the chase keeps the melee flag on; now 0 s ([a caught shooter's way out](#a-caught-shooters-way-out)) |
 | Rally at MoralePercent 0.23 (`morale.rally_rule` "fixed", `rally_mp`), +2 points a second away from enemies (`rally_rate`), morale at most −0.3 of leadership when a rout begins (`rout_floor_mp`) | gates' replay: routed again 10 / 20 / 30 / 45 s after a rally 0.40 / 0.43 / 0.46 / 0.51 (game 0.07 / 0.13 / 0.16 / 0.23); morale after a rally 0.23 → 0.09 in 5 s (game 0.17 → 0.29) | fits: the router's morale stood still, the rally at one number; the morale probe showed the game's rule (morale follows the target, the rally by distance and rout time) |
 | "Flanks secure" with any standing friend (lords too) within 120 m (`neighbour_effect_range`) | +5 nearly always, in melee too; agreement with the game's label in the recordings 73 % | the morale probe: only friends at both sides secure, or no enemy within 146 m (87 % in the recordings) |
 | The flank / rear attack −6 / −14 for one 0.5 s tick at the first blow (`morale.attacked_event`) | a drop of 1.5 / 1.9 points over 1–2 s | the morale probe: "attacked in the rear" holds while struck (29 s), +19 points as the attacker leaves; now −6 / −14 all the time of the attack |
