@@ -247,6 +247,9 @@ ability head only, weight 0.1 → 0 over 300 updates. A general mechanism (magic
 ability head had collapsed (presses a ready ability with probability 0.9996 in any situation): for the start —
 `--reset-heads ability` and `--head-entropy ...,ability=0.2`
 ([abilities by their effect](training/training.md#abilities-by-their-effect-branches)).
+About 105 of ~5,000 moments an update are replayed and the price is noisy; the **ability critic** (`--ability-critic`,
+off by default) is a small separate network that learns from the replayed prices and, after its warm-up (2,000 prices
+and an error below the mean's), prices every moment an ability is ready.
 
 **Spread of the simulator's uncertain numbers** (`--dr`, on in line S): 23 numbers not taken exactly from
 the game's database (a few probes, fits, estimates), each battle draws them inside ranges from the evidence; the

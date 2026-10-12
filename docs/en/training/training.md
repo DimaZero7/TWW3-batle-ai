@@ -42,7 +42,7 @@ The first steps compile for 1–3 minutes (seconds once a run of the same shapes
 | drills | `--drills` (0: share of the battles), `--drill-weights` (json; default the `TRAIN` drills equally: kiting, hold_fire), `--drill-bank` (256 per drill), `--drill-embed` (1: share of the embedded frame, for the drills that have one), `--drill-broad` (0.5: of the rest, share of the broad frame), `--drill-teach` (`auto` or json {drill: weight}: the teacher, off by default), `--drill-teach-minutes` (10: manual), `--drill-teach-k` (0.5), `--drill-teach-cap` (0.25), `--drill-teach-weight` (0.15: auto), `--teach-normal` (`auto`, names or json {drill: share}: the teacher in normal battles, off by default), `--teach-normal-k` (0.5), `--teach-normal-cap` (0.15), `--teach-normal-weight` (0.1), `--teach-normal-match` (0.1): [drills](#drills) |
 | observation | `--observe-dir` (off: the folder of converted battles), `--observe-share` (0.1), `--observe-weight` (0.1), `--observe-decay` (0.95), `--observe-anchor` (0.2), `--observe-anchor-decay` (0.995), `--observe-anchor-alone` (off: the anchor ends with the term), `--observe-adv` (`critic`), `--observe-beta` (1), `--observe-clip` (20), `--observe-steps` (0: `--steps`), `--observe-refresh` (20): [learning by observation](#learning-by-observation) |
 | kiting in self-play | `--kite-share` (0: share of the `self` / `past` battles started, planned 0.1), `--kite-bank` (256 battles ready): [kiting in self-play](#kiting-in-self-play) |
-| abilities by their effect | `--ability-branch` (0: off; the share of presses branched), `--ability-branch-missed` (0.005), `--ability-branch-copies` (4), `--ability-branch-horizon` (60 s), `--ability-branch-hold` (0 s), `--ability-branch-cap` (0: none), `--ability-branch-batch` (128), `--ability-branch-weight` (0.1), `--ability-branch-decay` (300 updates): [abilities by their effect](#abilities-by-their-effect-branches) |
+| abilities by their effect | `--ability-branch` (0: off; the share of presses branched), `--ability-branch-missed` (0.005), `--ability-branch-copies` (4), `--ability-branch-horizon` (60 s), `--ability-branch-hold` (0 s), `--ability-branch-cap` (0: none), `--ability-branch-batch` (128), `--ability-branch-weight` (0.1), `--ability-branch-decay` (300 updates); the ability critic `--ability-critic` (off), `--ability-critic-weight` (1), `--ability-critic-warmup` (2,000), `--ability-critic-buffer` (25,000): [abilities by their effect](#abilities-by-their-effect-branches) |
 
 ### The chain's settings
 
@@ -736,8 +736,45 @@ skills too.
   `gold_missed` / `good_missed` (the price of pressing at a missed moment), `price_se` (the price's standard error
   over the copies: the noise), `price_rms`, `branch_battles`, `branch_battle_s`, `seconds`, `weight`; in PPO —
   `ability_branch_loss`, `ability_branch_rows`.
-- **Extension points**: a separate critic of the abilities (`Brancher.baseline`, none now — worth it if the price is
-  noisy); a cost of an ability unused through a battle (`Config.unused_penalty`, must be 0 now).
+- **The ability critic** (`tools/nn/train/ability_critic.py`, `run.py --ability-critic`, off by default; needs
+  `--ability-branch`). Few moments are replayed: ~105 of ~5,000 an update (S25: ~2,500 presses, ~2,400 missed), and
+  the price is noisy (standard error 0.007 at a spread of the prices of 0.012 of the budget). The critic is a small
+  separate network (2 layers of 64, dropout 0.2, its own AdamW; not a head of the policy, nothing reaches the shared
+  trunk) that predicts the price of pressing the slot from what the network sees at that moment: the unit's token
+  without its card (health, men, morale, fatigue, melee, threats), the slot's ability input (ready, recharge, active,
+  the passport — which ability it is), the side's context (factions, the clock since the start, the damage timers; no
+  time to the end) and the neighbourhood from the observation's positions (the nearest seen enemy; own units — all, in
+  melee, wavering, routing — and seen enemies, in melee, within 35 and 80 m). Training only, as the side's critic.
+  - **It learns** from every replayed price (Huber regression) out of a buffer of the last `--ability-critic-buffer`
+    (25,000) prices; the buffer, the network and AdamW are saved in the checkpoint (`train.ability_critic`, features in
+    float16, ~10 MB) and the next part of the chain goes on. An old checkpoint without it loads; the critic starts
+    fresh. 32 steps of 256 an update. Every tenth price is held out.
+  - **Shrunk to the mean.** The target is noisy and even a small network learns some of the noise. The prediction is
+    mean + k × (network − mean), k ∈ [0, 1] the best one on the held-out tenth: where the network knows little, the
+    prediction falls back to the mean price instead of passing noise to the head.
+  - **Warm-up.** While the buffer has fewer than `--ability-critic-warmup` (2,000, ~20 updates) prices or the held-out
+    error is not below 0.98 of "predict the mean" — as without the critic (the replayed moments only).
+  - **Ready — a price at every moment** (as COMA: the value of the unit's option at every decision, one pass). Every
+    decision records all moments (a press, or a ready ability not pressed) with the critic's input. A moment not
+    replayed: the predicted price Q × `--ability-critic-weight` (1); a replayed one: the critic as a control variate
+    (Q-Prop): Q + (measured − Q) clipped to ±2 root mean squares of the buffer, or the measured price as it is —
+    whichever of the two is less spread over the chunk's replayed moments. The prediction is taken before the chunk's
+    prices enter the buffer. Then as without the critic: +price at a press, −price at a missed moment, divided by the
+    buffer's root mean square of the measured prices (at least 0.005), clipped to ±5. The term's weight is the same
+    decaying `--ability-branch-weight`; it now has ~45 times as many rows, so take a smaller weight with the critic.
+  - **Log** (`ability_branch`): `moments` (all of the chunk), `covered` (the share priced), `critic_on`,
+    `critic_samples`, `critic_train`, `critic_val` and `critic_base` (Huber on the held-out tenth of the critic and of
+    "the mean"), `critic_ev` (the explained share of the prices' spread there), `critic_shrink`, `critic_s`, `q_press` /
+    `q_missed` (the mean predicted price of a press / a missed moment, gold), `q_std`, `price_sd` / `cv_sd` / `cv_used`.
+  - **Check on a synthetic price** (the pace of training: 105 prices an update; 40 varying inputs, the rest the
+    passport of one of 5 abilities; the price — a buff in melee and out of it plus a count, noise 1.5x the price's
+    spread): ready from update 20 on without a break, the explained share of the noiseless price 0.58–0.74 (0.69 on
+    average); at noise 4x — on in 20 updates of 120, the share then 0.08–0.64 (0.46), never below zero. Pure noise —
+    never on, k < 0.5. Tried and rejected: 2 layers of 128 without dropout (Adam 1e-3) learn the noise — without the
+    shrink the share of the noiseless price below zero (−0.7…−1.6), with it 0.16–0.23 against 0.74. Cost (CPU, 4 cores): recording the moments
+    ~0.07 s for 64 decisions of 80 moments, training 0.1 s an update at a full buffer, predicting 5,000 moments 0.007 s.
+- **Extension points**: a bootstrapped critic target (TD: the price plus the value of the next ready moment,
+  `Brancher.target`); a cost of an ability unused through a battle (`Config.unused_penalty`, must be 0 now).
 
 **itS23's ability head had collapsed.** The audit (`build/ability_branch/abil_audit.py`, 128 battles × 420
 decisions, self-play and `ai_like`): the chance to press a ready ability 0.9996 on average, the 5 % quantile 0.9994,

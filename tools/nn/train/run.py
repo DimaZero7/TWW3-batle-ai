@@ -231,6 +231,8 @@ def train(args, every=None, teacher=None, normal=None):
     teach_auto.prior) - the hook may change its shares (Auto.observe), read before every update. normal: with
     an adaptive --teach-normal, the teacher in normal battles (teach_auto.Transfer; default: one with the init
     checkpoint's last transfer numbers), likewise."""
+    if args.ability_critic and not args.ability_branch:
+        raise SystemExit("--ability-critic needs --ability-branch")
     device = torch.device(args.device)
     torch.manual_seed(args.seed)
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -413,9 +415,18 @@ def train(args, every=None, teacher=None, normal=None):
         env.brancher = ability_branch.Brancher(ability_branch.Config(
             share=args.ability_branch, missed=args.ability_branch_missed, copies=args.ability_branch_copies,
             horizon_s=args.ability_branch_horizon, cap=args.ability_branch_cap, batch=args.ability_branch_batch,
-            hold_s=args.ability_branch_hold, seed=args.seed), device)
+            hold_s=args.ability_branch_hold, seed=args.seed, critic=args.ability_critic,
+            critic_weight=args.ability_critic_weight, critic_warmup=args.ability_critic_warmup,
+            critic_buffer=args.ability_critic_buffer), device)
         print(f"ability branches: {env.brancher.cfg}, weight {args.ability_branch_weight:g} -> 0 over "
               f"{args.ability_branch_decay} updates (from update {ab_updates0} of the chain)", flush=True)
+        if env.brancher.critic is not None:
+            # the ability critic's model, Adam and buffer go on from --init's "train" (a fresh one otherwise)
+            saved = (checkpoint.train_state(args.init) or {}).get("ability_critic") if args.init and args.resume else None
+            if env.brancher.critic.load(saved):
+                print(f"ability critic: resumed from {args.init} ({len(env.brancher.critic)} samples)", flush=True)
+            else:
+                print("ability critic: fresh", flush=True)
     # v2 (d 256): 2 parts. Until the update freed the critic's activations and the full entropy's graph early
     # (ppo.update; 8.1 -> 5.6 MB a decision) it took one part more: 3 parts peaked at 12.0 GB of the 16 GB card, and a
     # little more pushed the card into its shared memory (an update 10 s -> 157 s); now 2 parts peak at 12.2 GB, 3 at
@@ -510,7 +521,9 @@ def train(args, every=None, teacher=None, normal=None):
                           "chain_s": chain_s0 + trained, "chain_updates": chain_u0 + update,
                           "ability_updates": ab_updates0 + (update if args.ability_branch else 0),
                           "observe_updates": observe.updates if observe is not None
-                          else int(carried.get("observe_updates", 0))}}
+                          else int(carried.get("observe_updates", 0))},
+                **({"ability_critic": env.brancher.critic.state()}
+                   if args.ability_branch and env.brancher.critic is not None else {})}
 
     def share_done():
         """The share of the run done: of the updates when --updates is set, else of the minutes."""
@@ -1020,6 +1033,15 @@ def parser():
                     help="... the ability head's term's weight at the start (ppo.ability_term)")
     ap.add_argument("--ability-branch-decay", type=int, default=300,
                     help="... it goes to 0 linearly over this many updates of the chain with it on (0: no decay)")
+    ap.add_argument("--ability-critic", action="store_true",
+                    help="... the ability critic (ability_critic.py): learns the replayed prices, and once it beats the "
+                         "mean it prices every moment an ability was ready (needs --ability-branch)")
+    ap.add_argument("--ability-critic-weight", type=float, default=ability_branch.Config.critic_weight,
+                    help="... its predicted price x this at the moments not replayed")
+    ap.add_argument("--ability-critic-warmup", type=int, default=ability_branch.Config.critic_warmup,
+                    help="... replayed moments in its buffer before it is used")
+    ap.add_argument("--ability-critic-buffer", type=int, default=ability_branch.Config.critic_buffer,
+                    help="... replayed moments it keeps (saved with the checkpoint)")
     ap.add_argument("--gpu-mem", type=float, default=1.0,
                     help="share of the GPU's memory training may hold (game mode: e.g. 0.5, so a game keeps memory)")
     ap.add_argument("--gpu-duty", type=float, default=1.0,

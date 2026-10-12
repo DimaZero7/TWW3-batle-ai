@@ -40,8 +40,22 @@ process (~50 s), then 2 branches x horizon decisions (5.6-7.8 s an update at cap
 GPU, S25's options). The allocator's cache is released around the branches (_release).
 Without a cap, snapshots beyond the slots play in further batches of the same shape.
 
-Extension points (not used yet): a separate critic of the abilities (Brancher.baseline: 0 now; for a noisy price), a
-cost of an ability left unused through a battle (Config.unused_penalty: must be 0 now).
+The ability critic (Config.critic; run.py --ability-critic, off by default; ability_critic.py): a few percent of the
+moments are replayed and their price is noisy, so the head learns little from them. With the critic, every decision
+records each moment (a press, or a ready ability left: Brancher._moments) with the critic's input; at the chunk's end
+the replayed moments' prices go into the critic's buffer (Brancher.target: the regression target, the measured price),
+it takes a few steps, and once it is ready (warm-up: critic_warmup samples and its held-out error below the mean's)
+EVERY moment of the chunk gets a price as the head's advantage (COMA's way: the critic's value of the unit's option at
+each decision, one pass): +price at a press, -price at a missed moment (the slot the head likes best).
+    not replayed  the critic's Q x critic_weight;
+    replayed      the critic as a control variate (Q-Prop): Q + (measured - Q) clipped to +-critic_resid x the buffer's
+                  root mean square, or the measured price as it is - whichever of the two has the smaller variance over
+                  the chunk's replayed moments (both standard deviations logged: price_sd, cv_sd; cv_used).
+Divided by the root mean square of the buffer's measured prices (at least ADV_FLOOR: the critic's Q is smaller where it
+is unsure) and clipped as above. Before it is ready: the replayed moments only, as without it.
+
+Extension points (not used yet): a bootstrapped (TD) target of the critic (Brancher.target), a cost of an ability left
+unused through a battle (Config.unused_penalty: must be 0).
 """
 import math
 import time
@@ -79,6 +93,13 @@ class Config:
     hold_s: float = 0.0         # "not": the unit's slot also stays unused this many seconds (0: the network goes on as
     #                             it would - and may press it a decision later; module doc)
     unused_penalty: float = 0.0  # reserved (a cost of an ability unused through a battle): not implemented, must be 0
+    # the ability critic (ability_critic.py; run.py --ability-critic): off by default
+    critic: bool = False
+    critic_weight: float = 1.0  # its predicted price x this at the moments not replayed
+    critic_resid: float = 2.0   # a replayed moment: Q + (measured - Q) within +-this x the buffer's root mean square
+    critic_warmup: int = 2000   # replayed moments in its buffer before it is used (and it must beat the mean)
+    critic_buffer: int = 25000  # replayed moments it keeps (the last)
+    critic_steps: int = 32      # its optimiser's steps an update
 
     def __post_init__(self):
         if self.unused_penalty:
@@ -398,12 +419,29 @@ def pad_snap(template, snap, src, kinds):
     return sel, unit, side, torch.full_like(unit, -1)
 
 
+def choice(info, r, n):
+    """The moments' (rows r, units n [k] of the decision's learner rows) slot, whether it was pressed, and the
+    log-probability of the head's choice: a press's slot, else the ready slot the head likes best (its choice "none")."""
+    obs, action = info["obs"], info["action"]
+    ab = torch.nan_to_num(info["logits"]["ability"].float(), nan=hd.NEG)
+    was = action.ability[r, n]
+    pressed = was >= 0
+    usable = obs["abil_ok"][r, n]                                       # [k, SLOTS]
+    best = torch.where(usable, ab[r, n, 1:], torch.full_like(ab[r, n, 1:], hd.NEG)).argmax(-1)
+    lp = torch.log_softmax(ab[r, n], -1).gather(1, (was.clamp(min=-1) + 1)[:, None])[:, 0]
+    return torch.where(pressed, was, best), pressed, lp
+
+
 @dataclass
 class _Chunk:
     T: int = 0
     t: int = 0
     snaps: list = field(default_factory=list)
-    entries: list = field(default_factory=list)      # (t, r, n, side, slot, press, battle index in the snapshots, lp)
+    entries: list = field(default_factory=list)      # (t, r, n, side, slot, press, battle index in the snapshots, lp,
+    #                                                    the moment's index: the critic's, else -1)
+    moments: list = field(default_factory=list)      # with the critic: per decision (t, r, n, slot, press, lp, budget,
+    #                                                    features) of every press and missed moment ([M] tensors)
+    n_moments: int = 0
     n_battles: int = 0
     presses: object = None                           # [] on the device: the learner's presses this chunk
     missed: object = None                            # ... the moments a ready ability was not pressed
@@ -416,6 +454,11 @@ class Brancher:
 
     def __init__(self, cfg=Config(), device="cpu"):
         self.cfg = cfg
+        self.critic = None
+        if cfg.critic:
+            from tools.nn.train import ability_critic
+            self.critic = ability_critic.AbilityCritic(device, buffer=cfg.critic_buffer, warmup=cfg.critic_warmup,
+                                                       steps=cfg.critic_steps, seed=cfg.seed)
         self.gen = torch.Generator(device=device).manual_seed(int(cfg.seed) + 104729)
         self.chunk = _Chunk()
         self.stats = {}
@@ -456,6 +499,9 @@ class Brancher:
         c.missed += missed.sum()
         draw = torch.rand(press.shape, generator=self.gen, device=press.device)
         take = (press & (draw < self.cfg.share)) | (missed & (draw < self.cfg.missed))
+        where = None
+        if self.critic is not None:
+            where = self._moments(env, info, press | missed, t)
         nz = take.nonzero()                                                 # [k, 2] (r, n): reads the GPU
         if not len(nz):
             return
@@ -477,13 +523,8 @@ class Brancher:
                 return
             nz = nz[torch.tensor(keep, dtype=torch.long, device=nz.device)]
         r, n = nz[:, 0], nz[:, 1]
-        ab = torch.nan_to_num(logits["ability"].float(), nan=hd.NEG)
-        was = action.ability[r, n]
-        pressed = was >= 0
-        usable = obs["abil_ok"][r, n]                                       # [k, SLOTS]
-        best = torch.where(usable, ab[r, n, 1:], torch.full_like(ab[r, n, 1:], hd.NEG)).argmax(-1)
-        slot = torch.where(pressed, was, best)
-        lp = torch.log_softmax(ab[r, n], -1).gather(1, (was.clamp(min=-1) + 1)[:, None])[:, 0]
+        slot, pressed, lp = choice(info, r, n)
+        moment = where[r, n] if where is not None else torch.full_like(r, -1)
         b = rows[r] % env.B
         side = rows[r] // env.B + 1
         ub, inv = torch.unique(b, return_inverse=True)
@@ -491,26 +532,81 @@ class Brancher:
         at = c.n_battles + inv
         c.n_battles += len(ub)
         c.taken += len(nz)
-        for x in zip(r.tolist(), n.tolist(), side.tolist(), slot.tolist(), pressed.tolist(), at.tolist(), lp.tolist()):
+        for x in zip(r.tolist(), n.tolist(), side.tolist(), slot.tolist(), pressed.tolist(), at.tolist(), lp.tolist(),
+                     moment.tolist()):
             c.entries.append((t,) + x)
 
-    def baseline(self, entries):
-        """Extension point: a separate critic of the abilities would give each entry's expected price here (subtracted
-        from it). None: no baseline (the price as it is)."""
-        return None
+    def _moments(self, env, info, mask, t):
+        """The critic's record of every moment of the decision (mask [R, N]: a press or a ready ability left) ->
+        [R, N] each unit's moment index (-1: none)."""
+        from tools.nn.train import ability_critic
+        c = self.chunk
+        where = torch.full(mask.shape, -1, dtype=torch.long, device=mask.device)
+        mom = mask.nonzero()                                                # reads the GPU
+        if not len(mom):
+            return where
+        r, n = mom[:, 0], mom[:, 1]
+        slot, pressed, lp = choice(info, r, n)
+        b = env.rows_learn[r] % env.B
+        X = ability_critic.features(info["obs"], r, n, slot)
+        c.moments.append((torch.full_like(r, t), r, n, slot, pressed, lp, reward.budget(env.st.u)[b], X))
+        where[r, n] = torch.arange(len(r), device=r.device) + c.n_moments
+        c.n_moments += len(r)
+        return where
 
     @torch.no_grad()
     def finish(self, env, actor):
         """Plays the chunk's branches -> {"adv", "mask", "lp"} [T, R, N] (ppo.update's ability term), or None when no
-        snapshot was taken; the stats for the log in self.stats."""
-        c, cfg = self.chunk, self.cfg
+        moment is priced; the stats for the log in self.stats. With the critic ready, every moment of the chunk is
+        priced (module doc "The ability critic")."""
+        c = self.chunk
         t0 = time.time()
         presses, missed = (int(x) for x in torch.stack([c.presses, c.missed]).tolist())
         R, N = len(env.rows_learn), env.N
         self.stats = {"presses": presses, "missed_moments": missed, "replayed_presses": 0, "replayed_missed": 0}
-        if not c.entries:
+        if not c.entries and not (self.critic is not None and c.n_moments):
             self.chunk = _Chunk()
             return None
+        dev = env.device
+        out = {"adv": torch.zeros(c.T, R, N, device=dev), "mask": torch.zeros(c.T, R, N, dtype=torch.bool, device=dev),
+               "lp": torch.zeros(c.T, R, N, device=dev)}
+        price = torch.zeros(0, device=dev)
+        if c.entries:
+            price, se, budget = self._play(env, actor)
+            pressed = torch.tensor([e[5] for e in c.entries], device=dev)
+            t = torch.tensor([e[0] for e in c.entries], device=dev)
+            r = torch.tensor([e[1] for e in c.entries], device=dev)
+            unit = torch.tensor([e[2] for e in c.entries], device=dev)
+            lp = torch.tensor([e[7] for e in c.entries], device=dev)
+            rms = float(price.pow(2).mean().sqrt())
+            gold = price * budget.mean(1)
+            p, m = pressed, ~pressed
+            st = self.stats
+            st.update(replayed_presses=int(p.sum()), replayed_missed=int(m.sum()), price_rms=round(rms, 5),
+                      price_se=round(float(se.mean()), 5))
+            if bool(p.any()):
+                st.update(price_press=round(float(price[p].mean()), 5), gold_press=round(float(gold[p].mean()), 1),
+                          zero_press=round(float((price[p].abs() < ZERO).float().mean()), 3),
+                          good_press=round(float((price[p] > ZERO).float().mean()), 3))
+            if bool(m.any()):
+                st.update(price_missed=round(float(price[m].mean()), 5), gold_missed=round(float(gold[m].mean()), 1),
+                          good_missed=round(float((price[m] > ZERO).float().mean()), 3))
+            self.last = {"price": price, "se": se, "pressed": pressed, "entries": list(c.entries)}
+            # the replayed moments by their measured price (all there is without the critic or before it is ready)
+            adv = (torch.where(pressed, price, -price) / max(rms, ADV_FLOOR)).clamp(-ADV_CLIP, ADV_CLIP)
+            out["adv"][t, r, unit] = adv
+            out["mask"][t, r, unit] = True
+            out["lp"][t, r, unit] = lp
+        if self.critic is not None and c.n_moments:
+            self._criticise(out, price)
+        self.stats["seconds"] = round(time.time() - t0, 2)
+        self.chunk = _Chunk()
+        return out if bool(out["mask"].any()) else None
+
+    def _play(self, env, actor):
+        """The branches of the chunk's entries -> (price [E] budget share, its standard error over the copies [E],
+        budget [E, copies] gold)."""
+        c, cfg = self.chunk, self.cfg
         dev = env.device
         snap = concat(c.snaps)
         E = len(c.entries)
@@ -548,40 +644,56 @@ class Brancher:
             budget[ix] = bg[:len(part)]
             played += 2 * K * (len(part) + len(fill))
         _release(dev)          # ... and the branches' for the update
+        self.stats.update(branch_battles=played, branch_battle_s=round(played * decisions * env.decision_s))
         price = diff.mean(1)                                                # [E] budget share
         se = diff.std(1) / math.sqrt(K) if K > 1 else torch.zeros_like(price)
-        base = self.baseline(c.entries)
-        if base is not None:
-            price = price - base
-        pressed = torch.tensor([e[5] for e in c.entries], device=dev)
-        adv_raw = torch.where(pressed, price, -price)
-        rms = float(price.pow(2).mean().sqrt())
-        scale = max(rms, ADV_FLOOR)
-        adv = (adv_raw / scale).clamp(-ADV_CLIP, ADV_CLIP)
-        out = {"adv": torch.zeros(c.T, R, N, device=dev), "mask": torch.zeros(c.T, R, N, dtype=torch.bool, device=dev),
-               "lp": torch.zeros(c.T, R, N, device=dev)}
-        t = torch.tensor([e[0] for e in c.entries], device=dev)
-        r = torch.tensor([e[1] for e in c.entries], device=dev)
-        lp = torch.tensor([e[7] for e in c.entries], device=dev)
-        out["adv"][t, r, unit] = adv
-        out["mask"][t, r, unit] = True
-        out["lp"][t, r, unit] = lp
-        gold = price * budget.mean(1)
-        p, m = pressed, ~pressed
+        return price, se, budget
+
+    def target(self, price):
+        """The critic's regression target of the replayed moments: their measured price. Extension point: a bootstrapped
+        (TD) target, e.g. the price plus the critic's value of the unit's next ready moment."""
+        return price
+
+    def _criticise(self, out, price):
+        """The ability critic (module doc). Its prediction of every moment of the chunk comes first, by the critic as
+        the last update left it (the replayed moments' measured prices are not in it yet: the control variate stays
+        independent of them); once ready, every moment gets its price as the head's advantage (out, in place). Then
+        the replayed prices go into its buffer and it fits."""
+        from tools.nn.train import ability_critic
+        c, cfg, crit = self.chunk, self.cfg, self.critic
+        t, r, n, slot, pressed, lp, budget, X = (torch.cat(x) for x in zip(*c.moments))
+        e_m = torch.tensor([e[8] for e in c.entries], dtype=torch.long, device=X.device)
+        t1 = time.time()
         st = self.stats
-        st.update(replayed_presses=int(p.sum()), replayed_missed=int(m.sum()), branch_battles=played,
-                  branch_battle_s=round(played * decisions * env.decision_s), seconds=round(time.time() - t0, 2),
-                  price_rms=round(rms, 5), price_se=round(float(se.mean()), 5))
-        if bool(p.any()):
-            st.update(price_press=round(float(price[p].mean()), 5), gold_press=round(float(gold[p].mean()), 1),
-                      zero_press=round(float((price[p].abs() < ZERO).float().mean()), 3),
-                      good_press=round(float((price[p] > ZERO).float().mean()), 3))
-        if bool(m.any()):
-            st.update(price_missed=round(float(price[m].mean()), 5), gold_missed=round(float(gold[m].mean()), 1),
-                      good_missed=round(float((price[m] > ZERO).float().mean()), 3))
-        self.last = {"price": price, "se": se, "pressed": pressed, "entries": list(c.entries)}
-        self.chunk = _Chunk()
-        return out
+        on = crit.ready()
+        q = crit.predict(X) if "train" in crit.last else torch.zeros(len(X), device=X.device)
+        st["critic_on"] = int(on)
+        st["moments"] = len(X)
+        gold = q * budget                                                   # the predicted price in gold
+        if bool(pressed.any()):
+            st["q_press"] = round(float(gold[pressed].mean()), 2)
+        if bool((~pressed).any()):
+            st["q_missed"] = round(float(gold[~pressed].mean()), 2)
+        st["q_std"] = round(float(gold.std()), 2) if len(gold) > 1 else 0.0
+        if on:
+            scale = max(crit.rms(), ADV_FLOOR)
+            used = q * cfg.critic_weight
+            if len(e_m):
+                lim = cfg.critic_resid * crit.rms()
+                cv = q[e_m] + (price - q[e_m]).clamp(-lim, lim)
+                sd_p, sd_cv = (float(x.std()) if len(x) > 1 else 0.0 for x in (price, cv))
+                use_cv = sd_cv <= sd_p
+                used[e_m] = cv if use_cv else price
+                st.update(price_sd=round(sd_p, 5), cv_sd=round(sd_cv, 5), cv_used=int(use_cv))
+            adv = (torch.where(pressed, used, -used) / scale).clamp(-ADV_CLIP, ADV_CLIP)
+            out["adv"][t, r, n] = adv
+            out["mask"][t, r, n] = True
+            out["lp"][t, r, n] = lp
+        st["covered"] = round(float(out["mask"].sum()) / len(X), 4)
+        if len(e_m):
+            crit.add(X[e_m], self.target(price))
+        st.update({"critic_" + k: v for k, v in ability_critic.rounded(crit.fit()).items()})
+        st["critic_s"] = round(time.time() - t1, 2)
 
 
 def _release(dev):
