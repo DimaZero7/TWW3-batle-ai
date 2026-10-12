@@ -3529,3 +3529,52 @@ class TestBodyAcross:
         on_w, off_w = _fight_lost(SWORD, WOLF, P), _fight_lost(SWORD, WOLF, off)
         assert off_w > 0 and 1.6 < on_w / off_w < 2.3
         assert _fight_lost(SWORD, CLANRAT, P) == pytest.approx(_fight_lost(SWORD, CLANRAT, off))
+
+
+RATLING = "wh2_dlc12_skv_inf_ratling_gun_0"
+
+
+class TestRatlingSpinUp:
+    def test_the_gun_has_its_own_aim_and_a_new_target_costs_all_of_it(self):
+        """missile.aim_projectile_s / retarget_projectile_s (the ratling probe's first shot 3.75-5.0 s from the go, median
+        4.5; game battles 20261012-111853 / -111151: the first bullet after a halt, a new target or a switch as long, 5-6
+        s at 1 s samples): the gun aims 4.5 s, and an order on another target takes the whole aim off; other muskets keep
+        theirs (handgunners 2.0 s, nothing lost on a new target)."""
+        s, hg = P.static(RATLING), P.static("wh_main_emp_inf_handgunners")
+        assert s["aim_s"] == 4.5 and s["rt_s"] == 4.5
+        assert hg["aim_s"] == P.sim["missile"]["aim_s"]["musket"] and hg["rt_s"] == 0
+        st, H, step = TestSecondWave._retarget_lane(RATLING, P)
+        first = next(k for k in range(200) if step(0 if k == 0 else None) > 0) * P.dt
+        assert 4.5 - P.dt <= first <= 4.5 + 2.0
+        for _ in range(int(2 / P.dt)):
+            step()
+        k = 0
+        while step(1 if k == 0 else None) <= 0 and k < 400:
+            k += 1
+        assert k * P.dt >= 4.5 - P.dt
+
+
+class TestBodyEllipseMissile:
+    def test_body_radii_turn_with_the_facing(self):
+        """missile.body_radii: an ellipse body (radius 0.9 long, x 0.4 across: wolf rats) facing the shooter is 0.36 m
+        half-wide across the line of fire and 0.9 long along it, side-on the other way round; a circle keeps r."""
+        u = {"radius": torch.tensor([[0.9, 0.9, 0.65]]), "body_ratio": torch.tensor([[0.4, 0.4, 1.0]])}
+        rel = torch.tensor([[0.0, math.pi / 2, 0.7]])[:, None, :].expand(1, 3, 3).clone()
+        across, along = missile.body_radii(u, {"rel_j": rel})
+        assert across[0, 0].tolist() == pytest.approx([0.36, 0.9, 0.65])
+        assert along[0, 0].tolist() == pytest.approx([0.9, 0.36, 0.65])
+
+    def test_beasts_running_at_the_shooter_are_hit_less_infantry_unchanged(self):
+        """missile.body_ellipse: crossbowmen 100 m from wolf rats facing them hit fewer than with the round body; side-on
+        about as many; clanrats (round) the same with the rule on or off."""
+        xbow = "wh_main_emp_inf_crossbowmen"
+        off = P.with_cal("missile", body_ellipse=False)
+        spacing = P.sim["formation"]["spacing_m"]
+
+        def p(target, bearing, params):
+            st = scenario.build([army([(xbow, -100, 0, 90)], [(target, 0, 0, bearing)])], params)
+            H = st.N // 2
+            return float(missile.hit_chance(st.u, geometry.pairwise(st.u, spacing), params)[0, 0, H])
+        head_on, side_on, round_body = p(WOLF, 270, P), p(WOLF, 0, P), p(WOLF, 270, off)
+        assert head_on < 0.9 * round_body and side_on > head_on
+        assert p(CLANRAT, 270, P) == pytest.approx(p(CLANRAT, 270, off))

@@ -109,6 +109,9 @@ class Params:
             ref = (ms.get("reload_ref_s") or {}).get(cat)
             reload_s = (ms["reload_s"][cat] * (missile.get("reload_s", ref) / ref if ref else 1.0)
                         if cat in ms["reload_s"] else missile.get("reload_s", 0) * ms["reload_scale_other"])
+        proj = missile.get("projectile") if missile else None
+        own_aim = (ms.get("aim_projectile_s") or {}).get(proj) if missile else None
+        own_rt = (ms.get("retarget_projectile_s") or {}).get(proj) if missile else None
         resist = u.get("damage_resist") or {}
         h, v = self.spacing_of(key)
         men = u["men"]
@@ -157,13 +160,15 @@ class Params:
             "muzzle_v": missile.get("muzzle_velocity", 0.0) if missile else 0,
             "height": u.get("height_m", 1.8),
             "small_arms": cat in SMALL_ARMS if missile else False,
-            "aim_s": ms["aim_s"].get(cat, ms["aim_s_other"]) if missile else 0,
+            # a projectile measured on its own (missile.aim_projectile_s: the Ratling Gun's spin-up) takes its own aim
+            "aim_s": float(own_aim) if own_aim is not None else (ms["aim_s"].get(cat, ms["aim_s_other"]) if missile else 0),
             # by category, measured (missile.order_quiet_why): arcing fire keeps quiet after a new order or target,
             # whatever its reload; direct fire and throwing weapons lose nothing (-1: the rule of all)
             "quiet_s": float((ms.get("order_quiet_cat_s") or {}).get(cat, 0.0)) if missile else 0.0,
             # (missile.reaim_broken_why) arrows and bolts: once the target lost this share of its men, each shot aims
             "broken_at": float((ms.get("reaim_broken_cat_share") or {}).get(cat, 0.0)) if missile else 0.0,
-            "rt_s": float((ms.get("retarget_cat_s") or {}).get(cat, -1.0)) if missile else -1.0,
+            "rt_s": (float(own_rt) if own_rt is not None else float((ms.get("retarget_cat_s") or {}).get(cat, -1.0)))
+                    if missile else -1.0,
             # its hits slow the small formations they hit (missile.hit_slow: the hit reactions of gunpowder, by category)
             "hslow": bool(missile) and bool((ms.get("hit_slow") or {}).get("on"))
                      and cat in ((ms.get("hit_slow") or {}).get("categories") or ()),

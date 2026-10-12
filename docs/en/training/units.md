@@ -322,14 +322,15 @@ too.
 | Unit | Feature | What it does | Source | Simulator | Network |
 |---|---|---|---|---|---|
 | Gun | A burst of 18 bullets | a man fires 18 bullets at 4 a second (4.5 s); 12 s from a burst's start to the next | DB `shots_per_volley`; the rate and the cycle measured (`ratling`: on the lone General 576 = 32 x 18 bullets a burst, 64 bullets every 0.5 s) | `missile.burst_rate_s` 4, `reload_projectile_s` 12 (`missile.py burst_share`) | input `volley_shots` |
-| Gun | A burst cut by a dead target | a man whose target (a front-rank man) died aims again (2 s) and loses those bullets: 364-482 bullets a burst on a formation instead of 576 | measured `ratling` | `missile.burst_reaim` | - |
+| Gun | Spin-up | the first bullet 4.5 s after a halt, an order or a new target (a switch of target - the whole spin-up again) | measured `ratling` (3.75-5.0 s) and battles 20261012-111853 / -111151 (5-6 s at 1 s samples) | `missile.aim_projectile_s`, `retarget_projectile_s` | - |
+| Gun | A burst cut by a dead target | a man whose target (a front-rank man) died aims again (4.5 s) and loses those bullets: 364-482 bullets a burst on a formation instead of 576 | measured `ratling` | `missile.burst_reaim` | - |
 | Gun | Suppression | the target's speed x0.7 for 10 s from the last hit | DB (`contact_stat_effect`, a 10 s phase) | contact effect | the effect's pair |
 | Gun | Fire in melee | shoots the unit cutting it down | measured `suppress` | `missile.fire_in_melee` | - |
 | Censer Bearers | Contagion | the target's leadership -10 for 10 s from the last blow | DB (`contact_phase`) | contact effect | the effect's pair |
 | Monks, censers | Frenzy | +10 attack, damage and charge x1.1, off below half morale | DB | innate effect (as the flagellants') | the effect's pair |
 | Giant Rats (poison) | Poison | speed, melee and missile damage x0.85 for 10 s | DB | contact effect | the effect's pair |
 | Giant Rats | Run 9.5, charge 11.5, acceleration 6 | the fastest unit | DB | the common movement (matches the game: 9.5 / 11.5 m/s, 90 % of the run in 3 s) | passport |
-| Giant Rats | An ellipse body 0.9 x 0.4 | in melee takes its body's width along a contact, 0.92 m instead of the template's 2.0 | DB `battle_entities` | `melee.body_across` (the `wolfrats` probe: damage 0.4 -> ~1 of the game) | passport `radii_ratio` |
+| Giant Rats | An ellipse body 0.9 x 0.4 | in melee takes its body's width along a contact, 0.92 m instead of the template's 2.0; as a target of arrows and bullets an ellipse turned to the shooter (facing him 0.72 m across instead of 1.8) | DB `battle_entities`; the hitbox is the entity's shape (community) | `melee.body_across` (the `wolfrats` probe: damage 0.4 -> ~1 of the game); `missile.body_ellipse` (battles: HP a shot on running wolf rats 13.3 -> 10.4, game 7.6) | passport `radii_ratio` |
 | Giant Rats | Caste `war_beast` | - | DB | - | the caste column (a typo `warbeast` put them among "other" before) |
 | Censers, Giant Rats | Magical attacks | against magic resistance (none of our units has it) | DB `melee_weapons.is_magical` | not needed | input `magic_attacks` |
 | Halberdiers | vs large +16, defence 42 | we have no large units | DB | rules exist | passport |

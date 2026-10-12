@@ -121,9 +121,11 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
 - **Contact effects and bursts** ([details](training/simulator.md#contact-effects-and-the-ratling-guns-burst)):
   poison, the censer's contagion, the Ratling Gun's suppressing fire - the database phase's stats on the unit hit for
   10 s from the last hit, different ones stack, friendly fire lays none; the Ratling Gun - 18 bullets a volley at 4 a
-  second, a 12 s cycle, one ammunition pool, it fires in melee too; a man whose target died loses 2 s of his burst. A
-  beast (an ellipse body in the database) takes its body's width along a contact in melee: 2.2x the Giant Rats striking
-  (the probe's twin: 0.4 -> ~1 of the game).
+  second, a 12 s cycle, one ammunition pool, it fires in melee too; a 4.5 s spin-up after a halt, an order and every new target (measured); a man whose target died loses the spin-up
+  from his burst. A beast (an ellipse body in the database) takes its body's width along a contact in melee: 2.2x the
+  Giant Rats striking (the probe's twin: 0.4 -> ~1 of the game); as a target the same ellipse turned to the shooter (a
+  beast running at the shooter is narrow). The network as the Skaven (guns, wolf rats) against the game's AI: the
+  replay by both sides' orders gives the game's outcome 8 of 8 - the twin's loss is `ai_like`'s, not the mechanics'.
 - **Bullets slow** ([details](training/simulator.md#contact-effects-and-the-ratling-guns-burst)): hits of projectiles of
   category `musket` (handguns, the gun, pistols, throwing stars) slow a small formation for 10 s: run x0.65, walk
   x0.9 (the `hitslow` measure: a run at handgunners x0.68, bolts do not slow; no number in the database).

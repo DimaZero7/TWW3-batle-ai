@@ -37,7 +37,7 @@ Artillery is in [artillery](artillery.md). Conventions: [index](README.md). Our 
     is hit within his radius or in his "shadow" h / tan of the angle; the men of a formation are not in exact
     files: a projectile passing over n ranks at head height meets a man with 1 − (1 − 2r / the front step)^n;
     a formation by its files and ranks with the database's spacing (a loose or thinned formation catches
-    less), a lone man by a circle. The probe, 27 standing lanes of full-strength targets: error 0.096 (arrows
+    less), a lone man by a circle; a man's body is his battle entity's shape from the database (`battle_entities`: a circle or an ellipse radius × radius·`radii_ratio`), turned to the shooter (`missile.body_ellipse`: a wolf rat facing the shooter is narrow, side-on wide; an entity's hitbox is its shape, radius and radii ratio, by the community). The probe, 27 standing lanes of full-strength targets: error 0.096 (arrows
     0.101, pistols 0.104, slings 0.050, Night Runners 0.121) against 0.171 for the old ground model with the
     fitted k 1.1. Open: the game hits a thinned target less than the model (probe P1), a target running at the
     shooter — ×1.2 (P3).

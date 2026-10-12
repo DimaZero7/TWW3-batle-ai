@@ -279,7 +279,7 @@ def hit_chance(u, pw, params):
     a number: that spacing for all, the same files and ranks (the prototype's 2.0, build/accuracy/proto.py)."""
     cfg = params.sim["missile"]["accuracy"]
     if cfg.get("plane"):
-        return hit_chance_plane(u, pw)
+        return hit_chance_plane(u, pw, ellipse=bool(params.sim["missile"].get("body_ellipse")))
     k = float(cfg["k"])
     d = pw["dist"].clamp(min=5.0)
     shrink = torch.sqrt((1 - u["acc"] / 100).clamp(min=0))[:, :, None]
@@ -309,9 +309,27 @@ def hit_chance(u, pw, params):
     return torch.where((u["men0"] <= 1)[:, None, :], p_lone, p_form).clamp(0, 1)
 
 
-def hit_chance_plane(u, pw):
+def body_radii(u, pw):
+    """([B, i, j] half-width across i's line of fire, half-length along it) of a man of j, m (missile.body_ellipse).
+    The database's battle_entities body is a circle of `radius` (infantry, lords: radii_ratio 1) or an ellipse radius
+    long along the man's facing and radius x radii_ratio across it (beasts, weapon teams) - the hit box of projectiles
+    (community: an entity's hitbox is its shape, radius and radii ratio). Seen from i at the angle phi off j's facing
+    (pw rel_j): half-width r sqrt(sin^2 phi + q^2 cos^2 phi), half-length r sqrt(cos^2 phi + q^2 sin^2 phi), q the
+    ratio; a circle keeps r both ways."""
+    r = u["radius"][:, None, :].expand_as(pw["rel_j"])
+    q = u["body_ratio"][:, None, :].expand_as(r)
+    s, c = torch.sin(pw["rel_j"]), torch.cos(pw["rel_j"])
+    ell = q < 1
+    across = torch.where(ell, r * torch.sqrt(s * s + q * q * c * c), r)
+    along = torch.where(ell, r * torch.sqrt(c * c + q * q * s * s), r)
+    return across, along
+
+
+def hit_chance_plane(u, pw, ellipse=False):
     """[B, i, j] the hit chance with the spread in the plane across the line of fire (module docstring; missile.accuracy
-    plane): sigma from the calibration AREA, the aim at a man's middle, ranks not in exact files."""
+    plane): sigma from the calibration AREA, the aim at a man's middle, ranks not in exact files. ellipse: a man's body
+    is his battle entity's ellipse seen from the shooter (body_radii; missile.body_ellipse): its half-width across the
+    line of fire where the formula has r across (the lone man's erf, the cover), its half-length along it elsewhere."""
     d = pw["dist"].clamp(min=5.0)
     shrink = torch.sqrt((1 - u["acc"] / 100).clamp(min=0))[:, :, None]
     sig = (torch.sqrt(u["cal_area"].clamp(min=0))[:, :, None] * d / u["cal_dist"].clamp(min=1.0)[:, :, None]
@@ -321,8 +339,11 @@ def hit_chance_plane(u, pw):
     L = u["height"][:, None, :] / torch.tan(theta)
     sa = sig / torch.sin(theta)                      # the spread along the line, on the ground
     c = 0.5 * L                                      # the aim point (a man's middle) beyond his feet
-    r = u["radius"][:, None, :]
-    lat_lone = torch.erf(r / (math.sqrt(2) * sig))
+    if ellipse:
+        rx, r = body_radii(u, pw)                    # across the line of fire, along it
+    else:
+        rx = r = u["radius"][:, None, :]
+    lat_lone = torch.erf(rx / (math.sqrt(2) * sig))
     p_lone = lat_lone * (_phi((L + r - c) / sa) - _phi((-r - c) / sa))
     h = torch.where(u["sp_h"] > 0, u["sp_h"], torch.full_like(u["sp_h"], 2.0))[:, None, :]
     sv = torch.where(u["sp_v"] > 0, u["sp_v"], torch.full_like(u["sp_v"], 2.0))[:, None, :]
@@ -330,7 +351,7 @@ def hit_chance_plane(u, pw):
     D = (depth - sv).clamp(min=0)                    # the target's formation (geometry.dims)
     ranks = (depth / sv).clamp(min=1)
     n = torch.minimum(((torch.minimum(L, D) + 2 * r) / sv).clamp(min=1.0), ranks)
-    cover = 1 - (1 - (2 * r / h).clamp(max=1.0)) ** n
+    cover = 1 - (1 - (2 * rx / h).clamp(max=1.0)) ** n
     lateral = torch.maximum(cover, lat_lone)
     along = torch.zeros_like(sig)
     q_n = 7
