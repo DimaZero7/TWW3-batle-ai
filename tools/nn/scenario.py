@@ -126,9 +126,12 @@ TAIL = """  <battle_description>
 """
 
 
-def scenario_xml(arena, defender, duration_s=3600):
-    """defender: 'own' or 'enemy' — the side that wins on timeout, so the game sees it defending."""
+def scenario_xml(arena, defender, duration_s=3600, labels=None):
+    """defender: 'own' or 'enemy' — the side that wins on timeout, so the game sees it defending.
+    labels: {side: text} — the general's name the game shows over each army (who commands the side,
+    tools/build.py side_labels); the side's key ('own'/'enemy') by default. Nothing reads it back."""
     assert defender in SIDES
+    labels = labels or {}
     places = placements(arena)
     sides = armies(arena)
     parts = ['<?xml version="1.0" encoding="utf-8"?>\n',
@@ -139,7 +142,7 @@ def scenario_xml(arena, defender, duration_s=3600):
         back = arena["deployment_m"] / 2 - 40  # the zone reaches 40 m in front of the spearmen
         units = "".join(UNIT.format(men=u["men"], script_name=u["script_name"], key=escape(u["key"]), x=u["x"], z=u["z"],
                                     orient=orient, width=u["width"],
-                                    general=(f"        <general><name>{side}</name><star_rating level=\"1\"/></general>\n"
+                                    general=(f"        <general><name>{escape(labels.get(side) or side)}</name><star_rating level=\"1\"/></general>\n"
                                              if u["general"] else ""))
                         for u in places[side])
         parts.append(ALLIANCE.format(index=index, faction=escape(sides[side]["faction"]), size=arena["deployment_m"],
@@ -160,10 +163,10 @@ def run_config(arena):
                              for u in places[side]] for side in SIDES}}
 
 
-def write_scenario(defender, arena=None, path=None, duration_s=3600):
+def write_scenario(defender, arena=None, path=None, duration_s=3600, labels=None):
     """Writes the battle file (scenarios/nn_arena.xml unless path is given); returns the arena."""
     arena = arena or load_arena()
-    (path or SCENARIO).write_text(scenario_xml(arena, defender, duration_s), encoding="utf-8", newline="\n")
+    (path or SCENARIO).write_text(scenario_xml(arena, defender, duration_s, labels), encoding="utf-8", newline="\n")
     return arena
 
 

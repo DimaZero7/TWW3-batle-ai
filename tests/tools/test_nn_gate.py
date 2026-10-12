@@ -1,6 +1,7 @@
 """The in-game gate: nn-arena builds of generated battles (--army-seed, --own-role) and
 tools/nn/gate.py (the plan, the outcome of a run, the summary). Levels 1-2: no game."""
 import json
+from pathlib import Path
 
 import pytest
 
@@ -45,6 +46,30 @@ class TestBuild:
         assert xml.count("<unit ") == len(config["units"]["own"]) + len(config["units"]["enemy"])
         # What the Lua side puts into the companion's state: attacker 1 when our side attacks.
         assert (1 if config["enemy_role"] == "defend" else 2) == attacker
+
+    @pytest.mark.parametrize("argv,own,enemy", [
+        (["nn-arena", "--army-seed", "1000900795", "--net-name", "build/v2/itS24_3.pt"],
+         "Нейросеть S24_3", "ИИ игры (нормальная)"),
+        (["nn-arena", "--army-seed", "1000900795", "--enemy-ai", "ai_like", "--net-name", "build/nn-train/test5/S24/m5.pt"],
+         "Нейросеть S24/m5", "Скрипт ai_like"),
+        (["human", "--army-seed", "1000900795", "--enemy-ai", "net", "--net-name", "itS22"],
+         "Человек", "Нейросеть itS22"),
+        (["human", "--army-seed", "1000900795"], "Человек", "ИИ игры (нормальная)"),
+        (["nn-arena", "--army-seed", "1000900795", "--label-own", "A & B", "--label-enemy", "<x>"], "A &amp; B", "&lt;x&gt;"),
+    ])
+    def test_the_general_over_each_army_names_who_commands_it(self, argv, own, enemy, tmp_path, monkeypatch):
+        written = capture(monkeypatch, tmp_path)
+        assert build.main(argv) == 0
+        (_, scenario), = written
+        xml = Path(scenario).read_bytes().decode("utf-8")
+        assert xml.count("<general><name>") == 2
+        assert xml.index(f"<general><name>{own}</name>") < xml.index(f"<general><name>{enemy}</name>")
+
+    def test_the_network_name_comes_from_the_checkpoint(self):
+        assert build.net_name("build/v2/itS24_3.pt") == "S24_3"
+        assert build.net_name("build/v2/v2c_m60.pt") == "v2c_m60"
+        assert build.net_name("build/nn-train/test5/wfix_ema10/m10.pt") == "wfix_ema10/m10"
+        assert build.net_name("S22") == "S22" and build.net_name("") == ""
 
     def test_the_swapped_battle_gives_our_side_the_other_army(self, tmp_path, monkeypatch):
         written = capture(monkeypatch, tmp_path)

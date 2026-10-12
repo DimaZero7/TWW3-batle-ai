@@ -309,6 +309,32 @@ def build(target, run_config, dependencies=None, scenario=None, kv=None):
     return manifest
 
 
+def net_name(value):
+    """A short name of the network from its checkpoint: build/v2/itS24_3.pt -> 'S24_3',
+    build/nn-train/test5/S24/m5.pt -> 'S24/m5'; a name without '.pt' stays as given."""
+    if not value:
+        return ""
+    if not value.lower().endswith(".pt"):
+        return value
+    path = Path(value)
+    stem = path.stem
+    if stem.startswith("it") and len(stem) > 2 and (stem[2].isupper() or stem[2].isdigit()):
+        stem = stem[2:]
+    if stem[:1] == "m" and stem[1:].isdigit() and path.parent.name:
+        stem = f"{path.parent.name}/{stem}"
+    return stem
+
+
+def side_labels(args):
+    """{side: the general's name over the army in the game}: who commands the side (--label-own/--label-enemy
+    override). The game runs in Russian (Steam language), so its fonts have Cyrillic."""
+    net = " ".join(x for x in ("Нейросеть", net_name(args.net_name)) if x)
+    own = {"net": net, "human": "Человек", "attack": "Планировщик CA (атака)",
+           "defend": "Планировщик CA (оборона)", "hold": "Стоит без приказов"}.get(args.own_ai, args.own_ai)
+    enemy = {"game": "ИИ игры (нормальная)", "net": net}.get(args.enemy_ai, f"Скрипт {args.enemy_ai}")
+    return {"own": args.label_own or own, "enemy": args.label_enemy or enemy}
+
+
 def nn_arena_config(args, run_config):
     """nn-arena: writes the battle file and fills run_config (units, roles, the generated armies).
     Returns the path of a battle file written outside scenarios/ (a generated battle), else None."""
@@ -321,6 +347,7 @@ def nn_arena_config(args, run_config):
     defender = "enemy" if enemy_role == "defend" else "own"
     duration_s = max(3600, args.timeout + TIMEOUT_MARGIN_S)
     path = None
+    labels = side_labels(args)
     if args.army_from_run is not None:
         # an old run's armies and deployment (tools/nn/army_from_run.py): its manifest, not the generator
         from tools.nn import army_from_run
@@ -346,20 +373,21 @@ def nn_arena_config(args, run_config):
         # A generated battle is not a scenario of the repository: its file goes next to the build.
         path = project.BUILD / args.target / f"{arena['name']}.xml"
         path.parent.mkdir(parents=True, exist_ok=True)
-        nn_scenario.write_scenario(defender, arena, path, duration_s)
+        nn_scenario.write_scenario(defender, arena, path, duration_s, labels)
         run_config["army"] = dict(army, cost={s: arena["sides"][s]["cost"] for s in nn_scenario.SIDES},
                                   men={s: sum(u["men"] for u in arena["sides"][s]["units"])
                                        for s in nn_scenario.SIDES})
         if "edit" in arena["sides"]["own"]:
             run_config["army"]["edit"] = arena["sides"]["own"]["edit"]
     elif args.target == "nn-arena":
-        arena = nn_scenario.write_scenario(defender, nn_scenario.load_arena(args.arena), duration_s=duration_s)
+        arena = nn_scenario.write_scenario(defender, nn_scenario.load_arena(args.arena), duration_s=duration_s,
+                                            labels=labels)
     else:
         # the human target never rewrites scenarios/nn_arena.xml: its battle file goes next to its build
         arena = nn_scenario.load_arena(args.arena)
         path = project.BUILD / args.target / f"{arena['name']}.xml"
         path.parent.mkdir(parents=True, exist_ok=True)
-        nn_scenario.write_scenario(defender, arena, path, duration_s)
+        nn_scenario.write_scenario(defender, arena, path, duration_s, labels)
     run_config.update(nn_scenario.run_config(arena), own_ai=args.own_ai, enemy_role=enemy_role)
     if args.defend_radius is not None:
         run_config["defend_radius_m"] = args.defend_radius
@@ -421,6 +449,15 @@ def main(argv=None):
                              "script of the simulator (tools/nn/train/opponents.py) in the companion, as the "
                              "network's simulator opponent (the twin's: ai_like); human: also 'net', the "
                              "network plays the enemy side (the companion's --enemy-script net --no-own)")
+    parser.add_argument("--net-name", default="",
+                        help="nn-arena/human: the network's checkpoint (path or name) for the label over its army: "
+                             "build/v2/itS24_3.pt -> 'Нейросеть S24_3'")
+    parser.add_argument("--label-own", default="",
+                        help="nn-arena/human: the general's name over our army (default: who commands it - "
+                             "'Нейросеть <--net-name>', 'Человек', 'Планировщик CA (атака)', ...)")
+    parser.add_argument("--label-enemy", default="",
+                        help="nn-arena/human: the general's name over the enemy army (default: 'ИИ игры (нормальная)', "
+                             "'Скрипт ai_like', 'Нейросеть <--net-name>')")
     parser.add_argument("--free-speed", action="store_true",
                         help="human: the battle starts at --speed and the human may change the speed and pause "
                              "(no speed guard; the network's decisions stay decide_ms of battle time)")
