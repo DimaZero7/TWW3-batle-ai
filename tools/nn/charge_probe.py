@@ -259,6 +259,7 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe retarget [runs...] [--sim]          # the retarget plan's table
     python -m tools.nn.charge_probe run --plan retarget2                # 10 more shooter lanes (the same table)
     python -m tools.nn.charge_probe run --plan retarget3                # targets in line / across (the turn?)
+    python -m tools.nn.charge_probe run --plan ratlingrt               # the Ratling Gun's spin-up on a new target
     python -m tools.nn.charge_probe run --plan leave                    # the exit from melee (report --sim)
     python -m tools.nn.charge_probe run --plan skirmish                 # the shooters' skirmish mode
     python -m tools.nn.charge_probe skirmish [runs...] [--sim]          # its table (skirmish2 too; --sim: + the twin)
@@ -388,7 +389,7 @@ NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in N
 UNIT_PLANS = ("ratling", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow")
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
-         "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "leave", "skirmish", "skirmish2", "shootcontact",
+         "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "ratlingrt", "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour") + UNIT_PLANS
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
@@ -486,6 +487,16 @@ RETARGET3_RAY_D_M = 98.0        # as the 'side' lanes' (80 m front to front, 30 
 RETARGET = {"fire_s": 120, "gap_m": 80, "t2_gap_m": 30}   # 80 m front to front: ~98 m centre to centre
 RETARGET_PLACES = DMGMELEE_PLACES
 RETARGET_LAG_S = 2.0       # a shot's flight (bolts 45 m/s, bullets 100 m/s over ~110 m) and the health readout's lag
+# the ratlingrt plan: the Ratling Gun's spin-up on a new target - one switch of its ranged attack to the other target at
+# switch_s after the go (the lane ends max_s, before the switch back at 2 x switch_s): the game's bursts start ~4.5 s
+# after the go and ~12 s apart (B1 ~4.5, B2 ~16.5), so M1 6.0 / M2 18.5 switch mid-burst, E 12.5 right after the first
+# burst, L 14.5 late in the reload (~2 s before B2); A no switch (the control). (kind, switch_s, max_s, lanes): 9 lanes
+# (18 spearmen and the General: the army's 20 units);
+# the targets: held fearless Empire spearmen gap_m front to front, t2_gap_m apart (centres ~40 m apart: ~13 deg aside,
+# inside the gun's fire arc), the gun between them; on the retarget2 grid, 2 battles, lanes rotated
+RATLINGRT_LANES = (("A", None, 40, 1), ("M1", 6.0, 11.5, 2), ("E", 12.5, 24.0, 2), ("L", 14.5, 28.0, 2),
+                   ("M2", 18.5, 36.0, 2))
+RATLINGRT = {"gap_m": 70, "t2_gap_m": 10}
 ROUTMOB_MEN_S = 40     # the routmob plan: the soldiers' places this long after the target's rout
 # the pursuit plan: a long chase after a rout (gap_m front to front at the go; the target, half its men killed at placement,
 # routed by script rout_at_s after the contact if it has not routed by then; the lane ends after_rout_s after the rout)
@@ -791,6 +802,14 @@ def battles(plan):
                         kind=f"{RETARGET_KIND[switch_s]}-{geom}", **where, **({"switch_s": switch_s} if switch_s else {}))
         base = [rt3(*x) for x in RETARGET3_LANES]
         for b in (base, rotate(base, 3)):
+            out.append([dict(l, place=p) for l, p in zip(b, RETARGET2_PLACES)])
+    elif plan == "ratlingrt":
+        def rr(kind, switch_s, max_s, _n):
+            return lane("ratling", "spear", "retarget", "hold", gap_m=RATLINGRT["gap_m"], fight_s=max_s, answer=False,
+                        target2="spear", t2_gap_m=RATLINGRT["t2_gap_m"], t2_inward=True, a_mid=True, max_s=max_s,
+                        kind=kind, **({"switch_s": switch_s} if switch_s else {}))
+        base = [rr(*x) for x in RATLINGRT_LANES for _ in range(x[3])]
+        for b in (base, rotate(base, 5)):
             out.append([dict(l, place=p) for l, p in zip(b, RETARGET2_PLACES)])
     elif plan == "leave":
         def lv(attacker, target, kind):
