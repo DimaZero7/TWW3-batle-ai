@@ -260,6 +260,7 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
     python -m tools.nn.charge_probe run --plan retarget2                # 10 more shooter lanes (the same table)
     python -m tools.nn.charge_probe run --plan retarget3                # targets in line / across (the turn?)
     python -m tools.nn.charge_probe run --plan ratlingrt               # the Ratling Gun's spin-up on a new target
+    python -m tools.nn.charge_probe run --plan ratlingrt2              # an order late in a burst, orders every 9 / 6 s
     python -m tools.nn.charge_probe run --plan leave                    # the exit from melee (report --sim)
     python -m tools.nn.charge_probe run --plan skirmish                 # the shooters' skirmish mode
     python -m tools.nn.charge_probe skirmish [runs...] [--sim]          # its table (skirmish2 too; --sim: + the twin)
@@ -389,7 +390,8 @@ NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in N
 UNIT_PLANS = ("ratling", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow")
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
-         "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "ratlingrt", "leave", "skirmish", "skirmish2", "shootcontact",
+         "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "ratlingrt", "ratlingrt2",
+         "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour") + UNIT_PLANS
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
@@ -497,6 +499,12 @@ RETARGET_LAG_S = 2.0       # a shot's flight (bolts 45 m/s, bullets 100 m/s over
 RATLINGRT_LANES = (("A", None, 40, 1), ("M1", 6.0, 11.5, 2), ("E", 12.5, 24.0, 2), ("L", 14.5, 28.0, 2),
                    ("M2", 18.5, 36.0, 2))
 RATLINGRT = {"gap_m": 70, "t2_gap_m": 10}
+# the ratlingrt2 plan: does an order late in a burst, or orders again and again, buy the gun a fresh burst? The ratlingrt
+# lanes' places and targets; (kind, switch_s, max_s, lanes): 'LB' one switch 3.5-5 s into the second burst (B2 ~16-19 s
+# after the go: B1 4.0-7.0 + 12; the lane ends before the switch back at 2 x switch_s), 'S9' / 'S6' a switch every 9 / 6 s
+# for 75 s, 'A' no switch (the control, 75 s). 9 lanes, 2 battles, lanes rotated
+RATLINGRT2_LANES = (("LB", 20.5, 40.0, 1), ("LB", 21.5, 42.0, 1), ("LB", 22.5, 44.0, 1), ("S9", 9.0, 75.0, 2),
+                    ("S6", 6.0, 75.0, 2), ("A", None, 75.0, 2))
 ROUTMOB_MEN_S = 40     # the routmob plan: the soldiers' places this long after the target's rout
 # the pursuit plan: a long chase after a rout (gap_m front to front at the go; the target, half its men killed at placement,
 # routed by script rout_at_s after the contact if it has not routed by then; the lane ends after_rout_s after the rout)
@@ -803,12 +811,12 @@ def battles(plan):
         base = [rt3(*x) for x in RETARGET3_LANES]
         for b in (base, rotate(base, 3)):
             out.append([dict(l, place=p) for l, p in zip(b, RETARGET2_PLACES)])
-    elif plan == "ratlingrt":
+    elif plan in ("ratlingrt", "ratlingrt2"):
         def rr(kind, switch_s, max_s, _n):
             return lane("ratling", "spear", "retarget", "hold", gap_m=RATLINGRT["gap_m"], fight_s=max_s, answer=False,
                         target2="spear", t2_gap_m=RATLINGRT["t2_gap_m"], t2_inward=True, a_mid=True, max_s=max_s,
                         kind=kind, **({"switch_s": switch_s} if switch_s else {}))
-        base = [rr(*x) for x in RATLINGRT_LANES for _ in range(x[3])]
+        base = [rr(*x) for x in (RATLINGRT_LANES if plan == "ratlingrt" else RATLINGRT2_LANES) for _ in range(x[3])]
         for b in (base, rotate(base, 5)):
             out.append([dict(l, place=p) for l, p in zip(b, RETARGET2_PLACES)])
     elif plan == "leave":

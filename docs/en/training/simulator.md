@@ -647,6 +647,24 @@ The mechanics of the new Skaven units ([passports](units.md#ratling-gun-plague-m
   network's guns) and -111151 (the game AI's), 1 s samples: the first bullet after a halt / a new target / a switch
   after 5.5 / 6 / 6 and 5 / 5 / 6 s, the simulator's replay of the same battles 4 / 3 / 2 s, with the rule 5 / 5 / 5.
   The spin-up is the burst's re-aim too (below).
+- **An order mid-burst** (`missile.burst_cut_reload`, `missile.burst_cut_spread_s` 2 s, `missile.burst_cut`): a new
+  order (another kind or another attack target) while a burst is going ends the burst. A man who had begun it reloads
+  from the cut as from a burst's end: the cycle less the burst, the gun's 12 - 4.5 = 7.5 s (no new number); a man who
+  had not begun stays loaded. The unit has one clock: the share that had begun is the seconds since the burst's start /
+  2 s (the game's men begin a burst over ~2 s, the `ratling` probe), and the unit waits that share of 7.5 s. The new
+  burst is full, once the unit is loaded and spun up (4.5 s from the order); the cycle counts from it. Without the rule
+  the reload ran from the cut burst's start - 10.5-12 s without a bullet. No database or community number - measured.
+  The `ratlingrt` probe: an order on another target 0.5-2 s into a burst (3-27 % of its bullets out: few men had begun)
+  - the first bullet 4.0-4.5 s later, a burst of 465-563 of 576. The `ratlingrt2` probe (2 battles x 9 lanes): one order
+  3.5-5 s into a burst - the next 4.0-6.0 s later (the bulk 5.5-7), full; an order every 9 s - each burst, all men at
+  once, began 1-1.5 s before the order, the next 7.5 s after it, 0.96 of the bullets a minute of no orders; every 6 s -
+  5.0 s later only the men who had not begun fire (big and small bursts in turns), 0.53 of the bullets a minute.
+  Rejected: "cut and loaded" (a new full burst 4.5 s after any order) gave orders every 9 / 6 s 1.22 / 1.14 of the
+  bullets a minute of no orders (game 0.96 / 0.53) - the network could fire more by spamming the gun with orders.
+  Open: a single order early in a burst waits 7.5 s in the twin against the game's 4.5 (the simulator's men all begin
+  at once, and the twin's order lands 2 s into the burst). Not measured, chosen: the same order again changes nothing;
+  a switch of target the unit makes itself without an order (its target died or routed) keeps the old way (the cycle
+  from the cut burst's start).
 - **A burst cut short** (`missile.burst_reaim`): a man whose target died aims again (`aim_s`: the gun's 4.5 s) and loses
   those bullets of his burst; flat fire aims at the front rank, so a death there takes the gun's men / the target's
   files out of the burst. The probe: on the lone General every burst was 576 bullets, on formations the first 576 and
@@ -690,6 +708,8 @@ places, 4 copies; the game - the mean of 2 lanes):
 | Gun: the first bullet after the order, s | 3.75-5.0 (median 4.5) | 4.5 (was 3.0) |
 | Gun: bullets a burst, General / swordsmen 60 / 100 / 135 m / shields 100 m | 576 / 364 / 424 / 470 / 482 | 576 / 455 / 486 / 498 / 488 (was 576 / 502 / 521 / 519 / 524) |
 | Gun: the burst's cycle, s | 11.5-12.0 | 12.0 |
+| Gun: next bullet after an order on another target - early in a burst / late in it / orders every 9 s, s (the `ratlingrt`, `ratlingrt2` probes) | 4.5 / 4.5 (bulk 5.5-7) / 7.5 | 7.5 / 7.5 / 7.5 (was 10.5 / 8.0 / 7.5) |
+| Gun: bullets a minute with orders every 9 / 6 s against none | 0.96 / 0.53 | 0.96 / 0.60 (was 0.87 / 0.32; "cut and loaded" 1.22 / 1.14) |
 | Gun: HP a bullet, swordsmen 60 / 100 / 135 m / shields | 2.16 / 1.62 / 1.37 / 1.60 | 2.20 / 1.63 / 1.44 / 1.62 |
 | Gun: the target's HP a second, swordsmen 60 / 100 / 135 m | 71 / 60 / 56 | 84 / 66 / 60 (was 93 / 71 / 61) |
 | Swordsmen running at the gun: contact, s | 95 | 88 (was none: they broke under fire) |

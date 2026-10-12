@@ -85,6 +85,51 @@ class TestBurst:
         assert first == pytest.approx(32 * 18, rel=0.01)                  # 576: the lone General's lane in the game
         assert starts[1] - starts[0] == pytest.approx(12.0, abs=P.dt)      # the measured cycle
 
+    @staticmethod
+    def switch_mid_burst(into_s):
+        """The gun on one of two swordsmen units 90 m away, an attack order on the other into_s s after its first
+        burst starts. -> (seconds from the order to the next bullet, bullets in the 6 s from it, the burst after it -
+        its start's seconds after the order)."""
+        st = battle_of([(SWORD, -20.0, -90.0, 0.0), (SWORD, 20.0, -90.0, 0.0)], [(RATLING, 0.0, 0.0, 180.0)])
+        H = st.N // 2
+        orders = O.hold(st.B, st.N, st.device)
+        orders.kind[0, H], orders.target[0, H] = O.ATTACK, 0
+        t, b1, T, log = 0.0, None, None, []
+        while t < 60.0:
+            if b1 is not None and T is None and t >= b1 + into_s - 1e-6:
+                orders.target[0, H], T = 1, t                              # the new order
+            a0 = float(st.u["a"][0, H])
+            battle.step(st, orders, P)
+            t += P.dt
+            n = a0 - float(st.u["a"][0, H])
+            if n > 1e-6 and b1 is None:
+                b1 = t
+            if T is not None:
+                log.append((t - T, n))
+        first = next(dt for dt, n in log if n > 1e-6)
+        burst = sum(n for dt, n in log if first - 1e-6 <= dt < first + 6.0)
+        nxt = next(dt for (dt, n), (_, prev) in zip(log, [(0, 0.0)] + log) if dt > first + 6 and n > 1e-6 and prev <= 1e-6)
+        return first, burst, nxt
+
+    def test_an_order_early_in_a_burst_gives_a_full_burst_after_the_spin_up(self):
+        # 0.5 s in: a quarter of the men had begun (burst_cut_spread_s 2), the wait 0.25 x 7.5 s hides in the spin-up
+        aim = P.static(RATLING)["aim_s"]
+        first, burst, nxt = self.switch_mid_burst(0.5)
+        assert first == pytest.approx(aim, abs=P.dt)                      # the game 4.0-4.5 s (the ratlingrt probe)
+        assert burst > 0.8 * 32 * 18                                      # a full burst (the game 465-563 of 576)
+        assert nxt - first == pytest.approx(12.0, abs=P.dt)               # the cycle from the new burst
+
+    def test_an_order_later_in_a_burst_reloads_the_cycle_less_the_burst_from_the_cut(self):
+        # every man had begun: 12 - 4.5 = 7.5 s from the cut (orders every 9 s in the game: the next 7.4-7.6 s after)
+        first, burst, _ = self.switch_mid_burst(3.0)
+        assert first == pytest.approx(12.0 - 4.5, abs=P.dt)
+        assert burst > 0.8 * 32 * 18
+
+    def test_without_the_rule_the_cut_burst_keeps_its_reload(self, monkeypatch):
+        monkeypatch.setitem(P.sim["missile"], "burst_cut_reload", 0)
+        first, _, _ = self.switch_mid_burst(1.5)
+        assert first == pytest.approx(12.0 - 1.5, abs=P.dt)               # the old 10.5-12 s
+
     def test_the_ammunition_is_one_pool_of_the_unit(self):
         st = gun_on(GENERAL, 100.0, men=16)
         H = st.N // 2

@@ -653,6 +653,29 @@ def burst_share(u, volley_target, m_target, loaded, dt):
     return burst, start, share, target
 
 
+def burst_cut(u, mask, spread_s=0.0):
+    """A new order mid-burst (missile.burst_cut_reload; battle.py, the order block): the burst units of mask [B, N]
+    whose burst is going end it. The men who had begun it reload from the cut as from a burst's own end (the cycle
+    less the burst: the gun's 12 - 4.5 = 7.5 s); the others stay loaded. The share that had begun: the burst's
+    elapsed seconds / spread_s (the game's men begin a burst over ~2 s; 0: all of them), the unit's wait that share of
+    the rest (one clock for the unit). Its next burst, whole (spv a man), comes once it is loaded and the spin-up is
+    done (the aim clock the order reset); the reload cycle counts from it. -> [B, N] the units cut."""
+    if "bst_s" not in u:
+        return torch.zeros_like(mask)
+    cut = mask & (u["spv"] > 1) & (u["bst_rate"] > 0) & (u["bst_s"] > 1e-6)
+    length = u["spv"] / u["bst_rate"].clamp(min=1e-6)
+    begun = torch.ones_like(u["bst_s"])
+    if spread_s > 0:
+        begun = ((length - u["bst_s"]) / spread_s).clamp(0, 1)
+    wait = begun * (u["reload"] - length).clamp(min=0)
+    u["bst_s"] = torch.where(cut, torch.zeros_like(u["bst_s"]), u["bst_s"])
+    u["bst"] = torch.where(cut, torch.zeros_like(u["bst"]), u["bst"])
+    u["unready"] = torch.where(cut, (wait / u["reload"].clamp(min=1e-6)).clamp(0, 1), u["unready"])
+    if "bst_p" in u:
+        u["bst_p"] = torch.where(cut, torch.zeros_like(u["bst_p"]), u["bst_p"])
+    return cut
+
+
 def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, catch=None):
     """Shots, and HP taken per pair [B, N, N] (i shoots, f is hit) this step; per-hit damage
     [B, N, N]. clear [B, N]: share of the shooter's men with a clear line (clear_shot; None: all).

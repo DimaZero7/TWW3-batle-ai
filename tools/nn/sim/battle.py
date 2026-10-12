@@ -96,6 +96,11 @@ def step(st, orders, params=None, dt=None):
         own_rt = u["rt_s"] >= 0
         u["aim"] = torch.where(changed, torch.where(own_rt, torch.minimum(u["aim"], u["aim_s"] - u["rt_s"]),
                                                     torch.zeros_like(u["aim"])), u["aim"])
+        if cal["missile"].get("burst_cut_reload"):
+            # a burst weapon given a new order mid-burst ends the burst: the men who had begun it reload from the cut
+            # (the cycle less the burst), the others stay loaded; a new full burst once loaded and spun up
+            # (missile.burst_cut_reload; the ratlingrt / ratlingrt2 probes)
+            missile.burst_cut(u, changed, float(cal["missile"].get("burst_cut_spread_s") or 0.0))
     u["order_kind"], u["order_target"], u["order_run"] = kind, tgt, run
     if "order_s" in u:
         # the order's clock (contact.fresh_incidental, melee.py): a new order given in melee starts it at 0, out of
