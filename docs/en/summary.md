@@ -113,8 +113,10 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
   poison, the censer's contagion, the Ratling Gun's suppressing fire - the database phase's stats on the unit hit for
   10 s from the last hit, different ones stack, friendly fire lays none; the Ratling Gun - 18 bullets a volley at 4 a
   second, a 12 s cycle, one ammunition pool, it fires in melee too; a man whose target died loses 2 s of his burst.
-- **Not modelled:** terrain, forest, visibility, cavalry, monsters, magic, flight, artillery, experience; runners
-  slowed by bullet hits (the `hitslow` probe: run x0.68 under handgun fire).
+- **Bullets slow** ([details](training/simulator.md#contact-effects-and-the-ratling-guns-burst)): hits of projectiles of
+  category `musket` (handguns, the gun, pistols, throwing stars) slow a small formation for 10 s: run x0.65, walk
+  x0.9 (the `hitslow` measure: a run at handgunners x0.68, bolts do not slow; no number in the database).
+- **Not modelled:** terrain, forest, visibility, cavalry, monsters, magic, flight, artillery, experience.
 
 **Checks against the game.** A recorded battle is replayed by its recorded orders 19 times with the start
 shifted up to 2 m; the copies are the forecast, the game's record is the outcome. The main score is **the

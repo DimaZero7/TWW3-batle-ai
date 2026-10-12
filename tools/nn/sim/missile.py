@@ -180,6 +180,41 @@ def router_keep(u, prev, params, t, dt):
     return on_router & (draw < stay)
 
 
+def hit_slow_lay(u, params, dt, hp_missile, shit, enemy, t):
+    """The slowing from hits (missile.hit_slow; config/nn/sim.json hit_slow.why), in place: the timer hs_s runs down
+    by dt, then starts at hit_slow.duration_s on every unit hit this step by an enemy whose projectiles slow (STATIC
+    hslow: the database's projectile category in hit_slow.categories). hp_missile [B, i, j]: HP i's projectiles took
+    from j this step, shit [B, i, j] the HP a hit, enemy [B, i, j]. Hits land as Poisson counts of the expected ones:
+    at least one with 1 - exp(-hits), a hash draw per battle, unit and step (morale._hash_uniform), as effects.lay."""
+    hs = params.sim["missile"].get("hit_slow") or {}
+    if not hs.get("on") or "hs_s" not in u:
+        return
+    from tools.nn.sim import morale
+    B, N = u["men"].shape
+    k = torch.round(t / dt).long() if isinstance(t, torch.Tensor) else torch.full(
+        (B,), round(float(t) / dt), dtype=torch.long, device=u["men"].device)
+    n = torch.where(shit > 0, hp_missile / shit.clamp(min=1e-6), torch.zeros_like(hp_missile)) * enemy
+    hits = (u["hslow"].float()[:, :, None] * n).sum(1)
+    draw = morale._hash_uniform(B, N, k, u["men"].device, salt=61417, ids=morale.battle_ids(u))
+    hit = (hits > 0) & (draw < 1 - torch.exp(-hits))
+    left = (u["hs_s"] - dt).clamp(min=0)
+    u["hs_s"] = torch.where(hit, torch.full_like(left, float(hs["duration_s"])), left)
+
+
+def hit_slow_factor(u, params, fast):
+    """[B, N] the share of its speed a unit keeps under the slowing from hits (missile.hit_slow; 1: none): hs_s > 0 on
+    a small formation (men0 > 1, not large: the measured clanrats; lords ignore most hit reactions - the database's
+    battle_entities hit_reactions_ignore_chance 70-75 %, infantry 0) - hit_slow.run while it runs (fast [B, N]), else
+    hit_slow.walk."""
+    hs = params.sim["missile"].get("hit_slow") or {}
+    one = torch.ones_like(u["hp"])
+    if not hs.get("on") or "hs_s" not in u:
+        return one
+    on = (u["hs_s"] > 0) & (u["men0"] > 1) & ~u["large"]
+    k = torch.where(fast, torch.full_like(one, float(hs["run"])), torch.full_like(one, float(hs["walk"])))
+    return torch.where(on, k, one)
+
+
 def choose_target(u, pw, can_shoot, order_target, order_attack, exclude=None, prev=None, per_man=False,
                   reach=(0.0, 0.0), keep_router=None):
     """[B, N] slot each shooter aims at (-1 none). exclude [B, N, N]: targets i may not take. prev [B, N]: last

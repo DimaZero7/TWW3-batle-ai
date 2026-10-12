@@ -162,6 +162,9 @@ class Params:
             # (missile.reaim_broken_why) arrows and bolts: once the target lost this share of its men, each shot aims
             "broken_at": float((ms.get("reaim_broken_cat_share") or {}).get(cat, 0.0)) if missile else 0.0,
             "rt_s": float((ms.get("retarget_cat_s") or {}).get(cat, -1.0)) if missile else -1.0,
+            # its hits slow the small formations they hit (missile.hit_slow: the hit reactions of gunpowder, by category)
+            "hslow": bool(missile) and bool((ms.get("hit_slow") or {}).get("on"))
+                     and cat in ((ms.get("hit_slow") or {}).get("categories") or ()),
             "friendly_fire": ms["friendly_fire"].get(cat, ms["friendly_fire_other"]) if missile else 0,
             "morale_bonus": self.sim["morale"]["faction_bonus"].get(faction, 0),
             "rout_death_s": (self.sim["morale"]["lord_fall"].get("rout_death_s") or {}).get(faction, 0),

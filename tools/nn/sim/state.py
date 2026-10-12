@@ -158,6 +158,8 @@ STATIC = {
     "mfx": ("i", "the contact effect its blows lay on the enemy they hit: index in config/nn/effects.json order, -1 "
                  "none (the passport's melee.contact_phase; tools/nn/sim/effects.py lay)"),
     "sfx": ("i", "the contact effect its projectiles lay (missile.contact_phase), -1 none"),
+    "hslow": ("b", "its projectiles' hits slow the small formations they hit (config/nn/sim.json missile.hit_slow by "
+                   "category: musket - handguns, the Ratling Gun, pistols, throwing stars; missile.py hit_slow)"),
     "fx": ("i", "its innate effects: bitmask over config/nn/effects.json order (tools/nn/sim/effects.py)"),
     "fxt0": ("i", "its first timed effect (index in that order, -1 none)"),
     "fxt1": ("i", "its second timed effect (-1 none)"),
@@ -237,6 +239,8 @@ INTERNAL = {
     "rally_ok_s": ("f", "seconds a routing unit has met the rally's conditions without a break (morale.rally_wait_s)"),
     "flank_hit": ("f", "worst direction attacked from now: 0 front, 1 flank, 2 rear"),
     "under_fire_s": ("f", "seconds since last hit by a projectile"),
+    "hs_s": ("f", "seconds left of the slowing from hits of projectiles that slow (STATIC hslow; missile.py hit_slow: "
+                  "missile.hit_slow.duration_s from each step such hits land in), 0: none"),
     "lost_worst": ("f", "the worst share of the unit lost so far (tools/nn/train/reward.py track: health, a rout's "
                         "share, out whole), kept by the reward's caller, not the simulator: a rally gives nothing back"),
     "dealt": ("f", "HP dealt in melee recently (decaying)"),

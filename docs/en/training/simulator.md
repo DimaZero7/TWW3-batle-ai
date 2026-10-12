@@ -644,6 +644,24 @@ The mechanics of the new Skaven units ([passports](units.md#ratling-gun-plague-m
   files out of the burst. The probe: on the lone General every burst was 576 bullets, on formations the first 576 and
   then 364-482 - the rate halving within 0.5 s of 3-4 deaths.
 
+- **Bullets slow** (`missile.hit_slow`): a hit of a weapon whose projectile is of the database's category `musket`
+  (handguns, the gun, pistols, throwing stars) starts a 10 s timer on the unit hit (a step with h hits - with chance
+  1 - e^-h, a hash draw, each hit again). While it runs a small formation (more than one man, not large) runs at x0.65 of
+  its speed and walks at x0.9; routers too. The game's mechanism is the hit reaction (the engine; the database has only
+  `battle_entities.hit_reactions_ignore_chance`, the RPFM schema's name: 0 for our infantry, 70-75 % for the lords); no
+  number of the slowing in the database or online - the numbers are measured. The `hitslow` probe (2 battles): clanrats
+  without shields run at handgunners at 2.59 m/s against 3.83 unshot (x0.68), walk 1.25 against 1.33 (x0.94); at
+  crossbowmen no difference (3.75 / 1.35): a bolt (category `arrow`, 45 m/s, mass 5) does not slow, a bullet (`musket`,
+  100 m/s, the same mass) does. Per man: after a handgun burst the whole formation nearly stands for 2-3 s (42 % of the
+  men under 1 m/s, 8 of them dead), after a bolt volley nothing. The `suppress` probe: under the gun (its x0.7
+  suppression already on) the run is 1.29, the walk 0.91 against 2.10 / 1.05 from the suppression alone (x0.61 / x0.87);
+  x0.65 and x0.9 lie between the two weapons. 10 s: the game's handgunners hit in bursts 5.5-9.5 s apart and the
+  formation stays slow between them; the simulator fires a whole volley once a reload (14.8 s) - 7 s gave a run of 2.85
+  and contact at 41.8 s, 15 s 2.46 but contact at 51.2 s (the last 50 m slowed too, the game's were not), 10 s - the
+  table below. Not measured: throwing stars and pistols (`musket` by the database - included), cavalry and monsters
+  (large - not slowed), lords (lone - not slowed: they ignore most hit reactions), routers (included: the same hit
+  reaction).
+
 **The probe and the twin** (`python -m tools.nn.unit_probe <runs> --sim`: each lane in the simulator at the same
 places, 4 copies; the game - the mean of 2 lanes):
 
@@ -656,6 +674,10 @@ places, 4 copies; the game - the mean of 2 lanes):
 | Suppression: the card's speed | 21 of 30 | 21 of 30 |
 | Suppression: walk under fire / after it (the effect still on), m/s | 0.91 / ~1.0 | 1.05 / 1.05 |
 | Suppression: run under fire, m/s | 1.29 | 2.10 |
+| Suppression + bullets slow: run / walk under fire, m/s | 1.29 / 0.91 | 1.36 / 0.94 |
+| Bullets slow: clanrats running / walking at handgunners, m/s (without the rule 3.78 / 1.35) | 2.59 / 1.25 | 2.46 / 1.23 |
+| Bullets slow: contact running / walking, s (without the rule 34.2 / 81.0) | 43.5 / 92.5 | 44.9 / 88.6 |
+| Bolts: run / walk at crossbowmen, m/s | 3.75 / 1.35 | 3.78 / 1.35 |
 | Suppression: the effect after the last shot, s | 10.5-11 (with the bullet's flight) | 9.5 |
 | Censers / monks: the swordsmen's HP a second, 5-15 s | 90 / 71 | 81 / 81 |
 | Censers / monks: the swordsmen's morale after 10 s | 0.48 / 0.79 | 0.43 / 0.82 |
@@ -666,12 +688,9 @@ places, 4 copies; the game - the mean of 2 lanes):
 
 Open (not these units' new mechanics - general ones):
 
-- **Bullet hits slow runners.** The `hitslow` probe (fire at running clanrats without shields, 2 battles): under the
-  handgunners' bullets the run is 2.59 m/s against 3.83 without fire (x0.68), the walk 1.25 against 1.33; under the
-  crossbowmen's bolts no difference (3.75 / 1.35). Suppression x0.7 with this slowing gives a run of 3.0 x 0.7 x 0.68
-  = 1.43 (the gun in the game 1.29) and a walk of 0.99 (0.91). The database has the mechanism: hit reactions
-  (`battle_entities.hit_reactions_ignore_chance` - the RPFM schema's name - 0 for all our infantry, 70-75 % for the
-  lords), but no number of the slowing. The simulator slows nobody by hits - a separate change.
+- **Swordsmen do not reach the gun.** With bullets slowing, the swordsmen running at the gun rout or die before contact
+  in the simulator (its last shot at 79 s, no contact), in the game they reach it at 95 s: the gun's long fire is
+  stronger in the simulator than in the game (its HP a second is already higher: 93 / 71 / 62 against 71 / 60 / 56).
 - The first 5 s of the censers', monks' and halberds' melee are twice the game's in the simulator (censers 443 against
   230 HP/s) - the same charge hole as all infantry's (the melee change).
 - The Giant Rats strike half as hard as in the game (the charge's 0-5 s 800 against 1490 HP, then 18 against
@@ -1169,6 +1188,14 @@ keep no such clock: their recorded orders go by the recorded time, with no wait 
 (`replay.LORD_PHASES` False). The game's lords break off melee 1.3 times a minute and switch targets; a lord
 whose clock waited went on with an old order on another unit in 0.28 of the seconds the game's enemy lord
 fought ours. This is a rule of the replay (the check tool), not of the simulator.
+
+**A shooter without a recorded target out of melee** goes to its order's point (MOVE), and a moving shooter does not
+fire. That is right: the game records a shooter's target whenever it fires, firing at will too (the 72 gate battles,
+`build/replayfix`: 99.9 % of the seconds with the fire flag have a recorded target; without one, out of melee, shooters
+fire in 0.3 % of the seconds). HOLD instead of MOVE where the unit stood in the recording would add fire the game did not
+have. Routers nobody records as a target and long out of melee lose men in the game mostly by running off the map edge
+(`men` falls to 0 while the recorded health stays): 3416 of 4261 gold of such losses in the 72 battles are the map edge,
+845 real damage; the check's `hp_lost_end` counts leaving the map neither in the game nor in the simulator.
 
 **A shooter whose target routs only in the simulation** (`missile.replay_router_release` 1, a replay rule too): a
 shooter's recorded ATTACK on a unit that routs in the simulation while in the recording it stood at that second is

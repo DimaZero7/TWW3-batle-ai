@@ -630,6 +630,9 @@ def step(st, orders, params=None, dt=None):
     # contact effects (poison, the censer's contagion, suppressing fire): a hit of a weapon that lays one starts it on
     # the enemy hit (effects.lay; friendly fire lays none); it acts from the next step
     effects.lay(u, params, dt, melee_scaled, mhit, hp_missile * scale[:, None, :], shit, pw["enemy"].float(), st.t)
+    # the slowing from hits of gunpowder (missile.hit_slow): a hit starts its timer on the enemy hit; it acts in this
+    # step's movement (below)
+    missile.hit_slow_lay(u, params, dt, hp_missile * scale[:, None, :], shit, pw["enemy"].float(), st.t)
     shot_at = (hp_missile * pw["enemy"]).sum(1) > 0      # friendly fire does not count (ume_concerned_under_friendly_fire 0)
     u["under_fire_s"] = torch.where(shot_at, torch.zeros_like(u["under_fire_s"]), u["under_fire_s"] + dt)
     attackers = strike & standing[:, :, None]
@@ -893,6 +896,10 @@ def step(st, orders, params=None, dt=None):
     if cal["contact"].get("chase"):
         # a chaser in contact with its leaving target (above) is not held in place: it moves with it (below)
         locked = locked & ~chasing
+    # Hits of gunpowder slow the small formations they hit, routers too (missile.hit_slow; config/nn/sim.json hit_slow.why:
+    # the hitslow probe - clanrats running at handgunners x0.68, walking x0.94; bolts nothing; the hit reactions)
+    if "hs_s" in u:
+        want = want * missile.hit_slow_factor(u, params, want > u["walk"] + 0.3)
     # Turning on the move (turn.move_turn; the database's battle_entities turn_rate, the turning probe
     # build/movelords): a unit heading for a point off its facing turns towards it at its men's turn rate (a formation's
     # men about-face where they stand: its front becomes the old back rank) and runs only the way it faces - its speed
