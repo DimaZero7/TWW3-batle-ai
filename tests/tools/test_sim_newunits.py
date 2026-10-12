@@ -173,3 +173,38 @@ class TestContactEffects:
         assert float(u[f"cfx{j}_s"][0, 0]) == 0                            # no hit: nothing
         effects.lay(u, P, 0.5, torch.zeros_like(hp), hit, hp, hit, torch.ones_like(hp), torch.zeros(1))
         assert float(u[f"cfx{j}_s"][0, 0]) == 10.0                         # 10 hits: on for 10 s
+
+
+class TestLoneManInMelee:
+    """missile.single_in_melee_projectiles: the Ratling Gun hits a lord in melee as out of melee (measured in the S24
+    exam recordings: 0.141 HP per 1000 bullets in melee, 0.145 out); arrows, slings and handguns keep
+    single_entity_in_melee (0)."""
+
+    def shoot(self, in_melee, lone_hit=True):
+        from tools.nn.sim import missile
+        st = battle_of([(GENERAL, 0.0, -60.0, 0.0)],
+                       [(RATLING, 0.0, 0.0, 180.0), ("wh2_main_skv_inf_clanrats_1", 0.0, -66.0, 0.0)])
+        H = st.N // 2
+        st.u["lone_hit"][0, H] = lone_hit                    # (False: the rule of the others)
+        pw = geometry.pairwise(st.u, 1.5)
+        target = torch.full((1, st.N), -1)
+        target[0, H] = 0                                      # the gun shoots the General
+        contact = torch.zeros((1, st.N, st.N), dtype=torch.bool)
+        if in_melee:
+            contact[0, 0, H + 1] = contact[0, H + 1, 0] = True    # he fights the clanrats
+        _, hp, _ = missile.volley(st.u, pw, target, 1.0, P, contact=contact)
+        return float(hp[0, H, 0]), float(hp[0, H, H + 1])
+
+    def test_the_switch_marks_the_gun_only(self):
+        assert P.static(RATLING)["lone_hit"] and not P.static("wh_main_emp_inf_handgunners")["lone_hit"]
+        assert not P.with_cal("missile", single_in_melee_projectiles=[]).static(RATLING)["lone_hit"]
+
+    def test_the_gun_hits_a_lord_in_melee_as_out_of_it_less_the_friendly_fire(self):
+        ms = P.sim["missile"]
+        ff = ms["friendly_fire"].get(P.units[RATLING]["missile"]["category"], ms["friendly_fire_other"])
+        free, _ = self.shoot(False)
+        fight, friends = self.shoot(True)
+        assert free > 0 and fight == pytest.approx((1 - ff) * free, rel=1e-4)
+        old, old_friends = self.shoot(True, lone_hit=False)
+        assert old == 0.0                                     # single_entity_in_melee 0
+        assert friends > 0 and old_friends > 0                # the friendly-fire share lands on the gun's clanrats

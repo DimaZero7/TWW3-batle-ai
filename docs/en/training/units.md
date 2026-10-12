@@ -322,7 +322,7 @@ too.
 | Unit | Feature | What it does | Source | Simulator | Network |
 |---|---|---|---|---|---|
 | Gun | A burst of 18 bullets | a man fires 18 bullets at 4 a second (4.5 s); 12 s from a burst's start to the next | DB `shots_per_volley`; the rate and the cycle measured (`ratling`: on the lone General 576 = 32 x 18 bullets a burst, 64 bullets every 0.5 s) | `missile.burst_rate_s` 4, `reload_projectile_s` 12 (`missile.py burst_share`) | input `volley_shots` |
-| Gun | Spin-up | the first bullet 4.5 s after a halt, an order or a new target (a switch of target - the whole spin-up again) | measured `ratling` (3.75-5.0 s) and battles 20261012-111853 / -111151 (5-6 s at 1 s samples) | `missile.aim_projectile_s`, `retarget_projectile_s` | - |
+| Gun | Spin-up | the first bullet 4.5 s after a halt, an order or a new target (a switch of target - the whole spin-up again) | measured `ratling` (3.75-5.0 s) and battles 20261012-111853 / -111151 (5-6 s at 1 s samples) | `missile.aim_projectile_s`, `retarget_projectile_s` | inputs `aim_first`, `aim_retarget` |
 | Gun | A burst cut by a dead target | a man whose target (a front-rank man) died aims again (4.5 s) and loses those bullets: 364-482 bullets a burst on a formation instead of 576 | measured `ratling` | `missile.burst_reaim` | - |
 | Gun | Suppression | the target's speed x0.7 for 10 s from the last hit | DB (`contact_stat_effect`, a 10 s phase) | contact effect | the effect's pair |
 | Gun | Fire in melee | shoots the unit cutting it down | measured `suppress` | `missile.fire_in_melee` | - |

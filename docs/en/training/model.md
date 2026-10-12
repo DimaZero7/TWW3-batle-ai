@@ -270,13 +270,34 @@ for them and acts as before.
 Two inputs (`observation.WEAPON`, 11.10.2026), known from the unit card: the shots a man fires in a volley / 20
 (`passport.weapon`: the Ratling Gun's 18 -> 0.9, a plain shooter 0.05, no missile weapon 0) and the melee weapon's
 magical attacks (0/1: the censer, the plain Giant Rats). Without the first the network cannot tell the gun's burst
-from a handgun's shot. They stand at the token's very end; an older checkpoint gets zero weights for them.
+from a handgun's shot. They stand after the order; an older checkpoint gets zero weights for them.
+
+### Aim: the first shot and a new target (both sides, the last inputs)
+
+Two inputs (`observation.AIM`, 13.10.2026), known from the unit card, seconds / 10 (`passport.aim`), for every shooter:
+
+- `aim_first` - the aim before the first shot after a halt: the Ratling Gun 4.5 s (its spin-up) -> 0.45, archers and
+  crossbows 3.3 -> 0.33, slings 4.3 -> 0.43, guns and throwing stars 2.0 -> 0.2;
+- `aim_retarget` - how long the unit stays silent after an attack order on another target: the longest of the
+  simulator's three rules (`battle.py`) - the new order takes the aim back (`rt_s`; -1: the whole aim again), the
+  switch of target `rt_s` (-1: the rule of all `missile.retarget_s` 3 s), arcing fire keeps quiet `quiet_s`
+  (`order_quiet_cat_s`). So archers, crossbows and slings 8.5 s -> 0.85 (the quiet window), the gun 4.5 -> 0.45 (the
+  whole spin-up again), guns and stars 0. A new target does not reset the reload: it runs on, and the shot also
+  waits for loaded men.
+
+No missile weapon - 0. The simulator's own numbers: one function, `tools/nn/sim/params.aim_times` (and
+`retarget_silence`), gives both the simulator's `aim_s`, `rt_s`, `quiet_s` and these inputs; they are fixed per unit
+key, so the companion in the game gets the same numbers from the key. They stand at the token's very end: a
+checkpoint of 167 inputs loads with zero weights for them and acts as before (`observation.old_columns`: its columns
+stay where they are; the student's recorded tokens widen the same way, `observe/tokens.widen`, and so do Adam's moments
+on resume, `run.resume`). Test: `tests/tools/test_nn_aim_input.py`. Both card groups (weapon and aim) reach training
+too: the fields `LiveSetup.FIELDS` (`tools/nn/train/scenes.py`).
 
 ## Model
 
 ```mermaid
 flowchart TB
-  tok["Unit tokens: 167 numbers each<br/>(69 of them the passport, 38 the innate effects,<br/>1 the volley readiness, 1 the fire arc,<br/>5 the order in force, 2 the weapon)"] --> enc["Shared encoder<br/>the same weights for every unit"]
+  tok["Unit tokens: 169 numbers each<br/>(69 of them the passport, 38 the innate effects,<br/>1 the volley readiness, 1 the fire arc,<br/>5 the order in force, 2 the weapon, 2 the aim)"] --> enc["Shared encoder<br/>the same weights for every unit"]
   ctx["Context: character, role, counts, lords,<br/>time elapsed, damage timers,<br/>the attacker's progress"] --> enc
   enc --> att["Attention layers<br/>+ distance bias, masks"]
   att --> gru["Memory: a GRU per unit<br/>and one for the army"]

@@ -714,7 +714,10 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, cat
         # (with the spread model, hits aimed at a lone man in melee keep the measured rule: hit_rate x distance
         # factor, his share x single_entity_in_melee)
         lone_melee = ((u["men0"] <= 1) & (engaged > 0))[:, None, :]
-        aimed = torch.where(lone_melee, aimed_old, aimed)
+        # ... but the shooters of missile.single_in_melee_projectiles (the Ratling Gun: lone_hit) hit a lone man in
+        # melee as out of it: the spread model's hits, his whole share (config/nn/sim.json single_in_melee_projectiles_why)
+        as_out = (u["lone_hit"][:, :, None] & lone_melee) if "lone_hit" in u else torch.zeros_like(lone_melee)
+        aimed = torch.where(lone_melee & ~as_out, aimed_old, aimed)
         # A lone man among them (a lord) is hit as a lone target is: single_entity_factor of his
         # share (without it a lord in melee with shot enemies took the whole friendly fire).
         # The target's own share: a lone man in melee takes single_entity_in_melee of it (measured 0:
@@ -723,7 +726,8 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, cat
         own = torch.where(in_melee, lone, own_out)
         if ms.get("single_entity_in_melee") is not None:
             own = torch.where(in_melee, torch.full_like(men, float(ms["single_entity_in_melee"])), own_out)
-        landed = torch.bmm(aimed * ff, friends * lone[:, None, :]) + aimed * (1 - ff) * own[:, None, :]
+        own = torch.where(as_out, own_out[:, None, :], own[:, None, :])        # [B, i, j]
+        landed = torch.bmm(aimed * ff, friends * lone[:, None, :]) + aimed * (1 - ff) * own
     if caught is not None:
         landed = landed + caught
     if geo is not None:

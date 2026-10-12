@@ -157,6 +157,8 @@ STATIC = {
     "bst_rate": ("f", "shots a second a man fires in a burst (a volley of spv > 1 shots fired over spv / bst_rate s: the "
                       "Ratling Gun 4, measured - config/nn/sim.json missile.burst_rate_s); 0: the volley at once"),
     "melee_fire": ("b", "shoots in melee too (config/nn/sim.json missile.fire_in_melee: the Ratling Gun, measured)"),
+    "lone_hit": ("b", "its hits on a lone man (a lord) in melee land as out of melee (config/nn/sim.json "
+                      "missile.single_in_melee_projectiles: the Ratling Gun, measured; others: single_entity_in_melee)"),
     "mfx": ("i", "the contact effect its blows lay on the enemy they hit: index in config/nn/effects.json order, -1 "
                  "none (the passport's melee.contact_phase; tools/nn/sim/effects.py lay)"),
     "sfx": ("i", "the contact effect its projectiles lay (missile.contact_phase), -1 none"),

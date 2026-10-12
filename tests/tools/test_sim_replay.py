@@ -306,6 +306,25 @@ def test_redirect_stays_on_the_enemy_it_chose_while_it_touches_it():
     assert policy(st2).target[0, 0] == 1
 
 
+def test_worker_processes_keep_the_caller_s_params(monkeypatch):
+    """check.simulate in processes: each worker rebuilds the passed params (they used to load config/nn/sim.json
+    afresh and lose with_cal / --cal numbers)."""
+    from tools.nn.sim import check
+    from tools.nn.sim.params import load
+    base = load()
+    tuned = base.with_cal("morale", rally_after_s=123.0)
+    packed = check.portable_params(tuned)
+    assert "units" not in packed and "effects" not in packed          # the big tables stay the files' own
+    back = check.restore_params(packed)
+    assert back.sim["morale"]["rally_after_s"] == 123.0 and back.units is base.units
+    assert check.restore_params(check.portable_params(None)).sim == base.sim
+    seen = []
+    monkeypatch.setattr(check.torch, "set_num_threads", lambda n: None)     # (not this process's threads)
+    monkeypatch.setattr(check, "_simulate_batch", lambda games, armies, params, *a, **k: seen.append(params) or [])
+    check._work(([], [], 1, 0.0, 0, False, 1, False, None, "cpu", packed))
+    assert seen[0].sim["morale"]["rally_after_s"] == 123.0
+
+
 def test_recorded_orders_mark_the_game_s_moving_seconds():
     b = recording(); b.f["mv"][:, 0] = [True, True, False, True, False, True, True]
     r = replay.recorded_orders(b, [0, 1], 2)

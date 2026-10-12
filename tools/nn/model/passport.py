@@ -141,6 +141,30 @@ def weapon(keys, passports=None):
     return out
 
 
+AIM_S = 10.0   # the AIM columns' seconds / this (the Ratling Gun's 4.5 s spin-up -> 0.45)
+
+
+def aim(keys, passports=None, missile_cal=None):
+    """[len(keys), 2] float32: the token's AIM columns (tools/nn/model/observation.py, 13.10.2026), seconds / AIM_S:
+    - the aim before the first shot from a halt (the simulator's aim_s: the Ratling Gun's spin-up 4.5, arrows 3.3,
+      slings 4.3, muskets 2.0, the rest 3.8);
+    - the silence after an attack order on another target (sim params.retarget_silence: arrows and slings 8.5 - their
+      quiet window, the Ratling Gun 4.5, muskets 0, the rest 3.8); the reload is not reset by it, it runs on.
+    0 without a missile weapon, and for padding. The same numbers as the simulator's (tools/nn/sim/params.aim_times,
+    config/nn/sim.json missile; missile_cal: that section, default today's file): static per unit key, so the companion
+    gets them from the key as the simulator does."""
+    from tools.nn.sim import params as sim_params
+    passports = passports or load()
+    ms = missile_cal if missile_cal is not None else sim_params.load().sim["missile"]
+    out = np.zeros((len(keys), 2), dtype=np.float32)
+    for i, k in enumerate(keys):
+        miss = passports[k].get("missile") if k else None
+        if miss:
+            aim_s, rt_s, quiet_s = sim_params.aim_times(miss, ms)
+            out[i] = (aim_s / AIM_S, sim_params.retarget_silence(aim_s, rt_s, quiet_s, ms) / AIM_S)
+    return out
+
+
 def cost(keys, passports=None):
     """Multiplayer cost per unit, gold (0 for padding): the simulator's `cost` (tools/nn/sim/params.py)."""
     passports = passports or load()

@@ -127,12 +127,19 @@ ORDER = ("order_hold", "order_move", "order_attack", "order_withdraw", "order_ag
 # shots a man fires in a volley (passport.volley_shots: the Ratling Gun's burst of 18 -> 0.9, 1 shot -> 0.05) and its
 # melee weapon's magical attacks (passport.magic).
 WEAPON = ("volley_shots", "magic_attacks")
+# Then AIM (13.10.2026, both sides: the unit's card; older checkpoints: zero weights): the passport's seconds of aim
+# before the first shot from a halt and of silence after an attack order on another target, / passport.AIM_S
+# (passport.aim: the simulator's numbers, tools/nn/sim/params.aim_times; the reload is not reset by a new target).
+AIM = ("aim_first", "aim_retarget")
 NAMES = (tuple(n for n, _ in DYNAMIC) + FLAGS + tuple(f"passport_{i}" for i in range(passport.SIZE)) + effects.NAMES
-         + VOLLEY + ARC + ORDER + WEAPON)
+         + VOLLEY + ARC + ORDER + WEAPON + AIM)
 INDEX = {n: i for i, n in enumerate(NAMES)}
 TOKEN = len(NAMES)
 # Effect pairs of the tokens of trained checkpoints before 11.10.2026 (14 effects, no WEAPON): old_columns maps them.
 OLD_EFFECTS = (14,)
+# Column groups appended at the token's end since the new units (11.10.2026), oldest first: a token without the last
+# of them keeps its columns where they are (old_columns), zeros (zero weights) for the missing ones.
+TAIL = (AIM,)
 
 
 def old_columns(width):
@@ -140,8 +147,14 @@ def old_columns(width):
     grew past OLD_EFFECTS (11.10.2026: the new units' attributes and contact effects, then WEAPON after ORDER) that had
     columns after its effect pairs (VOLLEY 03.10, ARC and ORDER 07.10.2026): its effect pairs keep their places, those
     columns move behind the new pairs to their places by name, the new columns get zero weights (encoder.TokenEncoder).
-    None: not such a token (a token that ended with its effect pairs, or older still, grew at the end only:
+    A token of today's columns without the last groups of TAIL (AIM, 13.10.2026): its columns stay where they are.
+    None: not such a token (today's; a token that ended with its effect pairs, or older still, grew at the end only:
     encoder.pad_inputs)."""
+    width_now = TOKEN
+    for group in reversed(TAIL):
+        width_now -= len(group)
+        if width == width_now:
+            return list(range(width))
     base = len(DYNAMIC) + len(FLAGS) + passport.SIZE
     E, after = effects.SIZE // 2, VOLLEY + ARC + ORDER
     for e_old in OLD_EFFECTS:
@@ -195,6 +208,7 @@ class Setup:
         self.reload = np.stack([passport.reload(k) for k in self.keys])       # [B, N] s (VOLLEY; 0: no missile)
         self.arc = np.stack([passport.fire_arc(k) for k in self.keys])        # [B, N] fire arc / 180 (ARC)
         self.weapon = np.stack([passport.weapon(k) for k in self.keys])       # [B, N, len(WEAPON)] (WEAPON)
+        self.aim = np.stack([passport.aim(k) for k in self.keys])             # [B, N, len(AIM)] (AIM)
         ab = [abilities.slots(k) for k in self.keys]
         self.abil = np.stack([a[0] for a in ab])                               # [B, N, SLOTS, STATIC]
         self.abil_owned = np.stack([a[1] for a in ab])                         # [B, N, SLOTS]
@@ -218,7 +232,8 @@ class Setup:
                                        present=t(self.present), attacker=t(self.attacker), lord=t(self.lord),
                                        abil=t(self.abil), abil_owned=t(self.abil_owned),
                                        abil_use=t(self.abil_use), fx_owned=t(self.fx_owned), cost=t(self.cost),
-                                       reload=t(self.reload), arc=t(self.arc), weapon=t(self.weapon))
+                                       reload=t(self.reload), arc=t(self.arc), weapon=t(self.weapon),
+                                       aim=t(self.aim))
         return self._cache[key]
 
     def character(self, side):
@@ -249,6 +264,7 @@ class _Arrays:
     reload: object = None      # [B, N] passport reload_s (Setup.reload, VOLLEY); None: unknown, the input 0
     arc: object = None         # [B, N] passport fire arc / 180 (Setup.arc, ARC); None: unknown, the input 0
     weapon: object = None      # [B, N, len(WEAPON)] (Setup.weapon, WEAPON); None: unknown, the inputs 0
+    aim: object = None         # [B, N, len(AIM)] (Setup.aim, AIM); None: unknown, the inputs 0
 
 
 @dataclass
@@ -429,7 +445,10 @@ def observe(state, setup, side, memory=None, full=False):
     order = m.stack([m.where(see_all & S.present, c, c * 0) for c in order], -1)
     weapon = getattr(S, "weapon", None)
     weapon = m.stack([xs * 0] * len(WEAPON), -1) if weapon is None else _f(m, weapon)
-    tokens = _cat(m, [dyn, _f(m, S.passport), fx, late, arc[..., None], order, weapon], -1) * _f(m, S.present)[..., None]
+    aim = getattr(S, "aim", None)
+    aim = m.stack([xs * 0] * len(AIM), -1) if aim is None else _f(m, aim)
+    tokens = (_cat(m, [dyn, _f(m, S.passport), fx, late, arc[..., None], order, weapon, aim], -1)
+              * _f(m, S.present)[..., None])
 
     attend = S.present & ~dead & ~(own & ~alive)
     ctrl = own & alive & (ms < 6)

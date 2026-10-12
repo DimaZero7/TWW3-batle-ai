@@ -850,7 +850,7 @@ def test_without_the_feedback_the_eyes_do_not_change_the_decision_and_are_comput
     with torch.no_grad():                                            # a frozen reference: not needed
         lg0, _ = net.sequence(seq, None, reset, act)
     assert not any(k.startswith("eyes_") for k in lg0)
-    assert torch.allclose(lg["kind"], lg0["kind"])
+    assert torch.allclose(lg["kind"], lg0["kind"], atol=1e-6)        # (float rounding: grad on and off)
 
 
 def test_an_older_checkpoint_with_the_feedback_loads_and_computes_what_it_did(tmp_path):

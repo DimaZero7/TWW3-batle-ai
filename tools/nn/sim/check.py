@@ -29,7 +29,7 @@ from tools import config as project
 from tools.nn import gamedata, measure, simskill
 from tools.nn import scenario as arena_scenario
 from tools.nn.sim import battle, replay, scenario
-from tools.nn.sim.params import load as load_params
+from tools.nn.sim.params import Params, load as load_params
 
 OUT = project.BUILD / "nn-sim" / "check.json"
 TOLERANCE = 0.2
@@ -207,7 +207,9 @@ def simulate(run_dirs, params=None, device="cpu", copies=1, jitter_m=0.0, seed=0
     if pooled:
         import multiprocessing as mp
         pool = mp.get_context("spawn").Pool(min(workers, len(jobs)))
-        results = pool.imap_unordered(_work, [j[:-1] + (None,) for j in jobs])  # params: each loads its own
+        # params: each process loads the files itself and takes the passed ones' differing parts (portable_params)
+        packed = portable_params(params)
+        results = pool.imap_unordered(_work, [j[:-1] + (packed,) for j in jobs])
     else:
         results = map(_work, jobs)
     for n, got in enumerate(results, 1):
@@ -221,11 +223,37 @@ def simulate(run_dirs, params=None, device="cpu", copies=1, jitter_m=0.0, seed=0
     return [out[k] for k in range(len(run_dirs))]
 
 
+PORTABLE = ("units", "rules", "sim", "abilities", "effects")
+
+
+def portable_params(params):
+    """What a worker process needs to rebuild `params` (None: the files' own, load_params()): {"_portable": True,
+    field: value} with sim and rules always and the big tables (units, abilities, effects) only where they are not
+    the files' (load_params is cached: the same object). Before, a worker loaded config/nn/sim.json itself and lost
+    the caller's numbers (with_cal, --cal)."""
+    if params is None:
+        return {"_portable": True}
+    base = load_params()
+    out = {"_portable": True, "sim": params.sim, "rules": params.rules}
+    for name in ("units", "abilities", "effects"):
+        if getattr(params, name) is not getattr(base, name):
+            out[name] = getattr(params, name)
+    return out
+
+
+def restore_params(packed):
+    """The Params of portable_params' output (the files' own for the fields it lacks)."""
+    base = load_params()
+    return Params(**{name: packed.get(name, getattr(base, name)) for name in PORTABLE})
+
+
 def _work(job):
     """One batch: simulate, then measure_fn per recording (or the Battles) -> {index: result}."""
     idx, run_dirs, copies, jitter_m, seed, end_at_recording, H, zero_first, measure_fn, device, params = job
-    if params is None:                  # a worker process: one thread
+    if params is None or isinstance(params, dict):       # a worker process: one thread
         torch.set_num_threads(1)
+    if isinstance(params, dict):
+        params = restore_params(params)
     params = params or load_params()
     games = [load(d) for d in run_dirs]
     armies, facs = [], []

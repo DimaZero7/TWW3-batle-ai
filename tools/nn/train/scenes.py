@@ -65,7 +65,9 @@ class LiveSetup:
               "fx_owned",                            # innate effects owned [B, N, E] (tools/nn/model/effects.py)
               "cost",                                # multiplayer cost [B, N] (the attacker's progress)
               "reload",                              # passport reload_s [B, N] (the volley input, VOLLEY)
-              "arc")                                 # passport fire arc / 180 [B, N] (the token's ARC)
+              "arc",                                 # passport fire arc / 180 [B, N] (the token's ARC)
+              "weapon",                              # shots a volley, magical attacks [B, N, 2] (the token's WEAPON)
+              "aim")                                 # aim and retarget silence [B, N, 2] (the token's AIM)
 
     def __init__(self, arrays, char, factions):
         self.arrays, self.char, self.factions = arrays, char, factions

@@ -27,6 +27,43 @@ def _value(x):
     return x["value"] if isinstance(x, dict) and "value" in x else x
 
 
+def aim_times(missile, ms):
+    """(aim_s, rt_s, quiet_s) of a missile weapon (a passport's `missile`; empty: none) by sim.json's `missile` section
+    `ms` (battle.py applies them):
+      aim_s    seconds of aim before the first shot, the aim clock starting at a halt - the projectile's own
+               (aim_projectile_s: the Ratling Gun's spin-up 4.5), else the category's (aim_s), else aim_s_other; 0
+               without a missile weapon;
+      rt_s     the aim a new target costs a unit that had one - the projectile's own (retarget_projectile_s), else the
+               category's (retarget_cat_s), else -1: the rule of all (a new order resets the aim, a switch costs
+               retarget_s);
+      quiet_s  arcing fire's silence after a new order or a new target (order_quiet_cat_s), 0 for the rest.
+    The simulator's STATIC aim_s, rt_s, quiet_s and the network's AIM columns (tools/nn/model/passport.aim) come from
+    here."""
+    if not missile:
+        return 0, -1.0, 0.0
+    cat, proj = missile.get("category"), missile.get("projectile")
+    own_aim = (ms.get("aim_projectile_s") or {}).get(proj)
+    own_rt = (ms.get("retarget_projectile_s") or {}).get(proj)
+    aim_s = float(own_aim) if own_aim is not None else ms["aim_s"].get(cat, ms["aim_s_other"])
+    rt_s = float(own_rt) if own_rt is not None else float((ms.get("retarget_cat_s") or {}).get(cat, -1.0))
+    quiet_s = float((ms.get("order_quiet_cat_s") or {}).get(cat, 0.0))
+    return aim_s, rt_s, quiet_s
+
+
+def retarget_silence(aim_s, rt_s, quiet_s, ms):
+    """Seconds without a shot after an attack order on another target, for a unit that aims at one (battle.py): the
+    new order takes the aim back by rt_s (-1: to 0, missile.aim_reset_on_order), the switch of target by rt_s (-1:
+    retarget_s; nothing with retarget_s 0), and arcing fire keeps quiet quiet_s (order_quiet_cat_s) - the longest of
+    them. The reload is not reset: it runs on (the shot also waits for loaded men). 0 without a missile weapon.
+    Arrows and slings 8.5 (the quiet window), the Ratling Gun 4.5 (its spin-up), muskets 0, the rest aim_s."""
+    if not aim_s:
+        return 0.0
+    order = (rt_s if rt_s >= 0 else aim_s) if ms.get("aim_reset_on_order") else 0.0
+    rule = ms.get("retarget_s")
+    switch = (rt_s if rt_s >= 0 else rule) if rule else 0.0
+    return float(max(order, switch, quiet_s))
+
+
 @dataclass
 class Params:
     units: dict      # key -> passport
@@ -109,9 +146,7 @@ class Params:
             ref = (ms.get("reload_ref_s") or {}).get(cat)
             reload_s = (ms["reload_s"][cat] * (missile.get("reload_s", ref) / ref if ref else 1.0)
                         if cat in ms["reload_s"] else missile.get("reload_s", 0) * ms["reload_scale_other"])
-        proj = missile.get("projectile") if missile else None
-        own_aim = (ms.get("aim_projectile_s") or {}).get(proj) if missile else None
-        own_rt = (ms.get("retarget_projectile_s") or {}).get(proj) if missile else None
+        aim_s, rt_s, quiet_s = aim_times(missile, ms)
         resist = u.get("damage_resist") or {}
         h, v = self.spacing_of(key)
         men = u["men"]
@@ -146,6 +181,8 @@ class Params:
             "spv": float(missile.get("shots_per_volley") or 1) if missile else 1.0,
             "bst_rate": float((ms.get("burst_rate_s") or {}).get(missile.get("projectile"), 0.0)) if missile else 0.0,
             "melee_fire": bool(missile) and missile.get("projectile") in (ms.get("fire_in_melee") or ()),
+            # its hits on a lone man in melee land as out of melee (missile.single_in_melee_projectiles: the Ratling Gun)
+            "lone_hit": bool(missile) and missile.get("projectile") in (ms.get("single_in_melee_projectiles") or ()),
             "ammo0": men * missile.get("ammo", 0) if missile else 0,
             "range": missile.get("range_m", 0) if missile else 0,
             "reload": reload_s,
@@ -161,14 +198,13 @@ class Params:
             "height": u.get("height_m", 1.8),
             "small_arms": cat in SMALL_ARMS if missile else False,
             # a projectile measured on its own (missile.aim_projectile_s: the Ratling Gun's spin-up) takes its own aim
-            "aim_s": float(own_aim) if own_aim is not None else (ms["aim_s"].get(cat, ms["aim_s_other"]) if missile else 0),
+            "aim_s": aim_s,
             # by category, measured (missile.order_quiet_why): arcing fire keeps quiet after a new order or target,
             # whatever its reload; direct fire and throwing weapons lose nothing (-1: the rule of all)
-            "quiet_s": float((ms.get("order_quiet_cat_s") or {}).get(cat, 0.0)) if missile else 0.0,
+            "quiet_s": quiet_s,
             # (missile.reaim_broken_why) arrows and bolts: once the target lost this share of its men, each shot aims
             "broken_at": float((ms.get("reaim_broken_cat_share") or {}).get(cat, 0.0)) if missile else 0.0,
-            "rt_s": (float(own_rt) if own_rt is not None else float((ms.get("retarget_cat_s") or {}).get(cat, -1.0)))
-                    if missile else -1.0,
+            "rt_s": rt_s,
             # its hits slow the small formations they hit (missile.hit_slow: the hit reactions of gunpowder, by category)
             "hslow": bool(missile) and bool((ms.get("hit_slow") or {}).get("on"))
                      and cat in ((ms.get("hit_slow") or {}).get("categories") or ()),
