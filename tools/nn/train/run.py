@@ -35,7 +35,7 @@ from tools.nn.model import critic as model_critic
 from tools.nn.model import policy as model_policy
 from tools.nn.train import cadence as cad
 from tools.nn.train import checkpoint, drills, evaluate, league, matchups, ppo, randomise, reward, rollout, scenes
-from tools.nn.train import bankproc, head_entropy, head_reset, kitesp, teach_auto
+from tools.nn.train import ability_branch, bankproc, head_entropy, head_reset, kitesp, teach_auto
 from tools.nn.train import dr as uncertain
 from tools.nn.train.drills import teach as drill_teach
 
@@ -407,6 +407,15 @@ def train(args, every=None, teacher=None, normal=None):
         print(dr_cfg.text(), flush=True)
     if normal_s:
         env.set_teach_shares(normal_s)
+    # --ability-branch: presses priced by replaying them in the simulator (ability_branch.py), the ability head's term
+    ab_updates0 = int(carried.get("ability_updates", 0))
+    if args.ability_branch:
+        env.brancher = ability_branch.Brancher(ability_branch.Config(
+            share=args.ability_branch, missed=args.ability_branch_missed, copies=args.ability_branch_copies,
+            horizon_s=args.ability_branch_horizon, cap=args.ability_branch_cap, batch=args.ability_branch_batch,
+            hold_s=args.ability_branch_hold, seed=args.seed), device)
+        print(f"ability branches: {env.brancher.cfg}, weight {args.ability_branch_weight:g} -> 0 over "
+              f"{args.ability_branch_decay} updates (from update {ab_updates0} of the chain)", flush=True)
     # v2 (d 256): 2 parts. Until the update freed the critic's activations and the full entropy's graph early
     # (ppo.update; 8.1 -> 5.6 MB a decision) it took one part more: 3 parts peaked at 12.0 GB of the 16 GB card, and a
     # little more pushed the card into its shared memory (an update 10 s -> 157 s); now 2 parts peak at 12.2 GB, 3 at
@@ -499,6 +508,7 @@ def train(args, every=None, teacher=None, normal=None):
         return {"optim": opt.state_dict(),
                 "state": {"floor_w": floor_w, "head_w": head_w, "entropy_decay_s": decay_s0 + (trained if args.entropy_decay else 0.0),
                           "chain_s": chain_s0 + trained, "chain_updates": chain_u0 + update,
+                          "ability_updates": ab_updates0 + (update if args.ability_branch else 0),
                           "observe_updates": observe.updates if observe is not None
                           else int(carried.get("observe_updates", 0))}}
 
@@ -532,8 +542,11 @@ def train(args, every=None, teacher=None, normal=None):
         decay_s = decay_s0 + (time.time() - t0 - paused if args.entropy_decay else 0.0)
         scheduled = schedule(args.entropy, entropy_end, decay_share(args.entropy_decay, decay_s, done_share))
         floor_w = scheduled if floor_w is None else max(scheduled, floor_w)
+        ab_w = (ability_branch.weight(args.ability_branch_weight, args.ability_branch_decay, ab_updates0 + update)
+                if args.ability_branch else 0.0)
         u_cfg = dataclasses.replace(step_cfg, entropy=floor_w if args.entropy_target else scheduled,
-                                    anchor=schedule(args.anchor, anchor_end, done_share), heads=tuple(head_w.items()))
+                                    anchor=schedule(args.anchor, anchor_end, done_share), heads=tuple(head_w.items()),
+                                    ability=ab_w)
         trains = update >= warmup
         teach_w = (teacher.weights() if teacher is not None
                    else drill_teach.weights(teach0, args.drill_teach_minutes, (time.time() - t0 - paused) / 60))
@@ -620,6 +633,8 @@ def train(args, every=None, teacher=None, normal=None):
                         "top": [[n, round(q, 3), round(p, 3), age] for n, q, p, age in pool.top(5)]}}
         if taught:
             row["teach"] = taught
+        if args.ability_branch:
+            row["ability_branch"] = dict(env.brancher.stats, weight=round(ab_w, 5))
         if observed:
             row["observe"] = {k: round(v, 4) for k, v in observed.items()}
         if args.kite_share:
@@ -652,6 +667,9 @@ def train(args, every=None, teacher=None, normal=None):
                                                                                      "danger10")), flush=True)
             if args.kite_share:
                 print("      " + kitesp.text(row["kite"]), flush=True)
+            if args.ability_branch:
+                print("      ability branches " + " ".join(f"{k} {v}" for k, v in row["ability_branch"].items()),
+                      flush=True)
             if observed and "loss" not in observed:     # the term off (its weight negligible, observe/store.py)
                 print(f"      observe off (weight {observed['weight_now']:.1e}); anchor weight {observed['anchor_now']:.4f} "
                       f"KL to the start {observed['anchor_kl']:.4f}", flush=True)
@@ -981,6 +999,27 @@ def parser():
     ap.add_argument("--no-bank-ahead", dest="bank_ahead", action="store_false",
                     help="build each new bank when it is due (the training waits) instead of in a process ahead "
                          "(tools/nn/train/bankproc.py)")
+    ap.add_argument("--ability-branch", type=float, default=0.0, metavar="SHARE",
+                    help="abilities by their effect (ability_branch.py): this share of the learner's presses is replayed "
+                         "in the simulator pressed and not pressed (common random numbers), the trade's difference is "
+                         "the ability head's extra advantage; 0: off")
+    ap.add_argument("--ability-branch-missed", type=float, default=ability_branch.Config.missed,
+                    help="... the chance a moment of a ready ability not pressed (a unit, a decision) is replayed too")
+    ap.add_argument("--ability-branch-copies", type=int, default=ability_branch.Config.copies,
+                    help="... copies of each branch")
+    ap.add_argument("--ability-branch-horizon", type=float, default=ability_branch.Config.horizon_s,
+                    help="... seconds of battle each branch plays")
+    ap.add_argument("--ability-branch-hold", type=float, default=ability_branch.Config.hold_s,
+                    help="... in the 'not pressed' branch the slot also stays unused this many seconds (0: the network "
+                         "goes on and may press it a decision later)")
+    ap.add_argument("--ability-branch-cap",type=int, default=ability_branch.Config.cap,
+                    help="... snapshots a chunk at most (0: no cap)")
+    ap.add_argument("--ability-branch-batch", type=int, default=ability_branch.Config.batch,
+                    help="... snapshots per branch batch (x copies battles in each branch)")
+    ap.add_argument("--ability-branch-weight", type=float, default=0.1,
+                    help="... the ability head's term's weight at the start (ppo.ability_term)")
+    ap.add_argument("--ability-branch-decay", type=int, default=300,
+                    help="... it goes to 0 linearly over this many updates of the chain with it on (0: no decay)")
     ap.add_argument("--gpu-mem", type=float, default=1.0,
                     help="share of the GPU's memory training may hold (game mode: e.g. 0.5, so a game keeps memory)")
     ap.add_argument("--gpu-duty", type=float, default=1.0,

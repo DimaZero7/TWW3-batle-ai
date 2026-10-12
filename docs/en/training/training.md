@@ -42,6 +42,7 @@ The first steps compile for 1–3 minutes (seconds once a run of the same shapes
 | drills | `--drills` (0: share of the battles), `--drill-weights` (json; default the `TRAIN` drills equally: kiting, hold_fire), `--drill-bank` (256 per drill), `--drill-embed` (1: share of the embedded frame, for the drills that have one), `--drill-broad` (0.5: of the rest, share of the broad frame), `--drill-teach` (`auto` or json {drill: weight}: the teacher, off by default), `--drill-teach-minutes` (10: manual), `--drill-teach-k` (0.5), `--drill-teach-cap` (0.25), `--drill-teach-weight` (0.15: auto), `--teach-normal` (`auto`, names or json {drill: share}: the teacher in normal battles, off by default), `--teach-normal-k` (0.5), `--teach-normal-cap` (0.15), `--teach-normal-weight` (0.1), `--teach-normal-match` (0.1): [drills](#drills) |
 | observation | `--observe-dir` (off: the folder of converted battles), `--observe-share` (0.1), `--observe-weight` (0.1), `--observe-decay` (0.95), `--observe-anchor` (0.2), `--observe-anchor-decay` (0.995), `--observe-anchor-alone` (off: the anchor ends with the term), `--observe-adv` (`critic`), `--observe-beta` (1), `--observe-clip` (20), `--observe-steps` (0: `--steps`), `--observe-refresh` (20): [learning by observation](#learning-by-observation) |
 | kiting in self-play | `--kite-share` (0: share of the `self` / `past` battles started, planned 0.1), `--kite-bank` (256 battles ready): [kiting in self-play](#kiting-in-self-play) |
+| abilities by their effect | `--ability-branch` (0: off; the share of presses branched), `--ability-branch-missed` (0.005), `--ability-branch-copies` (4), `--ability-branch-horizon` (60 s), `--ability-branch-hold` (0 s), `--ability-branch-cap` (0: none), `--ability-branch-batch` (128), `--ability-branch-weight` (0.1), `--ability-branch-decay` (300 updates): [abilities by their effect](#abilities-by-their-effect-branches) |
 
 ### The chain's settings
 
@@ -540,10 +541,11 @@ the game AI's move orders were "impossible" for it (probability < e^−30, the i
   (16) at 0.5 — ~4 cells, the hold (4) at 0.5 — ~2. One scale for heads of 2 to 256 choices; in nats every head and
   every map would need its own number (sectors outside the map are masked).
 - **Rows.** The kind — the units that decide; the target — where an attack was chosen; the sector and the cell —
-  move / withdraw (their logits are under that kind); the hold — a new order (not keep); run — move / attack. Rows
-  with fewer than 2 allowed choices are left out.
+  move / withdraw (their logits are under that kind); the hold — a new order (not keep); run — move / attack; the
+  ability — a unit that takes orders with an ability ready ("none" or a slot, whatever the kind). Rows with fewer
+  than 2 allowed choices are left out.
 - **A floor per head** (`--head-entropy 'sector=0.4,cell=0.5,hold=0.5'`; names: kind, target, sector, cell, hold,
-  run). Every head with a target has its own weight in the loss (− weight × share): × `--entropy-rate` every update
+  run, ability). Every head with a target has its own weight in the loss (− weight × share): × `--entropy-rate` every update
   while the share is below the target, ÷ above it, within [`--head-entropy-start` 0.003, `--head-entropy-max` 0.05].
   The weights are kept in the checkpoint and go on along the chain. The kind's floor in nats (`--entropy-target`)
   stays as it was.
@@ -556,7 +558,8 @@ the game AI's move orders were "impossible" for it (probability < e^−30, the i
   (Nikishin et al., 2022: a network over-fitted to its early experience gains from resetting its last layers, the
   data kept). Layers: sector — `place_q`, `place_k`, `place_near`; cell — `fine`; hold — `commit`; target — `q`,
   `k`, `target_pair`; kind — `kind`; run — `run`; cond — the shared condition `cond` (read by the sector, the cell,
-  the hold and run). With the reset the same fresh heads are copied into the leashes' frozen networks
+  the hold and run); ability — `ability_q`, `ability_k`, `ability_none`
+  ([abilities by their effect](#abilities-by-their-effect-branches)). With the reset the same fresh heads are copied into the leashes' frozen networks
   (`--reference` and the start network the observation's KL uses), or the KL would pull towards the collapsed ones;
   Adam's moments of those weights are dropped. The reset is **once**: give the option to one step of a chain, not to
   every step.
@@ -678,6 +681,73 @@ The network decides itself when its lord uses an ability, like a player
   battles × 64 decisions); the slice of the stored state is a copy;
 - the critic's warm-up updates run the actor without a graph (memory);
 - `run.py` logs `abilities_per_battle`.
+
+### Abilities by their effect (branches)
+
+The battle's reward is too broad to teach *when* to press an ability: one press drowns among hundreds of other
+decisions. So the ability head gets a hint of its own — what the press really gave, found by replaying that moment in
+the simulator with the press and without it (`tools/nn/train/ability_branch.py`, `run.py --ability-branch`, off by
+default). The mechanism is general: it does not know what an ability does, so it will do for magic and for the lord's
+skills too.
+
+- **Snapshot.** At a training decision a share of the learner's presses (`--ability-branch`, e.g. 0.2) and now and
+  then the moments "an ability ready, not pressed" (`--ability-branch-missed`, 0.005 — a chance per unit and
+  decision) are snapshotted: the battle's state before the decision's simulator steps and all that lets it go on as
+  in the batch — the observation's memory, the networks' memories after the decision, the commitments, the
+  decision's orders (own, the past version's, the scripts').
+- **Two branches.** At the chunk's end (before the update) each snapshot plays twice: "pressed" (the decision as it
+  was; at a missed moment the ready slot the head likes best) and "not" (the same decision without that unit's
+  ability: no effect, no recharge). `--ability-branch-copies` (4) copies each, `--ability-branch-horizon` (60) s on;
+  both sides play as in the batch: the network with its current weights, the opponent the same script or past version.
+- **"Not pressed" means "not now".** In "not" the network plays on as usual and may press the same ability a second
+  later. While the head presses whatever is ready at once (itS23 0.9996 a decision, a fresh one ~0.43), the price is
+  "now against in 1–2 s", near 0, and the head cannot learn to wait from it. `--ability-branch-hold` (0 s: off) keeps
+  that slot unused in "not" this many seconds (`Battles.ability_hold`): the price is "now against not within N s".
+- **Common random numbers.** Copy c of "pressed" and copy c of "not" sit at the same place of two batches of the same
+  shape, every decision of both starts from the same seed (the networks' sampling, the orders' latency), and their
+  battle id for the simulator's hash draws is the same. The branches differ only by the press and what follows from it;
+  the copies by their seeds.
+- **The price of a press** = the mean over the copies of (trade of "pressed" − trade of "not") after 60 s; the trade as
+  gold in the v2 reward: (enemy gold destroyed − own) / budget, from the unit's side.
+- **The signal goes to the ability head only.** The price is an extra advantage of the log-probability of the ability
+  head's choice: +price for a press, −price at a missed moment (the choice there was "none"). A clipped PPO term
+  (`ppo.ability_term`) on those rows only; not in the reward, not in the critic, not in the other heads (the gradient
+  reaches the shared trunk through the head, as PPO's does). The prices are divided by their root mean square over the
+  chunk (at least 0.005 of the budget, so noise is not blown up) and clipped to ±5; the sum is divided by all units
+  that take orders, so a weight of 0.1 is a tenth of PPO's push on those rows. The weight decays:
+  `--ability-branch-weight` (0.1) → 0 linearly over `--ability-branch-decay` (300) updates with branches; the counter
+  goes on along the chain (`ability_updates` in the checkpoint). No penalties.
+- **Cost.** Each snapshot is 2 × copies battles of 60 s. The branches play in batches of `--ability-branch-batch` (128)
+  snapshots of one kind of battle (against a script, self-play, against a past version), the last one filled up with
+  copies of its own: a few fixed shapes, each compiled once. `--ability-branch-cap` (0: none) — snapshots a chunk at
+  most. The measured slowdown is below.
+- **Log** (`log.jsonl`, `ability_branch`): `presses` (the learner's presses in the chunk), `missed_moments`,
+  `replayed_presses`, `replayed_missed`, `price_press` (the mean price of a press, budget share), `gold_press` (in
+  gold), `zero_press` (the share of "empty" presses, |price| < 0.002 of the budget), `good_press`, `price_missed` /
+  `gold_missed` / `good_missed` (the price of pressing at a missed moment), `price_se` (the price's standard error
+  over the copies: the noise), `price_rms`, `branch_battles`, `branch_battle_s`, `seconds`, `weight`; in PPO —
+  `ability_branch_loss`, `ability_branch_rows`.
+- **Extension points**: a separate critic of the abilities (`Brancher.baseline`, none now — worth it if the price is
+  noisy); a cost of an ability unused through a battle (`Config.unused_penalty`, must be 0 now).
+
+**itS23's ability head had collapsed.** The audit (`build/ability_branch/abil_audit.py`, 128 battles × 420
+decisions, self-play and `ai_like`): the chance to press a ready ability 0.9996 on average, the 5 % quantile 0.9994,
+spread share 0.015 — in melee and out of it, 300+ m from the enemy and in the first 60 s alike; the network presses
+everything as soon as it is ready. An untrained head for comparison: 0.43 (0.32–0.60) a decision. So for the
+branches' start the head is reset (`--reset-heads ability`: layers `ability_q`, `ability_k`, `ability_none`; the
+trunk's ability encoder stays) and given a spread floor (`--head-entropy ...,ability=0.2`). The floor is low on
+purpose: the decision comes every second, and at a share of 0.5 the chance to press would be at least 0.11 a second —
+the ability would be pressed seconds after it is ready. A share of 0.2 lets it wait (~0.03 a decision) and press
+with confidence (~0.97).
+
+**First numbers** (CPU, 4 cores, itS23 with the head reset, 64 battles × 16 decisions, share 1.0, the first chunk —
+the battles' start): 159 presses, all replayed (1,408 branch battles, 84,480 s of battle in 894 s); the price of a
+press +0.0004 of the budget (+2.8 gold), "empty" 69 %, useful 15 %; the price's noise (standard error over 4 copies)
+0.0025 against a spread of prices of 0.005 — before the armies close in a press changes almost nothing. **Cost** on
+the GPU not measured (it was training); an estimate from S23 (~1,800 presses an update, an update 23 s): a snapshot is
+480 s of branch battle; share 0.2 — ~180 thousand s of battle, +25–35 s an update, speed ~×0.4; share 1.0 — ~870
+thousand, speed ~×0.13. `--ability-branch-cap 128` — ~60 thousand s of battle, ~×0.7. To measure:
+`build/ability_branch/measure.sh` (off / 0.2 / 0.2 with a 30 s hold).
 
 ## Drills
 

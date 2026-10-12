@@ -74,6 +74,8 @@ class PPOConfig:
     adv_norm: str = "batch"    # normalise the side's advantage over the minibatch ("batch") or over each
     #                            role's rows apart ("role": the attacker's, bigger with its idle cost, no
     #                            longer outweighs the defender's)
+    ability: float = 0.0       # weight of the ability branches' term now (batch["abil_branch"], ability_branch.py;
+    #                            run.py --ability-branch-weight, decaying): 0 off
 
 
 def gae(rewards, values, dones, last_value, gamma, lam):
@@ -99,6 +101,22 @@ def policy_loss(lp_new, lp_old, adv, mask, clip):
     n = m.sum().clamp(min=1)
     clipped = (((ratio - 1).abs() > clip).float() * m).sum() / n
     return -(surrogate * m).sum() / n, clipped
+
+
+def ability_term(logits, act, branch, ctrl, clip):
+    """The ability branches' term (ability_branch.py): - the clipped surrogate of the ability head's log-probability of
+    the choice made under the branches' advantage, on the priced rows only, summed over them and divided by the units
+    that take orders (as policy_loss: a weight of 0.1 is a tenth of PPO's per-unit push on those rows). Only the ability
+    logits enter it: not the reward, not the critic, not the other heads. branch: {"adv", "mask", "lp"} [S, N] (the
+    minibatch's rows). -> (term, priced rows)."""
+    la = torch.log_softmax(torch.nan_to_num(logits["ability"], nan=hd.NEG), -1)
+    lp = la.gather(-1, (act.ability.clamp(min=-1) + 1)[..., None])[..., 0]
+    m = branch["mask"]
+    ratio = torch.exp(torch.where(m, lp - branch["lp"], torch.zeros_like(lp)))
+    a = branch["adv"]
+    surrogate = torch.minimum(ratio * a, ratio.clamp(1 - clip, 1 + clip) * a)
+    n = ctrl.float().sum().clamp(min=1)
+    return -(surrogate * m.float()).sum() / n, m.float().sum()
 
 
 def kind_entropy(logits):
@@ -263,6 +281,12 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
             stats[f"eyes_{h}"] = 0.0
             stats[f"eyes_ref_{h}"] = 0.0
     teach_acc = {n: [0.0] * 7 for n in taught["names"]} if taught else {}
+    branch = batch.get("abil_branch") if cfg.ability and train_policy else None
+    if branch is not None and batch["action"].ability is None:
+        branch = None
+    if branch is not None:
+        stats["ability_branch_loss"] = 0.0      # the term (before its weight), a minibatch's mean
+        stats["ability_branch_rows"] = 0.0      # priced rows a minibatch
     head_w = dict(cfg.heads)
     head_acc = {}                                # head -> [share x rows, nats x rows, rows] (head_entropy.measure)
     need_kl = bool(train_policy and cfg.target_kl)
@@ -276,7 +300,8 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
             parts = torch.arange(len(idx), device=idx.device).tensor_split(max(1, min(cfg.accum, len(idx))))
             opt.zero_grad(set_to_none=True)
             step = dict.fromkeys(("policy_loss", "value_loss", "entropy", "kl", "clip", "entropy_all", "anchor_kl")
-                                 + tuple(k for k in stats if k.startswith("eyes_")), 0.0)
+                                 + tuple(k for k in stats if k.startswith("eyes_") or k.startswith("ability_branch_")),
+                                 0.0)
             for part in parts:
                 share = len(part) / len(idx)
                 pidx = idx[part]
@@ -346,8 +371,15 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                         for h, (mse, ref) in parts_e.items():
                             step[f"eyes_{h}"] += _f(mse) * share
                             step[f"eyes_ref_{h}"] += _f(ref) * share
+                    branched = torch.zeros((), device=adv.device)
+                    if branch is not None and "ability" in logits:
+                        branched, priced = ability_term(logits, act, {k: _rows(v, pidx) for k, v in branch.items()},
+                                                        ctrl, cfg.clip)
+                        step["ability_branch_loss"] += _f(branched) * share
+                        step["ability_branch_rows"] += _f(priced)
                 policy_part = (pl - cfg.entropy * entropy + cfg.anchor * anchored + imitation + cfg.eyes * seen
-                               + (obs_anchor * observed if obs_on else 0.0) - (spread if spread is not None else 0.0))
+                               + (obs_anchor * observed if obs_on else 0.0) - (spread if spread is not None else 0.0)
+                               + cfg.ability * branched)
                 if train_policy:
                     (policy_part * share).backward()
                 with torch.no_grad():

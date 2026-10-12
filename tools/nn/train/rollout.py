@@ -406,6 +406,11 @@ class Battles:
         # The learner's reward by term (reward.PARTS) and its decisions, by role (attack, defend)
         self.part_stats = torch.zeros(2, len(reward.PARTS), device=self.device)
         self.part_steps = torch.zeros(2, device=self.device)
+        # the ability branches (tools/nn/train/ability_branch.Brancher; run.py --ability-branch): None off
+        self.brancher = None
+        # (until [B, N] battle time, slot [B, N]): a learner unit's ability slot held unused until then (the ability
+        # branches' "not pressed" with Config.hold_s); None: none
+        self.ability_hold = None
         self.start()
 
     @property
@@ -607,6 +612,12 @@ class Battles:
         a, frame, c = self.cur
         abil_row = self.bank_row[self.rows_learn % self.B]           # the battles the observation was made of
         obs_r, h_prev, logits, action, orders, h_new = self._act(actor, a, frame, self.rows_learn, self.h_learn, greedy)
+        if self.ability_hold is not None:
+            # an ability branch's "not pressed" (ability_branch.py hold_s): the unit's slot is not used until then
+            until, slot = self.ability_hold
+            b = self.rows_learn % self.B
+            held = (until[b] > self.st.t[b][:, None]) & (orders.ability == slot[b]) & (slot[b] >= 0)
+            orders.ability = torch.where(held, torch.full_like(orders.ability, -1), orders.ability)
         parts = [(self.rows_learn, orders)]
         h_past_new = None
         if len(self.rows_past):
@@ -634,22 +645,13 @@ class Battles:
         truth = None
         if getattr(actor.cfg, "eyes", False):
             truth = (meyes.truth(self.st.u, rb), meyes.own_cost(self.st.u, rb, rs + 1))
-        # When the decision's orders land: a fixed step, or (a latency between steps) at random per battle.
-        whole, frac = self.cadence.delay(self.params.dt)
-        delay = self.cadence.delays(self.params.dt, self.B, self.device) if frac else None
+        delay = self._delay()
         scripted = self.scripted()                   # the scripts' orders of this decision, on the same state
-        r_rows = None
-        finished = torch.zeros_like(self.st.done)
-        for j in range(self.k):
-            land = (delay == j) if delay is not None and j in (whole, whole + 1) else (j == whole)
-            now = [(rows, self._landing(o, rows, land)) for rows, o in parts]
-            base = None if scripted is None else self._landing(scripted, None, land)
-            was_done = self.st.done.clone()
-            r, fin = self._sim_step(now, attacks, rb, rs, was_done, base)
-            r_rows = r if r_rows is None else r_rows + r
-            finished = finished | fin
-            if each is not None:
-                each(~was_done)
+        if self.brancher is not None:
+            # the ability branches (tools/nn/train/ability_branch.py): a snapshot of the battles before the steps
+            self.brancher.capture(self, {"obs": obs_r, "logits": logits, "action": action, "parts": parts,
+                                         "scripted": scripted, "h_new": h_new, "h_past": h_past_new})
+        r_rows, finished = self._play(parts, scripted, delay, attacks, rb, rs, each)
         d_rows = finished[rb]
         if truth is not None:                        # after the steps, before a finished battle restarts
             truth = (truth[0], meyes.truth(self.st.u, rb), truth[1])
@@ -668,6 +670,45 @@ class Battles:
             obs_r = dict(obs_r, abil=obs_r["abil"][..., :mab.DYNAMIC].clone(), abil_row=abil_row)
         return {"obs": obs_r, "action": action, "lp": lp, "value": value, "reward": r_rows,
                 "done": d_rows, "critic_obs": c, "attacks": attacks, "teach": taught, "truth": truth}
+
+    def _delay(self):
+        """When the decision's orders land: None (a fixed step), or [B] the step per battle (a latency between steps:
+        at random, torch's default generator)."""
+        _, frac = self.cadence.delay(self.params.dt)
+        return self.cadence.delays(self.params.dt, self.B, self.device) if frac else None
+
+    def _play(self, parts, scripted, delay, attacks, rb, rs, each=None):
+        """The self.k simulator steps of a decision whose orders are made: the networks' `parts` ((rows, Orders), ...)
+        and the scripts' (scripted, Orders [B, N] or None) land at the cadence's latency (delay: _delay()), KEEP before
+        and after. -> (the learner rows' reward [R] summed over the steps, finished [B])."""
+        whole, _ = self.cadence.delay(self.params.dt)
+        r_rows = None
+        finished = torch.zeros_like(self.st.done)
+        for j in range(self.k):
+            land = (delay == j) if delay is not None and j in (whole, whole + 1) else (j == whole)
+            now = [(rows, self._landing(o, rows, land)) for rows, o in parts]
+            base = None if scripted is None else self._landing(scripted, None, land)
+            was_done = self.st.done.clone()
+            r, fin = self._sim_step(now, attacks, rb, rs, was_done, base)
+            r_rows = r if r_rows is None else r_rows + r
+            finished = finished | fin
+            if each is not None:
+                each(~was_done)
+        return r_rows, finished
+
+    @torch.no_grad()
+    def replay(self, parts, scripted):
+        """A decision whose orders are given (the networks' parts ((rows, Orders), ...) with rows self.rows_learn /
+        self.rows_past; the scripts' Orders [B, N] or None): its simulator steps, then the next observation. The
+        networks' memories must already be those after it (h_learn, past_h). The ability branches' first decision
+        (ability_branch.py): the decision of the snapshot, the ability of one unit changed."""
+        rb, rs = self.rows_learn % self.B, self.rows_learn // self.B
+        attacks = self.st.attacker[rb] == rs + 1
+        _, finished = self._play(parts, scripted, self._delay(), attacks, rb, rs)
+        if self.auto_reset:
+            self._reset(finished)
+        self.health = self._measure(self.st, self.weights.rout_share, self.weights.lord_rout)
+        self.cur = self.observe(False)
 
     def _teach_labels(self, cfg, obs_r, frame):
         """The teachers' labels of the learner rows at this decision (drills/teach.py): (Action [R, N],
@@ -959,8 +1000,14 @@ def collect(env, actor, critic, T):
     with h0 [R, 1 + N, d], reset [T, R] (a new battle began at step t: its memory starts empty), the
     bootstrap value [R], and abil_static: the bank's ability passports (full_obs puts them back into obs)."""
     h0 = env.h_learn
+    brancher = getattr(env, "brancher", None)
+    if brancher is not None:
+        brancher.begin(env, T)
     steps = [env.step(actor, critic) for _ in range(T)]
     out = {}
+    if brancher is not None:
+        # the ability branches of the chunk's snapshots: the head's extra advantage (ppo.update's ability term)
+        out["abil_branch"] = brancher.finish(env, actor)
     for k in ("obs", "critic_obs"):
         out[k] = {n: torch.stack([s[k][n] for s in steps]) for n in steps[0][k]}
     out["h0"] = h0 if h0 is not None else actor.initial(rows_of(steps[0]["obs"], slice(None)))

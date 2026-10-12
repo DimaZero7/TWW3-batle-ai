@@ -12,9 +12,11 @@ Outside tools/nn/model on purpose: a file there changes the simulator's version 
 import torch
 
 # The heads by name and their layers (ChainHeads' attributes). "cond": the condition every part after the kind
-# reads (sector, cell, hold and run share it).
+# reads (sector, cell, hold and run share it). "ability": the ability head (its query of the unit, its key of a slot's
+# state and passport, the "none" score); the trunk's ability encoder (policy.ABILITY_PARAMS "abilities.") stays.
 PARTS = {"kind": ("kind",), "target": ("q", "k", "target_pair"), "sector": ("place_q", "place_k", "place_near"),
-         "cell": ("fine",), "hold": ("commit",), "run": ("run",), "cond": ("cond",)}
+         "cell": ("fine",), "hold": ("commit",), "run": ("run",), "cond": ("cond",),
+         "ability": ("ability_q", "ability_k", "ability_none")}
 
 
 def parse(spec):

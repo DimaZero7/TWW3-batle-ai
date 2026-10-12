@@ -233,6 +233,14 @@ S12's weights, 10 epochs on the CPU: on held-out starts order kind 0.76, target 
 within 25 m 0.22 (worse than "repeat", 0.46); in the simulator it wins 0.41 of its battles against `nearest`, 0.25
 against `ai_like` ([student](training/student.md)).
 
+**Abilities by their effect** (`--ability-branch share`, off by default): a share of the ability presses is
+replayed in the simulator from the same moment twice — "pressed" and "not pressed" (4 copies with common random
+numbers, 60 s, both sides by the same policies); the difference of the gold trade is an extra advantage for the
+ability head only, weight 0.1 → 0 over 300 updates. A general mechanism (magic and the lord's skills later). itS23's
+ability head had collapsed (presses a ready ability with probability 0.9996 in any situation): for the start —
+`--reset-heads ability` and `--head-entropy ...,ability=0.2`
+([abilities by their effect](training/training.md#abilities-by-their-effect-branches)).
+
 **Spread of the simulator's uncertain numbers** (`--dr`, on in line S): 23 numbers not taken exactly from
 the game's database (a few probes, fits, estimates), each battle draws them inside ranges from the evidence; the
 `sim.json` number stays the median ([spread](training/training.md), `config/nn/dr.json`).
