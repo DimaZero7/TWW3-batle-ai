@@ -29,9 +29,16 @@ cfg.ability x the clipped surrogate of the ability head alone (not the reward, n
 shared layers through the head as PPO's does), its advantages divided by the chunk's root mean square of the prices
 (at least ADV_FLOOR) and clipped to ADV_CLIP. The weight decays (run.py --ability-branch-weight, -decay).
 
-Cost: each snapshot plays 2 x copies battles for horizon_s - extra battles of the same GPU batch kind. Batches of
-`batch` snapshots of one kind (learner rows and past rows a battle: against a script, self-play, a past version), the
-last one padded with copies of its own (their results dropped): a few fixed shapes, each compiled once.
+Cost: each snapshot plays 2 x copies battles for horizon_s. All the chunk's snapshots go in ONE batch of a fixed
+shape a branch: the GPU step costs about the same at 64 battles and at 512 (~0.06 s a decision: launches, not work),
+so it is the number of sequential decisions that costs, not the battles. The batch has `batch` slots (min(batch, cap)
+with a cap) split between the battle kinds (who plays each side: the learner, a past version, a script;
+kinds_of_ctrl) by their share of the main batch's learner rows (composition()); the capture keeps within each kind's
+slots (Brancher.capture); a free slot is padding (a snapshot battle relabelled to the kind and ended: frozen, its
+result dropped). Same counts of each kind give the same learner and past rows every time: one shape, compiled once a
+process (~50 s), then 2 branches x horizon decisions (5.6-7.8 s an update at cap 128, copies 4: 1024 battles of 60 s;
+GPU, S25's options). The allocator's cache is released around the branches (_release).
+Without a cap, snapshots beyond the slots play in further batches of the same shape.
 
 Extension points (not used yet): a separate critic of the abilities (Brancher.baseline: 0 now; for a noisy price), a
 cost of an ability left unused through a battle (Config.unused_penalty: must be 0 now).
@@ -327,10 +334,68 @@ def play_pair(template, actor, snap, unit, side, slot, copies, decisions, seed, 
     return (ends["pressed"] - ends["not"]).reshape(b, copies), budget.reshape(b, copies)
 
 
+def kinds_of_ctrl(ctrl):
+    """[b, 2] controllers -> [b] each battle's kind: who plays each side, the learner's network (L), a past version (P)
+    or a script, as L1 x 8 + P1 x 4 + L2 x 2 + P2 (10: self-play; 9 / 6: L against P / P against L; 8 / 2: L against a
+    script / a script against L). The same counts of each kind give the same learner and past rows on each side: the
+    compiled steps' shapes (rollout.placement splits the rows by side)."""
+    L, P = league.LEARNER, league.CODE["past"]
+    c = ctrl.long()
+    return (c[:, 0] == L) * 8 + (c[:, 0] == P) * 4 + (c[:, 1] == L) * 2 + (c[:, 1] == P)
+
+
 def kind_of(snap):
-    """[b] each battle's kind for the batches of one shape: learner rows x 3 + past rows."""
-    ctrl = snap["b/ctrl"]
-    return (ctrl == league.LEARNER).sum(1) * 3 + (ctrl == league.CODE["past"]).sum(1)
+    """[b] each snapshot battle's kind (kinds_of_ctrl)."""
+    return kinds_of_ctrl(snap["b/ctrl"])
+
+
+def learner_rows(kind):
+    """The learner's rows of a battle of this kind (kinds_of_ctrl): 1 or 2."""
+    return (kind >> 3) + ((kind >> 1) & 1)
+
+
+def composition(ctrl, n):
+    """{kind: slots} of a branch batch of n slots: the kinds of the battles ctrl [B, 2] (the main batch) by their share
+    of its learner rows (where the presses come from), each kind present at least 1 slot (largest remainders)."""
+    rows = {}
+    for k in kinds_of_ctrl(ctrl).tolist():
+        rows[k] = rows.get(k, 0) + learner_rows(k)
+    ks = sorted(rows)
+    n = max(int(n), len(ks))
+    total = sum(rows.values())
+    want = {k: n * rows[k] / total for k in ks}
+    out = {k: max(1, int(math.floor(want[k]))) for k in ks}
+    for k in sorted(ks, key=lambda k: out[k] - want[k]):          # the largest remainders first
+        if sum(out.values()) >= n:
+            break
+        out[k] += 1
+    while sum(out.values()) > n:                                   # (the minimum of 1 overfilled)
+        out[max(ks, key=lambda k: out[k])] -= 1
+    return out
+
+
+def pad_snap(template, snap, src, kinds):
+    """Padding of a branch batch: battle src (an index into snap) once per entry of `kinds`, relabelled to a battle of
+    that kind of the template (its controllers, scripts, layout; the active past slot) and ended (frozen: the steps
+    change nothing; its result is dropped). -> (snapshot dict, unit, side, slot): side a side the learner's network
+    plays, slot -1 (nothing pressed)."""
+    dev = template.device
+    sel = select(snap, torch.full((len(kinds),), int(src), dtype=torch.long, device=dev))
+    first = {}
+    for b, k in enumerate(kinds_of_ctrl(template.ctrl).tolist()):
+        first.setdefault(k, b)
+    il = [first[k] for k in kinds]
+    rep = torch.tensor(il, dtype=torch.long, device=dev)
+    sel["b/ctrl"] = template.ctrl[rep].clone()
+    sel["b/by_rule"] = template.by_rule[rep].clone()
+    sel["b/is_past"] = template.is_past[rep].clone()
+    sel["b/battle_slot"] = torch.full_like(sel["b/battle_slot"], int(template.active))
+    for k in ("scene", "learner", "opponent"):
+        sel["lay/" + k] = np.asarray(getattr(template.layout, k))[il]
+    sel["st/done"] = torch.ones_like(sel["st/done"])
+    side = (sel["b/ctrl"][:, 0] != league.LEARNER).long() + 1
+    unit = torch.zeros(len(kinds), dtype=torch.long, device=dev)
+    return sel, unit, side, torch.full_like(unit, -1)
 
 
 @dataclass
@@ -343,6 +408,7 @@ class _Chunk:
     presses: object = None                           # [] on the device: the learner's presses this chunk
     missed: object = None                            # ... the moments a ready ability was not pressed
     taken: int = 0
+    room: dict = None                                # {kind: slots left} with a cap (the batch's composition)
 
 
 class Brancher:
@@ -354,10 +420,24 @@ class Brancher:
         self.chunk = _Chunk()
         self.stats = {}
         self.calls = 0
+        self.comp = None                         # {kind: slots} of a branch batch (composition), set at begin
+        self.kind_b = None                       # [B] each main battle's kind, on the host
+
+    def slots(self):
+        """Snapshots a branch batch holds."""
+        cfg = self.cfg
+        return max(1, min(cfg.batch, cfg.cap) if cfg.cap else cfg.batch)
 
     def begin(self, env, T):
         z = torch.zeros((), device=env.device)
-        self.chunk = _Chunk(T=T, presses=z.clone(), missed=z.clone())
+        if self.kind_b is None or len(self.kind_b) != env.B:
+            self.comp = composition(env.ctrl, self.slots())
+            self.kind_b = kinds_of_ctrl(env.ctrl).tolist()
+        room = None
+        if self.cfg.cap:
+            rounds = max(1, math.ceil(self.cfg.cap / sum(self.comp.values())))
+            room = {k: v * rounds for k, v in self.comp.items()}
+        self.chunk = _Chunk(T=T, presses=z.clone(), missed=z.clone(), room=room)
 
     def capture(self, env, info):
         c = self.chunk
@@ -383,10 +463,19 @@ class Brancher:
             left = max(0, self.cfg.cap - c.taken)
             per = max(1, math.ceil(self.cfg.cap / max(1, c.T)))
             m = min(left, per)
-            if len(nz) > m:
-                nz = nz[torch.randperm(len(nz), generator=self.gen, device=self.gen.device)[:m].to(nz.device)]
-            if not len(nz):
+            # at random, within each battle kind's slots of the branch batch (composition)
+            order = torch.randperm(len(nz), generator=self.gen, device=self.gen.device).tolist()
+            kb = [self.kind_b[i] for i in (rows[nz[:, 0]] % env.B).tolist()]
+            keep = []
+            for i in order:
+                if len(keep) >= m:
+                    break
+                if c.room.get(kb[i], 0) > 0:
+                    c.room[kb[i]] -= 1
+                    keep.append(i)
+            if not keep:
                 return
+            nz = nz[torch.tensor(keep, dtype=torch.long, device=nz.device)]
         r, n = nz[:, 0], nz[:, 1]
         ab = torch.nan_to_num(logits["ability"].float(), nan=hd.NEG)
         was = action.ability[r, n]
@@ -435,19 +524,30 @@ class Brancher:
         diff = torch.zeros(E, K, device=dev)
         budget = torch.ones(E, K, device=dev)
         played = 0
-        for kind in sorted(set(kinds)):
-            mine = [i for i, k in enumerate(kinds) if k == kind]
-            for s0 in range(0, len(mine), cfg.batch):
-                part = mine[s0:s0 + cfg.batch]
-                size = _bucket(len(part), cfg.batch)
-                pad = part + [part[i % len(part)] for i in range(size - len(part))]
-                ix = torch.tensor(pad, device=dev)
-                self.calls += 1
-                d, bg = play_pair(env, actor, select(snap, at[ix]), unit[ix], side[ix], slot[ix], K, decisions,
-                                  cfg.seed + self.calls, cfg.hold_s)
-                diff[ix[:len(part)]] = d[:len(part)]
-                budget[ix[:len(part)]] = bg[:len(part)]
-                played += 2 * K * size
+        comp = self.comp or composition(env.ctrl, self.slots())
+        todo = {k: [i for i, kk in enumerate(kinds) if kk == k] for k in comp}
+        assert sum(map(len, todo.values())) == E, "a snapshot of a battle kind the main batch does not have"
+        _release(dev)          # the update's cached blocks back to the driver: the branches' batches fit (module doc)
+        while any(todo.values()):
+            # one batch of the fixed composition: each kind's snapshots, then its free slots as padding
+            part, fill = [], []
+            for k in sorted(comp):
+                part += todo[k][:comp[k]]
+                fill += [k] * (comp[k] - len(todo[k][:comp[k]]))
+                todo[k] = todo[k][comp[k]:]
+            ix = torch.tensor(part, device=dev)
+            sub = select(snap, at[ix])
+            u_, s_, k_ = unit[ix], side[ix], slot[ix]
+            if fill:
+                ps, pu, pside, pslot = pad_snap(env, sub, 0, fill)
+                sub = concat([sub, ps])
+                u_, s_, k_ = torch.cat([u_, pu]), torch.cat([s_, pside]), torch.cat([k_, pslot])
+            self.calls += 1
+            d, bg = play_pair(env, actor, sub, u_, s_, k_, K, decisions, cfg.seed + self.calls, cfg.hold_s)
+            diff[ix] = d[:len(part)]
+            budget[ix] = bg[:len(part)]
+            played += 2 * K * (len(part) + len(fill))
+        _release(dev)          # ... and the branches' for the update
         price = diff.mean(1)                                                # [E] budget share
         se = diff.std(1) / math.sqrt(K) if K > 1 else torch.zeros_like(price)
         base = self.baseline(c.entries)
@@ -484,10 +584,12 @@ class Brancher:
         return out
 
 
-def _bucket(n, full):
-    """The batch size of n snapshots (n <= full): the smallest of (full / 8, full) that holds them (few shapes)."""
-    small = max(1, full // 8)
-    return small if n <= small else full
+def _release(dev):
+    """The caching allocator's free blocks back to the driver (CUDA). The branches' two batches come on top of the main
+    batch and its chunk: with the update's cache still held, video memory overflowed into shared system memory (Windows
+    lets it rather than failing) and a step went from 0.06 s to ~1 s."""
+    if torch.device(dev).type == "cuda":
+        torch.cuda.empty_cache()
 
 
 def weight(w0, decay, updates):

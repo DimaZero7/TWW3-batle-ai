@@ -717,10 +717,19 @@ skills too.
   that take orders, so a weight of 0.1 is a tenth of PPO's push on those rows. The weight decays:
   `--ability-branch-weight` (0.1) → 0 linearly over `--ability-branch-decay` (300) updates with branches; the counter
   goes on along the chain (`ability_updates` in the checkpoint). No penalties.
-- **Cost.** Each snapshot is 2 × copies battles of 60 s. The branches play in batches of `--ability-branch-batch` (128)
-  snapshots of one kind of battle (against a script, self-play, against a past version), the last one filled up with
-  copies of its own: a few fixed shapes, each compiled once. `--ability-branch-cap` (0: none) — snapshots a chunk at
-  most. The measured slowdown is below.
+- **Cost.** Each snapshot is 2 × copies battles of 60 s. A simulator step on the GPU costs nearly the same at 64 and at
+  512 battles (~0.06 s: the time goes to launching operations, not to the work), so what costs is the number of steps
+  in a row, not the number of battles. All the chunk's snapshots go in **one batch** a branch: `--ability-branch-batch`
+  (128; with `--ability-branch-cap`, the smaller of the two) slots split between the kinds of battle (against a script,
+  against a past version, self-play) by their share of the learner's rows in the main batch; a snapshot is taken only
+  while its kind has a slot, free slots are padding (a snapshot copy relabelled to the kind and already ended: frozen,
+  its result dropped). The batch always has one shape — compiled once a run (~50 s in the first update), then the
+  branches are 2 × 60 decisions, 5.6–7.8 s an update (cap 128, 4 copies: 1,024 battles of 60 s; an update 29–36 s
+  against ~23 s without branches). Before and after the branches the GPU memory cache goes back to the driver: else
+  memory overflowed into Windows' shared memory and a step grew from 0.06 to ~1 s. Without
+  `--ability-branch-cap` the extra snapshots play in more such batches. Before, the batches went by kind of battle one
+  after another (3 kinds × 2 branches × 60 decisions) in two sizes, each compiled on its own: the first update of
+  S25_1 spent 364 s on the branches.
 - **Log** (`log.jsonl`, `ability_branch`): `presses` (the learner's presses in the chunk), `missed_moments`,
   `replayed_presses`, `replayed_missed`, `price_press` (the mean price of a press, budget share), `gold_press` (in
   gold), `zero_press` (the share of "empty" presses, |price| < 0.002 of the budget), `good_press`, `price_missed` /
@@ -744,10 +753,9 @@ with confidence (~0.97).
 the battles' start): 159 presses, all replayed (1,408 branch battles, 84,480 s of battle in 894 s); the price of a
 press +0.0004 of the budget (+2.8 gold), "empty" 69 %, useful 15 %; the price's noise (standard error over 4 copies)
 0.0025 against a spread of prices of 0.005 — before the armies close in a press changes almost nothing. **Cost** on
-the GPU not measured (it was training); an estimate from S23 (~1,800 presses an update, an update 23 s): a snapshot is
-480 s of branch battle; share 0.2 — ~180 thousand s of battle, +25–35 s an update, speed ~×0.4; share 1.0 — ~870
-thousand, speed ~×0.13. `--ability-branch-cap 128` — ~60 thousand s of battle, ~×0.7. To measure:
-`build/ability_branch/measure.sh` (off / 0.2 / 0.2 with a 30 s hold).
+the GPU (share 0.2, `--ability-branch-cap 128`, a 30 s hold, a usual update ~23 s): one batch of 512 battles a branch,
+a step 0.06–0.07 s, the branches 5.6–7.8 s an update plus ~50 s of compiling once a run; GPU memory peak 12.1 GB. Without a cap (share 0.2 —
+~560 snapshots) ~5 such batches, ~35–40 s an update.
 
 ## Drills
 

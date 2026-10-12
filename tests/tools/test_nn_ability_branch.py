@@ -180,6 +180,43 @@ def test_the_term_reaches_the_ability_head_and_not_the_other_heads_nor_the_criti
     assert float(rows) == float(br["mask"].sum())
 
 
+def test_the_branch_batch_composition_follows_the_learner_rows_and_fills_its_slots():
+    L, P, A = league.LEARNER, league.CODE["past"], league.CODE["ai_like"]
+    ctrl = torch.tensor([[L, L]] * 2 + [[L, P]] * 4 + [[A, L]] * 2)       # learner rows: self 4, past 4, script 2
+    assert ab.composition(ctrl, 10) == {10: 4, 9: 4, 2: 2}
+    assert [ab.learner_rows(k) for k in (10, 9, 6, 8, 2)] == [2, 1, 1, 1, 1]
+    for n in (1, 3, 7, 128):
+        c = ab.composition(ctrl, n)
+        assert sum(c.values()) == max(n, 3) and min(c.values()) >= 1
+
+
+def test_mixed_kinds_play_in_one_batch_of_the_composition_padded_and_frozen():
+    actor, crit = tiny()
+    env = env_of(8, {"self": 0.5, "hold_shoot": 0.5})
+    env.brancher = ab.Brancher(ab.Config(share=1.0, missed=1.0, copies=2, horizon_s=2.0, cap=6, batch=6))
+    calls = []
+    real = ab.play_pair
+
+    def spy(template, actor_, snap, unit, side, slot, *a, **k):
+        calls.append((ab.kind_of(snap).tolist(), snap["st/done"].tolist(), slot.tolist()))
+        return real(template, actor_, snap, unit, side, slot, *a, **k)
+    ab.play_pair = spy
+    try:
+        batch = rollout.collect(env, actor, crit, 3)
+    finally:
+        ab.play_pair = real
+    comp = env.brancher.comp
+    assert sum(comp.values()) == 6 and 10 in comp and set(comp) <= {10, 8, 2}
+    st = env.brancher.stats
+    n = st["replayed_presses"] + st["replayed_missed"]
+    assert 0 < n <= 6 and len(calls) == 1                      # the cap within the composition: one batch
+    kinds, done, slot = calls[0]
+    assert sorted(kinds) == sorted(k for k, v in comp.items() for _ in range(v))
+    assert all(done[n:]) and all(s == -1 for s in slot[n:])    # the padding: ended, nothing pressed
+    assert st["branch_battles"] == 2 * 2 * 6
+    assert int(batch["abil_branch"]["mask"].sum()) == n
+
+
 def test_the_weight_decays_to_zero_and_the_reserved_penalty_is_refused():
     assert ab.weight(0.1, 100, 0) == pytest.approx(0.1)
     assert ab.weight(0.1, 100, 50) == pytest.approx(0.05)
