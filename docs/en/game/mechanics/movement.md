@@ -106,7 +106,8 @@ Ours: [pace and fatigue](../units/pace.md), [simulator](../../training/simulator
     (`pursue_charge_max_unit_separation`). A unit without an order does not follow a router. Simulator:
     `contact.pursue_gap_m` 16 m ([simulator](../../training/simulator.md#a-routers-exit-from-the-fight)). A chaser
     that keeps up (its run no slower than the flight) runs into the loose mob and strikes with all its men
-    (`contact.pursue_envelop`).
+    (`contact.pursue_envelop`); its men run in from their ranks from a standstill at the unit's acceleration
+    (`contact.pursue_envelop_run`).
   - **A router by a standing formation.** Given room a router steers clear of a standing enemy formation (the `passby`
     probe: spearmen 30-40 m in its way, no router man nearer than 5 m). One that runs into it (the formation a few metres
     behind, the boxes into the way: the `routmob2` probe's 'neighbours' lanes) leaves up to a third of its men stuck among

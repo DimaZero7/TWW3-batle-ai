@@ -47,6 +47,7 @@ is the RPFM schema's, how the engine uses it we have not checked (see [below](#n
 | `mass` | a man's mass | `battle_entities.mass` | card |
 | `size` | size class: `small`, `large`… | `battle_entities` | ours |
 | `height_m`, `radius_m` | a man's height and radius | `battle_entities` | ours |
+| `radii_ratio` | an ellipse body (a beast, a weapon team): radius x this across; 1 a circle | `battle_entities` (shape `ellipse`) | ours |
 | `speed.walk`, `speed.run` | walk and run, m/s | `battle_entities` | card (the card's speed = run × 10) |
 | `speed.charge`, `acceleration`, `deceleration` | charge, speeding up, slowing down | `battle_entities` | ours |
 | `melee.attack`, `defence`, `charge_bonus` | attack, defence, charge | `land_units` | card |
@@ -328,6 +329,7 @@ too.
 | Monks, censers | Frenzy | +10 attack, damage and charge x1.1, off below half morale | DB | innate effect (as the flagellants') | the effect's pair |
 | Giant Rats (poison) | Poison | speed, melee and missile damage x0.85 for 10 s | DB | contact effect | the effect's pair |
 | Giant Rats | Run 9.5, charge 11.5, acceleration 6 | the fastest unit | DB | the common movement (matches the game: 9.5 / 11.5 m/s, 90 % of the run in 3 s) | passport |
+| Giant Rats | An ellipse body 0.9 x 0.4 | in melee takes its body's width along a contact, 0.92 m instead of the template's 2.0 | DB `battle_entities` | `melee.body_across` (the `wolfrats` probe: damage 0.4 -> ~1 of the game) | passport `radii_ratio` |
 | Giant Rats | Caste `war_beast` | - | DB | - | the caste column (a typo `warbeast` put them among "other" before) |
 | Censers, Giant Rats | Magical attacks | against magic resistance (none of our units has it) | DB `melee_weapons.is_magical` | not needed | input `magic_attacks` |
 | Halberdiers | vs large +16, defence 42 | we have no large units | DB | rules exist | passport |

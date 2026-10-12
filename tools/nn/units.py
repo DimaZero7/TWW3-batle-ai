@@ -83,6 +83,8 @@ FIELDS = {
     "size": ("battle_entities.size", None),
     "height_m": ("battle_entities.height", None),
     "radius_m": ("battle_entities.radius", None),
+    "radii_ratio": ("battle_entities.radii_ratio: an ellipse body (shape 'ellipse') is radius long and radius x this "
+                    "across; 1 a circle (every man)", None),
     "speed.walk": ("battle_entities.walk_speed, m/s", "card slow_speed"),
     "speed.run": ("battle_entities.run_speed, m/s", "card fast_speed; scalar_speed = run x 10"),
     "speed.charge": ("battle_entities.charge_speed, m/s", None),
@@ -209,6 +211,7 @@ def passport(key, t):
                     "chaotic": sp["is_chaotic_formation"]},
         "hp_per_man": hp, "hp_total": hp * main["num_men"], "mass": entity["mass"], "size": entity["size"],
         "height_m": entity["height"], "radius_m": entity["radius"],
+        "radii_ratio": entity["radii_ratio"] if entity["shape"] == "ellipse" else 1.0,
         "speed": {"walk": entity["walk_speed"], "run": entity["run_speed"], "charge": entity["charge_speed"],
                   "charge_distance": entity["charge_distance_commence_run"],
                   "charge_pose_distance": entity["charge_distance_adopt_charge_pose"],

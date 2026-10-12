@@ -120,6 +120,10 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
     places in the `dmgmelee` probe: a unit keeps 25-28 of its 30 m, 0.22 ... 1.0 of the whole unit's men reach the
     enemy at 0.3 ... 5 men a file; no such rule in any source - [simulator](../../training/simulator.md)). The database
     has no number for how many strike.
+  - Ours: a beast's body is an ellipse in the database (`battle_entities` shape `ellipse`, radius x `radii_ratio`
+    across: Giant Rats 0.9 x 0.4), so along a contact it takes its body's width, h - 2r(1 - radii_ratio) - 0.92 m
+    against the template's 2.0 (`melee.body_across`; the `wolfrats` probe: 1.4-1.9x the infantry's men a metre of front
+    within 2.5 m, a third of them early inside the enemy's box); a circle (infantry, lords) keeps h.
 - **Matched combat.** A share of blows is played as paired "matched combat" animations
   instead of free strikes: `matched_combat_percentage` WH2 100 → WH3 50; in a formed charge 20 %,
   formed vs formed 40 %, formed vs free 60 %. An entity below 15 % HP cannot start one; while in
@@ -192,7 +196,9 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
     (`contact.pursue_gap_m`, the `pursuit` probe). A router caught by a unit no slower than it is struck by as many of
     the chaser's men as the router has (`contact.pursue_envelop`): in the `pursuit` probe stormvermin after spearmen had
     26-30 men within 2.5 m of the routers against 7-9 at a standing front, the router lost 83-92 HP/s against 37-42
-    standing, while a man struck no harder than standing (no charge bonus shows). Router men that ran into a standing
+    standing, while a man struck no harder than standing (no charge bonus shows); the chaser's men run in from their
+    ranks from a standstill, so this grows over ~3-5 s after the rout (`contact.pursue_envelop_run`: the probe's
+    stormvermin had 2-8 / 22-23 / 26-31 men near at 0.5 / 2.5 / 3.5 s, the router lost 0-22 HP/s in its first 2 s). Router men that ran into a standing
     enemy formation stay stuck among its men (up to a third of the unit, breaking free at 1 / 22 s a man on average) and die there while
     the mob runs on (`contact.rout_stuck`, the `routmob2` probe, [simulator](../../training/simulator.md#a-routers-exit-from-the-fight)).
 - **Devastating Flanker** doubles the charge bonus against flank/rear

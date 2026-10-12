@@ -2617,6 +2617,23 @@ class TestPursuitEnvelop:
         assert lost_off > 0
         assert lost_on > 2 * lost_off
 
+    def test_the_chasers_men_run_in_from_their_ranks(self):
+        """contact.pursue_envelop_run (the pursuit probe: stormvermin after Empire spearmen have 2-8 / 8-12 / 22-23 /
+        26-31 men within 2.5 m of a router man 0.5 / 1.5 / 2.5 / 3.5 s after the rout, the router 12 HP/s in its first
+        2 s against 92 at 2-7 s): the engulfing grows with the ground the chaser's men cover from a standstill (its
+        acceleration to its run) over its formation's depth - the first second is struck about as without the rule,
+        once they have run the depth as with it in full."""
+        assert P.sim["contact"]["pursue_envelop_run"]
+        hp = lambda rows, t: next(r[1] for r in rows if r[0] >= t - 1e-6)
+        run = _caught_router(P)
+        whole = _caught_router(P.with_cal("contact", pursue_envelop_run=0))
+        none = _caught_router(P.with_cal("contact", pursue_envelop=0))
+        first = lambda rows: rows[0][1] - hp(rows, 1.0)
+        assert first(run) < 0.5 * first(whole)
+        assert first(run) < 1.5 * first(none) + 1.0
+        later = lambda rows: hp(rows, 6.0) - hp(rows, 9.0)
+        assert later(run) == pytest.approx(later(whole), rel=0.25)
+
     def test_a_slower_chaser_does_not(self):
         """Spearmen (run 3.0) after skavenslaves (faster): no engulfing - the chase as without the rule."""
         on = _chase_after_rout(P, seconds=12.0)
@@ -3435,3 +3452,48 @@ class TestRouterKeep:
         want = float(missile.router_share(torch.tensor(2.0), self.AGES, self.SHARES))
         assert off == pytest.approx(0.0, abs=0.01)
         assert on == pytest.approx(want, abs=0.08)
+
+
+WOLF = "wh2_dlc16_skv_mon_wolf_rats_0"
+
+
+def _fight_lost(key1, key2, params, lo=10.0, hi=20.0):
+    """key1 (side 1) and key2 (side 2) attacking each other from contact: HP side 1 lost between lo and hi s."""
+    st = face_off(key1, key2)
+    H = st.N // 2
+
+    def orders(s):
+        o = O.hold(s.B, s.N, s.device)
+        o.kind[0, 0], o.target[0, 0] = O.ATTACK, H
+        o.kind[0, H], o.target[0, H] = O.ATTACK, 0
+        return o
+    hp = {}
+    for k in range(int(round(hi / params.dt))):
+        battle.step(st, orders(st), params)
+        hp[round((k + 1) * params.dt, 3)] = float(st.u["hp_abs"][0, 0])
+    return hp[round(lo, 3)] - hp[round(hi, 3)]
+
+
+class TestBodyAcross:
+    def test_an_ellipse_body_takes_its_width_along_a_contact(self):
+        """melee.body_across: a man's place along a contact is the template's spacing less his body's length plus its
+        width, h - 2 r (1 - radii_ratio): wolf rats (template h 2.0 / v 3.5, radius 0.9, radii_ratio 0.4) 0.92 / 2.42 m;
+        a circle keeps h, v; off: h, v."""
+        u = {"radius": torch.tensor([[0.9, 0.65]]), "body_ratio": torch.tensor([[0.4, 1.0]])}
+        h, v = torch.tensor([[2.0, 1.48]]), torch.tensor([[3.5, 1.6]])
+        hc, vc = melee.contact_spacing(u, h, v, True)
+        assert hc.tolist()[0] == pytest.approx([0.92, 1.48]) and vc.tolist()[0] == pytest.approx([2.42, 1.6])
+        assert melee.contact_spacing(u, h, v, False)[0] is h
+        assert melee.contact_spacing({"radius": u["radius"]}, h, v, True)[0] is h       # no field: as before
+        zero = dict(u, body_ratio=torch.tensor([[0.0, 0.0]]))                         # (an unset field: a circle)
+        assert melee.contact_spacing(zero, h, v, True)[0].tolist()[0] == pytest.approx(h.tolist()[0])
+
+    def test_wolf_rats_bring_twice_the_men_infantry_unchanged(self):
+        """The wolf rats probe (swordsmen struck 1,148 HP in 5-15 s, 42 HP/s steady; 45-60 of the 80 beasts within
+        2.5 m of an enemy at 2-10 s): with the rule the wolf rats strike swordsmen about 2.0 / 0.92 harder; swordsmen
+        against clanrats are unchanged."""
+        assert P.sim["melee"]["body_across"]
+        off = P.with_cal("melee", body_across=False)
+        on_w, off_w = _fight_lost(SWORD, WOLF, P), _fight_lost(SWORD, WOLF, off)
+        assert off_w > 0 and 1.6 < on_w / off_w < 2.3
+        assert _fight_lost(SWORD, CLANRAT, P) == pytest.approx(_fight_lost(SWORD, CLANRAT, off))

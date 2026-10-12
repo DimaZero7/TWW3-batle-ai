@@ -115,6 +115,8 @@ class Params:
         return {
             "men0": men, "hp_man": u["hp_per_man"], "hp0": u["hp_total"], "mass": u["mass"],
             "radius": u["radius_m"], "sp_h": h, "sp_v": v,
+            # the body across: an ellipse body (a beast, a weapon team) is radius long and radius x this across
+            "body_ratio": u.get("radii_ratio", 1.0),
             # the default order: men / rank_depth files (the database's ranks), h apart
             "width": (men / max(1, u.get("rank_depth") or 1)) * h if men > 1 else 2 * u["radius_m"],
             "walk": u["speed"]["walk"], "run": u["speed"]["run"], "charge_speed": u["speed"]["charge"],

@@ -70,6 +70,8 @@ STATIC = {
     "width": ("f", "frontage ordered at the start, m (files = floor(width / sp_h))"),
     "sp_h": ("f", "a man's place across the front, m (the formation template's close spacing, the database)"),
     "sp_v": ("f", "a man's place between ranks, m (the same)"),
+    "body_ratio": ("f", "a man's body across over its radius (the database's battle_entities radii_ratio of an ellipse "
+                        "body - a beast 0.4, a weapon team 0.6; 1 a circle, every man): melee.body_across"),
     "walk": ("f", "walk speed, m/s"),
     "run": ("f", "run speed, m/s"),
     "charge_speed": ("f", "charge speed, m/s"),

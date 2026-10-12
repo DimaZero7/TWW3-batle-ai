@@ -5,9 +5,9 @@ Per pair of units in contact (i strikes j), per second:
 
     men striking F  = fighting_files x (length of the sides in contact / the striker's spacing along its side:
                       h across its front or back, v along a flank; its formation template, config/nn/units.json
-                      spacing), at most men (through the target's flank: the striker's own side, melee.flank_face
-                      "striker"); against a single man (a lord) at most lord_max_attackers in all, however many
-                      units surround him (the lord swarm probe, docs/en/game/units/lord-swarm.md); a single man
+                      spacing; an ellipse body - a beast - takes its width there, melee.body_across), at most
+                      men (through the target's flank: the striker's own side, melee.flank_face "striker");
+                      against a single man (a lord) at most lord_max_attackers in all, however many units surround him (the lord swarm probe, docs/en/game/units/lord-swarm.md); a single man
                       strikes once; a unit in contact with several enemies shares out no more than its own front
                       holds; a unit attacking another enemy strikes one it only touches at contact.unit_incidental
                       (a lord: lord_incidental) of its rate; a formation without a missile weapon under HOLD (no
@@ -42,7 +42,8 @@ build/charge/spec.md). A braced unit with
 charge_reflection strikes a charger in front of it (within bracing_attack_angle) whose charge is still at least
 charge_reflect_min_charge_factor_threshold at charge_reflect_damage_multiplier of its damage (database).
 Pursuit: a routing target is struck from the rear with all the men in contact at contact.pursuit_rate of the
-rule and no charge (measured).
+rule and no charge (measured); a chaser that keeps up engulfs it (contact.pursue_envelop), its men running in from
+their ranks since the rout (contact.pursue_envelop_run).
 """
 import torch
 
@@ -129,6 +130,20 @@ def spacing_of(u, spacing):
     return h, v
 
 
+def contact_spacing(u, h, v, on):
+    """(h, v) [B, N]: a man's place along a contact, m (melee.body_across; on False: the formation's h, v). In melee the
+    men close up to their neighbours body to body, keeping the template's gap between bodies, and face the enemy: an
+    ellipse body (the database's battle_entities shape 'ellipse', radius long, radius x radii_ratio across - a beast, a
+    weapon team) takes its width, not its length, so its place is h - 2 r (1 - radii_ratio) (v the same); a circle
+    (every man of the infantry: radii_ratio 1) keeps h, v."""
+    if not on or "body_ratio" not in u:
+        return h, v
+    ratio = u["body_ratio"]
+    ratio = torch.where(ratio > 0, ratio, torch.ones_like(ratio)).clamp(max=1)
+    cut = 2 * u["radius"] * (1 - ratio)
+    return (h - cut).clamp(min=0.3), (v - cut).clamp(min=0.3)
+
+
 def strikes(u, pw, contact, params, charge_now, first=False):
     """HP per second each unit i takes from each j: rate [B, N, N] (i strikes j), the per-hit damage [B, N, N],
     the direction sector of i seen from j and the men striking F [B, N, N]; with first, also swing [B, N, N]: the
@@ -138,6 +153,8 @@ def strikes(u, pw, contact, params, charge_now, first=False):
     cal = params.sim["melee"]
     cc = params.sim["contact"]
     h_u, v_u = spacing_of(u, params.sim["formation"]["spacing_m"])
+    # a man's place along a contact (melee.body_across): the formation's h, v for circles, the body's width for an ellipse
+    hc_u, vc_u = contact_spacing(u, h_u, v_u, cal.get("body_across"))
     men_i = u["men"][:, :, None]
     single_i = u["men0"][:, :, None] <= 1
     single_j = u["men0"][:, None, :] <= 1
@@ -145,7 +162,7 @@ def strikes(u, pw, contact, params, charge_now, first=False):
     front_i, depth_i = pw["front"][:, :, None], pw["depth"][:, :, None]
     s, c = torch.sin(pw["rel_i"]), torch.cos(pw["rel_i"])
     through_front = s.abs() * depth_i <= c.abs() * front_i
-    along = torch.where(through_front, h_u[:, :, None], v_u[:, :, None])
+    along = torch.where(through_front, hc_u[:, :, None], vc_u[:, :, None])
     # The front's fill (melee.front_fill_ranks, lam; 0 / absent: off): a thinned formation does not close up - it keeps
     # its ordered width (the dmgmelee probe: 25-28 of 30 m) and only part of its men reach the enemy. Its frontal face
     # is the ordered width (files0 = floor(width / h), not the men's), and its men striking are scaled by the fill of
@@ -190,7 +207,7 @@ def strikes(u, pw, contact, params, charge_now, first=False):
     side_of = torch.where(through_front, torch.where(c >= 0, 0, 3), torch.where(s >= 0, 1, 2))
     for g in range(4):
         in_g = side_of == g
-        hold = cal["fighting_files"] * (front_i / h_u[:, :, None] if g in (0, 3) else depth_i / v_u[:, :, None])
+        hold = cal["fighting_files"] * (front_i / hc_u[:, :, None] if g in (0, 3) else depth_i / vc_u[:, :, None])
         tot = torch.where(in_g, F, torch.zeros_like(F)).sum(dim=2, keepdim=True)
         F = torch.where(in_g & ~single_i & (tot > hold), F * hold / tot.clamp(min=1e-6), F)
     if cal.get("target_face_cap"):
@@ -255,7 +272,19 @@ def strikes(u, pw, contact, params, charge_now, first=False):
         flee = u["run"][:, None, :] * float(params.sim["morale"]["rout_speed"])
         keeps_up = u["run"][:, :, None] >= flee
         caught = routing & on_j & keeps_up & contact & (u["range"][:, :, None] <= 0)
-        F = torch.where(caught, torch.maximum(F, torch.minimum(men_i, u["men"][:, None, :])), F)
+        engulf = torch.minimum(men_i, u["men"][:, None, :])
+        if cc.get("pursue_envelop_run") and "rout_s" in u:
+            # The chaser's men run in (contact.pursue_envelop_run): at the rout they stand in their formation's ranks and
+            # each runs from his place to a router man, from a standstill at the unit's acceleration to its run (the
+            # database's battle_entities), so the men it brings grow with the ground covered since the rout s(t) over
+            # its formation's depth: F + (engulf - F) x min(1, s(t) / depth) (a router caught later: long run, whole)
+            t = u["rout_s"][:, None, :]
+            a = u["accel"][:, :, None].clamp(min=0.1)
+            v = u["run"][:, :, None].clamp(min=0.1)
+            ground = torch.where(t < v / a, 0.5 * a * t * t, v * t - v * v / (2 * a))
+            frac = (ground / depth_i.clamp(min=0.5)).clamp(0, 1)
+            engulf = F + (engulf - F).clamp(min=0) * frac
+        F = torch.where(caught, torch.maximum(F, engulf), F)
     if (cc.get("rout_stuck") or {}).get("on") and "stk_n" in u:
         # A router's men stuck among a standing formation's (battle.py, contact.rout_stuck) each have a man of it on them,
         # wherever the rest of the router is: men striking = min(its men, the stuck men).

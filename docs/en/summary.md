@@ -102,7 +102,8 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
   enemy, the lord's death (−16 for 45 s, then −10), shattering of a unit and of the army; the rally is the
   measured process (`morale.rally_hazard`: a chance a second by the distance to the nearest enemy for routers with morale above 0; measured on the same condition over 360 game recordings).
 - **Rout:** the first 7 s the router stays in contact, then while a unit with an attack order on it is within
-  16 m edge to edge; a chaser that caught it (no slower) strikes with as many men as it has; router men that ran into
+  16 m edge to edge; a chaser that caught it (no slower) strikes with as many men as it has, gaining them over ~3-5 s
+  as its men run in from their ranks; router men that ran into
   a standing enemy formation stay stuck there and die there (the 72-battle replay: units lose 0.75 of the game's while
   routing, was 0.61); it is slowed in a crowd; it dodges its chaser at
   an angle; far from the enemy it flees from all standing enemies (weight 1 / distance), to its own edge
@@ -115,7 +116,9 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
 - **Contact effects and bursts** ([details](training/simulator.md#contact-effects-and-the-ratling-guns-burst)):
   poison, the censer's contagion, the Ratling Gun's suppressing fire - the database phase's stats on the unit hit for
   10 s from the last hit, different ones stack, friendly fire lays none; the Ratling Gun - 18 bullets a volley at 4 a
-  second, a 12 s cycle, one ammunition pool, it fires in melee too; a man whose target died loses 2 s of his burst.
+  second, a 12 s cycle, one ammunition pool, it fires in melee too; a man whose target died loses 2 s of his burst. A
+  beast (an ellipse body in the database) takes its body's width along a contact in melee: 2.2x the Giant Rats striking
+  (the probe's twin: 0.4 -> ~1 of the game).
 - **Bullets slow** ([details](training/simulator.md#contact-effects-and-the-ratling-guns-burst)): hits of projectiles of
   category `musket` (handguns, the gun, pistols, throwing stars) slow a small formation for 10 s: run x0.65, walk
   x0.9 (the `hitslow` measure: a run at handgunners x0.68, bolts do not slow; no number in the database).
