@@ -93,11 +93,18 @@ Ours: [pace and fatigue](../units/pace.md), [simulator](../../training/simulator
     from the first second, [simulator](../../training/simulator.md#a-caught-shooters-way-out)).
 - **Pursuit.** All pursuer attacks on routers count as charges; 5.0.0 removed the cap of 35 % of a
   pursuing unit attacking. WH3 keys: `pursue_max_charge_time` 5 s, `pursue_charge_max_unit_separation`
-  8 m, `melee_seconds_in_close_proximity_to_stop_pursue` 1.5 s (no descriptions). · twwstats,
-  fandom · high (values), low (meaning).
+  8 m, `melee_seconds_in_close_proximity_to_stop_pursue` 1.5 s. Descriptions (the database schema): 8 m - "max
+  distance at which entities will be allowed to pick charge targets when pursuing", 5 s - "time used to calculate a
+  maximum distance an entity can charge when pursuing", 1.5 s - "melee attacks will stop the pursue state after being
+  this time in continue close proximity". · twwstats, fandom, the database schema · high (values), medium (meaning).
   - Ours: in the recordings a router chased by one pursuer loses 0.64 of what a standing target in
     melee loses, without a charge burst in the first 5 s; the simulator strikes a router at 0.43 of
     the rule (`contact.pursuit_rate`), from the rear, without the charge.
+  - **The chase.** The `pursuit` probe (9 chases under an attack order): the router is in melee and loses health
+    while the formations' edges are within ~16 m (flag 0.96-1.00, beyond it 0.26 and hardly any loss); the routing mob
+    strings out 13-23 m along the flight, the pursuers' men pick targets within 8 m
+    (`pursue_charge_max_unit_separation`). A unit without an order does not follow a router. Simulator:
+    `contact.pursue_gap_m` 16 m ([simulator](../../training/simulator.md#a-routers-exit-from-the-fight)).
   - **A router's exit.** In the recordings (216 battles, 3,987 routs from melee) a unit that routs from melee
     stays in melee 7 s more (median; p25 5, p75 12), without a chase too (median 6 s), gathers speed over ~7 s
     (0.41 of its rout speed in the first second, 0.81 in the fourth) and all that time loses 0.77 of what a

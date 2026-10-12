@@ -2521,6 +2521,56 @@ class TestPursuitSprint:
         assert max(speeds) >= charge - 0.05                                      # the sprint: the charge speed
 
 
+def _chase_after_rout(params, attack=True, seconds=40.0):
+    """Spearmen in contact with skavenslaves for 2 s (attacking them, or HOLD), then the slaves rout; per step after
+    the rout: (s, the slaves in melee, the spearmen in melee, the slaves' HP, the boxes' edge gap)."""
+    st = scenario.build([army([(SPEAR, -50, 0, 90), (SPEAR, -300, 700, 90)],
+                              [(SLAVE, 50, 0, 270), (SLAVE, 300, 700, 270)])], params)
+    H = st.N // 2
+    front, depth = geometry.dims(st.u, params.sim["formation"]["spacing_m"])
+    st.u["x"][0, 0] = -(depth[0, 0] / 2 + TOUCH / 2)
+    st.u["x"][0, H] = depth[0, H] / 2 + TOUCH / 2
+    orders = (lambda s: _attack_router(s)) if attack else replay.hold
+    for _ in range(int(round(2.0 / params.dt))):
+        battle.step(st, orders(st), params)
+    st.u["morale"][0, H] = -30.0
+    rows = []
+    for k in range(int(round(seconds / params.dt))):
+        battle.step(st, orders(st), params)
+        gap = float(geometry.pairwise(st.u, params.sim["formation"]["spacing_m"])["gap"][0, 0, H])
+        rows.append(((k + 1) * params.dt, bool(st.u["m"][0, H]), bool(st.u["m"][0, 0]), float(st.u["hp_abs"][0, H]),
+                     gap))
+    return rows
+
+
+class TestPursuitReach:
+    def test_a_chased_router_stays_in_melee_while_its_chaser_is_within_the_pursuits_reach(self):
+        """contact.pursue_gap_m (16 m, the pursuit probe): beyond the rout's exit (7 s) skavenslaves chased by spearmen
+        with an attack order on them stay in melee and lose HP while the boxes' edges are within 16 m; the spearmen's
+        own melee flag is not lit by it; once the faster router (4.2 x rout_speed against a run of 3.0) is beyond the
+        reach it is out of melee and loses nothing. Off (0): out of melee after the exit."""
+        gap_m = P.sim["contact"]["pursue_gap_m"]
+        assert gap_m == 16
+        on = _chase_after_rout(P)
+        off = _chase_after_rout(P.with_cal("contact", pursue_gap_m=0))
+        near = [r for r in on if 7.5 <= r[0] and r[4] <= gap_m - 1.5]     # (the gap after the step: 1.5 m slack)
+        far = [r for r in on if 7.5 <= r[0] and r[4] > gap_m + 1.5]
+        assert len(near) >= 4 and len(far) > 10                        # the chase lasts past the exit, then breaks
+        assert all(r[1] for r in near) and not any(r[1] for r in far)
+        assert not any(r[2] for r in near)                             # the chaser's flag stays off
+        hp = lambda rows, t: next(r[3] for r in rows if r[0] >= t - 1e-6)
+        assert hp(on, near[0][0]) - hp(on, near[-1][0]) > 0           # struck in the chase
+        assert hp(on, far[0][0]) - hp(on, far[-1][0]) == pytest.approx(0.0, abs=1e-6)
+        assert not any(r[1] for r in off if r[0] >= 9.0)
+        assert hp(off, 9.0) - hp(off, 20.0) == pytest.approx(0.0, abs=1e-6)
+
+    def test_an_unordered_formation_does_not_hold_a_router_beyond_the_exit(self):
+        """The pursuit probe's 'own' lanes: units that are not told to attack the router do not chase it - after the
+        rout's exit it is out of melee whatever the reach."""
+        rows = _chase_after_rout(P, attack=False, seconds=15.0)
+        assert not any(r[1] for r in rows if r[0] >= 9.0)
+
+
 class TestRoutExit:
     def test_a_formation_routing_from_melee_stays_in_contact_and_is_struck_for_rout_pin_s(self):
         pin = P.sim["contact"]["rout_pin_s"]

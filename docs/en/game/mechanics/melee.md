@@ -188,7 +188,10 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
     of what a standing target loses, and the first 5 s of a pursuit hit no harder than later (17.9
     against 18.2 HP/s). One that routed from melee stays in contact with those it fought for 7 s and is
     struck at 0.83 (the recordings: 0.77 of a standing unit's loss; `contact.rout_pin_s`,
-    [movement](movement.md)).
+    [movement](movement.md)); then while a unit with an attack order chases it with the formations' edges within 16 m
+    (`contact.pursue_gap_m`, the `pursuit` probe). OPEN: the game strikes a router caught by a faster unit harder than
+    a standing one (stormvermin on spearmen 2.1-2.3 %/s before the rout, 3.7-5.3 in the chase) - it looks like the
+    database's pursuit charge, which the simulator does not give.
 - **Devastating Flanker** doubles the charge bonus against flank/rear
   (`devastating_flanker_charge_multiplier` 2); **Glorious Charge** (4.2.0, Empire/Kislev) doubles
   its duration and applies the flank morale penalty to the target. WH3 · fandom (snippets) · medium.

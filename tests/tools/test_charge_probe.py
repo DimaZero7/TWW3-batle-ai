@@ -10,6 +10,42 @@ from tools.nn import charge_probe as cp
 from tools.nn import lord_swarm as ls
 
 
+def test_the_pursuit_plan_chases_a_router_by_order_or_leaves_it_to_the_unordered_attacker():
+    plan = cp.battles("pursuit")
+    assert len(plan) == 2 and all(len(b) == 5 for b in plan)
+    for b in plan:
+        kinds = sorted((ln["kind"], ln["attacker"], ln["target"]) for ln in b)
+        assert kinds == [("order", "svsh", "spear"), ("order", "swords", "clanrat"), ("order", "wolfrat", "swords"),
+                         ("own", "svsh", "spear"), ("own", "swords", "clanrat")]
+        for ln in b:
+            assert ln["t_morale"] and ln["at_rout"] == "none" and ln["after_rout_s"] == 60 and ln["rout_at_s"] == 40
+            assert (ln["mode"], ln["target_mode"]) == (("attack_run", "stand") if ln["kind"] == "order"
+                                                       else ("hold", "both"))
+    config, model_s, _ = cp.run_config("pursuit", 1)
+    assert config["men_after_rout_s"] == 60 and model_s < 900
+
+
+def test_pursuit_measure_the_router_by_seconds_after_the_rout():
+    # the chaser 2 m/s, the router 4 m/s from the rout at 10 s; the router's flag on to 15 s after it, 1 % HP a second
+    samples = []
+    for k in range(0, 2 * 65):
+        t = k / 2
+        s = max(0.0, t - 10)
+        a = {"x": 0.0, "z": -2 * s, "m": t < 12, "hp": 1000.0, "men": 120}
+        tg = {"x": 0.0, "z": -5 - 4 * s, "m": s < 15, "hp": 1000.0 - 10 * min(s, 15), "men": 80}
+        samples.append((t, a, tg, None))
+    lane = {"run": "x", "spec": {"name": "L1", "kind": "order", "a_key": cp.UNITS["swords"][0],
+                                 "t_key": cp.UNITS["clanrat"][0], "after_rout_s": 60},
+            "samples": samples, "phases": [{"phase": "rout", "t": 10000}], "men": []}
+    out = cp.pursuit_measure(lane)
+    assert out["pair"] == "swords>clanrat" and out["rout_s"] == 10.0 and not out["forced"]
+    assert out["bins"]["2-7"]["tm"] == 1.0 and out["bins"]["15-30"]["tm"] == 0.0
+    assert out["bins"]["2-7"]["loss"] == pytest.approx(1.0, abs=0.01) and out["bins"]["30-45"]["loss"] == 0.0
+    assert out["bins"]["15-30"]["va"] == pytest.approx(2.0, abs=0.01)
+    assert out["bins"]["15-30"]["vt"] == pytest.approx(4.0, abs=0.01)
+    assert "45-60" not in out["bins"]                 # the recording ends 54.5 s after the rout
+
+
 def test_plans_have_few_battles_and_lanes_on_both_sides():
     assert len(cp.battles("charge")) == 8 and len(cp.battles("hit")) == 2
     for plan in cp.PLANS:

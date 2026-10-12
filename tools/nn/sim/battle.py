@@ -121,6 +121,23 @@ def step(st, orders, params=None, dt=None):
         back = torch.where(alive & u["r"] & (u["rpin_s"] > 0), u["rpin_d"], torch.zeros_like(u["rpin_d"]))
         gap_c = gap_c - back[:, :, None] - back[:, None, :]
     touch = pw["enemy"] & both & (gap_c <= reach_ij + held)
+    # The pursuit's reach (contact.pursue_gap_m; config/nn/sim.json contact.pursue_gap_why; absent / 0: off): a router
+    # stays in contact with a formation chasing it - a standing enemy, not a missile unit, with an attack order on it -
+    # while their formations' edges are within pursue_gap_m (the pursuers' men pick charge targets among the routing
+    # mob's men within the database's pursue_charge_max_unit_separation 8 m, and the mob strings out ~8 m beyond its box);
+    # the chaser strikes it (melee.py: the pursuit's rate), the router counts as in melee (u["m"] below), the chaser's own
+    # melee flag is not lit by it (the game's: off 5 s after the rout). touch_geo: the contacts without these pairs (the
+    # missiles' contact test, the morale's fought enemies, the chaser's melee flag).
+    touch_geo = touch
+    chase_touch = torch.zeros_like(touch)
+    pursue_gap = float(cal["contact"].get("pursue_gap_m") or 0.0)
+    if pursue_gap > 0:
+        chaser = alive & ~u["r"] & (kind == O.ATTACK) & (tgt >= 0) & (u["range"] <= 0)
+        onto = tgt[:, :, None] == torch.arange(N, device=tgt.device)[None, None, :]
+        chase_touch = (chaser[:, :, None] & onto & (alive & u["r"])[:, None, :] & pw["enemy"]
+                       & (pw["gap"] <= pursue_gap))
+        chase_touch = chase_touch | chase_touch.transpose(1, 2)
+        touch = touch | chase_touch
     # Leaving melee: a withdraw order, or any unit told to move contact.leave_m or more away (0: off).
     # It walks out of the fight: it strikes nobody and is not held in place, the enemies in contact
     # still strike it (measured in the game, config/nn/sim.json contact.why).
@@ -512,7 +529,7 @@ def step(st, orders, params=None, dt=None):
         # A burst (missile.py burst_share): a volley of spv shots a man (the Ratling Gun's 18) leaves at the measured
         # rate over spv / bst_rate s from its start; the reload runs from the start (the cycle start to start)
         burst, start, share, volley_target = missile.burst_share(u, volley_target, m_target, share, dt)
-    shots, hp_missile, shit = missile.volley(u, pw, volley_target, dt, params, contact=touch, clear=clear,
+    shots, hp_missile, shit = missile.volley(u, pw, volley_target, dt, params, contact=touch_geo, clear=clear,
                                              loaded=share, catch=catch)
     fired = shots > 0 if burst is None else torch.where(burst, start, shots > 0)
     u["unready"] = torch.where(fired, torch.ones_like(unready), unready)
@@ -713,7 +730,7 @@ def step(st, orders, params=None, dt=None):
     shot_now = (aimed & pw["enemy"]).any(1)
     # the share of health lost by the enemies it fights (in contact, or the target it shoots): winning shows only
     # once one of them has lost morale.combat_lost
-    fought = (touch | aimed | aimed.transpose(1, 2)) & pw["enemy"] & alive[:, None, :]
+    fought = (touch_geo | aimed | aimed.transpose(1, 2)) & pw["enemy"] & alive[:, None, :]
     lost_j = (1 - u["hp_abs"] / u["hp0"].clamp(min=1e-6))[:, None, :]
     foe_lost = torch.where(fought, lost_j, torch.zeros_like(lost_j)).amax(2)
     # The charge's morale (+15, morale.charge): a block of block_s from the charge pose (an attack order, its target's
@@ -983,7 +1000,7 @@ def step(st, orders, params=None, dt=None):
                   else u["turn"])
         rate = torch.where(u["men0"] > 1, torch.full_like(u["b"], float(t_cal["formation_deg_s"])), single)
         movement.limit_turn(u, old["b"], standing & ~mv & ~engaged & ~steer, rate * dt)
-    router_hit = torch.where(strike & u["r"][:, None, :], d, torch.full_like(d, 1e9))
+    router_hit = torch.where(strike & touch_geo & u["r"][:, None, :], d, torch.full_like(d, 1e9))
     router = router_hit.argmin(2)
     has_router = router_hit.min(2).values < 1e9
     target = torch.where(has_opp & standing, opp, torch.where(shown, shown_tgt,
@@ -992,6 +1009,9 @@ def step(st, orders, params=None, dt=None):
     # a router in its rout's exit touched by a standing enemy is in melee too (the game's flag: median 7 s after a rout
     # from melee, contact.rout_pin_why)
     held_router = r_pin & (u["rpin_s"] > 0) & (touch & standing[:, None, :]).any(2) if pin_s > 0 else torch.zeros_like(alive)
+    # a router within the pursuit's reach of a chaser (contact.pursue_gap_m above) is in melee too (the pursuit probe: the
+    # game's flag on 0.96-1.00 with the formations' edges within 16 m, 0.26 beyond)
+    held_router = held_router | (alive & u["r"] & chase_touch.any(2))
     u["m"] = alive & (engaged | has_router | held_router)
     u["mv"] = mv
     u["f"] = mv & (spd > u["walk"] + 0.3)

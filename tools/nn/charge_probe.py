@@ -82,6 +82,14 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           halts at the rout; crossbowmen of its side 80 m beyond the target, fire at will), neighbours (halts; two
           spearmen units of its side 25 m to either side and 20 m behind the target, halted, striking only what touches
           them), the control (halts, nobody else); soldiers' places 40 s after the rout - 2 battles, lanes rotated;
+  pursuit the long chase after a rout (build/simreal/router_melee.md: in the gate battles a router stays in melee 13-31 %
+          of its seconds 7-60 s after the rout at about the same loss a second, the simulator's never after its 7 s exit):
+          the target (half its men killed at placement, normal morale; routed by script rout_at_s 40 s after the contact if
+          it has not routed by then) is chased 60 s after its rout (after_rout_s; soldier places all that time): swordsmen
+          after clanrats, stormvermin after Empire spearmen, wolf rats after swordsmen under an attack order kept on the
+          router (kind 'order'), and swordsmen / stormvermin never ordered, attacked at a run by their target (kind 'own':
+          do they chase by themselves?) - 2 battles of 5 lanes, rotated; the table: python -m tools.nn.charge_probe
+          pursuit [runs] [--sim] (the routmob / routmob2 chase lanes too);
   rallysecure how 'flanks secure' comes back after a rally (the game: the rallied unit far from enemies gains +1/+2/+3/+4
           /+7 morale 3/10/20/30/45 s after the rally, the simulator +5 at once): skavenslaves with half their men killed
           at placement (damage kill 0.5), normal morale, held (never ordered), attacked by fearless spearmen from 40 m
@@ -364,7 +372,7 @@ UNIT_PLANS = ("ratling", "suppress", "suppress2", "censer", "wolfrats", "wolfpoi
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
          "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "leave", "skirmish", "skirmish2", "shootcontact",
-         "holdmelee", "holdlord", "recontact") + UNIT_PLANS
+         "holdmelee", "holdlord", "recontact", "pursuit") + UNIT_PLANS
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
 WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
@@ -451,6 +459,11 @@ RETARGET = {"fire_s": 120, "gap_m": 80, "t2_gap_m": 30}   # 80 m front to front:
 RETARGET_PLACES = DMGMELEE_PLACES
 RETARGET_LAG_S = 2.0       # a shot's flight (bolts 45 m/s, bullets 100 m/s over ~110 m) and the health readout's lag
 ROUTMOB_MEN_S = 40     # the routmob plan: the soldiers' places this long after the target's rout
+# the pursuit plan: a long chase after a rout (gap_m front to front at the go; the target, half its men killed at placement,
+# routed by script rout_at_s after the contact if it has not routed by then; the lane ends after_rout_s after the rout)
+PURSUIT = {"gap_m": 40, "rout_at_s": 40, "after_rout_s": 60, "max_s": 200}
+# (chaser, router) pairs: Empire infantry after clanrats, stormvermin after spearmen, wolf rats after swordsmen
+PURSUIT_PAIRS = (("swords", "clanrat"), ("svsh", "spear"), ("wolfrat", "swords"))
 ROUTMOB_END_S = 45     # ... and the lane ends this long after it
 # the reform plan: soldier places this long after contact (the whole fight)
 REFORM_MEN_S = 260
@@ -616,6 +629,19 @@ def battles(plan):
                         after_rout_s=ROUTMOB_END_S, max_s=260)
         base = [rm("spear", "slave", "none"), rm("spear", "slave", "halt"), rm("swords", "clanrat", "none"),
                 rm("swords", "clanrat", "halt")]
+        out += [base, rotate(base, 2)]
+    elif plan == "pursuit":
+        def pu(attacker, target, kind):
+            common = dict(gap_m=PURSUIT["gap_m"], fight_s=200, t_morale=True, at_rout="none",
+                          after_rout_s=PURSUIT["after_rout_s"], max_s=PURSUIT["max_s"], rout_at_s=PURSUIT["rout_at_s"],
+                          damage={"t": {"method": "kill", "share": 0.5}}, kind=kind)
+            if kind == "order":
+                # the chaser attacks at a run and keeps its attack order on the router (the chase by order)
+                return lane(attacker, target, "attack_run", "stand", **common)
+            # 'own': the chaser is never ordered - the target attacks it at a run; at the rout the chaser chases (or not)
+            # by its own choice
+            return lane(attacker, target, "hold", "both", answer=False, **common)
+        base = [pu(a, t, "order") for a, t in PURSUIT_PAIRS] + [pu(a, t, "own") for a, t in PURSUIT_PAIRS[:2]]
         out += [base, rotate(base, 2)]
     elif plan == "routmob2":
         def rm2(kind):
@@ -928,6 +954,8 @@ def run_config(plan, index):
               "lanes": lanes, "park": park}
     if plan in ("routmob", "routmob2"):
         config["men_after_rout_s"] = ROUTMOB_MEN_S
+    if plan == "pursuit":
+        config["men_after_rout_s"] = PURSUIT["after_rout_s"]
     model_s = max(l["max_s"] for l in lanes) + SETTLE_MS / 1000 + 20
     return config, model_s, arena
 
@@ -2334,10 +2362,94 @@ def recontact_report(run_dirs, sim=False, layout=False, device="cpu", copies=4, 
     return result
 
 
+# ---------------------------------------------------------------- the chase after a rout (plans pursuit, routmob, routmob2)
+
+PURSUIT_BINS = ((0, 2), (2, 7), (7, 15), (15, 30), (30, 45), (45, 60))
+PURSUIT_PLANS = ("pursuit", "routmob", "routmob2")
+
+
+def pursuit_measure(lane):
+    """A chase lane (game or simulator: the target routed, the attacker not halted at the rout): by PURSUIT_BINS seconds
+    after the rout - the router's melee flag (share of samples), its health lost a second (% of its health at the rout),
+    centre to centre (m), both centres' speeds (m/s, the way over the bin), the chaser's melee flag and (game) its men
+    within 2.5 m of a router man. None if the target never routed."""
+    spec, s = lane["spec"], lane["samples"]
+    rout = [p for p in lane["phases"] if p.get("phase") == "rout"]
+    if not rout or not s:
+        return None
+    t_r = rout[0]["t"] / 1000
+    t = np.array([x[0] for x in s])
+    ax, az, tx, tz = series(s, "a", "x"), series(s, "a", "z"), series(s, "tg", "x"), series(s, "tg", "z")
+    hp, tm, am = series(s, "tg", "hp"), series(s, "tg", "m"), series(s, "a", "m")
+    hp0 = at(t, hp, t_r)
+    end = min(t[-1], t_r + (spec.get("after_rout_s") or ROUTMOB_END_S))
+    out = {"run": lane["run"], "lane": spec["name"], "kind": spec.get("kind") or spec.get("at_rout"),
+           "pair": f"{SHORT[spec['a_key']]}>{SHORT[spec['t_key']]}", "rout_s": round(t_r, 1),
+           "forced": any(p.get("phase") == "rout_forced" for p in lane["phases"]), "bins": {}}
+    for lo, hi in PURSUIT_BINS:
+        if t_r + hi > end + 0.6:
+            break
+        sel = (t >= t_r + lo) & (t < t_r + hi)
+        if sel.sum() < 2 or not hp0:
+            continue
+        i, j = np.flatnonzero(sel)[[0, -1]]
+        dt = max(t[j] - t[i], 1e-6)
+        row = {"tm": float(np.nanmean(tm[sel])), "am": float(np.nanmean(am[sel])),
+               "loss": float(100 * (hp[i] - hp[j]) / hp0 / dt),
+               "d": float(np.nanmean(np.hypot(ax[sel] - tx[sel], az[sel] - tz[sel]))),
+               "va": float(np.hypot(ax[j] - ax[i], az[j] - az[i]) / dt),
+               "vt": float(np.hypot(tx[j] - tx[i], tz[j] - tz[i]) / dt)}
+        ms = [m for m in lane.get("men") or [] if t_r + lo <= m[0] < t_r + hi]
+        if ms:
+            row["near"] = float(np.mean([near_counts(m[1], m[2], (2.5,))[0] for m in ms]))
+        out["bins"][f"{lo}-{hi}"] = row
+    return out
+
+
+def pursuit_report(run_dirs, sim=False, device="cpu", copies=4, out=None, params=None):
+    """The chase lanes of the pursuit / routmob / routmob2 runs (at_rout 'none'): the game's, with sim the simulator on
+    the same lanes; prints per kind and pair the bins of pursuit_measure (means over lanes), writes
+    build/charge-probe/pursuit.json (not in Git)."""
+    lanes = [ln for d in run_dirs for ln in load_run(d)
+             if ln.get("plan") in PURSUIT_PLANS and ln["spec"].get("at_rout", "none") == "none"]
+    rows = [r for r in (pursuit_measure(ln) for ln in lanes) if r]
+    for r in rows:
+        r["src"] = "game"
+    if sim and lanes:
+        for r in (pursuit_measure(ln) for ln in sim_lanes(lanes, device=device, copies=copies, params=params)):
+            if r:
+                r["src"] = "sim"
+                rows.append(r)
+    groups = {}
+    for r in rows:
+        groups.setdefault((r["kind"], r["pair"], r["src"]), []).append(r)
+    keys = ("tm", "loss", "d", "va", "vt", "am", "near")
+    table = []
+    print("The chase after a rout, by seconds after it: tm = the router's melee flag (share), loss = its health lost a "
+          "second (% of it at the rout), d = centre to centre (m), va / vt = the chaser's / router's speed (m/s), am = "
+          "the chaser's melee flag, near = chaser men within 2.5 m of a router man (game)")
+    for (kind, pair, src), rs in sorted(groups.items()):
+        print(f"  {kind:6} {pair:16} {src:4} n={len(rs)} rout at {np.mean([r['rout_s'] for r in rs]):.0f} s"
+              f" (forced {sum(r['forced'] for r in rs)})")
+        for lo, hi in PURSUIT_BINS:
+            b = f"{lo}-{hi}"
+            vals = [r["bins"][b] for r in rs if b in r["bins"]]
+            if not vals:
+                continue
+            m = {k: float(np.mean([v[k] for v in vals if k in v])) for k in keys if any(k in v for v in vals)}
+            table.append(dict(m, kind=kind, pair=pair, src=src, bin=b, n=len(vals)))
+            print(f"    {b:>6} " + " ".join(f"{k} {m[k]:6.2f}" for k in keys if k in m))
+    out = out or ROOT / "pursuit.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps({"lanes": rows, "summary": table}, indent=1), encoding="utf-8")
+    print("->", out)
+    return table
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("command", nargs="?", choices=("report", "plan", "run", "turns", "exits", "retarget", "skirmish",
-                                                     "shootcontact", "recontact"),
+                                                     "shootcontact", "recontact", "pursuit"),
                         default="report")
     parser.add_argument("runs", nargs="*", type=Path, help="report: run folders (default: build/charge-probe/runs/*)")
     parser.add_argument("--plan", choices=PLANS, default="charge")
@@ -2379,6 +2491,10 @@ def main(argv=None):
     if args.command == "recontact":
         recontact_report(args.runs or runs(), sim=args.sim, layout=args.layout, device=args.device,
                          copies=args.copies, out=None if args.out == OUT else args.out)
+        return 0
+    if args.command == "pursuit":
+        pursuit_report(args.runs or runs(), sim=args.sim, device=args.device, copies=args.copies,
+                       out=None if args.out == OUT else args.out)
         return 0
     if args.command == "turns":
         turn_report(args.runs or runs(), sim=args.sim, device=args.device, copies=min(args.copies, 4),
