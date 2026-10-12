@@ -866,7 +866,10 @@ def step(st, orders, params=None, dt=None):
                 "running": speed > u["walk"] + 0.3, "walking": speed > 0.3,
                 "idle": idle, "active": alive, "attack": kind == O.ATTACK, "single": u["men0"] <= 1,
                 "run_order": u["order_run"].bool(), "routing": alive & u["r"], "vigour": vigour,
-                "move_order": (kind == O.MOVE) | (kind == O.WITHDRAW), "shooter": u["range"] > 0}
+                "move_order": (kind == O.MOVE) | (kind == O.WITHDRAW), "shooter": u["range"] > 0,
+                # it strikes the enemies it touches this step (not leaving, not in a hold's exit window): a lone man
+                # in melee pays by it (fatigue.calibration.single_melee)
+                "strikes": striker & engaged}
     near_m = float(cal["fatigue"].get("calibration", {}).get("ready_enemy_m", 0.0))
     if near_m > 0:
         activity["enemy_near"] = (foes & standing[:, None, :] & (d <= near_m)).any(2)

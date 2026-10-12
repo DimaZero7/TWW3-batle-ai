@@ -2223,6 +2223,38 @@ def test_a_formation_in_melee_without_the_attack_order_by_its_order_and_kind():
     assert u["fatigue"].tolist() == pytest.approx([14930., 14975., 14988., 14951., 14951., 14990.])
 
 
+def test_a_lone_man_in_melee_without_the_attack_order_pays_by_whether_he_strikes():
+    # (calibration.single_melee "strikes"; the game's lords: hold with an engine target +84/s like the attack +91,
+    # hold without one -43) striking under hold: combat +19; not striking under hold: ready -7; not striking under a
+    # move order: melee_move -2.5; a formation under hold is unchanged (ready, striking or not)
+    u = {"fatigue": torch.full((4,), 15000.), "fat": torch.zeros(4)}
+    activity = melee_activity(4, single=[True, True, True, False], strikes=[True, False, False, True],
+                              move_order=[False, False, True, False], walking=[False, False, True, False])
+    fatigue.step(u, activity, calibrated_fatigue(), 1.)
+    assert u["fatigue"].tolist() == pytest.approx([15190., 14930., 14975., 14930.])
+    # switched off: the old rest (idle -18 standing, walking -1)
+    import copy
+    p = copy.deepcopy(calibrated_fatigue())
+    p.sim["fatigue"]["calibration"].pop("single_melee")
+    u = {"fatigue": torch.full((4,), 15000.), "fat": torch.zeros(4)}
+    fatigue.step(u, activity, p, 1.)
+    assert u["fatigue"].tolist() == pytest.approx([14820., 14820., 14990., 14930.])
+
+
+def test_battle_tells_fatigue_whether_a_held_lord_strikes(monkeypatch):
+    # a lord held in melee strikes; told to withdraw he leaves and strikes nobody
+    st = face_off("wh2_main_skv_cha_warlord_0", SLAVE, gap=0)
+    seen = {}
+    monkeypatch.setattr(fatigue, "step", lambda u, activity, params, dt: seen.update(activity))
+    battle.step(st, O.hold(st.B, st.N), P)
+    assert bool(seen["melee"][0, 0]) and bool(seen["strikes"][0, 0])
+    cmd = O.hold(st.B, st.N)
+    cmd.kind[0, 0] = O.WITHDRAW
+    cmd.x[0, 0], cmd.z[0, 0] = st.u["x"][0, 0] - 60, st.u["z"][0, 0]
+    battle.step(st, cmd, P)
+    assert not bool(seen["strikes"][0, 0])
+
+
 def test_charging_tires_only_under_an_attack_order():
     u = {"fatigue": torch.full((2,), 15000.), "fat": torch.zeros(2)}
     activity = melee_activity(2, attack=[True, False], charging=[True, True])

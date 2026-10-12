@@ -39,7 +39,7 @@ flowchart LR
   replay of ~640 recorded battles and the acceptance number A - how far the twins of the panel's 56 battles are from
   the game (lower is better, ~0.30).
 - **The twin's largest gaps:** our units lose half the game's health while routing; the network's lord is in melee
-  1.9x as often as in the game; the AI's shooters move less in the twin.
+  1.5x as often as in the game and out of the fight in 0.30 of battles against the game's 0.38 (0.12 before the lord's fatigue rule); the AI's shooters move less in the twin.
 - **The simulator on the game's recordings** (the replay of 72 battles, below): the loss curves match;
   routs and rallies remain.
 
@@ -111,7 +111,7 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
 - **Lords:** as fragile as in the game (no own aura, always "losing" in melee), a blow split over 4 men,
   the lord duel by the game's formula, abilities (the game's AI uses them by the measured rule), "Wounds".
 - **Fatigue** by the database (10 ticks a second, melee tires under an attack order; the charge +34 on the sprint in,
-  no surcharge after the blow; in melee without an attack — ready; shooting 11.4 — measured), units' innate
+  no surcharge after the blow; in melee without an attack — ready, a lord tiring as in an attack while he strikes — measured; shooting 11.4 — measured), units' innate
   effects, turning at the database's turn rate, formation by the database's template.
 - **Contact effects and bursts** ([details](training/simulator.md#contact-effects-and-the-ratling-guns-burst)):
   poison, the censer's contagion, the Ratling Gun's suppressing fire - the database phase's stats on the unit hit for

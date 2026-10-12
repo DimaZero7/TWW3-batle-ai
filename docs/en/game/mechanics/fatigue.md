@@ -61,7 +61,9 @@ max 30000. · [twwstats][tws], [fandom Fatigue][fw-fat], [CA elevation blog][ele
     are Fresh. Exact starting points within that band are unrecorded: zero remains an assumption.
   - Ours (calibration ON): melee tires only a unit with an attack order — a single
     entity at the DB's +19 a tick, a formation at 13.7 (measured); in melee without an attack
-    order the unit moves or rests. Charging +34 also only with an attack order, for a single entity
+    order a formation stands ready (−7) or loses −2.5 a tick under a move order (measured); a lord without an attack order
+    pays +19 while he strikes the enemies he touches, and rests as a formation when he does not (measured on the lords in the game:
+    hold with a target +84/s, as the attack +91; [simulator](../../training/simulator.md#fatigue-calibration)). Charging +34 also only with an attack order, for a single entity
     only in the first 2 s of a contact (the game's lords first turn tired after 60–62 s of melee; with
     +19 and the charge for all 13 s the simulator gave 37–47 s; [lords](../../training/simulator.md#lords)). Foe-Seeker,
     while active, takes 1 % of the maximum a second (−300 points/s; the DB's `special_ability_phases`

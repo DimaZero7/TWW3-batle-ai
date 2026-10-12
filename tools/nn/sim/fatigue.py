@@ -9,8 +9,9 @@ charges melee only to a unit with an attack order: the database's +19 a tick for
 formation (measured; a formation's men are not tired one by one - build/movelords); charging (+34) while the unit
 sprints at its target under the attack order, up to the contact (calibration.charging "sprint", battle.py); a
 formation in melee without the order stands ready (-7), under a move / withdraw order -2.5, a missile formation in
-melee -1.2 with the attack order / -4.9 without (measured, build/fatigue2); a single entity without the order moves or
-rests. A move costs by its order's run flag (run +4, walk -1), a routing unit +4; shooting 11.4 a tick on the seconds
+melee -1.2 with the attack order / -4.9 without (measured, build/fatigue2); a single entity without the order pays
+combat while he strikes and rests as a formation while he does not (calibration.single_melee; missing: he moves or
+rests at idle). A move costs by its order's run flag (run +4, walk -1), a routing unit +4; shooting 11.4 a tick on the seconds
 it shoots (measured, build/fatigue2; aiming stands ready); a standing unit
 rests at idle with no standing enemy within ready_enemy_m, else stands ready. OFF is the legacy
 model: 5 ticks/s, ready recovery, every melee +19. Tired states cost morale (morale.py) and scale
@@ -70,15 +71,24 @@ def step(u, activity, params, dt):
                              knobs.full_like(rate, knobs.get(u, "multi_combat", float(trial["multi_combat"]))))
         rest = torch.where(moving, move_rate, torch.full_like(rate, F["idle"]))
         form = ~single
+        # A lone man (a lord) in melee without the attack order pays by what he does (calibration.single_melee
+        # "strikes"; fatigue.calibration.single_melee_why): striking the enemies he touches - the database's combat, as
+        # under the order; not striking (a hold's exit window, a leave) - as a formation, ready / melee_move. Missing:
+        # he walks or rests at idle -18 while he fights.
+        lone = single & (trial.get("single_melee") == "strikes") & ("strikes" in activity)
+        rests_like_form = form | lone
         if "melee_hold" in trial:
             # A formation in melee without the attack order (89 % of it under hold, the engine giving it no target)
             # stands ready: the database's ready -7 (calibration.melee_hold "ready"; fatigue.calibration.why).
             hold = trial["melee_hold"]
             hold = F["ready"] if hold == "ready" else float(hold)
-            rest = torch.where(form, torch.full_like(rate, hold), rest)
+            rest = torch.where(rests_like_form, torch.full_like(rate, hold), rest)
         if "melee_move" in trial and "move_order" in activity:
             # ... under a move or withdraw order: the measured -2.5 a tick (calibration.melee_move)
-            rest = torch.where(form & activity["move_order"], torch.full_like(rate, float(trial["melee_move"])), rest)
+            rest = torch.where(rests_like_form & activity["move_order"], torch.full_like(rate, float(trial["melee_move"])),
+                               rest)
+        if "strikes" in activity:
+            rest = torch.where(lone & activity["strikes"], combat, rest)
         melee_rate = torch.where(attack, combat, rest)
         if "shooter_melee" in trial and "shooter" in activity:
             # A missile formation in melee: measured, with the attack order / with another (calibration.shooter_melee)
