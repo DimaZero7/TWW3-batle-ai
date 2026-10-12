@@ -11,6 +11,7 @@ the pages of the section:
 | [Network model](network.md) | the design: goal, where it runs, faction character, co-op, readiness |
 | [Inputs and model](model.md) | what the network sees, its layers and heads, in code |
 | [Training](training.md) | PPO in the simulator: battles, opponents, reward, drills, evaluation, what was tried and rejected |
+| [The game AI's student](student.md) | a v2 network taught by imitation of the game's AI from recordings: a pool opponent, a twin instead of `ai_like` |
 | [Workflow](workflow.md) | a chain step from a few parameters, the run card, leftovers between steps, the baselines' cache, step speed |
 | [Battle simulator](simulator.md) | the battle the network trains in, its checks against the game, pending changes |
 | [Random armies](armies.md) | the battle generator for training and the in-game check |

@@ -218,6 +218,13 @@ game's AI) from recorded battles, only those its critic found better than expect
 line S the flag is set, but the weight is already about 0 - off in effect (below 1e-6 nothing is computed)
 ([observation](training/training.md#learning-by-observation)).
 
+**The game AI's student** (`tools/nn/student`): a v2 network taught by plain imitation of the game's AI on its
+recorded battles (135 AI-vs-AI battles, every second: the AI's new order or keep; a repeat of the same order is
+keep), split by start; a candidate pool opponent (`--pool-extra`, no new code) and twin instead of `ai_like`. From
+S12's weights, 10 epochs on the CPU: on held-out starts order kind 0.76, target 0.53 (better than simple rules), point
+within 25 m 0.22 (worse than "repeat", 0.46); in the simulator it wins 0.41 of its battles against `nearest`, 0.25
+against `ai_like` ([student](training/student.md)).
+
 **Spread of the simulator's uncertain numbers** (`--dr`, on in line S): 23 numbers not taken exactly from
 the game's database (a few probes, fits, estimates), each battle draws them inside ranges from the evidence; the
 `sim.json` number stays the median ([spread](training/training.md), `config/nn/dr.json`).
