@@ -10,6 +10,22 @@ from tools.nn import charge_probe as cp
 from tools.nn import lord_swarm as ls
 
 
+def test_the_passby_plan_puts_held_spearmen_by_the_routers_way():
+    plan = cp.battles("passby")
+    assert len(plan) == 3 and all(len(b) == 5 for b in plan)
+    assert sorted(ln["kind"] for ln in plan[0]) == sorted(ln["kind"] for ln in plan[1]) == \
+        ["control", "mid", "pair10", "side10", "side5"]
+    assert sorted(ln["kind"] for ln in plan[2]) == ["control", "near_mid", "near_pair", "near_side", "neighbours"]
+    for b in plan:
+        for ln in b:
+            assert (ln["attacker"], ln["target"], ln["at_rout"], ln["rout_at_s"]) == ("spear", "slave", "halt", 30)
+            assert ln["t_morale"] and (ln.get("extras") is None) == (ln["kind"] == "control")
+            for e in ln.get("extras") or []:
+                assert e["short"] == "spear" and e["dz"] < 0                     # behind the target, in its flight
+    config, model_s, _ = cp.run_config("passby", 3)
+    assert config["men_after_rout_s"] == cp.ROUTMOB_MEN_S and model_s < 900
+
+
 def test_the_pursuit_plan_chases_a_router_by_order_or_leaves_it_to_the_unordered_attacker():
     plan = cp.battles("pursuit")
     assert len(plan) == 2 and all(len(b) == 5 for b in plan)

@@ -102,7 +102,9 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
   enemy, the lord's death (−16 for 45 s, then −10), shattering of a unit and of the army; the rally is the
   measured process (`morale.rally_hazard`: a chance a second by the distance to the nearest enemy for routers with morale above 0; measured on the same condition over 360 game recordings).
 - **Rout:** the first 7 s the router stays in contact, then while a unit with an attack order on it is within
-  16 m edge to edge; it is slowed in a crowd; it dodges its chaser at
+  16 m edge to edge; a chaser that caught it (no slower) strikes with as many men as it has; router men that ran into
+  a standing enemy formation stay stuck there and die there (the 72-battle replay: units lose 0.75 of the game's while
+  routing, was 0.61); it is slowed in a crowd; it dodges its chaser at
   an angle; far from the enemy it flees from all standing enemies (weight 1 / distance), to its own edge
   only when none stands ([where a router runs](training/simulator.md#where-a-router-runs)).
 - **Lords:** as fragile as in the game (no own aura, always "losing" in melee), a blow split over 4 men,

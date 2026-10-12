@@ -138,6 +138,20 @@ def step(st, orders, params=None, dt=None):
                        & (pw["gap"] <= pursue_gap))
         chase_touch = chase_touch | chase_touch.transpose(1, 2)
         touch = touch | chase_touch
+    # Stuck men (contact.rout_stuck; config/nn/sim.json contact.rout_stuck_why; absent / off: none): a router whose men ran
+    # into a standing enemy formation leaves stk_n of them among its men (below, after the melee) - they stay in contact
+    # with it wherever the rest of the router is: it strikes them (melee.py), the router counts as in melee, the striker's
+    # own flag is not lit by them (the game's bystanders: off).
+    stuck_cal = cal["contact"].get("rout_stuck") or {}
+    stuck_touch = torch.zeros_like(touch)
+    if stuck_cal.get("on") and "stk_n" in u:
+        k_of = u["stk_k"].clamp(min=0)
+        k_ok = alive.gather(1, k_of) & ~u["r"].gather(1, k_of)
+        has = alive & u["r"] & (u["stk_n"] > 0) & (u["stk_k"] >= 0) & k_ok
+        u["stk_n"] = torch.where(has, u["stk_n"], torch.zeros_like(u["stk_n"]))
+        among = has[:, None, :] & (u["stk_k"][:, None, :] == torch.arange(N, device=st.device)[None, :, None])
+        stuck_touch = (among | among.transpose(1, 2)) & pw["enemy"]
+        touch = touch | stuck_touch
     # Leaving melee: a withdraw order, or any unit told to move contact.leave_m or more away (0: off).
     # It walks out of the fight: it strikes nobody and is not held in place, the enemies in contact
     # still strike it (measured in the game, config/nn/sim.json contact.why).
@@ -356,6 +370,21 @@ def step(st, orders, params=None, dt=None):
 
     # --- melee ---
     rate, mhit, sector, F_men, swing = melee.strikes(u, pw, strike, params, charge_now, first=True)
+    if stuck_cal.get("on") and "stk_n" in u:
+        # A router running into a standing enemy formation (its boxes touching by their own edges - not the rout's exit
+        # contact - with the router moving towards it, not a formation chasing it by order) leaves among its men as many
+        # of its own as that formation's men strike it now (F_men); the most of them, one formation per router.
+        raw = pw["enemy"] & both & (pw["gap"] <= reach_ij + held)
+        dxk, dzk = u["x"][:, :, None] - u["x"][:, None, :], u["z"][:, :, None] - u["z"][:, None, :]   # [k, j]: j to k
+        into = (u["vx"][:, None, :] * dxk + u["vz"][:, None, :] * dzk) > 0
+        by_order = (kind == O.ATTACK)[:, :, None] & (tgt[:, :, None] == torch.arange(N, device=st.device)[None, None, :])
+        new = (raw & into & ~by_order & standing[:, :, None] & (alive & u["r"])[:, None, :]
+               & (u["men0"] > 1)[:, :, None] & (u["men0"] > 1)[:, None, :])
+        cand = torch.where(new, F_men, torch.zeros_like(F_men)).clamp(max=u["men"][:, None, :])
+        best, k_best = cand.max(1)
+        take_k = best > u["stk_n"]
+        u["stk_n"] = torch.where(take_k, best, u["stk_n"])
+        u["stk_k"] = torch.where(take_k, k_best, u["stk_k"])
     first_pair = first[:, :, None]
     if cal["contact"].get("stand_first_strike"):
         # (build/open_melee/spec.md R1) a unit standing under HOLD that an enemy reaches strikes once at once too, with
@@ -628,6 +657,11 @@ def step(st, orders, params=None, dt=None):
     credit = kills * (drop / want.clamp(min=1e-9)).clamp(max=10)[:, None, :] * pw["enemy"]
     u["k"] = u["k"] + credit.sum(2)
     u["hp_abs"], u["men"] = hp_new, men_new
+    if stuck_cal.get("on") and "stk_n" in u:
+        # the stuck men are the ones dying (nobody else reaches them) and the rest work free over escape_s (measured)
+        left = (u["stk_n"] - drop).clamp(min=0) * math.exp(-dt / float(stuck_cal["escape_s"]))
+        u["stk_n"] = torch.where(left >= float(stuck_cal.get("min_men", 0.5)), torch.minimum(left, men_new),
+                                 torch.zeros_like(left))
     u["hp"] = torch.where(present, hp_new / u["hp0"].clamp(min=1e-6), torch.zeros_like(hp_new))
     # seconds since its health first fell below a quarter (never back: the Wounds, effects.py)
     if "low_s" in u:
@@ -1012,6 +1046,9 @@ def step(st, orders, params=None, dt=None):
     # a router within the pursuit's reach of a chaser (contact.pursue_gap_m above) is in melee too (the pursuit probe: the
     # game's flag on 0.96-1.00 with the formations' edges within 16 m, 0.26 beyond)
     held_router = held_router | (alive & u["r"] & chase_touch.any(2))
+    # a router with men stuck among a standing enemy's (contact.rout_stuck above) is in melee too (the routmob2 probe's
+    # 'neighbours': the slaves' flag on to 45 s after the rout while a third to a tenth of their men stayed there)
+    held_router = held_router | (alive & u["r"] & stuck_touch.any(1))
     u["m"] = alive & (engaged | has_router | held_router)
     u["mv"] = mv
     u["f"] = mv & (spd > u["walk"] + 0.3)

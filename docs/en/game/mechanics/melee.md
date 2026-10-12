@@ -189,9 +189,12 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
     against 18.2 HP/s). One that routed from melee stays in contact with those it fought for 7 s and is
     struck at 0.83 (the recordings: 0.77 of a standing unit's loss; `contact.rout_pin_s`,
     [movement](movement.md)); then while a unit with an attack order chases it with the formations' edges within 16 m
-    (`contact.pursue_gap_m`, the `pursuit` probe). OPEN: the game strikes a router caught by a faster unit harder than
-    a standing one (stormvermin on spearmen 2.1-2.3 %/s before the rout, 3.7-5.3 in the chase) - it looks like the
-    database's pursuit charge, which the simulator does not give.
+    (`contact.pursue_gap_m`, the `pursuit` probe). A router caught by a unit no slower than it is struck by as many of
+    the chaser's men as the router has (`contact.pursue_envelop`): in the `pursuit` probe stormvermin after spearmen had
+    26-30 men within 2.5 m of the routers against 7-9 at a standing front, the router lost 83-92 HP/s against 37-42
+    standing, while a man struck no harder than standing (no charge bonus shows). Router men that ran into a standing
+    enemy formation stay stuck among its men (up to a third of the unit, breaking free at 1 / 22 s a man on average) and die there while
+    the mob runs on (`contact.rout_stuck`, the `routmob2` probe, [simulator](../../training/simulator.md#a-routers-exit-from-the-fight)).
 - **Devastating Flanker** doubles the charge bonus against flank/rear
   (`devastating_flanker_charge_multiplier` 2); **Glorious Charge** (4.2.0, Empire/Kislev) doubles
   its duration and applies the flank morale penalty to the target. WH3 · fandom (snippets) · medium.

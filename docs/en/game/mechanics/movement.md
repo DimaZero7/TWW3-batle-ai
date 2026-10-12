@@ -104,7 +104,14 @@ Ours: [pace and fatigue](../units/pace.md), [simulator](../../training/simulator
     while the formations' edges are within ~16 m (flag 0.96-1.00, beyond it 0.26 and hardly any loss); the routing mob
     strings out 13-23 m along the flight, the pursuers' men pick targets within 8 m
     (`pursue_charge_max_unit_separation`). A unit without an order does not follow a router. Simulator:
-    `contact.pursue_gap_m` 16 m ([simulator](../../training/simulator.md#a-routers-exit-from-the-fight)).
+    `contact.pursue_gap_m` 16 m ([simulator](../../training/simulator.md#a-routers-exit-from-the-fight)). A chaser
+    that keeps up (its run no slower than the flight) runs into the loose mob and strikes with all its men
+    (`contact.pursue_envelop`).
+  - **A router by a standing formation.** Given room a router steers clear of a standing enemy formation (the `passby`
+    probe: spearmen 30-40 m in its way, no router man nearer than 5 m). One that runs into it (the formation a few metres
+    behind, the boxes into the way: the `routmob2` probe's 'neighbours' lanes) leaves up to a third of its men stuck among
+    the enemy, the unit 'in melee' to 45 s and losing 0.4-0.8 %/s while the mob is 50-120 m off; the stuck men die or
+    break free (1 / 22 s a man on average; `contact.rout_stuck`).
   - **A router's exit.** In the recordings (216 battles, 3,987 routs from melee) a unit that routs from melee
     stays in melee 7 s more (median; p25 5, p75 12), without a chase too (median 6 s), gathers speed over ~7 s
     (0.41 of its rout speed in the first second, 0.81 in the fourth) and all that time loses 0.77 of what a

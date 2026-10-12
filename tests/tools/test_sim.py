@@ -2534,6 +2534,8 @@ def _chase_after_rout(params, attack=True, seconds=40.0):
     for _ in range(int(round(2.0 / params.dt))):
         battle.step(st, orders(st), params)
     st.u["morale"][0, H] = -30.0
+    st.u["w"][0, H] = True                          # wavering past the waver timer (morale.waver_timer)
+    st.u["waver_s"][0, H] = 10.0
     rows = []
     for k in range(int(round(seconds / params.dt))):
         battle.step(st, orders(st), params)
@@ -2569,6 +2571,107 @@ class TestPursuitReach:
         rout's exit it is out of melee whatever the reach."""
         rows = _chase_after_rout(P, attack=False, seconds=15.0)
         assert not any(r[1] for r in rows if r[0] >= 9.0)
+
+
+STORMVERMIN = "wh2_main_skv_inf_stormvermin_1"
+
+
+def _caught_router(params, seconds=15.0):
+    """Stormvermin (run 3.8) attacking Empire spearmen (run 3.0) in contact for 2 s, then the spearmen rout and the
+    stormvermin keep their attack order on them; the spearmen's HP by step after the rout [(s, hp)]."""
+    st = scenario.build([army([(SPEAR, -50, 0, 90), (SPEAR, -300, 700, 90)],
+                              [(STORMVERMIN, 50, 0, 270), (STORMVERMIN, 300, 700, 270)], attacker=2)], params)
+    H = st.N // 2
+    front, depth = geometry.dims(st.u, params.sim["formation"]["spacing_m"])
+    st.u["x"][0, 0] = -(depth[0, 0] / 2 + TOUCH / 2)
+    st.u["x"][0, H] = depth[0, H] / 2 + TOUCH / 2
+
+    def orders(s):
+        o = O.hold(s.B, s.N, s.device)
+        o.kind[0, H] = O.ATTACK
+        o.target[0, H] = 0
+        return o
+    for _ in range(int(round(2.0 / params.dt))):
+        battle.step(st, orders(st), params)
+    st.u["morale"][0, 0] = -30.0
+    st.u["w"][0, 0] = True                          # wavering past the waver timer (morale.waver_timer)
+    st.u["waver_s"][0, 0] = 10.0
+    rows = []
+    for k in range(int(round(seconds / params.dt))):
+        battle.step(st, orders(st), params)
+        rows.append(((k + 1) * params.dt, float(st.u["hp_abs"][0, 0]), bool(st.u["r"][0, 0])))
+    return rows
+
+
+class TestPursuitEnvelop:
+    def test_a_faster_chaser_engulfs_the_router(self):
+        """contact.pursue_envelop (the pursuit probe: stormvermin after Empire spearmen have 26-30 men within 2.5 m of
+        a router man, 7-9 on a standing front; the router lost 83-92 HP/s against 37-42 standing): a chaser whose run
+        keeps up with the router's flight strikes it with min(its men, the router's men), past the side caps."""
+        assert P.sim["contact"]["pursue_envelop"]
+        hp = lambda rows, t: next(r[1] for r in rows if r[0] >= t - 1e-6)
+        on = _caught_router(P)
+        off = _caught_router(P.with_cal("contact", pursue_envelop=0))
+        assert all(r[2] for r in on) and all(r[2] for r in off)       # routing all along
+        lost_on, lost_off = hp(on, 3.0) - hp(on, 10.0), hp(off, 3.0) - hp(off, 10.0)
+        assert lost_off > 0
+        assert lost_on > 2 * lost_off
+
+    def test_a_slower_chaser_does_not(self):
+        """Spearmen (run 3.0) after skavenslaves (faster): no engulfing - the chase as without the rule."""
+        on = _chase_after_rout(P, seconds=12.0)
+        off = _chase_after_rout(P.with_cal("contact", pursue_envelop=0), seconds=12.0)
+        assert [r[3] for r in on] == pytest.approx([r[3] for r in off])
+
+
+def _run_between(params, side_z=25.0, seconds=40.0):
+    """routmob2's 'neighbours': skavenslaves fighting spearmen (west of them) rout and flee east between two held
+    spearmen units standing side_z m to either side of their line, 20 m east of their centre; per step after the
+    rout: (s, the slaves routing, in melee, HP, men stuck, the slaves' x)."""
+    st = scenario.build([army([(SPEAR, -50, 0, 90), (SPEAR, 70, side_z, 270), (SPEAR, 70, -side_z, 270)],
+                              [(SLAVES, 50, 0, 270), (SLAVES, 300, 700, 270)])], params)
+    H = st.N // 2
+    front, depth = geometry.dims(st.u, params.sim["formation"]["spacing_m"])
+    st.u["x"][0, 0] = -(depth[0, 0] / 2 + TOUCH / 2)
+    st.u["x"][0, H] = depth[0, H] / 2 + TOUCH / 2
+    st.u["x"][0, 1] = st.u["x"][0, H] + 20.0
+    st.u["x"][0, 2] = st.u["x"][0, H] + 20.0
+    for _ in range(int(round(2.0 / params.dt))):
+        battle.step(st, replay.hold(st), params)
+    st.u["morale"][0, H] = -30.0
+    st.u["w"][0, H] = True                          # wavering past the waver timer (morale.waver_timer)
+    st.u["waver_s"][0, H] = 10.0
+    rows = []
+    for k in range(int(round(seconds / params.dt))):
+        battle.step(st, replay.hold(st), params)
+        rows.append(((k + 1) * params.dt, bool(st.u["r"][0, H]), bool(st.u["m"][0, H]), float(st.u["hp_abs"][0, H]),
+                     float(st.u["stk_n"][0, H]), float(st.u["x"][0, H])))
+    return rows
+
+
+class TestRoutStuck:
+    def test_a_router_running_into_standing_formations_leaves_men_among_them(self):
+        """contact.rout_stuck (routmob2 'neighbours': a quarter to a third of the slaves' men stay among the spearmen
+        they ran between, the unit in melee and losing HP to 45 s after the rout while its centre is 100 m off):
+        the slaves' stuck men keep them in melee and struck after the rout's exit, far from the spearmen; off: out of
+        melee after the exit, no loss."""
+        assert P.sim["contact"]["rout_stuck"]["on"]
+        on = _run_between(P, seconds=20.0)
+        off = _run_between(P.with_cal("contact", rout_stuck={"on": 0}), seconds=20.0)
+        assert all(r[1] for r in on) and all(r[1] for r in off)       # routing all along
+        assert max(r[4] for r in on) >= 3                             # men stuck
+        late = [r for r in on if 12.0 <= r[0] <= 20.0]
+        assert all(r[2] for r in late) and late[-1][5] > 70           # in melee, its centre 40+ m past them
+        assert late[0][3] - late[-1][3] > 0                           # still struck
+        late_off = [r for r in off if 12.0 <= r[0] <= 20.0]
+        assert not any(r[2] for r in late_off) and late_off[0][3] - late_off[-1][3] == pytest.approx(0.0, abs=1e-6)
+        assert all(r[4] == 0 for r in off)
+
+    def test_a_router_running_clear_of_them_leaves_nobody(self):
+        """The passby probe: slaves that run past spearmen standing clear of their way keep no man there."""
+        rows = _run_between(P, side_z=45.0, seconds=20.0)
+        assert all(r[4] == 0 for r in rows)
+        assert not any(r[2] for r in rows if r[0] >= 9.0)
 
 
 class TestRoutExit:

@@ -240,7 +240,29 @@ def strikes(u, pw, contact, params, charge_now, first=False):
             if F0 is not None:          # (the floor is the steady level)
                 F0 = torch.where(single_i | single_j | ~shot_at, F0, F0 * float(floor))
         F = torch.where(single_i | single_j, F, F * w)
-    own = torch.where(single_i, torch.ones_like(men_i), men_i)
+    if cc.get("pursue_envelop"):
+        # A caught router is engulfed (contact.pursue_envelop; config/nn/sim.json contact.pursue_envelop_why): a chaser
+        # with its attack order on a routing formation it touches, whose run is at least the router's free flight
+        # (morale.rout_speed of the router's run), does not fight it front to front - its men pick charge targets among
+        # the routing mob's men (the database: pursue_charge_max_unit_separation 8 m, max_pursue_charges_ratio 1 - every
+        # man of the chaser may) and run into the loose mob, so a router man has a chaser man on him: men striking =
+        # min(the chaser's men, the router's men), past the formation's side caps (the pursuit probe: stormvermin after
+        # Empire spearmen, wolf rats after swordsmen - chaser men within 2.5 m of a router man 26-33, 0.95-1.4 of the
+        # router's men, against 7-9 on a 30 m front standing; a slower chaser, swordsmen after clanrats, does not catch).
+        routing = u["r"][:, None, :] & ~single_i & ~single_j
+        on_j = (u["order_kind"][:, :, None] == O.ATTACK) & \
+            (u["order_target"][:, :, None] == torch.arange(u["men"].shape[1], device=F.device)[None, None, :])
+        flee = u["run"][:, None, :] * float(params.sim["morale"]["rout_speed"])
+        keeps_up = u["run"][:, :, None] >= flee
+        caught = routing & on_j & keeps_up & contact & (u["range"][:, :, None] <= 0)
+        F = torch.where(caught, torch.maximum(F, torch.minimum(men_i, u["men"][:, None, :])), F)
+    if (cc.get("rout_stuck") or {}).get("on") and "stk_n" in u:
+        # A router's men stuck among a standing formation's (battle.py, contact.rout_stuck) each have a man of it on them,
+        # wherever the rest of the router is: men striking = min(its men, the stuck men).
+        slot = torch.arange(u["men"].shape[1], device=F.device)[None, :, None]
+        among = (u["stk_k"][:, None, :] == slot) & (u["stk_n"] > 0)[:, None, :] & contact
+        F = torch.where(among, torch.maximum(F, torch.minimum(men_i, u["stk_n"][:, None, :])), F)
+    own =torch.where(single_i, torch.ones_like(men_i), men_i)
     total = F.sum(dim=2, keepdim=True)
     F = F * torch.where(total > own, own / total.clamp(min=1e-6), torch.ones_like(total))
     if F0 is not None:

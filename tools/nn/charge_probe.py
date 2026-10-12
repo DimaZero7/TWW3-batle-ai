@@ -82,6 +82,17 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           halts at the rout; crossbowmen of its side 80 m beyond the target, fire at will), neighbours (halts; two
           spearmen units of its side 25 m to either side and 20 m behind the target, halted, striking only what touches
           them), the control (halts, nobody else); soldiers' places 40 s after the rout - 2 battles, lanes rotated;
+  passby  a router passing standing enemies (in the gate battles a router 7-60 s into its rout with a standing enemy
+          within 30 m that does not target it is in melee 0.40-0.50 of its seconds; the routmob2 'neighbours' lanes: a
+          quarter to a third of the slaves' men stay in contact with the two spearmen units they ran between, the unit's
+          melee flag on for 45 s): routmob2's lanes (skavenslaves with half their men killed at placement attacked by
+          spearmen from 40 m, routed by script 30 s after the contact, the attacker halts at the rout) with spearmen of
+          the attacker's side held by the flight path (-z; PASSBY_EXTRAS): in it 40 m behind the target's centre
+          ('mid'), 30 m behind and 25 / 40 m aside (5 m overlap / 10 m gap at 30 m widths: 'side5', 'side10'), two 40 m
+          to either side ('pair10'), none ('control') - 2 battles of 5 lanes, rotated (the router steered clear of
+          them all); battle 3: close behind the target, no room to steer - 20 m behind and 25 m aside ('near_side'),
+          28 m behind ('near_mid'), two 20 m behind and 22 / 25 m to either side ('near_pair', 'neighbours' = routmob2's),
+          'control'; the soldier places of all 40 s after the rout;
   pursuit the long chase after a rout (build/simreal/router_melee.md: in the gate battles a router stays in melee 13-31 %
           of its seconds 7-60 s after the rout at about the same loss a second, the simulator's never after its 7 s exit):
           the target (half its men killed at placement, normal morale; routed by script rout_at_s 40 s after the contact if
@@ -372,12 +383,23 @@ UNIT_PLANS = ("ratling", "suppress", "suppress2", "censer", "wolfrats", "wolfpoi
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
          "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "leave", "skirmish", "skirmish2", "shootcontact",
-         "holdmelee", "holdlord", "recontact", "pursuit") + UNIT_PLANS
+         "holdmelee", "holdlord", "recontact", "pursuit", "passby") + UNIT_PLANS
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
 WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
 ROUTMOB2_EXTRAS = {"fire": [{"short": "xbow", "dx": 0, "dz": 80, "fire": True}],
                    "neighbours": [{"short": "spear", "dx": -25, "dz": -20}, {"short": "spear", "dx": 25, "dz": -20}]}
+# the passby plan: units of the attacker's side (dx, dz from the target's centre; held, never ordered) by the router's
+# flight path (-z, away from the attacker)
+PASSBY_EXTRAS = {"mid": [{"short": "spear", "dx": 0, "dz": -40}],
+                 "side5": [{"short": "spear", "dx": 25, "dz": -30}],
+                 "side10": [{"short": "spear", "dx": 40, "dz": -30}],
+                 "pair10": [{"short": "spear", "dx": -40, "dz": -30}, {"short": "spear", "dx": 40, "dz": -30}],
+                 # battle 3: close behind the target (its back edge ~9 m behind its centre), no room to steer
+                 "near_side": [{"short": "spear", "dx": 25, "dz": -20}],
+                 "near_mid": [{"short": "spear", "dx": 0, "dz": -28}],
+                 "near_pair": [{"short": "spear", "dx": -22, "dz": -20}, {"short": "spear", "dx": 22, "dz": -20}],
+                 "neighbours": [{"short": "spear", "dx": -25, "dz": -20}, {"short": "spear", "dx": 25, "dz": -20}]}
 # the rallysecure plan: units of the target's side teleported beside the rallied target (dx to its right, dz ahead,
 # from its centre and facing at the rally; entries/charge_probe.lua rally_friends), parked far until then
 RALLYSECURE_FRIENDS = {"neighbours": [{"short": "clanrat", "dx": -35, "dz": 0, "width": 25},
@@ -651,6 +673,14 @@ def battles(plan):
                         damage={"t": {"method": "kill", "share": 0.5}}, rout_at_s=30, kind=kind, **extra)
         base = [rm2(k) for k in ("chase", "fire", "neighbours", "control")]
         out += [base, rotate(base, 2)]
+    elif plan == "passby":
+        def pb(kind):
+            extra = dict(extras=PASSBY_EXTRAS[kind]) if kind in PASSBY_EXTRAS else {}
+            return lane("spear", "slave", "attack_run", "stand", gap_m=40, fight_s=200, t_morale=True, at_rout="halt",
+                        after_rout_s=ROUTMOB_END_S, max_s=260, damage={"t": {"method": "kill", "share": 0.5}},
+                        rout_at_s=30, kind=kind, **extra)
+        base = [pb(k) for k in ("mid", "side5", "side10", "pair10", "control")]
+        out += [base, rotate(base, 2), [pb(k) for k in ("near_side", "near_mid", "near_pair", "neighbours", "control")]]
     elif plan == "rallysecure":
         def rs(kind):
             common = dict(t_morale=True, damage={"t": {"method": "kill", "share": 0.5}}, kind=kind,
@@ -952,7 +982,7 @@ def run_config(plan, index):
                                                                                                   "shootcontact", "recontact")
                               else 90 if plan in ("hit", "move", "vv") else 30),
               "lanes": lanes, "park": park}
-    if plan in ("routmob", "routmob2"):
+    if plan in ("routmob", "routmob2", "passby"):
         config["men_after_rout_s"] = ROUTMOB_MEN_S
     if plan == "pursuit":
         config["men_after_rout_s"] = PURSUIT["after_rout_s"]
