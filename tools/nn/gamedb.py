@@ -89,8 +89,8 @@ def read_prefixed(pack, prefixes):
     return got
 
 
-MOD_TABLES = {"morale": "db\\_kv_morale_tables\\", "fatigue": "db\\_kv_fatigue_tables\\",
-              "battle": "db\\_kv_rules_tables\\"}
+KV_TABLES = {"morale": "_kv_morale", "fatigue": "_kv_fatigue", "battle": "_kv_rules"}    # section -> table
+MOD_TABLES = {section: f"db\\{t}_tables\\" for section, t in KV_TABLES.items()}
 
 
 def mod_rules(settings=None):
@@ -105,67 +105,30 @@ def mod_rules(settings=None):
         for section, prefix in MOD_TABLES.items():
             for name, b in sorted(raw.items()):
                 if name.startswith(prefix):
-                    rows.setdefault(section, {}).update(kv_table(b))
+                    rows.setdefault(section, {}).update(kv_table(b, KV_TABLES[section]))
         out.append((mod["pack_name"], rows))
     return out
 
 
-def _skip_header(b):
-    p = 0
-    if b[p:p + 4] == b"\xfd\xfe\xfc\xff":
-        n = struct.unpack_from("<H", b, p + 4)[0]
-        p += 6 + 2 * n
-    if b[p:p + 4] == b"\xfc\xfd\xfe\xff":
-        p += 8
-    return p + 1
-
-
-def kv_table(b):
-    """Key-value table: rows of (string, float32)."""
-    p = _skip_header(b)
-    rows = struct.unpack_from("<I", b, p)[0]
-    p += 4
-    out = {}
-    for _ in range(rows):
-        n = struct.unpack_from("<H", b, p)[0]
-        key = b[p + 2:p + 2 + n].decode("utf-8")
-        p += 2 + n
-        out[key] = round(struct.unpack_from("<f", b, p)[0], 4)
-        p += 4
-    return out
+def kv_table(b, table="_kv_morale"):
+    """Key-value table (the _kv_*_tables: key, value; the RPFM schema's names): {key: value rounded to 4 digits}."""
+    return {r["key"]: round(r["value"], 4) for r in dbtables.decode(b, table, digits=None)}
 
 
 def exp_bonuses(b):
-    """unit_experience_bonuses: stat, (i32 flag), float a, float b per rank.
+    """unit_experience_bonuses (the RPFM schema's names: stat, value, growth_rate, growth_scalar) per stat, written as
+    {"flag": value, "a": growth_rate, "b": growth_scalar} (the keys config/nn/game_rules.json has always had).
 
-    How the engine applies a and b is not verified (leadership has a = 0, b = 1.06: it looks
-    like a flat +1.06 a rank; melee attack/defence a = 0.6, b = 0.12)."""
-    p = _skip_header(b)
-    rows = struct.unpack_from("<I", b, p)[0]
-    p += 4
-    out = {}
-    for _ in range(rows):
-        n = struct.unpack_from("<H", b, p)[0]
-        key = b[p + 2:p + 2 + n].decode("utf-8")
-        p += 2 + n
-        flag, a, c = struct.unpack_from("<iff", b, p)
-        p += 12
-        out[key] = {"flag": flag, "a": round(a, 4), "b": round(c, 4)}
-    return out
+    How the engine applies them is not verified (leadership has growth_rate 0, growth_scalar 1.06: it looks
+    like a flat +1.06 a rank; melee attack/defence 0.6 and 0.12)."""
+    return {r["stat"]: {"flag": r["value"], "a": round(r["growth_rate"], 4), "b": round(r["growth_scalar"], 4)}
+            for r in dbtables.decode(b, "unit_experience_bonuses", digits=None)}
 
 
 def exp_levels(b):
-    p = _skip_header(b)
-    rows = struct.unpack_from("<I", b, p)[0]
-    p += 4
-    out = {}
-    for _ in range(rows):
-        n = struct.unpack_from("<H", b, p)[0]
-        key = b[p + 2:p + 2 + n].decode("utf-8")
-        p += 2 + n
-        out[key] = struct.unpack_from("<i", b, p)[0]
-        p += 4
-    return {k: v for k, v in out.items() if k.startswith("land_")}
+    """unit_experience_thresholds (key, value): the experience a rank needs, the land units' rows."""
+    rows = dbtables.decode(b, "unit_experience_thresholds")
+    return {r["key"]: r["value"] for r in rows if r["key"].startswith("land_")}
 
 
 def unit_row(rows, key):
@@ -185,8 +148,7 @@ def main():
     game = Path(project.load()["game_dir"]) / "data" / "db.pack"
     raw = read_entries(game, set(TABLES.values()))
     land_units = dbtables.decode(raw[TABLES["units"]], "land_units")
-    rules = {"_source": str(game), "morale": kv_table(raw[TABLES["morale"]]),
-             "fatigue": kv_table(raw[TABLES["fatigue"]]), "battle": kv_table(raw[TABLES["battle"]]),
+    rules = {"_source": str(game), **{s: kv_table(raw[TABLES[s]], t) for s, t in KV_TABLES.items()},
              "experience_bonus": exp_bonuses(raw[TABLES["exp_bonus"]]),
              "experience_levels": exp_levels(raw[TABLES["exp_levels"]]),
              "units": {t: dict(unit_row(land_units, k), key=k) for t, k in UNIT_KEYS.items()}}

@@ -8,8 +8,8 @@ the multiplayer army generator (config WH_mp_Empire_land -> WH_Empire_land, ...)
 
     py -3.14 -m tools.nn.armies.templates      # reads data/db.pack, writes config/nn/army_templates.json
 
-Every table is read whole to the last byte (tools/nn/dbtables.decode). The field names are
-ours, from the values: ratio, template, group, parent, config, priority, quality.
+Every table is read whole to the last byte (tools/nn/dbtables.decode), its columns by the RPFM
+schema's names (tools/nn/dbschema.py).
 
 Used by tools/nn/armies/generate.py (family_shares): a template's ratios are summed by unit
 family - the root of a group's parent chain - over the families the faction's pool has.
@@ -23,34 +23,26 @@ from tools import config as project
 from tools.nn.armies import pools as P
 
 OUT = project.CONFIG_DIR / "nn" / "army_templates.json"
-LAYOUTS = {
-    "cdir_military_generator_template_priorities": (1, "config:s priority:i template:s f03:b"),
-    "cdir_military_generator_template_ratios": (None, "ratio:i template:s group:s"),
-    "cdir_military_generator_unit_group_overrides": (None, "group:s parent:s"),
-    "cdir_military_generator_unit_qualities": (2, "group:s unit:s quality:s"),
-}
+TABLES = ("cdir_military_generator_template_priorities", "cdir_military_generator_template_ratios",
+          "cdir_military_generator_unit_group_overrides", "cdir_military_generator_unit_qualities")
 
 
 def read(pack):
     """{table: rows} of the generator's tables (Python 3.14+)."""
-    from tools.nn import dbtables, gamedb
-    names = {dbtables.entry_name(t): t for t in LAYOUTS}
-    raw = gamedb.read_entries(pack, set(names))
-    assert set(raw) == set(names), f"not in {pack}: {sorted(set(names) - set(raw))}"
-    return {names[n]: dbtables.decode(b, names[n], (LAYOUTS[names[n]][0], dbtables._layout(LAYOUTS[names[n]][1])))
-            for n, b in raw.items()}
+    from tools.nn import dbtables
+    return dbtables.read_tables(pack, TABLES)
 
 
 def document(tables, pools, source):
     """The file's content: per pool faction its templates, the groups of its pool's units, the parents."""
     ratios, priorities = {}, {}
     for r in tables["cdir_military_generator_template_ratios"]:
-        ratios.setdefault(r["template"], {})[r["group"]] = r["ratio"]
+        ratios.setdefault(r["template_key"], {})[r["unit_group_key"]] = r["ratio"]
     for r in tables["cdir_military_generator_template_priorities"]:
-        priorities.setdefault(r["config"], {})[r["template"]] = r["priority"]
+        priorities.setdefault(r["config_key"], {})[r["template_key"]] = r["priority"]
     unit_groups = {}
     for r in tables["cdir_military_generator_unit_qualities"]:
-        unit_groups.setdefault(r["unit"], []).append({"group": r["group"], "quality": r["quality"]})
+        unit_groups.setdefault(r["unit_key"], []).append({"group": r["group_key"], "quality": r["quality"]})
     factions = {}
     for faction, pool in pools.items():
         config = pool.generator

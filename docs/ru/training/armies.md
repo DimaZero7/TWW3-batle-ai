@@ -130,7 +130,7 @@ flowchart LR
 
 Пропорции шаблонных армий — из генератора армий игры (`cdir_military_generator_*`,
 «campaign director»). Таблицы читаются целиком до последнего байта
-(`tools/nn/dbtables.decode`). Имена полей наши, по значениям.
+(`tools/nn/dbtables.decode`), столбцы — по именам схемы RPFM.
 
 | Таблица | Что в ней |
 |---|---|

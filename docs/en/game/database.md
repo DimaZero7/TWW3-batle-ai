@@ -27,13 +27,14 @@ py -3.14 -m tools.nn.units      # units → config/nn/units.json
 
 Both find the game through `config/local.json`. `tools/nn/gamedb.py` writes the
 battle rules, `tools/nn/units.py` the [unit passports](../training/units.md).
-The unit tables are read by `tools/nn/dbtables.py`. Checked on v9.0.1, build
-50381 (30.09.2026).
+The tables are read by `tools/nn/dbtables.py` by the RPFM schema (below). Checked on v9.0.1, build 50381.
 
 ```mermaid
 flowchart LR
   pack["data/db.pack<br/>PFH5, zstd"] --> gamedb["tools/nn/gamedb.py"]
   pack --> dbt["tools/nn/dbtables.py"]
+  schema["config/db_schema.json<br/>RPFM schema"] --> dbt
+  dbt --> gamedb
   dbt --> units["tools/nn/units.py"]
   gamedb --> json["config/nn/game_rules.json"]
   units --> ujson["config/nn/units.json"]
@@ -65,65 +66,91 @@ flowchart LR
 
 ## How the tables are laid out
 
-- **Key–value** (`_kv_*`): a header, the row count (4 bytes), then rows of
-  "name (2-byte length + UTF-8) — float32 number".
-- **The other tables**: a header with a version number, one byte, the row count
-  (4 bytes), then the rows one after another. A row is always the same sequence
-  of fields: int32, float32, flag (1 byte), text (2-byte length + UTF-8) and
-  optional text (a flag, then text when the flag is 1). There is no schema
-  inside: we worked out the order and types of the fields ourselves.
-- The worked-out layouts are `LAYOUTS` in `tools/nn/dbtables.py`. Each reads
-  the **whole** table to the last byte; every text is readable text and every
-  flag is 0 or 1. If the game updates a table and a layout no longer fits,
-  reading stops with an error (version, bytes left over or "not text") instead
-  of reading shifted numbers.
+- **A table holds no names.** A header with a version number (the `_kv_*` and some junctions have none — version 0),
+  one byte, the row count (4 bytes), then the rows one after another. A row is the same sequence of fields: int32,
+  float32, a flag (1 byte), text (2-byte length + UTF-8), optional text (a flag, then the text) and a few rarer types.
+- **The fields' names and order come from the modders' RPFM schema** ([rpfm-schemas][rpfm], Frodo45127,
+  `schema_wh3.ron`): for every table and each of its versions, the fields in the order they are written, with name and
+  type. The community has kept it up for years; every mod editor uses it.
+- We keep not the whole schema (11 MB) but **a cut of it** — `config/db_schema.json` (~18 KB): only our tables, only
+  the versions the installed game and the required mods have, plus the source and the SHA-256 of the downloaded file.
+  So the code needs no external file, and a schema change shows in git. `tools/nn/dbschema.py` makes the cut.
+- `tools/nn/dbtables.py` reads a table **whole** by the schema of its version: to the last byte, every text readable
+  text, every flag 0 or 1. The code reaches the columns by the schema's names. If a game update changes a table (a
+  new version, or fields that do not fit), reading stops with an error instead of reading shifted numbers. Then:
+
+```bash
+curl -L -o build/rpfm/schema_wh3.ron https://raw.githubusercontent.com/Frodo45127/rpfm-schemas/master/schema_wh3.ron
+py -3.14 -m tools.nn.dbschema     # rebuild config/db_schema.json
+```
 
 | Table | Version | Fields | Rows |
 |---|---:|---:|---:|
 | `land_units` | 54 | 60 | 2679 |
 | `main_units` | 7 | 45 | 2802 |
-| `battle_entities` | 39 | 58 | 1339 |
+| `battle_entities` | 39 | 58 | 1341 |
 | `melee_weapons` | 25 | 20 | 1280 |
 | `missile_weapons` | 12 | 6 | 863 |
 | `projectiles` | 53 | 58 | 1093 |
-| `unit_armour_types` | 6 | 4 | 106 |
+| `unit_armour_types` | 6 | 3 | 106 |
 | `unit_shield_types` | 6 | 5 | 24 |
-| `unit_spacings` | 7 | 19 | 164 |
-| `unit_attributes_to_groups_junctions` | 2 | 3 | 8559 |
-| `land_units_to_unit_abilites_junctions` | 1 | 3 | 9686 |
+| `unit_spacings` | 7 | 19 | 165 |
+| `unit_attributes_to_groups_junctions` | 2 | 2 | 8563 |
+| `land_units_to_unit_abilites_junctions` | 1 | 3 | 9693 |
+| `unit_special_abilities` | 74 | 71 | 3173 |
+| `special_ability_phases` | 44 | 31 | 2526 |
+| `special_ability_to_special_ability_phase_junctions` | 2 | 6 | 2730 |
+| `special_ability_phase_stat_effects` | 3 | 4 | 3252 |
 
-- **Field names.** `land_units` and `main_units` have the game's own names: all
-  60 and 45 columns of the three Empire units equal the decode with a schema from
-  26.09.2026 (local archive `research/evidence/units/empire-20260926`). The old
-  `land_units` read "three numbers after the key and two strings" is replaced by
-  reading the whole table.
-- In the other tables we gave the names. Checked against unit cards in battle:
-  health, mass, walk and run (`battle_entities`), damage and armour-piercing damage
-  (`melee_weapons`, `projectiles`), a projectile's range and reload, the armour
-  number ([unit passports](../training/units.md#checked-against-the-cards)).
-- Inferred from the values, not checked in battle: acceleration, deceleration,
-  charge speed, radius, height, size class (`battle_entities`); bonuses against
-  large and infantry, time between blows, hitting several (`melee_weapons`); the
-  projectile's flight (`projectiles`); the shield's chance (`unit_shield_types`); the close formation's spacing (`unit_spacings`: nine numbers come
-  before the key - that way the table reads to its last byte; the first three are the spacing across the front h,
-  the scatter and the spacing between ranks v; checked on the roster: the game's front (files - 1) x h within ~1 %,
-  files = floor(width / h)).
-  Why: [what we inferred](../training/units.md#what-we-inferred).
-- Inferred from the values and checked by the melee probe (`build/meleetests`): the charge distances
-  `battle_entities` `charge_distance_commence_run` / `_adopt_charge_pose` / `_pick_target` (30 / 25 / 25 m for
-  infantry, 35 / 30 / 30 for lords; under an attack order a unit covers the last 30 m at its charge speed); an
-  ability's initial recharge `unit_special_abilities.initial_recharge` (0 for the lords' active abilities, 3 s
-  Strength of the Penitent, 5 s Single Entity; Gate of Khorne 60 = fandom).
-- Fields whose meaning we do not know are named by number: `f12`, `f15`…
-- **`unit_experience_bonuses_tables`**: a stat, an int32 flag and two float32
-  `a`, `b` per rank. For leadership `b` = 1.06 — what one rank adds.
-- **`unit_experience_thresholds_tables`**: the level name and an int32 —
-  experience.
+Also read whole: `_kv_*`, `unit_experience_*`, the abilities' condition junctions
+(`special_ability_to_recharge_contexts`, `_to_auto_deactivate_flags`, `special_ability_phase_attribute_effects`) and
+the army generator `cdir_military_generator_*` ([armies](../training/armies.md#army-templates-from-the-games-database)).
+
+- **Checked in battle.** Against the unit cards: health, mass, walk and run (`battle_entities`), damage and
+  armour-piercing damage (`melee_weapons`, `projectiles`), a projectile's range and reload, the armour number
+  ([unit passports](../training/units.md#checked-against-the-cards)). By the melee probe (`build/meleetests`): the
+  charge distances `battle_entities.charge_distance_commence_run` / `_adopt_charge_pose` / `_pick_target` (30 / 25 /
+  25 m for infantry, 35 / 30 / 30 for lords); an ability's initial recharge `unit_special_abilities.initial_recharge`
+  (0 for the lords' actives, 3 s Strength of the Penitent, 5 s Single Entity). The close formation's spacing
+  (`unit_spacings.close_formation_spacing_horizontal` / `_vertical`) against the roster: the game's front
+  (files − 1) × h within ~1 %.
+- **`unit_experience_bonuses`**: `stat`, `value` (int32), `growth_rate`, `growth_scalar` (float32); `game_rules.json`
+  writes them under the old keys `flag`, `a`, `b`. For leadership `growth_scalar` = 1.06 — what one rank adds.
+- **`unit_experience_thresholds`**: `key` — the level's name, `value` — the experience.
+
+## Where we read columns differently before
+
+Before the schema we decoded some tables ourselves: the field order was fitted so the table reads to the last byte,
+the names given from the values. The schema confirmed nearly all of it; the differences are below. None changes a
+number in `units.json` or `abilities.json`: the files rebuilt by the schema are the same byte for byte (except the
+`_fields` texts).
+
+| Column | How we read it | By the schema | Affects the simulator |
+|---|---|---|---|
+| `special_ability_to_special_ability_phase_junctions`, 2nd and 3rd | ability, phase | **phase, ability** (swapped) | no: each of our abilities has one phase named as itself; the rows "another ability with the same phase" we took for "variants" |
+| `unit_armour_types.material` | the armour's material | `audio_type` — the hit's sound (body, leather, chainmail…) | no: `armour_material` is only in the passport |
+| `unit_shield_types.material` | the shield's material | `audio_type` | no: not read |
+| `unit_special_abilities` 5th (`targets_own`) | "cast on the caster or friends" | `affect_self` — acts on the owner too | no: 1 for all of ours; `self_cast` the same |
+| an ability being passive | `active_time` and `recharge_time` both −1 | the table has its own `passive` column | no: only Strength of the Penitent differs (passive in the table, our `auto` — innate too) |
+| `projectiles.trajectory` | trajectory | `trajectory_sight` | no: the same values (`low` — direct fire) |
+| `projectiles` 21st, 22nd (`f21`, `f22`) | a float of no known meaning | `bonus_v_infantry`, `bonus_v_large` (int32) | no: both 0 for our units' projectiles (we thought there was no such column) |
+| `main_units.barrier_health`, `battle_entities` 40th, `unit_attributes_to_groups_junctions` 2nd | int32; float; a flag + text | float32; `vfx_filter_id` int32; optional text | no: unused (the same bytes) |
+| `unit_experience_bonuses` | flag, `a`, `b` | `value`, `growth_rate`, `growth_scalar` | no: the simulator has no experience |
+| `unit_spacings` 3rd–8th | "six more numbers" | the dismounted formation's spacing (`dismounted_*`) | no |
+
+Our other names the schema confirmed or refined without a change of meaning: `turn_rate` → `turn_speed`,
+`marksmanship` → `marksmanship_bonus`, `penetration` → `projectile_penetration`, `close_h` / `close_v` /
+`close_scatter` → `close_formation_spacing_horizontal` / `_vertical` / `_variation`, `chaotic` →
+`is_chaotic_formation`, `f13` → `is_magical`, `update_targets` → `update_targets_every_frame`. The former guesses by
+position (a phase's duration — "the float before the key", a phase's fatigue — "the float after three flags", the
+abilities' combat potential — a copy from twwstats) are replaced by reading the columns `duration`,
+`fatigue_change_ratio`, `additional_melee_cp` / `additional_missile_cp`.
 
 ## Not checked
 
-- What the keys mean that did not show up in battle recordings (there are many).
-- The columns we named from their values (above) and the `f<number>` columns.
-- A projectile bonus against large and infantry: no column found
-  ([unit passports](../training/units.md#what-is-not-there-and-why)).
-- What abilities and attributes do: the `special_ability_*` tables are not decoded.
+- What the `_kv_*` keys that never showed up in recorded battles mean (there are many).
+- How the engine uses the columns not checked in battle (a name from the schema is not yet a formula):
+  acceleration, deceleration, charge speed, radius, height, size class, the time between blows, a projectile's
+  flight, a shield's chance ([unit passports](../training/units.md#not-checked-against-the-game)).
+
+[rpfm]: https://github.com/Frodo45127/rpfm-schemas

@@ -1,13 +1,12 @@
-"""Ability passports: reading the database's ability tables (tools/nn/dbtables.py decode_prefix),
-building passports (tools/nn/abilities.py), the saved config/nn/abilities.json, and the network's
-ability features and slots (tools/nn/model/abilities.py). Numpy only."""
+"""Ability passports: building them from the database's ability tables read by the schema's names
+(tools/nn/abilities.py), the saved config/nn/abilities.json, and the network's ability features and slots
+(tools/nn/model/abilities.py). Numpy only."""
 import json
-import struct
 
 import numpy as np
 import pytest
 
-from tools.nn import abilities, dbtables
+from tools.nn import abilities
 from tools.nn.model import abilities as mab
 from tools.nn.model import passport
 from tools.nn.sim.abilities import SLOTS, slot_keys
@@ -19,68 +18,42 @@ VV, DO, RALLY = ("wh2_main_character_abilities_verminous_valour", "wh_main_chara
                  "wh_main_character_abilities_rally")
 
 
-def text(s):
-    b = s.encode()
-    return struct.pack("<H", len(b)) + b
-
-
-def prefix_row(key, active, recharge, uses, rng, own, friendly, enemy, tail=b"\x00" * 9):
-    return (text(key) + struct.pack("<ffif", active, recharge, uses, rng) + bytes([own])
-            + struct.pack("<ii", friendly, enemy) + b"\x00" + struct.pack("<f", 0.0) + tail)
-
-
-def table(version, rows):
-    return b"\xfc\xfd\xfe\xff" + struct.pack("<i", version) + b"\x01" + struct.pack("<I", len(rows)) + b"".join(rows)
-
-
-class TestPrefix:
-    def test_a_row_is_found_by_its_key_and_read_up_to_the_prefix(self):
-        b = table(74, [prefix_row("a_buff", 25.0, 60.0, -1, 0.0, 1, 0, 0),
-                       prefix_row("b_aura", 18.0, 90.0, -1, 35.0, 1, -1, 0)])
-        got = dbtables.decode_prefix(b, "unit_special_abilities", ["b_aura", "a_buff"])
-        assert got["b_aura"]["effect_range"] == 35 and got["b_aura"]["num_effected_friendly_units"] == -1
-        assert got["a_buff"]["active_time"] == 25 and got["a_buff"]["targets_own"] is True
-        assert got["a_buff"]["initial_recharge"] == 0
-
-    def test_a_key_written_inside_another_row_is_not_taken_and_a_missing_key_raises(self):
-        inside = text("a_buff") + b"\xff" * 30          # the key as a reference: no sane numbers after it
-        b = table(74, [prefix_row("a_buff", 25.0, 60.0, -1, 0.0, 1, 0, 0, tail=inside)])
-        assert dbtables.decode_prefix(b, "unit_special_abilities", ["a_buff"])["a_buff"]["recharge_time"] == 60
-        with pytest.raises(ValueError):
-            dbtables.decode_prefix(b, "unit_special_abilities", ["nothing"])
-        with pytest.raises(ValueError):
-            dbtables.decode_prefix(table(75, []), "unit_special_abilities", [])
-
-
 def tables():
-    j = [{"order": 1, "special_ability": "buff", "phase": "buff", "target_self": True, "target_friends": True,
+    # the junction's columns by the schema: order, phase, special_ability; "dlc_variant" is another ability that
+    # reuses the phase "buff" (it is not a phase of "buff")
+    j = [{"order": 1, "phase": "buff", "special_ability": "buff", "target_self": True, "target_friends": True,
           "target_enemies": False},
-         {"order": 1, "special_ability": "buff", "phase": "dlc_variant", "target_self": True,
+         {"order": 1, "phase": "buff", "special_ability": "dlc_variant", "target_self": True,
+          "target_friends": False, "target_enemies": False},
+         {"order": 1, "phase": "buff_extra", "special_ability": "buff", "target_self": True,
           "target_friends": False, "target_enemies": False},
          {"order": 1, "special_ability": "hex", "phase": "hex_phase", "target_self": False,
           "target_friends": False, "target_enemies": True}]
     s = [{"phase": "buff", "stat": "stat_morale", "how": "add", "value": 16.0},
-         {"phase": "dlc_variant", "stat": "stat_morale", "how": "add", "value": 99.0},
+         {"phase": "buff_extra", "stat": "stat_morale", "how": "add", "value": 99.0},
          {"phase": "hex_phase", "stat": "stat_melee_attack", "how": "add", "value": -10.0}]
-    a = [{"attribute": "unbreakable", "phase": "buff", "effect": "positive"}]
+    a = [{"attribute": "unbreakable", "phase": "buff", "attribute_type": "positive"}]
     return {"special_ability_to_special_ability_phase_junctions": j, "special_ability_phase_stat_effects": s,
             "special_ability_phase_attribute_effects": a}
 
 
-class TestPassport:
-    PREFIX = {"buff": {"active_time": 14.0, "recharge_time": 60.0, "num_uses": -1, "effect_range": 35.0,
-                       "targets_own": True, "num_effected_friendly_units": -1, "num_effected_enemy_units": 0,
-                       "update_targets": False},
-              "hex": {"active_time": 13.0, "recharge_time": 0.0, "num_uses": 1, "effect_range": 35.0,
-                      "targets_own": False, "num_effected_friendly_units": 0, "num_effected_enemy_units": -1,
-                      "update_targets": False},
-              "aura": {"active_time": -1.0, "recharge_time": -1.0, "num_uses": -1, "effect_range": 35.0,
-                       "targets_own": True, "num_effected_friendly_units": -1, "num_effected_enemy_units": 0,
-                       "update_targets": True}}
+def ability(key, active, recharge, uses, rng, own, friendly, enemy, every_frame, cp=(0.0, 0.0)):
+    """A unit_special_abilities row by the schema's names (only the columns a passport reads)."""
+    return {"key": key, "active_time": active, "recharge_time": recharge, "num_uses": uses, "effect_range": rng,
+            "affect_self": own, "num_effected_friendly_units": friendly, "num_effected_enemy_units": enemy,
+            "update_targets_every_frame": every_frame, "initial_recharge": 0.0,
+            "additional_melee_cp": cp[0], "additional_missile_cp": cp[1]}
 
-    def test_the_phase_named_as_the_ability_wins_over_variants(self):
+
+class TestPassport:
+    PREFIX = {"buff": ability("buff", 14.0, 60.0, -1, 35.0, True, -1, 0, False, (50.0, 25.5)),
+              "hex": ability("hex", 13.0, 0.0, 1, 35.0, False, 0, -1, False),
+              "aura": ability("aura", -1.0, -1.0, -1, 35.0, True, -1, 0, True)}
+
+    def test_the_phase_named_as_the_ability_wins_over_its_other_phases(self):
         p = abilities.passport("buff", self.PREFIX, tables())
         assert p["phases"] == ["buff"] and p["targets"] == {"self": True, "friends": True, "enemies": False}
+        assert p["cp"] == [50, 25.5] and isinstance(p["cp"][0], int)
         assert [(e["stat"], e["value"], e["on"]) for e in p["effects"]] == [("stat_morale", 16.0, ["self", "friends"])]
         assert p["attributes"][0]["attribute"] == "unbreakable"
         assert p["self_cast"] and not p["passive"]
@@ -99,6 +72,20 @@ class TestPassport:
         assert abilities.check_cards(good, {"lord": {}}, tmp_path) == []
         bad = dict(good, aura=dict(good["aura"], passive=False))
         assert len(abilities.check_cards(bad, {"lord": {}}, tmp_path)) == 1
+
+    def test_build_indexes_the_rows_and_reads_the_phases_fatigue(self):
+        t = dict(tables(), unit_special_abilities=list(self.PREFIX.values()),
+                 special_ability_to_recharge_contexts=[{"recharge_context": "losing_melee_combat",
+                                                        "special_ability": "buff"}],
+                 special_ability_to_auto_deactivate_flags=[{"deactivate_flag": "out_of_melee",
+                                                            "special_ability": "buff"}],
+                 special_ability_phases=[{"id": "buff", "fatigue_change_ratio": -0.009999999776482582},
+                                         {"id": "hex_phase", "fatigue_change_ratio": 0.0}])
+        got = abilities.build(t, ["buff", "hex"], {})
+        assert got["buff"]["vigour_per_s"] == -0.01 and got["hex"]["vigour_per_s"] == 0
+        assert got["buff"]["recharge_when"] == ["losing_melee_combat"] and got["buff"]["off_when"] == ["out_of_melee"]
+        with pytest.raises(ValueError, match="no row"):
+            abilities.build(t, ["nothing"], {})
 
 
 class TestSaved:

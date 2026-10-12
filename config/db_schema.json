@@ -1,0 +1,536 @@
+{
+ "_description": "The RPFM schema of the game's database tables we read (tools/nn/dbschema.py): per table (without '_tables') and version, the fields in the order they are written, [name, type]. Refresh: python -m tools.nn.dbschema.",
+ "_source": {"url": "https://raw.githubusercontent.com/Frodo45127/rpfm-schemas/master/schema_wh3.ron", "repository": "rpfm-schemas (Frodo45127), branch master", "format_version": 5, "sha256": "f5fed7eb28deee26405643b37b8d2d2f77b1b2b95b804169edceef501351a83a"},
+ "tables": {
+  "_kv_morale": {
+   "0": [
+    ["key", "StringU8"],
+    ["value", "F32"]
+   ]
+  },
+  "_kv_fatigue": {
+   "0": [
+    ["key", "StringU8"],
+    ["value", "F32"]
+   ]
+  },
+  "_kv_rules": {
+   "0": [
+    ["key", "StringU8"],
+    ["value", "F32"]
+   ]
+  },
+  "unit_experience_bonuses": {
+   "1": [
+    ["stat", "StringU8"],
+    ["value", "I32"],
+    ["growth_rate", "F32"],
+    ["growth_scalar", "F32"]
+   ]
+  },
+  "unit_experience_thresholds": {
+   "0": [
+    ["key", "StringU8"],
+    ["value", "I32"]
+   ]
+  },
+  "land_units": {
+   "54": [
+    ["accuracy", "I32"],
+    ["armour", "StringU8"],
+    ["campaign_action_points", "I32"],
+    ["category", "StringU8"],
+    ["charge_bonus", "I32"],
+    ["class", "StringU8"],
+    ["historical_description_text", "StringU8"],
+    ["key", "StringU8"],
+    ["man_animation", "OptionalStringU8"],
+    ["man_entity", "StringU8"],
+    ["melee_attack", "I32"],
+    ["melee_defence", "I32"],
+    ["morale", "I32"],
+    ["bonus_hit_points", "I32"],
+    ["mount", "OptionalStringU8"],
+    ["num_mounts", "I32"],
+    ["primary_melee_weapon", "StringU8"],
+    ["primary_missile_weapon", "OptionalStringU8"],
+    ["rank_depth", "I32"],
+    ["shield", "StringU8"],
+    ["short_description_text", "StringU8"],
+    ["spacing", "StringU8"],
+    ["training_level", "StringU8"],
+    ["articulated_record", "OptionalStringU8"],
+    ["engine", "OptionalStringU8"],
+    ["is_male", "Boolean"],
+    ["visibility_spotting_range_min", "F32"],
+    ["visibility_spotting_range_max", "F32"],
+    ["attribute_group", "OptionalStringU8"],
+    ["spot_dist_tree", "I32"],
+    ["spot_dist_scrub", "I32"],
+    ["reload", "I32"],
+    ["selection_vo", "StringU8"],
+    ["selected_vo_secondary", "StringU8"],
+    ["selected_vo_tertiary", "StringU8"],
+    ["hiding_scalar", "F32"],
+    ["ground_stat_effect_group", "OptionalStringU8"],
+    ["secondary_ammo", "I32"],
+    ["primary_ammo", "I32"],
+    ["damage_mod_flame", "I32"],
+    ["damage_mod_magic", "I32"],
+    ["num_engines", "I32"],
+    ["damage_mod_physical", "I32"],
+    ["damage_mod_missile", "I32"],
+    ["damage_mod_all", "I32"],
+    ["ai_usage_group", "StringU8"],
+    ["can_skirmish", "Boolean"],
+    ["can_brace", "Boolean"],
+    ["mounted_draughts", "Boolean"],
+    ["sync_locomotion", "Boolean"],
+    ["capture_tier", "StringU8"],
+    ["key_building_capture_tier", "StringU8"],
+    ["score_capture_tier", "StringU8"],
+    ["harmony_amplification_type", "OptionalStringU8"],
+    ["first_person", "OptionalStringU8"],
+    ["ar_unit_category", "OptionalStringU8"],
+    ["healing_power", "F32"],
+    ["spell_mastery", "F32"],
+    ["infinite_secondary_ammo", "Boolean"],
+    ["default_guard_mode", "Boolean"]
+   ]
+  },
+  "main_units": {
+   "7": [
+    ["additional_building_requirement", "OptionalStringU8"],
+    ["campaign_cap", "I32"],
+    ["caste", "StringU8"],
+    ["create_time", "I32"],
+    ["is_naval", "Boolean"],
+    ["land_unit", "StringU8"],
+    ["num_men", "I32"],
+    ["multiplayer_cap", "I32"],
+    ["multiplayer_cost", "I32"],
+    ["naval_unit", "OptionalStringU8"],
+    ["num_ships", "I32"],
+    ["min_men_per_ship", "I32"],
+    ["max_men_per_ship", "I32"],
+    ["recruitment_cost", "I32"],
+    ["unit", "StringU8"],
+    ["upkeep_cost", "I32"],
+    ["weight", "OptionalStringU8"],
+    ["resource_requirement", "OptionalStringU8"],
+    ["special_edition_mask", "I32"],
+    ["in_encyclopedia", "Boolean"],
+    ["audio_voiceover_culture", "StringU8"],
+    ["ui_unit_group_land", "StringU8"],
+    ["tier", "I32"],
+    ["is_high_threat", "Boolean"],
+    ["porthole_camera", "StringU8"],
+    ["mount", "OptionalStringU8"],
+    ["use_hitpoints_in_campaign", "Boolean"],
+    ["porthole_composite_scene", "OptionalStringU8"],
+    ["melee_cp", "F32"],
+    ["missile_cp", "F32"],
+    ["can_siege", "Boolean"],
+    ["audio_voiceover_culture_override", "StringU8"],
+    ["restrict_xp_gain_in_campaign", "Boolean"],
+    ["audio_voiceover_actor_group", "StringU8"],
+    ["food_cost", "I32"],
+    ["has_spoken_vo", "Boolean"],
+    ["is_monstrous", "Boolean"],
+    ["multiplayer_qb_cap", "I32"],
+    ["vo_is_dragon", "Boolean"],
+    ["vo_is_dinosaur", "Boolean"],
+    ["optional_ui_element", "OptionalStringU8"],
+    ["barrier_health", "F32"],
+    ["can_be_bribed", "Boolean"],
+    ["point_allowance_weight", "I32"],
+    ["is_renown", "Boolean"]
+   ]
+  },
+  "battle_entities": {
+   "39": [
+    ["key", "StringU8"],
+    ["type", "StringU8"],
+    ["walk_speed", "F32"],
+    ["run_speed", "F32"],
+    ["acceleration", "F32"],
+    ["deceleration", "F32"],
+    ["charge_speed", "F32"],
+    ["charge_distance_commence_run", "F32"],
+    ["charge_distance_adopt_charge_pose", "F32"],
+    ["charge_distance_pick_target", "F32"],
+    ["radius", "F32"],
+    ["shape", "StringU8"],
+    ["radii_ratio", "F32"],
+    ["mass", "F32"],
+    ["height", "F32"],
+    ["fire_arc_close", "F32"],
+    ["turn_speed", "F32"],
+    ["hit_points", "I32"],
+    ["allow_turn_to_move_anim", "Boolean"],
+    ["allow_static_turn_anim", "Boolean"],
+    ["min_turning_speed", "F32"],
+    ["fly_speed", "F32"],
+    ["flying_charge_speed", "F32"],
+    ["size", "StringU8"],
+    ["strafe_speed", "F32"],
+    ["gradient_strategy", "StringU8"],
+    ["audio_entity_type", "StringU8"],
+    ["combat_reaction_radius", "F32"],
+    ["entity_effects", "StringU8"],
+    ["hit_reactions_ignore_chance", "I32"],
+    ["knock_interrupts_ignore_chance", "I32"],
+    ["soft_collision_offset_z", "F32"],
+    ["can_climb_ladder_and_stair_pipes", "Boolean"],
+    ["projectile_intersection_radius_ratio", "F32"],
+    ["projectile_penetration_speed_change", "F32"],
+    ["projectile_penetration_resistance", "I32"],
+    ["aura_vfx", "OptionalStringU8"],
+    ["porthole_camera", "OptionalStringU8"],
+    ["min_tracking_ratio", "F32"],
+    ["max_tracking_ratio", "F32"],
+    ["vfx_filter_id", "I32"],
+    ["can_cast_projectile", "Boolean"],
+    ["porthole_composite_scene", "OptionalStringU8"],
+    ["has_blood", "Boolean"],
+    ["can_dismember", "Boolean"],
+    ["combat_camera_shake", "OptionalStringU8"],
+    ["dismember_head_alive_hp_ratio", "F32"],
+    ["dismember_arms_alive_hp_ratio", "F32"],
+    ["jump_attack_chance", "I32"],
+    ["locomotion_constants", "StringU8"],
+    ["enable_engine_crew_turn_in_movement_direction", "Boolean"],
+    ["dealt_collision_knocked_flying_threshold_multiplier", "F32"],
+    ["dealt_collision_knocked_down_threshold_multiplier", "F32"],
+    ["dealt_collision_knocked_back_threshold_multiplier", "F32"],
+    ["anim_lod_distance_multiplier", "F32"],
+    ["size_for_animation_lod", "OptionalStringU8"],
+    ["leaves_collision_when_dies", "Boolean"],
+    ["stop_before_turn", "Boolean"]
+   ]
+  },
+  "melee_weapons": {
+   "25": [
+    ["bonus_v_large", "I32"],
+    ["bonus_v_infantry", "I32"],
+    ["key", "StringU8"],
+    ["damage", "I32"],
+    ["ap_damage", "I32"],
+    ["weapon_length", "F32"],
+    ["melee_weapon_type", "StringU8"],
+    ["audio_type", "OptionalStringU8"],
+    ["splash_attack_target_size", "OptionalStringU8"],
+    ["splash_attack_max_attacks", "I32"],
+    ["splash_attack_power_multiplier", "F32"],
+    ["building_damage_multiplier", "F32"],
+    ["ignition_amount", "F32"],
+    ["is_magical", "Boolean"],
+    ["contact_phase", "OptionalStringU8"],
+    ["collision_attack_max_targets", "I32"],
+    ["collision_attack_max_targets_cooldown", "I32"],
+    ["melee_attack_interval", "F32"],
+    ["scaling_damage", "OptionalStringU8"],
+    ["is_spell", "Boolean"]
+   ]
+  },
+  "missile_weapons": {
+   "12": [
+    ["key", "StringU8"],
+    ["precursor", "Boolean"],
+    ["default_projectile", "StringU8"],
+    ["audio_type", "OptionalStringU8"],
+    ["use_secondary_ammo_pool", "Boolean"],
+    ["hide_secondary_range_ammo_statistics_ui", "Boolean"]
+   ]
+  },
+  "projectiles": {
+   "53": [
+    ["key", "StringU8"],
+    ["category", "StringU8"],
+    ["shot_type", "StringU8"],
+    ["explosion_type", "OptionalStringU8"],
+    ["spin_type", "StringU8"],
+    ["projectile_number", "I32"],
+    ["trajectory_sight", "StringU8"],
+    ["effective_range", "I32"],
+    ["minimum_range", "I32"],
+    ["max_elevation", "I32"],
+    ["muzzle_velocity", "F32"],
+    ["marksmanship_bonus", "F32"],
+    ["spread", "F32"],
+    ["damage", "I32"],
+    ["ap_damage", "I32"],
+    ["can_bounce", "Boolean"],
+    ["high_air_resistance", "Boolean"],
+    ["collision_radius", "F32"],
+    ["base_reload_time", "F32"],
+    ["calibration_distance", "F32"],
+    ["calibration_area", "F32"],
+    ["bonus_v_infantry", "I32"],
+    ["bonus_v_large", "I32"],
+    ["projectile_display", "OptionalStringU8"],
+    ["overhead_stat_effect", "OptionalStringU8"],
+    ["projectile_audio", "OptionalStringU8"],
+    ["shockwave_radius", "F32"],
+    ["can_damage_buildings", "Boolean"],
+    ["contact_stat_effect", "OptionalStringU8"],
+    ["gravity", "F32"],
+    ["burst_size", "I32"],
+    ["burst_shot_delay", "F32"],
+    ["mass", "F32"],
+    ["homing_params", "OptionalStringU8"],
+    ["first_person_params", "OptionalStringU8"],
+    ["ignition_amount", "F32"],
+    ["is_magical", "Boolean"],
+    ["can_target_airborne", "Boolean"],
+    ["can_damage_allies", "Boolean"],
+    ["fixed_elevation", "I32"],
+    ["projectile_penetration", "OptionalStringU8"],
+    ["expiry_range", "I32"],
+    ["is_beam_launch_burst", "Boolean"],
+    ["expire_on_impact", "Boolean"],
+    ["can_roll", "Boolean"],
+    ["trail_always_on", "Boolean"],
+    ["shots_per_volley", "I32"],
+    ["fired_by_mount", "Boolean"],
+    ["lock_on_multiple_fire_pos", "Boolean"],
+    ["prefer_central_targets", "Boolean"],
+    ["can_damage_vehicles", "Boolean"],
+    ["building_damage_multiplier", "F32"],
+    ["scaling_damage", "OptionalStringU8"],
+    ["is_spell", "Boolean"],
+    ["vegetation_ignore_time", "F32"],
+    ["missile_mirror_start_time", "F32"],
+    ["spawned_vortex", "OptionalStringU8"],
+    ["projectile_shot_type_display", "StringU8"]
+   ]
+  },
+  "unit_armour_types": {
+   "6": [
+    ["armour_value", "I32"],
+    ["key", "StringU8"],
+    ["audio_type", "OptionalStringU8"]
+   ]
+  },
+  "unit_shield_types": {
+   "6": [
+    ["key", "StringU8"],
+    ["shield_defence_value", "I32"],
+    ["shield_armour_value", "I32"],
+    ["missile_block_chance", "I32"],
+    ["audio_type", "OptionalStringU8"]
+   ]
+  },
+  "unit_attributes_to_groups_junctions": {
+   "2": [
+    ["attribute", "StringU8"],
+    ["attribute_group", "OptionalStringU8"]
+   ]
+  },
+  "land_units_to_unit_abilites_junctions": {
+   "1": [
+    ["ability", "StringU8"],
+    ["land_unit", "StringU8"],
+    ["culture", "StringU8"]
+   ]
+  },
+  "unit_spacings": {
+   "7": [
+    ["close_formation_spacing_horizontal", "F32"],
+    ["close_formation_spacing_variation", "F32"],
+    ["close_formation_spacing_vertical", "F32"],
+    ["dismounted_close_formation_spacing_horizontal", "F32"],
+    ["dismounted_close_formation_spacing_variation", "F32"],
+    ["dismounted_close_formation_spacing_vertical", "F32"],
+    ["dismounted_loose_formation_spacing_horizontal", "F32"],
+    ["dismounted_loose_formation_spacing_variation", "F32"],
+    ["dismounted_loose_formation_spacing_vertical", "F32"],
+    ["key", "StringU8"],
+    ["loose_formation_spacing_horizontal", "F32"],
+    ["loose_formation_spacing_variation", "F32"],
+    ["loose_formation_spacing_vertical", "F32"],
+    ["routing_space_variation", "F32"],
+    ["is_chaotic_formation", "Boolean"],
+    ["testudo_horizontal_spacing", "F32"],
+    ["testudo_vertical_spacing", "F32"],
+    ["shield_wall_horizontal_spacing", "F32"],
+    ["shield_wall_vertical_spacing", "F32"]
+   ]
+  },
+  "unit_special_abilities": {
+   "74": [
+    ["key", "StringU8"],
+    ["active_time", "F32"],
+    ["recharge_time", "F32"],
+    ["num_uses", "I32"],
+    ["effect_range", "F32"],
+    ["affect_self", "Boolean"],
+    ["num_effected_friendly_units", "I32"],
+    ["num_effected_enemy_units", "I32"],
+    ["update_targets_every_frame", "Boolean"],
+    ["initial_recharge", "F32"],
+    ["activated_projectile", "OptionalStringU8"],
+    ["target_friends", "Boolean"],
+    ["target_enemies", "Boolean"],
+    ["target_ground", "Boolean"],
+    ["target_intercept_range", "F32"],
+    ["always_affect_self", "Boolean"],
+    ["only_affect_target", "Boolean"],
+    ["wind_up_time", "F32"],
+    ["passive", "Boolean"],
+    ["unique_id", "I64"],
+    ["bombardment", "OptionalStringU8"],
+    ["spawned_unit", "OptionalStringU8"],
+    ["wind_up_stance", "OptionalStringU8"],
+    ["mana_cost", "F32"],
+    ["min_range", "F32"],
+    ["targetting_aoe", "OptionalStringU8"],
+    ["passive_aoe", "OptionalStringU8"],
+    ["active_aoe", "OptionalStringU8"],
+    ["activation_effect", "OptionalStringU8"],
+    ["vortex", "OptionalStringU8"],
+    ["miscast_chance", "F32"],
+    ["miscast_explosion", "OptionalStringU8"],
+    ["ai_usage", "OptionalStringU8"],
+    ["audio", "OptionalStringU8"],
+    ["special_ability_display", "OptionalStringU8"],
+    ["voiceover_state", "StringU8"],
+    ["additional_melee_cp", "F32"],
+    ["additional_missile_cp", "F32"],
+    ["parent_ability", "OptionalStringU8"],
+    ["spawn_type", "OptionalStringU8"],
+    ["spawn_proxy_vfx", "OptionalStringU8"],
+    ["target_ground_under_allies", "Boolean"],
+    ["target_ground_under_enemies", "Boolean"],
+    ["miscast_global_bonus", "Boolean"],
+    ["target_self", "Boolean"],
+    ["composite_scene_group_on_wind_up", "OptionalStringU8"],
+    ["composite_scene_group_on_active", "OptionalStringU8"],
+    ["wind_down_stance", "OptionalStringU8"],
+    ["use_loop_stance", "Boolean"],
+    ["update_phase_by_ability_duration", "Boolean"],
+    ["spawn_is_transformation", "Boolean"],
+    ["spawn_is_decoy", "Boolean"],
+    ["only_affect_owned_units", "Boolean"],
+    ["formation", "OptionalStringU8"],
+    ["behaviour", "OptionalStringU8"],
+    ["current_mana_moves_to_reserve", "Boolean"],
+    ["spawn_shares_health_and_fatigue", "Boolean"],
+    ["affect_siege_equipment", "Boolean"],
+    ["shared_recharge_time", "F32"],
+    ["intensity_based_activation", "Boolean"],
+    ["autoresolver_usage", "StringU8"],
+    ["autoresolver_targets", "I32"],
+    ["display_stops_when_display_expires", "Boolean"],
+    ["autoresolve_cp_multiplier", "F64"],
+    ["ability_available_ui_event", "OptionalStringU8"],
+    ["can_be_copied_to_transformation_unit", "Boolean"],
+    ["audio_switch_casting_override", "OptionalStringU8"],
+    ["audio_switch_ui_override", "OptionalStringU8"],
+    ["ai_usage_template_group", "OptionalStringU8"],
+    ["audio_vo_actor_override", "OptionalStringU8"],
+    ["mom_vortex_key", "OptionalStringU8"]
+   ]
+  },
+  "special_ability_phases": {
+   "44": [
+    ["duration", "F32"],
+    ["effect_type", "StringU8"],
+    ["id", "StringU8"],
+    ["requested_stance", "OptionalStringU8"],
+    ["cant_move", "Boolean"],
+    ["freeze_fatigue", "Boolean"],
+    ["fatigue_change_ratio", "F32"],
+    ["inspiration_aura_range_mod", "F32"],
+    ["ability_recharge_change", "F32"],
+    ["hp_change_frequency", "F32"],
+    ["damage_amount", "I32"],
+    ["max_damaged_entities", "I32"],
+    ["resurrect", "Boolean"],
+    ["mana_regen_mod", "F32"],
+    ["mana_max_depletion_mod", "F32"],
+    ["imbue_magical", "Boolean"],
+    ["imbue_ignition", "I32"],
+    ["imbue_contact", "OptionalStringU8"],
+    ["phase_display", "OptionalStringU8"],
+    ["phase_audio", "OptionalStringU8"],
+    ["is_hidden_in_ui", "Boolean"],
+    ["affects_allies", "Boolean"],
+    ["affects_enemies", "Boolean"],
+    ["replenish_ammo", "F32"],
+    ["composite_scene_group", "OptionalStringU8"],
+    ["spreading", "OptionalStringU8"],
+    ["freeze_recharge", "Boolean"],
+    ["heal_amount", "F32"],
+    ["barrier_heal_amount", "F32"],
+    ["remove_magical", "Boolean"],
+    ["execute_ratio", "F32"]
+   ]
+  },
+  "special_ability_to_special_ability_phase_junctions": {
+   "2": [
+    ["order", "I32"],
+    ["phase", "StringU8"],
+    ["special_ability", "StringU8"],
+    ["target_self", "Boolean"],
+    ["target_friends", "Boolean"],
+    ["target_enemies", "Boolean"]
+   ]
+  },
+  "special_ability_phase_stat_effects": {
+   "3": [
+    ["phase", "StringU8"],
+    ["value", "F32"],
+    ["stat", "StringU8"],
+    ["how", "StringU8"]
+   ]
+  },
+  "special_ability_phase_attribute_effects": {
+   "1": [
+    ["attribute", "StringU8"],
+    ["phase", "StringU8"],
+    ["attribute_type", "StringU8"]
+   ]
+  },
+  "special_ability_to_recharge_contexts": {
+   "0": [
+    ["recharge_context", "StringU8"],
+    ["special_ability", "StringU8"]
+   ]
+  },
+  "special_ability_to_auto_deactivate_flags": {
+   "0": [
+    ["deactivate_flag", "StringU8"],
+    ["special_ability", "StringU8"]
+   ]
+  },
+  "cdir_military_generator_template_priorities": {
+   "1": [
+    ["config_key", "StringU8"],
+    ["priority", "I32"],
+    ["template_key", "StringU8"],
+    ["leader_only", "Boolean"]
+   ]
+  },
+  "cdir_military_generator_template_ratios": {
+   "0": [
+    ["ratio", "I32"],
+    ["template_key", "StringU8"],
+    ["unit_group_key", "StringU8"]
+   ]
+  },
+  "cdir_military_generator_unit_group_overrides": {
+   "0": [
+    ["group", "StringU8"],
+    ["parent", "StringU8"]
+   ]
+  },
+  "cdir_military_generator_unit_qualities": {
+   "2": [
+    ["group_key", "StringU8"],
+    ["unit_key", "StringU8"],
+    ["quality", "StringU8"]
+   ]
+  }
+ }
+}

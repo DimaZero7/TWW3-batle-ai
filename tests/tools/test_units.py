@@ -1,4 +1,5 @@
-"""tools.nn.dbtables and tools.nn.units: reading DB tables, unit passports, the check against cards."""
+"""tools.nn.dbtables and tools.nn.units: reading DB tables by the schema's names, unit passports, the check against
+cards."""
 import copy
 import json
 import struct
@@ -23,7 +24,7 @@ def text(s):
     return struct.pack("<H", len(raw)) + raw
 
 
-LAYOUT = (3, dbtables._layout("key:s n:i x:f flag:b extra:o"))
+LAYOUT = (3, [("key", "StringU8"), ("n", "I32"), ("x", "F32"), ("flag", "Boolean"), ("extra", "OptionalStringU8")])
 
 
 def row(key, n, x, flag, extra):
@@ -56,11 +57,26 @@ def test_header_without_version():
     assert dbtables.header(guid + b"\xfc\xfd\xfe\xff" + struct.pack("<i", 9) + b"\x01") == (9, len(guid) + 9)
 
 
-def test_layouts_are_consistent():
-    for name, (version, fields) in dbtables.LAYOUTS.items():
-        names = [n for n, _ in fields]
-        assert len(names) == len(set(names)), name
-        assert dbtables.INFERRED.get(name, set()) <= set(names), name
+def test_decode_reads_the_schemas_layout_of_the_tables_version():
+    """No layout given: the table's version picks its fields from the schema copy (config/db_schema.json)."""
+    rows = [text("waver_base_timeout") + struct.pack("<f", 25.0), text("x") + struct.pack("<f", 0.1)]
+    assert dbtables.decode(table(None, rows), "_kv_morale") == [{"key": "waver_base_timeout", "value": 25.0},
+                                                                 {"key": "x", "value": 0.1}]
+    assert dbtables.decode(table(None, rows[1:]), "_kv_morale", digits=None)[0]["value"] == struct.unpack(
+        "<f", struct.pack("<f", 0.1))[0]
+    with pytest.raises(ValueError, match="version 99 is not in"):
+        dbtables.decode(table(99, rows), "_kv_morale")
+    with pytest.raises(KeyError, match="not in"):
+        dbtables.decode(table(None, rows), "no_such_table")
+
+
+def test_other_schema_types():
+    wide = "ab".encode("utf-16-le")
+    b = table(1, [struct.pack("<h", -2) + struct.pack("<q", 2 ** 40) + struct.pack("<d", 0.5) + struct.pack("<I", 7)
+                  + struct.pack("<H", 2) + wide + b"\x01" + struct.pack("<i", 9) + b"\x00"])
+    layout = (1, [("a", "I16"), ("b", "I64"), ("c", "F64"), ("d", "ColourRGB"), ("e", "StringU16"),
+                  ("f", "OptionalI32"), ("g", "OptionalI32")])
+    assert dbtables.decode(b, "t", layout) == [{"a": -2, "b": 2 ** 40, "c": 0.5, "d": 7, "e": "ab", "f": 9, "g": None}]
 
 
 def saved():
@@ -150,7 +166,16 @@ def game_db():
 @pytest.mark.skipif(game_db() is None, reason="needs the installed game and Python 3.14+ (compression.zstd)")
 def test_passports_are_rebuilt_from_the_game_the_same():
     tables = dbtables.read_tables(game_db(), units.TABLES)
-    assert units.build(tables) == saved()["units"]
+    built = units.build(tables)
+    assert built == saved()["units"]
+    assert units.contact_phases(built, tables) == saved()["contact_phases"]
+
+
+@pytest.mark.skipif(game_db() is None, reason="needs the installed game and Python 3.14+ (compression.zstd)")
+def test_every_table_we_read_decodes_whole_by_the_schema():
+    from tools.nn import dbschema
+    got = dbtables.read_tables(game_db(), [t for t in dbschema.TABLES])
+    assert all(rows for rows in got.values())
 
 
 def test_the_skaven_wave():
@@ -223,14 +248,11 @@ def test_the_card_counts_every_shot_of_a_volley():
     assert units.check_card(p, card) == []                     # twdatabase: 288 = (2 + 6) x 18 x 10 / 5
 
 
-def test_phase_heads_read_the_duration_and_effect_before_a_phase_key():
-    def phase(key, duration, effect):
-        return struct.pack("<f", duration) + text(effect) + text(key) + b"\x00" * 6
-    b = table(dbtables.PHASES_VERSION, [phase("a_contact", 10.0, "negative"), phase("b_passive", -1.0, "positive"),
-                                        text("a_contact") + b"\x01" + text("a_contact")])   # a reference: no head
-    assert dbtables.phase_heads(b, ["a_contact", "b_passive"]) == {
-        "a_contact": {"duration_s": 10.0, "effect": "negative"}, "b_passive": {"duration_s": -1.0, "effect": "positive"}}
-    with pytest.raises(ValueError, match="0 rows"):
-        dbtables.phase_heads(b, ["missing"])
-    with pytest.raises(ValueError, match="version"):
-        dbtables.phase_heads(table(3, []), ["a_contact"])
+def test_contact_phases_take_the_phases_duration_effect_type_and_stats():
+    u = {"gun": {"melee": {"contact_phase": None}, "missile": {"contact_phase": "a_contact"}}}
+    t = {"special_ability_phases": [{"id": "b_passive", "duration": -1.0, "effect_type": "positive"},
+                                    {"id": "a_contact", "duration": 10.0, "effect_type": "negative"}],
+         "special_ability_phase_stat_effects": [{"phase": "a_contact", "stat": "scalar_speed", "how": "mult",
+                                                 "value": 0.7}]}
+    assert units.contact_phases(u, t) == {"a_contact": {"duration_s": 10.0, "effect": "negative", "stats": [
+        {"stat": "scalar_speed", "how": "mult", "value": 0.7}]}}

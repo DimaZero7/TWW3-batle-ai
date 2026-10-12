@@ -135,7 +135,7 @@ built in its own process).
 
 The proportions of template armies come from the game's army generator
 (`cdir_military_generator_*`, the "campaign director"). The tables are read whole to the
-last byte (`tools/nn/dbtables.decode`). The field names are ours, from the values.
+last byte (`tools/nn/dbtables.decode`), the columns by the RPFM schema's names.
 
 | Table | What it holds |
 |---|---|

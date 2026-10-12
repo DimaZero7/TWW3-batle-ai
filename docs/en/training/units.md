@@ -23,9 +23,9 @@ flowchart LR
   units --> json["config/nn/units.json"]
 ```
 
-- `tools/nn/dbtables.py` reads the database tables **whole**, to the last byte.
-  If a game update changes a table, reading stops with an error instead of
-  reading shifted numbers. How the tables are laid out: [the game's database](../game/database.md).
+- `tools/nn/dbtables.py` reads the database tables **whole**, to the last byte, and names the columns by the
+  modders' RPFM schema (`config/db_schema.json`). If a game update changes a table, reading stops with an error
+  instead of reading shifted numbers. How the tables are laid out: [the game's database](../game/database.md).
 - `tools/nn/units.py` builds a passport from the unit key (`main_units`) and
   checks it against the unit's card from battle when there is one
   ([roster](../game/units/roster.md)). On any difference the file is not written.
@@ -36,8 +36,8 @@ flowchart LR
 
 ## What a passport holds
 
-"Card" — the field equals the unit's card in battle. "Ours" — we worked out the
-column's meaning from its values ourselves (see [below](#what-we-inferred)).
+"Card" — the field equals the unit's card in battle. "Ours" — not checked against the card: the column's name
+is the RPFM schema's, how the engine uses it we have not checked (see [below](#not-checked-against-the-game)).
 
 | Field | What | From | Checked |
 |---|---|---|---|
@@ -484,9 +484,9 @@ the hits whose shooter stands within 60° of the target's facing, for lords and 
   effects](#innate-effects)). Abilities: their numbers, when the game fires them and when they are off
   are in the ability passports (`config/nn/abilities.json`).
 
-## What we inferred
+## Not checked against the game
 
-We named these columns ourselves, from the values across the whole table:
+The names of these columns are the RPFM schema's; their values across the whole table look so:
 
 - `bonus_v_large` — non-zero for spears and halberds; `bonus_v_infantry` — for
   paired swords and chariots.
@@ -500,8 +500,8 @@ We named these columns ourselves, from the values across the whole table:
   (`wh_missile_block_55_metal` → 55).
 - In `projectiles`: `minimum_range`, `max_elevation` (88°), `muzzle_velocity`
   (45 m/s the arrow, 50 the sling), `calibration_distance` and `calibration_area`
-  (95 m and 3.7 m for the arrow), `penetration` (`very_low`), `trajectory`,
+  (95 m and 3.7 m for the arrow), `projectile_penetration` (`very_low`), `trajectory_sight`,
   `projectile_number`, `shots_per_volley` (1 each).
 
-They have to be checked by measuring in battle before the simulator relies on
-them.
+How the engine uses them has to be checked by measuring in battle before the simulator relies on them. Where our
+earlier reading of the columns differed from the schema: [game database](../game/database.md#where-we-read-columns-differently-before).

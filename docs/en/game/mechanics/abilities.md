@@ -18,8 +18,8 @@ abilities of our lords are read from the database (`config/nn/abilities.json`, `
   exactly 3 s; recordings of 54 units - gaps of exactly 3 s in 92 %, after leaving melee the next fire 3 s later,
   out of melee too). Wounds - 5 s below 25 % health. · database,
   CA, recordings, probe · high.
-- **How an ability picks its targets** (`unit_special_abilities.update_targets`, the community's schemas:
-  `update_targets_every_frame`): 1 - every frame, an aura following its owner (Rally, Hold the Line): one coming in
+- **How an ability picks its targets** (`unit_special_abilities.update_targets_every_frame`, the passport's
+  `update_targets`): 1 - every frame, an aura following its owner (Rally, Hold the Line): one coming in
   gets it, one leaving loses it; 0 - once at the cast: the friends in range get it and keep it for the whole active
   time wherever they go, later arrivals get nothing (Stand Your Ground). · database, 142 recorded battles, probe T-E2 ·
   high.

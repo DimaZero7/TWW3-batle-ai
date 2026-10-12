@@ -43,19 +43,19 @@
    "checked": null
   },
   "spacing.h": {
-   "source": "unit_spacings.close_h (inferred): a man's place across the front in close formation, m",
+   "source": "unit_spacings.close_formation_spacing_horizontal: a man's place across the front in close formation, m",
    "checked": "data/roster widths: front = (files - 1) h, files = floor(width / h)"
   },
   "spacing.v": {
-   "source": "unit_spacings.close_v (inferred): between ranks, m",
+   "source": "unit_spacings.close_formation_spacing_vertical: between ranks, m",
    "checked": "data/roster: depth = (ranks - 1) v"
   },
   "spacing.scatter": {
-   "source": "unit_spacings.close_scatter (inferred), m",
+   "source": "unit_spacings.close_formation_spacing_variation, m",
    "checked": null
   },
   "spacing.chaotic": {
-   "source": "unit_spacings.chaotic (inferred): a chaotic (loose, irregular) formation",
+   "source": "unit_spacings.is_chaotic_formation: a chaotic (loose, irregular) formation",
    "checked": null
   },
   "entity": {
@@ -75,15 +75,15 @@
    "checked": "card Mass"
   },
   "size": {
-   "source": "battle_entities.size (inferred)",
+   "source": "battle_entities.size",
    "checked": null
   },
   "height_m": {
-   "source": "battle_entities.height (inferred)",
+   "source": "battle_entities.height",
    "checked": null
   },
   "radius_m": {
-   "source": "battle_entities.radius (inferred)",
+   "source": "battle_entities.radius",
    "checked": null
   },
   "speed.walk": {
@@ -95,27 +95,27 @@
    "checked": "card fast_speed; scalar_speed = run x 10"
   },
   "speed.charge": {
-   "source": "battle_entities.charge_speed (inferred), m/s",
+   "source": "battle_entities.charge_speed, m/s",
    "checked": null
   },
   "speed.charge_distance": {
-   "source": "battle_entities.charge_distance_commence_run (inferred), m: an attacking unit closes the last this many metres to its target at its charge speed (30 infantry, 35 lords; the melee probe: the last 30 m at 3.65-3.88 m/s, run 3.0)",
+   "source": "battle_entities.charge_distance_commence_run, m: an attacking unit closes the last this many metres to its target at its charge speed (30 infantry, 35 lords; the melee probe: the last 30 m at 3.65-3.88 m/s, run 3.0)",
    "checked": null
   },
   "speed.charge_pose_distance": {
-   "source": "battle_entities.charge_distance_adopt_charge_pose (inferred), m: an attacking unit takes its charge pose this far from its target (25 infantry, 30 lords; the morale probe: the charge's +15 morale starts at a gap of 24.6-27.5 m)",
+   "source": "battle_entities.charge_distance_adopt_charge_pose, m: an attacking unit takes its charge pose this far from its target (25 infantry, 30 lords; the morale probe: the charge's +15 morale starts at a gap of 24.6-27.5 m)",
    "checked": null
   },
   "speed.acceleration": {
-   "source": "battle_entities.acceleration (inferred)",
+   "source": "battle_entities.acceleration",
    "checked": null
   },
   "speed.turn_deg_s": {
-   "source": "battle_entities.turn_rate, deg/s: how fast a man (a model) turns (named by patch 6.1: horse cavalry 100 -> 120 deg/s, and 120 in the DB)",
+   "source": "battle_entities.turn_speed, deg/s: how fast a man (a model) turns (patch 6.1: horse cavalry 100 -> 120 deg/s, and 120 in the DB)",
    "checked": null
   },
   "speed.deceleration": {
-   "source": "battle_entities.deceleration (inferred)",
+   "source": "battle_entities.deceleration",
    "checked": null
   },
   "melee.attack": {
@@ -143,35 +143,35 @@
    "checked": "damage + ap_damage = card stat_weapon_damage"
   },
   "melee.bonus_v_large": {
-   "source": "melee_weapons.bonus_v_large (inferred)",
+   "source": "melee_weapons.bonus_v_large",
    "checked": null
   },
   "melee.bonus_v_infantry": {
-   "source": "melee_weapons.bonus_v_infantry (inferred)",
+   "source": "melee_weapons.bonus_v_infantry",
    "checked": null
   },
   "melee.attack_interval_s": {
-   "source": "melee_weapons.melee_attack_interval (inferred)",
+   "source": "melee_weapons.melee_attack_interval",
    "checked": null
   },
   "melee.splash_target_size": {
-   "source": "melee_weapons.splash_attack_target_size (inferred)",
+   "source": "melee_weapons.splash_attack_target_size",
    "checked": null
   },
   "melee.splash_max_attacks": {
-   "source": "melee_weapons.splash_attack_max_attacks (inferred)",
+   "source": "melee_weapons.splash_attack_max_attacks",
    "checked": null
   },
   "melee.splash_power_multiplier": {
-   "source": "melee_weapons.splash_attack_power_multiplier (inferred)",
+   "source": "melee_weapons.splash_attack_power_multiplier",
    "checked": null
   },
   "melee.magic": {
-   "source": "melee_weapons.is_magical (f13 of tools/nn/dbtables.py; the name from the RPFM schema schema_wh3.ron): magical attacks - the censer, the plain Giant Rats' claws",
+   "source": "melee_weapons.is_magical: magical attacks - the censer, the plain Giant Rats' claws",
    "checked": null
   },
   "melee.contact_phase": {
-   "source": "melee_weapons.contact_phase (inferred): the contact effect a blow lays on its target (its numbers in the document's contact_phases)",
+   "source": "melee_weapons.contact_phase: the contact effect a blow lays on its target (its numbers in the document's contact_phases)",
    "checked": null
   },
   "armour": {
@@ -179,7 +179,7 @@
    "checked": "card stat_armour"
   },
   "armour_material": {
-   "source": "unit_armour_types.material (inferred)",
+   "source": "unit_armour_types.audio_type: the armour's sound type (body, leather, chainmail, ...)",
    "checked": null
   },
   "shield.key": {
@@ -187,7 +187,7 @@
    "checked": null
   },
   "shield.missile_block_chance": {
-   "source": "unit_shield_types.missile_block_chance (inferred), %",
+   "source": "unit_shield_types.missile_block_chance, %",
    "checked": null
   },
   "leadership": {
@@ -255,7 +255,7 @@
    "checked": "card scalar_missile_range"
   },
   "missile.min_range_m": {
-   "source": "projectiles.minimum_range (inferred)",
+   "source": "projectiles.minimum_range",
    "checked": null
   },
   "missile.reload_s": {
@@ -271,64 +271,64 @@
    "checked": "see reload_s"
   },
   "missile.projectile_number": {
-   "source": "projectiles.projectile_number (inferred)",
+   "source": "projectiles.projectile_number",
    "checked": null
   },
   "missile.shots_per_volley": {
-   "source": "projectiles.shots_per_volley (inferred)",
+   "source": "projectiles.shots_per_volley",
    "checked": null
   },
   "missile.trajectory": {
-   "source": "projectiles.trajectory (inferred)",
+   "source": "projectiles.trajectory_sight",
    "checked": null
   },
   "missile.direct": {
-   "source": "projectiles.trajectory == 'low' (ours): flat, fixed-speed fire (guns) that needs a clear line past friendly units (docs/en/game/mechanics/missiles.md: `low` flat; `dual_low_fixed` switches to an arc when blocked, `fixed` arcs)",
+   "source": "projectiles.trajectory_sight == 'low' (ours): flat, fixed-speed fire (guns) that needs a clear line past friendly units (docs/en/game/mechanics/missiles.md: `low` flat; `dual_low_fixed` switches to an arc when blocked, `fixed` arcs)",
    "checked": null
   },
   "missile.muzzle_velocity": {
-   "source": "projectiles.muzzle_velocity (inferred), m/s",
+   "source": "projectiles.muzzle_velocity, m/s",
    "checked": null
   },
   "missile.max_elevation": {
-   "source": "projectiles.max_elevation (inferred), degrees",
+   "source": "projectiles.max_elevation, degrees",
    "checked": null
   },
   "missile.calibration_distance_m": {
-   "source": "projectiles.calibration_distance (inferred)",
+   "source": "projectiles.calibration_distance",
    "checked": null
   },
   "missile.calibration_area_m": {
-   "source": "projectiles.calibration_area (inferred)",
+   "source": "projectiles.calibration_area",
    "checked": null
   },
   "missile.marksmanship": {
-   "source": "projectiles.marksmanship (inferred: the column after muzzle_velocity, 10 for our arrows, slings and pistol, 15 for the Night Runners' sling; added to land_units.accuracy in the spread, tools/nn/sim/missile.py)",
+   "source": "projectiles.marksmanship_bonus: 10 for our arrows, slings and pistol, 15 for the Night Runners' sling; added to land_units.accuracy in the spread (ours, tools/nn/sim/missile.py)",
    "checked": null
   },
   "missile.fire_arc_deg": {
-   "source": "battle_entities.fire_arc_close / 2 (inferred: the full angle, 60 / 70 for our shooters, 360 for throwing stars; mods name the column 'Fire Arc'), degrees each side",
+   "source": "battle_entities.fire_arc_close / 2 (ours: the column is the full angle, 60 / 70 for our shooters, 360 for throwing stars), degrees each side",
    "checked": null
   },
   "missile.explosion": {
-   "source": "projectiles.explosion_type (inferred)",
+   "source": "projectiles.explosion_type",
    "checked": null
   },
   "missile.penetration": {
-   "source": "projectiles.penetration (inferred)",
+   "source": "projectiles.projectile_penetration",
    "checked": null
   },
   "missile.shot_type": {
-   "source": "projectiles.shot_type (inferred)",
+   "source": "projectiles.shot_type",
    "checked": null
   },
   "missile.contact_phase": {
-   "source": "projectiles.contact_stat_effect (inferred): the contact effect a hit lays on its target (the Ratling Gun's suppressing fire)",
+   "source": "projectiles.contact_stat_effect: the contact effect a hit lays on its target (the Ratling Gun's suppressing fire)",
    "checked": null
   }
  },
  "_missing": {
-  "missile.bonus_v_large / bonus_v_infantry": "no such column found: the anti-large arrow row equals the plain arrow",
+  "missile.bonus_v_large / bonus_v_infantry": "projectiles.bonus_v_large / bonus_v_infantry: 0 for every projectile of our units (not in the passport)",
   "missile.can_fire_over_friendlies": "no column of its own: missile.direct (trajectory 'low') says the unit cannot; the others arc over friends (knowledge base, not measured)",
   "fatigue modifiers per unit": "none in land_units / battle_entities; fatigue rules are global (config/nn/game_rules.json, fatigue)",
   "lord aura per unit": "no per-unit radius found; the aura is global (_kv_morale_tables: general_aura_radius, general_inspire_effect_amount_*); a lord is marked by the attribute 'encourages'",
@@ -336,8 +336,8 @@
   "experience": "per rank, global: config/nn/game_rules.json (experience_bonus, experience_levels)"
  },
  "_contact_phases": {
-  "duration_s": "special_ability_phases: the float before the key (inferred, tools/nn/dbtables.phase_heads; 10 for poison, the censer's contagion and suppressing fire - fandom: contact effects last 10 s)",
-  "effect": "special_ability_phases: the effect type before the key (positive / negative)",
+  "duration_s": "special_ability_phases.duration, s (10 for poison, the censer's contagion and suppressing fire - fandom: contact effects last 10 s)",
+  "effect": "special_ability_phases.effect_type (positive / negative)",
   "stats": "special_ability_phase_stat_effects rows of the phase: stat, how (add / mult), value"
  },
  "contact_phases": {
