@@ -145,8 +145,9 @@ class AbilityCritic:
         m.unit.copy_(y.pow(2).mean().sqrt().clamp(min=1e-5))
         m.fixed.fill_(True)
 
+    @torch.enable_grad()
     def fit(self):
-        """A few steps of Huber regression on the buffer's training part, the shrink on the held-out tenth, and its
+        """(Gradients on: it is called from Brancher.finish, which runs under no_grad.) A few steps of Huber regression on the buffer's training part, the shrink on the held-out tenth, and its
         loss there against "predict the training mean" -> stats (self.last): samples, train (the steps' loss), val, base
         (the mean's), ev (explained variance there), shrink."""
         val = (self.ids % VAL_EVERY) == 0
