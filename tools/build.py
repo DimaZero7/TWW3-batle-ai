@@ -25,6 +25,7 @@ Usage:
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # the melee probe (tools/nn/charge_probe.py)
     python -m tools.build missile-probe --mprobe-plan dist --mprobe-battle 1   # the missile probe (tools/nn/missile_probe.py)
     python -m tools.build morale-probe --morale-plan flank --morale-battle 1   # the morale probe (tools/nn/morale_probe.py)
+    python -m tools.build morale-probe --morale-plan timer --kv waver_base_timeout=x10   # a probe with game rules changed
 
 Output: build/<target>/ with the .pack, the bundled script and manifest.json.
 Install and launch with tools/launcher/launch.ps1.
@@ -36,7 +37,7 @@ from pathlib import Path
 import sys
 
 from tools import config as project
-from tools.pack import bundle, pfh5
+from tools.pack import bundle, kvtable, pfh5
 
 # target -> entry module, pack/script names, scenario XML and its in-pack name.
 TARGETS = {
@@ -207,6 +208,8 @@ TIMEOUT_MARGIN_S = 60
 # human: every soldier's position every this many ticks (a reading of all men takes ~50 ms).
 HUMAN_SOLDIERS_EVERY = 5
 ARENA_TARGETS = ("nn-arena", "human")
+# --kv (the game's rule rows changed in the pack, tools/pack/kvtable.py): probes only, never a battle for data.
+KV_TARGETS = ("charge-probe", "missile-probe", "morale-probe")
 # lord-fall: ms between samples (the moment's step is read at +1, +2 s).
 LORD_FALL_TICK_MS = 500
 
@@ -248,11 +251,16 @@ def check_syntax(script):
     return True
 
 
-def build(target, run_config, dependencies=None, scenario=None):
+def build(target, run_config, dependencies=None, scenario=None, kv=None):
     """dependencies defaults to the required mods; every battle loads them.
-    scenario overrides the target's scenario file (a name in scenarios/)."""
+    scenario overrides the target's scenario file (a name in scenarios/).
+    kv ({section: {key: value}}, a probe only): the pack carries its own rule tables with these rows
+    (tools/pack/kvtable.py); the run's config and manifest name them (kv, kv_label)."""
     if dependencies is None:
         dependencies = project.required_mods()
+    if kv:
+        assert target in KV_TARGETS, f"--kv is for the probes {KV_TARGETS}"
+        run_config = dict(run_config, kv=kv, kv_label=kvtable.label(kv))
     spec = dict(TARGETS[target])
     if scenario:
         spec["scenario"] = scenario
@@ -272,6 +280,7 @@ def build(target, run_config, dependencies=None, scenario=None):
         f"script\\battle\\{folder}\\scenario.lua": SCENARIO_LUA,
         f"script\\battle\\{folder}\\{spec['packed_scenario']}": scenario_xml,
     }
+    files.update(kvtable.entries(kv or {}))
     dependency_names = [d["pack"] for d in dependencies]
     blob = pfh5.pack_files(files, dependency_names)
     assert pfh5.read_pack(blob) == (files, tuple(dependency_names))
@@ -294,6 +303,8 @@ def build(target, run_config, dependencies=None, scenario=None):
         "syntax_checked": syntax_checked,
         "engine_tested": False,
     }
+    if kv:
+        manifest["kv_override"] = kv
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return manifest
 
@@ -460,10 +471,15 @@ def main(argv=None):
                                                     "newdist", "starsmove", "meleefire", "hglof", "rangenew", "lofab", "lofthresh", "lofheight", "rangestand"),
                         default="dist", help="missile-probe: the plan (tools/nn/missile_probe.py)")
     parser.add_argument("--mprobe-battle", type=int, default=1, help="missile-probe: the plan's battle, 1-based")
-    parser.add_argument("--morale-plan", choices=("flank", "charge", "secure", "shoot", "rally", "strong", "penitent", "aura", "strong2", "rally2"),
+    parser.add_argument("--morale-plan", choices=("flank", "charge", "secure", "shoot", "rally", "strong", "penitent", "aura", "strong2", "rally2", "timer"),
                         default="flank",
                         help="morale-probe: the plan (tools/nn/morale_probe.py)")
     parser.add_argument("--morale-battle", type=int, default=1, help="morale-probe: the plan's battle, 1-based")
+    parser.add_argument("--kv", action="append", metavar="[SECTION.]KEY=VALUE|xN",
+                        help="a probe only (charge-, missile-, morale-probe): a row of the game's rule tables "
+                             "(_kv_morale/_kv_rules/_kv_fatigue: section morale/battle/fatigue) set to VALUE or N times "
+                             "the game's value, by a table of the probe's own pack (tools/pack/kvtable.py); repeatable. "
+                             "Never for a battle that records data: the rule is not the game's")
     parser.add_argument("--swarm", dest="plan_swarm", choices=("infantry", "lords", "all", "damage"), default="infantry",
                         help="lord-swarm: infantry around each lord, the other lord (with units) on him, both, or the "
                              "damage plan (one swordsmen / greatswords / clanrat / Stormvermin unit on a lord)")
@@ -535,6 +551,14 @@ def main(argv=None):
         parser.error("--timeout must be between 30 and 3600 seconds")
     if not 250 <= args.decide_ms <= 5000:
         parser.error("--decide-ms must be between 250 and 5000")
+    kv = None
+    if args.kv:
+        if args.target not in KV_TARGETS:
+            parser.error(f"--kv is for the probes: {', '.join(KV_TARGETS)}")
+        try:
+            kv = kvtable.parse(args.kv)
+        except ValueError as e:
+            parser.error(str(e))
 
     if args.target == "map-capture":
         run_config = {"step": args.step, "features": args.features}
@@ -642,7 +666,7 @@ def main(argv=None):
         run_config["stall_ms"] = stall_ms
     if args.target in ARENA_TARGETS and scenario_file and not args.scenario:
         args.scenario = str(scenario_file)
-    manifest = build(args.target, run_config, scenario=args.scenario)
+    manifest = build(args.target, run_config, scenario=args.scenario, **({"kv": kv} if kv else {}))
     print(json.dumps(manifest, indent=2))
     return 0
 

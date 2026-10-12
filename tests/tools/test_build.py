@@ -73,6 +73,38 @@ class TestRequiredMods:
         assert manifest["dependencies"][0]["sha256"] == project.required_mods()[0]["sha256"]
 
 
+class TestKvOverride:
+    def test_a_probe_pack_carries_its_rule_table_and_names_it(self, tmp_path, monkeypatch):
+        from tools.nn import gamedb
+        monkeypatch.setattr(project, "BUILD", tmp_path)
+        assert build.main(["morale-probe", "--morale-plan", "timer", "--speed", "10",
+                           "--kv", "waver_base_timeout=x10"]) == 0
+        manifest = json.loads((tmp_path / "morale-probe" / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["kv_override"] == {"morale": {"waver_base_timeout": 250.0}}
+        assert manifest["config"]["kv_label"] == "waver_base_timeout=250" and manifest["config"]["tick_ms"] == 250
+        entries, _ = pfh5.read_pack((tmp_path / "morale-probe" / manifest["pack"]).read_bytes())
+        table = entries["db\\_kv_morale_tables\\!tww3_bai_probe_kv"]
+        assert gamedb.kv_table(table) == {"waver_base_timeout": 250.0}
+
+    def test_an_ordinary_build_has_no_rule_table(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(project, "BUILD", tmp_path)
+        assert build.main(["morale-probe", "--morale-plan", "timer"]) == 0
+        manifest = json.loads((tmp_path / "morale-probe" / "manifest.json").read_text(encoding="utf-8"))
+        assert "kv_override" not in manifest and "kv" not in manifest["config"]
+        entries, _ = pfh5.read_pack((tmp_path / "morale-probe" / manifest["pack"]).read_bytes())
+        assert not any(name.startswith("db\\") for name in entries)
+
+    def test_kv_only_for_probes_and_known_keys(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(project, "BUILD", tmp_path)
+        with pytest.raises(SystemExit):
+            build.main(["nn-arena", "--kv", "waver_base_timeout=0"])
+        with pytest.raises(SystemExit):
+            build.main(["morale-probe", "--kv", "waver_base_timout=0"])
+        with pytest.raises(AssertionError):
+            build.build("ai-vs-ai", {"speed": 3, "timeout_ms": 60000, "tick_ms": 1000, "scenario": "ai_vs_ai"},
+                        kv={"morale": {"waver_base_timeout": 0.0}})
+
+
 class TestMovePlan:
     def test_hamlet_plan_loads_and_stall_rule_covers_it(self, tmp_path, monkeypatch):
         monkeypatch.setattr(project, "BUILD", tmp_path)

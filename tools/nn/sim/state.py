@@ -233,6 +233,8 @@ INTERNAL = {
     "rout_count": ("f", "times routed"),
     "rout_s": ("f", "seconds since the rout began"),
     "rally_s": ("f", "seconds since the last rally"),
+    "waver_s": ("f", "seconds of the current unbroken wavering (0 on its first step, and when not wavering): the waver "
+                     "timer before a rout (morale.waver_timer)"),
     "rpin_s": ("f", "seconds into the rout's exit of a formation that routed from melee (contact.rout_pin_s: its men "
                     "stay in contact that long; 0: not in one)"),
     "rpin_d": ("f", "metres run since its rout's exit began (left out of its contact test while the exit lasts)"),

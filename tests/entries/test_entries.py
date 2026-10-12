@@ -1916,6 +1916,30 @@ class TestMoraleProbe:
         assert set(sample["lanes"][0]["u"]) == {"U", "E"}
         assert {r["lane"]: r["why"] for r in rows if r["event"] == "probe_lane_end"} == {"L1": "step"}
 
+    def test_the_waver_trigger_and_the_kill_step(self, lua, tmp_path):
+        lua.execute(self.SETUP + """
+            CONFIG.lanes[1].steps = {{on = 'go', ['do'] = 'kill', unit = 'U', share = 0.25, delay_s = 1},
+                                     {on = 'waver', of = 'U', ['do'] = 'move', unit = 'E', x = 0, z = 120, delay_s = 0},
+                                     {on = 'step', of = 2, ['do'] = 'end', delay_s = 2}}
+            enemy[2].is_wavering = function(self) return self.wav == true end
+            enemy[2].kill_number_of_men = function(self, n) self.men = self.men - n end
+            STATE = require('entries.morale_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 12 do bm:tick(500); bm:pump() end
+            assert(enemy[2].men == 90, 'a quarter of the men killed: ' .. tostring(enemy[2].men))
+            enemy[2].wav = true
+            for _ = 1, 10 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        kill = next(r for r in rows if r["event"] == "probe_kill")
+        assert (kill["men0"], kill["n"], kill["ok"]) == (120, 30, True)
+        assert ("waver", "U") in [(r["kind"], r["role"]) for r in rows if r["event"] == "probe_event"]
+        assert [r["i"] for r in rows if r["event"] == "probe_step"] == [1, 2, 3]
+        sample = next(r for r in rows if r["event"] == "probe_sample")
+        assert "w" in sample["lanes"][0]["u"]["U"]
+
     def test_shadow_point(self, lua):
         x, z = lua.eval("require('entries.morale_probe').shadow_point")(0, 100, 0, 0, 50)
         assert (x, z) == (0, 50)

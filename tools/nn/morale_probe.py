@@ -32,12 +32,19 @@ Plans (battles):
           greatswords, the General, swordsmen + spearmen side by side;
   rally2  the rally clock (1 battle): as rally, the enemy keeps 150 m (twice), or keeps 60 m and halts 20 / 28 / 36 s
           after the rout (the router then runs clear of 95 m): rally at once, 7 s later, or at an 18 s cycle?
+  timer   the timer before a rout (2 battles of 6 lanes on a 3 x 2 grid, 0.25 s samples, speed 10): skavenslaves or
+          clanrats held, brought down by fearless enemies in front / front + rear / front + flank, the enemies leaving
+          at the first wavering, or the engine killing 30 % of the men every 4 s; run with the game's rules and with
+          waver_base_timeout changed in the probe's pack (--kv waver_base_timeout=x10 / =0): 'timer' prints the delays
+          wavering -> rout and MoralePercent <= 0 -> rout per variant (timer_lane).
 
     python -m tools.nn.morale_probe plan [--plan flank]            # the battles
     python -m tools.build morale-probe --morale-plan flank --morale-battle 1
     python -m tools.nn.morale_probe run --plan flank [--battles 1,2]
     python -m tools.nn.morale_probe report [runs...] [--sim]        # the game's table (+ the simulator twin)
     python -m tools.nn.morale_probe twin --plan rally [--out f.json] # the simulator alone on a plan's lanes
+    python -m tools.nn.morale_probe run --plan timer --kv waver_base_timeout=x10 --graphics lowigpu
+    python -m tools.nn.morale_probe timer [runs...]                 # the timer plan's table per rule variant
 
 Writes build/morale-probe/analysis.json (not in Git).
 """
@@ -83,7 +90,7 @@ SETTLE_MS = 4000
 TICK_MS = 500
 WIDTH_M = 30
 PARK_Z = 650
-PLANS = ("flank", "charge", "secure", "shoot", "rally", "strong", "penitent", "aura", "strong2", "rally2")
+PLANS = ("flank", "charge", "secure", "shoot", "rally", "strong", "penitent", "aura", "strong2", "rally2", "timer")
 PENITENT = "wh_dlc04_unit_passive_strength_of_the_penitent"
 HTL, SYG, RALLY = ("wh_main_lord_passive_hold_the_line", "wh_main_character_abilities_stand_your_ground",
                    "wh_main_character_abilities_rally")
@@ -316,6 +323,55 @@ def aura_lane(kind):
     return {"kind": kind, "units": units, "steps": steps, "max_s": AURA_END_S + 5}
 
 
+TIMER_KINDS = ("front", "rear", "flank_cr", "leave", "kill_fast", "kill")
+TIMER_MAX_S = 300              # past 250 s: waver_base_timeout x10 read as whole seconds still ends in the lane
+TIMER_AFTER_ROUT_S = 8
+TIMER_TICK_MS = 250            # the delay to the rout is ~1 s in the game's battles: four samples a second
+TIMER_SPEED = 10
+TIMER_PLACES = ((-350, -250), (0, -250), (350, -250), (-350, 250), (0, 250), (350, 250))   # 350 / 500 m apart
+TIMER_KILL = ((5, 0.3), (9, 0.3), (13, 0.3), (17, 0.3), (21, 0.3))   # kill: (s from the go, share of the men left)
+TIMER_KILL_FAST = ((5, 0.5), (6, 0.5), (7, 0.5), (8, 0.5))           # kill_fast: morale through wavering in ~1-3 s
+
+
+def timer_lane(kind):
+    """The timer before a rout (build/simreal/morale_timers.md: in the game half the first routs start ~1 s after
+    MoralePercent <= 0 or straight from wavering, 13 % of the units at <= 0 never rout; the simulator routs at once):
+    U (tested: skavenslaves, or clanrats '_cr') holds, never ordered; fearless Empire units bring its morale down.
+    'front' spearmen (E) attack it in front from 40 m; 'rear' the same and swordsmen (R) in its rear 15 s after its
+    contact; 'flank_cr' clanrats: swordsmen in front, spearmen (R) in the flank 15 s after; 'leave' as front, and at
+    U's first wavering E moves 80 m back at a run (no more casualties: does the wavering unit rout at the timer's end
+    all the same, or recover?); 'leave_cr' clanrats, swordsmen in front and spearmen in the rear, both enemies leave at
+    the wavering (not in TIMER_KINDS: the first normal battle only); 'kill' no melee:
+    spearmen stand 60 m in front, the engine kills 30 % of U's men every 4 s (TIMER_KILL: losses alone); 'kill_fast'
+    the same, half the men every second (TIMER_KILL_FAST: the morale falls through wavering to below 0 within a few
+    seconds - does the unit wait the timer below 0?). Each lane ends TIMER_AFTER_ROUT_S after U's rout, 60 s after the
+    leave, or at TIMER_MAX_S."""
+    tested = "clanrat" if kind.endswith("_cr") else "slave"
+    dU = depth(tested)
+    front = "swords" if tested == "clanrat" else "spear"
+    kills = {"kill": TIMER_KILL, "kill_fast": TIMER_KILL_FAST}.get(kind)
+    units = [u("U", tested, 0, -dU / 2, 0), u("E", front, 0, (60 if kills else 40) + depth(front) / 2, 180, True)]
+    steps = []
+    if kills:
+        steps += [s("go", "kill", "U", delay_s=t, share=share) for t, share in kills]
+    else:
+        steps.append(s("go", "attack", "E", target="U"))
+    if kind in ("rear", "leave_cr"):
+        units.append(u("R", "swords" if tested == "slave" else "spear", 0, -dU - 40 - depth("spear") / 2, 0, True))
+        steps.append(s("contact", "attack", "R", of="U", delay_s=15, target="U"))
+    if kind == "flank_cr":
+        units.append(u("R", "spear", 70 + 15, -dU / 2, 270, True))
+        steps.append(s("contact", "attack", "R", of="U", delay_s=15, target="U"))
+    if kind in ("leave", "leave_cr"):
+        first = len(steps) + 1
+        steps.append(s("waver", "move", "E", of="U", x=0, z=round(120 + depth(front) / 2, 1)))
+        if kind == "leave_cr":
+            steps.append(s("waver", "move", "R", of="U", x=0, z=round(-dU - 120, 1)))
+        steps.append(s("step", "end", of=first, delay_s=60))
+    steps.append(s("rout", "end", of="U", delay_s=TIMER_AFTER_ROUT_S))
+    return {"kind": kind, "units": units, "steps": steps, "max_s": TIMER_MAX_S}
+
+
 def rotate(items, k):
     k %= len(items)
     return items[k:] + items[:k]
@@ -345,6 +401,9 @@ def battles(plan):
                 [strong2_lane(k) for k in ("slave:gs", "slave:general", "slave:swords+spear")]]
     if plan == "rally2":
         return [[rally2_lane(k) for k in (150, "h20", "h28", 150, "h36")]]
+    if plan == "timer":
+        a = [timer_lane(k) for k in TIMER_KINDS]
+        return [a, rotate(a, 3)]
     return [[rally_lane(k) for k in (0, 50, 90, 150)]]
 
 
@@ -370,7 +429,7 @@ def layout(specs, plan):
     n, dx = len(specs), lane_dx(plan)
     tested = set()
     for k, spec in enumerate(specs, 1):
-        x = dx * (k - 1 - (n - 1) / 2)
+        x, z = (TIMER_PLACES[k - 1] if plan == "timer" else (dx * (k - 1 - (n - 1) / 2), 0.0))
         units = []
         for un in spec["units"]:
             name = add(un["short"], k)
@@ -380,7 +439,7 @@ def layout(specs, plan):
                 fearless.append(name)
             else:
                 tested.add(UNITS[un["short"]][2])
-        lanes.append({"name": f"L{k}", "kind": spec["kind"], "x": round(x, 1), "z": 0.0, "max_s": spec["max_s"],
+        lanes.append({"name": f"L{k}", "kind": spec["kind"], "x": round(x, 1), "z": round(z, 1), "max_s": spec["max_s"],
                       "units": units, "steps": spec["steps"]})
     park = []
     for faction in (EMP, SKV):
@@ -407,8 +466,8 @@ def layout(specs, plan):
 def run_config(plan, index):
     """(entry config, model seconds, arena) of battle `index` (1-based) of a plan."""
     lanes, park, fearless, arena = layout(battles(plan)[index - 1], plan)
-    config = {"plan": plan, "battle": index, "settle_ms": SETTLE_MS, "tick_ms": TICK_MS, "lanes": lanes,
-              "park": park, "fearless": fearless}
+    config = {"plan": plan, "battle": index, "settle_ms": SETTLE_MS,
+              "tick_ms": TIMER_TICK_MS if plan == "timer" else TICK_MS, "lanes": lanes, "park": park, "fearless": fearless}
     model_s = max(l["max_s"] for l in lanes) + SETTLE_MS / 1000 + 20
     return config, model_s, arena
 
@@ -421,15 +480,22 @@ def write_scenario(plan, index, path=None):
     return path
 
 
-def run(plan, which=None, python=sys.executable, dry=False, deadline=1200):
+def run(plan, which=None, python=sys.executable, dry=False, deadline=None, kv=(), speed=None, graphics=""):
     """Builds and launches each battle in turn (tools/launcher/launch.ps1: Normal difficulty set and restored by
-    the launcher)."""
+    the launcher). kv: tools.build --kv rows (the game's rules changed in the probe's pack); speed: the battle
+    speed (the timer plan: TIMER_SPEED); graphics: the launcher's -Graphics (lowigpu: the integrated GPU)."""
     done = []
+    speed = speed or (TIMER_SPEED if plan == "timer" else None)
+    # real seconds before the script ends a battle: the timer plan is ~35 s at speed 10 (a hung one must not hold
+    # the game into the training line's sets)
+    deadline = deadline or (240 if plan == "timer" else 1200)
     for i in which or range(1, len(battles(plan)) + 1):
         build = [python, "-m", "tools.build", "morale-probe", "--morale-plan", plan, "--morale-battle", str(i),
-                 "--deadline", str(deadline)]
+                 "--deadline", str(deadline)] + (["--speed", str(speed)] if speed else [])
+        for row in kv or ():
+            build += ["--kv", row]
         launch = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(LAUNCHER / "launch.ps1"),
-                  "-Target", "morale-probe"]
+                  "-Target", "morale-probe"] + (["-Graphics", graphics] if graphics else [])
         print(f"--- {plan} {i}", flush=True)
         if dry:
             print(" ".join(build), "&&", " ".join(launch))
@@ -441,6 +507,116 @@ def run(plan, which=None, python=sys.executable, dry=False, deadline=1200):
     return done
 
 
+# ---------------------------------------------------------------- the timer before a rout (plan timer)
+
+def variant(cfg):
+    """The run's rule variant: its manifest config's kv_label (tools/build.py --kv), 'normal' without one."""
+    return cfg.get("kv_label") or "normal"
+
+
+def timer_measure(lane):
+    """A timer lane (game): U's first wavering (is_wavering), first sample with MoralePercent <= 0, rout (is_routing)
+    and the delays between them (s, the samples' 0.25 s); U's morale and losses around them; the spells of
+    MoralePercent <= 0 that ended without a rout (the unit came back above 0), and whether U recovered from
+    wavering (the flag off again, no rout)."""
+    t = np.array(lane["t"])
+    mp_, w, r = col(lane, "U", "mp"), flag(lane, "U", "w"), flag(lane, "U", "r")
+    hp, ms = col(lane, "U", "hp"), col(lane, "U", "ms")
+    r1 = lambda v: None if v is None else round(float(v), 2)
+    out = {"run": lane["run"], "variant": lane.get("variant", "normal"), "lane": lane["spec"]["name"],
+           "kind": lane["spec"]["kind"]}
+    i_r = int(np.argmax(r)) if r.any() else None
+    end = i_r if i_r is not None else len(t)
+    zero = np.isfinite(mp_) & (mp_ <= 0)
+    i_w = int(np.argmax(w[:end])) if w[:end].any() else None
+    i_0 = int(np.argmax(zero[:end])) if zero[:end].any() else None
+    out["contact_s"] = r1(lane["events"]["contact"].get("U"))
+    out["waver_s"] = r1(t[i_w]) if i_w is not None else None
+    out["zero_s"] = r1(t[i_0]) if i_0 is not None else None
+    out["rout_s"] = r1(t[i_r]) if i_r is not None else None
+    out["waver_to_rout_s"] = r1(t[i_r] - t[i_w]) if i_r is not None and i_w is not None else None
+    out["zero_to_rout_s"] = r1(t[i_r] - t[i_0]) if i_r is not None and i_0 is not None else None
+    # below 0 (the game's MoralePercent rests at exactly 0 while the unit is still wavering): the first such sample
+    neg = np.isfinite(mp_) & (mp_ < 0) & ~r
+    i_n = int(np.argmax(neg[:end])) if neg[:end].any() else None
+    out["neg_s"] = r1(t[i_n]) if i_n is not None else None
+    out["neg_to_rout_s"] = r1(t[i_r] - t[i_n]) if i_r is not None and i_n is not None else None
+    if i_r is not None and i_r > 0:
+        out["mp_before_rout"] = r1(mp_[i_r - 1])
+        out["ms_before_rout"] = None if not np.isfinite(ms[i_r - 1]) else int(ms[i_r - 1])
+        out["mp_min_before_rout"] = r1(np.nanmin(mp_[:i_r]))
+        # time spent at <= 0 just before the rout (the last unbroken run of zero samples)
+        k = i_r - 1
+        while k >= 0 and zero[k]:
+            k -= 1
+        out["zero_run_before_rout_s"] = r1((i_r - 1 - k) * (t[1] - t[0]) if len(t) > 1 else 0.0)
+    if i_w is not None:
+        sel = (t >= t[i_w]) & (t <= t[i_w] + 3.0)
+        out["hp_lost_waver_0_3"] = r1(hp[sel][0] - hp[sel][-1]) if sel.any() else None
+        # recovered: the wavering flag off again (for 2+ s) before any rout
+        off = ~w[i_w:end]
+        out["recovered"] = bool(any(off[j:j + 8].all() and len(off[j:j + 8]) == 8 for j in range(len(off))))
+    # spells at <= 0 that ended without a rout (the unit back above 0 first)
+    spells, j = [], 0
+    while j < end:
+        if zero[j]:
+            k = j
+            while k < end and zero[k]:
+                k += 1
+            if k < end:          # came back above 0 before the rout / the lane's end
+                spells.append(round(float(t[k] - t[j]), 2))
+            j = k
+        else:
+            j += 1
+    out["zero_spells_no_rout_s"] = spells
+    out["hp_end"] = r1(np.nanmin(hp)) if np.isfinite(hp).any() else None
+    return out
+
+
+def timer_summary(rows):
+    """Per variant (and kind): how many routed, the delays wavering -> rout and <= 0 -> rout (median, min, max)."""
+    def stats(xs):
+        xs = [x for x in xs if x is not None]
+        if not xs:
+            return None
+        return {"n": len(xs), "median": round(float(np.median(xs)), 2), "min": min(xs), "max": max(xs)}
+    out = {}
+    for v in sorted({r["variant"] for r in rows}):
+        sel = [r for r in rows if r["variant"] == v]
+        block = {"lanes": len(sel), "routed": sum(r["rout_s"] is not None for r in sel),
+                 "wavered_no_rout": sum(r["waver_s"] is not None and r["rout_s"] is None for r in sel),
+                 "recovered": sum(bool(r.get("recovered")) for r in sel),
+                 "waver_to_rout_s": stats([r["waver_to_rout_s"] for r in sel]),
+                 "zero_to_rout_s": stats([r["zero_to_rout_s"] for r in sel]),
+                 "neg_to_rout_s": stats([r.get("neg_to_rout_s") for r in sel]),
+                 "zero_run_before_rout_s": stats([r.get("zero_run_before_rout_s") for r in sel]),
+                 "mp_before_rout": stats([r.get("mp_before_rout") for r in sel]),
+                 "zero_spells_no_rout": sum(len(r["zero_spells_no_rout_s"]) for r in sel),
+                 "kinds": {}}
+        for k in TIMER_KINDS + ("leave_cr",):
+            ks = [r for r in sel if r["kind"] == k]
+            if ks:
+                block["kinds"][k] = [(r["waver_to_rout_s"], r["zero_to_rout_s"], r.get("mp_before_rout"),
+                                      r.get("recovered")) for r in ks]
+        out[v] = block
+    return out
+
+
+def timer_report(run_dirs, out=None):
+    """The timer lanes of the runs: one row per lane, the summary per variant; writes build/morale-probe/timer.json."""
+    lanes = [ln for d in run_dirs for ln in load_run(d) if ln["plan"] == "timer"]
+    rows = [timer_measure(ln) for ln in lanes]
+    for r in rows:
+        print(json.dumps(r, ensure_ascii=False))
+    table = timer_summary(rows)
+    print(json.dumps(table, indent=1, ensure_ascii=False))
+    out = out or ROOT / "timer.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps({"lanes": rows, "summary": table}, indent=1, ensure_ascii=False), encoding="utf-8")
+    print(out)
+    return rows, table
+
+
 # ---------------------------------------------------------------- the recordings
 
 def load_run(run_dir):
@@ -448,8 +624,8 @@ def load_run(run_dir):
     run_dir = Path(run_dir)
     cfg = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))["config"]
     lanes = {l["name"]: {"run": run_dir.name, "plan": cfg.get("plan"), "battle": cfg.get("battle"), "spec": l,
-                         "t": [], "rows": {x["role"]: [] for x in l["units"]},
-                         "events": {"contact": {}, "rout": {}, "rally": {}}, "steps": {}, "end": None}
+                         "variant": variant(cfg), "t": [], "rows": {x["role"]: [] for x in l["units"]},
+                         "events": {"contact": {}, "rout": {}, "rally": {}, "waver": {}}, "steps": {}, "end": None}
              for l in cfg.get("lanes", [])}
     for line in (run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines():
         if '"probe_' not in line:
@@ -954,7 +1130,8 @@ def report(run_dirs, sim=False, out=OUT, device="cpu", copies=4):
     game = [measure(ln) for ln in lanes]
     result = {"lanes": game}
     if sim:
-        sims = sim_lanes(lanes, device=device, copies=copies)
+        # the timer plan has no twin (its waver trigger and kill step are the game's only; the simulator routs at once)
+        sims = sim_lanes([ln for ln in lanes if ln["plan"] != "timer"], device=device, copies=copies)
         result["sim"] = [measure(ln) for ln in sims]
     for r in game:
         print(json.dumps(r, ensure_ascii=False, default=float))
@@ -980,7 +1157,7 @@ def twin(plans, out=None, device="cpu", copies=4):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", nargs="?", choices=("report", "plan", "run", "twin"), default="report")
+    parser.add_argument("command", nargs="?", choices=("report", "plan", "run", "twin", "timer"), default="report")
     parser.add_argument("runs", nargs="*", type=Path, help="report: run folders (default: build/morale-probe/runs/*)")
     parser.add_argument("--plan", default="flank", help="a plan, or several comma separated (twin)")
     parser.add_argument("--battles", help="run: battle numbers, comma separated (default: all of the plan)")
@@ -989,6 +1166,10 @@ def main(argv=None):
     parser.add_argument("--copies", type=int, default=4)
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--dry", action="store_true")
+    parser.add_argument("--kv", action="append", default=[],
+                        help="run: a game rule row changed in the probe's pack (tools.build --kv), repeatable")
+    parser.add_argument("--speed", type=int, choices=(1, 3, 10, 20), help="run: the battle speed")
+    parser.add_argument("--graphics", default="", help="run: the launcher's -Graphics (lowigpu, low, ...)")
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8")
     if args.command == "plan":
@@ -1000,11 +1181,14 @@ def main(argv=None):
         which = [int(x) for x in args.battles.split(",")] if args.battles else None
         done = []
         for p in args.plan.split(","):
-            done += run(p, which, dry=args.dry)
+            done += run(p, which, dry=args.dry, kv=args.kv, speed=args.speed, graphics=args.graphics)
         print("done:", done)
         return 0 if all(d[-1] == 0 for d in done) else 1
     if args.command == "twin":
         twin(args.plan.split(","), out=args.out, device=args.device, copies=args.copies)
+        return 0
+    if args.command == "timer":
+        timer_report(args.runs or runs(), out=args.out)
         return 0
     report(args.runs or runs(), sim=args.sim, out=args.out or OUT, device=args.device, copies=args.copies)
     return 0

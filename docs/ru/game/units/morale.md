@@ -109,7 +109,8 @@ flowchart LR
 **Таймеры:** после третьего бегства отряд разбит (`shatter_after_rout_count` 3), на дне −50 очков
 (`ums_broken_threshold_lower`) — сразу;
 собравшийся отряд 10 с не может снова побежать (`post_rally_no_rout_timer`);
-`waver_base_timeout` 25 с; мораль меняется плавно (`percent_update_per_tick` 0,15).
+`waver_base_timeout` 25 — десятые доли секунды: бегство не раньше 2,5 с колебания и только при морали ниже 0
+(проба timer, [механика](../mechanics/morale.md)); мораль меняется плавно (`percent_update_per_tick` 0,15).
 
 ## Что показали записи
 

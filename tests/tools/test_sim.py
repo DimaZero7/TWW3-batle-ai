@@ -1178,13 +1178,53 @@ class TestMorale:
         assert bool(st.u["s"].all()) and bool(st.u["r"].all())
         st = face_off(SPEAR, SLAVE)
         st.u["morale"][:] = -60
+        st.u["w"][:] = True                         # wavering past the waver timer (morale.waver_timer)
+        st.u["waver_s"][:] = 10.0
         cal = dict(P.sim["morale"]["collapse"], shatter_below_broken=False)
         morale.step(st.u, self.ctx(st, collapse=hit), P.with_cal("morale", collapse=cal, shatter_rules=False), 0.5)
         assert not bool(st.u["s"].any()) and bool(st.u["r"].all())
 
+    def test_the_waver_timer_holds_a_rout_until_two_and_a_half_seconds_of_wavering(self):
+        """morale.waver_timer (the probe timer): below 0 a unit routs only after waver_base_timeout (25) tenths of a
+        second of unbroken wavering; at exactly 0 it never routs; the timer off routs at once."""
+        assert P.morale["waver_base_timeout"] == 25 and P.sim["morale"]["waver_timer"] == {"on": True, "tick_s": 0.1}
+        cal = P
+        st = face_off(SPEAR, SLAVE)
+        low = self.ctx(st, lord_dead_points=torch.full_like(st.u["men"], -80.0))     # a target far below 0, above -50
+        routed_at = wavered_at = below_at = None
+        for k in range(1, 30):
+            morale.step(st.u, low, cal, 0.5)
+            if routed_at is None and bool(st.u["r"][0, 0]):
+                routed_at = k
+            if wavered_at is None and bool(st.u["w"][0, 0]):
+                wavered_at = k
+            if below_at is None and float(st.u["morale"][0, 0]) < 0:
+                below_at = k
+        # below 0 well before the timer's end: the rout comes 2.5 s = 5 steps of 0.5 s after the first wavering step
+        assert below_at < wavered_at + 5 and routed_at == wavered_at + 5
+        # the timer off: the step it is below 0
+        st = face_off(SPEAR, SLAVE)
+        off = P.with_cal("morale", waver_timer={"on": False})
+        for k in range(1, 30):
+            morale.step(st.u, low, off, 0.5)
+            if bool(st.u["r"][0, 0]):
+                break
+        assert k == below_at
+        # a unit that has wavered past the timer routs the step its morale is below 0
+        st = face_off(SPEAR, SLAVE)
+        st.u["w"][0, 0] = True
+        st.u["waver_s"][0, 0] = 10.0
+        st.u["morale"][0, 0] = -20.0
+        morale.step(st.u, self.ctx(st), P, 0.5)
+        assert bool(st.u["r"][0, 0])
+        morale.step(st.u, self.ctx(st), P, 0.5)
+        assert float(st.u["waver_s"][0, 0]) == 0                                  # the clock ends with the wavering
+
     def test_the_third_rout_shatters_and_a_free_unit_rallies(self):
         st = face_off(SPEAR, SLAVE)
         st.u["morale"][0, 0] = -20.0
+        st.u["w"][0, 0] = True                      # wavering past the waver timer (morale.waver_timer)
+        st.u["waver_s"][0, 0] = 10.0
         free = self.ctx(st, enemy_near=torch.zeros_like(st.u["r"]))
         morale.step(st.u, self.ctx(st), P, 0.5)
         assert st.u["r"][0, 0] and st.u["rout_count"][0, 0] == 1
@@ -1197,6 +1237,7 @@ class TestMorale:
         st.u["rout_count"][0, 0] = 2
         st.u["rally_s"][0, 0] = 100.0
         st.u["morale"][0, 0] = -20.0
+        st.u["w"][0, 0], st.u["waver_s"][0, 0] = True, 10.0
         morale.step(st.u, self.ctx(st), P, 0.5)
         assert st.u["s"][0, 0] and st.u["ms"][0, 0] == 7
 
@@ -1680,6 +1721,7 @@ class TestSecondWave:
         st = scenario.build([army([(SPEAR, -100, 0, 90), (FLAG, -100, 60, 90)], [(SLAVE, 300, 0, 270)])], P)
         assert bool(st.u["unbreakable"][0, 1]) and not bool(st.u["unbreakable"][0, 0])
         st.u["morale"][0, :2] = -20.0                     # crushed: the spearmen rout, the flagellants not
+        st.u["w"][0, :2], st.u["waver_s"][0, :2] = True, 10.0     # past the waver timer (morale.waver_timer)
         for _ in range(4):
             battle.step(st, replay.hold(st), P)
         assert bool(st.u["r"][0, 0])
@@ -2431,6 +2473,7 @@ def _rout_from_melee(params, seconds=10.0):
         battle.step(st, replay.hold(st), params)
     assert bool(st.u["m"][0, H]) and not bool(st.u["r"][0, H])
     st.u["morale"][0, H] = -30.0
+    st.u["w"][0, H], st.u["waver_s"][0, H] = True, 10.0         # past the waver timer (morale.waver_timer)
     rows = []
     for k in range(int(round(seconds / dt))):
         battle.step(st, replay.hold(st), params)
@@ -2464,6 +2507,7 @@ class TestPursuitSprint:
             for _ in range(int(round(2.0 / params.dt))):
                 battle.step(st, _attack_router(st), params)
             st.u["morale"][0, H] = -30.0
+            st.u["w"][0, H], st.u["waver_s"][0, H] = True, 10.0     # past the waver timer (morale.waver_timer)
             speeds, gaps = [], []
             for k in range(int(round(20.0 / params.dt))):
                 battle.step(st, _attack_router(st), params)

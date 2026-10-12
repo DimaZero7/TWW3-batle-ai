@@ -110,7 +110,8 @@ The table does not say how many seconds count as "recent".
 **Timers:** after the third rout the unit is shattered (`shatter_after_rout_count` 3), at the floor of
 −50 points (`ums_broken_threshold_lower`) at once;
 a rallied unit cannot rout again for 10 s (`post_rally_no_rout_timer`);
-`waver_base_timeout` 25 s; morale changes smoothly (`percent_update_per_tick` 0.15).
+`waver_base_timeout` 25 - tenths of a second: a rout no sooner than 2.5 s of wavering and only with morale below 0
+(the probe timer, [mechanics](../mechanics/morale.md)); morale changes smoothly (`percent_update_per_tick` 0.15).
 
 ## What the recordings show
 

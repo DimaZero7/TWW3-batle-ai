@@ -78,11 +78,20 @@ Sources: [twwstats morale][tws-m] (high), [fandom Leadership][fw-lead], [fandom 
 
 ## Waver, rout, rally, shatter
 
-- **Wavering** lasts `waver_base_timeout` 25 s at base; a wavering unit drops its current order.
-  · [twwstats][tws-m], [fandom Leadership][fw-lead] · high (value), medium (behaviour).
-- **Broken → rally timer.** `broken_finish_base_timeout` 180 s is "the base timeout for going
-  from broken to rally", plus 10 s × experience level (`broken_finish_timer_experience_bonus`). ·
-  [twwstats morale][tws-m] · high (value), low (how it applies in WH3).
+- **Wavering → rout.** `waver_base_timeout` 25 is in tenths of a second: 2.5 s. It is the least wavering before a
+  rout, not a delay after 0: a unit routs when its morale is below 0 (at exactly 0 it still wavers) and it has wavered
+  without a break at least 2.5 s; one that has wavered longer routs as soon as its morale is below 0. Without losses a
+  wavering unit recovers (Empire's "casualties while wavering -> rout at the timer's end" is not in WH3). A wavering
+  unit drops its current order. · [fandom Leadership][fw-lead] ("below 0 for 2.5 s"); the probe timer
+  (`python -m tools.nn.morale_probe run --plan timer --kv waver_base_timeout=x10`, 4 battles x 6 lanes, normal
+  difficulty; the key changed in the probe's pack, `tools/build.py --kv`): with 25 a unit whose morale went through
+  wavering to below 0 in ~1 s routed 3.0 s after the wavering began; with 250 after 25.5 s (three lanes of three),
+  standing up to 24 s below 0; with 0 after 1.2 s, as soon as below 0 · high (unit and meaning proved by the probe).
+- **Broken → rally timer.** `broken_finish_base_timeout` 180 is "the base timeout for going
+  from broken to rally", plus 10 × experience level (`broken_finish_timer_experience_bonus`); in the unit of
+  `waver_base_timeout` (tenths of a second) that is 18 s - exactly the measured least rout before a rally
+  (`morale.rally_after_s` 18, the morale probe: not before 18.5 s). Not checked by changing the key. ·
+  [twwstats morale][tws-m] · high (value), medium (unit: by `waver_base_timeout` and the measurement).
   - Ours: a rally when morale is above 0, the unit has routed at least 18 s (the morale probe: not before
     18.5 s), no living enemy is within 95 m, and all this has held without a break for 7 s
     (`morale.rally_wait_s`: the recordings' median from the first such second to the rally, p25 4, p75 12;

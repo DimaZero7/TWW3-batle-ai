@@ -6,15 +6,17 @@
 --   on = 'go'       the probe's start;
 --   on = 'contact'  the first melee of role `of` (is_in_melee);
 --   on = 'rout'     the first rout of role `of`;  on = 'rally'  its first rally after a rout;
+--   on = 'waver'    the first sample of role `of` wavering (is_wavering);
 --   on = 'step'     step number `of` of the lane fired.
 -- What a step does (do): 'attack' / 'attack_walk' (unit attacks target in melee, at a run / walk),
 -- 'shoot' (unit shoots target), 'move' / 'move_walk' (to lane point x, z), 'halt', 'stop_fire',
+-- 'kill' (the engine kills share of unit's living men: unit:kill_number_of_men),
 -- 'shadow' (each tick unit keeps d metres from role `target`: a move at a run to the point d from
 -- it on the line between them, once it is more than 8 m off; until a 'halt' of that unit),
 -- 'ability' (unit uses ability `key` on itself: a lord's Stand Your Ground, Rally),
 -- 'end' (the lane ends).
 -- Every tick_ms 'probe_sample': per running lane every role's place, bearing, men, health, melee,
--- routing / wavering / shattered, CCO MoralePercent and MoraleGreatestEffect (the strongest morale
+-- routing / wavering / shattered, CCO MoralePercent, MoraleState and MoraleGreatestEffect (the strongest morale
 -- effect's text), PercentHpLostRecently, moving fast, firing, and its active effects (fx: the phase
 -- keys of CCO ActiveEffectList, as the bridge's nn_effects). A lane also ends after max_s. The
 -- battle ends when every lane is done.
@@ -31,9 +33,9 @@ local M = {}
 
 local LOG = 'tww3_bai_events.jsonl'
 local TIMER = 'tww3_bai_morale_probe_tick'
-M.TRIGGERS = {go = true, contact = true, rout = true, rally = true, step = true}
+M.TRIGGERS = {go = true, contact = true, rout = true, rally = true, waver = true, step = true}
 M.ACTIONS = {attack = true, attack_walk = true, shoot = true, move = true, move_walk = true, halt = true,
-    stop_fire = true, shadow = true, ability = true, ['end'] = true}
+    stop_fire = true, shadow = true, ability = true, kill = true, ['end'] = true}
 
 local function round(v, k)
     if type(v) ~= 'number' or v ~= v then return nil end
@@ -108,7 +110,8 @@ function M.main(bm, config, globals)
             fast = read(function() return u:is_moving_fast() end),
             r = read(function() return u:is_routing() end), w = read(function() return u:is_wavering() end),
             s = read(function() return u:is_shattered() end),
-            mp = round(read(cco, u, 'MoralePercent'), 3), phr = round(read(cco, u, 'PercentHpLostRecently'), 4),
+            mp = round(read(cco, u, 'MoralePercent'), 3), ms = read(cco, u, 'MoraleState'),
+            phr = round(read(cco, u, 'PercentHpLostRecently'), 4),
             fire = read(cco, u, 'IsFiringMissiles')}
         local effect = read(cco, u, 'MoraleGreatestEffect')
         if type(effect) == 'string' and effect ~= '' then row.mge = effect end
@@ -161,6 +164,12 @@ function M.main(bm, config, globals)
                 t = now - lane.events.go})
         elseif d == 'shadow' then
             lane.shadows[s.unit] = {target = s.target, d = s.d}
+        elseif d == 'kill' then
+            local men0 = read(function() return it.unit:number_of_men_alive() end) or 0
+            local n = math.floor(men0 * (s.share or 0))
+            local ok, e = pcall(function() it.unit:kill_number_of_men(n, false) end)
+            emit('probe_kill', {lane = lane.name, unit = s.unit, men0 = men0, n = n, ok = ok,
+                error = (not ok) and tostring(e) or nil, t = now - lane.events.go})
         elseif d == 'end' then
             end_lane(lane, 'step')
         end
@@ -201,6 +210,10 @@ function M.main(bm, config, globals)
                         ev.rout[role] = now
                         emit('probe_event', {lane = lane.name, kind = 'rout', role = role, t = now - ev.go})
                     end
+                    if row.w and not ev.waver[role] then
+                        ev.waver[role] = now
+                        emit('probe_event', {lane = lane.name, kind = 'waver', role = role, t = now - ev.go})
+                    end
                     if ev.rout[role] and row.r == false and not ev.rally[role] then
                         ev.rally[role] = now
                         emit('probe_event', {lane = lane.name, kind = 'rally', role = role, t = now - ev.go})
@@ -232,7 +245,7 @@ function M.main(bm, config, globals)
         local now = now_ms()
         for _, lane in ipairs(state.lanes) do
             lane.running = true
-            lane.events = {go = now, contact = {}, rout = {}, rally = {}, step = {}}
+            lane.events = {go = now, contact = {}, rout = {}, rally = {}, waver = {}, step = {}}
         end
         emit('probe_go', {lanes = #state.lanes})
         state.active = true

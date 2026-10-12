@@ -17,7 +17,8 @@ expendable units); routing enemies within 100 m +2.5 each (at most 5); under fir
 projectile hit; very tired -2, exhausted -6; an enemy worth 3x as much within 70 m -3; the charge +15 in blocks
 of 6 s from the charge sprint (morale.charge); the army beaten as a whole -120 (army destruction).
 
-States: wavering below 16 points; routing at 0 or below (not within 10 s of a rally); the third
+States: wavering below 16 points; routing at 0 or below (not within 10 s of a rally; with morale.waver_timer on: below
+0 and only after waver_base_timeout tenths of a second - 2.5 s - of unbroken wavering); the third
 rout shatters, as does falling below the database's broken band (-50 points) during army destruction. A routing
 unit's morale follows its target like any other's (without the fight terms) and it rallies once the morale is above
 0, it has routed morale.rally_after_s and no standing enemy is within morale.rally_free_m (its army not collapsing);
@@ -332,7 +333,18 @@ def step(u, ctx, params, dt):
 
     # Rout.
     no_rout = u["rally_s"] < R["post_rally_no_rout_timer"]
-    start = alive & ~u["r"] & (M <= 0) & ~(no_rout & (u["rout_count"] > 0))
+    timer = cal.get("waver_timer") or {}
+    if timer.get("on") and "waver_s" in u:
+        # The waver timer (morale.waver_timer; the probe timer, build/morale-probe/timer.json): a unit routs only once
+        # its morale is below 0 (at exactly 0 it still wavers) AND it has wavered without a break the database's
+        # waver_base_timeout in tenths of a second (25 -> 2.5 s; the probe with it x10 routed 25.5 s after the wavering,
+        # x0 at once). waver_s: seconds since the first step of the current wavering (0 on that step).
+        wav = alive & ~u["r"] & (M < R["ums_wavering_threshold_upper"])
+        u["waver_s"] = torch.where(wav & u["w"], u["waver_s"] + dt, torch.zeros_like(u["waver_s"]))
+        ripe = u["waver_s"] >= R["waver_base_timeout"] * float(timer["tick_s"]) - 1e-6
+        start = alive & ~u["r"] & (M < 0) & ripe & ~(no_rout & (u["rout_count"] > 0))
+    else:
+        start = alive & ~u["r"] & (M <= 0) & ~(no_rout & (u["rout_count"] > 0))
     u["r"] = u["r"] | start
     u["rout_count"] = u["rout_count"] + start.float()
     u["s"] = u["s"] | (start & (u["rout_count"] >= R["shatter_after_rout_count"]))
