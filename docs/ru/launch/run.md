@@ -163,7 +163,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/launch.ps1 -T
 powershell -NoProfile -ExecutionPolicy Bypass -File build/steps/human_vs_net.ps1 -Ckpt build/v2/itN.pt -Battle 1
 ```
 
-- `-Battle 1..8` — бой из набора `build/steps/watch_set8.ps1` (1 = зерно 1000900014, 2 — оно же с обменом армий;
+- `-Battle 1..8` — бой старого экзамена из 8 боёв (до замены пар, [экзамен](gate.md#экзамен); 1 = зерно 1000900014, 2 — оно же с обменом армий;
   3, 4 — 1000903669; 5, 6 — 1000901199; 7, 8 — армии прогона 20261007-091416). Человек получает армию, которой в
   этом бою играла сеть, и обороняется; сеть — армию ИИ игры и атакует. `-Greedy` — самый вероятный приказ сети.
 - Скрипт собирает `tools.build human ... --enemy-ai net --free-speed --timeout 3600 --stall-minutes 30

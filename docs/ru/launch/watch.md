@@ -47,7 +47,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/watch.ps1
 
 Быстрая проверка: `-Speed 20 -LingerSeconds 0`.
 
-Набор из 8 боёв против `ai_like` вместо ИИ игры: `build/steps/watch_set8.ps1 -Ckpt build/v2/itN.pt -EnemyAi ai_like`.
+[Экзамен](gate.md#экзамен) (10 боёв) против `ai_like` вместо ИИ игры: `build/steps/watch_set8.ps1 -Ckpt build/v2/itN.pt -EnemyAi ai_like`.
 
 Подпись над армией в игре (имя генерала в сценарии) — кто управляет стороной: «Нейросеть S24_3», «ИИ игры (нормальная)», «Скрипт ai_like», «Человек», «Планировщик CA (атака)». Её ставит сборка (`tools.build nn-arena|human`): имя сети — из `--net-name <чекпойнт>` (`build/v2/itS24_3.pt` → `S24_3`, `…/S24/m5.pt` → `S24/m5`; скрипты `build/steps` передают свой `-Ckpt`), свой текст — `--label-own` / `--label-enemy`. Игра идёт на русском (язык Steam), кириллица в шрифтах есть. Имя ничем не читается: мост ищет отряды по `script_name`.
 

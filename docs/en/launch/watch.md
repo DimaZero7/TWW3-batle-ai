@@ -47,7 +47,7 @@ Options:
 
 A quick check: `-Speed 20 -LingerSeconds 0`.
 
-The 8-battle set against `ai_like` instead of the game's AI: `build/steps/watch_set8.ps1 -Ckpt build/v2/itN.pt -EnemyAi ai_like`.
+The [exam](gate.md#exam) (10 battles) against `ai_like` instead of the game's AI: `build/steps/watch_set8.ps1 -Ckpt build/v2/itN.pt -EnemyAi ai_like`.
 
 The label over each army in the game (the general's name in the scenario) says who commands the side: «Нейросеть S24_3» (network), «ИИ игры (нормальная)» (the game's AI, Normal), «Скрипт ai_like» (script), «Человек» (human), «Планировщик CA (атака)» (CA's planner). The build sets it (`tools.build nn-arena|human`): the network's name from `--net-name <checkpoint>` (`build/v2/itS24_3.pt` → `S24_3`, `…/S24/m5.pt` → `S24/m5`; the `build/steps` scripts pass their `-Ckpt`), a text of your own with `--label-own` / `--label-enemy`. The game runs in Russian (the Steam language), its fonts have Cyrillic. Nothing reads the name: the bridge finds units by `script_name`.
 

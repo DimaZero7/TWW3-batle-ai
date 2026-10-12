@@ -1330,6 +1330,30 @@ RTX 5070 Ti, 1024 battles, up to 19 units a side, 64 decisions an update, at the
 In the update, the GRU's 64 steps and the attention's float32 backward remain the main cost. TF32 is
 on (`allow_tf32`).
 
+## What has been shown to help
+
+The only yardstick is the [exam in the game](../launch/gate.md#exam): the network's battles against the game's AI at
+Normal, pairs with the armies swapped. **Trade** is the enemy's losses over ours (above 1 - worse for the enemy). One
+exam of 8 battles is noisy: neighbouring networks of one line differ by 1-2 wins (S19-S21: 5, 4, 6), so an effect is an
+average over several exams. Numbers: `build/compare/itS*.json` (not in Git).
+
+**In training now (line S):** PPO v2 with the [v2 reward](#reward); opponents (`--mix`) self-play 0.35,
+[past versions](#past-versions) 0.38, `ai_like` 0.15, `nearest` 0.02, of the self / past battles 0.17 with
+[kiting](#kiting-in-self-play); the spread of inexact simulator numbers `--dr`; [v2 armies](armies.md#the-v2-scheme-numbers-of-units-first)
+(`--armies v2`) with the [new units](units.md#ratling-gun-plague-monks-censer-bearers-giant-rats); parts of 30-60 min,
+each from the last network of the previous one; [learning by observation](#learning-by-observation) is off.
+
+| Change | What is on now | Effect on the exam in the game | Details |
+|---|---|---|---|
+| Past-version pool of networks with the full enemy view and of equal strength only | the pool holds line S networks (from S9: they see the enemy's morale, fatigue, ammunition); older networks without this input charge head-on and teach nothing | S12 (trained against S9, S10, winning ~50 % against the pool) - 5/8, trade 1.06: the first trade above 1. Before line S the best network K3 - 5/8, 0.96. S12's style: shooters lose 0.52 of their cost against S10's 0.65 (`build/s12/`) | [past versions](#past-versions) |
+| v2 army generator: numbers of units first (15-19 units 40 %, 10-14 - 30 %, 5-9 - 20 %, 1-4 - 10 %), budget 2 000-15 000, equal gold | `--armies v2` from S14 | S14-S19 and S21: 6, 6, 6, 6, 6, 5, 6 of 8 - 5.9 on average over 7 exams, trade 1.01-1.10. Before it S1-S13: 0-5 of 8, 3.0 on average, trade 0.55-1.06. One exam dipped: S20 4/8, 0.95 | [v2 armies](armies.md#the-v2-scheme-numbers-of-units-first) |
+| New units: Ratling Gun, Plague Monks, Censer Bearers, two kinds of Giant Rats, halberdiers | the `units_v2` list in `config/nn/pools.json` from S15 | the exam did not drop: S15 6/8, trade 1.10 (S14 without them - 6/8, 1.04) | [unit cards](units.md#ratling-gun-plague-monks-censer-bearers-giant-rats) |
+| Simulator fixes from game battles: shooters keep a fleeing target; the wave and the first strike only at the first contact; a 2.5 s wavering timer; bullets slow down; pursuit, envelopment, stuck units; beasts by body width; a lord under "hold" in melee tires | all in `config/nn/sim.json` and the simulator code | the "ever-fresh lord" loophole closed: in the twin the network's lord was never out (0 of 192 battles), while in every loss in the game the lord was out. Before the lord fix S22 - 7/8, 1.13; right after it a transition (S23 4/8, 1.03; S23b 3/8, 0.94); then S23_2 - 8/8, 1.15, the first exam without a loss | [simulator](simulator.md#fatigue-calibration), [pursuit](simulator.md#pursuit-routing-and-casualty-windows) |
+
+On but not measured separately: kiting in self-play, `--dr`, the `ai_like` share 0.15 (from S24; before 0.3 with self-play
+0.28 and past 0.3). S24 is the first network on the [new exam](../launch/gate.md#exam) of 10 battles; its numbers are not
+compared with the old exam. Failed changes - [below](#tried-and-rejected).
+
 ## What is missing
 
 - A wider network that beats the small one: the `small` preset (0.84 M) shows interference (new

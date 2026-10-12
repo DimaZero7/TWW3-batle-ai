@@ -164,7 +164,7 @@ by observation).
 powershell -NoProfile -ExecutionPolicy Bypass -File build/steps/human_vs_net.ps1 -Ckpt build/v2/itN.pt -Battle 1
 ```
 
-- `-Battle 1..8`: a battle of the set `build/steps/watch_set8.ps1` (1 = seed 1000900014, 2 = the same with the armies
+- `-Battle 1..8`: a battle of the old 8-battle exam (before its pairs were replaced, [exam](gate.md#exam); 1 = seed 1000900014, 2 = the same with the armies
   swapped; 3, 4 = 1000903669; 5, 6 = 1000901199; 7, 8 = the armies of run 20261007-091416). The human gets the army
   the network had in that battle and defends; the network gets the game AI's army and attacks. `-Greedy`: the
   network's most likely order.

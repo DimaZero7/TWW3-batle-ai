@@ -13,6 +13,37 @@ look at the pair gold (strongly negative ≈ a soft 0–2); 0–2 — the game's
 the battles are analysed for bugs and simulator-vs-game gaps ([pair verdicts](#what-the-gate-writes)).
 It is a quick check before the night one ([readiness](../training/network.md#readiness)), not that check.
 
+## Exam
+
+The working check of a training line is the **exam** after each part: a fixed set of battles against the game's AI at
+Normal, pairs with the armies swapped (the network plays each army of a pair), the same starts for every network - so
+networks are compared with each other. Run: `build/steps/watch_set8.ps1 -Ckpt build/v2/itN.pt` (the `build/` scripts
+are not in Git); the result and the comparison with the twin in the simulator - `build/compare/itN.json`
+(`bash build/steps/compare_set.sh N`).
+
+**Now - 10 battles, 5 pairs** on [v2 armies](../training/armies.md#the-v2-scheme-numbers-of-units-first) with the new
+units, of different sizes (`--armies v2`):
+
+| Pair | Seed | Armies (units with the lord) | Budget |
+|---|---|---|---|
+| small | 1000700025 | 3 and 4 | 2 144 |
+| medium | 1000700000 | 11 and 11 | 8 438 |
+| large | 1000700017 | 18 and 14 | 5 714 |
+| full | 1000700001 | 17 and 20 | 6 316 |
+| rich | 1000700260 | 16 and 17 | 14 263 |
+
+**The old exam** - 8 battles, 4 pairs on v1 armies (`build/steps/watch_set8_old.ps1`): seeds 1000910095, 1000903669,
+1000901199 and the armies of run `20261007-091416`. Its numbers (`build/compare/itS*.json` up to S23_2) are not compared
+with the new exam.
+
+**Replacement rule** (the user's): a pair won 2-0 on three exams in a row is replaced by a new one - the network already
+passes it and it tells nothing more; when every battle of the exam is won, the whole exam is replaced, to check that the
+network can play other armies too. So pair 1000900014 (2-0 on S14-S17) was replaced by 1000910095, and after S23_2's 8
+of 8 the old exam was replaced by the current one.
+
+**Noise:** neighbouring networks of one line differ by 1-2 wins (S19-S21: 5, 4, 6 of 8), so a network is judged by pairs
+and on average over several exams. What has been shown to raise the exam - [what helped](../training/training.md#what-has-been-shown-to-help).
+
 ## Launch
 
 Docker Desktop running, the game closed:

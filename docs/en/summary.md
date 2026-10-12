@@ -31,10 +31,15 @@ flowchart LR
 
 ## Where we are
 
-- **In the game the network wins less than half:** the exams of line S (sets of 8 battles,
-  `build/compare/itS*.json`) - 1-5 wins of 8, trade (enemy losses over ours, in gold) 0.75-1.06. The same 8 battles
-  in the simulator (the "twin": the same armies, the network against the `ai_like` script) - 5-7 of 8, trade
-  1.04-1.23. The simulator is still kinder to the network than the game.
+- **Level in the game:** on the old exam (8 battles against the game's AI at Normal, pairs with the armies swapped;
+  `build/compare/itS*.json`) line S networks since S14 win 5.6 of 8 on average (12 exams, 3 to 8), trade (enemy losses
+  over ours) 0.94-1.15; the best is S23_2: 8 of 8, 1.15. Before line S the best was K3: 5 of 8, 0.96. After 8 of 8 the
+  exam was replaced by a new one - 10 battles on v2 armies with the new units ([exam](launch/gate.md#exam)); the first
+  network on it is S24.
+- **What raised it** ([what helped, with numbers](training/training.md#what-has-been-shown-to-help)): a past-version pool of
+  equal networks with the full enemy view only (S12: 5/8, the first trade above 1); v2 armies (from S14: 5.9 of 8 on
+  average against 3.0 before); simulator fixes from game battles, the main one closing the "ever-fresh lord" loophole
+  (S23_2: 8 of 8).
 - **How we look for the gap:** the automatic hole finder (`build/holes`, report `build/holes/report.md`): a step
   replay of ~640 recorded battles and the acceptance number A - how far the twins of the panel's 56 battles are from
   the game (lower is better, ~0.30).
@@ -51,7 +56,7 @@ largest hole.
 | Step | What | How |
 |---|---|---|
 | 1. Training | 40 min from the previous network, no checks in the simulator | `bash build/steps/v2_iterW.sh NAME 40 INIT` (survives a crash: the next attempt starts from `latest.pt`) |
-| 2. Battles in the game | 8 battles: 3 evaluation seeds + the armies of run 20261007-091416, each twice with the armies swapped | `build/steps/watch_set8.ps1 -Ckpt build/v2/itN.pt` |
+| 2. Exam in the game | 10 battles: 5 seeds of v2 armies of different sizes, each twice with the armies swapped ([exam](launch/gate.md#exam)) | `build/steps/watch_set8.ps1 -Ckpt build/v2/itN.pt` |
 | 3. Twin | the same 8 starts in the simulator (the network against `ai_like`, 4 copies); a "game / twin" table and the 3-5 largest behaviour gaps | `bash build/steps/compare_set.sh N` → `build/compare/set_vs_twin.py` |
 | 4. Probe | the largest gap is staged as one mechanic in the game and in the simulator alike (lanes of units, everything recorded) | `tools/nn/charge_probe.py` + `src/entries/charge_probe.lua`, plans `--plan` ([probe](apps/entries.md#charge_probe---the-melee-probe-one-mechanic-game-and-simulator-alike)) |
 | 5. Simulator fix | the game's rule from the probe, behind a switch in `config/nn/sim.json` | an agent; a test at once |
@@ -210,9 +215,9 @@ battles a minute -16 %).
 the budget) + a price for an order change 0.006 ("keep" and a repeat are free)
 ([reward](training/training.md#reward)).
 
-**Opponents** (`--mix`, line S - `build/steps/v2_iterW.sh`): self-play 0.28, past versions 0.3 (pool 12 and the
+**Opponents** (`--mix`, line S - `build/steps/v2_iterW.sh`): self-play 0.35, past versions 0.38 (pool 12 and the
 networks S9, S10; drawn by quality scores as OpenAI Five's, one version a battle, [past versions](training/training.md#past-versions)),
-`ai_like` 0.3 (a script modelled on the game's AI), `nearest` 0.02 (everyone runs at the nearest enemy); of the
+`ai_like` 0.15 (a script modelled on the game's AI; 0.3 before S24), `nearest` 0.02 (everyone runs at the nearest enemy); of the
 self / past battles 0.17 with kiting by situation (`--kite-share`, ~10 % of all battles)
 ([opponents](training/training.md#battles-and-opponents)); the scripts decide at the game's cadence - once a
 second, their orders as late as the network's. The game's AI takes no part in training - it is
@@ -275,7 +280,7 @@ Details: [bridge](apps/bridge.md) · [watch a network battle](launch/watch.md) �
 
 ## In-game check
 
-The working check is **a set of 8 battles** after each iteration (`watch_set8.ps1`, above): 4 pairs, in
+The working check is **the exam** after each iteration (`watch_set8.ps1`, above; [exam](launch/gate.md#exam)): 5 pairs, in
 each the network plays both armies (2-0 - the network beats the AI with both armies; 1-1 - the army
 decides; 0-2 - the AI is better). The set is compared with its twin at once - the main source of
 simulator holes. The general check tool is
