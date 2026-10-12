@@ -66,3 +66,32 @@ def test_battles_are_found_and_split_by_start_both_sides_together_the_exam_apart
     for s in p["val"]:                                                 # both sides of a held-out battle
         assert sum(x.run == s.run for x in p["val"]) == 2
     assert p == ds.split(sides, 0.25)                                  # the same every time
+
+
+def test_a_side_recorded_with_the_old_token_loads_in_todays_width(tmp_path, monkeypatch):
+    """Data recorded before the token grew (11.10.2026, 155 columns): the loader puts its columns at their new places
+    (observe.tokens.widen, observation.old_columns) and zeros in the new ones; the network's width loads as it is."""
+    from tools.nn.model import observation as ob
+    from tools.nn.observe.tokens import widen
+    old = 155
+    cols = ob.old_columns(old)
+    assert cols is not None and ob.TOKEN > old
+    L, N = 3, 2
+    tok = np.random.default_rng(0).random((L, N, old)).astype(np.float32)
+    path = tmp_path / "b.npz"
+    np.savez_compressed(path, s0_tokens=tok, s0_ctx=np.zeros((L, 4), np.float32), s0_geo=np.zeros(3, np.float32),
+                        s0_t=np.arange(L, dtype=np.float32))
+    lab = {k: np.full((L, N), -1, np.int64) for k in ("kind", "target", "point", "commit", "order")}
+    lab.update({k: np.zeros((L, N), bool) for k in ("run", "run_known", "alt")})
+    seen = {}
+    monkeypatch.setattr(ds, "student_labels", lambda a: seen.setdefault("w", a["tokens"].shape[-1]) and dict(lab))
+    monkeypatch.setattr(ds, "replay", lambda a, l: (np.zeros((L, N), bool), np.zeros((L, N)), l["kind"], 0))
+    side = ds.Side(path, 0, "r", "g", "exam", L, N)
+    out = ds.Loader(N).load(side)
+    assert seen["w"] == ob.TOKEN                       # the labels and the replay see today's token too
+    assert out["tokens"].shape == (L, N, ob.TOKEN)
+    assert np.array_equal(out["tokens"][..., cols], tok)
+    rest = np.setdiff1d(np.arange(ob.TOKEN), cols)
+    assert not out["tokens"][..., rest].any()
+    now = np.ones((L, N, ob.TOKEN), np.float32)
+    assert widen(now) is now

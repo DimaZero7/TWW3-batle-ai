@@ -25,27 +25,12 @@ import numpy as np
 import torch
 
 from tools.nn.observe import loss as obs_loss
+from tools.nn.observe.tokens import widen as _tokens     # converted before the token grew (11.10.2026)
 
 OBS = ("tokens", "ctx", "own", "attend", "ctrl", "target_ok", "pos", "abil", "abil_ok")
 LABELS = ("kind", "target", "point", "run", "run_known", "alt")
 ADV = ("critic", "mc", "window20")
 NEGLIGIBLE = 1e-6       # the term's weight below this: off (module doc)
-
-
-def _tokens(a):
-    """A converted battle's tokens [L, N, F] in today's token: one converted before the new units (11.10.2026; 155
-    columns) gets its columns at their new places and zeros for the new ones (observation.old_columns), as the
-    network's weights (encoder.py); today's width as it is."""
-    from tools.nn.model import observation as ob
-    if a.shape[-1] == ob.TOKEN:
-        return a
-    cols = ob.old_columns(a.shape[-1])
-    if cols is None:
-        raise SystemExit(f"converted tokens of {a.shape[-1]} columns, the network's {ob.TOKEN}: convert again "
-                         "(python -m tools.nn.observe.convert)")
-    out = np.zeros(a.shape[:-1] + (ob.TOKEN,), a.dtype)
-    out[..., cols] = a
-    return out
 
 
 def _pad(a, N, axis=1, value=0):

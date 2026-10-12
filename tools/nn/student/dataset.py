@@ -31,6 +31,7 @@ from pathlib import Path
 import numpy as np
 
 from tools import config as project
+from tools.nn.observe.tokens import widen
 
 DIRS = (project.BUILD / "observe" / "data", project.BUILD / "student" / "data")
 OBS = ("tokens", "ctx", "own", "attend", "ctrl", "target_ok", "pos", "abil", "abil_ok")
@@ -221,6 +222,8 @@ class Loader:
         with np.load(side.path) as z:
             pre = f"s{side.side}_"
             a = {k[len(pre):]: z[k] for k in z.files if k.startswith(pre)}
+        if "tokens" in a:
+            a["tokens"] = widen(a["tokens"])        # recorded before the token grew (11.10.2026): today's width
         key = side.name
         if key not in self.cache:
             lab = student_labels(a)
