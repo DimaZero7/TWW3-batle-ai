@@ -145,6 +145,8 @@ loop - the replay of the network's 72 set battles.
 **Known mismatches** (details - ["What is missing"](training/simulator.md#what-is-missing)):
 
 - a worn unit in melee loses health faster than in the game (the `dmgmelee` probe is being analysed);
+- greatswords in melee take ~0.75 of the game - not because of armour (the `armour` probe: armour 90 on stormvermin
+  gives no shortfall) but because stormvermin as strikers fall short x0.76-0.84 on any target; the cause is not found;
 - fewer routs and rallies than in the game; in the twin our units rout less than in the game, the AI's
   more;
 - the AI's shooters lose less in the replay than in the game (0.34 health against 0.42): one running out of melee loses

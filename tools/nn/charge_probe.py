@@ -137,6 +137,12 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           (morale_rows: MoralePercent, MoraleState, wavering), fatigue, melee flag, kills; every 1 s both units' soldier
           places, all fight (men_after_s 260). Lanes on a 3 + 2 grid (DMGMELEE_PLACES: 300 m apart in a row, rows 400 m
           apart: 5 lanes 250+ m apart do not fit in one row inside the map's |x| <= 480) - 2 battles, lanes rotated;
+  armour  armour in melee (build/simreal/melee_gap.md: greatswords, armour 95, lose 0.70-0.77 of the game's in the twin to
+          stormvermin and to clanrats, swordsmen / spearmen, armour 30, 0.9-1.18): the dmgmelee recipe (both attack from
+          3 m, 240 s, fearless, whole units) on pairs that split the target's armour from the hit chance and the unit:
+          swordsmen (base-heavy 21 / 7 AP), halberdiers (AP-heavy 8 / 20) and spearmen without shields (19 / 6, low hit
+          chance) v stormvermin with shields (armour 90), greatswords v clanrats with shields (armour 95 / 25), swordsmen v
+          clanrats (the control, armour 30 / 25) - 2 battles of 5 lanes on the dmgmelee grid, rotated;
   reengage  the opening wave of a second contact (sim.json melee.wave was measured on fresh pairs only; in the gate battles
           tired units back in melee after 10+ s out of it lose little more in their first 10 s than later: x1.46 above half
           health, x1.12 at or below it, fresh x2.44): both attack each other at a run from 30 m, fearless; (1) swordsmen v
@@ -383,7 +389,7 @@ UNIT_PLANS = ("ratling", "suppress", "suppress2", "censer", "wolfrats", "wolfpoi
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
          "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "leave", "skirmish", "skirmish2", "shootcontact",
-         "holdmelee", "holdlord", "recontact", "pursuit", "passby") + UNIT_PLANS
+         "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour") + UNIT_PLANS
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
 WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
@@ -719,6 +725,13 @@ def battles(plan):
                 dmg("spearsh", "clanrat"), dmg("general", "svsh")]
         for b in (base, rotate(base, 2)):
             out.append([dict(l, place=p) for l, p in zip(b, DMGMELEE_PLACES)])
+    elif plan == "armour":
+        def ar(attacker, target):
+            return lane(attacker, target, "attack_walk", "both", gap_m=3, fight_s=240, morale_rows=True, kind="full")
+        base = [ar("swords", "svsh"), ar("halb", "svsh"), ar("spear", "svsh"), ar("gs", "clanrat"),
+                ar("swords", "clanrat")]
+        for b in (base, rotate(base, 2)):
+            out.append([dict(l, place=p) for l, p in zip(b, DMGMELEE_PLACES)])
     elif plan == "reengage":
         def re(attacker, target, kind):
             common = dict(gap_m=30, kind=kind, lane_dx=REENGAGE_LANE_DX)
@@ -978,7 +991,7 @@ def run_config(plan, index):
                              else SKIRMISH2["men_near_m"] if plan == "skirmish2"
                              else SHOOTCONTACT["men_near_m"] if plan == "shootcontact" else 60),
               # the soldiers' places: the first 30 s (the charge plan) or the whole fight (hit: men in contact)
-              "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2", "dmgmelee", "reengage") else 95 if plan in ("defender", "wave", "wavemiss", "wavemiss2", "leave", "skirmish", "skirmish2",
+              "men_after_s": (REFORM_MEN_S if plan in ("reform", "reform2", "dmgmelee", "armour", "reengage") else 95 if plan in ("defender", "wave", "wavemiss", "wavemiss2", "leave", "skirmish", "skirmish2",
                                                                                                   "shootcontact", "recontact")
                               else 90 if plan in ("hit", "move", "vv") else 30),
               "lanes": lanes, "park": park}

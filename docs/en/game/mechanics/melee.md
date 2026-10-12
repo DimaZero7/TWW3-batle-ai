@@ -51,6 +51,9 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
     digits: a General-on-General blow is 244.9 HP on average in the game, 245.1 by the rule (334 blows);
     infantry blows on a lord are whole numbers within the rule, rounded to the nearest
     (`build/damage/spec.md` D2).
+  - Checked in the game: **the target's armour by itself makes no gap** (the `armour` probe, below in "What is still
+    unclear"). Shields in the database give no armour or defence in melee (`unit_shield_types` `shield_armour_value`,
+    `shield_defence_value` - 0 on all 24 shields).
 - **Order of modifiers**: base → bonus vs type → charge → height → armour (base only) →
   resistances (summed, capped at 90 %) → rounding (base and AP rounded separately). Overkill
   is lost. Base damage has no floor (can be 0). WH3 · [CA damage blog][dmg] · high.
@@ -504,6 +507,36 @@ unit is out of contact ~4 s after the order (its own melee flag goes off only af
 - **A weakening unit's blows (the `reform`, `reform2` probes).** The striker's losses cut its blows (swordsmen at 30 %
   deal 58 / 38 / 24 / 6 HP/s while they go 34 -> 10), the target's do not. Unexplained: full clanrats' blows fall
   38 -> 15 with 145 -> 46 men alive, the swordsmen's stay ~32 to the end.
+- **Armour is not the cause; stormvermin fall short as strikers** (the `armour` probe, `tools/nn/charge_probe.py`, 2 battles
+  of 5 lanes, `build/charge-probe/runs/20261012-101114`, `-101259`; with `dmgmelee`, `reengage`, `reform2`, `wave`; analysis
+  `build/agent-armour`). The `dmgmelee` recipe: both attack from 3 m, 240 s, fearless, whole units. The pairs split the
+  target's armour, the hit chance and the unit itself. Sim / game, health lost 5-30 s after contact (before fatigue and
+  before units die out):
+
+  | Striker -> target | Target armour | Hit chance | Sim / game |
+  |---|---:|---:|---:|
+  | spearmen -> stormvermin | 90 | 11 % | 1.34 |
+  | halberdiers -> stormvermin | 90 | 17 % | 1.15 |
+  | swordsmen -> stormvermin | 90 | 23 % | 1.06 |
+  | greatswords -> stormvermin | 90 | 37 % | 1.05 / 1.34 |
+  | clanrats -> greatswords | 95 | 29 % | 0.85 |
+  | stormvermin -> greatswords | 95 | 43 % | 0.76 / 0.84 |
+  | stormvermin -> swordsmen / halberdiers / spearmen | 30 | 31-41 % | 0.76 / 0.77 / 0.79 |
+  | clanrats -> swordsmen (6 cells) | 30 | 27 % | 0.79-1.11 |
+  | clanrats -> spearmen with shields | 30 | 17 % | 1.21 |
+  | swordsmen -> clanrats (6 cells) | 25 | 37 % | 0.90-1.07 |
+  | greatswords -> clanrats | 25 | 51 % | 0.89 |
+
+  Armour 90 gives no shortfall (stormvermin take as much as in the game or more, from the armour-piercing halberds and
+  from the swordsmen's base damage alike). The greatswords (95) fall short mostly against stormvermin - and stormvermin
+  fall short as much against swordsmen with armour 30: it is the stormvermin as strikers (x0.76-0.84 on any target), not
+  the target's armour. Whole battles agree (72 battles, `build/simreal/breakdown.npz`, melee): stormvermin as a target
+  0.96-1.11, greatswords 0.72-0.74. What makes stormvermin stronger than the rule in the game is not found (their men
+  within 3.15 m of the target are 0.8-0.9 of the clanrats', as in the simulator by their 1.8 m file step; per man in reach
+  the game gives 0.62-0.74 of the rule, clanrats 0.36-0.53) - OPEN. A second trace: weak strikers (hit chance 11-17 %)
+  are stronger in the simulator than in the game, strong ones (37-51 %) weaker; Stand Your Ground and the flagellants
+  showed the same (above). Apart from armour and from this: shooters in melee (armour 20) take 0.46-0.64 of the game in
+  whole battles.
 
 - **Hold in melee.** In whole battles the network's units in melee kill 0.08 a second under hold (twin 0.21), while
   in the probes a halt after attacking strikes 0.69–0.73 of the control (4 lanes; rule `hold_rate` 0.5) - the gap
@@ -572,6 +605,7 @@ unit is out of contact ~4 s after the order (its own melee flag goes off only af
 | The wave and the first strike anew after 10 s out of contact; the first strike by the wave's men | a second contact struck as the first (0–3 s over 10–20 s 4.7, game 0.24–1.35); the first 441 HP/s at 0–1 s (game 184–219) | the `recontact` probe and the melee probe ([simulator](../../training/simulator.md#tried-and-rejected)) |
 | Attack − defence at weight 0.1 in formations (before 06.10.2026) | held the four pairs (51 of 54 within 20 %), but every addition to attack and defence — abilities, fatigue, charge, flanks — worked ten times weaker | not the game's rule; the flat pairs are explained by the cost of a miss and overkill |
 | A fixed interval, p / interval, at weight 1 in formations | worse on 121 battles than p / (p × interval + 0.5) (`build/hitchance` fit2) | a miss in the game costs less than the interval |
+| The same on the melee probes (formation on formation, `fighting_files` 1.0 and 1.3 instead of 0.5) | 30 pair directions over 5-30 s (the `armour`, `dmgmelee`, `reengage`, `wave` probes): the spread of sim / game sd log 0.153 -> 0.215; swordsmen and greatswords strike x1.2-1.4 the game, clanrats x0.7-0.9 | the pairs do not fit; the law in hit chance is steeper in the game than ours, but not p / interval (`build/agent-armour/calib*.log`) |
 | The exact overkill step (whole blows per man) | loss-rate error 0.174 against 0.146 without overkill and 0.144 smoothed; worse across all 200 resamples | the step is blurred in formations (candidates: height between models, blows on the wounded) |
 | The formation step from `build/mass/spec.md` (the Empire 1.65 × 1.75) | the Empire's roster depth ×0.77–0.92 | these are the numbers from the table's neighbouring row: in the `unit_spacings` row nine numbers come before the key |
 | A holding unit strikes in full with its men in contact (no `hold_rate`; the reading of `build/melee2/spec.md` 3) | the probe's holding units strike twice the game: clanrats lose 23 HP/s on braced spearmen (game 12), 20 on spearmen facing away (10), 35 on swordsmen (17) | in the game a holding formation strikes at 0.49–0.52 of the rule; only a lord without an order strikes in full |
