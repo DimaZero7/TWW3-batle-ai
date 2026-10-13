@@ -250,6 +250,14 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           lane ends 30 s after contact 2 (after2_s) - 3 battles of 6 lanes 200 m apart, rotated. 'recontact' prints per
           kind the HP lost a second in 0-3 / 3-10 / 10-20 s after each contact and 0-3 over 10-20; --sim adds the
           simulator on the same lanes, --layout the simulator alone on the plan's own places (before the game).
+  walkpass  a unit walking past an enemy (build/lordrout: in the exam replay units under a far move order spend 2.5-8x
+          the game's time within 12 m of an enemy, standing 56-70 % of it, where the game's pass at 2.1-2.5 m/s): swordsmen
+          get a move (lane mode 'pass') from 30 m ahead to 40 m behind the clanrats' front, beside them with an edge gap of
+          0 / 3 / 6 / 10 m - the clanrats idle (halted, never ordered: 'idle') or busy (attacking an Empire spearmen unit
+          placed at their front at the go, lane.t_attack_extra: 'busy') - or straight through them ('through'); and
+          'inmelee': swordsmen <-> clanrats from 3 m, 10 s after contact the swordsmen get a move 40 m aside.
+          Battle 1 at a run (45 s a lane), battle 2 at a walk (pass_walk, 75 s), lanes rotated - 2 battles of 10 lanes.
+          Its table: python -m tools.nn.walkpass_probe [runs] [--sim].
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -392,7 +400,12 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
          "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "ratlingrt", "ratlingrt2",
          "leave", "skirmish", "skirmish2", "shootcontact",
-         "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour") + UNIT_PLANS
+         "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass") + UNIT_PLANS
+# the walkpass plan: swordsmen walk / run (a move order, 'pass') past clanrats - idle (halted, never ordered) or busy
+# (fighting an Empire spearmen unit they attack at the go) - edge_m apart edge to edge (the formations 30 m wide), or
+# straight through them ('through'), from gap_m ahead to beyond_m behind the clanrats' front; 'inmelee': a fight from 3 m,
+# 10 s after contact a move inmelee_dx aside. Battle 1 at a run, battle 2 at a walk (lanes rotated)
+WALKPASS = {"gap_m": 30, "beyond_m": 40, "max_s": {True: 45, False: 75}, "gaps": (0, 3, 6, 10), "inmelee_dx": 40}
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
 WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
@@ -903,6 +916,30 @@ def battles(plan):
                         max_s=10 + RECONTACT["fight_s"] + cap + 30 + RECONTACT["after2_s"], **common)
         base = [rc(k) for k in RECONTACT_KINDS]
         out += [rotate(base, k) for k in (0, 2, 4)]
+    elif plan == "walkpass":
+        g = WALKPASS
+
+        def wp(kind, gap, run):
+            common = dict(gap_m=g["gap_m"], fight_s=g["max_s"][run], max_s=g["max_s"][run], answer=False, kind=kind,
+                          edge_m=gap, a_w=WIDTH_M, t_w=WIDTH_M, at_run=run)
+            if kind == "inmelee":
+                # a fight (both attack from 3 m), 10 s after contact the swordsmen get a move 40 m aside
+                return lane("swords", "clanrat", "attack_walk", "both", **dict(common, gap_m=3),
+                            after={"at_s": 10, "kind": "move_near", "dx": g["inmelee_dx"], "dz": 0, "walk": not run})
+            a_dx = 0.0 if kind == "through" else WIDTH_M + gap        # centre to centre: the half widths + the edge gap
+            extra = {}
+            if kind == "busy":
+                # an Empire spearmen unit in front of the clanrats (its front 1.5 m from theirs), attacked by them at the go
+                e_depth = depth(UNITS["spear"][0], UNITS["spear"][1], WIDTH_M)
+                t_depth = depth(UNITS["clanrat"][0], UNITS["clanrat"][1], WIDTH_M)
+                extra = dict(extras=[{"short": "spear", "dx": 0, "dz": round(t_depth / 2 + 1.5 + e_depth / 2, 1)}],
+                             t_attack_extra=True)
+            return lane("swords", "clanrat", "pass", "hold", a_dx=a_dx, pass_beyond_m=g["beyond_m"], pass_walk=not run,
+                        **common, **extra)
+        for k, run in enumerate((True, False)):
+            base = [wp(kind, gap, run) for kind in ("idle", "busy") for gap in g["gaps"]] + \
+                [wp("through", 0, run), wp("inmelee", 0, run)]
+            out.append([dict(l, place=p) for l, p in zip(base, rotate(list(SKIRMISH2_SHORT), 5 * k))])
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
@@ -1313,7 +1350,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
         st.u[k] = st.u[k] + ((torch.rand(st.u[k].shape, generator=gen) * 2 - 1) * jitter_m).to(device)
     B, N = st.B, st.N
     slot = {r: torch.tensor([sim_scenario.slots(a, per_side).get(r, -1) for a in armies], device=device)
-            for r in ("a", "tg", "l", "t2")}
+            for r in ("a", "tg", "l", "t2", "e1")}
     # everyone fearless but a target that keeps its morale (t_morale: the routmob plan)
     keep = torch.zeros((B, N), dtype=torch.bool, device=device)
     for b, ln in enumerate(meta):
@@ -1444,9 +1481,10 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                 st.u["range"][b, T] = 0.0
             elif mode[b] == "pass":
                 # the skirmish2 plan's 'pass' (entries/charge_probe.lua): a run straight ahead from its own place to
-                # pass_beyond_m behind the lane's z, never attacking
+                # pass_beyond_m behind the lane's z, never attacking (pass_walk: at a walk - the walkpass plan)
                 sx, _ = st_["start"][b]
-                kind[b, A], x[b, A], z[b, A], run_[b, A] = O.MOVE, sx, sp["z"] - sp.get("pass_beyond_m", 100), True
+                kind[b, A], x[b, A], z[b, A], run_[b, A] = (O.MOVE, sx, sp["z"] - sp.get("pass_beyond_m", 100),
+                                                            not sp.get("pass_walk"))
             elif mode[b] == "attack_t2" and int(slot["t2"][b]) >= 0:
                 # the skirmish2 plan's 'neighbour': a melee attack at a run on the target's neighbour
                 kind[b, A], target[b, A], run_[b, A] = O.ATTACK, int(slot["t2"][b]), True
@@ -1516,6 +1554,9 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                 kind[b, T], target[b, T], run_[b, T] = O.ATTACK, A, tmode[b] == "both"
             elif tmode[b] == "push":
                 kind[b, T], x[b, T], z[b, T], run_[b, T] = O.MOVE, sp["x"], sp["z"] + sp.get("push_m", 60), False
+            if sp.get("t_attack_extra") and int(slot["e1"][b]) >= 0:
+                # the walkpass plan's 'busy': the target attacks the first extra at a walk from the go
+                kind[b, T], target[b, T], run_[b, T] = O.ATTACK, int(slot["e1"][b]), False
             # the reengage plan (entries/charge_probe.lua): the attacker stands at +z facing the target at -z, so straight
             # back is +z for it and -z for the target
             if mode[b] == "reengage":
@@ -2290,13 +2331,13 @@ def shootcontact_report(run_dirs, out=None):
 
 def layout_lanes(plan, which=None):
     """The plan's lanes as recordings holding only their start (the places entries/charge_probe.lua M.layout gives them
-    at the go): the simulator's twin before any game run (sim_lanes). Lanes with a second target, a lord or extras are
-    not covered."""
+    at the go): the simulator's twin before any game run (sim_lanes). Lanes with a second target or a lord are not
+    covered (extras are: sim_lanes places them from the target's start)."""
     out = []
     for i in which or range(1, len(battles(plan)) + 1):
         config, _, _ = run_config(plan, i)
         for l in config["lanes"]:
-            assert not (l.get("target2") or l.get("lord") or l.get("extras")), l["name"]
+            assert not (l.get("target2") or l.get("lord")), l["name"]
             a_men, t_men = UNITS[SHORT[l["a_key"]]][1], UNITS[SHORT[l["t_key"]]][1]
             a = {"x": l["x"] + l.get("a_dx", 0), "z": l["z"] + l["gap_m"] + l["a_depth"] / 2, "b": 180.0, "men": a_men}
             tg = {"x": l["x"], "z": l["z"] - l["t_depth"] / 2, "b": 180.0 if l["target_mode"] == "rear" else 0.0,

@@ -501,7 +501,7 @@ def main(argv=None):
                              "or a named arena in config/nn/arenas.json")
     parser.add_argument("--repeats", type=int, default=2,
                         help="lord-swarm: how many times each layout runs in the battle")
-    parser.add_argument("--probe-plan", choices=("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform", "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure", "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "ratlingrt", "ratlingrt2", "leave", "skirmish", "skirmish2", "shootcontact", "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "ratling", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow"), default="charge",
+    parser.add_argument("--probe-plan", choices=("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform", "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure", "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "ratlingrt", "ratlingrt2", "leave", "skirmish", "skirmish2", "shootcontact", "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "ratling", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow"), default="charge",
                         help="charge-probe: the plan (tools/nn/charge_probe.py)")
     parser.add_argument("--probe-battle", type=int, default=1, help="charge-probe: the plan's battle, 1-based")
     parser.add_argument("--mprobe-plan", choices=("dist", "arc", "range", "targets", "shield", "moving", "rank", "thin", "pistol", "moving2", "lof",

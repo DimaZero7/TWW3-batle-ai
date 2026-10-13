@@ -99,6 +99,8 @@ class TestHoldRate:
         st = face_off(SPEAR, CLANRAT)
         H = st.N // 2
         st.u["order_kind"][0, 0] = kind_0
+        # a move's point near (R3's 5 m lanes: held; a far one through the enemy strikes in full, contact.move_far_full)
+        st.u["ox"][0, 0], st.u["oz"][0, 0] = st.u["x"][0, 0] + 3.0, st.u["z"][0, 0]
         st.u["order_kind"][0, H] = O.ATTACK
         st.u["order_target"][0, H] = 0
         if reflect:
@@ -168,8 +170,11 @@ class TestMoveThrough:
         assert off > 0 and spear > 0
 
     def test_a_far_point_through_the_enemy_strikes_in_full_a_near_one_held(self):
-        far, _ = self.dealt(60.0, P.with_cal("contact", move_far_full=1))       # (off in sim.json: one lane)
-        held, _ = self.dealt(60.0)
+        # on in sim.json (P3 and the walkpass probe's 'through' lanes: the walker pushing in under its move order strikes
+        # the held clanrats at 0.6 of the attacking rate; held: 0.33)
+        assert P.sim["contact"]["move_far_full"] == 1
+        far, _ = self.dealt(60.0)
+        held, _ = self.dealt(60.0, P.with_cal("contact", move_far_full=0))
         assert far > held > 0
 
 

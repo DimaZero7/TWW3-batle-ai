@@ -31,8 +31,9 @@
 --                  order is probe_phase 'aim' {target = 1 | 2, n}. No contact: the lane ends after max_s. The shooter's
 --                  sample row carries ammo (ammo_left: its drop is the shots of that half second, one a man), fire
 --                  (CCO IsFiringMissiles) and dd (CCO DamageDealt).
---   'pass'         a move at a run straight ahead (its own x, placed a_dx m beside the target) to pass_beyond_m behind
---                  the target's front: it goes past the target, never attacks it (the skirmish2 plan);
+--   'pass'         a move at a run (lane.pass_walk: at a walk) straight ahead (its own x, placed a_dx m beside the target)
+--                  to pass_beyond_m behind the target's front: it goes past the target, never attacks it (the skirmish2
+--                  and walkpass plans); lane.t_attack_extra: at the go the target attacks the first extra at a walk;
 --   'attack_t2'    attack the second target (lane.target2) at a run (the skirmish2 plan: the target's neighbour).
 -- lane.a_ability (optional): the attacker uses it on himself a_ability_after_s after the first contact
 -- (Foe-Seeker's vigour). lane.men_all_s (optional): the attacker's soldier places every men_ms from the go
@@ -739,6 +740,10 @@ function M.main(bm, config, globals)
                 attack(lane, lane.t, lane.a, lane.target_mode == 'both_walk')
             end
             if lane.t2 and lane.t2_mode == 'attack' then attack(lane, lane.t2, lane.a, true) end
+            if lane.t_attack_extra and lane.extras and lane.extras[1] then
+                -- (the walkpass plan's 'busy' lanes) the target attacks the first extra at a walk: it is busy fighting
+                attack(lane, lane.t, state.units[lane.extras[1].name], true)
+            end
             if lane.target_mode == 'push' then
                 orders.move(lane.t.uc, vec(lane.layout.tx, lane.z + (lane.push_m or 60)), false)
             elseif lane.target_mode == 'skirmish' and lane.t_move then
@@ -766,7 +771,7 @@ function M.main(bm, config, globals)
                 orders.move(lane.a.uc, vec(L.tx, lane.z - lane.move_beyond_m), true)
             elseif m == 'pass' then
                 local L = lane.layout
-                orders.move(lane.a.uc, vec(L.ax, lane.z - (lane.pass_beyond_m or 100)), true)
+                orders.move(lane.a.uc, vec(L.ax, lane.z - (lane.pass_beyond_m or 100)), lane.pass_walk ~= true)
             elseif m == 'attack_t2' then
                 attack(lane, lane.a, lane.t2, false)
             end

@@ -68,7 +68,7 @@ def test_plans_have_few_battles_and_lanes_on_both_sides():
         for i in range(1, len(cp.battles(plan)) + 1):
             config, model_s, arena = cp.run_config(plan, i)
             # (reengage: its tired pair runs up to 540 s before its fight; retarget2 / 3: 10 / 7 short lanes)
-            assert 2 <= len(config["lanes"]) <= {"retarget2": 10, "retarget3": 7, "ratlingrt": 9, "ratlingrt2": 9, "leave": 6, "skirmish": 10, "skirmish2": 12, "shootcontact": 8, "recontact": 6, "ratling": 6, "censer": 8, "wolfrats": 8, "hitslow": 6}.get(plan, 5)
+            assert 2 <= len(config["lanes"]) <= {"retarget2": 10, "retarget3": 7, "ratlingrt": 9, "ratlingrt2": 9, "leave": 6, "skirmish": 10, "skirmish2": 12, "walkpass": 10, "shootcontact": 8, "recontact": 6, "ratling": 6, "censer": 8, "wolfrats": 8, "hitslow": 6}.get(plan, 5)
             assert model_s < (720 if plan == "reengage" else 400)
             assert all(len(side["units"]) <= 20 for side in arena["sides"].values())
             names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}
@@ -81,7 +81,7 @@ def test_plans_have_few_battles_and_lanes_on_both_sides():
             assert {p["name"] for p in config["park"]} == {"own_lord", "enemy_lord"} - used
             places = [(l["x"], l["z"]) for l in config["lanes"]]
             # (skirmish2: 150 m - its 12 lanes and the long lanes' runway; the mode starts within ~40 m)
-            apart = 150 if plan == "skirmish2" else 200
+            apart = 150 if plan in ("skirmish2", "walkpass") else 200
             assert all(math.dist(p, q) >= apart for k, p in enumerate(places) for q in places[k + 1:])
 
 
@@ -625,6 +625,30 @@ def test_the_skirmish_plan_charges_each_shooter_with_its_mode_on_and_off():
             assert l["z"] + l["gap_m"] + l["a_depth"] <= 600 and l["z"] - 360 >= -600 and abs(l["x"]) <= 500
             below = [o for o in config["lanes"] if o["z"] < l["z"]]
             assert all(abs(o["x"] - l["x"]) >= 100 for o in below)
+
+
+def test_the_walkpass_plan_passes_idle_and_busy_enemies_at_each_gap_at_a_run_and_a_walk():
+    b = cp.battles("walkpass")
+    assert len(b) == 2 and all(len(x) == 10 for x in b)
+    assert [l["place"] for l in b[0]] != [l["place"] for l in b[1]]                 # the lanes rotated
+    for battle, run in zip(b, (True, False)):
+        kinds = sorted((l["kind"], l["edge_m"]) for l in battle)
+        assert kinds == sorted([(k, g) for k in ("idle", "busy") for g in (0, 3, 6, 10)] + [("through", 0), ("inmelee", 0)])
+        for l in battle:
+            assert l["at_run"] == run and l["max_s"] == (45 if run else 75)
+            if l["kind"] == "inmelee":
+                assert l["mode"] == "attack_walk" and l["target_mode"] == "both" and l["after"]["walk"] == (not run)
+                continue
+            assert l["mode"] == "pass" and l["target_mode"] == "hold" and not l["answer"]
+            assert l["pass_walk"] == (not run) and l["a_dx"] == (0 if l["kind"] == "through" else 30 + l["edge_m"])
+            assert ("extras" in l) == (l["kind"] == "busy") and l.get("t_attack_extra", False) == (l["kind"] == "busy")
+    config, model_s, arena = cp.run_config("walkpass", 2)
+    for l in config["lanes"]:
+        if l["kind"] in ("idle", "busy"):                                           # past, not into, the clanrats
+            assert l["a_dx"] - (l["a_width"] + l["t_width"]) / 2 == l["edge_m"]
+        if l["kind"] == "busy":                                                     # the spearmen at the clanrats' front
+            e = l["extras"][0]
+            assert e["dx"] == 0 and e["dz"] > l["t_depth"] / 2 and e["name"].startswith("own_")
 
 
 def test_the_skirmish2_plan_has_passers_neighbours_controls_and_long_chases():

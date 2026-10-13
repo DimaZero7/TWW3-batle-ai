@@ -556,8 +556,17 @@ unit is out of contact ~4 s after the order (its own melee flag goes off only af
   point 60 m through the clanrat spearmen attacking them fight — they deal 213 / 317 / 521 HP at 0–5 / 5–15 / 15–30 s
   and 29 HP/s after (answering with an attack order 361 / 319 / 377 and 21 HP/s, held 221 / 161 / 166 and 13); the
   simulator had them leaving (0 / 0 / 98). Now only a point away from the enemy is a leave (`contact.leave_away_only`):
-  the simulator 187 / 112 / 169 and 11 HP/s. OPEN: in the game such a unit strikes like an attacker or more (1 lane),
-  in the simulator at the move share 0.5.
+  the simulator 187 / 112 / 169 and 11 HP/s. Such a unit (a move 10 m or more through the enemy, given before the
+  contact) strikes in full (`contact.move_far_full` 1): probe `walkpass`, the 'through' lanes (swordsmen move to a point
+  40 m beyond held clanrats; `build/charge-probe/runs/20261013-014012` at a run, `-014115` at a walk): the swordsmen push
+  in under the order (0.2 m/s, moving all the time) and take 0.64 / 0.62 % of the clanrats' health a second 5–25 s
+  after the contact - 0.56–0.69 of the same unit attacking (0.92 / 1.14 %/s in that probe's 'inmelee' lanes); the twin
+  gave 0.25 with the move share 0.5, 0.50 with the rule.
+- **A unit walking past an enemy is not held.** Probe `walkpass` (`tools/nn/walkpass_probe.py`): swordsmen under a move
+  pass clanrats with an edge gap of 0 / 3 / 6 / 10 m. Past idle ones: the melee flag only at gap 0 (11–16 s), almost no
+  losses (≤ 1 %), at their point on time. Past ones busy fighting another unit: the melee flag at 0 and 3 m (24–39 and
+  5–16 s), the unit walks on without stopping, loses 2–5 %, the clanrats 3 % more. The twin: passing, it barely touches
+  (0–28 s of the flag; one copy of two stopped).
 - **Leaving melee unchased is slower than in the simulator.** Probe `fatleave` (swordsmen, spearmen, greatswords
   withdraw from held clanrats 10 s after contact): the about-face (150°) takes 1.5 s — as in the simulator; but the
   centre gets 1.5 / 4.6 / 9.3 m away in 2 / 4 / 6 s (simulator 3.7 / 9.7 / 15.7), the leaver loses health until

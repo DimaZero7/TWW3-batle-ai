@@ -148,7 +148,10 @@ stay at least 1.38 of the steady level (`melee.wave` `missile_attack_floor`; the
 %/s 20-90 s after contact, the game 0.60-0.73, without the rule 0.46-0.58). A formation
 under a move order that is still in contact and not leaving (its point within 10 m; `contact.hold_move`)
 strikes the same: blocked by the enemy, its men do not step into the gaps (the probe: move lanes 0.70 of the
-same unit attacking; the target lost 345 HP in 5–15 s in the simulator, now 173, game 180). The first strike of
+same unit attacking; the target lost 345 HP in 5–15 s in the simulator, now 173, game 180). A formation under a move
+to a point 10 m or more through the enemy, given before the contact, pushes in and strikes in full
+(`contact.move_far_full`; probes P3 and `walkpass`: 0.56–0.69 of the same unit attacking, the twin 0.33 with the 0.5
+share, 0.65 with the rule). The first strike of
 a standing unit and a braced reflector's blows are not cut by this share (below, "Men fighting", "Charge"). A lord under
 hold strikes in full (in the game a lord without an order strikes at the rule). Before, holding in melee
 struck at full rate and the network held 76 % of its melee seconds. An ability order fires a ready self-cast ability once (not passive,
