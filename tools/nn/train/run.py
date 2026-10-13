@@ -252,6 +252,16 @@ def train(args, every=None, teacher=None, normal=None):
     checkpoint's last transfer numbers), likewise."""
     if args.ability_critic and not args.ability_branch:
         raise SystemExit("--ability-critic needs --ability-branch")
+    own = bool(getattr(args, "ability_own_signal", False))
+    if own and not args.ability_branch:
+        raise SystemExit("--ability-own-signal needs --ability-branch (the branches price the presses)")
+    body_grad, own_w = getattr(args, "ability_body_grad", None), getattr(args, "ability_weight", None)
+    ab_body = (body_grad if body_grad is not None else 0.1) if own else 1.0
+    ab_own_w = own_w if own_w is not None else 1.0
+    price = getattr(args, "ability_price", "auto")
+    ab_bonus = price == "bonus" or (price == "auto" and own)
+    if ab_bonus and not args.ability_branch:
+        raise SystemExit("--ability-price bonus needs --ability-branch")
     device = torch.device(args.device)
     torch.manual_seed(args.seed)
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -437,17 +447,26 @@ def train(args, every=None, teacher=None, normal=None):
             hold_s=args.ability_branch_hold, openloop=args.ability_branch_openloop,
             greedy=args.ability_branch_greedy, seed=args.seed, critic=args.ability_critic,
             critic_weight=args.ability_critic_weight, critic_warmup=args.ability_critic_warmup,
-            critic_buffer=args.ability_critic_buffer), device)
-        print(f"ability branches: {env.brancher.cfg}, weight {args.ability_branch_weight:g} -> 0 over "
-              f"{args.ability_branch_decay} updates (from update {ab_updates0} of the chain)", flush=True)
+            critic_buffer=args.ability_critic_buffer, bonus=ab_bonus, bonus_file=getattr(args, "ability_price_file", ""),
+            own=own), device)
+        if own:
+            print(f"ability branches: {env.brancher.cfg}; the ability head's own signal: weight {ab_own_w:g} (no decay), "
+                  f"body gradient x {ab_body:g}, price {env.brancher.price_kind()}", flush=True)
+        else:
+            print(f"ability branches: {env.brancher.cfg}, weight {args.ability_branch_weight:g} -> 0 over "
+                  f"{args.ability_branch_decay} updates (from update {ab_updates0} of the chain)", flush=True)
         if env.brancher.critic is not None:
             # the ability critic's model, Adam and buffer go on from --init's "train" (a fresh one otherwise)
             ts = (checkpoint.train_state(args.init) or {}) if args.init and args.resume else {}
             saved = ts.get("ability_critic")
-            # prices of another kind (open-loop or not; a state without the mark is closed-loop) start afresh
-            if saved is not None and bool(ts.get("ability_critic_openloop", False)) != bool(env.brancher.cfg.openloop):
+            # prices of another kind (open-loop or not, by the bonuses or not; a state without the mark is closed-loop
+            # by the branches) start afresh
+            kind = ts.get("ability_critic_kind") or ("openloop" if ts.get("ability_critic_openloop", False)
+                                                     else "closed")
+            if saved is not None and kind != env.brancher.price_kind():
                 saved = None
-                print("ability critic: the saved buffer holds the other kind of price (open-loop or not)", flush=True)
+                print(f"ability critic: the saved buffer holds another kind of price ({kind}, now "
+                      f"{env.brancher.price_kind()})", flush=True)
             if env.brancher.critic.load(saved):
                 print(f"ability critic: resumed from {args.init} ({len(env.brancher.critic)} samples)", flush=True)
             else:
@@ -456,7 +475,7 @@ def train(args, every=None, teacher=None, normal=None):
     # (ppo.update; 8.1 -> 5.6 MB a decision) it took one part more: 3 parts peaked at 12.0 GB of the 16 GB card, and a
     # little more pushed the card into its shared memory (an update 10 s -> 157 s); now 2 parts peak at 12.2 GB, 3 at
     # 10.1 GB (line W's batch, 1024 battles x 64 decisions)
-    step_cfg = sized(cfg, env.N, width=width)
+    step_cfg = dataclasses.replace(sized(cfg, env.N, width=width), ability_own=own, ability_body_grad=ab_body)
     if args.parts:                                # --parts: the minibatch in this many parts, whatever the size
         step_cfg = dataclasses.replace(step_cfg, accum=args.parts)
     log = (out / "log.jsonl").open("w", encoding="utf-8", newline="\n")
@@ -548,7 +567,8 @@ def train(args, every=None, teacher=None, normal=None):
                           "observe_updates": observe.updates if observe is not None
                           else int(carried.get("observe_updates", 0))},
                 **({"ability_critic": env.brancher.critic.state(),
-                    "ability_critic_openloop": bool(env.brancher.cfg.openloop)}
+                    "ability_critic_openloop": bool(env.brancher.cfg.openloop),
+                    "ability_critic_kind": env.brancher.price_kind()}
                    if args.ability_branch and env.brancher.critic is not None else {})}
 
     def share_done():
@@ -583,11 +603,12 @@ def train(args, every=None, teacher=None, normal=None):
         decay_s = decay_s0 + (time.time() - t0 - paused if args.entropy_decay else 0.0)
         scheduled = schedule(args.entropy, entropy_end, decay_share(args.entropy_decay, decay_s, done_share))
         floor_w = scheduled if floor_w is None else max(scheduled, floor_w)
-        ab_w = (ability_branch.weight(args.ability_branch_weight, args.ability_branch_decay, ab_updates0 + update)
+        ab_w = (ab_own_w if own else
+                ability_branch.weight(args.ability_branch_weight, args.ability_branch_decay, ab_updates0 + update)
                 if args.ability_branch else 0.0)
         u_cfg = dataclasses.replace(step_cfg, entropy=floor_w if args.entropy_target else scheduled,
                                     anchor=schedule(args.anchor, anchor_end, done_share), heads=tuple(head_w.items()),
-                                    ability=ab_w)
+                                    ability=ab_w, ability_own=own, ability_body_grad=ab_body)
         trains = update >= warmup
         teach_w = (teacher.weights() if teacher is not None
                    else drill_teach.weights(teach0, args.drill_teach_minutes, (time.time() - t0 - paused) / 60))
@@ -1079,6 +1100,21 @@ def parser():
                     help="... replayed moments in its buffer before it is used")
     ap.add_argument("--ability-critic-buffer", type=int, default=ability_branch.Config.critic_buffer,
                     help="... replayed moments it keeps (saved with the checkpoint)")
+    ap.add_argument("--ability-own-signal", action="store_true",
+                    help="the ability head learns only from its own term (needs --ability-branch): its log-probability "
+                         "and entropy are out of the main surrogate; the term's weight is --ability-weight (no decay); "
+                         "the body gets the term's gradient x --ability-body-grad (ppo.py)")
+    ap.add_argument("--ability-body-grad", type=float, default=None,
+                    help="... the gradient into the ability head's input x this (default 0.1 under the own signal; "
+                         "0: none)")
+    ap.add_argument("--ability-weight", type=float, default=None,
+                    help="... the ability head's own term's weight (default 1.0 under the own signal)")
+    ap.add_argument("--ability-price", default="auto", choices=("auto", "branch", "bonus"),
+                    help="... the press's price: bonus - a valid ability's by its bonuses (config/ability_price.json, "
+                         "abilities_price/train_price.py), the others by the branches; branch - all by the branches; "
+                         "auto - bonus under the own signal, else branch")
+    ap.add_argument("--ability-price-file", default="",
+                    help="... the bonus price's numbers (default config/ability_price.json)")
     ap.add_argument("--gpu-mem", type=float, default=1.0,
                     help="share of the GPU's memory training may hold (game mode: e.g. 0.5, so a game keeps memory)")
     ap.add_argument("--gpu-duty", type=float, default=1.0,

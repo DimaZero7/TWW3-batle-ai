@@ -42,7 +42,7 @@ The first steps compile for 1–3 minutes (seconds once a run of the same shapes
 | drills | `--drills` (0: share of the battles), `--drill-weights` (json; default the `TRAIN` drills equally: kiting, hold_fire), `--drill-bank` (256 per drill), `--drill-embed` (1: share of the embedded frame, for the drills that have one), `--drill-broad` (0.5: of the rest, share of the broad frame), `--drill-teach` (`auto` or json {drill: weight}: the teacher, off by default), `--drill-teach-minutes` (10: manual), `--drill-teach-k` (0.5), `--drill-teach-cap` (0.25), `--drill-teach-weight` (0.15: auto), `--teach-normal` (`auto`, names or json {drill: share}: the teacher in normal battles, off by default), `--teach-normal-k` (0.5), `--teach-normal-cap` (0.15), `--teach-normal-weight` (0.1), `--teach-normal-match` (0.1): [drills](#drills) |
 | observation | `--observe-dir` (off: the folder of converted battles), `--observe-share` (0.1), `--observe-weight` (0.1), `--observe-decay` (0.95), `--observe-anchor` (0.2), `--observe-anchor-decay` (0.995), `--observe-anchor-alone` (off: the anchor ends with the term), `--observe-adv` (`critic`), `--observe-beta` (1), `--observe-clip` (20), `--observe-steps` (0: `--steps`), `--observe-refresh` (20): [learning by observation](#learning-by-observation) |
 | kiting in self-play | `--kite-share` (0: share of the `self` / `past` battles started, planned 0.1), `--kite-bank` (256 battles ready): [kiting in self-play](#kiting-in-self-play) |
-| abilities by their effect | `--ability-branch` (0: off; the share of presses branched), `--ability-branch-missed` (0.005), `--ability-branch-copies` (4), `--ability-branch-horizon` (60 s), `--ability-branch-hold` (0 s), `--ability-branch-openloop` (off), `--ability-branch-greedy` (off), `--ability-branch-cap` (0: none), `--ability-branch-batch` (128), `--ability-branch-weight` (0.1), `--ability-branch-decay` (300 updates); the ability critic `--ability-critic` (off), `--ability-critic-weight` (1), `--ability-critic-warmup` (2,000), `--ability-critic-buffer` (25,000): [abilities by their effect](#abilities-by-their-effect-branches) |
+| abilities by their effect | `--ability-branch` (0: off; the share of presses branched), `--ability-branch-missed` (0.005), `--ability-branch-copies` (4), `--ability-branch-horizon` (60 s), `--ability-branch-hold` (0 s), `--ability-branch-openloop` (off), `--ability-branch-greedy` (off), `--ability-branch-cap` (0: none), `--ability-branch-batch` (128), `--ability-branch-weight` (0.1), `--ability-branch-decay` (300 updates); the ability critic `--ability-critic` (off), `--ability-critic-weight` (1), `--ability-critic-warmup` (2,000), `--ability-critic-buffer` (25,000): [abilities by their effect](#abilities-by-their-effect-branches); the ability head's own signal `--ability-own-signal` (off), `--ability-weight` (1.0), `--ability-body-grad` (0.1), `--ability-price` (auto), `--ability-price-file` (`config/ability_price.json`): [own signal](#the-ability-heads-own-signal) |
 
 ### The chain's settings
 
@@ -837,6 +837,56 @@ skills too.
     (±3 root mean squares): real share 0.08 against 0.07.
 - **Extension points**: a bootstrapped critic target (TD: the price plus the value of the next ready moment,
   `Brancher.target`); a cost of an ability unused through a battle (`Config.unused_penalty`, must be 0 now).
+
+### The ability head's own signal
+
+`--ability-own-signal` (off by default; needs `--ability-branch`). The ability head learns only from the price of its
+own presses, not from the battle's reward: in the reward one press drowns, and the head had learnt to press whatever
+is ready at once.
+
+- **The head is out of the main PPO.** The ability choice's log-probability is not in the main surrogate (nor its
+  entropy): the main advantage no longer moves the head. The main part's old log-probability = the whole action's
+  recorded one less the ability choice's, which the branches record at every decision (`lp_all`). The KL for the early
+  stop is the whole action's (the main part's + the ability's; the ability's alone is logged as `ability_kl`).
+- **Its own clipped PPO term** (`ppo.ability_term`) is the head's only signal, weight `--ability-weight` (1.0) without
+  decay (`--ability-branch-weight` and `-decay` do nothing under this flag). Normalisation and clipping as the
+  branches'. The head's entropy floor (`--head-entropy ...,ability=…`) stays.
+- **The body gets the head's gradient scaled down.** The gradient that leaves the ability head into its input (the
+  unit's thought - the input of the `ability_q` and `ability_none` layers) is multiplied by `--ability-body-grad`
+  (0.1; 0 - none at all). The forward pass does not change (bit for bit, a test); the factor acts only during the
+  update (`ppo.AbilityInputGrad`: hooks on those two layers).
+- **The press's price** (`--ability-price`; `auto` = `bonus` under this flag, else `branch`). A valid ability (Stand
+  Your Ground, Deadly Onslaught, Foe-Seeker - by the validity card) - the [bonus price](ability_price.md): the bricks'
+  counters on the "pressed" branch's trajectory (the branch is played anyway; recorded once a decision -
+  `collect.Recorder`), benefit - debuffs - the recharge cost, gold / budget, the mean over the copies. The others
+  (Rally, Verminous Valour) - the branches' price as before. The numbers - `config/ability_price.json` (outside
+  `config/nn`: the simulator's version does not change; made by `tools/nn/abilities_price/train_price.py`): the lab's
+  whole-battle rates, vigour by the lord's fatigue tier at the press (fresh 0.008 .. exhausted 0.024 a % x s); the
+  recharge cost - a ridge regression of "the best press of the same ability later in its recharge window" on what is
+  seen at the press, one per ability, >= 0.
+- **A moment left** (ready, not pressed) - the ability critic's value (with a minus sign, as before); the critic learns
+  the same price (by the bonuses where the ability is valid). A critic buffer of another kind of price restarts (the
+  checkpoint's `ability_critic_kind`: `openloop` / `closed`, `+bonus`).
+- **Log** (`ability_branch`): `press_rate` (presses / moments an ability was ready), `press_rate_melee` /
+  `press_rate_free` (the unit in melee / not), per ability `press_rate_<name>_melee` / `_free` and `ready_<name>` (its
+  ready moments); the bonus price - `bonus_presses`, `bonus_gold_press` (the mean price, gold), `bonus_benefit_press`
+  (benefit - debuffs), `bonus_recharge_press`, `bonus_zero_work` (the share of presses whose bonus did no useful work),
+  `bonus_good_press` (price > 0), `bonus_branch_gold` (the branches' price of the same presses), `bonus_gold_missed`,
+  `bonus_gold_<name>`, `bonus_n_<name>`, `used_rms` (the root mean square of the price the head learns from),
+  `bonus_s` (the time to count it); in the PPO row - `ability_kl`.
+- **The lab's rates recounted with today's bricks.** `build/abilities_price/lab/lab.json` was counted with the earlier
+  vigour and morale bricks (vigour - seconds a tier fresher, rate 0.37): with today's counter (% x s) Foe-Seeker's price
+  came out 118 gold against the branches' 8. The same pairs counted again (`train_price --relab`,
+  `build/abilities_price/train_price/lab_bricks_now.json`): vigour 0.022 a % x s, morale 0.037 (interval
+  -0.24..0.34: noise; the morale curve by level is noise too, so morale has no curve); the other rates are the same.
+  The card with the lab's rates and the vigour curve - all three valid: sign / Spearman Stand Your Ground 0.79 / 0.73,
+  Deadly Onslaught 0.89 / 0.69, Foe-Seeker 0.73 / 0.41.
+- **The price on itS25_12's presses** (4,563, 60 s; benefit / recharge / price in gold, share of price > 0): Stand Your
+  Ground 12.3 / 20.9 / -8.7, 6 % (in melee 25.5 / 31.2 / -5.7, 11 %; out of it 2.2 / 13.1 / -10.9, 3 %); Deadly
+  Onslaught 6.7 / 10.2 / -3.5, 30 % (in melee -0.4, 50 %; out -6.1, 12 %); Foe-Seeker 9.5 / 12.3 / -2.7, 25 % (a tired
+  lord, tiers 3-4: +3.8..+6.0; a fresh one -3.7). The mean benefit matches the branches' price (12.3 against 12.8; 6.7
+  against 8.5; 9.5 against 8.0). The recharge cost is the expected best later press, so most of today's presses are
+  priced below 0: the head will press less and wait; in melee the price is higher than out of it.
 
 **itS23's ability head had collapsed.** The audit (`build/ability_branch/abil_audit.py`, 128 battles × 420
 decisions, self-play and `ai_like`): the chance to press a ready ability 0.9996 on average, the 5 % quantile 0.9994,

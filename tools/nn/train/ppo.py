@@ -75,7 +75,11 @@ class PPOConfig:
     #                            role's rows apart ("role": the attacker's, bigger with its idle cost, no
     #                            longer outweighs the defender's)
     ability: float = 0.0       # weight of the ability branches' term now (batch["abil_branch"], ability_branch.py;
-    #                            run.py --ability-branch-weight, decaying): 0 off
+    #                            run.py --ability-branch-weight, decaying; --ability-weight under the own signal): 0 off
+    ability_own: bool = False  # the ability head learns from its own term only: its log-probability is out of the main
+    #                            surrogate (and of the KL's main part), run.py --ability-own-signal
+    ability_body_grad: float = 1.0  # the gradient through the ability head's input (the unit's thought) x this: the
+    #                                 body's share of the ability term (0: none); used under ability_own
 
 
 def gae(rewards, values, dones, last_value, gamma, lam):
@@ -103,20 +107,61 @@ def policy_loss(lp_new, lp_old, adv, mask, clip):
     return -(surrogate * m).sum() / n, clipped
 
 
-def ability_term(logits, act, branch, ctrl, clip):
+def ability_log_prob(logits, act):
+    """[S, N] the ability head's log-probability of the choice made (none: index 0)."""
+    la = torch.log_softmax(torch.nan_to_num(logits["ability"], nan=hd.NEG), -1)
+    return la.gather(-1, (act.ability.clamp(min=-1) + 1)[..., None])[..., 0]
+
+
+def ability_term(logits, act, branch, ctrl, clip, lp=None):
     """The ability branches' term (ability_branch.py): - the clipped surrogate of the ability head's log-probability of
     the choice made under the branches' advantage, on the priced rows only, summed over them and divided by the units
     that take orders (as policy_loss: a weight of 0.1 is a tenth of PPO's per-unit push on those rows). Only the ability
     logits enter it: not the reward, not the critic, not the other heads. branch: {"adv", "mask", "lp"} [S, N] (the
-    minibatch's rows). -> (term, priced rows)."""
-    la = torch.log_softmax(torch.nan_to_num(logits["ability"], nan=hd.NEG), -1)
-    lp = la.gather(-1, (act.ability.clamp(min=-1) + 1)[..., None])[..., 0]
+    minibatch's rows); lp: ability_log_prob already made. -> (term, priced rows)."""
+    if lp is None:
+        lp = ability_log_prob(logits, act)
     m = branch["mask"]
     ratio = torch.exp(torch.where(m, lp - branch["lp"], torch.zeros_like(lp)))
     a = branch["adv"]
     surrogate = torch.minimum(ratio * a, ratio.clamp(1 - clip, 1 + clip) * a)
     n = ctrl.float().sum().clamp(min=1)
     return -(surrogate * m.float()).sum() / n, m.float().sum()
+
+
+def scale_grad(x, s):
+    """x in the forward pass (bit for bit), its gradient x s in the backward pass (s 0: none)."""
+    if s == 0:
+        return x.detach()
+    d = x.detach()
+    return d + (x - d) * s
+
+
+class AbilityInputGrad:
+    """Within it, the gradient that flows out of the ability head into its input - the unit's thought, the input of
+    ChainHeads.ability_q and ability_none (heads.Heads: the same names) - is x scale: the body's share of the ability
+    head's own term (--ability-body-grad; module doc). Forward pre-hooks on the two layers, removed on exit; scale 1
+    (or no such layers) adds none."""
+
+    def __init__(self, actor, scale):
+        self.actor, self.scale, self.handles = actor, float(scale), []
+
+    def __enter__(self):
+        heads = getattr(self.actor, "heads", None)
+        if self.scale != 1.0 and heads is not None:
+            s = self.scale
+            for name in ("ability_q", "ability_none"):
+                m = getattr(heads, name, None)
+                if m is not None:
+                    self.handles.append(m.register_forward_pre_hook(
+                        lambda mod, args: (scale_grad(args[0], s),) + tuple(args[1:])))
+        return self
+
+    def __exit__(self, *exc):
+        for h in self.handles:
+            h.remove()
+        self.handles = []
+        return False
 
 
 def kind_entropy(logits):
@@ -242,6 +287,14 @@ def critic_stats(batch, adv, ret):
 
 
 def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, reference=None, teach=None, observe=None):
+    """Some epochs of minibatch updates on one rollout (batch from rollout.collect). -> stats (_update). Under the
+    ability head's own signal (cfg.ability_own) the gradient through the ability head's input is x
+    cfg.ability_body_grad (AbilityInputGrad)."""
+    with AbilityInputGrad(actor, cfg.ability_body_grad if cfg.ability_own else 1.0):
+        return _update(actor, critic, opt, batch, cfg, train_policy, reference, teach, observe)
+
+
+def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, reference=None, teach=None, observe=None):
     """Some epochs of minibatch updates on one rollout (batch from rollout.collect). -> stats.
     train_policy False: the critic only (a warm-up for a critic that starts from nothing while the
     actor already plays: a checkpoint saved without one). reference: a frozen actor (e.g. the one the
@@ -251,7 +304,11 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
     batch has labels. observe: the demonstrations' term (tools/nn/observe/store.py Observe; None: off).
 
     A minibatch is a set of learner rows with their whole chunk of T decisions: the actor runs its
-    memory through the chunk from the memory the chunk began with (Actor.sequence)."""
+    memory through the chunk from the memory the chunk began with (Actor.sequence).
+
+    cfg.ability_own: the ability head's log-probability is left out of the main surrogate (the main advantage no longer
+    trains it; its old part comes from the branches' batch["abil_branch"]["lp_all"]); the KL for target_kl stays the
+    whole action's (the main part's + the ability head's, logged apart as ability_kl)."""
     adv, ret = gae(batch["reward"], batch["value"], batch["done"], batch["last_value"], cfg.gamma, cfg.lam)
     T, R = adv.shape
     # The actor's and the critic's gradients are clipped apart (each to max_grad). Clipped together
@@ -284,6 +341,12 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
     branch = batch.get("abil_branch") if cfg.ability and train_policy else None
     if branch is not None and batch["action"].ability is None:
         branch = None
+    own = bool(cfg.ability_own) and batch["action"].ability is not None
+    if own:
+        ab_all = batch.get("abil_branch")
+        if ab_all is None or "lp_all" not in ab_all:
+            raise ValueError("ability_own needs the branches' lp_all (run.py --ability-own-signal with --ability-branch)")
+        stats["ability_kl"] = 0.0
     if branch is not None:
         stats["ability_branch_loss"] = 0.0      # the term (before its weight), a minibatch's mean
         stats["ability_branch_rows"] = 0.0      # priced rows a minibatch
@@ -300,8 +363,8 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
             parts = torch.arange(len(idx), device=idx.device).tensor_split(max(1, min(cfg.accum, len(idx))))
             opt.zero_grad(set_to_none=True)
             step = dict.fromkeys(("policy_loss", "value_loss", "entropy", "kl", "clip", "entropy_all", "anchor_kl")
-                                 + tuple(k for k in stats if k.startswith("eyes_") or k.startswith("ability_branch_")),
-                                 0.0)
+                                 + tuple(k for k in stats if k.startswith("eyes_") or k.startswith("ability_branch_")
+                                         or k == "ability_kl"), 0.0)
             for part in parts:
                 share = len(part) / len(idx)
                 pidx = idx[part]
@@ -321,11 +384,19 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                     logits, _ = actor.sequence(obs, batch["h0"][pidx], batch["reset"][:, pidx], seq_act)
                     logits = {k: v.reshape(-1, *v.shape[2:]) for k, v in logits.items()}
                     ctrl = obs["ctrl"].reshape(-1, obs["ctrl"].shape[-1])
-                    lp, ent = hd.log_prob(logits, act, ctrl)
+                    lp_ab = old_ab = None
+                    if own:
+                        # the main surrogate without the ability head: its log-probability (and entropy) left out
+                        lp, ent = hd.log_prob(logits, hd.Action(**{k: getattr(act, k) for k in kinds
+                                                                   if k != "ability"}), ctrl)
+                        lp_ab = torch.where(ctrl, ability_log_prob(logits, act), torch.zeros_like(lp))
+                        old_ab = _rows(ab_all["lp_all"], pidx)
+                    else:
+                        lp, ent = hd.log_prob(logits, act, ctrl)
                     # (the full entropy is for the log only: its graph - softmaxes over the 256 sectors - let go now)
                     ent_all = masked_mean(ent.detach(), ctrl)
                     del ent
-                    old = _rows(batch["lp"], pidx)
+                    old = _rows(batch["lp"], pidx) - (old_ab if own else 0.0)
                     pl, clipped = policy_loss(lp, old, a, ctrl, cfg.clip)
                     free = deciding(obs).reshape(-1, ctrl.shape[-1])
                     entropy = masked_mean(kind_entropy(logits), free)
@@ -373,8 +444,9 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                             step[f"eyes_ref_{h}"] += _f(ref) * share
                     branched = torch.zeros((), device=adv.device)
                     if branch is not None and "ability" in logits:
-                        branched, priced = ability_term(logits, act, {k: _rows(v, pidx) for k, v in branch.items()},
-                                                        ctrl, cfg.clip)
+                        branched, priced = ability_term(logits, act, {k: _rows(v, pidx) for k, v in branch.items()
+                                                                      if k in ("adv", "mask", "lp")},
+                                                        ctrl, cfg.clip, lp=lp_ab)
                         step["ability_branch_loss"] += _f(branched) * share
                         step["ability_branch_rows"] += _f(priced)
                 policy_part = (pl - cfg.entropy * entropy + cfg.anchor * anchored + imitation + cfg.eyes * seen
@@ -384,6 +456,10 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
                     (policy_part * share).backward()
                 with torch.no_grad():
                     kl = masked_mean(old - lp, ctrl)
+                    if own:                          # the whole action's KL: the main part's + the ability head's
+                        kl_ab = masked_mean(old_ab - lp_ab, ctrl)
+                        step["ability_kl"] += _f(kl_ab) * share
+                        kl = kl + kl_ab
                 for k, x in (("policy_loss", pl), ("value_loss", vl), ("entropy", entropy), ("kl", kl),
                              ("clip", clipped), ("entropy_all", ent_all), ("anchor_kl", anchored)):
                     step[k] += _f(x) * share

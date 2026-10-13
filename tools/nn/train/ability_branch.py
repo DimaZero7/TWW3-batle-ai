@@ -70,6 +70,15 @@ reliability(): 1 - the copies' noise variance of the mean / the prices' variance
 moments, the ceiling of what any critic can explain; the critic keeps each price's two halves of the copies and logs
 the buffer's split-half value (critic_rel).
 
+Own signal (Config.own, Config.bonus; run.py --ability-own-signal): the ability head learns only from this term
+(ppo.update leaves its log-probability out of the main surrogate; capture() keeps every decision's ability
+log-probability of the choice made, finish()'s "lp_all", for the main part's old log-probability). With the bonus price
+a valid ability's moment (tools/nn/abilities_price/train_price.py: the validity card's abilities) is priced by its
+bonuses on the "pressed" branch's trajectory (recorded a decision at a time, abilities_price/collect.Recorder): benefit
+- debuffs - the dynamic recharge cost, gold / the budget, the mean over the copies; the others keep the branch price;
+the critic learns the same (price_kind(): a buffer of another kind restarts). The log's press rates (moments a slot of
+each ability is ready, by the unit in melee or not, and its presses: rate_stats) are counted whenever the branches run.
+
 Extension points (not used yet): a bootstrapped (TD) target of the critic (Brancher.target), a cost of an ability left
 unused through a battle (Config.unused_penalty: must be 0).
 """
@@ -118,6 +127,11 @@ class Config:
     critic_warmup: int = 2000   # replayed moments in its buffer before it is used (and it must beat the mean)
     critic_buffer: int = 25000  # replayed moments it keeps (the last)
     critic_steps: int = 32      # its optimiser's steps an update
+    # the ability head's own signal (run.py --ability-own-signal; module doc "Own signal")
+    bonus: bool = False         # a valid ability's press priced by its bonuses (abilities_price/train_price.py) on the
+    #                             pressed branch's trajectory; the others keep the branch price
+    bonus_file: str = ""        # the bonus price's numbers ("": config/ability_price.json)
+    own: bool = False           # finish() also returns every decision's ability log-probability (lp_all), always
 
     def __post_init__(self):
         if self.unused_penalty:
@@ -521,6 +535,9 @@ class _Chunk:
     missed: object = None                            # ... the moments a ready ability was not pressed
     taken: int = 0
     room: dict = None                                # {kind: slots left} with a cap (the batch's composition)
+    lp_all: list = field(default_factory=list)       # with Config.own: per decision (t, [R, N] the ability head's
+    #                                                    log-probability of the choice made)
+    rates: object = None                             # [A + 1, 2, 2] on the device: (ability, in melee, (ready, pressed))
 
 
 class Brancher:
@@ -533,6 +550,12 @@ class Brancher:
             from tools.nn.train import ability_critic
             self.critic = ability_critic.AbilityCritic(device, buffer=cfg.critic_buffer, warmup=cfg.critic_warmup,
                                                        steps=cfg.critic_steps, seed=cfg.seed)
+        self.pricer = None
+        if cfg.bonus:
+            from tools.nn.abilities_price import train_price
+            self.pricer = train_price.load(cfg.bonus_file or None)
+        from tools.nn.model import abilities as mab
+        self.keys = mab.keys()                   # the observation's ability index -> key (abil_idx; -1: the last row)
         self.gen = torch.Generator(device=device).manual_seed(int(cfg.seed) + 104729)
         self.chunk = _Chunk()
         self.stats = {}
@@ -555,7 +578,56 @@ class Brancher:
         if self.cfg.cap:
             rounds = max(1, math.ceil(self.cfg.cap / sum(self.comp.values())))
             room = {k: v * rounds for k, v in self.comp.items()}
-        self.chunk = _Chunk(T=T, presses=z.clone(), missed=z.clone(), room=room)
+        self.chunk = _Chunk(T=T, presses=z.clone(), missed=z.clone(), room=room,
+                            rates=torch.zeros(len(self.keys) + 1, 2, 2, device=env.device))
+
+    def price_kind(self):
+        """The kind of price the critic learns (a buffer of another kind restarts, run.py): open loop or not, and
+        whether the valid abilities are priced by their bonuses."""
+        return ("openloop" if self.cfg.openloop else "closed") + ("+bonus" if self.pricer is not None else "")
+
+    def _count(self, env, info, live, t):
+        """The log's press rates (the moments a slot of each ability is ready, by the unit in melee or not, and the
+        presses of it) and, with Config.own, the decision's ability log-probability of the choice made."""
+        c = self.chunk
+        obs, action = info["obs"], info["action"]
+        ok = obs["abil_ok"] & live[..., None]                                # [R, N, ACTIVE]
+        K = ok.shape[-1]
+        idx = obs["abil_idx"][..., :K].long()
+        idx = torch.where(idx >= 0, idx, torch.full_like(idx, len(self.keys)))
+        melee = (obs["tokens"][..., ob.INDEX["melee"]] > 0).long()[..., None].expand_as(idx)
+        pressed = ok & (action.ability[..., None] == torch.arange(K, device=ok.device))
+        cell = (idx * 2 + melee) * 2
+        flat = c.rates.view(-1)
+        # (weights, not boolean indexing: no read of the GPU)
+        flat.index_add_(0, cell.reshape(-1), ok.reshape(-1).to(flat.dtype))
+        flat.index_add_(0, cell.reshape(-1) + 1, pressed.reshape(-1).to(flat.dtype))
+        if self.cfg.own:
+            la = torch.log_softmax(torch.nan_to_num(info["logits"]["ability"].float(), nan=hd.NEG), -1)
+            lp = la.gather(-1, (action.ability.clamp(min=-1) + 1)[..., None])[..., 0]
+            c.lp_all.append((t, torch.where(obs["ctrl"], lp, torch.zeros_like(lp))))
+
+    def rate_stats(self, rates):
+        """{field: value} of the chunk's press rates (rates [A + 1, 2, 2] on the host): press_rate (presses / moments
+        an ability was ready), _melee / _free (the unit in melee or not), and per ability (its key's tail after
+        'abilities_'): press_rate_<name>_melee / _free and ready_<name> (its moments)."""
+        r = np.asarray(rates, dtype=float)
+        st = {}
+        tot = r.sum(0)                                                        # [2, 2]
+        if tot[:, 0].sum() > 0:
+            st["press_rate"] = round(float(tot[:, 1].sum() / tot[:, 0].sum()), 4)
+        for m, name in ((1, "melee"), (0, "free")):
+            if tot[m, 0] > 0:
+                st[f"press_rate_{name}"] = round(float(tot[m, 1] / tot[m, 0]), 4)
+        for a, key in enumerate(self.keys):
+            if r[a, :, 0].sum() <= 0:
+                continue
+            short = key.split("abilities_")[-1]
+            st[f"ready_{short}"] = int(r[a, :, 0].sum())
+            for m, name in ((1, "melee"), (0, "free")):
+                if r[a, m, 0] > 0:
+                    st[f"press_rate_{short}_{name}"] = round(float(r[a, m, 1] / r[a, m, 0]), 4)
+        return st
 
     def capture(self, env, info):
         c = self.chunk
@@ -572,6 +644,8 @@ class Brancher:
         missed = live & (action.ability < 0) & obs["abil_ok"].any(-1)
         c.presses += press.sum()
         c.missed += missed.sum()
+        if c.rates is not None and obs.get("abil_idx") is not None and obs.get("tokens") is not None:
+            self._count(env, info, live, t)
         draw = torch.rand(press.shape, generator=self.gen, device=press.device)
         take = (press & (draw < self.cfg.share)) | (missed & (draw < self.cfg.missed))
         where = None
@@ -631,23 +705,32 @@ class Brancher:
 
     @torch.no_grad()
     def finish(self, env, actor):
-        """Plays the chunk's branches -> {"adv", "mask", "lp"} [T, R, N] (ppo.update's ability term), or None when no
-        moment is priced; the stats for the log in self.stats. With the critic ready, every moment of the chunk is
-        priced (module doc "The ability critic")."""
+        """Plays the chunk's branches -> {"adv", "mask", "lp"} [T, R, N] (ppo.update's ability term; with Config.own
+        also "lp_all" [T, R, N]: every decision's ability log-probability of the choice made), or None when no moment
+        is priced (with Config.own never None); the stats for the log in self.stats. With the critic ready, every
+        moment of the chunk is priced (module doc "The ability critic"). With the bonus price (Config.bonus) a valid
+        ability's moment is priced by its bonuses instead of the branches' trade (module doc "Own signal")."""
         c = self.chunk
         t0 = time.time()
         presses, missed = (int(x) for x in torch.stack([c.presses, c.missed]).tolist())
         R, N = len(env.rows_learn), env.N
         self.stats = {"presses": presses, "missed_moments": missed, "replayed_presses": 0, "replayed_missed": 0}
-        if not c.entries and not (self.critic is not None and c.n_moments):
-            self.chunk = _Chunk()
-            return None
+        if c.rates is not None:
+            self.stats.update(self.rate_stats(c.rates.cpu().numpy()))
         dev = env.device
         out = {"adv": torch.zeros(c.T, R, N, device=dev), "mask": torch.zeros(c.T, R, N, dtype=torch.bool, device=dev),
                "lp": torch.zeros(c.T, R, N, device=dev)}
+        if self.cfg.own:
+            out["lp_all"] = torch.zeros(c.T, R, N, device=dev)
+            for t, lp in c.lp_all:
+                if t < c.T and lp.shape == out["lp_all"].shape[1:]:
+                    out["lp_all"][t] = lp
+        if not c.entries and not (self.critic is not None and c.n_moments):
+            self.chunk = _Chunk()
+            return out if self.cfg.own else None
         price = torch.zeros(0, device=dev)
         if c.entries:
-            price, se, budget = self._play(env, actor)
+            price, se, budget, bonus = self._play(env, actor)
             pressed = torch.tensor([e[5] for e in c.entries], device=dev)
             t = torch.tensor([e[0] for e in c.entries], device=dev)
             r = torch.tensor([e[1] for e in c.entries], device=dev)
@@ -666,8 +749,14 @@ class Brancher:
             if bool(m.any()):
                 st.update(price_missed=round(float(price[m].mean()), 5), gold_missed=round(float(gold[m].mean()), 1),
                           good_missed=round(float((price[m] > ZERO).float().mean()), 3))
-            self.last = {"price": price, "se": se, "pressed": pressed, "entries": list(c.entries)}
-            # the replayed moments by their measured price (all there is without the critic or before it is ready)
+            if bonus is not None:
+                # the price the head learns from: a valid ability's by its bonuses, the others' by the branches
+                price = torch.where(bonus["ok"], bonus["share"], price)
+                self.copies = torch.where(bonus["ok"][:, None], bonus["share_copies"], self.copies)
+                rms = float(price.pow(2).mean().sqrt())
+                st.update(self.bonus_stats(bonus, pressed, gold, rms))
+            self.last = {"price": price, "se": se, "pressed": pressed, "entries": list(c.entries), "bonus": bonus}
+            # the replayed moments by their price (all there is without the critic or before it is ready)
             adv = (torch.where(pressed, price, -price) / max(rms, ADV_FLOOR)).clamp(-ADV_CLIP, ADV_CLIP)
             out["adv"][t, r, unit] = adv
             out["mask"][t, r, unit] = True
@@ -676,11 +765,39 @@ class Brancher:
             self._criticise(out, price)
         self.stats["seconds"] = round(time.time() - t0, 2)
         self.chunk = _Chunk()
-        return out if bool(out["mask"].any()) else None
+        return out if (self.cfg.own or bool(out["mask"].any())) else None
+
+    def bonus_stats(self, bonus, pressed, branch_gold, rms):
+        """The log's fields of the bonus price (gold unless said): of the valid presses replayed - bonus_presses,
+        bonus_gold_press (the price: benefit - debuffs - recharge), bonus_benefit_press (benefit - debuffs),
+        bonus_recharge_press, bonus_zero_work (the share whose bonus did no useful work: every counter 0),
+        bonus_good_press (price > 0), bonus_branch_gold (the branches' price of the same presses); bonus_gold_missed
+        (the valid moments left: the price of pressing then); per ability bonus_gold_<name> / bonus_n_<name>; used_rms
+        (the root mean square of the price the head learns from, budget share)."""
+        ok = bonus["ok"]
+        st = {"used_rms": round(rms, 5)}
+        vp, vm = ok & pressed, ok & ~pressed
+        g = bonus["gold"]
+        if bool(vp.any()):
+            st.update(bonus_presses=int(vp.sum()), bonus_gold_press=round(float(g[vp].mean()), 2),
+                      bonus_benefit_press=round(float(bonus["benefit"][vp].mean()), 2),
+                      bonus_recharge_press=round(float(bonus["recharge"][vp].mean()), 2),
+                      bonus_zero_work=round(float((bonus["work"][vp] <= 0).float().mean()), 3),
+                      bonus_good_press=round(float((g[vp] > 0).float().mean()), 3),
+                      bonus_branch_gold=round(float(branch_gold[vp].mean()), 2))
+        if bool(vm.any()):
+            st["bonus_gold_missed"] = round(float(g[vm].mean()), 2)
+        for key in sorted({k for k, o in zip(bonus["key"], ok.tolist()) if o}):
+            sel = torch.tensor([k == key for k in bonus["key"]], device=ok.device) & vp
+            if bool(sel.any()):
+                short = key.split("abilities_")[-1]
+                st[f"bonus_gold_{short}"] = round(float(g[sel].mean()), 2)
+                st[f"bonus_n_{short}"] = int(sel.sum())
+        return st
 
     def _play(self, env, actor):
         """The branches of the chunk's entries -> (price [E] budget share, its standard error over the copies [E],
-        budget [E, copies] gold)."""
+        budget [E, copies] gold, bonus: None, or with the bonus price the entries' bonus prices (bonus_prices))."""
         c, cfg = self.chunk, self.cfg
         dev = env.device
         snap = concat(c.snaps)
@@ -694,6 +811,7 @@ class Brancher:
         K = max(1, int(cfg.copies))
         diff = torch.zeros(E, K, device=dev)
         budget = torch.ones(E, K, device=dev)
+        traced = []
         played = 0
         comp = self.comp or composition(env.ctrl, self.slots())
         todo = {k: [i for i, kk in enumerate(kinds) if kk == k] for k in comp}
@@ -714,10 +832,18 @@ class Brancher:
                 sub = concat([sub, ps])
                 u_, s_, k_ = torch.cat([u_, pu]), torch.cat([s_, pside]), torch.cat([k_, pslot])
             self.calls += 1
+            rec = None
+            if self.pricer is not None:
+                from tools.nn.abilities_price import collect as pcollect
+                rec = pcollect.Recorder(sub, u_, s_, k_, K, env.params)    # the pressed branch's trajectory
             d, bg = play_pair(env, actor, sub, u_, s_, k_, K, decisions, cfg.seed + self.calls, cfg.hold_s,
-                              openloop=cfg.openloop, greedy=cfg.greedy)
+                              openloop=cfg.openloop, greedy=cfg.greedy, each=None if rec is None else rec.each)
             diff[ix] = d[:len(part)]
             budget[ix] = bg[:len(part)]
+            if rec is not None:
+                n = len(part)
+                traced.append((part, rec.result(n), (u_[:n] - (s_[:n] - 1) * rec.H).tolist(),
+                               snap["st/t"][at[ix]].tolist()))
             played += 2 * K * (len(part) + len(fill))
         _release(dev)          # ... and the branches' for the update
         self.stats.update(branch_battles=played, branch_battle_s=round(played * decisions * env.decision_s))
@@ -727,7 +853,48 @@ class Brancher:
             self.stats["price_rel"] = round(rel, 3)
         price = diff.mean(1)                                                # [E] budget share
         se = diff.std(1) / math.sqrt(K) if K > 1 else torch.zeros_like(price)
-        return price, se, budget
+        bonus = self.bonus_prices(env, traced, budget) if self.pricer is not None else None
+        return price, se, budget, bonus
+
+    def bonus_prices(self, env, traced, budget):
+        """The entries' bonus prices from the pressed branches' trajectories (traced: per branch batch (entry indices,
+        Recorder.result, the presser's index among his side's units, the battle time at the press)) -> {"ok" [E] bool:
+        a valid ability priced by its bonuses, "gold" [E] its price, "share" [E] the same / the budget, "share_copies"
+        [E, copies], "benefit", "recharge", "work" [E], "key": [E] the ability's key}."""
+        from tools.nn.abilities_price import bonuses as bz
+        from tools.nn.sim import abilities as sab
+        t1 = time.time()
+        E, K = budget.shape
+        names = sab.keys(env.params)
+        dev = budget.device
+        bg = budget.cpu().numpy()
+        out = {"ok": np.zeros(E, bool), "gold": np.zeros(E), "share": np.zeros(E), "share_copies": np.zeros((E, K)),
+               "benefit": np.zeros(E), "recharge": np.zeros(E), "work": np.zeros(E), "key": [""] * E}
+        fields = ("x", "z", "alive", "r", "m", "mv", "sprint", "charge", "morale", "fatigue", "on")
+        for part, res, owner, tpress in traced:
+            for j, e in enumerate(part):
+                k = int(res["key"][j])
+                key = names[k] if 0 <= k < len(names) else ""
+                out["key"][e] = key
+                if not self.pricer.ok(key):
+                    continue
+                trs = []
+                for cc in range(K):
+                    tr = {f: np.asarray(res[f][j, cc], dtype=bool if f in bz.FLAGS else np.float64) for f in fields}
+                    tr["mmax"] = np.asarray(res["mmax"][j, cc], dtype=np.float64)
+                    tr["owner"], tr["dt_s"] = int(owner[j]), float(env.decision_s)
+                    trs.append(tr)
+                p = self.pricer.price(key, trs, tpress[j])
+                out["ok"][e] = True
+                out["gold"][e] = p["price"]
+                out["share_copies"][e] = p["copies"] / np.maximum(bg[e], 1e-6)
+                out["share"][e] = out["share_copies"][e].mean()
+                out["benefit"][e] = p["benefit"] - p["debuffs"]
+                out["recharge"][e] = p["recharge"]
+                out["work"][e] = p["work"]
+        self.stats["bonus_s"] = round(time.time() - t1, 2)
+        return {k: (v if k == "key" else torch.as_tensor(v, device=dev, dtype=torch.bool if k == "ok"
+                                                           else torch.float32)) for k, v in out.items()}
 
     def target(self, price):
         """The critic's regression target of the replayed moments: their measured price. Extension point: a bootstrapped

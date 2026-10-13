@@ -14,6 +14,9 @@ Three layers:
     lab.py       the bonus lab: each kind's rate k (and its curves) measured in controlled simulator pairs that differ
                  only by the bonus, independent of the network's presses; the rates' layer-3 check (numpy)
     lab_sim.py   the lab's simulator runs: small scripted fights and whole battles, pairs on / off (torch)
+    train_price.py  the bonus price the training uses (run.py --ability-own-signal): the lab's rates, the valid
+                 abilities and the dynamic recharge cost's fit (config/ability_price.json); --relab counts the lab's
+                 pairs with today's bricks (numpy)
 
 Only numpy in the first three and lab.py (the host's tests); collect.py and lab_sim.py need torch.
 """

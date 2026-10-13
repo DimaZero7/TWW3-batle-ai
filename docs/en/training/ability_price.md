@@ -265,6 +265,13 @@ time on the GPU: small fights ~4.7 min a kind, whole battles ~1.5 min, on the co
 | charge_speed (per % x s) | 0.016 | 0.005...0.027 | 0.014 (0.010...0.019) | 0.004 (0...0.033) |
 | vigour (per s) | 0.37 | 0.33...0.41 | 0.20 (0.18...0.21) | 0.24 (0.14...0.31) |
 
+**Note: this table's vigour and morale rates were counted with the earlier bricks** (vigour - seconds a tier fresher,
+morale - the shortfall to the norm). With today's bricks the same pairs give vigour 0.022 a % x s (0.020...0.025; by
+the lord's fatigue tier 0.008 fresh ... 0.024 exhausted) and morale 0.037 (-0.24...0.34); the other rates are the
+same, and with them all three abilities pass: Stand Your Ground 0.79 / 0.73, Deadly Onslaught 0.89 / 0.69, Foe-Seeker
+0.73 / 0.41 (`python -m tools.nn.abilities_price.train_price --relab build/abilities_price/lab`; the training takes
+them so - [the ability head's own signal](training.md#the-ability-heads-own-signal)).
+
 **Curves** (the rate by conditions; the full table is `build/abilities_price/lab/lab.md`):
 
 - **vigour** depends strongly on the lord's fatigue tier at the press: fresh 0.05, active 0.11, winded 0.32, tired

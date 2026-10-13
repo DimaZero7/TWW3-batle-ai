@@ -271,6 +271,13 @@ branches drop only the pressed slot in "not pressed" (they used to drop all of t
 bonus kind's rate without the network's presses - pairs of battles "with the bonus / without" (small fights and
 whole v2 battles played by `ai_like`); its rates with curves (vigour by the fatigue tier, morale by the unit's morale)
 reproduce the replay at least as well as the regression, except Deadly Onslaught's sign (0.89 against 0.92).
+**The ability head's own signal** (`--ability-own-signal`, off by default): the ability head is out of the main PPO
+and learns only from its own PPO term (weight 1.0) by the press's price - a valid ability's by its bonuses on the
+"pressed" branch's trajectory (the lab's rates recounted with today's bricks; the recharge cost by the situation;
+`config/ability_price.json`), Rally's and Verminous Valour's by the branches; a moment left ready - the ability
+critic's value of the same price. The body gets its gradient x 0.1 (`--ability-body-grad`). The log has the press
+rate in melee and out of it per ability and the mean bonus price
+([own signal](training/training.md#the-ability-heads-own-signal)).
 
 **Spread of the simulator's uncertain numbers** (`--dr`, on in line S): 23 numbers not taken exactly from
 the game's database (a few probes, fits, estimates), each battle draws them inside ranges from the evidence; the
