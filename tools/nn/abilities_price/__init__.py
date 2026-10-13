@@ -11,5 +11,9 @@ Three layers:
                  replayed open loop (tools/nn/train/ability_branch.py) with the pressed branch's trajectory recorded
                  (torch; the training container)
 
-Only numpy in the first three (the host's tests); collect.py needs torch.
+    lab.py       the bonus lab: each kind's rate k (and its curves) measured in controlled simulator pairs that differ
+                 only by the bonus, independent of the network's presses; the rates' layer-3 check (numpy)
+    lab_sim.py   the lab's simulator runs: small scripted fights and whole battles, pairs on / off (torch)
+
+Only numpy in the first three and lab.py (the host's tests); collect.py and lab_sim.py need torch.
 """

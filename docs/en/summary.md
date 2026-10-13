@@ -263,6 +263,10 @@ against the open-loop replay; on 4 563 presses of itS25_12 Stand Your Ground, De
 (rank correlation 0.74, 0.63, 0.44), Rally has no signal at 60 s, Verminous Valour fails. The training's open-loop
 branches drop only the pressed slot in "not pressed" (they used to drop all of the lord's abilities)
 ([the press's price](training/ability_price.md)).
+**The bonus lab** measures each
+bonus kind's rate without the network's presses - pairs of battles "with the bonus / without" (small fights and
+whole v2 battles played by `ai_like`); its rates with curves (vigour by the fatigue tier, morale by the unit's morale)
+reproduce the replay at least as well as the regression, except Deadly Onslaught's sign (0.89 against 0.92).
 
 **Spread of the simulator's uncertain numbers** (`--dr`, on in line S): 23 numbers not taken exactly from
 the game's database (a few probes, fits, estimates), each battle draws them inside ranges from the evidence; the

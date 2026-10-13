@@ -216,6 +216,119 @@ and the trajectory has no units' health.
   Ground Spearman 0.23 against 0.41, Rally tells the non-zero presses with an area of 0.64 against 0.94; the band
   0..16 - 0.30 and 0.90. The band 16..30 is kept (the wavering threshold -> steady).
 
+## The bonus lab
+
+The rate k of each bonus kind measured in the simulator **without the network's presses**: an experiment where the
+lab, not the network, switches the bonus on. Why: the regression over the network's presses sees only how the network
+presses (it hardly ever presses the charge and speed bonuses at the right moment - their rates there are ~0 with a huge
+spread), and several kinds in one press get mixed up. Code: `tools/nn/abilities_price/lab.py` (numpy: the
+experiments, counters, rates, curves, the layer-3 check) and `lab_sim.py` (torch: the simulator runs); layers 1-3 do
+not change.
+
+**An experiment is a pair of battles.** Two copies of one battle with one battle id (the simulator's randomness is a
+hash of it, so the copies are the same to the bit) and the same orders: the orders are made on the copy "with the
+bonus" and replayed in the copy "without" (open loop, as the replay prices). In the copy "with the bonus" the lord
+presses a **lab ability** at the chosen second: a real ability's passport with only one bonus kind left (the same
+duration, radius, targets), its number x a dose 0.5 / 1 / 2. The lord's own real abilities are taken out, the game's
+AI fires nobody's. The measure: the gold over the 60 s after the press - (enemy destroyed - own lost) "with" minus the
+same "without" (the trade of the reward and of the replay prices, in gold). The counter is **the same** as for the
+network's presses: the layer-1 brick through the layer-2 ability (the lab passport) on the "with" copy's trajectory.
+The rate k = sum of gold / sum of counter over the pairs at the real number (dose 1), 95 % by bootstrap over pairs.
+
+**Three families of experiments** (the conditions from the real ones: the lords that carry the bonus - the Empire's
+General and the Skaven Warlord; units from our armies' pools `config/nn/pools.json`, both factions):
+
+- **small fights** (8 192 pairs a kind, the lab's script): "line" - the lord and 0-4 friends against 1-4 enemies,
+  lines 10-80 m apart, some enemies on a flank, the press at second 0-45 (before, at or deep in the fight); "run-up" -
+  the lord 20-60 m from an enemy unit's edge (speed and vigour 20-150 m), at any angle from its front to its rear, the
+  enemy often already fighting a unit of ours, the press as the run starts. The lord's fatigue from the network's
+  presses' distribution (vigour: every tier). Each side keeps a far reserve of 4-10 units (700 m, holding), so a local
+  fight does not end the battle and army destruction counts as in a real army;
+- **whole battles** (3 072 pairs a kind): v2 armies as in training, both sides played by the `ai_like` script; the lord
+  of a side that carries the bonus presses it at a battle time drawn from the network's presses' times (up to 600 s);
+  the battle is played once to the press, then doubled;
+- **whole battles on the condition** (8 192 pairs a kind): the same, but the press at the first second the bonus has
+  work (damage - the lord in melee; defence - a unit of his within 35 m in melee; charge and charge speed - the lord
+  runs at his attack target closer than 70 m; speed - the lord moves out of melee; morale - a unit within 35 m 8 points
+  or more below its normal top; vigour - the lord fights or moves), within 120 s.
+
+The rate in the table is the whole battles' (both families together): they are closer to the network's battles. Run
+time on the GPU: small fights ~4.7 min a kind, whole battles ~1.5 min, on the condition ~5.5 min (~1.5 h for 7 kinds).
+
+| Kind | Rate k, whole battles | 95 % | small fights | regression (layer 3) |
+|---|---|---|---|---|
+| melee_damage (per % x s) | 0.016 | 0.014...0.018 | 0.0098 (0.0087...0.011) | 0.021 (0.014...0.028) |
+| charge (per % x impact) | 0.056 | -0.02...0.13 | 0.029 (0.019...0.043) | 0.003 (0...0.11) |
+| melee_defence (per point x s) | 0.0225 | 0.021...0.024 | 0.020 (0.019...0.021) | 0.014 (0.010...0.017) |
+| morale (per point) | 0.008 | -0.06...0.07 | 0.081 (0.037...0.13) | 0.15 (0.09...0.24) |
+| speed (per % x s) | 0.009 | 0.002...0.017 | 0.041 (0.036...0.046) | 0 (0...0.002) |
+| charge_speed (per % x s) | 0.016 | 0.005...0.027 | 0.014 (0.010...0.019) | 0.004 (0...0.033) |
+| vigour (per s) | 0.37 | 0.33...0.41 | 0.20 (0.18...0.21) | 0.24 (0.14...0.31) |
+
+**Curves** (the rate by conditions; the full table is `build/abilities_price/lab/lab.md`):
+
+- **vigour** depends strongly on the lord's fatigue tier at the press: fresh 0.05, active 0.11, winded 0.32, tired
+  0.41, very tired 0.54, exhausted 0.29 (whole battles; small fights the same shape);
+- **defence** in small fights grows with the enemy's attack: attack < 25 - 0.012, 25-32 - 0.024, 32-40 - 0.028 (the
+  hit formula 35 + attack - defence within 8...90: against a weak attack the defence runs into the lower bound); in
+  whole battles flatter (0.020-0.024);
+- **morale**: only units whose morale at the press is 32-48 points gain (small fights 0.25 a point; above 48 ~0.01);
+  in whole battles the rate is ~0 at any morale (16-32: 0.08, a wide interval);
+- **charge** (small fights): from the rear 0.012 against 0.026-0.034 from the front and flank;
+- **dose** (proportionality): damage and defence at x2 give less a unit (damage 0.015 / 0.010 / 0.0067 at
+  x0.5 / x1 / x2 in small fights; defence 0.021 / 0.020 / 0.013), vigour at x2 more (0.37 -> 0.64). The damage and
+  defence bricks declare themselves proportional; in the simulator the return diminishes.
+
+**The layer-3 check** (the prices of itS25_12's 5 090 presses by the lab's rates against the replay prices; the
+regression is fitted on these very presses, the lab never saw them; "with curves" - morale by the unit's morale at the
+press, vigour by the lord's fatigue tier):
+
+| Ability | regression: sign / Spearman | lab | lab with curves | mean price / replay, gold (lab with curves) |
+|---|---|---|---|---|
+| Deadly Onslaught | 0.92 / 0.66 | 0.89 / 0.69 | 0.89 / 0.69 | 6.6 / 8.5 |
+| Stand Your Ground | 0.75 / 0.71 | 0.76 / 0.72 | 0.80 / 0.73 | 13.5 / 13.8 |
+| Foe-Seeker | 0.64 / 0.26 | 0.58 / 0.18 | 0.69 / 0.34 | 10.9 / 7.8 |
+| Rally | 0.73 / 0.08 | 0.75 / 0.08 | 0.87 / 0.03 | 0.6 / 1.4 |
+| Verminous Valour | 0.52 / 0.04 | 0.52 / 0.00 | 0.57 / 0.02 | no signal |
+
+The lab's rates with curves reproduce the replay at least as well as the regression for every ability with a signal,
+except Deadly Onslaught's sign (0.89 against 0.92: the lab's damage rate is lower, mean price 6.6 against 8.5). The
+small fights' rates alone do worse (Deadly Onslaught's sign 0.79, Foe-Seeker's Spearman -0.21): a small fight has few
+targets, damage is worth less there and morale and speed more than in a whole battle.
+
+**Found on the way** (the decisions are not here):
+
+- **A run-up into a busy target.** 61-66 % of the `sprint` seconds in the recorded trajectory (`collect.fields`) are
+  the lord's run at an enemy already fighting a unit of ours. The simulator gives neither the sprint nor the charge
+  then (`charge.free_target_only`) - from any side, the rear too. So the charge-speed brick counts seconds where the
+  bonus does nothing (the record needs a "target free" flag), and a hammer-and-anvil charge into the rear of a busy
+  enemy gets no charge in the simulator - worth checking against the game (rule 17).
+- **Speed counts idle seconds.** The condition "moves out of melee" catches much useless running in the network's
+  presses: with the small fights' rate (0.041) Foe-Seeker's price goes against the replay (Spearman -0.21). The
+  condition "moves out of melee and reaches melee later in the window" (a probe outside the code) keeps the same rate in
+  small fights (0.042) and lifts Foe-Seeker's Spearman -0.21 -> +0.22 (with the whole battles' rates 0.18 -> 0.25).
+- **Morale at the line.** The counter "shortfall to the normal top" hardly relates to the gold (Spearman with a pair's
+  gold 0.14 in small fights, 0.09 in whole battles); the counter "seconds the bonus keeps the unit above the waver (16)
+  or rout (0) line it would be below without it" relates better in small fights (0.31), not in whole battles (0.10),
+  and does not fix Rally (0.06).
+
+**What stays uncertain:** the charge in whole battles (an impact comes in only 17 % of the condition presses - interval
+-0.02...0.13; the small fights' 0.029 is more reliable), morale (~0 +- 0.07 in whole battles, 0.08 in small fights -
+the rate depends on the situation, the counter is not the right one), speed (0.009 in whole battles against 0.041 in
+small fights). The `ai_like` script plays both sides: the AI's lord keeps back and rarely runs in to attack, the
+network's lord plays otherwise.
+
+    DOCK_NAME=agent-bonuslab DOCK_BUILD=<main>/build bash tools/nn/dock.sh tools.nn.abilities_price.lab_sim \
+        --pairs 8192 --battle-pairs 3072 --out build/abilities_price/lab          # small fights and whole battles
+    ... --pairs 0 --battle-pairs 8192 --battle-trigger 120 ...                     # whole battles on the condition
+    python -m tools.nn.abilities_price.lab --dir build/abilities_price/lab       # rates, curves, layer 3 -> lab.md
+
+Tests: `tests/tools/test_nn_abilities_price_lab.py` (host: a lab ability is the same layer-2 part of the real ability
+with the same counter, a x2 dose doubles a proportional counter, the experiments' layout, the rate and its interval,
+the curves), `tests/tools/test_nn_abilities_price_lab_torch.py` (container: with a bonus of size 0 the copies are the
+same to the bit - in small fights and whole battles; with the bonus they part only after the press; layer 2's masks
+match the simulator's record >= 97 %).
+
 ## How to run
 
     DOCK_NAME=agent-abprice DOCK_BUILD=<main>/build bash tools/nn/dock.sh tools.nn.abilities_price.collect \
