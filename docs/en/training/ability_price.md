@@ -14,11 +14,14 @@ is cheap and every press has one. Code: `tools/nn/abilities_price/`; the network
   recharge, radius, targets; no code per ability. (3) One generic validator that knows nothing about any bonus.
 - **The rate k** (gold per counter unit) is one per bonus kind, not per ability; it is measured by regressing the
   replay prices on the counters.
-- **The recharge cost depends on the situation**: what the same press would have been worth later in the recharge
-  window (the best of those), predicted from what is seen at the press.
+- **The recharge cost depends on the situation**: what the same press would have given at the first moment of the
+  recharge window when its bonus gets work, less the gain of the ability coming back earlier when pressed now;
+  predicted from what is seen at the press. Not "the best press later": the maximum is biased up, with it the price was
+  > 0 in 6 % of Stand Your Ground's presses.
 - **The result on 4 563 presses of the network itS25_12** (2 560 of its own presses + 2 003 moments of a ready
   ability, the price at 60 s): Stand Your Ground, Deadly Onslaught and Foe-Seeker pass (rank correlation with the
-  replay 0.74, 0.63, 0.44); Rally has no signal, Verminous Valour fails (section [Result](#result)).
+  replay 0.74, 0.63, 0.44; Deadly Onslaught's sign agreement 0.65 - below the 0.7 threshold because of the recharge
+  cost's level, see Result); Rally has no signal, Verminous Valour fails (section [Result](#result)).
 
 ## Layer 1: the bonus bricks
 
@@ -86,15 +89,26 @@ The press's price (gold):
 **The recharge cost is dynamic.** Pressed now, the ability is gone for recharge_s seconds; the cost is what it would
 have given pressed later. `Ability.later` moves the press to second s of the same trajectory: the real press's mark is
 taken out of the morale and fatigue (`undo`), the trajectory is cut at s, the ability's timer laid anew (`active_s`
-seconds), the new press's mark put back (`apply`), the counters over the horizon from s. `best_later` - the best
-benefit of such presses 5, 10, ... recharge_s seconds later (>= 0: never pressing is always there) - is the cost in
-hindsight (`hindsight`): it sees the future. The price takes its **prediction from the situation at the press**
+seconds), the new press's mark put back (`apply`), the counters over the horizon from s. `next_useful` - the benefit
+of the press at the **first** of the seconds 5, 10, ... recharge_s where its bonus has work (some counter > 0; the
+game's AI presses so too - when the bonus has something to do), less the gain of the earlier return: pressed now
+rather than tau seconds later, the ability is back tau seconds earlier - tau x the ability's mean press benefit /
+(active_s + recharge_s) (`credit_gold_s` in `config/ability_price.json`: Stand Your Ground 0.11, Deadly Onslaught
+0.055, Foe-Seeker 0.11 gold a second); >= 0, no work in the whole window - 0. This is the cost in hindsight: it sees
+the future. The price takes its **prediction from the situation at the press**
 (`situation`, `validate.situation_recharge`): a ridge regression on what is seen then (battle time, the lord in melee
 / moving, friends within 35 m and those of them in melee, own units standing, own units below 30 morale points,
 wavering and routing, the lord's fatigue tier), one per ability, cross-fitted (each press by the other folds), >= 0.
 No hand numbers per ability. The trajectory must cover the window: collected with a 120 s horizon (`--horizon 120`),
-the price taken at the 60 s mark. The formulas' start (the mean benefit of the useful presses x recharge_s / 60,
-`Recharge`) is kept for comparison - beside it in the card.
+the price taken at the 60 s mark. Beside it in the card for comparison: the formulas' start (the mean benefit of the
+useful presses x recharge_s / 60, `Recharge`) and the former cost `best_later` - the best press of the window
+(`--target best`).
+
+Why not the best press of the window: it is the maximum over the window's 18 seconds on one random trajectory - only
+someone who knows the future picks so. On itS25_12's presses a Stand Your Ground press in melee gives 25.5 gold, the
+same press at any given later second less (25.2 after 5 s ... 18.9 after 85 s), and the window's maximum 29.4: the
+price was > 0 in 11 % of the presses in melee and in 14 % of those where the lord fought >= 15 s of the 18 under the
+bonus. The copies' noise is not the cause: the maximum of the mean over 4 copies gives the same 10 %.
 
 ## Layer 3: the validator
 
@@ -118,8 +132,14 @@ File `validate.py`, one for every bonus: it knows only the brick interface, the 
   not the copies' noise) is below 0.25 - its ceiling of rank correlation is sqrt(0.25) = 0.5, nothing to compare
   with; else **fail**. Why these thresholds: a random sign gives 0.5, 0.7 is clearly better; Spearman 0.4 is about half
   the ceiling the replay's own noise allows (sqrt of the reliability, 0.7-0.9 for the abilities with a signal).
-- **The recharge cost's variants** - a table of their own in the card: the formulas' start, hindsight, by the
-  situation (mean cost, share of price > 0, share of replay less the cost > 0, sign agreement).
+- **The recharge cost's variants** - a table of their own in the card: the formulas' start, the best press of the
+  window (`hindsight`), the first useful press (`next`), by the situation (mean cost, share of price > 0, share of
+  replay less the cost > 0, sign agreement).
+- **The sign agreement depends on the recharge cost's level**, not only on its quality: the same cost is taken off
+  both sides, and the more prices it makes negative, the higher the agreement. A constant cost with the same share of
+  prices > 0 agrees as well as any of the dynamic ones (on itS25_12's presses: Deadly Onslaught 0.67 against 0.68,
+  Stand Your Ground 0.75 against 0.82; with the best press of the window 0.74 against 0.73 and 0.80 against 0.88).
+  So the recharge cost is not chosen by this number; the rank correlation does not depend on it.
 
 ## Data
 
@@ -162,11 +182,11 @@ cost by the situation. The rates k (gold per counter unit):
 
 | Ability | presses (own) | sign | Spearman (ceiling) | reliability | V | verdict | recharge cost, gold | replay by price third | game-AI style: n, price > 0, replay - recharge > 0 |
 |---|---|---|---|---|---|---|---|---|---|
-| Verminous Valour | 908 (580) | 0.63 | 0.00 (0.51) | 0.26 | 0.13 | fail | 1.1 | 1.7 / 2.5 / -0.4 | 440; 0.12; 0.31 |
-| Deadly Onslaught | 747 (402) | 0.72 | 0.63 (0.93) | 0.87 | 0.54 | pass | 12.5 | 0.0 / 14.4 / 11.2 | - (the AI never presses) |
-| Foe-Seeker | 1 013 (547) | 0.77 | 0.44 (0.53) | 0.28 | 0.49 | pass | 12.8 | 1.1 / 8.1 / 14.9 | 458; 0.22; 0.32 |
-| Rally | 973 (587) | 0.90 | 0.08 (0.16) | 0.03 | 0.43 | no signal | 3.3 | 0.0 / 0.1 / 2.8 | 251; 0.16; 0.10 |
-| Stand Your Ground | 922 (444) | 0.80 | 0.74 (0.73) | 0.53 | 0.67 | pass | 17.9 | 0.0 / 11.4 / 27.0 | 308; 0.12; 0.30 |
+| Verminous Valour | 908 (580) | 0.55 | 0.00 (0.51) | 0.26 | 0.05 | fail | 0.7 | 1.7 / 2.5 / -0.4 | 440; 0.25; 0.34 |
+| Deadly Onslaught | 747 (402) | 0.65 | 0.63 (0.93) | 0.87 | 0.47 | passes by the rank correlation, the sign below the threshold (see below) | 8.2 | 0.0 / 14.4 / 11.2 | - (the AI never presses) |
+| Foe-Seeker | 1 013 (547) | 0.71 | 0.44 (0.53) | 0.28 | 0.42 | pass | 7.1 | 1.1 / 8.1 / 14.9 | 458; 0.62; 0.46 |
+| Rally | 973 (587) | 0.82 | 0.08 (0.16) | 0.03 | 0.36 | no signal | 1.5 | 0.0 / 0.1 / 2.8 | 251; 0.40; 0.14 |
+| Stand Your Ground | 922 (444) | 0.76 | 0.74 (0.73) | 0.53 | 0.63 | pass | 10.0 | 0.0 / 11.4 / 27.0 | 308; 0.54; 0.43 |
 
 The tests (a) pass for all 8 bricks.
 
@@ -188,10 +208,15 @@ The tests (a) pass for all 8 bricks.
   previous data) - a unit held from routing now saves the trade, now loses more in melee; nothing in the recorded
   trajectory predicts the sign. The counter catches the mean: the top 10 % by the counter - the replay 35 gold on
   average, the bottom half - 0.
-- **The dynamic recharge cost** removed Deadly Onslaught's inflated sign agreement (0.92 came from a price almost always
-  < 0): now the price is > 0 in 30 % of the presses, the replay less the recharge > 0 in 12 %, agreement 0.72. The gap
-  comes from the replay's skew: 12 % of the presses with >= 20 s of the lord's melee under the bonus replay to exactly
-  0, the median a third of the mean (5.9 against 15.5 gold), while the counter's price gives the mean.
+- **The recharge cost "the first useful press later"** instead of "the best press of the window": the price > 0 in
+  45 / 45 / 31 % of the presses (Deadly Onslaught / Foe-Seeker / Stand Your Ground; before 24 / 16 / 9 %), in the
+  game-AI-style presses (in melee, friends near) 62 % and 54 % for Foe-Seeker and Stand Your Ground (before 22 % and
+  12 %). The sign agreement fell (0.74 -> 0.65, 0.74 -> 0.71, 0.78 -> 0.76): Deadly Onslaught's below the 0.7
+  threshold, though its rank correlation is the same (0.63) - the sign agreement measures the recharge cost's level
+  (section "Layer 3"). Deadly Onslaught's sign gap comes from the replay's skew: 12 % of the presses with >= 20 s of the
+  lord's melee under the bonus replay to exactly 0, the median a third of the mean (5.9 against 15.5 gold), while the
+  counter's price gives the mean; the replay less the recharge cost is > 0 in 18 % of the presses against 45 % for the
+  price. In training the ability stays priced by its bonuses (the valid list is `train_price.VALID`).
 - **The horizon.** The replay's mean price at 30 / 60 / 90 / 120 s: Foe-Seeker 2.8 / 8.0 / 14.4 / 22.4, Verminous
   Valour 0.9 / 1.3 / 4.5 / 5.7, Stand Your Ground 12.2 / 12.8 / 14.0 / 21.6 - vigour's and speed's worth shows after
   60 s; at 90 s the speed rate is already significant (0.006, 95 % 0.002..0.010). Rally is most reliable at 30 s
@@ -209,6 +234,20 @@ and the trajectory has no units' health.
   presses, 60 s).
 - **Vigour as seconds a tier fresher** (no tier weight): Foe-Seeker Spearman 0.26-0.34; the lord's melee seconds alone
   relate to the price more (0.37).
+- **The recharge cost as the best press of the window** (`best_later`, the maximum over the seconds 5 ... recharge_s):
+  biased up - the maximum of ~18 noisy values, only someone who knows the future picks so. The price > 0 in 7 / 30 /
+  26 % of the presses of Stand Your Ground / Deadly Onslaught / Foe-Seeker, in Stand Your Ground's presses in melee
+  11 %, the mean price there -5.7 gold (the head learns not to press even in melee). Tried to soften it on the same
+  4 563 presses (the recharge cost by the situation, the lab's rates; the share of price > 0 in Stand Your Ground's
+  presses in melee / out of it): the maximum of the mean over 4 copies - 18 % (the copies' noise is not the cause);
+  the maximum of the values predicted from the situation at each second - 18 %; the best given second predicted at
+  the press (the lower bound of what waiting without knowing the future gives) - 50 % / 6 %, the mean price in melee
+  -0.2 (pressing in melee no matter); the mean useful press benefit x the chance of work in the window - 51 % / 5 % (in
+  46 % of the presses where the lord fought >= 15 s under the bonus the price < 0); the first second where the press
+  would give >= half the mean useful benefit - 77 % / 11 %, but unstable for Foe-Seeker (at a 0.75 threshold the price
+  > 0 in 74 % of the presses, out of melee 88 %). Chosen: the first useful press (no threshold to tune): Stand Your
+  Ground in melee 71 %, out of it 18 %; where the lord fought >= 15 s under the bonus 79 % (Deadly Onslaught, >= 20 s,
+  83 %).
 - **The recharge cost as the mean benefit x recharge_s / 60**: for a 90 s recharge 1.5 means, the price > 0 in 1-2 %
   of Deadly Onslaught's presses and in 14-20 % of Stand Your Ground's (the replay > 0 in 54-55 % and 49-50 %); the
   sign agreement was inflated by it (0.92).
@@ -343,7 +382,7 @@ match the simulator's record >= 97 %).
         --presses 2500 --out build/abilities_price/natural120.npz
     ... --hold --share 0 --missed 0.02 --random-slot ... --out build/abilities_price/hold120.npz
     python -m tools.nn.abilities_price.validate --data build/abilities_price/natural120.npz \
-        build/abilities_price/hold120.npz --horizon 60 [--recharge situation|hindsight|static]
+        build/abilities_price/hold120.npz --horizon 60 [--recharge situation|next|hindsight|static] [--target next|best]
 
 The card is `build/abilities_price/card.md` (+ `.json`). Tests: `tests/tools/test_nn_abilities_price.py` (host),
 `tests/tools/test_nn_abilities_price_torch.py` and `tests/tools/test_nn_ability_branch.py` (container).

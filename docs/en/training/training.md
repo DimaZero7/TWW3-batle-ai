@@ -862,8 +862,9 @@ is ready at once.
   (Rally, Verminous Valour) - the branches' price as before. The numbers - `config/ability_price.json` (outside
   `config/nn`: the simulator's version does not change; made by `tools/nn/abilities_price/train_price.py`): the lab's
   whole-battle rates, vigour by the lord's fatigue tier at the press (fresh 0.008 .. exhausted 0.024 a % x s); the
-  recharge cost - a ridge regression of "the best press of the same ability later in its recharge window" on what is
-  seen at the press, one per ability, >= 0.
+  recharge cost - a ridge regression of "the same ability pressed at the first moment of its recharge window when its
+  bonus has work, less the gain of the earlier return" on what is seen at the press, one per ability, >= 0
+  (`recharge_target: next`; [why not the best press of the window](ability_price.md#layer-2-an-ability-is-data)).
 - **A moment left** (ready, not pressed) - the ability critic's value (with a minus sign, as before); the critic learns
   the same price (by the bonuses where the ability is valid). A critic buffer of another kind of price restarts (the
   checkpoint's `ability_critic_kind`: `openloop` / `closed`, `+bonus`).
@@ -882,11 +883,12 @@ is ready at once.
   The card with the lab's rates and the vigour curve - all three valid: sign / Spearman Stand Your Ground 0.79 / 0.73,
   Deadly Onslaught 0.89 / 0.69, Foe-Seeker 0.73 / 0.41.
 - **The price on itS25_12's presses** (4,563, 60 s; benefit / recharge / price in gold, share of price > 0): Stand Your
-  Ground 12.3 / 20.9 / -8.7, 6 % (in melee 25.5 / 31.2 / -5.7, 11 %; out of it 2.2 / 13.1 / -10.9, 3 %); Deadly
-  Onslaught 6.7 / 10.2 / -3.5, 30 % (in melee -0.4, 50 %; out -6.1, 12 %); Foe-Seeker 9.5 / 12.3 / -2.7, 25 % (a tired
-  lord, tiers 3-4: +3.8..+6.0; a fresh one -3.7). The mean benefit matches the branches' price (12.3 against 12.8; 6.7
-  against 8.5; 9.5 against 8.0). The recharge cost is the expected best later press, so most of today's presses are
-  priced below 0: the head will press less and wait; in melee the price is higher than out of it.
+  Ground 12.3 / 12.2 / +0.1, 42 % (in melee +0.9, 74 %; out of it -0.5, 17 %; where the lord fought >= 15 s of the 18
+  under the bonus 82 %); Deadly Onslaught 6.7 / 6.7 / 0.0, 49 % (in melee +0.8, 74 %; out -0.7, 28 %; the lord >= 20 s
+  in melee under the bonus 84 %); Foe-Seeker 9.5 / 8.5 / +1.1, 45 % (in melee +1.6, 55 %; out +0.6, 38 %). The mean
+  benefit matches the branches' price (12.3 against 12.8; 6.7 against 8.5; 9.5 against 8.0). A press whose bonus did no
+  useful work is always < 0. With the former recharge cost (the best press of the window) the price was > 0 in 6 / 30 /
+  25 % of the presses, Stand Your Ground's mean in melee -5.7: the head learnt not to press even there.
 
 **itS23's ability head had collapsed.** The audit (`build/ability_branch/abil_audit.py`, 128 battles × 420
 decisions, self-play and `ai_like`): the chance to press a ready ability 0.9996 on average, the 5 % quantile 0.9994,

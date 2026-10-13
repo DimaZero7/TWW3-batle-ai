@@ -22,6 +22,13 @@ def test_the_config_prices_the_three_valid_abilities_with_a_recharge_fit_each():
         r = pr.spec["recharge"][k]
         assert len(r["beta"]) == len(r["mu"]) == len(r["sd"]) == tp.SITUATION_N == len(va.SITUATION)
     assert set(pr.rates) >= {"melee_damage", "melee_defence", "vigour", "morale", "charge", "speed", "charge_speed"}
+    # the recharge cost learns the first useful later press less the earlier return's credit, not the best one
+    assert pr.spec["recharge_target"] == "next" and pr.spec["recharge_target"] in abl.TARGETS
+    for k in pr.valid:
+        r = pr.spec["recharge"][k]
+        a = pr.abilities[k]
+        assert np.isclose(r["credit_gold_s"], r["own_mean"] / (a.active_s + a.recharge_s))
+        assert 0 < r["predicted_mean"] < 1.5 * r["own_mean"]        # the best-later cost was 1.7x (stand your ground)
     v = pr.curves["vigour"]
     assert len(v["rates"]) == len(v["edges"]) - 1 and all(x >= 0 for x in v["rates"])
 

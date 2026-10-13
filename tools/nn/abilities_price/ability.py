@@ -16,9 +16,11 @@ The press's price (gold):
     price    = benefit - debuffs - recharge cost
 The recharge cost: static (Recharge) - the mean net benefit of this ability's useful presses x recharge_s / 60 (a 90 s
 recharge costs more than a 60 s one); dynamic (DynamicRecharge) - per press, what the ability ready over the next
-recharge_s seconds is worth in this situation: the best net benefit of the same ability pressed at a later second of
-the window instead (Ability.later: the press's own trajectory, its own mark taken out, the press moved), or that best
-regressed on the situation at the press (validate.py: no look at the future).
+recharge_s seconds is worth in this situation: the net benefit of the same ability pressed at a later second of the
+window instead (Ability.later: the press's own trajectory, its own mark taken out, the press moved) - at the first
+second its bonus would have work, less the credit of getting the ability back earlier (next_useful; best_later, the
+best second of the window, is kept for comparison: biased up), regressed on the situation at the press (validate.py,
+train_price.py: no look at the future).
 
 Only numpy.
 """
@@ -220,16 +222,35 @@ class DynamicRecharge(Recharge):
         return float(self.costs[press])
 
 
-def best_later(ability, tr, bricks, rates, horizon, step=5):
+def best_later(ability, tr, bricks, rates, horizon, step=5, credit_s=0.0):
     """The most a press of the same ability at a later second of its recharge window (step, 2 step, .. recharge_s)
-    would have netted (benefit - debuffs, gold; >= 0: not pressing at all is always there) - the dynamic recharge cost
-    seen in hindsight on this trajectory."""
+    would have netted (benefit - debuffs - credit_s x the second, gold; >= 0: not pressing at all is always there) - the
+    dynamic recharge cost seen in hindsight on this trajectory, the max kind: biased up (the maximum of ~18 noisy
+    seconds; a policy does not know the best second in advance) - kept for comparison, the cost is next_useful."""
     starts = np.arange(step, ability.recharge_s + 1e-6, step) / tr["dt_s"]
     best = 0.0
-    for c in ability.later(tr, bricks, starts, horizon):
+    for s, c in zip(starts, ability.later(tr, bricks, starts, horizon)):
         ben, deb = split(c, rates, bricks)
-        best = max(best, ben - deb)
+        best = max(best, ben - deb - (credit_s * float(s) * tr["dt_s"] if c else 0.0))
     return best
+
+
+def next_useful(ability, tr, bricks, rates, horizon, step=5, credit_s=0.0):
+    """The net benefit (gold, >= 0) of the same ability pressed at the FIRST later second of its recharge window (step,
+    2 step, .. recharge_s) where its bonus would do useful work (some counter > 0) - the press a sensible player makes
+    if he waits now (press when the bonus has work, as the game's AI does) - less credit_s x that second (pressing now
+    brings the ability back that many seconds earlier: credit_s = the ability's mean press benefit / (active_s +
+    recharge_s)); 0 when no second of the window has work. The dynamic recharge cost seen in hindsight on this
+    trajectory, without best_later's maximum (the best of ~18 noisy seconds: an upper bound no causal policy reaches)."""
+    starts = np.arange(step, ability.recharge_s + 1e-6, step) / tr["dt_s"]
+    for s, c in zip(starts, ability.later(tr, bricks, starts, horizon)):
+        if c and sum(c.values()) > 0:
+            ben, deb = split(c, rates, bricks)
+            return max(0.0, ben - deb - credit_s * float(s) * tr["dt_s"])
+    return 0.0
+
+
+TARGETS = {"next": next_useful, "best": best_later}     # the hindsight recharge cost's kinds (config: recharge_target)
 
 
 def price(ability, counters, rates, bricks, recharge, press=None):

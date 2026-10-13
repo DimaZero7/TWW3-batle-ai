@@ -14,10 +14,14 @@ tier fresher, ~16x the rate of today's "% x s" counter: foe seeker's price came 
                 bins are noise (95 % intervals 1-3 gold a point wide) and change no card (CURVE_KINDS)
     valid       the abilities priced this way (the card with the lab's rates: stand your ground, deadly onslaught,
                 foe seeker); any other keeps its branch price
-    recharge    per ability a ridge regression of the hindsight recharge cost (ability.best_later: the best net
-                benefit of the same ability pressed 5, 10, .. recharge_s seconds later on the same trajectory, the
-                rates as above with the vigour rate of the presser's tier at the press) on the situation at the press
-                (validate.SITUATION: what is seen then, no future), clipped at 0
+    recharge    per ability a ridge regression of the hindsight recharge cost on the situation at the press
+                (validate.SITUATION: what is seen then, no future), clipped at 0. The hindsight cost (recharge_target):
+                "next" (the default) - ability.next_useful: the net benefit of the same ability pressed at the first of
+                5, 10, .. recharge_s seconds later on the same trajectory where its bonus would have work, less
+                credit_gold_s x that second (pressing now brings it back that much earlier; credit_gold_s = the
+                ability's mean press benefit in the data / (active_s + recharge_s)); "best" - ability.best_later, the
+                best of those seconds (biased up: the maximum of ~18 noisy values, 6 % of stand your ground's presses
+                came out > 0); the rates as above with the vigour rate of the presser's tier at the press
 
     price (gold) = benefit - debuffs - recharge cost; benefit and debuffs the mean over the branch's copies
 
@@ -188,11 +192,11 @@ def lab_spec(lab, kinds=CURVE_KINDS):
     return rates, curves
 
 
-def fit(data_paths, lab_path, out=None, horizon=60.0, copies=2, step=5, seed=0):
+def fit(data_paths, lab_path, out=None, horizon=60.0, copies=4, step=5, seed=0, target="next"):
     from tools.nn.abilities_price import validate as va
     lab = json.loads(Path(lab_path).read_text(encoding="utf-8"))
     rates, curves = lab_spec(lab)
-    spec = {"rates": rates, "curves": curves, "valid": list(VALID), "recharge": {}}
+    spec = {"rates": rates, "curves": curves, "valid": list(VALID), "recharge_target": target, "recharge": {}}
     cfg = ROOT / "config" / "nn"
     passports = json.loads((cfg / "abilities.json").read_text(encoding="utf-8"))["abilities"]
     sim = json.loads((cfg / "sim.json").read_text(encoding="utf-8"))
@@ -203,6 +207,14 @@ def fit(data_paths, lab_path, out=None, horizon=60.0, copies=2, step=5, seed=0):
     P, C = data["diff"].shape
     key = np.array([names[int(k)] for k in data["key"]])
     X = va.situation(data, rules)
+    own = np.zeros(P)                     # each press's own net benefit over the horizon (mean over the copies)
+    for p in range(P):
+        if key[p] in pr.valid:
+            own[p] = np.mean([np.subtract(*pr.gold(key[p], va.trace(data, p, c, dt_s, upto=horizon / dt_s))[:2])
+                              for c in range(C)])
+    credit = {a: (float(own[key == a].mean()) / (pr.abilities[a].active_s + pr.abilities[a].recharge_s)
+                  if target == "next" and (key == a).any() else 0.0) for a in pr.valid}
+    later = abl.TARGETS[target]
     hind = np.zeros(P)
     for p in range(P):
         a = pr.abilities.get(key[p])
@@ -212,7 +224,7 @@ def fit(data_paths, lab_path, out=None, horizon=60.0, copies=2, step=5, seed=0):
         for c in range(min(C, copies)):
             tr = va.trace(data, p, c, dt_s)
             k = dict(rates, vigour=pr._vigour_rate(tr))
-            vals.append(abl.best_later(a, tr, pr.bricks, k, horizon / dt_s, step))
+            vals.append(later(a, tr, pr.bricks, k, horizon / dt_s, step, credit_s=credit[key[p]]))
         hind[p] = np.mean(vals)
     mu, sd = X.mean(0), X.std(0)
     sd[sd == 0] = 1.0
@@ -229,10 +241,12 @@ def fit(data_paths, lab_path, out=None, horizon=60.0, copies=2, step=5, seed=0):
         beta = np.linalg.solve(A.T @ A + reg, A.T @ hind[ix])
         pred = np.clip(A @ beta, 0.0, None)
         spec["recharge"][a] = {"mu": mu.tolist(), "sd": sd.tolist(), "beta": beta.tolist(), "n": int(len(ix)),
-                               "hindsight_mean": float(hind[ix].mean()), "predicted_mean": float(pred.mean())}
-        fitted[a] = (float(hind[ix].mean()), float(pred.mean()), len(ix))
+                               "hindsight_mean": float(hind[ix].mean()), "predicted_mean": float(pred.mean()),
+                               "own_mean": float(own[ix].mean()), "credit_gold_s": credit[a]}
+        fitted[a] = (float(hind[ix].mean()), float(pred.mean()), len(ix), float(own[ix].mean()),
+                     float((own[ix] - pred > 0).mean()))
     spec["_source"] = {"lab": str(lab_path), "data": [str(p) for p in data_paths], "horizon_s": horizon,
-                       "hindsight_copies": copies, "step_s": step, "ridge": RIDGE,
+                       "hindsight_copies": min(C, copies), "step_s": step, "ridge": RIDGE, "recharge_target": target,
                        "situation": list(va.SITUATION)}
     if out:
         Path(out).write_text(json.dumps(spec, indent=1) + "\n", encoding="utf-8")
@@ -275,6 +289,8 @@ def main():
     ap.add_argument("--out", default=None, help="default config/ability_price.json (fit)")
     ap.add_argument("--horizon", type=float, default=60.0)
     ap.add_argument("--relab", default=None, metavar="LAB_DIR", help="count the lab's pairs with today's bricks")
+    ap.add_argument("--recharge-target", default="next", choices=tuple(abl.TARGETS),
+                    help="the hindsight recharge cost: next (the first later second with work, less the credit) or best")
     a = ap.parse_args()
     if a.relab:
         d = relab(a.relab, a.data or ["build/abilities_price/natural.npz", "build/abilities_price/hold.npz"],
@@ -284,9 +300,10 @@ def main():
                 print(way, k.split("abilities_")[-1], r.get("verdict"), round(r["sign"], 2), round(r["spearman"], 2))
         return
     spec, fitted = fit(a.data or ["build/abilities_price/natural120.npz", "build/abilities_price/hold120.npz"], a.lab,
-                       a.out or str(FILE), a.horizon)
-    for k, (h, p, n) in fitted.items():
-        print(f"{k}: {n} presses, hindsight recharge {h:.1f} gold, predicted {p:.1f}")
+                       a.out or str(FILE), a.horizon, target=a.recharge_target)
+    for k, (h, p, n, b, pos) in fitted.items():
+        print(f"{k}: {n} presses, benefit {b:.1f} gold, hindsight recharge {h:.1f}, predicted {p:.1f}, "
+              f"price > 0 {pos:.2f}")
     print("rates", {k: round(v, 4) for k, v in spec["rates"].items()})
     print("curves", spec["curves"])
 

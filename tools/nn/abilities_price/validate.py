@@ -18,10 +18,14 @@ trajectory's schema (bonuses.TRACE), the abilities as data (ability.py) and the 
     (sign agreement >= 0.7, Spearman >= 0.4); "no signal" when the branch price's real share (its reliability over the
     copies) is below REL_MIN - then it is noise and agreement cannot be judged.
 
-The recharge cost (ability.py): dynamic by default - per press the best later press of the same ability within its
-recharge window on the press's own trajectory (ability.best_later, hindsight, with the fitted rates), regressed on the
-situation at the press (situation(): what is seen then, cross-fitted per ability) so it looks at no future; the card
-shows the static start (the mean useful net x recharge_s / 60) and the hindsight cost beside it.
+The recharge cost (ability.py): dynamic by default - per press the later press of the same ability within its
+recharge window on the press's own trajectory (hindsight, with the fitted rates): --target next (the default,
+ability.next_useful: at the first later second its bonus would have work, less the credit of getting the ability back
+earlier) or best (ability.best_later: the best second, biased up), regressed on the situation at the press
+(situation(): what is seen then, cross-fitted per ability) so it looks at no future; the card shows the static start
+(the mean useful net x recharge_s / 60) and both hindsight costs beside it. The sign agreement moves with the cost's
+level: both sides less the same cost, a cost that makes most prices negative agrees more (a constant cost of the same
+share above 0 agrees as much as any of the dynamic ones on itS25_12's presses) - it does not judge the recharge cost.
 
 A file of a longer horizon (collect.py --horizon 120 --marks 30,60,90) is read at --horizon: the branch price at that
 mark, the counters over that many seconds; the later presses use the whole trajectory.
@@ -205,17 +209,21 @@ def counters(data, names, abilities, bricks, dt_s=1.0, upto=None):
     return kinds, Cc.mean(1), Cc
 
 
-def hindsight_recharge(data, names, abilities, bricks, rates, dt_s=1.0, horizon=60, copies=2, step=5):
-    """[P] the dynamic recharge cost seen in hindsight (ability.best_later, mean over the first `copies` copies)."""
+def hindsight_recharge(data, names, abilities, bricks, rates, dt_s=1.0, horizon=60, copies=2, step=5, target="best",
+                       credit=None):
+    """[P] the dynamic recharge cost seen in hindsight (ability.TARGETS[target]: best_later or next_useful, mean over
+    the first `copies` copies); credit {key: gold a second} - the earlier return's credit (next_useful)."""
     k = {kd: r["k"] for kd, r in rates.items()}
+    later = abl.TARGETS[target]
     P, C = data["diff"].shape
     out = np.zeros(P)
     for p in range(P):
-        a = abilities.get(names[int(data["key"][p])])
+        key = names[int(data["key"][p])]
+        a = abilities.get(key)
         if a is None:
             continue
-        out[p] = np.mean([abl.best_later(a, trace(data, p, c, dt_s), bricks, k, horizon / dt_s, step)
-                          for c in range(min(C, copies))])
+        out[p] = np.mean([later(a, trace(data, p, c, dt_s), bricks, k, horizon / dt_s, step,
+                                credit_s=(credit or {}).get(key, 0.0)) for c in range(min(C, copies))])
     return out
 
 
@@ -505,11 +513,14 @@ def markdown(checks, rates, rows, kinds, meta, P, recharge_kind="static", horizo
 RECHARGE_WORDS = {
     "static": "the static start (the mean useful net benefit x recharge_s / 60)",
     "hindsight": "the best later press of the same ability within its recharge window on this trajectory (hindsight)",
-    "situation": "the hindsight cost regressed on the situation at the press (cross-fitted per ability; no future)",
+    "next": "the same ability pressed at the first later second of its recharge window where its bonus has work, less "
+            "the earlier return's credit (hindsight)",
+    "situation": "the hindsight cost (next or best: --target) regressed on the situation at the press (cross-fitted per "
+                 "ability; no future)",
 }
 
 
-def run(paths, out=None, boot=400, seed=0, horizon=None, recharge="situation"):
+def run(paths, out=None, boot=400, seed=0, horizon=None, recharge="situation", target="next"):
     params_dir = ROOT / "config" / "nn"
     passports = json.loads((params_dir / "abilities.json").read_text(encoding="utf-8"))["abilities"]
     sim = json.loads((params_dir / "sim.json").read_text(encoding="utf-8"))
@@ -525,10 +536,13 @@ def run(paths, out=None, boot=400, seed=0, horizon=None, recharge="situation"):
     y = data["diff"].mean(1) * data["budget"].mean(1)
     rates = fit_rates(C, y, kinds, bricks, boot, seed)
     pred = crossfit(C, y, kinds, bricks, seed=seed)
-    hind = hindsight_recharge(data, names, abilities, bricks, rates, dt_s, H)
     key = np.array([names[int(k)] for k in data["key"]])
-    sit = situation_recharge(situation(data, rules), hind, key, seed=seed)
-    costs = {"hindsight": hind, "situation": sit}
+    credit = {a: float(pred[key == a].mean()) / (abilities[a].active_s + abilities[a].recharge_s)
+              for a in abilities if (key == a).any()}
+    hind = hindsight_recharge(data, names, abilities, bricks, rates, dt_s, H)
+    nxt = hindsight_recharge(data, names, abilities, bricks, rates, dt_s, H, target="next", credit=credit)
+    sit = situation_recharge(situation(data, rules), nxt if target == "next" else hind, key, seed=seed)
+    costs = {"hindsight": hind, "next": nxt, "situation": sit}
     rows = card(data, names, abilities, bricks, kinds, C, rates, pred, passports, sim["abilities"],
                 recharge=costs.get(recharge), others=costs)
     md = markdown(checks, rates, rows, kinds, meta, len(y), recharge if recharge in costs else "static", H)
@@ -537,7 +551,7 @@ def run(paths, out=None, boot=400, seed=0, horizon=None, recharge="situation"):
         Path(out).write_text(md, encoding="utf-8")
         Path(out).with_suffix(".json").write_text(json.dumps(
             {"rates": rates, "rows": rows, "checks": [c.__dict__ for c in checks], "horizon_s": H,
-             "recharge": recharge}, indent=1, default=float), encoding="utf-8")
+             "recharge": recharge, "target": target}, indent=1, default=float), encoding="utf-8")
     return md, rates, rows, checks
 
 
@@ -548,9 +562,10 @@ def main():
     ap.add_argument("--boot", type=int, default=400)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--horizon", type=float, default=None, help="the price's horizon, s (a mark of a longer file)")
-    ap.add_argument("--recharge", default="situation", choices=("static", "hindsight", "situation"))
+    ap.add_argument("--recharge", default="situation", choices=("static", "hindsight", "next", "situation"))
+    ap.add_argument("--target", default="next", choices=tuple(abl.TARGETS), help="the hindsight cost 'situation' learns")
     a = ap.parse_args()
-    md, *_ = run(a.data, a.out, a.boot, a.seed, a.horizon, a.recharge)
+    md, *_ = run(a.data, a.out, a.boot, a.seed, a.horizon, a.recharge, a.target)
     print(md)
 
 

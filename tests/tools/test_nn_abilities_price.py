@@ -233,6 +233,30 @@ def test_a_later_press_counts_the_same_ability_moved_to_that_second():
     assert p["recharge"] == 7.0 and p["price"] == pytest.approx(0.02 * 50 - 7.0)
 
 
+def test_the_next_useful_press_is_the_first_later_second_with_work_less_the_credit_not_the_best():
+    # Deadly Onslaught: the lord fights 12-20 s and 60-100 s. The first later second with work is 5 (7 s of melee in
+    # 5..36: 12..19 - 8 s), the best is 60 (31 s): next_useful takes the first, best_later the best
+    a = abl.abilities(PASSPORTS, BRICKS)["wh_main_character_abilities_deadly_onslaught"]
+    rates = {"melee_damage": 0.02, "charge": 0.0}
+    tr, _ = blank(S=120, U=2, active=31)
+    tr["m"][12:20, 0] = True
+    tr["m"][60:, 0] = True
+    first = 0.02 * 25.0 * 8                                                     # seconds 12..19 under the bonus
+    assert abl.next_useful(a, tr, BRICKS, rates, 60) == pytest.approx(first)
+    assert abl.best_later(a, tr, BRICKS, rates, 60) == pytest.approx(0.02 * 25.0 * 31)
+    assert abl.next_useful(a, tr, BRICKS, rates, 60, credit_s=0.1) == pytest.approx(first - 0.1 * 5)
+    assert abl.next_useful(a, tr, BRICKS, rates, 60, credit_s=10.0) == 0.0     # never below 0
+    # no work in the first seconds: the first start with work is later (melee only from 60: the start at 30, active
+    # 31..61, catches 2 s), less the credit of its 30 s
+    tr["m"][12:20, 0] = False
+    assert abl.next_useful(a, tr, BRICKS, rates, 60) == pytest.approx(0.02 * 25.0 * 2)
+    assert abl.next_useful(a, tr, BRICKS, rates, 60, credit_s=0.01) == pytest.approx(0.02 * 25.0 * 2 - 0.3)
+    # no work anywhere in the window: 0
+    tr["m"][:] = False
+    assert abl.next_useful(a, tr, BRICKS, rates, 60) == 0.0 and abl.best_later(a, tr, BRICKS, rates, 60) == 0.0
+    assert set(abl.TARGETS) == {"next", "best"}
+
+
 def test_a_later_morale_press_sees_the_morale_without_the_first_press():
     # Rally pressed at 0: the recorded morale carries its lift. Moved to second 30, the counter must see the morale
     # without the first press (here 10 points: wavering) - not the lifted one

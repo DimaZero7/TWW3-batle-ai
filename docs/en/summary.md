@@ -262,7 +262,8 @@ the price spread, cheaper branches. With it the abilities do work in the simulat
 budget over 60 s on average, Stand Your Ground in melee +0.005. The share is logged (`price_rel`). **The press priced
 by its bonuses** (`tools/nn/abilities_price`, training untouched): a brick per bonus kind (a counter of its useful
 work; morale weighted by the wavering / rout thresholds, vigour by the fatigue tier's penalties), an ability as its
-passport's data, a recharge cost by the situation (the best later press in the recharge window), one generic validator
+passport's data, a recharge cost by the situation (the same press at the first moment of the recharge window when its
+bonus has work, less the gain of the earlier return), one generic validator
 against the open-loop replay; on 4 563 presses of itS25_12 Stand Your Ground, Deadly Onslaught and Foe-Seeker pass
 (rank correlation 0.74, 0.63, 0.44), Rally has no signal at 60 s, Verminous Valour fails. The training's open-loop
 branches drop only the pressed slot in "not pressed" (they used to drop all of the lord's abilities)
