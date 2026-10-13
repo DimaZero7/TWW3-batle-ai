@@ -423,7 +423,12 @@ def train(args, every=None, teacher=None, normal=None):
               f"{args.ability_branch_decay} updates (from update {ab_updates0} of the chain)", flush=True)
         if env.brancher.critic is not None:
             # the ability critic's model, Adam and buffer go on from --init's "train" (a fresh one otherwise)
-            saved = (checkpoint.train_state(args.init) or {}).get("ability_critic") if args.init and args.resume else None
+            ts = (checkpoint.train_state(args.init) or {}) if args.init and args.resume else {}
+            saved = ts.get("ability_critic")
+            # prices of another kind (open-loop or not; a state without the mark is closed-loop) start afresh
+            if saved is not None and bool(ts.get("ability_critic_openloop", False)) != bool(env.brancher.cfg.openloop):
+                saved = None
+                print("ability critic: the saved buffer holds the other kind of price (open-loop or not)", flush=True)
             if env.brancher.critic.load(saved):
                 print(f"ability critic: resumed from {args.init} ({len(env.brancher.critic)} samples)", flush=True)
             else:
@@ -523,7 +528,8 @@ def train(args, every=None, teacher=None, normal=None):
                           "ability_updates": ab_updates0 + (update if args.ability_branch else 0),
                           "observe_updates": observe.updates if observe is not None
                           else int(carried.get("observe_updates", 0))},
-                **({"ability_critic": env.brancher.critic.state()}
+                **({"ability_critic": env.brancher.critic.state(),
+                    "ability_critic_openloop": bool(env.brancher.cfg.openloop)}
                    if args.ability_branch and env.brancher.critic is not None else {})}
 
     def share_done():
