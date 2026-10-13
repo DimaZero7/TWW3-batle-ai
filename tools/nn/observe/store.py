@@ -26,8 +26,9 @@ import torch
 
 from tools.nn.observe import loss as obs_loss
 from tools.nn.observe.tokens import widen as _tokens     # converted before the token grew (11.10.2026)
+from tools.nn.observe.tokens import widen_abil
 
-OBS = ("tokens", "ctx", "own", "attend", "ctrl", "target_ok", "pos", "abil", "abil_ok")
+OBS = ("tokens", "ctx", "own", "attend", "ctrl", "target_ok", "pos", "abil", "abil_ok", "abil_idx")
 LABELS = ("kind", "target", "point", "run", "run_known", "alt")
 ADV = ("critic", "mc", "window20")
 NEGLIGIBLE = 1e-6       # the term's weight below this: off (module doc)
@@ -79,9 +80,11 @@ class Demos:
             A_all.append(a[rows])
             w20 = (g["w20_adv"] > 0) & (g["w20_trade"] > 0)
             both.append(np.stack([good[rows], w20[rows]], -1))
+            widen_abil(g)                                # converted before the ability slots grew (13.10.2026)
             self.seqs.append({"name": g["name"], "L": len(g["t"]), "A": a, "good": good,
                               "obs": {k: torch.as_tensor(g[k] if k == "ctx" else _pad(
-                                          _tokens(g[k]) if k == "tokens" else g[k], self.N)) for k in OBS if k in g},
+                                          _tokens(g[k]) if k == "tokens" else g[k], self.N,
+                                          value=-1 if k == "abil_idx" else 0)) for k in OBS if k in g},
                               "geo": torch.as_tensor(g["geo"]),
                               "lab": {k: torch.as_tensor(_pad(g[k], self.N, value=-1 if g[k].dtype.kind == "i" else 0))
                                       for k in LABELS}})
@@ -132,6 +135,8 @@ class Demos:
         for k in ("tokens", "ctx", "abil", "pos"):
             if k in o:
                 o[k] = o[k].float()
+        if "abil_idx" in o:
+            o["abil_idx"] = o["abil_idx"].long()
         o["free"] = o["ctrl"].clone()
         o["commit"] = torch.zeros(*o["ctrl"].shape, 2, device=device)
         o["geo"] = q["geo"].to(device).float()[None].expand(b - a, -1)

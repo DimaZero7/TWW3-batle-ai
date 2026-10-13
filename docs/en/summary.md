@@ -180,9 +180,13 @@ morale, fatigue, ammunition, kills) except their orders ([visibility rule](train
 to the end of the battle. Preset `v2`, 3.51 M weights, trained from scratch
 ([details](training/model.md#variant-v2-map-sectors-chained-heads-commitment)):
 
-- **Unit tokens** (169 numbers each: passport, state, effects - contact effects too -, fire arc, the order in force,
-  shots a volley and magic, the aim before the first shot and the silence after a new target; checkpoints of 155 and
-  167 inputs load with zero weights for the new ones) → 3 attention
+- **Unit tokens** (197 numbers each: passport, state, effects - contact effects too -, fire arc, the order in force,
+  shots a volley and magic, the aim before the first shot and the silence after a new target, 28 - the bonuses other
+  units' abilities lay on it; checkpoints of 155, 167 and 169 inputs load with zero weights for the new ones) +
+  **abilities**: 30 slots a unit - all its abilities, none lost (15 for the actives - the head chooses among them, 15
+  for the passives; a passive shows its condition and "on now"; the passport comes from a table, a unit stores the
+  slot's 6 numbers and the ability's index; [details](training/model.md#abilities-each-unit-each-of-its-ability-slots))
+  → 3 attention
   layers with a distance bias and pair features (who reaches whom, closing speed, flank / rear; also in the target
   pointer) → GRU memory.
 - **Map sectors** 16 × 16 of 100 m: strength and count of own and visible enemy units, routers, the map

@@ -4,10 +4,13 @@
   not by its name); the side's context (character, role, time) is added to every token and is
   also a token of its own (index 0). Inputs added since a checkpoint was saved (passport features
   appended at the token's end) load with zero weights (pad_inputs): it computes what it did.
-* AbilityEncoder: each ability slot (its state and passport, tools/nn/model/abilities.py) through
+* AbilityEncoder: each ability slot (its state and passport, tools/nn/model/abilities.py full) through
   the same small network; the sum over the unit's owned slots is added to the unit's token, so the
   order of the slots does not matter. Its last layer starts at zero: an actor trained before
-  abilities sees exactly what it saw.
+  abilities sees exactly what it saw. It reads the slots a network saw before 13.10.2026 (abilities.legacy: the
+  simulator's first 3 of the unit's abilities); AbilityExtra (the same, its last layer at zero too) reads every owned
+  slot: an actor saved before it computes what it did, and learns the abilities it never saw (the 4th and 5th of a
+  lord: Wounded, Scurry Away!) and the new columns through it.
 * Block: attention + feed-forward. Masks: padding, own dead units and known-dead enemies are
   never looked at. Bias: a learned number per head for the distance between two units (buckets),
   so "who is near" is easy; tokens without a known position use a bucket of their own. v2 adds the pair
@@ -71,7 +74,31 @@ class TokenEncoder(nn.Module):
         return self.norm(torch.cat([c[:, None], u], 1))
 
 
+def _rows(abil, idx, mask):
+    """(the full features [M, SIZE] of the slots where mask [B, N, K], (b, n)) - eager only (nonzero)."""
+    b, n, k = mask.nonzero(as_tuple=True)
+    return ab.full(abil[b, n, k], idx[b, n, k]), b, n
+
+
+def _sum(e, b, n, B, N):
+    """[M, d] rows of (b, n) -> [B, N, d] summed per unit."""
+    return e.new_zeros(B * N, e.shape[-1]).index_add(0, b * N + n, e).reshape(B, N, -1)
+
+
+def _dense(net, abil, idx, mask, slots):
+    """sum over the slots (a static list) of net(the slot's full features) where mask [B, N, K] - compiled."""
+    a, i, keep = abil[:, :, slots], idx[:, :, slots], mask[:, :, slots, None]
+    x = ab.full(a, i)
+    # (the slots not kept enter as zeros: a stray NaN there would poison the weights' gradient)
+    e = net(torch.where(keep, x, torch.zeros_like(x)))
+    return torch.where(keep, e, torch.zeros_like(e)).sum(2)
+
+
 class AbilityEncoder(nn.Module):
+    """The slots a network saw before 13.10.2026 (module doc)."""
+    # compiled: where those slots can be (the unit's first OLD_SLOTS abilities: its first actives, its first passives)
+    COMPILED = tuple(range(ab.OLD_SLOTS)) + tuple(range(ab.ACTIVE, ab.ACTIVE + ab.OLD_SLOTS))
+
     def __init__(self, d):
         super().__init__()
         self.net = nn.Sequential(nn.Linear(ab.SIZE, d), nn.GELU(), nn.Linear(d, d))
@@ -82,22 +109,62 @@ class AbilityEncoder(nn.Module):
         pad_inputs(state_dict, prefix + "net.0.weight", self.net[0].in_features)
         super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
-    def forward(self, abil):
-        """abil [B, N, SLOTS, SIZE] -> [B, N, d]: the sum over the owned slots. Only the owned slots
-        go through the network (lords: a few of the B x N x SLOTS), so the cost stays small. Compiled
-        (the decisions of training, tools/nn/train/rollout.py fast()), every slot goes through it and
-        those not owned are dropped after it - the same sum: picking the owned ones (nonzero) reads
-        their number back from the GPU and breaks the graph, and a decision's batch is small."""
+    def forward(self, abil, idx):
+        """abil [B, N, SLOTS, STATE], idx [B, N, SLOTS] -> [B, N, d]: the sum over the legacy owned slots. Only those
+        go through the network (lords: a few of the B x N x SLOTS), so the cost stays small. Compiled (the decisions
+        of training, tools/nn/train/rollout.py fast()), the 6 places they can be go through it and the rest are
+        dropped after it - the same sum: picking the owned ones (nonzero) reads their number back from the GPU and
+        breaks the graph."""
+        keep = ab.legacy(abil[..., ab.STATE_INDEX["owned"]] > 0.5)
         if torch.compiler.is_compiling():
-            owned = (abil[..., ab.INDEX["owned"]] > 0.5)[..., None]
-            # (the slots not owned enter as zeros: a stray NaN there would poison the weights' gradient)
-            e = self.net(torch.where(owned, abil, torch.zeros_like(abil)))             # [B, N, SLOTS, d]
-            return torch.where(owned, e, torch.zeros_like(e)).sum(2)
-        B, N, K, _ = abil.shape
-        b, n, k = (abil[..., ab.INDEX["owned"]] > 0.5).nonzero(as_tuple=True)
-        e = self.net(abil[b, n, k])                                                   # [M, d]
-        out = e.new_zeros(B * N, e.shape[-1]).index_add(0, b * N + n, e)
-        return out.reshape(B, N, -1)
+            return _dense(self.net, abil, idx, keep, list(self.COMPILED))
+        B, N = abil.shape[:2]
+        x, b, n = _rows(abil, idx, keep)
+        return _sum(self.net(x), b, n, B, N)
+
+
+class AbilityExtra(nn.Module):
+    """Every owned slot (module doc): the actives through the network one by one (compiled: the simulator's timer
+    slots, abilities.SIM_SLOTS - a simulator setup has no other, abilities.sim_fits), the passives - whose state is
+    owned and on now only - by a table of the network's answer per (ability, on now), counted per unit."""
+
+    def __init__(self, d):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(ab.SIZE, d), nn.GELU(), nn.Linear(d, d))
+        nn.init.zeros_(self.net[2].weight)
+        nn.init.zeros_(self.net[2].bias)
+
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+        pad_inputs(state_dict, prefix + "net.0.weight", self.net[0].in_features)
+        super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
+
+    def _passives(self, abil, idx):
+        """[B, N, d]: the passive slots' sum (class doc)."""
+        tab = ab.torch_table(abil.device)
+        A1 = tab.shape[0]                                            # abilities + the empty row
+        rows = torch.arange(A1, device=abil.device)
+        on = torch.arange(2, device=abil.device, dtype=abil.dtype)
+        state = torch.zeros(A1, 2, ab.STATE, device=abil.device, dtype=abil.dtype)
+        state[..., ab.STATE_INDEX["owned"]] = 1.0
+        state[..., ab.STATE_INDEX["on_now"]] = on
+        table = self.net(ab.full(state, rows[:, None].expand(A1, 2), tab))     # [A1, 2, d]
+        p = abil[:, :, ab.ACTIVE:]                                   # [B, N, P, STATE]
+        owned = p[..., ab.STATE_INDEX["owned"]] > 0.5
+        code = idx[:, :, ab.ACTIVE:].clamp(min=0) * 2 + (p[..., ab.STATE_INDEX["on_now"]] > 0.5).long()
+        counts = abil.new_zeros(*code.shape[:2], 2 * A1).scatter_add_(2, code, owned.to(abil.dtype))
+        return counts @ table.reshape(2 * A1, -1)
+
+    def forward(self, abil, idx):
+        """abil [B, N, SLOTS, STATE], idx [B, N, SLOTS] -> [B, N, d]: the sum over every owned slot."""
+        owned = abil[..., ab.STATE_INDEX["owned"]] > 0.5
+        act = owned[:, :, :ab.ACTIVE]
+        if torch.compiler.is_compiling():
+            out = _dense(self.net, abil, idx, owned, list(range(ab.SIM_SLOTS)))
+        else:
+            B, N = abil.shape[:2]
+            x, b, n = _rows(abil[:, :, :ab.ACTIVE], idx[:, :, :ab.ACTIVE], act)
+            out = _sum(self.net(x), b, n, B, N)
+        return out + self._passives(abil, idx)
 
 
 def distance_buckets(pos, known, bins):

@@ -406,19 +406,22 @@ class TestAbilities:
     def test_the_own_lords_bar_and_the_passports_of_both_sides(self):
         setup, state = self.setup_state(ab1_on=[10.0, 0, 5.0, 0], ab1_cd=[100.0, 0, 70.0, 0])
         obs, _ = ob.observe(state, setup, 1)
-        J = self.A.INDEX
-        assert obs.abil.shape == (1, 4, 3, self.A.SIZE)
-        lord = obs.abil[0, 0]
-        assert lord[:, J["owned"]].tolist() == [1, 1, 1]
-        assert lord[:, J["ready"]].tolist() == [1, 0, 0]               # Hold the Line is passive
+        J, A = self.A.STATE_INDEX, self.A.ACTIVE
+        assert obs.abil.shape == (1, 4, self.A.SLOTS, self.A.STATE) and obs.abil_idx.shape == (1, 4, self.A.SLOTS)
+        lord = obs.abil[0, 0]                     # the General: Foe-Seeker, Stand Your Ground; Hold the Line, Wounded
+        assert lord[:, J["owned"]].nonzero()[0].tolist() == [0, 1, A, A + 1]
+        assert lord[[0, 1, A], J["ready"]].tolist() == [1, 0, 0]          # Hold the Line is passive
         assert lord[1, J["recharge_left"]] == pytest.approx(100 / 60) and lord[1, J["active_left"]] == pytest.approx(10 / 30)
-        assert obs.abil_ok[0].tolist() == [[True, False, False], [False] * 3, [False] * 3, [False] * 3]
-        assert lord[0, J["active_s"]] == pytest.approx(25 / 60)       # Foe Seeker's passport
-        enemy = obs.abil[0, 2]                                           # the Warlord: known abilities, no timers
-        assert enemy[:, J["owned"]].tolist() == [1, 1, 1] and enemy[:, J["ready"]].tolist() == [0, 0, 0]
+        assert lord[A, J["on_now"]] == 1 and lord[A, J["active_now"]] == 0  # the aura is on (no condition), no timer
+        assert obs.abil_ok.shape == (1, 4, A)
+        assert obs.abil_ok[0, 0].nonzero()[0].tolist() == [0] and not obs.abil_ok[0, 1:].any()
+        full = self.A.full(obs.abil, obs.abil_idx)
+        assert full[0, 0, 0, self.A.INDEX["active_s"]] == pytest.approx(25 / 60)       # Foe Seeker's passport
+        enemy = obs.abil[0, 2]                   # the Warlord: known abilities (3 actives, 2 passives), no timers
+        assert enemy[:, J["owned"]].nonzero()[0].tolist() == [0, 1, 2, A, A + 1] and not enemy[:, J["ready"]].any()
         assert enemy[1, J["recharge_left"]] == 0 and enemy[1, J["active_left"]] == 0
-        assert enemy[:, J["active_now"]].tolist() == [0, 1, 0]           # seen active
-        assert np.all(obs.abil[0, 1] == 0)                               # spearmen own nothing
+        assert enemy[:3, J["active_now"]].tolist() == [0, 1, 0] and enemy[:3, J["on_now"]].tolist() == [0, 1, 0]
+        assert np.all(obs.abil[0, 1] == 0) and (obs.abil_idx[0, 1] == -1).all()  # spearmen own nothing
 
     def test_an_enemy_ability_is_seen_only_while_the_unit_is(self):
         setup, state = self.setup_state(ab0_on=[0, 0, 5.0, 0], ab0_cd=[0, 0, 65.0, 0])
@@ -432,7 +435,8 @@ class TestAbilities:
         setup, state = self.setup_state()
         bare = {k: v for k, v in state.items() if not k.startswith("ab")}
         obs, _ = ob.observe(bare, setup, 1)
-        assert not obs.abil_ok.any() and obs.abil[0, 0, :, self.A.INDEX["owned"]].tolist() == [1, 1, 1]
+        A = self.A.ACTIVE
+        assert not obs.abil_ok.any() and obs.abil[0, 0, :, self.A.INDEX["owned"]].nonzero()[0].tolist() == [0, 1, A, A + 1]
         routing = with_state(state, ms=np.array([[6.0, 2, 2, 2]]), r=np.array([[True, False, False, False]]))
         obs, _ = ob.observe(routing, setup, 1)
         assert not obs.abil_ok.any()
@@ -440,7 +444,7 @@ class TestAbilities:
     def test_the_warlords_side_sees_its_own_bar(self):
         setup, state = self.setup_state()
         obs, _ = ob.observe(state, setup, 2)
-        assert obs.abil_ok[0, 2].tolist() == [True, True, True] and not obs.abil_ok[0, :2].any()
+        assert obs.abil_ok[0, 2].nonzero()[0].tolist() == [0, 1, 2] and not obs.abil_ok[0, :2].any()
 
     def test_a_setup_without_abilities_gives_no_ability_input(self):
         setup, state = self.setup_state()
@@ -490,6 +494,7 @@ class TestVolley:
             assert v.tolist() == pytest.approx([w, 0, we, 0]), t
             assert cobs.tokens[0, :, I["volley_ready"]].tolist() == pytest.approx([w, 0, we, 0]), t
         assert (I["volley_ready"] == ob.TOKEN - 1 - len(ob.ARC) - len(ob.ORDER) - len(ob.WEAPON) - len(ob.AIM)
+                - len(ob.RECEIVED)
                 and I["volley_ready"] not in ob.OWN_ONLY)
 
     def test_a_hidden_enemys_ammunition_is_not_read(self):

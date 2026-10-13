@@ -59,11 +59,11 @@ _I = ob.INDEX
 
 def features(obs, r, n, slot):
     """[M, WIDTH] the critic's input of the moments (r, n, slot: [M] long: the learner row, the unit, the ability slot)
-    from the decision's observation of the learner rows (obs: "tokens", "ctx", "own", "pos", "abil" with passports)."""
+    from the decision's observation of the learner rows (obs: "tokens", "ctx", "own", "pos", "abil", "abil_idx")."""
     tok = obs["tokens"][r].float()                                   # [M, N, TOKEN]
     me = tok.gather(1, n[:, None, None].expand(-1, 1, tok.shape[-1]))[:, 0, :OWN]
-    ab = obs["abil"][r, n].float()                                   # [M, SLOTS, SIZE]
-    ab = ab.gather(1, slot.clamp(min=0)[:, None, None].expand(-1, 1, ab.shape[-1]))[:, 0]
+    k = slot.clamp(min=0)
+    ab = mab.full(obs["abil"][r, n, k].float(), obs["abil_idx"][r, n, k])     # [M, SIZE]
     ctx = obs["ctx"][r].float()[:, :ob.CONTEXT]
     pos = obs["pos"][r].float() * ob.POS                             # [M, N, 2] m
     here = pos.gather(1, n[:, None, None].expand(-1, 1, 2))

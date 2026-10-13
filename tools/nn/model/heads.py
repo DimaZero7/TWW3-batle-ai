@@ -88,7 +88,7 @@ class Heads(nn.Module):
 
     def forward(self, x, obs_t):
         """x [B, 1 + N, d] -> masked logits: kind [B, N, 5], point [B, N, P], target [B, N, N], run [B, N],
-        ability [B, N, 1 + SLOTS] (0: none, 1 + k: slot k; when obs_t has abilities)."""
+        ability [B, N, 1 + ACTIVE] (0: none, 1 + k: slot k; when obs_t has abilities)."""
         u = self.norm(x[:, 1:])
         ctrl, ok = obs_t["ctrl"], obs_t["target_ok"]
         kind = self.kind(u)
@@ -100,16 +100,21 @@ class Heads(nn.Module):
         point = self._grid(u, obs_t) if self.cfg.grid else self.point(u)
         out = {"kind": kind, "point": point, "target": target, "run": self.run(u)[..., 0]}
         if obs_t.get("abil") is not None:
-            usable = obs_t["abil_ok"] & ctrl[..., None]                                   # [B, N, SLOTS]
+            usable = obs_t["abil_ok"] & ctrl[..., None]                                   # [B, N, ACTIVE]
             if torch.compiler.is_compiling():
-                # Compiled (as AbilityEncoder): every slot is scored, those that may not be used masked.
-                abil = torch.where(usable[..., None], obs_t["abil"], torch.zeros_like(obs_t["abil"]))
+                # Compiled (as AbilityEncoder): the simulator's timer slots are scored (a simulator setup has no
+                # other, abilities.sim_fits), those that may not be used masked.
+                D = ab.SIM_SLOTS
+                x = ab.full(obs_t["abil"][:, :, :D], obs_t["abil_idx"][:, :, :D])
+                abil = torch.where(usable[..., :D, None], x, torch.zeros_like(x))
                 score = (self.ability_q(u)[:, :, None] * self.ability_k(abil)).sum(-1)
-                slot = torch.where(usable, score / math.sqrt(self.cfg.pointer), torch.full_like(score, NEG))
+                slot = torch.where(usable[..., :D], score / math.sqrt(self.cfg.pointer), torch.full_like(score, NEG))
+                slot = torch.cat([slot, slot.new_full((*slot.shape[:2], usable.shape[-1] - D), NEG)], -1)
             else:
-                # Only the slots that may be used are scored (a few of B x N x SLOTS); the rest stay masked.
+                # Only the slots that may be used are scored (a few of B x N x ACTIVE); the rest stay masked.
                 b, n, k = usable.nonzero(as_tuple=True)
-                score = (self.ability_q(u)[b, n] * self.ability_k(obs_t["abil"][b, n, k])).sum(-1)
+                x = ab.full(obs_t["abil"][b, n, k], obs_t["abil_idx"][b, n, k])
+                score = (self.ability_q(u)[b, n] * self.ability_k(x)).sum(-1)
                 slot = torch.full(obs_t["abil_ok"].shape, NEG, device=u.device, dtype=score.dtype)
                 slot = slot.index_put((b, n, k), score / math.sqrt(self.cfg.pointer))
             out["ability"] = torch.cat([self.ability_none(u), slot], -1)

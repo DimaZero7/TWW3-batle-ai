@@ -31,11 +31,12 @@ from pathlib import Path
 import numpy as np
 
 from tools import config as project
-from tools.nn.observe.tokens import widen
+from tools.nn.observe.tokens import widen, widen_abil
 
 DIRS = (project.BUILD / "observe" / "data", project.BUILD / "student" / "data")
-OBS = ("tokens", "ctx", "own", "attend", "ctrl", "target_ok", "pos", "abil", "abil_ok")
+OBS = ("tokens", "ctx", "own", "attend", "ctrl", "target_ok", "pos", "abil", "abil_ok", "abil_idx")
 F32 = ("tokens", "ctx", "pos", "abil")
+LONG = ("abil_idx",)
 DURATIONS = (2.0, 4.0, 8.0, 16.0)        # tools/nn/model/commit.py DURATIONS (torch-free here)
 HOLD, MOVE, ATTACK, WITHDRAW, KEEP = 0, 1, 2, 3, 4   # tools/nn/sim/orders.py
 
@@ -224,6 +225,7 @@ class Loader:
             a = {k[len(pre):]: z[k] for k in z.files if k.startswith(pre)}
         if "tokens" in a:
             a["tokens"] = widen(a["tokens"])        # recorded before the token grew (11.10.2026): today's width
+        widen_abil(a)                               # ... and before the ability slots grew (13.10.2026)
         key = side.name
         if key not in self.cache:
             lab = student_labels(a)
@@ -234,7 +236,7 @@ class Loader:
             self.cache[key] = lab
         lab = self.cache[key]
         N = self.N
-        out = {k: a[k] if k == "ctx" else _pad(a[k], N) for k in OBS if k in a}      # (ctx: no units axis)
+        out = {k: a[k] if k == "ctx" else _pad(a[k], N, -1 if k in LONG else 0) for k in OBS if k in a}  # (ctx: no units)
         out["geo"] = a["geo"]
         out["t"] = a["t"]
         for k in ("kind", "target", "point", "commit"):
@@ -263,7 +265,7 @@ def to_batch(segs, device="cpu"):
     obs = {}
     for k in OBS:
         if k in first:
-            obs[k] = stack(lambda a, r, k=k: a[k][r], torch.float32 if k in F32 else None)
+            obs[k] = stack(lambda a, r, k=k: a[k][r], torch.float32 if k in F32 else torch.long if k in LONG else None)
     obs["free"] = stack(lambda a, r: a["free"][r])
     obs["commit"] = stack(lambda a, r: a["commit_in"][r], torch.float32)
     obs["geo"] = stack(lambda a, r: np.broadcast_to(a["geo"], (len(r),) + a["geo"].shape), torch.float32)

@@ -155,29 +155,46 @@ the enemy's character. It is for training only.
 An ability is known by what it does, never by its name: its **passport**
 (`config/nn/abilities.json`, written by `py -3.14 -m tools.nn.abilities` from the game's database;
 features in `tools/nn/model/abilities.py`). A new lord's ability needs a passport, not a new
-network. A unit has up to 3 slots (`tools/nn/sim/abilities.py` `slot_keys`, the same for the
-simulator): active abilities first, then passives that reach other units, then the rest, each
-group by key. General: Foe Seeker, Stand Your Ground, Hold the Line; Warlord: Verminous Valour,
-Deadly Onslaught, Rally.
+network.
 
-| Input (per slot, `Obs.abil` [B, N, 3, 114]) | Own unit | Enemy, visible | Enemy, not visible | Scale |
+**Slots: every ability of the unit, none lost.** A unit has 30 slots (`abilities.SLOTS`, `abilities.layout`): the
+first 15 (`ACTIVE`) hold the actives and the ones the game fires itself (with timers), in the simulator's order
+(`tools/nn/sim/abilities.py` `ordered`: the network's slot k is the simulator's slot k), the other 15 the passives
+(auras on others first, then the unit's own), by key. General: Foe Seeker, Stand Your Ground | Hold the Line,
+Wounded (single entity); Warlord: Verminous Valour, Deadly Onslaught, Rally | Scurry Away!, Wounded. The most in our
+pools: 3 actives (the Warlord) and 3 passives (Plague Monks); `tests/tools/test_nn_ability_slots.py` checks every unit
+of the pools and of `units.json`: no ability lost, each has its passport, the actives fit the simulator's 3 timer slots
+(`sim/abilities.SLOTS`; more - the test fails, then raise the simulator's SLOTS). Before, 3 slots held everything and
+the lords' Wounded and Scurry Away! fell out of them (they did reach the token as innate effects - owned and on).
+
+**What is stored.** Per unit and decision only the slot's state (`Obs.abil` [B, N, 30, 6]) and the ability's index
+into the passports' table (`Obs.abil_idx` [B, N, 30], -1 empty; the order: the passports' keys sorted, as the
+simulator's). The passport (111 numbers) is not stored per unit: the networks take it from the table on the device
+just before they read it (`abilities.full`).
+
+| Input (per slot; the full vector: 117 numbers) | Own unit | Enemy, visible | Enemy, not visible | Scale |
 |---|---|---|---|---|
 | Owned | yes | yes | yes | 0/1 |
 | Ready to use now | yes | no | no | 0/1 |
 | Seconds until ready | yes | no | no | s / 60, up to 3 |
 | Seconds active left | yes | no | no | s / 30, up to 2 |
-| Active now | yes | yes | no | 0/1 |
+| Active now (a timer runs: an active or game-fired one) | yes | yes | no | 0/1 |
 | Passport: passive, active and recharge time, uses, range, self-cast, how many friends / enemies it reaches, targets (self, friends, enemies) | yes | yes | yes | s / 60, s / 120, m / 100, 0/1 |
 | Passport: effects on allies (the owner and his friends) and on enemies: 28 stats of the database (speed, charge speed, melee attack and defence, damage and AP, charge bonus, leadership, armour, resistances, missile damage, reload, accuracy, range, bonus vs large / infantry, mass, …) and 15 attributes (unbreakable, immune to psychology, causes fear, …) | yes | yes | yes | multipliers as value − 1; additions / 50 or / 100; attributes 0/1 |
-| Passport: when (at the end): the game fires it itself (`auto`), on losing a melee / in melee, off out of melee / below half morale / when not wavering / below half health, another condition | yes | yes | yes | 0/1 |
+| Passport: when: the game fires it itself (`auto`), on losing a melee / in melee, off out of melee / below half morale / when not wavering / below half health, another condition | yes | yes | yes | 0/1 |
+| Passport (new, at the end): on below 25 % health (Wounded); vigour - what it gives back to its owner a second while active: -`fatigue_change_ratio` x 100 (Foe Seeker +1: the simulator takes 1 % of the maximum fatigue off a second, `sim/fatigue.py`; "+" rests, "-" tires) | yes | yes | yes | 0/1; share / 0.01 |
+| On now (new, the last): its effect acts now - an active's is "active now", a passive's condition holds (the innate effect's "on", `model/effects.py`: Wounded after 25 % health, Scurry Away! while wavering, Hold the Line always) | yes | yes | no | 0/1 |
 
 Why the enemy's: a player sees the enemy army's cards before battle (the abilities are on them),
 and in battle the game draws an active ability's effect on the unit and lists it among the
 unit's active effects (CCO `ActiveEffectList`, read by the bridge). The enemy's timers are not
-shown anywhere: they are not given. `Obs.abil_ok` [B, N, 3]: own abilities the network may use
-now — owned, active (not passive), self-cast (used on the owner, no target to choose), ready
-(not active, recharged) and the unit takes orders (alive, not routing). Without the timers in the
-state (recordings) nothing is ready.
+shown anywhere: they are not given. `Obs.abil_ok` [B, N, 15]: own abilities the network may use
+now — only the first 15 slots (a passive is never pressed), owned, active, self-cast (used on the owner, no target to
+choose), ready (not active, recharged) and the unit takes orders (alive, not routing). A slot without its timers in
+the state (recordings; the slots past the simulator's 3) is not ready.
+
+Why "on now" is a column of its own, not "active now": a passive's "active now" was always 0, and a trained network
+saw it so; a new column with zero weights keeps its play.
 
 ### Innate effects (each unit, each effect of the catalogue)
 
@@ -293,11 +310,25 @@ stay where they are; the student's recorded tokens widen the same way, `observe/
 on resume, `run.resume`). Test: `tests/tools/test_nn_aim_input.py`. Both card groups (weapon and aim) reach training
 too: the fields `LiveSetup.FIELDS` (`tools/nn/train/scenes.py`).
 
+### Effects on me from others (own units and visible enemies, the last inputs)
+
+28 inputs (`observation.RECEIVED`, 13.10.2026, `rx_<stat>`): what the abilities of OTHER units give this unit now -
+a friend's aura or cast (Hold the Line, Rally, Stand Your Ground), an enemy's ability on it. The same 28 database stats
+and the same scale as the passport's allies group (multipliers value - 1, additions / 50 or / 100); an enemy's ability
+by its enemies group. The unit's own abilities and innate effects are not here: they are in its slots and effects.
+From the state's field `ab_rx` - which abilities of others are on the unit (a bitmask over the passports' table,
+summed by `abilities.received`). The simulator writes it every step (`sim/abilities.py` - the abilities' auras and
+casts, `sim/effects.py` - the innate auras, `State.observation` joins them); the companion from the unit card: the
+phases the bridge reads from `ActiveEffectList` (field `fx`), but the unit's own abilities (`exchange.received`).
+The bridge needs nothing new. An enemy only while seen (the game lists a visible unit's active effects). A checkpoint
+without these inputs (169) loads with zero weights for them (`observation.old_columns`, the student -
+`observe/tokens.widen`, Adam - `run.resume`).
+
 ## Model
 
 ```mermaid
 flowchart TB
-  tok["Unit tokens: 169 numbers each<br/>(69 of them the passport, 38 the innate effects,<br/>1 the volley readiness, 1 the fire arc,<br/>5 the order in force, 2 the weapon, 2 the aim)"] --> enc["Shared encoder<br/>the same weights for every unit"]
+  tok["Unit tokens: 197 numbers each<br/>(69 of them the passport, 38 the innate effects,<br/>1 the volley readiness, 1 the fire arc,<br/>5 the order in force, 2 the weapon, 2 the aim,<br/>28 the effects from others)"] --> enc["Shared encoder<br/>the same weights for every unit"]
   ctx["Context: character, role, counts, lords,<br/>time elapsed, damage timers,<br/>the attacker's progress"] --> enc
   enc --> att["Attention layers<br/>+ distance bias, masks"]
   att --> gru["Memory: a GRU per unit<br/>and one for the army"]
@@ -311,10 +342,14 @@ flowchart TB
 
 - **Tokens.** One token per unit, own and enemy, with the same encoder: a new unit is known by
   its passport, not by its name. The context (character, role, timers) is added to every token
-  and is a token of its own. Each ability slot goes through one small shared network
-  (`AbilityEncoder`); the sum over the unit's owned slots is added to its token, so the slots'
-  order does not matter. Its last layer starts at zero: an actor trained before abilities sees
-  exactly what it saw.
+  and is a token of its own. Each ability slot (its state + the passport from the table) goes through a small
+  network; the sum over the unit's owned slots is added to its token, so the slots' order does not matter. There are
+  two, both with their last layer at zero at the start: `AbilityEncoder` reads the slots a network saw before
+  13.10.2026 (the unit's first 3 abilities in the simulator's order, `abilities.legacy`), `AbilityExtra` every slot
+  (through it the network learns the new: the lords' Wounded and Scurry Away!, the new columns). An actor trained
+  before sees exactly what it saw. In training (`torch.compile`) the first reads the 6 places its slots can be, the
+  second the simulator's 3 timer slots and the passives by a table "ability x on now" (a passive has no other state);
+  eager - only the slots that are there (`nonzero`).
 - **Attention** (3–4 layers): every unit looks at the others. Masks: padding, own dead units and
   enemies seen destroyed are never looked at. A learned bias per head by the distance between
   two units (16 buckets, 0 to ~1500 m) makes "who is near" easy. Invisible enemies stay in the
@@ -345,15 +380,20 @@ flowchart TB
   - target: a pointer at a visible living enemy (the unit's query against each enemy's key),
     as in AlphaStar;
   - run or walk;
-  - ability: "none" or a pointer at one of the unit's slots (the unit's query against a key made
-    from each slot's state and passport), only slots in `abil_ok`. It is independent of the
+  - ability: "none" or a pointer at one of the unit's first 15 slots (the actives; the unit's query against a key
+    made from each slot's state and passport), only slots in `abil_ok`. It is independent of the
     order kind (a lord can move and use an ability at once). Permuting the slots permutes the
     choice; an ability never seen before still gets a valid choice (tests). Sampled only when
     asked (`heads.sample(..., abilities=True)`; `decide.act` asks): until training knows the head,
     `Action.ability` is `None` and `log_prob` leaves it out.
 - **Loading an older actor.** `Actor.load_state_dict` accepts a state without the ability parts
   (`policy.ABILITY_PARAMS`): they start fresh — the encoder adds nothing, the head picks at random
-  among ready abilities.
+  among ready abilities. An actor without `ability_extra` (before 13.10.2026) gets it with a zero output, and the new
+  ability and token columns zero weights: checked on the real `build/v2/itS25_12.pt` - 8 greedy battles against
+  ai_like x 240 decisions on the CPU, every head's logits, the memory and the actions bit-identical with the old code
+  (65 ability presses). `ability_extra` is registered last, and `run.resume(opt, path, fresh)` skips the new
+  parameters (`run.fresh_params`) and pads Adam's moments with zeros for the new columns - a chain goes on with its
+  moments.
 - **No adapters.** One network for every faction and role (the role and the faction character are
   inputs). A checkpoint with the former LoRA wrapper layers (saved as `qkv.base.weight`, the adapters
   never switched on) loads as it was (`encoder.Block`).
@@ -370,8 +410,10 @@ the learner and the past version choose abilities (`heads.sample(..., abilities=
 rollout keeps `Action.ability` and the update counts it in the log-probability; the `ai` flag is
 true only for the scripted opponents' sides (`tools/nn/sim/abilities.py` `set_rule`, again after
 every restart: the bank's rows bring `scenario.build`'s default, side 2); the LiveSetup carries
-`abil`, `abil_owned`, `abil_use`. A stored transition keeps only the slots' state (5 numbers) and
-the battle's bank row; `rollout.full_obs` puts the passports back for the update.
+`abil_idx`, `abil_use`, `abil_fx` (and checks that every unit's actives fit the simulator's timer slots). A stored
+transition keeps the state of only the slots some unit of the bank owns (now 6 of 30: 3 actives + 3 passives, 6
+numbers each) and the battle's bank row; `rollout.full_obs` puts the 30 slots and the abilities' indices back from the
+bank, the networks take the passports from the table.
 
 ## Variant v2: map sectors, chained heads, commitment
 
@@ -644,6 +686,13 @@ An int8 export of the actor looks practical; not done yet:
   unknown health, death and shattering), both sides see it, the defender's blows do not count.
 - `tests/tools/test_abilities.py` (numpy): reading the ability tables, passports, the cards'
   check, the saved numbers, features and slots.
+- `tests/tools/test_nn_ability_slots.py`: no ability of any unit of the pools and of `units.json` is lost (the most: 3
+  actives, 3 passives); the table's order is the simulator's; the new columns last, the vigour's sign; a passive's "on
+  now" (Wounded below 25 %, Scurry Away! while wavering, an enemy's only while seen); the head only over the first 15
+  slots, a slot without timers is not ready; the effects from others (own, an enemy's, a hidden enemy) and the
+  companion reading them from the card; the simulator marks an aura on a neighbour; the student's old records move to
+  the new slots; (torch) an older v1 and v2 actor on the new inputs = on the old, Adam's moments with the new parts,
+  the stored slots come back whole, the compiled and the eager encoders agree.
 - `tests/tools/test_nn_model.py` (torch; skipped in `.venv`, run in the container): numpy and
   torch give the same input; only visible living enemies can be targets; swapping units swaps
   the outputs; memory; a checkpoint of the former LoRA wrapper; log-probabilities; points inside the map; the critic; the

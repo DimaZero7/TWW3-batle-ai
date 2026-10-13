@@ -32,6 +32,7 @@ RUNS = project.BUILD / "nn-arena" / "runs"
 CRITIC_KEYS = ("tokens", "ctx", "own", "attend", "pos")
 F16 = ("tokens", "ctx", "abil")
 BOOLS = ("own", "attend", "ctrl", "target_ok", "abil_ok")
+INTS = ("abil_idx",)          # int16 (the ability's row in model/abilities.py table, -1 none)
 
 
 def critic_values(critic, obs_list):
@@ -72,8 +73,9 @@ def convert(run_dir, actor_cfg, critic, ckpt_name=""):
     for s in sides:
         o = obs[s]
         cat = lambda k, dt=None: np.concatenate([np.asarray(getattr(x, k)) for x in o], 0).astype(dt or np.float32)
-        arrays = {k: cat(k, np.float16 if k in F16 else (bool if k in BOOLS else np.float32))
-                  for k in ("tokens", "ctx", "own", "attend", "ctrl", "target_ok", "pos", "abil", "abil_ok")
+        arrays = {k: cat(k, np.float16 if k in F16 else (bool if k in BOOLS else np.int16 if k in INTS
+                                                          else np.float32))
+                  for k in ("tokens", "ctx", "own", "attend", "ctrl", "target_ok", "pos", "abil", "abil_ok", "abil_idx")
                   if getattr(o[0], k) is not None}
         frame = o[0].frame
         geo = sectors.geo(frame, torch.as_tensor(pipe.b.setup.bounds, dtype=torch.float32))[0].numpy()

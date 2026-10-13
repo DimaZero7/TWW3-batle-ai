@@ -127,11 +127,22 @@ class TestSaved:
 
 class TestFeatures:
     def test_size_scale_and_padding(self):
-        feat, owned, usable = mab.slots([GENERAL, "", WARLORD, "wh_main_emp_inf_spearmen_0"])
-        assert feat.shape == (4, SLOTS, mab.STATIC) and np.abs(feat).max() <= 1.5
-        assert owned.tolist() == [[True] * 3, [False] * 3, [True] * 3, [False] * 3]
-        assert usable.tolist()[0] == [True, True, False] and usable.tolist()[2] == [True, True, True]
+        idx, usable, fx = mab.slots([GENERAL, "", WARLORD, "wh_main_emp_inf_spearmen_0"])
+        feat = mab.table()[idx]
+        assert feat.shape == (4, mab.SLOTS, mab.STATIC) and np.abs(feat).max() <= 1.5
+        owned = idx >= 0
+        A = mab.ACTIVE
+        # the General: 2 actives, 2 passives (Hold the Line, Wounded); the Warlord: 3 actives, 2 passives
+        assert owned[0].nonzero()[0].tolist() == [0, 1, A, A + 1]
+        assert owned[2].nonzero()[0].tolist() == [0, 1, 2, A, A + 1]
+        assert not owned[1].any() and not owned[3].any()
+        assert usable[0].nonzero()[0].tolist() == [0, 1] and usable[2].nonzero()[0].tolist() == [0, 1, 2]
         assert np.all(feat[1] == 0) and np.all(feat[3] == 0)
+        names = mab.keys()
+        assert [names[i] for i in idx[0][owned[0]]] == [FS, SYG, HTL, "wh3_main_unit_passive_single_entity"]
+        # a passive's innate effect (its on now): config/nn/effects.json order
+        from tools.nn.model import effects
+        assert effects.keys()[fx[0, A]] == HTL and fx[0, 0] == -1
 
     def test_actives_first_then_passives_that_reach_others(self):
         units, saved = passport.load(), mab.load()

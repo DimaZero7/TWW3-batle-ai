@@ -32,11 +32,20 @@ The rule: the AI sees only what a human player sees.
   whose `hp` is not known counts nothing until known again), so the companion computes it from the
   game's state as the simulator does. It is the reward's clock while the run's --idle-rate,
   --idle-window and rout share are these numbers (0.05, 30 s, 0.5: rollout.Battles warns otherwise).
-* Abilities (Obs.abil, per unit and ability slot): the ability's passport (tools/nn/model/abilities.py:
-  both sides, it is on the unit's card) and its state. Own units: owned, ready, seconds until ready,
-  seconds active left (the ability bar). Enemies: owned, and active now only while the unit is seen
-  (the game draws the ability's effect on the unit and lists it among the unit's active effects;
-  its timers are not shown). Obs.abil_ok: own abilities the network may use now.
+* Abilities (Obs.abil, per unit and ability slot: every ability of the unit, tools/nn/model/abilities.py layout -
+  the actives and game-fired ones from slot 0, the passives from slot ACTIVE): its state, and the ability's index into
+  the passports' table (Obs.abil_idx: the networks put the passport back, abilities.full; both sides, it is on the
+  unit's card). Own units: owned, ready, seconds until ready, seconds active left (the ability bar). Enemies: owned,
+  and active now only while the unit is seen (the game draws the ability's effect on the unit and lists it among the
+  unit's active effects; its timers are not shown). On now (own units, seen enemies): an active's timer runs, a
+  passive's condition holds (the innate effect's on, below). The timers of the actives' slots come from the state's
+  `ab{k}_on` / `ab{k}_cd` (the simulator's first SLOTS; a slot without them is not ready). Obs.abil_ok [B, N,
+  ACTIVE]: own abilities the network may use now.
+* Effects on me from others (RECEIVED, the token's last columns, 13.10.2026; own units and seen enemies: the game lists
+  them among the unit's active effects): the stats the abilities of other units lay on the unit now - a friend's aura
+  or cast, an enemy's - summed as the passports' allies group (an enemy's: its enemies group), abilities.received;
+  from the state's `ab_rx` (the abilities on it, a bitmask: the simulator's; the companion's from the unit card;
+  missing: none). The unit's own abilities and innate effects are in its slots and its innate effects.
 * Volley readiness (VOLLEY, own units and seen enemies, the column before ARC): seconds since the
   unit's projectiles left (`a`) last fell between two observations (its last volley) / its passport
   reload_s, clipped to 0..1; 1 before its first shot; 0 for units without missiles. Seen at the
@@ -131,15 +140,18 @@ WEAPON = ("volley_shots", "magic_attacks")
 # before the first shot from a halt and of silence after an attack order on another target, / passport.AIM_S
 # (passport.aim: the simulator's numbers, tools/nn/sim/params.aim_times; the reload is not reset by a new target).
 AIM = ("aim_first", "aim_retarget")
+# Then RECEIVED (13.10.2026, own units and seen enemies; older checkpoints: zero weights): the stat bonuses other units'
+# abilities lay on the unit now (module doc; abilities.received).
+RECEIVED = abilities.RECEIVED_NAMES
 NAMES = (tuple(n for n, _ in DYNAMIC) + FLAGS + tuple(f"passport_{i}" for i in range(passport.SIZE)) + effects.NAMES
-         + VOLLEY + ARC + ORDER + WEAPON + AIM)
+         + VOLLEY + ARC + ORDER + WEAPON + AIM + RECEIVED)
 INDEX = {n: i for i, n in enumerate(NAMES)}
 TOKEN = len(NAMES)
 # Effect pairs of the tokens of trained checkpoints before 11.10.2026 (14 effects, no WEAPON): old_columns maps them.
 OLD_EFFECTS = (14,)
 # Column groups appended at the token's end since the new units (11.10.2026), oldest first: a token without the last
 # of them keeps its columns where they are (old_columns), zeros (zero weights) for the missing ones.
-TAIL = (AIM,)
+TAIL = (AIM, RECEIVED)
 
 
 def old_columns(width):
@@ -147,7 +159,8 @@ def old_columns(width):
     grew past OLD_EFFECTS (11.10.2026: the new units' attributes and contact effects, then WEAPON after ORDER) that had
     columns after its effect pairs (VOLLEY 03.10, ARC and ORDER 07.10.2026): its effect pairs keep their places, those
     columns move behind the new pairs to their places by name, the new columns get zero weights (encoder.TokenEncoder).
-    A token of today's columns without the last groups of TAIL (AIM, 13.10.2026): its columns stay where they are.
+    A token of today's columns without the last groups of TAIL (AIM, RECEIVED, 13.10.2026): its columns stay where
+    they are.
     None: not such a token (today's; a token that ended with its effect pairs, or older still, grew at the end only:
     encoder.pad_inputs)."""
     width_now = TOKEN
@@ -210,9 +223,9 @@ class Setup:
         self.weapon = np.stack([passport.weapon(k) for k in self.keys])       # [B, N, len(WEAPON)] (WEAPON)
         self.aim = np.stack([passport.aim(k) for k in self.keys])             # [B, N, len(AIM)] (AIM)
         ab = [abilities.slots(k) for k in self.keys]
-        self.abil = np.stack([a[0] for a in ab])                               # [B, N, SLOTS, STATIC]
-        self.abil_owned = np.stack([a[1] for a in ab])                         # [B, N, SLOTS]
-        self.abil_use = np.stack([a[2] for a in ab])                           # [B, N, SLOTS] may be ordered
+        self.abil_idx = np.stack([a[0] for a in ab])                           # [B, N, SLOTS] row in abilities.table
+        self.abil_use = np.stack([a[1] for a in ab])                           # [B, N, SLOTS] may be ordered
+        self.abil_fx = np.stack([a[2] for a in ab])                            # [B, N, SLOTS] a passive's effect
         self.fx_owned = np.stack([effects.owned(k) for k in self.keys])       # [B, N, E] innate effects
         self.cost = np.stack([passport.cost(k) for k in self.keys])           # [B, N] gold (PROGRESS)
         self.present = self.side > 0
@@ -230,8 +243,8 @@ class Setup:
                                        rank=t(self.rank), lord_level=t(self.lord_level),
                                        passport=t(self.passport), men0=t(self.men0), ammo0=t(self.ammo0),
                                        present=t(self.present), attacker=t(self.attacker), lord=t(self.lord),
-                                       abil=t(self.abil), abil_owned=t(self.abil_owned),
-                                       abil_use=t(self.abil_use), fx_owned=t(self.fx_owned), cost=t(self.cost),
+                                       abil_idx=t(self.abil_idx), abil_use=t(self.abil_use),
+                                       abil_fx=t(self.abil_fx), fx_owned=t(self.fx_owned), cost=t(self.cost),
                                        reload=t(self.reload), arc=t(self.arc), weapon=t(self.weapon),
                                        aim=t(self.aim))
         return self._cache[key]
@@ -256,9 +269,9 @@ class _Arrays:
     present: object
     attacker: object
     lord: object
-    abil: object = None        # abilities (Setup.abil ...); None: the units have no abilities
-    abil_owned: object = None
+    abil_idx: object = None    # abilities (Setup.abil_idx ...); None: the units have no abilities
     abil_use: object = None
+    abil_fx: object = None
     fx_owned: object = None    # [B, N, E] innate effects owned (Setup.fx_owned); None: none known
     cost: object = None        # [B, N] multiplayer cost (Setup.cost); None: unknown, every unit counts 1
     reload: object = None      # [B, N] passport reload_s (Setup.reload, VOLLEY); None: unknown, the input 0
@@ -308,9 +321,10 @@ class Obs:
     pos: object        # [B, N, 2] (forward, lateral) / POS: current or last seen
     frame: Frame
     side: int
-    abil: object = None     # [B, N, SLOTS, abilities.SIZE] per ability slot: state, then passport
-    abil_ok: object = None  # [B, N, SLOTS] own abilities that may be used now (owned, self-cast, ready,
+    abil: object = None     # [B, N, SLOTS, abilities.STATE] per ability slot: its state (abilities.full: + passport)
+    abil_ok: object = None  # [B, N, ACTIVE] own abilities that may be used now (owned, self-cast, ready,
     #                         the unit takes orders). Both None when the setup has no abilities.
+    abil_idx: object = None  # [B, N, SLOTS] int64 the slot's ability: its row in abilities.table (-1 none)
 
 
 def _f(m, a):
@@ -437,7 +451,8 @@ def observe(state, setup, side, memory=None, full=False):
     if fx_own is None:                           # a setup without innate effects: none owned
         E = effects.SIZE // 2
         fx_own = np.zeros(xs.shape + (E,), np.float32) if m is np else xs.new_zeros(xs.shape + (E,))
-    fx = effects.features(m, state, fx_own, S.present if full else (own | sees))
+    fx_on = effects.active(m, state, fx_own)
+    fx = effects.features(m, state, fx_own, S.present if full else (own | sees), on=fx_on)
     late = m.stack([m.where(sees, cols[n], cols[n] * 0) for n in VOLLEY], -1)
     arc = getattr(S, "arc", None)
     arc = xs * 0 if arc is None else _f(m, arc)
@@ -447,7 +462,8 @@ def observe(state, setup, side, memory=None, full=False):
     weapon = m.stack([xs * 0] * len(WEAPON), -1) if weapon is None else _f(m, weapon)
     aim = getattr(S, "aim", None)
     aim = m.stack([xs * 0] * len(AIM), -1) if aim is None else _f(m, aim)
-    tokens = (_cat(m, [dyn, _f(m, S.passport), fx, late, arc[..., None], order, weapon, aim], -1)
+    rx = _received(m, state, S, S.present if full else (own | sees), xs)
+    tokens = (_cat(m, [dyn, _f(m, S.passport), fx, late, arc[..., None], order, weapon, aim, rx], -1)
               * _f(m, S.present)[..., None])
 
     attend = S.present & ~dead & ~(own & ~alive)
@@ -472,30 +488,60 @@ def observe(state, setup, side, memory=None, full=False):
     if full:   # the critic also knows the enemy's character
         other = setup.character(3 - side)
         ctx = _cat(m, [ctx, _f(m, other if m is np else m.as_tensor(other, device=x.device))], -1)
-    abil, abil_ok = _abilities(m, state, S, own, sees, ctrl, full, xs)
+    abil, abil_ok, abil_idx = _abilities(m, state, S, own, sees, ctrl, full, xs, fx_on)
     return Obs(_f(m, tokens), _f(m, ctx), own, attend, ctrl, target_ok, _f(m, pos), fr, side,
-               abil, abil_ok), new
+               abil, abil_ok, abil_idx), new
 
 
-def _abilities(m, state, S, own, sees, ctrl, full, like):
-    """(abil [B, N, SLOTS, SIZE], abil_ok [B, N, SLOTS]): each slot's state and passport (module doc)."""
-    K = abilities.SLOTS
-    if getattr(S, "abil", None) is None:          # a setup without abilities (e.g. an older LiveSetup):
-        return None, None                         # no ability input at all (and nothing to store)
-    owned = S.abil_owned & S.present[..., None]
-    known = all(state.get(f"ab{k}_{t}") is not None for k in range(K) for t in ("on", "cd"))
+def _abilities(m, state, S, own, sees, ctrl, full, like, fx_on):
+    """(abil [B, N, SLOTS, STATE], abil_ok [B, N, ACTIVE], abil_idx [B, N, SLOTS]): each slot's state and ability
+    (module doc). fx_on [B, N, E]: the innate effects on (effects.active; the passives' on now)."""
+    K, A = abilities.SLOTS, abilities.ACTIVE
+    if getattr(S, "abil_idx", None) is None:      # a setup without abilities (e.g. an older LiveSetup):
+        return None, None, None                   # no ability input at all (and nothing to store)
+    idx = S.abil_idx
+    owned = (idx >= 0) & S.present[..., None]
+    idx = m.where(owned, idx, idx * 0 - 1)
+    # the actives' timers: the slots the state has them for (the simulator's first SLOTS, the companion's), the rest
+    # none (never ready); the passives' slots have none
+    timed = [k for k in range(A) if state.get(f"ab{k}_on") is not None and state.get(f"ab{k}_cd") is not None]
     zero = like * 0
-    on = m.stack([_f(m, state[f"ab{k}_on"]) if known else zero for k in range(K)], -1)       # [B, N, K]
-    cd = m.stack([_f(m, state[f"ab{k}_cd"]) if known else zero for k in range(K)], -1)
+    on = m.stack([_f(m, state[f"ab{k}_on"]) if k in timed else zero for k in range(K)], -1)      # [B, N, K]
+    cd = m.stack([_f(m, state[f"ab{k}_cd"]) if k in timed else zero for k in range(K)], -1)
+    has_timer = m.stack([(zero == zero) if k in timed else (zero != zero) for k in range(K)], -1)
     mine = (S.present if full else own)[..., None] & owned
-    ready = mine & S.abil_use & (cd <= 0) & (on <= 0) & known
-    seen_on = owned & (on > 0) & ((S.present if full else own | sees)[..., None])
+    ready = mine & S.abil_use & (cd <= 0) & (on <= 0) & has_timer
+    vis = owned & ((S.present if full else own | sees)[..., None])
+    seen_on = vis & (on > 0)
+    fx = S.abil_fx
+    if fx_on.shape[-1]:
+        passive_on = m.where(fx >= 0, _take(m, fx_on, m.where(fx >= 0, fx, fx * 0)), fx < -1)
+    else:
+        passive_on = fx < -1
+    on_now = vis & (seen_on | passive_on)
     none = zero[..., None] * 0
-    dyn = m.stack([_f(m, owned), _f(m, ready), m.where(mine, m.clip(cd / abilities.RECHARGE, 0, 3), none),
-                   m.where(mine, m.clip(on / abilities.ACTIVE, 0, 2), none), _f(m, seen_on)], -1)
-    abil = _cat(m, [dyn, _f(m, S.abil) * _f(m, owned)[..., None]], -1)
-    abil_ok = ready & own[..., None] & ctrl[..., None]
-    return _f(m, abil), abil_ok
+    state_ = m.stack([_f(m, owned), _f(m, ready), m.where(mine, m.clip(cd / abilities.RECHARGE, 0, 3), none),
+                      m.where(mine, m.clip(on / abilities.ACTIVE_S, 0, 2), none), _f(m, seen_on), _f(m, on_now)], -1)
+    abil_ok = (ready & own[..., None] & ctrl[..., None])[..., :A]
+    return _f(m, state_), abil_ok, idx
+
+
+def _take(m, a, i):
+    """a [..., E] gathered at i [..., K] (int) -> [..., K]."""
+    if m is np:
+        return np.take_along_axis(a, i, -1)
+    return a.gather(-1, i.long())
+
+
+def _received(m, state, S, visible, like):
+    """[B, N, len(RECEIVED)] the RECEIVED columns (module doc): from the state's `ab_rx`; only where visible."""
+    rx = state.get("ab_rx")
+    idx = getattr(S, "abil_idx", None)
+    if rx is None or idx is None:
+        return m.stack([like * 0] * len(RECEIVED), -1)
+    rx = rx.astype(np.int64) if m is np else rx.long()
+    out = abilities.received(rx, S.side, idx)
+    return m.where(visible[..., None], _f(m, out), _f(m, out) * 0)
 
 
 def _b(m, a):

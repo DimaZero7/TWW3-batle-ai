@@ -27,10 +27,15 @@ friends within range_m, who keep it active_s wherever they go, and a friend comi
 nothing (Stand Your Ground; state snap_s / snap_ab: one per unit, a new cast replaces it - one
 ability does not stack). Multipliers multiply, additions add.
 
-Slots: a unit shows up to SLOTS abilities (slot_keys): active ones first, then passives that reach
-other units, then the rest, each group by key. The network's input (tools/nn/model/abilities.py)
-uses the same slots (passives included: the ability bar shows them). Only json here and in
-slot_keys(); the tensors need torch.
+Slots: a unit's abilities in order (ordered(): the ones with timers - actives and the game-fired ones - first, then
+passives that reach other units, then the rest, each group by key); the simulator keeps timers for the first SLOTS
+(slot_keys): every timed ability of every unit of our pools fits (tests/tools/test_nn_ability_slots.py), the passives
+are innate effects (effects.py) and need no slot here. The network's input (tools/nn/model/abilities.py) shows all of
+them, none dropped: its timed slot k is this module's slot k.
+Received (`ab_rx`, INTERNAL, the network's "effects on me from others"): a bitmask over the passports' order (keys())
+of the abilities of OTHER units on each unit in the last step - a friend's aura or cast laid on it (snap), an enemy's on
+it; effects.py adds the innate auras' (`fx_rx`: Hold the Line); State.observation() gives their union.
+Only json here and in slot_keys(); the tensors need torch.
 """
 try:
     import torch
@@ -65,15 +70,21 @@ def keys(params):
     return sorted(params.abilities)
 
 
-def slot_keys(unit_key, units, passports):
-    """The unit's abilities in its SLOTS slots ("" = empty): actives, then passives reaching others."""
+def ordered(unit_key, units, passports):
+    """All the unit's abilities with a passport, in order: actives and game-fired ones (timers), then passives that
+    reach other units, then the rest, each group by key."""
     own = [k for k in (units.get(unit_key) or {}).get("abilities") or () if k in passports]
 
     def order(k):
         p = passports[k]
         reach = p["targets"].get("friends") or p["targets"].get("enemies")
         return (bool(p["passive"]), bool(p["passive"]) and not reach, k)
-    own = sorted(own, key=order)[:SLOTS]
+    return sorted(own, key=order)
+
+
+def slot_keys(unit_key, units, passports):
+    """The unit's abilities in the simulator's SLOTS slots ("" = empty): the first SLOTS of ordered()."""
+    own = ordered(unit_key, units, passports)[:SLOTS]
     return own + [""] * (SLOTS - len(own))
 
 
@@ -158,6 +169,8 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None):
     log = {s: zero.clone() for s in MULT}
     add = {s: zero.clone() for s in STATS if s not in MULT}
     use = torch.full_like(u["ab0"], -1) if use is None else use
+    A = T.shape[0] - 1
+    rx = zero[..., None].expand(-1, -1, A + 1).clone() if "ab_rx" in u else None     # [B, N, A + 1] received
     for k in range(SLOTS):
         r = T[u[f"ab{k}"]]                          # [B, N, COLS]; -1 picks the empty last row
         c = lambda name: r[..., COL[name]]
@@ -200,6 +213,10 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None):
                               torch.full_like(cast, -1, dtype=torch.long)).max(1).values
             snap = torch.where(hit, T[src, COL["active_s"]], snap)
             snap_ab = torch.where(hit, src, snap_ab)
+        if rx is not None:
+            # from other units: a friend's aura or an enemy's (the owner himself is in reach["self"] only)
+            oh = torch.nn.functional.one_hot(u[f"ab{k}"].clamp(min=0), A + 1).float() * (u[f"ab{k}"] >= 0)[..., None]
+            rx = rx + torch.einsum("bij,bia->bja", (reach["friends"] | reach["enemies"]).float(), oh)
         if got is not None:
             for a in range(T.shape[0] - 1):
                 mine = (u[f"ab{k}"] == a)[:, :, None]
@@ -224,6 +241,8 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None):
                 log[s] = log[s] + torch.where(held, torch.log(v.clamp(min=1e-6)), torch.zeros_like(v))
             else:
                 add[s] = add[s] + torch.where(held, v, torch.zeros_like(v))
+        if rx is not None:
+            rx = rx + torch.nn.functional.one_hot(snap_ab.clamp(min=0), A + 1).float() * held[..., None]
         u["snap_s"] = torch.where(snap > 0, snap, torch.zeros_like(snap))
         u["snap_ab"] = torch.where(snap > 0, snap_ab, torch.full_like(snap_ab, -1))
         if got is not None:
@@ -231,6 +250,8 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None):
                 g = held & (snap_ab == a)
                 if bool(g.any()):
                     got[a] = got.get(a, torch.zeros_like(g)) | g
+    if rx is not None:
+        u["ab_rx"] = bits(rx[..., :A] > 0)
     if got is not None:
         names = keys(params)
         RECEIVED.append({names[a]: g for a, g in got.items()})
@@ -254,6 +275,12 @@ def apply(u, params, dt, standing, engaged, dist, same_side, use=None):
 
 def restore(u, old):
     u.update(old)
+
+
+def bits(flags):
+    """[..., A] bool -> [...] int64 bitmask (bit a: flags[..., a]); at most 62 abilities."""
+    assert flags.shape[-1] <= 62, "the received bitmask holds 62 abilities"
+    return (flags.long() << torch.arange(flags.shape[-1], device=flags.device)).sum(-1)
 
 
 def vigour(u, params, standing):

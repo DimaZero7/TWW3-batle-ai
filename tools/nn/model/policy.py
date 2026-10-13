@@ -13,14 +13,16 @@ import torch
 from torch import nn
 
 from tools.nn.model import heads as hd
-from tools.nn.model.encoder import AbilityEncoder, Block, TokenEncoder, attention_bias
+from tools.nn.model.encoder import AbilityEncoder, AbilityExtra, Block, TokenEncoder, attention_bias
 from tools.nn.model.memory import TokenMemory
 
-OBS_KEYS = ("tokens", "ctx", "own", "attend", "ctrl", "target_ok", "pos", "abil", "abil_ok")
+OBS_KEYS = ("tokens", "ctx", "own", "attend", "ctrl", "target_ok", "pos", "abil", "abil_ok", "abil_idx")
 # v2's extra inputs (not from observation.observe: added at the decision, commit.inputs and sectors.geo)
 V2_KEYS = ("free", "commit", "geo")
 # Parameters an actor saved before abilities lacks: they start fresh when it is loaded.
-ABILITY_PARAMS = ("abilities.", "heads.ability_")
+# (ability_extra: every ability slot, 13.10.2026 - registered last, so Adam's moments of an older actor keep their
+# order, run.resume)
+ABILITY_PARAMS = ("abilities.", "heads.ability_", "ability_extra.")
 # ... and one of the bin head loaded into a grid actor (cfg.grid): its grid head starts fresh.
 # ... and a v2 actor saved before the pair features (cfg.pairs, pairs.py): their layers start at zero (computes what
 # it did).
@@ -55,11 +57,17 @@ class Actor(nn.Module):
         self.blocks = nn.ModuleList(Block(cfg.d, cfg.heads, cfg.ff) for _ in range(cfg.layers))
         self.memory = TokenMemory(cfg.d) if cfg.memory else None
         self.heads = hd.Heads(cfg)
+        self.ability_extra = AbilityExtra(cfg.d)
 
     def initial(self, obs_t):
         """Empty memory for a batch: [B, 1 + N, d]."""
         B, N = obs_t["own"].shape
         return torch.zeros(B, 1 + N, self.cfg.d, device=obs_t["tokens"].device)
+
+    def ability_input(self, obs_t):
+        """[B, N, d] the abilities' sum added to the unit tokens (encoder.py AbilityEncoder + AbilityExtra)."""
+        a, i = obs_t["abil"], obs_t["abil_idx"]
+        return self.abilities(a, i) + self.ability_extra(a, i)
 
     def _split(self):
         """Attention blocks before the memory (the rest come after it)."""
@@ -69,7 +77,7 @@ class Actor(nn.Module):
         """Tokens -> the blocks before the memory: (x [B, 1 + N, d], attention bias)."""
         x = self.encoder(obs_t["tokens"], obs_t["ctx"])
         if obs_t.get("abil") is not None:
-            x = x + torch.nn.functional.pad(self.abilities(obs_t["abil"]), (0, 0, 1, 0))
+            x = x + torch.nn.functional.pad(self.ability_input(obs_t), (0, 0, 1, 0))
         bias = attention_bias(obs_t, self.dist, self.cfg.dist_bins)
         for block in self.blocks[:self._split()]:
             x = block(x, bias)
@@ -153,6 +161,7 @@ class ActorV2(Actor):
         if cfg.eyes:
             from tools.nn.model.eyes import Eyes
             self.eyes = Eyes(cfg)
+        self.ability_extra = AbilityExtra(cfg.d)
         assert cfg.sector_at <= self._split(), "the sectors' attention comes before the memory"
 
     def encode(self, obs_t):
@@ -162,7 +171,7 @@ class ActorV2(Actor):
         x = self.encoder(obs_t["tokens"], obs_t["ctx"])
         pad = (lambda v: torch.nn.functional.pad(v, (0, 0, 1, 0)))
         if obs_t.get("abil") is not None:
-            x = x + pad(self.abilities(obs_t["abil"]))
+            x = x + pad(self.ability_input(obs_t))
         if obs_t.get("commit") is not None:
             x = x + pad(self.commit_in(obs_t["commit"].to(x.dtype)))
         pf = pairs.features(obs_t).to(x.dtype) if self.cfg.pairs else None

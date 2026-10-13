@@ -1178,9 +1178,13 @@ class TestAbilities:
         a, _, _ = env.observe()
         full = rollout.rows_of(a, env.rows_learn)
         step = env.step(actor, crit)
-        assert step["obs"]["abil"].shape[-1] == mab.DYNAMIC and step["action"].ability is not None
-        back = rollout.full_obs(step["obs"], env.bank.setup.arrays.abil)
+        # the slots' state of only the slots some unit of the bank owns, the bank row; no passports, no indices
+        used = rollout.used_slots(env.bank.setup.arrays.abil_idx)
+        assert step["obs"]["abil"].shape[-2:] == (len(used), mab.STATE) and len(used) < mab.SLOTS
+        assert "abil_idx" not in step["obs"] and step["action"].ability is not None
+        back = rollout.full_obs(step["obs"], {"idx": env.bank.setup.arrays.abil_idx, "slots": used})
         assert torch.equal(back["abil"], full["abil"]) and "abil_row" not in back
+        assert torch.equal(back["abil_idx"], full["abil_idx"])
         assert torch.all((step["action"].ability == -1) | full["abil_ok"].gather(
             2, step["action"].ability.clamp(min=0)[..., None])[..., 0])
 

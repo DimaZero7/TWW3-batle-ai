@@ -287,6 +287,10 @@ INTERNAL = {
                     "Your Ground keeps on the units in range at the cast wherever they go; abilities.py)"),
     "snap_ab": ("i", "that ability (index in the passports, -1 none)"),
     "fx_on": ("i", "the innate effects on in the last step: bitmask over config/nn/effects.json order"),
+    "ab_rx": ("i", "the abilities of other units on it in the last step (a friend's aura or cast, an enemy's): bitmask "
+                   "over the passports' order (abilities.keys); the network's effects from others"),
+    "fx_rx": ("i", "the innate auras of other units on it in the last step (Hold the Line): the same bitmask "
+                   "(effects.py); State.observation() gives ab_rx | fx_rx"),
 }
 
 GROUPS = {"observed": OBSERVED, "static": STATIC, "internal": INTERNAL}
@@ -345,14 +349,18 @@ class State:
         """The contract with the network (tools/nn/model/observation.py): the OBSERVED tensors
         [B, N], `side` [B, N], `t` [B] (s), the abilities' timers ab{k}_on / ab{k}_cd [B, N] (s:
         active left, until ready; the observation shows them for own units, `on` for seen enemies),
-        `fx_on` [B, N]: the innate effects on now (bitmask, tools/nn/sim/effects.py) and `gone` [B, N]
+        `fx_on` [B, N]: the innate effects on now (bitmask, tools/nn/sim/effects.py), `ab_rx` [B, N]: the abilities of
+        other units on it (bitmask over the passports' order: abilities.py and effects.py auras) and `gone` [B, N]
         (left the map: its gold is lost whole, the attacker's progress in the observation), the order in force
         `order_kind`, `order_target` [B, N] (the observation's ORDER)."""
+        from tools.nn.sim.abilities import SLOTS
         out = {k: self.u[k] for k in OBSERVED}
-        for k in range(3):
+        for k in range(SLOTS):
             for t in ("on", "cd"):
                 out[f"ab{k}_{t}"] = self.u[f"ab{k}_{t}"]
         out["fx_on"] = self.u["fx_on"]
+        if "ab_rx" in self.u:
+            out["ab_rx"] = self.u["ab_rx"] | self.u.get("fx_rx", torch.zeros_like(self.u["ab_rx"]))
         out["gone"] = self.u["gone"]
         out["side"] = self.u["side"]
         out["order_kind"] = self.u["order_kind"]      # the order in force (observation ORDER)

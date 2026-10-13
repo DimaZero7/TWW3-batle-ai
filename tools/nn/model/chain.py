@@ -101,10 +101,33 @@ class ChainHeads(nn.Module):
             self.target_pair = nn.Linear(pr.SIZE, 1, bias=False)
             nn.init.zeros_(self.target_pair.weight)
 
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+        """Ability features appended since the checkpoint load with zero weights (encoder.pad_inputs)."""
+        from tools.nn.model.encoder import pad_inputs
+        pad_inputs(state_dict, prefix + "ability_k.0.weight", self.ability_k[0].in_features)
+        super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
+
+    def _ability_scores(self, u, obs_t, usable):
+        """[B, N, ACTIVE] each slot's score (the unit's query . the slot's key / sqrt(pointer)); the slots that may not
+        be used: anything (masked after). The simulator's timer slots (abilities.SIM_SLOTS) are scored all at once;
+        the others only where usable (eager; compiled - the simulator - has none there: abilities.sim_fits)."""
+        D, p = ab.SIM_SLOTS, self.cfg.pointer
+        x = ab.full(obs_t["abil"][:, :, :D], obs_t["abil_idx"][:, :, :D])
+        x = torch.where(usable[..., :D, None], x, torch.zeros_like(x))
+        q = self.ability_q(u)
+        score = (q[:, :, None] * self.ability_k(x)).sum(-1) / math.sqrt(p)
+        rest = score.new_zeros(*score.shape[:2], usable.shape[-1] - D)
+        if not torch.compiler.is_compiling():
+            b, n, k = usable[..., D:].nonzero(as_tuple=True)
+            k = k + D
+            xr = ab.full(obs_t["abil"][b, n, k], obs_t["abil_idx"][b, n, k])
+            rest = rest.index_put((b, n, k - D), (q[b, n] * self.ability_k(xr)).sum(-1) / math.sqrt(p))
+        return torch.cat([score, rest], -1)
+
     def forward(self, x, s, cells_in, obs_t, action=None, greedy=False, temperature=1.0, abilities=True, pairs=None):
         """x [B, 1 + N, d] unit tokens, s [B, S, ds] sector tokens, cells_in [B, S, k2] (sectors.inside) -> (logits,
         action). logits: kind [B, N, 5], target [B, N, N], sector [B, N, S], fine [B, N, k2], commit [B, N, 4],
-        run [B, N], ability [B, N, 1 + SLOTS] - each under the action's earlier parts. action None: sampled.
+        run [B, N], ability [B, N, 1 + ACTIVE] - each under the action's earlier parts. action None: sampled.
         pairs [B, 1 + N, 1 + N, pairs.SIZE]: the pair features (cfg.pairs), added to the target's logits."""
         cfg = self.cfg
         u = self.norm(x[:, 1:])
@@ -159,9 +182,9 @@ class ChainHeads(nn.Module):
             a_commit, a_run = action.commit, action.run
         a_ability = None
         if obs_t.get("abil") is not None:
-            usable = obs_t["abil_ok"] & ctrl[..., None]
-            abil = torch.where(usable[..., None], obs_t["abil"], torch.zeros_like(obs_t["abil"]))
-            score, bad = _cap((self.ability_q(u)[:, :, None] * self.ability_k(abil)).sum(-1) / math.sqrt(cfg.pointer), bad)
+            usable = obs_t["abil_ok"] & ctrl[..., None]                                   # [B, N, ACTIVE]
+            score = self._ability_scores(u, obs_t, usable)
+            score, bad = _cap(score, bad)
             slot = torch.where(usable, score, torch.full_like(score, NEG))
             none, bad = _cap(self.ability_none(u), bad)
             out["ability"] = torch.cat([none, slot], -1)

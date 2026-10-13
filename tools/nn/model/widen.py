@@ -67,6 +67,7 @@ def wider_config(cfg, k):
 ACTOR = {"encoder.unit.0": ("hid", "raw"), "encoder.unit.2": ("res", "hid"),
          "encoder.ctx.0": ("hid", "raw"), "encoder.ctx.2": ("res", "hid"),
          "abilities.net.0": ("hid", "raw"), "abilities.net.2": ("res", "hid"),
+         "ability_extra.net.0": ("hid", "raw"), "ability_extra.net.2": ("res", "hid"),
          "memory.cell.weight_ih": ("gru", "res"), "memory.cell.weight_hh": ("gru", "res"),
          "heads.kind": ("raw", "res"), "heads.point": ("raw", "res"), "heads.run": ("raw", "res"),
          "heads.q": ("query", "res"), "heads.k": ("key", "res"), "heads.ability_q": ("query", "res"),

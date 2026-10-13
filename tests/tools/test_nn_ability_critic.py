@@ -119,12 +119,16 @@ def test_features_read_the_unit_its_slot_and_the_neighbourhood():
     tokens[0, 1, I["state_routing"]] = 1.0            # a friend routing 20 m away
     tokens[0, 2, I["melee"]] = 1.0                    # a friend in melee 60 m away
     tokens[0, 3, I["melee"]] = 1.0                    # an enemy in melee 30 m away
-    abil = torch.zeros(1, N, 3, mab.SIZE)
+    abil = torch.zeros(1, N, mab.SLOTS, mab.STATE)
     abil[0, 0, 1, 0] = 7.0                            # slot 1's first column
-    obs = {"tokens": tokens, "ctx": torch.zeros(1, ob.CONTEXT), "own": own, "pos": pos, "abil": abil}
+    idx = torch.full((1, N, mab.SLOTS), -1)
+    idx[0, 0, 1] = mab.keys().index("wh_main_character_abilities_rally")
+    obs = {"tokens": tokens, "ctx": torch.zeros(1, ob.CONTEXT), "own": own, "pos": pos, "abil": abil, "abil_idx": idx}
     x = ac.features(obs, torch.tensor([0]), torch.tensor([0]), torch.tensor([1]))
     assert x.shape == (1, ac.WIDTH)
     assert float(x[0, ac.OWN]) == 7.0 and float(x[0, ob.INDEX["men"]]) == 1.0
+    # the slot's passport from the table (Rally: active 14 s)
+    assert float(x[0, ac.OWN + mab.INDEX["active_s"]]) == pytest.approx(14 / 60)
     loc = x[0, -ac.LOCAL:]
     assert float(loc[0]) == pytest.approx(30 / ac.FAR) and float(loc[1]) == 0.0
     near35 = (loc[2:8] * 4).tolist()                  # own, own melee, own wavering, own routing, enemy, enemy melee

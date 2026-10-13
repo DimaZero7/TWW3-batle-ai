@@ -21,8 +21,10 @@ began with, so the update can run the memory (GRU) through the chunk again.
 Abilities: the networks (learner and past version) choose their lords' abilities (heads.sample with
 abilities=True; Orders.ability); only the scripted opponents' lords fire by the game-AI rule
 (sim abilities.set_rule, again after every restart: the bank's rows bring scenario.build's `ai`).
-A transition keeps only the abilities' state (abil [.., SLOTS, DYNAMIC]) and the battle's bank row
-(abil_row); full_obs() puts the passports back from the bank (batch["abil_static"]) for the update:
+A transition keeps only the abilities' state of the slots some unit of the bank owns (abil [.., U, STATE], U of the
+SLOTS: ~6 of 30) and the battle's bank row (abil_row); full_obs() puts the slots and their abilities back from the
+bank (batch["abil_static"]: its abil_idx and U) for the update - the passports themselves the networks take from
+the table (model/abilities.py full):
 the whole input would be ~3 GB for 1024 battles x 64 decisions.
 
 Past slots (past_slots=K; run.py --past-slots): up to K past versions play at once, each in a slot. A battle against
@@ -151,15 +153,25 @@ def merge_memory(old, new, rows):
     return ob.Memory(frame, *(w(getattr(old, k), getattr(new, k)) for k in MEMORY))
 
 
-def full_obs(obs, table):
-    """A stored observation (rows of collect's batch["obs"], [..]) with the abilities' passports put back:
-    abil [.., N, SLOTS, DYNAMIC] + table[abil_row] -> abil [.., N, SLOTS, SIZE]; abil_row dropped.
-    An observation without abilities is returned as it is."""
+def full_obs(obs, static):
+    """A stored observation (rows of collect's batch["obs"], [..]) with the abilities' slots put back: abil
+    [.., N, U, STATE] -> [.., N, SLOTS, STATE] (the slots U = static["slots"], zeros elsewhere: no unit of the bank
+    owns them) and abil_idx = static["idx"][abil_row] [.., N, SLOTS]; abil_row dropped. An observation without
+    abilities is returned as it is."""
     if "abil_row" not in obs:
         return obs
     out = {k: v for k, v in obs.items() if k != "abil_row"}
-    out["abil"] = torch.cat([obs["abil"], table[obs["abil_row"]]], -1)
+    a = obs["abil"]
+    full = a.new_zeros(*a.shape[:-2], mab.SLOTS, a.shape[-1])
+    full[..., static["slots"], :] = a
+    out["abil"] = full
+    out["abil_idx"] = static["idx"][obs["abil_row"]]
     return out
+
+
+def used_slots(idx):
+    """[U] long: the slots some unit of the bank owns (idx [M, N, SLOTS]: its abil_idx), in order."""
+    return (idx >= 0).flatten(0, -2).any(0).nonzero()[:, 0]
 
 
 def placement(rows, B):
@@ -331,6 +343,7 @@ class Battles:
         self.bank = self.source.bank
         self.B, self.N = layout.B, self.bank.N
         self.advance = battle.stepper(self.device, compile)
+        mab.warm(self.device)                    # the abilities' tables, before any compiled code reads them
         self.look = observer(self.device, compile)
         # the bookkeeping around the simulator's step, compiled like it on CUDA (fast())
         self.compiled = use = compile if compile is not None else self.device.type == "cuda"
@@ -665,9 +678,10 @@ class Battles:
             for k, h in h_past_new.items():
                 self.past_h[k] = h * keep[self.rows_past % self.B][:, None, None]
         self.cur = self.observe(critic is not None)
-        if "abil" in obs_r:                          # keep the state, not the passports (full_obs)
+        if "abil" in obs_r:                          # keep the slots some unit owns and the bank row (full_obs)
             # a copy: a slice (view) would keep the whole input of every step alive (~60 MB each)
-            obs_r = dict(obs_r, abil=obs_r["abil"][..., :mab.DYNAMIC].clone(), abil_row=abil_row)
+            obs_r = {k: v for k, v in obs_r.items() if k != "abil_idx"}
+            obs_r = dict(obs_r, abil=obs_r["abil"][..., self._abil_slots(), :].clone(), abil_row=abil_row)
         return {"obs": obs_r, "action": action, "lp": lp, "value": value, "reward": r_rows,
                 "done": d_rows, "critic_obs": c, "attacks": attacks, "teach": taught, "truth": truth}
 
@@ -853,6 +867,13 @@ class Battles:
         """mask [B, N] limited to the learner's units."""
         return mask & learner_units(self.st.u, self.ctrl)
 
+    def _abil_slots(self):
+        """The slots some unit of the bank owns (used_slots; once per bank)."""
+        idx = self.bank.setup.arrays.abil_idx
+        if getattr(self, "_abil_used", (None,))[0] is not idx:
+            self._abil_used = (idx, used_slots(idx))
+        return self._abil_used[1]
+
     def _ability_marks(self):
         """[B, N, SLOTS] the learner's units' ability cooldowns (a use sets one up)."""
         u = self.st.u
@@ -1015,7 +1036,8 @@ def collect(env, actor, critic, T):
     out["reset"] = torch.cat([torch.zeros_like(done[:1]), done[:-1]])
     out["action"] = hd.Action(**{f: torch.stack([getattr(s["action"], f) for s in steps])
                                  for f in steps[0]["action"].parts()})
-    out["abil_static"] = getattr(env.bank.setup.arrays, "abil", None)
+    idx = getattr(env.bank.setup.arrays, "abil_idx", None)
+    out["abil_static"] = None if idx is None else {"idx": idx, "slots": env._abil_slots()}
     for k in ("lp", "value", "reward", "done", "attacks"):
         out[k] = torch.stack([s[k] for s in steps])
     if steps[0].get("teach") is not None:

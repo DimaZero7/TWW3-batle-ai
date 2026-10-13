@@ -61,7 +61,7 @@ class LiveSetup:
     working on the same tensors)."""
 
     FIELDS = ("side", "bounds", "rank", "lord_level", "passport", "men0", "ammo0", "present", "attacker", "lord",
-              "abil", "abil_owned", "abil_use",      # abil: the ability slots' passports [B, N, SLOTS, STATIC]
+              "abil_idx", "abil_use", "abil_fx",     # the ability slots [B, N, SLOTS] (model/abilities.py slots)
               "fx_owned",                            # innate effects owned [B, N, E] (tools/nn/model/effects.py)
               "cost",                                # multiplayer cost [B, N] (the attacker's progress)
               "reload",                              # passport reload_s [B, N] (the volley input, VOLLEY)
@@ -74,6 +74,9 @@ class LiveSetup:
 
     @classmethod
     def of(cls, setup, device):
+        from tools.nn.model import abilities as mab
+        # the simulator times the first SIM_SLOTS of a unit's actives only; the compiled networks read no other
+        assert mab.sim_fits(setup.abil_idx), "a unit with more timed abilities than the simulator's slots"
         like = setup.like(torch.zeros(1, device=device))
         arrays = observation._Arrays(**{k: getattr(like, k).clone() for k in cls.FIELDS})
         char = {s: torch.as_tensor(setup.character(s), device=device).float() for s in (1, 2)}

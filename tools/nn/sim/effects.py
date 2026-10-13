@@ -49,7 +49,7 @@ try:
 except ImportError:          # the table's layout is importable without torch
     torch = None
 
-from tools.nn.sim.abilities import MULT, SIM_STATS, STATS
+from tools.nn.sim.abilities import MULT, SIM_STATS, SLOTS, STATS
 
 # The effects' stats: the abilities' and the missile damage (poison: x0.85, scalar_missile_damage_base / _ap)
 E_STATS = STATS + ("m_damage", "m_ap")
@@ -293,7 +293,7 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
         on = on | (torch.nn.functional.one_hot(e.clamp(min=0), E + 1)[..., :E].bool() & live[..., None])
         # the ability bar of the slot holding this effect's ability shows its timers
         ab = r[..., COL["ability"]].long()
-        for k in range(3):
+        for k in range(SLOTS):
             match = has & (ab >= 0) & (u[f"ab{k}"] == ab)
             u[f"ab{k}_on"] = torch.where(match, t_on, u[f"ab{k}_on"])
             u[f"ab{k}_cd"] = torch.where(match, t_cd, u[f"ab{k}_cd"])
@@ -308,12 +308,18 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
     eye = torch.eye(u["men"].shape[1], dtype=torch.bool, device=u["men"].device)[None]
     present = u["side"] > 0
     got = {}
+    ab_keys = sorted(params.abilities or {})
+    rx = torch.zeros_like(u["fx"]) if "fx_rx" in u else None
     for i in auras(params):
         # from a living owner, routing too, to friends in range, routing too (spec 3.4)
         give = (same_side & ~eye & present[:, None, :] & (dist <= T[i, COL["range_m"]])
                 & (on[..., i] & alive)[:, :, None]).float()             # owner i -> friend j
         if RECEIVED is not None:
             got[i] = give.sum(1) > 0
+        key = order(params)[i]
+        if rx is not None and key in ab_keys:
+            # the aura's ability on a friend: the network's "effects on me from others" (abilities.py ab_rx)
+            rx = rx | ((give.sum(1) > 0).long() << ab_keys.index(key))
         for s in E_STATS:
             v = T[i, COL[f"friends_{s}"]]
             if s in E_MULT:
@@ -340,6 +346,8 @@ def apply(u, params, dt, standing, engaged, dist, same_side):
     u["resist_physical"] = (u["resist_physical"] + add["resist_physical"] / 100).clamp(max=0.9)
     for r, f in RULES.items():
         u[f] = torch.einsum("bne,e->bn", onf, c(f"rule_{r}")) > 0
+    if rx is not None:
+        u["fx_rx"] = rx
     if RECEIVED is not None:
         keys = order(params)
         RECEIVED.append({keys[i]: (on[..., i] | got.get(i, torch.zeros_like(on[..., i]))).clone()

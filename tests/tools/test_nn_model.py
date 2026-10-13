@@ -223,7 +223,8 @@ def test_only_ready_abilities_of_own_units_can_be_chosen():
     o = policy.to_torch(obs)
     logits, _ = model()(o)
     a = logits["ability"]
-    assert a.shape == (2, 8, 4) and torch.isfinite(a[..., 0]).all()
+    from tools.nn.model import abilities as mab
+    assert a.shape == (2, 8, 1 + mab.ACTIVE) and torch.isfinite(a[..., 0]).all()
     allowed = o["abil_ok"] & o["ctrl"][..., None]
     assert torch.all(a[..., 1:][~allowed] <= heads.NEG / 2) and torch.all(a[..., 1:][allowed] > heads.NEG / 2)
     assert not allowed[..., 0].any() and allowed.any()
@@ -238,12 +239,15 @@ def test_only_ready_abilities_of_own_units_can_be_chosen():
 def test_permuting_ability_slots_permutes_the_choice():
     setup, state, obs = ability_obs()
     o = policy.to_torch(obs)
-    perm = torch.tensor([2, 0, 1])
-    p = dict(o, abil=o["abil"][:, :, perm], abil_ok=o["abil_ok"][:, :, perm])
+    from tools.nn.model import abilities as mab
+    perm = torch.tensor([2, 0, 1])                       # the actives' slots (the passives' have no choice)
+    full = torch.cat([perm, torch.arange(3, mab.SLOTS)])
+    p = dict(o, abil=o["abil"][:, :, full], abil_idx=o["abil_idx"][:, :, full],
+             abil_ok=o["abil_ok"][:, :, full[:mab.ACTIVE]])
     net = model()
     a, _ = net(o)
     b, _ = net(p)
-    assert torch.allclose(a["ability"][..., 1:][..., perm], b["ability"][..., 1:], atol=1e-5)
+    assert torch.allclose(a["ability"][..., 1:][..., full[:mab.ACTIVE]], b["ability"][..., 1:], atol=1e-5)
     assert torch.allclose(a["ability"][..., 0], b["ability"][..., 0], atol=1e-5)
     assert torch.allclose(a["kind"], b["kind"], atol=1e-5)
 
@@ -253,11 +257,14 @@ def test_an_unseen_ability_still_gives_a_valid_choice():
     setup, state, obs = ability_obs()
     o = policy.to_torch(obs)
     torch.manual_seed(3)
-    owned = o["abil"][..., mab.INDEX["owned"]] > 0.5
-    new = o["abil"].clone()
-    new[..., mab.DYNAMIC:] = torch.where(owned[..., None], torch.rand_like(new[..., mab.DYNAMIC:]) * 2 - 1,
-                                         new[..., mab.DYNAMIC:])
-    logits, _ = model()(dict(o, abil=new))
+    # passports the network never saw: the table of today's abilities replaced by random ones (its empty row stays)
+    table = mab.torch_table("cpu")
+    unseen = torch.cat([torch.rand_like(table[:-1]) * 2 - 1, table[-1:]])
+    mab._TORCH["cpu"] = unseen
+    try:
+        logits, _ = model()(o)
+    finally:
+        mab._TORCH["cpu"] = table
     assert torch.isfinite(logits["ability"][..., 0]).all() and torch.isfinite(logits["kind"]).all()
     a = heads.sample(logits, abilities=True)
     allowed = torch.cat([torch.ones_like(o["abil_ok"][..., :1]), o["abil_ok"] & o["ctrl"][..., None]], -1)
@@ -460,11 +467,13 @@ WAVE2 = ["wh_dlc04_emp_inf_flagellants_0", "wh_main_emp_inf_greatswords", "wh_dl
          "wh_main_emp_cha_general_0", "wh2_main_skv_cha_warlord_0", "wh2_main_skv_inf_skavenslave_slingers_0"]
 NEW_PASSPORT = 2 + 3          # attributes mounted_fire_move, guerrilla_deploy; direct, spread, muzzle_velocity
 NEW_ABILITY = 8               # abilities.WHEN
+NEW_AB13 = 3                  # abilities WHEN2, VIGOUR, on now (13.10.2026), after WHEN
 NEW_EFFECTS = mfx.SIZE        # the innate effects' columns (appended after the second wave)
 NEW_VOLLEY = len(ob.VOLLEY)   # the volley input, appended after the effects (03.10.2026)
 NEW_ARC = len(ob.ARC)         # the fire arc, appended after the volley input (07.10.2026)
 NEW_ORDER = len(ob.ORDER)     # the order in force, appended after the fire arc (07.10.2026)
-NEW_WEAPON = len(ob.WEAPON) + len(ob.AIM)   # the volley's shots and magical attacks (11.10.2026), the aim (13.10)
+NEW_WEAPON = len(ob.WEAPON) + len(ob.AIM) + len(ob.RECEIVED)   # the volley's shots and magical attacks (11.10.2026),
+#                                                                 the aim and the effects from others (13.10)
 T0 = ob.TOKEN - NEW_WEAPON - NEW_ORDER - NEW_VOLLEY - NEW_ARC    # the token before the volley input
 T1 = ob.TOKEN - NEW_WEAPON - NEW_ORDER - NEW_ARC       # the token before the fire arc
 
@@ -480,33 +489,50 @@ def test_the_second_wave_is_seen_in_the_passport_and_the_ability_slots():
     assert f[0, unbreakable] == 1 and f[1, unbreakable] == 0                  # flagellants never rout
     assert f[2, direct] == 1 and f[3, direct] == 0                            # pistols flat, arrows arc
     assert f[2, at + passport.ATTRIBUTES.index("mounted_fire_move")] == 1
-    feat, owned, usable = mab.slots([WAVE2[0]])
+    idx, usable, _ = mab.slots([WAVE2[0]])
+    feat, owned = mab.table()[idx], idx >= 0
     names = mab.STATIC_NAMES
     assert owned[0].sum() == 2 and not usable[0].any()                        # the game fires them, not orders
     penitent = feat[0, 0]                                                     # actives first (sim slot order)
     assert penitent[names.index("auto")] == 1 and penitent[names.index("when_losing_melee")] == 1
     assert penitent[names.index("off_out_of_melee")] == 1
-    assert feat[0, 1, names.index("off_morale_below_half")] == 1             # frenzy
+    assert feat[0, mab.ACTIVE, names.index("off_morale_below_half")] == 1    # frenzy: the passives' first slot
+
+
+def old_abilities(actor, width):
+    """The actor's ability layers read the first `width` ability features (abilities.full cut while it runs): as a
+    network saved before the later columns, all appended at the end (the slot's state stays its own)."""
+    from tools.nn.model import abilities as mab
+    keep = {}
+
+    def pre(module, args, kwargs=None):
+        keep["full"] = mab.full
+        mab.full = lambda state, idx, tab=None: keep["full"](state, idx, tab)[..., :width]
+
+    def post(module, args, out):
+        mab.full = keep["full"]
+    actor.register_forward_pre_hook(pre)
+    actor.register_forward_hook(post)
+    return actor
 
 
 def narrow_networks(cfg):
     """An actor and critic as saved before the second wave: NEW_PASSPORT fewer token inputs, NEW_ABILITY
-    fewer ability inputs (all appended at the ends)."""
+    fewer ability inputs (all appended at the ends; and the ability inputs of 13.10.2026 after them)."""
     from tools.nn.model import abilities as mab
     actor, crit = policy.Actor(cfg), critic.Critic(cfg)
+    width = mab.SIZE - NEW_ABILITY - NEW_AB13
     actor.encoder.unit[0] = torch.nn.Linear(T0 - NEW_EFFECTS - NEW_PASSPORT, cfg.d)
-    actor.abilities.net[0] = torch.nn.Linear(mab.SIZE - NEW_ABILITY, cfg.d)
-    actor.heads.ability_k[0] = torch.nn.Linear(mab.SIZE - NEW_ABILITY, cfg.d)
+    actor.abilities.net[0] = torch.nn.Linear(width, cfg.d)
+    actor.ability_extra.net[0] = torch.nn.Linear(width, cfg.d)     # (its last layer at zero: it adds nothing)
+    actor.heads.ability_k[0] = torch.nn.Linear(width, cfg.d)
     crit.encoder.unit[0] = torch.nn.Linear(T0 - NEW_EFFECTS - NEW_PASSPORT, cfg.critic_d)
-    return actor.eval(), crit.eval()
+    return old_abilities(actor, width).eval(), crit.eval()
 
 
 def narrow(o):
-    """The observation as the networks before the second wave saw it."""
-    out = dict(o, tokens=o["tokens"][..., :T0 - NEW_EFFECTS - NEW_PASSPORT])
-    if "abil" in o:
-        out["abil"] = o["abil"][..., :o["abil"].shape[-1] - NEW_ABILITY]
-    return out
+    """The observation as the networks before the second wave saw it (the ability features: old_abilities)."""
+    return dict(o, tokens=o["tokens"][..., :T0 - NEW_EFFECTS - NEW_PASSPORT])
 
 
 def wave2_obs():
@@ -549,7 +575,8 @@ def test_networks_saved_before_the_second_wave_load_and_act_the_same_and_train()
     loss = sum(v.masked_fill(v < -1e8, 0).sum() for v in out.values())
     loss.backward()
     assert new.encoder.unit[0].weight.grad[:, T0 - NEW_EFFECTS - NEW_PASSPORT:T0 - NEW_EFFECTS].abs().sum() > 0
-    assert new.abilities.net[0].weight.grad[:, -NEW_ABILITY:].abs().sum() > 0
+    from tools.nn.model import abilities as mab
+    assert new.abilities.net[0].weight.grad[:, mab.OLD_SIZE - NEW_ABILITY:mab.OLD_SIZE].abs().sum() > 0
 
 
 CHAIN = ROOT / "build/nn-train/test5/it4/m10.pt"
@@ -563,7 +590,7 @@ def test_the_chain_checkpoint_loads_through_the_conversion_and_acts_as_before():
     new = checkpoint.load_policy(CHAIN)
     new_crit = checkpoint.load_critic(CHAIN)
     old, old_crit = narrow_networks(cfg)
-    fresh = {k: v for k, v in new.state_dict().items() if k.startswith(policy.ABILITY_PARAMS)
+    fresh = {k: v for k, v in old.state_dict().items() if k.startswith(policy.ABILITY_PARAMS)
              and k not in data["actor"]}
     torch.nn.Module.load_state_dict(old, {**fresh, **data["actor"]})
     if new_crit is not None:
@@ -855,7 +882,7 @@ def test_the_fire_arc_input_is_the_passports_arc_on_both_sides():
     col = obs.tokens[..., ob.INDEX["fire_arc"]]
     want = {"wh2_main_skv_inf_night_runners_0": 1.0, "wh2_dlc13_emp_inf_archers_0": 30 / 180,
             "wh_main_emp_inf_swordsmen": 0.0, "wh_main_emp_inf_handgunners": 30 / 180}
-    assert ob.NAMES[T1] == "fire_arc" and ob.NAMES[T1 + 1:] == ob.ORDER + ob.WEAPON + ob.AIM
+    assert ob.NAMES[T1] == "fire_arc" and ob.NAMES[T1 + 1:] == ob.ORDER + ob.WEAPON + ob.AIM + ob.RECEIVED
     for b, keys in enumerate(setup.keys):
         for i, k in enumerate(keys):
             assert col[b, i] == pytest.approx(want[k], abs=1e-6), (b, i, k)     # own (0-3) and enemy (4-7)

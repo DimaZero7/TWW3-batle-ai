@@ -21,7 +21,6 @@ from tools.nn.model import abilities as model_abilities
 from tools.nn.model import passport
 from tools.nn.model.observation import Setup
 from tools.nn.model.sources import CROSSROADS, EMPIRE, SKAVEN
-from tools.nn.sim.abilities import SLOTS, slot_keys
 from tools.nn.sim.orders import KINDS   # hold, move, attack, withdraw, keep (codes 0-4)
 
 STATE = "tww3_bai_nn_state.json"
@@ -57,6 +56,7 @@ class Battle:
     side: np.ndarray
     setup: Setup
     slots: list = None     # per unit: its ability keys by slot ("" empty), as the network's input has them
+    #                        (model/abilities.py layout: every ability; the actives' slot k is the simulator's)
     walk: np.ndarray = None   # [N] walk speed (m/s, passport; 0 unknown): running_by_speed
     shape: dict = None     # the formations as the simulator lays them out (formation_shape): engaged_targets' contact
     threat: dict = None    # the simulator's flank / rear threat rule (threat_rule): threat_flags
@@ -77,8 +77,8 @@ def battle(doc, bounds=CROSSROADS):
                   factions=[(factions.get("own", EMPIRE), factions.get("enemy", SKAVEN))],
                   attacker=np.array([int(doc.get("attacker", 2))]))
     units_db, passports = passport.load(), model_abilities.load()
-    slots = [slot_keys(u.get("key") or "", units_db, passports) if u.get("key") in units_db else [""] * SLOTS
-             for u in units]
+    slots = [model_abilities.layout(u.get("key") or "", units_db, passports) if u.get("key") in units_db
+             else [""] * model_abilities.SLOTS for u in units]
     walk = np.array([float(((units_db.get(u.get("key") or "") or {}).get("speed") or {}).get("walk") or 0.0)
                      for u in units])
     return Battle(doc["batch"], names, side[0], setup, slots, walk, formation_shape(doc), threat_rule())
@@ -366,6 +366,30 @@ def arrays(doc, names, slots=None, own=1):
     out["t"] = np.array([doc.get("t", 0) / 1000.0])
     if slots is not None:
         out.update(ability_timers(doc, names, slots, own=own))
+        out["ab_rx"] = received(doc, names)
+    return out
+
+
+def received(doc, names, passports=None, units_db=None):
+    """[1, N] int64: the abilities of other units on each unit now - the network's effects from others (observation
+    RECEIVED; the simulator's ab_rx): a bitmask over the passports' order (model/abilities.py keys) of the abilities
+    whose phase the unit's card shows (row fx: the bridge's ActiveEffectList, whoever laid it) and that the unit does not
+    own itself (its own are its slots: a friend's aura, Hold the Line or Rally, an enemy's on it). fx not read: none."""
+    passports = passports or model_abilities.load()
+    units_db = units_db or passport.load()
+    keys = model_abilities.keys(passports)
+    phases = [set(passports[k].get("phases") or (k,)) for k in keys]
+    rows = {u["n"]: u for u in doc["units"]}
+    out = np.zeros((1, len(names)), np.int64)
+    for i, name in enumerate(names):
+        row = rows.get(name, {})
+        fx = _effects(row)
+        if not fx:
+            continue
+        own = set((units_db.get(row.get("key") or "") or {}).get("abilities") or ())
+        for a, k in enumerate(keys):
+            if k not in own and phases[a] & fx:
+                out[0, i] |= 1 << a
     return out
 
 
@@ -540,7 +564,8 @@ def ability_timers(doc, names, slots, passports=None, own=1):
     uses the bridge counts (1; the enemy's script: 2, its own bridge's abilities_used)."""
     passports = passports or model_abilities.load()
     N = len(names)
-    out = {f"ab{k}_{t}": np.zeros((1, N)) for k in range(SLOTS) for t in ("on", "cd")}
+    K = max((len(s) for s in slots), default=0)
+    out = {f"ab{k}_{t}": np.zeros((1, N)) for k in range(K) for t in ("on", "cd")}
     t = doc.get("t", 0) / 1000.0
     used = doc.get("abilities_used") or {}
     rows = {u["n"]: u for u in doc["units"]}

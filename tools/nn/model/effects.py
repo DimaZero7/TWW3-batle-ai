@@ -101,9 +101,10 @@ def active(m, state, own_bits, doc=None):
     return m.stack(cols, -1) if cols else have[..., :0]
 
 
-def features(m, state, own_bits, visible, doc=None):
-    """[B, N, 2E] float: per effect (owned, on); `on` only where visible [B, N] (own units, seen enemies)."""
-    on = active(m, state, own_bits, doc) & visible[..., None]
+def features(m, state, own_bits, visible, doc=None, on=None):
+    """[B, N, 2E] float: per effect (owned, on); `on` only where visible [B, N] (own units, seen enemies). on: active()
+    already worked out (None: here)."""
+    on = (active(m, state, own_bits, doc) if on is None else on) & visible[..., None]
     on = on.astype(np.float32) if m is np else on.float()
     own = own_bits.astype(np.float32) if m is np else own_bits.float()
     return m.stack([own, on], -1).reshape(*own.shape[:-1], 2 * own.shape[-1])

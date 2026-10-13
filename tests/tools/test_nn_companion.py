@@ -128,6 +128,7 @@ def test_write_waits_while_the_file_is_held(tmp_path, monkeypatch):
 
 FS, SYG, HTL = ("wh_main_character_abilities_foe_seeker", "wh_main_character_abilities_stand_your_ground",
                 "wh_main_lord_passive_hold_the_line")
+WOUNDED = "wh3_main_unit_passive_single_entity"
 
 
 def test_ability_timers_from_the_bridges_uses_and_the_active_effects():
@@ -138,13 +139,18 @@ def test_ability_timers_from_the_bridges_uses_and_the_active_effects():
     doc["units"][0]["fx"] = [HTL, SYG]                                   # the lord's card: SYG is on
     doc["units"][1]["fx"] = {}                                            # JSON's empty list
     b = exchange.battle(doc)
-    assert b.slots[0] == [FS, SYG, HTL] and b.slots[1] == ["", "", ""]
+    from tools.nn.model import abilities as mab
+    A, K = mab.ACTIVE, mab.SLOTS
+    # every ability of the General (model/abilities.py layout): the actives from 0, the passives from ACTIVE
+    assert b.slots[0] == [FS, SYG] + [""] * (A - 2) + [HTL, WOUNDED] + [""] * (K - A - 2)
+    assert b.slots[1] == [""] * K
     s = exchange.arrays(doc, b.names, b.slots)
     assert s["ab1_on"][0, 0] == pytest.approx(8) and s["ab1_cd"][0, 0] == pytest.approx(98)
     assert s["ab0_on"][0, 0] == 0 and s["ab0_cd"][0, 0] == 0
     assert s["ab0_on"][0, 2] == 1 and s["ab0_cd"][0, 2] == 1 and s["ab1_on"][0, 2] == 0
     obs, _ = ob.observe(s, b.setup, 1)
-    assert obs.abil_ok[0, 0].tolist() == [True, False, False]
+    assert obs.abil_ok[0, 0].nonzero()[0].tolist() == [0]
+    assert obs.abil[0, 0, A, mab.STATE_INDEX["on_now"]] == 1          # Hold the Line on the card: on
     late = json.loads(json.dumps(dict(doc, t=200000)))
     late["units"][0]["fx"] = [HTL]
     assert exchange.arrays(late, b.names, b.slots)["ab1_cd"][0, 0] == 0   # ready again

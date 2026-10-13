@@ -115,30 +115,38 @@ def optimizer(actor, critic, lr, width=1.0):
     return torch.optim.Adam([{"params": readers, "lr": lr / width}, {"params": rest, "lr": lr}], lr=lr, eps=1e-5)
 
 
-def resume(opt, path):
+def resume(opt, path, fresh=()):
     """Adam's state from the checkpoint `path` (its "train", checkpoint.py) into opt, when it has one of the same
-    parameters (count and shapes, in order); the learning rates stay opt's (the options'). -> the trainer's
-    counters saved with it ({} if none), or None when nothing was resumed (why: printed)."""
+    parameters (count and shapes, in order, besides `fresh`); the learning rates stay opt's (the options'). fresh: the
+    parameters the checkpoint has none of (an actor's parts added since it was saved, fresh_params): they start
+    Adam afresh. A first layer whose inputs grew (the token's columns: observation.old_columns; the ability features
+    appended at the end: encoder.pad_inputs) gets its moments at the columns' places, zero for the new ones. -> the
+    trainer's counters saved with it ({} if none), or None when nothing was resumed (why: printed)."""
     tr = checkpoint.train_state(path) if path else None
     if not tr or "optim" not in tr:
         return None
     saved = tr["optim"]
     counters = dict(tr.get("state") or {})
-    params = [p for g in opt.param_groups for p in g["params"]]
-    ids = [i for g in saved["param_groups"] for i in g["params"]]
-    if len(saved["param_groups"]) != len(opt.param_groups) or len(ids) != len(params):
+    skip = {id(p) for p in fresh}
+    groups = [[p for p in g["params"] if id(p) not in skip] for g in opt.param_groups]
+    if len(saved["param_groups"]) != len(opt.param_groups) or any(
+            len(g["params"]) != len(mine) for g, mine in zip(saved["param_groups"], groups)):
         # (the trainer's counters go on all the same: the chain's updates keep the observation term off, its seconds
         # the entropy decay)
         print(f"{path}: the optimizer's state is of other parameters: Adam starts afresh, the counters go on", flush=True)
         return counters
     from tools.nn.model import observation as ob
-    for i, p in zip(ids, params):
+    pairs = [(i, p) for g, mine in zip(saved["param_groups"], groups) for i, p in zip(g["params"], mine)]
+    for i, p in pairs:
         st = saved["state"].get(i, {})
         if "exp_avg" in st and tuple(st["exp_avg"].shape) != tuple(p.shape):
-            # the token encoder's first layer of a checkpoint from before the new units (observation.old_columns):
-            # its moments to the columns' new places, zero for the new columns (as its weights, encoder.py)
-            cols = ob.old_columns(st["exp_avg"].shape[1]) if st["exp_avg"].dim() == 2 else None
-            if cols is not None and p.dim() == 2 and p.shape == (st["exp_avg"].shape[0], ob.TOKEN):
+            old = st["exp_avg"]
+            if old.dim() == 2 and p.dim() == 2 and old.shape[0] == p.shape[0] and old.shape[1] < p.shape[1]:
+                # the token encoder's first layer of a checkpoint from before the new units (observation.old_columns):
+                # its moments to the columns' new places; other inputs appended at the end (encoder.pad_inputs); zero
+                # for the new columns (as its weights, encoder.py)
+                cols = ob.old_columns(old.shape[1]) if p.shape[1] == ob.TOKEN else None
+                cols = list(range(old.shape[1])) if cols is None else cols
                 for k in ("exp_avg", "exp_avg_sq"):
                     new = st[k].new_zeros(p.shape)
                     new[:, cols] = st[k]
@@ -146,11 +154,22 @@ def resume(opt, path):
                 continue
             print(f"{path}: the optimizer's state is of other shapes: Adam starts afresh, the counters go on", flush=True)
             return counters
+    # the saved state renumbered as opt numbers its parameters (the fresh ones without a state)
+    number = {id(p): n for n, p in enumerate(p for g in opt.param_groups for p in g["params"])}
+    state = {number[id(p)]: saved["state"][i] for i, p in pairs if i in saved["state"]}
+    param_groups = [dict(g, params=[number[id(p)] for p in mine_all["params"]])
+                    for g, mine_all in zip(saved["param_groups"], opt.param_groups)]
     lrs = [g["lr"] for g in opt.param_groups]
-    opt.load_state_dict(saved)
+    opt.load_state_dict({"state": state, "param_groups": param_groups})
     for g, lr in zip(opt.param_groups, lrs):
         g["lr"] = lr
     return counters
+
+
+def fresh_params(model, path):
+    """The parameters of `model` (an actor) that the checkpoint's actor has none of (resume's fresh)."""
+    have = set(checkpoint.read(path)["actor"])
+    return [p for n, p in model.named_parameters() if n not in have]
 
 
 def same_file(a, b):
@@ -283,7 +302,7 @@ def train(args, every=None, teacher=None, normal=None):
     # a chain goes on as one run. Only when the critic comes from the same file (else its moments are another's).
     carried = None
     if args.init and args.resume and (args.critic_init is None or same_file(args.critic_init, args.init)):
-        carried = resume(opt, args.init)
+        carried = resume(opt, args.init, fresh_params(actor, args.init))
     warmup = args.critic_warmup
     if carried is not None:
         warmup = 0
