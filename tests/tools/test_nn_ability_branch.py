@@ -314,6 +314,54 @@ def test_open_loop_not_replays_the_pressed_orders_exactly_and_never_presses():
     assert fired["pressed"] > 0 and fired["not"] == 0
 
 
+def test_open_loop_not_drops_only_the_pressed_slot(monkeypatch):
+    """A lord with two ready abilities: slot k1 pressed at the snapshot, and the "pressed" branch orders his other slot
+    k2 at decision 2. "not" replays that order (k2 fires there too) and drops only k1: k2's effect is no part of k1's
+    price."""
+    actor, env, cand = grabbed()
+    snap = env.brancher.got[0]
+    by = {}
+    for b_, s_, n_, k_ in cand:
+        by.setdefault((b_, s_, n_), []).append(k_)
+    two = [(key, ks[:2]) for key, ks in sorted(by.items()) if len(ks) >= 2]
+    assert two, "the arena's lords have two ready self-cast abilities at the start"
+    b = torch.tensor([key[0] for key, _ in two])
+    side = torch.tensor([key[1] for key, _ in two])
+    unit = torch.tensor([key[2] for key, _ in two])
+    k1 = torch.tensor([ks[0] for _, ks in two])
+    k2 = torch.tensor([ks[1] for _, ks in two])
+    K = 2
+    play = rollout.Battles._play
+    seen = {}
+
+    def inject(self, parts, *a, **k):
+        if "_play" in self.__dict__:                       # the pressed branch (its _play records the orders)
+            seen[id(self)] = seen.get(id(self), 0) + 1
+            if seen[id(self)] == 3:                         # decision 2 (0: the snapshot's replay)
+                rows, o = parts[0]
+                bK = len(b) * K
+                j = torch.arange(bK)
+                glob = (side.repeat_interleave(K) - 1) * bK + j
+                r = (rows[None, :] == glob[:, None]).float().argmax(1)
+                o.ability[r, unit.repeat_interleave(K)] = k2.repeat_interleave(K)
+        return play(self, parts, *a, **k)
+
+    monkeypatch.setattr(rollout.Battles, "_play", inject)
+    used = {}
+
+    def each(i, pe, ne):
+        j = torch.arange(pe.B)
+        n = unit.repeat_interleave(K)
+        for name, e in (("pressed", pe), ("not", ne)):
+            for tag, s in (("k1", k1), ("k2", k2)):
+                s = s.repeat_interleave(K)
+                cd = torch.stack([e.st.u[f"ab{q}_cd"][j, n] + e.st.u[f"ab{q}_on"][j, n] for q in range(3)], 1)
+                used[name, tag] = cd.gather(1, s[:, None])[:, 0] > 0
+    ab.play_pair(env, actor, ab.select(snap, b), unit, side, k1, K, 5, seed=5, openloop=True, each=each)
+    assert used["pressed", "k1"].all() and used["pressed", "k2"].all()
+    assert not used["not", "k1"].any() and used["not", "k2"].all()
+
+
 def test_the_branch_battles_are_freed_without_the_cyclic_collector():
     # open loop / greedy hook the branch env's _play / _act with closures holding the env: dropped at the end, or the
     # branches' battles (their GPU state) live on until Python's cyclic collector happens to run

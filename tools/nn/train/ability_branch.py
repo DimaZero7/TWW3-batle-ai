@@ -25,7 +25,9 @@ Open loop (Config.openloop; run.py --ability-branch-openloop): closed loop, the 
 every decision and the battles drift apart within 10-20 s (one different sample, then everything differs): the 60 s
 price is mostly that chaos. Open loop: "pressed" is played first each decision and its orders are kept (the networks'
 of both sides, the scripts', the steps they land on); "not" plays exactly those orders (the unit's slot unused) and
-decides nothing - only the simulator (the press's effect: stats, morale, what follows) differs. The price is then
+decides nothing - only the simulator (the press's effect: stats, morale, what follows) differs; of the unit's ability
+orders only the pressed slot's are dropped in "not" (its other abilities the network fires later fire in both, so their
+effect is not in this press's price). The price is then
 "this press against none, with the same plan". Greedy (Config.greedy): the networks take their most likely action, so
 the copies differ only by the simulator's draws and the orders' latency. Neither adds a random draw: with nothing
 pressed in either branch the price is exactly 0 (test).
@@ -359,7 +361,7 @@ def play_pair(template, actor, snap, unit, side, slot, copies, decisions, seed, 
     said = []
     if openloop:
         envs["pressed"][0]._play = _recording_play(envs["pressed"][0], said)
-        r_unit = r                                              # the unit's learner row and slot ("not": unused)
+        r_unit, k_unit = r, slot[rep]                           # the unit's learner row and slot ("not": unused)
     state = (torch.get_rng_state(), torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None)
     try:
         for i in range(decisions):
@@ -371,7 +373,8 @@ def play_pair(template, actor, snap, unit, side, slot, copies, decisions, seed, 
                 elif openloop and name == "not":
                     p, sc, delay = said.pop()
                     p = [(rows_, O.Orders(*(getattr(o_, f).clone() for f in O.FIELDS))) for rows_, o_ in p]
-                    p[0][1].ability[r_unit, n] = -1
+                    a = p[0][1].ability[r_unit, n]           # only the pressed slot: its other slots fire in both
+                    p[0][1].ability[r_unit, n] = torch.where(a == k_unit, torch.full_like(a, -1), a)
                     _replay_orders(env, p, sc, delay)
                 else:
                     env.step(actor, greedy=greedy)

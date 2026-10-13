@@ -18,7 +18,16 @@ trajectory's schema (bonuses.TRACE), the abilities as data (ability.py) and the 
     (sign agreement >= 0.7, Spearman >= 0.4); "no signal" when the branch price's real share (its reliability over the
     copies) is below REL_MIN - then it is noise and agreement cannot be judged.
 
-    python -m tools.nn.abilities_price.validate --data build/abilities_price/natural.npz build/abilities_price/hold.npz
+The recharge cost (ability.py): dynamic by default - per press the best later press of the same ability within its
+recharge window on the press's own trajectory (ability.best_later, hindsight, with the fitted rates), regressed on the
+situation at the press (situation(): what is seen then, cross-fitted per ability) so it looks at no future; the card
+shows the static start (the mean useful net x recharge_s / 60) and the hindsight cost beside it.
+
+A file of a longer horizon (collect.py --horizon 120 --marks 30,60,90) is read at --horizon: the branch price at that
+mark, the counters over that many seconds; the later presses use the whole trajectory.
+
+    python -m tools.nn.abilities_price.validate --data build/abilities_price/natural120.npz \
+        build/abilities_price/hold120.npz --horizon 60
 
 Only numpy (scipy's nnls when it is there).
 """
@@ -143,31 +152,46 @@ def auto_tests(bricks, seed=0, n=60, tol=1e-6):
 
 # --- data ---
 
-def load(paths):
-    """The presses of collect.py files, concatenated -> {field: array} (+ "source": file index per press)."""
+def load(paths, horizon=None):
+    """The presses of collect.py files, concatenated -> {field: array} (+ "source": file index per press). horizon (s):
+    "diff" is the branch price at that mark of a longer file (its diff_at), "diff_end" the price at the file's own
+    horizon."""
     parts, meta = [], []
     names = None
+    keep = ("x", "z", "alive", "r", "m", "mv", "sprint", "charge", "morale", "fatigue", "mmax", "on", "diff", "budget",
+            "key", "owner", "side", "pressed", "t", "opponent", "other", "row", "diff_at")
     for i, p in enumerate(paths):
         d = np.load(p)
         names = list(d["key_names"])
-        meta.append(json.loads(str(d["meta"])))
-        part = {k: d[k] for k in d.files if k not in ("key_names", "meta")}
+        m = json.loads(str(d["meta"]))
+        meta.append(m)
+        part = {k: d[k] for k in d.files if k in keep}
+        part["diff_end"] = part["diff"]
+        if horizon is not None and abs(float(m.get("horizon_s", horizon)) - horizon) > 1e-6:
+            marks = [float(x) for x in m.get("marks_s", [])]
+            if horizon not in marks:
+                raise ValueError(f"{p}: horizon {m.get('horizon_s')} s, marks {marks}: no price at {horizon} s")
+            part["diff"] = part["diff_at"][:, :, marks.index(horizon)]
         part["source"] = np.full(len(part["diff"]), i)
         parts.append(part)
-    data = {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
+    common = set.intersection(*(set(p) for p in parts))
+    data = {k: np.concatenate([p[k] for p in parts]) for k in parts[0] if k in common}
     return data, names, meta
 
 
-def trace(data, p, c, dt_s=1.0):
-    """The trajectory of press p, copy c."""
-    tr = {k: np.asarray(data[k][p, c], dtype=bool if k in bz.FLAGS else np.float64)
+def trace(data, p, c, dt_s=1.0, upto=None):
+    """The trajectory of press p, copy c (upto: its first upto + 1 samples)."""
+    cut = slice(None) if upto is None else slice(0, int(upto) + 1)
+    tr = {k: np.asarray(data[k][p, c] if k == "mmax" else data[k][p, c][cut],
+                        dtype=bool if k in bz.FLAGS else np.float64)
           for k in ("x", "z", "alive", "r", "m", "mv", "sprint", "charge", "morale", "fatigue", "mmax", "on")}
     tr["owner"], tr["dt_s"] = int(data["owner"][p]), dt_s
     return tr
 
 
-def counters(data, names, abilities, bricks, dt_s=1.0):
-    """(kinds, C [P, K] mean over the copies, Ccopy [P, copies, K]) of every press (0 for a kind its ability lacks)."""
+def counters(data, names, abilities, bricks, dt_s=1.0, upto=None):
+    """(kinds, C [P, K] mean over the copies, Ccopy [P, copies, K]) of every press (0 for a kind its ability lacks);
+    upto: over the first upto samples."""
     kinds = sorted({k for a in abilities.values() for k in a.kinds()})
     P, copies = data["diff"].shape
     Cc = np.zeros((P, copies, len(kinds)))
@@ -176,9 +200,68 @@ def counters(data, names, abilities, bricks, dt_s=1.0):
         if a is None:
             continue
         for c in range(copies):
-            for k, v in a.counters(trace(data, p, c, dt_s), bricks).items():
+            for k, v in a.counters(trace(data, p, c, dt_s, upto), bricks).items():
                 Cc[p, c, kinds.index(k)] = v
     return kinds, Cc.mean(1), Cc
+
+
+def hindsight_recharge(data, names, abilities, bricks, rates, dt_s=1.0, horizon=60, copies=2, step=5):
+    """[P] the dynamic recharge cost seen in hindsight (ability.best_later, mean over the first `copies` copies)."""
+    k = {kd: r["k"] for kd, r in rates.items()}
+    P, C = data["diff"].shape
+    out = np.zeros(P)
+    for p in range(P):
+        a = abilities.get(names[int(data["key"][p])])
+        if a is None:
+            continue
+        out[p] = np.mean([abl.best_later(a, trace(data, p, c, dt_s), bricks, k, horizon / dt_s, step)
+                          for c in range(min(C, copies))])
+    return out
+
+
+SITUATION = ("1", "battle time / 600 s", "owner in melee", "owner moving", "friends within 35 m",
+             "friends within 35 m in melee", "own units standing", "own units below the steady edge",
+             "own units wavering or routing", "owner fatigue tier")
+
+
+def situation(data, rules=bz.Rules()):
+    """[P, len(SITUATION)] what is seen at the press (sample 0 of copy 0; the presser's side only)."""
+    P = len(data["diff"])
+    o = data["owner"].astype(int)
+    j = np.arange(P)
+    g = lambda k: np.asarray(data[k][:, 0, 0])
+    alive, r, m, mv = g("alive").astype(bool), g("r").astype(bool), g("m").astype(bool), g("mv").astype(bool)
+    x, z, mor = g("x").astype(float), g("z").astype(float), g("morale").astype(float)
+    fat = g("fatigue").astype(float)
+    d = np.hypot(x - x[j, o][:, None], z - z[j, o][:, None])
+    near = alive & ~r & (d <= 35.0)
+    near[j, o] = False
+    stand = alive & ~r
+    return np.stack([np.ones(P), data["t"] / 600.0, m[j, o], mv[j, o], near.sum(1), (near & m).sum(1), stand.sum(1),
+                     (stand & (mor < rules.morale_steady)).sum(1), (alive & ((mor < rules.morale_waver) | r)).sum(1),
+                     bz.tier(fat[j, o], rules.fatigue_thresholds)], 1).astype(float)
+
+
+def situation_recharge(X, target, key, folds=5, ridge=1.0, seed=0):
+    """[P] the recharge cost the situation at the press predicts: per ability a ridge regression of the hindsight cost
+    (target) on X, cross-fitted (each press by the other folds), clipped at 0."""
+    out = np.zeros(len(target))
+    rng = np.random.default_rng(seed)
+    mu, sd = X.mean(0), X.std(0)
+    sd[sd == 0] = 1.0
+    Z = (X - mu) / sd
+    Z[:, 0] = 1.0
+    for a in np.unique(key):
+        ix = np.nonzero(key == a)[0]
+        f = rng.permutation(len(ix)) % folds
+        for i in range(folds):
+            tr, te = ix[f != i], ix[f == i]
+            A = Z[tr]
+            reg = ridge * np.eye(A.shape[1])
+            reg[0, 0] = 0.0
+            beta = np.linalg.solve(A.T @ A + reg, A.T @ target[tr])
+            out[te] = np.clip(Z[te] @ beta, 0.0, None)
+    return out
 
 
 # --- statistics ---
@@ -298,8 +381,9 @@ def game_ai_style(data, names, p, passports, sim_abilities):
     return int(friends.sum()) >= need
 
 
-def card(data, names, abilities, bricks, kinds, C, rates, pred, passports, sim_abilities):
-    """{ability key: row} (module doc (b), (c), (e)) and the alarms."""
+def card(data, names, abilities, bricks, kinds, C, rates, pred, passports, sim_abilities, recharge=None, others=None):
+    """{ability key: row} (module doc (b), (c), (e)) and the alarms. recharge [P]: per-press recharge costs (gold; None:
+    the static one); others {name: [P]}: other recharge costs whose share above 0 and sign agreement are shown too."""
     y = data["diff"].mean(1) * data["budget"].mean(1)                     # the branch price, gold
     budget = data["budget"].mean(1)
     key = np.array([names[int(k)] for k in data["key"]])
@@ -313,7 +397,8 @@ def card(data, names, abilities, bricks, kinds, C, rates, pred, passports, sim_a
             continue
         ab = abilities[a]
         net = pred[sel]                                                     # cross-fitted
-        R = abl.Recharge.fit({a: net}, abilities).cost(a)
+        static = abl.Recharge.fit({a: net}, abilities).cost(a)
+        R = np.full(len(net), static) if recharge is None else recharge[sel]
         price = net - R
         yb = y[sel]
         alarms = []
@@ -334,13 +419,21 @@ def card(data, names, abilities, bricks, kinds, C, rates, pred, passports, sim_a
             if np.isfinite(ro) and np.isfinite(rb) and abs(ro - rb) > SCALE_GAP:
                 alarms.append(f"scale: rho(price, {name}) {ro:+.2f} vs branch {rb:+.2f}")
         sign = float(((price > 0) == (yb - R > 0)).mean())
+        variants = {"static": np.full(len(net), static)}
+        variants.update({k: v[sel] for k, v in (others or {}).items()})
+        variants = {k: {"recharge_gold": float(v.mean()), "share_price_pos": float((net - v > 0).mean()),
+                        "share_branch_pos": float((yb - v > 0).mean()), "sign": float(((net - v > 0) == (yb - v > 0)).mean())}
+                    for k, v in variants.items()}
         rho = spearman(net, yb)
+        thirds = np.array_split(np.argsort(net, kind="mergesort"), 3)
+        by_third = [float(yb[t].mean()) for t in thirds]
         V = (2 * sign - 1) / 2 + (rho if np.isfinite(rho) else 0.0) / 2
         rel = reliability(data["diff"][sel] * data["budget"][sel])
         ok = bool(sign >= SIGN_MIN and np.isfinite(rho) and rho >= SPEARMAN_MIN)
         verdict = "pass" if ok else ("no signal" if not (rel >= REL_MIN) else "FAIL")
         ai = np.array([game_ai_style(data, names, p, passports, sim_abilities) for p in np.nonzero(sel)[0]])
-        rows[a] = {"n": int(sel.sum()), "pressed": int(data["pressed"][sel].sum()), "recharge_gold": R,
+        rows[a] = {"n": int(sel.sum()), "pressed": int(data["pressed"][sel].sum()), "recharge_gold": float(R.mean()),
+                   "share_price_pos_branch": float((yb - R > 0).mean()), "variants": variants, "by_third": by_third,
                    "net_mean": float(net.mean()), "net_in_sample_mean": float(net_in[sel].mean()),
                    "branch_mean": float(yb.mean()), "branch_se": float(yb.std() / np.sqrt(len(yb))),
                    "share_price_pos": share, "share_branch_pos": float((yb > 0).mean()), "tail": tail,
@@ -349,6 +442,7 @@ def card(data, names, abilities, bricks, kinds, C, rates, pred, passports, sim_a
                    "scale": sc, "alarms": alarms,
                    "ai_n": int(ai.sum()), "ai_price_pos": float((price[ai] > 0).mean()) if ai.any() else float("nan"),
                    "ai_net_pos": float((net[ai] > 0).mean()) if ai.any() else float("nan"),
+                   "ai_branch_less_recharge_pos": float((yb[ai] - R[ai] > 0).mean()) if ai.any() else float("nan"),
                    "ai_branch_pos": float((yb[ai] > 0).mean()) if ai.any() else float("nan"),
                    "nonzero": {kd: float((C[sel, kinds.index(kd)] > 0).mean()) for kd in ab.kinds()},
                    "other": float(data["other"][sel].mean()) if "other" in data else float("nan")}
@@ -359,10 +453,11 @@ def short(key):
     return key.split("abilities_")[-1]
 
 
-def markdown(checks, rates, rows, kinds, meta, P):
+def markdown(checks, rates, rows, kinds, meta, P, recharge_kind="static", horizon=None):
     L = ["# Ability price: validity card", ""]
-    L.append(f"Presses: {P}; data: " + "; ".join(f"{m.get('ckpt')} hold={m.get('hold')} copies={m.get('copies')} "
-                                                    f"horizon={m.get('horizon_s')} s" for m in meta))
+    L.append(f"Presses: {P}; price at {horizon:g} s; data: " if horizon else f"Presses: {P}; data: ")
+    L[-1] += "; ".join(f"{m.get('ckpt')} hold={m.get('hold')} copies={m.get('copies')} horizon={m.get('horizon_s')} s"
+                       for m in meta)
     L += ["", "## (a) Tests from the bricks' descriptions", "", "| brick | " + " | ".join(
         dict.fromkeys(c.test for c in checks)) + " |", "|---|" + "---|" * len(dict.fromkeys(c.test for c in checks))]
     tests = list(dict.fromkeys(c.test for c in checks))
@@ -379,22 +474,42 @@ def markdown(checks, rates, rows, kinds, meta, P):
         L.append(f"| {kd} | {r['k']:.4g} | {r['lo']:.3g} .. {r['hi']:.3g} | {r['ols']:.3g} +- {r['ols_se']:.2g} | "
                  f"{r['n']} |")
     L += ["", "## (b, c, e) Per ability", "",
-          "| ability | presses (net's) | price > 0 | branch > 0 | sign agree | Spearman (ceiling) | branch rel | V | "
-          "verdict | "
-          "game-AI style: n, price > 0, branch > 0 | recharge, gold | mean net / branch, gold | alarms |",
-          "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+          "Recharge: " + RECHARGE_WORDS.get(recharge_kind, recharge_kind) + ". Branch mean by price third: the branch "
+          "price's mean (gold) over the presses in the lowest / middle / highest third of the price.", "",
+          "| ability | presses (net's) | price > 0 | branch - recharge > 0 | sign agree | Spearman (ceiling) | branch rel "
+          "| V | verdict | game-AI style: n, price > 0, branch - recharge > 0 | recharge, gold | mean net / branch, gold "
+          "| branch mean by price third | alarms |",
+          "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for a, r in rows.items():
-        L.append(f"| {short(a)} | {r['n']} ({r['pressed']}) | {r['share_price_pos']:.2f} | {r['share_branch_pos']:.2f} "
-                 f"| {r['sign']:.2f} | {r['spearman']:.2f} ({r['ceiling']:.2f}) | {r['rel']:.2f} | {r['V']:.2f} | "
-                 f"{r['verdict']} | {r['ai_n']}, {r['ai_price_pos']:.2f}, {r['ai_branch_pos']:.2f} | "
-                 f"{r['recharge_gold']:.1f} | {r['net_mean']:.1f} / {r['branch_mean']:.1f} +- {r['branch_se']:.1f} | "
-                 f"{'; '.join(r['alarms']) or '-'} |")
+        L.append(f"| {short(a)} | {r['n']} ({r['pressed']}) | {r['share_price_pos']:.2f} | "
+                 f"{r['share_price_pos_branch']:.2f} | {r['sign']:.2f} | {r['spearman']:.2f} ({r['ceiling']:.2f}) | "
+                 f"{r['rel']:.2f} | {r['V']:.2f} | {r['verdict']} | {r['ai_n']}, {r['ai_price_pos']:.2f}, "
+                 f"{r['ai_branch_less_recharge_pos']:.2f} | {r['recharge_gold']:.1f} | {r['net_mean']:.1f} / "
+                 f"{r['branch_mean']:.1f} +- {r['branch_se']:.1f} | "
+                 + " / ".join(f"{v:.1f}" for v in r["by_third"]) + f" | {'; '.join(r['alarms']) or '-'} |")
     L += ["", "Counter non-zero share per ability: " + "; ".join(
         f"{short(a)}: " + ", ".join(f"{k} {v:.2f}" for k, v in r["nonzero"].items()) for a, r in rows.items())]
+    names = list(next(iter(rows.values()))["variants"]) if rows else []
+    if names:
+        L += ["", "## Recharge cost variants", "",
+              "Per variant: mean cost (gold), share of price > 0, share of branch - cost > 0, sign agreement. " +
+              " ".join(f"{k}: {RECHARGE_WORDS.get(k, k)}." for k in names), "",
+              "| ability | " + " | ".join(names) + " |", "|---|" + "---|" * len(names)]
+        for a, r in rows.items():
+            L.append(f"| {short(a)} | " + " | ".join(
+                f"{v['recharge_gold']:.1f}; {v['share_price_pos']:.2f}; {v['share_branch_pos']:.2f}; {v['sign']:.2f}"
+                for v in r["variants"].values()) + " |")
     return "\n".join(L) + "\n"
 
 
-def run(paths, out=None, boot=400, seed=0):
+RECHARGE_WORDS = {
+    "static": "the static start (the mean useful net benefit x recharge_s / 60)",
+    "hindsight": "the best later press of the same ability within its recharge window on this trajectory (hindsight)",
+    "situation": "the hindsight cost regressed on the situation at the press (cross-fitted per ability; no future)",
+}
+
+
+def run(paths, out=None, boot=400, seed=0, horizon=None, recharge="situation"):
     params_dir = ROOT / "config" / "nn"
     passports = json.loads((params_dir / "abilities.json").read_text(encoding="utf-8"))["abilities"]
     sim = json.loads((params_dir / "sim.json").read_text(encoding="utf-8"))
@@ -402,20 +517,27 @@ def run(paths, out=None, boot=400, seed=0):
     bricks = bz.bricks(rules)
     abilities = abl.abilities(passports, bricks)
     checks = auto_tests(bricks, seed)
-    data, names, meta = load(paths)
+    data, names, meta = load(paths, horizon)
     dt_s = float(meta[0].get("dt_s", 1.0))
-    kinds, C, _ = counters(data, names, abilities, bricks, dt_s)
+    H = float(horizon if horizon is not None else meta[0].get("horizon_s", 60.0))
+    upto = int(round(H / dt_s))
+    kinds, C, _ = counters(data, names, abilities, bricks, dt_s, upto)
     y = data["diff"].mean(1) * data["budget"].mean(1)
     rates = fit_rates(C, y, kinds, bricks, boot, seed)
     pred = crossfit(C, y, kinds, bricks, seed=seed)
-    rows = card(data, names, abilities, bricks, kinds, C, rates, pred, passports, sim["abilities"])
-    md = markdown(checks, rates, rows, kinds, meta, len(y))
+    hind = hindsight_recharge(data, names, abilities, bricks, rates, dt_s, H)
+    key = np.array([names[int(k)] for k in data["key"]])
+    sit = situation_recharge(situation(data, rules), hind, key, seed=seed)
+    costs = {"hindsight": hind, "situation": sit}
+    rows = card(data, names, abilities, bricks, kinds, C, rates, pred, passports, sim["abilities"],
+                recharge=costs.get(recharge), others=costs)
+    md = markdown(checks, rates, rows, kinds, meta, len(y), recharge if recharge in costs else "static", H)
     if out:
         Path(out).parent.mkdir(parents=True, exist_ok=True)
         Path(out).write_text(md, encoding="utf-8")
         Path(out).with_suffix(".json").write_text(json.dumps(
-            {"rates": rates, "rows": rows, "checks": [c.__dict__ for c in checks]}, indent=1, default=float),
-            encoding="utf-8")
+            {"rates": rates, "rows": rows, "checks": [c.__dict__ for c in checks], "horizon_s": H,
+             "recharge": recharge}, indent=1, default=float), encoding="utf-8")
     return md, rates, rows, checks
 
 
@@ -425,8 +547,10 @@ def main():
     ap.add_argument("--out", default="build/abilities_price/card.md")
     ap.add_argument("--boot", type=int, default=400)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--horizon", type=float, default=None, help="the price's horizon, s (a mark of a longer file)")
+    ap.add_argument("--recharge", default="situation", choices=("static", "hindsight", "situation"))
     a = ap.parse_args()
-    md, *_ = run(a.data, a.out, a.boot, a.seed)
+    md, *_ = run(a.data, a.out, a.boot, a.seed, a.horizon, a.recharge)
     print(md)
 
 

@@ -60,21 +60,42 @@ def test_charge_counts_impacts_while_on():
     assert BRICKS["charge"].count(tr, mask, 1.6) == pytest.approx(60.0 * 2)
 
 
-def test_morale_counts_the_shortfall_at_most_the_bonus_and_nothing_at_the_top():
-    tr, mask = blank(U=3)
+def test_morale_weight_follows_the_games_morale_states():
+    # 1 below the wavering edge (16), down through the shaken band to 0 at the steady edge (30)
+    w = bz.morale_weight([-10.0, 0.0, 15.9, 23.0, 30.0, 70.0], RULES)
+    assert w == pytest.approx([1.0, 1.0, 1.0, 0.5, 0.0, 0.0], abs=0.01)
+    assert (RULES.morale_rout, RULES.morale_waver, RULES.morale_steady) == (0.0, 16.0, 30.0)       # game_rules.json
+    # the area between a and b is the integral of the weight
+    xs = np.linspace(-5.0, 40.0, 4501)
+    num = np.trapezoid(bz.morale_weight(xs, RULES), xs) if hasattr(np, "trapezoid") else np.trapz(
+        bz.morale_weight(xs, RULES), xs)
+    assert bz.morale_area(-5.0, RULES) - bz.morale_area(40.0, RULES) == pytest.approx(num, rel=1e-3)
+
+
+def test_morale_counts_the_lift_near_the_wavering_edge_not_the_shortfall_from_the_top():
+    tr, mask = blank(U=4)
     m2 = mask.copy()
     m2[1:21, :] = True
     lift = bz.morale_lift(m2, 16.0, 1.0, RULES)
-    tr["morale"] = tr["mmax"][None, :] + lift            # everyone at the top: the lift is the bonus's own
-    assert BRICKS["morale"].count(tr, m2, 16.0) == pytest.approx(0.0, abs=1e-9)
-    tr["morale"][:, 1] -= 10.0                           # 10 short all along -> 10
-    tr["morale"][:, 2] -= np.linspace(0, 40, len(tr["on"]))   # the shortfall grows past the bonus -> 16
-    assert BRICKS["morale"].count(tr, m2, 16.0) == pytest.approx(10.0 + 16.0)
+    # unit 0: steady without it (50 + lift: 10 short of its top 60) -> 0, however short of the top
+    # unit 1: 5 without it (wavering), 21 with it -> 11 points below the wavering edge, 5 in the shaken band at weight
+    #         1 .. 9/14: 11 + (14^2 - 9^2) / 28
+    # unit 2: 20 without it (shaken) -> only the part of the lift below 30: area(20) - area(36) = 100 / 28
+    # unit 3: 5 without it, but out of the mask -> 0
+    base = np.array([50.0, 5.0, 20.0, 5.0])
+    tr["morale"] = base[None, :] + lift
+    tr["morale"][:, 3] = 5.0
+    m2[:, 3] = False
+    got = BRICKS["morale"].count(tr, m2, 16.0)
+    assert got == pytest.approx(0.0 + 11.0 + (14.0 ** 2 - 9.0 ** 2) / 28.0 + (30.0 - 20.0) ** 2 / 28.0, rel=1e-6)
     # the lift runs at the morale's pace: max(1, 15 % of the gap) a tick, two ticks a second
     assert lift[1, 0] == pytest.approx(16 * 0.15 + (16 - 2.4) * 0.15)
+    # nothing grows with the time spent below the top: a unit steady all along is worth 0 at any shortfall
+    tr["morale"][:, 0] = np.linspace(55.0, 31.0, len(tr["on"])) + lift[:, 0]
+    assert BRICKS["morale"].count(tr, m2, 16.0) == pytest.approx(got, rel=1e-6)
 
 
-def test_vigour_counts_the_seconds_a_tier_fresher_while_busy():
+def test_vigour_weighs_the_tier_by_what_it_changes_while_busy():
     # Foe-Seeker: -1 % of the maximum a second for 25 s; the owner fights 40 s; recorded fatigue 0 while it is on (cut
     # off at 0: rebuilt at the combat rate, 19 a tick x 10), then up 190 a second. Without it: 190 s from the start.
     S = 40
@@ -82,10 +103,18 @@ def test_vigour_counts_the_seconds_a_tier_fresher_while_busy():
     tr["m"][1:, 0] = True
     s = np.arange(S + 1)
     tr["fatigue"][:, 0] = np.where(s <= 25, 0.0, 190.0 * (s - 25))
-    # tiers apart from s = 15 (2850 >= 2800 without it) to 40
-    assert BRICKS["vigour"].count(tr, mask, -0.01) == pytest.approx(26.0)
+    # without it 'active' from s = 15 (2850), 'winded' from s = 35 (6650); with it 'active' at s = 40 (2850). In melee
+    # (the database's fatigue effects): fresh / active 5 (attack x0.95), fresh / winded 15 (+ AP x0.9), active /
+    # winded 10: 20 x 5 + 5 x 15 + 1 x 10
+    pen = bz.tier_penalty(RULES)
+    assert list(pen["melee"][:3]) == pytest.approx([0.0, 5.0, 15.0]) and list(pen["move"][:3]) == pytest.approx([0, 0, 5])
+    assert BRICKS["vigour"].count(tr, mask, -0.01) == pytest.approx(20 * 5 + 5 * 15 + 10)
     assert BRICKS["fatigue_cost"].count(tr, mask, -0.01) == 0.0          # a recovery is no cost
     tr["m"][:, 0] = False
+    tr["mv"][1:, 0] = True               # moving: only the speed. Recorded 5000 flat ('active'); without it +300 a second
+    tr["fatigue"][:, 0] = 5000.0         # for 25 s: 'winded' (6600+) from s = 6 to the end -> 35 s x 5 (speed x0.95)
+    assert BRICKS["vigour"].count(tr, mask, -0.01) == pytest.approx(35 * 5)
+    tr["mv"][:, 0] = False
     assert BRICKS["vigour"].count(tr, mask, -0.01) == 0.0                # idle: the tier does nothing
 
 
@@ -166,6 +195,67 @@ def test_price_is_benefit_less_debuffs_and_recharge():
     p = abl.price(a["wh_main_character_abilities_foe_seeker"], {"speed": 100.0, "fatigue_cost": 5.0},
                   dict(rates, fatigue_cost=1.0), BRICKS, rc)
     assert p["debuffs"] == pytest.approx(5.0)
+
+
+def test_undo_and_apply_are_inverse_where_nothing_is_cut_off():
+    tr, mask = blank(S=40, U=3, active=20)
+    m2 = mask.copy()
+    m2[1:21, :] = True
+    tr["morale"] = tr["morale"] - np.linspace(0, 30, 41)[:, None]
+    tr["fatigue"][:, 0] = 8000.0 + 100.0 * np.arange(41)
+    for kind, v in (("morale", 16.0), ("vigour", -0.01)):
+        b = BRICKS[kind]
+        back = b.apply(b.undo(tr, m2, v), m2, v)
+        f = "morale" if kind == "morale" else "fatigue"
+        assert np.allclose(back[f], tr[f]), kind
+    assert np.allclose(BRICKS["melee_damage"].undo(tr, m2, 1.25)["m"], tr["m"])         # a flag brick: nothing to undo
+
+
+def test_a_later_press_counts_the_same_ability_moved_to_that_second():
+    # Deadly Onslaught (31 s): the lord fights from second 30 to the end (100); pressed at 0 it catches 2 s of it
+    a = abl.abilities(PASSPORTS, BRICKS)["wh_main_character_abilities_deadly_onslaught"]
+    tr, _ = blank(S=100, U=2, active=31)
+    tr["m"][30:, 0] = True
+    now = a.counters(tr, BRICKS)
+    assert now["melee_damage"] == pytest.approx(25.0 * 2)
+    later = a.later(tr, BRICKS, [10, 29, 80], horizon=60)
+    assert later[0]["melee_damage"] == pytest.approx(25.0 * 12)
+    assert later[1]["melee_damage"] == pytest.approx(25.0 * 31)                          # the whole action in melee
+    assert later[2]["melee_damage"] == pytest.approx(25.0 * 20)                          # the trajectory ends at 100
+    tr["alive"][50:, 0] = False
+    assert a.later(tr, BRICKS, [60], horizon=60) == [{}]                                 # a dead lord presses nothing
+    # the hindsight recharge cost: the best of the window's later presses (90 s window, step 5: at 30 s the full 31 s)
+    rates = {"melee_damage": 0.02, "charge": 0.0}
+    tr["alive"][:] = True
+    assert abl.best_later(a, tr, BRICKS, rates, 60) == pytest.approx(0.02 * 25.0 * 31)
+    rc = abl.DynamicRecharge([3.0, 7.0])
+    p = abl.price(a, now, rates, BRICKS, rc, press=1)
+    assert p["recharge"] == 7.0 and p["price"] == pytest.approx(0.02 * 50 - 7.0)
+
+
+def test_a_later_morale_press_sees_the_morale_without_the_first_press():
+    # Rally pressed at 0: the recorded morale carries its lift. Moved to second 30, the counter must see the morale
+    # without the first press (here 10 points: wavering) - not the lifted one
+    a = abl.abilities(PASSPORTS, BRICKS)["wh_main_character_abilities_rally"]
+    tr, _ = blank(S=80, U=2, active=14)
+    tr["x"][:, 1] = 5.0
+    m = a.masks(tr)
+    mask = m["self"] | m["friends"]
+    tr["morale"][:] = 10.0 + bz.morale_lift(mask & tr["alive"], 16.0, 1.0, RULES)
+    first = a.counters(tr, BRICKS)["morale"]
+    moved = a.later(tr, BRICKS, [30], horizon=60)[0]["morale"]
+    assert first > 0 and moved == pytest.approx(first, rel=1e-6)
+
+
+def test_the_situation_recharge_follows_the_situation_and_looks_at_no_future():
+    rng = np.random.default_rng(0)
+    n = 400
+    X = np.stack([np.ones(n), rng.uniform(0, 1, n), rng.integers(0, 2, n)], 1).astype(float)
+    target = 5.0 + 10.0 * X[:, 2] + rng.normal(0, 1, n)                 # in melee at the press: dearer
+    key = np.array(["a"] * n)
+    got = va.situation_recharge(X, target, key)
+    assert got[X[:, 2] == 1].mean() == pytest.approx(15.0, abs=0.5) and got[X[:, 2] == 0].mean() == pytest.approx(5.0, abs=0.5)
+    assert (got >= 0).all()
 
 
 # --- layer 3 ---

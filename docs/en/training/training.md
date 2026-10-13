@@ -710,7 +710,8 @@ skills too.
 - **Open loop** (`--ability-branch-openloop`, off by default). Without it both branches' networks decide anew every
   decision: one different choice and after 10–20 s they are different battles; the 60 s price is mostly that chaos.
   With it "pressed" is played first and its orders are kept (both sides' networks, the scripts, the step each order
-  lands on); "not" plays exactly those orders (the unit's slot not pressed) and decides nothing itself. Only the
+  lands on); "not" plays exactly those orders (the pressed slot of the unit not pressed; its other abilities the
+  network presses later are pressed in both branches and stay out of this press's price) and decides nothing itself. Only the
   press's effect in the simulator differs (stats, morale and what follows). The price is "press against no press with
   the same plan". With no press in either branch the price is exactly 0 (test): the branches have no randomness beyond
   the orders. `--ability-branch-greedy` — the branches' networks take their most likely action instead of sampling.

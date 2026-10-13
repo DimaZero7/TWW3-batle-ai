@@ -8,10 +8,11 @@ pressed branch's trajectory of the presser's side recorded a second at a time (b
 The training's machinery does the capture and the branches (ability_branch.Brancher.capture, branch_env, the recorded
 orders, trade); play_pair() here is ability_branch.play_pair's open loop with two additions:
   * `each` gets the pressed branch after every decision (the recorder);
-  * one_slot (default): "not" drops only the pressed SLOT's orders of the unit. ability_branch.play_pair drops all of the
-    unit's ability orders in "not", so when the network presses another ability of the same lord within the horizon
-    (the Warlord has three) that press is in "pressed" only and its effect lands in the price. one_slot=False is
-    ability_branch.play_pair exactly (a test); `other` counts the decisions the pressed branch orders another slot of the
+  * the price at marks (decisions) inside the horizon too (`diff_at`: 30, 60, 90 s of a 120 s horizon in one play);
+  * one_slot (default): "not" drops only the pressed SLOT's orders of the unit - as ability_branch.play_pair does (a
+    test: the same prices to the bit). one_slot=False is the training's old way (all of the unit's ability orders
+    dropped in "not": another ability of the same lord the network presses within the horizon - the Warlord has three -
+    then lands in this press's price); `other` counts the decisions the pressed branch orders another slot of the
     unit.
 --hold: the learner's network never presses in the main battles (its ability orders dropped), so the lords' abilities
 stay ready at every stage of a battle, in melee too, and the replayed moments (--missed) cover them all; the slot of
@@ -22,8 +23,9 @@ The file (numpy, savez_compressed): per press p, copy c, sample s (0 the press, 
 presser's side (H slots): the TRACE fields [P, C, S+1, H] (mmax [P, C, H], on [P, C, S+1]); per press: key (index into
 key_names), owner (h of the presser), side, pressed (a press of the network, else a moment it left), t (battle time),
 opponent (league code), other (decisions the pressed branch ordered another slot of the unit, mean over copies),
-diff [P, C] (trade pressed - trade not at the horizon, budget share), budget [P, C] (gold); --compare-slots: diff_alt
-[P, C] the same played the other way (all slots / one slot).
+row (the battle's row in the main battles: with t it tells the presses of one battle), diff [P, C] (trade pressed -
+trade not at the horizon, budget share), diff_at [P, C, M] the same at the marks (meta "marks_s"), budget [P, C]
+(gold); --compare-slots: diff_alt [P, C] the same played the other way (all slots / one slot).
 """
 import argparse
 import json
@@ -45,10 +47,11 @@ FLOATS = ("x", "z", "charge", "morale", "fatigue")
 FLAGS = ("alive", "r", "m", "mv", "sprint")
 
 
-def play_pair(template, actor, snap, unit, side, slot, copies, decisions, seed, each=None, one_slot=True):
-    """ability_branch.play_pair(openloop=True) with each(i, pressed env, not env) after every decision and, one_slot,
-    "not" dropping only the pressed slot's orders of the unit (module doc). -> (diff [b, copies], budget [b, copies],
-    other [b, copies]: decisions "pressed" ordered another slot of the unit)."""
+def play_pair(template, actor, snap, unit, side, slot, copies, decisions, seed, each=None, one_slot=True, marks=()):
+    """ability_branch.play_pair(openloop=True) with each(i, pressed env, not env) after every decision, the price at
+    the marks (numbers of decisions played) and, one_slot=False, "not" dropping all of the unit's ability orders (module
+    doc). -> (diff [b, copies], budget [b, copies], other [b, copies]: decisions "pressed" ordered another slot of the
+    unit, at [b, copies, len(marks)]: trade pressed - trade not after each mark's decisions)."""
     b = len(snap["keys"])
     dev = template.device
     rep = torch.arange(b, device=dev).repeat_interleave(copies)
@@ -71,6 +74,8 @@ def play_pair(template, actor, snap, unit, side, slot, copies, decisions, seed, 
     envs["pressed"][0]._play = ab._recording_play(envs["pressed"][0], said)
     k_rep = slot[rep]
     other = torch.zeros(len(rep), device=dev)
+    s_rep = side[rep]
+    at = []
     state = (torch.get_rng_state(), torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None)
     try:
         for i in range(decisions):
@@ -90,6 +95,9 @@ def play_pair(template, actor, snap, unit, side, slot, copies, decisions, seed, 
                     env.step(actor)
             if each is not None:
                 each(i, envs["pressed"][0], envs["not"][0])
+            if i + 1 in marks:
+                at.append(ab.trade(envs["pressed"][0].st.u, s_rep, template.weights.rout_share)
+                          - ab.trade(envs["not"][0].st.u, s_rep, template.weights.rout_share))
     finally:
         torch.set_rng_state(state[0])
         if state[1] is not None:
@@ -97,11 +105,11 @@ def play_pair(template, actor, snap, unit, side, slot, copies, decisions, seed, 
         said.clear()
         for env, _, _ in envs.values():
             ab._unhook(env)
-    s_rep = side[rep]
     ends = {name: ab.trade(envs[name][0].st.u, s_rep, template.weights.rout_share) for name in envs}
     budget = reward.budget(envs["not"][0].st.u)
+    at = torch.stack(at, 1).reshape(b, copies, -1) if at else torch.zeros(b, copies, 0, device=dev)
     return ((ends["pressed"] - ends["not"]).reshape(b, copies), budget.reshape(b, copies),
-            other.reshape(b, copies))
+            other.reshape(b, copies), at)
 
 
 def fields(u, own, owner, slot, spacing):
@@ -180,7 +188,7 @@ def ready_slots(u, b, n, table):
     return out
 
 
-def play_chunk(env, actor, br, seed, one_slot=True, random_slot=False, gen=None, compare=False):
+def play_chunk(env, actor, br, seed, one_slot=True, random_slot=False, gen=None, compare=False, marks=()):
     """The chunk's captured moments (br.chunk) played open loop with the recorder: -> {field: numpy}, per press.
     compare: each batch played again the other way (one slot / all slots, the same seeds): diff_alt."""
     c, cfg = br.chunk, br.cfg
@@ -225,20 +233,22 @@ def play_chunk(env, actor, br, seed, one_slot=True, random_slot=False, gen=None,
             u_, s_, k_ = torch.cat([u_, pu]), torch.cat([s_, pside]), torch.cat([k_, pslot])
         rec = Recorder(sub, u_, s_, k_, K, env.params)
         calls += 1
-        d, bg, oth = play_pair(env, actor, sub, u_, s_, k_, K, decisions, seed * 1000 + calls, each=rec.each,
-                               one_slot=one_slot)
+        d, bg, oth, at_ = play_pair(env, actor, sub, u_, s_, k_, K, decisions, seed * 1000 + calls, each=rec.each,
+                                    one_slot=one_slot, marks=marks)
         n = len(part)
         r = rec.result(n)
         r["diff"] = d[:n].cpu().numpy()
         r["budget"] = bg[:n].cpu().numpy()
         r["other"] = oth[:n].mean(1).cpu().numpy()
+        r["diff_at"] = at_[:n].cpu().numpy()
         if compare:
-            d2, _, _ = play_pair(env, actor, sub, u_, s_, k_, K, decisions, seed * 1000 + calls, one_slot=not one_slot)
+            d2, _, _, _ = play_pair(env, actor, sub, u_, s_, k_, K, decisions, seed * 1000 + calls, one_slot=not one_slot)
             r["diff_alt"] = d2[:n].cpu().numpy()
         r["owner"] = (u_[:n] - (s_[:n] - 1) * rec.H).cpu().numpy()
         r["side"] = s_[:n].cpu().numpy()
         r["pressed"] = np.array([entries[i][5] for i in part], dtype=bool)
         r["t"] = snap["st/t"][at[ix]].cpu().numpy()
+        r["row"] = np.array([int(env.rows_learn[entries[i][1]]) % env.B for i in part])
         r["opponent"] = np.asarray(snap["lay/opponent"])[at[ix].cpu().numpy()]
         parts.append(r)
     ab._release(dev)
@@ -267,7 +277,7 @@ def battles(device, B, mix, seed, compile=None, hold=False):
 
 
 def collect(env, actor, cfg, target, minutes, chunk, seed, one_slot=True, random_slot=False, compare=False,
-            log=print):
+            log=print, marks=()):
     """Plays env's battles with the actor and prices the captured moments until `target` presses or `minutes`."""
     br = ab.Brancher(cfg, env.device)
     env.brancher = br
@@ -281,7 +291,7 @@ def collect(env, actor, cfg, target, minutes, chunk, seed, one_slot=True, random
                 env.step(actor)
         if br.chunk.entries:
             rounds += 1
-            r = play_chunk(env, actor, br, seed + rounds, one_slot, random_slot, gen, compare)
+            r = play_chunk(env, actor, br, seed + rounds, one_slot, random_slot, gen, compare, marks)
             out.append(r)
             n += len(r["diff"])
         br.chunk = ab._Chunk()
@@ -315,11 +325,12 @@ def main():
     ap.add_argument("--hold", action="store_true", help="the learner never presses in the main battles (module doc)")
     ap.add_argument("--random-slot", action="store_true", help="a moment left: a random ready slot")
     ap.add_argument("--all-slots", action="store_true",
-                    help="'not' drops all of the unit's ability orders (ability_branch.play_pair as it is)")
+                    help="'not' drops all of the unit's ability orders (the training's old way)")
     ap.add_argument("--compare-slots", action="store_true",
                     help="each batch also played the other way (one slot / all slots): diff_alt")
     ap.add_argument("--copies", type=int, default=4)
     ap.add_argument("--horizon", type=float, default=60.0)
+    ap.add_argument("--marks", default="30,60,90", help="seconds inside the horizon the price is also taken at")
     ap.add_argument("--batch", type=int, default=128)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--seed", type=int, default=11)
@@ -330,12 +341,14 @@ def main():
     actor = checkpoint.load_policy(a.ckpt, a.device)
     cfg = ab.Config(share=a.share, missed=a.missed, copies=a.copies, horizon_s=a.horizon, batch=a.batch,
                     openloop=True, seed=a.seed)
+    marks_s = [float(x) for x in a.marks.split(",") if x.strip() and float(x) < a.horizon]
+    marks = tuple(max(1, int(round(m / env.decision_s))) for m in marks_s)
     t0 = time.time()
     data = collect(env, actor, cfg, a.presses, a.minutes, a.chunk, a.seed, one_slot=not a.all_slots,
-                   random_slot=a.random_slot, compare=a.compare_slots)
+                   random_slot=a.random_slot, compare=a.compare_slots, marks=marks)
     meta = {"ckpt": a.ckpt, "mix": a.mix, "copies": a.copies, "horizon_s": a.horizon, "share": a.share,
             "missed": a.missed, "hold": a.hold, "random_slot": a.random_slot, "one_slot": not a.all_slots,
-            "seconds": round(time.time() - t0), "dt_s": env.decision_s,
+            "seconds": round(time.time() - t0), "dt_s": env.decision_s, "marks_s": marks_s,
             "opponents": {str(v): k for k, v in league.CODE.items()}}
     save(a.out, data, sab.keys(env.params), meta)
     print(f"saved {len(data.get('diff', []))} presses to {a.out} in {time.time() - t0:.0f} s", flush=True)

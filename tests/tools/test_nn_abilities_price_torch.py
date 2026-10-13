@@ -23,19 +23,20 @@ ROOT = Path(__file__).resolve().parents[2]
 PASSPORTS = json.loads((ROOT / "config/nn/abilities.json").read_text(encoding="utf-8"))["abilities"]
 
 
-def test_all_slots_is_ability_branch_play_pair_exactly_and_each_changes_nothing():
+def test_one_slot_is_ability_branch_play_pair_exactly_and_each_changes_nothing():
     actor, env, cand = grabbed()
     snap = env.brancher.got[0]
     b, side, unit, slot = pick(cand)
     want = ab.play_pair(env, actor, ab.select(snap, b), unit, side, slot, 2, 6, seed=5, openloop=True)
     rec = co.Recorder(ab.select(snap, b), unit, side, slot, 2, env.params)
-    d, bg, other = co.play_pair(env, actor, ab.select(snap, b), unit, side, slot, 2, 6, seed=5, each=rec.each,
-                                one_slot=False)
+    d, bg, other, at = co.play_pair(env, actor, ab.select(snap, b), unit, side, slot, 2, 6, seed=5, each=rec.each,
+                                    marks=(3, 6))
     assert torch.equal(d, want[0]) and torch.equal(bg, want[1])
-    d1, _, other1 = co.play_pair(env, actor, ab.select(snap, b), unit, side, slot, 2, 6, seed=5)
-    # one slot: differs from all slots only where the pressed branch ordered another slot of the unit
-    same = (other1 == 0).all(1)
-    assert torch.equal(d1[same], d[same])
+    assert at.shape == (len(b), 2, 2) and torch.equal(at[:, :, -1], d)      # the price at the marks, the last = d
+    d0, _, other0, _ = co.play_pair(env, actor, ab.select(snap, b), unit, side, slot, 2, 6, seed=5, one_slot=False)
+    # all slots (the training's old way): differs from one slot only where the pressed branch ordered another slot
+    same = (other0 == 0).all(1)
+    assert torch.equal(d0[same], d[same])
     r = rec.result(len(b))
     assert r["x"].shape == (len(b), 2, 7, env.N // 2) and r["on"].shape == (len(b), 2, 7)
     assert (r["on"][:, :, 0] == 0).all() and (r["on"][:, :, 1] > 0).any()        # the press: its timer runs

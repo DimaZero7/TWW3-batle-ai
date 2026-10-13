@@ -14,9 +14,11 @@ The press's price (gold):
     benefit  = sum over buff parts of k[kind] x counter
     debuffs  = sum over debuff parts of k[kind] x counter
     price    = benefit - debuffs - recharge cost
-The recharge cost (Recharge): the start - the mean net benefit of this ability's useful presses x recharge_s / 60 (a 90 s
-recharge costs more than a 60 s one); the dynamic version (the ability critic's value of a ready ability over the next
-recharge_s seconds in this situation) plugs in as a Recharge with per-press costs.
+The recharge cost: static (Recharge) - the mean net benefit of this ability's useful presses x recharge_s / 60 (a 90 s
+recharge costs more than a 60 s one); dynamic (DynamicRecharge) - per press, what the ability ready over the next
+recharge_s seconds is worth in this situation: the best net benefit of the same ability pressed at a later second of
+the window instead (Ability.later: the press's own trajectory, its own mark taken out, the press moved), or that best
+regressed on the situation at the press (validate.py: no look at the future).
 
 Only numpy.
 """
@@ -120,6 +122,47 @@ class Ability:
     def kinds(self):
         return tuple(dict.fromkeys(p.kind for p in self.parts))
 
+    def _part_masks(self, tr):
+        m = self.masks(tr)
+        out = []
+        for part in self.parts:
+            mask = np.zeros_like(tr["alive"])
+            for g in part.groups:
+                mask = mask | m[g]
+            out.append(mask)
+        return out
+
+    def later(self, tr, bricks, starts, horizon):
+        """[{kind: counter}] of the same ability pressed at each second in `starts` (samples) instead: the press's own
+        mark on the recorded morale / fatigue taken out (Brick.undo), the trajectory cut at the start, the ability's timer
+        laid anew (active_s seconds from there, the owner alive), its mark put back at the new second (Brick.apply), and
+        the counters over `horizon` samples from there (fewer where the trajectory ends). A start the owner is not
+        standing at (dead, routing) gets nothing."""
+        base = tr
+        for part, mask in zip(self.parts, self._part_masks(tr)):
+            base = bricks[part.kind].undo(base, mask, part.value)
+        S1 = len(tr["alive"])
+        o = int(tr["owner"])
+        out = []
+        for s0 in starts:
+            s0 = int(s0)
+            if s0 >= S1 - 1 or not tr["alive"][s0, o] or tr["r"][s0, o]:
+                out.append({})
+                continue
+            end = min(S1, s0 + int(horizon) + 1)
+            cut = {k: (v[s0:end] if isinstance(v, np.ndarray) and v.ndim >= 1 and len(v) == S1 and k != "mmax" else v)
+                   for k, v in base.items()}
+            secs = np.arange(end - s0) * tr["dt_s"]
+            on = np.clip(self.active_s + tr["dt_s"] - secs, 0.0, None)
+            on[0] = 0.0
+            cut["on"] = on * cut["alive"][:, o]
+            c = {}
+            for part, mask in zip(self.parts, self._part_masks(cut)):
+                b = bricks[part.kind]
+                c[part.kind] = c.get(part.kind, 0.0) + b.count(b.apply(cut, mask, part.value), mask, part.value)
+            out.append(c)
+        return out
+
 
 def abilities(passports, bricks, pressable=True):
     """{key: Ability} of the passports (pressable: only the ones a player or the network fires - active, self-cast,
@@ -162,12 +205,35 @@ class Recharge:
             out[k] = float(useful.mean() if len(useful) else 0.0) * abilities_[k].recharge_s / 60.0
         return cls(out)
 
-    def cost(self, key, situation=None):
+    def cost(self, key, press=None):
         return self.per_ability.get(key, 0.0)
 
 
-def price(ability, counters, rates, bricks, recharge):
+class DynamicRecharge(Recharge):
+    """Per-press recharge costs (gold): costs[p] of press p (module doc)."""
+
+    def __init__(self, costs):
+        super().__init__()
+        self.costs = np.asarray(costs, dtype=float)
+
+    def cost(self, key, press=None):
+        return float(self.costs[press])
+
+
+def best_later(ability, tr, bricks, rates, horizon, step=5):
+    """The most a press of the same ability at a later second of its recharge window (step, 2 step, .. recharge_s)
+    would have netted (benefit - debuffs, gold; >= 0: not pressing at all is always there) - the dynamic recharge cost
+    seen in hindsight on this trajectory."""
+    starts = np.arange(step, ability.recharge_s + 1e-6, step) / tr["dt_s"]
+    best = 0.0
+    for c in ability.later(tr, bricks, starts, horizon):
+        ben, deb = split(c, rates, bricks)
+        best = max(best, ben - deb)
+    return best
+
+
+def price(ability, counters, rates, bricks, recharge, press=None):
     """{"benefit", "debuffs", "recharge", "net", "price"} of one press, gold."""
     ben, deb = split(counters, rates, bricks)
-    r = recharge.cost(ability.key)
+    r = recharge.cost(ability.key, press)
     return {"benefit": ben, "debuffs": deb, "recharge": r, "net": ben - deb, "price": ben - deb - r}
