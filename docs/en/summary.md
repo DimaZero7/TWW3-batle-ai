@@ -255,7 +255,12 @@ price is almost all the battle's noise (real share 0.07 in a probe of 649 presse
 from the inputs (explained share ≤ 0). The **open loop** removes the chaos (`--ability-branch-openloop`): "not"
 plays the orders "pressed" gave, so only the ability's effect differs — real share over 60 s 0.46 instead of 0, half
 the price spread, cheaper branches. With it the abilities do work in the simulator: a press is worth +0.003 of the
-budget over 60 s on average, Stand Your Ground in melee +0.005. The share is logged (`price_rel`).
+budget over 60 s on average, Stand Your Ground in melee +0.005. The share is logged (`price_rel`). **The press priced
+by its bonuses** (`tools/nn/abilities_price`, training untouched): a brick per bonus kind (a counter of its useful
+work), an ability as its passport's data, one generic validator against the open-loop replay; on 5 091 presses of
+itS25_12 Stand Your Ground and Deadly Onslaught pass (rank correlation 0.71 and 0.66), the morale counter does not
+predict the price (Rally 0.08). Found there: the training's branches drop all of the lord's abilities in "not pressed"
+for 60 s, not only the pressed one ([the press's price](training/ability_price.md)).
 
 **Spread of the simulator's uncertain numbers** (`--dr`, on in line S): 23 numbers not taken exactly from
 the game's database (a few probes, fits, estimates), each battle draws them inside ranges from the evidence; the
