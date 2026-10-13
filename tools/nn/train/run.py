@@ -540,6 +540,8 @@ def train(args, every=None, teacher=None, normal=None):
 
     while share_done() < 1.0 and (not args.updates or time.time() - t0 - paused < args.minutes * 60):
         t_u = time.time()
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()    # the log's gpu_gb: this update's peak
         done_share = share_done()
         if time.time() - t_bank >= args.bank_refresh * 60:
             if ahead is not None:
@@ -653,6 +655,10 @@ def train(args, every=None, teacher=None, normal=None):
                         "top": [[n, round(q, 3), round(p, 3), age] for n, q, p, age in pool.top(5)]}}
         if taught:
             row["teach"] = taught
+        if torch.cuda.is_available():
+            row["gpu_gb"] = {"peak": round(torch.cuda.max_memory_allocated() / 2**30, 2),
+                             "alloc": round(torch.cuda.memory_allocated() / 2**30, 2),
+                             "reserved": round(torch.cuda.memory_reserved() / 2**30, 2)}
         if args.ability_branch:
             row["ability_branch"] = dict(env.brancher.stats, weight=round(ab_w, 5))
         if observed:

@@ -314,6 +314,26 @@ def test_open_loop_not_replays_the_pressed_orders_exactly_and_never_presses():
     assert fired["pressed"] > 0 and fired["not"] == 0
 
 
+def test_the_branch_battles_are_freed_without_the_cyclic_collector():
+    # open loop / greedy hook the branch env's _play / _act with closures holding the env: dropped at the end, or the
+    # branches' battles (their GPU state) live on until Python's cyclic collector happens to run
+    import gc
+    actor, env, cand = grabbed()
+    snap = env.brancher.got[0]
+    b, side, unit, slot = pick(cand)
+    alive = lambda: sum(isinstance(o, rollout.Battles) for o in gc.get_objects())
+    gc.collect()
+    gc.disable()
+    try:
+        n0 = alive()
+        for openloop, greedy in ((True, False), (False, True), (True, True)):
+            ab.play_pair(env, actor, ab.select(snap, b), unit, side, slot, 2, 3, seed=5, openloop=openloop,
+                         greedy=greedy)
+        assert alive() == n0
+    finally:
+        gc.enable()
+
+
 def test_greedy_branches_repeat_and_take_the_most_likely_action():
     actor, env, cand = grabbed()
     snap = env.brancher.got[0]

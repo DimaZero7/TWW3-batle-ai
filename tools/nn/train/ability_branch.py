@@ -381,6 +381,9 @@ def play_pair(template, actor, snap, unit, side, slot, copies, decisions, seed, 
         torch.set_rng_state(state[0])
         if state[1] is not None:
             torch.cuda.set_rng_state_all(state[1])
+        said.clear()
+        for env, _, _ in envs.values():
+            _unhook(env)
     s_rep = side[rep]
     for name in ("pressed", "not"):
         ends[name] = trade(envs[name][0].st.u, s_rep, template.weights.rout_share)
@@ -405,6 +408,15 @@ def _recording_play(env, said):
         said.append((parts, scripted, delay))
         return play(env, parts, scripted, delay, *a, **k)
     return run
+
+
+def _unhook(env):
+    """Drops a branch env's own _play / _act (_recording_play, _greedy_act). Their closures hold the env: a reference
+    cycle that only Python's cyclic collector frees, and it rarely runs (its trigger counts objects, not video memory),
+    so each update's branch battles (their state, observation, memories on the GPU) stayed alive: video memory grew
+    update by update until it spilled into shared memory and a step went from 0.06 s to ~1 s."""
+    env.__dict__.pop("_play", None)
+    env.__dict__.pop("_act", None)
 
 
 def _replay_orders(env, parts, scripted, delay):
