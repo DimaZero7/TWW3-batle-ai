@@ -676,9 +676,9 @@ The network decides itself when its lord uses an ability, like a player
 - only the scripted opponents' lords fire by the simulator's game-AI rule: `Battles.by_rule`
   (`tools/nn/sim/abilities.py` `set_rule`), set again after every restart, because a battle from
   the bank brings `scenario.build`'s default (side 2 by the rule);
-- a stored decision keeps only the slots' state (5 numbers) and the battle's bank row;
-  `rollout.full_obs` puts the passports back in the update (the whole input would be ~3 GB for 1024
-  battles × 64 decisions); the slice of the stored state is a copy;
+- a stored decision keeps only the packed state of the slots in use, the bitmask of "effects on me from others"
+  instead of their 28 token columns, and the battle's bank row; `rollout.full_obs` puts the rest back in the update
+  (the whole input would be ~3 GB for 1024 battles × 64 decisions; [model](model.md#model));
 - the critic's warm-up updates run the actor without a graph (memory);
 - `run.py` logs `abilities_per_battle`.
 

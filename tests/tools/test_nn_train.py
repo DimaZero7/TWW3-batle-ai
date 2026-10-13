@@ -1173,18 +1173,32 @@ class TestAbilities:
 
     def test_the_stored_input_is_small_and_full_obs_gives_back_the_observation(self):
         from tools.nn.model import abilities as mab
+        from tools.nn.model import observation as ob
         env = rollout.Battles(league.layout(4, 1, opponent="nearest"), MIRROR, params=rollout.params_with_limit(3.0))
         actor, crit = nets()
-        a, _, _ = env.observe()
+        for _ in range(2):                                              # (the auras are on after a step)
+            env.step(actor, crit)
+        env.cur = env.observe(True)
+        a, _, c = env.cur
         full = rollout.rows_of(a, env.rows_learn)
         step = env.step(actor, crit)
         # the slots' state of only the slots some unit of the bank owns, the bank row; no passports, no indices
         used = rollout.used_slots(env.bank.setup.arrays.abil_idx)
-        assert step["obs"]["abil"].shape[-2:] == (len(used), mab.STATE) and len(used) < mab.SLOTS
-        assert "abil_idx" not in step["obs"] and step["action"].ability is not None
-        back = rollout.full_obs(step["obs"], {"idx": env.bank.setup.arrays.abil_idx, "slots": used})
-        assert torch.equal(back["abil"], full["abil"]) and "abil_row" not in back
+        assert step["obs"]["abil_bits"].shape[-1] == len(used) and len(used) < mab.SLOTS
+        assert step["obs"]["abil_bits"].dtype == torch.uint8 and step["obs"]["abil_time"].shape[-2:] == (len(used), 2)
+        assert "abil_idx" not in step["obs"] and "abil" not in step["obs"] and step["action"].ability is not None
+        # the token without its RECEIVED columns, their bitmask instead (both views)
+        kept = ob.TOKEN - len(ob.RECEIVED)
+        for o in (step["obs"], step["critic_obs"]):
+            assert o["tokens"].shape[-1] == kept and o["abil_rx"].dtype == torch.int32
+        static = {"idx": env.bank.setup.arrays.abil_idx, "slots": used, "side": env.bank.setup.arrays.side}
+        back = rollout.full_obs(step["obs"], static)
+        assert torch.equal(back["abil"], full["abil"]) and "abil_row" not in back and "abil_rx" not in back
         assert torch.equal(back["abil_idx"], full["abil_idx"])
+        assert torch.equal(back["tokens"], full["tokens"])
+        cback = rollout.full_obs(step["critic_obs"], static)
+        assert set(cback) == set(c) and all(torch.equal(cback[k], c[k]) for k in c)
+        assert full["tokens"][..., kept:].any() and c["tokens"][..., kept:].any()        # (the columns were not 0)
         assert torch.all((step["action"].ability == -1) | full["abil_ok"].gather(
             2, step["action"].ability.clamp(min=0)[..., None])[..., 0])
 

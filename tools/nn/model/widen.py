@@ -201,7 +201,8 @@ def battles(actor, critic, n=16, decisions=48, seed=0, device="cpu"):
     env = rollout.Battles(lay, scenes.SCENES, device, params, randomise.Spread(), seed=seed, source=src)
     torch.manual_seed(seed)
     batch = rollout.collect(env, actor, critic, decisions)
-    return rollout.full_obs(batch["obs"], batch["abil_static"]), batch["critic_obs"], batch["reset"]
+    return (rollout.full_obs(batch["obs"], batch["abil_static"]),
+            rollout.full_obs(batch["critic_obs"], batch["abil_static"]), batch["reset"])
 
 
 @torch.no_grad()

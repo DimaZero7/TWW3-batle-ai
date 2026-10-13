@@ -318,9 +318,24 @@ def test_the_stored_slots_come_back_whole():
     bank_idx = o["abil_idx"].clone()                                  # [M = 1, N, SLOTS]
     used = rollout.used_slots(bank_idx)
     assert used.tolist() == [0, 1, 2, A, A + 1, A + 2]                 # 6 of the 30 slots
-    stored = {"abil": o["abil"][..., used, :][None], "abil_row": torch.zeros(1, 1, dtype=torch.long)}
+    bits, times = rollout.pack_abil(o["abil"][..., used, :][None])
+    stored = {"abil_bits": bits, "abil_time": times, "abil_row": torch.zeros(1, 1, dtype=torch.long)}
     back = rollout.full_obs(stored, {"idx": bank_idx, "slots": used})
     assert torch.equal(back["abil"][0], o["abil"]) and torch.equal(back["abil_idx"][0], o["abil_idx"])
+
+
+def test_the_packed_slot_state_comes_back_exactly():
+    """rollout.pack_abil keeps the yes/no columns as bits and the two times as they are: unpack_abil gives the same
+    numbers, bit for bit (any time, any mix of yes/no)."""
+    torch = pytest.importorskip("torch")
+    from tools.nn.train import rollout
+    g = torch.Generator().manual_seed(3)
+    a = (torch.rand(5, 7, 6, mab.STATE, generator=g) > 0.5).float()
+    for name in ("recharge_left", "active_left"):
+        a[..., mab.STATE_INDEX[name]] = torch.rand(5, 7, 6, generator=g) * 3
+    bits, times = rollout.pack_abil(a)
+    assert bits.dtype == torch.uint8 and times.shape == (5, 7, 6, 2)
+    assert torch.equal(rollout.unpack_abil(bits, times), a)
 
 
 def test_compiled_and_eager_abilities_agree():

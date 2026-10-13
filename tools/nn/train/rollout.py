@@ -21,11 +21,13 @@ began with, so the update can run the memory (GRU) through the chunk again.
 Abilities: the networks (learner and past version) choose their lords' abilities (heads.sample with
 abilities=True; Orders.ability); only the scripted opponents' lords fire by the game-AI rule
 (sim abilities.set_rule, again after every restart: the bank's rows bring scenario.build's `ai`).
-A transition keeps only the abilities' state of the slots some unit of the bank owns (abil [.., U, STATE], U of the
-SLOTS: ~6 of 30) and the battle's bank row (abil_row); full_obs() puts the slots and their abilities back from the
-bank (batch["abil_static"]: its abil_idx and U) for the update - the passports themselves the networks take from
-the table (model/abilities.py full):
-the whole input would be ~3 GB for 1024 battles x 64 decisions.
+A transition keeps only the abilities' state of the slots some unit of the bank owns (U of the SLOTS: ~6 of 30),
+packed (pack_abil: abil_bits, abil_time), the token without its RECEIVED columns but their bitmask (squeeze_received:
+abil_rx; the actor's and the critic's view) and the battle's bank row (abil_row); full_obs() puts the slots, their
+abilities and the RECEIVED columns back from the bank (batch["abil_static"]: its abil_idx, side and U) for the update
+- the passports themselves the networks take from the table (model/abilities.py full): the whole input would be
+~3 GB for 1024 battles x 64 decisions. collect() writes each decision into [T, ...] buffers at once (stacked at the
+end, the decisions' copies and the stack were alive together: the GPU's peak).
 
 Past slots (past_slots=K; run.py --past-slots): up to K past versions play at once, each in a slot. A battle against
 a past version keeps the slot it began with to its end (battle_slot [B]; a restarting battle takes the active slot),
@@ -154,19 +156,69 @@ def merge_memory(old, new, rows):
 
 
 def full_obs(obs, static):
-    """A stored observation (rows of collect's batch["obs"], [..]) with the abilities' slots put back: abil
-    [.., N, U, STATE] -> [.., N, SLOTS, STATE] (the slots U = static["slots"], zeros elsewhere: no unit of the bank
-    owns them) and abil_idx = static["idx"][abil_row] [.., N, SLOTS]; abil_row dropped. An observation without
-    abilities is returned as it is."""
+    """A stored observation (rows of collect's batch["obs"] or batch["critic_obs"], [..]) whole again, from the bank
+    (static: collect's batch["abil_static"]) and the battle's bank row (abil_row, dropped):
+    * the abilities' slots: the packed state of the slots U = static["slots"] (pack_abil: abil_bits [.., N, U],
+      abil_time [.., N, U, 2]) -> abil [.., N, SLOTS, STATE] (zeros elsewhere: no unit of the bank owns them) and
+      abil_idx = static["idx"][abil_row] [.., N, SLOTS];
+    * the token's RECEIVED columns (observation.py) from abil_rx [.., N] (squeeze_received): abilities.received of the
+      bitmask, the units' sides and slots (static["side"], static["idx"]) - zeros where the bitmask is 0.
+    An observation without abilities is returned as it is."""
     if "abil_row" not in obs:
         return obs
-    out = {k: v for k, v in obs.items() if k != "abil_row"}
-    a = obs["abil"]
-    full = a.new_zeros(*a.shape[:-2], mab.SLOTS, a.shape[-1])
-    full[..., static["slots"], :] = a
-    out["abil"] = full
-    out["abil_idx"] = static["idx"][obs["abil_row"]]
+    row = obs["abil_row"]
+    out = {k: v for k, v in obs.items() if k not in ("abil_row", "abil_bits", "abil_time", "abil_rx")}
+    if "abil_bits" in obs:
+        a = unpack_abil(obs["abil_bits"], obs["abil_time"])
+        full = a.new_zeros(*a.shape[:-2], mab.SLOTS, a.shape[-1])
+        full[..., static["slots"], :] = a
+        out["abil"] = full
+        out["abil_idx"] = static["idx"][row]
+    if "abil_rx" in obs:
+        rec = mab.received(obs["abil_rx"].long(), static["side"][row], static["idx"][row])
+        out["tokens"] = torch.cat([obs["tokens"], rec.to(obs["tokens"].dtype)], -1)
     return out
+
+
+# The token's RECEIVED columns (its last: observation.py) are kept as the bitmask they are made of (squeeze_received)
+_KEPT = ob.TOKEN - len(ob.RECEIVED)
+assert ob.NAMES[_KEPT:] == ob.RECEIVED
+
+
+def squeeze_received(obs, rx):
+    """An observation of the learner rows to keep (the actor's or the critic's: tokens [R, N, TOKEN]): its token
+    without the RECEIVED columns, and abil_rx [R, N] int32 - the bitmask of others' abilities on the unit they are made
+    of (rx: the state's ab_rx of the rows' battles), 0 where the token does not show them (observation.py: the view's
+    "visible" column; abilities.received of 0 is 0). full_obs puts the columns back: 28 numbers a unit in 4 bytes
+    (~0.4 GB less a chunk of 1024 battles x 64 decisions, each of the two views)."""
+    tok = obs["tokens"]
+    vis = tok[..., ob.INDEX["visible"]] > 0.5
+    return dict(obs, tokens=tok[..., :_KEPT], abil_rx=torch.where(vis, rx, torch.zeros_like(rx)).to(torch.int32))
+
+
+# The slot state's yes/no numbers (exactly 0 or 1: observation._abilities) and its two times, by the column
+_BITS = tuple(mab.STATE_INDEX[n] for n in ("owned", "ready", "active_now", "on_now"))
+_TIMES = tuple(mab.STATE_INDEX[n] for n in ("recharge_left", "active_left"))
+assert sorted(_BITS + _TIMES) == list(range(mab.STATE))
+
+
+def pack_abil(a):
+    """The slots' state a [.., STATE] float32 -> (bits [..] uint8: its yes/no columns, one bit each; times [.., 2]
+    float32: its two times) - the same numbers in 9 bytes instead of 24 (unpack_abil gives them back exactly)."""
+    bits = torch.zeros(a.shape[:-1], dtype=torch.uint8, device=a.device)
+    for k, i in enumerate(_BITS):
+        bits |= (a[..., i] > 0.5).to(torch.uint8) << k
+    return bits, a[..., list(_TIMES)].contiguous()
+
+
+def unpack_abil(bits, times):
+    """pack_abil's (bits, times) -> the slots' state [.., STATE] float32."""
+    cols = [None] * mab.STATE
+    for k, i in enumerate(_BITS):
+        cols[i] = ((bits >> k) & 1).to(times.dtype)
+    for j, i in enumerate(_TIMES):
+        cols[i] = times[..., j]
+    return torch.stack(cols, -1)
 
 
 def used_slots(idx):
@@ -450,6 +502,7 @@ class Battles:
         self.last_hit = torch.full((self.B,), -1.0, device=self.device)
         self.hit_rate = torch.zeros(self.B, device=self.device)     # [B] reward.hit_rate (with idle_rate)
         self.cur = None
+        self.cur_rx = None      # [B, N] the state's ab_rx at self.cur's observation (squeeze_received)
         self.battles = 0
         self.timeouts = 0
         if self.teach_names:
@@ -498,6 +551,7 @@ class Battles:
     # --- observation ---
     def observe(self, critic=True):
         state = self.st.observation()
+        self.cur_rx = state.get("ab_rx")
         obs, cobs = {}, {}
         for s in (1, 2):
             obs[s], self.mem[s] = self.look(state, self.setup, s, self.mem[s])
@@ -623,6 +677,7 @@ class Battles:
         if self.cur is None:
             self.cur = self.observe(critic is not None)
         a, frame, c = self.cur
+        rx = self.cur_rx
         abil_row = self.bank_row[self.rows_learn % self.B]           # the battles the observation was made of
         obs_r, h_prev, logits, action, orders, h_new = self._act(actor, a, frame, self.rows_learn, self.h_learn, greedy)
         if self.ability_hold is not None:
@@ -680,8 +735,14 @@ class Battles:
         self.cur = self.observe(critic is not None)
         if "abil" in obs_r:                          # keep the slots some unit owns and the bank row (full_obs)
             # a copy: a slice (view) would keep the whole input of every step alive (~60 MB each)
-            obs_r = {k: v for k, v in obs_r.items() if k != "abil_idx"}
-            obs_r = dict(obs_r, abil=obs_r["abil"][..., self._abil_slots(), :].clone(), abil_row=abil_row)
+            bits, times = pack_abil(obs_r["abil"][..., self._abil_slots(), :])
+            obs_r = {k: v for k, v in obs_r.items() if k not in ("abil_idx", "abil")}
+            obs_r = dict(obs_r, abil_bits=bits, abil_time=times, abil_row=abil_row)
+            if rx is not None:                       # the token's RECEIVED columns as their bitmask (full_obs)
+                rx_r = rx[self.rows_learn % self.B]
+                obs_r = squeeze_received(obs_r, rx_r)
+                if c is not None:
+                    c = dict(squeeze_received(c, rx_r), abil_row=abil_row)
         return {"obs": obs_r, "action": action, "lp": lp, "value": value, "reward": r_rows,
                 "done": d_rows, "critic_obs": c, "attacks": attacks, "teach": taught, "truth": truth}
 
@@ -980,6 +1041,7 @@ class Battles:
             a, frame, c = self.cur
             self.cur = ({k: v[two] for k, v in a.items()}, frame_rows(frame, two),
                         None if c is None else {k: v[sel_learn] for k, v in c.items()})
+        self.cur_rx = take(self.cur_rx)
         for k in ("health", "last_hit", "hit_rate", "bank_row", "want", "ctrl", "by_rule", "kind_battle",
                   "order_battle", "teach_draw", "is_past", "battle_slot"):
             setattr(self, k, getattr(self, k)[keep])
@@ -1019,25 +1081,41 @@ class Battles:
 def collect(env, actor, critic, T):
     """T decisions (steps) of every battle -> a dict of stacked tensors [T, R, ...], the memory the chunk began
     with h0 [R, 1 + N, d], reset [T, R] (a new battle began at step t: its memory starts empty), the
-    bootstrap value [R], and abil_static: the bank's ability passports (full_obs puts them back into obs)."""
+    bootstrap value [R], and abil_static: the bank's ability slots and sides (full_obs puts the abilities and the
+    token's RECEIVED columns back into obs and critic_obs)."""
     h0 = env.h_learn
     brancher = getattr(env, "brancher", None)
     if brancher is not None:
         brancher.begin(env, T)
-    steps = [env.step(actor, critic) for _ in range(T)]
-    out = {}
+    # The observations (most of the chunk: ~6 GB for 1024 battles x 64 decisions) go into [T, ...] buffers made at the
+    # first decision, each decision's copy let go at once: stacked at the end, the decisions' copies and the stack were
+    # both alive (twice the chunk: 14.1 GB of the 16 GB card at the peak, past it into shared memory - collect and the
+    # update ran 3-10x slower)
+    out = {"obs": None, "critic_obs": None}
+    steps = []
+    for t in range(T):
+        s = env.step(actor, critic)
+        for k in ("obs", "critic_obs"):
+            d = s.pop(k)
+            if d is None:
+                continue
+            if out[k] is None:
+                out[k] = {n: v.new_empty((T,) + tuple(v.shape)) for n, v in d.items()}
+            for n, v in d.items():
+                out[k][n][t] = v
+            del d
+        steps.append(s)
     if brancher is not None:
         # the ability branches of the chunk's snapshots: the head's extra advantage (ppo.update's ability term)
         out["abil_branch"] = brancher.finish(env, actor)
-    for k in ("obs", "critic_obs"):
-        out[k] = {n: torch.stack([s[k][n] for s in steps]) for n in steps[0][k]}
-    out["h0"] = h0 if h0 is not None else actor.initial(rows_of(steps[0]["obs"], slice(None)))
+    out["h0"] = h0 if h0 is not None else actor.initial({n: v[0] for n, v in out["obs"].items()})
     done = torch.stack([s["done"] for s in steps])
     out["reset"] = torch.cat([torch.zeros_like(done[:1]), done[:-1]])
     out["action"] = hd.Action(**{f: torch.stack([getattr(s["action"], f) for s in steps])
                                  for f in steps[0]["action"].parts()})
     idx = getattr(env.bank.setup.arrays, "abil_idx", None)
-    out["abil_static"] = None if idx is None else {"idx": idx, "slots": env._abil_slots()}
+    out["abil_static"] = None if idx is None else {"idx": idx, "slots": env._abil_slots(),
+                                                   "side": env.bank.setup.arrays.side}
     for k in ("lp", "value", "reward", "done", "attacks"):
         out[k] = torch.stack([s[k] for s in steps])
     if steps[0].get("teach") is not None:

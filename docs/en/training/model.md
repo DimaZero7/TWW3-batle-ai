@@ -411,9 +411,19 @@ rollout keeps `Action.ability` and the update counts it in the log-probability; 
 true only for the scripted opponents' sides (`tools/nn/sim/abilities.py` `set_rule`, again after
 every restart: the bank's rows bring `scenario.build`'s default, side 2); the LiveSetup carries
 `abil_idx`, `abil_use`, `abil_fx` (and checks that every unit's actives fit the simulator's timer slots). A stored
-transition keeps the state of only the slots some unit of the bank owns (now 6 of 30: 3 actives + 3 passives, 6
-numbers each) and the battle's bank row; `rollout.full_obs` puts the 30 slots and the abilities' indices back from the
-bank, the networks take the passports from the table.
+transition keeps the state of only the slots some unit of the bank owns (now 6 of 30: 3 actives + 3 passives),
+packed without loss (`rollout.pack_abil`: the 4 yes/no numbers as bits of one byte, the 2 times as they are), and the
+battle's bank row. The token's "effects on me from others" columns (RECEIVED, 28 numbers) are not stored: the bitmask
+`abil_rx` instead (4 bytes a unit: whose abilities are on it, 0 where the token does not show them), in both views,
+the actor's and the critic's (`rollout.squeeze_received`). `rollout.full_obs` puts the 30 slots, the abilities'
+indices and the RECEIVED columns back from the bank (the units' sides and slots) - the same numbers bit for bit
+(checked on the GPU: 120 steps, 23,686 units with nonzero columns); the networks take the passports from the table.
+
+GPU memory (1024 battles x 64 decisions, v2): the stored chunk is 5.3 GB (6.3 GB unpacked). Collect writes each
+decision into a `[T, ...]` buffer at once and lets its copy go: before, the decisions were kept in a list and stacked
+at the end, both copies alive at once - collect peaked at 14.1 of 16 GB, video memory spilled into Windows' shared
+memory, and collect and the update ran 3-10x slower (an update 35-216 s instead of 17 s). Now collect peaks at 7.4 GB,
+the update at 12.0-12.1 GB (12.7-12.9 GB reserved by the allocator).
 
 ## Variant v2: map sectors, chained heads, commitment
 

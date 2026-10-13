@@ -369,7 +369,8 @@ def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refer
                 share = len(part) / len(idx)
                 pidx = idx[part]
                 obs = full_obs({k: v[:, pidx] for k, v in batch["obs"].items()}, batch.get("abil_static"))
-                cobs = {k: _rows(v, pidx) for k, v in batch["critic_obs"].items()}
+                cobs = full_obs({k: v[:, pidx] for k, v in batch["critic_obs"].items()}, batch.get("abil_static"))
+                cobs = {k: v.reshape(-1, *v.shape[2:]) for k, v in cobs.items()}
                 act = hd.Action(**{k: _rows(getattr(batch["action"], k), pidx) for k in kinds})
                 seq_act = chunk_action(batch["action"], pidx)
                 a = a_all[:, part].reshape(-1)
