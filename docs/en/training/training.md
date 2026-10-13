@@ -734,8 +734,20 @@ skills too.
   `replayed_presses`, `replayed_missed`, `price_press` (the mean price of a press, budget share), `gold_press` (in
   gold), `zero_press` (the share of "empty" presses, |price| < 0.002 of the budget), `good_press`, `price_missed` /
   `gold_missed` / `good_missed` (the price of pressing at a missed moment), `price_se` (the price's standard error
-  over the copies: the noise), `price_rms`, `branch_battles`, `branch_battle_s`, `seconds`, `weight`; in PPO —
+  over the copies: the noise), `price_rms`, `price_rel` (the real share of the chunk's price spread: 1 − the noise of
+  the mean over the copies / the prices' spread; the ceiling of what any critic can explain; the chunk's prices per
+  copy are `Brancher.copies`), `branch_battles`, `branch_battle_s`, `seconds`, `weight`; in PPO —
   `ability_branch_loss`, `ability_branch_rows`.
+- **How much of the price is real** (a CPU probe: S25_5 without updates, 649 presses x 4 copies, the same snapshots
+  also measured at shorter horizons). The 60 s price is almost all noise: real share 0.07 (the S25 log suggests ~0.4
+  from `price_rms` 0.012 and `price_se` 0.007 — the mean of the errors understates the noise under heavy tails). The
+  noise is the chaos of the fight itself: where the lord never fought in 30 s the price is pure noise with a spread of
+  0.009 of the budget; the copies drift apart after 10–20 s. Real share by horizon: 10 s — 0.94 (but 92 % of the
+  prices ≈ 0), **20 s — 0.52**, 30 s — 0.16, 45 s — 0.13, 60 s — 0.07; the mean price of a press at 20–30 s is +0.0009
+  of the budget. The abilities' means show at 30 s and drown at 60 s: Stand Your Ground with the lord in melee —
+  +0.0030 ± 0.0008 after 30 s and +0.0001 ± 0.0019 after 60 s; Deadly Onslaught — +0.0018 ± 0.0008 and −0.0003 ±
+  0.0014. So a short horizon gives less noise: `--ability-branch-horizon 20` (real share 0.52 against 0.07, branches
+  three times cheaper); it counts only the near effect (a 25–31 s buff partly).
 - **The ability critic** (`tools/nn/train/ability_critic.py`, `run.py --ability-critic`, off by default; needs
   `--ability-branch`). Few moments are replayed: ~105 of ~5,000 an update (S25: ~2,500 presses, ~2,400 missed), and
   the price is noisy (standard error 0.007 at a spread of the prices of 0.012 of the budget). The critic is a small
@@ -748,7 +760,10 @@ skills too.
   - **It learns** from every replayed price (Huber regression) out of a buffer of the last `--ability-critic-buffer`
     (25,000) prices; the buffer, the network and AdamW are saved in the checkpoint (`train.ability_critic`, features in
     float16, ~10 MB) and the next part of the chain goes on. An old checkpoint without it loads; the critic starts
-    fresh. 32 steps of 256 an update. Every tenth price is held out.
+    fresh. 32 steps of 256 an update. Every tenth price is held out. With each price the buffer keeps the means of
+    the two halves of its copies: from them `critic_rel`, the real share of the buffer's price spread (the halves'
+    correlation, Spearman–Brown corrected); a buffer without halves (an old checkpoint) loads, its old prices' halves
+    unknown.
   - **Shrunk to the mean.** The target is noisy and even a small network learns some of the noise. The prediction is
     mean + k × (network − mean), k ∈ [0, 1] the best one on the held-out tenth: where the network knows little, the
     prediction falls back to the mean price instead of passing noise to the head.
@@ -765,7 +780,17 @@ skills too.
   - **Log** (`ability_branch`): `moments` (all of the chunk), `covered` (the share priced), `critic_on`,
     `critic_samples`, `critic_train`, `critic_val` and `critic_base` (Huber on the held-out tenth of the critic and of
     "the mean"), `critic_ev` (the explained share of the prices' spread there), `critic_shrink`, `critic_s`, `q_press` /
-    `q_missed` (the mean predicted price of a press / a missed moment, gold), `q_std`, `price_sd` / `cv_sd` / `cv_used`.
+    `q_missed` (the mean predicted price of a press / a missed moment, gold), `q_std`, `price_sd` / `cv_sd` / `cv_used`,
+    `critic_rel`.
+  - **Why it stays off on S25.** Not a bug: there is nothing to learn. After 2,841 prices `critic_ev` 0, k 0, the
+    held-out error = the mean's. The real part of the price is small (above: 0.07 at 60 s) and does not depend on what
+    the critic sees: ridge regression, boosted trees and networks of 32–256, cross-validated, explained ≤ 0 of the 2,596
+    buffer prices of S25_5 (the best +0.003) and of the probe's 649. A critic that knows only the mean (+0.001 of the
+    budget) would push the head to press everything ready at once (as the collapsed itS23) — the gate is right to keep
+    it off. At a 20 s horizon the explained share is ~0 too (+0.025 by ridge on the 20 s price); it shows only for the
+    own losses of the units the press touches over 20 s (+0.06), but that is half the price (no damage to the enemy).
+    So `--ability-critic` gives nothing now; it is worth turning on when `critic_rel` and `price_rel` in the log are
+    clearly above 0.
   - **Check on a synthetic price** (the pace of training: 105 prices an update; 40 varying inputs, the rest the
     passport of one of 5 abilities; the price — a buff in melee and out of it plus a count, noise 1.5x the price's
     spread): ready from update 20 on without a break, the explained share of the noiseless price 0.58–0.74 (0.69 on
@@ -773,6 +798,14 @@ skills too.
     never on, k < 0.5. Tried and rejected: 2 layers of 128 without dropout (Adam 1e-3) learn the noise — without the
     shrink the share of the noiseless price below zero (−0.7…−1.6), with it 0.16–0.23 against 0.74. Cost (CPU, 4 cores): recording the moments
     ~0.07 s for 64 decisions of 80 moments, training 0.1 s an update at a full buffer, predicting 5,000 moments 0.007 s.
+  - **Tried and rejected.** *A local price*: only the gold of the units the press touches (the lord; for an aura, own
+    units within its range while it is active, as the simulator marks them) and of the enemies they fight (their
+    target, those hitting them, or within 0 / 20 / 40 / 80 m), the difference in the same copies: real share
+    −0.07…0.06 against 0.07 of the global one (649 presses), at 30 s 0.21 against 0.16 — the noise comes from the
+    lord's own fight, not from far units. The touched units' own losses alone are more reliable (0.3–0.5) but unrelated
+    to the battle's price and blind to damage dealt. *A simple model* "ability × situation" (lord in melee, an enemy
+    within 35 m, own wavering…, ridge): explained share −0.07…+0.04 at every horizon. *Clipping the copies' outliers*
+    (±3 root mean squares): real share 0.08 against 0.07.
 - **Extension points**: a bootstrapped critic target (TD: the price plus the value of the next ready moment,
   `Brancher.target`); a cost of an ability unused through a battle (`Config.unused_penalty`, must be 0 now).
 

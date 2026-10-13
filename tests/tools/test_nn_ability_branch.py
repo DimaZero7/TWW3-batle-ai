@@ -268,3 +268,24 @@ def test_run_logs_the_branches_and_carries_the_decay_in_the_chain(tmp_path, monk
     assert all("ability_branch" in r and "presses" in r["ability_branch"] and "head_share_ability" in r for r in rows)
     assert [r["ability_branch"]["weight"] for r in rows] == [0.1, 0.075]
     assert checkpoint.train_state(out / "latest.pt")["state"]["ability_updates"] == 2
+
+
+
+def test_the_reliability_is_the_real_share_of_the_prices_spread():
+    g = torch.Generator().manual_seed(0)
+    signal = torch.randn(4000, 1, generator=g)
+    assert abs(ab.reliability(signal + torch.randn(4000, 4, generator=g) * 2.0) - 0.5) < 0.05   # var 1 vs 4 / 4
+    assert ab.reliability(torch.randn(4000, 4, generator=g)) < 0.05
+    assert ab.reliability(signal.expand(-1, 4)) == 1.0
+    assert ab.reliability(signal[:4].expand(-1, 4)) is None and ab.reliability(signal) is None
+
+
+def test_a_chunk_keeps_its_prices_per_copy_and_logs_their_real_share():
+    actor, crit = tiny()
+    env = env_of(8)
+    env.brancher = ab.Brancher(ab.Config(share=1.0, missed=1.0, copies=2, horizon_s=3.0, batch=8))
+    rollout.collect(env, actor, crit, 4)
+    br = env.brancher
+    n = br.stats["replayed_presses"] + br.stats["replayed_missed"]
+    assert br.copies.shape == (n, 2) and torch.allclose(br.last["price"], br.copies.mean(1))
+    assert n < 8 or br.stats["price_rel"] == round(ab.reliability(br.copies), 3)

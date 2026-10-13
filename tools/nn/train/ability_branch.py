@@ -54,6 +54,11 @@ each decision, one pass): +price at a press, -price at a missed moment (the slot
 Divided by the root mean square of the buffer's measured prices (at least ADV_FLOOR: the critic's Q is smaller where it
 is unsure) and clipped as above. Before it is ready: the replayed moments only, as without it.
 
+How much of a price is real: the chunk's prices per copy are kept (Brancher.copies [E, copies]); the log's price_rel =
+reliability(): 1 - the copies' noise variance of the mean / the prices' variance - the share that differs between
+moments, the ceiling of what any critic can explain; the critic keeps each price's two halves of the copies and logs
+the buffer's split-half value (critic_rel).
+
 Extension points (not used yet): a bootstrapped (TD) target of the critic (Brancher.target), a cost of an ability left
 unused through a battle (Config.unused_penalty: must be 0).
 """
@@ -463,6 +468,7 @@ class Brancher:
         self.chunk = _Chunk()
         self.stats = {}
         self.calls = 0
+        self.copies = None                       # the last chunk's prices per copy [E, copies] (_play)
         self.comp = None                         # {kind: slots} of a branch batch (composition), set at begin
         self.kind_b = None                       # [B] each main battle's kind, on the host
 
@@ -645,6 +651,10 @@ class Brancher:
             played += 2 * K * (len(part) + len(fill))
         _release(dev)          # ... and the branches' for the update
         self.stats.update(branch_battles=played, branch_battle_s=round(played * decisions * env.decision_s))
+        self.copies = diff
+        rel = reliability(diff)
+        if rel is not None:
+            self.stats["price_rel"] = round(rel, 3)
         price = diff.mean(1)                                                # [E] budget share
         se = diff.std(1) / math.sqrt(K) if K > 1 else torch.zeros_like(price)
         return price, se, budget
@@ -691,9 +701,28 @@ class Brancher:
             out["lp"][t, r, n] = lp
         st["covered"] = round(float(out["mask"].sum()) / len(X), 4)
         if len(e_m):
-            crit.add(X[e_m], self.target(price))
+            d = self.copies
+            K = d.shape[1] if d is not None and len(d) == len(e_m) else 0
+            halves = torch.stack([d[:, :K // 2].mean(1), d[:, K // 2:].mean(1)], 1) if K >= 2 else None
+            crit.add(X[e_m], self.target(price), halves)
         st.update({"critic_" + k: v for k, v in ability_critic.rounded(crit.fit()).items()})
+        rel = crit.reliability()
+        if rel is not None:
+            st["critic_rel"] = round(rel, 3)
         st["critic_s"] = round(time.time() - t1, 2)
+
+
+def reliability(d):
+    """The real share of the prices' spread (it differs between moments) against the copies' noise: d [E, K] the
+    prices per copy -> 1 - mean(variance over the copies / K) / variance of the price, at least 0 (None with fewer than 2
+    copies or 8 moments). It bounds what any critic can explain of the measured price (module doc)."""
+    E, K = d.shape
+    if K < 2 or E < 8:
+        return None
+    v = float(d.mean(1).var())
+    if v <= 0:
+        return 0.0
+    return max(0.0, 1.0 - float((d.var(1) / K).mean()) / v)
 
 
 def _release(dev):

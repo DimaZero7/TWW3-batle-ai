@@ -89,6 +89,25 @@ def test_the_state_goes_on_in_a_new_critic_and_another_width_starts_afresh():
     assert not ac.AbilityCritic().load(None)
 
 
+def test_the_buffer_keeps_the_copies_halves_and_tells_how_much_of_the_price_is_real():
+    g = torch.Generator().manual_seed(5)
+    sig = torch.randn(3000, generator=g)
+    halves = sig[:, None] + torch.randn(3000, 2, generator=g) * 2 ** 0.5    # each half: noise var 2, the mean's 1
+    crit = ac.AbilityCritic()
+    X, _, _ = synthetic(3000, 6)
+    crit.add(X, halves.mean(1), halves)
+    assert abs(crit.reliability() - 0.5) < 0.05                    # signal var 1, the price's noise var 1
+    st = checkpoint._to_cpu(crit.state())
+    again = ac.AbilityCritic()
+    assert again.load(st) and torch.equal(again.halves, crit.halves)
+    # an older state (no halves): loads, the reliability unknown until new prices come with them
+    old = {k: v for k, v in st.items() if k != "halves"}
+    again = ac.AbilityCritic()
+    assert again.load(old) and again.halves.isnan().all() and again.reliability() is None
+    again.add(X[:60], halves[:60].mean(1))                        # without halves: NaN, still unknown
+    assert again.reliability() is None and len(again.halves) == len(again.y)
+
+
 def test_features_read_the_unit_its_slot_and_the_neighbourhood():
     N = 5
     tokens = torch.zeros(1, N, ob.TOKEN)

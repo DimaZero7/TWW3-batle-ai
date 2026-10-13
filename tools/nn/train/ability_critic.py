@@ -16,7 +16,15 @@ signal at all of them, smoothed over many battles:
     AbilityCritic              -> the model, its own optimiser (AdamW), the replay buffer (the last `buffer` replayed
                                   moments, kept across updates and saved with the checkpoint's "train"); fit(): a few
                                   steps of Huber regression an update, then the shrink calibrated on the held-out tenth;
-                                  ready() once it has `warmup` samples and beats the mean there by MARGIN
+                                  ready() once it has `warmup` samples and beats the mean there by MARGIN;
+                                  reliability(): the real share of the buffer's price variance from the two halves of
+                                  each price's copies (kept with it) - the ceiling of the critic's explained variance
+
+Why it stays off on the S25 lord abilities (docs/en/training/training.md "Abilities by their effect"): the 60 s price is
+mostly the copies' noise (its real share ~0.15-0.4) and the real part is not a function of what the critic sees - no
+learner (ridge, boosted trees, MLPs of 32-256, cross-validated) explained more than 0 of 2 596 buffer prices or 447
+probe prices. A critic that knew only the mean (+0.001 of the budget) would push the head to press at once whenever
+ready, so the gate keeping it off is right.
 
 The shrink: a noisy target and a few thousand samples, a small network still fits some noise (on a synthetic price with
 noise 1.5x the signal, unshrunk predictions of a wider network without dropout explained less than nothing of the
@@ -114,6 +122,7 @@ class AbilityCritic:
         self.X = torch.zeros(0, WIDTH, device=self.device)
         self.y = torch.zeros(0, device=self.device)
         self.ids = torch.zeros(0, dtype=torch.long, device=self.device)
+        self.halves = torch.zeros(0, 2, device=self.device)  # each price's two halves of the copies (NaN: unknown)
         self.seen = 0                            # samples added ever (their numbers: the validation split)
         self.gen = torch.Generator(device="cpu").manual_seed(int(seed) + 7717)
         self.last = {}
@@ -121,16 +130,29 @@ class AbilityCritic:
     def __len__(self):
         return len(self.y)
 
-    def add(self, X, y):
-        """New replayed moments: X [k, WIDTH], y [k] their measured price (budget share). The oldest go past `buffer`."""
+    def add(self, X, y, halves=None):
+        """New replayed moments: X [k, WIDTH], y [k] their measured price (budget share), halves [k, 2] the means of
+        the two halves of its copies (reliability(): what of the price is real). The oldest go past `buffer`."""
         k = len(y)
         if not k:
             return
+        h = (torch.full((k, 2), float("nan")) if halves is None else halves.detach().float()).to(self.device)
+        self.halves = torch.cat([self.halves, h])[-self.cap:]
         ids = torch.arange(self.seen, self.seen + k, device=self.device)
         self.seen += k
         self.X = torch.cat([self.X, X.detach().float().to(self.device)])[-self.cap:]
         self.y = torch.cat([self.y, y.detach().float().to(self.device)])[-self.cap:]
         self.ids = torch.cat([self.ids, ids])[-self.cap:]
+
+    def reliability(self):
+        """The share of the buffer's price variance that is real, from the halves of the copies (split-half, Spearman-
+        Brown: r = corr(half 1, half 2), 2r / (1 + r)); None with fewer than 50 prices that have them. It bounds the
+        critic's explained variance."""
+        h = self.halves[~self.halves.isnan().any(1)]
+        if len(h) < 50:
+            return None
+        r = float(torch.corrcoef(h.T)[0, 1])
+        return 2 * r / (1 + r) if r > -1 else -1.0
 
     def rms(self):
         """The buffer's root mean square of the prices (0 when empty)."""
@@ -202,7 +224,7 @@ class AbilityCritic:
     def state(self):
         """What a resumed run needs (checkpoint.py "train"): the model, AdamW, the buffer (features in float16)."""
         return {"width": WIDTH, "model": self.model.state_dict(), "optim": self.opt.state_dict(),
-                "X": self.X.half(), "y": self.y, "ids": self.ids, "seen": self.seen}
+                "X": self.X.half(), "y": self.y, "ids": self.ids, "seen": self.seen, "halves": self.halves}
 
     def load(self, d):
         """A saved state(); one of another input width (the observation changed) is dropped. -> loaded or not."""
@@ -213,6 +235,9 @@ class AbilityCritic:
         self.X = d["X"].float().to(self.device)[-self.cap:]
         self.y = d["y"].float().to(self.device)[-self.cap:]
         self.ids = d["ids"].long().to(self.device)[-self.cap:]
+        h = d.get("halves")                      # (older states: none kept)
+        self.halves = (h.float().to(self.device) if h is not None
+                       else torch.full((len(d["y"]), 2), float("nan"), device=self.device))[-self.cap:]
         self.seen = int(d["seen"])
         return True
 
