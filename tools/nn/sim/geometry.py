@@ -87,3 +87,24 @@ def sector(rel, front_deg, rear_deg):
     """0 front, 1 flank, 2 rear, from an angle off the facing (radians)."""
     a = rel.abs()
     return torch.where(a <= front_deg * DEG, 0, torch.where(a >= rear_deg * DEG, 2, 1))
+
+
+def blocked_share(u, pw, mask, gx, gz):
+    """[B, N]: the largest share of unit i's front that a formation j with mask [B, N, N] (row i, column j) covers
+    across i's way to (gx, gz): i's front (pw["front"], centred on its centre, square to its way) against j's box seen
+    across that way (its front and depth at j's bearing), their overlap over i's front, 0..1 (0 where mask has none)."""
+    wx, wz = gx - u["x"], gz - u["z"]
+    n = torch.sqrt(wx * wx + wz * wz).clamp(min=1e-6)
+    lx, lz = wz / n, -wx / n                                     # across the way
+    rx = u["x"][:, None, :] - u["x"][:, :, None]
+    rz = u["z"][:, None, :] - u["z"][:, :, None]
+    off = rx * lx[:, :, None] + rz * lz[:, :, None]              # j's centre across i's way
+    b = u["b"] * DEG
+    sj, cj = torch.sin(b)[:, None, :], torch.cos(b)[:, None, :]  # j's facing (sin, cos); its front (cos, -sin)
+    l_x, l_z = lx[:, :, None], lz[:, :, None]
+    ext = (pw["front"][:, None, :] / 2 * (cj * l_x - sj * l_z).abs()
+           + pw["depth"][:, None, :] / 2 * (sj * l_x + cj * l_z).abs())
+    half = (pw["front"] / 2).clamp(min=1e-6)[:, :, None]
+    ov = (torch.minimum(half, off + ext) - torch.maximum(-half, off - ext)).clamp(min=0)
+    share = torch.where(mask, (ov / (2 * half)).clamp(max=1.0), torch.zeros_like(ov))
+    return share.max(2).values

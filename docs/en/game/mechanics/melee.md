@@ -567,6 +567,19 @@ unit is out of contact ~4 s after the order (its own melee flag goes off only af
   losses (≤ 1 %), at their point on time. Past ones busy fighting another unit: the melee flag at 0 and 3 m (24–39 and
   5–16 s), the unit walks on without stopping, loses 2–5 %, the clanrats 3 % more. The twin: passing, it barely touches
   (0–28 s of the flag; one copy of two stopped).
+- **A unit clipping an enemy's edge does not go round it, it pushes through.** Probe `walkpass2`
+  (`tools/nn/charge_probe.py`, the same `walkpass_probe` table; 4 battles of 10 lanes,
+  `build/charge-probe/runs/20261013-033936`, `-034116`, `-034309`, `-034447`): the swordsmen's (30 m front) straight way
+  to a point beyond clanrats clips their formation by 2 / 5 / 10 / 15 m. The game plans no way round: none stepped
+  aside more than 1.4 m, as the control at a 5 m gap. The unit does not stop: with the melee flag lit it goes on, the
+  slower the more of its front runs into the enemy. Held clanrats, clipped by 2.5–3 / 5–6 / 11 / 14–15 m (a share of
+  the front 0.09 / 0.19 / 0.37 / 0.5): the net way from the first melee second until past the clanrats - at a run
+  2.68 / 2.39 / 0.78 / 0.26 m/s (free 3.0), at a walk 1.33 / 0.97 / 0.73 / 0.31 (free 1.5); straight through (probe
+  `walkpass`) 0.26 / 0.12. At 2–5 m the unit passes at almost full pace and reaches its point, but keeps the melee
+  flag there too, near the clanrats' rear (22–37 s); at 10 m, past the clanrats' centre, it is caught 5–15 m beyond it
+  to the lane's end; at 15 m it pushes in at 0.1–0.3 m/s. Clanrats busy fighting Empire spearmen shift towards them,
+  so the way clips them only by 0–6 m: a pass at 1.0–2.9 m/s. The simulator's rule is `contact.move_push`
+  ([simulator](../../training/simulator.md), "Pushing through").
 - **Leaving melee unchased is slower than in the simulator.** Probe `fatleave` (swordsmen, spearmen, greatswords
   withdraw from held clanrats 10 s after contact): the about-face (150°) takes 1.5 s — as in the simulator; but the
   centre gets 1.5 / 4.6 / 9.3 m away in 2 / 4 / 6 s (simulator 3.7 / 9.7 / 15.7), the leaver loses health until

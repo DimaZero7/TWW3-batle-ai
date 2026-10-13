@@ -946,12 +946,26 @@ def step(st, orders, params=None, dt=None):
                     & (u["men0"] > 1) & (u["range"] <= 0))
         closing = closing & ~retarget
         want = torch.where(retarget, u["walk"], want)
+    push = torch.zeros_like(closing)
+    push_cal = cal["contact"].get("move_push") or {}
+    if push_cal.get("on") and leave_m > 0:
+        # A formation under a move contact.leave_m or more away that is not a leave (given before the contact, its point
+        # through the enemy: leave_away_only) is not held where it touches the enemy: it pushes on to its point, fighting,
+        # at a share of its order's speed by the share of its front the enemy formations it touches cover across its way
+        # (geometry.blocked_share; contact.move_push walk / run tables; config/nn/sim.json contact.move_push_why: the
+        # walkpass2 probe - swordsmen whose straight way clipped held clanrats by 2-6 m went on at 0.65-0.89 of their
+        # speed with the melee flag lit, by 11 m at 0.26-0.49, by 14-15 m and straight through at 0.08-0.21).
+        push = engaged & (kind == O.MOVE) & ~leaving & (point_d >= leave_m) & (u["men0"] > 1)
+        cover = geometry.blocked_share(u, pw, touch & standing[:, None, :], u["ox"], u["oz"])
+        share = torch.where(run, movement.ramp(cover, push_cal["run"]), movement.ramp(cover, push_cal["walk"]))
+        want = torch.where(push, want * share, want)
+        closing = closing & ~push
     cx, cz = u["x"].gather(1, close_to), u["z"].gather(1, close_to)
     gx = torch.where(closing, cx, gx)
     gz = torch.where(closing, cz, gz)
     want = torch.where(closing, u["walk"], want)
     moving = moving | closing
-    locked = engaged & (~leaving | pinned) & ~closing & ~retarget
+    locked = engaged & (~leaving | pinned) & ~closing & ~retarget & ~push
     if cal["contact"].get("chase"):
         # a chaser in contact with its leaving target (above) is not held in place: it moves with it (below)
         locked = locked & ~chasing

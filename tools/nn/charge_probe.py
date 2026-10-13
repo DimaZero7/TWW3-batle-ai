@@ -258,6 +258,13 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           'inmelee': swordsmen <-> clanrats from 3 m, 10 s after contact the swordsmen get a move 40 m aside.
           Battle 1 at a run (45 s a lane), battle 2 at a walk (pass_walk, 75 s), lanes rotated - 2 battles of 10 lanes.
           Its table: python -m tools.nn.walkpass_probe [runs] [--sim].
+  walkpass2 a walker whose straight path clips an enemy's edge (walkpass covers a clear pass and a path through the
+          middle): the same swordsmen and clanrats, the walker's straight line overlapping the clanrats' formation (30 m
+          wide) by 2 / 5 / 10 / 15 m (edge_m -2 .. -15), idle or busy - busy: the Empire spearmen they attack stand at
+          their front shifted away from the walker (WALKPASS2 busy_clear_m: 5 m off the walker's line), so the walker
+          clips only the clanrats - and the controls idle / busy at a clear edge gap of 5 m. Battles 1 and 3 at a run, 2
+          and 4 at a walk, lanes rotated - 4 battles of 10 lanes. Its table (+ the path's bend and the stops): the same
+          walkpass_probe.
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -400,12 +407,16 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
          "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "ratlingrt", "ratlingrt2",
          "leave", "skirmish", "skirmish2", "shootcontact",
-         "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass") + UNIT_PLANS
+         "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2") + UNIT_PLANS
 # the walkpass plan: swordsmen walk / run (a move order, 'pass') past clanrats - idle (halted, never ordered) or busy
 # (fighting an Empire spearmen unit they attack at the go) - edge_m apart edge to edge (the formations 30 m wide), or
 # straight through them ('through'), from gap_m ahead to beyond_m behind the clanrats' front; 'inmelee': a fight from 3 m,
 # 10 s after contact a move inmelee_dx aside. Battle 1 at a run, battle 2 at a walk (lanes rotated)
 WALKPASS = {"gap_m": 30, "beyond_m": 40, "max_s": {True: 45, False: 75}, "gaps": (0, 3, 6, 10), "inmelee_dx": 40}
+# the walkpass2 plan: the walker's straight line overlapping the clanrats by `overlaps` m (edge gap negative), idle or
+# busy (the spearmen the busy clanrats attack shifted busy_clear_m off the walker's line, away from it), controls at a
+# clear edge gap control_m; battles at a run, a walk, a run, a walk (lanes rotated)
+WALKPASS2 = {"overlaps": (2, 5, 10, 15), "control_m": 5, "busy_clear_m": 5, "gaits": (True, False, True, False)}
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
 WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
@@ -940,6 +951,26 @@ def battles(plan):
             base = [wp(kind, gap, run) for kind in ("idle", "busy") for gap in g["gaps"]] + \
                 [wp("through", 0, run), wp("inmelee", 0, run)]
             out.append([dict(l, place=p) for l, p in zip(base, rotate(list(SKIRMISH2_SHORT), 5 * k))])
+    elif plan == "walkpass2":
+        g, g2 = WALKPASS, WALKPASS2
+
+        def wp2(kind, edge, run):
+            extra = {}
+            if kind == "busy":
+                # the spearmen at the clanrats' front (as walkpass), shifted away from the walker (-x) so their near
+                # edge stays busy_clear_m off the walker's line: the walker clips the clanrats only
+                e_depth = depth(UNITS["spear"][0], UNITS["spear"][1], WIDTH_M)
+                t_depth = depth(UNITS["clanrat"][0], UNITS["clanrat"][1], WIDTH_M)
+                e_dx = float(min(0, edge - g2["busy_clear_m"]))
+                extra = dict(extras=[{"short": "spear", "dx": e_dx, "dz": round(t_depth / 2 + 1.5 + e_depth / 2, 1)}],
+                             t_attack_extra=True)
+            return lane("swords", "clanrat", "pass", "hold", gap_m=g["gap_m"], fight_s=g["max_s"][run],
+                        max_s=g["max_s"][run], answer=False, kind=kind, edge_m=edge, a_w=WIDTH_M, t_w=WIDTH_M,
+                        at_run=run, a_dx=float(WIDTH_M + edge), pass_beyond_m=g["beyond_m"], pass_walk=not run, **extra)
+        edges = [-o for o in g2["overlaps"]] + [g2["control_m"]]
+        for k, run in enumerate(g2["gaits"]):
+            base = [wp2(kind, e, run) for kind in ("idle", "busy") for e in edges]
+            out.append([dict(l, place=p) for l, p in zip(base, rotate(list(SKIRMISH2_SHORT), 3 * k))])
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
