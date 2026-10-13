@@ -99,13 +99,29 @@ def sized(cfg, N, slots=22, width=1.0):
                                accum=max(1, math.ceil(width - 1e-9)))
 
 
-def optimizer(actor, critic, lr, width=1.0):
+def optimizer(actor, critic, lr, width=1.0, ability_lr=1.0):
     """Adam over the actor and the critic. In a widened network (width > 1, tools/nn/model/widen.py) the
     weights that read the copied token stream (widen.stream_readers: fan-in x width) take lr / width:
     every copy gets the gradient the small weight got and Adam moves each about lr, so their sum (what
-    the network computes) moved width times as far as in the small network (as muP's lr ~ 1 / fan-in)."""
+    the network computes) moved width times as far as in the small network (as muP's lr ~ 1 / fan-in).
+    ability_lr (--ability-lr-mult): the ability head's parameters (ppo.ABILITY_HEAD) take lr x it - Adam moves each
+    weight about lr whatever the loss's weight, so a heavier ability term barely speeds the head; this does. Not 1:
+    the parameters in groups by runs of the same lr, in the actor's then the critic's order (the order a one-group
+    optimizer has: resume maps the moments by it, both ways); 1: the one group as before."""
+    params = list(actor.parameters()) + list(critic.parameters())
+    if ability_lr != 1.0:
+        if width > 1.0:
+            raise SystemExit("--ability-lr-mult is for an unwidened network (v2)")
+        head = {id(p) for p in ppo.ability_head_params(actor)}
+        groups = []
+        for p in params:
+            plr = lr * ability_lr if id(p) in head else lr
+            if not groups or groups[-1]["lr"] != plr:
+                groups.append({"params": [], "lr": plr})
+            groups[-1]["params"].append(p)
+        return torch.optim.Adam(groups, lr=lr, eps=1e-5)
     if width <= 1.0:
-        return torch.optim.Adam(list(actor.parameters()) + list(critic.parameters()), lr=lr, eps=1e-5)
+        return torch.optim.Adam(params, lr=lr, eps=1e-5)
     from tools.nn.model import widen
     readers, rest = [], []
     for model, spec in ((actor, widen.ACTOR), (critic, widen.CRITIC)):
@@ -128,15 +144,17 @@ def resume(opt, path, fresh=()):
     saved = tr["optim"]
     counters = dict(tr.get("state") or {})
     skip = {id(p) for p in fresh}
-    groups = [[p for p in g["params"] if id(p) not in skip] for g in opt.param_groups]
-    if len(saved["param_groups"]) != len(opt.param_groups) or any(
-            len(g["params"]) != len(mine) for g, mine in zip(saved["param_groups"], groups)):
+    # the parameters in the groups' order, matched one by one whatever the groups (a one-group optimizer's state into
+    # one with the ability head's group, --ability-lr-mult, and back: optimizer() keeps the order)
+    saved_ids = [i for g in saved["param_groups"] for i in g["params"]]
+    mine = [p for g in opt.param_groups for p in g["params"] if id(p) not in skip]
+    if len(saved_ids) != len(mine):
         # (the trainer's counters go on all the same: the chain's updates keep the observation term off, its seconds
         # the entropy decay)
         print(f"{path}: the optimizer's state is of other parameters: Adam starts afresh, the counters go on", flush=True)
         return counters
     from tools.nn.model import observation as ob
-    pairs = [(i, p) for g, mine in zip(saved["param_groups"], groups) for i, p in zip(g["params"], mine)]
+    pairs = list(zip(saved_ids, mine))
     for i, p in pairs:
         st = saved["state"].get(i, {})
         if "exp_avg" in st and tuple(st["exp_avg"].shape) != tuple(p.shape):
@@ -157,8 +175,9 @@ def resume(opt, path, fresh=()):
     # the saved state renumbered as opt numbers its parameters (the fresh ones without a state)
     number = {id(p): n for n, p in enumerate(p for g in opt.param_groups for p in g["params"])}
     state = {number[id(p)]: saved["state"][i] for i, p in pairs if i in saved["state"]}
-    param_groups = [dict(g, params=[number[id(p)] for p in mine_all["params"]])
-                    for g, mine_all in zip(saved["param_groups"], opt.param_groups)]
+    # (the groups' options are opt's own: the same Adam, its lr per group restored below)
+    param_groups = [dict({k: v for k, v in g.items() if k != "params"}, params=[number[id(p)] for p in g["params"]])
+                    for g in opt.param_groups]
     lrs = [g["lr"] for g in opt.param_groups]
     opt.load_state_dict({"state": state, "param_groups": param_groups})
     for g, lr in zip(opt.param_groups, lrs):
@@ -262,6 +281,9 @@ def train(args, every=None, teacher=None, normal=None):
     ab_bonus = price == "bonus" or (price == "auto" and own)
     if ab_bonus and not args.ability_branch:
         raise SystemExit("--ability-price bonus needs --ability-branch")
+    ab_lr, ab_epochs = float(getattr(args, "ability_lr_mult", 1.0)), int(getattr(args, "ability_epochs", 1))
+    if ab_epochs > 1 and not args.ability_branch:
+        raise SystemExit("--ability-epochs needs --ability-branch (the extra passes are of the ability term)")
     device = torch.device(args.device)
     torch.manual_seed(args.seed)
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -307,7 +329,7 @@ def train(args, every=None, teacher=None, normal=None):
                         entropy=args.entropy, anchor=args.anchor, adv_norm=args.adv_norm, eyes=args.eyes_weight)
     width = actor.cfg.d / model_config.SMALL.d
     # (v2 is trained from scratch, not widened from a small network: no lr / width on the stream's readers)
-    opt = optimizer(actor, critic, cfg.lr, 1.0 if actor.cfg.sectors else width)
+    opt = optimizer(actor, critic, cfg.lr, 1.0 if actor.cfg.sectors else width, ab_lr)
     # Adam's moments and the trainer's counters from --init (saved with latest.pt and m<minute>.pt): the next part of
     # a chain goes on as one run. Only when the critic comes from the same file (else its moments are another's).
     carried = None
@@ -451,7 +473,8 @@ def train(args, every=None, teacher=None, normal=None):
             own=own), device)
         if own:
             print(f"ability branches: {env.brancher.cfg}; the ability head's own signal: weight {ab_own_w:g} (no decay), "
-                  f"body gradient x {ab_body:g}, price {env.brancher.price_kind()}", flush=True)
+                  f"body gradient x {ab_body:g}, price {env.brancher.price_kind()}, head lr x {ab_lr:g}, "
+                  f"ability epochs {ab_epochs}", flush=True)
         else:
             print(f"ability branches: {env.brancher.cfg}, weight {args.ability_branch_weight:g} -> 0 over "
                   f"{args.ability_branch_decay} updates (from update {ab_updates0} of the chain)", flush=True)
@@ -475,7 +498,8 @@ def train(args, every=None, teacher=None, normal=None):
     # (ppo.update; 8.1 -> 5.6 MB a decision) it took one part more: 3 parts peaked at 12.0 GB of the 16 GB card, and a
     # little more pushed the card into its shared memory (an update 10 s -> 157 s); now 2 parts peak at 12.2 GB, 3 at
     # 10.1 GB (line W's batch, 1024 battles x 64 decisions)
-    step_cfg = dataclasses.replace(sized(cfg, env.N, width=width), ability_own=own, ability_body_grad=ab_body)
+    step_cfg = dataclasses.replace(sized(cfg, env.N, width=width), ability_own=own, ability_body_grad=ab_body,
+                                   ability_epochs=ab_epochs)
     if args.parts:                                # --parts: the minibatch in this many parts, whatever the size
         step_cfg = dataclasses.replace(step_cfg, accum=args.parts)
     log = (out / "log.jsonl").open("w", encoding="utf-8", newline="\n")
@@ -1109,6 +1133,13 @@ def parser():
                          "0: none)")
     ap.add_argument("--ability-weight", type=float, default=None,
                     help="... the ability head's own term's weight (default 1.0 under the own signal)")
+    ap.add_argument("--ability-lr-mult", type=float, default=1.0,
+                    help="the ability head's parameters (ppo.ABILITY_HEAD) learn at --lr x this (an Adam group of their "
+                         "own; 1: as the rest)")
+    ap.add_argument("--ability-epochs", type=int, default=1,
+                    help="passes of the ability term over each update's priced rows: the main one + this - 1 of the "
+                         "ability head alone on the stored thoughts, each clipped on the ability ratio (needs "
+                         "--ability-branch; ppo.ability_epochs)")
     ap.add_argument("--ability-price", default="auto", choices=("auto", "branch", "bonus"),
                     help="... the press's price: bonus - a valid ability's by its bonuses (config/ability_price.json, "
                          "abilities_price/train_price.py), the others by the branches; branch - all by the branches; "

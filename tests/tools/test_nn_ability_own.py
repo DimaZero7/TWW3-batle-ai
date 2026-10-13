@@ -143,3 +143,143 @@ def test_run_own_signal_logs_a_constant_weight_and_saves_the_price_kind(tmp_path
     assert all("ability_kl" in r and "press_rate" in r["ability_branch"] for r in rows)
     ts = checkpoint.train_state(out / "latest.pt")
     assert ts["ability_critic_kind"] == "openloop+bonus"
+
+
+# --- the ability head's own lr (run.py --ability-lr-mult) and extra epochs (--ability-epochs, ppo.ability_epochs) ---
+
+def own_cfg(**kw):
+    return dataclasses.replace(ppo.PPOConfig(), minibatch=10_000, ability=1.0, ability_own=True, ability_body_grad=0.1,
+                               target_kl=0.0, **kw)
+
+
+def copies(actor, crit):
+    a, c = policy.Actor(TINY), mcritic.Critic(TINY)
+    a.load_state_dict(actor.state_dict())
+    c.load_state_dict(crit.state_dict())
+    return a.eval(), c.eval()
+
+
+def priced(batch):
+    """The batch with a nonzero advantage on every priced row (the term has a gradient to give)."""
+    br = dict(batch["abil_branch"])
+    m = br["mask"]
+    br["adv"] = torch.where(m, torch.linspace(-1, 1, m.numel()).reshape(m.shape), br["adv"])
+    return dict(batch, abil_branch=br)
+
+
+def test_the_head_group_is_the_ability_head_only_and_a_multiplier_of_1_keeps_one_group():
+    from tools.nn.train import run
+    actor, crit = tiny()
+    names = [n for n, _ in actor.named_parameters() if n.startswith(ppo.ABILITY_HEAD)]
+    assert names and all(n.startswith(ABILITY) for n in names)
+    assert len(run.optimizer(actor, crit, 1e-4).param_groups) == 1
+    opt = run.optimizer(actor, crit, 1e-4, ability_lr=3.0)
+    assert len(opt.param_groups) == 3
+    head = {id(p) for p in ppo.ability_head_params(actor)}
+    for g in opt.param_groups:
+        inside = id(g["params"][0]) in head
+        assert g["lr"] == pytest.approx(3e-4 if inside else 1e-4)
+        assert all((id(p) in head) == inside for p in g["params"])
+    # the groups keep the one-group order (resume maps the moments by it)
+    flat = [id(p) for g in opt.param_groups for p in g["params"]]
+    assert flat == [id(p) for p in list(actor.parameters()) + list(crit.parameters())]
+
+
+def test_the_multiplier_moves_only_the_heads_weights_faster():
+    from tools.nn.train import run
+    actor, crit, env, batch = collected()
+    batch = priced(batch)
+    moved = {}
+    for mult in (1.0, 10.0):
+        a, c = copies(actor, crit)
+        before = {n: p.detach().clone() for n, p in a.named_parameters()}
+        torch.manual_seed(1)                      # (the minibatch's row order)
+        ppo.update(a, c, run.optimizer(a, c, 1e-3, ability_lr=mult), batch, own_cfg())
+        moved[mult] = {n: p.detach() - before[n] for n, p in a.named_parameters()}
+    assert any(nonzero(d) for n, d in moved[1.0].items() if n.startswith(ppo.ABILITY_HEAD))
+    for n, d in moved[1.0].items():
+        if n.startswith(ppo.ABILITY_HEAD):        # Adam's first step is lr x mhat / (sqrt(vhat) + eps): x the multiplier
+            # (atol: the float32 rounding of weight + step, ~1e-7 of the weight)
+            assert torch.allclose(moved[10.0][n], 10.0 * d, rtol=1e-3, atol=1e-6), n
+        else:                                     # one minibatch: the rest took the very same step
+            assert torch.equal(moved[10.0][n], d), n
+
+
+def test_adam_moments_carry_between_one_group_and_the_heads_group(tmp_path):
+    from tools.nn.train import run
+    actor, crit, env, batch = collected()
+    batch = priced(batch)
+    for saved_mult, new_mult in ((1.0, 4.0), (4.0, 1.0)):
+        a, c = copies(actor, crit)
+        opt = run.optimizer(a, c, 1e-3, ability_lr=saved_mult)
+        ppo.update(a, c, opt, batch, own_cfg())
+        path = checkpoint.save(tmp_path / f"s{saved_mult}.pt", a, c, "v2",
+                               train={"optim": opt.state_dict(), "state": {}})
+        new = run.optimizer(a, c, 1e-3, ability_lr=new_mult)
+        assert run.resume(new, path) == {}
+        for p in list(a.parameters()) + list(c.parameters()):
+            old_st, new_st = opt.state.get(p, {}), new.state.get(p, {})
+            assert set(old_st) == set(new_st) and old_st
+            for k in old_st:
+                assert torch.equal(old_st[k].cpu(), new_st[k].cpu())
+        head = {id(p) for p in ppo.ability_head_params(a)}
+        for g in new.param_groups:                  # the learning rates stay the new optimizer's
+            assert g["lr"] == pytest.approx(1e-3 * (new_mult if id(g["params"][0]) in head else 1.0))
+
+
+def test_the_heads_logits_from_the_stored_thought_are_the_forward_passes():
+    actor, crit, env, batch = collected()
+    obs = rollout.full_obs(batch["obs"], batch.get("abil_static"))
+    with ppo.ThoughtTap(actor, True) as tap, torch.no_grad():
+        assert tap.on
+        logits, _ = actor.sequence(obs, batch["h0"], batch["reset"], batch["action"])
+        u = tap.take()
+    assert u is not None and not actor.heads.ability_none._forward_hooks          # the hook is gone after
+    flat = {k: v.reshape(-1, *v.shape[2:]) for k, v in obs.items()}
+    with torch.no_grad():
+        mine = ppo.head_ability_logits(actor.heads, u, flat, flat["ctrl"])
+    assert torch.equal(mine, logits["ability"].reshape(mine.shape))
+
+
+def test_extra_ability_epochs_move_only_the_head_and_log_their_kl():
+    from tools.nn.train import run
+    actor, crit, env, batch = collected()
+    batch = priced(batch)
+    after, out = {}, {}
+    for epochs in (1, 3):
+        a, c = copies(actor, crit)
+        torch.manual_seed(1)
+        out[epochs] = ppo.update(a, c, run.optimizer(a, c, 1e-3), batch, own_cfg(ability_epochs=epochs))
+        after[epochs] = {n: p.detach().clone() for n, p in list(a.named_parameters()) + list(c.named_parameters())}
+    for n, p in after[1].items():
+        if not n.startswith(ppo.ABILITY_HEAD):
+            assert torch.equal(after[3][n], p), n          # the body, the other heads and the critic: as with one pass
+    assert any(not torch.equal(after[3][n], p) for n, p in after[1].items() if n.startswith(ppo.ABILITY_HEAD))
+    assert "ability_extra_kl" not in out[1] and "ability_branch_kl" in out[1] and "ability_branch_clip" in out[1]
+    o = out[3]
+    assert o["ability_extra_steps"] == 2 * o["minibatches"] and o["ability_extra_rows"] > 0
+    assert 0.0 <= o["ability_extra_clip"] <= 1.0 and 0.0 <= o["ability_branch_clip"] <= 1.0
+    # the extra passes go on from where the main one left the head: further from the rollout's policy
+    assert o["ability_extra_kl"] > o["ability_branch_kl"] >= 0.0
+
+
+def test_run_takes_the_heads_lr_and_epochs(tmp_path, monkeypatch):
+    from tools.nn.train import run
+    monkeypatch.setattr(checkpoint, "DIR", tmp_path)
+    monkeypatch.setitem(config.PRESETS, "v2", TINY)
+    actor, crit = tiny()
+    init = checkpoint.save(tmp_path / "init.pt", actor, crit, "v2")
+    args = run.parser().parse_args(["--name", "lr", "--init", str(init), "--reward", "v2", "--battles", "4",
+                                    "--steps", "2", "--updates", "2", "--minutes", "5", "--device", "cpu", "--no-eval",
+                                    "--mix", '{"self": 0.5, "nearest": 0.5}', "--bank", "8", "--max-units", "4",
+                                    "--ability-branch", "1.0", "--ability-branch-missed", "1.0",
+                                    "--ability-branch-copies", "1", "--ability-branch-horizon", "2",
+                                    "--ability-branch-batch", "4", "--ability-branch-openloop", "--ability-own-signal",
+                                    "--ability-lr-mult", "3", "--ability-epochs", "2"])
+    _, _, out = run.train(args)
+    rows = [json.loads(x) for x in (out / "log.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert rows and all("ability_branch_kl" in r and "ability_branch_clip" in r for r in rows)
+    assert any("ability_extra_kl" in r for r in rows)
+    with pytest.raises(SystemExit):
+        run.train(run.parser().parse_args(["--name", "x", "--init", str(init), "--ability-epochs", "2",
+                                           "--device", "cpu"]))

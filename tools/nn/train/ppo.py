@@ -80,6 +80,8 @@ class PPOConfig:
     #                            surrogate (and of the KL's main part), run.py --ability-own-signal
     ability_body_grad: float = 1.0  # the gradient through the ability head's input (the unit's thought) x this: the
     #                                 body's share of the ability term (0: none); used under ability_own
+    ability_epochs: int = 1    # passes of the ability term over the update's priced rows: the main one + this - 1 of the
+    #                            ability head alone on the stored thoughts (ability_epochs; run.py --ability-epochs)
 
 
 def gae(rewards, values, dones, last_value, gamma, lam):
@@ -127,6 +129,124 @@ def ability_term(logits, act, branch, ctrl, clip, lp=None):
     surrogate = torch.minimum(ratio * a, ratio.clamp(1 - clip, 1 + clip) * a)
     n = ctrl.float().sum().clamp(min=1)
     return -(surrogate * m.float()).sum() / n, m.float().sum()
+
+
+# The ability head's own parameters (ChainHeads / Heads): the unit's query, the slots' key (its encoder of the slot's
+# state and passport) and the "none" logit. Not the heads' norm, nor the body (encoder.py AbilityEncoder / AbilityExtra
+# feed the unit's token: the shared body). run.py --ability-lr-mult gives them an Adam group of their own
+ABILITY_HEAD = ("heads.ability_q.", "heads.ability_k.", "heads.ability_none.")
+
+
+def ability_head_params(actor):
+    """[parameters] of the ability head (ABILITY_HEAD), in the actor's order."""
+    return [p for n, p in actor.named_parameters() if n.startswith(ABILITY_HEAD)]
+
+
+def head_ability_logits(heads, u, obs_t, ctrl):
+    """[B, N, 1 + ACTIVE] the ability logits of ChainHeads.forward (tools/nn/model/chain.py: the same operations, kept
+    here so the model's files - the simulator's version, version.py - stay as they are; a test holds them equal) from
+    the units' thought u [B, N, d] (after the heads' norm): the ability head alone."""
+    from tools.nn.model import chain
+    usable = obs_t["abil_ok"] & ctrl[..., None]
+    bad = u.new_zeros(u.shape[0])
+    score, bad = chain._cap(heads._ability_scores(u, obs_t, usable), bad)
+    slot = torch.where(usable, score, torch.full_like(score, hd.NEG))
+    none, bad = chain._cap(heads.ability_none(u), bad)
+    return torch.cat([none, slot], -1)
+
+
+class ThoughtTap:
+    """Within it (on), every run of the ability head keeps its input - the units' thought u [B, N, d], detached - in
+    .u (a forward hook on heads.ability_none): the update stores the priced rows' thoughts for the extra ability epochs
+    (ability_epochs). Off, or an actor without the chained heads (chain.ChainHeads): nothing."""
+
+    def __init__(self, actor, on):
+        heads = getattr(actor, "heads", None)
+        self.on = bool(on) and hasattr(heads, "_ability_scores")
+        self.heads, self.u, self.handle = heads, None, None
+
+    def __enter__(self):
+        if self.on:
+            self.handle = self.heads.ability_none.register_forward_hook(
+                lambda mod, args, out: setattr(self, "u", args[0].detach()))
+        return self
+
+    def take(self):
+        u, self.u = self.u, None
+        return u
+
+    def __exit__(self, *exc):
+        if self.handle is not None:
+            self.handle.remove()
+        self.handle, self.u = None, None
+        return False
+
+
+def ability_rows(u, obs, ctrl, act, branch, n_ctrl, share):
+    """A part's priced rows kept for the extra ability epochs: the thought u [S, N, d] (ThoughtTap), the slots
+    (obs abil / abil_idx / abil_ok [S, N, ..]), ctrl [S, N], the ability chosen, the branches' advantage and old
+    log-probability (branch [S, N]) where branch["mask"]; n_ctrl: the part's units that take orders (ability_term's
+    divisor), share: the part's share of its minibatch."""
+    b, n = branch["mask"].nonzero(as_tuple=True)
+    return {"u": u[b, n], "abil": obs["abil"][b, n], "abil_idx": obs["abil_idx"][b, n], "abil_ok": obs["abil_ok"][b, n],
+            "ctrl": ctrl[b, n], "ability": act.ability[b, n], "adv": branch["adv"][b, n], "lp": branch["lp"][b, n],
+            "n": n_ctrl, "share": share}
+
+
+def kl_k3(ratio):
+    """Per row, (ratio - 1) - log ratio (ratio = new / old probability of the choice made): an unbiased estimate of
+    KL(old || new) that is never negative (Schulman's k3); the plain old - new log-probability can come out negative
+    over the few dozen priced rows of a minibatch."""
+    return (ratio - 1) - torch.log(ratio)
+
+
+def ability_epochs(actor, opt, cache, cfg):
+    """cfg.ability_epochs - 1 more passes of the ability term (as ability_term: the clipped surrogate of the ability
+    ratio, new / the rollout's) over the update's stored priced rows (cache: per minibatch, its parts' ability_rows),
+    by the ability head alone (head_ability_logits on the stored thoughts: no body, no memory), one optimizer step
+    a minibatch (Adam steps only the parameters with a gradient: the head's), its gradient clipped to max_grad. -> the
+    last pass's stats (each minibatch's before its step): ability_extra_kl (the head's KL(old || new) over the priced
+    rows, kl_k3), ability_extra_clip (their share with |ratio - 1| > clip), ability_extra_loss (a minibatch's term),
+    ability_extra_rows (priced rows a minibatch), ability_extra_steps, ability_extra_skipped (non-finite gradients)."""
+    params = ability_head_params(actor)
+    heads = actor.heads
+    zero = torch.zeros((), dtype=torch.float64, device=params[0].device)
+    kl_s, clip_s, rows, loss_s, steps, skipped = zero, zero, zero, zero, 0, 0
+    full = [mb for mb in cache if any(c["u"].shape[0] for c in mb)]
+    for e in range(cfg.ability_epochs - 1):
+        last = e == cfg.ability_epochs - 2
+        for i in torch.randperm(len(full)).tolist():
+            opt.zero_grad(set_to_none=True)
+            for c in full[i]:
+                M = c["u"].shape[0]
+                if not M:
+                    continue
+                obs_t = {k: c[k][:, None] for k in ("abil", "abil_idx", "abil_ok")}
+                logits = head_ability_logits(heads, c["u"][:, None], obs_t, c["ctrl"][:, None])
+                lp = ability_log_prob({"ability": logits}, hd.Action(None, None, None, None, c["ability"][:, None]))[:, 0]
+                ratio = torch.exp(lp - c["lp"])
+                a = c["adv"]
+                surrogate = torch.minimum(ratio * a, ratio.clamp(1 - cfg.clip, 1 + cfg.clip) * a)
+                term = -surrogate.sum() / c["n"]
+                (cfg.ability * term * c["share"]).backward()
+                if last:
+                    with torch.no_grad():
+                        kl_s = kl_s + _f(kl_k3(ratio).sum())
+                        clip_s = clip_s + _f(((ratio - 1).abs() > cfg.clip).sum())
+                        rows = rows + M
+                        loss_s = loss_s + _f(term) * c["share"]
+            gn = torch.nn.utils.clip_grad_norm_(params, cfg.max_grad)
+            if bool(torch.isfinite(gn)):
+                opt.step()
+            else:                                    # a non-finite gradient: no step
+                skipped += 1
+            steps += 1
+    opt.zero_grad(set_to_none=True)
+    r = _read({"kl": kl_s, "clip": clip_s, "rows": rows, "loss": loss_s})
+    n_mb = max(1, len(full))
+    return {"ability_extra_kl": r["kl"] / max(1.0, r["rows"]), "ability_extra_clip": r["clip"] / max(1.0, r["rows"]),
+            "ability_extra_loss": r["loss"] / n_mb, "ability_extra_rows": r["rows"] / n_mb,
+            "ability_extra_steps": float(steps), "ability_extra_skipped": float(skipped)}
 
 
 def scale_grad(x, s):
@@ -290,11 +410,14 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
     """Some epochs of minibatch updates on one rollout (batch from rollout.collect). -> stats (_update). Under the
     ability head's own signal (cfg.ability_own) the gradient through the ability head's input is x
     cfg.ability_body_grad (AbilityInputGrad)."""
-    with AbilityInputGrad(actor, cfg.ability_body_grad if cfg.ability_own else 1.0):
-        return _update(actor, critic, opt, batch, cfg, train_policy, reference, teach, observe)
+    extra = (cfg.ability_epochs > 1 and train_policy and bool(cfg.ability) and batch.get("abil_branch") is not None
+             and batch["action"].ability is not None)
+    with AbilityInputGrad(actor, cfg.ability_body_grad if cfg.ability_own else 1.0), ThoughtTap(actor, extra) as tap:
+        return _update(actor, critic, opt, batch, cfg, train_policy, reference, teach, observe, tap if tap.on else None)
 
 
-def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, reference=None, teach=None, observe=None):
+def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, reference=None, teach=None, observe=None,
+            tap=None):
     """Some epochs of minibatch updates on one rollout (batch from rollout.collect). -> stats.
     train_policy False: the critic only (a warm-up for a critic that starts from nothing while the
     actor already plays: a checkpoint saved without one). reference: a frozen actor (e.g. the one the
@@ -308,7 +431,11 @@ def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refer
 
     cfg.ability_own: the ability head's log-probability is left out of the main surrogate (the main advantage no longer
     trains it; its old part comes from the branches' batch["abil_branch"]["lp_all"]); the KL for target_kl stays the
-    whole action's (the main part's + the ability head's, logged apart as ability_kl)."""
+    whole action's (the main part's + the ability head's, logged apart as ability_kl).
+
+    tap (ThoughtTap; cfg.ability_epochs > 1): the priced rows' thoughts are kept, and after the epochs the ability head
+    alone takes cfg.ability_epochs - 1 more passes over them (ability_epochs). Whenever the ability term is on, its KL
+    and clip share on the priced rows are logged (ability_branch_kl, ability_branch_clip)."""
     adv, ret = gae(batch["reward"], batch["value"], batch["done"], batch["last_value"], cfg.gamma, cfg.lam)
     T, R = adv.shape
     # The actor's and the critic's gradients are clipped apart (each to max_grad). Clipped together
@@ -350,6 +477,9 @@ def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refer
     if branch is not None:
         stats["ability_branch_loss"] = 0.0      # the term (before its weight), a minibatch's mean
         stats["ability_branch_rows"] = 0.0      # priced rows a minibatch
+        stats["ability_branch_kl"] = 0.0        # the ability head's KL(old || new) over the priced rows (kl_k3)
+        stats["ability_branch_clip"] = 0.0      # their share with the ability ratio outside the clip
+    cache = [] if tap is not None and branch is not None else None   # per minibatch: its parts' priced rows
     head_w = dict(cfg.heads)
     head_acc = {}                                # head -> [share x rows, nats x rows, rows] (head_entropy.measure)
     need_kl = bool(train_policy and cfg.target_kl)
@@ -362,6 +492,7 @@ def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refer
                               and batch.get("attacks") is not None else None).reshape(T, len(idx))
             parts = torch.arange(len(idx), device=idx.device).tensor_split(max(1, min(cfg.accum, len(idx))))
             opt.zero_grad(set_to_none=True)
+            kept = []
             step = dict.fromkeys(("policy_loss", "value_loss", "entropy", "kl", "clip", "entropy_all", "anchor_kl")
                                  + tuple(k for k in stats if k.startswith("eyes_") or k.startswith("ability_branch_")
                                          or k == "ability_kl"), 0.0)
@@ -445,11 +576,20 @@ def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refer
                             step[f"eyes_ref_{h}"] += _f(ref) * share
                     branched = torch.zeros((), device=adv.device)
                     if branch is not None and "ability" in logits:
-                        branched, priced = ability_term(logits, act, {k: _rows(v, pidx) for k, v in branch.items()
-                                                                      if k in ("adv", "mask", "lp")},
-                                                        ctrl, cfg.clip, lp=lp_ab)
+                        br = {k: _rows(v, pidx) for k, v in branch.items() if k in ("adv", "mask", "lp")}
+                        lp_b = lp_ab if lp_ab is not None else ability_log_prob(logits, act)
+                        branched, priced = ability_term(logits, act, br, ctrl, cfg.clip, lp=lp_b)
                         step["ability_branch_loss"] += _f(branched) * share
                         step["ability_branch_rows"] += _f(priced)
+                        with torch.no_grad():
+                            ratio_b = torch.exp(torch.where(br["mask"], lp_b - br["lp"], torch.zeros_like(lp_b)))
+                            step["ability_branch_kl"] += _f(masked_mean(kl_k3(ratio_b), br["mask"])) * share
+                            step["ability_branch_clip"] += _f(masked_mean(((ratio_b - 1).abs() > cfg.clip).float(),
+                                                                          br["mask"])) * share
+                        if cache is not None:
+                            flat = {k: obs[k].reshape(-1, *obs[k].shape[2:]) for k in ("abil", "abil_idx", "abil_ok")}
+                            kept.append(ability_rows(tap.take(), flat, ctrl, act, br, ctrl.float().sum().clamp(min=1),
+                                                     share))
                 policy_part = (pl - cfg.entropy * entropy + cfg.anchor * anchored + imitation + cfg.eyes * seen
                                + (obs_anchor * observed if obs_on else 0.0) - (spread if spread is not None else 0.0)
                                + cfg.ability * branched)
@@ -467,6 +607,8 @@ def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refer
             if obs_on and obs_term:
                 # the demonstrations: their own chunks, one backward pass beside the minibatch's
                 lo, so = observe.term(actor)
+                if tap is not None:
+                    tap.take()                       # (the demonstrations' thoughts: not kept)
                 (obs_w * lo).backward()
                 obs_acc["loss"] += float(lo.detach())
                 obs_n += 1
@@ -485,6 +627,8 @@ def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refer
             else:                                    # a non-finite gradient: no step (it would poison the weights)
                 stats["skipped"] = stats.get("skipped", 0.0) + 1.0
                 opt.zero_grad(set_to_none=True)
+            if cache is not None:
+                cache.append(kept)
             step["grad_norm"], step["grad_norm_critic"] = _f(grad_norm), _f(grad_norm_critic)
             for k, x in step.items():
                 stats[k] += x
@@ -494,11 +638,14 @@ def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refer
                 break
         if stop:
             break
+    extra_stats = ability_epochs(actor, opt, cache, cfg) if cache else {}
+    del cache
     actor.eval()
     critic.eval()
     stats = _read(stats)
     out = {k: v / max(1, n) for k, v in stats.items()}
     out["minibatches"] = n
+    out.update(extra_stats)
     out["skipped"] = stats.get("skipped", 0.0)
     for h in meyes.HEADS:
         # explained share over the whole update (one minibatch whose targets are all ~0 gave -270 averaged per

@@ -42,7 +42,7 @@ bash tools/nn/dock.sh tools.nn.train.checkpoint                  # записа�
 | учения | `--drills` (0: доля боёв), `--drill-weights` (json; по умолчанию учения `TRAIN` поровну: kiting, hold_fire), `--drill-bank` (256 на учение), `--drill-embed` (1: доля встроенной рамки, у учений, где она есть), `--drill-broad` (0.5: из остальных доля широкой рамки), `--drill-teach` (`auto` или json {учение: вес}: учитель, по умолчанию выключен), `--drill-teach-minutes` (10: ручной), `--drill-teach-k` (0.5), `--drill-teach-cap` (0.25), `--drill-teach-weight` (0.15: auto), `--teach-normal` (`auto`, имена или json {учение: доля}: учитель в обычных боях, по умолчанию выключен), `--teach-normal-k` (0.5), `--teach-normal-cap` (0.15), `--teach-normal-weight` (0.1), `--teach-normal-match` (0.1): [учения](#учения) |
 | наблюдение | `--observe-dir` (выкл.: папка разобранных боёв), `--observe-share` (0,1), `--observe-weight` (0,1), `--observe-decay` (0,95), `--observe-anchor` (0,2), `--observe-anchor-decay` (0,995), `--observe-anchor-alone` (выкл.: якорь кончается с членом), `--observe-adv` (`critic`), `--observe-beta` (1), `--observe-clip` (20), `--observe-steps` (0: `--steps`), `--observe-refresh` (20): [обучение через наблюдение](#обучение-через-наблюдение) |
 | кайтинг в самоигре | `--kite-share` (0: доля начатых боёв `self` / `past`, план 0,1), `--kite-bank` (256 готовых боёв): [кайтинг в самоигре](#кайтинг-в-самоигре) |
-| способности по действию | `--ability-branch` (0: выкл.; доля нажатий в ветки), `--ability-branch-missed` (0,005), `--ability-branch-copies` (4), `--ability-branch-horizon` (60 с), `--ability-branch-hold` (0 с), `--ability-branch-openloop` (выкл.), `--ability-branch-greedy` (выкл.), `--ability-branch-cap` (0: нет), `--ability-branch-batch` (128), `--ability-branch-weight` (0,1), `--ability-branch-decay` (300 обновлений); критик способностей `--ability-critic` (выкл.), `--ability-critic-weight` (1), `--ability-critic-warmup` (2 000), `--ability-critic-buffer` (25 000): [способности по действию](#способности-по-их-действию-ветки); собственный сигнал головы `--ability-own-signal` (выкл.), `--ability-weight` (1,0), `--ability-body-grad` (0,1), `--ability-price` (auto), `--ability-price-file` (`config/ability_price.json`): [собственный сигнал](#собственный-сигнал-головы-способностей) |
+| способности по действию | `--ability-branch` (0: выкл.; доля нажатий в ветки), `--ability-branch-missed` (0,005), `--ability-branch-copies` (4), `--ability-branch-horizon` (60 с), `--ability-branch-hold` (0 с), `--ability-branch-openloop` (выкл.), `--ability-branch-greedy` (выкл.), `--ability-branch-cap` (0: нет), `--ability-branch-batch` (128), `--ability-branch-weight` (0,1), `--ability-branch-decay` (300 обновлений); критик способностей `--ability-critic` (выкл.), `--ability-critic-weight` (1), `--ability-critic-warmup` (2 000), `--ability-critic-buffer` (25 000): [способности по действию](#способности-по-их-действию-ветки); собственный сигнал головы `--ability-own-signal` (выкл.), `--ability-weight` (1,0), `--ability-body-grad` (0,1), `--ability-lr-mult` (1,0), `--ability-epochs` (1), `--ability-price` (auto), `--ability-price-file` (`config/ability_price.json`): [собственный сигнал](#собственный-сигнал-головы-способностей) |
 
 ### Настройки цепочки
 
@@ -833,6 +833,22 @@ python -m tools.nn.observe.convert --list build/observe/aivai_ok.txt [--limit 5]
   отряда — вход слоёв `ability_q` и `ability_none`), умножается на `--ability-body-grad` (0,1; 0 — не уходит совсем).
   Прямой проход не меняется (бит в бит, тест); множитель действует только во время обновления (`ppo.AbilityInputGrad`:
   крючки на этих двух слоях).
+- **Свой шаг головы.** Adam двигает каждый вес примерно на lr, какой бы ни был вес члена, поэтому `--ability-weight`
+  почти не ускоряет голову. Два рычага (по умолчанию выключены — обновление бит в бит прежнее, тест):
+  - `--ability-lr-mult` (1,0): веса головы (`ability_q`, `ability_k` — кодировщик ключа слота, `ability_none`;
+    `ppo.ABILITY_HEAD`) учатся с lr × множитель — своя группа Adam. Норма голов, ствол и кодировщики способностей в
+    стволе (`AbilityEncoder`, `AbilityExtra`) — с общим lr. Группы идут в прежнем порядке весов, поэтому моменты Adam
+    переносятся из старых чекпойнтов в новые группы и обратно (`run.resume`, проверено на itS25_19).
+  - `--ability-epochs` (1; нужен `--ability-branch`): после обычного прохода ещё N − 1 проходов только члена способностей
+    по оценённым строкам порции, одной головой. Мысль отряда (вход головы) запоминается в обычном проходе
+    (`ppo.ThoughtTap`), лишние проходы считают логиты головы по ней (`ppo.head_ability_logits` — те же операции, что в
+    `ChainHeads`; тест держит их равными), без ствола и памяти: дёшево. Обрезка — по отношению вероятностей способности
+    к записанной при сборе, как в обычном проходе; шаг Adam только у весов головы (у остальных нет градиента).
+  - Журнал на каждом обновлении: `ability_branch_kl` (KL головы старая → новая на оценённых строках, оценка
+    (r − 1) − ln r, не бывает < 0), `ability_branch_clip` (доля строк за обрезкой) — в обычном проходе;
+    `ability_extra_kl`, `ability_extra_clip`, `ability_extra_loss`, `ability_extra_rows`, `ability_extra_steps` — в
+    последнем лишнем проходе. Проба на itS25_19 (процессор, 8 боёв × 4 решения, множитель 3, 3 прохода): 20–43
+    оценённые строки на порцию, в последнем лишнем проходе KL 0,01–0,02, за обрезкой 14–25 %.
 - **Цена нажатия** (`--ability-price`; `auto` = `bonus` под этим флагом, иначе `branch`). Годная способность («Стой
   насмерть», «Смертельный натиск», «Охотник на врагов» — по карточке годности) — [цена по бонусам](ability_price.md):
   счётчики кирпичей на траектории ветки «нажал» (ветка и так играется, запись раз в решение — `collect.Recorder`),

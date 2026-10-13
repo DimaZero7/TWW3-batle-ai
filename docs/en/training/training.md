@@ -42,7 +42,7 @@ The first steps compile for 1–3 minutes (seconds once a run of the same shapes
 | drills | `--drills` (0: share of the battles), `--drill-weights` (json; default the `TRAIN` drills equally: kiting, hold_fire), `--drill-bank` (256 per drill), `--drill-embed` (1: share of the embedded frame, for the drills that have one), `--drill-broad` (0.5: of the rest, share of the broad frame), `--drill-teach` (`auto` or json {drill: weight}: the teacher, off by default), `--drill-teach-minutes` (10: manual), `--drill-teach-k` (0.5), `--drill-teach-cap` (0.25), `--drill-teach-weight` (0.15: auto), `--teach-normal` (`auto`, names or json {drill: share}: the teacher in normal battles, off by default), `--teach-normal-k` (0.5), `--teach-normal-cap` (0.15), `--teach-normal-weight` (0.1), `--teach-normal-match` (0.1): [drills](#drills) |
 | observation | `--observe-dir` (off: the folder of converted battles), `--observe-share` (0.1), `--observe-weight` (0.1), `--observe-decay` (0.95), `--observe-anchor` (0.2), `--observe-anchor-decay` (0.995), `--observe-anchor-alone` (off: the anchor ends with the term), `--observe-adv` (`critic`), `--observe-beta` (1), `--observe-clip` (20), `--observe-steps` (0: `--steps`), `--observe-refresh` (20): [learning by observation](#learning-by-observation) |
 | kiting in self-play | `--kite-share` (0: share of the `self` / `past` battles started, planned 0.1), `--kite-bank` (256 battles ready): [kiting in self-play](#kiting-in-self-play) |
-| abilities by their effect | `--ability-branch` (0: off; the share of presses branched), `--ability-branch-missed` (0.005), `--ability-branch-copies` (4), `--ability-branch-horizon` (60 s), `--ability-branch-hold` (0 s), `--ability-branch-openloop` (off), `--ability-branch-greedy` (off), `--ability-branch-cap` (0: none), `--ability-branch-batch` (128), `--ability-branch-weight` (0.1), `--ability-branch-decay` (300 updates); the ability critic `--ability-critic` (off), `--ability-critic-weight` (1), `--ability-critic-warmup` (2,000), `--ability-critic-buffer` (25,000): [abilities by their effect](#abilities-by-their-effect-branches); the ability head's own signal `--ability-own-signal` (off), `--ability-weight` (1.0), `--ability-body-grad` (0.1), `--ability-price` (auto), `--ability-price-file` (`config/ability_price.json`): [own signal](#the-ability-heads-own-signal) |
+| abilities by their effect | `--ability-branch` (0: off; the share of presses branched), `--ability-branch-missed` (0.005), `--ability-branch-copies` (4), `--ability-branch-horizon` (60 s), `--ability-branch-hold` (0 s), `--ability-branch-openloop` (off), `--ability-branch-greedy` (off), `--ability-branch-cap` (0: none), `--ability-branch-batch` (128), `--ability-branch-weight` (0.1), `--ability-branch-decay` (300 updates); the ability critic `--ability-critic` (off), `--ability-critic-weight` (1), `--ability-critic-warmup` (2,000), `--ability-critic-buffer` (25,000): [abilities by their effect](#abilities-by-their-effect-branches); the ability head's own signal `--ability-own-signal` (off), `--ability-weight` (1.0), `--ability-body-grad` (0.1), `--ability-lr-mult` (1.0), `--ability-epochs` (1), `--ability-price` (auto), `--ability-price-file` (`config/ability_price.json`): [own signal](#the-ability-heads-own-signal) |
 
 ### The chain's settings
 
@@ -855,6 +855,23 @@ is ready at once.
   unit's thought - the input of the `ability_q` and `ability_none` layers) is multiplied by `--ability-body-grad`
   (0.1; 0 - none at all). The forward pass does not change (bit for bit, a test); the factor acts only during the
   update (`ppo.AbilityInputGrad`: hooks on those two layers).
+- **The head's own step.** Adam moves every weight by about lr whatever the term's weight, so `--ability-weight` barely
+  speeds the head up. Two levers (off by default - the update is bit for bit the old one, a test):
+  - `--ability-lr-mult` (1.0): the head's weights (`ability_q`, `ability_k` - the slot key's encoder, `ability_none`;
+    `ppo.ABILITY_HEAD`) learn at lr x the factor - an Adam group of their own. The heads' norm, the body and the ability
+    encoders in the body (`AbilityEncoder`, `AbilityExtra`) keep the common lr. The groups keep the weights' old order,
+    so Adam's moments carry from old checkpoints into the new groups and back (`run.resume`, checked on itS25_19).
+  - `--ability-epochs` (1; needs `--ability-branch`): after the usual pass, N - 1 more passes of the ability term only
+    over the chunk's priced rows, by the head alone. The unit's thought (the head's input) is kept in the usual pass
+    (`ppo.ThoughtTap`); the extra passes compute the head's logits from it (`ppo.head_ability_logits` - the same
+    operations as `ChainHeads`; a test keeps them equal), without the body or the memory: cheap. Clipped on the
+    ability's probability ratio to the one recorded at collection, as in the usual pass; Adam steps only the head's
+    weights (the others have no gradient).
+  - Logged every update: `ability_branch_kl` (the head's KL old -> new on the priced rows, the estimate
+    (r - 1) - ln r, never < 0), `ability_branch_clip` (the share of rows past the clip) - in the usual pass;
+    `ability_extra_kl`, `ability_extra_clip`, `ability_extra_loss`, `ability_extra_rows`, `ability_extra_steps` - in
+    the last extra pass. A probe on itS25_19 (CPU, 8 battles x 4 decisions, factor 3, 3 passes): 20-43 priced rows a
+    minibatch, in the last extra pass KL 0.01-0.02, 14-25 % past the clip.
 - **The press's price** (`--ability-price`; `auto` = `bonus` under this flag, else `branch`). A valid ability (Stand
   Your Ground, Deadly Onslaught, Foe-Seeker - by the validity card) - the [bonus price](ability_price.md): the bricks'
   counters on the "pressed" branch's trajectory (the branch is played anyway; recorded once a decision -
