@@ -42,7 +42,7 @@ The first steps compile for 1–3 minutes (seconds once a run of the same shapes
 | drills | `--drills` (0: share of the battles), `--drill-weights` (json; default the `TRAIN` drills equally: kiting, hold_fire), `--drill-bank` (256 per drill), `--drill-embed` (1: share of the embedded frame, for the drills that have one), `--drill-broad` (0.5: of the rest, share of the broad frame), `--drill-teach` (`auto` or json {drill: weight}: the teacher, off by default), `--drill-teach-minutes` (10: manual), `--drill-teach-k` (0.5), `--drill-teach-cap` (0.25), `--drill-teach-weight` (0.15: auto), `--teach-normal` (`auto`, names or json {drill: share}: the teacher in normal battles, off by default), `--teach-normal-k` (0.5), `--teach-normal-cap` (0.15), `--teach-normal-weight` (0.1), `--teach-normal-match` (0.1): [drills](#drills) |
 | observation | `--observe-dir` (off: the folder of converted battles), `--observe-share` (0.1), `--observe-weight` (0.1), `--observe-decay` (0.95), `--observe-anchor` (0.2), `--observe-anchor-decay` (0.995), `--observe-anchor-alone` (off: the anchor ends with the term), `--observe-adv` (`critic`), `--observe-beta` (1), `--observe-clip` (20), `--observe-steps` (0: `--steps`), `--observe-refresh` (20): [learning by observation](#learning-by-observation) |
 | kiting in self-play | `--kite-share` (0: share of the `self` / `past` battles started, planned 0.1), `--kite-bank` (256 battles ready): [kiting in self-play](#kiting-in-self-play) |
-| abilities by their effect | `--ability-branch` (0: off; the share of presses branched), `--ability-branch-missed` (0.005), `--ability-branch-copies` (4), `--ability-branch-horizon` (60 s), `--ability-branch-hold` (0 s), `--ability-branch-cap` (0: none), `--ability-branch-batch` (128), `--ability-branch-weight` (0.1), `--ability-branch-decay` (300 updates); the ability critic `--ability-critic` (off), `--ability-critic-weight` (1), `--ability-critic-warmup` (2,000), `--ability-critic-buffer` (25,000): [abilities by their effect](#abilities-by-their-effect-branches) |
+| abilities by their effect | `--ability-branch` (0: off; the share of presses branched), `--ability-branch-missed` (0.005), `--ability-branch-copies` (4), `--ability-branch-horizon` (60 s), `--ability-branch-hold` (0 s), `--ability-branch-openloop` (off), `--ability-branch-greedy` (off), `--ability-branch-cap` (0: none), `--ability-branch-batch` (128), `--ability-branch-weight` (0.1), `--ability-branch-decay` (300 updates); the ability critic `--ability-critic` (off), `--ability-critic-weight` (1), `--ability-critic-warmup` (2,000), `--ability-critic-buffer` (25,000): [abilities by their effect](#abilities-by-their-effect-branches) |
 
 ### The chain's settings
 
@@ -707,6 +707,13 @@ skills too.
   shape, every decision of both starts from the same seed (the networks' sampling, the orders' latency), and their
   battle id for the simulator's hash draws is the same. The branches differ only by the press and what follows from it;
   the copies by their seeds.
+- **Open loop** (`--ability-branch-openloop`, off by default). Without it both branches' networks decide anew every
+  decision: one different choice and after 10–20 s they are different battles; the 60 s price is mostly that chaos.
+  With it "pressed" is played first and its orders are kept (both sides' networks, the scripts, the step each order
+  lands on); "not" plays exactly those orders (the unit's slot not pressed) and decides nothing itself. Only the
+  press's effect in the simulator differs (stats, morale and what follows). The price is "press against no press with
+  the same plan". With no press in either branch the price is exactly 0 (test): the branches have no randomness beyond
+  the orders. `--ability-branch-greedy` — the branches' networks take their most likely action instead of sampling.
 - **The price of a press** = the mean over the copies of (trade of "pressed" − trade of "not") after 60 s; the trade as
   gold in the v2 reward: (enemy gold destroyed − own) / budget, from the unit's side.
 - **The signal goes to the ability head only.** The price is an extra advantage of the log-probability of the ability
@@ -746,8 +753,29 @@ skills too.
   prices ≈ 0), **20 s — 0.52**, 30 s — 0.16, 45 s — 0.13, 60 s — 0.07; the mean price of a press at 20–30 s is +0.0009
   of the budget. The abilities' means show at 30 s and drown at 60 s: Stand Your Ground with the lord in melee —
   +0.0030 ± 0.0008 after 30 s and +0.0001 ± 0.0019 after 60 s; Deadly Onslaught — +0.0018 ± 0.0008 and −0.0003 ±
-  0.0014. So a short horizon gives less noise: `--ability-branch-horizon 20` (real share 0.52 against 0.07, branches
-  three times cheaper); it counts only the near effect (a 25–31 s buff partly).
+  0.0014.
+- **The open loop removes the chaos** (the same probe, 192 presses on the same snapshots, 4 copies; the real share at
+  20 / 30 / 45 / 60 s):
+
+  | branches | 20 s | 30 s | 45 s | 60 s | the 60 s prices' spread |
+  |---|---|---|---|---|---|
+  | as before (closed loop, sampled) | 0.63 | 0.10 | 0 | 0 | 0.013 |
+  | most likely action (`greedy`) | 0.94 | 0.85 | 0.78 | 0.62 | 0.016 |
+  | **open loop** (`openloop`) | 0.87 | 0.72 | 0.51 | 0.46 | 0.008 |
+  | open loop + `greedy` | 0.96 | 0.85 | 0.74 | 0.72 | 0.008 |
+
+  `greedy` without the open loop is misleading: the copies are almost the same and repeat the same chaos — the
+  prices' spread is even larger than before; reliable, but not about the ability. The open loop halves the spread: what
+  is left is the effect itself. `greedy` on top is more reliable still, but the price is then for the "most likely
+  action" plan, not for what the network does. So the main mode is `--ability-branch-openloop` with the 60 s horizon.
+  The branches get cheaper with it: "not" runs no network and builds no observation (CPU: 412 s against 603 s for 96
+  snapshots x 4 copies; not measured on the GPU).
+- **The abilities do work in the simulator** (open loop, the mean price of a press, budget share x 1000, ± the error
+  over moments, 192 presses): after 30 s +1.9 ± 0.4, after 60 s +3.1 ± 0.5 (~30 gold for a 10,000 army). The lord in
+  melee +2.4 / +3.4 (30 / 60 s), not in melee +1.4 / +2.7; an enemy within 35 m +2.4 / +3.8, none +0.7 / +1.4; own
+  units wavering or routing within 35 m +3.8 / +2.6 (12 presses). By ability (60 s): Stand Your Ground in melee
+  +4.8 ± 2.0 (out of it +0.2), Deadly Onslaught +3.1 ± 0.8 (out of it +0.7), rally +4.5 ± 1.8 (out of it +2.5),
+  foe_seeker +7.0 ± 1.9, verminous_valour +0.8 ± 0.7.
 - **The ability critic** (`tools/nn/train/ability_critic.py`, `run.py --ability-critic`, off by default; needs
   `--ability-branch`). Few moments are replayed: ~105 of ~5,000 an update (S25: ~2,500 presses, ~2,400 missed), and
   the price is noisy (standard error 0.007 at a spread of the prices of 0.012 of the budget). The critic is a small
@@ -790,7 +818,7 @@ skills too.
     it off. At a 20 s horizon the explained share is ~0 too (+0.025 by ridge on the 20 s price); it shows only for the
     own losses of the units the press touches over 20 s (+0.06), but that is half the price (no damage to the enemy).
     So `--ability-critic` gives nothing now; it is worth turning on when `critic_rel` and `price_rel` in the log are
-    clearly above 0.
+    clearly above 0 — e.g. with the open loop (`price_rel` ~0.5 at 60 s); the critic is not checked on its prices yet.
   - **Check on a synthetic price** (the pace of training: 105 prices an update; 40 varying inputs, the rest the
     passport of one of 5 abilities; the price — a buff in melee and out of it plus a count, noise 1.5x the price's
     spread): ready from update 20 on without a break, the explained share of the noiseless price 0.58–0.74 (0.69 on

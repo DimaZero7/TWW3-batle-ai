@@ -415,7 +415,8 @@ def train(args, every=None, teacher=None, normal=None):
         env.brancher = ability_branch.Brancher(ability_branch.Config(
             share=args.ability_branch, missed=args.ability_branch_missed, copies=args.ability_branch_copies,
             horizon_s=args.ability_branch_horizon, cap=args.ability_branch_cap, batch=args.ability_branch_batch,
-            hold_s=args.ability_branch_hold, seed=args.seed, critic=args.ability_critic,
+            hold_s=args.ability_branch_hold, openloop=args.ability_branch_openloop,
+            greedy=args.ability_branch_greedy, seed=args.seed, critic=args.ability_critic,
             critic_weight=args.ability_critic_weight, critic_warmup=args.ability_critic_warmup,
             critic_buffer=args.ability_critic_buffer), device)
         print(f"ability branches: {env.brancher.cfg}, weight {args.ability_branch_weight:g} -> 0 over "
@@ -1025,6 +1026,11 @@ def parser():
     ap.add_argument("--ability-branch-hold", type=float, default=ability_branch.Config.hold_s,
                     help="... in the 'not pressed' branch the slot also stays unused this many seconds (0: the network "
                          "goes on and may press it a decision later)")
+    ap.add_argument("--ability-branch-openloop", action="store_true",
+                    help="... 'not pressed' plays the orders 'pressed' gave (both sides, every decision) instead of "
+                         "deciding again: only the press's own effect differs (far less noise)")
+    ap.add_argument("--ability-branch-greedy", action="store_true",
+                    help="... the branches' networks take their most likely action instead of sampling")
     ap.add_argument("--ability-branch-cap",type=int, default=ability_branch.Config.cap,
                     help="... snapshots a chunk at most (0: no cap)")
     ap.add_argument("--ability-branch-batch", type=int, default=ability_branch.Config.batch,

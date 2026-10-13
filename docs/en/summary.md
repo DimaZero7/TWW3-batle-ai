@@ -252,8 +252,10 @@ About 105 of ~5,000 moments an update are replayed and the price is noisy; the *
 off by default) is a small separate network that learns from the replayed prices and, after its warm-up (2,000 prices
 and an error below the mean's), prices every moment an ability is ready. On S25 it stays off, and rightly: the 60 s
 price is almost all the battle's noise (real share 0.07 in a probe of 649 presses) and no model predicted its real part
-from the inputs (explained share ≤ 0). A short horizon has less noise: over 20 s the real share is 0.52 and the
-branches cost a third (`--ability-branch-horizon 20`); the share is logged (`price_rel`).
+from the inputs (explained share ≤ 0). The **open loop** removes the chaos (`--ability-branch-openloop`): "not"
+plays the orders "pressed" gave, so only the ability's effect differs — real share over 60 s 0.46 instead of 0, half
+the price spread, cheaper branches. With it the abilities do work in the simulator: a press is worth +0.003 of the
+budget over 60 s on average, Stand Your Ground in melee +0.005. The share is logged (`price_rel`).
 
 **Spread of the simulator's uncertain numbers** (`--dr`, on in line S): 23 numbers not taken exactly from
 the game's database (a few probes, fits, estimates), each battle draws them inside ranges from the evidence; the

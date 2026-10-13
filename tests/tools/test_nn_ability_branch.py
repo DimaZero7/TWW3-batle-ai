@@ -289,3 +289,68 @@ def test_a_chunk_keeps_its_prices_per_copy_and_logs_their_real_share():
     n = br.stats["replayed_presses"] + br.stats["replayed_missed"]
     assert br.copies.shape == (n, 2) and torch.allclose(br.last["price"], br.copies.mean(1))
     assert n < 8 or br.stats["price_rel"] == round(ab.reliability(br.copies), 3)
+
+
+def test_open_loop_not_replays_the_pressed_orders_exactly_and_never_presses():
+    actor, env, cand = grabbed()
+    snap = env.brancher.got[0]
+    b, side, unit, slot = pick(cand)
+    # nothing pressed in either: the open-loop "not" replays "pressed"'s orders, so the two are the same battle
+    for greedy in (False, True):
+        same = ab.play_pair(env, actor, ab.select(snap, b), unit, side, torch.full_like(slot, -1), 2, 6, seed=5,
+                            openloop=True, greedy=greedy)
+        assert torch.count_nonzero(same[0]) == 0
+    # pressed: the unit's slot stays unused in "not" though "pressed"'s orders are replayed there
+    fired = {}
+
+    def each(i, pe, ne):
+        j = torch.arange(pe.B)
+        n = unit.repeat_interleave(2)
+        s = slot.repeat_interleave(2)
+        for name, e in (("pressed", pe), ("not", ne)):
+            cd = torch.stack([e.st.u[f"ab{k}_cd"][j, n] for k in range(3)], 1).gather(1, s[:, None])[:, 0]
+            fired[name] = int((cd > 0).sum())
+    ab.play_pair(env, actor, ab.select(snap, b), unit, side, slot, 2, 6, seed=5, openloop=True, each=each)
+    assert fired["pressed"] > 0 and fired["not"] == 0
+
+
+def test_greedy_branches_repeat_and_take_the_most_likely_action():
+    actor, env, cand = grabbed()
+    snap = env.brancher.got[0]
+    b, side, unit, slot = pick(cand)
+    one = ab.play_pair(env, actor, ab.select(snap, b), unit, side, slot, 2, 4, seed=5, greedy=True)
+    two = ab.play_pair(env, actor, ab.select(snap, b), unit, side, slot, 2, 4, seed=5, greedy=True)
+    assert torch.equal(one[0], two[0])
+    seen = []
+    e, _, _ = ab.branch_env(env, ab.select(snap, b))
+    real = type(e)._act
+    type(e)._act = lambda self, *a: seen.append(a[-1]) or real(self, *a)
+    try:
+        e._act = ab._greedy_act(e)
+        e.step(actor)
+    finally:
+        type(e)._act = real
+    assert seen and all(seen)
+
+
+def test_the_open_loop_and_greedy_flags_reach_the_branches():
+    from tools.nn.train import run
+    args = run.parser().parse_args(["--ability-branch", "0.2", "--ability-branch-openloop", "--ability-branch-greedy"])
+    assert args.ability_branch_openloop and args.ability_branch_greedy
+    actor, crit = tiny()
+    env = env_of()
+    env.brancher = ab.Brancher(ab.Config(share=1.0, missed=1.0, copies=2, horizon_s=3.0, batch=4, openloop=True,
+                                         greedy=True))
+    calls = []
+    real = ab.play_pair
+
+    def spy(*a, **k):
+        calls.append((k.get("openloop"), k.get("greedy")))
+        return real(*a, **k)
+    ab.play_pair = spy
+    try:
+        rollout.collect(env, actor, crit, 3)
+    finally:
+        ab.play_pair = real
+    assert calls and all(c == (True, True) for c in calls)
+    assert env.brancher.stats["replayed_presses"] + env.brancher.stats["replayed_missed"] > 0

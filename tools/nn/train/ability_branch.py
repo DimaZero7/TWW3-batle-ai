@@ -21,6 +21,15 @@ generator (the networks' sampling, the orders' latency), and the copy's battle i
 draws) is the same in both - the two differ only by the press and what follows from it. The copies differ by their
 seeds' positions and ids.
 
+Open loop (Config.openloop; run.py --ability-branch-openloop): closed loop, the two branches' networks decide anew
+every decision and the battles drift apart within 10-20 s (one different sample, then everything differs): the 60 s
+price is mostly that chaos. Open loop: "pressed" is played first each decision and its orders are kept (the networks'
+of both sides, the scripts', the steps they land on); "not" plays exactly those orders (the unit's slot unused) and
+decides nothing - only the simulator (the press's effect: stats, morale, what follows) differs. The price is then
+"this press against none, with the same plan". Greedy (Config.greedy): the networks take their most likely action, so
+the copies differ only by the simulator's draws and the orders' latency. Neither adds a random draw: with nothing
+pressed in either branch the price is exactly 0 (test).
+
 The price of the press = mean over the copies of (trade of `pressed` - trade of `not`) at the horizon, the trade as
 the v2 reward's gold term from the unit's side: (enemy gold destroyed - own gold lost) / budget (reward.gold_sides, the
 worst share lost so far). It is the extra advantage of the ability head's log-probability of the choice made: +price for
@@ -97,6 +106,8 @@ class Config:
     seed: int = 0
     hold_s: float = 0.0         # "not": the unit's slot also stays unused this many seconds (0: the network goes on as
     #                             it would - and may press it a decision later; module doc)
+    openloop: bool = False      # "not" plays "pressed"'s orders instead of deciding again (module doc "Open loop")
+    greedy: bool = False        # the branches' networks take their most likely action, not a sample
     unused_penalty: float = 0.0  # reserved (a cost of an ability unused through a battle): not implemented, must be 0
     # the ability critic (ability_critic.py; run.py --ability-critic): off by default
     critic: bool = False
@@ -308,11 +319,15 @@ def trade(u, side, rout_share=reward.Weights.rout_share):
     return (foe - own) / reward.budget(u)
 
 
-def play_pair(template, actor, snap, unit, side, slot, copies, decisions, seed, hold_s=0.0):
+def play_pair(template, actor, snap, unit, side, slot, copies, decisions, seed, hold_s=0.0, openloop=False,
+              greedy=False, each=None):
     """The two branches of each snapshot battle (snap: b battles; unit, side, slot [b]: the unit whose ability differs,
     its side 1 / 2 and the slot pressed), copies copies each, `decisions` decisions (the snapshot's own first); hold_s:
-    in "not" the slot also stays unused that many seconds. -> (diff [b, copies]: trade pressed - trade not at the end,
-    budget [b, copies]: the battles' budgets in gold)."""
+    in "not" the slot also stays unused that many seconds. openloop: "not" plays the orders "pressed" gave (both sides,
+    every decision, their landing steps too) instead of deciding again, the unit's slot unused (module doc); greedy:
+    every network (the learner's, the past versions') takes its most likely action instead of sampling. each(i, pressed
+    env, not env): called after decision i of both. -> (diff [b, copies]: trade pressed - trade not at the end, budget
+    [b, copies]: the battles' budgets in gold)."""
     b = len(snap["keys"])
     dev = template.device
     rep = torch.arange(b, device=dev).repeat_interleave(copies)
@@ -338,7 +353,13 @@ def play_pair(template, actor, snap, unit, side, slot, copies, decisions, seed, 
             until[j, n] = env.st.t + float(hold_s)
             held[j, n] = slot[rep]
             env.ability_hold = (until, held)
+        if greedy:
+            env._act = _greedy_act(env)
         envs[name] = (env, parts, scripted)
+    said = []
+    if openloop:
+        envs["pressed"][0]._play = _recording_play(envs["pressed"][0], said)
+        r_unit = r                                              # the unit's learner row and slot ("not": unused)
     state = (torch.get_rng_state(), torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None)
     try:
         for i in range(decisions):
@@ -347,8 +368,15 @@ def play_pair(template, actor, snap, unit, side, slot, copies, decisions, seed, 
                 torch.manual_seed(seed * 7919 + i)
                 if i == 0:
                     env.replay(parts, scripted)
+                elif openloop and name == "not":
+                    p, sc, delay = said.pop()
+                    p = [(rows_, O.Orders(*(getattr(o_, f).clone() for f in O.FIELDS))) for rows_, o_ in p]
+                    p[0][1].ability[r_unit, n] = -1
+                    _replay_orders(env, p, sc, delay)
                 else:
-                    env.step(actor)
+                    env.step(actor, greedy=greedy)
+            if each is not None:
+                each(i, envs["pressed"][0], envs["not"][0])
     finally:
         torch.set_rng_state(state[0])
         if state[1] is not None:
@@ -358,6 +386,32 @@ def play_pair(template, actor, snap, unit, side, slot, copies, decisions, seed, 
         ends[name] = trade(envs[name][0].st.u, s_rep, template.weights.rout_share)
     budget = reward.budget(envs["not"][0].st.u)
     return (ends["pressed"] - ends["not"]).reshape(b, copies), budget.reshape(b, copies)
+
+
+def _greedy_act(env):
+    """env._act with every network's action its most likely one (the past versions' too: Battles._act_past samples)."""
+    act = type(env)._act
+
+    def run(actor, a, frame, rows, h, greedy):
+        return act(env, actor, a, frame, rows, h, True)
+    return run
+
+
+def _recording_play(env, said):
+    """env._play that also keeps each decision's orders (the networks' parts, the scripts', the landing steps)."""
+    play = type(env)._play
+
+    def run(parts, scripted, delay, *a, **k):
+        said.append((parts, scripted, delay))
+        return play(env, parts, scripted, delay, *a, **k)
+    return run
+
+
+def _replay_orders(env, parts, scripted, delay):
+    """An open-loop decision: given orders and landing steps, the simulator steps only (no observation: nobody decides
+    on it)."""
+    rb, rs = env.rows_learn % env.B, env.rows_learn // env.B
+    env._play(parts, scripted, delay, env.st.attacker[rb] == rs + 1, rb, rs)
 
 
 def kinds_of_ctrl(ctrl):
@@ -645,7 +699,8 @@ class Brancher:
                 sub = concat([sub, ps])
                 u_, s_, k_ = torch.cat([u_, pu]), torch.cat([s_, pside]), torch.cat([k_, pslot])
             self.calls += 1
-            d, bg = play_pair(env, actor, sub, u_, s_, k_, K, decisions, cfg.seed + self.calls, cfg.hold_s)
+            d, bg = play_pair(env, actor, sub, u_, s_, k_, K, decisions, cfg.seed + self.calls, cfg.hold_s,
+                              openloop=cfg.openloop, greedy=cfg.greedy)
             diff[ix] = d[:len(part)]
             budget[ix] = bg[:len(part)]
             played += 2 * K * (len(part) + len(fill))
