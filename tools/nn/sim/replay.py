@@ -27,6 +27,14 @@ LORD_PHASES = False  # a lone man's (a lord's) clock waits for contact / separat
                      # recorded time - the game's lords break off melee 1.3 times a minute and switch targets; a lord
                      # whose clock waited for a contact or a separation went on with an old order on another unit in
                      # 0.28 of the seconds the game's enemy lord fought ours, build/open_battle/spec.md 1)
+WALK_IN_MELEE = True  # a formation that is not a leaver (CA's planner's, the game AI's, ai_like's melee units), in melee
+                     # (its flag) without a recorded target, its recorded point leave_m or more away, which the game
+                     # shows moving (is_moving this second and the next), replays its MOVE instead of attacking the
+                     # nearest enemy (or holding): the exam v2 games (20, the game AI's and ai_like's such seconds) - 73 %
+                     # of those seconds are is_moving ones, at a median 1.6 m/s with the point through the nearest enemy
+                     # and 2.2 m/s with it away (2 s way); replayed as an attack they stood and fought. The simulator's
+                     # contact rules then decide: a point through the enemy pushes on fighting (contact.move_push,
+                     # move_far_full), one away leaves (leave_away_only). Off: the old attack on the nearest enemy.
 REDIRECT = True      # Replay with params: a formation without a missile weapon that does not touch its recorded attack
                      # target but touches another standing enemy attacks that enemy (the nearest by edge gap; the same
                      # one while it still touches it), unless the recording shows it moving at that second and the next
@@ -180,8 +188,15 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
             leaving = np.hypot(ox - np.nan_to_num(f["x"][:, i]), oz - np.nan_to_num(f["z"][:, i])) >= leave_m
         held = np.zeros(T, dtype=bool) if holds is None else (np.asarray(holds[:T, i], bool) & m_i)
         leaving = leaving & ~held
+        # A formation in melee without a recorded target that the game shows walking under its far move (WALK_IN_MELEE)
+        # keeps that move: the simulator's contact rules decide what it does (push through, leave, fight on).
+        mv_i = np.asarray(f["mv"][:, i], bool) if "mv" in f else np.zeros(T, dtype=bool)
+        walking = np.zeros(T, dtype=bool)
+        if WALK_IN_MELEE and leave_m > 0 and formation:
+            far = np.hypot(ox - np.nan_to_num(f["x"][:, i]), oz - np.nan_to_num(f["z"][:, i])) >= leave_m
+            walking = m_i & (tg < 0) & ~leaving & ~held & far & mv_i & np.r_[mv_i[1:], False]
         if nearest_of[i]:
-            tg = np.where((tg < 0) & m_i & ~leaving & ~held, nearest[:, i], tg)
+            tg = np.where((tg < 0) & m_i & ~leaving & ~held & ~walking, nearest[:, i], tg)
         ok_t = tg >= 0
         mapped = np.where(ok_t, np.array(slot_of)[np.clip(tg, 0, None)], -1)
         attack = ok_t & (battle.side[np.clip(tg, 0, None)] != battle.side[i]) & ~held
@@ -190,14 +205,13 @@ def recorded_orders(battle, slot_of, N, widths=None, spacing=1.5, fight_nearest=
                               spacing if np.isscalar(spacing) else spacing[i])
             br = np.radians(b_i)
             ox, oz = ox - back * np.sin(br), oz - back * np.cos(br)
-        fighting = m_i & ~attack & ~leaving
+        fighting = m_i & ~attack & ~leaving & ~walking
         kind[:, s] = np.where(attack, O.ATTACK, np.where(fighting, O.HOLD, O.MOVE))
         target[:, s] = np.where(attack, mapped, -1)
         target_r[:, s] = attack & np.asarray(f["r"], bool)[np.arange(T), np.clip(tg, 0, None)]
         x[:, s], z[:, s] = ox, oz
         # moving in the game this second and the next (is_moving; the redirect keeps such a unit's recorded order)
-        mv = np.asarray(f["mv"][:, i], bool) if "mv" in f else np.zeros(T, dtype=bool)
-        moving[:, s] = mv & np.r_[mv[1:], False]
+        moving[:, s] = mv_i & np.r_[mv_i[1:], False]
         # Look ahead without wrapping the recording's first flags into its last seconds.
         run[:, s] = running
         for ahead in (1, 2):

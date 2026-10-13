@@ -1329,7 +1329,13 @@ half); the main score is the share of game values inside the copies' 90 % interv
 ([below](#the-checks-score-the-simulator-as-a-forecast)). A unit in melee
 without a recorded target whose recorded point is 10 m or more away moves there (it leaves the
 fight) only if that point is a move order in force: the network's units and missile units; the
-melee units of CA's planner and of the game's AI fight on. The network's battles against the game's
+melee units of CA's planner and of the game's AI fight on - except in the seconds the game shows such a unit moving
+(its moving flag this second and the next, `replay.WALK_IN_MELEE`): then the replay gives it the recorded move and
+the simulator's contact rules decide what it does in contact (through the enemy it pushes on and strikes,
+`contact.move_push`; away from the enemy it leaves). In the 20 exam v2 battles the game AI's and ai_like's units in
+melee without a target and with a point 10 m or more away have the moving flag in 73 % of such seconds, a 2 s way of
+1.6 m/s with the point through the nearest enemy and 2.2 m/s with it away; as an attack on the nearest they stood and
+fought. The network's battles against the game's
 AI (the gate: generated armies) are reported apart; the attacker of a recorded battle comes from its
 manifest's roles (`scenario.attacker_of`).
 
@@ -1668,9 +1674,13 @@ Measured, ready as a switch, not in `config/nn/sim.json`: none now.
 - **Walkers in the exam replay stand by the enemy.** Units under the game's recorded far move spend 319–322 /
   308–317 s a battle by a standing enemy (centres within 12 m) in the exam v2 replay (`build/compare/itS24`,
   `itS24ai`, 10 battles × 6 copies) and stand 0.56 / 0.59 of that time (the game 129 s and 0.19 / 92 s and 0.19).
-  Pushing through (`contact.move_push`) barely changes it: in 93 % of those replay seconds the simulated unit does not
-  walk but attacks under the replay's own order (its contact clock, `tools/nn/sim/replay.py`), while the game walks it
-  then (52–59 % without the melee flag, on the move). A question of the replay method, not of movement.
+  This is no measure of movement. 40–56 % of those seconds are ones where the game's unit routs or is shattered and
+  the replayed one stands (the replay routs fewer units: 9.7–10.7 enemy routs a battle against the game's
+  16.0–16.3). Over the seconds the game's unit stands only, walkers spend 104–193 s a battle by an enemy, standing
+  0.46–0.65 (the game 34–129 s, 0.09–0.20). The rest is the battle's course parting: the replayed unit is already at
+  its point (the game's still on its way, a median 17 m off) or its contact clock ran ahead of or behind the game's
+  (`tools/nn/sim/replay.py`) and it fights under a recorded attack. Neither pushing through (`contact.move_push`)
+  nor `replay.WALK_IN_MELEE` moves these numbers much.
 - **A rally and a rout again.** With the morale probe's rally rule (a router's morale follows its target; it
   rallies above 0, after 18 s of rout and with no standing enemy within 95 m; measured before the "any enemy"
   and "7 s in a row" rules) the gates' replay (both sides recorded,

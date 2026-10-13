@@ -136,6 +136,24 @@ def test_inference_preserves_leaver_roles_and_does_not_wrap_run_lookahead():
     assert not (disabled["phase"] == 2).any()
 
 
+def test_a_non_leaver_the_game_shows_walking_in_melee_keeps_its_far_move(monkeypatch):
+    """replay.WALK_IN_MELEE: the AI's formation in recorded melee without a target, its point far, that the game shows
+    moving (is_moving this second and the next) replays its MOVE, not an attack on the nearest enemy; standing, it
+    still attacks the nearest."""
+    b = recording()
+    b.f["mv"][4:6, 1] = True
+    r = replay.recorded_orders(b, [0, 1], 2, fight_nearest=[False, True], leavers=[True, False])
+    assert r["kind"][4, 1] == O.MOVE and r["target"][4, 1] == -1 and r["phase"][4, 1] == 0
+    b.f["mv"][5, 1] = False                                   # moving one second only: the old attack
+    assert replay.recorded_orders(b, [0, 1], 2, fight_nearest=[False, True], leavers=[True, False])["kind"][4, 1] == O.ATTACK
+    b.f["mv"][5, 1] = True
+    b.f["ox"][:, 1] = 15                                      # the point 5 m away: no far move, the old attack
+    assert replay.recorded_orders(b, [0, 1], 2, fight_nearest=[False, True], leavers=[True, False])["kind"][4, 1] == O.ATTACK
+    b.f["ox"][:, 1] = 100
+    monkeypatch.setattr(replay, "WALK_IN_MELEE", False)
+    assert replay.recorded_orders(b, [0, 1], 2, fight_nearest=[False, True], leavers=[True, False])["kind"][4, 1] == O.ATTACK
+
+
 def test_cancelled_move_in_recorded_melee_is_not_an_exit_phase():
     b = recording(); b.target[3, 0] = -1; b.target[4, 0] = 1
     r = replay.recorded_orders(b, [0, 1], 2, leavers=[True, False], fight_nearest=[False, True])
