@@ -428,12 +428,9 @@ def _batch(job):
             pw = geometry.pairwise(u, spacing, rect=bool(ccal.get("rect_gap")))
             alive = present & (u["men"] > 0) & ~u["gone"]
             standing = alive & ~u["r"]
-            lone = u["men0"] <= 1
-            reach = torch.where(lone[:, :, None] | lone[:, None, :], float(ccal.get("lord_reach_m", ccal["reach_m"])),
-                                float(ccal["reach_m"]))
-            held = (u["m"][:, :, None] | u["m"][:, None, :]).float() * float(ccal["hold_m"])
+            lim = geometry.contact_limit(u, pw, ccal, params.battle, spacing)
             foe = pw["enemy"] & alive[:, :, None] & standing[:, None, :]
-            touch = foe & (pw["gap"] <= reach + held)
+            touch = foe & (pw["gap"] <= lim)
             sec = geometry.sector(pw["rel_i"], ccal["front_deg"], ccal["rear_deg"]) if hasattr(geometry, "sector") else None
             t_n[:, w] = touch.sum(2).cpu().numpy()
             if sec is not None:

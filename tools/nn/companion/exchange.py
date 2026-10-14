@@ -107,7 +107,9 @@ def formation_shape(doc, params=None):
             out[k][i] = float(row[k])
     c = params.sim["contact"]
     out.update(reach_m=float(c["reach_m"]), lord_reach_m=float(c.get("lord_reach_m", c["reach_m"])),
-               hold_m=float(c["hold_m"]), spacing=float(params.sim["formation"]["spacing_m"]))
+               hold_m=float(c["hold_m"]), spacing=float(params.sim["formation"]["spacing_m"]),
+               engage_m=(float(params.battle.get("entity_action_attack_formed_combat_distance", 2.5))
+                         if c.get("engage") else None))
     leave_m = float(c.get("leave_m", 0.0))
     out["exit"] = {"window_s": float(params.battle.get("melee_breakoff_secs", 0.0)) if c.get("breakoff") else 0.0,
                    "leave_m": leave_m, "away_only": bool(c.get("leave_away_only")),
@@ -120,7 +122,8 @@ def gaps(state, shape):
     """([N, N] the gap between the edges of unit i's and unit j's formations, m (negative: overlap), [N, N] the gap
     at which they touch) as the simulator measures them (geometry.pairwise, battle.py `touch`): rectangles of
     geometry.dims (files = floor(width / h), at most the men; ranks = ceil(men / files); a lone man 2 x radius);
-    contact.reach_m (a lone man lord_reach_m), hold_m more when either is in melee (state m)."""
+    contact.reach_m (a lone man lord_reach_m), hold_m more when either is in melee (state m); with contact.engage
+    (engage_m: the formed combat distance) two formations either of which is in melee touch up to geometry.engage_gap."""
     x, z = state["x"][0].astype(float), state["z"][0].astype(float)
     b = np.radians(np.nan_to_num(state["b"][0].astype(float)))
     men = np.nan_to_num(state["men"][0].astype(float))
@@ -142,12 +145,21 @@ def gaps(state, shape):
     def half(f, d, phi):
         s, c = np.maximum(np.abs(np.sin(phi)), 1e-6), np.maximum(np.abs(np.cos(phi)), 1e-6)
         return np.minimum((f / 2) / s, (d / 2) / c)
-    ext = half(front[:, None], depth[:, None], wrap(theta - b[:, None])) + \
-        half(front[None, :], depth[None, :], wrap(theta + math.pi - b[None, :]))
-    reach = np.where(single[:, None] | single[None, :], shape["lord_reach_m"], shape["reach_m"])
+    rel_i, rel_j = wrap(theta - b[:, None]), wrap(theta + math.pi - b[None, :])
+    ext = half(front[:, None], depth[:, None], rel_i) + half(front[None, :], depth[None, :], rel_j)
+    lone = single[:, None] | single[None, :]
+    reach = np.where(lone, shape["lord_reach_m"], shape["reach_m"])
     m = np.asarray(state["m"][0], dtype=bool)
-    held = (m[:, None] | m[None, :]) * shape["hold_m"]
-    return dist - ext, reach + held
+    in_melee = m[:, None] | m[None, :]
+    at = reach + in_melee * shape["hold_m"]
+    if shape.get("engage_m") is not None:
+        def half_place(f, d, hh, vv, rel):
+            return np.where(np.abs(np.sin(rel)) * d <= np.abs(np.cos(rel)) * f, vv, hh) / 2
+        eng = (shape["engage_m"] + np.maximum(shape["radius"][:, None], shape["radius"][None, :])
+               - half_place(front[:, None], depth[:, None], h[:, None], v[:, None], rel_i)
+               - half_place(front[None, :], depth[None, :], h[None, :], v[None, :], rel_j))
+        at = np.where(in_melee & ~lone, np.maximum(at, eng), at)
+    return dist - ext, at
 
 
 def touching(state, shape):

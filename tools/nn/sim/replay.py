@@ -299,9 +299,8 @@ class Replay:
             keys += ("moving",)
             c = params.sim["contact"]
             self.spacing = float(params.sim["formation"]["spacing_m"])
-            self.reach = float(c["reach_m"])
-            self.lord_reach = float(c.get("lord_reach_m", c["reach_m"]))
-            self.hold_m = float(c["hold_m"])
+            self.ccal = c
+            self.rules = params.battle
             self.rect = bool(c.get("rect_gap"))
         self.chosen = None
         for k in keys:
@@ -373,16 +372,14 @@ class Replay:
         return o
 
     def touching(self, st):
-        """([B, N, N] i touches standing enemy j, edge gaps, [B, N] standing): battle.step's contact test (edges within
-        reach_m, lord_reach_m for a lone man, + hold_m when either fights already) from the places before the step."""
+        """([B, N, N] i touches standing enemy j, edge gaps, [B, N] standing): battle.step's contact test
+        (geometry.contact_limit) from the places before the step."""
         u = st.u
         pw = geometry.pairwise(u, self.spacing, rect=self.rect)
         alive = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
         standing = alive & ~u["r"]
-        lone = u["men0"] <= 1
-        reach = torch.where(lone[:, :, None] | lone[:, None, :], self.lord_reach, self.reach)
-        held = (u["m"][:, :, None] | u["m"][:, None, :]).float() * self.hold_m
-        touch = pw["enemy"] & alive[:, :, None] & standing[:, None, :] & (pw["gap"] <= reach + held)
+        lim = geometry.contact_limit(u, pw, self.ccal, self.rules, self.spacing)
+        touch = pw["enemy"] & alive[:, :, None] & standing[:, None, :] & (pw["gap"] <= lim)
         return touch, pw["gap"], standing
 
     def _redirect(self, st, o, moving):

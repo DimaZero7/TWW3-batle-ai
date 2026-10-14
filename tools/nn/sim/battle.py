@@ -50,7 +50,6 @@ def step(st, orders, params=None, dt=None):
     cal = params.sim
     R = params.battle
     spacing = cal["formation"]["spacing_m"]
-    reach = cal["contact"]["reach_m"]
     rect = bool(cal["contact"].get("rect_gap"))     # the formations' true rectangle gap (geometry.rect_gap)
 
     present = u["side"] > 0
@@ -113,12 +112,11 @@ def step(st, orders, params=None, dt=None):
     # --- contacts ---
     pw = geometry.pairwise(u, spacing, rect=rect)
     both = alive[:, :, None] & alive[:, None, :]
-    # Units already fighting stay in contact a little longer (formations thin as men fall).
-    held = (u["m"][:, :, None] | u["m"][:, None, :]).float() * cal["contact"]["hold_m"]
     # Formations touch when their edges overlap by -reach_m (the game's formations step into each other at the
-    # contact); a lone man (a lord) stops at a formation's edge (contact.lord_reach_m).
-    lone = (u["men0"] <= 1)
-    reach_ij = torch.where(lone[:, :, None] | lone[:, None, :], float(cal["contact"].get("lord_reach_m", reach)), reach)
+    # contact); a lone man (a lord) stops at a formation's edge (contact.lord_reach_m). Units already fighting stay in
+    # contact a little longer (contact.hold_m; with contact.engage two formations stay in contact while their outer men
+    # are within the database's formed combat distance: geometry.contact_limit).
+    lim = geometry.contact_limit(u, pw, cal["contact"], R, spacing)
     # The rout's exit (contact.rout_pin_s; config/nn/sim.json contact.rout_pin_why): a formation that began to rout in
     # melee keeps its men in contact for rout_pin_s seconds - the contact test does not count the way it has run since
     # (rpin_d), so the enemies it fought go on striking it (at the pursuit rate, melee.py) while it pulls away.
@@ -126,7 +124,7 @@ def step(st, orders, params=None, dt=None):
     if cal["contact"].get("rout_pin_s") and "rpin_s" in u:
         back = torch.where(alive & u["r"] & (u["rpin_s"] > 0), u["rpin_d"], torch.zeros_like(u["rpin_d"]))
         gap_c = gap_c - back[:, :, None] - back[:, None, :]
-    touch = pw["enemy"] & both & (gap_c <= reach_ij + held)
+    touch = pw["enemy"] & both & (gap_c <= lim)
     # The pursuit's reach (contact.pursue_gap_m; config/nn/sim.json contact.pursue_gap_why; absent / 0: off): a router
     # stays in contact with a formation chasing it - a standing enemy, not a missile unit, with an attack order on it -
     # while their formations' edges are within pursue_gap_m (the pursuers' men pick charge targets among the routing
@@ -380,7 +378,7 @@ def step(st, orders, params=None, dt=None):
         # A router running into a standing enemy formation (its boxes touching by their own edges - not the rout's exit
         # contact - with the router moving towards it, not a formation chasing it by order) leaves among its men as many
         # of its own as that formation's men strike it now (F_men); the most of them, one formation per router.
-        raw = pw["enemy"] & both & (pw["gap"] <= reach_ij + held)
+        raw = pw["enemy"] & both & (pw["gap"] <= lim)
         dxk, dzk = u["x"][:, :, None] - u["x"][:, None, :], u["z"][:, :, None] - u["z"][:, None, :]   # [k, j]: j to k
         into = (u["vx"][:, None, :] * dxk + u["vz"][:, None, :] * dzk) > 0
         by_order = (kind == O.ATTACK)[:, :, None] & (tgt[:, :, None] == torch.arange(N, device=st.device)[None, None, :])

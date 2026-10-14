@@ -157,6 +157,49 @@ def pairwise(u, spacing, rect=False):
             "front": front, "depth": depth}
 
 
+def engage_gap(u, pw, combat_m, spacing=1.5):
+    """[B, N, N] the edge gap of two formations' boxes at which their outer men are within the game's formed combat
+    distance (config/nn/sim.json contact.engage_why): a man strikes an enemy man whose centre is within combat_m (the
+    database's entity_action_attack_formed_combat_distance) plus that man's radius; the outer men stand half a man's
+    place inside the box's edge (sp_v through the front or back, sp_h through a flank, dims: depth = ranks x v), so the
+    boxes' gap is combat_m + the larger radius - the two half places. The side each shows the other: the centre line's
+    (face_length's through-front test)."""
+    front, depth = pw["front"], pw["depth"]
+    if "sp_h" in u:
+        h = torch.where(u["sp_h"] > 0, u["sp_h"], torch.full_like(u["sp_h"], float(spacing)))
+        v = torch.where(u["sp_v"] > 0, u["sp_v"], torch.full_like(u["sp_v"], float(spacing)))
+    else:
+        h = v = torch.full_like(front, float(spacing))
+
+    def half_place(f, d, hh, vv, rel):
+        s, c = torch.sin(rel).abs(), torch.cos(rel).abs()
+        return torch.where(s * d <= c * f, vv, hh) / 2
+
+    hp_i = half_place(front[:, :, None], depth[:, :, None], h[:, :, None], v[:, :, None], pw["rel_i"])
+    hp_j = half_place(front[:, None, :], depth[:, None, :], h[:, None, :], v[:, None, :], pw["rel_j"])
+    r = torch.maximum(u["radius"][:, :, None], u["radius"][:, None, :])
+    return combat_m + r - hp_i - hp_j
+
+
+def contact_limit(u, pw, ccal, rules=None, spacing=1.5):
+    """[B, N, N] the largest edge gap (pw["gap"]) at which units i and j touch: contact.reach_m (a lone man:
+    contact.lord_reach_m), + contact.hold_m when either is in melee already (u["m"]); with contact.engage on, two
+    formations either of which is in melee touch while their outer men are within the formed combat distance
+    (engage_gap; never less than the old hold). rules: the game's battle rules (params.battle); spacing: a man's place
+    for a unit without its own (formation.spacing_m)."""
+    reach = float(ccal["reach_m"])
+    lone = u["men0"] <= 1
+    pair_lone = lone[:, :, None] | lone[:, None, :]
+    in_melee = u["m"][:, :, None] | u["m"][:, None, :]
+    lim = torch.where(pair_lone, torch.full_like(pw["gap"], float(ccal.get("lord_reach_m", reach))),
+                      torch.full_like(pw["gap"], reach)) + in_melee.float() * float(ccal["hold_m"])
+    if ccal.get("engage"):
+        combat_m = float((rules or {}).get("entity_action_attack_formed_combat_distance", 2.5))
+        eng = torch.maximum(lim, engage_gap(u, pw, combat_m, spacing))
+        lim = torch.where(in_melee & ~pair_lone, eng, lim)
+    return lim
+
+
 def sector(rel, front_deg, rear_deg):
     """0 front, 1 flank, 2 rear, from an angle off the facing (radians)."""
     a = rel.abs()

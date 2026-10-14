@@ -454,7 +454,9 @@ def test_a_unit_in_melee_has_the_enemy_it_touches_not_the_orders_target():
     h, v = sh["sp_h"][0], sh["sp_v"][0]
     files = min(max(math.floor(sh["width"][0] / h + 1e-4), 1), 100)
     depth = math.ceil(100 / files) * v
-    for g, touches in ((-1.0, True), (-0.4, False)):              # edges within reach_m + hold_m (-2.5 + 2 in melee)
+    # edges within reach_m + hold_m touch; with contact.engage a melee contact holds while the edge soldiers are within
+    # the DB's formation melee distance (geometry.contact_limit), so 'not touching' is taken well beyond it
+    for g, touches in ((-1.0, True), (6.0, False)):
         doc["units"][1]["x"] = depth + g                           # two equal formations face to face: gap = d - depth
         s = exchange.arrays(doc, b.names)
         assert bool(exchange.touching(s, dict(sh, side=b.side))[0, 1]) is touches
