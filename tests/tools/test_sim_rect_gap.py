@@ -68,6 +68,6 @@ class TestRectGap:
         assert float(geometry.pairwise(u, 1.5, rect=True)["gap"][0, 0, 1]) == pytest.approx(
             float(geometry.pairwise(u, 1.5)["gap"][0, 0, 1]))
 
-    def test_the_switch_is_off(self):
-        # off: the walkpass2 twin gets worse with it (config/nn/sim.json contact.rect_gap_why)
-        assert P.sim["contact"].get("rect_gap") is False
+    def test_the_switch_is_on(self):
+        # on since S26, together with contact.push_keep_facing (config/nn/sim.json contact.rect_gap_why)
+        assert P.sim["contact"].get("rect_gap") is True

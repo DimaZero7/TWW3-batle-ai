@@ -52,13 +52,17 @@ def lane(a_dx, bystander=True, a_b=180.0):
     return st, H
 
 
-ON = dict(rect_gap=True, square_front=1, push_keep_facing=1)
+# engage pinned off in both: these lanes measure the side rules alone (with contact.engage on, the bystander 1 m beside
+# a square target is held in contact too: its edge is within the formed combat distance of the swordsmen's)
+ON = dict(rect_gap=True, square_front=1, push_keep_facing=1, engage=0)
+OFF = dict(rect_gap=False, square_front=0, push_keep_facing=0, engage=0)     # the old centre-line rule
 
 
 def fight(a_dx, bystander=True, seconds=40, on=True, a_b=180.0, b_attacks=False, from_s=0.0):
     """The swordsmen attack B (B held, or attacking them); -> (health share lost by B, by C from from_s on, the
     swordsmen's last bearing, B's last bearing)."""
-    params = P.with_cal("contact", **ON).with_cal("melee", frontage_edge_m=0.0) if on else P
+    params = (P.with_cal("contact", **ON).with_cal("melee", frontage_edge_m=0.0) if on
+              else P.with_cal("contact", **OFF).with_cal("melee", frontage_edge_m=None))
     st, H = lane(a_dx, bystander, a_b)
     o = replay.hold(st)
     o.kind[0, 0], o.target[0, 0], o.run[0, 0] = O.ATTACK, H, False
@@ -119,7 +123,8 @@ def test_a_walker_pushing_past_keeps_the_facing_of_its_way():
     assert float(st.u["z"][0, 0]) < -30.0          # it got past
 
 
-def test_the_switches_are_off():
-    # off: no lever on the whole battles' routs, the frontage lowers their melee rate (config/nn/sim.json *_why)
-    assert not P.sim["contact"].get("square_front") and not P.sim["contact"].get("push_keep_facing")
+def test_the_documented_defaults():
+    # square_front and the frontage off: no lever on the whole battles' routs, the frontage lowers their melee rate;
+    # push_keep_facing on with rect_gap since S26 (config/nn/sim.json *_why)
+    assert not P.sim["contact"].get("square_front") and P.sim["contact"].get("push_keep_facing")
     assert P.sim["melee"].get("frontage_edge_m") is None

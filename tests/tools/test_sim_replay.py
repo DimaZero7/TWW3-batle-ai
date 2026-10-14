@@ -266,8 +266,9 @@ def test_network_holds_follow_the_companion_s_last_decision(tmp_path, monkeypatc
 
 
 def contact_params():
+    # contact.engage and rect_gap absent: the old hold; battle: the game's rules (contact_limit reads them with engage)
     return SimpleNamespace(sim={"contact": {"reach_m": -2.5, "lord_reach_m": 1.0, "hold_m": 2.0},
-                                "formation": {"spacing_m": 1.5}})
+                                "formation": {"spacing_m": 1.5}}, battle={})
 
 
 def melee_state(z_target=100., z_other=10.):

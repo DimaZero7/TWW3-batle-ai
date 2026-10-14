@@ -1,7 +1,8 @@
 """Morale rules from the drift-free step replay (S26; docs/en/game/mechanics/morale.md, config/nn/sim.json morale):
 the attacked side kept from the contact's start (morale.attacked_first), routing enemies counted to the measured reach
 (morale.routing_enemies_reach), the charge's morale going with the unit's charging move (morale.charge.moving), the
-fight's winning (morale.combat_win). All OFF by default. Needs torch (the container)."""
+fight's winning (morale.combat_shooter). ON by default since S26 (the charge's melee_start OFF); each test sets the
+switch it tests explicitly in both states. Needs torch (the container)."""
 import copy
 
 import pytest
@@ -56,7 +57,7 @@ class TestAttackedFirst:
         return before, float(st.u["flank_hit"][0, 0])
 
     def test_the_rear_contact_is_kept_after_the_turn_only_with_the_rule(self):
-        before, after = self.rear_then_turn(P)
+        before, after = self.rear_then_turn(with_morale(P, "attacked_first", on=False))
         assert before == 2 and after == 0
         before, after = self.rear_then_turn(with_morale(P, "attacked_first", on=True))
         assert before == 2 and after == 2
@@ -78,7 +79,8 @@ class TestRoutingEnemiesReach:
         return seen[-1]
 
     def test_a_router_at_150_m_counts_with_the_measured_reach(self, monkeypatch):
-        assert self.counted(P, monkeypatch, 80) == 1 and self.counted(P, monkeypatch, 150) == 0
+        off = with_morale(P, "routing_enemies_reach", on=False)
+        assert self.counted(off, monkeypatch, 80) == 1 and self.counted(off, monkeypatch, 150) == 0
         on = with_morale(P, "routing_enemies_reach", on=True)
         m = float(on.sim["morale"]["routing_enemies_reach"]["m"])
         assert self.counted(on, monkeypatch, 150) == 1 and self.counted(on, monkeypatch, m + 30) == 0
@@ -138,7 +140,7 @@ class TestChargeMoving:
     def test_a_unit_moving_in_melee_under_attack_gets_a_block(self):
         mc = P.sim["morale"]["charge"]
         for on in (False, True):
-            params = P.with_cal("morale", charge={**mc, "moving": {**mc["moving"], "on": on}})
+            params = P.with_cal("morale", charge={**mc, "moving": {**mc["moving"], "on": on, "melee_start": True}})
             st, o = self.melee(params)
             st.u["chm_s"][0, 0] = 0.0
             st.u["mv"][0, 0] = True
@@ -148,6 +150,15 @@ class TestChargeMoving:
             st.u["chm_s"][0, 0] = 0.0
             battle.step(st, o, params)
             assert float(st.u["chm_s"][0, 0]) == 0
+
+    def test_without_melee_start_no_block_starts_in_melee(self):
+        mc = P.sim["morale"]["charge"]
+        params = P.with_cal("morale", charge={**mc, "moving": {**mc["moving"], "on": True, "melee_start": False}})
+        st, o = self.melee(params)
+        st.u["chm_s"][0, 0] = 0.0
+        st.u["mv"][0, 0] = True
+        battle.step(st, o, params)
+        assert float(st.u["chm_s"][0, 0]) == 0
 
     def test_blocks_go_on_while_the_unit_moves_with_no_cap(self):
         mc = P.sim["morale"]["charge"]
@@ -159,3 +170,11 @@ class TestChargeMoving:
             st.u["mv"][0, 0] = mv
             battle.step(st, o, params)
             assert float(st.u["chm_s"][0, 0]) == pytest.approx(want)
+
+
+def test_the_documented_defaults():
+    # config/nn/sim.json morale: the S26 rules ON, a charge block not started in melee, the strong-enemy balance OFF
+    m = P.sim["morale"]
+    assert m["attacked_first"]["on"] and m["combat_shooter"]["on"] and m["routing_enemies_reach"]["on"]
+    assert m["charge"]["moving"]["on"] and not m["charge"]["moving"]["melee_start"]
+    assert m["strong_enemy"]["rule"] == "off"

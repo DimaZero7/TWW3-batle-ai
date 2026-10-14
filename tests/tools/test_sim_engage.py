@@ -18,10 +18,14 @@ SWORD, CLANRAT, GENERAL = "wh_main_emp_inf_swordsmen", "wh2_main_skv_inf_clanrat
 COMBAT = P.battle["entity_action_attack_formed_combat_distance"]
 
 
-def on(params=P):
+def on(params=P, engage=1):
     p = copy.deepcopy(params)
-    p.sim["contact"]["engage"] = 1
+    p.sim["contact"]["engage"] = engage
     return p
+
+
+def off(params=P):
+    return on(params, 0)
 
 
 def units(rows, m=(False, False)):
@@ -68,9 +72,8 @@ class TestContactLimit:
 
     def test_off_is_reach_plus_hold(self):
         c = P.sim["contact"]
-        assert not c.get("engage")
-        assert self.lim(P, [EMP, rat()], (False, False)) == pytest.approx(c["reach_m"])
-        assert self.lim(P, [EMP, rat()], (True, False)) == pytest.approx(c["reach_m"] + c["hold_m"])
+        assert self.lim(off(), [EMP, rat()], (False, False)) == pytest.approx(c["reach_m"])
+        assert self.lim(off(), [EMP, rat()], (True, False)) == pytest.approx(c["reach_m"] + c["hold_m"])
 
     def test_on_holds_to_the_combat_distance_in_melee_only(self):
         c = P.sim["contact"]
@@ -101,12 +104,12 @@ def fight(params, gap):
 class TestBattle:
     def test_fronts_at_the_games_fighting_distance_stay_in_contact_only_with_the_switch(self):
         # the reform probe: in a long fight the game's fronts stand ~1.3 m (closest men) apart, the boxes ~+0.5..+1.5 m
-        assert not fight(P, 1.0)
+        assert not fight(off(), 1.0)
         assert fight(on(), 1.0)
         assert not fight(on(), 2.5)            # beyond the combat distance: apart
 
     def test_overlapping_boxes_touch_either_way(self):
-        assert fight(P, -1.0) and fight(on(), -1.0)
+        assert fight(off(), -1.0) and fight(on(), -1.0)
 
 
 def test_the_companion_mirror_agrees():
@@ -128,5 +131,6 @@ def test_the_companion_mirror_agrees():
     assert exchange.gaps(state, shape)[1][0, 1] == pytest.approx(c["reach_m"] + c["hold_m"])
 
 
-def test_the_switch_is_off():
-    assert P.sim["contact"].get("engage") == 0
+def test_the_switch_is_on():
+    # on since S26 (config/nn/sim.json contact.engage_why)
+    assert P.sim["contact"].get("engage") == 1

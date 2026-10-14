@@ -927,11 +927,13 @@ class TestProperties:
         a = st.clone()
         H = st.N // 2
         swap = torch.cat([torch.arange(H, 2 * H), torch.arange(0, H)])
-        from tools.nn.sim.state import HISTORY
+        from tools.nn.sim.state import HISTORY, PAIRS
         b = st.clone()
         for k, v in b.u.items():
             if k in HISTORY:                         # [B, K * N]: K steps of N slots
                 b.u[k] = v.reshape(v.shape[0], -1, st.N)[:, :, swap].reshape(v.shape[0], -1)
+            elif k in PAIRS:                         # [B, N * N]: both slots of the pair swap
+                b.u[k] = v.reshape(v.shape[0], st.N, st.N)[:, swap][:, :, swap].reshape(v.shape[0], -1)
             else:
                 b.u[k] = v[:, swap]
         b.u["side"] = torch.where(b.u["side"] > 0, 3 - b.u["side"], b.u["side"])
