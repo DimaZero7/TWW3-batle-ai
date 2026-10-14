@@ -271,6 +271,16 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           clips only the clanrats - and the controls idle / busy at a clear edge gap of 5 m. Battles 1 and 3 at a run, 2
           and 4 at a walk, lanes rotated - 4 battles of 10 lanes. Its table (+ the path's bend and the stops): the same
           walkpass_probe.
+  busycharge  a charge into an enemy already fighting another of our units (S26 task 7: the simulator's
+          charge.free_target_only gives no charge sprint and no charge bonus then, from any side): Empire spearmen (the
+          anvil, an extra) and clanrats attack each other at a walk from 1.5 m at the go; BUSYCHARGE a_go_s after the go
+          the charger - swordsmen (charge bonus 14; 5 lanes a battle) or the General (one a battle: rear busy / free, flank
+          busy) - attacks the clanrats at a run from gap_m 40 m off
+          their front (a_side 0: the anvil between them), their right flank (90) or their back (180); the controls charge
+          clanrats nobody fights from the front and from the back. The clanrats keep their morale (t_morale: MoralePercent,
+          the effects, the rout), everyone else fearless; the lane's contact is the charger's melee flag (contact_a_only),
+          its row carries DamageDealt (dd_rows); 30 s from that contact - 3 battles of 6 lanes, rotated.
+          Its table: python -m tools.nn.busycharge_probe [runs] [--sim].
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -414,7 +424,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "ratlingrt", "ratlingrt2",
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
-         "sidecontact") + UNIT_PLANS
+         "sidecontact", "busycharge") + UNIT_PLANS
 # the walkpass plan: swordsmen walk / run (a move order, 'pass') past clanrats - idle (halted, never ordered) or busy
 # (fighting an Empire spearmen unit they attack at the go) - edge_m apart edge to edge (the formations 30 m wide), or
 # straight through them ('through'), from gap_m ahead to beyond_m behind the clanrats' front; 'inmelee': a fight from 3 m,
@@ -426,6 +436,13 @@ WALKPASS = {"gap_m": 30, "beyond_m": 40, "max_s": {True: 45, False: 75}, "gaps":
 WALKPASS2 = {"overlaps": (2, 5, 10, 15), "control_m": 5, "busy_clear_m": 5, "gaits": (True, False, True, False)}
 # the sidecontact plan: the attacker's centre a_dx m aside of its target's (+x, towards the bystander), the bystander
 # t2_gap_m from the target's edge; the attacker's front overlaps the bystander by a_dx - t2_gap_m; a lane without one
+# the busycharge plan: the charger's order a_go_s after the go (the anvil's fight on for ~5 s by then), its run gap_m
+# (front to front / edge to edge), the fight after its contact; the places: 2 rows of 5 columns 200 m apart (a flank
+# charger stands ~60 m right of its lane's x)
+BUSYCHARGE = {"a_go_s": 6, "gap_m": 40, "fight_s": 30, "after_rout_s": 10, "anvil": "spear", "anvil_gap_m": 1.5,
+              "kinds": (("busy", 0), ("busy", 90), ("busy", 180), ("free", 0), ("free", 180)),
+              "lord_kinds": (("busy", 180), ("free", 180), ("busy", 90))}
+BUSYCHARGE_PLACES = tuple((float(x), z) for z in (250.0, -250.0) for x in (-400, -200, 0, 200, 400))
 SIDECONTACT = {"a_dx": (0, 6, 12, 18), "solo_dx": 12, "t2_gap_m": 1, "fight_s": 60}
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
@@ -988,6 +1005,26 @@ def battles(plan):
                      **common) for d in g["a_dx"]] + [lane("swords", "clanrat", "attack_walk", "hold",
                                                            a_dx=float(g["solo_dx"]), **common)]
         out += [base, rotate(base, 2)]
+    elif plan == "busycharge":
+        g = BUSYCHARGE
+        t_depth = depth(UNITS["clanrat"][0], UNITS["clanrat"][1], WIDTH_M)
+        e_depth = depth(UNITS[g["anvil"]][0], UNITS[g["anvil"]][1], WIDTH_M)
+
+        def bc(charger, busy, side):
+            extra = {}
+            if busy == "busy":
+                # the anvil at the clanrats' front facing them (bearing 180), both attacking at a walk at the go
+                extra = dict(extras=[{"short": g["anvil"], "dx": 0.0, "dz": round(t_depth / 2 + g["anvil_gap_m"] + e_depth / 2, 1),
+                                      "b": 180, "width": WIDTH_M, "attack": True}], t_attack_extra=True)
+            return lane(charger, "clanrat", "attack_run", "hold", gap_m=g["gap_m"], fight_s=g["fight_s"], answer=False,
+                        a_side=side, a_go_s=g["a_go_s"], contact_a_only=True, dd_rows=True, t_morale=True,
+                        at_rout="none", after_rout_s=g["after_rout_s"], kind=f"{busy}{side}",
+                        max_s=g["a_go_s"] + g["gap_m"] / 1.4 + g["fight_s"] + 20, **extra)
+        # the swordsmen's five lanes in every battle; the General (one a side: the lord slot) one lane a battle
+        base = [bc("swords", busy, side) for busy, side in g["kinds"]]
+        for k, (busy, side) in enumerate(g["lord_kinds"]):
+            lanes = rotate(base, k) + [bc("general", busy, side)]
+            out.append([dict(l, place=p) for l, p in zip(lanes, rotate(list(BUSYCHARGE_PLACES), 2 * k))])
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),
@@ -1373,11 +1410,18 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
             r = s0[3]
             sides[1]["units"].append({"key": UNITS["general"][0], "x": r["x"], "z": r["z"], "b": r["b"],
                                       "general": True, "name": "l"})
+        e0 = ln["extras"][0][1] if ln.get("extras") else []
         for j, e in enumerate(spec.get("extras") or [], 1):
-            # the attacker's side's extra units (dx, dz) from the target's centre, halted (a shooter fires at will)
-            sides[roles["a"]]["units"].append({"key": UNITS[e["short"]][0], "x": s0[2]["x"] + e["dx"],
-                                               "z": s0[2]["z"] + e["dz"], "b": s0[1]["b"], "men": UNITS[e["short"]][1],
-                                               "width": spec["a_width"], "general": False, "name": f"e{j}"})
+            # the attacker's side's extra units (dx, dz) from the target's centre, halted (a shooter fires at will);
+            # at their recorded place when the run has it (the busycharge plan's anvil: its own bearing e.b)
+            r_e = e0[j - 1] if len(e0) >= j and e0[j - 1].get("x") is not None else None
+            sides[roles["a"]]["units"].append({"key": UNITS[e["short"]][0],
+                                               "x": r_e["x"] if r_e else s0[2]["x"] + e["dx"],
+                                               "z": r_e["z"] if r_e else s0[2]["z"] + e["dz"],
+                                               "b": r_e["b"] if r_e else e.get("b", s0[1]["b"]),
+                                               "men": r_e["men"] if r_e else UNITS[e["short"]][1],
+                                               "width": e.get("width", spec["a_width"]), "general": False,
+                                               "name": f"e{j}"})
         if spec.get("t_morale"):
             # the target can rout (the routmob plan): a far-off standing unit of its side keeps its battle going
             sides[roles["tg"]]["units"].append({"key": spec["t_key"], "x": s0[2]["x"], "z": s0[2]["z"] - 400.0,
@@ -1456,7 +1500,9 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
             # the contact began in the step that ended now (its blows are in this sample already): its start
             # (a tired lane's only once its fight is on: before it the pair shuttles)
             fighting = mode[b] != "tire" or (st_["tire"][b] or {}).get("phase") == "fight"
-            if st_["contact"][b] is None and fighting and (m_a[b] or m_t[b]):
+            # (contact_a_only, the busycharge plan: the target is in melee with the anvil already - the attacker's flag)
+            touched = m_a[b] or (m_t[b] and not sp.get("contact_a_only"))
+            if st_["contact"][b] is None and fighting and touched:
                 st_["contact"][b] = t - params.dt
                 if L >= 0 and sp["lord"].get("ability") and syg_slot >= 0 and not sp["lord"].get("at_m"):
                     ab[b, L] = syg_slot
@@ -1519,7 +1565,13 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                                                                 fx, fz + sp["back_m"], True)
                 else:
                     kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, True
+            elif mode[b] in ("attack_run", "attack_walk") and t + t_first[b] < float(sp.get("a_go_s") or 0) - 1e-6:
+                # (a_go_s, the busycharge plan) the order waits that long after the game's go: a halt where it stands
+                sx, sz = st_["start"][b]
+                kind[b, A], target[b, A], run_[b, A], x[b, A], z[b, A] = O.HOLD, -1, False, sx, sz
             elif mode[b] in ("attack_run", "attack_walk"):
+                if sp.get("a_go_s") and not any(p_["phase"] == "a_go" for p_ in st_["phases"][b]):
+                    st_["phases"][b].append({"phase": "a_go", "t": (t + t_first[b]) * 1000})
                 kind[b, A], target[b, A], run_[b, A] = O.ATTACK, T, mode[b] == "attack_run"
             elif mode[b] == "shoot":
                 # the new units' ratling plan (tools/nn/unit_probe.py): one ranged attack on the target at a walk
@@ -1602,6 +1654,10 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                 kind[b, T], target[b, T], run_[b, T] = O.ATTACK, A, tmode[b] == "both"
             elif tmode[b] == "push":
                 kind[b, T], x[b, T], z[b, T], run_[b, T] = O.MOVE, sp["x"], sp["z"] + sp.get("push_m", 60), False
+            if int(slot["e1"][b]) >= 0 and (sp.get("extras") or [{}])[0].get("attack"):
+                # the busycharge plan's anvil: the first extra attacks the target at a walk from the go
+                E1 = int(slot["e1"][b])
+                kind[b, E1], target[b, E1], run_[b, E1] = O.ATTACK, T, False
             if sp.get("t_attack_extra") and int(slot["e1"][b]) >= 0:
                 # the walkpass plan's 'busy': the target attacks the first extra at a walk from the go
                 kind[b, T], target[b, T], run_[b, T] = O.ATTACK, int(slot["e1"][b]), False
@@ -2388,6 +2444,12 @@ def layout_lanes(plan, which=None):
             assert not (l.get("target2") or l.get("lord")), l["name"]
             a_men, t_men = UNITS[SHORT[l["a_key"]]][1], UNITS[SHORT[l["t_key"]]][1]
             a = {"x": l["x"] + l.get("a_dx", 0), "z": l["z"] + l["gap_m"] + l["a_depth"] / 2, "b": 180.0, "men": a_men}
+            if l.get("a_side") == 90:          # the busycharge plan: off the target's right edge / behind its back
+                a = {"x": l["x"] + l["t_width"] / 2 + l["gap_m"] + l["a_depth"] / 2, "z": l["z"] - l["t_depth"] / 2,
+                     "b": 270.0, "men": a_men}
+            elif l.get("a_side") == 180:
+                a = {"x": l["x"] + l.get("a_dx", 0), "z": l["z"] - l["t_depth"] - l["gap_m"] - l["a_depth"] / 2,
+                     "b": 0.0, "men": a_men}
             tg = {"x": l["x"], "z": l["z"] - l["t_depth"] / 2, "b": 180.0 if l["target_mode"] == "rear" else 0.0,
                   "men": t_men}
             out.append({"run": "layout", "plan": plan, "battle": i, "spec": l, "samples": [(0.0, a, tg, None)],

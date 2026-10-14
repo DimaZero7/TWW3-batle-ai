@@ -40,6 +40,15 @@ NEAR_M = 40.0        # an enemy in melee this near (centres) counts as striking 
 DEAD_HP = 0.003      # health share at or below which a unit with no men is dead, not gone
 
 
+def side4(rel, front_deg, rear_deg):
+    """0 front, 1 right flank, 2 rear, 3 left flank of a unit, from an angle off its facing (radians; any wrap) - the
+    simulator's geometry.side4."""
+    a = (np.asarray(rel) + np.pi) % (2 * np.pi) - np.pi
+    d = np.abs(a)
+    s = np.where(d <= np.deg2rad(front_deg), 0, np.where(d >= np.deg2rad(rear_deg), 2, 1))
+    return np.where((s == 1) & (a < 0), 3, s)
+
+
 def _ffill(a):
     """[T, n] float with NaN rows carried forward (a unit no longer listed keeps its last value); leading NaN -> 0."""
     a = np.array(a, float)
@@ -82,6 +91,7 @@ def clocks(g, rows, info, cal, hist=True):
     side = np.asarray(g.side)
     enemy = side[:, None] != side[None, :]
     x, z = _ffill(f["x"]), _ffill(f["z"])
+    bear = _ffill(f["b"]) if "b" in f else np.zeros_like(x)
     hp = _ffill(f["hp"])
     a = _ffill(f["a"])
     m = np.asarray(f["m"], bool)
@@ -173,9 +183,21 @@ def clocks(g, rows, info, cal, hist=True):
             fresh = eng & (contact <= 0)
             j_of = np.where(tgt[k] >= 0, tgt[k], tgt[k - 1])
             attack = j_of >= 0
-            # the target already fighting (another of ours) the row before: no charge (charge.free_target_only)
+            # the target already fighting (another of ours) the row before: no charge (charge.free_target_only); with
+            # charge.blocked_side only when one of ours in melee within NEAR_M of it stands on the charger's side of it
+            # (the recording does not say who touches whom)
             jj = np.clip(j_of, 0, None)
             busy = attack & m[k - 1][jj] & ~r[k - 1][jj]
+            if cal.get("blocked_side"):
+                xj, zj = x[k - 1][jj], z[k - 1][jj]
+                bj = np.deg2rad(bear[k - 1][jj])
+                s_i = side4(np.arctan2(x[k - 1] - xj, z[k - 1] - zj) - bj, cal["front_deg"], cal["rear_deg"])
+                qx, qz = x[k - 1][None, :] - xj[:, None], z[k - 1][None, :] - zj[:, None]
+                s_q = side4(np.arctan2(qx, qz) - bj[:, None], cal["front_deg"], cal["rear_deg"])
+                ours = (side[:, None] == side[None, :]) & ~np.eye(n, dtype=bool)
+                q_on = (m[k - 1] & ~r[k - 1] & alive[k - 1])[None, :]
+                block = ours & q_on & (np.hypot(qx, qz) <= NEAR_M) & (s_q == s_i[:, None])
+                busy = busy & block.any(1)
             ran = runup + np.where(fast, v_to, 0.0)
             charge_now = fresh & attack & (ran >= float(cal["min_runup"])) & ~busy
             charge_at = np.where(charge_now, k, charge_at)

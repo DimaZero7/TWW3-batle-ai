@@ -80,6 +80,38 @@ def test_melee_clock_bridges_short_gaps_and_the_charge_follows_a_run_in():
     assert c["charge"][0, 1] == 0                     # the lord stood
 
 
+def test_a_busy_target_takes_a_charge_only_from_a_side_none_of_ours_fights_on():
+    """charge.free_target_only + blocked_side: the charger (unit 0) runs at enemy unit 1 (facing it, bearing 270) that
+    our unit 2 already fights; at its back (x 60) the charge lands, at its front (x 40: between them) it does not;
+    without blocked_side neither."""
+    def charge(anvil_x, blocked):
+        T = 40
+        f = {k: np.zeros((T, 3)) for k in ("x", "z", "a", "mp", "ms", "b")}
+        f["x"][:, 0], f["x"][:, 1], f["x"][:, 2] = -50.0, 50.0, anvil_x
+        f["b"][:, 1] = 270.0
+        for k in range(1, 19):
+            f["x"][k, 0] = -50.0 + 5.0 * k
+        f["x"][18:, 0] = 40.0
+        f["hp"] = np.ones((T, 3))
+        f["men"] = np.tile([100.0, 100.0, 100.0], (T, 1))
+        for k in ("m", "r", "s", "w", "fire", "mv", "f"):
+            f[k] = np.zeros((T, 3), bool)
+        f["m"][:, 1:] = True                     # the target and our anvil fight from the start
+        f["m"][18:, 0] = True
+        target = np.full((T, 3), -1)
+        target[:, 0], target[:, 2] = 1, 1
+        g = gamedata.Battle(run="t", own_ai="attack", enemy_role="defend", result={}, t=np.arange(T, dtype=float), f=f,
+                            target=target, names=("own_a", "enemy_b", "own_c"), keys=("k0", "k1", "k2"),
+                            side=np.array([1, 2, 1]))
+        info = {"hp0": np.full(3, 1000.0), "run": np.full(3, 4.0), "men0": np.full(3, 100.0), "reload": np.zeros(3),
+                "lord": np.zeros(3, bool)}
+        cal = dict(CAL, blocked_side=blocked, front_deg=45, rear_deg=135)
+        return stepclock.clocks(g, [20], info, cal)["charge"][0, 0]
+    assert charge(60.0, 1) > 0.8 and charge(40.0, 1) == 0
+    assert charge(60.0, 0) == 0 and charge(40.0, 0) == 0
+    assert stepclock.side4(np.deg2rad([0, 60, 180, -60]), 45, 135).tolist() == [0, 1, 2, 3]
+
+
 def test_dealt_goes_to_the_named_attacker_and_lord_fall():
     g = battle()
     g.f["m"][10:, :] = True

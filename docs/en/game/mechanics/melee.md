@@ -184,12 +184,42 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
   friend makes no charge attack (back ranks of a counter-charge): ~35 % less counter-charge
   damage. Still the WH3 base · [1.12.1 notes][p1121] · high. CA (WH2): no charge when the path is
   blocked by one's own unit · [pcgamesn][pcgcav] · high.
-  - Ours: no sprint and no charge when the attack target is already in melee with another of our units — it
-    comes in at a run (`charge.free_target_only`: entering a fight where the target is surrounded by friends is
-    a blocked path). The recordings of 221 battles (the centre's speed 2 s before contact / the card's run,
-    median): into a free target of its own order the game's AI 1.12 (standing) / 1.02 (moving), the network 1.09
-    (p75 1.20–1.26 — the charge speed); into one already fighting 0.79–0.86. Whether entering another unit's
-    fight gives the charge bonus — open (no data, a probe).
+  - Ours: no sprint and no charge when the attack target is already in melee with another of our units **on the
+    same side of the target** the charger comes from (front ±45°, rear beyond 135°, the right and the left flank -
+    `charge.free_target_only`, `charge.blocked_side`): our men block the way, it comes in at a run. Into a busy
+    target's flank or rear - the full sprint and charge. Community: the charge bonus applies to units already
+    engaged; infantry and cavalry get blocked by their own troops in the way; flank and rear charges keep the
+    bonus · [Steam WH2][chbusy] · medium.
+    - The `busycharge` probe (`tools/nn/charge_probe.py --plan busycharge`, the table `tools/nn/busycharge_probe.py`;
+      3 battles, 3 swordsmen lanes a case and 1 General lane): Empire spearmen and clanrats fight from 1.5 m, 6 s
+      later swordsmen (charge 14) charge the clanrats from 40 m. From the impact (the clanrats' first loss in 0.5 s
+      over 2.5x their loss to the spearmen, the charger within reach):
+
+      | swordsmen → clanrats | sprint, m/s (last 10 m) | HP over the spearmen's, 0–2 / 0–5 s | morale, −in 5 s |
+      |---|---:|---:|---:|
+      | free, front | 4.27 | 291 / 411 | 0.00 |
+      | free, rear | 3.71 | 418 / 597 | 0.31 |
+      | busy, rear | 3.70 | 402 / 594 | 0.49 |
+      | busy, right flank | 3.40 | 136 / 240 | 0.21 |
+      | busy, front through the spearmen | 2.31 | 26 / 64 | 0.05 |
+
+      The swordsmen's run 3.0, charge 3.8. Into a busy rear - the same as into a free one: the full charge. Into the
+      flank - the sprint is there, less damage: the clanrats' side is 15 m against a 30 m front. Through our men - no
+      charge (as CA says). The General: into a busy rear 184 / 483 at 5.0 m/s, a free rear 239 / 478. The game's melee
+      flag of a charge into a rear or flank comes 2–3.5 s after the first blows (a frontal one - at once), so the
+      windows run from the impact, not the flag.
+    - The probe's twin (the simulator on the same lanes, 4 copies), before → after: into a busy rear 0–2 s 299 → 431 HP
+      (game 402), the sprint 3.00 → 3.80 m/s (3.70), the clanrats' morale in 5 s −0.43 → −0.47 (−0.49); in front through
+      our men unchanged (no charge). Whole battles: 72 gate battles - same winner 59.5 → 60.5, routs a unit 0.817 → 0.815
+      (game 1.187); the step replay (92 battles) - losses 0.97 → 0.97 of the game's, rout starts 1.02 → 1.03
+      (`build/charge7`).
+    - OPEN: the twin's charge over 0–5 s is stronger than the game's on a free target too (front 650 against 411, rear 740
+      against 597 - the clanrats stand unordered and keep their morale), into a flank 2–3x (a busy flank 0–2 s 413 against
+      136: the swordsmen's 30 m front on the clanrats' 15 m side, `melee.flank_face` striker); the General's is half the
+      game's (a busy rear 230 against 483).
+    - The recordings of 221 battles (the centre's speed 2 s before contact / the card's run, median): into a free
+      target of its own order the game's AI 1.12 (standing) / 1.02 (moving), the network 1.09 (p75 1.20–1.26 — the
+      charge speed); into one already fighting 0.79–0.86 (most such approaches - in front through our men).
 - **Charge morale.** A charging unit gets +15 leadership; `charge_timeout` 60 s is the timeout of
   that morale bonus. WH2 descriptions, same values in WH3 · [twwstats kv][tws] · high (values),
   medium (duration: guides say ~10 s). See [morale](morale.md).
@@ -656,6 +686,7 @@ unit is out of contact ~4 s after the order (its own melee flag goes off only af
 [p1121]: https://updatecrazy.com/total-war-warhammer-2-update-1-12-1-patch-notes-sep-8-2021/
 [reflect]: https://steamcommunity.com/app/1142710/discussions/0/688619343242657770/
 [pcgcav]: https://www.pcgamesn.com/total-war-warhammer-2/cavalry-overhaul-beta
+[chbusy]: https://steamcommunity.com/app/594570/discussions/0/1782766638534960763/
 [p510]: https://community.creative-assembly.com/total-war/total-war-warhammer/blogs/23-total-war-warhammer-iii-patch-5-1-0
 [p530]: https://community.creative-assembly.com/total-war/total-war-warhammer/forums/7-total-war-warhammer/threads/7586-total-war-warhammer-iii-patch-5-3-0-battle-balance-details
 [splash]: https://community.creative-assembly.com/total-war/total-war-warhammer/forums/10-battles/threads/6818-dividing-damage-among-models-during-splash-attacks-is-a-bad-design-decision

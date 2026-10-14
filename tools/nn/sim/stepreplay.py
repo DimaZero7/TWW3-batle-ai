@@ -263,7 +263,9 @@ def _batch(job):
            params.sim["morale"].get("extended_s") or 0.0), "recent_window_s": params.sim["morale"]["casualties_s"],
            "reset_s": params.sim["contact"].get("reset_s", 0.0), "min_share": params.sim["charge"]["min_speed_share"],
            "min_runup": params.sim["charge"]["min_runup_m"], "decay": params.battle["charge_decay_duration"],
-           "rout_pin_s": params.sim["contact"].get("rout_pin_s") or 0.0}
+           "rout_pin_s": params.sim["contact"].get("rout_pin_s") or 0.0,
+           "blocked_side": params.sim["charge"].get("blocked_side", 0), "front_deg": params.sim["contact"]["front_deg"],
+           "rear_deg": params.sim["contact"]["rear_deg"]}
     T = np.array([len(g.t) for g in games])
     starts = window_starts(int(T.max()), H)
     W = len(starts)

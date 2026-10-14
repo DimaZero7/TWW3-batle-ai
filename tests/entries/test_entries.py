@@ -1313,6 +1313,43 @@ class TestChargeProbe:
         lane = lua.table_from({"mode": "recharge", "recharge_after_s": 30, "back_m": 40, "recharge_max_s": 45})
         assert step("out", 40000, 0, 30000, 36, False, lane) == "back"            # no pause_s: on getting there
 
+    def test_busycharge_anvil_fights_first_and_the_charger_goes_later(self, lua, tmp_path):
+        """The busycharge plan: the anvil (an extra with attack) and the target fight from the go; the charger's attack
+        waits a_go_s; the target's melee flag is no contact (contact_a_only), the charger's is; its row has dd."""
+        lua.execute(self.SETUP + """
+            local L = CONFIG.lanes[1]
+            L.mode, L.target_mode, L.answer, L.lord, L.max_s, L.fight_s = 'attack_run', 'hold', false, nil, 60, 5
+            L.a_side, L.a_go_s, L.contact_a_only, L.dd_rows, L.t_attack_extra = 180, 6, true, true, true
+            L.extras = {{name = 'own_swords_2', dx = 0, dz = 14, b = 180, width = 30, attack = true}}
+            fake.cco[tostring(own[2]:unique_ui_id())] = {DamageDealt = 12}
+            CONFIG.lanes = {L}
+            CONFIG.park = {{name = 'enemy_lord', x = 700, z = -400, bearing = 0}}
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 9 do bm:tick(500); bm:pump() end
+            assert(own[3].attack_args.target == 'enemy_clanrat_1' and own[3].attack_args.run == false, 'the anvil walks in')
+            assert(enemy[2].attack_args.target == 'own_swords_2', 'the target attacks the anvil')
+            assert(own[2].attack_args == nil, 'the charger waits')
+            enemy[2].melee, own[3].melee = true, true
+            for _ = 1, 8 do bm:tick(500); bm:pump() end
+            assert(own[2].attack_args.target == 'enemy_clanrat_1' and own[2].attack_args.run == true, 'the charge')
+            own[2].melee = true
+            for _ = 1, 40 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        ph = {r["phase"]: r["t"] for r in rows if r["event"] == "probe_phase"}
+        (c,) = [r["t"] for r in rows if r["event"] == "probe_contact"]
+        assert ph["a_go"] >= 6000 and c > ph["a_go"]
+        assert "dd" in next(r for r in rows if r["event"] == "probe_sample")["lanes"][0]["a"]
+        lay = lua.eval("require('entries.charge_probe').layout")
+        base = {"x": 0, "z": 0, "gap_m": 40, "a_depth": 10, "t_depth": 16, "t_width": 30, "target_mode": "hold"}
+        flank = lay(lua.table_from(dict(base, a_side=90)))
+        assert (flank["ax"], flank["az"], flank["ab"], flank["tz"]) == (60, -8, 270, -8)
+        rear = lay(lua.table_from(dict(base, a_side=180)))
+        assert (rear["ax"], rear["az"], rear["ab"], rear["tb"]) == (0, -61, 0, 0)
+
     def test_damage_shoot_and_two_on_one(self, lua, tmp_path):
         lua.execute(self.SETUP + """
             CONFIG.lanes = {CONFIG.lanes[1], CONFIG.lanes[2]}

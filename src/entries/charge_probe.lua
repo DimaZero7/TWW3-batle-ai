@@ -72,6 +72,12 @@
 -- probe_phase 'rout_forced'). lane.extras (optional) {{name, dx, dz, fire}}: units of the attacker's side placed
 -- (dx, dz) from the target's centre facing the attacker's way, halted, fearless, never ordered; with fire, fire at will;
 -- sampled as the list 'e' in probe_sample (unit rows) and probe_men (soldier places after the rout).
+-- The busycharge plan: lane.a_side (degrees, 0 front / 90 right flank / 180 rear) places the attacker gap_m off the
+-- target's front / right edge / back (M.layout), facing it; an extra with e.b is placed at that world bearing and with
+-- e.attack attacks the target at a walk at the go (the anvil: with lane.t_attack_extra both fight); lane.a_go_s holds the
+-- attacker's order (its mode's) until that long after the go (probe_phase 'a_go'); lane.contact_a_only: the lane's
+-- contact is the attacker's melee flag only (the target is already in melee with the anvil); lane.dd_rows: the
+-- attacker's row carries dd (CCO DamageDealt).
 -- A t_morale target's sample row also carries its morale: mp (CCO MoralePercent), ms (MoraleState), mge
 -- (MoraleGreatestEffect, the strongest effect's text), fx (CCO ActiveEffectList keys) and w (wavering).
 -- lane.morale_rows (optional): both units' sample rows carry those morale fields (fearless or not; the dmgmelee plan).
@@ -131,6 +137,15 @@ end
 function M.layout(lane)
     local td, ad = lane.t_depth or 0, lane.a_depth or 0
     local tb = lane.target_mode == 'rear' and 180 or 0
+    if lane.a_side == 90 then
+        -- (the busycharge plan) off the target's right edge (+x), facing it (-x)
+        return {ax = lane.x + (lane.t_width or 0) / 2 + lane.gap_m + ad / 2, az = lane.z - td / 2, ab = 270,
+            tx = lane.x, tz = lane.z - td / 2, tb = tb}
+    elseif lane.a_side == 180 then
+        -- (the busycharge plan) behind the target's back (-z), facing it (+z)
+        return {ax = lane.x + (lane.a_dx or 0), az = lane.z - td - lane.gap_m - ad / 2, ab = 0,
+            tx = lane.x, tz = lane.z - td / 2, tb = tb}
+    end
     return {ax = lane.x + (lane.a_dx or 0), az = lane.z + lane.gap_m + ad / 2, ab = 180, tx = lane.x, tz = lane.z - td / 2, tb = tb}
 end
 
@@ -338,6 +353,7 @@ function M.main(bm, config, globals)
         local row = shooter and shooter_row(u) or unit_row(u)
         if lane.morale_rows or (who == 'tg' and lane.t_morale) then add_morale(row, u) end
         if lane.card_rows then row.cs = card_stats(u) end
+        if lane.dd_rows and who == 'a' then row.dd = round(read(cco, u, 'DamageDealt'), 0) end
         return row
     end
 
@@ -405,7 +421,7 @@ function M.main(bm, config, globals)
                 local a_m = read(function() return lane.a.unit:is_in_melee() end)
                 local t_m = read(function() return lane.t.unit:is_in_melee() end)
                 local fighting = lane.mode ~= 'tire' or lane.phase == 'fight'
-                if not lane.contact and fighting and (a_m or t_m) then
+                if not lane.contact and fighting and (a_m or (t_m and not lane.contact_a_only)) then
                     lane.contact = now
                     emit('probe_contact', {lane = lane.name, t = now - lane.t0, n = 1})
                     if lane.answer and lane.target_mode ~= 'hold' and lane.target_mode ~= 'both'
@@ -571,6 +587,12 @@ function M.main(bm, config, globals)
                                 t = now - lane.t0})
                         end
                     end
+                end
+                if lane.a_pending and now - lane.t0 >= lane.a_go_s * 1000 then
+                    -- (the busycharge plan) the attacker's order, held until a_go_s after the go
+                    lane.a_pending = false
+                    attack(lane, lane.a, lane.t, lane.mode == 'attack_walk')
+                    emit('probe_phase', {lane = lane.name, phase = 'a_go', t = now - lane.t0})
                 end
                 if lane.mode == 'retarget' then
                     local want = M.retarget_aim(now - lane.t0, lane.switch_s)
@@ -740,6 +762,10 @@ function M.main(bm, config, globals)
                 attack(lane, lane.t, lane.a, lane.target_mode == 'both_walk')
             end
             if lane.t2 and lane.t2_mode == 'attack' then attack(lane, lane.t2, lane.a, true) end
+            for _, e in ipairs(lane.extras or {}) do
+                -- (the busycharge plan's anvil) the extra attacks the target at a walk
+                if e.attack then attack(lane, state.units[e.name], lane.t, true) end
+            end
             if lane.t_attack_extra and lane.extras and lane.extras[1] then
                 -- (the walkpass plan's 'busy' lanes) the target attacks the first extra at a walk: it is busy fighting
                 attack(lane, lane.t, state.units[lane.extras[1].name], true)
@@ -755,6 +781,9 @@ function M.main(bm, config, globals)
                 orders.attack_ranged(lane.t.uc, lane.a.unit, false, true)
             end
             local m = lane.mode
+            if lane.a_go_s and (m == 'attack_run' or m == 'attack_walk') then
+                lane.a_pending, m = true, nil
+            end
             if m == 'attack_run' or m == 'recharge' or m == 'withdraw' or m == 'reengage' then
                 attack(lane, lane.a, lane.t, false)
             elseif m == 'attack_walk' then
@@ -827,7 +856,7 @@ function M.main(bm, config, globals)
             end
             for _, e in ipairs(lane.extras or {}) do
                 local it = state.units[e.name]
-                place(it, L.tx + (e.dx or 0), L.tz + (e.dz or 0), L.ab, lane.a_width)
+                place(it, L.tx + (e.dx or 0), L.tz + (e.dz or 0), e.b or L.ab, e.width or lane.a_width)
                 if e.fire then orders.set_fire_at_will(it.uc, true) end
             end
             for _, f in ipairs(lane.rally_friends or {}) do

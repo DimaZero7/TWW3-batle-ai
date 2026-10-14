@@ -676,7 +676,40 @@ def test_no_sprint_and_no_charge_into_a_target_already_in_melee_with_ours():
     free_v, free_c = approach(False)
     busy_v, busy_c = approach(True)
     run = P.units[SWORD]["speed"]["run"]
-    assert free_v > busy_v + 0.3 and free_c and not busy_c and busy_v <= run + 0.05
+    # (charge.blocked_side off: our unit on any side of the target blocks the charge)
+    if not P.sim["charge"].get("blocked_side"):
+        assert free_v > busy_v + 0.3 and free_c and not busy_c and busy_v <= run + 0.05
+
+
+def test_a_busy_target_blocks_the_charge_only_from_the_side_ours_fight_it_on():
+    """charge.blocked_side (the busycharge probe): swordsmen charge the front of clanrats that our spearmen already fight -
+    with the spearmen at the clanrats' back the charge is whole (the sprint, the bonus), with them at their front (between
+    the two) there is none."""
+    params = P.with_cal("charge", blocked_side=1, free_target_only=1)
+
+    def approach(where):
+        rows = [(SWORD, -40, 0, 90)] + [(SPEAR, 30 if where == "rear" else -30, 0, 270 if where == "rear" else 90)]
+        st = scenario.build([army(rows, [(CLANRAT, 0, 0, 270)])], params)
+        H = st.N // 2
+        front, depth = geometry.dims(st.u, params.sim["formation"]["spacing_m"])
+        off = (float(depth[0, 1]) + float(depth[0, H])) / 2 + TOUCH - 0.5
+        st.u["x"][0, 1] = float(st.u["x"][0, H]) + (off if where == "rear" else -off)
+        speeds, charged = [], False
+        for _ in range(40):
+            o = orders(st, **{"0": (O.ATTACK, H, True)})
+            o.kind[0, 1], o.target[0, 1] = O.ATTACK, H
+            battle.step(st, o, params)
+            st.u["b"][0, H] = 270.0                    # the clanrats keep facing the swordsmen
+            speeds.append(float(torch.hypot(st.u["vx"][0, 0], st.u["vz"][0, 0])))
+            charged = charged or float(st.u["charge"][0, 0]) > 0.5
+            if bool(st.u["m"][0, 0]):
+                break
+        return max(speeds), charged
+    rear_v, rear_c = approach("rear")
+    front_v, front_c = approach("front")
+    run = params.units[SWORD]["speed"]["run"]
+    assert rear_c and rear_v > run + 0.3
+    assert not front_c and front_v <= run + 0.05
 
 
 # --- C4: the flank and rear sectors ---

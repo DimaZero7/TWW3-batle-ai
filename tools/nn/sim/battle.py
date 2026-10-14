@@ -347,7 +347,18 @@ def step(st, orders, params=None, dt=None):
     busy_t = torch.zeros_like(standing)
     if ccal.get("free_target_only"):
         rows = touch.gather(1, tgt.clamp(min=0)[:, :, None].expand(-1, -1, N))        # [B, i, k]: i's target touches k
-        busy_t = (tgt >= 0) & (rows & same_side & ~eye & standing[:, None, :]).any(2)
+        block = rows & same_side & ~eye & standing[:, None, :]
+        if ccal.get("blocked_side"):
+            # (charge.blocked_side, the busycharge probe) only our unit fighting the target on the side the charger
+            # comes from blocks the way (front, right, rear, left of the target: contact.front_deg / rear_deg); into
+            # its flank or back the charge is whole - the game's swordsmen into clanrats busy with our spearmen: rear
+            # 402 / 594 HP in 0-2 / 0-5 s (free rear 418 / 597), sprint 3.70 m/s in the last 10 m (free 3.71)
+            side4 = geometry.side4(pw["rel_j"], cal["contact"]["front_deg"], cal["contact"]["rear_deg"])   # [B, x, j]
+            ti = tgt.clamp(min=0)
+            s_i = side4.gather(2, ti[:, :, None]).squeeze(2)                               # i's side of its target
+            s_k = side4.transpose(1, 2).gather(1, ti[:, :, None].expand(-1, -1, N))       # k's side of i's target
+            block = block & (s_k == s_i[:, :, None])
+        busy_t = (tgt >= 0) & block.any(2)
     min_runup = knobs.get(u, "min_runup_m", float(ccal["min_runup_m"]))
     fire = engaged & (kind == O.ATTACK) & (u["runup"] >= min_runup) & ~busy_t
     u["charge"] = torch.where(fire, torch.ones_like(u["charge"]), u["charge"])

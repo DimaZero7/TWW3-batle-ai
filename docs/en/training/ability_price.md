@@ -345,10 +345,11 @@ targets, damage is worth less there and morale and speed more than in a whole ba
 **Found on the way** (the decisions are not here):
 
 - **A run-up into a busy target.** 61-66 % of the `sprint` seconds in the recorded trajectory (`collect.fields`) are
-  the lord's run at an enemy already fighting a unit of ours. The simulator gives neither the sprint nor the charge
-  then (`charge.free_target_only`) - from any side, the rear too. So the charge-speed brick counts seconds where the
-  bonus does nothing (the record needs a "target free" flag), and a hammer-and-anvil charge into the rear of a busy
-  enemy gets no charge in the simulator - worth checking against the game (rule 17).
+  the lord's run at an enemy already fighting a unit of ours. Checked against the game (the `busycharge` probe): into a
+  busy target's rear and flank the charge is whole, there is none only through our own men (from the side our unit
+  fights on); the simulator does the same (`charge.blocked_side`, [the charge](../game/mechanics/melee.md#charge)).
+  The charge-speed brick still counts the seconds of a frontal run-up through our men, where there is no bonus (the
+  record needs the side).
 - **Speed counts idle seconds.** The condition "moves out of melee" catches much useless running in the network's
   presses: with the small fights' rate (0.041) Foe-Seeker's price goes against the replay (Spearman -0.21). The
   condition "moves out of melee and reaches melee later in the window" (a probe outside the code) keeps the same rate in

@@ -222,6 +222,12 @@ def sector(rel, front_deg, rear_deg):
     return torch.where(a <= front_deg * DEG, 0, torch.where(a >= rear_deg * DEG, 2, 1))
 
 
+def side4(rel, front_deg, rear_deg):
+    """0 front, 1 right flank, 2 rear, 3 left flank, from an angle off the facing (radians, + to the right)."""
+    s = sector(rel, front_deg, rear_deg)
+    return torch.where((s == 1) & (rel < 0), 3, s)
+
+
 def blocked_share(u, pw, mask, gx, gz):
     """[B, N]: the largest share of unit i's front that a formation j with mask [B, N, N] (row i, column j) covers
     across i's way to (gx, gz): i's front (pw["front"], centred on its centre, square to its way) against j's box seen
