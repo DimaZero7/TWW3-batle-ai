@@ -302,6 +302,7 @@ class Replay:
             self.ccal = c
             self.rules = params.battle
             self.rect = bool(c.get("rect_gap"))
+            self.mdepth = geometry.melee_depth(params.sim)
         self.chosen = None
         for k in keys:
             fill = {"kind": O.HOLD, "target": -1, "target_r": False, "moving": False}.get(k, 0)
@@ -375,7 +376,7 @@ class Replay:
         """([B, N, N] i touches standing enemy j, edge gaps, [B, N] standing): battle.step's contact test
         (geometry.contact_limit) from the places before the step."""
         u = st.u
-        pw = geometry.pairwise(u, self.spacing, rect=self.rect)
+        pw = geometry.pairwise(u, self.spacing, rect=self.rect, melee_depth=self.mdepth)
         alive = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
         standing = alive & ~u["r"]
         lim = geometry.contact_limit(u, pw, self.ccal, self.rules, self.spacing)

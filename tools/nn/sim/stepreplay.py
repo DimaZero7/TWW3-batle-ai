@@ -452,7 +452,8 @@ def _batch(job):
             put("aim_tgt", probe.u["aim_tgt"], took)
             del probe
         with torch.no_grad():
-            pw = geometry.pairwise(u, spacing, rect=bool(ccal.get("rect_gap")))
+            pw = geometry.pairwise(u, spacing, rect=bool(ccal.get("rect_gap")),
+                                    melee_depth=geometry.melee_depth(params.sim))
             alive = present & (u["men"] > 0) & ~u["gone"]
             standing = alive & ~u["r"]
             lim = geometry.contact_limit(u, pw, ccal, params.battle, spacing)

@@ -108,6 +108,7 @@ def formation_shape(doc, params=None):
     c = params.sim["contact"]
     out.update(reach_m=float(c["reach_m"]), lord_reach_m=float(c.get("lord_reach_m", c["reach_m"])),
                hold_m=float(c["hold_m"]), spacing=float(params.sim["formation"]["spacing_m"]),
+               melee_depth=float((params.sim["formation"].get("melee_depth") or {}).get("ranks") or 0.0),
                engage_m=(float(params.battle.get("entity_action_attack_formed_combat_distance", 2.5))
                          if c.get("engage") else None))
     leave_m = float(c.get("leave_m", 0.0))
@@ -121,7 +122,8 @@ def formation_shape(doc, params=None):
 def gaps(state, shape):
     """([N, N] the gap between the edges of unit i's and unit j's formations, m (negative: overlap), [N, N] the gap
     at which they touch) as the simulator measures them (geometry.pairwise, battle.py `touch`): rectangles of
-    geometry.dims (files = floor(width / h), at most the men; ranks = ceil(men / files); a lone man 2 x radius);
+    geometry.dims (files = floor(width / h), at most the men; ranks = ceil(men / files); a lone man 2 x radius;
+    with formation.melee_depth a unit in melee (state m) keeps room for its dead: geometry.dims);
     contact.reach_m (a lone man lord_reach_m), hold_m more when either is in melee (state m); with contact.engage
     (engage_m: the formed combat distance) two formations either of which is in melee touch up to geometry.engage_gap."""
     x, z = state["x"][0].astype(float), state["z"][0].astype(float)
@@ -132,6 +134,12 @@ def gaps(state, shape):
     with np.errstate(invalid="ignore"):
         files = np.minimum(np.maximum(np.floor(shape["width"] / h + 1e-4), 1), np.maximum(men, 1))
         ranks = np.ceil(np.maximum(men, 1) / files)
+        c = shape.get("melee_depth") or 0.0
+        if c > 0:
+            files0 = np.maximum(np.floor(shape["width"] / h + 1e-4), 1)
+            men0 = np.maximum(shape["men0"], 1)
+            loose = np.minimum(np.maximum(men, 1) / files + c * np.maximum(1 - men / men0, 0), np.ceil(men0 / files0))
+            ranks = np.where(np.asarray(state["m"][0], dtype=bool), np.maximum(ranks, loose), ranks)
     single = shape["men0"] <= 1
     front = np.where(single, 2 * shape["radius"], files * h)
     depth = np.where(single, 2 * shape["radius"], ranks * v)

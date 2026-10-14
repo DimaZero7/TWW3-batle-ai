@@ -12,10 +12,19 @@ import torch
 DEG = math.pi / 180
 
 
-def dims(u, spacing):
+def melee_depth(sim):
+    """formation.melee_depth's ranks per lost share (config/nn/sim.json; 0 / absent: off) - dims' melee_depth."""
+    return float(((sim.get("formation") or {}).get("melee_depth") or {}).get("ranks") or 0.0)
+
+
+def dims(u, spacing, melee_depth=0.0):
     """(front, depth) [B, N], m: files = floor(ordered width / h) (at least 1, at most the men), front = files x h,
     depth = ceil(men / files) x v (the game's own formations, data/roster: front (files - 1) h, depth (ranks - 1)
-    v, within 1 % / 10 % at 15-40 m; build/meleecore/spacing_check.py). spacing: h and v of a unit without its own."""
+    v, within 1 % / 10 % at 15-40 m; build/meleecore/spacing_check.py). spacing: h and v of a unit without its own.
+    melee_depth (formation.melee_depth.ranks, c; 0: off): a formation in melee (its melee clock contact_s > 0) does
+    not close up as its men fall - ranks = max(ceil(r), min(r + c (1 - men / men0), ceil(men0 / files0))), r = men /
+    files, files0 = floor(width / h): the dead leave c ranks' worth of room at their whole loss (config/nn/sim.json
+    formation.melee_depth.why); out of melee the box closes up as before (the missile probe P1)."""
     men = u["men"].clamp(min=0)
     single = u["men0"] <= 1
     if "sp_h" in u:
@@ -23,9 +32,14 @@ def dims(u, spacing):
         v = torch.where(u["sp_v"] > 0, u["sp_v"], torch.full_like(u["sp_v"], float(spacing)))
     else:
         h = v = torch.full_like(men, float(spacing))
-    files = torch.clamp(torch.floor(u["width"] / h + 1e-4), min=1)
-    files = torch.minimum(files, men.clamp(min=1))
+    files0 = torch.clamp(torch.floor(u["width"] / h + 1e-4), min=1)
+    files = torch.minimum(files0, men.clamp(min=1))
     ranks = torch.ceil(men.clamp(min=1) / files)
+    if melee_depth > 0 and "contact_s" in u:
+        men0 = u["men0"].clamp(min=1)
+        loose = torch.minimum(men.clamp(min=1) / files + melee_depth * (1 - men / men0).clamp(min=0),
+                              torch.ceil(men0 / files0))
+        ranks = torch.where(u["contact_s"] > 0, torch.maximum(ranks, loose), ranks)
     front = files * h
     depth = ranks * v
     lord = 2 * u["radius"]
@@ -117,7 +131,7 @@ def front_contact(x, z, b, front, depth):
     return o_f <= o_l
 
 
-def pairwise(u, spacing, rect=False):
+def pairwise(u, spacing, rect=False, melee_depth=0.0):
     """Everything about unit pairs, each [B, N, N] (row i, column j):
     dist      centre distance, m
     theta     bearing from i to j, radians
@@ -131,8 +145,9 @@ def pairwise(u, spacing, rect=False):
     rel_j     where i is seen from j, radians from j's facing
     face_i, face_j   length of i's side towards j, of j's side towards i
     enemy     different sides, both present
+    melee_depth: dims' (formation.melee_depth: a formation in melee keeps room for its dead)
     """
-    front, depth = dims(u, spacing)
+    front, depth = dims(u, spacing, melee_depth)
     x, z = u["x"], u["z"]
     dx = x[:, None, :] - x[:, :, None]
     dz = z[:, None, :] - z[:, :, None]

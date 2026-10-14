@@ -51,6 +51,7 @@ def step(st, orders, params=None, dt=None):
     R = params.battle
     spacing = cal["formation"]["spacing_m"]
     rect = bool(cal["contact"].get("rect_gap"))     # the formations' true rectangle gap (geometry.rect_gap)
+    mdepth = geometry.melee_depth(cal)              # a formation in melee keeps room for its dead (geometry.dims)
 
     present = u["side"] > 0
     alive = present & (u["men"] > 0) & ~u["gone"]
@@ -110,7 +111,7 @@ def step(st, orders, params=None, dt=None):
                                                           torch.full_like(u["order_s"], win)), u["order_s"] + dt)
 
     # --- contacts ---
-    pw = geometry.pairwise(u, spacing, rect=rect)
+    pw = geometry.pairwise(u, spacing, rect=rect, melee_depth=mdepth)
     both = alive[:, :, None] & alive[:, None, :]
     # Formations touch when their edges overlap by -reach_m (the game's formations step into each other at the
     # contact); a lone man (a lord) stops at a formation's edge (contact.lord_reach_m). Units already fighting stay in
@@ -1178,7 +1179,7 @@ def step(st, orders, params=None, dt=None):
     threat_cal = cal["threat"].get("calibration", {})
     # A calibrated flag uses the position and bearing visible in this observation.
     # OFF preserves the legacy pre-move geometry for exact baseline comparison.
-    threat_pw = geometry.pairwise(u, spacing, rect=rect) if threat_cal.get("on") else pw
+    threat_pw = geometry.pairwise(u, spacing, rect=rect, melee_depth=mdepth) if threat_cal.get("on") else pw
     masks = {} if threat_cal.get("on") else {"alive": alive, "standing": standing}
     u.update(threat_flags(u, threat_pw, params, **masks))
     dead = present & ((u["men"] <= 0) | u["gone"])

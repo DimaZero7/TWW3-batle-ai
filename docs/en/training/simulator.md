@@ -181,7 +181,7 @@ recordings; "calibrated" — a number fitted so the simulator repeats the game (
 | Mechanic | How | Source |
 |---|---|---|
 | Speed | walk, run, acceleration, deceleration of the passport; routing units run at 0.985 of the run with fatigue (before innate effects: a Skaven rout ×1.1 by Scurry Away!) | DB; the routing speed measured: routing / run divided by the database's fatigue multiplier — the Empire 0.989–1.000 in all 6 fatigue states, the Skaven 0.977 ([innate effects](#innate-effects)) |
-| Formation | front of the ordered width: ranks = floor(width / h), front = ranks × h, depth = ceil(men / ranks) × v; h, v — the unit's formation-template step from the DB (`unit_spacings`: the Empire and lords 1.48 × 1.6 m, clanrats, Flagellants, militia 1.6 × 1.7, slaves 1.6 × 1.8, Greatswords 1.7 × 1.75, Stormvermin 1.8 × 1.9, archers 2.0 × 2.1, slingers and Night Runners 2.2 × 2.8); `formation.spacing_m` — only for a unit without a template; a lord is a circle of his radius | DB; checked against the roster (6 units, 15–80 m): the game's front (ranks − 1) × h to 1.3 % (median), depth (ranks − 1) × v to 14 % (`build/meleecore/spacing_check.py`) |
+| Formation | front of the ordered width: ranks = floor(width / h), front = ranks × h, depth = ceil(men / ranks) × v (in melee with `formation.melee_depth` deeper, the dead's room stays: [below](#formation-depth-in-melee-formationmelee_depth), off); h, v — the unit's formation-template step from the DB (`unit_spacings`: the Empire and lords 1.48 × 1.6 m, clanrats, Flagellants, militia 1.6 × 1.7, slaves 1.6 × 1.8, Greatswords 1.7 × 1.75, Stormvermin 1.8 × 1.9, archers 2.0 × 2.1, slingers and Night Runners 2.2 × 2.8); `formation.spacing_m` — only for a unit without a template; a lord is a circle of his radius | DB; checked against the roster (6 units, 15–80 m): the game's front (ranks − 1) × h to 1.3 % (median), depth (ranks − 1) × v to 14 % (`build/meleecore/spacing_check.py`) |
 | Contact | own standing formations may stand in each other, nobody pushes them apart (`contact.friend_push` false; the recordings: own centres within 2 m in 0.2–0.3 % of pair-seconds, two still out of melee within 4 m keep their distance over 5 s - median 0.00 m); formations touch when they overlap by 2.5 m (`contact.reach_m` −2.5); a lord — at the formation's edge, within 1 m (`contact.lord_reach_m`); 2 m more for those already fighting (with `contact.engage`, off: while the outer men are within the database's formed combat distance, [below](#contact-by-the-formed-combat-distance-contactengage)); a unit leaves melee on withdraw or a move 10 m or more away (it strikes nobody, the enemies in contact strike it ×1.25, missile units ×0.55); a missile unit is held in place 5 s before it leaves, a unit without a missile weapon 2 s, a lord is not held; a unit with an attack order on the leaver follows it (at most at its own run speed) and strikes it (the chase, `contact.chase`); one still in contact 24 s after it began to leave (a lord too, `contact.breakoff_lord`) drops its order and fights again (`contact.breakoff`, the DB key `melee_breakoff_secs`); a hold after a leave or an attack on an enemy out of contact, given in melee, does not close the window: the formation and a lord strike nobody until 24 s from the first order (`contact.hold_breakoff`, `contact.hold_breakoff_lord`); the melee clock (`contact_s`) keeps running through gaps in contact shorter than 10 s (`contact.reset_s`); a formation's opening wave and first strike come at its first contact of the battle only (`contact.opening_once`): back in contact after any time out it fights at the usual rate at once (the charge bonus stays) | measured: in the first second of contact the game's formations overlap by 2.5–4.8 m (centre distance in the pairs against half the sum of depths from the DB step: −2.1 / −2.9); leaving and the chase — the melee-exit probe and 46 episodes of the network's battles (above, "Orders"); missile units' 5 s — measured (254 episodes; whether the chase holds them — open); 10 s — gaps of 4–7 s in the game do not start the fight over (`build/cyclecharge`); 24 s — the melee-exit probe (`build/movelords`): chased swordsmen and spearmen strike nothing for 24–26 s, then fight on; a halt after a leave — the `holdmelee` probe: 0 HP for 10–25 s after the halt, 6 lanes of 6, a lord's - the `holdlord` probe; the wave and the first strike once - the `recontact` probe (below, Men fighting) |
 | Pushing through | a formation under a move to a point 10 m or more away, given before the contact, its point through the enemy (not a leave): where it touches a standing enemy it does not stop but goes on to its point, fighting (the melee flag; strikes as `contact.move_far_full`), at a share of its order's speed by the share of its front the enemy formations it touches cover across its way (`geometry.blocked_share`; `contact.move_push`, tables for a walk and a run): covered 0.1 / 0.2 / 0.37 / 0.5 / the whole front - at a walk 0.89 / 0.65 / 0.49 / 0.21 / 0.08, at a run 0.89 / 0.80 / 0.26 / 0.09 / 0.09; no way round the enemy is planned - as in the game | measured: the `walkpass2` probe (`tools/nn/walkpass_probe.py`; `build/charge-probe/runs/20261013-033936`, `-034309` at a run, `-034116`, `-034447` at a walk, 2 lanes a case): swordsmen whose straight way clipped held clanrats by 2.5–3 / 5–6 / 11 / 14–15 m went on at a net 2.68 / 2.39 / 0.78 / 0.26 m/s at a run and 1.33 / 0.97 / 0.73 / 0.31 at a walk from their first melee second until past the clanrats; straight through (the `walkpass` probe) 0.26 / 0.12; none stepped aside more than 1.4 m (as the control); the twin of the same lanes 2.44 / 1.47 / 0.92 / 0.53 and 1.23 / 0.91 / 0.79 / 0.38 m/s (without the rule 0.93 / 0.65 / 0.32 / 0.08 and 0.69 / 0.58 / 0.13 / 0.12: it stood where it touched) |
 | Facing | a unit heading for a point off its facing turns to it at its men's turn rate from the DB (`battle_entities` turn_rate: infantry and the General 120°/s, archers and the Warlord 180, militia 240) and runs only the way it faces: its speed towards the point × cos of the angle between its facing and its way, none beyond 90° (`turn.move_turn`); a formation about-faces where it stands (the front rank becomes the back); a step of less than 10 m to its point a formation makes without turning; a formation in melee turns at most 2° a second (a lord turns at once); out of melee a standing formation turns in place at most `turn.formation_deg_s` 80°/s, a lord at his own turn rate from the DB | measured: infantry in melee turns 1°/s (median; mean 2.3), a free unit struck in the flank turns 8° in 5 s (median); standing missile units out of melee whose engine target appears 60° or more off their facing face it (within 20°) after 1 s (median; mean 1.6 s at 60–120°, 1.7 s at 120–180°; ≥ 64°/s with 1 s samples), standing turns of lords 40°/s (median of 440, 1 s samples; the old fit `single_deg_s`); the turning probe (`build/movelords`, 0.25 s, soldier places): spearmen sent at a run 150 m behind them about-face where they stand (each man's place along the front: correlation −0.98) and reach the run 2 s after the order; on a move order the General turns ~120°/s, the Warlord ~200°/s, both move off after 1.2 s |
@@ -1561,7 +1561,8 @@ the larger man's radius (`battle_entities`) − half a man's place of each towar
 back, h through a flank: the outer men stand half a place inside the box). Empire against clanrats: +1.5 m instead of
 −0.5. The start of a contact (−2.5 m) and lords are unchanged. Database numbers, no fit. On the probes the contact is
 seen in 81 % of the seconds; the rest is the depth: the game's formation keeps its depth as men fall (swordsmen at 50
-of 120 men ~8 m deep), the simulator's box loses ranks (4.8 m). The same rule is in the companion (`exchange.gaps`), so
+of 120 men ~8 m deep), the simulator's box loses ranks (4.8 m; the rule [below](#formation-depth-in-melee-formationmelee_depth),
+off). The same rule is in the companion (`exchange.gaps`), so
 the network sees the contact alike in the game and in the simulator.
 
 | | Before | `engage` | `engage` + `rect_gap` + `push_keep_facing` |
@@ -1580,6 +1581,7 @@ fighting. More routs begin in a window, but the simulator routed more often than
 the change too - that is morale (item 1), not the contact. The rule does not close the whole battles' rout shortage
 (0.80 against 1.19).
 
+<<<<<<< ours
 #### Morale by the game's greatest effect: four rules (off)
 
 **The point.** Where the game's morale stands still (a 10 s window, settled), the simulator's morale target matches it
@@ -1621,6 +1623,51 @@ the tail is the windows where its target is 12+ points below the game's morale (
 simulator against 14 in the game; in the other 90 % 126 against 75; before these rules and `contact.engage`); there it
 more often has losing the fight (-8 at a balance below 0.4, where the game needs about -1 - the balance is an estimate
 of who hit whom), a flank / rear blow by its own geometry and its own army collapse / neighbours' routs in the window.
+=======
+#### Formation depth in melee (`formation.melee_depth`)
+
+**The point.** In melee the game's formation does not close up as its men fall: its width stays near the ordered one
+and its depth shrinks more slowly than the simulator's box - the dead leave room. The rule repeats this; the contact at
+the game's places gets more accurate, but whole battles do not change; off.
+
+**The measure** (the men's places every second; probes `reform`, `reform2`, `damaged`, one on one, 240 s from 3 m:
+`build/charge-probe/runs/20261008-180435`, `-181311`, `-175102`, `-175151`; not the enveloping 15 and 50 m clanrats nor
+the two-on-one lane; 72 unit-lanes, 4,314 melee seconds from 5 s after contact; `build/formdepth/shape.py`, `fit.py`,
+`fit3.py`). Depth: the men's spread along the facing (p3-p97 / 0.94) in ranks, against the same unit whole before
+contact. No rule in the sources (CA's material, the database, the community's write-ups) - this is a measurement.
+
+| Men of the start | 90-100 % | 50-60 % | 30-40 % | 10-20 % | 0-10 % |
+|---|---|---|---|---|---|
+| Game, ranks (median of lanes) | 6.5 | 5.2 | 4.4 | 3.5 | 3.4 |
+| Simulator's box (closes up) | 6.0 | 4.0 | 4.0 | 2.0 | 1.0 |
+| The rule | 6.0 | 4.6 | 4.9 | 3.8 | 3.1 |
+
+The width stays near the ordered one (swordsmen at 50 %: 28.5 of 29.3 m) - the simulator has this already (files by
+the ordered width). Out of melee a thinned formation closes up (missile probe P1) - there the box is unchanged.
+
+**The rule** (`formation.melee_depth.ranks` c; `geometry.dims`; 0: off). A formation in melee (clock `contact_s` > 0)
+has ranks = max(ceil(r), min(r + c × (1 − men / men at the start), ceil(men at the start / files of the width))),
+r = men / files: the dead leave c ranks of room at a whole loss. c = 2.8 (90 % over lanes 0.4-4.3; by the front half,
+centre to the front men, 2.6). This form fits better than a power of the men's share, a floor of ranks and ceil(r) + c
+(error 8.31 against 8.41 / 8.31 / 8.75; the box without the rule 8.75). The same in the companion (`exchange.gaps`, by
+the game's melee flag).
+
+| c = 2.8 | Off | On |
+|---|---|---|
+| Probes: seconds with both in melee and a contact at the game's places (`build/formdepth/probe_contact.py`); the weaker at 50-70 / 30-50 / < 30 % of its men | 91.2 % (87.6 / 88.5 / 87.2) | 98.0 % (96.4 / 99.2 / 100) |
+| Melee windows without a contact, `--force pos`, exam / 72 battles | 17.6 / 13.6 % | 14.9 / 12.4 % |
+| Health lost a window, `--force pos` | 0.96 / 0.92 | 0.98 / 0.93 |
+| Routs begun, `--force pos` | 1.34 / 1.22 | 1.39 / 1.25 |
+| Units under 30 % health in melee, `--force pos` | 1.08 / 1.03 | 1.21 / 1.10 |
+| Step replay without `--force`: health lost; routs begun | 1.02 / 0.96; 1.38 / 1.25 | 1.04 / 0.97; 1.40 / 1.28 |
+| The 72 whole battles: routs a unit (game 1.187), same winner of 72, enemy's loss (game 0.571) | 0.832; 59.5; 0.501 | 0.847; 58.5; 0.497 |
+
+Why off: whole battles do not move (the difference is noise), and the simulator already hits thinned units in melee
+harder than the game (1.08 / 1.03), with the extra contact harder still (1.21 / 1.10). The likely cause is in the
+damage, not the geometry: a thinned target has fewer men within the strikers' reach (as `melee.front_fill_ranks` for
+the striker); the simulator lacks this. On the probes the box at c 2.8 of units under 30 % overlaps its enemy 1.2 m
+more than whole units; the evenest over the losses is c ≈ 2.2.
+>>>>>>> theirs
 
 ### The check's score: the simulator as a forecast
 
