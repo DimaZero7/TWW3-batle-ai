@@ -1011,6 +1011,15 @@ loses 33 HP/s against the game's 28.4); in absolute HP/s the game's 18.1 comes a
 unit no slower than it is struck not by the formation's front but by as many men as the router has
 (`contact.pursue_envelop`, [below](#a-routers-exit-from-the-fight)): the same share, more men.
 
+**How much routers lose - a check.** The step replay (92 battles, by second, where the unit itself routs, units gone off
+the map left out): the simulator strikes routers not weaker than the game but harder - x1.22 per routing second in the
+72 gate battles and x1.55 in the 20 exam battles (routing at the window start <7 / 7-30 / 30+ s: x1.39 / 1.01 / 1.21 in
+the gate). The exam v2 twin's gap ("ours lose routing" game 0.056, twin 0.025, x2.24) is not the pursuit: 0.019 of
+the 0.056 are units that ran off the map (the game records 0 men with the health kept, the measure
+`build/v2gap/ana.py` counted it as a loss, the twin keeps its men); without them x1.48 - just as many more routs as
+the game has (x1.51: again x1.93, shattered x1.63), per rout 0.98 (the enemy: 0.90 with routs 0.88). The rest is
+morale (more routs), not how routers are cut down.
+
 ### A shooter and its routing target
 
 A shooter without an order on a target in range (hold, move, withdraw, or an attack on a unit out of range - the
