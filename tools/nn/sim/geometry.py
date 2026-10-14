@@ -196,19 +196,20 @@ def engage_gap(u, pw, combat_m, spacing=1.5):
     return combat_m + r - hp_i - hp_j
 
 
-def contact_limit(u, pw, ccal, rules=None, spacing=1.5):
+def contact_limit(u, pw, ccal, rules=None, spacing=1.5, engage=True):
     """[B, N, N] the largest edge gap (pw["gap"]) at which units i and j touch: contact.reach_m (a lone man:
     contact.lord_reach_m), + contact.hold_m when either is in melee already (u["m"]); with contact.engage on, two
     formations either of which is in melee touch while their outer men are within the formed combat distance
     (engage_gap; never less than the old hold). rules: the game's battle rules (params.battle); spacing: a man's place
-    for a unit without its own (formation.spacing_m)."""
+    for a unit without its own (formation.spacing_m); engage False: the old hold whatever contact.engage says (the
+    release of contact.engage_release, battle.py)."""
     reach = float(ccal["reach_m"])
     lone = u["men0"] <= 1
     pair_lone = lone[:, :, None] | lone[:, None, :]
     in_melee = u["m"][:, :, None] | u["m"][:, None, :]
     lim = torch.where(pair_lone, torch.full_like(pw["gap"], float(ccal.get("lord_reach_m", reach))),
                       torch.full_like(pw["gap"], reach)) + in_melee.float() * float(ccal["hold_m"])
-    if ccal.get("engage"):
+    if engage and ccal.get("engage"):
         combat_m = float((rules or {}).get("entity_action_attack_formed_combat_distance", 2.5))
         eng = torch.maximum(lim, engage_gap(u, pw, combat_m, spacing))
         lim = torch.where(in_melee & ~pair_lone, eng, lim)

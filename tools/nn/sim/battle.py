@@ -236,6 +236,19 @@ def step(st, orders, params=None, dt=None):
                                              new_order=sk_new if sk_cal.get("order_cuts", 1) else None)
         if sk_cal.get("melee_run"):
             leaving = leaving | (sk_run & in_touch)
+    if cal["contact"].get("engage") and cal["contact"].get("engage_release"):
+        # The engage hold is for units that stay fighting (contact.engage_release; config/nn/sim.json
+        # contact.engage_release_why): a pair where either unit leaves (a withdraw, a far move, an attack_leave, a
+        # skirmish run) or has an attack order on another unit touches only by the old hold (reach_m + hold_m). The
+        # chase and the rout's stuck men keep their own contacts.
+        ar = torch.arange(N, device=tgt.device)
+        other = (kind == O.ATTACK)[:, :, None] & (tgt >= 0)[:, :, None] & (tgt[:, :, None] != ar[None, None, :])
+        rel = leaving[:, :, None] | other
+        rel = rel | rel.transpose(1, 2)
+        lim_old = geometry.contact_limit(u, pw, cal["contact"], R, spacing, engage=False)
+        drop = rel & (gap_c > lim_old) & ~chase_touch & ~stuck_touch
+        touch = touch & ~drop
+        touch_geo = touch_geo & ~drop
     striker = standing & ~leaving
     if cal["contact"].get("hold_breakoff") and "brk_s" in u:
         # A hold does not close the melee exit's window (contact.hold_breakoff; config/nn/sim.json

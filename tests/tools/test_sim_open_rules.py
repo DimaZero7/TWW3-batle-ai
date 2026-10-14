@@ -237,6 +237,11 @@ class TestFreshOrders:
         for _ in range(int(12 / params.dt)):
             battle.step(st, orders(st, **{"0": (O.ATTACK, H, False), str(H): (O.ATTACK, 0, False)}), params)
         assert bool(st.u["m"][0, 0])
+        # the second clanrats (held, out of the fight) stand where the probe's did at the order: their near edge
+        # 4.4-5.2 m behind the swordsmen's front line (both runs at 10-12.5 s; the start line above put it level with
+        # that front, 3 m beside the swordsmen's flank - a corner contact after a 2 m step aside with rect_gap)
+        front, depth = geometry.dims(st.u, P.sim["formation"]["spacing_m"])
+        st.u["z"][0, H + 1] = st.u["z"][0, 0] - depth[0, 0] / 2 - 4.5 - depth[0, H + 1] / 2
         return st, H
 
     def after(self, order, seconds, params=P):
@@ -476,6 +481,14 @@ class TestMeleeExit:
         assert out_at is not None and 3.0 <= out_at <= 5.0 and lost < 100.0
         st0, out0, _, _ = self.leave(chased=False, seconds=10, params=P.with_cal("contact", pin_melee_s=0.0))
         assert out0 is not None and out0 < out_at                   # without the hold: out sooner
+
+    def test_the_engage_hold_lets_a_leaver_go(self):
+        # contact.engage_release: the formed combat distance holds only units that stay fighting - a leaver touches by
+        # the old hold, so it walks out as in fatleave (with the engage hold on it: 120 HP lost, out at 5 s)
+        assert P.sim["contact"]["engage"] and P.sim["contact"]["engage_release"]
+        _, out_on, lost_on, _ = self.leave(chased=False, seconds=10)
+        _, out_off, lost_off, _ = self.leave(chased=False, seconds=10, params=P.with_cal("contact", engage_release=0))
+        assert out_on < out_off and lost_on < lost_off - 15.0
 
     def test_a_chased_unit_stays_in_contact_until_the_window_then_fights(self):
         st, out_at, lost, struck = self.leave(chased=True, seconds=30)

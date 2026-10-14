@@ -86,18 +86,27 @@ class TestContactLimit:
         assert self.lim(on(), [lord, rat()], (True, True)) == pytest.approx(c["lord_reach_m"] + c["hold_m"])
 
 
-def fight(params, gap):
-    """Swordsmen and clanrats both in melee, holding, their boxes `gap` m apart head-on: in contact after a step?"""
+def fight(params, gap, order=None):
+    """Swordsmen and clanrats both in melee, holding, their boxes `gap` m apart head-on: in contact after a step?
+    order: the swordsmen's instead of the hold - "withdraw" (west), "other" (attack a second clanrat unit 5 m beyond
+    their right flank: nearer than contact.leave_m, not a leave)."""
     st = scenario.build([{"attacker": 1, "sides": {
         1: {"faction": "wh_main_emp_empire", "units": [{"key": SWORD, "x": -50, "z": 0, "b": 90}]},
-        2: {"faction": "wh2_main_skv_skaven", "units": [{"key": CLANRAT, "x": 50, "z": 0, "b": 270}]}}}], params)
+        2: {"faction": "wh2_main_skv_skaven", "units": [{"key": CLANRAT, "x": 50, "z": 0, "b": 270},
+                                                         {"key": CLANRAT, "x": 50, "z": 80, "b": 270}]}}}], params)
     front, depth = geometry.dims(st.u, params.sim["formation"]["spacing_m"])
     H = st.N // 2
     st.u["x"][0, 0] = -(depth[0, 0] / 2 + gap / 2)
-    st.u["x"][0, H] = depth[0, H] / 2 + gap / 2
+    st.u["x"][0, H] = st.u["x"][0, H + 1] = depth[0, H] / 2 + gap / 2
+    st.u["z"][0, H + 1] = front[0, 0] / 2 + 5.0 + front[0, H + 1] / 2
     st.u["m"][0, 0] = True
     st.u["m"][0, H] = True
-    battle.step(st, O.hold(st.B, st.N), params)
+    o = O.hold(st.B, st.N)
+    if order == "withdraw":
+        o.kind[0, 0], o.x[0, 0], o.z[0, 0] = O.WITHDRAW, -300.0, 0.0
+    elif order == "other":
+        o.kind[0, 0], o.target[0, 0] = O.ATTACK, H + 1
+    battle.step(st, o, params)
     return bool(st.u["m"][0, 0]) and bool(st.u["m"][0, H])
 
 
@@ -107,6 +116,19 @@ class TestBattle:
         assert not fight(off(), 1.0)
         assert fight(on(), 1.0)
         assert not fight(on(), 2.5)            # beyond the combat distance: apart
+
+    def test_a_leaver_or_an_attacker_of_another_unit_is_not_held(self):
+        # contact.engage_release: the combat distance holds units that stay fighting; one leaving (a withdraw) or told
+        # to attack another unit touches its foe by the old hold only (the fatleave / fresh probes)
+        rel = copy.deepcopy(on())
+        rel.sim["contact"]["engage_release"] = 1
+        held = copy.deepcopy(on())
+        held.sim["contact"]["engage_release"] = 0
+        for order in ("withdraw", "other"):
+            assert not fight(rel, 1.0, order)
+            assert fight(held, 1.0, order)
+        assert fight(rel, 1.0)                 # a held pair: still in contact
+        assert fight(rel, -1.0, "other")       # overlapping boxes: the old hold holds
 
     def test_overlapping_boxes_touch_either_way(self):
         assert fight(off(), -1.0) and fight(on(), -1.0)
