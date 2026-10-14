@@ -40,9 +40,13 @@ flowchart LR
   equal networks with the full enemy view only (S12: 5/8, the first trade above 1); v2 armies (from S14: 5.9 of 8 on
   average against 3.0 before); simulator fixes from game battles, the main one closing the "ever-fresh lord" loophole
   (S23_2: 8 of 8).
-- **How we look for the gap:** the automatic hole finder (`build/holes`, report `build/holes/report.md`): a step
-  replay of ~640 recorded battles and the acceptance number A - how far the twins of the panel's 56 battles are from
-  the game (lower is better, ~0.30).
+- **How we look for the gap:** the step replay without drift (`tools/nn/sim/stepreplay.py`, [the measure](training/simulator.md#the-step-replay-a-measure-without-drift)):
+  every 10 / 20 s the simulator is put into the recorded game state with its hidden clocks and compared by situation.
+  On 92 battles, from the same state the window's damage is right (0.94; after 5 s 1.02) and it routs **more** than
+  the game (1.11 / 1.21): the whole battles' rout deficit is the battle's path, not morale in the moment. Candidates:
+  the morale of middling and fresh units ('charge' in a long melee), the contact at the game's places, flank and rear
+  attacks. The acceptance number A (`build/holes`) - how far the twins of the panel's 56 battles are from the game
+  (lower is better, ~0.30).
 - **The twin's largest gaps:** our units lose half the game's health while routing; the network's lord is in melee
   1.5x as often as in the game and out of the fight in 0.30 of battles against the game's 0.38 (0.12 before the lord's fatigue rule); the AI's shooters move less in the twin.
 - **The simulator on the game's recordings** (the replay of 72 battles, below): the loss curves match;

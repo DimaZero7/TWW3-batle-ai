@@ -1439,6 +1439,114 @@ Mean absolute trade error across the three gates at game end / sim end: previous
 that game movement is reproduced or the 98% requirement is met. The replay and coefficient
 changes alter the simulator version and its baseline evaluation cache.
 
+### The step replay: a measure without drift
+
+A whole replay drifts from the game by ~110 m on average, so comparing routs and losses in it mixes the mechanics'
+errors with drift (34 % of the game's losses before a rout fall in seconds when the replay's unit is not even in
+melee). The step replay has no drift: every H s (10 or 20) the simulator is put into the recorded state of the game and
+plays H s on the recorded orders; each second of the window its state is compared with the recording.
+
+```
+DOCK_NAME=agent-stepreplay DOCK_BUILD=<main checkout>/build bash tools/nn/dock.sh tools.nn.sim.stepreplay \
+  --sets it1 it2 it3 it4 it5 it6 it7 it8 it9 --lists build/compare/itS24.json build/compare/itS24ai.json \
+  --H 10 --copies 4 --chunk 46 --device cuda --out build/stepreplay/<tag>
+.venv/Scripts/python -m tools.nn.sim.stepcells build/stepreplay/<tag> --group exam=build/stepreplay/exam.json --md <file>
+```
+
+92 battles take ~15 min on the GPU. A mechanic's change is checked by the same run with `--set section.key=value`.
+
+**What a window starts from** (`tools/nn/sim/stepreplay.py`):
+- the observed state: place, bearing, men, health, morale (MoralePercent x leadership - morale is recorded for both
+  sides in all 92 battles), the rout, shatter, waver and melee flags, ammunition, kills, fatigue level, the target;
+- the simulator's hidden clocks rebuilt from the recording's history (`tools/nn/sim/stepclock.py`): the casualty
+  windows (the last 4 and 60 s of the recorded health; a router leaving the map - men 0, the health kept - is not a
+  loss), the fight balance (who struck whom - an estimate: the attacker the recording names, else the nearest enemy in
+  melee within 40 m), the waver timer, the routs so far, the rout and rally clocks, the melee clock, the run-up and
+  the charge, the velocity (only where the game shows the unit moving), the rout's exit, under fire, the lord's fall;
+- abilities: the timers from the recorded casts (the `nn_effects` events: an ability coming on the lord); in the
+  window the recorded casts are replayed as orders and the game-AI rule is off;
+- a shooter: the target the game shows it firing at and the aim of the seconds it stood; a random place in its
+  reload cycle (the game fires as a trickle of men, the recording has no unit volley); the target it takes from these
+  places without the switch's cost (a probe step on a copy of the state).
+
+From its own last window the simulator carries what the recording lacks: the order clocks (`order_s`, `exit_s`,
+`brk_s`, `leave_s`), the charge's morale blocks, the reload and aim of a shooter the game shows not firing, the
+contact and timed effects, the skirmish run, stuck men. Modes: `--force pos` - the game's places, bearings and velocity
+every second (the damage at the game's geometry); `--force pos,hp` - also its health, men, casualty windows and fight
+balance (morale and routs on the game's own losses); `--keep field,...` - a field not put (a check of the reset).
+
+**The comparison** (`tools/nn/sim/stepcells.py`). A row is a unit in a window (on the field at its start): the health
+lost (a share of the start; the simulator's: the mean of 4 copies), apart also after the window's first 5 s; a rout
+begun; a rally; the morale's change. Cells: the situation at the start by the recording (melee and how long, how many
+enemies touch the unit in the simulator's contact test at the game's places and from which side, a contact
+beginning, being shot at, routing, low health), the unit kind, the game's morale. The ratio is sim / game of the cell's
+sums, the 95 % interval resamples battles (the windows of one battle are not independent). The curve by second of the
+window shows what builds up over time and what is the reset's jump.
+
+**The measure's own errors.** Each gave a damage deficit the simulator does not have; found by the curve by second of
+the window and `--keep` checks:
+
+| What | How it showed | Fix |
+|---|---|---|
+| Velocity from the place's jitter (~0.3 m/s for a standing unit) | a standing shooter 'walked' and lost its aim; shooters' damage in a window's 1st-3rd s 0.2-0.5 of the game | velocity only with the game's moving flag |
+| Reload from the ammunition's drop | every shooter 'had just fired', volleys in step: 6k HP/s in a window's 2nd s, 150k in its 9th (the game flat) | a random place in the cycle |
+| A new target after the places' jump | the 3 s target switch of every shooter at once (damage in the 2nd-3rd s 0.55 of later) | the target from the probe step |
+| The old step replay `build/holes` (3 s windows) | the casualty windows were its own, not the game's (`build/holes/wavering.md`); leaving the map was a loss | the windows from the recording; leaving is not a loss |
+
+What is left: a shooter fires ~0.7 of its later rate in a window's first 3-5 s; melee in the first 5 s is 0.77-0.92 of
+the game (below: geometry), from the 6th-8th s ~1.0 (20 s windows).
+
+**The result on 92 battles** (10 s windows; in 20 s windows the 72 battles are the same within +-0.05, the exam's
+routs 1.13, rallies 0.88):
+
+| | 72 gate battles (it1-it9) | 20 exam battles (S24) |
+|---|---|---|
+| Health lost, sim / game, over the window | 0.94 (0.92-0.97) | 0.96 (0.88-1.05) |
+| The same after the window's first 5 s | 1.02 (0.99-1.05) | 1.05 (0.97-1.14) |
+| Routs begun | 1.11 (1.04-1.19): game 2008, sim 2237 | 1.21 (1.01-1.38): 683 / 827 |
+| Routs begun at the game's places and losses (`--force pos,hp`) | 1.06 (0.99-1.14) | 1.09 (0.93-1.24) |
+| Health lost at the game's places every second (`--force pos`) | 0.85 (0.83-0.88) | 0.79 (0.70-0.90) |
+| Rallies | 1.04 (0.98-1.10) | 0.80 (0.73-0.84) |
+
+The main point: **from the same state the simulator does not rout less than the game but more, and its damage over a
+window is right.** The rout deficit of whole battles (the enemy 9.7 against 16 a battle) is not morale in the moment
+but the battle's path: in a whole replay the units do not reach the states they rout from (drift of places, contacts,
+losses).
+
+Deviations (10 s windows, 72 battles; the 95 % interval excludes 1):
+
+| Cell | Sim / game | What it means |
+|---|---|---|
+| Routs from MoralePercent 0.5-0.75 / 0.25-0.5 / < 0.25 | 3.27 / 1.41 / 0.89 (on the game's losses 2.90 / 1.31 / 0.88) | middling morale breaks faster than the game's, wavering units hold a little longer |
+| Fresh units out of a fight: MoralePercent over 10 s | game +0.014, sim -0.039; routs x1.37 | the morale's target out of a fight is below the game's |
+| Melee where the game is in melee and the simulator's rectangles do not touch (33 % of melee windows; the gap: median 4.3 m) | damage 0.74, routs 0.76 | the contact at the game's places |
+| Melee: touching 1 enemy / 2 or more | damage 0.84 / 1.07 (after 5 s 0.91 / 1.10) | one on one less, a crowd more |
+| Lord | damage 1.25 (1.16-1.35) | the lord loses more than in the game |
+
+Morale against the game's 'greatest effect' (the recording's `MoraleGreatestEffect`, mode `--force pos,hp`, a window's
+end): where the game names the effect, the simulator's term is on - 'casualties suffered' 1.00, 'flanks secure' 0.78,
+'enemy routing' 0.81, 'lord nearby' 0.90, 'under fire' 0.67, **'charge' 0.30** (7175 windows), **'attacked in the
+rear' 0.50, 'in the flank' 0.38**, 'winning' 0.53, 'army losses' 0.53. The game's 'charge' (71k unit-seconds of the 92
+battles): 58 % out of melee, 93 % under an attack order, in melee it shows 30-120 s after the contact too (5-6 % of the
+seconds), in runs of 6 s (median; 75 % up to 12 s, 90 % up to 18 s); the simulator's 6 s blocks come only from the
+charge pose up to the contact.
+
+**What to fix next** (by size; internet and the database first, rule 17):
+1. **The morale of middling and fresh units**: from MoralePercent 0.5-0.75 they rout 2.9 times as often as in the game
+   even on its own losses and places, and fresh units out of a fight lose morale where the game's gain. Start with the
+   terms the simulator lacks where the game names them: 'charge' in a long melee (repeated 6 s blocks - on what
+   event?) and 'winning'. Probe: a unit under an attack order in a long melee, a new attack order on the same or another
+   target every 20 s; read `MoraleGreatestEffect` and MoralePercent by second.
+2. **The contact at the game's places**: in a third of the game's melee windows the simulator sees no contact at the
+   same places; the damage there 0.74, one on one 0.84. Holding the game's places every second (`--force pos`) the
+   damage there is 0.51 and 0.77, in a crowd 1.02: the simulator reaches the game's damage only by moving its units
+   deeper into each other (possibly one source of the places' drift in whole battles). Probe: two units of a known width meet in melee; record the
+   centres and the formation's edges (the men's places) by second and check the simulator's rectangles (width, depth,
+   where the centre is).
+3. **Flank and rear attacks**: the game names 'attacked in the rear / flank' and the simulator has the term off in 50 /
+   62 % of such windows (its side of the blow is by its own geometry). Probe: a flank / rear attack from a known angle,
+   record from which angle the game starts and stops showing the effect.
+
 ### The check's score: the simulator as a forecast
 
 **The point.** The simulator matches the game if the game behaves like one more copy of the replay. The
