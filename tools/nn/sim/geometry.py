@@ -52,11 +52,61 @@ def face_length(front, depth, phi):
     return torch.where(through_front, front, depth)
 
 
-def pairwise(u, spacing):
+def _box_point_dist(px, pz, cx, cz, fx, fz, hf, hl):
+    """Distance from points (px, pz) to a rectangle centred (cx, cz), facing (fx, fz), hf half its depth along the
+    facing and hl half its front across it (0 inside). Shapes broadcast."""
+    rx, rz = px - cx, pz - cz
+    a = (rx * fx + rz * fz).abs() - hf                  # along the facing
+    c = (rx * fz - rz * fx).abs() - hl                  # across it (the front's direction (cos b, -sin b))
+    return torch.sqrt(a.clamp(min=0) ** 2 + c.clamp(min=0) ** 2)
+
+
+def rect_gap(x, z, b, front, depth):
+    """[B, N, N] the signed distance between unit i's and unit j's formation rectangles, m: the shortest distance
+    between their edges when apart, minus the least depth of their overlap when they overlap (the separating-axis
+    test over the four edge normals: exact for rectangles at any bearings and offsets). Head-on and square to each
+    other, with their centres on one line, it equals the centre-line gap of pairwise (dist less both half extents)."""
+    br = b * DEG
+    fx, fz = torch.sin(br), torch.cos(br)               # facing; the front runs along (fz, -fx)
+    hf, hl = depth / 2, front / 2
+    dx = x[:, None, :] - x[:, :, None]                  # [B, i, j]: j's centre from i's
+    dz = z[:, None, :] - z[:, :, None]
+    fxi, fzi, fxj, fzj = fx[:, :, None], fz[:, :, None], fx[:, None, :], fz[:, None, :]
+    hfi, hli, hfj, hlj = hf[:, :, None], hl[:, :, None], hf[:, None, :], hl[:, None, :]
+    C = (fxi * fxj + fzi * fzj).abs()                   # |cos| and |sin| of the bearings' difference
+    S = (fxi * fzj - fzi * fxj).abs()
+    d_fi = (dx * fxi + dz * fzi).abs()
+    d_li = (dx * fzi - dz * fxi).abs()
+    d_fj = (dx * fxj + dz * fzj).abs()
+    d_lj = (dx * fzj - dz * fxj).abs()
+    over = torch.stack((hfi + hfj * C + hlj * S - d_fi,
+                        hli + hfj * S + hlj * C - d_li,
+                        hfj + hfi * C + hli * S - d_fj,
+                        hlj + hfi * S + hli * C - d_lj), 0).min(0).values
+    # apart: the shortest distance is from a corner of one to the other (convex polygons)
+    sg = torch.tensor((1.0, 1.0, -1.0, -1.0), device=x.device, dtype=x.dtype)
+    sl = torch.tensor((1.0, -1.0, 1.0, -1.0), device=x.device, dtype=x.dtype)
+    # corners [B, N, 4]: centre + sg hf facing + sl hl front direction (fz, -fx)
+    kx = x[..., None] + sg * hf[..., None] * fx[..., None] + sl * hl[..., None] * fz[..., None]
+    kz = z[..., None] + sg * hf[..., None] * fz[..., None] - sl * hl[..., None] * fx[..., None]
+    # j's corners to i's box [B, i, j, 4], i's corners to j's box
+    d_ji = _box_point_dist(kx[:, None, :, :], kz[:, None, :, :], x[:, :, None, None], z[:, :, None, None],
+                           fx[:, :, None, None], fz[:, :, None, None], hf[:, :, None, None], hl[:, :, None, None])
+    d_ij = _box_point_dist(kx[:, :, None, :], kz[:, :, None, :], x[:, None, :, None], z[:, None, :, None],
+                           fx[:, None, :, None], fz[:, None, :, None], hf[:, None, :, None], hl[:, None, :, None])
+    apart = torch.minimum(d_ji.min(3).values, d_ij.min(3).values)
+    return torch.where(over > 0, -over, apart)
+
+
+def pairwise(u, spacing, rect=False):
     """Everything about unit pairs, each [B, N, N] (row i, column j):
     dist      centre distance, m
     theta     bearing from i to j, radians
-    gap       distance between the two formations' edges, m (negative: overlap)
+    gap       distance between the two formations' edges, m (negative: overlap); rect (config/nn/sim.json
+              contact.rect_gap): the rectangles' true signed distance (rect_gap) between two formations, else the
+              centre-line gap (dist less each rectangle's half extent along the line between the centres: exact
+              head-on, but it misses an overlap of two boxes at an angle or offset whose corners meet off that line);
+              a lone man (a circle) keeps the centre-line gap
     reach_j   distance from i's centre to j's edge, m (missile range)
     rel_i     where j is seen from i, radians from i's facing
     rel_j     where i is seen from j, radians from j's facing
@@ -76,9 +126,14 @@ def pairwise(u, spacing):
     fj, dj = front[:, None, :], depth[:, None, :]
     ext_j = half_extent(fj, dj, rel_j)
     ext = half_extent(fi, di, rel_i) + ext_j
+    gap = dist - ext
+    if rect:
+        single = u["men0"] <= 1
+        lone = single[:, :, None] | single[:, None, :]
+        gap = torch.where(lone, gap, rect_gap(x, z, u["b"], front, depth))
     side = u["side"]
     enemy = (side[:, :, None] != side[:, None, :]) & (side[:, :, None] > 0) & (side[:, None, :] > 0)
-    return {"dist": dist, "theta": theta, "gap": dist - ext, "reach_j": dist - ext_j, "rel_i": rel_i, "rel_j": rel_j,
+    return {"dist": dist, "theta": theta, "gap": gap, "reach_j": dist - ext_j, "rel_i": rel_i, "rel_j": rel_j,
             "face_i": face_length(fi, di, rel_i), "face_j": face_length(fj, dj, rel_j), "enemy": enemy,
             "front": front, "depth": depth}
 

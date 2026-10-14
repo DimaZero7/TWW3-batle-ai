@@ -1654,6 +1654,19 @@ otherwise (Empire infantry in the mirror 2.2× and 1.15×); and shots at a unit 
 (an infantry unit in a whole battle loses ~1.3× per shot aimed at it what the lone target of the
 shooting arena does). With both, the casualty curves of both sides match the game within ~10 %.
 
+**The melee shortfall in whole battles** (the exam replay, 20 battles; analysis `build/meleegap2`). The count "a unit
+struck by one enemy unit loses 0.72 of the game's rate" is mostly an artefact of counting: "who strikes" comes from the
+target field, and the game's often does not point at the unit it fights (57 % of the enemy's melee seconds in the game are
+"nobody targets it", 38 % in the simulator). By health summed, not by rate, the simulator's "one attacker" seconds give more
+than the game's (63 against 57); the shortfall sits in the "nobody targets it" seconds (29 against 53). The probes' clean
+pairs (23 lanes "both attack from 3 m", 240 s): from 10 s the rate is the game's (1.00-1.05), the first 10 s 0.79 (OPEN: the
+contact's volley from 3 m without a run-up; from a 30 m run-up as in the game). The step replay of the 72 battles (3 s
+windows from the game's places): where the rectangles touch, the rate is 0.85 (enemy) / 0.95 (own); blows into the rear
+0.60-0.83 (OPEN). The main point: **too few routs is not the melee's doing** - a sensitivity run (men fighting x1.2,
+`melee.fighting_files` 0.6, not a rule, with `contact.rect_gap`) raised the enemy's melee loss rate above the game's (0.263
+against 0.249 a 100 s), and the enemy's routs a battle only 9.7 -> 11.8 (network) / 10.7 -> 11.1 (ai_like; game 16.0 / 16.3); allowing for the simulator's shorter battle (654 against
+780 s) the routs are 0.71 of the game's. The cause is the rout threshold / morale, not the damage.
+
 ### Speed
 
 | Where | Battles at once | Battles a second |
@@ -1783,6 +1796,7 @@ Measured, ready as a switch, not in `config/nn/sim.json`: none now.
 
 | What | Result | Why not |
 |---|---|---|
+| The formations' gap as the true distance between their rectangles, not along the line between the centres (`contact.rect_gap`, off; `geometry.rect_gap`) | the step replay of the 72 battles: where the game's unit is in melee and the centre-line test sees no contact (35 % of the enemy's windows, 27 % of own), in 39–42 % of them the rectangles overlap by 0.5 m or more; the exam replay: enemy routs a battle 9.70 -> 11.07 (network) / 10.68 -> 10.67 (ai_like), game 16.0 / 16.3; the 72 battles: routs a unit 0.812 -> 0.815 (game 1.187), same winner 60 -> 58.5 of 72 | the `walkpass2` probe twin gets worse: a walker clipping held clanrats by 2 / 5 m at a run 1.61 / 0.93 m/s (was 2.47 / 1.46, game 2.68 / 2.39), at a walk 0.91 / 0.63 (1.22 / 0.91, game 1.33 / 0.97) - the clanrats turn towards it and their turned rectangle keeps the corner contact; to turn on with a fix of the held unit's turning or `move_push` measured anew |
 | A formation's opening wave and first strike anew after 10 s out of contact (`contact.reset_s` reset the wave's clock; `contact.opening_once` 0) | the `recontact` probe: a second contact after 10–80 s out struck as a fresh one in the simulator - 0–3 s over 10–20 s 4.7, the swordsmen lost 3.7 (game 0.24–1.35 and 0.2–0.8) | in the game a second contact bursts neither after 2 s nor after 80 s out |
 | The first strike by the opening wave's men (x2.48 at the contact; `contact.first_strike_steady` 0) | first contacts: the target lost 441 HP/s at 0–1 s (game 184–219), the held side's answer 157 (game 40); 0–3 s over 10–20 s 4.64 (game 2.87) | the swing was checked against the game before the wave (189 against 220), the wave fitted on the soldiers' places from 2 s on; together never checked - counted twice |
 | Arcing fire after a new order: a 7.5 s window (crossbows only); each man aiming on his own 4–8 s from the later of the order and his own reload, no unit volley | twin one order / B10 / C5: 872 / 630 / 90 and 625 / 569 / 326 against the game's 660 / 618 / 279 | the 7.5 s window left out slings and bows and is a bit short of the measure; the men's own aim fired in B10 in the wrong target's windows, and B7 and C3 were nothing like the game (B7 in the game 0.13–0.22 of one order) |

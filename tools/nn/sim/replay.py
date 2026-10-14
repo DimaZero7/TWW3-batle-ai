@@ -302,6 +302,7 @@ class Replay:
             self.reach = float(c["reach_m"])
             self.lord_reach = float(c.get("lord_reach_m", c["reach_m"]))
             self.hold_m = float(c["hold_m"])
+            self.rect = bool(c.get("rect_gap"))
         self.chosen = None
         for k in keys:
             fill = {"kind": O.HOLD, "target": -1, "target_r": False, "moving": False}.get(k, 0)
@@ -375,7 +376,7 @@ class Replay:
         """([B, N, N] i touches standing enemy j, edge gaps, [B, N] standing): battle.step's contact test (edges within
         reach_m, lord_reach_m for a lone man, + hold_m when either fights already) from the places before the step."""
         u = st.u
-        pw = geometry.pairwise(u, self.spacing)
+        pw = geometry.pairwise(u, self.spacing, rect=self.rect)
         alive = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
         standing = alive & ~u["r"]
         lone = u["men0"] <= 1
