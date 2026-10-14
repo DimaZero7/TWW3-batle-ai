@@ -1581,14 +1581,13 @@ fighting. More routs begin in a window, but the simulator routed more often than
 the change too - that is morale (item 1), not the contact. The rule does not close the whole battles' rout shortage
 (0.80 against 1.19).
 
-<<<<<<< ours
 #### Morale by the game's greatest effect: four rules (off)
 
 **The point.** Where the game's morale stands still (a 10 s window, settled), the simulator's morale target matches it
 by the median for nearly every label (the battle casualties table exactly, -2 ... -74; the 15 % a 0.5 s tick approach
 too). Four terms differ: 'winning' (the simulator lacks 4-5 points), 'enemy routing' (-7.5), 'charge' (-6...-20),
 'attacked in the rear / flank' (the simulator 12 / 4 points higher). Each is fixed by a rule measured on the recordings
-of 92 battles (the `MoraleGreatestEffect` labels, the step replay); all four are off - the orchestrator decides:
+of 92 battles (the `MoraleGreatestEffect` labels, the step replay); all four are on (except `melee_start`) - the orchestrator decides:
 
 | Rule (`config/nn/sim.json` morale) | What it does | Measured |
 |---|---|---|
@@ -1623,13 +1622,12 @@ the tail is the windows where its target is 12+ points below the game's morale (
 simulator against 14 in the game; in the other 90 % 126 against 75; before these rules and `contact.engage`); there it
 more often has losing the fight (-8 at a balance below 0.4, where the game needs about -1 - the balance is an estimate
 of who hit whom), a flank / rear blow by its own geometry and its own army collapse / neighbours' routs in the window.
-=======
+
 #### Formation depth in melee (`formation.melee_depth`)
 
 **The point.** In melee the game's formation does not close up as its men fall: its width stays near the ordered one
 and its depth shrinks more slowly than the simulator's box - the dead leave room. The rule repeats this; the contact at
 the game's places gets more accurate, but whole battles do not change; off.
-
 **The measure** (the men's places every second; probes `reform`, `reform2`, `damaged`, one on one, 240 s from 3 m:
 `build/charge-probe/runs/20261008-180435`, `-181311`, `-175102`, `-175151`; not the enveloping 15 and 50 m clanrats nor
 the two-on-one lane; 72 unit-lanes, 4,314 melee seconds from 5 s after contact; `build/formdepth/shape.py`, `fit.py`,
@@ -1644,7 +1642,6 @@ contact. No rule in the sources (CA's material, the database, the community's wr
 
 The width stays near the ordered one (swordsmen at 50 %: 28.5 of 29.3 m) - the simulator has this already (files by
 the ordered width). Out of melee a thinned formation closes up (missile probe P1) - there the box is unchanged.
-
 **The rule** (`formation.melee_depth.ranks` c; `geometry.dims`; 0: off). A formation in melee (clock `contact_s` > 0)
 has ranks = max(ceil(r), min(r + c × (1 − men / men at the start), ceil(men at the start / files of the width))),
 r = men / files: the dead leave c ranks of room at a whole loss. c = 2.8 (90 % over lanes 0.4-4.3; by the front half,
@@ -1653,7 +1650,6 @@ centre to the front men, 2.6). This form fits better than a power of the men's s
 the game's melee flag).
 
 | c = 2.8 | Off | On |
-|---|---|---|
 | Probes: seconds with both in melee and a contact at the game's places (`build/formdepth/probe_contact.py`); the weaker at 50-70 / 30-50 / < 30 % of its men | 91.2 % (87.6 / 88.5 / 87.2) | 98.0 % (96.4 / 99.2 / 100) |
 | Melee windows without a contact, `--force pos`, exam / 72 battles | 17.6 / 13.6 % | 14.9 / 12.4 % |
 | Health lost a window, `--force pos` | 0.96 / 0.92 | 0.98 / 0.93 |
@@ -1667,7 +1663,6 @@ harder than the game (1.08 / 1.03), with the extra contact harder still (1.21 / 
 damage, not the geometry: a thinned target has fewer men within the strikers' reach (as `melee.front_fill_ranks` for
 the striker); the simulator lacks this. On the probes the box at c 2.8 of units under 30 % overlaps its enemy 1.2 m
 more than whole units; the evenest over the losses is c ≈ 2.2.
->>>>>>> theirs
 
 ### The check's score: the simulator as a forecast
 
