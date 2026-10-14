@@ -98,6 +98,25 @@ def rect_gap(x, z, b, front, depth):
     return torch.where(over > 0, -over, apart)
 
 
+def front_contact(x, z, b, front, depth):
+    """[B, N, N] True where formation i meets formation j through i's front or back, False through a flank: of i's two
+    axes, the one along which the two rectangles overlap less (or lie farther apart) is the contact's normal (the
+    separating-axis test's least penetration, as rect_gap). Two fronts meeting with their centres offset - a unit whose
+    front overlaps a neighbour of its enemy by a few metres - touch through the fronts, though the neighbour's centre
+    lies off i's flank (the centre-line rule, pairwise rel_i, called that a flank)."""
+    br = b * DEG
+    fx, fz = torch.sin(br), torch.cos(br)
+    hf, hl = depth / 2, front / 2
+    dx = x[:, None, :] - x[:, :, None]
+    dz = z[:, None, :] - z[:, :, None]
+    fxi, fzi, fxj, fzj = fx[:, :, None], fz[:, :, None], fx[:, None, :], fz[:, None, :]
+    C = (fxi * fxj + fzi * fzj).abs()
+    S = (fxi * fzj - fzi * fxj).abs()
+    o_f = hf[:, :, None] + hf[:, None, :] * C + hl[:, None, :] * S - (dx * fxi + dz * fzi).abs()
+    o_l = hl[:, :, None] + hf[:, None, :] * S + hl[:, None, :] * C - (dx * fzi - dz * fxi).abs()
+    return o_f <= o_l
+
+
 def pairwise(u, spacing, rect=False):
     """Everything about unit pairs, each [B, N, N] (row i, column j):
     dist      centre distance, m

@@ -140,6 +140,14 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
   standing in each other (centres within 8 m) loses 26.5 HP/s - as from one (26.9); two apart 32.5; three 29.0 in a
   pile / 39.4 apart. A side of the target holds as many men as it has room for. Ours: the units striking a target
   through one of its sides share its length (`melee.target_face_cap`, [simulator](../../training/simulator.md)).
+- **The target's neighbour is struck too.** The `sidecontact` probe (`build/adjmelee/runs/20261014-111840`, `-111937`):
+  swordsmen attack held clanrats at a walk from 3 m, set 0 / 6 / 12 / 18 m aside, a second clanrat unit stands 1 m beside
+  the target. The neighbour, attacked by nobody, loses 2.0 / 6.2 / 6.9 / 9.5 HP/s from 30 s on - about by the share of the
+  swordsmen's front over it (the target 29.5 / 29.3 / 29.7 / 24.3; without a neighbour 30.0); even 1 m apart the end men
+  reach it. In melee the attacker keeps its front parallel to its target's (180-186 deg; turning 6-16 deg on the way in)
+  and slides half the offset onto it; the held target does not turn (3-5 deg). Here: a unit strikes every enemy in
+  contact; the fixes that match the probe (`contact.square_front`, `melee.frontage_edge_m`) add no routs in whole
+  battles and are off ([simulator](../../training/simulator.md)).
 - **Hit reactions.** After `melee_max_hit_reactions` 2 interrupts in a row an entity ignores
   further hit reactions so it can attack. WH2 description · [twwstats kv][tws] · high.
 

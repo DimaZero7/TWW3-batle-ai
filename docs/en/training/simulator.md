@@ -1684,6 +1684,23 @@ windows from the game's places): where the rectangles touch, the rate is 0.85 (e
 against 0.249 a 100 s), and the enemy's routs a battle only 9.7 -> 11.8 (network) / 10.7 -> 11.1 (ai_like; game 16.0 / 16.3); allowing for the simulator's shorter battle (654 against
 780 s) the routs are 0.71 of the game's. The cause is the rout threshold / morale, not the damage.
 
+**Blows at the target's neighbour** (the `sidecontact` probe, `build/adjmelee`). A soldier strikes any enemy within his
+reach, not only his unit's order target (the community: a blow comes from a single soldier by his proximity to an enemy).
+The simulator did so already: a unit strikes every enemy in contact (`contact.unit_incidental` 1.0), sharing its front
+out by sides. The "nobody targets it" share of `build/lossgap/pre_rout.txt` (30 % of the game's losses) is the losing
+unit's own target field, and the simulator writes its nearest enemy in contact there (`battle.py`), so it always has 97 %
+"target near": that is not missing damage. The game probe (swordsmen attack held clanrats 0 / 6 / 12 / 18 m off their
+line, a second clanrat unit 1 m beside the target, 2 lanes each): the neighbour loses 2.0 / 6.2 / 6.9 / 9.5 HP/s from 30 s
+on (the target 29.5 / 29.3 / 29.7 / 24.3); the attacker hardly turns (180-186 deg) and slides only half the offset to its
+target. The twin lost the neighbour after 5-10 s (0-1.5 HP/s): the attacker turned to the target's centre (206 deg), the
+target to it, and the rectangle's corner left the neighbour. Three fixes - `contact.square_front` (a formation attacking
+a formation puts its front parallel; a held one does not turn to an attacker in front of it), `melee.frontage_edge_m`
+(the men of the part of the side that overlaps the enemy strike it; the side of contact by the rectangles' least overlap,
+`geometry.front_contact`), `contact.push_keep_facing` (a unit walking to a far point does not turn to an enemy it clips -
+that was the cause of the stall with `contact.rect_gap`) - with `rect_gap` give the probe 4.8 / 9.1 / 8.0 HP/s on the
+neighbour and 31.9 / 29.3 / 26.2 on the target. They do not help whole battles (all **off**, below "Tried and rejected"):
+enemy routs a battle 9.3-10.6 (network) / 9.8-10.5 (ai_like) against 9.70 / 10.68 without them (game 16.0 / 16.3).
+
 ### Speed
 
 | Where | Battles at once | Battles a second |
@@ -1813,7 +1830,8 @@ Measured, ready as a switch, not in `config/nn/sim.json`: none now.
 
 | What | Result | Why not |
 |---|---|---|
-| The formations' gap as the true distance between their rectangles, not along the line between the centres (`contact.rect_gap`, off; `geometry.rect_gap`) | the step replay of the 72 battles: where the game's unit is in melee and the centre-line test sees no contact (35 % of the enemy's windows, 27 % of own), in 39–42 % of them the rectangles overlap by 0.5 m or more; the exam replay: enemy routs a battle 9.70 -> 11.07 (network) / 10.68 -> 10.67 (ai_like), game 16.0 / 16.3; the 72 battles: routs a unit 0.812 -> 0.815 (game 1.187), same winner 60 -> 58.5 of 72 | the `walkpass2` probe twin gets worse: a walker clipping held clanrats by 2 / 5 m at a run 1.61 / 0.93 m/s (was 2.47 / 1.46, game 2.68 / 2.39), at a walk 0.91 / 0.63 (1.22 / 0.91, game 1.33 / 0.97) - the clanrats turn towards it and their turned rectangle keeps the corner contact; to turn on with a fix of the held unit's turning or `move_push` measured anew |
+| The formations' gap as the true distance between their rectangles, not along the line between the centres (`contact.rect_gap`, off; `geometry.rect_gap`) | the step replay of the 72 battles: where the game's unit is in melee and the centre-line test sees no contact (35 % of the enemy's windows, 27 % of own), in 39–42 % of them the rectangles overlap by 0.5 m or more; the exam replay: enemy routs a battle 9.70 -> 11.07 (network) / 10.68 -> 10.67 (ai_like), game 16.0 / 16.3; the 72 battles: routs a unit 0.812 -> 0.815 (game 1.187), same winner 60 -> 58.5 of 72 | the `walkpass2` probe twin gets worse: a walker clipping held clanrats by 2 / 5 m at a run 1.61 / 0.93 m/s (was 2.47 / 1.46, game 2.68 / 2.39), at a walk 0.91 / 0.63 (1.22 / 0.91, game 1.33 / 0.97) - the cause is the walker's own turn to the clanrats (slowed in their rectangle it turned 53 deg to them and went to its point at its speed x cos 53 deg); `contact.push_keep_facing` removes it (the push error 0.531 -> 0.346 m/s, centre line 0.335), but with it too the enemy routs are 10.60 / 10.47 - not a lever |
+| Blows at the target's neighbour: a formation puts its front parallel to its target's (`contact.square_front`), the men of the part of the side overlapping the enemy strike it (`melee.frontage_edge_m` 0 / 2.5 m; the side of contact by `geometry.front_contact`), with `rect_gap` and `push_keep_facing` | the `sidecontact` probe matches: the neighbour from 30 s 4.8 / 9.1 / 8.0 HP/s (game 6.2 / 6.9 / 9.5), the target 31.9 / 29.3 / 26.2 (game 29.3 / 29.7 / 24.3), the lone offset lane 30.3 (game 30.0, without 32.6) | the exam replay: enemy routs a battle 9.34 / 10.17 (network, edge 0 / 2.5 m), 10.27 / 9.83 (ai_like) against 9.70 / 10.68 (game 16.0 / 16.3); the enemy's melee loss rate falls 0.232 -> 0.204-0.206 a 100 s (game 0.249): the rectangles' overlap undercounts the men within reach in whole battles; the 72 battles: routs a unit 0.802 -> 0.795 (game 1.187), same winner 57.5 -> 58; without the overlap (`square_front` only): 10.27 / 10.46 |
 | A formation's opening wave and first strike anew after 10 s out of contact (`contact.reset_s` reset the wave's clock; `contact.opening_once` 0) | the `recontact` probe: a second contact after 10–80 s out struck as a fresh one in the simulator - 0–3 s over 10–20 s 4.7, the swordsmen lost 3.7 (game 0.24–1.35 and 0.2–0.8) | in the game a second contact bursts neither after 2 s nor after 80 s out |
 | The first strike by the opening wave's men (x2.48 at the contact; `contact.first_strike_steady` 0) | first contacts: the target lost 441 HP/s at 0–1 s (game 184–219), the held side's answer 157 (game 40); 0–3 s over 10–20 s 4.64 (game 2.87) | the swing was checked against the game before the wave (189 against 220), the wave fitted on the soldiers' places from 2 s on; together never checked - counted twice |
 | Arcing fire after a new order: a 7.5 s window (crossbows only); each man aiming on his own 4–8 s from the later of the order and his own reload, no unit volley | twin one order / B10 / C5: 872 / 630 / 90 and 625 / 569 / 326 against the game's 660 / 618 / 279 | the 7.5 s window left out slings and bows and is a bit short of the measure; the men's own aim fired in B10 in the wrong target's windows, and B7 and C3 were nothing like the game (B7 in the game 0.13–0.22 of one order) |

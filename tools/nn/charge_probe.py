@@ -258,6 +258,12 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           'inmelee': swordsmen <-> clanrats from 3 m, 10 s after contact the swordsmen get a move 40 m aside.
           Battle 1 at a run (45 s a lane), battle 2 at a walk (pass_walk, 75 s), lanes rotated - 2 battles of 10 lanes.
           Its table: python -m tools.nn.walkpass_probe [runs] [--sim].
+  sidecontact who strikes a unit its enemy only touches (S26: do a formation's men strike any enemy within reach, not only
+          their order's target?): swordsmen attack clanrats at a walk from 3 m, both clanrat units held (never ordered;
+          the target answers on its own), a second clanrat unit (the bystander, target2) SIDECONTACT t2_gap_m beside the
+          target; the swordsmen placed a_dx 0 / 6 / 12 / 18 m aside towards it (their front over the bystander by
+          a_dx - 1 m), and the same at 12 m without a bystander (does the attacker slide back onto its target?); 60 s
+          fights - 2 battles of 5 lanes, rotated. Every 0.5 s the three units' health, men, places (the bystander: t2).
   walkpass2 a walker whose straight path clips an enemy's edge (walkpass covers a clear pass and a path through the
           middle): the same swordsmen and clanrats, the walker's straight line overlapping the clanrats' formation (30 m
           wide) by 2 / 5 / 10 / 15 m (edge_m -2 .. -15), idle or busy - busy: the Empire spearmen they attack stand at
@@ -407,7 +413,8 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
          "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "ratlingrt", "ratlingrt2",
          "leave", "skirmish", "skirmish2", "shootcontact",
-         "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2") + UNIT_PLANS
+         "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
+         "sidecontact") + UNIT_PLANS
 # the walkpass plan: swordsmen walk / run (a move order, 'pass') past clanrats - idle (halted, never ordered) or busy
 # (fighting an Empire spearmen unit they attack at the go) - edge_m apart edge to edge (the formations 30 m wide), or
 # straight through them ('through'), from gap_m ahead to beyond_m behind the clanrats' front; 'inmelee': a fight from 3 m,
@@ -417,6 +424,9 @@ WALKPASS = {"gap_m": 30, "beyond_m": 40, "max_s": {True: 45, False: 75}, "gaps":
 # busy (the spearmen the busy clanrats attack shifted busy_clear_m off the walker's line, away from it), controls at a
 # clear edge gap control_m; battles at a run, a walk, a run, a walk (lanes rotated)
 WALKPASS2 = {"overlaps": (2, 5, 10, 15), "control_m": 5, "busy_clear_m": 5, "gaits": (True, False, True, False)}
+# the sidecontact plan: the attacker's centre a_dx m aside of its target's (+x, towards the bystander), the bystander
+# t2_gap_m from the target's edge; the attacker's front overlaps the bystander by a_dx - t2_gap_m; a lane without one
+SIDECONTACT = {"a_dx": (0, 6, 12, 18), "solo_dx": 12, "t2_gap_m": 1, "fight_s": 60}
 # the wavemiss plan: (attacker, shooter target) of its lanes; battle 1's shooters hold / stand / hold / stand, battle 2's
 # the other way round
 WAVEMISS = (("clanrat", "xbow"), ("clanrat", "archer"), ("clanrat", "hgun"), ("swords", "nrun"))
@@ -971,6 +981,13 @@ def battles(plan):
         for k, run in enumerate(g2["gaits"]):
             base = [wp2(kind, e, run) for kind in ("idle", "busy") for e in edges]
             out.append([dict(l, place=p) for l, p in zip(base, rotate(list(SKIRMISH2_SHORT), 3 * k))])
+    elif plan == "sidecontact":
+        g = SIDECONTACT
+        common = dict(gap_m=3, fight_s=g["fight_s"], answer=False)
+        base = [lane("swords", "clanrat", "attack_walk", "hold", a_dx=float(d), target2="clanrat", t2_gap_m=g["t2_gap_m"],
+                     **common) for d in g["a_dx"]] + [lane("swords", "clanrat", "attack_walk", "hold",
+                                                           a_dx=float(g["solo_dx"]), **common)]
+        out += [base, rotate(base, 2)]
     elif plan == "vv":
         # (a second lane: one Warlord a battle; the swordsmen on clanrats only fill the plan's two-lane frame)
         out.append([lane("warlord", "swords", "attack_run", fight_s=45, a_ability=VV, a_ability_after_s=20),

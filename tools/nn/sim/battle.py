@@ -1039,7 +1039,43 @@ def step(st, orders, params=None, dt=None):
     opp = near_foe.argmin(2)
     has_opp = near_foe.min(2).values < 1e9
     ox_, oz_ = u["x"].gather(1, opp), u["z"].gather(1, opp)
-    movement.face(u, ox_ - u["x"], oz_ - u["z"], has_opp & ~mv & standing & ~steer)
+    # A formation under a move to a point farther than contact.step_m keeps the facing of its way: it does not turn to the
+    # enemy it clips (contact.push_keep_facing; the walkpass2 probe: the game's walker stays within 15 deg of its way while
+    # it pushes past held clanrats, melee flag lit; turned to them, the twin's walker ran only cos(53 deg) of its speed
+    # towards its point - the stall of rect_gap)
+    face_opp = has_opp & ~mv & standing & ~steer
+    if cal["contact"].get("push_keep_facing"):
+        face_opp = face_opp & ~((kind == O.MOVE) & (point_d >= float(cal["contact"]["step_m"])) & (u["men0"] > 1))
+    fdx, fdz = ox_ - u["x"], oz_ - u["z"]
+    if cal["contact"].get("square_front"):
+        # Formation against formation (contact.square_front; config/nn/sim.json contact.square_front_why): the fight's
+        # anchor is the unit's attack target where it touches it, else its nearest opponent. A formation attacking its
+        # anchor faces square to the anchor's side it touches (its front if it meets the anchor's front: the fronts
+        # parallel), not the anchor's centre; one that does not attack it keeps its facing, and turns (square to that
+        # side) only to an anchor attacking it from outside its front (contact.front_deg) - not to a passer or a unit
+        # fighting another (the sidecontact probe: swordsmen attacking clanrats 6-18 m off their line turned 6-16 deg on
+        # the way in and back to 180-186 in melee, the held clanrats stayed at 3-5; the twin turned both to the other's
+        # centre, 206 / 17, the box's corner off the bystander; the walkpass2 probe: held clanrats the walker clipped
+        # never targeted it). The anchor's side: where this unit is seen from it, as geometry.pairwise.
+        on_t = (kind == O.ATTACK) & (tgt >= 0) & touch.gather(2, tgt.clamp(min=0)[:, :, None]).squeeze(2)
+        anc = torch.where(on_t, tgt.clamp(min=0), opp)
+        ax_, az_ = u["x"].gather(1, anc), u["z"].gather(1, anc)
+        ob = u["b"].gather(1, anc) * geometry.DEG
+        rel = geometry.wrap(torch.atan2(u["x"] - ax_, u["z"] - az_) - ob)
+        of, od = pw["front"].gather(1, anc), pw["depth"].gather(1, anc)
+        s, c = torch.sin(rel), torch.cos(rel)
+        thru = s.abs() * od <= c.abs() * of
+        side = torch.where(thru, torch.where(c >= 0, 0.0, 180.0), torch.where(s >= 0, 90.0, -90.0)) * geometry.DEG
+        into = ob + side + math.pi                                     # against the outward normal of that side
+        sq = (u["men0"] > 1) & (u["men0"].gather(1, anc) > 1)
+        n_slot = torch.arange(u["men"].shape[1], device=anc.device)[None, :]
+        attacked = (kind.gather(1, anc) == O.ATTACK) & (tgt.gather(1, anc) == n_slot)
+        seen = geometry.wrap(torch.atan2(ax_ - u["x"], az_ - u["z"]) - u["b"] * geometry.DEG).abs()
+        outside = seen > float(cal["contact"]["front_deg"]) * geometry.DEG
+        face_opp = face_opp & (~sq | on_t | (attacked & outside))
+        fdx = torch.where(sq, torch.sin(into), fdx)
+        fdz = torch.where(sq, torch.cos(into), fdz)
+    movement.face(u, fdx, fdz, face_opp)
     wt = aim_at.clamp(min=0)
     if done_deg is not None:
         # a standing shooter keeps its facing; it turns only to a target beyond stand_fire_arc_deg (turning above)

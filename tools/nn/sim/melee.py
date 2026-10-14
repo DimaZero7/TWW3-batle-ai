@@ -162,6 +162,15 @@ def strikes(u, pw, contact, params, charge_now, first=False):
     front_i, depth_i = pw["front"][:, :, None], pw["depth"][:, :, None]
     s, c = torch.sin(pw["rel_i"]), torch.cos(pw["rel_i"])
     through_front = s.abs() * depth_i <= c.abs() * front_i
+    edge = cal.get("frontage_edge_m")
+    sat_j = None
+    if edge is not None:
+        # (melee.frontage_edge_m, below: the side of contact by the rectangles' least overlap, geometry.front_contact,
+        # not by the line between the centres; a lone man's keeps the centres' line)
+        sat = geometry.front_contact(u["x"], u["z"], u["b"], pw["front"], pw["depth"])
+        lone = single_i | single_j
+        through_front = torch.where(lone, through_front, sat)
+        sat_j = torch.where(lone, pw["face_j"] == pw["front"][:, None, :], sat.transpose(1, 2))
     along = torch.where(through_front, hc_u[:, :, None], vc_u[:, :, None])
     # The front's fill (melee.front_fill_ranks, lam; 0 / absent: off): a thinned formation does not close up - it keeps
     # its ordered width (the dmgmelee probe: 25-28 of 30 m) and only part of its men reach the enemy. Its frontal face
@@ -173,20 +182,44 @@ def strikes(u, pw, contact, params, charge_now, first=False):
         files0 = torch.clamp(torch.floor(u["width"] / h_u + 1e-4), min=1)
         r_i = (u["men"].clamp(min=0) / files0)[:, :, None]
         r0_i = (u["men0"].clamp(min=1) / files0)[:, :, None]
-        face_i = torch.where(through_front, (files0 * h_u)[:, :, None], pw["face_i"])
+        face_i = torch.where(through_front, (files0 * h_u)[:, :, None],
+                             pw["face_i"] if sat_j is None else depth_i.expand_as(pw["face_i"]))
         lam = knobs.get(u, "front_fill_ranks", lam, 3)      # (a per-battle draw in training: tools/nn/train/dr.py)
         fill = (1 - torch.exp(-r_i / lam)) / (1 - torch.exp(-r0_i / lam))
     else:
-        face_i = pw["face_i"]
+        face_i = pw["face_i"] if sat_j is None else torch.where(through_front, front_i, depth_i)
         fill = None
-    length = torch.minimum(face_i, pw["face_j"])
+    face_j = pw["face_j"] if sat_j is None else torch.where(sat_j, pw["front"][:, None, :], pw["depth"][:, None, :])
+    length = torch.minimum(face_i, face_j)
+    flank_j = torch.zeros_like(through_front)
     if cal.get("flank_face", "min") == "striker":
         # Through the target's flank (its side towards i is its depth) the striker brings men by
         # its own face, not by the target's short flank (measured: a lone flank attacker takes
         # 1.53x what a frontal one does; melee.flank_face, config/nn/sim.json).
         s_j, c_j = torch.sin(pw["rel_j"]).abs(), torch.cos(pw["rel_j"]).abs()
-        flank_j = s_j * pw["depth"][:, None, :] > c_j * pw["front"][:, None, :]
+        flank_j = s_j * pw["depth"][:, None, :] > c_j * pw["front"][:, None, :] if sat_j is None else ~sat_j
         length = torch.where(flank_j, face_i, length)
+    if edge is not None:
+        # The contact's frontage (melee.frontage_edge_m; absent: off): a formation's men strike the enemies within their
+        # reach, whichever unit those belong to - so i brings to j the men of the part of its side that j covers, not its
+        # whole side: i's side towards j (its front or back, h apart, or a flank) against j's box seen along that side
+        # (j's front and depth at j's bearing), their overlap, plus frontage_edge_m for the men at the overlap's ends who
+        # reach on past it; at most the length above (a formation square on another: unchanged). Formations only, and not
+        # through the target's flank under melee.flank_face "striker" (its own measured rule: the men wrap round).
+        # MEASURED (the sidecontact probe, build/adjmelee; config/nn/sim.json melee.frontage_edge_why).
+        b = u["b"] * geometry.DEG
+        sb, cb = torch.sin(b), torch.cos(b)
+        # i's side direction: across its front (cos b, -sin b) through the front or back, along its facing on a flank
+        lx = torch.where(through_front, cb[:, :, None], sb[:, :, None])
+        lz = torch.where(through_front, -sb[:, :, None], cb[:, :, None])
+        half = torch.where(through_front, face_i, depth_i.expand_as(face_i)) / 2
+        rx = u["x"][:, None, :] - u["x"][:, :, None]
+        rz = u["z"][:, None, :] - u["z"][:, :, None]
+        off = rx * lx + rz * lz                                    # j's centre along i's side
+        ext = (pw["front"][:, None, :] / 2 * (cb[:, None, :] * lx - sb[:, None, :] * lz).abs()
+               + pw["depth"][:, None, :] / 2 * (sb[:, None, :] * lx + cb[:, None, :] * lz).abs())
+        ov = (torch.minimum(half, off + ext) - torch.maximum(-half, off - ext)).clamp(min=0)
+        length = torch.where(single_i | single_j | flank_j, length, torch.minimum(length, ov + float(edge)))
     F = cal["fighting_files"] * length / along
     F = torch.minimum(F, men_i)
     if fill is not None:
