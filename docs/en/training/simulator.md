@@ -1220,8 +1220,25 @@ together do the rules hold the shooting: the archers' target wavers 46 s after t
   enemy within 70 m is worth `morale.strong_ratio` 3 times the unit or more (cost × health); speed is not
   needed. The morale probe: archers next to the Warlord (1.5×) and Night Runners (1.3×), spearmen next to
   clanrats (1.2×) — 0; skavenslaves next to swordsmen (3×) −3 / −4, next to the General (4.8×, slower than
-  them) −7 at 65 m and −9 at 45 / 30 m. The scale to −24 by "combat power" 4…32 and the reach beyond 70 m
-  (the General's from ~120 m) are not modelled: no formula (searched 06.10.2026).
+  them) −7 at 65 m and −9 at 45 / 30 m. This rule is on now (`morale.strong_enemy.rule` `off`).
+- **The strong enemy's scale** (`morale.strong_enemy.rule` `balance`, **off**): the penalty by the database's
+  scale — −3 at "combat power" 4, linear to −24 at 32, −24 beyond, 0 below 4 (`enemy_morale_penalty_*`). Combat
+  power = k × E / F: E — the standing enemies' value, F — its own plus its standing friends'; the value as the game
+  records it (`strategic_value`: combat potential × health), each weighted max(0, 1 − d / 180 m) centre to centre.
+  No formula online (searched 14.10.2026; an Empire guide: "the combat power of the units within 75 m is added into
+  friendly and enemy totals which are compared"). k 1.975 and 180 m are measured: the probe strong2 (skavenslaves
+  alone, the enemy stops at ~100 / 80 / 60 / 40 m) — spearmen 0 / 0 / 0 / 0, swordsmen 0 / 0 / −3 / −4,
+  flagellants −3 / −4 / −5 / −6, the General −5 / −7 / −8 / −9, swordsmen + spearmen −4 / −5 / −6; the rule misses
+  these 19 points by 0.4 point at most. Friends count because of the 72 recorded battles: without them the rule
+  would change morale in 49 % of the quiet 10 s windows (full health, no melee), by −3.7 points on average, where
+  the game's moved +0.08; with friends in none. The game's label "superior in strength and speed" is the more
+  frequent the larger the rule's penalty: 0.4 % of the seconds at −3…−6, 1.9 % at −9…−12, 40 % at −21…−24. Not
+  explained: greatswords (6.8×) give nothing in the probe (the rule −7.8), archers next to the Warlord at 30 m 0
+  (the rule −3.2); what "speed" in the label means is not found. **Why off**: the 72-battle replay — routs per unit
+  0.812 → 0.782 (game 1.187), same winner 60 → 55.5 of 72; the exam — enemy routs a battle 9.70 → 9.85 (network
+  battles, game 16.0) and 10.68 → 10.57 (AI battles, game 16.3). The old −3 was on in half the seconds before the
+  game's routs, the scaled rule far less often (a unit in a line has friends near). The rout deficit is not in this
+  term; switch it on together with its cause.
 
 ### Morale by the game's rules (the morale probe)
 
@@ -1789,7 +1806,7 @@ Measured, ready as a switch, not in `config/nn/sim.json`: none now.
   further from the game ([above](#fatigue-calibration)). Uphill is not modelled.
 - **Not modelled**: terrain, a turn while walking (a moving unit faces where it goes at once),
   cavalry, monsters, magic, flying, artillery, experience ranks, the scaled "strong enemy near"
-  (only −3 with an enemy worth 3 times as much: no combat-power formula), the database's `broken_finish_base_timeout` 180 and `charge_timeout` 60 (meaning not found).
+  (by default only −3 with an enemy worth 3 times as much; the rule by the database's scale exists but is off: [above](#expendable-units-resistance-a-stronger-enemy)), the database's `broken_finish_base_timeout` 180 and `charge_timeout` 60 (meaning not found).
 - `vis` is always true: line of sight is not modelled.
 
 ## Tried and rejected

@@ -3369,6 +3369,37 @@ class TestMoraleBatch:
             return bool(self.ctx_of(st, monkeypatch=monkeypatch)[-1]["strong_enemy"][0, 0])
         assert not strong(1.5, 20.0) and strong(P.sim["morale"]["strong_ratio"]) and strong(4.8, 0.5)
 
+    def test_the_strong_enemy_scale_is_the_databases_linear_minus_3_to_minus_24(self):
+        """morale.strong_points: 0 below combat power 4, -3 at 4, linear to -24 at 32, held beyond (the database's
+        enemy_morale_penalty_combat_power_min/max, value_min/max)."""
+        got = morale.strong_points(torch.tensor([0.0, 3.9, 4.0, 18.0, 32.0, 50.0]), P.morale).tolist()
+        assert got == pytest.approx([0.0, 0.0, -3.0, -13.5, -24.0, -24.0])
+
+    def test_the_strong_enemy_is_the_balance_of_strength_around_the_unit(self, monkeypatch):
+        """morale.strong_enemy rule "balance" (the probe strong2: skavenslaves alone, the General stops 35 m away:
+        -9; swordsmen at 60 m: -3, at 80 m: 0): power = k x the enemies' strategic values / its own and its friends',
+        each x (1 - d / reach_m); three friends beside it (32 / 32 / 64 m) bring the General's -9 to 0; a routing enemy counts nothing."""
+        monkeypatch.setitem(P.sim["morale"], "strong_enemy", {"rule": "balance", "k": 1.975, "reach_m": 180})
+        slaves = "wh2_main_skv_inf_skavenslaves_0"
+
+        def run(enemy, dist, friends=(), routing=False):
+            st = scenario.build([army([(enemy, 0, dist, 180)], [(slaves, 0, 0, 0)] + [(slaves, x, 0, 0) for x in friends])],
+                                P)
+            H = st.N // 2
+            st.u["r"][0, 0] = routing
+            seen = self.ctx_of(st, monkeypatch=monkeypatch)[-1]
+            power = seen["strong_power"]
+            pts = float(morale.terms(st.u, seen, P)["strong_enemy"][0, H])
+            return float(power[0, H]), pts, st
+        power, pts, st = run(GENERAL, 35)
+        H = st.N // 2
+        ratio = float(morale.strategic_value(st.u, P)[0, 0] / morale.strategic_value(st.u, P)[0, H])
+        assert power == pytest.approx(1.975 * ratio * (1 - 35 / 180), rel=1e-4)
+        assert pts == pytest.approx(-9.0, abs=0.5)
+        assert run(SWORD, 60)[1] == pytest.approx(-3.0, abs=0.5) and run(SWORD, 80)[1] == 0.0
+        assert run(GENERAL, 35, friends=(-32, 32, 64))[1] == 0.0
+        assert run(GENERAL, 35, routing=True)[0] == 0.0
+
 
 
     def test_the_fight_shows_only_once_the_loser_has_lost_a_tenth(self):

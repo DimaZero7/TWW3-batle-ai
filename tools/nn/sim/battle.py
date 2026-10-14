@@ -821,6 +821,10 @@ def step(st, orders, params=None, dt=None):
         "strong_enemy": (foes & standing[:, None, :] & (d <= M["enemy_effect_range"])
                          & (worth[:, None, :] >= knobs.get(u, "strong_ratio", float(mcal["strong_ratio"]), 3)
                             * worth[:, :, None])).any(2),
+        # morale.strong_enemy rule "balance": the enemies' strength around the unit against its own and its
+        # friends' (morale.strong_power); the term is then the database's -3 ... -24 scale (morale.strong_points).
+        "strong_power": (morale.strong_power(u, d, foes & standing[:, None, :], friends & standing[:, None, :], params)
+                         if (mcal.get("strong_enemy") or {}).get("rule") == "balance" else None),
         # (morale.rally_any_enemy: any enemy blocks the rally, routing ones too - the recordings: within 95 m of a
         # routing enemy 0.9 % rallied a second, 12.6 % with none; build/open_battle/spec.md 4)
         "enemy_near": (foes & (standing[:, None, :] | bool(mcal.get("rally_any_enemy")))

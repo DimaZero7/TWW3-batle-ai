@@ -49,13 +49,13 @@ All values are WH3 9.0.0 = our `game_rules.json`; descriptions from WH2.
 | Flanks exposed one / both | −3 / −6 | lost within `open_flanks_effect_range` 120 m | same points, 60 m |
 | Flanks secure | +5 | | +5 (neighbour within 120 m) |
 | Routing units near | −3 per routing friend (≤ 4), +2.5 per routing enemy (≤ 5) | weighting × rout balance; within 100 m front/flank | same |
-| Strong enemy near | −3 … −24 | by enemy combat power 4 … 32, within `enemy_effect_range` 70 m | −3 only. Out of melee the recordings show not even −3 (3,244 cases, median 0), but with 0 the spearmen–clanrats pair departs from the game: −3 kept |
+| Strong enemy near | −3 … −24 | by enemy combat power 4 … 32, within `enemy_effect_range` 70 m | by default −3 only (an enemy worth 3 times as much within 70 m). A rule by the database's scale exists, off (`morale.strong_enemy` `balance`): combat power = 1.975 × the standing enemies' value / (its own + its standing friends'), each weighted 1 − d / 180 m — measured (the probe strong2: error ≤ 0.4 point; 72 recorded battles: without friends the rule contradicts the game). No formula online. Greatswords give nothing in the probe — not explained. Off: it does not reduce the rout deficit, same winner 60 → 55.5 of 72 ([simulator](../../training/simulator.md#expendable-units-resistance-a-stronger-enemy)) |
 | Under missile fire | −5 | "attacked by projectile" | same; holds 15 s after the last hit (probes: the game's flag goes off exactly 15 s later in 9 barrages of 9) |
 | Attacked / damaged by artillery | −8 / −10 | near miss = within 12 m (`artillery_near_miss_distance_squared` 144) | — |
 | Fear | −8 | enemy "is frightening"; range 20 m (fandom says 30 m) | — |
 | Very tired / exhausted | −2 / −6 | tired 0 | same |
 | On the hill | +10 | "up-hill of all enemies" | — (flat map) |
-| Charging | +15 | morale bonus of a charge, timeout 60 s (guides: lasts ~10 s) | **not modelled. Gap** |
+| Charging | +15 | morale bonus of a charge, timeout 60 s (guides: lasts ~10 s) | the same: +15 in blocks of 6 s from the charge pose, a second block while the unit still runs at its target or its charge has landed (`morale.charge`; recordings: the label 'Charging' lasts exactly 6 or 12 s; the morale probe: it starts 4.5–6.5 s before contact). `charge_timeout` 60 is neither a duration nor a cooldown (in the recordings a unit charges again 19 s later); its meaning is unknown |
 | Surprised / panic | −30 / −50 | (ambush; panic not described) | — |
 | Inspired | +30 | "a friendly is having an inspiring effect" (abilities) | — |
 | Army on the brink | −120 | when enemy/own current strength ≥ 2.6 **and** own strength ≤ 0.22 of the start | modelled (strength: the DB's combat potential × health) |

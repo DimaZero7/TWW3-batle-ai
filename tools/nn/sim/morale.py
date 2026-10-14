@@ -188,6 +188,39 @@ def combat_points(dealt, taken, in_combat, cal, rules, own_lost=None, foe_lost=N
     return torch.where(in_combat, pts, torch.zeros_like(pts))
 
 
+def strategic_value(u, params):
+    """[B, N] a unit's strength as the game records it (unit:strategic_value(), army_collapse's "cp" rule):
+    (combat potential that does not run out + missile combat potential x ammo_share) x health."""
+    cal = params.sim["morale"].get("collapse") or {}
+    share = ammo_share(u, float(cal.get("ammo_slope", 14.0)), float(cal.get("ammo_midpoint", 0.25)))
+    return (u["cp_fixed"] + u["cp_missile"] * share) * u["hp"].clamp(0, 1)
+
+
+def strong_power(u, d, foes, friends, params):
+    """[B, N] the 'combat power' of the enemies around a unit (morale.strong_enemy, rule "balance"):
+    k x E / F, E = the standing enemies' strategic values, F = its own + its standing friends', each weighted by
+    max(0, 1 - distance / reach_m) (centre to centre; the unit itself at full weight). foes / friends [B, N, N]:
+    the pairs to count (standing, alive; friends without the unit itself). Measured: config/nn/sim.json
+    morale.strong_enemy.why."""
+    se = params.sim["morale"]["strong_enemy"]
+    v = strategic_value(u, params)
+    fall = (1 - d / float(se["reach_m"])).clamp(min=0)
+    vj = v[:, None, :] * fall
+    enemy = torch.where(foes, vj, torch.zeros_like(vj)).sum(2)
+    own = v + torch.where(friends, vj, torch.zeros_like(vj)).sum(2)
+    return float(se["k"]) * enemy / own.clamp(min=1e-6)
+
+
+def strong_points(power, R):
+    """[B, N] the database's strong-enemy penalty: enemy_morale_penalty_value_min (-3) at combat power
+    enemy_morale_penalty_combat_power_min (4), linear to value_max (-24) at combat_power_max (32), held beyond;
+    0 below the minimum."""
+    lo, hi = R["enemy_morale_penalty_combat_power_min"], R["enemy_morale_penalty_combat_power_max"]
+    vlo, vhi = R["enemy_morale_penalty_value_min"], R["enemy_morale_penalty_value_max"]
+    pts = vlo + (power.clamp(lo, hi) - lo) * ((vhi - vlo) / (hi - lo))
+    return torch.where(power >= lo, pts, torch.zeros_like(pts))
+
+
 # The terms a routing unit does not get: they need a fight (spec build/morale_spec 2.5; the probe's routers
 # show casualties, routing units, the lord, under fire and fatigue).
 FIGHT_TERMS = ("secure", "combat", "attacked", "exposed", "charge")
@@ -242,8 +275,13 @@ def terms(u, ctx, params):
     out["under_fire"] = torch.where(ctx["under_fire"], R["ume_concerned_attacked_by_projectile"], 0.0)
     out["fatigue"] = torch.where(u["fat"] >= 5, R["ume_concerned_exhausted"],
                                  torch.where(u["fat"] >= 4, R["ume_concerned_very_tired"], 0.0))
-    # A much stronger enemy near (battle.py ctx strong_enemy): the database's enemy_morale_penalty_value_min.
-    out["strong_enemy"] = torch.where(ctx["strong_enemy"], R["enemy_morale_penalty_value_min"], 0.0)
+    # Stronger enemies near: with morale.strong_enemy rule "balance" (battle.py ctx strong_power) the database's
+    # scale -3 ... -24 by the combat power around the unit (strong_power / strong_points); else (ctx strong_enemy,
+    # an enemy worth morale.strong_ratio times as much within 70 m) the database's enemy_morale_penalty_value_min.
+    if ctx.get("strong_power") is not None:
+        out["strong_enemy"] = strong_points(ctx["strong_power"], R)
+    else:
+        out["strong_enemy"] = torch.where(ctx["strong_enemy"], R["enemy_morale_penalty_value_min"], 0.0)
     # The charge (+15, the database's charge_bonus) in blocks of morale.charge.block_s (battle.py u chm_s).
     out["charge"] = torch.where(u["chm_s"] > 0, R["charge_bonus"], 0.0)
     # The army is beaten as a whole (army_collapse: the database's 2.6x / 0.22 thresholds).

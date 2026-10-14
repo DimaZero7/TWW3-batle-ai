@@ -182,8 +182,11 @@ of the strongest effect (`MoraleGreatestEffect`). Data: `build/morale`.
   | swordsmen + spearmen side by side | −4 | −5 | −6 | −10 |
 
   The penalty grows as the enemy comes and starts beyond 70 m (`enemy_effect_range`); greatswords (dearer than
-  swordsmen and flagellants) give nothing, two weaker units together more than each. So the "combat power" is not the
-  cost nor cost × health; no formula — OPEN.
+  swordsmen and flagellants) give nothing, two weaker units together more than each. Every lane but the greatswords
+  fits one rule (error ≤ 0.4 point): "combat power" = 1.975 × the enemies' value (`strategic_value`, the cost in the
+  table) / (its own + its friends' near) × (1 − d / 180 m), points by the database's scale (4 → −3, 32 → −24). The
+  probe has no friends; that they count shows in the 72 recorded battles ([simulator](../../training/simulator.md#expendable-units-resistance-a-stronger-enemy),
+  `morale.strong_enemy`). The greatswords — OPEN.
 
 ## How to read it
 
@@ -207,5 +210,5 @@ of the strongest effect (`MoraleGreatestEffect`). Data: `build/morale`.
   meaning is not found. `shatter_after_first_rout_if_casulties_higher_than` 0.05 and `…_second_rout_…` 0.1 —
   by the recordings: a shatter below 0.05 / 0.10 of the starting health on the 1st / 2nd rout (above).
 - The game's own rally clock: rout length to the rally peaks at 18–19 and 36–37 s (morale probe T-E).
-- How the game computes the fight's balance (a ratio of what, over what window, the thresholds) and a strong
-  enemy's "combat power".
+- How the game computes the fight's balance (a ratio of what, over what window, the thresholds); why greatswords
+  give no "strong enemy" and what "speed" in its label means.
