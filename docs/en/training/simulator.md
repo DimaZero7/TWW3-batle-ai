@@ -1533,17 +1533,19 @@ charge pose up to the contact.
 
 **What to fix next** (by size; internet and the database first, rule 17):
 1. **The morale of middling and fresh units**: from MoralePercent 0.5-0.75 they rout 2.9 times as often as in the game
-   even on its own losses and places, and fresh units out of a fight lose morale where the game's gain. Start with the
-   terms the simulator lacks where the game names them: 'charge' in a long melee (repeated 6 s blocks - on what
-   event?) and 'winning'. Probe: a unit under an attack order in a long melee, a new attack order on the same or another
-   target every 20 s; read `MoraleGreatestEffect` and MoralePercent by second.
+   even on its own losses and places, and fresh units out of a fight lose morale where the game's gain. The four
+   missing terms are the rules [below](#morale-by-the-games-greatest-effect-four-rules-off) (off): fresh units now
+   nearly as in the game, middling ones rout 2-2.8 times as often (was 2.7-3.8). What is left is a tail: losing the
+   fight -8 by the estimated balance, the side of a blow by its own geometry, its own army collapse in the window.
 2. **The contact at the game's places**: in a third of the game's melee windows the simulator sees no contact at the
    same places; the damage there 0.74, one on one 0.84. The cause and the fix are
    [below](#contact-by-the-formed-combat-distance-contactengage) (`contact.engage`, off); what is left after it is the
    formation's depth as men fall (the game's formation keeps its depth, the simulator's box loses ranks).
 3. **Flank and rear attacks**: the game names 'attacked in the rear / flank' and the simulator has the term off in 50 /
-   62 % of such windows (its side of the blow is by its own geometry). Probe: a flank / rear attack from a known angle,
-   record from which angle the game starts and stops showing the effect.
+   62 % of such windows (its side of the blow is by its own geometry). The game's side is where the contact began
+   (`morale.attacked_first`, below), but with it too the term is on in only 27 / 51 % of the windows: the game's label
+   by the centres' angle grows smoothly (rear: 5 % in front -> 18 % behind), probably counted by men. Probe: a flank /
+   rear attack from a known angle, record from which angle the game starts and stops showing the effect.
 
 #### Contact by the formed combat distance (`contact.engage`)
 
@@ -1577,6 +1579,48 @@ contacts grow by 0.4 % of the 371k melee unit-seconds (with `rect_gap` 1.7 %): a
 fighting. More routs begin in a window, but the simulator routed more often than the game from the same state before
 the change too - that is morale (item 1), not the contact. The rule does not close the whole battles' rout shortage
 (0.80 against 1.19).
+
+#### Morale by the game's greatest effect: four rules (off)
+
+**The point.** Where the game's morale stands still (a 10 s window, settled), the simulator's morale target matches it
+by the median for nearly every label (the battle casualties table exactly, -2 ... -74; the 15 % a 0.5 s tick approach
+too). Four terms differ: 'winning' (the simulator lacks 4-5 points), 'enemy routing' (-7.5), 'charge' (-6...-20),
+'attacked in the rear / flank' (the simulator 12 / 4 points higher). Each is fixed by a rule measured on the recordings
+of 92 battles (the `MoraleGreatestEffect` labels, the step replay); all four are off - the orchestrator decides:
+
+| Rule (`config/nn/sim.json` morale) | What it does | Measured |
+|---|---|---|
+| `charge.moving` (+ `melee_start`) | the charge's 6 s block (`charge_timeout` 60 in tenths of a second) repeats while the unit moves under an attack order (the `mv` flag), with no cap on blocks; `melee_start`: in melee a move under an attack order starts a block | after a block's end another followed in 54-64 % with a move and 0-2 % without (1st-3rd block alike); 93 % of the label's starts deep in melee came with a move (12 % of such seconds); after a unit starts to move under an attack order its morale rises +5.4 points in 6 s, under a move order -1.1 |
+| `combat_shooter` | a shooter out of melee weighs only its exchange with the enemy it shoots at | shooters in a fight (the foe lost 10 %) need +8 at any balance of all HP from 0.67 up, +5 below 0.4; the old rule gave 0 in 47 % of the windows labelled 'winning' |
+| `routing_enemies_reach` (200 m) | routing enemies counted to 200 m centre to centre (the database: 100 m) | where the label is 'enemy routing', the game's morale needs 2.5 x the routers within 200 m: median error +4.25 at 100 m, 0.0 at 200; friends fit 100 m better |
+| `attacked_first` | the side struck is where the pair's contact began, held while the pair stays in contact (`state.PAIRS` `hit_sec`) | the database's text: 'first contact from the flank / rear'; recordings: 'rear' in 18 % of the seconds where the contact began in the rear and the attacker is now in front, 8.5 % where it began in front and the attacker is now behind |
+
+The check (on top of `contact.engage` + `rect_gap` + `push_keep_facing`; 92 battles, 10 s windows, 2 copies; 72 gate
+battles / 20 exam ones; 'three rules' = all four without `melee_start`):
+
+| | Before | Three rules + `charge.moving` without `melee_start` |
+|---|---|---|
+| Routs sim / game, no `--force` | 1.26 / 1.43 | 1.01 / 1.13 |
+| - from MoralePercent 0.5-0.75 | 3.79 / 2.74 | 2.78 / 2.04 |
+| - from MoralePercent < 0.25 | 1.00 / 1.20 | 0.84 / 0.98 |
+| Routs, `--force pos,hp` (the game's places and losses) | 1.24 / 1.31; 0.5-0.75: 3.46 / 2.31 | 0.94 / 0.96; 0.5-0.75: 2.05 / 1.50 |
+| Fresh units out of a fight, MoralePercent over 10 s (game +0.007 / +0.005) | -0.046 / -0.026 | -0.014 / -0.006 |
+| Health lost a window, no `--force` | 0.97 / 1.02 | 0.97 / 1.03 |
+| The game's label -> the simulator's term on (`--force pos,hp`): charge, flank, rear, winning, enemy routing | 0.30; 0.48; 0.23; 0.52; 0.82 | 0.39; 0.51; 0.27; 0.57; 1.00 |
+| The 72 whole battles (4 copies): routs a unit (game 1.187), same winner | 0.844; 58 | 0.801; 59.5 |
+
+One at a time in the 72 whole battles: `charge.moving` with `melee_start` 0.816; 57, without it 0.838; 58.5;
+`routing_enemies_reach` 0.841; 57.5; `combat_shooter` 0.837; 59.5; `attacked_first` 0.814; 58.5; all four with
+`melee_start` 0.774; 58.5. `melee_start` is too much: in the replay at the game's places (`--force pos,hp`) the
+simulator's unit 'moves' in melee nearly always (the game's places push it), the charge was on in 35-40 % of the melee
+windows and routs fell to 0.76 / 0.82 of the game's; without `--force` the simulator moves in 25 % of its melee
+seconds, the game in 17 %, and only ~30 % of the game's moves give a charge (the game's condition is narrower, not
+found). These rules do not add routs to whole battles (the morale there is not lower than the game's because of these
+terms): the shortage is the battle's path (drift). From middling morale the simulator still routs 2-2.8 times as often:
+the tail is the windows where its target is 12+ points below the game's morale (10 % of the windows: 105 routs in the
+simulator against 14 in the game; in the other 90 % 126 against 75; before these rules and `contact.engage`); there it
+more often has losing the fight (-8 at a balance below 0.4, where the game needs about -1 - the balance is an estimate
+of who hit whom), a flank / rear blow by its own geometry and its own army collapse / neighbours' routs in the window.
 
 ### The check's score: the simulator as a forecast
 

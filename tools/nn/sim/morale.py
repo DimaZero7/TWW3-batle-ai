@@ -16,6 +16,10 @@ lf / rf / bf) -3, several -6; routing friends within 100 m -3 each (at most 4; a
 expendable units); routing enemies within 100 m +2.5 each (at most 5); under fire -5 until 15 s after the last
 projectile hit; very tired -2, exhausted -6; an enemy worth 3x as much within 70 m -3; the charge +15 in blocks
 of 6 s from the charge sprint (morale.charge); the army beaten as a whole -120 (army destruction).
+Switches measured on the step replay's recordings (config/nn/sim.json, off by default; battle.py): attacked_first (the side
+a pair's contact began on, held while in contact), combat_shooter (a shooter's balance only against the enemy it shoots),
+routing_enemies_reach (routing enemies counted to 200 m), charge.moving (another 6 s block while the unit still moves
+under an attack order, no cap; in melee a move under an attack order starts one).
 
 States: wavering below 16 points; routing at 0 or below (not within 10 s of a rally; with morale.waver_timer on: below
 0 and only after waver_base_timeout tenths of a second - 2.5 s - of unbroken wavering); the third
@@ -252,7 +256,11 @@ def terms(u, ctx, params):
         ext = u["extended"] / u["hp0"].clamp(min=1e-6)
         out["extended"] = steps(ext, table(R, "extended_casualties_penalty_", (10, 15, 33, 50, 80)))
     in_combat = ctx.get("in_combat", ctx["in_melee"])
-    combat = combat_points(u["dealt"] + u["shot_dealt"], u["taken"] + u["shot_taken"], in_combat, cal, R,
+    # the HP the fight's balance weighs: the unit's dealt / taken (melee and missiles), or ctx fight_dealt / fight_taken
+    # (morale.combat_shooter: a shooter out of melee only against the enemy it shoots at; battle.py)
+    dealt = ctx["fight_dealt"] if ctx.get("fight_dealt") is not None else u["dealt"] + u["shot_dealt"]
+    taken = ctx["fight_taken"] if ctx.get("fight_taken") is not None else u["taken"] + u["shot_taken"]
+    combat = combat_points(dealt, taken, in_combat, cal, R,
                            own_lost=lost, foe_lost=ctx.get("foe_lost"),
                            win_scale=knobs.get(u, "combat_ratio_scale", None))
     if cal.get("single_combat") == "losing":

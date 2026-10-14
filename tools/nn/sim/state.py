@@ -301,6 +301,12 @@ HISTORY = {
     "lost_hist": "HP lost each step over the last K steps (morale.casualties_window \"sliding\": the recent and "
                  "extended casualty windows; K = tools/nn/sim/morale.history_steps, 0 when the windows decay)",
 }
+# Per pair of units, [B, N * N] (row: the attacker j, column: the unit i it strikes; 2-D for the same reason):
+PAIRS = {
+    "hit_sec": "the side of i that j's contact began on, + 1 (1 front, 2 flank, 3 rear; 0: no contact): held while the "
+               "pair stays in contact (morale.attacked_first: the database's 'attacked in the flank / rear' is the "
+               "first contact's side)",
+}
 
 # The battle's id [B, N] (int64, the same on every slot; empty() sets it, nothing per unit fills it): its row in the
 # batch it was built in. The hash draws (morale's rally, the rout's dodge side, the scripts' picks) key on it, so a
@@ -317,7 +323,7 @@ def _dtype(code):
 @dataclass
 class State:
     """A batch of battles. u: every per-unit tensor [B, N] by name (OBSERVED, STATIC, INTERNAL) and the
-    per-unit histories [B, K * N] (HISTORY);
+    per-unit histories [B, K * N] (HISTORY), the per-pair fields [B, N * N] (PAIRS);
     t: battle time [B], s; attacker [B] (1 or 2); done [B]; winner [B] (0 none yet, 1 or 2);
     lord_dead_s [B, 2]: seconds since side 1's / side 2's lord died or shattered (-1: alive or none);
     bounds: the map's half-size, m (square, centre 0); keys [B][N] unit keys ("" empty slot)."""
@@ -383,6 +389,8 @@ def empty(B, N, device="cpu", history=0):
             u[name] = torch.zeros((B, N), dtype=_dtype(code), device=device)
     for name in HISTORY:
         u[name] = torch.zeros((B, history * N), device=device)
+    for name in PAIRS:
+        u[name] = torch.zeros((B, N * N), device=device)
     u["target"].fill_(-1)
     u["order_target"].fill_(-1)
     u["aim_tgt"].fill_(-1)

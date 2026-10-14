@@ -693,6 +693,17 @@ def step(st, orders, params=None, dt=None):
     attackers = strike & standing[:, :, None]
     # the worst side it is struck from this step (morale: attacked in the flank / rear while it lasts)
     u["flank_hit"] = torch.where(attackers, sector, torch.zeros_like(sector)).amax(1).float()
+    if (cal["morale"].get("attacked_first") or {}).get("on") and "hit_sec" in u:
+        # morale.attacked_first: the side is the one each attacker's contact BEGAN on (the database's was_attacked_in_flank
+        # / _rear: 'first contact from the flank / rear'), held while that pair stays in contact (the recordings: the
+        # first contact's side keeps the game's label as the struck unit turns to face its attacker; the morale probe
+        # T-A: from the first blow to the attacker's leaving); u hit_sec [B, N * N] (state.PAIRS), side + 1, 0 none
+        Bn, Nn = touch.shape[0], touch.shape[1]
+        prev = u["hit_sec"].reshape(Bn, Nn, Nn)
+        held = torch.where(prev > 0, prev, torch.where(attackers, sector.float() + 1, torch.zeros_like(prev)))
+        held = torch.where(touch & standing[:, :, None] & (held > 0), held, torch.zeros_like(held))
+        u["hit_sec"] = held.reshape(Bn, Nn * Nn)
+        u["flank_hit"] = (held.amax(1) - 1).clamp(min=0)
 
     alive = present & (u["men"] > 0) & ~u["gone"]
     standing = alive & ~u["r"]
@@ -793,11 +804,37 @@ def step(st, orders, params=None, dt=None):
     first_block = charging & (u["chm_n"] <= 0)
     next_block = ((u["chm_s"] > 0) & (left_s <= 0) & (charging | landed) & (u["chm_n"] >= 1)
                   & (u["chm_n"] < float(mc["blocks"])))
+    if (mc.get("moving") or {}).get("on"):
+        # morale.charge.moving: the charge's morale goes with the unit charging = moving (u mv: the last step's own move)
+        # under an attack order. A block ends; another follows if the unit still moves, with no cap; in melee a unit that
+        # moves under an attack order with no block running starts one (the recordings, 92 battles: at a block's end
+        # another block followed in 54-64 % of the cases when the game's moving flag was on, 0-2 % when off, for the
+        # 1st, 2nd and 3rd block alike; 93 % of the label's starts deep in melee came with the flag on, against 12 % of
+        # deep-melee seconds; the block is the database's charge_timeout 60 in tenths of a second, as waver_base_timeout)
+        moving_att = standing & (kind == O.ATTACK) & u["mv"] & ~sk_run
+        next_block = (u["chm_s"] > 0) & (left_s <= 0) & moving_att
+        if mc["moving"].get("melee_start"):
+            first_block = first_block | (moving_att & engaged & (u["chm_s"] <= 0))
     new_block = first_block | next_block
     u["chm_s"] = torch.where(new_block, torch.full_like(left_s, float(mc["block_s"])), left_s)
     u["chm_n"] = torch.where(new_block, u["chm_n"] + 1, u["chm_n"])
     u["chm_n"] = torch.where(~charging & ~engaged & (u["chm_s"] <= 0), torch.zeros_like(u["chm_n"]), u["chm_n"])
     u["chm_s"] = torch.where(standing, u["chm_s"], torch.zeros_like(u["chm_s"]))
+    rr = mcal.get("routing_enemies_reach") or {}
+    routing_enemies_m = float(rr["m"]) if rr.get("on") else M["routing_unit_effect_distance_front"]
+    fight_dealt = fight_taken = None
+    if (mcal.get("combat_shooter") or {}).get("on"):
+        # morale.combat_shooter: a unit out of melee that shoots weighs only the HP it exchanges with the enemy it shoots
+        # at (its missile HP dealt against what that enemy shoots back at it), not the fire of others on it (the
+        # recordings: shooters the game shows winning need +8 at every balance of all HP from 0.67 up, +5 below)
+        at = u["aim_tgt"]
+        tj = at.clamp(min=0)
+        back = (at >= 0) & (at.gather(1, tj) == slot[None, :]) & pw["enemy"].gather(2, tj[:, :, None]).squeeze(2)
+        own_shot = (at >= 0) & ~engaged
+        zero = torch.zeros_like(u["shot_dealt"])
+        fight_dealt = torch.where(own_shot, u["shot_dealt"], u["dealt"] + u["shot_dealt"])
+        fight_taken = torch.where(own_shot, torch.where(back, u["shot_dealt"].gather(1, tj), zero),
+                                  u["taken"] + u["shot_taken"])
     ctx = {
         "aura": aura * standing.float(),
         "collapse": collapse,
@@ -806,12 +843,16 @@ def step(st, orders, params=None, dt=None):
         "in_melee": engaged,
         "in_combat": engaged | firing | shot_now,
         "foe_lost": foe_lost,
+        "fight_dealt": fight_dealt,          # (morale.combat_shooter; None: the unit's HP dealt / taken, all of it)
+        "fight_taken": fight_taken,
         # A routing expendable unit scares nobody (morale.expendable_scares_expendable: only other expendable units;
         # the database's attribute text, measured: config/nn/sim.json morale.expendable_why).
         "routing_friends": (friends & u["r"][:, None, :] & ~(u["expendable"][:, None, :] & ~(
             u["expendable"][:, :, None] & bool(cal["morale"].get("expendable_scares_expendable"))))
                             & (d <= M["routing_unit_effect_distance_front"])).float().sum(2),
-        "routing_enemies": (foes & u["r"][:, None, :] & (d <= M["routing_unit_effect_distance_front"])).float().sum(2),
+        # routing enemies within the database's routing_unit_effect_distance_front (100 m, centre to centre), or within
+        # morale.routing_enemies_reach m when it is on (measured: the recordings' labels count routers to ~200 m)
+        "routing_enemies": (foes & u["r"][:, None, :] & (d <= routing_enemies_m)).float().sum(2),
         # The game's "under missile attack" holds morale.under_fire_s after the last projectile hit (measured).
         "under_fire": u["under_fire_s"] < float(cal["morale"].get("under_fire_s", 2.0)),
         # A standing enemy within enemy_effect_range (70 m) worth morale.strong_ratio times the unit or more (cost x

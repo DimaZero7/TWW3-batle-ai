@@ -32,8 +32,8 @@ Output, one npz per battle (out_dir/<run>.npz): starts [W], sim_<f> [W, H, C, n]
 hp, men, mp, r, s, w, m, x, z, gone, mel / mis = HP taken in melee / from missiles that second, dl / sdl = HP dealt), the
 first step's contact (t_n: standing enemies touching, t_sec: the worst side touched 0 front 1 flank 2 rear, t_gap: the
 nearest standing enemy's edge gap) [W, C, n], the morale terms at the window's first and last step (copy mean)
-[K, W, n], the rebuilt clocks at the starts c_<name> [W, n], the game arrays g_<f> [T, n] (g_dl / g_sdl: HP dealt a
-row by stepclock's attribution), the recorded orders o_kind / o_target [T, n] and the units' passport numbers.
+[K, W, n] and what morale.step saw besides (SEEN: x0_<name> / x1_<name> [W, n]), the rebuilt clocks at the starts c_<name> [W, n], the game arrays g_<f> [T, n] (g_dl / g_sdl: HP dealt a row by stepclock's
+attribution), the recorded orders o_kind / o_target [T, n] and the units' passport numbers.
 Needs torch: python -m tools.nn.sim.stepreplay --sets it1 ... --out build/stepreplay/<tag> (the container, GPU when free).
 """
 import argparse
@@ -49,6 +49,10 @@ from tools.nn.sim import stepclock
 SIM_SEC = ("hp", "men", "mp", "r", "s", "w", "m", "x", "z", "gone", "mel", "mis", "dl", "sdl")
 GAME_F = ("x", "z", "b", "men", "hp", "mp", "ms", "a", "k", "fat", "phr")
 GAME_B = ("r", "s", "w", "m", "mv", "f", "fire", "lf", "rf", "bf")
+# what morale.step saw besides the terms, at a window's first and last step (x0_<name> / x1_<name> [W, n], copy mean):
+# the start bonus (the effects' leadership, on the state only inside the step), in a fight / in melee, the share lost by
+# the enemies it fights, the fight balance (HP dealt + 1) / (taken + 1), routing enemies counted, the side struck from
+SEEN = ("bonus", "in_combat", "in_melee", "foe_lost", "ratio", "routing_enemies", "flank_hit")
 TERMS = ("aura", "lord", "secure", "casualties", "recent", "extended", "combat", "attacked", "exposed",
          "routing_friends", "routing_enemies", "under_fire", "fatigue", "strong_enemy", "charge", "collapse")
 CLOCKS = ("taken", "shot_taken", "dealt", "shot_dealt", "waver_s", "rout_count", "rout_s", "rally_s", "contact_s",
@@ -57,12 +61,31 @@ CLOCKS = ("taken", "shot_taken", "dealt", "shot_dealt", "waver_s", "rout_count",
 
 
 class _Last:
-    """morale.TRACE stand-in: keeps the last step's terms."""
+    """morale.TRACE stand-in: keeps the last step's terms (and the start bonus, morale_bonus, as morale.step saw it:
+    the effects' leadership is on the state only inside the step, effects.restore takes it off)."""
     def __init__(self):
         self.parts = None
+        self.seen = None
 
     def append(self, p):
         self.parts = p
+
+
+def _seen(step):
+    """morale.step wrapped to keep what it sees (SEEN, into morale.TRACE.seen)."""
+    def wrapped(u, ctx, params, dt):
+        import torch
+        from tools.nn.sim import morale
+        if isinstance(morale.TRACE, _Last):
+            z = torch.zeros_like(u["morale"])
+            morale.TRACE.seen = {
+                "bonus": u["morale_bonus"] + z, "in_combat": ctx.get("in_combat", ctx["in_melee"]).float(),
+                "in_melee": ctx["in_melee"].float(), "foe_lost": ctx.get("foe_lost", z) + z,
+                "ratio": (u["dealt"] + u["shot_dealt"] + 1.0) / (u["taken"] + u["shot_taken"] + 1.0),
+                "routing_enemies": ctx["routing_enemies"] + z, "flank_hit": u["flank_hit"] + z}
+        return step(u, ctx, params, dt)
+    wrapped.inner = step
+    return wrapped
 
 
 def _params(sets=()):
@@ -215,6 +238,8 @@ def _batch(job):
         torch.set_num_threads(threads)
     params = _params(sets)
     morale.TRACE = _Last()
+    if not hasattr(morale.step, "inner"):
+        morale.step = _seen(morale.step)
     torch.manual_seed(sum(ord(c) for d in run_dirs for c in Path(d).name) % (2 ** 31))
     gen = torch.Generator(device="cpu").manual_seed(sum(ord(c) for d in run_dirs for c in Path(d).name) % (2 ** 31) + 1)
     games, armies = [], []
@@ -326,6 +351,8 @@ def _batch(job):
     t_gap = np.zeros((B, W, N), np.float32)
     terms0 = np.zeros((len(TERMS), B, W, N), np.float32)
     terms1 = np.zeros((len(TERMS), B, W, N), np.float32)
+    seen0 = np.zeros((len(SEEN), B, W, N), np.float32)
+    seen1 = np.zeros((len(SEEN), B, W, N), np.float32)
     fade = math.exp(-dt / params.sim["morale"]["recent_s"])
     present = u["side"] > 0
     spacing = params.sim["formation"]["spacing_m"]
@@ -464,6 +491,8 @@ def _batch(job):
                 if h == 0 and s == 0 and morale.TRACE.parts is not None:
                     for q, nm in enumerate(TERMS):
                         terms0[q, :, w] = morale.TRACE.parts[nm].float().cpu().numpy()
+                    for q, nm in enumerate(SEEN):
+                        seen0[q, :, w] = morale.TRACE.seen[nm].float().cpu().numpy()
                 st.done = ~active
                 st.winner = torch.zeros_like(st.winner)
             st.t = torch.full((B,), float(i0 + h + 1), device=device)
@@ -476,6 +505,8 @@ def _batch(job):
         if morale.TRACE.parts is not None:
             for q, nm in enumerate(TERMS):
                 terms1[q, :, w] = morale.TRACE.parts[nm].float().cpu().numpy()
+            for q, nm in enumerate(SEEN):
+                seen1[q, :, w] = morale.TRACE.seen[nm].float().cpu().numpy()
     out = {}
     for k, (g, meta, clk) in enumerate(zip(games, metas, clk_all)):
         so, nw = meta["so"], len(meta["starts"])
@@ -490,6 +521,9 @@ def _batch(job):
         d["t_gap"] = np.moveaxis(t_gap[bs, :nw][..., so], 0, 1)
         d["terms0"] = terms0[:, bs, :nw][..., so].mean(1)                                       # [K, W, n]
         d["terms1"] = terms1[:, bs, :nw][..., so].mean(1)
+        for q, nm in enumerate(SEEN):
+            d[f"x0_{nm}"] = seen0[q, bs, :nw][..., so].mean(0)                                 # [W, n]
+            d[f"x1_{nm}"] = seen1[q, bs, :nw][..., so].mean(0)
         for f in CLOCKS:
             d[f"c_{f}"] = clk[f].astype(np.float32)
         d["starts"] = np.array(meta["starts"])
