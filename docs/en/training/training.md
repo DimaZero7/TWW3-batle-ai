@@ -42,7 +42,7 @@ The first steps compile for 1–3 minutes (seconds once a run of the same shapes
 | drills | `--drills` (0: share of the battles), `--drill-weights` (json; default the `TRAIN` drills equally: kiting, hold_fire), `--drill-bank` (256 per drill), `--drill-embed` (1: share of the embedded frame, for the drills that have one), `--drill-broad` (0.5: of the rest, share of the broad frame), `--drill-teach` (`auto` or json {drill: weight}: the teacher, off by default), `--drill-teach-minutes` (10: manual), `--drill-teach-k` (0.5), `--drill-teach-cap` (0.25), `--drill-teach-weight` (0.15: auto), `--teach-normal` (`auto`, names or json {drill: share}: the teacher in normal battles, off by default), `--teach-normal-k` (0.5), `--teach-normal-cap` (0.15), `--teach-normal-weight` (0.1), `--teach-normal-match` (0.1): [drills](#drills) |
 | observation | `--observe-dir` (off: the folder of converted battles), `--observe-share` (0.1), `--observe-weight` (0.1), `--observe-decay` (0.95), `--observe-anchor` (0.2), `--observe-anchor-decay` (0.995), `--observe-anchor-alone` (off: the anchor ends with the term), `--observe-adv` (`critic`), `--observe-beta` (1), `--observe-clip` (20), `--observe-steps` (0: `--steps`), `--observe-refresh` (20): [learning by observation](#learning-by-observation) |
 | kiting in self-play | `--kite-share` (0: share of the `self` / `past` battles started, planned 0.1), `--kite-bank` (256 battles ready): [kiting in self-play](#kiting-in-self-play) |
-| abilities by their effect | `--ability-branch` (0: off; the share of presses branched), `--ability-branch-missed` (0.005), `--ability-branch-copies` (4), `--ability-branch-horizon` (60 s), `--ability-branch-hold` (0 s), `--ability-branch-openloop` (off), `--ability-branch-greedy` (off), `--ability-branch-cap` (0: none), `--ability-branch-batch` (128), `--ability-branch-weight` (0.1), `--ability-branch-decay` (300 updates); the ability critic `--ability-critic` (off), `--ability-critic-weight` (1), `--ability-critic-warmup` (2,000), `--ability-critic-buffer` (25,000): [abilities by their effect](#abilities-by-their-effect-branches); the ability head's own signal `--ability-own-signal` (off), `--ability-weight` (1.0), `--ability-body-grad` (0.1), `--ability-lr-mult` (1.0), `--ability-epochs` (1), `--ability-price` (auto), `--ability-price-file` (`config/ability_price.json`): [own signal](#the-ability-heads-own-signal) |
+| abilities by their effect | `--ability-branch` (0: off; the share of presses branched), `--ability-branch-missed` (0.005), `--ability-branch-copies` (4), `--ability-branch-horizon` (60 s), `--ability-branch-hold` (0 s), `--ability-branch-openloop` (off), `--ability-branch-greedy` (off), `--ability-branch-cap` (0: none), `--ability-branch-batch` (128), `--ability-branch-weight` (0.1), `--ability-branch-decay` (300 updates); the ability critic `--ability-critic` (off), `--ability-critic-weight` (1), `--ability-critic-warmup` (2,000), `--ability-critic-buffer` (25,000): [abilities by their effect](#abilities-by-their-effect-branches); the ability head's own signal `--ability-own-signal` (off), `--ability-weight` (1.0), `--ability-body-grad` (0.1), `--ability-lr-mult` (1.0), `--ability-epochs` (1), `--ability-norm` (shared), `--ability-price` (auto), `--ability-price-file` (`config/ability_price.json`): [own signal](#the-ability-heads-own-signal) |
 
 ### The chain's settings
 
@@ -872,6 +872,18 @@ is ready at once.
     `ability_extra_kl`, `ability_extra_clip`, `ability_extra_loss`, `ability_extra_rows`, `ability_extra_steps` - in
     the last extra pass. A probe on itS25_19 (CPU, 8 battles x 4 decisions, factor 3, 3 passes): 20-43 priced rows a
     minibatch, in the last extra pass KL 0.01-0.02, 14-25 % past the clip.
+- **The prices' scale: shared or each ability's own** (`--ability-norm`, default `shared` - bit for bit as before,
+  test). `shared`: every price is divided by one root mean square (the chunk's or the critic buffer's). The most
+  valuable presses set it (foe seeker, stand your ground in melee: ~16 gold), and a cheap ability's signal drowns:
+  deadly onslaught far from the fight -1.25 gold -> -0.08 of the +-5 range, 15-20 times weaker than the other
+  abilities' melee presses. `per-ability`: each price (a press from the branches or, once the critic is ready, every
+  moment's price) is divided by its own ability's root mean square, then the same +-5 clip (`ability_branch.AbilityNorm`):
+  - an average over updates decaying by 0.9 an update (~10 updates' memory), weighted by rows;
+  - a rare ability with fewer than 32 rows is filled up with the update's mean square of all prices (it starts at the
+    shared scale, not at the noise of two rows);
+  - at least 0.0002 of the budget (2 gold of a 10,000-gold army), so prices near zero are not blown up;
+  - the sums live in the checkpoint's training state (`ability_norm`, by the ability's key): the chain's next step
+    goes on with them; without them - from scratch. Log: `norm_rms_<name>` (the ability's scale, budget share).
 - **The press's price** (`--ability-price`; `auto` = `bonus` under this flag, else `branch`). A valid ability (Stand
   Your Ground, Deadly Onslaught, Foe-Seeker - by the validity card) - the [bonus price](ability_price.md): the bricks'
   counters on the "pressed" branch's trajectory (the branch is played anyway; recorded once a decision -

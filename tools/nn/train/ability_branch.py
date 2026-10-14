@@ -79,6 +79,15 @@ bonuses on the "pressed" branch's trajectory (recorded a decision at a time, abi
 the critic learns the same (price_kind(): a buffer of another kind restarts). The log's press rates (moments a slot of
 each ability is ready, by the unit in melee or not, and its presses: rate_stats) are counted whenever the branches run.
 
+Scale per ability (Config.norm "per-ability"; run.py --ability-norm): by default ("shared") every price is divided by
+one root mean square (the chunk's, or the critic buffer's), set by the abilities with the biggest prices (foe seeker,
+stand your ground in melee: ~16 gold) - a small ability's whole signal (deadly onslaught far from melee: -1.25 gold)
+becomes ~0.08 of the +-ADV_CLIP range, 15-20 times weaker. Per ability: each priced cell (a replayed price, or with the
+critic ready every moment's price as used) is divided by its own ability's running root mean square (AbilityNorm: an
+average over updates decaying by NORM_DECAY, weighted by rows; an ability with fewer than NORM_PRIOR rows is filled up
+with the update's mean square of all prices; at least NORM_FLOOR), then clipped to ADV_CLIP. The running sums go on
+in the checkpoint's "train" (run.py: "ability_norm"); a run without them starts fresh. Logged: norm_rms_<name>.
+
 Extension points (not used yet): a bootstrapped (TD) target of the critic (Brancher.target), a cost of an ability left
 unused through a battle (Config.unused_penalty: must be 0).
 """
@@ -101,6 +110,12 @@ from tools.nn.train import league, reward, scenes
 ZERO = 0.002
 ADV_FLOOR = 0.005          # the prices' root mean square at least this (budget share): tiny noise is not blown up
 ADV_CLIP = 5.0             # the normalised advantage within +-this
+# Config.norm "per-ability" (module doc "Scale per ability"; AbilityNorm)
+NORM_DECAY = 0.9           # an ability's running sums decay this much an update (~10 updates' memory)
+NORM_PRIOR = 32            # ... an ability with fewer (decayed) rows is filled up to this many with the update's
+#                            mean square of all abilities' prices (a rare ability starts at the shared scale)
+NORM_FLOOR = 0.0002        # ... its root mean square at least this (budget share: 2 gold of a 10 000-gold army)
+NORMS = ("shared", "per-ability")
 ID_STEP = 1_000_003        # a copy's battle id: the snapshot's + ID_STEP x (copy + 1)
 FRAME = ("cx", "cz", "ux", "uz")
 MEMORY = tuple(f for f in ob.Memory.__dataclass_fields__ if f != "frame")
@@ -132,10 +147,14 @@ class Config:
     #                             pressed branch's trajectory; the others keep the branch price
     bonus_file: str = ""        # the bonus price's numbers ("": config/ability_price.json)
     own: bool = False           # finish() also returns every decision's ability log-probability (lp_all), always
+    norm: str = "shared"        # the prices' scale (run.py --ability-norm): "shared" - one root mean square of all;
+    #                             "per-ability" - each ability's own running one (AbilityNorm; module doc)
 
     def __post_init__(self):
         if self.unused_penalty:
             raise ValueError("ability_branch.Config.unused_penalty is reserved: not implemented yet")
+        if self.norm not in NORMS:
+            raise ValueError(f"ability_branch.Config.norm: {self.norm!r} not one of {NORMS}")
 
 
 # --- snapshots: flat dicts of per-battle data ([b, ...] tensors, lists, numpy arrays) ---
@@ -526,9 +545,9 @@ class _Chunk:
     t: int = 0
     snaps: list = field(default_factory=list)
     entries: list = field(default_factory=list)      # (t, r, n, side, slot, press, battle index in the snapshots, lp,
-    #                                                    the moment's index: the critic's, else -1)
+    #                                                    the moment's index: the critic's, else -1, the ability index)
     moments: list = field(default_factory=list)      # with the critic: per decision (t, r, n, slot, press, lp, budget,
-    #                                                    features) of every press and missed moment ([M] tensors)
+    #                                                    features, ability index) of every press and missed moment
     n_moments: int = 0
     n_battles: int = 0
     presses: object = None                           # [] on the device: the learner's presses this chunk
@@ -538,6 +557,59 @@ class _Chunk:
     lp_all: list = field(default_factory=list)       # with Config.own: per decision (t, [R, N] the ability head's
     #                                                    log-probability of the choice made)
     rates: object = None                             # [A + 1, 2, 2] on the device: (ability, in melee, (ready, pressed))
+
+
+class AbilityNorm:
+    """Each ability's running scale of its prices (Config.norm "per-ability"; module doc "Scale per ability"). Per
+    ability (keys: the observation's ability index -> key; index len(keys): an unknown one) the decayed sum of its
+    prices' squares and of its rows; an update: both x NORM_DECAY, the update's rows added; an ability's root mean
+    square = sqrt((squares + fill x the update's mean square of all prices) / (rows + fill)), fill = NORM_PRIOR less
+    its rows (at least 0), at least NORM_FLOOR. Kept in the checkpoint's "train" (state / load: by key, so a changed
+    ability table maps)."""
+
+    def __init__(self, keys):
+        self.keys = list(keys) + [""]                # the last: an ability the table does not know
+        self.sq = np.zeros(len(self.keys))
+        self.n = np.zeros(len(self.keys))
+        self.last = None
+
+    def rms(self, shared_ms=0.0):
+        """[A + 1] each ability's root mean square now (budget share)."""
+        fill = np.maximum(NORM_PRIOR - self.n, 0.0)
+        return np.maximum(np.sqrt((self.sq + fill * shared_ms) / (self.n + fill)), NORM_FLOOR)
+
+    def update(self, idx, val):
+        """The update's priced rows: idx [k] long their ability index, val [k] their price (budget share, either
+        sign) -> [k] each row's scale (its ability's root mean square after adding them), on val's device."""
+        i = idx.detach().cpu().numpy().astype(np.int64)
+        v = val.detach().double().cpu().numpy()
+        self.sq *= NORM_DECAY
+        self.n *= NORM_DECAY
+        np.add.at(self.sq, i, v * v)
+        np.add.at(self.n, i, 1.0)
+        rms = self.rms(float(np.mean(v * v)) if len(v) else 0.0)
+        self.last = {"rms": rms, "seen": np.bincount(i, minlength=len(self.keys)) > 0}
+        return torch.as_tensor(rms[i], dtype=val.dtype, device=val.device)
+
+    def stats(self):
+        """{norm_rms_<name>: the root mean square (budget share)} of the abilities priced in the last update."""
+        if self.last is None:
+            return {}
+        return {"norm_rms_" + (k.split("abilities_")[-1] or "unknown"): round(float(r), 6)
+                for k, r, s in zip(self.keys, self.last["rms"], self.last["seen"]) if s}
+
+    def state(self):
+        return {k: (float(s), float(n)) for k, s, n in zip(self.keys, self.sq, self.n) if n > 0}
+
+    def load(self, d):
+        """A saved state() (None or empty: fresh) -> loaded or not. Abilities not in the table now are dropped."""
+        if not d:
+            return False
+        at = {k: i for i, k in enumerate(self.keys)}
+        for k, (s, n) in d.items():
+            if k in at:
+                self.sq[at[k]], self.n[at[k]] = s, n
+        return True
 
 
 class Brancher:
@@ -556,6 +628,7 @@ class Brancher:
             self.pricer = train_price.load(cfg.bonus_file or None)
         from tools.nn.model import abilities as mab
         self.keys = mab.keys()                   # the observation's ability index -> key (abil_idx; -1: the last row)
+        self.norm = AbilityNorm(self.keys) if cfg.norm == "per-ability" else None
         self.gen = torch.Generator(device=device).manual_seed(int(cfg.seed) + 104729)
         self.chunk = _Chunk()
         self.stats = {}
@@ -673,6 +746,7 @@ class Brancher:
             nz = nz[torch.tensor(keep, dtype=torch.long, device=nz.device)]
         r, n = nz[:, 0], nz[:, 1]
         slot, pressed, lp = choice(info, r, n)
+        kind = self._ability_of(info, r, n, slot)
         moment = where[r, n] if where is not None else torch.full_like(r, -1)
         b = rows[r] % env.B
         side = rows[r] // env.B + 1
@@ -682,8 +756,16 @@ class Brancher:
         c.n_battles += len(ub)
         c.taken += len(nz)
         for x in zip(r.tolist(), n.tolist(), side.tolist(), slot.tolist(), pressed.tolist(), at.tolist(), lp.tolist(),
-                     moment.tolist()):
+                     moment.tolist(), kind.tolist()):
             c.entries.append((t,) + x)
+
+    def _ability_of(self, info, r, n, slot):
+        """[k] the moments' ability index (the observation's abil_idx of the slot; an unknown one: len(keys))."""
+        idx = info["obs"].get("abil_idx")
+        if idx is None:
+            return torch.full_like(r, len(self.keys))
+        a = idx[r, n, slot].long()
+        return torch.where(a >= 0, a, torch.full_like(a, len(self.keys)))
 
     def _moments(self, env, info, mask, t):
         """The critic's record of every moment of the decision (mask [R, N]: a press or a ready ability left) ->
@@ -698,7 +780,8 @@ class Brancher:
         slot, pressed, lp = choice(info, r, n)
         b = env.rows_learn[r] % env.B
         X = ability_critic.features(info["obs"], r, n, slot)
-        c.moments.append((torch.full_like(r, t), r, n, slot, pressed, lp, reward.budget(env.st.u)[b], X))
+        c.moments.append((torch.full_like(r, t), r, n, slot, pressed, lp, reward.budget(env.st.u)[b], X,
+                          self._ability_of(info, r, n, slot)))
         where[r, n] = torch.arange(len(r), device=r.device) + c.n_moments
         c.n_moments += len(r)
         return where
@@ -720,6 +803,9 @@ class Brancher:
         dev = env.device
         out = {"adv": torch.zeros(c.T, R, N, device=dev), "mask": torch.zeros(c.T, R, N, dtype=torch.bool, device=dev),
                "lp": torch.zeros(c.T, R, N, device=dev)}
+        # per-ability scale: the prices go in raw with their ability index, normalised once at the end (_normalise)
+        kinds = (torch.full((c.T, R, N), len(self.keys), dtype=torch.long, device=dev) if self.norm is not None
+                 else None)
         if self.cfg.own:
             out["lp_all"] = torch.zeros(c.T, R, N, device=dev)
             for t, lp in c.lp_all:
@@ -757,12 +843,18 @@ class Brancher:
                 st.update(self.bonus_stats(bonus, pressed, gold, rms))
             self.last = {"price": price, "se": se, "pressed": pressed, "entries": list(c.entries), "bonus": bonus}
             # the replayed moments by their price (all there is without the critic or before it is ready)
-            adv = (torch.where(pressed, price, -price) / max(rms, ADV_FLOOR)).clamp(-ADV_CLIP, ADV_CLIP)
+            if kinds is None:
+                adv = (torch.where(pressed, price, -price) / max(rms, ADV_FLOOR)).clamp(-ADV_CLIP, ADV_CLIP)
+            else:
+                adv = torch.where(pressed, price, -price)
+                kinds[t, r, unit] = torch.tensor([e[9] for e in c.entries], dtype=torch.long, device=dev)
             out["adv"][t, r, unit] = adv
             out["mask"][t, r, unit] = True
             out["lp"][t, r, unit] = lp
         if self.critic is not None and c.n_moments:
-            self._criticise(out, price)
+            self._criticise(out, price, kinds)
+        if kinds is not None:
+            self._normalise(out, kinds)
         self.stats["seconds"] = round(time.time() - t0, 2)
         self.chunk = _Chunk()
         return out if (self.cfg.own or bool(out["mask"].any())) else None
@@ -901,14 +993,24 @@ class Brancher:
         (TD) target, e.g. the price plus the critic's value of the unit's next ready moment."""
         return price
 
-    def _criticise(self, out, price):
+    def _normalise(self, out, kinds):
+        """Config.norm "per-ability": out["adv"]'s priced cells hold the raw signed price (budget share), kinds their
+        ability index -> each divided by its ability's running root mean square (AbilityNorm, updated with them) and
+        clipped to ADV_CLIP, in place; the scales logged (norm_rms_<name>)."""
+        m = out["mask"]
+        if bool(m.any()):
+            raw = out["adv"][m]
+            out["adv"][m] = (raw / self.norm.update(kinds[m], raw)).clamp(-ADV_CLIP, ADV_CLIP)
+            self.stats.update(self.norm.stats())
+
+    def _criticise(self, out, price, kinds=None):
         """The ability critic (module doc). Its prediction of every moment of the chunk comes first, by the critic as
         the last update left it (the replayed moments' measured prices are not in it yet: the control variate stays
         independent of them); once ready, every moment gets its price as the head's advantage (out, in place). Then
         the replayed prices go into its buffer and it fits."""
         from tools.nn.train import ability_critic
         c, cfg, crit = self.chunk, self.cfg, self.critic
-        t, r, n, slot, pressed, lp, budget, X = (torch.cat(x) for x in zip(*c.moments))
+        t, r, n, slot, pressed, lp, budget, X, kind = (torch.cat(x) for x in zip(*c.moments))
         e_m = torch.tensor([e[8] for e in c.entries], dtype=torch.long, device=X.device)
         t1 = time.time()
         st = self.stats
@@ -932,7 +1034,11 @@ class Brancher:
                 use_cv = sd_cv <= sd_p
                 used[e_m] = cv if use_cv else price
                 st.update(price_sd=round(sd_p, 5), cv_sd=round(sd_cv, 5), cv_used=int(use_cv))
-            adv = (torch.where(pressed, used, -used) / scale).clamp(-ADV_CLIP, ADV_CLIP)
+            if kinds is None:
+                adv = (torch.where(pressed, used, -used) / scale).clamp(-ADV_CLIP, ADV_CLIP)
+            else:
+                adv = torch.where(pressed, used, -used)          # raw: per-ability scale at the end (_normalise)
+                kinds[t, r, n] = kind
             out["adv"][t, r, n] = adv
             out["mask"][t, r, n] = True
             out["lp"][t, r, n] = lp

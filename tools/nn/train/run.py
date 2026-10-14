@@ -470,7 +470,13 @@ def train(args, every=None, teacher=None, normal=None):
             greedy=args.ability_branch_greedy, seed=args.seed, critic=args.ability_critic,
             critic_weight=args.ability_critic_weight, critic_warmup=args.ability_critic_warmup,
             critic_buffer=args.ability_critic_buffer, bonus=ab_bonus, bonus_file=getattr(args, "ability_price_file", ""),
-            own=own), device)
+            own=own, norm=getattr(args, "ability_norm", "shared")), device)
+        if env.brancher.norm is not None:
+            # each ability's running scale goes on from --init's "train" (fresh otherwise)
+            ts = (checkpoint.train_state(args.init) or {}) if args.init and args.resume else {}
+            loaded = env.brancher.norm.load(ts.get("ability_norm"))
+            print(f"ability prices scaled per ability: {'resumed from ' + str(args.init) if loaded else 'fresh'}",
+                  flush=True)
         if own:
             print(f"ability branches: {env.brancher.cfg}; the ability head's own signal: weight {ab_own_w:g} (no decay), "
                   f"body gradient x {ab_body:g}, price {env.brancher.price_kind()}, head lr x {ab_lr:g}, "
@@ -593,7 +599,9 @@ def train(args, every=None, teacher=None, normal=None):
                 **({"ability_critic": env.brancher.critic.state(),
                     "ability_critic_openloop": bool(env.brancher.cfg.openloop),
                     "ability_critic_kind": env.brancher.price_kind()}
-                   if args.ability_branch and env.brancher.critic is not None else {})}
+                   if args.ability_branch and env.brancher.critic is not None else {}),
+                **({"ability_norm": env.brancher.norm.state()}
+                   if args.ability_branch and env.brancher.norm is not None else {})}
 
     def share_done():
         """The share of the run done: of the updates when --updates is set, else of the minutes."""
@@ -1144,6 +1152,10 @@ def parser():
                     help="... the press's price: bonus - a valid ability's by its bonuses (config/ability_price.json, "
                          "abilities_price/train_price.py), the others by the branches; branch - all by the branches; "
                          "auto - bonus under the own signal, else branch")
+    ap.add_argument("--ability-norm", default="shared", choices=ability_branch.NORMS,
+                    help="... the prices' scale before the clip: shared - one root mean square of all abilities' prices "
+                         "(the biggest set it); per-ability - each ability's own running one (kept in the checkpoint; "
+                         "ability_branch.AbilityNorm)")
     ap.add_argument("--ability-price-file", default="",
                     help="... the bonus price's numbers (default config/ability_price.json)")
     ap.add_argument("--gpu-mem", type=float, default=1.0,

@@ -42,7 +42,7 @@ bash tools/nn/dock.sh tools.nn.train.checkpoint                  # записа�
 | учения | `--drills` (0: доля боёв), `--drill-weights` (json; по умолчанию учения `TRAIN` поровну: kiting, hold_fire), `--drill-bank` (256 на учение), `--drill-embed` (1: доля встроенной рамки, у учений, где она есть), `--drill-broad` (0.5: из остальных доля широкой рамки), `--drill-teach` (`auto` или json {учение: вес}: учитель, по умолчанию выключен), `--drill-teach-minutes` (10: ручной), `--drill-teach-k` (0.5), `--drill-teach-cap` (0.25), `--drill-teach-weight` (0.15: auto), `--teach-normal` (`auto`, имена или json {учение: доля}: учитель в обычных боях, по умолчанию выключен), `--teach-normal-k` (0.5), `--teach-normal-cap` (0.15), `--teach-normal-weight` (0.1), `--teach-normal-match` (0.1): [учения](#учения) |
 | наблюдение | `--observe-dir` (выкл.: папка разобранных боёв), `--observe-share` (0,1), `--observe-weight` (0,1), `--observe-decay` (0,95), `--observe-anchor` (0,2), `--observe-anchor-decay` (0,995), `--observe-anchor-alone` (выкл.: якорь кончается с членом), `--observe-adv` (`critic`), `--observe-beta` (1), `--observe-clip` (20), `--observe-steps` (0: `--steps`), `--observe-refresh` (20): [обучение через наблюдение](#обучение-через-наблюдение) |
 | кайтинг в самоигре | `--kite-share` (0: доля начатых боёв `self` / `past`, план 0,1), `--kite-bank` (256 готовых боёв): [кайтинг в самоигре](#кайтинг-в-самоигре) |
-| способности по действию | `--ability-branch` (0: выкл.; доля нажатий в ветки), `--ability-branch-missed` (0,005), `--ability-branch-copies` (4), `--ability-branch-horizon` (60 с), `--ability-branch-hold` (0 с), `--ability-branch-openloop` (выкл.), `--ability-branch-greedy` (выкл.), `--ability-branch-cap` (0: нет), `--ability-branch-batch` (128), `--ability-branch-weight` (0,1), `--ability-branch-decay` (300 обновлений); критик способностей `--ability-critic` (выкл.), `--ability-critic-weight` (1), `--ability-critic-warmup` (2 000), `--ability-critic-buffer` (25 000): [способности по действию](#способности-по-их-действию-ветки); собственный сигнал головы `--ability-own-signal` (выкл.), `--ability-weight` (1,0), `--ability-body-grad` (0,1), `--ability-lr-mult` (1,0), `--ability-epochs` (1), `--ability-price` (auto), `--ability-price-file` (`config/ability_price.json`): [собственный сигнал](#собственный-сигнал-головы-способностей) |
+| способности по действию | `--ability-branch` (0: выкл.; доля нажатий в ветки), `--ability-branch-missed` (0,005), `--ability-branch-copies` (4), `--ability-branch-horizon` (60 с), `--ability-branch-hold` (0 с), `--ability-branch-openloop` (выкл.), `--ability-branch-greedy` (выкл.), `--ability-branch-cap` (0: нет), `--ability-branch-batch` (128), `--ability-branch-weight` (0,1), `--ability-branch-decay` (300 обновлений); критик способностей `--ability-critic` (выкл.), `--ability-critic-weight` (1), `--ability-critic-warmup` (2 000), `--ability-critic-buffer` (25 000): [способности по действию](#способности-по-их-действию-ветки); собственный сигнал головы `--ability-own-signal` (выкл.), `--ability-weight` (1,0), `--ability-body-grad` (0,1), `--ability-lr-mult` (1,0), `--ability-epochs` (1), `--ability-norm` (shared), `--ability-price` (auto), `--ability-price-file` (`config/ability_price.json`): [собственный сигнал](#собственный-сигнал-головы-способностей) |
 
 ### Настройки цепочки
 
@@ -849,6 +849,18 @@ python -m tools.nn.observe.convert --list build/observe/aivai_ok.txt [--limit 5]
     `ability_extra_kl`, `ability_extra_clip`, `ability_extra_loss`, `ability_extra_rows`, `ability_extra_steps` — в
     последнем лишнем проходе. Проба на itS25_19 (процессор, 8 боёв × 4 решения, множитель 3, 3 прохода): 20–43
     оценённые строки на порцию, в последнем лишнем проходе KL 0,01–0,02, за обрезкой 14–25 %.
+- **Масштаб цен: общий или свой у каждой способности** (`--ability-norm`, по умолчанию `shared` — бит в бит прежнее,
+  тест). `shared`: все цены делятся на одно среднеквадратичное (порции или буфера критика). Его задают самые дорогие
+  нажатия («Охотник на врагов», «Стой насмерть» в рукопашной: ~16 золота), и сигнал дешёвой способности тонет:
+  «Смертельный натиск» вдали от боя −1,25 золота → −0,08 из диапазона ±5, в 15–20 раз слабее рукопашных нажатий
+  других способностей. `per-ability`: каждая цена (нажатие из веток или, когда критик готов, цена каждого момента)
+  делится на среднеквадратичное своей способности, потом та же обрезка ±5 (`ability_branch.AbilityNorm`):
+  - среднее по обновлениям с затуханием 0,9 за обновление (память ~10 обновлений), с весом по числу строк;
+  - у редкой способности, пока строк меньше 32, недостающие строки добираются средним квадратом всех цен обновления
+    (начинает с общего масштаба, а не с шума двух строк);
+  - не меньше 0,0002 бюджета (2 золота армии в 10 000), чтобы цены около нуля не раздувались;
+  - суммы лежат в состоянии обучения чекпойнта (`ability_norm`, по ключу способности) — следующий шаг цепочки
+    продолжает их; без них — с нуля. Журнал: `norm_rms_<имя>` (масштаб способности, доля бюджета).
 - **Цена нажатия** (`--ability-price`; `auto` = `bonus` под этим флагом, иначе `branch`). Годная способность («Стой
   насмерть», «Смертельный натиск», «Охотник на врагов» — по карточке годности) — [цена по бонусам](ability_price.md):
   счётчики кирпичей на траектории ветки «нажал» (ветка и так играется, запись раз в решение — `collect.Recorder`),
