@@ -489,7 +489,7 @@ replay of the recordings army destruction comes by the end in 0.15 of the battle
 with either strength formula — the losing army in the replay loses health too slowly in the last two minutes
 (at the game's onset it still holds 0.23 of its strength in the replay, 0.15 in the game).
 
-**Routers in the rule (`morale.collapse.rule_routing_weight`, off: 0.5).** The bar counts a router at 0.5, but
+**Routers in the rule (`morale.collapse.rule_routing_weight`, on: 1.0).** The bar counts a router at 0.5, but
 the rule probably counts it in full: the community says broken units count with the CP they have left, and only
 shattered units drop out. The 92 step-replay battles agree. With the recorded strategic values and the DB
 thresholds, the rule holds for 4+ s on 20 of 184 sides before any unit shows "army losses" (one side: 90 s at
