@@ -424,7 +424,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "ratlingrt", "ratlingrt2",
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
-         "sidecontact", "busycharge") + UNIT_PLANS
+         "sidecontact", "busycharge", "ratcharge") + UNIT_PLANS
 # the walkpass plan: swordsmen walk / run (a move order, 'pass') past clanrats - idle (halted, never ordered) or busy
 # (fighting an Empire spearmen unit they attack at the go) - edge_m apart edge to edge (the formations 30 m wide), or
 # straight through them ('through'), from gap_m ahead to beyond_m behind the clanrats' front; 'inmelee': a fight from 3 m,
@@ -1005,6 +1005,13 @@ def battles(plan):
                      **common) for d in g["a_dx"]] + [lane("swords", "clanrat", "attack_walk", "hold",
                                                            a_dx=float(g["solo_dx"]), **common)]
         out += [base, rotate(base, 2)]
+    elif plan == "ratcharge":
+        # clanrats charging swordsmen (the melee probe's open cell: the twin 1.3-1.5x the game at 0-2 s): what the
+        # strikers do after the charge's first blow - men in contact and HP every 0.5 s (men_ms 500); swordsmen charging
+        # clanrats in the same battle for the high-hit-chance reference. 3 battles, lanes rotated.
+        base = [lane("clanrat", "swords", "attack_run", "hold"), lane("clanrat", "swords", "attack_run", "hold"),
+                lane("clanrat", "swords", "attack_run", "stand"), lane("swords", "clanrat", "attack_run", "hold")]
+        out += [rotate(base, k) for k in range(3)]
     elif plan == "busycharge":
         g = BUSYCHARGE
         t_depth = depth(UNITS["clanrat"][0], UNITS["clanrat"][1], WIDTH_M)
@@ -1133,7 +1140,7 @@ def run_config(plan, index):
     lanes, park, arena = layout(specs)
     turn = plan == "move" and any(l["mode"] == "script" for l in lanes)
     config = {"plan": plan, "battle": index, "settle_ms": SETTLE_MS, "tick_ms": TURN_TICK_MS if turn else TICK_MS,
-              "men_ms": 500 if turn else MEN_MS,
+              "men_ms": 500 if turn or plan == "ratcharge" else MEN_MS,
               # (reengage: the pair 30 + 30 m apart between its two fights, centre to centre ~75 m)
               "men_near_m": (100 if plan in ("reengage", "recontact") else 150 if plan == "leave"
                              else SKIRMISH["men_near_m"] if plan == "skirmish"
