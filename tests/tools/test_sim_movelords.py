@@ -110,6 +110,18 @@ class TestArmyStrength:
         u["hp"][0, H] = 0.5                              # 450 < 2.6 x 260
         assert not bool(morale.army_collapse(u, P)[0, 0])
 
+    def test_routers_count_in_the_rule_at_rule_routing_weight(self):
+        # the archers (350) routing, the General (950) at 0.25 health: own 237.5 + 350 x w; the Warlord 900
+        st = scenario.build([army([(GENERAL, 0, 0, 0, True), (ARCHER, 50, 0, 0)], [(WARLORD, 600, 0, 0, True)])], P)
+        u = st.u
+        u["hp"][0, 0] = 0.25
+        u["r"][0, 1] = True
+        cal = dict(P.sim["morale"]["collapse"])
+        none = P.with_cal("morale", collapse=dict(cal, rule_routing_weight=0.0))   # 237.5 <= 286, 900 >= 617.5
+        full = P.with_cal("morale", collapse=dict(cal, rule_routing_weight=1.0))   # 587.5 > 286: no collapse
+        assert bool(morale.army_collapse(u, none)[0, 0])
+        assert not bool(morale.army_collapse(u, full)[0, 0])
+
 
 class TestLordFatigueAndWounds:
     def _melee_activity(self, n, single):

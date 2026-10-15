@@ -489,6 +489,17 @@ replay of the recordings army destruction comes by the end in 0.15 of the battle
 with either strength formula — the losing army in the replay loses health too slowly in the last two minutes
 (at the game's onset it still holds 0.23 of its strength in the replay, 0.15 in the game).
 
+**Routers in the rule (`morale.collapse.rule_routing_weight`, off: 0.5).** The bar counts a router at 0.5, but
+the rule probably counts it in full: the community says broken units count with the CP they have left, and only
+shattered units drop out. The 92 step-replay battles agree. With the recorded strategic values and the DB
+thresholds, the rule holds for 4+ s on 20 of 184 sides before any unit shows "army losses" (one side: 90 s at
+0.12–0.15 of the start and 2.6–2.8× enemy, with no label). At weight 1.0 that falls to 8 sides (unit-seconds
+332 → 149). Weight 0.5 is the main cause of extra routs from mid morale. With it, the step replay's army losses
+fire for 58 % of the simulator-only routs from MoralePercent 0.5–0.75. The game shows that label there in only
+one battle. On the step replay (72 gate / 20 exam), routs from 0.5–0.75 sim/game fall 2.82 / 1.98 → 2.26 / 1.76.
+On the game's places and losses they fall 2.04 / 1.30 → 1.53 / 1.07. All routs fall 1.00 / 1.11 → 0.92 / 1.07.
+On the 72 whole battles, "same winner" goes 60.5 → 59, and routs per unit go 0.779 → 0.789 (game 1.187).
+
 Source: 175 completed fair battles (28 game-AI, 147 network), 69 with the newer CCO
 fields. `MoraleGreatestEffect` identifies “Army losses” on 65 sides. Across all 350 sides,
 the ≥0.4 MoralePercent drop in 60% of standing units within 3 s occurs on 135 sides;

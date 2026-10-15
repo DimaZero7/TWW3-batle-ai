@@ -67,7 +67,11 @@ def army_collapse(u, params):
         slope, midpoint = float(cal["ammo_slope"]), float(cal["ammo_midpoint"])
         value = u["cp_fixed"] + u["cp_missile"] * ammo_share(u, slope, midpoint)
         initial_value = u["cp_fixed"] + u["cp_missile"] * (1 / (1 + math.exp(-slope * (1 - midpoint))))
-        weight = torch.where(u["r"], float(cal["routing_weight"]), 1.0) * torch.ones_like(value)
+        # routers in the rule: rule_routing_weight (the community: 'broken units are counted as active with whatever CP
+        # remains'; the recordings: the 'army losses' label starts with routers at full weight, not at the bar's 0.5 -
+        # sim.json collapse.rule_why); absent: routing_weight, the balance-of-power bar's
+        rw = cal.get("rule_routing_weight", cal["routing_weight"])
+        weight = torch.where(u["r"], float(rw), 1.0) * torch.ones_like(value)
     elif cal.get("strength") == "strategic":
         value = value * torch.where(u["lord"], float(cal["lord_value_scale"]), 1.0)
         ammo = (u["a"] / u["ammo0"].clamp(min=1)).clamp(0, 1)
