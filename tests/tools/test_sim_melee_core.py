@@ -351,6 +351,7 @@ class TestMeleeCore2:
         # melee.swing_interval: a formation that ran in struck once with every man; those who hit wait their attack
         # interval, those who missed miss_s - its rate x0 before miss_s, x(1 - p) until the interval, whole after.
         PS = P.with_cal("melee", swing_interval=1)
+        P0 = P.with_cal("melee", swing_interval=0)
         st = scenario.build([army([(CLANRATS, 0, 0, 90)], [(SWORD, 10, 0, 270)])], PS)
         H = st.N // 2
         pw = geometry.pairwise(st.u, PS.sim["formation"]["spacing_m"])
@@ -368,14 +369,55 @@ class TestMeleeCore2:
             return float(r[0, H, 0]), float(swing[0, H, 0])
 
         mid, swing = rate_at(2.0)
-        full, swing_off = rate_at(2.0, params=P)
+        full, swing_off = rate_at(2.0, params=P0)
         assert rate_at(0.0)[0] == 0.0 and swing == pytest.approx(swing_off, rel=1e-5)   # the swing itself unchanged
         assert mid == pytest.approx((1 - p) * full, rel=1e-4)
         assert rate_at(u["attack_interval_s"] + 0.1)[0] == pytest.approx(rate_at(u["attack_interval_s"] + 0.1,
-                                                                                 params=P)[0], rel=1e-5)
+                                                                                 params=P0)[0], rel=1e-5)
         assert rate_at(2.0, ran_in=False)[0] == pytest.approx(full, rel=1e-5)            # no first strike: no pause
-        assert rate_at(2.0, melee_s=60.0)[0] == pytest.approx(rate_at(2.0, melee_s=60.0, params=P)[0], rel=1e-5)
+        assert rate_at(2.0, melee_s=60.0)[0] == pytest.approx(rate_at(2.0, melee_s=60.0, params=P0)[0], rel=1e-5)
         #                                                                                  (a later fight: opening_once)
+
+    def test_a_unit_that_ran_in_swings_its_front_rank(self):
+        # contact.first_strike_rank: the first strike of a formation that ran in is its files in contact (the steady men
+        # / fighting_files), through the target's flank only the files that meet that side; a standing one keeps the
+        # steady swing.
+        PR = P.with_cal("contact", first_strike_rank=1)
+        P1 = P.with_cal("contact", first_strike_rank=0)
+        ff = P.sim["melee"]["fighting_files"]
+
+        def swings(rows, params):
+            st = scenario.build([army([(CLANRATS, 0, 0, 90)], rows)], params)
+            H = st.N // 2
+            pw = geometry.pairwise(st.u, params.sim["formation"]["spacing_m"])
+            contact = pw["enemy"] & (pw["gap"] <= 1.0)
+            z = torch.zeros_like(st.u["men"])
+            st.u["contact_s"] = torch.full_like(st.u["men"], 1e4)
+            st.u["order_kind"][0, H], st.u["order_target"][0, H] = O.ATTACK, 0
+            ran = torch.zeros_like(st.u["men"], dtype=torch.bool)
+            ran[0, H] = True
+            assert bool(contact[0, H, 0])
+            sw = melee.strikes(st.u, pw, contact, params, z, first=True, ran=ran)[4]
+            return float(sw[0, H, 0]), float(sw[0, 0, H]), pw, H
+
+        head = [(SWORD, 10, 0, 270)]
+        on, back_on, _, _ = swings(head, PR)
+        off, back_off, _, _ = swings(head, P1)
+        assert on == pytest.approx(off / ff, rel=1e-4)                  # 30 m on 30 m: every file, 2x the steady men
+        assert back_on == pytest.approx(back_off, rel=1e-5)             # the clanrats did not run in: unchanged
+        # into the clanrats' flank: the files that meet its depth, not the swordsmen's whole front
+        for row in ([(SWORD, 0, 14, 180)], [(SWORD, 0, 14, 0)], [(SWORD, 0, -14, 0)], [(SWORD, 0, -14, 180)]):
+            try:
+                on, _, pw, H = swings(row, PR)
+            except AssertionError:
+                continue
+            off = swings(row, P1)[0]
+            fi, fj = float(pw["face_i"][0, H, 0]), float(pw["face_j"][0, H, 0])
+            assert fj < fi
+            assert on == pytest.approx(off / ff * fj / fi, rel=1e-3)
+            break
+        else:
+            raise AssertionError("no flank contact placed")
 
     def test_men_gather_round_a_lord_only_when_he_ran_in(self):
         # build/melee2/spec.md L4: infantry running onto a standing lord strike him in full at once; the formation a

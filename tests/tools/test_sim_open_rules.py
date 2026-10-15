@@ -433,12 +433,15 @@ def test_the_first_strike_counts_the_steady_front_not_the_wave():
             if bool(st.u["m"][0, 0]) and not m0:
                 return hp0 - float(st.u["hp_abs"][0, H])
         return None
-    assert P.sim["contact"]["first_strike_steady"] == 1
-    W = dict(P.sim["melee"]["wave"])
-    on = contact_step(P)
-    off = contact_step(P.with_cal("contact", first_strike_steady=0))
-    no_wave = contact_step(P.with_cal("melee", wave=dict(W, amp=0.0)))
-    no_wave_off = contact_step(P.with_cal("melee", wave=dict(W, amp=0.0)).with_cal("contact", first_strike_steady=0))
+    # (the charge's front rank and the pause after the swing off: this rule alone - contact.first_strike_rank and
+    # melee.swing_interval have their own tests in test_sim_melee_core.py)
+    PB = P.with_cal("contact", first_strike_rank=0).with_cal("melee", swing_interval=0)
+    assert PB.sim["contact"]["first_strike_steady"] == 1
+    W = dict(PB.sim["melee"]["wave"])
+    on = contact_step(PB)
+    off = contact_step(PB.with_cal("contact", first_strike_steady=0))
+    no_wave = contact_step(PB.with_cal("melee", wave=dict(W, amp=0.0)))
+    no_wave_off = contact_step(PB.with_cal("melee", wave=dict(W, amp=0.0)).with_cal("contact", first_strike_steady=0))
     assert no_wave == pytest.approx(no_wave_off, rel=1e-4)    # without a wave the flag changes nothing
     assert on < 0.7 * off                                      # the swing loses the wave's x2.48
     assert on > no_wave                                        # the step's rate keeps the wave

@@ -85,7 +85,7 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
   damage - armour-piercing whole + base minus the armour roll; the wound pool; flank / rear - defence
   ×0.6 / ×0.3; charge from a run-up and the charge-speed sprint (into a target already fighting ours too, unless
   through our own men: `charge.blocked_side`, the `busycharge` probe); the first strike on entering a fight; the
-  opening wave of a fight (`melee.wave`) - both at a formation's first contact of the battle only (the `recontact` probe), the first strike by the men without the wave; a thinned formation keeps its width and only part of its men reach
+  opening wave of a fight (`melee.wave`) - both at a formation's first contact of the battle only (the `recontact` probe), the first strike by the men without the wave, a charge's by its whole front rank, then a pause for the attack interval (`contact.first_strike_rank`, `melee.swing_interval`: a charge's 0-2 s error against the game 0.32 -> 0.22); a thinned formation keeps its width and only part of its men reach
   the enemy (`melee.front_fill_ranks` 1.5: the `dmgmelee` probe, a unit at 30 % struck 1.6-1.9x the game
   before); random blows (`noise.blows`: on in the replay and the twin, off in training).
 - **Leaving melee and orders in a fight:** the 24 s window from the database (a lord's too); a move order in a fight is

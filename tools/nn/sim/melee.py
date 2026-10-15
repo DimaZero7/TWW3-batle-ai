@@ -144,11 +144,13 @@ def contact_spacing(u, h, v, on):
     return (h - cut).clamp(min=0.3), (v - cut).clamp(min=0.3)
 
 
-def strikes(u, pw, contact, params, charge_now, first=False):
+def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     """HP per second each unit i takes from each j: rate [B, N, N] (i strikes j), the per-hit damage [B, N, N],
     the direction sector of i seen from j and the men striking F [B, N, N]; with first, also swing [B, N, N]: the
     HP of one blow of every man in contact at once (the first strike, battle.py). charge_now [B, N]: the striker's
-    charge left (0-1, battle.py: its own clock from the charge's first blow)."""
+    charge left (0-1, battle.py: its own clock from the charge's first blow). ran [B, N] (with first): the strikers
+    whose charge lands now (battle.py: the first strike of a charge), whose swing is their front rank
+    (contact.first_strike_rank)."""
     B = params.battle
     cal = params.sim["melee"]
     cc = params.sim["contact"]
@@ -191,6 +193,7 @@ def strikes(u, pw, contact, params, charge_now, first=False):
         fill = None
     face_j = pw["face_j"] if sat_j is None else torch.where(sat_j, pw["front"][:, None, :], pw["depth"][:, None, :])
     length = torch.minimum(face_i, face_j)
+    length_meet = length          # the two sides' common length (the impact's front: contact.first_strike_rank)
     flank_j = torch.zeros_like(through_front)
     if cal.get("flank_face", "min") == "striker":
         # Through the target's flank (its side towards i is its depth) the striker brings men by
@@ -266,6 +269,22 @@ def strikes(u, pw, contact, params, charge_now, first=False):
             F = torch.where(in_g & ~single_j & ~single_i & (tot > side_len), F * side_len / tot.clamp(min=1e-6), F)
     # the men striking without the opening wave: the first strike's (contact.first_strike_steady)
     F0 = F if (first and cc.get("first_strike_steady")) else None
+    F_rank = None
+    if first and ran is not None and cc.get("first_strike_rank"):
+        # The charge's front rank (contact.first_strike_rank; config/nn/sim.json contact.first_strike_rank_why): a
+        # formation whose charge lands meets the enemy with its whole front rank at once - a man of every file in
+        # contact runs into an enemy and swings (his interval is ready: CA Feature Focus #2) - so its first strike is
+        # the files in contact (the steady men without the fighting_files share: F / fighting_files, the same caps), on
+        # the length where the two sides meet: through the target's flank the files that run into that side, not the
+        # striker's whole front (melee.flank_face striker is the men wrapping round later). A unit that comes in without
+        # a charge (a move order, a blocked way, a walk-in under the run-up) and a standing one keep the steady front's
+        # swing (the probes: swordsmen running in under a move order 96 HP/s at 0-1 s, the steady swing 89). Formations
+        # only.
+        F_rank = F / float(cal["fighting_files"])
+        F_rank = torch.where(flank_j, F_rank * (length_meet / length.clamp(min=1e-6)).clamp(max=1.0), F_rank)
+        F_rank = torch.minimum(F_rank, men_i)
+        rank_on = ran[:, :, None] & ~single_i & ~single_j
+        F_rank = torch.where(rank_on, F_rank, torch.zeros_like(F_rank))
     wave = cal.get("wave")
     if wave and "contact_s" in u:
         # The opening wave (melee.wave): two formations' fronts meet closer than they fight later and part over
@@ -330,6 +349,9 @@ def strikes(u, pw, contact, params, charge_now, first=False):
     if F0 is not None:
         total0 = F0.sum(dim=2, keepdim=True)
         F0 = F0 * torch.where(total0 > own, own / total0.clamp(min=1e-6), torch.ones_like(total0))
+    if F_rank is not None:
+        totr = F_rank.sum(dim=2, keepdim=True)
+        F_rank = F_rank * torch.where(totr > own, own / totr.clamp(min=1e-6), torch.ones_like(totr))
     # At most lord_max_attackers around a single man, however many units they belong to (the
     # lord swarm probe); an enemy lord among them keeps his place (one man) and the infantry
     # share the rest.
@@ -500,5 +522,13 @@ def strikes(u, pw, contact, params, charge_now, first=False):
         # config/nn/sim.json contact.first_strike_steady_why): the swing was checked against the game before the wave
         # came in (the melee probe: 0-1 s 189 HP against the game's 220, swordsmen charging clanrats); multiplied by the
         # wave (x2.48 at the contact) it gave 441 against 184-219, the recontact probe's 18 first contacts 211.
-        swing_rate = torch.where(F > 0, swing_rate * F0 / F.clamp(min=1e-9), torch.zeros_like(swing_rate))
+        swing_rate_steady = torch.where(F > 0, swing_rate * F0 / F.clamp(min=1e-9), torch.zeros_like(swing_rate))
+    else:
+        swing_rate_steady = swing_rate
+    if F_rank is not None:
+        # (contact.first_strike_rank, above: the front rank of a unit that ran in; the rest keep the steady swing)
+        swing_rate = torch.where(rank_on, torch.where(F > 0, swing_rate * F_rank / F.clamp(min=1e-9),
+                                                      torch.zeros_like(swing_rate)), swing_rate_steady)
+    else:
+        swing_rate = swing_rate_steady
     return rate, hit, sector, F, swing_rate * (p / per_s.clamp(min=1e-9))

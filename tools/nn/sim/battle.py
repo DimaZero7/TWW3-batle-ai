@@ -398,7 +398,7 @@ def step(st, orders, params=None, dt=None):
     tired = fatigue.effects(u, params)
 
     # --- melee ---
-    rate, mhit, sector, F_men, swing = melee.strikes(u, pw, strike, params, charge_now, first=True)
+    rate, mhit, sector, F_men, swing = melee.strikes(u, pw, strike, params, charge_now, first=True, ran=first & fire)
     if stuck_cal.get("on") and "stk_n" in u:
         # A router running into a standing enemy formation (its boxes touching by their own edges - not the rout's exit
         # contact - with the router moving towards it, not a formation chasing it by order) leaves among its men as many
