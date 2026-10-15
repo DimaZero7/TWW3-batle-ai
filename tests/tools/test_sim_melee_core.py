@@ -347,6 +347,36 @@ class TestMeleeCore2:
         move = lost_per_step(SWORD, CLANRATS, kind=O.MOVE)           # a move order runs in: a burst, no charge
         assert then[0] < move[0][0] < first[0]
 
+    def test_after_the_first_strike_the_men_wait_their_interval(self):
+        # melee.swing_interval: a formation that ran in struck once with every man; those who hit wait their attack
+        # interval, those who missed miss_s - its rate x0 before miss_s, x(1 - p) until the interval, whole after.
+        PS = P.with_cal("melee", swing_interval=1)
+        st = scenario.build([army([(CLANRATS, 0, 0, 90)], [(SWORD, 10, 0, 270)])], PS)
+        H = st.N // 2
+        pw = geometry.pairwise(st.u, PS.sim["formation"]["spacing_m"])
+        contact = pw["enemy"] & (pw["gap"] <= 1.0)
+        z = torch.zeros_like(st.u["men"])
+        st.u["order_kind"][0, H], st.u["order_target"][0, H] = O.ATTACK, 0
+        u = PS.units[SWORD]["melee"]
+        p = (35 + u["attack"] - PS.units[CLANRATS]["melee"]["defence"]) / 100
+
+        def rate_at(t, ran_in=True, params=PS, melee_s=None):
+            st.u["contact_s"] = torch.full_like(st.u["men"], t + PS.dt)
+            st.u["melee_s"] = torch.full_like(st.u["men"], t + PS.dt if melee_s is None else melee_s)
+            st.u["ran_in"][0, H] = ran_in
+            r, _, _, _, swing = melee.strikes(st.u, pw, contact, params, z, first=True)
+            return float(r[0, H, 0]), float(swing[0, H, 0])
+
+        mid, swing = rate_at(2.0)
+        full, swing_off = rate_at(2.0, params=P)
+        assert rate_at(0.0)[0] == 0.0 and swing == pytest.approx(swing_off, rel=1e-5)   # the swing itself unchanged
+        assert mid == pytest.approx((1 - p) * full, rel=1e-4)
+        assert rate_at(u["attack_interval_s"] + 0.1)[0] == pytest.approx(rate_at(u["attack_interval_s"] + 0.1,
+                                                                                 params=P)[0], rel=1e-5)
+        assert rate_at(2.0, ran_in=False)[0] == pytest.approx(full, rel=1e-5)            # no first strike: no pause
+        assert rate_at(2.0, melee_s=60.0)[0] == pytest.approx(rate_at(2.0, melee_s=60.0, params=P)[0], rel=1e-5)
+        #                                                                                  (a later fight: opening_once)
+
     def test_men_gather_round_a_lord_only_when_he_ran_in(self):
         # build/melee2/spec.md L4: infantry running onto a standing lord strike him in full at once; the formation a
         # lord runs into brings its men to bear over lord_gather_s.

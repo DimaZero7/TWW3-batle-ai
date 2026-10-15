@@ -393,6 +393,26 @@ def strikes(u, pw, contact, params, charge_now, first=False):
     # a lone man striking a lone man (lord against lord) swings every interval (the lone lord duels).
     interval = u["interval"][:, :, None].clamp(min=1e-6)
     per_s = torch.where(single_i & single_j, p / interval, p / (p * interval + float(cal["miss_s"])))
+    if cal.get("swing_interval") and "ran_in" in u and "contact_s" in u:
+        # The first strike starts the men's intervals (melee.swing_interval; CA Feature Focus #2: a man's attack
+        # interval runs after his blow): a unit that came into its fight moving or charging (ran_in) struck once with
+        # every man in contact at the contact (battle.py, the first strike), so its men who hit wait their interval
+        # before the next blow and those who missed melee.miss_s - the steady rate starts as they come back: x(1 - p)
+        # from miss_s, whole from the interval (t: the striker's seconds since that contact; a formation at its first
+        # fight of the battle only - contact.opening_once gives no later first strike). Formations only: a lone man's
+        # first blow is still ~3x weaker than the game's (OPEN), the pause would only deepen that.
+        # The busycharge probe (config/nn/sim.json melee.swing_why): swordsmen charging free clanrats head-on, the
+        # clanrats' HP a second at 0-1 / 1-2 / 2-3 / 3-5 / 5-10 s after the impact 259 / 40 / 64 / 35 / 50 - a pause after
+        # the impact, not a charge rate.
+        t = (u["contact_s"] - float(params.dt))[:, :, None]
+        swung = u["ran_in"][:, :, None] & ~single_i
+        if "melee_s" in u:
+            swung = swung & (u["melee_s"] - u["contact_s"] < 0.5 * float(params.dt))[:, :, None]
+        back = torch.where(t >= float(cal["miss_s"]), 1 - p, torch.zeros_like(p)) + torch.where(t >= interval, p,
+                                                                                               torch.zeros_like(p))
+        back = torch.where(swung, back, torch.ones_like(back))
+    else:
+        back = None
     rate = F * struck * per_s * hit
     # Men gather round a lone man (a lord) who ran into their formation over contact.lord_gather_s from the
     # striker's contact (0: at once); infantry that runs onto a standing lord strikes him in full at once (the lord
@@ -467,11 +487,14 @@ def strikes(u, pw, contact, params, charge_now, first=False):
         cut = cut & (reflect <= 1.0)
     full = rate
     rate = torch.where(cut, rate * knobs.get(u, "hold_rate", float(cc.get("hold_rate", 1.0)), 3), rate)
+    swing_from = rate
+    if back is not None:
+        rate = rate * back
     if not first:
         return rate, hit, sector, F
     # One blow of every man in contact (the first strike): the rate's men and multipliers, one swing each; every man in
     # reach swings, hold_rate is about the men who step in later (contact.first_strike_full; R1).
-    swing_rate = full if cc.get("first_strike_full") else rate
+    swing_rate = full if cc.get("first_strike_full") else swing_from
     if F0 is not None:
         # The first strike swings the men of the steady front, not the opening wave's (contact.first_strike_steady;
         # config/nn/sim.json contact.first_strike_steady_why): the swing was checked against the game before the wave
