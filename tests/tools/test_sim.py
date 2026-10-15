@@ -283,6 +283,35 @@ class TestMelee:
         # attacker to leave or to attack another keeps being struck by the attacker's whole front)
         assert P.sim["melee"]["flank_face"] == "striker"
 
+    def test_a_flank_attacker_of_a_target_held_in_front_strikes_along_the_flank_only(self):
+        # melee.flank_face_busy: the target's men face the enemy that holds its front and do not turn to mesh with the
+        # newcomer on their flank - the newcomer brings men along the target's flank (the busycharge probe)
+        st = scenario.build([army([(SPEAR, -50, 0, 90), (SPEAR, 0, 50, 180)], [(SLAVE, 50, 0, 270)])], P)
+        H = st.N // 2
+        front, depth = geometry.dims(st.u, P.sim["formation"]["spacing_m"])
+        st.u["b"][0, H] = 0.0                                   # the slaves face +z: their flank to the first spearmen
+        st.u["x"][0, H], st.u["z"][0, H] = 0.0, 0.0
+        st.u["x"][0, 0] = -(front[0, H] / 2 + depth[0, 0] / 2 + TOUCH / 2)   # on the slaves' left flank
+        st.u["x"][0, 1], st.u["z"][0, 1] = 0.0, depth[0, H] / 2 + depth[0, 1] / 2 + TOUCH / 2   # on their front
+        st.u["contact_s"][:] = 300.0                            # past the opening wave (melee.wave) ...
+        st.u["contact_s"][0, 0] = 200.0                         # ... the flank attacker a newcomer
+        pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
+        contact = pw["enemy"] & (pw["gap"] <= 1.0)
+        assert bool(contact[0, 0, H]) and bool(contact[0, 1, H])
+        z = torch.zeros_like(st.u["men"])
+        ff, sp = P.sim["melee"]["fighting_files"], P.spacing_of(SPEAR)[0]
+
+        def f(c, busy):
+            return float(melee.strikes(st.u, pw, c, P.with_cal("melee", flank_face="striker", flank_face_busy=busy), z)[3][0, 0, H])
+        assert f(contact, 0) == pytest.approx(ff * float(front[0, 0]) / sp, rel=1e-4)        # wraps round
+        assert f(contact, 1) == pytest.approx(ff * float(depth[0, H]) / sp, rel=1e-4)        # along the flank
+        alone = contact.clone()
+        alone[0, 1, H] = alone[0, H, 1] = False
+        assert f(alone, 1) == pytest.approx(ff * float(front[0, 0]) / sp, rel=1e-4)           # a free target: wraps
+        st.u["contact_s"][0, 0] = 300.0                         # in melee as long as the target: they met before it
+        assert f(contact, 1) == pytest.approx(ff * float(front[0, 0]) / sp, rel=1e-4)        # turned - still meshed
+        assert P.sim["melee"]["flank_face_busy"] == 1
+
     def test_the_opening_wave_brings_more_men_early_and_fades_with_the_pair_s_time_in_melee(self):
         """melee.wave (config/nn/sim.json wave_why: the men within the database's reach early): men striking
         x (1 + amp exp(-t / tau_s)), t the younger of the two units' contact clocks; off (None): the old rule."""

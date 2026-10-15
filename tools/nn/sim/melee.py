@@ -195,13 +195,27 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     length = torch.minimum(face_i, face_j)
     length_meet = length          # the two sides' common length (the impact's front: contact.first_strike_rank)
     flank_j = torch.zeros_like(through_front)
+    wrap = flank_j
     if cal.get("flank_face", "min") == "striker":
         # Through the target's flank (its side towards i is its depth) the striker brings men by
         # its own face, not by the target's short flank (measured: a lone flank attacker takes
         # 1.53x what a frontal one does; melee.flank_face, config/nn/sim.json).
         s_j, c_j = torch.sin(pw["rel_j"]).abs(), torch.cos(pw["rel_j"]).abs()
         flank_j = s_j * pw["depth"][:, None, :] > c_j * pw["front"][:, None, :] if sat_j is None else ~sat_j
-        length = torch.where(flank_j, face_i, length)
+        wrap = flank_j
+        if cal.get("flank_face_busy"):
+            # A target held through its front or back by another unit (melee.flank_face_busy; config/nn/sim.json
+            # melee.flank_face_busy_why): its men face that enemy and do not turn to mesh with the newcomer on their flank,
+            # so the newcomer reaches them only along that flank - the two sides' common length (the busycharge probe:
+            # swordsmen charging the flank of clanrats fighting our spearmen - 15 of their men within 2.5 m of a clanrat
+            # against 26-28 through the back, the clanrats' HP lost 0.5 of a charge into their back after the impact).
+            # Only a newcomer (i in melee for less time than j): a pair that met before j turned its flank (to leave, to
+            # attack a neighbour - the defender probe) stays meshed.
+            held = (contact & ~flank_j).any(dim=1, keepdim=True)       # j fought through its front or back by anyone
+            if "contact_s" in u:
+                held = held & (u["contact_s"][:, :, None] + float(params.dt) < u["contact_s"][:, None, :])
+            wrap = flank_j & ~held
+        length = torch.where(wrap, face_i, length)
     if edge is not None:
         # The contact's frontage (melee.frontage_edge_m; absent: off): a formation's men strike the enemies within their
         # reach, whichever unit those belong to - so i brings to j the men of the part of its side that j covers, not its
@@ -222,7 +236,7 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
         ext = (pw["front"][:, None, :] / 2 * (cb[:, None, :] * lx - sb[:, None, :] * lz).abs()
                + pw["depth"][:, None, :] / 2 * (sb[:, None, :] * lx + cb[:, None, :] * lz).abs())
         ov = (torch.minimum(half, off + ext) - torch.maximum(-half, off - ext)).clamp(min=0)
-        length = torch.where(single_i | single_j | flank_j, length, torch.minimum(length, ov + float(edge)))
+        length = torch.where(single_i | single_j | wrap, length, torch.minimum(length, ov + float(edge)))
     F = cal["fighting_files"] * length / along
     F = torch.minimum(F, men_i)
     if fill is not None:

@@ -214,8 +214,8 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
       (game 1.187); the step replay (92 battles) - losses 0.97 → 0.97 of the game's, rout starts 1.02 → 1.03
       (`build/charge7`).
     - OPEN: the twin's charge over 0–5 s is stronger than the game's on a free target too (front 650 against 411, rear 740
-      against 597 - the clanrats stand unordered and keep their morale), into a flank 2–3x (a busy flank 0–2 s 413 against
-      136: the swordsmen's 30 m front on the clanrats' 15 m side, `melee.flank_face` striker); the General's is half the
+      against 597 - the clanrats stand unordered and keep their morale), into a busy target's flank 1.4x over 0–2 s (through a
+      held flank only along its 15 m, not the swordsmen's whole 30 m front: `melee.flank_face_busy`; later 0.8–1.1x); the General's is half the
       game's (a busy rear 230 against 483).
     - The recordings of 221 battles (the centre's speed 2 s before contact / the card's run, median): into a free
       target of its own order the game's AI 1.12 (standing) / 1.02 (moving), the network 1.09 (p75 1.20–1.26 — the

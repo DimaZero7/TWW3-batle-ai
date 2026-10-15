@@ -1,0 +1,55 @@
+windows s: [(0, 1), (1, 2), (0, 2), (2, 5), (0, 5), (5, 10), (10, 20)] copies 8
+busy  swords           busy0                  game        3     32     29     31     30     30     32     26
+busy  swords           busy0                  off        24     88     53     70     36     50     43     36 | x  2.74  1.79  2.29  1.19  1.63  1.32  1.37
+busy  swords           busy0                  on         24     68     36     52     41     45     36     36 | x  2.13  1.22  1.69  1.34  1.48  1.12  1.35
+busy  swords           busy180                game        3    260    182    221     84    139     86     64
+busy  swords           busy180                off        24    429     81    255     70    144    109     80 | x  1.65  0.44  1.15  0.83  1.03  1.27  1.24
+busy  swords           busy180                on         24    399    104    251     75    146    103     74 | x  1.53  0.57  1.14  0.89  1.05  1.20  1.15
+busy  swords           busy90                 game        3    127     72    100     67     80     55     46
+busy  swords           busy90                 off        24    203     72    137     82    104    104     76 | x  1.60  0.99  1.38  1.23  1.30  1.87  1.64
+busy  swords           busy90                 on         24    230     55    143     45     84     72     50 | x  1.81  0.76  1.43  0.68  1.05  1.29  1.09
+busy  swords           free0                  game        3    259     40    150     44     86     50     39
+busy  swords           free0                  off        24    298     59    178     65    110     72     49 | x  1.15  1.47  1.19  1.46  1.27  1.44  1.26
+busy  swords           free0                  on         24    281     68    174     61    107     71     43 | x  1.08  1.69  1.17  1.38  1.23  1.40  1.10
+busy  swords           free180                game        3    387     31    209     60    119     61     36
+busy  swords           free180                off        24    407     30    219     52    119     81     50 | x  1.05  0.98  1.05  0.88  1.00  1.33  1.39
+busy  swords           free180                on         24    388     28    208     45    110     80     53 | x  1.00  0.91  1.00  0.75  0.92  1.30  1.47
+melee clanrat>spear    attack_run/hold        game        2    148     29     88     68     76     31     33
+melee clanrat>spear    attack_run/hold        off        16    167     58    112     45     72     53     38 | x  1.13  2.01  1.27  0.66  0.95  1.73  1.15
+melee clanrat>spear    attack_run/hold        on         16    179     37    108     40     67     58     38 | x  1.21  1.29  1.22  0.59  0.88  1.89  1.16
+melee clanrat>spear    attack_run/rear        game        2    264     22    143    102    118     37     32
+melee clanrat>spear    attack_run/rear        off        16    295     42    169     39     91     62     43 | x  1.12  1.95  1.18  0.39  0.77  1.67  1.37
+melee clanrat>spear    attack_run/rear        on         16    255     36    146     57     92     59     41 | x  0.97  1.67  1.02  0.56  0.78  1.57  1.31
+melee clanrat>spear    attack_walk/hold       game        2    118     26     72     44     55     47     28
+melee clanrat>spear    attack_walk/hold       off        16    188     60    124     50     80     56     38 | x  1.59  2.26  1.71  1.15  1.44  1.20  1.34
+melee clanrat>spear    attack_walk/hold       on         16    234     43    139     51     86     56     36 | x  1.97  1.64  1.91  1.17  1.56  1.18  1.26
+melee clanrat>swords   attack_run/hold        game        2    118     30     74     38     52     52     30
+melee clanrat>swords   attack_run/hold        off        16    186     57    122     48     77     60     40 | x  1.57  1.93  1.64  1.27  1.48  1.15  1.35
+melee clanrat>swords   attack_run/hold        on         16    209     64    137     59     90     62     35 | x  1.77  2.18  1.85  1.56  1.72  1.19  1.18
+melee spear>sspear     attack_run/stand       game        4    121     42     81     39     56     45     34
+melee spear>sspear     attack_run/stand       off        32    166     42    104     43     67     44     35 | x  1.37  1.02  1.28  1.11  1.21  0.98  1.04
+melee spear>sspear     attack_run/stand       on         32    170     42    106     40     67     46     36 | x  1.40  1.01  1.30  1.05  1.19  1.01  1.06
+melee swords>clanrat   attack_run/stand       game        4    268     36    152     50     91     46     38
+melee swords>clanrat   attack_run/stand       off        32    309     70    190     54    109     70     47 | x  1.15  1.97  1.25  1.09  1.19  1.51  1.25
+melee swords>clanrat   attack_run/stand       on         32    285     57    171     56    102     73     46 | x  1.06  1.59  1.12  1.12  1.12  1.57  1.21
+melee swords>clanrat   attack_walk/stand      game        4    310     34    172     45     96     59     42
+melee swords>clanrat   attack_walk/stand      off        32    302     52    177     61    108     67     48 | x  0.98  1.53  1.03  1.35  1.12  1.14  1.13
+melee swords>clanrat   attack_walk/stand      on         32    310     49    180     52    103     70     47 | x  1.00  1.43  1.04  1.14  1.07  1.20  1.11
+melee swords>clanrat   move_run/stand         game        4     96     18     57     22     36     25     19
+melee swords>clanrat   move_run/stand         off        32     86     25     56     23     36     28     23 | x  0.91  1.35  0.98  1.04  1.00  1.13  1.21
+melee swords>clanrat   move_run/stand         on         32     89     18     54     24     36     28     23 | x  0.93  0.98  0.94  1.11  1.00  1.14  1.20
+melee swords>clanrat   recharge/stand         game        4    260     33    147     62     96     44      9
+melee swords>clanrat   recharge/stand         off        32    276     52    164     57    100     74      0 | x  1.06  1.60  1.12  0.92  1.04  1.67  0.00
+melee swords>clanrat   recharge/stand         on         32    294     55    174     57    104     74      0 | x  1.13  1.68  1.19  0.92  1.08  1.66  0.00
+melee warlord>swords   attack_run/stand       game        1    272      2    137    114    123     28     27
+melee warlord>swords   attack_run/stand       off         8    198     43    121     23     62     31     31 | x  0.73 21.56  0.88  0.20  0.50  1.10  1.13
+melee warlord>swords   attack_run/stand       on          8    138     34     86     34     55     31     34 | x  0.51 17.25  0.63  0.30  0.45  1.10  1.26
+melee warlord>swords   recharge/stand         game        1    205      2    104     91     96     42      0
+melee warlord>swords   recharge/stand         off         8    181     43    112     37     67     22      0 | x  0.88 21.56  1.08  0.41  0.70  0.54  0.00
+melee warlord>swords   recharge/stand         on          8    164     34     99     20     52     35      0 | x  0.80 17.25  0.96  0.22  0.54  0.83  0.00
+recon swords>clanrat   attack_run/hold        game        3    314     41    178     53    103     75     44
+recon swords>clanrat   attack_run/hold        off        24    320     59    189     66    115     69     46 | x  1.02  1.44  1.07  1.24  1.12  0.93  1.05
+recon swords>clanrat   attack_run/hold        on         24    278     62    170     52    100     75     45 | x  0.89  1.53  0.96  0.99  0.97  1.00  1.04
+recon swords>clanrat   recharge/hold          game       15    302     22    162     49     94     68     38
+recon swords>clanrat   recharge/hold          off       120    299     52    176     58    105     67     45 | x  0.99  2.36  1.09  1.18  1.12  0.99  1.20
+recon swords>clanrat   recharge/hold          on        120    311     56    183     53    105     73     48 | x  1.03  2.53  1.13  1.08  1.12  1.07  1.26

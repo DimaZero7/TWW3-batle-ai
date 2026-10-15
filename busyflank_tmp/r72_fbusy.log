@@ -1,0 +1,29 @@
+WALK_IN_MELEE True
+set melee flank_face_busy 1
+  [1 of 15 batches (up to 40 recordings x 4), 83 s]
+  [2 of 15 batches (up to 40 recordings x 4), 96 s]
+  [3 of 15 batches (up to 40 recordings x 4), 96 s]
+  [4 of 15 batches (up to 40 recordings x 4), 117 s]
+  [5 of 15 batches (up to 40 recordings x 4), 166 s]
+  [6 of 15 batches (up to 40 recordings x 4), 177 s]
+  [7 of 15 batches (up to 40 recordings x 4), 265 s]
+  [8 of 15 batches (up to 40 recordings x 4), 267 s]
+  [9 of 15 batches (up to 40 recordings x 4), 278 s]
+  [10 of 15 batches (up to 40 recordings x 4), 283 s]
+  [11 of 15 batches (up to 40 recordings x 4), 335 s]
+  [12 of 15 batches (up to 40 recordings x 4), 343 s]
+  [13 of 15 batches (up to 40 recordings x 4), 352 s]
+  [14 of 15 batches (up to 40 recordings x 4), 363 s]
+  [15 of 15 batches (up to 40 recordings x 4), 392 s]
+battles 72, same winner 57.5 of 72, coverage 0.811
+  routed_1   game 12.472 sim 8.694
+  routed_2   game 5.597 sim 4.524
+  hp_lost_1  game 0.784 sim 0.669
+  hp_lost_2  game 0.571 sim 0.506
+  enemy.hp_lost_end    game 0.571 sim 0.506 coverage 0.78
+  own.hp_lost_end      game 0.784 sim 0.669 coverage 0.79
+  routs_per_unit       game 1.187 sim 0.783 coverage 0.80
+  own.routed_share     game 0.937 sim 0.648 coverage 0.82
+  enemy.routed_share   game 0.417 sim 0.352 coverage 0.82
+  rallies_per_unit     game 0.599 sim 0.440 coverage 0.83
+  own_won              game 0.125 sim 0.264 coverage 0.88
