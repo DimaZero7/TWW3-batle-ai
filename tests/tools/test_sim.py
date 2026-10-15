@@ -1161,8 +1161,12 @@ class TestMorale:
         u = st.u
         u["hp"][0, :2] = 0.28
         assert not bool(morale.army_collapse(u, P)[0, :2].any())
-        # One friend routes: 0.28 * (1 + 0.5) / 2 = 0.21 of starting army power.
+        # One friend routes: routers count fully in the rule (rule_routing_weight 1.0, as the game),
+        # so the army keeps 0.28 of its starting power and the rule does not fire.
         u["r"][0, 0] = True
+        assert not bool(morale.army_collapse(u, P)[0, :2].any())
+        # Below the 0.22 threshold it fires whether or not the units route.
+        u["hp"][0, :2] = 0.2
         assert bool(morale.army_collapse(u, P)[0, :2].all())
         # Routing the equally strong opposing army halves its strength, but does not zero it.
         u["hp"][0, :2] = 0.4
