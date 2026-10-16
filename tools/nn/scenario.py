@@ -9,6 +9,12 @@ The default arena (config/nn/arena.json) puts the same army on both sides. A nam
 arena from config/nn/arenas.json takes the map from it and gives each side its own
 army: "sides": {"own": {"faction", "units"}, "enemy": {...}} (measurements, 30.09.2026).
 
+A unit with "special_abilities": [keys] gets exactly these abilities in the battle (the battle file's
+<unit_capabilities>, as the game's own benchmarks give their mages a set of spells): the list replaces
+the unit's default abilities, so its innate ones (its passport's "abilities": the database's
+land_units_to_unit_abilites_junctions) are written into it too. A unit without the field keeps the
+game's defaults (no <unit_capabilities>). Only the probes set it for now (the magic probe's mages).
+
     python -m tools.nn.scenario            # write scenarios/nn_arena.xml
     python -m tools.nn.scenario pair_spear_v_slave
 """
@@ -25,6 +31,8 @@ SIDES = ("own", "enemy")
 DEFAULT = "arena"
 # What a named arena may not set: the map and its zones stay those of config/nn/arena.json.
 BASE_ONLY = ("map", "catchment", "environment", "deployment_m")
+# Unit passports with the innate abilities (the training pool's file wins over the probes' one).
+PASSPORTS = (project.CONFIG_DIR / "nn" / "units.json", project.ROOT / "data" / "units" / "probe-units.json")
 
 
 def load_arena(name=None, path=None, arenas_path=None):
@@ -65,8 +73,45 @@ def frame(side, gap_m):
     return gap_m / 2, 0.0, (-1.0, 0.0), (0.0, 1.0), 3 * math.pi / 2
 
 
+def innate_abilities(key, paths=PASSPORTS):
+    """The unit's own abilities (its passport's "abilities"), or None when no passport has it."""
+    for path in paths:
+        if path.exists():
+            units = json.loads(path.read_text(encoding="utf-8"))["units"]
+            if key in units:
+                return list(units[key].get("abilities") or [])
+    return None
+
+
+def capabilities(unit, paths=PASSPORTS):
+    """The abilities a unit is given in the battle file: None (the game's defaults) without
+    "special_abilities", else its innate abilities and the listed ones (once each, in that order).
+    A unit with the field and no passport is refused: its innate abilities would be lost."""
+    listed = unit.get("special_abilities")
+    if listed is None:
+        return None
+    innate = innate_abilities(unit["key"], paths)
+    if innate is None:
+        raise KeyError(f"{unit['key']}: special_abilities without a passport (innate abilities unknown)")
+    out = []
+    for k in innate + list(listed):
+        assert k and not any(c.isspace() for c in k), f"bad ability key {k!r}"
+        if k not in out:
+            out.append(k)
+    return out
+
+
+def capabilities_xml(keys):
+    """The <unit_capabilities> block of a unit ('' for None: the defaults)."""
+    if keys is None:
+        return ""
+    rows = "".join(f"          <special_ability>{escape(k)}</special_ability>\n" for k in keys)
+    return f"        <unit_capabilities>\n{rows}        </unit_capabilities>\n"
+
+
 def placements(arena):
-    """{side: [{script_name, slot, key, men, general, x, z, bearing_deg, width}]}."""
+    """{side: [{script_name, slot, key, men, general, x, z, bearing_deg, width, abilities}]}
+    (abilities: capabilities(), None for the game's defaults)."""
     out = {}
     sides = armies(arena)
     for side in SIDES:
@@ -77,7 +122,8 @@ def placements(arena):
             z = az + fwd[1] * u["forward"] + right[1] * u["lateral"]
             rows.append({"script_name": f"{side}_{u['slot']}", "slot": u["slot"], "key": u["key"], "men": u["men"],
                          "general": bool(u.get("general")), "x": round(x, 1), "z": round(z, 1),
-                         "bearing_deg": round(math.degrees(orient)) % 360, "width": u["width"]})
+                         "bearing_deg": round(math.degrees(orient)) % 360, "width": u["width"],
+                         "abilities": capabilities(u)})
         out[side] = rows
     return out
 
@@ -85,7 +131,7 @@ def placements(arena):
 UNIT = """      <unit num_soldiers="{men}" script_name="{script_name}">
         <unit_type type="{key}"/>
         <position x="{x}" y="{z}"/><orientation radians="{orient:.4f}"/><width metres="{width}"/>
-        <unit_experience level="0"/>
+{caps}        <unit_experience level="0"/>
 {general}      </unit>
 """
 
@@ -141,7 +187,7 @@ def scenario_xml(arena, defender, duration_s=3600, labels=None):
         ax, az, fwd, _, orient = frame(side, arena["gap_m"])
         back = arena["deployment_m"] / 2 - 40  # the zone reaches 40 m in front of the spearmen
         units = "".join(UNIT.format(men=u["men"], script_name=u["script_name"], key=escape(u["key"]), x=u["x"], z=u["z"],
-                                    orient=orient, width=u["width"],
+                                    orient=orient, width=u["width"], caps=capabilities_xml(u["abilities"]),
                                     general=(f"        <general><name>{escape(labels.get(side) or side)}</name><star_rating level=\"1\"/></general>\n"
                                              if u["general"] else ""))
                         for u in places[side])

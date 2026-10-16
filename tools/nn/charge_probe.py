@@ -281,6 +281,9 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           the effects, the rout), everyone else fearless; the lane's contact is the charger's melee flag (contact_a_only),
           its row carries DamageDealt (dd_rows); 30 s from that contact - 3 battles of 6 lanes, rotated.
           Its table: python -m tools.nn.busycharge_probe [runs] [--sim].
+  magic   the spellcasters (build/magic/plan.md 7): the Gold Wizard's Searing Doom and the Warlock Engineer's Warp
+          Lightning cast by script (lane mode 'cast') on held targets, each side's winds every second - 3 battles of 4
+          lanes; the lanes and their table: tools/nn/magic_probe.py.
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -359,6 +362,9 @@ UNITS = {
     "ratling": ("wh2_dlc12_skv_inf_ratling_gun_0", 32, SKV),
     "wolfrat": ("wh2_dlc16_skv_mon_wolf_rats_0", 80, SKV),
     "wolfratp": ("wh2_dlc16_skv_mon_wolf_rats_1", 80, SKV),          # with poison
+    # the spellcasters of the magic plan (tools/nn/magic_probe.py; build/magic/plan.md): heroes, not lords
+    "goldwiz": ("wh3_dlc25_emp_cha_wizard_metal", 1, EMP),             # Gold Wizard, Lore of Metal (DLC Thrones of Decay)
+    "warlock": ("wh2_main_skv_cha_warlock_engineer", 1, SKV),          # Warlock Engineer, Lore of Ruin
 }
 
 
@@ -419,12 +425,14 @@ NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 # the new units' plans (tools/nn/unit_probe.py: their lanes, measures and table)
 UNIT_PLANS = ("ratling", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow")
+# magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
+MAGIC_PLANS = ("magic",)
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
          "reform2", "defender", "wave", "routmob", "routmob2", "wavemiss", "wavemiss2", "rallysecure",
          "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "ratlingrt", "ratlingrt2",
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
-         "sidecontact", "busycharge", "ratcharge") + UNIT_PLANS
+         "sidecontact", "busycharge", "ratcharge") + UNIT_PLANS + MAGIC_PLANS
 # the walkpass plan: swordsmen walk / run (a move order, 'pass') past clanrats - idle (halted, never ordered) or busy
 # (fighting an Empire spearmen unit they attack at the go) - edge_m apart edge to edge (the formations 30 m wide), or
 # straight through them ('through'), from gap_m ahead to beyond_m behind the clanrats' front; 'inmelee': a fight from 3 m,
@@ -615,6 +623,9 @@ def battles(plan):
     if plan in UNIT_PLANS:
         from tools.nn import unit_probe
         return unit_probe.battles(plan)
+    if plan in MAGIC_PLANS:
+        from tools.nn import magic_probe
+        return magic_probe.battles()
     if plan == "charge":
         a = [lane("swords", "clanrat", m) for m in ("attack_run", "attack_walk", "move_run", "recharge")]
         out += [rotate(a, k) for k in range(4)]
@@ -1067,14 +1078,16 @@ def layout(specs):
     side_of = {EMP: "own", SKV: "enemy"}
     lanes, used_lords = [], set()
 
-    def add(short, k, tag=""):
+    def add(short, k, tag="", abilities=None):
         key, men, faction = UNITS[short]
         if short in LORDS.values():
             used_lords.add(short)
             return f"{side_of[faction]}_lord"
         slot = f"{short}{tag}_{k}"
         sides[faction].append({"slot": slot, "key": key, "men": men, "forward": -20 - 40 * (len(sides[faction]) // 4),
-                               "lateral": 40 * (len(sides[faction]) % 4 - 1.5), "width": WIDTH_M})
+                               "lateral": 40 * (len(sides[faction]) % 4 - 1.5), "width": 5 if men == 1 else WIDTH_M})
+        if abilities is not None:            # exactly these and the innate ones (tools/nn/scenario.py capabilities)
+            sides[faction][-1]["special_abilities"] = list(abilities)
         return f"{side_of[faction]}_{slot}"
     n = len(specs)
     for k, spec in enumerate(specs, 1):
@@ -1086,7 +1099,8 @@ def layout(specs):
         if spec.get("place"):                 # an explicit place (the dmgmelee plan's grid)
             x, z = spec["place"]
         aw, tw = spec.get("a_w", WIDTH_M), spec.get("t_w", WIDTH_M)
-        row = dict(spec, name=f"L{k}", x=round(float(x), 1), z=float(z), attacker=add(spec["attacker"], k),
+        row = dict(spec, name=f"L{k}", x=round(float(x), 1), z=float(z),
+                   attacker=add(spec["attacker"], k, abilities=spec.get("a_abilities")),
                    target=add(spec["target"], k), a_key=a_key, t_key=t_key,
                    a_depth=round(depth(a_key, a_men, aw), 2), t_depth=round(depth(t_key, t_men, tw), 2),
                    a_width=5 if a_men == 1 else aw, t_width=5 if t_men == 1 else tw,
@@ -1155,6 +1169,9 @@ def run_config(plan, index):
         config["men_after_rout_s"] = ROUTMOB_MEN_S
     if plan == "pursuit":
         config["men_after_rout_s"] = PURSUIT["after_rout_s"]
+    if plan in MAGIC_PLANS:
+        from tools.nn import magic_probe
+        config.update(magic_probe.config_extra(index))
     model_s = max(l["max_s"] for l in lanes) + SETTLE_MS / 1000 + 20
     return config, model_s, arena
 

@@ -1,9 +1,10 @@
 """The files the game and the companion exchange (docs/en/apps/bridge.md). Numpy only, no torch.
 
     game  -> tww3_bai_nn_state.json   every decision: move number, battle time, every unit's row
-             (with fx: the phases active on it), abilities_used: {unit: {ability: ms of its last use}}
+             (with fx: the phases active on it), abilities_used: {unit: {ability: ms of its last use}},
+             winds: the own army's Winds of Magic {cur, rate} (absent when the game gives none)
     companion -> tww3_bai_nn_orders.txt   the answer for that move: one line per own unit, and a line
-             'ability <unit> <key>' per ability to use now
+             'ability <unit> <key> [<target>]' per ability to use now (with a target: a spell on that unit)
 
 Both files are written to a temp file first and then renamed, so a reader never sees half of one.
 The orders file ends with a line 'end': the game takes nothing without it.
@@ -644,8 +645,8 @@ def ability_list(names, side, ability, slots, own=1):
 
 
 def orders_text(batch, move, orders, think_ms=None, abilities=()):
-    """The orders file for the game (parsed by src/apps/bridge/services.lua). abilities: [{unit, key}]
-    to use now, one line each. A unit that takes no orders (marked "out" by the loop: dead, routing,
+    """The orders file for the game (parsed by src/apps/bridge/services.lua). abilities: [{unit, key,
+    target (optional: the unit a spell is cast on; none: the unit itself)}] to use now, one line each. A unit that takes no orders (marked "out" by the loop: dead, routing,
     shattered) gets no line: the network's HOLD for it is only a filler, and given to a unit that
     rallied before the answer came it halted it (gate 02.10.2026: 42 of 102 rallies; the bridge
     also ignores it, docs/en/apps/bridge.md)."""
@@ -667,9 +668,10 @@ def orders_text(batch, move, orders, think_ms=None, abilities=()):
         else:
             raise ValueError(f"unknown order kind: {k}")
     for a in abilities:
-        if not a["unit"] or not a["key"] or any(c.isspace() for c in a["unit"] + a["key"]):
+        target = a.get("target") or ""
+        if not a["unit"] or not a["key"] or any(c.isspace() for c in a["unit"] + a["key"] + target):
             raise ValueError(f"bad ability line: {a}")
-        lines.append(f"ability {a['unit']} {a['key']}")
+        lines.append(f"ability {a['unit']} {a['key']}" + (f" {target}" if target else ""))
     lines.append("end")
     return "\n".join(lines) + "\n"
 
@@ -697,7 +699,7 @@ def parse_orders(text):
                 o.update(target=w[3], run=w[4] == "1")
             doc["orders"][w[1]] = o
         elif w[0] == "ability":
-            doc["abilities"].append({"unit": w[1], "key": w[2]})
+            doc["abilities"].append({"unit": w[1], "key": w[2], **({"target": w[3]} if len(w) > 3 else {})})
     return doc
 
 

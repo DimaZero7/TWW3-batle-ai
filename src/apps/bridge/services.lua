@@ -20,8 +20,10 @@ end
 
 -- One unit line: unit <name> hold | move <x> <z> <run> | withdraw <x> <z> <run>
 -- | attack <target name> <run> | keep. run is 1 or 0.
--- An ability line: ability <unit name> <ability key>: use it now (once; independent of the
--- unit's order). Files without ability lines are as before.
+-- An ability line: ability <unit name> <ability key> [<target unit name>]: use it now (once;
+-- independent of the unit's order); with a target (a spell: a bombardment or a hex on an enemy,
+-- an augment on a friend) on that unit, without one on the unit itself. Files without ability
+-- lines are as before.
 local function unit_order(w)
     local name, kind = w[2], w[3]
     if not name or not M.KINDS[kind] then return nil, 'bad kind: ' .. tostring(kind) end
@@ -39,7 +41,7 @@ local function unit_order(w)
 end
 
 -- The companion's answer -> {move, batch, think_ms, orders = {name -> order},
--- abilities = {{unit, key}...}}, or nil and the reason. A file without its last line 'end'
+-- abilities = {{unit, key, target}...}} (target nil: the unit itself), or nil and the reason. A file without its last line 'end'
 -- is not complete.
 function M.parse_orders(text)
     if type(text) ~= 'string' or text == '' then return nil, 'empty' end
@@ -63,7 +65,7 @@ function M.parse_orders(text)
             doc.count = doc.count + 1
         elseif w[1] == 'ability' then
             if not w[2] or not w[3] then return nil, 'ability without a unit or a key' end
-            doc.abilities[#doc.abilities + 1] = {unit = w[2], key = w[3]}
+            doc.abilities[#doc.abilities + 1] = {unit = w[2], key = w[3], target = w[4]}
         elseif w[1] == 'end' then
             complete = true
         end
@@ -337,9 +339,12 @@ end
 
 -- What the companion reads: meta (batch, factions, attacker...), the move
 -- number, the battle time and every unit's row; used = {unit name -> {ability key ->
--- battle ms of its last use by the bridge}} (the companion counts the timers from it).
-function M.state_document(meta, move, t_ms, units, done, used)
-    local doc = {move = move, t = t_ms, units = units, done = done == true, abilities_used = used or {}}
+-- battle ms of its last use by the bridge}} (the companion counts the timers from it); winds =
+-- the own army's Winds of Magic {cur, rate} (apps.battle.winds; the player sees his own pool only),
+-- absent when the engine gives none.
+function M.state_document(meta, move, t_ms, units, done, used, winds)
+    local doc = {move = move, t = t_ms, units = units, done = done == true, abilities_used = used or {},
+        winds = winds}
     for k, v in pairs(meta) do doc[k] = v end
     return doc
 end

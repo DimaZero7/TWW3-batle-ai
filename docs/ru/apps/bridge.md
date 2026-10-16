@@ -224,14 +224,17 @@ sequenceDiagram
 они стоят и стреляют по своему выбору.
 
 **Способности.** Сеть сама решает, когда её лорд применяет способность, как игрок. Строка ответа
-`ability <отряд> <ключ>` применяется один раз и сразу, рядом с приказом отряда:
+`ability <отряд> <ключ> [<цель>]` применяется один раз и сразу, рядом с приказом отряда:
 
 - отряд должен стоять (не бежит, не разбит, не погиб) и `unit:can_perform_special_ability(key)`
   должна ответить «да»; тогда `uc:perform_special_ability(key, unit)` — на самого лорда (на себя:
-  сети предлагаются только способности без выбора цели; вызов проверен в бою,
-  [команды](../game/units/commands.md));
+  вызов проверен в бою, [команды](../game/units/commands.md));
+- с целью (заклинание: бомбардировка или проклятие на врага, усиление на своего) —
+  `uc:perform_special_ability(key, отряд-цель)`, цель — скрипт-имя любого отряда любой стороны; так
+  кастуют маги в бенчмарках самой игры и в пробе магии ([charge_probe](entries.md#charge_probe), план
+  `magic`); цель не найдена — `unknown_target`;
 - каждая просьба пишется в журнал (`nn_ability`: `used`, `not_ready`, `down`, `unknown_unit`,
-  `error`);
+  `unknown_target`, `error`; у заклинания ещё `tg` — цель и `w` — свои ветра магии перед кастом);
 - в состоянии есть `abilities_used` (последнее применение каждой способности, мс боя) и у каждого
   отряда обеих сторон `fx`: фазы, действующие на нём сейчас, как их показывает его карточка (CCO
   `ActiveEffectList.At(i).PhaseRecordContext.Key`, проверено в бою,
@@ -274,6 +277,7 @@ sequenceDiagram
 | `decide_ms` | Время между решениями, мс |
 | `units` | Все отряды: поля записанного `nn_sample` ([nn_arena](entries.md#nn_arena)) и ещё `side`, `key` (ключ отряда), `v` (виден другой стороне) и `fx` (ключи действующих на нём фаз; нет, если карточку не прочесть); без полей только для записи `sv`, `pcr`, `phr`, `mge` (и `bop` записи): `nn_arena` читает их для калибровки симулятора, не для сети |
 | `abilities_used` | `{отряд: {ключ способности: мс боя её последнего применения мостом}}` (`{}` до первого) |
+| `winds` | Ветра магии своей армии `{cur, rate}`: `army:winds_of_magic_current()` и `winds_of_magic_remaining_recharge_rate()` (`apps.battle.winds`); чужие ветра игрок не видит, их нет. Поля нет, если игра не ответила |
 
 **Приказы** `tww3_bai_nn_orders.txt` (помощник → игра), текст, строка на отряд:
 
@@ -293,8 +297,9 @@ end
 
 `move` / `withdraw`: точка x, z в метрах и бег 1 / 0; `attack`: скрипт-имя врага и бег;
 `keep`: нового приказа нет (сеть решила продолжать прежний); `ability`: отряд и ключ
-способности, которую применить сейчас (строк сколько угодно; файл без них — как раньше, формат
-остаётся `tww3_bai_nn_orders 1`).
+способности, которую применить сейчас, и, для заклинания, скрипт-имя цели (`ability own_mage_1
+wh_main_spell_metal_searing_doom enemy_spear_3`; строк сколько угодно; файл без них — как раньше,
+формат остаётся `tww3_bai_nn_orders 1`).
 Без последней строки `end` игра ничего не берёт. Отряд без строки сохраняет свой приказ.
 
 ## Враг под скриптом симулятора
@@ -358,7 +363,7 @@ Stand Your Ground 11 раз, отказов нет; 714 ходов, пропус
 
 | Функция | Что делает |
 |---|---|
-| `parse_orders(text)` | Файл приказов → `{move, batch, think_ms, orders, abilities}` или `nil` и причина (`incomplete`, `bad kind`, `ability without a unit or a key`…) |
+| `parse_orders(text)` | Файл приказов → `{move, batch, think_ms, orders, abilities}` (способность — `{unit, key, target}`, без цели — сам отряд) или `nil` и причина (`incomplete`, `bad kind`, `ability without a unit or a key`…) |
 | `changed(old, new)` | Другой ли приказ (вид, цель, бег, точка дальше `REPEAT_M` = 5 м) |
 | `state_document(meta, move, t, units, done, used)` | Состояние как таблица для JSON (`used` → `abilities_used`) |
 | `active_effects(read)` | Ключи фаз, действующих на отряде, с его карточки (`read(field)` → значение CcoBattleUnit) или `nil`, если список не прочесть |
@@ -395,7 +400,7 @@ Stand Your Ground 11 раз, отказов нет; 714 ходов, пропус
 | `nn_miss` | `move` без ответа к следующему решению, `answered` |
 | `nn_hold` | `u`, `action` (`aim`, `none`, `halt`, `keep` — HOLD оставил цель движка целью стрелка, без остановки), `tg` — цель стоящего стрелка |
 | `nn_stall` | `u`, `k` (`attack`, `move`, `withdraw`), `tg` — потерянный движком приказ, отданный снова |
-| `nn_ability` | `move`, `u`, `key`, `status`: `used`, `not_ready` (`can_perform_special_ability` ответила «нет»: в игре только если способности нет), `down` (отряд не стоит), `unknown_unit` (не наш), `error` |
+| `nn_ability` | `move`, `u`, `key`, `tg` (цель заклинания), `w` (свои ветра перед заклинанием), `status`: `used`, `not_ready` (`can_perform_special_ability` ответила «нет»: в игре только если способности нет), `down` (отряд не стоит), `unknown_unit` (не наш), `unknown_target`, `error` |
 | `nn_ability_ready` | `u`, `key`, `ready` (`can_perform_special_ability`), при изменении |
 | `nn_effects` | `u`, `fx` (фазы на отряде или `unknown`), при изменении |
 | `nn_skirmish` | только при `skirmish = 'off'`: `action` `off` (при старте; `units` — у кого выключен, `was` — был ли включён до того) или `again` (`u`: на решении режим оказался включён и выключен снова) |

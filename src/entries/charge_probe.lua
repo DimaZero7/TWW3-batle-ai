@@ -35,6 +35,11 @@
 --                  to pass_beyond_m behind the target's front: it goes past the target, never attacks it (the skirmish2
 --                  and walkpass plans); lane.t_attack_extra: at the go the target attacks the first extra at a walk;
 --   'attack_t2'    attack the second target (lane.target2) at a run (the skirmish2 plan: the target's neighbour).
+--   'cast'         (the magic plan) the attacker is a spellcaster and gets no order; lane.casts {{at_s, key, tg}}: at
+--                  at_s after the go perform_special_ability(key, the target unit: tg 't' (default), 't2', or 'a' the
+--                  caster himself), as the game's benchmarks cast their spells; each try is probe_ability {who 'a',
+--                  key, tg (the unit's name), n (its index in casts), at_s, can (can_perform_special_ability before),
+--                  w (the caster's side's winds before), status given / failed}. No contact: the lane ends after max_s.
 -- lane.a_ability (optional): the attacker uses it on himself a_ability_after_s after the first contact
 -- (Foe-Seeker's vigour). lane.men_all_s (optional): the attacker's soldier places every men_ms from the go
 -- to men_all_s, wherever the enemy is (how a formation turns).
@@ -92,6 +97,12 @@
 -- {{name, dx, dz, width, px, pz}} - units of the target's side parked at (px, pz) from the start - are teleported to
 -- dx m to its right and dz m ahead of its centre (its facing at the rally), facing its way (probe_phase 'friends');
 -- sampled as the list 'f'. The lane ends after_rally_s after the rally (then after_rout_s no longer applies).
+-- The magic plan: with config.winds_ms every winds_ms after the go 'probe_winds' {t, s1, s2}: each side's Winds of Magic
+-- (apps.battle.winds: the readers that answered at the start, probe_winds_api {side, found, values}), and m = {lane =
+-- {field = value}}: the caster's CCO fields of M.MAGE_CCO that answered at the start. config.winds_set {{side, current,
+-- reserve}}: added to that side's winds at the start, before the go (probe_winds_set {side, before, after, status}).
+-- Each 'cast' lane's caster is described at the start: probe_mage {lane, u, active, passive (owned special abilities),
+-- magic (can_use_magic), can {key = can_perform_special_ability} of its cast keys, cco {field = value}}.
 -- Every tick_ms 'probe_sample': per running lane both units' (and the lord's) men, health
 -- (CCO HealthValue), melee flag, place, bearing, moving / moving fast, kills, fatigue, status keys
 -- (CCO StatusList: braced, melee...). Every men_ms while the two are within men_near_m of each
@@ -106,13 +117,24 @@ local orders = require('apps.orders.adapter')
 local facing = require('apps.orders.facing')
 local map = require('apps.map.adapter')
 local services = require('apps.bridge.services')
+local winds = require('apps.battle.winds')
 
 local M = {}
 
 local LOG = 'tww3_bai_events.jsonl'
 local TIMER, MEN_TIMER = 'tww3_bai_charge_probe_tick', 'tww3_bai_charge_probe_men'
+local WINDS_TIMER = 'tww3_bai_charge_probe_winds'
 M.MODES = {attack_run = true, attack_walk = true, move_run = true, recharge = true, hold = true, withdraw = true,
-    script = true, shoot = true, reengage = true, tire = true, retarget = true, pass = true, attack_t2 = true}
+    script = true, shoot = true, reengage = true, tire = true, retarget = true, pass = true, attack_t2 = true,
+    cast = true}
+-- A caster's CCO fields tried at the start (the magic plan): the unit card's ability list and magic fields. Their names
+-- are not documented anywhere we found: the ones that answer are logged (probe_mage cco) and read again every winds_ms.
+M.MAGE_CCO = {'BattleAbilityList.Size', 'CanUseMagic', 'IsCasting', 'IsSpellcaster', 'NumAbilities',
+    'WindsOfMagicPoolContext.CurrentWinds', 'WindsOfMagicPoolContext.Current', 'WindsOfMagicPoolContext.Reserve',
+    'WindsOfMagicPoolContext.Max', 'WindsOfMagicPoolContext.RechargeRate'}
+M.ABILITY_CCO = {'Key', 'Name', 'IsActive', 'IsEnabled', 'CanUse', 'IsUsable', 'State', 'ManaCost', 'Cost',
+    'RechargeTime', 'RechargeTimeRemaining', 'CooldownTimeRemaining', 'RechargePercent', 'RemainingRecharge',
+    'NumUses', 'UsesRemaining', 'TimeRemaining', 'AbilityRecordContext.Key', 'UnitAbilityContext.Key'}
 M.TARGET_MODES = {stand = true, hold = true, both = true, both_walk = true, rear = true, push = true,
     skirmish = true}
 M.AFTER_KINDS = {attack_t2 = true, attack_same = true, halt = true, move_near = true, none = true}
@@ -147,6 +169,15 @@ function M.layout(lane)
             tx = lane.x, tz = lane.z - td / 2, tb = tb}
     end
     return {ax = lane.x + (lane.a_dx or 0), az = lane.z + lane.gap_m + ad / 2, ab = 180, tx = lane.x, tz = lane.z - td / 2, tb = tb}
+end
+
+-- The indices of a 'cast' lane's casts due at elapsed_ms after the go and not yet tried (done[i]), in order. Pure.
+function M.due_casts(casts, done, elapsed_ms)
+    local out = {}
+    for i, c in ipairs(casts or {}) do
+        if not (done and done[i]) and elapsed_ms >= (c.at_s or 0) * 1000 then out[#out + 1] = i end
+    end
+    return out
 end
 
 -- The second target's centre (x, z) for a lane's layout L: t2_dx beside the target, t2_dz along z. Pure.
@@ -233,6 +264,7 @@ function M.main(bm, config, globals)
     local function stop_timers()
         pcall(function() bm:remove_process(TIMER) end)
         pcall(function() bm:remove_process(MEN_TIMER) end)
+        pcall(function() bm:remove_process(WINDS_TIMER) end)
     end
     local function fail(err)
         state.active = false
@@ -413,6 +445,26 @@ function M.main(bm, config, globals)
         orders.attack_melee(it.uc, enemy.unit, walk)
     end
 
+    -- (the magic plan) one try of a 'cast' lane's cast i (module comment).
+    local function cast(lane, i, now)
+        lane.cast_done[i] = true
+        local c = lane.casts[i]
+        local target = (c.tg == 'a' and lane.a) or (c.tg == 't2' and lane.t2) or lane.t
+        local w = winds.read(state.armies[lane.a.side], {'cur'})
+        local can = read(function() return lane.a.unit:can_perform_special_ability(c.key) end)
+        local ok, e = pcall(function() lane.a.uc:perform_special_ability(c.key, target.unit) end)
+        emit('probe_ability', {lane = lane.name, who = 'a', key = c.key, tg = target.name, n = i, at_s = c.at_s,
+            t = now - lane.t0, can = can, w = w and w.cur, status = ok and 'given' or 'failed',
+            error = (not ok) and tostring(e) or nil})
+    end
+
+    -- (the magic plan) the caster's CCO fields that answered at the start ({field = value}).
+    local function mage_cco(lane)
+        local out = {}
+        for _, f in ipairs(lane.cco_found or {}) do out[f] = read(cco, lane.a.unit, f) end
+        return out
+    end
+
     local function tick()
         if not state.active then return end
         local rows, busy, now = {}, false, now_ms()
@@ -588,6 +640,9 @@ function M.main(bm, config, globals)
                         end
                     end
                 end
+                if lane.mode == 'cast' then
+                    for _, i in ipairs(M.due_casts(lane.casts, lane.cast_done, now - lane.t0)) do cast(lane, i, now) end
+                end
                 if lane.a_pending and now - lane.t0 >= lane.a_go_s * 1000 then
                     -- (the busycharge plan) the attacker's order, held until a_go_s after the go
                     lane.a_pending = false
@@ -747,9 +802,25 @@ function M.main(bm, config, globals)
         if #rows > 0 then emit('probe_men', {lanes = rows}) end
     end
 
+    -- (the magic plan) each side's winds and the casters' CCO fields every winds_ms (module comment).
+    local function winds_sample()
+        if not state.active then return end
+        local row, m = {t = now_ms() - state.t0}, {}
+        for side = 1, 2 do row['s' .. side] = winds.read(state.armies[side], state.winds_found[side]) end
+        for _, lane in ipairs(state.lanes) do
+            if lane.mode == 'cast' and lane.running and lane.cco_found and #lane.cco_found > 0 then
+                m[lane.name] = mage_cco(lane)
+            end
+        end
+        if next(m) then row.m = m end
+        emit('probe_winds', row)
+    end
+
     local function go()
+        state.t0 = now_ms()
         for _, lane in ipairs(state.lanes) do
             lane.t0, lane.running, lane.phase = now_ms(), true, 'in'
+            lane.cast_done = {}
             if lane.mode == 'tire' then
                 -- the shuttle's first leg: straight back, both at a run
                 lane.phase, lane.legs, lane.leg_ms = 'tire', {a = 1, t = 1}, {a = lane.t0, t = lane.t0}
@@ -809,7 +880,57 @@ function M.main(bm, config, globals)
         state.active = true
         bm:repeat_callback(guarded(tick), config.tick_ms, TIMER)
         bm:repeat_callback(guarded(men_sample), config.men_ms, MEN_TIMER)
+        if config.winds_ms then
+            winds_sample()
+            bm:repeat_callback(guarded(winds_sample), config.winds_ms, WINDS_TIMER)
+        end
         flush()
+    end
+
+    -- (the magic plan) the winds readers of each side, the scripted winds, the casters (module comment).
+    local function magic_start()
+        state.winds_found = {}
+        for side = 1, 2 do
+            state.winds_found[side] = winds.discover(state.armies[side])
+            emit('probe_winds_api', {side = side, found = state.winds_found[side],
+                values = winds.read(state.armies[side], state.winds_found[side])})
+        end
+        for _, set in ipairs(config.winds_set or {}) do
+            local army = state.armies[set.side]
+            local before = winds.read(army, state.winds_found[set.side])
+            local ok, e = winds.modify(army, set.current, set.reserve)
+            emit('probe_winds_set', {side = set.side, current = set.current, reserve = set.reserve, before = before,
+                after = winds.read(army, state.winds_found[set.side]), status = ok and 'done' or 'failed', error = e})
+        end
+        for _, lane in ipairs(state.lanes) do
+            if lane.mode == 'cast' then
+                local u = lane.a.unit
+                local found, values = {}, {}
+                for _, f in ipairs(M.MAGE_CCO) do
+                    local v = read(cco, u, f)
+                    if v ~= nil then found[#found + 1], values[f] = f, v end
+                end
+                local n = values['BattleAbilityList.Size']
+                if type(n) == 'number' and n > 0 and n < 32 then
+                    for i = 0, n - 1 do
+                        for _, f in ipairs(M.ABILITY_CCO) do
+                            local path = 'BattleAbilityList.At(' .. i .. ').' .. f
+                            local v = read(cco, u, path)
+                            if v ~= nil then found[#found + 1], values[path] = path, v end
+                        end
+                    end
+                end
+                lane.cco_found = found
+                local can = {}
+                for _, c in ipairs(lane.casts or {}) do
+                    can[c.key] = read(function() return u:can_perform_special_ability(c.key) end)
+                end
+                emit('probe_mage', {lane = lane.name, u = lane.a.name,
+                    active = read(function() return u:owned_non_passive_special_abilities() end),
+                    passive = read(function() return u:owned_passive_special_abilities() end),
+                    magic = read(function() return u:can_use_magic() end), can = can, cco = values})
+            end
+        end
     end
 
     local function start()
@@ -871,6 +992,7 @@ function M.main(bm, config, globals)
                     before = before, after = orders.skirmish_active(u), error = (not ok) and tostring(can) or nil})
             end
         end
+        if config.winds_ms then magic_start() end
         emit('start', {speed = config.speed, lanes = config.lanes})
         state.cancel_deadline = battle.deadline(bm, config.deadline_s * 1000, guarded(function()
             finish('deadline')
@@ -891,6 +1013,7 @@ function M.main(bm, config, globals)
         end
         assert(common and vector_type, 'common and battle_vector globals required')
         local sides = battle.read_sides(bm)
+        state.armies = {sides[1].army, sides[2].army}
         local keep_morale = {}
         for _, l in ipairs(config.lanes) do
             if l.t_morale then keep_morale[l.target] = true end
@@ -926,6 +1049,13 @@ function M.main(bm, config, globals)
             end
             if l.mode == 'tire' then
                 assert(M.fatigue_level(l.tire_until), 'unknown tire_until ' .. tostring(l.tire_until))
+            end
+            if l.mode == 'cast' then
+                assert(type(l.casts) == 'table', 'a cast lane needs casts')
+                for _, c in ipairs(l.casts) do
+                    assert(type(c.key) == 'string' and type(c.at_s) == 'number', 'a cast needs key and at_s')
+                    assert(c.tg ~= 't2' or l.target2, 'a cast on t2 needs target2')
+                end
             end
             for _, e in ipairs(l.extras or {}) do
                 assert(state.units[e.name], 'scenario unit missing: ' .. tostring(e.name))

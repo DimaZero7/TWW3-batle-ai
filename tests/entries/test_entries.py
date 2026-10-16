@@ -1830,6 +1830,51 @@ class TestChargeProbe:
         assert l2[0]["tg"]["ammo"] == 40 and l2[0]["tg"]["mp"] == 0.7
         assert [(r["lane"], r["phase"], r["t"]) for r in rows if r["event"] == "probe_phase"] == [("L2", "stop_fire", 3000)] and "cs" in l2[0]["a"] and "ammo" not in l2[0]["a"]
 
+    def test_cast_lane_casts_on_its_target_at_its_seconds_and_logs_the_winds(self, lua, tmp_path):
+        """The magic plan: a 'cast' lane's caster gets no order and casts on the held target at each at_s (every try
+        given, can_perform_special_ability and the side's winds before it logged); the scripted winds are added at
+        the start; each side's winds and the caster's answering CCO fields every winds_ms."""
+        lua.execute(self.SETUP + """
+            local L = CONFIG.lanes[1]
+            L.mode, L.target_mode, L.answer, L.max_s, L.fight_s, L.gap_m = 'cast', 'hold', false, 6, 6, 120
+            L.casts = {{at_s = 1, key = 'spell', tg = 't'}, {at_s = 3, key = 'spell', tg = 't'}}
+            CONFIG.lanes = {L}
+            CONFIG.park = {{name = 'enemy_lord', x = 700, z = -400, bearing = 0}}
+            CONFIG.winds_ms = 1000
+            CONFIG.winds_set = {{side = 1, current = 5, reserve = 10}}
+            bm.winds = {{cur = 12, rate = 0.5}, {cur = 30, rate = 0.25}}
+            own[2].abilities = {spell = true}
+            fake.cco['uid_own_swords_1'] = {['BattleAbilityList.Size'] = 1, ['BattleAbilityList.At(0).Key'] = 'spell'}
+            STATE = require('entries.charge_probe').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 30 do bm:tick(500); bm:pump() end
+            assert(STATE.finished and bm.ended)
+            assert(own[2].attack_args == nil and enemy[2].attack_args == nil, 'nobody is ordered')
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        assert [o for o in lua.eval("bm.orders").values() if o.startswith("ability")] == [
+            "ability own_swords_1 spell on enemy_clanrat_1"] * 2
+        api = {r["side"]: r["found"] for r in rows if r["event"] == "probe_winds_api"}
+        assert api[1] == ["cur", "rate"] and api[2] == ["cur", "rate"]
+        (st,) = [r for r in rows if r["event"] == "probe_winds_set"]
+        assert st["before"]["cur"] == 12 and st["after"]["cur"] == 17 and st["status"] == "done"
+        (mage,) = [r for r in rows if r["event"] == "probe_mage"]
+        assert mage["u"] == "own_swords_1" and mage["can"] == {"spell": True}
+        assert mage["cco"] == {"BattleAbilityList.Size": 1, "BattleAbilityList.At(0).Key": "spell"}
+        tries = [(r["n"], r["tg"], r["can"], r["w"], r["status"]) for r in rows if r["event"] == "probe_ability"]
+        assert tries == [(1, "enemy_clanrat_1", True, 17, "given"), (2, "enemy_clanrat_1", False, 17, "given")]
+        t = [r["t"] for r in rows if r["event"] == "probe_ability"]
+        assert 1000 <= t[0] < 1600 and 3000 <= t[1] < 3600
+        w = [r for r in rows if r["event"] == "probe_winds"]
+        assert len(w) >= 5 and w[0]["s1"] == {"cur": 17, "rate": 0.5} and w[0]["s2"]["cur"] == 30
+        assert w[0]["m"]["L1"]["BattleAbilityList.At(0).Key"] == "spell"
+        assert {r["lane"]: r["why"] for r in rows if r["event"] == "probe_lane_end"} == {"L1": "max_s"}
+        due = lua.eval("require('entries.charge_probe').due_casts")
+        casts = lua.table_from([lua.table_from({"at_s": 1}), lua.table_from({"at_s": 3})])
+        assert list(due(casts, lua.table_from({}), 2000).values()) == [1]
+        assert list(due(casts, lua.table_from({1: True}), 3000).values()) == [2]
+
 
 class TestMissileProbe:
     """The missile probe (entries.missile_probe; lanes from tools/nn/missile_probe.py)."""

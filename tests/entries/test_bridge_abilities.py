@@ -308,3 +308,58 @@ def test_a_rallied_unit_goes_on_with_its_order_and_takes_no_filler_hold(lua, tmp
         ("own_spear_1", "attack", "enemy_lord", "given"), ("own_spear_1", "hold", None, "given")]
     skipped = {r["move"]: r["skipped"] for r in rows if r["event"] == "nn_orders"}
     assert skipped[2] == 1 and rows[-1]["nn_regiven"] == 2
+
+
+SPELL = "wh_main_spell_metal_searing_doom"
+
+
+def test_an_ability_line_may_name_the_target_of_a_spell(lua):
+    from tools.nn.companion import exchange
+    lua.execute("S = require('apps.bridge.services')")
+    doc = lua.eval(f"S.parse_orders('tww3_bai_nn_orders 1\\nmove 2\\nbatch b\\nability own_lord {SPELL} enemy_spear_1\\n"
+                   f"ability own_lord {SYG}\\nend\\n')")
+    assert (doc.abilities[1].unit, doc.abilities[1].key, doc.abilities[1].target) == ("own_lord", SPELL, "enemy_spear_1")
+    assert doc.abilities[2].target is None                       # no target: the unit itself
+    text = exchange.orders_text("b", 2, [], None, [{"unit": "own_lord", "key": SPELL, "target": "enemy_spear_1"},
+                                                    {"unit": "own_lord", "key": SYG}])
+    assert f"ability own_lord {SPELL} enemy_spear_1\n" in text and f"ability own_lord {SYG}\n" in text
+    assert exchange.parse_orders(text)["abilities"] == [
+        {"unit": "own_lord", "key": SPELL, "target": "enemy_spear_1"}, {"unit": "own_lord", "key": SYG}]
+    with pytest.raises(ValueError):
+        exchange.orders_text("b", 2, [], None, [{"unit": "own_lord", "key": SPELL, "target": "a b"}])
+
+
+def test_a_spell_is_cast_on_its_target_and_the_state_carries_the_own_winds(lua, tmp_path):
+    from tools.nn.companion import exchange
+    lua.globals().SYG, lua.globals().FS, lua.globals().SPELL = SYG, FS, SPELL
+    lua.execute(SETUP + """
+        own[1].abilities[SPELL] = true
+        bm.winds = {{cur = 12, rate = 0.5}, {cur = 30, rate = 0.4}}
+        STATE = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+        bm:pump()
+    """)
+    doc = exchange.read_state(tmp_path / exchange.STATE)
+    assert doc["winds"] == {"cur": 12, "rate": 0.5}               # the own army's only
+    keep = [{"unit": "own_lord", "kind": "keep"}, {"unit": "own_spear_1", "kind": "keep"}]
+    uses = [{"unit": "own_lord", "key": SPELL, "target": "enemy_spear_1"},
+            {"unit": "own_lord", "key": SYG, "target": "nobody"}]
+    exchange.write_atomic(tmp_path / exchange.ORDERS, exchange.orders_text(doc["batch"], 1, keep, None, uses))
+    lua.execute("""
+        bm:tick(100)
+        bm.outcome, bm.winner = true, 2
+        for _ = 1, 10 do bm:tick(100) end
+    """)
+    assert list(lua.eval("bm.orders").values()) == [f"ability own_lord {SPELL} on enemy_spear_1"]
+    rows = events(tmp_path / "tww3_bai_events.jsonl")
+    used = [(r["u"], r["key"], r.get("tg"), r.get("w"), r["status"]) for r in rows if r["event"] == "nn_ability"]
+    assert used == [("own_lord", SPELL, "enemy_spear_1", 12, "used"), ("own_lord", SYG, "nobody", 12, "unknown_target")]
+
+
+def test_a_state_without_the_engines_winds_has_none(lua, tmp_path):
+    from tools.nn.companion import exchange
+    lua.globals().SYG, lua.globals().FS = SYG, FS
+    lua.execute(SETUP + """
+        STATE = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+        bm:pump()
+    """)
+    assert "winds" not in exchange.read_state(tmp_path / exchange.STATE)

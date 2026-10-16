@@ -230,13 +230,17 @@ Every unit of our side is under script control (`take_control`) from the start o
 the first answer it stands and shoots at will.
 
 **Abilities.** The network decides itself when its lord uses an ability, like a player. An
-`ability <unit> <key>` line of the answer is used once, at once, beside the unit's order:
+`ability <unit> <key> [<target>]` line of the answer is used once, at once, beside the unit's order:
 
 - the unit must stand (not routing, shattered or dead) and `unit:can_perform_special_ability(key)`
   must say yes; then `uc:perform_special_ability(key, unit)` — on the lord himself (self-cast:
-  the network is offered only abilities that need no target; the recipe verified in battle,
-  [commands](../game/units/commands.md));
-- each request is logged (`nn_ability`: `used`, `not_ready`, `down`, `unknown_unit`, `error`);
+  the recipe verified in battle, [commands](../game/units/commands.md));
+- with a target (a spell: a bombardment or a hex on an enemy, an augment on a friend) —
+  `uc:perform_special_ability(key, the target unit)`, the target being any unit of either side by its
+  script name; so the game's own benchmarks cast their mages' spells, and so does the magic probe
+  ([charge_probe](entries.md#charge_probe), plan `magic`); a target not found is `unknown_target`;
+- each request is logged (`nn_ability`: `used`, `not_ready`, `down`, `unknown_unit`, `unknown_target`,
+  `error`; a spell also with `tg`, its target, and `w`, the own Winds of Magic before the cast);
 - the state carries `abilities_used` (each ability's last use, battle ms) and, for every unit of
   both sides, `fx`: the phases active on it now, as its card shows them (CCO
   `ActiveEffectList.At(i).PhaseRecordContext.Key`, verified in battle, [states](../game/units/states.md)).
@@ -279,6 +283,7 @@ companion then simply reads again when the JSON is not complete.
 | `decide_ms` | Time between decisions, ms |
 | `units` | Every unit: the fields of the recorded `nn_sample` ([nn_arena](entries.md#nn_arena)) plus `side`, `key` (unit key), `v` (visible to the other side) and `fx` (phase keys active on it; missing when the card cannot be read); without the recording-only `sv`, `pcr`, `phr`, `mge` (and the sample's `bop`), which `nn_arena` reads for the simulator's calibration, not for the network |
 | `abilities_used` | `{unit: {ability key: battle ms of its last use by the bridge}}` (`{}` before any) |
+| `winds` | The own army's Winds of Magic `{cur, rate}`: `army:winds_of_magic_current()` and `winds_of_magic_remaining_recharge_rate()` (`apps.battle.winds`); the enemy's winds a player does not see, so they are not there. No field when the game gives none |
 
 **Orders** `tww3_bai_nn_orders.txt` (companion → game), text, one line per unit:
 
@@ -298,8 +303,9 @@ end
 
 `move` / `withdraw`: point x, z in metres and run 1 / 0; `attack`: the enemy's script name and run;
 `keep`: no new order (the network chose to go on with the one in force); `ability`: the unit and the
-ability key to use now (any number of lines; a file without them is as before, the format stays
-`tww3_bai_nn_orders 1`).
+ability key to use now and, for a spell, the target's script name (`ability own_mage_1
+wh_main_spell_metal_searing_doom enemy_spear_3`; any number of lines; a file without them is as before,
+the format stays `tww3_bai_nn_orders 1`).
 Without the last line `end` the game takes nothing. A unit without a line keeps its order.
 
 ## The enemy under the simulator's script
@@ -367,7 +373,7 @@ only for units that have the mode) in `nn_sample` and in the companion's state. 
 
 | Function | What it does |
 |---|---|
-| `parse_orders(text)` | The orders file → `{move, batch, think_ms, orders, abilities}`, or `nil` and the reason (`incomplete`, `bad kind`, `ability without a unit or a key`…) |
+| `parse_orders(text)` | The orders file → `{move, batch, think_ms, orders, abilities}` (each ability `{unit, key, target}`, target nil: the unit itself), or `nil` and the reason (`incomplete`, `bad kind`, `ability without a unit or a key`…) |
 | `changed(old, new)` | Is the order different (kind, target, run, point further than `REPEAT_M` = 5 m) |
 | `state_document(meta, move, t, units, done, used)` | The state as a table for JSON (`used` → `abilities_used`) |
 | `active_effects(read)` | The phase keys active on a unit from its card (`read(field)` → the CcoBattleUnit value), or `nil` when the list cannot be read |
@@ -404,7 +410,7 @@ card: with it every row gets `fx`. The entry [nn_arena](entries.md#nn_arena) wit
 | `nn_miss` | `move` that got no answer by the next decision, `answered` |
 | `nn_hold` | `u`, `action` (`aim`, `none`, `halt`, `keep` — a HOLD left the engine's target as the pick, no halt), `tg` — a held shooter's target |
 | `nn_stall` | `u`, `k` (`attack`, `move`, `withdraw`), `tg` — an order the engine dropped, given again |
-| `nn_ability` | `move`, `u`, `key`, `status`: `used`, `not_ready` (`can_perform_special_ability` said no: in the game only for an ability not owned), `down` (the unit is not standing), `unknown_unit` (not ours), `error` |
+| `nn_ability` | `move`, `u`, `key`, `tg` (a spell's target), `w` (the own winds before a spell), `status`: `used`, `not_ready` (`can_perform_special_ability` said no: in the game only for an ability not owned), `down` (the unit is not standing), `unknown_unit` (not ours), `unknown_target`, `error` |
 | `nn_ability_ready` | `u`, `key`, `ready` (`can_perform_special_ability`), when it changes |
 | `nn_effects` | `u`, `fx` (the phases on the unit, or `unknown`), when they change |
 | `nn_skirmish` | only with `skirmish = 'off'`: `action` `off` (at the start; `units` - whose mode was turned off, `was` - was it on before) or `again` (`u`: a decision found the mode on and turned it off again) |

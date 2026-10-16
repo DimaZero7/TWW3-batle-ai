@@ -33,16 +33,21 @@
 -- decisions, even if the enemy is still in melee (nn_reaim). Empty shooters under ATTACK
 -- leave ranged duty immediately and receive a melee attack (nn_empty_melee).
 -- No answer by the next decision tick: the orders in force stay (event nn_miss).
--- Abilities: an 'ability <unit> <key>' line of the answer is used at once when the unit
+-- Abilities: an 'ability <unit> <key> [<target>]' line of the answer is used at once when the unit
 -- stands and can_perform_special_ability(key) says yes: perform_special_ability(key, the
--- unit itself) (self-cast; the recipe verified in battle, docs/en/game/units/commands.md).
+-- unit itself) (self-cast; the recipe verified in battle, docs/en/game/units/commands.md), or
+-- with a target (a spell) perform_special_ability(key, that unit) - any unit of either side by its
+-- name, as the game's benchmarks cast their spells (the magic probe, tools/nn/charge_probe.py).
 -- In the game can_perform_special_ability says the lord owns it, ready or not (01.10.2026):
 -- readiness is the companion's (its count and the card's active effects).
--- Each request is logged (event nn_ability: used, not_ready, down, unknown_unit, error); the
+-- Each request is logged (event nn_ability: used, not_ready, down, unknown_unit, unknown_target,
+-- error; tg the target's name, w the own winds before it); the
 -- state document carries each ability's last use (abilities_used) and every unit's active
 -- effects (row fx, when opts.cco reads the unit's card), so the companion knows the timers.
 -- Changes only are logged once per decision: nn_ability_ready (an own unit's active ability:
 -- can_perform_special_ability turned true or false) and nn_effects (a unit's active phases).
+-- Every state document carries the own army's Winds of Magic (winds {cur, rate}, apps.battle.winds;
+-- absent when the engine gives none).
 -- The Lua side writes everything it reads; what a human would not see is hidden
 -- by the companion's observation (tools/nn/model/observation.py).
 -- A second instance commands the enemy side under a script in the companion (nn_arena enemy_ai
@@ -56,6 +61,7 @@ local json = require('apps.core.json')
 local orders = require('apps.orders.adapter')
 local exchange = require('apps.bridge.exchange_adapter')
 local services = require('apps.bridge.services')
+local winds = require('apps.battle.winds')
 
 local M = {}
 
@@ -296,7 +302,8 @@ function M.start(opts)
         local rows = opts.rows()
         effects(rows)
         readiness()
-        local doc = services.state_document(opts.meta, handle.written, opts.now_ms(), rows, done, used)
+        local doc = services.state_document(opts.meta, handle.written, opts.now_ms(), rows, done, used,
+            winds.read(opts.army))
         handle.write_mode = exchange.write(state_file, json.encode(doc))
         return rows
     end
@@ -472,11 +479,16 @@ function M.start(opts)
     local function use_ability(req)
         local it = own_by_name[req.unit]
         if not it then return 'unknown_unit' end
+        local target = it.unit
+        if req.target then
+            target = unit_by_name[req.target]
+            if not target then return 'unknown_target' end
+        end
         if not standing(it.unit) then return 'down' end
         if read(function() return it.unit:can_perform_special_ability(req.key) end) ~= true then
             return 'not_ready'
         end
-        local ok = pcall(function() it.uc:perform_special_ability(req.key, it.unit) end)
+        local ok = pcall(function() it.uc:perform_special_ability(req.key, target) end)
         if not ok then return 'error' end
         used[req.unit] = used[req.unit] or {}
         used[req.unit][req.key] = opts.now_ms()
@@ -522,13 +534,15 @@ function M.start(opts)
         handle.applied = handle.applied + 1
         opts.emit('nn_orders', row)
         for _, req in ipairs(doc.abilities or {}) do
+            local w = req.target and winds.read(opts.army, {'cur'}) or nil
             local status = use_ability(req)
             if status == 'used' then
                 handle.abilities_used = handle.abilities_used + 1
             else
                 handle.abilities_refused = handle.abilities_refused + 1
             end
-            opts.emit('nn_ability', {t = opts.now_ms(), move = doc.move, u = req.unit, key = req.key, status = status})
+            opts.emit('nn_ability', {t = opts.now_ms(), move = doc.move, u = req.unit, key = req.key, tg = req.target,
+                w = w and w.cur, status = status})
         end
     end
 
