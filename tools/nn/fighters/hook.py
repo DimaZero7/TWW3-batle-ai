@@ -64,7 +64,7 @@ class Hook:
     def adopt(self, st, params):
         self.st = st
         self.params = params
-        self.F = S.build(st, params, seed=self.seed)
+        self.F = S.build(st, params, seed=self.seed, start_phase=bool(self.lab['melee'].get('start_phase')))
         self.x_last, self.z_last = st.u["x"].clone(), st.u["z"].clone()
 
     def _pre(self, st, params, dt):

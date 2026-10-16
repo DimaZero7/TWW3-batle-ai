@@ -151,8 +151,8 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
   ([armies](training/armies.md#casters)); the scripts' sides get none.
 - **The fighters lab** ([details](training/fighters_lab.md), `tools/nn/fighters/`, apart from training): every man a point
   with his own health inside the simulator's step. On the replay of 92 battles men killed per health in thinned units and
-  under fire come nearer the game (two-handers 0.24 -> 0.62), melee damage on whole units overshoots (1.26); a man in
-  reach strikes 0.35 of the formula (measured, cause not found); ~140x slower than the simulator, 1024 battles do not fit.
+  under fire come nearer the game (two-handers 0.24 -> 0.62), damage on thinned units 0.95; a man swings
+  once an interval, a miss too (the swing probe; the simulator charged a miss 0.5 s), whole battles' damage 1.37 - open; ~140x slower than the simulator, 1024 battles do not fit.
 - **Not modelled:** terrain, forest, visibility, cavalry, monsters, other magic, flight, artillery, experience.
 
 **Checks against the game.** A recorded battle is replayed by its recorded orders 19 times with the start

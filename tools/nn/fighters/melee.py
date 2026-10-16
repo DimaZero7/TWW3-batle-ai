@@ -9,7 +9,8 @@ His blow (CA Feature Focus #2, the database; the same formulas as the simulator'
                within 8-90 %; direction: the struck man's facing (to the man he fights, else his unit's), the striker
                within 45 deg of it the front, beyond 135 deg the rear (defence x0.6 flank, x0.3 rear; a routing man: rear;
                a lone man: contact.lord_direction)
-  clock        the passport's attack interval after a hit, the simulator's melee.miss_s after a miss; it runs only while
+  clock        the passport's attack interval after every swing, hit or miss (lab.json melee.swing_per_interval; off: the
+               simulator's melee.miss_s after a miss); it runs only while
                an enemy man is in reach (lab.json melee)
   damage       the armour-piercing part whole, the base part less his own armour roll U(0.5, 1) x armour (at most all
                of it), then resistance (at most 90 %), at least 1; the charge bonus and the bonus v infantry / large split
@@ -178,8 +179,10 @@ def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
     refl = reflect.reshape(B, N * N).gather(1, gp)
     lands = hit & (torch.rand((B, M), generator=gen, device=p.device) < g_m)
     # the clock after the swing: the interval after a hit, miss_s after a miss (the remainder kept)
-    miss_s = float(params.sim["melee"]["miss_s"])
-    F.cd = torch.where(fire, F.cd.clamp(min=-dt) + torch.where(hit, gat("interval"), torch.full_like(F.cd, miss_s)),
+    # (lab.json melee.swing_per_interval: a miss costs the whole interval too - every swing, hit or miss, comes an
+    # interval after the last; else the simulator's melee.miss_s)
+    miss = gat("interval") if lab["melee"].get("swing_per_interval") else torch.full_like(F.cd, float(params.sim["melee"]["miss_s"]))
+    F.cd = torch.where(fire, F.cd.clamp(min=-dt) + torch.where(hit, gat("interval"), miss),
                        F.cd)
     F.cd = torch.where(has, F.cd, F.cd.clamp(min=0))
     # damage

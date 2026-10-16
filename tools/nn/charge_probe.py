@@ -432,7 +432,12 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "ratlingrt", "ratlingrt2",
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
-         "sidecontact", "busycharge", "ratcharge") + UNIT_PLANS + MAGIC_PLANS
+         "sidecontact", "busycharge", "ratcharge", "swing") + UNIT_PLANS + MAGIC_PLANS
+# the swing plan (the fighters lab's blow rate, tools/nn/fighters/swingdata.py): small units cut down to SWING_MEN men by
+# kill_number_of_men before the go, both attacking from 3 m; health and men every SWING_MS, the soldiers' places too -
+# each drop of a unit's health is a hit of one man (or a few at once): hits a second per man within reach
+SWING_MEN = {"five": 5, "one": 1}
+SWING_MS = 100
 # the walkpass plan: swordsmen walk / run (a move order, 'pass') past clanrats - idle (halted, never ordered) or busy
 # (fighting an Empire spearmen unit they attack at the go) - edge_m apart edge to edge (the formations 30 m wide), or
 # straight through them ('through'), from gap_m ahead to beyond_m behind the clanrats' front; 'inmelee': a fight from 3 m,
@@ -626,6 +631,15 @@ def battles(plan):
     if plan in MAGIC_PLANS:
         from tools.nn import magic_probe
         return magic_probe.battles()
+    if plan == "swing":
+        def cut(a, t, n, kind):
+            sh = lambda short: round((UNITS[short][1] - n + 0.5) / UNITS[short][1], 4)
+            return lane(a, t, "attack_walk", "both", gap_m=3, fight_s=90, max_s=110, kind=kind,
+                        damage={"a": {"method": "kill", "share": sh(a)}, "t": {"method": "kill", "share": sh(t)}})
+        five = SWING_MEN["five"]
+        return [[cut("swords", "clanrat", five, "five_a"), cut("swords", "clanrat", five, "five_b"),
+                 cut("swords", "clanrat", SWING_MEN["one"], "one"), cut("gs", "svsh", five, "five_gs"),
+                 cut("spear", "clanrat", five, "five_spear")]]
     if plan == "charge":
         a = [lane("swords", "clanrat", m) for m in ("attack_run", "attack_walk", "move_run", "recharge")]
         out += [rotate(a, k) for k in range(4)]
@@ -1165,6 +1179,8 @@ def run_config(plan, index):
                                                                                                   "shootcontact", "recontact")
                               else 90 if plan in ("hit", "move", "vv") else 30),
               "lanes": lanes, "park": park}
+    if plan == "swing":
+        config.update(tick_ms=SWING_MS, men_ms=SWING_MS, men_after_s=200)
     if plan in ("routmob", "routmob2", "passby"):
         config["men_after_rout_s"] = ROUTMOB_MEN_S
     if plan == "pursuit":

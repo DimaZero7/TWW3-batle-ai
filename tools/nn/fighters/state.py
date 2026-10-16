@@ -43,7 +43,7 @@ def _files0(u):
     return torch.minimum(torch.clamp(torch.floor(u["width"] / h + 1e-4), min=1), u["men0"].clamp(min=1))
 
 
-def build(st, params, seed=0):
+def build(st, params, seed=0, start_phase=False):
     """Fighters for every man of st (tools/nn/sim/state.State): at their places in their unit's formation, each with
     his passport's health; a unit that starts with fewer men than its men0 has the rest dead, and its missing health
     (men x HP a man > its HP) comes off its men as wounds spread evenly (conform)."""
@@ -108,6 +108,10 @@ def build(st, params, seed=0):
                  dz=torch.zeros((B, M), device=dev), pend=torch.zeros((B, M), device=dev),
                  sh=torch.zeros((B, N), device=dev), down=torch.zeros((B, M), device=dev), aim=torch.full((B, M), -1, dtype=torch.long, device=dev),
                  gen=torch.Generator(device=dev).manual_seed(seed + 1), u_ref=u)
+    if start_phase:
+        # (lab.json melee.start_phase) each man's attack clock starts at a random point of his interval: the men of a
+        # unit are not all ready to swing when it meets the enemy
+        F.cd = torch.rand((B, M), generator=F.gen, device=dev) * u["interval"].gather(1, F.uid)
     hp_man = u["hp_man"].gather(1, F.uid)
     men_now = u["men"].round().long().gather(1, F.uid)
     F.hp = torch.where(F.valid & (F.k < men_now), hp_man, torch.zeros_like(hp_man))

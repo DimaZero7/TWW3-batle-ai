@@ -12,9 +12,12 @@ and answers: how much closer to the game are the men than the rectangle, and wha
 - **What it gives.** On the same game recordings the men beat the rectangle where it was wrong: men killed per health
   lost in thinned units, the first seconds of a melee, men killed under fire (two-handers most), the contact and the
   formation's shape. Tables below, "Against the game".
-- **The main fork.** By the game's formulas every man within reach of an enemy strikes three times as often as the
-  game shows. Why is not known. The lab takes the measured share of blows `melee.blow_share` 0.35 (one number for all;
-  0.2-0.65 by pair). The rectangle covers the same gap with its fitted `fighting_files` 0.5.
+- **The attack clock found.** A man swings once an attack interval of his passport - hit or miss (CA's schema: the
+  interval is "the smallest gap between the starts of attack animations"). The simulator charged a miss 0.5 s; hence
+  the old "share of blows 0.35". A probe in the game (units of 5 and 1 men, every 0.1 s): 91 hits where "a swing every
+  interval" expects 76 and "a miss of 0.5 s" 167. One on one in the probes the damage now meets the game with no fit; in
+  whole battles 1.37 of the game (with the share 0.35: 1.20), on thinned units 0.95 (was 0.85). The whole battles'
+  surplus - probably the first blow of every new clash, open.
 - **The knock-down** is one mechanism - "a blow of mass or force -> the man is thrown / down, lies" - spells today;
   charges and monsters will use it. A probe battle in the game (the men's places every 0.1 s) confirmed: knocked men
   do not die lying, a knocked unit hardly strikes; the throw has a median of 3 m. But the men's share thrown is 2-5x
@@ -60,7 +63,8 @@ the back) instead of running through itself.
 plus the enemy's radius. He keeps his opponent while in reach, else takes the nearest (first of his unit's order
 target). A blow: the game's formulas as in the simulator, but per man: hit chance 35 + attack + charge - defence x
 direction (the direction against the struck man's own facing), an armour roll every blow, damage beyond health lost.
-The attack clock: the passport's interval after a hit, 0.5 s after a miss; it runs only while an enemy is in reach (the
+The attack clock: the passport's interval after every swing, hit or miss (`melee.swing_per_interval`; measured -
+below, "The attack clock"); it runs only while an enemy is in reach (the
 first blow is at once, a return to the fight brings no new burst - the `recontact` probe). The unit's rules stay: a
 holding formation strikes at 0.5, a router is struck at 0.43 and so on (a blow lands with that chance).
 
@@ -100,8 +104,8 @@ Spells call it today (each projectile of Searing Doom and Warp Lightning lands a
 | Reach of a blow | 2.5 m + the target's radius | database `entity_action_attack_formed_combat_distance`, radius `battle_entities` |
 | Tether to the place | 2.0 m | database `entity_action_attack_formed_tether_distance` |
 | Standoff (the front rank's distance to the enemy) | 1.0 m at contact -> 2.3 m, tau 13 s | measured: soldiers' places, 48 lanes of the probes reform, reform2, damaged, dmgmelee, wave, armour - the median nearest-enemy distance of the 15 nearest men 0.98 / 1.14 / 1.32 / 1.51 / 1.91 / 2.24 / 2.26 / 2.39 m at 0-1 / 1-3 / 3-5 / 5-10 / 10-20 / 20-40 / 40-90 / 90-240 s |
-| Share of blows `blow_share` | 0.35 | measured: 116 lane-sides of the melee probes, HP a second per man within reach 3.15 m against the formula - 0.38 / 0.35 / 0.32 / 0.36 / 0.36 / 0.30 at 2-5 / 5-10 / 10-20 / 20-40 / 40-90 / 90-240 s; 0.2-0.65 by pair |
-| Attack clock | the passport's interval, a miss 0.5 s | database, the simulator's `melee.miss_s` |
+| Attack clock | a swing every interval of the passport, a miss too | CA's schema (`melee_weapons`: the interval between the starts of attack animations); measured - the `swing` probe, below |
+| Share of blows `blow_share` | 1 (was 0.35) | the old measured 0.35 = the ratio of "a swing every interval" to "a miss of 0.5 s" (p + 0.5 / interval) |
 | Spread of arrows | calibration area x (d / distance)^2 x (1 - accuracy) | database, the simulator's model `missile.hit_chance_plane` |
 | Knocked / lying | 7 / 3.5 m/s; 1.0-2.7 s | database |
 | Throw | median 3.0 m (p10-p90 2.3-6.0) | measured: the knock probe battle, below |
@@ -139,22 +143,46 @@ Mainly: men killed per health in thinned units (20-40 % and < 20 %) come nearer 
 -> 1.26 (the one blow share 0.35 was measured one on one; in whole battles it overshoots), on nearly broken ones 1.08 ->
 0.66. Contact at the rectangle's level (0.90 / 0.89).
 
+### The attack clock (the swing probe)
+
+The melee probe's `swing` plan (`build/charge-probe/runs/20261016-213837`, one battle, 5 lanes): units cut to 5 and 1
+men (`kill_number_of_men`), both sides attacking from 3 m, health and the men's places every 0.1 s
+(`python -m tools.nn.fighters.swingdata`). Hits - the drops of a unit's health between samples; man-seconds - men
+within reach (3.15 m) of an enemy. In all 91 hits (77 drops) in 1,020 man-seconds: "a swing every interval" (p /
+interval) expects 76 (game / it 1.20 +- 0.21 by hits, 1.01 by drops), "a miss of 0.5 s" 167 (0.55). By lane 0.63-1.96
+(few hits each). One battle was enough: the two rules are 2x apart, the error +-21 %.
+
+The column "men, swing" - no share 0.35, the clock "a swing every interval" (below, "Attack clock"):
+
+| Number | Rectangle | Men, share 0.35 | Men, swing |
+|---|---|---|---|
+| Melee, damage, all | 0.89 | 1.20 | 1.37 [1.32-1.43] |
+| ... health > 85 % / 60-85 % / < 20 % | 0.85 / 0.86 / 1.08 | 1.26 / 1.26 / 0.66 | 1.51 / 1.42 / 0.70 |
+| A thinned unit (< 30 %), damage on it | 1.03 | 0.85 | 0.95 [0.88-1.02] |
+| Men killed per health, melee, all / < 20 % | 0.86 / 0.66 | 0.79 / 1.19 | 0.87 / 1.29 |
+| Men killed per health, under fire, all | 0.58 | 0.62 | 0.65 |
+| Routs begun | 0.97 | 1.03 | 1.21 |
+
+One on one in the probes the swing every interval meets the game (damage 15-30 s / steady 1.00 / 1.02); in whole
+battles the damage is above the game: probably the opening of every clash - each man who first reaches an enemy
+swings at once (the probes 0-1 / 0-2 s 1.58 / 1.39 of the game) - and whole battles have many clashes. Open.
+
 ### Melee probes
 
 112 lanes of 11 plans of the melee probe (`tools/nn/charge_probe.py`: reform, reform2, dmgmelee, damaged, wave, armour,
 defender, fresh, meleeorders, recontact, busycharge), each lane's twin 4 copies. Mean |log(sim / game)| over lanes and
 the sum sim / game:
 
-| What | Rectangle | Men |
-|---|---|---|
-| Target's HP at 0-1 s | 0.90 (0.61) | 0.53 (0.83) |
-| Target's HP at 0-5 s | 0.60 (0.63) | 0.38 (0.86) |
-| Target's HP at 5-15 s | 0.20 (0.94) | 0.27 (0.90) |
-| Target's HP at 15-30 s | 0.29 (1.11) | 0.30 (0.92) |
-| Target's HP a second, steady | 0.31 (1.03) | 0.34 (0.92) |
-| Target's men killed at 0-10 s | 1.63 (0.34) | 0.46 (0.90) |
-| Target's men killed at 15-30 s | 0.39 (1.34) | 0.37 (1.10) |
-| Attacker's men killed at 5-15 s | 2.49 (0.14) | 0.83 (0.69) |
+| What | Rectangle | Men, share 0.35 | Men, swing |
+|---|---|---|---|
+| Target's HP at 0-1 s | 0.90 (0.61) | 0.53 (0.83) | 0.63 (1.58) |
+| Target's HP at 0-5 s | 0.60 (0.63) | 0.38 (0.86) | 0.42 (1.35) |
+| Target's HP at 5-15 s | 0.20 (0.94) | 0.27 (0.90) | 0.36 (0.85) |
+| Target's HP at 15-30 s | 0.29 (1.11) | 0.30 (0.92) | 0.27 (1.00) |
+| Target's HP a second, steady | 0.31 (1.03) | 0.34 (0.92) | 0.29 (1.02) |
+| Target's men killed at 0-10 s | 1.63 (0.34) | 0.46 (0.90) | 0.50 (1.37) |
+| Target's men killed at 15-30 s | 0.39 (1.34) | 0.37 (1.10) | 0.40 (1.19) |
+| Attacker's men killed at 5-15 s | 2.49 (0.14) | 0.83 (0.69) | 0.59 (0.95) |
 
 The shape from the men's places (game / men, lane means; the rectangle is its box: depth 12.2 m, width 28.6 m
 always): men within reach 3.15 m at 1-3 / 5-10 / 20-40 / 90-240 s 48 / 38 / 23 / 16 and 37 / 34 / 22 / 15; the front
@@ -246,8 +274,9 @@ of memory; 46 battles at once and several jobs in parallel took 12 GB.
 
 ## Not there
 
-- Why a man in reach strikes a third as often as the formula (`blow_share`); candidates - the matched-combat animations
-  (database `matched_combat_*_percentage`), the blow animation's own time, men in reach that do not attack.
+- The damage in whole battles with "a swing every interval" is 1.37 of the game: the opening of a clash (who strikes
+  at once at contact) - to measure with the `swing` probe by the moments of the first health drops after contact; a
+  random phase of the clock on entering a fight gave 0.35 of the game at 0-1 s (too little) - kept "ready at once".
 - The share thrown by a spell is 2-5x below the game's (the knock probe battle): how the game throws men beyond the
   blast radius is not found.
 - The ellipse body (wolf rats) - the men are circles; the Ratling Gun's burst - at most 2 shots a man a step; a flat
