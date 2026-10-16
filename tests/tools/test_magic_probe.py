@@ -47,7 +47,7 @@ def test_the_magic_battle_file_gives_the_casters_their_spell_and_innate_abilitie
 
 def test_the_magic_plan_casts_on_held_targets_and_logs_the_winds():
     plan = cp.battles("magic")
-    assert len(plan) == 3 and all(len(b) == 4 for b in plan)
+    assert len(plan) == 4 and all(len(b) == 4 for b in plan)
     for i, b in enumerate(plan, 1):
         config, model_s, arena = cp.run_config("magic", i)
         assert config["winds_ms"] == 1000 and config["men_ms"] == 1000 and config["men_near_m"] >= 300
@@ -64,6 +64,51 @@ def test_the_magic_plan_casts_on_held_targets_and_logs_the_winds():
     assert {s["side"]: (s["current"], s["reserve"]) for s in b2["winds_set"]} == {1: (30, 40), 2: (30, -60)}
     b3 = cp.battles("magic")[2]
     assert [ln["gap_m"] for ln in b3] == [mp.GAP_M, mp.FAR_M, mp.GAP_M, mp.GAP_M] and mp.FAR_M > 200 > mp.GAP_M + 20
+
+
+def test_battle_4_puts_a_friend_of_the_caster_right_behind_each_target():
+    config, _, arena = cp.run_config("magic", 4)
+    assert {s["side"]: s["current"] for s in config["winds_set"]} == {1: 30, 2: 30}
+    for ln in config["lanes"]:
+        (e,) = ln["extras"]
+        side = "own_" if ln["attacker"].startswith("own_") else "enemy_"
+        assert e["name"].startswith(side) and not ln["target"].startswith(side)      # the caster's side, not the target's
+        e_depth = cp.depth(cp.UNITS[e["short"]][0], cp.UNITS[e["short"]][1], e["width"])
+        # behind the target (away from the caster: -z), its front friend_gap_m from the target's back
+        assert e["dz"] == pytest.approx(-(ln["t_depth"] / 2 + ln["friend_gap_m"] + e_depth / 2), abs=0.06)
+        assert ln["t_width"] == mp.FRIEND_T_W and ln["friend_gap_m"] in mp.FRIEND_GAPS_M
+        assert [c["at_s"] for c in ln["casts"]][:2] == [10, 50]
+
+
+def test_friend_after_takes_the_strike_window_less_the_melee_rate():
+    # the friend loses 10 HP a second throughout (the melee) and 500 more between 6 and 8 s after a try at 20 s
+    rows = []
+    for k in range(0, 81):
+        t = k / 2
+        hp = 8000 - 10 * t - 500 * min(max(t - 26, 0), 2) / 2
+        rows.append((t, [{"hp": hp, "men": 120, "m": True}]))
+    (f,) = mp.friend_after({"extras": rows}, 20.0)
+    w = mp.STRIKE_S[1] - mp.STRIKE_S[0]
+    assert f["hp"] == round(500 + 10 * w) and f["hp_net"] == pytest.approx(500, abs=0.1) and f["fight"]
+    assert mp.friend_after({}, 20.0) == []
+
+
+def test_a_drop_of_two_casts_goes_to_both_lanes_that_tried(tmp_path):
+    lanes = [{"name": n, "attacker": f"own_goldwiz_{i}", "target": f"enemy_clanrat_{i}", "mode": "cast", "kind": n,
+              "gap_m": 120, "target_mode": "hold"} for i, n in ((1, "L1"), (2, "L2"))]
+    (tmp_path / "manifest.json").write_text(json.dumps({"config": {"plan": "magic", "battle": 4, "lanes": lanes}}),
+                                            encoding="utf-8")
+    rows = [{"event": "probe_ability", "lane": n, "who": "a", "key": "sd", "tg": "x", "n": 1, "t": 10000,
+             "status": "given"} for n in ("L1", "L2")]
+    for k in range(0, 41):
+        rows.append({"event": "probe_sample", "lanes": [{"lane": n, "t": k * 500, "a": {"hp": 3420, "men": 1},
+                                                          "tg": {"hp": 9600, "men": 160}} for n in ("L1", "L2")]})
+    for s in range(0, 21):
+        rows.append({"event": "probe_winds", "t": s * 1000, "s1": {"cur": 42 - (12 if s >= 11 else 0)},
+                     "s2": {"cur": 42}})
+    (tmp_path / "events.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    casts = mp.measure(tmp_path)["casts"]
+    assert sorted(c["lane"] for c in casts) == ["L1", "L2"] and all(c["cost"] == 6 for c in casts)
 
 
 def _run(tmp_path):

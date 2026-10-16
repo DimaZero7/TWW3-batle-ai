@@ -42,6 +42,11 @@ run.py --armies v2 and AI-vs-AI battles) draws the numbers of units first (Gener
 4. the other side buys for that army's cost x its share / the first's share, +-TOLERANCE, with its drawn number of
    units, or the nearest number that can (fewer when even its cheapest units are too dear);
    the pools' and the factions' budget_max do not apply (the market of 19 units does).
+
+Casters (both schemes, config/nn/pools.json "mages", share 0 by default - then no draw is made): with that probability
+a battle gives each side its faction's caster (the Gold Wizard, the Warlock Engineer) beside the lord, on top of its
+army, with exactly his spells (Generator.add_mages). A side a script plays loses its caster when the battle starts
+(tools/nn/sim/magic.py leave_scripted: no script casts).
 """
 import math
 
@@ -223,6 +228,9 @@ class Generator:
         self.budget_max = P.budget_max() if pools is None else None
         self.rare = P.budget_rare() if pools is None else (0.0, None)
         self.v2 = P.armies_v2()
+        # the casters (pools.json "mages"; given pools: none): that share of battles gives each side its faction's
+        # caster (add_mages)
+        self.mage_share, self.mages = P.mages() if pools is None else (0.0, {})
         self.max_units = max_units
         self.base = base or arena_scenario.load_arena()
         self._markets = {}
@@ -293,6 +301,22 @@ class Generator:
             arena["sides"][side] = {"faction": faction, "army": army, "budget": round(side_budget),
                                     "cost": pool.lord.cost + sum(u.cost for u in units),
                                     "units": placement.place(pool.lord, units, arena["deployment_m"])}
+        return self.add_mages(rng, arena)
+
+    def add_mages(self, rng, arena):
+        """The casters (pools.json "mages"): with probability mage_share each side gets its faction's caster beside
+        the lord (placement.hero), with exactly his spells in the battle file (special_abilities: tools/nn/scenario.py
+        capabilities) and his cost on top of the side's (both sides at once: the gold stays as even as the two
+        casters' costs). Share 0 (the default): no draw, the arena as before. In place; returns the arena."""
+        if self.mage_share <= 0 or rng.random() >= self.mage_share:
+            return arena
+        for side in arena["sides"].values():
+            mage = self.mages.get(side["faction"])
+            if mage is None:
+                continue
+            side["units"].append(placement.hero(mage.unit, side["units"][0], spells=mage.spells))
+            side["cost"] += mage.unit.cost
+            side["mage"] = mage.unit.key
         return arena
 
     def count(self, rng, max_units=None):
@@ -369,7 +393,7 @@ class Generator:
                                     "budget": round(budget[side]),
                                     "cost": pool.lord.cost + sum(u.cost for u in units),
                                     "units": placement.place(pool.lord, units, arena["deployment_m"])}
-        return arena
+        return self.add_mages(rng, arena)
 
 
 _DEFAULT = None

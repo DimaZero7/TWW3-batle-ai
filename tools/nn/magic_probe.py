@@ -14,7 +14,12 @@ spells' 200 m), nobody else ordered.
             Lightning on swordsmen and greatswords (P2, P3 damage by armour);
   battle 3  the cast's rules and a moving target (P2, P4): Searing Doom on clanrats walking at the caster, Warp
             Lightning ordered on spearmen out of range (260 m: does the caster walk in?), the stormvermin and the
-            swordsmen again (a second sample).
+            swordsmen again (a second sample);
+  battle 4  friendly hits: each target (held, 45 m wide: a shallow block) has a unit of the caster's own side right
+            behind it (extras: halted, fearless, never ordered), its front FRIEND_GAPS_M (2 / 5 m) from the target's
+            back; two casts a lane (10 s, then from 50 s); both sides +30 current winds. What a bombardment's projectiles
+            and explosions take from the caster's own men standing near its target (the passports' can_damage_allies /
+            affects_allies: true for both spells).
 
 Every lane samples both units every 0.5 s (men, health), the soldiers' places every 1 s and each side's winds every
 1 s (probe_winds). The casters' abilities are exactly the spell and their innate ones (tools/nn/scenario.py
@@ -25,6 +30,7 @@ capabilities).
     python -m tools.nn.magic_probe [runs...] [--out build/magic/probe.json]   # the casts, the winds, the damage
     python -m tools.nn.magic_probe runs... --sim [--copies 8] [--set wounds='"even"']   # + the simulator's twin
                                     # (tools/nn/sim/magic.py; needs torch: bash tools/nn/dock.sh tools.nn.magic_probe ...)
+    python -m tools.nn.magic_probe <battle-4 run> --friendly [--copies 8]   # the friendly hits, game against twin
 """
 import argparse
 import json
@@ -44,9 +50,13 @@ FAR_M = 260              # ... and out of it (battle 3)
 WINDS_MS = 1000
 MEN_NEAR_M = 400         # the soldiers' places whenever caster and target are this close (always: no contact)
 # battle -> the scripted winds at the start: [{side (1 Empire, 2 Skaven), current, reserve}] (amounts added)
-WINDS_SET = {2: [{"side": 1, "current": 30, "reserve": 40}, {"side": 2, "current": 30, "reserve": -60}]}
+WINDS_SET = {2: [{"side": 1, "current": 30, "reserve": 40}, {"side": 2, "current": 30, "reserve": -60}],
+             4: [{"side": 1, "current": 30, "reserve": 0}, {"side": 2, "current": 30, "reserve": 0}]}
+FRIEND_GAPS_M = (2, 5)   # battle 4: the friend's front to the target's back
+FRIEND_T_W = 45          # battle 4: the targets' frontage (a shallow block: the friend within the strikes' reach)
 WINDOWS = ((0, 2), (2, 4), (4, 6), (6, 8), (8, 12), (12, 20))   # s after the cast (its winds drop)
 DROP = 2.5               # a fall of the side's current winds this big in one second is a cast
+SPELL_COST = 6           # both spells' mana_cost (the passports): a drop of 12 in one second is two casts
 
 
 def tries(first_s, from_s, to_s, every_s=1):
@@ -79,7 +89,20 @@ def battles():
           caster(WARLOCK, "spear", [5], gap_m=FAR_M, max_s=100, kind="b3_wl_far"),
           caster(GOLD, "svsh", [20], max_s=100, kind="b3_sd_svsh"),
           caster(WARLOCK, "swords", [30], max_s=100, kind="b3_wl_swords")]
-    return [b1, b2, b3]
+    b4 = [friendly(GOLD, "clanrat", "spear", FRIEND_GAPS_M[0]), friendly(GOLD, "slave", "swords", FRIEND_GAPS_M[1]),
+          friendly(WARLOCK, "spear", "clanrat", FRIEND_GAPS_M[0]), friendly(WARLOCK, "swords", "slave", FRIEND_GAPS_M[1])]
+    return [b1, b2, b3, b4]
+
+
+def friendly(who, target, friend, gap_m, max_s=120):
+    """A battle-4 lane: the caster's own unit `friend` right behind his target, its front gap_m from the target's back
+    (the target FRIEND_T_W wide, the friend cp.WIDTH_M; both facing away from each other: the friend faces as the
+    caster does), two casts (10 s, then a try every second from 50 to 90 s)."""
+    t_depth = cp.depth(cp.UNITS[target][0], cp.UNITS[target][1], FRIEND_T_W)
+    e_depth = cp.depth(cp.UNITS[friend][0], cp.UNITS[friend][1], cp.WIDTH_M)
+    extra = {"short": friend, "dx": 0.0, "dz": -round(t_depth / 2 + gap_m + e_depth / 2, 1), "width": cp.WIDTH_M}
+    return caster(who, target, tries(10, 50, 90), max_s=max_s, t_w=FRIEND_T_W, extras=[extra], friend_gap_m=gap_m,
+                  kind=f"b4_{'sd' if who == GOLD else 'wl'}_{target}_ff{gap_m}")
 
 
 def config_extra(index):
@@ -160,6 +183,35 @@ def damage_after(samples, t_cast, windows=WINDOWS):
             "windows": out}
 
 
+STRIKE_S = (4.0, 11.0)   # s after the try: the window a strike's damage lies in (the first hit ~5.5-6 s, Searing Doom's
+#                          last ~9.5 s: probe1.md)
+BASE_S = 6.0             # s before the try: the melee's own rate (battle 4: the friend fought the target throughout)
+
+
+def friend_after(lane, t_cast, strike=STRIKE_S, base_s=BASE_S):
+    """The caster's own units near the target (battle 4's extras), each: {"hp", "men" - lost in the strike window
+    (STRIKE_S after t_cast), "hp_net", "men_net" - the same less the loss at the rate of the base_s before the try (the
+    melee's own: the friend and the target fight), "fight" - in melee in the window}; samples lane["extras"]
+    [(t, [row])]; [] without extras."""
+    rows = lane.get("extras") or []
+    if not rows:
+        return []
+    t = np.array([r[0] for r in rows])
+    out = []
+    for j in range(len(rows[0][1])):
+        rec = {"fight": any(bool((r[1][j] or {}).get("m")) for r in rows
+                            if t_cast + strike[0] <= r[0] <= t_cast + strike[1])}
+        for key in ("hp", "men"):
+            v = np.array([np.nan if (r[1][j] or {}).get(key) is None else float(r[1][j][key]) for r in rows])
+            lost = cp.at(t, v, t_cast + strike[0]) - cp.at(t, v, t_cast + strike[1])
+            rate = (cp.at(t, v, t_cast - base_s) - cp.at(t, v, t_cast)) / base_s
+            rec[key] = None if np.isnan(lost) else round(float(lost))
+            net = lost - (rate if np.isfinite(rate) else 0.0) * (strike[1] - strike[0])
+            rec[f"{key}_net"] = None if np.isnan(net) else round(float(net), 1)
+        out.append(rec)
+    return out
+
+
 def measure(run_dir):
     """Rows of one run: per lane its casts (from the side's winds drops, matched to the lane's last try before them)
     with the damage after each; per side the winds."""
@@ -177,18 +229,23 @@ def measure(run_dir):
                        "casts": drops, "winds": winds_summary(magic["winds"], side, [d[1] for d in drops])}
         for t_drop, cost in drops:
             # the lane of this side whose try came last before the drop's sample (its given tries only; a try in the same
-            # second as the sample is taken as after it: battle 1, the first try at 40 s showed at the 41 s sample)
-            best = None
+            # second as the sample is taken as after it: battle 1, the first try at 40 s showed at the 41 s sample); a
+            # drop of several casts' cost (battle 4: two casters a side cast at the same second) goes to as many lanes
+            # whose last try is that late
+            last = []
             for ln in by_side.get(side, []):
                 ts = [a["t"] / 1000 for a in ln["abilities"] if a.get("status") == "given" and a["t"] / 1000 < t_drop - 0.25]
-                if ts and (best is None or max(ts) > best[1]):
-                    best = (ln, max(ts))
-            if best is None:
+                if ts:
+                    last.append((max(ts), ln))
+            if not last:
                 continue
-            ln, t_try = best
-            rows.append({"run": ln["run"], "battle": ln["battle"], "lane": ln["spec"]["name"],
-                         "kind": ln["spec"].get("kind"), "side": side, "try_s": round(t_try, 1), "drop_s": t_drop,
-                         "cost": cost, **damage_after(ln["samples"], t_try)})
+            last.sort(key=lambda x: -x[0])
+            n = max(1, round(cost / SPELL_COST))
+            for t_try, ln in [x for x in last if x[0] >= last[0][0] - 0.5][:n]:
+                rows.append({"run": ln["run"], "battle": ln["battle"], "lane": ln["spec"]["name"],
+                             "kind": ln["spec"].get("kind"), "side": side, "try_s": round(t_try, 1), "drop_s": t_drop,
+                             "cost": round(cost / n, 3), **damage_after(ln["samples"], t_try),
+                             "friends": friend_after(ln, t_try)})
     mages = {k: {f: v for f, v in m.items() if f in ("u", "active", "passive", "magic", "can", "cco")}
              for k, m in magic["mages"].items()}
     return {"run": Path(run_dir).name, "casts": rows, "sides": sides, "mages": mages}
@@ -334,7 +391,7 @@ def sim_report(run_dirs, copies=4, device="cpu", params=None, out=None):
     params = sim_params(params)
     rows = []
     for run in run_dirs:
-        lanes = [ln for ln in cp.load_run(run) if ln["spec"].get("mode") == "cast"
+        lanes = [ln for ln in cp.load_run(run) if ln["spec"].get("mode") == "cast" and not ln["spec"].get("extras")
                  and any(a.get("status") == "given" for a in ln["abilities"])]
         if not lanes:
             continue
@@ -408,6 +465,126 @@ def sim_report(run_dirs, copies=4, device="cpu", params=None, out=None):
     return rows, summary
 
 
+def _row_at(rows, t):
+    """The sample row (rows [(t, row)]) nearest t."""
+    return min(rows, key=lambda r: abs(r[0] - t))[1]
+
+
+def friendly_cases(run_dir):
+    """Battle 4's casts as the twin's starting points: [{kind, spell, try_s, caster, target, friend (rows at the try:
+    x, z, b, men), widths, game: friend_after}] (the units where the game had them at the try)."""
+    lanes = {ln["spec"]["name"]: ln for ln in cp.load_run(run_dir) if ln["spec"].get("extras")}
+    out = []
+    for c in measure(run_dir)["casts"]:
+        ln = lanes.get(c["lane"])
+        if ln is None or not ln.get("extras"):
+            continue
+        spec = ln["spec"]
+        smp = [(s[0], s) for s in ln["samples"]]
+        s = _row_at(smp, c["try_s"])
+        e = _row_at(ln["extras"], c["try_s"])[0]
+        out.append({"kind": c["kind"], "spell": SPELL[GOLD] if "_sd_" in c["kind"] else SPELL[WARLOCK],
+                    "try_s": c["try_s"], "caster": (spec["a_key"], s[1], spec["a_width"]),
+                    "target": (spec["t_key"], s[2], spec["t_width"]),
+                    "friend": (cp.UNITS[spec["extras"][0]["short"]][0], e, spec["extras"][0].get("width") or cp.WIDTH_M),
+                    "game": c["friends"][0], "target_game": c["windows"]})
+    return out
+
+
+def friendly_twin(cases, params, copies=8, device="cpu", strike=STRIKE_S):
+    """The simulator on battle 4's casts: each case twice (with the cast at 0 s and without: a control), copies each;
+    the caster, his target and his friend where the game had them at the try, held, fearless, 30 current winds. Per
+    case {"hp", "men"}: what the cast took from the friend in the strike window (STRIKE_S after the order) - the cast's
+    copies less the control's (the melee the boxes may start is the same in both)."""
+    import torch
+    from tools.nn.sim import battle, magic, orders as O, scenario as sim_scenario
+    armies, meta = [], []
+    for i, c in enumerate(cases):
+        sides = {1: {"faction": cp.EMP, "ai": False, "units": []}, 2: {"faction": cp.SKV, "ai": False, "units": []}}
+        for key, row, width in (c["caster"], c["friend"], c["target"]):
+            fac = 1 if cp.FACTION[key] == cp.EMP else 2
+            sides[fac]["units"].append({"key": key, "x": row["x"], "z": row["z"], "b": row["b"], "men": row["men"],
+                                        "width": width, "general": False})
+        for cast in (True, False):
+            for _ in range(copies):
+                armies.append({"attacker": 1, "sides": sides})
+                meta.append((i, cast))
+    st = sim_scenario.build(armies, params, device=device, per_side=2)
+    B, N = st.B, st.N
+    a_side = torch.tensor([0 if cp.FACTION[cases[i]["caster"][0]] == cp.EMP else 1 for i, _ in meta], device=device)
+    a_slot, f_slot, t_slot = a_side * 2, a_side * 2 + 1, (1 - a_side) * 2
+    b_idx = torch.arange(B, device=device)
+    st.u["leadership"] = st.u["leadership"] + 1e4
+    st.u["morale"] = st.u["morale"] + 1e4
+    st.u["wm_cur"] = torch.where(st.u["side"] > 0, torch.full_like(st.u["wm_cur"], 30.0), st.u["wm_cur"])
+    casting = torch.tensor([cast for _, cast in meta], device=device)
+    asked = {"done": False}
+    hp_f, men_f = [], []
+
+    def policy(st):
+        o = O.hold(B, N, device)
+        slot = torch.full_like(o.kind, -1)
+        target = torch.full_like(o.kind, -1)
+        if not asked["done"]:
+            slot[b_idx, a_slot] = torch.where(casting, torch.zeros_like(a_slot), torch.full_like(a_slot, -1))
+            target[b_idx, a_slot] = t_slot
+            asked["done"] = True
+        magic.request(st.u, slot, target)
+        return o
+
+    def record(st):
+        hp_f.append((float(st.t.max()), st.u["hp_abs"][b_idx, f_slot].tolist(), st.u["men"][b_idx, f_slot].tolist()))
+
+    battle.run(st, policy, params, until_s=strike[1] + 1.0, record=record)
+    t = np.array([r[0] for r in hp_f])
+    hp = np.array([r[1] for r in hp_f])          # [T, B]
+    men = np.array([r[2] for r in hp_f])
+    i0, i1 = int(np.abs(t - strike[0]).argmin()), int(np.abs(t - strike[1]).argmin())
+    lost_hp, lost_men = hp[i0] - hp[i1], men[i0] - men[i1]
+    out = []
+    for i in range(len(cases)):
+        on = [b for b, (j, cast) in enumerate(meta) if j == i and cast]
+        off = [b for b, (j, cast) in enumerate(meta) if j == i and not cast]
+        out.append({"hp": float(lost_hp[on].mean() - lost_hp[off].mean()),
+                    "men": float(lost_men[on].mean() - lost_men[off].mean()),
+                    "hp_control": float(lost_hp[off].mean())})
+    return out
+
+
+def friendly_report(run_dirs, copies=8, device="cpu", params=None, out=None):
+    """Battle 4: what each cast took from the caster's own unit behind its target, the game (less the melee's own rate)
+    against the twin (less its control); per spell the sums."""
+    params = sim_params(params, blows=False)
+    cases = [c for r in run_dirs for c in friendly_cases(r)]
+    if not cases:
+        print("no battle-4 casts")
+        return [], {}
+    twin = friendly_twin(cases, params, copies=copies, device=device)
+    print(f"{'cast':<22}{'try':>6} {'friend HP game':>14} {'(raw)':>7} {'twin':>7}  {'men game':>8} {'twin':>6}  fight")
+    rows = []
+    for c, tw in zip(cases, twin):
+        g = c["game"]
+        rows.append({"kind": c["kind"], "spell": c["spell"], "try_s": c["try_s"], "game_hp": g["hp_net"],
+                     "game_hp_raw": g["hp"], "game_men": g["men_net"], "twin_hp": tw["hp"], "twin_men": tw["men"],
+                     "twin_hp_control": tw["hp_control"], "fight": g["fight"]})
+        print(f"{c['kind']:<22}{c['try_s']:>6.1f} {g['hp_net']:>14.0f} {g['hp']:>7.0f} {tw['hp']:>7.0f}  "
+              f"{g['men_net']:>8.1f} {tw['men']:>6.1f}  {g['fight']}")
+    summary = {}
+    for spell in sorted({r["spell"] for r in rows}):
+        sel = [r for r in rows if r["spell"] == spell]
+        summary[spell] = {"casts": len(sel), "game_hp": sum(r["game_hp"] for r in sel),
+                          "twin_hp": sum(r["twin_hp"] for r in sel), "game_men": sum(r["game_men"] for r in sel),
+                          "twin_men": sum(r["twin_men"] for r in sel)}
+        s = summary[spell]
+        print(f"{spell}: {s['casts']} casts, friend HP game {s['game_hp']:.0f} twin {s['twin_hp']:.0f}, men game "
+              f"{s['game_men']:.1f} twin {s['twin_men']:.1f}")
+    if out:
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        Path(out).write_text(json.dumps({"rows": rows, "summary": summary}, ensure_ascii=False, indent=1),
+                             encoding="utf-8")
+    return rows, summary
+
+
 def report(run_dirs, out=None):
     docs = [measure(r) for r in run_dirs]
     for d in docs:
@@ -434,6 +611,8 @@ def main(argv=None):
     parser.add_argument("runs", nargs="*", type=Path, help="run folders (default: the charge probe's magic runs)")
     parser.add_argument("--out", type=Path)
     parser.add_argument("--sim", action="store_true", help="the simulator's twin of the casts beside the game's")
+    parser.add_argument("--friendly", action="store_true",
+                        help="battle 4: the friendly hits, the game's against the twin's (friendly_report)")
     parser.add_argument("--copies", type=int, default=4)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
@@ -442,12 +621,15 @@ def main(argv=None):
     sys.stdout.reconfigure(encoding="utf-8")
     run_dirs = args.runs or [r for r in cp.runs() if json.loads((r / "manifest.json").read_text(encoding="utf-8"))
                              ["config"].get("plan") == "magic"]
-    if args.sim:
+    if args.sim or args.friendly:
         params = None
         if args.set:
             from tools.nn.sim.params import load
             params = load().with_cal("magic", **{k: json.loads(v) for k, v in (a.split("=", 1) for a in args.set)})
-        sim_report(run_dirs, copies=args.copies, device=args.device, params=params, out=args.out)
+        if args.friendly:
+            friendly_report(run_dirs, copies=args.copies, device=args.device, params=params, out=args.out)
+        else:
+            sim_report(run_dirs, copies=args.copies, device=args.device, params=params, out=args.out)
     else:
         report(run_dirs, args.out)
     return 0

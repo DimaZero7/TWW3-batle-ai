@@ -650,7 +650,8 @@ Warp Lightning (both bombardments). What the game showed: the `magic` probe (`to
 whatever its size, and stops when it is empty (the database's `restored_points_base` 0.1; the probe: +1 every 10 s).
 No cap on the current pool was found (the database's 30; the probe 42-43 and rising): none.
 
-**A cast** (`magic.request(u, slot, target)`; the network and `ai_like` do not give it yet):
+**A cast** (`magic.request(u, slot, target)`; the network does not give it yet, the scripts do not cast - a script
+side's caster leaves the battle at the start, `leave_scripted`, [armies](armies.md#casters)):
 
 | Rule | Number | Source |
 |---|---|---|
@@ -705,11 +706,29 @@ nearer 1):
 The casts' spread (root mean square of the log ratio): HP 0.18-0.20, Warp Lightning's dead 0.25, Searing Doom's 0.56.
 Between the twin's runs the ratios move +-0.05 (random hits); two equal casts on one target differ +-20 % in the game.
 
+**Friendly hits** (the `magic` probe's battle 4, 1 battle, 12 casts, `python -m tools.nn.magic_probe <run> --friendly`):
+a unit of the caster's own side stands behind the target (2 or 5 m behind its back). In the game they started a melee
+at once (at 5 m too), so the friend's losses in the strike window (4-11 s after the order) are taken less the melee's
+rate over the 6 s before the cast. The twin puts all three where the game had them at the cast and counts the cast
+less the same battle without it.
+
+| Spell | Lost by the friend, game (less the melee / all) | Twin | Men, game / twin |
+|---|---:|---:|---:|
+| Searing Doom (6 casts, the 2 first with damage) | 2573 / 3265 HP | 3103 HP | 21 / 21 |
+| Warp Lightning (6 casts, 3 with damage) | 296 / 1775 HP | 4948 HP | 10 / 62 |
+
+Searing Doom on friends is as the game's. Warp Lightning on friends is several times stronger in the twin: in the
+three casts with damage the friend lost 5-18 men in the game (all, with the melee), 13-25 in the twin from the
+lightning alone. A guess (not checked): the game's bolts aim at the target's men (the projectile's
+`marksmanship_bonus` 30, `spread` 0, `calibration_area` 1 m - an accurate shot; Searing Doom's 0, 5 and 10 m) rather
+than fall round its centre as in the simulator; friends get only the explosion. To check on the recorded men
+(`extra_men`): where the friend's dead lay.
+
 Open: (1) on a whole unit's first cast Searing Doom kills 1.8x the game's in the twin (the game: 4 / 7 / 8 / 19 men),
 on the second fewer; the per-man replay on the recorded places gives the same - a mechanism is missing (the game does
 not give single men's health); (2) armour against Searing Doom: the game's stormvermin (armour 90) lose 0.57-0.77 of
-the slaves' (armour 0), the twin's 0.8; (3) casting in melee and on the move, the game AI's magic, the network with
-magic - not done.
+the slaves' (armour 0), the twin's 0.8; (3) Warp Lightning on friends near the target - several times the game's in
+the twin (above); (4) casting in melee and on the move, the game AI's magic, the network with magic - not done.
 
 ## Contact effects and the Ratling Gun's burst
 

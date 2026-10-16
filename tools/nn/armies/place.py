@@ -67,6 +67,19 @@ def place(lord, units, deployment_m=300.0):
     return out
 
 
+HERO_GAP_M = 10.0        # a hero (a caster) stands this far to the lord's right, centre to centre
+
+
+def hero(unit, lord, spells=None):
+    """The unit dict of a hero (pools.Unit, one man) placed beside the placed lord (place()'s first dict): his row,
+    HERO_GAP_M to his right; spells: the hero's exact abilities in the battle file ("special_abilities")."""
+    out = {"slot": unit.slot, "key": unit.key, "men": unit.men, "forward": lord["forward"],
+           "lateral": round(lord["lateral"] + HERO_GAP_M, 1), "width": unit.width}
+    if spells is not None:
+        out["special_abilities"] = list(spells)
+    return out
+
+
 def footprint(unit, depth):
     """(forward min, forward max, lateral min, lateral max) a placed unit covers, m."""
     return (unit["forward"] - depth, unit["forward"], unit["lateral"] - unit["width"] / 2,

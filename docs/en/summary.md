@@ -138,7 +138,10 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
   +0.1 a second), a cast on request that walks into its 200 m range, a 1 s wind-up and the cooldown from the effect's
   end; the bombardments Searing Doom (Gold Wizard) and Warp Lightning (Warlock Engineer) by the target's formation
   density and the friends near it, the landings gathering at the centre. The probe's twin (17 casts): HP 0.84 / 0.97
-  of the game's, dead 1.05 / 1.10 (sums; Searing Doom / Warp Lightning). The network and `ai_like` do not cast yet.
+  of the game's, dead 1.05 / 1.10 (sums; Searing Doom / Warp Lightning). Friendly hits near the target (the probe's
+  battle 4): Searing Doom as the game's, Warp Lightning several times more in the twin. The network and the scripts do
+  not cast yet; casters in the armies sit behind the `mages` switch, off ([armies](training/armies.md#casters)); the
+  scripts' sides get none.
 - **Not modelled:** terrain, forest, visibility, cavalry, monsters, other magic, flight, artillery, experience.
 
 **Checks against the game.** A recorded battle is replayed by its recorded orders 19 times with the start

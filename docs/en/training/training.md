@@ -676,6 +676,8 @@ The network decides itself when its lord uses an ability, like a player
 - only the scripted opponents' lords fire by the simulator's game-AI rule: `Battles.by_rule`
   (`tools/nn/sim/abilities.py` `set_rule`), set again after every restart, because a battle from
   the bank brings `scenario.build`'s default (side 2 by the rule);
+- the scripts do not cast: there, after `set_rule`, a script side's caster leaves the battle (`tools/nn/sim/magic.py`
+  `leave_scripted`; casters in the armies are off for now - [armies](armies.md#casters));
 - a stored decision keeps only the packed state of the slots in use, the bitmask of "effects on me from others"
   instead of their 28 token columns, and the battle's bank row; `rollout.full_obs` puts the rest back in the update
   (the whole input would be ~3 GB for 1024 battles × 64 decisions; [model](model.md#model));

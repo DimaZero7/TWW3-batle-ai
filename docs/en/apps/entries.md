@@ -208,7 +208,7 @@ name any Empire or Skaven unit by its database key: the passport from `config/nn
 missile damage); a `shoot` lane's attacker row is a shooter's (ammo, fire flag, damage dealt).
 Analysis: `python -m tools.nn.unit_probe [folders]` - per plan and lane kind the mean (min-max); `--sim` - the
 simulator's twin on the same lanes beside it (game | sim).
-Magic before the simulator (`tools/nn/magic_probe.py`, `build/magic/plan.md`): plan `magic`, 3 battles of 4 lanes. In
+Magic before the simulator (`tools/nn/magic_probe.py`, `build/magic/plan.md`): plan `magic`, 4 battles of 4 lanes. In
 a lane a spellcaster (the Gold Wizard: Searing Doom; the Warlock Engineer: Warp Lightning) stands 120 m in front of
 its target, the target holds (`hold`, fearless). Attacker mode `cast`: no orders, at each second of `casts`
 `perform_special_ability(key, the target)` (event `probe_ability`: the try, `can_perform_special_ability`, the side's
@@ -219,9 +219,12 @@ winds (`apps.battle.winds`: current, reserve, `rate`) and the caster's CCO field
 (`BattleAbilityList.At(i).IsActive / RechargePercent`); `winds_set`: winds added by script at the start
 (`probe_winds_set`). Battle 1: the game's winds, a cast at 40 s and a try every second (the cooldown), casters
 without the list (the defaults); battle 2: scripted winds (+30 current both sides, reserve +40 / -60), targets with
-and without armour; battle 3: a target walking at the caster, a target out of range (260 m), repeats. Table:
-`python -m tools.nn.magic_probe [runs]` - the casts by the winds' falls, their cost, the target's health and men lost
-by windows after the cast, the winds' flow; with `--sim` the simulator's twin beside the game's, cast by cast (the
+and without armour; battle 3: a target walking at the caster, a target out of range (260 m), repeats; battle 4:
+friendly hits - behind each target (45 m wide) a unit of the caster's side (`extras`, 2 / 5 m behind its back), two
+casts a lane, +30 current both sides. Table: `python -m tools.nn.magic_probe [runs]` - the casts by the winds' falls
+(a fall of two casts in one second goes to two lanes), their cost, the target's health and men lost by windows after
+the cast, the friend's losses (`friends`), the winds' flow; with `--sim` the simulator's twin beside the game's, cast
+by cast; with `--friendly` the friendly hits, the game's against the twin's (the
 [simulator's magic](../training/simulator.md#magic)).
 
 Every 0.5 s `probe_sample` per lane: men, health (CCO `HealthValue`), melee / moving / running flags, place,

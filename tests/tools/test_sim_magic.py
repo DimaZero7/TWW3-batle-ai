@@ -187,6 +187,37 @@ def test_the_strike_falls_where_a_walking_target_was_at_the_launch():
     assert z_at[0.5] - float(st.u["bm0_z"][0, a]) > 1.0
 
 
+def test_a_scripted_sides_caster_leaves_and_the_networks_stays():
+    # battle 0: the Empire's caster on side 1 (a network), battle 1: the same with side 1 scripted; side 2 always a
+    # script with its own caster beside clanrats
+    def army():
+        return {"attacker": 1, "sides": {
+            1: {"faction": "wh_main_emp_empire", "units": [{"key": GOLD, "x": 0.0, "z": -120.0, "b": 0.0},
+                                                          {"key": SPEAR, "x": 40.0, "z": -100.0, "b": 0.0}]},
+            2: {"faction": "wh2_main_skv_skaven", "units": [{"key": CLANRAT, "x": 0.0, "z": 0.0, "b": 180.0},
+                                                           {"key": WARLOCK, "x": 0.0, "z": 120.0, "b": 180.0}]}}}
+    st = scenario.build([army(), army()], P, per_side=2)
+    by_script = torch.tensor([[False, True], [True, True]])
+    magic.leave_scripted(st.u, by_script)
+    u = st.u
+    gold, spear, clanrat, warlock = 0, 1, 2, 3
+    assert int(u["side"][0, gold]) == 1 and float(u["men"][0, gold]) == 1 and int(u["sp0"][0, gold]) >= 0
+    for b, slot in ((0, warlock), (1, warlock), (1, gold)):
+        assert int(u["side"][b, slot]) == 0 and float(u["men"][b, slot]) == 0 and int(u["sp0"][b, slot]) == -1
+    assert int(u["side"][1, spear]) == 1 and float(u["men"][1, spear]) == 120        # the other units stay
+    assert int(u["side"][0, clanrat]) == 2
+    before = {k: v.clone() for k, v in u.items() if torch.is_tensor(v)}
+    magic.leave_scripted(st.u, by_script)                                              # again: nothing changes
+    assert all(torch.equal(before[k], u[k]) for k in before)
+    # the network's caster still casts on battle 0 (the bombardment strikes the clanrats)
+    st0 = scenario.build([army()], P, per_side=2)
+    magic.leave_scripted(st0.u, torch.tensor([[False, True]]))
+    st0.u["leadership"] = st0.u["leadership"] + 1e4
+    st0.u["morale"] = st0.u["morale"] + 1e4
+    rec = run(st0, gold, clanrat, until=12.0)
+    assert rec[-1][1] < rec[0][1] - 500
+
+
 def test_magic_off_changes_nothing():
     st, a, tg = duel(GOLD, CLANRAT, p=params(on=0))
     rec = run(st, a, tg, until=12.0, p=params(on=0))

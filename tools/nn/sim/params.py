@@ -237,9 +237,15 @@ def _read(path):
 
 @lru_cache(maxsize=4)
 def load(units=None, rules=None, sim=None, abilities=None, effects=None):
-    """Params from the five files (defaults: config/nn/); the spells are abilities.json's own section."""
+    """Params from the five files (defaults: config/nn/); the spells are abilities.json's own section. With the default
+    units the casters the armies field (config/nn/pools.json "mages" with a share above 0; their passports in
+    data/units/probe-units.json) join them; with the share 0 (the default) nothing joins (and the step skips magic)."""
     ab = _read(abilities or CONFIG / "abilities.json")
-    return Params(units=_read(units or CONFIG / "units.json")["units"],
+    extra = {}
+    if units is None:
+        from tools.nn.armies import pools
+        extra = pools.mage_passports()
+    return Params(units={**extra, **_read(units or CONFIG / "units.json")["units"]},
                   rules=_read(rules or CONFIG / "game_rules.json"),
                   sim=_read(sim or CONFIG / "sim.json"),
                   abilities=ab["abilities"],

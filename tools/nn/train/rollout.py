@@ -74,6 +74,7 @@ from tools.nn.model.decide import to_orders
 from tools.nn.model.frame import Frame
 from tools.nn.sim import abilities as sim_abilities
 from tools.nn.sim import battle
+from tools.nn.sim import magic as sim_magic
 from tools.nn.sim import orders as O
 from tools.nn.sim import state as S
 from tools.nn.sim.params import load
@@ -485,6 +486,7 @@ class Battles:
     def start(self):
         self.st, self.setup, idx = open_rows(self.source, self.want)
         sim_abilities.set_rule(self.st.u, self.by_rule)
+        sim_magic.leave_scripted(self.st.u, self.by_rule)     # the scripts' sides field no caster
         self.bank_row = idx.clone()
         self.bounds2 = torch.cat([self.setup.bounds, self.setup.bounds])
         every = torch.ones(self.B, dtype=torch.bool, device=self.device)
@@ -990,6 +992,7 @@ class Battles:
         self.last_hit = torch.where(finished, torch.full_like(self.last_hit, -1.0), self.last_hit)
         self.hit_rate = torch.where(finished, torch.zeros_like(self.hit_rate), self.hit_rate)
         sim_abilities.set_rule(self.st.u, self.by_rule)
+        sim_magic.leave_scripted(self.st.u, self.by_rule)     # the scripts' sides field no caster
         mcommit.reset(self.cstate, torch.cat([finished, finished]))
         self.bank_row = torch.where(finished, idx, self.bank_row)
         self.battle_slot = torch.where(finished, torch.full_like(self.battle_slot, self.active), self.battle_slot)

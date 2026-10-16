@@ -218,6 +218,35 @@ shares by chance, and 60% keeps at least 40% of the army in melee to screen the 
 units. Missile stacks stay in the random armies — the network must be able to play
 against them too.
 
+## Casters
+
+The `mages` switch in `pools.json` (`generate.add_mages`, `pools.mages`). It is **off** now (`share` 0): the network
+does not see magic yet, and the battles are the same as without it (no extra draw is made). With `share` > 0 a battle
+gets casters with that probability: each side its faction's caster beside the lord (in his row, 10 m to his right),
+**on top of** its army:
+
+| Faction | Caster | Spell (level 1) | Cost |
+|---|---|---|---:|
+| Empire | Gold Wizard (`wh3_dlc25_emp_cha_wizard_metal`) | Searing Doom | 250 |
+| Skaven | Warlock Engineer (`wh2_main_skv_cha_warlock_engineer`) | Warp Lightning | 400 |
+
+- Both sides get theirs at once, so the gold differs only by the costs' difference (150 in an Empire-Skaven battle).
+- In the battle file a caster has exactly his spells (`special_abilities` -> `<unit_capabilities>`,
+  `tools/nn/scenario.py`; without the list a caster has his whole lore) and his innate abilities. The spells come from
+  the caster's passport (`spells`).
+- The casters' passports are in `data/units/probe-units.json`, not in `config/nn/units.json` (that would change the
+  network's ability table). The simulator takes them only while the switch is on (`tools/nn/sim/params.py`).
+- **A side a script plays has no caster.** The scripts (`ai_like` and the others) do not cast, and a caster would be a
+  dead unit. So at every battle start such a side's caster leaves the battle: his slot becomes empty
+  (`tools/nn/sim/magic.py` `leave_scripted`, called by `rollout.py` beside `set_rule` and by the scripts-against-scripts
+  battles of `evaluate.py`). The network keeps its caster: in self-play and against past versions, both sides.
+
+The casters' cards are checked against the game and the database: health 3420 for both is right (the database:
+`bonus_hit_points` 3412 + 8 of the man, one hero template; in battle the card's `HealthValue` was 3420 on all four of
+the probe's casters). The Warlock Engineer has no missile weapon: the database gives his unit none and no ammunition
+(`primary_missile_weapon` empty, `primary_ammo` 0); his shot is the Doomrocket ability (one rocket, 90 s cooldown), not
+a pistol. Missile resistance 15 % on both, as the card (fandom).
+
 ## Deployment
 
 `place.py` puts a side's 1–20 units in lines, in the format of `config/nn/arenas.json`:

@@ -28,6 +28,7 @@ import torch
 from tools.nn.model import factions as fac
 from tools.nn.sim import abilities as sim_abilities
 from tools.nn.sim import check, scenario
+from tools.nn.sim import magic as sim_magic
 from tools.nn.sim import orders as O
 from tools.nn.sim import state as S
 from tools.nn.train import behaviour, checkpoint, league, matchups, randomise, reward, rollout, scenes, skill
@@ -834,6 +835,7 @@ def script_battles(names, n_pairs, max_units=19, limit_s=3600.0, device="cpu", c
                           compile=compile, source=source)
     ctrl = torch.as_tensor(np.stack([code, code], 1), device=env.device)
     sim_abilities.set_rule(env.st.u, torch.ones_like(ctrl, dtype=torch.bool))     # both sides by the game-AI rule
+    sim_magic.leave_scripted(env.st.u, torch.ones_like(ctrl, dtype=torch.bool))   # no caster: scripts both
     if first is not None and first < n_pairs:
         keep = env.narrow(np.concatenate([i * n_pairs + np.arange(first) for i in range(len(names))]))
         ctrl, n_pairs, seeds = ctrl[keep], first, seeds[:first]

@@ -255,6 +255,59 @@ def armies_v2(path=None):
     return {"counts": counts, "ceiling": (low, high)}
 
 
+PROBE_PASSPORTS = project.ROOT / "data" / "units" / "probe-units.json"
+
+
+@dataclass(frozen=True)
+class Mage:
+    """A faction's caster for the armies (config/nn/pools.json "mages"): the unit and its spells (its passport's
+    `spells`: the battle file's <unit_capabilities> and the simulator's spell slots)."""
+    unit: Unit
+    spells: tuple
+
+
+def mages(path=None, passports_path=None, probe_path=None):
+    """(share, {faction: Mage}) of config/nn/pools.json "mages": that share of battles gives each side its faction's
+    caster beside the lord (generate.py); (0.0, {}) - never (the default: no random draw is made, every battle as
+    before). The casters' passports: config/nn/units.json, else data/units/probe-units.json (where they are today:
+    out of units.json the network's ability table and the training's units stay as they are)."""
+    doc = json.loads((path or POOLS).read_text(encoding="utf-8"))
+    m = doc.get("mages") or {}
+    share = float(m.get("share", 0.0))
+    assert 0.0 <= share <= 1.0, f"mages share {share}"
+    if share <= 0:
+        return 0.0, {}
+    known = {**mage_passports_of(m, probe_path),
+             **json.loads((passports_path or PASSPORTS).read_text(encoding="utf-8"))["units"]}
+    out = {}
+    for faction, key in (m.get("units") or {}).items():
+        assert key in known, f"mages: {key} has no passport"
+        spells = tuple(known[key].get("spells") or ())
+        assert spells, f"mages: {key} has no spells in its passport"
+        unit = dataclasses.replace(_unit({"key": key, "width": 5.0}, known, "mage"), slot="mage")
+        out[faction] = Mage(unit=unit, spells=spells)
+    return share, out
+
+
+def mage_passports_of(m, probe_path=None):
+    """{key: passport} of the casters of a "mages" section found in data/units/probe-units.json."""
+    path = probe_path or PROBE_PASSPORTS
+    if not path.exists():
+        return {}
+    probe = json.loads(path.read_text(encoding="utf-8"))["units"]
+    return {k: probe[k] for k in (m.get("units") or {}).values() if k in probe}
+
+
+def mage_passports(path=None, probe_path=None):
+    """The casters' passports the simulator needs beside config/nn/units.json when the armies field them (share > 0;
+    tools/nn/sim/params.py load); {} otherwise: without a caster among the units the simulator skips magic."""
+    doc = json.loads((path or POOLS).read_text(encoding="utf-8"))
+    m = doc.get("mages") or {}
+    if float(m.get("share", 0.0)) <= 0:
+        return {}
+    return mage_passports_of(m, probe_path)
+
+
 def mix(path=None):
     """{"template": share, "random": share} of armies (config/nn/pools.json "mix")."""
     doc = json.loads((path or POOLS).read_text(encoding="utf-8"))

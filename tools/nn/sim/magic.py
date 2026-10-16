@@ -121,6 +121,30 @@ def start(u, params):
         u[f"sp{k}_cd"] = T[u[f"sp{k}"], COL["initial_s"]].clone()
 
 
+def leave_scripted(u, by_script):
+    """The casters (a spell in a slot) of the sides a script plays leave the battle before it starts: no script casts
+    (opponents.py), and a caster that never casts would be a dead unit of its army (the user, 16.10.2026: the scripts'
+    armies get no caster; the network meets magic in self-play and past versions). by_script [B, 2] bool (side 1, side
+    2; rollout.py by_rule). A caster that leaves is an empty slot (side 0, no men), as the slots no unit fills. Call it
+    after every restart (the bank's rows bring the casters back). In place; a no-op without casters."""
+    if "sp0" not in u:
+        return
+    caster = (u["sp0"] >= 0) | (u["sp1"] >= 0)
+    if not bool(caster.any()):
+        return
+    side = u["side"]
+    rule = by_script.to(torch.bool)
+    gone = caster & (((side == 1) & rule[:, 0:1]) | ((side == 2) & rule[:, 1:2]))
+    if not bool(gone.any()):
+        return
+    for name in ("side", "men", "men0", "hp", "hp_abs", "hp0"):
+        if name in u:
+            u[name] = torch.where(gone, torch.zeros_like(u[name]), u[name])
+    for name in ("sp0", "sp1", "cast_k", "cq_k"):
+        u[name] = torch.where(gone, torch.full_like(u[name], -1), u[name])
+    u["lord"] = u["lord"] & ~gone
+
+
 def request(u, slot, target):
     """Ask the units to cast: slot [B, N] - the spell slot (0..SLOTS-1, -1 none), target [B, N] - the unit to cast at
     (a slot of the state's layout). Taken by the next step (steer); in place."""
