@@ -17,7 +17,9 @@ Options:
 `-LingerSeconds` (after the result keep the game open this long, or until the user closes it, then
 clean up as usual; 0 by default), `-Graphics ultra|low|lowigpu|human2k` (a graphics preset for this run only:
 `ultra` [below](#a-battle-played-by-a-human); `low` the lightest game in a small window, for measurements;
-`lowigpu` `low` on the integrated GPU; `human2k` [a human against the network](#a-human-against-the-network)).
+`lowigpu` `low` on the integrated GPU; `human2k` [a human against the network](#a-human-against-the-network)),
+`-GamePriority Normal|AboveNormal|High` and `-FastCores on|off` (the game process's priority and fast cores,
+[below](#game-process-priority-and-fast-cores)).
 To watch the network command our side, use
 [watching the network](watch.md): it starts the companion and calls this launcher.
 
@@ -37,7 +39,8 @@ To watch the network command our side, use
    `used_mods.txt` is never touched.
 5. Sets Normal difficulty for the battle ([below](#fair-difficulty)).
 6. Starts `Warhammer3.exe game_startup_mode battle <scenario>; <mods>;` and
-   records the PID.
+   records the PID. Right after the start it sets the game process's priority and fast cores
+   ([below](#game-process-priority-and-fast-cores)).
 7. Reads the event log while the game writes it and prints key lines.
 8. Waits for completion: `result` (`probe_done` for `map-capture`). Stops on
    `error` / `probe_error` / `skipped`, process exit, a new crash report or timeout.
@@ -55,7 +58,7 @@ To watch the network command our side, use
 | File | Contents |
 |---|---|
 | `manifest.json` | The build that played |
-| `launch.json` | PID, time, arguments, log offset, earlier log bytes moved (`stale_log_bytes`), battle difficulty |
+| `launch.json` | PID, time, arguments, log offset, earlier log bytes moved (`stale_log_bytes`), battle difficulty, the game's priority and cores (`game_priority`, `game_affinity`) |
 | `events.jsonl` | Events of this run |
 | `events.before.jsonl` | Only if the game-folder log was not empty at the start: its earlier lines |
 | `status.json` | `completed` / `lua_error` / `timeout` / `process_exited` / `crash_report`, cleanup and preferences outcome, `event_log` (`removed` / `absent` / `kept: <reason>`) |
@@ -85,6 +88,37 @@ is in `launch.json` (`battle_difficulty`, `user_battle_difficulty`), the result 
 `launch.json`: the starting morale is the same at both difficulties
 ([battle difficulty](../game/difficulty.md)). The arena's analysis takes only such battles
 (`tools/nn/gamedata.runs`).
+
+## Game process: priority and fast cores
+
+A big battle (thousands of men) is bound by one game thread, the one that computes the battle itself: it is busy
+97-98 % of one core while the GPU is at 20-30 %. Other load on the CPU (Docker, training) costs the battle 30-40 %
+of its speed. So right after the game starts the launcher (`tools/launcher/game_process.ps1`):
+
+- gives the game process **priority High**: the game gets the CPU before containers and training;
+- on a hybrid CPU (fast P cores and efficient E cores, like Intel 12th-14th gen) **keeps the game on the P cores
+  only** (both threads of each core). Cores are told apart by the Windows efficiency class
+  (`GetLogicalProcessorInformationEx`): P cores have the highest class. On the i9-13900HK these are 6 P cores,
+  logical 0-11, mask `0xFFF`; the E cores 12-19 are left to Docker and the rest. On a non-hybrid CPU the cores
+  are not changed (`not hybrid`).
+
+While it loads, the game puts its own priority back to Normal; the cores stay. So the launcher sets High again on
+every poll of the event log (`status.json`: `game_priority_resets`, usually 1).
+
+**What it gives: measured, nothing.** The full 17x20 battle (4686 men), 300 game seconds, the network, the RTX: with
+it 83 and 85 s of real time, without it 75 and 85 s; beside a 6-core load in Docker 106 s both with and without it.
+The load slows the battle not by taking the CPU from the game (free cores remain) but because the laptop shares one
+power budget among its cores and lowers the clocks: the mean clock is 139 % of base without the load, 120 % with it.
+Priority and cores do not help here; only an empty machine during the battle does. The setting stays on: no harm
+was seen, and under a direct fight for cores (many containers on every core) it gives the game room.
+
+Only the game process's own properties change; the power plan and other system settings are never touched. A failure
+here does not stop the battle: `launch.json` records what was set (`game_priority`, `game_affinity`) or why not (`failed: ...`).
+
+On by default. To turn it off or change it: the options `-GamePriority` / `-FastCores off`, the environment variables
+`BAI_GAME_PRIORITY` / `BAI_FAST_CORES` (this is how [watching the network](watch.md) gets them too), the keys
+`game_priority` / `game_fast_cores` in `config/local.json` (defaults in `config/default.json`: `High`, `true`). Order:
+the option, then the environment, then the config. Test: `tests/tools/test_launcher_game_process.py`.
 
 ## Required mod: True Sight
 
@@ -208,3 +242,5 @@ the reset of 30.09.2026):
 ## Limits
 
 - Graphics presets: only `ultra`, `low`, `lowigpu` and `human2k` (`tools/launcher/preferences.ps1`).
+- One copy of the game per Windows session: a second `Warhammer3.exe` shows "Mutex error - Another instance of Total
+  War: WARHAMMER 3 is running" and closes. One copy at low takes about 4 GB of RAM and 1.4 GB of video memory.
