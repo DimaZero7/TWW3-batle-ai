@@ -10,6 +10,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from tools.nn.armies import generate
+from tools.nn.sim import abilities as sim_abilities
 from tools.nn.sim import battle, scenario
 from tools.nn.sim.params import load
 from tools.nn.train import drills as D
@@ -111,6 +112,9 @@ class TestMeter:
     def _play(self, script, enemy, n=4):
         descs = [d for d, _ in K.armies(range(100, 100 + n))]
         st = scenario.build(descs)
+        # Both sides play by script here: no game-AI rule, so no skirmish mode (its shooters
+        # would back off on their own and the naive script would count as running).
+        sim_abilities.set_rule(st.u, torch.zeros(st.B, 2, dtype=torch.bool))
         ks = torch.tensor([d["kite_side"] for d in descs])
         params = load()
         m = K.Meter(st.B, st.N, "cpu")
