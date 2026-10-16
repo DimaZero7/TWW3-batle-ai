@@ -1,0 +1,220 @@
+"""The fighters lab (tools/nn/fighters): the men match their units, the formation's places, the file closing up, the
+neighbour search, a blow and a projectile land on one man, overkill is lost, the lab runs inside the simulator's step
+and leaves the simulator alone outside it. Needs torch: run in the container."""
+import math
+
+import pytest
+
+torch = pytest.importorskip("torch")
+
+from tools.nn.fighters import cells, hook, melee as FM, missile as FS, state as S  # noqa: E402
+from tools.nn.sim import battle, geometry, melee, replay, scenario  # noqa: E402
+from tools.nn.sim.params import load  # noqa: E402
+
+P = load().with_cal("noise", blows=False)
+EMP, SKV = "wh_main_emp_empire", "wh2_main_skv_skaven"
+SWORDS, CLANRATS, ARCHERS = "wh_main_emp_inf_swordsmen", "wh2_main_skv_inf_clanrats_1", "wh2_dlc13_emp_inf_archers_0"
+
+
+def army(units1, units2):
+    """units: [(key, x, z, bearing, men or None)]."""
+    def side(faction, units):
+        return {"faction": faction, "units": [{"key": k, "x": x, "z": z, "b": b, "width": 30,
+                                               **({"men": m} if m else {})} for k, x, z, b, m in units]}
+    return {"attacker": 1, "sides": {1: side(EMP, units1), 2: side(SKV, units2)}}
+
+
+def build(a, B=1):
+    with hook.installed() as h:
+        st = scenario.build([a] * B, P)
+        return st, h.F
+
+
+def test_men_match_units_and_form_up():
+    st, F = build(army([(SWORDS, 0, 0, 0, None)], [(CLANRATS, 0, 60, 180, 100)]))
+    u = st.u
+    live = S.alive(F)
+    men = S.unit_count(F, live, st.N)
+    assert torch.equal(men, u["men"])                          # 120 swordsmen, 100 of 160 clanrats alive
+    hp = S.unit_sum(F, torch.where(live, F.hp, torch.zeros_like(F.hp)), st.N)
+    assert torch.allclose(hp, u["hp_abs"], atol=0.6)
+    assert float(F.hp[0][live[0] & (F.uid[0] == 0)].max()) == float(u["hp_man"][0, 0])
+    # the swordsmen's men: 20 files 1.48 m apart (30 m // 1.48), 6 ranks 1.6 m apart, round the unit's centre
+    px, pz = S.positions(F, u)
+    m = live[0] & (F.uid[0] == 0)
+    xs, zs = px[0][m], pz[0][m]
+    assert abs(float(xs.mean())) < 0.05 and abs(float(zs.mean())) < 0.05
+    assert abs(float(xs.max() - xs.min()) - 19 * 1.48) < 1e-3
+    assert abs(float(zs.max() - zs.min()) - 5 * 1.6) < 1e-3
+    assert float(zs.max()) > 3.9                                # the front rank ahead (facing +z, bearing 0)
+
+
+def test_the_man_behind_steps_up():
+    st, F = build(army([(SWORDS, 0, 0, 0, None)], [(CLANRATS, 0, 60, 180, None)]))
+    live = S.alive(F)
+    r0 = S.rank_now(F, live)
+    # kill the front man of the first file: the man behind him takes rank 0, the file closes up
+    front = live & (F.uid == 0) & (F.file == 0) & (F.rank0 == 0)
+    behind = live & (F.uid == 0) & (F.file == 0) & (F.rank0 == 1)
+    F.hp = torch.where(front, torch.zeros_like(F.hp), F.hp)
+    r1 = S.rank_now(F, S.alive(F))
+    assert float(r0[behind]) == 1 and float(r1[behind]) == 0
+    other = live & (F.uid == 0) & (F.file == 1) & (F.rank0 == 1)
+    assert float(r1[other]) == 1
+
+
+def test_conform_kills_the_most_wounded_and_sets_health():
+    st, F = build(army([(SWORDS, 0, 0, 0, None)], [(CLANRATS, 0, 60, 180, None)]))
+    u = st.u
+    live = S.alive(F)
+    sw = torch.nonzero(live[0] & (F.uid[0] == 0)).squeeze(1)
+    F.hp[0, sw[:5]] = 10.0                                      # five badly wounded swordsmen
+    u["men"][0, 0] = 115.0
+    u["hp_abs"][0, 0] = 115 * 69 - 300.0
+    S.conform(F, u)
+    live = S.alive(F)
+    assert int((live[0] & (F.uid[0] == 0)).sum()) == 115
+    assert not bool(live[0, sw[:5]].any())                      # they died
+    hp = float(F.hp[0][live[0] & (F.uid[0] == 0)].sum())
+    assert abs(hp - (115 * 69 - 300.0)) < 1.0
+
+
+def test_cells_find_every_neighbour_within_the_cell():
+    g = torch.Generator().manual_seed(0)
+    x = torch.rand((2, 400), generator=g) * 60
+    z = torch.rand((2, 400), generator=g) * 60
+    valid = torch.ones((2, 400), dtype=torch.bool)
+    t = cells.Table(x, z, valid, 3.6, 4096)
+    cand = t.query(x, z, 40)
+    d = torch.sqrt((x[:, :, None] - x[:, None, :]) ** 2 + (z[:, :, None] - z[:, None, :]) ** 2)
+    want = d <= 3.6
+    got = torch.zeros((2, 400, 401), dtype=torch.bool)
+    got.scatter_(2, torch.where(cand >= 0, cand, torch.full_like(cand, 400)), torch.ones_like(cand, dtype=torch.bool))
+    assert bool((got[..., :400] | ~want).all())                 # nothing within 3.6 m is missed
+
+
+def _melee_pair(gap_m):
+    """Swordsmen and clanrats front to front gap_m apart (their front men), each attacking the other."""
+    a = army([(SWORDS, 0, 0, 0, None)], [(CLANRATS, 0, 0, 180, None)])
+    st, F = build(a)
+    u = st.u
+    N = st.N
+    # the front ranks gap_m apart along z (the swordsmen face +z, the clanrats -z)
+    px, pz = S.positions(F, u)
+    live = S.alive(F)[0]
+    sw_front = float(pz[0][live & (F.uid[0] == 0)].max())
+    cr_front = float(pz[0][live & (F.uid[0] == N // 2)].min()) - float(u["z"][0, N // 2])
+    u["z"][0, N // 2] = sw_front + gap_m - cr_front
+    return st, F
+
+
+def test_a_blow_needs_reach_and_lands_on_one_man():
+    st, F = _melee_pair(2.0)
+    u = st.u
+    lab = dict(hook.LAB)
+    lab["melee"] = dict(lab["melee"], blow_share=1.0)
+    near = hook.Near(F, u, lab)
+    N = st.N
+    permit = torch.zeros((1, N, N), dtype=torch.bool)
+    permit[0, 0, N // 2] = True                                 # only the swordsmen may strike
+    pw = geometry.pairwise(u, 1.5)
+    hp, men = FM.resolve(F, u, P, lab, permit, pw, torch.zeros_like(u["men"]), 0.5, near)
+    # the first rank's 20 men are within reach (2.0 m < 2.5 + 0.65), the second (3.6 m) is not
+    assert float(men[0, 0, N // 2]) == 20
+    assert float(hp[0, N // 2, 0]) == 0                         # the clanrats were not allowed to strike
+    struck = F.pend[0] > 0
+    assert bool((F.uid[0][struck] == N // 2).all())             # only clanrats took damage
+    assert float(F.pend[0].max()) <= 60.0 + 1e-4                # a man takes at most his health (overkill lost)
+    assert abs(float(F.pend[0].sum()) - float(hp[0, 0, N // 2])) < 1e-3
+
+
+def test_no_blow_out_of_reach():
+    st, F = _melee_pair(4.0)
+    u = st.u
+    near = hook.Near(F, u, hook.LAB)
+    N = st.N
+    permit = torch.ones((1, N, N), dtype=torch.bool)
+    pw = geometry.pairwise(u, 1.5)
+    hp, men = FM.resolve(F, u, P, hook.LAB, permit, pw, torch.zeros_like(u["men"]), 0.5, near)
+    assert float(hp.sum()) == 0 and float(men.sum()) == 0
+
+
+def test_a_projectile_hits_one_man_of_the_unit_in_its_path():
+    # archers shoot at clanrats 100 m off; swordsmen stand 4 m in front of the clanrats on the line of fire: some of the
+    # projectiles aimed at the clanrats fall on the swordsmen's men (friendly fire from the geometry, no rule)
+    a = army([(ARCHERS, 0, 0, 0, None), (SWORDS, 0, 86, 0, None)], [(CLANRATS, 0, 100, 180, None)])
+    st, F = build(a, B=2)
+    u = st.u
+    near = hook.Near(F, u, hook.LAB)
+    N = st.N
+    shots = torch.zeros((2, N))
+    shots[:, 0] = 90.0
+    target = torch.full((2, N), -1, dtype=torch.long)
+    target[:, 0] = N // 2
+    hp, traced, wanted = FS.fire(F, u, P, hook.LAB, shots, target, near, 0.5)
+    assert traced == wanted and traced > 150
+    on_clan, on_friend = float(hp[:, 0, N // 2].sum()), float(hp[:, 0, 1].sum())
+    assert on_clan > 0 and on_friend > 0
+    # a hit is one man's: never beyond his health (overkill lost)
+    hit = F.pend > 0
+    assert bool((F.pend[hit] <= F.hp[hit] + 1e-4).all())
+    assert int(hit.sum()) < traced                              # misses, shields, two arrows on one man
+
+
+def test_the_lab_runs_in_the_step_and_the_simulator_is_left_alone():
+    a = army([(SWORDS, -15, 0, 90, None), (ARCHERS, -60, 0, 90, None)], [(CLANRATS, 15, 0, 270, None)])
+    orig = (battle.step, melee.strikes, geometry.contact_limit, scenario.build)
+    with hook.installed() as h:
+        st = scenario.build([a] * 2, P)
+        F = h.F
+        for _ in range(60):
+            battle.step(st, replay.nearest_attack(st), P, P.dt)
+        live = S.alive(F)
+        assert torch.equal(S.unit_count(F, live, st.N), st.u["men"])
+        assert float(st.u["hp"][:, st.N // 2].max()) < 1.0      # the clanrats were hurt
+        assert bool(st.u["m"][:, 0].all())                       # the men's contact lit the melee flag
+        # a copy (the step replay's probe step) runs the plain simulator
+        probe = st.clone()
+        battle.step(probe, replay.nearest_attack(probe), P, P.dt)
+    assert (battle.step, melee.strikes, geometry.contact_limit, scenario.build) == orig
+    assert not math.isnan(float(st.u["hp_abs"].sum()))
+
+
+def _doom(st, n=12.0):
+    """n Searing Doom projectiles this step on the clanrats' centre, 'cast' by the swordsmen's slot (knock.bombard)."""
+    from tools.nn.sim import magic
+    u = st.u
+    N = st.N
+    u["sp0"][0, 0] = magic.keys(P).index("wh_main_spell_metal_searing_doom")
+    u["bm0_x"][0, 0], u["bm0_z"][0, 0] = u["x"][0, N // 2], u["z"][0, N // 2]
+    return [(0, torch.tensor([[0, 0]]), torch.tensor([n]))]
+
+
+def test_a_spell_knocks_men_down_and_the_lying_take_nothing():
+    from tools.nn.fighters import knock as FK
+    st, F = build(army([(SWORDS, 0, 0, 0, None)], [(CLANRATS, 0, 60, 180, None)]))
+    u = st.u
+    N = st.N
+    hp, hits = FK.bombard(F, u, P, hook.LAB, _doom(st), 0.5)
+    assert float(hp[0, 0, N // 2]) > 0 and float(hp[0, 0, 0]) == 0           # the clanrats, not the 'caster'
+    lying = F.down > 0
+    assert int(lying.sum()) > 0 and bool((F.uid[lying] == N // 2).all())
+    lo, hi = P.battle["knockdown_getting_up_delay_min"], P.battle["knockdown_getting_up_delay_max"]
+    assert float(F.down[lying].min()) >= lo and float(F.down[lying].max()) <= hi
+    # lying, they take nothing from the next projectiles
+    before = F.pend[lying].clone()
+    FK.bombard(F, u, P, hook.LAB, _doom(st, 40.0), 0.5)
+    assert torch.equal(F.pend[lying], before)
+    # ... strike nobody in melee and nobody strikes them
+    u["z"][0, N // 2] = 12.0                                    # the clanrats on the swordsmen
+    near = hook.Near(F, u, hook.LAB)
+    F.tgt = torch.full_like(F.tgt, -1)
+    permit = torch.ones((1, N, N), dtype=torch.bool)
+    FM.resolve(F, u, P, hook.LAB, permit, geometry.pairwise(u, 1.5), torch.zeros_like(u["men"]), 0.5, near)
+    assert int((F.tgt >= 0).sum()) > 0
+    assert not bool((F.tgt[lying] >= 0).any())
+    assert not bool(lying[0, F.tgt[F.tgt >= 0]].any())
+    # they get up after their time
+    for _ in range(6):
+        FK.tick(F, 0.5)
+    assert not bool((F.down > 0).any())

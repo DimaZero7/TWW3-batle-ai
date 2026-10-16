@@ -26,6 +26,13 @@ spells' 200 m), nobody else ordered.
             current winds. A strike on one man has no formation's geometry: its HP is the landings' density at the
             strike point (where the projectiles fall), the contact's and the explosion's stacking on the struck man and
             the explosion's armour, nothing else.
+  battle 6  the knock-down man by man (the fighters lab, tools/nn/fighters/knock.py; build/fighters/knock): the soldiers'
+            places every 0.1 s (KNOCK_MEN_MS) all the battle - who is thrown, how far and which way from the strike, how
+            long he lies, whether he dies lying (a later projectile) and whether a knocked unit fights on. Searing Doom on
+            held clanrats (cast at 10 s, again from 50 s) and on held skavenslaves (light men: 20 s, from 60 s); Warp
+            Lightning on held swordsmen (10 s, from 50 s) and on swordsmen in melee with clanrats that attack their back
+            from 3 m at the go (25 s, from 65 s); the control: the same melee lane without a cast. Both sides +30
+            current winds.
 
 Every lane samples both units every 0.5 s (men, health), the soldiers' places every 1 s and each side's winds every
 1 s (probe_winds). The casters' abilities are exactly the spell and their innate ones (tools/nn/scenario.py
@@ -59,7 +66,9 @@ MEN_NEAR_M = 400         # the soldiers' places whenever caster and target are t
 # battle -> the scripted winds at the start: [{side (1 Empire, 2 Skaven), current, reserve}] (amounts added)
 WINDS_SET = {2: [{"side": 1, "current": 30, "reserve": 40}, {"side": 2, "current": 30, "reserve": -60}],
              4: [{"side": 1, "current": 30, "reserve": 0}, {"side": 2, "current": 30, "reserve": 0}],
-             5: [{"side": 1, "current": 30, "reserve": 0}, {"side": 2, "current": 30, "reserve": 0}]}
+             5: [{"side": 1, "current": 30, "reserve": 0}, {"side": 2, "current": 30, "reserve": 0}],
+             6: [{"side": 1, "current": 30, "reserve": 0}, {"side": 2, "current": 30, "reserve": 0}]}
+KNOCK_MEN_MS = 100       # battle 6: the soldiers' places every 0.1 s (the knock-down's throw and getting up)
 FRIEND_GAPS_M = (2, 5)   # battle 4: the friend's front to the target's back
 FRIEND_T_W = 45          # battle 4: the targets' frontage (a shallow block: the friend within the strikes' reach)
 WINDOWS = ((0, 2), (2, 4), (4, 6), (6, 8), (8, 12), (12, 20))   # s after the cast (its winds drop)
@@ -104,7 +113,15 @@ def battles():
           caster(GOLD, "warlock", LONE_AT[1], max_s=165, kind="b5_sd_warlock"),
           caster(WARLOCK, "general", LONE_AT[0], max_s=165, kind="b5_wl_general"),
           caster(WARLOCK, GOLD, LONE_AT[1], max_s=165, kind="b5_wl_goldwiz")]
-    return [b1, b2, b3, b4, b5]
+    melee = [{"short": "clanrat", "dx": 0.0, "width": cp.WIDTH_M, "attack": True,
+              "dz": -round(cp.depth(cp.UNITS["swords"][0], cp.UNITS["swords"][1]) / 2 + 3
+                           + cp.depth(cp.UNITS["clanrat"][0], cp.UNITS["clanrat"][1]) / 2, 1)}]
+    b6 = [caster(GOLD, "clanrat", tries(10, 50, 90), max_s=120, kind="b6_sd_clanrat"),
+          caster(GOLD, "slave", tries(20, 60, 100), max_s=120, kind="b6_sd_slave"),
+          caster(WARLOCK, "swords", tries(10, 50, 90), max_s=120, kind="b6_wl_swords"),
+          caster(WARLOCK, "swords", tries(25, 65, 100), max_s=120, extras=melee, kind="b6_wl_swords_melee"),
+          caster(WARLOCK, "swords", [], max_s=120, extras=melee, kind="b6_control_melee")]
+    return [b1, b2, b3, b4, b5, b6]
 
 
 def friendly(who, target, friend, gap_m, max_s=120):
@@ -120,7 +137,11 @@ def friendly(who, target, friend, gap_m, max_s=120):
 
 def config_extra(index):
     """The entry config's magic fields of battle `index` (1-based)."""
-    return {"winds_ms": WINDS_MS, "winds_set": WINDS_SET.get(index, []), "men_ms": 1000, "men_near_m": MEN_NEAR_M}
+    out = {"winds_ms": WINDS_MS, "winds_set": WINDS_SET.get(index, []), "men_ms": 1000, "men_near_m": MEN_NEAR_M}
+    if index == 6:
+        # the knock-down's throw and getting up: the places every 0.1 s, all the battle (the melee lanes' contact too)
+        out.update(men_ms=KNOCK_MEN_MS, men_after_s=200)
+    return out
 
 
 # ---------------------------------------------------------------- the recordings

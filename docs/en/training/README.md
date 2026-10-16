@@ -15,6 +15,7 @@ the pages of the section:
 | [The game AI's student](student.md) | a v2 network taught by imitation of the game's AI from recordings: a pool opponent, a twin instead of `ai_like` |
 | [Workflow](workflow.md) | a chain step from a few parameters, the run card, leftovers between steps, the baselines' cache, step speed |
 | [Battle simulator](simulator.md) | the battle the network trains in, its checks against the game, pending changes |
+| [The fighters lab](fighters_lab.md) | every man a point with his own health, inside the simulator's step apart from training: melee, arrows, the knock-down man by man, against the game |
 | [Random armies](armies.md) | the battle generator for training and the in-game check |
 | [Unit passports](units.md) | the units' numbers from the game's database, innate effects, how to add a unit |
 | [Measurements in the game](measurements.md) | numbers from real battles the simulator is checked against |

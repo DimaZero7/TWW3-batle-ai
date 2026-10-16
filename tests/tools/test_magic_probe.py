@@ -47,10 +47,11 @@ def test_the_magic_battle_file_gives_the_casters_their_spell_and_innate_abilitie
 
 def test_the_magic_plan_casts_on_held_targets_and_logs_the_winds():
     plan = cp.battles("magic")
-    assert len(plan) == 5 and all(len(b) == 4 for b in plan)
+    assert len(plan) == 6 and all(len(b) == 4 for b in plan[:5]) and len(plan[5]) == 5
     for i, b in enumerate(plan, 1):
         config, model_s, arena = cp.run_config("magic", i)
-        assert config["winds_ms"] == 1000 and config["men_ms"] == 1000 and config["men_near_m"] >= 300
+        assert config["winds_ms"] == 1000 and config["men_near_m"] >= 300
+        assert config["men_ms"] == (mp.KNOCK_MEN_MS if i == 6 else 1000)
         for ln in config["lanes"]:
             assert ln["mode"] == "cast" and not ln["answer"] and ln["target_mode"] in ("hold", "push")
             assert all(c["key"] in (mp.SEARING_DOOM, mp.WARP_LIGHTNING) and c["tg"] == "t" for c in ln["casts"])
@@ -64,6 +65,19 @@ def test_the_magic_plan_casts_on_held_targets_and_logs_the_winds():
     assert {s["side"]: (s["current"], s["reserve"]) for s in b2["winds_set"]} == {1: (30, 40), 2: (30, -60)}
     b3 = cp.battles("magic")[2]
     assert [ln["gap_m"] for ln in b3] == [mp.GAP_M, mp.FAR_M, mp.GAP_M, mp.GAP_M] and mp.FAR_M > 200 > mp.GAP_M + 20
+
+
+def test_battle_6_samples_the_men_every_tenth_of_a_second_with_a_melee_control():
+    config, _, _ = cp.run_config("magic", 6)
+    assert config["men_ms"] == 100 and config["men_after_s"] >= 120
+    kinds = [ln["kind"] for ln in config["lanes"]]
+    assert kinds[-1] == "b6_control_melee" and config["lanes"][-1]["casts"] == []
+    melee = [ln for ln in config["lanes"] if ln.get("extras")]
+    assert len(melee) == 2 and all(ln["extras"][0]["attack"] and ln["extras"][0]["dz"] < 0 for ln in melee)
+    # a side's first casts apart (the strikes are told apart by the men's places, not by the winds)
+    for spell in (mp.SEARING_DOOM, mp.WARP_LIGHTNING):
+        first = [ln["casts"][0]["at_s"] for ln in config["lanes"] if ln["casts"] and ln["casts"][0]["key"] == spell]
+        assert len(first) == len(set(first)) == 2
 
 
 def test_battle_5_strikes_lone_men_of_two_masses_with_single_tries_after_each_cooldown():
