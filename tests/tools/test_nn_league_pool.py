@@ -190,7 +190,8 @@ class TestResume:
         assert run.resume(run.optimizer(*nets(), 1e-3), bare) is None    # nothing to resume
         other = config.preset("small", d=48, layers=2, heads=2, pointer=16, critic_d=32, critic_layers=1, critic_heads=2)
         wide = run.optimizer(policy.Actor(other), critic.Critic(other), 1e-3)
-        assert run.resume(wide, path) is None                          # other shapes: afresh
+        assert run.resume(wide, path) == state                         # other shapes: Adam afresh, the counters go on
+        assert not wide.state_dict()["state"]
 
     def test_a_run_goes_on_from_its_latest_with_adam_the_counters_and_the_shared_pool(self, tmp_path, monkeypatch):
         from tools.nn.train import run

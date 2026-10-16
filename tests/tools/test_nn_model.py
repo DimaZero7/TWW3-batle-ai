@@ -30,6 +30,13 @@ def critic_state(data):
     return {k: v for k, v in data["critic"].items() if not k.startswith("unit_value.")}
 
 
+def actor_state(data, new):
+    """A checkpoint's actor with the ability parts it lacks (policy.ABILITY_PARAMS: e.g. ability_extra, S25) taken
+    from `new`, the actor loaded from it: they start fresh there (ability_extra adds exactly 0), the same in both."""
+    fresh = {k: v for k, v in new.state_dict().items() if k.startswith(policy.ABILITY_PARAMS) and k not in data["actor"]}
+    return {**fresh, **data["actor"]}
+
+
 def model(cfg=CFG, seed=0):
     torch.manual_seed(seed)
     return policy.Actor(cfg).eval()
@@ -455,7 +462,7 @@ def test_a_checkpoint_saved_before_the_progress_inputs_acts_as_before(path):
     new, new_crit = checkpoint.load_policy(path), checkpoint.load_critic(path).eval()
     assert torch.all(progress_cols(new) == 0) and torch.all(progress_cols(new_crit) == 0)
     old, old_crit = pre_progress_networks(cfg)
-    torch.nn.Module.load_state_dict(old, data["actor"])
+    torch.nn.Module.load_state_dict(old, actor_state(data, new))
     torch.nn.Module.load_state_dict(old_crit, critic_state(data))
     setup, states = timer_states()
     same_outputs(old, new, old_crit, new_crit, setup, states, to_old=no_progress, atol=1e-4)
@@ -735,7 +742,7 @@ def test_the_it5_checkpoint_loads_and_acts_as_before_the_effects():
     new = checkpoint.load_policy(CHAIN5)
     new_crit = checkpoint.load_critic(CHAIN5)
     old, old_crit = pre_effects_networks(cfg)
-    torch.nn.Module.load_state_dict(old, data["actor"])
+    torch.nn.Module.load_state_dict(old, actor_state(data, new))
     setup, state, obs, cobs = fx_obs()
     o, c = policy.to_torch(obs), policy.to_torch(cobs)
     with torch.no_grad():
@@ -847,7 +854,7 @@ def test_a_checkpoint_saved_before_the_volley_input_acts_as_before(path):
     assert data["actor"]["encoder.unit.0.weight"].shape[1] == width
     assert torch.all(new.encoder.unit[0].weight[:, width:] == 0)
     old, old_crit = pre_volley_networks(cfg, width)
-    torch.nn.Module.load_state_dict(old, data["actor"])
+    torch.nn.Module.load_state_dict(old, actor_state(data, new))
     # the critic: in the checkpoint, or beside it (widen.py --critic-dst <stem>_critic.pt), else a fresh one
     crit_path = path.with_name(path.stem + "_critic.pt")
     crit_data = (critic_state(data) if "critic" in data else
@@ -956,7 +963,7 @@ def test_a_checkpoint_saved_before_the_fire_arc_acts_as_before(path):
     assert torch.equal(w[:, cols], data["actor"]["encoder.unit.0.weight"].to(w.dtype))
     assert torch.all(w[:, [i for i in range(ob.TOKEN) if i not in cols]] == 0)
     old, old_crit = pre_arc_networks(cfg, width)
-    torch.nn.Module.load_state_dict(old, data["actor"])
+    torch.nn.Module.load_state_dict(old, actor_state(data, new))
     crit_path = path.with_name(path.stem + "_critic.pt")
     crit_data = (critic_state(data) if "critic" in data else
                  critic_state(checkpoint.read(crit_path)) if crit_path.exists() else old_crit.state_dict())

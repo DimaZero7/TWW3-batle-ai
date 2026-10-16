@@ -139,13 +139,14 @@ def test_a_widened_checkpoint_loads_old_ones_still_load_and_training_continues(t
     assert checkpoint.load_policy(wide_path).cfg == widen.wider_config(CFG, 2)
     assert checkpoint.load_critic(wide_path).cfg.critic_d == 2 * CFG.critic_d
     assert checkpoint.load_policy(small).cfg == CFG                       # the small one as it was
-    # a run from the wide network with a small version as "past" (--pool 1: random.pt only, here the small one)
+    # a run from the wide network with a small version as "past" (--pool 1 keeps the version added last: random.pt
+    # and --init go in first, --pool-extra after them, so the pool is the small one only)
     monkeypatch.setattr(checkpoint, "DIR", tmp_path)
     monkeypatch.setattr(checkpoint, "RANDOM", small)
     args = run.parser().parse_args(["--name", "w", "--init", str(wide_path), "--battles", "4", "--steps", "2",
                                     "--updates", "4", "--minutes", "5", "--device", "cpu", "--no-eval",
                                     "--mix", '{"past": 0.5, "nearest": 0.5}', "--anchor", "0.05",
-                                    "--pool", "1", "--snapshot-every", "1",
+                                    "--pool", "1", "--pool-extra", str(small), "--snapshot-every", "1",
                                     "--bank", "8", "--max-units", "4"])
     trained, summary, out = run.train(args)
     assert summary["updates"] == 4 and trained.cfg == widen.wider_config(CFG, 2)
