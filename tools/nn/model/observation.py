@@ -41,6 +41,15 @@ The rule: the AI sees only what a human player sees.
   passive's condition holds (the innate effect's on, below). The timers of the actives' slots come from the state's
   `ab{k}_on` / `ab{k}_cd` (the simulator's first SLOTS; a slot without them is not ready). Obs.abil_ok [B, N,
   ACTIVE]: own abilities the network may use now.
+* Spells (16.10.2026, S27; the user's rule: what a player sees of magic): the side's own winds of magic, current and
+  reserve (the context's WINDS: the game's winds bar; never the enemy's); a caster's spells are slots of its abilities
+  (the last SPELLS active slots, abilities.py: their passports - both sides, the unit card lists an enemy mage's spells),
+  their timers from the state's `sp{k}_cd` / `sp{k}_on` (own units), affordable (the side's current winds at least the
+  spell's cost) and casting (own units: its cast is under way); Obs.abil_ok of a spell slot: owned, recharged, affordable,
+  not casting, the unit takes orders and some enemy may be attacked (where it falls: the target pointer; no range mask -
+  the caster walks into range, pairs.py shows how far). MAGIC (the token's last columns; own units and seen enemies):
+  casting now (the state's `cast_now`: winding up, the staff glows - not which spell nor where) and struck by a spell
+  (`bm_hit`: spell projectiles fell on it in the last step - the strikes are seen once they fall). Missing fields: 0.
 * Effects on me from others (RECEIVED, the token's last columns, 13.10.2026; own units and seen enemies: the game lists
   them among the unit's active effects): the stats the abilities of other units lay on the unit now - a friend's aura
   or cast, an enemy's - summed as the passports' allies group (an enemy's: its enemies group), abilities.received;
@@ -143,15 +152,18 @@ AIM = ("aim_first", "aim_retarget")
 # Then RECEIVED (13.10.2026, own units and seen enemies; older checkpoints: zero weights): the stat bonuses other units'
 # abilities lay on the unit now (module doc; abilities.received).
 RECEIVED = abilities.RECEIVED_NAMES
+# Then MAGIC (16.10.2026, own units and seen enemies; older checkpoints: zero weights): casting now, struck by a spell
+# (module doc).
+MAGIC = ("casting_now", "spell_strike")
 NAMES = (tuple(n for n, _ in DYNAMIC) + FLAGS + tuple(f"passport_{i}" for i in range(passport.SIZE)) + effects.NAMES
-         + VOLLEY + ARC + ORDER + WEAPON + AIM + RECEIVED)
+         + VOLLEY + ARC + ORDER + WEAPON + AIM + RECEIVED + MAGIC)
 INDEX = {n: i for i, n in enumerate(NAMES)}
 TOKEN = len(NAMES)
 # Effect pairs of the tokens of trained checkpoints before 11.10.2026 (14 effects, no WEAPON): old_columns maps them.
 OLD_EFFECTS = (14,)
 # Column groups appended at the token's end since the new units (11.10.2026), oldest first: a token without the last
 # of them keeps its columns where they are (old_columns), zeros (zero weights) for the missing ones.
-TAIL = (AIM, RECEIVED)
+TAIL = (AIM, RECEIVED, MAGIC)
 
 
 def old_columns(width):
@@ -182,7 +194,9 @@ OWN_ONLY = tuple(INDEX[n] for n, who in DYNAMIC if who == "own") + tuple(INDEX[n
 # recently, the enemy lord the same (CONTEXT_BASE: the context before the damage timers); then TIMERS:
 # the fine clock, we dealt damage yet and seconds since we last did (0 before), the enemy the same.
 # Then PROGRESS: the attacker's damage rate / RATE_MIN, it reached RATE_MIN yet, seconds since it last
-# did (the reward's idle clock).
+# did (the reward's idle clock). Then WINDS (16.10.2026): the side's own winds of magic, current and reserve /
+# abilities.WINDS_SCALE (the state's wm_cur, wm_res; 0 missing). A checkpoint without WINDS loads with zero weights
+# for them (encoder.TokenEncoder; the critic's enemy character after them keeps its weights).
 # Nothing refers to the battle's time limit (a campaign battle may have none): only time elapsed.
 # A checkpoint of the older context (a t / 3600 column after defend, no TIMERS) loads with that
 # column dropped and zero weights for TIMERS and PROGRESS; one without PROGRESS with zero weights
@@ -191,9 +205,10 @@ CONTEXT_BASE = factions.SIZE + 12
 OLD_TIME = factions.SIZE + 2   # the older context's t / 3600 column (removed)
 TIMERS = ("clock_fine", "dealt_any", "dealt_since", "taken_any", "taken_since")
 PROGRESS = ("progress_rate", "progress_any", "progress_since")
-CONTEXT = CONTEXT_BASE + len(TIMERS) + len(PROGRESS)
+WINDS = ("winds_current", "winds_reserve")
+CONTEXT = CONTEXT_BASE + len(TIMERS) + len(PROGRESS) + len(WINDS)
 CONTEXT_FULL = CONTEXT + factions.SIZE   # the critic's: + the enemy's character
-CTX = {n: CONTEXT_BASE + i for i, n in enumerate(TIMERS + PROGRESS)}
+CTX = {n: CONTEXT_BASE + i for i, n in enumerate(TIMERS + PROGRESS + WINDS)}
 
 
 @dataclass
@@ -463,7 +478,9 @@ def observe(state, setup, side, memory=None, full=False):
     aim = getattr(S, "aim", None)
     aim = m.stack([xs * 0] * len(AIM), -1) if aim is None else _f(m, aim)
     rx = _received(m, state, S, S.present if full else (own | sees), xs)
-    tokens = (_cat(m, [dyn, _f(m, S.passport), fx, late, arc[..., None], order, weapon, aim, rx], -1)
+    shown = S.present if full else (own | sees)
+    magic = m.stack([m.where(shown, _f(m, _field(state, k, xs) > 0), xs * 0) for k in ("cast_now", "bm_hit")], -1)
+    tokens = (_cat(m, [dyn, _f(m, S.passport), fx, late, arc[..., None], order, weapon, aim, rx, magic], -1)
               * _f(m, S.present)[..., None])
 
     attend = S.present & ~dead & ~(own & ~alive)
@@ -479,7 +496,8 @@ def observe(state, setup, side, memory=None, full=False):
     reached = rate_t >= 0
     progress = m.stack([m.clip(rate / RATE_MIN, 0, RATE_CAP), _f(m, reached),
                         m.where(reached, m.clip((tb[:, 0] - rate_t) / SINCE, 0, 1), rate * 0)], -1)
-    ctx = _cat(m, [ctx, lords, _f(m, timers), _f(m, progress)], -1)
+    winds = _winds(m, state, own, xs)
+    ctx = _cat(m, [ctx, lords, _f(m, timers), _f(m, progress), winds], -1)
     pos = m.stack([fwd, lat], -1) / POS
     pos = m.where(seen[..., None], pos, pos * 0)
     new = Memory(fr, last_x, last_z, last_t, seen, dead, m.where(sees, xs, xs * 0), m.where(sees, zs, zs * 0),
@@ -488,14 +506,29 @@ def observe(state, setup, side, memory=None, full=False):
     if full:   # the critic also knows the enemy's character
         other = setup.character(3 - side)
         ctx = _cat(m, [ctx, _f(m, other if m is np else m.as_tensor(other, device=x.device))], -1)
-    abil, abil_ok, abil_idx = _abilities(m, state, S, own, sees, ctrl, full, xs, fx_on)
+    abil, abil_ok, abil_idx = _abilities(m, state, S, own, sees, ctrl, full, xs, fx_on, target_ok)
     return Obs(_f(m, tokens), _f(m, ctx), own, attend, ctrl, target_ok, _f(m, pos), fr, side,
                abil, abil_ok, abil_idx), new
 
 
-def _abilities(m, state, S, own, sees, ctrl, full, like, fx_on):
+def _winds(m, state, own, like):
+    """[B, len(WINDS)] the side's own current winds and reserve / abilities.WINDS_SCALE (module doc): the state's wm_cur,
+    wm_res of its units (the same on every unit of a side; the largest over its own units); 0 when missing."""
+    cols = []
+    for k in ("wm_cur", "wm_res"):
+        v = state.get(k)
+        if v is None:
+            cols.append(like[:, 0] * 0)
+            continue
+        v = m.where(own, _f(m, v), like * 0)
+        cols.append((v.max(-1) if m is np else v.max(-1).values) / abilities.WINDS_SCALE)
+    return m.stack(cols, -1)
+
+
+def _abilities(m, state, S, own, sees, ctrl, full, like, fx_on, target_ok=None):
     """(abil [B, N, SLOTS, STATE], abil_ok [B, N, ACTIVE], abil_idx [B, N, SLOTS]): each slot's state and ability
-    (module doc). fx_on [B, N, E]: the innate effects on (effects.active; the passives' on now)."""
+    (module doc). fx_on [B, N, E]: the innate effects on (effects.active; the passives' on now); target_ok [B, N]:
+    the enemies that may be attacked now (a spell needs one to fall on; None: any)."""
     K, A = abilities.SLOTS, abilities.ACTIVE
     if getattr(S, "abil_idx", None) is None:      # a setup without abilities (e.g. an older LiveSetup):
         return None, None, None                   # no ability input at all (and nothing to store)
@@ -504,13 +537,29 @@ def _abilities(m, state, S, own, sees, ctrl, full, like, fx_on):
     idx = m.where(owned, idx, idx * 0 - 1)
     # the actives' timers: the slots the state has them for (the simulator's first SLOTS, the companion's), the rest
     # none (never ready); the passives' slots have none
-    timed = [k for k in range(A) if state.get(f"ab{k}_on") is not None and state.get(f"ab{k}_cd") is not None]
+    # (a spell slot's timers: the state's sp{j}_on / sp{j}_cd)
+    src = {k: f"ab{k}" for k in range(A)}
+    src.update({k: f"sp{j}" for j, k in enumerate(abilities.SPELL_SLOTS)})
+    timed = [k for k in range(A) if state.get(f"{src[k]}_on") is not None and state.get(f"{src[k]}_cd") is not None]
     zero = like * 0
-    on = m.stack([_f(m, state[f"ab{k}_on"]) if k in timed else zero for k in range(K)], -1)      # [B, N, K]
-    cd = m.stack([_f(m, state[f"ab{k}_cd"]) if k in timed else zero for k in range(K)], -1)
+    on = m.stack([_f(m, state[f"{src[k]}_on"]) if k in timed else zero for k in range(K)], -1)      # [B, N, K]
+    cd = m.stack([_f(m, state[f"{src[k]}_cd"]) if k in timed else zero for k in range(K)], -1)
     has_timer = m.stack([(zero == zero) if k in timed else (zero != zero) for k in range(K)], -1)
     mine = (S.present if full else own)[..., None] & owned
     ready = mine & S.abil_use & (cd <= 0) & (on <= 0) & has_timer
+    # spells: the side's current winds pay for it, the caster is not casting already; it needs an enemy to fall on
+    spell = m.stack([(zero == zero) if k in abilities.SPELL_SLOTS else (zero != zero) for k in range(K)], -1) & owned
+    cost = abilities.column("mana", idx) * abilities.WINDS_SCALE                                      # [B, N, K]
+    wm = state.get("wm_cur")
+    wm = zero if wm is None else _f(m, wm)
+    affordable = mine & spell & (wm[..., None] >= cost - 1e-4)
+    ck = state.get("cast_k")
+    ck = zero - 1 if ck is None else _f(m, ck)
+    casting_any = ck >= 0
+    casting = mine & spell & m.stack([(ck == k - abilities.SPELL_AT) if k in abilities.SPELL_SLOTS else (zero != zero)
+                                      for k in range(K)], -1)
+    foe = (zero[:, 0] == zero[:, 0]) if target_ok is None else target_ok.any(-1)                     # [B]
+    ready = m.where(spell, ready & affordable & ~casting_any[..., None] & foe[:, None, None], ready)
     vis = owned & ((S.present if full else own | sees)[..., None])
     seen_on = vis & (on > 0)
     fx = S.abil_fx
@@ -521,7 +570,8 @@ def _abilities(m, state, S, own, sees, ctrl, full, like, fx_on):
     on_now = vis & (seen_on | passive_on)
     none = zero[..., None] * 0
     state_ = m.stack([_f(m, owned), _f(m, ready), m.where(mine, m.clip(cd / abilities.RECHARGE, 0, 3), none),
-                      m.where(mine, m.clip(on / abilities.ACTIVE_S, 0, 2), none), _f(m, seen_on), _f(m, on_now)], -1)
+                      m.where(mine, m.clip(on / abilities.ACTIVE_S, 0, 2), none), _f(m, seen_on), _f(m, on_now),
+                      _f(m, affordable), _f(m, casting)], -1)
     abil_ok = (ready & own[..., None] & ctrl[..., None])[..., :A]
     return _f(m, state_), abil_ok, idx
 

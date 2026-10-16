@@ -4,6 +4,14 @@ An ability is a group of bonus bricks with their numbers (bonuses.py), its durat
 read from its passport (config/nn/abilities.json); no code per ability. A new ability of known bonus kinds is data only;
 a passport stat no brick declares is listed in Ability.unpriced (a new kind needs a new brick).
 
+A spell is an ability too (16.10.2026; its passport config/nn/abilities.json "spells"): its bricks come from what the
+passport says it does - a bombardment strikes enemies (spell_damage), friends too when its projectile or explosion
+affects allies (spell_friendly, a debuff), knocks men down when it has a projectile mass or an explosion force
+(spell_knock), and it costs winds (winds_cost, its mana, a debuff). Its mask: the caster from the cast's launch (its
+timer `on`: active_s) to the end of its effect and a second after (the last landings), the counters reading the
+simulator's own bookkeeping of the caster (bonuses.SPELL_FIELDS); a cast that never launched (out of winds, the target
+gone) gets nothing.
+
 Who gets the bonus (mask), as the simulator lays it (tools/nn/sim/abilities.py):
     self      the owner while the ability is active (its timer `on` > 0) and he is alive;
     friends   update_targets true - an aura that follows him: his side's units within range_m of him each second while
@@ -54,10 +62,33 @@ class Ability:
     update_targets: bool
     parts: tuple
     unpriced: tuple = field(default=())     # the passport's stats no brick prices (or on targets not traced)
+    spell: bool = False                     # a spell (its passport abilities.json "spells"; module doc)
+
+    @classmethod
+    def from_spell(cls, key, p, bricks):
+        """The ability of a spell's passport (an entry of abilities.json `spells`): bricks from its bombardment."""
+        b = p.get("bombardment") or {}
+        pr, ex = b.get("projectile") or {}, b.get("explosion") or {}
+        parts, unpriced = [], []
+        if b:
+            parts.append(Part("spell_damage", 1.0, ("enemies",)))
+            if pr.get("allies") or ex.get("allies"):
+                parts.append(Part("spell_friendly", 1.0, ("friends",)))
+            if (pr.get("mass") and pr.get("impact_v")) or ex.get("force"):
+                parts.append(Part("spell_knock", 1.0, ("enemies",)))
+        else:
+            unpriced.append(f"{p.get('kind', 'spell')} without a bombardment")
+        if float(p.get("mana") or 0) > 0:
+            parts.append(Part("winds_cost", float(p["mana"]), ("self",)))
+        parts = [q for q in parts if q.kind in bricks]
+        return cls(key, float(max(p.get("active_s", 0), 0)), float(max(p.get("recharge_s", 0), 0)),
+                   float(p.get("range_m") or 0), False, tuple(parts), tuple(unpriced), spell=True)
 
     @classmethod
     def from_passport(cls, key, p, bricks):
-        """The ability of passport p (an entry of abilities.json `abilities`)."""
+        """The ability of passport p (an entry of abilities.json `abilities`; a spell's: from_spell)."""
+        if "mana" in p:
+            return cls.from_spell(key, p, bricks)
         kinds = stat_kinds(bricks)
         by = {}                                  # (kind, groups) -> {(stat, how): value}
         unpriced = []
@@ -93,6 +124,19 @@ class Ability:
         S1, U = tr["alive"].shape
         o = int(tr["owner"])
         alive = tr["alive"]
+        if self.spell:
+            # the cast's window: from its launch to the end of its effect and a second after, the first such run
+            on = np.asarray(tr["on"]) > 0
+            run = on.copy()
+            run[1:] |= on[:-1]
+            first = np.zeros(S1, dtype=bool)
+            if run[1:].any():
+                s0 = 1 + int(np.argmax(run[1:]))
+                s1 = s0 + int(np.argmin(run[s0:])) if not run[s0:].all() else S1
+                first[s0:s1] = True
+            me = np.zeros((S1, U), dtype=bool)
+            me[:, o] = first
+            return {"self": me, "friends": me, "enemies": me}
         active = (np.asarray(tr["on"]) > 0) & alive[:, o]
         active[0] = False
         me = np.zeros((S1, U), dtype=bool)
@@ -146,6 +190,8 @@ class Ability:
         S1 = len(tr["alive"])
         o = int(tr["owner"])
         out = []
+        if self.spell:              # (a cast's work is its own bombardment's: no later cast is laid on the trajectory)
+            return [{} for _ in starts]
         for s0 in starts:
             s0 = int(s0)
             if s0 >= S1 - 1 or not tr["alive"][s0, o] or tr["r"][s0, o]:
@@ -166,14 +212,16 @@ class Ability:
         return out
 
 
-def abilities(passports, bricks, pressable=True):
+def abilities(passports, bricks, pressable=True, spells=None):
     """{key: Ability} of the passports (pressable: only the ones a player or the network fires - active, self-cast,
-    not fired by the game itself)."""
+    not fired by the game itself) and of the spells' passports (abilities.json "spells": all pressed)."""
     out = {}
     for k, p in passports.items():
         if pressable and (p["passive"] or p.get("auto") or not p.get("self_cast")):
             continue
         out[k] = Ability.from_passport(k, p, bricks)
+    for k, p in (spells or {}).items():
+        out[k] = Ability.from_spell(k, p, bricks)
     return out
 
 

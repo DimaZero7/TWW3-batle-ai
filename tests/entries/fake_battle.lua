@@ -143,6 +143,7 @@ function F.manager(sides)
             create_unit_controller = function() return controller(bm.orders) end,
             winds_of_magic_current = function() return bm.winds and bm.winds[i].cur end,
             winds_of_magic_remaining_recharge_rate = function() return bm.winds and bm.winds[i].rate end,
+            winds_of_magic_reserve = function() return bm.winds and bm.winds[i].res end,
             modify_winds_of_magic_current = function(_, x) bm.winds[i].cur = bm.winds[i].cur + x end,
             modify_winds_of_magic_reserve = function(_, x) bm.winds[i].res = (bm.winds[i].res or 0) + x end}
         alliances[i] = {armies = function() return list({army}) end,

@@ -13,9 +13,19 @@ timers) in the first ACTIVE slots, in the simulator's order (tools/nn/sim/abilit
 ACTIVE only; a passive is never pressed.
 
 What a slot carries (observation.py): its state, STATE numbers a unit and decision (Obs.abil), and the ability's index
-into the passports' table (keys() order, Obs.abil_idx; -1 none). The passport (STATIC numbers) is not stored per unit
-and step: full() puts it back from table() / torch_table() on the device just before the networks read it. The full
-features of a slot: DYNAMIC, STATIC, DYNAMIC_NEW (new columns last: an older network loads with zero weights for them).
+into the passports' table (rows() order: the abilities (keys()), then the spells (spell_keys()); Obs.abil_idx; -1 none).
+The passport (STATIC numbers, then SPELL_STATIC) is not stored per unit and step: full() puts it back from table() /
+torch_table() on the device just before the networks read it. The full features of a slot: DYNAMIC, STATIC,
+DYNAMIC_NEW, SPELL_STATIC, SPELL_DYNAMIC (new columns last: an older network loads with zero weights for them).
+
+Spells (16.10.2026, S27: a spell is an ability of the caster - the same slots, the same head, the same price): a caster's
+spells (his unit passport's `spells`, the battle file's <unit_capabilities>; their passports config/nn/abilities.json
+"spells") sit in the last SPELLS active slots (SPELL_AT + k = the simulator's spell slot k, tools/nn/sim/magic.py;
+Orders.ability SPELL_AT + k). A spell is described by its passport as any ability (active_s, recharge_s, range_m,
+targets: features()) and by SPELL_STATIC: its cost in winds, wind-up, and its bombardment (projectiles, damage, spread,
+delay, friendly fire). Its slot's state adds SPELL_DYNAMIC: the side's winds pay for it (own units), it is being cast
+now (own units). Where it falls: the unit the target pointer chooses (heads.py / chain.py: the attack target's pointer;
+no target is masked for its range - the caster walks into range, the pair features show how far, pairs.py).
 """
 import json
 from functools import lru_cache
@@ -23,6 +33,7 @@ from functools import lru_cache
 import numpy as np
 
 from tools import config as project
+from tools.nn.sim.magic import SLOTS as SPELLS
 from tools.nn.model import passport as unit_passport
 from tools.nn.sim.abilities import SLOTS as SIM_SLOTS
 from tools.nn.sim.abilities import ordered
@@ -78,15 +89,29 @@ STATIC = len(STATIC_NAMES)
 DYNAMIC_NAMES = ("owned", "ready", "recharge_left", "active_left", "active_now")
 DYNAMIC_NEW = ("on_now",)
 DYNAMIC = len(DYNAMIC_NAMES)
-STATE = DYNAMIC + len(DYNAMIC_NEW)            # the numbers a slot carries per unit and decision (Obs.abil)
-SIZE = DYNAMIC + STATIC + len(DYNAMIC_NEW)    # the full features of a slot (full())
-INDEX = {n: i for i, n in enumerate(DYNAMIC_NAMES + STATIC_NAMES + DYNAMIC_NEW)}
-STATE_INDEX = {n: i for i, n in enumerate(DYNAMIC_NAMES + DYNAMIC_NEW)}
-OLD_SIZE = SIZE - len(WHEN2) - len(VIGOUR) - len(DYNAMIC_NEW)    # the full features before 13.10.2026
+# Spells (16.10.2026, appended last: older checkpoints load with zero weights for them): SPELL_STATIC - the spell's
+# passport (0 for an ability): it is a spell; its cost in winds / WINDS_SCALE; its wind-up s / 5; a bombardment; its
+# projectiles / 50; a projectile's damage + AP (contact) / 100; the explosion's damage + AP / 50 and radius m / 10; the
+# spread of the landings m / 20; the delay from the wind-up's end to the first landing (start + flight) s / 10; the
+# landing window s / 5; it strikes friends too. SPELL_DYNAMIC (own units): the side's current winds pay for it now;
+# it is being cast now (walking into range or winding up).
+WINDS_SCALE = 50.0
+SPELL_STATIC = ("spell", "mana", "wind_up", "bomb", "bomb_projectiles", "bomb_contact", "bomb_explosion",
+                "bomb_explosion_m", "bomb_spread_m", "bomb_delay_s", "bomb_window_s", "bomb_allies")
+SPELL_DYNAMIC = ("affordable", "casting")
+STATE = DYNAMIC + len(DYNAMIC_NEW) + len(SPELL_DYNAMIC)   # the numbers a slot carries per unit and decision (Obs.abil)
+STATE_OLD = DYNAMIC + len(DYNAMIC_NEW)                    # ... before the spells (13.10.2026): full() pads the rest
+TABLE = STATIC + len(SPELL_STATIC)                        # a passport row of table()
+SIZE = DYNAMIC + STATIC + len(DYNAMIC_NEW) + len(SPELL_STATIC) + len(SPELL_DYNAMIC)   # the full features (full())
+INDEX = {n: i for i, n in enumerate(DYNAMIC_NAMES + STATIC_NAMES + DYNAMIC_NEW + SPELL_STATIC + SPELL_DYNAMIC)}
+STATE_INDEX = {n: i for i, n in enumerate(DYNAMIC_NAMES + DYNAMIC_NEW + SPELL_DYNAMIC)}
+OLD_SIZE = DYNAMIC + STATIC - len(WHEN2) - len(VIGOUR)    # the full features before 13.10.2026
 RECHARGE, ACTIVE_S = 60.0, 30.0
 # The slots: SLOTS a unit, the first ACTIVE for the actives and game-fired ones (the head's choices), the rest for
 # the passives. OLD_SLOTS: the slots a network saw before 13.10.2026 (the simulator's first 3; encoder.py).
 SLOTS, ACTIVE, OLD_SLOTS = 30, 15, 3
+SPELL_AT = ACTIVE - SPELLS              # the spells' slots: SPELL_AT .. ACTIVE - 1 (Orders.ability, sim/orders.py)
+SPELL_SLOTS = tuple(range(SPELL_AT, ACTIVE))
 
 
 def _group(on):
@@ -129,27 +154,77 @@ def features(p):
 assert len(features({})) == STATIC
 
 
+def spell_features(p):
+    """SPELL_STATIC of a spell's passport (abilities.json "spells"; module doc); zeros for an ability's."""
+    if "mana" not in p:
+        return [0.0] * len(SPELL_STATIC)
+    b = p.get("bombardment") or {}
+    pr = b.get("projectile") or {}
+    ex = b.get("explosion") or {}
+    return [1.0, float(p["mana"]) / WINDS_SCALE, float(p.get("wind_up_s") or 0) / 5, float(bool(b)),
+            float(b.get("projectiles") or 0) / 50, (float(pr.get("damage") or 0) + float(pr.get("ap") or 0)) / 100,
+            (float(ex.get("damage") or 0) + float(ex.get("ap") or 0)) / 50, float(ex.get("radius_m") or 0) / 10,
+            float(b.get("spread_m") or 0) / 20, (float(b.get("start_s") or 0) + float(b.get("flight_s") or 0)) / 10,
+            float(b.get("window_s") or 0) / 5, float(bool(pr.get("allies")) or bool(ex.get("allies")))]
+
+
+assert len(spell_features({})) == len(SPELL_STATIC)
+
+
 @lru_cache(maxsize=4)
 def load(path=None):
     return json.loads((path or PASSPORTS).read_text(encoding="utf-8"))["abilities"]
 
 
+@lru_cache(maxsize=4)
+def load_spells(path=None):
+    """The spells' passports (abilities.json "spells"; {} without them)."""
+    return json.loads((path or PASSPORTS).read_text(encoding="utf-8")).get("spells") or {}
+
+
 def keys(passports=None):
-    """The passports' order: the table's rows (the simulator's abilities.keys: sorted)."""
+    """The abilities' passports in order (the simulator's abilities.keys: sorted): the table's first rows, the bitmask
+    of RECEIVED (ab_rx)."""
     return sorted(passports or load())
+
+
+def spell_keys(spells=None):
+    """The spells' passports in order (the simulator's magic.keys: sorted): the table's rows after the abilities'."""
+    return sorted(load_spells() if spells is None else spells)
+
+
+def rows(passports=None, spells=None):
+    """The table's rows: keys() then spell_keys() (abil_idx indexes them; -1: the zero row after them)."""
+    return keys(passports) + spell_keys(spells)
+
+
+def passport_of(key, passports=None, spells=None):
+    """The passport of an ability or a spell by key (None: neither)."""
+    passports = load() if passports is None else passports
+    spells = load_spells() if spells is None else spells
+    return passports.get(key) or spells.get(key)
+
+
+def _row(p):
+    return features(p) + spell_features(p)
 
 
 @lru_cache(maxsize=1)
 def _table():
-    passports = load()
-    return np.asarray([features(passports[k]) for k in keys(passports)] + [[0.0] * STATIC], np.float32)
+    passports, spells = load(), load_spells()
+    return np.asarray([_row(passports[k]) for k in keys(passports)] + [_row(spells[k]) for k in spell_keys(spells)]
+                      + [[0.0] * TABLE], np.float32)
 
 
-def table(passports=None):
-    """[A + 1, STATIC] float32: every passport's features in keys() order; the last row (index -1) is no ability."""
-    if passports is None:
+def table(passports=None, spells=None):
+    """[A + S + 1, TABLE] float32: every passport's features (STATIC, then SPELL_STATIC) in rows() order - the
+    abilities, then the spells; the last row (index -1) is no ability."""
+    if passports is None and spells is None:
         return _table()
-    return np.asarray([features(passports[k]) for k in keys(passports)] + [[0.0] * STATIC], np.float32)
+    passports = load() if passports is None else passports
+    spells = load_spells() if spells is None else spells
+    return np.asarray([_row(passports[k]) for k in keys(passports)] + [_row(spells[k]) for k in spell_keys(spells)]
+                      + [[0.0] * TABLE], np.float32)
 
 
 _TORCH = {}
@@ -175,14 +250,35 @@ def warm(device):
 
 
 def full(state, idx, tab=None):
-    """The full features [..., SIZE] of slots: their state [..., STATE] (Obs.abil) and the passport of their ability
-    idx [...] (-1: none, the table's zero row). numpy or torch (tab: the table on the device; None: torch_table)."""
+    """The full features [..., SIZE] of slots: their state [..., STATE] (Obs.abil; a state of STATE_OLD columns, recorded
+    before the spells: its spell columns 0) and the passport of their ability idx [...] (-1: none, the table's zero
+    row): DYNAMIC, STATIC, DYNAMIC_NEW, SPELL_STATIC, SPELL_DYNAMIC. numpy or torch (tab: the table on the device;
+    None: torch_table)."""
+    n_new = len(DYNAMIC_NEW)
     if isinstance(state, np.ndarray):
         tab = table() if tab is None else tab
-        return np.concatenate([state[..., :DYNAMIC], tab[np.asarray(idx)], state[..., DYNAMIC:]], -1).astype(np.float32)
+        if state.shape[-1] < STATE:
+            state = np.concatenate([state, np.zeros(state.shape[:-1] + (STATE - state.shape[-1],), state.dtype)], -1)
+        t = tab[np.asarray(idx)]
+        return np.concatenate([state[..., :DYNAMIC], t[..., :STATIC], state[..., DYNAMIC:DYNAMIC + n_new],
+                               t[..., STATIC:], state[..., DYNAMIC + n_new:]], -1).astype(np.float32)
     import torch
     tab = torch_table(state.device) if tab is None else tab
-    return torch.cat([state[..., :DYNAMIC], tab.to(state.dtype)[idx], state[..., DYNAMIC:]], -1)
+    if state.shape[-1] < STATE:
+        state = torch.cat([state, state.new_zeros(*state.shape[:-1], STATE - state.shape[-1])], -1)
+    t = tab.to(state.dtype)[idx]
+    return torch.cat([state[..., :DYNAMIC], t[..., :STATIC], state[..., DYNAMIC:DYNAMIC + n_new], t[..., STATIC:],
+                      state[..., DYNAMIC + n_new:]], -1)
+
+
+def column(name, idx, tab=None):
+    """[...] the passport column `name` (STATIC_NAMES or SPELL_STATIC, scaled as in table()) of the abilities idx [...]
+    (-1: 0). numpy or torch (torch: the table on idx's device)."""
+    j = INDEX[name] - DYNAMIC - (len(DYNAMIC_NEW) if name in SPELL_STATIC else 0)
+    if isinstance(idx, np.ndarray):
+        return (table() if tab is None else tab)[idx, j]
+    tab = torch_table(idx.device) if tab is None else tab
+    return tab[idx, j]
 
 
 def legacy(owned):
@@ -200,18 +296,27 @@ def legacy(owned):
     return owned & (rank < OLD_SLOTS)
 
 
-def layout(unit_key, units=None, passports=None):
+def unit_spells(unit_key, units=None, spells=None):
+    """The unit's spells with a passport, in its passport's order (the simulator's spell slots, magic.slots_of)."""
+    units = units or unit_passport.load()
+    spells = load_spells() if spells is None else spells
+    return [k for k in (units.get(unit_key) or {}).get("spells") or () if k in spells][:SPELLS]
+
+
+def layout(unit_key, units=None, passports=None, spells=None):
     """The unit's SLOTS ability keys ("" = empty): its actives and game-fired ones from slot 0 (the simulator's order),
-    its passives from slot ACTIVE. None dropped (more than fit: an error)."""
+    its spells from SPELL_AT, its passives from slot ACTIVE. None dropped (more than fit: an error)."""
     units = units or unit_passport.load()
     passports = passports or load()
     own = ordered(unit_key, units, passports)
     act = [k for k in own if not passports[k].get("passive")]
     pas = [k for k in own if passports[k].get("passive")]
-    if len(act) > ACTIVE or len(pas) > SLOTS - ACTIVE:
-        raise ValueError(f"{unit_key}: {len(act)} actives, {len(pas)} passives: the slots hold {ACTIVE} and "
+    sp = unit_spells(unit_key, units, spells)
+    if len(act) > SPELL_AT or len(pas) > SLOTS - ACTIVE:
+        raise ValueError(f"{unit_key}: {len(act)} actives, {len(pas)} passives: the slots hold {SPELL_AT} and "
                          f"{SLOTS - ACTIVE} (tools/nn/model/abilities.py)")
-    return act + [""] * (ACTIVE - len(act)) + pas + [""] * (SLOTS - ACTIVE - len(pas))
+    return (act + [""] * (SPELL_AT - len(act)) + sp + [""] * (SPELLS - len(sp)) + pas
+            + [""] * (SLOTS - ACTIVE - len(pas)))
 
 
 def slots(unit_keys, units=None, passports=None):
@@ -222,7 +327,8 @@ def slots(unit_keys, units=None, passports=None):
     from tools.nn.model import effects
     units = units or unit_passport.load()
     passports = passports or load()
-    rows = {k: i for i, k in enumerate(keys(passports))}
+    spells = load_spells()
+    row_of = {k: i for i, k in enumerate(rows(passports, spells))}
     fx_order = {k: i for i, k in enumerate(effects.keys())}
     n = len(unit_keys)
     idx = np.full((n, SLOTS), -1, np.int64)
@@ -231,10 +337,13 @@ def slots(unit_keys, units=None, passports=None):
     for i, key in enumerate(unit_keys):
         if not key:
             continue
-        for k, a in enumerate(layout(key, units, passports)):
-            if a:
+        for k, a in enumerate(layout(key, units, passports, spells)):
+            if a and k in SPELL_SLOTS:          # a spell: ordered at the unit the target pointer chooses
+                idx[i, k] = row_of[a]
+                usable[i, k] = True
+            elif a:
                 p = passports[a]
-                idx[i, k] = rows[a]
+                idx[i, k] = row_of[a]
                 usable[i, k] = bool(p.get("self_cast")) and not p.get("passive")
                 if p.get("passive"):
                     fx[i, k] = fx_order.get(a, -1)
@@ -243,8 +352,20 @@ def slots(unit_keys, units=None, passports=None):
 
 def sim_fits(idx):
     """Whether every unit's timed abilities fit the simulator's SIM_SLOTS timer slots (idx [..., SLOTS]): a setup the
-    simulator plays must (the compiled networks read its first SIM_SLOTS active slots only, encoder.py)."""
-    return not (np.asarray(idx)[..., SIM_SLOTS:ACTIVE] >= 0).any()
+    simulator plays must (the compiled networks read its first SIM_SLOTS active slots and the spells' only, encoder.py)."""
+    return not (np.asarray(idx)[..., SIM_SLOTS:SPELL_AT] >= 0).any()
+
+
+# The active slots the compiled networks score: the simulator's timer slots and the spells' (sim_fits)
+COMPILED = tuple(range(SIM_SLOTS)) + SPELL_SLOTS
+
+
+def spread(x, dim=2):
+    """x [..., len(COMPILED), ...] along dim (the COMPILED slots) -> [..., ACTIVE, ...] with zeros between them."""
+    import torch
+    shape = list(x.shape)
+    shape[dim] = SPELL_AT - SIM_SLOTS
+    return torch.cat([x.narrow(dim, 0, SIM_SLOTS), x.new_zeros(shape), x.narrow(dim, SIM_SLOTS, SPELLS)], dim)
 
 
 MULT_MASK = np.array([h == "mult" for _, h, _ in STATS])
@@ -285,7 +406,7 @@ def _received_table(group):
     """[A, S] float32 of the passports' group (allies / enemies): the log of each multiplier, each addition / scale."""
     passports = load()
     out = np.zeros((len(passports), len(STATS)), np.float32)
-    for a, k in enumerate(keys(passports)):
+    for a, k in enumerate(keys(passports)):        # (the abilities' rows only: no spell lays a stat)
         f = features(passports[k])
         for j, (s, h, _) in enumerate(STATS):
             v = f[INDEX[f"{group}_{s}_{h}"] - DYNAMIC]

@@ -33,7 +33,7 @@ def pool_units():
 
 
 def test_no_ability_of_any_unit_is_lost():
-    units, passports = passport.load(), mab.load()
+    units, passports = passport.load(passport.PASSPORTS), mab.load()      # (the casters: test_nn_spells.py)
     keys = pool_units()
     assert GENERAL in keys and WARLORD in keys and MONKS in keys
     most = {"actives": 0, "passives": 0}
@@ -41,6 +41,9 @@ def test_no_ability_of_any_unit_is_lost():
         own = list(units[key].get("abilities") or ())
         assert all(a in passports for a in own), key            # every ability has its passport
         lay = mab.layout(key, units, passports)
+        spells = mab.unit_spells(key, units)                     # a caster's spells: the last active slots
+        assert lay[mab.SPELL_AT:A] == spells + [""] * (A - mab.SPELL_AT - len(spells)), key
+        lay = lay[:mab.SPELL_AT] + [""] * (A - mab.SPELL_AT) + lay[A:]
         assert sorted(a for a in lay if a) == sorted(own), key   # none dropped, none twice
         act = [a for a in lay[:A] if a]
         pas = [a for a in lay[A:] if a]
@@ -58,12 +61,17 @@ def test_no_ability_of_any_unit_is_lost():
 
 def test_the_table_order_is_the_simulators():
     from tools.nn.sim.params import load
-    assert sab.keys(load()) == mab.keys()
-    assert mab.table().shape == (len(mab.keys()) + 1, mab.STATIC) and not mab.table()[-1].any()
+    from tools.nn.sim import magic
+    assert sab.keys(load()) == mab.keys() and magic.keys(load()) == mab.spell_keys()
+    assert mab.rows() == mab.keys() + mab.spell_keys()
+    assert mab.table().shape == (len(mab.rows()) + 1, mab.TABLE) and not mab.table()[-1].any()
 
 
 def test_new_columns_are_last_and_vigour_restores():
-    assert mab.SIZE == mab.OLD_SIZE + 3 and list(mab.INDEX)[-3:] == ["when_health_below_quarter", "vigour", "on_now"]
+    n = len(mab.SPELL_STATIC) + len(mab.SPELL_DYNAMIC)
+    assert mab.SIZE == mab.OLD_SIZE + 3 + n
+    assert list(mab.INDEX)[-3 - n:-n] == ["when_health_below_quarter", "vigour", "on_now"]
+    assert list(mab.INDEX)[-n:] == list(mab.SPELL_STATIC + mab.SPELL_DYNAMIC)
     t = dict(zip(mab.STATIC_NAMES, mab.table()[mab.keys().index(FS)]))
     # Foe-Seeker: the database's fatigue_change_ratio -0.01 - the simulator takes 1 % of the maximum fatigue off a
     # second (tools/nn/sim/fatigue.py: fatigue + vigour x max x dt), it restores vigour: + 1

@@ -6,9 +6,13 @@ Each decision step every unit of the batch gets one order, as six tensors [B, N]
     x, z     float  MOVE / WITHDRAW: the point to go to, m (same frame as the state's x, z)
     target   int64  ATTACK: the enemy's slot (the state's layout), -1 none
     run      bool   run (True) or walk (False)
-    ability  int64  the unit's ability slot to use now (0..SLOTS-1, tools/nn/sim/abilities.py), -1 none.
-                    Optional: Orders made without it get -1 everywhere (the five-field contract
+    ability  int64  the unit's ability slot to use now, -1 none: 0..SLOTS-1 a lord ability (tools/nn/sim/abilities.py),
+                    SPELL_AT + k its spell k (tools/nn/sim/magic.py: a cast at cast_target) - the slots of the
+                    network's ability input (tools/nn/model/abilities.py layout: ABILITY_SLOTS actives, the spells
+                    last). Optional: Orders made without it get -1 everywhere (the five-field contract
                     still works). Independent of kind: a lord may move and use an ability at once.
+    cast_target int64  a spell's target: the unit (a slot of the state's layout) whose centre the bombardment falls
+                    on (magic.request), -1 none. Optional (-1 everywhere).
 
     HOLD      stay; shoot at will at enemies in range; fight back when attacked.
     MOVE      go to (x, z) and stop there; missile units do not shoot on the move. A unit in
@@ -32,6 +36,7 @@ state.slot_from_own_first.
 from dataclasses import dataclass
 
 from tools.nn.sim.abilities import SLOTS
+from tools.nn.sim.magic import SLOTS as SPELLS
 
 try:
     import torch
@@ -39,6 +44,10 @@ except ImportError:
     torch = None
 
 HOLD, MOVE, ATTACK, WITHDRAW, KEEP = 0, 1, 2, 3, 4
+# The order's ability slots (the network's active slots, tools/nn/model/abilities.py ACTIVE): the lord abilities from 0,
+# the spells in the last SPELLS (SPELL_AT + k: spell k)
+ABILITY_SLOTS = 15
+SPELL_AT = ABILITY_SLOTS - SPELLS
 KINDS = ("hold", "move", "attack", "withdraw", "keep")
 FIELDS = {
     "kind": ("i", "HOLD 0, MOVE 1, ATTACK 2, WITHDRAW 3, KEEP 4"),
@@ -46,7 +55,8 @@ FIELDS = {
     "z": ("f", "MOVE/WITHDRAW point z, m"),
     "target": ("i", "ATTACK: enemy slot, -1 none"),
     "run": ("b", "run instead of walk"),
-    "ability": ("i", "ability slot to use now, -1 none"),
+    "ability": ("i", "ability slot to use now, -1 none (SPELL_AT + k: spell k)"),
+    "cast_target": ("i", "a spell's target slot, -1 none"),
 }
 
 
@@ -58,10 +68,18 @@ class Orders:
     target: "torch.Tensor"
     run: "torch.Tensor"
     ability: "torch.Tensor" = None
+    cast_target: "torch.Tensor" = None
 
     def __post_init__(self):
         if self.ability is None:
             self.ability = torch.full_like(self.kind, -1)
+        if self.cast_target is None:
+            self.cast_target = torch.full_like(self.kind, -1)
+
+    def spell(self):
+        """[B, N] the spell slot ordered (0..SPELLS-1), -1 none."""
+        k = self.ability - SPELL_AT
+        return torch.where((k >= 0) & (k < SPELLS), k, torch.full_like(k, -1))
 
     def to(self, device):
         return Orders(*(getattr(self, k).to(device) for k in FIELDS))
@@ -76,7 +94,8 @@ def hold(B, N, device="cpu"):
                   x=torch.zeros((B, N), device=device), z=torch.zeros((B, N), device=device),
                   target=torch.full((B, N), -1, dtype=torch.int64, device=device),
                   run=torch.zeros((B, N), dtype=torch.bool, device=device),
-                  ability=torch.full((B, N), -1, dtype=torch.int64, device=device))
+                  ability=torch.full((B, N), -1, dtype=torch.int64, device=device),
+                  cast_target=torch.full((B, N), -1, dtype=torch.int64, device=device))
 
 
 def merge(first, second, use_second):
@@ -96,5 +115,8 @@ def check(orders, N):
         raise ValueError("ATTACK without a target")
     if not (torch.isfinite(orders.x).all() and torch.isfinite(orders.z).all()):
         raise ValueError("order point not finite")
-    if ((orders.ability < -1) | (orders.ability >= SLOTS)).any():
+    a = orders.ability
+    if ((a < -1) | ((a >= SLOTS) & (a < SPELL_AT)) | (a >= ABILITY_SLOTS)).any():
         raise ValueError("order ability slot out of range")
+    if ((orders.cast_target < -1) | (orders.cast_target >= N)).any():
+        raise ValueError("order cast target out of range")

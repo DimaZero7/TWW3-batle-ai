@@ -16,7 +16,8 @@ M.READERS = {
     {'winds_of_magic_capacity', 'cap'},
     {'winds_of_magic_recharge_rate', 'rr'},
 }
-M.DEFAULT = {'cur', 'rate'}
+-- (the reserve: winds_of_magic_reserve answers in battle, the magic probe build/magic/probe1.md; the network sees it)
+M.DEFAULT = {'cur', 'rate', 'res'}
 
 local function call(army, method)
     local ok, v = pcall(function() return army[method](army) end)

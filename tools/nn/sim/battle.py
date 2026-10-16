@@ -80,6 +80,8 @@ def step(st, orders, params=None, dt=None):
     # range runs in, one winding up stands; their orders here replace the given ones ---
     cast_move = None
     if magic.on(params) and "cast_k" in u:
+        # a cast ordered (Orders.ability SPELL_AT + k at Orders.cast_target: the network's) is asked of the caster now
+        magic.request(u, orders.spell(), orders.cast_target)
         kind, tgt, run, cast_move, cast_x, cast_z = magic.steer(u, params, dt, kind, tgt, run, standing, alive, same_side)
     point = (kind == O.MOVE) | (kind == O.WITHDRAW)
     # another order than the one in force (kind, target or a point moved over 1 m): ends a latched leave (below)
@@ -602,8 +604,10 @@ def step(st, orders, params=None, dt=None):
         # the bombardments landing this step (magic.py): the HP and the men each caster's strike takes from each unit,
         # their own kill rule; the HP counts with the missiles' below (casualties, the fight's balance, under fire: the
         # spells' projectiles are projectiles of the database)
-        hp_bomb, kills_bomb, _ = magic.bombard(u, params, dt, pw["front"], pw["depth"],
-                                               noise=bool((params.sim.get("noise") or {}).get("blows")))
+        bomb_extra = {}
+        hp_bomb, kills_bomb, hits_bomb = magic.bombard(u, params, dt, pw["front"], pw["depth"],
+                                                       noise=bool((params.sim.get("noise") or {}).get("blows")),
+                                                       extra=bomb_extra)
     fired = shots > 0 if burst is None else torch.where(burst, start, shots > 0)
     u["unready"] = torch.where(fired, torch.ones_like(unready), unready)
     if reaim:
@@ -644,6 +648,15 @@ def step(st, orders, params=None, dt=None):
     u["gold_out"] = u["gold_out"] + (dmg * pw["enemy"] * (u["cost"] / u["hp0"].clamp(min=1e-6))[:, None, :]).sum(2)
     share = melee.kill_share(u["hp_man"][:, None, :], hit, cal["kills"]["exponent"])
     db = hp_bomb * scale[:, None, :] if hp_bomb is not None else torch.zeros_like(dmg)    # (the bombardments' own kills)
+    if hp_bomb is not None and "bm_hit" in u:
+        # bookkeeping (no effect on the battle): who spell projectiles struck (the network's spell_strike) and each
+        # caster's gold of enemy and own health and the enemy men knocked down so far (the spell price's bricks)
+        per_hp = (u["cost"] / u["hp0"].clamp(min=1e-6))[:, None, :]
+        friend = same_side & ~eye & present[:, None, :]
+        u["bm_hit"] = hits_bomb.sum(1) > 0
+        u["bm_gold_e"] = u["bm_gold_e"] + (db * pw["enemy"] * per_hp).sum(2)
+        u["bm_gold_f"] = u["bm_gold_f"] + (db * friend * per_hp).sum(2)
+        u["bm_knock"] = u["bm_knock"] + (bomb_extra["knock"] * pw["enemy"]).sum(2)
     kills = (dmg - db) / u["hp_man"][:, None, :].clamp(min=1e-6) * share
     if cal["kills"].get("wound_pool"):
         # The wounded pool (kills.wound_pool; build/open_melee/spec.md R7): the game keeps every man's health and the

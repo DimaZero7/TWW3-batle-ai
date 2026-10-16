@@ -1,6 +1,8 @@
 """Layer 1: the bonus bricks (docs/en/training/ability_price.md, the agreed formulas build/abilities_bonus/formulas.md).
 
-A brick is one kind of bonus (melee damage, charge bonus, melee defence, morale, speed, charge speed, vigour). It counts
+A brick is one kind of bonus (melee damage, charge bonus, melee defence, morale, speed, charge speed, vigour; and what a
+spell does - its bombardment's damage to enemies, its damage to friends, the enemy men it knocks down, the winds it
+spends: SpellDamage, SpellFriendly, SpellKnock, WindsCost, read from the simulator's own bookkeeping). It counts
 the bonus's USEFUL work on a trajectory - only the seconds (or impacts, or morale points) where the bonus could change
 something - as a number >= 0, and declares what it does (Description): the condition under which it works, whether the
 counter grows in proportion to the bonus's size, buff or debuff, its unit. The rate k (gold per counter unit) belongs to
@@ -36,7 +38,14 @@ TRACE = {
     "on": ("s", "the owner's ability: active seconds left"),
     "owner": ("1", "the presser's index among the U units"),
     "dt_s": ("1", "seconds between samples"),
+    # spells (16.10.2026; the simulator's bookkeeping of the presser, state bm_gold_e / bm_gold_f / bm_knock, wm_cur;
+    # 0 for a presser without spells)
+    "sp_gold_e": ("s", "the gold of enemy health the presser's bombardments have taken so far"),
+    "sp_gold_f": ("s", "the gold of his own side's health they have taken so far (friendly fire)"),
+    "sp_knock": ("s", "enemy men they have knocked down so far (knock events)"),
+    "winds": ("s", "his side's current winds of magic"),
 }
+SPELL_FIELDS = ("sp_gold_e", "sp_gold_f", "sp_knock", "winds")
 FLAGS = ("alive", "r", "m", "mv", "sprint")
 
 # The game's rules a brick reads (config/nn/game_rules.json; defaults = the database's numbers)
@@ -391,8 +400,71 @@ class FatigueCost(_Vigour):
     sign = +1
 
 
+def _window(tr, mask):
+    """[S+1] bool: the seconds the press's mask holds for its owner (a spell's: from its launch to its effect's end)."""
+    w = np.asarray(mask)[:, int(tr["owner"])].copy()
+    w[0] = False
+    return w
+
+
+class _SpellGain(Brick):
+    """value x the rise of a spell bookkeeping field (FIELD: a running total of the presser) over the press's window -
+    what the press's own bombardment did (a later cast of the same caster falls outside it: the window ends with its
+    effect, the next cast waits its recharge)."""
+    FIELD = ""
+
+    def count(self, tr, mask, value):
+        f = np.asarray(tr.get(self.FIELD, np.zeros(len(tr["alive"]))), dtype=np.float64)
+        rise = np.zeros_like(f)
+        rise[1:] = np.clip(f[1:] - f[:-1], 0.0, None)
+        return float(max(0.0, value) * (rise * _window(tr, mask)).sum())
+
+    def switch_off(self, tr, mask, value):
+        return _with(tr, **{self.FIELD: np.zeros(len(tr["alive"]))})
+
+
+class SpellDamage(_SpellGain):
+    desc = Description("spell_damage", "the spell's bombardment takes enemy health", True, "buff", "add", "gold",
+                       (("bombardment", "enemies"),), 1.0)
+    FIELD = "sp_gold_e"
+
+
+class SpellFriendly(_SpellGain):
+    desc = Description("spell_friendly", "the spell's bombardment takes the caster's own side's health", True,
+                       "debuff", "add", "gold", (("bombardment", "allies"),), 1.0)
+    FIELD = "sp_gold_f"
+
+
+class SpellKnock(_SpellGain):
+    desc = Description("spell_knock", "the spell's bombardment knocks enemy men down (they are out of the fight "
+                       "until up: magic.knock)", True, "buff", "add", "men knocked", (("bombardment", "knock"),), 1.0)
+    FIELD = "sp_knock"
+
+
+class WindsCost(Brick):
+    """The winds a cast spends, when they are short: value (its cost) if the side's current winds after the payment, at
+    some second of the press's window, are below the cost - the cast took winds the next cast would have needed then;
+    0 when the side could pay again at once, or the cast never launched (no window). A debuff: winds are the resource
+    of future casts (the rate: what a wind point is worth in the casts it would pay for)."""
+    desc = Description("winds_cost", "the cast leaves its side's current winds below another cast's cost", False,
+                       "debuff", "add", "winds", (("mana", "cost"),), 6.0)
+
+    def count(self, tr, mask, value):
+        w = _window(tr, mask)
+        if value <= 0 or not w.any():
+            return 0.0
+        winds = np.asarray(tr.get("winds", np.full(len(w), np.inf)), dtype=np.float64)
+        return float(value) if float(winds[w].min()) < value else 0.0
+
+    def switch_off(self, tr, mask, value):
+        return _with(tr, winds=np.full(len(tr["alive"]), 1e9))
+
+
+SPELL_KINDS = ("spell_damage", "spell_friendly", "spell_knock", "winds_cost")
+
+
 def bricks(rules=Rules()):
     """{kind: brick} of every brick."""
     out = [MeleeDamage(), Charge(), MeleeDefence(), Morale(rules), Speed(), ChargeSpeed(), VigourGain(rules),
-           FatigueCost(rules)]
+           FatigueCost(rules), SpellDamage(), SpellFriendly(), SpellKnock(), WindsCost()]
     return {b.desc.kind: b for b in out}

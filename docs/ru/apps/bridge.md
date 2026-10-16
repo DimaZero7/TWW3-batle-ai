@@ -277,7 +277,7 @@ sequenceDiagram
 | `decide_ms` | Время между решениями, мс |
 | `units` | Все отряды: поля записанного `nn_sample` ([nn_arena](entries.md#nn_arena)) и ещё `side`, `key` (ключ отряда), `v` (виден другой стороне) и `fx` (ключи действующих на нём фаз; нет, если карточку не прочесть); без полей только для записи `sv`, `pcr`, `phr`, `mge` (и `bop` записи): `nn_arena` читает их для калибровки симулятора, не для сети |
 | `abilities_used` | `{отряд: {ключ способности: мс боя её последнего применения мостом}}` (`{}` до первого) |
-| `winds` | Ветра магии своей армии `{cur, rate}`: `army:winds_of_magic_current()` и `winds_of_magic_remaining_recharge_rate()` (`apps.battle.winds`); чужие ветра игрок не видит, их нет. Поля нет, если игра не ответила |
+| `winds` | Ветра магии своей армии `{cur, rate, res}`: `army:winds_of_magic_current()`, `winds_of_magic_remaining_recharge_rate()` и резерв `winds_of_magic_reserve()` (проба магии 1: отвечает в бою; `apps.battle.winds`) — сеть видит текущий запас и резерв; чужие ветра игрок не видит, их нет. Поля нет, если игра не ответила |
 
 **Приказы** `tww3_bai_nn_orders.txt` (помощник → игра), текст, строка на отряд:
 

@@ -161,7 +161,8 @@ class TestFunctions:
         obs = st.observation()
         timers = {f"ab{k}_{t}" for k in range(3) for t in ("on", "cd")}
         order = {"order_kind", "order_target"}         # the order in force (observation ORDER)
-        assert set(obs) == set(S.OBSERVED) | {"side", "t", "fx_on", "gone", "ab_rx"} | timers | order \
+        magic = {"wm_cur", "wm_res", "cast_k", "cast_now", "bm_hit"} | {f"sp{k}_{t}" for k in range(2) for t in ("on", "cd")}
+        assert set(obs) == set(S.OBSERVED) | {"side", "t", "fx_on", "gone", "ab_rx"} | timers | order | magic \
             and obs["t"].shape == (2,)
         x = torch.arange(6).repeat(2, 1)
         assert S.own_first(x, 2)[0].tolist() == [3, 4, 5, 0, 1, 2]

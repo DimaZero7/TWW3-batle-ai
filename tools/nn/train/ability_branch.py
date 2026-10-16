@@ -88,6 +88,12 @@ average over updates decaying by NORM_DECAY, weighted by rows; an ability with f
 with the update's mean square of all prices; at least NORM_FLOOR), then clipped to ADV_CLIP. The running sums go on
 in the checkpoint's "train" (run.py: "ability_norm"); a run without them starts fresh. Logged: norm_rms_<name>.
 
+Spells (Config.spell_price; run.py --spell-price): "direct" (the default) - a damage spell's cast is priced by direct
+accounting, not replayed (tools/nn/train/spell_price.py: the gold of enemy health its bombardment took over its window
+less the own, less k_winds x the winds it spent; the user, 16.10.2026): every cast of the learner, +price at the press,
+the spell's own per-ability scale; the spells' moments (presses, a ready spell left) are neither replayed nor in the
+critic. "branch": as any ability (the replays, the bonus price of the spell bricks).
+
 Extension points (not used yet): a bootstrapped (TD) target of the critic (Brancher.target), a cost of an ability left
 unused through a battle (Config.unused_penalty: must be 0).
 """
@@ -98,6 +104,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import torch
 
+from tools.nn.model import abilities as mab
 from tools.nn.model import heads as hd
 from tools.nn.model import observation as ob
 from tools.nn.model.frame import Frame
@@ -116,6 +123,7 @@ NORM_PRIOR = 32            # ... an ability with fewer (decayed) rows is filled 
 #                            mean square of all abilities' prices (a rare ability starts at the shared scale)
 NORM_FLOOR = 0.0002        # ... its root mean square at least this (budget share: 2 gold of a 10 000-gold army)
 NORMS = ("shared", "per-ability")
+SPELL_PRICES = ("direct", "branch")
 ID_STEP = 1_000_003        # a copy's battle id: the snapshot's + ID_STEP x (copy + 1)
 FRAME = ("cx", "cz", "ux", "uz")
 MEMORY = tuple(f for f in ob.Memory.__dataclass_fields__ if f != "frame")
@@ -149,12 +157,17 @@ class Config:
     own: bool = False           # finish() also returns every decision's ability log-probability (lp_all), always
     norm: str = "shared"        # the prices' scale (run.py --ability-norm): "shared" - one root mean square of all;
     #                             "per-ability" - each ability's own running one (AbilityNorm; module doc)
+    spell_price: str = "direct"  # a spell's cast (module doc "Spells"): "direct" - by direct accounting
+    #                             (spell_price.py), "branch" - replayed as any ability
+    spell_file: str = ""        # the direct price's numbers ("": config/ability_price.json "spell_direct")
 
     def __post_init__(self):
         if self.unused_penalty:
             raise ValueError("ability_branch.Config.unused_penalty is reserved: not implemented yet")
         if self.norm not in NORMS:
             raise ValueError(f"ability_branch.Config.norm: {self.norm!r} not one of {NORMS}")
+        if self.spell_price not in SPELL_PRICES:
+            raise ValueError(f"ability_branch.Config.spell_price: {self.spell_price!r} not one of {SPELL_PRICES}")
 
 
 # --- snapshots: flat dicts of per-battle data ([b, ...] tensors, lists, numpy arrays) ---
@@ -355,13 +368,14 @@ def trade(u, side, rout_share=reward.Weights.rout_share):
 
 
 def play_pair(template, actor, snap, unit, side, slot, copies, decisions, seed, hold_s=0.0, openloop=False,
-              greedy=False, each=None):
+              greedy=False, each=None, cast=None):
     """The two branches of each snapshot battle (snap: b battles; unit, side, slot [b]: the unit whose ability differs,
     its side 1 / 2 and the slot pressed), copies copies each, `decisions` decisions (the snapshot's own first); hold_s:
     in "not" the slot also stays unused that many seconds. openloop: "not" plays the orders "pressed" gave (both sides,
     every decision, their landing steps too) instead of deciding again, the unit's slot unused (module doc); greedy:
     every network (the learner's, the past versions') takes its most likely action instead of sampling. each(i, pressed
-    env, not env): called after decision i of both. -> (diff [b, copies]: trade pressed - trade not at the end, budget
+    env, not env): called after decision i of both. cast [b]: a spell slot's target in "pressed" (the unit slot; -1 or
+    None: the decision's own, Orders.cast_target). -> (diff [b, copies]: trade pressed - trade not at the end, budget
     [b, copies]: the battles' budgets in gold)."""
     b = len(snap["keys"])
     dev = template.device
@@ -382,6 +396,9 @@ def play_pair(template, actor, snap, unit, side, slot, copies, decisions, seed, 
         r = r_of[(side[rep] - 1) * len(rep) + j]
         n = unit[rep]
         o.ability[r, n] = slot[rep] if press else -1
+        if press and cast is not None:          # a spell's target (a missed moment's: the pointer's favourite)
+            c_ = cast[rep]
+            o.cast_target[r, n] = torch.where(c_ >= 0, c_, o.cast_target[r, n])
         if not press and hold_s > 0:
             until = torch.full((len(rep), env.N), -1.0, device=dev)
             held = torch.full((len(rep), env.N), -1, dtype=torch.long, device=dev)
@@ -526,17 +543,39 @@ def pad_snap(template, snap, src, kinds):
     return sel, unit, side, torch.full_like(unit, -1)
 
 
-def choice(info, r, n):
+def choice(info, r, n, spells=True):
     """The moments' (rows r, units n [k] of the decision's learner rows) slot, whether it was pressed, and the
-    log-probability of the head's choice: a press's slot, else the ready slot the head likes best (its choice "none")."""
+    log-probability of the head's choice: a press's slot, else the ready slot the head likes best (its choice "none";
+    spells False: the best of the slots that are not spells - the spells' moments are priced directly)."""
     obs, action = info["obs"], info["action"]
     ab = torch.nan_to_num(info["logits"]["ability"].float(), nan=hd.NEG)
     was = action.ability[r, n]
     pressed = was >= 0
     usable = obs["abil_ok"][r, n]                                       # [k, SLOTS]
+    if not spells:
+        usable = usable & ~_spell_slots(usable)
     best = torch.where(usable, ab[r, n, 1:], torch.full_like(ab[r, n, 1:], hd.NEG)).argmax(-1)
     lp = torch.log_softmax(ab[r, n], -1).gather(1, (was.clamp(min=-1) + 1)[:, None])[:, 0]
     return torch.where(pressed, was, best), pressed, lp
+
+
+def _spell_slots(like):
+    """[..., ACTIVE] bool like `like`: the spells' slots (abilities.SPELL_SLOTS)."""
+    k = torch.arange(like.shape[-1], device=like.device)
+    return (k >= mab.SPELL_AT).expand_as(like)
+
+
+def cast_of(info, r, n, slot, pressed):
+    """[k] the moments' spell target (the unit slot; -1 for an ability that is not a spell): a press's own (the target
+    pointer's choice, Action.target), a missed moment's the pointer's favourite (its most likely target)."""
+    tl = info["logits"].get("target")
+    was = info["action"].target[r, n]
+    if tl is None:
+        return torch.full_like(r, -1)
+    best = torch.nan_to_num(tl[r, n].float(), nan=hd.NEG).argmax(-1)
+    has = tl[r, n].max(-1).values > hd.NEG / 2
+    pick = torch.where(pressed & (was >= 0), was, torch.where(has, best, torch.full_like(best, -1)))
+    return torch.where(hd.is_spell(slot), pick, torch.full_like(pick, -1))
 
 
 @dataclass
@@ -626,8 +665,11 @@ class Brancher:
         if cfg.bonus:
             from tools.nn.abilities_price import train_price
             self.pricer = train_price.load(cfg.bonus_file or None)
-        from tools.nn.model import abilities as mab
-        self.keys = mab.keys()                   # the observation's ability index -> key (abil_idx; -1: the last row)
+        self.keys = mab.rows()                   # the observation's ability index -> key (abil_idx; -1: the last row)
+        self.ledger = None                       # the spells' direct price (Config.spell_price "direct")
+        if cfg.spell_price == "direct":
+            from tools.nn.train import spell_price
+            self.ledger = spell_price.Ledger(*spell_price.load(cfg.spell_file or None))
         self.norm = AbilityNorm(self.keys) if cfg.norm == "per-ability" else None
         self.gen = torch.Generator(device=device).manual_seed(int(cfg.seed) + 104729)
         self.chunk = _Chunk()
@@ -714,7 +756,16 @@ class Brancher:
         rows = env.rows_learn
         live = obs["ctrl"] & ~env.st.done[rows % env.B][:, None]
         press = live & (action.ability >= 0)
-        missed = live & (action.ability < 0) & obs["abil_ok"].any(-1)
+        ok = obs["abil_ok"]
+        if self.ledger is not None:
+            # the spells by direct accounting (module doc "Spells"): their casts to the ledger, their moments not
+            # replayed and not in the critic
+            if "sp0_on" in env.st.u:
+                self.ledger.update(env, env.decision_s)
+                self.ledger.add(env, info, t)
+            press = press & ~hd.is_spell(action.ability)
+            ok = ok & ~_spell_slots(ok)
+        missed = live & (action.ability < 0) & ok.any(-1)
         c.presses += press.sum()
         c.missed += missed.sum()
         if c.rates is not None and obs.get("abil_idx") is not None and obs.get("tokens") is not None:
@@ -745,8 +796,9 @@ class Brancher:
                 return
             nz = nz[torch.tensor(keep, dtype=torch.long, device=nz.device)]
         r, n = nz[:, 0], nz[:, 1]
-        slot, pressed, lp = choice(info, r, n)
+        slot, pressed, lp = choice(info, r, n, spells=self.ledger is None)
         kind = self._ability_of(info, r, n, slot)
+        cast = cast_of(info, r, n, slot, pressed)
         moment = where[r, n] if where is not None else torch.full_like(r, -1)
         b = rows[r] % env.B
         side = rows[r] // env.B + 1
@@ -756,7 +808,7 @@ class Brancher:
         c.n_battles += len(ub)
         c.taken += len(nz)
         for x in zip(r.tolist(), n.tolist(), side.tolist(), slot.tolist(), pressed.tolist(), at.tolist(), lp.tolist(),
-                     moment.tolist(), kind.tolist()):
+                     moment.tolist(), kind.tolist(), cast.tolist()):
             c.entries.append((t,) + x)
 
     def _ability_of(self, info, r, n, slot):
@@ -777,7 +829,7 @@ class Brancher:
         if not len(mom):
             return where
         r, n = mom[:, 0], mom[:, 1]
-        slot, pressed, lp = choice(info, r, n)
+        slot, pressed, lp = choice(info, r, n, spells=self.ledger is None)
         b = env.rows_learn[r] % env.B
         X = ability_critic.features(info["obs"], r, n, slot)
         c.moments.append((torch.full_like(r, t), r, n, slot, pressed, lp, reward.budget(env.st.u)[b], X,
@@ -811,9 +863,12 @@ class Brancher:
             for t, lp in c.lp_all:
                 if t < c.T and lp.shape == out["lp_all"].shape[1:]:
                     out["lp_all"][t] = lp
+        spells = self._spells(env, out, kinds, c.T)
         if not c.entries and not (self.critic is not None and c.n_moments):
+            if spells and kinds is not None:
+                self._normalise(out, kinds)
             self.chunk = _Chunk()
-            return out if self.cfg.own else None
+            return out if (self.cfg.own or spells) else None
         price = torch.zeros(0, device=dev)
         if c.entries:
             price, se, budget, bonus = self._play(env, actor)
@@ -859,6 +914,28 @@ class Brancher:
         self.chunk = _Chunk()
         return out if (self.cfg.own or bool(out["mask"].any())) else None
 
+    def _spells(self, env, out, kinds, T):
+        """The spells' casts of the chunk priced directly (spell_price.Ledger) into out (adv: +price at the press, the
+        raw budget share with the per-ability scale, else / their own root mean square; mask, lp) -> how many."""
+        if self.ledger is None:
+            return 0
+        if "sp0_on" in env.st.u:
+            self.ledger.update(env, env.decision_s)
+        res = self.ledger.result(env, T)
+        self.stats.update(self.ledger.stats)
+        if res is None or not len(res["t"]):
+            return 0
+        t, r, n, share = res["t"], res["r"], res["n"], res["share"]
+        if kinds is None:
+            rms = float(share.pow(2).mean().sqrt())
+            share = (share / max(rms, ADV_FLOOR)).clamp(-ADV_CLIP, ADV_CLIP)
+        else:
+            kinds[t, r, n] = res["kind"]
+        out["adv"][t, r, n] = share
+        out["mask"][t, r, n] = True
+        out["lp"][t, r, n] = res["lp"]
+        return len(t)
+
     def bonus_stats(self, bonus, pressed, branch_gold, rms):
         """The log's fields of the bonus price (gold unless said): of the valid presses replayed - bonus_presses,
         bonus_gold_press (the price: benefit - debuffs - recharge), bonus_benefit_press (benefit - debuffs),
@@ -898,6 +975,7 @@ class Brancher:
         unit = torch.tensor([e[2] for e in c.entries], device=dev)
         side = torch.tensor([e[3] for e in c.entries], device=dev)
         slot = torch.tensor([e[4] for e in c.entries], device=dev)
+        cast = torch.tensor([e[10] if len(e) > 10 else -1 for e in c.entries], device=dev)
         kinds = kind_of(snap)[at].tolist()
         decisions = max(1, int(round(cfg.horizon_s / env.decision_s)))
         K = max(1, int(cfg.copies))
@@ -918,18 +996,20 @@ class Brancher:
                 todo[k] = todo[k][comp[k]:]
             ix = torch.tensor(part, device=dev)
             sub = select(snap, at[ix])
-            u_, s_, k_ = unit[ix], side[ix], slot[ix]
+            u_, s_, k_, c_ = unit[ix], side[ix], slot[ix], cast[ix]
             if fill:
                 ps, pu, pside, pslot = pad_snap(env, sub, 0, fill)
                 sub = concat([sub, ps])
                 u_, s_, k_ = torch.cat([u_, pu]), torch.cat([s_, pside]), torch.cat([k_, pslot])
+                c_ = torch.cat([c_, torch.full_like(pslot, -1)])
             self.calls += 1
             rec = None
             if self.pricer is not None:
                 from tools.nn.abilities_price import collect as pcollect
                 rec = pcollect.Recorder(sub, u_, s_, k_, K, env.params)    # the pressed branch's trajectory
             d, bg = play_pair(env, actor, sub, u_, s_, k_, K, decisions, cfg.seed + self.calls, cfg.hold_s,
-                              openloop=cfg.openloop, greedy=cfg.greedy, each=None if rec is None else rec.each)
+                              openloop=cfg.openloop, greedy=cfg.greedy, each=None if rec is None else rec.each,
+                              cast=c_)
             diff[ix] = d[:len(part)]
             budget[ix] = bg[:len(part)]
             if rec is not None:
@@ -955,14 +1035,15 @@ class Brancher:
         [E, copies], "benefit", "recharge", "work" [E], "key": [E] the ability's key}."""
         from tools.nn.abilities_price import bonuses as bz
         from tools.nn.sim import abilities as sab
+        from tools.nn.sim import magic as smagic
         t1 = time.time()
         E, K = budget.shape
-        names = sab.keys(env.params)
+        names = sab.keys(env.params) + smagic.keys(env.params)      # (collect.Recorder: a spell after the abilities)
         dev = budget.device
         bg = budget.cpu().numpy()
         out = {"ok": np.zeros(E, bool), "gold": np.zeros(E), "share": np.zeros(E), "share_copies": np.zeros((E, K)),
                "benefit": np.zeros(E), "recharge": np.zeros(E), "work": np.zeros(E), "key": [""] * E}
-        fields = ("x", "z", "alive", "r", "m", "mv", "sprint", "charge", "morale", "fatigue", "on")
+        fields = ("x", "z", "alive", "r", "m", "mv", "sprint", "charge", "morale", "fatigue", "on") + bz.SPELL_FIELDS
         for part, res, owner, tpress in traced:
             for j, e in enumerate(part):
                 k = int(res["key"][j])

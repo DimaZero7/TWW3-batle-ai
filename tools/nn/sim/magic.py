@@ -156,7 +156,7 @@ def leave_scripted(u, by_script):
 def request(u, slot, target):
     """Ask the units to cast: slot [B, N] - the spell slot (0..SLOTS-1, -1 none), target [B, N] - the unit to cast at
     (a slot of the state's layout). Taken by the next step (steer); in place."""
-    ask = slot >= 0
+    ask = (slot >= 0) & (slot < SLOTS)
     u["cq_k"] = torch.where(ask, slot, u["cq_k"])
     u["cq_t"] = torch.where(ask, target, u["cq_t"])
 
@@ -194,6 +194,8 @@ def steer(u, params, dt, kind, tgt, run, standing, alive, same_side):
         u["wm_cur"] = u["wm_cur"].clamp(max=float(w["current_cap"]))
     for k in range(SLOTS):
         u[f"sp{k}_cd"] = (u[f"sp{k}_cd"] - dt).clamp(min=0)
+        if f"sp{k}_on" in u:
+            u[f"sp{k}_on"] = (u[f"sp{k}_on"] - dt).clamp(min=0)
     N = u["men"].shape[1]
     ar = torch.arange(N, device=u["men"].device)[None, :].expand_as(u["cq_k"])
 
@@ -241,6 +243,8 @@ def steer(u, params, dt, kind, tgt, run, standing, alive, same_side):
         u[f"bm{j}_t"] = torch.where(launch, t_slot, u[f"bm{j}_t"])
         u[f"bm{j}_fix"] = torch.where(launch, torch.zeros_like(u[f"bm{j}_fix"]), u[f"bm{j}_fix"])
         u[f"sp{j}_cd"] = torch.where(launch, r[..., COL["active_s"]] + r[..., COL["recharge_s"]], u[f"sp{j}_cd"])
+        if f"sp{j}_on" in u:
+            u[f"sp{j}_on"] = torch.where(launch, r[..., COL["active_s"]], u[f"sp{j}_on"])
     end = drop | done
     u["cast_k"] = torch.where(end, torch.full_like(k, -1), u["cast_k"])
     u["cast_t"] = torch.where(end, torch.full_like(t_slot, -1), u["cast_t"])
@@ -331,6 +335,10 @@ def strikes(u, params, dt):
         s = u[f"bm{k}_s"]
         live = s >= 0
         if not bool(live.any()):
+            # (new tensors as when it lands: the state's fields are replaced whatever the data, so a compiled step's
+            # code after bombard() - battle.stepper - sees the same aliasing every step and is not recompiled)
+            for f in ("s", "x", "z", "fix"):
+                u[f"bm{k}_{f}"] = u[f"bm{k}_{f}"].clone()
             continue
         r = T[u[f"sp{k}"]]
         col = lambda name: r[..., COL[name]]
@@ -356,7 +364,14 @@ def strikes(u, params, dt):
     return out
 
 
-def bombard(u, params, dt, front, depth, noise=False):
+def _eager(fn):
+    """fn kept out of torch.compile (battle.stepper): its landings' shapes depend on the data (nonzero), and compiled it
+    recompiled every step (1.3 s a step of 1024 battles instead of ~10 ms); eager it is a few small operations."""
+    return torch.compiler.disable(fn) if torch is not None else fn
+
+
+@_eager
+def bombard(u, params, dt, front, depth, noise=False, extra=None):
     """The bombardments' damage this step: (hp, kills, hits) [B, i, j] - the HP caster i's strike takes from unit j, the
     men it kills, the hits it lands (contact and explosion); zeros when nothing lands. front, depth [B, N]: the
     formations' boxes (geometry.dims); noise: Poisson hits (the game's own randomness, noise.blows). In place (the
@@ -375,9 +390,14 @@ def bombard(u, params, dt, front, depth, noise=False):
     dev = u["men"].device
     hp = torch.zeros((B, N, N), device=dev)
     kills, hits = torch.zeros_like(hp), torch.zeros_like(hp)
+    knocks = torch.zeros_like(hp)
+    if extra is not None:
+        extra["knock"] = knocks
     wounded = torch.zeros((B, N), device=dev)
     landing = strikes(u, params, dt)
     if not landing:
+        if "bm_w" in u:
+            u["bm_w"] = u["bm_w"].clone()          # (replaced every step: strikes())
         return hp, kills, hits
     c = cal(params)
     T = table(params, dev)
@@ -447,6 +467,10 @@ def bombard(u, params, dt, front, depth, noise=False):
                 r_k = (col("e_radius_m") * (1 - thr_s * mass / max(col("e_force"), 1e-6))).clamp(min=0)
                 lam_k = col("n") * f * (math.pi * (r_c ** 2 * cap * k_c + r_k ** 2 * float(col("e_force") > 0)))[..., None]
                 op = open_share(lam_k, col("window_s"), t_down)
+                # (bookkeeping) the knock events this step: the landings now / all of them x the knocking hits that
+                # find a man up, by the band's men
+                knocks.index_put_((bb, ii), (lam_k * op * band_men * (nn / max(col("n"), 1e-6))[:, None, None]
+                                             ).sum(-1), accumulate=True)
                 lam_c = lam_c * torch.where(ph_c >= hmj - 1e-6, torch.ones_like(op), op)
                 lam_e = lam_e * torch.where(ph_e >= hmj - 1e-6, torch.ones_like(op), op)
             Hc, He = lam_c * band_men, lam_e * band_men

@@ -24,6 +24,9 @@
   "none" always. Independent of the order kind: a lord may move and use an ability at once.
   Sampled only when asked (sample(abilities=True)): code that does not know the head (training
   before it is wired in) gets Action.ability None, and log_prob leaves it out.
+  A spell (its slot abilities.SPELL_AT + k) falls on a unit: the target pointer's choice (the same pointer and mask as
+  an attack's) - an attack's target when the kind is attack, else a target drawn from the pointer for it
+  (Action.target; log_prob counts the target for an attack or a spell). No new head: a spell is an ability.
 """
 import math
 from dataclasses import dataclass
@@ -102,14 +105,13 @@ class Heads(nn.Module):
         if obs_t.get("abil") is not None:
             usable = obs_t["abil_ok"] & ctrl[..., None]                                   # [B, N, ACTIVE]
             if torch.compiler.is_compiling():
-                # Compiled (as AbilityEncoder): the simulator's timer slots are scored (a simulator setup has no
-                # other, abilities.sim_fits), those that may not be used masked.
-                D = ab.SIM_SLOTS
-                x = ab.full(obs_t["abil"][:, :, :D], obs_t["abil_idx"][:, :, :D])
-                abil = torch.where(usable[..., :D, None], x, torch.zeros_like(x))
-                score = (self.ability_q(u)[:, :, None] * self.ability_k(abil)).sum(-1)
-                slot = torch.where(usable[..., :D], score / math.sqrt(self.cfg.pointer), torch.full_like(score, NEG))
-                slot = torch.cat([slot, slot.new_full((*slot.shape[:2], usable.shape[-1] - D), NEG)], -1)
+                # Compiled (as AbilityEncoder): the simulator's timer slots and the spells' are scored (a simulator
+                # setup has no other, abilities.sim_fits), those that may not be used masked.
+                C = list(ab.COMPILED)
+                x = ab.full(obs_t["abil"][:, :, C], obs_t["abil_idx"][:, :, C])
+                abil = torch.where(usable[..., C, None], x, torch.zeros_like(x))
+                score = ab.spread((self.ability_q(u)[:, :, None] * self.ability_k(abil)).sum(-1))
+                slot = torch.where(usable, score / math.sqrt(self.cfg.pointer), torch.full_like(score, NEG))
             else:
                 # Only the slots that may be used are scored (a few of B x N x ACTIVE); the rest stay masked.
                 b, n, k = usable.nonzero(as_tuple=True)
@@ -155,7 +157,24 @@ def sample(logits, greedy=False, temperature=1.0, abilities=False):
     if abilities and "ability" in logits:
         d = Categorical(logits=logits["ability"] / max(temperature, 1e-6), validate_args=False)
         a.ability = (d.probs.argmax(-1) if greedy else d.sample()) - 1
+        # a spell falls on the target pointer's choice: the attack's target, else one drawn for it
+        drawn = target.probs.argmax(-1) if greedy else target.sample()
+        cast = is_spell(a.ability) & (a.target < 0) & has_target
+        a.target = torch.where(cast, drawn, a.target)
     return a
+
+
+def is_spell(ability):
+    """[...] bool: the ability slot chosen is a spell's (abilities.SPELL_AT ..; -1 none: False)."""
+    return ability >= ab.SPELL_AT
+
+
+def targeted(a):
+    """[B, N] bool: the action's target pointer choice counts - an attack, or a spell cast at a unit."""
+    out = a.kind == ATTACK
+    if a.ability is not None:
+        out = out | (is_spell(a.ability) & (a.target >= 0))
+    return out
 
 
 def log_prob(logits, a, ctrl):
@@ -172,7 +191,7 @@ def log_prob(logits, a, ctrl):
     move, attack = a.kind == MOVE, a.kind == ATTACK
     lp = kind.log_prob(a.kind)
     lp = lp + torch.where(move | (a.kind == WITHDRAW), point.log_prob(a.point), torch.zeros_like(lp))
-    lp = lp + torch.where(attack, target.log_prob(a.target.clamp(min=0)), torch.zeros_like(lp))
+    lp = lp + torch.where(targeted(a), target.log_prob(a.target.clamp(min=0)), torch.zeros_like(lp))
     lp = lp + torch.where(move | attack, run.log_prob(a.run.float()), torch.zeros_like(lp))
     ent = kind.entropy() + point.entropy() * (kind.probs[..., MOVE] + kind.probs[..., WITHDRAW]) + run.entropy()
     if a.ability is not None and "ability" in logits:

@@ -334,12 +334,12 @@ def test_a_spell_is_cast_on_its_target_and_the_state_carries_the_own_winds(lua, 
     lua.globals().SYG, lua.globals().FS, lua.globals().SPELL = SYG, FS, SPELL
     lua.execute(SETUP + """
         own[1].abilities[SPELL] = true
-        bm.winds = {{cur = 12, rate = 0.5}, {cur = 30, rate = 0.4}}
+        bm.winds = {{cur = 12, rate = 0.5, res = 68}, {cur = 30, rate = 0.4, res = 50}}
         STATE = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
         bm:pump()
     """)
     doc = exchange.read_state(tmp_path / exchange.STATE)
-    assert doc["winds"] == {"cur": 12, "rate": 0.5}               # the own army's only
+    assert doc["winds"] == {"cur": 12, "rate": 0.5, "res": 68}     # the own army's only (the reserve: probe 1)
     keep = [{"unit": "own_lord", "kind": "keep"}, {"unit": "own_spear_1", "kind": "keep"}]
     uses = [{"unit": "own_lord", "key": SPELL, "target": "enemy_spear_1"},
             {"unit": "own_lord", "key": SYG, "target": "nobody"}]

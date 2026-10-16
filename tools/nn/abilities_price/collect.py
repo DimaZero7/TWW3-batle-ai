@@ -113,7 +113,9 @@ def play_pair(template, actor, snap, unit, side, slot, copies, decisions, seed, 
 
 
 def fields(u, own, owner, slot, spacing):
-    """{field: [b, H]} of the battles' units `own` [b, H] (the presser's side), on [b] the owner's ability timer."""
+    """{field: [b, H]} of the battles' units `own` [b, H] (the presser's side), on [b] the owner's ability timer (a
+    spell's slot, O.SPELL_AT + k: its spell k's), the spells' bookkeeping [b] of the owner (bonuses.SPELL_FIELDS: 0
+    without magic)."""
     g = lambda v: v.gather(1, own)
     alive = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
     gap = geometry.pairwise(u, spacing)["gap"]
@@ -128,7 +130,17 @@ def fields(u, own, owner, slot, spacing):
         out[k] = g(u[k].float())
     on = torch.stack([u[f"ab{k}_on"] for k in range(sab.SLOTS)], 2)                  # [b, N, SLOTS]
     j = torch.arange(len(owner), device=owner.device)
-    out["on"] = on[j, owner, slot.clamp(min=0)]
+    ab_on = on[j, owner, slot.clamp(min=0, max=sab.SLOTS - 1)]
+    zero = torch.zeros(len(owner), device=owner.device)
+    if "sp0_on" in u:
+        sp = torch.stack([u[f"sp{k}_on"] for k in range(O.SPELLS)], 2)               # [b, N, SPELLS]
+        sp_on = sp[j, owner, (slot - O.SPELL_AT).clamp(min=0, max=O.SPELLS - 1)]
+        out["on"] = torch.where(slot >= O.SPELL_AT, sp_on, ab_on)
+    else:
+        out["on"] = torch.where(slot >= O.SPELL_AT, zero, ab_on)
+    for f, name in (("sp_gold_e", "bm_gold_e"), ("sp_gold_f", "bm_gold_f"), ("sp_knock", "bm_knock"),
+                    ("winds", "wm_cur")):
+        out[f] = u[name].gather(1, owner[:, None])[:, 0].float() if name in u else zero
     return out
 
 
@@ -149,8 +161,16 @@ class Recorder:
         self.spacing = params.sim["formation"]["spacing_m"]
         u0 = {k[2:]: v[rep] for k, v in snap.items() if k.startswith("u/")}
         self.mmax = (u0["leadership"] + u0["morale_bonus"]).gather(1, self.own)
-        self.key = torch.stack([u0[f"ab{k}"] for k in range(sab.SLOTS)], 2)[
-            torch.arange(len(rep), device=dev), self.owner, self.slot.clamp(min=0)]
+        j = torch.arange(len(rep), device=dev)
+        key = torch.stack([u0[f"ab{k}"] for k in range(sab.SLOTS)], 2)[
+            j, self.owner, self.slot.clamp(min=0, max=sab.SLOTS - 1)]
+        if "sp0" in u0:
+            # a spell's slot: its key's index after the abilities' (key_names: sab.keys + magic.keys)
+            sp = torch.stack([u0[f"sp{k}"] for k in range(O.SPELLS)], 2)[
+                j, self.owner, (self.slot - O.SPELL_AT).clamp(min=0, max=O.SPELLS - 1)]
+            n_ab = len(sab.keys(params))
+            key = torch.where(self.slot >= O.SPELL_AT, torch.where(sp >= 0, sp + n_ab, torch.full_like(sp, -1)), key)
+        self.key = key
         self.samples = [self._take(u0)]
 
     def _take(self, u):
@@ -160,7 +180,8 @@ class Recorder:
         self.samples.append(self._take(pressed.st.u))
 
     def result(self, n):
-        """{field: numpy [n, K, S+1, H] (on: [n, K, S+1])} of the first n snapshots (the rest: padding)."""
+        """{field: numpy [n, K, S+1, H] (on and the spells' fields: [n, K, S+1])} of the first n snapshots (the rest:
+        padding)."""
         b, K = self.b, self.K
         out = {}
         for k in self.samples[0]:
@@ -350,7 +371,8 @@ def main():
             "missed": a.missed, "hold": a.hold, "random_slot": a.random_slot, "one_slot": not a.all_slots,
             "seconds": round(time.time() - t0), "dt_s": env.decision_s, "marks_s": marks_s,
             "opponents": {str(v): k for k, v in league.CODE.items()}}
-    save(a.out, data, sab.keys(env.params), meta)
+    from tools.nn.sim import magic
+    save(a.out, data, sab.keys(env.params) + magic.keys(env.params), meta)
     print(f"saved {len(data.get('diff', []))} presses to {a.out} in {time.time() - t0:.0f} s", flush=True)
 
 

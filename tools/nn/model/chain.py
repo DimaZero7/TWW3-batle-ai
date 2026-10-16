@@ -6,7 +6,9 @@ the ones before it (autoregressive, as AlphaStar's action heads):
       -> place (for move and withdraw): a sector (the unit's query against the sector tokens, sectors.py), then one of
          its fine x fine cells (~25 m) given the sector chosen
       -> commitment: keep the new order 2 / 4 / 8 / 16 s (commit.py)
-    run (move and attack) and the ability (as heads.py: independent of the order) beside them.
+    run (move and attack) and the ability (as heads.py: independent of the order) beside them; a spell (an ability, its
+    slot abilities.SPELL_AT + k) falls on the target pointer's choice - the attack's target, else one drawn from the same
+    pointer after the ability (heads.py).
 The target's logits also get a learned number from the pair features of the unit and the enemy (cfg.pairs, pairs.py:
 reach, closing speed, bearing; 0 at the start).
 
@@ -105,24 +107,27 @@ class ChainHeads(nn.Module):
         """Ability features appended since the checkpoint load with zero weights (encoder.pad_inputs)."""
         from tools.nn.model.encoder import pad_inputs
         pad_inputs(state_dict, prefix + "ability_k.0.weight", self.ability_k[0].in_features)
+        if getattr(self, "target_pair", None) is not None:      # pair features appended since (pairs.SPELL): zeros
+            pad_inputs(state_dict, prefix + "target_pair.weight", self.target_pair.in_features)
         super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
     def _ability_scores(self, u, obs_t, usable):
         """[B, N, ACTIVE] each slot's score (the unit's query . the slot's key / sqrt(pointer)); the slots that may not
-        be used: anything (masked after). The simulator's timer slots (abilities.SIM_SLOTS) are scored all at once;
-        the others only where usable (eager; compiled - the simulator - has none there: abilities.sim_fits)."""
-        D, p = ab.SIM_SLOTS, self.cfg.pointer
-        x = ab.full(obs_t["abil"][:, :, :D], obs_t["abil_idx"][:, :, :D])
-        x = torch.where(usable[..., :D, None], x, torch.zeros_like(x))
+        be used: anything (masked after). The simulator's timer slots (abilities.SIM_SLOTS) and the spells'
+        (abilities.COMPILED) are scored all at once; the others only where usable (eager; compiled - the simulator -
+        has none there: abilities.sim_fits)."""
+        D, p, C = ab.SIM_SLOTS, self.cfg.pointer, list(ab.COMPILED)
+        x = ab.full(obs_t["abil"][:, :, C], obs_t["abil_idx"][:, :, C])
+        x = torch.where(usable[..., C, None], x, torch.zeros_like(x))
         q = self.ability_q(u)
-        score = (q[:, :, None] * self.ability_k(x)).sum(-1) / math.sqrt(p)
-        rest = score.new_zeros(*score.shape[:2], usable.shape[-1] - D)
+        score = ab.spread((q[:, :, None] * self.ability_k(x)).sum(-1) / math.sqrt(p))           # [B, N, ACTIVE]
         if not torch.compiler.is_compiling():
-            b, n, k = usable[..., D:].nonzero(as_tuple=True)
-            k = k + D
+            mid = torch.zeros_like(usable)
+            mid[..., D:ab.SPELL_AT] = True
+            b, n, k = (usable & mid).nonzero(as_tuple=True)
             xr = ab.full(obs_t["abil"][b, n, k], obs_t["abil_idx"][b, n, k])
-            rest = rest.index_put((b, n, k - D), (q[b, n] * self.ability_k(xr)).sum(-1) / math.sqrt(p))
-        return torch.cat([score, rest], -1)
+            score = score.index_put((b, n, k), (q[b, n] * self.ability_k(xr)).sum(-1) / math.sqrt(p))
+        return score
 
     def forward(self, x, s, cells_in, obs_t, action=None, greedy=False, temperature=1.0, abilities=True, pairs=None):
         """x [B, 1 + N, d] unit tokens, s [B, S, ds] sector tokens, cells_in [B, S, k2] (sectors.inside) -> (logits,
@@ -190,6 +195,9 @@ class ChainHeads(nn.Module):
             out["ability"] = torch.cat([none, slot], -1)
             if action is None and abilities:
                 a_ability = _pick(out["ability"], greedy, temperature) - 1
+                # a spell falls on the target pointer's choice: the attack's target, else one drawn for it now
+                cast = (a_ability >= ab.SPELL_AT) & (a_target < 0) & has_target
+                a_target = torch.where(cast, _pick(target, greedy, temperature), a_target)
             elif action is not None:
                 a_ability = action.ability
         point = sc.point_index(cfg, a_sector, a_fine)
@@ -214,7 +222,8 @@ def log_prob(logits, a, ctrl):
     cfg_sector, cfg_fine = _split_like(logits, a.point)
     zero = torch.zeros_like(logits["run"])
     lp = kind.log_prob(a.kind)
-    lp = lp + torch.where(attack, target.log_prob(a.target.clamp(min=0)), zero)
+    from tools.nn.model.heads import targeted
+    lp = lp + torch.where(targeted(a), target.log_prob(a.target.clamp(min=0)), zero)
     lp = lp + torch.where(place, sector.log_prob(cfg_sector) + fine.log_prob(cfg_fine), zero)
     lp = lp + torch.where(move | attack, run.log_prob(a.run.float()), zero)
     if a.commit is not None:

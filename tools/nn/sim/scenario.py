@@ -32,6 +32,8 @@ def build(armies, params=None, device="cpu", per_side=None):
     H = per_side or max(max(len(a["sides"][s]["units"]) for s in (1, 2)) for a in armies)
     st = S.empty(B, 2 * H, device=device, history=morale.history_steps(params, params.dt))
     rows = {k: [[0.0] * (2 * H) for _ in range(B)] for k in S.STATIC}
+    for k in ("sp0", "sp1"):       # an empty slot holds no spell (-1; 0 would be the first spell's index)
+        rows[k] = [[-1.0] * (2 * H) for _ in range(B)]
     obs = {k: [[0.0] * (2 * H) for _ in range(B)] for k in ("x", "z", "b", "men")}
     attacker = []
     for bi, army in enumerate(armies):

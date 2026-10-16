@@ -177,13 +177,16 @@ def full_obs(obs, static):
         out["abil_idx"] = static["idx"][row]
     if "abil_rx" in obs:
         rec = mab.received(obs["abil_rx"].long(), static["side"][row], static["idx"][row])
-        out["tokens"] = torch.cat([obs["tokens"], rec.to(obs["tokens"].dtype)], -1)
+        tok = obs["tokens"]
+        out["tokens"] = torch.cat([tok[..., :_KEPT], rec.to(tok.dtype), tok[..., _KEPT:]], -1)
     return out
 
 
-# The token's RECEIVED columns (its last: observation.py) are kept as the bitmask they are made of (squeeze_received)
-_KEPT = ob.TOKEN - len(ob.RECEIVED)
-assert ob.NAMES[_KEPT:] == ob.RECEIVED
+# The token's RECEIVED columns (observation.py: before MAGIC, the token's last) are kept as the bitmask they are made
+# of (squeeze_received)
+_KEPT = ob.INDEX[ob.RECEIVED[0]]
+_AFTER = _KEPT + len(ob.RECEIVED)
+assert ob.NAMES[_KEPT:_AFTER] == ob.RECEIVED and ob.NAMES[_AFTER:] == ob.MAGIC
 
 
 def squeeze_received(obs, rx):
@@ -194,18 +197,19 @@ def squeeze_received(obs, rx):
     (~0.4 GB less a chunk of 1024 battles x 64 decisions, each of the two views)."""
     tok = obs["tokens"]
     vis = tok[..., ob.INDEX["visible"]] > 0.5
-    return dict(obs, tokens=tok[..., :_KEPT], abil_rx=torch.where(vis, rx, torch.zeros_like(rx)).to(torch.int32))
+    return dict(obs, tokens=torch.cat([tok[..., :_KEPT], tok[..., _AFTER:]], -1),
+                abil_rx=torch.where(vis, rx, torch.zeros_like(rx)).to(torch.int32))
 
 
 # The slot state's yes/no numbers (exactly 0 or 1: observation._abilities) and its two times, by the column
-_BITS = tuple(mab.STATE_INDEX[n] for n in ("owned", "ready", "active_now", "on_now"))
+_BITS = tuple(mab.STATE_INDEX[n] for n in ("owned", "ready", "active_now", "on_now", "affordable", "casting"))
 _TIMES = tuple(mab.STATE_INDEX[n] for n in ("recharge_left", "active_left"))
 assert sorted(_BITS + _TIMES) == list(range(mab.STATE))
 
 
 def pack_abil(a):
     """The slots' state a [.., STATE] float32 -> (bits [..] uint8: its yes/no columns, one bit each; times [.., 2]
-    float32: its two times) - the same numbers in 9 bytes instead of 24 (unpack_abil gives them back exactly)."""
+    float32: its two times) - the same numbers in 9 bytes instead of 32 (unpack_abil gives them back exactly)."""
     bits = torch.zeros(a.shape[:-1], dtype=torch.uint8, device=a.device)
     for k, i in enumerate(_BITS):
         bits |= (a[..., i] > 0.5).to(torch.uint8) << k
@@ -938,9 +942,10 @@ class Battles:
         return self._abil_used[1]
 
     def _ability_marks(self):
-        """[B, N, SLOTS] the learner's units' ability cooldowns (a use sets one up)."""
+        """[B, N, SLOTS (+ spells)] the learner's units' ability cooldowns (a use sets one up; a spell's at its launch)."""
         u = self.st.u
-        cd = torch.stack([u[f"ab{k}_cd"] for k in range(sim_abilities.SLOTS)], -1)
+        cd = torch.stack([u[f"ab{k}_cd"] for k in range(sim_abilities.SLOTS)]
+                         + [u[f"sp{k}_cd"] for k in range(sim_magic.SLOTS) if f"sp{k}_cd" in u], -1)
         return cd * self._learner_units(torch.ones_like(u["m"])).float()[..., None]
 
     def nan_fixed(self, reset=True):

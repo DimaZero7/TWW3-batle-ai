@@ -470,7 +470,8 @@ def train(args, every=None, teacher=None, normal=None):
             greedy=args.ability_branch_greedy, seed=args.seed, critic=args.ability_critic,
             critic_weight=args.ability_critic_weight, critic_warmup=args.ability_critic_warmup,
             critic_buffer=args.ability_critic_buffer, bonus=ab_bonus, bonus_file=getattr(args, "ability_price_file", ""),
-            own=own, norm=getattr(args, "ability_norm", "shared")), device)
+            own=own, norm=getattr(args, "ability_norm", "shared"),
+            spell_price=getattr(args, "spell_price", "direct")), device)
         if env.brancher.norm is not None:
             # each ability's running scale goes on from --init's "train" (fresh otherwise)
             ts = (checkpoint.train_state(args.init) or {}) if args.init and args.resume else {}
@@ -1158,6 +1159,10 @@ def parser():
                          "ability_branch.AbilityNorm)")
     ap.add_argument("--ability-price-file", default="",
                     help="... the bonus price's numbers (default config/ability_price.json)")
+    ap.add_argument("--spell-price", default="direct", choices=ability_branch.SPELL_PRICES,
+                    help="... a damage spell's cast: direct - by direct accounting (its bombardment's enemy gold less the "
+                         "own, less k_winds x the winds spent; tools/nn/train/spell_price.py), not replayed; branch - "
+                         "replayed as any ability")
     ap.add_argument("--gpu-mem", type=float, default=1.0,
                     help="share of the GPU's memory training may hold (game mode: e.g. 0.5, so a game keeps memory)")
     ap.add_argument("--gpu-duty", type=float, default=1.0,

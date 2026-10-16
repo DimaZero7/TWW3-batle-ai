@@ -101,7 +101,7 @@ def synthetic(batch=1, own=20, enemy=20, seed=0, bounds=CROSSROADS, keys=None):
     `enemy` units of side 2 across 350 m, random health, morale, movement. Keys from the passports."""
     from tools.nn.model import passport
     rng = np.random.default_rng(seed)
-    pool = keys or list(passport.load())
+    pool = keys or list(passport.load(passport.PASSPORTS))      # (config/nn/units.json: not the casters)
     N = own + enemy
     ks = [list(rng.choice(pool, N)) for _ in range(batch)]
     side = np.array([[1] * own + [2] * enemy] * batch)

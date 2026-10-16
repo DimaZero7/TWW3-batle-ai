@@ -141,9 +141,14 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
   threshold by the projectile's and the man's mass) is not hurt until he is up. The probe's twin (Searing Doom / Warp
   Lightning, sums): HP on units 0.72 / 0.90 of the game's, dead 0.73 / 1.01, dead on first casts 0.92 / 1.05; HP on lone
   men (heroes, lords) 0.85 / 1.38 (1.39 / 3.66 without the knock). Friendly hits near the target (battle 4): the twin
-  places the units by the game's centres, while in melee their men are mixed - open. The network and the scripts do
-  not cast yet; casters in the armies sit behind the `mages` switch, off ([armies](training/armies.md#casters)); the
-  scripts' sides get none.
+  places the units by the game's centres, while in melee their men are mixed - open. **The network casts**
+  ([input](training/model.md#magic-spells-winds-casting-16102026-s27)): a spell is a slot of the caster's abilities (the
+  same head and press price), it sees its own winds, the enemy caster's spells, "the enemy caster is casting" and the
+  strikes; where: the attack target's pointer, no range mask (the caster walks up). The cast's price in training is
+  direct accounting, no replays ([price](training/ability_price.md#spells): enemy damage - own damage - 13.9 gold x
+  the winds; k the lab's mean gold of a good cast). Training with a caster in every battle is ~2 times slower (`magic.bombard`
+  is not compiled). The scripts do not cast; casters in the armies sit behind the `mages` switch, off
+  ([armies](training/armies.md#casters)); the scripts' sides get none.
 - **Not modelled:** terrain, forest, visibility, cavalry, monsters, other magic, flight, artillery, experience.
 
 **Checks against the game.** A recorded battle is replayed by its recorded orders 19 times with the start

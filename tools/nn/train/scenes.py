@@ -178,7 +178,9 @@ class Generated:
         roles = ["attack" if i % 2 == 0 else "defend" for i in range(len(seeds))]
         armies = [scenario.from_arena(a, r) for a, r in zip(arenas, roles)]
         self.seeds, self.max_units, self.sequential = seeds, max_units, sequential
-        self.bank = Bank(armies, params, device, max_units + 1,
+        # (a side with a caster on top of its army - pools.json "mages" - has one more: generate.add_mages)
+        most = max(len(a["sides"][k]["units"]) for a in armies for k in (1, 2))
+        self.bank = Bank(armies, params, device, max(max_units + 1, most),
                          names=[f"{a['name']}-{r}" for a, r in zip(arenas, roles)])
         dev = self.bank.state.device
         self.gen = torch.Generator(device=dev).manual_seed(seed)

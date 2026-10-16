@@ -33,7 +33,7 @@ def widen_abil(a):
     if old.shape[-1] != mab.OLD_SIZE:
         raise SystemExit(f"recorded ability slots of {old.shape[-1]} columns: convert or record again")
     D, K = mab.DYNAMIC, old.shape[-2]
-    tab = mab.table()[:-1, :mab.OLD_SIZE - D]                              # [A, the old passport]
+    tab = mab.table()[:len(mab.keys()), :mab.OLD_SIZE - D]                 # [A, the old passport] (no spell then)
     owned = old[..., mab.INDEX["owned"]] > 0.5                           # [..., K]
     flat = old[..., D:].reshape(-1, mab.OLD_SIZE - D)
     uniq, inv = np.unique(flat.round(3), axis=0, return_inverse=True)
@@ -47,7 +47,8 @@ def widen_abil(a):
     dest = np.where(passive, mab.ACTIVE + k - n_act, k)                 # [..., K]
     state = np.zeros(owned.shape[:-1] + (mab.SLOTS, mab.STATE), np.float32)
     idx = np.full(owned.shape[:-1] + (mab.SLOTS,), -1, np.int64)
-    st = np.concatenate([old[..., :D], np.where(passive, 0.0, old[..., mab.INDEX["active_now"]])[..., None]], -1)
+    st = np.concatenate([old[..., :D], np.where(passive, 0.0, old[..., mab.INDEX["active_now"]])[..., None],
+                         np.zeros(owned.shape + (mab.STATE - mab.STATE_OLD,), np.float32)], -1)    # (no spell: 0)
     st = np.where(owned[..., None], st, 0.0)
     dest = np.where(owned, dest, mab.SLOTS - 1 - k)                      # (not owned: zeros on a free place)
     np.put_along_axis(state, np.broadcast_to(dest[..., None], dest.shape + (mab.STATE,)), st, -2)

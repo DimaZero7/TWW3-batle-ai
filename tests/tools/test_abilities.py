@@ -91,7 +91,7 @@ class TestPassport:
 class TestSaved:
     def test_every_owned_ability_has_a_passport_and_the_cards_agree(self):
         saved = mab.load()
-        units = passport.load()
+        units = passport.load(passport.PASSPORTS)          # (config/nn/units.json: the casters' cards are the probe's)
         assert set(abilities.owned(units)) <= set(saved)
         assert abilities.check_cards(saved, units) == []
 
@@ -129,7 +129,7 @@ class TestFeatures:
     def test_size_scale_and_padding(self):
         idx, usable, fx = mab.slots([GENERAL, "", WARLORD, "wh_main_emp_inf_spearmen_0"])
         feat = mab.table()[idx]
-        assert feat.shape == (4, mab.SLOTS, mab.STATIC) and np.abs(feat).max() <= 1.5
+        assert feat.shape == (4, mab.SLOTS, mab.TABLE) and np.abs(feat).max() <= 1.5
         owned = idx >= 0
         A = mab.ACTIVE
         # the General: 2 actives, 2 passives (Hold the Line, Wounded); the Warlord: 3 actives, 2 passives

@@ -6,7 +6,11 @@
   "morale": 0.03686549792083261,
   "speed": 0.009110065822804818,
   "charge_speed": 0.01567810044249719,
-  "vigour": 0.02235317559221129
+  "vigour": 0.02235317559221129,
+  "spell_damage": 1.0887701302955066,
+  "spell_friendly": 0.04005252588584258,
+  "spell_knock": 0.0,
+  "winds_cost": 10.45249874767383
  },
  "curves": {
   "vigour": {
@@ -31,9 +35,11 @@
   }
  },
  "valid": [
+  "wh2_main_spell_ruin_warp_lightning",
   "wh_main_character_abilities_deadly_onslaught",
   "wh_main_character_abilities_foe_seeker",
-  "wh_main_character_abilities_stand_your_ground"
+  "wh_main_character_abilities_stand_your_ground",
+  "wh_main_spell_metal_searing_doom"
  ],
  "recharge_target": "next",
  "recharge": {
@@ -189,6 +195,32 @@
    "own units below the steady edge",
    "own units wavering or routing",
    "owner fatigue tier"
-  ]
+  ],
+  "spell_lab": {
+   "pairs": "build/abilities_price/spell_lab/pairs.npz",
+   "pairs_per_spell": {
+    "wh2_main_spell_ruin_warp_lightning": 2048,
+    "wh_main_spell_metal_searing_doom": 2048
+   },
+   "horizon_s": 60,
+   "families": [
+    "dense",
+    "moving",
+    "runner",
+    "melee",
+    "lone",
+    "far"
+   ]
+  }
+ },
+ "recharge_static": {
+  "wh2_main_spell_ruin_warp_lightning": 37.769936896763916,
+  "wh_main_spell_metal_searing_doom": 24.938787318845293
+ },
+ "spell_direct": {
+  "k_winds": 13.859264034509195,
+  "horizon_s": 30.0,
+  "good_casts": 684,
+  "why": "k_winds: the mean direct gold (enemy gold less own, the cast's bombardment) a wind point of the spell lab's casts at a dense standing enemy in range ('dense' pairs, both spells): what else the winds would have bought (tools/nn/train/spell_price.py)"
  }
 }

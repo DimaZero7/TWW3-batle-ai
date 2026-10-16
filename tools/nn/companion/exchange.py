@@ -2,7 +2,7 @@
 
     game  -> tww3_bai_nn_state.json   every decision: move number, battle time, every unit's row
              (with fx: the phases active on it), abilities_used: {unit: {ability: ms of its last use}},
-             winds: the own army's Winds of Magic {cur, rate} (absent when the game gives none)
+             winds: the own army's Winds of Magic {cur, rate, res} (absent when the game gives none)
     companion -> tww3_bai_nn_orders.txt   the answer for that move: one line per own unit, and a line
              'ability <unit> <key> [<target>]' per ability to use now (with a target: a spell on that unit)
 
@@ -388,7 +388,30 @@ def arrays(doc, names, slots=None, own=1):
     if slots is not None:
         out.update(ability_timers(doc, names, slots, own=own))
         out["ab_rx"] = received(doc, names)
+    w = winds_of(doc)
+    if w is not None:
+        # the own side's winds (observation WINDS): on its units (the simulator's per-unit copy of the side's pool)
+        mine = np.zeros((1, N), dtype=bool)
+        for u in doc["units"]:
+            mine[0, index[u["n"]]] = int(u.get("side", 0)) == own
+        out["wm_cur"] = np.where(mine, w[0], 0.0)
+        out["wm_res"] = np.where(mine, w[1], 0.0)
     return out
+
+
+def winds_of(doc, params=None):
+    """(current, reserve) of the own army's winds of magic from the state document (the bridge's winds {cur, res}); the
+    reserve when the game gives none: the battle's start reserve less its flow so far (config/nn/sim.json magic.winds:
+    68 - 0.1 x t, the magic probe: flat while it lasts); None without winds."""
+    w = doc.get("winds")
+    if not isinstance(w, dict) or not isinstance(w.get("cur"), (int, float)):
+        return None
+    res = w.get("res")
+    if not isinstance(res, (int, float)):
+        from tools.nn.sim.params import load
+        cal = ((params or load()).sim.get("magic") or {}).get("winds") or {}
+        res = max(0.0, float(cal.get("reserve", 0.0)) - float(cal.get("flow_per_s", 0.0)) * doc.get("t", 0) / 1000.0)
+    return float(w["cur"]), float(res)
 
 
 def received(doc, names, passports=None, units_db=None):
@@ -582,8 +605,10 @@ def ability_timers(doc, names, slots, passports=None, own=1):
     the lord owns it, so the bridge cannot refuse a use in recharge); a phase on the unit with no use
     known counts 1 s active. Enemies: only whether it is active now (fx: the game shows it on the
     unit; the observation keeps it only while the unit is seen): `on` 1 s, timers 0. own: the side whose
-    uses the bridge counts (1; the enemy's script: 2, its own bridge's abilities_used)."""
-    passports = passports or model_abilities.load()
+    uses the bridge counts (1; the enemy's script: 2, its own bridge's abilities_used). A spell's slot (abilities.py
+    SPELL_AT + j) also gives sp{j}_on / sp{j}_cd (its passport's active_s and recharge_s from its last cast: the
+    recharge runs from the effect's end, the magic probe); the caster shows no phase of it."""
+    passports = passports or {**model_abilities.load_spells(), **model_abilities.load()}
     N = len(names)
     K = max((len(s) for s in slots), default=0)
     out = {f"ab{k}_{t}": np.zeros((1, N)) for k in range(K) for t in ("on", "cd")}
@@ -605,12 +630,15 @@ def ability_timers(doc, names, slots, passports=None, own=1):
                 since = t - float(last[key]) / 1000.0
                 active, recharge = max(float(p["active_s"]), 0.0), max(float(p["recharge_s"]), 0.0)
                 on, cd = max(0.0, active - since), max(0.0, active + recharge - since)
-                if fx is not None and not seen_on and since >= TAKE_S and on > 0:
+                if fx is not None and not seen_on and since >= TAKE_S and on > 0 and p.get("phases"):
                     on = cd = 0.0                      # the card does not show it: it did not take
             if seen_on and on <= 0 and not p.get("passive"):
                 on = 1.0
                 cd = max(cd, on)
             out[f"ab{k}_on"][0, i], out[f"ab{k}_cd"][0, i] = on, cd
+    for j, k in enumerate(model_abilities.SPELL_SLOTS):
+        if k < K:
+            out[f"sp{j}_on"], out[f"sp{j}_cd"] = out[f"ab{k}_on"], out[f"ab{k}_cd"]
     return out
 
 
@@ -634,12 +662,19 @@ def orders_list(names, side, kind, x, z, target, run, own=1):
     return out
 
 
-def ability_list(names, side, ability, slots, own=1):
-    """The network's ability choice [N] (slot, -1 none) -> [{unit, key}] for units of side `own`."""
+def ability_list(names, side, ability, slots, own=1, cast=None):
+    """The network's ability choice [N] (slot, -1 none) -> [{unit, key}] for units of side `own`; a spell's slot
+    (abilities.SPELL_AT ..) with its target: [{unit, key, target}] - the unit cast[i] (Orders.cast_target; none: no
+    line, a spell needs a unit to fall on)."""
     out = []
     for i, name in enumerate(names):
         k = int(ability[i])
         if side[i] == own and 0 <= k < len(slots[i]) and slots[i][k]:
+            if k in model_abilities.SPELL_SLOTS:
+                t = -1 if cast is None else int(cast[i])
+                if 0 <= t < len(names):
+                    out.append({"unit": name, "key": slots[i][k], "target": names[t]})
+                continue
             out.append({"unit": name, "key": slots[i][k]})
     return out
 

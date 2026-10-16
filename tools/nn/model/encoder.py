@@ -49,13 +49,21 @@ class TokenEncoder(nn.Module):
         The critic's enemy character, after them, keeps its weights."""
         key = prefix + "ctx.0.weight"
         w = state_dict.get(key)
-        n, timers, progress = self.ctx[0].in_features, len(ob.TIMERS), len(ob.PROGRESS)
+        winds = len(ob.WINDS)
+        # (n: the context without WINDS - the older shims below are relative to it; WINDS go in last, 16.10.2026)
+        n, timers, progress = self.ctx[0].in_features - winds, len(ob.TIMERS), len(ob.PROGRESS)
         at = ob.CONTEXT_BASE + timers                                    # where PROGRESS begins
         if w is not None and w.shape[1] == n - timers - progress + 1:
             w = torch.cat([w[:, :ob.OLD_TIME], w[:, ob.OLD_TIME + 1:ob.CONTEXT_BASE + 1],
                            w.new_zeros(w.shape[0], timers), w[:, ob.CONTEXT_BASE + 1:]], 1)
         if w is not None and w.shape[1] == n - progress:
-            state_dict[key] = torch.cat([w[:, :at], w.new_zeros(w.shape[0], progress), w[:, at:]], 1)
+            w = torch.cat([w[:, :at], w.new_zeros(w.shape[0], progress), w[:, at:]], 1)
+        if w is not None and w.shape[1] == n:
+            # a context without WINDS: zero weights for them (before the critic's enemy character)
+            wat = ob.CONTEXT - winds
+            w = torch.cat([w[:, :wat], w.new_zeros(w.shape[0], winds), w[:, wat:]], 1)
+        if w is not None:
+            state_dict[key] = w
         # a token from before the new units (14 effect pairs, no WEAPON; observation.old_columns): its columns to their
         # new places, zero weights for the new effect pairs and WEAPON - the old network computes what it did
         uw = state_dict.get(prefix + "unit.0.weight")
@@ -125,8 +133,9 @@ class AbilityEncoder(nn.Module):
 
 class AbilityExtra(nn.Module):
     """Every owned slot (module doc): the actives through the network one by one (compiled: the simulator's timer
-    slots, abilities.SIM_SLOTS - a simulator setup has no other, abilities.sim_fits), the passives - whose state is
-    owned and on now only - by a table of the network's answer per (ability, on now), counted per unit."""
+    slots and the spells', abilities.COMPILED - a simulator setup has no other, abilities.sim_fits), the passives -
+    whose state is owned and on now only - by a table of the network's answer per (ability, on now), counted per
+    unit."""
 
     def __init__(self, d):
         super().__init__()
@@ -159,7 +168,7 @@ class AbilityExtra(nn.Module):
         owned = abil[..., ab.STATE_INDEX["owned"]] > 0.5
         act = owned[:, :, :ab.ACTIVE]
         if torch.compiler.is_compiling():
-            out = _dense(self.net, abil, idx, owned, list(range(ab.SIM_SLOTS)))
+            out = _dense(self.net, abil, idx, owned, list(ab.COMPILED))     # (the timer slots and the spells')
         else:
             B, N = abil.shape[:2]
             x, b, n = _rows(abil[:, :, :ab.ACTIVE], idx[:, :, :ab.ACTIVE], act)

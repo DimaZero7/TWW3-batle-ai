@@ -95,6 +95,10 @@ def random_trace(rng, S=60, U=8, active=None):
     tr["on"] = np.clip(A - np.arange(S1), 0, None).astype(float)
     tr["on"][0] = 0.0
     tr["owner"], tr["dt_s"] = 0, 1.0
+    # the spells' bookkeeping (bonuses.SPELL_FIELDS): running totals rising in bursts, the side's winds wandering
+    for f, size in (("sp_gold_e", 60.0), ("sp_gold_f", 15.0), ("sp_knock", 3.0)):
+        tr[f] = np.cumsum(np.where(rng.random(S1) < 0.3, rng.exponential(size, S1), 0.0))
+    tr["winds"] = np.clip(rng.uniform(0, 20) + np.cumsum(rng.normal(0, 1.5, S1)), 0, None)
     mask = np.zeros((S1, U), dtype=bool)
     who = rng.random(U) < 0.5
     who[0] = True
@@ -163,7 +167,7 @@ def load(paths, horizon=None):
     parts, meta = [], []
     names = None
     keep = ("x", "z", "alive", "r", "m", "mv", "sprint", "charge", "morale", "fatigue", "mmax", "on", "diff", "budget",
-            "key", "owner", "side", "pressed", "t", "opponent", "other", "row", "diff_at")
+            "key", "owner", "side", "pressed", "t", "opponent", "other", "row", "diff_at") + bz.SPELL_FIELDS
     for i, p in enumerate(paths):
         d = np.load(p)
         names = list(d["key_names"])
@@ -189,6 +193,9 @@ def trace(data, p, c, dt_s=1.0, upto=None):
     tr = {k: np.asarray(data[k][p, c] if k == "mmax" else data[k][p, c][cut],
                         dtype=bool if k in bz.FLAGS else np.float64)
           for k in ("x", "z", "alive", "r", "m", "mv", "sprint", "charge", "morale", "fatigue", "mmax", "on")}
+    for k in bz.SPELL_FIELDS:                       # (a file of before the spells has none: 0)
+        if k in data:
+            tr[k] = np.asarray(data[k][p, c][cut], dtype=np.float64)
     tr["owner"], tr["dt_s"] = int(data["owner"][p]), dt_s
     return tr
 

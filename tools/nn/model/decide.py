@@ -5,7 +5,8 @@
 
 Only the side's units that take orders get one; every other unit (enemy, dead, routing) holds.
 A unit may get KEEP (code 4): no new order, the one in force goes on (x, z = its place, target -1).
-Orders.ability: the slot of an ability to use now (only where obs.abil_ok allowed it), -1 none.
+Orders.ability: the slot of an ability to use now (only where obs.abil_ok allowed it), -1 none; a spell's slot
+(abilities.SPELL_AT + k) casts at Orders.cast_target, the target pointer's choice.
 v2 (cfg.sectors): a unit held by its commitment keeps (commit.py); the companion keeps the commitment's state.
 """
 import numpy as np
@@ -33,11 +34,13 @@ def to_orders(cfg, action, obs_t, frame, bounds):
     point = torch.where(move[..., None], point, here)
     target = torch.where(kind == hd.ATTACK, action.target, torch.full_like(action.target, -1))
     run = action.run & ((kind == hd.MOVE) | (kind == hd.ATTACK))
-    ability = None
+    ability = cast = None
     if action.ability is not None:
         ability = torch.where(ctrl & (action.ability >= 0), action.ability, torch.full_like(action.ability, -1))
+        # a spell (Orders.ability SPELL_AT + k) falls on the target pointer's choice (heads.py)
+        cast = torch.where(hd.is_spell(ability), action.target, torch.full_like(action.target, -1))
     return Orders(kind=kind, x=point[..., 0].float(), z=point[..., 1].float(), target=target, run=run,
-                  ability=ability)
+                  ability=ability, cast_target=cast)
 
 
 def v2_inputs(actor, obs_t, frame, bounds, commit_state, t):

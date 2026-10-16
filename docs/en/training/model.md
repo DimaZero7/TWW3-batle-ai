@@ -104,6 +104,7 @@ Every decision also gets the side's context:
 | We have dealt damage yet; seconds since we last did | 0/1; s / 300, up to 1 (0 before the first) |
 | The enemy has dealt us damage yet; seconds since it last did | 0/1; s / 300, up to 1 (0 before the first) |
 | The attacker's progress (both sides): its damage rate; it has reached 0.05 yet; seconds since it last was at 0.05 or more | rate / 0.05, up to 4; 0/1; s / 300, up to 1 (0 before) |
+| Own winds of magic: the current pool and the reserve (`observation.WINDS`; the enemy's winds are not seen) | / 50 |
 
 The game announces a general's death, so the enemy lord's counts even when he was not seen.
 
@@ -167,12 +168,12 @@ of the pools and of `units.json`: no ability lost, each has its passport, the ac
 (`sim/abilities.SLOTS`; more - the test fails, then raise the simulator's SLOTS). Before, 3 slots held everything and
 the lords' Wounded and Scurry Away! fell out of them (they did reach the token as innate effects - owned and on).
 
-**What is stored.** Per unit and decision only the slot's state (`Obs.abil` [B, N, 30, 6]) and the ability's index
-into the passports' table (`Obs.abil_idx` [B, N, 30], -1 empty; the order: the passports' keys sorted, as the
-simulator's). The passport (111 numbers) is not stored per unit: the networks take it from the table on the device
-just before they read it (`abilities.full`).
+**What is stored.** Per unit and decision only the slot's state (`Obs.abil` [B, N, 30, 8]) and the ability's index
+into the passports' table (`Obs.abil_idx` [B, N, 30], -1 empty; the order: the abilities' keys sorted, as the
+simulator's, then the spells', `abilities.rows`). The passport (123 numbers) is not stored per unit: the networks
+take it from the table on the device just before they read it (`abilities.full`).
 
-| Input (per slot; the full vector: 117 numbers) | Own unit | Enemy, visible | Enemy, not visible | Scale |
+| Input (per slot; the full vector: 131 numbers) | Own unit | Enemy, visible | Enemy, not visible | Scale |
 |---|---|---|---|---|
 | Owned | yes | yes | yes | 0/1 |
 | Ready to use now | yes | no | no | 0/1 |
@@ -183,7 +184,9 @@ just before they read it (`abilities.full`).
 | Passport: effects on allies (the owner and his friends) and on enemies: 28 stats of the database (speed, charge speed, melee attack and defence, damage and AP, charge bonus, leadership, armour, resistances, missile damage, reload, accuracy, range, bonus vs large / infantry, mass, …) and 15 attributes (unbreakable, immune to psychology, causes fear, …) | yes | yes | yes | multipliers as value − 1; additions / 50 or / 100; attributes 0/1 |
 | Passport: when: the game fires it itself (`auto`), on losing a melee / in melee, off out of melee / below half morale / when not wavering / below half health, another condition | yes | yes | yes | 0/1 |
 | Passport (new, at the end): on below 25 % health (Wounded); vigour - what it gives back to its owner a second while active: -`fatigue_change_ratio` x 100 (Foe Seeker +1: the simulator takes 1 % of the maximum fatigue off a second, `sim/fatigue.py`; "+" rests, "-" tires) | yes | yes | yes | 0/1; share / 0.01 |
-| On now (new, the last): its effect acts now - an active's is "active now", a passive's condition holds (the innate effect's "on", `model/effects.py`: Wounded after 25 % health, Scurry Away! while wavering, Hold the Line always) | yes | yes | no | 0/1 |
+| On now: its effect acts now - an active's is "active now", a passive's condition holds (the innate effect's "on", `model/effects.py`: Wounded after 25 % health, Scurry Away! while wavering, Hold the Line always) | yes | yes | no | 0/1 |
+| A spell's passport (new, 16.10.2026; 0 for an ability): it is a spell; its cost in winds; the wind-up; a bombardment; projectiles; a projectile's damage (base + AP); the explosion's damage and radius; the landings' spread; the delay from the wind-up's end to the first landing; the landing window; it strikes friends | yes | yes | yes | 0/1; / 50; s / 5; / 50; / 100; / 50, m / 10; m / 20; s / 10; s / 5; 0/1 |
+| A spell: the own winds pay for it now; its cast is under way (the caster walking into range or winding up) - the last | yes | no | no | 0/1 |
 
 Why the enemy's: a player sees the enemy army's cards before battle (the abilities are on them),
 and in battle the game draws an active ability's effect on the unit and lists it among the
@@ -310,6 +313,42 @@ stay where they are; the student's recorded tokens widen the same way, `observe/
 on resume, `run.resume`). Test: `tests/tools/test_nn_aim_input.py`. Both card groups (weapon and aim) reach training
 too: the fields `LiveSetup.FIELDS` (`tools/nn/train/scenes.py`).
 
+### Magic: spells, winds, casting (16.10.2026, S27)
+
+A spell is a skill of the caster: the same slot, the same ability head, the same press price
+([price](ability_price.md#spells)). What the network sees (the user's rule: as a player does):
+
+- **Its own winds**: the current pool and the reserve (the context, `WINDS`; the game's winds bar). Never the
+  enemy's.
+- **A caster's spells are his ability slots.** The spells of the unit's card (the passport's `spells`: the Gold
+  Wizard's Searing Doom, the Warlock Engineer's Warp Lightning) sit in the last two active slots (13 and 14,
+  `abilities.SPELL_AT`; slot `SPELL_AT + k` = the simulator's spell k). A spell's passport (`abilities.json`
+  `spells`): the ability's common columns (active time, recharge, range, target "enemies") and 12 of its own
+  (`SPELL_STATIC`, the table above). An enemy caster's spells are seen (his card), not their timers.
+- **May cast** (`Obs.abil_ok` of a spell slot): owned, recharged, the own winds pay its cost, not casting already,
+  the unit takes orders and some enemy is seen alive. **No range mask:** a caster out of range walks into it (the
+  game's way - probe 1; the simulator's), the network decides itself whether to cast now, bring the caster up or not;
+  the price of walking up (the caster steps forward, exposed) is the press's own price, "pressed / not pressed".
+- **Each target's distance against the range**: pair features (`pairs.SPELL`, v2): for caster i and unit j - the
+  distance / the longest range of i's spells (up to 2) and "j within it" (0/1). The attention and the target pointer
+  read them (zero weights at first).
+- **The enemy caster is casting now** (`casting_now`, the token: own units and seen enemies) - the glowing staff;
+  not which spell nor where. **A spell's strike** (`spell_strike`): spell projectiles fell on the unit in the last
+  step - the place is seen once it falls.
+- **Where it falls: the existing target pointer** (the attack target's, no new head): a unit that attacks casts at its
+  attack target; otherwise, once a spell is chosen, the pointer picks a target for it (the same mask: a seen living
+  enemy). The probability of that choice is part of the action's log-probability (`heads.targeted`). The order:
+  `Orders.ability = SPELL_AT + k`, `Orders.cast_target` the unit; the simulator (`battle.step` -> `magic.request`) and
+  the bridge (`ability <unit> <key> <target>`) take it as it is.
+- The companion: the winds from the state's `winds` (`cur`; the bridge now reads the reserve `res` too -
+  `winds_of_magic_reserve`, probe 1; without it 68 - 0.1 x t), a spell's timers from its last cast
+  (`abilities_used`). "Casting now" and "strike" the bridge does not read yet (0 in the game): a probe has to find
+  their readers.
+
+Older networks load and play as they did: the new inputs (the winds, 2 token columns, 14 slot columns, 4 pair
+features) get zero weights (`TokenEncoder`, `pad_inputs`, `PairBias`); armies without a caster give the same inputs as
+before. Test: `tests/tools/test_nn_spells.py`.
+
 ### Effects on me from others (own units and visible enemies, the last inputs)
 
 28 inputs (`observation.RECEIVED`, 13.10.2026, `rx_<stat>`): what the abilities of OTHER units give this unit now -
@@ -328,7 +367,7 @@ without these inputs (169) loads with zero weights for them (`observation.old_co
 
 ```mermaid
 flowchart TB
-  tok["Unit tokens: 197 numbers each<br/>(69 of them the passport, 38 the innate effects,<br/>1 the volley readiness, 1 the fire arc,<br/>5 the order in force, 2 the weapon, 2 the aim,<br/>28 the effects from others)"] --> enc["Shared encoder<br/>the same weights for every unit"]
+  tok["Unit tokens: 199 numbers each<br/>(69 of them the passport, 38 the innate effects,<br/>1 the volley readiness, 1 the fire arc,<br/>5 the order in force, 2 the weapon, 2 the aim,<br/>28 the effects from others, 2 magic)"] --> enc["Shared encoder<br/>the same weights for every unit"]
   ctx["Context: character, role, counts, lords,<br/>time elapsed, damage timers,<br/>the attacker's progress"] --> enc
   enc --> att["Attention layers<br/>+ distance bias, masks"]
   att --> gru["Memory: a GRU per unit<br/>and one for the army"]

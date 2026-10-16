@@ -350,9 +350,9 @@ def old_context(ctx, t=None):
 
 
 def old_networks(cfg):
-    """An actor and a critic with the older context input (a time column, no TIMERS, no PROGRESS)."""
+    """An actor and a critic with the older context input (a time column, no TIMERS, no PROGRESS, no WINDS)."""
     actor, crit = policy.Actor(cfg), critic.Critic(cfg)
-    n = len(ob.TIMERS) + len(ob.PROGRESS) - 1
+    n = len(ob.TIMERS) + len(ob.PROGRESS) - 1 + len(ob.WINDS)
     actor.encoder.ctx[0] = torch.nn.Linear(ob.CONTEXT - n, cfg.d)
     crit.encoder.ctx[0] = torch.nn.Linear(ob.CONTEXT_FULL - n, cfg.critic_d)
     return actor.eval(), crit.eval()
@@ -415,20 +415,21 @@ def test_a_trained_checkpoint_acts_as_before_the_damage_timers(path):
 # --- the attacker's progress (observation.PROGRESS), appended after the damage timers ---
 
 def no_progress(ctx):
-    """The context as networks before PROGRESS saw it (the critic's enemy character stays after it)."""
-    at = ob.CONTEXT - len(ob.PROGRESS)
+    """The context as networks before PROGRESS saw it (no WINDS either; the critic's enemy character stays after it)."""
+    at = ob.CTX["progress_rate"]
     return torch.cat([ctx[:, :at], ctx[:, ob.CONTEXT:]], 1)
 
 
 def pre_progress_networks(cfg):
     actor, crit = policy.Actor(cfg), critic.Critic(cfg)
-    actor.encoder.ctx[0] = torch.nn.Linear(ob.CONTEXT - len(ob.PROGRESS), cfg.d)
-    crit.encoder.ctx[0] = torch.nn.Linear(ob.CONTEXT_FULL - len(ob.PROGRESS), cfg.critic_d)
+    n = len(ob.PROGRESS) + len(ob.WINDS)
+    actor.encoder.ctx[0] = torch.nn.Linear(ob.CONTEXT - n, cfg.d)
+    crit.encoder.ctx[0] = torch.nn.Linear(ob.CONTEXT_FULL - n, cfg.critic_d)
     return actor.eval(), crit.eval()
 
 
 def progress_cols(net):
-    at = ob.CONTEXT - len(ob.PROGRESS)
+    at = ob.CTX["progress_rate"]
     return net.encoder.ctx[0].weight[:, at:ob.CONTEXT]
 
 
@@ -442,7 +443,7 @@ def test_networks_saved_before_the_progress_inputs_load_and_act_the_same():
     assert torch.all(progress_cols(new) == 0) and torch.all(progress_cols(new_crit) == 0)
     # the critic's enemy character keeps its weights, after the new columns
     assert torch.equal(new_crit.encoder.ctx[0].weight[:, ob.CONTEXT:],
-                       old_crit.encoder.ctx[0].weight[:, ob.CONTEXT - len(ob.PROGRESS):])
+                       old_crit.encoder.ctx[0].weight[:, ob.CTX["progress_rate"]:])
     same_outputs(old, new, old_crit, new_crit, setup, states, to_old=no_progress)
     mem = None
     for st in states:
@@ -479,8 +480,8 @@ NEW_EFFECTS = mfx.SIZE        # the innate effects' columns (appended after the 
 NEW_VOLLEY = len(ob.VOLLEY)   # the volley input, appended after the effects (03.10.2026)
 NEW_ARC = len(ob.ARC)         # the fire arc, appended after the volley input (07.10.2026)
 NEW_ORDER = len(ob.ORDER)     # the order in force, appended after the fire arc (07.10.2026)
-NEW_WEAPON = len(ob.WEAPON) + len(ob.AIM) + len(ob.RECEIVED)   # the volley's shots and magical attacks (11.10.2026),
-#                                                                 the aim and the effects from others (13.10)
+NEW_WEAPON = len(ob.WEAPON) + len(ob.AIM) + len(ob.RECEIVED) + len(ob.MAGIC)   # the volley's shots and magical
+#                                       attacks (11.10.2026), the aim and the effects from others (13.10), magic (16.10)
 T0 = ob.TOKEN - NEW_WEAPON - NEW_ORDER - NEW_VOLLEY - NEW_ARC    # the token before the volley input
 T1 = ob.TOKEN - NEW_WEAPON - NEW_ORDER - NEW_ARC       # the token before the fire arc
 
@@ -889,7 +890,7 @@ def test_the_fire_arc_input_is_the_passports_arc_on_both_sides():
     col = obs.tokens[..., ob.INDEX["fire_arc"]]
     want = {"wh2_main_skv_inf_night_runners_0": 1.0, "wh2_dlc13_emp_inf_archers_0": 30 / 180,
             "wh_main_emp_inf_swordsmen": 0.0, "wh_main_emp_inf_handgunners": 30 / 180}
-    assert ob.NAMES[T1] == "fire_arc" and ob.NAMES[T1 + 1:] == ob.ORDER + ob.WEAPON + ob.AIM + ob.RECEIVED
+    assert ob.NAMES[T1] == "fire_arc" and ob.NAMES[T1 + 1:] == ob.ORDER + ob.WEAPON + ob.AIM + ob.RECEIVED + ob.MAGIC
     for b, keys in enumerate(setup.keys):
         for i, k in enumerate(keys):
             assert col[b, i] == pytest.approx(want[k], abs=1e-6), (b, i, k)     # own (0-3) and enemy (4-7)

@@ -73,13 +73,14 @@ def situation(tr, t, rules=bz.Rules()):
 
 class Pricer:
     """The bonus price of presses (module doc). spec: config/ability_price.json's dict; passports: abilities.json's
-    `abilities`."""
+    `abilities`; spells: its `spells` (a spell is priced by its own bricks: bonuses.SPELL_KINDS, the spell lab's rates,
+    lab_spell.py; its recharge cost the static one, spec "recharge_static")."""
 
-    def __init__(self, spec, passports, rules=bz.Rules()):
+    def __init__(self, spec, passports, rules=bz.Rules(), spells=None):
         self.spec = spec
         self.rules = rules
         self.bricks = bz.bricks(rules)
-        self.abilities = abl.abilities(passports, self.bricks)
+        self.abilities = abl.abilities(passports, self.bricks, spells=spells)
         self.rates = {k: float(v) for k, v in spec["rates"].items()}
         self.curves = spec.get("curves") or {}
         self.valid = set(spec["valid"]) & set(self.abilities)
@@ -140,7 +141,7 @@ class Pricer:
         """The dynamic recharge cost (gold) the situation at the press predicts (0 without a fit for the ability)."""
         r = self.recharge.get(key)
         if not r:
-            return 0.0
+            return float((self.spec.get("recharge_static") or {}).get(key, 0.0))
         x = situation(tr, t, self.rules)
         z = (x - np.asarray(r["mu"])) / np.asarray(r["sd"])
         z[0] = 1.0
@@ -164,12 +165,13 @@ def load(path=None, passports=None, rules=None):
     """The Pricer of config/ability_price.json (path), the passports and rules of config/nn."""
     spec = json.loads(Path(path or FILE).read_text(encoding="utf-8"))
     cfg = ROOT / "config" / "nn"
+    doc = json.loads((cfg / "abilities.json").read_text(encoding="utf-8"))
     if passports is None:
-        passports = json.loads((cfg / "abilities.json").read_text(encoding="utf-8"))["abilities"]
+        passports = doc["abilities"]
     if rules is None:
         sim = json.loads((cfg / "sim.json").read_text(encoding="utf-8"))
         rules = bz.rules(json.loads((cfg / "game_rules.json").read_text(encoding="utf-8")), sim)
-    return Pricer(spec, passports, rules)
+    return Pricer(spec, passports, rules, spells=doc.get("spells") or {})
 
 
 # --- fit: the spec from the lab's card and the presses ---

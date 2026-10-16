@@ -30,8 +30,9 @@ class TestLayout:
     def test_orders_have_five_kinds_and_six_fields(self):
         assert orders.KINDS == ("hold", "move", "attack", "withdraw", "keep")
         assert (orders.HOLD, orders.MOVE, orders.ATTACK, orders.WITHDRAW, orders.KEEP) == (0, 1, 2, 3, 4)
-        # ability (the slot to use now, -1 none) came last and is optional: the first five are as before
-        assert list(orders.FIELDS) == ["kind", "x", "z", "target", "run", "ability"]
+        # ability (the slot to use now, -1 none) and a spell's cast target came last and are optional: the first five
+        # are as before
+        assert list(orders.FIELDS) == ["kind", "x", "z", "target", "run", "ability", "cast_target"]
 
     def test_the_network_reads_the_ability_timers(self):
         assert {f"ab{k}_{t}" for k in range(3) for t in ("on", "cd")} <= set(state.INTERNAL)

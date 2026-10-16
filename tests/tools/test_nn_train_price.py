@@ -13,18 +13,24 @@ FS = "wh_main_character_abilities_foe_seeker"
 DO = "wh_main_character_abilities_deadly_onslaught"
 
 
+DOOM, LIGHTNING = "wh_main_spell_metal_searing_doom", "wh2_main_spell_ruin_warp_lightning"
+
+
 def test_the_config_prices_the_three_valid_abilities_with_a_recharge_fit_each():
     pr = tp.load()
-    assert pr.valid == {SYG, FS, DO}
+    assert pr.valid == {SYG, FS, DO, DOOM, LIGHTNING}               # the spells: the spell lab's card (lab_spell.py)
     assert not pr.ok("wh_main_character_abilities_rally") and not pr.ok(
         "wh2_main_character_abilities_verminous_valour")
-    for k in pr.valid:
+    for k in (DOOM, LIGHTNING):                                      # a spell: the static recharge cost, its bricks' rates
+        assert pr.recharge_cost(k, None, 0.0) == pr.spec["recharge_static"][k] > 0
+        assert pr.abilities[k].spell and set(pr.abilities[k].kinds()) <= set(pr.rates)
+    for k in (SYG, FS, DO):
         r = pr.spec["recharge"][k]
         assert len(r["beta"]) == len(r["mu"]) == len(r["sd"]) == tp.SITUATION_N == len(va.SITUATION)
     assert set(pr.rates) >= {"melee_damage", "melee_defence", "vigour", "morale", "charge", "speed", "charge_speed"}
     # the recharge cost learns the first useful later press less the earlier return's credit, not the best one
     assert pr.spec["recharge_target"] == "next" and pr.spec["recharge_target"] in abl.TARGETS
-    for k in pr.valid:
+    for k in (SYG, FS, DO):
         r = pr.spec["recharge"][k]
         a = pr.abilities[k]
         assert np.isclose(r["credit_gold_s"], r["own_mean"] / (a.active_s + a.recharge_s))

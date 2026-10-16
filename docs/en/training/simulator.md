@@ -651,8 +651,18 @@ Warp Lightning (both bombardments). What the game showed: the `magic` probe (`to
 whatever its size, and stops when it is empty (the database's `restored_points_base` 0.1; the probe: +1 every 10 s).
 No cap on the current pool was found (the database's 30; the probe 42-43 and rising): none.
 
-**A cast** (`magic.request(u, slot, target)`; the network does not give it yet, the scripts do not cast - a script
-side's caster leaves the battle at the start, `leave_scripted`, [armies](armies.md#casters)):
+**A cast** (`magic.request(u, slot, target)`; the network's order - `Orders.ability = SPELL_AT + slot`,
+`Orders.cast_target` the target, `battle.step` hands it to `request` ([the network's input](model.md#magic-spells-winds-casting-16102026-s27));
+the scripts do not cast - a script side's caster leaves the battle at the start, `leave_scripted`,
+[armies](armies.md#casters)). Bookkeeping with no effect on the battle, for the cast's price
+([bricks](ability_price.md#spells)): on the caster the gold of enemy and own health his bombardments have taken so far
+(`bm_gold_e`, `bm_gold_f`) and the enemy men knocked down (`bm_knock`); on a unit "spell projectiles fell on it in the
+step" (`bm_hit`, the network's input); the spell's active timer (`sp{k}_on`). `magic.bombard` runs outside
+`torch.compile` (`_eager`: its landings' shape depends on the data - compiled it recompiled every step, 1.3 s a step of
+1 024 battles), and it replaces its state fields every step (else the compiled rest of the step recompiled on "is it
+the same tensor?"): a step of 1 024 battles with casters ~42 ms against ~8 ms without them (in the landing window),
+170 ms before. An army's empty slot holds no spell (`sp0` -1; 0 before - "the first spell", harmless: an empty slot
+neither stands nor casts).
 
 | Rule | Number | Source |
 |---|---|---|

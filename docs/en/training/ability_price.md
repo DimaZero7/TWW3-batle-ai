@@ -376,6 +376,112 @@ the curves), `tests/tools/test_nn_abilities_price_lab_torch.py` (container: with
 same to the bit - in small fights and whole battles; with the bonus they part only after the press; layer 2's masks
 match the simulator's record >= 97 %).
 
+## Spells
+
+A spell is a skill of the caster: the same ability head, the same own signal (`--ability-own-signal`, `per-ability`
+scale); no head of its own. Where it falls: the unit the target pointer chooses
+([the network's input](model.md#magic-spells-winds-casting-16102026-s27)).
+
+**The cast's price in training is direct accounting, no replays** (the user's decision;
+`tools/nn/train/spell_price.py`, `--spell-price direct`, the default): the simulator knows which damage came from the
+spell, so
+
+    price (gold) = the gold of enemy health this cast's bombardment took
+                   - the gold of own health it took
+                   - k_winds x the winds spent (the cast's cost, when it launched)
+
+The window: from the decision that ordered the cast to the end of the spell's effect (its timer `sp{k}_on` on, then
+off at two decisions in a row - Warp Lightning's last bolts fall 0.2 s after its 5 s) or 30 s (a cast that did not
+happen: no winds spent), or the battle's end. A cast whose window is still open at the chunk's end is not priced. The
+caster's walk-up and his death are the ordinary reward for losses, not counted here. **Every** cast of the network is
+priced (+price at the press, the spell's own scale); the spells' moments (a cast, or a ready spell left) are neither
+replayed nor in the ability critic. **k_winds** - what else those winds would have bought: the mean direct gold of a
+good cast (the lab's "dense standing enemy in range" pairs, both spells) a wind point - **13.9 gold**
+(`config/ability_price.json` `spell_direct`, 684 casts). The direct price by the lab's situations (gold):
+
+| Situation | Warp Lightning | Searing Doom |
+|---|---|---|
+| dense standing | +8.7 | -8.7 |
+| far (walk-up) | +13.9 | -13.1 |
+| walking | -16.9 | -52.8 |
+| in melee with a friend | -22.6 | -32.1 |
+| running away (empty place) | -33.2 | -76.9 |
+| lone (the lord) | -56.1 | -59.0 |
+
+The order is as intended: a dense standing crowd pays best, an empty place and a lone man worst. With this k an
+average good cast is about 0 and the rest below: the network learns to spend winds on the best targets only. The
+"pressed / not pressed" branches and the bricks' price below stay an option (`--spell-price branch`).
+
+**The spell's bricks** (`bonuses.py`; the counters read the simulator's own bookkeeping of the caster: `bm_gold_e`,
+`bm_gold_f`, `bm_knock`, `wm_cur`):
+
+| Kind | Counter (unit) | Buff / debuff |
+|---|---|---|
+| `spell_damage` | the gold of enemy health this cast's bombardment took (cost x the health's share) | buff |
+| `spell_friendly` | the same of own units (it strikes friends near the target) | debuff |
+| `spell_knock` | enemy men knocked down (`magic.knock`) | buff |
+| `winds_cost` | the cast's cost in winds, when after the payment the winds are below the next cast's cost (winds are the resource of future casts) | debuff |
+
+**The spell's passport is data** (`ability.Ability.from_spell`): a bombardment -> `spell_damage`; a projectile or
+explosion that strikes allies -> `spell_friendly`; a projectile mass or explosion force -> `spell_knock`; a cost in
+winds -> `winds_cost`. The cast's window: from the bombardment's launch to the end of its effect and a second after
+(the last landings); the same caster's next cast (after the recharge) falls outside it; a cast that did not happen (no
+winds, the target gone) counts 0. Layer 3's auto tests (off -> 0, zero -> 0, x2, a longer window, >= 0) pass for all
+four.
+
+**The spell lab** (`lab_spell.py`): pairs "cast / no cast" - one battle copied with one battle id, the script's
+orders replayed (open loop), the caster casting at the target at the press second in copy "cast". The measure: gold
+over 60 s (enemy destroyed - own lost), "cast" less "no cast". Six situations (the target always an enemy unit): a
+**dense standing** unit in range (80-190 m), one **walking** across, one **running** away (the strike point is fixed
+start_s after the cast: the projectiles fall on an empty place), one **in melee with a friend** (friendly fire), a
+**lone** man (the enemy lord), one **far** off (230-380 m, an enemy shooter by it: the caster walks into range; the
+spells' 200 m are beyond the shooters' reach, the walk costs time, not losses). 2 048 pairs a spell (the Gold Wizard's
+Searing Doom, the Warlock Engineer's Warp Lightning), the GPU, 2.5 min.
+
+The rates (non-negative least squares over all 4 096 pairs, 95 % by bootstrap):
+
+| Kind | k | 95 % |
+|---|---|---|
+| `spell_damage` | 1.09 gold a gold | 1.08..1.10 |
+| `spell_friendly` | 0.04 | 0..0.19 |
+| `spell_knock` | 0 | 0..0 |
+| `winds_cost` | 10.5 gold a wind point - derived, not measured (below) | - |
+
+- **Damage** is worth a little more than its gold (1.09): the dead and wounded pull the enemy's morale down.
+- **Friendly damage is hardly subtracted** (0.04): a strike on a melee also strikes and knocks the enemy, and the own
+  unit loses less to it over 60 s - in the pair this offsets the losses to the own spell. Measured in the simulator;
+  the game's is a probe (open).
+- **The knock is 0:** in the simulator a knocked man only takes no damage, he strikes on (his being out of the fight is
+  not modelled) - the rate is honestly 0 until it is measured.
+- **The winds:** a 60 s pair does not see the next casts (the next is 38 s away, the winds run out only at the third);
+  the rate is derived: a wind point is worth the mean useful net of a cast per point (the mean useful price of a cast /
+  6). The brick counts it only when the cast leaves fewer winds than the next one costs.
+- **The recharge cost** is the static one (`Recharge`: the mean useful price x recharge_s / 60): Warp Lightning 37.8,
+  Searing Doom 24.9 gold. A recharge cost by the situation (as the abilities') once a trained network casts.
+
+The card (the price from the rates, cross-fitted over 5 folds; "y" the pair's gold; sign and Spearman - the price's
+agreement with the pair):
+
+| Situation | Doom: y | price | Lightning: y | price |
+|---|---|---|---|---|
+| dense standing | 74.5 | 81.1 | 110.8 | 100.1 |
+| walking | 30.4 | 33.1 | 75.4 | 72.2 |
+| running away (empty place) | 5.7 | 6.3 | 55.0 | 54.4 |
+| in melee with a friend | 68.3 | 75.9 | 100.8 | 91.3 |
+| lone (the lord) | 24.1 | 26.3 | 32.7 | 29.5 |
+| far (walk-up) | 70.1 | 76.3 | 105.5 | 105.7 |
+| all: sign / Spearman | 0.99 / 0.93 | | 1.00 / 0.93 | |
+
+Less the recharge cost, Searing Doom's cast at a runner (-19) and at a lone man (+1), Warp Lightning's at a lone man
+(-8) are below or about zero; at a dense standing unit the highest (+56 and +62). Lightning strikes even a running
+unit (+17): its 5 bolts fall within 1 s, the unit cannot leave the 8 m circle. Both spells are **valid** (sign >= 0.7,
+Spearman >= 0.4): the rates, the valid spells and the recharge cost are written into `config/ability_price.json`
+(`--write`): the cast price uses them with `--spell-price branch`; the direct accounting (the default) takes only `k_winds` (`spell_direct`).
+
+    DOCK_NAME=agent-magic5 bash tools/nn/dock.sh tools.nn.abilities_price.lab_spell --pairs 2048 --batch 512 \
+        --out build/abilities_price/spell_lab [--write]                                        # ~2.5 min, GPU
+    python -m tools.nn.abilities_price.lab_spell --out build/abilities_price/spell_lab --analyse [--write]
+
 ## How to run
 
     DOCK_NAME=agent-abprice DOCK_BUILD=<main>/build bash tools/nn/dock.sh tools.nn.abilities_price.collect \

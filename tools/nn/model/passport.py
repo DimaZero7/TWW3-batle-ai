@@ -81,7 +81,16 @@ SIZE = len(features({"men": 1, "hp_total": 1, "hp_per_man": 1, "mass": 1, "armou
 
 @lru_cache(maxsize=4)
 def load(path=None):
-    return json.loads((path or PASSPORTS).read_text(encoding="utf-8"))["units"]
+    """The unit passports (config/nn/units.json). The default file's also the casters the armies may field
+    (config/nn/pools.json "mages", their passports in data/units/probe-units.json; whatever the share: the network
+    knows them as it knows any unit, the simulator's units get them only with a share above 0, sim/params.py)."""
+    units = json.loads((path or PASSPORTS).read_text(encoding="utf-8"))["units"]
+    if path is not None:
+        return units
+    from tools.nn.armies import pools
+    m = json.loads(pools.POOLS.read_text(encoding="utf-8")).get("mages") or {}
+    extra = pools.mage_passports_of(m)
+    return {**units, **{k: v for k, v in extra.items() if k not in units}}     # (units.json's first, in its order)
 
 
 def table(keys, passports=None):

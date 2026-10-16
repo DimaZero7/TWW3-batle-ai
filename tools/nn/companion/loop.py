@@ -85,7 +85,8 @@ class Brain:
             if o["unit"] not in ctrl_names:
                 o["out"] = True     # dead, routing or shattered: the network's HOLD is no order (summary)
         exchange.remember_orders(self.given, out, ctrl_names)
-        uses = exchange.ability_list(b.names, b.side, orders.ability[0].cpu().numpy(), b.slots, own=me)
+        uses = exchange.ability_list(b.names, b.side, orders.ability[0].cpu().numpy(), b.slots, own=me,
+                                     cast=orders.cast_target[0].cpu().numpy())
         return out, (time.perf_counter() - t0) * 1000, uses
 
 

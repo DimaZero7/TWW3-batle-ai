@@ -14,8 +14,15 @@ unit tokens and their positions: the same in the simulator and the companion, no
   right) and where i stands as j faces - flank and rear, both ways; both seen now.
 
 Each comes twice: for a pair of the same side and for a pair of opposite sides (an enemy closing in is not a friend
-closing in; one linear layer cannot tell them apart otherwise): FEATURES x 2 = SIZE numbers per pair. The context
+closing in; one linear layer cannot tell them apart otherwise): FEATURES x 2 numbers per pair. The context
 token and pairs with an unknown position give zeros.
+
+Then SPELL (16.10.2026, appended last: older networks load with zero weights for them): the spell reach of a caster
+i - the distance / the longest range of i's spells (its ability slots' passports, abilities.SPELL_SLOTS; 0 for a unit
+without spells; at most REACH_CAP) and whether j is within it (0 / 1), the same twice (same side, opposite sides):
+for each enemy the caster sees how far he is inside his spell's range or how much farther (no target is masked for
+the range: the caster walks into range, tools/nn/sim/magic.py; the price of walking up is the press's own). SIZE =
+(FEATURES + SPELL) x 2.
 
 The network uses them in two places, each a linear layer started at zero (so a network trained without them computes
 exactly what it did: the loaded weights are kept and the new ones are 0, policy.Actor.load_state_dict):
@@ -31,7 +38,9 @@ from tools.nn.model import passport
 
 FEATURES = ("reach_i", "reach_j", "in_range_i", "in_range_j", "closing", "bearing_cos_i", "bearing_sin_i",
             "bearing_cos_j", "bearing_sin_j")
-SIZE = 2 * len(FEATURES)       # x (same side, opposite sides)
+SPELL = ("spell_reach_i", "spell_in_i")
+OLD_SIZE = 2 * len(FEATURES)   # before SPELL (16.10.2026)
+SIZE = 2 * (len(FEATURES) + len(SPELL))       # x (same side, opposite sides)
 REACH_CAP = 2.0                # distance / range, at most
 CLOSE_CAP = 2.0                # closing speed / VEL, within +-
 RANGE_SCALE = 500.0            # the passport's range_m / 500 (passport.features)
@@ -89,8 +98,27 @@ def features(obs_t):
     feats = torch.where(ok, feats, torch.zeros_like(feats))
     own = obs_t["own"]
     same = (own[:, :, None] == own[:, None, :])[..., None].to(dt)
-    out = torch.cat([feats * same, feats * (1 - same)], -1)
+    sr = spell_range(obs_t).to(dt)                                                # [B, N] m (0: no spells)
+    casts = sr > 0
+    s_safe = torch.where(casts, sr, torch.ones_like(sr))
+    s_reach = torch.where(casts[:, :, None], (d / s_safe[:, :, None]).clamp(max=REACH_CAP), torch.zeros_like(d))
+    s_in = (casts[:, :, None] & (d <= sr[:, :, None])).to(dt)
+    sp = torch.where(both[..., None], torch.stack([s_reach, s_in], -1), torch.zeros_like(d)[..., None])
+    out = torch.cat([feats * same, feats * (1 - same), sp * same, sp * (1 - same)], -1)
     return torch.nn.functional.pad(out, (0, 0, 1, 0, 1, 0))                       # the context token
+
+
+def spell_range(obs_t):
+    """[B, N] the longest range (m) of each unit's spells (its owned spell slots' passports; 0: none, or no ability
+    input)."""
+    from tools.nn.model import abilities as ab
+    a = obs_t.get("abil")
+    if a is None:
+        return torch.zeros_like(obs_t["pos"][..., 0])
+    k = list(ab.SPELL_SLOTS)
+    owned = a[:, :, k, ab.STATE_INDEX["owned"]] > 0.5
+    rng = ab.column("range_m", obs_t["abil_idx"][:, :, k].long()) * 100.0
+    return torch.where(owned, rng.to(a.dtype), torch.zeros_like(rng, dtype=a.dtype)).max(-1).values
 
 
 class PairBias(nn.Module):
@@ -100,6 +128,12 @@ class PairBias(nn.Module):
         super().__init__()
         self.lin = nn.Linear(SIZE, heads, bias=False)
         nn.init.zeros_(self.lin.weight)
+
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+        """A network saved before SPELL: zero weights for it (computes what it did)."""
+        from tools.nn.model.encoder import pad_inputs
+        pad_inputs(state_dict, prefix + "lin.weight", SIZE)
+        super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
 
     def forward(self, f):
         """f [B, L, L, SIZE] -> [B, heads, L, L]."""

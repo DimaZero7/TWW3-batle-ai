@@ -306,6 +306,16 @@ INTERNAL = {
     "bm1_x": ("f", "its strike point x, m"),
     "bm1_z": ("f", "its strike point z, m"),
     "bm1_fix": ("b", "its strike point is fixed"),
+    "sp0_on": ("f", "seconds spell 0's effect stays active (active_s from the wind-up's end: the ability bar's timer; "
+                    "magic.py)"),
+    "sp1_on": ("f", "seconds spell 1's effect stays active"),
+    "bm_hit": ("b", "spell projectiles struck it in the last step (a bombardment falling on it: the game shows it; the "
+                    "network's spell_strike)"),
+    "bm_gold_e": ("f", "bookkeeping (no effect): the gold of enemy health its bombardments have taken so far "
+                       "(HP / starting HP x cost; the spell price's bricks, tools/nn/abilities_price)"),
+    "bm_gold_f": ("f", "bookkeeping: the same of its own side's health (friendly fire)"),
+    "bm_knock": ("f", "bookkeeping: enemy men its bombardments have knocked down so far (magic.knock: knock "
+                      "events, each down for the getting-up delay)"),
     "bm_w": ("f", "HP of its wounds the bombardments left (their HP less the health of the men they killed, at most "
                   "its wounds): the next strike finds them where its dose falls (magic.bombard)"),
     "cmb": ("f", "the morale's fight balance points of the last step (morale.combat_points: < 0 losing, > 0 winning; 0 "
@@ -398,6 +408,17 @@ class State:
         out["side"] = self.u["side"]
         out["order_kind"] = self.u["order_kind"]      # the order in force (observation ORDER)
         out["order_target"] = self.u["order_target"]
+        if "wm_cur" in self.u:
+            # spells (observation.py, magic): the side's winds, each spell slot's timers, who is casting now (winding up:
+            # the staff glows) and who spell projectiles struck in the last step
+            from tools.nn.sim.magic import SLOTS as SPELLS
+            out["wm_cur"], out["wm_res"] = self.u["wm_cur"], self.u["wm_res"]
+            for k in range(SPELLS):
+                out[f"sp{k}_cd"] = self.u[f"sp{k}_cd"]
+                out[f"sp{k}_on"] = self.u[f"sp{k}_on"]
+            out["cast_k"] = self.u["cast_k"]
+            out["cast_now"] = (self.u["cast_k"] >= 0) & (self.u["cast_s"] >= 0)
+            out["bm_hit"] = self.u["bm_hit"]
         out["t"] = self.t
         return out
 

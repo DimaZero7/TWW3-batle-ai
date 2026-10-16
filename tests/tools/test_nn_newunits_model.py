@@ -26,7 +26,7 @@ def test_the_weapon_columns():
     w = passport.weapon([GUN, CENSER, POISON_RATS, SWORD, "wh_main_emp_inf_handgunners", ""])
     assert w[:, 0].tolist() == pytest.approx([0.9, 0, 0, 0, 0.05, 0])
     assert w[:, 1].tolist() == [0, 1, 0, 0, 0, 0]
-    T = len(ob.AIM) + len(ob.RECEIVED)                                  # the groups after WEAPON
+    T = len(ob.AIM) + len(ob.RECEIVED) + len(ob.MAGIC)                  # the groups after WEAPON
     assert ob.NAMES[-len(ob.WEAPON) - T:-T] == ob.WEAPON
 
 
@@ -59,7 +59,7 @@ def test_the_companion_reads_contact_effects_from_the_card():
 
 def test_a_token_from_before_the_new_units_maps_to_its_columns():
     E = mfx.SIZE // 2
-    width = ob.TOKEN - 2 * (E - 14) - len(ob.WEAPON) - len(ob.AIM) - len(ob.RECEIVED)
+    width = ob.TOKEN - 2 * (E - 14) - len(ob.WEAPON) - len(ob.AIM) - len(ob.RECEIVED) - len(ob.MAGIC)
     cols = ob.old_columns(width)
     assert cols is not None and len(cols) == width and len(set(cols)) == width
     names = [ob.NAMES[c] for c in cols]
@@ -72,7 +72,7 @@ def test_an_old_checkpoint_computes_what_it_did():
     torch = pytest.importorskip("torch")
     from tools.nn.model.encoder import TokenEncoder
     E = mfx.SIZE // 2
-    width = ob.TOKEN - 2 * (E - 14) - len(ob.WEAPON) - len(ob.AIM) - len(ob.RECEIVED)
+    width = ob.TOKEN - 2 * (E - 14) - len(ob.WEAPON) - len(ob.AIM) - len(ob.RECEIVED) - len(ob.MAGIC)
     torch.manual_seed(0)
     old = TokenEncoder(16, n_token=width)
     new = TokenEncoder(16)
