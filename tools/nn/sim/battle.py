@@ -10,7 +10,7 @@ import math
 
 import torch
 
-from tools.nn.sim import abilities, effects, fatigue, geometry, knobs, melee, missile, morale, movement, skirmish
+from tools.nn.sim import abilities, effects, fatigue, geometry, knobs, magic, melee, missile, morale, movement, skirmish
 from tools.nn.sim import orders as O
 from tools.nn.sim.params import load
 
@@ -76,6 +76,11 @@ def step(st, orders, params=None, dt=None):
     t_ok = (tgt >= 0) & alive.gather(1, tgt.clamp(min=0)) & ~same_side.gather(2, tgt.clamp(min=0)[:, :, None]).squeeze(2)
     kind = torch.where((kind == O.ATTACK) & ~t_ok, torch.full_like(kind, O.HOLD), kind)
     tgt = torch.where(kind == O.ATTACK, tgt, torch.full_like(tgt, -1))
+    # --- spells (magic.py; config/nn/sim.json magic): the winds flow, casts asked (magic.request) start, a caster out of
+    # range runs in, one winding up stands; their orders here replace the given ones ---
+    cast_move = None
+    if magic.on(params) and "cast_k" in u:
+        kind, tgt, run, cast_move, cast_x, cast_z = magic.steer(u, params, dt, kind, tgt, run, standing, alive, same_side)
     point = (kind == O.MOVE) | (kind == O.WITHDRAW)
     # another order than the one in force (kind, target or a point moved over 1 m): ends a latched leave (below)
     new_order = (kind != u["order_kind"]) | (tgt != u["order_target"]) | (
@@ -87,6 +92,9 @@ def step(st, orders, params=None, dt=None):
         >= knobs.get(u, "sk_new_point_m", float(sk_cal.get("new_point_m", 5.0))) ** 2))
     u["ox"] = torch.where(take & point, orders.x, u["ox"])
     u["oz"] = torch.where(take & point, orders.z, u["oz"])
+    if cast_move is not None:
+        u["ox"] = torch.where(cast_move, cast_x, u["ox"])
+        u["oz"] = torch.where(cast_move, cast_z, u["oz"])
     # A new order (another kind, or another attack target) makes a shooter aim again (missile.aim_reset_on_order;
     # measured: a firing unit given one in the game shoots its next 10 s at 0.6-0.75 of the rate of one given none).
     # By category, measured (missile.order_quiet_why): direct fire and throwing weapons lose nothing (rt_s 0: loaded men
@@ -589,6 +597,13 @@ def step(st, orders, params=None, dt=None):
         burst, start, share, volley_target = missile.burst_share(u, volley_target, m_target, share, dt)
     shots, hp_missile, shit = missile.volley(u, pw, volley_target, dt, params, contact=touch_geo, clear=clear,
                                              loaded=share, catch=catch)
+    hp_bomb = kills_bomb = None
+    if magic.on(params) and "bm0_s" in u:
+        # the bombardments landing this step (magic.py): the HP and the men each caster's strike takes from each unit,
+        # their own kill rule; the HP counts with the missiles' below (casualties, the fight's balance, under fire: the
+        # spells' projectiles are projectiles of the database)
+        hp_bomb, kills_bomb, _ = magic.bombard(u, params, dt, pw["front"], pw["depth"],
+                                               noise=bool((params.sim.get("noise") or {}).get("blows")))
     fired = shots > 0 if burst is None else torch.where(burst, start, shots > 0)
     u["unready"] = torch.where(fired, torch.ones_like(unready), unready)
     if reaim:
@@ -618,6 +633,8 @@ def step(st, orders, params=None, dt=None):
         hp_melee = rolled(hp_melee, mhit)
         hp_missile = rolled(hp_missile, shit)
     dmg = hp_melee + hp_missile
+    if hp_bomb is not None:
+        dmg = dmg + hp_bomb
     hit = torch.where(hp_missile > 0, shit, mhit)
     taken = dmg.sum(1)
     scale = torch.where(taken > u["hp_abs"], u["hp_abs"] / taken.clamp(min=1e-9), torch.ones_like(taken))
@@ -626,7 +643,8 @@ def step(st, orders, params=None, dt=None):
     # bookkeeping (no effect on the battle): the gold of enemy health each unit destroyed (dmg [B, striker, struck])
     u["gold_out"] = u["gold_out"] + (dmg * pw["enemy"] * (u["cost"] / u["hp0"].clamp(min=1e-6))[:, None, :]).sum(2)
     share = melee.kill_share(u["hp_man"][:, None, :], hit, cal["kills"]["exponent"])
-    kills = dmg / u["hp_man"][:, None, :].clamp(min=1e-6) * share
+    db = hp_bomb * scale[:, None, :] if hp_bomb is not None else torch.zeros_like(dmg)    # (the bombardments' own kills)
+    kills = (dmg - db) / u["hp_man"][:, None, :].clamp(min=1e-6) * share
     if cal["kills"].get("wound_pool"):
         # The wounded pool (kills.wound_pool; build/open_melee/spec.md R7): the game keeps every man's health and the
         # blows beyond a man's health are lost (CA), so the wounded among the living - W = men x HP a man - the unit's
@@ -644,11 +662,12 @@ def step(st, orders, params=None, dt=None):
         W_cap = own * (u["hp_man"] - hit_m).clamp(min=0)
         k_m = torch.minimum((W + D - W_cap).clamp(min=0), D) / hm
         pool_k = dm / D.clamp(min=1e-9)[:, None, :] * k_m[:, None, :]
-        shot_k = (dmg - dm) / hm[:, None, :] * melee.kill_share(u["hp_man"][:, None, :], shit, cal["kills"]["exponent"])
+        shot_k = (dmg - dm - db) / hm[:, None, :] * melee.kill_share(u["hp_man"][:, None, :], shit,
+                                                                     cal["kills"]["exponent"])
         if cal["kills"].get("missile_uniform"):
             # kills.missile_uniform (build/open2): projectile hits spread evenly over the living men, each with his
             # own health (melee.shot_kills: Poisson hits a man, tau from the unit's wounded); per pair by its hits
-            h_pair = (dmg - dm).clamp(min=0) / shit.clamp(min=1e-6)
+            h_pair = (dmg - dm - db).clamp(min=0) / shit.clamp(min=1e-6)
             H = h_pair.sum(1)
             # the hits' mean HP (HP a man / their hits-weighted E[N] to kill)
             K_t = (h_pair * hm[:, None, :] / shit.clamp(min=1e-6)).sum(1) / H.clamp(min=1e-9)
@@ -656,6 +675,8 @@ def step(st, orders, params=None, dt=None):
             k_t = melee.shot_kills(H, u["men"], u["hp_man"], u["hp_abs"], eff_t)
             shot_k = h_pair / H.clamp(min=1e-9)[:, None, :] * k_t[:, None, :]
         kills = torch.where((u["men0"] > 1)[:, None, :], pool_k + shot_k, kills)
+    if kills_bomb is not None:
+        kills = kills + torch.where((u["men0"] > 1)[:, None, :], kills_bomb * scale[:, None, :], torch.zeros_like(kills))
     hp_new = (u["hp_abs"] - taken).clamp(min=0)
     floor = torch.ceil(hp_new / u["hp_man"].clamp(min=1e-6) - 1e-6)
     men_new = torch.maximum(u["men"] - kills.sum(1), floor)
@@ -704,7 +725,7 @@ def step(st, orders, params=None, dt=None):
     u["dealt"] = u["dealt"] * fade + melee_scaled.sum(2)
     u["taken"] = u["taken"] * fade + melee_scaled.sum(1)
     # the same balance of missile HP between enemies (the morale's winning / losing the fight counts both)
-    shot_scaled = hp_missile * scale[:, None, :] * pw["enemy"]
+    shot_scaled = (hp_missile * scale[:, None, :] + db) * pw["enemy"]
     u["shot_dealt"] = u["shot_dealt"] * fade + shot_scaled.sum(2)
     u["shot_taken"] = u["shot_taken"] * fade + shot_scaled.sum(1)
     # contact effects (poison, the censer's contagion, suppressing fire): a hit of a weapon that lays one starts it on
@@ -713,7 +734,7 @@ def step(st, orders, params=None, dt=None):
     # the slowing from hits of gunpowder (missile.hit_slow): a hit starts its timer on the enemy hit; it acts in this
     # step's movement (below)
     missile.hit_slow_lay(u, params, dt, hp_missile * scale[:, None, :], shit, pw["enemy"].float(), st.t)
-    shot_at = (hp_missile * pw["enemy"]).sum(1) > 0      # friendly fire does not count (ume_concerned_under_friendly_fire 0)
+    shot_at = ((hp_missile + db) * pw["enemy"]).sum(1) > 0     # friendly fire does not count (ume_concerned_under_friendly_fire 0)
     u["under_fire_s"] = torch.where(shot_at, torch.zeros_like(u["under_fire_s"]), u["under_fire_s"] + dt)
     attackers = strike & standing[:, :, None]
     # the worst side it is struck from this step (morale: attacked in the flank / rear while it lasts)

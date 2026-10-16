@@ -221,7 +221,8 @@ winds (`apps.battle.winds`: current, reserve, `rate`) and the caster's CCO field
 without the list (the defaults); battle 2: scripted winds (+30 current both sides, reserve +40 / -60), targets with
 and without armour; battle 3: a target walking at the caster, a target out of range (260 m), repeats. Table:
 `python -m tools.nn.magic_probe [runs]` - the casts by the winds' falls, their cost, the target's health and men lost
-by windows after the cast, the winds' flow.
+by windows after the cast, the winds' flow; with `--sim` the simulator's twin beside the game's, cast by cast (the
+[simulator's magic](../training/simulator.md#magic)).
 
 Every 0.5 s `probe_sample` per lane: men, health (CCO `HealthValue`), melee / moving / running flags, place,
 bearing, kills, fatigue, status keys (CCO `StatusList`: `braced`, `melee`...) of the attacker, the target and

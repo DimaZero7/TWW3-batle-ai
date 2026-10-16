@@ -5,6 +5,10 @@ ability key the units of config/nn/units.json own (their `abilities`). The netwo
 (tools/nn/model/abilities.py) and the simulator (tools/nn/sim/abilities.py) both read this file:
 an ability is known by what it does (times, reach, targets, effects), never by its name, so a new
 lord's ability needs a passport, not a new network.
+The casters' spells (their passports' `spells`, config/nn/units.json and data/units/probe-units.json) get a spell
+passport in the file's own section `spells` (spell_passport, SPELL_FIELDS: cost, wind-up, range, targets, the
+bombardment with its projectile and explosion); the simulator reads it (tools/nn/sim/magic.py), the network's ability
+table does not.
 
     py -3.14 -m tools.nn.abilities                  # the abilities of the units in units.json
     py -3.14 -m tools.nn.abilities --abilities k1,k2   # more keys
@@ -14,6 +18,7 @@ Needs Python 3.14+ (compression.zstd) to read the game. A lord with a card from 
 """
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -26,6 +31,92 @@ TABLES = ("unit_special_abilities", "special_ability_to_special_ability_phase_ju
           "special_ability_phase_stat_effects", "special_ability_phase_attribute_effects",
           "special_ability_to_recharge_contexts", "special_ability_to_auto_deactivate_flags")
 PHASES = "special_ability_phases"      # read with floats as written (fatigue_change_ratio to 6 digits)
+# the spells' own tables (spell_passport): the ability's kind, the bombardment, its projectile, explosion and penetration
+SPELL_TABLES = ("unit_abilities", "projectile_bombardments", "projectiles", "projectiles_explosions",
+                "projectile_penetration_junctions")
+PROBE_UNITS = project.ROOT / "data" / "units" / "probe-units.json"
+
+# Where each spell passport field comes from (spell_passport; the spells of the casters' `spells`, tools/nn/units.py)
+SPELL_FIELDS = {
+    "kind": "unit_abilities.type (wh_type_bombardment, ...)",
+    "mana": "unit_special_abilities.mana_cost: the winds of magic a cast takes from its side's current pool",
+    "wind_up_s": "unit_special_abilities.wind_up_time, s: the caster stands casting this long after the order",
+    "range_m": "unit_special_abilities.target_intercept_range, m: the cast's reach, caster's centre to the target's "
+               "(out of it the caster walks in first: the magic probe, build/magic/probe1.md)",
+    "active_s": "unit_special_abilities.active_time, s; the recharge runs from its end (the probe: casts 40 s / 37 s "
+                "apart = wind-up + active + recharge)",
+    "recharge_s": "unit_special_abilities.recharge_time, s",
+    "initial_s": "unit_special_abilities.initial_recharge, s (-1 and 0: ready at once)",
+    "targets": "unit_special_abilities.target_enemies / target_friends / target_self / target_ground",
+    "ai_usage": "unit_special_abilities.ai_usage: the game's AI usage template",
+    "overcast": "unit_abilities.overpower_option: the overcast spell's key (not modelled yet)",
+    "bombardment": "projectile_bombardments of unit_special_abilities.bombardment: projectiles = num_projectiles, "
+                   "start_s = start_time (after the wind-up), window_s = arrival_window, spread_m = radius_spread (the "
+                   "projectiles land within this radius of the aim), launch_height_m = launch_height, launch = "
+                   "launch_source",
+    "bombardment.projectile": "projectiles of its projectile_type: damage, ap = ap_damage, collision_m = "
+                              "collision_radius, penetration = projectile_penetration_junctions.max_penetration of its "
+                              "projectile_penetration (the men one projectile can strike), penetration_cap = its "
+                              "entity_size_cap, elevation_deg = fixed_elevation, muzzle_v = muzzle_velocity, gravity, "
+                              "magical = is_magical, allies = can_damage_allies, explosion = explosion_type",
+    "bombardment.explosion": "projectiles_explosions of the projectile's explosion_type: radius_m = detonation_radius, "
+                             "damage = detonation_damage, ap = detonation_damage_ap, allies = affects_allies",
+    "bombardment.flight_s": "ours: the fall from launch_height at muzzle_velocity aimed fixed_elevation below the "
+                            "horizontal under gravity, h = v sin(e) t + g t^2 / 2 (Searing Doom 2.96 s, Warp Lightning "
+                            "1.17 s: with the wind-up and start the first hit 5.96 / 5.17 s after the order, the probe "
+                            "6.0 / 5.0-5.5 s)",
+}
+
+
+def flight_s(height, v, elevation_deg, gravity):
+    """Seconds of the fall from `height` m at muzzle velocity v aimed elevation_deg below the horizontal under gravity
+    (h = v sin(e) t + g t^2 / 2); 0 without a height."""
+    if not height or height <= 0:
+        return 0.0
+    vy = max(float(v), 0.0) * math.sin(math.radians(float(elevation_deg or 0.0)))
+    g = float(gravity or 0.0)
+    if g <= 0:
+        return height / vy if vy > 0 else 0.0
+    return (-vy + math.sqrt(vy * vy + 2 * g * height)) / g
+
+
+def spell_passport(key, t):
+    """One spell's passport (SPELL_FIELDS) from the decoded tables t (TABLES and SPELL_TABLES)."""
+    rows = {r["key"]: r for r in t["unit_special_abilities"]}
+    if key not in rows:
+        raise ValueError(f"unit_special_abilities: no row for {key}")
+    p = rows[key]
+    ua = {r["key"]: r for r in t["unit_abilities"]}.get(key) or {}
+    out = {"kind": ua.get("type"), "mana": p["mana_cost"], "wind_up_s": p["wind_up_time"],
+           "range_m": p["target_intercept_range"], "active_s": p["active_time"], "recharge_s": p["recharge_time"],
+           "initial_s": max(0.0, p.get("initial_recharge", 0.0)),
+           "targets": {k: bool(p[f"target_{k}"]) for k in ("enemies", "friends", "self", "ground")},
+           "ai_usage": p.get("ai_usage"), "overcast": ua.get("overpower_option"), "bombardment": None}
+    if p.get("bombardment"):
+        b = {r["bombardment_key"]: r for r in t["projectile_bombardments"]}[p["bombardment"]]
+        pr = {r["key"]: r for r in t["projectiles"]}[b["projectile_type"]]
+        pen = {r["key"]: r for r in t["projectile_penetration_junctions"]}.get(pr["projectile_penetration"]) or {}
+        ex = {r["key"]: r for r in t["projectiles_explosions"]}.get(pr["explosion_type"])
+        proj = {"key": pr["key"], "damage": pr["damage"], "ap": pr["ap_damage"], "collision_m": pr["collision_radius"],
+                "penetration": pen.get("max_penetration"), "penetration_cap": pen.get("entity_size_cap"),
+                "elevation_deg": pr["fixed_elevation"], "muzzle_v": pr["muzzle_velocity"], "gravity": pr["gravity"],
+                "magical": bool(pr["is_magical"]), "allies": bool(pr["can_damage_allies"]),
+                "explosion": pr["explosion_type"] or None}
+        out["bombardment"] = {
+            "key": b["bombardment_key"], "projectiles": b["num_projectiles"], "start_s": b["start_time"],
+            "window_s": b["arrival_window"], "spread_m": b["radius_spread"], "launch_height_m": b["launch_height"],
+            "launch": b["launch_source"], "projectile": proj,
+            "explosion": None if ex is None else {"key": ex["key"], "radius_m": ex["detonation_radius"],
+                                                  "damage": ex["detonation_damage"], "ap": ex["detonation_damage_ap"],
+                                                  "allies": bool(ex["affects_allies"])},
+            "flight_s": round(flight_s(b["launch_height"], pr["muzzle_velocity"], pr["fixed_elevation"], pr["gravity"]),
+                              3)}
+    return out
+
+
+def spells_of(*docs):
+    """Every spell key the casters of the unit passport documents own (their `spells`), sorted."""
+    return sorted({k for d in docs for u in d.values() for k in u.get("spells") or ()})
 
 # Where each passport field comes from: table.column by the RPFM schema's names (tools/nn/dbschema.py); "ours": what
 # we make of the columns.
@@ -198,10 +289,16 @@ def build(tables, keys, units, roster=ROSTER):
     return out
 
 
-def document(abilities, source):
-    return {"_description": "Ability passports (docs/en/training/model.md, abilities): what each ability of our "
-                            "units does, from the game's database. Written by py -3.14 -m tools.nn.abilities.",
-            "_source": str(source), "_fields": FIELDS, "_missing": MISSING, "abilities": abilities}
+def document(abilities, source, spells=None):
+    """The file's document; spells ({key: spell passport}, the casters') in their own section, after the abilities:
+    the network's ability table (tools/nn/model/abilities.py) reads `abilities` only."""
+    doc = {"_description": "Ability passports (docs/en/training/model.md, abilities): what each ability of our "
+                           "units does, from the game's database. Written by py -3.14 -m tools.nn.abilities.",
+           "_source": str(source), "_fields": FIELDS, "_missing": MISSING, "abilities": abilities}
+    if spells:
+        doc["_spell_fields"] = SPELL_FIELDS
+        doc["spells"] = spells
+    return doc
 
 
 def main(argv=None):
@@ -212,12 +309,20 @@ def main(argv=None):
     sys.stdout.reconfigure(encoding="utf-8")
     from tools.nn import dbtables
     game = Path(project.load()["game_dir"]) / "data" / "db.pack"
-    tables = dict(dbtables.read_tables(game, TABLES), **dbtables.read_tables(game, (PHASES,), digits=None))
+    tables = dict(dbtables.read_tables(game, TABLES + SPELL_TABLES),
+                  **dbtables.read_tables(game, (PHASES,), digits=None))
     units = json.loads(UNITS.read_text(encoding="utf-8"))["units"]
     keys = sorted(set(owned(units)) | set(args.abilities.split(",") if args.abilities else ()))
     abilities = build(tables, keys, units)
-    args.out.write_text(json.dumps(document(abilities, game), indent=1, ensure_ascii=False) + "\n",
+    probe = json.loads(PROBE_UNITS.read_text(encoding="utf-8"))["units"] if PROBE_UNITS.exists() else {}
+    spells = {k: spell_passport(k, tables) for k in spells_of(units, probe)}
+    args.out.write_text(json.dumps(document(abilities, game, spells), indent=1, ensure_ascii=False) + "\n",
                         encoding="utf-8", newline="\n")
+    for k, s in spells.items():
+        b = s["bombardment"] or {}
+        print(f"spell {k}: {s['kind']}, mana {s['mana']:g}, wind-up {s['wind_up_s']:g} s, range {s['range_m']:g} m, "
+              f"{b.get('projectiles')} projectiles over {b.get('window_s')} s from {b.get('start_s')} s, flight "
+              f"{b.get('flight_s')} s")
     for k, a in abilities.items():
         eff = ", ".join(f"{e['stat']} {e['how']} {e['value']:g}" for e in a["effects"])
         kind = "passive" if a["passive"] else f"{a['active_s']:g} s / {a['recharge_s']:g} s" + (

@@ -167,6 +167,11 @@ STATIC = {
     "fx": ("i", "its innate effects: bitmask over config/nn/effects.json order (tools/nn/sim/effects.py)"),
     "fxt0": ("i", "its first timed effect (index in that order, -1 none)"),
     "fxt1": ("i", "its second timed effect (-1 none)"),
+    "sp0": ("i", "the unit's first spell: index in the spell passports (config/nn/abilities.json spells; "
+                 "tools/nn/sim/magic.py keys), -1 none"),
+    "sp1": ("i", "its second spell (-1 none)"),
+    "resist_magic": ("f", "spell resistance, 0-1: the database's damage_mod_magic + damage_mod_all (a ward), what cuts a "
+                          "magical projectile (magic.py; docs/en/game/mechanics/magic.md)"),
     "tag": ("i", "a drill's mark of the unit (tools/nn/train/drills: 1 our unit of the drill's situation, 2 the "
                  "enemy's, inserted into an otherwise normal battle; 0 every other unit); set by scenario.build from "
                  "the description's \"tag\"; the simulator and the observation never read it (only the drill's scripts)"),
@@ -281,6 +286,28 @@ INTERNAL = {
     "fxt0_used": ("b", "timed effect 0 has fired in this battle: its recharge runs only while its recharge context "
                        "holds (the initial one, before the first fire, always; effects.py)"),
     "fxt1_used": ("b", "timed effect 1 has fired in this battle"),
+    "wm_cur": ("f", "its side's current winds of magic (the pool the casts pay from; the same on every unit of the side; "
+                    "magic.py)"),
+    "wm_res": ("f", "its side's winds reserve (it flows into the current pool, magic.winds.flow_per_s)"),
+    "sp0_cd": ("f", "seconds until spell 0 is ready (magic.py: from the wind-up's end, active_s + recharge_s)"),
+    "sp1_cd": ("f", "seconds until spell 1 is ready"),
+    "cq_k": ("i", "a cast asked of it for the next step (magic.request): the spell slot, -1 none"),
+    "cq_t": ("i", "the asked cast's target slot"),
+    "cast_k": ("i", "the spell slot it is casting (pending out of range or winding up), -1 none"),
+    "cast_t": ("i", "the cast's target slot"),
+    "cast_s": ("f", "seconds left of the cast's wind-up; < 0: pending, walking into range"),
+    "bm0_s": ("f", "seconds since the wind-up's end of spell 0's bombardment, -1 none (magic.bombard)"),
+    "bm0_t": ("i", "its target slot (its centre fixes the strike point start_s after the wind-up)"),
+    "bm0_x": ("f", "its strike point x, m (fixed: bm0_fix)"),
+    "bm0_z": ("f", "its strike point z, m"),
+    "bm0_fix": ("b", "its strike point is fixed"),
+    "bm1_s": ("f", "the same of spell 1's bombardment"),
+    "bm1_t": ("i", "its target slot"),
+    "bm1_x": ("f", "its strike point x, m"),
+    "bm1_z": ("f", "its strike point z, m"),
+    "bm1_fix": ("b", "its strike point is fixed"),
+    "bm_w": ("f", "HP of its wounds the bombardments left (their HP less the health of the men they killed, at most "
+                  "its wounds): the next strike finds them where its dose falls (magic.bombard)"),
     "cmb": ("f", "the morale's fight balance points of the last step (morale.combat_points: < 0 losing, > 0 winning; 0 "
                  "out of a fight or routing): the 'losing its melee' of the effects (effects.py losing_melee)"),
     "snap_s": ("f", "seconds left of an ability laid on it at a friend's cast (passport update_targets false: Stand "
@@ -399,6 +426,8 @@ def empty(B, N, device="cpu", history=0):
     u["mfx"].fill_(-1)
     u["sfx"].fill_(-1)
     u["snap_ab"].fill_(-1)
+    for name in ("sp0", "sp1", "cq_k", "cq_t", "cast_k", "cast_t", "bm0_s", "bm0_t", "bm1_s", "bm1_t"):
+        u[name].fill_(-1)
     u["vis"].fill_(True)
     u[BATTLE_ID] = torch.arange(B, device=device)[:, None].expand(B, N).clone()
     zeros = torch.zeros(B, device=device)

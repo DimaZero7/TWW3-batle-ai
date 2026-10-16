@@ -23,6 +23,8 @@ capabilities).
     python -m tools.nn.charge_probe plan --plan magic             # the battles
     python -m tools.nn.charge_probe run --plan magic --speed 3    # build + launch each, in turn
     python -m tools.nn.magic_probe [runs...] [--out build/magic/probe.json]   # the casts, the winds, the damage
+    python -m tools.nn.magic_probe runs... --sim [--copies 8] [--set wounds='"even"']   # + the simulator's twin
+                                    # (tools/nn/sim/magic.py; needs torch: bash tools/nn/dock.sh tools.nn.magic_probe ...)
 """
 import argparse
 import json
@@ -192,6 +194,220 @@ def measure(run_dir):
     return {"run": Path(run_dir).name, "casts": rows, "sides": sides, "mages": mages}
 
 
+# ---------------------------------------------------------------- the simulator's twin
+
+def sim_params(params=None, blows=True):
+    """The simulator's numbers with the probe's units (data/units/probe-units.json: the casters) beside the pool's (the
+    pool's file wins) and the game's own randomness of hits (noise.blows) for the twin's copies."""
+    import dataclasses
+    from tools.nn.sim.params import load
+    params = params or load()
+    probe = json.loads(cp.PROBE_UNITS_JSON.read_text(encoding="utf-8"))["units"]
+    params = dataclasses.replace(params, units={**probe, **params.units})
+    return params.with_cal("noise", blows=bool(blows))
+
+
+def first_winds(magic):
+    """{side: (current, reserve)} of the run's first winds sample."""
+    for _, w, _ in magic["winds"]:
+        if w[1].get("cur") is not None and w[2].get("cur") is not None:
+            return {s: (float(w[s]["cur"]), float(w[s].get("res") or 0.0)) for s in (1, 2)}
+    return {}
+
+
+def sim_lanes(lanes, winds, params, copies=4, device="cpu", seed=0):
+    """The simulator on the recorded cast lanes: each lane its own battle - the caster and its target where the first
+    sample has them, the target held (a 'push' target walks to where the game's ended), everyone fearless, the sides'
+    winds as the game's first sample, the game's casts asked at their seconds (a try on cooldown or without winds is
+    dropped, as the game drops it). Returns per lane and copy {"samples": [(t, hp, men)], "casts": [t of an accepted
+    try], "caster": [(t, x, z)]} on the game's clock."""
+    import torch
+    from tools.nn.sim import battle, magic, orders as O, scenario as sim_scenario
+    armies, meta = [], []
+    for ln, w in zip(lanes, winds):
+        spec, s0 = ln["spec"], ln["samples"][0]
+        sides = {1: {"faction": cp.EMP, "ai": False, "units": []}, 2: {"faction": cp.SKV, "ai": False, "units": []}}
+        for role, row, key, width in (("a", s0[1], spec["a_key"], spec["a_width"]),
+                                      ("tg", s0[2], spec["t_key"], spec["t_width"])):
+            fac = 1 if cp.FACTION[key] == cp.EMP else 2
+            sides[fac]["units"].append({"key": key, "x": row["x"], "z": row["z"], "b": row["b"], "men": row["men"],
+                                        "width": width, "general": False, "name": role})
+        for _ in range(copies):
+            armies.append({"attacker": 1, "sides": sides})
+            meta.append((ln, w))
+    st = sim_scenario.build(armies, params, device=device, per_side=1)
+    B, N = st.B, st.N
+    a_slot = torch.tensor([0 if cp.FACTION[m[0]["spec"]["a_key"]] == cp.EMP else 1 for m in meta], device=device)
+    t_slot = 1 - a_slot
+    b_idx = torch.arange(B, device=device)
+    st.u["leadership"] = st.u["leadership"] + 1e4
+    st.u["morale"] = st.u["morale"] + 1e4
+    for b, (_, w) in enumerate(meta):
+        for side, (cur, res) in w.items():
+            mask = st.u["side"][b] == side
+            st.u["wm_cur"][b, mask] = cur
+            st.u["wm_res"][b, mask] = res
+    t0 = [float(m[0]["samples"][0][0]) for m in meta]
+    tries = [sorted(a["t"] / 1000 for a in m[0]["abilities"] if a.get("status") == "given") for m in meta]
+    asked = [0] * B
+    push = [m[0]["spec"].get("target_mode") == "push" for m in meta]
+    end_xz = [(m[0]["samples"][-1][2]["x"], m[0]["samples"][-1][2]["z"]) for m in meta]
+    out = [{"samples": [], "casts": [], "caster": [], "starts": []} for _ in range(B)]
+    pending = {}
+    before = {"k": [-1] * B, "w": st.u["wm_cur"][b_idx, a_slot].tolist()}
+
+    def policy(st):
+        o = O.hold(B, N, device)
+        kind = torch.full_like(o.kind, O.KEEP)
+        x, z = o.x.clone(), o.z.clone()
+        slot = torch.full_like(o.kind, -1)
+        target = torch.full_like(o.kind, -1)
+        t = float(st.t.max())
+        for b in range(B):
+            A, T = int(a_slot[b]), int(t_slot[b])
+            kind[b, T] = O.HOLD
+            if push[b]:
+                kind[b, T], x[b, T], z[b, T] = O.MOVE, end_xz[b][0], end_xz[b][1]
+            while asked[b] < len(tries[b]) and tries[b][asked[b]] <= t0[b] + t + 1e-6:
+                slot[b, A], target[b, A] = 0, T
+                pending[b] = tries[b][asked[b]]
+                asked[b] += 1
+        magic.request(st.u, slot, target)
+        before["k"] = st.u["cast_k"][b_idx, a_slot].tolist()
+        return O.Orders(kind=kind, x=x, z=z, target=o.target, run=o.run, ability=o.ability)
+
+    def record(st):
+        t = float(st.t.max())
+        hp = st.u["hp_abs"][b_idx, t_slot].tolist()
+        men = st.u["men"][b_idx, t_slot].tolist()
+        ax, az = st.u["x"][b_idx, a_slot].tolist(), st.u["z"][b_idx, a_slot].tolist()
+        k = st.u["cast_k"][b_idx, a_slot].tolist()
+        w = st.u["wm_cur"][b_idx, a_slot].tolist()
+        for b in range(B):
+            tg = t0[b] + t
+            out[b]["samples"].append((tg, hp[b], men[b]))
+            out[b]["caster"].append((tg, ax[b], az[b]))
+            if b in pending:
+                # a try taken: the caster was not casting before it and is now (pending or winding up)
+                if before["k"][b] < 0 and k[b] >= 0:
+                    out[b]["casts"].append(pending[b])
+                pending.pop(b)
+            if before["w"][b] - w[b] >= DROP:
+                out[b]["starts"].append(round(tg, 2))         # the wind-up's start: the side's winds drop
+            before["w"][b] = w[b]
+
+    max_s = max(float(m[0]["spec"].get("max_s", 160)) for m in meta)
+    battle.run(st, policy, params, until_s=max_s, record=record)
+    return [(m[0], o) for m, o in zip(meta, out)]
+
+
+def twin_damage(samples, t_cast, windows=WINDOWS):
+    """damage_after of a twin's samples [(t, hp, men)]."""
+    rows = [(t, None, {"hp": hp, "men": men}, None) for t, hp, men in samples]
+    return damage_after(rows, t_cast, windows)
+
+
+def first_hit(samples, t_cast, until=20.0):
+    """Seconds from t_cast to the first health lost (samples [(t, hp)]), None: none."""
+    prev = None
+    for t, hp in samples:
+        if t < t_cast:
+            prev = hp
+            continue
+        if t > t_cast + until:
+            break
+        if prev is not None and hp < prev - 0.5:
+            return round(t - t_cast, 2)
+        prev = hp
+    return None
+
+
+def rms(v):
+    """The root mean square of log(v) (0: every ratio 1), None for none."""
+    v = [x for x in v if x]
+    return float(np.sqrt(np.mean(np.log(np.maximum(v, 1e-3)) ** 2))) if v else None
+
+
+def sim_report(run_dirs, copies=4, device="cpu", params=None, out=None):
+    """The game's casts against the twin's: per cast HP and men lost (to 20 s after the try), their ratio twin / game
+    (1: the same), the first hit's delay; the geometric means per spell."""
+    params = sim_params(params)
+    rows = []
+    for run in run_dirs:
+        lanes = [ln for ln in cp.load_run(run) if ln["spec"].get("mode") == "cast"
+                 and any(a.get("status") == "given" for a in ln["abilities"])]
+        if not lanes:
+            continue
+        w = first_winds(load_magic(run))
+        game = {(c["lane"]): [] for c in measure(run)["casts"]}
+        for c in measure(run)["casts"]:
+            game[c["lane"]].append(c)
+        twins = sim_lanes(lanes, [w] * len(lanes), params, copies=copies, device=device)
+        by_lane = {}
+        for ln, tw in twins:
+            by_lane.setdefault(ln["spec"]["name"], (ln, []))[1].append(tw)
+        for name, (ln, tws) in by_lane.items():
+            g_casts = sorted(game.get(name, []), key=lambda c: c["try_s"])
+            t_g = np.array([s[0] for s in ln["samples"]])
+            hp_g = cp.series(ln["samples"], "tg", "hp")
+            for i, gc in enumerate(g_casts):
+                g_hp = sum(v[0] or 0 for v in gc["windows"].values())
+                g_men = sum(v[1] or 0 for v in gc["windows"].values())
+                s_hp, s_men, s_hit, s_try, s_start = [], [], [], [], []
+                for tw in tws:
+                    if i >= len(tw["casts"]):
+                        continue
+                    if i < len(tw["starts"]):
+                        s_start.append(tw["starts"][i])
+                    d = twin_damage(tw["samples"], tw["casts"][i])
+                    s_hp.append(sum(v[0] or 0 for v in d["windows"].values()))
+                    s_men.append(sum(v[1] or 0 for v in d["windows"].values()))
+                    s_hit.append(first_hit([(t, hp) for t, hp, _ in tw["samples"]], tw["casts"][i]))
+                    s_try.append(tw["casts"][i])
+                g_hit = first_hit(list(zip(t_g, hp_g)), gc["try_s"])
+                rows.append({"run": Path(run).name, "lane": name, "kind": gc["kind"], "n": i + 1,
+                             "spell": SPELL[GOLD] if "_sd_" in gc["kind"] else SPELL[WARLOCK],
+                             "try_game": gc["try_s"], "try_twin": float(np.mean(s_try)) if s_try else None,
+                             "start_game": gc["drop_s"], "start_twin": float(np.mean(s_start)) if s_start else None,
+                             "hp_game": g_hp, "men_game": g_men,
+                             "hp_twin": float(np.mean(s_hp)) if s_hp else None,
+                             "men_twin": float(np.mean(s_men)) if s_men else None,
+                             "hit_game_s": g_hit, "hit_twin_s": float(np.mean([h for h in s_hit if h is not None]))
+                             if any(h is not None for h in s_hit) else None, "copies": len(s_hp)})
+    print(f"{'cast':<22}{'n':>2} {'try g/t':>13} {'HP game':>8} {'twin':>7} {'x':>5}  {'men g':>5} {'twin':>6} {'x':>5}"
+          f"  {'1st hit g/t':>11}  {'cast g/t':>11}")
+    for r in rows:
+        hx = r["hp_twin"] / r["hp_game"] if r["hp_twin"] is not None and r["hp_game"] else None
+        mx = r["men_twin"] / r["men_game"] if r["men_twin"] is not None and r["men_game"] else None
+        r["hp_x"], r["men_x"] = hx, mx
+        print(f"{r['kind']:<22}{r['n']:>2} {r['try_game']:>6.1f}/{(r['try_twin'] or 0):>6.1f} {r['hp_game']:>8.0f} "
+              f"{(r['hp_twin'] or 0):>7.0f} {(hx or 0):>5.2f}  {r['men_game']:>5.0f} {(r['men_twin'] or 0):>6.1f} "
+              f"{(mx or 0):>5.2f}  {str(r['hit_game_s']):>5}/{str(r['hit_twin_s']):>5}  "
+              f"{str(r['start_game']):>5}/{str(r['start_twin']):>5}")
+    summary = {}
+    for spell in sorted({r["spell"] for r in rows}):
+        sel = [r for r in rows if r["spell"] == spell and r["hp_x"]]
+        first = [r for r in sel if r["n"] == 1]
+        gm = lambda v: float(np.exp(np.mean(np.log(np.maximum(v, 1e-3))))) if len(v) else None
+        summary[spell] = {"casts": len(sel), "hp_x": gm([r["hp_x"] for r in sel]),
+                          "men_x": gm([r["men_x"] for r in sel if r["men_x"]]),
+                          "hp_x_first": gm([r["hp_x"] for r in first]),
+                          "men_x_first": gm([r["men_x"] for r in first if r["men_x"]]),
+                          "hp_sum_x": sum(r["hp_twin"] for r in sel) / max(1e-9, sum(r["hp_game"] for r in sel)),
+                          "men_sum_x": sum(r["men_twin"] for r in sel) / max(1e-9, sum(r["men_game"] for r in sel)),
+                          # the spread of the casts' ratios about 1: the root mean square of their logarithm
+                          "hp_rms": rms([r["hp_x"] for r in sel]), "men_rms": rms([r["men_x"] for r in sel if r["men_x"]])}
+        s = summary[spell]
+        print(f"{spell}: {s['casts']} casts, twin / game HP {s['hp_x']:.2f} (sum {s['hp_sum_x']:.2f}, first casts "
+              f"{s['hp_x_first']:.2f}, rms log {s['hp_rms']:.2f}), men {s['men_x']:.2f} (sum {s['men_sum_x']:.2f}, "
+              f"first {s['men_x_first']:.2f}, rms log {s['men_rms']:.2f})")
+    if out:
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        Path(out).write_text(json.dumps({"rows": rows, "summary": summary}, ensure_ascii=False, indent=1),
+                             encoding="utf-8")
+    return rows, summary
+
+
 def report(run_dirs, out=None):
     docs = [measure(r) for r in run_dirs]
     for d in docs:
@@ -217,11 +433,23 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("runs", nargs="*", type=Path, help="run folders (default: the charge probe's magic runs)")
     parser.add_argument("--out", type=Path)
+    parser.add_argument("--sim", action="store_true", help="the simulator's twin of the casts beside the game's")
+    parser.add_argument("--copies", type=int, default=4)
+    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                        help="the twin with sim.json magic.KEY = VALUE (JSON), e.g. --set wounds='\"even\"'")
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(encoding="utf-8")
     run_dirs = args.runs or [r for r in cp.runs() if json.loads((r / "manifest.json").read_text(encoding="utf-8"))
                              ["config"].get("plan") == "magic"]
-    report(run_dirs, args.out)
+    if args.sim:
+        params = None
+        if args.set:
+            from tools.nn.sim.params import load
+            params = load().with_cal("magic", **{k: json.loads(v) for k, v in (a.split("=", 1) for a in args.set)})
+        sim_report(run_dirs, copies=args.copies, device=args.device, params=params, out=args.out)
+    else:
+        report(run_dirs, args.out)
     return 0
 
 

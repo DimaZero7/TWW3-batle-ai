@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from tools.nn.sim import abilities
+from tools.nn.sim import abilities, magic
 from tools.nn.sim import effects as innate
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -71,6 +71,7 @@ class Params:
     sim: dict        # sim.json
     abilities: dict = None   # abilities.json: ability key -> passport
     effects: dict = None     # effects.json: {"order", "effects", "units"}
+    spells: dict = None      # abilities.json "spells": spell key -> passport (tools/nn/sim/magic.py)
 
     # --- the game's rules (config/nn/game_rules.json) ---
     @property
@@ -105,7 +106,7 @@ class Params:
         """A copy with some calibrated numbers replaced (for fitting)."""
         sim = json.loads(json.dumps(self.sim))
         sim[section].update(values)
-        return Params(self.units, self.rules, sim, self.abilities, self.effects)
+        return Params(self.units, self.rules, sim, self.abilities, self.effects, self.spells)
 
     # --- per unit ---
     def spacing_of(self, key):
@@ -171,6 +172,8 @@ class Params:
             # damage_mod_all (a ward save) adds to physical: every damage here is physical (melee, and missiles
             # through missile.physical_resist), so it counts once (0 for every unit today)
             "resist_physical": (resist.get("physical", 0) + resist.get("all", 0)) / 100,
+            # spell resistance and the ward cut a magical projectile (magic.py; docs/en/game/mechanics/magic.md)
+            "resist_magic": min(0.9, (resist.get("magic", 0) + resist.get("all", 0)) / 100),
             "large": u.get("size", "small") != "small",
             # rule flags (expendable, encourages, reflect, unbreakable, fire_move, fatigue_immune), the
             # effects bitmask and the timed effects: from the unit's innate effects (config/nn/effects.json)
@@ -223,6 +226,8 @@ class Params:
             **self.skirmish_gaps(key),
             "sk": False,
             **{f"ab{k}": i for k, i in enumerate(abilities.slots_of(self, key))},
+            # its spells (the passport's `spells`, config/nn/abilities.json spells; magic.py)
+            **{f"sp{k}": i for k, i in enumerate(magic.slots_of(self, key))},
         }
 
 
@@ -232,9 +237,11 @@ def _read(path):
 
 @lru_cache(maxsize=4)
 def load(units=None, rules=None, sim=None, abilities=None, effects=None):
-    """Params from the five files (defaults: config/nn/)."""
+    """Params from the five files (defaults: config/nn/); the spells are abilities.json's own section."""
+    ab = _read(abilities or CONFIG / "abilities.json")
     return Params(units=_read(units or CONFIG / "units.json")["units"],
                   rules=_read(rules or CONFIG / "game_rules.json"),
                   sim=_read(sim or CONFIG / "sim.json"),
-                  abilities=_read(abilities or CONFIG / "abilities.json")["abilities"],
-                  effects=_read(effects or CONFIG / "effects.json"))
+                  abilities=ab["abilities"],
+                  effects=_read(effects or CONFIG / "effects.json"),
+                  spells=ab.get("spells") or {})

@@ -504,6 +504,72 @@
     ["special_ability", "StringU8"]
    ]
   },
+  "unit_abilities": {
+   "17": [
+    ["key", "StringU8"],
+    ["requires_effect_enabling", "Boolean"],
+    ["icon_name", "StringU8"],
+    ["overpower_option", "OptionalStringU8"],
+    ["type", "StringU8"],
+    ["video", "OptionalStringU8"],
+    ["uniqueness", "StringU8"],
+    ["is_unit_upgrade", "Boolean"],
+    ["is_hidden_in_ui", "Boolean"],
+    ["source_type", "StringU8"],
+    ["superseded_abilities_set", "OptionalStringU8"],
+    ["is_hidden_in_ui_for_enemy", "Boolean"]
+   ]
+  },
+  "projectile_bombardments": {
+   "7": [
+    ["arrival_window", "F32"],
+    ["bombardment_key", "StringU8"],
+    ["num_projectiles", "I32"],
+    ["projectile_type", "StringU8"],
+    ["radius_spread", "F32"],
+    ["start_time", "F32"],
+    ["launch_source", "StringU8"],
+    ["launch_vfx", "OptionalStringU8"],
+    ["launch_height", "I32"],
+    ["audio_type", "OptionalStringU8"],
+    ["launch_height_underground", "I32"],
+    ["randomise_launch", "Boolean"],
+    ["deterministic_launch_cadence", "Boolean"]
+   ]
+  },
+  "projectiles_explosions": {
+   "19": [
+    ["key", "StringU8"],
+    ["detonator_type", "StringU8"],
+    ["detonation_type", "StringU8"],
+    ["detonation_radius", "F32"],
+    ["detonation_duration", "F32"],
+    ["detonation_speed", "F32"],
+    ["detonation_damage", "F32"],
+    ["shrapnel", "OptionalStringU8"],
+    ["explosion_particle_effect", "OptionalStringU8"],
+    ["fuse_distance_from_target", "F32"],
+    ["explosion_particle_effect_on_ground", "OptionalStringU8"],
+    ["explosion_audio", "OptionalStringU8"],
+    ["contact_phase_effect", "OptionalStringU8"],
+    ["ignition_amount", "F32"],
+    ["is_magical", "Boolean"],
+    ["detonation_damage_ap", "F32"],
+    ["camera_shake", "OptionalStringU8"],
+    ["detonation_force", "F32"],
+    ["fuse_fixed_time", "F32"],
+    ["affects_allies", "Boolean"],
+    ["is_spell", "Boolean"]
+   ]
+  },
+  "projectile_penetration_junctions": {
+   "0": [
+    ["description", "OptionalStringU8"],
+    ["entity_size_cap", "OptionalStringU8"],
+    ["key", "StringU8"],
+    ["max_penetration", "I32"]
+   ]
+  },
   "cdir_military_generator_template_priorities": {
    "1": [
     ["config_key", "StringU8"],

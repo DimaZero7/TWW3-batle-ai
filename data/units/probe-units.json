@@ -313,6 +313,10 @@
   "missile.shot_type": {
    "source": "projectiles.shot_type (inferred)",
    "checked": null
+  },
+  "spells": {
+   "source": "ours: SPELLS - the caster's rank-1 spell (character_skill_nodes.points_on_creation; build/magic/plan.md 1); only on casters",
+   "checked": null
   }
  },
  "_missing": {
@@ -835,7 +839,10 @@
     "missile": 0.0
    },
    "missile": null,
-   "card_check": "no card"
+   "card_check": "no card",
+   "spells": [
+    "wh_main_spell_metal_searing_doom"
+   ]
   },
   "wh2_main_skv_cha_warlock_engineer": {
    "land_unit": "wh2_main_skv_cha_warlock_engineer",
@@ -921,7 +928,10 @@
     "missile": 0.0
    },
    "missile": null,
-   "card_check": "no card"
+   "card_check": "no card",
+   "spells": [
+    "wh2_main_spell_ruin_warp_lightning"
+   ]
   }
  }
 }

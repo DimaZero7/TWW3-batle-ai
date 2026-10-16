@@ -161,11 +161,12 @@ not active, recharged); otherwise nothing happens. The network reads the abiliti
 
 ## One step (0.5 s)
 
-1. Take the orders (routing units ignore them).
+1. Take the orders (routing units ignore them) and the casts: the winds flow, a caster out of range runs at his
+   target, one winding up stands ([magic](#magic)).
 2. Contacts: the units' rectangles (front × depth of the ranks the men fill) touch.
 3. Innate effects (attributes, passives, game-fired timed passives) and cast abilities: their
    stats and rule flags hold for this step.
-4. Blows in melee and shots.
+4. Blows in melee, shots and the spells' projectiles.
 5. Health, men, kills.
 6. Morale: wavering, rout, rally, shattering.
 7. Fatigue.
@@ -635,6 +636,80 @@ units drop 2.3 points more morale in the next 3 s than Empire units (7.7 against
 951 crossings; at 40 % and 60 % both drop the same): Strength in Numbers' +6 switches off there.
 The Skaven's former start bonus (`morale.faction_bonus` +6, fitted) was Strength in Numbers: it is 0
 now.
+
+## Magic
+
+Code: `tools/nn/sim/magic.py`; rules: `config/nn/sim.json` `magic` (each number with its source); the spells' numbers:
+the passports, `config/nn/abilities.json` section `spells` (`py -3.14 -m tools.nn.abilities`, the game's database).
+Two hero casters so far, each with his rank-1 spell: the **Gold Wizard** - Searing Doom, the **Warlock Engineer** -
+Warp Lightning (both bombardments). What the game showed: the `magic` probe (`tools/nn/magic_probe.py`, 3 battles,
+22 casts, `build/magic/probe1.md`).
+
+**Winds of magic** (`wm_cur`, `wm_res`: the side's pool, the same on all its units). Start: 12 current, 68 reserve
+(the database: 80 x 0.15; the probe: so on both sides). The reserve flows into the current pool at 0.1 a second,
+whatever its size, and stops when it is empty (the database's `restored_points_base` 0.1; the probe: +1 every 10 s).
+No cap on the current pool was found (the database's 30; the probe 42-43 and rising): none.
+
+**A cast** (`magic.request(u, slot, target)`; the network and `ai_like` do not give it yet):
+
+| Rule | Number | Source |
+|---|---|---|
+| The cost, from the current pool at the wind-up's start | 6 both | the database's `mana_cost`; the probe |
+| Range, caster's centre to the target's | 200 m | the database's `target_intercept_range`; the probe: cast at ~205 m |
+| Farther, the caster runs in himself and casts once in range | - | the probe: from 260 m in ~16 s; the twin casts at 23 s, the game at 22 s |
+| Wind-up (the caster stands) | 1 s | the database's `wind_up_time` |
+| The cooldown from the wind-up's end: active + recharge | 8 + 30 / 5 + 30 s | the database; the probe: casts 40 / 37 s apart |
+| No winds, the target dead, the caster routing: the cast is dropped | - | - |
+
+**The bombardment.** `start_s` after the wind-up the strike point is fixed at the target's centre (the probe: on
+walking clanrats the dead lay where the unit's centre was 3 s after the order = wind-up 1 + start 2). The projectiles
+land evenly in time over `window_s` after their flight: the fall from the launch height at the database's angle and
+speed under gravity (2.96 s Searing Doom, 1.17 s Warp Lightning). The first damage 6.0 / 5.5 s after the order - **as
+the game's**.
+
+Where they land: the distance from the strike point uniform from 0 to `spread_m` (10 / 8 m) at any angle, so the
+landings **gather at the centre** (`magic.landing` "radius"). The recorded places of the men show it: on a first cast
+the game killed 79 % of the men within 2 m of the centre and 0-7 % beyond 4 m (Searing Doom), 73 % / 42 % / 29 % / 7 %
+by 2 m rings (Warp Lightning); landings even over the disc would give 19-20 % in every ring.
+
+Each projectile strikes everyone whose men are near, friends too (both spells can hurt allies in the database):
+
+| Part | Whom | Damage |
+|---|---|---|
+| The projectile's hit | men whose body is within its collision radius (`collision_m` + the man's radius), at most its penetration (2 / 20) | Searing Doom 24 + 12 AP, Warp Lightning 224 AP |
+| The explosion | men within the detonation radius **less 1 m** (2 m / 5 m) | 30 / 24 AP x (1 - d / R) |
+
+"Less 1 m": the community (a bug report to CA: the blast radius is in effect 1 less than written). The falloff to the
+blast's edge is described nowhere - measured: the full damage over the whole radius gives 1.2-1.5x the game's damage,
+a linear falloff is the nearest. Armour cuts the base part of the hit (as for arrows), the AP part goes whole; a
+magical projectile is cut only by spell resistance and the ward (`resist_magic`), a shield does not help (it falls
+from above).
+
+How the simulator counts it (a unit is one object, no men): 8 rings round the strike point. A ring's men: the unit's
+density (men / (front x depth)) x the area of its box in the ring. Each man of a ring gets his share of the hits and of
+the explosions' dose (by the landings' profile, worked out once from the rules above). Every man has his own health:
+the dead by Poisson (as for arrows, `melee.shot_kills`); a hit beyond a man's health kills him and takes only the health
+he had. The wounds earlier strikes left (`bm_w`) lie where the strike falls (the target's centre, as last time): a
+second cast on the same unit kills more and takes less HP (part of it is spent on the wounded), as in the game. The
+bombardment's HP counts with the missiles' HP: losses, the fight's balance, under fire (the spells' projectiles are the
+database's projectiles; the probe's targets were fearless: the morale is not checked).
+
+**The probe's twin** (`python -m tools.nn.magic_probe <3 battles> --sim --copies 8`, 17 casts, sim / game, better -
+nearer 1):
+
+| Spell | HP (mean of the casts / sum) | Dead (mean / sum) | First damage after the order, sim / game |
+|---|---:|---:|---:|
+| Warp Lightning (8 casts) | 1.00 / 0.97 | 1.13 / 1.10 | 5.5 / 5.5 s |
+| Searing Doom (9 casts) | 0.86 / 0.84 | 1.31 / 1.05 | 6.0 / 6.0 s |
+
+The casts' spread (root mean square of the log ratio): HP 0.18-0.20, Warp Lightning's dead 0.25, Searing Doom's 0.56.
+Between the twin's runs the ratios move +-0.05 (random hits); two equal casts on one target differ +-20 % in the game.
+
+Open: (1) on a whole unit's first cast Searing Doom kills 1.8x the game's in the twin (the game: 4 / 7 / 8 / 19 men),
+on the second fewer; the per-man replay on the recorded places gives the same - a mechanism is missing (the game does
+not give single men's health); (2) armour against Searing Doom: the game's stormvermin (armour 90) lose 0.57-0.77 of
+the slaves' (armour 0), the twin's 0.8; (3) casting in melee and on the move, the game AI's magic, the network with
+magic - not done.
 
 ## Contact effects and the Ratling Gun's burst
 
@@ -2089,7 +2164,7 @@ Measured, ready as a switch, not in `config/nn/sim.json`: none now.
   in the check gives network battles 96/132 versus 100/132 with the legacy model, and the gate trade is a little
   further from the game ([above](#fatigue-calibration)). Uphill is not modelled.
 - **Not modelled**: terrain, a turn while walking (a moving unit faces where it goes at once),
-  cavalry, monsters, magic, flying, artillery, experience ranks, the scaled "strong enemy near"
+  cavalry, monsters, magic (but two bombardments, [above](#magic)), flying, artillery, experience ranks, the scaled "strong enemy near"
   (by default only −3 with an enemy worth 3 times as much; the rule by the database's scale exists but is off: [above](#expendable-units-resistance-a-stronger-enemy)), the database's `broken_finish_base_timeout` 180 and `charge_timeout` 60 (meaning not found).
 - `vis` is always true: line of sight is not modelled.
 
@@ -2097,6 +2172,9 @@ Measured, ready as a switch, not in `config/nn/sim.json`: none now.
 
 | What | Result | Why not |
 |---|---|---|
+| A bombardment's projectiles land uniformly over its spread disc (`magic.landing` "area") | the magic probe's twin: Searing Doom's dead 0.50 of the game's; by 2 m rings 19-20 % of the men would die everywhere (the game: 79 % at the centre, 0-7 % beyond 4 m) | the game's landings gather at the centre (`landing` "radius") |
+| A bombardment's hits merged with the missile hits of the pair (one mean HP a hit) | the twin: Warp Lightning's dead 0.15-0.27 of the game's (the 224 AP bolts mixed with the explosions' small hits) | the bombardment keeps its own kills (`magic.bombard`) |
+| A bombardment: the wounds of earlier strikes even over the unit (`magic.wounds` "even") | the twin: Searing Doom HP 0.98, dead 0.76; Warp Lightning 1.07 and 0.98; the casts' spread the same | the per-man replay on the recorded places keeps the wounds at the centre; "strike" kept: the dead summed 1.06 / 1.03 |
 | The formations' gap as the true distance between their rectangles, not along the line between the centres (`contact.rect_gap`, off; `geometry.rect_gap`) | the step replay of the 72 battles: where the game's unit is in melee and the centre-line test sees no contact (35 % of the enemy's windows, 27 % of own), in 39–42 % of them the rectangles overlap by 0.5 m or more; the exam replay: enemy routs a battle 9.70 -> 11.07 (network) / 10.68 -> 10.67 (ai_like), game 16.0 / 16.3; the 72 battles: routs a unit 0.812 -> 0.815 (game 1.187), same winner 60 -> 58.5 of 72 | the `walkpass2` probe twin gets worse: a walker clipping held clanrats by 2 / 5 m at a run 1.61 / 0.93 m/s (was 2.47 / 1.46, game 2.68 / 2.39), at a walk 0.91 / 0.63 (1.22 / 0.91, game 1.33 / 0.97) - the cause is the walker's own turn to the clanrats (slowed in their rectangle it turned 53 deg to them and went to its point at its speed x cos 53 deg); `contact.push_keep_facing` removes it (the push error 0.531 -> 0.346 m/s, centre line 0.335), but with it too the enemy routs are 10.60 / 10.47 - not a lever |
 | Blows at the target's neighbour: a formation puts its front parallel to its target's (`contact.square_front`), the men of the part of the side overlapping the enemy strike it (`melee.frontage_edge_m` 0 / 2.5 m; the side of contact by `geometry.front_contact`), with `rect_gap` and `push_keep_facing` | the `sidecontact` probe matches: the neighbour from 30 s 4.8 / 9.1 / 8.0 HP/s (game 6.2 / 6.9 / 9.5), the target 31.9 / 29.3 / 26.2 (game 29.3 / 29.7 / 24.3), the lone offset lane 30.3 (game 30.0, without 32.6) | the exam replay: enemy routs a battle 9.34 / 10.17 (network, edge 0 / 2.5 m), 10.27 / 9.83 (ai_like) against 9.70 / 10.68 (game 16.0 / 16.3); the enemy's melee loss rate falls 0.232 -> 0.204-0.206 a 100 s (game 0.249): the rectangles' overlap undercounts the men within reach in whole battles; the 72 battles: routs a unit 0.802 -> 0.795 (game 1.187), same winner 57.5 -> 58; without the overlap (`square_front` only): 10.27 / 10.46 |
 | A formation's opening wave and first strike anew after 10 s out of contact (`contact.reset_s` reset the wave's clock; `contact.opening_once` 0) | the `recontact` probe: a second contact after 10–80 s out struck as a fresh one in the simulator - 0–3 s over 10–20 s 4.7, the swordsmen lost 3.7 (game 0.24–1.35 and 0.2–0.8) | in the game a second contact bursts neither after 2 s nor after 80 s out |

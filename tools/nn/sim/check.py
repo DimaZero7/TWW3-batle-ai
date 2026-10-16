@@ -223,7 +223,7 @@ def simulate(run_dirs, params=None, device="cpu", copies=1, jitter_m=0.0, seed=0
     return [out[k] for k in range(len(run_dirs))]
 
 
-PORTABLE = ("units", "rules", "sim", "abilities", "effects")
+PORTABLE = ("units", "rules", "sim", "abilities", "effects", "spells")
 
 
 def portable_params(params):
@@ -235,7 +235,7 @@ def portable_params(params):
         return {"_portable": True}
     base = load_params()
     out = {"_portable": True, "sim": params.sim, "rules": params.rules}
-    for name in ("units", "abilities", "effects"):
+    for name in ("units", "abilities", "effects", "spells"):
         if getattr(params, name) is not getattr(base, name):
             out[name] = getattr(params, name)
     return out

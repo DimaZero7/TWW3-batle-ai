@@ -51,6 +51,13 @@ UNITS = ("wh_main_emp_cha_general_0", "wh_main_emp_inf_spearmen_0", "wh2_dlc13_e
          # (config/nn/pools.json units_v2): units.md "Ratling Gun, Plague Monks, Censer Bearers, Giant Rats"
          "wh2_dlc12_skv_inf_ratling_gun_0", "wh2_main_skv_inf_plague_monks", "wh2_main_skv_inf_plague_monk_censer_bearer",
          "wh2_dlc16_skv_mon_wolf_rats_0", "wh2_dlc16_skv_mon_wolf_rats_1")
+# The spells our casters cast (the battle XML's <unit_capabilities>, tools/nn/scenario.py; build/magic/plan.md 1): a
+# hero's rank-1 spell - a free skill at his creation (character_skill_nodes.points_on_creation 1: the Gold Wizard's
+# hidden Searing Doom node, the Warlock Engineer's first Ruin node). The list replaces the unit's default abilities in
+# battle (without it a caster gets his whole lore: the magic probe, build/magic/probe1.md). The spells' numbers are
+# their passports (config/nn/abilities.json "spells", python -m tools.nn.abilities).
+SPELLS = {"wh3_dlc25_emp_cha_wizard_metal": ("wh_main_spell_metal_searing_doom",),
+          "wh2_main_skv_cha_warlock_engineer": ("wh2_main_spell_ruin_warp_lightning",)}
 TABLES = ("main_units", "land_units", "battle_entities", "melee_weapons", "missile_weapons", "projectiles",
           "unit_armour_types", "unit_shield_types", "unit_attributes_to_groups_junctions",
           "land_units_to_unit_abilites_junctions", "unit_spacings", "special_ability_phase_stat_effects",
@@ -124,6 +131,8 @@ FIELDS = {
     "hiding_scalar": ("land_units.hiding_scalar", None),
     "attributes": ("unit_attributes_to_groups_junctions for land_units.attribute_group", None),
     "abilities": ("land_units_to_unit_abilites_junctions.ability", "card owned abilities"),
+    "spells": ("ours: SPELLS - the caster's rank-1 spell (character_skill_nodes.points_on_creation; build/magic/plan.md "
+               "1); only on casters", None),
     "multiplayer_cost": ("main_units.multiplayer_cost", None),
     "combat_potential.melee": ("main_units.melee_cp: the unit's melee combat potential (the army-destruction "
                                "strength with its abilities' cp, config/nn/abilities.json; build/movelords)", None),
@@ -254,6 +263,8 @@ def passport(key, t):
             "fire_arc_deg": entity["fire_arc_close"] / 2, "explosion": pr["explosion_type"],
             "penetration": pr["projectile_penetration"], "shot_type": pr["shot_type"],
             "contact_phase": pr["contact_stat_effect"]}
+    if key in SPELLS:
+        out["spells"] = list(SPELLS[key])
     return out
 
 

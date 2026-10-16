@@ -134,7 +134,12 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
 - **Bullets slow** ([details](training/simulator.md#contact-effects-and-the-ratling-guns-burst)): hits of projectiles of
   category `musket` (handguns, the gun, pistols, throwing stars) slow a small formation for 10 s: run x0.65, walk
   x0.9 (the `hitslow` measure: a run at handgunners x0.68, bolts do not slow; no number in the database).
-- **Not modelled:** terrain, forest, visibility, cavalry, monsters, magic, flight, artillery, experience.
+- **Magic** ([details](training/simulator.md#magic), `tools/nn/sim/magic.py`): the side's winds (start 12 / 68,
+  +0.1 a second), a cast on request that walks into its 200 m range, a 1 s wind-up and the cooldown from the effect's
+  end; the bombardments Searing Doom (Gold Wizard) and Warp Lightning (Warlock Engineer) by the target's formation
+  density and the friends near it, the landings gathering at the centre. The probe's twin (17 casts): HP 0.84 / 0.97
+  of the game's, dead 1.05 / 1.10 (sums; Searing Doom / Warp Lightning). The network and `ai_like` do not cast yet.
+- **Not modelled:** terrain, forest, visibility, cavalry, monsters, other magic, flight, artillery, experience.
 
 **Checks against the game.** A recorded battle is replayed by its recorded orders 19 times with the start
 shifted up to 2 m; the copies are the forecast, the game's record is the outcome. The main score is **the

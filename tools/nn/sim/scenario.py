@@ -18,7 +18,7 @@ from pathlib import Path
 import torch
 
 from tools.nn import scenario as arena_scenario
-from tools.nn.sim import abilities as sim_abilities, effects as sim_effects, morale, replay
+from tools.nn.sim import abilities as sim_abilities, effects as sim_effects, magic, morale, replay
 from tools.nn.sim import state as S
 from tools.nn.sim.params import load
 
@@ -77,6 +77,7 @@ def build(armies, params=None, device="cpu", per_side=None):
     u["rally_s"].fill_(1e6)
     u["under_fire_s"].fill_(1e6)
     initial_cooldowns(u, params)
+    magic.start(u, params)          # the sides' winds of magic, the spells' initial cooldowns
     u["vis"] = present.clone()
     st.attacker = torch.tensor(attacker, dtype=torch.int64, device=device)
     st.bounds = params.map_half

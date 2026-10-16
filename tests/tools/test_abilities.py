@@ -161,3 +161,45 @@ class TestFeatures:
         g = dict(zip(mab.STATIC_NAMES, mab.features(hexed)))
         assert g["enemies_stat_melee_attack_add"] == pytest.approx(-0.2) and g["allies_stat_melee_attack_add"] == 0
         assert len(mab.features(hexed)) == mab.STATIC
+
+
+class TestSpells:
+    """The spell passports (tools/nn/abilities.py spell_passport; config/nn/abilities.json spells)."""
+
+    TABLES = {
+        "unit_special_abilities": [{"key": "sd", "mana_cost": 6.0, "wind_up_time": 1.0, "target_intercept_range": 200.0,
+                                    "active_time": 8.0, "recharge_time": 30.0, "initial_recharge": -1.0,
+                                    "target_enemies": True, "target_friends": False, "target_self": False,
+                                    "target_ground": True, "ai_usage": "aoe_bombardment", "bombardment": "sd_b"}],
+        "unit_abilities": [{"key": "sd", "type": "wh_type_bombardment", "overpower_option": "sd_up"}],
+        "projectile_bombardments": [{"bombardment_key": "sd_b", "num_projectiles": 40, "start_time": 2.0,
+                                     "arrival_window": 3.0, "radius_spread": 10.0, "launch_height": 150,
+                                     "launch_source": "above_target", "projectile_type": "sd_p"}],
+        "projectiles": [{"key": "sd_p", "damage": 24, "ap_damage": 12, "collision_radius": 0.4,
+                         "projectile_penetration": "very_low_magic", "fixed_elevation": 45, "muzzle_velocity": 30.0,
+                         "gravity": 20.0, "is_magical": True, "can_damage_allies": True, "explosion_type": "sd_e"}],
+        "projectiles_explosions": [{"key": "sd_e", "detonation_radius": 3.0, "detonation_damage": 0.0,
+                                    "detonation_damage_ap": 30.0, "affects_allies": True}],
+        "projectile_penetration_junctions": [{"key": "very_low_magic", "max_penetration": 2,
+                                              "entity_size_cap": "very_small"}],
+    }
+
+    def test_a_bombardment_spell_from_its_tables(self):
+        p = abilities.spell_passport("sd", self.TABLES)
+        assert (p["kind"], p["mana"], p["wind_up_s"], p["range_m"], p["initial_s"]) == \
+            ("wh_type_bombardment", 6.0, 1.0, 200.0, 0.0)
+        b = p["bombardment"]
+        assert (b["projectiles"], b["start_s"], b["window_s"], b["spread_m"]) == (40, 2.0, 3.0, 10.0)
+        assert (b["projectile"]["penetration"], b["explosion"]["ap"], b["explosion"]["radius_m"]) == (2, 30.0, 3.0)
+        # the fall from 150 m at 30 m/s, 45 deg down, gravity 20: 2.955 s (the probe's first hit 6.0 s after the order)
+        assert b["flight_s"] == pytest.approx(2.955, abs=0.002)
+
+    def test_the_fall_of_a_projectile(self):
+        assert abilities.flight_s(100, 120.0, 45, 0.8) == pytest.approx(1.172, abs=0.002)    # Warp Lightning
+        assert abilities.flight_s(0, 30.0, 45, 20.0) == 0.0
+
+    def test_the_casters_spells_are_in_the_file(self):
+        doc = json.loads(abilities.OUT.read_text(encoding="utf-8"))
+        probe = json.loads(abilities.PROBE_UNITS.read_text(encoding="utf-8"))["units"]
+        assert abilities.spells_of(probe) == sorted(doc["spells"])
+        assert set(doc["spells"]).isdisjoint(doc["abilities"])        # the network's ability table is unchanged
