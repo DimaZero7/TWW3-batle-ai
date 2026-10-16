@@ -171,12 +171,14 @@ def routers(run_dirs, copies=4, device="cpu", seed=0):
                          "rect": [router_series(x, rect=True) for x in rect]})
 
 
-def compare(run_dirs, copies=4, device="cpu", seed=0):
+def compare(run_dirs, copies=4, device="cpu", seed=0, rect_params=None, rect_only=False):
+    """rect_params: the simulator's params for the rectangle (a --set variant); rect_only: the 'fighters' column is a
+    second rectangle with the default params (a before / after of the simulator itself)."""
     lanes = [ln for d in run_dirs for ln in cp.load_run(d)]
     lanes = [ln for ln in lanes if (ln.get("contacts") or {}).get(1) is not None]
     game = [cp.measure(ln) for ln in lanes]
-    rect = twin(lanes, False, copies, device, seed)
-    figh = twin(lanes, True, copies, device, seed)
+    rect = twin(lanes, False, copies, device, seed, params=rect_params)
+    figh = twin(lanes, False, copies, device, seed) if rect_only else twin(lanes, True, copies, device, seed)
     rows = []
     for i, ln in enumerate(lanes):
         r = {"run": ln["run"], "lane": ln["spec"]["name"], "plan": ln["plan"], "cell": game[i]["cell"], "game": {},
@@ -313,6 +315,8 @@ def main(argv=None):
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--out", default=str(project.BUILD / "fighters" / "probes.json"))
     ap.add_argument("--routers", action="store_true", help="the routing mob's stretch (plans routmob, routmob2, passby)")
+    ap.add_argument("--set", action="append", default=[], help="section.key=json over config/nn/sim.json for the rectangle")
+    ap.add_argument("--rect-only", action="store_true", help="the second column: the rectangle with the default params")
     a = ap.parse_args(argv)
     if a.routers:
         plans = set(a.plans.split(","))
@@ -351,7 +355,11 @@ def main(argv=None):
     dirs = [Path(d) for d in a.runs] if a.runs else [d for d in cp.runs() if
                                                        json.loads((d / "manifest.json").read_text(encoding="utf-8"))
                                                        ["config"].get("plan") in plans]
-    rows = compare(dirs, a.copies, a.device)
+    rect_params = None
+    if a.set:
+        from tools.nn.sim import stepreplay
+        rect_params = stepreplay._params(a.set).with_cal("noise", blows=False)
+    rows = compare(dirs, a.copies, a.device, rect_params=rect_params, rect_only=a.rect_only)
     sc = score(rows)
     sh = shape_table(rows)
     out = Path(a.out)

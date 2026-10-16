@@ -436,7 +436,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
 # the swing plan (the fighters lab's blow rate, tools/nn/fighters/swingdata.py): small units cut down to SWING_MEN men by
 # kill_number_of_men before the go, both attacking from 3 m; health and men every SWING_MS, the soldiers' places too -
 # each drop of a unit's health is a hit of one man (or a few at once): hits a second per man within reach
-SWING_MEN = {"five": 5, "one": 1}
+SWING_MEN = {"five": 5, "one": 1, "full": 25}   # battle 2: 25 a side (the opening: many first contacts)
 SWING_MS = 100
 # the walkpass plan: swordsmen walk / run (a move order, 'pass') past clanrats - idle (halted, never ordered) or busy
 # (fighting an Empire spearmen unit they attack at the go) - edge_m apart edge to edge (the formations 30 m wide), or
@@ -632,14 +632,17 @@ def battles(plan):
         from tools.nn import magic_probe
         return magic_probe.battles()
     if plan == "swing":
-        def cut(a, t, n, kind):
+        def cut(a, t, n, kind, mode="attack_walk", gap_m=3):
             sh = lambda short: round((UNITS[short][1] - n + 0.5) / UNITS[short][1], 4)
-            return lane(a, t, "attack_walk", "both", gap_m=3, fight_s=90, max_s=110, kind=kind,
+            return lane(a, t, mode, "both", gap_m=gap_m, fight_s=90, max_s=110, kind=kind,
                         damage={"a": {"method": "kill", "share": sh(a)}, "t": {"method": "kill", "share": sh(t)}})
-        five = SWING_MEN["five"]
+        five, full = SWING_MEN["five"], SWING_MEN["full"]
         return [[cut("swords", "clanrat", five, "five_a"), cut("swords", "clanrat", five, "five_b"),
                  cut("swords", "clanrat", SWING_MEN["one"], "one"), cut("gs", "svsh", five, "five_gs"),
-                 cut("spear", "clanrat", five, "five_spear")]]
+                 cut("spear", "clanrat", five, "five_spear")],
+                [cut("swords", "clanrat", full, "full_a"), cut("swords", "clanrat", full, "full_b"),
+                 cut("gs", "svsh", full, "full_gs"), cut("spear", "clanrat", full, "full_spear"),
+                 cut("swords", "clanrat", full, "full_charge", mode="attack_run", gap_m=40)]]
     if plan == "charge":
         a = [lane("swords", "clanrat", m) for m in ("attack_run", "attack_walk", "move_run", "recharge")]
         out += [rotate(a, k) for k in range(4)]

@@ -14,10 +14,10 @@ from pathlib import Path
 from tools import config as project
 
 
-def run(runs, out, rect=False, copies=4, device="cpu", chunk=12, seed=0, log=print):
+def run(runs, out, rect=False, copies=4, device="cpu", chunk=12, seed=0, log=print, sets=()):
     from tools.nn.sim import stepreplay
     if rect:
-        stepreplay.run(runs, out, H=10, copies=copies, device=device, chunk=chunk, workers=1, log=log)
+        stepreplay.run(runs, out, H=10, copies=copies, device=device, chunk=chunk, workers=1, log=log, sets=sets)
         return
     from tools.nn.fighters import hook
     orig = stepreplay._params
@@ -28,7 +28,7 @@ def run(runs, out, rect=False, copies=4, device="cpu", chunk=12, seed=0, log=pri
     stepreplay._params = params
     try:
         with hook.installed(seed=seed) as h:
-            stepreplay.run(runs, out, H=10, copies=copies, device=device, chunk=chunk, workers=1, log=log)
+            stepreplay.run(runs, out, H=10, copies=copies, device=device, chunk=chunk, workers=1, log=log, sets=sets)
             log(f"projectiles traced {h.stats['traced']:.0f} of {h.stats['wanted']:.0f}")
     finally:
         stepreplay._params = orig
@@ -44,6 +44,7 @@ def main(argv=None):
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--chunk", type=int, default=12)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--set", action="append", default=[], help="section.key=json over config/nn/sim.json (stepreplay)")
     a = ap.parse_args(argv)
     names = list(a.runs)
     if a.runs_from:
@@ -51,7 +52,7 @@ def main(argv=None):
     if a.limit:
         names = names[:a.limit]
     runs = [project.BUILD / "nn-arena" / "runs" / n for n in names]
-    run(runs, a.out, rect=a.rect, copies=a.copies, device=a.device, chunk=a.chunk)
+    run(runs, a.out, rect=a.rect, copies=a.copies, device=a.device, chunk=a.chunk, sets=a.set)
 
 
 if __name__ == "__main__":

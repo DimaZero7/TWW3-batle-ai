@@ -167,6 +167,25 @@ One on one in the probes the swing every interval meets the game (damage 15-30 s
 battles the damage is above the game: probably the opening of every clash - each man who first reaches an enemy
 swings at once (the probes 0-1 / 0-2 s 1.58 / 1.39 of the game) - and whole battles have many clashes. Open.
 
+### The first blow (the swing probe, battle 2)
+
+`build/charge-probe/runs/20261016-232843`: the same pairs at 25 men (many first contacts), one lane a charge from 40 m
+(`python -m tools.nn.fighters.openingdata`). The whole battle: 551 hits, "a swing every interval" expects 441 (1.25 by
+hits, 1.04 by drops), "a miss of 0.5 s" 959 (0.57): the clock confirmed a second time. The opening: each man from the
+moment he first stands within reach - the hits by 1 / 2 / 3 / 5 / 10 s after contact, game / model:
+
+| First-blow model | 1 s | 2 s | 3 s | 5 s | 10 s |
+|---|---|---|---|---|---|
+| strikes at once, then every interval | 1.22 | 1.41 | 1.50 | 1.09 | 0.98 |
+| a random point of his interval | 6.85 | 3.54 | 2.42 | 1.82 | 1.28 |
+| strikes after 0.5 s | 1.72 | 1.41 | 1.51 | 1.25 | 1.00 |
+| strikes after 1 s | 4.67 | 1.45 | 1.51 | 1.87 | 1.07 |
+
+The game's opening is not weaker but stronger than "at once" (1.2-1.5 in the first 3 s): the first blow is "ready at
+once", no delay (CA's schema: the interval is between animation starts; a man who has not struck has none to wait).
+The rest (+20-50 % in the first seconds) - more men within reach at contact in the game than the 0.1 s places count
+(the first wave's crush), open. So the lab's surplus in whole battles (1.37) is not the first blow.
+
 ### Melee probes
 
 112 lanes of 11 plans of the melee probe (`tools/nn/charge_probe.py`: reform, reform2, dmgmelee, damaged, wave, armour,
@@ -274,9 +293,9 @@ of memory; 46 battles at once and several jobs in parallel took 12 GB.
 
 ## Not there
 
-- The damage in whole battles with "a swing every interval" is 1.37 of the game: the opening of a clash (who strikes
-  at once at contact) - to measure with the `swing` probe by the moments of the first health drops after contact; a
-  random phase of the clock on entering a fight gave 0.35 of the game at 0-1 s (too little) - kept "ready at once".
+- The damage in whole battles with "a swing every interval" is 1.37 of the game; the first blow ("ready at once") is
+  confirmed by the probe, so the surplus is elsewhere (how many men are in reach in big clashes of several units).
+  Open.
 - The share thrown by a spell is 2-5x below the game's (the knock probe battle): how the game throws men beyond the
   blast radius is not found.
 - The ellipse body (wolf rats) - the men are circles; the Ratling Gun's burst - at most 2 shots a man a step; a flat
@@ -292,3 +311,9 @@ of memory; 46 battles at once and several jobs in parallel took 12 GB.
   reach 34-45 against 19 in the game at 20-40 s, fronts 1.1-1.4 m apart against 2.3.
 - **The formation follows every fighting man.** Fighting second ranks pulled the formation forward and the fronts did
   not part (standoff 1.0-1.3 m all fight). Kept: only the front rank takes the standoff and pulls the formation.
+- **The same attack clock in the rectangle** (measured in a copy, the patch `build/fighters/rect_swing.patch`, not in
+  the simulator): `melee.swing_per_interval` (a swing every interval) and `fighting_files` 1 instead of 0.5. Melee
+  probes: target HP steady 1.03 -> 0.99, but 0-5 s 0.63 -> 0.41 and the attacker's steady loss 0.93 -> 0.72; the replay
+  of 92 battles: melee damage 0.89 -> 0.84, on thinned units 1.03 -> 0.95, men killed per health 0.86 -> 0.67, routs
+  0.97 -> 0.98. The rectangle's other rules (the wave, the first strike, the wounded pool) were fitted to the old clock;
+  swapping the clock alone breaks them.
