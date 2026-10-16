@@ -177,9 +177,11 @@ class TestSpells:
                                      "launch_source": "above_target", "projectile_type": "sd_p"}],
         "projectiles": [{"key": "sd_p", "damage": 24, "ap_damage": 12, "collision_radius": 0.4,
                          "projectile_penetration": "very_low_magic", "fixed_elevation": 45, "muzzle_velocity": 30.0,
-                         "gravity": 20.0, "is_magical": True, "can_damage_allies": True, "explosion_type": "sd_e"}],
+                         "gravity": 20.0, "is_magical": True, "can_damage_allies": True, "explosion_type": "sd_e",
+                         "mass": 50.0}],
         "projectiles_explosions": [{"key": "sd_e", "detonation_radius": 3.0, "detonation_damage": 0.0,
-                                    "detonation_damage_ap": 30.0, "affects_allies": True}],
+                                    "detonation_damage_ap": 30.0, "affects_allies": True,
+                                    "detonation_force": 400.0}],
         "projectile_penetration_junctions": [{"key": "very_low_magic", "max_penetration": 2,
                                               "entity_size_cap": "very_small"}],
     }
@@ -193,10 +195,15 @@ class TestSpells:
         assert (b["projectile"]["penetration"], b["explosion"]["ap"], b["explosion"]["radius_m"]) == (2, 30.0, 3.0)
         # the fall from 150 m at 30 m/s, 45 deg down, gravity 20: 2.955 s (the probe's first hit 6.0 s after the order)
         assert b["flight_s"] == pytest.approx(2.955, abs=0.002)
+        # the knock (sim.json magic.knock): the projectile's mass and speed at the end of that fall, the shockwave's force
+        assert (b["projectile"]["mass"], b["explosion"]["force"]) == (50.0, 400.0)
+        assert b["projectile"]["impact_v"] == pytest.approx(83.07, abs=0.01)
 
     def test_the_fall_of_a_projectile(self):
         assert abilities.flight_s(100, 120.0, 45, 0.8) == pytest.approx(1.172, abs=0.002)    # Warp Lightning
         assert abilities.flight_s(0, 30.0, 45, 20.0) == 0.0
+        # its speed at the end: 120 m/s at 45 deg down, gravity 0.8 for 1.17 s - 120.7 m/s
+        assert abilities.impact_v(100, 120.0, 45, 0.8) == pytest.approx(120.66, abs=0.01)
 
     def test_the_casters_spells_are_in_the_file(self):
         doc = json.loads(abilities.OUT.read_text(encoding="utf-8"))

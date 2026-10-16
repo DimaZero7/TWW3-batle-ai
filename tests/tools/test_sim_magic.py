@@ -16,6 +16,7 @@ GOLD, WARLOCK = "wh3_dlc25_emp_cha_wizard_metal", "wh2_main_skv_cha_warlock_engi
 SD, WL = "wh_main_spell_metal_searing_doom", "wh2_main_spell_ruin_warp_lightning"
 SPEAR, SWORD, GREAT = "wh_main_emp_inf_spearmen_0", "wh_main_emp_inf_swordsmen", "wh_main_emp_inf_greatswords"
 CLANRAT, SLAVE, STORM = "wh2_main_skv_inf_clanrats_1", "wh2_main_skv_inf_skavenslaves_0", "wh2_main_skv_inf_stormvermin_1"
+GENERAL, WARLORD = "wh_main_emp_cha_general_0", "wh2_main_skv_cha_warlord_0"
 
 
 def params(**magic_cal):
@@ -143,6 +144,34 @@ def test_the_damage_is_the_probes_order_of_magnitude():
         rec = run(st, a, tg, until=15.0)
         assert 0.6 * hp_game < rec[0][1] - rec[-1][1] < 1.4 * hp_game
         assert rec[0][2] - rec[-1][2] < 5 * men_game + 5
+
+
+def test_the_open_share_of_a_knocked_man():
+    lam = torch.tensor([1e-9, 0.5, 2.0, 20.0])
+    assert torch.allclose(magic.open_share(lam, 0.0, 1.85)[1:], (1 - torch.exp(-lam[1:])) / lam[1:])   # all at once
+    assert float(magic.open_share(lam, 1.0, 1.85)[0]) == pytest.approx(1.0)
+    # a window shorter than the time down: one hit at most, as all at once
+    assert torch.allclose(magic.open_share(lam, 1.0, 1.85), magic.open_share(lam, 0.0, 1.85))
+    # 3 s and 1.85 s down: two hits at most - many hits register under two
+    n = magic.open_share(lam, 3.0, 1.85) * lam
+    assert float(n[-1]) == pytest.approx(2.0, abs=0.05) and float(n[1]) < 0.5
+    # no time down: every hit registers
+    assert torch.allclose(magic.open_share(lam, 3.0, 1e-9), torch.ones_like(lam), atol=1e-4)
+
+
+def test_a_knocked_lone_man_takes_less_and_a_heavy_one_stands():
+    hp = {}
+    for knock in (0, 1):
+        p = params(knock=knock)
+        for caster, target in ((WARLOCK, GOLD), (GOLD, WARLOCK), (GOLD, WARLORD)):
+            st, a, tg = duel(caster, target, p=p)
+            rec = run(st, a, tg, until=15.0, p=p)
+            hp[knock, target] = rec[0][1] - rec[-1][1]
+    # Warp Lightning on a lone Gold Wizard: about one bolt (224) with the knock (battle 5: 190-218 a cast), ~2x without
+    assert hp[1, GOLD] < 0.6 * hp[0, GOLD] and hp[1, GOLD] < 320
+    # Searing Doom: a light Warlock Engineer (250) is knocked down, a Warlord (650) is not (battle 5: 70 / 228 a cast)
+    assert hp[1, WARLOCK] < 0.5 * hp[0, WARLOCK] and hp[1, WARLOCK] < 0.6 * hp[1, WARLORD]
+    assert hp[1, WARLORD] == pytest.approx(hp[0, WARLORD], rel=0.05)
 
 
 def test_landings_peak_at_the_centre():

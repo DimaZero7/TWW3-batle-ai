@@ -645,8 +645,8 @@
   "ai_usage": "unit_special_abilities.ai_usage: the game's AI usage template",
   "overcast": "unit_abilities.overpower_option: the overcast spell's key (not modelled yet)",
   "bombardment": "projectile_bombardments of unit_special_abilities.bombardment: projectiles = num_projectiles, start_s = start_time (after the wind-up), window_s = arrival_window, spread_m = radius_spread (the projectiles land within this radius of the aim), launch_height_m = launch_height, launch = launch_source",
-  "bombardment.projectile": "projectiles of its projectile_type: damage, ap = ap_damage, collision_m = collision_radius, penetration = projectile_penetration_junctions.max_penetration of its projectile_penetration (the men one projectile can strike), penetration_cap = its entity_size_cap, elevation_deg = fixed_elevation, muzzle_v = muzzle_velocity, gravity, magical = is_magical, allies = can_damage_allies, explosion = explosion_type",
-  "bombardment.explosion": "projectiles_explosions of the projectile's explosion_type: radius_m = detonation_radius, damage = detonation_damage, ap = detonation_damage_ap, allies = affects_allies",
+  "bombardment.projectile": "projectiles of its projectile_type: damage, ap = ap_damage, collision_m = collision_radius, penetration = projectile_penetration_junctions.max_penetration of its projectile_penetration (the men one projectile can strike), penetration_cap = its entity_size_cap, elevation_deg = fixed_elevation, muzzle_v = muzzle_velocity, gravity, magical = is_magical, allies = can_damage_allies, explosion = explosion_type, mass (its knock on the man it strikes: mass x impact_v / his mass against the game's collision_speed_delta_threshold_knocked_*), impact_v = ours: its speed at the end of the fall (flight_s)",
+  "bombardment.explosion": "projectiles_explosions of the projectile's explosion_type: radius_m = detonation_radius, damage = detonation_damage, ap = detonation_damage_ap, allies = affects_allies, force = detonation_force (its shockwave's knock: force / a man's mass against shockwave_speed_delta_threshold_knocked_*)",
   "bombardment.flight_s": "ours: the fall from launch_height at muzzle_velocity aimed fixed_elevation below the horizontal under gravity, h = v sin(e) t + g t^2 / 2 (Searing Doom 2.96 s, Warp Lightning 1.17 s: with the wind-up and start the first hit 5.96 / 5.17 s after the order, the probe 6.0 / 5.0-5.5 s)"
  },
  "spells": {
@@ -686,14 +686,17 @@
      "gravity": 0.8,
      "magical": true,
      "allies": true,
-     "explosion": "wh2_main_spell_ruin_warp_lightning"
+     "explosion": "wh2_main_spell_ruin_warp_lightning",
+     "mass": 100.0,
+     "impact_v": 120.66
     },
     "explosion": {
      "key": "wh2_main_spell_ruin_warp_lightning",
      "radius_m": 6.0,
      "damage": 0.0,
      "ap": 24.0,
-     "allies": true
+     "allies": true,
+     "force": 400.0
     },
     "flight_s": 1.172
    }
@@ -734,14 +737,17 @@
      "gravity": 20.0,
      "magical": true,
      "allies": true,
-     "explosion": "wh_main_spell_metal_searing_doom"
+     "explosion": "wh_main_spell_metal_searing_doom",
+     "mass": 50.0,
+     "impact_v": 83.07
     },
     "explosion": {
      "key": "wh_main_spell_metal_searing_doom",
      "radius_m": 3.0,
      "damage": 0.0,
      "ap": 30.0,
-     "allies": true
+     "allies": true,
+     "force": 400.0
     },
     "flight_s": 2.955
    }

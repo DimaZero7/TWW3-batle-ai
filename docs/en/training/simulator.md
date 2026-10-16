@@ -642,8 +642,9 @@ now.
 Code: `tools/nn/sim/magic.py`; rules: `config/nn/sim.json` `magic` (each number with its source); the spells' numbers:
 the passports, `config/nn/abilities.json` section `spells` (`py -3.14 -m tools.nn.abilities`, the game's database).
 Two hero casters so far, each with his rank-1 spell: the **Gold Wizard** - Searing Doom, the **Warlock Engineer** -
-Warp Lightning (both bombardments). What the game showed: the `magic` probe (`tools/nn/magic_probe.py`, 3 battles,
-22 casts, `build/magic/probe1.md`).
+Warp Lightning (both bombardments). What the game showed: the `magic` probe (`tools/nn/magic_probe.py`: battles 1-3 -
+22 casts on units, `build/magic/probe1.md`; battle 4 - friendly hits; battle 5 - 16 casts on lone men,
+`build/magic/probe2.md`).
 
 **Winds of magic** (`wm_cur`, `wm_res`: the side's pool, the same on all its units). Start: 12 current, 68 reserve
 (the database: 80 x 0.15; the probe: so on both sides). The reserve flows into the current pool at 0.1 a second,
@@ -680,6 +681,23 @@ Each projectile strikes everyone whose men are near, friends too (both spells ca
 | The projectile's hit | men whose body is within its collision radius (`collision_m` + the man's radius), at most its penetration (2 / 20) | Searing Doom 24 + 12 AP, Warp Lightning 224 AP |
 | The explosion | men within the detonation radius **less 1 m** (2 m / 5 m) | 30 / 24 AP x (1 - d / R) |
 
+**A man knocked down takes no damage** (`magic.knock`, on). A projectile knocks the man it strikes when its mass x
+its speed at the ground / his mass reaches 7 m/s; an explosion knocks a man at d when its force / his mass x
+(1 - d / R) reaches 3.5 m/s (the database's `collision_` and `shockwave_speed_delta_threshold_knocked_down`; the
+projectile's mass, its speed at the ground and the explosion's force are in the passports: Searing Doom 50 x 83 m/s,
+Warp Lightning 100 x 121 m/s, force 400). He lies `knockdown_getting_up_delay` 1.0-2.7 s (we take the mean, 1.85 s),
+and the bombardment does not hurt him all that time. The community: knocked-over infantry get invincibility frames (a
+WH3 mod's notes, Steam 2859816151). The simulator counts for each man of a ring the share of the hits that find him on
+his feet (`open_share`: a counter with dead time); a hit that kills a whole man at once (Warp Lightning on infantry) is
+not cut. Whom it concerns: Warp Lightning knocks everyone (a General of mass 600 too), Searing Doom men lighter than 593
+(a Skaven Warlord, 650, stands), Searing Doom's blast only light infantry at its very centre.
+
+Why (the probe's battle 5, lone men): Warp Lightning strikes a lone General or Gold Wizard **at most once a cast** (6
+casts one health step of 190-218, 2 none), though the landings' law puts 1.4 bolts on him on average; Searing Doom takes
+70 a cast from a light Warlock Engineer (mass 250), 228 from a heavy Warlord (650). Without the rule the twin gave lone
+men 3-4x the game's. The men of a formation under Searing Doom are thrown 1.5-3 m from the centre in the game (the
+recorded places) - the simulator does not move men.
+
 "Less 1 m": the community (a bug report to CA: the blast radius is in effect 1 less than written). The falloff to the
 blast's edge is described nowhere - measured: the full damage over the whole radius gives 1.2-1.5x the game's damage,
 a linear falloff is the nearest. Armour cuts the base part of the hit (as for arrows), the AP part goes whole; a
@@ -695,15 +713,18 @@ second cast on the same unit kills more and takes less HP (part of it is spent o
 bombardment's HP counts with the missiles' HP: losses, the fight's balance, under fire (the spells' projectiles are the
 database's projectiles; the probe's targets were fearless: the morale is not checked).
 
-**The probe's twin** (`python -m tools.nn.magic_probe <3 battles> --sim --copies 8`, 17 casts, sim / game, better -
-nearer 1):
+**The probe's twin** (`python -m tools.nn.magic_probe <battles> --sim --copies 8`, sim / game, better - nearer 1; in
+brackets without the knock, `--set knock=0`):
 
-| Spell | HP (mean of the casts / sum) | Dead (mean / sum) | First damage after the order, sim / game |
-|---|---:|---:|---:|
-| Warp Lightning (8 casts) | 1.00 / 0.97 | 1.13 / 1.10 | 5.5 / 5.5 s |
-| Searing Doom (9 casts) | 0.86 / 0.84 | 1.31 / 1.05 | 6.0 / 6.0 s |
+| Spell | HP on units (mean / sum) | Dead (mean / sum) | Dead, first cast | HP on lone men (sum) | First damage, sim / game |
+|---|---:|---:|---:|---:|---:|
+| Warp Lightning (8 + 8 casts) | 0.94 / 0.90 (0.98 / 0.95) | 1.04 / 1.01 (1.08 / 1.06) | 1.05 (1.13) | 1.38 (3.66) | 5.5 / 5.5 s |
+| Searing Doom (9 + 8 casts) | 0.73 / 0.72 (0.86 / 0.85) | 0.82 / 0.73 (1.34 / 1.07) | 0.92 (1.81) | 0.85 (1.39) | 6.0 / 6.0 s |
 
-The casts' spread (root mean square of the log ratio): HP 0.18-0.20, Warp Lightning's dead 0.25, Searing Doom's 0.56.
+Lone men, HP a cast, game / twin: Searing Doom on the Warlord 228 / 180, on the Warlock Engineer 70 / 73; Warp
+Lightning on the General 156 / 238, on the Gold Wizard 165 / 205 (in the game 2 casts of Warp Lightning in 8 missed, the
+twin nearly always hits). The casts' spread (root mean square of the log ratio): HP 0.22 / 0.35, dead 0.22 / 0.47 (Warp
+Lightning / Searing Doom).
 Between the twin's runs the ratios move +-0.05 (random hits); two equal casts on one target differ +-20 % in the game.
 
 **Friendly hits** (the `magic` probe's battle 4, 1 battle, 12 casts, `python -m tools.nn.magic_probe <run> --friendly`):
@@ -714,21 +735,39 @@ less the same battle without it.
 
 | Spell | Lost by the friend, game (less the melee / all) | Twin | Men, game / twin |
 |---|---:|---:|---:|
-| Searing Doom (6 casts, the 2 first with damage) | 2573 / 3265 HP | 3103 HP | 21 / 21 |
-| Warp Lightning (6 casts, 3 with damage) | 296 / 1775 HP | 4948 HP | 10 / 62 |
+| Searing Doom (6 casts, the 2 first with damage) | 2573 / 3265 HP | 2629 HP (`--apart` 1091) | 21 / 11 (1) |
+| Warp Lightning (6 casts, 3 with damage) | 296 / 1775 HP | 4588 HP (`--apart` 1541) | 10 / 59 (15) |
 
-Searing Doom on friends is as the game's. Warp Lightning on friends is several times stronger in the twin: in the
-three casts with damage the friend lost 5-18 men in the game (all, with the melee), 13-25 in the twin from the
-lightning alone. A guess (not checked): the game's bolts aim at the target's men (the projectile's
-`marksmanship_bonus` 30, `spread` 0, `calibration_area` 1 m - an accurate shot; Searing Doom's 0, 5 and 10 m) rather
-than fall round its centre as in the simulator; friends get only the explosion. To check on the recorded men
-(`extra_men`): where the friend's dead lay.
+Most of Warp Lightning's difference is **the twin's placing, not the spell**: in one lane (Warp Lightning on spearmen,
+the caster's clanrats behind them) the game gives the friend's centre 1 m from the target's - the men mixed in the
+melee - and the twin lays the friend's box right on the target: both densities whole at the strike point. That lane's
+two casts make 4027 of the twin's 4948 HP (without the knock). In the simulator's own battles boxes in melee touch, they
+do not lie on each other. With `--apart` (the friend moved back to touch the target's back) Warp Lightning on friends is
+1541 HP / 15 men - between the game's "less the melee" and "all" - but Searing Doom falls to 1091 against the game's
+2573. No one placing fits both spells: where the friend's men stood in battle 4 is not recorded (`probe_men` records the
+target only) - open. Taking the melee off by its rate before the cast is noisy too (one cast -422 HP).
 
-Open: (1) on a whole unit's first cast Searing Doom kills 1.8x the game's in the twin (the game: 4 / 7 / 8 / 19 men),
-on the second fewer; the per-man replay on the recorded places gives the same - a mechanism is missing (the game does
-not give single men's health); (2) armour against Searing Doom: the game's stormvermin (armour 90) lose 0.57-0.77 of
-the slaves' (armour 0), the twin's 0.8; (3) Warp Lightning on friends near the target - several times the game's in
-the twin (above); (4) casting in melee and on the move, the game AI's magic, the network with magic - not done.
+**Tried and rejected** (the per-man replay on the recorded places, battles 1-3, sim / game):
+
+- *Warp Lightning aims at the target's men* (the projectile's `spread` 0, `calibration_area` 1: an accurate shot): by 2
+  m rings from the centre 0.40 / 0.42 / 0.40 / 0.33 of the men die, the game's 0.73 / 0.42 / 0.29 / 0.07 (landing
+  round the centre: 0.70 / 0.42 / 0.25 / 0.15). The game's bolts gather at the centre, as Searing Doom's.
+- *A projectile's hit spares its man its own explosion*: Searing Doom HP 0.62, first casts' dead 0.78 - too little.
+- *Armour cuts the explosion too* (as base damage): stormvermin and slaves level (0.57 / 0.61), but Searing Doom's HP
+  0.65, and greatswords (armour 95) lose no less than swordsmen to Warp Lightning in the game - not borne out.
+- *The projectile's scatter over its calibration area* (sigma^2 = area x (d / distance)^2, as arrows: Searing Doom
+  2.1 m, Warp Lightning 0.5 m): Searing Doom's dead nearly the same (1.69).
+- *A knocked man immune to the projectile's hit only, the explosion still hurts him*: the Warlock Engineer 152 a cast
+  against the game's 70.
+- *No "less 1 m" with the knock*: Searing Doom's dead 1.5-1.9x the game's.
+
+Open: (1) Searing Doom's HP on units 0.72 of the game's (with the knock; 0.85 without): in the game the men are thrown
+1.5-3 m from the centre and come under other projectiles, the simulator does not move them; two equal casts on one
+target differ more in the game than in the model (stormvermin 1870 and 2558 HP against the replay's +-130); (2) armour
+against Searing Doom: the game's stormvermin (armour 90) lose 0.57-0.77 of the slaves' (armour 0), the twin's 0.83; (3)
+friendly hits - the friend's men's places are needed (above); (4) Warp Lightning takes 190 from a lone man, not 224
+(-15 %, the cause not found); (5) casting in melee and on the move, the game AI's magic, the network with magic - not
+done.
 
 ## Contact effects and the Ratling Gun's burst
 

@@ -58,9 +58,14 @@ SPELL_FIELDS = {
                               "collision_radius, penetration = projectile_penetration_junctions.max_penetration of its "
                               "projectile_penetration (the men one projectile can strike), penetration_cap = its "
                               "entity_size_cap, elevation_deg = fixed_elevation, muzzle_v = muzzle_velocity, gravity, "
-                              "magical = is_magical, allies = can_damage_allies, explosion = explosion_type",
+                              "magical = is_magical, allies = can_damage_allies, explosion = explosion_type, mass "
+                              "(its knock on the man it strikes: mass x impact_v / his mass against the game's "
+                              "collision_speed_delta_threshold_knocked_*), impact_v = ours: its speed at the end of the "
+                              "fall (flight_s)",
     "bombardment.explosion": "projectiles_explosions of the projectile's explosion_type: radius_m = detonation_radius, "
-                             "damage = detonation_damage, ap = detonation_damage_ap, allies = affects_allies",
+                             "damage = detonation_damage, ap = detonation_damage_ap, allies = affects_allies, force = "
+                             "detonation_force (its shockwave's knock: force / a man's mass against "
+                             "shockwave_speed_delta_threshold_knocked_*)",
     "bombardment.flight_s": "ours: the fall from launch_height at muzzle_velocity aimed fixed_elevation below the "
                             "horizontal under gravity, h = v sin(e) t + g t^2 / 2 (Searing Doom 2.96 s, Warp Lightning "
                             "1.17 s: with the wind-up and start the first hit 5.96 / 5.17 s after the order, the probe "
@@ -78,6 +83,15 @@ def flight_s(height, v, elevation_deg, gravity):
     if g <= 0:
         return height / vy if vy > 0 else 0.0
     return (-vy + math.sqrt(vy * vy + 2 * g * height)) / g
+
+
+def impact_v(height, v, elevation_deg, gravity):
+    """Speed, m/s, at the end of the fall of flight_s (the same throw): the horizontal v cos(e) and the vertical
+    v sin(e) + g t."""
+    t = flight_s(height, v, elevation_deg, gravity)
+    e = math.radians(float(elevation_deg or 0.0))
+    v = max(float(v), 0.0)
+    return math.hypot(v * math.cos(e), v * math.sin(e) + float(gravity or 0.0) * t)
 
 
 def spell_passport(key, t):
@@ -101,14 +115,17 @@ def spell_passport(key, t):
                 "penetration": pen.get("max_penetration"), "penetration_cap": pen.get("entity_size_cap"),
                 "elevation_deg": pr["fixed_elevation"], "muzzle_v": pr["muzzle_velocity"], "gravity": pr["gravity"],
                 "magical": bool(pr["is_magical"]), "allies": bool(pr["can_damage_allies"]),
-                "explosion": pr["explosion_type"] or None}
+                "explosion": pr["explosion_type"] or None, "mass": pr["mass"],
+                "impact_v": round(impact_v(b["launch_height"], pr["muzzle_velocity"], pr["fixed_elevation"],
+                                           pr["gravity"]), 2)}
         out["bombardment"] = {
             "key": b["bombardment_key"], "projectiles": b["num_projectiles"], "start_s": b["start_time"],
             "window_s": b["arrival_window"], "spread_m": b["radius_spread"], "launch_height_m": b["launch_height"],
             "launch": b["launch_source"], "projectile": proj,
             "explosion": None if ex is None else {"key": ex["key"], "radius_m": ex["detonation_radius"],
                                                   "damage": ex["detonation_damage"], "ap": ex["detonation_damage_ap"],
-                                                  "allies": bool(ex["affects_allies"])},
+                                                  "allies": bool(ex["affects_allies"]),
+                                                  "force": ex["detonation_force"]},
             "flight_s": round(flight_s(b["launch_height"], pr["muzzle_velocity"], pr["fixed_elevation"], pr["gravity"]),
                               3)}
     return out

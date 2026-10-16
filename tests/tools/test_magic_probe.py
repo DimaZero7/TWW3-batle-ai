@@ -47,7 +47,7 @@ def test_the_magic_battle_file_gives_the_casters_their_spell_and_innate_abilitie
 
 def test_the_magic_plan_casts_on_held_targets_and_logs_the_winds():
     plan = cp.battles("magic")
-    assert len(plan) == 4 and all(len(b) == 4 for b in plan)
+    assert len(plan) == 5 and all(len(b) == 4 for b in plan)
     for i, b in enumerate(plan, 1):
         config, model_s, arena = cp.run_config("magic", i)
         assert config["winds_ms"] == 1000 and config["men_ms"] == 1000 and config["men_near_m"] >= 300
@@ -64,6 +64,20 @@ def test_the_magic_plan_casts_on_held_targets_and_logs_the_winds():
     assert {s["side"]: (s["current"], s["reserve"]) for s in b2["winds_set"]} == {1: (30, 40), 2: (30, -60)}
     b3 = cp.battles("magic")[2]
     assert [ln["gap_m"] for ln in b3] == [mp.GAP_M, mp.FAR_M, mp.GAP_M, mp.GAP_M] and mp.FAR_M > 200 > mp.GAP_M + 20
+
+
+def test_battle_5_strikes_lone_men_of_two_masses_with_single_tries_after_each_cooldown():
+    config, _, _ = cp.run_config("magic", 5)
+    assert {s["side"]: s["current"] for s in config["winds_set"]} == {1: 30, 2: 30}
+    lanes = config["lanes"]
+    assert all(ln["t_width"] == 5 for ln in lanes)                                 # lone men
+    assert {ln["t_key"] for ln in lanes} == {cp.UNITS["warlord"][0], cp.UNITS["warlock"][0], cp.UNITS["general"][0],
+                                            cp.UNITS["goldwiz"][0]}
+    for ln in lanes:
+        at = [c["at_s"] for c in ln["casts"]]
+        assert all(b - a >= 40 for a, b in zip(at, at[1:]))                       # each after the cooldown (37-40 s)
+    # the side's two lanes never try in the same second (a winds drop is matched to the lane that tried last)
+    assert not set(mp.LONE_AT[0]) & set(mp.LONE_AT[1])
 
 
 def test_battle_4_puts_a_friend_of_the_caster_right_behind_each_target():

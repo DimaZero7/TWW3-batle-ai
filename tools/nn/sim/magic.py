@@ -33,6 +33,13 @@ of its formation (men / (front x depth), the simulator's own box, geometry.dims)
                effective value of the radius of ranged blast damage is 1 less than the value filled in") take the
                explosion's damage x (1 - (d / R)^p), p = magic.explosion_falloff_power (measured: no source names a
                falloff; a flat explosion gives 1.5x / 1.2x the game's HP on the probe's casts).
+    knock      (magic.knock) a man knocked down takes nothing more of the bombardment until he is up: the projectile
+               knocks the man it strikes when its mass x impact_v / his mass reaches the game's
+               collision_speed_delta_threshold_knocked_down, the shockwave a man at d when force / his mass x (1 - d / R)
+               reaches shockwave_speed_delta_threshold_knocked_down; he is down knockdown_getting_up_delay's mean.
+               Each man's hits are cut to the share that finds him up (open_share: a dead-time counter over the
+               bombardment's window); a hit that kills a whole man outright is not cut. The probe's battle 5: Warp
+               Lightning strikes a lone man once a cast at most, Searing Doom a light Warlock Engineer 70, a Warlord 228.
 By rings round the strike point (bombard(), profile()): a ring's men, their hits and explosion dose; the kills Poisson
 a man with his own health, the wounds the bombardments left (bm_w) where the strike's dose falls (magic.wounds). Damage
 per man: the armour roll on the base part (melee.per_hit, as missiles), the AP part whole; a magical projectile is cut
@@ -55,7 +62,7 @@ except ImportError:
 SLOTS = 2            # spells a caster holds (sp0, sp1)
 COLS = ("mana", "wind_up_s", "range_m", "active_s", "recharge_s", "initial_s", "t_enemies", "t_friends", "bomb", "n",
         "start_s", "window_s", "spread_m", "flight_s", "c_base", "c_ap", "c_radius_m", "c_pen", "e_base", "e_ap",
-        "e_radius_m", "allies", "magical")
+        "e_radius_m", "allies", "magical", "c_mom", "e_force")
 COL = {c: i for i, c in enumerate(COLS)}
 
 
@@ -99,7 +106,8 @@ def row(params, key):
             float(b.get("flight_s") or 0.0), float(pr.get("damage") or 0.0), float(pr.get("ap") or 0.0),
             float(pr.get("collision_m") or 0.0), float(pr.get("penetration") or 1), float(ex.get("damage") or 0.0),
             float(ex.get("ap") or 0.0), r_e, float(bool(pr.get("allies")) or bool(ex.get("allies"))),
-            float(bool(pr.get("magical")))]
+            float(bool(pr.get("magical"))), float(pr.get("mass") or 0.0) * float(pr.get("impact_v") or 0.0),
+            float(ex.get("force") or 0.0) if ex else 0.0]
 
 
 def table(params, device):
@@ -282,6 +290,24 @@ def profile(R, R_e, p, landing, device):
     return out
 
 
+def open_share(lam, window, t_down):
+    """The share of a man's knocking hits (Poisson, lam of them over window s) that strike him when each knocks him
+    down for t_down s (immune meanwhile): the registered count of a dead-time counter that starts open, E[N] =
+    sum_k P(Poisson(lam / window x (window - (k - 1) t_down)) >= k) (the k-th hit no earlier than (k - 1) t_down after
+    the first), over lam; 1 for lam -> 0; a window of 0: 1 - e^(-lam) of lam (one hit at most)."""
+    lam = lam.clamp(min=0)
+    if window <= 0:
+        n = 1 - torch.exp(-lam)
+    else:
+        n = torch.zeros_like(lam)
+        for k in range(1, int(window / max(t_down, 1e-6)) + 2):
+            span = window - (k - 1) * t_down
+            if span <= 0:
+                break
+            n = n + torch.special.gammainc(torch.full_like(lam, float(k)), lam * (span / window))
+    return torch.where(lam > 1e-6, n / lam.clamp(min=1e-6), torch.ones_like(lam))
+
+
 def _kills(H, A, hm, hpA, ph, rem, many):
     """(kills, HP) of H hits Poisson over the A men of a band with health hpA (rem a man): a hit of a man's health or more
     (K <= 1) kills the man it strikes, the hits on a man already struck lost - A (1 - e^(-H / A)) men, each his health
@@ -358,6 +384,12 @@ def bombard(u, params, dt, front, depth, noise=False):
     p = float(c.get("explosion_falloff_power", 1.0))
     body = float(c.get("contact_body", 1.0))
     mode = str(c.get("landing", "radius"))
+    knock = bool(c.get("knock"))
+    if knock:
+        rules = params.battle
+        thr_c = float(rules["collision_speed_delta_threshold_knocked_down"])
+        thr_s = float(rules["shockwave_speed_delta_threshold_knocked_down"])
+        t_down = (float(rules["knockdown_getting_up_delay_min"]) + float(rules["knockdown_getting_up_delay_max"])) / 2
     present = (u["side"] > 0) & (u["men"] > 0) & ~u["gone"]
     men = u["men"].clamp(min=0)
     rho = torch.where(present, men / (front * depth).clamp(min=1e-3), torch.zeros_like(men))
@@ -399,9 +431,6 @@ def bombard(u, params, dt, front, depth, noise=False):
             size = torch.where(ok, m2 / m1.clamp(min=1e-12), torch.zeros_like(m1))              # [K]
             lam_e = torch.where(ok, nn[:, None, None] * (m1 * m1 / m2.clamp(min=1e-12)), torch.zeros_like(m1))
             lam_e = lam_e.expand_as(lam_c)
-            Hc, He = lam_c * band_men, lam_e * band_men
-            if noise:
-                Hc, He = torch.poisson(Hc), torch.poisson(He)
             res = (u["resist_magic"] if col("magical") > 0
                    else (u["resist_missile"] + u["resist_physical"]).clamp(max=0.9))[bb][..., None]
             arm, hmj = u["armour"][bb][..., None], hm[bb][..., None]
@@ -409,6 +438,20 @@ def bombard(u, params, dt, front, depth, noise=False):
             ph_c = melee.per_hit(torch.full_like(hmj, col("c_base")), torch.full_like(hmj, col("c_ap")), arm, hmj, res,
                                  single=single)                              # [M, N, 1]
             ph_e = melee.per_hit(col("e_base") * size, col("e_ap") * size, arm, hmj, res, single=single)   # [M, N, K]
+            if knock:
+                # the knock (magic.knock): a man the projectile or its shockwave knocks down takes nothing more of the
+                # bombardment until he is up - his share of its hits is his open time's (open_share); a hit that kills
+                # a whole man outright is not cut (the knocked man is dead already)
+                mass = u["mass"][bb].clamp(min=1.0)                                             # [M, N]
+                k_c = (col("c_mom") / mass >= thr_c).float()
+                r_k = (col("e_radius_m") * (1 - thr_s * mass / max(col("e_force"), 1e-6))).clamp(min=0)
+                lam_k = col("n") * f * (math.pi * (r_c ** 2 * cap * k_c + r_k ** 2 * float(col("e_force") > 0)))[..., None]
+                op = open_share(lam_k, col("window_s"), t_down)
+                lam_c = lam_c * torch.where(ph_c >= hmj - 1e-6, torch.ones_like(op), op)
+                lam_e = lam_e * torch.where(ph_e >= hmj - 1e-6, torch.ones_like(op), op)
+            Hc, He = lam_c * band_men, lam_e * band_men
+            if noise:
+                Hc, He = torch.poisson(Hc), torch.poisson(He)
             # the band's men and their health: the wounds bombardments left (bm_w) lie where this strike's dose falls
             # (a bombardment strikes its target's centre, as the last one did), the unit's other wounds by the band's
             # share of its men

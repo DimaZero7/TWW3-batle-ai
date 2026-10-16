@@ -137,9 +137,11 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
 - **Magic** ([details](training/simulator.md#magic), `tools/nn/sim/magic.py`): the side's winds (start 12 / 68,
   +0.1 a second), a cast on request that walks into its 200 m range, a 1 s wind-up and the cooldown from the effect's
   end; the bombardments Searing Doom (Gold Wizard) and Warp Lightning (Warlock Engineer) by the target's formation
-  density and the friends near it, the landings gathering at the centre. The probe's twin (17 casts): HP 0.84 / 0.97
-  of the game's, dead 1.05 / 1.10 (sums; Searing Doom / Warp Lightning). Friendly hits near the target (the probe's
-  battle 4): Searing Doom as the game's, Warp Lightning several times more in the twin. The network and the scripts do
+  density and the friends near it, the landings gathering at the centre; a man knocked down (the database's speed
+  threshold by the projectile's and the man's mass) is not hurt until he is up. The probe's twin (Searing Doom / Warp
+  Lightning, sums): HP on units 0.72 / 0.90 of the game's, dead 0.73 / 1.01, dead on first casts 0.92 / 1.05; HP on lone
+  men (heroes, lords) 0.85 / 1.38 (1.39 / 3.66 without the knock). Friendly hits near the target (battle 4): the twin
+  places the units by the game's centres, while in melee their men are mixed - open. The network and the scripts do
   not cast yet; casters in the armies sit behind the `mages` switch, off ([armies](training/armies.md#casters)); the
   scripts' sides get none.
 - **Not modelled:** terrain, forest, visibility, cavalry, monsters, other magic, flight, artillery, experience.
