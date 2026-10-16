@@ -19,10 +19,7 @@
 #    against the game's AI — we train for people, not a cheating AI);
 #  * -Graphics ultra sets the graphics preset for this run only (preferences.ps1), restored with
 #    the same backup (a battle a human plays: build human); -Graphics low (or the environment variable
-#    BAI_GRAPHICS=low for every launch of a session) is the lightest run, for measurements while the user plays;
-#  * the started game gets CPU priority High and, on a hybrid CPU, only the fast P cores (game_process.ps1;
-#    -GamePriority / -FastCores off, BAI_GAME_PRIORITY / BAI_FAST_CORES, config game_priority / game_fast_cores);
-#    only that process changes, never the power plan or any system setting.
+#    BAI_GRAPHICS=low for every launch of a session) is the lightest run, for measurements while the user plays.
 param(
     [Parameter(Mandatory = $true)][ValidateSet('ai-vs-ai', 'unit-readout', 'move-probe', 'manual', 'roster-capture', 'enemy-layout', 'map-capture', 'archer-range', 'nn-arena', 'lord-swarm', 'charge-probe', 'missile-probe', 'morale-probe', 'human', 'lord-fall', 'lord-duel', 'lord-ai')][string]$Target,
     [int]$TimeoutSeconds = 0,
@@ -31,11 +28,7 @@ param(
     # sees the end of the battle; then the usual cleanup (tools/launcher/watch.ps1 uses it).
     [int]$LingerSeconds = 0,
     # A graphics preset for this run only (tools/launcher/preferences.ps1); empty: the user's own.
-    [ValidateSet('', 'ultra', 'low', 'lowigpu', 'human2k')][string]$Graphics = '',
-    # The game process's CPU priority and its cores (game_process.ps1); empty: BAI_GAME_PRIORITY / BAI_FAST_CORES,
-    # else config game_priority / game_fast_cores, else High and the fast (P) cores.
-    [ValidateSet('', 'Normal', 'AboveNormal', 'High')][string]$GamePriority = '',
-    [ValidateSet('', 'on', 'off')][string]$FastCores = ''
+    [ValidateSet('', 'ultra', 'low', 'lowigpu', 'human2k')][string]$Graphics = ''
 )
 $ErrorActionPreference = 'Stop'
 if (-not $Graphics -and $env:BAI_GRAPHICS) { $Graphics = $env:BAI_GRAPHICS }
@@ -43,7 +36,6 @@ $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $repo 'tools\telemetry\read_jsonl.ps1')
 . (Join-Path $PSScriptRoot 'event_log.ps1')
 . (Join-Path $PSScriptRoot 'preferences.ps1')
-. (Join-Path $PSScriptRoot 'game_process.ps1')
 
 # Settings: config/default.json overridden by config/local.json.
 $settings = Get-Content -LiteralPath (Join-Path $repo 'config\default.json') -Raw | ConvertFrom-Json
@@ -57,7 +49,6 @@ if (Test-Path -LiteralPath $localConfig) {
 $game = (Resolve-Path -LiteralPath $settings.game_dir).Path
 $exe = Join-Path $game 'Warhammer3.exe'
 if (-not (Test-Path -LiteralPath $exe)) { throw "Warhammer3.exe not found in $game (set game_dir in config/local.json)" }
-$gameOptions = Resolve-GameProcessOptions -Settings $settings -Priority $GamePriority -FastCores $FastCores
 
 $buildDir = Join-Path $repo ('build\' + $Target)
 $manifest = Get-Content -LiteralPath (Join-Path $buildDir 'manifest.json') -Raw | ConvertFrom-Json
@@ -167,27 +158,19 @@ $reader = New-JsonlReader -Offset $offset
 $started = Get-Date
 $arguments = 'game_startup_mode battle ' + $manifest.scenario + '; ' + (Split-Path -Leaf $modList) + ';'
 $process = Start-Process -FilePath $exe -WorkingDirectory $game -ArgumentList $arguments -PassThru
-# At once, before the game builds its thread pool: priority and the fast cores (game_process.ps1).
-$gameProcess = Set-GameProcess -Process $process -Priority $gameOptions.priority -FastCores $gameOptions.fast_cores
 @{pid = $process.Id; started_utc = $started.ToUniversalTime().ToString('o'); target = $Target; build = $manifest.build;
   pack_sha256 = $manifest.pack_sha256; log_offset = $offset; stale_log_bytes = $staleBytes; arguments = $arguments;
-  battle_difficulty = $fairDifficulty; user_battle_difficulty = $userDifficulty; graphics = $Graphics;
-  game_priority = $gameProcess.priority; game_affinity = $gameProcess.affinity} |
+  battle_difficulty = $fairDifficulty; user_battle_difficulty = $userDifficulty; graphics = $Graphics} |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'launch.json') -Encoding utf8
 Write-Output ("Started WH3 PID {0}; run folder {1}. Process start is not success: waiting for events." -f $process.Id, $run)
-Write-Output ("Game process: priority {0}, cores {1}" -f $gameProcess.priority, $gameProcess.affinity)
 
 $status = 'timeout'
 $done = 0
 $runLog = Join-Path $run 'events.jsonl'
 $copiedLines = [long]0
-$priorityResets = 0
 try {
     while (((Get-Date) - $started).TotalSeconds -lt $TimeoutSeconds) {
         if ($process.HasExited) { $status = 'process_exited'; break }
-        if ($gameProcess.priority -eq $gameOptions.priority -and (Restore-GamePriority -Process $process -Priority $gameOptions.priority)) {
-            $priorityResets++
-        }
         $crash = Get-ChildItem -LiteralPath "$env:APPDATA\The Creative Assembly\Warhammer3\crash_report" -Filter '*.stack.txt' -ErrorAction SilentlyContinue |
             Where-Object { $_.LastWriteTime -gt $started } | Select-Object -First 1
         if ($crash) { Copy-Item -LiteralPath $crash.FullName -Destination $run; $status = 'crash_report'; break }
@@ -221,8 +204,7 @@ try {
         if (Test-Path -LiteralPath $path) { Copy-Item -LiteralPath $path -Destination $run }
     }
 } finally {
-    $cleanup = @{status = $status; completed_events = $done; game_left_running = $false; private_files_removed = $false;
-        game_priority_resets = $priorityResets}
+    $cleanup = @{status = $status; completed_events = $done; game_left_running = $false; private_files_removed = $false}
     $current = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
     $ours = $current -and $current.Path -eq $exe -and [Math]::Abs(($current.StartTime - $started).TotalSeconds) -lt 15
     if ($ours -and $KeepGameOpen) {
