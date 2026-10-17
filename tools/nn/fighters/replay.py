@@ -18,7 +18,7 @@ from tools import config as project
 
 
 def run(runs, out, rect=False, copies=4, device="cpu", chunk=12, seed=0, log=print, sets=(), places=False,
-        geometry=False):
+        geometry=False, lab=()):
     from tools.nn.sim import stepreplay
     if rect:
         stepreplay.run(runs, out, H=10, copies=copies, device=device, chunk=chunk, workers=1, log=log, sets=sets)
@@ -31,9 +31,19 @@ def run(runs, out, rect=False, copies=4, device="cpu", chunk=12, seed=0, log=pri
         return orig(sets).with_cal("noise", blows=False)
     stepreplay._params = params
     orig_batch = stepreplay._batch
-    geo = {"near": 0, "inside": 0, "steps": 0, "near_by_s": [0] * 10, "samples_by_s": [0] * 10}
+    geo = {"near": 0, "inside": 0, "steps": 0, "near_by_s": [0] * 10, "samples_by_s": [0] * 10,
+           "blows_front_flank_rear": [0, 0, 0]}
+    lab_d = json.loads(json.dumps(hook.LAB))
+    for kv in lab:
+        # section.key=json over the lab's numbers (lab.json), as --set over the simulator's
+        k, v = kv.split("=", 1)
+        *path, last = k.split(".")
+        d = lab_d
+        for p in path:
+            d = d.setdefault(p, {})
+        d[last] = json.loads(v)
     try:
-        with hook.installed(seed=seed) as h:
+        with hook.installed(lab=lab_d, seed=seed) as h:
             def batch(job):
                 if places:
                     from tools.nn.fighters.places import FromRecording
@@ -60,7 +70,8 @@ def run(runs, out, rect=False, copies=4, device="cpu", chunk=12, seed=0, log=pri
         share = geo["inside"] / max(geo["near"], 1)
         log(f"lab geometry: men within reach of an enemy {geo['near']}, nearest enemy inside their own formation "
             f"{share:.3f}; men within reach a battle by the window's second: "
-            + " ".join(f"{a / max(n, 1):.0f}" for a, n in zip(geo["near_by_s"], geo["samples_by_s"])))
+            + " ".join(f"{a / max(n, 1):.0f}" for a, n in zip(geo["near_by_s"], geo["samples_by_s"]))
+            + f"; swings front / flank / rear {geo['blows_front_flank_rear']}")
         Path(out).mkdir(parents=True, exist_ok=True)
         (Path(out) / "geometry.json").write_text(json.dumps(dict(geo, inside_share=share)), encoding="utf-8")
 
@@ -70,6 +81,10 @@ def _geometry(st, F, copies, geo, every_steps=4):
     import numpy as np
     from tools.nn.fighters import soldiersdata, state as S
     geo["steps"] += 1
+    k_ = getattr(F, "dir_k", None)
+    if k_ is not None:
+        for j in range(3):
+            geo["blows_front_flank_rear"][j] += int((k_ == j).sum())
     if geo["steps"] % every_steps:
         return
     u = st.u
@@ -110,6 +125,7 @@ def main(argv=None):
     ap.add_argument("--set", action="append", default=[], help="section.key=json over config/nn/sim.json (stepreplay)")
     ap.add_argument("--places", action="store_true", help="each window from the game's recorded soldiers' places")
     ap.add_argument("--geometry", action="store_true", help="the lab's men-in-reach geometry (soldiersdata.geometry)")
+    ap.add_argument("--lab", action="append", default=[], help="section.key=json over tools/nn/fighters/lab.json")
     a = ap.parse_args(argv)
     names = list(a.runs)
     if a.runs_from:
@@ -118,7 +134,7 @@ def main(argv=None):
         names = names[:a.limit]
     runs = [project.BUILD / "nn-arena" / "runs" / n for n in names]
     run(runs, a.out, rect=a.rect, copies=a.copies, device=a.device, chunk=a.chunk, sets=a.set, places=a.places,
-        geometry=a.geometry)
+        geometry=a.geometry, lab=a.lab)
 
 
 if __name__ == "__main__":

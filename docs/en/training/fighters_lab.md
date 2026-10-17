@@ -204,7 +204,25 @@ on whole units, sim / game:
 The game's places take away about half the excess (1.45 -> 1.21); the men within reach are then as many as the
 game's, through all 9 s of the window (521-533 against 542-554 / 472-485 by battle). The rest is the damage per man
 within reach in big mêlées above the game's (one on one in the probes it matches). In the game mêlées are the rule:
-'nearest enemy inside one's own formation' for 83 % of the men within reach (31 % one on one in the probes). Open.
+'nearest enemy inside one's own formation' for 83 % of the men within reach (31 % one on one in the probes).
+
+**Mêlées in the game** (the same recordings, melee seconds with no shooter at the unit; `build/fighters2/game_rate.py`,
+`mob_rate.py`): a unit loses about the same however many enemy units reach it - 18 / 21 / 21 (x1e-4 of its health a
+second) with 1 / 2 / 3+ units, though the enemies within reach are 18 / 33 / 61. The damage per man within reach falls
+threefold; a man of a unit whose target is another unit strikes 0.35-0.53 as hard as one whose unit targets this one
+(a fit over the seconds). The pressure on the striker himself (how many enemies reach him) does not change his rate.
+The lab from the game's places: 21 / 25 / 31 - 1.15 / 1.24 / 1.46 of the game.
+
+| Variant (replay from the places, 2 battles) | Damage, all | 1 / 2 / 3+ units |
+|---|---|---|
+| As now (the side of a blow by the man's facing) | 1.23 | 1.15 / 1.24 / 1.46 |
+| The side by the unit's facing (`melee.direction` "unit") | 1.29 | 1.18 / 1.29 / 1.55 |
+| ... from unit centre to unit centre (as the rectangle) | 1.19 | 1.05 / 1.18 / 1.44 |
+| A man of a unit with another target strikes with share 0.45 (`--set contact.unit_incidental=0.45`, measured above) | 1.10 | 1.04 / 1.05 / 1.33 |
+
+The side of a blow does not explain the mêlées (the melee probes are the same under any rule: steady 1.01). The
+'other target' share takes more than half the rest, but `contact.unit_incidental` is a simulator number (shared with
+the rectangle, its version) and is not put in the lab. The rest in big mêlées (3+ units: 1.33) is open.
 
 ### Melee probes
 

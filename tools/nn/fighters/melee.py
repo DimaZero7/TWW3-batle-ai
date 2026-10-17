@@ -157,6 +157,13 @@ def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
     t_fx = torch.where(t_tgt >= 0, px.gather(1, t_tgt.clamp(min=0)) - tx, torch.sin(tgu("b") * geometry.DEG))
     t_fz = torch.where(t_tgt >= 0, pz.gather(1, t_tgt.clamp(min=0)) - tz, torch.cos(tgu("b") * geometry.DEG))
     ax, az = px - tx, pz - tz
+    d_mode = lab["melee"].get("direction", "man")
+    if d_mode != "man":
+        # (lab.json melee.direction) the struck unit's facing instead of the struck man's; "unit_centre": the striker's
+        # unit centre seen from the struck unit's centre (as the rectangle)
+        t_fx, t_fz = torch.sin(tgu("b") * geometry.DEG), torch.cos(tgu("b") * geometry.DEG)
+        if d_mode == "unit_centre":
+            ax, az = gat("x") - tgu("x"), gat("z") - tgu("z")
     cosang = (ax * t_fx + az * t_fz) / (torch.sqrt(ax * ax + az * az) * torch.sqrt(t_fx * t_fx + t_fz * t_fz)).clamp(min=1e-6)
     cc = params.sim["contact"]
     front_c = torch.cos(torch.tensor(float(cc["front_deg"]) * geometry.DEG))
@@ -165,6 +172,7 @@ def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
                                                           float(R["melee_defence_direction_penalty_coefficient_rear"]),
                                                           float(R["melee_defence_direction_penalty_coefficient_flank"])))
     coef = torch.where(routing_t, float(R["melee_defence_direction_penalty_coefficient_rear"]), coef)
+    F.dir_k = torch.where(fire, (cosang < front_c).long() + (cosang <= rear_c).long(), torch.full_like(F.tgt, -1))
     lone_t = tgu("men0") <= 1
     w = torch.where(lone_t, torch.full_like(coef, float(cc.get("lord_direction", 1.0))), torch.ones_like(coef))
     defence = tgu("defence") * (1 - w * (1 - coef))

@@ -317,7 +317,17 @@ def main(argv=None):
     ap.add_argument("--routers", action="store_true", help="the routing mob's stretch (plans routmob, routmob2, passby)")
     ap.add_argument("--set", action="append", default=[], help="section.key=json over config/nn/sim.json for the rectangle")
     ap.add_argument("--rect-only", action="store_true", help="the second column: the rectangle with the default params")
+    ap.add_argument("--lab", action="append", default=[], help="section.key=json over tools/nn/fighters/lab.json")
     a = ap.parse_args(argv)
+    from tools.nn.fighters import hook
+    for kv in a.lab:
+        # the lab's numbers for this run (hook.LAB in place: every Hook built here reads it)
+        k, v = kv.split("=", 1)
+        *path, last = k.split(".")
+        d = hook.LAB
+        for p in path:
+            d = d.setdefault(p, {})
+        d[last] = json.loads(v)
     if a.routers:
         plans = set(a.plans.split(","))
         dirs = [d for d in cp.runs() if json.loads((d / "manifest.json").read_text(encoding="utf-8"))["config"]
