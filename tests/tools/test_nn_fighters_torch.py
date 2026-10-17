@@ -289,3 +289,60 @@ def test_the_lab_gives_the_network_its_units_shape():
     plain = scenario.build([a], P)
     assert "shape" not in plain.observation()
     assert ob.NAMES[-len(ob.SHAPE):] == ob.SHAPE
+
+
+def _rats_in_reach(free_on, steps=24):
+    """Wolf rats attacking swordsmen (nearest_attack), the lab's move.free on or off: (rats within reach of a
+    swordsman - 2.5 m + 0.65 -, rats alive) after steps."""
+    import copy
+    lab = copy.deepcopy(hook.LAB)
+    lab["move"]["free"]["on"] = free_on
+    a = army([(SWORDS, 0, 0, 0, None)], [("wh2_dlc16_skv_mon_wolf_rats_0", 0, 25, 180, None)])
+    with hook.installed(lab=lab) as h:
+        st = scenario.build([a], P)
+        F = h.F
+        for _ in range(steps):
+            battle.step(st, replay.nearest_attack(st), P, P.dt)
+        px, pz = S.positions(F, st.u)
+        live = S.alive(F)[0]
+        N = st.N
+        r = live & (F.uid[0] == N // 2)
+        s = live & (F.uid[0] == 0)
+        d = torch.sqrt((px[0][r][:, None] - px[0][s][None, :]) ** 2 + (pz[0][r][:, None] - pz[0][s][None, :]) ** 2)
+        return int((d.min(1).values <= 3.15).sum()), int(r.sum())
+
+
+def test_beasts_fight_free_round_their_target():
+    # lab.json move.free: a beast's men (an ellipse body, no missile weapon: the wolf rats) leave their places once
+    # their unit is in the fight and each closes on an enemy man - the game's probe lanes: 46-77 of 80 rats within
+    # reach against the formed lab's 15-20
+    near_free, alive = _rats_in_reach(True)
+    near_formed, _ = _rats_in_reach(False)
+    assert near_free > 1.5 * near_formed and near_free > 0.4 * alive
+    from tools.nn.fighters import move as MV
+    u = {"body_ratio": torch.tensor([[1.0, 0.4, 0.6, 0.4]]), "range": torch.tensor([[0.0, 0.0, 120.0, 0.0]]),
+         "men0": torch.tensor([[120.0, 80.0, 30.0, 1.0]])}
+    assert MV.free_units(u, hook.LAB)[0].tolist() == [False, True, False, False]
+
+
+def test_a_man_takes_at_most_k_attackers_blows():
+    # lab.json melee.max_attackers (off by default): with K, the blows landing on a man fought by n men in reach
+    # are cut to K / n of them
+    import copy
+    got = []
+    for K in (None, 1):
+        # 120 swordsmen on 6 clanrats spread along their front: several swordsmen in reach of each clanrat
+        a = army([(SWORDS, 0, 0, 0, None)], [(CLANRATS, 0, 6.0, 180, 6)])
+        st, F = build(a)
+        u = st.u
+        N = st.N
+        lab = copy.deepcopy(hook.LAB)
+        lab["melee"]["max_attackers"] = K
+        permit = torch.zeros((1, N, N), dtype=torch.bool)
+        permit[0, 0, N // 2] = True
+        pw = geometry.pairwise(u, 1.5)
+        near = hook.Near(F, u, lab)
+        hp, men = FM.resolve(F, u, P, lab, permit, pw, torch.zeros_like(u["men"]), 0.5, near)
+        got.append((float(F.pend[0].sum()), float(men[0, 0, N // 2])))
+    assert got[0][1] == got[1][1] and got[0][1] > 6               # the same swordsmen in reach, more than the rats
+    assert 0 < got[1][0] < 0.6 * got[0][0]

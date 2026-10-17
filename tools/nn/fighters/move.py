@@ -7,6 +7,8 @@ A man is carried by his unit's centre (his place is an offset from it). Then:
   in a fight   a man with an enemy man within reach + the tether (melee.resolve's F.eng) stands at the standoff from him
                (lab.json standoff: measured, closer at the contact, ~2.3 m later), on the line between them, at most the
                database's formed tether distance (2.0 m) from his place
+  free         a beast (lab.json move.free: the wolf rats) in a fight under an attack order leaves his place: he closes
+               on an enemy man with no tether, or runs at his unit's target, and the crowd flows round it (free_attack)
   pace         he walks there at most his unit's run speed (relative to the unit's centre) a step
   bodies       men closer than the sum of their radii (the database's battle_entities radius) push apart, half each,
                friends and enemies alike
@@ -14,6 +16,46 @@ A lone man (a lord) is his unit's centre."""
 import torch
 
 from tools.nn.fighters import melee as FM, scans as SC, state as S
+from tools.nn.sim import orders as O
+
+
+def free_units(u, lab):
+    """[B, N] the units that fight free (lab.json move.free): a beast - an ellipse body (the database's battle_entities
+    radii_ratio < 1) with no missile weapon (a weapon team has one) - of more than one man."""
+    cfg = lab["move"].get("free") or {}
+    if not cfg.get("on"):
+        return torch.zeros_like(u["men0"], dtype=torch.bool)
+    return (u["body_ratio"] < 1.0) & (u["range"] <= 0) & (u["men0"] > 1)
+
+
+def free_attack(F, u, lab, up, px, pz, ux, uz, gx, gz):
+    """The goal (offset from the unit's centre) of each man of a unit fighting free (free_units) once his unit is in the
+    fight (its melee flag: one of its men has an enemy within reach) under an attack order: the standoff from the enemy man he fights
+    (F.tgt) or closes on (F.eng: within reach + the tether) - with no tether to his place -, else his unit's attack
+    target's centre (the bodies stop him at its men, the rest flow round it). Other men keep gx, gz."""
+    free = free_units(u, lab)
+    if not bool(lab["move"].get("free", {}).get("on")):
+        return gx, gz
+    ot = u["order_target"]
+    attacking = (u["order_kind"] == O.ATTACK) & (ot >= 0) & ~u["r"]
+    # in the fight: the unit's melee flag (the men's contact lights it, hook.contact_pairs) - not a sum over its men,
+    # which the compiled step could not build (a fused Triton kernel failed to compile)
+    act = (free & attacking & u["m"]).gather(1, F.uid) & up
+    foe = torch.where(F.tgt >= 0, F.tgt, getattr(F, "eng", F.tgt))
+    has = foe >= 0
+    fc = foe.clamp(min=0)
+    ex, ez = px.gather(1, fc), pz.gather(1, fc)
+    vx, vz = px - ex, pz - ez
+    n = torch.sqrt(vx * vx + vz * vz).clamp(min=1e-3)
+    t_i = u["melee_s"].gather(1, F.uid) if "melee_s" in u else torch.zeros_like(px)
+    t_j = u["melee_s"].gather(1, F.uid.gather(1, fc)) if "melee_s" in u else torch.zeros_like(px)
+    s = FM.standoff(lab, torch.minimum(t_i, t_j))
+    wx, wz = ex + vx / n * s - ux, ez + vz / n * s - uz
+    tu = ot.clamp(min=0).gather(1, F.uid)
+    cx, cz = u["x"].gather(1, tu) - ux, u["z"].gather(1, tu) - uz
+    gx = torch.where(act, torch.where(has, wx, cx), gx)
+    gz = torch.where(act, torch.where(has, wz, cz), gz)
+    return gx, gz
 
 
 def step(F, u, params, lab, dt, near):
@@ -66,6 +108,7 @@ def step(F, u, params, lab, dt, near):
         fight = eng >= 0
         gx = torch.where(fight, gx + ox * k, gx)
         gz = torch.where(fight, gz + oz * k, gz)
+    gx, gz = free_attack(F, u, lab, live & ~lying, px, pz, ux, uz, gx, gz)
     # the pace
     mx, mz = gx - F.dx, gz - F.dz
     dist = torch.sqrt(mx * mx + mz * mz).clamp(min=1e-6)

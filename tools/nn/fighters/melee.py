@@ -23,6 +23,7 @@ His blow (CA Feature Focus #2, the database; the same formulas as the simulator'
                pursuit_rate (rout_pin_rate in its exit), a unit attacking another enemy unit_incidental /
                fresh_incidental / lord_incidental, infantry on a lord also fought by a lord lord_rival_others - a blow
                lands with that chance
+  attackers    (lab.json melee.max_attackers, off) a man takes the blows of at most K of the men fighting him
 A blow's damage goes to the man struck: beyond his health it is lost (overkill), so whole men die and wounds stay
 on the living. Returned per pair of units: the HP dealt [B, i, j] and the men striking [B, i, j]."""
 import math
@@ -175,6 +176,14 @@ def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
     gp = (F.uid * N + tu)
     g_m = g.reshape(B, N * N).gather(1, gp) * float(lab["melee"].get("blow_share", 1.0))
     refl = reflect.reshape(B, N * N).gather(1, gp)
+    K = lab["melee"].get("max_attackers")
+    if K:
+        # (lab.json melee.max_attackers) a man takes the blows of at most K of the men fighting him at a time: with n
+        # in reach on him, each one's swing lands on him with the chance K / n (the swing is spent either way)
+        # (not on a lone man - a lord: the wolf rats' probe lanes on the General, base 0.22 / with it 0.02 of the
+        # game's damage on him at 5-15 s)
+        n_on = torch.zeros((B, M), device=g_m.device).scatter_add(1, t_c, (has & (tgt >= 0)).float()).gather(1, t_c)
+        g_m = torch.where(lone_t, g_m, g_m * (float(K) / n_on.clamp(min=1.0)).clamp(max=1.0))
     lands = hit & (S.rnd(F, M, 102) < g_m)
     # the clock after the swing: the interval after a hit, miss_s after a miss (the remainder kept)
     # (lab.json melee.swing_per_interval: a miss costs the whole interval too - every swing, hit or miss, comes an

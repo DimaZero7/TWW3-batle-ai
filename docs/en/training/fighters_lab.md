@@ -86,6 +86,14 @@ man with an enemy in reach stands at the "standoff" from him (measured, below), 
 database's `entity_action_attack_formed_tether_distance`); the ranks behind follow. Bodies (the database's radius) do
 not overlap.
 
+**Beasts fight free** (`move.free_attack`, `lab.json` `move.free`, on). A man of a beast unit (an ellipse body - the
+database's `radii_ratio` below 1 - and no missile weapon; in the roster the wolf rats), once his unit is in the fight
+under an attack order, leaves his place: he closes on the enemy he fights or the nearest within reach + the tether,
+with no tether to his place, else runs at his unit's target's centre; the bodies stop him at the enemy's men and the
+rest flow round its formation. The database has both attack modes, "formed" and "free"
+(`matched_combat_formed_vs_free_percentage`, `max_range_for_attack_mode_free_attack` 100 m), but no table says which
+unit fights which way - so the rule goes by the body. Measured below, "Wolf rats".
+
 **The knock-down** (`knock.py`), one mechanism for any blow of mass or force:
 
 - the speed the impact gives the man (a body struck him - the projectile's mass x speed / his mass; a shockwave -
@@ -116,6 +124,7 @@ Spells call it today (each projectile of Searing Doom and Warp Lightning lands a
 | Spread of arrows | calibration area x (d / distance)^2 x (1 - accuracy) | database, the simulator's model `missile.hit_chance_plane` |
 | Knocked / lying | 7 / 3.5 m/s; 1.0-2.7 s | database |
 | Throw | median 3.0 m (p10-p90 2.3-6.0) | measured: the knock probe battle, below |
+| Beasts fight free | an ellipse body, no missile weapon | a rule by the body (the database does not say who attacks how); measured: the wolf rats' probes, below |
 
 Every lab number with its reason: `tools/nn/fighters/lab.json`.
 
@@ -235,6 +244,50 @@ The lab from the game's places: 21 / 25 / 31 - 1.15 / 1.24 / 1.46 of the game.
 The side of a blow does not explain the mêlées (the melee probes are the same under any rule: steady 1.01). The
 'other target' share takes more than half the rest: in the lab it is the lab's own number `melee.unit_incidental` 0.45
 (`lab.json`, with its source); the rectangle's `contact.unit_incidental` stays 1. The rest in big mêlées (3+ units: 1.33) is open.
+
+**Where the mobs' rest sits** (the replay of the same 2 battles from the places, `build/night_mob`):
+
+- The surplus is there in the window's first second already, when the men stand exactly on the game's places: 3+
+  units 1.28 / 1.35 / 1.37 at the window's seconds 0-1 / 2-4 / 5-8. So it is the rule of a man's blow, not how the men
+  drift apart.
+- Not the charge: with no charge (`--set charge.min_runup_m=1e9`) 3+ units 1.27 (was 1.28). Not "another target": with
+  `unit_incidental` 0 3+ units 1.08-1.27, but 1 unit 0.88-1.00.
+- The surplus grows with the size of the contact, not with the number of units. Lab / game by the enemy men within
+  reach of the unit (the window's first second): < 10 - 0.52, 10-20 - 0.76, 20-35 - 1.03, 35-50 - 1.12, 50-80 - 1.22,
+  80+ - 1.77. The game loses about the same (14-29 x 1e-4 a second) however many enemies reach; the lab in proportion
+  to the strikers. A mob of 3+ units is simply a big contact (often a fresh unit coming in: with a "fresh" striking
+  unit, < 5 s in melee, 3+ units 1.59, without one 0.82-1.14).
+- The same in the one-on-one probes (112 lanes, 13-40 s after contact, the formula - chance x mean blow / interval): the
+  game's damage per striker within reach is 0.98 / 0.87 / 0.71 / 0.58 / 0.42 / 0.34 / 0.18 of the formula with < 10 /
+  10-20 / 20-30 / 30-45 / 45-60 / 60-90 / 90+ strikers. The lab's damage per striker does not depend on their number.
+  The probes agree with the game because they mostly have 15-25 strikers.
+- The mechanism is not found. "A man takes the blows of at most two enemies at a time" (`melee.max_attackers` 2, after
+  the database's `melee_max_hit_reactions` 2) flattens the probes up to 45 strikers, but breaks the men killed per
+  health in whole battles ("Tried and rejected"). "A blow only along a clear line" (nobody between the two men) explains
+  little: 0.59-0.83 of the strikers are clear. Needs a game probe that sees every man's blows in a crowd (men's places
+  and health every 0.1 s, one unit against 1 / 3 units).
+
+### Wolf rats (probes wolfrats, wolfpoison)
+
+22 lanes of 4 battles (`build/charge-probe/runs/20261011-2141...2145`; rats on swordsmen, spearmen, the General; 4
+copies; `probes --plans wolfrats,wolfpoison`). The network trained on the men (itS27_4) keeps its rats away from melee:
+in the lab the rats lost it much harder than in the game. The cause is the formation: in the game the rats fight free,
+nearly all within reach, flowing round the enemy; in the lab they fought formed (ranks 3.5 m apart, only the first
+strikes). Sim / game, sum over lanes:
+
+| Measure | Game | Rectangle | Men formed (was) | Men, beasts free |
+|---|---|---|---|---|
+| Rats within reach of the enemy, 1-3 / 5-10 s | 57 / 55 | - | 17 / 16 | 56 / 64 |
+| Wrap (share of rats beside and behind the enemy), 5-10 s | 0.1-0.7 | - | 0.00-0.02 | 0.1-0.8 |
+| Rats' damage, 0-5 / 5-15 s / steady | | 0.81 / 0.70 / 0.83 | 0.69 / 0.32 / 0.41 | 1.60 / 1.13 / 0.87 |
+| Rats' losses, 0-5 / 5-15 s / steady | | 0.59 / 0.54 / 0.80 | 1.08 / 0.75 / 1.35 | 1.43 / 1.34 / 1.92 |
+| Rats' damage / their losses, 5-15 s | | 1.30 | 0.43 | 0.84 |
+
+The rats stand in the fight as in the game, and "dealt / lost" at 5-15 s goes 0.43 -> 0.84. But both sides now strike
+harder than the game: the same trouble of big contacts as in the mobs (in the game 87 swordsmen are within reach of
+the rats and deal about a third of the formula). On the General the rats take 0.08-0.22 of the game's both before and
+after - a separate question (a lone target). The replay of the 2 exam battles from the places: melee damage on whole
+units 1.10 -> 1.14 (the battles have rats).
 
 ### The unit's shape (for the network)
 
@@ -455,9 +508,9 @@ x 4 copies ran in a container of 10 GB (`DOCK_MEM=10g`).
 
 ## Not there
 
-- The damage in whole battles with "a swing every interval" is 1.37 of the game; the first blow ("ready at once") is
-  confirmed by the probe, so the surplus is elsewhere (how many men are in reach in big clashes of several units).
-  Open.
+- The damage in big contacts: in the game the damage per striker within reach falls with their number (0.98 -> 0.18 of
+  the formula from < 10 to 90+ strikers), in the lab it does not; hence the mobs of 3+ units 1.33 and the free rats'
+  surplus. The mechanism is not found ("Mobs", above).
 - The share thrown by a spell is 2-5x below the game's (the knock probe battle): how the game throws men beyond the
   blast radius is not found.
 - The ellipse body (wolf rats) - the men are circles; the Ratling Gun's burst - at most 2 shots a man a step; a flat
@@ -478,6 +531,13 @@ x 4 copies ran in a container of 10 GB (`DOCK_MEM=10g`).
   of 92 battles: melee damage 0.89 -> 0.84, on thinned units 1.03 -> 0.95, men killed per health 0.86 -> 0.67, routs
   0.97 -> 0.98. The rectangle's other rules (the wave, the first strike, the wounded pool) were fitted to the old clock;
   swapping the clock alone breaks them.
+- **A man takes the blows of at most K enemies at a time** (`--lab melee.max_attackers=2`; each of the n strikers of
+  one man lands with the chance K / n; not on a lone man - a lord). Melee probes: target HP 0-1 / 0-5 / 0-10 s 1.59 /
+  1.40 / 1.24 -> 1.33 / 1.14 / 1.01, steady 1.07 -> 0.96, 5-15 s 0.97 -> 0.78. But the replay of 2 battles from the
+  places: melee damage on whole units 1.10 -> 0.79, men killed per health lost 0.74 -> 0.52 (game 0.79: the blows spread
+  over more men), 1 / 2 / 3+ units 0.82 / 0.70 / 0.91. On the General in the rats' probes 0.22 -> 0.02. The switch is
+  kept, off.
+- **No "another target"** (`unit_incidental` 0): 3+ units 1.08-1.27, but 1 unit 0.88-1.00 - does not explain the mobs.
 
 - **Speed: neighbour lists through the compiler.** The whole step under `torch.compile`, the neighbours as lists
   [battles x men x 108], the compiler fusing the operations itself: 1024 battles 42.9 ms, three passes over the lists
