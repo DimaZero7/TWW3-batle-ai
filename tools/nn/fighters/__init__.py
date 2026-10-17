@@ -12,5 +12,6 @@ simulator's step (hook.py) - apart from training; the simulator's files are not 
   replay.py  the step replay with the men; card.py the comparison
   soldiersdata.py  the game's recorded soldiers' places (nn_soldiers), the men-in-reach geometry
   places.py  the step replay's windows from those places
+  shapecheck.py  shape.unit_features (the unit's shape for the network): the lab against the game; its cost
   bench.py   speed
 """

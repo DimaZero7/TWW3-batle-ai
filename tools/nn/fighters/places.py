@@ -6,6 +6,8 @@ the lab carries stay near where they were) and that place, in the unit's frame, 
 (F.fixed, F.fa, F.ff; installed() wraps state.slots for it, the lab's step itself unchanged) - the formation keeps
 the game's shape and moves with its centre. A unit with no
 record keeps the lab's formation. Needs torch."""
+from pathlib import Path
+
 import numpy as np
 import torch
 
@@ -91,7 +93,8 @@ class FromRecording:
         for d in run_dirs:
             g = check.load(d)
             slot = scenario.slots(scenario.from_recording(g, d), hs)
-            self.runs.append({"t": g.t, "slot": {nm: slot[nm] for nm in g.names}, "places": soldiersdata.load(d)})
+            self.runs.append({"name": Path(d).name, "t": g.t, "slot": {nm: slot[nm] for nm in g.names},
+                              "places": soldiersdata.load(d)})
         self.stats = {"windows": 0, "units": 0, "men": 0, "missing": 0}
 
     def __call__(self, F, u, row):

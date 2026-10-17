@@ -86,6 +86,13 @@ class TestArenas:
         assert written[2]["soldiers_every"] == 1
         with pytest.raises(SystemExit):
             build.main(["nn-arena", "--own-ai", "net", "--soldiers-every", "-1"])
+        assert "soldiers_state" not in written[2]
+        assert build.main(["nn-arena", "--own-ai", "net", "--soldiers-every", "2", "--soldiers-state"]) == 0
+        assert written[3]["soldiers_every"] == 2 and written[3]["soldiers_state"] is True   # to the companion too
+        for bad in (["nn-arena", "--own-ai", "net", "--soldiers-state"],                    # nothing read
+                    ["nn-arena", "--own-ai", "hold", "--soldiers-every", "2", "--soldiers-state"]):   # no companion
+            with pytest.raises(SystemExit):
+                build.main(bad)
         with pytest.raises(SystemExit):
             build.main(["nn-arena", "--own-ai", "attack", "--enemy-ai", "ai_like"])
 

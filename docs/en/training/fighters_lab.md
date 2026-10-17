@@ -221,8 +221,38 @@ The lab from the game's places: 21 / 25 / 31 - 1.15 / 1.24 / 1.46 of the game.
 | A man of a unit with another target strikes with share 0.45 (`--set contact.unit_incidental=0.45`, measured above) | 1.10 | 1.04 / 1.05 / 1.33 |
 
 The side of a blow does not explain the mêlées (the melee probes are the same under any rule: steady 1.01). The
-'other target' share takes more than half the rest, but `contact.unit_incidental` is a simulator number (shared with
-the rectangle, its version) and is not put in the lab. The rest in big mêlées (3+ units: 1.33) is open.
+'other target' share takes more than half the rest: in the lab it is the lab's own number `melee.unit_incidental` 0.45
+(`lab.json`, with its source); the rectangle's `contact.unit_incidental` stays 1. The rest in big mêlées (3+ units: 1.33) is open.
+
+### The unit's shape (for the network)
+
+`shape.unit_features` (torch) - one function for the lab's men and for the game's soldiers' places: per unit 9 numbers
+and a 4 x 4 map, in the unit's frame (its facing, from the men's centre of mass): men per m² (width x depth), width and
+depth (sqrt(12) x the men's spread across / along - a full rectangle's side), the mass off the middle of the extent
+forward and sideways, the share of men within reach of an enemy, the share of empty cells of the box (holes) and of its
+front row, wounds (1 - health / (men x a man's health)), the share of the men in each of 16 cells. In the game the
+companion computes it from the places the bridge sends every 2 s (`--soldiers-every 2 --soldiers-state`, companion
+`--shape`; the network does not see it yet): 4 ms a reading of 3,000 men (4 CPU threads; a 17 x 20 units battle), the
+state document +32 KB; a 3 x 4 units battle in the game 2.2 ms median.
+
+Check (`python -m tools.nn.fighters.shapecheck`; the replay of 2 battles from the game's places, `replay --places
+--shape-log`): the lab 5 / 10 s after the window's start against the game at that second; 'no change' - the game at
+the window's start against the game 5 / 10 s on (how much the shape changes by itself):
+
+| Feature | Game mean | Lab - game, 5 / 10 s | No change, 5 / 10 s | Correlation lab / game, 5 / 10 s |
+|---|---|---|---|---|
+| men per m² | 0.26 (lab 0.27) | 0.040 / 0.048 | 0.026 / 0.041 | 0.75 / 0.67 |
+| width, m | 23.9 (23.9) | 2.9 / 3.5 | 2.3 / 3.4 | 0.61 / 0.55 |
+| depth, m | 24.1 (23.1) | 3.8 / 4.5 | 3.5 / 5.6 | 0.97 / 0.96 |
+| mass forward, m | 1.9 (1.4) | 1.7 / 1.9 | 1.7 / 2.6 | 0.86 / 0.80 |
+| within reach of an enemy | 0.185 (0.181) | 0.075 / 0.082 | 0.045 / 0.070 | 0.84 / 0.81 |
+| holes / in the front row | 0.09 / 0.14 | 0.04 / 0.08 | 0.04 / 0.07-0.09 | 0.85-0.88 / 0.78-0.80 |
+| wounds | 0.23 | 0.007 / 0.009 | 0.004 / 0.008 | 1.00 / 0.99 |
+| 4 x 4 cells | 0.04-0.08 | ~0.021 | ~0.020-0.027 | 0.42-0.74 |
+
+The means agree (no bias); the lab's error is about how much the shape changes by itself in 5-10 s (at 10 s the lab is
+nearer the game than 'no change' in depth, the mass forward and holes; worse in the share within reach at 5 s). 4,524
+unit-seconds a horizon; units of 10+ men, no lords.
 
 ### Melee probes
 

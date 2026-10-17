@@ -47,7 +47,8 @@
 -- Changes only are logged once per decision: nn_ability_ready (an own unit's active ability:
 -- can_perform_special_ability turned true or false) and nn_effects (a unit's active phases).
 -- Every state document carries the own army's Winds of Magic (winds {cur, rate}, apps.battle.winds;
--- absent when the engine gives none).
+-- absent when the engine gives none). opts.soldiers() (nn_arena soldiers_state): the latest reading of every
+-- soldier's place ({t, units = {{n, side, xz_dm}}}), put in the document (soldiers) once, when new.
 -- The Lua side writes everything it reads; what a human would not see is hidden
 -- by the companion's observation (tools/nn/model/observation.py).
 -- A second instance commands the enemy side under a script in the companion (nn_arena enemy_ai
@@ -298,12 +299,20 @@ function M.start(opts)
         end
     end
 
+    local soldiers_sent = nil
     local function write(done)
         local rows = opts.rows()
         effects(rows)
         readiness()
         local doc = services.state_document(opts.meta, handle.written, opts.now_ms(), rows, done, used,
             winds.read(opts.army))
+        if opts.soldiers then
+            -- every soldier's place (nn_arena soldiers_state): only a reading not sent yet
+            local s = opts.soldiers()
+            if s and s.t ~= soldiers_sent then
+                doc.soldiers, soldiers_sent = s, s.t
+            end
+        end
         handle.write_mode = exchange.write(state_file, json.encode(doc))
         return rows
     end

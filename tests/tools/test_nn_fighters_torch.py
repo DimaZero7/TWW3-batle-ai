@@ -241,3 +241,31 @@ def test_places_from_the_recording_put_the_men_and_hold_the_shape():
         gx, gz = S.to_world(u, F, *S.slots(F, u))
         assert torch.allclose(gx[0][m], torch.full_like(gx[0][m], 2.0), atol=1e-4)
     assert not torch.allclose(S.slots(F, u)[1][0][m], torch.full_like(sf[0][m], 2.0))   # outside: the formation
+
+
+def test_unit_features_of_a_block_and_its_enemy():
+    # shape.unit_features: a 10 x 6 block 1.5 m apart facing +z, an enemy line 2 m before its front
+    import numpy as np
+    from tools.nn.fighters import shape
+    xs = (np.arange(10) - 4.5) * 1.5
+    block = np.array([(x, (r - 2.5) * 1.5) for r in range(6) for x in xs])
+    line = np.array([(x, 3.75 + 2.0) for x in xs])
+    f = shape.features_from_rows({"a": block, "e": line}, ["a", "e"], [1, 2], [0.0, 180.0], [60, 10], [0.9, 1.0])
+    F = dict(zip(shape.FEATURES, f[0, :len(shape.FEATURES)].tolist()))
+    assert abs(F["width_m"] - 1.5 * math.sqrt(99)) < 0.05 and abs(F["depth_m"] - 1.5 * math.sqrt(35)) < 0.05
+    assert abs(F["men_m2"] - 60 / (F["width_m"] * F["depth_m"])) < 1e-4
+    assert abs(F["skew_fwd_m"]) < 1e-4 and abs(F["skew_side_m"]) < 1e-4
+    assert abs(F["contact"] - 1 / 6) < 1e-6                    # the front rank (10 of 60) within 3.15 m
+    assert F["holes"] == 0 and F["front_holes"] == 0
+    assert abs(F["wounded"] - 0.1) < 1e-5                      # 90 % of the start's health on all 60 men
+    grid = f[0, len(shape.FEATURES):].reshape(4, 4)
+    assert abs(float(grid.sum()) - 1) < 1e-5 and float(grid[3].sum()) > 0   # the front row (index 3) holds men
+    # the rear half gone: the mass at the front, holes behind
+    f2 = shape.features_from_rows({"a": block[30:], "e": line}, ["a", "e"], [1, 2], [0.0, 180.0], [60, 10],
+                                  [0.6, 1.0])
+    assert float(f2[0, 2]) < F["depth_m"] and abs(float(f2[0, 3])) < 1e-4
+    # turned: the same numbers in its own frame
+    rot = lambda p: np.stack([p[:, 1], -p[:, 0]], 1)            # a quarter turn: facing +x is bearing 90
+    f3 = shape.features_from_rows({"a": rot(block), "e": rot(line)}, ["a", "e"], [1, 2], [90.0, 270.0], [60, 10],
+                                  [0.9, 1.0])
+    assert torch.allclose(f3, f, atol=1e-4)

@@ -395,6 +395,9 @@ def nn_arena_config(args, run_config):
         # every soldier's place every this many ticks in any mode (research: the fighters lab's replay from the
         # game's own places; a reading of all men takes ~50 ms)
         run_config["soldiers_every"] = args.soldiers_every
+    if args.soldiers_state:
+        # the readings go to the companion too (its shape features: tools/nn/fighters/shape.py, companion --shape)
+        run_config["soldiers_state"] = True
     if args.own_ai == "net":
         run_config.update(own_role=own_role, decide_ms=args.decide_ms, poll_ms=NET_POLL_MS)
         if args.enemy_ai != "game":
@@ -479,6 +482,9 @@ def main(argv=None):
     parser.add_argument("--soldiers-every", type=int,
                         help="every soldier's position every this many ticks (0: never; default: human "
                              f"{HUMAN_SOLDIERS_EVERY}, nn-arena never)")
+    parser.add_argument("--soldiers-state", action="store_true",
+                        help="nn-arena --own-ai net with --soldiers-every: each reading also to the companion (the "
+                             "state document's soldiers; the companion's shape features, --shape)")
     parser.add_argument("--army-seed", type=int,
                         help="nn-arena: a generated battle (tools/nn/armies, generate.battle(seed)): "
                              "armies of a lord and 0-19 units a side; EVAL seeds for checks")
@@ -570,6 +576,8 @@ def main(argv=None):
         parser.error("--free-speed is for the human target")
     if args.soldiers_every is not None and args.soldiers_every < 0:
         parser.error("--soldiers-every must be 0 or more")
+    if args.soldiers_state and not (args.target == "nn-arena" and args.own_ai == "net" and args.soldiers_every):
+        parser.error("--soldiers-state is for nn-arena --own-ai net with --soldiers-every N")
     if args.army_from_run is not None:
         if args.target not in ARENA_TARGETS:
             parser.error("--army-from-run is for nn-arena and human")

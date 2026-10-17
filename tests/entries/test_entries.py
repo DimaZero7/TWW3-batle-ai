@@ -501,6 +501,27 @@ class TestNnArena:
         assert final["done"] is True and final["move"] == 4   # the decision just before the end
         assert all(r["policy"] == "nn_arena_net" for r in rows)
 
+    def test_net_hands_the_soldiers_places_to_the_companion_once_when_new(self, lua, tmp_path):
+        # config.soldiers_state (tools.build nn-arena --soldiers-every N --soldiers-state): a new reading of every
+        # soldier's place goes into the next state document (soldiers), once; without it the document has none.
+        from tools.nn.companion import exchange
+        lua.execute(self.SETUP + """
+            CONFIG.own_ai, CONFIG.enemy_role, CONFIG.decide_ms, CONFIG.poll_ms = 'net', 'attack', 1000, 100
+            CONFIG.factions = {own = 'wh_main_emp_empire', enemy = 'wh2_main_skv_skaven'}
+            CONFIG.soldiers_every, CONFIG.soldiers_state = 1000, true    -- one reading only (the first tick)
+            STATE = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+        """)
+        assert "soldiers" not in exchange.read_state(tmp_path / exchange.STATE)      # move 1: nothing read yet
+        sent = []
+        for _ in range(3):                                                           # moves 2, 3, 4
+            lua.execute("for _ = 1, 10 do bm:tick(100) end")
+            doc = exchange.read_state(tmp_path / exchange.STATE)
+            sent.append(doc.get("soldiers"))
+        got = [s for s in sent if s]
+        assert len(got) == 1 and len(got[0]["units"]) == 4                          # the one reading, once
+        assert got[0]["units"][0]["xz_dm"] and {u["side"] for u in got[0]["units"]} == {1, 2}
+
     def test_net_runs_shooters_frees_idle_ones_and_gives_orders_again_after_a_rally(self, lua, tmp_path):
         # The gate's in-game findings (01.10.2026): a ranged attack must pass the run flag; a unit that
         # routed and rallied gets its order again; a shooter that cannot hit its target (the target in

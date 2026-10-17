@@ -284,6 +284,7 @@ companion then simply reads again when the JSON is not complete.
 | `units` | Every unit: the fields of the recorded `nn_sample` ([nn_arena](entries.md#nn_arena)) plus `side`, `key` (unit key), `v` (visible to the other side) and `fx` (phase keys active on it; missing when the card cannot be read); without the recording-only `sv`, `pcr`, `phr`, `mge` (and the sample's `bop`), which `nn_arena` reads for the simulator's calibration, not for the network |
 | `abilities_used` | `{unit: {ability key: battle ms of its last use by the bridge}}` (`{}` before any) |
 | `winds` | The own army's Winds of Magic `{cur, rate, res}`: `army:winds_of_magic_current()`, `winds_of_magic_remaining_recharge_rate()` and the reserve `winds_of_magic_reserve()` (magic probe 1: it answers in battle; `apps.battle.winds`) - the network sees the current pool and the reserve; the enemy's winds a player does not see, so they are not there. No field when the game gives none |
+| `soldiers` | Only with `soldiers_state` (build `--soldiers-every N --soldiers-state`): the latest reading of every soldier's place of both sides `{t, units = [{n, side, xz_dm}]}` (`observer_adapter`), once - when it is new. The companion with `--shape` computes the units' shape from it (`tools/nn/fighters/shape.py` `unit_features`); the network does not see it yet |
 
 **Orders** `tww3_bai_nn_orders.txt` (companion → game), text, one line per unit:
 

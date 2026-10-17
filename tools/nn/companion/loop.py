@@ -36,7 +36,7 @@ class Brain:
     observation is that side's own (its frame, its units own, the other side's as it sees them), as the
     simulator's self-play gives either side to the network."""
 
-    def __init__(self, actor, greedy=False, temperature=1.0, side=SIDE):
+    def __init__(self, actor, greedy=False, temperature=1.0, side=SIDE, shape=False):
         assert side in (1, 2), side
         self.actor, self.greedy, self.temperature, self.side = actor, greedy, temperature, side
         self.battle, self.memory, self.h = None, None, None
@@ -46,6 +46,9 @@ class Brain:
         self.breakoff = None                 # the melee exit's clocks (exchange.Breakoff), per battle
         self.commit = {}                     # v2: the commitment's state (tools/nn/model/commit.py), per battle
         self.before = None                   # (batch, move, the orders in force before that move's answer)
+        self.shape = shape                   # --shape: the units' shape features from the soldiers' places
+        self.shape_last = None               # (t s, [N, F] tensor) of the last reading (not the network's input yet)
+        self.shape_ms = None                 # what the last computation took
 
     def orders_before(self, batch, move):
         """The network's orders in force as the simulator's opponent sees them at decision `move`: before
@@ -73,6 +76,9 @@ class Brain:
         self.breakoff.update(state, self.given)          # the melee exit's window over: the order in force holds
         self.before = (doc["batch"], doc["move"], dict(self.given))
         self.points = exchange.order_points(state, b.names, b.side, self.given, self.points, own=me)
+        self.shape_ms = None
+        if self.shape and doc.get("soldiers"):
+            self.shape_last, self.shape_ms = shape_features(doc["soldiers"], b, state)
         self.mv = exchange.keep_still(self.memory, state, self.mv)
         obs, self.memory = ob.observe(state, b.setup, me, self.memory)
         orders, self.h, _, _ = decide.act(self.actor, obs, b.setup, self.h, self.greedy, self.temperature,
@@ -88,6 +94,17 @@ class Brain:
         uses = exchange.ability_list(b.names, b.side, orders.ability[0].cpu().numpy(), b.slots, own=me,
                                      cast=orders.cast_target[0].cpu().numpy())
         return out, (time.perf_counter() - t0) * 1000, uses
+
+
+def shape_features(soldiers, b, state):
+    """((t s, [N, F]) the units' shape (tools/nn/fighters/shape.unit_features) from the bridge's soldiers' places
+    ({t, units = [{n, side, xz_dm}]}), and the ms it took). Read and computed only: the network does not see it yet."""
+    from tools.nn.fighters import shape
+    t0 = time.perf_counter()
+    rows = {u["n"]: np.asarray(u["xz_dm"], float).reshape(-1, 2) / 10.0 for u in soldiers.get("units") or []
+            if u.get("xz_dm")}
+    f = shape.features_from_rows(rows, b.names, b.side, state["b"][0], b.shape["men0"], state["hp"][0])
+    return (soldiers.get("t", 0) / 1000.0, f), (time.perf_counter() - t0) * 1000
 
 
 def describe(orders, limit=4):
@@ -110,8 +127,9 @@ BUSY_S = 5.0     # after a state, look for the next one every poll_s; later (loa
 class Seat:
     """One side the companion answers: its state and orders files, who decides, its log and line prefix."""
 
-    def __init__(self, state, orders, decide, log=None, label=""):
+    def __init__(self, state, orders, decide, log=None, label="", owner=None):
         self.state, self.orders, self.decide, self.log, self.label = Path(state), Path(orders), decide, log, label
+        self.owner = owner              # the Brain answering (its shape_ms in the log)
         first = exchange.read_state(self.state)
         self.last = (first["batch"], first["move"]) if first else None   # a file of an earlier run: not answered
         self.done = False
@@ -127,7 +145,7 @@ def run(game, brain, log=None, poll_s=0.005, idle_poll_s=0.1, exit_on_done=False
     a long wait (idle_exit_s 0: forever)."""
     seats = []
     if brain is not None:
-        seats.append(Seat(Path(game) / exchange.STATE, Path(game) / exchange.ORDERS, brain.decide, log))
+        seats.append(Seat(Path(game) / exchange.STATE, Path(game) / exchange.ORDERS, brain.decide, log, owner=brain))
     if isinstance(enemy, Brain):
         seats.append(Seat(Path(game) / exchange.ENEMY_STATE, Path(game) / exchange.ENEMY_ORDERS, enemy.decide,
                           enemy_log, "enemy "))
@@ -163,9 +181,13 @@ def run(game, brain, log=None, poll_s=0.005, idle_poll_s=0.1, exit_on_done=False
                 f"turn {turn_ms:5.1f} ms  | {exchange.summary(orders)} | {describe(orders)}{used}")
             if seat.log:
                 with open(seat.log, "a", encoding="utf-8", newline="\n") as f:
-                    f.write(json.dumps({"batch": doc["batch"], "move": doc["move"], "t": doc.get("t"),
-                                        "think_ms": round(think_ms, 2), "turn_ms": round(turn_ms, 2),
-                                        "write_attempts": attempts, "orders": orders, "abilities": uses}) + "\n")
+                    row = {"batch": doc["batch"], "move": doc["move"], "t": doc.get("t"),
+                           "think_ms": round(think_ms, 2), "turn_ms": round(turn_ms, 2),
+                           "write_attempts": attempts, "orders": orders, "abilities": uses}
+                    shape_ms = getattr(seat.owner, "shape_ms", None)
+                    if shape_ms is not None:
+                        row["shape_ms"] = round(shape_ms, 2)     # --shape: the shape features' cost
+                    f.write(json.dumps(row) + "\n")
         if exit_on_done and all(seat.done for seat in seats[:1]):
             return
         if not new:
@@ -190,6 +212,10 @@ def main(argv=None):
     parser.add_argument("--enemy-script", help="also command the enemy side by this simulator script "
                                                "(tools/nn/train/opponents.py, e.g. ai_like): nn-arena --enemy-ai; "
                                                "'net': by the network itself (its own memory, side 2's view)")
+    parser.add_argument("--shape", action="store_true",
+                        help="the units' shape features from the soldiers' places in the state (tools.build nn-arena "
+                             "--soldiers-every N --soldiers-state): computed and timed (shape_ms in the log), not an "
+                             "input of the network yet")
     parser.add_argument("--no-own", action="store_true",
                         help="do not answer our side's bridge: a human plays side 1 (tools.build human --enemy-ai)")
     parser.add_argument("--enemy-log", help="append every enemy decision as a JSON line to this file "
@@ -218,7 +244,8 @@ def main(argv=None):
         print(f"companion: the enemy side by {who}; watching "
               f"{Path(args.game) / exchange.ENEMY_STATE}")
     try:
-        run(args.game, None if args.no_own else Brain(actor, args.greedy, args.temperature), args.log,
+        run(args.game, None if args.no_own else Brain(actor, args.greedy, args.temperature, shape=args.shape),
+            args.log,
             exit_on_done=args.exit_on_done,
             idle_exit_s=args.idle_exit, enemy=enemy, enemy_log=enemy_log)
     except KeyboardInterrupt:

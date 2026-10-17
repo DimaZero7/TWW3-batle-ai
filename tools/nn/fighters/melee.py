@@ -39,7 +39,7 @@ def armour_roll(base, ap, armour, resist, gen, shape):
     return ((ap + base * (1 - blocked)) * (1 - resist.clamp(max=0.9))).clamp(min=1.0)
 
 
-def gates(u, params, permit, pw, charge_now):
+def gates(u, params, permit, pw, charge_now, incidental=None):
     """[B, i, j] the chance a blow of i on j lands (the simulator's unit-level rates, module docstring) and [B, i, j]
     the charge reflection's damage multiplier."""
     cc = params.sim["contact"]
@@ -58,7 +58,7 @@ def gates(u, params, permit, pw, charge_now):
     order_t = u["order_target"][:, :, None]
     busy = (u["order_kind"][:, :, None] == O.ATTACK) & (order_t >= 0) & (order_t != slot)
     g = torch.where(single_j & ~single_i & busy, g * float(cc.get("lord_incidental", 1.0)), g)
-    inc = torch.full_like(g, float(cc.get("unit_incidental", 1.0)))
+    inc = torch.full_like(g, float(cc.get("unit_incidental", 1.0) if incidental is None else incidental))
     if cc.get("fresh_incidental") is not None and "order_s" in u:
         fresh = (u["order_s"] < float(R.get("melee_breakoff_secs", 0.0)))[:, :, None]
         inc = torch.where(fresh, float(cc["fresh_incidental"]), inc)
@@ -181,7 +181,7 @@ def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
     gen = F.gen
     hit = fire & (torch.rand((B, M), generator=gen, device=p.device) < p)
     # the unit-level share of blows that land, the reflection
-    g, reflect = gates(u, params, permit, pw, charge_now)
+    g, reflect = gates(u, params, permit, pw, charge_now, incidental=lab["melee"].get("unit_incidental"))
     gp = (F.uid * N + tu)
     g_m = g.reshape(B, N * N).gather(1, gp) * float(lab["melee"].get("blow_share", 1.0))
     refl = reflect.reshape(B, N * N).gather(1, gp)

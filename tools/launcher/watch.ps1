@@ -78,6 +78,7 @@ $dockerArgs = "run --rm --init --name $container -v `"${repo}:/repo`" -v `"${gam
     "-e PYTHONUNBUFFERED=1 snake-ai-trainer python -m tools.nn.companion --game /game --log /repo/$logRel"
 if ($Checkpoint) { $dockerArgs += ' --checkpoint /repo/' + ($Checkpoint -replace '\\', '/') }
 if ($Greedy) { $dockerArgs += ' --greedy' }
+if ($manifest.config.soldiers_state) { $dockerArgs += ' --shape' }   # the soldiers' places come: the shape features
 if ($enemyScript) { $dockerArgs += ' --enemy-script ' + $enemyScript }
 if ($human) { $dockerArgs += ' --no-own' }   # a human plays side 1: nobody answers its bridge
 $runs = Join-Path $repo ('build\' + $Target + '\runs')

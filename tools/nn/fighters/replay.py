@@ -18,7 +18,7 @@ from tools import config as project
 
 
 def run(runs, out, rect=False, copies=4, device="cpu", chunk=12, seed=0, log=print, sets=(), places=False,
-        geometry=False, lab=()):
+        geometry=False, lab=(), shape_log=False):
     from tools.nn.sim import stepreplay
     if rect:
         stepreplay.run(runs, out, H=10, copies=copies, device=device, chunk=chunk, workers=1, log=log, sets=sets)
@@ -52,6 +52,9 @@ def run(runs, out, rect=False, copies=4, device="cpu", chunk=12, seed=0, log=pri
             stepreplay._batch = batch
             if geometry:
                 h.listeners.append(lambda st, F: _geometry(st, F, copies, geo))
+            shapes = {}
+            if shape_log:
+                h.listeners.append(lambda st, F: _shape(st, F, copies, h, shapes))
             if places:
                 from tools.nn.fighters.places import installed as places_installed
                 with places_installed():
@@ -66,6 +69,14 @@ def run(runs, out, rect=False, copies=4, device="cpu", chunk=12, seed=0, log=pri
     finally:
         stepreplay._params = orig
         stepreplay._batch = orig_batch
+    if shape_log:
+        import numpy as np
+        Path(out).mkdir(parents=True, exist_ok=True)
+        for run, d in shapes.items():
+            rows = sorted(d["f"])
+            np.savez(Path(out) / f"{run}_shape.npz", rows=np.array(rows), feats=np.stack([d["f"][r] for r in rows]),
+                     names=np.array(d["names"]))
+        log(f"shape features at the windows' 5th and 10th second: {Path(out)}/<run>_shape.npz")
     if geometry:
         share = geo["inside"] / max(geo["near"], 1)
         log(f"lab geometry: men within reach of an enemy {geo['near']}, nearest enemy inside their own formation "
@@ -74,6 +85,30 @@ def run(runs, out, rect=False, copies=4, device="cpu", chunk=12, seed=0, log=pri
             + f"; swings front / flank / rear {geo['blows_front_flank_rear']}")
         Path(out).mkdir(parents=True, exist_ok=True)
         (Path(out) / "geometry.json").write_text(json.dumps(dict(geo, inside_share=share)), encoding="utf-8")
+
+
+def _shape(st, F, copies, h, shapes):
+    """shape.unit_features of the lab's men (copy mean) at the 5th and the 10th second of each window (the replay from
+    the places: h.on_reset knows the batch's runs and their slots)."""
+    import numpy as np
+    from tools.nn.fighters import shape, state as S
+    t = float(st.t.min())
+    if abs(t - round(t)) > 1e-6 or round(t) % 5 or h.on_reset is None:
+        return
+    row = int(round(t))
+    u = st.u
+    px, pz = S.positions(F, u)
+    live = S.alive(F)
+    feats = shape.unit_features(px, pz, F.uid, live, S.ugather(u, F, "side").long(), u["b"], u["men0"], u["hp"],
+                                u["men"].shape[1]).cpu().numpy()
+    for k, r in enumerate(h.on_reset.runs):
+        bs = slice(k * copies, (k + 1) * copies)
+        if bool(st.done[bs].all()):
+            continue
+        d = shapes.setdefault(r["name"], {"f": {}, "names": [None] * feats.shape[1]})
+        for nm, n in r["slot"].items():
+            d["names"][n] = nm
+        d["f"][row] = feats[bs].mean(0)
 
 
 def _geometry(st, F, copies, geo, every_steps=4):
@@ -126,6 +161,8 @@ def main(argv=None):
     ap.add_argument("--places", action="store_true", help="each window from the game's recorded soldiers' places")
     ap.add_argument("--geometry", action="store_true", help="the lab's men-in-reach geometry (soldiersdata.geometry)")
     ap.add_argument("--lab", action="append", default=[], help="section.key=json over tools/nn/fighters/lab.json")
+    ap.add_argument("--shape-log", action="store_true",
+                    help="with --places: the lab's shape.unit_features at each window's 5th and 10th second")
     a = ap.parse_args(argv)
     names = list(a.runs)
     if a.runs_from:
@@ -134,7 +171,7 @@ def main(argv=None):
         names = names[:a.limit]
     runs = [project.BUILD / "nn-arena" / "runs" / n for n in names]
     run(runs, a.out, rect=a.rect, copies=a.copies, device=a.device, chunk=a.chunk, sets=a.set, places=a.places,
-        geometry=a.geometry, lab=a.lab)
+        geometry=a.geometry, lab=a.lab, shape_log=a.shape_log)
 
 
 if __name__ == "__main__":

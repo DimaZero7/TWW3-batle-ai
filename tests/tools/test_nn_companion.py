@@ -338,6 +338,25 @@ class TestCompanion:
     def need_torch(self):
         pytest.importorskip("torch")
 
+    def test_shape_features_from_the_bridges_soldiers_only_with_the_switch(self):
+        # --shape: the state's soldiers' places become shape.unit_features (read and timed; not an input yet)
+        from tools.nn.companion import loop, policy
+        from tools.nn.fighters import shape
+        block = [v for z in range(5) for x in range(20) for v in (-1750 + x * 15, z * 15)]     # dm, 20 x 5
+        soldiers = {"t": 4000, "units": [{"n": "own_spear_1", "side": 1, "xz_dm": block},
+                                         {"n": "enemy_spear_1", "side": 2, "unavailable": "call_failed"}]}
+        doc = dict(state_doc(), soldiers=soldiers)
+        off = loop.Brain(policy.fresh(seed=1))
+        off.decide(doc)
+        assert off.shape_last is None and off.shape_ms is None
+        on = loop.Brain(policy.fresh(seed=1), shape=True)
+        on.decide(doc)
+        t, f = on.shape_last
+        assert t == 4.0 and tuple(f.shape) == (4, len(shape.FEATURES) + 16) and on.shape_ms > 0
+        assert float(f[1, 0]) > 0 and float(f[0].abs().sum()) == 0          # the spearmen's block; the lord unread
+        on.decide(dict(state_doc(), move=2))                                 # no new reading: nothing computed
+        assert on.shape_ms is None and on.shape_last[0] == 4.0
+
     def test_a_decision_gives_every_own_unit_a_valid_order(self):
         from tools.nn.companion import loop, policy
         brain = loop.Brain(policy.fresh(seed=1))

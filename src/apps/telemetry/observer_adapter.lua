@@ -15,7 +15,8 @@
 --                  ValueBase a row, plus CCO CharacterRank, HasCharacterRank, ExperienceLevel,
 --                  HealthMax) on change, so an ability's or a skill's effect on the stats shows;
 --   soldiers()     every soldiers_every-th call: nn_soldiers, every soldier's x, z in decimetres
---                  of every unit (CCO ManList; ~50 ms for 2000 men, so not every second).
+--                  of every unit (CCO ManList; ~50 ms for 2000 men, so not every second); the last
+--                  reading stays in self.last_soldiers ({t, units}: the network's bridge sends it on).
 local services = require('apps.bridge.services')
 local card = require('apps.units.card_adapter')
 local formation = require('apps.units.formation_adapter')
@@ -148,7 +149,8 @@ function M.new(opts)
                 rows[#rows + 1] = {n = it.name, side = it.side, unavailable = men.reason}
             end
         end
-        opts.emit('nn_soldiers', {t = opts.now_ms(), units = rows})
+        self.last_soldiers = {t = opts.now_ms(), units = rows}
+        opts.emit('nn_soldiers', self.last_soldiers)
     end
 
     return self

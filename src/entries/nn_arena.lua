@@ -31,7 +31,9 @@
 -- and the decision interval stays decide_ms of battle time at any speed.
 -- config.observe = true adds the human's observer (apps.telemetry.observer_adapter) to any mode, without
 -- the soldiers; config.soldiers_every = n > 0 adds it with the soldiers (nn_soldiers every n ticks; research only:
--- the fighters lab's replay from the game's own places, tools/nn/fighters); config.cards = true also records every unit's card on change (nn_card), both sides
+-- the fighters lab's replay from the game's own places, tools/nn/fighters); config.soldiers_state = true (own_ai
+-- 'net', with soldiers_every) also hands each new reading to the companion in the state document (soldiers: the
+-- shape of the units, tools/nn/fighters/shape.py; companion --shape); config.cards = true also records every unit's card on change (nn_card), both sides
 -- (the lord against the game's AI: tools/nn/lord_ai.py).
 -- Each side may have its own army (tools/nn/scenario.py: named arenas).
 -- config.skirmish (with own_ai 'net'): 'off' turns the game's skirmish mode off for every unit a bridge commands
@@ -322,6 +324,9 @@ function M.main(bm, config, globals)
     local function net_start()
         state.net = bridge.start({army = state.own_army, own = state.sides[1], enemies = state.sides[2],
             vector = vec, rows = shared_rows, emit = emit, cco = cco, skirmish = config.skirmish,
+            soldiers = config.soldiers_state and function()
+                return state.observer and state.observer.last_soldiers or nil
+            end or nil,
             now_ms = function() return bm:time_elapsed_ms() - started_ms end,
             model_ms = function() return bm:time_elapsed_ms() end,
             meta = {batch = state.batch, factions = config.factions, decide_ms = config.decide_ms,
