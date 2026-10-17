@@ -480,7 +480,7 @@ NEW_EFFECTS = mfx.SIZE        # the innate effects' columns (appended after the 
 NEW_VOLLEY = len(ob.VOLLEY)   # the volley input, appended after the effects (03.10.2026)
 NEW_ARC = len(ob.ARC)         # the fire arc, appended after the volley input (07.10.2026)
 NEW_ORDER = len(ob.ORDER)     # the order in force, appended after the fire arc (07.10.2026)
-NEW_WEAPON = len(ob.WEAPON) + len(ob.AIM) + len(ob.RECEIVED) + len(ob.MAGIC)   # the volley's shots and magical
+NEW_WEAPON = len(ob.WEAPON) + len(ob.AIM) + len(ob.RECEIVED) + len(ob.MAGIC) + len(ob.SHAPE)   # the volley's shots and magical
 #                                       attacks (11.10.2026), the aim and the effects from others (13.10), magic (16.10)
 T0 = ob.TOKEN - NEW_WEAPON - NEW_ORDER - NEW_VOLLEY - NEW_ARC    # the token before the volley input
 T1 = ob.TOKEN - NEW_WEAPON - NEW_ORDER - NEW_ARC       # the token before the fire arc
@@ -890,7 +890,7 @@ def test_the_fire_arc_input_is_the_passports_arc_on_both_sides():
     col = obs.tokens[..., ob.INDEX["fire_arc"]]
     want = {"wh2_main_skv_inf_night_runners_0": 1.0, "wh2_dlc13_emp_inf_archers_0": 30 / 180,
             "wh_main_emp_inf_swordsmen": 0.0, "wh_main_emp_inf_handgunners": 30 / 180}
-    assert ob.NAMES[T1] == "fire_arc" and ob.NAMES[T1 + 1:] == ob.ORDER + ob.WEAPON + ob.AIM + ob.RECEIVED + ob.MAGIC
+    assert ob.NAMES[T1] == "fire_arc" and ob.NAMES[T1 + 1:] == ob.ORDER + ob.WEAPON + ob.AIM + ob.RECEIVED + ob.MAGIC + ob.SHAPE
     for b, keys in enumerate(setup.keys):
         for i, k in enumerate(keys):
             assert col[b, i] == pytest.approx(want[k], abs=1e-6), (b, i, k)     # own (0-3) and enemy (4-7)

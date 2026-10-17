@@ -46,7 +46,7 @@ class Near:
 
 
 class Hook:
-    def __init__(self, lab=None, params=None, seed=0):
+    def __init__(self, lab=None, params=None, seed=0, shape=False):
         self.lab = lab or LAB
         self.params = params
         self.seed = seed
@@ -60,6 +60,7 @@ class Hook:
         self.orig = {}
         self.landings = None
         self.on_reset = None         # f(F, u, row) at a step replay's window start (places.FromRecording)
+        self.shape = shape           # the units' shape for the network after every step (u shape / shape_ok)
         self.reset_every = 10
         self.last_reset = None
 
@@ -70,6 +71,8 @@ class Hook:
         self.F = S.build(st, params, seed=self.seed, start_phase=bool(self.lab['melee'].get('start_phase')))
         self.x_last, self.z_last = st.u["x"].clone(), st.u["z"].clone()
         self.last_reset = None
+        if self.shape:
+            self._shape(st)
 
     def _pre(self, st, params, dt):
         u = st.u
@@ -121,10 +124,24 @@ class Hook:
         F.dz = torch.where(lying, F.dz - (u["z"] - self.z_last).gather(1, F.uid), F.dz)
         MV.step(F, u, params, self.lab, dt, self.near)
         FK.tick(F, dt)
+        if self.shape:
+            self._shape(st)
         self.x_last, self.z_last = u["x"].clone(), u["z"].clone()
         self.stats["steps"] += 1
         for f in self.listeners:
             f(st, F)
+
+    def _shape(self, st):
+        """The units' shape from their men (fighters/shape.unit_features) into the state: u shape [B, N, 25],
+        shape_ok [B, N] (a unit with living men) - the observation's SHAPE (tools/nn/model/observation.py)."""
+        from tools.nn.fighters import shape
+        u, F = st.u, self.F
+        px, pz = S.positions(F, u)
+        live = S.alive(F)
+        N = u["men"].shape[1]
+        u["shape"] = shape.unit_features(px, pz, F.uid, live, S.ugather(u, F, "side").long(), u["b"], u["men0"],
+                                         u["hp"], N)
+        u["shape_ok"] = (S.unit_count(F, live, N) > 0) & (u["side"] > 0)
 
     # ---- the patched functions ----
     def step(self, st, orders, params=None, dt=None):
@@ -210,11 +227,12 @@ HOOK = None
 
 
 @contextlib.contextmanager
-def installed(lab=None, params=None, seed=0):
-    """Patch the simulator's functions for the State built inside (module docstring); yields the Hook."""
+def installed(lab=None, params=None, seed=0, shape=False):
+    """Patch the simulator's functions for the State built inside (module docstring); yields the Hook. shape: the units'
+    shape for the network after every step (Hook._shape: the state's shape / shape_ok, observation SHAPE)."""
     global HOOK
     from tools.nn.sim import battle, geometry, magic, melee, missile, morale, scenario
-    h = Hook(lab, params, seed)
+    h = Hook(lab, params, seed, shape=shape)
     h.orig = {"step": battle.step, "contact_limit": geometry.contact_limit, "strikes": melee.strikes,
               "volley": missile.volley, "casualty_windows": morale.casualty_windows, "build": scenario.build,
               "magic_strikes": magic.strikes, "bombard": magic.bombard}

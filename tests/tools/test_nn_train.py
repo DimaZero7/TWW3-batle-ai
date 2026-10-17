@@ -1200,7 +1200,8 @@ class TestAbilities:
         assert torch.equal(back["tokens"], full["tokens"])
         cback = rollout.full_obs(step["critic_obs"], static)
         assert set(cback) == set(c) and all(torch.equal(cback[k], c[k]) for k in c)
-        assert full["tokens"][..., kept:].any() and c["tokens"][..., kept:].any()        # (the columns were not 0)
+        rx = slice(ob.INDEX[ob.RECEIVED[0]], ob.INDEX[ob.RECEIVED[-1]] + 1)               # the RECEIVED columns
+        assert full["tokens"][..., rx].any() and c["tokens"][..., rx].any()              # (the columns were not 0)
         assert torch.all((step["action"].ability == -1) | full["abil_ok"].gather(
             2, step["action"].ability.clamp(min=0)[..., None])[..., 0])
 

@@ -47,7 +47,7 @@ class Brain:
         self.commit = {}                     # v2: the commitment's state (tools/nn/model/commit.py), per battle
         self.before = None                   # (batch, move, the orders in force before that move's answer)
         self.shape = shape                   # --shape: the units' shape features from the soldiers' places
-        self.shape_last = None               # (t s, [N, F] tensor) of the last reading (not the network's input yet)
+        self.shape_last = None               # (t s, [N, F] tensor, [N] read) of the last reading: the observation's SHAPE
         self.shape_ms = None                 # what the last computation took
 
     def orders_before(self, batch, move):
@@ -66,6 +66,7 @@ class Brain:
             self.battle, self.memory, self.h = exchange.battle(doc), None, None
             self.given, self.points, self.moved, self.commit = {}, {}, None, {}
             self.mv = None
+            self.shape_last = None
             self.breakoff = exchange.Breakoff(self.battle.names, self.battle.side, self.battle.shape, own=self.side)
         b, me = self.battle, self.side
         state = exchange.arrays(doc, b.names, b.slots, own=me)
@@ -79,6 +80,10 @@ class Brain:
         self.shape_ms = None
         if self.shape and doc.get("soldiers"):
             self.shape_last, self.shape_ms = shape_features(doc["soldiers"], b, state)
+        if self.shape and self.shape_last is not None:
+            # the latest reading (the bridge sends one every --soldiers-every ticks): the observation's SHAPE
+            state["shape"] = self.shape_last[1].numpy()[None]
+            state["shape_ok"] = self.shape_last[2][None]
         self.mv = exchange.keep_still(self.memory, state, self.mv)
         obs, self.memory = ob.observe(state, b.setup, me, self.memory)
         orders, self.h, _, _ = decide.act(self.actor, obs, b.setup, self.h, self.greedy, self.temperature,
@@ -97,14 +102,15 @@ class Brain:
 
 
 def shape_features(soldiers, b, state):
-    """((t s, [N, F]) the units' shape (tools/nn/fighters/shape.unit_features) from the bridge's soldiers' places
-    ({t, units = [{n, side, xz_dm}]}), and the ms it took). Read and computed only: the network does not see it yet."""
+    """((t s, [N, F], [N] bool: a unit read) the units' shape (tools/nn/fighters/shape.unit_features) from the
+    bridge's soldiers' places ({t, units = [{n, side, xz_dm}]}), and the ms it took): the observation's SHAPE."""
     from tools.nn.fighters import shape
     t0 = time.perf_counter()
     rows = {u["n"]: np.asarray(u["xz_dm"], float).reshape(-1, 2) / 10.0 for u in soldiers.get("units") or []
             if u.get("xz_dm")}
     f = shape.features_from_rows(rows, b.names, b.side, state["b"][0], b.shape["men0"], state["hp"][0])
-    return (soldiers.get("t", 0) / 1000.0, f), (time.perf_counter() - t0) * 1000
+    ok = np.array([n in rows and len(rows[n]) > 0 for n in b.names])
+    return (soldiers.get("t", 0) / 1000.0, f, ok), (time.perf_counter() - t0) * 1000
 
 
 def describe(orders, limit=4):
@@ -213,9 +219,9 @@ def main(argv=None):
                                                "(tools/nn/train/opponents.py, e.g. ai_like): nn-arena --enemy-ai; "
                                                "'net': by the network itself (its own memory, side 2's view)")
     parser.add_argument("--shape", action="store_true",
-                        help="the units' shape features from the soldiers' places in the state (tools.build nn-arena "
-                             "--soldiers-every N --soldiers-state): computed and timed (shape_ms in the log), not an "
-                             "input of the network yet")
+                        help="the units' shape from the soldiers' places in the state (tools.build nn-arena "
+                             "--soldiers-every N --soldiers-state): the observation's SHAPE (a network trained without "
+                             "it gives it zero weight); its cost shape_ms in the log")
     parser.add_argument("--no-own", action="store_true",
                         help="do not answer our side's bridge: a human plays side 1 (tools.build human --enemy-ai)")
     parser.add_argument("--enemy-log", help="append every enemy decision as a JSON line to this file "

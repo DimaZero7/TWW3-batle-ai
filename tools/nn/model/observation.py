@@ -50,6 +50,13 @@ The rule: the AI sees only what a human player sees.
   the caster walks into range, pairs.py shows how far). MAGIC (the token's last columns; own units and seen enemies):
   casting now (the state's `cast_now`: winding up, the staff glows - not which spell nor where) and struck by a spell
   (`bm_hit`: spell projectiles fell on it in the last step - the strikes are seen once they fall). Missing fields: 0.
+* The unit's shape (SHAPE, the token's last columns, 17.10.2026, S27; own units and seen enemies: the soldiers are seen
+  on the field): tools/nn/fighters/shape.unit_features from the soldiers' places - men per m², width and depth, the
+  mass off the middle forward and sideways, the share within an enemy's reach, empty cells of the unit's 4 x 4 box and
+  of its front row, wounds (from health and men, both shown on the card), the 4 x 4 density map - scaled (SHAPE_SCALE),
+  and shape_known (a reading exists: the fighters lab in the simulator, the companion's --shape in the game). The
+  state's `shape` [B, N, 25] and `shape_ok` [B, N]; without them (the rectangle simulator, older recordings) zeros and
+  shape_known 0. Older checkpoints: zero weights (they play as before).
 * Effects on me from others (RECEIVED, the token's last columns, 13.10.2026; own units and seen enemies: the game lists
   them among the unit's active effects): the stats the abilities of other units lay on the unit now - a friend's aura
   or cast, an enemy's - summed as the passports' allies group (an enemy's: its enemies group), abilities.received;
@@ -155,15 +162,25 @@ RECEIVED = abilities.RECEIVED_NAMES
 # Then MAGIC (16.10.2026, own units and seen enemies; older checkpoints: zero weights): casting now, struck by a spell
 # (module doc).
 MAGIC = ("casting_now", "spell_strike")
+# Then SHAPE (17.10.2026, own units and seen enemies; older checkpoints: zero weights): the unit's shape from its
+# soldiers' places (module doc): known, the 9 numbers of tools/nn/fighters/shape.FEATURES, the 4 x 4 map.
+SHAPE_FEATURES = ("men_m2", "width_m", "depth_m", "skew_fwd_m", "skew_side_m", "contact", "holes", "front_holes",
+                  "wounded")
+SHAPE_GRID = 16
+SHAPE = ("shape_known",) + tuple(f"shape_{n}" for n in SHAPE_FEATURES) + tuple(f"shape_cell{i}" for i in
+                                                                                  range(SHAPE_GRID))
+# the raw numbers' scales: men per m² x 2 (~0.5), metres / 30 (width, depth) and / 10 (the offsets), shares as they
+# are, a cell's share x 4 (an even spread 1 / 16 -> 0.25)
+SHAPE_SCALE = (2.0, 1 / 30, 1 / 30, 0.1, 0.1, 1.0, 1.0, 1.0, 1.0) + (4.0,) * SHAPE_GRID
 NAMES = (tuple(n for n, _ in DYNAMIC) + FLAGS + tuple(f"passport_{i}" for i in range(passport.SIZE)) + effects.NAMES
-         + VOLLEY + ARC + ORDER + WEAPON + AIM + RECEIVED + MAGIC)
+         + VOLLEY + ARC + ORDER + WEAPON + AIM + RECEIVED + MAGIC + SHAPE)
 INDEX = {n: i for i, n in enumerate(NAMES)}
 TOKEN = len(NAMES)
 # Effect pairs of the tokens of trained checkpoints before 11.10.2026 (14 effects, no WEAPON): old_columns maps them.
 OLD_EFFECTS = (14,)
 # Column groups appended at the token's end since the new units (11.10.2026), oldest first: a token without the last
 # of them keeps its columns where they are (old_columns), zeros (zero weights) for the missing ones.
-TAIL = (AIM, RECEIVED, MAGIC)
+TAIL = (AIM, RECEIVED, MAGIC, SHAPE)
 
 
 def old_columns(width):
@@ -480,7 +497,8 @@ def observe(state, setup, side, memory=None, full=False):
     rx = _received(m, state, S, S.present if full else (own | sees), xs)
     shown = S.present if full else (own | sees)
     magic = m.stack([m.where(shown, _f(m, _field(state, k, xs) > 0), xs * 0) for k in ("cast_now", "bm_hit")], -1)
-    tokens = (_cat(m, [dyn, _f(m, S.passport), fx, late, arc[..., None], order, weapon, aim, rx, magic], -1)
+    form = _shape(m, state, shown, xs)
+    tokens = (_cat(m, [dyn, _f(m, S.passport), fx, late, arc[..., None], order, weapon, aim, rx, magic, form], -1)
               * _f(m, S.present)[..., None])
 
     attend = S.present & ~dead & ~(own & ~alive)
@@ -509,6 +527,19 @@ def observe(state, setup, side, memory=None, full=False):
     abil, abil_ok, abil_idx = _abilities(m, state, S, own, sees, ctrl, full, xs, fx_on, target_ok)
     return Obs(_f(m, tokens), _f(m, ctx), own, attend, ctrl, target_ok, _f(m, pos), fr, side,
                abil, abil_ok, abil_idx), new
+
+
+def _shape(m, state, shown, like):
+    """[B, N, len(SHAPE)] the units' shape (module doc): known (the state's shape_ok and shown: own units, seen
+    enemies), then the state's shape [B, N, 25] x SHAPE_SCALE where known; zeros without them."""
+    v, ok = state.get("shape"), state.get("shape_ok")
+    if v is None or ok is None:
+        return m.stack([like * 0] * len(SHAPE), -1)
+    known = shown & (_f(m, ok) > 0.5)
+    scale = SHAPE_SCALE if m is np else m.as_tensor(SHAPE_SCALE, device=like.device)
+    vals = _f(m, v) * scale
+    vals = m.where(known[..., None], vals, vals * 0)
+    return _cat(m, [_f(m, known)[..., None], vals], -1)
 
 
 def _winds(m, state, own, like):

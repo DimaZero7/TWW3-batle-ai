@@ -220,12 +220,14 @@ def test_the_simulator_marks_the_abilities_of_others():
     assert torch.is_tensor(rx)
 
 
+CUT = ob.INDEX[ob.RECEIVED[0]]     # the token a network saved before 13.10.2026 knew: up to RECEIVED
+
+
 def _old_view(o):
     """The observation as a network saved before 13.10.2026 read it: no RECEIVED, no on now, its 3 slots only."""
     import torch
     out = dict(o)
-    out["tokens"] = torch.cat([o["tokens"][..., :ob.TOKEN - len(ob.RECEIVED)],
-                               torch.zeros_like(o["tokens"][..., ob.TOKEN - len(ob.RECEIVED):])], -1)
+    out["tokens"] = torch.cat([o["tokens"][..., :CUT], torch.zeros_like(o["tokens"][..., CUT:])], -1)
     seen = mab.legacy(o["abil"][..., 0] > 0.5)
     abil = torch.where(seen[..., None], o["abil"], torch.zeros_like(o["abil"]))
     abil[..., mab.STATE_INDEX["on_now"]] = 0
@@ -250,7 +252,7 @@ def test_an_older_network_acts_as_it_did(preset):
     sd = {k: v for k, v in trained.state_dict().items() if not k.startswith("ability_extra.")}
     for k in ("abilities.net.0.weight", "heads.ability_k.0.weight"):
         sd[k] = sd[k][:, :mab.OLD_SIZE].clone()   # saved before the new columns
-    sd["encoder.unit.0.weight"] = sd["encoder.unit.0.weight"][:, :ob.TOKEN - len(ob.RECEIVED)].clone()
+    sd["encoder.unit.0.weight"] = sd["encoder.unit.0.weight"][:, :CUT].clone()
     new = policy.Actor(cfg).eval()
     missing, _ = new.load_state_dict(sd)
     assert {k.split(".")[0] for k in missing} == {"ability_extra"}
@@ -261,7 +263,7 @@ def test_an_older_network_acts_as_it_did(preset):
     for i in range(2):
         obs, mem = ob.observe(dict(state, t=np.array([30.0 + i])), setup, 1, mem)
         o = policy.to_torch(obs)
-        assert o["tokens"][..., ob.TOKEN - len(ob.RECEIVED):].abs().sum() > 0       # the new inputs are there
+        assert o["tokens"][..., CUT:].abs().sum() > 0                              # the new inputs are there
         assert (o["abil"][..., mab.STATE_INDEX["on_now"]] > 0).any()
         assert (~mab.legacy(o["abil"][..., 0] > 0.5) & (o["abil"][..., 0] > 0.5)).any()   # and slots it never saw
         if preset == "v2":

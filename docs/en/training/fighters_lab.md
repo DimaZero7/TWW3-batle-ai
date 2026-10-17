@@ -232,7 +232,7 @@ depth (sqrt(12) x the men's spread across / along - a full rectangle's side), th
 forward and sideways, the share of men within reach of an enemy, the share of empty cells of the box (holes) and of its
 front row, wounds (1 - health / (men x a man's health)), the share of the men in each of 16 cells. In the game the
 companion computes it from the places the bridge sends every 2 s (`--soldiers-every 2 --soldiers-state`, companion
-`--shape`; the network does not see it yet): 4 ms a reading of 3,000 men (4 CPU threads; a 17 x 20 units battle), the
+`--shape`; the network's input `SHAPE`, [model](model.md)): 4 ms a reading of 3,000 men (4 CPU threads; a 17 x 20 units battle), the
 state document +32 KB; a 3 x 4 units battle in the game 2.2 ms median.
 
 Check (`python -m tools.nn.fighters.shapecheck`; the replay of 2 battles from the game's places, `replay --places

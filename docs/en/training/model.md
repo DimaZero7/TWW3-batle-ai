@@ -349,6 +349,33 @@ Older networks load and play as they did: the new inputs (the winds, 2 token col
 features) get zero weights (`TokenEncoder`, `pad_inputs`, `PairBias`); armies without a caster give the same inputs as
 before. Test: `tests/tools/test_nn_spells.py`.
 
+### The unit's shape (17.10.2026, S27; own units and seen enemies, the token's last inputs)
+
+How the unit's men stand - from the soldiers' places (`tools/nn/fighters/shape.py` `unit_features`, one function for
+the lab and the game; [fighters lab](fighters_lab.md#the-units-shape-for-the-network)). 26 columns `SHAPE` at the
+token's end:
+
+- `shape_known` - a shape exists (0: no reading - the rectangle simulator, older recordings, a unit without men);
+- 9 numbers times `SHAPE_SCALE`: men per m² x2, width and depth / 30 m, the men's mass off the middle forward and
+  sideways / 10 m, the share of men within reach of an enemy, the share of empty cells of the 4 x 4 box and of its
+  front row, wounds (1 - health / (men x a man's health));
+- the 4 x 4 map in the unit's frame (its facing; rows from the rear to the front) - a cell's share of the men x4.
+
+Visibility: own units always, enemies while seen (the formation is seen by eye; an enemy's wounds from its health and
+men, which its card shows). An unseen enemy: zeros.
+
+Where from: the state's `shape` [B, N, 25] and `shape_ok` [B, N]. The simulator gives them only when it runs with the
+men (`hook.installed(shape=True)`: after every step; `State.observation` passes them on); the plain simulator (the
+rectangle) does not, so zeros and `shape_known` 0. In the game the companion with `--shape` (build `--soldiers-every
+2 --soldiers-state`): the latest reading of the places (at most 2 s old). Training with the men does not run yet -
+the lab is slow and holds one state; the input is ready, its weights zero.
+
+Older networks load with zero weights for these columns and decide bit for bit as before: itS26_15, the old code
+against the new on the same simulator states (18 battles x 30 decisions of both sides, logits, actions and memory -
+14 M numbers), difference 0 - also with a random shape in the state (`build/fighters2/bitcheck/decisions.py`; test
+`tests/tools/test_nn_shape_input.py`). Storage: the learner's token is 26 numbers longer (~0.5 GB a chunk
+of 1024 battles x 64 decisions if kept as it is).
+
 ### Effects on me from others (own units and visible enemies, the last inputs)
 
 28 inputs (`observation.RECEIVED`, 13.10.2026, `rx_<stat>`): what the abilities of OTHER units give this unit now -

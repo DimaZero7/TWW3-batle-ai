@@ -351,11 +351,28 @@ class TestCompanion:
         assert off.shape_last is None and off.shape_ms is None
         on = loop.Brain(policy.fresh(seed=1), shape=True)
         on.decide(doc)
-        t, f = on.shape_last
+        t, f, read = on.shape_last
         assert t == 4.0 and tuple(f.shape) == (4, len(shape.FEATURES) + 16) and on.shape_ms > 0
         assert float(f[1, 0]) > 0 and float(f[0].abs().sum()) == 0          # the spearmen's block; the lord unread
-        on.decide(dict(state_doc(), move=2))                                 # no new reading: nothing computed
+        assert read.tolist() == [False, True, False, False]
+        seen = {}
+        real = loop.ob.observe
+
+        def spy(state, *a, **k):
+            obs, mem = real(state, *a, **k)
+            seen["tok"] = np.asarray(obs.tokens)[0]
+            return obs, mem
+        loop.ob.observe = spy
+        try:
+            on.decide(dict(state_doc(), move=2))                             # no new reading: the last one stays
+        finally:
+            loop.ob.observe = real
         assert on.shape_ms is None and on.shape_last[0] == 4.0
+        known = seen["tok"][:, ob.INDEX["shape_known"]]
+        names = on.battle.names
+        assert known[names.index("own_spear_1")] == 1 and known[names.index("own_lord")] == 0
+        k = names.index("own_spear_1")
+        assert seen["tok"][k, ob.INDEX["shape_men_m2"]] == pytest.approx(2 * float(f[1, 0]), rel=1e-5)
 
     def test_a_decision_gives_every_own_unit_a_valid_order(self):
         from tools.nn.companion import loop, policy

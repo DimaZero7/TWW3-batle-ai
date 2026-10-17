@@ -494,7 +494,7 @@ class TestVolley:
             assert v.tolist() == pytest.approx([w, 0, we, 0]), t
             assert cobs.tokens[0, :, I["volley_ready"]].tolist() == pytest.approx([w, 0, we, 0]), t
         assert (I["volley_ready"] == ob.TOKEN - 1 - len(ob.ARC) - len(ob.ORDER) - len(ob.WEAPON) - len(ob.AIM)
-                - len(ob.RECEIVED) - len(ob.MAGIC)
+                - len(ob.RECEIVED) - len(ob.MAGIC) - len(ob.SHAPE)
                 and I["volley_ready"] not in ob.OWN_ONLY)
 
     def test_a_hidden_enemys_ammunition_is_not_read(self):

@@ -269,3 +269,23 @@ def test_unit_features_of_a_block_and_its_enemy():
     f3 = shape.features_from_rows({"a": rot(block), "e": rot(line)}, ["a", "e"], [1, 2], [90.0, 270.0], [60, 10],
                                   [0.9, 1.0])
     assert torch.allclose(f3, f, atol=1e-4)
+
+
+def test_the_lab_gives_the_network_its_units_shape():
+    # hook.installed(shape=True): after every step the state carries shape.unit_features and shape_ok (observation
+    # SHAPE); without it the state has none (the rectangle: zeros, shape_known 0)
+    from tools.nn.fighters import shape
+    from tools.nn.model import observation as ob
+    a = army([(SWORDS, -15, 0, 90, None)], [(CLANRATS, 15, 0, 270, None)])
+    with hook.installed(shape=True):
+        st = scenario.build([a], P)
+        for _ in range(6):
+            battle.step(st, replay.nearest_attack(st), P, P.dt)
+        o = st.observation()
+    N = st.N
+    assert tuple(o["shape"].shape) == (1, N, len(shape.FEATURES) + shape.GRID ** 2)
+    assert o["shape_ok"][0].tolist() == [n in (0, N // 2) for n in range(N)]      # the two units with men
+    assert float(o["shape"][0, 0, 1]) > 20 and 0 < float(o["shape"][0, 0, 5]) <= 1   # width; within reach
+    plain = scenario.build([a], P)
+    assert "shape" not in plain.observation()
+    assert ob.NAMES[-len(ob.SHAPE):] == ob.SHAPE

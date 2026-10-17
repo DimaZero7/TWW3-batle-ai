@@ -419,6 +419,9 @@ class State:
             out["cast_k"] = self.u["cast_k"]
             out["cast_now"] = (self.u["cast_k"] >= 0) & (self.u["cast_s"] >= 0)
             out["bm_hit"] = self.u["bm_hit"]
+        if "shape" in self.u:
+            # the units' shape from their men (the fighters lab, tools/nn/fighters/hook.py shape=True: observation SHAPE)
+            out["shape"], out["shape_ok"] = self.u["shape"], self.u["shape_ok"]
         out["t"] = self.t
         return out
 

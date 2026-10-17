@@ -204,9 +204,11 @@ morale, fatigue, ammunition, kills) except their orders ([visibility rule](train
 to the end of the battle. Preset `v2`, 3.51 M weights, trained from scratch
 ([details](training/model.md#variant-v2-map-sectors-chained-heads-commitment)):
 
-- **Unit tokens** (197 numbers each: passport, state, effects - contact effects too -, fire arc, the order in force,
+- **Unit tokens** (225 numbers each: passport, state, effects - contact effects too -, fire arc, the order in force,
   shots a volley and magic, the aim before the first shot and the silence after a new target, 28 - the bonuses other
-  units' abilities lay on it; checkpoints of 155, 167 and 169 inputs load with zero weights for the new ones) +
+  units' abilities lay on it, 'casting / struck by a spell', 26 - the unit's shape from its soldiers' places (`SHAPE`:
+  from the fighters lab or the companion's `--shape`, else zeros; [more](training/model.md#the-units-shape-17102026-s27-own-units-and-seen-enemies-the-tokens-last-inputs));
+  checkpoints of 155, 167, 169, 197 and 199 inputs load with zero weights for the new ones) +
   **abilities**: 30 slots a unit - all its abilities, none lost (15 for the actives - the head chooses among them, 15
   for the passives; a passive shows its condition and "on now"; the passport comes from a table, a unit stores the
   slot's 6 numbers and the ability's index; [details](training/model.md#abilities-each-unit-each-of-its-ability-slots))
