@@ -1521,6 +1521,39 @@ RTX 5070 Ti, 1024 battles, up to 19 units a side, 64 decisions an update, at the
 In the update, the GRU's 64 steps and the attention's float32 backward remain the main cost. TF32 is
 on (`allow_tf32`).
 
+**Line S with the men** (`--fighters`, ability branches, 1024 battles, the minibatch in 3 parts; RTX 5070 Ti, from
+`itS27_4`, updates 2-14): ~1,150 -> **~1,320** battle seconds a second with the same training numbers, **~1,390-1,500**
+with `--amp bf16h --parts 2` (off by default). Where a training cycle's time went (the parts timed and synchronised,
+`tools/nn/train/speedprobe.py`, ~66 s): the collection 40 s - the simulator's steps with the men 12 s, the network's
+decisions 7 s, the ability branches 17 s (their simulator steps 9 s); the PPO update 25 s - the backward pass 14 s, the
+actor's forward 6 s, the critic 1.4 s; `start_kl` 3-10 s (from the shared memory, below). The card is busy ~80 % of the
+collection's time and ~72 % of the update's (profile): waits for reads of the GPU are under 7 % of the collection, the
+update has small kernels (12 thousand a minibatch). What was done:
+
+- **Video memory in segments that grow** (`run.py --cuda-alloc expandable`, the default; PyTorch's
+  `expandable_segments`). With fixed blocks the cache held 15.5-16.7 GB for a 12.7 GB peak - more than the card, and
+  Windows moved it into shared memory: `start_kl`'s pass 3.2 s instead of 0.2, the collection ~10 % slower. Now the
+  cache is 13.1 GB; +10 %.
+- **The unit's shape only before an observation** (`hook.installed(shape="lazy")` in `run.fighters_installed`,
+  `Men.shape_now`): the network reads it once a decision, and it was made after every step (a sort of all the men and
+  a contact pass). The "not pressed" branch never looks. The same numbers (test); the branches 13.0 -> 11.4 s.
+- **The men wait out the update in host memory** (`Men.park` / `unpark`, the default; `--no-fighters-park` keeps them on
+  the card): 1.2 GB for the update's time, and the men's hook lets go of the last ability branch. Peak 12.7 -> 11.5 GB,
+  cache 11.9 GB - room for the desktop's windows (they take 1.3-2.4 GB of the same card: with a 13.2 GB cache and
+  windows open an update took 90-280 s instead of 20).
+- **bf16 in the update, optional** (`--amp bf16h`: the actor's and the critic's passes under `autocast(bfloat16)`, the
+  actor's heads in float32; `--amp bf16` - the heads in bf16 too). The update 20.6 -> 16.8 s with the minibatch in 2
+  parts instead of 3 (peak 12.0 GB; in float32 2 parts do not fit). The log-probability's shift from the rollout's:
+  1.4·10⁻³ on average (bf16: 2.3·10⁻³; TF32 3·10⁻⁵), its KL 1.2·10⁻⁵ - ~1 % of a real update's KL (0.0016); single units
+  up to 0.2. Over 13 updates the KL, the clip share, the critic's explained variance, the entropies and the win rates
+  are within the spread of two float32 runs; `ability_extra_kl` 0.024 against 0.011-0.013 (one update 0.10) - to watch
+  on a long run.
+- **Profile** (`tools/nn/train/speedprobe.py`, `run.py`'s options + `--updates N`): `--probe time` - the cycle's parts,
+  synchronised; `light` - the collection, the branches, the update and `start_kl` without a slowdown; `torch
+  --probe-part step|update` - the kernels of a few decisions or minibatches (`--probe-trace`: the gaps in the card's
+  work); `sync` - the reads of the GPU in a decision; `mismatch` - the log-probabilities' shift, TF32 / bf16. Results in
+  `build/speedprobe/`.
+
 ## What has been shown to help
 
 The only yardstick is the [exam in the game](../launch/gate.md#exam): the network's battles against the game's AI at
@@ -1766,10 +1799,14 @@ handled by the fair metrics, not by gold, and the Empire got shielded units
 
 ### Speed tricks not kept
 
-bf16 autocast in the update was slower (5.06 s against 4.62 s) and moved the log-probabilities from
-the rollout's by ~2·10⁻³ (TF32: 2·10⁻⁵), as much as a real update's KL; compiling the actor's blocks
-and the critic for the update gave nothing; the GRU's input weights hoisted out of the loop were
-slower; a graph for any batch size (`dynamic=True`) needs a C++ compiler the container lacks.
+bf16 autocast in the small network's update was slower (5.06 s against 4.62 s) - for v2 with the men it is faster and
+optional (`--amp`, above); compiling the actor's blocks and the critic for the update gave nothing, nor did the actor's
+whole trunk for v2 (the encoder, the blocks before the memory, the GRU's 64 steps; `torch.compile`, forward and
+backward): an update 19.1-20.5 s against 19.5-21.3 s, peak +0.85 GB, 150 s of compiling; the GRU's input weights
+hoisted out of the loop were slower; a graph for any batch size (`dynamic=True`) needs a C++ compiler the container
+lacks. With the men the minibatch in 2 parts in float32 does not fit even with the men in host memory (peak ~13.6 GB:
+the first update did not end in 8 min). Removing the reads of the GPU in a decision (the ability branches' capture, the
+battles' restart) was not worth it: the card's gaps of 0.3 ms or more are 7 % of the collection.
 
 ### Reading hold by the distance to the point
 

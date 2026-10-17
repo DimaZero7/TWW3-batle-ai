@@ -33,6 +33,7 @@
   the GPU is read once a minibatch only (whether the gradient is finite, the KL for target_kl): a float() a stat (~30 a
   part, ~3500 an update) made the CPU wait for the GPU each time.
 """
+import contextlib
 from dataclasses import dataclass
 
 import torch
@@ -82,6 +83,8 @@ class PPOConfig:
     #                                 body's share of the ability term (0: none); used under ability_own
     ability_epochs: int = 1    # passes of the ability term over the update's priced rows: the main one + this - 1 of the
     #                            ability head alone on the stored thoughts (ability_epochs; run.py --ability-epochs)
+    amp: str = ""              # "bf16" / "bf16h": the update's actor and critic passes under torch.autocast(bfloat16)
+    #                            ("bf16h": the actor's heads in float32; _amp, run.py --amp)
 
 
 def gae(rewards, values, dones, last_value, gamma, lam):
@@ -357,6 +360,62 @@ def distance(actor, other, batch, minibatch):
         return float(anchor_kl(a, b, ctrl))
 
 
+def _float32(x):
+    """x's floating tensors (in tuples, lists and dicts too) as float32."""
+    if torch.is_tensor(x):
+        return x.float() if x.is_floating_point() else x
+    if isinstance(x, dict):
+        return {k: _float32(v) for k, v in x.items()}
+    if isinstance(x, (tuple, list)):
+        return type(x)(_float32(v) for v in x)
+    return x
+
+
+@contextlib.contextmanager
+def _fp32_heads(model):
+    """Within it, model.heads (if any) runs in float32 outside autocast: its inputs cast up, autocast off for its
+    forward (pre / post hooks)."""
+    heads = getattr(model, "heads", None)
+    if heads is None:
+        yield
+        return
+    off = []
+
+    def pre(mod, args, kwargs):
+        ctx = torch.autocast("cuda", enabled=False)
+        ctx.__enter__()
+        off.append(ctx)
+        return _float32(args), _float32(kwargs)
+
+    def post(mod, args, kwargs, out):
+        off.pop().__exit__(None, None, None)
+        return out
+    h1 = heads.register_forward_pre_hook(pre, with_kwargs=True)
+    h2 = heads.register_forward_hook(post, with_kwargs=True)
+    try:
+        yield
+    finally:
+        h1.remove()
+        h2.remove()
+        while off:
+            off.pop().__exit__(None, None, None)
+
+
+@contextlib.contextmanager
+def _amp(cfg, model=None):
+    """cfg.amp on CUDA: "bf16" - the passes under torch.autocast(bfloat16); "bf16h" - the same with model's heads in
+    float32 (_fp32_heads: the logits' own rounding out of the log-probabilities); else nothing."""
+    if cfg.amp not in ("bf16", "bf16h") or not torch.cuda.is_available():
+        yield
+        return
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        if cfg.amp == "bf16h" and model is not None:
+            with _fp32_heads(model):
+                yield
+        else:
+            yield
+
+
 def chunk_action(action, idx):
     """The actions [T, R, ...] of the rows idx, kept [T, len(idx), ...] (the chained heads' logits are those under
     the actions taken: Actor.sequence's action)."""
@@ -508,12 +567,16 @@ def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refer
                 # The critic first, its backward pass at once: the actor and the critic share no weights, so the
                 # gradients are those of one backward pass of the sum, and the critic's activations (~2.2 MB a
                 # decision) are freed before the actor's are made (the part's peak memory)
-                vl = ((critic(cobs) - _rows(ret, pidx)) ** 2).mean()
+                with _amp(cfg):
+                    v_new = critic(cobs)
+                vl = ((v_new.float() - _rows(ret, pidx)) ** 2).mean()
                 (cfg.value * vl * share).backward()
                 # The critic's warm-up (train_policy False): the actor runs without a graph, for the stats
                 # only; with one its activations took ~3.5 GB more at the peak (13.5 GB on a 16 GB card).
                 with torch.set_grad_enabled(train_policy):
-                    logits, _ = actor.sequence(obs, batch["h0"][pidx], batch["reset"][:, pidx], seq_act)
+                    with _amp(cfg, actor):
+                        logits, _ = actor.sequence(obs, batch["h0"][pidx], batch["reset"][:, pidx], seq_act)
+                    logits = {k: v.float() for k, v in logits.items()}
                     logits = {k: v.reshape(-1, *v.shape[2:]) for k, v in logits.items()}
                     ctrl = obs["ctrl"].reshape(-1, obs["ctrl"].shape[-1])
                     lp_ab = old_ab = None

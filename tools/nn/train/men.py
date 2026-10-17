@@ -1,7 +1,7 @@
 """The fighters lab in training (run.py --fighters; docs/en/training/fighters_lab.md "In training").
 
 With --fighters the training's simulator runs with the lab's men (tools/nn/fighters/hook.py, installed for the whole
-run with adopt=False, shape=True): every man a point with his health and place; contact, melee, missiles and spells'
+run with adopt=False, shape="lazy" - the shape made only before an observation, shape_now): every man a point with his health and place; contact, melee, missiles and spells'
 blows by the men; morale, routs, orders and the rest the simulator's, as in the lab. The network sees the units' shape
 (observation SHAPE: hook.shape_of after every step).
 
@@ -147,11 +147,43 @@ class Men:
             g = _fresh(v).expand((len(idx),) + tuple(v.shape[1:])) if g is None else g.to(v.dtype)
             setattr(F, k, v.index_put((idx,), g))
         u = st.u
-        if "shape" in u:
+        if "shape" in u and self.h.shape is True:      # (lazy: the observation's shape_now does it)
             s, ok = FH.shape_of(sub.u, G)
             u["shape"] = u["shape"].index_put((idx,), s)
             u["shape_ok"] = u["shape_ok"].index_put((idx,), ok)
         self.restarts += len(idx)
+
+    def shape_now(self, st):
+        """The units' shape of st's men now, before an observation (the hook's shape="lazy": run.fighters_installed;
+        rollout.Battles.observe) - nothing otherwise."""
+        self.h.shape_now(st)
+
+    def park(self, st):
+        """The batch's men off the video memory while the network learns (run.py: around ppo.update; --fighters-park):
+        their tensors to pinned host memory, and the hook lets go of the last stepped State (an ability branch's, whose
+        men and units it would keep on the card) and its contact pairs. unpark() brings them back. -> bytes moved."""
+        F = st.men
+        h = self.h
+        h.st, h.F, h.contact, h.near = st, F, None, None
+        n = 0
+        for k, v in list(vars(F).items()):
+            if torch.is_tensor(v) and v.is_cuda and v.numel() > 1:      # (the scalars stay)
+                host = torch.empty(v.shape, dtype=v.dtype, pin_memory=True)
+                setattr(F, k, host.copy_(v, non_blocking=True))
+                n += v.numel() * v.element_size()
+        self.parked = st.device
+        return n
+
+    def unpark(self, st):
+        """park()'s men back on the card."""
+        dev = getattr(self, "parked", None)
+        if dev is None:
+            return
+        F = st.men
+        for k, v in list(vars(F).items()):
+            if torch.is_tensor(v) and not v.is_cuda:
+                setattr(F, k, v.to(dev, non_blocking=True))
+        self.parked = None
 
     def narrow(self, st, new, keep):
         """new (the battles keep of st, rollout.Battles.narrow) gets their men."""

@@ -562,6 +562,8 @@ class Battles:
 
     # --- observation ---
     def observe(self, critic=True):
+        if self.men is not None:
+            self.men.shape_now(self.st)          # the units' shape of the men now (fighters, shape="lazy")
         state = self.st.observation()
         self.cur_rx = state.get("ab_rx")
         obs, cobs = {}, {}

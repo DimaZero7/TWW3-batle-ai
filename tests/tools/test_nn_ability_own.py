@@ -283,3 +283,36 @@ def test_run_takes_the_heads_lr_and_epochs(tmp_path, monkeypatch):
     with pytest.raises(SystemExit):
         run.train(run.parser().parse_args(["--name", "x", "--init", str(init), "--ability-epochs", "2",
                                            "--device", "cpu"]))
+
+
+def test_the_updates_bf16_switch_is_off_by_default_and_keeps_the_heads_in_float32():
+    """--amp (ppo.PPOConfig.amp, off by default): bf16 autocast of the update's passes; "bf16h" keeps the actor's heads in
+    float32 (their inputs cast up, autocast off inside them). On the CPU (no CUDA) it is nothing."""
+    from tools.nn.train import run
+    assert ppo.PPOConfig().amp == "" and run.parser().parse_args([]).amp == ""
+    assert run.parser().parse_args(["--amp", "bf16h"]).amp == "bf16h"
+    x = {"a": torch.ones(2, dtype=torch.bfloat16),
+         "b": (torch.ones(1, dtype=torch.float16), torch.ones(1, dtype=torch.long))}
+    y = ppo._float32(x)
+    assert y["a"].dtype == torch.float32 and y["b"][0].dtype == torch.float32 and y["b"][1].dtype == torch.long
+
+    class Net(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.body, self.heads = torch.nn.Linear(4, 4), torch.nn.Linear(4, 2)
+
+        def forward(self, x):
+            h = self.body(x)
+            return h, self.heads(h)
+    cfg = dataclasses.replace(ppo.PPOConfig(), amp="bf16h")
+    if not torch.cuda.is_available():
+        with ppo._amp(cfg, Net()):
+            assert not torch.is_autocast_enabled("cuda")
+        return
+    net = Net().cuda()
+    for amp, head_dtype in (("bf16h", torch.float32), ("bf16", torch.bfloat16)):
+        with ppo._amp(dataclasses.replace(cfg, amp=amp), net):
+            h, out = net(torch.randn(3, 4, device="cuda"))
+            assert h.dtype == torch.bfloat16 and out.dtype == head_dtype, amp
+            assert torch.is_autocast_enabled("cuda")          # (on again after the heads)
+    assert not net.heads._forward_pre_hooks and not net.heads._forward_hooks

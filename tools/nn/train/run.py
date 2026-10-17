@@ -269,7 +269,8 @@ def fighters_installed(args):
     if not getattr(args, "fighters", False):
         return contextlib.nullcontext()
     from tools.nn.fighters import hook as fighters_hook
-    return fighters_hook.installed(seed=args.seed, shape=True, adopt=False, outside=False)
+    # shape "lazy": the units' shape only before an observation (every decision), not after every simulator step
+    return fighters_hook.installed(seed=args.seed, shape="lazy", adopt=False, outside=False)
 
 
 def fighters_men(args, M="args"):
@@ -279,6 +280,17 @@ def fighters_men(args, M="args"):
         return None
     from tools.nn.train import men
     return men.Men(M=args.fighters_men if M == "args" else M, seed=args.seed)
+
+
+def cuda_alloc(mode, device):
+    """--cuda-alloc: the caching allocator's way of holding video memory (CUDA only). "expandable" (default): segments
+    that grow in place (PyTorch's expandable_segments) instead of fixed blocks; "default": PyTorch's own. With fixed
+    blocks the cache held 15.5-16.7 GB for a 12.7 GB peak (line S with fighters): past the card, into shared memory
+    (start_kl's pass 3.2 s instead of 0.2, the collection ~10 % slower); expandable: 13.1 GB."""
+    if mode == "default" or torch.device(device).type != "cuda":
+        return
+    setting = getattr(torch._C, "_accelerator_setAllocatorSettings", None) or torch.cuda.memory._set_allocator_settings
+    setting("expandable_segments:True")
 
 
 def train(args, every=None, teacher=None, normal=None):
@@ -310,6 +322,7 @@ def _train(args, every=None, teacher=None, normal=None):
     if ab_epochs > 1 and not args.ability_branch:
         raise SystemExit("--ability-epochs needs --ability-branch (the extra passes are of the ability term)")
     device = torch.device(args.device)
+    cuda_alloc(getattr(args, "cuda_alloc", "default"), device)
     torch.manual_seed(args.seed)
     torch.backends.cuda.matmul.allow_tf32 = True
     drills.BROAD = args.drill_broad              # the drills' broad frames: their share of every drill's battles
@@ -534,13 +547,14 @@ def _train(args, every=None, teacher=None, normal=None):
     # little more pushed the card into its shared memory (an update 10 s -> 157 s); now 2 parts peak at 12.2 GB, 3 at
     # 10.1 GB (line W's batch, 1024 battles x 64 decisions)
     step_cfg = dataclasses.replace(sized(cfg, env.N, width=width), ability_own=own, ability_body_grad=ab_body,
-                                   ability_epochs=ab_epochs)
+                                   ability_epochs=ab_epochs, amp=getattr(args, "amp", "") or "")
     if args.parts:                                # --parts: the minibatch in this many parts, whatever the size
         step_cfg = dataclasses.replace(step_cfg, accum=args.parts)
     elif env.men is not None:
-        # --fighters: the batch's men stay on the card through the update (+1.2 GB at 1024 battles x 7168 places, the
-        # update's peak +2.5 GB): 2 parts peaked at 14.8 GB, the card spilled into its shared memory (a decision 0.23 ->
-        # 2.2 s, an update 18 -> 158 s); 3 parts take ~2 GB off the update's peak
+        # --fighters: with the batch's men on the card through the update (+1.2 GB at 1024 battles x 7168 places, the
+        # update's peak +2.5 GB) 2 parts peaked at 14.8 GB, the card spilled into its shared memory (a decision 0.23 ->
+        # 2.2 s, an update 18 -> 158 s); with them parked in host memory (the default, Men.park) still ~13.6 GB. 3 parts:
+        # 11.5 GB (2 parts fit with --amp bf16h: 12.0 GB)
         step_cfg = dataclasses.replace(step_cfg, accum=max(step_cfg.accum, 3))
     log = (out / "log.jsonl").open("w", encoding="utf-8", newline="\n")
     print(f"{args.name}: battles {env.B} (learner rows {env.R}), slots {env.N}, up to {args.max_units} units a side "
@@ -662,7 +676,11 @@ def _train(args, every=None, teacher=None, normal=None):
             env.set_teach_shares(normal.shares)
         if env.men is not None and torch.cuda.is_available():
             torch.cuda.empty_cache()                  # --fighters: the update's cached blocks back for the men's steps
+        if env.men is not None:
+            env.men.unpark(env.st)                    # (--fighters-park: the men back on the card)
         batch = rollout.collect(env, actor, critic, args.steps)
+        if env.men is not None and args.fighters_park:
+            env.men.park(env.st)                      # the men off the card while the network learns (Men.park)
         if env.men is not None and torch.cuda.is_available():
             torch.cuda.empty_cache()                  # ... and the steps' blocks back for the update
         t_c = time.time()
@@ -954,6 +972,9 @@ def parser():
                          "docs/en/training/fighters_lab.md): every man a point with his health and place, the network "
                          "sees the units' shape; the final evaluation too (the baselines stay the plain simulator's); "
                          "off by default")
+    ap.add_argument("--no-fighters-park", dest="fighters_park", action="store_false",
+                    help="--fighters: keep the batch's men on the card while the network learns (by default they wait in "
+                         "host memory, men.Men.park: 1.2 GB less at the update's peak)")
     ap.add_argument("--fighters-men", type=int, default=7168,
                     help="--fighters: places a battle (the batch's fixed size; a battle of more men is picked again)")
     ap.add_argument("--dr", nargs="?", const=str(uncertain.DEFAULT), default=None, metavar="JSON",
@@ -1214,6 +1235,10 @@ def parser():
                          "replayed as any ability")
     ap.add_argument("--gpu-mem", type=float, default=1.0,
                     help="share of the GPU's memory training may hold (game mode: e.g. 0.5, so a game keeps memory)")
+    ap.add_argument("--amp", default="", choices=("", "bf16", "bf16h"),
+                    help="the PPO update's passes under bfloat16 autocast (ppo.PPOConfig.amp)")
+    ap.add_argument("--cuda-alloc", default="expandable", choices=("default", "expandable"),
+                    help="the CUDA allocator's segments (cuda_alloc; default: expandable)")
     ap.add_argument("--gpu-duty", type=float, default=1.0,
                     help="share of the time the GPU works (e.g. 0.9: after each update rest 1/9 of its time; "
                          "quieter fans, a responsive desktop; the rest is not counted as training time)")

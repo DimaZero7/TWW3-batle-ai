@@ -375,13 +375,14 @@ simulator's, as in the lab. `--fighters-men` (7168): places a battle. The simula
 
 How it works (`tools/nn/train/men.py`):
 
-- The lab is installed for the whole run (`hook.installed(adopt=False, shape=True, outside=False)`): the battles built
+- The lab is installed for the whole run (`hook.installed(adopt=False, shape="lazy", outside=False)`): the battles built
   (the bank of armies) get no men; the men live beside the batch's state (`st.men`), and any state that has them steps
   with them. A state without men steps with the plain (compiled) simulator - so do `test5`'s evaluations inside
   training and the scripts' baselines: they stay the plain simulator's.
 - **A batch's start and a battle's restart.** The men are built after the battle is taken from the bank, its places
   moved and its uncertain numbers drawn (`randomise`, `--dr`): a restarted battle's anew (its rows of the batch
-  replaced, the other battles untouched), the units' shape at once.
+  replaced, the other battles untouched). The units' shape is made before every observation (`Men.shape_now`), not
+  after every step: the network reads it once a decision (the same numbers, test).
 - **The batch's sizes are fixed** - the step is compiled for them (a new size ~4 min of compiling): 7168 places a
   battle (the v2 banks: 3,070 men a battle on average, p99 5,900, the largest 6,800 of 6,144 battles), up to 32 men of
   units whose blow splashes (the banks: at most 2), a blow split 8 ways at most. A battle with too many men is taken
@@ -391,10 +392,11 @@ How it works (`tools/nn/train/men.py`):
   (test).
 - **Evaluation** (`evaluate.play(fighters=...)`; `run.py`'s final evaluation with `--fighters`): the batch has its men,
   they follow their battles when the batch shrinks; no CUDA graph (the men's step has eager parts).
-- **Memory.** The batch's men stay on the card through the update (+1.2 GB at 1024 battles x 7168 places, the update's
-  peak +2.5 GB). With the minibatch in 2 parts the peak was 14.8 GB and the card spilled into its shared memory (a
-  decision 0.23 -> 2.2 s, an update 18 -> 158 s). So with `--fighters` the minibatch is in 3 parts by default and the
-  card's cache is released before and after the collection: peak 12.7 GB.
+- **Memory.** For the update the batch's men go to host memory (`Men.park` / `unpark`, ~0.1 s; on the card:
+  `--no-fighters-park`): -1.2 GB, the update's peak 11.5 GB (12.7 with them on the card). With the minibatch in 2 parts
+  the peak was 14.8 GB (~13.6 with the men off the card) and the card spilled into its shared memory (a decision 0.23 ->
+  2.2 s, an update 18 -> 158 s). So with `--fighters` the minibatch is in 3 parts by default (2 with `--amp bf16h`,
+  [training speed](training.md#training-speed)), and the card's cache is released before and after the collection.
 - **The unit's shape** - the share of men within an enemy's reach is counted by the contact kernel straight from the
   cell table (`shape.unit_features`, on the GPU): the neighbour lists [battles x places x 108] of such a batch would
   take 6 GB.
@@ -416,6 +418,10 @@ Training slows down less because much of it is not the step: the network, the up
 the men 12 s an update against 6 s, the collection without them 22 against 11 s, the update 22 against 20 s). Without
 the men and with the minibatch in 2 parts (as line S runs) the peak is 13.5 GB: the card spilled into its shared memory
 too, 760 battle seconds a second instead of 1,710.
+
+Now with the men (by default: video memory in segments, the shape before an observation, the men off the card for the
+update; from `itS27_4`, updates 2-14) - ~1,320 battle seconds a second instead of ~1,150, peak 11.5 GB, the branches
+11 s; with `--amp bf16h --parts 2` ~1,390-1,500 ([training speed](training.md#training-speed)).
 
 ## How to run
 

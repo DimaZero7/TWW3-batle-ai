@@ -72,6 +72,31 @@ def test_a_batch_steps_with_its_men_and_the_network_sees_their_shape():
         assert int(st.men.tick) == 4 * env.k                 # every simulator step went through the men
 
 
+def test_a_lazy_shape_gives_the_network_what_a_shape_after_every_step_does():
+    """Training's shape="lazy" (run.fighters_installed): the shape only before an observation - the battles, the men and
+    every observation the same as with the shape after every simulator step."""
+    def play(mode):
+        actor, crit = tiny()
+        with hook.installed(shape=mode, adopt=False, outside=False):
+            env = env_of()
+            seen = []
+            for _ in range(4):
+                s = env.step(actor, crit)
+                seen.append(env.cur[0]["tokens"].clone())
+            env._reset(torch.tensor([True, False, False, False]))
+            env.step(actor, crit)
+            seen.append(env.cur[0]["tokens"].clone())
+            return seen, s["action"].kind, {k: env.st.u[k].clone() for k in ("x", "z", "hp", "shape", "shape_ok")}
+    eager, lazy = play(True), play("lazy")
+    assert all(torch.equal(a, b) for a, b in zip(eager[0], lazy[0]))
+    assert torch.equal(eager[1], lazy[1])
+    for k in eager[2]:
+        assert torch.equal(eager[2][k], lazy[2][k]), k
+    run_args = run.parser().parse_args(["--fighters"])
+    with run.fighters_installed(run_args) as h:
+        assert h.shape == "lazy"
+
+
 def test_a_restart_builds_the_battles_men_anew_and_leaves_the_others():
     actor, crit = tiny()
     with lab():
@@ -202,3 +227,34 @@ def test_a_state_without_men_steps_plainly_while_the_lab_is_installed():
             battle.step(st, replay.nearest_attack(st), P, P.dt)
     for k in ("hp_abs", "men", "x", "z", "morale"):
         assert torch.equal(st.u[k], plain.u[k]), k
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="the men wait in host memory only from the video card")
+def test_parked_men_come_back_as_they_were_and_the_battles_go_on_alike():
+    """run.py parks the batch's men in host memory around the update (men.Men.park; --no-fighters-park keeps them): back
+    on the card they are the same numbers, and the battles step as if they never left."""
+    def play(park):
+        actor, crit = tiny()
+        actor, crit = actor.cuda(), crit.cuda()
+        with hook.installed(shape="lazy", adopt=False, outside=False):
+            env = rollout.Battles(league.layout(4, 1, {"self": 0.5, "hold_shoot": 0.5}), MIRROR, device="cuda",
+                                  men=tm.Men(M=None), compile=False)
+            for _ in range(2):
+                env.step(actor, crit)
+            if park:
+                F = env.st.men
+                before = {k: getattr(F, k).clone() for k in tm.row_fields(F)}
+                assert env.men.park(env.st) > 0 and not F.hp.is_cuda and env.men.h.contact is None
+                env.men.unpark(env.st)
+                for k, v in before.items():
+                    assert getattr(F, k).is_cuda and torch.equal(getattr(F, k), v), k
+            for _ in range(2):
+                env.step(actor, crit)
+            return {k: env.st.u[k].clone() for k in ("x", "z", "hp", "shape")}
+    a, b = play(False), play(True)
+    for k in ("x", "z", "hp"):
+        assert torch.equal(a[k], b[k]), k
+    # (the shape's sums on the GPU add in no fixed order: two runs alike differ by ~3e-4 there too)
+    assert torch.allclose(a["shape"], b["shape"], atol=2e-3, rtol=1e-4)
+    assert run.parser().parse_args(["--fighters"]).fighters_park
+    assert not run.parser().parse_args(["--fighters", "--no-fighters-park"]).fighters_park

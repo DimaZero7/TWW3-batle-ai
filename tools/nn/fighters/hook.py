@@ -111,7 +111,9 @@ class Hook:
         self.orig = {}
         self.landings = None
         self.on_reset = None         # f(F, u, row) at a step replay's window start (places.FromRecording)
-        self.shape = shape           # the units' shape for the network after every step (u shape / shape_ok)
+        self.shape = shape           # the units' shape for the network after every step (u shape / shape_ok); "lazy":
+        #                              only when asked (shape_now: before an observation - training, tools/nn/train/men.py)
+        self.shape_fn = None         # shape_now's shape_of (compiled on CUDA for a big batch)
         self.reset_every = 10
         self.last_reset = None
         self.adopt_built = adopt     # a State scenario.build makes gets its men (off in training: men.py attaches them)
@@ -134,7 +136,7 @@ class Hook:
         st.men = F
         F.x_last, F.z_last = st.u["x"].clone(), st.u["z"].clone()
         self.st, self.F = st, F
-        if self.shape:
+        if self.shape is True:
             self._shape(st, F)
 
     def _reset(self, st):
@@ -188,7 +190,7 @@ class Hook:
         MV.step(F, u, params, self.lab, dt, self.near)
         FK.tick(F, dt)
         F.tick = F.tick + 1
-        if self.shape:
+        if self.shape is True:
             self._shape(st, F)
         F.x_last, F.z_last = u["x"].clone(), u["z"].clone()
         self.near = None
@@ -216,6 +218,20 @@ class Hook:
         shape_ok [B, N] (a unit with living men) - the observation's SHAPE (tools/nn/model/observation.py)."""
         u = st.u
         u["shape"], u["shape_ok"] = shape_of(u, self.F if F is None else F)
+
+    def shape_now(self, st):
+        """With shape="lazy": the units' shape of st's men now into its state (as _shape after every step; the network
+        reads it only at a decision, every second step at the game's cadence - each skipped one saves a sort of all the
+        men and a contact scan). The same function, compiled on its own on CUDA for a batch of COMPILE_MEN men or more.
+        Nothing without men or with shape True / False."""
+        F = getattr(st, "men", None)
+        if self.shape != "lazy" or F is None:
+            return
+        if self.shape_fn is None:
+            use = self.compile if self.compile is not None else torch.device(st.device).type == "cuda"
+            self.shape_fn = torch.compile(shape_of, dynamic=False) if use else shape_of
+        fn = self.shape_fn if F.B * F.M >= COMPILE_MEN else shape_of
+        st.u["shape"], st.u["shape_ok"] = fn(st.u, F)
 
     # ---- the patched functions ----
     def _plain(self, st):
@@ -336,7 +352,8 @@ HOOK = None
 @contextlib.contextmanager
 def installed(lab=None, params=None, seed=0, shape=False, compile=None, adopt=True, outside=True):
     """Patch the simulator's functions for the State built inside (module docstring); yields the Hook. shape: the units'
-    shape for the network after every step (Hook._shape: the state's shape / shape_ok, observation SHAPE); compile:
+    shape for the network after every step (Hook._shape: the state's shape / shape_ok, observation SHAPE); "lazy": only
+    when asked (Hook.shape_now; training asks before every observation, tools/nn/train/men.py); compile:
     the step compiled (None: on CUDA for a batch of COMPILE_MEN men or more, Hook._runner). adopt: a State built
     inside gets its men (False, training: the training attaches them, Hook.attach, and any other State steps plainly,
     compiled on CUDA); outside: look for an outside reset of the units' places, men and health before each step

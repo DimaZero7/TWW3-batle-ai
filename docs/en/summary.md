@@ -156,7 +156,9 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
   compiled, Triton kernels look for the neighbours: 1024 battles 20.5 ms (1.7-2.8 simulator steps), 1.1 GB of the GPU.
   Training with the men ([in training](training/fighters_lab.md#in-training), `tools/nn/train/men.py`): the men with the
   batch, restarted battles, the ability branches and the evaluation; 7168 places a battle; the network sees the units'
-  shape. Training 1.5x slower (1,130 against 1,710 battle seconds a second, the minibatch in 3 parts), GPU peak 12.7 GB.
+  shape. Training with the men ~1,320 battle seconds a second (was ~1,150: video memory in segments, the shape only
+  before an observation, the men off the card for the update - [training speed](training/training.md#training-speed)),
+  with `--amp bf16h --parts 2` ~1,390-1,500; without the men it was 1,710; GPU peak 11.5 GB.
 - **Not modelled:** terrain, forest, visibility, cavalry, monsters, other magic, flight, artillery, experience.
 
 **Checks against the game.** A recorded battle is replayed by its recorded orders 19 times with the start
