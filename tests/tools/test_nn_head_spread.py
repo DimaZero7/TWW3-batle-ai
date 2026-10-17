@@ -178,7 +178,12 @@ def test_run_resets_the_heads_and_keeps_the_floors_weights_in_the_chain(tmp_path
                                     "--head-entropy", "sector=0.99,cell=0.01", "--head-entropy-start", "0.01"])
     trained, _, out = run.train(args)
     rows = [json.loads(x) for x in (out / "log.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert all("head_share_sector" in r and "head_ent_hold" in r for r in rows)
+    # every head used in an update is logged (floor or not); a head with no rows that update (no move ordered in
+    # these tiny rollouts: sector, cell) is not - ppo.py logs measured heads only, its floor's weight stays
+    # (head_entropy.next_weights)
+    assert "head_share_sector" in rows[0] and "head_ent_hold" in rows[0]
+    for r in rows:
+        assert all(("head_share_" + h in r) == ("head_ent_" + h in r) for h in head_entropy.HEADS)
     assert rows[0]["head_entropy_weight"] == {"sector": 0.01, "cell": 0.01}
     assert rows[1]["head_entropy_weight"] == {"sector": 0.0125, "cell": 0.01}      # x 1.25 below, the lowest above
     state = checkpoint.train_state(out / "m0.pt")["state"]
