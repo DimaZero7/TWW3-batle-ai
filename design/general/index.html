@@ -67,6 +67,10 @@ a{color:inherit}
 .ginfo b{font-size:16px}
 .lgroup>summary{cursor:pointer;font-weight:600;font-size:16px;margin-bottom:8px}
 .lacc{border:1px solid var(--line);border-radius:8px}
+.lsub{border:1px solid var(--line);border-radius:8px}
+.lsub>summary{cursor:pointer;display:flex;gap:12px;align-items:baseline;padding:10px 12px}
+.lsub>summary .ln{font-weight:600}
+.layers.sub{padding:0 10px 10px}
 .lacc>summary{cursor:pointer;display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;padding:10px 12px;list-style-position:inside}
 .lacc>summary .ln{font-weight:600}
 .lacc[open]>summary{border-bottom:1px dashed var(--line)}
@@ -136,7 +140,7 @@ a{color:inherit}
           <li>В памяти 2 байта на клетку: тип местности + 4 флага зон в одном байте; ~18 КБ на карту. На входе в сеть — 5 слоёв (на мгновение, один раз на карту).</li>
         </ul></div>
         <details class="lgroup" open>
-          <summary>Слои карты — 5 (нажми на слой, чтобы раскрыть)</summary>
+          <summary>Слои карты — 5: местность (1) и развёртывание (4)</summary>
         <div class="layers">
           <details class="lacc">
             <summary><span class="ln">Слой 1 · местность</span><span class="kind">ярлык → словарик</span></summary>
@@ -153,6 +157,9 @@ a{color:inherit}
             </div>
             </div>
           </details>
+          <details class="lsub">
+            <summary><span class="ln">Развёртывание</span><span class="kind">4 слоя-флага</span></summary>
+            <div class="layers sub">
           <details class="lacc">
             <summary><span class="ln">Слой 2 · наша зона</span><span class="kind">флаг да/нет → числом</span></summary>
             <div class="lrow">
@@ -199,6 +206,8 @@ a{color:inherit}
               <div class="leg"><span><i class="sw" style="background:var(--foev)"></i>да</span><span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>нет</span></div>
               <span class="small">То же для врага. Слои 4 и 5 накладываются посередине.</span>
             </div>
+            </div>
+          </details>
             </div>
           </details>
         </div>
