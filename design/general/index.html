@@ -63,6 +63,11 @@ ul{margin:0;padding-left:18px} li{margin:3px 0}
 .track i{display:block;height:100%}
 .v{font-family:var(--f-mono);font-size:12px;text-align:right}
 a{color:inherit}
+.why{border-top:1px dashed var(--line);padding-top:8px}
+.why summary{cursor:pointer;font-size:14px;font-weight:600;color:var(--done)}
+.why summary:focus-visible{outline:2px solid var(--open);outline-offset:2px}
+.why ul{margin-top:6px}
+.why i{color:var(--foe);font-style:normal;font-weight:600}
 .cstep{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
 @media (max-width:820px){.cstep{grid-template-columns:1fr 1fr}}
 .cstep .box{gap:4px}
@@ -118,6 +123,18 @@ a{color:inherit}
         <ul class="small">
           <li>Клетка всегда 16 м. Сетка 96×96 клеток (= 1536 м, самая большая полевая карта). Типичная карта 1024 м занимает середину 64×64. Клетки «за картой» окружают карту со всех сторон — край виден везде.</li>
           <li>Память: ~18 КБ на карту (2 слоя по байту на клетку).</li>
+        </ul>
+        <details class="why">
+          <summary>Почему так и что отвергли</summary>
+          <ul class="small">
+            <li><b>Клетка всегда 16 м, а не «любая карта в 64×64».</b> Если растягивать, на маленькой карте клетка 8 м, на большой 24 м — сеть путает расстояния. <i>Отвергнуто.</i></li>
+            <li><b>«За картой» со всех сторон, а не только справа и снизу.</b> Иначе у левого и верхнего края сеть не видит, что дальше хода нет. <i>Отвергнуто.</i></li>
+            <li><b>Тип местности — номер через словарик, а не число.</b> Число «2» сеть примет за «больше, чем 1», будто вода — это «лес побольше». <i>Отвергнуто.</i></li>
+            <li><b>Типы по механике, а не по виду.</b> Руины и обрыв — оба «нельзя пройти» (если механика одинаковая), разводить их незачем.</li>
+            <li><b>96×96, потому что</b> самое большое полевое поле — 1536 м (данные игры: 980 карт, типичная 1024 м).</li>
+          </ul>
+        </details>
+        <ul class="small" style="display:none">
           <li>Оба слоя — ярлыки, идут через словарик.</li>
           <li>Карта хранится один раз на карту, сводка считается один раз.</li>
         </ul>
