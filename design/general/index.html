@@ -71,11 +71,74 @@ a{color:inherit}
 .lsub>summary{cursor:pointer;display:flex;gap:12px;align-items:baseline;padding:10px 12px}
 .lsub>summary .ln{font-weight:600}
 .layers.sub{padding:0 10px 10px}
+.gwrap{display:flex;flex-direction:column;gap:6px}
+.zoomcap{font-size:13px;color:var(--muted)}
+.zoom{display:grid;grid-template-columns:repeat(8,1fr);gap:1px;width:200px;position:relative;border:2px solid var(--open);border-radius:4px;overflow:hidden}
+.zoom .edge{position:absolute;right:0;bottom:0;border-left:3px dashed var(--open);border-top:3px dashed var(--open);pointer-events:none}
+.zoom .edgelbl{position:absolute;transform:translate(4px,-120%);font-size:12px;font-weight:600;color:var(--open);white-space:nowrap;background:var(--panel);padding:0 4px;border-radius:3px}
+.zoom i{aspect-ratio:1;display:block}
 .later-row{border:1px dashed var(--line);border-radius:8px;padding:8px 12px}
 .lacc>summary{cursor:pointer;display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;padding:10px 12px;list-style-position:inside}
 .lacc>summary .ln{font-weight:600}
 .lacc[open]>summary{border-bottom:1px dashed var(--line)}
 .lacc .lrow{border:0;margin:0}
+.net{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:8px}
+.lvl{display:flex;flex-direction:column;gap:8px}
+.lvl.dim{opacity:.75}
+.lvlh{font-weight:700;font-size:17px}
+.flowg{display:grid;grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr) 28px minmax(0,1fr) 28px minmax(0,1fr);gap:8px;align-items:center}
+.flowg.one{grid-template-columns:1fr}
+@media (max-width:900px){.flowg{grid-template-columns:1fr}.arrowc{transform:rotate(90deg)}}
+.col{display:flex;flex-direction:column;gap:8px;min-width:0}
+.colt{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.arrowc,.down{color:var(--muted);font-size:22px;text-align:center}
+.node{font:inherit;font-size:16px;padding:12px;border-radius:10px;border:2px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer;text-align:center}
+.node span{font-size:13px;color:var(--muted)}
+.node.tall{min-height:110px}
+.node.done{border-color:var(--done)}
+.node.none{border-style:dashed;color:var(--muted)}
+.node.on{box-shadow:0 0 0 3px var(--open);background:var(--open-bg);color:var(--ink)}
+.node:focus-visible{outline:2px solid var(--open);outline-offset:2px}
+.legend2{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:14px;color:var(--muted);margin-top:4px}
+.legend2 span{display:inline-flex;align-items:center;gap:6px}
+.st{width:16px;height:12px;border-radius:3px;display:inline-block;border:2px solid var(--line)}
+.st.done{border-color:var(--done)} .st.none{border-style:dashed}
+.types{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;font-size:15px}
+.types .tl{color:var(--muted);font-size:14px}
+.ty{padding:4px 12px;border-radius:999px;font-weight:600;font-size:14px}
+.blocks{display:flex;flex-wrap:wrap;gap:12px;margin-top:6px;align-items:flex-start}
+.t-in{--tc:#3a7bd5} .t-proc{--tc:#8a5ad8} .t-out{--tc:#d08a1c} .t-test{--tc:#1a9a8a}
+.ty{background:color-mix(in srgb,var(--tc) 22%,transparent);color:var(--tc);border:1px solid var(--tc)}
+.node.t-in,.node.t-proc,.node.t-out,.node.t-test{border-color:var(--tc);background:color-mix(in srgb,var(--tc) 14%,var(--panel));min-width:220px}
+.node.on{box-shadow:0 0 0 3px var(--tc);background:color-mix(in srgb,var(--tc) 30%,var(--panel))}
+.nodestack{display:flex;flex-direction:column;align-items:center;gap:2px}
+.vlink{color:var(--muted);font-size:20px;line-height:1}
+.barrow{font-size:26px;color:var(--muted);align-self:flex-start;line-height:1;margin-top:13px}
+.pipe{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.ps{display:flex;flex-direction:column;gap:4px;align-items:center;text-align:center;width:170px}
+.pa{font-size:22px;color:var(--muted)}
+.pg{display:grid;gap:1px;width:110px;height:110px}
+.pg i{display:block;background:color-mix(in srgb,#8a5ad8 45%,var(--panel));border-radius:1px}
+.pstack{position:relative;width:110px;height:110px}
+.pstack i{position:absolute;width:80px;height:80px;border:2px solid #8a5ad8;border-radius:4px;background:color-mix(in srgb,#8a5ad8 18%,var(--panel))}
+.pstack i:nth-child(1){left:0;top:30px}.pstack i:nth-child(2){left:10px;top:20px}.pstack i:nth-child(3){left:20px;top:10px}.pstack i:nth-child(4){left:30px;top:0}
+.ptok{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;width:110px}
+.ptok i{display:block;height:30px;border-radius:6px;background:linear-gradient(90deg,#8a5ad8 0 30%,color-mix(in srgb,#8a5ad8 40%,var(--panel)) 30% 60%,#8a5ad8 60% 75%,color-mix(in srgb,#8a5ad8 25%,var(--panel)) 75%)}
+.g24{max-width:230px}.g24.s{width:105px;max-width:105px}.g12{max-width:80px;width:80px}.g6{max-width:46px;width:46px}
+.feat4{display:grid;grid-template-columns:repeat(2,105px);gap:12px}
+.feat4>div{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);text-align:center;align-items:stretch}
+.shr{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:20px}
+.tokbar{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.vec32{display:grid;grid-template-columns:repeat(32,1fr);gap:1px;width:180px;height:18px}
+.vec32 i{display:block;border-radius:1px}
+.stk{position:relative;width:230px;height:230px}
+.stk .sl{position:absolute;width:140px}
+.stk .sl span{font-size:11px;color:var(--muted);background:var(--panel);padding:0 3px;border-radius:3px}
+.zcv{width:300px;max-width:100%;height:auto;border-radius:6px;background:var(--bg)}
+.nettype{font-size:17px;border:2px solid #8a5ad8;border-radius:10px;padding:8px 12px;background:color-mix(in srgb,#8a5ad8 14%,var(--panel));align-self:flex-start}
+.nettype span{color:var(--muted);font-size:14px}
+.tlist{padding:4px 12px 10px}
+.tlist li{margin:6px 0}
 .layers{display:flex;flex-direction:column;gap:6px}
 
 .lrow{display:grid;grid-template-columns:230px minmax(0,1fr);gap:12px;align-items:start;padding:10px;border:1px solid var(--line);border-radius:8px}
@@ -118,12 +181,23 @@ a{color:inherit}
 <div class="wrap">
   <header style="display:flex;flex-direction:column;gap:8px">
     <h1>Генерал: архитектура</h1>
-    <p class="muted">Рабочая страница S28. Вкладки идут по уровням: уровень → часть → тема. Заполнено только то, о чём договорились.</p>
+    <p class="muted">Рабочая страница S28. Нажми на блок — под ним откроется описание. Здесь только то, о чём договорились.</p>
   </header>
 
-  <nav class="tabrow t1" id="tLevel" aria-label="Уровень"><span class="lbl">Уровень</span></nav>
-  <nav class="tabrow" id="tPart" aria-label="Часть"><span class="lbl">Часть</span></nav>
-  <nav class="tabrow" id="tTopic" aria-label="Тема"><span class="lbl">Тема</span></nav>
+  <section class="net" aria-label="Схема сети генерала">
+    <div class="types"><span class="tl">Типы блоков:</span>
+      <span class="ty t-in">вход</span><span class="ty t-proc">обработка</span><span class="ty t-out">выход</span><span class="ty t-test">проверка</span>
+    </div>
+    <div class="blocks">
+      <button class="node t-in" data-n="landscape" type="button">Ландшафт</button>
+      <span class="barrow">→</span>
+      <div class="nodestack">
+        <button class="node t-proc" data-n="mapproc" type="button">Анализ карты</button>
+        <span class="vlink">┆</span>
+        <button class="node t-test" data-n="maptest" type="button">Проверки анализа карты</button>
+      </div>
+    </div>
+  </section>
   <div class="crumbs" id="crumbs"></div>
 
   <main id="content"></main>
@@ -137,90 +211,93 @@ a{color:inherit}
         <h2>Карта <span class="chip done">решено</span></h2>
         <div class="ginfo"><b>Общее</b>
         <ul class="small">
-          <li>Клетка всегда 16 м. Сетка 96×96 клеток (= 1536 м, самая большая полевая карта). Типичная карта 1024 м занимает середину 64×64. Клетки «за картой» окружают карту со всех сторон — край виден везде.</li>
+          <li>Клетка всегда 16 м. Сетка 128×128 клеток (= 2048 м): влезает любая полевая карта и наша арена с краем для бегущих (±1020 м). Типичная карта 1024 м занимает середину 64×64. Клетки «за картой» окружают карту со всех сторон — край виден везде.</li>
           <li>В памяти: доли типов (по байту на тип) + 4 флага зон в одном байте; сейчас 3 байта на клетку, ~28 КБ на карту. На входе в сеть — слои долей + 4 слоя флагов (на мгновение, один раз на карту).</li>
+          <li><b>Карта всегда «от своей стороны».</b> Для второй стороны карта зеркалится, и «наша / врага» меняются местами — генерал всегда видит себя с одной стороны (как сеть отрядов сейчас).</li>
+          <li><b>Учения:</b> бои там сдвинуты по карте, поэтому слои считаются для каждого боя на лету (это дёшево).</li>
+          <li>Запретная полоса вокруг зоны — 64 м (данные игры: 210 из 257 зон).</li>
         </ul></div>
         <details class="lgroup" open>
-          <summary>Слои карты: местность (2 доли) и развёртывание (4 флага)</summary>
+          <summary>Слои карты — 6: местность (1–2) и развёртывание (3–6)</summary>
         <div class="layers">
           <details class="lsub">
-            <summary><span class="ln">Местность</span><span class="kind">доли типов в клетке, сумма = 1</span></summary>
+            <summary><span class="ln">Местность · слои 1–2</span><span class="kind">доли типов в клетке, сумма = 1</span></summary>
             <div class="layers sub">
               <details class="lacc">
-                <summary><span class="ln">Поле</span><span class="kind">доля 0…1 → числом</span></summary>
+                <summary><span class="ln">Слой 1 · поле</span><span class="kind">доля 0…1 → числом</span></summary>
                 <div class="lrow">
-                  <div class="grid" data-g="t1" aria-label="Поле"></div>
+                  <div class="gwrap"><div class="grid" data-g="t1" aria-label="Поле"></div><div class="zoomcap">одна клетка (жёлтая рамка на карте), разрезанная на мелкие кусочки; пунктир — край карты:</div><div class="zoom" data-zoom="t1"></div><div class="zoomcap" data-zlbl="t1"></div></div>
                   <div class="linfo">
-                    <b>Поле</b>
+                    <b>Слой 1 · поле</b>
                     <span class="kind">доля 0…1 → числом</span>
                     <div class="leg"><span><i class="sw" style="background:var(--field)"></i>1 — вся клетка</span><span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>0 — нет</span></div>
-                    <span class="small">Обычная проходимая земля.</span>
+                    <span class="small">Обычная проходимая земля. Пример: край карты режет клетки — в крайних клетках поле занимает только часть (0,25, 0,5…), это и есть доля.</span>
                   </div>
                 </div>
               </details>
               <details class="lacc">
-                <summary><span class="ln">За картой</span><span class="kind">доля 0…1 → числом</span></summary>
+                <summary><span class="ln">Слой 2 · за картой</span><span class="kind">доля 0…1 → числом</span></summary>
                 <div class="lrow">
-                  <div class="grid" data-g="t2" aria-label="За картой"></div>
+                  <div class="gwrap"><div class="grid" data-g="t2" aria-label="За картой"></div><div class="zoomcap">та же клетка; пунктир — край карты:</div><div class="zoom" data-zoom="t2"></div><div class="zoomcap" data-zlbl="t2"></div></div>
                   <div class="linfo">
-                    <b>За картой</b>
+                    <b>Слой 2 · за картой</b>
                     <span class="kind">доля 0…1 → числом</span>
                     <div class="leg"><span><i class="sw" style="background:var(--out)"></i>1 — вся клетка</span><span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>0 — нет</span></div>
-                    <span class="small">Край мира: туда не пройти, бегущие уходят туда и выходят из боя насовсем. Это не «непроходимо» — механика другая.</span>
+                    <span class="small">Тот же пример: доля «за картой» = 1 − доля поля. Край мира: туда не пройти, бегущие уходят туда и выходят из боя насовсем. Это не «непроходимо» — механика другая.</span>
                   </div>
                 </div>
               </details>
-              <div class="later-row small">Потом, с рельефом: непроходимо (дома, обрывы), лес, вода… — по слою на тип по механике.</div>
+              <div class="later-row small">Потом, с рельефом: непроходимо (дома, обрывы), лес, вода… — по слою на тип по механике (новые номера в конце, старые не меняются).</div>
             </div>
           </details>
           <details class="lsub">
-            <summary><span class="ln">Развёртывание</span><span class="kind">4 слоя-флага</span></summary>
+            <summary><span class="ln">Развёртывание · слои 3–6</span><span class="kind">4 слоя-флага</span></summary>
             <div class="layers sub">
           <details class="lacc">
-            <summary><span class="ln">Слой 2 · наша зона</span><span class="kind">флаг да/нет → числом</span></summary>
+            <summary><span class="ln">Слой 3 · наша зона</span><span class="kind">флаг да/нет → числом</span></summary>
             <div class="lrow">
-            <div class="grid" data-g="z1" aria-label="Слой 2 · наша зона"></div>
+            <div class="gwrap"><div class="grid" data-g="z1" aria-label="Слой 3 · наша зона"></div><span class="zoomcap">край зоны крупно: пунктир — настоящая граница (со скруглённым углом)</span><canvas class="zcv" data-zc="1" width="300" height="190" aria-label="Угол зоны и клетки"></canvas><span class="zoomcap"><b style="color:var(--mine)">■</b> целиком внутри — «да» &nbsp; <b style="color:var(--muted)">▨</b> частично — «нет»</span></div>
             <div class="linfo">
-              <b>Слой 2 · наша зона</b>
+              <b>Слой 3 · наша зона</b>
               <span class="kind">флаг да/нет → числом</span>
               <div class="leg"><span><i class="sw" style="background:var(--mine)"></i>да</span><span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>нет</span></div>
-              <span class="small">Где наши стоят в начале.</span>
+              <span class="small">Где наши стоят в начале. Клетка = «да», только если она <b>целиком</b> внутри зоны: края и скруглённые углы, где зона занимает часть клетки, считаются «нет». Так любая точка «да»-клетки точно годится для расстановки.</span>
             </div>
             </div>
           </details>
           <details class="lacc">
-            <summary><span class="ln">Слой 3 · зона врага</span><span class="kind">флаг да/нет → числом</span></summary>
+            <summary><span class="ln">Слой 4 · зона врага</span><span class="kind">флаг да/нет → числом</span></summary>
             <div class="lrow">
-            <div class="grid" data-g="z2" aria-label="Слой 3 · зона врага"></div>
+            <div class="gwrap"><div class="grid" data-g="z2" aria-label="Слой 4 · зона врага"></div><span class="zoomcap">край зоны врага крупно: пунктир — настоящая граница</span><canvas class="zcv" data-zc="2" width="300" height="190" aria-label="Край области и клетки"></canvas><span class="zoomcap"><b style="color:var(--foe)">■</b> целиком внутри — «да» &nbsp; <b style="color:var(--muted)">▨</b> частично — «нет»</span></div>
             <div class="linfo">
-              <b>Слой 3 · зона врага</b>
+              <b>Слой 4 · зона врага</b>
               <span class="kind">флаг да/нет → числом</span>
               <div class="leg"><span><i class="sw" style="background:var(--foe)"></i>да</span><span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>нет</span></div>
-              <span class="small">Где враги стоят в начале. Основные зоны никогда не пересекаются.</span>
+              <span class="small">Где враги стоят в начале. «Да» — только если клетка целиком в зоне. Основные зоны никогда не пересекаются.</span>
             </div>
             </div>
           </details>
           <details class="lacc">
-            <summary><span class="ln">Слой 4 · можно нашим передовым</span><span class="kind">флаг да/нет → числом</span></summary>
+            <summary><span class="ln">Слой 5 · можно нашим передовым</span><span class="kind">флаг да/нет → числом</span></summary>
             <div class="lrow">
-            <div class="grid" data-g="z3" aria-label="Слой 4 · можно нашим передовым"></div>
+            <div class="gwrap"><div class="grid" data-g="z3" aria-label="Слой 5 · можно нашим передовым"></div><span class="zoomcap">у зоны врага крупно: красное — зона врага, пунктир — граница запретной полосы ~64 м</span><canvas class="zcv" data-zc="3" width="300" height="190" aria-label="Край области и клетки"></canvas><span class="zoomcap"><b style="color:var(--minev)">■</b> целиком вне полосы — «да» &nbsp; <b style="color:var(--muted)">▨</b> полоса режет клетку — «нет»</span></div>
             <div class="linfo">
-              <b>Слой 4 · можно нашим передовым</b>
+              <b>Слой 5 · можно нашим передовым</b>
               <span class="kind">флаг да/нет → числом</span>
               <div class="leg"><span><i class="sw" style="background:var(--minev)"></i>да</span><span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>нет</span></div>
-              <span class="small">Почти всё поле, кроме полосы ~42 м вокруг зоны врага.</span>
+              <span class="small">Почти всё поле, кроме полосы ~64 м вокруг зоны врага. «Да» — только если клетка целиком в этой области.</span>
             </div>
             </div>
           </details>
           <details class="lacc">
-            <summary><span class="ln">Слой 5 · можно передовым врага</span><span class="kind">флаг да/нет → числом</span></summary>
+            <summary><span class="ln">Слой 6 · можно передовым врага</span><span class="kind">флаг да/нет → числом</span></summary>
             <div class="lrow">
-            <div class="grid" data-g="z4" aria-label="Слой 5 · можно передовым врага"></div>
+            <div class="gwrap"><div class="grid" data-g="z4" aria-label="Слой 6 · можно передовым врага"></div><span class="zoomcap">у нашей зоны крупно: зелёное — наша зона, пунктир — граница запретной полосы ~64 м</span><canvas class="zcv" data-zc="4" width="300" height="190" aria-label="Край области и клетки"></canvas><span class="zoomcap"><b style="color:var(--foev)">■</b> целиком вне полосы — «да» &nbsp; <b style="color:var(--muted)">▨</b> полоса режет клетку — «нет»</span></div>
             <div class="linfo">
-              <b>Слой 5 · можно передовым врага</b>
+              <b>Слой 6 · можно передовым врага</b>
               <span class="kind">флаг да/нет → числом</span>
               <div class="leg"><span><i class="sw" style="background:var(--foev)"></i>да</span><span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>нет</span></div>
-              <span class="small">То же для врага. Слои 4 и 5 накладываются посередине.</span>
+              <span class="small">То же для врага, то же правило «целиком внутри». Слои 5 и 6 накладываются посередине.</span>
             </div>
             </div>
           </details>
@@ -233,10 +310,13 @@ a{color:inherit}
           <ul class="small">
             <li><b>Клетка всегда 16 м, а не «любая карта в 64×64».</b> Если растягивать, на маленькой карте клетка 8 м, на большой 24 м — сеть путает расстояния. <i>Отвергнуто.</i></li>
             <li><b>«За картой» со всех сторон, а не только справа и снизу.</b> Иначе у левого и верхнего края сеть не видит, что дальше хода нет. <i>Отвергнуто.</i></li>
+            <li><b>Зоны — флаги «целиком внутри», а не доли.</b> Частичные клетки на краях и скруглённых углах зон считаются «нет» — зона чуть меньше (до 16 м по краю), зато в «да»-клетку точно можно ставить. Доли для зон отвергнуты: точность не нужна. «Больше половины — да» отвергнуто: отряд мог бы встать за пределами зоны.</li>
+            <li><b>Зеркало для второй стороны</b>, а не только обмен «наша/врага»: иначе генерал учит два направления («мы слева», «мы справа») — вдвое дольше. <i>Без зеркала — отвергнуто.</i></li>
+            <li><b>Полоса 64 м, а не 42:</b> 42 было ошибкой прошлого разбора; файлы карт игры дают 64 м.</li>
             <li><b>«За картой» — отдельный тип, не «непроходимо».</b> Пройти нельзя в обоих случаях, но за край бегущие уходят и выходят из боя насовсем, а дом или обрыв они обегают и остаются; за краем ничего нет. Разная механика — разные типы.</li>
             <li><b>Местность — доли, а не один тип на клетку.</b> «Кто больше места» теряет мелкие препятствия и смешанный край; «любое препятствие» закрывает проходы. Доли — величины, подаются числами. <i>Один тип на клетку — отвергнуто для генерала</i> (останется для подробной карты отрядов 2 м, там номер через словарик).</li>
             <li><b>Типы по механике, а не по виду.</b> Руины и обрыв — оба «нельзя пройти» (если механика одинаковая), разводить их незачем.</li>
-            <li><b>96×96, потому что</b> самое большое полевое поле — 1536 м (данные игры: 980 карт, типичная 1024 м).</li>
+            <li><b>128×128, а не 96×96:</b> у нашей арены край, где бегущие уходят с поля, — ±1020 м (2040 м), а 96×96 покрывало только 1536 м: генерал не видел бы край и отряды у края. 128×128 вмещает и любые полевые карты игры (до 1536×1792). <i>96×96 — отвергнуто.</i></li>
           </ul>
         </details>
         <ul class="small" style="display:none">
@@ -262,14 +342,14 @@ a{color:inherit}
         <h2>Советники + совещание <span class="chip done">решено</span></h2>
         <div class="flowv">
           <div class="nd2">5 слоёв карты</div><div class="nd2">карточки армий</div>
-          <div class="nd2 m">советник карты<br><span>свёртка → 32 своих слоя → сжатие 96×96 → 24×24</span></div><div class="nd2 m">советник армий<br><span>внимание между отрядами</span></div>
-          <div class="nd2 wide">совещание: 576 участков ⇄ отряды (кросс-внимание)</div>
+          <div class="nd2 m">советник карты<br><span>свёртка → 32 своих слоя → сжатие 128×128 → 32×32</span></div><div class="nd2 m">советник армий<br><span>внимание между отрядами</span></div>
+          <div class="nd2 wide">совещание: 1024 участка ⇄ отряды (кросс-внимание)</div>
           <div class="nd2 wide out2">замысел</div>
         </div>
         <ul class="small">
           <li>Две части со своими весами + пучок «совещания»; учатся вместе, одной ошибкой.</li>
-          <li>Карта сжимается до 24×24 = 576 участков перед совещанием.</li>
-          <li>Бой 40×40: ~46 тыс. пар на бой, доли миллисекунды; память для обучения ~190 МБ на слой совещания.</li>
+          <li>Карта сжимается до 32×32 = 1024 участка перед совещанием.</li>
+          <li>Бой 40×40: ~82 тыс. пар на бой, доли миллисекунды; память для обучения ~340 МБ на слой совещания.</li>
         </ul>
         <details class="why">
           <summary>Почему так и что отвергли</summary>
@@ -285,36 +365,117 @@ a{color:inherit}
   </section>
 </template>
 
+<template id="tpl-mapproc">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done">
+        <h2>Анализ карты <span class="chip done">решено</span></h2>
+        <div class="nettype">Тип сети: <b>свёрточная</b> <span>(CNN, convolutional neural network)</span></div>
+        <div class="ginfo"><b>Общее</b>
+        <ul class="small">
+          <li>Берёт слои карты и делает из них короткую сводку: 1024 участка, у каждого 32 числа.</li>
+          <li>Считается один раз на карту и запоминается — местность во время боя не меняется.</li>
+          <li><b>32 признака</b> — на ровной карте с запасом. Расширим до 64, когда появится рельеф (и если проверка покажет, что признакам тесно).</li>
+          <li><b>Сжатие до 32×32</b> (участок 64×64 м, 1024 участка). Если понадобится ускорить или сэкономить память — участки по 96 м (≈21×21, совещание вдвое дешевле).</li>
+          <li>Размер — по прикидке около 30 тыс. весов; окончательно — замером при сборке.</li>
+          <li>Новые слои (лес, вода, высота…) добавляем, только когда понадобятся. Сейчас — только то, что есть. Когда слой добавим, он подключится к первому окошку с нулевыми весами: старая сеть сначала работает как раньше, переучивать с нуля не придётся.</li>
+        </ul></div>
+        <details class="lgroup" open>
+          <summary>Шаги — 4 (нажми на шаг, чтобы раскрыть)</summary>
+          <div class="layers">
+            <details class="lacc"><summary><span class="ln">1 · Вход: 6 слоёв карты</span><span class="kind">128×128 клеток</span></summary>
+              <div class="lrow"><div class="gwrap"><div class="stk" data-m="input"></div></div>
+              <div class="linfo"><b>Вход: 6 слоёв карты</b><span class="kind">2 доли местности + 4 флага зон</span>
+              <span class="small">Те самые слои из блока «Ландшафт», сложенные стопкой. Каждая клетка — 6 чисел.</span></div></div></details>
+            <details class="lacc"><summary><span class="ln">2 · Окошко 3×3 ищет находки</span><span class="kind">свёртка</span></summary>
+              <div class="lrow"><div class="gwrap"><div class="grid g24" data-m="scan"></div><span class="zoomcap">жёлтая рамка — окошко 3×3; оно проходит всю карту</span></div>
+              <div class="linfo"><b>Окошко 3×3 ищет находки</b><span class="kind">одни и те же веса по всей карте</span>
+              <span class="small">Окошко смотрит на клетку и её 8 соседей во всех 6 слоях и выдаёт одно число: «есть ли здесь находка». Окошек 32 — каждое ищет своё. Что искать, сеть учит сама.</span></div></div></details>
+            <details class="lacc"><summary><span class="ln">3 · Получилось 32 своих слоя-признака</span><span class="kind">примеры 4 из 32</span></summary>
+              <div class="lrow"><div class="gwrap"><div class="feat4"><div><div class="grid g24 s" data-m="f0"></div><span>край карты</span></div><div><div class="grid g24 s" data-m="f1"></div><span>передний край нашей зоны</span></div><div><div class="grid g24 s" data-m="f2"></div><span>зона врага</span></div><div><div class="grid g24 s" data-m="f3"></div><span>середина поля</span></div></div></div>
+              <div class="linfo"><b>32 своих слоя-признака</b><span class="kind">яркое = «находка есть»</span>
+              <span class="small">Каждое окошко дало свою карту ответов. Это уже не наши слои, а признаки, которые придумала сеть. Показаны правдоподобные примеры. «Передний край нашей зоны» — линия, где наша армия стоит в начале лицом к врагу: отсюда начинается наш фронт. С рельефом добавятся «проход», «брод», «опушка».</span></div></div></details>
+            <details class="lacc"><summary><span class="ln">4 · Сжатие и итог</span><span class="kind">128 → 64 → 32</span></summary>
+              <div class="lrow"><div class="gwrap"><div class="shr"><div class="grid g24 s" data-m="f0"></div><span>→</span><div class="grid g12" data-m="p12"></div><span>→</span><div class="grid g6" data-m="p6"></div></div><span class="zoomcap">каждые 2×2 клетки сливаются в одну, остаётся самое заметное (сетки на картинке уменьшены)</span><div class="tokbar"><span>один участок =</span><div class="vec32" data-m="vec"></div></div></div>
+              <div class="linfo"><b>Сжатие и итог</b><span class="kind">1024 участка × 32 числа</span>
+              <span class="small">Карта 128×128 дважды уменьшается вдвое → 32×32 = 1024 участка (по 64 м). У каждого участка 32 числа — по одному от каждого признака. Эта сводка и идёт дальше.</span></div></div></details>
+          </div>
+        </details>
+        <details class="why">
+          <summary>Почему так и что отвергли</summary>
+          <ul class="small">
+            <li><b>Свёртка:</b> одно окошко узнаёт находку в любом месте карты; смысл местности — в соседях, окошко на них и смотрит; дёшево; так читает карту AlphaStar.</li>
+            <li><b>Сжатие:</b> 16 384 клетки × отряды — слишком много пар; 1024 участка — в 16 раз меньше. <i>Без сжатия — отвергнуто.</i></li>
+            <li><b>Отвергнуто:</b> своя строка на каждую карту (новую карту не поймёт). Внимание по кусочкам и граф областей — запасные варианты.</li>
+          </ul>
+        </details>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-maptest">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done">
+        <h2>Проверки анализа карты <span class="chip done">решено</span></h2>
+        <div class="ginfo"><b>Когда проверяем</b>
+        <ul class="small">
+          <li><b>Не после каждого обучения.</b> Модуль проверяем выборочно и по поводу.</li>
+          <li><b>Поводы:</b> сеть странно ведёт себя с картой (лезет к краю, не видит зон); перед тем как расширять признаки; после большой переделки модуля; когда добавили рельеф или новые карты.</li>
+        </ul></div>
+        <details class="lgroup" open>
+          <summary>Проверки — 3 группы (нажми, чтобы раскрыть)</summary>
+          <div class="layers">
+            <details class="lacc"><summary><span class="ln">1 · При сборке</span><span class="kind">тесты кода, один раз, бесплатно</span></summary>
+              <div class="tlist"><ul class="small">
+                <li><b>Слои на входе правильные</b> — центр, доли на краю, «целиком внутри», сумма долей.</li>
+                <li><b>Окошко смотрит только рядом</b> — одна точка на пустой карте даёт ответ только вокруг неё.</li>
+                <li><b>Сдвиг</b> — сдвинули карту на клетку, признаки сдвинулись на клетку.</li>
+                <li><b>Новый слой ничего не ломает</b> — слой с нулевыми весами, ответ тот же до бита.</li>
+                <li><b>Края</b> — у края сетки признаки ведут себя как в середине (за краем — «за картой», а не ноль).</li>
+                <li><b>Размах чисел</b> — после каждого шага числа не улетают и не гаснут.</li>
+                <li><b>Зеркало</b> — повёрнутый бой даёт стороне 2 те же слои и признаки, что стороне 1.</li>
+              </ul></div></details>
+            <details class="lacc"><summary><span class="ln">2 · Выборочно, по поводу</span><span class="kind">после обучения, дёшево</span></summary>
+              <div class="tlist"><ul class="small">
+                <li><b>Мёртвые нейроны</b> — признак всегда 0 на любой карте. Лечение: другая функция включения, меньше шаг обучения.</li>
+                <li><b>Тесно</b> — все 32 признака заняты и по-настоящему разные. Лечение: расширить до 64.</li>
+                <li><b>Двойники</b> — признаки повторяют друг друга (таблица похожести).</li>
+                <li><b>Используется ли карта</b> — подменили карту: меняются ли решения генерала; доходит ли до модуля сигнал обучения.</li>
+              </ul></div></details>
+            <details class="lacc"><summary><span class="ln">3 · Когда появится рельеф</span><span class="kind">новые карты</span></summary>
+              <div class="tlist"><ul class="small">
+                <li><b>Не заучил ли одну карту</b> — проверка на картах, которых не было в обучении.</li>
+                <li><b>Не съело ли сжатие мелочь</b> — карта с узким проходом против карты без него: отличает ли сводка.</li>
+                <li><b>Опыт с размером</b> — 32 против 64 признаков, одинаковое время обучения.</li>
+              </ul></div></details>
+          </div>
+        </details>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">На будущее</div><div class="box later"><h2>Пробы в игре <span class="chip later">с картами игры</span></h2><ul class="small">
+      <li>Сейчас в игре проверять нечего: край арены уже замерен, зоны — из нашего сценария.</li>
+      <li>С картами игры: как координаты файла карты переходят в координаты боя; совпадают ли зоны-многоугольники с тем, где игра даёт ставить отряды; где край, за которым бегущие уходят.</li></ul></div></div></div>
+  </section>
+</template>
+
 <script>
 (function(){
   // the tree: levels → parts → topics; "ready" topics have a template, others show as not discussed yet
-  var tree=[
-    {n:"1. Замысел",parts:[
-      {n:"Входные параметры",topics:[{n:"Ландшафт",tpl:"tpl-landscape"},{n:"Армии"},{n:"Кто атакует"}]},
-      {n:"Обработка",topics:[{n:"Советники и совещание",tpl:"tpl-proc"}]},
-      {n:"Выход",topics:[]}]},
-    {n:"2. Группы на поле",parts:[]},
-    {n:"3. Отряды",parts:[]}
-  ];
-  var st={l:0,p:0,t:0};
-  try{var s=JSON.parse(localStorage.getItem("gen-tabs")||"null");if(s)st=s;}catch(e){}
-  function save(){try{localStorage.setItem("gen-tabs",JSON.stringify(st));}catch(e){}}
-  function row(id,items,cur,ready,onpick){
-    var el=document.getElementById(id);[].slice.call(el.querySelectorAll("button")).forEach(function(b){b.remove();});
-    items.forEach(function(it,i){var b=document.createElement("button");b.type="button";b.textContent=it.n;
-      if(i===cur)b.classList.add("on");if(!ready(it))b.classList.add("soon");
-      b.addEventListener("click",function(){onpick(i);});el.appendChild(b);});
-    el.hidden=items.length===0;
-  }
+  var nodes={landscape:{t:"Вход · Ландшафт",tpl:"tpl-landscape"},mapproc:{t:"Обработка · Анализ карты",tpl:"tpl-mapproc"},maptest:{t:"Проверка · Проверки анализа карты",tpl:"tpl-maptest"}};
+  var cur="landscape";
+  try{var sv=localStorage.getItem("gen-node");if(sv&&nodes[sv])cur=sv;}catch(e){}
+  [].forEach.call(document.querySelectorAll(".node"),function(b){var n=nodes[b.dataset.n];
+    b.addEventListener("click",function(){cur=b.dataset.n;try{localStorage.setItem("gen-node",cur);}catch(e){}render();document.getElementById("content").scrollIntoView({behavior:"smooth",block:"start"});});});
   function render(){
-    var L=tree[st.l]||tree[0];var parts=L.parts;if(st.p>=parts.length)st.p=0;
-    var P=parts[st.p];var topics=P?P.topics:[];if(st.t>=topics.length)st.t=0;var T=topics[st.t];
-    row("tLevel",tree,st.l,function(it){return it.parts.some(function(p){return p.topics.some(function(t){return t.tpl;});});},function(i){st.l=i;st.p=0;st.t=0;save();render();});
-    row("tPart",parts,st.p,function(it){return it.topics.some(function(t){return t.tpl;});},function(i){st.p=i;st.t=0;save();render();});
-    row("tTopic",topics,st.t,function(it){return !!it.tpl;},function(i){st.t=i;save();render();});
-    document.getElementById("crumbs").innerHTML="<b>"+L.n+"</b>"+(P?" → <b>"+P.n+"</b>":"")+(T?" → <b>"+T.n+"</b>":"");
+    [].forEach.call(document.querySelectorAll(".node"),function(b){b.classList.toggle("on",b.dataset.n===cur);});
+    var N=nodes[cur];document.getElementById("crumbs").innerHTML="<b>"+N.t+"</b>";
     var c=document.getElementById("content");c.innerHTML="";
-    if(T&&T.tpl){c.appendChild(document.getElementById(T.tpl).content.cloneNode(true));draw(c);}
+    if(N.tpl){c.appendChild(document.getElementById(N.tpl).content.cloneNode(true));draw(c);}
     else c.innerHTML='<div class="empty">Ещё не обсуждали. Дойдём по порядку.</div>';
   }
   function fillGrid(el,fn,w,h){var s="";for(var y=0;y<h;y++)for(var x=0;x<w;x++)s+='<i style="background:'+fn(x,y)+'"></i>';el.innerHTML=s;}
@@ -322,9 +483,65 @@ a{color:inherit}
     var W=14,H=12;function out(x,y){return x<1||y<1||x>=W-1||y>=H-1;}
     var g1=c.querySelector('[data-g="g1"]'),g2=c.querySelector('[data-g="g2"]'),f=c.querySelector('[data-g="fine"]');
     if(g1)fillGrid(g1,function(x,y){return out(x,y)?"var(--out)":"var(--field)";},W,H);
-    var tt={t1:function(x,y){return !out(x,y);},t2:function(x,y){return out(x,y);}};
-    var tc={t1:"var(--field)",t2:"var(--out)"};
-    Object.keys(tt).forEach(function(k){var el=c.querySelector('[data-g="'+k+'"]');if(el)fillGrid(el,function(x,y){return tt[k](x,y)?tc[k]:"var(--neutral)";},W,H);});
+    // example: the map edge cuts through cells (x 1.5..12.25, y 1.25..10.5) - edge cells get a share
+    var mx0=1.5,mx1=12.25,my0=1.25,my1=10.5;
+    function share(x,y){var ox=Math.max(0,Math.min(x+1,mx1)-Math.max(x,mx0)),oy=Math.max(0,Math.min(y+1,my1)-Math.max(y,my0));return ox*oy;}
+    function mixc(col,v){return "color-mix(in srgb,var("+col+") "+Math.round(v*100)+"%,var(--neutral))";}
+    var tdef={t1:{col:"--field",f:function(x,y){return share(x,y);}},t2:{col:"--out",f:function(x,y){return 1-share(x,y);}}};
+    Object.keys(tdef).forEach(function(k){var el=c.querySelector('[data-g="'+k+'"]');if(!el)return;var d=tdef[k];
+      fillGrid(el,function(x,y){return mixc(d.col,d.f(x,y));},W,H);
+      var one=el.children[1*W+1];if(one)one.style.boxShadow="0 0 0 3px var(--open)";
+      var zm=c.querySelector('[data-zoom="'+k+'"]');if(zm){var n=8,cx=1,cy=1,inside=0,h2="";for(var yy=0;yy<n;yy++)for(var xx=0;xx<n;xx++){var px=cx+(xx+0.5)/n,py=cy+(yy+0.5)/n,inn=(px>=mx0&&px<=mx1&&py>=my0&&py<=my1);var on=k==="t1"?inn:!inn;if(on)inside++;h2+='<i style="background:'+(on?"var("+d.col+")":"var(--neutral)")+'"></i>';}
+        zm.innerHTML=h2+'<span class="edge" style="left:'+((mx0-cx)*100)+'%;top:'+((my0-cy)*100)+'%"></span>';
+        var lb=c.querySelector('[data-zlbl="'+k+'"]');if(lb)lb.innerHTML='закрашено <b>'+inside+'</b> из '+(n*n)+' кусочков → доля <b>'+(inside/(n*n)).toFixed(2).replace(".",",")+'</b>';}});
+    [].forEach.call(c.querySelectorAll('[data-pg]'),function(el){var n=+el.dataset.pg,k=n===96?12:6;var h="";for(var i=0;i<k*k;i++)h+='<i></i>';el.innerHTML=h;el.style.gridTemplateColumns="repeat("+k+",1fr)";});
+    if(c.querySelector('[data-m]')){
+      var N=24;function o24(x,y){return x<2||y<2||x>=N-2||y>=N-2;}
+      function zm(x,y){return !o24(x,y)&&y>=N-6;} function zf(x,y){return !o24(x,y)&&y<6;}
+      var P="#8a5ad8";function pc(v){return "color-mix(in srgb,"+P+" "+Math.round(8+v*85)+"%,var(--panel))";}
+      function g(el,n,fn){var h="";for(var y=0;y<n;y++)for(var x=0;x<n;x++)h+='<i style="background:'+fn(x,y)+'"></i>';el.innerHTML=h;el.style.gridTemplateColumns="repeat("+n+",1fr)";}
+      var f=[function(x,y){return (!o24(x,y)&&(x===2||y===2||x===N-3||y===N-3))?1:0;},
+             function(x,y){return (zm(x,y)&&!zm(x,y-1))?1:0;},
+             function(x,y){return zf(x,y)?0.9:0;},
+             function(x,y){var dx=Math.abs(x-11.5),dy=Math.abs(y-11.5);return Math.max(0,1-Math.max(dx,dy)/8);}];
+      [].forEach.call(c.querySelectorAll('[data-m]'),function(el){var m=el.dataset.m;
+        if(m==="scan"){g(el,N,function(x,y){if(o24(x,y))return "var(--out)";if(zm(x,y))return "var(--mine)";if(zf(x,y))return "var(--foe)";return "var(--field)";});
+          [].forEach.call(el.children,function(ch,i){var x=i%N,y=Math.floor(i/N);if(x>=9&&x<=11&&y>=16&&y<=18){ch.style.boxShadow="inset 0 0 0 2px var(--open)";}});}
+        else if(m[0]==="f"){var k=+m[1];g(el,N,function(x,y){return pc(f[k](x,y));});}
+        else if(m==="p12"){g(el,12,function(x,y){var v=0;for(var a=0;a<2;a++)for(var b=0;b<2;b++)v=Math.max(v,f[0](x*2+a,y*2+b));return pc(v);});}
+        else if(m==="p6"){g(el,6,function(x,y){var v=0;for(var a=0;a<4;a++)for(var b=0;b<4;b++)v=Math.max(v,f[0](x*4+a,y*4+b));return pc(v);});}
+        else if(m==="vec"){var h="";for(var i=0;i<32;i++){var v=Math.abs(Math.sin(i*1.7+0.5));h+='<i style="background:'+pc(v)+'"></i>';}el.innerHTML=h;}
+        else if(m==="input"){var L=[function(x,y){return o24(x,y)?"var(--neutral)":"var(--field)";},function(x,y){return o24(x,y)?"var(--out)":"var(--neutral)";},
+            function(x,y){return zm(x,y)?"var(--mine)":"var(--neutral)";},function(x,y){return zf(x,y)?"var(--foe)":"var(--neutral)";},
+            function(x,y){return (!o24(x,y)&&y>8)?"var(--minev)":"var(--neutral)";},function(x,y){return (!o24(x,y)&&y<N-9)?"var(--foev)":"var(--neutral)";}];
+          var nm=["поле","за картой","наша зона","зона врага","наши передовые","передовые врага"];var h="";
+          for(var j=L.length-1;j>=0;j--){var gh='<div class="sl" style="left:'+(j*16)+'px;top:'+((5-j)*16)+'px"><div class="grid" style="grid-template-columns:repeat(12,1fr);gap:1px">';
+            for(var y=0;y<12;y++)for(var x=0;x<12;x++)gh+='<i style="background:'+L[j](x*2,y*2)+'"></i>';gh+='</div><span>'+nm[j]+'</span></div>';h+=gh;}
+          el.innerHTML=h;}
+      });
+    }
+    [].forEach.call(c.querySelectorAll('canvas[data-zc]'),function(cv){var x=cv.getContext("2d"),cs=getComputedStyle(document.documentElement);
+      function v(n){return cs.getPropertyValue(n).trim();}
+      var mode=+cv.dataset.zc,C=30,cols=10,rows=6,oy=0; x.clearRect(0,0,cv.width,cv.height);
+      // a rounded rectangle zone; for the vanguard modes the zone sits at the top/bottom and the band is the zone grown by b cells
+      var zx0=1.4,zx1=8.6,r=1.6,zy0,zy1,b=0;
+      if(mode<=2){zy0=1.6;zy1=6.2;}else{zy0=-3;zy1=1.2;b=2.6;}
+      function inRR(px,py,x0,y0,x1,y1,rr){if(px<x0||px>x1||py<y0||py>y1)return false;var cx=Math.min(Math.max(px,x0+rr),x1-rr),cy=Math.min(Math.max(py,y0+rr),y1-rr);return (px-cx)*(px-cx)+(py-cy)*(py-cy)<=rr*rr+1e-9;}
+      function inZone(px,py){return inRR(px,py,zx0,zy0,zx1,zy1,r);}
+      function inBand(px,py){return inRR(px,py,zx0-b,zy0-b,zx1+b,zy1+b,r+b);}
+      var yes={1:"--mine",2:"--foe",3:"--minev",4:"--foev"}[mode], zc=mode===3?"--foe":"--mine";
+      for(var j=0;j<rows;j++)for(var i=0;i<cols;i++){var all=true,any=false,zin=false;
+        for(var a=0;a<=8;a++)for(var bb=0;bb<=8;bb++){var px=i+a/8,py=j+bb/8,q;
+          if(mode<=2)q=inZone(px,py);else{q=!inBand(px,py);if(inZone(px,py))zin=true;}
+          all=all&&q;any=any||q;}
+        var X=i*C,Y=oy+j*C;x.fillStyle=all?v(yes):(mode>2&&zin?v(zc):v("--neutral"));x.fillRect(X+1,Y+1,C-2,C-2);
+        if(any&&!all){x.save();x.beginPath();x.rect(X+1,Y+1,C-2,C-2);x.clip();x.strokeStyle=v("--muted");x.lineWidth=1.5;for(var t=-C;t<C;t+=6){x.beginPath();x.moveTo(X+t,Y+C);x.lineTo(X+t+C,Y);x.stroke();}x.restore();}}
+      function rr(x0,y0,x1,y1,R){x.beginPath();x.moveTo(x0+R,y0);x.lineTo(x1-R,y0);x.arcTo(x1,y0,x1,y0+R,R);x.lineTo(x1,y1-R);x.arcTo(x1,y1,x1-R,y1,R);x.lineTo(x0+R,y1);x.arcTo(x0,y1,x0,y1-R,R);x.lineTo(x0,y0+R);x.arcTo(x0,y0,x0+R,y0,R);x.stroke();}
+      x.setLineDash([6,4]);x.strokeStyle=v("--open");x.lineWidth=3;
+      if(mode<=2)rr(zx0*C,oy+zy0*C,zx1*C,oy+zy1*C+400,r*C);else rr((zx0-b)*C,oy+(zy0-b)*C,(zx1+b)*C,oy+(zy1+b)*C,(r+b)*C);
+      x.setLineDash([]);
+      if(mode===4){x.save();x.translate(0,cv.height);x.scale(1,-1);x.restore();}
+    });
     var zz={z1:function(x,y){return y>=H-3;},z2:function(x,y){return y<=2;},z3:function(x,y){return y>3;},z4:function(x,y){return y<H-4;}};
     var zc={z1:"var(--mine)",z2:"var(--foe)",z3:"var(--minev)",z4:"var(--foev)"};
     Object.keys(zz).forEach(function(k){var el=c.querySelector('[data-g="'+k+'"]');if(el)fillGrid(el,function(x,y){return (!out(x,y)&&zz[k](x,y))?zc[k]:"var(--neutral)";},W,H);});
