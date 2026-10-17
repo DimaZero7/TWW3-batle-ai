@@ -59,6 +59,9 @@ class Hook:
         self.stats = {"traced": 0.0, "wanted": 0.0, "steps": 0}
         self.orig = {}
         self.landings = None
+        self.on_reset = None         # f(F, u, row) at a step replay's window start (places.FromRecording)
+        self.reset_every = 10
+        self.last_reset = None
 
     # ---- the State ----
     def adopt(self, st, params):
@@ -66,6 +69,7 @@ class Hook:
         self.params = params
         self.F = S.build(st, params, seed=self.seed, start_phase=bool(self.lab['melee'].get('start_phase')))
         self.x_last, self.z_last = st.u["x"].clone(), st.u["z"].clone()
+        self.last_reset = None
 
     def _pre(self, st, params, dt):
         u = st.u
@@ -85,6 +89,13 @@ class Hook:
                 F.dx = torch.where(back, bx, F.dx)
                 F.dz = torch.where(back, bz, F.dz)
         F.pend = torch.zeros_like(F.pend)
+        if self.on_reset is not None:
+            # the step replay's window start (st.t back on a whole recording row, every reset_every rows): the
+            # recorded soldiers' places (places.py)
+            t = float(st.t.min())
+            if abs(t - round(t)) < 1e-6 and round(t) % self.reset_every == 0 and round(t) != self.last_reset:
+                self.last_reset = round(t)
+                self.on_reset(F, u, int(round(t)))
         self.near = Near(F, u, self.lab)
         # the men's contact: unit pairs with a man of each within reach (formed combat distance + the other's radius)
         B, N = u["men"].shape

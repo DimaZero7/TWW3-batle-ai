@@ -218,3 +218,26 @@ def test_a_spell_knocks_men_down_and_the_lying_take_nothing():
     for _ in range(6):
         FK.tick(F, 0.5)
     assert not bool((F.down > 0).any())
+
+
+def test_places_from_the_recording_put_the_men_and_hold_the_shape():
+    # tools/nn/fighters/places.py: the living men onto the recorded places (least way), held as the unit's places
+    from tools.nn.fighters import places
+    st, F = build(army([(SWORDS, 0, 0, 0, 10)], [(CLANRATS, 0, 60, 180, None)]))
+    u = st.u
+    F.fixed = torch.zeros_like(F.valid)
+    F.fa, F.ff = torch.zeros_like(F.dx), torch.zeros_like(F.dx)
+    pts = torch.stack([torch.arange(10.0) * 0.8 - 3.6, torch.full((10,), 2.0)], 1).numpy()   # one line 2 m ahead
+    assert places.put(F, u, 0, 0, pts) == 10
+    px, pz = S.positions(F, u)
+    m = S.alive(F)[0] & (F.uid[0] == 0)
+    got = sorted(zip(px[0][m].tolist(), pz[0][m].tolist()))
+    assert all(abs(a - b) < 1e-4 and abs(c - 2.0) < 1e-4 for (a, c), b in zip(got, sorted(pts[:, 0].tolist())))
+    with places.installed():
+        sa, sf = S.slots(F, u)                      # the places are the recorded ones in the unit's frame
+        assert torch.allclose(sf[0][m], torch.full_like(sf[0][m], 2.0), atol=1e-4)
+        # turned with the unit: a quarter turn carries the recorded shape
+        u["b"] = torch.full_like(u["b"], 90.0)
+        gx, gz = S.to_world(u, F, *S.slots(F, u))
+        assert torch.allclose(gx[0][m], torch.full_like(gx[0][m], 2.0), atol=1e-4)
+    assert not torch.allclose(S.slots(F, u)[1][0][m], torch.full_like(sf[0][m], 2.0))   # outside: the formation

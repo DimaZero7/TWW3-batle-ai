@@ -186,6 +186,26 @@ once", no delay (CA's schema: the interval is between animation starts; a man wh
 The rest (+20-50 % in the first seconds) - more men within reach at contact in the game than the 0.1 s places count
 (the first wave's crush), open. So the lab's surplus in whole battles (1.37) is not the first blow.
 
+### Replay from the game's soldiers' places
+
+A battle recorded with the soldiers' places (`tools.build nn-arena ... --soldiers-every 1`: the bridge writes
+`nn_soldiers` once a second) is replayed so: at each window start every living man of the lab is put on a recorded
+place of his unit's men (nearest pairs), and those places in the unit's frame are his places for the window
+(`places.py`, `soldiersdata.py`; `python -m tools.nn.fighters.replay --runs <run> --places --geometry`). Two exam v2
+battles (seed 1000700001, the net itS26_15 against the game's AI; the second 479 s of ~950, interrupted), melee damage
+on whole units, sim / game:
+
+| Window start | Damage, all | Men within reach of an enemy a second (game 525) | Nearest enemy inside one's own formation (game 0.83) |
+|---|---|---|---|
+| Rectangle (the simulator) | 0.98 | - | - |
+| Men, a rectangle formation at the recorded centre | 1.45 | ~507 | 0.74 |
+| Men, places from the recording | 1.21 | 530 | 0.86 |
+
+The game's places take away about half the excess (1.45 -> 1.21); the men within reach are then as many as the
+game's, through all 9 s of the window (521-533 against 542-554 / 472-485 by battle). The rest is the damage per man
+within reach in big mêlées above the game's (one on one in the probes it matches). In the game mêlées are the rule:
+'nearest enemy inside one's own formation' for 83 % of the men within reach (31 % one on one in the probes). Open.
+
 ### Melee probes
 
 112 lanes of 11 plans of the melee probe (`tools/nn/charge_probe.py`: reform, reform2, dmgmelee, damaged, wave, armour,

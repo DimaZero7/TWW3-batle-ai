@@ -391,6 +391,10 @@ def nn_arena_config(args, run_config):
     run_config.update(nn_scenario.run_config(arena), own_ai=args.own_ai, enemy_role=enemy_role)
     if args.defend_radius is not None:
         run_config["defend_radius_m"] = args.defend_radius
+    if args.own_ai != "human" and args.soldiers_every:
+        # every soldier's place every this many ticks in any mode (research: the fighters lab's replay from the
+        # game's own places; a reading of all men takes ~50 ms)
+        run_config["soldiers_every"] = args.soldiers_every
     if args.own_ai == "net":
         run_config.update(own_role=own_role, decide_ms=args.decide_ms, poll_ms=NET_POLL_MS)
         if args.enemy_ai != "game":
@@ -400,7 +404,8 @@ def nn_arena_config(args, run_config):
             # the game's skirmish mode off for every unit a bridge commands (the simulator has none)
             run_config.update(skirmish="off")
     if args.own_ai == "human":
-        run_config.update(own_role=own_role, soldiers_every=args.soldiers_every)
+        run_config.update(own_role=own_role, soldiers_every=HUMAN_SOLDIERS_EVERY if args.soldiers_every is None
+                          else args.soldiers_every)
         if args.enemy_ai != "game":
             # side 2 under the companion: the network as side 2 ('net') or a script (tools/nn/companion/loop.py)
             run_config.update(enemy_ai="companion", enemy_script=args.enemy_ai, decide_ms=args.decide_ms,
@@ -471,8 +476,9 @@ def main(argv=None):
     parser.add_argument("--own-role", choices=("attack", "defend"),
                         help="nn-arena --own-ai net, human: our side attacks (the game's AI defends and wins on "
                              "timeout) or defends (default: the game's AI attacks)")
-    parser.add_argument("--soldiers-every", type=int, default=HUMAN_SOLDIERS_EVERY,
-                        help="human: every soldier's position every this many ticks (0: never)")
+    parser.add_argument("--soldiers-every", type=int,
+                        help="every soldier's position every this many ticks (0: never; default: human "
+                             f"{HUMAN_SOLDIERS_EVERY}, nn-arena never)")
     parser.add_argument("--army-seed", type=int,
                         help="nn-arena: a generated battle (tools/nn/armies, generate.battle(seed)): "
                              "armies of a lord and 0-19 units a side; EVAL seeds for checks")
@@ -562,7 +568,7 @@ def main(argv=None):
         parser.error("--skirmish is for nn-arena --own-ai net and human --enemy-ai (the bridge's units)")
     if args.free_speed and args.target != "human":
         parser.error("--free-speed is for the human target")
-    if args.soldiers_every < 0:
+    if args.soldiers_every is not None and args.soldiers_every < 0:
         parser.error("--soldiers-every must be 0 or more")
     if args.army_from_run is not None:
         if args.target not in ARENA_TARGETS:

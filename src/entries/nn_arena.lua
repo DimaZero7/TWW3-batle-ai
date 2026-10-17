@@ -30,7 +30,8 @@
 -- speed and pause it (no speed guard); the bridge's decisions and polls run on battle time, so a pause stops them
 -- and the decision interval stays decide_ms of battle time at any speed.
 -- config.observe = true adds the human's observer (apps.telemetry.observer_adapter) to any mode, without
--- the soldiers; config.cards = true also records every unit's card on change (nn_card), both sides
+-- the soldiers; config.soldiers_every = n > 0 adds it with the soldiers (nn_soldiers every n ticks; research only:
+-- the fighters lab's replay from the game's own places, tools/nn/fighters); config.cards = true also records every unit's card on change (nn_card), both sides
 -- (the lord against the game's AI: tools/nn/lord_ai.py).
 -- Each side may have its own army (tools/nn/scenario.py: named arenas).
 -- config.skirmish (with own_ai 'net'): 'off' turns the game's skirmish mode off for every unit a bridge commands
@@ -456,7 +457,8 @@ function M.main(bm, config, globals)
         end
         hand_over()
         if config.enemy_ai == 'scripted' then scripted_start(2) end
-        if config.observe then observe(0) end
+        -- config.soldiers_every in any mode (default off): every soldier's place every that many ticks (research)
+        if config.observe or (config.soldiers_every or 0) > 0 then observe(config.soldiers_every or 0) end
         if state.observer then state.observer.changes() end
         last_reissue = bm:time_elapsed_ms()
         state.stall = battle_services.new_stall_detector(config.stall_ms)

@@ -856,6 +856,24 @@ class TestNnArena:
         assert [r["fx"] for r in rows if r["event"] == "nn_effects" and r["u"] == "enemy_lord"] == [["rage"]]
         assert not [r for r in rows if r["event"] == "nn_soldiers"]
 
+    def test_soldiers_every_records_the_soldiers_in_any_mode(self, lua, tmp_path):
+        # config.soldiers_every outside the human's battle (the fighters lab's replay from the game's places): the
+        # observer with nn_soldiers every n ticks, both sides; off (absent) by default - see the test above.
+        lua.execute(self.SETUP + """
+            CONFIG.own_ai, CONFIG.soldiers_every = 'scripted', 2
+            local state = require('entries.nn_arena').main(bm, CONFIG, GLOBALS)
+            bm:pump()
+            for _ = 1, 5 do bm:tick() end
+            bm.outcome, bm.winner = true, 2
+            bm:tick()
+            assert(state.finished and state.observer ~= nil)
+        """)
+        rows = events(tmp_path / "tww3_bai_events.jsonl")
+        assert "error" not in [r["event"] for r in rows], [r for r in rows if r["event"] == "error"]
+        soldiers = [r for r in rows if r["event"] == "nn_soldiers"]
+        assert len(soldiers) == 3 and len(soldiers[0]["units"]) == 4     # ticks 1, 3, 5; both sides
+        assert {u["side"] for u in soldiers[0]["units"]} == {1, 2} and soldiers[0]["units"][0]["xz_dm"]
+
     def test_an_unknown_own_ai_is_an_error(self, lua, tmp_path):
         lua.execute(self.SETUP + """
             CONFIG.own_ai = 'dance'

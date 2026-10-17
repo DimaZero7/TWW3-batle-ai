@@ -81,6 +81,11 @@ class TestArenas:
         assert written[0]["enemy_role"] == "attack" and all(u["width"] for u in written[0]["units"]["enemy"])
         assert build.main(["nn-arena", "--own-ai", "net"]) == 0
         assert "enemy_ai" not in written[1] and "enemy_script" not in written[1]
+        assert "soldiers_every" not in written[1]                      # the soldiers' places: off by default
+        assert build.main(["nn-arena", "--own-ai", "net", "--soldiers-every", "1"]) == 0
+        assert written[2]["soldiers_every"] == 1
+        with pytest.raises(SystemExit):
+            build.main(["nn-arena", "--own-ai", "net", "--soldiers-every", "-1"])
         with pytest.raises(SystemExit):
             build.main(["nn-arena", "--own-ai", "attack", "--enemy-ai", "ai_like"])
 

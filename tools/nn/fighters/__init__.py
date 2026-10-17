@@ -10,5 +10,7 @@ simulator's step (hook.py) - apart from training; the simulator's files are not 
   shape.py   the shape numbers from men's places (numpy: the game's probes and the lab alike)
   probes.py  the probe lanes (charge_probe) with the men
   replay.py  the step replay with the men; card.py the comparison
+  soldiersdata.py  the game's recorded soldiers' places (nn_soldiers), the men-in-reach geometry
+  places.py  the step replay's windows from those places
   bench.py   speed
 """
