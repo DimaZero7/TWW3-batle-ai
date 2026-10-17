@@ -71,6 +71,7 @@ a{color:inherit}
 .lsub>summary{cursor:pointer;display:flex;gap:12px;align-items:baseline;padding:10px 12px}
 .lsub>summary .ln{font-weight:600}
 .layers.sub{padding:0 10px 10px}
+.later-row{border:1px dashed var(--line);border-radius:8px;padding:8px 12px}
 .lacc>summary{cursor:pointer;display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;padding:10px 12px;list-style-position:inside}
 .lacc>summary .ln{font-weight:600}
 .lacc[open]>summary{border-bottom:1px dashed var(--line)}
@@ -140,21 +141,36 @@ a{color:inherit}
           <li>В памяти: доли типов (по байту на тип) + 4 флага зон в одном байте; сейчас 3 байта на клетку, ~28 КБ на карту. На входе в сеть — слои долей + 4 слоя флагов (на мгновение, один раз на карту).</li>
         </ul></div>
         <details class="lgroup" open>
-          <summary>Слои карты: местность (по слою на тип) и развёртывание (4 флага)</summary>
+          <summary>Слои карты: местность (2 доли) и развёртывание (4 флага)</summary>
         <div class="layers">
-          <details class="lacc">
-            <summary><span class="ln">Местность — доли типов в клетке</span><span class="kind">по слою на тип, доля 0…1 → числом</span></summary>
-            <div class="lrow">
-            <div class="grid" data-g="g1" aria-label="Слой местности"></div>
-            <div class="linfo">
-              <b>Местность — доли типов</b>
-              <span class="kind">по слою на тип, доля 0…1 → числом</span>
-              <div class="leg">
-                <span><i class="sw" style="background:var(--field)"></i>доля «поле»</span>
-                <span><i class="sw" style="background:var(--out)"></i>доля «за картой»</span>
-              </div>
-              <span class="small">В каждой клетке — сколько в ней каждого типа (сумма = 1). Сейчас типов 2: поле и за картой, крайние клетки могут быть смешанными. С рельефом добавятся слои: лес, вода, непроходимо… — типы по механике.</span>
-            </div>
+          <details class="lsub">
+            <summary><span class="ln">Местность</span><span class="kind">доли типов в клетке, сумма = 1</span></summary>
+            <div class="layers sub">
+              <details class="lacc">
+                <summary><span class="ln">Поле</span><span class="kind">доля 0…1 → числом</span></summary>
+                <div class="lrow">
+                  <div class="grid" data-g="t1" aria-label="Поле"></div>
+                  <div class="linfo">
+                    <b>Поле</b>
+                    <span class="kind">доля 0…1 → числом</span>
+                    <div class="leg"><span><i class="sw" style="background:var(--field)"></i>1 — вся клетка</span><span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>0 — нет</span></div>
+                    <span class="small">Обычная проходимая земля.</span>
+                  </div>
+                </div>
+              </details>
+              <details class="lacc">
+                <summary><span class="ln">За картой</span><span class="kind">доля 0…1 → числом</span></summary>
+                <div class="lrow">
+                  <div class="grid" data-g="t2" aria-label="За картой"></div>
+                  <div class="linfo">
+                    <b>За картой</b>
+                    <span class="kind">доля 0…1 → числом</span>
+                    <div class="leg"><span><i class="sw" style="background:var(--out)"></i>1 — вся клетка</span><span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>0 — нет</span></div>
+                    <span class="small">Край мира: туда не пройти, бегущие уходят туда и выходят из боя насовсем. Это не «непроходимо» — механика другая.</span>
+                  </div>
+                </div>
+              </details>
+              <div class="later-row small">Потом, с рельефом: непроходимо (дома, обрывы), лес, вода… — по слою на тип по механике.</div>
             </div>
           </details>
           <details class="lsub">
@@ -217,6 +233,7 @@ a{color:inherit}
           <ul class="small">
             <li><b>Клетка всегда 16 м, а не «любая карта в 64×64».</b> Если растягивать, на маленькой карте клетка 8 м, на большой 24 м — сеть путает расстояния. <i>Отвергнуто.</i></li>
             <li><b>«За картой» со всех сторон, а не только справа и снизу.</b> Иначе у левого и верхнего края сеть не видит, что дальше хода нет. <i>Отвергнуто.</i></li>
+            <li><b>«За картой» — отдельный тип, не «непроходимо».</b> Пройти нельзя в обоих случаях, но за край бегущие уходят и выходят из боя насовсем, а дом или обрыв они обегают и остаются; за краем ничего нет. Разная механика — разные типы.</li>
             <li><b>Местность — доли, а не один тип на клетку.</b> «Кто больше места» теряет мелкие препятствия и смешанный край; «любое препятствие» закрывает проходы. Доли — величины, подаются числами. <i>Один тип на клетку — отвергнуто для генерала</i> (останется для подробной карты отрядов 2 м, там номер через словарик).</li>
             <li><b>Типы по механике, а не по виду.</b> Руины и обрыв — оба «нельзя пройти» (если механика одинаковая), разводить их незачем.</li>
             <li><b>96×96, потому что</b> самое большое полевое поле — 1536 м (данные игры: 980 карт, типичная 1024 м).</li>
@@ -305,6 +322,9 @@ a{color:inherit}
     var W=14,H=12;function out(x,y){return x<1||y<1||x>=W-1||y>=H-1;}
     var g1=c.querySelector('[data-g="g1"]'),g2=c.querySelector('[data-g="g2"]'),f=c.querySelector('[data-g="fine"]');
     if(g1)fillGrid(g1,function(x,y){return out(x,y)?"var(--out)":"var(--field)";},W,H);
+    var tt={t1:function(x,y){return !out(x,y);},t2:function(x,y){return out(x,y);}};
+    var tc={t1:"var(--field)",t2:"var(--out)"};
+    Object.keys(tt).forEach(function(k){var el=c.querySelector('[data-g="'+k+'"]');if(el)fillGrid(el,function(x,y){return tt[k](x,y)?tc[k]:"var(--neutral)";},W,H);});
     var zz={z1:function(x,y){return y>=H-3;},z2:function(x,y){return y<=2;},z3:function(x,y){return y>3;},z4:function(x,y){return y<H-4;}};
     var zc={z1:"var(--mine)",z2:"var(--foe)",z3:"var(--minev)",z4:"var(--foev)"};
     Object.keys(zz).forEach(function(k){var el=c.querySelector('[data-g="'+k+'"]');if(el)fillGrid(el,function(x,y){return (!out(x,y)&&zz[k](x,y))?zc[k]:"var(--neutral)";},W,H);});
