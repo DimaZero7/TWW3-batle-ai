@@ -86,3 +86,25 @@ def test_neighbour_scans_triton_match_torch():
     b = SC.push_scan(near, ax, az, up, rad_m, use_triton=True)
     assert float(a[0].abs().sum()) > 1.0
     assert torch.allclose(a[0], b[0], atol=1e-5) and torch.allclose(a[1], b[1], atol=1e-5)
+
+
+@cuda
+def test_unit_shape_by_the_contact_kernel_matches_torch():
+    # shape.unit_features' share of men in reach of an enemy: the contact kernel (no neighbour lists) = torch's lists
+    from tools.nn.fighters import shape
+    g, x, z, valid, hit, uid, radius, height = _men(M=900)
+    x, z = x * 0.5, z * 0.5                                     # dense: many men in reach
+    B, M = x.shape
+    N = radius.shape[1]
+    side_m = torch.where(uid < N // 2, 1, 2)
+    bearing = torch.rand((B, N), generator=g) * 360
+    men0 = torch.full((B, N), 120.0)
+    hp = torch.rand((B, N), generator=g)
+    args = [t.to("cuda") for t in (x, z, uid, valid, side_m, bearing, men0, hp)]
+    want = shape.unit_features(*args, N, use_triton=False)
+    got = shape.unit_features(*args, N, use_triton=True)
+    i = shape.FEATURES.index("contact")
+    assert float(want[..., i].sum()) > 0.5                       # men in reach of an enemy
+    diff = (got - want).abs().amax((0, 1))
+    # (the other features: the same sums, atomics' order on the GPU - float noise)
+    assert float(diff[i]) < 1e-6 and torch.allclose(got, want, rtol=1e-4, atol=1e-5), diff.tolist()

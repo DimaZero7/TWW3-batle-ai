@@ -53,6 +53,9 @@ class TestStep:
         assert out == {"drills": 0.1, "weights": {"a": 1}, "name": "plain"}
         with pytest.raises(SystemExit):
             step.apply_sets({}, ["novalue"], [])
+        # the fighters lab in a step of the chain: --set fighters=true is run.py's bare --fighters
+        assert step.option_args(step.apply_sets({}, ["fighters=true", "fighters-men=6144"], [])) == [
+            "--fighters", "--fighters-men", "6144"]
 
     def test_the_command_of_a_step(self, tmp_path, monkeypatch):
         t5, runs = chain_folders(tmp_path)

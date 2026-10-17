@@ -43,16 +43,23 @@ def _files0(u):
     return torch.minimum(torch.clamp(torch.floor(u["width"] / h + 1e-4), min=1), u["men0"].clamp(min=1))
 
 
-def build(st, params, seed=0, start_phase=False):
+def build(st, params, seed=0, start_phase=False, M=None, L=None, splash_S=None):
     """Fighters for every man of st (tools/nn/sim/state.State): at their places in their unit's formation, each with
     his passport's health; a unit that starts with fewer men than its men0 has the rest dead, and its missing health
-    (men x HP a man > its HP) comes off its men as wounds spread evenly (conform)."""
+    (men x HP a man > its HP) comes off its men as wounds spread evenly (conform).
+    M, L, splash_S: the batch's fixed sizes (training, tools/nn/train/men.py: rows rebuilt into a batch compiled for
+    them) - places a battle (at least its men: ValueError otherwise), splash men a battle (a splash unit's man beyond
+    them strikes one man, a warning), the most men a blow splashes (results the same for any value >= the batch's);
+    None: the batch's own."""
     u = st.u
     dev = u["men"].device
     B, N = u["men"].shape
     present = (u["side"] > 0)
     men0 = torch.where(present, u["men0"].round(), torch.zeros_like(u["men0"])).long()
-    M = max(1, int(men0.sum(1).max()))
+    need = max(1, int(men0.sum(1).max()))
+    if M is not None and need > M:
+        raise ValueError(f"fighters: a battle of {need} men in a batch of {M} places a battle")
+    M = need if M is None else int(M)
     files0 = _files0(u).long()
     m0, f0 = men0.cpu().tolist(), files0.cpu().tolist()
     uid = torch.zeros((B, M), dtype=torch.long)
@@ -109,14 +116,19 @@ def build(st, params, seed=0, start_phase=False):
                  sh=torch.zeros((B, N), device=dev), down=torch.zeros((B, M), device=dev), aim=torch.full((B, M), -1, dtype=torch.long, device=dev),
                  gen=torch.Generator(device=dev).manual_seed(seed + 1), u_ref=u, seed=int(seed),  # (eager draws)
                  tick=torch.zeros((), dtype=torch.long, device=dev),
-                 splash_S=int(u["splash"].max().clamp(min=1, max=8)) if bool((u["splash"] > 1).any()) else 1)
+                 splash_S=int(splash_S) if splash_S is not None else
+                 (int(u["splash"].max().clamp(min=1, max=8)) if bool((u["splash"] > 1).any()) else 1))
     if start_phase:
         # (lab.json melee.start_phase) each man's attack clock starts at a random point of his interval: the men of a
         # unit are not all ready to swing when it meets the enemy
         F.cd = torch.rand((B, M), generator=F.gen, device=dev) * u["interval"].gather(1, F.uid)
     # the men of splash units (melee.resolve: their blows split over the nearest men; static, padded with -1)
     sp_m = (u["splash"] > 1).gather(1, F.uid) & F.valid
-    L = max(1, int(sp_m.sum(1).max()))
+    need = max(1, int(sp_m.sum(1).max()))
+    if L is not None and need > L:
+        import warnings
+        warnings.warn(f"fighters: a battle of {need} splash men in a batch of {L}: the rest strike one man")
+    L = min(M, need if L is None else int(L))
     order = torch.argsort((~sp_m).to(torch.int8), dim=1, stable=True)[:, :L]
     F.splash_men = torch.where(sp_m.gather(1, order), order, torch.full_like(order, -1))
     hp_man = u["hp_man"].gather(1, F.uid)

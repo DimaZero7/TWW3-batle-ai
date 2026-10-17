@@ -376,8 +376,10 @@ def restart_rows(st, setup, source, rows, want=None):
 class Battles:
     def __init__(self, layout, scene_list=scenes.SCENES, device="cpu", params=None, spread=randomise.Spread(),
                  weights=reward.Weights(), seed=0, auto_reset=True, compile=None, source=None, cadence=None,
-                 teach=None, teach_normal=None, attack_only=league.ATTACK_ONLY, past_slots=1, dr=None):
+                 teach=None, teach_normal=None, attack_only=league.ATTACK_ONLY, past_slots=1, dr=None, men=None):
         self.device = torch.device(device)
+        # the fighters lab's men beside the state (tools/nn/train/men.Men; run.py --fighters); None: the plain simulator
+        self.men = men
         self.params = params or load()
         # domain randomisation of the simulator's uncertain numbers (tools/nn/train/dr.py Config; None: off)
         self.dr = dr
@@ -489,6 +491,8 @@ class Battles:
 
     def start(self):
         self.st, self.setup, idx = open_rows(self.source, self.want)
+        if self.men is not None:
+            idx = self._fit_men(torch.ones(self.B, dtype=torch.bool, device=self.device), idx)
         sim_abilities.set_rule(self.st.u, self.by_rule)
         sim_magic.leave_scripted(self.st.u, self.by_rule)     # the scripts' sides field no caster
         self.bank_row = idx.clone()
@@ -497,6 +501,8 @@ class Battles:
         randomise.apply(self.st, every, self.spread, self.gen)
         if self.dr is not None:
             uncertain.apply(self.st, every, self.dr, self.gen)
+        if self.men is not None:
+            self.men.open(self.st, self.params)            # the men at the (randomised) start places
         state = self.st.observation()
         self.mem = {s: ob.start(state, self.setup, s) for s in (1, 2)}
         self.cmem = {s: ob.start(state, self.setup, s) for s in (1, 2)}
@@ -990,10 +996,23 @@ class Battles:
             self.kind_stats.zero_()
         return {name: float(k[i] / max(1, k.sum())) for i, name in enumerate(O.KINDS)}
 
+    def _fit_men(self, rows, idx):
+        """The battles of rows (just taken from the bank as rows idx) with more men than the fighters' batch has places
+        for (men.Men.M) are taken again (a rare battle: none in 6,144 v2 battles at the default) -> the bank rows."""
+        big = self.men.too_big(self.st, rows)
+        for _ in range(64):
+            if not bool(big.any()):
+                return idx
+            idx = torch.where(big, restart_rows(self.st, self.setup, self.source, big, self.want), idx)
+            big = self.men.too_big(self.st, big)
+        raise RuntimeError(f"fighters: no battle of the bank fits {self.men.M} men (run.py --fighters-men)")
+
     def _reset(self, finished):
         if not bool(finished.any()):
             return
         idx = restart_rows(self.st, self.setup, self.source, finished, self.want)
+        if self.men is not None:
+            idx = self._fit_men(finished, idx)
         self.last_hit = torch.where(finished, torch.full_like(self.last_hit, -1.0), self.last_hit)
         self.hit_rate = torch.where(finished, torch.zeros_like(self.hit_rate), self.hit_rate)
         sim_abilities.set_rule(self.st.u, self.by_rule)
@@ -1004,6 +1023,8 @@ class Battles:
         randomise.apply(self.st, finished, self.spread, self.gen)
         if self.dr is not None:
             uncertain.apply(self.st, finished, self.dr, self.gen)
+        if self.men is not None:
+            self.men.restart(self.st, self.params, finished)   # their men anew at the (randomised) start places
         if self.teach_names:                     # a new battle: a new draw for the teacher's share
             self.teach_draw = torch.where(finished, torch.rand(self.B, generator=self.teach_gen, device=self.device),
                                           self.teach_draw)
@@ -1032,6 +1053,8 @@ class Battles:
         kl = keep.tolist()
         self.st = S.State({k: v[keep] for k, v in st.u.items()}, st.t[keep], st.attacker[keep], st.done[keep],
                           st.winner[keep], st.lord_dead_s[keep], st.bounds, [st.keys[i] for i in kl])
+        if self.men is not None:
+            self.men.narrow(st, self.st, keep)
         arrays = ob._Arrays(**{k: take(getattr(setup.arrays, k)) for k in scenes.LiveSetup.FIELDS})
         self.setup = scenes.LiveSetup(arrays, {s: setup.char[s][keep] for s in (1, 2)},
                                       [setup.factions[i] for i in kl])

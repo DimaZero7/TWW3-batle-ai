@@ -80,7 +80,8 @@ def combined(opponents, per_scene, n_scenes, scene_attacker=None, attack_only=()
 @torch.no_grad()
 def play(actor, opponents=OPPONENTS, per_scene=512, past=None, device="cpu", limit_s=3600.0, greedy=False,
          seed=1, scene_list=scenes.SCENES, compile=None, hold_defend=False, generated=None, max_units=19, small=None,
-         together=False, paired=True, baseline=False, compact=True, cuda_graph=True, cadence=None, measure=None):
+         together=False, paired=True, baseline=False, compact=True, cuda_graph=True, cadence=None, measure=None,
+         fighters=None):
     """-> {"by_opponent": {name: {games, wins, win_rate, seconds, hp_own_lost, hp_enemy_lost, timeouts,
     gold_destroyed, gold_lost (mean gold a battle, reward.gold_sides at the end), gold_ratio (their sums'
     ratio), gold_trade (mean (destroyed - lost) / budget),
@@ -118,14 +119,18 @@ def play(actor, opponents=OPPONENTS, per_scene=512, past=None, device="cpu", lim
 
     measure: the metric profiles to compute (tools/nn/train/profiles.py TEST5: "behaviour", "liveliness",
     "fatigue", "transfer"; None: all). Without "behaviour" / "liveliness" the "behaviour" blocks are {},
-    without "transfer" "transfer" is {}; the rest (wins, gold, pairs, lords, kinds, the rating) always."""
+    without "transfer" "transfer" is {}; the rest (wins, gold, pairs, lords, kinds, the rating) always.
+
+    fighters: () -> tools/nn/train/men.Men - the battles with the fighters lab's men (run.py --fighters; the hook
+    installed), no CUDA graph (the lab's step has eager parts); None: the plain simulator. The baselines stay the plain
+    simulator's."""
     out = {"by_opponent": {}, "by_scene": {}, "limit_s": limit_s, "greedy": greedy, "per_scene": per_scene,
            "battles": {}, "transfer": {}}
     only = () if hold_defend else league.ATTACK_ONLY
     groups = [tuple(opponents)] if together else [(n,) for n in opponents]
     for names in groups:
         res = _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, scene_list, compile, only,
-                         generated, max_units, small, paired, compact, cuda_graph, cadence, measure)
+                         generated, max_units, small, paired, compact, cuda_graph, cadence, measure, fighters)
         for name, (mine, rows, per) in ((k, v) for k, v in res.items() if k != _TRANSFER):
             out["by_opponent"][name] = mine
             out["by_scene"][name] = rows
@@ -442,9 +447,10 @@ class Graphed:
 
 def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, scene_list, compile, attack_only,
                generated=None, max_units=19, small=None, paired=True, compact=True, cuda_graph=True, cadence=None,
-               measure=None):
+               measure=None, fighters=None):
     """{name: (result, rows by scene, per-battle lists)} of the opponents `names`, played in one batch.
-    measure: as play()'s."""
+    measure, fighters: as play()'s."""
+    cuda_graph = cuda_graph and fighters is None
     params = rollout.params_with_limit(limit_s)
     if generated and paired:
         n_pairs = pair_count(generated)
@@ -475,7 +481,8 @@ def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, sce
                         j % n_sc + n_sc * (j // (2 * n_sc)))
         seeds_b = lay.scene
     env = rollout.Battles(lay, scene_list, device=device, params=params, spread=SPREAD,
-                          seed=seed, auto_reset=False, compile=compile, source=source, cadence=cadence)
+                          seed=seed, auto_reset=False, compile=compile, source=source, cadence=cadence,
+                          men=fighters() if fighters is not None else None)
     if "past" in names:
         env.set_past(past)
     B = env.B
@@ -986,12 +993,13 @@ def write_run(path, b, army, arena, side, opponent, source):
 
 @torch.no_grad()
 def record(actor, out=REPLAYS, opponents=("nearest", "hold_shoot", "hold", "ai_like", "self"), device="cpu", limit_s=3600.0, source="", seed=2,
-           scene_list=scenes.SCENES, compile=None, cadence=None):
+           scene_list=scenes.SCENES, compile=None, cadence=None, fighters=None):
     """Every scene from both sides against each opponent, written down per second; -> run folders.
-    cadence: the network's (tools/nn/train/cadence.py; default the game's)."""
+    cadence: the network's (tools/nn/train/cadence.py; default the game's); fighters: as play()'s."""
     lay = combined(opponents, 2, len(scene_list), scenes.attackers(scene_list), league.ATTACK_ONLY)
     env = rollout.Battles(lay, scene_list, device=device, params=rollout.params_with_limit(limit_s), spread=SPREAD,
-                          seed=seed, auto_reset=False, compile=compile, cadence=cadence)
+                          seed=seed, auto_reset=False, compile=compile, cadence=cadence,
+                          men=fighters() if fighters is not None else None)
     rec = check.Recorder(env.st)
     for _ in range(int(limit_s / env.decision_s) + 2):
         if bool(env.st.done.all()):

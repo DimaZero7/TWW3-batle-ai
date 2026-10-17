@@ -20,6 +20,7 @@ seconds the same. Writes (build/ is not in Git), in build/nn-train/runs/<name>/:
 and copies the final network to build/nn-train/latest.pt (the companion's default).
 """
 import argparse
+import contextlib
 import dataclasses
 import json
 import math
@@ -262,7 +263,31 @@ def reward_preset(args):
     return args
 
 
+def fighters_installed(args):
+    """--fighters: the fighters lab in the simulator for the run (tools/nn/train/men.py: the hook installed, nothing
+    built adopted, the units' shape for the network); else nothing."""
+    if not getattr(args, "fighters", False):
+        return contextlib.nullcontext()
+    from tools.nn.fighters import hook as fighters_hook
+    return fighters_hook.installed(seed=args.seed, shape=True, adopt=False, outside=False)
+
+
+def fighters_men(args, M="args"):
+    """--fighters: a new men.Men for a batch (M: places a battle; "args": --fighters-men, None: the batch's own -
+    evaluation); else None."""
+    if not getattr(args, "fighters", False):
+        return None
+    from tools.nn.train import men
+    return men.Men(M=args.fighters_men if M == "args" else M, seed=args.seed)
+
+
 def train(args, every=None, teacher=None, normal=None):
+    """_train with the fighters lab installed for it (--fighters)."""
+    with fighters_installed(args):
+        return _train(args, every, teacher, normal)
+
+
+def _train(args, every=None, teacher=None, normal=None):
     """every: (minutes, hook) - hook(actor, critic, minute, update) after every `minutes` of training
     (its time not counted as training: e.g. a full evaluation). teacher: with --drill-teach auto, the
     adaptive teacher (teach_auto.Auto; default: one with the init checkpoint's last drill numbers,
@@ -455,7 +480,10 @@ def train(args, every=None, teacher=None, normal=None):
                           source=source(), cadence=cadence, past_slots=slots,
                           teach=drills.load(list(teach0)) if teach0 else None,
                           teach_normal={n: loaded_normal[n] for n in normal_names} if normal_names else None,
-                          attack_only=defend_only, dr=dr_cfg)
+                          attack_only=defend_only, dr=dr_cfg, men=fighters_men(args))
+    if env.men is not None:
+        print(f"fighters lab: every man of the batch (tools/nn/train/men.py), {env.men.M} places a battle, the "
+              f"network sees the units' shape", flush=True)
     if dr_cfg is not None:
         print(dr_cfg.text(), flush=True)
     if normal_s:
@@ -509,6 +537,11 @@ def train(args, every=None, teacher=None, normal=None):
                                    ability_epochs=ab_epochs)
     if args.parts:                                # --parts: the minibatch in this many parts, whatever the size
         step_cfg = dataclasses.replace(step_cfg, accum=args.parts)
+    elif env.men is not None:
+        # --fighters: the batch's men stay on the card through the update (+1.2 GB at 1024 battles x 7168 places, the
+        # update's peak +2.5 GB): 2 parts peaked at 14.8 GB, the card spilled into its shared memory (a decision 0.23 ->
+        # 2.2 s, an update 18 -> 158 s); 3 parts take ~2 GB off the update's peak
+        step_cfg = dataclasses.replace(step_cfg, accum=max(step_cfg.accum, 3))
     log = (out / "log.jsonl").open("w", encoding="utf-8", newline="\n")
     print(f"{args.name}: battles {env.B} (learner rows {env.R}), slots {env.N}, up to {args.max_units} units a side "
           f"(armies {args.armies}), "
@@ -627,7 +660,11 @@ def train(args, every=None, teacher=None, normal=None):
             env.set_teach_shares(teacher.shares)
         if normal is not None:
             env.set_teach_shares(normal.shares)
+        if env.men is not None and torch.cuda.is_available():
+            torch.cuda.empty_cache()                  # --fighters: the update's cached blocks back for the men's steps
         batch = rollout.collect(env, actor, critic, args.steps)
+        if env.men is not None and torch.cuda.is_available():
+            torch.cuda.empty_cache()                  # ... and the steps' blocks back for the update
         t_c = time.time()
         # Schedules: the kind's entropy bonus and the KL to the reference go linearly from their start to
         # their end value over the run (e.g. exploration fades out).
@@ -884,12 +921,17 @@ def final_eval(path, args, summary, out):
     untrained = checkpoint.load_policy(args.eval_past or checkpoint.RANDOM, device)
     res = {"training": summary, "checkpoint": str(path)}
     t = time.time()
-    res["trained"] = evaluate.play(actor, past=untrained, device=device, limit_s=args.limit,
-                                   generated=args.eval_generated, max_units=args.max_units, cadence=cadence)
+    men = (lambda: fighters_men(args, None)) if getattr(args, "fighters", False) else None
+    with fighters_installed(args):
+        res["trained"] = evaluate.play(actor, past=untrained, device=device, limit_s=args.limit,
+                                       generated=args.eval_generated, max_units=args.max_units, cadence=cadence,
+                                       fighters=men)
     print(f"eval {path.name} {time.time() - t:.0f} s", flush=True)
     show(path.name, res["trained"])
     (out / "eval.json").write_text(json.dumps(res, indent=1), encoding="utf-8", newline="\n")
-    paths = evaluate.record(actor, out / "replays", device=device, limit_s=args.limit, source=str(path), cadence=cadence)
+    with fighters_installed(args):
+        paths = evaluate.record(actor, out / "replays", device=device, limit_s=args.limit, source=str(path),
+                                cadence=cadence, fighters=men)
     print(f"replays: {len(paths)} in {out / 'replays'}", flush=True)
     return res
 
@@ -907,6 +949,13 @@ def parser():
                     help="the size of a network started from random.pt (default: --init's, else small; a checkpoint "
                          "brings its own sizes)")
     ap.add_argument("--limit", type=float, default=3600.0, help="battle time limit, s (the defender wins at it)")
+    ap.add_argument("--fighters", action="store_true",
+                    help="the fighters lab in the training's simulator (tools/nn/train/men.py, "
+                         "docs/en/training/fighters_lab.md): every man a point with his health and place, the network "
+                         "sees the units' shape; the final evaluation too (the baselines stay the plain simulator's); "
+                         "off by default")
+    ap.add_argument("--fighters-men", type=int, default=7168,
+                    help="--fighters: places a battle (the batch's fixed size; a battle of more men is picked again)")
     ap.add_argument("--dr", nargs="?", const=str(uncertain.DEFAULT), default=None, metavar="JSON",
                     help="domain randomisation of the simulator's uncertain numbers (tools/nn/train/dr.py): each training "
                          "battle draws them inside the ranges of this file (no value: config/nn/dr.json); off by default")

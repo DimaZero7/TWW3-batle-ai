@@ -148,10 +148,13 @@ FEATURES = ("men_m2", "width_m", "depth_m", "skew_fwd_m", "skew_side_m", "contac
 GRID = 4
 
 
-def unit_features(px, pz, uid, live, side_m, bearing, men0, hp, N, reach=REACH_M, cell_m=3.6, cap=12, hash_size=8192):
+def unit_features(px, pz, uid, live, side_m, bearing, men0, hp, N, reach=REACH_M, cell_m=3.6, cap=12, hash_size=8192,
+                  use_triton=None):
     """[B, N, len(FEATURES) + GRID * GRID] (module docstring). Men [B, M]: px, pz (m), uid (the unit slot, long), live
     (bool), side_m (the man's side); units [B, N]: bearing (deg), men0 (men at the start), hp (health, a share of the
-    start). A unit with no living man: zeros. Needs torch."""
+    start). A unit with no living man: zeros. use_triton (None: on CUDA when Triton is there): the men in reach of an
+    enemy by the contact kernel (scans.contact_scan) straight from the cell table - the torch way builds the neighbour
+    lists [B, M, 9 x cap] (a training batch of 1024 battles x 7168 places: 6 GB a list). Needs torch."""
     import torch
     from tools.nn.fighters import cells
     B, M = px.shape
@@ -178,11 +181,21 @@ def unit_features(px, pz, uid, live, side_m, bearing, men0, hp, N, reach=REACH_M
     area = width.clamp(min=1.0) * depth.clamp(min=1.0)
     # in reach of an enemy man (the lab's neighbour cells)
     tab = cells.Table(px, pz, live, cell_m, hash_size)
-    cand = tab.query(px, pz, cap)
-    cxm, czm = cells.gather2(px, cand), cells.gather2(pz, cand)
-    d2 = (cxm - px[:, :, None]) ** 2 + (czm - pz[:, :, None]) ** 2
-    foe = (cand >= 0) & cells.gather2(live, cand) & (cells.gather2(side_m, cand) != side_m[:, :, None])
-    touch = (foe & (d2 <= reach * reach)).any(2) & live
+    from tools.nn.fighters.kernels import _triton_ok
+    if _triton_ok(px, use_triton):
+        from types import SimpleNamespace
+        from tools.nn.fighters import scans
+        side_u = torch.zeros((B, N), dtype=torch.long, device=dev).scatter_reduce(
+            1, uid, torch.where(live, side_m.long(), torch.zeros_like(uid)), reduce="amax")
+        near = SimpleNamespace(table=tab, px=px, pz=pz, cap=cap)
+        _, hi = scans.contact_scan(near, live, uid, side_u, zeros, reach, use_triton=True)
+        touch = (hi >= 0) & live
+    else:
+        cand = tab.query(px, pz, cap)
+        cxm, czm = cells.gather2(px, cand), cells.gather2(pz, cand)
+        d2 = (cxm - px[:, :, None]) ** 2 + (czm - pz[:, :, None]) ** 2
+        foe = (cand >= 0) & cells.gather2(live, cand) & (cells.gather2(side_m, cand) != side_m[:, :, None])
+        touch = (foe & (d2 <= reach * reach)).any(2) & live
     contact = usum(touch.float()) / nn_
     # the 4 x 4 box
     w_m, d_m = width.gather(1, uid).clamp(min=1e-3), depth.gather(1, uid).clamp(min=1e-3)

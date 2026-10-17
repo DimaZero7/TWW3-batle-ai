@@ -3,9 +3,10 @@
 [← Back](README.md) · [Documentation](../README.md) › [Training data](README.md) › The fighters lab · [Русский](../../ru/training/fighters_lab.md)
 
 A model where every man of a unit is a point of his own, with his own health, his place in the formation and his own
-blows. It lives apart from training: the code is `tools/nn/fighters/`, the simulator's files (`tools/nn/sim`,
-`config/nn`) are not changed and the simulator's version stays. The lab hooks into the simulator's step for the run
-and answers: how much closer to the game are the men than the rectangle, and what do they cost.
+blows. The code is `tools/nn/fighters/`, the simulator's files (`tools/nn/sim`, `config/nn`) are not changed and the
+simulator's version stays. The lab hooks into the simulator's step for the run and answers: how much closer to the
+game are the men than the rectangle, and what do they cost. Training with the men: the switch `run.py --fighters`
+(off by default; below, "In training").
 
 ## In short
 
@@ -365,6 +366,57 @@ How it works:
 - The kernels run through one torch op (`fighters::launch`): put straight into the compiled graph they ran 3-5x slower
   (the compiler lost their launch settings).
 
+## In training
+
+`run.py --fighters` (off by default; in the chain `python -m tools.ops.step ... --set fighters=true`): the training's
+simulator runs with the men in every batch of battles, the network sees the units' shape (the `SHAPE` input: the flag
+"shape present" = 1, the features from the men's places). Morale, routs, orders, fatigue, abilities are the
+simulator's, as in the lab. `--fighters-men` (7168): places a battle. The simulator's version does not change.
+
+How it works (`tools/nn/train/men.py`):
+
+- The lab is installed for the whole run (`hook.installed(adopt=False, shape=True, outside=False)`): the battles built
+  (the bank of armies) get no men; the men live beside the batch's state (`st.men`), and any state that has them steps
+  with them. A state without men steps with the plain (compiled) simulator - so do `test5`'s evaluations inside
+  training and the scripts' baselines: they stay the plain simulator's.
+- **A batch's start and a battle's restart.** The men are built after the battle is taken from the bank, its places
+  moved and its uncertain numbers drawn (`randomise`, `--dr`): a restarted battle's anew (its rows of the batch
+  replaced, the other battles untouched), the units' shape at once.
+- **The batch's sizes are fixed** - the step is compiled for them (a new size ~4 min of compiling): 7168 places a
+  battle (the v2 banks: 3,070 men a battle on average, p99 5,900, the largest 6,800 of 6,144 battles), up to 32 men of
+  units whose blow splashes (the banks: at most 2), a blow split 8 ways at most. A battle with too many men is taken
+  again from the bank (none in 6,144 battles).
+- **Ability branches** (`--ability-branch`): a battle's snapshot copies its men too (the `f/...` entries); both
+  branches, "pressed" and "not", start from the same men and the same random numbers; the branches repeat exactly
+  (test).
+- **Evaluation** (`evaluate.play(fighters=...)`; `run.py`'s final evaluation with `--fighters`): the batch has its men,
+  they follow their battles when the batch shrinks; no CUDA graph (the men's step has eager parts).
+- **Memory.** The batch's men stay on the card through the update (+1.2 GB at 1024 battles x 7168 places, the update's
+  peak +2.5 GB). With the minibatch in 2 parts the peak was 14.8 GB and the card spilled into its shared memory (a
+  decision 0.23 -> 2.2 s, an update 18 -> 158 s). So with `--fighters` the minibatch is in 3 parts by default and the
+  card's cache is released before and after the collection: peak 12.7 GB.
+- **The unit's shape** - the share of men within an enemy's reach is counted by the contact kernel straight from the
+  cell table (`shape.unit_features`, on the GPU): the neighbour lists [battles x places x 108] of such a batch would
+  take 6 GB.
+
+Speed (RTX 5070 Ti, 1024 battles, line S's options from `itS26_15`):
+
+| | Without men | With men | Ratio |
+|---|---|---|---|
+| Simulator step, ms (battles' start, hold orders) | 8.9 | 66.6 | 7.5 |
+| A decision (network + 2 steps), s | 0.110 | 0.229 | 2.1 |
+| Training, battle seconds a second (10 min; an update 37 / 56 s) | 1,710 (1,570-2,030) | 1,130 (1,080-1,370) | 1.5 |
+| Peak GPU memory, GB (the minibatch in 3 parts) | 11.5 | 12.7 | |
+| Warm-up (compiling), s: first time / from the cache | 35 | 251 + 247 (branches) / 71 | |
+
+The men's step on such a batch is 7.5 simulator steps (the lab's bench on 2,262 men: 1.7-2.8): by the profile the
+contact kernel (two passes: the step and the shape, ~12 ms), melee (~9 ms), the bodies' push (~7 ms) and sorting the
+cell table (~10 ms). Half the places are empty (3,100 men of 7,168 on average), but the kernels skip empty places.
+Training slows down less because much of it is not the step: the network, the update, the branches (the branches with
+the men 12 s an update against 6 s, the collection without them 22 against 11 s, the update 22 against 20 s). Without
+the men and with the minibatch in 2 parts (as line S runs) the peak is 13.5 GB: the card spilled into its shared memory
+too, 760 battle seconds a second instead of 1,710.
+
 ## How to run
 
 ```bash
@@ -376,6 +428,7 @@ DOCK_MEM=8g DOCK_BUILD=<main>/build bash tools/nn/dock.sh tools.nn.fighters.repl
 DOCK_MEM=8g DOCK_BUILD=<main>/build bash tools/nn/dock.sh tools.nn.fighters.replay --runs-from ... --out build/fighters/sr_rect --rect --device cuda --chunk 16
 python -m tools.nn.fighters.card build/fighters/sr_rect build/fighters/sr_fighters     # the table, no torch
 DOCK_MEM=8g bash tools/nn/dock.sh tools.nn.fighters.bench --B 256 1024                 # speed
+DOCK_MEM=12g bash tools/nn/dock.sh tools.nn.train.run --fighters ...                   # training with the men (above)
 python -m tools.nn.charge_probe run --plan magic --battles 6 --speed 3                  # the knock-down probe battle (the game)
 python -m tools.nn.fighters.knockdata build/charge-probe/runs/<run>                     # its reading
 ```
@@ -389,7 +442,8 @@ with hook.installed() as h:            # whatever is built inside (scenario.buil
 
 Tests: `tests/tools/test_nn_fighters_torch.py` (the container), `tests/tools/test_nn_fighters_kernels.py` (the
 container, the GPU: the kernels = torch), `tests/tools/test_nn_fighters_shape.py`, `tests/tools/test_magic_probe.py`
-(no torch). The replay: every batch of a new size compiles for ~4 min, so the batches are big - `--chunk 46` (92
+(no torch), `tests/tools/test_nn_train_men.py` (the container: training with the men - the switch, restarts, branches,
+evaluation). The replay: every batch of a new size compiles for ~4 min, so the batches are big - `--chunk 46` (92
 battles - 2 batches, 10 min with the compiling; it was 44 min in batches of 16, not compiled); a batch of 46 battles
 x 4 copies ran in a container of 10 GB (`DOCK_MEM=10g`).
 

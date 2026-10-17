@@ -227,6 +227,8 @@ def snapshot(env, idx, info):
         d["b/" + k] = getattr(env, k)[idx]
     d["lay/scene"], d["lay/learner"], d["lay/opponent"] = (np.asarray(getattr(env.layout, k))[il]
                                                            for k in ("scene", "learner", "opponent"))
+    if getattr(env, "men", None) is not None:
+        d.update(env.men.snap(st, idx))          # the fighters lab's men (run.py --fighters; men.py): "f/<field>"
     for k, v in env.cstate.items():
         d["commit/" + k] = _two(v, B)[idx]
     # the networks' memories after the decision, per battle and side
@@ -302,6 +304,8 @@ def branch_env(template, snap):
     u = {k[2:]: v.clone() for k, v in snap.items() if k.startswith("u/")}
     env.st = S.State(u, *(snap["st/" + k].clone() for k in ("t", "attacker", "done", "winner", "lord_dead_s")),
                      template.st.bounds, [list(r) for r in snap["keys"]])
+    if getattr(template, "men", None) is not None:
+        template.men.branch(template.st, env.st, snap)   # the snapshot's men (run.py --fighters)
     arrays = ob._Arrays(**{k: snap["setup/" + k].clone() for k in scenes.LiveSetup.FIELDS})
     env.setup = scenes.LiveSetup(arrays, {s: snap[f"char/{s}"].clone() for s in (1, 2)}, list(snap["factions"]))
     env.bounds2 = torch.cat([env.setup.bounds, env.setup.bounds])

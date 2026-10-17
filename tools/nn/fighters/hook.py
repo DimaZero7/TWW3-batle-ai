@@ -13,8 +13,11 @@ for (scenario.build while installed):
                included) is laid on the men struck; their health, the dead
   after the step  the unit's men and health are the men's; the men walk to their places or close on the man they
                fight (move.py)
-Everything else of the step runs as it is. Install with `with installed(lab=...):`; the State built inside gets its
-men (HOOK.F); a copy of it (st.clone(), the step replay's probe step) runs the plain simulator.
+Everything else of the step runs as it is. Install with `with installed(lab=...):`; a State built inside gets its
+men (st.men, the last one also HOOK.F); a copy of it (st.clone(), the step replay's probe step) runs the plain
+simulator. Training (tools/nn/train/men.py; installed(adopt=False)): nothing built is adopted, the training gives its
+states their men itself (Hook.attach) - every State with men steps with them (st.men: a batch, its ability branches,
+an evaluation), any other plainly (compiled as battle.stepper on CUDA).
 Speed: on CUDA the whole step - the simulator's and the men's - runs compiled (torch.compile, as battle.stepper; fixed
 sizes, the men's draws by a counter hash, state.rnd); an outside reset (the step replay's window start) is looked for
 before it, eager (one sync a step). installed(compile=False): eager.
@@ -91,7 +94,7 @@ def contact_pairs(F, lo, hi, N):
 
 
 class Hook:
-    def __init__(self, lab=None, params=None, seed=0, shape=False, compile=None):
+    def __init__(self, lab=None, params=None, seed=0, shape=False, compile=None, adopt=True, outside=True):
         self.lab = lab or LAB
         self.params = params
         self.seed = seed
@@ -111,6 +114,9 @@ class Hook:
         self.shape = shape           # the units' shape for the network after every step (u shape / shape_ok)
         self.reset_every = 10
         self.last_reset = None
+        self.adopt_built = adopt     # a State scenario.build makes gets its men (off in training: men.py attaches them)
+        self.outside = outside       # look for an outside reset before each step (_reset; training: none, men.py)
+        self.plain = None            # the plain simulator's step for a State without men (compiled on CUDA)
 
     @property
     def stats(self):
@@ -118,20 +124,25 @@ class Hook:
 
     # ---- the State ----
     def adopt(self, st, params):
-        self.st = st
         self.params = params
-        self.F = S.build(st, params, seed=self.seed, start_phase=bool(self.lab['melee'].get('start_phase')))
-        self.x_last, self.z_last = st.u["x"].clone(), st.u["z"].clone()
         self.last_reset = None
+        self.attach(st, S.build(st, params, seed=self.seed, start_phase=bool(self.lab['melee'].get('start_phase'))))
+
+    def attach(self, st, F):
+        """st steps with the men F from now on (st.men; the hook's current State and men): their units' last places
+        (F.x_last, z_last: _reset, _post) and the units' shape (shape=True) from them now."""
+        st.men = F
+        F.x_last, F.z_last = st.u["x"].clone(), st.u["z"].clone()
+        self.st, self.F = st, F
         if self.shape:
-            self._shape(st)
+            self._shape(st, F)
 
     def _reset(self, st):
         """An outside reset (the step replay's window start: the recording's places, men and health) - eager, before the
         (compiled) step: one sync a step."""
         u = st.u
         F = self.F
-        jump = (torch.sqrt((u["x"] - self.x_last) ** 2 + (u["z"] - self.z_last) ** 2) > 6.0) & (u["side"] > 0)
+        jump = (torch.sqrt((u["x"] - F.x_last) ** 2 + (u["z"] - F.z_last) ** 2) > 6.0) & (u["side"] > 0)
         dif = S.differs(F, u)
         any_jump, any_dif = torch.stack([jump.any(), dif.any()]).tolist()
         if any_jump:
@@ -172,14 +183,14 @@ class Hook:
         S.write_back(F, u)
         # a man lying (knock.py) stays where he fell while his unit moves on
         lying = (F.down > 0) & S.alive(F)
-        F.dx = torch.where(lying, F.dx - (u["x"] - self.x_last).gather(1, F.uid), F.dx)
-        F.dz = torch.where(lying, F.dz - (u["z"] - self.z_last).gather(1, F.uid), F.dz)
+        F.dx = torch.where(lying, F.dx - (u["x"] - F.x_last).gather(1, F.uid), F.dx)
+        F.dz = torch.where(lying, F.dz - (u["z"] - F.z_last).gather(1, F.uid), F.dz)
         MV.step(F, u, params, self.lab, dt, self.near)
         FK.tick(F, dt)
         F.tick = F.tick + 1
         if self.shape:
-            self._shape(st)
-        self.x_last, self.z_last = u["x"].clone(), u["z"].clone()
+            self._shape(st, F)
+        F.x_last, F.z_last = u["x"].clone(), u["z"].clone()
         self.near = None
 
     def _inner(self, st, orders, params, dt):
@@ -200,25 +211,32 @@ class Hook:
             self.compiled = torch.compile(self._inner, dynamic=False)
         return self.compiled
 
-    def _shape(self, st):
+    def _shape(self, st, F=None):
         """The units' shape from their men (fighters/shape.unit_features) into the state: u shape [B, N, 25],
         shape_ok [B, N] (a unit with living men) - the observation's SHAPE (tools/nn/model/observation.py)."""
-        from tools.nn.fighters import shape
-        u, F = st.u, self.F
-        px, pz = S.positions(F, u)
-        live = S.alive(F)
-        N = u["men"].shape[1]
-        u["shape"] = shape.unit_features(px, pz, F.uid, live, S.ugather(u, F, "side").long(), u["b"], u["men0"],
-                                         u["hp"], N)
-        u["shape_ok"] = (S.unit_count(F, live, N) > 0) & (u["side"] > 0)
+        u = st.u
+        u["shape"], u["shape_ok"] = shape_of(u, self.F if F is None else F)
 
     # ---- the patched functions ----
+    def _plain(self, st):
+        """The plain simulator's step of a State without men: as before the hook (adopt: the lab's own runs, eager), or
+        in training compiled on CUDA as battle.stepper (unless compile=False)."""
+        use = self.compile if self.compile is not None else torch.device(st.device).type == "cuda"
+        if self.adopt_built or not use:
+            return self.orig["step"]
+        if self.plain is None:
+            self.plain = torch.compile(self.orig["step"], dynamic=False)
+        return self.plain
+
     def step(self, st, orders, params=None, dt=None):
-        if st is not self.st or self.F is None:
-            return self.orig["step"](st, orders, params, dt)
+        F = getattr(st, "men", None)
+        if F is None:
+            return self._plain(st)(st, orders, params, dt)
+        self.st, self.F = st, F
         params = params or self.params
         dt = dt or params.dt
-        self._reset(st)
+        if self.outside:
+            self._reset(st)
         self.on = True
         try:
             out = self._runner(st)(st, orders, params, dt)
@@ -295,22 +313,37 @@ class Hook:
 
     def build(self, armies, params=None, device="cpu", per_side=None):
         st = self.orig["build"](armies, params, device=device, per_side=per_side)
-        from tools.nn.sim.params import load
-        self.adopt(st, params or load())
+        if self.adopt_built:
+            from tools.nn.sim.params import load
+            self.adopt(st, params or load())
         return st
+
+
+def shape_of(u, F):
+    """(shape [B, N, 25], shape_ok [B, N]) of the units from their men F (shape.unit_features; ok: a unit with living
+    men)."""
+    from tools.nn.fighters import shape
+    px, pz = S.positions(F, u)
+    live = S.alive(F)
+    N = u["men"].shape[1]
+    return (shape.unit_features(px, pz, F.uid, live, S.ugather(u, F, "side").long(), u["b"], u["men0"], u["hp"], N),
+            (S.unit_count(F, live, N) > 0) & (u["side"] > 0))
 
 
 HOOK = None
 
 
 @contextlib.contextmanager
-def installed(lab=None, params=None, seed=0, shape=False, compile=None):
+def installed(lab=None, params=None, seed=0, shape=False, compile=None, adopt=True, outside=True):
     """Patch the simulator's functions for the State built inside (module docstring); yields the Hook. shape: the units'
     shape for the network after every step (Hook._shape: the state's shape / shape_ok, observation SHAPE); compile:
-    the step compiled (None: on CUDA for a batch of COMPILE_MEN men or more, Hook._runner)."""
+    the step compiled (None: on CUDA for a batch of COMPILE_MEN men or more, Hook._runner). adopt: a State built
+    inside gets its men (False, training: the training attaches them, Hook.attach, and any other State steps plainly,
+    compiled on CUDA); outside: look for an outside reset of the units' places, men and health before each step
+    (Hook._reset; training keeps its men in step itself, tools/nn/train/men.py)."""
     global HOOK
     from tools.nn.sim import battle, geometry, magic, melee, missile, morale, scenario
-    h = Hook(lab, params, seed, shape=shape, compile=compile)
+    h = Hook(lab, params, seed, shape=shape, compile=compile, adopt=adopt, outside=outside)
     h.orig = {"step": battle.step, "contact_limit": geometry.contact_limit, "strikes": melee.strikes,
               "volley": missile.volley, "casualty_windows": morale.casualty_windows, "build": scenario.build,
               "magic_strikes": magic.strikes, "bombard": magic.bombard}
@@ -345,4 +378,4 @@ def installed(lab=None, params=None, seed=0, shape=False, compile=None):
         HOOK = None
 
 
-__all__ = ["installed", "Hook", "Near", "LAB", "math"]
+__all__ = ["installed", "Hook", "Near", "LAB", "shape_of", "math"]
