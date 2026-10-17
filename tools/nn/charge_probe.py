@@ -284,6 +284,10 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
   magic   the spellcasters (build/magic/plan.md 7): the Gold Wizard's Searing Doom and the Warlock Engineer's Warp
           Lightning cast by script (lane mode 'cast') on held targets, each side's winds every second - 3 battles of 4
           lanes; the lanes and their table: tools/nn/magic_probe.py.
+  crowd   who limits the blows in a crowd (the fighters lab): swordsmen attack clanrats cut to 5 / 15 men or full, and
+          with two more swordsmen units on the clanrats' flanks (extras attacking) full or cut to 25; both sides
+          attacking from 3 m, samples and the soldiers' places every 0.1 s - 1 battle of 5 lanes. Its table:
+          python -m tools.nn.fighters.crowddata <run> [--lab].
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -424,7 +428,7 @@ RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 # the new units' plans (tools/nn/unit_probe.py: their lanes, measures and table)
-UNIT_PLANS = ("ratling", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow")
+UNIT_PLANS = ("ratling", "ratlord", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow")
 # magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
 MAGIC_PLANS = ("magic",)
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
@@ -432,12 +436,17 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "ratlingrt", "ratlingrt2",
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
-         "sidecontact", "busycharge", "ratcharge", "swing") + UNIT_PLANS + MAGIC_PLANS
+         "sidecontact", "busycharge", "ratcharge", "swing", "crowd") + UNIT_PLANS + MAGIC_PLANS
 # the swing plan (the fighters lab's blow rate, tools/nn/fighters/swingdata.py): small units cut down to SWING_MEN men by
 # kill_number_of_men before the go, both attacking from 3 m; health and men every SWING_MS, the soldiers' places too -
 # each drop of a unit's health is a hit of one man (or a few at once): hits a second per man within reach
 SWING_MEN = {"five": 5, "one": 1, "full": 25}   # battle 2: 25 a side (the opening: many first contacts)
 SWING_MS = 100
+# the crowd plan (the fighters lab's damage in big contacts, tools/nn/fighters/crowddata.py): who limits the blows in a
+# crowd - the strikers or the men struck? Swordsmen attack clanrats from 3 m, both attacking: the clanrats cut down to
+# CROWD["small"] men (many strikers on few men), full (the control), and the same with two more swordsmen units on the
+# clanrats' flanks (3 units on one); samples and the soldiers' places every SWING_MS
+CROWD = {"small": (5, 15, 25), "flank_gap_m": 2.0, "fight_s": 60, "max_s": 75}
 # the walkpass plan: swordsmen walk / run (a move order, 'pass') past clanrats - idle (halted, never ordered) or busy
 # (fighting an Empire spearmen unit they attack at the go) - edge_m apart edge to edge (the formations 30 m wide), or
 # straight through them ('through'), from gap_m ahead to beyond_m behind the clanrats' front; 'inmelee': a fight from 3 m,
@@ -643,6 +652,21 @@ def battles(plan):
                 [cut("swords", "clanrat", full, "full_a"), cut("swords", "clanrat", full, "full_b"),
                  cut("gs", "svsh", full, "full_gs"), cut("spear", "clanrat", full, "full_spear"),
                  cut("swords", "clanrat", full, "full_charge", mode="attack_run", gap_m=40)]]
+    if plan == "crowd":
+        def cut(n, flanks=False):
+            t_men = UNITS["clanrat"][1]
+            extra = {}
+            if n:
+                extra["damage"] = {"t": {"method": "kill", "share": round((t_men - n + 0.5) / t_men, 4)}}
+            if flanks:
+                dx = round(WIDTH_M / 2 + depth(UNITS["swords"][0], UNITS["swords"][1]) / 2 + CROWD["flank_gap_m"], 1)
+                extra["extras"] = [{"short": "swords", "dx": dx, "dz": 0.0, "b": 270, "attack": True},
+                                   {"short": "swords", "dx": -dx, "dz": 0.0, "b": 90, "attack": True}]
+            kind = f"{'three' if flanks else 'one'}_{n or 'full'}"
+            return lane("swords", "clanrat", "attack_walk", "both", gap_m=3, fight_s=CROWD["fight_s"],
+                        max_s=CROWD["max_s"], kind=kind, **extra)
+        s_ = CROWD["small"]
+        return [[cut(s_[0]), cut(s_[1]), cut(None), cut(None, True), cut(s_[2], True)]]
     if plan == "charge":
         a = [lane("swords", "clanrat", m) for m in ("attack_run", "attack_walk", "move_run", "recharge")]
         out += [rotate(a, k) for k in range(4)]
@@ -1182,7 +1206,7 @@ def run_config(plan, index):
                                                                                                   "shootcontact", "recontact")
                               else 90 if plan in ("hit", "move", "vv") else 30),
               "lanes": lanes, "park": park}
-    if plan == "swing":
+    if plan in ("swing", "crowd"):
         config.update(tick_ms=SWING_MS, men_ms=SWING_MS, men_after_s=200)
     if plan in ("routmob", "routmob2", "passby"):
         config["men_after_rout_s"] = ROUTMOB_MEN_S
@@ -1485,7 +1509,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
         st.u[k] = st.u[k] + ((torch.rand(st.u[k].shape, generator=gen) * 2 - 1) * jitter_m).to(device)
     B, N = st.B, st.N
     slot = {r: torch.tensor([sim_scenario.slots(a, per_side).get(r, -1) for a in armies], device=device)
-            for r in ("a", "tg", "l", "t2", "e1")}
+            for r in ("a", "tg", "l", "t2", "e1", "e2", "e3")}
     # everyone fearless but a target that keeps its morale (t_morale: the routmob plan)
     keep = torch.zeros((B, N), dtype=torch.bool, device=device)
     for b, ln in enumerate(meta):
@@ -1697,10 +1721,12 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
                 kind[b, T], target[b, T], run_[b, T] = O.ATTACK, A, tmode[b] == "both"
             elif tmode[b] == "push":
                 kind[b, T], x[b, T], z[b, T], run_[b, T] = O.MOVE, sp["x"], sp["z"] + sp.get("push_m", 60), False
-            if int(slot["e1"][b]) >= 0 and (sp.get("extras") or [{}])[0].get("attack"):
-                # the busycharge plan's anvil: the first extra attacks the target at a walk from the go
-                E1 = int(slot["e1"][b])
-                kind[b, E1], target[b, E1], run_[b, E1] = O.ATTACK, T, False
+            for j, e in enumerate((sp.get("extras") or [])[:3], 1):
+                # an extra with attack (the busycharge plan's anvil, the crowd plan's flankers) attacks the target at a
+                # walk from the go
+                Ej = int(slot[f"e{j}"][b])
+                if Ej >= 0 and e.get("attack"):
+                    kind[b, Ej], target[b, Ej], run_[b, Ej] = O.ATTACK, T, False
             if sp.get("t_attack_extra") and int(slot["e1"][b]) >= 0:
                 # the walkpass plan's 'busy': the target attacks the first extra at a walk from the go
                 kind[b, T], target[b, T], run_[b, T] = O.ATTACK, int(slot["e1"][b]), False

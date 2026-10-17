@@ -8,6 +8,10 @@ Monks, the Plague Censer Bearers, the Wolf Rats (plain and poisoned) and the Hal
             lanes, rotated. Measures: crew and ammunition at the go, the first shot, bullets a second and a man, the bursts
             (ammo drops between gaps of 1+ s), the time to empty, HP the target lost per bullet, the target's phases (fx:
             suppressing fire?) and card speed;
+  ratlord   the gun's bullets on a lone man (the itS26_15 exam: our General out under the guns' fire, the simulator's
+            lone-man hits half the game's): the General 135 m off (front to front) facing the gun (his shield, 55 %, in its
+            60 deg) or his back to it, 100 m off his back to it (the ratling plan has him 100 m off facing), RATLORD_S -
+            3 battles of one lane (the army has one General). Measures: as ratling (HP per bullet);
   suppress  suppressing fire (R2): swordsmen attack the gun from SUPPRESS_GAP m at a walk / at a run, the gun aimed at them
             (fire at will, its skirmish mode off) or silent (never ordered: the control); the swordsmen's speed under fire and
             without, their card speed - 2 battles of 4 lanes (the gun fires on in melee: the phase never ends there);
@@ -51,6 +55,9 @@ RATLING_S = 200          # the game: a burst of 18 a man every ~12 s (7 s of fir
 # (kind, target, gap front to front m, share of the crew killed at placement)
 RATLING_LANES = (("d60", "swords", 60, None), ("d100", "swords", 100, None), ("d135", "swords", 135, None),
                  ("shield100", "spearsh", 100, None), ("half100", "swords", 100, 0.5), ("lord100", "general", 100, None))
+# one lord lane a battle (the army has one General); the ratling plan's lord100 lane (facing) is the 100 m front
+RATLORD_LANES = (("lord135_front", 135, "front"), ("lord100_back", 100, "back"), ("lord135_back", 135, "back"))
+RATLORD_S = 60           # the General (4068 HP) lives ~2 bursts at 100 m
 SUPPRESS_GAP = 120
 SUPPRESS2_STOP = {"walk_stop25": (True, 25), "run_stop15": (False, 15)}     # kind -> (walk, the gun silent after s)
 HITSLOW_SHOOTERS = ("hgun", "xbow")      # the hitslow plan's shooters (no contact effect): handguns flat, bolts arcing
@@ -82,6 +89,11 @@ def battles(plan):
                            kind=kind, **FX, **extra)
         base = [r(*x) for x in RATLING_LANES]
         return [_placed(base, k) for k in (0, 3)]
+    if plan == "ratlord":
+        def rl(kind, gap, face):
+            return cp.lane(RATLING, "general", "shoot", "hold" if face == "front" else "rear", gap_m=gap,
+                           fight_s=RATLORD_S, max_s=RATLORD_S, answer=False, kind=kind, **FX)
+        return [_placed([rl(*x)], 0) for x in RATLORD_LANES]
     if plan == "suppress":
         def s(kind, walk, fire):
             return cp.lane("swords", RATLING, "attack_walk" if walk else "attack_run", "skirmish" if fire else "hold",
@@ -458,7 +470,7 @@ def wolfpoison_measure(lane):
     return out
 
 
-MEASURE = {"ratling": ratling_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
+MEASURE = {"ratling": ratling_measure, "ratlord": ratling_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
            "hitslow": suppress_measure, "censer": censer_measure,
            "wolfrats": wolfrats_measure, "wolfpoison": wolfpoison_measure}
 
@@ -496,6 +508,7 @@ def _fmt(v):
 # The numbers the simulator's twin is checked on (report --sim: game | sim side by side), per plan
 KEY = {"ratling": ("first_shot_s", "bullets_per_s", "bullets_per_man_s", "bursts", "burst_bullets", "burst_s",
                    "burst_every_s", "hp_per_bullet", "tg_hp_per_s", "tg_men_lost", "tg_fx_first_s", "tg_card_speed_fx"),
+       "ratlord": ("first_shot_s", "bullets_per_s", "bursts", "burst_bullets", "hp_per_bullet", "tg_hp_per_s"),
        "suppress": ("contact_s", "speed_way", "speed_way_fx", "fx_share_way", "card_speed_fx", "shots",
                     "fx_after_last_shot_s"),
        "suppress2": ("contact_s", "speed_way", "speed_way_fx", "speed_way_nofx", "fx_share_way", "shots",

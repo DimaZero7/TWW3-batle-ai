@@ -117,7 +117,13 @@ def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
     # the target: kept while in reach, else the nearest (his unit's attack target first); the man he closes on
     ot = S.ugather(u, F, "order_target")
     pref_unit = torch.where((u["order_kind"] == O.ATTACK).gather(1, F.uid), ot, torch.full_like(ot, -1))
-    scan = (near, up, c_live, F.uid, u["side"], u["radius"], permit, F.tgt, pref_unit, combat, tether)
+    if not lab["melee"].get("prefer_target", True):
+        # (lab.json melee.prefer_target off) the nearest enemy man in reach, whatever his unit
+        pref_unit = torch.full_like(ot, -1)
+    # the reach: the formed combat distance plus the struck man's radius (lab.json melee.reach_radius; off: the distance
+    # alone, centre to centre)
+    rad = u["radius"] if lab["melee"].get("reach_radius", True) else torch.zeros_like(u["radius"])
+    scan = (near, up, c_live, F.uid, u["side"], rad, permit, F.tgt, pref_unit, combat, tether)
     keep, has, new_t, has_e, eng = SC.melee_scan(*scan)
     tgt = torch.where(keep, F.tgt, torch.where(has, new_t, torch.full_like(F.tgt, -1)))
     eng = torch.where(has_e, eng, torch.full_like(tgt, -1))
@@ -212,7 +218,7 @@ def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
         smc = sm.clamp(min=0)
         L = sm.shape[1]
         at = lambda t: t.gather(1, smc)
-        c_s, d_s, _, in_s, _ = SC.melee_rows(near, smc, up, c_live, F.uid, u["side"], u["radius"], permit, combat,
+        c_s, d_s, _, in_s, _ = SC.melee_rows(near, smc, up, c_live, F.uid, u["side"], rad, permit, combat,
                                              tether)
         dd = torch.where(in_s, d_s, torch.full_like(d_s, 1e9))
         dd = torch.where(c_s == at(tgt)[:, :, None], torch.full_like(dd, -1.0), dd)

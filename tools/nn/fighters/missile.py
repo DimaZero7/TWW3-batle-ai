@@ -23,7 +23,7 @@ import torch
 
 from tools.nn.fighters import kernels as K, state as S
 from tools.nn.fighters.melee import armour_roll
-from tools.nn.sim import geometry
+from tools.nn.sim import geometry, missile as sim_missile
 
 G = 9.81
 
@@ -126,7 +126,8 @@ def _trace(F, u, params, lab, sh, ok, target, near, live, salt=210):
     cosang = (fx * tx + fz * tz) / (torch.sqrt(fx * fx + fz * fz) * torch.sqrt(tx * tx + tz * tz)).clamp(min=1e-6)
     arc = math.cos(float(params.battle["shield_defence_angle_missile"]) * geometry.DEG)
     front = (cosang >= arc) & gu("small_arms")
-    block = front & (S.rnd(F, Pk, salt + 3) < u["shield"].gather(1, ku))
+    # (the simulator's missile.shield_ap_pierce: an armour-piercing projectile leaves the shield part of its chance)
+    block = front & (S.rnd(F, Pk, salt + 3) < u["shield"].gather(1, ku) * sim_missile.shield_pierce(u, params, i))
     resist = (u["resist_missile"].gather(1, ku) + u["resist_physical"].gather(1, ku)).clamp(max=0.9)
     amt = armour_roll(gu("m_damage"), gu("m_ap"), u["armour"].gather(1, ku), resist, gen, who.shape,
                       u01=S.rnd(F, Pk, salt + 4))

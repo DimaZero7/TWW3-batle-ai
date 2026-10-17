@@ -75,7 +75,11 @@ Artillery is in [artillery](artillery.md). Conventions: [index](README.md). Our 
   `missile_armour_piercing_coefficient` 0.5, `_penetrating_coefficient` 0.25,
   `missile_shield_piercing_coefficient` 0.5 are described (WH2) as parts of "missile damage
   resolution" with shield and armour bonuses; a WH3 player's formula from them contradicts the
-  shield % the game shows. Treat as legacy. · [twwstats][tws], [Attila guide][attila] · low for WH3.
+  shield % the game shows. · [twwstats][tws], [Attila guide][attila] · low for WH3.
+  - But a game measurement fits "shield x (1 - 0.5 x the armour-piercing share of the damage)": the Ratling Gun's
+    bullets (6 of 8 armour-piercing) on the General (shield 55 %) - facing / back 0.66 at 135 m and 0.68 at 100 m (the
+    `ratlord` probe), the rule 0.66, the plain shield 0.45. Ours: `missile.shield_ap_pierce` (off,
+    [simulator](../../training/simulator.md)).
 - **Armour against missiles** works as in melee (base part reduced by a random 50–100 % of
   armour, AP ignores it). Missile resistance and physical resistance (non-magical) apply; all
   resistances add up to a 90 % cap; a hit does at least 1 damage. · [CA damage blog][dmg] · high.

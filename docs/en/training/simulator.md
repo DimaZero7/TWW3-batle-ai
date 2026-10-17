@@ -910,8 +910,32 @@ Open (not these units' new mechanics - general ones):
 - The Giant Rats strike harder than the game's in the first second of contact (a charge 555 against 401 HP, into braced
   spearmen 543 against 230: the first strike swings every man of the wider front) and weaker at 5-15 s (0.75-0.8): in
   the game the beasts run in among the enemy's men (a third of those within 2.5 m are inside its box), not in the rule.
-- Bullets hit the lone General half as often as in the game (0.24 against 0.54 HP a bullet) - the general hole of hits
-  on a lord.
+- Bullets on the lone General (the `ratlord` probe, 2,880 bullets a lane; HP a bullet, game / simulator with both fixes
+  below): facing the gun at 100 m 0.52-0.57 / 0.37, his back to it 0.80 / 0.56; at 135 m facing 0.28 / 0.23, back
+  0.43 / 0.35. Without the shield the lone man's spread model gives 0.70-0.81 of the game - open (on arrows and slings
+  the lone man agrees).
+- **The guns on the lord in whole battles** (the step replay of the itS26_15 exam, the windows where the guns fire at
+  our lord out of melee; `build/night_mob`): the lord lost 0.10 of the game. Two causes, both behind switches (off by
+  default):
+  - `missile.spill_geometry.own_points` - a quadrature bug, no new number. The Hermite nodes (8 over the whole spread)
+    lie sigma / sin(theta) apart - for a flat bullet at 130 m 40 m, wider than a lone man's band (height / tan(theta),
+    34 m): his own hits came out 0, and any formation of his side ahead of him (within 120 m) or beside him took them
+    all. Now the target's own hits and a neighbour's hits are integrated over the landing points where their band is
+    not empty (Gauss-Legendre, `own_points` points, weighted by the landing density), and the neighbour takes the
+    target's own hits only where their spans overlap across. The gun on a standing General 130 m away, his health a
+    minute: alone 0.136; with swordsmen 34 m ahead of him 0.000 -> 0.130; with swordsmen 10 m beside him 0.122 -> 0.136;
+    11 m straight ahead of him 0.044 (the bullets below their heads - the swordsmen do catch them).
+  - `missile.shield_ap_pierce` - a shield blocks its chance x (1 - the database's `missile_shield_piercing_coefficient`
+    0.5 x the projectile's armour-piercing share of the damage). The `ratlord` probe: against the gun (6 of 8 damage
+    armour-piercing) the General with a 55 % shield loses facing / back 0.66 (135 m) and 0.68 (100 m), the rule gives
+    0.66, the plain shield 0.45. Arrows (2 of 19) on 35 % shields do not tell the rule from the plain shield (0.67 /
+    0.65, game 0.66).
+  - The windows' replay (lord HP lost, sim / game; lord out in the windows, game 4): the rectangle 0.10 -> 0.42 (spill)
+    -> 0.46 (both); out 0.25 -> 0.75; the lab's men (their own fire, no spill) 0.43 -> 0.46, out 1.0 / 0.5. In the
+    windows with none of his units on the line of fire the game loses 0.56 HP a bullet, the rectangle 0.05 -> 0.31;
+    with some, 0.31 and 0.02 -> 0.06: in the game the units near the lord take about half, in the simulator almost all.
+  - The replay of 92 battles with both fixes (`build/night_mob/r92_base`, `r92_fix`): damage under fire 0.90 -> 0.91,
+    men killed per health under fire 0.59 -> 0.59, routs 0.96 -> 0.97, melee unchanged - the fixes break nothing.
 - Projectiles on running beasts: crossbows and handguns on wolf rats faster than 4 m/s hit 1.4x the game's in the
   battles (a fast target moves from under the projectile in its flight - not in the hit model).
 

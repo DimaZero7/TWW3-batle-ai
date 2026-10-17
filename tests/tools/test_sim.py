@@ -543,6 +543,41 @@ class TestMissile:
         old, _ = self._spill(0.0, 18.0, params=self.OLD)
         assert 0 < old < aside                               # (the table: a share of the old rate-based hits)
 
+    @staticmethod
+    def _lone(dx, dz, own_points, pierce=False):
+        """The General's HP of one Ratling Gun volley at him 130 m away (x = 0, the gun at x = -130; he faces it), an
+        Empire swordsmen unit of his at (dx, dz) (None: none); spill_geometry.own_points, shield_ap_pierce as given."""
+        sg = dict(P.sim["missile"]["spill_geometry"], own_points=own_points)
+        params = P.with_cal("missile", spill_geometry=sg, shield_ap_pierce=pierce)
+        side1 = [("wh_main_emp_cha_general_0", 0.0, 0.0, 270, True)]
+        if dx is not None:
+            side1.append(("wh_main_emp_inf_swordsmen", dx, dz, 270))
+        st = scenario.build([army(side1, [("wh2_dlc12_skv_inf_ratling_gun_0", -130.0, 0.0, 90)], attacker=2)], params)
+        H = st.N // 2
+        pw = geometry.pairwise(st.u, params.sim["formation"]["spacing_m"])
+        target = torch.full((1, st.N), -1)
+        target[0, H] = 0
+        _, hp, _ = missile.volley(st.u, pw, target, 1.0, params)
+        return float(hp[0, H, 0])
+
+    def test_a_formation_ahead_of_a_lone_man_or_beside_him_keeps_off_his_hits(self):
+        """spill_geometry.own_points: a flat shot's Hermite nodes lie sigma / sin(theta) apart (40 m for the Ratling
+        Gun at 130 m), wider than a lone man's band, so off his own hits came out 0 and swordsmen 34 m ahead of the
+        General took them all; with the window quadrature he keeps them (they pass above the swordsmen), and a unit
+        beside him (not in his span across) takes none of them; a unit right in front of him (11 m) still does."""
+        alone = self._lone(None, 0.0, 8)
+        assert alone > 0 and self._lone(None, 0.0, 0) == pytest.approx(alone, rel=1e-6)
+        assert self._lone(-34.0, 5.0, 0) < 0.05 * alone                     # the bug, off
+        assert self._lone(-34.0, 5.0, 8) > 0.9 * alone
+        assert self._lone(0.0, 18.0, 8) == pytest.approx(alone, rel=1e-3)
+        assert self._lone(-11.0, 0.0, 8) < 0.5 * alone
+
+    def test_an_armour_piercing_bullet_leaves_the_shield_part_of_its_chance(self):
+        """missile.shield_ap_pierce: the General's shield (55 %) against the Ratling Gun (6 of 8 damage armour-piercing)
+        blocks 0.55 x (1 - 0.5 x 0.75) - the ratlord probe: facing / back 0.66 at 135 m, 0.68 at 100 m."""
+        off, on = self._lone(None, 0.0, 0), self._lone(None, 0.0, 0, pierce=True)
+        assert on / off == pytest.approx((1 - 0.55 * 0.625) / (1 - 0.55), rel=1e-3)
+
     def test_the_spill_quadrature_is_built_at_import_not_in_the_step(self):
         """spill_geometry's Gauss-Hermite points come from a table built at import (numpy inside the compiled step
         becomes CPU tensors, which inductor cannot compile without a C++ compiler): standard normal moments, the

@@ -152,9 +152,11 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
 - **The fighters lab** ([details](training/fighters_lab.md), `tools/nn/fighters/`; in training `run.py --fighters`, off by default): every man a point
   with his own health inside the simulator's step. On the replay of 92 battles men killed per health in thinned units and
   under fire come nearer the game (two-handers 0.24 -> 0.62), damage on thinned units 0.95; a man swings
-  once an interval, a miss too (the swing probe; the simulator charged a miss 0.5 s), whole battles' damage 1.37 - open: in the game the damage per
-  striker falls with the size of the contact (0.98 -> 0.18 of the formula from < 10 to 90+ strikers), in the lab it does
-  not - hence the mobs of 3+ units 1.33. Beasts (wolf rats) fight free, flowing round the enemy as in the game (56-64
+  once an interval, a miss too (the swing probe; the simulator charged a miss 0.5 s), whole battles' damage 1.37 - open. The game has no cap on how
+  many strike one man (the crowd probe: 5 rats surrounded by 120 swordsmen die 5.5 times as fast as under one striker;
+  the lab on the probe 1.0 of the game); the whole battles' excess is in the men of units whose order target is that
+  enemy (1.6 of the game already in the first second from the game's places), those striking an 'other' enemy 0.5; the
+  mobs of 3+ units are the same. Beasts (wolf rats) fight free, flowing round the enemy as in the game (56-64
   rats within reach against 17 formed). The step is
   compiled, Triton kernels look for the neighbours: 1024 battles 20.5 ms (1.7-2.8 simulator steps), 1.1 GB of the GPU.
   Training with the men ([in training](training/fighters_lab.md#in-training), `tools/nn/train/men.py`): the men with the

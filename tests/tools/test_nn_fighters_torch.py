@@ -346,3 +346,46 @@ def test_a_man_takes_at_most_k_attackers_blows():
         got.append((float(F.pend[0].sum()), float(men[0, 0, N // 2])))
     assert got[0][1] == got[1][1] and got[0][1] > 6               # the same swordsmen in reach, more than the rats
     assert 0 < got[1][0] < 0.6 * got[0][0]
+
+
+def _resolve_once(**melee_lab):
+    """One melee step of 120 swordsmen on 6 clanrats 6 m ahead (the swordsmen's unit permitted on them): (HP the
+    clanrats take, swordsmen with an enemy in reach), the lab's melee section changed by melee_lab."""
+    import copy
+    a = army([(SWORDS, 0, 0, 0, None)], [(CLANRATS, 0, 6.0, 180, 6)])
+    st, F = build(a)
+    u = st.u
+    N = st.N
+    lab = copy.deepcopy(hook.LAB)
+    lab["melee"].update(melee_lab)
+    permit = torch.zeros((1, N, N), dtype=torch.bool)
+    permit[0, 0, N // 2] = True
+    pw = geometry.pairwise(u, 1.5)
+    near = hook.Near(F, u, lab)
+    _, men = FM.resolve(F, u, P, lab, permit, pw, torch.zeros_like(u["men"]), 0.5, near)
+    return float(F.pend[0].sum()), float(men[0, 0, N // 2])
+
+
+def test_the_reach_is_the_combat_distance_plus_the_struck_mans_radius_or_alone():
+    # lab.json melee.reach_radius (on): 2.5 m + the struck man's radius; off: 2.5 m centre to centre - fewer in reach
+    _, n_on = _resolve_once()
+    _, n_off = _resolve_once(reach_radius=False)
+    assert n_on > n_off > 0
+
+
+def test_without_the_target_preference_a_man_strikes_the_nearest():
+    # lab.json melee.prefer_target (on): a man of his unit's attack target counts 2 m nearer; off: the nearest. With one
+    # enemy unit in reach both pick the same men
+    assert _resolve_once()[1] == _resolve_once(prefer_target=False)[1]
+
+
+def test_an_armour_piercing_shot_leaves_the_shield_part_of_its_chance():
+    # the simulator's missile.shield_ap_pierce (the lab's shield follows it): 1 - 0.5 x the AP share of the damage;
+    # the Ratling Gun (2 + 6 AP) keeps 0.625 of a shield's chance, off 1
+    from tools.nn.sim import missile as SM
+    u = {"m_damage": torch.tensor([[2.0, 17.0]]), "m_ap": torch.tensor([[6.0, 2.0]])}
+    on = P.with_cal("missile", shield_ap_pierce=True)
+    assert SM.shield_pierce(u, P).tolist() == [[1.0, 1.0]]
+    got = SM.shield_pierce(u, on)[0].tolist()
+    assert got[0] == pytest.approx(0.625) and got[1] == pytest.approx(1 - 0.5 * 2 / 19)
+    assert SM.shield_pierce(u, on, torch.tensor([[1, 1, 0]]))[0].tolist() == pytest.approx([got[1], got[1], got[0]])

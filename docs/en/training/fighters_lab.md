@@ -79,7 +79,8 @@ holding formation strikes at 0.5, a router is struck at 0.43 and so on (a blow l
 the unit's living men. Each aims at his own target man (keeps him while he lives - the simulator's `missile.reaim`), the
 projectile lands with the database's spread (calibration area, accuracy), flies below head height over its last h / tan
 theta metres and hits the first man on its way - enemy or friend. The shield of a man facing the shooter blocks its
-share. A hit takes that man's health.
+share (with the simulator's `missile.shield_ap_pierce` cut by the projectile's armour piercing, [simulator](simulator.md)).
+A hit takes that man's health.
 
 **Movement** (`move.py`). A man is carried by his unit's centre and walks to his place (at most his run). A front-rank
 man with an enemy in reach stands at the "standoff" from him (measured, below), at most 2 m from his place (the
@@ -257,15 +258,43 @@ The side of a blow does not explain the mêlées (the melee probes are the same 
   80+ - 1.77. The game loses about the same (14-29 x 1e-4 a second) however many enemies reach; the lab in proportion
   to the strikers. A mob of 3+ units is simply a big contact (often a fresh unit coming in: with a "fresh" striking
   unit, < 5 s in melee, 3+ units 1.59, without one 0.82-1.14).
-- The same in the one-on-one probes (112 lanes, 13-40 s after contact, the formula - chance x mean blow / interval): the
-  game's damage per striker within reach is 0.98 / 0.87 / 0.71 / 0.58 / 0.42 / 0.34 / 0.18 of the formula with < 10 /
-  10-20 / 20-30 / 30-45 / 45-60 / 60-90 / 90+ strikers. The lab's damage per striker does not depend on their number.
-  The probes agree with the game because they mostly have 15-25 strikers.
-- The mechanism is not found. "A man takes the blows of at most two enemies at a time" (`melee.max_attackers` 2, after
-  the database's `melee_max_hit_reactions` 2) flattens the probes up to 45 strikers, but breaks the men killed per
-  health in whole battles ("Tried and rejected"). "A blow only along a clear line" (nobody between the two men) explains
-  little: 0.59-0.83 of the strikers are clear. Needs a game probe that sees every man's blows in a crowd (men's places
-  and health every 0.1 s, one unit against 1 / 3 units).
+- "In the probes the damage per striker falls with the crowd" (0.98 -> 0.18 of the formula from < 10 to 90+ strikers)
+  was a counting error: the big crowds of the probes came from lanes where the attacker does not strike (the
+  meleeorders plan - an order to walk through the enemy, the game 0.00-0.14 of the formula; defender - a halt, a move
+  away), while its men stand within 3.15 m of the enemy. Without them 0.6-0.9 of the formula at any 14-32 strikers.
+
+**The crowd probe** (plan `crowd`, `build/charge-probe/runs/20261017-231623`, one battle; swordsmen attack clanrats from
+3 m, both sides attacking; the clanrats cut down to 5 / 15 / 25 men or full, one swordsmen unit on them or three - two
+more on the flanks; places and health every 0.1 s; `python -m tools.nn.fighters.crowddata <run> [--lab]`):
+
+| Lane | Clanrats' HP/s in the game, 0-3 / 3-10 / 10-30 s | Lab / game | Strikers in reach / men struck in reach |
+|---|---|---|---|
+| 1 unit -> 5 rats | 53 / 28 / - | 1.30 / 0.48 / - | 26 / 2.8 |
+| 1 unit -> 15 rats | 138 / 53 / 16 | 1.19 / 1.02 / 0.07 | 24 / 6.4 |
+| 1 unit -> full | 172 / 54 / 31 | 0.78 / 1.55 / 1.24 | 30 / 26 |
+| 3 units -> full | 253 / 173 / 75 | 1.28 / 1.03 / 1.11 | 25 / 22 |
+| 3 units -> 25 rats | 217 / 100 / 23 | 0.89 / 0.88 / 0.64 | 26 / 9 |
+| Sum over lanes | | 1.06 / 1.02 / 0.95 | |
+
+There is no cap on how many strike one man: 5 surrounded rats (2.8 within reach) lose 14 HP/s a rat - 5.5 strikers'
+blows by the formula; "each man struck takes at most K" fits for no K <= 5. The lab on these lanes is within the game's
+noise (sum 0.95-1.06). So the mobs of 3+ units are not a crowd mechanic.
+
+**Where the whole battles' excess is** (the replay of the 2 battles from the places, the victim unit's seconds, lab /
+game damage), by whose strikers:
+
+| Strikers on the victim | Seconds | Lab / game |
+|---|---|---|
+| all of units whose order target is this victim, standing, not fresh | 2,726 | 1.59 (the window's first second: 1.49) |
+| all of units with another target (an "other" enemy), standing | 3,595 | 0.50 |
+| some of moving units | 4,334 | 1.45 |
+| all seconds | 12,989 | 1.22 |
+
+The excess is in the "own target", already in the first second, when the men's places are exactly the game's, and the
+same at any crowd size (1.81 / 1.44 / 1.60 / 1.57 with 9 / 21 / 38 / 67 strikers). The "other target" is the
+opposite, half the game (`melee.unit_incidental` 0.45 balances their sum). A mob of 3+ units mixes the two with a bigger
+contact. How the game differs is not found; tried (no better, "Tried and rejected"): the choice of the enemy without the
+order target's preference (`melee.prefer_target`), the reach 2.5 m centre to centre (`melee.reach_radius`).
 
 ### Wolf rats (probes wolfrats, wolfpoison)
 
@@ -490,6 +519,9 @@ DOCK_MEM=8g bash tools/nn/dock.sh tools.nn.fighters.bench --B 256 1024          
 DOCK_MEM=12g bash tools/nn/dock.sh tools.nn.train.run --fighters ...                   # training with the men (above)
 python -m tools.nn.charge_probe run --plan magic --battles 6 --speed 3                  # the knock-down probe battle (the game)
 python -m tools.nn.fighters.knockdata build/charge-probe/runs/<run>                     # its reading
+python -m tools.nn.charge_probe run --plan crowd                                        # the crowd probe (game, 1 battle)
+python -m tools.nn.fighters.crowddata build/charge-probe/runs/<run>                     # its reading (no torch)
+DOCK_MEM=8g bash tools/nn/dock.sh tools.nn.fighters.crowddata build/charge-probe/runs/<run> --lab --device cuda   # and the lab
 ```
 
 ```python
@@ -508,9 +540,10 @@ x 4 copies ran in a container of 10 GB (`DOCK_MEM=10g`).
 
 ## Not there
 
-- The damage in big contacts: in the game the damage per striker within reach falls with their number (0.98 -> 0.18 of
-  the formula from < 10 to 90+ strikers), in the lab it does not; hence the mobs of 3+ units 1.33 and the free rats'
-  surplus. The mechanism is not found ("Mobs", above).
+- The damage in whole battles: the men of units striking their order target deal 1.6 of the game, those striking an
+  "other" enemy 0.5 (already in the first second from the game's places); hence the mobs of 3+ units 1.33 and the free
+  rats' surplus. In the probes (and in a crowd) as in the game. The mechanism is not found ("Where the whole battles'
+  excess is", above).
 - The share thrown by a spell is 2-5x below the game's (the knock probe battle): how the game throws men beyond the
   blast radius is not found.
 - The ellipse body (wolf rats) - the men are circles; the Ratling Gun's burst - at most 2 shots a man a step; a flat
@@ -538,6 +571,14 @@ x 4 copies ran in a container of 10 GB (`DOCK_MEM=10g`).
   over more men), 1 / 2 / 3+ units 0.82 / 0.70 / 0.91. On the General in the rats' probes 0.22 -> 0.02. The switch is
   kept, off.
 - **No "another target"** (`unit_incidental` 0): 3+ units 1.08-1.27, but 1 unit 0.88-1.00 - does not explain the mobs.
+- **A man strikes the nearest, no order target preference** (`--lab melee.prefer_target=false`; the replay of 2 battles
+  from the places, `build/night_mob/np_inc045`): "own target" 1.60 -> 1.51, "other" 0.50 -> 0.54, all 1.22 -> 1.19. With
+  `unit_incidental` 1 too (`np_inc1`): "other" 0.89, "own" 1.52, all 1.35 - the "own target" stays.
+- **The reach 2.5 m centre to centre** (`--lab melee.reach_radius=false`; the database does not say with the target's
+  radius or without): the replay of 2 battles - melee damage on whole units 1.14 -> 0.92, "own target" 1.60 -> 1.19,
+  80+ strikers 1.63 -> 1.33, but men killed per health lost 0.75 -> 0.66 (game 0.79); the melee probes (53 lanes with
+  the crowd) target HP 0-1 s 1.45 -> 1.12, 5-15 s 0.80 -> 0.63, steady 0.98 -> 0.90. The switch stays on (the radius
+  counts).
 
 - **Speed: neighbour lists through the compiler.** The whole step under `torch.compile`, the neighbours as lists
   [battles x men x 108], the compiler fusing the operations itself: 1024 battles 42.9 ms, three passes over the lists

@@ -377,9 +377,29 @@ def _hermite_table(n_max=32):
 _GH_TABLE = _hermite_table()
 
 
+def _legendre_table(n_max=32):
+    """Gauss-Legendre points and weights on [-1, 1] for 1..n_max points, as plain floats (built at import, as the
+    Hermite table)."""
+    import numpy as np
+    out = {}
+    for n in range(1, n_max + 1):
+        x, w = np.polynomial.legendre.leggauss(n)
+        out[n] = ([float(v) for v in x], [float(v) for v in w])
+    return out
+
+
+_GL_TABLE = _legendre_table()
+
+
 def _hermite(device, dtype, n):
     """Standard-normal quadrature points and weights (Gauss-Hermite) on the state's device."""
     x, w = _GH_TABLE[n]
+    return torch.tensor(x, device=device, dtype=dtype), torch.tensor(w, device=device, dtype=dtype)
+
+
+def _legendre(device, dtype, n):
+    """Gauss-Legendre points and weights on [-1, 1] on the state's device."""
+    x, w = _GL_TABLE[n]
     return torch.tensor(x, device=device, dtype=dtype), torch.tensor(w, device=device, dtype=dtype)
 
 
@@ -443,27 +463,67 @@ def spill_geometry(u, pw, target, params):
     xl = (aim[:, None] * hd_j[..., None, None] + c[..., None, None] + sa[..., None, None] * gx[None, :])   # [B, i, 1, qa, qg]
     w = (gw[None, :] / qa).expand(qa, qg)
 
-    def band(L_, c0, hd, step, cv):
-        lo = torch.maximum(xl - L_[..., None, None] - r[..., None, None], (c0 - hd)[..., None, None])
-        hi = torch.minimum(xl + r[..., None, None], (c0 + hd)[..., None, None])
+    def band(L_, c0, hd, step, cv, x=None):
+        x = xl if x is None else x
+        lo = torch.maximum(x - L_[..., None, None] - r[..., None, None], (c0 - hd)[..., None, None])
+        hi = torch.minimum(x + r[..., None, None], (c0 + hd)[..., None, None])
         inside = (hi - lo).clamp(min=0)
         n = torch.where(inside > 0, (inside / step[..., None, None]).clamp(min=1.0), torch.zeros_like(inside))
         return 1 - (1 - cv[..., None, None]) ** n, lo
-    pk, sk = band(Lk, b, half_d, step_along, cov1)                           # [B, i, k, qa, qg]
-    pj, sj = band(Lj, torch.zeros_like(hd_j), hd_j, step_along.gather(2, tj), cov1.gather(2, tj))
-    sv_k = step_along[..., None, None]
-    k_first = sk < sj - sv_k
-    j_first = sj < sk - sv_k
-    union = 1 - (1 - pj) * (1 - pk)
-    share = union / (pj + pk).clamp(min=1e-9)
-    hk = torch.where(k_first, pk, torch.where(j_first, pk * (1 - pj), pk * share))
-    hj = torch.where(j_first, pj, torch.where(k_first, pj * (1 - pk), pj * share))
+
+    def first(x):
+        pk, sk = band(Lk, b, half_d, step_along, cov1, x)                    # [B, i, k, qa, qg]
+        pj, sj = band(Lj, torch.zeros_like(hd_j), hd_j, step_along.gather(2, tj), cov1.gather(2, tj), x)
+        sv_k = step_along[..., None, None]
+        k_first = sk < sj - sv_k
+        j_first = sj < sk - sv_k
+        union = 1 - (1 - pj) * (1 - pk)
+        share = union / (pj + pk).clamp(min=1e-9)
+        hk = torch.where(k_first, pk, torch.where(j_first, pk * (1 - pj), pk * share))
+        hj = torch.where(j_first, pj, torch.where(k_first, pj * (1 - pk), pj * share))
+        return hk, hj, pj
+    hk, hj, pj = first(xl)
     hk = (hk * w).sum((-1, -2))                                              # [B, i, k]
     hj = (hj * w).sum((-1, -2))
     pj_alone = (pj * w).sum((-1, -2))                                        # [B, i, 1]
+    own_n = int(cfg.get("own_points") or 0)
+    if own_n:
+        # (missile.spill_geometry.own_points) j's own hits - what it keeps - over the landing points where its band is
+        # not empty, [-hd_j - r, hd_j + L_j + r] from its centre (Gauss-Legendre, own_n points, weighted by the landing
+        # density: the aim uniform over its depth, Gaussian along). The Hermite nodes above spread over the whole
+        # spread lie sigma / sin(theta) apart (a flat shot: 40 m at 130 m), wider than a lone man's band (his height /
+        # tan(theta), 34 m): his own hits came out 0, so any formation of his side ahead of him took them all - the
+        # Ratling Guns of the itS26_15 exam never hit our General behind his line
+        gx_, gw_ = _legendre(sig.device, sig.dtype, own_n)
+        lo_w = -hd_j - r.expand(-1, N, -1).gather(2, tj)                                       # [B, i, 1]
+        hi_w = hd_j + Lj + r.expand(-1, N, -1).gather(2, tj)
+        mid, half = 0.5 * (lo_w + hi_w), 0.5 * (hi_w - lo_w)
+        xo = mid[..., None, None] + half[..., None, None] * gx_[None, None, None, None, :]     # [B, i, 1, 1, n]
+        mu = aim[:, None] * hd_j[..., None, None] + c[..., None, None]                         # [B, i, 1, qa, 1]
+        dens = torch.exp(-0.5 * ((xo - mu) / sa[..., None, None]) ** 2) / (math.sqrt(2 * math.pi) * sa[..., None, None])
+        wo = dens * half[..., None, None] * gw_ / qa                                            # [B, i, 1, qa, n]
+        _, hj_o, pj_o = first(xo)
+        hj = (hj_o * wo).sum((-1, -2))
+        pj_alone = (pj_o * wo).sum((-1, -2))
+        # ... and each other formation k's hits over its own window [b - hd_k - r, b + hd_k + L_k + r]
+        lo_k, hi_k = b - half_d - r, b + half_d + Lk + r                     # [B, i, k]
+        mid_k, half_k = 0.5 * (lo_k + hi_k), 0.5 * (hi_k - lo_k)
+        xk = mid_k[..., None, None] + half_k[..., None, None] * gx_                            # [B, i, k, 1, n]
+        dens_k = torch.exp(-0.5 * ((xk - mu) / sa[..., None, None]) ** 2) / (math.sqrt(2 * math.pi) * sa[..., None, None])
+        hk_o, _, _ = first(xk)
+        hk = (hk_o * dens_k * half_k[..., None, None] * gw_ / qa).sum((-1, -2))
+        # across, k takes j's own hits only where its men stand in j's span: the share of j-aimed shots landing in the
+        # overlap of the two spans (min(lat_k, lat_j) counted a formation beside a lone man as standing in his way)
+        lo_c = torch.maximum(a - half_w - r, -hw_j)
+        hi_c = torch.minimum(a + half_w + r, hw_j)
+        both_keep = torch.where(hi_c > lo_c, (_uniform_phi(hi_c, hw_j, sig) - _uniform_phi(lo_c, hw_j, sig)).clamp(0, 1),
+                                torch.zeros_like(hi_c))
+        both_keep = torch.minimum(both_keep, lat_j)
+    else:
+        both_keep = both
     on_k = both * hk
     # j keeps its hits outside k's span in full; inside, hj of its pj_alone
-    keep_jk = 1 - both * (1 - hj / pj_alone.clamp(min=1e-9)) / lat_j.clamp(min=1e-9)
+    keep_jk = 1 - both_keep * (1 - hj / pj_alone.clamp(min=1e-9)) / lat_j.clamp(min=1e-9)
     side_j = u["side"].gather(1, t)[:, :, None]
     eye = torch.arange(N, device=t.device)[None, None, :] == tj
     other = (u["side"][:, None, :] == side_j) & ~eye & ((u["men"] > 0) & ~u["gone"])[:, None, :] & (u["men0"] > 1)[:, None, :]
@@ -676,6 +736,23 @@ def burst_cut(u, mask, spread_s=0.0):
     return cut
 
 
+def shield_pierce(u, params, shooter=None):
+    """[B, N] (with shooter [B, X]: those men's) the share of a shield's block chance left against the projectiles:
+    1 - missile_shield_piercing_coefficient x their armour-piercing share of the damage (missile.shield_ap_pierce; off:
+    1). Measured on the Ratling Gun (6 of 8 damage armour-piercing) at a lone General (55 % shield): his HP per bullet
+    facing the gun / his back to it 0.66 at 135 m, 0.68 at 100 m (the ratlord probe; config/nn/sim.json
+    missile.shield_ap_pierce_why), the rule 1 - 0.55 x (1 - 0.5 x 0.75) = 0.66, the plain block 0.45."""
+    ms = params.sim["missile"]
+    if shooter is None:
+        m_d, m_a = u["m_damage"], u["m_ap"]
+    else:
+        m_d, m_a = u["m_damage"].gather(1, shooter), u["m_ap"].gather(1, shooter)
+    if not ms.get("shield_ap_pierce"):
+        return torch.ones_like(m_d)
+    coef = float(params.battle.get("missile_shield_piercing_coefficient", 0.0))
+    return 1 - coef * m_a / (m_d + m_a).clamp(min=1e-6)
+
+
 def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, catch=None):
     """Shots, and HP taken per pair [B, N, N] (i shoots, f is hit) this step; per-hit damage
     [B, N, N]. clear [B, N]: share of the shooter's men with a clear line (clear_shot; None: all).
@@ -772,6 +849,7 @@ def volley(u, pw, target, dt, params, contact=None, clear=None, loaded=None, cat
     # a shield blocks small arms only (build/shields/spec.md S4); every projectile of our roster is one
     front = (pw["rel_j"].abs() <= B["shield_defence_angle_missile"] * geometry.DEG) & u["small_arms"][:, :, None]
     shield = torch.where(front, u["shield"][:, None, :], torch.zeros_like(dist))
+    shield = shield * shield_pierce(u, params)[:, :, None]
     # Resistance: missile; with missile.physical_resist also physical (CA: physical resistance works against all
     # non-magical damage, the sum at most 90 %; config/nn/sim.json missile.physical_resist_why).
     resist = u["resist_missile"]
