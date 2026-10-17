@@ -71,6 +71,12 @@ a{color:inherit}
 .kind{font-family:var(--f-mono);font-size:14px;color:var(--done)}
 .kind.open{color:var(--open)}
 @media (max-width:520px){.lrow{grid-template-columns:1fr}}
+.flowv{display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:center}
+.nd2{border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--bg);font-size:15px}
+.nd2 span{color:var(--muted);font-size:13px}
+.nd2.m{font-weight:600}
+.nd2.wide{grid-column:1 / -1;font-weight:600}
+.nd2.out2{background:var(--open-bg);color:var(--open)}
 .why{border-top:1px dashed var(--line);padding-top:8px}
 .why summary{cursor:pointer;font-size:14px;font-weight:600;color:var(--done)}
 .why summary:focus-visible{outline:2px solid var(--open);outline-offset:2px}
@@ -128,23 +134,46 @@ a{color:inherit}
               <span class="small">Потом: лес, вода, непроходимо… — типы по механике.</span>
             </div>
           </div>
-          <div class="lrow pending">
-            <div class="grid" data-g="g2" aria-label="Слой зон"></div>
+          <div class="lrow">
+            <div class="grid" data-g="z1" aria-label="Слой 2 · наша зона"></div>
             <div class="linfo">
-              <b>Слой 2 · зоны развёртывания</b>
-              <span class="kind open">вид слоя — открытый вопрос</span>
-              <div class="leg">
-                <span><i class="sw" style="background:var(--mine)"></i>наша</span>
-                <span><i class="sw" style="background:var(--foe)"></i>врага</span>
-                <span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>ничья</span>
-              </div>
-              <span class="small">Передовые области накладываются — как их хранить, решаем (см. «Открытые вопросы»).</span>
+              <b>Слой 2 · наша зона</b>
+              <span class="kind">флаг да/нет → числом</span>
+              <div class="leg"><span><i class="sw" style="background:var(--mine)"></i>да</span><span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>нет</span></div>
+              <span class="small">Где наши стоят в начале.</span>
+            </div>
+          </div>
+          <div class="lrow">
+            <div class="grid" data-g="z2" aria-label="Слой 3 · зона врага"></div>
+            <div class="linfo">
+              <b>Слой 3 · зона врага</b>
+              <span class="kind">флаг да/нет → числом</span>
+              <div class="leg"><span><i class="sw" style="background:var(--foe)"></i>да</span><span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>нет</span></div>
+              <span class="small">Где враги стоят в начале. Основные зоны никогда не пересекаются.</span>
+            </div>
+          </div>
+          <div class="lrow">
+            <div class="grid" data-g="z3" aria-label="Слой 4 · можно нашим передовым"></div>
+            <div class="linfo">
+              <b>Слой 4 · можно нашим передовым</b>
+              <span class="kind">флаг да/нет → числом</span>
+              <div class="leg"><span><i class="sw" style="background:var(--minev)"></i>да</span><span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>нет</span></div>
+              <span class="small">Почти всё поле, кроме полосы ~42 м вокруг зоны врага.</span>
+            </div>
+          </div>
+          <div class="lrow">
+            <div class="grid" data-g="z4" aria-label="Слой 5 · можно передовым врага"></div>
+            <div class="linfo">
+              <b>Слой 5 · можно передовым врага</b>
+              <span class="kind">флаг да/нет → числом</span>
+              <div class="leg"><span><i class="sw" style="background:var(--foev)"></i>да</span><span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>нет</span></div>
+              <span class="small">То же для врага. Слои 4 и 5 накладываются посередине.</span>
             </div>
           </div>
         </div>
         <ul class="small">
           <li>Клетка всегда 16 м. Сетка 96×96 клеток (= 1536 м, самая большая полевая карта). Типичная карта 1024 м занимает середину 64×64. Клетки «за картой» окружают карту со всех сторон — край виден везде.</li>
-          <li>Память: ~18 КБ на карту (2 слоя по байту на клетку).</li>
+          <li>В памяти 2 байта на клетку: тип местности + 4 флага зон в одном байте; ~18 КБ на карту. На входе в сеть — 5 слоёв (на мгновение, один раз на карту).</li>
         </ul>
         <details class="why">
           <summary>Почему так и что отвергли</summary>
@@ -165,15 +194,9 @@ a{color:inherit}
     <div class="side">
       <div>
         <div class="colh">Открытые вопросы</div>
-        <div class="box open">
-          <h2>Ответ найден — нужно утвердить <span class="chip open">ждёт тебя</span></h2>
-          <div class="q"><b>2. Зоны развёртывания</b>
-            <span class="small">Основные зоны врагов <b>не пересекаются</b> (1043 пары, зазор ≥ 8 м). Отдельной передовой зоны в игре нет: отряд с передовым развёртыванием ставится где угодно, кроме полосы ~42 м вокруг зоны врага. Значит, «где могут стоять наши передовые» и «где могут стоять передовые врага» <b>накладываются</b>.</span>
-            <div class="zones" data-g="zones" aria-label="Пример флагов зон"></div>
-            <span class="small"><b>Предложение:</b> вместо одного слоя с пятью типами — 4 флага да/нет в клетке: наша зона · зона врага · сюда можно нашим передовым · сюда можно передовым врага. Союзники делят зону своей стороны.</span></div>
-          <div class="q"><b>Попутно</b><span class="small">Сейчас ни зоны, ни границы поля в бой к нам не попадают: сценарий ставит армии квадратами 300×300 м. Зоны можно прочитать заранее из файлов карт.</span></div>
-        </div>
+        <div class="box"><span class="small">Открытых вопросов по ландшафту нет.</span></div>
       </div>
+
       <div>
         <div class="colh">На будущее — не в первой версии</div>
         <div class="box later">
@@ -198,13 +221,44 @@ a{color:inherit}
   </section>
 </template>
 
+<template id="tpl-proc">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done">
+        <h2>Советники + совещание <span class="chip done">решено</span></h2>
+        <div class="flowv">
+          <div class="nd2">5 слоёв карты</div><div class="nd2">карточки армий</div>
+          <div class="nd2 m">советник карты<br><span>свёртка → 32 своих слоя → сжатие 96×96 → 24×24</span></div><div class="nd2 m">советник армий<br><span>внимание между отрядами</span></div>
+          <div class="nd2 wide">совещание: 576 участков ⇄ отряды (кросс-внимание)</div>
+          <div class="nd2 wide out2">замысел</div>
+        </div>
+        <ul class="small">
+          <li>Две части со своими весами + пучок «совещания»; учатся вместе, одной ошибкой.</li>
+          <li>Карта сжимается до 24×24 = 576 участков перед совещанием.</li>
+          <li>Бой 40×40: ~46 тыс. пар на бой, доли миллисекунды; память для обучения ~190 МБ на слой совещания.</li>
+        </ul>
+        <details class="why">
+          <summary>Почему так и что отвергли</summary>
+          <ul class="small">
+            <li><b>Не одна общая сеть на всё:</b> карта — сетка, армии — список; одной сети неудобно и то и другое. <i>Отвергнуто.</i></li>
+            <li><b>Не «два доклада одной строкой»:</b> теряются связи «этот отряд + это место». Совещание даёт отрядам переспросить карту. Так устроен AlphaStar.</li>
+            <li><b>Сжатие перед совещанием:</b> 9 216 клеток × отряды — слишком много пар; число входных слоёв на цену не влияет.</li>
+          </ul>
+        </details>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Сколько слоёв совещания (1–3) и до какого размера сжимать (24×24 или 16×16) — решим при сборке по замеру.</span></div></div></div>
+  </section>
+</template>
+
 <script>
 (function(){
   // the tree: levels → parts → topics; "ready" topics have a template, others show as not discussed yet
   var tree=[
     {n:"1. Замысел",parts:[
       {n:"Входные параметры",topics:[{n:"Ландшафт",tpl:"tpl-landscape"},{n:"Армии"},{n:"Кто атакует"}]},
-      {n:"Обработка",topics:[]},
+      {n:"Обработка",topics:[{n:"Советники и совещание",tpl:"tpl-proc"}]},
       {n:"Выход",topics:[]}]},
     {n:"2. Группы на поле",parts:[]},
     {n:"3. Отряды",parts:[]}
@@ -235,6 +289,9 @@ a{color:inherit}
     var W=14,H=12;function out(x,y){return x<1||y<1||x>=W-1||y>=H-1;}
     var g1=c.querySelector('[data-g="g1"]'),g2=c.querySelector('[data-g="g2"]'),f=c.querySelector('[data-g="fine"]');
     if(g1)fillGrid(g1,function(x,y){return out(x,y)?"var(--out)":"var(--field)";},W,H);
+    var zz={z1:function(x,y){return y>=H-3;},z2:function(x,y){return y<=2;},z3:function(x,y){return y>3;},z4:function(x,y){return y<H-4;}};
+    var zc={z1:"var(--mine)",z2:"var(--foe)",z3:"var(--minev)",z4:"var(--foev)"};
+    Object.keys(zz).forEach(function(k){var el=c.querySelector('[data-g="'+k+'"]');if(el)fillGrid(el,function(x,y){return (!out(x,y)&&zz[k](x,y))?zc[k]:"var(--neutral)";},W,H);});
     if(g2)fillGrid(g2,function(x,y){if(out(x,y))return "var(--neutral)";if(y<=2)return "var(--foe)";if(y>=H-3)return "var(--mine)";return "var(--neutral)";},W,H);
     if(f)fillGrid(f,function(x,y){return (x>=4&&y>=4)?"var(--block)":"var(--field)";},8,8);
     var hm=c.querySelector('[data-g="heat"]');
