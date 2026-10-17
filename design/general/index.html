@@ -63,6 +63,14 @@ ul{margin:0;padding-left:18px} li{margin:3px 0}
 .track i{display:block;height:100%}
 .v{font-family:var(--f-mono);font-size:12px;text-align:right}
 a{color:inherit}
+.layers{display:flex;flex-direction:column;gap:10px}
+.lrow{display:grid;grid-template-columns:150px minmax(0,1fr);gap:12px;align-items:start;padding:10px;border:1px solid var(--line);border-radius:8px}
+.lrow .grid{max-width:150px}
+.lrow.pending{border-style:dashed}
+.linfo{display:flex;flex-direction:column;gap:4px;min-width:0}
+.kind{font-family:var(--f-mono);font-size:12px;color:var(--done)}
+.kind.open{color:var(--open)}
+@media (max-width:520px){.lrow{grid-template-columns:1fr}}
 .why{border-top:1px dashed var(--line);padding-top:8px}
 .why summary{cursor:pointer;font-size:14px;font-weight:600;color:var(--done)}
 .why summary:focus-visible{outline:2px solid var(--open);outline-offset:2px}
@@ -107,18 +115,32 @@ a{color:inherit}
       <div class="colh">Решено</div>
       <div class="box done">
         <h2>Карта <span class="chip done">решено</span></h2>
-        <div class="pair">
-          <div><div class="grid" data-g="g1" aria-label="Слой местности"></div><div class="small">Слой 1: местность</div></div>
-          <div><div class="grid" data-g="g2" aria-label="Слой зон"></div><div class="small">Слой 2: зоны развёртывания</div></div>
-        </div>
-        <div class="leg">
-          <span><i class="sw" style="background:var(--field)"></i>поле</span>
-          <span><i class="sw" style="background:var(--out)"></i>за картой</span>
-          <span><i class="sw" style="background:var(--mine)"></i>наша</span>
-          <span><i class="sw" style="background:var(--minev)"></i>наша передовая</span>
-          <span><i class="sw" style="background:var(--foe)"></i>врага</span>
-          <span><i class="sw" style="background:var(--foev)"></i>передовая врага</span>
-          <span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>ничья</span>
+        <div class="layers">
+          <div class="lrow">
+            <div class="grid" data-g="g1" aria-label="Слой местности"></div>
+            <div class="linfo">
+              <b>Слой 1 · местность</b>
+              <span class="kind">ярлык → словарик</span>
+              <div class="leg">
+                <span><i class="sw" style="background:var(--field)"></i>поле</span>
+                <span><i class="sw" style="background:var(--out)"></i>за картой</span>
+              </div>
+              <span class="small">Потом: лес, вода, непроходимо… — типы по механике.</span>
+            </div>
+          </div>
+          <div class="lrow pending">
+            <div class="grid" data-g="g2" aria-label="Слой зон"></div>
+            <div class="linfo">
+              <b>Слой 2 · зоны развёртывания</b>
+              <span class="kind open">вид слоя — открытый вопрос</span>
+              <div class="leg">
+                <span><i class="sw" style="background:var(--mine)"></i>наша</span>
+                <span><i class="sw" style="background:var(--foe)"></i>врага</span>
+                <span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>ничья</span>
+              </div>
+              <span class="small">Передовые области накладываются — как их хранить, решаем (см. «Открытые вопросы»).</span>
+            </div>
+          </div>
         </div>
         <ul class="small">
           <li>Клетка всегда 16 м. Сетка 96×96 клеток (= 1536 м, самая большая полевая карта). Типичная карта 1024 м занимает середину 64×64. Клетки «за картой» окружают карту со всех сторон — край виден везде.</li>
@@ -213,7 +235,7 @@ a{color:inherit}
     var W=14,H=12;function out(x,y){return x<1||y<1||x>=W-1||y>=H-1;}
     var g1=c.querySelector('[data-g="g1"]'),g2=c.querySelector('[data-g="g2"]'),f=c.querySelector('[data-g="fine"]');
     if(g1)fillGrid(g1,function(x,y){return out(x,y)?"var(--out)":"var(--field)";},W,H);
-    if(g2)fillGrid(g2,function(x,y){if(out(x,y))return "var(--neutral)";if(y<=2)return "var(--foe)";if(y===3)return "var(--foev)";if(y>=H-3)return "var(--mine)";if(y===H-4)return "var(--minev)";return "var(--neutral)";},W,H);
+    if(g2)fillGrid(g2,function(x,y){if(out(x,y))return "var(--neutral)";if(y<=2)return "var(--foe)";if(y>=H-3)return "var(--mine)";return "var(--neutral)";},W,H);
     if(f)fillGrid(f,function(x,y){return (x>=4&&y>=4)?"var(--block)":"var(--field)";},8,8);
     var hm=c.querySelector('[data-g="heat"]');
     if(hm){
