@@ -107,11 +107,18 @@ def build(st, params, seed=0, start_phase=False):
                  hp=torch.zeros((B, M), device=dev), dx=torch.zeros((B, M), device=dev),
                  dz=torch.zeros((B, M), device=dev), pend=torch.zeros((B, M), device=dev),
                  sh=torch.zeros((B, N), device=dev), down=torch.zeros((B, M), device=dev), aim=torch.full((B, M), -1, dtype=torch.long, device=dev),
-                 gen=torch.Generator(device=dev).manual_seed(seed + 1), u_ref=u)
+                 gen=torch.Generator(device=dev).manual_seed(seed + 1), u_ref=u, seed=int(seed),  # (eager draws)
+                 tick=torch.zeros((), dtype=torch.long, device=dev),
+                 splash_S=int(u["splash"].max().clamp(min=1, max=8)) if bool((u["splash"] > 1).any()) else 1)
     if start_phase:
         # (lab.json melee.start_phase) each man's attack clock starts at a random point of his interval: the men of a
         # unit are not all ready to swing when it meets the enemy
         F.cd = torch.rand((B, M), generator=F.gen, device=dev) * u["interval"].gather(1, F.uid)
+    # the men of splash units (melee.resolve: their blows split over the nearest men; static, padded with -1)
+    sp_m = (u["splash"] > 1).gather(1, F.uid) & F.valid
+    L = max(1, int(sp_m.sum(1).max()))
+    order = torch.argsort((~sp_m).to(torch.int8), dim=1, stable=True)[:, :L]
+    F.splash_men = torch.where(sp_m.gather(1, order), order, torch.full_like(order, -1))
     hp_man = u["hp_man"].gather(1, F.uid)
     men_now = u["men"].round().long().gather(1, F.uid)
     F.hp = torch.where(F.valid & (F.k < men_now), hp_man, torch.zeros_like(hp_man))
@@ -119,6 +126,36 @@ def build(st, params, seed=0, start_phase=False):
     sa, sf = slots(F, u)
     F.dx, F.dz = to_world(u, F, sa, sf)
     return F
+
+
+_M32 = 0xFFFFFFFF
+
+
+def _mix(h):
+    """A 32-bit integer hash (int64 tensors holding 32 bits)."""
+    h = ((h ^ (h >> 16)) * 0x45D9F3B) & _M32
+    h = ((h ^ (h >> 16)) * 0x45D9F3B) & _M32
+    return h ^ (h >> 16)
+
+
+def rnd(F, X, salt):
+    """[B, X] uniform (0, 1) draws for this step (F.tick) and the call site's salt: a counter-based hash of (seed,
+    battle, column, step, salt) - no generator state, so the step compiles (torch.compile) and every draw is the same
+    for the same inputs."""
+    dev = F.hp.device
+    b = torch.arange(F.B, device=dev)[:, None]
+    i = torch.arange(X, device=dev)[None, :]
+    h = _mix((b + F.seed * 1000003) & _M32)
+    h = _mix(h ^ i)
+    h = _mix(h ^ ((F.tick * 0x2545F491 + int(salt) * 0x6C8E9CF5) & _M32))
+    return ((h >> 8).float() + 0.5) / float(1 << 24)
+
+
+def rnorm(F, X, salt):
+    """[B, X] standard normal draws (Box-Muller over two rnd draws)."""
+    u1 = rnd(F, X, salt)
+    u2 = rnd(F, X, salt + 7777)
+    return torch.sqrt(-2.0 * torch.log(u1)) * torch.cos(2 * math.pi * u2)
 
 
 def ugather(u, F, name):
@@ -230,7 +267,8 @@ def conform(F, u):
     # new wound = cap x (w + eps) / sum(w + eps): the lab's spread kept, even where none
     eps = 1e-3 * u["hp_man"]
     share = (wound + eps.gather(1, F.uid)) / (w_sum + eps * n_live).clamp(min=1e-9).gather(1, F.uid)
-    new_w = (cap.gather(1, F.uid) * share).clamp(max=hp_man - 1e-3)
+    # (a wound leaves at least 1e-4 of a man's health: above hook.DEAD_FRAC, under which a man is dead)
+    new_w = (cap.gather(1, F.uid) * share).clamp(max=hp_man * (1 - 1e-4))
     hp_w = torch.where(live & differs.gather(1, F.uid), hp_man - new_w, hp)
     hp_w = torch.where(lone & F.valid, torch.where(live, goal.gather(1, F.uid), hp_w), hp_w)
     F.hp = torch.where(F.valid, hp_w.clamp(min=0), torch.zeros_like(hp_w))
@@ -278,5 +316,5 @@ def wrap_deg(a):
     return torch.remainder(a + 180.0, 360.0) - 180.0
 
 
-__all__ = ["Fighters", "build", "slots", "to_world", "positions", "conform", "write_back", "differs", "alive",
-           "unit_count", "unit_sum", "ugather", "rotate_offsets", "wrap_deg", "rank_now", "unit_rank", "math"]
+__all__ = ["Fighters", "build", "rnd", "rnorm", "slots", "to_world", "positions", "conform", "write_back", "differs",
+           "alive", "unit_count", "unit_sum", "ugather", "rotate_offsets", "wrap_deg", "rank_now", "unit_rank", "math"]

@@ -4,8 +4,8 @@ from the start into the melee, CUDA events; peak memory.
 
   python -m tools.nn.fighters.bench --B 256 512 1024 [--steps 160]
 
-Modes: sim (the simulator compiled, as training runs it), sim_eager, lab (the simulator eager with the men, hook.py:
-the lab's step is eager - its Python control flow), and the lab's own share (lab - sim_eager). Needs torch + CUDA."""
+Modes: sim (the simulator compiled, as training runs it), sim_eager, lab (the simulator with the men, hook.py: the
+whole step compiled), lab_eager (the same, eager), and the lab against the simulator compiled. Needs torch + CUDA."""
 import argparse
 import statistics
 import time
@@ -52,7 +52,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--B", nargs="+", type=int, default=[256, 512, 1024])
     ap.add_argument("--steps", type=int, default=160)
-    ap.add_argument("--modes", default="sim,sim_eager,lab")
+    ap.add_argument("--modes", default="sim,lab")
     a = ap.parse_args(argv)
     dev = "cuda"
     params = load().with_cal("noise", blows=False)
@@ -63,9 +63,9 @@ def main(argv=None):
             torch.cuda.reset_peak_memory_stats()
             t0 = time.perf_counter()
             try:
-                if mode == "lab":
+                if mode in ("lab", "lab_eager"):
                     from tools.nn.fighters import hook
-                    with hook.installed() as h:
+                    with hook.installed(compile=(mode == "lab")) as h:
                         st = fresh(B, params, dev)
                         m, ci, blocks = timed(st, battle.step, params, a.steps)
                         M = h.F.M
@@ -83,9 +83,8 @@ def main(argv=None):
                   f"peak {peak:.2f} GB; sim time {float(st.t.max()):.0f} s; men a battle {M}; "
                   f"wall {time.perf_counter() - t0:.0f} s", flush=True)
             del st
-        if "lab" in res and "sim_eager" in res:
-            print(f"B={B}: the lab's own part {res['lab'] - res['sim_eager']:.1f} ms a step; lab / sim compiled "
-                  f"{res['lab'] / res.get('sim', float('nan')):.1f}x", flush=True)
+        if "lab" in res and "sim" in res:
+            print(f"B={B}: lab / sim compiled {res['lab'] / res['sim']:.1f}x", flush=True)
 
 
 if __name__ == "__main__":

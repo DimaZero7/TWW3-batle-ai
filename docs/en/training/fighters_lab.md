@@ -53,6 +53,12 @@ five places of the step:
 
 After the step the unit's men and health in the simulator are the men's, and the men walk to their places.
 
+Death at 0 has a tolerance: a man left with under 1e-5 of his health after a blow (`hook.DEAD_FRAC`) is dead. A blow
+that took all he had leaves 0 only up to rounding; without the tolerance ~1 % of the living stood on with under 1e-6
+of their health (no remainders between 1e-6 and 1e-4), how many depending on the order of the arithmetic: on the same
+blows these "nearly dead" gave ~9 % fewer men killed per health lost, the compiled step 7 % fewer still. A man wounded
+by the check against the recording (`state.conform`) keeps at least 1e-4 of his health - above the tolerance.
+
 **The men** (`state.py`). A man's place is an offset from his unit's centre. A unit in formation: ranks at its
 template's spacing from the database (`unit_spacings`), the ordered width, the place's scatter the database's
 `close_formation_spacing_variation`. When a man dies the man behind him in the file takes his place (the file closes
@@ -120,6 +126,11 @@ Every 10 s the simulator is put into the recorded state of a game battle and pla
 copies (`tools/nn/sim/stepreplay.py`). The men carry their places and wounds over from their own last window (the
 wounds put to the recording's health: the most wounded die first). The windows are chosen by the game - the same for
 both models. Sim / game, 95 % interval over battles (`python -m tools.nn.fighters.card`):
+
+The table was taken before the death tolerance (`hook.DEAD_FRAC`, "How it works"). With it (the same 92 battles
+replayed, `sr_swing` -> `build/fspeed/full92_sr`): men killed per health in melee 0.87 -> 0.94 (> 85 % 1.07 -> 1.17,
+20-40 % 0.89 -> 0.98, < 20 % 1.29 -> 1.56), under fire 0.65 -> 0.89 (two-handers 0.63 -> 0.82); melee damage 1.37 ->
+1.39, under fire 0.84 -> 0.83, contact 0.884 and routs 1.21 -> 1.20 - the same.
 
 | Number | Windows | Game | Rectangle | Men |
 |---|---|---|---|---|
@@ -321,17 +332,38 @@ lets arrows through). Thin targets (45 slaves on 30 m): the game keeps 14 men at
 ## Speed
 
 `python -m tools.nn.fighters.bench` (RTX 5070 Ti 16 GB, the arena whole_emp_v_skv 20 x 20, 2,262 men a battle, all
-attacking the nearest; ms a 0.5 s step, 100 steps from the start into the melee):
+attacking the nearest; ms a 0.5 s step, 100 steps from the start into the melee; the card was shared with another
+agent - up to +-20 %):
 
-| Battles | Simulator, compiled (as training) | Simulator, not compiled | Men (not compiled) | Men's peak memory |
-|---|---|---|---|---|
-| 256 | 6.7 | 106 | 262 (its own part 156) | 4.8 GB |
-| 1024 | 7.4 | 146 | 7,800-30,000 | 21.6 GB - does not fit the 16 GB card |
+| Battles | Simulator, compiled (as training) | Men | Men's peak memory |
+|---|---|---|---|
+| 256 | 5.9 | 13.7 | 0.33 GB |
+| 1024 | 9.3-12 | 20.5 | 1.1 GB |
 
-At 1024 battles the men do not run today: the neighbour lists (108 candidates a man) take ~19 GB. In batches of 256 it
-is ~1.05 s a step of 1024 battles - ~140x the compiled simulator. What would cut it: neighbours only for the men of
-units near an enemy (a minority in a battle), int32 indices, `torch.compile` of the men's step (without the Python
-checks) - not estimated.
+The men's step is 1.7-2.8 simulator steps. How it got there (ms a step, 256 / 1024 battles):
+
+| Step | 256 | 1024 | Memory, 256 / 1024 |
+|---|---|---|---|
+| Not compiled (before) | 262 | did not fit | 4.8 / 21.6 GB |
+| The whole step - the simulator and the men - through `torch.compile`: no syncs with the CPU and no data-dependent sizes, the men's draws by a counter | 50 | - | 2.0 / - |
+| The units' contact from two numbers a man (was ~60 M atomic adds a step), splash blows for the men of such units only, the projectiles' kernel (projectiles not loosed are skipped) | 15.9 | 42.9 | 1.2 / 4.7 GB |
+| Own kernels look for neighbours (contact, melee target, the bodies' push) straight in the cell table, skipping the empty slots | 13.7 | 20.5 | 0.33 / 1.1 GB |
+
+How it works:
+
+- **Compiling.** On the GPU the whole step is compiled (`hook.Hook._runner`, as `battle.stepper` in training) when the
+  batch has 100,000 men's places or more (`hook.COMPILE_MEN`): the first compile of a batch of a new size takes ~4 min
+  (Docker keeps it until the code changes). Small batches (the probes) run eager. An outside reset (the replay's window
+  start from the recording) is looked for before the step, eager - one sync a step.
+- **The men's draws** - a counter (`state.rnd`: a hash of the battle, the man, the step and the call site), no
+  generator: the step compiles and the same inputs give the same numbers. Splash strikes (spells, `knock.bombard`) stay
+  eager, on the generator.
+- **Neighbours.** The cell table (`cells.Table`): the men sorted by cell, per cell where its men start and how many.
+  Triton kernels (`scans.py`: contact, target, bodies; `kernels.py`: a projectile's path) read it directly and skip
+  the empty places; the "108 candidates a man" lists are no longer built on the GPU. Each kernel has the same logic in
+  torch beside it (CPU, tests); `tests/tools/test_nn_fighters_kernels.py` checks the numbers match.
+- The kernels run through one torch op (`fighters::launch`): put straight into the compiled graph they ran 3-5x slower
+  (the compiler lost their launch settings).
 
 ## How to run
 
@@ -340,7 +372,7 @@ checks) - not estimated.
 DOCK_MEM=8g DOCK_BUILD=<main>/build bash tools/nn/dock.sh tools.nn.fighters.probes --plans reform,dmgmelee --copies 4 --device cuda --out build/fighters/probes.json
 DOCK_MEM=8g DOCK_BUILD=<main>/build bash tools/nn/dock.sh tools.nn.fighters.probes --routers --plans routmob,routmob2,passby --device cuda --out build/fighters/rout.json
 DOCK_MEM=8g DOCK_BUILD=<main>/build bash tools/nn/dock.sh tools.nn.fighters.probes --missile build/probes7/runs/<thin> ... --device cuda --out build/fighters/missile.json
-DOCK_MEM=8g DOCK_BUILD=<main>/build bash tools/nn/dock.sh tools.nn.fighters.replay --runs-from build/contactgap/sr_free_rect --out build/fighters/sr_fighters --device cuda --chunk 16
+DOCK_MEM=8g DOCK_BUILD=<main>/build bash tools/nn/dock.sh tools.nn.fighters.replay --runs-from build/contactgap/sr_free_rect --out build/fighters/sr_fighters --device cuda --chunk 46
 DOCK_MEM=8g DOCK_BUILD=<main>/build bash tools/nn/dock.sh tools.nn.fighters.replay --runs-from ... --out build/fighters/sr_rect --rect --device cuda --chunk 16
 python -m tools.nn.fighters.card build/fighters/sr_rect build/fighters/sr_fighters     # the table, no torch
 DOCK_MEM=8g bash tools/nn/dock.sh tools.nn.fighters.bench --B 256 1024                 # speed
@@ -355,9 +387,11 @@ with hook.installed() as h:            # whatever is built inside (scenario.buil
     battle.run(st, policy, params)
 ```
 
-Tests: `tests/tools/test_nn_fighters_torch.py` (the container), `tests/tools/test_nn_fighters_shape.py`,
-`tests/tools/test_magic_probe.py` (no torch). A replay batch of 16 battles x 4 copies keeps the container within ~8 GB
-of memory; 46 battles at once and several jobs in parallel took 12 GB.
+Tests: `tests/tools/test_nn_fighters_torch.py` (the container), `tests/tools/test_nn_fighters_kernels.py` (the
+container, the GPU: the kernels = torch), `tests/tools/test_nn_fighters_shape.py`, `tests/tools/test_magic_probe.py`
+(no torch). The replay: every batch of a new size compiles for ~4 min, so the batches are big - `--chunk 46` (92
+battles - 2 batches, 10 min with the compiling; it was 44 min in batches of 16, not compiled); a batch of 46 battles
+x 4 copies ran in a container of 10 GB (`DOCK_MEM=10g`).
 
 ## Not there
 
@@ -369,7 +403,6 @@ of memory; 46 battles at once and several jobs in parallel took 12 GB.
 - The ellipse body (wolf rats) - the men are circles; the Ratling Gun's burst - at most 2 shots a man a step; a flat
   shot looks for bodies over its last 21.6 m only.
 - Wrapping round the enemy (the "drop") is weaker than the game's (0-0.02 against 0.01-0.05 one on one).
-- The lab runs without `torch.compile` only (Python checks inside the step).
 
 ## Tried and rejected
 
@@ -385,3 +418,12 @@ of memory; 46 battles at once and several jobs in parallel took 12 GB.
   of 92 battles: melee damage 0.89 -> 0.84, on thinned units 1.03 -> 0.95, men killed per health 0.86 -> 0.67, routs
   0.97 -> 0.98. The rectangle's other rules (the wave, the first strike, the wounded pool) were fitted to the old clock;
   swapping the clock alone breaks them.
+
+- **Speed: neighbour lists through the compiler.** The whole step under `torch.compile`, the neighbours as lists
+  [battles x men x 108], the compiler fusing the operations itself: 1024 battles 42.9 ms, three passes over the lists
+  25 ms of it (each reads all 108 places, the empty ones too). Replaced by kernels that skip the empty places (20.5 ms).
+- **A kernel program a man.** A Triton program a man (128 cell places): contact / target / bodies 22 / 24 / 18 ms on
+  1024 battles; 2-4 men a program and 1-2 warps - 2.2 / 3.7 / 2.5 ms (searched, `kernels.TUNE`).
+- **The kernels straight inside the compiled step.** The same kernels called inside `torch.compile` as they are ran
+  3-5x slower (contact 12.6 ms against 2.1): the compiler lost the men a program and the warps. Kept: the call through
+  the torch op `fighters::launch`, which the compiler leaves alone.

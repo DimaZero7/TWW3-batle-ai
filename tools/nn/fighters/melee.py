@@ -25,16 +25,21 @@ His blow (CA Feature Focus #2, the database; the same formulas as the simulator'
                lands with that chance
 A blow's damage goes to the man struck: beyond his health it is lost (overkill), so whole men die and wounds stay
 on the living. Returned per pair of units: the HP dealt [B, i, j] and the men striking [B, i, j]."""
+import math
+
 import torch
 
-from tools.nn.fighters import cells, state as S
+from tools.nn.fighters import scans as SC, state as S
 from tools.nn.sim import geometry
 from tools.nn.sim import orders as O
 
 
-def armour_roll(base, ap, armour, resist, gen, shape):
-    """HP of a blow / hit: ap whole, base less U(0.5, 1) x armour % of it (at most all), resistance, at least 1."""
-    roll = 0.5 + 0.5 * torch.rand(shape, generator=gen, device=base.device)
+def armour_roll(base, ap, armour, resist, gen, shape, u01=None):
+    """HP of a blow / hit: ap whole, base less U(0.5, 1) x armour % of it (at most all), resistance, at least 1.
+    u01: the uniform draws (state.rnd; else from the generator gen)."""
+    if u01 is None:
+        u01 = torch.rand(shape, generator=gen, device=base.device)
+    roll = 0.5 + 0.5 * u01
     blocked = (roll * armour / 100).clamp(max=1.0)
     return ((ap + base * (1 - blocked)) * (1 - resist.clamp(max=0.9))).clamp(min=1.0)
 
@@ -104,32 +109,17 @@ def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
     live = S.alive(F)
     lying = F.down > 0                                         # knocked down (knock.py): strikes nobody ...
     up = live & ~lying
-    cand, d, c_uid = near.cand, near.d, near.c_uid
     # ... and nobody strikes him (lab.json knock.invulnerable)
-    c_live = (cand >= 0) & cells.gather2(up if lab.get("knock", {}).get("invulnerable", True) else live, cand)
-    pair = (F.uid[:, :, None] * N + c_uid).reshape(B, -1)
-    ok_pair = permit.reshape(B, N * N).gather(1, pair).reshape(cand.shape)
-    side_m = S.ugather(u, F, "side")
-    ok_pair = ok_pair & (cells.gather2(side_m, cand) != side_m[:, :, None])          # enemies only
+    c_live = up if lab.get("knock", {}).get("invulnerable", True) else live
     combat = float(R.get("entity_action_attack_formed_combat_distance", 2.5))
     tether = float(R.get("entity_action_attack_formed_tether_distance", 2.0))
-    r_c = cells.gather2(S.ugather(u, F, "radius"), cand)
-    reach = combat + r_c
-    me = up[:, :, None]
-    inreach = me & c_live & ok_pair & (d <= reach)
-    engage = me & c_live & ok_pair & (d <= reach + tether)
-    # the target: kept while in reach, else the nearest (his unit's attack target first)
-    keep = (inreach & (cand == F.tgt[:, :, None])).any(2)
+    # the target: kept while in reach, else the nearest (his unit's attack target first); the man he closes on
     ot = S.ugather(u, F, "order_target")
-    pref = (u["order_kind"] == O.ATTACK).gather(1, F.uid)[:, :, None] & (c_uid == ot[:, :, None])
-    big = torch.full_like(d, 1e9)
-    score = torch.where(inreach, d - 2.0 * pref.float(), big)
-    best = score.argmin(2)
-    has = inreach.any(2)
-    new_t = cand.gather(2, best[:, :, None]).squeeze(2)
+    pref_unit = torch.where((u["order_kind"] == O.ATTACK).gather(1, F.uid), ot, torch.full_like(ot, -1))
+    scan = (near, up, c_live, F.uid, u["side"], u["radius"], permit, F.tgt, pref_unit, combat, tether)
+    keep, has, new_t, has_e, eng = SC.melee_scan(*scan)
     tgt = torch.where(keep, F.tgt, torch.where(has, new_t, torch.full_like(F.tgt, -1)))
-    e_score = torch.where(engage, d - 2.0 * pref.float(), big)
-    eng = torch.where(engage.any(2), cand.gather(2, e_score.argmin(2)[:, :, None]).squeeze(2), torch.full_like(tgt, -1))
+    eng = torch.where(has_e, eng, torch.full_like(tgt, -1))
     F.eng = torch.where(has, tgt, eng)
     # the clock
     if lab["melee"].get("cooldown_in_reach_only", True):
@@ -166,8 +156,8 @@ def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
             ax, az = gat("x") - tgu("x"), gat("z") - tgu("z")
     cosang = (ax * t_fx + az * t_fz) / (torch.sqrt(ax * ax + az * az) * torch.sqrt(t_fx * t_fx + t_fz * t_fz)).clamp(min=1e-6)
     cc = params.sim["contact"]
-    front_c = torch.cos(torch.tensor(float(cc["front_deg"]) * geometry.DEG))
-    rear_c = torch.cos(torch.tensor(float(cc["rear_deg"]) * geometry.DEG))
+    front_c = math.cos(float(cc["front_deg"]) * geometry.DEG)
+    rear_c = math.cos(float(cc["rear_deg"]) * geometry.DEG)
     coef = torch.where(cosang >= front_c, 1.0, torch.where(cosang <= rear_c,
                                                           float(R["melee_defence_direction_penalty_coefficient_rear"]),
                                                           float(R["melee_defence_direction_penalty_coefficient_flank"])))
@@ -178,14 +168,14 @@ def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
     defence = tgu("defence") * (1 - w * (1 - coef))
     p = torch.clamp(float(R["melee_hit_chance_base"]) + float(R["melee_hit_chance_normalisation_coefficient"])
                     * (attack - defence), float(R["melee_hit_chance_min"]), float(R["melee_hit_chance_max"])) / 100
-    gen = F.gen
-    hit = fire & (torch.rand((B, M), generator=gen, device=p.device) < p)
+    gen = None                     # (the draws: state.rnd)
+    hit = fire & (S.rnd(F, M, 101) < p)
     # the unit-level share of blows that land, the reflection
     g, reflect = gates(u, params, permit, pw, charge_now, incidental=lab["melee"].get("unit_incidental"))
     gp = (F.uid * N + tu)
     g_m = g.reshape(B, N * N).gather(1, gp) * float(lab["melee"].get("blow_share", 1.0))
     refl = reflect.reshape(B, N * N).gather(1, gp)
-    lands = hit & (torch.rand((B, M), generator=gen, device=p.device) < g_m)
+    lands = hit & (S.rnd(F, M, 102) < g_m)
     # the clock after the swing: the interval after a hit, miss_s after a miss (the remainder kept)
     # (lab.json melee.swing_per_interval: a miss costs the whole interval too - every swing, hit or miss, comes an
     # interval after the last; else the simulator's melee.miss_s)
@@ -199,43 +189,48 @@ def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
     base = (dmg + extra * share) * refl
     app = (ap + extra * (1 - share)) * refl
     n_max = gat("splash").clamp(min=1)
-    splash = bool((u["splash"] > 1).any())
-    if splash:
-        # a splash blow: the nearest n_max men in reach (the target first), each its 1 / n_max of the blow
-        S_ = int(u["splash"].max().clamp(max=8))
-        dd = torch.where(inreach, d, big)
-        dd = torch.where(cand == tgt[:, :, None], torch.full_like(dd, -1.0), dd)
+    S_ = int(getattr(F, "splash_S", 1))                  # static: the batch's most men a blow splashes (state.build)
+    div = torch.where(lone_t, torch.ones_like(n_max), n_max) if S_ > 1 else torch.ones_like(n_max)
+    # the blows: (striker [B, X] or None for every man, the man struck [B, X], HP [B, X]); first every man's blow on
+    # the man he fights
+    hp_hit = armour_roll(base / div, app / div, tgu("armour"), tgu("resist_physical"), gen, (B, M),
+                         u01=S.rnd(F, M, 110))
+    amounts = [(None, tgt, torch.where(lands & (tgt >= 0), hp_hit, torch.zeros_like(hp_hit)))]
+    if S_ > 1:
+        # a splash blow: the nearest n_max men in reach (the target first), each its 1 / n_max of the blow; a lone
+        # target takes the whole blow. Only the men of splash units (state.build's splash_men [B, L], -1 padding)
+        sm = F.splash_men
+        smc = sm.clamp(min=0)
+        L = sm.shape[1]
+        at = lambda t: t.gather(1, smc)
+        c_s, d_s, _, in_s, _ = SC.melee_rows(near, smc, up, c_live, F.uid, u["side"], u["radius"], permit, combat,
+                                             tether)
+        dd = torch.where(in_s, d_s, torch.full_like(d_s, 1e9))
+        dd = torch.where(c_s == at(tgt)[:, :, None], torch.full_like(dd, -1.0), dd)
         val, idx = torch.topk(-dd, S_, dim=2)
-        t_all = cand.gather(2, idx)
-        ok_s = (val > -1e8) & (torch.arange(S_, device=d.device)[None, None, :] < n_max[:, :, None])
+        t_all = c_s.gather(2, idx)
+        ok_s = ((val > -1e8) & (torch.arange(S_, device=d_s.device)[None, None, :] < at(n_max)[:, :, None])
+                & ~at(lone_t)[:, :, None] & (sm >= 0)[:, :, None])
         t_all = torch.where(ok_s, t_all, torch.full_like(t_all, -1))
-        div = torch.where(lone_t, torch.ones_like(n_max), n_max)          # a lone target takes the whole blow
-        t_all = torch.where(lone_t[:, :, None], torch.cat([tgt[:, :, None], torch.full_like(t_all[..., 1:], -1)], 2),
-                            t_all)
-    else:
-        S_ = 1
-        t_all = tgt[:, :, None]
-        div = torch.ones_like(n_max)
-    amounts = []
-    for s in range(S_):
-        ts = t_all[..., s]
-        tsc = ts.clamp(min=0)
-        su = F.uid.gather(1, tsc)
-        arm = u["armour"].gather(1, su)
-        res = u["resist_physical"].gather(1, su)
-        hp_hit = armour_roll(base / div, app / div, arm, res, gen, (B, M))
-        amounts.append((ts, torch.where(lands & (ts >= 0), hp_hit, torch.zeros_like(hp_hit))))
+        b_s, a_s, l_s, dv = at(base), at(app), at(lands), at(div)
+        for s in range(1, S_):
+            ts = t_all[..., s]
+            su = F.uid.gather(1, ts.clamp(min=0))
+            h_s = armour_roll(b_s / dv, a_s / dv, u["armour"].gather(1, su), u["resist_physical"].gather(1, su), gen,
+                              (B, L), u01=S.rnd(F, L, 110 + s))
+            amounts.append((smc, ts, torch.where(l_s & (ts >= 0), h_s, torch.zeros_like(h_s))))
     # overkill: what each man takes is at most his health left
     raw = torch.zeros((B, M), device=p.device)
-    for ts, a in amounts:
+    for _, ts, a in amounts:
         raw = raw.scatter_add(1, ts.clamp(min=0), a)
     room = (F.hp - F.pend).clamp(min=0)
     k = torch.where(raw > 0, torch.minimum(raw, room) / raw.clamp(min=1e-9), torch.zeros_like(raw))
     hp_pair = torch.zeros((B, N * N), device=p.device)
-    for ts, a in amounts:
+    for who, ts, a in amounts:
         eff = a * k.gather(1, ts.clamp(min=0))
         F.pend = F.pend.scatter_add(1, ts.clamp(min=0), eff)
-        hp_pair = hp_pair.scatter_add(1, F.uid * N + F.uid.gather(1, ts.clamp(min=0)), eff)
+        su = F.uid if who is None else F.uid.gather(1, who)
+        hp_pair = hp_pair.scatter_add(1, su * N + F.uid.gather(1, ts.clamp(min=0)), eff)
     men = torch.zeros((B, N * N), device=p.device).scatter_add(1, F.uid * N + tu, has.float())
     F.tgt = tgt
     F.fired = fire

@@ -13,7 +13,7 @@ A man is carried by his unit's centre (his place is an offset from it). Then:
 A lone man (a lord) is his unit's centre."""
 import torch
 
-from tools.nn.fighters import cells, melee as FM, state as S
+from tools.nn.fighters import melee as FM, scans as SC, state as S
 
 
 def step(F, u, params, lab, dt, near):
@@ -72,18 +72,10 @@ def step(F, u, params, lab, dt, near):
     cap = (S.ugather(u, F, "run") * dt / dist).clamp(max=1.0)
     nx, nz = F.dx + mx * cap, F.dz + mz * cap
     # bodies
-    cand = near.cand
-    ok = (cand >= 0) & cells.gather2(live & ~lying, cand) & (live & ~lying)[:, :, None]
     ax, az = ux + nx, uz + nz
-    cx = cells.gather2(ax, cand)
-    cz = cells.gather2(az, cand)
-    rx, rz = ax[:, :, None] - cx, az[:, :, None] - cz
-    d = torch.sqrt(rx * rx + rz * rz).clamp(min=1e-3)
-    rad = S.ugather(u, F, "radius")
-    need = rad[:, :, None] + cells.gather2(rad, cand)
-    over = torch.where(ok & (d < need), (need - d) / 2, torch.zeros_like(d))
-    nx = nx + (over * rx / d).sum(2)
-    nz = nz + (over * rz / d).sum(2)
+    sx, sz = SC.push_scan(near, ax, az, live & ~lying, S.ugather(u, F, "radius"))
+    nx = nx + sx
+    nz = nz + sz
     lone = (u["men0"] <= 1).gather(1, F.uid)
     moves = live & ~lying
     F.dx = torch.where(lone, torch.zeros_like(nx), torch.where(moves, nx, F.dx))

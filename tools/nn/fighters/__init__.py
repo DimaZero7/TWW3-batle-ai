@@ -3,6 +3,8 @@ simulator's step (hook.py) - apart from training; the simulator's files are not 
 
   state.py   the men: places (offsets from the unit's centre), health, attack clocks; formation places; conform
   cells.py   neighbours by cells (fixed sizes)
+  scans.py   the neighbour scans (contact, melee targets, bodies): GPU kernels (Triton) + the same in torch
+  kernels.py the projectiles' path kernel; the kernels' launch (one torch op: torch.compile keeps it as it is)
   melee.py   blows man by man
   missile.py projectiles man by man
   move.py    the men's own moves
