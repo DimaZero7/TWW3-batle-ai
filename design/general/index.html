@@ -1,0 +1,231 @@
+<title>Генерал: архитектура</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: the general's design as a hierarchy of tabs - level → part → topic; only agreed content is filled, the rest shows as "not yet" */
+:root{
+  --bg:#f3f4f6; --panel:#ffffff; --ink:#1b2028; --muted:#5d6672; --line:#d6dbe2;
+  --done:#1f8a5b; --done-bg:#e3f4ec; --open:#b07300; --open-bg:#fff3d9; --later:#5b6b86; --later-bg:#e9edf4;
+  --field:#cfe3a8; --out:#7a7f88; --block:#6c5a4a; --mine:#2b9a6a; --minev:#8fd3b2; --foe:#cc4a3f; --foev:#f0a8a1; --neutral:#eceff3;
+  --f-body:"Golos Text",system-ui,"Segoe UI",sans-serif; --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#12151a; --panel:#1a1f26; --ink:#e5e9ee; --muted:#9aa4b0; --line:#2d343e;
+  --done:#46c58b; --done-bg:#12301f; --open:#f0b54a; --open-bg:#33270e; --later:#9fb0cc; --later-bg:#1f2633;
+  --field:#6f8a45; --out:#4a4f58; --block:#8b7460; --mine:#2fae78; --minev:#2c6b52; --foe:#e2645a; --foev:#7a3b36; --neutral:#2a3038; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12151a; --panel:#1a1f26; --ink:#e5e9ee; --muted:#9aa4b0; --line:#2d343e;
+  --done:#46c58b; --done-bg:#12301f; --open:#f0b54a; --open-bg:#33270e; --later:#9fb0cc; --later-bg:#1f2633;
+  --field:#6f8a45; --out:#4a4f58; --block:#8b7460; --mine:#2fae78; --minev:#2c6b52; --foe:#e2645a; --foev:#7a3b36; --neutral:#2a3038; color-scheme:dark}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px 48px}
+.wrap{max-width:1120px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+h1{font-size:26px;margin:0;text-wrap:balance}
+h2{font-size:18px;margin:0;text-wrap:balance}
+p{margin:0;max-width:72ch}
+.muted{color:var(--muted)}
+.crumbs{font-size:14px;color:var(--muted)} .crumbs b{color:var(--ink)}
+.tabrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.tabrow .lbl{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;width:88px}
+.tabrow button{font:inherit;font-size:14px;padding:7px 13px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer}
+.tabrow button.on{background:var(--ink);color:var(--panel);border-color:var(--ink)}
+.tabrow button.soon{color:var(--muted);border-style:dashed}
+.tabrow button:focus-visible{outline:2px solid var(--open);outline-offset:2px}
+.t1 button{font-size:15px;padding:9px 16px}
+.panel{display:flex;flex-direction:column;gap:16px}
+.cards{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:900px){.cards{grid-template-columns:1fr}.tabrow .lbl{width:100%}}
+.side{display:flex;flex-direction:column;gap:16px;min-width:0}
+.colh{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;margin-bottom:6px}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.box.done{border-left:4px solid var(--done)}
+.box.open{border-left:4px solid var(--open)}
+.box.later{border-left:4px dashed var(--later)}
+.empty{background:var(--panel);border:1px dashed var(--line);border-radius:10px;padding:22px;color:var(--muted);text-align:center}
+.chip{display:inline-block;font-size:11px;font-family:var(--f-mono);padding:1px 7px;border-radius:999px;margin-left:6px;vertical-align:middle}
+.chip.done{background:var(--done-bg);color:var(--done)} .chip.open{background:var(--open-bg);color:var(--open)} .chip.later{background:var(--later-bg);color:var(--later)}
+.small{font-size:14px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(14,1fr);gap:1px;max-width:300px}
+.grid i{aspect-ratio:1;border-radius:1px;display:block}
+.leg{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:13px;color:var(--muted)}
+.leg span{display:inline-flex;align-items:center;gap:5px}
+.sw{width:12px;height:12px;border-radius:2px;display:inline-block}
+.pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+ul{margin:0;padding-left:18px} li{margin:3px 0}
+.q{display:flex;flex-direction:column;gap:4px;padding:10px;border:1px solid var(--line);border-radius:8px}
+.q b{font-weight:600}
+.shares{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:center}
+.fine{display:grid;grid-template-columns:repeat(8,1fr);gap:1px;width:120px}
+.fine i{aspect-ratio:1;display:block}
+.bars{display:flex;flex-direction:column;gap:6px;min-width:0}
+.b{display:grid;grid-template-columns:96px 1fr 40px;gap:8px;align-items:center;font-size:13px}
+.track{height:12px;background:var(--line);border-radius:3px;overflow:hidden}
+.track i{display:block;height:100%}
+.v{font-family:var(--f-mono);font-size:12px;text-align:right}
+a{color:inherit}
+.cstep{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+@media (max-width:820px){.cstep{grid-template-columns:1fr 1fr}}
+.cstep .box{gap:4px}
+.heat{display:grid;grid-template-columns:repeat(14,1fr);gap:2px;max-width:420px}
+.heat i{aspect-ratio:1;display:block;border-radius:2px}
+.zones{display:grid;grid-template-columns:repeat(14,1fr);gap:1px;max-width:260px;margin:4px 0}
+.zones i{aspect-ratio:1;display:block;border-radius:1px}
+.vars{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:start}
+@media (max-width:980px){.vars{grid-template-columns:1fr}}
+.dg{display:grid;grid-template-columns:1fr 1fr;gap:6px;text-align:center;font-size:13px}
+.dg .nd{border:1px solid var(--line);border-radius:8px;padding:6px;background:var(--bg)}
+.dg .nd span{color:var(--muted);font-size:12px}
+.dg .nd.in{background:var(--neutral)}
+.dg .nd.big,.dg .ar2,.dg .nd.outn{grid-column:1 / -1}
+.dg .nd.big{font-weight:600}
+.dg .nd.outn{background:var(--open-bg);color:var(--open);font-weight:600}
+.dg .ar2{color:var(--muted)}
+</style>
+
+<div class="wrap">
+  <header style="display:flex;flex-direction:column;gap:8px">
+    <h1>Генерал: архитектура</h1>
+    <p class="muted">Рабочая страница S28. Вкладки идут по уровням: уровень → часть → тема. Заполнено только то, о чём договорились.</p>
+  </header>
+
+  <nav class="tabrow t1" id="tLevel" aria-label="Уровень"><span class="lbl">Уровень</span></nav>
+  <nav class="tabrow" id="tPart" aria-label="Часть"><span class="lbl">Часть</span></nav>
+  <nav class="tabrow" id="tTopic" aria-label="Тема"><span class="lbl">Тема</span></nav>
+  <div class="crumbs" id="crumbs"></div>
+
+  <main id="content"></main>
+</div>
+
+<template id="tpl-landscape">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done">
+        <h2>Карта <span class="chip done">решено</span></h2>
+        <div class="pair">
+          <div><div class="grid" data-g="g1" aria-label="Слой местности"></div><div class="small">Слой 1: местность</div></div>
+          <div><div class="grid" data-g="g2" aria-label="Слой зон"></div><div class="small">Слой 2: зоны развёртывания</div></div>
+        </div>
+        <div class="leg">
+          <span><i class="sw" style="background:var(--field)"></i>поле</span>
+          <span><i class="sw" style="background:var(--out)"></i>за картой</span>
+          <span><i class="sw" style="background:var(--mine)"></i>наша</span>
+          <span><i class="sw" style="background:var(--minev)"></i>наша передовая</span>
+          <span><i class="sw" style="background:var(--foe)"></i>врага</span>
+          <span><i class="sw" style="background:var(--foev)"></i>передовая врага</span>
+          <span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>ничья</span>
+        </div>
+        <ul class="small">
+          <li>Клетка всегда 16 м. Сетка 96×96 клеток (= 1536 м, самая большая полевая карта). Типичная карта 1024 м занимает середину 64×64. Клетки «за картой» окружают карту со всех сторон — край виден везде.</li>
+          <li>Память: ~18 КБ на карту (2 слоя по байту на клетку).</li>
+          <li>Оба слоя — ярлыки, идут через словарик.</li>
+          <li>Карта хранится один раз на карту, сводка считается один раз.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="side">
+      <div>
+        <div class="colh">Открытые вопросы</div>
+        <div class="box open">
+          <h2>Ответ найден — нужно утвердить <span class="chip open">ждёт тебя</span></h2>
+          <div class="q"><b>2. Зоны развёртывания</b>
+            <span class="small">Основные зоны врагов <b>не пересекаются</b> (1043 пары, зазор ≥ 8 м). Отдельной передовой зоны в игре нет: отряд с передовым развёртыванием ставится где угодно, кроме полосы ~42 м вокруг зоны врага. Значит, «где могут стоять наши передовые» и «где могут стоять передовые врага» <b>накладываются</b>.</span>
+            <div class="zones" data-g="zones" aria-label="Пример флагов зон"></div>
+            <span class="small"><b>Предложение:</b> вместо одного слоя с пятью типами — 4 флага да/нет в клетке: наша зона · зона врага · сюда можно нашим передовым · сюда можно передовым врага. Союзники делят зону своей стороны.</span></div>
+          <div class="q"><b>Попутно</b><span class="small">Сейчас ни зоны, ни границы поля в бой к нам не попадают: сценарий ставит армии квадратами 300×300 м. Зоны можно прочитать заранее из файлов карт.</span></div>
+        </div>
+      </div>
+      <div>
+        <div class="colh">На будущее — не в первой версии</div>
+        <div class="box later">
+          <h2>Доли в клетке <span class="chip later">когда будет рельеф</span></h2>
+          <div class="shares">
+            <div class="fine" data-g="fine" aria-label="Клетка 16 м из клеток 2 м"></div>
+            <div class="bars">
+              <div class="b"><span>поле</span><div class="track"><i style="width:75%;background:var(--field)"></i></div><span class="v">0,75</span></div>
+              <div class="b"><span>непроходимо</span><div class="track"><i style="width:25%;background:var(--block)"></i></div><span class="v">0,25</span></div>
+              <div class="b"><span>за картой</span><div class="track"><i style="width:0%;background:var(--out)"></i></div><span class="v">0,00</span></div>
+            </div>
+          </div>
+          <ul class="small">
+            <li>Клетка генерала (16 м) хранит доли типов: «сколько здесь чего». Мелкие дома и узкие проходы не пропадают.</li>
+            <li>Доли — величины, подаются числами прямо.</li>
+            <li>У отрядов будет своя подробная карта (2 м), там в клетке один тип.</li>
+            <li><a href="https://claude.ai/artifact/JwmZ1VDEnbHmmeHoJFUErh">Пример с тремя правилами</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+</template>
+
+<script>
+(function(){
+  // the tree: levels → parts → topics; "ready" topics have a template, others show as not discussed yet
+  var tree=[
+    {n:"1. Замысел",parts:[
+      {n:"Входные параметры",topics:[{n:"Ландшафт",tpl:"tpl-landscape"},{n:"Армии"},{n:"Кто атакует"}]},
+      {n:"Обработка",topics:[]},
+      {n:"Выход",topics:[]}]},
+    {n:"2. Группы на поле",parts:[]},
+    {n:"3. Отряды",parts:[]}
+  ];
+  var st={l:0,p:0,t:0};
+  try{var s=JSON.parse(localStorage.getItem("gen-tabs")||"null");if(s)st=s;}catch(e){}
+  function save(){try{localStorage.setItem("gen-tabs",JSON.stringify(st));}catch(e){}}
+  function row(id,items,cur,ready,onpick){
+    var el=document.getElementById(id);[].slice.call(el.querySelectorAll("button")).forEach(function(b){b.remove();});
+    items.forEach(function(it,i){var b=document.createElement("button");b.type="button";b.textContent=it.n;
+      if(i===cur)b.classList.add("on");if(!ready(it))b.classList.add("soon");
+      b.addEventListener("click",function(){onpick(i);});el.appendChild(b);});
+    el.hidden=items.length===0;
+  }
+  function render(){
+    var L=tree[st.l]||tree[0];var parts=L.parts;if(st.p>=parts.length)st.p=0;
+    var P=parts[st.p];var topics=P?P.topics:[];if(st.t>=topics.length)st.t=0;var T=topics[st.t];
+    row("tLevel",tree,st.l,function(it){return it.parts.some(function(p){return p.topics.some(function(t){return t.tpl;});});},function(i){st.l=i;st.p=0;st.t=0;save();render();});
+    row("tPart",parts,st.p,function(it){return it.topics.some(function(t){return t.tpl;});},function(i){st.p=i;st.t=0;save();render();});
+    row("tTopic",topics,st.t,function(it){return !!it.tpl;},function(i){st.t=i;save();render();});
+    document.getElementById("crumbs").innerHTML="<b>"+L.n+"</b>"+(P?" → <b>"+P.n+"</b>":"")+(T?" → <b>"+T.n+"</b>":"");
+    var c=document.getElementById("content");c.innerHTML="";
+    if(T&&T.tpl){c.appendChild(document.getElementById(T.tpl).content.cloneNode(true));draw(c);}
+    else c.innerHTML='<div class="empty">Ещё не обсуждали. Дойдём по порядку.</div>';
+  }
+  function fillGrid(el,fn,w,h){var s="";for(var y=0;y<h;y++)for(var x=0;x<w;x++)s+='<i style="background:'+fn(x,y)+'"></i>';el.innerHTML=s;}
+  function draw(c){
+    var W=14,H=12;function out(x,y){return x<1||y<1||x>=W-1||y>=H-1;}
+    var g1=c.querySelector('[data-g="g1"]'),g2=c.querySelector('[data-g="g2"]'),f=c.querySelector('[data-g="fine"]');
+    if(g1)fillGrid(g1,function(x,y){return out(x,y)?"var(--out)":"var(--field)";},W,H);
+    if(g2)fillGrid(g2,function(x,y){if(out(x,y))return "var(--neutral)";if(y<=2)return "var(--foe)";if(y===3)return "var(--foev)";if(y>=H-3)return "var(--mine)";if(y===H-4)return "var(--minev)";return "var(--neutral)";},W,H);
+    if(f)fillGrid(f,function(x,y){return (x>=4&&y>=4)?"var(--block)":"var(--field)";},8,8);
+    var hm=c.querySelector('[data-g="heat"]');
+    if(hm){
+      var HW=14,HH=10,feat=[],kind=[];
+      for(var y=0;y<HH;y++)for(var x=0;x<HW;x++){var forest=(x>=2&&x<=5&&y>=2&&y<=6),hill=((x-10)*(x-10)+(y-3)*(y-3)<=5);
+        kind.push(forest?1:(hill?2:0));feat.push([forest||hill?0:1, forest?1:0, hill?1:0]);}
+      var units=[{n:"кавалерия",q:[1,-0.6,0],ans:"Кавалерия смотрит на открытое поле: там ей разгоняться. В доклад попадает: «поле большое, лес слева мешает»."},
+                 {n:"стрелки",q:[0,0.4,1],ans:"Стрелки смотрят на холм (дальше бьют) и чуть на лес (укрытие). В доклад: «холм справа — хорошая позиция»."},
+                 {n:"лёгкая пехота",q:[0,1,0.2],ans:"Лёгкая пехота смотрит на лес: там её не достанут стрелы и кавалерия. В доклад: «лес слева — укрытие»."}];
+      var ui=c.__u||0;
+      var ut=c.querySelector('[data-units]');[].slice.call(ut.querySelectorAll("button")).forEach(function(b){b.remove();});
+      units.forEach(function(u,i){var b=document.createElement("button");b.type="button";b.textContent=u.n;if(i===ui)b.classList.add("on");b.addEventListener("click",function(){c.__u=i;draw(c);});ut.appendChild(b);});
+      var u=units[ui],sc=feat.map(function(f){return 3*(f[0]*u.q[0]+f[1]*u.q[1]+f[2]*u.q[2]);}),mx=Math.max.apply(null,sc);
+      var ex=sc.map(function(s){return Math.exp(s-mx);}),tot=ex.reduce(function(a,b){return a+b;},0),w=ex.map(function(e){return e/tot;}),wm=Math.max.apply(null,w);
+      var base=["var(--field)","var(--mine)","var(--block)"],s2="";
+      for(var k=0;k<HW*HH;k++){var a=w[k]/wm;s2+='<i style="background:'+base[kind[k]]+';box-shadow:inset 0 0 0 '+(a>0.15?Math.max(1,Math.round(a*4)):0)+'px var(--open);opacity:'+(0.35+0.65*a).toFixed(2)+'"></i>';}
+      hm.innerHTML=s2;
+      c.querySelector('[data-q]').textContent="«Вопрос» отряда «"+u.n+"»:";
+      var qn=["хочу открытое","хочу укрытие","хочу высоту"];
+      c.querySelector('[data-qbars]').innerHTML=u.q.map(function(v,i){var p=Math.abs(v)*100;return '<div class="b"><span>'+qn[i]+'</span><div class="track"><i style="width:'+p+'%;background:'+(v>=0?'var(--done)':'var(--foe)')+'"></i></div><span class="v">'+(v>=0?'+':'')+v.toFixed(1)+'</span></div>';}).join("");
+      c.querySelector('[data-ans]').textContent=u.ans;
+    }
+    var z=c.querySelector('[data-g="zones"]');
+    if(z){var ZW=14,ZH=10,s="";for(var y=0;y<ZH;y++)for(var x=0;x<ZW;x++){
+      var foe=y<=1, mine=y>=ZH-2, foeBand=y<=2, mineBand=y>=ZH-3;
+      var ourV=!foeBand, foeV=!mineBand, col;
+      if(foe)col="var(--foe)";else if(mine)col="var(--mine)";else if(ourV&&foeV)col="linear-gradient(135deg,var(--minev) 50%,var(--foev) 50%)";else if(ourV)col="var(--minev)";else col="var(--foev)";
+      s+='<i style="background:'+col+'"></i>';}z.innerHTML=s;}
+  }
+  render();
+})();
+</script>
