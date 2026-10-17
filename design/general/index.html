@@ -63,7 +63,16 @@ ul{margin:0;padding-left:18px} li{margin:3px 0}
 .track i{display:block;height:100%}
 .v{font-family:var(--f-mono);font-size:12px;text-align:right}
 a{color:inherit}
-.layers{display:flex;flex-direction:column;gap:10px}
+.ginfo{border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--bg)}
+.ginfo b{font-size:16px}
+.lgroup>summary{cursor:pointer;font-weight:600;font-size:16px;margin-bottom:8px}
+.lacc{border:1px solid var(--line);border-radius:8px}
+.lacc>summary{cursor:pointer;display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;padding:10px 12px;list-style-position:inside}
+.lacc>summary .ln{font-weight:600}
+.lacc[open]>summary{border-bottom:1px dashed var(--line)}
+.lacc .lrow{border:0;margin:0}
+.layers{display:flex;flex-direction:column;gap:6px}
+
 .lrow{display:grid;grid-template-columns:230px minmax(0,1fr);gap:12px;align-items:start;padding:10px;border:1px solid var(--line);border-radius:8px}
 .lrow .grid{max-width:230px}
 .lrow.pending{border-style:dashed}
@@ -121,8 +130,17 @@ a{color:inherit}
       <div class="colh">Решено</div>
       <div class="box done">
         <h2>Карта <span class="chip done">решено</span></h2>
+        <div class="ginfo"><b>Общее</b>
+        <ul class="small">
+          <li>Клетка всегда 16 м. Сетка 96×96 клеток (= 1536 м, самая большая полевая карта). Типичная карта 1024 м занимает середину 64×64. Клетки «за картой» окружают карту со всех сторон — край виден везде.</li>
+          <li>В памяти 2 байта на клетку: тип местности + 4 флага зон в одном байте; ~18 КБ на карту. На входе в сеть — 5 слоёв (на мгновение, один раз на карту).</li>
+        </ul></div>
+        <details class="lgroup" open>
+          <summary>Слои карты — 5 (нажми на слой, чтобы раскрыть)</summary>
         <div class="layers">
-          <div class="lrow">
+          <details class="lacc">
+            <summary><span class="ln">Слой 1 · местность</span><span class="kind">ярлык → словарик</span></summary>
+            <div class="lrow">
             <div class="grid" data-g="g1" aria-label="Слой местности"></div>
             <div class="linfo">
               <b>Слой 1 · местность</b>
@@ -133,8 +151,11 @@ a{color:inherit}
               </div>
               <span class="small">Потом: лес, вода, непроходимо… — типы по механике.</span>
             </div>
-          </div>
-          <div class="lrow">
+            </div>
+          </details>
+          <details class="lacc">
+            <summary><span class="ln">Слой 2 · наша зона</span><span class="kind">флаг да/нет → числом</span></summary>
+            <div class="lrow">
             <div class="grid" data-g="z1" aria-label="Слой 2 · наша зона"></div>
             <div class="linfo">
               <b>Слой 2 · наша зона</b>
@@ -142,8 +163,11 @@ a{color:inherit}
               <div class="leg"><span><i class="sw" style="background:var(--mine)"></i>да</span><span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>нет</span></div>
               <span class="small">Где наши стоят в начале.</span>
             </div>
-          </div>
-          <div class="lrow">
+            </div>
+          </details>
+          <details class="lacc">
+            <summary><span class="ln">Слой 3 · зона врага</span><span class="kind">флаг да/нет → числом</span></summary>
+            <div class="lrow">
             <div class="grid" data-g="z2" aria-label="Слой 3 · зона врага"></div>
             <div class="linfo">
               <b>Слой 3 · зона врага</b>
@@ -151,8 +175,11 @@ a{color:inherit}
               <div class="leg"><span><i class="sw" style="background:var(--foe)"></i>да</span><span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>нет</span></div>
               <span class="small">Где враги стоят в начале. Основные зоны никогда не пересекаются.</span>
             </div>
-          </div>
-          <div class="lrow">
+            </div>
+          </details>
+          <details class="lacc">
+            <summary><span class="ln">Слой 4 · можно нашим передовым</span><span class="kind">флаг да/нет → числом</span></summary>
+            <div class="lrow">
             <div class="grid" data-g="z3" aria-label="Слой 4 · можно нашим передовым"></div>
             <div class="linfo">
               <b>Слой 4 · можно нашим передовым</b>
@@ -160,8 +187,11 @@ a{color:inherit}
               <div class="leg"><span><i class="sw" style="background:var(--minev)"></i>да</span><span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>нет</span></div>
               <span class="small">Почти всё поле, кроме полосы ~42 м вокруг зоны врага.</span>
             </div>
-          </div>
-          <div class="lrow">
+            </div>
+          </details>
+          <details class="lacc">
+            <summary><span class="ln">Слой 5 · можно передовым врага</span><span class="kind">флаг да/нет → числом</span></summary>
+            <div class="lrow">
             <div class="grid" data-g="z4" aria-label="Слой 5 · можно передовым врага"></div>
             <div class="linfo">
               <b>Слой 5 · можно передовым врага</b>
@@ -169,12 +199,10 @@ a{color:inherit}
               <div class="leg"><span><i class="sw" style="background:var(--foev)"></i>да</span><span><i class="sw" style="background:var(--neutral);border:1px solid var(--line)"></i>нет</span></div>
               <span class="small">То же для врага. Слои 4 и 5 накладываются посередине.</span>
             </div>
-          </div>
+            </div>
+          </details>
         </div>
-        <ul class="small">
-          <li>Клетка всегда 16 м. Сетка 96×96 клеток (= 1536 м, самая большая полевая карта). Типичная карта 1024 м занимает середину 64×64. Клетки «за картой» окружают карту со всех сторон — край виден везде.</li>
-          <li>В памяти 2 байта на клетку: тип местности + 4 флага зон в одном байте; ~18 КБ на карту. На входе в сеть — 5 слоёв (на мгновение, один раз на карту).</li>
-        </ul>
+        </details>
         <details class="why">
           <summary>Почему так и что отвергли</summary>
           <ul class="small">
