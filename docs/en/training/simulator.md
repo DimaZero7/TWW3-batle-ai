@@ -931,6 +931,18 @@ Open (not these units' new mechanics - general ones):
     rest is the later bursts: HP a bullet in bursts 2-5 against the first, game 0.84, lab 0.81, rectangle 0.93 (its
     front rank is one pool, the lab's hits pile up more on the aimed men); and the first burst on a whole formation is
     above the game in every model (0.7-0.95) - open.
+  - A counting error in the probes (`unit_probe.ratling_measure`): a projectile lands d / (v cos theta) after it leaves (a
+    bolt at 108 m 2.5 s, a bullet 1.1 s), and HP a bullet counted every bullet of the lane: those of the lane's last
+    flight time landed after it ended, their hits are not in the recording. Now only the bullets loosed by the end less
+    the flight and 0.5 s count, the health up to their landing (the simulator's hits are at once). Crossbows on a lone
+    man (`ratlone`): sim / game 1.48 / 1.54 -> 1.19 / 1.26 (the last volley was 90 of 447 bolts); the `lonerank` probe
+    (until the target died, no cut) 1.08 / 1.15. The gun on a lone man 0.84-0.93, handguns 0.87-0.98, the General
+    0.87-1.13. The crossbows' rest (~1.15-1.25) is within one lane's noise (~40 hits) and `lonerank`: left.
+  - The first burst is the gun's alone: the handguns' first volley on a whole formation is game / sim 1.0-1.09. The
+    gun's formation is sim / game ~1.18 and its lone man ~0.88: the model gives the gun a formation / lone ratio ~1.3x the
+    game's. It looks like a spread that is not round (wider in height than across): a lone man's hits hang on both, a
+    formation's on the height only. Neither the database nor the community has it - it needs a probe: the gun at a tall
+    and at a wide target at one distance.
 - The first 5 s of the censers', monks' and halberds' melee are twice the game's in the simulator (censers 443 against
   230 HP/s) - the same charge hole as all infantry's (the melee change).
 - The Giant Rats strike harder than the game's in the first second of contact (a charge 555 against 401 HP, into braced

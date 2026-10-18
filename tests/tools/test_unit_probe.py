@@ -199,11 +199,12 @@ def test_report_tables_per_plan_and_kind(tmp_path, capsys):
     events = []
     for k in range(0, 20):
         lanes = [{"lane": l["name"], "t": k * 500, "a": {"x": 0, "z": 100, "men": 32, "ammo": 8640 - 100 * k},
-                  "tg": {"x": 0, "z": 0, "men": 120, "hp": 8000 - 150 * k}} for l in config["lanes"]]
+                  "tg": {"x": 0, "z": 0, "men": 120, "hp": 8000 - 150 * max(0, k - 2)}} for l in config["lanes"]]
         events.append({"event": "probe_sample", "lanes": lanes})
     (run / "events.jsonl").write_text("\n".join(json.dumps(e) for e in events), encoding="utf-8")
     result = up.report([run], out=tmp_path / "out.json")
     assert len(result["lanes"]) == 6
     s = {r["kind"]: r for r in result["summary"]}
-    assert s["d60"]["hp_per_bullet"][0] == pytest.approx(1.5) and s["d60"]["n"] == 1
+    # the hits land a flight (100 m at 100 m/s: 1 s) after the bullets: the bullets of the lane's last 1.5 s are left out
+    assert s["d60"]["hp_per_bullet"][0] == pytest.approx(1.5, rel=0.02) and s["d60"]["n"] == 1
     assert "== ratling" in capsys.readouterr().out

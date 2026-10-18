@@ -46,6 +46,7 @@ Units by short name (tools/nn/charge_probe.UNITS) or any Empire / Skaven key wit
 data/units/probe-units.json); the plans' units are this module's constants (RATLING, CENSER, ...).
 """
 import argparse
+import math
 import json
 import sys
 from pathlib import Path
@@ -288,6 +289,17 @@ def _card_change(lane, who, key, c, lo=0.0, hi=30.0):
     return base, (hi_v if base - lo_v < hi_v - base else lo_v)
 
 
+def _flight_s(spec, d):
+    """A projectile's flight, s: the low arc's d / (v cos theta), theta = asin(g d / v^2) / 2 (the shooter's passport
+    muzzle velocity); 0 without one."""
+    p = cp.passport(spec.get("a_key") or "") or {}
+    v = float((p.get("missile") or {}).get("muzzle_velocity") or 0)
+    if not v or not d:
+        return 0.0
+    th = 0.5 * math.asin(min(1.0, d * 9.81 / (v * v)))
+    return d / (v * math.cos(th))
+
+
 def ratling_measure(lane):
     spec, s = lane["spec"], lane["samples"]
     t = _t(lane)
@@ -324,11 +336,25 @@ def ratling_measure(lane):
     out["burst_bullets"] = float(np.median(sizes))
     out["burst_s"] = float(np.median(np.array(ends) - np.array(starts) + 0.5))
     out["burst_every_s"] = float(np.median(np.diff(starts))) if len(starts) > 1 else None
-    stop = min(float(t[-1]), last + 2.0)          # the last bullets' flight and the health readout
+    # HP per bullet counts only the bullets whose hits the recording holds: a projectile lands its flight time after it
+    # leaves (the low arc's d / (v cos theta): a bolt 2.5 s at 108 m, a bullet 1.1 s), so the ones loosed in the lane's
+    # last flight time + the 0.5 s readout land after it ends (the ratlone crossbows' last volley: 90 of 447 bolts, their
+    # HP lost - 1.46 of the game was this). The simulator's hits are at once (run 'sim'): its HP to the same bullets.
+    flight = _flight_s(spec, out["d0_m"])
+    cut = float(t[-1]) - flight - 0.5
+    keep = fired & (t[1:] <= cut + 1e-6)
+    if keep.any():
+        last_k = float(t[1:][keep][-1])
+        n_keep = float(np.nansum(drop[keep]))
+    else:
+        last_k, n_keep = last, bullets
+    # (a bullet loosed in the sample ending at last_k lands by last_k + flight: the health then holds its hit and
+    # none of the later ones')
+    stop = min(float(t[-1]), last_k + (0.0 if lane.get("run") == "sim" else flight))
     lost = cp.at(t, hp, first - 0.5) - cp.at(t, hp, stop)
     out["tg_hp_lost"] = lost
     out["tg_men_lost"] = cp.at(t, tmen, first - 0.5) - cp.at(t, tmen, stop)
-    out["hp_per_bullet"] = lost / bullets if bullets else None
+    out["hp_per_bullet"] = lost / n_keep if n_keep else None
     out["tg_hp_per_s"] = lost / (stop - first + 0.5)
     out["dd_end"] = _row(s[-1], "a").get("dd")
     out["tg_dead"] = bool(np.nanmin(tmen) == 0) if np.isfinite(tmen).any() else None
