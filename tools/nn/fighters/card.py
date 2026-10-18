@@ -13,7 +13,10 @@ Numbers (sim / game, 95 % CI by battles bootstrapped):
   HP by health  HP lost in melee windows by the same health bins (a damaged unit: below 30 %)
   contact       the seconds the game's melee flag is on (not routing): the share with the copies' flag on (and the
                 share of the game's off seconds with the copies' on)
-  routs         routs begun in the windows"""
+  routs         routs begun in the windows
+--settle S: men per HP and HP over the window's seconds S..9 only (the lab's men re-pair with the enemy after the
+window's reset - each striker on the man he keeps hitting; in the first seconds the blows land on men with no history
+with him, docs/en/training/fighters_lab.md "Killed per health: the window reset and the men's turnover")"""
 import argparse
 import glob
 import json
@@ -36,7 +39,7 @@ def load(d):
     return out
 
 
-def records(d):
+def records(d, settle=0):
     """[n, 13] per (window, unit): hp0 share, men share, men0, game HP lost (men's worth), game men lost, sim HP lost
     (men's worth, copy mean), sim men lost, game melee share, game rout begun, sim routs begun (copy mean), hp a man,
     two-handed (greatswords), key index; and the contact seconds [m, 3]: game m, sim m share, valid."""
@@ -61,11 +64,18 @@ def records(d):
     # is the game's): HP lost over rows s .. s + J = game hp0 - sim hp at h = J - 1
     sd_hp = ((gh0[:, None, :] - sh[:, J - 1]) * men0[:, None, :]).mean(1)
     sd_m = (gm0[:, None, :] - sm[:, J - 1]).mean(1)
+    g_hp_lost, g_men_lost = (gh0 - gh1) * men0, gm0 - gm1
+    if settle:
+        # the window's seconds settle..J: the copies from their own state after settle seconds, the game from its row
+        sd_hp = ((sh[:, settle - 1] - sh[:, J - 1]) * men0[:, None, :]).mean(1)
+        sd_m = (sm[:, settle - 1] - sm[:, J - 1]).mean(1)
+        g_hp_lost, g_men_lost = (g_hp[:, settle] - gh1) * men0, g_men[:, settle] - gm1
+        keep &= np.isfinite(g_hp_lost + g_men_lost)
     two = np.array(["greatsword" in str(k) for k in d["keys"]])[None, :]
     keyi = np.arange(len(d["keys"]))[None, :]
     g_rout = (~g_rs[:, 0]) & g_rs.any(1)
     s_rout = ((sr[:, :J] | ss[:, :J]).any(1)).mean(1)
-    rec = np.stack([gh0, gm0 / men0, np.broadcast_to(men0, gh0.shape), (gh0 - gh1) * men0, gm0 - gm1, sd_hp, sd_m,
+    rec = np.stack([gh0, gm0 / men0, np.broadcast_to(men0, gh0.shape), g_hp_lost, g_men_lost, sd_hp, sd_m,
                     g_m.mean(1), g_rout.astype(float), s_rout, np.broadcast_to(hp_man[None, :], gh0.shape),
                     np.broadcast_to(two, gh0.shape).astype(float), np.broadcast_to(keyi, gh0.shape)], -1)
     # routs: every unit not routing at the start (lords too), whatever its losses
@@ -78,10 +88,10 @@ def records(d):
     return rec[keep], (con, rout)
 
 
-def collect(d):
+def collect(d, settle=0):
     rows, cons, routs = [], [], []
     for name, b in load(d).items():
-        r, (c, ro) = records(b)
+        r, (c, ro) = records(b, settle)
         rows.append(r)
         cons.append(c)
         routs.append(ro)
@@ -103,8 +113,8 @@ def _ratio(rows, sel, num_s, den_s, num_g, den_g, n_boot=300):
     return v, (np.percentile(bs, [2.5, 97.5]) if bs else (np.nan, np.nan))
 
 
-def card(d):
-    rows, cons, routs = collect(d)
+def card(d, settle=0):
+    rows, cons, routs = collect(d, settle)
     out = {}
     melee = lambda a: a[:, 7] > 0.5
     shot = lambda a: (a[:, 7] == 0) & (a[:, 3] > 0)
@@ -139,8 +149,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("dirs", nargs="+", help="step-replay folders (the first: the rectangle, the next: the lab)")
     ap.add_argument("--out", default="")
+    ap.add_argument("--settle", type=int, default=0, help="men per HP and HP over the window's seconds S..9 only")
     a = ap.parse_args(argv)
-    cards = {Path(d).name: card(d) for d in a.dirs}
+    cards = {Path(d).name: card(d, a.settle) for d in a.dirs}
     names = list(cards)
     keys = list(cards[names[0]])
     print("sim / game [95 % CI by battles]; " + " | ".join(names))

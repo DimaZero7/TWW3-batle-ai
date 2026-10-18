@@ -958,6 +958,19 @@ Open (not these units' new mechanics - general ones):
     killed per health the same.
   - The replay of 92 battles with both fixes (`build/night_mob/r92_base`, `r92_fix`): damage under fire 0.90 -> 0.91,
     men killed per health under fire 0.59 -> 0.59, routs 0.96 -> 0.97, melee unchanged - the fixes break nothing.
+  - **Where the rest is** (the lord's damage 0.50 of the game in the itS26_15 replay; `build/night4`). Two parts:
+    - The lone man. The battle with the soldiers' places (`20261017-041729`, the net itS26_15, 78 s of the guns' fire on
+      the lord out of melee): in the seconds with none of his men in the 30 m corridor before him on the line to the
+      gun (+-1.4 m; by the game's places, 63 s, the game 39 HP/s) the rectangle gives 0.74 of the game, the lab's men
+      0.50 - the same short hits on a lone man as in the probes (0.70-0.81). When his men do stand in the corridor (3 or
+      more) the lord loses 1-7 HP/s in the game: the cover is there in the game.
+    - The rectangle's cover. In the 10 itS26_15 battles (no soldiers' places) by the units' centres: a unit of his in
+      melee "in line" before the lord or round him - the simulator 0.01-0.13 of the game (the game 28-34 HP/s, as with no
+      cover). By its centre the unit is on the line, but its men in the fight are not; the rectangle covers the lord
+      where no men stand. Not the friends' line of fire: with `missile.arc_los` null (the old rule) 0.50 -> 0.22.
+    - The database's projectile collision radius (`projectiles.collision_radius`: a bullet 0.05 m, an arrow and a sling
+      stone 0.1) does not fit the lone man: by the formula +11 % for the gun but +15 % for the arrows, where the lone man
+      already matches.
 - Projectiles on running beasts: crossbows and handguns on wolf rats faster than 4 m/s hit 1.4x the game's in the
   battles (a fast target moves from under the projectile in its flight - not in the hit model).
 

@@ -314,6 +314,29 @@ What is known (`build/night3`: the lab's men in reach logged by unit pair, `reac
   the blocked ones spoils the killed per health ("Tried and rejected").
 - Unit type, fatigue and health do not explain the excess: "own target" 1.1-1.6 for every infantry type, at any fatigue.
 
+**Killed per health: the window reset and the men's turnover** (the replay of the same 2 battles from the places,
+`build/night4`):
+
+- **Part of the shortfall is the window reset.** Killed per health, lab / game, by the window's second 0-8: 0.64 / 0.54 /
+  0.66 / 0.67 / 0.70 / 0.81 / 0.88 / 0.86 / 0.87 (the game's is flat). After the reset the men stand at new places and
+  strike new enemies - the blows land on men they have not wounded yet; in 5-8 s the pairs "striker - his wounded man"
+  form again. `card --settle 5` (the window's seconds 5-9 only): all 0.75 -> 0.86; whole units (> 85 %) 0.97 -> 1.11,
+  60-85 % 0.69 -> 0.81, 40-60 % 0.72 -> 0.78. It is not where the wounds lie: the wound share of the men in reach is the
+  same before and after the reset (0.217), and handing the wounds over by nearness to the enemy or keeping the targets
+  through the reset changes nothing (0.74). With no reset - the probes, whole units - the lab kills per health even more
+  than the game (1.1-1.4).
+- **The rest is the turnover.** A man in reach of the enemy is still in reach 1 / 3 / 5 s later (of the survivors): the
+  game 0.91 / 0.85 / 0.83, the lab 0.87 / 0.76 / 0.68. The difference is when the unit's centre moves: with the centre
+  moving under 0.5 m in 3 s the lab 0.84 (the game 0.82), over 3 m 0.63 (the game 0.88). In the game a man locked with
+  an enemy stays with him wherever the centre goes; in the lab a man is tied to his place in the formation (at most
+  2 m) and the centre carries him out of reach - the blows spread over more men. (The game's men are followed one by
+  one: in `ManList` a dead man's slot takes the list's last man - checked on the probes every 0.1 s: a move of 0.28 m
+  against 8 m with a plain removal.)
+- `clear_line` with `unit_incidental` 1 (`build/night4/clear_inc1`): melee damage on whole units 1.14 -> 0.95, killed per
+  health 0.75 -> 0.62, after the window's 5 s 0.86 -> 0.68 (whole units 1.11 -> 0.83) - the fall is not the reset: the
+  rule takes away the second rank's blows on the same front men. Too early to turn it on before what holds the men in
+  a fight is found.
+
 ### Wolf rats (probes wolfrats, wolfpoison)
 
 22 lanes of 4 battles (`build/charge-probe/runs/20261011-2141...2145`; rats on swordsmen, spearmen, the General; 4
@@ -533,6 +556,7 @@ DOCK_MEM=8g DOCK_BUILD=<main>/build bash tools/nn/dock.sh tools.nn.fighters.prob
 DOCK_MEM=8g DOCK_BUILD=<main>/build bash tools/nn/dock.sh tools.nn.fighters.replay --runs-from build/contactgap/sr_free_rect --out build/fighters/sr_fighters --device cuda --chunk 46
 DOCK_MEM=8g DOCK_BUILD=<main>/build bash tools/nn/dock.sh tools.nn.fighters.replay --runs-from ... --out build/fighters/sr_rect --rect --device cuda --chunk 16
 python -m tools.nn.fighters.card build/fighters/sr_rect build/fighters/sr_fighters     # the table, no torch
+python -m tools.nn.fighters.card ... --settle 5                                         # killed per health over the window's seconds 5-9
 DOCK_MEM=8g bash tools/nn/dock.sh tools.nn.fighters.bench --B 256 1024                 # speed
 DOCK_MEM=12g bash tools/nn/dock.sh tools.nn.train.run --fighters ...                   # training with the men (above)
 python -m tools.nn.charge_probe run --plan magic --battles 6 --speed 3                  # the knock-down probe battle (the game)
@@ -563,6 +587,9 @@ x 4 copies ran in a container of 10 GB (`DOCK_MEM=10g`).
   rats' surplus. In the probes (and in a crowd) as in the game. The mechanism is not found ("Where the whole battles'
   excess is", above): the lab has as many men in reach as the game, and the game's damage grows with its men reached,
   not with the strikers; a rule that gives this without spoiling the killed per health is open.
+- The men hold in a fight weaker than the game's when the unit's centre moves (still in reach 3 s later 0.63 against
+  0.88, "Killed per health: the window reset and the men's turnover"): hence the short killed per health of wounded units
+  (0.78-0.84 after the window's 5 s). What holds a man at his enemy in the game is not found.
 - The share thrown by a spell is 2-5x below the game's (the knock probe battle): how the game throws men beyond the
   blast radius is not found.
 - The ellipse body (wolf rats) - the men are circles; the Ratling Gun's burst - at most 2 shots a man a step; a flat
@@ -608,6 +635,13 @@ x 4 copies ran in a container of 10 GB (`DOCK_MEM=10g`).
   the game without the rule too; the "own" 0.70 rested on the second rank's blows on the same front men (the blows
   concentrated), the rule removes them and the "own" falls to the same 0.61. So first a mechanism by which the game
   concentrates the blows on fewer men is needed (open), then `clear_line`.
+- **The fight holds a man** (tried in a copy, not in the code): a man with an enemy within reach is not carried with his
+  unit's centre and does not walk to his place unless the unit routs or is ordered to move or withdraw. The replay of 2
+  battles from the places (`build/night4/whold`): "still in reach 3 s later" with the centre still 0.84 -> 0.91, moving
+  unchanged (0.63 -> 0.64), melee damage on whole units 1.14 -> 1.41, killed per health 0.74 -> 0.76.
+- **Wounds by nearness to the enemy and the target kept through the window reset** (the replay from the places: the
+  lab's man nearest the enemy before the reset hands his health to the place nearest the enemy after; a man keeps his
+  target): killed per health 0.74 / 0.74 - no change.
 
 - **Speed: neighbour lists through the compiler.** The whole step under `torch.compile`, the neighbours as lists
   [battles x men x 108], the compiler fusing the operations itself: 1024 battles 42.9 ms, three passes over the lists
