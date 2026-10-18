@@ -6,7 +6,8 @@ flies to one man:
   aim          his own target man while that one lives in the unit he shoots (the simulator's missile.reaim), else a
                random living man of it, at his middle: h / (2 tan theta) beyond his feet (the
                simulator's spread model, missile.hit_chance_plane: the database's calibration area and distance,
-               accuracy + marksmanship; sigma^2 = area x (d / calibration distance)^2 x (1 - accuracy / 100))
+               accuracy + marksmanship; sigma = sqrt(area) x d / calibration distance x (1 - accuracy / 100), or
+               x sqrt(1 - accuracy / 100) with missile.accuracy.shrink "area")
   landing      Gaussian: sigma across the line of fire, sigma / sin(theta) along it on the ground (theta: the launch
                angle that carries the muzzle velocity to the distance, the lower arc)
   low path     over its last h / tan(theta) metres the projectile is below the head of a man h tall: the first man
@@ -98,8 +99,10 @@ def _trace(F, u, params, lab, sh, ok, target, near, live, salt=210):
     ex, ez = ex / d, ez / d
     d = d.clamp(min=5.0)
     gu = lambda name: u[name].gather(1, i)
-    sig = (torch.sqrt(gu("cal_area").clamp(min=0)) * d / gu("cal_dist").clamp(min=1.0)
-           * torch.sqrt((1 - gu("acc") / 100).clamp(min=0))).clamp(min=1e-3)
+    # the accuracy's cut as the simulator's (missile.acc_shrink: the radius or the area)
+    a = (1 - gu("acc") / 100).clamp(min=0)
+    shrink = a if params.sim["missile"]["accuracy"].get("shrink") == "radius" else torch.sqrt(a)
+    sig = (torch.sqrt(gu("cal_area").clamp(min=0)) * d / gu("cal_dist").clamp(min=1.0) * shrink).clamp(min=1e-3)
     v = gu("muzzle_v").clamp(min=1.0)
     theta = (0.5 * torch.asin((d * G / (v * v)).clamp(max=1.0))).clamp(min=1e-3)
     tan = torch.tan(theta)

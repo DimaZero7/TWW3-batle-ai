@@ -549,9 +549,12 @@ class TestMissile:
     @staticmethod
     def _lone(dx, dz, own_points, pierce=False):
         """The General's HP of one Ratling Gun volley at him 130 m away (x = 0, the gun at x = -130; he faces it), an
-        Empire swordsmen unit of his at (dx, dz) (None: none); spill_geometry.own_points, shield_ap_pierce as given."""
+        Empire swordsmen unit of his at (dx, dz) (None: none); spill_geometry.own_points, shield_ap_pierce as given.
+        The spread of the area reading (missile.accuracy.shrink 'area': sigma / sin(theta) 40 m, the case the
+        quadrature bug was found on; the radius reading's 33 m spread hides it less clearly)."""
         sg = dict(P.sim["missile"]["spill_geometry"], own_points=own_points)
-        params = P.with_cal("missile", spill_geometry=sg, shield_ap_pierce=pierce)
+        params = P.with_cal("missile", spill_geometry=sg, shield_ap_pierce=pierce,
+                            accuracy=dict(P.sim["missile"]["accuracy"], shrink="area"))
         side1 = [("wh_main_emp_cha_general_0", 0.0, 0.0, 270, True)]
         if dx is not None:
             side1.append(("wh_main_emp_inf_swordsmen", dx, dz, 270))
@@ -923,7 +926,8 @@ class TestMissileRules:
         p = float(missile.hit_chance(st.u, geometry.pairwise(st.u, 1.5), P)[0, 0, H])
         m = P.units[ARCHER]["missile"]
         lord = P.units["wh2_main_skv_cha_warlord_0"]
-        sig = math.sqrt(m["calibration_area_m"]) * 100 / m["calibration_distance_m"] * math.sqrt(1 - (10 + 10) / 100)
+        assert P.sim["missile"]["accuracy"]["shrink"] == "radius"            # the accuracy cuts the spread's radius
+        sig = math.sqrt(m["calibration_area_m"]) * 100 / m["calibration_distance_m"] * (1 - (10 + 10) / 100)
         th = 0.5 * math.asin(100 * 9.81 / m["muzzle_velocity"] ** 2)
         L = lord["height_m"] / math.tan(th)
         sa, c, r = sig / math.sin(th), L / 2, lord["radius_m"]
@@ -938,7 +942,24 @@ class TestMissileRules:
         m, unit = P.units[MILITIA_K]["missile"], P.units[MILITIA_K]
         acc = (unit["missile"].get("accuracy", 0) or 0) + (m.get("marksmanship", 0) or 0)
         sig = math.sqrt(m["calibration_area_m"]) * 65 / m["calibration_distance_m"] * math.sqrt(1 - acc / 100)
-        assert sig == pytest.approx(1.26, abs=0.02)                          # militia at 65 m (spec S1 d)
+        assert sig == pytest.approx(1.26, abs=0.02)                          # militia at 65 m (spec S1 d), the area cut
+
+    def test_accuracy_cuts_the_spread_radius_by_its_percent(self):
+        """missile.accuracy.shrink 'radius' (the lonerank probe: a lone Warlock Engineer under handguns / crossbows at
+        rank 0 and 9, +27 accuracy - hits x1.75 / x1.87 in the game): sigma x (1 - a / 100); 'area' x sqrt(1 - a / 100)
+        gave x1.43 / x1.46. A lone man's (the Warlord's) hits from rank 0 to rank 9 by each reading."""
+        area = P.with_cal("missile", accuracy=dict(P.sim["missile"]["accuracy"], shrink="area"))
+        ratio = {}
+        for name, prm in (("radius", P), ("area", area)):
+            p = []
+            for acc in (20.0, 47.0):
+                st = shooter_and([(0, 107, "wh2_main_skv_cha_warlord_0")], key="wh_main_emp_inf_handgunners")
+                st.u["acc"][0, 0] = acc
+                assert float(missile.acc_shrink(st.u, prm)[0, 0, 0]) == pytest.approx(
+                    (1 - acc / 100) if name == "radius" else math.sqrt(1 - acc / 100), rel=1e-5)
+                p.append(float(missile.hit_chance(st.u, geometry.pairwise(st.u, 1.5), prm)[0, 0, st.N // 2]))
+            ratio[name] = p[1] / p[0]
+        assert 1.75 < ratio["radius"] < 2.1 and 1.35 < ratio["area"] < 1.55
 
     def test_direct_fire_on_a_lone_man_falls_with_distance(self):
         p = []

@@ -33,6 +33,8 @@ def test_the_new_units_plans_build_on_the_grid_with_effects_and_card_rows(tmp_pa
             assert len(b) == 1 and sorted(l["kind"] for l in b[0]) == sorted(list(up.SUPPRESS2_STOP) * 2)
         elif plan == "ratlord":            # one lane a battle (one General): each kind once
             assert [l["kind"] for bt in b for l in bt] == [x[0] for x in up.RATLORD_LANES]
+        elif plan == "ratlone":            # one battle, each kind once (flat and arcing fire at lone heroes)
+            assert len(b) == 1 and [l["kind"] for l in b[0]] == [x[0] for x in up.RATLONE_LANES]
         else:
             assert len(b) == 2 and sorted(l["kind"] for l in b[0]) == sorted(l["kind"] for l in b[1])
             # every kind in two lane places

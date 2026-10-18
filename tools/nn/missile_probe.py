@@ -107,6 +107,8 @@ UNITS = {
     "storm": ("wh2_main_skv_inf_stormvermin_0", 160, SKV),
     "general": ("wh_main_emp_cha_general_0", 1, EMP),
     "warlord": ("wh2_main_skv_cha_warlord_0", 1, SKV),
+    # a lone hero (no shield; heroes, unlike the lord, can stand in several lanes): the lonerank plan's target
+    "warlock": ("wh2_main_skv_cha_warlock_engineer", 1, SKV),
 }
 LORDS = {EMP: "general", SKV: "warlord"}
 SHORT = {key: short for short, (key, _, _) in UNITS.items()}
@@ -116,7 +118,8 @@ Z0 = -80               # the shooters' line
 SETTLE_MS = 4000
 TICK_MS = 500
 PLANS = ("dist", "arc", "range", "targets", "shield", "moving", "rank", "thin", "pistol", "moving2", "lof",
-         "newdist", "starsmove", "meleefire", "hglof", "rangenew", "lofab", "lofthresh", "lofheight", "rangestand")
+         "newdist", "starsmove", "meleefire", "hglof", "rangenew", "lofab", "lofthresh", "lofheight", "rangestand",
+         "lonerank")
 # The game places a lane's target with its front, not its centre, at d (the recordings: centre ~9-10 m farther, the
 # skavenslaves' and the flagellants' half depth plus the shooter's own offset): plans that want a centre distance take
 # d = centre - CENTRE_OFFSET (the analysis reads the recorded places anyway).
@@ -227,6 +230,12 @@ def battles(plan):
                  lane("hg", "slave", 80, friend_fwd=40, friend_lat=15, **fr),
                  lane("hg", "slave", 80, friend_fwd=40, friend_lat=22.5, **fr),
                  lane("hg", "slave", 80, friend_fwd=15, friend_lat=0, **fr), lane("hg", "slave", 80)]]
+    if plan == "lonerank":
+        # how accuracy narrows the spread at a lone man (area or radius: hits x1.5 or x2.3 from rank 0 to rank 9, +27
+        # accuracy): handguns (flat) and crossbows (arcing) at a lone Warlock Engineer, rank 0 and 9, until he dies or
+        # the ammunition ends
+        return [[lane(s, "warlock", 100, t_width=5, **({"s_rank": 9} if r else {})) for s in ("hg", "xb")
+                 for r in (0, 9)]]
     if plan == "lof":
         fr = dict(friend="spear", friend_fwd=40, friend_width=30)
         return [[lane("militia", "slave", 60, friend_lat=0, **fr), lane("militia", "slave", 60, friend_lat=15, **fr),

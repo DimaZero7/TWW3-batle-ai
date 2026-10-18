@@ -122,7 +122,7 @@ Spells call it today (each projectile of Searing Doom and Warp Lightning lands a
 | Standoff (the front rank's distance to the enemy) | 1.0 m at contact -> 2.3 m, tau 13 s | measured: soldiers' places, 48 lanes of the probes reform, reform2, damaged, dmgmelee, wave, armour - the median nearest-enemy distance of the 15 nearest men 0.98 / 1.14 / 1.32 / 1.51 / 1.91 / 2.24 / 2.26 / 2.39 m at 0-1 / 1-3 / 3-5 / 5-10 / 10-20 / 20-40 / 40-90 / 90-240 s |
 | Attack clock | a swing every interval of the passport, a miss too | CA's schema (`melee_weapons`: the interval between the starts of attack animations); measured - the `swing` probe, below |
 | Share of blows `blow_share` | 1 (was 0.35) | the old measured 0.35 = the ratio of "a swing every interval" to "a miss of 0.5 s" (p + 0.5 / interval) |
-| Spread of arrows | calibration area x (d / distance)^2 x (1 - accuracy) | database, the simulator's model `missile.hit_chance_plane` |
+| Spread of arrows | sigma = sqrt(calibration area) x d / distance x (1 - accuracy) (`missile.accuracy.shrink` "radius") | database, the simulator's model `missile.hit_chance_plane` |
 | Knocked / lying | 7 / 3.5 m/s; 1.0-2.7 s | database |
 | Throw | median 3.0 m (p10-p90 2.3-6.0) | measured: the knock probe battle, below |
 | Beasts fight free | an ellipse body, no missile weapon | a rule by the body (the database does not say who attacks how); measured: the wolf rats' probes, below |

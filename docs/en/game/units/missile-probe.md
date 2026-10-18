@@ -86,6 +86,12 @@ came into range.
 
 **Rank 9:** archers 0.83 against 0.74 at rank 0 (x1.12), slingers 0.75 against 0.55 (x1.36).
 
+**Rank and a lone man (plan `lonerank`, 1 battle, `build/missile-probe/runs/20261018-073000`).** Handguns and crossbows
+at a lone Warlock Engineer 100 m off, rank 0 and 9, until he died (~200 hits a lane). Hits a shot: handguns
+0.25 → 0.45 (x1.75), crossbows 0.14 → 0.27 (x1.87). The +27 accuracy cuts the spread's radius: by the radius x1.92 / x2.04,
+by the area x1.43 / x1.46 - the simulator now takes the radius (`missile.accuracy.shrink`); the twin with the rank's
+accuracy, sim / game: 0.96 / 1.10 / 1.08 / 1.15 (by the area 0.86 / 0.68 / 0.91 / 0.70).
+
 ## Probes P1–P4 (thinned target, pistols, running target, friends in the line of fire)
 
 5 battles, plans `thin` (2), `pistol`, `moving2`, `lof`; recordings and analysis — `build/probes7` (`mband.py`,

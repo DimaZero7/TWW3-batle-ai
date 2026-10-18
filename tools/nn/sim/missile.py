@@ -273,13 +273,24 @@ def _phi(x):
     return 0.5 * (1 + torch.erf(x / math.sqrt(2)))
 
 
+def acc_shrink(u, params):
+    """[B, i, 1] how shooter i's accuracy (land_units accuracy + the projectile's marksmanship, a) narrows its spread
+    sigma (missile.accuracy.shrink): "radius" - sigma x (1 - a / 100), the spread's radius cut by the percent (the
+    lonerank probe: a lone Warlock Engineer under handguns and crossbows at rank 0 and rank 9, +27 accuracy - hits
+    x1.75 / x1.87, the radius reading x1.92 / x2.04, the area reading x1.43 / x1.46); otherwise "area" - sigma x
+    sqrt(1 - a / 100), the area cut (the modders' wording; config/nn/sim.json missile.accuracy_why)."""
+    a = (1 - u["acc"] / 100).clamp(min=0)
+    radius = params is not None and params.sim["missile"]["accuracy"].get("shrink") == "radius"
+    return (a if radius else torch.sqrt(a))[:, :, None]
+
+
 def hit_chance(u, pw, params):
     """[B, i, j] chance that a projectile of i aimed at j hits a man of j (module docstring: the spread model).
     missile.accuracy.spacing "db": the target's own close spacing (sp_h, sp_v) and formation (geometry.dims);
     a number: that spacing for all, the same files and ranks (the prototype's 2.0, build/accuracy/proto.py)."""
     cfg = params.sim["missile"]["accuracy"]
     if cfg.get("plane"):
-        return hit_chance_plane(u, pw, ellipse=bool(params.sim["missile"].get("body_ellipse")))
+        return hit_chance_plane(u, pw, ellipse=bool(params.sim["missile"].get("body_ellipse")), params=params)
     k = float(cfg["k"])
     d = pw["dist"].clamp(min=5.0)
     shrink = torch.sqrt((1 - u["acc"] / 100).clamp(min=0))[:, :, None]
@@ -325,13 +336,14 @@ def body_radii(u, pw):
     return across, along
 
 
-def hit_chance_plane(u, pw, ellipse=False):
+def hit_chance_plane(u, pw, ellipse=False, params=None):
     """[B, i, j] the hit chance with the spread in the plane across the line of fire (module docstring; missile.accuracy
     plane): sigma from the calibration AREA, the aim at a man's middle, ranks not in exact files. ellipse: a man's body
     is his battle entity's ellipse seen from the shooter (body_radii; missile.body_ellipse): its half-width across the
-    line of fire where the formula has r across (the lone man's erf, the cover), its half-length along it elsewhere."""
+    line of fire where the formula has r across (the lone man's erf, the cover), its half-length along it elsewhere.
+    params: the accuracy's cut (acc_shrink; None: the area's)."""
     d = pw["dist"].clamp(min=5.0)
-    shrink = torch.sqrt((1 - u["acc"] / 100).clamp(min=0))[:, :, None]
+    shrink = acc_shrink(u, params)
     sig = (torch.sqrt(u["cal_area"].clamp(min=0))[:, :, None] * d / u["cal_dist"].clamp(min=1.0)[:, :, None]
            * shrink).clamp(min=1e-3)
     v = u["muzzle_v"].clamp(min=1.0)[:, :, None]
@@ -426,7 +438,7 @@ def spill_geometry(u, pw, target, params):
     tj = t[:, :, None]
     d_ij = pw["dist"].gather(2, tj).clamp(min=5.0)                          # [B, i, 1]
     th_ij = pw["theta"].gather(2, tj)                                       # bearing i -> j
-    shrink = torch.sqrt((1 - u["acc"] / 100).clamp(min=0))[:, :, None]
+    shrink = acc_shrink(u, params)
     sig = (torch.sqrt(u["cal_area"].clamp(min=0))[:, :, None] * d_ij / u["cal_dist"].clamp(min=1.0)[:, :, None]
            * shrink).clamp(min=1e-3)
     v0 = u["muzzle_v"].clamp(min=1.0)[:, :, None]
@@ -608,7 +620,7 @@ def arc_lines(u, pw, target, params):
     ds = (pw["depth"] / 2)[:, :, None]                             # the shooter's half depth
     dt_ = pw["depth"].gather(1, t)[:, :, None] / 2                 # the target's half depth
     sig = (torch.sqrt(u["cal_area"].clamp(min=0))[:, :, None] * dist / u["cal_dist"].clamp(min=1.0)[:, :, None]
-           * torch.sqrt((1 - u["acc"] / 100).clamp(min=0))[:, :, None]).clamp(min=1e-3)
+           * acc_shrink(u, params)).clamp(min=1e-3)
     blocked = torch.zeros_like(along)
     low = torch.zeros_like(along)
     nodes = (-0.57735, 0.57735)

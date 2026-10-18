@@ -12,6 +12,9 @@ Monks, the Plague Censer Bearers, the Wolf Rats (plain and poisoned) and the Hal
             lone-man hits half the game's): the General 135 m off (front to front) facing the gun (his shield, 55 %, in its
             60 deg) or his back to it, 100 m off his back to it (the ratling plan has him 100 m off facing), RATLORD_S -
             3 battles of one lane (the army has one General). Measures: as ratling (HP per bullet);
+  ratlone   flat and arcing fire at a lone man (the gun's lone-man hits 0.7-0.8 of the game, arrows' right: the gun's or
+            flat fire's?): the gun at a Gold Wizard 60 / 100 / 135 m off, handguns at a Warlock Engineer 60 / 100 / 135 m
+            off, crossbows at him 100 / 135 m off (RATLONE_LANES) - 1 battle of 8 lanes, RATLONE_S. Measures: as ratling;
   suppress  suppressing fire (R2): swordsmen attack the gun from SUPPRESS_GAP m at a walk / at a run, the gun aimed at them
             (fire at will, its skirmish mode off) or silent (never ordered: the control); the swordsmen's speed under fire and
             without, their card speed - 2 battles of 4 lanes (the gun fires on in melee: the phase never ends there);
@@ -64,6 +67,14 @@ RATLORD_S = 60           # the General (4068 HP) lives ~2 bursts at 100 m
 RATCOVER_TARGET, RATCOVER_UNIT, RATCOVER_GAP, RATCOVER_R = "goldwiz", "swords", 130, 0.6
 RATCOVER_LANES = (("alone", None, 0), ("front5", "front", 5), ("front10", "front", 10), ("front20", "front", 20),
                   ("side5", "side", 5), ("back1", "back", 1), ("back5", "back", 5))
+# the ratlone plan: shots at a lone man by flat and arcing fire (is the gun's lone-man deficit the gun's or flat fire's?):
+# the gun at a Gold Wizard, handguns (flat) and crossbows (arcing) at a Warlock Engineer (no shields, both heroes: one a
+# lane), facing the shooter, (kind, shooter, target, gap front to front m); 1 battle
+RATLONE_LANES = (("gun60", RATLING, "goldwiz", 60), ("gun100", RATLING, "goldwiz", 100),
+                 ("gun135", RATLING, "goldwiz", 135), ("hgun60", "hgun", "warlock", 60),
+                 ("hgun100", "hgun", "warlock", 100), ("hgun135", "hgun", "warlock", 135),
+                 ("xbow100", "xbow", "warlock", 100), ("xbow135", "xbow", "warlock", 135))
+RATLONE_S = 60
 SUPPRESS_GAP = 120
 SUPPRESS2_STOP = {"walk_stop25": (True, 25), "run_stop15": (False, 15)}     # kind -> (walk, the gun silent after s)
 HITSLOW_SHOOTERS = ("hgun", "xbow")      # the hitslow plan's shooters (no contact effect): handguns flat, bolts arcing
@@ -116,6 +127,9 @@ def battles(plan):
                            max_s=RATLORD_S, answer=False, kind=kind, **FX, **extra)
         base = [rc(*x) for x in RATCOVER_LANES]
         return [_placed(base, k) for k in (0, 4)]
+    if plan == "ratlone":
+        return [_placed([cp.lane(a, t, "shoot", "hold", gap_m=gap, fight_s=RATLONE_S, max_s=RATLONE_S, answer=False,
+                                 kind=kind, **FX) for kind, a, t, gap in RATLONE_LANES], 0)]
     if plan == "suppress":
         def s(kind, walk, fire):
             return cp.lane("swords", RATLING, "attack_walk" if walk else "attack_run", "skirmish" if fire else "hold",
@@ -509,7 +523,7 @@ def ratcover_measure(lane):
     return out
 
 
-MEASURE = {"ratling": ratling_measure, "ratlord": ratling_measure, "ratcover": ratcover_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
+MEASURE = {"ratling": ratling_measure, "ratlord": ratling_measure, "ratcover": ratcover_measure, "ratlone": ratling_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
            "hitslow": suppress_measure, "censer": censer_measure,
            "wolfrats": wolfrats_measure, "wolfpoison": wolfpoison_measure}
 
@@ -549,6 +563,7 @@ KEY = {"ratling": ("first_shot_s", "bullets_per_s", "bullets_per_man_s", "bursts
                    "burst_every_s", "hp_per_bullet", "tg_hp_per_s", "tg_men_lost", "tg_fx_first_s", "tg_card_speed_fx"),
        "ratlord": ("first_shot_s", "bullets_per_s", "bursts", "burst_bullets", "hp_per_bullet", "tg_hp_per_s"),
        "ratcover": ("first_shot_s", "bullets", "hp_per_bullet", "e_hp_per_bullet", "tg_hp_per_s"),
+       "ratlone": ("first_shot_s", "bullets", "hp_per_bullet", "tg_hp_per_s", "tg_dead"),
        "suppress": ("contact_s", "speed_way", "speed_way_fx", "fx_share_way", "card_speed_fx", "shots",
                     "fx_after_last_shot_s"),
        "suppress2": ("contact_s", "speed_way", "speed_way_fx", "speed_way_nofx", "fx_share_way", "shots",
