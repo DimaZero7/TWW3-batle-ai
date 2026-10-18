@@ -407,3 +407,48 @@ def test_a_man_with_a_friend_in_the_way_is_blocked():
     live = torch.ones((1, M), dtype=torch.bool)
     got = FM.blocked_line(F, u, near, tgt, live)[0].tolist()
     assert got == [True, False, False, False, False, False, True]   # 0 behind 1; 3's friend 0.9 m aside; 6 behind 0, 1
+
+
+def test_a_man_holding_his_enemy_is_not_carried_by_his_unit():
+    # lab.json move.hold (off): a man with an enemy man in reach (F.tgt) of a standing unit of 2+ is held - unless his
+    # unit routs or its centre jumped (the step replay's reset); off: nobody
+    import copy
+    from tools.nn.fighters import move as MV
+    st, F = build(army([(SWORDS, 0, 0, 0, None)], [(CLANRATS, 0, 60, 180, None)]))
+    u = st.u
+    lab = copy.deepcopy(hook.LAB)
+    assert MV.held(F, u, lab) is None
+    lab["move"]["hold"] = {"on": True, "release_m": None}
+    F.x_last, F.z_last = u["x"].clone(), u["z"].clone()
+    first = S.alive(F) & (F.uid == 0)
+    F.tgt = torch.where(first, torch.zeros_like(F.tgt), torch.full_like(F.tgt, -1))
+    assert torch.equal(MV.held(F, u, lab), first)
+    u["r"][0, 0] = True
+    assert not bool(MV.held(F, u, lab).any())
+    u["r"][0, 0] = False
+    F.x_last = F.x_last - 10.0
+    assert not bool(MV.held(F, u, lab).any())
+
+
+def test_a_fighting_man_behind_the_front_stays_within_the_tether():
+    # lab.json move.tether_all (off): a man behind the front with an enemy man in reach stands where he is while within
+    # the database's tether (2 m) of his place; off he walks back to his place
+    import copy
+    from tools.nn.fighters import move as MV
+    got = []
+    for on in (False, True):
+        st, F = build(army([(SWORDS, 0, 0, 0, None)], [(CLANRATS, 0, 60, 180, None)]))
+        u = st.u
+        lab = copy.deepcopy(hook.LAB)
+        lab["move"]["tether_all"] = on
+        live = S.alive(F)
+        # the outermost man of a middle rank, 1 m out of his place (no neighbour's body there), fighting someone (tgt
+        # only marks the fight here)
+        m = live & (F.uid == 0) & (F.rank0 == 3)
+        k = int(torch.where(m, F.dx, torch.full_like(F.dx, 1e9))[0].argmin())
+        F.dx[0, k] = F.dx[0, k] - 1.0
+        x0 = float(F.dx[0, k])
+        F.tgt[0, k] = 0
+        MV.step(F, u, P, lab, P.dt, hook.Near(F, u, lab))
+        got.append(abs(float(F.dx[0, k]) - x0))
+    assert got[0] > 0.5 and got[1] < 0.2

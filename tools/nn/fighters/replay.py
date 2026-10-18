@@ -18,7 +18,7 @@ from tools import config as project
 
 
 def run(runs, out, rect=False, copies=4, device="cpu", chunk=12, seed=0, log=print, sets=(), places=False,
-        geometry=False, lab=(), shape_log=False):
+        geometry=False, lab=(), shape_log=False, churn=False):
     from tools.nn.sim import stepreplay
     if rect:
         stepreplay.run(runs, out, H=10, copies=copies, device=device, chunk=chunk, workers=1, log=log, sets=sets)
@@ -48,10 +48,17 @@ def run(runs, out, rect=False, copies=4, device="cpu", chunk=12, seed=0, log=pri
                 if places:
                     from tools.nn.fighters.places import FromRecording
                     h.on_reset = FromRecording(job[0], job[4])
+                    if churn:
+                        # battle row b of this batch -> run b // copies; churn rows name units by slot
+                        buf.clear()
+                        churn_meta.append([{"name": r["name"], "slot": r["slot"]} for r in h.on_reset.runs])
                 return orig_batch(job)
             stepreplay._batch = batch
             if geometry:
                 h.listeners.append(lambda st, F: _geometry(st, F, copies, geo))
+            churn_rows, churn_meta, buf = [], [], {}
+            if churn:
+                h.listeners.append(lambda st, F: _churn(st, F, buf, churn_rows, len(churn_meta) - 1))
             shapes = {}
             if shape_log:
                 h.listeners.append(lambda st, F: _shape(st, F, copies, h, shapes))
@@ -69,6 +76,13 @@ def run(runs, out, rect=False, copies=4, device="cpu", chunk=12, seed=0, log=pri
     finally:
         stepreplay._params = orig
         stepreplay._batch = orig_batch
+    if churn and churn_rows:
+        import numpy as np
+        Path(out).mkdir(parents=True, exist_ok=True)
+        np.savez(Path(out) / "churn.npz", rows=np.concatenate(churn_rows),
+                 meta=np.array(json.dumps(churn_meta)))
+        r = np.concatenate(churn_rows)
+        log(f"churn: men in reach followed {len(r)}, still in reach 3 s later {r[:, 4].mean():.3f} -> {out}/churn.npz")
     if shape_log:
         import numpy as np
         Path(out).mkdir(parents=True, exist_ok=True)
@@ -109,6 +123,72 @@ def _shape(st, F, copies, h, shapes):
         for nm, n in r["slot"].items():
             d["names"][n] = nm
         d["f"][row] = feats[bs].mean(0)
+
+
+def _churn(st, F, buf, rows, batch, lag=3, reach=3.15):
+    """Does a man in reach of an enemy man stay in reach (the churn, docs "Killed per HP: the window reset and the
+    churn")? Once a second: each man of a unit of 2+ with an enemy man within `reach` (centre to centre, as
+    soldiersdata) - `lag` s later, inside the same window: still in reach, his own shift, his largest 1 s step, his unit
+    centre's shift. Rows (batch, battle row, second, unit, still, shift, jump, centre shift, unit routing, fighting a man,
+    nearest enemy man's shift, that pair still in reach, his unit centre's shift, cosine of the two shifts) into `rows`."""
+    import numpy as np
+    import torch
+    from tools.nn.fighters import state as S
+    t = float(st.t[0])
+    if abs(t - round(t)) > 1e-6:
+        return
+    t = int(round(t))
+    u = st.u
+    px, pz = S.positions(F, u)
+    live = S.alive(F) & (u["men0"] > 1).gather(1, F.uid)
+    side = S.ugather(u, F, "side")
+    inr = torch.zeros_like(live)
+    foe = torch.full_like(F.uid, -1)
+    for b in range(F.B):
+        for s_ in (1, 2):
+            a = live[b] & (side[b] == s_)
+            e = live[b] & (side[b] != s_) & (side[b] > 0)
+            if not bool(a.any()) or not bool(e.any()):
+                continue
+            pa = torch.stack([px[b][a], pz[b][a]], 1)
+            pe = torch.stack([px[b][e], pz[b][e]], 1)
+            d, j = torch.cdist(pa, pe).min(1)
+            ia = a.nonzero().squeeze(1)
+            inr[b, ia] = d <= reach
+            foe[b, ia] = e.nonzero().squeeze(1)[j]
+    snap = {"p": torch.stack([px, pz], -1).cpu().numpy(), "live": live.cpu().numpy(), "inr": inr.cpu().numpy(),
+            "uid": F.uid.cpu().numpy(), "c": torch.stack([u["x"], u["z"]], -1).cpu().numpy(),
+            "r": u["r"].cpu().numpy(), "tgt": (F.tgt >= 0).cpu().numpy(), "foe": foe.cpu().numpy()}
+    buf[t] = snap
+    for k in [k for k in buf if k < t - lag]:
+        del buf[k]
+    w0 = (t - 1) // 10 * 10                 # the window's start row (snapshots at its seconds 1..10)
+    t0 = t - lag
+    if t0 <= w0 or any(k not in buf for k in range(t0, t + 1)):
+        return
+    a = buf[t0]
+    sel = a["inr"] & snap["live"]
+    if not sel.any():
+        return
+    bb, mm = np.nonzero(sel)
+    jump = np.zeros(len(bb))
+    for k in range(t0 + 1, t + 1):
+        d = buf[k]["p"][bb, mm] - buf[k - 1]["p"][bb, mm]
+        jump = np.maximum(jump, np.hypot(d[:, 0], d[:, 1]))
+    sh = snap["p"][bb, mm] - a["p"][bb, mm]
+    n = a["uid"][bb, mm]
+    cs = snap["c"][bb, n] - a["c"][bb, n]
+    # the nearest enemy man at t0: his shift, the pair still within reach, his unit centre's shift
+    f = a["foe"][bb, mm]
+    fs = snap["p"][bb, f] - a["p"][bb, f]
+    pd = snap["p"][bb, mm] - snap["p"][bb, f]
+    fn = a["uid"][bb, f]
+    fc = snap["c"][bb, fn] - a["c"][bb, fn]
+    rows.append(np.stack([np.full(len(bb), batch), bb, np.full(len(bb), t0), n, snap["inr"][bb, mm], np.hypot(sh[:, 0], sh[:, 1]), jump,
+                          np.hypot(cs[:, 0], cs[:, 1]), a["r"][bb, n], a["tgt"][bb, mm], np.hypot(fs[:, 0], fs[:, 1]),
+                          (np.hypot(pd[:, 0], pd[:, 1]) <= reach) & snap["live"][bb, f], np.hypot(fc[:, 0], fc[:, 1]),
+                          (sh * fs).sum(1) / np.maximum(np.hypot(sh[:, 0], sh[:, 1]) * np.hypot(fs[:, 0], fs[:, 1]), 1e-6)],
+                         1).astype(np.float32))
 
 
 def _geometry(st, F, copies, geo, every_steps=4):
@@ -163,6 +243,8 @@ def main(argv=None):
     ap.add_argument("--lab", action="append", default=[], help="section.key=json over tools/nn/fighters/lab.json")
     ap.add_argument("--shape-log", action="store_true",
                     help="with --places: the lab's shape.unit_features at each window's 5th and 10th second")
+    ap.add_argument("--churn", action="store_true",
+                    help="with --places: men in reach followed 3 s (still in reach, shift) -> <out>/churn.npz")
     a = ap.parse_args(argv)
     names = list(a.runs)
     if a.runs_from:
@@ -171,7 +253,7 @@ def main(argv=None):
         names = names[:a.limit]
     runs = [project.BUILD / "nn-arena" / "runs" / n for n in names]
     run(runs, a.out, rect=a.rect, copies=a.copies, device=a.device, chunk=a.chunk, sets=a.set, places=a.places,
-        geometry=a.geometry, lab=a.lab, shape_log=a.shape_log)
+        geometry=a.geometry, lab=a.lab, shape_log=a.shape_log, churn=a.churn)
 
 
 if __name__ == "__main__":

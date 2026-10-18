@@ -34,6 +34,8 @@ def load(d):
     out = {}
     for f in sorted(glob.glob(str(Path(d) / "*.npz"))):
         z = np.load(f, allow_pickle=True)
+        if "starts" not in z.files:             # not a battle's record (replay.py --churn: churn.npz)
+            continue
         out[Path(f).stem] = {k: z[k] for k in ("starts", "u_men0", "u_lord", "u_hp0", "g_men", "g_hp", "g_r", "g_s",
                                               "g_m", "sim_men", "sim_hp", "sim_r", "sim_s", "sim_gone", "sim_m", "keys")}
     return out

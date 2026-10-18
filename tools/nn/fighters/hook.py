@@ -187,6 +187,11 @@ class Hook:
         lying = (F.down > 0) & S.alive(F)
         F.dx = torch.where(lying, F.dx - (u["x"] - F.x_last).gather(1, F.uid), F.dx)
         F.dz = torch.where(lying, F.dz - (u["z"] - F.z_last).gather(1, F.uid), F.dz)
+        # a man fighting an enemy man within reach is not carried by his unit's centre either (lab.json move.hold)
+        held = MV.held(F, u, self.lab)
+        if held is not None:
+            F.dx = torch.where(held, F.dx - (u["x"] - F.x_last).gather(1, F.uid), F.dx)
+            F.dz = torch.where(held, F.dz - (u["z"] - F.z_last).gather(1, F.uid), F.dz)
         MV.step(F, u, params, self.lab, dt, self.near)
         FK.tick(F, dt)
         F.tick = F.tick + 1

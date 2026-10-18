@@ -19,6 +19,20 @@ from tools.nn.fighters import melee as FM, scans as SC, state as S
 from tools.nn.sim import orders as O
 
 
+def held(F, u, lab):
+    """[B, M] the men who hold on to the enemy man they fight (lab.json move.hold; None when off): alive, standing, of
+    a unit of 2+ that is not routing, with an enemy man within reach (F.tgt), and his unit's centre moved less than 6 m
+    since the last step (more is the step replay's reset, hook._reset's jump). Such a man is not carried by his unit's
+    centre (hook._post) and keeps where he stands (step) while his place is within move.hold.release_m of him."""
+    cfg = lab["move"].get("hold") or {}
+    if not cfg.get("on"):
+        return None
+    live = S.alive(F) & (F.down <= 0)
+    jump = torch.sqrt((u["x"] - F.x_last) ** 2 + (u["z"] - F.z_last) ** 2) > 6.0
+    unit_ok = (u["men0"] > 1) & ~u["r"] & ~jump
+    return live & (F.tgt >= 0) & unit_ok.gather(1, F.uid)
+
+
 def free_units(u, lab):
     """[B, N] the units that fight free (lab.json move.free): a beast - an ellipse body (the database's battle_entities
     radii_ratio < 1) with no missile weapon (a weapon team has one) - of more than one man."""
@@ -106,9 +120,29 @@ def step(F, u, params, lab, dt, near):
         on = torch.sqrt(ox * ox + oz * oz).clamp(min=1e-6)
         k = (tether / on).clamp(max=1.0)
         fight = eng >= 0
+        if lab["move"].get("tether_all"):
+            # (lab.json move.tether_all) a man behind the front with an enemy man in reach stands where he is while
+            # within the tether of his place; beyond it he is pulled back to the tether's edge
+            back = live & (F.tgt >= 0) & ~fight & ~S.ugather(u, F, "r")
+            qx, qz = F.dx - gx, F.dz - gz
+            qn = torch.sqrt(qx * qx + qz * qz).clamp(min=1e-6)
+            kq = (tether / qn).clamp(max=1.0)
+            gx = torch.where(back, gx + qx * kq, gx)
+            gz = torch.where(back, gz + qz * kq, gz)
         gx = torch.where(fight, gx + ox * k, gx)
         gz = torch.where(fight, gz + oz * k, gz)
     gx, gz = free_attack(F, u, lab, live & ~lying, px, pz, ux, uz, gx, gz)
+    hold = held(F, u, lab)
+    if hold is not None:
+        # (lab.json move.hold) he keeps where he stands - a front man at the standoff from the man he fights, no
+        # tether to his place - unless his place is more than release_m away (then he goes back to it as before)
+        rel = (lab["move"].get("hold") or {}).get("release_m")
+        if rel is not None:
+            sx, sz = S.to_world(u, F, sa, sf)
+            hold = hold & ((F.dx - sx) ** 2 + (F.dz - sz) ** 2 <= float(rel) ** 2)
+        fr = hold & (eng >= 0)
+        gx = torch.where(hold, torch.where(fr, wx, F.dx), gx)
+        gz = torch.where(hold, torch.where(fr, wz, F.dz), gz)
     # the pace
     mx, mz = gx - F.dx, gz - F.dz
     dist = torch.sqrt(mx * mx + mz * mz).clamp(min=1e-6)
