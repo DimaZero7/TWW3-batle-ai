@@ -604,7 +604,10 @@ x 4 copies ran in a container of 10 GB (`DOCK_MEM=10g`).
   `unit_incidental` 1 0.95; "own target" 1.54 -> 1.16 (1.17), "other" 0.52 -> 0.38 (0.61), but men killed per health
   lost 0.75 -> 0.60 (0.63; game 0.79): the blows spread over more men. The melee probes (53 lanes with the crowd, with
   `unit_incidental` 1): target HP 0-1 / 0-5 / 5-15 s 1.45 / 1.13 / 0.80 -> 1.01 / 0.82 / 0.71, steady 0.98 -> 0.99. The
-  switch stays, off.
+  switch stays, off. Why the killed fall: the lab's killed per health is low everywhere - on the "other target" 0.61 of
+  the game without the rule too; the "own" 0.70 rested on the second rank's blows on the same front men (the blows
+  concentrated), the rule removes them and the "own" falls to the same 0.61. So first a mechanism by which the game
+  concentrates the blows on fewer men is needed (open), then `clear_line`.
 
 - **Speed: neighbour lists through the compiler.** The whole step under `torch.compile`, the neighbours as lists
   [battles x men x 108], the compiler fusing the operations itself: 1024 battles 42.9 ms, three passes over the lists

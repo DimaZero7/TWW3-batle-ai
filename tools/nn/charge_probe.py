@@ -428,7 +428,7 @@ RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 # the new units' plans (tools/nn/unit_probe.py: their lanes, measures and table)
-UNIT_PLANS = ("ratling", "ratlord", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow")
+UNIT_PLANS = ("ratling", "ratlord", "ratcover", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow")
 # magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
 MAGIC_PLANS = ("magic",)
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
@@ -1158,9 +1158,10 @@ def layout(specs):
             if spec.get("a_mid"):                    # the attacker between the two targets (the retarget plan)
                 row["a_dx"] = round(row["t2_dx"] / 2, 1)
         if spec.get("extras"):
-            # units of the attacker's side placed (dx, dz) from the target's centre, halted, fearless, never ordered
-            # (fire: fire at will on); entries/charge_probe.lua start
-            assert all(UNITS[e["short"]][2] == a_fac for e in spec["extras"]), spec
+            # units of the attacker's side (or, with e.side 't', of the target's: the ratcover plan's cover beside a
+            # lone man) placed (dx, dz) from the target's centre, halted, fearless, never ordered (fire: fire at will
+            # on); entries/charge_probe.lua start
+            assert all(UNITS[e["short"]][2] == (t_fac if e.get("side") == "t" else a_fac) for e in spec["extras"]), spec
             row["extras"] = [dict(e, name=add(e["short"], k, f"e{j}")) for j, e in enumerate(spec["extras"], 1)]
         if spec.get("rally_friends"):
             # units of the target's side parked far (+z, px / pz) until the target rallies, then teleported beside it;
@@ -1482,7 +1483,7 @@ def sim_lanes(lanes, params=None, device="cpu", copies=8, jitter_m=1.0, seed=0):
             # the attacker's side's extra units (dx, dz) from the target's centre, halted (a shooter fires at will);
             # at their recorded place when the run has it (the busycharge plan's anvil: its own bearing e.b)
             r_e = e0[j - 1] if len(e0) >= j and e0[j - 1].get("x") is not None else None
-            sides[roles["a"]]["units"].append({"key": UNITS[e["short"]][0],
+            sides[roles["tg" if e.get("side") == "t" else "a"]]["units"].append({"key": UNITS[e["short"]][0],
                                                "x": r_e["x"] if r_e else s0[2]["x"] + e["dx"],
                                                "z": r_e["z"] if r_e else s0[2]["z"] + e["dz"],
                                                "b": r_e["b"] if r_e else e.get("b", s0[1]["b"]),

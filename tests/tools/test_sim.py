@@ -575,6 +575,26 @@ class TestMissile:
         assert self._lone(0.0, 18.0, 8) == pytest.approx(alone, rel=1e-3)
         assert self._lone(-11.0, 0.0, 8) < 0.5 * alone
 
+    def test_shots_beside_a_lone_man_land_on_his_unit_behind_or_ahead(self):
+        """spill_geometry.lateral_rest: the gun's shots at the General that land in the swordsmen's span but beside his
+        own (1.4 m) meet them alone - before, only the shots through both spans counted (the ratcover probe: swordsmen
+        5 m behind a lone man lose 2.6x his HP a bullet, the simulator gave 0.4x); his own hits stay."""
+        def run(dx, on):
+            sg = dict(P.sim["missile"]["spill_geometry"], lateral_rest=on)
+            params = P.with_cal("missile", spill_geometry=sg)
+            st = scenario.build([army([("wh_main_emp_cha_general_0", 0.0, 0.0, 270, True),
+                                       ("wh_main_emp_inf_swordsmen", dx, 0.0, 270)],
+                                      [("wh2_dlc12_skv_inf_ratling_gun_0", -130.0, 0.0, 90)], attacker=2)], params)
+            H = st.N // 2
+            pw = geometry.pairwise(st.u, params.sim["formation"]["spacing_m"])
+            target = torch.full((1, st.N), -1)
+            target[0, H] = 0
+            _, hp, _ = missile.volley(st.u, pw, target, 1.0, params)
+            return float(hp[0, H, 0]), float(hp[0, H, 1])
+        for dx in (10.0, -15.0):                       # behind him, ahead of him
+            (l0, s0), (l1, s1) = run(dx, False), run(dx, True)
+            assert l1 == pytest.approx(l0, rel=1e-6) and s1 > 3 * s0 > 0
+
     def test_an_armour_piercing_bullet_leaves_the_shield_part_of_its_chance(self):
         """missile.shield_ap_pierce: the General's shield (55 %) against the Ratling Gun (6 of 8 damage armour-piercing)
         blocks 0.55 x (1 - 0.5 x 0.75) - the ratlord probe: facing / back 0.66 at 135 m, 0.68 at 100 m."""

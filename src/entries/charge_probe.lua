@@ -74,7 +74,8 @@
 -- soldiers' places of both units are sampled every men_ms for that long after the rout wherever the enemy is (the
 -- routing mob's shape); the sample rows carry r (routing) and sh (shattered) too. lane.rout_at_s (optional): a
 -- t_morale target not routed that long after the first contact is routed by script (morale_behavior_rout; emitted as
--- probe_phase 'rout_forced'). lane.extras (optional) {{name, dx, dz, fire}}: units of the attacker's side placed
+-- probe_phase 'rout_forced'). lane.extras (optional) {{name, dx, dz, fire}}: units of the attacker's side (or of the
+-- target's: tools/nn/charge_probe.py e.side 't', the ratcover plan; the entry places either alike) placed
 -- (dx, dz) from the target's centre facing the attacker's way, halted, fearless, never ordered; with fire, fire at will;
 -- sampled as the list 'e' in probe_sample (unit rows) and probe_men (soldier places after the rout).
 -- The busycharge plan: lane.a_side (degrees, 0 front / 90 right flank / 180 rear) places the attacker gap_m off the

@@ -58,6 +58,12 @@ RATLING_LANES = (("d60", "swords", 60, None), ("d100", "swords", 100, None), ("d
 # one lord lane a battle (the army has one General); the ratling plan's lord100 lane (facing) is the 100 m front
 RATLORD_LANES = (("lord135_front", 135, "front"), ("lord100_back", 100, "back"), ("lord135_back", 135, "back"))
 RATLORD_S = 60           # the General (4068 HP) lives ~2 bursts at 100 m
+# the ratcover plan: a lone Gold Wizard (no shield, 3420 HP; the army has one General, the plan needs one lone man a lane)
+# facing the gun RATCOVER_GAP m off, an Empire swordsmen unit of his side (30 m wide, 9.6 m deep) gap m off him -
+# (kind, where, gap): ahead (towards the gun), behind, beside; none (the control); 2 battles, the places rotated
+RATCOVER_TARGET, RATCOVER_UNIT, RATCOVER_GAP, RATCOVER_R = "goldwiz", "swords", 130, 0.6
+RATCOVER_LANES = (("alone", None, 0), ("front5", "front", 5), ("front10", "front", 10), ("front20", "front", 20),
+                  ("side5", "side", 5), ("back1", "back", 1), ("back5", "back", 5))
 SUPPRESS_GAP = 120
 SUPPRESS2_STOP = {"walk_stop25": (True, 25), "run_stop15": (False, 15)}     # kind -> (walk, the gun silent after s)
 HITSLOW_SHOOTERS = ("hgun", "xbow")      # the hitslow plan's shooters (no contact effect): handguns flat, bolts arcing
@@ -94,6 +100,22 @@ def battles(plan):
             return cp.lane(RATLING, "general", "shoot", "hold" if face == "front" else "rear", gap_m=gap,
                            fight_s=RATLORD_S, max_s=RATLORD_S, answer=False, kind=kind, **FX)
         return [_placed([rl(*x)], 0) for x in RATLORD_LANES]
+    if plan == "ratcover":
+        # a lone man of ours under the gun with a unit of his side near him (the itS26_15 exam: our units near the
+        # General took about half of the guns' bullets in the game, nearly all in the simulator); RATCOVER_LANES
+        def rc(kind, where, gap):
+            extra = {}
+            if where:
+                d = cp.depth(cp.UNITS[RATCOVER_UNIT][0], cp.UNITS[RATCOVER_UNIT][1])
+                r = RATCOVER_R
+                dx, dz = {"front": (0.0, gap + r + d / 2), "back": (0.0, -(gap + r + d / 2)),
+                          "side": (gap + r + cp.WIDTH_M / 2, 0.0)}[where]
+                extra["extras"] = [{"short": RATCOVER_UNIT, "dx": round(dx, 1), "dz": round(dz, 1), "b": 0,
+                                    "width": cp.WIDTH_M, "side": "t"}]
+            return cp.lane(RATLING, RATCOVER_TARGET, "shoot", "hold", gap_m=RATCOVER_GAP, fight_s=RATLORD_S,
+                           max_s=RATLORD_S, answer=False, kind=kind, **FX, **extra)
+        base = [rc(*x) for x in RATCOVER_LANES]
+        return [_placed(base, k) for k in (0, 4)]
     if plan == "suppress":
         def s(kind, walk, fire):
             return cp.lane("swords", RATLING, "attack_walk" if walk else "attack_run", "skirmish" if fire else "hold",
@@ -470,7 +492,24 @@ def wolfpoison_measure(lane):
     return out
 
 
-MEASURE = {"ratling": ratling_measure, "ratlord": ratling_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
+def ratcover_measure(lane):
+    """ratling_measure's numbers for the lone man, and the HP his cover (the lane's extra unit) lost per bullet over the
+    same span (e_hp_per_bullet)."""
+    out = ratling_measure(lane)
+    ex = lane.get("extras") or []
+    if not ex or not out.get("bullets") or out.get("first_shot_s") is None:
+        return out
+    te = np.array([t for t, _ in ex])
+    he = np.array([np.nan if not rows or rows[0].get("hp") is None else float(rows[0]["hp"]) for _, rows in ex])
+    first, last = out["first_shot_s"], out["last_shot_s"]
+    stop = min(float(te[-1]), last + 2.0)
+    lost = cp.at(te, he, first - 0.5) - cp.at(te, he, stop)
+    out["e_hp_lost"] = lost
+    out["e_hp_per_bullet"] = lost / out["bullets"]
+    return out
+
+
+MEASURE = {"ratling": ratling_measure, "ratlord": ratling_measure, "ratcover": ratcover_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
            "hitslow": suppress_measure, "censer": censer_measure,
            "wolfrats": wolfrats_measure, "wolfpoison": wolfpoison_measure}
 
@@ -509,6 +548,7 @@ def _fmt(v):
 KEY = {"ratling": ("first_shot_s", "bullets_per_s", "bullets_per_man_s", "bursts", "burst_bullets", "burst_s",
                    "burst_every_s", "hp_per_bullet", "tg_hp_per_s", "tg_men_lost", "tg_fx_first_s", "tg_card_speed_fx"),
        "ratlord": ("first_shot_s", "bullets_per_s", "bursts", "burst_bullets", "hp_per_bullet", "tg_hp_per_s"),
+       "ratcover": ("first_shot_s", "bullets", "hp_per_bullet", "e_hp_per_bullet", "tg_hp_per_s"),
        "suppress": ("contact_s", "speed_way", "speed_way_fx", "fx_share_way", "card_speed_fx", "shots",
                     "fx_after_last_shot_s"),
        "suppress2": ("contact_s", "speed_way", "speed_way_fx", "speed_way_nofx", "fx_share_way", "shots",

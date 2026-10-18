@@ -941,9 +941,21 @@ Open (not these units' new mechanics - general ones):
     simulator 2.6x more, and a lord at his unit's front edge is covered by half in the simulator (its ranks behind him
     share the shot), in the game not. The bullet model (the shot below head height over its last height / tan(angle) m,
     ~11 m before the lord for the gun at 130 m) agrees with the `arc_los` arc here: a trajectory height fix does not
-    change it. The cause is not found - it needs an in-game probe: the General under the gun, an own unit 5 / 10 / 20 m
-    ahead of him, beside and behind (the `ratlord` plan has no units of the target's side - `extras` places only the
-    attacker's, `charge_probe.lua` needs a change).
+    change it.
+  - **The `ratcover` probe** (`build/charge-probe/runs/20261018-031137`, `-031218`, 2 battles of 7 lanes; a lone Gold
+    Wizard - no shield, 2.0 m tall - facing the gun 130 m off, swordsmen of his side 5 / 10 / 20 m ahead of him, 5 m
+    beside, 1 / 5 m behind; `extras` with `side: "t"`): the wizard's HP a bullet, game / simulator - alone 0.43 / 0.34;
+    swordsmen ahead 0.10 / 0.11, 0.17 / 0.17, 0.28 / 0.24; beside 0.48 / 0.34, behind 0.44-0.46 / 0.34. **The lord's
+    cover by his own units is as in the game** (the share of the lone man 0.23 / 0.40 / 0.65 against 0.32 / 0.50 /
+    0.71); the exam's gap is not the cover (the units there move and are not exactly on the line). Wrong is the
+    swordsmen's own damage: the game 1.13-1.38 HP a bullet, the simulator 0.10-0.33 (0.1-0.25 of the game). The cause is
+    a counting error: the shots at a lone man land across with sigma ~2.5 m, his span is 1.4 m, and the neighbour got only
+    the shots through both spans (`min(lat_k, lat_j)`); those landing beside the lone man were lost.
+    `missile.spill_geometry.lateral_rest` (off): the shots in the neighbour's span outside the target's meet the
+    neighbour alone. With it the swordsmen 1.61-1.90 (1.2-1.5 of the game), the wizard unchanged; the itS26_15 replay: the
+    lord's HP 0.50 -> 0.50, own units within 40 m of the lord under the guns' fire 0.56 -> 1.27 of the game; the replay
+    of 92 battles (`build/night3/r92_lat`): damage under fire 0.91 -> 0.95, in melee 0.89 -> 0.93, routs 0.97 -> 1.00, the
+    killed per health the same.
   - The replay of 92 battles with both fixes (`build/night_mob/r92_base`, `r92_fix`): damage under fire 0.90 -> 0.91,
     men killed per health under fire 0.59 -> 0.59, routs 0.96 -> 0.97, melee unchanged - the fixes break nothing.
 - Projectiles on running beasts: crossbows and handguns on wolf rats faster than 4 m/s hit 1.4x the game's in the

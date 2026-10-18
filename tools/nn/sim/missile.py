@@ -481,8 +481,9 @@ def spill_geometry(u, pw, target, params):
         share = union / (pj + pk).clamp(min=1e-9)
         hk = torch.where(k_first, pk, torch.where(j_first, pk * (1 - pj), pk * share))
         hj = torch.where(j_first, pj, torch.where(k_first, pj * (1 - pk), pj * share))
-        return hk, hj, pj
-    hk, hj, pj = first(xl)
+        return hk, hj, pj, pk
+    hk, hj, pj, pk = first(xl)
+    pk_alone = (pk * w).sum((-1, -2))                                        # [B, i, k]
     hk = (hk * w).sum((-1, -2))                                              # [B, i, k]
     hj = (hj * w).sum((-1, -2))
     pj_alone = (pj * w).sum((-1, -2))                                        # [B, i, 1]
@@ -502,7 +503,7 @@ def spill_geometry(u, pw, target, params):
         mu = aim[:, None] * hd_j[..., None, None] + c[..., None, None]                         # [B, i, 1, qa, 1]
         dens = torch.exp(-0.5 * ((xo - mu) / sa[..., None, None]) ** 2) / (math.sqrt(2 * math.pi) * sa[..., None, None])
         wo = dens * half[..., None, None] * gw_ / qa                                            # [B, i, 1, qa, n]
-        _, hj_o, pj_o = first(xo)
+        _, hj_o, pj_o, _ = first(xo)
         hj = (hj_o * wo).sum((-1, -2))
         pj_alone = (pj_o * wo).sum((-1, -2))
         # ... and each other formation k's hits over its own window [b - hd_k - r, b + hd_k + L_k + r]
@@ -510,8 +511,10 @@ def spill_geometry(u, pw, target, params):
         mid_k, half_k = 0.5 * (lo_k + hi_k), 0.5 * (hi_k - lo_k)
         xk = mid_k[..., None, None] + half_k[..., None, None] * gx_                            # [B, i, k, 1, n]
         dens_k = torch.exp(-0.5 * ((xk - mu) / sa[..., None, None]) ** 2) / (math.sqrt(2 * math.pi) * sa[..., None, None])
-        hk_o, _, _ = first(xk)
-        hk = (hk_o * dens_k * half_k[..., None, None] * gw_ / qa).sum((-1, -2))
+        hk_o, _, _, pk_o = first(xk)
+        wk = dens_k * half_k[..., None, None] * gw_ / qa
+        hk = (hk_o * wk).sum((-1, -2))
+        pk_alone = (pk_o * wk).sum((-1, -2))
         # across, k takes j's own hits only where its men stand in j's span: the share of j-aimed shots landing in the
         # overlap of the two spans (min(lat_k, lat_j) counted a formation beside a lone man as standing in his way)
         lo_c = torch.maximum(a - half_w - r, -hw_j)
@@ -522,6 +525,11 @@ def spill_geometry(u, pw, target, params):
     else:
         both_keep = both
     on_k = both * hk
+    if cfg.get("lateral_rest"):
+        # (missile.spill_geometry.lateral_rest) the shots that land in k's span but beside j's (a lone man's 1.2 m:
+        # most of the gun's spread at him) meet k alone: they were lost before (min(lat_k, lat_j) took only the
+        # shots through both spans)
+        on_k = on_k + (lat_k - both).clamp(min=0) * pk_alone
     # j keeps its hits outside k's span in full; inside, hj of its pj_alone
     keep_jk = 1 - both_keep * (1 - hj / pj_alone.clamp(min=1e-9)) / lat_j.clamp(min=1e-9)
     side_j = u["side"].gather(1, t)[:, :, None]
