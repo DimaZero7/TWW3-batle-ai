@@ -7,7 +7,10 @@
 #  * refuses to start while any Warhammer3 process runs;
 #  * uses its own mod list file; the user's used_mods.txt is never touched;
 #  * stops only the process it started (same PID, path and start time);
-#  * removes only its own pack and mod list, and only if unchanged;
+#  * removes only its own pack, mod list and the Workshop packs it copied into data/ (True Sight),
+#    and only if unchanged; what it puts into the game folder is written to build/launcher-installed.json
+#    before the first copy, so a run that crashed or was killed is cleaned by the next launch
+#    (or by hand: tools/launcher/cleanup.ps1) - nothing of ours stays in data/ for a normal game;
 #  * results are copied to build/<target>/runs/<time>/ before cleanup;
 #  * the game-folder event log tww3_bai_events.jsonl is removed after the run
 #    only once all of it is verifiably in the run's events.jsonl and no game
@@ -36,6 +39,8 @@ $repo = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $repo 'tools\telemetry\read_jsonl.ps1')
 . (Join-Path $PSScriptRoot 'event_log.ps1')
 . (Join-Path $PSScriptRoot 'preferences.ps1')
+. (Join-Path $PSScriptRoot 'installed.ps1')
+$marker = Join-Path $repo 'build\launcher-installed.json'
 
 # Settings: config/default.json overridden by config/local.json.
 $settings = Get-Content -LiteralPath (Join-Path $repo 'config\default.json') -Raw | ConvertFrom-Json
@@ -76,6 +81,10 @@ if ($TimeoutSeconds -le 0) {
 Write-Output ("Launcher timeout: {0} s" -f $TimeoutSeconds)
 
 if (Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue) { throw 'WH3 is already running; not interrupting it.' }
+# What an earlier run put into the game folder and never removed (crashed, killed): ours by the marker.
+$leftover = Remove-InstalledFiles -Marker $marker
+if ($leftover.removed.Count -gt 0) { Write-Output ("Removed what an earlier run left in the game folder: " + ($leftover.removed -join ', ')) }
+if ($leftover.kept.Count -gt 0) { throw ("Files an earlier run put into the game folder have changed since; not touching them: " + ($leftover.kept -join ', ')) }
 if ((Test-Path -LiteralPath $installedPack) -or (Test-Path -LiteralPath $modList)) {
     throw "Files of a previous run remain ($installedPack or $modList). Inspect them and remove manually."
 }
@@ -108,27 +117,38 @@ foreach ($dependency in $manifest.dependencies) {
     $dataPack = Join-Path $game ('data\' + $dependency.pack)
     if (Test-Path -LiteralPath $dataPack) {
         if ((Get-FileHash -LiteralPath $dataPack).Hash.ToLowerInvariant() -ne $dependency.sha256) { throw "A different $($dependency.pack) is already in data/; not overwriting it." }
+        Write-Output ("Warning: {0} is in data/ and not ours by {1} - left there after the run; the game then loads it in every normal start too (remove it unless it is yours)." -f $dataPack, $marker)
     } else {
         $toCopy += , @($workshopPack, $dataPack)
     }
     $lines += 'mod "' + $dependency.pack + '";'
 }
 $lines += 'mod "' + $manifest.pack + '";'
+$modText = ($lines -join [Environment]::NewLine) + [Environment]::NewLine
 
+# Everything this run puts into the game folder goes to the marker first (installed.ps1): the
+# cleanup below, or the next launch after a crash, removes exactly these files.
+$entries = @(@{path = $installedPack; sha256 = $manifest.pack_sha256}, @{path = $modList; sha256 = (Get-TextSha256 $modText)})
+foreach ($pair in $toCopy) { $entries += @{path = $pair[1]; sha256 = (Get-FileSha256 $pair[0])} }
+Save-InstalledMarker -Marker $marker -Entries $entries
+
+$prefs = Join-Path $env:APPDATA 'The Creative Assembly\Warhammer3\scripts\preferences.script.txt'
+$prefsBackup = Join-Path $repo 'build\preferences.script.backup.txt'
+$process = $null
+$reader = $null
+$clearLog = $false
+$status = 'setup_failed'
+$done = 0
+$runLog = Join-Path $run 'events.jsonl'
+$copiedLines = [long]0
+try {
 # Install dependencies, our pack and the private mod list.
-$copiedDependencies = @()
-foreach ($pair in $toCopy) {
-    Copy-Item -LiteralPath $pair[0] -Destination $pair[1]
-    $copiedDependencies += $pair[1]
-}
+foreach ($pair in $toCopy) { Copy-Item -LiteralPath $pair[0] -Destination $pair[1] }
 Copy-Item -LiteralPath $sourcePack -Destination $installedPack
 if ((Get-FileHash -LiteralPath $installedPack).Hash.ToLowerInvariant() -ne $manifest.pack_sha256) { throw 'Installed pack hash mismatch' }
-$modText = ($lines -join [Environment]::NewLine) + [Environment]::NewLine
 [IO.File]::WriteAllText($modList, $modText, [Text.UTF8Encoding]::new($false))
 
 # Fair difficulty. A backup left by an interrupted run is the user's file: put it back first.
-$prefs = Join-Path $env:APPDATA 'The Creative Assembly\Warhammer3\scripts\preferences.script.txt'
-$prefsBackup = Join-Path $repo 'build\preferences.script.backup.txt'
 $fairDifficulty = 1
 if (Test-Path -LiteralPath $prefsBackup) {
     [IO.File]::WriteAllBytes($prefs, [IO.File]::ReadAllBytes($prefsBackup))
@@ -165,10 +185,6 @@ $process = Start-Process -FilePath $exe -WorkingDirectory $game -ArgumentList $a
 Write-Output ("Started WH3 PID {0}; run folder {1}. Process start is not success: waiting for events." -f $process.Id, $run)
 
 $status = 'timeout'
-$done = 0
-$runLog = Join-Path $run 'events.jsonl'
-$copiedLines = [long]0
-try {
     while (((Get-Date) - $started).TotalSeconds -lt $TimeoutSeconds) {
         if ($process.HasExited) { $status = 'process_exited'; break }
         $crash = Get-ChildItem -LiteralPath "$env:APPDATA\The Creative Assembly\Warhammer3\crash_report" -Filter '*.stack.txt' -ErrorAction SilentlyContinue |
@@ -205,7 +221,7 @@ try {
     }
 } finally {
     $cleanup = @{status = $status; completed_events = $done; game_left_running = $false; private_files_removed = $false}
-    $current = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
+    $current = if ($process) { Get-Process -Id $process.Id -ErrorAction SilentlyContinue } else { $null }
     $ours = $current -and $current.Path -eq $exe -and [Math]::Abs(($current.StartTime - $started).TotalSeconds) -lt 15
     if ($ours -and $KeepGameOpen) {
         $cleanup.game_left_running = $true
@@ -214,25 +230,26 @@ try {
         for ($i = 0; $i -lt 40 -and (Get-Process -Id $current.Id -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 500 }
     }
     if (-not $cleanup.game_left_running -and -not (Get-Process -Name Warhammer3 -ErrorAction SilentlyContinue)) {
-        $packSame = (Test-Path -LiteralPath $installedPack) -and (Get-FileHash -LiteralPath $installedPack).Hash.ToLowerInvariant() -eq $manifest.pack_sha256
-        $modsSame = (Test-Path -LiteralPath $modList) -and (Get-Content -LiteralPath $modList -Raw) -eq $modText
-        if ($packSame -and $modsSame) {
-            Remove-Item -LiteralPath $installedPack
-            Remove-Item -LiteralPath $modList
-            foreach ($copy in $copiedDependencies) { Remove-Item -LiteralPath $copy -ErrorAction SilentlyContinue }
-            foreach ($name in $outputs) {
-                $gamePath = Join-Path $game $name
-                $savedPath = Join-Path $run $name
-                if ((Test-Path -LiteralPath $gamePath) -and (Test-Path -LiteralPath $savedPath) -and
-                    (Get-FileHash -LiteralPath $gamePath).Hash -eq (Get-FileHash -LiteralPath $savedPath).Hash) {
-                    Remove-Item -LiteralPath $gamePath
-                }
+        # Our pack, mod list and the Workshop packs we copied (the marker), each only if unchanged.
+        try {
+            $gone = Remove-InstalledFiles -Marker $marker
+            $cleanup.removed = @($gone.removed)
+            $cleanup.private_files_removed = ($gone.kept.Count -eq 0)
+            if ($gone.kept.Count -gt 0) { $cleanup.changed_kept = @($gone.kept) }
+        } catch {
+            $cleanup.removed = 'failed: ' + $_.Exception.Message
+        }
+        foreach ($name in $outputs) {
+            $gamePath = Join-Path $game $name
+            $savedPath = Join-Path $run $name
+            if ((Test-Path -LiteralPath $gamePath) -and (Test-Path -LiteralPath $savedPath) -and
+                (Get-FileHash -LiteralPath $gamePath).Hash -eq (Get-FileHash -LiteralPath $savedPath).Hash) {
+                Remove-Item -LiteralPath $gamePath
             }
-            $cleanup.private_files_removed = $true
         }
         # The game is gone: copy what it wrote after the last poll (a cut last line too), then
         # remove the shared log if all of it is in the run's copy.
-        if ($clearLog) {
+        if ($clearLog -and $reader) {
             try {
                 $lines = @(Read-JsonlLines -State $reader -Path $eventLog)
                 if ($reader.Pending.Length -gt 0) { $lines += $reader.Pending; $reader.Pending = '' }

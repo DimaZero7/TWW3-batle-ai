@@ -28,11 +28,13 @@ To watch the network command our side, use
 ## What the launcher does
 
 1. Reads `config/default.json` and `config/local.json`, finds the game.
-2. Checks that WH3 is not running and no files of a previous run remain.
-   Lines left in the event log from outside a launcher run are moved into the
+2. Checks that WH3 is not running and removes what an earlier run put into the game folder and left
+   (it crashed or was killed): the files of `build/launcher-installed.json` whose hash is unchanged. Any other
+   file of an earlier run stops it. Lines left in the event log from outside a launcher run are moved into the
    run folder (`events.before.jsonl`).
-3. Checks dependencies (SHA-256), then copies them and our pack into `data`
-   and verifies the installed pack hash.
+3. Checks dependencies (SHA-256), writes everything it will put into the game folder (our pack, the
+   dependency copies, the mod list) into `build/launcher-installed.json`, only then copies the dependencies
+   and our pack into `data` and verifies the installed pack hash.
 4. Writes its **own** mod list `tww3_bai_<target>_mods.txt`. The user's
    `used_mods.txt` is never touched.
 5. Sets Normal difficulty for the battle ([below](#fair-difficulty)).
@@ -43,8 +45,11 @@ To watch the network command our side, use
    `error` / `probe_error` / `skipped`, process exit, a new crash report or timeout.
 9. Copies results and stops **only its own** process (same PID, path and
    start time).
-10. Removes its pack, its mod list and its dependency copies — only when
-    unchanged; puts the game's preferences file back.
+10. Removes its pack, its mod list and its dependency copies (`true_sight.pack`) by
+    `build/launcher-installed.json` — only when unchanged; also when the battle failed or never started.
+    Puts the game's preferences file back. When the game could not be closed the files stay listed; the next
+    launch removes them, or `powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/cleanup.ps1`
+    (before a normal game, e.g. multiplayer: the mod left in `data` broke a game with a friend).
 11. Copies the last lines of the event log and **removes the log** from the game
     folder — only when no game runs and all of it is in the run's `events.jsonl`.
 
@@ -108,7 +113,8 @@ accuracy and skirmishing it does not touch.
   downloaded or its hash changed.
 - Before a run the launcher copies `true_sight.pack` from the Workshop folder
   into `data` if absent, never overwrites a different file, lists it before
-  our pack and removes only its own copy afterwards.
+  our pack and removes only its own copy afterwards (by `build/launcher-installed.json`, after a failed
+  battle too). A copy in `data` not on that list counts as the user's: the launcher leaves it and warns.
 
 Subscribe to the mod in Steam Workshop once. If the author releases an
 update, the hash no longer matches and runs stop: review the new version and

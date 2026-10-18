@@ -344,7 +344,8 @@ Details: [training](training/training.md).
   enemy in the game (`--enemy-ai ai_like`, a second bridge, the same companion): only the engine's
   difference is left ([bridge](apps/bridge.md#the-enemy-under-the-simulators-script)).
 - **Starting a battle:** pack build (`tools.build nn-arena`), the launcher sets Normal difficulty and
-  restores the player's settings; one battle per game launch (~2 min). The True Sight mod is required.
+  restores the player's settings; one battle per game launch (~2 min). The True Sight mod is required; the launcher removes its
+  copies in the game folder (pack, `true_sight.pack`, mod list) after a failed battle too (`build/launcher-installed.json`).
 
 Details: [bridge](apps/bridge.md) · [watch a network battle](launch/watch.md) · [run](launch/run.md) ·
 [build](launch/build.md) · [in-game modules](apps/README.md) · [project design](architecture/overview.md).

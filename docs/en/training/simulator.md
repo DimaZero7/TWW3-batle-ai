@@ -903,8 +903,26 @@ hits on wolf rats (the ellipse body, the "Hits" row above). The twin after the c
 
 Open (not these units' new mechanics - general ones):
 
-- The gun still hits a formation a little harder than the game (84 / 66 / 60 against 71 / 60 / 56 HP/s): the simulator's
-  burst is 4.5 s of every man at once, the game's men start apart and a burst lasts 7-8 s.
+- **The gun hits a formation harder than the game: 1.43 HP a bullet** (swordsmen, shield spearmen 60-135 m). The `ratform`
+  probe (1 battle, 7 lanes, `build/charge-probe/runs/20261018-222548`, plan in `tools/nn/unit_probe.py`; the gun 100 m off
+  at swordsmen facing it and with their backs to it, at flagellants - no shield, no armour, a bullet does exactly 8 - 60 and
+  100 m off; handguns 100 m off at clanrats facing and back, and at skavenslaves) took the excess apart:
+  - Not the shields. A formation's shield passes facing / back: the gun 0.74, handguns 0.79; the rule
+    `missile.shield_ap_pierce` 0.78 / 0.785, the plain shield 0.65. The rule holds for formations too. Without shields
+    the excess is the same: backs 1.45, flagellants 1.55 / 1.32 (100 / 60 m).
+  - Not the thinning target nor the bullets a burst: HP a bullet counts a fired bullet.
+  - The first burst on a whole formation: the game 0.7-0.95 of the simulator (flagellants 2.87 against 3.40, swordsmen's
+    backs 2.94 against 3.24, 100 m 1.70-2.06 against 2.39). A Monte Carlo of the same spread model man by man (exact
+    files, as the game's: standing swordsmen stand file behind file within 0.1 m) gives what the simulator does (the gun
+    1.4-1.56 of the game, handguns 1.07, lone men 0.97-1.04): a formation's geometry does not explain this part - open.
+  - The later bursts: the game's HP a bullet falls to 0.65-0.75 of the first as soon as men die (5-10 % dead), the
+    simulator's stays level to the end. And the game kills more: at 25 % of the health lost the dead are 0.3-0.45 of
+    that health, the simulator's 0.0 (the gun's hits spread evenly over the living, `kills.missile_uniform`), handguns
+    0.45-0.55 against 0.2-0.28. The game's gun hits land close together (each shooter keeps his target man, 18 bullets in
+    a row) and once men die some bullets are lost. The fighters lab (each bullet to its own man) repeats it: by burst
+    1.95 -> 1.4-1.8 against the game's 1.7-2.1 -> 1.5-1.9 (100 m), but its low path is cut at 21.6 m (`lab.json`
+    `missile.path_points` x `cells.cell_m`) where a flat bullet's is 37 m (100 m) and 61 m (60 m): at 60 m the lab gives
+    0.7 of the game (2.0 against 2.9). Its match at 100-135 m is partly that cut.
 - The first 5 s of the censers', monks' and halberds' melee are twice the game's in the simulator (censers 443 against
   230 HP/s) - the same charge hole as all infantry's (the melee change).
 - The Giant Rats strike harder than the game's in the first second of contact (a charge 555 against 401 HP, into braced
@@ -920,7 +938,7 @@ Open (not these units' new mechanics - general ones):
   HP a bullet, sim / game, before → after: the gun on a lone man (ratlone, ratlord, ratcover, ratling's lord100)
   0.63-0.81 → 0.87-1.14, handguns 0.79-0.82 → 0.87-0.98; arrows and sling on a lone lord 0.97 / 0.94 → 1.19 / 1.16
   (one lane each). The gun on formations is 1.21 of the game before and 1.43 after (swordsmen, shield spearmen
-  60-135 m): its own excess on formations is open. The itS26_15 step replay (windows where a gun aims at the lord out
+  60-135 m): its own excess on formations: taken apart above (the `ratform` probe). The itS26_15 step replay (windows where a gun aims at the lord out
   of melee, his HP sim / game): rectangle 0.43 → 0.64, fighters 0.41 → 0.58; the 92-battle replay
   (`build/night6/r92_base`, `r92_rad`): damage under fire 0.95 → 1.00, in melee 0.93 → 0.94, killed per HP under fire
   0.59 → 0.60, routs 1.00 → 1.01, lords under the guns' fire 0.79 → 1.01.

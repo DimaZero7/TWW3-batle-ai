@@ -428,7 +428,7 @@ RADII = (1.5, 2.5, 3.5)
 NEAR_WINDOWS = ((0, 5), (5, 15), (15, 30), (30, 90))
 NEAR_KEYS = tuple(f"{who}_near_{lo}_{hi}" for who in ("a", "tg") for lo, hi in NEAR_WINDOWS)
 # the new units' plans (tools/nn/unit_probe.py: their lanes, measures and table)
-UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow")
+UNIT_PLANS = ("ratling", "ratlord", "ratcover", "ratlone", "ratform", "suppress", "suppress2", "censer", "wolfrats", "wolfpoison", "hitslow")
 # magic (tools/nn/magic_probe.py: its lanes - mode 'cast' - and measures)
 MAGIC_PLANS = ("magic",)
 PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "meleeorders", "damaged", "reform",
