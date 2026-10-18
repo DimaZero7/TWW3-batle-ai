@@ -577,6 +577,46 @@ def test_a_shot_unit_keeps_fewer_men_for_its_health_than_the_exponent_rule():
     assert k_new > 1.5 * k_old
 
 
+def test_front_kills_with_all_hits_on_the_front_rank_kill_sooner_and_lose_the_hits_beyond_a_man():
+    # kills.missile_front (melee.front_kills): 120 men of 69 HP, 20 in the front rank, hits of 7.5 HP (~9 to kill), 40 hits
+    # a step all on the front rank for 5 steps (200 hits: 10 a front man): the front dies (~ half of it), the even
+    # spread kills nobody; the HP lost beyond the dead men's health comes back as lost hits
+    men, hp_man, ph = torch.tensor([120.0]), torch.tensor([69.0]), torch.tensor([7.5])
+    hp, fw = torch.tensor([8280.0]), torch.tensor([0.0])
+    hp_u, men_u = hp.clone(), men.clone()
+    dead_f = dead_u = lost = 0.0
+    for _ in range(5):
+        k, w, fw = melee.front_kills(torch.tensor([40.0]), torch.tensor([0.0]), men, torch.tensor([20.0]), hp_man, hp, ph,
+                                     fw)
+        hp = hp - (40.0 - w) * ph
+        men, dead_f, lost = men - k, dead_f + float(k), lost + float(w)
+        ku = melee.shot_kills(torch.tensor([40.0]), men_u, hp_man, hp_u, ph)
+        hp_u, men_u, dead_u = hp_u - 40.0 * ph, men_u - ku, dead_u + float(ku)
+    assert dead_u < 0.5 and 6 < dead_f < 16
+    assert 0 < lost < 0.2 * 200
+    # the front's own wounds stay within the unit's
+    assert 0 <= float(fw) <= float(men * hp_man - hp) + 0.5
+    # all of a step's hits even (none on the front) is shot_kills
+    k, w, _ = melee.front_kills(torch.tensor([0.0]), torch.tensor([60.0]), torch.tensor([180.0]), torch.tensor([20.0]),
+                                torch.tensor([50.0]), torch.tensor([9000.0]), torch.tensor([50.0 / 3]), torch.tensor([0.0]))
+    assert float(k) == pytest.approx(float(melee.shot_kills(torch.tensor([60.0]), torch.tensor([180.0]),
+                                                            torch.tensor([50.0]), torch.tensor([9000.0]),
+                                                            torch.tensor([50.0 / 3]))), rel=0.05, abs=0.05)
+
+
+def test_the_front_rank_takes_most_flat_bullets_and_few_arrows():
+    # missile.front_share: a Ratling Gun's flat bullets (a 37 m low path at 100 m) on swordsmen mostly strike the front
+    # rank; archers' arcing arrows spread over the depth
+    from tools.nn.sim import missile
+    gun = face_off(SWORD, "wh2_dlc12_skv_inf_ratling_gun_0", gap=100.0)
+    bows = face_off(ARCHER, SLAVE, gap=100.0)
+    H = gun.N // 2
+    sp = P.sim["formation"]["spacing_m"]
+    f_gun = float(missile.front_share(gun.u, geometry.pairwise(gun.u, sp), P)[0, H, 0])
+    f_bow = float(missile.front_share(bows.u, geometry.pairwise(bows.u, sp), P)[0, 0, H])
+    assert 0.6 <= f_gun <= 1.0 and 0.0 <= f_bow <= 0.45 and f_bow < f_gun, (f_gun, f_bow)
+
+
 # --- C1: shattering by the database's thresholds ---
 
 class TestShatter:

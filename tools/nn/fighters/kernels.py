@@ -63,7 +63,7 @@ def launch(name, rows, ins, ints, floats, consts):
 if triton is not None:
     @triton.jit
     def _path_first_kernel(start_ptr, count_ptr, man_ptr, px_ptr, pz_ptr, hit_ptr, uid_ptr, rad_ptr, hgt_ptr,
-                           lx_ptr, lz_ptr, ex_ptr, ez_ptr, tan_ptr, sh_ptr, ok_ptr, out_ptr,
+                           lx_ptr, lz_ptr, ex_ptr, ez_ptr, tan_ptr, sh_ptr, ok_ptr, np_ptr, out_ptr,
                            P, M, N, H, c,
                            P1: tl.constexpr, P2: tl.constexpr, NPTS: tl.constexpr, CAP: tl.constexpr,
                            BLOCK: tl.constexpr):
@@ -79,11 +79,12 @@ if triton is not None:
         ez = tl.load(ez_ptr + q)
         tan = tl.load(tan_ptr + q)
         sh = tl.load(sh_ptr + q)
+        npq = tl.minimum(tl.load(np_ptr + q), NPTS)          # this projectile's points (its low path's length)
         lanes = tl.arange(0, BLOCK)
         lane_ok = lanes < CAP
         best = -1e9
         who = -1
-        for k in tl.static_range(NPTS):
+        for k in range(0, npq):
             qx = lx - ex * k * c
             qz = lz - ez * k * c
             ix = tl.floor(qx / c).to(tl.int64)
@@ -120,23 +121,27 @@ if triton is not None:
 
 
 def path_first(table, cap, n_pts, px, pz, hittable, uid, radius, height, lx, lz, ex, ez, tan, sh, ok,
-               use_triton=None):
+               use_triton=None, npts=None):
     """[B, P] the man (index into M) each projectile strikes first along its low path, -1 none. table: cells.Table of
     the men (their places px, pz [B, M]); hittable [B, M]; uid [B, M]; radius, height [B, N] by unit; the projectiles
     [B, P]: landing (lx, lz), unit direction from the shooter (ex, ez), tan of the launch angle, shooter sh, ok. A man
     is struck when the path passes within his radius over its last height / tan metres (+ radius); the first is the
-    farthest back from the landing point."""
+    farthest back from the landing point. npts [B, P] (None: n_pts each): the points each projectile searches, at most
+    n_pts (lab.json missile.path_full: as many as its low path is long)."""
     B, P = lx.shape
     M = px.shape[1]
     N = radius.shape[1]
+    if npts is None:
+        npts = torch.full_like(sh, int(n_pts))
     if _triton_ok(px, use_triton):
         ins = [table.start, table.count, table.man, px, pz, hittable.to(torch.int8), uid, radius.float(),
-               height.float(), lx, lz, ex, ez, tan, sh, ok.to(torch.int8)]
+               height.float(), lx, lz, ex, ez, tan, sh, ok.to(torch.int8), npts.to(torch.int32).contiguous()]
         out, = launch("path", B * P, ins, (P, M, N, table.H), (table.c,),
                       (cells._P1, cells._P2, n_pts, cap, max(16, 1 << (int(cap) - 1).bit_length())))
         return out.reshape(B, P)
     c = table.c
-    cand = torch.cat([table.query(lx - ex * k * c, lz - ez * k * c, cap) for k in range(n_pts)], 2)     # [B, P, K]
+    cand = torch.cat([torch.where((k < npts)[:, :, None], table.query(lx - ex * k * c, lz - ez * k * c, cap), -1)
+                      for k in range(n_pts)], 2)                                                     # [B, P, K]
     c_ok = (cand >= 0) & cells.gather2(hittable, cand) & (cand != sh[:, :, None])
     cx, cz = cells.gather2(px, cand), cells.gather2(pz, cand)
     wx, wz = cx - lx[:, :, None], cz - lz[:, :, None]

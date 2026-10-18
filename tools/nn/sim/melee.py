@@ -120,6 +120,72 @@ def shot_kills(hits, men, hp_man, hp_abs, per_hit):
     return torch.where(K < 1.02, hits, k).clamp(min=0) * (men > 0)
 
 
+def _tau_of(m_obs, Ks):
+    """tau with E[k | k < K] = tau Q(K - 1, tau) / Q(K, tau) = m_obs (bisection, as shot_kills)."""
+    m_obs = torch.minimum(m_obs, 0.95 * (Ks - 1))
+    lo, hi = torch.zeros_like(Ks), 4 * Ks + 30
+    lg = torch.lgamma(Ks)
+    for _ in range(16):
+        mid = (lo + hi) / 2
+        q = torch.special.gammaincc(Ks, mid).clamp(min=1e-30)
+        pk = torch.exp((Ks - 1) * torch.log(mid.clamp(min=1e-30)) - mid - lg)
+        m = mid * (1 - pk / q)
+        up = m < m_obs
+        lo, hi = torch.where(up, mid, lo), torch.where(up, hi, mid)
+    return (lo + hi) / 2
+
+
+def _pool(n, tau, x, Ks):
+    """One pool of n living men with Poisson(tau) hits so far (each under K) taking x more hits a man: (men killed,
+    hits beyond the dead men's K - lost, a man's health is all he loses -, the survivors' mean hits)."""
+    s0 = torch.special.gammaincc(Ks, tau).clamp(min=1e-30)
+    t1 = tau + x
+    s1 = torch.special.gammaincc(Ks, t1)
+    kills = n * (1 - s1 / s0).clamp(0, 1)
+
+    def excess(t):                       # E[(S - K)+], S ~ Poisson(t)
+        return t * (1 - torch.special.gammaincc(Ks - 1, t)) - Ks * (1 - torch.special.gammaincc(Ks, t))
+    # E[(S - K)+ ; k0 < K] = E+(tau + x) - E+(tau) - x P(k0 >= K), over the living at the start (/ s0)
+    waste = n * ((excess(t1) - excess(tau) - x * (1 - s0)).clamp(min=0) / s0)
+    waste = torch.minimum(waste, n * x)
+    mean = t1 * torch.special.gammaincc(Ks - 1, t1) / s1.clamp(min=1e-30)
+    return kills, waste, torch.minimum(mean, Ks)
+
+
+def front_kills(h_front, h_rest, men, front, hp_man, hp_abs, per_hit, fw):
+    """Projectile kills with the front rank struck first (kills.missile_front; missile.front_share): the unit's living
+    men are two pools - its front rank (`front` men: its files, at most its men) and the rest - each man with his own
+    health and Poisson hits (shot_kills). h_front hits fall on the front rank only, h_rest spread evenly over all the
+    living. fw: the front rank's wounds (HP it lacks; the rest's are the unit's wounds W less these). A front man who
+    dies is replaced by a man of the rest stepping up (the game's file closing up), his wounds with him. Returns
+    (men killed, hits lost beyond the dead men's health - a man takes at most his health, CA -, the front's new
+    wounds). No fitted number: the front's share is the spread model's, the pools Poisson as shot_kills."""
+    A = men.clamp(min=1e-6)
+    a = torch.minimum(front, men).clamp(min=1e-6)
+    rest = (men - a).clamp(min=0)
+    ph = per_hit.clamp(min=1e-6)
+    K = (hp_man / ph).clamp(min=1.0)
+    Ks = K.clamp(min=1.02)
+    W = (men * hp_man - hp_abs).clamp(min=0)
+    Wa = torch.minimum(fw.clamp(min=0), W)
+    Wr = W - Wa
+    xr = h_rest / A
+    xa = h_front / a + xr
+    ta = _tau_of(Wa / (a * ph), Ks)
+    tr = _tau_of(Wr / (rest.clamp(min=1e-6) * ph), Ks)
+    ka, wa, ma = _pool(a, ta, xa, Ks)
+    kr, wr, mr = _pool(rest, tr, xr, Ks)
+    kr = torch.where(rest > 0, kr, torch.zeros_like(kr))
+    wr = torch.where(rest > 0, wr, torch.zeros_like(wr))
+    up = torch.minimum(ka, (rest - kr).clamp(min=0))          # the men stepping up into the front's gaps
+    fw_new = ph * ((a - ka).clamp(min=0) * ma + up * mr)
+    one = K < 1.02                                            # a hit that kills: a man a hit, nothing lost
+    hits = h_front + h_rest
+    kills = torch.where(one, hits, ka + kr).clamp(min=0) * (men > 0)
+    lost = torch.where(one, torch.zeros_like(hits), wa + wr) * (men > 0)
+    return kills, lost, torch.where(one | (men <= 0), torch.zeros_like(fw_new), fw_new)
+
+
 def spacing_of(u, spacing):
     """(h, v) [B, N]: a man's place across the front and between ranks, m (the unit's formation template,
     config/nn/units.json spacing; `spacing` where a unit has none)."""

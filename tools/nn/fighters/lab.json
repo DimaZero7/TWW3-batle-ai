@@ -66,6 +66,9 @@
   "missile": {
     "proj_max": 384,
     "path_points": 6,
+    "path_full": true,
+    "path_points_max": 48,
+    "path_full_why": "missile.path_full (missile.py _trace, kernels.path_first; false: path_points for every projectile): each projectile searches its whole low path for bodies - the battle's tallest body's height / tan theta + its widest radius back from the landing point, no farther than the shooter - in cell_m steps, at most path_points_max (48 x 3.6 = 173 m, past the longest range of the roster, 160 m: a cap, not a fitted number). A counting error before: path_points' 6 x 3.6 = 21.6 m cut a flat bullet's low path (h / tan theta: 37 m at 100 m, 61 m at 60 m for a man 1.8 m tall and the 100 m/s bullet), so a bullet that passed over its aim man and came down onto the ranks behind him past 21.6 m was a miss.",
     "per_man_max": 2,
     "why": "projectiles a battle traced per step at most (the rest wait for the next step), the points along a projectile's low path searched for bodies (cells.cell_m apart from the landing point back towards the shooter: 6 x 3.6 = 21.6 m; a flat shot's longer low path is cut there), projectiles a man looses per step at most"
   }

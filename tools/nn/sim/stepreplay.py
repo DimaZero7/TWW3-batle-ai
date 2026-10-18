@@ -387,6 +387,15 @@ def _batch(job):
         put("men", torch.minimum(men, u["men0"]))
         put("hp", hp)
         put("hp_abs", hp * u["hp0"])
+        if "fw" in u:
+            # kills.missile_front: the front rank's share of the recorded wounds is its share of the men (the
+            # recording has no wounds by rank: an even spread, as shot_kills reads W)
+            from tools.nn.sim import geometry as _geo
+            fr, _ = _geo.dims(u, spacing)
+            files = (fr / u["sp_h"].clamp(min=0.1)).clamp(min=1)
+            mn = u["men"].clamp(min=1e-6)
+            W = (u["men"] * u["hp_man"] - u["hp_abs"]).clamp(min=0)
+            put("fw", W * torch.minimum(files, mn) / mn)
         mpk = known & torch.isfinite(tens(put_f["mp"][:, w]))
         put("mp", gf("mp"), mpk)
         put("morale", gf("mp") * u["leadership"], mpk)

@@ -374,6 +374,51 @@ def hit_chance_plane(u, pw, ellipse=False, params=None):
     return torch.where((u["men0"] <= 1)[:, None, :], p_lone, p_form).clamp(0, 1)
 
 
+def front_share(u, pw, params):
+    """[B, i, j] the share of i's hits on formation j that strike j's front rank (kills.missile_front): a projectile
+    strikes the first man on its path (CA: a projectile is a body that must touch a model), and a formation stands
+    file behind file (the game's places: standing swordsmen's ranks within 0.1 m of each other's files), so a flat
+    shot that comes in at a man's height meets the front man of its file; only what passes between the front men or
+    over their heads goes deeper. The same spread model as hit_chance_plane (no new number): the front rank's chance
+    - its cover across, min(1, 2 r / its spacing), x the landing points whose low path passes the front rank (aimed
+    at a man y0 deep, the window [-r, L + r] at the front) - over the formation's chance. Arcing fire (a short low
+    path L) spreads over the depth (the thin probe's even spread of arrows); a flat bullet's L of 37-61 m puts most
+    of its hits on the front rank. 1 for a lone man."""
+    d = pw["dist"].clamp(min=5.0)
+    shrink = acc_shrink(u, params)
+    sig = (torch.sqrt(u["cal_area"].clamp(min=0))[:, :, None] * d / u["cal_dist"].clamp(min=1.0)[:, :, None]
+           * shrink).clamp(min=1e-3)
+    v = u["muzzle_v"].clamp(min=1.0)[:, :, None]
+    theta = (0.5 * torch.asin((d * 9.81 / (v * v)).clamp(max=1.0))).clamp(min=1e-3)
+    L = u["height"][:, None, :] / torch.tan(theta)
+    sa = sig / torch.sin(theta)
+    c = 0.5 * L
+    if params.sim["missile"].get("body_ellipse"):
+        rx, r = body_radii(u, pw)
+    else:
+        rx = r = u["radius"][:, None, :]
+    lat_lone = torch.erf(rx / (math.sqrt(2) * sig))
+    h = torch.where(u["sp_h"] > 0, u["sp_h"], torch.full_like(u["sp_h"], 2.0))[:, None, :]
+    sv = torch.where(u["sp_v"] > 0, u["sp_v"], torch.full_like(u["sp_v"], 2.0))[:, None, :]
+    depth = pw["depth"][:, None, :]
+    D = (depth - sv).clamp(min=0)
+    ranks = (depth / sv).clamp(min=1)
+    n = torch.minimum(((torch.minimum(L, D) + 2 * r) / sv).clamp(min=1.0), ranks)
+    cover1 = (2 * rx / h).clamp(max=1.0)
+    lateral = torch.maximum(1 - (1 - cover1) ** n, lat_lone)
+    along = torch.zeros_like(sig)
+    first = torch.zeros_like(sig)
+    q_n = 7
+    for q in range(q_n):
+        y0 = D * (q + 0.5) / q_n
+        along = along + _phi((D + L - c - y0) / sa) - _phi((-r - c - y0) / sa)
+        first = first + _phi((L + r - c - y0) / sa) - _phi((-r - c - y0) / sa)
+    p_form = lateral * along / q_n
+    p_first = torch.maximum(cover1, lat_lone) * first / q_n
+    share = (p_first / p_form.clamp(min=1e-9)).clamp(0, 1)
+    return torch.where((u["men0"] <= 1)[:, None, :] | (ranks <= 1.0), torch.ones_like(share), share)
+
+
 def _hermite_table(n_max=32):
     """Standard-normal quadrature points and weights (Gauss-Hermite) for 1..n_max points, as plain floats. Built once
     at import, outside torch.compile: numpy inside the compiled simulator step is traced as CPU tensors, and inductor

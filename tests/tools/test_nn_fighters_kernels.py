@@ -43,6 +43,29 @@ def test_path_first_triton_matches_torch():
     got = K.path_first(*args, use_triton=True)
     assert int((want >= 0).sum()) > 50                          # the test hits men
     assert torch.equal(got, want)
+    # each projectile its own number of points (lab.json missile.path_full), up to n_pts
+    npts = torch.randint(1, 15, (B, P), generator=g).to(dev)
+    args = (table, 12, 14, x, z, hit, uid, radius, height, lx, lz, ex, ez, tan, sh, ok)
+    want = K.path_first(*args, use_triton=False, npts=npts)
+    got = K.path_first(*args, use_triton=True, npts=npts)
+    assert int((want >= 0).sum()) > 50
+    assert torch.equal(got, want)
+
+
+def test_the_whole_low_path_finds_a_man_far_behind_the_landing_point():
+    # a flat bullet (tan 0.05: a man 1.8 m tall is under it for the last 36 m) lands 30 m past a lone man: he is
+    # on its low path; 6 points (21.6 m) miss him, the projectile's own 11 points find him (lab.json path_full)
+    x, z = torch.tensor([[0.0]]), torch.tensor([[0.0]])
+    valid = torch.tensor([[True]])
+    uid = torch.zeros((1, 1), dtype=torch.long)
+    table = cells.Table(x, z, valid, 3.6, 4096)
+    one = lambda v: torch.tensor([[v]])
+    args = (table, 12, 6, x, z, valid, uid, torch.tensor([[0.65]]), torch.tensor([[1.8]]), one(0.0), one(30.0),
+            one(0.0), one(1.0), one(0.05), torch.tensor([[-1]]), torch.tensor([[True]]))
+    assert int(K.path_first(*args, use_triton=False)) == -1
+    args = (table, 12, 48) + args[3:]
+    assert int(K.path_first(*args, use_triton=False, npts=torch.tensor([[11]]))) == 0
+    assert int(K.path_first(*args, use_triton=False, npts=torch.tensor([[6]]))) == -1
 
 
 def _near(x, z, valid, uid):

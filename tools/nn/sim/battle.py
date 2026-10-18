@@ -685,7 +685,25 @@ def step(st, orders, params=None, dt=None):
             # the hits' mean HP (HP a man / their hits-weighted E[N] to kill)
             K_t = (h_pair * hm[:, None, :] / shit.clamp(min=1e-6)).sum(1) / H.clamp(min=1e-9)
             eff_t = torch.where(H > 0, hm / K_t.clamp(min=1e-6), hm)
-            k_t = melee.shot_kills(H, u["men"], u["hp_man"], u["hp_abs"], eff_t)
+            if cal["kills"].get("missile_front") and "fw" in u:
+                # kills.missile_front: a flat shot strikes the front man of its file first (missile.front_share), so
+                # the hits fall on the front rank (its files) and the rest evenly; a man takes at most his health -
+                # the hits beyond the dead men's are lost (melee.front_kills)
+                fs = missile.front_share(u, pw, params)
+                h_f = (h_pair * fs).sum(1)
+                files = (pw["front"] / u["sp_h"].clamp(min=0.1)).clamp(min=1)
+                k_t, lost, fw_new = melee.front_kills(h_f, (H - h_f).clamp(min=0), u["men"], files, u["hp_man"],
+                                                      u["hp_abs"], eff_t, u["fw"])
+                many = u["men0"] > 1
+                u["fw"] = torch.where(many & (H > 0), fw_new, u["fw"])
+                # the lost hits' health back out of the taken (each pair by its hits)
+                lost_hp = torch.where(many, lost * eff_t, torch.zeros_like(lost))
+                cut = h_pair / H.clamp(min=1e-9)[:, None, :] * lost_hp[:, None, :]
+                cut = torch.minimum(cut, (dmg - dm - db).clamp(min=0))
+                dmg = dmg - cut
+                taken = dmg.sum(1)
+            else:
+                k_t = melee.shot_kills(H, u["men"], u["hp_man"], u["hp_abs"], eff_t)
             shot_k = h_pair / H.clamp(min=1e-9)[:, None, :] * k_t[:, None, :]
         kills = torch.where((u["men0"] > 1)[:, None, :], pool_k + shot_k, kills)
     if kills_bomb is not None:

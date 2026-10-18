@@ -228,6 +228,8 @@ INTERNAL = {
     "late": ("f", "share of a shooter's men whose target man died since their last shot (missile.reaim: they aim "
                   "again before the next shot): 1 - prod(1 - the target's men lost a step / its men), 0 at a volley "
                   "and at a new target"),
+    "fw": ("f", "HP its front rank lacks (kills.missile_front: projectile hits on the front rank first; melee.front_kills: "
+                "the rest's wounds are the unit's less these)"),
     "loaded_s": ("f", "seconds a shooter has been loaded for its next volley, waiting for its late men to aim "
                       "(missile.reaim; 0 while reloading)"),
     "skr": ("b", "in a skirmish run now (skirmish.py): started at sk_m, kept until sk_stop_m, in melee or routing ended"),

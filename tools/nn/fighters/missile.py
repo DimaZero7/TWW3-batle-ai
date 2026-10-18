@@ -12,7 +12,7 @@ flies to one man:
                angle that carries the muzzle velocity to the distance, the lower arc)
   low path     over its last h / tan(theta) metres the projectile is below the head of a man h tall: the first man
                along the path (of any unit, friend or foe, the shooter's own excepted) whose body - a circle of his
-               radius - it passes through is hit; none: a miss
+               radius - it passes through is hit; none: a miss (lab.json missile.path_full: the whole low path searched)
   shield       the struck man's shield (its block chance) stops a small-arms projectile coming within the database's
                shield_defence_angle_missile of his facing (to the man he fights, else his unit's)
   damage       the armour-piercing part whole, the base part less his own armour roll, resistance (missile + physical,
@@ -112,12 +112,24 @@ def _trace(F, u, params, lab, sh, ok, target, near, live, salt=210):
     lx = ax + ex * along + ez * across
     lz = az + ez * along - ex * across
     # the bodies near the low path: cells round points from the landing point back towards the shooter (all
-    # path_points: the points past the longest low path add only men beyond it, whom the path test drops)
-    n_pts = max(1, int(lab["missile"]["path_points"]))
+    # path_points: the points past the longest low path add only men beyond it, whom the path test drops).
+    # lab.json missile.path_full: each projectile searches its whole low path - the tallest body's height / tan theta
+    # + the widest radius, no farther than its shooter - up to path_points_max points (a flat bullet's low path is
+    # 37 m at 100 m and 61 m at 60 m: path_points' 6 x 3.6 = 21.6 m lost the bodies beyond, a counting error)
+    npts = None
+    if lab["missile"].get("path_full"):
+        n_pts = max(1, int(lab["missile"]["path_points_max"]))
+        c = float(near.table.c)
+        hmax = u["height"].amax(1, keepdim=True)
+        rmax = u["radius"].amax(1, keepdim=True)
+        reach = torch.minimum(hmax / tan + rmax, (d + along).clamp(min=0) + rmax)    # (the landing point from the shooter)
+        npts = (torch.ceil(reach / c) + 1).clamp(1, n_pts).to(torch.int32)
+    else:
+        n_pts = max(1, int(lab["missile"]["path_points"]))
     # (a man lying - knocked down - is passed over: lab.json knock.invulnerable)
     hittable = live & ~(F.down > 0) if lab.get("knock", {}).get("invulnerable", True) else live
     who = K.path_first(near.table, int(lab["cells"]["cap"]), n_pts, px, pz, hittable, F.uid, u["radius"], u["height"],
-                       lx, lz, ex, ez, tan, sh, ok)
+                       lx, lz, ex, ez, tan, sh, ok, npts=npts)
     wc = who.clamp(min=0)
     ku = F.uid.gather(1, wc)                                                 # the struck man's unit
     # the shield: his facing (to the man he fights, else his unit's) within the shield angle of the shooter

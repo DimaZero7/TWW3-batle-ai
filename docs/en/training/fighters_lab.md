@@ -619,8 +619,16 @@ x 4 copies ran in a container of 10 GB (`DOCK_MEM=10g`).
   carries them off (0.67) - how a unit locked with the enemy routs is the simulator's.
 - The share thrown by a spell is 2-5x below the game's (the knock probe battle): how the game throws men beyond the
   blast radius is not found.
-- The ellipse body (wolf rats) - the men are circles; the Ratling Gun's burst - at most 2 shots a man a step; a flat
-  shot looks for bodies over its last 21.6 m only.
+- The ellipse body (wolf rats) - the men are circles; the Ratling Gun's burst - at most 2 shots a man a step.
+- A projectile looks for bodies over its whole low path (`lab.json` `missile.path_full`: the tallest body's height /
+  tan of the angle + radius, no farther than the shooter, up to 48 points 3.6 m apart). It used to be cut at 21.6 m - a
+  counting error: a flat bullet's is 37 m at 100 m and 61 m at 60 m. The Ratling Gun on formations (the `ratling`,
+  `ratform` probes), HP a bullet lab / game: 60 m 0.7 -> 1.06, 100-135 m 0.97-1.04, swordsmen 1.08-1.15,
+  flagellants 0.96 / 1.11 (60 / 100 m); handguns on formations 0.92-1.05; lone men unchanged (0.85-1.0; crossbows 1.46 as
+  before). The dead's share of the HP lost at a
+  quarter lost: game 0.30-0.56, lab 0.39-0.50.
+  The itS26_15 step replay (`build/ratform/s26_lab_full`): the lord under the guns 0.58 -> 0.85 of the game, the lord
+  out of melee overall 0.87 -> 1.17 (the rectangle 0.64 / 1.19).
 - Wrapping round the enemy (the "drop") is weaker than the game's (0-0.02 against 0.01-0.05 one on one).
 
 ## Tried and rejected
