@@ -16,6 +16,9 @@ from tools.nn.sim import state as S  # noqa: E402
 from tools.nn.sim.params import load  # noqa: E402
 
 P = load()
+# the plain shield (its whole chance whatever the projectile): the shield rules' tests below check the cone, the sides
+# and the 55 % on it; missile.shield_ap_pierce (on) has its own test (TestMissile)
+PLAIN_SHIELD = P.with_cal("missile", shield_ap_pierce=False)
 SPEAR, SLAVE, CLANRAT = "wh_main_emp_inf_spearmen_0", "wh2_main_skv_inf_skavenslave_spearmen_0", \
     "wh2_main_skv_inf_clanrat_spearmen_0"
 ARCHER, SLINGER = "wh2_dlc13_emp_inf_archers_0", "wh2_main_skv_inf_skavenslave_slingers_0"
@@ -608,7 +611,7 @@ class TestMissile:
                 st = face_off(key, SLINGER, gap=100)
                 st.u["b"][0, 0] = facing
                 pw = geometry.pairwise(st.u, P.sim["formation"]["spacing_m"])
-                lost[key, facing] = float(missile.volley(st.u, pw, target, 1.0, P)[1].sum())
+                lost[key, facing] = float(missile.volley(st.u, pw, target, 1.0, PLAIN_SHIELD)[1].sum())
         assert lost[SHIELD_SPEAR, 90.0] == pytest.approx(0.65 * lost[SPEAR, 90.0], rel=1e-4)
         assert lost[SHIELD_SPEAR, 270.0] == pytest.approx(lost[SPEAR, 270.0], rel=1e-4)
         assert lost[SPEAR, 90.0] > 0
@@ -1080,7 +1083,7 @@ class TestShieldRules:
     """build/shields/spec.md: small arms only, a 60 deg cone each side of the facing, no side or rear block,
     in melee too, the General's 55 %."""
 
-    def _lost(self, key, rot, shooter=SLINGER, melee=False, params=P):
+    def _lost(self, key, rot, shooter=SLINGER, melee=False, params=PLAIN_SHIELD):
         # the target at the origin facing `rot` degrees off the direction to the shooter (100 m east); melee: an
         # enemy spearmen unit (the shooter's side) fights it
         st = scenario.build([army([(key, 0, 0, 90.0 - rot)], [(shooter, 100, 0, 270), (SPEAR, 0, 6, 180)])], params)
@@ -1116,9 +1119,9 @@ class TestShieldRules:
         pw = geometry.pairwise(st.u, 1.5)
         target = torch.full((1, st.N), -1)
         target[0, H] = 0
-        blocked = float(missile.volley(st.u, pw, target, 1.0, P)[1][0, H, 0])
+        blocked = float(missile.volley(st.u, pw, target, 1.0, PLAIN_SHIELD)[1][0, H, 0])
         st.u["small_arms"][0, H] = False                                    # an artillery-like projectile
-        through = float(missile.volley(st.u, pw, target, 1.0, P)[1][0, H, 0])
+        through = float(missile.volley(st.u, pw, target, 1.0, PLAIN_SHIELD)[1][0, H, 0])
         assert blocked == pytest.approx(0.65 * through, rel=1e-4)
         assert all(P.static(k)["small_arms"] for k in (ARCHER, SLINGER, MILITIA_K, NR))
 

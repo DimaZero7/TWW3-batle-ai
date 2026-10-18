@@ -385,7 +385,25 @@ def test_an_armour_piercing_shot_leaves_the_shield_part_of_its_chance():
     from tools.nn.sim import missile as SM
     u = {"m_damage": torch.tensor([[2.0, 17.0]]), "m_ap": torch.tensor([[6.0, 2.0]])}
     on = P.with_cal("missile", shield_ap_pierce=True)
-    assert SM.shield_pierce(u, P).tolist() == [[1.0, 1.0]]
+    assert SM.shield_pierce(u, P.with_cal("missile", shield_ap_pierce=False)).tolist() == [[1.0, 1.0]]
     got = SM.shield_pierce(u, on)[0].tolist()
     assert got[0] == pytest.approx(0.625) and got[1] == pytest.approx(1 - 0.5 * 2 / 19)
     assert SM.shield_pierce(u, on, torch.tensor([[1, 1, 0]]))[0].tolist() == pytest.approx([got[1], got[1], got[0]])
+
+
+def test_a_man_with_a_friend_in_the_way_is_blocked():
+    # lab.json melee.clear_line (off): melee.blocked_line - a living man of his own side whose body crosses the segment
+    # to the man he fights blocks him; a friend beside the line (farther than his radius) does not
+    from types import SimpleNamespace
+    px = torch.tensor([[0.0, 1.2, 2.5, 0.0, 1.2, 2.5, -1.0]])
+    pz = torch.tensor([[0.0, 0.3, 0.0, 5.0, 5.9, 5.0, 0.0]])
+    uid = torch.tensor([[0, 0, 1, 0, 0, 1, 0]])                     # unit 0 side 1, unit 1 side 2
+    M = px.shape[1]
+    cand = torch.tensor([[[j for j in range(M) if j != i] for i in range(M)]])
+    near = SimpleNamespace(px=px, pz=pz, cand=cand)
+    F = SimpleNamespace(uid=uid, B=1)
+    u = {"side": torch.tensor([[1, 2]]), "radius": torch.tensor([[0.65, 0.65]])}
+    tgt = torch.tensor([[2, -1, -1, 5, -1, -1, 2]])
+    live = torch.ones((1, M), dtype=torch.bool)
+    got = FM.blocked_line(F, u, near, tgt, live)[0].tolist()
+    assert got == [True, False, False, False, False, False, True]   # 0 behind 1; 3's friend 0.9 m aside; 6 behind 0, 1

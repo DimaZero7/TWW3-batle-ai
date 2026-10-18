@@ -294,7 +294,25 @@ The excess is in the "own target", already in the first second, when the men's p
 same at any crowd size (1.81 / 1.44 / 1.60 / 1.57 with 9 / 21 / 38 / 67 strikers). The "other target" is the
 opposite, half the game (`melee.unit_incidental` 0.45 balances their sum). A mob of 3+ units mixes the two with a bigger
 contact. How the game differs is not found; tried (no better, "Tried and rejected"): the choice of the enemy without the
-order target's preference (`melee.prefer_target`), the reach 2.5 m centre to centre (`melee.reach_radius`).
+order target's preference (`melee.prefer_target`), the reach 2.5 m centre to centre (`melee.reach_radius`), a blow only
+along a clear line to the enemy (`melee.clear_line`).
+
+What is known (`build/night3`: the lab's men in reach logged by unit pair, `reachlog.py`):
+
+- The lab has as many "own target" men in reach as the game (23.4 against 21.8 a victim a second): the excess is in the
+  damage per man, not in their number. The "other target" has 0.64 of the game's men in reach in the lab (they are
+  drawn to their order target).
+- In the game a man of the "other target" strikes not 0.45 but ~0.6 of an "own target" man (at the same men in reach by
+  the game's places: 0.94 / 0.52 / 0.48 against 1.40 / 0.86 / 0.81 x1e-4 of the health a second with 10-20 / 20-35 /
+  35-50 strikers). So in whole battles both strike at ~0.6 of the formula in the game, and the lab's 0.45 covers the
+  "own" excess.
+- The game's damage grows with the number of its men reached, not with the strikers: 0.62-0.69 x1e-4 a second on such a
+  man with 1-3 strikers on him; the lab grows with the strikers (lab / game 1.02 / 1.22 / 1.32 / 1.29 at 0-1 / 1-1.5 /
+  1.5-2 / 2-3 strikers per man struck).
+- A striker with a man of his own side on the line to the enemy (a body within 0.6 m of it) adds no damage in the game
+  (least squares: 0.78 per clear one, -0.46 per blocked); 30 % of the game's are blocked, 30-40 % of the lab's. Forbidding
+  the blocked ones spoils the killed per health ("Tried and rejected").
+- Unit type, fatigue and health do not explain the excess: "own target" 1.1-1.6 for every infantry type, at any fatigue.
 
 ### Wolf rats (probes wolfrats, wolfpoison)
 
@@ -543,7 +561,8 @@ x 4 copies ran in a container of 10 GB (`DOCK_MEM=10g`).
 - The damage in whole battles: the men of units striking their order target deal 1.6 of the game, those striking an
   "other" enemy 0.5 (already in the first second from the game's places); hence the mobs of 3+ units 1.33 and the free
   rats' surplus. In the probes (and in a crowd) as in the game. The mechanism is not found ("Where the whole battles'
-  excess is", above).
+  excess is", above): the lab has as many men in reach as the game, and the game's damage grows with its men reached,
+  not with the strikers; a rule that gives this without spoiling the killed per health is open.
 - The share thrown by a spell is 2-5x below the game's (the knock probe battle): how the game throws men beyond the
   blast radius is not found.
 - The ellipse body (wolf rats) - the men are circles; the Ratling Gun's burst - at most 2 shots a man a step; a flat
@@ -579,6 +598,13 @@ x 4 copies ran in a container of 10 GB (`DOCK_MEM=10g`).
   80+ strikers 1.63 -> 1.33, but men killed per health lost 0.75 -> 0.66 (game 0.79); the melee probes (53 lanes with
   the crowd) target HP 0-1 s 1.45 -> 1.12, 5-15 s 0.80 -> 0.63, steady 0.98 -> 0.90. The switch stays on (the radius
   counts).
+- **Only a man with a clear line to the enemy strikes** (`--lab melee.clear_line=true`, `melee.blocked_line`: a man of
+  his own side whose body crosses the segment to the enemy blocks the blow; a second rank does not strike past the
+  first). The replay of 2 battles from the places (`build/night3`): melee damage on whole units 1.15 -> 0.84, with
+  `unit_incidental` 1 0.95; "own target" 1.54 -> 1.16 (1.17), "other" 0.52 -> 0.38 (0.61), but men killed per health
+  lost 0.75 -> 0.60 (0.63; game 0.79): the blows spread over more men. The melee probes (53 lanes with the crowd, with
+  `unit_incidental` 1): target HP 0-1 / 0-5 / 5-15 s 1.45 / 1.13 / 0.80 -> 1.01 / 0.82 / 0.71, steady 0.98 -> 0.99. The
+  switch stays, off.
 
 - **Speed: neighbour lists through the compiler.** The whole step under `torch.compile`, the neighbours as lists
   [battles x men x 108], the compiler fusing the operations itself: 1024 battles 42.9 ms, three passes over the lists

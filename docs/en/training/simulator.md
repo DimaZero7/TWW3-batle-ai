@@ -934,6 +934,16 @@ Open (not these units' new mechanics - general ones):
     -> 0.46 (both); out 0.25 -> 0.75; the lab's men (their own fire, no spill) 0.43 -> 0.46, out 1.0 / 0.5. In the
     windows with none of his units on the line of fire the game loses 0.56 HP a bullet, the rectangle 0.05 -> 0.31;
     with some, 0.31 and 0.02 -> 0.06: in the game the units near the lord take about half, in the simulator almost all.
+  - Where the unit stands against the line gun -> lord (the same 10 replays, 239 seconds, the nearest own unit, its centre
+    within 10 m of the line; the lord's HP, sim / game, at 0.50 overall): a unit 0-15 m ahead of the lord - the game 17
+    HP/s (23 on average), the sim 0.19; a unit 0-15 m behind him (the lord at its front edge or inside it) - the game 20,
+    the sim 0.26; behind him beyond 15 m - 1.15. In the game a unit ahead barely covers the lord (17 against 23), in the
+    simulator 2.6x more, and a lord at his unit's front edge is covered by half in the simulator (its ranks behind him
+    share the shot), in the game not. The bullet model (the shot below head height over its last height / tan(angle) m,
+    ~11 m before the lord for the gun at 130 m) agrees with the `arc_los` arc here: a trajectory height fix does not
+    change it. The cause is not found - it needs an in-game probe: the General under the gun, an own unit 5 / 10 / 20 m
+    ahead of him, beside and behind (the `ratlord` plan has no units of the target's side - `extras` places only the
+    attacker's, `charge_probe.lua` needs a change).
   - The replay of 92 battles with both fixes (`build/night_mob/r92_base`, `r92_fix`): damage under fire 0.90 -> 0.91,
     men killed per health under fire 0.59 -> 0.59, routs 0.96 -> 0.97, melee unchanged - the fixes break nothing.
 - Projectiles on running beasts: crossbows and handguns on wolf rats faster than 4 m/s hit 1.4x the game's in the
@@ -2264,6 +2274,7 @@ Measured, ready as a switch, not in `config/nn/sim.json`: none now.
 
 | What | Result | Why not |
 |---|---|---|
+| The spill on a lone man as one body (`spill_geometry` "lone_path": the shot meets the neighbour's ranks before the lord, then the lord, then the ranks behind him - instead of the interleaved formations' shared union) | the General under the gun at 130 m, swordsmen centred 6-12 m behind him (the lord ahead of the line) - as before, 1.0 of the lone man; the lord 1-3 m inside its front edge 0.24-0.59 -> 0.17-0.26; a unit ahead - unchanged | in the game a unit by the lord covers him less than the simulator, the change covers him more; code removed |
 | A bombardment's projectiles land uniformly over its spread disc (`magic.landing` "area") | the magic probe's twin: Searing Doom's dead 0.50 of the game's; by 2 m rings 19-20 % of the men would die everywhere (the game: 79 % at the centre, 0-7 % beyond 4 m) | the game's landings gather at the centre (`landing` "radius") |
 | A bombardment's hits merged with the missile hits of the pair (one mean HP a hit) | the twin: Warp Lightning's dead 0.15-0.27 of the game's (the 224 AP bolts mixed with the explosions' small hits) | the bombardment keeps its own kills (`magic.bombard`) |
 | A bombardment: the wounds of earlier strikes even over the unit (`magic.wounds` "even") | the twin: Searing Doom HP 0.98, dead 0.76; Warp Lightning 1.07 and 0.98; the casts' spread the same | the per-man replay on the recorded places keeps the wounds at the centre; "strike" kept: the dead summed 1.06 / 1.03 |

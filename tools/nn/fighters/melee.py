@@ -100,6 +100,30 @@ def standoff(lab, t):
     return float(s["steady_m"]) - (float(s["steady_m"]) - float(s["start_m"])) * torch.exp(-t / float(s["tau_s"]))
 
 
+def blocked_line(F, u, near, tgt, live):
+    """[B, M] a man whose line to the man he fights (tgt, -1 none) passes through a living man of his own side: that
+    man's body (his radius) crosses the segment between them, strictly between the two (lab.json melee.clear_line)."""
+    from tools.nn.fighters import cells
+    px, pz = near.px, near.pz
+    t_c = tgt.clamp(min=0)
+    sx, sz = px.gather(1, t_c) - px, pz.gather(1, t_c) - pz
+    L = torch.sqrt(sx * sx + sz * sz).clamp(min=1e-3)
+    ex, ez = sx / L, sz / L
+    cand = near.cand                                                    # [B, M, K], -1 none, himself left out
+    cc = cand.clamp(min=0)
+    rx = cells.gather2(px, cand) - px[:, :, None]
+    rz = cells.gather2(pz, cand) - pz[:, :, None]
+    along = rx * ex[:, :, None] + rz * ez[:, :, None]
+    perp = (rx * ez[:, :, None] - rz * ex[:, :, None]).abs()
+    side_m = u["side"].gather(1, F.uid)
+    rad_m = u["radius"].gather(1, F.uid)
+    same = side_m.gather(1, cc.reshape(F.B, -1)).reshape(cand.shape) == side_m[:, :, None]
+    ok = (cand >= 0) & same & live.gather(1, cc.reshape(F.B, -1)).reshape(cand.shape)
+    r_c = rad_m.gather(1, cc.reshape(F.B, -1)).reshape(cand.shape)
+    inway = ok & (along > 0) & (along < L[:, :, None]) & (perp < r_c)
+    return inway.any(2) & (tgt >= 0)
+
+
 def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
     """One step of melee (module docstring). near: the neighbour pass of this step (hook.Near). Sets F.tgt (the man
     each fights), F.eng (the enemy man each closes on: within reach + the tether), F.pend (+ the HP each man takes);
@@ -128,6 +152,11 @@ def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
     tgt = torch.where(keep, F.tgt, torch.where(has, new_t, torch.full_like(F.tgt, -1)))
     eng = torch.where(has_e, eng, torch.full_like(tgt, -1))
     F.eng = torch.where(has, tgt, eng)
+    if lab["melee"].get("clear_line"):
+        # (lab.json melee.clear_line) a man strikes only when no man of his own side stands in the way to the man he
+        # fights (a body within its radius of the line between them): a second rank in reach does not strike past its
+        # front rank; he keeps his target and waits (his clock stands, as out of reach)
+        has = has & ~blocked_line(F, u, near, tgt, live)
     # the clock
     if lab["melee"].get("cooldown_in_reach_only", True):
         F.cd = torch.where(has, F.cd - dt, F.cd)
