@@ -37,6 +37,8 @@ def test_the_new_units_plans_build_on_the_grid_with_effects_and_card_rows(tmp_pa
             assert len(b) == 1 and [l["kind"] for l in b[0]] == [x[0] for x in up.RATLONE_LANES]
         elif plan == "ratform":            # one battle, each kind once (the gun and handguns at formations)
             assert len(b) == 1 and [l["kind"] for l in b[0]] == [x[0] for x in up.RATFORM_LANES]
+        elif plan == "ratshape":           # one battle, each kind once (narrow and wide targets, a lone man)
+            assert len(b) == 1 and [l["kind"] for l in b[0]] == [x[0] for x in up.RATSHAPE_LANES]
         else:
             assert len(b) == 2 and sorted(l["kind"] for l in b[0]) == sorted(l["kind"] for l in b[1])
             # every kind in two lane places

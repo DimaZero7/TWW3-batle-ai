@@ -617,6 +617,30 @@ def test_the_front_rank_takes_most_flat_bullets_and_few_arrows():
     assert 0.6 <= f_gun <= 1.0 and 0.0 <= f_bow <= 0.45 and f_bow < f_gun, (f_gun, f_bow)
 
 
+def test_a_narrow_column_catches_only_the_shots_across_its_span():
+    # missile.accuracy.width (missile.width_capture): the Ratling Gun 100 m off a swordsmen column 6 m wide misses
+    # across more often than a 30 m front (the same men deeper); side on, the 6 m column is a wide target again;
+    # a span of one man is the lone man's erf
+    from tools.nn.sim import missile
+    st = face_off(SWORD, "wh2_dlc12_skv_inf_ratling_gun_0", gap=100.0)
+    H = st.N // 2
+    sp = P.sim["formation"]["spacing_m"]
+    u = st.u
+    pw = geometry.pairwise(u, sp)
+    sig = torch.full_like(pw["dist"], 1.6)
+    rx = u["radius"][:, None, :].expand_as(sig)
+    wide = float(missile.width_capture(u, pw, sig, rx, P)[0, H, 0])
+    pw6 = dict(pw, front=torch.full_like(pw["front"], 6.0))
+    narrow = float(missile.width_capture(u, pw6, sig, rx, P)[0, H, 0])
+    side = float(missile.width_capture(u, dict(pw6, depth=torch.full_like(pw["depth"], 48.0),
+                                               rel_j=torch.full_like(pw["rel_j"], math.pi / 2)), sig, rx, P)[0, H, 0])
+    one = float(missile.width_capture(u, dict(pw, front=u["sp_h"].clone()), sig, rx, P)[0, H, 0])
+    assert 0.9 < wide <= 1.0 and narrow < 0.9 * wide and side > 0.95
+    assert one == pytest.approx(math.erf(0.65 / (math.sqrt(2) * 1.6)), rel=0.02)
+    assert missile.width_capture(u, pw, sig, rx, P.with_cal("missile", accuracy={**P.sim["missile"]["accuracy"],
+                                                                                    "width": False})) is None
+
+
 # --- C1: shattering by the database's thresholds ---
 
 class TestShatter:

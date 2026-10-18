@@ -18,6 +18,8 @@ Monks, the Plague Censer Bearers, the Wolf Rats (plain and poisoned) and the Hal
   ratform   the gun on formations (sim 1.43 of the game where lone men are ~1.0): the gun 100 m off at swordsmen
             (shield 35 %) facing / their backs to it and at flagellants (no shield, armour 0), at flagellants 60 m; handguns
             the same at clanrats (shield) and skavenslaves (none) (RATFORM_LANES) - 1 battle of 7 lanes, RATFORM_S. Measures: as ratling;
+  ratshape  the shape of the gun's spread: the gun 100 m off at swordsmen 6 / 12 / 30 m wide and a lone Gold Wizard
+            (RATSHAPE_LANES) - 1 battle of 6 lanes, RATSHAPE_S. Measures: as ratling;
   suppress  suppressing fire (R2): swordsmen attack the gun from SUPPRESS_GAP m at a walk / at a run, the gun aimed at them
             (fire at will, its skirmish mode off) or silent (never ordered: the control); the swordsmen's speed under fire and
             without, their card speed - 2 battles of 4 lanes (the gun fires on in melee: the phase never ends there);
@@ -88,6 +90,13 @@ RATFORM_LANES = (("f_swords", RATLING, "swords", 100, "hold"), ("b_swords", RATL
                  ("hg_f_clanrat", "hgun", "clanrat", 100, "hold"), ("hg_b_clanrat", "hgun", "clanrat", 100, "rear"),
                  ("hg_f_slave", "hgun", "slave", 100, "hold"))
 RATFORM_S = 200
+# the ratshape plan: the shape of the gun's spread (its formation / lone ratio is ~1.3x the game's in the model: wider in
+# height than across?): the gun 100 m off at swordsmen 6 / 12 / 30 m wide (4 / 8 / 20 files, the same men deeper) and a
+# lone Gold Wizard - a narrow column catches the lateral spread's middle only, a wide front all of it, both the same
+# height; (kind, target, width m); 1 battle
+RATSHAPE_LANES = (("w6", "swords", 6), ("w6b", "swords", 6), ("w12", "swords", 12), ("w12b", "swords", 12),
+                  ("w30", "swords", 30), ("lone", "goldwiz", 5))
+RATSHAPE_S = 60
 SUPPRESS_GAP = 120
 SUPPRESS2_STOP = {"walk_stop25": (True, 25), "run_stop15": (False, 15)}     # kind -> (walk, the gun silent after s)
 HITSLOW_SHOOTERS = ("hgun", "xbow")      # the hitslow plan's shooters (no contact effect): handguns flat, bolts arcing
@@ -146,6 +155,9 @@ def battles(plan):
     if plan == "ratform":
         return [_placed([cp.lane(a, t, "shoot", mode, gap_m=gap, fight_s=RATFORM_S, max_s=RATFORM_S, answer=False,
                                  kind=kind, **FX) for kind, a, t, gap, mode in RATFORM_LANES], 0)]
+    if plan == "ratshape":
+        return [_placed([cp.lane(RATLING, t, "shoot", "hold", gap_m=100, fight_s=RATSHAPE_S, max_s=RATSHAPE_S,
+                                 answer=False, kind=kind, t_w=w, **FX) for kind, t, w in RATSHAPE_LANES], 0)]
     if plan == "suppress":
         def s(kind, walk, fire):
             return cp.lane("swords", RATLING, "attack_walk" if walk else "attack_run", "skirmish" if fire else "hold",
@@ -564,7 +576,7 @@ def ratcover_measure(lane):
     return out
 
 
-MEASURE = {"ratling": ratling_measure, "ratlord": ratling_measure, "ratcover": ratcover_measure, "ratlone": ratling_measure, "ratform": ratling_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
+MEASURE = {"ratling": ratling_measure, "ratlord": ratling_measure, "ratcover": ratcover_measure, "ratlone": ratling_measure, "ratform": ratling_measure, "ratshape": ratling_measure, "suppress": suppress_measure, "suppress2": suppress_measure,
            "hitslow": suppress_measure, "censer": censer_measure,
            "wolfrats": wolfrats_measure, "wolfpoison": wolfpoison_measure}
 
@@ -606,6 +618,7 @@ KEY = {"ratling": ("first_shot_s", "bullets_per_s", "bullets_per_man_s", "bursts
        "ratcover": ("first_shot_s", "bullets", "hp_per_bullet", "e_hp_per_bullet", "tg_hp_per_s"),
        "ratlone": ("first_shot_s", "bullets", "hp_per_bullet", "tg_hp_per_s", "tg_dead"),
        "ratform": ("first_shot_s", "bullets", "hp_per_bullet", "tg_hp_per_s", "tg_dead"),
+       "ratshape": ("first_shot_s", "bullets", "hp_per_bullet", "tg_hp_per_s", "tg_dead"),
        "suppress": ("contact_s", "speed_way", "speed_way_fx", "fx_share_way", "card_speed_fx", "shots",
                     "fx_after_last_shot_s"),
        "suppress2": ("contact_s", "speed_way", "speed_way_fx", "speed_way_nofx", "fx_share_way", "shots",

@@ -273,6 +273,30 @@ def _phi(x):
     return 0.5 * (1 + torch.erf(x / math.sqrt(2)))
 
 
+def _G(z):
+    """The integral of the normal CDF: d/dz G = Phi(z) (G(z) = z Phi(z) + phi(z))."""
+    return z * _phi(z) + torch.exp(-0.5 * z * z) / math.sqrt(2 * math.pi)
+
+
+def width_capture(u, pw, sig, rx, params):
+    """[B, i, j] the share of i's shots at formation j that pass across within its span (missile.accuracy.width): the aim
+    is a random man of j, his centre uniform over the span the shooter sees (front |cos phi| + depth |sin phi|, phi off
+    j's facing: a column seen end on is narrow, the same men side on wide) less one man's spacing, the lateral offset
+    Gaussian sigma; within the span +- a body's half-width the shot meets the men's cover, outside it nobody. The span
+    a half-width a: (1 / 2a) int_{-a}^{a} [Phi((a + rx - x) / s) - Phi((-a - rx - x) / s)] dx in closed form; a -> 0 is
+    the lone man's erf(rx / (sqrt 2 s)). None with the switch off (the span taken as endless, the old reading)."""
+    if params is None or not params.sim["missile"]["accuracy"].get("width"):
+        return None
+    h = torch.where(u["sp_h"] > 0, u["sp_h"], torch.full_like(u["sp_h"], 2.0))[:, None, :]
+    seen = (pw["front"][:, None, :] * torch.cos(pw["rel_j"]).abs()
+            + pw["depth"][:, None, :] * torch.sin(pw["rel_j"]).abs())
+    a = ((seen - h) / 2).clamp(min=1e-3)
+    zo, zi = (2 * a + rx) / sig, rx / sig
+    F = sig / (2 * a) * (_G(zo) - _G(zi) - _G(-zi) + _G(-zo))
+    lone = torch.erf(rx / (math.sqrt(2) * sig))
+    return torch.maximum(F, lone).clamp(max=1.0)
+
+
 def acc_shrink(u, params):
     """[B, i, 1] how shooter i's accuracy (land_units accuracy + the projectile's marksmanship, a) narrows its spread
     sigma (missile.accuracy.shrink): "radius" - sigma x (1 - a / 100), the spread's radius cut by the percent (the
@@ -365,6 +389,9 @@ def hit_chance_plane(u, pw, ellipse=False, params=None):
     n = torch.minimum(((torch.minimum(L, D) + 2 * r) / sv).clamp(min=1.0), ranks)
     cover = 1 - (1 - (2 * rx / h).clamp(max=1.0)) ** n
     lateral = torch.maximum(cover, lat_lone)
+    span = width_capture(u, pw, sig, rx, params)
+    if span is not None:
+        lateral = torch.maximum(span * cover, lat_lone)
     along = torch.zeros_like(sig)
     q_n = 7
     for q in range(q_n):
@@ -406,6 +433,11 @@ def front_share(u, pw, params):
     n = torch.minimum(((torch.minimum(L, D) + 2 * r) / sv).clamp(min=1.0), ranks)
     cover1 = (2 * rx / h).clamp(max=1.0)
     lateral = torch.maximum(1 - (1 - cover1) ** n, lat_lone)
+    lat_first = torch.maximum(cover1, lat_lone)
+    span = width_capture(u, pw, sig, rx, params)
+    if span is not None:
+        lateral = torch.maximum(span * (1 - (1 - cover1) ** n), lat_lone)
+        lat_first = torch.maximum(span * cover1, lat_lone)
     along = torch.zeros_like(sig)
     first = torch.zeros_like(sig)
     q_n = 7
@@ -414,7 +446,7 @@ def front_share(u, pw, params):
         along = along + _phi((D + L - c - y0) / sa) - _phi((-r - c - y0) / sa)
         first = first + _phi((L + r - c - y0) / sa) - _phi((-r - c - y0) / sa)
     p_form = lateral * along / q_n
-    p_first = torch.maximum(cover1, lat_lone) * first / q_n
+    p_first = lat_first * first / q_n
     share = (p_first / p_form.clamp(min=1e-9)).clamp(0, 1)
     return torch.where((u["men0"] <= 1)[:, None, :] | (ranks <= 1.0), torch.ones_like(share), share)
 
