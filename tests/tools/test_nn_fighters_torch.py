@@ -348,6 +348,49 @@ def test_a_man_takes_at_most_k_attackers_blows():
     assert 0 < got[1][0] < 0.6 * got[0][0]
 
 
+def test_a_man_is_fought_by_at_most_k_men_and_the_rest_re_pair():
+    # lab.json melee.pairs: an enemy man is fought by at most K men at a time; a man left over takes another enemy man
+    # in reach with room, else waits (no swing, his clock stands)
+    import copy
+    for K in (1, 2):
+        # 120 swordsmen on 6 clanrats 6 m ahead: many swordsmen in reach of each clanrat
+        a = army([(SWORDS, 0, 0, 0, None)], [(CLANRATS, 0, 6.0, 180, 6)])
+        st, F = build(a)
+        u = st.u
+        N = st.N
+        lab = copy.deepcopy(hook.LAB)
+        lab["melee"]["pairs"] = K
+        permit = torch.zeros((1, N, N), dtype=torch.bool)
+        permit[0, 0, N // 2] = True
+        pw = geometry.pairwise(u, 1.5)
+        near = hook.Near(F, u, lab)
+        _, men = FM.resolve(F, u, P, lab, permit, pw, torch.zeros_like(u["men"]), 0.5, near)
+        on = F.tgt[0][F.won[0]]
+        per = torch.bincount(on, minlength=F.M)
+        assert int(per.max()) <= K and float(men[0, 0, N // 2]) == float(F.won[0].sum())
+        assert 0 < float(men[0, 0, N // 2]) <= 6 * K
+        waiting = (F.uid[0] == 0) & S.alive(F)[0] & ~F.won[0] & (F.tgt[0] >= 0)
+        if K == 1:
+            # 8 swordsmen reach the 6 clanrats: 2 wait - no swing, the clock stands
+            assert int(waiting.sum()) == 2 and not bool(F.fired[0][waiting].any())
+            assert bool((F.cd[0][waiting] == 0).all())
+        else:
+            assert not bool(waiting.any())                                    # room for all 8 (2 a clanrat)
+    # two lines front to front 2 m apart: each swordsman reaches his clanrat and the diagonals - with K = 1 nearly every
+    # front clanrat is fought by one swordsman (the leftovers re-pair to free men)
+    st, F = _melee_pair(2.0)
+    u = st.u
+    N = st.N
+    lab = copy.deepcopy(hook.LAB)
+    lab["melee"]["pairs"] = 1
+    permit = torch.zeros((1, N, N), dtype=torch.bool)
+    permit[0, 0, N // 2] = True
+    near = hook.Near(F, u, lab)
+    _, men = FM.resolve(F, u, P, lab, permit, geometry.pairwise(u, 1.5), torch.zeros_like(u["men"]), 0.5, near)
+    victims = F.tgt[0][F.won[0]]
+    assert len(set(victims.tolist())) == len(victims) >= 18
+
+
 def _resolve_once(**melee_lab):
     """One melee step of 120 swordsmen on 6 clanrats 6 m ahead (the swordsmen's unit permitted on them): (HP the
     clanrats take, swordsmen with an enemy in reach), the lab's melee section changed by melee_lab."""

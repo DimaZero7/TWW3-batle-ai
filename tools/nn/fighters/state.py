@@ -9,6 +9,7 @@ contiguous, in its slot order: unit n of battle b owns [ustart[b, n], ustart[b, 
   hp         his health (the passport's hp_per_man whole), alive = hp > 0 and a man of the unit
   cd         his attack clock, s (0: ready)
   tgt        the man he fights (an index into M, -1 none)
+  won        he fought tgt last step as one of the K men a man takes at a time (lab.json melee.pairs)
 Per unit [B, N]: flip (the formation turned about: ranks and files swapped, the game's about-face in place), b_last.
 Static: the order that groups each file of a unit (file compaction: the man behind steps up).
 
@@ -111,6 +112,7 @@ def build(st, params, seed=0, start_phase=False, M=None, L=None, splash_S=None):
                  jit_f=to(jit_f), flip=torch.zeros((B, N), dtype=torch.bool, device=dev),
                  b_last=u["b"].clone(), cd=torch.zeros((B, M), device=dev),
                  tgt=torch.full((B, M), -1, dtype=torch.long, device=dev),
+                 won=torch.zeros((B, M), dtype=torch.bool, device=dev),
                  hp=torch.zeros((B, M), device=dev), dx=torch.zeros((B, M), device=dev),
                  dz=torch.zeros((B, M), device=dev), pend=torch.zeros((B, M), device=dev),
                  sh=torch.zeros((B, N), device=dev), down=torch.zeros((B, M), device=dev), aim=torch.full((B, M), -1, dtype=torch.long, device=dev),

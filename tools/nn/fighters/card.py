@@ -46,6 +46,7 @@ def records(d, settle=0):
     (men's worth, copy mean), sim men lost, game melee share, game rout begun, sim routs begun (copy mean), hp a man,
     two-handed (greatswords), key index; and the contact seconds [m, 3]: game m, sim m share, valid."""
     T = d["g_men"].shape[0]
+    J = max(globals()["J"], d["sim_hp"].shape[1] - 1)   # the window's seconds counted: 9 for H = 10, H - 1 for longer
     s = d["starts"]
     ok_w = s + J < T
     s = s[ok_w]

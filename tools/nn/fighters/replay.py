@@ -18,10 +18,10 @@ from tools import config as project
 
 
 def run(runs, out, rect=False, copies=4, device="cpu", chunk=12, seed=0, log=print, sets=(), places=False,
-        geometry=False, lab=(), shape_log=False, churn=False):
+        geometry=False, lab=(), shape_log=False, churn=False, H=10):
     from tools.nn.sim import stepreplay
     if rect:
-        stepreplay.run(runs, out, H=10, copies=copies, device=device, chunk=chunk, workers=1, log=log, sets=sets)
+        stepreplay.run(runs, out, H=H, copies=copies, device=device, chunk=chunk, workers=1, log=log, sets=sets)
         return
     from tools.nn.fighters import hook
     orig = stepreplay._params
@@ -65,10 +65,10 @@ def run(runs, out, rect=False, copies=4, device="cpu", chunk=12, seed=0, log=pri
             if places:
                 from tools.nn.fighters.places import installed as places_installed
                 with places_installed():
-                    stepreplay.run(runs, out, H=10, copies=copies, device=device, chunk=chunk, workers=1, log=log,
+                    stepreplay.run(runs, out, H=H, copies=copies, device=device, chunk=chunk, workers=1, log=log,
                                    sets=sets)
             else:
-                stepreplay.run(runs, out, H=10, copies=copies, device=device, chunk=chunk, workers=1, log=log,
+                stepreplay.run(runs, out, H=H, copies=copies, device=device, chunk=chunk, workers=1, log=log,
                                sets=sets)
             log(f"projectiles traced {h.stats['traced']:.0f} of {h.stats['wanted']:.0f}")
             if places and h.on_reset is not None:
@@ -239,6 +239,7 @@ def main(argv=None):
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--set", action="append", default=[], help="section.key=json over config/nn/sim.json (stepreplay)")
     ap.add_argument("--places", action="store_true", help="each window from the game's recorded soldiers' places")
+    ap.add_argument("--H", type=int, default=10, help="the window, s (the step replay's H)")
     ap.add_argument("--geometry", action="store_true", help="the lab's men-in-reach geometry (soldiersdata.geometry)")
     ap.add_argument("--lab", action="append", default=[], help="section.key=json over tools/nn/fighters/lab.json")
     ap.add_argument("--shape-log", action="store_true",
@@ -253,7 +254,7 @@ def main(argv=None):
         names = names[:a.limit]
     runs = [project.BUILD / "nn-arena" / "runs" / n for n in names]
     run(runs, a.out, rect=a.rect, copies=a.copies, device=a.device, chunk=a.chunk, sets=a.set, places=a.places,
-        geometry=a.geometry, lab=a.lab, shape_log=a.shape_log, churn=a.churn)
+        geometry=a.geometry, lab=a.lab, shape_log=a.shape_log, churn=a.churn, H=a.H)
 
 
 if __name__ == "__main__":

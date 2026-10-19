@@ -23,6 +23,8 @@ His blow (CA Feature Focus #2, the database; the same formulas as the simulator'
                pursuit_rate (rout_pin_rate in its exit), a unit attacking another enemy unit_incidental /
                fresh_incidental / lord_incidental, infantry on a lord also fought by a lord lord_rival_others - a blow
                lands with that chance
+  pairs        (lab.json melee.pairs, off) an enemy man is fought by at most K men at a time (not a lone man); a man
+               left over takes another enemy man in reach with room, else waits (pair_up)
   attackers    (lab.json melee.max_attackers, off) a man takes the blows of at most K of the men fighting him
 A blow's damage goes to the man struck: beyond his health it is lost (overkill), so whole men die and wounds stay
 on the living. Returned per pair of units: the HP dealt [B, i, j] and the men striking [B, i, j]."""
@@ -124,6 +126,58 @@ def blocked_line(F, u, near, tgt, live):
     return inway.any(2) & (tgt >= 0)
 
 
+def pair_up(F, u, near, tgt, has, keep, pref_unit, up, c_live, rad, permit, combat, tether, K, repair=True):
+    """(lab.json melee.pairs) An enemy man is fought by at most K men at a time (a lone man - a lord - by any number).
+    Each victim keeps the men who fought him last step (F.won) first, then the men of units whose attack target is his
+    unit, then the nearest; a man left over takes the nearest enemy man in reach who still has room (his unit's attack
+    target counting 2 m nearer), else he waits: no swing, his clock stands (as out of reach), he stays where he is.
+    Returns (has, tgt, won) - has: the men who strike this step, tgt: whom (re-paired), won [B, M]."""
+    B, M = tgt.shape
+    dev = tgt.device
+    t_c = tgt.clamp(min=0)
+    striking = has & (tgt >= 0)
+    lone = (u["men0"] <= 1).gather(1, F.uid)                                   # [B, M] a man of a lone unit
+    capped = striking & ~lone.gather(1, t_c)
+    px, pz = near.px, near.pz
+    d0 = torch.sqrt((px.gather(1, t_c) - px) ** 2 + (pz.gather(1, t_c) - pz) ** 2)
+    won_prev = getattr(F, "won", None)
+    held = keep & won_prev if won_prev is not None else torch.zeros_like(keep)
+    own = (F.uid.gather(1, t_c) == pref_unit)
+    noise = S.rnd(F, M, 131) * 1e-3
+    key = held.float() * 1000 + own.float() * 100 - d0 + noise                   # higher first
+    count = torch.zeros((B, M), device=dev)
+    win = torch.zeros_like(striking)
+    left = capped.clone()
+    for _ in range(int(K)):
+        k_m = torch.where(left, key, torch.full_like(key, -1e9))
+        best = torch.full((B, M), -1e9, device=dev).scatter_reduce(1, t_c, k_m, "amax", include_self=True)
+        w = left & (k_m >= best.gather(1, t_c))
+        win = win | w
+        left = left & ~w
+        count = count.scatter_add(1, t_c, w.float())
+    # the men left over: the nearest enemy man in reach who still has room (the scan of the step over the men with
+    # room), two of them on one man - the one with the higher key (his unit's target, nearer) has him; K rounds
+    tgt_out = tgt
+    none = torch.full_like(tgt, -1)
+    for r in range(int(K) if repair else 0):
+        room = (count < K) | lone
+        _, got, new_v, _, _ = SC.melee_scan(near, up & left, c_live & room, F.uid, u["side"], rad, permit, none,
+                                            pref_unit, combat, tether)
+        got = got & left
+        nv = new_v.clamp(min=0)
+        d2 = torch.sqrt((px.gather(1, nv) - px) ** 2 + (pz.gather(1, nv) - pz) ** 2)
+        own2 = F.uid.gather(1, nv) == pref_unit
+        key2 = torch.where(got, own2.float() * 100 - d2 + S.rnd(F, M, 133 + r) * 1e-3, torch.full_like(d2, -1e9))
+        best2 = torch.full((B, M), -1e9, device=dev).scatter_reduce(1, nv, key2, "amax", include_self=True)
+        w2 = got & (key2 >= best2.gather(1, nv))
+        win = win | w2
+        left = left & ~w2
+        tgt_out = torch.where(w2, nv, tgt_out)
+        count = count.scatter_add(1, nv, w2.float())
+    has_out = (has & ~(striking & ~lone.gather(1, t_c))) | win
+    return has_out, tgt_out, win
+
+
 def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
     """One step of melee (module docstring). near: the neighbour pass of this step (hook.Near). Sets F.tgt (the man
     each fights), F.eng (the enemy man each closes on: within reach + the tether), F.pend (+ the HP each man takes);
@@ -157,6 +211,11 @@ def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
         # fights (a body within its radius of the line between them): a second rank in reach does not strike past its
         # front rank; he keeps his target and waits (his clock stands, as out of reach)
         has = has & ~blocked_line(F, u, near, tgt, live)
+    K_pair = lab["melee"].get("pairs")
+    if K_pair:
+        # (lab.json melee.pairs) an enemy man is fought by at most K men at a time; the rest re-pair or wait
+        has, tgt, F.won = pair_up(F, u, near, tgt, has, keep, pref_unit, up, c_live, rad, permit, combat, tether,
+                                  K_pair, lab["melee"].get("pairs_repair", True))
     # the clock
     if lab["melee"].get("cooldown_in_reach_only", True):
         F.cd = torch.where(has, F.cd - dt, F.cd)

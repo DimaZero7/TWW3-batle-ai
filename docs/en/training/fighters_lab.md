@@ -19,6 +19,10 @@ game are the men than the rectangle, and what do they cost. Training with the me
   interval" expects 76 and "a miss of 0.5 s" 167. One on one in the probes the damage now meets the game with no fit; in
   whole battles 1.37 of the game (with the share 0.35: 1.20), on thinned units 0.95 (was 0.85). The whole battles'
   surplus - probably the first blow of every new clash, open.
+- **Mobs: the rule "at most two on one" is there but off.** Mobs of 3+ units are the lab's excess (1.46 of the game;
+  the rectangle 1.10). The rule `melee.pairs` 2 (an enemy man in a formation struck by at most two at a time) gives 1.18,
+  routs 1.09 -> 1.00, but men killed per health 0.72 -> 0.48 and the step +33 % - off until the user decides (below,
+  "Mobs").
 - **The knock-down** is one mechanism - "a blow of mass or force -> the man is thrown / down, lies" - spells today;
   charges and monsters will use it. A probe battle in the game (the men's places every 0.1 s) confirmed: knocked men
   do not die lying, a knocked unit hardly strikes; the throw has a median of 3 m. But the men's share thrown is 2-5x
@@ -75,6 +79,11 @@ below, "The attack clock"); it runs only while an enemy is in reach (the
 first blow is at once, a return to the fight brings no new burst - the `recontact` probe). The unit's rules stay: a
 holding formation strikes at 0.5, a router is struck at 0.43 and so on (a blow lands with that chance).
 
+**At most two on one** (`lab.json` `melee.pairs`: `null` by default - off; on - `--lab melee.pairs=2`). An enemy man is
+struck by at most two men at a time (a lone man - a lord - by any number). He keeps first those who struck him last step, then the men of units whose order target is his
+unit, then the nearest. A man left over takes the nearest enemy in reach who has room (`pairs_repair`); if there is
+none he waits: no swing, his attack clock stands. Source - below, "Mobs: at most two on one".
+
 **Missiles** (`missile.py`). How many shots and when - the simulator (volleys, reload, aim). The shots are loosed by
 the unit's living men. Each aims at his own target man (keeps him while he lives - the simulator's `missile.reaim`), the
 projectile lands with the database's spread (calibration area, accuracy), flies below head height over its last h / tan
@@ -126,6 +135,7 @@ Spells call it today (each projectile of Searing Doom and Warp Lightning lands a
 | Knocked / lying | 7 / 3.5 m/s; 1.0-2.7 s | database |
 | Throw | median 3.0 m (p10-p90 2.3-6.0) | measured: the knock probe battle, below |
 | Beasts fight free | an ellipse body, no missile weapon | a rule by the body (the database does not say who attacks how); measured: the wolf rats' probes, below |
+| Men striking one enemy at a time | as many as reach him; the rule "at most 2" (`melee.pairs`) is off | the game's records: the damage on the 'own target' follows the striker-enemy pairs with two an enemy, flat for any crowd; the database has a "second attacker on the same target" (`melee_secondary_attack_probability`), no third; below, "Mobs" |
 
 Every lab number with its reason: `tools/nn/fighters/lab.json`.
 
@@ -244,7 +254,36 @@ The lab from the game's places: 21 / 25 / 31 - 1.15 / 1.24 / 1.46 of the game.
 
 The side of a blow does not explain the mêlées (the melee probes are the same under any rule: steady 1.01). The
 'other target' share takes more than half the rest: in the lab it is the lab's own number `melee.unit_incidental` 0.45
-(`lab.json`, with its source); the rectangle's `contact.unit_incidental` stays 1. The rest in big mêlées (3+ units: 1.33) is open.
+(`lab.json`, with its source); the rectangle's `contact.unit_incidental` stays 1. The rest of the big mêlées goes with
+the rule "at most two on one" (below), but it is off.
+
+**Mobs: at most two on one** (`melee.pairs`, off by default). The excess is the lab's alone: the rectangle on the same 2 battles from
+the places (`build/agent-mobs/rect`) gives 1 / 2 / 3+ units 1.07 / 0.95 / 1.10, the lab without the rule 1.28 / 1.16 /
+1.46. The game's records (the same 2 battles, victim-seconds where every striker's unit has the victim as its order
+target): the damage over one striker's formula for every enemy man in reach falls 0.85 -> 0.44 as the strikers per
+man struck rise 1.3 -> 4.6. Over the formula times the disjoint striker-enemy pairs (each enemy with at most two
+strikers, the largest matching within the reach of 3.15 m) it is flat: 0.61-0.69 (with one an enemy 0.79-1.05). The lab
+without the rule grows with the crowd: 1.5 -> 2.4 of the same pairs. So in the game extra strikers on one enemy add no
+damage. The database has a "second attacker on the same target" (`melee_secondary_attack_probability` 1 - he may always
+strike), no third. Replay of 2 battles from the places (`build/agent-mobs`), lab / game (the default is the first row, the rule off):
+
+| Variant | Damage, whole units | 1 / 2 / 3+ units | Men killed per health lost | Routs |
+|---|---|---|---|---|
+| No rule (default) | 1.16 | 1.28 / 1.16 / 1.46 | 0.72 | 1.09 |
+| At most 1 an enemy | - | 0.92 / 0.79 / 0.92 | 0.33 | 0.97 |
+| **At most 2** | **0.99** | **1.12 / 0.97 / 1.18** | 0.48 | **1.00** |
+| At most 3 | 1.06 | 1.18 / 1.07 / 1.31 | 0.55 | 1.05 |
+| At most 2, a leftover does not look for another enemy | 0.84 | 0.95 / 0.85 / 1.00 | 0.51 | 0.97 |
+
+With the rule the mobs of 3+ units are as 1 unit (1.18 and 1.12); the rest ~1.1 is common to the 'own target' (1.29, without the rule
+1.53; 'other' 0.58). Step replay itS26_15 (10 battles, the lab's own places): melee damage 1.15 -> 1.08, routs 1.03 ->
+0.97. Melee probes (53 lanes with the crowd's): target HP 0-1 / 0-5 / 5-15 s / steady 1.45 / 1.13 / 0.80 / 0.98 ->
+1.25 / 1.03 / 0.80 / 0.98, the per-lane error lower in every window; the target's men killed 0-10 s 1.33 -> 1.04.
+**Worse:** men killed per health lost in whole battles 0.72 -> 0.48 (itS26_15 0.91 -> 0.71) and the attacker's men
+killed in the probes 0-10 s 0.80 -> 0.56: the blows land on more men while the game concentrates them. This and the
+old shortfall of the killed (0.72 without the rule, 30 s windows too) are one open question: how the game concentrates
+the blows on fewer men. The rule is off until the user decides: men killed per health lost in whole battles fall (0.72 -> 0.48 of the game, and morale counts the killed), the lab step costs 33 % more, K is chosen partly by the result, and the crowd probe found no cap on attackers (the `crowd` probe: a handful of
+rats surrounded die from 3.6-5.5 strikers a rat). The lab's step with the rule: 1024 battles 21.1 -> 28.1 ms.
 
 **Where the mobs' rest sits** (the replay of the same 2 battles from the places, `build/night_mob`):
 
@@ -278,7 +317,9 @@ more on the flanks; places and health every 0.1 s; `python -m tools.nn.fighters.
 
 There is no cap on how many strike one man: 5 surrounded rats (2.8 within reach) lose 14 HP/s a rat - 5.5 strikers'
 blows by the formula; "each man struck takes at most K" fits for no K <= 5. The lab on these lanes is within the game's
-noise (sum 0.95-1.06). So the mobs of 3+ units are not a crowd mechanic.
+noise (sum 0.95-1.06). These are the first seconds and a handful of enemies surrounded, every side of each open; in a
+formation (whole battles) extra strikers add no damage - the rule "at most two on one" (above, off). With it the crowd lanes
+are about the same: target HP sum 0-1 / 0-5 / 5-15 / 15-30 s 1.97 / 1.39 / 0.63 / 1.29 -> 1.50 / 1.22 / 0.67 / 1.23.
 
 **Where the whole battles' excess is** (the replay of the 2 battles from the places, the victim unit's seconds, lab /
 game damage), by whose strikers:
@@ -487,7 +528,9 @@ agent - up to +-20 %):
 | 256 | 5.9 | 13.7 | 0.33 GB |
 | 1024 | 9.3-12 | 20.5 | 1.1 GB |
 
-The men's step is 1.7-2.8 simulator steps. How it got there (ms a step, 256 / 1024 battles):
+The men's step is 1.7-2.8 simulator steps. The rule "at most two on one", if switched on (`melee.pairs` 2: two rounds of the
+share-out and two searches for a free enemy a step), costs +33 %: 1024 battles 21.1 -> 28.1 ms a step (80 steps, the card free).
+How it got there (ms a step, 256 / 1024 battles):
 
 | Step | 256 | 1024 | Memory, 256 / 1024 |
 |---|---|---|---|
@@ -607,11 +650,10 @@ x 4 copies ran in a container of 10 GB (`DOCK_MEM=10g`).
 
 ## Not there
 
-- The damage in whole battles: the men of units striking their order target deal 1.6 of the game, those striking an
-  "other" enemy 0.5 (already in the first second from the game's places); hence the mobs of 3+ units 1.33 and the free
-  rats' surplus. In the probes (and in a crowd) as in the game. The mechanism is not found ("Where the whole battles'
-  excess is", above): the lab has as many men in reach as the game, and the game's damage grows with its men reached,
-  not with the strikers; a rule that gives this without spoiling the killed per health is open.
+- The damage in whole battles: mobs of 3+ units 1.46 of the game (1 unit 1.28); the men of units striking their order
+  target deal 1.5-1.6 of the game, an "other" enemy 0.6. The rule "at most two on one" (`melee.pairs`, off) gives 1.18 /
+  1.12 and ~1.3 for the 'own target', but spreads the blows: men killed per health lost 0.72 -> 0.48 of the game. How the
+  game concentrates the blows on fewer men is open; whether to switch the rule on depends on the answer.
 - The short killed per health of wounded units (0.78-0.84 after the window's 5 s): the men's turnover does not explain
   it (still in reach 3 s later 0.80 against the game's 0.82, "Killed per health: the window reset and the men's
   turnover"), the cause is open.
@@ -645,6 +687,10 @@ x 4 copies ran in a container of 10 GB (`DOCK_MEM=10g`).
   of 92 battles: melee damage 0.89 -> 0.84, on thinned units 1.03 -> 0.95, men killed per health 0.86 -> 0.67, routs
   0.97 -> 0.98. The rectangle's other rules (the wave, the first strike, the wounded pool) were fitted to the old clock;
   swapping the clock alone breaks them.
+- **At most two on one, no search for another enemy** (`--lab melee.pairs_repair=false`): a man left over waits even
+  with a free enemy near. Replay of 2 battles from the places: damage on whole units 0.84, 1 / 2 / 3+ units 0.95 / 0.85
+  / 1.00 - too little. **One on one** (`pairs` 1): 0.92 / 0.79 / 0.92, men killed per health 0.33. **Three** (`pairs`
+  3): 1.18 / 1.07 / 1.31. Of the variants two with the search is best (written in `lab.json`, but off).
 - **A man takes the blows of at most K enemies at a time** (`--lab melee.max_attackers=2`; each of the n strikers of
   one man lands with the chance K / n; not on a lone man - a lord). Melee probes: target HP 0-1 / 0-5 / 0-10 s 1.59 /
   1.40 / 1.24 -> 1.33 / 1.14 / 1.01, steady 1.07 -> 0.96, 5-15 s 0.97 -> 0.78. But the replay of 2 battles from the

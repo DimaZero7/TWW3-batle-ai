@@ -136,6 +136,12 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
     the formula expects.
 - **Secondary attacker.** `melee_secondary_attack_probability` 1: a second attacker on the same
   target is always allowed to strike. WH2 description · [twwstats kv][tws] · medium.
+  - Ours (the fighters lab, `lab.json` `melee.pairs`, off until the user decides): the rule "an enemy man in a formation
+    is struck by at most two at a time" - the first and the second attacker, the key names no third; a man left over takes
+    another enemy near or waits. Mobs of 3+ units 1.46 -> 1.18 of the game, but men killed per health 0.72 -> 0.48. The
+    records of 2 exam battles with the soldiers' places: a unit's damage follows the striker-enemy pairs with two an
+    enemy (0.61-0.69 of the formula at 1.3-4.6 strikers per man struck), not the number of strikers (0.85 -> 0.44)
+    ([the lab](../../training/fighters_lab.md)). Not a lone man (a lord): he has his own cap (`contact.lord_max_attackers` 6.5).
 - **A pile at one side of the target.** In the recordings (all fair battles) an enemy formation struck by two of ours
   standing in each other (centres within 8 m) loses 26.5 HP/s - as from one (26.9); two apart 32.5; three 29.0 in a
   pile / 39.4 apart. A side of the target holds as many men as it has room for. Ours: the units striking a target
