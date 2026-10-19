@@ -42,6 +42,13 @@ c = h / (2 tan theta) beyond his feet; a man of height h is hit within his radiu
                  formation now (geometry.dims; the database's close spacing), so a loose or thinned unit is hit less;
                  the men are not in exact files: a projectile passing at head height over n = clamp((min(L, D) + 2r) /
                  s_v, 1, ranks) ranks meets a man with cover = 1 - (1 - min(2r / s_h, 1))^n.
+The spread's shape (missile.accuracy.spread, now "square"; the probe shots, build/shots): not a Gaussian but a uniform
+square in that plane, side^2 = calibration_area / p, p = accuracy / 100 x (calibration_distance / d)^2 x (1 - launch
+angle / 180 deg) within [0.01, 1] (square_side): the same d^2 growth far, but nearer than calibration_distance x
+sqrt(accuracy / 100) the spread stays the calibration area (crossbows at a lone man 30 m off: the game 0.35 hits a shot,
+the Gaussian 0.68, the square 0.40). The formulas above with Phi / erf replaced by the uniform's shares (_share: the
+offset uniform +-side / 2 across, +-side / (2 sin theta) along the ground); the spill and the friends' catch keep a
+Gaussian of the same variance (side / sqrt 12). "gauss": the Gaussian sigma above.
 (missile.accuracy.plane false: the older ground model, sigma = k x calibration_area x d / calibration_distance x
 sqrt(1 - accuracy / 100) with a fitted k, aimed at the feet, exact files.)
 A lone man in melee keeps hit_rate x distance factor x single_entity_in_melee (measured 0: his share is lost, sim.json single_in_melee_why); spill and
@@ -278,7 +285,44 @@ def _G(z):
     return z * _phi(z) + torch.exp(-0.5 * z * z) / math.sqrt(2 * math.pi)
 
 
-def width_capture(u, pw, sig, rx, params):
+def square_spread(params):
+    """missile.accuracy.spread "square" (the probe shots, build/shots): the spread a uniform square in the target's plane,
+    not a Gaussian (square_side); "gauss" or absent: the Gaussian sigma (acc_shrink)."""
+    return params is not None and params.sim["missile"]["accuracy"].get("spread") == "square"
+
+
+def aim_frac(params):
+    """missile.accuracy.aim_frac: the aim point's height on the man, a share of his height (0.5 or absent: his middle)."""
+    return 0.5 if params is None else float(params.sim["missile"]["accuracy"].get("aim_frac", 0.5))
+
+
+def square_side(u, d, theta):
+    """[B, i, j] the side, m, of shooter i's square spread at distance d (missile.accuracy.spread "square"): the
+    calibration AREA over p, p = accuracy / 100 x (calibration distance / d)^2 x (1 - launch angle / 180 deg) within
+    [0.01, 1] - the area grows as d^2 past the calibration distance x sqrt(accuracy / 100) and stays the calibration
+    area nearer (the probe shots: a lone Warlock Engineer ~30 m off, crossbows 0.37 hits a shot, the Gaussian 0.83)."""
+    p = (u["acc"][:, :, None] / 100 * (u["cal_dist"][:, :, None] / d) ** 2 * (1 - theta / math.pi)).clamp(0.01, 1.0)
+    return torch.sqrt(u["cal_area"].clamp(min=0)[:, :, None] / p).clamp(min=1e-3)
+
+
+def _share(lo, hi, m, w):
+    """The share of a uniform [m - w, m + w] within [lo, hi]."""
+    return ((torch.minimum(hi, m + w) - torch.maximum(lo, m - w)) / (2 * w)).clamp(0, 1)
+
+
+def _spread(u, pw_d, theta, params):
+    """(sigma, half): the Gaussian sigma across the line of fire at distance pw_d, half None; with the square spread
+    sigma its equal-variance side / sqrt 12 (for the spill and the friends' catch, which stay Gaussian) and half the
+    square's half side."""
+    if square_spread(params):
+        side = square_side(u, pw_d, theta)
+        return side / math.sqrt(12.0), side / 2
+    sig = (torch.sqrt(u["cal_area"].clamp(min=0))[:, :, None] * pw_d / u["cal_dist"].clamp(min=1.0)[:, :, None]
+           * acc_shrink(u, params)).clamp(min=1e-3)
+    return sig, None
+
+
+def width_capture(u, pw, sig, rx, params, half=None):
     """[B, i, j] the share of i's shots at formation j that pass across within its span (missile.accuracy.width): the aim
     is a random man of j, his centre uniform over the span the shooter sees (front |cos phi| + depth |sin phi|, phi off
     j's facing: a column seen end on is narrow, the same men side on wide) less one man's spacing, the lateral offset
@@ -291,6 +335,14 @@ def width_capture(u, pw, sig, rx, params):
     seen = (pw["front"][:, None, :] * torch.cos(pw["rel_j"]).abs()
             + pw["depth"][:, None, :] * torch.sin(pw["rel_j"]).abs())
     a = ((seen - h) / 2).clamp(min=1e-3)
+    if half is not None:
+        # the square spread: the lateral offset uniform +-half; the aim's centre over the span by 16 midpoints
+        A = a + rx
+        F = torch.zeros_like(A)
+        for q in range(16):
+            x = a * (2 * (q + 0.5) / 16 - 1)
+            F = F + _share(-A, A, x, half) / 16
+        return torch.maximum(F, (rx / half).clamp(max=1.0)).clamp(max=1.0)
     zo, zi = (2 * a + rx) / sig, rx / sig
     F = sig / (2 * a) * (_G(zo) - _G(zi) - _G(-zi) + _G(-zo))
     lone = torch.erf(rx / (math.sqrt(2) * sig))
@@ -367,20 +419,23 @@ def hit_chance_plane(u, pw, ellipse=False, params=None):
     line of fire where the formula has r across (the lone man's erf, the cover), its half-length along it elsewhere.
     params: the accuracy's cut (acc_shrink; None: the area's)."""
     d = pw["dist"].clamp(min=5.0)
-    shrink = acc_shrink(u, params)
-    sig = (torch.sqrt(u["cal_area"].clamp(min=0))[:, :, None] * d / u["cal_dist"].clamp(min=1.0)[:, :, None]
-           * shrink).clamp(min=1e-3)
     v = u["muzzle_v"].clamp(min=1.0)[:, :, None]
     theta = (0.5 * torch.asin((d * 9.81 / (v * v)).clamp(max=1.0))).clamp(min=1e-3)
+    sig, half = _spread(u, d, theta, params)
     L = u["height"][:, None, :] / torch.tan(theta)
     sa = sig / torch.sin(theta)                      # the spread along the line, on the ground
-    c = 0.5 * L                                      # the aim point (a man's middle) beyond his feet
+    c = aim_frac(params) * L                         # the aim point (a man's middle) beyond his feet
     if ellipse:
         rx, r = body_radii(u, pw)                    # across the line of fire, along it
     else:
         rx = r = u["radius"][:, None, :]
-    lat_lone = torch.erf(rx / (math.sqrt(2) * sig))
-    p_lone = lat_lone * (_phi((L + r - c) / sa) - _phi((-r - c) / sa))
+    if half is not None:                             # the square spread: uniform +-half across, +-ha along the ground
+        ha = half / torch.sin(theta)
+        lat_lone = (rx / half).clamp(max=1.0)
+        p_lone = lat_lone * _share(-r, L + r, c, ha)
+    else:
+        lat_lone = torch.erf(rx / (math.sqrt(2) * sig))
+        p_lone = lat_lone * (_phi((L + r - c) / sa) - _phi((-r - c) / sa))
     h = torch.where(u["sp_h"] > 0, u["sp_h"], torch.full_like(u["sp_h"], 2.0))[:, None, :]
     sv = torch.where(u["sp_v"] > 0, u["sp_v"], torch.full_like(u["sp_v"], 2.0))[:, None, :]
     depth = pw["depth"][:, None, :]
@@ -389,14 +444,17 @@ def hit_chance_plane(u, pw, ellipse=False, params=None):
     n = torch.minimum(((torch.minimum(L, D) + 2 * r) / sv).clamp(min=1.0), ranks)
     cover = 1 - (1 - (2 * rx / h).clamp(max=1.0)) ** n
     lateral = torch.maximum(cover, lat_lone)
-    span = width_capture(u, pw, sig, rx, params)
+    span = width_capture(u, pw, sig, rx, params, half=half)
     if span is not None:
         lateral = torch.maximum(span * cover, lat_lone)
     along = torch.zeros_like(sig)
     q_n = 7
     for q in range(q_n):
         y0 = D * (q + 0.5) / q_n
-        along = along + _phi((D + L - c - y0) / sa) - _phi((-r - c - y0) / sa)
+        if half is not None:
+            along = along + _share(-r, D + L, y0 + c, ha)
+        else:
+            along = along + _phi((D + L - c - y0) / sa) - _phi((-r - c - y0) / sa)
     p_form = lateral * along / q_n
     return torch.where((u["men0"] <= 1)[:, None, :], p_lone, p_form).clamp(0, 1)
 
@@ -412,19 +470,21 @@ def front_share(u, pw, params):
     path L) spreads over the depth (the thin probe's even spread of arrows); a flat bullet's L of 37-61 m puts most
     of its hits on the front rank. 1 for a lone man."""
     d = pw["dist"].clamp(min=5.0)
-    shrink = acc_shrink(u, params)
-    sig = (torch.sqrt(u["cal_area"].clamp(min=0))[:, :, None] * d / u["cal_dist"].clamp(min=1.0)[:, :, None]
-           * shrink).clamp(min=1e-3)
     v = u["muzzle_v"].clamp(min=1.0)[:, :, None]
     theta = (0.5 * torch.asin((d * 9.81 / (v * v)).clamp(max=1.0))).clamp(min=1e-3)
+    sig, half = _spread(u, d, theta, params)
     L = u["height"][:, None, :] / torch.tan(theta)
     sa = sig / torch.sin(theta)
-    c = 0.5 * L
+    c = aim_frac(params) * L
     if params.sim["missile"].get("body_ellipse"):
         rx, r = body_radii(u, pw)
     else:
         rx = r = u["radius"][:, None, :]
-    lat_lone = torch.erf(rx / (math.sqrt(2) * sig))
+    if half is not None:
+        ha = half / torch.sin(theta)
+        lat_lone = (rx / half).clamp(max=1.0)
+    else:
+        lat_lone = torch.erf(rx / (math.sqrt(2) * sig))
     h = torch.where(u["sp_h"] > 0, u["sp_h"], torch.full_like(u["sp_h"], 2.0))[:, None, :]
     sv = torch.where(u["sp_v"] > 0, u["sp_v"], torch.full_like(u["sp_v"], 2.0))[:, None, :]
     depth = pw["depth"][:, None, :]
@@ -434,7 +494,7 @@ def front_share(u, pw, params):
     cover1 = (2 * rx / h).clamp(max=1.0)
     lateral = torch.maximum(1 - (1 - cover1) ** n, lat_lone)
     lat_first = torch.maximum(cover1, lat_lone)
-    span = width_capture(u, pw, sig, rx, params)
+    span = width_capture(u, pw, sig, rx, params, half=half)
     if span is not None:
         lateral = torch.maximum(span * (1 - (1 - cover1) ** n), lat_lone)
         lat_first = torch.maximum(span * cover1, lat_lone)
@@ -443,8 +503,12 @@ def front_share(u, pw, params):
     q_n = 7
     for q in range(q_n):
         y0 = D * (q + 0.5) / q_n
-        along = along + _phi((D + L - c - y0) / sa) - _phi((-r - c - y0) / sa)
-        first = first + _phi((L + r - c - y0) / sa) - _phi((-r - c - y0) / sa)
+        if half is not None:
+            along = along + _share(-r, D + L, y0 + c, ha)
+            first = first + _share(-r, L + r, y0 + c, ha)
+        else:
+            along = along + _phi((D + L - c - y0) / sa) - _phi((-r - c - y0) / sa)
+            first = first + _phi((L + r - c - y0) / sa) - _phi((-r - c - y0) / sa)
     p_form = lateral * along / q_n
     p_first = lat_first * first / q_n
     share = (p_first / p_form.clamp(min=1e-9)).clamp(0, 1)
@@ -515,16 +579,14 @@ def spill_geometry(u, pw, target, params):
     tj = t[:, :, None]
     d_ij = pw["dist"].gather(2, tj).clamp(min=5.0)                          # [B, i, 1]
     th_ij = pw["theta"].gather(2, tj)                                       # bearing i -> j
-    shrink = acc_shrink(u, params)
-    sig = (torch.sqrt(u["cal_area"].clamp(min=0))[:, :, None] * d_ij / u["cal_dist"].clamp(min=1.0)[:, :, None]
-           * shrink).clamp(min=1e-3)
     v0 = u["muzzle_v"].clamp(min=1.0)[:, :, None]
     theta = (0.5 * torch.asin((d_ij * 9.81 / (v0 * v0)).clamp(max=1.0))).clamp(min=1e-3)
+    sig, _ = _spread(u, d_ij, theta, params)        # (the square spread: its equal-variance Gaussian here)
     sa = sig / torch.sin(theta)
     r = u["radius"][:, None, :]                                             # [B, 1, k]
     Lk = u["height"][:, None, :] / torch.tan(theta)                         # [B, i, k]
     Lj = Lk.gather(2, tj)
-    c = 0.5 * Lj
+    c = aim_frac(params) * Lj
     # each formation in shooter i's line-of-fire frame (along +: away from i; across)
     xj, zj = u["x"].gather(1, t)[:, :, None], u["z"].gather(1, t)[:, :, None]
     ex, ez = torch.sin(th_ij), torch.cos(th_ij)
@@ -696,8 +758,8 @@ def arc_lines(u, pw, target, params):
     v = u["muzzle_v"].clamp(min=1.0)[:, :, None]
     ds = (pw["depth"] / 2)[:, :, None]                             # the shooter's half depth
     dt_ = pw["depth"].gather(1, t)[:, :, None] / 2                 # the target's half depth
-    sig = (torch.sqrt(u["cal_area"].clamp(min=0))[:, :, None] * dist / u["cal_dist"].clamp(min=1.0)[:, :, None]
-           * acc_shrink(u, params)).clamp(min=1e-3)
+    th_d = (0.5 * torch.asin((dist.clamp(min=5.0) * 9.81 / (v * v)).clamp(max=1.0))).clamp(min=1e-3)
+    sig, _ = _spread(u, dist, th_d, params)         # (the square spread: its equal-variance Gaussian here)
     blocked = torch.zeros_like(along)
     low = torch.zeros_like(along)
     nodes = (-0.57735, 0.57735)

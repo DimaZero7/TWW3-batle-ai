@@ -550,11 +550,11 @@ class TestMissile:
     def _lone(dx, dz, own_points, pierce=False):
         """The General's HP of one Ratling Gun volley at him 130 m away (x = 0, the gun at x = -130; he faces it), an
         Empire swordsmen unit of his at (dx, dz) (None: none); spill_geometry.own_points, shield_ap_pierce as given.
-        The spread of the area reading (missile.accuracy.shrink 'area': sigma / sin(theta) 40 m, the case the
-        quadrature bug was found on; the radius reading's 33 m spread hides it less clearly)."""
+        The Gaussian spread of the area reading (missile.accuracy.spread 'gauss', shrink 'area': sigma / sin(theta) 40 m,
+        the case the quadrature bug was found on; the radius reading's 33 m spread hides it less clearly)."""
         sg = dict(P.sim["missile"]["spill_geometry"], own_points=own_points)
         params = P.with_cal("missile", spill_geometry=sg, shield_ap_pierce=pierce,
-                            accuracy=dict(P.sim["missile"]["accuracy"], shrink="area"))
+                            accuracy=dict(P.sim["missile"]["accuracy"], shrink="area", spread="gauss"))
         side1 = [("wh_main_emp_cha_general_0", 0.0, 0.0, 270, True)]
         if dx is not None:
             side1.append(("wh_main_emp_inf_swordsmen", dx, dz, 270))
@@ -923,7 +923,8 @@ class TestMissileRules:
         # the spread in the plane across the line of fire (missile.accuracy.plane; build/open_missile/spec.md S1)
         st = shooter_and([(0, 100, "wh2_main_skv_cha_warlord_0")])
         H = st.N // 2
-        p = float(missile.hit_chance(st.u, geometry.pairwise(st.u, 1.5), P)[0, 0, H])
+        gauss = P.with_cal("missile", accuracy=dict(P.sim["missile"]["accuracy"], spread="gauss"))
+        p = float(missile.hit_chance(st.u, geometry.pairwise(st.u, 1.5), gauss)[0, 0, H])
         m = P.units[ARCHER]["missile"]
         lord = P.units["wh2_main_skv_cha_warlord_0"]
         assert P.sim["missile"]["accuracy"]["shrink"] == "radius"            # the accuracy cuts the spread's radius
@@ -937,6 +938,15 @@ class TestMissileRules:
         expect = math.erf(r / (math.sqrt(2) * sig)) * (phi((L + r - c) / sa) - phi((-r - c) / sa))
         assert p == pytest.approx(expect, rel=1e-4) and 0.05 < p < 0.3
         assert "k" not in P.sim["missile"]["accuracy"]                       # no fitted number
+        # the square spread (missile.accuracy.spread 'square', the probe shots): side^2 = area / p, uniform across and
+        # along the ground (/ sin theta), the lone man's share (r / half) x his window [-r, L + r] in [c - ha, c + ha]
+        assert P.sim["missile"]["accuracy"]["spread"] == "square"
+        q = min(1.0, max(0.01, (10 + 10) / 100 * (m["calibration_distance_m"] / 100) ** 2 * (1 - th / math.pi)))
+        half = math.sqrt(m["calibration_area_m"] / q) / 2
+        ha = half / math.sin(th)
+        share = max(0.0, min(L + r, c + ha) - max(-r, c - ha)) / (2 * ha)
+        p_sq = float(missile.hit_chance(st.u, geometry.pairwise(st.u, 1.5), P)[0, 0, H])
+        assert p_sq == pytest.approx(min(1.0, r / half) * share, rel=1e-4)
 
     def test_the_spread_is_the_square_root_of_the_calibration_area(self):
         m, unit = P.units[MILITIA_K]["missile"], P.units[MILITIA_K]
@@ -948,9 +958,10 @@ class TestMissileRules:
         """missile.accuracy.shrink 'radius' (the lonerank probe: a lone Warlock Engineer under handguns / crossbows at
         rank 0 and 9, +27 accuracy - hits x1.75 / x1.87 in the game): sigma x (1 - a / 100); 'area' x sqrt(1 - a / 100)
         gave x1.43 / x1.46. A lone man's (the Warlord's) hits from rank 0 to rank 9 by each reading."""
-        area = P.with_cal("missile", accuracy=dict(P.sim["missile"]["accuracy"], shrink="area"))
+        gauss = P.with_cal("missile", accuracy=dict(P.sim["missile"]["accuracy"], spread="gauss"))
+        area = P.with_cal("missile", accuracy=dict(P.sim["missile"]["accuracy"], shrink="area", spread="gauss"))
         ratio = {}
-        for name, prm in (("radius", P), ("area", area)):
+        for name, prm in (("radius", gauss), ("area", area)):
             p = []
             for acc in (20.0, 47.0):
                 st = shooter_and([(0, 107, "wh2_main_skv_cha_warlord_0")], key="wh_main_emp_inf_handgunners")

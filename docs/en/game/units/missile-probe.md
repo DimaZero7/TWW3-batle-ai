@@ -15,7 +15,7 @@ or the target is gone. Unarmoured targets (skavenslaves for the Empire's shooter
 so a hit counts as HP lost / the rule's damage a hit (`tools/nn/measure.py` `per_hit`: armour, overkill). The
 teleport puts a unit so that the real centre distance is ~10 m more than ordered; the tables give the real one.
 
-    python -m tools.nn.missile_probe run --plan dist|arc|range|targets|shield|moving|rank
+    python -m tools.nn.missile_probe run --plan dist|arc|range|targets|shield|moving|rank|lonerank|shots
     python -m tools.nn.missile_probe report <runs...> --sim     # the game and the twin (torch, in the container)
 
 Lua: `src/entries/missile_probe.lua`, build target `missile-probe`; runs in `build/missile/probe_runs`, tables
@@ -275,6 +275,26 @@ range, 0.070 / 0.086 with the nearest enemy 0-10 m beyond, 0.050 / 0.050 at 10-2
 target beyond range, both standing, came with another enemy within range in 73-98 % of the cases (the recorded target is
 not the shot's). The full first volley beyond the rank rule is not modelled.
 
+
+## Probe `shots`: the spread near and "zeroing in"
+
+1 battle (run `build/missile-probe/runs/20261019-161711`, analysis `build/shots`), a lone Warlock Engineer (3420 HP):
+crossbows and handguns ~30 m off (centre to centre), crossbows ~100 m off twice and handguns ~140 m off; two of them get a
+new attack order on the same target after 120 / 100 s (`reorder_s`). Hits a shot = a volley's HP lost / the rule's HP a
+hit; the last volley (the target dies) is not counted.
+
+**Near, the spread does not shrink.** Crossbows at 30 m: 0.29-0.43 by volley, 0.35 over the lane. The Gaussian spread
+(sigma ~ d) expected 0.68: at 30 m it is narrower than the body. The square with a floor (side^2 = calibration area / p,
+p = accuracy / 100 x (calibration distance / d)^2 x (1 - launch angle / 180 deg), at most 1: nearer than ~0.45 of the
+calibration distance the spread is never smaller than the calibration area itself) - 0.40. Handguns at 29 m: 0.76 / 0.75
+in two whole volleys; Gaussian 0.96, square 1.0, square aimed at 0.75 of the height 0.81.
+
+**No "zeroing in".** If the spread shrank with every shot at the same target (to x0.5 the area by the 6th), volleys 5-9
+would hit 1.7-2 times the first, and a new order would bring it back to the first. Crossbows at 100 m: volleys 1-9 -
+0.09-0.17 (mean 0.125), no growth; after the new order 0.17 (not a drop, slightly higher). Handguns at 140 m: volleys
+1-7 - 0.12, after the order 0.15. Control (crossbows, no order): volleys 1-9 - 0.13, 10-18 - 0.145. The records agree:
+`lonerank` handguns, volleys 1 / 2-4 / 5-8 - 0.19 / 0.26 / 0.29; `ratlone` - the Ratling Gun's hits over its 576-bullet
+bursts flat or falling (60 m: 0.27 / 0.25 / 0.23).
 
 ## What does not match (open)
 

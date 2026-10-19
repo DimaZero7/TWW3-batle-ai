@@ -29,13 +29,21 @@ Artillery is in [artillery](artillery.md). Conventions: [index](README.md). Our 
   in Empire the key is described as "area of calibration target in square metres" (a TWC search excerpt) ·
   medium.
   - Ours: the hit comes from the database's spread model with no fitted number (`missile.hit_chance`,
-    `missile.accuracy.plane`): a shot aims at the middle of a random man of the target and lands at a Gaussian
-    offset in the plane across the line of fire at the target (like a range's target): σ = √calibration area ×
-    d / calibration distance × (1 − (accuracy + marksmanship) / 100). The area read as σ × σ is ours (the
-    1 σ circle gives an error of 0.273). Accuracy cuts the spread's **radius**, not the area as the modders write
-    (`missile.accuracy.shrink`): the `lonerank` probe - handguns and crossbows at a lone Warlock Engineer 100 m off,
-    rank 0 and 9 (+27 accuracy), ~200 hits each: hits ×1.75 / ×1.87, by the radius ×1.92 / ×2.04, by the area
-    ×1.43 / ×1.46. With it the Ratling Gun on a lone man goes 0.65-0.81 of the game → 0.87-1.14. On the ground the spread along the line is σ / sin(the angle it comes
+    `missile.accuracy.plane`): a shot aims at the middle of a random man of the target and lands in the plane across
+    the line of fire at the target (like a range's target) **uniformly over a square** (`missile.accuracy.spread`
+    "square"): side² = calibration area / p, p = (accuracy + marksmanship) / 100 × (calibration distance / d)² ×
+    (1 − launch angle / 180°), within [0.01, 1]. Past ~0.45 of the calibration distance the spread grows as d², nearer it
+    is never smaller than the calibration area itself (no more accurate near). The `shots` probe
+    ([missile probe](../units/missile-probe.md#probe-shots-the-spread-near-and-zeroing-in)): crossbows at a lone Warlock
+    Engineer 30 m off - 0.35 hits a shot, the former Gaussian spread (σ ∝ d) expected 0.68, the square 0.40; over 28
+    formation lanes the error 0.105 → 0.069, over 8 lone men 0.163 → 0.059; the Ratling Gun on formations the square
+    overshoots more than the Gaussian (0.140 → 0.184 - open). Hits do not grow shot by shot at the same target (no
+    "zeroing in", the same probe). The former Gaussian spread (`spread` "gauss"): σ = √calibration area × d / calibration
+    distance × (1 − (accuracy + marksmanship) / 100); in it accuracy cuts the spread's **radius**, not the area as the
+    modders write (`missile.accuracy.shrink`): the `lonerank` probe - handguns and crossbows at a lone Warlock Engineer
+    100 m off, rank 0 and 9 (+27 accuracy), ~200 hits each: hits ×1.75 / ×1.87, by the radius ×1.92 / ×2.04, by the area
+    ×1.43 / ×1.46 (the square with +27 gives ×2.3, with +18 ×1.9; how much accuracy a rank gives in the game the card
+    does not show - it has no accuracy; the simulator has no ranks). The Ratling Gun on a lone man 0.65-0.81 of the game → 0.87-1.14. On the ground the spread along the line is σ / sin(the angle it comes
     down at, from the muzzle velocity), the aim point lies h / (2 tan of the angle) beyond the man's feet; a man
     is hit within his radius or in his "shadow" h / tan of the angle; the men of a formation are not in exact
     files: a projectile passing over n ranks at head height meets a man with 1 − (1 − 2r / the front step)^n;

@@ -12,6 +12,8 @@
 -- move_run (a crossing, running at the shooter, running away).
 -- lane.reform_men (optional): once the target is down to that many men it is ordered to a point 5 m to its right
 -- with its starting width (goto_location_angle_width: the thinned unit re-forms), then stands.
+-- lane.reorder_s (optional): that many seconds after the go the shooter gets an attack order on its target (the same
+-- target, a new order; the aim's reset).
 -- lane.friend (optional): a unit of the shooter's side placed friend_fwd m ahead of and friend_lat m right of the
 -- shooter, facing as it does, held (the line of fire past friends); its row is sampled as 'f'. With
 -- lane.friend_engage (metres) the friend is placed that far in front of the target's centre instead, facing it, and
@@ -64,7 +66,7 @@ end
 -- config: build, speed, tick_ms, deadline_s, settle_ms, lanes = {{name, shooter, target, x, z, s_b, d, t_angle,
 -- t_rot, s_width, t_width, mode, target_mode, start_d, step_m, step_s, move_fwd, move_lat, move_run, max_s,
 -- idle_s, settle_s, s_move_fwd, s_move_lat, s_move_run, friend, friend_fwd, friend_lat, friend_width,
--- friend_engage}}, park = {{name, x, z, bearing}}. globals: common, battle_vector.
+-- friend_engage, reorder_s}}, park = {{name, x, z, bearing}}. globals: common, battle_vector.
 function M.main(bm, config, globals)
     if _G.tww3_bai_missile_probe then return end
     local state = {active = false, finished = false, batch = '', run_id = 'bootstrap', units = {}, lanes = {}}
@@ -158,6 +160,12 @@ function M.main(bm, config, globals)
                     lane.d = lane.d - lane.step_m
                     local L = M.layout(lane, lane.d)
                     place(lane.t, L.tx, L.tz, L.tb, lane.t_width)
+                end
+                -- lane.reorder_s: a new attack order on the same target that many seconds after the go (a new order)
+                if lane.reorder_s and not lane.reordered and now - lane.t0 >= lane.reorder_s * 1000 then
+                    lane.reordered = now
+                    orders.attack_ranged(lane.s.uc, lane.t.unit, false, true)
+                    emit('probe_reorder', {lane = lane.name, t = now - lane.t0})
                 end
                 if lane.reform_men and not lane.reformed and t.men and t.men <= lane.reform_men and t.x then
                     lane.reformed = now

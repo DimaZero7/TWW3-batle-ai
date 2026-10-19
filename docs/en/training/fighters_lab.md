@@ -131,7 +131,7 @@ Spells call it today (each projectile of Searing Doom and Warp Lightning lands a
 | Standoff (the front rank's distance to the enemy) | 1.0 m at contact -> 2.3 m, tau 13 s | measured: soldiers' places, 48 lanes of the probes reform, reform2, damaged, dmgmelee, wave, armour - the median nearest-enemy distance of the 15 nearest men 0.98 / 1.14 / 1.32 / 1.51 / 1.91 / 2.24 / 2.26 / 2.39 m at 0-1 / 1-3 / 3-5 / 5-10 / 10-20 / 20-40 / 40-90 / 90-240 s |
 | Attack clock | a swing every interval of the passport, a miss too | CA's schema (`melee_weapons`: the interval between the starts of attack animations); measured - the `swing` probe, below |
 | Share of blows `blow_share` | 1 (was 0.35) | the old measured 0.35 = the ratio of "a swing every interval" to "a miss of 0.5 s" (p + 0.5 / interval) |
-| Spread of arrows | sigma = sqrt(calibration area) x d / distance x (1 - accuracy) (`missile.accuracy.shrink` "radius") | database, the simulator's model `missile.hit_chance_plane` |
+| Spread of arrows | as the simulator's (`missile.accuracy.spread`): a square of side sqrt(calibration area / p), p = accuracy / 100 x (distance / d)^2 x (1 - launch angle / 180 deg) within [0.01, 1], the landing point uniform over it (across the line +-side / 2, along on the ground +-side / (2 sin angle)); with "gauss" sigma = sqrt(calibration area) x d / distance x (1 - accuracy) | database, the simulator's model `missile.square_side`, the `shots` probe |
 | Knocked / lying | 7 / 3.5 m/s; 1.0-2.7 s | database |
 | Throw | median 3.0 m (p10-p90 2.3-6.0) | measured: the knock probe battle, below |
 | Beasts fight free | an ellipse body, no missile weapon | a rule by the body (the database does not say who attacks how); measured: the wolf rats' probes, below |
@@ -649,6 +649,11 @@ battles - 2 batches, 10 min with the compiling; it was 44 min in batches of 16, 
 x 4 copies ran in a container of 10 GB (`DOCK_MEM=10g`).
 
 ## Not there
+
+- With the rectangle's rule `kills.missile_front` (on) the lab loses its own projectile hits: on the `ratform` lanes HP a
+  bullet on swordsmen 1.66 → 1.30 (game 1.54), handguns on clanrats 6.83 → 4.31 (game 6.60), the dead's share 0.59 → 0.01 -
+  the rectangle's front rank (its wound pool) overrides the lab's own dead. Check the lab's shooting only with
+  `--set kills.missile_front=0` for now (`build/shots/labcmp.py`); the fix is separate.
 
 - The damage in whole battles: mobs of 3+ units 1.46 of the game (1 unit 1.28); the men of units striking their order
   target deal 1.5-1.6 of the game, an "other" enemy 0.6. The rule "at most two on one" (`melee.pairs`, off) gives 1.18 /

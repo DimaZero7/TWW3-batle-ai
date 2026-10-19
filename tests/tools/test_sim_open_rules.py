@@ -639,6 +639,33 @@ def test_a_narrow_column_catches_only_the_shots_across_its_span():
     assert one == pytest.approx(math.erf(0.65 / (math.sqrt(2) * 1.6)), rel=0.02)
     assert missile.width_capture(u, pw, sig, rx, P.with_cal("missile", accuracy={**P.sim["missile"]["accuracy"],
                                                                                     "width": False})) is None
+    # the square spread: a span of one man is the lone man's share rx / half; a wide front catches all
+    assert float(missile.width_capture(u, dict(pw, front=u["sp_h"].clone()), sig, rx, P, half=torch.full_like(sig, 2.0))
+                 [0, H, 0]) == pytest.approx(0.65 / 2.0, rel=0.02)
+    assert float(missile.width_capture(u, pw, sig, rx, P, half=torch.full_like(sig, 2.0))[0, H, 0]) > 0.95
+
+
+def test_the_square_spread_stops_shrinking_near_and_grows_as_the_distance_squared_far():
+    # missile.accuracy.spread "square" (missile.square_side; the probe shots, build/shots): side^2 = calibration area / p,
+    # p = accuracy / 100 x (calibration distance / d)^2 x (1 - launch angle / 180) within [0.01, 1]; crossbows (area 5.1,
+    # distance 120, accuracy 10 + 10): the calibration area itself nearer than ~54 m, x(d)^2 past it
+    from tools.nn.sim import missile
+    st = face_off("wh_main_emp_inf_crossbowmen", SLAVE, gap=100.0)
+    u = st.u
+    i = 0
+    theta = lambda d: 0.5 * math.asin(min(1.0, 9.81 * d / 45.0 ** 2))
+    side = lambda d: float(missile.square_side(u, torch.full((1, st.N, 1), d), torch.full((1, st.N, 1), theta(d)))[0, i, 0])
+    assert side(20.0) == pytest.approx(math.sqrt(5.1), rel=1e-3) and side(30.0) == pytest.approx(math.sqrt(5.1), rel=1e-3)
+    p100 = 0.2 * (120 / 100.0) ** 2 * (1 - math.degrees(theta(100.0)) / 180)
+    assert side(100.0) == pytest.approx(math.sqrt(5.1 / p100), rel=1e-3)
+    # the switch: the formation's hit chance comes from the square, off (gauss) it is the Gaussian's
+    sp = P.sim["formation"]["spacing_m"]
+    pw = geometry.pairwise(u, sp)
+    H = st.N // 2
+    sq = P.with_cal("missile", accuracy={**P.sim["missile"]["accuracy"], "spread": "square"})
+    ga = P.with_cal("missile", accuracy={**P.sim["missile"]["accuracy"], "spread": "gauss"})
+    p_sq, p_ga = float(missile.hit_chance(u, pw, sq)[0, 0, H]), float(missile.hit_chance(u, pw, ga)[0, 0, H])
+    assert 0.3 < p_sq < 1.0 and 0.3 < p_ga < 1.0 and abs(p_sq - p_ga) > 1e-3
 
 
 # --- C1: shattering by the database's thresholds ---

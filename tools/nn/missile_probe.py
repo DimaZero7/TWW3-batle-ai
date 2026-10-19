@@ -60,6 +60,11 @@ Plans (each battle 4-5 lanes):
            clanrat spearmen that Empire spearmen walk into melee with - from behind our men, at 45 deg, along the
            contact (90 deg) - and the same melee without fire (control) (1 battle): the fire rate, the target's and
            our men's HP lost beyond the control's.
+  lonerank handguns and crossbows rank 0 / 9 at a lone Warlock Engineer 100 m off (1 battle): how accuracy narrows
+           the spread;
+  shots    crossbows and handguns at a lone Warlock Engineer ~30 m off; crossbows ~100 m off twice and handguns ~140 m
+           off, two of them given a new attack order on the same target after reorder_s (1 battle): the spread near
+           (does it stop shrinking?) and hits a shot volley by volley (do they grow, does a new order reset them?).
 
     python -m tools.nn.missile_probe plan [--plan dist]
     python -m tools.build missile-probe --mprobe-plan dist --mprobe-battle 1   # one battle's build
@@ -119,7 +124,7 @@ SETTLE_MS = 4000
 TICK_MS = 500
 PLANS = ("dist", "arc", "range", "targets", "shield", "moving", "rank", "thin", "pistol", "moving2", "lof",
          "newdist", "starsmove", "meleefire", "hglof", "rangenew", "lofab", "lofthresh", "lofheight", "rangestand",
-         "lonerank")
+         "lonerank", "shots")
 # The game places a lane's target with its front, not its centre, at d (the recordings: centre ~9-10 m farther, the
 # skavenslaves' and the flagellants' half depth plus the shooter's own offset): plans that want a centre distance take
 # d = centre - CENTRE_OFFSET (the analysis reads the recorded places anyway).
@@ -236,6 +241,14 @@ def battles(plan):
         # the ammunition ends
         return [[lane(s, "warlock", 100, t_width=5, **({"s_rank": 9} if r else {})) for s in ("hg", "xb")
                  for r in (0, 9)]]
+    if plan == "shots":
+        # the spread's shape near and the aim's ramp-up (H2, H3; build/shots): crossbows and handguns at a lone Warlock
+        # Engineer ~30 m off centre to centre (does the spread stop shrinking near the calibration distance?), and long
+        # series at a lone man - crossbows ~100 m off twice, handguns ~140 m off - with a new attack order on the same
+        # target after reorder_s (do the hits a shot grow volley by volley, and does a new order start them again?)
+        return [[lane("xb", "warlock", 27, t_width=5), lane("hg", "warlock", 27, t_width=5),
+                 lane("xb", "warlock", 100, t_width=5, reorder_s=120), lane("hg", "warlock", 137, t_width=5, reorder_s=100),
+                 lane("xb", "warlock", 100, t_width=5)]]
     if plan == "lof":
         fr = dict(friend="spear", friend_fwd=40, friend_width=30)
         return [[lane("militia", "slave", 60, friend_lat=0, **fr), lane("militia", "slave", 60, friend_lat=15, **fr),

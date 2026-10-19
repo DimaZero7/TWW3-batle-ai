@@ -8,8 +8,9 @@ flies to one man:
                simulator's spread model, missile.hit_chance_plane: the database's calibration area and distance,
                accuracy + marksmanship; sigma = sqrt(area) x d / calibration distance x (1 - accuracy / 100), or
                x sqrt(1 - accuracy / 100) with missile.accuracy.shrink "area")
-  landing      Gaussian: sigma across the line of fire, sigma / sin(theta) along it on the ground (theta: the launch
-               angle that carries the muzzle velocity to the distance, the lower arc)
+  landing      the simulator's spread (missile.accuracy.spread): "square" - uniform +-side / 2 across the line of fire,
+               +-side / (2 sin theta) along it on the ground (sim missile.square_side); "gauss" - sigma across, sigma /
+               sin(theta) along (theta: the launch angle that carries the muzzle velocity to the distance, the lower arc)
   low path     over its last h / tan(theta) metres the projectile is below the head of a man h tall: the first man
                along the path (of any unit, friend or foe, the shooter's own excepted) whose body - a circle of his
                radius - it passes through is hit; none: a miss (lab.json missile.path_full: the whole low path searched)
@@ -107,8 +108,21 @@ def _trace(F, u, params, lab, sh, ok, target, near, live, salt=210):
     theta = (0.5 * torch.asin((d * G / (v * v)).clamp(max=1.0))).clamp(min=1e-3)
     tan = torch.tan(theta)
     h_aim = u["height"].gather(1, F.uid.gather(1, ac))
-    along = 0.5 * h_aim / tan + sig / torch.sin(theta) * S.rnorm(F, Pk, salt + 1)
-    across = sig * S.rnorm(F, Pk, salt + 2)
+    # the simulator's spread (missile.accuracy.spread, aim_frac; lab.json missile.spread / aim_frac over them for a test):
+    # the aim point's height on the man (0.5: his middle) and a Gaussian or the square spread (sim missile.square_side)
+    cfg = lab["missile"]
+    acc_cfg = params.sim["missile"]["accuracy"]
+    aim_h = float(cfg.get("aim_frac", acc_cfg.get("aim_frac", 0.5))) * h_aim / tan
+    if cfg.get("spread", acc_cfg.get("spread", "gauss")) == "square":
+        # a uniform square in the target's plane, side sqrt(calibration area / p),
+        # p = accuracy / 100 x (calibration distance / d)^2 x (1 - launch angle / 180) within [0.01, 1]
+        pq = (gu("acc") / 100 * (gu("cal_dist") / d) ** 2 * (1 - theta / math.pi)).clamp(0.01, 1.0)
+        side = torch.sqrt(gu("cal_area").clamp(min=0) / pq)
+        along = aim_h + side * (S.rnd(F, Pk, salt + 1) - 0.5) / torch.sin(theta)
+        across = side * (S.rnd(F, Pk, salt + 2) - 0.5)
+    else:
+        along = aim_h + sig / torch.sin(theta) * S.rnorm(F, Pk, salt + 1)
+        across = sig * S.rnorm(F, Pk, salt + 2)
     lx = ax + ex * along + ez * across
     lz = az + ez * along - ex * across
     # the bodies near the low path: cells round points from the landing point back towards the shooter (all
@@ -128,7 +142,9 @@ def _trace(F, u, params, lab, sh, ok, target, near, live, salt=210):
         n_pts = max(1, int(lab["missile"]["path_points"]))
     # (a man lying - knocked down - is passed over: lab.json knock.invulnerable)
     hittable = live & ~(F.down > 0) if lab.get("knock", {}).get("invulnerable", True) else live
-    who = K.path_first(near.table, int(lab["cells"]["cap"]), n_pts, px, pz, hittable, F.uid, u["radius"], u["height"],
+    # lab.json missile.proj_radius_m (the H5 test, 0: off): the projectile's own radius added to the bodies'
+    body_r = u["radius"] + float(cfg.get("proj_radius_m", 0.0))
+    who = K.path_first(near.table, int(lab["cells"]["cap"]), n_pts, px, pz, hittable, F.uid, body_r, u["height"],
                        lx, lz, ex, ez, tan, sh, ok, npts=npts)
     wc = who.clamp(min=0)
     ku = F.uid.gather(1, wc)                                                 # the struck man's unit
