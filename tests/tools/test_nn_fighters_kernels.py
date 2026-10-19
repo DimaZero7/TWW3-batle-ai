@@ -50,6 +50,25 @@ def test_path_first_triton_matches_torch():
     got = K.path_first(*args, use_triton=True, npts=npts)
     assert int((want >= 0).sum()) > 50
     assert torch.equal(got, want)
+    # the shooter's own unit passed (lab.json missile.own_pass)
+    want = K.path_first(*args, use_triton=False, npts=npts, own_pass=True)
+    got = K.path_first(*args, use_triton=True, npts=npts, own_pass=True)
+    assert torch.equal(got, want)
+    hit_own = (want >= 0) & (uid.gather(1, want.clamp(min=0)) == uid.gather(1, sh))
+    assert not bool(hit_own.any())
+
+
+def test_a_projectile_passes_the_men_of_its_own_unit():
+    # lab.json missile.own_pass: a flat bullet over its own front man (same unit) goes on to the enemy behind him
+    x, z = torch.tensor([[0.0, 0.0, 0.0]]), torch.tensor([[-2.0, 0.0, 20.0]])      # shooter, his front man, the enemy
+    valid = torch.tensor([[True, True, True]])
+    uid = torch.tensor([[0, 0, 1]])
+    table = cells.Table(x, z, valid, 3.6, 4096)
+    one = lambda v: torch.tensor([[v]])
+    args = (table, 12, 48, x, z, valid, uid, torch.tensor([[0.3, 0.3]]), torch.tensor([[1.8, 1.8]]), one(0.0),
+            one(40.0), one(0.0), one(1.0), one(0.03), torch.tensor([[0]]), torch.tensor([[True]]))
+    assert int(K.path_first(*args, use_triton=False)) == 1
+    assert int(K.path_first(*args, use_triton=False, own_pass=True)) == 2
 
 
 def test_the_whole_low_path_finds_a_man_far_behind_the_landing_point():

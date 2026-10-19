@@ -10,7 +10,8 @@ for (scenario.build while installed):
   missiles     missile.volley: the simulator's shots, loosed by the men, each projectile traced to the man it hits
                (fighters/missile.py)
   losses       morale.casualty_windows: what the step takes from each unit (the simulator's scaling - a leaver's x1.25 -
-               included) is laid on the men struck; their health, the dead
+               included) is laid on the men struck; their health, the dead. The rectangle's kill rules that cut the
+               step's HP by its own dead (kills.missile_front) are off in the men's step (own_kills)
   after the step  the unit's men and health are the men's; the men walk to their places or close on the man they
                fight (move.py)
 Everything else of the step runs as it is. Install with `with installed(lab=...):`; a State built inside gets its
@@ -119,6 +120,7 @@ class Hook:
         self.adopt_built = adopt     # a State scenario.build makes gets its men (off in training: men.py attaches them)
         self.outside = outside       # look for an outside reset before each step (_reset; training: none, men.py)
         self.plain = None            # the plain simulator's step for a State without men (compiled on CUDA)
+        self._own = {}               # id(params) -> (params, its copy for the men's step: own_kills)
 
     @property
     def stats(self):
@@ -254,7 +256,7 @@ class Hook:
         if F is None:
             return self._plain(st)(st, orders, params, dt)
         self.st, self.F = st, F
-        params = params or self.params
+        params = own_kills(params or self.params, self._own)
         dt = dt or params.dt
         if self.outside:
             self._reset(st)
@@ -340,6 +342,33 @@ class Hook:
         return st
 
 
+# the simulator's kill rules that take HP back from the step's damage by the rectangle's own count of who dies
+# (own_kills): off in the men's step, where every man takes at most his health already (fighters/missile.py, melee.py)
+RECT_KILLS = (("kills", "missile_front"),)
+
+
+def own_kills(params, cache=None):
+    """params for the men's step: the rectangle's kill rules that cut the step's HP by its own dead (RECT_KILLS) off.
+    kills.missile_front lays a pair's projectile hits on the rectangle's front rank and takes the hits beyond its dead men
+    back out of the HP taken; the men already lose the HP beyond a man's health, so the cut came on top: casualty_windows
+    scales every man's pending HP down by it and a man struck for all his health stood on with a sliver (the ratform
+    probe lanes: the dead's share of the lost HP 0.59 -> 0.01, HP a bullet on clanrats 6.83 -> 4.31, game 6.60). The
+    same Params object back when nothing is on; the copy is kept (cache: id -> (params, copy)) - a stable object for the
+    compiled step."""
+    if not any((params.sim.get(sec) or {}).get(key) for sec, key in RECT_KILLS):
+        return params
+    hit = cache.get(id(params)) if cache is not None else None
+    if hit is not None and hit[0] is params:
+        return hit[1]
+    out = params
+    for sec, key in RECT_KILLS:
+        if (out.sim.get(sec) or {}).get(key):
+            out = out.with_cal(sec, **{key: 0})
+    if cache is not None:
+        cache[id(params)] = (params, out)
+    return out
+
+
 def shape_of(u, F):
     """(shape [B, N, 25], shape_ok [B, N]) of the units from their men F (shape.unit_features; ok: a unit with living
     men)."""
@@ -400,4 +429,4 @@ def installed(lab=None, params=None, seed=0, shape=False, compile=None, adopt=Tr
         HOOK = None
 
 
-__all__ = ["installed", "Hook", "Near", "LAB", "shape_of", "math"]
+__all__ = ["installed", "Hook", "Near", "LAB", "shape_of", "own_kills", "math"]

@@ -288,6 +288,18 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           with two more swordsmen units on the clanrats' flanks (extras attacking) full or cut to 25; both sides
           attacking from 3 m, samples and the soldiers' places every 0.1 s - 1 battle of 5 lanes. Its table:
           python -m tools.nn.fighters.crowddata <run> [--lab].
+  hitchance  the hit chance at its floor (the fighters lab): skavenslaves (melee attack 12) attack Empire spearmen
+          without shields (defence 34: chance 35 + 12 - 34 = 13) and with them (defence 42: 5, the floor 8) - the same
+          armour and health; both attacking from 3 m at a walk, samples and the soldiers' places every 0.1 s - 1 battle
+          of 6 lanes (3 + 3). The slaves' hits a second per man within reach, the two targets' ratio: 13 / 8 = 1.63 a
+          swing an interval, 12 / 7 = 1.71 with the chance less 1 point, 1.30 with a 0.5 s miss.
+          Its table: python -m tools.nn.fighters.swingdata <run>.
+  pursuitfast  is every blow of a chase a charge (the database's pursuit_charge_bonus_modifier 1)? The pursuit plan's
+          'order' lanes (fearless chasers attack at a run from 40 m a target with half its men killed that keeps its
+          morale, routed by script 40 s after contact, chased 60 s) with health every 0.1 s: stormvermin v spearmen,
+          wolf rats v swordsmen, 2 each - 1 battle of 4 lanes. A single blow's HP (the drops of the target's health
+          between samples) chasing against standing 15-40 s after contact (the charge gone): with the charge bonus on
+          every chase blow x1.53 (stormvermin) / x2.9 (wolf rats), without it x1.
 
     python -m tools.nn.charge_probe plan [--plan charge|hit]          # the battles
     python -m tools.build charge-probe --probe-plan hit --probe-battle 1   # one battle's build
@@ -436,7 +448,7 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "ratlingrt", "ratlingrt2",
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
-         "sidecontact", "busycharge", "ratcharge", "swing", "crowd") + UNIT_PLANS + MAGIC_PLANS
+         "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast") + UNIT_PLANS + MAGIC_PLANS
 # the swing plan (the fighters lab's blow rate, tools/nn/fighters/swingdata.py): small units cut down to SWING_MEN men by
 # kill_number_of_men before the go, both attacking from 3 m; health and men every SWING_MS, the soldiers' places too -
 # each drop of a unit's health is a hit of one man (or a few at once): hits a second per man within reach
@@ -667,6 +679,17 @@ def battles(plan):
                         max_s=CROWD["max_s"], kind=kind, **extra)
         s_ = CROWD["small"]
         return [[cut(s_[0]), cut(s_[1]), cut(None), cut(None, True), cut(s_[2], True)]]
+    if plan == "pursuitfast":
+        def pf(attacker, target, k):
+            return lane(attacker, target, "attack_run", "stand", gap_m=PURSUIT["gap_m"], fight_s=200, t_morale=True,
+                        at_rout="none", after_rout_s=PURSUIT["after_rout_s"], max_s=PURSUIT["max_s"],
+                        rout_at_s=PURSUIT["rout_at_s"], damage={"t": {"method": "kill", "share": 0.5}},
+                        kind=f"{attacker}_{k}")
+        return [[pf("svsh", "spear", 1), pf("wolfrat", "swords", 1), pf("svsh", "spear", 2), pf("wolfrat", "swords", 2)]]
+    if plan == "hitchance":
+        def hc(target, k):
+            return lane("slave", target, "attack_walk", "both", gap_m=3, fight_s=60, max_s=75, kind=f"{target}_{k}")
+        return [[hc("spear", 1), hc("spearsh", 1), hc("spear", 2), hc("spearsh", 2), hc("spear", 3), hc("spearsh", 3)]]
     if plan == "charge":
         a = [lane("swords", "clanrat", m) for m in ("attack_run", "attack_walk", "move_run", "recharge")]
         out += [rotate(a, k) for k in range(4)]
@@ -1207,12 +1230,14 @@ def run_config(plan, index):
                                                                                                   "shootcontact", "recontact")
                               else 90 if plan in ("hit", "move", "vv") else 30),
               "lanes": lanes, "park": park}
-    if plan in ("swing", "crowd"):
+    if plan in ("swing", "crowd", "hitchance"):
         config.update(tick_ms=SWING_MS, men_ms=SWING_MS, men_after_s=200)
     if plan in ("routmob", "routmob2", "passby"):
         config["men_after_rout_s"] = ROUTMOB_MEN_S
-    if plan == "pursuit":
+    if plan in ("pursuit", "pursuitfast"):
         config["men_after_rout_s"] = PURSUIT["after_rout_s"]
+    if plan == "pursuitfast":
+        config.update(tick_ms=SWING_MS, men_ms=500)
     if plan in MAGIC_PLANS:
         from tools.nn import magic_probe
         config.update(magic_probe.config_extra(index))

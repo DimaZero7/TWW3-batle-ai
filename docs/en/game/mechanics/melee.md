@@ -21,6 +21,16 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
     field the blows were counted as health drops (28 battles): General on General hits 41 % of his blows
     (formula 40 %: 55 against 45 + 5 Hold the Line), Warlord on Warlord 19 % (formula 30 % fresh, ~22 % with
     fatigue); a blow takes 245 / 223 HP — exactly the passport and armour at its mean 75 %.
+  - Checked in the game: **the 8 % floor is there, "the chance one point lower" is not confirmed** (the `hitchance`
+    probe, `tools/nn/charge_probe.py`, 1 battle, 6 lanes, health and soldiers' places every 0.1 s). Skavenslaves (attack
+    12) strike Empire spearmen with defence 34 (chance 13 %) and 42 (5 → the 8 % floor), the targets' armour and health
+    the same. Hits a second per slave within reach: 0.0365 and 0.0258, the ratio **1.42 [1.17–1.71]** over 0–60 s
+    (10–30 s: 1.35 [0.99–1.85]). Expected: a swing an interval 13 / 8 = 1.63; the chance a point lower (12 / 7) 1.71 — at
+    the interval's edge; a 0.5 s miss (the rectangle's rule) 1.30; no floor 13 / 5 = 2.6 — ruled out. One probe does not
+    tell 1.63 from 1.30, so the rule is unchanged.
+  - Open: the spearmen on the slaves (chance 45 %) with an interval of 5.7 s and 4.4 s hit equally often — 0.055 and
+    0.057 a second per man within reach (the interval expects a 1.30 difference), and less than the formula (0.55–0.70 of
+    "a swing an interval"); the slaves more (1.2–1.4).
 - **The stats in the formula are the modified ones**: abilities, fatigue, flank/rear
   multipliers and difficulty are applied before the roll. WH2–WH3 · [fandom Melee Attack][fw-ma],
   [CA damage blog][dmg] · medium.
@@ -248,6 +258,20 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
     stormvermin had 2-8 / 22-23 / 26-31 men near at 0.5 / 2.5 / 3.5 s, the router lost 0-22 HP/s in its first 2 s). Router men that ran into a standing
     enemy formation stay stuck among its men (up to a third of the unit, breaking free at 1 / 22 s a man on average) and die there while
     the mob runs on (`contact.rout_stuck`, the `routmob2` probe, [simulator](../../training/simulator.md#a-routers-exit-from-the-fight)).
+  - Checked in the game blow by blow: **in a chase about half the blows carry the whole charge** (the `pursuitfast` probe,
+    `tools/nn/charge_probe.py`: the `pursuit` lanes with an attack order, the target's health every 0.1 s, 1 battle, 4
+    lanes). Stormvermin on spearmen standing (from 15 s after contact to the rout) take 26–30 HP a blow — the rule
+    without the charge 28.4. In the chase the blows are of two kinds: 26–30 and 41–46 (with the whole charge bonus 18 —
+    43.4), none between; 36 of 68 single blows carry the whole charge (0.53). Wolf rats on swordsmen: 22 blows of 41–43
+    HP (charge 30) against 9 of 14–15 (none). So "every chase blow is a charge" holds for some blows only: a blow has the
+    whole charge or none. After the first contact the charge fades gradually: the stormvermin's blows 42–46 in the first
+    2 s, 36–40 at 5–6 s, 32–36 at 11–13 s, 27–28 at 15 s — linear over about 13 s (`charge_decay_duration`) from the
+    man's own contact.
+  - Ours for now: a blow on a router has no charge: the chase share 0.43 was fitted on recordings without it, and the
+    charge on top overshoots. The lab twin on the `pursuit` and `pursuitfast` lanes, the router's HP/s at 0–5 / 5–15 s of
+    the chase: stormvermin game 58 / 74, no charge 64 / 85, the charge on half the blows (`lab.json` `melee.chase_charge`
+    0.53) 87 / 112; swordsmen after clanrats 51 / 23 → 91 / 23 → 119 / 30. The switch stays off until the chase share is
+    measured again with the charge inside.
 - **Devastating Flanker** doubles the charge bonus against flank/rear
   (`devastating_flanker_charge_multiplier` 2); **Glorious Charge** (4.2.0, Empire/Kislev) doubles
   its duration and applies the flank morale penalty to the target. WH3 · fandom (snippets) · medium.

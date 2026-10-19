@@ -77,7 +77,10 @@ direction (the direction against the struck man's own facing), an armour roll ev
 The attack clock: the passport's interval after every swing, hit or miss (`melee.swing_per_interval`; measured -
 below, "The attack clock"); it runs only while an enemy is in reach (the
 first blow is at once, a return to the fight brings no new burst - the `recontact` probe). The unit's rules stay: a
-holding formation strikes at 0.5, a router is struck at 0.43 and so on (a blow lands with that chance).
+holding formation strikes at 0.5, a router is struck at 0.43 and so on (a blow lands with that chance). A blow on a
+router has no charge, as the simulator's; in the game half the chase blows carry the whole charge (the `pursuitfast`
+probe, [melee](../game/mechanics/melee.md)), but with the chase share 0.43 it overshoots - the switch
+`melee.chase_charge` is off.
 
 **At most two on one** (`lab.json` `melee.pairs`: `null` by default - off; on - `--lab melee.pairs=2`). An enemy man is
 struck by at most two men at a time (a lone man - a lord - by any number). He keeps first those who struck him last step, then the men of units whose order target is his
@@ -87,9 +90,13 @@ none he waits: no swing, his attack clock stands. Source - below, "Mobs: at most
 **Missiles** (`missile.py`). How many shots and when - the simulator (volleys, reload, aim). The shots are loosed by
 the unit's living men. Each aims at his own target man (keeps him while he lives - the simulator's `missile.reaim`), the
 projectile lands with the database's spread (calibration area, accuracy), flies below head height over its last h / tan
-theta metres and hits the first man on its way - enemy or friend. The shield of a man facing the shooter blocks its
+theta metres and hits the first man on its way - an enemy or a man of another friendly unit; it passes the men of its
+own unit (`lab.json` `missile.own_pass`, below "Missile probes"). The shield of a man facing the shooter blocks its
 share (with the simulator's `missile.shield_ap_pierce` cut by the projectile's armour piercing, [simulator](simulator.md)).
-A hit takes that man's health.
+A hit takes that man's health. The men decide who died: the rectangle's rule "the front rank takes the bullets"
+(`kills.missile_front`) is off in the men's step (`hook.own_kills`). Otherwise it took "the excess over the dead" by its
+own count out of the step's damage, every man got less than his share, and a man shot dead stood on with a sliver of
+health (below, "Missile probes").
 
 **Movement** (`move.py`). A man is carried by his unit's centre and walks to his place (at most his run). A front-rank
 man with an enemy in reach stands at the "standoff" from him (measured, below), at most 2 m from his place (the
@@ -152,6 +159,12 @@ The table was taken before the death tolerance (`hook.DEAD_FRAC`, "How it works"
 replayed, `sr_swing` -> `build/fspeed/full92_sr`): men killed per health in melee 0.87 -> 0.94 (> 85 % 1.07 -> 1.17,
 20-40 % 0.89 -> 0.98, < 20 % 1.29 -> 1.56), under fire 0.65 -> 0.89 (two-handers 0.63 -> 0.82); melee damage 1.37 ->
 1.39, under fire 0.84 -> 0.83, contact 0.884 and routs 1.21 -> 1.20 - the same.
+
+With "the men decide the dead" (`hook.own_kills`, below "Missile probes"; the same 92 battles with the square spread,
+before -> after): killed per HP under fire 0.25 -> 1.09 (whole units 0.40 -> 1.36, greatswords 0.67 -> 1.28), in melee
+0.85 -> 0.94; the damage under fire 0.92 -> 0.94, in melee 1.33 -> 1.34, routs 1.19 -> 1.20. Before the fix the lab in
+training with `--fighters` lost these dead too (the rectangle's rule is on with `kills.missile_front`). Passing its own
+unit (`missile.own_pass`) changes nothing in these battles (under fire 0.94, the dead 1.08).
 
 | Number | Windows | Game | Rectangle | Men |
 |---|---|---|---|---|
@@ -507,6 +520,21 @@ volley, sim / game (lane mean): rectangle 0.67 / 0.55, men 0.92 / 0.71. The targ
 0.76 / 0.82 of the game (it hits thinned targets harder than the game), men 1.11 / 1.49 (softer: a sparse formation
 lets arrows through). Thin targets (45 slaves on 30 m): the game keeps 14 men at 40 s, the rectangle 20, the men 28-30.
 
+**The men decide the dead** (`hook.own_kills`). While the rectangle's rule `kills.missile_front` ran in the men's step it
+took out of the step's damage what by its own count went "beyond the dead", though the men already lose the damage beyond
+a man's health themselves. Every man's damage was cut, and a man killed by one shot stood on with a sliver of health.
+The `ratling`, `ratform`, `ratshape` probes (17 kinds of lanes on formations), before / after / game: HP a bullet 0.77 /
+0.96 of the game (error over the kinds 0.27 → 0.07), the dead's share of the HP lost at a quarter lost 0.25 / 0.40 /
+0.41; handguns on clanrats HP a bullet 4.66 / 6.90 / 6.60, the dead's share 0.04 / 0.50 / 0.45. Lone men (a lord, the
+engineer) do not change: one man has no front rank. The numbers after the fix equal those with
+`--set kills.missile_front=0` (the old workaround) to the last digit.
+
+**A projectile passes its own unit** (`missile.own_pass`). The `shots` probe (handguns at a lone engineer 27 m off): hits a
+shot game 0.736, men 0.051 - a flat bullet aimed at the waist comes down ~60 m beyond the target and over its own front
+ranks flies under 1.2 m: the back ranks shot their own men in the back. Passing its own unit - 0.735; the other probe
+lanes (crossbows at 27 m 0.437 → 0.436 with the game's 0.352, every lane at 100-137 m, the `ratform` and `ratling`
+formations) do not change.
+
 **The lord next to his own infantry in melee** (Ratling guns firing at the General out of melee; the replay of the net
 itS26_15's battles, sim / game by the lord's health). By the units' centres (10 battles, `build/night3/sr_s26_15_lat`
 and `build/night5/s26_15_lab`): all seconds - rectangle 0.50, men 0.51; the seconds with the nearest own unit in melee
@@ -650,11 +678,6 @@ x 4 copies ran in a container of 10 GB (`DOCK_MEM=10g`).
 
 ## Not there
 
-- With the rectangle's rule `kills.missile_front` (on) the lab loses its own projectile hits: on the `ratform` lanes HP a
-  bullet on swordsmen 1.66 → 1.30 (game 1.54), handguns on clanrats 6.83 → 4.31 (game 6.60), the dead's share 0.59 → 0.01 -
-  the rectangle's front rank (its wound pool) overrides the lab's own dead. Check the lab's shooting only with
-  `--set kills.missile_front=0` for now (`build/shots/labcmp.py`); the fix is separate.
-
 - The damage in whole battles: mobs of 3+ units 1.46 of the game (1 unit 1.28); the men of units striking their order
   target deal 1.5-1.6 of the game, an "other" enemy 0.6. The rule "at most two on one" (`melee.pairs`, off) gives 1.18 /
   1.12 and ~1.3 for the 'own target', but spreads the blows: men killed per health lost 0.72 -> 0.48 of the game. How the
@@ -703,6 +726,13 @@ x 4 copies ran in a container of 10 GB (`DOCK_MEM=10g`).
   over more men), 1 / 2 / 3+ units 0.82 / 0.70 / 0.91. On the General in the rats' probes 0.22 -> 0.02. The switch is
   kept, off.
 - **No "another target"** (`unit_incidental` 0): 3+ units 1.08-1.27, but 1 unit 0.88-1.00 - does not explain the mobs.
+- **The target picked by a score** (`--lab melee.pick="score"`, `melee.pick_score`; the hypothesis: of the 16 nearest
+  enemy men in reach the score = 1 / the rank by distance + 1.5 for a man within 30 deg of the striker's facing, + 1.0
+  within 30-60 deg, + 3 for a man of a unit attacking the striker's unit; the last target x1.25; the second rank strikes
+  "the man in front of it"). Expected: the blows gather and the killed per HP lost grows. The replay of the 2 exam
+  battles from the game's places, sim / game: melee killed per HP lost 0.77 → 0.73 (facing to the last target) and 0.68
+  (facing the unit's way), on whole units 0.99 → 0.92 / 0.84; the damage 1.20 → 1.16 / 1.16; routs 1.10 → 1.15 / 1.11.
+  The blows spread more, not less: rejected, the switch kept (default `"nearest"`).
 - **A man strikes the nearest, no order target preference** (`--lab melee.prefer_target=false`; the replay of 2 battles
   from the places, `build/night_mob/np_inc045`): "own target" 1.60 -> 1.51, "other" 0.50 -> 0.54, all 1.22 -> 1.19. With
   `unit_incidental` 1 too (`np_inc1`): "other" 0.89, "own" 1.52, all 1.35 - the "own target" stays.

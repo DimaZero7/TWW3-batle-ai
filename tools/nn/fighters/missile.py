@@ -145,7 +145,7 @@ def _trace(F, u, params, lab, sh, ok, target, near, live, salt=210):
     # lab.json missile.proj_radius_m (the H5 test, 0: off): the projectile's own radius added to the bodies'
     body_r = u["radius"] + float(cfg.get("proj_radius_m", 0.0))
     who = K.path_first(near.table, int(lab["cells"]["cap"]), n_pts, px, pz, hittable, F.uid, body_r, u["height"],
-                       lx, lz, ex, ez, tan, sh, ok, npts=npts)
+                       lx, lz, ex, ez, tan, sh, ok, npts=npts, own_pass=bool(cfg.get("own_pass", False)))
     wc = who.clamp(min=0)
     ku = F.uid.gather(1, wc)                                                 # the struck man's unit
     # the shield: his facing (to the man he fights, else his unit's) within the shield angle of the shooter

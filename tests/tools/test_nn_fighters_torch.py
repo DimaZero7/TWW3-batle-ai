@@ -180,6 +180,33 @@ def test_the_lab_runs_in_the_step_and_the_simulator_is_left_alone():
     assert not math.isnan(float(st.u["hp_abs"].sum()))
 
 
+def test_the_men_keep_their_own_kills_under_the_rectangles_front_rank_rule():
+    # kills.missile_front (the rectangle's front-rank pool) takes the hits beyond its own dead back out of the step's HP;
+    # the men lose the HP beyond a man's health themselves, so in their step the rule is off (hook.own_kills): with it on
+    # the step scaled every man's pending HP down and a man struck for all his health stood on with a sliver
+    a = army([(ARCHERS, 0, 0, 0, None)], [(CLANRATS, 0, 70, 180, None)])
+
+    def run(params):
+        torch.manual_seed(0)
+        with hook.installed() as h:
+            st = scenario.build([a] * 2, params)
+            F = h.F
+            for _ in range(40):
+                battle.step(st, replay.nearest_attack(st), params, params.dt)
+            return F.hp.clone(), st.u["men"].clone(), st.u["hp_abs"].clone()
+
+    on, off = P.with_cal("kills", missile_front=1), P.with_cal("kills", missile_front=0)
+    assert hook.own_kills(on).sim["kills"]["missile_front"] == 0 and hook.own_kills(off) is off
+    cache = {}
+    assert hook.own_kills(on, cache) is hook.own_kills(on, cache)       # one copy (the compiled step's guard)
+    hp_on, men_on, abs_on = run(on)
+    hp_off, men_off, abs_off = run(off)
+    assert torch.equal(hp_on, hp_off) and torch.equal(men_on, men_off) and torch.equal(abs_on, abs_off)
+    N = men_on.shape[1]
+    men0 = float(build(a)[0].u["men0"][0, N // 2])
+    assert float(men_on[:, N // 2].min()) < men0                       # the arrows killed clanrats
+
+
 def _doom(st, n=12.0):
     """n Searing Doom projectiles this step on the clanrats' centre, 'cast' by the swordsmen's slot (knock.bombard)."""
     from tools.nn.sim import magic
@@ -407,6 +434,34 @@ def _resolve_once(**melee_lab):
     near = hook.Near(F, u, lab)
     _, men = FM.resolve(F, u, P, lab, permit, pw, torch.zeros_like(u["men"]), 0.5, near)
     return float(F.pend[0].sum()), float(men[0, 0, N // 2])
+
+
+def test_the_scored_pick_takes_a_man_in_reach_and_the_second_rank_strikes_the_man_in_front():
+    # lab.json melee.pick "score" (off by default): of the nearest men in reach the highest 1 / rank + the front cone's
+    # bonus (+ the attacker's, x keep for the last target); fronts 0.8 m apart: the swordsmen's second rank reaches too
+    st, F = _melee_pair(0.8)
+    u = st.u
+    N = st.N
+    permit = torch.zeros((1, N, N), dtype=torch.bool)
+    permit[0, 0, N // 2] = True
+    near = hook.Near(F, u, hook.LAB)
+    up = S.alive(F)
+    combat = float(P.battle["entity_action_attack_formed_combat_distance"])
+    tether = float(P.battle["entity_action_attack_formed_tether_distance"])
+    cfg = dict(hook.LAB["melee"].get("pick_score") or {})
+    t = FM.pick_score(F, u, near, up, up, u["radius"], permit, combat, tether, cfg)
+    mine = (F.uid[0] == 0) & up[0]
+    picked = mine & (t[0] >= 0)
+    px, pz = near.px[0], near.pz[0]
+    tt = t[0][picked]
+    d = torch.sqrt((px[tt] - px[picked]) ** 2 + (pz[tt] - pz[picked]) ** 2)
+    assert int(picked.sum()) > 20                                   # the second rank strikes too
+    assert bool((F.uid[0][tt] == N // 2).all()) and bool((d <= combat + float(u["radius"][0, N // 2]) + 1e-4).all())
+    # the front cone: each picked man is within 60 deg of the swordsmen's facing (+z) unless none is
+    ang = torch.rad2deg(torch.atan2((px[tt] - px[picked]).abs(), pz[tt] - pz[picked]))
+    assert float((ang <= 60).float().mean()) > 0.9
+    # the blows gather: fewer men struck than strikers (the second rank on the men in front of it)
+    assert len(torch.unique(tt)) < int(picked.sum())
 
 
 def test_the_reach_is_the_combat_distance_plus_the_struck_mans_radius_or_alone():

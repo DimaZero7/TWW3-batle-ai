@@ -69,7 +69,7 @@ def test_plans_have_few_battles_and_lanes_on_both_sides():
             config, model_s, arena = cp.run_config(plan, i)
             # (reengage: its tired pair runs up to 540 s before its fight; retarget2 / 3: 10 / 7 short lanes)
             # (ratlord: one General a battle - the army has one)
-            assert (1 if plan == "ratlord" else 2) <= len(config["lanes"]) <= {"retarget2": 10, "retarget3": 7, "ratlingrt": 9, "ratlingrt2": 9, "leave": 6, "skirmish": 10, "skirmish2": 12, "walkpass": 10, "walkpass2": 10, "shootcontact": 8, "recontact": 6, "ratling": 6, "censer": 8, "wolfrats": 8, "hitslow": 6, "busycharge": 6, "ratcover": 7, "ratlone": 8, "ratform": 7, "ratshape": 6}.get(plan, 5)
+            assert (1 if plan == "ratlord" else 2) <= len(config["lanes"]) <= {"retarget2": 10, "retarget3": 7, "ratlingrt": 9, "ratlingrt2": 9, "leave": 6, "skirmish": 10, "skirmish2": 12, "walkpass": 10, "walkpass2": 10, "shootcontact": 8, "recontact": 6, "ratling": 6, "censer": 8, "wolfrats": 8, "hitslow": 6, "busycharge": 6, "ratcover": 7, "ratlone": 8, "ratform": 7, "ratshape": 6, "hitchance": 6}.get(plan, 5)
             assert model_s < (720 if plan == "reengage" else 400)
             assert all(len(side["units"]) <= 20 for side in arena["sides"].values())
             names = {f"{side}_{u['slot']}" for side in ("own", "enemy") for u in arena["sides"][side]["units"]}

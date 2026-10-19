@@ -64,7 +64,7 @@ if triton is not None:
     @triton.jit
     def _path_first_kernel(start_ptr, count_ptr, man_ptr, px_ptr, pz_ptr, hit_ptr, uid_ptr, rad_ptr, hgt_ptr,
                            lx_ptr, lz_ptr, ex_ptr, ez_ptr, tan_ptr, sh_ptr, ok_ptr, np_ptr, out_ptr,
-                           P, M, N, H, c,
+                           P, M, N, H, OWN, c,
                            P1: tl.constexpr, P2: tl.constexpr, NPTS: tl.constexpr, CAP: tl.constexpr,
                            BLOCK: tl.constexpr):
         q = tl.program_id(0)
@@ -79,6 +79,7 @@ if triton is not None:
         ez = tl.load(ez_ptr + q)
         tan = tl.load(tan_ptr + q)
         sh = tl.load(sh_ptr + q)
+        su = tl.load(uid_ptr + b * M + tl.maximum(sh, 0))     # the shooter's unit (OWN: its men are passed)
         npq = tl.minimum(tl.load(np_ptr + q), NPTS)          # this projectile's points (its low path's length)
         lanes = tl.arange(0, BLOCK)
         lane_ok = lanes < CAP
@@ -100,6 +101,7 @@ if triton is not None:
                 cx = tl.load(px_ptr + mi, mask=okm, other=0.0)
                 cz = tl.load(pz_ptr + mi, mask=okm, other=0.0)
                 cu = tl.load(uid_ptr + mi, mask=okm, other=0)
+                okm = okm & ((OWN == 0) | (cu != su))
                 r = tl.load(rad_ptr + b * N + cu, mask=okm, other=0.0)
                 hg = tl.load(hgt_ptr + b * N + cu, mask=okm, other=0.0)
                 wx = cx - lx
@@ -121,13 +123,14 @@ if triton is not None:
 
 
 def path_first(table, cap, n_pts, px, pz, hittable, uid, radius, height, lx, lz, ex, ez, tan, sh, ok,
-               use_triton=None, npts=None):
+               use_triton=None, npts=None, own_pass=False):
     """[B, P] the man (index into M) each projectile strikes first along its low path, -1 none. table: cells.Table of
     the men (their places px, pz [B, M]); hittable [B, M]; uid [B, M]; radius, height [B, N] by unit; the projectiles
     [B, P]: landing (lx, lz), unit direction from the shooter (ex, ez), tan of the launch angle, shooter sh, ok. A man
     is struck when the path passes within his radius over its last height / tan metres (+ radius); the first is the
     farthest back from the landing point. npts [B, P] (None: n_pts each): the points each projectile searches, at most
-    n_pts (lab.json missile.path_full: as many as its low path is long)."""
+    n_pts (lab.json missile.path_full: as many as its low path is long). own_pass: the men of the shooter's own unit
+    are passed (lab.json missile.own_pass); else only the shooter himself."""
     B, P = lx.shape
     M = px.shape[1]
     N = radius.shape[1]
@@ -136,13 +139,15 @@ def path_first(table, cap, n_pts, px, pz, hittable, uid, radius, height, lx, lz,
     if _triton_ok(px, use_triton):
         ins = [table.start, table.count, table.man, px, pz, hittable.to(torch.int8), uid, radius.float(),
                height.float(), lx, lz, ex, ez, tan, sh, ok.to(torch.int8), npts.to(torch.int32).contiguous()]
-        out, = launch("path", B * P, ins, (P, M, N, table.H), (table.c,),
+        out, = launch("path", B * P, ins, (P, M, N, table.H, int(bool(own_pass))), (table.c,),
                       (cells._P1, cells._P2, n_pts, cap, max(16, 1 << (int(cap) - 1).bit_length())))
         return out.reshape(B, P)
     c = table.c
     cand = torch.cat([torch.where((k < npts)[:, :, None], table.query(lx - ex * k * c, lz - ez * k * c, cap), -1)
                       for k in range(n_pts)], 2)                                                     # [B, P, K]
     c_ok = (cand >= 0) & cells.gather2(hittable, cand) & (cand != sh[:, :, None])
+    if own_pass:
+        c_ok = c_ok & (cells.gather2(uid, cand) != uid.gather(1, sh.clamp(min=0))[:, :, None])
     cx, cz = cells.gather2(px, cand), cells.gather2(pz, cand)
     wx, wz = cx - lx[:, :, None], cz - lz[:, :, None]
     back = -(wx * ex[:, :, None] + wz * ez[:, :, None])                     # metres back from the landing point

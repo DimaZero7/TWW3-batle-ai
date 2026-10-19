@@ -23,6 +23,8 @@ His blow (CA Feature Focus #2, the database; the same formulas as the simulator'
                pursuit_rate (rout_pin_rate in its exit), a unit attacking another enemy unit_incidental /
                fresh_incidental / lord_incidental, infantry on a lord also fought by a lord lord_rival_others - a blow
                lands with that chance
+  pick         (lab.json melee.pick, "nearest" by default) whom a man strikes: "nearest" - the man he fights while in
+               reach, else the nearest (his unit's attack target 2 m nearer); "score" - the scored pick (pick_score)
   pairs        (lab.json melee.pairs, off) an enemy man is fought by at most K men at a time (not a lone man); a man
                left over takes another enemy man in reach with room, else waits (pair_up)
   attackers    (lab.json melee.max_attackers, off) a man takes the blows of at most K of the men fighting him
@@ -126,6 +128,44 @@ def blocked_line(F, u, near, tgt, live):
     return inway.any(2) & (tgt >= 0)
 
 
+def pick_score(F, u, near, up, c_live, rad, permit, combat, tether, cfg):
+    """(lab.json melee.pick "score") [B, M] whom each man strikes (-1: no enemy man in reach): of the `cands` nearest
+    enemy men in reach, the highest score = 1 / his rank by distance (1 the nearest) + `front` if he is within front_deg
+    of the striker's facing (+ `side` within side_deg) + `attacker` if his unit's attack order is on the striker's unit;
+    the man he fought last step x `keep`. The striker's facing (`facing`): "man" - to the man he fought last step while
+    that one lives, else his unit's; "unit" - his unit's."""
+    cand, d, c_uid, inr, _ = SC.melee_rows(near, None, up, c_live, F.uid, u["side"], rad, permit, combat, tether)
+    B, M, Kc = cand.shape
+    dd = torch.where(inr, d, torch.full_like(d, 1e9))
+    order = dd.argsort(dim=2)
+    rank = torch.empty_like(order).scatter_(2, order, torch.arange(1, Kc + 1, device=d.device).expand_as(order))
+    ok = inr & (rank <= int(cfg.get("cands", 16)))
+    score = 1.0 / rank.float()
+    px, pz = near.px, near.pz
+    live = S.alive(F)
+    t = F.tgt
+    tc = t.clamp(min=0)
+    seen = (t >= 0) & live.gather(1, tc) if cfg.get("facing", "man") == "man" else torch.zeros_like(live)
+    b = S.ugather(u, F, "b") * geometry.DEG
+    fx = torch.where(seen, px.gather(1, tc) - px, torch.sin(b))
+    fz = torch.where(seen, pz.gather(1, tc) - pz, torch.cos(b))
+    from tools.nn.fighters import cells
+    ex = cells.gather2(px, cand) - px[:, :, None]
+    ez = cells.gather2(pz, cand) - pz[:, :, None]
+    cosang = ((ex * fx[:, :, None] + ez * fz[:, :, None])
+              / (torch.sqrt(ex * ex + ez * ez) * torch.sqrt(fx * fx + fz * fz)[:, :, None]).clamp(min=1e-6))
+    score = score + torch.where(cosang >= math.cos(float(cfg.get("front_deg", 30)) * geometry.DEG),
+                                float(cfg.get("front", 1.5)),
+                                torch.where(cosang >= math.cos(float(cfg.get("side_deg", 60)) * geometry.DEG),
+                                            float(cfg.get("side", 1.0)), 0.0))
+    cu = c_uid.clamp(min=0).reshape(B, -1)
+    att = ((u["order_kind"].gather(1, cu) == O.ATTACK) & (u["order_target"].gather(1, cu) == F.uid.repeat_interleave(Kc, 1)))
+    score = score + float(cfg.get("attacker", 3.0)) * att.reshape(cand.shape).float()
+    score = torch.where(cand == t[:, :, None], score * float(cfg.get("keep", 1.25)), score)
+    best = cand.gather(2, torch.where(ok, score, torch.full_like(score, -1e9)).argmax(2, keepdim=True)).squeeze(2)
+    return torch.where(ok.any(2), best, torch.full_like(best, -1))
+
+
 def pair_up(F, u, near, tgt, has, keep, pref_unit, up, c_live, rad, permit, combat, tether, K, repair=True):
     """(lab.json melee.pairs) An enemy man is fought by at most K men at a time (a lone man - a lord - by any number).
     Each victim keeps the men who fought him last step (F.won) first, then the men of units whose attack target is his
@@ -203,7 +243,12 @@ def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
     rad = u["radius"] if lab["melee"].get("reach_radius", True) else torch.zeros_like(u["radius"])
     scan = (near, up, c_live, F.uid, u["side"], rad, permit, F.tgt, pref_unit, combat, tether)
     keep, has, new_t, has_e, eng = SC.melee_scan(*scan)
-    tgt = torch.where(keep, F.tgt, torch.where(has, new_t, torch.full_like(F.tgt, -1)))
+    if lab["melee"].get("pick", "nearest") == "score":
+        # (lab.json melee.pick "score") the scored pick among the enemy men in reach (pick_score)
+        tgt = pick_score(F, u, near, up, c_live, rad, permit, combat, tether, lab["melee"].get("pick_score") or {})
+        keep = (tgt >= 0) & (tgt == F.tgt)
+    else:
+        tgt = torch.where(keep, F.tgt, torch.where(has, new_t, torch.full_like(F.tgt, -1)))
     eng = torch.where(has_e, eng, torch.full_like(tgt, -1))
     F.eng = torch.where(has, tgt, eng)
     if lab["melee"].get("clear_line"):
@@ -232,7 +277,14 @@ def resolve(F, u, params, lab, permit, pw, charge_now, dt, near):
     ch = charge_now.gather(1, F.uid)
     routing_t = tgu("r")
     if params.sim["contact"].get("pursuit_rate") is not None:
-        ch = torch.where(routing_t, torch.zeros_like(ch), ch)
+        chase = lab["melee"].get("chase_charge")
+        if chase is not None:
+            # (lab.json melee.chase_charge) a blow on a routing man carries the striker's whole charge bonus with this
+            # chance (the pursuitfast probe: full-charge blows or none, no decayed ones), else none
+            full = (S.rnd(F, M, 103) < float(chase)).float()
+            ch = torch.where(routing_t, full, ch)
+        else:
+            ch = torch.where(routing_t, torch.zeros_like(ch), ch)
     extra = gat("charge_bonus") * ch + bonus
     attack = gat("attack") + extra
     # direction: the striker seen from the struck man against his facing

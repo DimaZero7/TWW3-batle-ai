@@ -159,7 +159,12 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
   as under one striker), while in a formation, by the game's records, the damage follows the striker-enemy pairs, not the
   crowd of strikers: mobs of 3+ units are the lab's excess (1.46 of the game, the rectangle 1.10). The rule "an enemy is
   struck by at most two at a time" (`melee.pairs` 2) gives 1.18 and routs 1.09 -> 1.00, but men killed per health 0.72 ->
-  0.48 and the step +33 % - off until the user decides; open - how the game concentrates the blows on fewer men. Beasts (wolf rats) fight free, flowing round the enemy as in the game (56-64
+  0.48 and the step +33 % - off until the user decides; open - how the game concentrates the blows on fewer men (a target picked "by a score", with
+  "the man in front", does not gather them: killed per HP 0.77 -> 0.68-0.73 - rejected). The men decide the dead under
+  fire: the rectangle's `kills.missile_front` is off in the men's step (`hook.own_kills`; it took damage from the men, and
+  on the 92-battle replay killed per HP under fire was 0.25 of the game, now 1.09 - training with `--fighters` had it
+  too); a projectile passes the men of its own unit (the shots probe: handguns at 27 m 0.05 -> 0.74 hits a shot, game
+  0.74). Beasts (wolf rats) fight free, flowing round the enemy as in the game (56-64
   rats within reach against 17 formed). The step is
   compiled, Triton kernels look for the neighbours: 1024 battles 20.5 ms (1.7-2.8 simulator steps), 1.1 GB of the GPU.
   Training with the men ([in training](training/fighters_lab.md#in-training), `tools/nn/train/men.py`): the men with the
