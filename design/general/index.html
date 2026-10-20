@@ -146,9 +146,9 @@ a{color:inherit}
 .node.t-env span{display:block}
 .blocks{display:grid;grid-template-columns:auto auto auto;justify-content:start;align-items:center;gap:12px;margin-top:6px}
 .blocks .nodestack{align-self:end;margin-bottom:-12px}
-.t-in{--tc:#3a7bd5} .t-proc{--tc:#8a5ad8} .t-out{--tc:#d08a1c} .t-test{--tc:#1a9a8a} .t-alg{--tc:#5f9a2e} .t-env{--tc:#a0a8b4} .t-todo{--tc:#c4568a}
+.t-in{--tc:#3a7bd5} .t-proc{--tc:#8a5ad8} .t-out{--tc:#d08a1c} .t-test{--tc:#1a9a8a} .t-alg{--tc:#5f9a2e} .t-learn{--tc:#b8329a} .t-env{--tc:#a0a8b4} .t-todo{--tc:#c4568a}
 .ty{background:color-mix(in srgb,var(--tc) 22%,transparent);color:var(--tc);border:1px solid var(--tc)}
-.node.t-in,.node.t-proc,.node.t-out,.node.t-test,.node.t-alg,.node.t-env,.node.t-todo{border-color:var(--tc);background:color-mix(in srgb,var(--tc) 14%,var(--panel));min-width:220px}
+.node.t-in,.node.t-proc,.node.t-out,.node.t-test,.node.t-alg,.node.t-learn,.node.t-env,.node.t-todo{border-color:var(--tc);background:color-mix(in srgb,var(--tc) 14%,var(--panel));min-width:220px}
 .node.on{box-shadow:0 0 0 3px var(--tc);background:color-mix(in srgb,var(--tc) 30%,var(--panel))}
 .nodestack{display:flex;flex-direction:column;align-items:center;gap:2px}
 .vlink{color:var(--muted);font-size:20px;line-height:1}
@@ -258,7 +258,7 @@ a{color:inherit}
   <section class="net" aria-label="Схема сети генерала">
     <h2 class="areah">Сеть</h2>
     <div class="zoombox" id="zoombox"><div class="types zlegend"><span class="tl">Типы блоков:</span>
-      <span class="ty t-in">вход</span><span class="ty t-proc">обработка</span><span class="ty t-out">выход</span><span class="ty t-alg">алгоритм</span><span class="ty t-test">проверка</span><span class="bangleg"><span class="bang">!</span> есть открытые вопросы или доработки</span><span class="bangleg"><span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span> сделано нейросетью, человек не проверял в деталях</span>
+      <span class="ty t-in">вход</span><span class="ty t-proc">обработка</span><span class="ty t-out">выход</span><span class="ty t-alg">алгоритм</span><span class="ty t-learn">выученная таблица</span><span class="ty t-test">проверка</span><span class="bangleg"><span class="bang">!</span> есть открытые вопросы или доработки</span><span class="bangleg"><span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span> сделано нейросетью, человек не проверял в деталях</span>
     </div><svg class="netsvg" id="netsvg" viewBox="0 0 900 600" role="group" aria-label="Схема сети генерала"></svg><div class="zbtns"><button type="button" id="zin" aria-label="Крупнее">+</button><button type="button" id="zout" aria-label="Мельче">−</button><button type="button" id="zreset" aria-label="Сбросить масштаб">⟲</button></div></div>
 <script>
 (function(){
@@ -497,29 +497,70 @@ a{color:inherit}
   h+=G("groupproc","t-proc",[GPX,BY,GPW,KY+KH-BY],"Сбор групп","обработка",gp);
   // --- Группы (output): filled groups are solid brackets - on top the group card (short row), inside its units (rows, as in the army blocks);
   // empty places are small dashed empty brackets in one row under them
-  var GOX=GPX+GPW+18,GOW=170,go="",GBX=GOX+18,GTOP={},RS=10;
+  var GOX=GPX+GPW+18,GOW=170,GBX=GOX+18,GTOP={},RS=10;
   var MEM={};GU.forEach(function(u){u.to.forEach(function(j){(MEM[j]=MEM[j]||[]).push({u:u.k,hl:!!u.hl});});});
-  var gy=BY+8;
-  [0,1].forEach(function(side){var c=side?'--foe':'--ours',free=[];
-    SL.forEach(function(sl,j){if(sl.s===side&&!sl.used)free.push(j);});
-    // the side's label, and on the same line its empty places: small dashed empty brackets
-    go+='<text class="ssub" x="'+(GOX+12)+'" y="'+(gy+9)+'">'+(side?'враг':'наши')+'</text>';
-    free.forEach(function(j,k){var x=GOX+58+k*14;go+='<path d="M'+(x+9)+' '+gy+'H'+x+'V'+(gy+10)+'H'+(x+9)+'" fill="none" stroke="color-mix(in srgb,var('+c+') 60%,var(--panel))" stroke-width="1.4" stroke-dasharray="2.5 2"/>';});
-    gy+=16;
-    SL.forEach(function(sl,j){if(sl.s!==side||!sl.used)return;
-      var ch=MEM[j]||[],top=gy,bot=top+3+RS+ch.length*RS+2;GTOP[j]=top+7;
-      go+='<path d="M'+(GBX+66)+' '+top+'H'+GBX+'V'+bot+'H'+(GBX+66)+'" fill="none" stroke="'+(j===2?'var(--open)':'color-mix(in srgb,var('+c+') 80%,var(--panel))')+'" stroke-width="2" stroke-linejoin="round"/>';
-      go+=crow(GBX+6,top+3,side,j+500,56);
-      ch.forEach(function(m,k){var ry=top+3+RS+1+k*RS;go+=crow(GBX+6,ry,side,m.u+300,56);
-        if(m.hl)go+='<rect x="'+(GBX+3.5)+'" y="'+(ry-2)+'" width="61" height="10" rx="3" fill="none" stroke="var(--open)" stroke-width="2"/>';});
-      gy=bot+4;});
-    gy+=4;});
+  // draws the groups (labels with empty places, brackets with the group card on top and its units inside); the same layout is reused after the group council
+  function grpDraw(X0,BX,seedHead,fade){var o="",gy=BY+8;
+    [0,1].forEach(function(side){var c=side?'--foe':'--ours',free=[];
+      SL.forEach(function(sl,j){if(sl.s===side&&!sl.used)free.push(j);});
+      // the side's label, and on the same line its empty places: small dashed empty brackets
+      o+='<text class="ssub" x="'+(X0+12)+'" y="'+(gy+9)+'">'+(side?'враг':'наши')+'</text>';
+      free.forEach(function(j,k){var x=X0+58+k*14;o+='<path d="M'+(x+9)+' '+gy+'H'+x+'V'+(gy+10)+'H'+(x+9)+'" fill="none" stroke="color-mix(in srgb,var('+c+') 60%,var(--panel))" stroke-width="1.4" stroke-dasharray="2.5 2"/>';});
+      gy+=16;
+      SL.forEach(function(sl,j){if(sl.s!==side||!sl.used)return;
+        // a group = a closed box: on top a band with the group card (the group's own vector), under a divider its units
+        var ch=MEM[j]||[],top=gy,bot=top+15+ch.length*RS,col=j===2?'var(--open)':'color-mix(in srgb,var('+c+') 80%,var(--panel))';GTOP[j]=(top+bot)/2;
+        o+='<rect x="'+BX+'" y="'+top+'" width="68" height="13" rx="3" fill="color-mix(in srgb,var('+c+') 16%,var(--panel))"/>';
+        o+='<rect x="'+BX+'" y="'+top+'" width="68" height="'+(bot-top)+'" rx="4" fill="none" stroke="'+col+'" stroke-width="2"/>';
+        o+='<line x1="'+BX+'" y1="'+(top+13)+'" x2="'+(BX+68)+'" y2="'+(top+13)+'" stroke="'+col+'" stroke-width="1"/>';
+        o+=crow(BX+6,top+3.5,side,j+seedHead,56);
+        var mo="";ch.forEach(function(m,k){var ry=top+16+k*RS;mo+=crow(BX+6,ry,side,m.u+300,56);
+          if(m.hl)mo+='<rect x="'+(BX+3.5)+'" y="'+(ry-2)+'" width="61" height="10" rx="3" fill="none" stroke="var(--open)" stroke-width="2"/>';});
+        o+=fade?'<g opacity=".45">'+mo+'</g>':mo;
+        gy=bot+4;});
+      gy+=4;});
+    return o;}
+  var go=grpDraw(GOX,GBX,500,false);
   h+=G("groups","t-out",[GOX,BY,GOW,KY+KH-BY],"Группы","выход",go);
   // the yellow unit leaves "Итог совещания" through the gap between columns (not across the enemy card)
   var gl='<path d="M'+(QCX+57.5)+' '+TOK[HU].y+'H'+(QCX+60)+'V'+(QRY+12*11+4)+'H'+(GPX+8)+'V'+YU+'H'+(GPX+15)+'" fill="none" stroke="var(--open)" stroke-width="1.6"/>';
   SL.forEach(function(sl,j){if(sl.used)gl+='<line x1="'+(GSX+(j===2?20:18))+'" y1="'+(sl.y+5.5)+'" x2="'+(GBX-2)+'" y2="'+GTOP[j]+'" '+(j===2?'stroke="var(--open)" stroke-width="1.6"':'class="cw"')+'/>';});
   h+='<g pointer-events="none">'+gl+'</g>';
-  var H=EY+110+12;svg.setAttribute("viewBox","0 -110 "+(GOX+GOW+26)+" "+(H+190));
+  // --- Совещание групп (processing): speakers = map tiles (from "Карта после совещания") and the groups; listeners = the groups only.
+  // drawn like the units' council: speakers column -> all-to-all -> listeners (nodes); yellow lines = whom the yellow group listens to
+  var GKX=GOX+GOW+18,GKW=200,GKC=[GKX+55,GKX+150],gk="";
+  var QPY=qa.y+qa.h/2-QP,GSP=[],GL=[];
+  for(var i=0;i<4;i++)GSP.push({k:"t",y:QPY+(i-1)*24,seed:i});
+  SL.forEach(function(sl,j){if(sl.used)GL.push({k:"g",j:j,y:GTOP[j],side:sl.s});});
+  var GYL=GL.findIndex(function(g){return g.j===2;});GL.forEach(function(g){GSP.push(g);});
+  var GW8=[.2,.7,.1,.15, .25,.1,.3,.15, .2,.95,.25];
+  GSP.forEach(function(a){GL.forEach(function(b){gk+='<line class="cw" x1="'+(GKC[0]+33)+'" y1="'+a.y+'" x2="'+(GKC[1]-6)+'" y2="'+b.y+'"/>';});});
+  GSP.forEach(function(a,i){gk+='<line x1="'+(GKC[0]+33)+'" y1="'+a.y+'" x2="'+(GKC[1]-6)+'" y2="'+GL[GYL].y+'" stroke="var(--open)" stroke-width="'+(.6+GW8[i]*3)+'" opacity="'+(.35+GW8[i]*.6)+'"/>';});
+  GSP.forEach(function(t,i){if(t.k==="t")gk+=tok(GKC[0],t,i===1,t.seed);
+    else{// a group at the table = the same box in small: the group card in the band (it is what speaks), one faint bar per unit under it
+      var gx=GKC[0]-28,c=t.side?'--foe':'--ours',nm=(MEM[t.j]||[]).length,bh=14+nm*4,bt=t.y-bh/2,col=t.j===2?'var(--open)':'color-mix(in srgb,var('+c+') 80%,var(--panel))';
+      gk+='<rect x="'+(gx-4)+'" y="'+bt+'" width="64" height="11" rx="3" fill="color-mix(in srgb,var('+c+') 16%,var(--panel))"/>';
+      gk+='<rect x="'+(gx-4)+'" y="'+bt+'" width="64" height="'+bh+'" rx="3" fill="none" stroke="'+col+'" stroke-width="1.8"/>';
+      gk+='<line x1="'+(gx-4)+'" y1="'+(bt+11)+'" x2="'+(gx+60)+'" y2="'+(bt+11)+'" stroke="'+col+'" stroke-width="1"/>';
+      gk+=crow(gx,bt+2.5,t.side,t.j+500,56);for(var k=0;k<nm;k++)gk+='<rect x="'+gx+'" y="'+(bt+13.5+k*4)+'" width="55" height="2.5" rx="1" fill="color-mix(in srgb,var('+c+') 35%,var(--panel))"/>';}});
+  GL.forEach(function(g,i){gk+=knode(GKC[1],g.y,i===GYL);});
+  h+=G("groupcouncil","t-proc",[GKX,KY,GKW,KH],"Совещание групп","обработка",gk);
+  // --- Группы после совещания (output): the same layout as "Группы"; the group cards have new numbers, the units inside are the same (faded)
+  var GQX=GKX+GKW+18,GQW=272,GQB=GQX+(GQW-66)/2;
+  h+=G("groupsafter","t-out",[GQX,BY,GQW,KY+KH-BY],"Группы после совещания","выход",grpDraw(GQX,GQB,800,true));
+  // lines: the yellow tile from the map, every group from its bracket to the table, from the table to its bracket after
+  var gkl='<line x1="'+(qa.x+qa.w+QP)+'" y1="'+QPY+'" x2="'+(GKC[0]-31)+'" y2="'+QPY+'" stroke="var(--open)" stroke-width="1.6"/>';
+  GL.forEach(function(g,i){var hl=i===GYL,st=hl?'stroke="var(--open)" stroke-width="1.6"':'class="cw"';
+    // from the right side of the group box in "Группы" straight into the left side of its small box at the table (both centred on the same height)
+    gkl+='<line x1="'+(GBX+68)+'" y1="'+g.y+'" x2="'+(GKC[0]-32)+'" y2="'+g.y+'" '+st+'/>';
+    gkl+='<line x1="'+(GKC[1]+6)+'" y1="'+g.y+'" x2="'+(GQB-2)+'" y2="'+g.y+'" '+st+'/>';});
+  h+='<g pointer-events="none">'+gkl+'</g>';
+  // --- Виды заданий (learned table): 10 cards with no input - their numbers are weights changed only by training; the menu groups choose from (next blocks)
+  var MKX=GOX,MKY=EY+140,MKW=190,MKH=162,mk="";
+  for(var i=0;i<10;i++){var y=MKY+16+i*10;mk+='<text class="ssub" x="'+(MKX+30)+'" y="'+(y+6)+'" text-anchor="end" style="font-size:9px">'+(i+1)+'</text>';
+    for(var k=0;k<8;k++)mk+='<rect x="'+(MKX+38+k*7)+'" y="'+y+'" width="6" height="6" rx="1.2" fill="color-mix(in srgb,var(--ink) '+Math.round(12+cval(700+i,k)*60)+'%,var(--panel))"/>';}
+  h+=G("missionkinds","t-learn",[MKX,MKY,MKW,MKH],"Виды заданий","выученная таблица",mk);
+  var H=MKY+MKH+12;svg.setAttribute("viewBox","0 -110 "+(GQX+GQW+26)+" "+(H+190));
   svg.innerHTML=h;
   [].forEach.call(svg.querySelectorAll(".snode"),function(g){g.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();g.dispatchEvent(new MouseEvent("click",{bubbles:true}));}});});
   // zoom (wheel over the scheme, buttons, pinch) and pan (drag); a drag does not count as a click
@@ -808,6 +849,73 @@ a{color:inherit}
       </div>
     </div>
     <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small"><li><b>Куда дальше</b> — в совещание генерала, вместе с участками карты.</li></ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-groupcouncil">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done"><h2>Совещание групп <span class="chip done">решено</span></h2>
+        <ul class="small">
+          <li><b>Отношения между группами</b> — каждая группа видит остальные: кто кому угрожает, кто рядом, кто сильнее. Без этого не выбрать задание вида «прикрыть нашу группу 1 от их группы 2».</li>
+          <li><b>Говорят все, слушают группы</b> — говорят участки «Карты после совещания» и все группы (наши и враг); слушают и обновляются только группы. Участки — фон: что между группами и где (река между нами — угрозы нет). Карта здесь не обновляется: цели «куда» указывают на «Карту после совещания» (она уже знает об армиях), а выбор цели сам сравнивает группу с каждым участком. Если по проверкам генерал плохо выбирает места — обновлять карту и здесь (отдельный выход «Карта после совещания групп»).</li>
+        </ul>
+      </div>
+      <div class="box done"><h2>Предложения <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Пустые места групп — маской</b>: их никто не слушает, и они никого не слушают.</li>
+          <li><b>Как совещание отрядов</b> — каждый спрашивает каждого; групп мало (до 20), поэтому дёшево; 1–2 слоя.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
+      <li><b>Сколько слоёв</b> — 1 или 2; замер.</li>
+    </ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-groupsafter">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done"><h2>Группы после совещания <span class="chip done">решено</span> <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Та же раскладка, что «Группы»</b> — те же скобки, те же пустые места.</li>
+          <li><b>Карточка группы — новые числа</b> (той же длины): группа теперь «знает» об остальных группах и о карте.</li>
+          <li><b>Состав тот же</b> — отряды в скобке не меняются (на схеме бледные).</li>
+          <li><b>Дальше</b> — выбор заданий: группа сравнивает свою карточку с «Видами заданий» и указывает цели.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
+      <li><b>Выбор заданий</b> — следующий блок.</li>
+    </ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-missionkinds">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done"><h2>Виды заданий <span class="chip done">решено</span></h2>
+        <ul class="small">
+          <li><b>10 видов, абстрактные</b> — мы не называем их («обход», «держать»); смысл им даёт сама сеть, как и составу групп.</li>
+          <li><b>Таблица без входа</b> — 10 карточек, их числа — выученные веса: меняются только обучением (поправка от ошибки генерала обратно).</li>
+          <li><b>Это меню</b> — сама таблица ничего не делает; группа выбирает из неё одно задание (следующие блоки), его карточка идёт дальше — отрядам группы.</li>
+        </ul>
+      </div>
+      <div class="box done"><h2>Предложения <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Карточка той же длины</b>, что карточки групп — чтобы группа сравнивала себя с заданиями напрямую.</li>
+          <li><b>Риск «пустых заданий»</b> — в начале задания ничего не значат, отряды их не замечают, выбор ни на что не влияет; или сеть всегда берёт одно и то же. Лечение: цели задания явные (указанием), на старте небольшая доплата, если по поведению отрядов можно угадать их задание; следить, сколько видов используется и различается ли поведение.</li>
+          <li><b>Запасной путь</b> — если абстрактные не взлетят, тем же 10 местам можно дать смысл учениями («место 1 — обход фланга») без переделки сети.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
+      <li><b>Как группа выбирает задание и цели</b> — следующие блоки: совещание групп, выбор заданий (вид → цель 1 → цель 2).</li>
+    </ul></div></div></div>
   </section>
 </template>
 
@@ -1233,7 +1341,7 @@ a{color:inherit}
 <script>
 (function(){
   // the tree: levels → parts → topics; "ready" topics have a template, others show as not discussed yet
-  var nodes={landscape:{t:"Вход · Ландшафт",tpl:"tpl-landscape"},mapproc:{t:"Обработка · Анализ карты",tpl:"tpl-mapproc"},maptest:{t:"Проверка · Проверки анализа карты",tpl:"tpl-maptest"},armies:{t:"Вход · Армии",tpl:"tpl-armies"},armyproc:{t:"Обработка · Анализ армий",tpl:"tpl-armyproc"},unitcards:{t:"Выход · Карточки отрядов",tpl:"tpl-unitcards"},maptiles:{t:"Выход · Участки карты",tpl:"tpl-maptiles"},armytest:{t:"Проверка · Проверки анализа армий",tpl:"tpl-armytest"},effproc:{t:"Обработка · Анализ эффектов",tpl:"tpl-effproc"},effcards:{t:"Выход · Карточки эффектов",tpl:"tpl-effcards"},addcards:{t:"Алгоритм · Сложение",tpl:"tpl-addcards"},efftest:{t:"Проверка · Проверки анализа эффектов",tpl:"tpl-efftest"},addtest:{t:"Проверка · Проверки сложения",tpl:"tpl-addtest"},finalcards:{t:"Выход · Отряды с эффектами",tpl:"tpl-finalcards"},council:{t:"Обработка · Совещание",tpl:"tpl-council"},resmap:{t:"Выход · Карта после совещания",tpl:"tpl-resmap"},resarmy:{t:"Выход · Армии после совещания",tpl:"tpl-resarmy"},groupproc:{t:"Обработка · Сбор групп",tpl:"tpl-groupproc"},groups:{t:"Выход · Группы",tpl:"tpl-groups"},effects:{t:"Вход · Эффекты",tpl:"tpl-effects"},sim:{t:"Симулятор · Доработки",tpl:"tpl-sim"}};
+  var nodes={landscape:{t:"Вход · Ландшафт",tpl:"tpl-landscape"},mapproc:{t:"Обработка · Анализ карты",tpl:"tpl-mapproc"},maptest:{t:"Проверка · Проверки анализа карты",tpl:"tpl-maptest"},armies:{t:"Вход · Армии",tpl:"tpl-armies"},armyproc:{t:"Обработка · Анализ армий",tpl:"tpl-armyproc"},unitcards:{t:"Выход · Карточки отрядов",tpl:"tpl-unitcards"},maptiles:{t:"Выход · Участки карты",tpl:"tpl-maptiles"},armytest:{t:"Проверка · Проверки анализа армий",tpl:"tpl-armytest"},effproc:{t:"Обработка · Анализ эффектов",tpl:"tpl-effproc"},effcards:{t:"Выход · Карточки эффектов",tpl:"tpl-effcards"},addcards:{t:"Алгоритм · Сложение",tpl:"tpl-addcards"},efftest:{t:"Проверка · Проверки анализа эффектов",tpl:"tpl-efftest"},addtest:{t:"Проверка · Проверки сложения",tpl:"tpl-addtest"},finalcards:{t:"Выход · Отряды с эффектами",tpl:"tpl-finalcards"},council:{t:"Обработка · Совещание",tpl:"tpl-council"},resmap:{t:"Выход · Карта после совещания",tpl:"tpl-resmap"},resarmy:{t:"Выход · Армии после совещания",tpl:"tpl-resarmy"},groupproc:{t:"Обработка · Сбор групп",tpl:"tpl-groupproc"},groups:{t:"Выход · Группы",tpl:"tpl-groups"},missionkinds:{t:"Выученная таблица · Виды заданий",tpl:"tpl-missionkinds"},groupcouncil:{t:"Обработка · Совещание групп",tpl:"tpl-groupcouncil"},groupsafter:{t:"Выход · Группы после совещания",tpl:"tpl-groupsafter"},effects:{t:"Вход · Эффекты",tpl:"tpl-effects"},sim:{t:"Симулятор · Доработки",tpl:"tpl-sim"}};
   // "!" on a block whose page has open questions, future items or reworks
   [].forEach.call(document.querySelectorAll(".node"),function(b){var n=nodes[b.dataset.n];if(!n||!n.tpl)return;
     var t=document.getElementById(n.tpl);if(!t)return;var c=t.content,hit=false;
