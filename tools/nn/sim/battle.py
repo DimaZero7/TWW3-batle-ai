@@ -912,6 +912,15 @@ def step(st, orders, params=None, dt=None):
         fight_dealt = torch.where(own_shot, u["shot_dealt"], u["dealt"] + u["shot_dealt"])
         fight_taken = torch.where(own_shot, torch.where(back, u["shot_dealt"].gather(1, tj), zero),
                                   u["taken"] + u["shot_taken"])
+    blocks = torch.ones_like(foes)
+    rw = mcal.get("rally_weak") or {}
+    if rw.get("on"):
+        # morale.rally_weak: an enemy weaker than rally_weak.ratio of the router (strategic value: combat potential x
+        # health) neither blocks its rally nor counts as the nearest enemy (the probe hyp: night runners at 3 % kept
+        # 25-30 m from a router and it rallied at the clock's 18.6 s; the recordings: the strongest enemy within 95 m
+        # at 0.17-0.33 of the router - rallies 0.087 a second, none within 95 m 0.136, 0.33-0.5 - 0.006)
+        sv = morale.strategic_value(u, params)
+        blocks = sv[:, None, :] >= float(rw["ratio"]) * sv[:, :, None]
     ctx = {
         "aura": aura * standing.float(),
         "collapse": collapse,
@@ -943,10 +952,10 @@ def step(st, orders, params=None, dt=None):
                          if (mcal.get("strong_enemy") or {}).get("rule") == "balance" else None),
         # (morale.rally_any_enemy: any enemy blocks the rally, routing ones too - the recordings: within 95 m of a
         # routing enemy 0.9 % rallied a second, 12.6 % with none; build/open_battle/spec.md 4)
-        "enemy_near": (foes & (standing[:, None, :] | bool(mcal.get("rally_any_enemy")))
+        "enemy_near": (foes & (standing[:, None, :] | bool(mcal.get("rally_any_enemy"))) & blocks
                        & (d <= mcal["rally_free_m"])).any(2),
         # the nearest standing enemy's centre (m; morale.rally_hazard: the rally's chance a second by it) and the time
-        "foe_d": torch.where(foes & standing[:, None, :], d, torch.full_like(d, 1e9)).amin(2),
+        "foe_d": torch.where(foes & standing[:, None, :] & blocks, d, torch.full_like(d, 1e9)).amin(2),
         "t": st.t,
     }
     began = morale.step(u, ctx, params, dt)

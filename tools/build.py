@@ -520,7 +520,8 @@ def main(argv=None):
                                                     "newdist", "starsmove", "meleefire", "hglof", "rangenew", "lofab", "lofthresh", "lofheight", "rangestand", "lonerank", "shots"),
                         default="dist", help="missile-probe: the plan (tools/nn/missile_probe.py)")
     parser.add_argument("--mprobe-battle", type=int, default=1, help="missile-probe: the plan's battle, 1-based")
-    parser.add_argument("--morale-plan", choices=("flank", "charge", "secure", "shoot", "rally", "strong", "penitent", "aura", "strong2", "rally2", "timer"),
+    parser.add_argument("--morale-plan", choices=("flank", "charge", "secure", "shoot", "rally", "strong", "penitent", "aura", "strong2", "rally2", "timer",
+                                                    "hyp"),
                         default="flank",
                         help="morale-probe: the plan (tools/nn/morale_probe.py)")
     parser.add_argument("--morale-battle", type=int, default=1, help="morale-probe: the plan's battle, 1-based")

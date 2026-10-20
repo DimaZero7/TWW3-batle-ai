@@ -192,7 +192,11 @@ beside it; mode `attack_t2`, the neighbour's width `t2_width`); `control` - the 
 the run share and fatigue per 30 s.
 Missile probe: `reform_men` (the target re-forms by a 5 m move with its width at that many men), `friend` (a friend
 placed `friend_fwd` / `friend_lat` from the shooter, sampled as `f`); plans `thin`, `pistol`, `moving2`, `lof`.
-Morale probe: plans `strong2` (the strong-enemy scale, 6 enemies, 120-30 m) and `rally2` (the rally clock).
+Morale probe: plans `strong2` (the strong-enemy scale, 6 enemies, 120-30 m), `rally2` (the rally clock) and `hyp`
+(morale hypotheses, 4 battles of 1-6 lanes in a column along z, 0.25 s: the waver timer and the rally at rank 0 and 9 -
+the rank goes into the scenario, a weak enemy by a router, an enemy front of 12 / 60 m at the rally, rear then flank
+strikes, even fights, routing friends and enemies together; the engine's `kill` steps count in the battle's casualties,
+not in the recent ones).
 New units before the simulator (`tools/nn/unit_probe.py`, `build/newunits/plan.md`): plans `ratling` (the Ratling Gun
 shoots standing swordsmen from 60 / 100 / 135 m, shield spearmen, with half its crew, the General), `suppress` (swordsmen
 walk and run at the gun, firing or silent: speed under suppressing fire), `suppress2` (the gun falls

@@ -12,8 +12,16 @@ def test_every_plan_builds_lanes_far_apart_with_a_tested_side(plan):
     for i in range(1, len(mp.battles(plan)) + 1):
         config, model_s, arena = mp.run_config(plan, i)
         lanes = config["lanes"]
-        # no enemy of another lane within 146 m
-        assert all(math.hypot(a["x"] - b["x"], a["z"] - b["z"]) >= 330 for i, a in enumerate(lanes) for b in lanes[i + 1:])
+        # no enemy of another lane within 146 m of a tested unit at the start (plan hyp: lanes in a column, 240-300 m
+        # apart)
+        def enemies_apart(a, b):
+            return min((math.hypot(a["x"] + p["x"] - b["x"] - q["x"], a["z"] + p["z"] - b["z"] - q["z"])
+                        for p in a["units"] for q in b["units"]
+                        if mp.UNITS[p["short"]][2] != mp.UNITS[q["short"]][2] and not (p["fearless"] and q["fearless"])),
+                       default=1e9)
+        assert all(math.hypot(a["x"] - b["x"], a["z"] - b["z"]) >= (240 if plan == "hyp" else 330)
+                   for i, a in enumerate(lanes) for b in lanes[i + 1:])
+        assert all(enemies_apart(a, b) >= 146 for i, a in enumerate(lanes) for b in lanes[i + 1:])
         names = {u["name"] for l in lanes for u in l["units"]}
         for l in lanes:
             tested = [u for u in l["units"] if not u["fearless"]]
@@ -109,3 +117,11 @@ def test_timer_summary_splits_the_rule_variants():
 
 def test_a_run_s_variant_is_its_build_s_kv_label():
     assert mp.variant({}) == "normal" and mp.variant({"kv_label": "waver_base_timeout=250"}) == "waver_base_timeout=250"
+
+
+def test_the_hyp_plan_writes_the_ranks_and_widths_into_the_battle(tmp_path):
+    text = mp.write_scenario("hyp", 1, tmp_path / "hyp1.xml").read_text(encoding="utf-8")
+    assert text.count('<unit_experience level="9"/>') == 2
+    config, _, _ = mp.run_config("hyp", 2)
+    widths = {ln["kind"]: [u["width"] for u in ln["units"] if u["role"] == "E"] for ln in config["lanes"]}
+    assert widths["narrow"] == [12.0] and widths["wide"] == [60.0]

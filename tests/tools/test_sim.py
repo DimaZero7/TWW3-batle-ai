@@ -1206,10 +1206,11 @@ class TestMorale:
         assert got == [-6.0] * 5 + [0.0, -14.0, 0.0]
 
     def test_the_army_beaten_as_a_whole_routs(self):
-        # Army destruction: -120 to every unit of the side (battle.py decides when).
+        # Army destruction: -120 to every unit of the side (battle.py decides when). The points fall below 12 within
+        # ~1.5 s and stay at 0 until the 2.5 s waver timer is up (morale.waver_timer.floor): all rout within 6 s.
         st = face_off(SPEAR, SLAVE)
         hit = torch.ones_like(st.u["r"])
-        for _ in range(8):
+        for _ in range(12):
             morale.step(st.u, self.ctx(st, collapse=hit), P, 0.5)
         assert bool(st.u["r"].all())
 
@@ -1299,6 +1300,8 @@ class TestMorale:
         st.u["rout_count"][:] = 1
         st.u["rally_s"][:] = 0
         st.u["morale"][:] = -60
+        st.u["w"][:] = True                         # wavering past the waver timer (morale.waver_timer.floor)
+        st.u["waver_s"][:] = 10.0
         # The ordinary ten-second protection after rally does not make a destroyed army immortal.
         morale.step(st.u, self.ctx(st, collapse=hit), P, 0.5)
         assert bool(st.u["s"].all()) and bool(st.u["r"].all())
@@ -1313,8 +1316,9 @@ class TestMorale:
     def test_the_waver_timer_holds_a_rout_until_two_and_a_half_seconds_of_wavering(self):
         """morale.waver_timer (the probe timer): below 0 a unit routs only after waver_base_timeout (25) tenths of a
         second of unbroken wavering; at exactly 0 it never routs; the timer off routs at once."""
-        assert P.morale["waver_base_timeout"] == 25 and P.sim["morale"]["waver_timer"] == {"on": True, "tick_s": 0.1}
-        cal = P
+        assert P.morale["waver_base_timeout"] == 25 and P.sim["morale"]["waver_timer"]["on"]
+        assert P.sim["morale"]["waver_timer"]["tick_s"] == 0.1
+        cal = P.with_cal("morale", waver_timer={"on": True, "tick_s": 0.1, "floor": {"on": False}})
         st = face_off(SPEAR, SLAVE)
         low = self.ctx(st, lord_dead_points=torch.full_like(st.u["men"], -80.0))     # a target far below 0, above -50
         routed_at = wavered_at = below_at = None
@@ -1328,6 +1332,16 @@ class TestMorale:
                 below_at = k
         # below 0 well before the timer's end: the rout comes 2.5 s = 5 steps of 0.5 s after the first wavering step
         assert below_at < wavered_at + 5 and routed_at == wavered_at + 5
+        # with the floor (morale.waver_timer.floor, on) the same rout step, and no points below 0 before it
+        st = face_off(SPEAR, SLAVE)
+        floor = P.with_cal("morale", waver_timer={"on": True, "tick_s": 0.1, "floor": {"on": True}})
+        pts, routed_floor = [], None
+        for k in range(1, 30):
+            morale.step(st.u, low, floor, 0.5)
+            pts.append(float(st.u["morale"][0, 0]))
+            if routed_floor is None and bool(st.u["r"][0, 0]):
+                routed_floor = k
+        assert routed_floor == routed_at and min(pts[:routed_floor - 1]) >= 0.0
         # the timer off: the step it is below 0
         st = face_off(SPEAR, SLAVE)
         off = P.with_cal("morale", waver_timer={"on": False})

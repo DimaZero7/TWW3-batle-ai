@@ -113,6 +113,11 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
   charge, outnumbering, "losing the fight" (−3 / −8 by the combat ratio, as in the database), a strong
   enemy, the lord's death (−16 for 45 s, then −10), shattering of a unit and of the army; the rally is the
   measured process (`morale.rally_hazard`: a chance a second by the distance to the nearest enemy for routers with morale above 0; measured on the same condition over 360 game recordings).
+  By the probe hyp and the recordings of 92 battles: wavering with a margin (it starts below 12 points and ends above
+  16), the points stay at 0 or above until the waver timer is up, a 1st / 2nd rout shatters by the living men
+  (< 5 % / < 10 %), not health, routing friends and enemies cancel, an enemy weaker than a third of a router does not
+  hold its rally. The step replay of 92 battles: shatters sim / game 4.09 → 0.64, waver starts 1.66 → 1.02, routs
+  0.98 → 0.95, rallies 1.02 → 1.05 ([morale](game/mechanics/morale.md)).
 - **Rout:** the first 7 s the router stays in contact, then while a unit with an attack order on it is within
   16 m edge to edge; a chaser that caught it (no slower) strikes with as many men as it has, gaining them over ~3-5 s
   as its men run in from their ranks; router men that ran into

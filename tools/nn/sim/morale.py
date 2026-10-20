@@ -21,9 +21,13 @@ a pair's contact began on, held while in contact), combat_shooter (a shooter's b
 routing_enemies_reach (routing enemies counted to 200 m), charge.moving (another 6 s block while the unit still moves
 under an attack order, no cap; in melee a move under an attack order starts one).
 
-States: wavering below 16 points; routing at 0 or below (not within 10 s of a rally; with morale.waver_timer on: below
-0 and only after waver_base_timeout tenths of a second - 2.5 s - of unbroken wavering); the third
-rout shatters, as does falling below the database's broken band (-50 points) during army destruction. A routing
+States: wavering below 16 points (morale.waver_band: from below 12 to above 16, shaken from below 30 to above 32);
+routing at 0 or below (not within 10 s of a rally; with morale.waver_timer on: below 0 and only after waver_base_timeout
+tenths of a second - 2.5 s - of unbroken wavering, the points held at 0 or above until then with its floor); the third
+rout shatters, as does falling below the database's broken band (-50 points) during army destruction (shatter_rules: a
+1st / 2nd router below 5 % / 10 % of its health or, morale.shatter_by "men", of its men). Routing friends and enemies
+cancel with morale.routing_net; an enemy weaker than a third of a router does not hold its rally with morale.rally_weak
+(battle.py); 'losing' needs a share balance below combat_even.share with morale.combat_even (off). A routing
 unit's morale follows its target like any other's (without the fight terms) and it rallies once the morale is above
 0, it has routed morale.rally_after_s and no standing enemy is within morale.rally_free_m (its army not collapsing);
 with morale.rally_hazard on, past rally_after_s and above 0 it rallies with a chance a second by the nearest enemy's
@@ -188,6 +192,14 @@ def combat_points(dealt, taken, in_combat, cal, rules, own_lost=None, foe_lost=N
     else:
         pts = torch.where(ratio <= 1 / c["slightly"], rules["losing_combat"], pts)
         pts = torch.where(ratio <= 1 / c["significantly"], rules["losing_combat_significantly"], pts)
+    even = cal.get("combat_even") or {}
+    if even.get("on") and own_lost is not None and foe_lost is not None:
+        # morale.combat_even: 'losing' (-3) only once the enemies it fights have lost less than combat_even.share of the
+        # share of health it has lost itself (an even or slightly lost fight gives nothing); 'losing significantly' as
+        # before. The probe hyp (even fights): clanrats behind spearmen at a share balance of 0.62-0.71 for 35 s - no -3
+        # (an HP balance of 0.53-0.61), -3 from 0.58; spearmen behind clanrats at 0.59 - -3 (HP balance 0.68)
+        lag = foe_lost < float(even["share"]) * own_lost
+        pts = torch.where((pts == rules["losing_combat"]) & ~lag, torch.zeros_like(pts), pts)
     gate = cal.get("combat_lost")
     if gate is not None and own_lost is not None:
         pts = torch.where((pts < 0) & (own_lost < float(gate)), torch.zeros_like(pts), pts)
@@ -214,6 +226,11 @@ def strong_power(u, d, foes, friends, params):
     v = strategic_value(u, params)
     fall = (1 - d / float(se["reach_m"])).clamp(min=0)
     vj = v[:, None, :] * fall
+    if se.get("speed_ratio") is not None:
+        # an enemy slower than speed_ratio x the unit's run speed (effects counted) is not counted (the probe strong2:
+        # greatswords 2.8 m/s against skavenslaves 4.2 x 0.9 'Strength in Numbers' = 3.78 gave nothing, swordsmen 3.0,
+        # flagellants 3.6 and the General 3.4 their points)
+        foes = foes & (u["run"][:, None, :] >= float(se["speed_ratio"]) * u["run"][:, :, None])
     enemy = torch.where(foes, vj, torch.zeros_like(vj)).sum(2)
     own = v + torch.where(friends, vj, torch.zeros_like(vj)).sum(2)
     return float(se["k"]) * enemy / own.clamp(min=1e-6)
@@ -284,6 +301,13 @@ def terms(u, ctx, params):
         max=R["max_routing_friends_to_consider"])
     out["routing_enemies"] = R["routing_enemies_effect_weighting"] * ctx["routing_enemies"].clamp(
         max=R["max_routing_enemies_to_consider"])
+    if (cal.get("routing_net") or {}).get("on"):
+        # morale.routing_net: routing friends and enemies cancel - only the surplus counts, x3 a friend, x2.5 an enemy
+        # (the caps on the surplus)
+        net = (ctx["routing_enemies"] - ctx["routing_friends"]).clamp(-R["max_routing_friends_to_consider"],
+                                                                      R["max_routing_enemies_to_consider"])
+        out["routing_friends"] = R["routing_friends_effect_weighting"] * net.clamp(max=0)
+        out["routing_enemies"] = R["routing_enemies_effect_weighting"] * net.clamp(min=0)
     out["under_fire"] = torch.where(ctx["under_fire"], R["ume_concerned_attacked_by_projectile"], 0.0)
     out["fatigue"] = torch.where(u["fat"] >= 5, R["ume_concerned_exhausted"],
                                  torch.where(u["fat"] >= 4, R["ume_concerned_very_tired"], 0.0))
@@ -310,6 +334,17 @@ def target_points(u, ctx, params, parts=None):
     for v in parts.values():
         pts = pts + v
     return pts
+
+
+def wavering(M, was, can, R, band):
+    """[B, N] wavering after this step's points M: below the wavering band's upper edge (16); with morale.waver_band on,
+    the game's margin - a unit starts to waver only below the shaken band's lower edge (12) and stays wavering while its
+    points are at the wavering band's upper edge (16) or below (was: wavering the step before; can: may waver - alive,
+    not routing). The recordings (92 battles, 1 s): of the seconds at 12-16 points, 5.3 % waver when the unit came from
+    above 16, 98.2 % when it came from below 12; probe lanes: 32 starts at 12 -> 11 points, 9 ends at 16 -> 17."""
+    if not band:
+        return can & (M < R["ums_wavering_threshold_upper"])
+    return can & ((M < R["ums_shaken_threshold_lower"]) | (was & (M <= R["ums_wavering_threshold_upper"])))
 
 
 def step(u, ctx, params, dt):
@@ -384,14 +419,20 @@ def step(u, ctx, params, dt):
     # Rout.
     no_rout = u["rally_s"] < R["post_rally_no_rout_timer"]
     timer = cal.get("waver_timer") or {}
+    band = bool((cal.get("waver_band") or {}).get("on"))
+    wav = wavering(M, u["w"], alive & ~u["r"], R, band)
     if timer.get("on") and "waver_s" in u:
         # The waver timer (morale.waver_timer; the probe timer, build/morale-probe/timer.json): a unit routs only once
         # its morale is below 0 (at exactly 0 it still wavers) AND it has wavered without a break the database's
         # waver_base_timeout in tenths of a second (25 -> 2.5 s; the probe with it x10 routed 25.5 s after the wavering,
         # x0 at once). waver_s: seconds since the first step of the current wavering (0 on that step).
-        wav = alive & ~u["r"] & (M < R["ums_wavering_threshold_upper"])
         u["waver_s"] = torch.where(wav & u["w"], u["waver_s"] + dt, torch.zeros_like(u["waver_s"]))
         ripe = u["waver_s"] >= R["waver_base_timeout"] * float(timer["tick_s"]) - 1e-6
+        if (timer.get("floor") or {}).get("on"):
+            # The floor (morale.waver_timer.floor; config/nn/sim.json waver_timer_why): until its waver timer is up a
+            # unit that does not rout keeps its points at 0 or above - the game holds them at 0 (one step below at most)
+            # while the timer runs, deep losses or not; the step the timer is up they move on below 0 and it routs.
+            M = torch.where(alive & ~u["r"] & ~ripe, M.clamp(min=0.0), M)
         start = alive & ~u["r"] & (M < 0) & ripe & ~(no_rout & (u["rout_count"] > 0))
     else:
         start = alive & ~u["r"] & (M <= 0) & ~(no_rout & (u["rout_count"] > 0))
@@ -414,17 +455,25 @@ def step(u, ctx, params, dt):
         # shatters, above). The recordings (221 battles): all 153 shatters on the run of a 1st / 2nd rout explained,
         # 0.1-0.3 % of the rallied units ever met one of them.
         floor = alive & ~u["unbreakable"] & (M <= R["ums_broken_threshold_lower"] + 1e-6)
-        low = alive & u["r"] & (((u["rout_count"] == 1) & (u["hp"] < R["shatter_after_first_rout_if_casulties_higher_than"]))
-                                | ((u["rout_count"] == 2) & (u["hp"] < R["shatter_after_second_rout_if_casulties_higher_than"])))
+        # the share left: of health, or (morale.shatter_by "men") of the men alive - the recordings (92 battles): every
+        # shatter of a 1st / 2nd rout above the floor came the second its men fell below 5 % / 10 % of the start (41 / 46
+        # of 41 / 46), while routers below 5 % of their health with more men ran on (1.9 % shattered within 2 s)
+        left = (u["men"] / u["men0"].clamp(min=1)) if cal.get("shatter_by") == "men" else u["hp"]
+        low = alive & u["r"] & (((u["rout_count"] == 1) & (left < R["shatter_after_first_rout_if_casulties_higher_than"]))
+                                | ((u["rout_count"] == 2) & (left < R["shatter_after_second_rout_if_casulties_higher_than"])))
         shattered = floor | low
         u["s"] = u["s"] | shattered
         u["r"] = u["r"] | shattered
     u["morale"] = torch.where(alive, M, u["morale"])
-    u["w"] = alive & ~u["r"] & (M < R["ums_wavering_threshold_upper"])
+    u["w"] = wavering(M, u["w"], alive & ~u["r"], R, band)
     mp = M / L
     u["mp"] = mp
     ms = torch.where(mp >= 1.0, 1, torch.where(mp >= R["ums_confident_threshold_lower"], 2, 3))
-    ms = torch.where(M < R["ums_steady_threshold_lower"], 4, ms)
+    shaken = M < R["ums_steady_threshold_lower"]
+    if band:
+        # shaken below the steady band's lower edge (30), back to steady only above the shaken band's upper edge (32)
+        shaken = shaken | (((u["ms"] == 4) | (u["ms"] == 5)) & (M <= R["ums_shaken_threshold_upper"]))
+    ms = torch.where(shaken, 4, ms)
     ms = torch.where(u["w"], 5, ms)
     ms = torch.where(u["r"], 6, ms)
     ms = torch.where(u["s"], 7, ms)

@@ -678,16 +678,20 @@ class TestShatter:
                 "routing_friends": torch.zeros_like(st.u["men"]), "routing_enemies": torch.zeros_like(st.u["men"]),
                 "under_fire": z, "strong_enemy": z, "enemy_near": z | True}
 
-    @pytest.mark.parametrize("routs, hp, shattered", [(1, 0.04, True), (1, 0.06, False), (2, 0.08, True),
-                                                     (2, 0.12, False)])
-    def test_a_routing_unit_shatters_below_the_database_health(self, routs, hp, shattered):
+    @pytest.mark.parametrize("by", ["hp", "men"])
+    @pytest.mark.parametrize("routs, share, shattered", [(1, 0.04, True), (1, 0.06, False), (2, 0.08, True),
+                                                        (2, 0.12, False)])
+    def test_a_routing_unit_shatters_below_the_database_share(self, routs, share, shattered, by):
+        # morale.shatter_by: the share of health ("hp") or of the living men ("men", the recordings) - the other one
+        # stays at 0.5, far above either threshold
         st = face_off(SPEAR, SLAVE, gap=200.0)
         st.u["r"][0, 0] = True
         st.u["rout_count"][0, 0] = float(routs)
         st.u["rout_s"][0, 0] = 5.0
-        st.u["hp"][0, 0] = hp
+        st.u["hp"][0, 0] = share if by == "hp" else 0.5
+        st.u["men"][0, 0] = round(float(st.u["men0"][0, 0]) * (share if by == "men" else 0.5))
         st.u["morale"][0, 0] = -5.0
-        morale.step(st.u, self.ctx(st), P, P.dt)
+        morale.step(st.u, self.ctx(st), P.with_cal("morale", shatter_by=by), P.dt)
         assert bool(st.u["s"][0, 0]) == shattered
 
     def test_morale_at_the_floor_shatters_without_army_collapse_unless_unbreakable(self, monkeypatch):
@@ -699,6 +703,8 @@ class TestShatter:
             st.u["rout_count"][0, 0] = float(routing)
             st.u["hp"][0, 0] = 0.8
             st.u["unbreakable"][0, 0] = unbreakable
+            st.u["w"][0, 0] = not routing           # a standing one wavering past the timer (morale.waver_timer.floor)
+            st.u["waver_s"][0, 0] = 10.0
             morale.step(st.u, self.ctx(st), P, P.dt)
             assert bool(st.u["s"][0, 0]) == (not unbreakable), (unbreakable, routing)
 

@@ -46,11 +46,10 @@ numbers as they are:
 | `wavering` | 0 | 16 |
 | `broken` (routing) | −50 | 0 |
 
-**The unit of these thresholds is not checked.** Whole numbers (0, 12, 16, 30,
-32, −50) sit next to fractions (0.65–1.1), and steady's upper threshold 0.8 is
-below its lower one, 30. Perhaps some are points and some are fractions of
-`MoralePercent`; they were not compared with the recordings. Neighbouring bands
-overlap.
+Whole numbers (0, 12, 16, 30, 32, −50) are points, fractions (0.65–1.1) shares of leadership. The overlapping bands
+are a margin: wavering starts below 12 points and ends above 16; "shaken" below 30, back above 32
+([mechanics](../mechanics/morale.md); the recordings of 92 battles: at 12–16 points 98 % of the units that came from
+below waver, 5 % of those that came from above).
 
 ## Leadership
 
@@ -134,9 +133,9 @@ a rallied unit cannot rout again for 10 s (`post_rally_no_rout_timer`);
   showed the rule (below). All recordings: any living enemy within 95 m, a routing one too, nearly
   forbids the rally (0.9 % of 4285 such seconds rallied within 1 s, with none 12.6 % of 17,319); and
   without one the rally is not at once — from the first second the conditions hold, median 7 s (p25 4, p75 12).
-- **Shattering.** All 92 + 61 shatters on the run of a 1st / 2nd rout (221 battles, army-destruction waves
-  excluded) met one of the conditions: points at the floor −50 or health below 0.05 / 0.10 of the start;
-  rallied units reached them in 0.000–0.003 of 3205.
+- **Shattering.** On a 1st / 2nd rout — when the points are at the floor −50 or fewer than 5 % / 10 % of the starting
+  men live (the recordings of 92 battles: all 41 / 46 shatters above the floor came the second the men fell below the
+  threshold; below it by health the routers ran on for 5,756 seconds, 1.9 % shattered within 2 s).
 - **How often.** 243 routs and 132 rallies in 13 battles — about 19 routs and 10
   rallies a battle. Units often rout and rally several times; the winner chases
   routers for a long time, a battle lasts 350–900 s of game time.
@@ -188,6 +187,22 @@ of the strongest effect (`MoraleGreatestEffect`). Data: `build/morale`.
   probe has no friends; that they count shows in the 72 recorded battles ([simulator](../../training/simulator.md#expendable-units-resistance-a-stronger-enemy),
   `morale.strong_enemy`). The greatswords — OPEN.
 
+- **The probe hyp** (20.10.2026, 4 battles, normal difficulty, `python -m tools.nn.morale_probe run --plan hyp`,
+  data `build/morale-probe/runs/20261020-*`): checks of morale hypotheses ([mechanics](../mechanics/morale.md)).
+  - Rank: skavenslaves cut by the engine rout 3.0 s after the wavering began (rank 0) and 7.5 s (rank 9); until the
+    timer is up the points stay at 0 (alternating 0 / −4). The rally: rank 0 18.3 s after the rout, rank 9 0.6 s, as
+    soon as the morale is above 0.
+  - A weak enemy (3 % of its men) 25–30 m from a router does not hold the rally: rallied at 18.6 s.
+  - The rally distance is from the enemy's formation edge: with a 12 m enemy front the rally at 102 m centre to
+    centre, with 60 m at 127 m.
+  - Struck in the rear, then on the flank too: 40 points before and after the second enemy came (the penalties do not
+    add up).
+  - An even fight (clanrats against spearmen, 80 s): the one behind at a share balance of 0.62–0.71 — no −3; −3 from
+    0.58–0.59.
+  - Routing friends and enemies cancel: 2 + 2 — 60 points and no label, 2 friends + 4 enemies — 65.
+  - The engine killing 70 % of the men at once caused no rout: its kills count in the battle's casualties, not in
+    the recent ones.
+
 ## How to read it
 
 - `cco.MoralePercent` is a number; it can be above 1, and under pressure it goes
@@ -205,7 +220,7 @@ of the strongest effect (`MoraleGreatestEffect`). Data: `build/morale`.
 
 - How exactly the engine adds up the effects: the formula is in the engine, the
   database has only the numbers.
-- Ranks above 0, other units and factions.
+- Ranks above 0 (beyond the waver and rally timers of rank 9, the probe hyp), other units and factions.
 - `charge_timeout` 60 is not a cooldown of the charge's morale (a unit gets +15 again after ~19 s); its
   meaning is not found. `shatter_after_first_rout_if_casulties_higher_than` 0.05 and `…_second_rout_…` 0.1 —
   by the recordings: a shatter below 0.05 / 0.10 of the starting health on the 1st / 2nd rout (above).

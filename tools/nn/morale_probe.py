@@ -37,6 +37,10 @@ Plans (battles):
           at the first wavering, or the engine killing 30 % of the men every 4 s; run with the game's rules and with
           waver_base_timeout changed in the probe's pack (--kv waver_base_timeout=x10 / =0): 'timer' prints the delays
           wavering -> rout and MoralePercent <= 0 -> rout per variant (timer_lane).
+  hyp     morale hypotheses (4 battles, lanes in a column along z, 0.25 s samples, speed 3): 1 - the waver timer and the
+          rally clock at rank 0 and 9 (the rank written into the scenario), a weak enemy by a router; 2 - rear then
+          flank strikes (one leaves first), two even fights, the rally against a 12 m / 60 m enemy front; 3 - a weak
+          fast enemy by a router; 4 - routing friends and enemies around a standing unit (hyp_*_lane).
 
     python -m tools.nn.morale_probe plan [--plan flank]            # the battles
     python -m tools.build morale-probe --morale-plan flank --morale-battle 1
@@ -90,7 +94,8 @@ SETTLE_MS = 4000
 TICK_MS = 500
 WIDTH_M = 30
 PARK_Z = 650
-PLANS = ("flank", "charge", "secure", "shoot", "rally", "strong", "penitent", "aura", "strong2", "rally2", "timer")
+PLANS = ("flank", "charge", "secure", "shoot", "rally", "strong", "penitent", "aura", "strong2", "rally2", "timer",
+         "hyp")
 PENITENT = "wh_dlc04_unit_passive_strength_of_the_penitent"
 HTL, SYG, RALLY = ("wh_main_lord_passive_hold_the_line", "wh_main_character_abilities_stand_your_ground",
                    "wh_main_character_abilities_rally")
@@ -115,10 +120,16 @@ def leadership(key):
     return float(json.loads(UNITS_JSON.read_text(encoding="utf-8"))["units"][key]["leadership"])
 
 
-def u(role, short, x, z, b, fearless=False):
-    """A lane unit: its centre (lane frame, m) and bearing (0: facing +z)."""
-    return {"role": role, "short": short, "x": round(float(x), 1), "z": round(float(z), 1), "b": b,
-            "fearless": fearless}
+def u(role, short, x, z, b, fearless=False, width=None, rank=0):
+    """A lane unit: its centre (lane frame, m) and bearing (0: facing +z); width: its frontage, m (None: WIDTH_M);
+    rank: its experience rank 0-9 (the scenario's unit_experience)."""
+    out = {"role": role, "short": short, "x": round(float(x), 1), "z": round(float(z), 1), "b": b,
+           "fearless": fearless}
+    if width is not None:
+        out["width"] = float(width)
+    if rank:
+        out["rank"] = int(rank)
+    return out
 
 
 def s(on, do, unit=None, of=None, delay_s=0.0, **extra):
@@ -372,6 +383,114 @@ def timer_lane(kind):
     return {"kind": kind, "units": units, "steps": steps, "max_s": TIMER_MAX_S}
 
 
+HYP_DZ = 300                   # plan hyp: lanes in a column along z, <= 300 m apart within z +-600 (routers flee
+                               # along x, to their edge)
+HYP_TICK_MS = 250
+HYP_SPEED = 3
+
+
+def hyp_timer_lane(rank):
+    """Plan hyp, the waver timer by rank: U (skavenslaves of `rank`, tested) holds; fearless spearmen stand 60 m in
+    front; the engine kills half of U's men every second (TIMER_KILL_FAST): its morale falls through wavering to below 0
+    within ~1 s, so the wavering -> rout delay is the timer itself (rank 0: 2.5 s; rank 9: 2.5 + 0.5 x 9 = 7 s?)."""
+    dU = depth("slave")
+    units = [u("U", "slave", 0, -dU / 2, 0, rank=rank), u("E", "spear", 0, 60 + depth("spear") / 2, 180, True)]
+    steps = [s("go", "kill", "U", delay_s=t, share=share) for t, share in TIMER_KILL_FAST]
+    steps.append(s("rout", "end", of="U", delay_s=12))
+    return {"kind": f"timer_r{rank}", "units": units, "steps": steps, "max_s": 80}
+
+
+def hyp_rally_lane(kind, rank=0):
+    """Plan hyp, the rally: U (skavenslaves of `rank`, tested) holds; fearless spearmen (E) attack it in front from
+    40 m, swordsmen (R) in its rear 15 s after its contact. At U's rout the engine kills E and R outright, so
+    nothing but `kind` decides the rally:
+      'free'   no enemy left (the rally clock alone: rank 0 at 18 s, rank 9 at once once the morale is above 0?);
+      'weak'   a fearless spearmen unit cut to 3 % of its men by the engine at the start (W, far weaker than a third of
+               the router) waits 30 m off U's flank and from the rout keeps 10 m from it: does a weak enemy block?
+      'narrow' / 'wide'  R is killed, E (12 m / 60 m frontage) keeps 40 m from the router and halts 20 s after the rout;
+               the router runs clear: the centre distance at the rally (by the enemy's edge: wide later than narrow?)."""
+    dU = depth("slave")
+    width = {"narrow": 12, "wide": 60}.get(kind)
+    dE = depth("spear", width or WIDTH_M)
+    units = [u("U", "slave", 0, -dU / 2, 0, rank=rank), u("E", "spear", 0, 40 + dE / 2, 180, True, width=width),
+             u("R", "swords", 0, -dU - 40 - depth("swords") / 2, 0, True)]
+    steps = [s("go", "attack", "E", target="U"), s("contact", "attack", "R", of="U", delay_s=15, target="U"),
+             s("rout", "kill", "R", of="U", share=1.0)]
+    if kind == "weak":
+        units.append(u("W", "spear", 15 + 30 + 5, -dU / 2, 270, True, width=10))
+        steps += [s("go", "kill", "W", share=0.97), s("rout", "kill", "E", of="U", share=1.0),
+                  s("rout", "shadow", "W", of="U", target="U", d=10.0)]
+    elif width:
+        steps += [s("rout", "shadow", "E", of="U", target="U", d=40.0), s("rout", "halt", "E", of="U", delay_s=20)]
+    else:
+        steps.append(s("rout", "kill", "E", of="U", share=1.0))
+    steps += [s("rally", "end", of="U", delay_s=30), s("rout", "end", of="U", delay_s=120)]
+    return {"kind": f"{kind}_r{rank}" if rank else kind, "units": units, "steps": steps, "max_s": 330}
+
+
+def hyp_weak_fast_lane():
+    """Plan hyp, a weak enemy that keeps up with the router: U (Empire spearmen, tested) holds; fearless stormvermin (E)
+    attack it in front from 40 m, clanrats (R) in its rear 15 s after its contact; at U's rout the engine kills E and R
+    outright, and night runners cut to 3 % of their men at the start (W, far weaker than a third of the router; faster
+    than it) keep 20 m from the router: rally at the clock's 18 s (a weak enemy does not block) or not while W is near?"""
+    dU = depth("spear")
+    units = [u("U", "spear", 0, -dU / 2, 0), u("E", "storm", 0, 40 + depth("storm") / 2, 180, True),
+             u("R", "clanrat", 0, -dU - 40 - depth("clanrat") / 2, 0, True),
+             u("W", "nr", 15 + 30 + 5, -dU / 2, 270, True, width=10)]
+    steps = [s("go", "attack", "E", target="U"), s("contact", "attack", "R", of="U", delay_s=15, target="U"),
+             s("go", "kill", "W", share=0.97), s("rout", "kill", "E", of="U", share=1.0),
+             s("rout", "kill", "R", of="U", share=1.0), s("rout", "shadow", "W", of="U", target="U", d=20.0),
+             s("rally", "end", of="U", delay_s=30), s("rout", "end", of="U", delay_s=120)]
+    return {"kind": "weak_fast", "units": units, "steps": steps, "max_s": 330}
+
+
+def hyp_flank_lane(first):
+    """Plan hyp, flank and rear at once: U (spearmen with shields, tested) holds; fearless skavenslaves attack its flank
+    (B, from 70 m) and its rear (C, from 70 m) at the start; 25 s after U's contact the `first` ('B' flank / 'C' rear)
+    runs ~200 m away along x, 20 s later the other: the morale's jump at each leave (the flank's -6 summed with the rear's -14,
+    or the rear instead of the flank?)."""
+    dU, dB = depth("spearsh"), depth("slave")
+    units = [u("U", "spearsh", 0, -dU / 2, 0), u("B", "slave", 15 + 70 + dB / 2, -dU / 2, 270, True),
+             u("C", "slave", 0, -dU - 70 - dB / 2, 0, True)]
+    # both leave along x (the lanes stand in a column along z): B on outwards, C sideways out of the rear
+    away = {"B": dict(x=15 + 200, z=round(-dU / 2, 1)), "C": dict(x=-200, z=round(-dU - 70, 1))}
+    second = "C" if first == "B" else "B"
+    steps = [s("go", "attack", "B", target="U"), s("go", "attack", "C", target="U"),
+             s("contact", "move", first, of="U", delay_s=25, **away[first]),
+             s("step", "move", second, of=3, delay_s=20, **away[second]),
+             s("step", "end", of=4, delay_s=25)]
+    return {"kind": f"flankrear_{first}", "units": units, "steps": steps, "max_s": 200}
+
+
+def hyp_even_lane(tested, foe):
+    """Plan hyp, the fight's balance: U (`tested`) holds, a fearless `foe` attacks it in front from 40 m; 80 s from the
+    contact. Near-even fights: at which HP balance does 'losing' (-3) show (the simulator: as soon as U takes more than
+    it deals; a 7-level scale with 'even' and 'slightly losing' 0?)."""
+    dU, dA = depth(tested), depth(foe)
+    units = [u("U", tested, 0, -dU / 2, 0), u("A", foe, 0, 40 + dA / 2, 180, True)]
+    steps = [s("go", "attack", "A", target="U"), s("contact", "end", of="U", delay_s=80)]
+    return {"kind": f"even_{tested}_{foe}", "units": units, "steps": steps, "max_s": 150}
+
+
+def hyp_routers_lane(own, foes):
+    """Plan hyp, routing friends and enemies together: U (spearmen, tested) stands; `own` Empire archers (tested) 35 m
+    behind it and `foes` skavenslaves (tested) 45 m in front of it, all held; 3 s after the start the engine kills 93 %
+    of each of them: they rout (and run to their own edges), U's morale moves by the routing terms alone (70 % does not
+    rout them: the engine's kills are no 'recent casualties', only the battle's total; run 20261020-014751). Friends -3
+    each and enemies +2.5 each summed (the simulator), or their difference weighted (2 + 2: 0, 2 + 4: +5)?"""
+    dU = depth("spear")
+    units = [u("U", "spear", 0, -dU / 2, 0)]
+    steps = []
+    for k in range(own):
+        units.append(u(f"F{k + 1}", "archers", (k - (own - 1) / 2) * 34, -dU - 35, 0, width=24))
+        steps.append(s("go", "kill", f"F{k + 1}", delay_s=3, share=0.93))
+    for k in range(foes):
+        units.append(u(f"E{k + 1}", "slave", (k - (foes - 1) / 2) * 30, 45, 180, width=22))
+        steps.append(s("go", "kill", f"E{k + 1}", delay_s=3, share=0.93))
+    steps.append(s("go", "end", delay_s=45))
+    return {"kind": f"routers_{own}_{foes}", "units": units, "steps": steps, "max_s": 55}
+
+
 def rotate(items, k):
     k %= len(items)
     return items[k:] + items[:k]
@@ -404,6 +523,13 @@ def battles(plan):
     if plan == "timer":
         a = [timer_lane(k) for k in TIMER_KINDS]
         return [a, rotate(a, 3)]
+    if plan == "hyp":
+        return [[hyp_timer_lane(0), hyp_timer_lane(9), hyp_rally_lane("free", 0), hyp_rally_lane("free", 9),
+                 hyp_rally_lane("weak")],
+                [hyp_flank_lane("B"), hyp_flank_lane("C"), hyp_even_lane("clanrat", "spear"),
+                 hyp_even_lane("spear", "clanrat"), hyp_rally_lane("narrow"), hyp_rally_lane("wide")],
+                [hyp_weak_fast_lane()],
+                [hyp_routers_lane(2, 2), hyp_routers_lane(2, 4), hyp_routers_lane(0, 2), hyp_routers_lane(2, 0)]]
     return [[rally_lane(k) for k in (0, 50, 90, 150)]]
 
 
@@ -429,11 +555,13 @@ def layout(specs, plan):
     n, dx = len(specs), lane_dx(plan)
     tested = set()
     for k, spec in enumerate(specs, 1):
-        x, z = (TIMER_PLACES[k - 1] if plan == "timer" else (dx * (k - 1 - (n - 1) / 2), 0.0))
+        x, z = (TIMER_PLACES[k - 1] if plan == "timer" else (0.0, min(HYP_DZ, 1200 / max(n - 1, 1)) * (k - 1 - (n - 1) / 2)) if plan == "hyp"
+                else (dx * (k - 1 - (n - 1) / 2), 0.0))
         units = []
         for un in spec["units"]:
             name = add(un["short"], k)
-            row = dict(un, name=name, key=UNITS[un["short"]][0], width=5 if UNITS[un["short"]][1] == 1 else WIDTH_M)
+            row = dict(un, name=name, key=UNITS[un["short"]][0],
+                       width=5 if UNITS[un["short"]][1] == 1 else un.get("width", WIDTH_M))
             units.append(row)
             if un["fearless"]:
                 fearless.append(name)
@@ -467,16 +595,24 @@ def run_config(plan, index):
     """(entry config, model seconds, arena) of battle `index` (1-based) of a plan."""
     lanes, park, fearless, arena = layout(battles(plan)[index - 1], plan)
     config = {"plan": plan, "battle": index, "settle_ms": SETTLE_MS,
-              "tick_ms": TIMER_TICK_MS if plan == "timer" else TICK_MS, "lanes": lanes, "park": park, "fearless": fearless}
+              "tick_ms": TIMER_TICK_MS if plan == "timer" else HYP_TICK_MS if plan == "hyp" else TICK_MS, "lanes": lanes,
+              "park": park, "fearless": fearless}
     model_s = max(l["max_s"] for l in lanes) + SETTLE_MS / 1000 + 20
     return config, model_s, arena
 
 
 def write_scenario(plan, index, path=None):
-    _, _, arena = run_config(plan, index)
+    config, _, arena = run_config(plan, index)
     path = path or ROOT / f"morale_probe_{plan}_{index}.xml"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(nn_scenario.scenario_xml(arena, "enemy", 3600), encoding="utf-8", newline="\n")
+    text = nn_scenario.scenario_xml(arena, "enemy", 3600)
+    for lane in config["lanes"]:                # experience: a unit's rank (0-9), as tools/nn/missile_probe.py
+        for un in lane["units"]:
+            if un.get("rank"):
+                text, n = re.subn(rf'(script_name="{re.escape(un["name"])}">.*?<unit_experience level=")0("/>)',
+                                  rf"\g<1>{int(un['rank'])}\g<2>", text, count=1, flags=re.S)
+                assert n == 1, un["name"]
+    path.write_text(text, encoding="utf-8", newline="\n")
     return path
 
 
@@ -485,7 +621,7 @@ def run(plan, which=None, python=sys.executable, dry=False, deadline=None, kv=()
     the launcher). kv: tools.build --kv rows (the game's rules changed in the probe's pack); speed: the battle
     speed (the timer plan: TIMER_SPEED); graphics: the launcher's -Graphics (lowigpu: the integrated GPU)."""
     done = []
-    speed = speed or (TIMER_SPEED if plan == "timer" else None)
+    speed = speed or (TIMER_SPEED if plan == "timer" else HYP_SPEED if plan == "hyp" else None)
     # real seconds before the script ends a battle: the timer plan is ~35 s at speed 10 (a hung one must not hold
     # the game into the training line's sets)
     deadline = deadline or (240 if plan == "timer" else 1200)
