@@ -20,6 +20,78 @@
     "entropy-target": 0.05,
     "entropy-max": 0.03,
     "gpu-duty": 1.0,
-    "mix": {"self": 0.05, "past": 0.1, "nearest": 0.35, "hold_shoot": 0.15, "hold": 0.05, "ai_like": 0.3}
+    "mix": {
+      "self": 0.05,
+      "past": 0.1,
+      "nearest": 0.35,
+      "hold_shoot": 0.15,
+      "hold": 0.05,
+      "ai_like": 0.3
+    }
+  },
+  "steps": {
+    "general": {
+      "_comment": "S28 skeleton (docs/en/training/general.md): the general on the unit network of line S27 (from build/v2/itS27_4.pt: --from build/v2/itS27_4.pt). The options of line S27 (build/steps/v2_iterW.sh + train_extra_S.txt: the reward v2, the v2 armies, the ability branches and their own signal, the fighters lab, the pool of S nets) over test5's protocol (its --small, lr, entropy and anchor undone), and the general: --general and its sizes. The evaluations: the mandatory set only (rating, pair gold, own lord deaths); the general's own numbers are in the run's log.jsonl (\"general\").",
+      "minutes": 30,
+      "every": 10,
+      "profile": "mandatory",
+      "drop": [
+        "anchor-roll",
+        "lord-rout",
+        "idle-rate",
+        "drill-teach",
+        "teach-normal"
+      ],
+      "options": {
+        "preset": "v2",
+        "reward": "v2",
+        "armies": "v2",
+        "small": "",
+        "lr": 0.0001,
+        "entropy": 0.01,
+        "entropy-end": 0.01,
+        "anchor": 0.0,
+        "anchor-end": 0.0,
+        "drills": 0,
+        "snapshot-every": 20,
+        "pool": 12,
+        "pool-extra": "build/v2/itS26_15.pt,build/v2/itS25_1.pt,build/v2/itS26_5.pt",
+        "mix": {
+          "self": 0.35,
+          "past": 0.38,
+          "ai_like": 0.05,
+          "nearest": 0.02
+        },
+        "kite-share": 0.17,
+        "observe-dir": "build/observe/data",
+        "dr": true,
+        "save-every": 5,
+        "critic-warmup": 3,
+        "adv-norm": "role",
+        "entropy-target": 0.05,
+        "entropy-max": 0.03,
+        "head-entropy": "sector=0.4,cell=0.5,hold=0.5,ability=0.05",
+        "ability-branch": 0.2,
+        "ability-branch-cap": 128,
+        "ability-branch-hold": 30,
+        "ability-branch-horizon": 60,
+        "ability-branch-openloop": true,
+        "ability-critic": true,
+        "ability-own-signal": true,
+        "ability-lr-mult": 2,
+        "ability-epochs": 2,
+        "ability-norm": "per-ability",
+        "parts": 3,
+        "fighters": true,
+        "general": true,
+        "general-card": 128,
+        "general-council-layers": 2,
+        "general-group-layers": 1,
+        "general-entropy": 0.01,
+        "general-return": "span",
+        "general-deploy": "net",
+        "general-center": 1.0
+      }
+    }
   }
 }

@@ -3,6 +3,7 @@
     python -m tools.ops.step --label n4_morale --from n3_consolidate
     python -m tools.ops.step --label n4 --from n3_consolidate/m15 --minutes 15 --set drills=0.1 --drop teach-normal
     python -m tools.ops.step --label n4 --from n3_consolidate --write build/steps/n4.sh -- --lord-rout 0.3
+    python -m tools.ops.step --label g1 --from build/v2/itS27_4.pt --step general     # a named step of the chain file
 
 Builds the test5 trend-run command of the chain (docs/en/training/training.md "The chain's settings")
 and prints it, or writes it as a bash script (--write): the previous step's last network is the
@@ -14,6 +15,11 @@ plays a baseline canary (--baseline-canary) so an unrelated code change does not
 config/train-chain.json test5.profile, else full): the mandatory set always, "drills,transfer" adds those.
 It also says whether the baselines' cache will hit (tools/nn/train/version.py) and the expected wall
 time. It never runs anything itself.
+
+--from a checkpoint file (build/v2/itS27_4.pt: a line's network outside test5, a copy of its run's latest.pt) takes it
+as the --init, the --reference and the --critic-init (its own critic and Adam: run.py resumes from it). --step NAME
+takes the chain file's "steps" entry NAME over the standing options: its "options" set or replace them, its "drop"
+removes them, its "minutes", "every", "profile" and "canary" replace test5's; --set / --drop come after it.
 """
 import argparse
 import json
@@ -40,8 +46,14 @@ def load_chain(path=CHAIN):
 
 def chain_point(spec, test5=None, runs=None):
     """("label", init, critic) of the previous step `spec`: "<label>" takes its last m<minute>.pt,
-    "<label>/m<minute>" that network; the critic is its run's latest.pt (None when missing)."""
+    "<label>/m<minute>" that network; the critic is its run's latest.pt (None when missing). A checkpoint file
+    ("<path>.pt", relative to the repository or absolute): itself, its critic its own."""
     test5, runs = TEST5 if test5 is None else test5, RUNS if runs is None else runs
+    if spec.endswith(".pt"):
+        path = Path(spec) if Path(spec).is_absolute() else ROOT / spec
+        if not path.is_file():
+            raise SystemExit(f"no checkpoint {path}")
+        return path.stem, path, path
     label, _, point = spec.replace("\\", "/").partition("/")
     folder = Path(test5) / label
     if not folder.is_dir():
@@ -123,10 +135,23 @@ def wall_minutes(minutes, every, miss):
     return (minutes * 60 + evals * EVAL_S + (MISS_S if miss else 0) + STARTUP_S) / 60, evals
 
 
+def named_step(chain, name):
+    """The chain file's "steps" entry `name` ({} for None): options, drop, minutes, every, profile, canary."""
+    if not name:
+        return {}
+    steps = chain.get("steps") or {}
+    if name not in steps:
+        raise SystemExit(f"no step {name!r} in the chain file's steps ({', '.join(sorted(steps)) or 'none'})")
+    return steps[name]
+
+
 def build(label, prev, chain, minutes=None, every=None, sets=(), drops=(), extra=(), canary=None, prefix=None,
-          profile=None):
+          profile=None, step_name=None):
     """(script lines, info) of the step."""
-    t5 = chain.get("test5", {})
+    named = named_step(chain, step_name)
+    t5 = dict(chain.get("test5", {}), **{k: v for k, v in named.items() if k in ("minutes", "every", "profile")})
+    if "canary" in named:
+        t5["baseline_canary"] = named["canary"]
     profile = t5.get("profile") if profile is None else profile
     if profile:
         profiles.parse(profile, profiles.TEST5, profiles.TEST5_ALIASES)     # a wrong name fails here, not in the run
@@ -135,7 +160,10 @@ def build(label, prev, chain, minutes=None, every=None, sets=(), drops=(), extra
     canary = t5.get("baseline_canary", 0) if canary is None else canary
     prefix = t5.get("dock_prefix", "orch-") if prefix is None else prefix
     prev_label, init, critic = chain_point(prev)
-    options = apply_sets(chain.get("options", {}), sets, drops)
+    standing = dict(chain.get("options", {}), **(named.get("options") or {}))
+    for k in named.get("drop") or ():
+        standing.pop(k, None)
+    options = apply_sets(standing, sets, drops)
     head = ["--critic-init", rel(critic)] if critic else []
     run_opts = head + ["--reference", rel(init)] + option_args(options) + list(extra)
     test5_args = ["--label", label, "--init", rel(init), "--updates", "0", "--minutes", f"{minutes:g}", "--every", f"{every:g}"]
@@ -148,7 +176,8 @@ def build(label, prev, chain, minutes=None, every=None, sets=(), drops=(), extra
     lines = [f'cd "{posix(ROOT)}"', cmd]
     info = {"label": label, "prev": prev_label, "init": rel(init), "critic": rel(critic) if critic else None,
             "minutes": minutes, "every": every, "canary": canary, "container": prefix + label, "options": options,
-            "extra": list(extra), "out": f"build/nn-train/test5/{label}", "profile": profile or profiles.FULL}
+            "extra": list(extra), "out": f"build/nn-train/test5/{label}", "profile": profile or profiles.FULL,
+            "step": step_name}
     return lines, info
 
 
@@ -165,12 +194,14 @@ def main(argv=None):
     ap.add_argument("--profile", help="metric profiles of the evaluations (test5 --profile: mandatory, full or a "
                                       "comma list; default: the config's test5.profile, else full)")
     ap.add_argument("--chain", default=str(CHAIN), help="the options file")
+    ap.add_argument("--step", dest="step_name", help="a named step of the chain file's \"steps\" (its options over the "
+                                                    "standing ones; module doc)")
     ap.add_argument("--write", help="write the script here (LF); print the command to run it")
     args, extra = ap.parse_known_args(argv)
     extra = [a for a in extra if a != "--"]
     chain = load_chain(args.chain)
     lines, info = build(args.label, args.prev, chain, args.minutes, args.every, args.set, args.drop, extra,
-                        args.canary, args.prefix, args.profile)
+                        args.canary, args.prefix, args.profile, args.step_name)
     print("\n".join(lines))
     print()
     print(f"chain: {info['prev']} -> {info['label']}: init {info['init']}, critic {info['critic'] or 'NONE (warm start of the critic!)'}")
@@ -191,7 +222,9 @@ def main(argv=None):
         log = path.with_suffix(".log")
         print(f"written {path}; run:  bash {posix(path)} > {posix(log)} 2>&1")
         print(f"wait:   bash tools/ops/wait.sh -t {int(wall * 60 * 1.5) + 600} {posix(log)} '^written:|Traceback|Error'")
-    print(f"card:   .venv/Scripts/python -m tools.ops.card {info['out']} --prev build/nn-train/test5/{info['prev']}")
+    prev_dir = TEST5 / info["prev"]
+    print(f"card:   .venv/Scripts/python -m tools.ops.card {info['out']}"
+          + (f" --prev build/nn-train/test5/{info['prev']}" if prev_dir.is_dir() else ""))
     return 0
 
 

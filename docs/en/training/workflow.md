@@ -39,6 +39,12 @@ nothing: the orchestrator starts the script in the background and waits on its l
 (default: the options file's `test5.profile`, else `full`) goes to `test5`: which metrics each
 evaluation computes ([metric profiles](#metric-profiles)).
 
+`--from <file>.pt` is a line's point outside `test5` (e.g. `build/v2/itS27_4.pt`, a copy of its run's `latest.pt`): it
+is also the `--reference` and the `--critic-init` (its own critic and Adam). `--step NAME` takes a named step of the
+options file's `steps`: its `options` over the standing ones, `drop` removes options, `minutes`, `every`, `profile`,
+`canary` replace `test5`'s; `--set` / `--drop` come after it. There is the step `general` now — the general on line
+S27's unit network ([the general](general.md#running-it)).
+
 The options file is outside `config/nn` on purpose: that folder is part of the simulator's
 version (below), and an edit there would make the baselines miss.
 

@@ -73,6 +73,39 @@ class TestStep:
         assert info["prev"] == "prev" and info["init"].endswith("m25.pt") and info["options"]["drills"] == 0.1
         assert info["container"] == "orch-n4" and info["out"] == "build/nn-train/test5/n4"
 
+    def test_a_checkpoint_file_is_its_own_init_reference_and_critic(self, tmp_path):
+        ck = tmp_path / "itS27_4.pt"
+        ck.write_bytes(b"x")
+        label, init, critic = step.chain_point(str(ck))
+        assert (label, init, critic) == ("itS27_4", ck, ck)
+        with pytest.raises(SystemExit):
+            step.chain_point(str(tmp_path / "missing.pt"))
+
+    def test_a_named_step_lays_its_options_over_the_standing_ones(self, tmp_path, monkeypatch):
+        ck = tmp_path / "net.pt"
+        ck.write_bytes(b"x")
+        chain = {"test5": {"minutes": 25, "every": 5, "baseline_canary": 32},
+                 "options": {"anchor": 0.03, "drills": 0.2, "lord-rout": 0.5},
+                 "steps": {"general": {"minutes": 30, "every": 10, "profile": "mandatory", "drop": ["lord-rout"],
+                                       "options": {"general": True, "drills": 0, "general-card": 96}}}}
+        lines, info = step.build("g1", str(ck), chain, step_name="general", sets=["general-card=128"])
+        cmd = lines[1]
+        assert "--minutes 30 --every 10 --baseline-canary 32 --profile mandatory -- " in cmd
+        assert info["options"] == {"anchor": 0.03, "drills": 0, "general": True, "general-card": 128}
+        assert "--general --general-card 128" in cmd and "--lord-rout" not in cmd
+        assert f"--critic-init {step.rel(ck)} --reference {step.rel(ck)}" in cmd and info["step"] == "general"
+        with pytest.raises(SystemExit):
+            step.build("g1", str(ck), chain, step_name="nope")
+
+    def test_the_chain_files_general_step_builds(self, monkeypatch):
+        chain = step.load_chain()
+        g = chain["steps"]["general"]
+        assert g["options"]["general"] is True and g["options"].get("fighters") is True
+        ck = REPO / "config" / "train-chain.json"                 # (any existing file stands in for the network)
+        monkeypatch.setattr(step, "chain_point", lambda spec: ("itS27_4", ck, ck))
+        lines, info = step.build("g1", "x.pt", chain, step_name="general")
+        assert "--general" in lines[1] and "--drills 0" in lines[1]
+
     def test_no_canary_when_the_config_says_zero(self, tmp_path, monkeypatch):
         t5, runs = chain_folders(tmp_path)
         monkeypatch.setattr(step, "TEST5", t5)

@@ -16,7 +16,7 @@ the pages of the section:
 | [Workflow](workflow.md) | a chain step from a few parameters, the run card, leftovers between steps, the baselines' cache, step speed |
 | [Battle simulator](simulator.md) | the battle the network trains in, its checks against the game, pending changes |
 | [The fighters lab](fighters_lab.md) | every man a point with his own health, inside the simulator's step apart from training: melee, arrows, the knock-down man by man, against the game |
-| [The general's network](general.md) | the S28 general in code: the map input, the "Armies" input (80 slots of 45 numbers and 3 labels), the army analysis — one network for all slots |
+| [The general's network](general.md) | the S28 general: the whole loop as a skeleton (groups, missions, deployment, executor, re-planning, PPO on two levels), the skeleton's simplifications, the map input, the "Armies" input, the army analysis |
 | [Random armies](armies.md) | the battle generator for training and the in-game check |
 | [Unit passports](units.md) | the units' numbers from the game's database, innate effects, how to add a unit |
 | [Measurements in the game](measurements.md) | numbers from real battles the simulator is checked against |

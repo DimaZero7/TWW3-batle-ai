@@ -29,6 +29,10 @@
   better than expected (observe/loss.py; the weight decays every update), and + anchor x KL(policy || the network the
   run started from) on the minibatch's own rows (its weight decays too). Its stats: out["observe"]. Once the term's
   weight is negligible (store.NEGLIGIBLE) the term and its chunks are skipped; the anchor goes on by its own weight.
+* The general (S28, tools/nn/general/learn.py; batch["general"] from rollout.collect, an executor with a general): the
+  executor's task input is computed again in every part from the chunk's plan table (learn.task_for, with the
+  gradient: the executor's loss reaches the general's network), and after the epochs the general takes its own PPO
+  steps on the plans that ended (learn.update; update's general= its LearnConfig, None: off). Its stats: general_*.
 * The stats are summed on the device in float64 (Python's float arithmetic: the same numbers) and read once at the end;
   the GPU is read once a minibatch only (whether the gradient is finite, the KL for target_kl): a float() a stat (~30 a
   part, ~3500 an update) made the CPU wait for the GPU each time.
@@ -342,6 +346,17 @@ def anchor_kl(logits, ref, ctrl):
     return masked_mean(k + p_attack * t, ctrl)
 
 
+def with_task(actor, batch, obs):
+    """obs (a part's [T, P, ..] observation) with the executor's task input computed from the batch's plan table
+    (tools/nn/general/learn.task_for) when the actor reads one and the batch has the general's plans; else as it is."""
+    table = (batch.get("general") or {}).get("table")
+    if table is None or "task_plan" not in obs or getattr(actor, "gcfg", None) is None:
+        return obs
+    from tools.nn.general import learn as glearn
+    task, on = glearn.task_for(actor, table, obs)
+    return dict(obs, task=task, task_on=on)
+
+
 def distance(actor, other, batch, minibatch):
     """The mean per-unit KL(actor || other) on the order kind and the target (anchor_kl), without
     gradients, over the first minibatch's worth of the batch's learner rows (each with its whole
@@ -352,7 +367,7 @@ def distance(actor, other, batch, minibatch):
     with torch.no_grad():
         obs = full_obs({k: v[:, idx] for k, v in batch["obs"].items()}, batch.get("abil_static"))
         act = chunk_action(batch["action"], idx)
-        a, _ = actor.sequence(obs, batch["h0"][idx], batch["reset"][:, idx], act)
+        a, _ = actor.sequence(with_task(actor, batch, obs), batch["h0"][idx], batch["reset"][:, idx], act)
         b, _ = other.sequence(obs, batch["h0"][idx], batch["reset"][:, idx], act)
         a = {k: v.reshape(-1, *v.shape[2:]) for k, v in a.items()}
         b = {k: v.reshape(-1, *v.shape[2:]) for k, v in b.items()}
@@ -465,14 +480,21 @@ def critic_stats(batch, adv, ret):
     return out
 
 
-def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, reference=None, teach=None, observe=None):
+def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, reference=None, teach=None, observe=None,
+           general=None):
     """Some epochs of minibatch updates on one rollout (batch from rollout.collect). -> stats (_update). Under the
     ability head's own signal (cfg.ability_own) the gradient through the ability head's input is x
-    cfg.ability_body_grad (AbilityInputGrad)."""
+    cfg.ability_body_grad (AbilityInputGrad). general: the general's LearnConfig (tools/nn/general/learn.py): its PPO
+    steps on the batch's ended plans after the epochs (module doc); None: none."""
     extra = (cfg.ability_epochs > 1 and train_policy and bool(cfg.ability) and batch.get("abil_branch") is not None
              and batch["action"].ability is not None)
     with AbilityInputGrad(actor, cfg.ability_body_grad if cfg.ability_own else 1.0), ThoughtTap(actor, extra) as tap:
-        return _update(actor, critic, opt, batch, cfg, train_policy, reference, teach, observe, tap if tap.on else None)
+        out = _update(actor, critic, opt, batch, cfg, train_policy, reference, teach, observe, tap if tap.on else None)
+    ready = (batch.get("general") or {}).get("ready")
+    if general is not None and train_policy and ready is not None and getattr(actor, "gcfg", None) is not None:
+        from tools.nn.general import learn as glearn
+        out.update(glearn.update(actor, opt, ready, general))
+    return out
 
 
 def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, reference=None, teach=None, observe=None,
@@ -574,6 +596,7 @@ def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refer
                 # The critic's warm-up (train_policy False): the actor runs without a graph, for the stats
                 # only; with one its activations took ~3.5 GB more at the peak (13.5 GB on a 16 GB card).
                 with torch.set_grad_enabled(train_policy):
+                    obs = with_task(actor, batch, obs)       # the general's cards again, with the gradient
                     with _amp(cfg, actor):
                         logits, _ = actor.sequence(obs, batch["h0"][pidx], batch["reset"][:, pidx], seq_act)
                     logits = {k: v.float() for k, v in logits.items()}

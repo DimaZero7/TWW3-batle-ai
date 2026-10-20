@@ -13,6 +13,8 @@ A file is a plain dict saved by torch.save (loads with weights_only=True):
              (tools/nn/sim/orders.py KINDS)
     preset   "small" or "target" (tools/nn/model/config.py), for the record
     config   the ModelConfig fields as a dict: rebuilds the actor
+    general  (an actor with the general, tools/nn/general/executor.py; may be missing) the GeneralConfig fields: the
+             actor is then a GeneralActor (actor_of)
     actor    the actor's state_dict (all the game needs)
     critic   the critic's state_dict (training only; may be missing)
     meta     dict: update, battles, steps, seconds, when written, notes
@@ -53,6 +55,24 @@ def config_of(data):
     return model_config.ModelConfig(**{k: v for k, v in data["config"].items() if k in names})
 
 
+def actor_of(data):
+    """A fresh actor of a checkpoint dict's kind: a GeneralActor when it has "general", else model_policy.Actor."""
+    cfg = config_of(data)
+    if data.get("general"):
+        from tools.nn.general import config as gconfig
+        from tools.nn.general.executor import GeneralActor
+        return GeneralActor(cfg, gconfig.of_dict(data["general"]))
+    return model_policy.Actor(cfg)
+
+
+def general_of(data):
+    """The checkpoint's GeneralConfig, None without a general."""
+    if not data.get("general"):
+        return None
+    from tools.nn.general import config as gconfig
+    return gconfig.of_dict(data["general"])
+
+
 def save(path, actor, critic=None, preset="small", meta=None, train=None):
     """Write a checkpoint atomically (a temporary file, then a rename). train: {"optim": state_dict, "state": dict}."""
     path = Path(path)
@@ -60,6 +80,8 @@ def save(path, actor, critic=None, preset="small", meta=None, train=None):
     data = {"format": FORMAT, "kinds": list(KINDS), "preset": preset, "config": dataclasses.asdict(actor.cfg),
             "actor": {k: v.detach().cpu() for k, v in actor.state_dict().items()},
             "meta": dict(meta or {}, written=time.strftime("%Y-%m-%d %H:%M:%S"))}
+    if getattr(actor, "gcfg", None) is not None:
+        data["general"] = dataclasses.asdict(actor.gcfg)
     if critic is not None:
         data["critic"] = {k: v.detach().cpu() for k, v in critic.state_dict().items()}
     if train is not None:
@@ -93,7 +115,7 @@ def read(path, device="cpu"):
 def load_policy(path, device="cpu"):
     """The actor of a checkpoint, in eval mode, on `device`."""
     data = read(path, device)
-    actor = model_policy.Actor(config_of(data))
+    actor = actor_of(data)
     actor.load_state_dict(data["actor"])
     return actor.to(device).eval()
 

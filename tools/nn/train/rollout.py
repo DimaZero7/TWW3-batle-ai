@@ -57,6 +57,14 @@ v2 networks (ModelConfig.sectors > 0; the learner's or the past version's): the 
 counters count the units that decide (not those held by their commitment). No teachers with v2.
 A learner with eyes (ModelConfig.eyes, tools/nn/model/eyes.py): every transition carries the truth of its rows before
 and after the decision's simulator steps ("truth"); collect() turns a chunk of them into the eyes' targets ("eyes").
+
+The general (S28; a network with one, tools/nn/general/executor.py GeneralActor - the learner's or a past slot's): the
+battles keep the plans of the rows it plays (tools/nn/general/runtime.py Runtime, made at the first step with such a
+network): the deployment at a battle's start (_reset, and the first step for start()'s battles), the re-plans at the
+decision's start, the task input of the executor in _act ("task", "task_on"; the transition keeps "task_geo",
+"task_on" and "task_plan" - the plan's row in the chunk's table - not the cards: the update computes them again), the
+reward added to the plans after the steps. collect() opens the chunk's plan table and hands the update its table and
+the ended plans (batch["general"]).
 """
 import warnings
 
@@ -483,6 +491,8 @@ class Battles:
         # (until [B, N] battle time, slot [B, N]): a learner unit's ability slot held unused until then (the ability
         # branches' "not pressed" with Config.hold_s); None: none
         self.ability_hold = None
+        # the general's plans (tools/nn/general/runtime.py; made at the first step with a network that has one)
+        self.general_rt = None
         self.start()
 
     @property
@@ -589,6 +599,7 @@ class Battles:
             obs_r = self._v2_inputs(cs, obs_r, t, fr, bounds)
         if h is None:
             h = actor.initial(obs_r)
+        obs_r = self._task(actor, rows, obs_r, fr)
         logits, action, orders, h_new = self._decide(actor, obs_r, h, fr, bounds, greedy)
         if v2:
             new = self._commit_apply(cs, obs_r, t, action)
@@ -624,6 +635,7 @@ class Battles:
                 if obs_v2 is None:
                     obs_v2 = self._v2_inputs(cs, obs_r, t, fr, bounds)
             o_in = obs_v2 if actor.cfg.sectors else obs_r
+            o_in = self._task(actor, rows, o_in, fr)
             h = self.past_h[k] if self.past_h[k] is not None else actor.initial(o_in)
             logits, act, o, hs[k] = self._decide(actor, o_in, h, fr, bounds, False)
             mine = slot == k
@@ -642,6 +654,36 @@ class Battles:
             for k in mcommit.KEYS:
                 self.cstate[k][rows] = new[k]
         return orders, hs
+
+    # --- the general (module doc) ---
+    def _general(self, actor):
+        """The battles' general Runtime: made at the first call with a network that has a general (the learner or a
+        past slot's), None while there is none."""
+        if self.general_rt is None:
+            from tools.nn.general.executor import has_task
+            from tools.nn.general.runtime import Runtime
+            first = next((a for a in [actor] + list(self.past) if a is not None and has_task(a)), None)
+            if first is not None:
+                self.general_rt = Runtime(self, first.cfg, first.gcfg)
+        return self.general_rt
+
+    def _task(self, actor, rows, obs_r, fr):
+        """obs_r with the executor's task input of rows (the general's plans) when the actor reads one."""
+        rt = self.general_rt
+        if rt is None or getattr(actor, "gcfg", None) is None:
+            return obs_r
+        return dict(obs_r, **rt.task(rows, obs_r, fr))
+
+    def _redeployed(self, rows):
+        """Battles rows [B] (bool) deployed again after their start (the general's first plans, Runtime.deploy_pending):
+        their men, memories and the pending observation afresh."""
+        if self.men is not None:
+            self.men.restart(self.st, self.params, rows)
+        state = self.st.observation()
+        for s in (1, 2):
+            self.mem[s] = merge_memory(self.mem[s], ob.start(state, self.setup, s), rows)
+            self.cmem[s] = merge_memory(self.cmem[s], ob.start(state, self.setup, s), rows)
+        self.cur = None
 
     def assemble(self, parts, base=None):
         """[(rows, Orders [len(rows), N])] and the scripts -> the batch's Orders [B, N]. base: the scripts'
@@ -688,9 +730,17 @@ class Battles:
         The reward and done of the learner rows are summed / any over the steps; finished battles restart
         (auto_reset) after the last. each(live [B]): called after every simulator step (live: the battles
         running before it), e.g. the evaluation's per-step counts."""
+        rt = self._general(actor)
+        if rt is not None:
+            rt.learner, rt.greedy = actor, greedy
+            pend = rt.pending
+            if rt.deploy_pending(self):
+                self._redeployed(pend)
         if self.cur is None:
             self.cur = self.observe(critic is not None)
         a, frame, c = self.cur
+        if rt is not None:
+            rt.replan(self, a)                   # the plans that are due, on the observation now
         rx = self.cur_rx
         abil_row = self.bank_row[self.rows_learn % self.B]           # the battles the observation was made of
         obs_r, h_prev, logits, action, orders, h_new = self._act(actor, a, frame, self.rows_learn, self.h_learn, greedy)
@@ -735,6 +785,8 @@ class Battles:
                                          "scripted": scripted, "h_new": h_new, "h_past": h_past_new})
         r_rows, finished = self._play(parts, scripted, delay, attacks, rb, rs, each)
         d_rows = finished[rb]
+        if rt is not None:
+            rt.after(self, r_rows, finished)     # the reward into the plans; the ended battles' plans are ready
         if truth is not None:                        # after the steps, before a finished battle restarts
             truth = (truth[0], meyes.truth(self.st.u, rb), truth[1])
 
@@ -747,6 +799,7 @@ class Battles:
             for k, h in h_past_new.items():
                 self.past_h[k] = h * keep[self.rows_past % self.B][:, None, None]
         self.cur = self.observe(critic is not None)
+        obs_r.pop("task", None)                      # (the cards: the update computes them again from the plan table)
         if "abil" in obs_r:                          # keep the slots some unit owns and the bank row (full_obs)
             # a copy: a slice (view) would keep the whole input of every step alive (~60 MB each)
             bits, times = pack_abil(obs_r["abil"][..., self._abil_slots(), :])
@@ -1015,6 +1068,11 @@ class Battles:
         idx = restart_rows(self.st, self.setup, self.source, finished, self.want)
         if self.men is not None:
             idx = self._fit_men(finished, idx)
+        if self.general_rt is not None:
+            # the general's deployment (before the randomisation); a restarting past battle takes the active slot
+            slot = torch.where(finished, torch.full_like(self.battle_slot, self.active), self.battle_slot)
+            self.battle_slot = slot
+            self.general_rt.start_battles(self, finished)
         self.last_hit = torch.where(finished, torch.full_like(self.last_hit, -1.0), self.last_hit)
         self.hit_rate = torch.where(finished, torch.zeros_like(self.hit_rate), self.hit_rate)
         sim_abilities.set_rule(self.st.u, self.by_rule)
@@ -1080,6 +1138,8 @@ class Battles:
             setattr(self, k, getattr(self, k)[keep])
         self.row_opp = self.row_opp[sel_learn]
         self.row_normal = self.row_normal[sel_learn]
+        if self.general_rt is not None:
+            self.general_rt.narrow(keep)
         lay = self.layout
         self.layout = league.Layout(lay.scene[kl], lay.learner[kl], lay.opponent[kl])
         self.B = len(kl)
@@ -1120,6 +1180,9 @@ def collect(env, actor, critic, T):
     brancher = getattr(env, "brancher", None)
     if brancher is not None:
         brancher.begin(env, T)
+    rt = getattr(env, "general_rt", None)
+    if rt is not None:
+        rt.begin_chunk(env)                      # the general's plans in force open the chunk's table
     # The observations (most of the chunk: ~6 GB for 1024 battles x 64 decisions) go into [T, ...] buffers made at the
     # first decision, each decision's copy let go at once: stacked at the end, the decisions' copies and the stack were
     # both alive (twice the chunk: 14.1 GB of the 16 GB card at the peak, past it into shared memory - collect and the
@@ -1166,4 +1229,6 @@ def collect(env, actor, critic, T):
         cost = torch.stack([s["truth"][2] for s in steps])
         out["eyes"] = meyes.targets(before, after, done, cost, env.decision_s)
     out["last_value"] = env.value(critic)
+    if rt is not None:
+        out["general"] = rt.end_chunk()          # {"table": the chunk's plans, "ready": the ended plans}
     return out

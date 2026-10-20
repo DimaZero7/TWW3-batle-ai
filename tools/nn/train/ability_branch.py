@@ -229,6 +229,8 @@ def snapshot(env, idx, info):
                                                            for k in ("scene", "learner", "opponent"))
     if getattr(env, "men", None) is not None:
         d.update(env.men.snap(st, idx))          # the fighters lab's men (run.py --fighters; men.py): "f/<field>"
+    if getattr(env, "general_rt", None) is not None:
+        d.update(env.general_rt.snap(idx))       # the general's plans in force (tools/nn/general/runtime.py): "g/<k>"
     for k, v in env.cstate.items():
         d["commit/" + k] = _two(v, B)[idx]
     # the networks' memories after the decision, per battle and side
@@ -298,6 +300,9 @@ def branch_env(template, snap):
     env.auto_reset = False
     env.brancher = None
     env.ability_hold = None
+    # the general's plans of the snapshot, frozen: no re-plans, no records in a branch (tools/nn/general/runtime.py)
+    rt = getattr(template, "general_rt", None)
+    env.general_rt = rt.branch(snap, B) if rt is not None and "g/has" in snap else None
     env.layout =league.Layout(snap["lay/scene"], snap["lay/learner"], snap["lay/opponent"])
     for k in ("health", "last_hit", "hit_rate", "bank_row", "want", "ctrl", "by_rule", "is_past", "battle_slot"):
         setattr(env, k, snap["b/" + k].clone())

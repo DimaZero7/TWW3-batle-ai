@@ -48,7 +48,7 @@ def compatible(path, preset):
     try:
         data = checkpoint.read(path)
         cfg = checkpoint.config_of(data)
-        model_policy.Actor(cfg).load_state_dict(data["actor"])
+        checkpoint.actor_of(data).load_state_dict(data["actor"])
         model_critic.Critic(cfg).load(data["critic"])
         # (a v2 network of an older v2 config, e.g. without the eyes, is not the preset's)
         return data.get("preset") == preset and (not cfg.sectors or cfg == model_config.PRESETS[preset])
@@ -66,7 +66,7 @@ def networks(preset, device, start=None, critic_from=None):
             checkpoint.write_random(start, preset)
     data = checkpoint.read(start)
     cfg = checkpoint.config_of(data)
-    actor, critic = model_policy.Actor(cfg), model_critic.Critic(cfg)
+    actor, critic = checkpoint.actor_of(data), model_critic.Critic(cfg)
     actor.load_state_dict(data["actor"])
     state = checkpoint.read(critic_from)["critic"] if critic_from else data.get("critic")
     if state is None:
@@ -100,7 +100,7 @@ def sized(cfg, N, slots=22, width=1.0):
                                accum=max(1, math.ceil(width - 1e-9)))
 
 
-def optimizer(actor, critic, lr, width=1.0, ability_lr=1.0):
+def optimizer(actor, critic, lr, width=1.0, ability_lr=1.0, general_lr=1.0):
     """Adam over the actor and the critic. In a widened network (width > 1, tools/nn/model/widen.py) the
     weights that read the copied token stream (widen.stream_readers: fan-in x width) take lr / width:
     every copy gets the gradient the small weight got and Adam moves each about lr, so their sum (what
@@ -108,15 +108,18 @@ def optimizer(actor, critic, lr, width=1.0, ability_lr=1.0):
     ability_lr (--ability-lr-mult): the ability head's parameters (ppo.ABILITY_HEAD) take lr x it - Adam moves each
     weight about lr whatever the loss's weight, so a heavier ability term barely speeds the head; this does. Not 1:
     the parameters in groups by runs of the same lr, in the actor's then the critic's order (the order a one-group
-    optimizer has: resume maps the moments by it, both ways); 1: the one group as before."""
+    optimizer has: resume maps the moments by it, both ways); 1: the one group as before. general_lr (--general-lr-mult):
+    the general's network's parameters (tools/nn/general/executor.general_params) take lr x it, the same way."""
     params = list(actor.parameters()) + list(critic.parameters())
-    if ability_lr != 1.0:
+    if ability_lr != 1.0 or general_lr != 1.0:
         if width > 1.0:
-            raise SystemExit("--ability-lr-mult is for an unwidened network (v2)")
+            raise SystemExit("--ability-lr-mult / --general-lr-mult are for an unwidened network (v2)")
         head = {id(p) for p in ppo.ability_head_params(actor)}
+        from tools.nn.general.executor import general_params
+        gen = {id(p) for p in general_params(actor)}
         groups = []
         for p in params:
-            plr = lr * ability_lr if id(p) in head else lr
+            plr = lr * ability_lr if id(p) in head else lr * general_lr if id(p) in gen else lr
             if not groups or groups[-1]["lr"] != plr:
                 groups.append({"params": [], "lr": plr})
             groups[-1]["params"].append(p)
@@ -263,6 +266,53 @@ def reward_preset(args):
     return args
 
 
+def general_config(args, data=None):
+    """The GeneralConfig of the run: --init's own when it has a general (its sizes and rules), else of the options."""
+    from tools.nn.general import config as gconfig
+    if data is not None and data.get("general"):
+        return gconfig.of_dict(data["general"])
+    return gconfig.GeneralConfig(card=args.general_card, reader_hidden=args.general_hidden,
+                                 council_layers=args.general_council_layers, council_heads=args.general_heads,
+                                 group_layers=args.general_group_layers, places=args.general_places,
+                                 kinds=args.general_kinds, rounds=args.general_rounds, center=args.general_center,
+                                 tiles=args.general_tiles,
+                                 effects=args.general_effects, zone=args.general_zone, deploy=args.general_deploy,
+                                 replan_s=args.general_replan_s, replan_min_s=args.general_replan_min_s)
+
+
+def with_general(actor, args):
+    """(actor, the general's LearnConfig or None): --general wraps the unit network into the executor with a general
+    (tools/nn/general/executor.py: the old weights, the task input at zero, a fresh general; an --init that has one
+    keeps it); without --general an executor still learns its general when it has one."""
+    from tools.nn.general import executor, learn as glearn
+    if not getattr(args, "general", False) and not executor.has_task(actor):
+        return actor, None
+    if not executor.has_task(actor):
+        if not actor.cfg.sectors:
+            raise SystemExit("--general needs a v2 unit network (ModelConfig.sectors > 0)")
+        actor = executor.wrap(actor, general_config(args))
+        n = sum(p.numel() for p in executor.general_params(actor))
+        print(f"general: a fresh general on the unit network ({n} weights; the task input at zero: the executor plays "
+              f"as the unit network did)", flush=True)
+    cfg = glearn.LearnConfig(entropy=args.general_entropy, epochs=args.general_epochs, value=args.general_value,
+                             minibatch=args.general_minibatch, branches=args.general_branches,
+                             distinct=args.general_distinct)
+    print(f"general: {actor.gcfg}; learning {cfg}; return {args.general_return}; lr x {args.general_lr_mult:g}",
+          flush=True)
+    return actor, cfg
+
+
+def general_text(g):
+    """One log line of the general's stats (row["general"])."""
+    kinds = " ".join(f"{x:.2f}" for x in g.get("kinds", []))
+    return (f"general: plans {g.get('plans', 0)} (deploy {g.get('deploy_plans', 0)}, by net {g.get('deploy_net_share', 0):.2f}), "
+            f"groups own {g.get('groups_own', 0):.1f} enemy {g.get('groups_enemy', 0):.1f}, replans/battle "
+            f"{g.get('replans_per_battle', 0):.1f} {g.get('replan_reasons', {})}; kinds [{kinds}] entropy "
+            f"{g.get('kind_entropy', 0):.2f}/{g.get('kind_entropy_max', 0):.2f}; places {g.get('places_top', {})}; "
+            f"pl {g.get('pl', 0):+.3f} ent {g.get('ent', 0):.2f} kl {g.get('kl', 0):.4f} clip {g.get('clip', 0):.2f} "
+            f"value mse {g.get('value_mse', 0):.5f} ev {g.get('value_ev', 0):+.2f} return {g.get('return_mean', 0):+.4f}")
+
+
 def fighters_installed(args):
     """--fighters: the fighters lab in the simulator for the run (tools/nn/train/men.py: the hook installed, nothing
     built adopted, the units' shape for the network); else nothing."""
@@ -335,6 +385,7 @@ def _train(args, every=None, teacher=None, normal=None):
         args.preset = checkpoint.read(args.init).get("preset", "small") if args.init else "small"
     actor, critic = networks(args.preset, device, args.init, args.critic_init)
     actor = with_grid(actor, args.grid)
+    actor, glearn_cfg = with_general(actor, args)
     # --reset-heads: those heads start again as a new network's, the rest as loaded (head_reset.py); the KL anchors'
     # frozen networks below get the same fresh heads, Adam's moments of them are dropped
     reset_params = head_reset.reset(actor, head_reset.parse(args.reset_heads), args.seed)
@@ -367,7 +418,8 @@ def _train(args, every=None, teacher=None, normal=None):
                         entropy=args.entropy, anchor=args.anchor, adv_norm=args.adv_norm, eyes=args.eyes_weight)
     width = actor.cfg.d / model_config.SMALL.d
     # (v2 is trained from scratch, not widened from a small network: no lr / width on the stream's readers)
-    opt = optimizer(actor, critic, cfg.lr, 1.0 if actor.cfg.sectors else width, ab_lr)
+    opt = optimizer(actor, critic, cfg.lr, 1.0 if actor.cfg.sectors else width, ab_lr,
+                    float(getattr(args, "general_lr_mult", 1.0)) if glearn_cfg is not None else 1.0)
     # Adam's moments and the trainer's counters from --init (saved with latest.pt and m<minute>.pt): the next part of
     # a chain goes on as one run. Only when the critic comes from the same file (else its moments are another's).
     carried = None
@@ -573,10 +625,12 @@ def _train(args, every=None, teacher=None, normal=None):
         if path != slot_path[k] or slots == 1:
             data = checkpoint.read(path, device)
             cfg_past = checkpoint.config_of(data)
-            # a pool version of another size (random.pt beside a widened learner): its own actor, made once
-            if (k, cfg_past) not in pasts:
-                pasts[(k, cfg_past)] = model_policy.Actor(cfg_past).to(device).eval()
-            past = pasts[(k, cfg_past)]
+            # a pool version of another size (random.pt beside a widened learner) or with a general (S28): its own
+            # actor, made once
+            key = (k, cfg_past, checkpoint.general_of(data))
+            if key not in pasts:
+                pasts[key] = checkpoint.actor_of(data).to(device).eval()
+            past = pasts[key]
             past.load_state_dict(data["actor"])
             env.set_past(past, untrained, slot=k)
         slot_path[k], slot_p[k] = path, p
@@ -603,6 +657,10 @@ def _train(args, every=None, teacher=None, normal=None):
     pick_past()
     t_warm = time.time()
     env.step(actor, critic)                       # compiles the simulator's step (not counted)
+    if env.general_rt is not None:
+        # the general's plans: the return's rule and the discount per decision (the trainer's)
+        env.general_rt.ret, env.general_rt.gamma = args.general_return, cfg.gamma
+        env.general_rt.take_stats()
     env.take_stats()
     env.orders_per_minute()
     env.kinds()
@@ -702,7 +760,7 @@ def _train(args, every=None, teacher=None, normal=None):
                    else drill_teach.weights(teach0, args.drill_teach_minutes, (time.time() - t0 - paused) / 60))
         teach_w = {**teach_w, **(normal.weights() if normal is not None else normal_w)}
         st = ppo.update(actor, critic, opt, batch, u_cfg, train_policy=trains, reference=reference, teach=teach_w,
-                        observe=observe)
+                        observe=observe, general=glearn_cfg)
         taught = st.pop("teach", None)
         observed = st.pop("observe", None)
         if start is not None:
@@ -793,6 +851,9 @@ def _train(args, every=None, teacher=None, normal=None):
             row["observe"] = {k: round(v, 4) for k, v in observed.items()}
         if args.kite_share:
             row["kite"] = env.kite_stats()
+        if env.general_rt is not None:
+            row["general"] = dict(env.general_rt.take_stats(),
+                                  **{k[len("general_"):]: round(v, 5) for k, v in st.items() if k.startswith("general_")})
         log.write(json.dumps(row) + "\n")
         log.flush()
         if update % args.print_every == 0:
@@ -821,6 +882,8 @@ def _train(args, every=None, teacher=None, normal=None):
                                                                                      "danger10")), flush=True)
             if args.kite_share:
                 print("      " + kitesp.text(row["kite"]), flush=True)
+            if "general" in row:
+                print("      " + general_text(row["general"]), flush=True)
             if args.ability_branch:
                 print("      ability branches " + " ".join(f"{k} {v}" for k, v in row["ability_branch"].items()),
                       flush=True)
@@ -1242,6 +1305,47 @@ def parser():
     ap.add_argument("--gpu-duty", type=float, default=1.0,
                     help="share of the time the GPU works (e.g. 0.9: after each update rest 1/9 of its time; "
                          "quieter fans, a responsive desktop; the rest is not counted as training time)")
+    ap.add_argument("--general", action="store_true",
+                    help="S28: the general (tools/nn/general, docs/en/training/general.md): the unit network becomes its "
+                         "executor (the old weights, a new task input at zero) with a fresh general that plans groups, "
+                         "missions and the deployment; both learn by PPO. An --init with a general keeps its own (its "
+                         "sizes and rules); off by default")
+    ap.add_argument("--general-card", type=int, default=64, help="general: the cards' width (64-128; simplification 3)")
+    ap.add_argument("--general-hidden", type=int, default=128, help="general: the army reader's first layer")
+    ap.add_argument("--general-council-layers", type=int, default=2, help="general: the council's layers")
+    ap.add_argument("--general-group-layers", type=int, default=1, help="general: the group council's layers")
+    ap.add_argument("--general-heads", type=int, default=4, help="general: attention heads of both councils")
+    ap.add_argument("--general-places", type=int, default=10, help="general: group places a side")
+    ap.add_argument("--general-kinds", type=int, default=10, help="general: mission kinds")
+    ap.add_argument("--general-rounds", type=int, default=3, help="general: rounds of the group collection")
+    ap.add_argument("--general-center", type=float, default=1.0,
+                    help="general: the group collection's keys less this x their side's mean key (a learned share; "
+                         "0: plain slot attention - a fresh general then put nearly every unit into one group)")
+    ap.add_argument("--general-tiles", default="sectors", choices=("sectors", "cnn"),
+                    help="general: the map tiles - the unit network's sectors (simplification 1; cnn: not built yet)")
+    ap.add_argument("--general-effects", default="off", choices=("off", "on"),
+                    help="general: the effect cards (simplification 2: off = zeros; on: not built yet)")
+    ap.add_argument("--general-zone", default="place", choices=("place", "map"),
+                    help="general: the deployment zone - place.py's area (simplification 5; map: not built yet)")
+    ap.add_argument("--general-deploy", default="net", choices=("net", "script"),
+                    help="general: net - the general places its groups in the zone, a rule lays the units out; script - "
+                         "place.py's placement as before (the general still forms groups and gives missions)")
+    ap.add_argument("--general-replan-s", type=float, default=30.0, help="general: seconds of battle between plans")
+    ap.add_argument("--general-replan-min-s", type=float, default=3.0,
+                    help="general: an event's re-plan (a group broken, a lord fallen) not sooner than this after a plan")
+    ap.add_argument("--general-entropy", type=float, default=0.01,
+                    help="general: the entropy bonus on its choices (simplification 4: on)")
+    ap.add_argument("--general-epochs", type=int, default=2, help="general: PPO epochs over the ended plans")
+    ap.add_argument("--general-minibatch", type=int, default=512, help="general: plans a minibatch")
+    ap.add_argument("--general-value", type=float, default=0.5, help="general: the plan value's loss weight")
+    ap.add_argument("--general-lr-mult", type=float, default=1.0, help="general: its network learns at --lr x this")
+    ap.add_argument("--general-return", default="span", choices=("span", "td"),
+                    help="general: a plan's return - span: the reward from its decision to the next plan or the end "
+                         "(the design); td: that + the next plan's discounted value (the value then of the battle's rest)")
+    ap.add_argument("--general-branches", type=float, default=0.0,
+                    help="general: share of the plans replayed with another mission (simplification 4: not built, keep 0)")
+    ap.add_argument("--general-distinct", type=float, default=0.0,
+                    help="general: the bonus for missions that tell apart (simplification 4: not built, keep 0)")
     ap.add_argument("--eval-generated", type=int, default=512, help="random battles per opponent (EVAL_SEEDS)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
