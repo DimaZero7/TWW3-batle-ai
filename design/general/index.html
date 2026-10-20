@@ -95,6 +95,9 @@ a{color:inherit}
 .node{position:relative;font:inherit;font-size:16px;padding:12px;border-radius:10px;border:2px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer;text-align:center}
 .node span{font-size:13px;color:var(--muted)}
 .bangleg{display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--muted);margin-left:8px}
+.robo{display:inline-flex;width:20px;height:20px;border-radius:50%;background:#5b6cf0;align-items:center;justify-content:center;vertical-align:middle;flex:none}
+.robo svg{width:14px;height:14px}
+.node > .robo{position:absolute;top:-9px;right:18px;width:22px;height:22px;box-shadow:0 0 0 2px var(--panel)}
 .bangleg .bang{position:static;width:20px;height:20px;border-radius:50%;background:var(--open);color:#1b1206;font-weight:800;font-size:13px;line-height:20px;text-align:center;display:inline-block}
 .node .glyph{display:block;width:120px;height:34px;margin:0 auto 6px}
 .node .nl{display:block;font-size:16px;color:var(--ink)}
@@ -255,7 +258,7 @@ a{color:inherit}
   <section class="net" aria-label="Схема сети генерала">
     <h2 class="areah">Сеть</h2>
     <div class="zoombox" id="zoombox"><div class="types zlegend"><span class="tl">Типы блоков:</span>
-      <span class="ty t-in">вход</span><span class="ty t-proc">обработка</span><span class="ty t-out">выход</span><span class="ty t-alg">алгоритм</span><span class="ty t-test">проверка</span><span class="bangleg"><span class="bang">!</span> есть открытые вопросы или доработки</span>
+      <span class="ty t-in">вход</span><span class="ty t-proc">обработка</span><span class="ty t-out">выход</span><span class="ty t-alg">алгоритм</span><span class="ty t-test">проверка</span><span class="bangleg"><span class="bang">!</span> есть открытые вопросы или доработки</span><span class="bangleg"><span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span> сделано нейросетью, человек не проверял в деталях</span>
     </div><svg class="netsvg" id="netsvg" viewBox="0 0 900 600" role="group" aria-label="Схема сети генерала"></svg><div class="zbtns"><button type="button" id="zin" aria-label="Крупнее">+</button><button type="button" id="zout" aria-label="Мельче">−</button><button type="button" id="zreset" aria-label="Сбросить масштаб">⟲</button></div></div>
 <script>
 (function(){
@@ -305,7 +308,10 @@ a{color:inherit}
   var mapIn=stk(S1.x,S1.y,S1.s,4)+mapIn2(M1,S1.x,S1.y,S1.s,6)+box(A1,1)+box(B1)+stk(S2.x,S2.y,S2.s,4)+mapIn2(M2,S2.x,S2.y,S2.s,5)+box(A2,1)+box(B2)+stk(S3.x,S3.y,S3.s,4)+mapIn2(M3,S3.x,S3.y,S3.s,4)+box(A3,1);
   var MBY=S1.y-46,MBH=LH+82+(GY-24)-MBY;
   h+=G("mapproc","t-proc",[PX0,MBY,PW0,MBH],"Анализ карты","обработка",mapIn);
-  h+=G("maptiles","t-out",[OX0,MBY,OW0,MBH],"Участки карты","выход",tiles+box(A4));
+  // one участок = its cell through all the stacked maps (a column of numbers), not one cell of the front map
+  var PD=35,a4=A4,prism='<polygon points="'+a4.x+','+a4.y+' '+(a4.x+PD)+','+(a4.y-PD)+' '+(a4.x+a4.w+PD)+','+(a4.y-PD)+' '+(a4.x+a4.w)+','+a4.y+'" fill="var(--open)" fill-opacity=".22" stroke="var(--open)" stroke-width="1.6" stroke-linejoin="round"/>'+
+    '<polygon points="'+(a4.x+a4.w)+','+a4.y+' '+(a4.x+a4.w+PD)+','+(a4.y-PD)+' '+(a4.x+a4.w+PD)+','+(a4.y+a4.h-PD)+' '+(a4.x+a4.w)+','+(a4.y+a4.h)+'" fill="var(--open)" fill-opacity=".32" stroke="var(--open)" stroke-width="1.6" stroke-linejoin="round"/>';
+  h+=G("maptiles","t-out",[OX0,MBY,OW0,MBH],"Участки карты","выход",tiles+box(A4)+prism);
   // projections (lines from a square to a cell)
   function proj(ax,ay,aw,b){var A=[[ax,ay],[ax+aw,ay],[ax,ay+aw],[ax+aw,ay+aw]],B=[[b.x,b.y],[b.x+b.s,b.y],[b.x,b.y+b.s],[b.x+b.s,b.y+b.s]],o="";
     for(var k=0;k<4;k++)o+='<line x1="'+A[k][0]+'" y1="'+A[k][1]+'" x2="'+B[k][0]+'" y2="'+B[k][1]+'"/>';return o;}
@@ -322,10 +328,12 @@ a{color:inherit}
   // --- Армии: two columns of slots (ours / enemy), vertical like neurons
   var AY=LH+82+(GY-24)+24+52,ax=60,arm="";
   var AT=AY-10-46;
-  h+='<line x1="'+TX+'" y1="'+(AT+34)+'" x2="'+TX+'" y2="'+(AY-10)+'" stroke="var(--tc-test)" stroke-width="1.5" stroke-dasharray="3 3"/>';
-  h+='<g class="node snode t-test" data-n="armytest" data-bx="'+(PX0+PW0)+'" data-by="'+AT+'" tabindex="0" role="button" aria-label="Проверки анализа армий"><rect class="hit" x="'+PX0+'" y="'+AT+'" width="'+PW0+'" height="34" rx="12"/>'+
-     '<path d="M'+(TX-96)+' '+(AT+17)+'l5 5 8-10" fill="none" stroke="var(--tc)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>'+
-     '<text class="slab" x="'+(TX+10)+'" y="'+(AT+22)+'" text-anchor="middle" style="font-size:14px">Проверки анализа армий</text></g>';
+  // a checks plaque above its block: dashed line down to the block, a tick and the label
+  function TPL(id,x,w,y,ytop,label,fs){var c=x+w/2,tw=label.length*fs*.6,x0=c-(tw+19)/2,o='<line x1="'+c+'" y1="'+(y+34)+'" x2="'+c+'" y2="'+ytop+'" stroke="var(--tc-test)" stroke-width="1.5" stroke-dasharray="3 3"/>';
+    return o+'<g class="node snode t-test" data-n="'+id+'" data-bx="'+(x+w)+'" data-by="'+y+'" tabindex="0" role="button" aria-label="'+label+'"><rect class="hit" x="'+x+'" y="'+y+'" width="'+w+'" height="34" rx="12"/>'+
+     '<path d="M'+x0+' '+(y+17)+'l5 5 8-10" fill="none" stroke="var(--tc)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>'+
+     '<text class="slab" x="'+(x0+19)+'" y="'+(y+22)+'" text-anchor="start" style="font-size:'+fs+'px">'+label+'</text></g>';}
+  h+=TPL("armytest",PX0,PW0,AT,AY-10,"Проверки анализа армий",14);
   for(var i=0;i<12;i++){var e=i>=9;arm+='<rect x="'+ax+'" y="'+(AY+18+i*11)+'" width="64" height="8" rx="3" fill="color-mix(in srgb,var(--ours) '+(e?16:62)+'%,transparent)"/>';
     var e2=i>=10;arm+='<rect x="'+(ax+84)+'" y="'+(AY+18+i*11)+'" width="64" height="8" rx="3" fill="color-mix(in srgb,var(--foe) '+(e2?16:62)+'%,transparent)"/>';}
   arm+='<text class="ssub" x="'+(ax+32)+'" y="'+(AY+12)+'" text-anchor="middle">наши 40</text><text class="ssub" x="'+(ax+116)+'" y="'+(AY+12)+'" text-anchor="middle">враг 40</text>';
@@ -346,6 +354,10 @@ a{color:inherit}
   for(var i=0;i<12;i++){var e=i>=9,e2=i>=10;
     oc+=e?'<rect x="'+CX+'" y="'+(AY+18+i*11)+'" width="56" height="8" rx="3" fill="color-mix(in srgb,var(--ours) 14%,var(--panel))"/>':crow(CX,AY+18+i*11,0,i,56);
     oc+=e2?'<rect x="'+(CX+64)+'" y="'+(AY+18+i*11)+'" width="56" height="8" rx="3" fill="color-mix(in srgb,var(--foe) 14%,var(--panel))"/>':crow(CX+64,AY+18+i*11,1,i,56);}
+  // the yellow unit gets fixed numbers so its card, its effect card and their sum match across blocks
+  var VU=[.45,.2,.55,.1,.35,.6,.25,.4],VE=[.3,0,.1,.4,0,.2,.35,0],VR=VU.map(function(u,k){return Math.round((u+VE[k])*100)/100;});
+  function vrow(x,y,vals,base,cw,ch,rx){var o="";vals.forEach(function(v,k){o+='<rect x="'+(x+k*cw)+'" y="'+y+'" width="'+(cw-(cw>8?1:.6))+'" height="'+ch+'" rx="'+rx+'" fill="color-mix(in srgb,var('+base+') '+Math.round(10+v*85)+'%,var(--panel))"/>';});return o;}
+  oc+=vrow(CX,AY+18+2*11,VU,"--ours",7,8,1.2);
   h+=G("unitcards","t-out",[OBX,BY,OBW,BH],"Карточки отрядов","выход",oc);
   // projections: a slot -> layer 1 -> layer 2 -> its card
   var sl={x:ax,y:AY+18+2*11,w:64,h:8};
@@ -365,17 +377,19 @@ a{color:inherit}
   });
   h+='<g pointer-events="none">'+core+paths+neur+'</g>';
   // --- Эффекты (input) -> Анализ эффектов (processing) -> added to the unit cards
-  var EY=BY+BH+20,ef="";
+  var EY=BY+BH+20+52,ef="";
   for(var i=0;i<4;i++){var x=GX+8+i*44;ef+='<rect x="'+x+'" y="'+(EY+14)+'" width="36" height="40" rx="4" fill="color-mix(in srgb,var(--ink) 10%,var(--panel))"/>';
     for(var k=0;k<3;k++)ef+='<line x1="'+(x+6)+'" y1="'+(EY+24+k*9)+'" x2="'+(x+(k===2?20:30))+'" y2="'+(EY+24+k*9)+'" stroke="var(--muted)" stroke-width="1.8" stroke-linecap="round"/>';}
   h+=G("effects","t-in",[GX-14,EY,LW+28,110],"Эффекты","вход",ef);
   // the effects reader: two small dense layers (every number of a record to every neuron)
   var EN=5,E1=[],E2=[];for(var i=0;i<EN;i++){var yy=EY+16+i*(110-50)/(EN-1);E1.push([BX+105,yy]);E2.push([BX+215,yy]);}
   h+=G("effproc","t-proc",[BX,EY,PW,110],"Анализ эффектов","обработка","");
+  h+=TPL("efftest",BX,PW,EY-46,EY,"Проверки анализа эффектов",14);
   var rec={x:GX+8+44,y:EY+14,w:36,h:40};
   // output block: a card per effect record (a row of numbers, drawn 8 of 64); joining them to the unit cards is a separate module, drawn later
   var ECX=OBX+(OBW-56)/2,eo="";
   for(var i=0;i<4;i++)for(var k=0;k<8;k++)eo+='<rect x="'+(ECX+k*7)+'" y="'+(EY+16+i*11)+'" width="6.4" height="8" rx="1.2" fill="color-mix(in srgb,var(--ink) '+Math.round(12+cval(i+90,k)*55)+'%,var(--panel))"/>';
+  eo+=vrow(ECX,EY+16+11,VE,"--ink",7,8,1.2);
   h+=G("effcards","t-out",[OBX,EY,OBW,110],"Карточки эффектов","выход",eo);
   var ecy=EY+16+11;
   var ex='<rect x="'+(rec.x-1.5)+'" y="'+(rec.y-1.5)+'" width="'+(rec.w+3)+'" height="'+(rec.h+3)+'" fill="none" stroke="var(--open)" stroke-width="2" rx="4"/>';
@@ -386,22 +400,96 @@ a{color:inherit}
   E1.concat(E2).forEach(function(q){ex+='<circle cx="'+q[0]+'" cy="'+q[1]+'" r="5.5" fill="color-mix(in srgb,var(--ink) 18%,var(--panel))" stroke="color-mix(in srgb,var(--ink) 45%,var(--panel))" stroke-width="1.2"/>';});
   h+='<g pointer-events="none">'+ex+'</g>';
   // --- Сложение (algorithm, no weights): unit card + its effect cards = final card
-  var SX=OBX+OBW+18,SW=130,SY0=BY,SH=EY+110-BY,sa="",smid=SY0+(SH-40)/2;
-  function srow(y,base,shift){var o="";for(var k=0;k<8;k++)o+='<rect x="'+(SX+(SW-88)/2+k*11)+'" y="'+y+'" width="10" height="12" rx="2" fill="color-mix(in srgb,var('+base+') '+Math.round(12+cval(shift,k)*55+(base==="--ours"?10:0))+'%,var(--panel))"/>';return o;}
-  sa+=srow(smid-46,"--ours",2)+'<text class="ssub" x="'+(SX+SW/2)+'" y="'+(smid-20)+'" text-anchor="middle" style="font-size:20px;font-weight:700">+</text>'+
-      srow(smid-12,"--ink",91)+'<text class="ssub" x="'+(SX+SW/2)+'" y="'+(smid+14)+'" text-anchor="middle" style="font-size:20px;font-weight:700">=</text>'+
-      srow(smid+22,"--ours",7);
-  h+='<g pointer-events="none"><line x1="'+(OBX+OBW)+'" y1="'+(BY+BH/2)+'" x2="'+SX+'" y2="'+(BY+BH/2)+'" stroke="var(--muted)" stroke-width="1.5"/><line x1="'+(OBX+OBW)+'" y1="'+(EY+55)+'" x2="'+SX+'" y2="'+(EY+55)+'" stroke="var(--muted)" stroke-width="1.5"/></g>';
+  var SX=OBX+OBW+18,SW=150,SY0=BY,SH=EY+110-BY,sa="",smid=SY0+(SH-40)/2;
+  var RX0=SX+(SW-88)/2,R1=smid-46,R2=smid-12,R3=smid+22;
+  for(var k=0;k<8;k++){var lx=RX0+k*11+5;sa+='<line x1="'+lx+'" y1="'+(R1+12)+'" x2="'+lx+'" y2="'+R2+'" stroke="var(--muted)" stroke-width=".8"/><line x1="'+lx+'" y1="'+(R2+12)+'" x2="'+lx+'" y2="'+R3+'" stroke="var(--muted)" stroke-width=".8"/>';}
+  sa+=vrow(RX0,R1,VU,"--ours",11,12,2)+vrow(RX0,R2,VE,"--ink",11,12,2)+vrow(RX0,R3,VR,"--ours",11,12,2);
+  [R1,R2,R3].forEach(function(y){sa+='<rect x="'+(RX0-2)+'" y="'+(y-2)+'" width="'+(88+3)+'" height="16" rx="3" fill="none" stroke="var(--open)" stroke-width="1.6"/>';});
+  sa+='<text class="ssub" x="'+(RX0+88+9)+'" y="'+(R2+11)+'" text-anchor="middle" style="font-size:18px;font-weight:700">+</text><text class="ssub" x="'+(RX0-10)+'" y="'+(R3+11)+'" text-anchor="middle" style="font-size:18px;font-weight:700">=</text>';
   h+=G("addcards","t-alg",[SX,SY0,SW,SH],"Сложение","алгоритм",sa);
+  h+=TPL("addtest",SX,SW,AT,SY0,"Проверки сложения",12);
   // output of the addition: the final card per slot (units with effects changed, the rest as they were)
   var FX=SX+SW+18,FW=200,FCX=FX+(FW-120)/2,FY=SY0+(SH-12*11)/2-20,fo="",FEFF={"0_2":1,"0_5":1,"1_4":1};
   for(var i=0;i<12;i++){var e=i>=9,e2=i>=10;
     fo+=e?'<rect x="'+FCX+'" y="'+(FY+i*11)+'" width="56" height="8" rx="3" fill="color-mix(in srgb,var(--ours) 14%,var(--panel))"/>':crow(FCX,FY+i*11,0,FEFF["0_"+i]?i+100:i,56);
     fo+=e2?'<rect x="'+(FCX+64)+'" y="'+(FY+i*11)+'" width="56" height="8" rx="3" fill="color-mix(in srgb,var(--foe) 14%,var(--panel))"/>':crow(FCX+64,FY+i*11,1,FEFF["1_"+i]?i+100:i,56);}
+  fo+=vrow(FCX,FY+2*11,VR,"--ours",7,8,1.2);
   fo+='<rect x="'+(FCX-1.5)+'" y="'+(FY+2*11-1.5)+'" width="59" height="11" fill="none" stroke="var(--open)" stroke-width="2" rx="3"/>';
-  h+='<line x1="'+(SX+SW)+'" y1="'+(SY0+SH/2)+'" x2="'+FX+'" y2="'+(SY0+SH/2)+'" stroke="var(--muted)" stroke-width="1.5" pointer-events="none"/>';
-  h+=G("finalcards","t-out",[FX,SY0,FW,SH],"Итоговые карточки","выход",fo);
-  var H=EY+110+12;svg.setAttribute("viewBox","0 -110 "+(FX+FW+26)+" "+(H+190));
+  h+=G("finalcards","t-out",[FX,SY0,FW,SH],"Отряды с эффектами","выход",fo);
+  // arrows: the yellow unit card and the yellow effect card go into the addition, the sum goes to the final card
+  var aw='fill="none" stroke="var(--open)" stroke-width="1.6" marker-end="url(#arrA)"',G1=OBX+OBW+6,G2=OBX+OBW+12;
+  h+='<defs><marker id="arrA" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L8 4L0 8z" fill="var(--open)"/></marker></defs>';
+  h+='<g pointer-events="none"><path d="M'+(CX+57.5)+' '+(AY+44)+'H'+(CX+60)+'V'+(AY+153)+'H'+G1+'V'+(R1+6)+'H'+(RX0-3)+'" '+aw+'/>'+
+     '<path d="M'+(ECX+57.5)+' '+(EY+31)+'H'+G2+'V'+(R2+6)+'H'+(RX0-3)+'" '+aw+'/>'+
+     '<path d="M'+(RX0+89)+' '+(R3+6)+'H'+(FX+20)+'V'+(FY+26)+'H'+(FCX-3)+'" '+aw+'/></g>';
+  // --- Совещание (processing): every unit with effects and every map tile at one table; each asks each (a transformer)
+  // drawn small: 4 tiles (near the map row) and 7 units (near the cards row); participants -> one round of all-to-all -> "Итог совещания" (output)
+  var KX=FX+FW+18,KW=200,KY=MBY,KH=EY+110-MBY,kc="",KC=[KX+55,KX+150];
+  // tiles placed so the yellow one sits level with the column it comes from in "Участки карты" (a straight line)
+  var TY0=Math.max(KY+24,A4.y+A4.h/2-PD-1*24);var TOK=[];for(var i=0;i<4;i++)TOK.push({k:"t",y:TY0+i*24});
+  var UY0=SY0+SH/2-3*24;for(var i=0;i<7;i++)TOK.push({k:"u",c:i<4?"--ours":"--foe",y:UY0+i*24});
+  var HT=1,HU=4,KW8=[.15,.9,.1,.2, .3,.15,.1,.2, .8,.25,.1];
+  // every participant is a card: a row of 8 cells (of 64), same length before and after the council; the pattern changes
+  function tok(x,t,hl,seed){var c=t.k==="u"?t.c:"--field",o="";
+    if(t.k==="u"&&seed===HU)o=vrow(x-20,t.y-5,VR,"--ours",5,10,1);
+    else for(var k=0;k<8;k++)o+='<rect x="'+(x-20+k*5)+'" y="'+(t.y-5)+'" width="4.4" height="10" rx="1" fill="color-mix(in srgb,var('+c+') '+Math.round(22+cval(seed+(t.k==="t"?60:0),k)*70)+'%,var(--panel))"/>';
+    if(hl)o+='<rect x="'+(x-23)+'" y="'+(t.y-8)+'" width="46" height="16" rx="3" fill="none" stroke="var(--open)" stroke-width="2"/>';return o;}
+  function knode(x,y,hl){return '<circle cx="'+x+'" cy="'+y+'" r="5.5" fill="color-mix(in srgb,var(--ink) 18%,var(--panel))" stroke="'+(hl?'var(--open)':'color-mix(in srgb,var(--ink) 45%,var(--panel))')+'" stroke-width="'+(hl?2:1.2)+'"/>';}
+  TOK.forEach(function(a){TOK.forEach(function(b){kc+='<line class="cw" x1="'+(KC[0]+21)+'" y1="'+a.y+'" x2="'+(KC[1]-6)+'" y2="'+b.y+'"/>';});});
+  TOK.forEach(function(a,i){kc+='<line x1="'+(KC[0]+21)+'" y1="'+a.y+'" x2="'+(KC[1]-6)+'" y2="'+TOK[HU].y+'" stroke="var(--open)" stroke-width="'+(.6+KW8[i]*3)+'" opacity="'+(.35+KW8[i]*.6)+'"/>';});
+  // the yellow tile listens to everyone too: most to the yellow unit (it suits it) and to the enemy that covers it
+  var KWT=[.4,.2,.35,.1, .85,.15,.1,.2, .7,.15,.1];
+  TOK.forEach(function(a,i){kc+='<line x1="'+(KC[0]+21)+'" y1="'+a.y+'" x2="'+(KC[1]-6)+'" y2="'+TOK[HT].y+'" stroke="var(--open)" stroke-width="'+(.6+KWT[i]*3)+'" opacity="'+(.35+KWT[i]*.6)+'"/>';});
+  TOK.forEach(function(t,i){kc+=tok(KC[0],t,i===HT||i===HU,i)+knode(KC[1],t.y,i===HU||i===HT);});
+  // from the illustrations: the yellow map tile and the yellow unit card go to their places at the table
+  var pj2='<path d="M'+(A4.x+A4.w+PD)+' '+(A4.y+A4.h/2-PD)+'L'+(KC[0]-23)+' '+TOK[HT].y+'" fill="none" stroke="var(--open)" stroke-width="1.6"/>'+
+          '<path d="M'+(FCX+57.5)+' '+(FY+26)+'H'+(FCX+60)+'V'+(FY+12*11+4)+'H'+(FX+FW+6)+'L'+(KC[0]-23)+' '+TOK[HU].y+'" fill="none" stroke="var(--open)" stroke-width="1.6"/>';
+  h+=G("council","t-proc",[KX,KY,KW,KH],"Совещание","обработка",kc);
+  // output: the same participants, the same card length; the numbers changed by what each learned from the others
+  // output: the same structure as before the council - the map as a grid of участки, the units as 40 + 40 slots (empty ones stay empty); same card length, new numbers
+  var QX=KX+KW+18,QW=200,qo="",QCX=QX+(QW-120)/2;
+  var QGX=QX+(QW-4*16)/2,QGY=TOK[HT].y-16-8;
+  // the map is still a stack of the same maps (drawn 6 of 32): layers behind the front grid
+  var QD=6;for(var L=5;L>=1;L--)qo+='<rect x="'+(QGX-5+L*QD)+'" y="'+(QGY-5-L*QD)+'" width="'+(4*16+8)+'" height="'+(3*16+8)+'" rx="4" fill="color-mix(in srgb,var(--ink) '+(6+L*5)+'%,var(--panel))" stroke="color-mix(in srgb,var(--ink) 30%,var(--panel))" stroke-width="1"/>';
+  qo+='<rect x="'+(QGX-5)+'" y="'+(QGY-5)+'" width="'+(4*16+8)+'" height="'+(3*16+8)+'" rx="4" fill="color-mix(in srgb,var(--ink) 8%,var(--panel))" stroke="color-mix(in srgb,var(--ink) 30%,var(--panel))" stroke-width="1"/>';
+  for(var r=0;r<3;r++)for(var c=0;c<4;c++)qo+='<rect x="'+(QGX+c*16)+'" y="'+(QGY+r*16)+'" width="14" height="14" rx="2" fill="color-mix(in srgb,var(--field) '+Math.round(25+cval(360+r*4+c,1)*70)+'%,var(--panel))"/>';
+  // the yellow участок: its cell through the whole stack, as in "Участки карты"
+  var qa={x:QGX+16,y:QGY+16,w:14,h:14},QP=5*QD;
+  qo+='<rect x="'+qa.x+'" y="'+qa.y+'" width="14" height="14" rx="2" fill="none" stroke="var(--open)" stroke-width="2"/>'+
+      '<polygon points="'+qa.x+','+qa.y+' '+(qa.x+QP)+','+(qa.y-QP)+' '+(qa.x+qa.w+QP)+','+(qa.y-QP)+' '+(qa.x+qa.w)+','+qa.y+'" fill="var(--open)" fill-opacity=".22" stroke="var(--open)" stroke-width="1.6" stroke-linejoin="round"/>'+
+      '<polygon points="'+(qa.x+qa.w)+','+qa.y+' '+(qa.x+qa.w+QP)+','+(qa.y-QP)+' '+(qa.x+qa.w+QP)+','+(qa.y+qa.h-QP)+' '+(qa.x+qa.w)+','+(qa.y+qa.h)+'" fill="var(--open)" fill-opacity=".32" stroke="var(--open)" stroke-width="1.6" stroke-linejoin="round"/>';
+  var QRY=TOK[HU].y-4-2*11;
+  for(var r=0;r<12;r++){var e=r>=9,e2=r>=10;
+    qo+=e?'<rect x="'+QCX+'" y="'+(QRY+r*11)+'" width="56" height="8" rx="3" fill="color-mix(in srgb,var(--ours) 14%,var(--panel))"/>':crow(QCX,QRY+r*11,0,r+300,56);
+    qo+=e2?'<rect x="'+(QCX+64)+'" y="'+(QRY+r*11)+'" width="56" height="8" rx="3" fill="color-mix(in srgb,var(--foe) 14%,var(--panel))"/>':crow(QCX+64,QRY+r*11,1,r+300,56);}
+  qo+='<rect x="'+(QCX-1.5)+'" y="'+(QRY+2*11-1.5)+'" width="59" height="11" fill="none" stroke="var(--open)" stroke-width="2" rx="3"/>';
+  h+=G("result","t-out",[QX,KY,QW,KH],"Итог совещания","выход",qo);
+  // the yellow tile and the yellow unit go to their places; the other participants go to theirs the same way (not drawn, to keep it light)
+  pj2+='<line x1="'+(KC[1]+6)+'" y1="'+TOK[HT].y+'" x2="'+(QGX+16)+'" y2="'+TOK[HT].y+'" stroke="var(--open)" stroke-width="1.6"/>';
+  pj2+='<line x1="'+(KC[1]+6)+'" y1="'+TOK[HU].y+'" x2="'+(QCX-1.5)+'" y2="'+TOK[HU].y+'" stroke="var(--open)" stroke-width="1.6"/>';
+  h+='<g pointer-events="none">'+pj2+'</g>';
+  // --- Сбор групп (processing): units divide themselves between group places, ours only into our 10, enemy only into enemy 10 (side mask); 3 rounds, one network
+  var GPX=QX+QW+18,GPW=230,gp="",GS=16,GSY=TOK[HU].y-2*GS-110,GSX=GPX+170;
+  var SL=[];for(var i=0;i<10;i++)SL.push({s:0,y:GSY+i*GS,used:i<6});for(var i=0;i<10;i++)SL.push({s:1,y:GSY+10*GS+18+i*GS,used:i<5});
+  var GU=[{s:0,y:SL[1].y,to:[1]},{s:0,y:TOK[HU].y,to:[2],hl:1},{s:0,y:SL[4].y+6,to:[4]},{s:0,y:SL[6].y,to:[5]},{s:1,y:SL[11].y,to:[11]},{s:1,y:SL[13].y+6,to:[13]},{s:1,y:SL[15].y,to:[14]}];
+  GU.forEach(function(u){SL.forEach(function(sl,j){if(sl.s!==u.s||!sl.used)return;var main=u.to.indexOf(j)>=0;
+    gp+='<line x1="'+(GPX+62)+'" y1="'+u.y+'" x2="'+(GSX-8)+'" y2="'+(sl.y+5)+'" stroke="'+(u.hl&&main?'var(--open)':'color-mix(in srgb,var('+(u.s?'--foe':'--ours')+') 70%,var(--panel))')+'" stroke-width="'+(main?2.2:.6)+'" opacity="'+(main?.95:.35)+'"/>';});});
+  GU.forEach(function(u,i){gp+=crow(GPX+22,u.y-4,u.s,i+300,40);if(u.hl)gp+='<rect x="'+(GPX+19)+'" y="'+(u.y-7)+'" width="46" height="14" rx="3" fill="none" stroke="var(--open)" stroke-width="2"/>';});
+  SL.forEach(function(sl,j){var c=sl.s?'--foe':'--ours';gp+='<rect x="'+(GSX-8)+'" y="'+sl.y+'" width="26" height="11" rx="3" fill="'+(sl.used?'color-mix(in srgb,var('+c+') 30%,var(--panel))':'none')+'" stroke="color-mix(in srgb,var('+c+') 70%,var(--panel))" stroke-width="1.2"'+(sl.used?'':' stroke-dasharray="3 2"')+'/>';
+    if(j===2)gp+='<rect x="'+(GSX-11)+'" y="'+(sl.y-3)+'" width="32" height="17" rx="4" fill="none" stroke="var(--open)" stroke-width="2"/>';});
+  gp+='<text class="ssub" x="'+(GSX+5)+'" y="'+(GSY-10)+'" text-anchor="middle">наши 10</text><text class="ssub" x="'+(GSX+5)+'" y="'+(GSY+10*GS+12)+'" text-anchor="middle">враг 10</text>';
+  gp+='<text class="ssub" x="'+(GPX+90)+'" y="'+(GSY-10)+'" text-anchor="middle">×3 круга</text>';
+  h+=G("groupproc","t-proc",[GPX,KY,GPW,KH],"Сбор групп","обработка",gp);
+  // --- Группы (output): a card per group place, 10 ours + 10 enemy; empty places stay empty
+  var GOX=GPX+GPW+18,GOW=150,GOC=GOX+(GOW-56)/2,go="";
+  SL.forEach(function(sl,j){go+=sl.used?crow(GOC,sl.y+1.5,sl.s,j+500,56):'<rect x="'+GOC+'" y="'+(sl.y+1.5)+'" width="56" height="8" rx="3" fill="color-mix(in srgb,var('+(sl.s?'--foe':'--ours')+') 14%,var(--panel))"/>';});
+  go+='<rect x="'+(GOC-1.5)+'" y="'+(SL[2].y)+'" width="59" height="11" fill="none" stroke="var(--open)" stroke-width="2" rx="3"/>';
+  h+=G("groups","t-out",[GOX,KY,GOW,KH],"Группы","выход",go);
+  // the yellow unit leaves "Итог совещания" through the gap between columns (not across the enemy card)
+  var gl='<path d="M'+(QCX+57.5)+' '+TOK[HU].y+'H'+(QCX+60)+'V'+(QRY+12*11+4)+'H'+(GPX+8)+'V'+TOK[HU].y+'H'+(GPX+19)+'" fill="none" stroke="var(--open)" stroke-width="1.6"/>';
+  SL.forEach(function(sl,j){if(sl.used)gl+='<line x1="'+(GSX+18)+'" y1="'+(sl.y+5.5)+'" x2="'+(GOC-1.5)+'" y2="'+(sl.y+5.5)+'" '+(j===2?'stroke="var(--open)" stroke-width="1.6"':'class="cw"')+'/>';});
+  h+='<g pointer-events="none">'+gl+'</g>';
+  var H=EY+110+12;svg.setAttribute("viewBox","0 -110 "+(GOX+GOW+26)+" "+(H+190));
   svg.innerHTML=h;
   [].forEach.call(svg.querySelectorAll(".snode"),function(g){g.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();g.dispatchEvent(new MouseEvent("click",{bubbles:true}));}});});
   // zoom (wheel over the scheme, buttons, pinch) and pan (drag); a drag does not count as a click
@@ -625,6 +713,218 @@ a{color:inherit}
   </section>
 </template>
 
+<template id="tpl-effproc">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done"><h2>Анализ эффектов <span class="chip done">решено</span> <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Что делает</b> — переводит одну строку эффекта в карточку эффекта.</li>
+          <li><b>Одна сеть на все строки</b> — как анализ армий: те же веса для любой строки любого эффекта, порядок строк не важен.</li>
+          <li><b>Устройство</b> — 2 полносвязных слоя; метки строки («что меняет», «кому», «когда действует») — через embedding, как касты в анализе армий.</li>
+          <li><b>Размер выхода</b> — равен размеру карточки отряда, иначе их не сложить.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small"><li><b>Ширина слоёв</b> — эффектов меньше, чем отрядов, вероятно хватит уже, чем у армий; подобрать замером.</li><li><b>Поля строки</b> — разбираются во входе «Эффекты».</li></ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-effcards">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done"><h2>Карточки эффектов <span class="chip done">решено</span> <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Одна карточка на строку эффекта</b> — «Держать строй!» (защита +5, мораль +4) даёт 2 карточки.</li>
+          <li><b>Ничья</b> — у карточки эффекта нет стороны; сторона приходит от отряда, к которому её прибавят.</li>
+          <li><b>Одна строка — одна карточка</b> — одна и та же строка у двух отрядов считается один раз и прибавляется обоим.</li>
+          <li><b>Размер</b> — как у карточки отряда.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-addcards">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done"><h2>Сложение <span class="chip done">решено</span> <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Алгоритм, не сеть</b> — своих весов нет, ничему не учится.</li>
+          <li><b>Список «эффект → слоты»</b> — код собирает один раз при сборке входа из базы игры: какие эффекты у какого отряда.</li>
+          <li><b>Что делает</b> — по списку прибавляет карточку каждой строки эффекта к карточке её отряда, число к числу. Несколько эффектов — прибавляются все; эффектов нет — карточка проходит как есть.</li>
+          <li><b>Обучение проходит насквозь</b> — поправка от ошибки генерала идёт через сложение назад в обе сети: анализ армий и анализ эффектов.</li>
+          <li><b>Не считать дважды</b> — паспорт отряда берётся без пассивок, иначе прибавка придёт и в числах, и через эффект.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small"><li><b>Ауры: к кому прибавлять</b> — предложение: к тому, кто даёт ауру (лорд «усиливает тех, кто рядом»); вариант: к тем, кто сейчас в радиусе (нужны положения отрядов).</li><li><b>Выравнивание после сложения</b> — предложение: привести каждую итоговую карточку к одному масштабу, чтобы много эффектов на одном отряде не раздували числа; не дублировать, если у совещания оно уже будет на входе.</li></ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-finalcards">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done"><h2>Отряды с эффектами <span class="chip done">решено</span> <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Одна карточка на слот</b> — 80 карточек (40 своих + 40 врага), в том же порядке, что слоты на входе; пустые слоты — пустые карточки.</li>
+          <li><b>Что в ней</b> — карточка отряда плюс карточки всех его эффектов: отряд «как он есть в этом бою».</li>
+          <li><b>Размер</b> — как у карточки отряда.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small"><li><b>Куда дальше</b> — в совещание генерала, вместе с участками карты.</li></ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-groupproc">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done"><h2>Сбор групп <span class="chip done">решено</span></h2>
+        <ul class="small">
+          <li><b>10 мест под группы на сторону</b> — наши 10 и враг 10. Расклад на старте — до 9 групп (конница на 2 фланга, 3 части пехоты, 2 части стрелков, резерв, летуны), десятое — запас, чтобы в бою было куда отделиться. Пустое место — группы нет.</li>
+          <li><b>Свои — только в свои места, враги — только во вражеские</b> (маска стороны). Группы врага — догадка сети о его строении: «их конница — отдельно от основной силы».</li>
+          <li><b>Отряд делит себя на 100 % между местами своей стороны</b> — места соревнуются за отряды, поэтому группы раздельные, а не «все во всех».</li>
+          <li><b>Состав учит сеть</b> — правил вроде «конница всегда вместе» нет.</li>
+        </ul>
+      </div>
+      <div class="box done"><h2>Предложения <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Одна сеть</b> — одни веса на все места и на обе стороны; места отличаются стартовыми карточками.</li>
+          <li><b>3 круга</b> — отряды делятся, группы обновляются, и так 3 раза: из размытого деления в чёткое. Все круги — внутри одного решения.</li>
+          <li><b>Бегущие — вне групп</b>, пока не соберутся (бегущим в игре не управляют).</li>
+        </ul>
+      </div>
+      <div class="colh">На будущее</div>
+      <div class="box later"><h2>На этап боя: защита от дёрганья <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Замок кодом</b> — пересборка групп и заданий только по расписанию (раз в 20–30 с) или по событию (группа разбита, задание выполнено, подкрепления, гибель лорда); твёрдый предел смен в минуту.</li>
+          <li><b>«Оставить или пересобрать» — отдельное решение с ценой</b> — обе ветки проигрываются вперёд, смена без выгоды учится как невыгодная.</li>
+          <li><b>Инерция</b> — на пересмотре места стартуют со своих прошлых карточек; разделение группы = часть отрядов ушла на свободное место.</li>
+          <li><b>Следить</b> — число смен замысла за бой; сколько групп реально используется и по сколько отрядов (не дробит ли «в пыль»).</li>
+        </ul>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
+      <li><b>Группы врага: чем проверить</b> — правды о группах врага нет (против ИИ игры групп у него нет); учатся только от исхода боя.</li>
+    </ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-groups">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done"><h2>Группы <span class="chip done">решено</span></h2>
+        <ul class="small">
+          <li><b>Карточка на место</b> — 10 наших и 10 вражеских; карточка группы — сводка её отрядов (кто, сколько, насколько сильны). Пустое место — пустая карточка.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
+      <li><b>Задания группам</b> — вид задания и цель (участок итоговой карты, вражеский отряд или группа, своя группа); ещё не проектировали.</li>
+    </ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-result">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done"><h2>Итог совещания <span class="chip done">решено</span> <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Те же участники</b> — 80 отрядов и все участки карты, ни больше ни меньше.</li>
+          <li><b>Карточки обновлены</b> — та же длина, другие числа: каждая теперь с учётом всех остальных (лучники «знают» про холм, про пушки врага и про копейщиков рядом).</li>
+          <li><b>Дальше</b> — из отрядов генерал берёт «что делать», из участков — «куда».</li>
+        </ul>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
+      <li><b>Выходы генерала</b> — что именно берём из итога и как; ещё не проектировали.</li>
+    </ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-council">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done"><h2>Совещание — все со всеми <span class="chip done">решено</span></h2>
+        <ul class="small">
+          <li><b>Один стол</b> — 80 «Отрядов с эффектами» и все «Участки карты»; каждый спрашивает каждого и забирает больше от тех, кто ему важен (трансформер).</li>
+          <li><b>Метка «свой / враг / участок»</b> — говорит, кто перед тобой.</li>
+          <li><b>Закрывает три связи сразу</b> — отряд↔карта, отряд↔отряд (отложенное «внимание между отрядами»), участок↔участок.</li>
+        </ul>
+      </div>
+      <div class="box done"><h2>Предложения <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Место участка</b> — у каждого участка его строка и столбец на карте; иначе за столом не узнать, где этот холм. У отрядов места нет — так решено во входе «Армии».</li>
+          <li><b>Выравнивание на входе</b> — каждую карточку перед столом привести к одному масштабу; заодно закрывает вопрос «выравнивание после сложения».</li>
+          <li><b>Пустые слоты не участвуют</b> — их никто не спрашивает и они никого не спрашивают.</li>
+          <li><b>На выходе</b> — блок «Итог совещания».</li>
+        </ul>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
+      <li><b>Сколько слоёв и какой ширины</b> — предложение: 2–3 слоя; подобрать замером.</li>
+      <li><b>Сколько участков за столом</b> — сколько клеток даёт анализ карты на выходе.</li>
+      <li><b>Сводка армии</b> — отдельный «собиратель» за столом (вариант 2), который слушает всех и подводит итог.</li>
+      <li><b>Выходы генерала</b> — что берём из стола и как; ещё не проектировали.</li>
+    </ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-efftest">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done">
+        <h2>Проверки анализа эффектов <span class="chip done">решено</span> <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
+        <details class="lgroup" open>
+          <summary>Проверки — 2 группы (нажми, чтобы раскрыть)</summary>
+          <div class="layers">
+            <details class="lacc"><summary><span class="ln">1 · При сборке</span><span class="kind">тесты кода, один раз, бесплатно</span></summary>
+              <div class="tlist"><ul class="small">
+                <li><b>Сборка данных</b> — эффект с неизвестной меткой — ошибка, а не тихое «другое».</li>
+                <li><b>Размах чисел</b> — карточки эффектов не улетают и не гаснут.</li>
+              </ul></div></details>
+            <details class="lacc"><summary><span class="ln">2 · Выборочно, по поводу</span><span class="kind">после обучения, дёшево</span></summary>
+              <div class="tlist"><ul class="small">
+                <li><b>Мёртвые нейроны</b> — нейрон всегда 0 на любом эффекте.</li>
+                <li><b>Различает ли эффекты</b> — похожие эффекты (две ауры на защиту) дают похожие карточки, разные — разные.</li>
+              </ul></div></details>
+          </div>
+        </details>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-addtest">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done">
+        <h2>Проверки сложения <span class="chip done">решено</span> <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
+        <div class="ginfo"><b>При сборке</b> — тесты кода, один раз, бесплатно
+        <ul class="small">
+          <li><b>Эффект попал к своему отряду</b> — карточка эффекта прибавилась к тем слотам, что в списке «эффект → слоты», и больше ни к каким.</li>
+          <li><b>Один эффект у двух отрядов</b> — обоим прибавилось одно и то же.</li>
+          <li><b>Нет эффектов</b> — итоговая карточка совпадает с карточкой отряда до бита.</li>
+          <li><b>Много эффектов на одном отряде</b> — 10 сильных эффектов на одном отряде: итоговая карточка не улетает.</li>
+        </ul></div>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
 <template id="tpl-armytest">
   <section class="cards">
     <div>
@@ -732,6 +1032,19 @@ a{color:inherit}
 <template id="tpl-effects">
   <section class="cards">
     <div>
+      <div class="colh">Решено</div>
+      <div class="box done"><h2>Формат записи <span class="chip done">решено</span> <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Хранение — целым эффектом, как в игре.</b> Общие поля (кому, радиус, когда, сколько длится) один раз и список изменений любой длины — как уже устроен <code>config/nn/effects.json</code>.</li>
+          <li><b>В сеть — построчно.</b> Код сборки режет эффект на строки: одна строка = одно изменение (что, как, на сколько) + общие поля эффекта. «Держать строй!» — 2 строки.</li>
+          <li><b>Почему.</b> Нет предела числу изменений; анализ эффектов учит одну форму строки; карточки строк складываются в «+» — сумма та же, что у целого эффекта.</li>
+          <li><b>Плата.</b> Общие поля повторяются в каждой строке; сеть не знает, что строки из одного эффекта (если понадобится — добавить номер эффекта).</li>
+        </ul>
+      </div>
+      <div class="box done"><h2>Поля строки — набросок <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
+        <span class="small">6 меток + 7 чисел. Разобрано по базе игры: 2682 отряда, 564 врождённые способности, 58 свойств, 37 эффектов при попадании. Строк у отряда: в среднем 7, у 90 % — не больше 13, максимум ~23.</span>
+        <table class="ptab"><tr><th>вид</th><th>поле</th><th>варианты и нормировка</th></tr><tr><td class="muted">метка</td><td>что меняет</td><td class="muted">39 характеристик, ~22 правила («даёт бесстрашие»), 2 «здоровье в секунду» — ~63, после объединения редких ~56</td></tr><tr><td class="muted">метка</td><td>как</td><td class="muted">прибавка / множитель / даёт правило / снимает правило / в секунду</td></tr><tr><td class="muted">метка</td><td>вид</td><td class="muted">на себя / аура / на всё поле / при ударе в рукопашной / при попадании снарядом</td></tr><tr><td class="muted">метка</td><td>кому</td><td class="muted">себе / себе и своим / своим без себя / врагам / в кого попал</td></tr><tr><td class="muted">метка</td><td>когда (условие 1)</td><td class="muted">«всегда» + ~45 условий из 75 флагов базы (~35 после объединения)</td></tr><tr><td class="muted">метка</td><td>когда-2 (условие 2) — новое</td><td class="muted">тот же список; два условия у 25 из 536 способностей</td></tr><tr><td class="muted">число</td><td>на сколько</td><td class="muted">прибавка ÷100; множитель — логарифм, обрезка ±1,5</td></tr><tr><td class="muted">число</td><td>радиус полный</td><td class="muted">м ÷100; типично 35 и 55 м, ободрение 70</td></tr><tr><td class="muted">число</td><td>радиус до нуля</td><td class="muted">м ÷100; отличается только у ободрения (105 м)</td></tr><tr><td class="muted">число</td><td>сколько длится</td><td class="muted">0 = пока держится условие; иначе логарифм секунд, 300 с ≈ 1</td></tr><tr><td class="muted">число</td><td>перезарядка — новое</td><td class="muted">116 эффектов сами включаются на время (0…120 с); логарифм, как длительность</td></tr><tr><td class="muted">число</td><td>один раз за бой — новое</td><td class="muted">0 / 1, ≈60 эффектов</td></tr><tr><td class="muted">число</td><td>порог условия — новое</td><td class="muted">«здоровье ниже ¼» = метка «здоровье ниже» + число 0,25; радиус условия — м ÷100</td></tr></table>
+      </div>
       <div class="colh">Кандидаты</div>
       <div class="box"><h2>Эффекты</h2>
         <span class="small">Справочник: каждый эффект описан один раз числами (на кого, что меняет, на сколько, радиусы, когда, сколько длится); у отряда — ссылки на свои эффекты. Записи этого вида уже есть в проекте: <code>config/nn/effects.json</code> (по ним работает симулятор). Отдельный анализ эффектов переводит запись в карточку, она прибавляется к карточке отряда.</span>
@@ -739,7 +1052,8 @@ a{color:inherit}
       </div>
     </div>
     <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
-      <li><b>Формат записи эффекта</b> — поля: на кого (себе / свои / враги / в кого попал), что меняет, как (прибавка или множитель), на сколько, радиусы, <b>когда действует</b> (один из вариантов: всегда, пока колеблется, здоровье выше ½, ниже ¼, в рукопашной…; новое условие — новый вариант), <b>сколько длится</b> (для эффектов при попадании).</li>
+      <li><b>Поля строки: что решить</b> — (1) брать ли 4 новых поля (перезарядка, один раз за бой, порог условия, второе условие); (2) какие редкие варианты меток объединять; (3) свойства только на себя (~40 из 58) — флагами в слот армии: какие ещё, кроме 4 нынешних.</li>
+      <li><b>Что не ложится в строку</b> — ужас (85 с невосприимчивости), фазы способности по порядку (62), пассивки без изменений характеристик (взрыв при смерти, призыв — 28, скорее «Способности»), «не складывается с …» (нужен ключ эффекта).</li>
       <li><b>Аура лорда</b> — тот же эффект, что «воодушевляет»; описать одной записью.</li>
             <li><b>Варианты из кампании</b> — навыки меняют радиус и силу: видны ли числа на карточке.</li>
       <li><b>Способности</b> — возможно, тот же формат и тот же анализ.</li>
@@ -872,14 +1186,16 @@ a{color:inherit}
 <script>
 (function(){
   // the tree: levels → parts → topics; "ready" topics have a template, others show as not discussed yet
-  var nodes={landscape:{t:"Вход · Ландшафт",tpl:"tpl-landscape"},mapproc:{t:"Обработка · Анализ карты",tpl:"tpl-mapproc"},maptest:{t:"Проверка · Проверки анализа карты",tpl:"tpl-maptest"},armies:{t:"Вход · Армии",tpl:"tpl-armies"},armyproc:{t:"Обработка · Анализ армий",tpl:"tpl-armyproc"},unitcards:{t:"Выход · Карточки отрядов",tpl:"tpl-unitcards"},maptiles:{t:"Выход · Участки карты",tpl:"tpl-maptiles"},armytest:{t:"Проверка · Проверки анализа армий",tpl:"tpl-armytest"},effproc:{t:"Обработка · Анализ эффектов"},effcards:{t:"Выход · Карточки эффектов"},addcards:{t:"Алгоритм · Сложение"},finalcards:{t:"Выход · Итоговые карточки"},effects:{t:"Вход · Эффекты",tpl:"tpl-effects"},sim:{t:"Симулятор · Доработки",tpl:"tpl-sim"}};
+  var nodes={landscape:{t:"Вход · Ландшафт",tpl:"tpl-landscape"},mapproc:{t:"Обработка · Анализ карты",tpl:"tpl-mapproc"},maptest:{t:"Проверка · Проверки анализа карты",tpl:"tpl-maptest"},armies:{t:"Вход · Армии",tpl:"tpl-armies"},armyproc:{t:"Обработка · Анализ армий",tpl:"tpl-armyproc"},unitcards:{t:"Выход · Карточки отрядов",tpl:"tpl-unitcards"},maptiles:{t:"Выход · Участки карты",tpl:"tpl-maptiles"},armytest:{t:"Проверка · Проверки анализа армий",tpl:"tpl-armytest"},effproc:{t:"Обработка · Анализ эффектов",tpl:"tpl-effproc"},effcards:{t:"Выход · Карточки эффектов",tpl:"tpl-effcards"},addcards:{t:"Алгоритм · Сложение",tpl:"tpl-addcards"},efftest:{t:"Проверка · Проверки анализа эффектов",tpl:"tpl-efftest"},addtest:{t:"Проверка · Проверки сложения",tpl:"tpl-addtest"},finalcards:{t:"Выход · Отряды с эффектами",tpl:"tpl-finalcards"},council:{t:"Обработка · Совещание",tpl:"tpl-council"},result:{t:"Выход · Итог совещания",tpl:"tpl-result"},groupproc:{t:"Обработка · Сбор групп",tpl:"tpl-groupproc"},groups:{t:"Выход · Группы",tpl:"tpl-groups"},effects:{t:"Вход · Эффекты",tpl:"tpl-effects"},sim:{t:"Симулятор · Доработки",tpl:"tpl-sim"}};
   // "!" on a block whose page has open questions, future items or reworks
   [].forEach.call(document.querySelectorAll(".node"),function(b){var n=nodes[b.dataset.n];if(!n||!n.tpl)return;
     var t=document.getElementById(n.tpl);if(!t)return;var c=t.content,hit=false;
     [].forEach.call(c.querySelectorAll(".colh"),function(h){var x=h.textContent.trim(),box=h.nextElementSibling;
       if(/Открытые вопросы|На будущее|Доработки/.test(x)&&box&&!/нет\.?\s*$/.test(box.textContent.trim()))hit=true;});
     if(c.querySelector(".box.later"))hit=true;
-    if(hit){if(b instanceof SVGElement){var bx=+b.dataset.bx,by=+b.dataset.by,ns="http://www.w3.org/2000/svg";var c=document.createElementNS(ns,"circle");c.setAttribute("cx",bx-4);c.setAttribute("cy",by+4);c.setAttribute("r",10);c.setAttribute("fill","var(--open)");var t=document.createElementNS(ns,"text");t.setAttribute("x",bx-4);t.setAttribute("y",by+9);t.setAttribute("text-anchor","middle");t.setAttribute("font-size","14");t.setAttribute("font-weight","800");t.setAttribute("fill","#1b1206");t.textContent="!";var tt=document.createElementNS(ns,"title");tt.textContent="есть открытые вопросы или доработки";b.appendChild(c);b.appendChild(t);b.appendChild(tt);}else{var i=document.createElement("span");i.className="bang";i.textContent="!";i.title="есть открытые вопросы или доработки";b.appendChild(i);}}});
+    if(hit){if(b instanceof SVGElement){var bx=+b.dataset.bx,by=+b.dataset.by,ns="http://www.w3.org/2000/svg";var c=document.createElementNS(ns,"circle");c.setAttribute("cx",bx-4);c.setAttribute("cy",by+4);c.setAttribute("r",10);c.setAttribute("fill","var(--open)");var t=document.createElementNS(ns,"text");t.setAttribute("x",bx-4);t.setAttribute("y",by+9);t.setAttribute("text-anchor","middle");t.setAttribute("font-size","14");t.setAttribute("font-weight","800");t.setAttribute("fill","#1b1206");t.textContent="!";var tt=document.createElementNS(ns,"title");tt.textContent="есть открытые вопросы или доработки";b.appendChild(c);b.appendChild(t);b.appendChild(tt);}else{var i=document.createElement("span");i.className="bang";i.textContent="!";i.title="есть открытые вопросы или доработки";b.appendChild(i);}}
+    // robot: something on the page was made by the network and not checked by a human in detail
+    if(document.getElementById(n.tpl).content.querySelector(".robo")){if(b instanceof SVGElement){var ns2="http://www.w3.org/2000/svg",rx=+b.dataset.bx-(hit?28:4),ry=+b.dataset.by+4,rg=document.createElementNS(ns2,"g");rg.innerHTML='<circle cx="'+rx+'" cy="'+ry+'" r="10" fill="#5b6cf0"/><g transform="translate('+(rx-7)+' '+(ry-7)+')"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></g><title>сделано нейросетью, человек не проверял в деталях</title>';b.appendChild(rg);}else{var r=document.createElement("span");r.innerHTML='<span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span>';b.appendChild(r.firstChild);}}});
   var cur="landscape";
   try{var sv=localStorage.getItem("gen-node");if(sv&&nodes[sv])cur=sv;}catch(e){}
   [].forEach.call(document.querySelectorAll(".node"),function(b){var n=nodes[b.dataset.n];
