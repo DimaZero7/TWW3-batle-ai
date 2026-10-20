@@ -179,7 +179,8 @@ def test_the_skeletons_simplifications_are_settings_and_the_missing_ones_are_ref
     from tools.nn.general import learn
     with pytest.raises(gconfig.NotBuilt):
         learn.LearnConfig(branches=0.1)
-    with pytest.raises(gconfig.NotBuilt):
-        learn.LearnConfig(distinct=0.1)
-    c = gconfig.GeneralConfig(card=96)
+    assert learn.LearnConfig(distinct=0.1, distinct_decay=100).distinct == 0.1      # built (distinct.py)
+    with pytest.raises(ValueError):
+        learn.LearnConfig(distinct=-0.1)
+    c =gconfig.GeneralConfig(card=96)
     assert gconfig.of_dict(gconfig.to_dict(c)) == c and c.task_dim == 2 * 96 + 8

@@ -8,8 +8,13 @@
   its advantage = the plan's return - the plan value's prediction at the plan (normalised over the update's plans);
   + an entropy bonus on the choices (entropy); the plan value ("Оценка замысла") regresses the return. No reward for
   carrying a mission out: the return is the battle's reward (v2).
-* Simplification 4: the mission branches (counterfactual replays) and the bonus for missions that tell apart are not
-  built: LearnConfig.branches and .distinct must be 0.
+  With run.py --general-return critic the records carry "base" (the unit network's critic's value where the plan began)
+  and the return is the critic's target (runtime.critic_target): the advantage is target - base (the critic explains
+  ~0.995 of the return's spread); the plan value then only learns the same target beside it (its explained share
+  logged).
+* The bonus for missions that tell apart (LearnConfig.distinct, run.py --general-distinct W) is the executor's, paid in
+  the rollout (runtime.py, distinct.py): not a term here.
+* Simplification 4: the mission branches (counterfactual replays) are not built: LearnConfig.branches must be 0.
 """
 from dataclasses import dataclass
 
@@ -28,13 +33,14 @@ class LearnConfig:
     max_grad: float = 0.5
     target_kl: float = 0.03    # the epochs stop when a minibatch's mean KL per group passes this (0: never)
     branches: float = 0.0      # simplification 4: mission branches - not built (> 0 refused)
-    distinct: float = 0.0      # simplification 4: the bonus for missions that tell apart - not built (> 0 refused)
+    distinct: float = 0.0      # the executor's bonus for missions that tell apart: its weight W (0: off; distinct.py)
+    distinct_decay: int = 0    # ... down to 0 linearly over this many updates of the chain (0: no decay)
 
     def __post_init__(self):
         if self.branches:
             raise NotBuilt("general mission branches (--general-branches): not built yet, keep 0")
-        if self.distinct:
-            raise NotBuilt("general bonus for distinct missions (--general-distinct): not built yet, keep 0")
+        if self.distinct < 0 or self.distinct_decay < 0:
+            raise ValueError("--general-distinct and --general-distinct-decay are >= 0")
 
 
 def task_for(actor, table, obs):
@@ -72,8 +78,9 @@ def update(actor, opt, ready, cfg=LearnConfig()):
     M = ready["lp"].shape[0]
     G = gen.cfg.places
     target = ready["target"].float()
-    adv = target - ready["value"].float()
-    adv = (adv - adv.mean()) / (adv.std() + 1e-8) if M > 1 else adv * 0
+    base = ready["base"].float() if "base" in ready else ready["value"].float()   # the critic's (--general-return critic)
+    raw = target - base
+    adv = (raw - raw.mean()) / (raw.std() + 1e-8) if M > 1 else raw * 0
     sums = {"pl": 0.0, "ent": 0.0, "vl": 0.0, "kl": 0.0, "clip": 0.0}
     n, stop = 0, False
     actor.train()
@@ -118,5 +125,20 @@ def update(actor, opt, ready, cfg=LearnConfig()):
     out["general_plans"] = float(M)
     out["general_steps"] = float(n)
     out["general_return_mean"] = float(target.mean())
+    out["general_return_std"] = float(target.std()) if M > 1 else 0.0
+    out["general_adv_mean"] = float(raw.mean())                    # the advantage before its normalisation
+    out["general_adv_std"] = float(raw.std()) if M > 1 else 0.0
+    if "base" in ready:
+        out["general_critic_ev"] = _ev(base, target)               # the unit critic's value at the plan vs the target
     out["general_groups"] = float(ready["active"][:, :G].float().sum(1).mean())
+    out.update(task_in_norms(actor))
     return out
+
+
+def task_in_norms(actor):
+    """The executor's task input's weight norms (stats general_task_in_*): all, the group card's columns, the mission
+    kind card's, the targets' geometry's - how much the executor listens to its task."""
+    w = actor.task_in.weight.detach().float()
+    D = actor.gcfg.card
+    return {"general_task_in_w": float(w.norm()), "general_task_in_group": float(w[:, :D].norm()),
+            "general_task_in_kind": float(w[:, D:2 * D].norm()), "general_task_in_geo": float(w[:, 2 * D:].norm())}

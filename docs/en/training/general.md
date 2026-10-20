@@ -30,7 +30,7 @@ flowchart TB
   S --> R["Re-planning<br/>30 s and events"]
   R --> C
   S --> W["Reward v2"]
-  W --> V["Plan value<br/>the general's critic"]
+  W --> V["Plan value<br/>the general's critic<br/>(or the unit critic)"]
   V --> O["PPO on two levels"]
 ```
 
@@ -50,7 +50,8 @@ flowchart TB
 | Executor | `executor.GeneralActor` | today's unit network; the task goes through a linear layer with zero weights and is added to the unit's token (as the commitment's input); enemies get nothing |
 | Re-planning | `runtime.Runtime.replan` | every 30 s of battle; sooner when a group is broken (more than half of its units rout or are destroyed) or a lord falls (ours or theirs), but not sooner than 3 s after the plan. Between plans the groups, missions and targets are locked |
 | Reward | `tools/nn/train/reward.py` | as now (v2); no reward for carrying a mission out |
-| Plan value | `General.value` | predicts the plan's return from the plan's cards (detached) |
+| Plan value | `General.value` | predicts the plan's return from the plan's cards (detached); with `--general-return critic` the advantage's base is the unit critic, and it learns beside it |
+| Missions that tell apart | `distinct.py`, `runtime.behave` | (`--general-distinct W`) a classifier guesses a group's mission kind from its units' behaviour; the executor's bonus |
 | Training | `learn.py`, `tools/nn/train/ppo.py` | [below](#training) |
 
 Size at a card width of 128 (the chain's step): 1.14 million weights, at 64: 308 thousand (the unit network: 3.5
@@ -90,6 +91,32 @@ PPO on two levels (`learn.py`):
   chunk's start the choices' probabilities of the plans in force are computed again with the weights of the moment
   (a plan made before the last update is priced as the policy of now: the ratio starts at 1; without it the general's
   KL was 0.05–0.07 an update and the clipped share 0.5–0.6).
+- **The return by the unit critic** (`--general-return critic`, off by default). Why: with `span` nearly all of the
+  return's spread (98.6 % in the analysis of the g1 points) is in the battle's last plans (±1 for the win), the
+  deployment's return spreads ~0.004, and the plan value explains ~0 — the general has nothing to learn from. The unit
+  critic explains 0.995 of the spread, so: the plan's advantage = the reward over the plan (decision k times γ^k) +
+  γ^n · V(end) − V(start). V is the unit network's critic's value of the own side (one number a side: that is how the
+  critic is built), γ the PPO's, n the plan's decisions. V(start) is at the plan; for the deployment's plan at the
+  battle's first decision. V(end) is at the re-plan's decision that cut the plan; when the battle ended, 0, and the
+  last reward (the win) is already in the sum. The plan value learns the same target beside it, but the advantage
+  takes the critic's difference. The formulas: `signal.py` (no torch); the critic's value at a decision:
+  `runtime.note_value` (computed before the decision's re-plans).
+- **The executor's bonus for missions that tell apart** (`--general-distinct W`, default 0 — off). Why: the executor
+  hardly listens to its task (the input's weights 0 → 0.39 by a random walk; swapping the mission kind changes the
+  decisions by a KL of 0.0006). How: over a plan the behaviour of each own group's units is summed
+  (`runtime.behave`): the shares of the order kinds, the run share, the group centre's displacement forward and
+  sideways (from the direction "our centre → the enemy's centre" at the plan's start, / 100 m), the centre's path, the
+  plan's length — 10 numbers (`runtime.BEH`). A small classifier (`distinct.py`: 2 layers of 64, its own Adam, outside
+  the network) guesses the group's mission kind from them. When the plan ends, each group gives W × (log q(kind |
+  behaviour) − log(1/10)) (within ±ln 10): 0 when the classifier guesses no better than chance, up to W · 2.3 when it is
+  sure and right. The bonus goes into the side's reward at the plan's last decision; not into the general's return.
+  It is a reason to act differently under different kinds, not a payment for carrying a mission out. W goes down to
+  0 linearly over `--general-distinct-decay N` updates of the chain (the counter goes on over the parts); the
+  classifier learns after every update on the ended plans, also once W = 0 (its accuracy measures how much the
+  behaviour depends on the kind). Its weights, Adam and the counter are in the checkpoint's `train`. A caveat: the kind
+  is tied to whom the general gives it (cavalry, say, gets one kind more often), so part of the guessing is by the
+  group's type, not by behaviour; an accuracy above chance does not yet mean the executor listens — read it with the
+  task input's weight norm.
 - **Start:** the executor takes the last unit network's weights, the new input at zero weights — it plays as before
   (test: the outputs are equal to the bit); the general from scratch.
 
@@ -107,7 +134,7 @@ yet, are refused with a `NotBuilt` error (the network never thinks it has what i
 | 1 | the map tiles are today's 16 × 16 sectors of 100 m (8 numbers), projected to the card's width | `--general-tiles sectors` | `cnn`: the map analysis's 1024 tiles (`map_cnn.py`) |
 | 2 | the effects are not connected: the effect cards are zeros | `--general-effects off` | `on`: the effects' analysis |
 | 3 | small widths: council 2 layers, group council 1 layer, card 128 (the chain's step; `run.py`'s default 64), 4 heads | `--general-card 128 --general-council-layers 2 --general-group-layers 1 --general-heads 4` | settled by the checks |
-| 4 | mission branches and the bonus for missions that tell apart are off; the entropy bonus on the choices is on | `--general-branches 0 --general-distinct 0 --general-entropy 0.01` | branches as the abilities'; the bonus |
+| 4 | mission branches are not built; the bonus for missions that tell apart is built but off by default; the entropy bonus on the choices is on | `--general-branches 0 --general-distinct 0 --general-entropy 0.01` | branches as the abilities'; the bonus: `--general-distinct W` ([above](#training)) |
 | 5 | the deployment zone is the area `place.py` deploys an army in (forward from −260 to +40 m of the side's line, sideways ±150 m); a tile is in the zone when its centre is; the layout inside a group is a rule | `--general-zone place`, `--general-deploy net` (`script`: the scripted placement as before) | `map`: the zones from the map's layers |
 
 More differences from the design (skeleton too):
@@ -137,6 +164,12 @@ The run's `log.jsonl`, field `general` (and the `general:` line of the output):
 | `deploy_net_share` | the share of deployments made by the general (the rest scripted: the zone did not fit) |
 | `replans_per_battle`, `replan_reasons` | re-plans a battle and by reason (timer, broken group, lord) |
 | `value_mse`, `value_ev` | the plan value's error on the update's plans (before the step) and its explained share |
+| `critic_ev` | (`--general-return critic`) the explained share of the plan's target by the unit critic's value at the plan's start |
+| `return_mean`, `return_std` | the mean and the spread of the plan's target (return) |
+| `adv_mean`, `adv_std` | the mean and the spread of the plan's advantage before its normalisation (target − base: the critic or the plan value) |
+| `task_in_w`, `task_in_group`, `task_in_kind`, `task_in_geo` | the executor's task input's weight norm: all, the group card's columns, the kind card's, the targets' geometry's — how much the executor listens to its task |
+| `distinct_acc`, `distinct_chance`, `distinct_gain`, `distinct_loss` | (`--general-distinct`) the accuracy of the classifier of kinds by behaviour on the update's plans (before its steps) and chance (0.1); the mean log q + ln 10 (the bonus without W); its loss |
+| `distinct_bonus`, `distinct_weight` | the mean bonus paid a group and W now |
 | `pl`, `ent`, `kl`, `clip` | the general's PPO: loss, the choices' entropy, KL, clipped share |
 
 The mandatory ones (rating, pair gold, own lord deaths) are in the `test5` evaluations as before.
@@ -153,7 +186,7 @@ chain's step uses 128. The runs: `build/nn-train/runs/gen_cost_*` (not in Git).
 In the trial training (10 and 12 min, from `itS27_4`): no NaN, no skipped steps; 3.6–4.0 groups a side (with the mean
 key taken off), all 10 mission kinds in use (entropy 2.18–2.29 of 2.30); ~20 re-plans a battle (timer ~80 %, broken
 groups ~17 %, lord ~3 %); the general's KL 0.005–0.018; the plan value explains nothing yet (share ≈ 0: a 30 s return
-is mostly noise; see `--general-return td`).
+is mostly noise; see `--general-return critic`).
 
 ## Running it
 
@@ -165,6 +198,12 @@ and the general. The evaluations: the mandatory set only. The command from the u
 ```bash
 .venv/Scripts/python -m tools.ops.step --label g1_general --from build/v2/itS27_4.pt --step general
 ```
+
+The general's signal is switched on over the step: `--set general-return=critic` (the advantage by the unit critic)
+and `--set general-distinct=0.003 --set general-distinct-decay=150` (the bonus for missions that tell apart: W 0.003
+down to 0 over 150 updates). W's scale: ~20 plans a battle × ~4 groups × the classifier's gain (up to 2.3) × W — at
+0.003 and a gain of 0.5 that is ~0.12 a battle against the battle return's spread of ~0.8; watch `distinct_bonus` in
+the log.
 
 `--from <file>.pt` (new): a line's point outside `test5` — it is the `--init`, the `--reference` and the
 `--critic-init` (Adam and the counters go on). `--step NAME` (new): a named step's options over the standing ones.
@@ -264,6 +303,14 @@ Tests at build time (group 1 of the design's "Checks" pages):
   only for own units in a group; the direction and distance to the target from the unit's facing; the update's cards
   = the battle's (the probabilities agree), a tiny update trains every part of the general; narrowing the batch and an
   ability branch keep the plans.
+- `test_general_signal.py` (no torch) — the formulas: the plan's target and advantage by the critic on toy numbers; the
+  battle's end — V(end) = 0 and the last reward; a right critic — advantage 0; the bonus is 0 at a chance guess, grows
+  with the guess, is bounded below; W's decay.
+- `test_general_signal_torch.py` — in the battles: the target of a plan cut by a re-plan = the reward + γ^n · V at the
+  re-plan, the base = V at the plan's start; the battle's end — no V(end); the deployment's plan takes V of the
+  battle's first decision; the classifier starts at chance and learns; a group's behaviour (order shares, run,
+  displacement forward and sideways, path); the bonus goes into the decision's reward but not into the general's
+  return; a tiny update logs the new numbers.
 - `test_general_deploy.py` (no torch) — the layout stays in the zone (200 random armies a side, the zone's edges, all
   on one tile), the line faces the enemy, a second group on a tile stands just behind, a wide line goes on in a second
   row.

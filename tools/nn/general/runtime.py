@@ -18,15 +18,24 @@ training (docs/en/training/general.md "How it runs").
   the side sees them); a tile's, its centre. Computed every decision (the targets move).
 * Records (training): every plan the learner's general makes keeps its inputs, choices, log-probabilities and value;
   when it ends (the next plan or the battle's end) it is "ready" with its return - the reward summed from its decision
-  to its end (GeneralConfig return "span"), or that plus the next plan's discounted value ("td": the value is then of
-  the rest of the battle). The plans in force during a chunk of decisions form its table (rollout.collect): the update
-  computes their cards again with gradients, so the executor's loss reaches the general (learn.py).
+  to its end (run.py --general-return "span"), or that plus the next plan's discounted value ("td": the value is then of
+  the rest of the battle), or ("critic") the reward discounted per decision + gamma^n x the unit network's critic's
+  value of the side where the plan ended (0 at the battle's end), with "base" = the critic's value where it began (at a
+  battle's first decision for the deployment's plan): the advantage is target - base (signal.plan_advantage;
+  note_value gives the runtime the critic's value of the decision before its re-plans). The plans in force during a
+  chunk of decisions form its table (rollout.collect): the update computes their cards again with gradients, so the
+  executor's loss reaches the general (learn.py).
+* Behaviour (run.py --general-distinct W: `distinct` is a distinct.Learner): every decision the learner's groups' order
+  kinds, run, centre and path are summed (behave); a plan's end turns them into its groups' behaviour (behaviour: BEH
+  numbers a group) and, at the bonus's weight, the classifier's bonus is added to the row's reward of that decision
+  (take_bonus: after the reward went into the plans - the general's return has no bonus).
 """
 import math
 import numpy as np
 import torch
 
 from tools.nn.general import deploy as gdeploy
+from tools.nn.general import signal as gsignal
 from tools.nn.general import tiles as gtiles
 from tools.nn.general import units as gunits
 from tools.nn.general.executor import has_task
@@ -34,11 +43,17 @@ from tools.nn.general.net import INPUTS
 from tools.nn.model import observation as ob
 from tools.nn.model import sectors as msectors
 from tools.nn.model.frame import Frame
+from tools.nn.sim import orders as O
 
 LEARNER, PAST = 0, 2                    # league.LEARNER, league.CODE["past"] (league imports drills: kept light here)
 # the log's counters (Counts): summed on the device, read once an update (take_stats)
 COUNTS = ("plans", "plans_deploy", "plans_replan", "groups_own", "groups_enemy", "deploys", "deploys_net", "laid_units",
-          "replan_timer", "replan_broken", "replan_lord", "battles", "replans_ended")
+          "replan_timer", "replan_broken", "replan_lord", "battles", "replans_ended", "distinct_bonus",
+          "distinct_groups")
+# a group's behaviour during a plan (Runtime.behaviour): its units' order kinds' shares, the run share, its centre's
+# displacement forward and sideways from the side's facing at the plan's start (/ 100 m, within +-5), its centre's path
+# (/ 100 m, at most 10), the plan's length (decisions / 60)
+BEH = tuple("kind_" + k for k in O.KINDS) + ("run", "forward", "sideways", "path", "length")
 REC = INPUTS + ("main", "kind", "t1", "t2", "place", "lp", "value", "active")
 _TABLE = None
 
@@ -94,7 +109,7 @@ class Runtime:
         self.B, self.N = env.B, env.N
         self.G, self.S, self.D = gcfg.places, mcfg.sectors ** 2, gcfg.card
         self.gamma = 0.9994                       # per decision (run.py sets the trainer's)
-        self.ret = "span"                         # the return of a plan: "span" or "td" (run.py --general-return)
+        self.ret = "span"                         # the return of a plan: "span", "td" or "critic" (--general-return)
         self.training = False                     # records kept (rollout.collect turns it on)
         self.frozen = False                       # a branch's copy: no plans of its own (branch)
         self.greedy = False
@@ -105,6 +120,9 @@ class Runtime:
         self.table, self.tix = None, torch.full((2 * self.B,), -1, dtype=torch.long, device=self.dev)
         self.ready = []
         self.stats = Counts(self.dev, gcfg.kinds, self.S)
+        self.v_now = None                         # the critic's value [2B] of the decision now (note_value), NaN: none
+        self.distinct = None                      # --general-distinct: the classifier (distinct.Learner), behaviour on
+        self.bonus = torch.zeros(2 * self.B, device=self.dev)    # the distinct bonus due to the rows' reward
 
     # --- storage ------------------------------------------------------------------------------------------------
     def _rows(self, R):
@@ -115,7 +133,11 @@ class Runtime:
              "main": z(R, N, dt=L) - 1, "kind": z(R, G, dt=L), "t1": z(R, G, dt=L), "t2": z(R, G, dt=L),
              "place": z(R, G, dt=L) - 1, "tgt": z(R, G, 2, 2), "mix": z(R, N, D), "kc": z(R, N, D),
              "places": z(R, 2 * G, D), "members": z(R, G), "lords": z(R, 2, dt=Bo), "r_sum": z(R),
-             "n_replan": z(R, dt=L), "lp": z(R, G), "value": z(R), "active": z(R, 2 * G, dt=Bo)}
+             "n_replan": z(R, dt=L), "lp": z(R, G), "value": z(R), "active": z(R, 2 * G, dt=Bo),
+             "r_disc": z(R), "v_start": z(R) + float("nan"),
+             "b_kind": z(R, G, len(O.KINDS)), "b_run": z(R, G), "b_n": z(R, G), "b_c0": z(R, G, 2),
+             "b_ok0": z(R, G, dt=Bo), "b_last": z(R, G, 2), "b_okl": z(R, G, dt=Bo), "b_path": z(R, G),
+             "b_fwd": z(R, 2), "b_fwd_ok": z(R, dt=Bo)}
         from tools.nn.general import army_input as ai
         r.update({"in/num": z(R, N, ai.SIZE), "in/lab": z(R, N, len(ai.LABELS), dt=L), "in/on": z(R, N, dt=Bo),
                   "in/own": z(R, N, dt=Bo), "in/free": z(R, N, dt=Bo), "in/tiles": z(R, S, len(gtiles.FEATURES)),
@@ -254,6 +276,14 @@ class Runtime:
         r["t_plan"][rows] = env.st.t[b].float()
         r["n_dec"][rows] = 0
         r["r_sum"][rows] = 0.0
+        r["r_disc"][rows] = 0.0
+        # the critic's value at the plan (a deployment's: the battle's first decision fills it, note_value)
+        nan = torch.full((M,), float("nan"), device=self.dev)
+        r["v_start"][rows] = nan if deploy or self.v_now is None else self.v_now[rows]
+        for k in ("b_kind", "b_run", "b_n", "b_c0", "b_last", "b_path", "b_fwd"):
+            r[k][rows] = 0.0
+        for k in ("b_ok0", "b_okl", "b_fwd_ok"):
+            r[k][rows] = False
         r["has"][rows] = True
         r["owner"][rows] = owner
         if deploy:
@@ -402,6 +432,7 @@ class Runtime:
         add = torch.zeros(2 * self.B, device=self.dev)
         add[env.rows_learn] = r_rows.float()
         r["r_sum"] += add * r["has"].float()
+        r["r_disc"] += add * r["has"].float() * self.gamma ** r["n_dec"].float()
         r["n_dec"] += r["has"].long()
         if bool(finished.any()):
             rows = torch.cat([finished, finished]).nonzero().squeeze(1)
@@ -423,9 +454,116 @@ class Runtime:
         target = r["r_sum"][rr].clone()
         if self.ret == "td" and not done and v_next is not None:
             target = target + (self.gamma ** r["n_dec"][rr].float()) * v_next[sel].float()
+        if self.ret == "critic":
+            target, rec["base"] = self.critic_target(rr, done)
         rec["target"] = target
         rec["done"] = torch.full_like(target, float(done))
+        if self.distinct is not None:
+            beh, ok = self.behaviour(rr)
+            rec["beh"], rec["beh_ok"] = beh, ok
+            if self.distinct.weight > 0:
+                bonus = self.distinct.bonus(beh, rec["kind"], ok)                      # [M, G]
+                self.bonus.index_add_(0, rr, bonus.sum(-1))
+                self.stats.add("distinct_bonus", bonus.sum())
+                self.stats.add("distinct_groups", ok.sum())
         self.ready.append(rec)
+
+    def critic_target(self, rows, done):
+        """(target, base) [M] of the plans of rows ending now by the critic (module doc; signal.plan_target): the
+        critic's value now (v_now; 0 at the battle's end) and at the plan's start (a plan without one: base = target,
+        no advantage)."""
+        r = self.r
+        n = r["n_dec"][rows].float()
+        if done or self.v_now is None:
+            v_end = torch.zeros_like(n)
+        else:
+            v_end = torch.nan_to_num(self.v_now[rows], nan=0.0)
+        target = gsignal.plan_target(r["r_disc"][rows], n, v_end, float(done), self.gamma)
+        v0 = r["v_start"][rows]
+        return target, torch.where(torch.isnan(v0), target, v0)
+
+    # --- the critic's value and the behaviour (module doc) -------------------------------------------------------
+    def note_value(self, env, value):
+        """The critic's value [R] of the learner rows at the decision now (before its re-plans; None: no critic): the
+        plans that wait for theirs (a deployment's) take it, the re-plans end and begin with it."""
+        if self.frozen:
+            return
+        if value is None:
+            self.v_now = None
+            return
+        v = torch.full((2 * self.B,), float("nan"), device=self.dev)
+        v[env.rows_learn] = value.float()
+        self.v_now = v
+        r = self.r
+        r["v_start"] = torch.where(r["has"] & torch.isnan(r["v_start"]), v, r["v_start"])
+
+    def behave(self, env, action, acting):
+        """A decision of the learner rows (action: its Action [R, N]; acting [R, N]: the units that decide): their
+        groups' order kinds, run, centre and path into the plans' sums (with --general-distinct only)."""
+        if self.frozen or self.distinct is None:
+            return
+        rows, r, G, B = env.rows_learn, self.r, self.G, self.B
+        has = r["has"][rows] & (r["owner"][rows] == 0)
+        b, s = rows % B, rows // B + 1
+        u = env.st.u
+        side = u["side"][b]
+        live = (u["men"][b] > 0) & ~u["gone"][b]
+        own = (side == s[:, None]) & live
+        foe = (side > 0) & (side != s[:, None]) & live
+        main = r["main"][rows]
+        grp = ((main[..., None] == torch.arange(G, device=self.dev)) & own[..., None] & has[:, None, None]).float()
+        act = grp * acting[..., None].float()                                           # [R, N, G]
+        kinds = (action.kind[..., None] == torch.arange(len(O.KINDS), device=self.dev)).float()      # [R, N, K]
+        r["b_kind"][rows] = r["b_kind"][rows] + torch.einsum("rng,rnk->rgk", act, kinds)
+        r["b_run"][rows] = r["b_run"][rows] + (act * action.run[..., None].float()).sum(1)
+        r["b_n"][rows] = r["b_n"][rows] + act.sum(1)
+        p = torch.stack([u["x"][b], u["z"][b]], -1).float()                             # [R, N, 2]
+        cnt = grp.sum(1)
+        cent = torch.einsum("rng,rnc->rgc", grp, p) / cnt.clamp(min=1)[..., None]
+        ok = cnt > 0
+        ok0, okl = r["b_ok0"][rows], r["b_okl"][rows]
+        first = ok & ~ok0
+        r["b_c0"][rows] = torch.where(first[..., None], cent, r["b_c0"][rows])
+        step = (cent - r["b_last"][rows]).norm(dim=-1)
+        r["b_path"][rows] = r["b_path"][rows] + torch.where(ok & okl, step, torch.zeros_like(step))
+        r["b_last"][rows] = torch.where(ok[..., None], cent, r["b_last"][rows])
+        r["b_ok0"][rows], r["b_okl"][rows] = ok0 | ok, okl | ok
+        # the side's facing: from its units' centre to the enemy's, once a plan
+        mo, mf = own.float(), foe.float()
+        co = torch.einsum("rn,rnc->rc", mo, p) / mo.sum(1).clamp(min=1)[:, None]
+        cf = torch.einsum("rn,rnc->rc", mf, p) / mf.sum(1).clamp(min=1)[:, None]
+        d = cf - co
+        nd = d.norm(dim=-1)
+        can = (mo.sum(1) > 0) & (mf.sum(1) > 0) & (nd > 1e-3) & ~r["b_fwd_ok"][rows] & has
+        r["b_fwd"][rows] = torch.where(can[:, None], d / nd.clamp(min=1e-3)[:, None], r["b_fwd"][rows])
+        r["b_fwd_ok"][rows] = r["b_fwd_ok"][rows] | can
+
+    def behaviour(self, rows):
+        """(beh [M, G, len(BEH)], ok [M, G]) of the plans of rows ending now: their groups' behaviour (BEH) and which
+        groups count (own active groups whose units decided during the plan)."""
+        r, G = self.r, self.G
+        n = r["b_n"][rows]
+        n1 = n.clamp(min=1)
+        share = r["b_kind"][rows] / n1[..., None]
+        run = r["b_run"][rows] / n1
+        d = r["b_last"][rows] - r["b_c0"][rows]
+        f = r["b_fwd"][rows][:, None]                                                    # [M, 1, 2]
+        fwd = d[..., 0] * f[..., 0] + d[..., 1] * f[..., 1]
+        lat = -d[..., 0] * f[..., 1] + d[..., 1] * f[..., 0]
+        seen = r["b_ok0"][rows] & r["b_fwd_ok"][rows][:, None]
+        fwd = torch.where(seen, fwd / 100.0, torch.zeros_like(fwd)).clamp(-5.0, 5.0)
+        lat = torch.where(seen, lat / 100.0, torch.zeros_like(lat)).clamp(-5.0, 5.0)
+        path = (r["b_path"][rows] / 100.0).clamp(max=10.0)
+        length = (r["n_dec"][rows].float() / 60.0)[:, None].expand_as(path)
+        beh = torch.cat([share, torch.stack([run, fwd, lat, path, length], -1)], -1)
+        ok = (n > 0) & r["active"][rows][:, :G]
+        return beh, ok
+
+    def take_bonus(self, env):
+        """The distinct bonus [R] due to the learner rows' reward of this decision (then zeroed)."""
+        out = self.bonus[env.rows_learn]
+        self.bonus.zero_()
+        return out
 
     # --- the executor's input ---------------------------------------------------------------------------------------
     def task(self, rows, obs_r, fr):
@@ -516,6 +654,9 @@ class Runtime:
         self.r = {k: v[two] for k, v in self.r.items()}
         self.b = {k: v[keep] for k, v in self.b.items()}
         self.tix = self.tix[two]
+        self.bonus = self.bonus[two]
+        if self.v_now is not None:
+            self.v_now = self.v_now[two]
         if self.pending is not None:
             self.pending = self.pending[keep]
         self.B = len(keep)
@@ -543,6 +684,7 @@ class Runtime:
         new.b = self._battles(B)
         new.tix = torch.full((2 * B,), -1, dtype=torch.long, device=self.dev)
         new.ready, new.table, new.pending = [], None, None
+        new.v_now, new.distinct, new.bonus = None, None, torch.zeros(2 * B, device=self.dev)
         new.frozen = True
         new.training = False
         new.stats = Counts(self.dev, self.gcfg.kinds, self.S)
@@ -568,4 +710,6 @@ class Runtime:
                 "replans_per_battle": round(s["replans_ended"] / max(1.0, s["battles"]), 2),
                 "replan_reasons": {k: int(s[f"replan_{k}"]) for k in ("timer", "broken", "lord")},
                 "places_top": {f"{int(i) // n_s}_{int(i) % n_s}": int(places[i]) for i in top if places[i] > 0},
-                "laid_units": int(s["laid_units"])}
+                "laid_units": int(s["laid_units"]),
+                **({"distinct_bonus": round(s["distinct_bonus"] / max(1.0, s["distinct_groups"]), 5),
+                    "distinct_weight": round(self.distinct.weight, 6)} if self.distinct is not None else {})}

@@ -739,7 +739,10 @@ class Battles:
         if self.cur is None:
             self.cur = self.observe(critic is not None)
         a, frame, c = self.cur
+        # the critic's value of the decision (before the re-plans: the general's plans that end and begin here take it)
+        value = self._values(critic, c) if critic is not None else None
         if rt is not None:
+            rt.note_value(self, value)
             rt.replan(self, a)                   # the plans that are due, on the observation now
         rx = self.cur_rx
         abil_row = self.bank_row[self.rows_learn % self.B]           # the battles the observation was made of
@@ -762,10 +765,9 @@ class Battles:
         assert not (self.teach_names and actor.cfg.sectors), "no teachers with a v2 network"
         taught = self._teach_labels(actor.cfg, obs_r, frame) if self.teach_names and self.R else None
         self.decisions += 1
-        value = None
-        if critic is not None:
-            value = self._values(critic, c)
         acting = obs_r.get("free", obs_r["ctrl"]) & ~self.st.done[self.rows_learn % self.B][:, None]
+        if rt is not None:
+            rt.behave(self, action, acting)      # the groups' behaviour (--general-distinct only)
         # (a comparison, not bincount / one_hot: they read the GPU's answer back to size their output)
         kinds = action.kind[..., None] == torch.arange(len(O.KINDS), device=self.device)
         per_row = (kinds & acting[..., None]).sum(1)                                    # [R, kinds]
@@ -787,6 +789,8 @@ class Battles:
         d_rows = finished[rb]
         if rt is not None:
             rt.after(self, r_rows, finished)     # the reward into the plans; the ended battles' plans are ready
+            if rt.distinct is not None and rt.distinct.weight > 0:
+                r_rows = r_rows + rt.take_bonus(self)   # the distinct bonus of the plans ended now (not the general's)
         if truth is not None:                        # after the steps, before a finished battle restarts
             truth = (truth[0], meyes.truth(self.st.u, rb), truth[1])
 

@@ -270,7 +270,8 @@ A network above the unit network: it splits the army into groups (10 places a si
 learned kinds, two targets: a group or a map tile) and a deployment place; the unit network — the "executor" — gets
 its group's mission as a new input (at zero weights at the start: it plays as before). Re-planning every 30 s of
 battle, on a broken group and on a lord's fall. Both levels learn by PPO from the same reward v2, the general has a
-critic of its own (the "plan value"). The whole loop is built as a skeleton, in the simulator, flag `run.py
+critic of its own (the "plan value"); by flags, the plan's advantage by the unit critic (`--general-return critic`)
+and the executor's bonus for missions that tell apart (`--general-distinct`). The whole loop is built as a skeleton, in the simulator, flag `run.py
 --general` (the chain's step `general`); simplifications: tiles = the 16 × 16 sectors, zero effects, small widths
 (card 128, 1.14 million weights), no mission branches, the zone = `place.py`'s area. Architecture:
 `design/general/index.html`; code: `tools/nn/general/`; [details](training/general.md).
