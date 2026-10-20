@@ -6,4 +6,6 @@
     render.py      check pictures of the layers (png)
     map_cnn.py     the map analysis (CNN): layers -> 1024 regions x 32 numbers; summary cache per map
     map_probe.py   checks of the map analysis now and then: dead features, crowding, twins, pictures
+    army_input.py  the armies' slots: 80 (40 own + 40 enemy), 45 numbers and 3 labels each, from the final numbers
+    army_reader.py the army analysis: one 2-layer dense network for every slot -> unit cards [B, 80, 256]
 """

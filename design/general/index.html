@@ -96,6 +96,8 @@ a{color:inherit}
 .node span{font-size:13px;color:var(--muted)}
 .bangleg{display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--muted);margin-left:8px}
 .bangleg .bang{position:static;width:20px;height:20px;border-radius:50%;background:var(--open);color:#1b1206;font-weight:800;font-size:13px;line-height:20px;text-align:center;display:inline-block}
+.node .glyph{display:block;width:120px;height:34px;margin:0 auto 6px}
+.node .nl{display:block;font-size:16px;color:var(--ink)}
 .node .bang{position:absolute;top:-9px;right:-9px;width:22px;height:22px;border-radius:50%;background:var(--open);color:#1b1206;font-weight:800;font-size:14px;line-height:22px;text-align:center;box-shadow:0 0 0 2px var(--panel)}
 .node.tall{min-height:110px}
 .node.done{border-color:var(--done)}
@@ -111,13 +113,39 @@ a{color:inherit}
 .ty{padding:4px 12px;border-radius:999px;font-weight:600;font-size:14px}
 .brow{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
 .simsec{margin-top:12px}
+.netsvg{display:block;width:100%;max-width:640px;height:auto;margin-top:8px}
+.zoombox{position:relative;width:100%;height:clamp(520px,80vh,900px);border-radius:12px;overflow:hidden;margin-top:6px}
+.zlegend{position:absolute;left:10px;top:8px;right:10px;z-index:1;pointer-events:none}
+.zlegend > *{pointer-events:auto}
+.zlegend .ty{background:color-mix(in srgb,var(--tc) 22%,var(--panel))}
+.zlegend .tl,.zlegend .bangleg{background:var(--panel);border-radius:999px;padding:3px 10px}
+.zoombox .netsvg{max-width:none;width:100%;height:100%;touch-action:none;cursor:grab}
+.zoombox .netsvg:active{cursor:grabbing}
+.zbtns{position:absolute;right:8px;bottom:8px;display:flex;gap:4px}
+.zbtns button{font:inherit;width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer;font-size:16px;line-height:1}
+.zbtns button:focus-visible{outline:2px solid var(--open);outline-offset:1px}
+.snode{cursor:pointer}
+.snode .hit{fill:color-mix(in srgb,var(--tc) 22%,transparent);stroke:var(--tc);stroke-width:1.2}
+.snode:hover .hit{fill:color-mix(in srgb,var(--tc) 28%,transparent)}
+.snode.on .hit{fill:color-mix(in srgb,var(--tc) 30%,transparent);stroke:var(--tc);stroke-width:3}
+.snode:focus-visible{outline:none}.snode:focus-visible .hit{stroke:var(--open);stroke-width:2}
+.slab{fill:var(--ink);font-size:20px;font-weight:600}
+.skind{fill:var(--tc);font-size:12px;font-weight:600}
+.ssub{fill:var(--muted);font-size:12px}
+.aw{stroke:var(--tc);stroke-width:.7;opacity:.35}
+:root{--fxc:#3a7bd5;--ours:#3a7bd5}
+.dw{stroke:var(--open);stroke-width:.8;opacity:.55}
+.sw{stroke:var(--muted);stroke-width:.7;opacity:.4}
+.cw{stroke:var(--muted);stroke-width:.7;opacity:.45}
+.proj line{stroke:var(--open);stroke-width:1.1;opacity:.85}
+:root{--tc-test:#1a9a8a}
 .areah{font-size:18px;margin:0 0 4px}
 .node.t-env span{display:block}
 .blocks{display:grid;grid-template-columns:auto auto auto;justify-content:start;align-items:center;gap:12px;margin-top:6px}
 .blocks .nodestack{align-self:end;margin-bottom:-12px}
-.t-in{--tc:#3a7bd5} .t-proc{--tc:#8a5ad8} .t-out{--tc:#d08a1c} .t-test{--tc:#1a9a8a} .t-env{--tc:#a0a8b4} .t-todo{--tc:#c4568a}
+.t-in{--tc:#3a7bd5} .t-proc{--tc:#8a5ad8} .t-out{--tc:#d08a1c} .t-test{--tc:#1a9a8a} .t-alg{--tc:#5f9a2e} .t-env{--tc:#a0a8b4} .t-todo{--tc:#c4568a}
 .ty{background:color-mix(in srgb,var(--tc) 22%,transparent);color:var(--tc);border:1px solid var(--tc)}
-.node.t-in,.node.t-proc,.node.t-out,.node.t-test,.node.t-env,.node.t-todo{border-color:var(--tc);background:color-mix(in srgb,var(--tc) 14%,var(--panel));min-width:220px}
+.node.t-in,.node.t-proc,.node.t-out,.node.t-test,.node.t-alg,.node.t-env,.node.t-todo{border-color:var(--tc);background:color-mix(in srgb,var(--tc) 14%,var(--panel));min-width:220px}
 .node.on{box-shadow:0 0 0 3px var(--tc);background:color-mix(in srgb,var(--tc) 30%,var(--panel))}
 .nodestack{display:flex;flex-direction:column;align-items:center;gap:2px}
 .vlink{color:var(--muted);font-size:20px;line-height:1}
@@ -226,20 +254,183 @@ a{color:inherit}
 
   <section class="net" aria-label="Схема сети генерала">
     <h2 class="areah">Сеть</h2>
-    <div class="types"><span class="tl">Типы блоков:</span>
-      <span class="ty t-in">вход</span><span class="ty t-proc">обработка</span><span class="ty t-out">выход</span><span class="ty t-test">проверка</span><span class="bangleg"><span class="bang">!</span> есть открытые вопросы или доработки</span>
-    </div>
-    <div class="blocks">
-      <div class="nodestack" style="grid-column:3;grid-row:1">
-        <button class="node t-test" data-n="maptest" type="button">Проверки анализа карты</button>
-        <span class="vlink">┆</span>
-      </div>
-      <button class="node t-in" data-n="landscape" type="button" style="grid-column:1;grid-row:2">Ландшафт</button>
-      <span class="barrow" style="grid-column:2;grid-row:2">→</span>
-      <button class="node t-proc" data-n="mapproc" type="button" style="grid-column:3;grid-row:2">Анализ карты</button>
-      <button class="node t-in" data-n="armies" type="button" style="grid-column:1;grid-row:3">Армии</button>
-      <button class="node t-in" data-n="effects" type="button" style="grid-column:1;grid-row:4">Эффекты</button>
-    </div>
+    <div class="zoombox" id="zoombox"><div class="types zlegend"><span class="tl">Типы блоков:</span>
+      <span class="ty t-in">вход</span><span class="ty t-proc">обработка</span><span class="ty t-out">выход</span><span class="ty t-alg">алгоритм</span><span class="ty t-test">проверка</span><span class="bangleg"><span class="bang">!</span> есть открытые вопросы или доработки</span>
+    </div><svg class="netsvg" id="netsvg" viewBox="0 0 900 600" role="group" aria-label="Схема сети генерала"></svg><div class="zbtns"><button type="button" id="zin" aria-label="Крупнее">+</button><button type="button" id="zout" aria-label="Мельче">−</button><button type="button" id="zreset" aria-label="Сбросить масштаб">⟲</button></div></div>
+<script>
+(function(){
+  // the general's network drawn the way neural nets are drawn: no boxes, faint type tints, projections between parts
+  var svg=document.getElementById("netsvg"),h="";
+  function G(id,cls,box,label,kind,inner){
+    return '<g class="node snode '+cls+'" data-n="'+id+'" data-bx="'+(box[0]+box[2])+'" data-by="'+box[1]+'" tabindex="0" role="button" aria-label="'+label+'">'+
+      '<rect class="hit" x="'+box[0]+'" y="'+box[1]+'" width="'+box[2]+'" height="'+box[3]+'" rx="14"/>'+inner+
+      '<text class="slab" x="'+(box[0]+box[2]/2)+'" y="'+(box[1]+box[3]-14)+'" text-anchor="middle">'+label+'</text></g>';}
+  // --- Ландшафт: a small map, square cells
+  var C=12,P=2,GX=40,GY=74,NX=14,NY=10,land="";
+  function cc(x,y){if(x===0||y===0||x===NX-1||y===NY-1)return "--out";if(y<=2&&x>=4&&x<=9)return "--foe";if(y>=NY-3&&x>=4&&x<=9)return "--mine";return "--field";}
+  for(var y=0;y<NY;y++)for(var x=0;x<NX;x++)land+='<rect x="'+(GX+x*(C+P))+'" y="'+(GY+y*(C+P))+'" width="'+C+'" height="'+C+'" rx="2" fill="var('+cc(x,y)+')"/>';
+  var wx=GX+5*(C+P)-1.5,wy=GY+4*(C+P)-1.5,ww=3*(C+P)-P+3;
+  land+='<rect x="'+wx+'" y="'+wy+'" width="'+ww+'" height="'+ww+'" fill="none" stroke="var(--open)" stroke-width="2.4" rx="3"/>';
+  var LW=NX*(C+P),LH=NY*(C+P);
+  h+=G("landscape","t-in",[GX-14,GY-24,LW+28,LH+82],"Ландшафт","вход",land);
+  // --- Анализ карты: stacks shrinking + tiles
+  function stk(x,y,sz,n){var o="";for(var i=n-1;i>=0;i--)o+='<rect x="'+(x+i*7)+'" y="'+(y-i*7)+'" width="'+sz+'" height="'+sz+'" rx="3" fill="color-mix(in srgb,var(--ink) '+(6+i*5)+'%,var(--panel))" stroke="color-mix(in srgb,var(--ink) 30%,var(--panel))" stroke-width="1"/>';return o;}
+  var S1={x:310,y:100,s:100},S2={x:445,y:118,s:70},S3={x:548,y:134,s:46},OX=730,OY=124;
+  var PX0=S1.x-16,PW0=320,OX0=PX0+PW0+16,OW0=874-OX0;
+  function cell(S,fx,fy,z){return {x:S.x+S.s*fx,y:S.y+S.s*fy,s:z};}
+  var c1=cell(S1,.4,.4,10),r1=cell(S1,.62,.55,16),c2=cell(S2,.55,.48,9),r2=cell(S2,.3,.3,14),c3=cell(S3,.4,.42,7),c4={x:OX+26,y:OY+26,s:11};
+  function mark(b){return '<rect x="'+b.x+'" y="'+b.y+'" width="'+b.s+'" height="'+b.s+'" fill="var(--open)"/>';}
+  function win(b){return '<rect x="'+b.x+'" y="'+b.y+'" width="'+b.s+'" height="'+b.s+'" fill="none" stroke="var(--open)" stroke-width="2" rx="2"/>';}
+  // the same map, shrinking on its way through the analysis (2x2 -> 1, the most noticeable stays: zone > field > outside)
+  var M0=[];for(var yy=0;yy<NY;yy++){var row=[];for(var xx=0;xx<NX;xx++)row.push(cc(xx,yy));M0.push(row);}
+  var RANK={"--foe":3,"--mine":3,"--field":2,"--out":1};
+  function pool(M){var o=[];for(var yy=0;yy<M.length;yy+=2){var r=[];for(var xx=0;xx<M[0].length;xx+=2){var best="--out";
+      [[0,0],[1,0],[0,1],[1,1]].forEach(function(d){var v=(M[yy+d[1]]||[])[xx+d[0]];if(v&&RANK[v]>RANK[best])best=v;});r.push(best);}o.push(r);}return o;}
+  var M1=M0,M2=pool(M0),M3=pool(M2);
+  function mapIn2(M,x,y,sz,pad){var ny=M.length,nx=M[0].length,cs=Math.min((sz-2*pad)/nx,(sz-2*pad)/ny),gw=cs*nx,gh=cs*ny,x0=x+(sz-gw)/2,y0=y+(sz-gh)/2,o="";
+    for(var j=0;j<ny;j++)for(var i=0;i<nx;i++)o+='<rect x="'+(x0+i*cs+.6)+'" y="'+(y0+j*cs+.6)+'" width="'+(cs-1.2)+'" height="'+(cs-1.2)+'" rx="1.5" fill="var('+M[j][i]+')"/>';
+    return o;}
+  OX=OX0+(OW0-96)/2;
+  // exact geometry: where cell (i,j) of grid M sits when drawn by mapIn2 in a square (x,y,sz,pad)
+  function geo(M,x,y,sz,pad){var ny=M.length,nx=M[0].length,cs=Math.min((sz-2*pad)/nx,(sz-2*pad)/ny);return {x0:x+(sz-cs*nx)/2,y0:y+(sz-cs*ny)/2,cs:cs};}
+  function area(g,i,j,w,hh){return {x:g.x0+i*g.cs,y:g.y0+j*g.cs,w:w*g.cs,h:hh*g.cs};}
+  var g1=geo(M1,S1.x,S1.y,S1.s,6),g2=geo(M2,S2.x,S2.y,S2.s,5),g3=geo(M3,S3.x,S3.y,S3.s,4),g4=geo(M3,OX,OY-4,96,0);
+  // one real path: the 3x3 window centred on input cell (6,5) -> layer-1 cell (6,5);
+  // the 2x2 block (6..7, 4..5) of layer 1 -> layer-2 cell (3,2); the 2x2 block (2..3, 2..3) of layer 2 -> layer-3 cell (1,1) = the output tile (1,1)
+  var CXc=6,CYc=5,A1=area(g1,CXc,CYc,1,1),B1=area(g1,6,4,2,2),A2=area(g2,3,2,1,1),B2=area(g2,2,2,2,2),A3=area(g3,1,1,1,1),A4=area(g4,1,1,1,1);
+  function box(r,fill){return '<rect x="'+r.x+'" y="'+r.y+'" width="'+r.w+'" height="'+r.h+'" '+(fill?'fill="var(--open)" fill-opacity=".85"':'fill="none" stroke="var(--open)" stroke-width="2"')+' rx="1.5"/>';}
+  // output: 32 feature maps 32x32 (a stack; the front one drawn as the map), one tile's column through the stack = its 32 numbers
+  OX=OX0+(OW0-96-35)/2;g4=geo(M3,OX,OY-4,96,0);A4=area(g4,1,1,1,1);
+  var tiles=stk(OX,OY-4,96,6)+mapIn2(M3,OX,OY-4,96,0);
+  var mapIn=stk(S1.x,S1.y,S1.s,4)+mapIn2(M1,S1.x,S1.y,S1.s,6)+box(A1,1)+box(B1)+stk(S2.x,S2.y,S2.s,4)+mapIn2(M2,S2.x,S2.y,S2.s,5)+box(A2,1)+box(B2)+stk(S3.x,S3.y,S3.s,4)+mapIn2(M3,S3.x,S3.y,S3.s,4)+box(A3,1);
+  var MBY=S1.y-46,MBH=LH+82+(GY-24)-MBY;
+  h+=G("mapproc","t-proc",[PX0,MBY,PW0,MBH],"Анализ карты","обработка",mapIn);
+  h+=G("maptiles","t-out",[OX0,MBY,OW0,MBH],"Участки карты","выход",tiles+box(A4));
+  // projections (lines from a square to a cell)
+  function proj(ax,ay,aw,b){var A=[[ax,ay],[ax+aw,ay],[ax,ay+aw],[ax+aw,ay+aw]],B=[[b.x,b.y],[b.x+b.s,b.y],[b.x,b.y+b.s],[b.x+b.s,b.y+b.s]],o="";
+    for(var k=0;k<4;k++)o+='<line x1="'+A[k][0]+'" y1="'+A[k][1]+'" x2="'+B[k][0]+'" y2="'+B[k][1]+'"/>';return o;}
+  function pr2(a,b){var A=[[a.x,a.y],[a.x+a.w,a.y],[a.x,a.y+a.h],[a.x+a.w,a.y+a.h]],B=[[b.x,b.y],[b.x+b.w,b.y],[b.x,b.y+b.h],[b.x+b.w,b.y+b.h]],o="";
+    for(var k=0;k<4;k++)o+='<line x1="'+A[k][0]+'" y1="'+A[k][1]+'" x2="'+B[k][0]+'" y2="'+B[k][1]+'"/>';return o;}
+  var W0={x:GX+(CXc-1)*(C+P),y:GY+(CYc-1)*(C+P),w:3*(C+P)-P,h:3*(C+P)-P};
+  h+='<g class="proj" pointer-events="none">'+pr2(W0,A1)+pr2(B1,A2)+pr2(B2,A3)+pr2(A3,A4)+'</g>';
+  // --- Проверки анализа карты: a small mark above, dashed link
+  var TX=PX0+PW0/2;
+  h+='<line x1="'+TX+'" y1="40" x2="'+TX+'" y2="'+MBY+'" stroke="var(--tc-test)" stroke-width="1.5" stroke-dasharray="3 3"/>';
+  h+='<g class="node snode t-test" data-n="maptest" data-bx="'+(PX0+PW0)+'" data-by="6" tabindex="0" role="button" aria-label="Проверки анализа карты"><rect class="hit" x="'+PX0+'" y="6" width="'+PW0+'" height="34" rx="12"/>'+
+     '<path d="M'+(TX-96)+' 23l5 5 8-10" fill="none" stroke="var(--tc)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>'+
+     '<text class="slab" x="'+(TX+10)+'" y="28" text-anchor="middle" style="font-size:14px">Проверки анализа карты</text></g>';
+  // --- Армии: two columns of slots (ours / enemy), vertical like neurons
+  var AY=LH+82+(GY-24)+24+52,ax=60,arm="";
+  var AT=AY-10-46;
+  h+='<line x1="'+TX+'" y1="'+(AT+34)+'" x2="'+TX+'" y2="'+(AY-10)+'" stroke="var(--tc-test)" stroke-width="1.5" stroke-dasharray="3 3"/>';
+  h+='<g class="node snode t-test" data-n="armytest" data-bx="'+(PX0+PW0)+'" data-by="'+AT+'" tabindex="0" role="button" aria-label="Проверки анализа армий"><rect class="hit" x="'+PX0+'" y="'+AT+'" width="'+PW0+'" height="34" rx="12"/>'+
+     '<path d="M'+(TX-96)+' '+(AT+17)+'l5 5 8-10" fill="none" stroke="var(--tc)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>'+
+     '<text class="slab" x="'+(TX+10)+'" y="'+(AT+22)+'" text-anchor="middle" style="font-size:14px">Проверки анализа армий</text></g>';
+  for(var i=0;i<12;i++){var e=i>=9;arm+='<rect x="'+ax+'" y="'+(AY+18+i*11)+'" width="64" height="8" rx="3" fill="color-mix(in srgb,var(--ours) '+(e?16:62)+'%,transparent)"/>';
+    var e2=i>=10;arm+='<rect x="'+(ax+84)+'" y="'+(AY+18+i*11)+'" width="64" height="8" rx="3" fill="color-mix(in srgb,var(--foe) '+(e2?16:62)+'%,transparent)"/>';}
+  arm+='<text class="ssub" x="'+(ax+32)+'" y="'+(AY+12)+'" text-anchor="middle">наши 40</text><text class="ssub" x="'+(ax+116)+'" y="'+(AY+12)+'" text-anchor="middle">враг 40</text>';
+  h+=G("armies","t-in",[GX-14,AY-10,LW+28,12*11+90],"Армии","вход",arm);
+  // --- Анализ армий (processing: the shared reader, 2 layers) -> Карточки отрядов (output, orange)
+  var BX=PX0,BY=AY-10,BH=12*11+90,PW=PW0,OBX=OX0,OBW=OW0,ar="";
+  function vstk(x,y,w,hh,n){var o="";for(var i=n-1;i>=0;i--)o+='<rect x="'+(x+i*7)+'" y="'+(y-i*7)+'" width="'+w+'" height="'+hh+'" rx="4" fill="color-mix(in srgb,var(--ink) '+(6+i*5)+'%,var(--panel))" stroke="color-mix(in srgb,var(--ink) 30%,var(--panel))" stroke-width="1"/>';return o;}
+  // neurons of the two dense layers (a column each; real width 256 - drawn 9)
+  var NN=9,N1=[],N2=[];
+  for(var i=0;i<NN;i++){var yy=BY+22+i*(BH-62)/(NN-1);N1.push([BX+105,yy]);N2.push([BX+215,yy]);}
+  var neur="";N1.concat(N2).forEach(function(q){neur+='<circle cx="'+q[0]+'" cy="'+q[1]+'" r="6.5" fill="color-mix(in srgb,var(--ink) 18%,var(--panel))" stroke="color-mix(in srgb,var(--ink) 45%,var(--panel))" stroke-width="1.2"/>';});
+  h+=G("armyproc","t-proc",[BX,BY,PW,BH],"Анализ армий","обработка",ar);
+  // output block: a card per slot (ours / enemy)
+  var CX=OBX+(OBW-120)/2,oc="";
+  // each card is a row of numbers (drawn 8 of 64): every unit gets its own pattern; empty slots stay a faint bar
+  function cval(i,k){var t=Math.sin(i*12.9898+k*78.233)*43758.5453;return t-Math.floor(t);}
+  function crow(x,y,side,i,w){var o="",cw=w/8;for(var k=0;k<8;k++)o+='<rect x="'+(x+k*cw)+'" y="'+y+'" width="'+(cw-.6)+'" height="8" rx="1.2" fill="color-mix(in srgb,var('+(side?'--foe':'--ours')+') '+Math.round(22+cval(i+side*40,k)*70)+'%,var(--panel))"/>';return o;}
+  for(var i=0;i<12;i++){var e=i>=9,e2=i>=10;
+    oc+=e?'<rect x="'+CX+'" y="'+(AY+18+i*11)+'" width="56" height="8" rx="3" fill="color-mix(in srgb,var(--ours) 14%,var(--panel))"/>':crow(CX,AY+18+i*11,0,i,56);
+    oc+=e2?'<rect x="'+(CX+64)+'" y="'+(AY+18+i*11)+'" width="56" height="8" rx="3" fill="color-mix(in srgb,var(--foe) 14%,var(--panel))"/>':crow(CX+64,AY+18+i*11,1,i,56);}
+  h+=G("unitcards","t-out",[OBX,BY,OBW,BH],"Карточки отрядов","выход",oc);
+  // projections: a slot -> layer 1 -> layer 2 -> its card
+  var sl={x:ax,y:AY+18+2*11,w:64,h:8};
+  var pr='<rect x="'+(sl.x-1.5)+'" y="'+(sl.y-1.5)+'" width="'+(sl.w+3)+'" height="'+(sl.h+3)+'" fill="none" stroke="var(--open)" stroke-width="2" rx="3"/>';
+  function pj(A,B){var o="";for(var q=0;q<4;q++)o+='<line x1="'+A[q][0]+'" y1="'+A[q][1]+'" x2="'+B[q][0]+'" y2="'+B[q][1]+'"/>';return o;}
+  function corners(r){return [[r.x,r.y],[r.x+r.w,r.y],[r.x,r.y+r.h],[r.x+r.w,r.y+r.h]];}
+  // three units through the SAME network: each has its own colour for the way in and the way out; the core (layer 1 -> layer 2) is shared, drawn once
+  var PATHS=[{side:0,row:2,col:"var(--open)"},{side:0,row:6,col:"#38b6d6"},{side:1,row:4,col:"#e05a9a"}];
+  var core="";N1.forEach(function(a){N2.forEach(function(b){core+='<line class="cw" x1="'+a[0]+'" y1="'+a[1]+'" x2="'+b[0]+'" y2="'+b[1]+'"/>';});});
+  var paths="";
+  PATHS.forEach(function(P){
+    var sx=ax+(P.side?84:0),sy=AY+18+P.row*11,ccx=CX+(P.side?64:0);
+    paths+='<rect x="'+(sx-1.5)+'" y="'+(sy-1.5)+'" width="67" height="11" fill="none" stroke="'+P.col+'" stroke-width="2" rx="3"/>';
+    paths+='<rect x="'+(ccx-1.5)+'" y="'+(sy-1.5)+'" width="59" height="11" fill="none" stroke="'+P.col+'" stroke-width="2" rx="3"/>';
+    N1.forEach(function(q){paths+='<line x1="'+(sx+64+1.5)+'" y1="'+(sy+4)+'" x2="'+q[0]+'" y2="'+q[1]+'" stroke="'+P.col+'" stroke-width=".9" opacity=".7"/>';});
+    N2.forEach(function(q){paths+='<line x1="'+q[0]+'" y1="'+q[1]+'" x2="'+(ccx-1.5)+'" y2="'+(sy+4)+'" stroke="'+P.col+'" stroke-width=".9" opacity=".7"/>';});
+  });
+  h+='<g pointer-events="none">'+core+paths+neur+'</g>';
+  // --- Эффекты (input) -> Анализ эффектов (processing) -> added to the unit cards
+  var EY=BY+BH+20,ef="";
+  for(var i=0;i<4;i++){var x=GX+8+i*44;ef+='<rect x="'+x+'" y="'+(EY+14)+'" width="36" height="40" rx="4" fill="color-mix(in srgb,var(--ink) 10%,var(--panel))"/>';
+    for(var k=0;k<3;k++)ef+='<line x1="'+(x+6)+'" y1="'+(EY+24+k*9)+'" x2="'+(x+(k===2?20:30))+'" y2="'+(EY+24+k*9)+'" stroke="var(--muted)" stroke-width="1.8" stroke-linecap="round"/>';}
+  h+=G("effects","t-in",[GX-14,EY,LW+28,110],"Эффекты","вход",ef);
+  // the effects reader: two small dense layers (every number of a record to every neuron)
+  var EN=5,E1=[],E2=[];for(var i=0;i<EN;i++){var yy=EY+16+i*(110-50)/(EN-1);E1.push([BX+105,yy]);E2.push([BX+215,yy]);}
+  h+=G("effproc","t-proc",[BX,EY,PW,110],"Анализ эффектов","обработка","");
+  var rec={x:GX+8+44,y:EY+14,w:36,h:40};
+  // output block: a card per effect record (a row of numbers, drawn 8 of 64); joining them to the unit cards is a separate module, drawn later
+  var ECX=OBX+(OBW-56)/2,eo="";
+  for(var i=0;i<4;i++)for(var k=0;k<8;k++)eo+='<rect x="'+(ECX+k*7)+'" y="'+(EY+16+i*11)+'" width="6.4" height="8" rx="1.2" fill="color-mix(in srgb,var(--ink) '+Math.round(12+cval(i+90,k)*55)+'%,var(--panel))"/>';
+  h+=G("effcards","t-out",[OBX,EY,OBW,110],"Карточки эффектов","выход",eo);
+  var ecy=EY+16+11;
+  var ex='<rect x="'+(rec.x-1.5)+'" y="'+(rec.y-1.5)+'" width="'+(rec.w+3)+'" height="'+(rec.h+3)+'" fill="none" stroke="var(--open)" stroke-width="2" rx="4"/>';
+  ex+='<rect x="'+(ECX-1.5)+'" y="'+(ecy-1.5)+'" width="59" height="11" fill="none" stroke="var(--open)" stroke-width="2" rx="3"/>';
+  E1.forEach(function(q){ex+='<line class="dw" x1="'+(rec.x+rec.w+1.5)+'" y1="'+(rec.y+rec.h/2)+'" x2="'+q[0]+'" y2="'+q[1]+'"/>';});
+  E1.forEach(function(q){E2.forEach(function(r){ex+='<line class="dw" x1="'+q[0]+'" y1="'+q[1]+'" x2="'+r[0]+'" y2="'+r[1]+'"/>';});});
+  E2.forEach(function(r){ex+='<line class="dw" x1="'+r[0]+'" y1="'+r[1]+'" x2="'+(ECX-1.5)+'" y2="'+(ecy+4)+'"/>';});
+  E1.concat(E2).forEach(function(q){ex+='<circle cx="'+q[0]+'" cy="'+q[1]+'" r="5.5" fill="color-mix(in srgb,var(--ink) 18%,var(--panel))" stroke="color-mix(in srgb,var(--ink) 45%,var(--panel))" stroke-width="1.2"/>';});
+  h+='<g pointer-events="none">'+ex+'</g>';
+  // --- Сложение (algorithm, no weights): unit card + its effect cards = final card
+  var SX=OBX+OBW+18,SW=130,SY0=BY,SH=EY+110-BY,sa="",smid=SY0+(SH-40)/2;
+  function srow(y,base,shift){var o="";for(var k=0;k<8;k++)o+='<rect x="'+(SX+(SW-88)/2+k*11)+'" y="'+y+'" width="10" height="12" rx="2" fill="color-mix(in srgb,var('+base+') '+Math.round(12+cval(shift,k)*55+(base==="--ours"?10:0))+'%,var(--panel))"/>';return o;}
+  sa+=srow(smid-46,"--ours",2)+'<text class="ssub" x="'+(SX+SW/2)+'" y="'+(smid-20)+'" text-anchor="middle" style="font-size:20px;font-weight:700">+</text>'+
+      srow(smid-12,"--ink",91)+'<text class="ssub" x="'+(SX+SW/2)+'" y="'+(smid+14)+'" text-anchor="middle" style="font-size:20px;font-weight:700">=</text>'+
+      srow(smid+22,"--ours",7);
+  h+='<g pointer-events="none"><line x1="'+(OBX+OBW)+'" y1="'+(BY+BH/2)+'" x2="'+SX+'" y2="'+(BY+BH/2)+'" stroke="var(--muted)" stroke-width="1.5"/><line x1="'+(OBX+OBW)+'" y1="'+(EY+55)+'" x2="'+SX+'" y2="'+(EY+55)+'" stroke="var(--muted)" stroke-width="1.5"/></g>';
+  h+=G("addcards","t-alg",[SX,SY0,SW,SH],"Сложение","алгоритм",sa);
+  // output of the addition: the final card per slot (units with effects changed, the rest as they were)
+  var FX=SX+SW+18,FW=200,FCX=FX+(FW-120)/2,FY=SY0+(SH-12*11)/2-20,fo="",FEFF={"0_2":1,"0_5":1,"1_4":1};
+  for(var i=0;i<12;i++){var e=i>=9,e2=i>=10;
+    fo+=e?'<rect x="'+FCX+'" y="'+(FY+i*11)+'" width="56" height="8" rx="3" fill="color-mix(in srgb,var(--ours) 14%,var(--panel))"/>':crow(FCX,FY+i*11,0,FEFF["0_"+i]?i+100:i,56);
+    fo+=e2?'<rect x="'+(FCX+64)+'" y="'+(FY+i*11)+'" width="56" height="8" rx="3" fill="color-mix(in srgb,var(--foe) 14%,var(--panel))"/>':crow(FCX+64,FY+i*11,1,FEFF["1_"+i]?i+100:i,56);}
+  fo+='<rect x="'+(FCX-1.5)+'" y="'+(FY+2*11-1.5)+'" width="59" height="11" fill="none" stroke="var(--open)" stroke-width="2" rx="3"/>';
+  h+='<line x1="'+(SX+SW)+'" y1="'+(SY0+SH/2)+'" x2="'+FX+'" y2="'+(SY0+SH/2)+'" stroke="var(--muted)" stroke-width="1.5" pointer-events="none"/>';
+  h+=G("finalcards","t-out",[FX,SY0,FW,SH],"Итоговые карточки","выход",fo);
+  var H=EY+110+12;svg.setAttribute("viewBox","0 -110 "+(FX+FW+26)+" "+(H+190));
+  svg.innerHTML=h;
+  [].forEach.call(svg.querySelectorAll(".snode"),function(g){g.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();g.dispatchEvent(new MouseEvent("click",{bubbles:true}));}});});
+  // zoom (wheel over the scheme, buttons, pinch) and pan (drag); a drag does not count as a click
+  var vb0=svg.getAttribute("viewBox").split(" ").map(Number),vb=vb0.slice();
+  function apply(){svg.setAttribute("viewBox",vb.join(" "));}
+  function zoomAt(f,cx,cy){var nw=Math.min(vb0[2]*1.5,Math.max(vb0[2]/8,vb[2]*f)),k=nw/vb[2];
+    vb=[cx-(cx-vb[0])*k,cy-(cy-vb[1])*k,vb[2]*k,vb[3]*k];apply();}
+  function toSvg(e){var r=svg.getBoundingClientRect();return [vb[0]+(e.clientX-r.left)/r.width*vb[2],vb[1]+(e.clientY-r.top)/r.height*vb[3]];}
+  svg.addEventListener("wheel",function(e){e.preventDefault();var p=toSvg(e);zoomAt(e.deltaY>0?1.15:1/1.15,p[0],p[1]);},{passive:false});
+  function center(){return [vb[0]+vb[2]/2,vb[1]+vb[3]/2];}
+  document.getElementById("zin").addEventListener("click",function(){var c=center();zoomAt(1/1.3,c[0],c[1]);});
+  document.getElementById("zout").addEventListener("click",function(){var c=center();zoomAt(1.3,c[0],c[1]);});
+  document.getElementById("zreset").addEventListener("click",function(){vb=vb0.slice();apply();});
+  svg.addEventListener("dblclick",function(){vb=vb0.slice();apply();});
+  var drag=null,moved=false,pts={};
+  svg.addEventListener("pointerdown",function(e){pts[e.pointerId]=[e.clientX,e.clientY];drag={x:e.clientX,y:e.clientY,vb:vb.slice()};moved=false;});
+  svg.addEventListener("pointermove",function(e){if(!drag||!pts[e.pointerId])return;
+    var ids=Object.keys(pts);
+    if(ids.length===2){var a=pts[ids[0]],b=pts[ids[1]],d0=Math.hypot(a[0]-b[0],a[1]-b[1]);pts[e.pointerId]=[e.clientX,e.clientY];
+      a=pts[ids[0]];b=pts[ids[1]];var d1=Math.hypot(a[0]-b[0],a[1]-b[1]);if(d0>0){var c=toSvg({clientX:(a[0]+b[0])/2,clientY:(a[1]+b[1])/2});zoomAt(d0/d1,c[0],c[1]);}moved=true;return;}
+    pts[e.pointerId]=[e.clientX,e.clientY];
+    var dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(!moved&&Math.hypot(dx,dy)<5)return;
+    if(!moved){moved=true;try{svg.setPointerCapture(e.pointerId);}catch(_){}}
+    var r=svg.getBoundingClientRect();vb=[drag.vb[0]-dx/r.width*vb[2],drag.vb[1]-dy/r.height*vb[3],vb[2],vb[3]];apply();});
+  function up(e){delete pts[e.pointerId];if(!Object.keys(pts).length)drag=null;}
+  svg.addEventListener("pointerup",up);svg.addEventListener("pointercancel",up);
+  svg.addEventListener("click",function(e){if(moved){e.stopPropagation();e.preventDefault();moved=false;}},true);
+})();
+</script>
   </section>
 
   <section class="net simsec" aria-label="Симулятор">
@@ -434,6 +625,49 @@ a{color:inherit}
   </section>
 </template>
 
+<template id="tpl-armytest">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done">
+        <h2>Проверки анализа армий <span class="chip done">решено</span></h2>
+        <div class="ginfo"><b>Когда проверяем</b>
+        <ul class="small">
+          <li><b>Не после каждого обучения.</b> Модуль проверяем выборочно и по поводу.</li>
+          <li><b>Поводы:</b> генерал странно понимает отряды (путает роли, не замечает сильных врагов); перед изменением паспорта или эффектов; после большой переделки модуля; когда добавили новые отряды или фракции.</li>
+        </ul></div>
+        <details class="lgroup" open>
+          <summary>Проверки — 3 группы (нажми, чтобы раскрыть)</summary>
+          <div class="layers">
+            <details class="lacc"><summary><span class="ln">1 · При сборке</span><span class="kind">тесты кода, один раз, бесплатно</span></summary>
+              <div class="tlist"><ul class="small">
+                <li><b>Порядок не важен</b> — переставили слоты, карточки переставились вместе с ними, числа те же.</li>
+                <li><b>Пустые слоты не мешают</b> — добавили или убрали пустые, карточки остальных не изменились.</li>
+                <li><b>Сеть одна на всех</b> — тот же отряд в слоте 3 и в слоте 57 даёт одинаковую карточку; свой и чужой отличаются только вкладом флага стороны.</li>
+                <li><b>Зеркало</b> — вторая сторона видит свою армию как «свою»: карточки как у первой в зеркальном бою.</li>
+                <li><b>Новый вариант ничего не ломает</b> — новая каста с нулевыми весами, старые карточки те же до бита.</li>
+                <li><b>Сборка данных</b> — отряд с неизвестной кастой или размером — ошибка, а не тихое «другое».</li>
+                <li><b>Размах чисел</b> — входы и карточки не улетают и не гаснут.</li>
+              </ul></div></details>
+            <details class="lacc"><summary><span class="ln">2 · Выборочно, по поводу</span><span class="kind">после обучения, дёшево</span></summary>
+              <div class="tlist"><ul class="small">
+                <li><b>Мёртвые нейроны</b> — нейрон всегда 0 на любом отряде.</li>
+                <li><b>Различает ли отряды</b> — таблица похожести карточек: копейщики рядом с алебардщиками, лучники далеко от монстров; всё слиплось — читатель не учится.</li>
+                <li><b>Чем пользуется сеть</b> — меняем по одному входу (например, броню): меняются ли карточка и решения генерала; входы без влияния — кандидаты на удаление.</li>
+                <li><b>Работают ли эффекты</b> — убрали эффект у лорда: меняется ли его карточка.</li>
+              </ul></div></details>
+            <details class="lacc"><summary><span class="ln">3 · Когда появятся новые отряды</span><span class="kind">новые фракции</span></summary>
+              <div class="tlist"><ul class="small">
+                <li><b>Не заучил ли отряды</b> — отряд, которого не было в обучении, получает разумную карточку, близкую к похожим по характеристикам.</li>
+              </ul></div></details>
+          </div>
+        </details>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
 <template id="tpl-maptest">
   <section class="cards">
     <div>
@@ -484,7 +718,7 @@ a{color:inherit}
 <template id="tpl-sim">
   <section class="cards">
     <div class="side"><div><div class="colh">Доработки</div><div class="box later"><ul class="small">
-      <li><b>Тела больших отрядов.</b> Попадание симулятор уже считает по телу бойца из базы игры (<code>battle_entities</code>: радиус, эллипс, рост; прямоугольник и лаборатория). Но у всех наших 28 отрядов малые тела — большие тела (конница, монстры) в симуляторе ни разу не проверены. Задача: добавить большие отряды и сверить попадания по ним с игрой пробой (лучники и пушка по монстру / коннице).</li>
+      <li><b>Тела больших отрядов (рост и радиус бойца).</b> Попадание симулятор уже считает по телу бойца из базы игры (<code>battle_entities</code>: радиус, эллипс, рост; прямоугольник и лаборатория). Но у всех наших 28 отрядов малые тела — большие тела (конница, монстры) в симуляторе ни разу не проверены. Задача: добавить большие отряды и сверить попадания по ним с игрой пробой (лучники и пушка по монстру / коннице).</li>
       <li><b>Большие отряды.</b> Все 28 отрядов — размер «малый»: «бонус против больших», натиск монстров, страх/ужас по размеру не проверяются. Добавить конницу и монстров в учения.</li>
       <li><b>Упор против натиска</b> (<code>can_brace</code>) — в симуляторе работает частично. Из входа генерала убран: у пехоты есть всегда, у зверей нет — видно по касте.</li>
       <li><b>Убрать режим «застрельщик» (skirmish)</b> — это алгоритм игры для человека и штатного ИИ; сеть отрядов отходит и стреляет сама. Затрагивает симулятор, мост и обучение (раньше без учителей сеть плохо держала дистанцию).</li>
@@ -513,6 +747,70 @@ a{color:inherit}
   </section>
 </template>
 
+<template id="tpl-maptiles">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done">
+        <h2>Участки карты <span class="chip done">решено</span></h2>
+        <div class="ginfo"><b>Что это</b>
+        <ul class="small">
+          <li><b>Итог анализа карты:</b> 32 карты-признака по 32×32 (по одной на каждый признак). Если смотреть по месту, это <b>1024 участка</b>: у каждого 32 числа — его значения на всех 32 картах. Это одно и то же, просто с двух сторон.</li>
+          <li><b>Участок — квадрат 64×64 м</b> (4×4 клетки по 16 м).</li>
+          <li><b>У каждого участка 32 числа</b> — по одному на каждый признак, найденный свёрткой: насколько здесь выражено «край карты», «край нашей зоны», «середина поля»… (с рельефом — «проход», «брод», «опушка»). Что значит каждый признак, сеть решает сама.</li>
+          <li><b>Считаются один раз на карту</b> и хранятся: местность за бой не меняется.</li>
+          <li><b>Зачем:</b> это «карта глазами сети» — короткая сводка вместо 16 384 клеток. Дальше с участками совещаются отряды (следующий блок): каждый отряд спрашивает, какие участки для него важны.</li>
+          <li>Для второй стороны карта зеркальная, поэтому и участки — «от своей стороны».</li>
+        </ul></div>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-unitcards">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done">
+        <h2>Карточки отрядов <span class="chip done">решено</span></h2>
+        <div class="ginfo"><b>Что это</b>
+        <ul class="small">
+          <li><b>Итог анализа армий:</b> по карточке на каждый занятый слот — до 80 карточек (40 своих + 40 врага), каждая около 256 чисел.</li>
+          <li><b>Карточка — «понимание» отряда сетью:</b> не характеристики, а их смысл («ударный», «держит строй», «опасен для стрелков»…). Что значит каждое число, сеть решает сама.</li>
+          <li><b>Здесь прибавляются эффекты:</b> к карточке отряда прибавляются карточки его эффектов из «Анализа эффектов» (знак «+» на схеме). Так у лорда с аурой в карточке появляется «поддерживает своих».</li>
+          <li>Карточка остаётся на месте своего слота: приказ потом идёт отряду этого слота.</li>
+          <li><b>Дальше:</b> с карточками работает совещание — отряды смотрят на участки карты и друг на друга (следующий блок).</li>
+        </ul></div>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-armyproc">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done">
+        <h2>Анализ армий <span class="chip done">решено</span></h2>
+        <div class="ginfo"><b>Что это</b>
+        <ul class="small">
+          <li><b>Читатель отряда</b> — маленькая полносвязная сеть из 2 слоёв: каждое число слота влияет на каждый нейрон первого слоя, каждый нейрон первого — на каждый нейрон второго.</li>
+          <li><b>Одна сеть на все 80 слотов</b> — одни и те же веса для своих и врага. Не 80 сетей: каждый отряд проходит через те же нейроны (на схеме — три отряда разными цветами через общую середину). Один бой даёт ей 80 примеров.</li>
+          <li><b>Вход</b> — 62 числа слота; каста, размер и тип траектории идут метками (у каждого варианта свой выученный набор чисел).</li>
+          <li><b>Выход</b> — карточка отряда (блок «Карточки отрядов»).</li>
+          <li>Пустые слоты через сеть не проходят (флаг «пусто»).</li>
+          <li>Весов немного: 62 × 256 + 256 × 256 ≈ 82 тыс. (вся нынешняя сеть отрядов — 3,8 млн).</li>
+        </ul></div>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
+      <li>Размеры (256 чисел, 2 слоя) — подобрать замером при сборке.</li>
+    </ul></div></div></div>
+  </section>
+</template>
+
 <template id="tpl-armies">
   <section class="cards">
     <div>
@@ -521,16 +819,12 @@ a{color:inherit}
         <h2>Слоты армий <span class="chip done">решено</span></h2>
         <div class="ginfo"><b>Общее</b>
         <ul class="small">
-          <li><b>80 слотов: 40 наших + 40 врага.</b> Это наибольший размер боя: больше отрядов в бою не бывает.</li>
-          <li><b>Один слот — один отряд</b> (лорд, герой, пехота, стрелки…).</li>
-          <li>Отрядов меньше 40 — остальные слоты <b>пустые</b>: у них флаг «пусто», и сеть их не читает.</li>
-          <li><b>Паспорт — итоговые характеристики с карточки отряда:</b> ранг, предметы, навыки уже внутри; ранг отдельно не нужен. Чего на карточке нет — из базы игры или блок «Считаем сами».</li>
-          <li><b>Свойства делим на три вида:</b> прибавки к себе — уже в итоговых числах; правила для себя (расходный, несокрушимый…) — флагами в паспорте; эффекты на других, пассивки, эффекты при попадании — вход «Эффекты».</li>
-          <li><b>Сторона и цена — первые в слоте.</b></li>
-          <li><b>Без места, направления, текущей скорости и расстояний до краёв карты.</b> Генерал решает до расстановки — отряды ещё не стоят на поле.</li>
-          <li><b>Скорость — берём:</b> бег итоговый с карточки, шаг и натиск — считаем (блок «Считаем сами»). Масса бойца — из базы.</li>
-          <li><b>Без состояния боя</b> (мораль, приказы, угрозы, усталость, видимость…): до боя всё на начальных значениях. </li>
-          <li><b>Новое: «пришло в бой»</b> — доля бойцов и доля здоровья от полного отряда (2 числа). В наших боях обе = 1; нужно, когда отряд приходит неполным (кампания). Здоровье отдельно, потому что у одиночек (лорд, монстр) бойцов всегда 1 из 1, а раны видны только по здоровью.</li>
+          <li><b>80 слотов: 40 наших + 40 врага, один слот — один отряд.</b> На поле у стороны не больше 40; подкрепления сверх 40 подходят по мере гибели прежних; призванные в лимит не входят. Пустые слоты — флаг «пусто», сеть их не читает.</li>
+          <li><b>Всё от своей стороны:</b> «свой» — армия генерала; для второй стороны флаги меняются местами, как на карте.</li>
+          <li><b>Только то, что известно до боя:</b> нет места, направления, состояния боя и видимости — вражеская армия перед боем видна целиком.</li>
+          <li><b>Паспорт — итоговые характеристики с карточки</b> (ранг, предметы, навыки уже внутри). Чего на карточке нет — из базы или блок «Считаем сами».</li>
+          <li><b>Свойства — три вида:</b> прибавки к себе — уже в итоговых числах; правила для себя — флагами в паспорте; эффекты на других, пассивки, эффекты при попадании — вход «Эффекты».</li>
+          <li><b>Строй (ширина, глубина) — выход, а не вход:</b> генерал выбирает его при расстановке.</li>
         </ul></div>
         <details class="lgroup" open>
           <summary>Пример: наших 20 отрядов, врага 26</summary>
@@ -569,15 +863,8 @@ a{color:inherit}
       </div>
     </div>
     <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
-      <li><b>Порядок слотов:</b> важен ли (лорд всегда первый?) или слоты — просто набор.</li>
-      <li><b>«От своей стороны»</b>, как карта: у второй стороны наши и враг меняются местами?</li>
-            <li><b>Видимость убрана</b> в расчёте, что перед боем вражеская армия видна целиком — проверить пробой (видны ли до боя засадные и скрытые отряды).</li>
       <li><b>Сопротивление огню</b> может быть отрицательным (слабость к огню) — проверить, как читается с карточки.</li>
-      <li><b>Строй при расстановке</b> (ширина, глубина) — возможно, выход генерала, а не вход.</li>
-      <li><b>Есть в базе, ещё не разбирали:</b> верховое животное (у конницы конь бьётся отдельно, своё здоровье и атака), боевая машина; пробитие снаряда (сквозь нескольких бойцов) и взрыв (урон по площади); разгон и торможение; размер «удара по нескольким» (идёт только число целей); тип щита (идёт только шанс); угол подъёма снаряда.</li>
-      <li><b>Рост и радиус бойца</b> — добавлять ли в паспорт: по ним игра и симулятор считают попадание (большое тело — больше попаданий).</li>
-      <li><b>Генерал в ходе боя</b> (если будет пересматривать замысел): тогда место и направление понадобятся — добавим новым входом с нулевыми весами, и оси отрядов надо взять от карты, а не от армий.</li>
-      <li><b>Подкрепления и призванные отряды</b> — потом: занимают ли они пустые слоты.</li>
+      <li><b>Резерв подкреплений и призванные</b> — как генерал видит отряды сверх 40 (очередь подкреплений) и призванных (появляются только в бою; до боя — это способность мага).</li>
     </ul></div></div></div>
   </section>
 </template>
@@ -585,18 +872,18 @@ a{color:inherit}
 <script>
 (function(){
   // the tree: levels → parts → topics; "ready" topics have a template, others show as not discussed yet
-  var nodes={landscape:{t:"Вход · Ландшафт",tpl:"tpl-landscape"},mapproc:{t:"Обработка · Анализ карты",tpl:"tpl-mapproc"},maptest:{t:"Проверка · Проверки анализа карты",tpl:"tpl-maptest"},armies:{t:"Вход · Армии",tpl:"tpl-armies"},effects:{t:"Вход · Эффекты",tpl:"tpl-effects"},sim:{t:"Симулятор · Доработки",tpl:"tpl-sim"}};
+  var nodes={landscape:{t:"Вход · Ландшафт",tpl:"tpl-landscape"},mapproc:{t:"Обработка · Анализ карты",tpl:"tpl-mapproc"},maptest:{t:"Проверка · Проверки анализа карты",tpl:"tpl-maptest"},armies:{t:"Вход · Армии",tpl:"tpl-armies"},armyproc:{t:"Обработка · Анализ армий",tpl:"tpl-armyproc"},unitcards:{t:"Выход · Карточки отрядов",tpl:"tpl-unitcards"},maptiles:{t:"Выход · Участки карты",tpl:"tpl-maptiles"},armytest:{t:"Проверка · Проверки анализа армий",tpl:"tpl-armytest"},effproc:{t:"Обработка · Анализ эффектов"},effcards:{t:"Выход · Карточки эффектов"},addcards:{t:"Алгоритм · Сложение"},finalcards:{t:"Выход · Итоговые карточки"},effects:{t:"Вход · Эффекты",tpl:"tpl-effects"},sim:{t:"Симулятор · Доработки",tpl:"tpl-sim"}};
   // "!" on a block whose page has open questions, future items or reworks
   [].forEach.call(document.querySelectorAll(".node"),function(b){var n=nodes[b.dataset.n];if(!n||!n.tpl)return;
     var t=document.getElementById(n.tpl);if(!t)return;var c=t.content,hit=false;
     [].forEach.call(c.querySelectorAll(".colh"),function(h){var x=h.textContent.trim(),box=h.nextElementSibling;
       if(/Открытые вопросы|На будущее|Доработки/.test(x)&&box&&!/нет\.?\s*$/.test(box.textContent.trim()))hit=true;});
     if(c.querySelector(".box.later"))hit=true;
-    if(hit){var i=document.createElement("span");i.className="bang";i.textContent="!";i.title="есть открытые вопросы или доработки";b.appendChild(i);}});
+    if(hit){if(b instanceof SVGElement){var bx=+b.dataset.bx,by=+b.dataset.by,ns="http://www.w3.org/2000/svg";var c=document.createElementNS(ns,"circle");c.setAttribute("cx",bx-4);c.setAttribute("cy",by+4);c.setAttribute("r",10);c.setAttribute("fill","var(--open)");var t=document.createElementNS(ns,"text");t.setAttribute("x",bx-4);t.setAttribute("y",by+9);t.setAttribute("text-anchor","middle");t.setAttribute("font-size","14");t.setAttribute("font-weight","800");t.setAttribute("fill","#1b1206");t.textContent="!";var tt=document.createElementNS(ns,"title");tt.textContent="есть открытые вопросы или доработки";b.appendChild(c);b.appendChild(t);b.appendChild(tt);}else{var i=document.createElement("span");i.className="bang";i.textContent="!";i.title="есть открытые вопросы или доработки";b.appendChild(i);}}});
   var cur="landscape";
   try{var sv=localStorage.getItem("gen-node");if(sv&&nodes[sv])cur=sv;}catch(e){}
   [].forEach.call(document.querySelectorAll(".node"),function(b){var n=nodes[b.dataset.n];
-    b.addEventListener("click",function(){cur=b.dataset.n;try{localStorage.setItem("gen-node",cur);}catch(e){}render();document.getElementById("content").scrollIntoView({behavior:"smooth",block:"start"});});});
+    b.addEventListener("click",function(){cur=b.dataset.n;try{localStorage.setItem("gen-node",cur);}catch(e){}render();});});
   function render(){
     [].forEach.call(document.querySelectorAll(".node"),function(b){b.classList.toggle("on",b.dataset.n===cur);});
     var N=nodes[cur];document.getElementById("crumbs").innerHTML="<b>"+N.t+"</b>";
