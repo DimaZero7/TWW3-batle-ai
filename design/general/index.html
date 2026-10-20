@@ -350,13 +350,14 @@ a{color:inherit}
   var CX=OBX+(OBW-120)/2,oc="";
   // each card is a row of numbers (drawn 8 of 64): every unit gets its own pattern; empty slots stay a faint bar
   function cval(i,k){var t=Math.sin(i*12.9898+k*78.233)*43758.5453;return t-Math.floor(t);}
-  function crow(x,y,side,i,w){var o="",cw=w/8;for(var k=0;k<8;k++)o+='<rect x="'+(x+k*cw)+'" y="'+y+'" width="'+(cw-.6)+'" height="8" rx="1.2" fill="color-mix(in srgb,var('+(side?'--foe':'--ours')+') '+Math.round(22+cval(i+side*40,k)*70)+'%,var(--panel))"/>';return o;}
+  // every card cell on the scheme is the same square: 6 x 6 on a 7 px pitch (a card of 8 cells = 56 px wide); w is ignored
+  function crow(x,y,side,i,w){var o="";for(var k=0;k<8;k++)o+='<rect x="'+(x+k*7)+'" y="'+y+'" width="6" height="6" rx="1.2" fill="color-mix(in srgb,var('+(side?'--foe':'--ours')+') '+Math.round(22+cval(i+side*40,k)*70)+'%,var(--panel))"/>';return o;}
   for(var i=0;i<12;i++){var e=i>=9,e2=i>=10;
     oc+=e?'<rect x="'+CX+'" y="'+(AY+18+i*11)+'" width="56" height="8" rx="3" fill="color-mix(in srgb,var(--ours) 14%,var(--panel))"/>':crow(CX,AY+18+i*11,0,i,56);
     oc+=e2?'<rect x="'+(CX+64)+'" y="'+(AY+18+i*11)+'" width="56" height="8" rx="3" fill="color-mix(in srgb,var(--foe) 14%,var(--panel))"/>':crow(CX+64,AY+18+i*11,1,i,56);}
   // the yellow unit gets fixed numbers so its card, its effect card and their sum match across blocks
   var VU=[.45,.2,.55,.1,.35,.6,.25,.4],VE=[.3,0,.1,.4,0,.2,.35,0],VR=VU.map(function(u,k){return Math.round((u+VE[k])*100)/100;});
-  function vrow(x,y,vals,base,cw,ch,rx){var o="";vals.forEach(function(v,k){o+='<rect x="'+(x+k*cw)+'" y="'+y+'" width="'+(cw-(cw>8?1:.6))+'" height="'+ch+'" rx="'+rx+'" fill="color-mix(in srgb,var('+base+') '+Math.round(10+v*85)+'%,var(--panel))"/>';});return o;}
+  function vrow(x,y,vals,base,cw,ch,rx){var o="";vals.forEach(function(v,k){o+='<rect x="'+(x+k*7)+'" y="'+y+'" width="6" height="6" rx="1.2" fill="color-mix(in srgb,var('+base+') '+Math.round(10+v*85)+'%,var(--panel))"/>';});return o;}
   oc+=vrow(CX,AY+18+2*11,VU,"--ours",7,8,1.2);
   h+=G("unitcards","t-out",[OBX,BY,OBW,BH],"Карточки отрядов","выход",oc);
   // projections: a slot -> layer 1 -> layer 2 -> its card
@@ -388,7 +389,7 @@ a{color:inherit}
   var rec={x:GX+8+44,y:EY+14,w:36,h:40};
   // output block: a card per effect record (a row of numbers, drawn 8 of 64); joining them to the unit cards is a separate module, drawn later
   var ECX=OBX+(OBW-56)/2,eo="";
-  for(var i=0;i<4;i++)for(var k=0;k<8;k++)eo+='<rect x="'+(ECX+k*7)+'" y="'+(EY+16+i*11)+'" width="6.4" height="8" rx="1.2" fill="color-mix(in srgb,var(--ink) '+Math.round(12+cval(i+90,k)*55)+'%,var(--panel))"/>';
+  for(var i=0;i<4;i++)for(var k=0;k<8;k++)eo+='<rect x="'+(ECX+k*7)+'" y="'+(EY+16+i*11)+'" width="6" height="6" rx="1.2" fill="color-mix(in srgb,var(--ink) '+Math.round(12+cval(i+90,k)*55)+'%,var(--panel))"/>';
   eo+=vrow(ECX,EY+16+11,VE,"--ink",7,8,1.2);
   h+=G("effcards","t-out",[OBX,EY,OBW,110],"Карточки эффектов","выход",eo);
   var ecy=EY+16+11;
@@ -401,11 +402,11 @@ a{color:inherit}
   h+='<g pointer-events="none">'+ex+'</g>';
   // --- Сложение (algorithm, no weights): unit card + its effect cards = final card
   var SX=OBX+OBW+18,SW=150,SY0=BY,SH=EY+110-BY,sa="",smid=SY0+(SH-40)/2;
-  var RX0=SX+(SW-88)/2,R1=smid-46,R2=smid-12,R3=smid+22;
-  for(var k=0;k<8;k++){var lx=RX0+k*11+5;sa+='<line x1="'+lx+'" y1="'+(R1+12)+'" x2="'+lx+'" y2="'+R2+'" stroke="var(--muted)" stroke-width=".8"/><line x1="'+lx+'" y1="'+(R2+12)+'" x2="'+lx+'" y2="'+R3+'" stroke="var(--muted)" stroke-width=".8"/>';}
+  var RX0=SX+(SW-56)/2,R1=smid-46,R2=smid-12,R3=smid+22;
+  for(var k=0;k<8;k++){var lx=RX0+k*7+3;sa+='<line x1="'+lx+'" y1="'+(R1+6)+'" x2="'+lx+'" y2="'+R2+'" stroke="var(--muted)" stroke-width=".8"/><line x1="'+lx+'" y1="'+(R2+6)+'" x2="'+lx+'" y2="'+R3+'" stroke="var(--muted)" stroke-width=".8"/>';}
   sa+=vrow(RX0,R1,VU,"--ours",11,12,2)+vrow(RX0,R2,VE,"--ink",11,12,2)+vrow(RX0,R3,VR,"--ours",11,12,2);
-  [R1,R2,R3].forEach(function(y){sa+='<rect x="'+(RX0-2)+'" y="'+(y-2)+'" width="'+(88+3)+'" height="16" rx="3" fill="none" stroke="var(--open)" stroke-width="1.6"/>';});
-  sa+='<text class="ssub" x="'+(RX0+88+9)+'" y="'+(R2+11)+'" text-anchor="middle" style="font-size:18px;font-weight:700">+</text><text class="ssub" x="'+(RX0-10)+'" y="'+(R3+11)+'" text-anchor="middle" style="font-size:18px;font-weight:700">=</text>';
+  [R1,R2,R3].forEach(function(y){sa+='<rect x="'+(RX0-2.5)+'" y="'+(y-2.5)+'" width="'+(56+4)+'" height="11" rx="3" fill="none" stroke="var(--open)" stroke-width="1.6"/>';});
+  sa+='<text class="ssub" x="'+(RX0+56+10)+'" y="'+(R2+8)+'" text-anchor="middle" style="font-size:18px;font-weight:700">+</text><text class="ssub" x="'+(RX0-11)+'" y="'+(R3+8)+'" text-anchor="middle" style="font-size:18px;font-weight:700">=</text>';
   h+=G("addcards","t-alg",[SX,SY0,SW,SH],"Сложение","алгоритм",sa);
   h+=TPL("addtest",SX,SW,AT,SY0,"Проверки сложения",12);
   // output of the addition: the final card per slot (units with effects changed, the rest as they were)
@@ -419,9 +420,9 @@ a{color:inherit}
   // arrows: the yellow unit card and the yellow effect card go into the addition, the sum goes to the final card
   var aw='fill="none" stroke="var(--open)" stroke-width="1.6" marker-end="url(#arrA)"',G1=OBX+OBW+6,G2=OBX+OBW+12;
   h+='<defs><marker id="arrA" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L8 4L0 8z" fill="var(--open)"/></marker></defs>';
-  h+='<g pointer-events="none"><path d="M'+(CX+57.5)+' '+(AY+44)+'H'+(CX+60)+'V'+(AY+153)+'H'+G1+'V'+(R1+6)+'H'+(RX0-3)+'" '+aw+'/>'+
-     '<path d="M'+(ECX+57.5)+' '+(EY+31)+'H'+G2+'V'+(R2+6)+'H'+(RX0-3)+'" '+aw+'/>'+
-     '<path d="M'+(RX0+89)+' '+(R3+6)+'H'+(FX+20)+'V'+(FY+26)+'H'+(FCX-3)+'" '+aw+'/></g>';
+  h+='<g pointer-events="none"><path d="M'+(CX+57.5)+' '+(AY+44)+'H'+(CX+60)+'V'+(AY+153)+'H'+G1+'V'+(R1+3)+'H'+(RX0-3)+'" '+aw+'/>'+
+     '<path d="M'+(ECX+57.5)+' '+(EY+31)+'H'+G2+'V'+(R2+3)+'H'+(RX0-3)+'" '+aw+'/>'+
+     '<path d="M'+(RX0+57.5)+' '+(R3+3)+'H'+(FX+20)+'V'+(FY+26)+'H'+(FCX-3)+'" '+aw+'/></g>';
   // --- Совещание (processing): every unit with effects and every map tile at one table; each asks each (a transformer)
   // drawn small: 4 tiles (near the map row) and 7 units (near the cards row); participants -> one round of all-to-all -> "Итог совещания" (output)
   var KX=FX+FW+18,KW=200,KY=MBY,KH=EY+110-MBY,kc="",KC=[KX+55,KX+150];
@@ -431,23 +432,23 @@ a{color:inherit}
   var HT=1,HU=4,KW8=[.15,.9,.1,.2, .3,.15,.1,.2, .8,.25,.1];
   // every participant is a card: a row of 8 cells (of 64), same length before and after the council; the pattern changes
   function tok(x,t,hl,seed){var c=t.k==="u"?t.c:"--field",o="";
-    if(t.k==="u"&&seed===HU)o=vrow(x-20,t.y-5,VR,"--ours",5,10,1);
-    else for(var k=0;k<8;k++)o+='<rect x="'+(x-20+k*5)+'" y="'+(t.y-5)+'" width="4.4" height="10" rx="1" fill="color-mix(in srgb,var('+c+') '+Math.round(22+cval(seed+(t.k==="t"?60:0),k)*70)+'%,var(--panel))"/>';
-    if(hl)o+='<rect x="'+(x-23)+'" y="'+(t.y-8)+'" width="46" height="16" rx="3" fill="none" stroke="var(--open)" stroke-width="2"/>';return o;}
+    if(t.k==="u"&&seed===HU)o=vrow(x-28,t.y-3,VR,"--ours",7,6,1.2);
+    else for(var k=0;k<8;k++)o+='<rect x="'+(x-28+k*7)+'" y="'+(t.y-3)+'" width="6" height="6" rx="1.2" fill="color-mix(in srgb,var('+c+') '+Math.round(22+cval(seed+(t.k==="t"?60:0),k)*70)+'%,var(--panel))"/>';
+    if(hl)o+='<rect x="'+(x-31)+'" y="'+(t.y-6)+'" width="62" height="12" rx="3" fill="none" stroke="var(--open)" stroke-width="2"/>';return o;}
   function knode(x,y,hl){return '<circle cx="'+x+'" cy="'+y+'" r="5.5" fill="color-mix(in srgb,var(--ink) 18%,var(--panel))" stroke="'+(hl?'var(--open)':'color-mix(in srgb,var(--ink) 45%,var(--panel))')+'" stroke-width="'+(hl?2:1.2)+'"/>';}
-  TOK.forEach(function(a){TOK.forEach(function(b){kc+='<line class="cw" x1="'+(KC[0]+21)+'" y1="'+a.y+'" x2="'+(KC[1]-6)+'" y2="'+b.y+'"/>';});});
-  TOK.forEach(function(a,i){kc+='<line x1="'+(KC[0]+21)+'" y1="'+a.y+'" x2="'+(KC[1]-6)+'" y2="'+TOK[HU].y+'" stroke="var(--open)" stroke-width="'+(.6+KW8[i]*3)+'" opacity="'+(.35+KW8[i]*.6)+'"/>';});
+  TOK.forEach(function(a){TOK.forEach(function(b){kc+='<line class="cw" x1="'+(KC[0]+29)+'" y1="'+a.y+'" x2="'+(KC[1]-6)+'" y2="'+b.y+'"/>';});});
+  TOK.forEach(function(a,i){kc+='<line x1="'+(KC[0]+29)+'" y1="'+a.y+'" x2="'+(KC[1]-6)+'" y2="'+TOK[HU].y+'" stroke="var(--open)" stroke-width="'+(.6+KW8[i]*3)+'" opacity="'+(.35+KW8[i]*.6)+'"/>';});
   // the yellow tile listens to everyone too: most to the yellow unit (it suits it) and to the enemy that covers it
   var KWT=[.4,.2,.35,.1, .85,.15,.1,.2, .7,.15,.1];
-  TOK.forEach(function(a,i){kc+='<line x1="'+(KC[0]+21)+'" y1="'+a.y+'" x2="'+(KC[1]-6)+'" y2="'+TOK[HT].y+'" stroke="var(--open)" stroke-width="'+(.6+KWT[i]*3)+'" opacity="'+(.35+KWT[i]*.6)+'"/>';});
+  TOK.forEach(function(a,i){kc+='<line x1="'+(KC[0]+29)+'" y1="'+a.y+'" x2="'+(KC[1]-6)+'" y2="'+TOK[HT].y+'" stroke="var(--open)" stroke-width="'+(.6+KWT[i]*3)+'" opacity="'+(.35+KWT[i]*.6)+'"/>';});
   TOK.forEach(function(t,i){kc+=tok(KC[0],t,i===HT||i===HU,i)+knode(KC[1],t.y,i===HU||i===HT);});
   // from the illustrations: the yellow map tile and the yellow unit card go to their places at the table
-  var pj2='<path d="M'+(A4.x+A4.w+PD)+' '+(A4.y+A4.h/2-PD)+'L'+(KC[0]-23)+' '+TOK[HT].y+'" fill="none" stroke="var(--open)" stroke-width="1.6"/>'+
-          '<path d="M'+(FCX+57.5)+' '+(FY+26)+'H'+(FCX+60)+'V'+(FY+12*11+4)+'H'+(FX+FW+6)+'L'+(KC[0]-23)+' '+TOK[HU].y+'" fill="none" stroke="var(--open)" stroke-width="1.6"/>';
+  var pj2='<path d="M'+(A4.x+A4.w+PD)+' '+(A4.y+A4.h/2-PD)+'L'+(KC[0]-31)+' '+TOK[HT].y+'" fill="none" stroke="var(--open)" stroke-width="1.6"/>'+
+          '<path d="M'+(FCX+57.5)+' '+(FY+26)+'H'+(FCX+60)+'V'+(FY+12*11+4)+'H'+(FX+FW+6)+'L'+(KC[0]-31)+' '+TOK[HU].y+'" fill="none" stroke="var(--open)" stroke-width="1.6"/>';
   h+=G("council","t-proc",[KX,KY,KW,KH],"Совещание","обработка",kc);
   // output: the same participants, the same card length; the numbers changed by what each learned from the others
   // output: the same structure as before the council - the map as a grid of участки, the units as 40 + 40 slots (empty ones stay empty); same card length, new numbers
-  var QX=KX+KW+18,QW=200,qo="",QCX=QX+(QW-120)/2;
+  var QX=KX+KW+18,QW=264,qo="",QCX=QX+(QW-120)/2;
   var QGX=QX+(QW-4*16)/2,QGY=TOK[HT].y-16-8;
   // the map is still a stack of the same maps (drawn 6 of 32): layers behind the front grid
   var QD=6;for(var L=5;L>=1;L--)qo+='<rect x="'+(QGX-5+L*QD)+'" y="'+(QGY-5-L*QD)+'" width="'+(4*16+8)+'" height="'+(3*16+8)+'" rx="4" fill="color-mix(in srgb,var(--ink) '+(6+L*5)+'%,var(--panel))" stroke="color-mix(in srgb,var(--ink) 30%,var(--panel))" stroke-width="1"/>';
@@ -458,36 +459,65 @@ a{color:inherit}
   qo+='<rect x="'+qa.x+'" y="'+qa.y+'" width="14" height="14" rx="2" fill="none" stroke="var(--open)" stroke-width="2"/>'+
       '<polygon points="'+qa.x+','+qa.y+' '+(qa.x+QP)+','+(qa.y-QP)+' '+(qa.x+qa.w+QP)+','+(qa.y-QP)+' '+(qa.x+qa.w)+','+qa.y+'" fill="var(--open)" fill-opacity=".22" stroke="var(--open)" stroke-width="1.6" stroke-linejoin="round"/>'+
       '<polygon points="'+(qa.x+qa.w)+','+qa.y+' '+(qa.x+qa.w+QP)+','+(qa.y-QP)+' '+(qa.x+qa.w+QP)+','+(qa.y+qa.h-QP)+' '+(qa.x+qa.w)+','+(qa.y+qa.h)+'" fill="var(--open)" fill-opacity=".32" stroke="var(--open)" stroke-width="1.6" stroke-linejoin="round"/>';
+  var qmap=qo;qo="";
   var QRY=TOK[HU].y-4-2*11;
   for(var r=0;r<12;r++){var e=r>=9,e2=r>=10;
     qo+=e?'<rect x="'+QCX+'" y="'+(QRY+r*11)+'" width="56" height="8" rx="3" fill="color-mix(in srgb,var(--ours) 14%,var(--panel))"/>':crow(QCX,QRY+r*11,0,r+300,56);
     qo+=e2?'<rect x="'+(QCX+64)+'" y="'+(QRY+r*11)+'" width="56" height="8" rx="3" fill="color-mix(in srgb,var(--foe) 14%,var(--panel))"/>':crow(QCX+64,QRY+r*11,1,r+300,56);}
   qo+='<rect x="'+(QCX-1.5)+'" y="'+(QRY+2*11-1.5)+'" width="59" height="11" fill="none" stroke="var(--open)" stroke-width="2" rx="3"/>';
-  h+=G("result","t-out",[QX,KY,QW,KH],"Итог совещания","выход",qo);
+  // the council's result splits into two outputs: the map part and the army part (computed together at one table, used by different next steps)
+  h+=G("resmap","t-out",[QX,MBY,QW,MBH],"Карта после совещания","выход",qmap);
+  h+=G("resarmy","t-out",[QX,BY,QW,KY+KH-BY],"Армии после совещания","выход",qo);
   // the yellow tile and the yellow unit go to their places; the other participants go to theirs the same way (not drawn, to keep it light)
   pj2+='<line x1="'+(KC[1]+6)+'" y1="'+TOK[HT].y+'" x2="'+(QGX+16)+'" y2="'+TOK[HT].y+'" stroke="var(--open)" stroke-width="1.6"/>';
   pj2+='<line x1="'+(KC[1]+6)+'" y1="'+TOK[HU].y+'" x2="'+(QCX-1.5)+'" y2="'+TOK[HU].y+'" stroke="var(--open)" stroke-width="1.6"/>';
   h+='<g pointer-events="none">'+pj2+'</g>';
   // --- Сбор групп (processing): units divide themselves between group places, ours only into our 10, enemy only into enemy 10 (side mask); 3 rounds, one network
-  var GPX=QX+QW+18,GPW=230,gp="",GS=16,GSY=TOK[HU].y-2*GS-110,GSX=GPX+170;
-  var SL=[];for(var i=0;i<10;i++)SL.push({s:0,y:GSY+i*GS,used:i<6});for(var i=0;i<10;i++)SL.push({s:1,y:GSY+10*GS+18+i*GS,used:i<5});
-  var GU=[{s:0,y:SL[1].y,to:[1]},{s:0,y:TOK[HU].y,to:[2],hl:1},{s:0,y:SL[4].y+6,to:[4]},{s:0,y:SL[6].y,to:[5]},{s:1,y:SL[11].y,to:[11]},{s:1,y:SL[13].y+6,to:[13]},{s:1,y:SL[15].y,to:[14]}];
-  GU.forEach(function(u){SL.forEach(function(sl,j){if(sl.s!==u.s||!sl.used)return;var main=u.to.indexOf(j)>=0;
-    gp+='<line x1="'+(GPX+62)+'" y1="'+u.y+'" x2="'+(GSX-8)+'" y2="'+(sl.y+5)+'" stroke="'+(u.hl&&main?'var(--open)':'color-mix(in srgb,var('+(u.s?'--foe':'--ours')+') 70%,var(--panel))')+'" stroke-width="'+(main?2.2:.6)+'" opacity="'+(main?.95:.35)+'"/>';});});
-  GU.forEach(function(u,i){gp+=crow(GPX+22,u.y-4,u.s,i+300,40);if(u.hl)gp+='<rect x="'+(GPX+19)+'" y="'+(u.y-7)+'" width="46" height="14" rx="3" fill="none" stroke="var(--open)" stroke-width="2"/>';});
-  SL.forEach(function(sl,j){var c=sl.s?'--foe':'--ours';gp+='<rect x="'+(GSX-8)+'" y="'+sl.y+'" width="26" height="11" rx="3" fill="'+(sl.used?'color-mix(in srgb,var('+c+') 30%,var(--panel))':'none')+'" stroke="color-mix(in srgb,var('+c+') 70%,var(--panel))" stroke-width="1.2"'+(sl.used?'':' stroke-dasharray="3 2"')+'/>';
-    if(j===2)gp+='<rect x="'+(GSX-11)+'" y="'+(sl.y-3)+'" width="32" height="17" rx="4" fill="none" stroke="var(--open)" stroke-width="2"/>';});
-  gp+='<text class="ssub" x="'+(GSX+5)+'" y="'+(GSY-10)+'" text-anchor="middle">наши 10</text><text class="ssub" x="'+(GSX+5)+'" y="'+(GSY+10*GS+12)+'" text-anchor="middle">враг 10</text>';
-  gp+='<text class="ssub" x="'+(GPX+90)+'" y="'+(GSY-10)+'" text-anchor="middle">×3 круга</text>';
-  h+=G("groupproc","t-proc",[GPX,KY,GPW,KH],"Сбор групп","обработка",gp);
-  // --- Группы (output): a card per group place, 10 ours + 10 enemy; empty places stay empty
-  var GOX=GPX+GPW+18,GOW=150,GOC=GOX+(GOW-56)/2,go="";
-  SL.forEach(function(sl,j){go+=sl.used?crow(GOC,sl.y+1.5,sl.s,j+500,56):'<rect x="'+GOC+'" y="'+(sl.y+1.5)+'" width="56" height="8" rx="3" fill="color-mix(in srgb,var('+(sl.s?'--foe':'--ours')+') 14%,var(--panel))"/>';});
-  go+='<rect x="'+(GOC-1.5)+'" y="'+(SL[2].y)+'" width="59" height="11" fill="none" stroke="var(--open)" stroke-width="2" rx="3"/>';
-  h+=G("groups","t-out",[GOX,KY,GOW,KH],"Группы","выход",go);
+  var GPX=QX+QW+18,GPW=250,gp="",GS=14,GSY=BY+44,RX=[GPX+100,GPX+148,GPX+196],GSX=RX[2]+8;
+  var SL=[];for(var i=0;i<10;i++)SL.push({s:0,y:GSY+i*GS,used:i<4});for(var i=0;i<10;i++)SL.push({s:1,y:GSY+10*GS+18+i*GS,used:i<3});
+  var GA=[[0,0,2,1,1,3,0,3,2],[10,10,11,12,10,11,12,10,11,12]],GU=[];
+  GA.forEach(function(arr,side){arr.forEach(function(g,k){GU.push({s:side,k:k,y:SL[side*10+k].y+5.5,to:[g],hl:side===0&&k===2});});});
+  var YU=GU[2].y;
+  // three rounds = three columns of the same places: round 1 everything is possible and fuzzy, by round 3 each unit sits in one place and unused places are empty
+  // the yellow unit's share per place in each round (a yellow chip, wider = bigger share)
+  var YS=[{1:.3,2:.4,3:.3},{1:.15,2:.75,3:.1},{2:.95}];
+  GU.forEach(function(u){SL.forEach(function(sl,j){if(sl.s!==u.s)return;var main=u.to.indexOf(j)>=0,yw=u.hl?(YS[0][j]||0):0;
+    var col=u.hl&&yw?'var(--open)':'color-mix(in srgb,var('+(u.s?'--foe':'--ours')+') 70%,var(--panel))';
+    gp+='<line x1="'+(GPX+76)+'" y1="'+u.y+'" x2="'+RX[0]+'" y2="'+(sl.y+5.5)+'" stroke="'+col+'" stroke-width="'+(yw?.6+yw*3:(main?1.3:.5))+'" opacity="'+(yw?.9:(main?.5:.12))+'"/>';});});
+  GU.forEach(function(u){gp+=crow(GPX+18,u.y-3,u.s,u.k+300,56);if(u.hl)gp+='<rect x="'+(GPX+15)+'" y="'+(u.y-6)+'" width="62" height="12" rx="3" fill="none" stroke="var(--open)" stroke-width="2"/>';});
+  SL.forEach(function(sl,j){var c=sl.s?'--foe':'--ours';
+    for(var r=0;r<3;r++){var x=RX[r],settled=r===0?false:!sl.used;
+      if(r<2)gp+='<line x1="'+(x+26)+'" y1="'+(sl.y+5.5)+'" x2="'+RX[r+1]+'" y2="'+(sl.y+5.5)+'" class="cw"/>';
+      var fill=sl.used?[18,26,36][r]:[18,7,0][r];
+      gp+='<rect x="'+x+'" y="'+sl.y+'" width="26" height="11" rx="3" fill="'+(fill?'color-mix(in srgb,var('+c+') '+fill+'%,var(--panel))':'none')+'" stroke="color-mix(in srgb,var('+c+') '+(settled?50:70)+'%,var(--panel))" stroke-width="1.1"'+(settled?' stroke-dasharray="3 2"':'')+'/>';
+      var ys=YS[r][j];if(ys){var cw=4+ys*18;gp+='<rect x="'+(x+13-cw/2)+'" y="'+(sl.y+2)+'" width="'+cw+'" height="7" rx="1.5" fill="var(--open)" opacity=".9"/>';}}
+    if(j===2)gp+='<rect x="'+(RX[2]-2)+'" y="'+(sl.y-1.5)+'" width="30" height="14" rx="4" fill="none" stroke="var(--open)" stroke-width="1.6"/>';});
+  ["круг 1","круг 2","круг 3"].forEach(function(t,r){gp+='<text class="ssub" x="'+(RX[r]+13)+'" y="'+(GSY-10)+'" text-anchor="middle">'+t+'</text>';});
+  gp+='<text class="ssub" x="'+(GPX+38)+'" y="'+(GSY-10)+'" text-anchor="middle">наши</text><text class="ssub" x="'+(GPX+38)+'" y="'+(GSY+10*GS+12)+'" text-anchor="middle">враг</text>';
+  h+=G("groupproc","t-proc",[GPX,BY,GPW,KY+KH-BY],"Сбор групп","обработка",gp);
+  // --- Группы (output): filled groups are solid brackets - on top the group card (short row), inside its units (rows, as in the army blocks);
+  // empty places are small dashed empty brackets in one row under them
+  var GOX=GPX+GPW+18,GOW=170,go="",GBX=GOX+18,GTOP={},RS=10;
+  var MEM={};GU.forEach(function(u){u.to.forEach(function(j){(MEM[j]=MEM[j]||[]).push({u:u.k,hl:!!u.hl});});});
+  var gy=BY+8;
+  [0,1].forEach(function(side){var c=side?'--foe':'--ours',free=[];
+    SL.forEach(function(sl,j){if(sl.s===side&&!sl.used)free.push(j);});
+    // the side's label, and on the same line its empty places: small dashed empty brackets
+    go+='<text class="ssub" x="'+(GOX+12)+'" y="'+(gy+9)+'">'+(side?'враг':'наши')+'</text>';
+    free.forEach(function(j,k){var x=GOX+58+k*14;go+='<path d="M'+(x+9)+' '+gy+'H'+x+'V'+(gy+10)+'H'+(x+9)+'" fill="none" stroke="color-mix(in srgb,var('+c+') 60%,var(--panel))" stroke-width="1.4" stroke-dasharray="2.5 2"/>';});
+    gy+=16;
+    SL.forEach(function(sl,j){if(sl.s!==side||!sl.used)return;
+      var ch=MEM[j]||[],top=gy,bot=top+3+RS+ch.length*RS+2;GTOP[j]=top+7;
+      go+='<path d="M'+(GBX+66)+' '+top+'H'+GBX+'V'+bot+'H'+(GBX+66)+'" fill="none" stroke="'+(j===2?'var(--open)':'color-mix(in srgb,var('+c+') 80%,var(--panel))')+'" stroke-width="2" stroke-linejoin="round"/>';
+      go+=crow(GBX+6,top+3,side,j+500,56);
+      ch.forEach(function(m,k){var ry=top+3+RS+1+k*RS;go+=crow(GBX+6,ry,side,m.u+300,56);
+        if(m.hl)go+='<rect x="'+(GBX+3.5)+'" y="'+(ry-2)+'" width="61" height="10" rx="3" fill="none" stroke="var(--open)" stroke-width="2"/>';});
+      gy=bot+4;});
+    gy+=4;});
+  h+=G("groups","t-out",[GOX,BY,GOW,KY+KH-BY],"Группы","выход",go);
   // the yellow unit leaves "Итог совещания" through the gap between columns (not across the enemy card)
-  var gl='<path d="M'+(QCX+57.5)+' '+TOK[HU].y+'H'+(QCX+60)+'V'+(QRY+12*11+4)+'H'+(GPX+8)+'V'+TOK[HU].y+'H'+(GPX+19)+'" fill="none" stroke="var(--open)" stroke-width="1.6"/>';
-  SL.forEach(function(sl,j){if(sl.used)gl+='<line x1="'+(GSX+18)+'" y1="'+(sl.y+5.5)+'" x2="'+(GOC-1.5)+'" y2="'+(sl.y+5.5)+'" '+(j===2?'stroke="var(--open)" stroke-width="1.6"':'class="cw"')+'/>';});
+  var gl='<path d="M'+(QCX+57.5)+' '+TOK[HU].y+'H'+(QCX+60)+'V'+(QRY+12*11+4)+'H'+(GPX+8)+'V'+YU+'H'+(GPX+15)+'" fill="none" stroke="var(--open)" stroke-width="1.6"/>';
+  SL.forEach(function(sl,j){if(sl.used)gl+='<line x1="'+(GSX+(j===2?20:18))+'" y1="'+(sl.y+5.5)+'" x2="'+(GBX-2)+'" y2="'+GTOP[j]+'" '+(j===2?'stroke="var(--open)" stroke-width="1.6"':'class="cw"')+'/>';});
   h+='<g pointer-events="none">'+gl+'</g>';
   var H=EY+110+12;svg.setAttribute("viewBox","0 -110 "+(GOX+GOW+26)+" "+(H+190));
   svg.innerHTML=h;
@@ -787,7 +817,7 @@ a{color:inherit}
       <div class="colh">Решено</div>
       <div class="box done"><h2>Сбор групп <span class="chip done">решено</span></h2>
         <ul class="small">
-          <li><b>10 мест под группы на сторону</b> — наши 10 и враг 10. Расклад на старте — до 9 групп (конница на 2 фланга, 3 части пехоты, 2 части стрелков, резерв, летуны), десятое — запас, чтобы в бою было куда отделиться. Пустое место — группы нет.</li>
+          <li><b>10 мест под группы на сторону</b> — наши 10 и враг 10. С запасом: например, конница на 2 фланга, 3 части пехоты, 2 части стрелков, резерв и летуны — 9 групп, и ещё есть куда отделиться в бою (пример, не требование). Пустое место — группы нет.</li>
           <li><b>Свои — только в свои места, враги — только во вражеские</b> (маска стороны). Группы врага — догадка сети о его строении: «их конница — отдельно от основной силы».</li>
           <li><b>Отряд делит себя на 100 % между местами своей стороны</b> — места соревнуются за отряды, поэтому группы раздельные, а не «все во всех».</li>
           <li><b>Состав учит сеть</b> — правил вроде «конница всегда вместе» нет.</li>
@@ -820,9 +850,9 @@ a{color:inherit}
   <section class="cards">
     <div>
       <div class="colh">Решено</div>
-      <div class="box done"><h2>Группы <span class="chip done">решено</span></h2>
+      <div class="box done"><h2>Группы <span class="chip done">решено</span> <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
         <ul class="small">
-          <li><b>Карточка на место</b> — 10 наших и 10 вражеских; карточка группы — сводка её отрядов (кто, сколько, насколько сильны). Пустое место — пустая карточка.</li>
+          <li><b>Группа = карточка + состав</b> — на каждое из 10 наших и 10 вражеских мест: карточка группы (сводка её отрядов: кто, сколько, насколько сильны) и состав (какие отряды в ней — они потом и выполняют задание). Пустое место — пустая группа.</li>
         </ul>
       </div>
     </div>
@@ -832,21 +862,38 @@ a{color:inherit}
   </section>
 </template>
 
-<template id="tpl-result">
+<template id="tpl-resmap">
   <section class="cards">
     <div>
       <div class="colh">Решено</div>
-      <div class="box done"><h2>Итог совещания <span class="chip done">решено</span> <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
+      <div class="box done"><h2>Карта после совещания <span class="chip done">решено</span> <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
         <ul class="small">
-          <li><b>Те же участники</b> — 80 отрядов и все участки карты, ни больше ни меньше.</li>
-          <li><b>Карточки обновлены</b> — та же длина, другие числа: каждая теперь с учётом всех остальных (лучники «знают» про холм, про пушки врага и про копейщиков рядом).</li>
-          <li><b>Дальше</b> — из отрядов генерал берёт «что делать», из участков — «куда».</li>
+          <li><b>Те же участки</b> — та же сетка и та же стопка из 32 слоёв, другие числа: каждое место теперь «знает» об армиях и о других местах («холм хорош для наших лучников, но его простреливают пушки врага»).</li>
+          <li><b>Считается вместе с армиями</b> — на одном столе совещания; два выхода, а не две независимые сети.</li>
+          <li><b>Дальше</b> — цель «куда»: группа указывает на участок этой карты.</li>
         </ul>
       </div>
     </div>
     <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><ul class="small">
-      <li><b>Выходы генерала</b> — что именно берём из итога и как; ещё не проектировали.</li>
+      <li><b>Задания группам</b> — как группа указывает участок; ещё не проектировали.</li>
     </ul></div></div></div>
+  </section>
+</template>
+
+<template id="tpl-resarmy">
+  <section class="cards">
+    <div>
+      <div class="colh">Решено</div>
+      <div class="box done"><h2>Армии после совещания <span class="chip done">решено</span> <span class="robo" title="сделано нейросетью, человек не проверял в деталях"><svg viewBox="0 0 14 14" aria-hidden="true"><line x1="7" y1="1.2" x2="7" y2="3.5" stroke="#fff" stroke-width="1.3"/><circle cx="7" cy="1.2" r="1.1" fill="#fff"/><rect x="2" y="3.5" width="10" height="8.5" rx="2.2" fill="#fff"/><circle cx="5" cy="7.3" r="1.25" fill="#5b6cf0"/><circle cx="9" cy="7.3" r="1.25" fill="#5b6cf0"/><line x1="5.2" y1="9.9" x2="8.8" y2="9.9" stroke="#5b6cf0" stroke-width="1.1" stroke-linecap="round"/></svg></span></h2>
+        <ul class="small">
+          <li><b>Те же 80 слотов</b> — 40 своих и 40 врагов, в том же порядке; пустые слоты пустые.</li>
+          <li><b>Карточки той же длины, другие числа</b> — каждая теперь с учётом всех остальных (лучники «знают» про холм, про пушки врага и про копейщиков рядом).</li>
+          <li><b>Считается вместе с картой</b> — на одном столе совещания.</li>
+          <li><b>Дальше</b> — в «Сбор групп».</li>
+        </ul>
+      </div>
+    </div>
+    <div class="side"><div><div class="colh">Открытые вопросы</div><div class="box"><span class="small">Открытых вопросов нет.</span></div></div></div>
   </section>
 </template>
 
@@ -866,7 +913,7 @@ a{color:inherit}
           <li><b>Место участка</b> — у каждого участка его строка и столбец на карте; иначе за столом не узнать, где этот холм. У отрядов места нет — так решено во входе «Армии».</li>
           <li><b>Выравнивание на входе</b> — каждую карточку перед столом привести к одному масштабу; заодно закрывает вопрос «выравнивание после сложения».</li>
           <li><b>Пустые слоты не участвуют</b> — их никто не спрашивает и они никого не спрашивают.</li>
-          <li><b>На выходе</b> — блок «Итог совещания».</li>
+          <li><b>На выходе</b> — два блока: «Карта после совещания» и «Армии после совещания».</li>
         </ul>
       </div>
     </div>
@@ -1186,7 +1233,7 @@ a{color:inherit}
 <script>
 (function(){
   // the tree: levels → parts → topics; "ready" topics have a template, others show as not discussed yet
-  var nodes={landscape:{t:"Вход · Ландшафт",tpl:"tpl-landscape"},mapproc:{t:"Обработка · Анализ карты",tpl:"tpl-mapproc"},maptest:{t:"Проверка · Проверки анализа карты",tpl:"tpl-maptest"},armies:{t:"Вход · Армии",tpl:"tpl-armies"},armyproc:{t:"Обработка · Анализ армий",tpl:"tpl-armyproc"},unitcards:{t:"Выход · Карточки отрядов",tpl:"tpl-unitcards"},maptiles:{t:"Выход · Участки карты",tpl:"tpl-maptiles"},armytest:{t:"Проверка · Проверки анализа армий",tpl:"tpl-armytest"},effproc:{t:"Обработка · Анализ эффектов",tpl:"tpl-effproc"},effcards:{t:"Выход · Карточки эффектов",tpl:"tpl-effcards"},addcards:{t:"Алгоритм · Сложение",tpl:"tpl-addcards"},efftest:{t:"Проверка · Проверки анализа эффектов",tpl:"tpl-efftest"},addtest:{t:"Проверка · Проверки сложения",tpl:"tpl-addtest"},finalcards:{t:"Выход · Отряды с эффектами",tpl:"tpl-finalcards"},council:{t:"Обработка · Совещание",tpl:"tpl-council"},result:{t:"Выход · Итог совещания",tpl:"tpl-result"},groupproc:{t:"Обработка · Сбор групп",tpl:"tpl-groupproc"},groups:{t:"Выход · Группы",tpl:"tpl-groups"},effects:{t:"Вход · Эффекты",tpl:"tpl-effects"},sim:{t:"Симулятор · Доработки",tpl:"tpl-sim"}};
+  var nodes={landscape:{t:"Вход · Ландшафт",tpl:"tpl-landscape"},mapproc:{t:"Обработка · Анализ карты",tpl:"tpl-mapproc"},maptest:{t:"Проверка · Проверки анализа карты",tpl:"tpl-maptest"},armies:{t:"Вход · Армии",tpl:"tpl-armies"},armyproc:{t:"Обработка · Анализ армий",tpl:"tpl-armyproc"},unitcards:{t:"Выход · Карточки отрядов",tpl:"tpl-unitcards"},maptiles:{t:"Выход · Участки карты",tpl:"tpl-maptiles"},armytest:{t:"Проверка · Проверки анализа армий",tpl:"tpl-armytest"},effproc:{t:"Обработка · Анализ эффектов",tpl:"tpl-effproc"},effcards:{t:"Выход · Карточки эффектов",tpl:"tpl-effcards"},addcards:{t:"Алгоритм · Сложение",tpl:"tpl-addcards"},efftest:{t:"Проверка · Проверки анализа эффектов",tpl:"tpl-efftest"},addtest:{t:"Проверка · Проверки сложения",tpl:"tpl-addtest"},finalcards:{t:"Выход · Отряды с эффектами",tpl:"tpl-finalcards"},council:{t:"Обработка · Совещание",tpl:"tpl-council"},resmap:{t:"Выход · Карта после совещания",tpl:"tpl-resmap"},resarmy:{t:"Выход · Армии после совещания",tpl:"tpl-resarmy"},groupproc:{t:"Обработка · Сбор групп",tpl:"tpl-groupproc"},groups:{t:"Выход · Группы",tpl:"tpl-groups"},effects:{t:"Вход · Эффекты",tpl:"tpl-effects"},sim:{t:"Симулятор · Доработки",tpl:"tpl-sim"}};
   // "!" on a block whose page has open questions, future items or reworks
   [].forEach.call(document.querySelectorAll(".node"),function(b){var n=nodes[b.dataset.n];if(!n||!n.tpl)return;
     var t=document.getElementById(n.tpl);if(!t)return;var c=t.content,hit=false;
