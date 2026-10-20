@@ -35,6 +35,12 @@
 --                  to pass_beyond_m behind the target's front: it goes past the target, never attacks it (the skirmish2
 --                  and walkpass plans); lane.t_attack_extra: at the go the target attacks the first extra at a walk;
 --   'attack_t2'    attack the second target (lane.target2) at a run (the skirmish2 plan: the target's neighbour).
+--   'laps'         (the fatrun plan: fatigue of running, walking and standing) no fight: the attacker goes round an
+--                  octagon of radius laps_r m about its place (at a run, lane.laps_walk: at a walk), each next corner
+--                  ordered once within 10 m of the current one (or once stopped 5 s into the leg), for run_s seconds; then
+--                  it halts where it is (probe_phase 'stop', its fatigue state) and stands to the lane's end (max_s);
+--                  with lane.t_near_m its target (parked gap_m away, never ordered) is teleported then t_near_m (front
+--                  to front) ahead of it, facing it, halted (probe_phase 'near'): standing near a standing enemy.
 --   'cast'         (the magic plan) the attacker is a spellcaster and gets no order; lane.casts {{at_s, key, tg}}: at
 --                  at_s after the go perform_special_ability(key, the target unit: tg 't' (default), 't2', or 'a' the
 --                  caster himself), as the game's benchmarks cast their spells; each try is probe_ability {who 'a',
@@ -127,7 +133,11 @@ local TIMER, MEN_TIMER = 'tww3_bai_charge_probe_tick', 'tww3_bai_charge_probe_me
 local WINDS_TIMER = 'tww3_bai_charge_probe_winds'
 M.MODES = {attack_run = true, attack_walk = true, move_run = true, recharge = true, hold = true, withdraw = true,
     script = true, shoot = true, reengage = true, tire = true, retarget = true, pass = true, attack_t2 = true,
-    cast = true}
+    cast = true, laps = true}
+-- A unit's CCO fields tried for its fatigue as a number (the fatrun plan; none is documented: the ones that answer are
+-- logged once, probe_fat_cco, and carried in the laps lanes' rows as fc).
+M.FAT_CCO = {'Fatigue', 'FatigueValue', 'FatiguePercent', 'FatigueLevel', 'FatigueState', 'Vigour', 'VigourPercent',
+    'VigourValue', 'VigourState', 'FatigueStateContext.Key', 'FatigueContext.Value'}
 -- A caster's CCO fields tried at the start (the magic plan): the unit card's ability list and magic fields. Their names
 -- are not documented anywhere we found: the ones that answer are logged (probe_mage cco) and read again every winds_ms.
 M.MAGE_CCO = {'BattleAbilityList.Size', 'CanUseMagic', 'IsCasting', 'IsSpellcaster', 'NumAbilities',
@@ -168,6 +178,16 @@ function M.layout(lane)
         -- (the busycharge plan) behind the target's back (-z), facing it (+z)
         return {ax = lane.x + (lane.a_dx or 0), az = lane.z - td - lane.gap_m - ad / 2, ab = 0,
             tx = lane.x, tz = lane.z - td / 2, tb = tb}
+    elseif lane.a_side and lane.a_side ~= 0 then
+        -- (the brace plan) at a_side degrees from the target's facing (clockwise, +x side), on the ray from its centre:
+        -- gap_m beyond the block's edge on that ray, facing its centre
+        local th = math.rad(lane.a_side)
+        local s, c = math.abs(math.sin(th)), math.abs(math.cos(th))
+        local r = math.min(s > 1e-6 and (lane.t_width or 0) / 2 / s or math.huge, c > 1e-6 and td / 2 / c or math.huge)
+        local d = r + lane.gap_m + ad / 2
+        local tx, tz = lane.x, lane.z - td / 2
+        return {ax = tx + d * math.sin(th), az = tz + d * math.cos(th), ab = (lane.a_side + 180) % 360,
+            tx = tx, tz = tz, tb = tb}
     end
     return {ax = lane.x + (lane.a_dx or 0), az = lane.z + lane.gap_m + ad / 2, ab = 180, tx = lane.x, tz = lane.z - td / 2, tb = tb}
 end
@@ -199,6 +219,13 @@ function M.fatigue_level(state)
         if k == state then return i - 1 end
     end
     return nil
+end
+
+-- The laps lane's corner k (1-based, cyclic) of the octagon of radius r about (x, z): corner 1 straight ahead
+-- (bearing), then clockwise. Pure. Returns x, z.
+function M.lap_point(x, z, bearing, k, r)
+    local a = math.rad((bearing or 0) + 45 * ((k - 1) % 8))
+    return x + r * math.sin(a), z + r * math.cos(a)
 end
 
 -- The tire shuttle's point for a unit placed at (x, z) facing bearing: odd legs tire_leg_m straight back, even legs
@@ -624,6 +651,36 @@ function M.main(bm, config, globals)
                         end
                     end
                 end
+                if lane.mode == 'laps' then
+                    local L = lane.layout
+                    local p = read(function() return lane.a.unit:position() end)
+                    if lane.phase == 'laps' then
+                        local x, z = M.lap_point(L.ax, L.az, L.ab, lane.wp, lane.laps_r)
+                        local off = p and math.sqrt((p:get_x() - x) ^ 2 + (p:get_z() - z) ^ 2) or math.huge
+                        local moving = read(function() return lane.a.unit:is_moving() end)
+                        if off <= 10 or (not moving and now - lane.wp_ms >= 5000) then
+                            lane.wp, lane.wp_ms = lane.wp + 1, now
+                            x, z = M.lap_point(L.ax, L.az, L.ab, lane.wp, lane.laps_r)
+                            orders.move(lane.a.uc, vec(x, z), lane.laps_walk ~= true)
+                        end
+                        if now - lane.t0 >= lane.run_s * 1000 then
+                            lane.phase = 'stop'
+                            orders.halt(lane.a.uc)
+                            local fat = read(function() return lane.a.unit:fatigue_state() end)
+                            emit('probe_phase', {lane = lane.name, phase = 'stop', t = now - lane.t0, fat = fat,
+                                corners = lane.wp, x = p and round(p:get_x()), z = p and round(p:get_z())})
+                            if lane.t_near_m and p then
+                                local b = read(function() return lane.a.unit:bearing() end) or L.ab
+                                local d = lane.t_near_m + ((lane.a_depth or 0) + (lane.t_depth or 0)) / 2
+                                local nx, nz = M.beside(p:get_x(), p:get_z(), b, 0, d)
+                                local ok, e = pcall(place, lane.t, nx, nz, (b + 180) % 360, lane.t_width)
+                                emit('probe_phase', {lane = lane.name, phase = 'near', t = now - lane.t0, x = round(nx),
+                                    z = round(nz), b = round(b, 0), status = ok and 'done' or 'failed',
+                                    error = (not ok) and tostring(e) or nil})
+                            end
+                        end
+                    end
+                end
                 if lane.mode == 'script' then
                     for i, step in ipairs(lane.steps or {}) do
                         if not step.done and now - lane.t0 >= step.at_s * 1000 then
@@ -738,6 +795,10 @@ function M.main(bm, config, globals)
                 end
                 local r = {lane = lane.name, t = now - lane.t0, a = lane_row(lane, 'a', lane.a.unit),
                     tg = lane_row(lane, 'tg', lane.t.unit)}
+                if lane.mode == 'laps' and lane.fat_found and #lane.fat_found > 0 then
+                    r.a.fc = {}
+                    for _, f in ipairs(lane.fat_found) do r.a.fc[f] = read(cco, lane.a.unit, f) end
+                end
                 if lane.rally_friends and #lane.rally_friends > 0 then
                     r.f = {}
                     for _, f in ipairs(lane.rally_friends) do r.f[#r.f + 1] = unit_row(state.units[f.name].unit) end
@@ -875,6 +936,11 @@ function M.main(bm, config, globals)
                 orders.move(lane.a.uc, vec(L.ax, lane.z - (lane.pass_beyond_m or 100)), lane.pass_walk ~= true)
             elseif m == 'attack_t2' then
                 attack(lane, lane.a, lane.t2, false)
+            elseif m == 'laps' then
+                lane.phase, lane.wp, lane.wp_ms = 'laps', 1, lane.t0
+                local L = lane.layout
+                local x, z = M.lap_point(L.ax, L.az, L.ab, 1, lane.laps_r)
+                orders.move(lane.a.uc, vec(x, z), lane.laps_walk ~= true)
             end
         end
         emit('probe_go', {lanes = #state.lanes})
@@ -994,6 +1060,17 @@ function M.main(bm, config, globals)
             end
         end
         if config.winds_ms then magic_start() end
+        for _, lane in ipairs(state.lanes) do
+            if lane.mode == 'laps' then
+                local found, values = {}, {}
+                for _, f in ipairs(M.FAT_CCO) do
+                    local v = read(cco, lane.a.unit, f)
+                    if v ~= nil then found[#found + 1], values[f] = f, v end
+                end
+                lane.fat_found = found
+                emit('probe_fat_cco', {lane = lane.name, values = values})
+            end
+        end
         emit('start', {speed = config.speed, lanes = config.lanes})
         state.cancel_deadline = battle.deadline(bm, config.deadline_s * 1000, guarded(function()
             finish('deadline')
@@ -1050,6 +1127,9 @@ function M.main(bm, config, globals)
             end
             if l.mode == 'tire' then
                 assert(M.fatigue_level(l.tire_until), 'unknown tire_until ' .. tostring(l.tire_until))
+            end
+            if l.mode == 'laps' then
+                assert(type(l.run_s) == 'number' and type(l.laps_r) == 'number', 'a laps lane needs run_s and laps_r')
             end
             if l.mode == 'cast' then
                 assert(type(l.casts) == 'table', 'a cast lane needs casts')

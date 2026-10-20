@@ -197,6 +197,11 @@ Morale probe: plans `strong2` (the strong-enemy scale, 6 enemies, 120-30 m), `ra
 the rank goes into the scenario, a weak enemy by a router, an enemy front of 12 / 60 m at the rally, rear then flank
 strikes, even fights, routing friends and enemies together; the engine's `kill` steps count in the battle's casualties,
 not in the recent ones).
+Fatigue and bracing (the melee probe): plan `fatrun` (mode `laps`: clanrats run or walk round an octagon of 40 m radius
+about their place for 180 s, then stand where they are to the lane's end; the rank goes into the scenario (`a_rank`);
+`t_near_m` - at the stop a standing enemy is put that many metres ahead of the unit; its table
+`build/fatcharge/fatrun.py`) and `brace` (clanrats charge held spearmen at `a_side` 0 / 30 / 60 / 100 deg from their
+facing, health every 0.1 s; its table `build/fatcharge/brace.py`).
 New units before the simulator (`tools/nn/unit_probe.py`, `build/newunits/plan.md`): plans `ratling` (the Ratling Gun
 shoots standing swordsmen from 60 / 100 / 135 m, shield spearmen, with half its crew, the General), `suppress` (swordsmen
 walk and run at the gun, firing or silent: speed under suppressing fire), `suppress2` (the gun falls

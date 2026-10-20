@@ -47,6 +47,21 @@ Uphill movement multiplies the movement cost by +50 / +100 / +150 % at gradients
 0.05 / 0.1 / 0.2; downhill gives no benefit. Thresholds: 2800 / 6600 / 12600 / 18000 / 27000,
 max 30000. · [twwstats][tws], [fandom Fatigue][fw-fat], [CA elevation blog][elev] · high.
 
+- **Checked by the `fatrun` probe** (`build/charge-probe/runs/20261020-043211`, 1 battle, Normal; rank 0 clanrats go
+  round an octagon of 40 m radius about their place for 180 s, then stand; table `build/fatcharge/fatrun.py`): at a
+  run - active at 78.0 and 83.5 s (at +4 a tick 70.1 s; ~34-36 points/s, as the battles' 39.4), never winded in 180 s
+  (the rule: 165 s); at a walk for 180 s - fresh all along (walking −1); after the stop fresh again in 26.5 s (idle −18:
+  20-24 s, ready −7: 53-63 s).
+- **Cavalry running.** The key "running (cavalry)" +6 is in the DB; whether the game reads it is not checked (no cavalry
+  in the probes). Ours: running +4 for everyone.
+- **Rank.** A unit's rank adds points a tick to every activity: ranks 0-2 0, 3-4 −1, 5-6 −2, 7-8 −3, 9 −4 (DB
+  `unit_stats_land_experience_bonuses`, the integer column beside the rank; read from our `db.pack` 20.10.2026). Rank 9
+  never tires at a run (+4 − 4 = 0) and rests at −22. The `fatrun` probe: at a run rank 5 active at 170.5 s (rank 0 at
+  78 / 83.5 s; −2 a tick on rank 0's measured run gives ~176 s), rank 9 fresh all 180 s (without it, active at ~80 s).
+  · DB, probe · high.
+  - Ours: the rule is in (`fatigue.calibration.rank`, `fatigue.py`), but the simulator has no ranks - every unit is
+    rank 0, as in our battles; it works once a unit carries a rank.
+
 - **Tick length.** One player says the tick is 0.1 s (10 a second): then continuous melee
   (190/s) reaches Tired in ~66 s and Exhausted in ~142 s, and idle (−180/s) recovers from Exhausted
   in ~150 s. · [Steam][tick] · medium-low.
@@ -70,10 +85,16 @@ max 30000. · [twwstats][tws], [fandom Fatigue][fw-fat], [CA elevation blog][ele
     fatigue_change_ratio −0.01, fandom "Vigour per second −1%"): in the probe the General in melee with it turned
     tired 91.5 s after contact, the rule gives 90.5 s, without the vigour ~51 s (`build/movelords`). A move costs by its
     order's run flag, not by speed: run +4, walk −1 (DB; clean walk spans of the game's AI, 2925 s:
-    0 crossings up, 6 down). A routing unit +4. Shooting 7.5 (not the DB +18). Idle −18 without
-    unfinished movement, attack or aiming and with no standing enemy within 80 m; otherwise ready
-    −7 (standing network units in the game recover at 0.48 / 0.62 / 0.79 / 1.00 of the idle rate
-    with the nearest enemy at 40 / 40–80 / 80–150 / 150–300 m). Completed movement counts as rest
+    0 crossings up, 6 down). A routing unit +4. Shooting 11.4 a tick on the seconds with a shot (not the DB +18). Idle
+    −18 without unfinished movement, attack or aiming; a unit under an attack order or aiming stands ready −7. An enemy
+    near gives no readiness by itself (`fatigue.calibration.ready_enemy_m` 0): the `fatrun` probe - a unit that got a
+    standing enemy put 30 m ahead (front to front) at its stop was fresh again in 29.5 s (none within 300 m: 26.5 s;
+    ready would give ~55 s); 1150 network battles in the game (`build/fatcharge/near3.py`): standing units with an
+    engine target recover at 0.27-0.33 of the idle rate at any distance to the enemy, without one at 0.62 / 0.72 / 0.74 /
+    0.84 / 0.82 with the nearest enemy at 0-40 / 40-80 / 80-150 / 150-300 / beyond 300 m. The old rule "a standing enemy
+    within 80 m - ready" gave a unit without a target 0.39 of its far rest, the game 0.75-0.9, no rule 1.0. The rest (a
+    unit without a target near an enemy rests at ~0.75-0.8) is **open**: some of its men seem to take the combat stance.
+    Completed movement counts as rest
     (an order-context approximation: arenas record neither `is_idle` nor combat stance, and
     `is_idle` sometimes stays false after `halt` while recovering at −180/s). Dead and departed
     units are frozen. 13.7 / 7.5 are fitted on the units' activities in the 204 recordings so that
@@ -99,7 +120,16 @@ max 30000. · [twwstats][tws], [fandom Fatigue][fw-fat], [CA elevation blog][ele
     136.5 s) — the number of men fighting does not matter. Attackers with a run-up (clanrat spearmen, 4 lanes):
     7.5–23 / 38–51 / 79.5–83.5 / 115–130.5 / 178–204.5 s, simulator 10.5–13 / 38.5–40.5 / 82–84.5 / 121.5–123.5 /
     187–189.5 — agree; a held unit without an order never tires in either; one answering with an attack order at
-    contact: game 35 / 67 / 95 / 142.5 s, simulator 21 / 49 / 92.5 / 132. Also **open**: in the probe the General reached contact already
+    contact: game 35 / 67 / 95 / 142.5 s, simulator 21 / 49 / 92.5 / 132.
+    Counting per man - "+19 for a man within reach of an enemy, ready −7 for the rest, the unit's level the floor of
+    its men's mean level" - is **refuted** by the records: in the `reform`, `reform2`, `dmgmelee`, `armour`, `fatleave`
+    probes (both sides under an attack order from 3 m, the soldiers' places every second, 62 units in lanes;
+    `build/fatcharge/f1_records.py`) units with 2-55 % of their men within 2.5 m of an enemy pass the levels alike (p10-p90)
+    at 26-30 / 49-62 / 86-91 / 115-138 s; that count would give units with a small share in reach no level in 240 s (mean
+    error 66-97 s against 7.8 s for 13.7 a unit). So nearly all the men of a unit in a fight pay "melee", not only those
+    at the enemy. The floor of the men's mean level (it could explain the late first level and the slow 3 -> 4) cannot
+    be checked: the game gives the unit's level only (`fatigue_state`, CCO `FatigueState`), no points, no men.
+    Also **open**: in the probe the General reached contact already
     "active" (≥ 2800 points after 80 m at a run and the charge), the simulator with ~940: the charge (+34) seems
     to cost on the run-in before contact too.
 - **Perfect Vigour** units never tire (a WH3 bug leaves units that start tired stuck at that

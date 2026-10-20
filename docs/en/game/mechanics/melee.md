@@ -104,9 +104,14 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
   - Ours (melee core 2): a unit that comes into a fight moving (its melee clock has just started and it was
     moving) or whose charge lands strikes **once at once with every man in contact** (F × struck × hit chance ×
     blow, with the charge's full bonus), then at the usual rate. A unit standing under hold that an enemy
-    reaches strikes once at once too — with its men in contact facing the enemy (within `contact.front_deg` 45°
-    of its front; `contact.stand_first_strike`); the first strike is not cut by the hold share (0.5): every man
-    in reach swings. The probe: the charger loses in the first second 106–194 HP to braced spearmen, 120 to
+    reaches strikes once at once too — with its men in contact facing the enemy (within the bracing angle 80° of
+    its front, the database's `bracing_attack_angle`; `contact.stand_first_strike`, `contact.stand_first_angle`); the
+    first strike is not cut by the hold share (0.5): every man in reach swings. The angle is the `brace` probe's
+    (`build/charge-probe/runs/20261020-043108`, 1 battle, 6 lanes; clanrats charge held spearmen from 50 m at an angle to
+    their facing, health every 0.1 s): the clanrats lose in their first second of contact 166 HP head-on, 41 at 30°, 83
+    and 127 at 60°, 0 and 0 at 100° (their first blows there come 3.5–5 s later). At 60° the standing unit answers at
+    once, at 100° not; the old 45° (`front_deg`) left 60° out. The twin: at 60° 90 → 163 HP (game 105): the rectangle
+    strikes with its whole front at an oblique contact, the game at 60° with ~0.63 of the head-on strike — **open**. The probe: the charger loses in the first second 106–194 HP to braced spearmen, 120 to
     swordsmen, 60–131 to units given an attack order at contact, 0 to a target facing away; the struck side's
     first-second error 1.05 → 0.41. No fitted numbers.
   - The men of the steady front swing, not the opening wave's (`contact.first_strike_steady`): the swing was checked
@@ -272,6 +277,12 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
     the chase: stormvermin game 58 / 74, no charge 64 / 85, the charge on half the blows (`lab.json` `melee.chase_charge`
     0.53) 87 / 112; swordsmen after clanrats 51 / 23 → 91 / 23 → 119 / 30. The switch stays off until the chase share is
     measured again with the charge inside.
+  - Why a chase blow has the whole charge or none: a pursuer that comes close to a router (within max(4 m; 5 s ×
+    (charge speed − the router's speed)), the formations within 8 m - the database's `pursue_max_charge_time`,
+    `pursue_charge_max_unit_separation`) gets a new charge order on that man. The share of such blows depends on the
+    speeds (stormvermin after spearmen 0.53, wolf rats after swordsmen 22 of 31 = 0.71), so one `chase_charge` share for
+    all pairs does not fit. Turn it on together with a rule of who gets a new charge by the speeds and with the chase
+    share measured again on whole-battle recordings with that charge inside; off for now.
 - **Devastating Flanker** doubles the charge bonus against flank/rear
   (`devastating_flanker_charge_multiplier` 2); **Glorious Charge** (4.2.0, Empire/Kislev) doubles
   its duration and applies the flank morale penalty to the target. WH3 · fandom (snippets) · medium.
@@ -296,10 +307,22 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
   (3.9 s), [reflection thread][reflect] · high (3.9 s, ×2), the 0.7 link is our inference ·
   `charge_reflect_damage_multiplier` 2, `charge_reflect_min_charge_factor_threshold` 0.7.
   - Ours: by the database — a unit with reflection that is braced (standing: slower than 0.5 m/s,
-    `melee.braced_speed`) deals the charger ×2 damage within 80° of its front while the charger's charge
+    `melee.braced_speed`) deals the charger ×2 damage from any side (`melee.reflect_any_angle`) while the charger's charge
     factor is ≥ 0.7 (3.9 s); it gets no charge bonus of its own. These blows are not cut by the hold share
     (0.5) (`contact.hold_reflect_full`): the probe — braced spearmen 52 HP/s in 1–5 s after a charge = the rule
     ×2, held swordsmen without reflection 12 HP/s; Steam players: braced models strike whatever is adjacent.
+  - The angle does not matter — the `brace` probe: the spearmen's single blows on the clanrats (drops of their health in
+    0.1 s with no man killed) come in two sizes, 17–23 HP (one blow, the rule 21) and 41–45 (doubled). In the charge's
+    first seconds at 100° (the clanrats on the spearmen's flank) 7 of 8 blows are doubled (42 / 43 / 42 / 42 / 43,
+    42 / 41), later 21, as head-on and at 60°. The old rule (only within 80° of the front) gave single ones at 100°.
+    The twin: the clanrats at 100° lose at 0–2 / 1–4 / 4–10 s 16 / 23 / 37 → 54 / 75 / 37 HP (game 0 / 64 / 94); head-on
+    and at 30–60° unchanged. The 92-battle step replay with both rules (the first strike's angle and the reflection):
+    no change - the rectangle's melee damage 0.93 -> 0.93, routs 0.945 -> 0.944; the lab 1.35 -> 1.34, 1.16 -> 1.16
+    (`build/fatcharge/r92_*`).
+  - Bracing itself is counted per man in the game (standing, within 10 m of his place in the formation, his own
+    charge gone), and the bracing mass multiplier (1–4 by the formation's depth, ×2 for units with charge defence, at
+    most 10) changes body collisions only. Ours: braced = the unit slower than 0.5 m/s, no mass multiplier - the
+    simulator has no body collisions. Not checked: needs large units (cavalry, monsters).
 - Update 1.1 also fixed impact maths so the defender uses its own mass (it used the attacker's). WH3 ·
   CA notes via press · high.
 
@@ -324,6 +347,11 @@ splash. Collected from the web on 02.10.2026; the conventions (confidence, "Ours
   patch notes · high.
   - Ours: passports carry mass (General 600, Warlord 650, spearmen 100, Stormvermin 150); the
     simulator does not use it (no knockdowns, no collisions).
+  - Knockdowns in a matched fight (chance 0.05 × the mass ratio × (1 + 2 × charge), knocked back 0.1 × …, a lord on
+    infantry ~30 % knocked down) are not checked by a probe: the "lord swarm" recordings have the soldiers' places once
+    a second and without ids, a knocked man cannot be told from one stepping back; it needs a battle with places every
+    0.1 s for each kind of target (one lord an army - a battle a kind). Interrupting a blow by a blow (the striker's
+    mass at least 0.4 of the target's; infantry never interrupts a lord) - not checked either.
 
 ## Splash
 

@@ -294,6 +294,17 @@ Plans (each a few battles of 2-5 lanes; lanes swap places between battles):
           of 6 lanes (3 + 3). The slaves' hits a second per man within reach, the two targets' ratio: 13 / 8 = 1.63 a
           swing an interval, 12 / 7 = 1.71 with the chance less 1 point, 1.30 with a 0.5 s miss.
           Its table: python -m tools.nn.fighters.swingdata <run>.
+  fatrun  fatigue of moving and standing (no fight): clanrats go round an octagon of 40 m about their place for 180 s
+          (FATRUN run_s) and then stand where they are to the lane's end (mode 'laps'): rank 0 at a run with no enemy
+          within 300 m, rank 0 at a run with a standing enemy (Empire spearmen, never ordered) teleported 30 m ahead of
+          it (front to front) at the stop, rank 0 at a walk, rank 5 and rank 9 at a run - 1 battle of 5 lanes. The
+          fatigue state every 0.5 s: when each level comes while moving and when the unit is fresh again standing
+          (its table: build/fatcharge/fatrun.py);
+  brace   who answers a charge at once and the reflection's angle: clanrats charge held (never ordered) Empire spearmen
+          from 50 m beyond their edge at 0 / 30 / 60 / 100 degrees from the spearmen's facing (a_side; 60 and 100 twice)
+          - 1 battle of 6 lanes on a 3 x 2 grid, health every 0.1 s: what the clanrats lose in their first second of
+          contact (the first loss of either side) and the size of the spearmen's single blows (drops of the clanrats'
+          health) in the first 3.9 s against later (its table: build/fatcharge/brace.py, the twin brace_twin.py);
   pursuitfast  is every blow of a chase a charge (the database's pursuit_charge_bonus_modifier 1)? The pursuit plan's
           'order' lanes (fearless chasers attack at a run from 40 m a target with half its men killed that keeps its
           morale, routed by script 40 s after contact, chased 60 s) with health every 0.1 s: stormvermin v spearmen,
@@ -334,6 +345,7 @@ import argparse
 import functools
 import json
 import math
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -448,7 +460,14 @@ PLANS = ("charge", "hit", "move", "vv", "syg2", "pair", "fatleave", "fresh", "me
          "dmgmelee", "reengage", "retarget", "retarget2", "retarget3", "ratlingrt", "ratlingrt2",
          "leave", "skirmish", "skirmish2", "shootcontact",
          "holdmelee", "holdlord", "recontact", "pursuit", "passby", "armour", "walkpass", "walkpass2",
-         "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast") + UNIT_PLANS + MAGIC_PLANS
+         "sidecontact", "busycharge", "ratcharge", "swing", "crowd", "hitchance", "pursuitfast", "fatrun",
+         "brace") + UNIT_PLANS + MAGIC_PLANS
+# the fatrun plan (mode 'laps'): run_s moving round an octagon of laps_r m, then standing to max_s; the parked target
+# gap_m away (the next lane's 240 m: every other enemy 400+ m off); near_m: the near lane's enemy at the stop
+FATRUN = {"run_s": 180, "laps_r": 40, "max_s": 270, "gap_m": 350, "near_m": 30}
+# the brace plan: the approach angles (degrees from the target's facing), its places (3 x 2, 300 x 400 m apart)
+BRACE = {"sides": (0, 30, 60, 100, 60, 100), "gap_m": 50, "fight_s": 30,
+         "places": ((-300.0, -200.0), (0.0, -200.0), (300.0, -200.0), (-300.0, 200.0), (0.0, 200.0), (300.0, 200.0))}
 # the swing plan (the fighters lab's blow rate, tools/nn/fighters/swingdata.py): small units cut down to SWING_MEN men by
 # kill_number_of_men before the go, both attacking from 3 m; health and men every SWING_MS, the soldiers' places too -
 # each drop of a unit's health is a hit of one man (or a few at once): hits a second per man within reach
@@ -686,6 +705,20 @@ def battles(plan):
                         rout_at_s=PURSUIT["rout_at_s"], damage={"t": {"method": "kill", "share": 0.5}},
                         kind=f"{attacker}_{k}")
         return [[pf("svsh", "spear", 1), pf("wolfrat", "swords", 1), pf("svsh", "spear", 2), pf("wolfrat", "swords", 2)]]
+    if plan == "fatrun":
+        f = FATRUN
+
+        def fr(rank, kind, walk=False, near=None):
+            return lane("clanrat", "spear", "laps", "hold", gap_m=f["gap_m"], fight_s=f["max_s"], max_s=f["max_s"],
+                        run_s=f["run_s"], laps_r=f["laps_r"], laps_walk=walk, a_rank=rank, kind=kind,
+                        **({"t_near_m": near} if near else {}))
+        return [[fr(0, "run_far"), fr(0, "run_near", near=f["near_m"]), fr(0, "walk", walk=True), fr(5, "run_r5"),
+                 fr(9, "run_r9")]]
+    if plan == "brace":
+        g = BRACE
+        return [[lane("clanrat", "spear", "attack_run", "hold", gap_m=g["gap_m"], fight_s=g["fight_s"], a_side=side,
+                      place=pl, kind=f"a{side}_{k}")
+                 for k, (side, pl) in enumerate(zip(g["sides"], g["places"]), 1)]]
     if plan == "hitchance":
         def hc(target, k):
             return lane("slave", target, "attack_walk", "both", gap_m=3, fight_s=60, max_s=75, kind=f"{target}_{k}")
@@ -1236,8 +1269,10 @@ def run_config(plan, index):
         config["men_after_rout_s"] = ROUTMOB_MEN_S
     if plan in ("pursuit", "pursuitfast"):
         config["men_after_rout_s"] = PURSUIT["after_rout_s"]
-    if plan == "pursuitfast":
+    if plan in ("pursuitfast", "brace"):
         config.update(tick_ms=SWING_MS, men_ms=500)
+    if plan == "fatrun":
+        config.update(men_after_s=0, men_near_m=0)
     if plan in MAGIC_PLANS:
         from tools.nn import magic_probe
         config.update(magic_probe.config_extra(index))
@@ -1246,10 +1281,16 @@ def run_config(plan, index):
 
 
 def write_scenario(plan, index, path=None):
-    _, _, arena = run_config(plan, index)
+    config, _, arena = run_config(plan, index)
     path = path or ROOT / f"charge_probe_{plan}_{index}.xml"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(nn_scenario.scenario_xml(arena, "enemy", 3600), encoding="utf-8", newline="\n")
+    text = nn_scenario.scenario_xml(arena, "enemy", 3600)
+    for ln in config["lanes"]:
+        if ln.get("a_rank"):                 # experience: the attacker's rank (0-9; the fatrun plan)
+            text, n = re.subn(rf'(script_name="{re.escape(ln["attacker"])}">.*?<unit_experience level=")0("/>)',
+                              rf"\g<1>{int(ln['a_rank'])}\g<2>", text, count=1, flags=re.S)
+            assert n == 1, ln["attacker"]
+    path.write_text(text, encoding="utf-8", newline="\n")
     return path
 
 

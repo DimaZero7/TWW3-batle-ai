@@ -80,6 +80,9 @@ def gates(u, params, permit, pw, charge_now, incidental=None):
     speed = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)
     braced = (u["reflect"] & (speed < cal["braced_speed"]))[:, :, None]
     facing = pw["rel_i"].abs() <= R["bracing_attack_angle"] * geometry.DEG
+    if cal.get("reflect_any_angle"):
+        # (sim.json melee.reflect_any_angle) from any side (the brace probe; the simulator's melee.py)
+        facing = torch.ones_like(facing)
     charging_j = (charge_now >= R["charge_reflect_min_charge_factor_threshold"])[:, None, :]
     on = braced & facing & charging_j & ~routing_j
     reflect = torch.where(on, torch.full_like(g, float(R["charge_reflect_damage_multiplier"])), torch.ones_like(g))

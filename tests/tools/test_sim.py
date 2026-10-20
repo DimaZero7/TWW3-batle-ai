@@ -2454,6 +2454,10 @@ def test_idle_rest_needs_no_standing_enemy_near():
 
 @pytest.mark.parametrize("gap,near", [(10, True), (200, False)])
 def test_battle_passes_run_flag_routing_and_enemy_near_to_fatigue(monkeypatch, gap, near):
+    # (the distance rule's plumbing: fatigue.calibration.ready_enemy_m 80; production has it at 0, the fatrun probe)
+    import copy
+    params = copy.deepcopy(P)
+    params.sim["fatigue"]["calibration"]["ready_enemy_m"] = 80
     st = face_off(SPEAR, SLAVE, gap=gap)
     seen = {}
     monkeypatch.setattr(fatigue, "step", lambda u, activity, params, dt: seen.update(activity))
@@ -2461,7 +2465,7 @@ def test_battle_passes_run_flag_routing_and_enemy_near_to_fatigue(monkeypatch, g
     cmd = O.hold(st.B, st.N)
     cmd.kind[0, 0] = O.MOVE
     cmd.x[0, 0], cmd.z[0, 0], cmd.run[0, 0] = st.u["x"][0, 0] - 30, st.u["z"][0, 0], True
-    battle.step(st, cmd, P)
+    battle.step(st, cmd, params)
     assert bool(seen["run_order"][0, 0]) and not bool(seen["run_order"][0, st.N // 2])
     assert not bool(seen["routing"][0, 0])
     if near:   # far from every standing enemy a router may rally at once
@@ -2469,7 +2473,7 @@ def test_battle_passes_run_flag_routing_and_enemy_near_to_fatigue(monkeypatch, g
     # a routing enemy is not a standing enemy
     assert not bool(seen["enemy_near"][0, 0])
     st.u["r"][0, st.N // 2] = False
-    battle.step(st, O.hold(st.B, st.N), P)
+    battle.step(st, O.hold(st.B, st.N), params)
     assert bool(seen["enemy_near"][0, 0]) is near
 
 

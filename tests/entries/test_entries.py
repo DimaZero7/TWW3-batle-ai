@@ -1683,6 +1683,16 @@ class TestChargeProbe:
         x, z = lua.eval(cp + ".shuttle_point(10, 0, 0, 1, 100)")
         assert (round(x, 6), round(z, 6)) == (10, -100)
         assert lua.eval(cp + ".shuttle_point(10, 0, 0, 2, 100)") == (10, 0)
+        # the fatrun plan's octagon: corner 1 straight ahead, corner 3 to the right (+x for bearing 0), corner 9 = 1
+        x, z = lua.eval(cp + ".lap_point(0, 0, 0, 3, 40)")
+        assert (round(x, 6), round(z, 6)) == (40, 0)
+        assert [round(v, 6) for v in lua.eval(cp + ".lap_point(5, 5, 180, 9, 40)")] == [5, -35]
+        # the brace plan: the attacker at 60 deg from the target's facing, gap_m beyond the edge on that ray
+        L = lua.eval(cp + ".layout")(lua.table_from({"x": 0, "z": 0, "gap_m": 50, "t_depth": 10, "a_depth": 16,
+                                                     "t_width": 30, "a_side": 60}))
+        d = 5 / 0.5 + 50 + 8                       # the front edge on the ray at 10 m, + gap, + half the depth
+        assert round(L["ax"], 3) == round(d * 0.8660254, 3) and round(L["az"], 3) == round(-5 + d * 0.5, 3)
+        assert L["ab"] == 240 and L["tb"] == 0
         step = lua.eval(cp + ".reengage_step")
         lane = lua.table_from({"part_after_s": 150, "part_s": 15})
         assert step("in", 159000, 10000, None, lane) == "in" and step("in", 160000, 10000, None, lane) == "out"

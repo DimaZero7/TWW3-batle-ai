@@ -13,7 +13,9 @@ melee -1.2 with the attack order / -4.9 without (measured, build/fatigue2); a si
 combat while he strikes and rests as a formation while he does not (calibration.single_melee; missing: he moves or
 rests at idle). A move costs by its order's run flag (run +4, walk -1), a routing unit +4; shooting 11.4 a tick on the seconds
 it shoots (measured, build/fatigue2; aiming stands ready); a standing unit
-rests at idle with no standing enemy within ready_enemy_m, else stands ready. OFF is the legacy
+rests at idle with no standing enemy within ready_enemy_m, else stands ready (ready_enemy_m 0: no such rule - a unit
+under an attack order or aiming stands ready, any other standing unit rests at idle). A ranked unit (u["rank"], absent
+in the simulator for now) adds calibration.rank's points a tick to every activity (the database). OFF is the legacy
 model: 5 ticks/s, ready recovery, every melee +19. Tired states cost morale (morale.py) and scale
 speed, melee attack and defence, armour, charge bonus, AP damage and reload by the database's
 unit_fatigue_effects_tables (effects(); config/nn/sim.json fatigue.effects).
@@ -101,6 +103,13 @@ def step(u, activity, params, dt):
     else:
         rate = torch.where(melee, F["combat"], rate)
     rate = torch.where(charging, F["charging"], rate)
+    if enabled and trial.get("rank") and "rank" in u:
+        # A ranked unit: the database's unit_stats_land_experience_bonuses gives each rank 0-9 points a tick on every
+        # activity's rate (calibration.rank: 0 / -1 / -2 / -3 / -4 from ranks 0 / 3 / 5 / 7 / 9; rank 9 never tires
+        # running and rests at -22). The fatrun probe: rank 5 first active 170.5 s into a run (rank 0 78 / 83.5 s), rank 9
+        # fresh all 180 s (fatigue.calibration.rank_why). The simulator's units carry no rank yet (u["rank"] absent).
+        table = torch.tensor([float(v) for v in trial["rank"]], dtype=rate.dtype, device=rate.device)
+        rate = rate + table[u["rank"].long().clamp(0, len(table) - 1)]
     # Perfect Vigour (attribute fatigue_immune, an innate effect): never tires
     if "fatigue_immune" in u:
         rate = torch.where(u["fatigue_immune"], torch.clamp(rate, max=0.0), rate)

@@ -128,8 +128,15 @@ or `tools/nn/sim` changes the simulator version (`tools/nn/train/version.py`).
 - **Lords:** as fragile as in the game (no own aura, always "losing" in melee), a blow split over 4 men,
   the lord duel by the game's formula, abilities (the game's AI uses them by the measured rule), "Wounds".
 - **Fatigue** by the database (10 ticks a second, melee tires under an attack order; the charge +34 on the sprint in,
-  no surcharge after the blow; in melee without an attack — ready, a lord tiring as in an attack while he strikes — measured; shooting 11.4 — measured), units' innate
-  effects, turning at the database's turn rate, formation by the database's template.
+  no surcharge after the blow; in melee without an attack — ready, a lord tiring as in an attack while he strikes — measured; shooting 11.4 — measured;
+  a standing unit rests at −18, an enemy near gives no readiness by itself — the `fatrun` probe and 1150 recorded
+  battles; a unit's rank −1…−4 a tick by the database — confirmed by the probe, but the simulator has no ranks), units' innate
+  effects, turning at the database's turn rate, formation by the database's template. Counting fatigue "per man in
+  contact" is refuted by the recordings: units with 2–55 % of their men at the enemy tire alike
+  ([fatigue](game/mechanics/fatigue.md)).
+- **Bracing** (the `brace` probe): a standing unit answers a charger at once within 80° of its facing (was 45°), the
+  charge reflection ×2 from any side (at 100° the spearmen's blows are doubled); the 92-battle replay unchanged
+  ([melee](game/mechanics/melee.md#bracing-and-charge-defence)).
 - **Contact effects and bursts** ([details](training/simulator.md#contact-effects-and-the-ratling-guns-burst)):
   poison, the censer's contagion, the Ratling Gun's suppressing fire - the database phase's stats on the unit hit for
   10 s from the last hit, different ones stack, friendly fire lays none; the Ratling Gun - 18 bullets a volley at 4 a

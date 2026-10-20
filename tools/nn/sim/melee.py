@@ -475,6 +475,11 @@ def strikes(u, pw, contact, params, charge_now, first=False, ran=None):
     speed = torch.sqrt(u["vx"] ** 2 + u["vz"] ** 2)
     braced = (u["reflect"] & (speed < cal["braced_speed"]))[:, :, None]
     facing = pw["rel_i"].abs() <= B["bracing_attack_angle"] * geometry.DEG
+    if cal.get("reflect_any_angle"):
+        # (melee.reflect_any_angle) the reflection asks only that the striker is braced and the charger's charge is on,
+        # not where the charger came from: the brace probe - spearmen's single blows on clanrats that charged them at
+        # 100 deg (their flank) 41-43 HP in the charge's first seconds (7 of 8), 17-23 later (one blow 21); melee.reflect_why
+        facing = torch.ones_like(facing)
     charging_j = (charge_now >= B["charge_reflect_min_charge_factor_threshold"])[:, None, :]
     reflect = torch.where(braced & facing & charging_j & ~routing_j,
                           torch.full_like(F, float(B["charge_reflect_damage_multiplier"])), torch.ones_like(F))

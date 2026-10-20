@@ -240,7 +240,8 @@ class TestCharge:
         assert rate(SPEAR, 0.70) > 1.3 * base
         assert rate(SPEAR, 0.69) == pytest.approx(base, rel=1e-5)  # 13 x 0.3 = 3.9 s of the charge
         assert rate(SPEAR, 1.0, moving=True) == pytest.approx(base, rel=1e-5)
-        assert rate(SPEAR, 1.0, behind=True) == pytest.approx(rate(SPEAR, 0.0, behind=True), rel=1e-5)
+        # from any side (melee.reflect_any_angle, the brace probe: doubled blows on a charge into the flank)
+        assert rate(SPEAR, 1.0, behind=True) > 1.3 * rate(SPEAR, 0.0, behind=True)
         assert rate(SLAVE, 1.0) == pytest.approx(rate(SLAVE, 0.0), rel=1e-5)   # no charge_reflection
         st, H = run_in(CLANRATS, SPEAR)
         assert float(st.u["charge"][0, 0]) == 0.0                  # the braced unit gets no charge of its own

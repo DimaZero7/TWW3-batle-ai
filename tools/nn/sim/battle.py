@@ -431,7 +431,13 @@ def step(st, orders, params=None, dt=None):
         # Feature Focus #2: the interval runs after a blow); the probe: a charger lost 106-194 HP in the first second
         # to braced spearmen, 120 to swordsmen, 0 to a target facing away
         stand = fresh & (speed <= 0.3) & (kind == O.HOLD) & ~opened
-        facing = pw["rel_i"].abs() <= float(cal["contact"]["front_deg"]) * geometry.DEG
+        deg = float(cal["contact"]["front_deg"])
+        if cal["contact"].get("stand_first_angle") == "bracing":
+            # (contact.stand_first_angle "bracing") within the database's bracing_attack_angle (80 deg) of its front, not
+            # front_deg: the brace probe - clanrats charging held spearmen at 60 deg lost 83 / 127 HP in their first
+            # second (in front 166, at 100 deg 0 / 0); contact.stand_first_why
+            deg = float(params.battle["bracing_attack_angle"])
+        facing = pw["rel_i"].abs() <= deg * geometry.DEG
         first_pair = first_pair | (stand[:, :, None] & facing)
     hp_melee = rate * dt + torch.where(first_pair, swing, torch.zeros_like(swing))
     # A unit leaving melee (held or walking out) still in contact takes contact.leave_taken of the blows: melee
