@@ -26,8 +26,8 @@ class MissionKind:
 # Every mission kind, in one place: the network has GeneralConfig.kinds of them (the first kinds of this list; its
 # kind table's rows are these numbers). A new kind goes at the end (the trained rows keep their numbers).
 # the task masks' parts on by default (taskmask.PARTS; docs/en/training/general.md "Task masks": the ablation at minute 0
-# of g13 - withdraw_attack, attack_target and shoot_* cost the rating 0.2-1.2 and are off)
-MASK_PARTS = "withdraw_move,attack_move,hold_target,hold_move,screen_move,shoot_group"
+# of g13 - withdraw_attack, attack_target and shoot_* cost the rating 0.2-1.2 and are off) and the volley lock shoot_volley
+MASK_PARTS = "withdraw_move,attack_move,hold_target,hold_move,screen_move,shoot_group,shoot_volley"
 
 MISSION_KINDS = (
     MissionKind(0, "attack", ("enemy",), "close on the target group and fight it in melee"),
@@ -91,7 +91,8 @@ class GeneralConfig:
     #                            executor computes what it did to the bit (a checkpoint saved before it: True)
     task_mask_parts: str = MASK_PARTS  # ... which of the masks (taskmask.PARTS, a comma list; "all" every one, "none"):
     #                            withdraw_attack, withdraw_move, shoot_melee, shoot_target, attack_target, attack_move,
-    #                            hold_target, hold_move, screen_move (the executor's) and shoot_group (the general's);
+    #                            hold_target, hold_move, screen_move, shoot_volley (the executor's) and shoot_group
+    #                            (the general's);
     #                            the default: those that cost nothing at minute 0 (docs "Task masks": the ablation)
     shoot_share: float = 0.5   # ... "shoot" for a group whose shooters are at least this share of its units (net.shoot_ok;
     #                            "at least one" let 61-66 % of the units under shoot be infantry without missiles)

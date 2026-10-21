@@ -18,9 +18,18 @@ on the chained heads' parts (tools/nn/model/chain.py: kind -> target -> sector -
               the attack only at enemies within HOLD_FIGHT x the reach of the point (where the measure is 0 beyond)
     screen    the sectors near the segment from the target group's centre to the seen enemy nearest to it (within
               mission.SCREEN_M of it, between its ends)
+    shoot     the volley lock (shoot_volley; volley_lock(), Runtime.task keeps its clock): a shooter that fires or aims
+              (the token's firing: the simulator's flag and the game's IsFiringMissiles are on from the moment a
+              standing shooter has a target in range and aims at it) only keeps its order - no move, no other target,
+              no hold - from the first decision it fires until a volley is seen (the token's volley_ready: the ammo
+              fell at this decision), or at most aim + VOLLEY_SLACK x the passport's reload (the game's database) +
+              one decision; the decision of the volley is free (an order there costs least: the men reload on), then
+              the next cycle locks again. Not in melee, nor with a seen enemy within VOLLEY_FREE_M (the unit may step
+              back or turn): every order is a new aim in the game and in the simulator (missile.aim_reset_on_order)
 Each piece is a part (PARTS; GeneralConfig.task_mask_parts, run.py --general-task-mask-parts); by default only those
-that cost nothing at minute 0 (config.MASK_PARTS: the movement ones and the general's shoot_group - the ones that forbid
-fighting, withdraw_attack, attack_target, shoot_*, cost g13 0.2-1.2 of the rating; docs "Task masks").
+that cost nothing at minute 0 (config.MASK_PARTS: the movement ones, the general's shoot_group and the volley lock -
+the ones that forbid fighting, withdraw_attack, attack_target, shoot_melee/target, cost g13 0.2-1.2 of the rating;
+docs "Task masks").
 A sector counts by its centre, with half its diagonal of slack (a 100 m sector: 71 m): the fine cell is free inside it.
 The target pointer is shared with the spells (chain.py): a target mask limits a unit's spells the same way.
 
@@ -30,8 +39,8 @@ shoot, whose target group not seen leaves the targets free (counted as a fall-ba
 
 The task's numbers per unit come with the observation (Runtime.task: "task_mk" the mission kind or -1, "task_pt" the
 mission's point in the side's frame (m), "task_reach" its reach (0: no point), "task_tg" the target index, "task_main"
-every slot's group number), so the rollout and the update compute the same masks from the stored decision (PPO's old
-log-probability is of the masked choice). The game (tools/nn/companion) gets them the same way.
+every slot's group number, "task_lock" the volley lock), so the rollout and the update compute the same masks from the
+stored decision (PPO's old log-probability is of the masked choice). The game (tools/nn/companion) gets them the same way.
 """
 import math
 
@@ -49,7 +58,15 @@ KIND = {k.name: k.index for k in gconfig.MISSION_KINDS}
 ATTACK_M = 150.0         # attack / flank: the sectors may come up to this far from the target group's centre at least
 HOLD_FIGHT = 3.0         # hold: the attack only at enemies within this x the reach of the point (the measure's 0)
 AWAY_M = gmission.AWAY_M  # withdraw: towards the point only this far from the nearest enemy
-KEYS = ("task_mk", "task_pt", "task_reach", "task_tg", "task_main")
+KEYS = ("task_mk", "task_pt", "task_reach", "task_tg", "task_main", "task_lock")
+# the volley lock (shoot_volley, volley_lock()): a volley seen at this decision (volley_ready x reload under this, s)
+# frees the decision; the simulator's men load fully only after ~1.1-1.3x the passport's reload (observation.py VOLLEY):
+# the lock's longest cycle aim + VOLLEY_SLACK x reload + one decision (a shooter that aims and never fires is let go);
+# a seen enemy within VOLLEY_FREE_M of the unit (centre to centre) frees it (a mask's rule, not a game number)
+VOLLEY_OPEN_S = 0.5
+VOLLEY_SLACK = 1.3
+VOLLEY_FREE_M = 50.0
+VOLLEY_STEP_S = 1.0
 # the masks' parts (GeneralConfig.task_mask_parts, run.py --general-task-mask-parts): each one alone switchable
 PARTS = ("withdraw_attack",   # withdraw: no attack (nor keep of an attack in force)
          "withdraw_move",     # withdraw: the sectors away from the nearest enemy (or towards the point)
@@ -60,7 +77,8 @@ PARTS = ("withdraw_attack",   # withdraw: no attack (nor keep of an attack in fo
          "hold_target",       # hold: the attack only at enemies near the point
          "hold_move",         # hold: the sectors within the point's reach
          "screen_move",       # screen: the sectors near the segment
-         "shoot_group")       # the general: "shoot" only for a group of shooters (net.General.shoot_ok)
+         "shoot_group",       # the general: "shoot" only for a group of shooters (net.General.shoot_ok)
+         "shoot_volley")      # shoot: a firing shooter only keeps its order until its volley (volley_lock)
 
 
 def parse_parts(text):
@@ -82,16 +100,74 @@ def parts_of(gcfg):
     return parse_parts(getattr(gcfg, "task_mask_parts", "all"))
 
 
-def fields(kind_u, point, reach, target_u, main, on):
+def fields(kind_u, point, reach, target_u, main, on, lock=None):
     """The task's numbers of the observation (module doc): kind_u [R, N] the unit's group's mission kind, point [R, N, 2]
     its point in the side's frame (m), reach [R, N] (0: no point), target_u [R, N] the target index, main [R, N] the
-    plan's group numbers of every slot, on [R, N] the units with a task."""
+    plan's group numbers of every slot, on [R, N] the units with a task; lock [R, N] the volley lock (volley_lock();
+    None: nobody)."""
     small = torch.int8
+    lock = torch.zeros_like(on) if lock is None else lock & on
     return {"task_mk": torch.where(on, kind_u, torch.full_like(kind_u, -1)).to(small),
             "task_pt": torch.where(on[..., None], torch.nan_to_num(point), torch.zeros_like(point)).float(),
             "task_reach": torch.where(on, reach, torch.zeros_like(reach)).float(),
             "task_tg": torch.where(on, target_u, torch.full_like(target_u, -1)).to(small),
-            "task_main": main.to(small)}
+            "task_main": main.to(small), "task_lock": lock.bool()}
+
+
+def _reload_column():
+    """The token's column of the passport's reload_s / RELOAD_SCALE (passport.features: found by its value, not its
+    place)."""
+    from tools.nn.model import passport
+    base = {"men": 1, "hp_total": 1, "hp_per_man": 1, "mass": 1, "armour": 0, "leadership": 0, "multiplayer_cost": 0,
+            "caste": "", "size": "", "speed": {"walk": 0, "run": 0, "charge": 0},
+            "melee": {"attack": 0, "defence": 0, "charge_bonus": 0, "damage": 0, "ap_damage": 0, "bonus_v_large": 0,
+                      "bonus_v_infantry": 0, "attack_interval_s": 0, "splash_max_attacks": 1},
+            "shield": {"missile_block_chance": 0}}
+    a = passport.features(dict(base, missile={"range_m": 100, "reload_s": 0}))
+    b = passport.features(dict(base, missile={"range_m": 100, "reload_s": RELOAD_SCALE}))
+    (i,) = [k for k in range(len(a)) if a[k] != b[k]]
+    assert abs(b[i] - 1.0) < 1e-6, "passport.features: the reload's scale changed"
+    return ob.INDEX[f"passport_{i}"]
+
+
+RELOAD_SCALE = 20.0
+RELOAD_COL = _reload_column()
+
+
+def cycle_s(tok):
+    """([.., N] the passport's reload_s, [.., N] the volley lock's longest cycle, s) of the tokens [.., N, TOKEN]: aim
+    (the larger of the first aim and the silence after a new target, passport.aim) + VOLLEY_SLACK x reload + one
+    decision."""
+    from tools.nn.model import passport
+    reload = tok[..., RELOAD_COL].float() * RELOAD_SCALE
+    aim = torch.maximum(tok[..., ob.INDEX["aim_first"]].float(), tok[..., ob.INDEX["aim_retarget"]].float())
+    return reload, aim * passport.AIM_S + VOLLEY_SLACK * reload + VOLLEY_STEP_S
+
+
+@torch.no_grad()
+def volley_lock(obs, shoot, t, t0):
+    """(lock [R, N], t0 [R, N]) the volley lock (module doc) at the battle time t [R] (s) of the observation obs (pos,
+    tokens, ctrl, target_ok) for the units under "shoot" (shoot [R, N]), from the clock t0 [R, N] (when the unit's
+    lock cycle began, -1: none; Runtime keeps it). Free at a volley seen now (volley_ready x reload <= VOLLEY_OPEN_S,
+    after the cycle began) or after cycle_s(); a new cycle begins with that decision."""
+    tok = obs["tokens"]
+    t = t.float()[:, None].expand_as(t0)
+    reload, longest = cycle_s(tok)
+    shooter = (tok[..., ob.INDEX["ammo"]].float() > 0) & (reload > 0)
+    firing = tok[..., ob.INDEX["firing"]].float() > 0.5
+    melee = tok[..., ob.INDEX["melee"]].float() > 0.5
+    pos = obs["pos"].float() * ob.POS
+    px, pz = pos[..., 0], pos[..., 1]
+    D = _d(px[:, :, None], pz[:, :, None], px[:, None, :], pz[:, None, :])
+    near = (obs["target_ok"][:, None, :] & (D <= VOLLEY_FREE_M)).any(-1)
+    cond = shoot & obs["ctrl"] & shooter & firing & ~melee & ~near
+    begun = t0 >= 0
+    since = tok[..., ob.INDEX["volley_ready"]].float() * reload
+    volley = begun & (t > t0) & (since <= VOLLEY_OPEN_S)
+    free = volley | (begun & (t - t0 >= longest))
+    lock = cond & ~free
+    t0 = torch.where(~cond, torch.full_like(t0, -1.0), torch.where(free | ~begun, t, t0))
+    return lock, t0
 
 
 def has(obs):
@@ -130,8 +206,10 @@ def masks(cfg, obs, sec_ok, parts=None):
                               is_k("withdraw"))
     use = (lambda *names: any(n in P for n in names))
     att, hold, scr = att & use("attack_target", "attack_move"), hold & use("hold_target", "hold_move"), scr & use("screen_move")
+    lk = obs.get("task_lock")
+    vl = sh & ("shoot_volley" in P) & (lk.bool() if lk is not None else torch.zeros_like(sh))   # the volley lock
     sh, wd = sh & use("shoot_melee", "shoot_target"), wd & use("withdraw_attack", "withdraw_move")
-    on = att | hold | scr | sh | wd                                           # the units under a part in force
+    on = att | hold | scr | sh | wd | vl                                      # the units under a part in force
     big = torch.full(px.shape + px.shape[-1:], 1e9, device=px.device)                          # [B, N, N]
     # targets: the target group's units (attack, flank, a shooter's shoot); hold: the enemies near the point
     member = (main[:, None, :] == tg[:, :, None]) & (tg[:, :, None] >= 0) & foe[:, None, :]       # [B, N (i), N (j)]
@@ -147,6 +225,7 @@ def masks(cfg, obs, sec_ok, parts=None):
     K = len(KINDS)
     ar = torch.arange(K, device=mk.device)
     kind = ~(((ar == ATTACK) & no_attack[..., None]) | ((ar == KEEP) & (no_attack & att_now & free)[..., None]))
+    kind = torch.where(vl[..., None], ar == KEEP, kind)                        # the volley lock: only keep
     # sectors (their centres in the side's frame, with half a diagonal of slack)
     c = sc.centres(cfg, mk.device)
     cx, cz = c[:, 0], c[:, 1]

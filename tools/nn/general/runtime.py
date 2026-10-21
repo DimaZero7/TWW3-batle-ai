@@ -76,7 +76,7 @@ COUNTS = ("plans", "plans_deploy", "plans_replan", "groups_own", "groups_enemy",
           "distinct_groups", "churn_units", "churn_moved", "kind_kept_groups", "kind_switched", "target_own",
           "target_enemy", "target_tile", "exec_bonus", "exec_bonus_abs", "exec_units", "pairs_ok", "pairs_all",
           "teach_plans", "battle_min", "shoot_groups", "shoot_noshooter", "shoot_units", "shoot_units_nomissile",
-          "mask_free", "mask_units", "mask_fallback")
+          "mask_free", "mask_units", "mask_fallback", "volley_lock", "fire_shooters", "fire_on")
 # a group's behaviour during a plan (Runtime.behaviour): its units' order kinds' shares, the run share, its centre's
 # displacement forward and sideways from the side's facing at the plan's start (/ 100 m, within +-5), its centre's path
 # (/ 100 m, at most 10), the plan's length (decisions / 60)
@@ -155,6 +155,7 @@ class Runtime:
         self.learner = None                       # the learner's actor (Battles.step sets it)
         self.r = self._rows(2 * self.B)
         self.b = self._battles(self.B)
+        self.t_now = None                         # the battles' time [B] at this decision (replan; the volley lock)
         self.pending = torch.ones(self.B, dtype=torch.bool, device=self.dev)   # the first start's deployment
         self.table, self.tix = None, torch.full((2 * self.B,), -1, dtype=torch.long, device=self.dev)
         self.ready = []
@@ -193,7 +194,7 @@ class Runtime:
              "b_fwd": z(R, 2), "b_fwd_ok": z(R, dt=Bo),
              "kind_logp": z(R, G, self.gcfg.kinds), "fresh": z(R, dt=Bo), "teach": z(R, dt=Bo),
              "new": z(R, dt=Bo), "teach_use": z(R, G, dt=Bo), "x_sum": z(R, G), "x_n": z(R, G),
-             "fire_t0": z(R) - 1.0}
+             "fire_t0": z(R) - 1.0, "vl_t0": z(R, N) - 1.0, "vl_at": z(R) - 1.0, "vl_lock": z(R, N, dt=Bo)}
         from tools.nn.general import army_input as ai
         r.update({"in/num": z(R, N, ai.SIZE), "in/lab": z(R, N, len(ai.LABELS), dt=L),
                   "in/pos": z(R, N, len(POS_FEATURES)), "in/prev_main": z(R, N, dt=L) - 1, "in/on": z(R, N, dt=Bo),
@@ -540,6 +541,7 @@ class Runtime:
             self._draw_teach(idx)                 # --general-teacher P: the battles whose learner plans it makes
         rows = torch.cat([idx, idx + self.B])
         self.r["fire_t0"][rows] = -1.0            # (the teacher's clock: our shooters' first volley)
+        self.r["vl_t0"][rows], self.r["vl_at"][rows], self.r["vl_lock"][rows] = -1.0, -1.0, False   # (the volley lock)
         self.r["has"][rows] = False
         self.r["owner"][rows] = -1
         self.tix[rows] = -1
@@ -560,7 +562,9 @@ class Runtime:
         return True
 
     def replan(self, env, obs):
-        """The rows whose plan is due (module doc) plan again on the observation obs (the stacked [2B] dict)."""
+        """The rows whose plan is due (module doc) plan again on the observation obs (the stacked [2B] dict). Notes the
+        battles' time (t_now: the volley lock's clock in task(); every decision calls this before the executor)."""
+        self.t_now = env.st.t.float().to(self.dev)
         if self.frozen:
             return
         r = self.r
@@ -805,9 +809,14 @@ class Runtime:
         return out
 
     # --- the executor's input ---------------------------------------------------------------------------------------
-    def task(self, rows, obs_r, fr):
+    def task(self, rows, obs_r, fr, t=None):
         """{"task" [R, N, task_dim], "task_on" [R, N], "task_geo" [R, N, 4], "task_plan" [R]} of rows [R] on their
-        observation obs_r (the rows' dict) and frame fr (module doc)."""
+        observation obs_r (the rows' dict) and frame fr (module doc); with the task masks also their numbers
+        (taskmask.fields) - the volley lock's from the battle time t [R] (s; None: the time replan() noted, none
+        before: no lock): its clock per unit (vl_t0) is kept here, and a second call at the same time gives the first
+        one's lock (the past slots' rows)."""
+        if t is None and getattr(self, "t_now", None) is not None and self.t_now.shape[0] == self.B:
+            t = self.t_now[rows % self.B]
         r, G, cfg = self.r, self.G, self.gcfg
         C = cfg.target_grid ** 2
         has = r["has"][rows]
@@ -822,15 +831,15 @@ class Runtime:
         n = w.sum(1)                                                                 # [R, 2G]
         cent = torch.einsum("rng,rnc->rgc", w, pos) / n.clamp(min=1)[..., None]
         cent_ok = n > 0
-        t = r["target"][rows]
-        is_g = t < 2 * G
-        gi = t.clamp(max=2 * G - 1)
+        t_g = r["target"][rows]
+        is_g = t_g < 2 * G
+        gi = t_g.clamp(max=2 * G - 1)
         gp = cent.gather(1, gi[..., None].expand(-1, -1, 2))
         gok = cent_ok.gather(1, gi)
         tw = r["tgt"][rows]                                                          # [R, G, 2] world (a tile)
         tf, tl = fr.point(tw[..., 0], tw[..., 1])
         tp = torch.stack([tf, tl], -1)
-        tok_t = torch.isfinite(tp).all(-1) & (t >= 2 * G) & (t < 2 * G + C)       # a coarse tile
+        tok_t = torch.isfinite(tp).all(-1) & (t_g >= 2 * G) & (t_g < 2 * G + C)   # a coarse tile
         p = torch.where(is_g[..., None], gp, torch.nan_to_num(tp))
         ok = torch.where(is_g, gok, tok_t)                                           # [R, G]
         mi = main.clamp(0, G - 1)
@@ -858,9 +867,25 @@ class Runtime:
             half = self.mcfg.grid_half / cfg.target_grid                 # a coarse tile's half side (mission.py)
             reach = torch.where(is_tile_u, torch.full_like(dist, half), torch.full_like(dist, gmission.GROUP_M))
             reach = torch.where(uok, reach, torch.zeros_like(reach))
-            out.update(gtaskmask.fields(r["kind"][rows].gather(1, mi), up, reach, t.gather(1, mi), main, on))
+            kind_u = r["kind"][rows].gather(1, mi)
+            lock = None if t is None else self._volley(rows, obs_r, on & (kind_u == gtaskmask.KIND["shoot"]), t)
+            out.update(gtaskmask.fields(kind_u, up, reach, t_g.gather(1, mi), main, on, lock))
             self._count_masks(rows, dict(obs_r, **out))
         return out
+
+    def _volley(self, rows, obs, shoot, t):
+        """The volley lock [R, N] of rows at the battle time t [R] (taskmask.volley_lock; its clock kept in vl_t0; a
+        battle whose time went back - a restart - begins without one)."""
+        r = self.r
+        t = t.float().to(self.dev)
+        at = r["vl_at"][rows]
+        same = (at == t)[:, None]
+        t0 = torch.where((t < at)[:, None], torch.full_like(r["vl_t0"][rows], -1.0), r["vl_t0"][rows])
+        lock, t0 = gtaskmask.volley_lock(obs, shoot, t, t0)
+        lock = torch.where(same, r["vl_lock"][rows], lock)
+        r["vl_t0"][rows] = torch.where(same, r["vl_t0"][rows], t0)
+        r["vl_lock"][rows], r["vl_at"][rows] = lock, t
+        return lock
 
     def _count_masks(self, rows, obs):
         """The log's counters of the task's masks (the learner's rows): the units deciding, those under a mask, those
@@ -877,6 +902,14 @@ class Runtime:
         self.stats.add("mask_free", free.sum())
         self.stats.add("mask_units", (m["on"] & free).sum())
         self.stats.add("mask_fallback", (fb & free).sum())
+        if "shoot_volley" in gtaskmask.parts_of(self.gcfg):
+            self.stats.add("volley_lock", (obs["task_lock"] & free).sum())
+        # the shooters' firing share (the token's flag: aiming or shooting) of our units that take orders with missiles
+        tok = obs["tokens"]
+        reload, _ = gtaskmask.cycle_s(tok)
+        sh = obs["ctrl"] & obs["own"] & mine[:, None] & (tok[..., ob.INDEX["ammo"]].float() > 0) & (reload > 0)
+        self.stats.add("fire_shooters", sh.sum())
+        self.stats.add("fire_on", (sh & (tok[..., ob.INDEX["firing"]].float() > 0.5)).sum())
 
     # --- chunks (rollout.collect) -----------------------------------------------------------------------------------
     @torch.no_grad()
@@ -922,6 +955,7 @@ class Runtime:
         self.b = {k: v[keep] for k, v in self.b.items()}
         self.tix = self.tix[two]
         self.bonus = self.bonus[two]
+        self.t_now = None
         if self.v_now is not None:
             self.v_now = self.v_now[two]
         if self.pending is not None:
@@ -954,6 +988,7 @@ class Runtime:
         new.ready, new.table, new.pending, new.teach_ready = [], None, None, []
         new.v_now, new.distinct, new.bonus = None, None, torch.zeros(2 * B, device=self.dev)
         new.brancher = None
+        new.t_now = None
         new.frozen = True
         new.training = False
         new.stats = Counts(self.dev, self.gcfg.kinds, self.S)
@@ -1006,7 +1041,10 @@ class Runtime:
                 "shoot_units_nomissile": round(s["shoot_units_nomissile"] / max(1.0, s["shoot_units"]), 4),
                 **({"mask_share": round(s["mask_units"] / max(1.0, s["mask_free"]), 4),
                     "mask_fallback": round(s["mask_fallback"] / max(1.0, s["mask_units"]), 5),
-                    "mask_fallback_n": int(s["mask_fallback"])} if getattr(self.gcfg, "task_mask", False) else {}),
+                    "mask_fallback_n": int(s["mask_fallback"]),
+                    "volley_lock": round(s["volley_lock"] / max(1.0, s["mask_free"]), 4),
+                    "shooters_firing": round(s["fire_on"] / max(1.0, s["fire_shooters"]), 4)}
+                   if getattr(self.gcfg, "task_mask", False) else {}),
                 **({"teach_share": round(s["teach_plans"] / (s["plans"] + s["teach_plans"]), 4)} if self.teacher > 0
                    else {}),
                 **({f"exec_{k.name}": round(float(ex[0, k.index] / ex[1, k.index]), 4) for k in names

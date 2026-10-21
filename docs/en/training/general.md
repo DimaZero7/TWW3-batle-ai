@@ -291,6 +291,35 @@ are on** (the "default" column), the harmful ones are off — why, in the table 
 | `hold` | `hold_target` | the attack only at enemies within 3 × the reach of the point (where the measure is 0) | yes |
 | `screen` | `screen_move` | the sectors near the segment from the target group's centre to the seen enemy nearest to it (50 m aside, between its ends) | yes |
 | (general) | `shoot_group` | the kind `shoot` only for a group with at least the share `--general-shoot-share` of shooters | yes |
+| `shoot` | `shoot_volley` | **the volley lock**: a shooter that fires or aims gets nothing but "keep" (no move, no other target, no "hold") until its volley (below) | yes |
+
+**The volley lock** (`shoot_volley`). In the game any new order resets a shooter's aim (in the simulator too,
+`missile.aim_reset_on_order`). In the g15 battle as the Empire (seed 1000920026, 0:10) the executor under `shoot` gave
+~10 shooters a new move or another target every second: they aimed 1-3 s and never reached a volley. The lock:
+- **when it is on:** the unit is under `shoot`, has ammunition and a reload on its card, and fires or aims — the token's
+  `firing` flag (in the simulator and in the game it is on from the moment a standing shooter has taken a target in
+  range and aims at it: the game's `IsFiringMissiles`). Not in melee and no seen enemy within `VOLLEY_FREE_M` = 50 m
+  (centre to centre): then the unit is free — it may step back or turn (a rule of the mask, not a game number);
+- **what is closed:** every order kind but "keep" (KEEP): the order in force goes on, nothing goes to the engine;
+- **how long:** from the first decision the unit fires to the decision where a volley is seen (the token's
+  `volley_ready`: the ammunition fell at this decision) — that decision is free: an order right after a volley costs
+  least (the men reload anyway). From the next decision a new cycle. No volley — the lock is lifted after the cycle
+  `cycle_s`: the aim (the larger of the first aim and the silence after a new target, `passport.aim`, the simulator's
+  numbers from `sim.json`) + 1.3 × the card's reload (`reload_s` from the game's database; 1.3: the simulator's men are
+  fully loaded after 1.1-1.3 reloads, `observation.py` VOLLEY) + one decision. An archer (reload 10 s, silence 8.5 s):
+  22.5 s;
+- **the clock** is the `Runtime`'s (`vl_t0` a unit; the battle time from `replan`, called every decision before the
+  executor), the lock goes with the observation as `task_lock`, and the update computes the mask from the same record.
+  A second call at the same time (the past slots' rows) gives the same lock; a battle begun again starts the clock
+  afresh. The companion calls the same `Runtime`, so in the game the lock is the same. The bridge gives nothing on
+  "keep" (`nn_keeps`), and an attack on the same target to a firing shooter it does not give anyway (`nn_aim_kept`,
+  [the bridge](../apps/bridge.md)); the bridge's own interventions (a standing shooter without a target, an idle shooter)
+  stay as they were.
+- **Checked in the simulator** (the point g15 m40, trained without the lock; on the CPU, `ai_like` only, the same
+  battles without and with the lock; `build/diag_volley`): 24 battles — the rating +0.68 → +0.94, wins 63 → 71 %; 48
+  other battles — +1.23 → +1.30, wins 75 → 77 % (noise ±0.4-0.5: no difference to tell — the lock does no harm). 2-3 %
+  of the units' decisions are under the lock; the shooters' firing share is the same (0.54 / 0.51): in the simulator
+  the executor jerks firing shooters less often than in the game — the lock is first of all for the game.
 
 **The parts checked at minute 0** (the point g13 m40, trained without masks; the `mandatory` evaluation on 256 battles
 an opponent instead of 512, the same for all; the rating's noise ±0.16, but the variants play the same battles; under
@@ -331,7 +360,7 @@ is free. The target pointer is shared with the spells: a target mask limits the 
   `shoot` a target group not seen leaves the targets free (a fall-back too).
 - **The same masks in training.** The task's numbers per unit come with the decision's observation (`Runtime.task`:
   `task_mk` the kind or −1, `task_pt` the point in the side's frame, `task_reach` the reach, `task_tg` the target,
-  `task_main` every slot's group number), are kept in the chunk's record, and the update computes the masks from that
+  `task_main` every slot's group number, `task_lock` the volley lock), are kept in the chunk's record, and the update computes the masks from that
   record: PPO's old probability is the masked choice's (test: the update's probabilities = the rollout's). The game
   (the companion) gets them the same way — one code.
 - **The heads' code.** `taskmask.MaskedChainHeads` is `ChainHeads` with three lines of masks (the executor changes its
@@ -484,6 +513,8 @@ The run's `log.jsonl`, field `general` (and the `general:` line of the output):
 | `teach_share` | (`--general-teacher`) the share of the learner's plans the teacher made |
 | `mask_share` | the share of the learner's deciding unit-decisions a task mask acts on |
 | `mask_fallback`, `mask_fallback_n` | the share of them where the mask closed everything and fell back (and the number) |
+| `volley_lock` | the share of the learner's deciding unit decisions under the volley lock (`shoot_volley`) |
+| `shooters_firing` | the share of our shooters' (with ammunition) decisions when they fire or aim (the `firing` flag) |
 | `shoot_noshooter` | the share of the groups with the kind `shoot` without a single shooter (all the learner's plans; with the mask 0) |
 | `shoot_units_nomissile` | the share of the unit-decisions under `shoot` of units without missiles (infantry in a shooting group) |
 | `imitate_nll`, `imitate_acc_kind`, `imitate_acc_target` | (`--general-teacher`) on the teacher's ended plans, before the steps: the network's mean NLL of the teacher's choice (kind + target), the share of groups where the network's most likely kind is the teacher's, and where its most likely target (under the teacher's kind) is the teacher's |

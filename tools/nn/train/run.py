@@ -413,7 +413,8 @@ def general_text(g):
                + (f", teacher {g['teach_share']:.2f}" if "teach_share" in g else "")
                if "exec_weight" in g else "")
             + (f"; task masks {g['mask_share']:.2f} of the units deciding, fall-back {g.get('mask_fallback', 0):.4f} "
-               f"({g.get('mask_fallback_n', 0)})" if "mask_share" in g else "")
+               f"({g.get('mask_fallback_n', 0)}), volley lock {g.get('volley_lock', 0):.3f}, shooters firing "
+               f"{g.get('shooters_firing', 0):.2f}" if "mask_share" in g else "")
             + (f"; shoot without a shooter {g.get('shoot_noshooter', 0):.3f} of the groups, "
                f"{g.get('shoot_units_nomissile', 0):.2f} of its units without missiles" if "shoot_noshooter" in g else "")
             + (f"; imitate nll {g.get('imitate_nll', float('nan')):.3f} acc kind "
@@ -1511,7 +1512,7 @@ def parser():
     ap.add_argument("--general-task-mask-parts", default=MASK_PARTS,
                     help="general: with --general-task-mask 1, which masks (a comma list of tools/nn/general/taskmask.py "
                          "PARTS: withdraw_attack, withdraw_move, shoot_melee, shoot_target, attack_target, attack_move, "
-                         "hold_target, hold_move, screen_move, shoot_group; 'all'; 'none'; default: those harmless at "
+                         "hold_target, hold_move, screen_move, shoot_group, shoot_volley; 'all'; 'none'; default: those harmless at "
                          "minute 0, docs 'Task masks'). Saved with the checkpoint")
     ap.add_argument("--general-shoot-share", type=float, default=0.5,
                     help="general: with --general-task-mask 1, 'shoot' only for a group whose shooters (a missile range "

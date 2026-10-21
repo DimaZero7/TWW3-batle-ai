@@ -246,3 +246,106 @@ def test_the_bonus_kind_weights():
     assert learn.exec_kinds("") == [1.0] * 6 and learn.exec_kinds("attack=0.5", 3) == [0.5, 1.0, 1.0]
     with pytest.raises(ValueError):
         learn.exec_kinds("charge=2")
+
+
+def shooting(firing=True, volley_ready=1.0, enemy_at=None):
+    """Our unit 2 (a shooter: reload 10 s, aim 3.3 s, silence after a new target 8.5 s) under "shoot" at e0, firing
+    (the token's flag) or not; volley_ready its VOLLEY column; enemy_at: unit 3 moved there (a near enemy)."""
+    pos = list(POS)
+    if enemy_at is not None:
+        pos[3] = enemy_at
+    o = obs_of(pos, {2: ("shoot", None, 0.0, G)}, shooter=[2])
+    tok = o["tokens"]
+    tok[0, 2, taskmask.RELOAD_COL] = 10.0 / taskmask.RELOAD_SCALE
+    tok[0, 2, ob.INDEX["aim_first"]], tok[0, 2, ob.INDEX["aim_retarget"]] = 0.33, 0.85
+    tok[0, 2, ob.INDEX["firing"]] = float(firing)
+    tok[0, 2, ob.INDEX["volley_ready"]] = volley_ready
+    return o
+
+
+def lock_at(o, t, t0):
+    shoot = o["task_mk"].long() == K["shoot"]
+    return taskmask.volley_lock(o, shoot, torch.tensor([float(t)]), t0)
+
+
+def test_the_reload_column_is_the_passports_reload():
+    from tools.nn.model import passport
+    p = passport.load()
+    key = next(k for k, v in p.items() if (v.get("missile") or {}).get("reload_s"))
+    f = passport.features(p[key])
+    assert abs(f[taskmask.RELOAD_COL - ob.INDEX["passport_0"]] * taskmask.RELOAD_SCALE
+               - p[key]["missile"]["reload_s"]) < 1e-4
+
+
+def test_the_volley_lock_holds_a_firing_shooter_for_its_cycle_then_frees_it():
+    reload, longest = taskmask.cycle_s(shooting()["tokens"])
+    N_ = float(longest[0, 2])
+    assert float(reload[0, 2]) == pytest.approx(10.0) and N_ == pytest.approx(8.5 + 1.3 * 10.0 + 1.0, abs=1e-3)
+    t0 = torch.full((1, N), -1.0)
+    o = shooting()
+    lock, t0 = lock_at(o, 10, t0)
+    assert lock[0].tolist() == [False, False, True, False, False, False] and float(t0[0, 2]) == 10.0
+    # under the lock: only keep (no move, no other target, no hold); the mask counts it
+    m, kind, tgt, sec, fb = run(dict(o, task_lock=lock))
+    assert kind[2].tolist() == [False, False, False, False, True] and bool(m["on"][0, 2]) and not bool(fb[2])
+    assert bool(kind[1, MOVE])                                            # (the others as before)
+    # no volley: locked N s, free at the first decision N s after it began, a new cycle from the next one
+    t, seen = 10, []
+    while t < 40:
+        t += 1
+        lock, t0 = lock_at(o, t, t0)
+        seen.append((t, bool(lock[0, 2])))
+    free = [t for t, k in seen if not k]
+    assert free[0] == math.ceil(10 + N_) and all(k for t, k in seen if t < free[0])
+    assert dict(seen)[free[0] + 1]
+    _, kind, _, _, _ = run(dict(o, task_lock=torch.zeros_like(lock)))     # free: every kind open
+    assert bool(kind[2, MOVE] and kind[2, ATTACK] and kind[2, HOLD])
+
+
+def test_the_volley_lock_frees_the_decision_of_a_volley_and_locks_the_next_cycle():
+    t0 = torch.full((1, N), -1.0)
+    lock, t0 = lock_at(shooting(), 10, t0)
+    lock, t0 = lock_at(shooting(volley_ready=1.0), 12, t0)
+    assert bool(lock[0, 2])
+    lock, t0 = lock_at(shooting(volley_ready=0.0), 13, t0)               # the ammo fell at this decision
+    assert not bool(lock[0, 2]) and float(t0[0, 2]) == 13.0
+    lock, t0 = lock_at(shooting(volley_ready=0.1), 14, t0)               # reloading: locked again
+    assert bool(lock[0, 2])
+
+
+def test_the_volley_lock_leaves_alone_a_shooter_not_firing_in_melee_or_near_an_enemy_and_other_missions():
+    t0 = torch.full((1, N), -1.0)
+    lock, t0b = lock_at(shooting(firing=False), 10, t0)                 # no target in range: not firing
+    assert not bool(lock.any()) and float(t0b[0, 2]) == -1.0
+    o = shooting()
+    o["tokens"][0, 2, ob.INDEX["melee"]] = 1.0
+    assert not bool(lock_at(o, 10, t0)[0].any())
+    assert not bool(lock_at(shooting(enemy_at=(-470.0, 0.0)), 10, t0)[0].any())   # an enemy 30 m away
+    o = shooting()
+    o["tokens"][0, 2, ob.INDEX["ammo"]] = 0.0                              # out of ammunition
+    assert not bool(lock_at(o, 10, t0)[0].any())
+    o = shooting()
+    lock, _ = taskmask.volley_lock(o, torch.zeros(1, N, dtype=torch.bool), torch.tensor([10.0]), t0)
+    assert not bool(lock.any())                                           # not under "shoot"
+    # a lock while the part is off: not applied
+    lock, _ = lock_at(o, 10, t0)
+    m = taskmask.masks(TINY, dict(o, task_lock=lock), torch.ones(1, CENTRES.shape[0], dtype=torch.bool),
+                       frozenset({"shoot_group"}))
+    assert bool(m["kind"][0, 2].all()) and not bool(m["on"][0, 2])
+
+
+def test_the_runtimes_volley_clock_gives_the_same_lock_at_the_same_time_and_restarts_with_the_battle():
+    from types import SimpleNamespace
+    from tools.nn.general import runtime as gruntime
+    rt = SimpleNamespace(dev=torch.device("cpu"), r={"vl_t0": torch.full((2, N), -1.0), "vl_at": torch.full((2,), -1.0),
+                                                     "vl_lock": torch.zeros(2, N, dtype=torch.bool)})
+    o = shooting()
+    shoot = o["task_mk"].long() == K["shoot"]
+    rows = torch.tensor([1])
+    vol = (lambda o_, t: gruntime.Runtime._volley(rt, rows, o_, shoot, torch.tensor([float(t)])))
+    assert bool(vol(o, 10)[0, 2])
+    assert not bool(vol(shooting(volley_ready=0.0), 13)[0, 2])
+    assert not bool(vol(shooting(volley_ready=0.0), 13)[0, 2])            # again at 13: the same (not a new cycle)
+    assert bool(vol(shooting(volley_ready=0.1), 14)[0, 2])
+    vol(o, 2)                                                             # the time went back: a new battle
+    assert float(rt.r["vl_t0"][1, 2]) == 2.0 and float(rt.r["vl_t0"][0, 2]) == -1.0
