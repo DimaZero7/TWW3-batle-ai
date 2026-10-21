@@ -362,6 +362,16 @@ the side (its own frame from where the armies stand) and the network learns both
 (`--free-speed`) does not hold the speed: decisions run on battle time, a pause stops them
 ([a human against the network](../launch/run.md#a-human-against-the-network)).
 
+**A network against a network.** `tools.build nn-arena --enemy-ai net --net-name A.pt --enemy-net-name B.pt`: the
+companion plays both sides, side 2 by another network. The companion (`--checkpoint A.pt --enemy-script net
+--enemy-checkpoint B.pt`) loads two networks: `loop.Brain(side=1)` with A and `loop.Brain(side=2)` with B, each
+with its own memory and its own general when the checkpoint has one (a checkpoint without a general plays as the
+unit network). The order choice and the temperature are the same for both (`--greedy`, `--temperature`). Without
+`--enemy-checkpoint` side 2 is played by the same network as side 1. The build puts B's path into the manifest's
+`config.enemy_checkpoint`, `watch.ps1` passes it to the companion ([launch](../launch/watch.md)); the label over
+the enemy army is "Нейросеть <B's name>". Side 2's log is `companion_enemy.jsonl`. Both networks run on the CPU in
+the companion; a move takes ~15 ms for the network with a general and ~80 ms for `itS27_4` (a 2 v 2 battle).
+
 ## Skirmish mode
 
 In the game some shooters (archers, slingers, Night Runners...) have skirmish mode: the unit steps back from an

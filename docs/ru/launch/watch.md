@@ -40,7 +40,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/watch.ps1
 | `-TimeoutModelSeconds` | 600 | Предел боя, с времени боя |
 | `-LingerSeconds` | 30 | Сколько игра остаётся открытой после итога |
 | `-NoBuild` | нет | Взять сборку `net`, которая уже лежит в `build/nn-arena/` |
-| `-EnemyAi game\|ai_like\|net` | `game` | Враг — ИИ игры или скрипт симулятора в помощнике (сборка `--enemy-ai`; с `-NoBuild` берётся из сборки, несовпадение — ошибка); журнал скрипта — `companion_enemy.jsonl` ([bridge](../apps/bridge.md#враг-под-скриптом-симулятора)); `net` — сеть на стороне 2, только с `-Target human` |
+| `-EnemyAi game\|ai_like\|net` | `game` | Враг — ИИ игры или скрипт симулятора в помощнике (сборка `--enemy-ai`; с `-NoBuild` берётся из сборки, несовпадение — ошибка); журнал скрипта — `companion_enemy.jsonl` ([bridge](../apps/bridge.md#враг-под-скриптом-симулятора)); `net` — сеть на стороне 2: против человека (`-Target human`) или против нашей сети (`nn-arena`, [сеть против сети](../apps/bridge.md#враг-под-скриптом-симулятора)) |
+| `-EnemyCheckpoint` | путь из сборки (`--enemy-net-name`), иначе `-Checkpoint` | Веса сети врага при `-EnemyAi net` (помощник `--enemy-checkpoint`); путь внутри репозитория |
 | `-Skirmish game\|off` | `game` | Режим застрельщиков под мостами (сборка `--skirmish`; с `-NoBuild` берётся из сборки) ([bridge](../apps/bridge.md#режим-застрельщиков)) |
 | `-Target nn-arena\|lord-duel\|human` | `nn-arena` | Чью сборку и папку прогонов брать; `lord-duel` ([дуэль лордов](../apps/entries.md#lord_duel)) — только с `-NoBuild`, журнал помощника — `build/lord-duel/companion/`; `human` — [человек против сети](run.md#человек-против-сети): только с `-NoBuild`, помощник отвечает только стороне 2 (`--no-own`) |
 | `-Graphics` | `BAI_GRAPHICS` | Набор графики на этот запуск (`launch.ps1 -Graphics`: `ultra`, `low`, `lowigpu`, `human2k`) |
@@ -49,7 +50,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/launcher/watch.ps1
 
 [Экзамен](gate.md#экзамен) (10 боёв) против `ai_like` вместо ИИ игры: `build/steps/watch_set8.ps1 -Ckpt build/v2/itN.pt -EnemyAi ai_like`.
 
-Подпись над армией в игре (имя генерала в сценарии) — кто управляет стороной: «Нейросеть S24_3», «ИИ игры (нормальная)», «Скрипт ai_like», «Человек», «Планировщик CA (атака)». Её ставит сборка (`tools.build nn-arena|human`): имя сети — из `--net-name <чекпойнт>` (`build/v2/itS24_3.pt` → `S24_3`, `…/S24/m5.pt` → `S24/m5`; скрипты `build/steps` передают свой `-Ckpt`), свой текст — `--label-own` / `--label-enemy`. Игра идёт на русском (язык Steam), кириллица в шрифтах есть. Имя ничем не читается: мост ищет отряды по `script_name`.
+Подпись над армией в игре (имя генерала в сценарии) — кто управляет стороной: «Нейросеть S24_3», «ИИ игры (нормальная)», «Скрипт ai_like», «Человек», «Планировщик CA (атака)». Её ставит сборка (`tools.build nn-arena|human`): имя сети — из `--net-name <чекпойнт>` (`build/v2/itS24_3.pt` → `S24_3`, `…/S24/m5.pt` → `S24/m5`; скрипты `build/steps` передают свой `-Ckpt`; сети врага — из `--enemy-net-name`, без него — та же), свой текст — `--label-own` / `--label-enemy`. Игра идёт на русском (язык Steam), кириллица в шрифтах есть. Имя ничем не читается: мост ищет отряды по `script_name`.
 
 ## Что печатает помощник
 

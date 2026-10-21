@@ -432,6 +432,26 @@ class TestCompanion:
         assert not worker.is_alive() and not (tmp_path / exchange.ORDERS).exists()
         assert [ln.split()[0] for ln in lines] == ["enemy", "enemy"] and "done" in lines[-1]
 
+    def test_the_enemy_side_by_another_checkpoint(self, tmp_path, monkeypatch):
+        # --enemy-script net --enemy-checkpoint B: side 2 by B's network (its own memory, general if any), our side
+        # by --checkpoint's; the same sampling for both; no --enemy-checkpoint: the same network on both sides
+        from tools.nn.companion import loop, policy
+        actors = {"a.pt": policy.fresh(seed=1), "b.pt": policy.fresh(seed=2)}
+        monkeypatch.setattr(loop.companion_policy, "load", lambda path, seed=0: (actors[str(path)], f"checkpoint {path}"))
+        seen = []
+        monkeypatch.setattr(loop, "run", lambda game, brain, log=None, **kw: seen.append((brain, kw["enemy"])))
+        game = ["--game", str(tmp_path), "--checkpoint", "a.pt", "--temperature", "0.7"]
+        assert loop.main(game + ["--enemy-script", "net", "--enemy-checkpoint", "b.pt"]) == 0
+        ours, theirs = seen[-1]
+        assert ours.actor is actors["a.pt"] and theirs.actor is actors["b.pt"]
+        assert (ours.side, theirs.side) == (1, 2) and ours.temperature == theirs.temperature == 0.7
+        assert theirs.general is None                                    # a network without a general: the units'
+        assert loop.main(game + ["--enemy-script", "net"]) == 0
+        ours, theirs = seen[-1]
+        assert theirs.actor is ours.actor is actors["a.pt"] and theirs.side == 2
+        with pytest.raises(SystemExit):
+            loop.main(game + ["--enemy-script", "ai_like", "--enemy-checkpoint", "b.pt"])
+
     def test_a_v2_network_keeps_its_commitment_between_the_games_states(self):
         from tools.nn.companion import loop, policy
         brain = loop.Brain(policy.fresh(seed=1, preset="v2"))

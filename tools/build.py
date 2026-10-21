@@ -17,6 +17,7 @@ Usage:
     python -m tools.build human --army-seed 1000900014 --enemy-ai net --free-speed   # a human against the network
     python -m tools.build nn-arena --army-from-run build/nn-arena/runs/20261007-091416 --army-swap   # an old run's armies
     python -m tools.build nn-arena --army-seed 1000900014 --enemy-ai ai_like   # the enemy under the simulator's script
+    python -m tools.build nn-arena --army-seed 1000920026 --enemy-ai net --net-name A.pt --enemy-net-name B.pt   # net v net
     python -m tools.build nn-arena --army-seed 1000900014 --enemy-ai ai_like --skirmish off   # no skirmish mode
     python -m tools.build lord-fall --faction skv --treatment kill   # the lord killed / routed (tools/nn/lord_fall.py)
     python -m tools.build lord-duel --duel emp   # our network's lord v a lord under one attack order (tools/nn/lord_duel.py)
@@ -316,7 +317,7 @@ def net_name(value):
         return ""
     if not value.lower().endswith(".pt"):
         return value
-    path = Path(value)
+    path = Path(value.replace("\\", "/"))     # a Windows path read the same on Linux
     stem = path.stem
     if stem.startswith("it") and len(stem) > 2 and (stem[2].isupper() or stem[2].isdigit()):
         stem = stem[2:]
@@ -329,9 +330,10 @@ def side_labels(args):
     """{side: the general's name over the army in the game}: who commands the side (--label-own/--label-enemy
     override). The game runs in Russian (Steam language), so its fonts have Cyrillic."""
     net = " ".join(x for x in ("Нейросеть", net_name(args.net_name)) if x)
+    enemy_net = " ".join(x for x in ("Нейросеть", net_name(args.enemy_net_name or args.net_name)) if x)
     own = {"net": net, "human": "Человек", "attack": "Планировщик CA (атака)",
            "defend": "Планировщик CA (оборона)", "hold": "Стоит без приказов"}.get(args.own_ai, args.own_ai)
-    enemy = {"game": "ИИ игры (нормальная)", "net": net}.get(args.enemy_ai, f"Скрипт {args.enemy_ai}")
+    enemy = {"game": "ИИ игры (нормальная)", "net": enemy_net}.get(args.enemy_ai, f"Скрипт {args.enemy_ai}")
     return {"own": args.label_own or own, "enemy": args.label_enemy or enemy}
 
 
@@ -401,7 +403,8 @@ def nn_arena_config(args, run_config):
     if args.own_ai == "net":
         run_config.update(own_role=own_role, decide_ms=args.decide_ms, poll_ms=NET_POLL_MS)
         if args.enemy_ai != "game":
-            # side 2 under a script of the simulator in the companion (tools/nn/companion/script.py)
+            # side 2 under a script of the simulator in the companion (tools/nn/companion/script.py), or 'net':
+            # under a network (--enemy-net-name's checkpoint, else our side's: the companion's --enemy-checkpoint)
             run_config.update(enemy_ai="companion", enemy_script=args.enemy_ai)
         if args.skirmish == "off":
             # the game's skirmish mode off for every unit a bridge commands (the simulator has none)
@@ -418,6 +421,9 @@ def nn_arena_config(args, run_config):
         if args.free_speed:
             # the human sets the pace: may change the speed and pause (no speed guard)
             run_config.update(free_speed=True)
+    if args.enemy_ai == "net" and args.enemy_net_name.lower().endswith(".pt"):
+        # the enemy network's checkpoint for the companion (watch.ps1 passes it as --enemy-checkpoint)
+        run_config["enemy_checkpoint"] = args.enemy_net_name.replace("\\", "/")
     return path
 
 
@@ -456,10 +462,16 @@ def main(argv=None):
                         help="nn-arena --own-ai net: the enemy side under the game's AI (default) or under a "
                              "script of the simulator (tools/nn/train/opponents.py) in the companion, as the "
                              "network's simulator opponent (the twin's: ai_like); human: also 'net', the "
-                             "network plays the enemy side (the companion's --enemy-script net --no-own)")
+                             "network plays the enemy side (the companion's --enemy-script net --no-own); nn-arena: "
+                             "'net' too, a network against a network (--enemy-net-name: the enemy's checkpoint)")
     parser.add_argument("--net-name", default="",
                         help="nn-arena/human: the network's checkpoint (path or name) for the label over its army: "
                              "build/v2/itS24_3.pt -> 'Нейросеть S24_3'")
+    parser.add_argument("--enemy-net-name", default="",
+                        help="--enemy-ai net: the enemy network's checkpoint (a path in the repository, or a name) - "
+                             "the label over its army ('Нейросеть <name>') and, for a .pt path, the companion's "
+                             "--enemy-checkpoint (watch.ps1 reads it from the manifest). Default: --net-name, the "
+                             "same network as ours")
     parser.add_argument("--label-own", default="",
                         help="nn-arena/human: the general's name over our army (default: who commands it - "
                              "'Нейросеть <--net-name>', 'Человек', 'Планировщик CA (атака)', ...)")
@@ -567,8 +579,10 @@ def main(argv=None):
     if args.own_role and args.own_ai not in ("net", "human") and args.target not in ("lord-duel", "lord-ai"):
         parser.error("--own-role is for --own-ai net and the human target (the planner modes set our role themselves)")
     net_arena = args.target == "nn-arena" and args.own_ai == "net"
-    if args.enemy_ai == "net" and args.target != "human":
-        parser.error("--enemy-ai net is for the human target (a human against the network)")
+    if args.enemy_ai == "net" and not (net_arena or args.target == "human"):
+        parser.error("--enemy-ai net is for nn-arena --own-ai net (network against network) and the human target")
+    if args.enemy_net_name and args.enemy_ai != "net":
+        parser.error("--enemy-net-name is for --enemy-ai net")
     if args.enemy_ai != "game" and not (net_arena or args.target == "human"):
         parser.error("--enemy-ai is for nn-arena --own-ai net and the human target")
     if args.skirmish != "game" and not (net_arena or (args.target == "human" and args.enemy_ai != "game")):

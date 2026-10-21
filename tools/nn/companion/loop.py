@@ -6,6 +6,8 @@
         [--enemy-script ai_like]   (also the enemy side: the script answers the enemy's bridge, script.py)
         [--enemy-script net --no-own]   (a human plays side 1, tools.build human --enemy-ai net: the network
                                          answers only the enemy's bridge, seeing the battle as side 2)
+        [--enemy-script net --enemy-checkpoint B.pt]   (the network against another network: side 2 by B's
+                                         weights, its own general if B has one; default: the --checkpoint's)
         [--no-general] [--general-set replan_s=30]   (a checkpoint with a general, S28: tools/nn/companion/general.py)
 
 One line per decision: move number, battle time, how long the network took, the orders.
@@ -239,6 +241,10 @@ def main(argv=None):
     parser.add_argument("--enemy-script", help="also command the enemy side by this simulator script "
                                                "(tools/nn/train/opponents.py, e.g. ai_like): nn-arena --enemy-ai; "
                                                "'net': by the network itself (its own memory, side 2's view)")
+    parser.add_argument("--enemy-checkpoint",
+                        help="with --enemy-script net: the enemy side's network (default: --checkpoint's). Its own "
+                             "memory and its own general when the checkpoint has one; the same sampling and "
+                             "temperature as our side")
     parser.add_argument("--shape", action="store_true",
                         help="the units' shape from the soldiers' places in the state (tools.build nn-arena "
                              "--soldiers-every N --soldiers-state): the observation's SHAPE (a network trained without "
@@ -260,7 +266,8 @@ def main(argv=None):
     actor, what = companion_policy.load(args.checkpoint, args.seed)
     print(f"companion: {what}; {'greedy' if args.greedy else f'sampling, temperature {args.temperature}'}; "
           f"{args.threads} threads; watching {Path(args.game) / exchange.STATE}")
-    gcfg = None if args.no_general else companion_general.config(actor, companion_general.parse_sets(args.general_set))
+    sets = companion_general.parse_sets(args.general_set)
+    gcfg = None if args.no_general else companion_general.config(actor, sets)
     if gcfg is not None:
         print(f"companion: the general (S28) plans the battle: re-plans every {gcfg.replan_s:g} s of battle, on a "
               f"broken group (> {gcfg.broken:g} of it) or a lord fallen (not sooner than {gcfg.replan_min_s:g} s); "
@@ -271,9 +278,18 @@ def main(argv=None):
         Path(args.log).parent.mkdir(parents=True, exist_ok=True)
     if args.no_own and not args.enemy_script:
         parser.error("--no-own needs --enemy-script: somebody must be answered")
+    if args.enemy_checkpoint and args.enemy_script != "net":
+        parser.error("--enemy-checkpoint needs --enemy-script net")
     enemy, enemy_log = None, None
     if args.enemy_script == "net":
-        enemy = Brain(actor, args.greedy, args.temperature, side=2, general=gcfg)
+        enemy_actor, enemy_gcfg = actor, gcfg
+        if args.enemy_checkpoint and Path(args.enemy_checkpoint) != Path(args.checkpoint or ""):
+            # another network for side 2: its own weights and, if it has one, its own general
+            enemy_actor, enemy_what = companion_policy.load(args.enemy_checkpoint, args.seed)
+            enemy_gcfg = None if args.no_general else companion_general.config(enemy_actor, sets)
+            print(f"companion: the enemy side's network: {enemy_what}; "
+                  f"{'its general plans side 2' if enemy_gcfg is not None else 'no general (the unit network)'}")
+        enemy = Brain(enemy_actor, args.greedy, args.temperature, side=2, general=enemy_gcfg)
     elif args.enemy_script:
         from tools.nn.companion.script import ScriptSide
         enemy = ScriptSide(args.enemy_script)

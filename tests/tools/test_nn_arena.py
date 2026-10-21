@@ -112,11 +112,29 @@ class TestArenas:
         assert c["army"]["seed"] == 1000900014 and c["army"]["swap"] is True and "skirmish" not in c
         assert build.main(["human", "--army-seed", "1000900014"]) == 0          # the human's battle as before
         assert not {"enemy_ai", "enemy_script", "free_speed", "decide_ms"} & set(written[1])
-        for bad in (["nn-arena", "--own-ai", "net", "--enemy-ai", "net"],     # the network on both sides: no
+        for bad in (["nn-arena", "--own-ai", "attack", "--enemy-ai", "net"],  # no network on our side
+                    ["nn-arena", "--own-ai", "net", "--enemy-net-name", "b.pt"],   # the enemy is not the network
                     ["nn-arena", "--own-ai", "net", "--free-speed"],
                     ["human", "--skirmish", "off"]):                          # no bridge to turn it off for
             with pytest.raises(SystemExit):
                 build.main(bad)
+
+    def test_a_network_against_another_network(self, tmp_path, monkeypatch):
+        """nn-arena --enemy-ai net --enemy-net-name B.pt: side 2 under the companion's network B (its checkpoint in
+        the manifest for watch.ps1's --enemy-checkpoint), labelled by B's name; without it the same network."""
+        monkeypatch.setattr(project, "BUILD", tmp_path)
+        written = []
+        monkeypatch.setattr(build, "build", lambda target, config, scenario=None: written.append(config) or {})
+        assert build.main(["nn-arena", "--army-seed", "1000920026", "--enemy-ai", "net",
+                           "--net-name", "build/nn-train/test5/g13_general/m40.pt",
+                           "--enemy-net-name", "build\\v2\\itS27_4.pt"]) == 0
+        c = written[0]
+        assert (c["own_ai"], c["enemy_ai"], c["enemy_script"]) == ("net", "companion", "net")
+        assert c["enemy_checkpoint"] == "build/v2/itS27_4.pt"
+        xml = next(tmp_path.glob("nn-arena/*.xml")).read_text(encoding="utf-8")
+        assert "Нейросеть g13_general/m40" in xml and "Нейросеть S27_4" in xml
+        assert build.main(["nn-arena", "--army-seed", "1000920026", "--enemy-ai", "net", "--net-name", "x.pt"]) == 0
+        assert "enemy_checkpoint" not in written[1]
 
 
 def unit(n, side, **kw):

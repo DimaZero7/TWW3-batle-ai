@@ -40,7 +40,8 @@ Options:
 | `-TimeoutModelSeconds` | 600 | Battle limit, s of battle time |
 | `-LingerSeconds` | 30 | How long the game stays open after the result |
 | `-NoBuild` | off | Use the net build already in `build/nn-arena/` |
-| `-EnemyAi game\|ai_like\|net` | `game` | The enemy: the game's AI or the simulator's script in the companion (build `--enemy-ai`; with `-NoBuild` the build's, a mismatch is an error); the script's log `companion_enemy.jsonl` ([bridge](../apps/bridge.md#the-enemy-under-the-simulators-script)); `net`: the network on side 2, only with `-Target human` |
+| `-EnemyAi game\|ai_like\|net` | `game` | The enemy: the game's AI or the simulator's script in the companion (build `--enemy-ai`; with `-NoBuild` the build's, a mismatch is an error); the script's log `companion_enemy.jsonl` ([bridge](../apps/bridge.md#the-enemy-under-the-simulators-script)); `net`: the network on side 2, against a human (`-Target human`) or against our network (`nn-arena`, [a network against a network](../apps/bridge.md#the-enemy-under-the-simulators-script)) |
+| `-EnemyCheckpoint` | the build's path (`--enemy-net-name`), else `-Checkpoint` | The enemy network's weights with `-EnemyAi net` (the companion's `--enemy-checkpoint`); a path inside the repository |
 | `-Skirmish game\|off` | `game` | Skirmish mode under the bridges (build `--skirmish`; with `-NoBuild` the build's) ([bridge](../apps/bridge.md#skirmish-mode)) |
 | `-Target nn-arena\|lord-duel\|human` | `nn-arena` | Whose build and runs folder; `lord-duel` ([lord duel](../apps/entries.md#lord_duel)) only with `-NoBuild`, the companion's log goes to `build/lord-duel/companion/`; `human` ([a human against the network](run.md#a-human-against-the-network)) only with `-NoBuild`, the companion answers side 2 only (`--no-own`) |
 | `-Graphics` | `BAI_GRAPHICS` | A graphics preset for the run (`launch.ps1 -Graphics`: `ultra`, `low`, `lowigpu`, `human2k`) |
@@ -49,7 +50,7 @@ A quick check: `-Speed 20 -LingerSeconds 0`.
 
 The [exam](gate.md#exam) (10 battles) against `ai_like` instead of the game's AI: `build/steps/watch_set8.ps1 -Ckpt build/v2/itN.pt -EnemyAi ai_like`.
 
-The label over each army in the game (the general's name in the scenario) says who commands the side: «Нейросеть S24_3» (network), «ИИ игры (нормальная)» (the game's AI, Normal), «Скрипт ai_like» (script), «Человек» (human), «Планировщик CA (атака)» (CA's planner). The build sets it (`tools.build nn-arena|human`): the network's name from `--net-name <checkpoint>` (`build/v2/itS24_3.pt` → `S24_3`, `…/S24/m5.pt` → `S24/m5`; the `build/steps` scripts pass their `-Ckpt`), a text of your own with `--label-own` / `--label-enemy`. The game runs in Russian (the Steam language), its fonts have Cyrillic. Nothing reads the name: the bridge finds units by `script_name`.
+The label over each army in the game (the general's name in the scenario) says who commands the side: «Нейросеть S24_3» (network), «ИИ игры (нормальная)» (the game's AI, Normal), «Скрипт ai_like» (script), «Человек» (human), «Планировщик CA (атака)» (CA's planner). The build sets it (`tools.build nn-arena|human`): the network's name from `--net-name <checkpoint>` (`build/v2/itS24_3.pt` → `S24_3`, `…/S24/m5.pt` → `S24/m5`; the `build/steps` scripts pass their `-Ckpt`; the enemy network's from `--enemy-net-name`, without it the same), a text of your own with `--label-own` / `--label-enemy`. The game runs in Russian (the Steam language), its fonts have Cyrillic. Nothing reads the name: the bridge finds units by `script_name`.
 
 ## What the companion prints
 

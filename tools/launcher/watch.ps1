@@ -14,7 +14,10 @@
 #                                         --skirmish; with -NoBuild the build's own setting is used)
 #   ... -Target human -NoBuild -EnemyAi net   (a human plays side 1, the network side 2: build human --enemy-ai net;
 #                                         the companion answers only the enemy's bridge, build/steps/human_vs_net.ps1)
-#   ... -Graphics human2k                 (a graphics preset for the run, launch.ps1 -Graphics; default: BAI_GRAPHICS)
+#   ... -EnemyAi net -Checkpoint A.pt -EnemyCheckpoint B.pt   (a network against another network: the enemy side by
+#                                         B's weights, the companion's --enemy-checkpoint; with -NoBuild and no
+#                                         -EnemyCheckpoint the build's --enemy-net-name is used, else -Checkpoint's)
+#   ... -Graphics human2k                (a graphics preset for the run, launch.ps1 -Graphics; default: BAI_GRAPHICS)
 param(
     [ValidateSet('nn-arena', 'lord-duel', 'human')][string]$Target = 'nn-arena',
     [ValidateSet(1, 3, 10, 20)][int]$Speed = 1,
@@ -22,6 +25,7 @@ param(
     [int]$DecideMs = 1000,
     [int]$TimeoutModelSeconds = 600,
     [string]$Checkpoint = '',
+    [string]$EnemyCheckpoint = '',
     [ValidateSet('', 'game', 'net', 'ai_like', 'nearest', 'hold_shoot', 'hold')][string]$EnemyAi = '',
     [ValidateSet('', 'game', 'off')][string]$Skirmish = '',
     [switch]$Greedy,
@@ -57,6 +61,8 @@ if (-not $NoBuild) {
     $enemyArgs = @()
     if ($EnemyAi) { $enemyArgs = @('--enemy-ai', $EnemyAi) }
     if ($Skirmish) { $enemyArgs += @('--skirmish', $Skirmish) }
+    if ($EnemyCheckpoint -and $EnemyAi -eq 'net') { $enemyArgs += @('--enemy-net-name', $EnemyCheckpoint) }
+    if ($Checkpoint) { $enemyArgs += @('--net-name', $Checkpoint) }
     & $python -m tools.build nn-arena --own-ai net --speed $Speed --arena $Arena --decide-ms $DecideMs --timeout $TimeoutModelSeconds @enemyArgs | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
 }
@@ -69,7 +75,13 @@ $enemyScript = ''
 if ($manifest.config.enemy_ai -eq 'companion') { $enemyScript = [string]$manifest.config.enemy_script }
 if ($EnemyAi -and ($EnemyAi -ne 'game') -ne [bool]$enemyScript) { throw "build/$Target enemy ($($manifest.config.enemy_ai) $enemyScript) is not -EnemyAi $EnemyAi; build it again" }
 if ($EnemyAi -and $EnemyAi -ne 'game' -and $enemyScript -ne $EnemyAi) { throw "build/$Target enemy script is $enemyScript, not $EnemyAi; build it again" }
-if ($enemyScript) { Write-Output ("The enemy side: the simulator's script {0} in the companion" -f $enemyScript) }
+if (-not $EnemyCheckpoint -and $enemyScript -eq 'net' -and $manifest.config.enemy_checkpoint) { $EnemyCheckpoint = [string]$manifest.config.enemy_checkpoint }
+if ($EnemyCheckpoint -and $enemyScript -ne 'net') { throw "-EnemyCheckpoint needs an enemy under the network (build --enemy-ai net); build/$Target enemy: $($manifest.config.enemy_ai) $enemyScript" }
+if ($EnemyCheckpoint -and -not (Test-Path -LiteralPath (Join-Path $repo $EnemyCheckpoint))) { throw "No enemy checkpoint $EnemyCheckpoint (a path inside the repository)" }
+if ($enemyScript -eq 'net') {
+    $who = if ($EnemyCheckpoint) { $EnemyCheckpoint } else { 'the same network as ours' }
+    Write-Output ("The enemy side: the network in the companion ({0})" -f $who)
+} elseif ($enemyScript) { Write-Output ("The enemy side: the simulator's script {0} in the companion" -f $enemyScript) }
 Write-Output ("Build {0}: arena {1}, speed x{2}, a decision every {3} ms" -f $manifest.build, $manifest.config.arena, $manifest.config.speed, $manifest.config.decide_ms)
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -80,6 +92,7 @@ if ($Checkpoint) { $dockerArgs += ' --checkpoint /repo/' + ($Checkpoint -replace
 if ($Greedy) { $dockerArgs += ' --greedy' }
 if ($manifest.config.soldiers_state) { $dockerArgs += ' --shape' }   # the soldiers' places come: the shape features
 if ($enemyScript) { $dockerArgs += ' --enemy-script ' + $enemyScript }
+if ($EnemyCheckpoint) { $dockerArgs += ' --enemy-checkpoint /repo/' + ($EnemyCheckpoint -replace '\\', '/') }
 if ($human) { $dockerArgs += ' --no-own' }   # a human plays side 1: nobody answers its bridge
 $runs = Join-Path $repo ('build\' + $Target + '\runs')
 $before = Get-ChildItem -LiteralPath $runs -Directory -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 1
