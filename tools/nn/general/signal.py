@@ -11,6 +11,9 @@ host's tests check them; docs/en/training/general.md "Training").
 * distinct_scale: the bonus is in the executor's advantage's units: W x the guess's gain x the spread (std) of the
   executor's advantage before its normalisation (an average over the updates; ppo's adv_std_*) - W = 1 pays a group
   one advantage std for each nat the classifier guesses its kind better than chance.
+* exec_bonus / exec_advantage: the executor's bonus for carrying out its mission (run.py --general-exec W;
+  mission.py measures it): per unit and decision W x (measure - its kind's running mean), into the unit's own advantage
+  as a reward-to-go (never the reward: the critic and the general's return do not see it).
 * The mission branches (run.py --general-branches P; branch.py): a plan replayed with one group's kind a swapped for b.
   other_kind maps a uniform draw over the K - 1 other kinds; kind_advantage is the kind choice's advantage from the
   branches' prices (price = the chosen branch's trade - the swapped one's, the mean over the copies):
@@ -59,6 +62,27 @@ def distinct_scale(prev, adv_std, keep=0.7, floor=0.005):
     if adv_std is None or not math.isfinite(adv_std) or adv_std <= 0:
         return float(prev)
     return max(floor, keep * float(prev) + (1.0 - keep) * float(adv_std))
+
+
+def exec_bonus(m, base, weight):
+    """The executor's bonus of a decision for carrying out its mission (run.py --general-exec W; mission.py): units'
+    measures m (0..1, any shape) against their kind's running mean base -> weight x (m - base): pays for doing it
+    better than usual, not for easy missions."""
+    return weight * (m - base)
+
+
+def exec_advantage(bonus, done, gl):
+    """The bonus's part of each unit's advantage (ppo.update): bonus [T, R, N] a decision, done [T, R] (float: the
+    battle ended at t), gl = gamma x lambda of the executor's PPO -> (1 - gl) x sum_j gl^j bonus[t + j] within the
+    battle and the chunk (a reward-to-go without a critic: the bonus never enters the reward, so neither the unit
+    critic nor the general's return sees it). x (1 - gl): a bonus steady over the horizon counts once, W = 1 pays a
+    unit one advantage std (the side's advantage is normalised) for a measure 1 above its kind's mean."""
+    out = bonus * 0.0
+    run = bonus[0] * 0.0
+    for t in reversed(range(len(bonus))):
+        run = bonus[t] + gl * (1.0 - done[t])[..., None] * run
+        out[t] = run
+    return (1.0 - gl) * out
 
 
 def other_kind(draw, chosen):

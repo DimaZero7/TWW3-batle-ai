@@ -1,0 +1,135 @@
+"""What carrying out a mission is (S28; docs/en/training/general.md "Missions"): every decision, for each own unit of a
+group of a plan, a number 0..1 of how well it does its group's mission kind (config.MISSION_KINDS) towards its group's
+target, from the simulator's state after the decision's steps (runtime.Runtime.execute; the executor's bonus is that
+number against its kind's running mean, signal.exec_bonus).
+
+The state's truth, not the side's view (a judge of the training: no unit is hidden in the simulator). A target group
+is its units standing now (alive, on the map, not routing); its point - their centre; a tile's - its centre. The
+measures (d: metres; near(d, R) = 1 within R, down to 0 at 3 R):
+
+    attack    1 in melee with a unit of the target group (the state's m and target), else 0.5 x (1 - d / NEAR_M) to its
+              nearest unit: "close on it and fight it"
+    flank     as attack, counted only where the unit stands off the front of the target's unit it fights (else the
+              nearest one): more than FLANK_DEG from that unit's facing - the sides of a struck unit the simulator uses
+              (config/nn/sim.json contact.front_deg 45: CA's front +-45)
+    hold      near(d to the target point, the reach): a tile's half side (the tile itself), GROUP_M around a group
+    screen    on the segment from the target group's centre to the standing enemy unit nearest to it (its projection
+              0..1 of the way) and near(the distance off the segment, SCREEN_M)
+    shoot     a shooter (range and ammunition): 0 in melee, 1 shooting at a unit of the target group, 0.5 within its
+              range of one, else 0; without missiles: 0 in melee, 1 at KEEP_M of the target group's nearest unit
+    withdraw  0 in melee, else 0.5 x near(d to the target point, the reach) + 0.5 x (distance to the nearest standing
+              enemy / AWAY_M, at most 1)
+
+A unit counts (ok) when it decided this decision (acting), its group has a mission and the target is there (a group
+with standing units; a tile inside the map; screen: some standing enemy). These are the measure's definitions (what
+"done" means), not the game's mechanics.
+"""
+import math
+
+import torch
+
+from tools.nn.general import config as gconfig
+
+NEAR_M = 300.0           # attack / flank: the closing part (0 from this far)
+FLANK_DEG = 45.0         # flank: off the front of the target's unit (config/nn/sim.json contact.front_deg)
+GROUP_M = 100.0          # hold / withdraw to a group: reach around its centre (a line of 3-4 units ~150 m wide)
+SCREEN_M = 50.0          # screen: within this of the segment (down to 0 at 3x)
+KEEP_M = (50.0, 250.0)   # shoot without missiles: the distance kept to the target group (beyond a charge's 30-35 m)
+AWAY_M = 300.0           # withdraw: the enemy's distance counted up to this
+
+
+def near(d, reach):
+    """1 within reach, down to 0 at 3 x reach."""
+    return (1.0 - (d - reach) / (2.0 * reach)).clamp(0.0, 1.0)
+
+
+def _gather(x, idx):
+    """x [R, N] at idx [R, N, ...] along the units."""
+    R, N = x.shape
+    return x.gather(1, idx.reshape(R, -1)).reshape(idx.shape)
+
+
+def measure(u, b, s, main, kind, target, tgt, acting, G, C, tile_half, cfg):
+    """-> (m [R, N] 0..1, ok [R, N] the units counted, k [R, N] each unit's mission kind) of rows [R] (b their battles,
+    s their sides 1 / 2) on the simulator's state u ([B, N] fields): main [R, N] the plan's group numbers (ours
+    0..G-1, theirs G..2G-1, -1 none), kind / target [R, G] our groups' missions, tgt [R, G, 2] a tile target's world
+    point (NaN else), acting [R, N] (the plan in force and the unit deciding), C coarse tiles, tile_half (m) their
+    half side, cfg the GeneralConfig (its kinds)."""
+    f = (lambda k: u[k][b])
+    x, z = f("x").float(), f("z").float()
+    side = f("side")
+    alive = (side > 0) & (f("men") > 0) & ~f("gone")
+    standing = alive & ~f("r")
+    own = side == s[:, None]
+    foe = (side > 0) & ~own
+    mi = main.clamp(0, G - 1)
+    in_g = own & (main >= 0) & (main < G) & acting
+    k_u = kind.gather(1, mi)
+    t_u = target.gather(1, mi)
+    p = torch.stack([x, z], -1)                                                     # [R, N, 2]
+    D = (p[:, :, None, :] - p[:, None, :, :]).norm(dim=-1)                          # [R, N, N]
+    big = torch.full_like(D, 1e9)
+    is_grp = t_u < 2 * G
+    member = (main[:, None, :] == t_u[:, :, None]) & standing[:, None, :] & is_grp[..., None]   # [R, N (i), N (j)]
+    n_t = member.sum(-1)
+    grp_ok = n_t > 0
+    dT, jT = torch.where(member, D, big).min(-1)                                    # the target's nearest unit
+    cg = torch.einsum("rij,rjc->ric", member.float(), p) / n_t.clamp(min=1)[..., None]
+    tp = tgt.gather(1, mi[..., None].expand(-1, -1, 2))
+    P = torch.where(is_grp[..., None], cg, torch.nan_to_num(tp))
+    P_ok = torch.where(is_grp, grp_ok, torch.isfinite(tp).all(-1) & (t_u < 2 * G + C))
+    dP = (p - P).norm(dim=-1)
+    reach = torch.where(is_grp, torch.full_like(dP, GROUP_M), torch.full_like(dP, tile_half))
+    melee = f("m")
+    slot = f("target")
+    hit_t = _gather_rows(member, slot) & (slot >= 0)                                 # its target is in the group
+    engaged = melee & hit_t
+    close = torch.where(grp_ok, (1.0 - dT / NEAR_M).clamp(0.0, 1.0), torch.zeros_like(dT))
+    attack = torch.where(engaged, torch.ones_like(dT), 0.5 * close)
+    # flank: where the unit stands seen from the target's unit (the one it fights, else the nearest one)
+    j = torch.where(engaged, slot.clamp(min=0), jT)
+    vx, vz = x - _gather(x, j), z - _gather(z, j)
+    bj = _gather(f("b").float(), j) * (math.pi / 180.0)
+    cos = (vx * torch.sin(bj) + vz * torch.cos(bj)) / (vx * vx + vz * vz).sqrt().clamp(min=1e-3)
+    off = cos < math.cos(FLANK_DEG * math.pi / 180.0)
+    flank = torch.where(engaged, off.float(), 0.5 * close * off.float())
+    hold = near(dP, reach)
+    # screen: between the target group's centre A and the standing enemy nearest to it
+    foe_st = foe & standing
+    dA = (P[:, :, None, :] - p[:, None, :, :]).norm(dim=-1)                          # [R, N (i), N (j)]
+    dA = torch.where(foe_st[:, None, :], dA, big)
+    jE = dA.argmin(-1)
+    foe_any = foe_st.any(-1, keepdim=True).expand_as(dP)
+    E = torch.stack([_gather(x, jE), _gather(z, jE)], -1)
+    v = E - P
+    w = p - P
+    vv = (v * v).sum(-1).clamp(min=1e-6)
+    along = (w * v).sum(-1) / vv
+    lat = (w[..., 0] * v[..., 1] - w[..., 1] * v[..., 0]).abs() / vv.sqrt()
+    screen = ((along >= 0.0) & (along <= 1.0)).float() * near(lat, SCREEN_M)
+    # shoot
+    shooter = (f("range") > 0) & (f("a") > 0)
+    firing = f("fire") & hit_t
+    rng = f("range").float()
+    s_sh = torch.where(firing, torch.ones_like(dT), torch.where(grp_ok & (dT <= rng), 0.5 * torch.ones_like(dT),
+                                                               torch.zeros_like(dT)))
+    s_no = (grp_ok & (dT >= KEEP_M[0]) & (dT <= KEEP_M[1])).float()
+    shoot = torch.where(melee, torch.zeros_like(dT), torch.where(shooter, s_sh, s_no))
+    # withdraw
+    dE = torch.where(foe_st[:, None, :], D, big).min(-1).values
+    away = torch.where(foe_any, (dE / AWAY_M).clamp(0.0, 1.0), torch.ones_like(dE))
+    withdraw = torch.where(melee, torch.zeros_like(dT), 0.5 * hold + 0.5 * away)
+    by = {"attack": (attack, grp_ok), "hold": (hold, P_ok), "flank": (flank, grp_ok), "screen": (screen, P_ok & foe_any),
+          "shoot": (shoot, grp_ok), "withdraw": (withdraw, P_ok)}
+    names = [k.name for k in gconfig.mission_kinds(cfg)]
+    m_all = torch.stack([by[n][0] for n in names], -1)                              # [R, N, K]
+    v_all = torch.stack([by[n][1] for n in names], -1)
+    kk = k_u.clamp(0, len(names) - 1)[..., None]
+    m = m_all.gather(-1, kk)[..., 0]
+    ok = in_g & v_all.gather(-1, kk)[..., 0]
+    return torch.where(ok, m, torch.zeros_like(m)), ok, k_u
+
+
+def _gather_rows(member, slot):
+    """member [R, N, N] at the column slot [R, N] of each row i (-1: False)."""
+    return member.gather(-1, slot.clamp(min=0)[..., None])[..., 0]

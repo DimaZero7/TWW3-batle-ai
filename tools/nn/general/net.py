@@ -16,8 +16,9 @@ order; docs/en/training/general.md).
       renumbered, so a group keeps its number (its prev card, its task) while it keeps its units
     group council: the groups listen to the tiles and to all groups (only groups change)   "Совещание групп"
     missions, step by step: kind (GeneralConfig.kinds learned cards) -> target              "Выбор заданий"
-      targets: our groups (not itself), their groups, the coarse tiles (target_grid^2, the council's tiles pooled)
-      only our groups choose
+      targets: our groups (not itself), their groups, the coarse tiles (target_grid^2, the council's tiles pooled);
+      a kind takes only its target types (config.MISSION_KINDS: attack an enemy group, hold a tile or our group ...):
+      the other pairs' logits are -inf, a kind with no target of its types there is not chosen; only our groups choose
     deployment place (the first plan only): a pointer to a tile of our zone                "Выбор мест расстановки"
     plan value: the critic of the plan, on the plan's cards (detached: its error does not  "Оценка замысла"
       move the rest)
@@ -253,6 +254,12 @@ class General(nn.Module):
         tpos[:, 0], tpos[:, 1] = f.reshape(-1) / POS_M, l.reshape(-1) / POS_M
         self.register_buffer("tile_pos", tpos, persistent=False)
         self.register_buffer("coarse", gtiles.coarse_index(sectors, cfg.target_grid), persistent=False)
+        # which (kind, target) pairs may be chosen: kind k with candidate c when its type (target_kind: our group, theirs,
+        # a coarse tile) is one config.MISSION_KINDS[k] takes - [K, 2G + C]
+        from tools.nn.general import config as gconfig
+        allow = torch.tensor(gconfig.allowed(gconfig.mission_kinds(cfg)), dtype=torch.bool)       # [K, 3]
+        types = target_kind(torch.arange(2 * G + self.C), G, self.C)
+        self.register_buffer("pair_ok", allow[:, types], persistent=False)
         self.norm_in = nn.LayerNorm(d)
         self.council = nn.ModuleList(Block(d, cfg.council_heads, cfg.ff) for _ in range(cfg.council_layers))
         self.norm_out = nn.LayerNorm(d)
@@ -329,14 +336,22 @@ class General(nn.Module):
         "place"} [P, G]. -> dict: the choices [P, G], "lp" [P, G] and "ent" [P, G] (the group's steps summed; 0 for a
         place that is not a group), "ent_parts" [P, G, 3] (kind, target, place), "value" [P], "lp_kind" [P, G] (the
         kind step's alone), "kind_logp" [P, G, K] (every kind's log-probability; uniform for a place that is not a
-        group). Targets: 0..G-1 our groups, G..2G-1 theirs, 2G.. the coarse tiles (target_kind)."""
+        group), "kind_ok" [P, G, K] (the kinds that may be chosen: some target of their types), "pairs" [P, G, 2] (the
+        (kind, target) pairs allowed, all kinds x the targets there are: the log's masked share). Targets: 0..G-1 our
+        groups, G..2G-1 theirs, 2G.. the coarse tiles (target_kind); a kind only with the target types it takes
+        (config.MISSION_KINDS: the pair_ok buffer)."""
         G = self.cfg.places
         g, tiles, active = c["groups"], c["tiles"], c["active"]
         d = g.shape[-1]
         mine = active[:, :G]                                                  # [P, G] our groups choose
         act = act or {}
+        cand_ok = torch.cat([active, c["coarse_ok"]], 1)                      # [P, 2G + C]
+        self_ = torch.eye(G, 2 * G + self.C, dtype=torch.bool, device=g.device)   # a group is not its own target
+        base_t = cand_ok[:, None, :] & ~self_[None] & mine[..., None]         # [P, G, 2G + C] the targets there are
+        pair = self.pair_ok.to(g.device)                                      # [K, 2G + C] the kinds' target types
+        # a kind may be chosen when some target there is of a type it takes (screen: another group of ours ...)
+        k_ok = (base_t[:, :, None, :] & pair[None, None]).any(-1)            # [P, G, K]
         k_logits = self.kind_q(g[:, :G]) @ self.kinds.t() / math.sqrt(d)      # [P, G, K]
-        k_ok = mine[..., None].expand(-1, -1, self.cfg.kinds)
         kind, lp_k, ent_k = categorical(k_logits, k_ok, act.get("kind"), greedy)
         # every kind's log-probability (the mission branches: the old log-probability, the alternatives' sampling)
         k_lg = k_logits.masked_fill(~k_ok, NEG)
@@ -344,9 +359,7 @@ class General(nn.Module):
         kc = self.kinds[kind]                                                 # [P, G, D]
         cand = torch.cat([g, c["coarse"]], 1)                                 # [P, 2G + C, D]
         keys = self.cand_k(cand)
-        cand_ok = torch.cat([active, c["coarse_ok"]], 1)                      # [P, 2G + C]
-        self_ = torch.eye(G, 2 * G + self.C, dtype=torch.bool, device=g.device)   # a group is not its own target
-        ok_t = cand_ok[:, None, :] & ~self_[None] & mine[..., None]
+        ok_t = base_t & pair[kind]                                            # only the kind's target types
         qt = self.target_q(torch.cat([g[:, :G], kc], -1))
         target, lp_t, ent_t = categorical(qt @ keys.transpose(1, 2) / math.sqrt(d), ok_t, act.get("target"), greedy)
         deploy = inp["deploy"].reshape(-1, 1)
@@ -363,9 +376,13 @@ class General(nn.Module):
                              masked_mean(tiles.detach(), inp["tile_ok"]), masked_mean(kc.detach(), mine),
                              inp["deploy"].to(g.dtype)[:, None]], -1)
         value = self.value(summary)[..., 0]
+        # the masked share (the log): the (kind, target) pairs a group may choose of all kinds x the targets there are
+        n_t = base_t.sum(-1).to(lp.dtype)
+        pairs_ok = (base_t[:, :, None, :] & pair[None, None]).sum((-1, -2)).to(lp.dtype)
         return {"kind": kind, "target": target, "place": place, "lp": lp, "ent": ent, "value": value,
                 "ent_parts": torch.stack([ent_k, ent_t, ent_p], -1) * m[..., None],
-                "lp_kind": lp_k * m, "kind_logp": kind_logp}
+                "lp_kind": lp_k * m, "kind_logp": kind_logp, "kind_ok": k_ok,
+                "pairs": torch.stack([pairs_ok, n_t * self.cfg.kinds], -1) * m[..., None]}
 
     def forward(self, inp, act=None, greedy=False):
         c = self.cards(inp)

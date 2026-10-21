@@ -201,3 +201,131 @@ def test_a_tiny_update_with_the_critics_return_logs_its_numbers():
     assert st["general_task_in_w"] >= 0.0
     fit = rt.distinct.fit(ready)
     assert 0.0 <= fit["distinct_acc"] <= 1.0 and fit["distinct_groups"] > 0
+
+
+def test_the_generals_update_comes_before_the_unit_networks_epochs():
+    """ppo.update runs learn.update first: its numbers are those of learn.update alone on the same weights (the unit
+    network's epochs, which move the general's weights through the task cards, come after it)."""
+    import copy
+    env = battles(B=4)
+    actor, crit = nets()
+    env.step(actor, crit)
+    env.general_rt.ret = "critic"
+    env.general_rt.r["t_plan"] -= 28.0
+    batch = rollout.collect(env, actor, crit, 4)
+    ready = batch["general"]["ready"]
+    assert ready is not None
+    L = learn.LearnConfig(epochs=1)
+    a1, c1 = copy.deepcopy(actor), copy.deepcopy(crit)
+    opt1 = torch.optim.Adam(list(a1.parameters()) + list(c1.parameters()), lr=1e-3)
+    torch.manual_seed(3)
+    st1 = learn.update(a1, opt1, ready, L)
+    a2, c2 = copy.deepcopy(actor), copy.deepcopy(crit)
+    opt2 = torch.optim.Adam(list(a2.parameters()) + list(c2.parameters()), lr=1e-3)
+    torch.manual_seed(3)
+    st2 = ppo.update(a2, c2, opt2, batch, dataclasses.replace(ppo.PPOConfig(), minibatch=8), general=L)
+    for k in ("general_kl_plan", "general_clip", "general_kl", "general_pl"):
+        assert st2[k] == st1[k], k
+    assert st1["general_clip"] < 0.01                                 # (the plans' weights: no step between)
+
+
+def test_the_clip_share_is_logged_apart_for_the_fresh_and_the_old_plans():
+    env = battles(B=4)
+    actor, crit = nets()
+    env.step(actor, crit)                                             # the deployment's plans: before the chunk (old)
+    rt = env.general_rt
+    rt.begin_chunk(env)
+    rt.r["t_plan"] -= 31.0
+    env.step(actor, crit)                                             # every row re-plans: the old plans end
+    rt.r["t_plan"] -= 31.0
+    env.step(actor, crit)                                             # ... and again: the fresh plans end
+    ready = rt.end_chunk()["ready"]
+    assert bool(ready["new"].any()) and bool((~ready["new"]).any())
+    opt = torch.optim.Adam(actor.parameters(), lr=1e-3)
+    st = learn.update(actor, opt, ready, learn.LearnConfig(epochs=1, minibatch=10 ** 6))
+    assert st["general_clip_fresh"] == 0.0 and st["general_clip_old"] == 0.0   # one step from the plans' own weights
+    assert 0.0 < st["general_fresh_share"] < 1.0
+
+
+def exec_chunk(weight, measure=True, teacher=0.0, T=4):
+    """A chunk of T decisions (every row re-plans inside it) with the missions measured and the executor's bonus at
+    weight (--general-exec), the teacher's share. -> (env, actor, critic, batch)."""
+    torch.manual_seed(7)
+    env = battles(B=4, mix={"self": 0.5, "nearest": 0.5})
+    actor, crit = nets()
+    torch.manual_seed(8)
+    env.step(actor, crit)
+    rt = env.general_rt
+    rt.ret, rt.gamma = "critic", 0.9997
+    rt.measure, rt.exec_w = measure, weight
+    rt.set_teacher(teacher)
+    rt.r["t_plan"] -= 28.0
+    torch.manual_seed(9)
+    return env, actor, crit, rollout.collect(env, actor, crit, T)
+
+
+def test_the_mission_bonus_leaves_the_reward_the_generals_return_and_the_critic_bit_for_bit():
+    """--general-exec: the bonus goes into the units' advantage only - the batch's reward and values, the general's
+    plans' targets and bases, the critic's update are those without it to the bit; the executor's update is not."""
+    _, a0, c0, b0 = exec_chunk(0.0, measure=False)
+    env, a1, c1, b1 = exec_chunk(1.0)
+    assert "exec" not in b0 and b1["exec"].shape == b1["reward"].shape + (env.N,)
+    assert float(b1["exec"].abs().sum()) > 0
+    for k in ("reward", "value", "done", "lp"):
+        assert torch.equal(b0[k], b1[k]), k
+    r0, r1 = b0["general"]["ready"], b1["general"]["ready"]
+    for k in ("ret", "base", "lp", "kind", "target"):
+        assert torch.equal(r0[k], r1[k]), k
+    cfg = dataclasses.replace(ppo.PPOConfig(), minibatch=8, target_kl=0.0)
+    outs = []
+    for a, c, b in ((a0, c0, b0), (a1, c1, b1)):
+        opt = torch.optim.Adam(list(a.parameters()) + list(c.parameters()), lr=1e-3)
+        torch.manual_seed(10)
+        outs.append(ppo.update(a, c, opt, b, cfg))
+    for (n, p), q in zip(c0.named_parameters(), c1.parameters()):
+        assert torch.equal(p, q), n                                    # the critic: not a bit moved by the bonus
+    assert outs[0]["value_loss"] == outs[1]["value_loss"]
+    assert any(not torch.equal(p, q) for p, q in zip(a0.parameters(), a1.parameters()))   # the executor: it is
+    assert "general_exec_adv_std" in outs[1] and outs[1]["general_exec_adv_std"] > 0
+
+
+def test_the_missions_are_measured_and_logged_by_kind():
+    env, actor, crit, batch = exec_chunk(1.0)
+    rt = env.general_rt
+    st = rt.take_stats()
+    names = [k.name for k in gconfig.MISSION_KINDS]
+    seen = [n for n in names if f"exec_{n}" in st]
+    assert seen and all(0.0 <= st[f"exec_{n}"] <= 1.0 for n in seen)
+    assert st["exec_units"] > 0 and st["exec_bonus_abs"] > 0 and st["exec_weight"] == 1.0
+    assert abs(st["exec_bonus"]) <= st["exec_bonus_abs"]
+    assert sum(st[f"kind_share_{n}"] for n in names) == pytest.approx(1.0, abs=2e-3)
+    assert 0.0 < st["masked_pairs"] < 1.0
+    assert all(math.isfinite(x) for x in st["exec_base"] if x == x)
+    # the paid units are our units with a group in a plan of the learner's
+    paid = batch["exec"] != 0
+    assert bool(paid.any())
+
+
+def test_the_teachers_plans_train_the_executor_and_not_the_general():
+    env, actor, crit, batch = exec_chunk(1.0, teacher=1.0)
+    rt = env.general_rt
+    taught = rt.r["teach"] & (rt.r["owner"] == 0)
+    assert bool(taught.any())                                          # the re-plans of the chunk are the teacher's
+    # their missions are the rule's: every own group's kind takes its target's type, no record for the general
+    for row in taught.nonzero().flatten().tolist():
+        for g in rt.r["active"][row, :GCFG.places].nonzero().flatten().tolist():
+            t = int(rt.r["target"][row, g])
+            tt = gconfig.TARGET_TYPES[0 if t < GCFG.places else 1 if t < 2 * GCFG.places else 2]
+            assert tt in gconfig.MISSION_KINDS[int(rt.r["kind"][row, g])].targets
+    assert batch["general"]["table"] is not None                       # the executor's cards: the teacher's plans too
+    st = rt.take_stats()
+    assert st["teach_share"] > 0
+    # the teacher's plans end: no record for the general's PPO
+    learner = rt.r["has"] & (rt.r["owner"] == 0)
+    n_free = int((learner & ~rt.r["teach"]).sum())                     # plans of the general's own still in force
+    rt.begin_chunk(env)
+    rt.r["t_plan"] -= 31.0
+    env.step(actor, crit)                                              # every plan ends at a re-plan
+    out = rt.end_chunk()
+    n = 0 if out["ready"] is None else out["ready"]["lp"].shape[0]
+    assert n == n_free < int(learner.sum()) and out["table"] is not None

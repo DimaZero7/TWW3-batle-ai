@@ -32,6 +32,7 @@ import numpy as np
 import torch
 
 from tools.nn.general import signal as gsignal
+from tools.nn.general.config import MISSION_KINDS
 from tools.nn.model import config as model_config
 from tools.nn.model import critic as model_critic
 from tools.nn.model import policy as model_policy
@@ -350,7 +351,8 @@ def with_general(actor, args):
                              entropy_place=args.general_entropy_place, epochs=args.general_epochs, value=args.general_value,
                              minibatch=args.general_minibatch, branches=args.general_branches,
                              branch_weight=args.general_branch_weight,
-                             distinct=args.general_distinct, distinct_decay=args.general_distinct_decay)
+                             distinct=args.general_distinct, distinct_decay=args.general_distinct_decay,
+                             exec=args.general_exec, exec_decay=args.general_exec_decay, teacher=args.general_teacher)
     print(f"general: {actor.gcfg}; learning {cfg}; return {args.general_return}; lr x {args.general_lr_mult:g}",
           flush=True)
     return actor, cfg
@@ -367,6 +369,9 @@ def general_brancher(args, glearn_cfg, device):
         price=args.general_branch_price, greedy=args.general_branch_greedy, seed=args.seed), device)
 
 
+MISSION_NAMES = {k.name for k in MISSION_KINDS}
+
+
 def general_text(g):
     """One log line of the general's stats (row["general"])."""
     kinds = " ".join(f"{x:.2f}" for x in g.get("kinds", []))
@@ -379,7 +384,8 @@ def general_text(g):
             f"{g.get('group_churn', 0):.3f} kind switch {g.get('kind_switch', 0):.3f}; "
             f"pl {g.get('pl', 0):+.3f} ent {g.get('ent', 0):.2f} (kind {g.get('ent_kind', 0):.2f} target "
             f"{g.get('ent_target', 0):.2f} place {g.get('ent_place', 0):.2f}) kl {g.get('kl', 0):.4f} (plans' own "
-            f"{g.get('kl_plan', 0):.4f}) clip {g.get('clip', 0):.2f} "
+            f"{g.get('kl_plan', 0):.4f}) clip {g.get('clip', 0):.2f} (fresh {g.get('clip_fresh', 0):.2f} old "
+            f"{g.get('clip_old', 0):.2f}) "
             f"value mse {g.get('value_mse', 0):.5f} ev {g.get('value_ev', 0):+.2f} return {g.get('return_mean', 0):+.4f}"
             + (f" critic ev {g['critic_ev']:+.2f}" if "critic_ev" in g else "")
             + f"; adv {g.get('adv_mean', 0):+.4f} sd {g.get('adv_std', 0):.4f}; task_in |W| {g.get('task_in_w', 0):.3f} "
@@ -392,7 +398,13 @@ def general_text(g):
             + (f"; distinct acc {g.get('distinct_acc', 0):.3f} (chance {g.get('distinct_chance', 0):.2f}) gain "
                f"{g.get('distinct_gain', 0):+.3f} bonus {g.get('distinct_bonus', 0):+.4f} w {g.get('distinct_weight', 0):.5f} "
                f"scale {g.get('distinct_scale', 0):.4f}"
-               if "distinct_weight" in g else ""))
+               if "distinct_weight" in g else "")
+            + ("; missions done " + " ".join(f"{k[5:]} {v:.2f}" for k, v in g.items()
+                                             if k.startswith("exec_") and k[5:] in MISSION_NAMES)
+               + f" (w {g.get('exec_weight', 0):g}, bonus |{g.get('exec_bonus_abs', 0):.3f}| a unit-decision, adv sd "
+               f"{g.get('exec_adv_std', 0):.3f}), masked pairs {g.get('masked_pairs', 0):.2f}"
+               + (f", teacher {g['teach_share']:.2f}" if "teach_share" in g else "")
+               if "exec_weight" in g else ""))
 
 
 def fighters_installed(args):
@@ -739,6 +751,7 @@ def _train(args, every=None, teacher=None, normal=None):
     pick_past()
     dlearn = None                                 # --general-distinct: the classifier (distinct.Learner)
     d_updates0 = int(carried.get("general_distinct_updates", 0))
+    e_updates0 = int(carried.get("general_exec_updates", 0))   # --general-exec-decay's counter over the chain
     t_warm = time.time()
     env.step(actor, critic)                       # compiles the simulator's step (not counted)
     if env.general_rt is not None:
@@ -755,6 +768,16 @@ def _train(args, every=None, teacher=None, normal=None):
             print(f"general distinct bonus: W {glearn_cfg.distinct:g} -> 0 over {glearn_cfg.distinct_decay} updates "
                   f"(from update {d_updates0} of the chain); classifier "
                   f"{'resumed from ' + str(args.init) if loaded else 'fresh'}", flush=True)
+        if glearn_cfg is not None:
+            # the missions' measures every decision (logged), the executor's bonus for them at --general-exec W (its
+            # decay's counter goes on over the chain), the teacher's share of the battles
+            env.general_rt.measure = True
+            env.general_rt.exec_w = gsignal.distinct_weight(glearn_cfg.exec, glearn_cfg.exec_decay, e_updates0)
+            env.general_rt.set_teacher(glearn_cfg.teacher)
+            print(f"general missions: the executor's bonus W {glearn_cfg.exec:g}"
+                  + (f" -> 0 over {glearn_cfg.exec_decay} updates (from update {e_updates0} of the chain)"
+                     if glearn_cfg.exec_decay else "") + f"; the teacher's share of the battles {glearn_cfg.teacher:g}",
+                  flush=True)
         # --general-branches P: a share of the learner's plans replayed with one group's mission kind changed
         env.general_rt.brancher = general_brancher(args, glearn_cfg, device)
         if env.general_rt.brancher is not None:
@@ -802,7 +825,8 @@ def _train(args, every=None, teacher=None, normal=None):
                           "ability_updates": ab_updates0 + (update if args.ability_branch else 0),
                           "observe_updates": observe.updates if observe is not None
                           else int(carried.get("observe_updates", 0)),
-                          "general_distinct_updates": d_updates0 + (update if dlearn is not None else 0)},
+                          "general_distinct_updates": d_updates0 + (update if dlearn is not None else 0),
+                          "general_exec_updates": e_updates0 + (update if glearn_cfg is not None else 0)},
                 **({"general_distinct": dlearn.state()} if dlearn is not None else {}),
                 **({"ability_critic": env.brancher.critic.state(),
                     "ability_critic_openloop": bool(env.brancher.cfg.openloop),
@@ -841,6 +865,9 @@ def _train(args, every=None, teacher=None, normal=None):
         if dlearn is not None:
             # --general-distinct: the bonus's weight of this collection (W down to 0 over --general-distinct-decay)
             dlearn.weight = gsignal.distinct_weight(glearn_cfg.distinct, glearn_cfg.distinct_decay, d_updates0 + update)
+        if glearn_cfg is not None and env.general_rt is not None:
+            # --general-exec: the mission bonus's weight of this collection (W down to 0 over --general-exec-decay)
+            env.general_rt.exec_w = gsignal.distinct_weight(glearn_cfg.exec, glearn_cfg.exec_decay, e_updates0 + update)
         batch = rollout.collect(env, actor, critic, args.steps)
         if env.men is not None and args.fighters_park:
             env.men.park(env.st)                      # the men off the card while the network learns (Men.park)
@@ -1432,7 +1459,7 @@ def parser():
     ap.add_argument("--general-group-layers", type=int, default=1, help="general: the group council's layers")
     ap.add_argument("--general-heads", type=int, default=4, help="general: attention heads of both councils")
     ap.add_argument("--general-places", type=int, default=10, help="general: group places a side")
-    ap.add_argument("--general-kinds", type=int, default=10,
+    ap.add_argument("--general-kinds", type=int, default=6,
                     help="general: mission kinds (the first of tools/nn/general/config.py MISSION_KINDS)")
     ap.add_argument("--general-target-grid", type=int, default=4,
                     help="general: a mission's target is a group or a tile of this coarse grid of the side's frame "
@@ -1507,6 +1534,21 @@ def parser():
     ap.add_argument("--general-distinct-decay", type=int, default=600,
                     help="general: the distinct bonus's W down to 0 linearly over this many updates of the chain (the "
                          "counter goes on over its parts; 0: no decay); the classifier goes on learning and is logged")
+    ap.add_argument("--general-exec", type=float, default=1.0,
+                    help="general: W, the executor's bonus for carrying out its missions (tools/nn/general/mission.py: "
+                         "every decision each unit's measure 0..1 of its group's mission kind - attack, hold, flank, "
+                         "screen, shoot, withdraw - towards its target): W x (the measure - its kind's running mean) "
+                         "into the unit's own advantage as a reward-to-go (in the normalised advantage's units: W = 1 "
+                         "pays one advantage std for a measure 1 above the mean) - never into the reward, so the critic "
+                         "and the general's return do not see it (0: measured and logged, not paid)")
+    ap.add_argument("--general-exec-decay", type=int, default=0,
+                    help="general: the mission bonus's W down to 0 linearly over this many updates of the chain (0: no "
+                         "decay)")
+    ap.add_argument("--general-teacher", type=float, default=0.0,
+                    help="general: P, the share of the learner's battles whose missions a scripted teacher gives "
+                         "(tools/nn/general/teacher.py: attack the nearest enemy group, shooters shoot, one group "
+                         "screens the shooters, a threatened lord withdraws); those plans train the executor only, not "
+                         "the general (0: off)")
     ap.add_argument("--eval-generated", type=int, default=512, help="random battles per opponent (EVAL_SEEDS)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")

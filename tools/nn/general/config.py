@@ -8,18 +8,37 @@ when the config is made (NotBuilt), so a run never thinks it has what it has not
 from dataclasses import asdict, dataclass, fields
 
 
+TARGET_TYPES = ("own", "enemy", "tile")     # a mission target's type (net.target_kind's 0, 1, 2)
+
+
 @dataclass(frozen=True)
 class MissionKind:
-    """One mission kind ("Виды заданий"): its number (the row of the general's learned kind table, the logs' "kind N")
-    and its name. Abstract for now: a name only - a kind's meaning (what carrying it out over a plan is, its executor's
-    payment) is added here, beside its name, and read by the code that checks it."""
+    """One mission kind ("Виды заданий"): its number (the row of the general's learned kind table, the logs' kind), its
+    name, the target types it takes (TARGET_TYPES: the general may not pair it with another - its logits there are
+    -inf, net.General.decide) and what carrying it out is (mission.py measures it every decision, 0..1 a unit; the
+    executor's bonus is that against its running mean, docs "Missions")."""
     index: int
     name: str
+    targets: tuple
+    meaning: str
 
 
 # Every mission kind, in one place: the network has GeneralConfig.kinds of them (the first kinds of this list; its
 # kind table's rows are these numbers). A new kind goes at the end (the trained rows keep their numbers).
-MISSION_KINDS = tuple(MissionKind(i, f"abstract_{i}") for i in range(10))
+MISSION_KINDS = (
+    MissionKind(0, "attack", ("enemy",), "close on the target group and fight it in melee"),
+    MissionKind(1, "hold", ("own", "tile"), "stand within reach of the target point (a tile's centre, a group's)"),
+    MissionKind(2, "flank", ("enemy",), "fight the target group from its side or rear"),
+    MissionKind(3, "screen", ("own",), "stand between the target group and the enemy nearest to it"),
+    MissionKind(4, "shoot", ("enemy",), "keep the target group in missile range, out of melee (no missiles: at a "
+                                        "distance)"),
+    MissionKind(5, "withdraw", ("own", "tile"), "go to the target point away from the enemy, out of melee"),
+)
+
+
+def allowed(kinds):
+    """[[bool] * len(TARGET_TYPES)] * len(kinds): which target types each kind takes."""
+    return [[t in k.targets for t in TARGET_TYPES] for k in kinds]
 
 
 def mission_kinds(cfg):

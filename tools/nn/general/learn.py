@@ -10,7 +10,10 @@
   plans); + an entropy bonus on each head apart (entropy_kind, entropy_target, entropy_place: the kind's ~ln 10 and the
   target's ~ln 36 are not one sum); the plan value ("Оценка замысла") regresses the return. The epochs' KL stop is
   against the policy at the update's start (the plans' own log-probabilities are older: their gap is logged apart,
-  kl_plan). No reward for carrying a mission out: the return is the battle's reward (v2).
+  kl_plan). No reward for carrying a mission out in the general's return: it is the battle's reward (v2) - the
+  executor's bonus for it (LearnConfig.exec, run.py --general-exec W) goes into the units' own advantage only
+  (ppo.update), so the general gains nothing by picking easy missions. The teacher's plans (LearnConfig.teacher) are
+  not among the ended plans: the general learns from its own choices only.
   With run.py --general-return critic the records carry "base" (the unit network's critic's value where the plan began)
   and the return is the critic's target (runtime.critic_target): the advantage is target - base (the critic explains
   ~0.995 of the return's spread); the plan value then only learns the same target beside it (its explained share
@@ -45,12 +48,20 @@ class LearnConfig:
     branch_weight: float = 1.0  # ... their term's weight in the general's loss
     distinct: float = 0.0      # the executor's bonus for missions that tell apart: its weight W (0: off; distinct.py)
     distinct_decay: int = 0    # ... down to 0 linearly over this many updates of the chain (0: no decay)
+    exec: float = 0.0          # the executor's bonus for carrying out its missions: its weight W (0: measured and
+    #                            logged, not paid; mission.py, runtime.execute)
+    exec_decay: int = 0        # ... down to 0 linearly over this many updates of the chain (0: no decay)
+    teacher: float = 0.0       # the share of the learner's battles whose missions the teacher gives (teacher.py)
 
     def __post_init__(self):
         if not 0.0 <= self.branches <= 1.0 or self.branch_weight < 0:
             raise ValueError("--general-branches is a share in [0, 1], --general-branch-weight >= 0")
         if self.distinct < 0 or self.distinct_decay < 0:
             raise ValueError("--general-distinct and --general-distinct-decay are >= 0")
+        if self.exec < 0 or self.exec_decay < 0:
+            raise ValueError("--general-exec and --general-exec-decay are >= 0")
+        if not 0.0 <= self.teacher <= 1.0:
+            raise ValueError("--general-teacher is a share in [0, 1]")
 
 
 def task_for(actor, table, obs):
@@ -108,7 +119,8 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None):
     """PPO of the general on the ended plans `ready` (runtime.end_chunk's: records [M, ..] with "ret", their return); branch: the
     mission branches' prices of the chunk (or None: no term). -> stats (general_*): policy loss, entropy (all and per
     head: ent_kind, ent_target, ent_place), KL (against the update's start; kl_plan: against the plans' own), clip
-    share, the plan value's loss and explained variance (before the step), plans, groups a plan; with branches their
+    share (and apart: clip_fresh of the plans begun in the chunk, clip_old of the older ones; fresh_share), the plan
+    value's loss and explained variance (before the step), plans, groups a plan; with branches their
     term's loss, KL, clip share and rows."""
     gen = actor.general
     params = list(gen.parameters())
@@ -131,6 +143,7 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None):
     if use_b:
         sums.update(branch_loss=0.0, branch_kl=0.0, branch_clip=0.0)
     n, stop = 0, False
+    cs = {"fresh": [0.0, 0.0], "old": [0.0, 0.0]}            # clipped groups, groups of the fresh and the old plans
     actor.train()
     for _ in range(cfg.epochs):
         if stop:
@@ -177,11 +190,23 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None):
                     sums[k] += float(parts[j])
                 sums["vl"] += float(vl)
                 sums["kl"] += kl
-                sums["clip"] += float((((ratio - 1).abs() > cfg.clip).float() * m).sum() / cnt)
+                out_c = ((ratio - 1).abs() > cfg.clip).float() * m
+                sums["clip"] += float(out_c.sum() / cnt)
+                if "new" in rec:
+                    # the plans begun in this chunk (made with the weights the update starts from) and the older ones
+                    for name, sel in (("fresh", rec["new"]), ("old", ~rec["new"])):
+                        mm = m * sel[:, None].float()
+                        cs[name][0] += float(out_c[sel].sum())
+                        cs[name][1] += float(mm.sum())
             n += 1
     actor.eval()
     out = {f"general_{k}": v / max(1, n) for k, v in sums.items()}
     out["general_kl_plan"] = kl_plan
+    for name, (c_n, g_n) in cs.items():
+        if g_n:
+            out[f"general_clip_{name}"] = c_n / g_n           # over all the steps' groups of those plans
+    if "new" in ready:
+        out["general_fresh_share"] = float(ready["new"].float().mean())
     out["general_value_ev"] = _ev(ready["value"].float(), target)
     out["general_value_mse"] = float(((ready["value"].float() - target) ** 2).mean())
     out["general_plans"] = float(M)

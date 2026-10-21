@@ -33,6 +33,14 @@ training (docs/en/training/general.md "How it runs").
   kinds, run, centre and path are summed (behave); a plan's end turns them into its groups' behaviour (behaviour: BEH
   numbers a group) and, at the bonus's weight, the classifier's bonus is added to the row's reward of that decision
   (take_bonus: after the reward went into the plans - the general's return has no bonus).
+* Carrying out the missions (run.py --general-exec W: `measure` on, `exec_w` = W): every decision, after its simulator
+  steps, each learner unit with a mission gets its measure 0..1 (execute; mission.py), summed by kind for the log; the
+  executor's bonus of the decision, W x (the measure - its kind's running mean), goes out with the decision (the
+  rollout's step "exec" [R, N]) into the units' own advantage (ppo.update, signal.exec_advantage) - never into the
+  reward: the unit critic and the general's return do not see it.
+* The teacher (run.py --general-teacher P: `teacher` = P): a share P of the battles (drawn at their start) has the
+  learner's missions made by the rule (teacher.py; the groups stay the network's); such plans ("teach") play and train
+  the executor but leave no record for the general's PPO, the classifier or the branches.
 * Mission branches (run.py --general-branches P: `brancher` is a branch.Brancher): every plan of the learner marks its
   rows "fresh" (every kind's log-probability is kept with the plan: kind_logp); the next decision's capture snapshots
   a share of them (branch.py) and clears the marks.
@@ -47,9 +55,12 @@ import numpy as np
 import torch
 
 from tools.nn.general import deploy as gdeploy
+from tools.nn.general import mission as gmission
 from tools.nn.general import signal as gsignal
+from tools.nn.general import teacher as gteacher
 from tools.nn.general import tiles as gtiles
 from tools.nn.general import units as gunits
+from tools.nn.general.config import mission_kinds
 from tools.nn.general.executor import has_task
 from tools.nn.general.net import CHOICES, INPUTS, POS_FEATURES, target_kind
 from tools.nn.model import observation as ob
@@ -62,7 +73,8 @@ LEARNER, PAST = 0, 2                    # league.LEARNER, league.CODE["past"] (l
 COUNTS = ("plans", "plans_deploy", "plans_replan", "groups_own", "groups_enemy", "deploys", "deploys_net", "laid_units",
           "replan_timer", "replan_broken", "replan_lord", "battles", "replans_ended", "distinct_bonus",
           "distinct_groups", "churn_units", "churn_moved", "kind_kept_groups", "kind_switched", "target_own",
-          "target_enemy", "target_tile")
+          "target_enemy", "target_tile", "exec_bonus", "exec_bonus_abs", "exec_units", "pairs_ok", "pairs_all",
+          "teach_plans")
 # a group's behaviour during a plan (Runtime.behaviour): its units' order kinds' shares, the run share, its centre's
 # displacement forward and sideways from the side's facing at the plan's start (/ 100 m, within +-5), its centre's path
 # (/ 100 m, at most 10), the plan's length (decisions / 60)
@@ -97,6 +109,7 @@ class Counts:
         self.v = torch.zeros(len(COUNTS), dtype=torch.float64, device=dev)
         self.kinds = torch.zeros(kinds, dtype=torch.float64, device=dev)
         self.places = torch.zeros(tiles, dtype=torch.float64, device=dev)
+        self.exec = torch.zeros(2, kinds, dtype=torch.float64, device=dev)     # the measures' sum and units a kind
 
     def add(self, name, x):
         self.v[COUNTS.index(name)] += x
@@ -106,8 +119,9 @@ class Counts:
 
     def take(self):
         # (copies: on the CPU .cpu().numpy() is the tensor's own memory, zeroed below)
-        out = dict(zip(COUNTS, self.v.tolist())), self.kinds.cpu().numpy().copy(), self.places.cpu().numpy().copy()
-        for t in (self.v, self.kinds, self.places):
+        out = (dict(zip(COUNTS, self.v.tolist())), self.kinds.cpu().numpy().copy(), self.places.cpu().numpy().copy(),
+               self.exec.cpu().numpy().copy())
+        for t in (self.v, self.kinds, self.places, self.exec):
             t.zero_()
         return out
 
@@ -138,6 +152,14 @@ class Runtime:
         self.distinct = None                      # --general-distinct: the classifier (distinct.Learner), behaviour on
         self.bonus = torch.zeros(2 * self.B, device=self.dev)    # the distinct bonus due to the rows' reward
         self.brancher = None                      # --general-branches: the mission branches (branch.Brancher)
+        # --general-exec: the missions' measures (mission.py) every decision, and the executor's bonus at weight exec_w
+        self.measure = False
+        self.exec_w = 0.0
+        self.exec_rate = 0.01                     # the kinds' running mean of the measure: this share of a decision's
+        self.exec_base = torch.full((gcfg.kinds,), float("nan"), device=self.dev)   # (NaN: none yet)
+        # --general-teacher P: the share of the learner's battles whose missions the teacher gives (teacher.py)
+        self.teacher = 0.0
+        self.teach_gen = None
 
     # --- storage ------------------------------------------------------------------------------------------------
     def _rows(self, R):
@@ -154,7 +176,8 @@ class Runtime:
              "b_kind": z(R, G, len(O.KINDS)), "b_run": z(R, G), "b_n": z(R, G), "b_c0": z(R, G, 2),
              "b_ok0": z(R, G, dt=Bo), "b_last": z(R, G, 2), "b_okl": z(R, G, dt=Bo), "b_path": z(R, G),
              "b_fwd": z(R, 2), "b_fwd_ok": z(R, dt=Bo),
-             "kind_logp": z(R, G, self.gcfg.kinds), "fresh": z(R, dt=Bo)}
+             "kind_logp": z(R, G, self.gcfg.kinds), "fresh": z(R, dt=Bo), "teach": z(R, dt=Bo),
+             "new": z(R, dt=Bo)}
         from tools.nn.general import army_input as ai
         r.update({"in/num": z(R, N, ai.SIZE), "in/lab": z(R, N, len(ai.LABELS), dt=L),
                   "in/pos": z(R, N, len(POS_FEATURES)), "in/prev_main": z(R, N, dt=L) - 1, "in/on": z(R, N, dt=Bo),
@@ -167,7 +190,7 @@ class Runtime:
         from tools.nn.general import army_input as ai
         z = (lambda *s, dt=torch.float32: torch.zeros(*s, dtype=dt, device=self.dev))
         return {"num": z(B, self.N, ai.SIZE), "lab": z(B, self.N, len(ai.LABELS), dt=torch.long),
-                "full": z(B, self.N, 2)}
+                "full": z(B, self.N, 2), "teach": z(B, dt=torch.bool)}
 
     def record(self, rows):
         """The plan records of rows [M] (net.INPUTS + PLAN: the plan's membership and numbering, choices,
@@ -281,15 +304,17 @@ class Runtime:
             sel = (owner == o).nonzero().squeeze(1)
             gen = self.actor_of(env, o).general
             c, d = gen(_take(inp, sel), greedy=self.greedy)
+            if o == 0 and self.teacher > 0:
+                d = self._teach(env, rows[sel], c, d)
             mix, kc = gen.unit_cards(c, d["kind"], c["main"])
             outs[o] = (sel, c, d, mix, kc)
         M, G, N = rows.numel(), self.G, self.N
         res = {k: None for k in ("main", "perm", "kind", "target", "place", "lp", "value", "mix", "kc", "places",
-                                 "active", "kind_logp")}
+                                 "active", "kind_logp", "pairs")}
         for o, (sel, c, d, mix, kc) in outs.items():
             vals = {"main": c["main"], "perm": c["perm"], "kind": d["kind"], "target": d["target"],
                     "place": d["place"], "lp": d["lp"], "value": d["value"], "mix": mix, "kc": kc,
-                    "places": c["places"], "active": c["active"], "kind_logp": d["kind_logp"]}
+                    "places": c["places"], "active": c["active"], "kind_logp": d["kind_logp"], "pairs": d["pairs"]}
             for k, v in vals.items():
                 if res[k] is None:
                     res[k] = v.new_zeros((M,) + tuple(v.shape[1:]))
@@ -320,6 +345,7 @@ class Runtime:
         r["lords"][rows] = torch.stack([own_alive, foe_alive], -1)
         r["t_plan"][rows] = env.st.t[b].float()
         r["n_dec"][rows] = 0
+        r["new"][rows] = True                     # begun in this chunk (begin_chunk: the plans in force are old)
         r["r_sum"][rows] = 0.0
         r["r_disc"][rows] = 0.0
         # the critic's value at the plan (a deployment's: the battle's first decision fills it, note_value)
@@ -331,8 +357,11 @@ class Runtime:
             r[k][rows] = False
         r["has"][rows] = True
         r["owner"][rows] = owner
+        r["teach"][rows] = ((owner == 0) & self.b["teach"][b]) if self.teacher > 0 else torch.zeros_like(owner,
+                                                                                                         dtype=torch.bool)
         if self.brancher is not None:
-            r["fresh"][rows] = owner == 0         # the learner's new plans: the mission branches' candidates
+            # the learner's new plans (not the teacher's): the mission branches' candidates
+            r["fresh"][rows] = (owner == 0) & ~r["teach"][rows]
         if deploy:
             r["n_replan"][rows] = 0
         else:
@@ -347,12 +376,30 @@ class Runtime:
         if deploy:
             self._layout(env, rows, res, inp, frame, u)
 
+    def _teach(self, env, rows, c, d):
+        """The general's choices d of the learner's rows [M] (cards c) with the teacher's missions where its battle is
+        taught (--general-teacher; teacher.py): kind and target replaced on the groups the rule gives one."""
+        b, s = rows % self.B, rows // self.B + 1
+        u = env.st.u
+        f = (lambda k: u[k][b])
+        side = f("side")
+        standing = (side > 0) & (f("men") > 0) & ~f("gone") & ~f("r")
+        kind, target, use = gteacher.choose(c["main"], c["active"], f("x"), f("z"), side == s[:, None], standing,
+                                            (f("range") > 0) & (f("a") > 0), f("lord"), self.G, self.gcfg.kinds)
+        use = use & self.b["teach"][b][:, None]
+        return dict(d, kind=torch.where(use, kind, d["kind"]), target=torch.where(use, target, d["target"]))
+
     def _count(self, rows, owner, res, inp, deploy, reason):
         """The log's counters of a planning call (the learner's plans only), on the device."""
         G, c = self.G, self.stats
-        mine = owner == 0
+        taught = self.r["teach"][rows]
+        c.add("teach_plans", ((owner == 0) & taught).sum())
+        mine = (owner == 0) & ~taught                  # the general's own plans (not the teacher's)
         act = res["active"]
         own_g = act[:, :G] & mine[:, None]
+        pairs = res["pairs"] * own_g[..., None]
+        c.add("pairs_ok", pairs[..., 0].sum())
+        c.add("pairs_all", pairs[..., 1].sum())
         c.add("plans", mine.sum())
         c.add(f"plans_{reason}", mine.sum())
         c.add("groups_own", own_g.sum())
@@ -429,6 +476,19 @@ class Runtime:
         self.stats.add("laid_units", laid_n)
 
     # --- the battle's hooks ---------------------------------------------------------------------------------------
+    def set_teacher(self, share):
+        """--general-teacher P: the share of the battles taught; the battles running now are drawn at once (their next
+        plans are the teacher's), the others at their start (start_battles)."""
+        self.teacher = float(share)
+        if self.teacher > 0:
+            self._draw_teach(torch.arange(self.B, device=self.dev))
+
+    def _draw_teach(self, idx):
+        # (its own generator: P = 0 draws nothing, the training's other random numbers are as without it)
+        if self.teach_gen is None:
+            self.teach_gen = torch.Generator(device=self.dev).manual_seed(7121)
+        self.b["teach"][idx] = torch.rand(len(idx), generator=self.teach_gen, device=self.dev) < self.teacher
+
     def start_battles(self, env, battles):
         """Battles [B] (bool) that (re)started: their units' slots, then the deployment's plans (both sides)."""
         if self.frozen or not bool(battles.any()):
@@ -437,6 +497,8 @@ class Runtime:
         keys = [env.st.keys[i] for i in idx.tolist()]
         num, lab, full = unit_table().battle(keys, self.dev)
         self.b["num"][idx], self.b["lab"][idx], self.b["full"][idx] = num, lab, full
+        if self.teacher > 0:
+            self._draw_teach(idx)                 # --general-teacher P: the battles whose learner plans it makes
         rows = torch.cat([idx, idx + self.B])
         self.r["has"][rows] = False
         self.r["owner"][rows] = -1
@@ -510,7 +572,7 @@ class Runtime:
     def _finish(self, rows, done, v_next=None):
         """The plans of rows end: ready records (the learner's, while training) with their return."""
         r = self.r
-        sel = r["has"][rows] & (r["owner"][rows] == 0)
+        sel = r["has"][rows] & (r["owner"][rows] == 0) & ~r["teach"][rows]    # (the teacher's plans: no record)
         if not self.training or not bool(sel.any()):
             return
         rr = rows[sel]
@@ -522,6 +584,7 @@ class Runtime:
             target, rec["base"] = self.critic_target(rr, done)
         rec["ret"] = target                       # the plan's return (learn.update's target)
         rec["done"] = torch.full_like(target, float(done))
+        rec["new"] = r["new"][rr].clone()         # begun in this chunk (learn.update: clip_fresh / clip_old)
         if self.distinct is not None:
             beh, ok = self.behaviour(rr)
             rec["beh"], rec["beh_ok"] = beh, ok
@@ -623,6 +686,40 @@ class Runtime:
         ok = (n > 0) & r["active"][rows][:, :G]
         return beh, ok
 
+    def execute(self, env, acting):
+        """After a decision's simulator steps (before after(): the plans in force are the decision's): how well each of
+        the learner's units with a mission carried it out (mission.measure, 0..1) into the log's sums by kind, and ->
+        the executor's bonus [R, N] of the decision (signal.exec_bonus: exec_w x (the measure - its kind's running mean
+        before this decision); 0 for the units not counted) or None (no measures, or exec_w 0: nothing to pay). acting
+        [R, N]: the units that decided. The bonus goes into the units' advantage only (ppo.update), never the reward."""
+        if self.frozen or not self.measure:
+            return None
+        rows, r, G, B = env.rows_learn, self.r, self.G, self.B
+        has = r["has"][rows] & (r["owner"][rows] == 0)
+        C = self.gcfg.target_grid ** 2
+        half = self.mcfg.grid_half / self.gcfg.target_grid             # a coarse tile's half side, m
+        m, ok, k = gmission.measure(env.st.u, rows % B, rows // B + 1, r["main"][rows], r["kind"][rows],
+                                    r["target"][rows], r["tgt"][rows], acting & has[:, None], G, C, half, self.gcfg)
+        K = self.gcfg.kinds
+        okf = ok.to(torch.float64)
+        kk = k.clamp(0, K - 1).reshape(-1)
+        tot = torch.zeros(2, K, dtype=torch.float64, device=self.dev)
+        tot[0].index_add_(0, kk, (m.double() * okf).reshape(-1))
+        tot[1].index_add_(0, kk, okf.reshape(-1))
+        self.stats.exec += tot
+        mean = (tot[0] / tot[1].clamp(min=1)).float()
+        seen = tot[1] > 0
+        first = torch.isnan(self.exec_base) & seen
+        base = torch.where(first, mean, self.exec_base)                 # (a kind's first decision: its own mean)
+        self.exec_base = torch.where(seen, base + self.exec_rate * (mean - base), base)
+        if not self.exec_w:
+            return None
+        bonus = gsignal.exec_bonus(m, torch.nan_to_num(base)[k.clamp(0, K - 1)], self.exec_w) * ok.float()
+        self.stats.add("exec_bonus", bonus.double().sum())
+        self.stats.add("exec_bonus_abs", bonus.double().abs().sum())
+        self.stats.add("exec_units", okf.sum())
+        return bonus
+
     def take_bonus(self, env):
         """The distinct bonus [R] due to the learner rows' reward of this decision (then zeroed)."""
         out = self.bonus[env.rows_learn]
@@ -690,6 +787,7 @@ class Runtime:
         r = self.r
         rows = (r["has"] & (r["owner"] == 0)).nonzero().squeeze(1)
         self.table = []
+        r["new"].zero_()                          # the plans in force were begun before this chunk
         self.tix.fill_(-1)
         if rows.numel() and self.learner is not None:
             rec = self.record(rows)
@@ -761,8 +859,14 @@ class Runtime:
         placed by the general), groups a plan (ours, theirs), the mission kinds' shares and their entropy, re-plans a
         battle and by reason, the most chosen deployment tiles ("row_column" of the side's 16 x 16), units laid out,
         the targets' shares (our group, theirs, a coarse tile; groups: both), the share of our units whose group number
-        changed at a re-plan (group_churn) and of our groups kept whose mission kind changed (kind_switch)."""
-        s, kinds, places = self.stats.take()
+        changed at a re-plan (group_churn) and of our groups kept whose mission kind changed (kind_switch); each kind's
+        share by name (kind_share_<kind>), the share of the (kind, target) pairs masked (masked_pairs); the teacher's
+        share of the learner's plans (teach_share); with the measures, each kind's mean measure a unit and decision
+        (exec_<kind>), the running means (exec_base) and the bonus paid a unit and decision (exec_bonus: signed, ~0 by
+        its baseline; exec_bonus_abs). The general's numbers are of its own plans (not the teacher's); the measures of
+        all the learner's."""
+        s, kinds, places, ex = self.stats.take()
+        names = mission_kinds(self.gcfg)
         n = max(1.0, s["plans"])
         tot = kinds.sum()
         p = kinds / tot if tot else kinds
@@ -785,4 +889,15 @@ class Runtime:
                 "group_churn": round(s["churn_moved"] / max(1.0, s["churn_units"]), 4),
                 "kind_switch": round(s["kind_switched"] / max(1.0, s["kind_kept_groups"]), 4),
                 **({"distinct_bonus": round(s["distinct_bonus"] / max(1.0, s["distinct_groups"]), 5),
-                    "distinct_weight": round(self.distinct.weight, 6)} if self.distinct is not None else {})}
+                    "distinct_weight": round(self.distinct.weight, 6)} if self.distinct is not None else {}),
+                **{f"kind_share_{k.name}": round(float(p[k.index]), 3) for k in names},
+                "masked_pairs": round(1.0 - s["pairs_ok"] / s["pairs_all"], 4) if s["pairs_all"] else 0.0,
+                **({"teach_share": round(s["teach_plans"] / (s["plans"] + s["teach_plans"]), 4)} if self.teacher > 0
+                   else {}),
+                **({f"exec_{k.name}": round(float(ex[0, k.index] / ex[1, k.index]), 4) for k in names
+                    if ex[1, k.index] > 0} if self.measure else {}),
+                **({"exec_base": [round(float(x), 4) for x in self.exec_base.tolist()],
+                    "exec_units": int(ex[1].sum()), "exec_weight": round(float(self.exec_w), 6)} if self.measure else {}),
+                **({"exec_bonus": round(s["exec_bonus"] / max(1.0, s["exec_units"]), 5),
+                    "exec_bonus_abs": round(s["exec_bonus_abs"] / max(1.0, s["exec_units"]), 5)}
+                   if self.measure and self.exec_w else {})}

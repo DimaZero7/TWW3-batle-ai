@@ -123,7 +123,17 @@ def test_the_other_kinds_are_never_the_chosen_one_and_the_policys_weight_is_one_
     alt, w = br.alternatives(logp, kind)
     assert alt.shape == (5, 64) and not bool((alt == kind[:, None]).any()) and torch.all(w == 1)
     assert set(alt.reshape(-1).tolist()) == set(range(10))
+    # only the kinds that take the group's target (valid): never another, every one of them
+    valid = torch.zeros(5, 10, dtype=torch.bool)
+    valid[:, [0, 3, 5]] = True
+    alt, w = br.alternatives(logp, torch.tensor([0, 3, 5, 3, 5]), valid)
+    assert torch.all(w == 1) and set(alt[0].tolist()) == {3, 5} and set(alt[1].tolist()) == {0, 5}
+    assert set(alt[2].tolist()) == {0, 3}
     br = gbranch.Brancher(gbranch.Config(share=1.0, copies=64, alt="policy"), "cpu")
+    alt, w = br.alternatives(logp, torch.tensor([0, 3, 5, 3, 5]), valid)
+    assert bool(valid.gather(1, alt).all()) and not bool((alt == torch.tensor([0, 3, 5, 3, 5])[:, None]).any())
+    p = logp.exp()
+    torch.testing.assert_close(w[0], 1 - p[0, 0] / (p[0, 0] + p[0, 3] + p[0, 5]))
     sure = logp.clone()
     sure[1] = torch.log_softmax(torch.tensor([0.0] * 3 + [50.0] + [0.0] * 6), -1)   # pi(chosen) ~ 1
     alt, w = br.alternatives(sure, kind)

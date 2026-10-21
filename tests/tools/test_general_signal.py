@@ -113,3 +113,42 @@ def test_the_branches_advantage_is_normalised_floored_and_clipped():
     assert np.allclose(signal.kind_advantage(price, w, 0.0, 5.0)[3], 0.0)    # pi(a) = 1: no signal
     big = signal.kind_advantage(np.array([1.0] + [0.0] * 99), np.ones(100), 0.0, 5.0)
     assert big[0] == pytest.approx(5.0)                                      # clipped
+
+
+def test_the_mission_bonus_pays_what_is_above_the_kinds_mean():
+    m = np.array([0.9, 0.3, 0.5])
+    np.testing.assert_allclose(signal.exec_bonus(m, 0.5, 2.0), [0.8, -0.4, 0.0])
+    assert np.all(signal.exec_bonus(m, 0.5, 0.0) == 0)                       # W = 0: nothing paid
+
+
+def test_the_mission_bonus_into_the_advantage_is_a_reward_to_go_cut_at_the_battles_end():
+    gl = 0.9
+    T, R, N = 200, 2, 3
+    bonus = np.zeros((T, R, N))
+    bonus[:, 0, 0] = 0.3                                                     # a steady bonus of one unit
+    done = np.zeros((T, R))
+    adv = signal.exec_advantage(bonus, done, gl)
+    assert adv[0, 0, 0] == pytest.approx(0.3, rel=1e-6)                      # x (1 - gl): a steady bonus counts once
+    assert np.all(adv[:, 1] == 0) and np.all(adv[:, 0, 1:] == 0)             # only that unit's
+    assert adv[-1, 0, 0] == pytest.approx(0.3 * (1 - gl))                    # the chunk's end: no future
+    one = np.zeros((T, R, N))
+    one[5, 1, 2] = 1.0                                                       # a bonus at decision 5 ...
+    a1 = signal.exec_advantage(one, done, gl)
+    assert a1[5, 1, 2] == pytest.approx(1 - gl) and a1[3, 1, 2] == pytest.approx((1 - gl) * gl ** 2)
+    assert np.all(a1[6:, 1, 2] == 0)                                         # ... credits the decisions up to it only
+    cut = done.copy()
+    cut[4, 1] = 1.0                                                          # the battle ended at 4: a new one from 5
+    a2 = signal.exec_advantage(one, cut, gl)
+    assert np.all(a2[:5, 1, 2] == 0) and a2[5, 1, 2] == pytest.approx(1 - gl)
+
+
+def test_every_target_type_is_taken_by_two_kinds_at_least():
+    """config.MISSION_KINDS: every kind takes some target types and says what it means; each target type is taken by
+    two kinds at least (the mission branches swap the kind and keep the target)."""
+    from tools.nn.general import config
+    ks = config.MISSION_KINDS
+    assert all(k.targets and set(k.targets) <= set(config.TARGET_TYPES) and k.meaning for k in ks)
+    al = config.allowed(ks)
+    assert len(al) == len(ks) and all(len(row) == len(config.TARGET_TYPES) for row in al)
+    for j, t in enumerate(config.TARGET_TYPES):
+        assert sum(row[j] for row in al) >= 2, t

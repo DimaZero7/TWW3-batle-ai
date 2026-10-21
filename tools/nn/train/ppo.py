@@ -31,8 +31,13 @@
   weight is negligible (store.NEGLIGIBLE) the term and its chunks are skipped; the anchor goes on by its own weight.
 * The general (S28, tools/nn/general/learn.py; batch["general"] from rollout.collect, an executor with a general): the
   executor's task input is computed again in every part from the chunk's plan table (learn.task_for, with the
-  gradient: the executor's loss reaches the general's network), and after the epochs the general takes its own PPO
-  steps on the plans that ended (learn.update; update's general= its LearnConfig, None: off). Its stats: general_*.
+  gradient: the executor's loss reaches the general's network); before the epochs the general takes its own PPO
+  steps on the plans that ended (learn.update; update's general= its LearnConfig, None: off; first, so its plans'
+  ratios start from the weights they were made with, not from those the executor's epochs moved). Its stats:
+  general_*.
+  The executor's bonus for carrying out its missions (batch["exec"] [T, R, N], run.py --general-exec) is each unit's
+  own part of its advantage (signal.exec_advantage, added to the side's normalised one): the policy loss's advantage is
+  then per unit; the reward, the returns and the critic are as without it.
 * The stats are summed on the device in float64 (Python's float arithmetic: the same numbers) and read once at the end;
   the GPU is read once a minibatch only (whether the gradient is finite, the KL for target_kl): a float() a stat (~30 a
   part, ~3500 an update) made the CPU wait for the GPU each time.
@@ -42,6 +47,7 @@ from dataclasses import dataclass
 
 import torch
 
+from tools.nn.general import signal as gsignal
 from tools.nn.model import eyes as meyes
 from tools.nn.model import heads as hd
 from tools.nn.train import head_entropy
@@ -106,9 +112,10 @@ def gae(rewards, values, dones, last_value, gamma, lam):
 
 
 def policy_loss(lp_new, lp_old, adv, mask, clip):
-    """Clipped surrogate per unit. lp_* [S, N], adv [S] (the side's), mask [S, N] -> (loss, clip share)."""
+    """Clipped surrogate per unit. lp_* [S, N], adv [S] (the side's) or [S, N] (each unit's: the side's + its own
+    mission bonus, --general-exec), mask [S, N] -> (loss, clip share)."""
     ratio = torch.exp(lp_new - lp_old)
-    a = adv[:, None]
+    a = adv[:, None] if adv.dim() == 1 else adv
     surrogate = torch.minimum(ratio * a, ratio.clamp(1 - clip, 1 + clip) * a)
     m = mask.float()
     n = m.sum().clamp(min=1)
@@ -485,16 +492,22 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
     """Some epochs of minibatch updates on one rollout (batch from rollout.collect). -> stats (_update). Under the
     ability head's own signal (cfg.ability_own) the gradient through the ability head's input is x
     cfg.ability_body_grad (AbilityInputGrad). general: the general's LearnConfig (tools/nn/general/learn.py): its PPO
-    steps on the batch's ended plans after the epochs (module doc); None: none."""
+    steps on the batch's ended plans before the unit network's epochs (module doc); None: none."""
     extra = (cfg.ability_epochs > 1 and train_policy and bool(cfg.ability) and batch.get("abil_branch") is not None
              and batch["action"].ability is not None)
-    with AbilityInputGrad(actor, cfg.ability_body_grad if cfg.ability_own else 1.0), ThoughtTap(actor, extra) as tap:
-        out = _update(actor, critic, opt, batch, cfg, train_policy, reference, teach, observe, tap if tap.on else None)
     ready = (batch.get("general") or {}).get("ready")
+    g_out = {}
     if general is not None and train_policy and ready is not None and getattr(actor, "gcfg", None) is not None:
         from tools.nn.general import learn as glearn
-        # (with --general-branches the chunk's mission kind prices: learn.update's branch term)
-        out.update(glearn.update(actor, opt, ready, general, branch=batch["general"].get("branch")))
+        # The general's PPO first: the unit network's epochs move the general's weights too (the executor's gradient
+        # through the task cards, learn.task_for: most of its tensors, each by ~lr with Adam however small the
+        # gradient), so after them its plans' ratios no longer start near 1 (build/diag_clip: clip 0.3-0.5 at kl_plan
+        # 0.02-0.06). It needs nothing of those epochs (the ended plans' records only). (With --general-branches the
+        # chunk's mission kind prices: learn.update's branch term.)
+        g_out = glearn.update(actor, opt, ready, general, branch=batch["general"].get("branch"))
+    with AbilityInputGrad(actor, cfg.ability_body_grad if cfg.ability_own else 1.0), ThoughtTap(actor, extra) as tap:
+        out = _update(actor, critic, opt, batch, cfg, train_policy, reference, teach, observe, tap if tap.on else None)
+    out.update(g_out)
     return out
 
 
@@ -520,6 +533,11 @@ def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refer
     and clip share on the priced rows are logged (ability_branch_kl, ability_branch_clip)."""
     adv, ret = gae(batch["reward"], batch["value"], batch["done"], batch["last_value"], cfg.gamma, cfg.lam)
     T, R = adv.shape
+    # the general's executor's bonus for carrying out its missions (--general-exec; tools/nn/general/runtime.execute):
+    # each unit's own part of its advantage [T, R, N] (a reward-to-go at gamma x lambda, in the normalised advantage's
+    # units), added to the side's after its normalisation; the reward, the returns and the critic do not see it
+    ex_adv = (gsignal.exec_advantage(batch["exec"].float(), batch["done"].float(), cfg.gamma * cfg.lam)
+              if batch.get("exec") is not None and train_policy else None)
     # The actor's and the critic's gradients are clipped apart (each to max_grad). Clipped together
     # (until 02.10), a critic loss's gradient (then the per-unit value's, norm 200-2000; the actor's
     # 0.2-0.5) scaled the actor's by 0.0006-0.0025: per parameter ~1e-8, far below Adam's eps 1e-5, so
@@ -587,6 +605,8 @@ def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refer
                 act = hd.Action(**{k: _rows(getattr(batch["action"], k), pidx) for k in kinds})
                 seq_act = chunk_action(batch["action"], pidx)
                 a = a_all[:, part].reshape(-1)
+                if ex_adv is not None:
+                    a = a[:, None] + _rows(ex_adv, pidx)                  # [S, N]: each unit's mission bonus too
                 # The critic first, its backward pass at once: the actor and the critic share no weights, so the
                 # gradients are those of one backward pass of the sum, and the critic's activations (~2.2 MB a
                 # decision) are freed before the actor's are made (the part's peak memory)
@@ -754,6 +774,13 @@ def _update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refer
             out["observe"].update(loss=obs_acc["loss"] / max(1, obs_n), **obs_loss.summary(obs_sums))
         observe.after()
     out["reward"] = float(batch["reward"].sum(0).mean())
+    if ex_adv is not None:
+        # the mission bonus's part of the units' advantage (the side's is normalised: std 1), over the units paid
+        paid = batch["exec"] != 0
+        if bool(paid.any()):
+            out["general_exec_adv_mean"] = float(ex_adv[paid].mean())
+            out["general_exec_adv_std"] = float(ex_adv[paid].std()) if int(paid.sum()) > 1 else 0.0
+            out["general_exec_paid"] = float(paid.float().mean())
     out["value_mean"] = float(batch["value"].mean())
     out["return_mean"] = float(ret.mean())
     out.update(critic_stats(batch, adv, ret))

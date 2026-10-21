@@ -242,11 +242,47 @@ def test_the_choices_keep_their_rules():
                     assert bool(ok[p, t - 2 * G])
                 kinds.add(int(gnet.target_kind(d["target"][p, g], G, C)))
                 assert bool(inp["zone"][p, int(d["place"][p, g])])
+                # the kind takes the target's type (config.MISSION_KINDS)
+                tt = gconfig.TARGET_TYPES[int(gnet.target_kind(d["target"][p, g], G, C))]
+                assert tt in gconfig.MISSION_KINDS[int(d["kind"][p, g])].targets
     assert kinds == {0, 1, 2}                                         # a fresh general picks groups too
     no = dict(inp, deploy=torch.zeros(4, dtype=torch.bool))
     with torch.no_grad():
         _, d = m(no)
     assert torch.all(d["place"] == -1)
+
+
+def test_a_kind_takes_only_its_target_types_and_one_without_a_target_is_not_chosen():
+    """The (kind, target) pairs a kind does not take (config.MISSION_KINDS targets) have no probability; a kind none of
+    whose target types is there (screen: no other group of ours) is not chosen; the masked share is logged."""
+    m, inp = model(), inputs(P=4)
+    C = CFG.target_grid ** 2
+    kinds = gconfig.MISSION_KINDS
+    pair = m.pair_ok
+    assert pair.shape == (CFG.kinds, 2 * G + C)
+    for k in kinds:
+        for c in range(2 * G + C):
+            tt = gconfig.TARGET_TYPES[int(gnet.target_kind(torch.tensor(c), G, C))]
+            assert bool(pair[k.index, c]) == (tt in k.targets)
+    with torch.no_grad():
+        c, d = m(inp)
+    mine = c["active"][:, :G]
+    # one group of ours only: no target for screen (our groups only), the others stay
+    one = c["main"].clone()
+    own_in = (one >= 0) & (one < G)
+    one[own_in] = 0
+    perm = c["perm"]
+    torch.manual_seed(4)
+    with torch.no_grad():
+        c1, d1 = m(dict(inp, main=one, perm=perm))
+    scr = gconfig.MISSION_KINDS[3]
+    assert scr.name == "screen"
+    assert not bool(d1["kind_ok"][:, 0, scr.index].any())
+    assert torch.all(d1["kind_logp"][:, 0, scr.index] < -1e6)
+    assert bool(d1["kind_ok"][:, 0, 0].all())                       # attack: their groups are there
+    # the masked share: pairs allowed <= all kinds x the targets there are, and less (a kind takes 1-2 of 3 types)
+    p = d["pairs"][mine]
+    assert torch.all(p[:, 0] <= p[:, 1]) and torch.all(p[:, 0] > 0) and float(p[:, 0].sum()) < float(p[:, 1].sum())
 
 
 def test_the_log_probability_under_the_choices_made_is_the_sampled_ones():
@@ -321,5 +357,6 @@ def test_the_mission_kinds_are_one_list():
     assert [k.index for k in ks] == list(range(len(ks))) and len({k.name for k in ks}) == len(ks)
     assert gconfig.GeneralConfig().kinds == len(ks)
     assert gconfig.mission_kinds(gconfig.GeneralConfig(kinds=4)) == ks[:4]
+    assert [k.name for k in ks] == ["attack", "hold", "flank", "screen", "shoot", "withdraw"]
     with pytest.raises(ValueError):
         gconfig.GeneralConfig(kinds=len(ks) + 1)

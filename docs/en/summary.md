@@ -267,13 +267,17 @@ Details: [input and design](training/model.md) · [idea](training/network.md).
 ## The general (S28, skeleton)
 
 A network above the unit network: it splits the army into groups (10 places a side; it sees where every unit stands),
-gives each group a mission (10 learned kinds — the list in `config.py` `MISSION_KINDS`; one target of ≤ 36: a group or
-a tile of a 4 × 4 grid) and a deployment place; the unit network — the "executor" — gets its group's mission as a new
-input (at zero weights at the start: it plays as before). Re-planning every 30 s of battle, on a broken group and on a
-lord's fall; a group keeps its number while it keeps its units. Both levels learn by PPO from the same reward v2 (the
-general with an honest probability ratio and the entropy per head), the general has a critic of its own (the "plan
-value"); line g1–g8 on the former design (262 target candidates, two targets, no unit positions) stayed uniformly
-random; by flags, the plan's advantage by the unit critic (`--general-return critic`) and the executor's bonus for
+gives each group a mission (6 kinds with a meaning — attack, hold, flank, screen, shoot, withdraw, the list in
+`config.py` `MISSION_KINDS`; one target of ≤ 36: a group or a tile of a 4 × 4 grid, each kind only with its target
+types) and a deployment place; the unit network — the "executor" — gets its group's mission as a new input (at zero
+weights at the start: it plays as before). Re-planning every 30 s of battle, on a broken group and on a lord's fall; a
+group keeps its number while it keeps its units. Both levels learn by PPO from the same reward v2 (the general with an
+honest probability ratio and the entropy per head), the general has a critic of its own (the "plan value"). The
+executor is paid for carrying out its mission (a measure 0…1 every decision from the simulator's state, `mission.py`;
+the bonus W × (measure − the kind's mean) goes into the unit's advantage only, not the reward: the critic and the
+general's return do not see it; `--general-exec`, default 1); a teacher general (`--general-teacher P`, default 0)
+gives the missions by rules in a share of the battles. Line g1–g8 on the former design (262 target candidates, two
+targets, no unit positions, abstract kinds) stayed uniformly random; by flags, the plan's advantage by the unit critic (`--general-return critic`) and the executor's bonus for
 missions that tell apart (`--general-distinct`, in units of the executor's advantage spread), the mission branches — a copy of the
 battle with another mission kind for one group, the exchange's difference is the kind choice's price
 (`--general-branches P`, an estimated +12–17 % to the step at 60 s). The whole loop is built as a skeleton, in the simulator, flag `run.py

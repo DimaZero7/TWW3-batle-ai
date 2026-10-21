@@ -795,7 +795,10 @@ class Battles:
                 gb.capture(self, info)
         r_rows, finished = self._play(parts, scripted, delay, attacks, rb, rs, each)
         d_rows = finished[rb]
+        executed = None
         if rt is not None:
+            # how the units carried out their missions (--general-exec): their bonus [R, N] (advantage, not reward)
+            executed = rt.execute(self, acting)
             rt.after(self, r_rows, finished)     # the reward into the plans; the ended battles' plans are ready
             if rt.distinct is not None and rt.distinct.weight > 0:
                 r_rows = r_rows + rt.take_bonus(self)   # the distinct bonus of the plans ended now (not the general's)
@@ -823,7 +826,7 @@ class Battles:
                 if c is not None:
                     c = dict(squeeze_received(c, rx_r), abil_row=abil_row)
         return {"obs": obs_r, "action": action, "lp": lp, "value": value, "reward": r_rows,
-                "done": d_rows, "critic_obs": c, "attacks": attacks, "teach": taught, "truth": truth}
+                "done": d_rows, "critic_obs": c, "attacks": attacks, "teach": taught, "truth": truth, "exec": executed}
 
     def _delay(self):
         """When the decision's orders land: None (a fixed step), or [B] the step per battle (a latency between steps:
@@ -1233,6 +1236,9 @@ def collect(env, actor, critic, T):
                                                    "side": env.bank.setup.arrays.side}
     for k in ("lp", "value", "reward", "done", "attacks"):
         out[k] = torch.stack([s[k] for s in steps])
+    if all(s.get("exec") is not None for s in steps):
+        # the executor's bonus for carrying out its missions [T, R, N] (ppo.update: the units' own advantage)
+        out["exec"] = torch.stack([s["exec"] for s in steps])
     if steps[0].get("teach") is not None:
         # the teachers: labels [T, R, N], where they count [T, R, N], the unit's teacher [T, R, N] (index into
         # names), the unit's battle labelled [T, R, N] (the share), the shares

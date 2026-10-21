@@ -258,7 +258,7 @@ def describe(rec, limit=6):
     for g in rec["groups"]:
         units = ", ".join(short(u) for u in g["units"][:limit])
         more = f" +{len(g['units']) - limit}" if len(g["units"]) > limit else ""
-        parts.append(f"{g['g']} [{units}{more}] kind {g['kind']} -> {tg(g['target'])}")
+        parts.append(f"{g['g']} [{units}{more}] kind {g.get('kind_name', g['kind'])} -> {tg(g['target'])}")
     return (f"general plan {rec['n']} t {rec['t']:.1f} s ({rec['reason']}): {len(rec['groups'])} groups, enemy "
             f"{len(rec['enemy'])} | " + " | ".join(parts))
 

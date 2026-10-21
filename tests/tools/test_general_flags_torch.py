@@ -49,7 +49,7 @@ def test_an_option_given_at_its_default_still_goes_over_the_saved_value():
     assert gcfg.deploy == "net" and over == {"deploy": ("script", "net")}
 
 
-@pytest.mark.parametrize("line", [("--general-card", "128"), ("--general-places", "8"), ("--general-kinds", "6"),
+@pytest.mark.parametrize("line", [("--general-card", "128"), ("--general-places", "8"), ("--general-kinds", "4"),
                                   ("--general-council-layers", "3"), ("--general-center", "0"),
                                   ("--general-target-grid", "2")])
 def test_a_size_option_against_the_saved_size_stops_the_run(line):

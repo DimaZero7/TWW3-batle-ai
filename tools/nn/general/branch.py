@@ -8,8 +8,9 @@ Capture (rollout.Battles.step -> Brancher.capture, after the decision's networks
 learner's plans made for this decision (Runtime marks them "fresh": a re-plan of this step, a deployment at the end of
 the step before) are taken with the chance `share`, within `cap` an update spread over the chunk's decisions and over
 the battle kinds' slots of the branch batch (the ability branches' way: ability_branch.composition). Of a taken plan
-one of its own groups is drawn (uniformly), and for every copy c another kind b_c (`alt`: "uniform" over the K - 1
-others, or "policy": by the general's probabilities without the chosen kind). The snapshot is ability_branch.snapshot
+one of its own groups is drawn (uniformly), and for every copy c another kind b_c that takes the group's target (its
+type: config.MISSION_KINDS - an enemy group: attack, flank, shoot; our group: hold, screen, withdraw; a tile: hold,
+withdraw), `alt`: "uniform" over those, or "policy": by the general's probabilities among them. The snapshot is ability_branch.snapshot
 (the battle before the decision's simulator steps, the networks' memories after it, the decision's orders, the
 general's plans in force); the plan's record (Runtime.record) and the kind's log-probability go with it.
 
@@ -189,22 +190,31 @@ class Brancher:
             room = {k: v * rounds for k, v in self.comp.items()}
         self.chunk = _Chunk(T=T, room=room, plans=torch.zeros((), device=env.device))
 
-    def alternatives(self, logp, kind):
+    def alternatives(self, logp, kind, valid=None):
         """The copies' other kinds [k, copies] and the prices' weights [k] of plans whose group's kind log-probabilities
-        are logp [k, K] and chosen kind `kind` [k] (Config.alt; signal.kind_advantage)."""
+        are logp [k, K] and chosen kind `kind` [k] (Config.alt; signal.kind_advantage). valid [k, K]: the kinds that
+        take the group's target (its type: config.MISSION_KINDS; None: all) - the other kind is one of them (each row
+        has one besides the chosen: capture's has_alt)."""
         k, K = logp.shape
         C = self.cfg.copies
         dev = logp.device
-        if self.cfg.alt == "uniform":
+        if valid is None and self.cfg.alt == "uniform":
             draw = torch.randint(0, K - 1, (k, C), generator=self.gen, device=dev)
             return gsignal.other_kind(draw, kind[:, None]), torch.ones(k, device=dev)
+        others = torch.ones(k, K, dtype=torch.bool, device=dev) if valid is None else valid.clone()
+        others[torch.arange(k, device=dev), kind] = False
+        flat = others.float() / others.float().sum(1, keepdim=True).clamp(min=1)
+        if self.cfg.alt == "uniform":
+            return torch.multinomial(flat, C, replacement=True, generator=self.gen), torch.ones(k, device=dev)
         p = logp.exp()
         pa = p.gather(1, kind[:, None])[:, 0]
-        q = p.scatter(1, kind[:, None], 0.0)
+        q = p * others.float()
         s = q.sum(1, keepdim=True)
-        flat = torch.ones_like(q).scatter(1, kind[:, None], 0.0) / (K - 1)
         q = torch.where(s > 1e-8, q / s.clamp(min=1e-12), flat)
-        return torch.multinomial(q, C, replacement=True, generator=self.gen), gsignal.policy_weight(pa)
+        # (the weight 1 - pi(chosen) is exact when the other kinds are all the rest; with the target's types only, it
+        # is 1 - pi(chosen) of the kinds that take that target, the same formula over them)
+        pv = pa / (pa + s[:, 0]).clamp(min=1e-12) if valid is not None else pa
+        return torch.multinomial(q, C, replacement=True, generator=self.gen), gsignal.policy_weight(pv)
 
     def capture(self, env, info):
         rt = env.general_rt
@@ -239,11 +249,22 @@ class Brancher:
                 return
             nz = nz[torch.tensor(keep, dtype=torch.long, device=nz.device)]
         K = r["kind_logp"].shape[-1]
-        g = torch.multinomial(r["active"][nz, :G].float(), 1, generator=self.gen)[:, 0]    # one own group a plan
+        # the kinds that take each group's target (its type; config.MISSION_KINDS): the swap keeps the target
+        pair = rt.learner.general.pair_ok.to(env.device)                                # [K, 2G + C]
+        valid = pair[:, r["target"][nz]].permute(1, 2, 0)                                # [k, G, K]
+        chosen = torch.nn.functional.one_hot(r["kind"][nz], K).bool()
+        can = r["active"][nz, :G] & (valid & ~chosen).any(-1)                            # a group with another kind
+        keep = can.any(-1)
+        if not bool(keep.all()):
+            nz, can = nz[keep], can[keep]
+            if not len(nz):
+                return
+            valid = valid[keep]
+        g = torch.multinomial(can.float(), 1, generator=self.gen)[:, 0]                 # one own group a plan
         kind = r["kind"][nz].gather(1, g[:, None])[:, 0]
         logp = r["kind_logp"][nz].gather(1, g[:, None, None].expand(-1, 1, K))[:, 0]       # [k, K]
         lp = logp.gather(1, kind[:, None])[:, 0]
-        alt, w = self.alternatives(logp, kind)
+        alt, w = self.alternatives(logp, kind, valid.gather(1, g[:, None, None].expand(-1, 1, K))[:, 0])
         b = nz % B
         ub, inv = torch.unique(b, return_inverse=True)
         c.snaps.append(ab.snapshot(env, ub, info))
