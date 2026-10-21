@@ -4,10 +4,15 @@
   update from the chunk's plan table (task_for: the general's cards with gradients, under the plans' locked membership
   and choices), so its loss reaches the group council, the group collection, the councils and the readers.
 * The general's choices (mission kind, target, deployment place: discrete, sampled) learn by PPO from the plans that
-  ended (update): each own group is an agent with its ratio of the plan's choices - the probability now / the one the
-  plan was made with (kept with the plan: a plan made before the last update is priced honestly) -, all groups of a
-  plan share its advantage = the plan's return - the plan value's prediction at the plan (normalised over the update's
-  plans); + an entropy bonus on each head apart (entropy_kind, entropy_target, entropy_place: the kind's ~ln 10 and the
+  ended (update): each own group is an agent with its ratio of the plan's choices (the joint log-probability of its
+  kind, target and place) - the probability now / a reference -, all groups of a plan share its advantage = the plan's
+  return - the plan value's prediction at the plan (normalised over the update's plans). The reference (stale plans):
+  a plan begun in this chunk was made with the weights the update starts from - its own log-probability; an older one
+  (begun before the last update: ~40 % of the ended plans with 30 s plans and 64 s chunks) - the policy at the update's
+  start (lp0), so its ratio starts at 1 and PPO's clip does not throw it away, and its lag behind the policy that made
+  it is a separate truncated importance weight c = min(1, exp(lp0 - lp_plan)) on its group's advantage (V-trace's
+  rho bar = 1: the data kept, the bias bounded). c = 1 for the fresh plans: the plain PPO bit for bit (records without
+  "new": all fresh). + an entropy bonus on each head apart (entropy_kind, entropy_target, entropy_place: the kind's ~ln 10 and the
   target's ~ln 36 are not one sum); the plan value ("Оценка замысла") regresses the return. The epochs' KL stop is
   against the policy at the update's start (the plans' own log-probabilities are older: their gap is logged apart,
   kl_plan). No reward for carrying a mission out in the general's return: it is the battle's reward (v2) - the
@@ -99,18 +104,35 @@ def pick(branch, idx):
     return {k: ({n: x[idx] for n, x in v.items()} if isinstance(v, dict) else v[idx]) for k, v in branch.items()}
 
 
+def kind_lp(d, group):
+    """The kind's log-probability [E] of each row's group (d: the general's output)."""
+    return d["lp_kind"].gather(1, group[:, None])[:, 0]
+
+
+def stale(lp_plan, lp0, new):
+    """(ref, w) of the ratio (module doc, "stale plans"): the plans begun in this chunk (new [M]) keep their own
+    log-probability lp_plan and the weight 1; the older ones take the update start's lp0 and c = min(1,
+    exp(lp0 - lp_plan)). lp_plan, lp0: [M] or [M, G]."""
+    fresh = new.reshape(new.shape + (1,) * (lp_plan.dim() - 1))
+    ref = torch.where(fresh, lp_plan, lp0)
+    w = torch.where(fresh, torch.ones_like(lp0), torch.exp((lp0 - lp_plan).clamp(max=0.0)))
+    return ref, w
+
+
 def branch_term(gen, branch, clip):
     """The mission branches' term (module doc) on branch (branch.Brancher.finish's: "rec" [E, ..], "group", "kind",
-    "lp", "adv" [E]) -> (loss: minus the mean clipped surrogate of the group's kind log-probability, KL, clip share)."""
+    "lp", "adv" [E]; with "ref" and "w" [E] (update's stale plans): the ratio's reference and the importance weight,
+    else the plan's own log-probability and 1) -> (loss: minus the mean clipped surrogate of the group's kind
+    log-probability, KL against the reference, clip share)."""
     rec = branch["rec"]
     _, d = gen(rec, act={k: rec[k] for k in CHOICES})
-    g = branch["group"]
-    lp = d["lp_kind"].gather(1, g[:, None])[:, 0]
-    ratio = torch.exp(lp - branch["lp"])
-    a = branch["adv"]
+    lp = kind_lp(d, branch["group"])
+    ref = branch.get("ref", branch["lp"])
+    ratio = torch.exp(lp - ref)
+    a = branch["adv"] * branch["w"] if "w" in branch else branch["adv"]
     surr = torch.minimum(ratio * a, ratio.clamp(1 - clip, 1 + clip) * a)
     with torch.no_grad():
-        kl = float((branch["lp"] - lp).mean())
+        kl = float((ref - lp).mean())
         cl = float(((ratio - 1).abs() > clip).float().mean())
     return -surr.mean(), kl, cl
 
@@ -119,7 +141,8 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None):
     """PPO of the general on the ended plans `ready` (runtime.end_chunk's: records [M, ..] with "ret", their return); branch: the
     mission branches' prices of the chunk (or None: no term). -> stats (general_*): policy loss, entropy (all and per
     head: ent_kind, ent_target, ent_place), KL (against the update's start; kl_plan: against the plans' own), clip
-    share (and apart: clip_fresh of the plans begun in the chunk, clip_old of the older ones; fresh_share), the plan
+    share (and apart: clip_fresh of the plans begun in the chunk, clip_old of the older ones; fresh_share; stale_w: the
+    older ones' mean importance weight c, branch_stale_w: the branches'), the plan
     value's loss and explained variance (before the step), plans, groups a plan; with branches their
     term's loss, KL, clip share and rows."""
     gen = actor.general
@@ -137,11 +160,28 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None):
                          for mb in torch.arange(M, device=target.device).split(cfg.minibatch)])
         mine0 = ready["active"][:, :G].float()
         kl_plan = float(((ready["lp"] - lp0) * mine0).sum() / mine0.sum().clamp(min=1))
+        new = ready["new"] if "new" in ready else torch.ones(M, dtype=torch.bool, device=target.device)
+        ref, w_is = stale(ready["lp"], lp0, new)          # the ratio's reference, the stale plans' weight [M, G]
+        old0 = mine0 * (~new)[:, None].float()
+        stale_w = float((w_is * old0).sum() / old0.sum()) if float(old0.sum()) else None
     sums = {"pl": 0.0, "ent": 0.0, "ent_kind": 0.0, "ent_target": 0.0, "ent_place": 0.0, "vl": 0.0, "kl": 0.0,
             "clip": 0.0}
     use_b = branch is not None and cfg.branch_weight > 0 and len(branch["adv"]) > 0
+    b_stale_w = None
     if use_b:
         sums.update(branch_loss=0.0, branch_kl=0.0, branch_clip=0.0)
+        if "new" in branch:
+            # the branches' plans the same way: one begun before this chunk (a deployment at the last step of the
+            # chunk before, captured in this one) takes the update start's kind log-probability and its weight
+            with torch.no_grad():
+                rb = branch["rec"]
+                lp0_b = torch.cat([kind_lp(gen(_rows(rb, mb), act=act_of(_rows(rb, mb)))[1], branch["group"][mb])
+                                   for mb in torch.arange(len(branch["adv"]), device=target.device)
+                                   .split(cfg.minibatch)])
+            b_ref, b_w = stale(branch["lp"], lp0_b, branch["new"])
+            branch = dict(branch, ref=b_ref, w=b_w)
+            b_old = ~branch["new"]
+            b_stale_w = float(b_w[b_old].mean()) if bool(b_old.any()) else None
     n, stop = 0, False
     cs = {"fresh": [0.0, 0.0], "old": [0.0, 0.0]}            # clipped groups, groups of the fresh and the old plans
     actor.train()
@@ -154,8 +194,8 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None):
             mine = rec["active"][:, :G]
             m = mine.float()
             cnt = m.sum().clamp(min=1)
-            ratio = torch.exp((d["lp"] - rec["lp"]) * m)
-            a = adv[mb][:, None]
+            ratio = torch.exp((d["lp"] - ref[mb]) * m)
+            a = adv[mb][:, None] * w_is[mb]                   # (x 1 for the fresh plans: the plain PPO bit for bit)
             surr = torch.minimum(ratio * a, ratio.clamp(1 - cfg.clip, 1 + cfg.clip) * a)
             pl = -(surr * m).sum() / cnt
             ent = (d["ent"] * m).sum() / cnt
@@ -174,7 +214,7 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None):
                                                                        [:cfg.minibatch])
                 bl, bkl, bcl = branch_term(gen, part, cfg.clip)
                 loss = loss + cfg.branch_weight * bl
-                sums["branch_loss"] += float(bl)
+                sums["branch_loss"] += float(bl.detach())
                 sums["branch_kl"] += bkl
                 sums["branch_clip"] += bcl
             opt.zero_grad(set_to_none=True)
@@ -207,6 +247,10 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None):
             out[f"general_clip_{name}"] = c_n / g_n           # over all the steps' groups of those plans
     if "new" in ready:
         out["general_fresh_share"] = float(ready["new"].float().mean())
+    if stale_w is not None:
+        out["general_stale_w"] = stale_w                 # the stale plans' mean importance weight (their groups)
+    if b_stale_w is not None:
+        out["general_branch_stale_w"] = b_stale_w
     out["general_value_ev"] = _ev(ready["value"].float(), target)
     out["general_value_mse"] = float(((ready["value"].float() - target) ** 2).mean())
     out["general_plans"] = float(M)

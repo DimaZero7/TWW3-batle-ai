@@ -247,6 +247,95 @@ def test_the_clip_share_is_logged_apart_for_the_fresh_and_the_old_plans():
     assert 0.0 < st["general_fresh_share"] < 1.0
 
 
+def old_and_fresh(seed=0):
+    """(actor, ready): a chunk's ended plans, some begun before it (old) and some in it (fresh)."""
+    env = battles(B=4)
+    actor, crit = nets(seed)
+    env.step(actor, crit)
+    rt = env.general_rt
+    rt.begin_chunk(env)
+    rt.r["t_plan"] -= 31.0
+    env.step(actor, crit)
+    rt.r["t_plan"] -= 31.0
+    env.step(actor, crit)
+    ready = rt.end_chunk()["ready"]
+    assert bool(ready["new"].any()) and bool((~ready["new"]).any())
+    return actor, ready
+
+
+def test_the_stale_weight_is_one_for_the_fresh_plans_and_truncated_for_the_old():
+    lp_plan = torch.tensor([[-1.0, -2.0], [-1.0, -2.0], [-1.0, -2.0]])
+    lp0 = torch.tensor([[-1.5, -1.0], [-1.5, -1.0], [-1.0, -2.0]])
+    new = torch.tensor([True, False, False])
+    ref, w = learn.stale(lp_plan, lp0, new)
+    assert torch.equal(ref[0], lp_plan[0]) and torch.equal(w[0], torch.ones(2))       # fresh: as the plain PPO
+    assert torch.equal(ref[1:], lp0[1:])                                                 # old: the update's start
+    assert float(w[1, 0]) == pytest.approx(math.exp(-0.5)) and float(w[1, 1]) == 1.0     # min(1, exp(lp0 - lp_plan))
+    assert torch.equal(w[2], torch.ones(2))
+    ref, w = learn.stale(lp_plan[:, 0], lp0[:, 0], new)                                  # [E]: the branches' shape
+    assert ref.shape == (3,) and float(w[1]) == pytest.approx(math.exp(-0.5))
+
+
+def test_with_fresh_plans_only_the_update_is_the_plain_ppo_bit_for_bit():
+    """All plans fresh: the same weights whether the records say so or carry no mark (the plain PPO on the plans'
+    own log-probabilities, the code before the stale plans' weight)."""
+    import copy
+    actor, ready = old_and_fresh()
+    fresh = {k: v[ready["new"]] for k, v in ready.items()}
+    plain = {k: v for k, v in fresh.items() if k != "new"}
+    outs = []
+    for rec in (fresh, plain):
+        a = copy.deepcopy(actor)
+        opt = torch.optim.Adam(a.parameters(), lr=1e-3)
+        torch.manual_seed(5)
+        st = learn.update(a, opt, rec, learn.LearnConfig(epochs=2, minibatch=4))
+        outs.append((a, st))
+    for (n, p), q in zip(outs[0][0].named_parameters(), outs[1][0].parameters()):
+        assert torch.equal(p, q), n
+    assert outs[0][1]["general_pl"] == outs[1][1]["general_pl"]
+    assert "general_stale_w" not in outs[0][1]
+
+
+def test_the_old_plans_ratio_starts_at_the_updates_policy_and_their_lag_is_a_weight():
+    """The general's weights moved after the plans were made (as an update between chunks does): the old plans are
+    not clipped at the first step (their ratio is against the update's start), their lag is the weight stale_w < 1;
+    the fresh ones (ratio against their own log-probability) are."""
+    actor, ready = old_and_fresh()
+    gen = actor.general
+    torch.manual_seed(1)
+    with torch.no_grad():
+        for p in gen.parameters():
+            p.add_(0.3 * torch.randn_like(p) * p.abs().mean())
+    G = gen.cfg.places
+    with torch.no_grad():
+        lp0 = gen(ready, act={k: ready[k] for k in learn.CHOICES})[1]["lp"]
+    old = ready["active"][:, :G] & ~ready["new"][:, None]
+    want = float(torch.exp((lp0 - ready["lp"]).clamp(max=0))[old].mean())
+    opt = torch.optim.Adam(actor.parameters(), lr=1e-3)
+    st = learn.update(actor, opt, ready, learn.LearnConfig(epochs=1, minibatch=10 ** 6))
+    assert st["general_clip_old"] == 0.0 and st["general_clip_fresh"] > 0.0
+    assert st["general_stale_w"] == pytest.approx(want, rel=1e-5) and 0.0 < st["general_stale_w"] < 1.0
+
+
+def test_the_replans_are_counted_per_ended_battle_and_per_its_minute():
+    env = battles(B=4)
+    actor, crit = nets()
+    env.step(actor, crit)                                             # the deployment
+    rt = env.general_rt
+    for _ in range(2):
+        rt.r["t_plan"] -= 31.0
+        env.step(actor, crit)                                         # every row re-plans
+    rt.take_stats()
+    finished = torch.zeros(env.B, dtype=torch.bool)
+    finished[0] = True
+    t = float(env.st.t[0])
+    rt.after(env, torch.zeros(env.R), finished)
+    s = rt.take_stats()
+    assert s["replans_per_battle"] == 2.0                              # both sides of battle 0: 2 re-plans each
+    assert s["battle_min"] == pytest.approx(t / 60, abs=0.01)
+    assert s["replans_per_min"] == pytest.approx(2.0 / (t / 60), rel=1e-3)
+
+
 def exec_chunk(weight, measure=True, teacher=0.0, T=4):
     """A chunk of T decisions (every row re-plans inside it) with the missions measured and the executor's bonus at
     weight (--general-exec), the teacher's share. -> (env, actor, critic, batch)."""

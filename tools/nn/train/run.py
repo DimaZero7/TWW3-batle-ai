@@ -377,7 +377,8 @@ def general_text(g):
     kinds = " ".join(f"{x:.2f}" for x in g.get("kinds", []))
     return (f"general: plans {g.get('plans', 0)} (deploy {g.get('deploy_plans', 0)}, by net {g.get('deploy_net_share', 0):.2f}), "
             f"groups own {g.get('groups_own', 0):.1f} enemy {g.get('groups_enemy', 0):.1f}, replans/battle "
-            f"{g.get('replans_per_battle', 0):.1f} {g.get('replan_reasons', {})}; kinds [{kinds}] entropy "
+            f"{g.get('replans_per_battle', 0):.1f} ({g.get('replans_per_min', 0):.2f} a minute of "
+            f"{g.get('battle_min', 0):.1f} min battles) {g.get('replan_reasons', {})}; kinds [{kinds}] entropy "
             f"{g.get('kind_entropy', 0):.2f}/{g.get('kind_entropy_max', 0):.2f}; places {g.get('places_top', {})}; "
             f"targets: groups {g.get('target_group', 0):.2f} (own {g.get('target_own', 0):.2f} enemy "
             f"{g.get('target_enemy', 0):.2f}) tiles {g.get('target_tile', 0):.2f}; re-plans: group churn "
@@ -385,7 +386,7 @@ def general_text(g):
             f"pl {g.get('pl', 0):+.3f} ent {g.get('ent', 0):.2f} (kind {g.get('ent_kind', 0):.2f} target "
             f"{g.get('ent_target', 0):.2f} place {g.get('ent_place', 0):.2f}) kl {g.get('kl', 0):.4f} (plans' own "
             f"{g.get('kl_plan', 0):.4f}) clip {g.get('clip', 0):.2f} (fresh {g.get('clip_fresh', 0):.2f} old "
-            f"{g.get('clip_old', 0):.2f}) "
+            f"{g.get('clip_old', 0):.2f}, old weight {g.get('stale_w', 1):.2f}) "
             f"value mse {g.get('value_mse', 0):.5f} ev {g.get('value_ev', 0):+.2f} return {g.get('return_mean', 0):+.4f}"
             + (f" critic ev {g['critic_ev']:+.2f}" if "critic_ev" in g else "")
             + f"; adv {g.get('adv_mean', 0):+.4f} sd {g.get('adv_std', 0):.4f}; task_in |W| {g.get('task_in_w', 0):.3f} "

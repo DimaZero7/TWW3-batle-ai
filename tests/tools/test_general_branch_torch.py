@@ -217,6 +217,12 @@ def test_the_terms_old_log_probability_is_the_plans_and_its_gradient_reaches_the
     actor.train()
     _, kl, _ = learn.branch_term(gen, br, 0.2)
     assert abs(kl) < 1e-5                                             # the ratio starts at 1
+    assert bool(br["new"].all())                                      # (the plans re-planned in the chunk: fresh)
+    _, kl2, _ = learn.branch_term(gen, dict(br, ref=br["lp"] + 0.1, w=torch.ones(len(br["adv"]))), 0.2)
+    assert kl2 == pytest.approx(kl + 0.1, abs=1e-5)                   # the reference, when given
+    loss0, _, _ = learn.branch_term(gen, dict(br, adv=torch.randn(len(br["adv"])),
+                                              w=torch.zeros(len(br["adv"]))), 0.2)
+    assert float(loss0.detach()) == 0.0                                       # the weight multiplies the advantage
     br = dict(br, adv=torch.randn(len(br["adv"])))
     gen.zero_grad(set_to_none=True)
     loss, _, _ = learn.branch_term(gen, br, 0.2)
@@ -233,6 +239,27 @@ def test_the_terms_old_log_probability_is_the_plans_and_its_gradient_reaches_the
     st = updated(actor, crit, batch, True, 1.0)
     for k in ("general_branch_loss", "general_branch_kl", "general_branch_rows"):
         assert k in st and st[k] == st[k], k
+    assert "general_branch_stale_w" not in st                         # all fresh: no stale weight
+
+
+def test_a_branch_of_a_plan_begun_before_the_chunk_takes_the_updates_reference_and_a_weight():
+    env, actor, crit, batch = collected(True)
+    br = batch["general"]["branch"]
+    E = len(br["adv"])
+    new = torch.arange(E) % 2 == 0                                    # half of them as if begun before the chunk
+    gen = actor.general
+    torch.manual_seed(1)
+    with torch.no_grad():
+        for p in gen.parameters():
+            p.add_(0.3 * torch.randn_like(p) * p.abs().mean())       # (the weights moved since those plans)
+        rec = br["rec"]
+        lp0 = learn.kind_lp(gen(rec, act={k: rec[k] for k in learn.CHOICES})[1], br["group"])
+    want = float(torch.exp((lp0 - br["lp"]).clamp(max=0))[~new].mean())
+    opt = torch.optim.Adam(actor.parameters(), lr=1e-3)
+    st = learn.update(actor, opt, batch["general"]["ready"], learn.LearnConfig(epochs=1, minibatch=10 ** 6,
+                                                                              branches=1.0),
+                      branch=dict(br, new=new))
+    assert st["general_branch_stale_w"] == pytest.approx(want, rel=1e-5) and st["general_branch_stale_w"] <= 1.0
 
 
 def test_no_branches_at_zero_and_the_flags_reach_the_config():

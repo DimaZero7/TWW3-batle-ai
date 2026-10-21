@@ -74,7 +74,7 @@ COUNTS = ("plans", "plans_deploy", "plans_replan", "groups_own", "groups_enemy",
           "replan_timer", "replan_broken", "replan_lord", "battles", "replans_ended", "distinct_bonus",
           "distinct_groups", "churn_units", "churn_moved", "kind_kept_groups", "kind_switched", "target_own",
           "target_enemy", "target_tile", "exec_bonus", "exec_bonus_abs", "exec_units", "pairs_ok", "pairs_all",
-          "teach_plans")
+          "teach_plans", "battle_min")
 # a group's behaviour during a plan (Runtime.behaviour): its units' order kinds' shares, the run share, its centre's
 # displacement forward and sideways from the side's facing at the plan's start (/ 100 m, within +-5), its centre's path
 # (/ 100 m, at most 10), the plan's length (decisions / 60)
@@ -566,6 +566,7 @@ class Runtime:
             mine = r["has"][rows] & (r["owner"][rows] == 0)
             self.stats.add("battles", mine.sum())
             self.stats.add("replans_ended", (r["n_replan"][rows] * mine).sum())
+            self.stats.add("battle_min", (env.st.t[rows % self.B].double() * mine).sum() / 60.0)   # their length
             r["has"][rows] = False
             r["owner"][rows] = -1
 
@@ -857,7 +858,9 @@ class Runtime:
     def take_stats(self):
         """The log's numbers since the last call (one read of the device): plans (all, at the deployment, the share
         placed by the general), groups a plan (ours, theirs), the mission kinds' shares and their entropy, re-plans a
-        battle and by reason, the most chosen deployment tiles ("row_column" of the side's 16 x 16), units laid out,
+        battle (of the battles that ended since the last call: early in a run only the short ones have, so it grows
+        with their length) and a minute of those battles (replans_per_min: ~2 at 30 s plans, the events above it;
+        battle_min: their mean length in minutes) and by reason, the most chosen deployment tiles ("row_column" of the side's 16 x 16), units laid out,
         the targets' shares (our group, theirs, a coarse tile; groups: both), the share of our units whose group number
         changed at a re-plan (group_churn) and of our groups kept whose mission kind changed (kind_switch); each kind's
         share by name (kind_share_<kind>), the share of the (kind, target) pairs masked (masked_pairs); the teacher's
@@ -881,6 +884,8 @@ class Runtime:
                 "kinds": [round(float(x), 3) for x in p], "kind_entropy": round(ent, 3),
                 "kind_entropy_max": round(math.log(self.gcfg.kinds), 3),
                 "replans_per_battle": round(s["replans_ended"] / max(1.0, s["battles"]), 2),
+                "replans_per_min": round(s["replans_ended"] / s["battle_min"], 3) if s["battle_min"] else 0.0,
+                "battle_min": round(s["battle_min"] / max(1.0, s["battles"]), 2),
                 "replan_reasons": {k: int(s[f"replan_{k}"]) for k in ("timer", "broken", "lord")},
                 "places_top": {f"{int(i) // n_s}_{int(i) % n_s}": int(places[i]) for i in top if places[i] > 0},
                 "laid_units": int(s["laid_units"]),

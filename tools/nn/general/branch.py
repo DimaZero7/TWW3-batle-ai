@@ -82,7 +82,8 @@ class _Chunk:
     t: int = 0
     snaps: list = field(default_factory=list)
     recs: list = field(default_factory=list)          # the taken plans' records (Runtime.record)
-    entries: list = field(default_factory=list)       # per capture {"t", "side", "group", "kind", "lp", "alt", "w", "at"}
+    entries: list = field(default_factory=list)       # per capture {"t", "side", "group", "kind", "lp", "alt", "w", "at",
+    #                                                   "new": the plan begun in this chunk (learn.update's stale plans)}
     n_battles: int = 0
     taken: int = 0
     room: dict = None                                 # {battle kind: slots left} with a cap
@@ -270,7 +271,7 @@ class Brancher:
         c.snaps.append(ab.snapshot(env, ub, info))
         c.recs.append(rt.record(nz))
         c.entries.append({"t": torch.full_like(nz, t), "side": nz // B + 1, "group": g, "kind": kind, "lp": lp,
-                          "alt": alt, "w": w.float(), "at": c.n_battles + inv})
+                          "alt": alt, "w": w.float(), "at": c.n_battles + inv, "new": r["new"][nz].clone()})
         c.n_battles += len(ub)
         c.taken += len(nz)
 
@@ -313,7 +314,7 @@ class Brancher:
         self.stats = st
         self.copies = diff
         return {"rec": _cat(c.recs), "group": e["group"], "kind": e["kind"], "lp": e["lp"], "adv": adv,
-                "price": price}
+                "price": price, "new": e["new"]}
 
     def _play(self, env, actor, snap, e):
         """The entries' branches in batches of the fixed composition (ability_branch.Brancher._play's way) ->

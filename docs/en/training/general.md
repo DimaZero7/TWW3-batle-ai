@@ -144,10 +144,18 @@ PPO on two levels (`learn.py`):
   plans' probability ratio did not start at 1 (clip 0.3–0.5 at `kl_plan` 0.02–0.06, `build/diag_clip`). The order's
   price: the executor's epochs start from task cards already after the general's step (the executor's probabilities in
   its first step are slightly not those of the play); the general's step is bounded by the KL 0.03 of its choices. The
-  clipped share is logged apart for the plans begun in this chunk (`clip_fresh`) and the older ones (`clip_old`). **The ratio is honest:** a plan keeps the log-probability it was chosen with, and the
-  ratio is "the policy now / the policy that chose", for a plan begun before the last update too. The epochs stop when
-  the KL a group **from the policy at the update's start** passes 0.03 (its probabilities are computed once without
-  gradients before the epochs); the gap between it and the plans' own probabilities is logged as `kl_plan`.
+  clipped share is logged apart for the plans begun in this chunk (`clip_fresh`) and the older ones (`clip_old`). A
+  plan keeps the log-probability it was chosen with (`lp_plan`, the sum over the heads kind + target + place). **Old
+  plans.** A plan lives up to 30 s, a chunk is 64 s, so ~40 % of the ended plans were begun in the previous chunk, that
+  is by the previous policy (before the last update). With their ratio counted from `lp_plan` it is far from 1 from
+  the first step and PPO clips almost all of them (g10: `clip_old` 0.6–0.8 at `clip_fresh` 0–0.06) — ~40 % of the
+  general's data is lost. So the ratio is counted from `lp0` — the probability of **the policy at the update's start**
+  (once, without gradients, before the epochs): for an old plan it starts at 1. The old plan's lag is a separate
+  truncated weight on its advantage: `c = min(1, exp(lp0 − lp_plan))` (as in V-trace: the data are kept, the bias is
+  bounded; a weight a group, on the same sum of the heads as the ratio). For a plan begun in this chunk `lp0` and
+  `lp_plan` come from the same weights: `lp_plan` itself is taken and `c = 1`, the plain PPO to the bit (test). The
+  old plans' mean `c` is logged as `stale_w`. The epochs stop when the KL a group from the policy at the update's
+  start passes 0.03; the gap between it and the plans' own probabilities is logged as `kl_plan`.
 - **The return by the unit critic** (`--general-return critic`, off by default). Why: with `span` nearly all of the
   return's spread (98.6 % in the analysis of the g1 points) is in the battle's last plans (±1 for the win), the
   deployment's return spreads ~0.004, and the plan value explains ~0 — the general has nothing to learn from. The unit
@@ -280,7 +288,12 @@ group with another kind".
 - **Training.** Every PPO step of the general adds `--general-branch-weight` (1) × a clipped PPO term on the log of
   this group's kind probability (`learn.branch_term`: the plan computed again from its record, the gradient reaches the
   cards, the councils and the army readers as the general's PPO does; targets and places are not touched). The old
-  probability is the plan's own (the ratio starts at 1, test). The same number of steps, the same KL stop.
+  probability is the plan's own (the ratio starts at 1, test). The branches take only the plans made in this chunk,
+  with one exception: a deployment at the last step of the previous chunk is captured at this one's first decision.
+  Such a branch is an old plan and counts as the old plans above: the ratio from the kind's `lp0`, the weight `c`
+  (`branch_stale_w`). The same number of steps, the same KL stop. `branch_clip` 0.15–0.40 in g9 does not come from
+  old plans: the branch term is at most 64 rows, and every general step (10–14 an update) trains on the same rows
+  again, so the ratio leaves the clip range within the update.
 - **P = 0**: no branches, nothing changes (test: with branches and the term's weight 0 the batch, the battles and the
   weights after the update are the same to the bit as without branches).
 
@@ -345,7 +358,8 @@ The run's `log.jsonl`, field `general` (and the `general:` line of the output):
 | `kind_switch` | the share of our groups (the number alive before and after a re-plan) whose mission kind changed |
 | `places_top` | the most chosen deployment tiles (`row_column` of the side's 16 × 16 grid: the row is forward) |
 | `deploy_net_share` | the share of deployments made by the general (the rest scripted: the zone did not fit) |
-| `replans_per_battle`, `replan_reasons` | re-plans a battle and by reason (timer, broken group, lord) |
+| `replans_per_battle`, `replan_reasons` | re-plans a battle (of the battles that ended during the update) and by reason (timer, broken group, lord). It grows with the battle's length: all battles start together, in the first updates only the short ones end (g10: 10 a battle at ~5 min battles, 20–22 at ~10–11 min; the battle's limit is 3600 s, not 600) |
+| `replans_per_min`, `battle_min` | re-plans a minute of the same battles (~2 at 30 s plans, above it — the events) and their mean length in minutes |
 | `value_mse`, `value_ev` | the plan value's error on the update's plans (before the step) and its explained share |
 | `critic_ev` | (`--general-return critic`) the explained share of the plan's target by the unit critic's value at the plan's start |
 | `return_mean`, `return_std` | the mean and the spread of the plan's target (return) |
@@ -355,6 +369,7 @@ The run's `log.jsonl`, field `general` (and the `general:` line of the output):
 | `distinct_bonus`, `distinct_weight`, `distinct_scale` | the mean bonus paid a group, W now and σ (the executor's advantage spread) |
 | `pl`, `ent`, `kl`, `clip` | the general's PPO: loss, the choices' entropy a group (the heads' sum), KL from the policy at the update's start, clipped share |
 | `clip_fresh`, `clip_old`, `fresh_share` | the clipped share of the plans begun in this chunk and of those begun earlier; the first ones' share of the ended plans |
+| `stale_w`, `branch_stale_w` | the mean weight `c = min(1, exp(lp0 − lp_plan))` of the old plans (their groups) and of the old branches; 1 — the plan did not lag |
 | `ent_kind`, `ent_target`, `ent_place` | the entropy per head a group (the kind's at most ln 6 = 1.79, the target's ~ln 36 = 3.6 without the mask; the place's only at a deployment) |
 | `kl_plan` | the KL from the probabilities the plans were chosen with to the policy at the update's start (how much "older" the plans are than the policy) |
 | `branch_plans`, `branch_branches`, `branch_taken_share` | (`--general-branches`) the learner's new plans a chunk, how many were played as branches, their share |
@@ -454,8 +469,11 @@ Line g1–g8 (8 steps of 40 min, ~280 updates, from `itS27_4`) learned nothing o
   a closed circle. Now 6 kinds with a meaning, a measure of carrying them out and the executor's bonus
   ([above](#missions)).
 - **The plans' probabilities overwritten at a chunk's start** by the policy of the moment (PPO's ratio started at 1 for
-  a plan chosen before the update too; the general's KL 0.0001–0.005, `clip` ≈ 0). That is a bias; the ratio is honest
-  now.
+  a plan chosen before the update too; the general's KL 0.0001–0.005, `clip` ≈ 0). That is a bias: the plan's lag was
+  lost altogether.
+- **The old plan's ratio from its own probability** (the plain PPO on all plans): the old plans (~40 %) were clipped
+  almost all (g10: `clip_old` 0.6–0.8, `clip_fresh` 0–0.06) — their data were lost. Now — from `lp0` and the weight `c`
+  ([above](#training)).
 - **The distinct bonus without a scale** (W 0.003, decay over 150 updates): ~0.0002 a group against the battle
   return's spread of ~0.8 — 3–4 orders of magnitude below the signal, decayed to 0 by g6; `distinct_acc` 0.13–0.31 at a
   chance of 0.1. The executor did not listen to the task: zeroing the task changed the decisions by a KL of 0.0023
@@ -580,7 +598,11 @@ Tests at build time (group 1 of the design's "Checks" pages):
   and bases and the critic's step are those without it to the bit, the executor's step is not; the measures by kind,
   the kinds' shares, the mask in the log; the teacher's plans train the executor (they are in the chunk's table) but
   give the general no record; the general's update in `ppo.update` comes before the executor's epochs (its numbers are
-  those of `learn.update` alone to the bit); `clip_fresh` and `clip_old` are logged apart.
+  those of `learn.update` alone to the bit); `clip_fresh` and `clip_old` are logged apart; the old plan's weight is 1
+  for the fresh ones and `min(1, exp(lp0 − lp_plan))` for the old ones; with fresh plans only the update is to the bit
+  that without the mark (the plain PPO); with the general's weights moved after the plans the old ones are not clipped
+  at the first step (their ratio from `lp0`), the fresh ones are, `stale_w` < 1 and equal to the hand-computed one;
+  the re-plans are counted a battle that ended and a minute of it.
 - `test_general_branch_torch.py` — the mission branches: the swap changes the kind card of the group's units only; a
   swap to the same kind prices exactly 0, the branches repeat, the random state is restored; an executor that does not
   listen to its task prices every swap 0; the other kind is never the chosen one and only of the kinds taking the
