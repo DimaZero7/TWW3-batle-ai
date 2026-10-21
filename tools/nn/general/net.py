@@ -403,7 +403,8 @@ class General(nn.Module):
         G, K = self.cfg.places, self.cfg.kinds
         out = torch.ones(c["main"].shape[0], G, K, dtype=torch.bool, device=c["main"].device)
         shoot = next((k.index for k in MISSION_KINDS if k.name == "shoot"), K)
-        if not getattr(self.cfg, "task_mask", False) or shoot >= K:
+        from tools.nn.general import taskmask
+        if "shoot_group" not in taskmask.parts_of(self.cfg) or shoot >= K:
             return out
         from tools.nn.general import army_input as ai
         on = inp["on"]

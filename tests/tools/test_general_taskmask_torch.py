@@ -139,7 +139,7 @@ def real():
     lay = league.layout(4, 1, {"self": 1.0}, scene_attacker=[1])
     env = rollout.Battles(lay, [("arena", "attack")], params=params, source=src, spread=randomise.NONE, compile=False)
     torch.manual_seed(0)
-    gcfg = gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2)
+    gcfg = gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2, task_mask_parts="all")
     return env, executor.wrap(policy.Actor(TINY).eval(), gcfg).eval(), mcritic.Critic(TINY).eval()
 
 
@@ -186,7 +186,7 @@ def test_switched_off_the_task_carries_no_mask_and_the_executor_is_as_before():
 
 def test_the_general_gives_shoot_only_to_a_group_with_a_shooter():
     from tools.nn.general.net import General
-    gcfg = gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2)
+    gcfg = gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2, task_mask_parts="all")
     gen = General(gcfg, TINY.sectors, TINY.grid_half)
     P, Nn = 1, 7
     num = torch.zeros(P, Nn, ai.SIZE)
@@ -198,12 +198,47 @@ def test_the_general_gives_shoot_only_to_a_group_with_a_shooter():
     s = K["shoot"]
     assert not ok[0, 0, s] and ok[0, 1, s] and not ok[0, 2, s] and not ok[0, 3, s]
     assert bool(ok[0, :, K["attack"]].all())
-    third = General(gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2, shoot_share=0.3), TINY.sectors,
-                    TINY.grid_half)
+    third = General(gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2, shoot_share=0.3,
+                                          task_mask_parts="shoot_group"), TINY.sectors, TINY.grid_half)
     assert bool(third.shoot_ok(inp, c)[0, 2, s])                     # one of three passes at 0.3
     off = General(gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2, task_mask=False), TINY.sectors,
                   TINY.grid_half)
     assert bool(off.shoot_ok(inp, c).all())
+    part_off = General(gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2, task_mask_parts="attack_target"),
+                       TINY.sectors, TINY.grid_half)
+    assert bool(part_off.shoot_ok(inp, c).all())                     # the part shoot_group not in force
+
+
+def test_the_parts_switch_each_mask_alone():
+    assert taskmask.parse_parts("all") == frozenset(taskmask.PARTS)
+    default = taskmask.parts_of(gconfig.GeneralConfig())                # the harmless ones (docs: the ablation)
+    assert default == taskmask.parse_parts(gconfig.MASK_PARTS) and "attack_target" not in default
+    assert not default & {"withdraw_attack", "shoot_melee", "shoot_target"} and "withdraw_move" in default
+    assert taskmask.parse_parts("") == frozenset() == taskmask.parse_parts("none")
+    with pytest.raises(ValueError):
+        taskmask.parse_parts("withdraw")
+    assert taskmask.parts_of(gconfig.GeneralConfig(task_mask=False, task_mask_parts="all")) == frozenset()
+    o = obs_of(POS, {0: ("withdraw", (-700.0, 0.0), 100.0, 2), 2: ("hold", (-500.0, 0.0), 100.0, 2 * G + 1)},
+               attacking=[0])
+    sec_ok = torch.ones(1, CENTRES.shape[0], dtype=torch.bool)
+    m = taskmask.masks(TINY, o, sec_ok, frozenset({"withdraw_move"}))
+    assert bool(m["kind"][0, 0].all()) and not bool(m["sector"][0, 0].all())     # attack open, sectors cut
+    assert bool(m["on"][0, 0]) and not bool(m["on"][0, 2])                      # hold: no part in force
+    assert bool(m["sector"][0, 2].all()) and bool(m["target"][0, 2].all())
+    m = taskmask.masks(TINY, o, sec_ok, frozenset({"withdraw_attack", "hold_target"}))
+    assert not m["kind"][0, 0, ATTACK] and bool(m["sector"][0, 0].all())
+    assert bool(m["sector"][0, 2].all()) and not bool(m["target"][0, 2].any())
+    m = taskmask.masks(TINY, o, sec_ok, frozenset())
+    assert not bool(m["on"].any()) and bool(m["kind"].all() and m["target"].all() and m["sector"].all())
+
+
+def test_the_executor_heads_follow_the_rules_parts():
+    import dataclasses
+    actor = executor.wrap(policy.Actor(TINY).eval(), gconfig.GeneralConfig(card=16, reader_hidden=16, council_heads=2,
+                                                                           task_mask_parts="hold_move,screen_move"))
+    assert actor.heads.parts == frozenset({"hold_move", "screen_move"})
+    actor.set_rules(dataclasses.replace(actor.gcfg, task_mask=False))
+    assert actor.heads.parts == frozenset()
 
 
 def test_the_bonus_kind_weights():

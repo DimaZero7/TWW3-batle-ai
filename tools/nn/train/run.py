@@ -32,7 +32,7 @@ import numpy as np
 import torch
 
 from tools.nn.general import signal as gsignal
-from tools.nn.general.config import MISSION_KINDS
+from tools.nn.general.config import MASK_PARTS, MISSION_KINDS
 from tools.nn.model import config as model_config
 from tools.nn.model import critic as model_critic
 from tools.nn.model import policy as model_policy
@@ -292,6 +292,7 @@ GENERAL_FLAGS = {"card": "general_card", "reader_hidden": "general_hidden", "cou
                  "kinds": "general_kinds", "target_grid": "general_target_grid", "rounds": "general_rounds",
                  "center": "general_center", "sharp": "general_sharp", "stick": "general_stick",
                  "kind_stick": "general_kind_stick", "task_mask": "general_task_mask",
+                 "task_mask_parts": "general_task_mask_parts",
                  "shoot_share": "general_shoot_share",
                  "tiles": "general_tiles", "effects": "general_effects", "zone": "general_zone",
                  "deploy": "general_deploy", "replan_s": "general_replan_s", "replan_min_s": "general_replan_min_s"}
@@ -1507,6 +1508,11 @@ def parser():
                     help="general: 1 the mission limits the executor - a unit's kinds, targets and sectors cut to its "
                          "group's mission (tools/nn/general/taskmask.py) - and 'shoot' only for a group with a shooter; "
                          "0: neither (the executor as before, to the bit). Saved with the checkpoint")
+    ap.add_argument("--general-task-mask-parts", default=MASK_PARTS,
+                    help="general: with --general-task-mask 1, which masks (a comma list of tools/nn/general/taskmask.py "
+                         "PARTS: withdraw_attack, withdraw_move, shoot_melee, shoot_target, attack_target, attack_move, "
+                         "hold_target, hold_move, screen_move, shoot_group; 'all'; 'none'; default: those harmless at "
+                         "minute 0, docs 'Task masks'). Saved with the checkpoint")
     ap.add_argument("--general-shoot-share", type=float, default=0.5,
                     help="general: with --general-task-mask 1, 'shoot' only for a group whose shooters (a missile range "
                          "on the card) are at least this share of its units (a rule, saved with the checkpoint)")

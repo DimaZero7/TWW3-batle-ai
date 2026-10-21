@@ -31,6 +31,8 @@ class GeneralActor(model_policy.ActorV2):
         # observation carries the task's numbers (Runtime.task with GeneralConfig.task_mask)
         from tools.nn.general.taskmask import MaskedChainHeads
         self.heads.__class__ = MaskedChainHeads
+        from tools.nn.general.taskmask import parts_of
+        self.heads.parts = parts_of(self.gcfg)                  # the masks' parts in force (GeneralConfig.task_mask_parts)
         # (registered after every part of the unit network: their parameters come last, run.resume keeps the order)
         self.task_in = nn.Linear(self.gcfg.task_dim, cfg.d)
         nn.init.zeros_(self.task_in.weight)
@@ -76,8 +78,10 @@ class GeneralActor(model_policy.ActorV2):
         changed = [k for k in keep if getattr(gcfg, k) != getattr(self.gcfg, k)]
         if changed:
             raise ValueError(f"set_rules: {changed} change the general's shape (its weights would not fit)")
+        from tools.nn.general.taskmask import parts_of
         self.gcfg = gcfg
         self.general.cfg = gcfg
+        self.heads.parts = parts_of(gcfg)
         self.general.groups.rounds = gcfg.rounds
 
     def load_state_dict(self, state_dict, strict=True, assign=False):

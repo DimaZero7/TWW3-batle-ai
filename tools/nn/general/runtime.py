@@ -872,7 +872,7 @@ class Runtime:
         S = self.S
         sec_ok = (msectors.inside(self.mcfg, g).any(-1) if g is not None
                   else torch.ones(rows.shape[0], S, dtype=torch.bool, device=self.dev))
-        m = gtaskmask.masks(self.mcfg, obs, sec_ok)
+        m = gtaskmask.masks(self.mcfg, obs, sec_ok, gtaskmask.parts_of(self.gcfg))
         _, _, _, fb = gtaskmask.apply(m, ctrl, obs.get("free", ctrl), obs["target_ok"], sec_ok)
         self.stats.add("mask_free", free.sum())
         self.stats.add("mask_units", (m["on"] & free).sum())

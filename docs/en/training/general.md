@@ -274,13 +274,54 @@ crossbow. A mask is logits of −∞ (the heads' `NEG`) before the softmax, as t
 unit with a mission, on the parts of the chained heads (`tools/nn/model/chain.py`: order kind → target → sector →
 cell):
 
-| Mission | What is closed |
-|---|---|
-| `withdraw` | the attack (and "keep" while an attack order is in force); the move sectors — only those whose centre is no nearer the nearest seen enemy than the unit now, or nearer the mission's point while 300 m from the enemy |
-| `shoot` | for a unit without missiles (the token's `ammo` 0) — the attack (and "keep" of an attack in force): a shooter's attack order in the simulator is to fire from its range (`battle.py` close_in), the others' a melee; a shooter's attack target only from the target group; moving free |
-| `attack`, `flank` | the attack target only the target group's units (the visible ones; none visible — targets free, a fall-back); the sectors no farther from the target group's centre than the unit now (at least 150 m): a charge is not cut |
-| `hold` | the sectors within the point's reach (as in the measure: half a tile's side, 100 m of a group); the attack only at enemies within 3 × the reach of the point (where the measure is 0) |
-| `screen` | the sectors near the segment from the target group's centre to the seen enemy nearest to it (50 m aside, between its ends) |
+Each mask is a separate part, switched on by the list `--general-task-mask-parts` (the field
+`GeneralConfig.task_mask_parts`, kept in the point; `all` every one, `none` none). **By default only the harmless ones
+are on** (the "default" column), the harmful ones are off — why, in the table below and in
+[Tried and rejected](#tried-and-rejected).
+
+| Mission | Part | What is closed | Default |
+|---|---|---|---|
+| `withdraw` | `withdraw_attack` | the attack (and "keep" while an attack order is in force) | no |
+| `withdraw` | `withdraw_move` | the move sectors — only those whose centre is no nearer the nearest seen enemy than the unit now, or nearer the mission's point while 300 m from the enemy | yes |
+| `shoot` | `shoot_melee` | for a unit without missiles (the token's `ammo` 0) — the attack (and "keep" of an attack in force): a shooter's attack order in the simulator is to fire from its range (`battle.py` close_in), the others' a melee | no |
+| `shoot` | `shoot_target` | a shooter's attack target only from the target group; moving free | no |
+| `attack`, `flank` | `attack_target` | the attack target only the target group's units (the visible ones; none visible — targets free, a fall-back) | no |
+| `attack`, `flank` | `attack_move` | the sectors no farther from the target group's centre than the unit now (at least 150 m): a charge is not cut | yes |
+| `hold` | `hold_move` | the sectors within the point's reach (as in the measure: half a tile's side, 100 m of a group) | yes |
+| `hold` | `hold_target` | the attack only at enemies within 3 × the reach of the point (where the measure is 0) | yes |
+| `screen` | `screen_move` | the sectors near the segment from the target group's centre to the seen enemy nearest to it (50 m aside, between its ends) | yes |
+| (general) | `shoot_group` | the kind `shoot` only for a group with at least the share `--general-shoot-share` of shooters | yes |
+
+**The parts checked at minute 0** (the point g13 m40, trained without masks; the `mandatory` evaluation on 256 battles
+an opponent instead of 512, the same for all; the rating's noise ±0.16, but the variants play the same battles; under
+mask — the share of the learner's unit decisions under a mask; fall-back — the share of those whose mask closed
+everything):
+
+| Variant | Rating | Δ to "no masks" | Exchange vs ai_like | Under mask | Fall-back |
+|---|---|---|---|---|---|
+| no masks | +0.77 | — | ×1.54 | 0 | 0 |
+| every part | −1.31 | −2.08 | ×0.40 | 98 % | 0.08 % |
+| `withdraw_*` (both) | −0.37 | −1.15 | ×0.80 | 39 % | 0 |
+| `withdraw_move` | +0.84 | +0.07 | ×1.61 | 32 % | 0 |
+| `shoot_*` | +0.58 | −0.19 | ×1.34 | 12 % | 0 |
+| `attack_target` | +0.16 | −0.61 | ×1.06 | 50 % | 0.11 % |
+| `attack_move` | +0.82 | +0.05 | ×1.58 | 52 % | 0.38 % |
+| `hold_target` | +0.82 | +0.05 | ×1.55 | 0.8 % | 0 |
+| `hold_move` | +0.80 | +0.03 | ×1.59 | 0.6 % | 0 |
+| `screen_move` | +0.96 | +0.19 | ×1.60 | 3.5 % | 1.8 % |
+| `shoot_group` | +0.84 | +0.07 | ×1.58 | — | — |
+| the harmless ones without `withdraw_move` | +0.81 | +0.04 | ×1.49 | 62 % | 0.38 % |
+| **the default** (the harmless ones with `withdraw_move`) | +0.78 | +0.01 | ×1.47 | 96 % | 0.29 % |
+So the parts that **forbid fighting** (the attack closed, or the target only from one group) do harm, and the limits
+on movement are harmless (under `withdraw` too: the harm is `withdraw_attack`, the sectors away from the enemy cost
+nothing). No bug in the code was found (the point's, the units' and the sector centres' frames are one
+— the side's frame; the masks are held by tests on hand-made observations); the harm is behaviour: the general picks
+its kind nearly independently of the battle (in g10 the choice-situation MI was 0.03 nats), and the executor without
+masks did not listen to it and so saved the army. With masks the general's poor choice is carried out literally: under
+`withdraw` (21 % of the plans, 39 % of the unit decisions) a unit in melee cannot answer and runs under the blows,
+under `attack X` it does not hit an enemy that is near and hitting it, under `shoot` infantry without missiles stands
+idle. The harmful parts make sense once the general picks its kind by the battle (e.g. from the teacher), not from the
+start.
 
 A sector is judged by its centre with half its diagonal of slack (a 100 m sector: 71 m); the cell inside the sector
 is free. The target pointer is shared with the spells: a target mask limits the unit's spells the same way.
@@ -297,7 +338,12 @@ is free. The target pointer is shared with the spells: a target mask limits the 
   heads' class, the weights are the same); `tools/nn/model` is not edited (it is in the simulator's version). A test
   holds the copy to the original's source (`SOURCE_SHA`): when `ChainHeads.forward` changes, carry it into the copy.
 - **Off** (`--general-task-mask 0`): no mask numbers in the observation and no `shoot` mask at the general — the
-  executor computes what it did, to the bit (test).
+  executor computes what it did, to the bit (test). A part not in the list closes nothing, and a unit under that kind
+  does not count as "under a mask".
+- **Update time.** The masks cost almost no time: in g14 the first 12 updates took 25–38 s (g13 without masks 22–32 s),
+  the collection 48–62 s against 47–49 s. The growth to 160–250 s from update 13 is not the masks: the GPU's peak
+  memory is the same (12.4–12.5 GB), and at the same time the "after" evaluation took 816 s instead of ~300 s —
+  something else held the GPU.
 - **Mission branches** change a group's kind together with its mask (`branch.swap_kind`).
 
 ## Teacher
@@ -537,6 +583,11 @@ today's code (another shape of the general): a new line starts from the unit net
 general, the executor = S27 + the task input at zero.
 
 ## Tried and rejected
+
+- **Every task mask at once** (g14 from the point g13): the rating at minute 0 +0.86 → −1.25 (the exchange vs ai_like
+  ×1.57 → ×0.45), after 19 updates only up to +0.04. Checked by parts ([Task masks](#task-masks)): `withdraw_attack`
+  (with the sectors −1.15, the sectors alone +0.07), `attack_target` (−0.61) and `shoot_*` (−0.19) do harm — everything that forbids a unit to fight; they are
+  off by default, switched on by `--general-task-mask-parts`.
 
 Line g1–g8 (8 steps of 40 min, ~280 updates, from `itS27_4`) learned nothing on the former design:
 

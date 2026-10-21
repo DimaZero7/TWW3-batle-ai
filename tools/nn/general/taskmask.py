@@ -18,6 +18,9 @@ on the chained heads' parts (tools/nn/model/chain.py: kind -> target -> sector -
               the attack only at enemies within HOLD_FIGHT x the reach of the point (where the measure is 0 beyond)
     screen    the sectors near the segment from the target group's centre to the seen enemy nearest to it (within
               mission.SCREEN_M of it, between its ends)
+Each piece is a part (PARTS; GeneralConfig.task_mask_parts, run.py --general-task-mask-parts); by default only those
+that cost nothing at minute 0 (config.MASK_PARTS: the movement ones and the general's shoot_group - the ones that forbid
+fighting, withdraw_attack, attack_target, shoot_*, cost g13 0.2-1.2 of the rating; docs "Task masks").
 A sector counts by its centre, with half its diagonal of slack (a 100 m sector: 71 m): the fine cell is free inside it.
 The target pointer is shared with the spells (chain.py): a target mask limits a unit's spells the same way.
 
@@ -47,6 +50,36 @@ ATTACK_M = 150.0         # attack / flank: the sectors may come up to this far f
 HOLD_FIGHT = 3.0         # hold: the attack only at enemies within this x the reach of the point (the measure's 0)
 AWAY_M = gmission.AWAY_M  # withdraw: towards the point only this far from the nearest enemy
 KEYS = ("task_mk", "task_pt", "task_reach", "task_tg", "task_main")
+# the masks' parts (GeneralConfig.task_mask_parts, run.py --general-task-mask-parts): each one alone switchable
+PARTS = ("withdraw_attack",   # withdraw: no attack (nor keep of an attack in force)
+         "withdraw_move",     # withdraw: the sectors away from the nearest enemy (or towards the point)
+         "shoot_melee",       # shoot: a unit without missiles no attack (nor keep of one)
+         "shoot_target",      # shoot: a shooter's attack only at the target group
+         "attack_target",     # attack / flank: the attack only at the target group
+         "attack_move",       # attack / flank: the sectors not farther from the target group
+         "hold_target",       # hold: the attack only at enemies near the point
+         "hold_move",         # hold: the sectors within the point's reach
+         "screen_move",       # screen: the sectors near the segment
+         "shoot_group")       # the general: "shoot" only for a group of shooters (net.General.shoot_ok)
+
+
+def parse_parts(text):
+    """frozenset of PARTS of a comma list ("all": every part; "" or "none": none); an unknown name: ValueError."""
+    text = (text or "").strip()
+    if text == "all":
+        return frozenset(PARTS)
+    names = [t.strip() for t in text.split(",") if t.strip() and t.strip() != "none"]
+    bad = [n for n in names if n not in PARTS]
+    if bad:
+        raise ValueError(f"task mask parts {bad}: not in {', '.join(PARTS)}")
+    return frozenset(names)
+
+
+def parts_of(gcfg):
+    """The parts in force of a GeneralConfig (none without task_mask)."""
+    if not getattr(gcfg, "task_mask", False):
+        return frozenset()
+    return parse_parts(getattr(gcfg, "task_mask_parts", "all"))
 
 
 def fields(kind_u, point, reach, target_u, main, on):
@@ -71,10 +104,12 @@ def _d(ax, az, bx, bz):
 
 
 @torch.no_grad()
-def masks(cfg, obs, sec_ok):
+def masks(cfg, obs, sec_ok, parts=None):
     """{"kind" [B, N, 5], "target" [B, N, N], "sector" [B, N, S], "on" [B, N]} the task's allowed choices (True: allowed;
     to AND with the heads' own masks) and the units under a mask, of the observation obs (with KEYS) and the sectors
-    inside the map sec_ok [B, S]; "fb_target" [B, N] the units whose target group is not seen (targets left free)."""
+    inside the map sec_ok [B, S]; "fb_target" [B, N] the units whose target group is not seen (targets left free).
+    parts: the PARTS in force (None: every one); a unit counts as under a mask ("on") when a part of its kind is."""
+    P = frozenset(PARTS) if parts is None else parts
     mk = obs["task_mk"].long()
     ctrl = obs["ctrl"]
     free = obs.get("free", ctrl)
@@ -93,18 +128,22 @@ def masks(cfg, obs, sec_ok):
     is_k = (lambda n: on & (mk == KIND[n]))
     att, hold, scr, sh, wd = (is_k("attack") | is_k("flank"), is_k("hold"), is_k("screen"), is_k("shoot"),
                               is_k("withdraw"))
+    use = (lambda *names: any(n in P for n in names))
+    att, hold, scr = att & use("attack_target", "attack_move"), hold & use("hold_target", "hold_move"), scr & use("screen_move")
+    sh, wd = sh & use("shoot_melee", "shoot_target"), wd & use("withdraw_attack", "withdraw_move")
+    on = att | hold | scr | sh | wd                                           # the units under a part in force
     big = torch.full(px.shape + px.shape[-1:], 1e9, device=px.device)                          # [B, N, N]
     # targets: the target group's units (attack, flank, a shooter's shoot); hold: the enemies near the point
     member = (main[:, None, :] == tg[:, :, None]) & (tg[:, :, None] >= 0) & foe[:, None, :]       # [B, N (i), N (j)]
-    by_group = att | (sh & shooter)
+    by_group = (att if "attack_target" in P else torch.zeros_like(att)) | (sh & shooter & ("shoot_target" in P))
     seen_t = member.any(-1)
     dPj = _d(px[:, None, :], pz[:, None, :], tx[:, :, None], tz[:, :, None])                     # enemy j - i's point
     near_p = (dPj <= HOLD_FIGHT * reach[..., None]) & foe[:, None, :]
     tgt = torch.ones_like(member)
     tgt = torch.where((by_group & seen_t)[..., None], member, tgt)
-    tgt = torch.where((hold & has_pt)[..., None], near_p, tgt)
+    tgt = torch.where((hold & has_pt & ("hold_target" in P))[..., None], near_p, tgt)
     # kinds: no attack under withdraw and a shoot without missiles (nor keep of an attack in force)
-    no_attack = wd | (sh & ~shooter)
+    no_attack = (wd & ("withdraw_attack" in P)) | (sh & ~shooter & ("shoot_melee" in P))
     K = len(KINDS)
     ar = torch.arange(K, device=mk.device)
     kind = ~(((ar == ATTACK) & no_attack[..., None]) | ((ar == KEEP) & (no_attack & att_now & free)[..., None]))
@@ -134,10 +173,10 @@ def masks(cfg, obs, sec_ok):
     away = dcE >= dE[..., None] - h
     toward = (dcP <= duP[..., None]) & (dcE >= AWAY_M) & has_pt[..., None]
     s_wd = away | toward
-    sec = torch.where((att & has_pt)[..., None], s_att, sec)
-    sec = torch.where((hold & has_pt)[..., None], s_hold, sec)
+    sec = torch.where((att & has_pt & ("attack_move" in P))[..., None], s_att, sec)
+    sec = torch.where((hold & has_pt & ("hold_move" in P))[..., None], s_hold, sec)
     sec = torch.where((scr & has_pt & any_foe)[..., None], s_scr, sec)
-    sec = torch.where((wd & any_foe)[..., None], s_wd, sec)
+    sec = torch.where((wd & any_foe & ("withdraw_move" in P))[..., None], s_wd, sec)
     del sec_ok   # (the heads AND it in; the fall-back is theirs)
     return {"kind": kind, "target": tgt, "sector": sec, "on": on, "fb_target": by_group & ~seen_t}
 
@@ -171,7 +210,7 @@ class MaskedChainHeads(chain.ChainHeads):
         ctrl, ok = obs_t["ctrl"], obs_t["target_ok"]
         free = obs_t.get("free", ctrl)
         sec_ok = cells_in.any(-1)                                                 # [B, S]
-        tm = masks(cfg, obs_t, sec_ok) if has(obs_t) else None
+        tm = masks(cfg, obs_t, sec_ok, getattr(self, "parts", None)) if has(obs_t) else None
         # hold, move, attack, withdraw, keep (tools/nn/sim/orders.py KINDS order); a held unit only keeps
         allowed = torch.stack([~ctrl | free, free, free & ok.any(-1, keepdim=True), free, ctrl], -1)
         t_ok = ok[:, None, :]
