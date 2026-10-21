@@ -11,11 +11,15 @@ training (docs/en/training/general.md "How it runs").
   `broken` of its units at the plan routs or is destroyed), a lord fallen (ours or theirs) - but not sooner than
   replan_min_s after the last plan. Between plans the groups, missions and targets are locked. A re-plan runs the whole
   network again on the armies now (men and health left), the side's observation's tiles and the places' cards of the
-  last plan (inertia); the routing take no part in the groups.
-* The task (inputs): per own unit with a group - its group card (the mix of our places' cards by its shares), its main
-  group's mission kind card, and the main group's two targets from the unit now: direction from its facing (cos, sin),
-  distance / dist_m (capped), "none" (zeros and the flag). A target group's point is the centre of its units now (as
-  the side sees them); a tile's, its centre. Computed every decision (the targets move).
+  last plan (inertia); the routing take no part in the groups. Every unit's place (net.POS_FEATURES: where it stands,
+  its facing and velocity in the side's frame) comes from the side's observation's tokens (at the deployment, from the
+  state: everything seen, standing). The new groups keep the last plan's numbers by their units (net.match_groups): a
+  number is a group while it keeps its units - its prev card, its task, the logs' gN.
+* The task (inputs): per own unit with a group - its group card (the mix of our places' cards by its shares), its
+  group's mission kind card, and its group's target from the unit now: direction from its facing (cos, sin), distance
+  / dist_m (capped), "none" (zeros and the flag). A target group's point is the centre of its units now (as the side
+  sees them); a coarse tile's, its centre (a fixed point of the plan). Computed every decision (the targets move, the
+  unit turns): a function of the state, no noise.
 * Records (training): every plan the learner's general makes keeps its inputs, choices, log-probabilities and value;
   when it ends (the next plan or the battle's end) it is "ready" with its return - the reward summed from its decision
   to its end (run.py --general-return "span"), or that plus the next plan's discounted value ("td": the value is then of
@@ -47,7 +51,7 @@ from tools.nn.general import signal as gsignal
 from tools.nn.general import tiles as gtiles
 from tools.nn.general import units as gunits
 from tools.nn.general.executor import has_task
-from tools.nn.general.net import INPUTS
+from tools.nn.general.net import CHOICES, INPUTS, POS_FEATURES, target_kind
 from tools.nn.model import observation as ob
 from tools.nn.model import sectors as msectors
 from tools.nn.model.frame import Frame
@@ -57,12 +61,14 @@ LEARNER, PAST = 0, 2                    # league.LEARNER, league.CODE["past"] (l
 # the log's counters (Counts): summed on the device, read once an update (take_stats)
 COUNTS = ("plans", "plans_deploy", "plans_replan", "groups_own", "groups_enemy", "deploys", "deploys_net", "laid_units",
           "replan_timer", "replan_broken", "replan_lord", "battles", "replans_ended", "distinct_bonus",
-          "distinct_groups")
+          "distinct_groups", "churn_units", "churn_moved", "kind_kept_groups", "kind_switched", "target_own",
+          "target_enemy", "target_tile")
 # a group's behaviour during a plan (Runtime.behaviour): its units' order kinds' shares, the run share, its centre's
 # displacement forward and sideways from the side's facing at the plan's start (/ 100 m, within +-5), its centre's path
 # (/ 100 m, at most 10), the plan's length (decisions / 60)
 BEH = tuple("kind_" + k for k in O.KINDS) + ("run", "forward", "sideways", "path", "length")
-REC = INPUTS + ("main", "kind", "t1", "t2", "place", "lp", "value", "active")
+PLAN = ("main", "perm", "kind", "target", "place", "lp", "value", "active")    # a plan's record besides its inputs
+REC = INPUTS + PLAN
 _TABLE = None
 
 
@@ -139,8 +145,9 @@ class Runtime:
         z = (lambda *s, dt=torch.float32: torch.zeros(*s, dtype=dt, device=dev))
         L, Bo = torch.long, torch.bool
         r = {"has": z(R, dt=Bo), "owner": z(R, dt=L) - 1, "t_plan": z(R), "n_dec": z(R, dt=L),
-             "main": z(R, N, dt=L) - 1, "kind": z(R, G, dt=L), "t1": z(R, G, dt=L), "t2": z(R, G, dt=L),
-             "place": z(R, G, dt=L) - 1, "tgt": z(R, G, 2, 2), "mix": z(R, N, D), "kc": z(R, N, D),
+             "main": z(R, N, dt=L) - 1, "perm": z(R, 2 * G, dt=L) + torch.arange(2 * G, device=dev),
+             "kind": z(R, G, dt=L), "target": z(R, G, dt=L),
+             "place": z(R, G, dt=L) - 1, "tgt": z(R, G, 2), "mix": z(R, N, D), "kc": z(R, N, D),
              "places": z(R, 2 * G, D), "members": z(R, G), "lords": z(R, 2, dt=Bo), "r_sum": z(R),
              "n_replan": z(R, dt=L), "lp": z(R, G), "value": z(R), "active": z(R, 2 * G, dt=Bo),
              "r_disc": z(R), "v_start": z(R) + float("nan"),
@@ -149,7 +156,8 @@ class Runtime:
              "b_fwd": z(R, 2), "b_fwd_ok": z(R, dt=Bo),
              "kind_logp": z(R, G, self.gcfg.kinds), "fresh": z(R, dt=Bo)}
         from tools.nn.general import army_input as ai
-        r.update({"in/num": z(R, N, ai.SIZE), "in/lab": z(R, N, len(ai.LABELS), dt=L), "in/on": z(R, N, dt=Bo),
+        r.update({"in/num": z(R, N, ai.SIZE), "in/lab": z(R, N, len(ai.LABELS), dt=L),
+                  "in/pos": z(R, N, len(POS_FEATURES)), "in/prev_main": z(R, N, dt=L) - 1, "in/on": z(R, N, dt=Bo),
                   "in/own": z(R, N, dt=Bo), "in/free": z(R, N, dt=Bo), "in/tiles": z(R, S, len(gtiles.FEATURES)),
                   "in/tile_ok": z(R, S, dt=Bo), "in/zone": z(R, S, dt=Bo), "in/deploy": z(R, dt=Bo),
                   "in/prev": z(R, 2 * G, D), "in/has_prev": z(R, dt=Bo)})
@@ -162,9 +170,10 @@ class Runtime:
                 "full": z(B, self.N, 2)}
 
     def record(self, rows):
-        """The plan records of rows [M] (net.INPUTS + the plan's membership, choices, log-probabilities, value)."""
+        """The plan records of rows [M] (net.INPUTS + PLAN: the plan's membership and numbering, choices,
+        log-probabilities at the plan, value)."""
         out = {k[3:]: self.r[k][rows] for k in self.r if k.startswith("in/")}
-        for k in ("main", "kind", "t1", "t2", "place", "lp", "value", "active"):
+        for k in PLAN:
             out[k] = self.r[k][rows]
         return out
 
@@ -216,8 +225,11 @@ class Runtime:
         cells_in = msectors.inside(self.mcfg, msectors.geo(frame, bounds))
         if deploy:
             tiles = gtiles.from_state(self.mcfg, u, u["cost"], s, frame, cells_in)
+            pos = self.pos_of_state(u, frame, present)
         else:
-            tiles = gtiles.from_obs(self.mcfg, {k: obs[k][rows] for k in ("tokens", "own", "attend", "pos")}, cells_in)
+            o = {k: obs[k][rows] for k in ("tokens", "own", "attend", "pos")}
+            tiles = gtiles.from_obs(self.mcfg, o, cells_in)
+            pos = self.pos_of_obs(o)
         tile_ok = cells_in.any(-1)
         if deploy and self.gcfg.deploy == "net":
             valid = self.zone.valid(u, s)
@@ -225,10 +237,31 @@ class Runtime:
         else:
             zone = torch.zeros_like(tile_ok)
         has_prev = self.r["has"][rows] if not deploy else torch.zeros_like(self.r["has"][rows])
-        prev =torch.where(has_prev.reshape(-1, 1, 1), self.r["places"][rows], torch.zeros_like(self.r["places"][rows]))
-        inp = {"num": num, "lab": self.b["lab"][b], "on": on, "own": own, "free": free, "tiles": tiles,
-               "tile_ok": tile_ok, "zone": zone, "deploy": zone.any(-1), "prev": prev, "has_prev": has_prev}
+        prev = torch.where(has_prev.reshape(-1, 1, 1), self.r["places"][rows], torch.zeros_like(self.r["places"][rows]))
+        prev_main = torch.where(has_prev[:, None], self.r["main"][rows], torch.full_like(self.r["main"][rows], -1))
+        inp = {"num": num, "lab": self.b["lab"][b], "pos": pos, "on": on, "own": own, "free": free, "tiles": tiles,
+               "tile_ok": tile_ok, "zone": zone, "deploy": zone.any(-1), "prev": prev, "has_prev": has_prev,
+               "prev_main": prev_main}
         return inp, frame, u
+
+    @staticmethod
+    def pos_of_obs(o):
+        """[M, N, 7] the units' places (net.POS_FEATURES) as the side's observation's tokens hold them: own units and
+        the enemies seen (their last seen place); zeros for the others."""
+        tok = o["tokens"].float()
+        cols = torch.stack([tok[..., ob.INDEX[k]] for k in POS_FEATURES[:-1]], -1)
+        known = o["attend"] & (o["own"] | (tok[..., ob.INDEX["seen"]] > 0.5))
+        return torch.cat([cols, torch.ones_like(cols[..., :1])], -1) * known[..., None].float()
+
+    @staticmethod
+    def pos_of_state(u, frame, present):
+        """[M, N, 7] the units' places at the deployment (the state: every unit seen, standing) in the side's frame
+        (frame [M]), as the observation's token would show them."""
+        f, l = frame.point(u["x"].float(), u["z"].float())
+        fc, fs = frame.facing(u["b"].float())
+        z = torch.zeros_like(f)
+        p = torch.stack([f / ob.POS, l / ob.POS, fc, fs, z, z, torch.ones_like(f)], -1)
+        return torch.nan_to_num(p) * present[..., None].float()
 
     # --- planning ---------------------------------------------------------------------------------------------------
     @torch.no_grad()
@@ -251,12 +284,12 @@ class Runtime:
             mix, kc = gen.unit_cards(c, d["kind"], c["main"])
             outs[o] = (sel, c, d, mix, kc)
         M, G, N = rows.numel(), self.G, self.N
-        res = {k: None for k in ("main", "kind", "t1", "t2", "place", "lp", "value", "mix", "kc", "places", "active",
-                                 "kind_logp")}
+        res = {k: None for k in ("main", "perm", "kind", "target", "place", "lp", "value", "mix", "kc", "places",
+                                 "active", "kind_logp")}
         for o, (sel, c, d, mix, kc) in outs.items():
-            vals = {"main": c["main"], "kind": d["kind"], "t1": d["t1"], "t2": d["t2"], "place": d["place"],
-                    "lp": d["lp"], "value": d["value"], "mix": mix, "kc": kc, "places": c["places"],
-                    "active": c["active"], "kind_logp": d["kind_logp"]}
+            vals = {"main": c["main"], "perm": c["perm"], "kind": d["kind"], "target": d["target"],
+                    "place": d["place"], "lp": d["lp"], "value": d["value"], "mix": mix, "kc": kc,
+                    "places": c["places"], "active": c["active"], "kind_logp": d["kind_logp"]}
             for k, v in vals.items():
                 if res[k] is None:
                     res[k] = v.new_zeros((M,) + tuple(v.shape[1:]))
@@ -264,20 +297,21 @@ class Runtime:
         # the previous plans end here: ready with their return (a re-plan; the battle's end: after())
         if not deploy:
             self._finish(rows, done=False, v_next=res["value"])
+            self._churn(rows, owner, res)
         b, s = rows % self.B, rows // self.B + 1
-        tile_w = gtiles.centres_world(self.mcfg, frame)                         # [M, S, 2]
-        tgt = torch.full((M, G, 2, 2), float("nan"), device=self.dev)
-        for j, t in enumerate((res["t1"], res["t2"])):
-            ti = t - 2 * G
-            is_tile = (ti >= 0) & (ti < self.S)
-            w = tile_w.gather(1, ti.clamp(0, self.S - 1)[..., None].expand(-1, -1, 2))
-            tgt[:, :, j] = torch.where(is_tile[..., None], w, tgt[:, :, j])
+        C = self.gcfg.target_grid ** 2
+        tile_w = gtiles.coarse_world(self.mcfg, frame, self.gcfg.target_grid)  # [M, C, 2]
+        ti = res["target"] - 2 * G
+        is_tile = (ti >= 0) & (ti < C)
+        w = tile_w.gather(1, ti.clamp(0, C - 1)[..., None].expand(-1, -1, 2))
+        tgt = torch.where(is_tile[..., None], w, torch.full_like(w, float("nan")))
         members = (res["main"][..., None] == torch.arange(G, device=self.dev)).sum(1).float()
         lds = env.st.lord_dead_s[b]
         own_alive = lds.gather(1, (s - 1)[:, None])[:, 0] < 0
         foe_alive = lds.gather(1, (2 - s)[:, None])[:, 0] < 0
         r = self.r
-        for k in ("main", "kind", "t1", "t2", "place", "lp", "value", "mix", "kc", "places", "active", "kind_logp"):
+        for k in ("main", "perm", "kind", "target", "place", "lp", "value", "mix", "kc", "places", "active",
+                  "kind_logp"):
             r[k][rows] = res[k].to(r[k].dtype)
         for k, v in inp.items():
             r["in/" + k][rows] = v.to(r["in/" + k].dtype)
@@ -324,6 +358,9 @@ class Runtime:
         c.add("groups_own", own_g.sum())
         c.add("groups_enemy", (act[:, G:] & mine[:, None]).sum())
         c.kinds.index_add_(0, res["kind"].reshape(-1), own_g.reshape(-1).double())
+        tk = target_kind(res["target"], G, self.gcfg.target_grid ** 2)
+        for i, name in enumerate(("target_own", "target_enemy", "target_tile")):
+            c.add(name, ((tk == i) & own_g).sum())
         if deploy:
             dep = inp["deploy"] & mine
             c.add("deploys", mine.sum())
@@ -331,6 +368,20 @@ class Runtime:
             pl = res["place"]
             m = own_g & dep[:, None] & (pl >= 0)
             c.places.index_add_(0, pl.clamp(min=0).reshape(-1), m.reshape(-1).double())
+
+    def _churn(self, rows, owner, res):
+        """The log's counters of a re-plan's numbering (the learner's plans; before the new plan is written): our units
+        in a group in both plans and those whose group number changed (general_group_churn), our groups active in
+        both plans and those whose mission kind changed (general_kind_switch)."""
+        r, G, c = self.r, self.G, self.stats
+        mine = (owner == 0) & r["has"][rows]
+        old, new = r["main"][rows], res["main"]
+        both = (old >= 0) & (old < G) & (new >= 0) & (new < G) & mine[:, None]
+        c.add("churn_units", both.sum())
+        c.add("churn_moved", (both & (old != new)).sum())
+        kept = r["active"][rows][:, :G] & res["active"][:, :G] & mine[:, None]
+        c.add("kind_kept_groups", kept.sum())
+        c.add("kind_switched", (kept & (r["kind"][rows] != res["kind"])).sum())
 
     def _layout(self, env, rows, res, inp, frame, u):
         """The deployment of the rows whose plan places its groups (inp deploy): the layout rule, written into the
@@ -469,7 +520,7 @@ class Runtime:
             target = target + (self.gamma ** r["n_dec"][rr].float()) * v_next[sel].float()
         if self.ret == "critic":
             target, rec["base"] = self.critic_target(rr, done)
-        rec["target"] = target
+        rec["ret"] = target                       # the plan's return (learn.update's target)
         rec["done"] = torch.full_like(target, float(done))
         if self.distinct is not None:
             beh, ok = self.behaviour(rr)
@@ -580,9 +631,10 @@ class Runtime:
 
     # --- the executor's input ---------------------------------------------------------------------------------------
     def task(self, rows, obs_r, fr):
-        """{"task" [R, N, task_dim], "task_on" [R, N], "task_geo" [R, N, 8], "task_plan" [R]} of rows [R] on their
+        """{"task" [R, N, task_dim], "task_on" [R, N], "task_geo" [R, N, 4], "task_plan" [R]} of rows [R] on their
         observation obs_r (the rows' dict) and frame fr (module doc)."""
-        r, G, S, cfg = self.r, self.G, self.S, self.gcfg
+        r, G, cfg = self.r, self.G, self.gcfg
+        C = cfg.target_grid ** 2
         has = r["has"][rows]
         main = r["main"][rows]
         own, attend = obs_r["own"], obs_r["attend"]
@@ -595,33 +647,31 @@ class Runtime:
         n = w.sum(1)                                                                 # [R, 2G]
         cent = torch.einsum("rng,rnc->rgc", w, pos) / n.clamp(min=1)[..., None]
         cent_ok = n > 0
-        geo = []
-        for j, t in enumerate((r["t1"][rows], r["t2"][rows])):
-            is_g = t < 2 * G
-            gi = t.clamp(max=2 * G - 1)
-            gp = cent.gather(1, gi[..., None].expand(-1, -1, 2))
-            gok = cent_ok.gather(1, gi)
-            tw = r["tgt"][rows][:, :, j]                                               # [R, G, 2] world
-            tf, tl = fr.point(tw[..., 0], tw[..., 1])
-            tp = torch.stack([tf, tl], -1)
-            tok_t = torch.isfinite(tp).all(-1) & (t >= 2 * G) & (t < 2 * G + S)     # a tile (not "none")
-            p = torch.where(is_g[..., None], gp, torch.nan_to_num(tp))
-            ok = torch.where(is_g, gok, tok_t)                                         # [R, G]
-            mi = main.clamp(0, G - 1)
-            up = p.gather(1, mi[..., None].expand(-1, -1, 2))                         # [R, N, 2] the unit's target
-            uok = ok.gather(1, mi) & (main >= 0) & (main < G)
-            d = up - pos
-            df, dl = d[..., 0], d[..., 1]
-            rf, rl = df * fc + dl * fs, -df * fs + dl * fc
-            dist = torch.sqrt(rf * rf + rl * rl)
-            far = dist > 1e-3
-            cos = torch.where(far, rf / dist.clamp(min=1e-3), torch.ones_like(rf))
-            sin = torch.where(far, rl / dist.clamp(min=1e-3), torch.zeros_like(rl))
-            dn = (dist / cfg.dist_m).clamp(max=cfg.dist_cap)
-            z = torch.zeros_like(dn)
-            geo.append(torch.stack([torch.where(uok, cos, z), torch.where(uok, sin, z), torch.where(uok, dn, z),
-                                    (~uok).float()], -1))
-        geo = torch.cat(geo, -1)
+        t = r["target"][rows]
+        is_g = t < 2 * G
+        gi = t.clamp(max=2 * G - 1)
+        gp = cent.gather(1, gi[..., None].expand(-1, -1, 2))
+        gok = cent_ok.gather(1, gi)
+        tw = r["tgt"][rows]                                                          # [R, G, 2] world (a tile)
+        tf, tl = fr.point(tw[..., 0], tw[..., 1])
+        tp = torch.stack([tf, tl], -1)
+        tok_t = torch.isfinite(tp).all(-1) & (t >= 2 * G) & (t < 2 * G + C)       # a coarse tile
+        p = torch.where(is_g[..., None], gp, torch.nan_to_num(tp))
+        ok = torch.where(is_g, gok, tok_t)                                           # [R, G]
+        mi = main.clamp(0, G - 1)
+        up = p.gather(1, mi[..., None].expand(-1, -1, 2))                           # [R, N, 2] the unit's target
+        uok = ok.gather(1, mi) & (main >= 0) & (main < G)
+        d = up - pos
+        df, dl = d[..., 0], d[..., 1]
+        rf, rl = df * fc + dl * fs, -df * fs + dl * fc
+        dist = torch.sqrt(rf * rf + rl * rl)
+        far = dist > 1e-3
+        cos = torch.where(far, rf / dist.clamp(min=1e-3), torch.ones_like(rf))
+        sin = torch.where(far, rl / dist.clamp(min=1e-3), torch.zeros_like(rl))
+        dn = (dist / cfg.dist_m).clamp(max=cfg.dist_cap)
+        z = torch.zeros_like(dn)
+        geo = torch.stack([torch.where(uok, cos, z), torch.where(uok, sin, z), torch.where(uok, dn, z),
+                           (~uok).float()], -1)
         on = has[:, None] & own & obs_r["ctrl"] & (main >= 0) & (main < G)
         geo = geo * on[..., None].float()
         task = torch.cat([r["mix"][rows], r["kc"][rows], geo], -1) * on[..., None].float()
@@ -632,9 +682,10 @@ class Runtime:
     @torch.no_grad()
     def begin_chunk(self, env):
         """A chunk's start: records on; the learner's plans in force get their cards from the general's weights now
-        (the update computes them again from the same weights: the rollout's log-probabilities and the update's agree),
-        and their choices' log-probabilities and value too (a plan made before the last update and ending in this
-        chunk is priced as the policy of now: PPO's ratio starts at 1), and they open the chunk's table."""
+        (the update computes them again from the same weights: the executor's probabilities in the rollout and in the
+        update agree) and their value; their choices keep the log-probability they were made with (PPO's honest
+        ratio for a plan made before the last update: the policy now / the policy that chose), and they open the
+        chunk's table."""
         self.training = True
         r = self.r
         rows = (r["has"] & (r["owner"] == 0)).nonzero().squeeze(1)
@@ -645,10 +696,9 @@ class Runtime:
             gen = self.learner.general
             c = gen.cards(rec)
             mix, kc = gen.unit_cards(c, rec["kind"], rec["main"])
-            d = gen.decide(rec, c, act={k: rec[k] for k in ("kind", "t1", "t2", "place")})
+            d = gen.decide(rec, c, act={k: rec[k] for k in CHOICES})
             r["mix"][rows], r["kc"][rows], r["places"][rows] = mix, kc, c["places"]
-            r["lp"][rows], r["value"][rows] = d["lp"], d["value"]
-            r["kind_logp"][rows] = d["kind_logp"]
+            r["value"][rows] = d["value"]
             rec = self.record(rows)
             self.table.append(rec)
             self.tix[rows] = torch.arange(rows.numel(), device=self.dev)
@@ -679,7 +729,7 @@ class Runtime:
         """The rows of the battles idx as a snapshot's {"g/<k>": [b, 2, ...]} (ability_branch.snapshot)."""
         B = self.B
         out = {}
-        for k in ("has", "main", "t1", "t2", "tgt", "mix", "kc"):
+        for k in ("has", "main", "target", "tgt", "mix", "kc"):
             v = self.r[k]
             out["g/" + k] = v.reshape(2, B, *v.shape[1:]).transpose(0, 1)[idx]
         return out
@@ -691,7 +741,7 @@ class Runtime:
         new.__dict__.update({k: v for k, v in self.__dict__.items() if k not in ("r", "b", "tix", "ready", "table")})
         new.B = B
         new.r = self._rows(2 * B)
-        for k in ("has", "main", "t1", "t2", "tgt", "mix", "kc"):
+        for k in ("has", "main", "target", "tgt", "mix", "kc"):
             v = snap["g/" + k]
             new.r[k] = v.transpose(0, 1).reshape(-1, *v.shape[2:]).clone()
         new.r["owner"] = torch.where(new.r["has"], torch.zeros_like(new.r["owner"]), new.r["owner"])
@@ -709,7 +759,9 @@ class Runtime:
     def take_stats(self):
         """The log's numbers since the last call (one read of the device): plans (all, at the deployment, the share
         placed by the general), groups a plan (ours, theirs), the mission kinds' shares and their entropy, re-plans a
-        battle and by reason, the most chosen deployment tiles ("row_column" of the side's 16 x 16), units laid out."""
+        battle and by reason, the most chosen deployment tiles ("row_column" of the side's 16 x 16), units laid out,
+        the targets' shares (our group, theirs, a coarse tile; groups: both), the share of our units whose group number
+        changed at a re-plan (group_churn) and of our groups kept whose mission kind changed (kind_switch)."""
         s, kinds, places = self.stats.take()
         n = max(1.0, s["plans"])
         tot = kinds.sum()
@@ -717,6 +769,8 @@ class Runtime:
         ent = float(-(p[p > 0] * np.log(p[p > 0])).sum()) if tot else 0.0
         n_s = self.mcfg.sectors
         top = np.argsort(-places)[:6]
+        tg = np.array([s["target_own"], s["target_enemy"], s["target_tile"]])
+        tg = tg / tg.sum() if tg.sum() else tg
         return {"plans": int(s["plans"]), "deploy_plans": int(s["deploys"]),
                 "deploy_net_share": round(s["deploys_net"] / max(1.0, s["deploys"]), 3),
                 "groups_own": round(s["groups_own"] / n, 2), "groups_enemy": round(s["groups_enemy"] / n, 2),
@@ -726,5 +780,9 @@ class Runtime:
                 "replan_reasons": {k: int(s[f"replan_{k}"]) for k in ("timer", "broken", "lord")},
                 "places_top": {f"{int(i) // n_s}_{int(i) % n_s}": int(places[i]) for i in top if places[i] > 0},
                 "laid_units": int(s["laid_units"]),
+                "target_own": round(float(tg[0]), 3), "target_enemy": round(float(tg[1]), 3),
+                "target_tile": round(float(tg[2]), 3), "target_group": round(float(tg[0] + tg[1]), 3),
+                "group_churn": round(s["churn_moved"] / max(1.0, s["churn_units"]), 4),
+                "kind_switch": round(s["kind_switched"] / max(1.0, s["kind_kept_groups"]), 4),
                 **({"distinct_bonus": round(s["distinct_bonus"] / max(1.0, s["distinct_groups"]), 5),
                     "distinct_weight": round(self.distinct.weight, 6)} if self.distinct is not None else {})}

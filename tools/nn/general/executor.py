@@ -29,7 +29,7 @@ class GeneralActor(model_policy.ActorV2):
         self.task_in = nn.Linear(self.gcfg.task_dim, cfg.d)
         nn.init.zeros_(self.task_in.weight)
         nn.init.zeros_(self.task_in.bias)
-        self.general = General(self.gcfg, cfg.sectors)
+        self.general = General(self.gcfg, cfg.sectors, cfg.grid_half)
 
     def encode(self, obs_t):
         """ActorV2.encode with the task added to the unit tokens (module doc)."""
@@ -65,7 +65,8 @@ class GeneralActor(model_policy.ActorV2):
         """Another GeneralConfig of the same shape (run.general_config: options over a checkpoint's rules - the
         deployment, the re-planning, the collection's rounds): every part that holds the config gets it."""
         keep = ("card", "reader_hidden", "council_layers", "council_heads", "group_layers", "ff", "places", "kinds",
-                "center", "tiles", "effects")
+                "target_grid", "center", "sharp", "stick", "tiles",
+                "effects")
         changed = [k for k in keep if getattr(gcfg, k) != getattr(self.gcfg, k)]
         if changed:
             raise ValueError(f"set_rules: {changed} change the general's shape (its weights would not fit)")

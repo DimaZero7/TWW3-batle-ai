@@ -92,4 +92,31 @@ def centres_world(cfg, frame):
     return torch.stack([x, z], -1)
 
 
+def coarse_index(sectors, grid, device=None):
+    """[S] the coarse tile (GeneralConfig.target_grid: grid x grid blocks of the sectors, row = forward, as the
+    sectors' index) of every sector. The grid must split the sectors evenly."""
+    if sectors % grid:
+        raise ValueError(f"general target_grid {grid} does not split {sectors} sectors evenly")
+    b = sectors // grid
+    i = torch.arange(sectors, device=device)
+    return ((i[:, None] // b) * grid + (i[None, :] // b)).reshape(-1)
+
+
+def coarse_centres(cfg, grid, device=None):
+    """[C, 2] (forward, lateral) m of every coarse tile's centre in the side's frame (the mean of its sectors')."""
+    c = centres(cfg, device)
+    idx = coarse_index(cfg.sectors, grid, c.device)
+    out = torch.zeros(grid * grid, 2, device=c.device).index_add_(0, idx, c)
+    return out / float((cfg.sectors // grid) ** 2)
+
+
+def coarse_world(cfg, frame, grid):
+    """[R, C, 2] (x, z) of every coarse tile's centre for the rows' frames."""
+    c = coarse_centres(cfg, grid, frame.cx.device)
+    f = c[None, :, 0].expand(frame.cx.shape[0], -1)
+    l = c[None, :, 1].expand(frame.cx.shape[0], -1)
+    x, z = frame.world(f, l)
+    return torch.stack([x, z], -1)
+
+
 ZoneRule = gdeploy.ZoneRule

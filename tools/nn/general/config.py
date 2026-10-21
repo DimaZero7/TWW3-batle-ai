@@ -8,6 +8,25 @@ when the config is made (NotBuilt), so a run never thinks it has what it has not
 from dataclasses import asdict, dataclass, fields
 
 
+@dataclass(frozen=True)
+class MissionKind:
+    """One mission kind ("Виды заданий"): its number (the row of the general's learned kind table, the logs' "kind N")
+    and its name. Abstract for now: a name only - a kind's meaning (what carrying it out over a plan is, its executor's
+    payment) is added here, beside its name, and read by the code that checks it."""
+    index: int
+    name: str
+
+
+# Every mission kind, in one place: the network has GeneralConfig.kinds of them (the first kinds of this list; its
+# kind table's rows are these numbers). A new kind goes at the end (the trained rows keep their numbers).
+MISSION_KINDS = tuple(MissionKind(i, f"abstract_{i}") for i in range(10))
+
+
+def mission_kinds(cfg):
+    """The cfg's mission kinds (MISSION_KINDS[:cfg.kinds])."""
+    return MISSION_KINDS[:cfg.kinds]
+
+
 class NotBuilt(ValueError):
     """A setting whose full version is not built yet (the skeleton's simplification is the only one there is)."""
 
@@ -22,11 +41,22 @@ class GeneralConfig:
     ff: int = 2                # feed-forward width = ff x card in both councils
     places: int = 10           # G: group places a side ("Сбор групп": 10 ours + 10 the enemy's)
     rounds: int = 3            # slot attention's rounds inside one decision
-    kinds: int = 10            # K: abstract mission kinds ("Виды заданий": a learned table)
-    center: float = 1.0        # the group collection's keys less this x their side's mean key (a learned share, starts
+    kinds: int = len(MISSION_KINDS)  # K: mission kinds ("Виды заданий": a learned table; MISSION_KINDS names them)
+    target_grid: int = 4       # a mission's target is a group (ours or theirs) or a tile of this coarse grid (4 x 4 of
+    #                            the side's frame: blocks of (sectors / 4)^2 map sectors) - <= 2G + 16 candidates
+    center: float = 0.7        # the group collection's keys less this x their side's mean key (a learned share, starts
     #                            here): the units compete for the places by what tells them apart - without it a fresh
-    #                            general put nearly every unit into one group (1.0-1.3 groups a side); 0: plain slot
-    #                            attention
+    #                            general put nearly every unit into one group (1.0-1.3 groups a side; with the layer-
+    #                            normed keys below ~2.3 groups of ~5 units); 1: ~6 groups of ~2 (46 % single units);
+    #                            0.7: ~3.4 groups of ~3.6 (build/gfix/slotproto.py, real armies); 0: plain slot attention
+    sharp: float = 15.0        # the group collection's keys and queries layer-normed, their dot product / sqrt(card) x
+    #                            this learned sharpness (its start): a fresh general's units have one clear main place
+    #                            (share 0.87-0.92 at 15, 0.79-0.82 at 10) and the groups' cards differ (cos 0.76-0.88) -
+    #                            with the plain dot product (0) every unit split ~0.100 over the 10 places, its group a
+    #                            draw of float noise, the group cards of a plan alike (g8: cos 0.995)
+    stick: float = 1.0         # a re-plan: the bonus on a unit's logit of its last group in the group collection (a
+    #                            learned value, starts here): the groups keep their units unless the attention prefers
+    #                            another place clearly; 0: none
     # --- the skeleton's simplifications (docs "Simplifications of the skeleton") ---
     tiles: str = "sectors"     # 1: the map tiles are the unit network's 16 x 16 sectors (8 features each) projected to
     #                            the card's width; "cnn" (the map CNN's 32 x 32 tiles, map_cnn.py) is not built yet
@@ -54,12 +84,16 @@ class GeneralConfig:
         if self.deploy not in ("net", "script"):
             raise ValueError(f"general deploy {self.deploy!r}: 'net' or 'script'")
         assert self.card % self.council_heads == 0, "the card's width must split into the heads"
+        if not 1 <= self.kinds <= len(MISSION_KINDS):
+            raise ValueError(f"general kinds {self.kinds}: 1..{len(MISSION_KINDS)} (config.MISSION_KINDS names them)")
+        if self.target_grid < 1:
+            raise ValueError(f"general target_grid {self.target_grid}: >= 1")
 
     @property
     def task_dim(self):
-        """The executor's task input a unit: its group card (the places' mix), its mission kind's card, 2 targets x
-        (direction cos, sin from the unit's facing, distance, "none")."""
-        return 2 * self.card + 8
+        """The executor's task input a unit: its group card (the places' mix), its mission kind's card, its group's
+        target (direction cos, sin from the unit's facing, distance, "none")."""
+        return 2 * self.card + 4
 
 
 def to_dict(cfg):

@@ -3,11 +3,14 @@
 * The executor (the unit network) learns as before (tools/nn/train/ppo.py): its task input is computed again in the
   update from the chunk's plan table (task_for: the general's cards with gradients, under the plans' locked membership
   and choices), so its loss reaches the group council, the group collection, the councils and the readers.
-* The general's choices (mission kind, target 1, target 2, deployment place: discrete, sampled) learn by PPO from the
-  plans that ended (update): each own group is an agent with its ratio of the plan's choices, all groups of a plan share
-  its advantage = the plan's return - the plan value's prediction at the plan (normalised over the update's plans);
-  + an entropy bonus on the choices (entropy); the plan value ("Оценка замысла") regresses the return. No reward for
-  carrying a mission out: the return is the battle's reward (v2).
+* The general's choices (mission kind, target, deployment place: discrete, sampled) learn by PPO from the plans that
+  ended (update): each own group is an agent with its ratio of the plan's choices - the probability now / the one the
+  plan was made with (kept with the plan: a plan made before the last update is priced honestly) -, all groups of a
+  plan share its advantage = the plan's return - the plan value's prediction at the plan (normalised over the update's
+  plans); + an entropy bonus on each head apart (entropy_kind, entropy_target, entropy_place: the kind's ~ln 10 and the
+  target's ~ln 36 are not one sum); the plan value ("Оценка замысла") regresses the return. The epochs' KL stop is
+  against the policy at the update's start (the plans' own log-probabilities are older: their gap is logged apart,
+  kl_plan). No reward for carrying a mission out: the return is the battle's reward (v2).
   With run.py --general-return critic the records carry "base" (the unit network's critic's value where the plan began)
   and the return is the critic's target (runtime.critic_target): the advantage is target - base (the critic explains
   ~0.995 of the return's spread); the plan value then only learns the same target beside it (its explained share
@@ -29,12 +32,15 @@ from tools.nn.general.net import CHOICES
 @dataclass(frozen=True)
 class LearnConfig:
     clip: float = 0.2
-    entropy: float = 0.01      # the entropy bonus on the general's choices (simplification 4: on)
+    entropy_kind: float = 0.001    # the entropy bonus on the mission kind's choice (simplification 4: on) ...
+    entropy_target: float = 0.001  # ... on the target's ...
+    entropy_place: float = 0.001   # ... and on the deployment place's
     value: float = 0.5         # the plan value's loss weight
     epochs: int = 2
     minibatch: int = 512       # plans a minibatch
     max_grad: float = 0.5
-    target_kl: float = 0.03    # the epochs stop when a minibatch's mean KL per group passes this (0: never)
+    target_kl: float = 0.03    # the epochs stop when a minibatch's mean KL per group (against the policy at the
+    #                            update's start) passes this (0: never)
     branches: float = 0.0      # the mission branches: the share of the plans replayed with another kind (0: off)
     branch_weight: float = 1.0  # ... their term's weight in the general's loss
     distinct: float = 0.0      # the executor's bonus for missions that tell apart: its weight W (0: off; distinct.py)
@@ -68,6 +74,10 @@ def task_for(actor, table, obs):
     return torch.cat([cards, geo], -1) * on[..., None].to(cards.dtype), on
 
 
+def _rows(d, idx):
+    return {k: v[idx] for k, v in d.items()}
+
+
 def _ev(value, ret):
     v = ret.var()
     return float(1 - (ret - value).var() / v) if v > 1e-12 else 0.0
@@ -95,19 +105,28 @@ def branch_term(gen, branch, clip):
 
 
 def update(actor, opt, ready, cfg=LearnConfig(), branch=None):
-    """PPO of the general on the ended plans `ready` (runtime.end_chunk's: records [M, ..] with "target"); branch: the
-    mission branches' prices of the chunk (or None: no term). -> stats (general_*): policy loss, entropy, KL, clip
+    """PPO of the general on the ended plans `ready` (runtime.end_chunk's: records [M, ..] with "ret", their return); branch: the
+    mission branches' prices of the chunk (or None: no term). -> stats (general_*): policy loss, entropy (all and per
+    head: ent_kind, ent_target, ent_place), KL (against the update's start; kl_plan: against the plans' own), clip
     share, the plan value's loss and explained variance (before the step), plans, groups a plan; with branches their
     term's loss, KL, clip share and rows."""
     gen = actor.general
     params = list(gen.parameters())
     M = ready["lp"].shape[0]
     G = gen.cfg.places
-    target = ready["target"].float()
+    target = ready["ret"].float()
     base = ready["base"].float() if "base" in ready else ready["value"].float()   # the critic's (--general-return critic)
     raw = target - base
     adv = (raw - raw.mean()) / (raw.std() + 1e-8) if M > 1 else raw * 0
-    sums = {"pl": 0.0, "ent": 0.0, "vl": 0.0, "kl": 0.0, "clip": 0.0}
+    act_of = (lambda rec: {k: rec[k] for k in CHOICES})
+    # the policy at the update's start (the KL stop's reference) and its gap to the plans' own log-probabilities
+    with torch.no_grad():
+        lp0 = torch.cat([gen(_rows(ready, mb), act=act_of(_rows(ready, mb)))[1]["lp"]
+                         for mb in torch.arange(M, device=target.device).split(cfg.minibatch)])
+        mine0 = ready["active"][:, :G].float()
+        kl_plan = float(((ready["lp"] - lp0) * mine0).sum() / mine0.sum().clamp(min=1))
+    sums = {"pl": 0.0, "ent": 0.0, "ent_kind": 0.0, "ent_target": 0.0, "ent_place": 0.0, "vl": 0.0, "kl": 0.0,
+            "clip": 0.0}
     use_b = branch is not None and cfg.branch_weight > 0 and len(branch["adv"]) > 0
     if use_b:
         sums.update(branch_loss=0.0, branch_kl=0.0, branch_clip=0.0)
@@ -117,8 +136,8 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None):
         if stop:
             break
         for mb in torch.randperm(M, device=target.device).split(cfg.minibatch):
-            rec = {k: v[mb] for k, v in ready.items()}
-            c, d = gen(rec, act={k: rec[k] for k in ("kind", "t1", "t2", "place")})
+            rec = _rows(ready, mb)
+            c, d = gen(rec, act=act_of(rec))
             mine = rec["active"][:, :G]
             m = mine.float()
             cnt = m.sum().clamp(min=1)
@@ -127,10 +146,12 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None):
             surr = torch.minimum(ratio * a, ratio.clamp(1 - cfg.clip, 1 + cfg.clip) * a)
             pl = -(surr * m).sum() / cnt
             ent = (d["ent"] * m).sum() / cnt
+            parts = (d["ent_parts"] * m[..., None]).sum((0, 1)) / cnt                # [3] kind, target, place
             vl = ((d["value"].float() - target[mb]) ** 2).mean()
-            loss = pl - cfg.entropy * ent + cfg.value * vl
+            loss = (pl - cfg.entropy_kind * parts[0] - cfg.entropy_target * parts[1] - cfg.entropy_place * parts[2]
+                    + cfg.value * vl)
             with torch.no_grad():
-                kl = float(((rec["lp"] - d["lp"]) * m).sum() / cnt)
+                kl = float(((lp0[mb] - d["lp"]) * m).sum() / cnt)
             if cfg.target_kl and kl > cfg.target_kl and n:
                 stop = True                          # (a minibatch past the KL: no step on it, no more epochs)
                 break
@@ -152,12 +173,15 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None):
             with torch.no_grad():
                 sums["pl"] += float(pl)
                 sums["ent"] += float(ent)
+                for j, k in enumerate(("ent_kind", "ent_target", "ent_place")):
+                    sums[k] += float(parts[j])
                 sums["vl"] += float(vl)
                 sums["kl"] += kl
                 sums["clip"] += float((((ratio - 1).abs() > cfg.clip).float() * m).sum() / cnt)
             n += 1
     actor.eval()
     out = {f"general_{k}": v / max(1, n) for k, v in sums.items()}
+    out["general_kl_plan"] = kl_plan
     out["general_value_ev"] = _ev(ready["value"].float(), target)
     out["general_value_mse"] = float(((ready["value"].float() - target) ** 2).mean())
     out["general_plans"] = float(M)

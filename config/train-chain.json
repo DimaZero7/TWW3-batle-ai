@@ -87,10 +87,9 @@
         "general-card": 128,
         "general-council-layers": 2,
         "general-group-layers": 1,
-        "general-entropy": 0.01,
-        "general-return": "span",
+        "general-return": "critic",
         "general-deploy": "net",
-        "general-center": 1.0
+        "general-center": 0.7
       }
     }
   }

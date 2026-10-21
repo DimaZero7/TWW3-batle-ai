@@ -64,7 +64,7 @@ def test_a_replanned_plans_target_is_the_reward_and_the_critic_at_the_replan():
     assert len(rt.ready) == 1
     rec = rt.ready[0]
     r0, r1 = float(s1["reward"][0]), float(s2["reward"][0])
-    assert float(rec["target"][0]) == pytest.approx(r0 + 0.9 * r1 + 0.81 * V(3, 0), abs=1e-5)
+    assert float(rec["ret"][0]) == pytest.approx(r0 + 0.9 * r1 + 0.81 * V(3, 0), abs=1e-5)
     assert float(rec["base"][0]) == pytest.approx(V(1, 0), abs=1e-6)
     assert float(rec["done"][0]) == 0.0
     assert float(rt.r["v_start"][0]) == pytest.approx(V(3, 0))          # the new plan begins at the re-plan's value
@@ -87,7 +87,7 @@ def test_at_the_battles_end_the_critic_counts_zero_and_the_deployment_takes_the_
     rt.after(env, torch.full((env.R,), 0.5), finished)                # the last decision's reward, the battle ends
     rec = rt.ready[-1]
     want = rd + 0.95 ** n * 0.5
-    torch.testing.assert_close(rec["target"], want, atol=1e-6, rtol=0)  # no V(end): the end's reward only
+    torch.testing.assert_close(rec["ret"], want, atol=1e-6, rtol=0)  # no V(end): the end's reward only
     torch.testing.assert_close(rec["base"], base)
     assert torch.all(rec["done"] == 1.0) and not bool(rt.r["has"][rows].any())
     # the next battle's deployment: no value until its first decision, then that decision's
@@ -102,7 +102,7 @@ def test_the_classifier_starts_at_chance_and_learns_separable_behaviour():
     torch.manual_seed(0)
     K = 10
     L = distinct.Learner(F, K, "cpu", lr=1e-2, epochs=100, minibatch=128)
-    L.weight = 1.0
+    L.weight, L.scale = 1.0, 1.0                                      # (scale: the executor's advantage std)
     M, G = 96, 3
     kind = torch.randint(0, K, (M, G))
     beh = torch.nn.functional.one_hot(kind, F).float()[..., :F] * 2.0 + 0.05 * torch.randn(M, G, F)
@@ -114,13 +114,15 @@ def test_the_classifier_starts_at_chance_and_learns_separable_behaviour():
     assert st["distinct_acc"] > 0.9 and st["distinct_gain"] > 1.0
     b = L.bonus(beh, kind, ok)
     assert float(b.mean()) > 1.0 and float(b.max()) <= math.log(K) + 1e-6
+    L.scale = 0.1                                                     # in the advantage's units: x its std
+    torch.testing.assert_close(L.bonus(beh, kind, ok), b * 0.1, rtol=1e-6, atol=1e-7)
     off = ok.clone()
     off[:, 1:] = False
     assert torch.all(L.bonus(beh, kind, off)[:, 1:] == 0)            # groups that do not count: 0
     L.weight = 0.0
     assert torch.all(L.bonus(beh, kind, ok) == 0)
     st2 = distinct.Learner(F, K, "cpu")
-    assert st2.load(L.state()) and torch.equal(st2.net(beh), L.net(beh))
+    assert st2.load(L.state()) and torch.equal(st2.net(beh), L.net(beh)) and st2.scale == 0.1
 
 
 def test_the_groups_behaviour_is_their_kinds_shares_and_the_moves_from_the_sides_facing():

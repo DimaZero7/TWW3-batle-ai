@@ -23,8 +23,8 @@ def args_of(*line):
 
 
 def test_the_parser_records_only_the_options_given():
-    a = args_of("--general-deploy", "script", "--general-entropy", "0.02")
-    assert "general_deploy" in a.cli_given and "general_entropy" in a.cli_given
+    a = args_of("--general-deploy", "script", "--general-entropy-kind", "0.02")
+    assert "general_deploy" in a.cli_given and "general_entropy_kind" in a.cli_given
     assert "general_replan_s" not in a.cli_given and "general_card" not in a.cli_given
     assert a.general_deploy == "script" and a.general_replan_s == 30.0      # the defaults are still there
     assert args_of().cli_given == []
@@ -39,7 +39,7 @@ def test_a_given_rule_goes_over_the_saved_one():
 
 def test_without_the_option_the_saved_rule_stays():
     saved = dataclasses.replace(SAVED, deploy="script", replan_s=45.0)
-    gcfg, over = run.general_config(args_of("--general-entropy", "0.05"), saved)
+    gcfg, over = run.general_config(args_of("--general-entropy-kind", "0.05"), saved)
     assert gcfg == saved and over == {}
 
 
@@ -50,7 +50,8 @@ def test_an_option_given_at_its_default_still_goes_over_the_saved_value():
 
 
 @pytest.mark.parametrize("line", [("--general-card", "128"), ("--general-places", "8"), ("--general-kinds", "6"),
-                                  ("--general-council-layers", "3"), ("--general-center", "0")])
+                                  ("--general-council-layers", "3"), ("--general-center", "0"),
+                                  ("--general-target-grid", "2")])
 def test_a_size_option_against_the_saved_size_stops_the_run(line):
     with pytest.raises(SystemExit, match=line[0]):
         run.general_config(args_of(*line), SAVED)
@@ -74,9 +75,9 @@ def test_with_general_applies_the_flags_to_a_loaded_general_and_the_next_checkpo
     loaded = checkpoint.load_policy(path)
     assert loaded.gcfg.deploy == "net"
     out, lcfg = run.with_general(loaded, args_of("--general-deploy", "script", "--general-rounds", "2",
-                                                 "--general-entropy", "0.03"))
+                                                 "--general-entropy-kind", "0.03"))
     assert out is loaded and out.gcfg.deploy == "script" and out.general.cfg is out.gcfg
-    assert out.general.groups.rounds == 2 and lcfg.entropy == 0.03
+    assert out.general.groups.rounds == 2 and lcfg.entropy_kind == 0.03
     assert checkpoint.general_of(checkpoint.read(checkpoint.save(tmp_path / "h.pt", out))).deploy == "script"
     again, _ = run.with_general(checkpoint.load_policy(path), args_of())            # no flags: as saved
     assert again.gcfg.deploy == "net" and again.general.groups.rounds == 3

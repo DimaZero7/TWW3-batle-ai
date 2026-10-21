@@ -8,6 +8,9 @@ host's tests check them; docs/en/training/general.md "Training").
   guesses a group's mission kind from what its units did during the plan; the bonus is log q(kind | behaviour) - log(1/K)
   (0 when it guesses no better than chance, up to log K when it is sure and right), clipped to [-log K, log K], x W.
 * distinct_weight: W down to 0 linearly over `decay` updates of the chain (0: no decay).
+* distinct_scale: the bonus is in the executor's advantage's units: W x the guess's gain x the spread (std) of the
+  executor's advantage before its normalisation (an average over the updates; ppo's adv_std_*) - W = 1 pays a group
+  one advantage std for each nat the classifier guesses its kind better than chance.
 * The mission branches (run.py --general-branches P; branch.py): a plan replayed with one group's kind a swapped for b.
   other_kind maps a uniform draw over the K - 1 other kinds; kind_advantage is the kind choice's advantage from the
   branches' prices (price = the chosen branch's trade - the swapped one's, the mean over the copies):
@@ -45,6 +48,17 @@ def distinct_weight(w0, decay, updates):
     if not decay:
         return float(w0)
     return float(w0) * max(0.0, 1.0 - updates / float(decay))
+
+
+SCALE0 = 0.06       # the executor's advantage std before the first update (line S27/g1-g8 logs: 0.058-0.068)
+
+
+def distinct_scale(prev, adv_std, keep=0.7, floor=0.005):
+    """The bonus's scale after an update: the running mean (keep x prev + (1 - keep) x now) of the executor's advantage
+    std adv_std (None or not finite: prev kept), at least floor."""
+    if adv_std is None or not math.isfinite(adv_std) or adv_std <= 0:
+        return float(prev)
+    return max(floor, keep * float(prev) + (1.0 - keep) * float(adv_std))
 
 
 def other_kind(draw, chosen):

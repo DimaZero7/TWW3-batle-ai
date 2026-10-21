@@ -215,31 +215,34 @@ class GameGeneral:
         return task, recs
 
 
-def target_name(i, G, S, n_sectors):
-    """A mission's target index (net.General.decide): our group, their group, a tile ("row_column" of the side's
-    sectors) or none."""
+def target_name(i, G, grid):
+    """A mission's target index (net.General.decide): our group, their group, a coarse tile ("row_column" of the side's
+    grid x grid targets' tiles, GeneralConfig.target_grid: row = forward) or none."""
     i = int(i)
     if i < G:
         return f"g{i}"
     if i < 2 * G:
         return f"e{i - G}"
-    if i < 2 * G + S:
+    if i < 2 * G + grid * grid:
         k = i - 2 * G
-        return f"tile {k // n_sectors}_{k % n_sectors}"
+        return f"tile {k // grid}_{k % grid}"
     return "none"
 
 
 def plan_record(rt, row, env, names, n, reason):
-    """The log's record of the plan in force of a row: {"n", "t", "reason", "groups": [{"g", "units", "kind", "t1",
-    "t2"}], "enemy": [{"g", "units"}]} - our groups gN, theirs eN (as the targets name them)."""
-    r, G, S = rt.r, rt.G, rt.S
+    """The log's record of the plan in force of a row: {"n", "t", "reason", "groups": [{"g", "units", "kind",
+    "kind_name", "target"}], "enemy": [{"g", "units"}]} - our groups gN, theirs eN (as the targets name them; a group
+    keeps its number over the re-plans while it keeps its units: net.match_groups)."""
+    from tools.nn.general.config import mission_kinds
+    r, G = rt.r, rt.G
     main = r["main"][row].tolist()
     active = r["active"][row].tolist()
-    kind, t1, t2 = r["kind"][row].tolist(), r["t1"][row].tolist(), r["t2"][row].tolist()
-    ns = rt.mcfg.sectors
+    kind, target = r["kind"][row].tolist(), r["target"][row].tolist()
+    grid = rt.gcfg.target_grid
+    names_k = [k.name for k in mission_kinds(rt.gcfg)]
     members = {g: [names[i] for i, m in enumerate(main) if m == g] for g in range(2 * G)}
-    ours = [{"g": f"g{g}", "units": members[g], "kind": int(kind[g]), "t1": target_name(t1[g], G, S, ns),
-             "t2": target_name(t2[g], G, S, ns)} for g in range(G) if active[g]]
+    ours = [{"g": f"g{g}", "units": members[g], "kind": int(kind[g]), "kind_name": names_k[int(kind[g])],
+             "target": target_name(target[g], G, grid)} for g in range(G) if active[g]]
     theirs = [{"g": f"e{g - G}", "units": members[g]} for g in range(G, 2 * G) if active[g]]
     return {"n": n, "t": round(float(r["t_plan"][row]), 2), "reason": reason, "groups": ours, "enemy": theirs}
 
@@ -255,7 +258,7 @@ def describe(rec, limit=6):
     for g in rec["groups"]:
         units = ", ".join(short(u) for u in g["units"][:limit])
         more = f" +{len(g['units']) - limit}" if len(g["units"]) > limit else ""
-        parts.append(f"{g['g']} [{units}{more}] kind {g['kind']} -> {tg(g['t1'])}, {tg(g['t2'])}")
+        parts.append(f"{g['g']} [{units}{more}] kind {g['kind']} -> {tg(g['target'])}")
     return (f"general plan {rec['n']} t {rec['t']:.1f} s ({rec['reason']}): {len(rec['groups'])} groups, enemy "
             f"{len(rec['enemy'])} | " + " | ".join(parts))
 

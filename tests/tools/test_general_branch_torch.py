@@ -214,7 +214,7 @@ def test_the_terms_old_log_probability_is_the_plans_and_its_gradient_reaches_the
     for name in ("kinds", "kind_q.weight", "reader.", "council.", "groups."):
         grads = [p.grad for n, p in gen.named_parameters() if n.startswith(name)]
         assert any(g is not None and float(g.abs().sum()) > 0 for g in grads), name
-    for name in ("t1_q.", "place_q.", "value."):                      # the other choices' heads: no gradient
+    for name in ("target_q.", "place_q.", "value."):                      # the other choices' heads: no gradient
         grads = [p.grad for n, p in gen.named_parameters() if n.startswith(name)]
         assert all(g is None or float(g.abs().sum()) == 0 for g in grads), name
     # the term on: the general's update logs it

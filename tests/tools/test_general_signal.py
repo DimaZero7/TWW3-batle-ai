@@ -59,6 +59,19 @@ def test_the_distinct_weight_decays_linearly_to_zero():
     assert signal.distinct_weight(0.02, 0, 10 ** 6) == pytest.approx(0.02)          # no decay
 
 
+def test_the_distinct_scale_follows_the_executors_advantage_std():
+    """The bonus is in the executor's advantage's units: its scale is a running mean of the advantage's std (ppo's
+    adv_std_*), kept when the update logs none, never below the floor."""
+    assert signal.SCALE0 == pytest.approx(0.06)
+    s = signal.distinct_scale(0.06, 0.2)
+    assert s == pytest.approx(0.7 * 0.06 + 0.3 * 0.2)
+    for _ in range(60):
+        s = signal.distinct_scale(s, 0.2)
+    assert s == pytest.approx(0.2, abs=1e-6)
+    assert signal.distinct_scale(0.1, None) == 0.1 and signal.distinct_scale(0.1, float("nan")) == 0.1
+    assert signal.distinct_scale(0.001, 0.0001) == 0.005
+
+
 def test_the_other_kind_skips_the_chosen_one_and_covers_the_rest_evenly():
     K = 10
     for a in range(K):

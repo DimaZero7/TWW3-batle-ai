@@ -21,7 +21,7 @@ flowchart TB
   T["Map tiles<br/>sectors 16×16 (simplification 1)"] --> C
   C --> G["Group collection<br/>10 places a side, 3 rounds"]
   G --> GC["Group council<br/>the groups listen"]
-  GC --> M["Mission choice<br/>kind → target 1 → target 2"]
+  GC --> M["Mission choice<br/>kind → target"]
   M --> P["Place choice<br/>a tile of our zone"]
   P --> L["Layout<br/>a rule, deploy.py"]
   M --> U["Unit task<br/>runtime.task"]
@@ -39,21 +39,23 @@ flowchart TB
 | Block of the design | Code | What it does |
 |---|---|---|
 | Armies | `units.py` (+ `army_input.py`) | the slots of all the battle's units: 45 numbers and 3 labels (as the "Armies" input); "come" = what is left now |
+| Where a unit stands | `runtime.pos_of_obs` / `pos_of_state`, `net.POS_FEATURES` | 7 numbers a unit in the side's frame, as in the unit network's token: forward and sideways / 500 m, its facing (cos, sin), velocity forward and sideways / 5 m/s, "known". In a re-plan from the side's observation's tokens (an enemy where it was last seen; one never seen: zeros), at the deployment from the state (velocity 0). Nothing new from the game is needed: the game has the same fields (the bridge state's `x`, `z`, `b`) |
 | Army analysis | `army_reader.py` | one network for all slots → the unit's card (`card` wide) |
-| Map tiles | `tiles.py` | 256 sectors of 100 m with their 8 numbers, projected to the card's width + the tile's place |
-| Council | `net.General.cards` | a transformer: units and tiles, each asks each; the label own / enemy / tile; empty slots and tiles outside the map take no part |
-| Group collection | `net.SlotGroups` | slot attention: 10 places ours + 10 the enemy's, each with its own starting card; a unit splits itself 100 % between its side's places (the side mask); 3 rounds; the routing and the dead are in no group. A group is a place that is some unit's main place. The units' keys less a learned share of their side's mean key (`--general-center`, starts at 1): the places compete for the units by what tells the units apart ([why](#more-differences-from-the-design)) |
+| Map tiles | `tiles.py` | 256 sectors of 100 m with their 8 numbers, projected to the card's width + the tile's place + its centre (through the same layer as the units' positions: a unit and a tile compare by place) |
+| Council | `net.General.cards` | a transformer: units (card + position) and tiles, each asks each; the label own / enemy / tile; empty slots and tiles outside the map take no part |
+| Group collection | `net.SlotGroups` | slot attention (keys and queries through a LayerNorm, × a learned sharpness `--general-sharp`, starting at 15 — a fresh general's main place share ~0.9): 10 places ours + 10 the enemy's, each with its own starting card; a unit splits itself 100 % between its side's places (the side mask); 3 rounds; the routing and the dead are in no group. A group is a place that is some unit's main place. The units' keys less a learned share of their side's mean key (`--general-center`, starts at 1): the places compete for the units by what tells the units apart ([why](#more-differences-from-the-design)). The unit's position is added to its key (its own layer `k_pos`): groups gather by place too, not only by type |
+| Group numbers | `net.match_groups`, `net.renumber`, `SlotGroups.stick` | in a re-plan a unit holds on to its last group (a learned bonus on its logit, `--general-stick`); then the new groups are matched to the old ones by the units they share (greedily: the pair sharing the most units first; with nothing to tell, a place keeps its own number) and renumbered — a number `gN` holds while the group keeps its units; the prev card, the task and the log go by that number. The numbering (`perm`) is kept with the plan: the update computes the plan again with it |
 | Group council | `net.Listen` | the groups listen to the tiles and to all groups; the tiles do not change |
-| Mission kinds | `General.kinds` | a table of 10 learned cards with no input |
-| Mission choice | `General.decide` | step by step: kind (the group's card against the kinds) → target 1 → target 2 or "none"; targets: our groups (not itself), their groups, tiles inside the map; the enemy's groups do not choose |
+| Mission kinds | `General.kinds`, `config.MISSION_KINDS` | a table of learned cards with no input; the list of kinds (number + name) is in one place, `config.py` `MISSION_KINDS` (now 10 abstract ones, `abstract_0…9`); a kind's meaning (what "done" is) goes there too |
+| Mission choice | `General.decide` | step by step: kind (the group's card against the kinds) → one target; targets: our groups (not itself), their groups, the tiles of a coarse 4 × 4 grid (`--general-target-grid`, a 400 m tile = the mean of its 16 sectors after the council; at least one sector inside the map): ≤ 36 candidates; the enemy's groups do not choose |
 | Place choice | `General.decide` | in the battle's first plan only: a pointer to a tile of our zone |
 | Layout | `deploy.py` | a rule: a line by the formations' widths on the group's tile, facing the enemy's centre; groups on one tile stand one behind the other; everything inside the zone |
-| Unit task | `runtime.Runtime.task` | for each own unit: its group card (the mix of the places' cards by its shares), its main group's mission kind card, 2 targets (direction from where the unit faces, cos and sin; distance / 100 m, at most 20; a "none" flag) — 2 × card + 8 numbers |
+| Unit task | `runtime.Runtime.task` | for each own unit: its group card (the mix of the places' cards by its shares), its group's mission kind card, the group's target (direction from where the unit faces, cos and sin; distance / 100 m, at most 20; a "none" flag) — 2 × card + 4 numbers |
 | Executor | `executor.GeneralActor` | today's unit network; the task goes through a linear layer with zero weights and is added to the unit's token (as the commitment's input); enemies get nothing |
 | Re-planning | `runtime.Runtime.replan` | every 30 s of battle; sooner when a group is broken (more than half of its units rout or are destroyed) or a lord falls (ours or theirs), but not sooner than 3 s after the plan. Between plans the groups, missions and targets are locked |
 | Reward | `tools/nn/train/reward.py` | as now (v2); no reward for carrying a mission out |
 | Plan value | `General.value` | predicts the plan's return from the plan's cards (detached); with `--general-return critic` the advantage's base is the unit critic, and it learns beside it |
-| Missions that tell apart | `distinct.py`, `runtime.behave` | (`--general-distinct W`) a classifier guesses a group's mission kind from its units' behaviour; the executor's bonus |
+| Missions that tell apart | `distinct.py`, `runtime.behave` | (`--general-distinct W`) a classifier guesses a group's mission kind from its units' behaviour; the executor's bonus, in units of its advantage's spread |
 | Mission branches | `branch.py` | (`--general-branches P`) a copy of the battle "the same plan, one group with another mission kind"; the exchange's difference is the kind choice's price ([below](#mission-branches)) |
 | Training | `learn.py`, `tools/nn/train/ppo.py` | [below](#training) |
 
@@ -69,11 +71,13 @@ version that has a general) is kept per row of the batch (as `rollout.Battles` k
   (`place.py`) — groups, missions, places; the rule puts the units on their groups' tiles. Scripted sides and old
   networks without a general stand as before. When a side's units do not stand in their zone (kite battles, drills)
   the placement stays scripted and the general only forms the groups and missions.
-- **Re-planning:** the network runs the whole scheme again: the armies "now" (the men and health left), the tiles from
-  the side's observation (the same numbers as the unit network's sectors), the group places start from their last
-  cards.
-- **The unit task** is computed every decision (the targets move): a target group's point is the centre of its units
-  now (as the side sees them), a tile's its centre.
+- **Re-planning:** the network runs the whole scheme again: the armies "now" (the men and health left), the units'
+  positions and the tiles from the side's observation (the same numbers as the unit network's tokens and sectors), the
+  group places start from their last cards; the new groups take the old numbers by the units they share
+  (`match_groups`).
+- **The unit task** is computed every decision (the target moves, the unit turns): a target group's point is the
+  centre of its units now (as the side sees them), a tile's its centre (a fixed point of the plan). It is a function
+  of the state, not noise: a unit that stands keeps its task.
 - **Both sides** in battles against itself and the pool (when the pool's version has a general) use the general;
   against scripts only our side does.
 
@@ -84,8 +88,9 @@ plays with it. The general's code is the simulator's (`runtime.Runtime`), not a 
 (`GameBattles`) turns the bridge's state into "a simulator batch of one battle" - the units in the state file's order
 and exactly the fields `Runtime` reads:
 
-- position, men, health share, morale state, visibility - from the game's state; a missing reading keeps the last
-  one; men but no position - the unit has left the map (as the enemy's script reads it);
+- position, bearing (`b`), men, health share, morale state, visibility - from the game's state; a missing reading
+  keeps the last one; men but no position - the unit has left the map (as the enemy's script reads it). The units'
+  positions for the general in a re-plan come from the same observation the unit network reads (the velocity too);
 - start health, cost, formation - the simulator's numbers for the unit's key;
 - a lord fallen (dead, shattered or off the map) - as the simulator's `lord_dead_s`.
 
@@ -106,14 +111,15 @@ KEY=VALUE` - a field of the general's settings over the checkpoint's, e.g. `repl
 The companion's log - a line for every plan:
 
 ```
-general plan 2 t 30.0 s (timer): 4 groups, enemy 3 | g0 [lord, spear_1, spear_2] kind 4 -> e1(3), tile 5_8 | ...
+general plan 2 t 30.0 s (timer): 4 groups, enemy 3 | g0 [lord, spear_1, spear_2] kind 4 -> e1(3) | g1 [...] kind 0 -> tile 2_1 | ...
 ```
 
 The plan's number, the battle time, the reason (`deploy` - the battle's start, `timer`, `broken`, `lord`), the number
-of our and the enemy's groups, and per our group `gN`: its units, the mission kind, target 1 and target 2 - our group
-`gN`, an enemy group `eN` (in brackets: how many units it has), a tile `tile row_column` of the side's 16 x 16 grid,
-or `none`. In `companion.jsonl` the decision a plan was made at has the field `general`: the same in full, plus the
-enemy's groups `enemy` with their units. A unit without a passport - the line `general off: ...`, and that battle goes
+of our and the enemy's groups, and per our group `gN`: its units, the mission kind, the target - our group `gN`, an
+enemy group `eN` (in brackets: how many units it has) or a tile `tile row_column` of the side's coarse 4 x 4 grid (the
+row is forward). A group's number holds from plan to plan while it keeps its units. In `companion.jsonl` the decision
+a plan was made at has the field `general`: the same in full (a group also has `kind_name`, the kind's name of
+`MISSION_KINDS`), plus the enemy's groups `enemy` with their units. A unit without a passport - the line `general off: ...`, and that battle goes
 without the general.
 
 ## Training
@@ -124,15 +130,16 @@ PPO on two levels (`learn.py`):
   (`learn.task_for`) — with the gradient, so the executor's loss reaches the group council, the group collection, the
   council and the army readers. At every chunk's start the cards of the plans in force are computed again with the
   weights of the moment — the decisions' probabilities in the battle and in the update agree (test).
-- **The general:** its choices (kind, target 1, target 2, place) are discrete and sampled; each own group is an agent
-  with its own ratio of probabilities, all groups of a plan share its advantage = the plan's return − the plan value at
-  the plan (normalised over the update's plans). The return is the reward summed from the decision to the next
-  re-plan or the battle's end (`--general-return span`). Plus an entropy bonus on the choices (`--general-entropy`,
-  0.01). The plan value learns the return. The general's steps come after the executor's epochs, the same Adam
-  (`--general-lr-mult` scales its step); 2 epochs of 512 plans, the epochs stop when the KL a group passes 0.03. At a
-  chunk's start the choices' probabilities of the plans in force are computed again with the weights of the moment
-  (a plan made before the last update is priced as the policy of now: the ratio starts at 1; without it the general's
-  KL was 0.05–0.07 an update and the clipped share 0.5–0.6).
+- **The general:** its choices (kind, target, place) are discrete and sampled; each own group is an agent with its
+  own ratio of probabilities, all groups of a plan share its advantage = the plan's return − the plan value at the plan
+  (normalised over the update's plans). The return is the reward summed from the decision to the next re-plan or the
+  battle's end (`--general-return span`; the chain's step: `critic`, below). Plus an entropy bonus on each head apart:
+  `--general-entropy-kind`, `--general-entropy-target`, `--general-entropy-place` (0.001 each). The plan value learns
+  the return. The general's steps come after the executor's epochs, the same Adam (`--general-lr-mult` scales its
+  step); 2 epochs of 512 plans. **The ratio is honest:** a plan keeps the log-probability it was chosen with, and the
+  ratio is "the policy now / the policy that chose", for a plan begun before the last update too. The epochs stop when
+  the KL a group **from the policy at the update's start** passes 0.03 (its probabilities are computed once without
+  gradients before the epochs); the gap between it and the plans' own probabilities is logged as `kl_plan`.
 - **The return by the unit critic** (`--general-return critic`, off by default). Why: with `span` nearly all of the
   return's spread (98.6 % in the analysis of the g1 points) is in the battle's last plans (±1 for the win), the
   deployment's return spreads ~0.004, and the plan value explains ~0 — the general has nothing to learn from. The unit
@@ -143,18 +150,22 @@ PPO on two levels (`learn.py`):
   last reward (the win) is already in the sum. The plan value learns the same target beside it, but the advantage
   takes the critic's difference. The formulas: `signal.py` (no torch); the critic's value at a decision:
   `runtime.note_value` (computed before the decision's re-plans).
-- **The executor's bonus for missions that tell apart** (`--general-distinct W`, default 0 — off). Why: the executor
+- **The executor's bonus for missions that tell apart** (`--general-distinct W`, default 0 — off; a stopgap: the
+  payment for carrying out concrete mission kinds will replace it). Why: the executor
   hardly listens to its task (the input's weights 0 → 0.39 by a random walk; swapping the mission kind changes the
   decisions by a KL of 0.0006). How: over a plan the behaviour of each own group's units is summed
   (`runtime.behave`): the shares of the order kinds, the run share, the group centre's displacement forward and
   sideways (from the direction "our centre → the enemy's centre" at the plan's start, / 100 m), the centre's path, the
   plan's length — 10 numbers (`runtime.BEH`). A small classifier (`distinct.py`: 2 layers of 64, its own Adam, outside
   the network) guesses the group's mission kind from them. When the plan ends, each group gives W × (log q(kind |
-  behaviour) − log(1/10)) (within ±ln 10): 0 when the classifier guesses no better than chance, up to W · 2.3 when it is
-  sure and right. The bonus goes into the side's reward at the plan's last decision; not into the general's return.
-  It is a reason to act differently under different kinds, not a payment for carrying a mission out. W goes down to
-  0 linearly over `--general-distinct-decay N` updates of the chain (the counter goes on over the parts); the
-  classifier learns after every update on the ended plans, also once W = 0 (its accuracy measures how much the
+  behaviour) − log(1/10)) × σ (within ±ln 10 before the factor): 0 when the classifier guesses no better than chance,
+  up to W · 2.3 · σ when it is sure and right. σ is the spread of the executor's advantage before its normalisation
+  (the mean of PPO's `adv_std_attack` and `adv_std_defend`, running: 0.7 · old + 0.3 · new, at least 0.005; 0.06 before
+  the first update — the number of the g1–g8 logs): the bonus is in the executor's signal's units, W = 1 pays a group
+  one advantage spread for each nat of the guess. The bonus goes into the side's reward at the plan's last decision;
+  not into the general's return. It is a reason to act differently under different kinds, not a payment for carrying
+  a mission out. W goes down to 0 linearly over `--general-distinct-decay N` updates of the chain (600 by default; the
+  counter goes on over the parts); σ is kept with the classifier in the point. The classifier learns after every update on the ended plans, also once W = 0 (its accuracy measures how much the
   behaviour depends on the kind). Its weights, Adam and the counter are in the checkpoint's `train`. A caveat: the kind
   is tied to whom the general gives it (cavalry, say, gets one kind more often), so part of the guessing is by the
   group's type, not by behaviour; an accuracy above chance does not yet mean the executor listens — read it with the
@@ -220,15 +231,22 @@ yet, are refused with a `NotBuilt` error (the network never thinks it has what i
 | 1 | the map tiles are today's 16 × 16 sectors of 100 m (8 numbers), projected to the card's width | `--general-tiles sectors` | `cnn`: the map analysis's 1024 tiles (`map_cnn.py`) |
 | 2 | the effects are not connected: the effect cards are zeros | `--general-effects off` | `on`: the effects' analysis |
 | 3 | small widths: council 2 layers, group council 1 layer, card 128 (the chain's step; `run.py`'s default 64), 4 heads | `--general-card 128 --general-council-layers 2 --general-group-layers 1 --general-heads 4` | settled by the checks |
-| 4 | the mission branches and the bonus for missions that tell apart are built but off by default; the entropy bonus on the choices is on | `--general-branches 0 --general-distinct 0 --general-entropy 0.01` | branches: `--general-branches P` ([above](#mission-branches)); the bonus: `--general-distinct W` ([above](#training)) |
+| 4 | the mission branches and the bonus for missions that tell apart are built but off by default; the entropy bonus on the choices is on, per head | `--general-branches 0 --general-distinct 0 --general-entropy-kind 0.001 --general-entropy-target 0.001 --general-entropy-place 0.001` | branches: `--general-branches P` ([above](#mission-branches)); the bonus: `--general-distinct W` ([above](#training)) |
 | 5 | the deployment zone is the area `place.py` deploys an army in (forward from −260 to +40 m of the side's line, sideways ±150 m); a tile is in the zone when its centre is; the layout inside a group is a rule | `--general-zone place`, `--general-deploy net` (`script`: the scripted placement as before) | `map`: the zones from the map's layers |
 
 More differences from the design (skeleton too):
 
-- **the group collection's keys less a share of their side's mean key** (`--general-center 1`, the share learns; `0`:
-  plain slot attention). Without it a fresh general in a probe put nearly all units into one group: 1.0–1.3 groups a
-  side (the common part of one army's keys outweighed the differences); with it 4.3–4.6 at the start (an army of ~14
-  units), 3.6–4.0 in the trial training. My decision; the design page does not have it;
+- **the group collection's keys less a share of their side's mean key** (`--general-center 0.7`, the share learns;
+  `0`: none). Without it a fresh general put nearly all units into one or two groups (the common part of one army's
+  keys outweighed the differences). My decision; the design page does not have it;
+- **the group collection's sharpness** (`--general-sharp 15`): keys and queries through a LayerNorm with no weights of
+  its own, their product / √card × a learned sharpness (kept as a log, starts at 15). Measured on real armies
+  (`build/gfix/slotproto.py`, 96 sides, a fresh general): a unit's main place share 0.87–0.92 (0.79–0.82 at 10), the
+  cosine of a plan's group cards 0.76–0.88, ~3.4 groups a side of ~3.6 units (with a centring of 1: ~6 groups of ~2,
+  46 % of one unit; without centring ~2.3 groups of ~5);
+- **the groups' inertia in a re-plan** (`--general-stick 1`): a learned bonus is added to the logit of a unit's last
+  group (the place that starts from its card) — a unit stays unless the attention clearly prefers another place. In a
+  trial run (6 updates) `group_churn` 0.47 → 0.13;
 - the slots are the battle's own slots (up to 80, their order means nothing: the network does not depend on it —
   test), not "40 own + 40 enemy";
 - a hidden enemy counts as full (the simulator hides nobody);
@@ -247,6 +265,9 @@ The run's `log.jsonl`, field `general` (and the `general:` line of the output):
 |---|---|
 | `groups_own`, `groups_enemy` | groups a plan a side (places that are some unit's main place) |
 | `kinds`, `kind_entropy` | the shares of the mission kinds of our groups and this histogram's entropy (at most ln 10 = 2.30) |
+| `target_group`, `target_own`, `target_enemy`, `target_tile` | the targets' shares: a group (ours or theirs), our group, an enemy group, a 4 × 4 tile |
+| `group_churn` | the share of our units whose group number changed at a re-plan (of those in a group before and after) |
+| `kind_switch` | the share of our groups (the number alive before and after a re-plan) whose mission kind changed |
 | `places_top` | the most chosen deployment tiles (`row_column` of the side's 16 × 16 grid: the row is forward) |
 | `deploy_net_share` | the share of deployments made by the general (the rest scripted: the zone did not fit) |
 | `replans_per_battle`, `replan_reasons` | re-plans a battle and by reason (timer, broken group, lord) |
@@ -256,8 +277,10 @@ The run's `log.jsonl`, field `general` (and the `general:` line of the output):
 | `adv_mean`, `adv_std` | the mean and the spread of the plan's advantage before its normalisation (target − base: the critic or the plan value) |
 | `task_in_w`, `task_in_group`, `task_in_kind`, `task_in_geo` | the executor's task input's weight norm: all, the group card's columns, the kind card's, the targets' geometry's — how much the executor listens to its task |
 | `distinct_acc`, `distinct_chance`, `distinct_gain`, `distinct_loss` | (`--general-distinct`) the accuracy of the classifier of kinds by behaviour on the update's plans (before its steps) and chance (0.1); the mean log q + ln 10 (the bonus without W); its loss |
-| `distinct_bonus`, `distinct_weight` | the mean bonus paid a group and W now |
-| `pl`, `ent`, `kl`, `clip` | the general's PPO: loss, the choices' entropy, KL, clipped share |
+| `distinct_bonus`, `distinct_weight`, `distinct_scale` | the mean bonus paid a group, W now and σ (the executor's advantage spread) |
+| `pl`, `ent`, `kl`, `clip` | the general's PPO: loss, the choices' entropy a group (the heads' sum), KL from the policy at the update's start, clipped share |
+| `ent_kind`, `ent_target`, `ent_place` | the entropy per head a group (the kind's at most ln 10 = 2.30, the target's ~ln 36 = 3.6; the place's only at a deployment) |
+| `kl_plan` | the KL from the probabilities the plans were chosen with to the policy at the update's start (how much "older" the plans are than the policy) |
 | `branch_plans`, `branch_branches`, `branch_taken_share` | (`--general-branches`) the learner's new plans a chunk, how many were played as branches, their share |
 | `branch_price_mean`, `branch_price_std`, `branch_price_rms`, `branch_price_se`, `branch_gold_mean` | the kind choice's price (budget share): mean, spread between branches, root mean square, the copies' noise; the mean in gold |
 | `branch_price_rel` | the real share of the prices' spread: 1 − the copies' noise of the mean / the prices' spread (the ceiling of what in the price is not noise) |
@@ -301,11 +324,11 @@ and the general. The evaluations: the mandatory set only. The command from the u
 .venv/Scripts/python -m tools.ops.step --label g1_general --from build/v2/itS27_4.pt --step general
 ```
 
-The general's signal is switched on over the step: `--set general-return=critic` (the advantage by the unit critic)
-and `--set general-distinct=0.003 --set general-distinct-decay=150` (the bonus for missions that tell apart: W 0.003
-down to 0 over 150 updates). W's scale: ~20 plans a battle × ~4 groups × the classifier's gain (up to 2.3) × W — at
-0.003 and a gain of 0.5 that is ~0.12 a battle against the battle return's spread of ~0.8; watch `distinct_bonus` in
-the log.
+The chain's step already runs with `--general-return critic` (the advantage by the unit critic). The bonus for
+missions that tell apart goes over the step: `--set general-distinct=1` (W 1 down to 0 over 600 updates). Its scale:
+~20 plans a battle × ~4 groups × the classifier's gain × W × σ — at a gain of 0.3 and σ 0.06 that is ~1.4 a battle
+against the battle return's spread of ~0.8, and ~0.3σ a group at the plan's last decision; watch `distinct_bonus` and
+`distinct_scale` in the log.
 
 Mission branches: `--set general-branches=0.2` (the rest by default: 4 copies, 60 s, up to 64 snapshots an update,
 the other kind evenly of the 9, the price by the exchange, the term's weight 1). Shorter and cheaper:
@@ -318,11 +341,44 @@ the other kind evenly of the 9, the price by the exchange, the term's weight 1).
 rule's option given on the command line goes over the saved value: `--general-deploy`, `--general-replan-s`,
 `--general-replan-min-s`, `--general-rounds`, `--general-zone`; one not given stays as in the point (an option's
 default never goes over the point). A size's option (`--general-card`, `-hidden`, `-council-layers`, `-heads`,
-`-group-layers`, `-places`, `-kinds`, `-center`, `-tiles`, `-effects`) with another value than the point's stops the
+`-group-layers`, `-places`, `-kinds`, `-target-grid`, `-center`, `-tiles`, `-effects`) with another value than the point's stops the
 run: the weights would not fit. The log at the start has the line `general: from the checkpoint …; overridden by
 flags: deploy 'net' -> 'script'` (or `none`); the next points save the new rules. The general's learning settings
-(`--general-entropy`, `-return`, `-branch-*`, `-distinct*`, `-epochs`…) are not kept in a point and always come from
-the options.
+(`--general-entropy-*`, `-return`, `-branch-*`, `-distinct*`, `-epochs`…) are not kept in a point and always come from
+the options. The points g1–g8 (before the units' positions, the coarse targets and the one target) do not load with
+today's code (another shape of the general): a new line starts from the unit network (`build/v2/itS27_4.pt`) — a fresh
+general, the executor = S27 + the task input at zero.
+
+## Tried and rejected
+
+Line g1–g8 (8 steps of 40 min, ~280 updates, from `itS27_4`) learned nothing on the former design:
+
+- **The group collection by the plain dot product** (key · query / √card) with the side's mean key taken off (share 1):
+  after it ~10 % of a key's length was left, every unit split exactly 0.100 over the 10 places (the logits' spread
+  0.01), a group was chosen by noise in the third digit, 65 % of the groups were of one unit, a plan's group cards were
+  alike (cosine 0.995), the group collection's weights did not move from the start over the night (the g8 atlas,
+  `build/diag_atlas/atlas.md`): no gradient reached the group collection — the root of the closed circle. Now:
+  layer-normed keys and queries and a learned sharpness (above).
+
+- **Targets as one softmax over ~262 candidates** (≤ 20 groups + 256 tiles of 16 × 16), **two targets** a group. The
+  uniform start almost never chose a group: in the game g8's 24 targets of 12 plans were all tiles, spread over the
+  whole grid; the choices' entropy a group 14.5 → 13.2–13.4 at a maximum of ≈ 13.4 (ln 10 + 2 × ln 262) — the choices
+  were uniform. Now: one target of ≤ 36 (groups + 4 × 4).
+- **One entropy bonus of 0.01 on the heads' summed entropy** (~13 nats): with a near-zero signal it pulled towards
+  uniform, on 256 tiles a large bonus for "a random target". Now: per head, 0.001.
+- **Slots without the units' positions:** groups gathered by type (all swordsmen in one, the lord apart), and the
+  tiles were not tied to the units. Now the position is in the council's input and in the group collection's keys.
+- **Group numbers without matching:** the prev cards did not hold identity — in the game g8's lord went g0 → g4, the
+  swordsmen g3 → g5 → g1, the members changed with nothing happening in the battle. Now: `match_groups` and the
+  `group_churn` number.
+- **The plans' probabilities overwritten at a chunk's start** by the policy of the moment (PPO's ratio started at 1 for
+  a plan chosen before the update too; the general's KL 0.0001–0.005, `clip` ≈ 0). That is a bias; the ratio is honest
+  now.
+- **The distinct bonus without a scale** (W 0.003, decay over 150 updates): ~0.0002 a group against the battle
+  return's spread of ~0.8 — 3–4 orders of magnitude below the signal, decayed to 0 by g6; `distinct_acc` 0.13–0.31 at a
+  chance of 0.1. The executor did not listen to the task: zeroing the task changed the decisions by a KL of 0.0023
+  (noise 0.0002), swapping the kind by 0.0006, the targets at the noise level; the task input's weight norm grew
+  0.3 → 1.08 by a random walk. Now the bonus is in the executor's advantage spread's units, the decay 600 by default.
 
 ## The map
 
@@ -404,17 +460,23 @@ Tests at build time (group 1 of the design's "Checks" pages):
   means nothing, empty slots do not interfere, one network for all, side 2's mirror, a new variant with zero weights,
   an unknown caste / size / trajectory is an error, the numbers' span.
 - `test_general_net_torch.py` — the general's network: the side mask of the group collection and the shares summing
-  to 1; the routing, the dead and the empty in no group; empty slots change nothing; a permutation of the slots
-  permutes the units and changes nothing else (groups, choices, probabilities, value); the choices' rules (only our
-  groups choose; a target is a live group, not itself, or a tile inside the map, or "none"; targets 1 and 2 differ; a
-  place only a zone tile and only in a deployment); the probability of a choice given again equals the sampled one;
+  to 1; the routing, the dead and the empty in no group; a fresh general (the sharpness) gives a unit one clear main place (share > 0.8) and different group cards (cosine < 0.9), without the sharpness ~0.1; the inertia of a re-plan keeps the units in their groups; empty slots change nothing; a permutation of the slots
+  permutes the units and changes nothing else (groups, choices, probabilities, value); alike units at different places
+  are told apart by place; the group numbers (`match_groups`: without a last plan in order, the same units under other
+  numbers get their numbers back, in a split the bigger part keeps the number, the sides do not mix); a re-plan gets
+  the old numbers and is computed again with the plan's numbering to the bit; the coarse 4 × 4 grid of the sectors;
+  the kinds' list `MISSION_KINDS`; the choices' rules (only our groups choose; a target is a live group, not itself,
+  or a 4 × 4 tile inside the map; a fresh general chooses groups too; a place only a zone tile and only in a
+  deployment); the probability of a choice given again equals the sampled one;
   the gradient of the task's cards reaches the group collection, the councils and the readers; a re-plan starts from
   the last places; the simplifications not built are refused.
 - `test_general_executor_torch.py` — the new input at zero = the old network to the bit (with a task and without);
   a trained input changes the decision; with no unit given a task, the old network again; a checkpoint keeps the
   general, an old network loads into an executor, the new weights come last (Adam goes on).
 - `test_general_runtime_torch.py` — the unit table = the "Armies" input; the tiles of the state = the observation's
-  sectors; the deployment is the general's and in the zone, the scripted side is not moved; the plan is locked between
+  sectors; the units' positions of the state = of the observation's tokens; a plan keeps the probability it was chosen
+  with (a chunk's start leaves it); the targets' shares, `group_churn`, `kind_switch` in the log; a target group is its
+  units' centre; the deployment is the general's and in the zone, the scripted side is not moved; the plan is locked between
   re-plans; re-plans by the timer, by a broken group (not sooner than 3 s), by a lord's fall (both sides); the task
   only for own units in a group; the direction and distance to the target from the unit's facing; the update's cards
   = the battle's (the probabilities agree), a tiny update trains every part of the general; narrowing the batch and an
@@ -426,7 +488,8 @@ Tests at build time (group 1 of the design's "Checks" pages):
   factor 1 − π exactly Q − V), the normalisation, its floor and the clip.
 - `test_general_signal_torch.py` — in the battles: the target of a plan cut by a re-plan = the reward + γ^n · V at the
   re-plan, the base = V at the plan's start; the battle's end — no V(end); the deployment's plan takes V of the
-  battle's first decision; the classifier starts at chance and learns; a group's behaviour (order shares, run,
+  battle's first decision; the classifier starts at chance and learns, the bonus is × σ; a group's behaviour (order
+  shares, run,
   displacement forward and sideways, path); the bonus goes into the decision's reward but not into the general's
   return; a tiny update logs the new numbers.
 - `test_general_branch_torch.py` — the mission branches: the swap changes the kind card of the group's units only; a

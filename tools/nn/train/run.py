@@ -288,13 +288,14 @@ class Parser(argparse.ArgumentParser):
 # GeneralConfig field -> its run.py option's dest
 GENERAL_FLAGS = {"card": "general_card", "reader_hidden": "general_hidden", "council_layers": "general_council_layers",
                  "council_heads": "general_heads", "group_layers": "general_group_layers", "places": "general_places",
-                 "kinds": "general_kinds", "rounds": "general_rounds", "center": "general_center",
+                 "kinds": "general_kinds", "target_grid": "general_target_grid", "rounds": "general_rounds",
+                 "center": "general_center", "sharp": "general_sharp", "stick": "general_stick",
                  "tiles": "general_tiles", "effects": "general_effects", "zone": "general_zone",
                  "deploy": "general_deploy", "replan_s": "general_replan_s", "replan_min_s": "general_replan_min_s"}
 # the fields that make the network's shape (the saved weights fit only them; center: 0 has no weight, any other value
 # is only the learned share's start - the saved weight is the share): an option cannot change them on an --init's general
 GENERAL_SHAPE = ("card", "reader_hidden", "council_layers", "council_heads", "group_layers", "places", "kinds",
-                 "center", "tiles", "effects")
+                 "target_grid", "center", "sharp", "stick", "tiles", "effects")
 
 
 def general_given(args):
@@ -345,7 +346,8 @@ def with_general(actor, args):
         actor.set_rules(gcfg)
         print(f"general: from the checkpoint {saved}; overridden by flags: "
               + (", ".join(f"{f} {a!r} -> {b!r}" for f, (a, b) in over.items()) or "none"), flush=True)
-    cfg = glearn.LearnConfig(entropy=args.general_entropy, epochs=args.general_epochs, value=args.general_value,
+    cfg = glearn.LearnConfig(entropy_kind=args.general_entropy_kind, entropy_target=args.general_entropy_target,
+                             entropy_place=args.general_entropy_place, epochs=args.general_epochs, value=args.general_value,
                              minibatch=args.general_minibatch, branches=args.general_branches,
                              branch_weight=args.general_branch_weight,
                              distinct=args.general_distinct, distinct_decay=args.general_distinct_decay)
@@ -372,7 +374,12 @@ def general_text(g):
             f"groups own {g.get('groups_own', 0):.1f} enemy {g.get('groups_enemy', 0):.1f}, replans/battle "
             f"{g.get('replans_per_battle', 0):.1f} {g.get('replan_reasons', {})}; kinds [{kinds}] entropy "
             f"{g.get('kind_entropy', 0):.2f}/{g.get('kind_entropy_max', 0):.2f}; places {g.get('places_top', {})}; "
-            f"pl {g.get('pl', 0):+.3f} ent {g.get('ent', 0):.2f} kl {g.get('kl', 0):.4f} clip {g.get('clip', 0):.2f} "
+            f"targets: groups {g.get('target_group', 0):.2f} (own {g.get('target_own', 0):.2f} enemy "
+            f"{g.get('target_enemy', 0):.2f}) tiles {g.get('target_tile', 0):.2f}; re-plans: group churn "
+            f"{g.get('group_churn', 0):.3f} kind switch {g.get('kind_switch', 0):.3f}; "
+            f"pl {g.get('pl', 0):+.3f} ent {g.get('ent', 0):.2f} (kind {g.get('ent_kind', 0):.2f} target "
+            f"{g.get('ent_target', 0):.2f} place {g.get('ent_place', 0):.2f}) kl {g.get('kl', 0):.4f} (plans' own "
+            f"{g.get('kl_plan', 0):.4f}) clip {g.get('clip', 0):.2f} "
             f"value mse {g.get('value_mse', 0):.5f} ev {g.get('value_ev', 0):+.2f} return {g.get('return_mean', 0):+.4f}"
             + (f" critic ev {g['critic_ev']:+.2f}" if "critic_ev" in g else "")
             + f"; adv {g.get('adv_mean', 0):+.4f} sd {g.get('adv_std', 0):.4f}; task_in |W| {g.get('task_in_w', 0):.3f} "
@@ -383,7 +390,8 @@ def general_text(g):
                f"{g.get('branch_worse', 0):.2f}, {g.get('branch_seconds', 0):.1f} s, term kl {g.get('branch_kl', 0):.4f}"
                if "branch_branches" in g else "")
             + (f"; distinct acc {g.get('distinct_acc', 0):.3f} (chance {g.get('distinct_chance', 0):.2f}) gain "
-               f"{g.get('distinct_gain', 0):+.3f} bonus {g.get('distinct_bonus', 0):+.4f} w {g.get('distinct_weight', 0):.5f}"
+               f"{g.get('distinct_gain', 0):+.3f} bonus {g.get('distinct_bonus', 0):+.4f} w {g.get('distinct_weight', 0):.5f} "
+               f"scale {g.get('distinct_scale', 0):.4f}"
                if "distinct_weight" in g else ""))
 
 
@@ -864,6 +872,10 @@ def _train(args, every=None, teacher=None, normal=None):
             # the classifier learns on the ended plans' groups (its accuracy before the steps: general_distinct_acc)
             st.update({"general_" + k: v for k, v in
                        dlearn.fit((batch.get("general") or {}).get("ready")).items()})
+            # the bonus's scale: the executor's advantage std (signal.distinct_scale), a running mean over the updates
+            stds = [st[k] for k in ("adv_std_attack", "adv_std_defend") if k in st]
+            dlearn.scale = gsignal.distinct_scale(dlearn.scale, sum(stds) / len(stds) if stds else None)
+            st["general_distinct_scale"] = dlearn.scale
         if start is not None:
             st["start_kl"] = ppo.distance(actor, start, batch, u_cfg.minibatch)
         if args.entropy_target and trains:
@@ -1420,9 +1432,20 @@ def parser():
     ap.add_argument("--general-group-layers", type=int, default=1, help="general: the group council's layers")
     ap.add_argument("--general-heads", type=int, default=4, help="general: attention heads of both councils")
     ap.add_argument("--general-places", type=int, default=10, help="general: group places a side")
-    ap.add_argument("--general-kinds", type=int, default=10, help="general: mission kinds")
+    ap.add_argument("--general-kinds", type=int, default=10,
+                    help="general: mission kinds (the first of tools/nn/general/config.py MISSION_KINDS)")
+    ap.add_argument("--general-target-grid", type=int, default=4,
+                    help="general: a mission's target is a group or a tile of this coarse grid of the side's frame "
+                         "(4: 4 x 4 tiles of 400 m; it must split the unit network's sectors evenly)")
     ap.add_argument("--general-rounds", type=int, default=3, help="general: rounds of the group collection")
-    ap.add_argument("--general-center", type=float, default=1.0,
+    ap.add_argument("--general-sharp", type=float, default=15.0,
+                    help="general: the group collection's keys and queries to unit length, their cosine x a learned "
+                         "sharpness starting here (0: the plain dot product - a fresh general then split every unit "
+                         "evenly over the places)")
+    ap.add_argument("--general-stick", type=float, default=1.0,
+                    help="general: a re-plan's bonus on a unit's logit of its last group in the group collection (a "
+                         "learned value, starts here; the groups' inertia - 0: none)")
+    ap.add_argument("--general-center", type=float, default=0.7,
                     help="general: the group collection's keys less this x their side's mean key (a learned share; "
                          "0: plain slot attention - a fresh general then put nearly every unit into one group)")
     ap.add_argument("--general-tiles", default="sectors", choices=("sectors", "cnn"),
@@ -1437,8 +1460,13 @@ def parser():
     ap.add_argument("--general-replan-s", type=float, default=30.0, help="general: seconds of battle between plans")
     ap.add_argument("--general-replan-min-s", type=float, default=3.0,
                     help="general: an event's re-plan (a group broken, a lord fallen) not sooner than this after a plan")
-    ap.add_argument("--general-entropy", type=float, default=0.01,
-                    help="general: the entropy bonus on its choices (simplification 4: on)")
+    ap.add_argument("--general-entropy-kind", type=float, default=0.001,
+                    help="general: the entropy bonus on the mission kind's choice (simplification 4: on; each head "
+                         "apart: the kind's ~ln 10 and the target's ~ln 36 are not one sum)")
+    ap.add_argument("--general-entropy-target", type=float, default=0.001,
+                    help="general: the entropy bonus on the target's choice")
+    ap.add_argument("--general-entropy-place", type=float, default=0.001,
+                    help="general: the entropy bonus on the deployment place's choice")
     ap.add_argument("--general-epochs", type=int, default=2, help="general: PPO epochs over the ended plans")
     ap.add_argument("--general-minibatch", type=int, default=512, help="general: plans a minibatch")
     ap.add_argument("--general-value", type=float, default=0.5, help="general: the plan value's loss weight")
@@ -1473,8 +1501,10 @@ def parser():
     ap.add_argument("--general-distinct", type=float, default=0.0,
                     help="general: W, the executor's bonus for missions that tell apart (tools/nn/general/distinct.py): "
                          "a classifier guesses a group's mission kind from its units' behaviour during the plan; each "
-                         "group's W x (log q(kind) - log(1/K)) goes into the side's reward where the plan ends (0: off)")
-    ap.add_argument("--general-distinct-decay", type=int, default=0,
+                         "group's W x (log q(kind) - log(1/K)) x the executor's advantage std (a running mean of "
+                         "ppo's adv_std_*: W = 1 pays one advantage std a nat of the guess) goes into the side's "
+                         "reward where the plan ends (0: off)")
+    ap.add_argument("--general-distinct-decay", type=int, default=600,
                     help="general: the distinct bonus's W down to 0 linearly over this many updates of the chain (the "
                          "counter goes on over its parts; 0: no decay); the classifier goes on learning and is logged")
     ap.add_argument("--eval-generated", type=int, default=512, help="random battles per opponent (EVAL_SEEDS)")

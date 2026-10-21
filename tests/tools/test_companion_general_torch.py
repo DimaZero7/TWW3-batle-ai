@@ -156,7 +156,7 @@ def parity(actor, seconds=240.0, seed=SEED, greedy=True, events=True):
         assert torch.equal(rg["main"][0], rs["main"][0][sl]), seen["move"]
         act = rs["active"][0][:G]
         assert torch.equal(rg["active"][0], rs["active"][0]), seen["move"]
-        for k in ("kind", "t1", "t2"):
+        for k in ("kind", "target"):
             assert torch.equal(rg[k][0][act], rs[k][0][act]), (k, seen["move"])
         assert float(rg["t_plan"][0]) == pytest.approx(float(rs["t_plan"][0]))
         # the same task, unit by unit
@@ -242,9 +242,8 @@ def test_a_plan_record_names_the_groups_their_units_kinds_and_targets():
     assert set().union(*(e["units"] for e in rec["enemy"])) <= {u.replace("own", "enemy") for u in own}
     for g in rec["groups"]:
         assert 0 <= g["kind"] < GCFG.kinds and g["g"].startswith("g")
-        for t in (g["t1"], g["t2"]):
-            assert t == "none" or t.startswith(("g", "e", "tile "))
-        assert g["t1"] != "none" and g["t1"] != g["g"]
+        assert g["target"].startswith(("g", "e", "tile ")) and g["target"] != g["g"]
+        assert g["kind_name"] == gconfig.MISSION_KINDS[g["kind"]].name
     line = cg.describe(rec)
     assert line.startswith("general plan 1 t 0.0 s (deploy):") and "kind" in line
 

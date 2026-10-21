@@ -65,6 +65,26 @@ def test_the_tiles_of_the_state_are_the_sectors_of_the_observation():
         torch.testing.assert_close(getattr(f2, k), getattr(fr, k).float(), rtol=0, atol=1e-5)
 
 
+def test_the_units_places_of_the_state_are_the_observations():
+    """The general's unit places (net.POS_FEATURES) at the deployment (from the state) are what the side's
+    observation's tokens show at the battle's start (where it stands, its facing; no velocity yet)."""
+    from tools.nn.general.runtime import Runtime
+    env = battles()
+    a, frame, _ = env.observe(False)
+    rows = torch.arange(2 * env.B)
+    b = rows % env.B
+    u = {k: env.st.u[k][b] for k in ("x", "z", "b", "side")}
+    fr = rollout.frame_rows(frame, rows)
+    o = {k: a[k][rows] for k in ("tokens", "own", "attend", "pos")}
+    present = u["side"] > 0
+    got = Runtime.pos_of_state(u, fr, present & o["attend"])
+    want = Runtime.pos_of_obs(o)
+    known = want[..., -1] == 1                                        # (own units and the enemies seen)
+    assert float(known.float().sum()) > 0.9 * float((present & o["attend"]).float().sum())
+    torch.testing.assert_close(got[known], want[known], rtol=1e-4, atol=1e-4)
+    assert float(want[..., :2].abs().sum()) > 0
+
+
 def test_the_deployment_is_the_generals_and_stays_in_the_zone():
     env = battles(B=6)
     actor, crit = nets()
@@ -102,7 +122,7 @@ def test_the_plan_is_locked_between_replans_and_replans_on_its_events():
     env.step(actor, crit)
     rt = env.general_rt
     r = rt.r
-    keep = {k: r[k].clone() for k in ("main", "kind", "t1", "t2")}
+    keep = {k: r[k].clone() for k in ("main", "kind", "target")}
     for _ in range(3):
         env.step(actor, crit)
     for k, v in keep.items():
@@ -113,6 +133,9 @@ def test_the_plan_is_locked_between_replans_and_replans_on_its_events():
     env.step(actor, crit)
     assert int(r["n_replan"][0]) == 1 and int(r["n_replan"][1:].sum()) == 0
     assert rt.stats["replan_timer"] == 1
+    # (the re-plan's numbering is counted: our units in a group in both plans, those that changed number)
+    assert rt.stats["churn_units"] > 0 and 0 <= rt.stats["churn_moved"] <= rt.stats["churn_units"]
+    assert 0 <= rt.stats["kind_switched"] <= rt.stats["kind_kept_groups"]
     # a broken group: more than half of its units rout - but not sooner than replan_min_s after the plan (row 0's is
     # a second old)
     row = 0
@@ -147,11 +170,11 @@ def test_the_task_is_for_own_units_in_a_group_only():
     assert "task" not in o                                            # the cards are not stored
     assert torch.all(~on | (o["own"] & o["ctrl"]))
     assert torch.all(geo[~on] == 0) and bool(on.any())
-    for j in (0, 4):                                                  # (cos, sin) a unit vector, or the "none" flag
-        cs = geo[..., j:j + 2].norm(dim=-1)
-        none = geo[..., j + 3] > 0.5
-        assert torch.allclose(cs[on & ~none], torch.ones_like(cs[on & ~none]), atol=1e-5)
-        assert torch.all(geo[..., j + 2][on & ~none] > 0)
+    assert geo.shape[-1] == 4                                         # one target: cos, sin, distance, none
+    cs = geo[..., 0:2].norm(dim=-1)                                   # (cos, sin) a unit vector, or the "none" flag
+    none = geo[..., 3] > 0.5
+    assert torch.allclose(cs[on & ~none], torch.ones_like(cs[on & ~none]), atol=1e-5)
+    assert torch.all(geo[..., 2][on & ~none] > 0)
     assert torch.all(o["task_plan"][on.any(-1)] >= -1)
 
 
@@ -165,23 +188,31 @@ def test_the_task_points_at_the_target_from_the_units_facing():
     rows = torch.tensor([row])
     G = GCFG.places
     g = int(rt.r["main"][row][rt.r["main"][row] >= 0][0])
-    # target 1 of the group: a tile 100 m ahead of the unit in the frame, target 2 none
+    # the group's target: a tile 100 m ahead of the unit in the frame
     obs_r = rollout.rows_of(a, rows)
     fr = rollout.frame_rows(frame, rows)
     n = int(torch.nonzero(rt.r["main"][row] == g)[0])
     from tools.nn.model import observation as ob
     pos = obs_r["pos"][0, n] * ob.POS
     x, z = fr.world(pos[0:1] + 100.0, pos[1:2])
-    rt.r["t1"][row, g] = 2 * G                                        # tile 0 ...
-    rt.r["tgt"][row, g, 0] = torch.stack([x[0], z[0]])                # ... at that point
-    rt.r["t2"][row, g] = 2 * G + rt.S
+    rt.r["target"][row, g] = 2 * G                                    # coarse tile 0 ...
+    rt.r["tgt"][row, g] = torch.stack([x[0], z[0]])                   # ... at that point
     out = rt.task(rows, dict(obs_r, ctrl=torch.ones_like(obs_r["ctrl"])), fr)
     tok = obs_r["tokens"][0, n]
     fc, fs = float(tok[ob.INDEX["face_cos"]]), float(tok[ob.INDEX["face_sin"]])
     geo = out["task_geo"][0, n]
     assert float(geo[0]) == pytest.approx(fc, abs=1e-4) and float(geo[1]) == pytest.approx(-fs, abs=1e-4)
     assert float(geo[2]) == pytest.approx(1.0, abs=1e-4) and float(geo[3]) == 0.0
-    assert geo[4:7].abs().sum() == 0 and float(geo[7]) == 1.0          # target 2: none
+    # a group target: its units' centre now
+    e = int(torch.nonzero(rt.r["active"][row, G:]).flatten()[0]) + G
+    rt.r["target"][row, g] = e
+    out = rt.task(rows, dict(obs_r, ctrl=torch.ones_like(obs_r["ctrl"])), fr)
+    seen = obs_r["tokens"][0][:, ob.INDEX["seen"]] > 0.5
+    w = (rt.r["main"][row] == e) & obs_r["attend"][0] & (obs_r["own"][0] | seen)
+    assert bool(w.any())
+    cent = (obs_r["pos"][0][w] * ob.POS).mean(0)
+    d = cent - pos
+    assert float(out["task_geo"][0, n, 2]) == pytest.approx(float(d.norm()) / 100.0, abs=1e-3)
 
 
 def test_the_updates_cards_are_the_rollouts_and_a_tiny_update_trains_the_general():
@@ -198,7 +229,7 @@ def test_the_updates_cards_are_the_rollouts_and_a_tiny_update_trains_the_general
         logits, _ = actor.sequence(obs, batch["h0"], batch["reset"], batch["action"])
         lp, _ = hd.log_prob(logits, batch["action"], obs["ctrl"])
     torch.testing.assert_close(lp, batch["lp"], atol=1e-4, rtol=0)
-    assert g["ready"] is not None and g["ready"]["target"].shape[0] > 0     # the re-planned plans ended
+    assert g["ready"] is not None and g["ready"]["ret"].shape[0] > 0     # the re-planned plans ended
     before = {n: p.detach().clone() for n, p in actor.named_parameters()}
     opt = torch.optim.Adam(list(actor.parameters()) + list(crit.parameters()), lr=1e-3)
     with torch.no_grad():
@@ -207,10 +238,45 @@ def test_the_updates_cards_are_the_rollouts_and_a_tiny_update_trains_the_general
                     general=learn.LearnConfig(epochs=1))
     assert all(np.isfinite(v) for v in st.values() if isinstance(v, float))
     assert st["general_plans"] > 0 and np.isfinite(st["general_value_mse"])
+    for k in ("general_ent_kind", "general_ent_target", "general_ent_place", "general_kl_plan"):
+        assert k in st and np.isfinite(st[k]), k
+    assert 0 < st["general_ent_kind"] <= np.log(GCFG.kinds) + 1e-6
     changed = {n for n, p in actor.named_parameters() if not torch.equal(before[n], p)}
     for part in ("general.reader.", "general.council.", "general.groups.", "general.listen.", "general.kinds",
-                 "general.t1_q.", "general.value.", "task_in."):
+                 "general.target_q.", "general.pos_in.", "general.value.", "task_in."):
         assert any(n.startswith(part) for n in changed), part
+
+
+def test_a_plan_keeps_the_log_probability_it_was_made_with():
+    """begin_chunk computes the plans' cards again with the weights now (the executor's input), but their choices keep
+    the log-probability they were chosen with: PPO's ratio for a plan made before an update is honest."""
+    env = battles(B=4, mix={"self": 1.0})
+    actor, crit = nets()
+    env.step(actor, crit)
+    rt = env.general_rt
+    lp0, mix0 = rt.r["lp"].clone(), rt.r["mix"].clone()
+    with torch.no_grad():
+        for p in actor.general.parameters():
+            p.add_(torch.randn_like(p) * 0.05)
+    rt.learner = actor
+    rt.begin_chunk(env)
+    assert torch.equal(rt.r["lp"], lp0)
+    assert not torch.allclose(rt.r["mix"], mix0)
+    t = rt.end_chunk()["table"]
+    mine = (rt.r["has"] & (rt.r["owner"] == 0)).nonzero().squeeze(1)
+    torch.testing.assert_close(t["lp"], lp0[mine], rtol=0, atol=0)
+
+
+def test_the_logs_targets_and_numbering():
+    env = battles(B=4, mix={"self": 1.0})
+    actor, crit = nets()
+    env.step(actor, crit)
+    env.general_rt.r["t_plan"] -= 31.0
+    env.step(actor, crit)
+    st = env.general_rt.take_stats()
+    assert st["target_own"] + st["target_enemy"] + st["target_tile"] == pytest.approx(1.0, abs=1e-3)
+    assert st["target_group"] == pytest.approx(st["target_own"] + st["target_enemy"], abs=1e-3)
+    assert 0 <= st["group_churn"] <= 1 and 0 <= st["kind_switch"] <= 1
 
 
 def test_narrowing_and_a_branch_keep_the_plans():

@@ -35,13 +35,15 @@ class Learner:
         self.opt = torch.optim.Adam(self.net.parameters(), lr=lr)
         self.epochs, self.minibatch = epochs, minibatch
         self.weight = 0.0                                # the bonus's weight now (run.py: signal.distinct_weight)
+        self.scale = signal.SCALE0                       # the executor's advantage std (run.py: signal.distinct_scale)
 
     @torch.no_grad()
     def bonus(self, beh, kind, ok):
         """The groups' bonus [M, G] (0 where not ok) of behaviour beh [M, G, F], their kinds [M, G] (long), ok [M, G]
-        (own groups with members seen during the plan) at the current weight."""
+        (own groups with members seen during the plan) at the current weight, in the executor's advantage's units
+        (x scale: signal.distinct_scale)."""
         lq = self.net(beh).gather(-1, kind[..., None])[..., 0]
-        return signal.distinct_bonus(lq, self.net.kinds, self.weight) * ok.to(lq.dtype)
+        return signal.distinct_bonus(lq, self.net.kinds, self.weight * self.scale) * ok.to(lq.dtype)
 
     def fit(self, ready):
         """Cross-entropy steps on the ended plans' groups (ready: records with "beh", "beh_ok", "kind"). -> stats:
@@ -71,7 +73,7 @@ class Learner:
                 "distinct_chance": 1.0 / self.net.kinds}
 
     def state(self):
-        return {"net": self.net.state_dict(), "opt": self.opt.state_dict()}
+        return {"net": self.net.state_dict(), "opt": self.opt.state_dict(), "scale": self.scale}
 
     def load(self, st):
         """Weights and Adam from a checkpoint's "train" (None: fresh). -> whether loaded."""
@@ -79,4 +81,5 @@ class Learner:
             return False
         self.net.load_state_dict(st["net"])
         self.opt.load_state_dict(st["opt"])
+        self.scale = float(st.get("scale", self.scale))
         return True
