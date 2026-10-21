@@ -8,6 +8,14 @@ host's tests check them; docs/en/training/general.md "Training").
   guesses a group's mission kind from what its units did during the plan; the bonus is log q(kind | behaviour) - log(1/K)
   (0 when it guesses no better than chance, up to log K when it is sure and right), clipped to [-log K, log K], x W.
 * distinct_weight: W down to 0 linearly over `decay` updates of the chain (0: no decay).
+* The mission branches (run.py --general-branches P; branch.py): a plan replayed with one group's kind a swapped for b.
+  other_kind maps a uniform draw over the K - 1 other kinds; kind_advantage is the kind choice's advantage from the
+  branches' prices (price = the chosen branch's trade - the swapped one's, the mean over the copies):
+    uniform b (b != a, each 1 / (K - 1)): E[price] = Q(a) - mean_{b != a} Q(b) = K / (K - 1) x (Q(a) - mean Q): an
+      advantage with an action-independent baseline (unbiased), weight 1;
+    b by the policy without a (pi(b) / (1 - pi(a))): E[price] = Q(a) - E_{b != a} Q(b), and x (1 - pi(a)) it is
+      exactly Q(a) - V (V = E_pi Q): weight 1 - pi(a).
+  The weighted prices are divided by their root mean square over the chunk (at least `floor`) and clipped to +-clip.
 """
 import math
 
@@ -37,3 +45,21 @@ def distinct_weight(w0, decay, updates):
     if not decay:
         return float(w0)
     return float(w0) * max(0.0, 1.0 - updates / float(decay))
+
+
+def other_kind(draw, chosen):
+    """A uniform draw over the K - 1 other kinds: draw in 0..K-2 -> the kind (chosen skipped)."""
+    return draw + (draw >= chosen)
+
+
+def policy_weight(p_chosen):
+    """The weight of a price whose other kind came from the policy without the chosen one: 1 - pi(chosen)."""
+    return 1.0 - p_chosen
+
+
+def kind_advantage(price, weight, floor, clip):
+    """The kind choice's advantage of the branches (module doc): price x weight, divided by the root mean square of
+    those over the chunk (at least floor), within +-clip. price, weight [E]."""
+    x = price * weight
+    rms = float((x * x).mean()) ** 0.5
+    return (x / max(rms, floor)).clip(-clip, clip)

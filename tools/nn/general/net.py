@@ -222,7 +222,8 @@ class General(nn.Module):
     def decide(self, inp, c, act=None, greedy=False):
         """The missions and places of our groups on the cards c (cards()): sampled, or under act {"kind", "t1", "t2",
         "place"} [P, G]. -> dict: the choices [P, G], "lp" [P, G] and "ent" [P, G] (the group's steps summed; 0 for a
-        place that is not a group), "value" [P]. Targets: index 0..G-1 our groups, G..2G-1 theirs, 2G.. the tiles,
+        place that is not a group), "value" [P], "lp_kind" [P, G] (the kind step's alone), "kind_logp" [P, G, K]
+        (every kind's log-probability; uniform for a place that is not a group). Targets: index 0..G-1 our groups, G..2G-1 theirs, 2G.. the tiles,
         2G + S "none" (target 2 only)."""
         G, S = self.cfg.places, self.S
         g, tiles, active = c["groups"], c["tiles"], c["active"]
@@ -232,6 +233,9 @@ class General(nn.Module):
         k_logits = self.kind_q(g[:, :G]) @ self.kinds.t() / math.sqrt(d)      # [P, G, K]
         k_ok = mine[..., None].expand(-1, -1, self.cfg.kinds)
         kind, lp_k, ent_k = categorical(k_logits, k_ok, act.get("kind"), greedy)
+        # every kind's log-probability (the mission branches: the old log-probability, the alternatives' sampling)
+        k_lg = k_logits.masked_fill(~k_ok, NEG)
+        kind_logp = torch.log_softmax(torch.where(k_ok.any(-1, keepdim=True), k_lg, torch.zeros_like(k_lg)).float(), -1)
         kc = self.kinds[kind]                                                 # [P, G, D]
         cand = torch.cat([g, tiles], 1)                                       # [P, 2G + S, D]
         keys = self.cand_k(cand)
@@ -261,7 +265,8 @@ class General(nn.Module):
                              inp["deploy"].to(g.dtype)[:, None]], -1)
         value = self.value(summary)[..., 0]
         return {"kind": kind, "t1": t1, "t2": t2, "place": place, "lp": lp, "ent": ent, "value": value,
-                "ent_parts": torch.stack([ent_k, ent_1, ent_2, ent_p], -1) * m[..., None]}
+                "ent_parts": torch.stack([ent_k, ent_1, ent_2, ent_p], -1) * m[..., None],
+                "lp_kind": lp_k * m, "kind_logp": kind_logp}
 
     def forward(self, inp, act=None, greedy=False):
         c = self.cards(inp)

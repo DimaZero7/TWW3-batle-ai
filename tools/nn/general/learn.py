@@ -14,13 +14,16 @@
   logged).
 * The bonus for missions that tell apart (LearnConfig.distinct, run.py --general-distinct W) is the executor's, paid in
   the rollout (runtime.py, distinct.py): not a term here.
-* Simplification 4: the mission branches (counterfactual replays) are not built: LearnConfig.branches must be 0.
+* The mission branches (LearnConfig.branches = the share of the plans replayed, run.py --general-branches P; branch.py):
+  the replayed plans' records with one group's kind price (batch["general"]["branch"]); every minibatch step adds
+  branch_weight x the clipped surrogate of that group's kind log-probability under that advantage (branch_term; the
+  same steps, the same KL stop). P = 0: no branches, nothing changes (test).
 """
 from dataclasses import dataclass
 
 import torch
 
-from tools.nn.general.config import NotBuilt
+from tools.nn.general.net import CHOICES
 
 
 @dataclass(frozen=True)
@@ -32,13 +35,14 @@ class LearnConfig:
     minibatch: int = 512       # plans a minibatch
     max_grad: float = 0.5
     target_kl: float = 0.03    # the epochs stop when a minibatch's mean KL per group passes this (0: never)
-    branches: float = 0.0      # simplification 4: mission branches - not built (> 0 refused)
+    branches: float = 0.0      # the mission branches: the share of the plans replayed with another kind (0: off)
+    branch_weight: float = 1.0  # ... their term's weight in the general's loss
     distinct: float = 0.0      # the executor's bonus for missions that tell apart: its weight W (0: off; distinct.py)
     distinct_decay: int = 0    # ... down to 0 linearly over this many updates of the chain (0: no decay)
 
     def __post_init__(self):
-        if self.branches:
-            raise NotBuilt("general mission branches (--general-branches): not built yet, keep 0")
+        if not 0.0 <= self.branches <= 1.0 or self.branch_weight < 0:
+            raise ValueError("--general-branches is a share in [0, 1], --general-branch-weight >= 0")
         if self.distinct < 0 or self.distinct_decay < 0:
             raise ValueError("--general-distinct and --general-distinct-decay are >= 0")
 
@@ -69,10 +73,32 @@ def _ev(value, ret):
     return float(1 - (ret - value).var() / v) if v > 1e-12 else 0.0
 
 
-def update(actor, opt, ready, cfg=LearnConfig()):
-    """PPO of the general on the ended plans `ready` (runtime.end_chunk's: records [M, ..] with "target"). -> stats
-    (general_*): policy loss, entropy, KL, clip share, the plan value's loss and explained variance (before the step),
-    plans, groups a plan."""
+def pick(branch, idx):
+    """The rows idx of the branches' dict (its "rec" too)."""
+    return {k: ({n: x[idx] for n, x in v.items()} if isinstance(v, dict) else v[idx]) for k, v in branch.items()}
+
+
+def branch_term(gen, branch, clip):
+    """The mission branches' term (module doc) on branch (branch.Brancher.finish's: "rec" [E, ..], "group", "kind",
+    "lp", "adv" [E]) -> (loss: minus the mean clipped surrogate of the group's kind log-probability, KL, clip share)."""
+    rec = branch["rec"]
+    _, d = gen(rec, act={k: rec[k] for k in CHOICES})
+    g = branch["group"]
+    lp = d["lp_kind"].gather(1, g[:, None])[:, 0]
+    ratio = torch.exp(lp - branch["lp"])
+    a = branch["adv"]
+    surr = torch.minimum(ratio * a, ratio.clamp(1 - clip, 1 + clip) * a)
+    with torch.no_grad():
+        kl = float((branch["lp"] - lp).mean())
+        cl = float(((ratio - 1).abs() > clip).float().mean())
+    return -surr.mean(), kl, cl
+
+
+def update(actor, opt, ready, cfg=LearnConfig(), branch=None):
+    """PPO of the general on the ended plans `ready` (runtime.end_chunk's: records [M, ..] with "target"); branch: the
+    mission branches' prices of the chunk (or None: no term). -> stats (general_*): policy loss, entropy, KL, clip
+    share, the plan value's loss and explained variance (before the step), plans, groups a plan; with branches their
+    term's loss, KL, clip share and rows."""
     gen = actor.general
     params = list(gen.parameters())
     M = ready["lp"].shape[0]
@@ -82,6 +108,9 @@ def update(actor, opt, ready, cfg=LearnConfig()):
     raw = target - base
     adv = (raw - raw.mean()) / (raw.std() + 1e-8) if M > 1 else raw * 0
     sums = {"pl": 0.0, "ent": 0.0, "vl": 0.0, "kl": 0.0, "clip": 0.0}
+    use_b = branch is not None and cfg.branch_weight > 0 and len(branch["adv"]) > 0
+    if use_b:
+        sums.update(branch_loss=0.0, branch_kl=0.0, branch_clip=0.0)
     n, stop = 0, False
     actor.train()
     for _ in range(cfg.epochs):
@@ -105,6 +134,15 @@ def update(actor, opt, ready, cfg=LearnConfig()):
             if cfg.target_kl and kl > cfg.target_kl and n:
                 stop = True                          # (a minibatch past the KL: no step on it, no more epochs)
                 break
+            if use_b:
+                E = len(branch["adv"])
+                part = branch if E <= cfg.minibatch else pick(branch, torch.randperm(E, device=target.device)
+                                                                       [:cfg.minibatch])
+                bl, bkl, bcl = branch_term(gen, part, cfg.clip)
+                loss = loss + cfg.branch_weight * bl
+                sums["branch_loss"] += float(bl)
+                sums["branch_kl"] += bkl
+                sums["branch_clip"] += bcl
             opt.zero_grad(set_to_none=True)
             loss.backward()
             gn = torch.nn.utils.clip_grad_norm_(params, cfg.max_grad)
@@ -131,6 +169,8 @@ def update(actor, opt, ready, cfg=LearnConfig()):
     if "base" in ready:
         out["general_critic_ev"] = _ev(base, target)               # the unit critic's value at the plan vs the target
     out["general_groups"] = float(ready["active"][:, :G].float().sum(1).mean())
+    if use_b:
+        out["general_branch_rows"] = float(len(branch["adv"]))
     out.update(task_in_norms(actor))
     return out
 

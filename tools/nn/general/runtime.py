@@ -29,6 +29,9 @@ training (docs/en/training/general.md "How it runs").
   kinds, run, centre and path are summed (behave); a plan's end turns them into its groups' behaviour (behaviour: BEH
   numbers a group) and, at the bonus's weight, the classifier's bonus is added to the row's reward of that decision
   (take_bonus: after the reward went into the plans - the general's return has no bonus).
+* Mission branches (run.py --general-branches P: `brancher` is a branch.Brancher): every plan of the learner marks its
+  rows "fresh" (every kind's log-probability is kept with the plan: kind_logp); the next decision's capture snapshots
+  a share of them (branch.py) and clears the marks.
 """
 import math
 import numpy as np
@@ -123,6 +126,7 @@ class Runtime:
         self.v_now = None                         # the critic's value [2B] of the decision now (note_value), NaN: none
         self.distinct = None                      # --general-distinct: the classifier (distinct.Learner), behaviour on
         self.bonus = torch.zeros(2 * self.B, device=self.dev)    # the distinct bonus due to the rows' reward
+        self.brancher = None                      # --general-branches: the mission branches (branch.Brancher)
 
     # --- storage ------------------------------------------------------------------------------------------------
     def _rows(self, R):
@@ -137,7 +141,8 @@ class Runtime:
              "r_disc": z(R), "v_start": z(R) + float("nan"),
              "b_kind": z(R, G, len(O.KINDS)), "b_run": z(R, G), "b_n": z(R, G), "b_c0": z(R, G, 2),
              "b_ok0": z(R, G, dt=Bo), "b_last": z(R, G, 2), "b_okl": z(R, G, dt=Bo), "b_path": z(R, G),
-             "b_fwd": z(R, 2), "b_fwd_ok": z(R, dt=Bo)}
+             "b_fwd": z(R, 2), "b_fwd_ok": z(R, dt=Bo),
+             "kind_logp": z(R, G, self.gcfg.kinds), "fresh": z(R, dt=Bo)}
         from tools.nn.general import army_input as ai
         r.update({"in/num": z(R, N, ai.SIZE), "in/lab": z(R, N, len(ai.LABELS), dt=L), "in/on": z(R, N, dt=Bo),
                   "in/own": z(R, N, dt=Bo), "in/free": z(R, N, dt=Bo), "in/tiles": z(R, S, len(gtiles.FEATURES)),
@@ -241,11 +246,12 @@ class Runtime:
             mix, kc = gen.unit_cards(c, d["kind"], c["main"])
             outs[o] = (sel, c, d, mix, kc)
         M, G, N = rows.numel(), self.G, self.N
-        res = {k: None for k in ("main", "kind", "t1", "t2", "place", "lp", "value", "mix", "kc", "places", "active")}
+        res = {k: None for k in ("main", "kind", "t1", "t2", "place", "lp", "value", "mix", "kc", "places", "active",
+                                 "kind_logp")}
         for o, (sel, c, d, mix, kc) in outs.items():
             vals = {"main": c["main"], "kind": d["kind"], "t1": d["t1"], "t2": d["t2"], "place": d["place"],
                     "lp": d["lp"], "value": d["value"], "mix": mix, "kc": kc, "places": c["places"],
-                    "active": c["active"]}
+                    "active": c["active"], "kind_logp": d["kind_logp"]}
             for k, v in vals.items():
                 if res[k] is None:
                     res[k] = v.new_zeros((M,) + tuple(v.shape[1:]))
@@ -266,7 +272,7 @@ class Runtime:
         own_alive = lds.gather(1, (s - 1)[:, None])[:, 0] < 0
         foe_alive = lds.gather(1, (2 - s)[:, None])[:, 0] < 0
         r = self.r
-        for k in ("main", "kind", "t1", "t2", "place", "lp", "value", "mix", "kc", "places", "active"):
+        for k in ("main", "kind", "t1", "t2", "place", "lp", "value", "mix", "kc", "places", "active", "kind_logp"):
             r[k][rows] = res[k].to(r[k].dtype)
         for k, v in inp.items():
             r["in/" + k][rows] = v.to(r["in/" + k].dtype)
@@ -286,6 +292,8 @@ class Runtime:
             r[k][rows] = False
         r["has"][rows] = True
         r["owner"][rows] = owner
+        if self.brancher is not None:
+            r["fresh"][rows] = owner == 0         # the learner's new plans: the mission branches' candidates
         if deploy:
             r["n_replan"][rows] = 0
         else:
@@ -635,6 +643,7 @@ class Runtime:
             d = gen.decide(rec, c, act={k: rec[k] for k in ("kind", "t1", "t2", "place")})
             r["mix"][rows], r["kc"][rows], r["places"][rows] = mix, kc, c["places"]
             r["lp"][rows], r["value"][rows] = d["lp"], d["value"]
+            r["kind_logp"][rows] = d["kind_logp"]
             rec = self.record(rows)
             self.table.append(rec)
             self.tix[rows] = torch.arange(rows.numel(), device=self.dev)
@@ -685,6 +694,7 @@ class Runtime:
         new.tix = torch.full((2 * B,), -1, dtype=torch.long, device=self.dev)
         new.ready, new.table, new.pending = [], None, None
         new.v_now, new.distinct, new.bonus = None, None, torch.zeros(2 * B, device=self.dev)
+        new.brancher = None
         new.frozen = True
         new.training = False
         new.stats = Counts(self.dev, self.gcfg.kinds, self.S)

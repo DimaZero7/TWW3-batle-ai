@@ -64,7 +64,9 @@ network): the deployment at a battle's start (_reset, and the first step for sta
 decision's start, the task input of the executor in _act ("task", "task_on"; the transition keeps "task_geo",
 "task_on" and "task_plan" - the plan's row in the chunk's table - not the cards: the update computes them again), the
 reward added to the plans after the steps. collect() opens the chunk's plan table and hands the update its table and
-the ended plans (batch["general"]).
+the ended plans (batch["general"]). The mission branches (Runtime.brancher, tools/nn/general/branch.py; run.py
+--general-branches P): a share of the plans made is snapshotted at their first decision and replayed at the chunk's
+end with one group's mission kind changed (batch["general"]["branch"]).
 """
 import warnings
 
@@ -781,10 +783,16 @@ class Battles:
             truth = (meyes.truth(self.st.u, rb), meyes.own_cost(self.st.u, rb, rs + 1))
         delay = self._delay()
         scripted = self.scripted()                   # the scripts' orders of this decision, on the same state
-        if self.brancher is not None:
-            # the ability branches (tools/nn/train/ability_branch.py): a snapshot of the battles before the steps
-            self.brancher.capture(self, {"obs": obs_r, "logits": logits, "action": action, "parts": parts,
-                                         "scripted": scripted, "h_new": h_new, "h_past": h_past_new})
+        gb = rt.brancher if rt is not None else None
+        if self.brancher is not None or gb is not None:
+            # the ability branches (tools/nn/train/ability_branch.py) and the mission branches (tools/nn/general/
+            # branch.py): a snapshot of the battles before the steps
+            info = {"obs": obs_r, "logits": logits, "action": action, "parts": parts, "scripted": scripted,
+                    "h_new": h_new, "h_past": h_past_new}
+            if self.brancher is not None:
+                self.brancher.capture(self, info)
+            if gb is not None:
+                gb.capture(self, info)
         r_rows, finished = self._play(parts, scripted, delay, attacks, rb, rs, each)
         d_rows = finished[rb]
         if rt is not None:
@@ -847,14 +855,17 @@ class Battles:
         """A decision whose orders are given (the networks' parts ((rows, Orders), ...) with rows self.rows_learn /
         self.rows_past; the scripts' Orders [B, N] or None): its simulator steps, then the next observation. The
         networks' memories must already be those after it (h_learn, past_h). The ability branches' first decision
-        (ability_branch.py): the decision of the snapshot, the ability of one unit changed."""
+        (ability_branch.py): the decision of the snapshot, the ability of one unit changed; the mission branches'
+        (tools/nn/general/branch.py): the snapshot's decision as it was. -> the learner rows' reward [R] summed over
+        the steps."""
         rb, rs = self.rows_learn % self.B, self.rows_learn // self.B
         attacks = self.st.attacker[rb] == rs + 1
-        _, finished = self._play(parts, scripted, self._delay(), attacks, rb, rs)
+        r_rows, finished = self._play(parts, scripted, self._delay(), attacks, rb, rs)
         if self.auto_reset:
             self._reset(finished)
         self.health = self._measure(self.st, self.weights.rout_share, self.weights.lord_rout)
         self.cur = self.observe(False)
+        return r_rows
 
     def _teach_labels(self, cfg, obs_r, frame):
         """The teachers' labels of the learner rows at this decision (drills/teach.py): (Action [R, N],
@@ -1187,6 +1198,9 @@ def collect(env, actor, critic, T):
     rt = getattr(env, "general_rt", None)
     if rt is not None:
         rt.begin_chunk(env)                      # the general's plans in force open the chunk's table
+    gb = rt.brancher if rt is not None else None
+    if gb is not None:
+        gb.begin(env, T)                         # the mission branches (tools/nn/general/branch.py)
     # The observations (most of the chunk: ~6 GB for 1024 battles x 64 decisions) go into [T, ...] buffers made at the
     # first decision, each decision's copy let go at once: stacked at the end, the decisions' copies and the stack were
     # both alive (twice the chunk: 14.1 GB of the 16 GB card at the peak, past it into shared memory - collect and the
@@ -1208,6 +1222,7 @@ def collect(env, actor, critic, T):
     if brancher is not None:
         # the ability branches of the chunk's snapshots: the head's extra advantage (ppo.update's ability term)
         out["abil_branch"] = brancher.finish(env, actor)
+    g_branch = gb.finish(env, actor) if gb is not None else None   # the plans replayed with another mission kind
     out["h0"] = h0 if h0 is not None else actor.initial({n: v[0] for n, v in out["obs"].items()})
     done = torch.stack([s["done"] for s in steps])
     out["reset"] = torch.cat([torch.zeros_like(done[:1]), done[:-1]])
@@ -1235,4 +1250,6 @@ def collect(env, actor, critic, T):
     out["last_value"] = env.value(critic)
     if rt is not None:
         out["general"] = rt.end_chunk()          # {"table": the chunk's plans, "ready": the ended plans}
+        if g_branch is not None:
+            out["general"]["branch"] = g_branch  # the mission kind's price (learn.update's branch term)
     return out

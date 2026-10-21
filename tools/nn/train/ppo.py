@@ -493,7 +493,8 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
     ready = (batch.get("general") or {}).get("ready")
     if general is not None and train_policy and ready is not None and getattr(actor, "gcfg", None) is not None:
         from tools.nn.general import learn as glearn
-        out.update(glearn.update(actor, opt, ready, general))
+        # (with --general-branches the chunk's mission kind prices: learn.update's branch term)
+        out.update(glearn.update(actor, opt, ready, general, branch=batch["general"].get("branch")))
     return out
 
 

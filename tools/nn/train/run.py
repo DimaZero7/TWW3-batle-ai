@@ -297,10 +297,22 @@ def with_general(actor, args):
               f"as the unit network did)", flush=True)
     cfg = glearn.LearnConfig(entropy=args.general_entropy, epochs=args.general_epochs, value=args.general_value,
                              minibatch=args.general_minibatch, branches=args.general_branches,
+                             branch_weight=args.general_branch_weight,
                              distinct=args.general_distinct, distinct_decay=args.general_distinct_decay)
     print(f"general: {actor.gcfg}; learning {cfg}; return {args.general_return}; lr x {args.general_lr_mult:g}",
           flush=True)
     return actor, cfg
+
+
+def general_brancher(args, glearn_cfg, device):
+    """The mission branches (tools/nn/general/branch.py) of --general-branches P > 0, else None (nothing changes)."""
+    if glearn_cfg is None or not glearn_cfg.branches:
+        return None
+    from tools.nn.general import branch as gbranch
+    return gbranch.Brancher(gbranch.Config(
+        share=glearn_cfg.branches, copies=args.general_branch_copies, horizon_s=args.general_branch_horizon,
+        cap=args.general_branch_cap, batch=args.general_branch_batch, alt=args.general_branch_alt,
+        price=args.general_branch_price, greedy=args.general_branch_greedy, seed=args.seed), device)
 
 
 def general_text(g):
@@ -315,6 +327,11 @@ def general_text(g):
             + (f" critic ev {g['critic_ev']:+.2f}" if "critic_ev" in g else "")
             + f"; adv {g.get('adv_mean', 0):+.4f} sd {g.get('adv_std', 0):.4f}; task_in |W| {g.get('task_in_w', 0):.3f} "
             f"(group {g.get('task_in_group', 0):.3f} kind {g.get('task_in_kind', 0):.3f} geo {g.get('task_in_geo', 0):.3f})"
+            + (f"; branches {g['branch_branches']} of {g.get('branch_plans', 0)} plans, price "
+               f"{g.get('branch_price_mean', 0):+.4f} sd {g.get('branch_price_std', 0):.4f} (real share "
+               f"{g.get('branch_price_rel', float('nan')):.2f}), chosen better {g.get('branch_better', 0):.2f} worse "
+               f"{g.get('branch_worse', 0):.2f}, {g.get('branch_seconds', 0):.1f} s, term kl {g.get('branch_kl', 0):.4f}"
+               if "branch_branches" in g else "")
             + (f"; distinct acc {g.get('distinct_acc', 0):.3f} (chance {g.get('distinct_chance', 0):.2f}) gain "
                f"{g.get('distinct_gain', 0):+.3f} bonus {g.get('distinct_bonus', 0):+.4f} w {g.get('distinct_weight', 0):.5f}"
                if "distinct_weight" in g else ""))
@@ -680,6 +697,11 @@ def _train(args, every=None, teacher=None, normal=None):
             print(f"general distinct bonus: W {glearn_cfg.distinct:g} -> 0 over {glearn_cfg.distinct_decay} updates "
                   f"(from update {d_updates0} of the chain); classifier "
                   f"{'resumed from ' + str(args.init) if loaded else 'fresh'}", flush=True)
+        # --general-branches P: a share of the learner's plans replayed with one group's mission kind changed
+        env.general_rt.brancher = general_brancher(args, glearn_cfg, device)
+        if env.general_rt.brancher is not None:
+            print(f"general mission branches: {env.general_rt.brancher.cfg}, term weight "
+                  f"{glearn_cfg.branch_weight:g}", flush=True)
         env.general_rt.take_stats()
     env.take_stats()
     env.orders_per_minute()
@@ -883,6 +905,8 @@ def _train(args, every=None, teacher=None, normal=None):
         if env.general_rt is not None:
             row["general"] = dict(env.general_rt.take_stats(),
                                   **{k[len("general_"):]: round(v, 5) for k, v in st.items() if k.startswith("general_")})
+            if env.general_rt.brancher is not None:
+                row["general"].update({"branch_" + k: v for k, v in env.general_rt.brancher.stats.items()})
         log.write(json.dumps(row) + "\n")
         log.flush()
         if update % args.print_every == 0:
@@ -1375,7 +1399,26 @@ def parser():
                          "(0 at the battle's end), its advantage less the critic's value where it began (the plan "
                          "value learns the same target beside it)")
     ap.add_argument("--general-branches", type=float, default=0.0,
-                    help="general: share of the plans replayed with another mission (simplification 4: not built, keep 0)")
+                    help="general: P, the share of the learner's plans replayed with one group's mission kind changed "
+                         "(tools/nn/general/branch.py): the price 'this kind against another' is the kind choice's "
+                         "advantage (0: off, nothing changes)")
+    ap.add_argument("--general-branch-copies", type=int, default=4,
+                    help="general branches: copies of each pair (common random numbers), each with its own other kind")
+    ap.add_argument("--general-branch-horizon", type=float, default=60.0,
+                    help="general branches: seconds of battle each branch plays (the plan frozen)")
+    ap.add_argument("--general-branch-cap", type=int, default=64,
+                    help="general branches: snapshots an update at most (0: no cap); <= the batch: one batch an update")
+    ap.add_argument("--general-branch-batch", type=int, default=64,
+                    help="general branches: snapshots a branch batch (x copies battles in each of its two branches)")
+    ap.add_argument("--general-branch-alt", default="uniform", choices=("uniform", "policy"),
+                    help="general branches: the other kind - uniform over the others, or by the general's "
+                         "probabilities without the chosen one (the price then x (1 - pi(chosen)))")
+    ap.add_argument("--general-branch-price", default="trade", choices=("trade", "reward"),
+                    help="general branches: the price - the gold exchange at the horizon, or the side's reward over it")
+    ap.add_argument("--general-branch-greedy", action="store_true",
+                    help="general branches: the networks in the branches take their most likely action")
+    ap.add_argument("--general-branch-weight", type=float, default=1.0,
+                    help="general branches: the weight of their term in the general's loss")
     ap.add_argument("--general-distinct", type=float, default=0.0,
                     help="general: W, the executor's bonus for missions that tell apart (tools/nn/general/distinct.py): "
                          "a classifier guesses a group's mission kind from its units' behaviour during the plan; each "

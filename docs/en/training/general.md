@@ -52,6 +52,7 @@ flowchart TB
 | Reward | `tools/nn/train/reward.py` | as now (v2); no reward for carrying a mission out |
 | Plan value | `General.value` | predicts the plan's return from the plan's cards (detached); with `--general-return critic` the advantage's base is the unit critic, and it learns beside it |
 | Missions that tell apart | `distinct.py`, `runtime.behave` | (`--general-distinct W`) a classifier guesses a group's mission kind from its units' behaviour; the executor's bonus |
+| Mission branches | `branch.py` | (`--general-branches P`) a copy of the battle "the same plan, one group with another mission kind"; the exchange's difference is the kind choice's price ([below](#mission-branches)) |
 | Training | `learn.py`, `tools/nn/train/ppo.py` | [below](#training) |
 
 Size at a card width of 128 (the chain's step): 1.14 million weights, at 64: 308 thousand (the unit network: 3.5
@@ -117,12 +118,56 @@ PPO on two levels (`learn.py`):
   is tied to whom the general gives it (cavalry, say, gets one kind more often), so part of the guessing is by the
   group's type, not by behaviour; an accuracy above chance does not yet mean the executor listens — read it with the
   task input's weight norm.
+- **Mission branches** (`--general-branches P`, default 0 — off): [below](#mission-branches).
 - **Start:** the executor takes the last unit network's weights, the new input at zero weights — it plays as before
   (test: the outputs are equal to the bit); the general from scratch.
 
 The chunk's plan table: the plans in force during the chunk (carried over and new) — their inputs, membership,
 choices. A transition keeps only the task's geometry, the "has a task" flag and the plan's number (not the cards:
 ~90 MB a chunk of 1024 battles × 64 decisions instead of gigabytes).
+
+## Mission branches
+
+Code: `tools/nn/general/branch.py` (after the ability branches, `tools/nn/train/ability_branch.py`), the flag
+`--general-branches P`. Why: the mission kind learns from the whole plan's advantage, one number for all groups of the
+plan, and one group's kind is a small part of it. A branch gives the choice a fair price: "the same plan, but this
+group with another kind".
+
+- **Snapshot.** Every new plan of the learner (a re-plan or a deployment) is marked; at its first decision the battle
+  is snapshotted with the chance P (as in the ability branches: the state before the simulator steps, the networks'
+  memories after the decision, the decision's orders, the general's plans). At most `--general-branch-cap` (64)
+  snapshots an update, evenly over the chunk's decisions and over the battle kinds (against a script, against a past
+  version, against itself — their shares in the branch batch as in the main batch). One of the plan's own groups is
+  drawn, and for each copy another kind: `--general-branch-alt uniform` (any of the 9 others evenly) or `policy` (by
+  the general's probabilities without the chosen one).
+- **Play.** At the chunk's end, before the update, every snapshot in `--general-branch-copies` (4) copies, two batches:
+  "as chosen" and "another kind" (the group's units' kind card = the other kind's card; the groups, targets, places the
+  same), `--general-branch-horizon` (60) s on. The plan is locked in the copies (no re-plans: open loop for the
+  general); the executors, the past versions and the scripts play as in the batch — the kind changes the battle only
+  through what the executor does with it. The first decision is the snapshot's orders in both (made under the chosen
+  kind): the other kind acts from the second second. Common random numbers as in the ability branches (one place in
+  two batches of one shape, one seed a decision, one battle id): a swap to the same kind prices exactly 0 (test).
+  `--general-branch-greedy`: the networks in the branches take their most likely action (less of the battle's chaos
+  in the price).
+- **The price** (budget share, from the general's side) = the mean over the copies of ("as chosen" − "another kind"):
+  `--general-branch-price trade` — the exchange at the horizon, (the enemy's gold destroyed − own) / budget, as in the
+  v2 reward and the ability branches; `reward` — the side's reward summed over the horizon. A price > 0: the chosen
+  kind is better than the swap.
+- **The kind choice's advantage** = the price; with `policy` the price × (1 − π(chosen)). Both are fair advantages:
+  with `uniform` the price's mean = K/(K−1) × (Q(kind) − the mean Q over the kinds), with `policy` exactly Q(kind) − V
+  (the formulas and their check: `signal.py`, a test without torch). The prices are divided by their root mean square
+  over the chunk (at least 0.005 of the budget) and clipped to ±5.
+- **Training.** Every PPO step of the general adds `--general-branch-weight` (1) × a clipped PPO term on the log of
+  this group's kind probability (`learn.branch_term`: the plan computed again from its record, the gradient reaches the
+  cards, the councils and the army readers as the general's PPO does; targets and places are not touched). The old
+  probability is the plan's own (the ratio starts at 1, test). The same number of steps, the same KL stop.
+- **P = 0**: no branches, nothing changes (test: with branches and the term's weight 0 the batch, the battles and the
+  weights after the update are the same to the bit as without branches).
+
+What to keep in mind. The executor plays on its own in both copies (otherwise the kind affects nothing), and in the
+ability branches the price of such a "closed loop" over 60 s is nearly all noise (real share 0.07; over 30 s 0.16, over
+20 s 0.52; [ability branches](training.md#abilities-by-their-effect-branches)). Watch `branch_price_rel` in the log;
+below ~0.2 — a 30 s horizon (also the plan's length: a plan is re-made every 30 s) and/or `--general-branch-greedy`.
 
 ## Simplifications of the skeleton
 
@@ -134,7 +179,7 @@ yet, are refused with a `NotBuilt` error (the network never thinks it has what i
 | 1 | the map tiles are today's 16 × 16 sectors of 100 m (8 numbers), projected to the card's width | `--general-tiles sectors` | `cnn`: the map analysis's 1024 tiles (`map_cnn.py`) |
 | 2 | the effects are not connected: the effect cards are zeros | `--general-effects off` | `on`: the effects' analysis |
 | 3 | small widths: council 2 layers, group council 1 layer, card 128 (the chain's step; `run.py`'s default 64), 4 heads | `--general-card 128 --general-council-layers 2 --general-group-layers 1 --general-heads 4` | settled by the checks |
-| 4 | mission branches are not built; the bonus for missions that tell apart is built but off by default; the entropy bonus on the choices is on | `--general-branches 0 --general-distinct 0 --general-entropy 0.01` | branches as the abilities'; the bonus: `--general-distinct W` ([above](#training)) |
+| 4 | the mission branches and the bonus for missions that tell apart are built but off by default; the entropy bonus on the choices is on | `--general-branches 0 --general-distinct 0 --general-entropy 0.01` | branches: `--general-branches P` ([above](#mission-branches)); the bonus: `--general-distinct W` ([above](#training)) |
 | 5 | the deployment zone is the area `place.py` deploys an army in (forward from −260 to +40 m of the side's line, sideways ±150 m); a tile is in the zone when its centre is; the layout inside a group is a rule | `--general-zone place`, `--general-deploy net` (`script`: the scripted placement as before) | `map`: the zones from the map's layers |
 
 More differences from the design (skeleton too):
@@ -148,7 +193,8 @@ More differences from the design (skeleton too):
 - a hidden enemy counts as full (the simulator hides nobody);
 - the re-planning's events are only 30 s, a broken group, a lord's fall ("mission done" and "reinforcements" — no);
 - "broken" counts destroyed units too, not only routing ones;
-- in the ability branches the plan is frozen (no re-plans in a branch's 60 s);
+- in the ability and the mission branches the plan is frozen (no re-plans in a branch's 60 s);
+- in a mission branch only the group's kind changes; the targets and the place chosen under the old kind stay;
 - the formation (width, depth) is not chosen — as in the scripted placement;
 - the unit critic does not see the plan.
 
@@ -171,6 +217,12 @@ The run's `log.jsonl`, field `general` (and the `general:` line of the output):
 | `distinct_acc`, `distinct_chance`, `distinct_gain`, `distinct_loss` | (`--general-distinct`) the accuracy of the classifier of kinds by behaviour on the update's plans (before its steps) and chance (0.1); the mean log q + ln 10 (the bonus without W); its loss |
 | `distinct_bonus`, `distinct_weight` | the mean bonus paid a group and W now |
 | `pl`, `ent`, `kl`, `clip` | the general's PPO: loss, the choices' entropy, KL, clipped share |
+| `branch_plans`, `branch_branches`, `branch_taken_share` | (`--general-branches`) the learner's new plans a chunk, how many were played as branches, their share |
+| `branch_price_mean`, `branch_price_std`, `branch_price_rms`, `branch_price_se`, `branch_gold_mean` | the kind choice's price (budget share): mean, spread between branches, root mean square, the copies' noise; the mean in gold |
+| `branch_price_rel` | the real share of the prices' spread: 1 − the copies' noise of the mean / the prices' spread (the ceiling of what in the price is not noise) |
+| `branch_better`, `branch_worse` | the share of branches where the chosen kind is better than the swap (price > 0.002 of the budget) and worse (< −0.002) |
+| `branch_battles`, `branch_battle_s`, `branch_seconds`, `branch_weight_mean` | battles in the branches, battle seconds, wall seconds; the price's mean factor (1, with `policy` 1 − π) |
+| `branch_loss`, `branch_kl`, `branch_clip`, `branch_rows` | the branches' term in the general's PPO: loss, the kind's KL, clipped share, rows |
 
 The mandatory ones (rating, pair gold, own lord deaths) are in the `test5` evaluations as before.
 
@@ -188,6 +240,15 @@ key taken off), all 10 mission kinds in use (entropy 2.18–2.29 of 2.30); ~20 r
 groups ~17 %, lord ~3 %); the general's KL 0.005–0.018; the plan value explains nothing yet (share ≈ 0: a 30 s return
 is mostly noise; see `--general-return critic`).
 
+**Mission branches — an estimate, not a measurement.** What costs is the number of decisions in a row, not of battles
+(a GPU step is launches: 64 and 512 battles cost about the same). A branch batch is 2 × horizon / 1 s decisions in a
+row; with `--general-branch-cap` ≤ `--general-branch-batch` one batch an update, and P hardly changes the cost (the
+learner's new plans are several thousand an update, ~50–90 a decision; at P ≥ ~0.05 the cap is already filled). The
+ability branches on the same machine: 2 × 60 decisions, 5.6–7.8 s an update (1024 battles); the mission branches at
+64 snapshots × 4 copies are 512 battles a batch, a decision ~14 % dearer (the executor's task) → **~6.5–9 s, +12–17 %
+of 54 s** at a 60 s horizon, **~3.5–4.5 s (+6–8 %)** at 30 s. The first update: ~50 s more to compile the batch's new
+shape (once a run).
+
 ## Running it
 
 The chain's step `general` in `config/train-chain.json` (`steps.general`): the options of line S27
@@ -204,6 +265,10 @@ and `--set general-distinct=0.003 --set general-distinct-decay=150` (the bonus f
 down to 0 over 150 updates). W's scale: ~20 plans a battle × ~4 groups × the classifier's gain (up to 2.3) × W — at
 0.003 and a gain of 0.5 that is ~0.12 a battle against the battle return's spread of ~0.8; watch `distinct_bonus` in
 the log.
+
+Mission branches: `--set general-branches=0.2` (the rest by default: 4 copies, 60 s, up to 64 snapshots an update,
+the other kind evenly of the 9, the price by the exchange, the term's weight 1). Shorter and cheaper:
+`--set general-branch-horizon=30`.
 
 `--from <file>.pt` (new): a line's point outside `test5` — it is the `--init`, the `--reference` and the
 `--critic-init` (Adam and the counters go on). `--step NAME` (new): a named step's options over the standing ones.
@@ -305,12 +370,20 @@ Tests at build time (group 1 of the design's "Checks" pages):
   ability branch keep the plans.
 - `test_general_signal.py` (no torch) — the formulas: the plan's target and advantage by the critic on toy numbers; the
   battle's end — V(end) = 0 and the last reward; a right critic — advantage 0; the bonus is 0 at a chance guess, grows
-  with the guess, is bounded below; W's decay.
+  with the guess, is bounded below; W's decay; the mission branches: the other kind is never the chosen one and covers
+  the rest evenly, the advantage is Q(kind) less a baseline that does not depend on the kind (with `policy` and the
+  factor 1 − π exactly Q − V), the normalisation, its floor and the clip.
 - `test_general_signal_torch.py` — in the battles: the target of a plan cut by a re-plan = the reward + γ^n · V at the
   re-plan, the base = V at the plan's start; the battle's end — no V(end); the deployment's plan takes V of the
   battle's first decision; the classifier starts at chance and learns; a group's behaviour (order shares, run,
   displacement forward and sideways, path); the bonus goes into the decision's reward but not into the general's
   return; a tiny update logs the new numbers.
+- `test_general_branch_torch.py` — the mission branches: the swap changes the kind card of the group's units only; a
+  swap to the same kind prices exactly 0, the branches repeat, the random state is restored; an executor that does not
+  listen to its task prices every swap 0; the other kind is never the chosen one, the `policy` weight = 1 − π; with
+  branches (the term's weight 0) the batch, the battles and the weights after the update are the same to the bit as
+  without; the term's old probability is the plan's (KL 0), its gradient reaches the kind, the council and the
+  readers, not the targets, places or the value; at P = 0 no branches, the flags reach the config.
 - `test_general_deploy.py` (no torch) — the layout stays in the zone (200 random armies a side, the zone's edges, all
   on one tile), the line faces the enemy, a second group on a tile stands just behind, a wide line goes on in a second
   row.

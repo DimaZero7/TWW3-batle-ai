@@ -177,8 +177,9 @@ def test_the_skeletons_simplifications_are_settings_and_the_missing_ones_are_ref
         gconfig.GeneralConfig(zone="map")
     assert gconfig.GeneralConfig(deploy="script").deploy == "script"
     from tools.nn.general import learn
-    with pytest.raises(gconfig.NotBuilt):
-        learn.LearnConfig(branches=0.1)
+    assert learn.LearnConfig(branches=0.1).branches == 0.1                          # built (branch.py)
+    with pytest.raises(ValueError):
+        learn.LearnConfig(branches=1.5)
     assert learn.LearnConfig(distinct=0.1, distinct_decay=100).distinct == 0.1      # built (distinct.py)
     with pytest.raises(ValueError):
         learn.LearnConfig(distinct=-0.1)
