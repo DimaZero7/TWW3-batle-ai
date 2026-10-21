@@ -273,6 +273,16 @@ the other kind evenly of the 9, the price by the exchange, the term's weight 1).
 `--from <file>.pt` (new): a line's point outside `test5` — it is the `--init`, the `--reference` and the
 `--critic-init` (Adam and the counters go on). `--step NAME` (new): a named step's options over the standing ones.
 
+**A point that already has a general.** Its settings (`GeneralConfig`) are saved in the point and taken from there. A
+rule's option given on the command line goes over the saved value: `--general-deploy`, `--general-replan-s`,
+`--general-replan-min-s`, `--general-rounds`, `--general-zone`; one not given stays as in the point (an option's
+default never goes over the point). A size's option (`--general-card`, `-hidden`, `-council-layers`, `-heads`,
+`-group-layers`, `-places`, `-kinds`, `-center`, `-tiles`, `-effects`) with another value than the point's stops the
+run: the weights would not fit. The log at the start has the line `general: from the checkpoint …; overridden by
+flags: deploy 'net' -> 'script'` (or `none`); the next points save the new rules. The general's learning settings
+(`--general-entropy`, `-return`, `-branch-*`, `-distinct*`, `-epochs`…) are not kept in a point and always come from
+the options.
+
 ## The map
 
 The "Landscape" input is `map_input.py` (6 layers on a grid of 128 × 128 cells of 16 m, always as its own side sees
@@ -387,5 +397,9 @@ Tests at build time (group 1 of the design's "Checks" pages):
 - `test_general_deploy.py` (no torch) — the layout stays in the zone (200 random armies a side, the zone's edges, all
   on one tile), the line faces the enemy, a second group on a tile stands just behind, a wide line goes on in a second
   row.
+- `test_general_flags_torch.py` — options over a point with a general: a point with `deploy='net'` +
+  `--general-deploy script` → script; without the option — net; an option given at its default goes over too; a
+  size's option against the point stops the run; the rules reach the network (the group collection's rounds) and the
+  next point keeps them.
 
 Groups 2 and 3 (dead neurons, card likeness, new units) — after training.

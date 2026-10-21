@@ -61,6 +61,18 @@ class GeneralActor(model_policy.ActorV2):
             x, s = self._look(x, f, buckets)
         return x, (bias, s, cells_in, pf)
 
+    def set_rules(self, gcfg):
+        """Another GeneralConfig of the same shape (run.general_config: options over a checkpoint's rules - the
+        deployment, the re-planning, the collection's rounds): every part that holds the config gets it."""
+        keep = ("card", "reader_hidden", "council_layers", "council_heads", "group_layers", "ff", "places", "kinds",
+                "center", "tiles", "effects")
+        changed = [k for k in keep if getattr(gcfg, k) != getattr(self.gcfg, k)]
+        if changed:
+            raise ValueError(f"set_rules: {changed} change the general's shape (its weights would not fit)")
+        self.gcfg = gcfg
+        self.general.cfg = gcfg
+        self.general.groups.rounds = gcfg.rounds
+
     def load_state_dict(self, state_dict, strict=True, assign=False):
         """As Actor's; a unit network's checkpoint (no task_in, no general) loads with those fresh."""
         missing, unexpected = nn.Module.load_state_dict(self, state_dict, strict=False, assign=assign)

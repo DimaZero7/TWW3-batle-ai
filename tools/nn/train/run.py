@@ -267,34 +267,84 @@ def reward_preset(args):
     return args
 
 
-def general_config(args, data=None):
-    """The GeneralConfig of the run: --init's own when it has a general (its sizes and rules), else of the options."""
+class Parser(argparse.ArgumentParser):
+    """An ArgumentParser that records which options the command line gave: args.cli_given, their dests (sorted list).
+    A setting saved in --init yields only to an option given there, never to an option's default (general_config)."""
+
+    def parse_known_args(self, args=None, namespace=None):
+        ns, rest = super().parse_known_args(args, namespace)
+        saved = [(a, a.default) for a in self._actions]
+        try:                                     # the same line again with no defaults: only the given dests are set
+            for a, _ in saved:
+                a.default = argparse.SUPPRESS
+            given, _ = super().parse_known_args(args, argparse.Namespace())
+        finally:
+            for a, d in saved:
+                a.default = d
+        ns.cli_given = sorted(vars(given))
+        return ns, rest
+
+
+# GeneralConfig field -> its run.py option's dest
+GENERAL_FLAGS = {"card": "general_card", "reader_hidden": "general_hidden", "council_layers": "general_council_layers",
+                 "council_heads": "general_heads", "group_layers": "general_group_layers", "places": "general_places",
+                 "kinds": "general_kinds", "rounds": "general_rounds", "center": "general_center",
+                 "tiles": "general_tiles", "effects": "general_effects", "zone": "general_zone",
+                 "deploy": "general_deploy", "replan_s": "general_replan_s", "replan_min_s": "general_replan_min_s"}
+# the fields that make the network's shape (the saved weights fit only them; center: 0 has no weight, any other value
+# is only the learned share's start - the saved weight is the share): an option cannot change them on an --init's general
+GENERAL_SHAPE = ("card", "reader_hidden", "council_layers", "council_heads", "group_layers", "places", "kinds",
+                 "center", "tiles", "effects")
+
+
+def general_given(args):
+    """The dests of the general's options given on the command line (args.cli_given of Parser); a Namespace made
+    without it: the options that differ from the parser's defaults."""
+    if hasattr(args, "cli_given"):
+        return set(args.cli_given) & set(GENERAL_FLAGS.values())
+    ap = parser()
+    return {d for d in GENERAL_FLAGS.values() if getattr(args, d) != ap.get_default(d)}
+
+
+def general_config(args, saved=None):
+    """(GeneralConfig of the run, overrides {field: (saved, new)}). Without saved (a fresh general): of the options.
+    With saved (--init's general): its sizes and rules, the rules of the options given on the command line over them;
+    an option given against a shape field (GENERAL_SHAPE) stops the run - the saved weights fit only their shape."""
     from tools.nn.general import config as gconfig
-    if data is not None and data.get("general"):
-        return gconfig.of_dict(data["general"])
-    return gconfig.GeneralConfig(card=args.general_card, reader_hidden=args.general_hidden,
-                                 council_layers=args.general_council_layers, council_heads=args.general_heads,
-                                 group_layers=args.general_group_layers, places=args.general_places,
-                                 kinds=args.general_kinds, rounds=args.general_rounds, center=args.general_center,
-                                 tiles=args.general_tiles,
-                                 effects=args.general_effects, zone=args.general_zone, deploy=args.general_deploy,
-                                 replan_s=args.general_replan_s, replan_min_s=args.general_replan_min_s)
+    if saved is None:
+        return gconfig.GeneralConfig(**{f: getattr(args, d) for f, d in GENERAL_FLAGS.items()}), {}
+    given = general_given(args)
+    over = {f: (getattr(saved, f), getattr(args, d)) for f, d in GENERAL_FLAGS.items()
+            if d in given and getattr(args, d) != getattr(saved, f)}
+    shape = [f for f in over if f in GENERAL_SHAPE]
+    if shape:
+        raise SystemExit("the --init's general has its own shape; these options would change it (its weights would not "
+                         "fit): " + ", ".join(f"--{GENERAL_FLAGS[f].replace('_', '-')} {over[f][1]} (saved {over[f][0]})"
+                                              for f in shape))
+    return dataclasses.replace(saved, **{f: new for f, (_, new) in over.items()}), over
 
 
 def with_general(actor, args):
     """(actor, the general's LearnConfig or None): --general wraps the unit network into the executor with a general
     (tools/nn/general/executor.py: the old weights, the task input at zero, a fresh general; an --init that has one
-    keeps it); without --general an executor still learns its general when it has one."""
+    keeps it, its rules yield to the options given on the command line: general_config); without --general an
+    executor still learns its general when it has one."""
     from tools.nn.general import executor, learn as glearn
     if not getattr(args, "general", False) and not executor.has_task(actor):
         return actor, None
     if not executor.has_task(actor):
         if not actor.cfg.sectors:
             raise SystemExit("--general needs a v2 unit network (ModelConfig.sectors > 0)")
-        actor = executor.wrap(actor, general_config(args))
+        actor = executor.wrap(actor, general_config(args)[0])
         n = sum(p.numel() for p in executor.general_params(actor))
         print(f"general: a fresh general on the unit network ({n} weights; the task input at zero: the executor plays "
               f"as the unit network did)", flush=True)
+    else:
+        saved = actor.gcfg
+        gcfg, over = general_config(args, saved)
+        actor.set_rules(gcfg)
+        print(f"general: from the checkpoint {saved}; overridden by flags: "
+              + (", ".join(f"{f} {a!r} -> {b!r}" for f, (a, b) in over.items()) or "none"), flush=True)
     cfg = glearn.LearnConfig(entropy=args.general_entropy, epochs=args.general_epochs, value=args.general_value,
                              minibatch=args.general_minibatch, branches=args.general_branches,
                              branch_weight=args.general_branch_weight,
@@ -1071,7 +1121,7 @@ def final_eval(path, args, summary, out):
 
 
 def parser():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = Parser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--name", default="run")
     ap.add_argument("--init", help="start from this checkpoint (default: random.pt)")
     ap.add_argument("--minutes", type=float, default=5.0, help="wall time of training (the warm-up not counted)")
@@ -1362,7 +1412,8 @@ def parser():
                     help="S28: the general (tools/nn/general, docs/en/training/general.md): the unit network becomes its "
                          "executor (the old weights, a new task input at zero) with a fresh general that plans groups, "
                          "missions and the deployment; both learn by PPO. An --init with a general keeps its own (its "
-                         "sizes and rules); off by default")
+                         "sizes and rules; a rule's option given on the command line goes over the saved one, a size's "
+                         "option against the saved size stops the run: general_config); off by default")
     ap.add_argument("--general-card", type=int, default=64, help="general: the cards' width (64-128; simplification 3)")
     ap.add_argument("--general-hidden", type=int, default=128, help="general: the army reader's first layer")
     ap.add_argument("--general-council-layers", type=int, default=2, help="general: the council's layers")
