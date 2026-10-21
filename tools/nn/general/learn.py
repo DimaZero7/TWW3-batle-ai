@@ -273,16 +273,18 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None, teach=None):
                 sums["branch_loss"] += float(bl.detach())
                 sums["branch_kl"] += bkl
                 sums["branch_clip"] += bcl
+            opt.zero_grad(set_to_none=True)
+            loss.backward()
             if use_i:
+                # the imitation's gradient added after the minibatch's backward (its graph is freed first): the two
+                # graphs of the general never stand in memory together (g12: +1.4 GB peak, the card overflowed)
                 E = teach["lp"].shape[0]
                 part = teach if E <= cfg.minibatch else _rows(teach, torch.randperm(E, device=target.device)
                                                               [:cfg.minibatch])
                 il, _ = imitate_term(gen, part)
                 if il is not None:
-                    loss = loss + cfg.imitate * il
+                    (cfg.imitate * il).backward()
                     sums["imitate_loss"] += float(il.detach())
-            opt.zero_grad(set_to_none=True)
-            loss.backward()
             gn = torch.nn.utils.clip_grad_norm_(params, cfg.max_grad)
             if bool(torch.isfinite(gn)):
                 opt.step()

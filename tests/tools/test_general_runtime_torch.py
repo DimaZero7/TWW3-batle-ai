@@ -314,3 +314,17 @@ def test_a_replan_passes_the_last_kinds_and_a_strong_inertia_keeps_them():
     kept = ((rt.r["main"][..., None] == ar) & (old_main[..., None] == ar)).any(1) & old_act & rows[:, None]
     assert bool(kept.any())
     assert torch.equal(rt.r["kind"][kept], old_kind[kept])
+
+
+def test_a_decision_with_a_general_refuses_a_cuda_graph_before_any_read_back(monkeypatch):
+    """evaluate.Graphed captures a decision as a CUDA graph: with a general the step refuses at its first call
+    (Runtime.deploy_pending raises before any read-back), so the capture fails cleanly; outside a capture it plays."""
+    from tools.nn.general import runtime
+    env = battles(B=2)
+    actor, crit = nets()
+    env.step(actor, crit)
+    monkeypatch.setattr(runtime, "capturing", lambda: True)
+    with pytest.raises(RuntimeError, match="no CUDA graph"):
+        env.step(actor, crit)
+    monkeypatch.setattr(runtime, "capturing", lambda: False)
+    env.step(actor, crit)

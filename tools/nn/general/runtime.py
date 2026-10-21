@@ -84,6 +84,15 @@ REC = INPUTS + PLAN
 _TABLE = None
 
 
+def capturing():
+    """Whether the current CUDA stream is being captured as a CUDA graph (the evaluation's Graphed). The plans read the
+    battles back every decision (which group re-plans, the first deployment), which a capture cannot record: a
+    read-back inside one invalidated it halfway ("operation failed due to a previous error during capture"). So
+    Runtime refuses at its first call of the step, before any work on the GPU: the capture ends empty and cleanly
+    (Graphed steps as before)."""
+    return torch.cuda.is_initialized() and torch.cuda.is_current_stream_capturing()
+
+
 def unit_table():
     global _TABLE
     if _TABLE is None:
@@ -517,7 +526,10 @@ class Runtime:
 
     def deploy_pending(self, env):
         """The first start's battles (Battles.start ran before any network was known): their deployment now, then
-        their memories, men and pending observation afresh. -> whether anything was done."""
+        their memories, men and pending observation afresh. -> whether anything was done. The step's first call:
+        inside a CUDA graph's capture it raises (capturing()), so the capture holds nothing of the step."""
+        if capturing():
+            raise RuntimeError("the general reads the battles back every decision: no CUDA graph")
         if self.pending is None or not bool(self.pending.any()):
             self.pending = None
             return False
