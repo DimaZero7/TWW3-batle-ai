@@ -9,7 +9,9 @@ page says what of it is in code (`tools/nn/general/`) and how it learns.
 
 **Now:** the whole loop is built as a "skeleton" — from the plan to the weights' update, in the simulator. It is
 switched on by `run.py --general` (or the chain's step `general`, [below](#running-it)). Some blocks are simplified —
-[the list](#simplifications-of-the-skeleton); each simplification is a setting, not hard-wired code.
+[the list](#simplifications-of-the-skeleton); each simplification is a setting, not hard-wired code. In the real game
+the general plays through the companion with the same code ([below](#in-the-game)); the deployment there is still
+scripted.
 
 ## The whole loop
 
@@ -74,6 +76,45 @@ version that has a general) is kept per row of the batch (as `rollout.Battles` k
   now (as the side sees them), a tile's its centre.
 - **Both sides** in battles against itself and the pool (when the pool's version has a general) use the general;
   against scripts only our side does.
+
+## In the game
+
+The companion (`tools/nn/companion/`, [bridge](../apps/bridge.md)) sees for itself that a checkpoint has a general and
+plays with it. The general's code is the simulator's (`runtime.Runtime`), not a copy: `tools/nn/companion/general.py`
+(`GameBattles`) turns the bridge's state into "a simulator batch of one battle" - the units in the state file's order
+and exactly the fields `Runtime` reads:
+
+- position, men, health share, morale state, visibility - from the game's state; a missing reading keeps the last
+  one; men but no position - the unit has left the map (as the enemy's script reads it);
+- start health, cost, formation - the simulator's numbers for the unit's key;
+- a lord fallen (dead, shattered or off the map) - as the simulator's `lord_dead_s`.
+
+How the battle goes:
+
+- **The plan** - at the battle's first state, on the armies and tiles of that state. The deployment stays the
+  bridge's, as before: `deploy` in the game is always `script` (the bridge does not move units yet), the checkpoint's
+  value is overridden. The general splits the army into groups and gives missions; it picks no places.
+- **Re-planning** - the same rules: every 30 s of **battle time** (the state's `t`, so the game's speed-up x3-x10
+  changes nothing), a broken group, a lord fallen; not sooner than 3 s after the last plan.
+- **The unit task** - every decision (once a second of battle); it goes into the executor with the usual input.
+- Without a general in the checkpoint (or with `--no-general`) the companion works as before, to the bit.
+
+Running it - as usual ([watch](../launch/watch.md), the exam): a checkpoint with a general switches it on by itself.
+The companion's flags: `--no-general` - play without the general (the executor without a task); `--general-set
+KEY=VALUE` - a field of the general's settings over the checkpoint's, e.g. `replan_s=20` (`deploy=net` is an error).
+
+The companion's log - a line for every plan:
+
+```
+general plan 2 t 30.0 s (timer): 4 groups, enemy 3 | g0 [lord, spear_1, spear_2] kind 4 -> e1(3), tile 5_8 | ...
+```
+
+The plan's number, the battle time, the reason (`deploy` - the battle's start, `timer`, `broken`, `lord`), the number
+of our and the enemy's groups, and per our group `gN`: its units, the mission kind, target 1 and target 2 - our group
+`gN`, an enemy group `eN` (in brackets: how many units it has), a tile `tile row_column` of the side's 16 x 16 grid,
+or `none`. In `companion.jsonl` the decision a plan was made at has the field `general`: the same in full, plus the
+enemy's groups `enemy` with their units. A unit without a passport - the line `general off: ...`, and that battle goes
+without the general.
 
 ## Training
 
@@ -401,5 +442,15 @@ Tests at build time (group 1 of the design's "Checks" pages):
   `--general-deploy script` → script; without the option — net; an option given at its default goes over too; a
   size's option against the point stops the run; the rules reach the network (the group collection's rounds) and the
   next point keeps them.
+- `test_companion_general_torch.py` - the general in the companion: a 240 s simulator battle (the enemy's lord falls
+  at 75 s, our big group routs at 140 s), at every decision the bridge's document of the same moment - the plan
+  (every unit's group, the kinds, the targets) and every unit's task are `Runtime`'s on the simulator's own state (the
+  task to 1e-4), the re-plans at the same moments and for the same reasons (the same check with the trained g8
+  checkpoint - greedy and sampling with the same random draws: the task within 2e-6); re-planning on the
+  battle's time (the states may come at any speed), on a fallen lord (once), on a broken group (not sooner than 3 s),
+  the routing out of the groups, a new battle - its own plan; the plan's record and log line; the `companion.jsonl`
+  log; without a general in the checkpoint - no general, and a general with the task input at zero gives the old
+  network's orders to the bit; the settings (`deploy` only `script`); a unit without a passport - the battle without
+  the general.
 
 Groups 2 and 3 (dead neurons, card likeness, new units) — after training.

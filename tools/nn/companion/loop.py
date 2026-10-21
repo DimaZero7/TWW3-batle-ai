@@ -6,11 +6,17 @@
         [--enemy-script ai_like]   (also the enemy side: the script answers the enemy's bridge, script.py)
         [--enemy-script net --no-own]   (a human plays side 1, tools.build human --enemy-ai net: the network
                                          answers only the enemy's bridge, seeing the battle as side 2)
+        [--no-general] [--general-set replan_s=30]   (a checkpoint with a general, S28: tools/nn/companion/general.py)
 
 One line per decision: move number, battle time, how long the network took, the orders.
 A new battle (a new batch in the state) starts the network's memory afresh (and a v2 network's commitment: its
 units held by their commitment keep, an event in the game's state - melee, a threat, the target gone, a rout or rally,
 the lord's death - frees them; tools/nn/model/commit.py).
+A checkpoint with a general (S28, tools/nn/general/executor.py) plans its side as in the simulator: the plan at the
+battle's first state, the re-plans on the battle's time (every 30 s, a broken group, a lord fallen), the task of every
+own unit each decision (tools/nn/companion/general.py); every plan is a line "general plan ..." and the decision's
+JSON line's "general" (its groups, units, mission kinds, targets, the re-plan's reason). The deployment stays the
+bridge's (deploy "script").
 """
 import argparse
 import json
@@ -23,6 +29,7 @@ import numpy as np
 import torch
 
 from tools.nn.companion import exchange
+from tools.nn.companion import general as companion_general
 from tools.nn.companion import policy as companion_policy
 from tools.nn.model import decide
 from tools.nn.model import observation as ob
@@ -36,9 +43,13 @@ class Brain:
     observation is that side's own (its frame, its units own, the other side's as it sees them), as the
     simulator's self-play gives either side to the network."""
 
-    def __init__(self, actor, greedy=False, temperature=1.0, side=SIDE, shape=False):
+    def __init__(self, actor, greedy=False, temperature=1.0, side=SIDE, shape=False, general=None):
         assert side in (1, 2), side
         self.actor, self.greedy, self.temperature, self.side = actor, greedy, temperature, side
+        # general: the GeneralConfig to play the actor's general with (companion_general.config), None: no general
+        # (a network without one, or --no-general: the executor without a task, as the unit network)
+        self.general = (companion_general.GameGeneral(actor, general, greedy, side) if general is not None else None)
+        self.plans = []                      # the general's plan records made at the last decision (the log)
         self.battle, self.memory, self.h = None, None, None
         self.given, self.points = {}, {}     # the orders in force, the order points (exchange.order_points)
         self.moved = None                    # the last positions and time (exchange.running_by_speed)
@@ -86,7 +97,12 @@ class Brain:
             state["shape_ok"] = self.shape_last[2][None]
         self.mv = exchange.keep_still(self.memory, state, self.mv)
         obs, self.memory = ob.observe(state, b.setup, me, self.memory)
-        orders, self.h, _, _ = decide.act(self.actor, obs, b.setup, self.h, self.greedy, self.temperature,
+        actor, self.plans = self.actor, []
+        if self.general is not None:
+            # the general's plan (a new battle; re-plans due on the battle's time) and every own unit's task
+            task, self.plans = self.general.decide(b, state, obs, self.memory)
+            actor = companion_general.with_task(self.actor, task)
+        orders, self.h, _, _ = decide.act(actor, obs, b.setup, self.h, self.greedy, self.temperature,
                                           commit_state=self.commit, t=state["t"])
         cols = [getattr(orders, k)[0].cpu().numpy() for k in ("kind", "x", "z", "target", "run")]
         out = exchange.orders_list(b.names, b.side, *cols, own=me)
@@ -154,7 +170,7 @@ def run(game, brain, log=None, poll_s=0.005, idle_poll_s=0.1, exit_on_done=False
         seats.append(Seat(Path(game) / exchange.STATE, Path(game) / exchange.ORDERS, brain.decide, log, owner=brain))
     if isinstance(enemy, Brain):
         seats.append(Seat(Path(game) / exchange.ENEMY_STATE, Path(game) / exchange.ENEMY_ORDERS, enemy.decide,
-                          enemy_log, "enemy "))
+                          enemy_log, "enemy ", owner=enemy))
     elif enemy is not None:
         seats.append(Seat(Path(game) / exchange.ENEMY_STATE, Path(game) / exchange.ENEMY_ORDERS,
                           lambda doc: enemy.decide(doc, brain.orders_before(doc["batch"], doc["move"])
@@ -185,6 +201,9 @@ def run(game, brain, log=None, poll_s=0.005, idle_poll_s=0.1, exit_on_done=False
                            for a in uses)
             out(f"{seat.label}move {doc['move']:4d}  t {doc.get('t', 0) / 1000:6.1f} s  think {think_ms:5.1f} ms  "
                 f"turn {turn_ms:5.1f} ms  | {exchange.summary(orders)} | {describe(orders)}{used}")
+            plans = getattr(seat.owner, "plans", None) or []
+            for p in plans:
+                out(f"{seat.label}{companion_general.describe(p)}")
             if seat.log:
                 with open(seat.log, "a", encoding="utf-8", newline="\n") as f:
                     row = {"batch": doc["batch"], "move": doc["move"], "t": doc.get("t"),
@@ -193,6 +212,8 @@ def run(game, brain, log=None, poll_s=0.005, idle_poll_s=0.1, exit_on_done=False
                     shape_ms = getattr(seat.owner, "shape_ms", None)
                     if shape_ms is not None:
                         row["shape_ms"] = round(shape_ms, 2)     # --shape: the shape features' cost
+                    if plans:
+                        row["general"] = plans                   # the general's plans made at this decision
                     f.write(json.dumps(row) + "\n")
         if exit_on_done and all(seat.done for seat in seats[:1]):
             return
@@ -226,6 +247,12 @@ def main(argv=None):
                         help="do not answer our side's bridge: a human plays side 1 (tools.build human --enemy-ai)")
     parser.add_argument("--enemy-log", help="append every enemy decision as a JSON line to this file "
                                             "(default: the --log file's name with _enemy)")
+    parser.add_argument("--no-general", action="store_true",
+                        help="a checkpoint with a general (S28): play without it (the executor gets no task: the unit "
+                             "network as it was)")
+    parser.add_argument("--general-set", action="append", default=[], metavar="KEY=VALUE",
+                        help="a GeneralConfig field over the checkpoint's for the game (e.g. replan_s=30); deploy is "
+                             "'script' (the bridge does not move units)")
     args = parser.parse_args(argv)
     sys.stdout.reconfigure(line_buffering=True)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
@@ -233,13 +260,20 @@ def main(argv=None):
     actor, what = companion_policy.load(args.checkpoint, args.seed)
     print(f"companion: {what}; {'greedy' if args.greedy else f'sampling, temperature {args.temperature}'}; "
           f"{args.threads} threads; watching {Path(args.game) / exchange.STATE}")
+    gcfg = None if args.no_general else companion_general.config(actor, companion_general.parse_sets(args.general_set))
+    if gcfg is not None:
+        print(f"companion: the general (S28) plans the battle: re-plans every {gcfg.replan_s:g} s of battle, on a "
+              f"broken group (> {gcfg.broken:g} of it) or a lord fallen (not sooner than {gcfg.replan_min_s:g} s); "
+              f"deploy {gcfg.deploy}; {gcfg}")
+    elif getattr(actor, "gcfg", None) is not None:
+        print("companion: the checkpoint has a general; --no-general: played without it")
     if args.log:
         Path(args.log).parent.mkdir(parents=True, exist_ok=True)
     if args.no_own and not args.enemy_script:
         parser.error("--no-own needs --enemy-script: somebody must be answered")
     enemy, enemy_log = None, None
     if args.enemy_script == "net":
-        enemy = Brain(actor, args.greedy, args.temperature, side=2)
+        enemy = Brain(actor, args.greedy, args.temperature, side=2, general=gcfg)
     elif args.enemy_script:
         from tools.nn.companion.script import ScriptSide
         enemy = ScriptSide(args.enemy_script)
@@ -250,7 +284,8 @@ def main(argv=None):
         print(f"companion: the enemy side by {who}; watching "
               f"{Path(args.game) / exchange.ENEMY_STATE}")
     try:
-        run(args.game, None if args.no_own else Brain(actor, args.greedy, args.temperature, shape=args.shape),
+        run(args.game, None if args.no_own else Brain(actor, args.greedy, args.temperature, shape=args.shape,
+                                                      general=gcfg),
             args.log,
             exit_on_done=args.exit_on_done,
             idle_exit_s=args.idle_exit, enemy=enemy, enemy_log=enemy_log)

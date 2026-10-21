@@ -32,6 +32,11 @@ training (docs/en/training/general.md "How it runs").
 * Mission branches (run.py --general-branches P: `brancher` is a branch.Brancher): every plan of the learner marks its
   rows "fresh" (every kind's log-probability is kept with the plan: kind_logp); the next decision's capture snapshots
   a share of them (branch.py) and clears the marks.
+* The game (tools/nn/companion/general.py GameBattles): the companion runs this Runtime on a view of the bridge's state
+  shaped like a Battles of one battle - what it reads of `env`: st.u (x, z, b, side, men, hp, hp0, ms, gone, vis, cost,
+  width, sp_h, sp_v), st.t, st.done, st.lord_dead_s, st.keys, setup.bounds, mem[s].frame, ctrl, past, battle_slot,
+  B, N, device (rows_learn: the training's hooks only). A change of what it reads changes GameBattles too
+  (test_companion_general_torch.py: the game's plans and tasks are the simulator's).
 """
 import math
 import numpy as np

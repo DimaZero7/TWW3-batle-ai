@@ -24,6 +24,10 @@ sequenceDiagram
 - The companion builds the network's input from it. What a human would not see is hidden there
   (the observation, [model](../training/model.md)): the game writes everything, the companion's
   observation hides the rest.
+- **The general** (a checkpoint with a general, S28): with the simulator's own code the companion makes the plan at
+  the battle's first state, re-plans every 30 s of battle time, on a broken group and a fallen lord, and every
+  decision adds every own unit's task to the network's input; the deployment is the bridge's
+  ([more](../training/general.md#in-the-game)). Without a general in the checkpoint - all as before.
 - **Order point** (`ox`, `oz` of our units): the companion replaces the game's reading with the
   simulator's (`exchange.order_points`, from the orders it gave): a holding unit's own place, an
   attacking unit's target, a move's point. The game's `ordered_position` is a move's point too, but

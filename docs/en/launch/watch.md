@@ -58,7 +58,9 @@ move   61  t   60.0 s  think   4.0 ms  turn  10.8 ms  | hold 1 attack 5 withdraw
 ```
 
 Move number, battle time, the network's time (`think`), the time from seeing the state to writing
-the answer (`turn`), how many units got each kind of order, the first orders.
+the answer (`turn`), how many units got each kind of order, the first orders. A checkpoint with a general also prints
+a line `general plan N t ... s (reason): ...` for every plan - its groups, mission kinds and targets
+([general](../training/general.md#in-the-game)); in `companion.jsonl` that decision has the field `general`.
 
 ## Results
 

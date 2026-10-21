@@ -275,7 +275,9 @@ and the executor's bonus for missions that tell apart (`--general-distinct`), th
 battle with another mission kind for one group, the exchange's difference is the kind choice's price
 (`--general-branches P`, an estimated +12–17 % to the step at 60 s). The whole loop is built as a skeleton, in the simulator, flag `run.py
 --general` (the chain's step `general`); simplifications: tiles = the 16 × 16 sectors, zero effects, small widths
-(card 128, 1.14 million weights), the zone = `place.py`'s area. Architecture:
+(card 128, 1.14 million weights), the zone = `place.py`'s area. In the game a checkpoint with a general plays through
+the companion with the same code (`tools/nn/companion/general.py`): the plan at the first state, re-plans on battle
+time, the unit task every decision, the deployment the bridge's; every plan is a log line. Architecture:
 `design/general/index.html`; code: `tools/nn/general/`; [details](training/general.md).
 
 ## Training
