@@ -291,7 +291,8 @@ GENERAL_FLAGS = {"card": "general_card", "reader_hidden": "general_hidden", "cou
                  "council_heads": "general_heads", "group_layers": "general_group_layers", "places": "general_places",
                  "kinds": "general_kinds", "target_grid": "general_target_grid", "rounds": "general_rounds",
                  "center": "general_center", "sharp": "general_sharp", "stick": "general_stick",
-                 "kind_stick": "general_kind_stick",
+                 "kind_stick": "general_kind_stick", "task_mask": "general_task_mask",
+                 "shoot_share": "general_shoot_share",
                  "tiles": "general_tiles", "effects": "general_effects", "zone": "general_zone",
                  "deploy": "general_deploy", "replan_s": "general_replan_s", "replan_min_s": "general_replan_min_s"}
 # the fields that make the network's shape (the saved weights fit only them; center: 0 has no weight, any other value
@@ -355,7 +356,8 @@ def with_general(actor, args):
                              distinct=args.general_distinct, distinct_decay=args.general_distinct_decay,
                              exec=args.general_exec, exec_decay=args.general_exec_decay, teacher=args.general_teacher,
                              imitate=args.general_imitate, imitate_decay=args.general_imitate_decay,
-                             exec_general=args.general_exec_general)
+                             exec_general=args.general_exec_general, exec_kind=args.general_exec_kind,
+                             teacher_hold_m=args.general_teacher_hold_m, teacher_fire_s=args.general_teacher_fire_s)
     print(f"general: {actor.gcfg}; learning {cfg}; return {args.general_return}; lr x {args.general_lr_mult:g}",
           flush=True)
     return actor, cfg
@@ -409,6 +411,10 @@ def general_text(g):
                f"{g.get('exec_adv_std', 0):.3f}), masked pairs {g.get('masked_pairs', 0):.2f}"
                + (f", teacher {g['teach_share']:.2f}" if "teach_share" in g else "")
                if "exec_weight" in g else "")
+            + (f"; task masks {g['mask_share']:.2f} of the units deciding, fall-back {g.get('mask_fallback', 0):.4f} "
+               f"({g.get('mask_fallback_n', 0)})" if "mask_share" in g else "")
+            + (f"; shoot without a shooter {g.get('shoot_noshooter', 0):.3f} of the groups, "
+               f"{g.get('shoot_units_nomissile', 0):.2f} of its units without missiles" if "shoot_noshooter" in g else "")
             + (f"; imitate nll {g.get('imitate_nll', float('nan')):.3f} acc kind "
                f"{g.get('imitate_acc_kind', float('nan')):.2f} target {g.get('imitate_acc_target', float('nan')):.2f} "
                f"w {g['imitate_w']:.4f}" if "imitate_w" in g else "")
@@ -784,6 +790,11 @@ def _train(args, every=None, teacher=None, normal=None):
             env.general_rt.measure = True
             env.general_rt.exec_w = gsignal.distinct_weight(glearn_cfg.exec, glearn_cfg.exec_decay, e_updates0)
             env.general_rt.set_teacher(glearn_cfg.teacher)
+            env.general_rt.teach_hold_m = glearn_cfg.teacher_hold_m
+            env.general_rt.teach_fire_s = glearn_cfg.teacher_fire_s
+            from tools.nn.general.learn import exec_kinds
+            env.general_rt.exec_kind = torch.tensor(exec_kinds(glearn_cfg.exec_kind, env.general_rt.gcfg.kinds),
+                                                    device=env.general_rt.dev)
             print(f"general missions: the executor's bonus W {glearn_cfg.exec:g}"
                   + (f" -> 0 over {glearn_cfg.exec_decay} updates (from update {e_updates0} of the chain)"
                      if glearn_cfg.exec_decay else "") + f"; the teacher's share of the battles {glearn_cfg.teacher:g}"
@@ -791,7 +802,9 @@ def _train(args, every=None, teacher=None, normal=None):
                                                                    f"(from update {i_updates0})"
                                                                    if glearn_cfg.imitate_decay else "")
                      if glearn_cfg.teacher > 0 else "")
-                  + f"; the general's execution bonus S {glearn_cfg.exec_general:g}", flush=True)
+                  + f"; the general's execution bonus S {glearn_cfg.exec_general:g}; the kinds' weights "
+                  + f"{glearn_cfg.exec_kind}; the task's masks {'on' if env.general_rt.gcfg.task_mask else 'off'}",
+                  flush=True)
         # --general-branches P: a share of the learner's plans replayed with one group's mission kind changed
         env.general_rt.brancher = general_brancher(args, glearn_cfg, device)
         if env.general_rt.brancher is not None:
@@ -1490,6 +1503,13 @@ def parser():
     ap.add_argument("--general-kind-stick", type=float, default=1.0,
                     help="general: a re-plan's bonus on a group's logit of its last plan's mission kind (the group that "
                          "kept its number and some of its units; a fixed rule, saved with the checkpoint; 0: none)")
+    ap.add_argument("--general-task-mask", type=lambda v: bool(int(v)), default=True,
+                    help="general: 1 the mission limits the executor - a unit's kinds, targets and sectors cut to its "
+                         "group's mission (tools/nn/general/taskmask.py) - and 'shoot' only for a group with a shooter; "
+                         "0: neither (the executor as before, to the bit). Saved with the checkpoint")
+    ap.add_argument("--general-shoot-share", type=float, default=0.5,
+                    help="general: with --general-task-mask 1, 'shoot' only for a group whose shooters (a missile range "
+                         "on the card) are at least this share of its units (a rule, saved with the checkpoint)")
     ap.add_argument("--general-stick", type=float, default=1.0,
                     help="general: a re-plan's bonus on a unit's logit of its last group in the group collection (a "
                          "learned value, starts here; the groups' inertia - 0: none)")
@@ -1570,6 +1590,13 @@ def parser():
                          "(tools/nn/general/teacher.py: attack the nearest enemy group, shooters shoot, one group "
                          "screens the shooters, a threatened lord withdraws); those plans train the executor only, not "
                          "the general (0: off)")
+    ap.add_argument("--general-teacher-hold-m", type=float, default=250.0,
+                    help="general: the teacher's groups hold their tile while the nearest enemy unit is farther than "
+                         "this (m) ...")
+    ap.add_argument("--general-teacher-fire-s", type=float, default=30.0,
+                    help="general: ... and until our shooters have been firing this long (s); then they attack")
+    ap.add_argument("--general-exec-kind", default="withdraw=2,screen=2",
+                    help="general: the executor's mission bonus x each kind's weight, 'name=w,...' (kinds not named: 1)")
     ap.add_argument("--general-imitate", type=float, default=0.3,
                     help="general: W, the teacher's imitation - on the teacher's ended plans (--general-teacher) the "
                          "general's loss + W x the mean negative log-probability of the teacher's kind and target over "

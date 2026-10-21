@@ -5,24 +5,35 @@ random. Those plans train the executor only: not the general's PPO, the plan val
 (runtime: the row's "teach").
 
 The rule (on the groups' standing units, the state's truth), later rules over earlier ones:
-  every group     attack the nearest enemy group (by the groups' centres);
+  every group     wait, then attack: hold the coarse tile it stands on while the nearest standing enemy unit is farther
+                  than HOLD_M from its centre and our shooters have not been firing for FIRE_S yet (the row's `engage`);
+                  then attack the nearest enemy group (by the groups' centres) - S27 waited and met the enemy (80 hold
+                  orders in the first 100 s against the general's 8, build/diag_skv);
   shooters        a group whose units are mostly shooters (range and ammunition): shoot the nearest enemy group;
   one screen      the non-shooting group without the lord nearest to our largest shooting group screens it;
   the lord        his group, with a standing enemy unit within THREAT_M of him: withdraw to our largest other group.
-Where no enemy group stands the network's choice stays.
+Where no enemy group stands the network's choice stays. Every pair is one the general may choose (its kind takes the
+target's type; shoot only a group with a shooter - GeneralConfig.task_mask's rule; hold a tile there is), so the
+general's imitation of the teacher (learn.py) never meets a masked pair.
 """
 import torch
 
 from tools.nn.general import config as gconfig
 
 THREAT_M = 150.0         # the lord is threatened by a standing enemy unit this close
+HOLD_M = 250.0           # a group holds while the nearest standing enemy unit is farther than this (run.py
+#                          --general-teacher-hold-m) ...
+FIRE_S = 30.0            # ... and until our shooters have been firing this long (--general-teacher-fire-s)
 INDEX = {k.name: k.index for k in gconfig.MISSION_KINDS}
 
 
-def choose(main, active, x, z, own, standing, shooter, lord, G, kinds):
+def choose(main, active, x, z, own, standing, shooter, lord, G, kinds, tiles=None, tiles_ok=None, engage=None,
+           hold_m=HOLD_M):
     """-> (kind [M, G], target [M, G], use [M, G]: our groups the rule gives a mission) of plans [M]: main [M, N] the
     plan's group numbers, active [M, 2G], the units' x, z, own, standing, shooter, lord [M, N]; kinds: the network's
-    number of kinds (a rule whose kind is beyond it is not used)."""
+    number of kinds (a rule whose kind is beyond it is not used); tiles [M, C, 2] the coarse tiles' world centres,
+    tiles_ok [M, C] those that may be targets, engage [M] our shooters have fired FIRE_S (None: no waiting - every
+    group attacks)."""
     M, N = main.shape
     dev = main.device
     ar = torch.arange(2 * G, device=dev)
@@ -40,10 +51,22 @@ def choose(main, active, x, z, own, standing, shooter, lord, G, kinds):
     kind = torch.full((M, G), k_of("attack"), dtype=torch.long, device=dev)
     target = near_e.clone()
     use = own_g & has_e
+    foe_st = ~own & standing
+    # wait: hold the tile it stands on while the enemy is far and our shooters have not fired long
+    if engage is not None and tiles is not None and on("hold"):
+        de = (cent[:, :G, None, :] - p[:, None, :, :]).norm(dim=-1).masked_fill(~foe_st[:, None, :], float("inf"))
+        far = de.min(-1).values > hold_m                                            # [M, G]
+        dt = (cent[:, :G, None, :] - tiles[:, None, :, :]).norm(dim=-1).masked_fill(~tiles_ok[:, None, :],
+                                                                                   float("inf"))
+        t_idx = dt.argmin(-1)
+        wait = far & ~engage[:, None] & tiles_ok.any(-1, keepdim=True)
+        kind = torch.where(wait, torch.full_like(kind, k_of("hold")), kind)
+        target = torch.where(wait, 2 * G + t_idx, target)
     # shooters
     sh = torch.einsum("mng,mn->mg", mem[:, :, :G].float(), shooter.float()) / n[:, :G].clamp(min=1)
     shooters = own_g & (sh > 0.5) & on("shoot")
     kind = torch.where(shooters & has_e, torch.full_like(kind, k_of("shoot")), kind)
+    target = torch.where(shooters & has_e, near_e, target)
     # one screen of the largest shooting group
     lord_g = (mem[:, :, :G] & lord[..., None]).any(1)
     size = n[:, :G]
@@ -62,7 +85,6 @@ def choose(main, active, x, z, own, standing, shooter, lord, G, kinds):
     # the lord threatened: withdraw to the largest other group
     lord_st = lord & standing & own
     lp = (p * lord_st[..., None].float()).sum(1) / lord_st.float().sum(1).clamp(min=1)[:, None]
-    foe_st = ~own & standing
     dl = (p - lp[:, None, :]).norm(dim=-1).masked_fill(~foe_st, float("inf")).min(-1).values
     threat = lord_st.any(-1) & (dl < THREAT_M)
     other = size[:, None, :].expand(M, G, G).clone().masked_fill(~own_g[:, None, :], -1.0)

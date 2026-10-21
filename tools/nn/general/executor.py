@@ -1,6 +1,8 @@
 """The executor ("Исполнитель"): today's unit network (tools/nn/model/policy.py ActorV2) with one new input, the unit's
 task ("Задание отряда", GeneralConfig.task_dim numbers a unit), and the general's network inside it (net.General), so
-a checkpoint, the pool's snapshots and the optimizer carry both.
+a checkpoint, the pool's snapshots and the optimizer carry both. Its chained heads are taskmask.MaskedChainHeads: the
+task's masks cut a unit's choices to its mission (GeneralConfig.task_mask); without the task's numbers in the
+observation they compute what chain.ChainHeads does.
 
 The task goes through one linear layer (task_in, cfg.d wide) whose weights and bias start at zero and is added to the
 unit's token where the unit has a task (obs "task_on": an own unit in a group; enemies never), right where the
@@ -25,6 +27,10 @@ class GeneralActor(model_policy.ActorV2):
         super().__init__(cfg)
         assert cfg.sectors, "the general's executor is a v2 unit network (ModelConfig.sectors > 0)"
         self.gcfg = gcfg or GeneralConfig()
+        # the chained heads with the task's masks (taskmask.py): the same module and weights, the masks only where the
+        # observation carries the task's numbers (Runtime.task with GeneralConfig.task_mask)
+        from tools.nn.general.taskmask import MaskedChainHeads
+        self.heads.__class__ = MaskedChainHeads
         # (registered after every part of the unit network: their parameters come last, run.resume keeps the order)
         self.task_in = nn.Linear(self.gcfg.task_dim, cfg.d)
         nn.init.zeros_(self.task_in.weight)

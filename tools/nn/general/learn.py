@@ -71,6 +71,9 @@ class LearnConfig:
     imitate: float = 0.0       # the teacher's imitation: its term's weight W now (run.py passes W after the decay; 0: off)
     imitate_decay: int = 0     # ... W down to 0 linearly over this many updates of the chain (run.py; 0: no decay)
     exec_general: float = 0.0  # the general's bonus for its groups' centred measure: S (in adv sd units; 0: off)
+    exec_kind: str = "withdraw=2,screen=2"   # the executor's bonus x a kind's weight ("name=w,..."; others 1)
+    teacher_hold_m: float = 250.0   # the teacher's groups hold while the nearest enemy is farther than this (teacher.py)
+    teacher_fire_s: float = 30.0    # ... and until our shooters have been firing this long
 
     def __post_init__(self):
         if not 0.0 <= self.branches <= 1.0 or self.branch_weight < 0:
@@ -81,8 +84,31 @@ class LearnConfig:
             raise ValueError("--general-exec and --general-exec-decay are >= 0")
         if not 0.0 <= self.teacher <= 1.0:
             raise ValueError("--general-teacher is a share in [0, 1]")
+        exec_kinds(self.exec_kind)                 # (a bad "name=w" stops the run here)
+        if self.teacher_hold_m < 0 or self.teacher_fire_s < 0:
+            raise ValueError("--general-teacher-hold-m and --general-teacher-fire-s are >= 0")
         if self.imitate < 0 or self.imitate_decay < 0 or self.exec_general < 0:
             raise ValueError("--general-imitate, --general-imitate-decay and --general-exec-general are >= 0")
+
+
+def exec_kinds(spec, kinds=None):
+    """[K] each mission kind's weight on the executor's bonus of --general-exec-kind "name=w,name=w" (the kinds not
+    named: 1; kinds: config.MISSION_KINDS's first K, None: all)."""
+    from tools.nn.general.config import MISSION_KINDS
+    names = [k.name for k in MISSION_KINDS[:kinds]]
+    out = [1.0] * len(names)
+    for part in (p.strip() for p in (spec or "").split(",")):
+        if not part:
+            continue
+        name, _, w = part.partition("=")
+        name = name.strip()
+        if name not in [k.name for k in MISSION_KINDS] or not w.strip():
+            raise ValueError(f"--general-exec-kind {spec!r}: 'name=w' of {[k.name for k in MISSION_KINDS]}")
+        if float(w) < 0:
+            raise ValueError(f"--general-exec-kind {spec!r}: weights >= 0")
+        if name in names:
+            out[names.index(name)] = float(w)
+    return out
 
 
 def task_for(actor, table, obs):

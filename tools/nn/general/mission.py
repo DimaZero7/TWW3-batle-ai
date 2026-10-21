@@ -8,7 +8,8 @@ is its units standing now (alive, on the map, not routing); its point - their ce
 measures (d: metres; near(d, R) = 1 within R, down to 0 at 3 R):
 
     attack    1 in melee with a unit of the target group (the state's m and target), else 0.5 x (1 - d / NEAR_M) to its
-              nearest unit: "close on it and fight it"
+              centre: "close on it and fight it" (the centre, not its nearest unit: a straggler running off is not the
+              group - the nearest unit paid a chase of one crossbow 700 m off, build/diag_skv)
     flank     as attack, counted only where the unit stands off the front of the target's unit it fights (else the
               nearest one): more than FLANK_DEG from that unit's facing - the sides of a struck unit the simulator uses
               (config/nn/sim.json contact.front_deg 45: CA's front +-45)
@@ -19,6 +20,9 @@ measures (d: metres; near(d, R) = 1 within R, down to 0 at 3 R):
               range of one, else 0; without missiles: 0 in melee, 1 at KEEP_M of the target group's nearest unit
     withdraw  0 in melee, else 0.5 x near(d to the target point, the reach) + 0.5 x (distance to the nearest standing
               enemy / AWAY_M, at most 1)
+
+Every measure x the group's cohesion: 1 within COHESION_M[0] of its own group's centre (its standing units), down to 0
+at COHESION_M[1] - a unit that leaves its group does not carry out the group's mission.
 
 A unit counts (ok) when it decided this decision (acting), its group has a mission and the target is there (a group
 with standing units; a tile inside the map; screen: some standing enemy). These are the measure's definitions (what
@@ -36,6 +40,7 @@ GROUP_M = 100.0          # hold / withdraw to a group: reach around its centre (
 SCREEN_M = 50.0          # screen: within this of the segment (down to 0 at 3x)
 KEEP_M = (50.0, 250.0)   # shoot without missiles: the distance kept to the target group (beyond a charge's 30-35 m)
 AWAY_M = 300.0           # withdraw: the enemy's distance counted up to this
+COHESION_M = (150.0, 300.0)  # every measure x 1 within the first of its own group's centre, down to 0 at the second
 
 
 def near(d, reach):
@@ -84,7 +89,8 @@ def measure(u, b, s, main, kind, target, tgt, acting, G, C, tile_half, cfg):
     slot = f("target")
     hit_t = _gather_rows(member, slot) & (slot >= 0)                                 # its target is in the group
     engaged = melee & hit_t
-    close = torch.where(grp_ok, (1.0 - dT / NEAR_M).clamp(0.0, 1.0), torch.zeros_like(dT))
+    dC = (p - cg).norm(dim=-1)                                                      # to the target group's centre
+    close = torch.where(grp_ok, (1.0 - dC / NEAR_M).clamp(0.0, 1.0), torch.zeros_like(dC))
     attack = torch.where(engaged, torch.ones_like(dT), 0.5 * close)
     # flank: where the unit stands seen from the target's unit (the one it fights, else the nearest one)
     j = torch.where(engaged, slot.clamp(min=0), jT)
@@ -126,6 +132,12 @@ def measure(u, b, s, main, kind, target, tgt, acting, G, C, tile_half, cfg):
     v_all = torch.stack([by[n][1] for n in names], -1)
     kk = k_u.clamp(0, len(names) - 1)[..., None]
     m = m_all.gather(-1, kk)[..., 0]
+    # the cohesion: the distance to its own group's centre (the group's standing units; the unit itself counts)
+    mate = (main[:, None, :] == main[:, :, None]) & (standing & own)[:, None, :]
+    mate = mate | torch.eye(main.shape[1], dtype=torch.bool, device=main.device)[None]
+    co = torch.einsum("rij,rjc->ric", mate.float(), p) / mate.sum(-1).clamp(min=1)[..., None]
+    lo, hi = COHESION_M
+    m = m * (1.0 - ((p - co).norm(dim=-1) - lo) / (hi - lo)).clamp(0.0, 1.0)
     ok = in_g & v_all.gather(-1, kk)[..., 0]
     return torch.where(ok, m, torch.zeros_like(m)), ok, k_u
 

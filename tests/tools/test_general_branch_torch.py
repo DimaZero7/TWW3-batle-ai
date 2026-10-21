@@ -84,9 +84,11 @@ def test_a_swap_to_the_same_kind_prices_exactly_zero_and_the_branches_repeat(pri
     assert torch.equal(torch.get_rng_state(), s)                     # the global random state is the one before
     d2, _ = gbranch.play_kinds(env, actor, sub, side, group, other, 2, 5, seed=3, price=price)
     assert torch.equal(d1, d2) and d1.shape == (len(cand), 2) and bool((bg > 0).all())
-    # an executor that does not listen to its task (the new input at zero): every swap prices exactly 0
+    # an executor that does not listen to its task (the new input at zero, and no task's masks - they follow the
+    # kind, taskmask.py): every swap prices exactly 0
     with torch.no_grad():
         actor.task_in.weight.zero_()
+    env.general_rt.gcfg = dataclasses.replace(env.general_rt.gcfg, task_mask=False)
     d3, _ = gbranch.play_kinds(env, actor, sub, side, group, other, 2, 5, seed=3, price=price)
     assert torch.count_nonzero(d3) == 0
 

@@ -239,9 +239,9 @@ tile's, its centre. near(d, R) = 1 within R, linearly to 0 at 3R.
 
 | Kind | Target | Measure 0…1 |
 |---|---|---|
-| `attack` | an enemy group | 1 — in melee with a unit of the target (the state's `m` and `target`); else 0.5 × (1 − d / 300 m) to its nearest unit |
+| `attack` | an enemy group | 1 — in melee with a unit of the target (the state's `m` and `target`); else 0.5 × (1 − d / 300 m) to its **centre** (not to its nearest unit: a straggler running off is not the group; the measure by the nearest unit paid two units and the lord for chasing one crossbow 700 m off, `build/diag_skv`) |
 | `hold` | a tile, our group | near(d to the target point, R): a tile's R is half its side (200 m: the tile itself), a group's 100 m around its centre |
-| `flank` | an enemy group | as `attack`, but only while the unit stands off the front of the target's unit it fights (or the nearest): more than 45° from its facing — the struck unit's sides as in the simulator (`config/nn/sim.json` contact.front_deg 45: CA's front ±45°) |
+| `flank` | an enemy group | as `attack` (closing on the centre), but only while the unit stands off the front of the target's unit it fights (or the nearest): more than 45° from its facing — the struck unit's sides as in the simulator (`config/nn/sim.json` contact.front_deg 45: CA's front ±45°) |
 | `screen` | our group | on the segment from the target's centre to the standing enemy nearest to it (projection 0…1 of the way) × near(the distance off the segment, 50 m) |
 | `shoot` | an enemy group | a shooter (range and ammunition): 0 in melee, 1 shooting at a unit of the target, 0.5 the target within its range, else 0; no missiles: 0 in melee, 1 at 50–250 m of the target's nearest unit |
 | `withdraw` | a tile, our group | 0 in melee, else 0.5 × near(d to the target point, R) + 0.5 × (distance to the nearest standing enemy / 300 m, at most 1) |
@@ -250,9 +250,55 @@ tile's, its centre. near(d, R) = 1 within R, linearly to 0 at 3R.
   pairs' logits are −∞ (`net.General.pair_ok`), not "zero done". A kind with no target there (screen without another
   group of ours) is not chosen. Every target type is taken by ≥ 2 kinds (the mission branches need it). The masked
   share is logged.
+- **Cohesion:** every measure × the unit's distance from its own group — 1 within 150 m of the centre of its standing
+  units, linearly to 0 at 300 m (`COHESION_M`): a unit that has left its group does not carry out the group's mission.
+- **The kinds' weights on the bonus** (`--general-exec-kind`, default `withdraw=2,screen=2`): the executor's bonus ×
+  the kind's weight — "withdraw" and "screen" the executor carried out worst, they pay double; the others 1.
+- **"Shoot" only for a group of shooters** (`GeneralConfig.task_mask`): the kind `shoot` is open to the general only
+  when the units with a missile range on their card (`army_input` `range` > 0) are at least half of the group's units
+  (`--general-shoot-share 0.5`, a rule kept in the point); else its logit is −∞ (`net.General.shoot_ok`). In the
+  battle's analysis infantry without shooters got `shoot` — 28 % of the unit-seconds; with the rule "one shooter at
+  least" 61–66 % of the units under `shoot` still had no missiles. Logged as `shoot_noshooter` (should be 0) and
+  `shoot_units_nomissile`.
 - **Not counted**: a unit whose target makes no sense now — a target group with no standing unit, a tile outside the
   map, `screen` without a standing enemy.
 - The measure — the mean over the group's units and the plan's decisions — is logged per kind (`exec_<kind>`).
+
+## Task masks
+
+Code: `tools/nn/general/taskmask.py`, flag `--general-task-mask 1` (the default; the field `GeneralConfig.task_mask`,
+kept in the point, a point without the field: 1). Why: the executor is not talked into its mission by a bonus, it is
+**limited** to it — the mission cuts its action space. In the analysis of a lost battle (`build/diag_skv`) units under
+"withdraw" went towards the enemy (cosine −0.44, 32 % of the time in melee), and under changing missions chased one
+crossbow. A mask is logits of −∞ (the heads' `NEG`) before the softmax, as the general's (kind × target), for each own
+unit with a mission, on the parts of the chained heads (`tools/nn/model/chain.py`: order kind → target → sector →
+cell):
+
+| Mission | What is closed |
+|---|---|
+| `withdraw` | the attack (and "keep" while an attack order is in force); the move sectors — only those whose centre is no nearer the nearest seen enemy than the unit now, or nearer the mission's point while 300 m from the enemy |
+| `shoot` | for a unit without missiles (the token's `ammo` 0) — the attack (and "keep" of an attack in force): a shooter's attack order in the simulator is to fire from its range (`battle.py` close_in), the others' a melee; a shooter's attack target only from the target group; moving free |
+| `attack`, `flank` | the attack target only the target group's units (the visible ones; none visible — targets free, a fall-back); the sectors no farther from the target group's centre than the unit now (at least 150 m): a charge is not cut |
+| `hold` | the sectors within the point's reach (as in the measure: half a tile's side, 100 m of a group); the attack only at enemies within 3 × the reach of the point (where the measure is 0) |
+| `screen` | the sectors near the segment from the target group's centre to the seen enemy nearest to it (50 m aside, between its ends) |
+
+A sector is judged by its centre with half its diagonal of slack (a 100 m sector: 71 m); the cell inside the sector
+is free. The target pointer is shared with the spells: a target mask limits the unit's spells the same way.
+
+- **Fall-back.** A part whose mask closed everything the unit had is not masked (`mask_fallback` in the log). A target
+  mask that left the attack no target closes the attack (hold: nothing to fight near the point); for `attack`/`flank`/
+  `shoot` a target group not seen leaves the targets free (a fall-back too).
+- **The same masks in training.** The task's numbers per unit come with the decision's observation (`Runtime.task`:
+  `task_mk` the kind or −1, `task_pt` the point in the side's frame, `task_reach` the reach, `task_tg` the target,
+  `task_main` every slot's group number), are kept in the chunk's record, and the update computes the masks from that
+  record: PPO's old probability is the masked choice's (test: the update's probabilities = the rollout's). The game
+  (the companion) gets them the same way — one code.
+- **The heads' code.** `taskmask.MaskedChainHeads` is `ChainHeads` with three lines of masks (the executor changes its
+  heads' class, the weights are the same); `tools/nn/model` is not edited (it is in the simulator's version). A test
+  holds the copy to the original's source (`SOURCE_SHA`): when `ChainHeads.forward` changes, carry it into the copy.
+- **Off** (`--general-task-mask 0`): no mask numbers in the observation and no `shoot` mask at the general — the
+  executor computes what it did, to the bit (test).
+- **Mission branches** change a group's kind together with its mask (`branch.swap_kind`).
 
 ## Teacher
 
@@ -262,12 +308,19 @@ of the battles (drawn at the battle's start by its own generator — at P = 0 th
 same) the learner side's missions come from the rule, the groups from the network. The rule (on the groups' standing
 units), later over earlier:
 
-- every group — `attack` the nearest enemy group (by the groups' centres);
+- every group first **waits**: `hold` the tile it stands on while the nearest standing enemy unit is farther than
+  250 m from its centre (`--general-teacher-hold-m`) and our shooters have been firing less than 30 s
+  (`--general-teacher-fire-s`; the first volley's time is the row's `fire_t0`); then — `attack` the nearest enemy group
+  (by the groups' centres). S27 waited and met the enemy (80 hold orders in the first 100 s against the general's 8,
+  `build/diag_skv`); the old teacher sent everyone to attack from the first second. The switch comes at the next
+  re-plan (every 30 s or on an event);
 - a group of mostly shooters (range and ammunition) — `shoot` the nearest enemy group;
 - one group — not shooters, without the lord, nearest to our largest shooting group — `screen` it;
 - the lord's group, with a standing enemy within 150 m of the lord — `withdraw` to our largest other group.
 
-No enemy group — the network's choice stays. The teacher's plans (`teach`) train the executor: they are in the chunk's
+No enemy group — the network's choice stays. Every teacher's pair is one the general may choose itself (the target's
+type by the kind; `shoot` only for a group at least half of shooters; `hold` a tile that is there), so the imitation never meets a
+masked pair (test). The teacher's plans (`teach`) train the executor: they are in the chunk's
 table — the executor's task cards are computed from them as from all. To the general they give only the imitation
 (`--general-imitate`, [above](#training)): an ended teacher's plan is a record with its inputs, kinds and targets and
 the mark of the groups it gave a mission (`use`; `batch["general"]["teach"]`). The general's PPO, the plan value, the
@@ -383,6 +436,10 @@ The run's `log.jsonl`, field `general` (and the `general:` line of the output):
 | `exec_bonus`, `exec_bonus_abs` | the bonus a unit-decision: signed (≈ 0 by its construction) and its magnitude |
 | `exec_adv_mean`, `exec_adv_std`, `exec_paid` | the unit's own part of its advantage from the bonus (in units of the side's normalised advantage, whose spread is 1) and the share of unit-decisions paid |
 | `teach_share` | (`--general-teacher`) the share of the learner's plans the teacher made |
+| `mask_share` | the share of the learner's deciding unit-decisions a task mask acts on |
+| `mask_fallback`, `mask_fallback_n` | the share of them where the mask closed everything and fell back (and the number) |
+| `shoot_noshooter` | the share of the groups with the kind `shoot` without a single shooter (all the learner's plans; with the mask 0) |
+| `shoot_units_nomissile` | the share of the unit-decisions under `shoot` of units without missiles (infantry in a shooting group) |
 | `imitate_nll`, `imitate_acc_kind`, `imitate_acc_target` | (`--general-teacher`) on the teacher's ended plans, before the steps: the network's mean NLL of the teacher's choice (kind + target), the share of groups where the network's most likely kind is the teacher's, and where its most likely target (under the teacher's kind) is the teacher's |
 | `imitate_groups`, `imitate_rows`, `imitate_w`, `imitate_loss` | groups and teacher's plans in the imitation, W now, the imitation's term (the mean over the steps; only at W > 0) |
 | `exec_general_term`, `exec_general_mean` | (`--general-exec-general`) the mean addition S × centred measure to a group's advantage: absolute and signed, in units of the plan advantage's spread |
@@ -452,7 +509,8 @@ The chain's step already runs with `--general-return critic` (the advantage by t
 carrying missions out (`--general-exec 1` — the option's default; stronger: `--set general-exec=2`; the teacher:
 `--set general-teacher=0.3`; with the teacher the general imitates it, `--general-imitate 0.3` down to 0 over 300 updates
 — the default; the general's small bonus `--general-exec-general 0.2` and the kind's inertia `--general-kind-stick 1` —
-the defaults). The points g1–g9 (10 abstract kinds) do not load with today's code (6 kinds): a new line
+the defaults; the task masks `--general-task-mask 1`, the kinds' weights on the bonus `--general-exec-kind
+withdraw=2,screen=2`, the teacher's waiting `--general-teacher-hold-m 250 --general-teacher-fire-s 30` — defaults too). The points g1–g9 (10 abstract kinds) do not load with today's code (6 kinds): a new line
 starts from `build/v2/itS27_4.pt`. The bonus for missions that tell apart goes over the step: `--set general-distinct=1` (W 1 down to 0 over 600 updates). Its scale:
 ~20 plans a battle × ~4 groups × the classifier's gain × W × σ — at a gain of 0.3 and σ 0.06 that is ~1.4 a battle
 against the battle return's spread of ~0.8, and ~0.3σ a group at the plan's last decision; watch `distinct_bonus` and
@@ -467,7 +525,8 @@ the other kind evenly of those taking the group's target, the price by the excha
 
 **A point that already has a general.** Its settings (`GeneralConfig`) are saved in the point and taken from there. A
 rule's option given on the command line goes over the saved value: `--general-deploy`, `--general-replan-s`,
-`--general-replan-min-s`, `--general-rounds`, `--general-zone`, `--general-kind-stick` (a point without the field: 1); one not given stays as in the point (an option's
+`--general-replan-min-s`, `--general-rounds`, `--general-zone`, `--general-kind-stick` (a point without the field: 1),
+`--general-task-mask` (a point without the field: 1), `--general-shoot-share` (a point without the field: 0.5); one not given stays as in the point (an option's
 default never goes over the point). A size's option (`--general-card`, `-hidden`, `-council-layers`, `-heads`,
 `-group-layers`, `-places`, `-kinds`, `-target-grid`, `-center`, `-tiles`, `-effects`) with another value than the point's stops the
 run: the weights would not fit. The log at the start has the line `general: from the checkpoint …; overridden by
@@ -647,17 +706,29 @@ Tests at build time (group 1 of the design's "Checks" pages):
   without a measure; S = 0 is the plain PPO to the bit, S > 0 — `exec_general_term` = the mean |S × measure|.
 - `test_general_branch_torch.py` — the mission branches: the swap changes the kind card of the group's units only; a
   swap to the same kind prices exactly 0, the branches repeat, the random state is restored; an executor that does not
-  listen to its task prices every swap 0; the other kind is never the chosen one and only of the kinds taking the
+  listen to its task (and without the task masks) prices every swap 0; the other kind is never the chosen one and only of the kinds taking the
   group's target, the `policy` weight = 1 − π; with
   branches (the term's weight 0) the batch, the battles and the weights after the update are the same to the bit as
   without; the term's old probability is the plan's (KL 0), its gradient reaches the kind, the council and the
   readers, not the targets, places or the value; at P = 0 no branches, the flags reach the config.
 - `test_general_mission_torch.py` — the measures on hand-made states: `attack` (melee with the target — 1, with
-  another group — less, far — half the closeness), `flank` (the target's front — 0, its side — 1, its rear far — half
+  another group — less, far — half the closeness to the target's centre), the cohesion (225 m from its group's centre —
+  the measure × 0.5, 350 m — 0), `flank` (the target's front — 0, its side — 1, its rear far — half
   the closeness), `hold` (a tile and a group, a tile outside the map is not counted), `screen` (on the segment — 1,
   behind — 0, aside — the fall-off), `shoot` (shooting at the target, in range, in melee, no missiles — the distance),
   `withdraw`, a target with no standing unit is not counted; the teacher: attack the nearest group, shooters shoot,
-  one group screens the shooters, a threatened lord withdraws; every pair of the teacher is allowed by the mask.
+  one group screens the shooters, a threatened lord withdraws; every pair of the teacher is allowed by the mask; the
+  waiting: the groups hold their tile (shooters shoot) while the enemy is farther than 250 m and the shooters have not
+  fired 30 s, then attack.
+- `test_general_taskmask_torch.py` — the task masks on hand-made observations: `withdraw` (the attack and "keep" of an
+  attack closed, the sectors towards the enemy closed, those back open), `shoot` (no missiles — no attack, a shooter —
+  the group's targets), `attack` (targets — group X, sectors no farther from X; X not seen — a fall-back), `hold`
+  (sectors near the point, the attack only nearby), `screen` (sectors near the segment), the fall-back when the
+  sectors are closed; the heads' copy matches `ChainHeads.forward`'s source; in a battle where every group withdraws —
+  not one attack, the update's probabilities = the rollout's under the masks, the masked share logged; off — no mask
+  numbers, the executor to the bit as without the general; the general gives `shoot` only to a group whose shooters
+  are at least `shoot_share` (1 of 2 — yes, 1 of 3 — no, at 0.3 — yes);
+  the bonus's kind weights.
 - `test_general_deploy.py` (no torch) — the layout stays in the zone (200 random armies a side, the zone's edges, all
   on one tile), the line faces the enemy, a second group on a tile stands just behind, a wide line goes on in a second
   row.

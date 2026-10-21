@@ -49,6 +49,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from tools.nn.general.army_reader import ArmyReader
+from tools.nn.general.config import MISSION_KINDS
 from tools.nn.model.encoder import Block
 
 NEG = -1e9
@@ -356,6 +357,7 @@ class General(nn.Module):
         pair = self.pair_ok.to(g.device)                                      # [K, 2G + C] the kinds' target types
         # a kind may be chosen when some target there is of a type it takes (screen: another group of ours ...)
         k_ok = (base_t[:, :, None, :] & pair[None, None]).any(-1)            # [P, G, K]
+        k_ok = k_ok & self.shoot_ok(inp, c)
         k_logits = self.kind_q(g[:, :G]) @ self.kinds.t() / math.sqrt(d)      # [P, G, K]
         k_logits = k_logits + self.kind_bonus(inp, c, k_logits)
         kind, lp_k, ent_k = categorical(k_logits, k_ok, act.get("kind"), greedy)
@@ -392,6 +394,26 @@ class General(nn.Module):
                 "lp_parts": torch.stack([lp_k, lp_t, lp_p], -1) * m[..., None],
                 "target_logits": t_logits.masked_fill(~ok_t, NEG), "target_ok": ok_t,
                 "pairs": torch.stack([pairs_ok, n_t * self.cfg.kinds], -1) * m[..., None]}
+
+    def shoot_ok(self, inp, c):
+        """[P, G, K] the kinds a group may take by its units (GeneralConfig.task_mask): "shoot" only for a group whose
+        shooters - units taking part (inp "on") whose card has a missile range (army_input "range" > 0) - are at least
+        GeneralConfig.shoot_share of its units taking part (and one at least); every other kind always. All True
+        without task_mask (or without the kind)."""
+        G, K = self.cfg.places, self.cfg.kinds
+        out = torch.ones(c["main"].shape[0], G, K, dtype=torch.bool, device=c["main"].device)
+        shoot = next((k.index for k in MISSION_KINDS if k.name == "shoot"), K)
+        if not getattr(self.cfg, "task_mask", False) or shoot >= K:
+            return out
+        from tools.nn.general import army_input as ai
+        on = inp["on"]
+        sh = (inp["num"][..., ai.INDEX["range"]] > 0) & on                                # [P, N]
+        mem = (c["main"][..., None] == torch.arange(G, device=sh.device)) & on[..., None]   # [P, N, G]
+        n_sh = (mem & sh[..., None]).sum(1).float()
+        n = mem.sum(1).float()
+        share = float(getattr(self.cfg, "shoot_share", 0.5))
+        out[..., shoot] = (n_sh > 0) & (n_sh >= share * n)                               # [P, G]
+        return out
 
     def kind_bonus(self, inp, c, k_logits):
         """[P, G, K] the kind's inertia of a re-plan (GeneralConfig.kind_stick B): + B on a group's logit of the kind its

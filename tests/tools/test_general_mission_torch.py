@@ -50,12 +50,12 @@ SIDE = [1, 1, 1, 2, 2, 2]
 MAIN = [0, 0, 1, G, G, G + 1]                    # ours: g0 (units 0, 1), g1 (unit 2); theirs: e0 (3, 4), e1 (5)
 
 
-def test_attack_is_melee_with_the_target_group_else_half_its_closeness():
+def test_attack_is_melee_with_the_target_group_else_half_its_closeness_to_its_centre():
     u = state([(0, 0), (0, -150), (500, 0), (0, 0), (30, 0), (900, 900)], SIDE,
               m=[True, False, False, True, False, False], target=[3, -1, -1, 0, -1, -1])
     m, ok = run(u, MAIN, {0: ("attack", G)})
     assert m[0] == pytest.approx(1.0)
-    assert m[1] == pytest.approx(0.5 * (1 - 150 / 300))                     # 150 m to unit 3
+    assert m[1] == pytest.approx(0.5 * (1 - math.hypot(15, 150) / 300))     # to e0's centre (15, 0), not unit 3
     u2 = state([(0, 0), (0, -150), (500, 0), (0, 0), (30, 0), (900, 900)], SIDE,
                m=[True, False, False, True, False, False], target=[5, -1, -1, 0, -1, -1])
     m, _ = run(u2, MAIN, {0: ("attack", G)})
@@ -65,19 +65,33 @@ def test_attack_is_melee_with_the_target_group_else_half_its_closeness():
 
 def test_flank_counts_only_off_the_targets_front():
     # unit 3 faces north (b 0: facing (sin, cos) = (0, 1)); ours fights it from its front, then from its side
-    front = state([(0, 20), (0, 400), (500, 0), (0, 0), (300, 300), (900, 900)], SIDE,
+    front = state([(0, 20), (0, 100), (500, 0), (0, 0), (300, 300), (900, 900)], SIDE,
                   m=[True, False, False, True, False, False], target=[3, -1, -1, 0, -1, -1])
     m, _ = run(front, MAIN, {0: ("flank", G)})
     assert m[0] == pytest.approx(0.0)
-    side = state([(20, 0), (0, 400), (500, 0), (0, 0), (300, 300), (900, 900)], SIDE,
+    side = state([(20, 0), (0, 100), (500, 0), (0, 0), (300, 300), (900, 900)], SIDE,
                  m=[True, False, False, True, False, False], target=[3, -1, -1, 0, -1, -1])
     m, _ = run(side, MAIN, {0: ("flank", G)})
     assert m[0] == pytest.approx(1.0)
-    # not in melee, behind the nearest target unit, 150 m: half its closeness
-    rear = state([(0, -150), (0, 400), (500, 0), (0, 0), (300, 300), (900, 900)], SIDE)
+    # not in melee, behind the nearest target unit, 150 m from the target group's centre: half its closeness
+    rear = state([(0, -150), (0, -150), (500, 0), (0, 0), (0, 0), (900, 900)], SIDE)
     m, _ = run(rear, MAIN, {0: ("flank", G)})
     assert m[0] == pytest.approx(0.5 * 0.5)
     assert 45.0 == mission.FLANK_DEG
+
+
+def test_a_unit_far_from_its_own_group_carries_out_less():
+    """Every measure x the cohesion: 1 within 150 m of its group's centre, down to 0 at 300 m."""
+    u = state([(0, 0), (0, -450), (500, 0), (0, 0), (30, 0), (900, 900)], SIDE,
+              m=[True, False, False, True, False, False], target=[3, -1, -1, 0, -1, -1])
+    m, _ = run(u, MAIN, {0: ("attack", G)})                                # g0's centre (0, -225): both 225 m off
+    assert m[0] == pytest.approx(0.5)                                       # in melee with e0: 1 x 0.5
+    assert m[1] == pytest.approx(0.0)                                       # 450 m from e0 - and 0.5 of it
+    far = state([(0, 0), (0, -700), (500, 0), (0, 0), (30, 0), (900, 900)], SIDE,
+                m=[True, False, False, True, False, False], target=[3, -1, -1, 0, -1, -1])
+    m, _ = run(far, MAIN, {0: ("attack", G)})
+    assert m[0] == 0.0                                                      # 350 m from its group's centre
+    assert mission.COHESION_M == (150.0, 300.0)
 
 
 def test_hold_is_within_reach_of_the_tile_or_the_group():
@@ -162,3 +176,41 @@ def test_the_teacher_gives_meaningful_missions():
         tt = "own" if t < G else "enemy" if t < 2 * G else "tile"
         assert tt in gconfig.MISSION_KINDS[int(kind[0, g])].targets
     assert math.isfinite(teacher.THREAT_M)
+
+
+def test_the_teacher_waits_on_its_tiles_until_the_enemy_is_near_or_our_shooters_have_fired():
+    """Before the clash: the groups hold the tile they stand on (shooters shoot) while the enemy is farther than
+    HOLD_M and our shooters have not fired FIRE_S; then they attack. Every pair is one the general may choose."""
+    N = 6
+    # ours: 0 spear (g0), 1-2 archers (g1), 3 spear (g2); theirs: 4 (e0, 600 m ahead), 5 (e1)
+    x = torch.tensor([[0.0, 50, 60, -100, 600, 700]])
+    z = torch.zeros(1, N)
+    main = torch.tensor([[0, 1, 1, 2, G, G + 1]])
+    active = torch.zeros(1, 2 * G, dtype=torch.bool)
+    active[0, [0, 1, 2, G, G + 1]] = True
+    own = torch.tensor([[True] * 4 + [False] * 2])
+    standing = torch.ones(1, N, dtype=torch.bool)
+    shooter = torch.tensor([[False, True, True, False, False, False]])
+    lord = torch.zeros(1, N, dtype=torch.bool)
+    tiles = torch.tensor([[[0.0, 0.0], [-100.0, 0.0], [600.0, 0.0]] + [[5000.0, 5000.0]] * (C - 3)])
+    tiles_ok = torch.tensor([[True, True, True] + [False] * (C - 3)])
+    args = (main, active, x, z, own, standing, shooter, lord, G, CFG.kinds)
+    kind, target, use = teacher.choose(*args, tiles=tiles, tiles_ok=tiles_ok, engage=torch.tensor([False]))
+    assert int(kind[0, 0]) == K["screen"] and int(target[0, 0]) == 1                # the nearest screens the archers
+    assert int(kind[0, 1]) == K["shoot"] and int(target[0, 1]) == G
+    assert int(kind[0, 2]) == K["hold"] and int(target[0, 2]) == 2 * G + 1          # its own tile
+    assert bool(use[0, :3].all())
+    # the shooters have fired long enough: attack
+    kind, target, _ = teacher.choose(*args, tiles=tiles, tiles_ok=tiles_ok, engage=torch.tensor([True]))
+    assert int(kind[0, 2]) == K["attack"] and int(target[0, 2]) == G
+    # the enemy near (within HOLD_M of g2's centre): attack at once
+    x2 = x.clone()
+    x2[0, 4] = 100.0
+    kind, target, _ = teacher.choose(main, active, x2, z, own, standing, shooter, lord, G, CFG.kinds, tiles=tiles,
+                                     tiles_ok=tiles_ok, engage=torch.tensor([False]))
+    assert int(kind[0, 2]) == K["attack"]
+    for g in range(3):
+        t = int(target[0, g])
+        tt = "own" if t < G else "enemy" if t < 2 * G else "tile"
+        assert tt in gconfig.MISSION_KINDS[int(kind[0, g])].targets
+    assert teacher.HOLD_M == 250.0 and teacher.FIRE_S == 30.0

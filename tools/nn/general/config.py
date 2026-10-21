@@ -81,6 +81,12 @@ class GeneralConfig:
     #                            prev_kind) keeps its kind unless the general prefers another clearly; a kind with no
     #                            target of its types now stays masked; 0: none (g10: the kind changed at 57 % of the
     #                            re-plans of a group kept, the choice drifting)
+    task_mask: bool = True     # the mission limits the executor (taskmask.py: a unit's kinds, targets and sectors cut to
+    #                            its group's mission, a rule, not a weight) and the general gives "shoot" only to a
+    #                            group with a shooter (a unit whose card has a missile range); False: neither, the
+    #                            executor computes what it did to the bit (a checkpoint saved before it: True)
+    shoot_share: float = 0.5   # ... "shoot" for a group whose shooters are at least this share of its units (net.shoot_ok;
+    #                            "at least one" let 61-66 % of the units under shoot be infantry without missiles)
     # --- the skeleton's simplifications (docs "Simplifications of the skeleton") ---
     tiles: str = "sectors"     # 1: the map tiles are the unit network's 16 x 16 sectors (8 features each) projected to
     #                            the card's width; "cnn" (the map CNN's 32 x 32 tiles, map_cnn.py) is not built yet
@@ -112,6 +118,8 @@ class GeneralConfig:
             raise ValueError(f"general kinds {self.kinds}: 1..{len(MISSION_KINDS)} (config.MISSION_KINDS names them)")
         if self.kind_stick < 0:
             raise ValueError(f"general kind_stick {self.kind_stick}: >= 0")
+        if not 0.0 <= self.shoot_share <= 1.0:
+            raise ValueError(f"general shoot_share {self.shoot_share}: a share in [0, 1]")
         if self.target_grid < 1:
             raise ValueError(f"general target_grid {self.target_grid}: >= 1")
 

@@ -278,7 +278,12 @@ the bonus W × (measure − the kind's mean) goes into the unit's advantage only
 general's return do not see it; `--general-exec`, default 1); a teacher general (`--general-teacher P`, default 0)
 gives the missions by rules in a share of the battles, the general learns to imitate it (`--general-imitate 0.3`, down
 to 0 over 300 updates); the general gets a small bonus for missions carried out (`--general-exec-general 0.2`, centred
-by kind), and in a re-plan a group's last kind gets +1 on its logit (`--general-kind-stick`). Line g1–g8 on the former design (262 target candidates, two
+by kind), and in a re-plan a group's last kind gets +1 on its logit (`--general-kind-stick`). The mission **limits** the
+executor (`--general-task-mask 1`, `taskmask.py`): under "withdraw" the attack and the sectors towards the enemy are
+closed, under "attack X" the target only X's units, under "hold" the sectors near the point, and so on; the general gives
+"shoot" only to a group with a shooter; the attack's measure is to the target's centre, every measure × the cohesion
+with the group; the teacher waits first (holds its tile while the enemy is farther than 250 m and the shooters have
+fired less than 30 s). Line g1–g8 on the former design (262 target candidates, two
 targets, no unit positions, abstract kinds) stayed uniformly random; by flags, the plan's advantage by the unit critic (`--general-return critic`) and the executor's bonus for
 missions that tell apart (`--general-distinct`, in units of the executor's advantage spread), the mission branches — a copy of the
 battle with another mission kind for one group, the exchange's difference is the kind choice's price

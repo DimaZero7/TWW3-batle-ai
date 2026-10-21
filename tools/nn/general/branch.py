@@ -112,6 +112,10 @@ def swap_kind(env, actor, side, group, alt):
     hit = (main == group[:, None]) & ok[:, None]                                    # [n, N]
     card = actor.general.kinds.detach()[alt.clamp(min=0)].to(rt.r["kc"].dtype)      # [n, D]
     rt.r["kc"][row] = torch.where(hit[..., None], card[:, None, :], rt.r["kc"][row])
+    # (the kind itself too: the task's masks follow it, taskmask.py)
+    G = rt.r["kind"].shape[1]
+    gk = (torch.arange(G, device=side.device) == group[:, None]) & ok[:, None]      # [n, G]
+    rt.r["kind"][row] = torch.where(gk, alt[:, None].clamp(min=0), rt.r["kind"][row])
 
 
 def play_kinds(template, actor, snap, side, group, alt, copies, decisions, seed, price="trade", greedy=False):
