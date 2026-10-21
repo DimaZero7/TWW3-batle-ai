@@ -18,7 +18,18 @@
   kl_plan). No reward for carrying a mission out in the general's return: it is the battle's reward (v2) - the
   executor's bonus for it (LearnConfig.exec, run.py --general-exec W) goes into the units' own advantage only
   (ppo.update), so the general gains nothing by picking easy missions. The teacher's plans (LearnConfig.teacher) are
-  not among the ended plans: the general learns from its own choices only.
+  not among the ended plans: their PPO is the general's own choices only.
+* The teacher's imitation (LearnConfig.imitate W, run.py --general-imitate; down to 0 over --general-imitate-decay
+  updates): the teacher's ended plans (runtime: batch["general"]["teach"], their inputs, the network's groups and the
+  rule's kind and target where it gave one, "use") add W x the mean negative log-probability of the teacher's kind
+  and target (the target's under the teacher's kind) over those groups to every minibatch step (imitate_term) - only
+  the general's weights (its network alone; the executor is not in it). Logged before the steps: imitate_nll,
+  imitate_acc_kind (the network's most likely kind is the teacher's), imitate_acc_target (its most likely target
+  under the teacher's kind), imitate_rows / imitate_groups, imitate_w.
+* The general's small execution bonus (LearnConfig.exec_general S, run.py --general-exec-general): each own group's
+  advantage of a plan + S x its centred measure over the plan (runtime "exec_c": the mean of measure - its kind's
+  running mean over the plan's decisions and the group's units, the executor's own centring: an easy kind has no gain,
+  only "can this be done here") - in the normalised advantage's units (adv sd = 1). S = 0: the plain PPO bit for bit.
   With run.py --general-return critic the records carry "base" (the unit network's critic's value where the plan began)
   and the return is the critic's target (runtime.critic_target): the advantage is target - base (the critic explains
   ~0.995 of the return's spread); the plan value then only learns the same target beside it (its explained share
@@ -57,6 +68,9 @@ class LearnConfig:
     #                            logged, not paid; mission.py, runtime.execute)
     exec_decay: int = 0        # ... down to 0 linearly over this many updates of the chain (0: no decay)
     teacher: float = 0.0       # the share of the learner's battles whose missions the teacher gives (teacher.py)
+    imitate: float = 0.0       # the teacher's imitation: its term's weight W now (run.py passes W after the decay; 0: off)
+    imitate_decay: int = 0     # ... W down to 0 linearly over this many updates of the chain (run.py; 0: no decay)
+    exec_general: float = 0.0  # the general's bonus for its groups' centred measure: S (in adv sd units; 0: off)
 
     def __post_init__(self):
         if not 0.0 <= self.branches <= 1.0 or self.branch_weight < 0:
@@ -67,6 +81,8 @@ class LearnConfig:
             raise ValueError("--general-exec and --general-exec-decay are >= 0")
         if not 0.0 <= self.teacher <= 1.0:
             raise ValueError("--general-teacher is a share in [0, 1]")
+        if self.imitate < 0 or self.imitate_decay < 0 or self.exec_general < 0:
+            raise ValueError("--general-imitate, --general-imitate-decay and --general-exec-general are >= 0")
 
 
 def task_for(actor, table, obs):
@@ -137,14 +153,38 @@ def branch_term(gen, branch, clip):
     return -surr.mean(), kl, cl
 
 
-def update(actor, opt, ready, cfg=LearnConfig(), branch=None):
+def imitate_term(gen, teach):
+    """The teacher's imitation (module doc) on its plans' records teach ([E, ..] with "use" [E, G]) -> (loss: the mean
+    negative log-probability of the teacher's kind + target over the groups it gave a mission that the network could
+    choose, stats {nll, acc_kind, acc_target, groups}), or (None, {}) without such a group."""
+    _, d = gen(teach, act={k: teach[k] for k in CHOICES})
+    G = gen.cfg.places
+    kind, target = teach["kind"], teach["target"]
+    k_ok = d["kind_ok"].gather(2, kind[..., None])[..., 0]
+    t_ok = d["target_ok"].gather(2, target[..., None])[..., 0]
+    use = teach["use"] & teach["active"][:, :G] & k_ok & t_ok          # (a pair the network may not choose: none)
+    n = use.sum()
+    if not bool(n):
+        return None, {}
+    nll = -(d["lp_parts"][..., 0] + d["lp_parts"][..., 1])
+    loss = (nll * use.float()).sum() / n
+    with torch.no_grad():
+        acc_k = ((d["kind_logp"].argmax(-1) == kind) & use).sum() / n
+        acc_t = ((d["target_logits"].argmax(-1) == target) & use).sum() / n
+    return loss, {"nll": float(loss.detach()), "acc_kind": float(acc_k), "acc_target": float(acc_t),
+                  "groups": float(n)}
+
+
+def update(actor, opt, ready, cfg=LearnConfig(), branch=None, teach=None):
     """PPO of the general on the ended plans `ready` (runtime.end_chunk's: records [M, ..] with "ret", their return); branch: the
     mission branches' prices of the chunk (or None: no term). -> stats (general_*): policy loss, entropy (all and per
     head: ent_kind, ent_target, ent_place), KL (against the update's start; kl_plan: against the plans' own), clip
     share (and apart: clip_fresh of the plans begun in the chunk, clip_old of the older ones; fresh_share; stale_w: the
     older ones' mean importance weight c, branch_stale_w: the branches'), the plan
     value's loss and explained variance (before the step), plans, groups a plan; with branches their
-    term's loss, KL, clip share and rows."""
+    term's loss, KL, clip share and rows; teach: the teacher's ended plans (the imitation's records, module doc; None:
+    no term) - imitate_* (nll and accuracies before the steps, the term's mean over the steps); with exec_general S > 0
+    exec_general_term (the mean |S x centred measure| of the groups measured, in adv sd) and exec_general_mean (signed)."""
     gen = actor.general
     params = list(gen.parameters())
     M = ready["lp"].shape[0]
@@ -153,6 +193,11 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None):
     base = ready["base"].float() if "base" in ready else ready["value"].float()   # the critic's (--general-return critic)
     raw = target - base
     adv = (raw - raw.mean()) / (raw.std() + 1e-8) if M > 1 else raw * 0
+    # the general's execution bonus a group (module doc), in the normalised advantage's units: + S x its centred measure
+    x_term = None
+    if cfg.exec_general > 0 and "exec_c" in ready:
+        x_ok = ready["exec_ok"] & ready["active"][:, :G]
+        x_term = cfg.exec_general * torch.nan_to_num(ready["exec_c"].float()) * x_ok.float()      # [M, G]
     act_of = (lambda rec: {k: rec[k] for k in CHOICES})
     # the policy at the update's start (the KL stop's reference) and its gap to the plans' own log-probabilities
     with torch.no_grad():
@@ -167,6 +212,14 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None):
     sums = {"pl": 0.0, "ent": 0.0, "ent_kind": 0.0, "ent_target": 0.0, "ent_place": 0.0, "vl": 0.0, "kl": 0.0,
             "clip": 0.0}
     use_b = branch is not None and cfg.branch_weight > 0 and len(branch["adv"]) > 0
+    # the teacher's imitation: its numbers before the steps (logged whatever its weight), its term at weight imitate
+    imit = {}
+    if teach is not None and teach["lp"].shape[0] > 0:
+        with torch.no_grad():
+            _, imit = imitate_term(gen, teach)
+    use_i = bool(imit) and cfg.imitate > 0
+    if use_i:
+        sums["imitate_loss"] = 0.0
     b_stale_w = None
     if use_b:
         sums.update(branch_loss=0.0, branch_kl=0.0, branch_clip=0.0)
@@ -195,7 +248,10 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None):
             m = mine.float()
             cnt = m.sum().clamp(min=1)
             ratio = torch.exp((d["lp"] - ref[mb]) * m)
-            a = adv[mb][:, None] * w_is[mb]                   # (x 1 for the fresh plans: the plain PPO bit for bit)
+            if x_term is None:
+                a = adv[mb][:, None] * w_is[mb]               # (x 1 for the fresh plans: the plain PPO bit for bit)
+            else:
+                a = (adv[mb][:, None] + x_term[mb]) * w_is[mb]
             surr = torch.minimum(ratio * a, ratio.clamp(1 - cfg.clip, 1 + cfg.clip) * a)
             pl = -(surr * m).sum() / cnt
             ent = (d["ent"] * m).sum() / cnt
@@ -217,6 +273,14 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None):
                 sums["branch_loss"] += float(bl.detach())
                 sums["branch_kl"] += bkl
                 sums["branch_clip"] += bcl
+            if use_i:
+                E = teach["lp"].shape[0]
+                part = teach if E <= cfg.minibatch else _rows(teach, torch.randperm(E, device=target.device)
+                                                              [:cfg.minibatch])
+                il, _ = imitate_term(gen, part)
+                if il is not None:
+                    loss = loss + cfg.imitate * il
+                    sums["imitate_loss"] += float(il.detach())
             opt.zero_grad(set_to_none=True)
             loss.backward()
             gn = torch.nn.utils.clip_grad_norm_(params, cfg.max_grad)
@@ -264,6 +328,16 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None):
     out["general_groups"] = float(ready["active"][:, :G].float().sum(1).mean())
     if use_b:
         out["general_branch_rows"] = float(len(branch["adv"]))
+    if imit:
+        out.update({f"general_imitate_{k}": v for k, v in imit.items()})
+        out["general_imitate_rows"] = float(teach["lp"].shape[0])
+    if teach is not None:
+        out["general_imitate_w"] = float(cfg.imitate)
+    if x_term is not None:
+        x_ok = ready["exec_ok"] & ready["active"][:, :G]
+        k = float(x_ok.sum())
+        out["general_exec_general_term"] = float(x_term.abs().sum() / k) if k else 0.0
+        out["general_exec_general_mean"] = float(x_term.sum() / k) if k else 0.0
     out.update(task_in_norms(actor))
     return out
 

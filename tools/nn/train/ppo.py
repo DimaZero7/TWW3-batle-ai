@@ -504,7 +504,9 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
         # gradient), so after them its plans' ratios no longer start near 1 (build/diag_clip: clip 0.3-0.5 at kl_plan
         # 0.02-0.06). It needs nothing of those epochs (the ended plans' records only). (With --general-branches the
         # chunk's mission kind prices: learn.update's branch term.)
-        g_out = glearn.update(actor, opt, ready, general, branch=batch["general"].get("branch"))
+        # (--general-imitate: the teacher's ended plans, the imitation's records)
+        g_out = glearn.update(actor, opt, ready, general, branch=batch["general"].get("branch"),
+                              teach=batch["general"].get("teach"))
     with AbilityInputGrad(actor, cfg.ability_body_grad if cfg.ability_own else 1.0), ThoughtTap(actor, extra) as tap:
         out = _update(actor, critic, opt, batch, cfg, train_policy, reference, teach, observe, tap if tap.on else None)
     out.update(g_out)

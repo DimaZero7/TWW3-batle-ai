@@ -291,6 +291,7 @@ GENERAL_FLAGS = {"card": "general_card", "reader_hidden": "general_hidden", "cou
                  "council_heads": "general_heads", "group_layers": "general_group_layers", "places": "general_places",
                  "kinds": "general_kinds", "target_grid": "general_target_grid", "rounds": "general_rounds",
                  "center": "general_center", "sharp": "general_sharp", "stick": "general_stick",
+                 "kind_stick": "general_kind_stick",
                  "tiles": "general_tiles", "effects": "general_effects", "zone": "general_zone",
                  "deploy": "general_deploy", "replan_s": "general_replan_s", "replan_min_s": "general_replan_min_s"}
 # the fields that make the network's shape (the saved weights fit only them; center: 0 has no weight, any other value
@@ -352,7 +353,9 @@ def with_general(actor, args):
                              minibatch=args.general_minibatch, branches=args.general_branches,
                              branch_weight=args.general_branch_weight,
                              distinct=args.general_distinct, distinct_decay=args.general_distinct_decay,
-                             exec=args.general_exec, exec_decay=args.general_exec_decay, teacher=args.general_teacher)
+                             exec=args.general_exec, exec_decay=args.general_exec_decay, teacher=args.general_teacher,
+                             imitate=args.general_imitate, imitate_decay=args.general_imitate_decay,
+                             exec_general=args.general_exec_general)
     print(f"general: {actor.gcfg}; learning {cfg}; return {args.general_return}; lr x {args.general_lr_mult:g}",
           flush=True)
     return actor, cfg
@@ -405,7 +408,12 @@ def general_text(g):
                + f" (w {g.get('exec_weight', 0):g}, bonus |{g.get('exec_bonus_abs', 0):.3f}| a unit-decision, adv sd "
                f"{g.get('exec_adv_std', 0):.3f}), masked pairs {g.get('masked_pairs', 0):.2f}"
                + (f", teacher {g['teach_share']:.2f}" if "teach_share" in g else "")
-               if "exec_weight" in g else ""))
+               if "exec_weight" in g else "")
+            + (f"; imitate nll {g.get('imitate_nll', float('nan')):.3f} acc kind "
+               f"{g.get('imitate_acc_kind', float('nan')):.2f} target {g.get('imitate_acc_target', float('nan')):.2f} "
+               f"w {g['imitate_w']:.4f}" if "imitate_w" in g else "")
+            + (f"; exec general |{g['exec_general_term']:.4f}| ({g.get('exec_general_mean', 0):+.4f}) adv sd"
+               if "exec_general_term" in g else ""))
 
 
 def fighters_installed(args):
@@ -753,6 +761,7 @@ def _train(args, every=None, teacher=None, normal=None):
     dlearn = None                                 # --general-distinct: the classifier (distinct.Learner)
     d_updates0 = int(carried.get("general_distinct_updates", 0))
     e_updates0 = int(carried.get("general_exec_updates", 0))   # --general-exec-decay's counter over the chain
+    i_updates0 = int(carried.get("general_imitate_updates", 0))   # --general-imitate-decay's (from its first step)
     t_warm = time.time()
     env.step(actor, critic)                       # compiles the simulator's step (not counted)
     if env.general_rt is not None:
@@ -777,8 +786,12 @@ def _train(args, every=None, teacher=None, normal=None):
             env.general_rt.set_teacher(glearn_cfg.teacher)
             print(f"general missions: the executor's bonus W {glearn_cfg.exec:g}"
                   + (f" -> 0 over {glearn_cfg.exec_decay} updates (from update {e_updates0} of the chain)"
-                     if glearn_cfg.exec_decay else "") + f"; the teacher's share of the battles {glearn_cfg.teacher:g}",
-                  flush=True)
+                     if glearn_cfg.exec_decay else "") + f"; the teacher's share of the battles {glearn_cfg.teacher:g}"
+                  + (f"; its imitation W {glearn_cfg.imitate:g}" + (f" -> 0 over {glearn_cfg.imitate_decay} updates "
+                                                                   f"(from update {i_updates0})"
+                                                                   if glearn_cfg.imitate_decay else "")
+                     if glearn_cfg.teacher > 0 else "")
+                  + f"; the general's execution bonus S {glearn_cfg.exec_general:g}", flush=True)
         # --general-branches P: a share of the learner's plans replayed with one group's mission kind changed
         env.general_rt.brancher = general_brancher(args, glearn_cfg, device)
         if env.general_rt.brancher is not None:
@@ -827,7 +840,8 @@ def _train(args, every=None, teacher=None, normal=None):
                           "observe_updates": observe.updates if observe is not None
                           else int(carried.get("observe_updates", 0)),
                           "general_distinct_updates": d_updates0 + (update if dlearn is not None else 0),
-                          "general_exec_updates": e_updates0 + (update if glearn_cfg is not None else 0)},
+                          "general_exec_updates": e_updates0 + (update if glearn_cfg is not None else 0),
+                          "general_imitate_updates": i_updates0 + (update if glearn_cfg is not None else 0)},
                 **({"general_distinct": dlearn.state()} if dlearn is not None else {}),
                 **({"ability_critic": env.brancher.critic.state(),
                     "ability_critic_openloop": bool(env.brancher.cfg.openloop),
@@ -892,8 +906,11 @@ def _train(args, every=None, teacher=None, normal=None):
         teach_w = (teacher.weights() if teacher is not None
                    else drill_teach.weights(teach0, args.drill_teach_minutes, (time.time() - t0 - paused) / 60))
         teach_w = {**teach_w, **(normal.weights() if normal is not None else normal_w)}
+        # (--general-imitate: the teacher's imitation's weight of this update, W down to 0 over --general-imitate-decay)
+        g_cfg = (dataclasses.replace(glearn_cfg, imitate=gsignal.distinct_weight(
+            glearn_cfg.imitate, glearn_cfg.imitate_decay, i_updates0 + update)) if glearn_cfg is not None else None)
         st = ppo.update(actor, critic, opt, batch, u_cfg, train_policy=trains, reference=reference, teach=teach_w,
-                        observe=observe, general=glearn_cfg)
+                        observe=observe, general=g_cfg)
         taught = st.pop("teach", None)
         observed = st.pop("observe", None)
         if dlearn is not None:
@@ -1470,6 +1487,9 @@ def parser():
                     help="general: the group collection's keys and queries to unit length, their cosine x a learned "
                          "sharpness starting here (0: the plain dot product - a fresh general then split every unit "
                          "evenly over the places)")
+    ap.add_argument("--general-kind-stick", type=float, default=1.0,
+                    help="general: a re-plan's bonus on a group's logit of its last plan's mission kind (the group that "
+                         "kept its number and some of its units; a fixed rule, saved with the checkpoint; 0: none)")
     ap.add_argument("--general-stick", type=float, default=1.0,
                     help="general: a re-plan's bonus on a unit's logit of its last group in the group collection (a "
                          "learned value, starts here; the groups' inertia - 0: none)")
@@ -1550,6 +1570,18 @@ def parser():
                          "(tools/nn/general/teacher.py: attack the nearest enemy group, shooters shoot, one group "
                          "screens the shooters, a threatened lord withdraws); those plans train the executor only, not "
                          "the general (0: off)")
+    ap.add_argument("--general-imitate", type=float, default=0.3,
+                    help="general: W, the teacher's imitation - on the teacher's ended plans (--general-teacher) the "
+                         "general's loss + W x the mean negative log-probability of the teacher's kind and target over "
+                         "the groups it gave a mission (the groups are the network's; the general's weights only; 0: "
+                         "off, the nll and accuracies still logged)")
+    ap.add_argument("--general-imitate-decay", type=int, default=300,
+                    help="general: the imitation's W down to 0 linearly over this many updates of the chain (its own "
+                         "counter, from its first update; 0: no decay)")
+    ap.add_argument("--general-exec-general", type=float, default=0.2,
+                    help="general: S, its small bonus for missions carried out - each group's plan advantage + S x the "
+                         "group's measure less its kind's running mean over the plan (the executor's centring: no gain "
+                         "for easy kinds), in the normalised advantage's units (0: off, the plain PPO)")
     ap.add_argument("--eval-generated", type=int, default=512, help="random battles per opponent (EVAL_SEEDS)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")

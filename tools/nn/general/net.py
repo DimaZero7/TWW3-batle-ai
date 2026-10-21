@@ -16,6 +16,7 @@ order; docs/en/training/general.md).
       renumbered, so a group keeps its number (its prev card, its task) while it keeps its units
     group council: the groups listen to the tiles and to all groups (only groups change)   "Совещание групп"
     missions, step by step: kind (GeneralConfig.kinds learned cards) -> target              "Выбор заданий"
+      a re-plan: + kind_stick on a group's logit of its last kind (the same number, some of its units kept)
       targets: our groups (not itself), their groups, the coarse tiles (target_grid^2, the council's tiles pooled);
       a kind takes only its target types (config.MISSION_KINDS: attack an enemy group, hold a tile or our group ...):
       the other pairs' logits are -inf, a kind with no target of its types there is not chosen; only our groups choose
@@ -36,6 +37,8 @@ Input dict (rows P; N the battle's slots, S tiles, G places a side):
     zone [P, S], deploy [P]         the deployment's tiles and whether the plan deploys
     prev [P, 2G, D], has_prev [P]   the places' cards of the last plan (the inertia of a re-plan)
     prev_main [P, N]                the last plan's group of every unit (-1 none): the groups' numbers (match_groups)
+    prev_kind [P, G]                (optional) the last plan's mission kind of each of our group numbers (-1 none): the
+                                    kind's inertia (GeneralConfig.kind_stick)
     main [P, N], perm [P, 2G]       (optional) the plan's membership and numbering when it is computed again (locked:
                                     the update, the refresh)
 """
@@ -50,7 +53,7 @@ from tools.nn.model.encoder import Block
 
 NEG = -1e9
 INPUTS = ("num", "lab", "pos", "on", "own", "free", "tiles", "tile_ok", "zone", "deploy", "prev", "has_prev",
-          "prev_main")
+          "prev_main", "prev_kind")
 CHOICES = ("kind", "target", "place")
 # a unit's place in the general's input, as the unit network's token reads it (observation.py: the side's frame):
 # forward and lateral / observation.POS, facing cos and sin, velocity forward and lateral / observation.VEL, known
@@ -336,7 +339,9 @@ class General(nn.Module):
         "place"} [P, G]. -> dict: the choices [P, G], "lp" [P, G] and "ent" [P, G] (the group's steps summed; 0 for a
         place that is not a group), "ent_parts" [P, G, 3] (kind, target, place), "value" [P], "lp_kind" [P, G] (the
         kind step's alone), "kind_logp" [P, G, K] (every kind's log-probability; uniform for a place that is not a
-        group), "kind_ok" [P, G, K] (the kinds that may be chosen: some target of their types), "pairs" [P, G, 2] (the
+        group), "kind_ok" [P, G, K] (the kinds that may be chosen: some target of their types), "lp_parts" [P, G, 3]
+        (the kind's, target's and place's steps apart), "target_logits" / "target_ok" [P, G, 2G + C] (the target step's
+        logits, masked, and the targets allowed for the group's kind: the teacher's imitation), "pairs" [P, G, 2] (the
         (kind, target) pairs allowed, all kinds x the targets there are: the log's masked share). Targets: 0..G-1 our
         groups, G..2G-1 theirs, 2G.. the coarse tiles (target_kind); a kind only with the target types it takes
         (config.MISSION_KINDS: the pair_ok buffer)."""
@@ -352,6 +357,7 @@ class General(nn.Module):
         # a kind may be chosen when some target there is of a type it takes (screen: another group of ours ...)
         k_ok = (base_t[:, :, None, :] & pair[None, None]).any(-1)            # [P, G, K]
         k_logits = self.kind_q(g[:, :G]) @ self.kinds.t() / math.sqrt(d)      # [P, G, K]
+        k_logits = k_logits + self.kind_bonus(inp, c, k_logits)
         kind, lp_k, ent_k = categorical(k_logits, k_ok, act.get("kind"), greedy)
         # every kind's log-probability (the mission branches: the old log-probability, the alternatives' sampling)
         k_lg = k_logits.masked_fill(~k_ok, NEG)
@@ -361,7 +367,8 @@ class General(nn.Module):
         keys = self.cand_k(cand)
         ok_t = base_t & pair[kind]                                            # only the kind's target types
         qt = self.target_q(torch.cat([g[:, :G], kc], -1))
-        target, lp_t, ent_t = categorical(qt @ keys.transpose(1, 2) / math.sqrt(d), ok_t, act.get("target"), greedy)
+        t_logits = qt @ keys.transpose(1, 2) / math.sqrt(d)                  # [P, G, 2G + C]
+        target, lp_t, ent_t = categorical(t_logits, ok_t, act.get("target"), greedy)
         deploy = inp["deploy"].reshape(-1, 1)
         okp = inp["zone"][:, None, :] & mine[..., None] & deploy[..., None]   # [P, G, S]
         qp = self.place_q(torch.cat([g[:, :G], kc], -1))
@@ -382,7 +389,26 @@ class General(nn.Module):
         return {"kind": kind, "target": target, "place": place, "lp": lp, "ent": ent, "value": value,
                 "ent_parts": torch.stack([ent_k, ent_t, ent_p], -1) * m[..., None],
                 "lp_kind": lp_k * m, "kind_logp": kind_logp, "kind_ok": k_ok,
+                "lp_parts": torch.stack([lp_k, lp_t, lp_p], -1) * m[..., None],
+                "target_logits": t_logits.masked_fill(~ok_t, NEG), "target_ok": ok_t,
                 "pairs": torch.stack([pairs_ok, n_t * self.cfg.kinds], -1) * m[..., None]}
+
+    def kind_bonus(self, inp, c, k_logits):
+        """[P, G, K] the kind's inertia of a re-plan (GeneralConfig.kind_stick B): + B on a group's logit of the kind its
+        number had in the last plan (inp prev_kind [P, G], -1 none), when the group kept some of that number's units
+        (main and prev_main share a unit: a number given to a new place by default, match_groups' identity, is not the
+        same group); zeros without prev_kind or with B = 0. (A kind with no target of its types now stays masked: the
+        mask comes after.)"""
+        B = float(getattr(self.cfg, "kind_stick", 0.0))
+        pk = inp.get("prev_kind")
+        if not B or pk is None or inp.get("prev_main") is None:
+            return torch.zeros_like(k_logits)
+        G, K = self.cfg.places, k_logits.shape[-1]
+        ar = torch.arange(G, device=k_logits.device)
+        kept = ((c["main"][..., None] == ar) & (inp["prev_main"][..., None] == ar)).any(1)       # [P, G]
+        kept = kept & (pk >= 0) & inp["has_prev"].reshape(-1, 1)
+        hot = (pk.clamp(0, K - 1)[..., None] == torch.arange(K, device=k_logits.device)) & kept[..., None]
+        return B * hot.to(k_logits.dtype)
 
     def forward(self, inp, act=None, greedy=False):
         c = self.cards(inp)

@@ -48,8 +48,8 @@ flowchart TB
 | Group council | `net.Listen` | the groups listen to the tiles and to all groups; the tiles do not change |
 | Mission kinds | `General.kinds`, `config.MISSION_KINDS` | a table of learned cards with no input; 6 kinds with a meaning ([below](#missions)): number, name, target types, what "done" is — in one place, `config.py` `MISSION_KINDS` |
 | Carrying missions out | `mission.py`, `runtime.execute` | every decision a measure 0…1 for each unit with a mission, from the simulator's state ([below](#missions)); the executor's bonus goes into the unit's advantage |
-| Teacher | `teacher.py` | (`--general-teacher P`) in a share of the battles a rule gives the missions, not the network ([below](#teacher)) |
-| Mission choice | `General.decide` | step by step: kind (the group's card against the kinds) → one target; targets: our groups (not itself), their groups, the tiles of a coarse 4 × 4 grid (`--general-target-grid`, a 400 m tile = the mean of its 16 sectors after the council; at least one sector inside the map): ≤ 36 candidates; the enemy's groups do not choose. A kind takes only its target types (the `pair_ok` mask: the other pairs' logits are −∞); a kind with no target there (screen without another group of ours) is not chosen |
+| Teacher | `teacher.py` | (`--general-teacher P`) in a share of the battles a rule gives the missions, not the network; the general learns to imitate it (`--general-imitate`) ([below](#teacher)) |
+| Mission choice | `General.decide` | step by step: kind (the group's card against the kinds) → one target; targets: our groups (not itself), their groups, the tiles of a coarse 4 × 4 grid (`--general-target-grid`, a 400 m tile = the mean of its 16 sectors after the council; at least one sector inside the map): ≤ 36 candidates; the enemy's groups do not choose. A kind takes only its target types (the `pair_ok` mask: the other pairs' logits are −∞); a kind with no target there (screen without another group of ours) is not chosen. In a re-plan the group's last kind's logit gets +B (`--general-kind-stick`, [below](#more-differences-from-the-design)) |
 | Place choice | `General.decide` | in the battle's first plan only: a pointer to a tile of our zone |
 | Layout | `deploy.py` | a rule: a line by the formations' widths on the group's tile, facing the enemy's centre; groups on one tile stand one behind the other; everything inside the zone |
 | Unit task | `runtime.Runtime.task` | for each own unit: its group card (the mix of the places' cards by its shares), its group's mission kind card, the group's target (direction from where the unit faces, cos and sin; distance / 100 m, at most 20; a "none" flag) — 2 × card + 4 numbers |
@@ -182,6 +182,25 @@ PPO on two levels (`learn.py`):
   paid its own (the distinct bonus went to the whole side). The measures are computed and logged at any W (W = 0: not
   paid).
 - **Teacher** (`--general-teacher P`): [below](#teacher).
+- **Imitating the teacher** (`--general-imitate W`, default 0.3; `--general-imitate-decay N`: W down to 0 over N
+  updates, default 300, its own counter in the point's `train` from the first update with imitation). Why: in g10 the
+  general got only noise from the battle, its choice of kind drifted (46 % `flank`, the kind carried out worst, 0.13;
+  the choice's dependence on the situation ≈ 0). How: on the teacher's plans its kind and target are known for every
+  group it gave a mission. The teacher's groups are the ones the network collected (the teacher changes only the kind
+  and the target), so everything matches: the general's network runs on those situations anyway, and their inputs
+  (armies, tiles, prev cards, membership, numbering) are kept in the record as for its own plans. Every PPO step of
+  the general adds W × the network's mean NLL of the teacher's choice to its loss: −(log π(the teacher's kind) +
+  log π(the teacher's target | the teacher's kind)) over the groups the teacher gave a mission (`learn.imitate_term`;
+  the place is not imitated — the teacher does not choose it). Pairs the network cannot choose (the mask) do not
+  count. The gradient goes into the general's weights only (the executor is not in this loss, test). The teacher's
+  plans still do not go into the PPO, the plan value, the classifier or the branches. The accuracy and the NLL are
+  computed before the steps, at any W (W = 0: the log only).
+- **The general's small bonus for carrying missions out** (`--general-exec-general S`, default 0.2). Each of our groups
+  of a plan adds S × its centred measure over the plan to the plan's advantage: the mean over the plan's decisions and
+  the group's units of (measure − the kind's running mean), the executor's bonus's own centring. Centring by kind
+  removes the gain of "easy" kinds: only "can this be done here" is left. It is added to the plan's normalised
+  advantage (spread 1), that is in units of its spread; the old plans take the same weight `c`. S = 0: the plain PPO
+  to the bit (test). In a trial run (a fresh general): 0.01–0.04 of the spread a group.
 - **The executor's bonus for missions that tell apart** (`--general-distinct W`, default 0 — off; with kinds that mean
   something the bonus for carrying them out took its place, it stays for comparison). Why: the executor
   hardly listens to its task (the input's weights 0 → 0.39 by a random walk; swapping the mission kind changes the
@@ -248,9 +267,11 @@ units), later over earlier:
 - one group — not shooters, without the lord, nearest to our largest shooting group — `screen` it;
 - the lord's group, with a standing enemy within 150 m of the lord — `withdraw` to our largest other group.
 
-No enemy group — the network's choice stays. The teacher's plans (`teach`) train the executor only: the general has no
-record of them (its PPO, the plan value, the classifier, the branches do not see them); they are in the chunk's table —
-the executor's task cards are computed from them as from all. In the general's log numbers (`kinds`, `kind_share_*`,
+No enemy group — the network's choice stays. The teacher's plans (`teach`) train the executor: they are in the chunk's
+table — the executor's task cards are computed from them as from all. To the general they give only the imitation
+(`--general-imitate`, [above](#training)): an ended teacher's plan is a record with its inputs, kinds and targets and
+the mark of the groups it gave a mission (`use`; `batch["general"]["teach"]`). The general's PPO, the plan value, the
+classifier and the branches do not see them. In the general's log numbers (`kinds`, `kind_share_*`,
 targets, the mask) only its own plans; the measures — all the learner's plans. The teacher's share: `teach_share`.
 
 ## Mission branches
@@ -312,7 +333,7 @@ yet, are refused with a `NotBuilt` error (the network never thinks it has what i
 | 1 | the map tiles are today's 16 × 16 sectors of 100 m (8 numbers), projected to the card's width | `--general-tiles sectors` | `cnn`: the map analysis's 1024 tiles (`map_cnn.py`) |
 | 2 | the effects are not connected: the effect cards are zeros | `--general-effects off` | `on`: the effects' analysis |
 | 3 | small widths: council 2 layers, group council 1 layer, card 128 (the chain's step; `run.py`'s default 64), 4 heads | `--general-card 128 --general-council-layers 2 --general-group-layers 1 --general-heads 4` | settled by the checks |
-| 4 | the bonus for carrying missions out is on; the mission branches, the bonus for missions that tell apart and the teacher are built but off by default; the entropy bonus on the choices is on, per head | `--general-exec 1 --general-teacher 0 --general-branches 0 --general-distinct 0 --general-entropy-kind 0.001 --general-entropy-target 0.001 --general-entropy-place 0.001` | branches: `--general-branches P` ([above](#mission-branches)); the distinct bonus: `--general-distinct W` ([above](#training)); the teacher: `--general-teacher P` ([above](#teacher)) |
+| 4 | the bonus for carrying missions out is on (the executor's and a small one the general's), imitating the teacher is on (it acts when the teacher is on); the mission branches, the bonus for missions that tell apart and the teacher are built but off by default; the entropy bonus on the choices is on, per head | `--general-exec 1 --general-exec-general 0.2 --general-imitate 0.3 --general-imitate-decay 300 --general-teacher 0 --general-branches 0 --general-distinct 0 --general-entropy-kind 0.001 --general-entropy-target 0.001 --general-entropy-place 0.001` | branches: `--general-branches P` ([above](#mission-branches)); the distinct bonus: `--general-distinct W` ([above](#training)); the teacher: `--general-teacher P` ([above](#teacher)) |
 | 5 | the deployment zone is the area `place.py` deploys an army in (forward from −260 to +40 m of the side's line, sideways ±150 m); a tile is in the zone when its centre is; the layout inside a group is a rule | `--general-zone place`, `--general-deploy net` (`script`: the scripted placement as before) | `map`: the zones from the map's layers |
 
 More differences from the design (skeleton too):
@@ -328,6 +349,15 @@ More differences from the design (skeleton too):
 - **the groups' inertia in a re-plan** (`--general-stick 1`): a learned bonus is added to the logit of a unit's last
   group (the place that starts from its card) — a unit stays unless the attention clearly prefers another place. In a
   trial run (6 updates) `group_churn` 0.47 → 0.13;
+- **the kind's inertia in a re-plan** (`--general-kind-stick B`, default 1; a rule, not a weight: saved in the point
+  with `GeneralConfig`, the option goes over it): the logit of the group's last kind gets +B
+  (`net.General.kind_bonus`). "The same group" is the same number and at least one unit shared with that number's last
+  group (a number a new place got by default is not the same group). The last kind is the plan's input `prev_kind`
+  (kept in the record, so the update computes the probabilities again with the same bonus). The kind is chosen before
+  the target, so "the last kind is allowed" is the kind's mask: with no target of its types now it stays closed. Why:
+  in g10 the kind of the same group changed at 57 % of the re-plans. B = 1 on a near-uniform choice of 6 kinds gives
+  the last kind ~0.35 (a fresh general in the trial: `kind_switch` 0.55–0.69), B = 2 ~0.6. B = 0: as before to the
+  bit (test). One code for the simulator and the game (`Runtime.inputs`);
 - the slots are the battle's own slots (up to 80, their order means nothing: the network does not depend on it —
   test), not "40 own + 40 enemy";
 - a hidden enemy counts as full (the simulator hides nobody);
@@ -353,9 +383,12 @@ The run's `log.jsonl`, field `general` (and the `general:` line of the output):
 | `exec_bonus`, `exec_bonus_abs` | the bonus a unit-decision: signed (≈ 0 by its construction) and its magnitude |
 | `exec_adv_mean`, `exec_adv_std`, `exec_paid` | the unit's own part of its advantage from the bonus (in units of the side's normalised advantage, whose spread is 1) and the share of unit-decisions paid |
 | `teach_share` | (`--general-teacher`) the share of the learner's plans the teacher made |
+| `imitate_nll`, `imitate_acc_kind`, `imitate_acc_target` | (`--general-teacher`) on the teacher's ended plans, before the steps: the network's mean NLL of the teacher's choice (kind + target), the share of groups where the network's most likely kind is the teacher's, and where its most likely target (under the teacher's kind) is the teacher's |
+| `imitate_groups`, `imitate_rows`, `imitate_w`, `imitate_loss` | groups and teacher's plans in the imitation, W now, the imitation's term (the mean over the steps; only at W > 0) |
+| `exec_general_term`, `exec_general_mean` | (`--general-exec-general`) the mean addition S × centred measure to a group's advantage: absolute and signed, in units of the plan advantage's spread |
 | `target_group`, `target_own`, `target_enemy`, `target_tile` | the targets' shares: a group (ours or theirs), our group, an enemy group, a 4 × 4 tile |
 | `group_churn` | the share of our units whose group number changed at a re-plan (of those in a group before and after) |
-| `kind_switch` | the share of our groups (the number alive before and after a re-plan) whose mission kind changed |
+| `kind_switch` | the share of our groups (the number alive before and after a re-plan) whose mission kind changed (the teacher's plans included) |
 | `places_top` | the most chosen deployment tiles (`row_column` of the side's 16 × 16 grid: the row is forward) |
 | `deploy_net_share` | the share of deployments made by the general (the rest scripted: the zone did not fit) |
 | `replans_per_battle`, `replan_reasons` | re-plans a battle (of the battles that ended during the update) and by reason (timer, broken group, lord). It grows with the battle's length: all battles start together, in the first updates only the short ones end (g10: 10 a battle at ~5 min battles, 20–22 at ~10–11 min; the battle's limit is 3600 s, not 600) |
@@ -417,7 +450,9 @@ and the general. The evaluations: the mandatory set only. The command from the u
 
 The chain's step already runs with `--general-return critic` (the advantage by the unit critic) and with the bonus for
 carrying missions out (`--general-exec 1` — the option's default; stronger: `--set general-exec=2`; the teacher:
-`--set general-teacher=0.3`). The points g1–g9 (10 abstract kinds) do not load with today's code (6 kinds): a new line
+`--set general-teacher=0.3`; with the teacher the general imitates it, `--general-imitate 0.3` down to 0 over 300 updates
+— the default; the general's small bonus `--general-exec-general 0.2` and the kind's inertia `--general-kind-stick 1` —
+the defaults). The points g1–g9 (10 abstract kinds) do not load with today's code (6 kinds): a new line
 starts from `build/v2/itS27_4.pt`. The bonus for missions that tell apart goes over the step: `--set general-distinct=1` (W 1 down to 0 over 600 updates). Its scale:
 ~20 plans a battle × ~4 groups × the classifier's gain × W × σ — at a gain of 0.3 and σ 0.06 that is ~1.4 a battle
 against the battle return's spread of ~0.8, and ~0.3σ a group at the plan's last decision; watch `distinct_bonus` and
@@ -432,7 +467,7 @@ the other kind evenly of those taking the group's target, the price by the excha
 
 **A point that already has a general.** Its settings (`GeneralConfig`) are saved in the point and taken from there. A
 rule's option given on the command line goes over the saved value: `--general-deploy`, `--general-replan-s`,
-`--general-replan-min-s`, `--general-rounds`, `--general-zone`; one not given stays as in the point (an option's
+`--general-replan-min-s`, `--general-rounds`, `--general-zone`, `--general-kind-stick` (a point without the field: 1); one not given stays as in the point (an option's
 default never goes over the point). A size's option (`--general-card`, `-hidden`, `-council-layers`, `-heads`,
 `-group-layers`, `-places`, `-kinds`, `-target-grid`, `-center`, `-tiles`, `-effects`) with another value than the point's stops the
 run: the weights would not fit. The log at the start has the line `general: from the checkpoint …; overridden by
@@ -566,7 +601,9 @@ Tests at build time (group 1 of the design's "Checks" pages):
   numbers get their numbers back, in a split the bigger part keeps the number, the sides do not mix); a re-plan gets
   the old numbers and is computed again with the plan's numbering to the bit; the coarse 4 × 4 grid of the sectors;
   the kinds' list `MISSION_KINDS`; a kind only with its target types, a kind with no target (screen with one group)
-  is not chosen; the choices' rules (only our groups choose; a target is a live group, not itself,
+  is not chosen; the kind's inertia: + B on the logit of the last kind of a group that kept its number and units
+  (the log-probabilities' gaps to the other kinds grow by exactly B), without `prev_kind` or shared units to the bit as
+  without it, a large B keeps the kind, a kind closed by the mask stays closed; the choices' rules (only our groups choose; a target is a live group, not itself,
   or a 4 × 4 tile inside the map; a fresh general chooses groups too; a place only a zone tile and only in a
   deployment); the probability of a choice given again equals the sampled one;
   the gradient of the task's cards reaches the group collection, the councils and the readers; a re-plan starts from
@@ -581,7 +618,8 @@ Tests at build time (group 1 of the design's "Checks" pages):
   re-plans; re-plans by the timer, by a broken group (not sooner than 3 s), by a lord's fall (both sides); the task
   only for own units in a group; the direction and distance to the target from the unit's facing; the update's cards
   = the battle's (the probabilities agree), a tiny update trains every part of the general; narrowing the batch and an
-  ability branch keep the plans.
+  ability branch keep the plans; a re-plan gets the groups' last kinds (`prev_kind`), with a large kind's inertia the
+  groups with shared units keep it.
 - `test_general_signal.py` (no torch) — the formulas: the mission bonus = W × (measure − mean), its part of the
   advantage a reward-to-go at γλ, a steady bonus counts once, the battle's end cuts it; every target type is taken by
   ≥ 2 kinds; the plan's target and advantage by the critic on toy numbers; the
@@ -602,7 +640,11 @@ Tests at build time (group 1 of the design's "Checks" pages):
   for the fresh ones and `min(1, exp(lp0 − lp_plan))` for the old ones; with fresh plans only the update is to the bit
   that without the mark (the plain PPO); with the general's weights moved after the plans the old ones are not clipped
   at the first step (their ratio from `lp0`), the fresh ones are, `stale_w` < 1 and equal to the hand-computed one;
-  the re-plans are counted a battle that ended and a minute of it.
+  the re-plans are counted a battle that ended and a minute of it; the imitation: the teacher's ended plans come with
+  its kinds and targets on the network's groups and the mark `use`; at W = 0 the weights are those without them to the
+  bit (the log only), at W > 0 only the general's weights move; imitation steps bring the network to the teacher's
+  choice (the NLL falls); the general's small bonus: a group's centred measure is finite, within ±1, 0 for groups
+  without a measure; S = 0 is the plain PPO to the bit, S > 0 — `exec_general_term` = the mean |S × measure|.
 - `test_general_branch_torch.py` — the mission branches: the swap changes the kind card of the group's units only; a
   swap to the same kind prices exactly 0, the branches repeat, the random state is restored; an executor that does not
   listen to its task prices every swap 0; the other kind is never the chosen one and only of the kinds taking the
@@ -622,7 +664,8 @@ Tests at build time (group 1 of the design's "Checks" pages):
 - `test_general_flags_torch.py` — options over a point with a general: a point with `deploy='net'` +
   `--general-deploy script` → script; without the option — net; an option given at its default goes over too; a
   size's option against the point stops the run; the rules reach the network (the group collection's rounds) and the
-  next point keeps them.
+  next point keeps them; `--general-kind-stick` is a rule (it goes over the point; a point without the field: 1); the
+  imitation's and the small bonus's defaults.
 - `test_companion_general_torch.py` - the general in the companion: a 240 s simulator battle (the enemy's lord falls
   at 75 s, our big group routs at 140 s), at every decision the bridge's document of the same moment - the plan
   (every unit's group, the kinds, the targets) and every unit's task are `Runtime`'s on the simulator's own state (the

@@ -37,6 +37,15 @@ def test_a_given_rule_goes_over_the_saved_one():
     assert gcfg.card == SAVED.card and gcfg.council_heads == SAVED.council_heads       # the sizes as saved
 
 
+def test_the_kinds_inertia_is_a_rule_an_option_goes_over():
+    gcfg, over = run.general_config(args_of("--general-kind-stick", "0"), SAVED)
+    assert gcfg.kind_stick == 0.0 and over == {"kind_stick": (1.0, 0.0)}
+    old = {k: v for k, v in gconfig.to_dict(SAVED).items() if k != "kind_stick"}     # a checkpoint before it: 1
+    assert gconfig.of_dict(old).kind_stick == 1.0
+    a = args_of()
+    assert (a.general_imitate, a.general_imitate_decay, a.general_exec_general) == (0.3, 300, 0.2)
+
+
 def test_without_the_option_the_saved_rule_stays():
     saved = dataclasses.replace(SAVED, deploy="script", replan_s=45.0)
     gcfg, over = run.general_config(args_of("--general-entropy-kind", "0.05"), saved)

@@ -276,7 +276,9 @@ honest probability ratio and the entropy per head), the general has a critic of 
 executor is paid for carrying out its mission (a measure 0…1 every decision from the simulator's state, `mission.py`;
 the bonus W × (measure − the kind's mean) goes into the unit's advantage only, not the reward: the critic and the
 general's return do not see it; `--general-exec`, default 1); a teacher general (`--general-teacher P`, default 0)
-gives the missions by rules in a share of the battles. Line g1–g8 on the former design (262 target candidates, two
+gives the missions by rules in a share of the battles, the general learns to imitate it (`--general-imitate 0.3`, down
+to 0 over 300 updates); the general gets a small bonus for missions carried out (`--general-exec-general 0.2`, centred
+by kind), and in a re-plan a group's last kind gets +1 on its logit (`--general-kind-stick`). Line g1–g8 on the former design (262 target candidates, two
 targets, no unit positions, abstract kinds) stayed uniformly random; by flags, the plan's advantage by the unit critic (`--general-return critic`) and the executor's bonus for
 missions that tell apart (`--general-distinct`, in units of the executor's advantage spread), the mission branches — a copy of the
 battle with another mission kind for one group, the exchange's difference is the kind choice's price

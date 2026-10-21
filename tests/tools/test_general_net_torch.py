@@ -360,3 +360,69 @@ def test_the_mission_kinds_are_one_list():
     assert [k.name for k in ks] == ["attack", "hold", "flank", "screen", "shoot", "withdraw"]
     with pytest.raises(ValueError):
         gconfig.GeneralConfig(kinds=len(ks) + 1)
+
+
+def stick_inputs(P=3):
+    """(inputs of a re-plan whose last plan had the same groups, the last plan's cards)."""
+    m, inp = model(), inputs(P=P)
+    with torch.no_grad():
+        c0, d0 = m(inp)
+    again = dict(inp, prev=c0["places"], has_prev=torch.ones(P, dtype=torch.bool), prev_main=c0["main"],
+                 prev_kind=torch.where(c0["active"][:, :G], d0["kind"], torch.full_like(d0["kind"], -1)))
+    return again, c0
+
+
+def kinds_at(B, inp, **lock):
+    import dataclasses
+    torch.manual_seed(0)
+    m = gnet.General(dataclasses.replace(CFG, kind_stick=B), SECT).double().eval()
+    with torch.no_grad():
+        return m(dict(inp, **lock))
+
+
+def test_the_kinds_inertia_adds_its_bonus_to_the_last_kind_of_a_group_kept():
+    """GeneralConfig.kind_stick B: a re-plan's group that kept its number and some of its units gets + B on its last
+    plan's kind's logit (the log-probabilities' gaps to the other kinds grow by B); no prev_kind, or a group with none
+    of the number's units: nothing changes, bit for bit."""
+    inp, c0 = stick_inputs()
+    lock = {"main": c0["main"], "perm": c0["perm"]}                     # the same groups under both settings
+    _, d0 = kinds_at(0.0, inp, **lock)
+    c3, d3 = kinds_at(3.0, inp, **lock)
+    pk = inp["prev_kind"]
+    n = 0
+    for p in range(pk.shape[0]):
+        for g in torch.nonzero(c3["active"][p, :G]).flatten().tolist():
+            k = int(pk[p, g])
+            for j in torch.nonzero(d3["kind_ok"][p, g]).flatten().tolist():
+                if j == k:
+                    continue
+                gap3 = float(d3["kind_logp"][p, g, k] - d3["kind_logp"][p, g, j])
+                gap0 = float(d0["kind_logp"][p, g, k] - d0["kind_logp"][p, g, j])
+                assert gap3 - gap0 == pytest.approx(3.0, abs=1e-5)       # (log_softmax in float32)
+                n += 1
+    assert n > 0
+    _, dn = kinds_at(3.0, {k: v for k, v in inp.items() if k != "prev_kind"}, **lock)
+    assert torch.equal(dn["kind_logp"], d0["kind_logp"])
+    lost = dict(inp, prev_main=torch.full_like(inp["prev_main"], -1))
+    _, dl0 = kinds_at(0.0, lost, **lock)
+    _, dl3 = kinds_at(3.0, lost, **lock)
+    assert torch.equal(dl3["kind_logp"], dl0["kind_logp"])
+
+
+def test_a_strong_kinds_inertia_keeps_the_kind_and_a_masked_kind_stays_masked():
+    inp, c0 = stick_inputs()
+    lock = {"main": c0["main"], "perm": c0["perm"]}
+    torch.manual_seed(2)
+    c, d = kinds_at(50.0, inp, **lock)
+    mine = c["active"][:, :G]
+    assert torch.equal(d["kind"][mine], inp["prev_kind"][mine])
+    # one group of ours only: screen (another group of ours) has no target - its bonus does not unmask it
+    one = c0["main"].clone()
+    one[(one >= 0) & (one < G)] = 0
+    scr = [k.index for k in gconfig.MISSION_KINDS if k.name == "screen"][0]
+    pk = torch.full_like(inp["prev_kind"], -1)
+    pk[:, 0] = scr
+    _, d1 = kinds_at(50.0, dict(inp, prev_kind=pk, prev_main=one), main=one, perm=c0["perm"])
+    assert torch.all(d1["kind_logp"][:, 0, scr] < -1e6) and torch.all(d1["kind"][:, 0] != scr)
+    with pytest.raises(ValueError):
+        gconfig.GeneralConfig(kind_stick=-1.0)

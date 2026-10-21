@@ -418,3 +418,88 @@ def test_the_teachers_plans_train_the_executor_and_not_the_general():
     out = rt.end_chunk()
     n = 0 if out["ready"] is None else out["ready"]["lp"].shape[0]
     assert n == n_free < int(learner.sum()) and out["table"] is not None
+
+
+def teach_and_ready():
+    """(env, actor, ready, teach): a chunk's ended plans of the general (the deployment's) and of the teacher (the
+    chunk's re-plans, ended at the next one) with the missions measured."""
+    env, actor, crit, batch = exec_chunk(1.0, teacher=1.0)
+    rt = env.general_rt
+    taught = rt.r["has"] & (rt.r["owner"] == 0) & rt.r["teach"]
+    want = {k: rt.r[k][taught].clone() for k in ("kind", "target", "main")}
+    rt.begin_chunk(env)
+    rt.r["t_plan"] -= 31.0
+    env.step(actor, crit)
+    teach = rt.end_chunk()["teach"]
+    assert teach is not None and teach["lp"].shape[0] == int(taught.sum())
+    for k, v in want.items():
+        assert torch.equal(teach[k], v), k                           # the teacher's choices on the network's groups
+    return env, actor, batch["general"]["ready"], teach
+
+
+def test_the_teachers_plans_are_kept_for_the_imitation_with_the_groups_it_gave_a_mission():
+    _, actor, ready, teach = teach_and_ready()
+    G = GCFG.places
+    use = teach["use"]
+    assert bool(use.any()) and not bool((use & ~teach["active"][:, :G]).any())
+    for k in ("num", "prev_main", "prev_kind", "has_prev", "main", "perm"):
+        assert k in teach, k                                           # the states to compute the plan again
+    loss, st = learn.imitate_term(actor.general, teach)
+    assert loss.requires_grad and st["nll"] > 0 and 0 <= st["acc_kind"] <= 1 and 0 <= st["acc_target"] <= 1
+
+
+def test_the_imitation_moves_only_the_general_and_at_zero_weight_changes_nothing():
+    import copy
+    _, actor, ready, teach = teach_and_ready()
+    outs = []
+    for w, t in ((0.0, None), (0.0, teach), (1.0, teach)):
+        a = copy.deepcopy(actor)
+        opt = torch.optim.Adam(a.parameters(), lr=1e-3)
+        torch.manual_seed(5)
+        outs.append((a, learn.update(a, opt, ready, learn.LearnConfig(epochs=1, minibatch=8, imitate=w), teach=t)))
+    for (n, p), q in zip(outs[0][0].named_parameters(), outs[1][0].parameters()):
+        assert torch.equal(p, q), n                                     # W = 0: only logged
+    st = outs[1][1]
+    assert st["general_imitate_w"] == 0.0 and st["general_imitate_nll"] > 0 and "general_imitate_loss" not in st
+    assert "general_imitate_acc_kind" in st and "general_imitate_acc_target" in st
+    moved = {n for (n, p), q in zip(outs[1][0].named_parameters(), outs[2][0].parameters()) if not torch.equal(p, q)}
+    assert moved and all(n.startswith("general.") for n in moved)      # the general's weights only
+    assert outs[2][1]["general_imitate_loss"] > 0
+
+
+def test_imitation_steps_bring_the_general_to_the_teachers_choices():
+    _, actor, _, teach = teach_and_ready()
+    gen = actor.general
+    opt = torch.optim.Adam(gen.parameters(), lr=3e-3)
+    _, st0 = learn.imitate_term(gen, teach)
+    for _ in range(40):
+        loss, _ = learn.imitate_term(gen, teach)
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+    _, st1 = learn.imitate_term(gen, teach)
+    assert st1["nll"] < 0.7 * st0["nll"] and st1["acc_kind"] >= st0["acc_kind"]
+
+
+def test_the_generals_execution_bonus_is_its_groups_centred_measure_and_zero_is_the_plain_ppo():
+    import copy
+    _, actor, crit, batch = exec_chunk(0.0)                          # (measured, the executor not paid)
+    ready = batch["general"]["ready"]
+    G = GCFG.places
+    ok = ready["exec_ok"] & ready["active"][:, :G]
+    assert bool(ok.any()) and bool(torch.isfinite(ready["exec_c"]).all())
+    assert float(ready["exec_c"].abs().max()) <= 1.0 and bool((ready["exec_c"][~ready["exec_ok"]] == 0).all())
+    plain = {k: v for k, v in ready.items() if k not in ("exec_c", "exec_ok")}
+    outs = []
+    for rec, s in ((plain, 0.0), (ready, 0.0), (ready, 0.5)):
+        a = copy.deepcopy(actor)
+        opt = torch.optim.Adam(a.parameters(), lr=1e-3)
+        torch.manual_seed(5)
+        outs.append((a, learn.update(a, opt, rec, learn.LearnConfig(epochs=1, minibatch=8, exec_general=s))))
+    for (n, p), q in zip(outs[0][0].named_parameters(), outs[1][0].parameters()):
+        assert torch.equal(p, q), n                                     # S = 0: bit for bit
+    assert "general_exec_general_term" not in outs[1][1]
+    st = outs[2][1]
+    want = float((0.5 * ready["exec_c"]).abs()[ok].mean())
+    assert st["general_exec_general_term"] == pytest.approx(want, rel=1e-5) and want > 0
+    assert any(not torch.equal(p, q) for p, q in zip(outs[1][0].parameters(), outs[2][0].parameters()))

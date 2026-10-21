@@ -76,6 +76,11 @@ class GeneralConfig:
     stick: float = 1.0         # a re-plan: the bonus on a unit's logit of its last group in the group collection (a
     #                            learned value, starts here): the groups keep their units unless the attention prefers
     #                            another place clearly; 0: none
+    kind_stick: float = 1.0    # a re-plan: the bonus on a group's logit of its last plan's mission kind (a fixed
+    #                            rule, not a weight): the group that kept its number and some of its units (net.decide:
+    #                            prev_kind) keeps its kind unless the general prefers another clearly; a kind with no
+    #                            target of its types now stays masked; 0: none (g10: the kind changed at 57 % of the
+    #                            re-plans of a group kept, the choice drifting)
     # --- the skeleton's simplifications (docs "Simplifications of the skeleton") ---
     tiles: str = "sectors"     # 1: the map tiles are the unit network's 16 x 16 sectors (8 features each) projected to
     #                            the card's width; "cnn" (the map CNN's 32 x 32 tiles, map_cnn.py) is not built yet
@@ -105,6 +110,8 @@ class GeneralConfig:
         assert self.card % self.council_heads == 0, "the card's width must split into the heads"
         if not 1 <= self.kinds <= len(MISSION_KINDS):
             raise ValueError(f"general kinds {self.kinds}: 1..{len(MISSION_KINDS)} (config.MISSION_KINDS names them)")
+        if self.kind_stick < 0:
+            raise ValueError(f"general kind_stick {self.kind_stick}: >= 0")
         if self.target_grid < 1:
             raise ValueError(f"general target_grid {self.target_grid}: >= 1")
 

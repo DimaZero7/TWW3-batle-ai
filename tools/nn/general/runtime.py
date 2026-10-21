@@ -147,6 +147,7 @@ class Runtime:
         self.pending = torch.ones(self.B, dtype=torch.bool, device=self.dev)   # the first start's deployment
         self.table, self.tix = None, torch.full((2 * self.B,), -1, dtype=torch.long, device=self.dev)
         self.ready = []
+        self.teach_ready = []                     # the teacher's ended plans (the general's imitation, learn.update)
         self.stats = Counts(self.dev, gcfg.kinds, self.S)
         self.v_now = None                         # the critic's value [2B] of the decision now (note_value), NaN: none
         self.distinct = None                      # --general-distinct: the classifier (distinct.Learner), behaviour on
@@ -177,13 +178,13 @@ class Runtime:
              "b_ok0": z(R, G, dt=Bo), "b_last": z(R, G, 2), "b_okl": z(R, G, dt=Bo), "b_path": z(R, G),
              "b_fwd": z(R, 2), "b_fwd_ok": z(R, dt=Bo),
              "kind_logp": z(R, G, self.gcfg.kinds), "fresh": z(R, dt=Bo), "teach": z(R, dt=Bo),
-             "new": z(R, dt=Bo)}
+             "new": z(R, dt=Bo), "teach_use": z(R, G, dt=Bo), "x_sum": z(R, G), "x_n": z(R, G)}
         from tools.nn.general import army_input as ai
         r.update({"in/num": z(R, N, ai.SIZE), "in/lab": z(R, N, len(ai.LABELS), dt=L),
                   "in/pos": z(R, N, len(POS_FEATURES)), "in/prev_main": z(R, N, dt=L) - 1, "in/on": z(R, N, dt=Bo),
                   "in/own": z(R, N, dt=Bo), "in/free": z(R, N, dt=Bo), "in/tiles": z(R, S, len(gtiles.FEATURES)),
                   "in/tile_ok": z(R, S, dt=Bo), "in/zone": z(R, S, dt=Bo), "in/deploy": z(R, dt=Bo),
-                  "in/prev": z(R, 2 * G, D), "in/has_prev": z(R, dt=Bo)})
+                  "in/prev": z(R, 2 * G, D), "in/has_prev": z(R, dt=Bo), "in/prev_kind": z(R, G, dt=L) - 1})
         return r
 
     def _battles(self, B):
@@ -262,9 +263,13 @@ class Runtime:
         has_prev = self.r["has"][rows] if not deploy else torch.zeros_like(self.r["has"][rows])
         prev = torch.where(has_prev.reshape(-1, 1, 1), self.r["places"][rows], torch.zeros_like(self.r["places"][rows]))
         prev_main = torch.where(has_prev[:, None], self.r["main"][rows], torch.full_like(self.r["main"][rows], -1))
+        # the last plan's kind of each of our group numbers (net.kind_bonus: the kind's inertia, GeneralConfig.kind_stick)
+        G = self.G
+        last_k = has_prev[:, None] & self.r["active"][rows][:, :G]
+        prev_kind = torch.where(last_k, self.r["kind"][rows], torch.full_like(self.r["kind"][rows], -1))
         inp = {"num": num, "lab": self.b["lab"][b], "pos": pos, "on": on, "own": own, "free": free, "tiles": tiles,
                "tile_ok": tile_ok, "zone": zone, "deploy": zone.any(-1), "prev": prev, "has_prev": has_prev,
-               "prev_main": prev_main}
+               "prev_main": prev_main, "prev_kind": prev_kind}
         return inp, frame, u
 
     @staticmethod
@@ -306,6 +311,7 @@ class Runtime:
             c, d = gen(_take(inp, sel), greedy=self.greedy)
             if o == 0 and self.teacher > 0:
                 d = self._teach(env, rows[sel], c, d)
+                self.r["teach_use"][rows[sel]] = d["teach_use"]
             mix, kc = gen.unit_cards(c, d["kind"], c["main"])
             outs[o] = (sel, c, d, mix, kc)
         M, G, N = rows.numel(), self.G, self.N
@@ -348,6 +354,9 @@ class Runtime:
         r["new"][rows] = True                     # begun in this chunk (begin_chunk: the plans in force are old)
         r["r_sum"][rows] = 0.0
         r["r_disc"][rows] = 0.0
+        r["x_sum"][rows], r["x_n"][rows] = 0.0, 0.0       # its groups' centred measures (--general-exec-general)
+        if self.teacher <= 0:
+            r["teach_use"][rows] = False
         # the critic's value at the plan (a deployment's: the battle's first decision fills it, note_value)
         nan = torch.full((M,), float("nan"), device=self.dev)
         r["v_start"][rows] = nan if deploy or self.v_now is None else self.v_now[rows]
@@ -387,7 +396,8 @@ class Runtime:
         kind, target, use = gteacher.choose(c["main"], c["active"], f("x"), f("z"), side == s[:, None], standing,
                                             (f("range") > 0) & (f("a") > 0), f("lord"), self.G, self.gcfg.kinds)
         use = use & self.b["teach"][b][:, None]
-        return dict(d, kind=torch.where(use, kind, d["kind"]), target=torch.where(use, target, d["target"]))
+        return dict(d, kind=torch.where(use, kind, d["kind"]), target=torch.where(use, target, d["target"]),
+                    teach_use=use)
 
     def _count(self, rows, owner, res, inp, deploy, reason):
         """The log's counters of a planning call (the learner's plans only), on the device."""
@@ -573,6 +583,16 @@ class Runtime:
     def _finish(self, rows, done, v_next=None):
         """The plans of rows end: ready records (the learner's, while training) with their return."""
         r = self.r
+        if self.training and self.teacher > 0:
+            # the teacher's plans: no PPO record, but their states and the teacher's choices for the general's imitation
+            # (learn.update, --general-imitate): the groups are the network's, so every group the rule gave a mission
+            # ("use") is a (kind, target) the network could have chosen on the same cards
+            tsel = r["has"][rows] & (r["owner"][rows] == 0) & r["teach"][rows]
+            if bool(tsel.any()):
+                tr = rows[tsel]
+                trec = self.record(tr)
+                trec["use"] = r["teach_use"][tr] & r["active"][tr][:, :self.G]
+                self.teach_ready.append(trec)
         sel = r["has"][rows] & (r["owner"][rows] == 0) & ~r["teach"][rows]    # (the teacher's plans: no record)
         if not self.training or not bool(sel.any()):
             return
@@ -586,6 +606,9 @@ class Runtime:
         rec["ret"] = target                       # the plan's return (learn.update's target)
         rec["done"] = torch.full_like(target, float(done))
         rec["new"] = r["new"][rr].clone()         # begun in this chunk (learn.update: clip_fresh / clip_old)
+        # its groups' mean centred measure over the plan (0 where none was measured; learn.update's exec_general)
+        rec["exec_c"] = r["x_sum"][rr] / r["x_n"][rr].clamp(min=1.0)
+        rec["exec_ok"] = r["x_n"][rr] > 0
         if self.distinct is not None:
             beh, ok = self.behaviour(rr)
             rec["beh"], rec["beh_ok"] = beh, ok
@@ -713,6 +736,13 @@ class Runtime:
         first = torch.isnan(self.exec_base) & seen
         base = torch.where(first, mean, self.exec_base)                 # (a kind's first decision: its own mean)
         self.exec_base = torch.where(seen, base + self.exec_rate * (mean - base), base)
+        # each plan's groups' centred measure (the measure - its kind's running mean before this decision), summed over
+        # the plan's decisions and units: the general's small bonus for missions carried out (--general-exec-general)
+        cen = (m.float() - torch.nan_to_num(base)[k.clamp(0, K - 1)]) * ok.float()          # [R, N]
+        main = r["main"][rows]
+        grp = (main[..., None] == torch.arange(G, device=self.dev)).float()                 # [R, N, G]
+        r["x_sum"][rows] = r["x_sum"][rows] + torch.einsum("rn,rng->rg", cen, grp)
+        r["x_n"][rows] = r["x_n"][rows] + torch.einsum("rn,rng->rg", ok.float(), grp)
         if not self.exec_w:
             return None
         bonus = gsignal.exec_bonus(m, torch.nan_to_num(base)[k.clamp(0, K - 1)], self.exec_w) * ok.float()
@@ -804,11 +834,13 @@ class Runtime:
 
     def end_chunk(self):
         """-> {"table": the chunk's plan records [P, ..] (task_plan indexes it), "ready": the ended plans' records with
-        their return since the last chunk}; both None when empty."""
+        their return since the last chunk, "teach": the teacher's ended plans' records with "use" [M, G] (the groups it
+        gave a mission: the general's imitation)}; each None when empty."""
         table = _cat(self.table) if self.table else None
         ready = _cat(self.ready)
-        self.table, self.ready = None, []
-        return {"table": table, "ready": ready}
+        teach = _cat(self.teach_ready)
+        self.table, self.ready, self.teach_ready = None, [], []
+        return {"table": table, "ready": ready, "teach": teach}
 
     # --- the batch's changes ----------------------------------------------------------------------------------------
     def narrow(self, keep):
@@ -837,7 +869,8 @@ class Runtime:
         """A frozen copy for a branch env of B battles from a snapshot (ability_branch.branch_env): the plans of the
         snapshot, no re-plans, no deployment, no records."""
         new = Runtime.__new__(Runtime)
-        new.__dict__.update({k: v for k, v in self.__dict__.items() if k not in ("r", "b", "tix", "ready", "table")})
+        new.__dict__.update({k: v for k, v in self.__dict__.items() if k not in ("r", "b", "tix", "ready", "table",
+                                                                                  "teach_ready")})
         new.B = B
         new.r = self._rows(2 * B)
         for k in ("has", "main", "target", "tgt", "mix", "kc"):
@@ -846,7 +879,7 @@ class Runtime:
         new.r["owner"] = torch.where(new.r["has"], torch.zeros_like(new.r["owner"]), new.r["owner"])
         new.b = self._battles(B)
         new.tix = torch.full((2 * B,), -1, dtype=torch.long, device=self.dev)
-        new.ready, new.table, new.pending = [], None, None
+        new.ready, new.table, new.pending, new.teach_ready = [], None, None, []
         new.v_now, new.distinct, new.bonus = None, None, torch.zeros(2 * B, device=self.dev)
         new.brancher = None
         new.frozen = True

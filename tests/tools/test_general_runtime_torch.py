@@ -292,3 +292,25 @@ def test_narrowing_and_a_branch_keep_the_plans():
     env.narrow(keep)
     assert rt.B == 2 and torch.equal(rt.r["mix"], torch.cat([mix[keep], mix[keep + 4]]))
     env.step(actor, crit)                                             # goes on
+
+
+def test_a_replan_passes_the_last_kinds_and_a_strong_inertia_keeps_them():
+    """Runtime.inputs: a re-plan's prev_kind is the last plan's kind of each of our active group numbers (-1 else);
+    with GeneralConfig.kind_stick 50 every group that kept some of its number's units keeps its kind (kind_switch)."""
+    torch.manual_seed(0)
+    actor = executor.wrap(policy.Actor(TINY).eval(), dataclasses.replace(GCFG, kind_stick=50.0)).eval()
+    crit = mcritic.Critic(TINY).eval()
+    env = battles(B=4, mix={"self": 1.0})
+    env.step(actor, crit)
+    rt = env.general_rt
+    G = GCFG.places
+    old_kind, old_main, old_act = rt.r["kind"].clone(), rt.r["main"].clone(), rt.r["active"][:, :G].clone()
+    rt.r["t_plan"] -= 31.0
+    env.step(actor, crit)                                             # every row re-plans
+    rows = rt.r["has"] & (rt.r["owner"] >= 0)
+    pk = rt.r["in/prev_kind"]
+    assert torch.equal(pk[rows], torch.where(old_act, old_kind, torch.full_like(old_kind, -1))[rows])
+    ar = torch.arange(G)
+    kept = ((rt.r["main"][..., None] == ar) & (old_main[..., None] == ar)).any(1) & old_act & rows[:, None]
+    assert bool(kept.any())
+    assert torch.equal(rt.r["kind"][kept], old_kind[kept])
