@@ -38,7 +38,7 @@ The first steps compile for 1–3 minutes (seconds once a run of the same shapes
 | exploration | `--entropy` (0.01) and `--entropy-end` (linear over the run), `--entropy-decay` (0 min: off; else over that many minutes of training over the whole chain), `--entropy-target` (0: off), `--entropy-max` (0.1), `--entropy-rate` (1.25); per head in v2: `--head-entropy` (off; `head=share`), `--head-entropy-start` (0.003), `--head-entropy-max` (0.05), `--reset-heads` (off; once): [per-head spread](#per-head-spread) |
 | leash | `--anchor` (0: KL weight to the reference) and `--anchor-end`, `--reference` (default `--init`), `--anchor-roll` (0 s: seconds of training between renewals of the reference), `--anchor-ema` (0 s: instead, the reference follows the actor with this half-life) |
 | reward | `--gold` (1.0), `--rout-share` (0.5), `--lord` (0.3), `--lord-rout` (0), `--idle` (2e-4), `--idle-tau` (150 s), `--idle-pause` (30 s), `--idle-step` (0.5), `--idle-cap` (20), `--idle-rate` (0), `--idle-window` (30 s), `--order-cost` (0.001), `--retarget` (0.003): [reward](#reward) |
-| opponents | `--mix` (json shares), `--pool` (8: past versions at most), `--pool-extra` (more checkpoints for the pool), `--pool-dir` (the pool's folder for a whole night), `--pool-eta` (0.01), `--past-slots` (3), `--past-every` (6 updates): [past versions](#past-versions), `--eval-past`, `--eval-generated` (512) |
+| opponents | `--mix` (json shares), `--pool` (8: past versions at most), `--pool-extra` (more checkpoints for the pool), `--pool-dir` (the pool's folder for a whole night), `--pool-eta` (0.01), `--past-slots` (3), `--past-every` (6 updates), `--past-pin` (off: a pinned opponent outside the pool), `--past-pin-share` (0.65): [past versions](#past-versions), `--eval-past`, `--eval-generated` (512) |
 | drills | `--drills` (0: share of the battles), `--drill-weights` (json; default the `TRAIN` drills equally: kiting, hold_fire), `--drill-bank` (256 per drill), `--drill-embed` (1: share of the embedded frame, for the drills that have one), `--drill-broad` (0.5: of the rest, share of the broad frame), `--drill-teach` (`auto` or json {drill: weight}: the teacher, off by default), `--drill-teach-minutes` (10: manual), `--drill-teach-k` (0.5), `--drill-teach-cap` (0.25), `--drill-teach-weight` (0.15: auto), `--teach-normal` (`auto`, names or json {drill: share}: the teacher in normal battles, off by default), `--teach-normal-k` (0.5), `--teach-normal-cap` (0.15), `--teach-normal-weight` (0.1), `--teach-normal-match` (0.1): [drills](#drills) |
 | observation | `--observe-dir` (off: the folder of converted battles), `--observe-share` (0.1), `--observe-weight` (0.1), `--observe-decay` (0.95), `--observe-anchor` (0.2), `--observe-anchor-decay` (0.995), `--observe-anchor-alone` (off: the anchor ends with the term), `--observe-adv` (`critic`), `--observe-beta` (1), `--observe-clip` (20), `--observe-steps` (0: `--steps`), `--observe-refresh` (20): [learning by observation](#learning-by-observation) |
 | kiting in self-play | `--kite-share` (0: share of the `self` / `past` battles started, planned 0.1), `--kite-bank` (256 battles ready): [kiting in self-play](#kiting-in-self-play) |
@@ -234,7 +234,10 @@ As OpenAI Five's (arXiv 1912.06680, appendix N), `league.Pool`:
 - **One pool for the night.** The pool's state is `q.json` in its folder (versions, q, the clock in updates,
   games). With `--pool-dir <folder>` the parts of a night go on with one pool: a new part reads `q.json` and
   writes its snapshots there (`<name>_v<update>.pt`). The untrained network and `--init` go only into a new
-  pool; `--pool-extra` adds the versions not in yet (one already in keeps its q).
+  pool; `--pool-extra` adds the versions not in yet (one already in keeps its q). The random draws of the
+  versions start from `--seed`, the pool's folder and its state: every step of a chain has its own folder, so its own
+  draws (from `--seed` alone every new pool would draw the same sequence: the same versions at the same updates, and
+  some versions of `--pool-extra` would never play); the same folder draws the same.
 - **One version a battle.** Up to `--past-slots` (3) versions play at once, each in a slot. A battle takes
   the active slot when it begins and keeps it to its end: the opponent's version never changes mid-battle
   and its memory (GRU) is not wiped. Every `--past-every` (6, about a battle) updates a version is drawn for
@@ -243,6 +246,13 @@ As OpenAI Five's (arXiv 1912.06680, appendix N), `league.Pool`:
   in the log). Every slot in use decides on all the past rows (one batch shape for the compiled step) and
   each row takes its own slot's orders. `--past-slots 1` is the old way: one version, a change wipes the
   memory of the running battles.
+- **A pinned opponent.** `--past-pin <checkpoint>`: a standing opponent in a slot of its own beyond `--past-slots`,
+  outside the pool: no q, it never leaves and is never replaced. A past battle that starts takes it with probability
+  `--past-pin-share` (0.65; a draw of its own from `--seed`), else the pool's active slot (`rollout.Battles.pin_slot`).
+  Its battles are `pinned/attack`, `pinned/defend` in the log (the pool's: `past/…`). The share of all battles ≈ share ×
+  the `past` share of `--mix`: in the step `general` 0.65 × 0.38 / 0.80 ≈ 31 %. The cost: one more network decides on
+  all the past rows. The step `general` pins `itS27_4`, the exam's opponent in the game; the training seeds stay random
+  (`TRAIN_SEEDS`), the exam's seeds only in [the exam's proxy](#the-exams-proxy).
 - **A stall sensor.** Every snapshot prints the pool's line: its size, the versions above p 5 %, the five
   most probable with q, p and age in updates; the same in the log (`pool`). A steep distribution (only the
   newest likely): the network outgrows itself fast; a flat one with old versions likely: growth stalled.
@@ -1453,6 +1463,41 @@ per opponent) flips the cross matchups — a matchup's win rate moves by up to 0
 rate on one faction by 0.16 — while the fitted faction edge takes it (−0.70 → +0.72) and the overall
 rating moves by 0.03 (its interval ±0.12).
 
+### The exam's proxy
+
+`tools/nn/train/exam_sim.py`: the game's exam repeated in the simulator. The network plays the exam's network
+(`--enemy`, default `build/v2/itS27_4.pt`) on the exam's 6 seeds (`SEEDS`, armies v2) with each army: **base** - our
+network on side 1 (army 1), side 2 attacks; **swap** - ours on side 2 (army 2), side 1 attacks. Our network always
+defends, as in `nn-arena`. Each battle R times (default 8): 12 R battles in all. Both networks' orders are sampled,
+the limit is 3600 s, the game's cadence, the simulator with the fighters (as the training with `--fighters`).
+
+How: `evaluate.play(seeds=…, armies="v2", defend=True)`. Every seed lies in the bank 2R times in a row;
+`scenes.Generated` alternates the attacker by the place in the bank, and the learner's side is the battle's defender.
+That gives R base and R swap battles a seed without touching the simulator's version files.
+
+Read like the 12-battle exam: per seed the win share on each side; the seed's pair 2-0 when both shares are above 0.5,
+0-2 when both are below, else 1-1; the expected 2-0 / 0-2 of one exam (the sums of p_base · p_swap and
+(1 − p_base)(1 − p_swap) over the seeds: steadier than the pairs by the majority); wins per 12 battles; the trade
+((enemy gold destroyed − own gold lost) / budget), its mean ± 95 %.
+
+The row of the evaluation's table (the skill block, `trend.md`; `report.json` → `skill.exam`): `exam vs itS27_4
+(fighters, 6 seeds x 2 sides x R 8, we defend) … | 2/4/0 (exp 2.4/0.1), 8.3/12, +0.082 ± 0.040` - the pairs
+2-0/1-1/0-2 (expected 2-0/0-2), the wins per 12, the trade. In `test5` it is the profile `exam`: not part of `full`,
+only when named (`mandatory,exam`); computed at the step's last point only (`--exam-at last`: the next step takes it as
+its "before"; `all`: at every point), `--exam-r` (8), `--exam-enemy`. In [the run card](workflow.md#the-run-card-toolsopscardpy)
+the rows of the trade and of the wins / pairs where the proxy was played. On its own on a finished point (container):
+
+    python -m tools.nn.train.exam_sim build/nn-train/test5/g23_general/m40.pt --R 8 --out build/exam_sim
+
+The calibration by three points of the game (`build/diag_exam_sim/notes.md`, with the fighters, R 4): the game's order
+- g19 m20 (game 3/3/0, +0.119; simulator 0.69 wins, +0.082) ≈ g23 m40 (game 3/3/0, +0.071; 0.71, +0.081) > g22 m30
+(game 0/3/3, −0.126; 0.56, +0.016) > the mirror itS27_4 against itself (0.54, −0.015). The gaps are compressed (+0.065
+of trade against +0.2 in the game), hence R 8 (~90 battles: such a gap shows at 95 %). The "zero" is not 50 %: in the
+simulator the defender wins more often (the mirror 0.54-0.56). The plain simulator (no fighters) puts g23 at g22's
+level - wrong, so the proxy runs with the fighters. The cost: ~7 min a point at R 8 on the GPU (by the analysis'
+measurements: R 2 in one process 409 s, 4 points of R 4 in parallel 815 s; the fighters' battles run without a CUDA
+graph, a battle at the limit runs all 3600 s).
+
 ### Liveliness
 
 Units that change orders and targets too often look artificial. Measured only (no reward), per
@@ -1865,5 +1910,11 @@ used, the floors up / down), the head reset (collapsed heads wide again, the kin
 into the leashes, Adam forgets), a sector floor widens it in an update, `run.py` with the reset and the floors, the
 weights in the checkpoint.
 `tests/tools/test_nn_league_pool.py` (torch): a version drawn ∝ e^q, a new version with the highest q, a win lowers q
-by η / (N p), the pool goes on from `q.json`, a running battle keeps its slot's version, Adam's state into the
-checkpoint and back, a second part goes on with the pool, Adam and the entropy decay.
+by η / (N p), the pool goes on from `q.json`, new pools in other folders draw differently (one folder the same), a
+running battle keeps its slot's version, the pinned slot takes its share of the starting battles (0 and 1; 0.65 over
+200 battles), its battles are `pinned/…`, it stays outside the pool (`run.py --past-pin`), Adam's state into the
+checkpoint and back, a second part goes on with the pool, Adam and the entropy decay. `tests/tools/test_nn_exam_sim.py`
+(numpy; the battles torch): the base / swap layout of the bank, the pairs 2-0 / 1-1 / 0-2 and the expected pairs, the
+row in the skill block and in the card only where the proxy was played (without the profile the table is as before),
+`evaluate.play` with `seeds`, `armies`, `defend`, `exam_sim.play` on a tiny network, `test5` computes the proxy only with
+the profile `exam` and at the last point.

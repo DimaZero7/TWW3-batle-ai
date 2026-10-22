@@ -15,10 +15,15 @@ from tools.ops import card, gapcard, step
 # --- profiles ---------------------------------------------------------------------------------------
 
 class TestProfiles:
-    def test_full_is_every_profile_and_mandatory_none(self):
-        assert profiles.parse("full", profiles.TEST5) == profiles.TEST5
+    def test_full_is_every_profile_but_the_opt_in_ones_and_mandatory_none(self):
+        plain = tuple(p for p in profiles.TEST5 if p not in profiles.OPT_IN)
+        assert "exam" in profiles.TEST5 and "exam" in profiles.OPT_IN
+        assert profiles.parse("full", profiles.TEST5) == plain
+        assert profiles.parse("full,exam", profiles.TEST5) == profiles.TEST5
+        assert profiles.parse("mandatory,exam", profiles.TEST5) == ("exam",)
         assert profiles.parse("mandatory", profiles.TEST5) == ()
         assert profiles.parse("", profiles.TEST5) == () and profiles.parse(None, profiles.GAME) == ()
+        assert profiles.parse("full", profiles.GAME) == profiles.GAME                 # no opt-in profile there
 
     def test_a_list_keeps_the_known_order_and_takes_aliases(self):
         got = profiles.parse("drills, shooters,transfer", profiles.TEST5, profiles.TEST5_ALIASES)
@@ -30,9 +35,15 @@ class TestProfiles:
             profiles.parse("drils", profiles.TEST5)
 
     def test_text_says_full_or_the_mandatory_set_plus_the_chosen(self):
-        assert profiles.text(profiles.TEST5, profiles.TEST5) == "full"
+        plain = profiles.parse("full", profiles.TEST5)
+        assert profiles.text(plain, profiles.TEST5) == "full"
+        assert profiles.text(profiles.TEST5, profiles.TEST5) == "full+exam"
         assert profiles.text((), profiles.TEST5) == "mandatory"
         assert profiles.text(("fatigue", "drills"), profiles.TEST5) == "mandatory+fatigue+drills"
+        assert profiles.text(("exam",), profiles.TEST5) == "mandatory+exam"
+        assert profiles.text(profiles.GAME, profiles.GAME) == "full"
+        for chosen in (plain, profiles.TEST5, ("exam",), ("drills", "exam")):           # parse reads the text back
+            assert profiles.parse(profiles.text(chosen, profiles.TEST5), profiles.TEST5) == chosen
 
     def test_the_adaptive_teachers_need_their_blocks(self):
         assert set(profiles.test5_needs("auto", True)) == {"drills", "transfer"}

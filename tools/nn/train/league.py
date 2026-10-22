@@ -117,7 +117,8 @@ class Pool:
 
     The pool's state (versions, q, the clock in updates, games) is root/q.json: a pool folder shared by the parts of
     a night (run.py --pool-dir) carries on where the last part left it. Paths inside the project are stored
-    relative to it (the container mounts the project elsewhere)."""
+    relative to it (the container mounts the project elsewhere). The draws come from the seed, the folder (key) and
+    the state: two new pools in different folders draw differently, the same folder the same."""
 
     STATE = "q.json"
 
@@ -132,7 +133,10 @@ class Pool:
             data = json.loads(state.read_text(encoding="utf-8"))
             self.entries = [dict(e) for e in data["entries"]]
             self.clock = int(data.get("clock", 0))
-        self.rng = random.Random(f"{seed}-{len(self.entries)}-{self.clock}")
+        # the draws from the seed, the pool's folder and its state: every step of a chain has a new folder and draws
+        # its own sequence (from "seed-size-clock" alone every new pool drew the same one: the same versions at the
+        # same updates, and two of the three extras never played); the same folder draws the same again
+        self.rng = random.Random(f"{seed}-{self.key(self.root)}-{len(self.entries)}-{self.clock}")
 
     def __len__(self):
         return len(self.entries)

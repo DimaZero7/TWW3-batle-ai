@@ -31,10 +31,10 @@
   },
   "steps": {
     "general": {
-      "_comment": "S28 skeleton (docs/en/training/general.md): the general on the unit network of line S27 (from build/v2/itS27_4.pt: --from build/v2/itS27_4.pt). The options of line S27 (build/steps/v2_iterW.sh + train_extra_S.txt: the reward v2, the v2 armies, the ability branches and their own signal, the fighters lab, the pool of S nets) over test5's protocol (its --small, lr, entropy and anchor undone), and the general: --general and its sizes. The evaluations: the mandatory set only (rating, pair gold, own lord deaths); the general's own numbers are in the run's log.jsonl (\"general\").",
+      "_comment": "S28 skeleton (docs/en/training/general.md): the general on the unit network of line S27 (from build/v2/itS27_4.pt: --from build/v2/itS27_4.pt). The options of line S27 (build/steps/v2_iterW.sh + train_extra_S.txt: the reward v2, the v2 armies, the ability branches and their own signal, the fighters lab, the pool of S nets) over test5's protocol (its --small, lr, entropy and anchor undone), and the general: --general and its sizes. The evaluations: the mandatory set (rating, pair gold, own lord deaths) and the exam's proxy at the step's last point (profile exam: the network against itS27_4 on the exam's 6 seeds, defending, fighters lab; tools/nn/train/exam_sim.py); the general's own numbers are in the run's log.jsonl (\"general\"). itS27_4 (the exam's opponent) is pinned in a past slot of its own: 0.65 of the past battles (~31 % of all; run.py --past-pin), apart from the pool.",
       "minutes": 30,
       "every": 10,
-      "profile": "mandatory",
+      "profile": "mandatory,exam",
       "drop": [
         "anchor-roll",
         "lord-rout",
@@ -56,6 +56,8 @@
         "snapshot-every": 20,
         "pool": 12,
         "pool-extra": "build/v2/itS26_15.pt,build/v2/itS25_1.pt,build/v2/itS26_5.pt",
+        "past-pin": "build/v2/itS27_4.pt",
+        "past-pin-share": 0.65,
         "mix": {
           "self": 0.35,
           "past": 0.38,

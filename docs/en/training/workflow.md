@@ -33,8 +33,8 @@ overrides one, `--drop key` removes one, options after `--` are appended as give
 last value of a repeated option). The container is `orch-<label>`; `--gpu-duty` (1.0; 0.6 in game mode) sits in the
 options file. The tool prints the two-line script (or writes it with `--write`), the init and
 critic it chose, whether the references' cache (the script baselines and the drill check scripts)
-will hit, and the expected wall time: training + (points + 2) evaluations of ~3.3 min (+ ~10 min on a
-cache miss; ahead of it: [`tools.ops.baselines`](#the-baselines-cache-and-the-canary)). It runs
+will hit, and the expected wall time: training + (points + 2) evaluations of ~3.3 min (+ ~7 min of the exam's proxy
+with the profile `exam`; + ~10 min on a cache miss; ahead of it: [`tools.ops.baselines`](#the-baselines-cache-and-the-canary)). It runs
 nothing: the orchestrator starts the script in the background and waits on its log. `--profile`
 (default: the options file's `test5.profile`, else `full`) goes to `test5`: which metrics each
 evaluation computes ([metric profiles](#metric-profiles)).
@@ -43,7 +43,8 @@ evaluation computes ([metric profiles](#metric-profiles)).
 is also the `--reference` and the `--critic-init` (its own critic and Adam). `--step NAME` takes a named step of the
 options file's `steps`: its `options` over the standing ones, `drop` removes options, `minutes`, `every`, `profile`,
 `canary` replace `test5`'s; `--set` / `--drop` come after it. There is the step `general` now — the general on line
-S27's unit network ([the general](general.md#running-it)).
+S27's unit network ([the general](general.md#running-it)): the profile `mandatory,exam` (the exam's proxy at the last
+point), the pinned opponent `itS27_4` (`past-pin`, `past-pin-share` 0.65).
 
 The options file is outside `config/nn` on purpose: that folder is part of the simulator's
 version (below), and an edit there would make the baselines miss.
@@ -58,7 +59,9 @@ better; network / `ai_like`), the teachers' shares, own lord dead, the kinds hol
 missile time in melee, timeouts, the evaluation's seconds (a cache miss shows here: ~500–600 s
 instead of ~190), the KL distance from the start. The last column is the change from the first
 point to the last, marked `*` beyond the noise (two standard errors where the number has one:
-rating, pair gold, drill wins, lord deaths; |change| ≥ 0.05 otherwise). Below: anomalies (a rating
+rating, pair gold, drill wins, lord deaths; |change| ≥ 0.05 otherwise). Where [the exam's proxy](training.md#the-exams-proxy)
+was played, two more rows: the trade against `itS27_4` (± 95 %) and the wins per 12 with the pairs 2-0/1-1/0-2 ("-" at
+the other points). Below: anomalies (a rating
 fall beyond noise between two points, the move share or lord deaths ×1.5, timeouts above 5 %, a
 drill's win falling ≥ 0.15), the capacity verdict, the training's minutes and updates. `--prev`
 adds the previous step's end point and the change from it; `--json` the data.
@@ -78,9 +81,9 @@ Every evaluation used to compute everything. Now a small **mandatory set** is al
 the rest by profiles chosen for the run's question (`tools/nn/train/profiles.py`). What a metric
 means does not depend on the profile: the profile only says whether it is computed.
 
-| Where | Always (mandatory) | Profiles (`--profile a,b`; `full` all, `mandatory` none) |
+| Where | Always (mandatory) | Profiles (`--profile a,b`; `full` all but the ones named only on their own, `mandatory` none) |
 |---|---|---|
-| `test5` (and `tools.ops.step --profile`) | the rating, pair gold against each script (with the script baselines), own lord deaths, wins and gold, order kinds | `behaviour` (alias `shooters`: missile units in melee, flanks, piles, abilities), `liveliness`, `fatigue` (the share of own units' time by fatigue state; the run share of move orders far from the fight), `transfer`, `drills`, `capacity`; default `full` |
+| `test5` (and `tools.ops.step --profile`) | the rating, pair gold against each script (with the script baselines), own lord deaths, wins and gold, order kinds | `behaviour` (alias `shooters`: missile units in melee, flanks, piles, abilities), `liveliness`, `fatigue` (the share of own units' time by fatigue state; the run share of move orders far from the fight), `transfer`, `drills`, `capacity`; default `full`. Only when named (not part of `full`): `exam` - [the exam's proxy](training.md#the-exams-proxy), ~7 min, at the step's last point (`--exam-at`), e.g. `mandatory,exam` or `full,exam` |
 | `python -m tools.nn.gate summary <folder> --profile …` | outcomes, pairs, pair gold, own lord deaths (from the recordings) | `liveliness` (default), `routs`, `lords`, `fatigue`, `activity`, `shooters`, `wrap` — each recording's numbers (as in the gap card) |
 | `tools.ops.gapcard` | win, trade, own and enemy gold lost, own loss and trade 30 s before the end, own army destroyed by the end, own lord death, battle length | `routs`, `lords`, `fatigue`, `activity`, `shooters`, `wrap`; default `full` |
 

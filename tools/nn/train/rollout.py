@@ -35,6 +35,9 @@ so its version never changes mid-battle and its memory (GRU) runs on. The traine
 slot that holds no battle (slot_counts) and makes it the active one (activate). Every slot in use decides on all past
 rows (one batch shape for the compiled step) and each row takes its own slot's orders; slot_stats counts the ended
 games and the learner's wins per slot (the pool's quality scores, league.Pool). One slot = the old single version.
+A pinned slot (pin_slot; run.py --past-pin): one more slot holds a fixed version for the whole run, apart from the pool
+(no quality score, never replaced); a past battle that starts takes it with probability pin_share, else the active
+slot; its battles count as "pinned" (take_stats), the pool's as "past".
 
 The drills' teacher (teach= {drill name: its skilled script}; tools/nn/train/drills/teach.py): at every
 decision the script labels the learner's units in that drill's battles on the same state (it does
@@ -99,9 +102,10 @@ MEMORY = ("last_x", "last_z", "last_t", "seen", "dead", "prev_x", "prev_z", "pre
           "last_rout_t", "lord_dead_t", "prev_hp", "hit_t", "prev_gold", "rate", "rate_t",
           "prev_ammo", "volley_t", "ord_kind", "ord_tgt", "ord_x", "ord_z", "ord_t")
 ROLES = ("attack", "defend")
-# Outcome counters: the opponents, and the untrained network as "past" on its own.
-STAT_NAMES = league.OPPONENTS + ("untrained",)
+# Outcome counters: the opponents, the untrained network as "past" on its own, the pinned past version (pin_slot) too.
+STAT_NAMES = league.OPPONENTS + ("untrained", "pinned")
 UNTRAINED = len(league.OPPONENTS) + 1
+PINNED = len(league.OPPONENTS) + 2
 # A teacher with a share of 0 runs its script every this many decisions only (the agreement is still measured)
 TEACH_PROBE = 8
 
@@ -446,7 +450,10 @@ class Battles:
         self.past_slots = max(1, int(past_slots))
         self.past = [None] * self.past_slots                  # the slots' actors
         self.slot_untrained = torch.zeros(self.past_slots, dtype=torch.bool, device=self.device)
+        self.slot_pinned = torch.zeros(self.past_slots, dtype=torch.bool, device=self.device)
         self.slot_stats = torch.zeros(self.past_slots, 2, device=self.device)      # ended games, learner wins
+        # the pinned slot (pin_slot; run.py --past-pin): its index, the share of the past battles that take it, its draws
+        self.pin, self.pin_share, self.pin_gen = None, 0.0, None
         self.active = 0
         self.slot_used = {0}                                  # slots that may hold battles (a superset, host side)
         self.is_past = (self.ctrl == league.CODE["past"]).any(1)                     # [B]
@@ -556,14 +563,43 @@ class Battles:
 
     def activate(self, slot):
         """New battles against a past version take this slot from now on (the running ones keep theirs)."""
+        if self.pin is not None and int(slot) == self.pin:
+            raise ValueError(f"slot {slot} is the pinned one")
         self.active = int(slot)
         self.slot_used.add(self.active)
 
+    def pin_slot(self, slot, actor, share, seed=0):
+        """A pinned past version (run.py --past-pin): slot `slot` holds `actor` for the whole run, apart from the pool's
+        slots (never the active one, never changed); a past battle that starts takes it with probability `share`, else
+        the active slot (a draw of its own generator, from `seed`). Its battles count as "pinned" in take_stats, not
+        "past". Before the first step: the battles that start now draw too."""
+        k = int(slot)
+        if k == self.active or not 0 <= k < self.past_slots:
+            raise ValueError(f"pinned slot {k}: not a slot apart from the active one ({self.past_slots} slots)")
+        if not 0.0 <= float(share) <= 1.0:
+            raise ValueError(f"pinned share {share} not in [0, 1]")
+        self.set_past(actor, slot=k)
+        self.slot_pinned[k] = True
+        self.pin, self.pin_share = k, float(share)
+        self.pin_gen = torch.Generator(device=self.device).manual_seed(int(seed) + 7919)
+        self.slot_used.add(k)
+        self.battle_slot = self._restart_slot(torch.ones(self.B, dtype=torch.bool, device=self.device))
+
+    def _restart_slot(self, finished):
+        """[B] the past slot of every battle once the battles `finished` (re)start: the active slot, or the pinned one
+        with probability pin_share (a draw for every battle; only the past battles read their slot)."""
+        new = torch.full_like(self.battle_slot, self.active)
+        if self.pin is not None:
+            take = torch.rand(self.B, generator=self.pin_gen, device=self.device) < self.pin_share
+            new = torch.where(take, torch.full_like(new, self.pin), new)
+        return torch.where(finished, new, self.battle_slot)
+
     def slot_counts(self):
-        """[slots] past battles each slot holds now (reads the GPU); slots without any but the active one are
-        dropped from those the step computes."""
+        """[slots] past battles each slot holds now (reads the GPU); slots without any but the active one (and the
+        pinned one) are dropped from those the step computes."""
         n = torch.bincount(self.battle_slot[self.is_past], minlength=self.past_slots).tolist()
-        self.slot_used = {k for k, c in enumerate(n) if c > 0} | {self.active}
+        self.slot_used = {k for k, c in enumerate(n) if c > 0} | {self.active} | (
+            set() if self.pin is None else {self.pin})
         return n
 
     def take_slot_stats(self):
@@ -985,6 +1021,7 @@ class Battles:
         past = self.row_opp == league.CODE["past"]
         slot = self.battle_slot[rb]
         code = torch.where(past & self.slot_untrained[slot], torch.full_like(self.row_opp, UNTRAINED), self.row_opp)
+        code = torch.where(past & self.slot_pinned[slot], torch.full_like(self.row_opp, PINNED), code)
         d = d_rows.float()
         dp = d * past.float()
         self.slot_stats.index_add_(0, slot, torch.stack([dp, dp * won], 1))
@@ -1086,9 +1123,10 @@ class Battles:
         idx = restart_rows(self.st, self.setup, self.source, finished, self.want)
         if self.men is not None:
             idx = self._fit_men(finished, idx)
+        # a restarting past battle takes the active slot (or the pinned one: pin_slot)
+        slot = self._restart_slot(finished)
         if self.general_rt is not None:
-            # the general's deployment (before the randomisation); a restarting past battle takes the active slot
-            slot = torch.where(finished, torch.full_like(self.battle_slot, self.active), self.battle_slot)
+            # the general's deployment (before the randomisation)
             self.battle_slot = slot
             self.general_rt.start_battles(self, finished)
         self.last_hit = torch.where(finished, torch.full_like(self.last_hit, -1.0), self.last_hit)
@@ -1097,7 +1135,7 @@ class Battles:
         sim_magic.leave_scripted(self.st.u, self.by_rule)     # the scripts' sides field no caster
         mcommit.reset(self.cstate, torch.cat([finished, finished]))
         self.bank_row = torch.where(finished, idx, self.bank_row)
-        self.battle_slot = torch.where(finished, torch.full_like(self.battle_slot, self.active), self.battle_slot)
+        self.battle_slot = slot
         randomise.apply(self.st, finished, self.spread, self.gen)
         if self.dr is not None:
             uncertain.apply(self.st, finished, self.dr, self.gen)

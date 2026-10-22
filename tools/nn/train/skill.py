@@ -24,7 +24,7 @@ matchups it happened to get. Measures that take the matchup out:
 """
 import numpy as np
 
-from tools.nn.train import matchups
+from tools.nn.train import exam_sim, matchups
 
 Z95 = 1.959964
 PRIOR_SD = 3.0          # the ridge: a Gaussian prior (logits) on every parameter, against perfect separation
@@ -244,8 +244,11 @@ def _f(v, fmt):
 
 def summary(res):
     """The compact skill block of one evaluation (evaluate.play's result): {"rating": fit(), "pairs":
-    {opp: pairs()}, "pair_gold": {opp: pair_gold()}, "advantage": {opp: advantage()}, "margin": {opp: {matchup: mean}}}."""
+    {opp: pairs()}, "pair_gold": {opp: pair_gold()}, "advantage": {opp: advantage()}, "margin": {opp: {matchup: mean}}},
+    and "exam" (the exam's proxy, tools/nn/train/exam_sim.py summary without the per-battle lists) when it was played."""
     out = {"rating": res.get("skill"), "pairs": {}, "pair_gold": {}, "advantage": {}, "margin": {}}
+    if res.get("exam"):
+        out["exam"] = {k: v for k, v in res["exam"].items() if k != "per_battle"}
     for opp, o in res.get("by_opponent", {}).items():
         if o.get("pairs"):
             out["pairs"][opp] = o["pairs"]
@@ -270,6 +273,9 @@ def rows(points):
         e = r.get("overall") if opp is None else r.get("by_opponent", {}).get(opp)
         return "-" if not e else f"{e['value']:+.2f} ± {Z95 * e['se']:.2f}"
     out.append(("rating, overall (logit, ± 95%)", [rating(p) for p in points]))
+    if any(p.get("exam") for p in points):            # the exam's proxy (exam_sim.py): only where it was played
+        last = next(p["exam"] for p in reversed(points) if p.get("exam"))
+        out.append((exam_sim.title(last), [exam_sim.cell(p.get("exam")) for p in points]))
     opps = list(dict.fromkeys(o for p in points for o in (p.get("rating") or {}).get("by_opponent", {})))
     for o in opps:
         out.append((f"rating, {o}", [rating(p, o) for p in points]))

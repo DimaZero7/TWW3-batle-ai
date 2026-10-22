@@ -12,7 +12,8 @@ armies, / budget; positive: we trade better), the exchange vs ai_like, each dril
 skilled script's beside), each drill's TRANSFER to normal battles (APPLIED share, higher is better,
 and MISTAKE share, lower is better, network / ai_like), the teachers' shares, own lord dead, the
 order kinds hold / move / attack, missile time in melee, timeouts, the evaluation's seconds, the KL
-distance from the start. The last column is the change from the first point to the last: a mark
+distance from the start; where the exam's proxy was played (profile exam, tools/nn/train/exam_sim.py) its trade
+(± 95 %), wins per 12 and pairs 2-0/1-1/0-2. The last column is the change from the first point to the last: a mark
 when it is beyond the noise (two standard errors where the numbers carry one; |change| >= 0.05
 otherwise, marked *); anomalies (a collapse between points, the move share x1.5, lord deaths x1.5, timeouts)
 are listed under the table; --prev adds the previous step's end point and the change from it. The
@@ -31,7 +32,7 @@ from tools.nn.train import skill
 
 OPPONENTS = ("ai_like", "nearest", "hold_shoot")
 MOVE_X, LORD_X, TIMEOUTS, PLAIN = 1.5, 1.5, 0.05, 0.05    # anomaly thresholds; the plain change threshold
-NO_MARK = ("seconds", "kl", "kinds")                      # rows whose change is shown but never marked
+NO_MARK = ("seconds", "kl", "kinds", "exam_wins")         # rows whose change is shown but never marked
 Z = 2.0
 
 
@@ -118,6 +119,14 @@ def rows(point):
         g = _g(s, "pair_gold", opp, "pair_gold")
         out.append((f"gold_{opp}", f"pair gold vs {opp} (/ budget, ± 95%)", _g(g, "value"), _g(g, "se"), "{:+.3f}"))
     out.append(("exchange", "pair exchange vs ai_like", _g(s, "pair_gold", "ai_like", "exchange", "value"), None, "x{:.2f}"))
+    e = s.get("exam")
+    if e and e.get("battles"):                   # the exam's proxy (exam_sim.py): only at the points that played it
+        enemy = Path(e.get("enemy") or "itS27_4").stem
+        out.append(("exam_trade", f"exam vs {enemy}: trade (sim, we defend, ± 95%)", _g(e, "trade", "value"),
+                    _g(e, "trade", "se"), "{:+.3f}"))
+        a, b, c = e["pairs"]
+        out.append(("exam_wins", f"exam vs {enemy}: wins /12 (pairs 2-0/1-1/0-2)", e.get("wins12"), None,
+                    "{:.1f}" + f" ({a}/{b}/{c})"))
     for d, v in (point.get("drills") or {}).items():
         sk = _g(v, "scripts", "skilled", "win_rate")
         out.append((f"drill_{d}", f"drill {d}: win" + (f" (skilled {sk:.2f})" if sk is not None else ""),
@@ -221,7 +230,11 @@ def card(folder, prev=None):
              "| number | " + " | ".join(heads) + " | change first -> last" + (" | vs prev end" if prev else "") + " |",
              "|---" * (len(heads) + 2 + bool(prev)) + "|"]
     data = []
-    for i, (key, title, _, _, f) in enumerate(table[0]):
+    # every row of any point, in the order of the point with the most (a row only some points have - the exam's proxy -
+    # shows "-" elsewhere)
+    order = list(dict.fromkeys([r[0] for r in max(table, key=len)] + [r[0] for t in table for r in t]))
+    first = {r[0]: r for t in reversed(table) for r in t}
+    for i, (key, title, _, _, f) in enumerate(first[k] for k in order):
         cells = [next((r for r in t if r[0] == key), None) for t in table]
         vals = [fmt(c[2], c[3], c[4]) if c else "-" for c in cells]
         a, b = cells[0], cells[-1]

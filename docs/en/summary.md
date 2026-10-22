@@ -309,6 +309,15 @@ the companion with the same code (`tools/nn/companion/general.py`): the plan at 
 time, the unit task every decision, the deployment the bridge's; every plan is a log line. Architecture:
 `design/general/index.html`; code: `tools/nn/general/`; [details](training/general.md).
 
+**The step `general` and the exam.** The exam's opponent `itS27_4` is pinned in a slot of its own outside the pool
+(`--past-pin`, `--past-pin-share 0.65`: ~31 % of all battles, `pinned/…` in the log); the training seeds are random. The
+step's evaluation: the mandatory set and, at the last point, **the exam's proxy** (`exam_sim.py`, the profile `exam`):
+the network against `itS27_4` on the exam's 6 seeds, with both armies, always defending, R 8 (96 battles), with the
+fighters; the row "pairs 2-0/1-1/0-2, wins per 12, trade ± 95 %", ~7 min. With the fighters the proxy repeated the order
+of three points of the game (g19 m20 ≈ g23 m40 > g22 m30 > the mirror), the plain simulator did not
+([the exam's proxy](training/training.md#the-exams-proxy)). The pool's random draws start from its folder too: every step
+its own (with one seed every step would draw the same, and some networks of `--pool-extra` would never play).
+
 ## Training
 
 **How it runs.** PPO as MAPPO: each unit is an agent, a side's units share its advantage, the critic sees

@@ -62,6 +62,13 @@ transfer). Each evaluation keeps its "profile"; report.json too.
 
     DOCK_NAME=t0-x bash tools/nn/dock.sh tools.nn.train.test5 --label x --profile mandatory -- ...
 
+The exam's proxy (--profile ...,exam; opt-in, "full" leaves it out; tools/nn/train/exam_sim.py): the network against
+--exam-enemy (default itS27_4, the game's exam opponent) on the exam's 6 seeds, armies v2, both armies, --exam-r battles
+each (12 R in all), our network defending, in the fighters lab; ~7 min a point at R 8. --exam-at last (default): only in
+the step's final evaluation ("after"; the next step's "before" reuses it), all: at every point. A row of the skill
+block: "exam vs itS27_4 ...: pairs 2-0/1-1/0-2 (expected), wins /12, trade ± 95%" (report.json: skill.exam; the
+evaluation: "exam" with the per-battle lists).
+
 A trend run: --updates 0 --minutes M --every K trains M minutes and runs the same evaluation every K
 minutes of training too (its time not counted), keeping each network (m<minute>.pt) and evaluation
 (eval_m<minute>.json); report.json and trend.md then hold the table minute 0 / K / ... / M:
@@ -81,7 +88,7 @@ from pathlib import Path
 import torch
 
 from tools.nn.train import cadence as cad
-from tools.nn.train import capacity, checkpoint, drills, evaluate, matchups, profiles, refs, run, skill, teach_auto
+from tools.nn.train import capacity, checkpoint, drills, evaluate, exam_sim, matchups, profiles, refs, run, skill, teach_auto
 from tools.nn.train import version
 
 OUT = checkpoint.DIR / "test5"
@@ -158,9 +165,16 @@ def gpu_lock(label, path=LOCK, poll_s=30.0, gap_s=60.0):
 
 
 def chosen(args):
-    """The metric profiles of this run (args.profiles, set by main(); without it every profile)."""
+    """The metric profiles of this run (args.profiles, set by main(); without it "full": every profile but the opt-in
+    ones, profiles.OPT_IN)."""
     p = getattr(args, "profiles", None)
-    return profiles.TEST5 if p is None else p
+    return profiles.parse(profiles.FULL, profiles.TEST5) if p is None else p
+
+
+def exam_args(args):
+    """(R, enemy, at) of the exam's proxy (test5 --exam-r, --exam-enemy, --exam-at; exam_sim's defaults without)."""
+    return (int(getattr(args, "exam_r", exam_sim.R)), str(getattr(args, "exam_enemy", exam_sim.ENEMY)),
+            getattr(args, "exam_at", "last"))
 
 
 def weights_hash(module):
@@ -186,6 +200,9 @@ def eval_key(actor, args, cadence):
            "cadence": cadence.meta(), "broad": drills.BROAD, "embed": drills.EMBED, "opponents": list(OPPONENTS)}
     if drills.EVAL_EXTRA:                        # a step's own drills (run.eval_drills): only then, old keys stay
         key["drills_extra"] = list(drills.EVAL_EXTRA)
+    if "exam" in prof:                           # the exam's proxy: its battles (only then, old keys stay)
+        r, enemy, _ = exam_args(args)
+        key["exam"] = {"R": r, "enemy": Path(enemy).as_posix(), "seeds": list(exam_sim.SEEDS)}
     return json.loads(json.dumps(key))                  # as it reads back from a file
 
 
@@ -207,9 +224,10 @@ def reusable(init, key):
     return None
 
 
-def evaluation(actor, args, device, cadence):
+def evaluation(actor, args, device, cadence, last=False):
     """The evaluation of every point; cadence: the training's (run.py --decide-s, --order-latency).
-    Computes the mandatory set and args.profiles (tools/nn/train/profiles.py)."""
+    Computes the mandatory set and args.profiles (tools/nn/train/profiles.py). last: the step's final evaluation
+    (the exam's proxy plays there; at every point with --exam-at all)."""
     t = time.time()
     prof = chosen(args)
     res = evaluate.play(actor, opponents=OPPONENTS, device=device, generated=args.eval, max_units=19, seed=1,
@@ -217,6 +235,11 @@ def evaluation(actor, args, device, cadence):
     if args.drill_eval and "drills" in prof:
         # the drills (tools/nn/train/drills, the verified ones): win rate and gold trade per drill
         res["drills"] = evaluate.play_drills(actor, args.drill_eval, device, cadence=cadence)
+    r, enemy, at = exam_args(args)
+    if "exam" in prof and (last or at == "all"):
+        # the exam's proxy (exam_sim.py): against itS27_4 on the exam's seeds, defending, in the fighters lab
+        res["exam"] = exam_sim.play(actor, enemy, r, device=device, cadence=cadence)
+        print(exam_sim.line(res["exam"], "point"), flush=True)
     res["seconds"] = round(time.time() - t)
     res["cadence"] = cadence.meta()
     res["profile"] = profiles.text(prof, profiles.TEST5)
@@ -584,6 +607,12 @@ def main():
     ap.add_argument("--profile", default=profiles.FULL,
                     help="metric profiles besides the mandatory set: 'mandatory', 'full' (default) or a comma list of "
                          + ", ".join(profiles.TEST5) + " (tools/nn/train/profiles.py)")
+    ap.add_argument("--exam-r", type=int, default=exam_sim.R,
+                    help="the exam's proxy (--profile ...,exam): battles per exam seed and side (12 R in all)")
+    ap.add_argument("--exam-enemy", default=exam_sim.ENEMY, help="the exam's proxy: the opponent's checkpoint")
+    ap.add_argument("--exam-at", default="last", choices=("last", "all"),
+                    help="the exam's proxy: in the step's final evaluation only (last; the next step's 'before' "
+                         "reuses it) or at every point (all, ~7 min each at R 8)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args, rest = ap.parse_known_args()
     try:
@@ -711,7 +740,7 @@ def test(args, rest):
     # after.json, which has it)
     drills.HEAVY_ON[0] = True
     try:
-        after = evaluation(actor, args, device, cadence)
+        after = evaluation(actor, args, device, cadence, last=True)
     finally:
         drills.HEAVY_ON[0] = False
     after["distance"] = distance(run_dir, last[0], summary["updates"])

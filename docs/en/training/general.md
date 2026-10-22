@@ -764,7 +764,11 @@ shape (once a run).
 The chain's step `general` in `config/train-chain.json` (`steps.general`): the options of line S27
 (`build/steps/v2_iterW.sh` + `train_extra_S.txt`: reward v2, armies v2, ability branches with their own signal, the
 fighters lab, the pool of S networks) over `test5`'s protocol (its `--small`, step size, entropy and anchor undone),
-and the general. The evaluations: the mandatory set only. The command from the unit network's last point:
+and the general. The exam's opponent `itS27_4` is pinned in a slot of its own: 0.65 of the past battles, ~31 % of all
+(`--past-pin`, outside the pool: [the pinned opponent](training.md#past-versions)). The evaluations: the mandatory set and,
+at the step's last point, [the exam's proxy](training.md#the-exams-proxy) (the profile `mandatory,exam`: the network
+against `itS27_4` on the exam's 6 seeds, defending, with the fighters; ~7 min). The command from the unit network's last
+point:
 
 ```bash
 .venv/Scripts/python -m tools.ops.step --label g1_general --from build/v2/itS27_4.pt --step general

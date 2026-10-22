@@ -38,6 +38,7 @@ RUNS = project.BUILD / "nn-train" / "runs"
 EVAL_S = 200.0            # one full evaluation with the baselines cached (n3: 194 s)
 MISS_S = 600.0            # extra on a reference cache miss: tools/nn/train/refs.py on the CPU (~10 min, 8 cores)
 STARTUP_S = 120.0         # the container, the compile warm-up
+EXAM_S = 420.0            # the exam's proxy (profile exam, tools/nn/train/exam_sim.py): once, in the final evaluation
 
 
 def load_chain(path=CHAIN):
@@ -129,10 +130,11 @@ def baseline_cache():
     return v, missing
 
 
-def wall_minutes(minutes, every, miss):
-    """A rough end-to-end estimate: training + the evaluations (before, every point, after) + start-up."""
+def wall_minutes(minutes, every, miss, exam=0):
+    """A rough end-to-end estimate: training + the evaluations (before, every point, after) + the exam's proxy
+    (`exam` times) + start-up."""
     evals = (int(minutes / every) if every else 0) + 2
-    return (minutes * 60 + evals * EVAL_S + (MISS_S if miss else 0) + STARTUP_S) / 60, evals
+    return (minutes * 60 + evals * EVAL_S + exam * EXAM_S + (MISS_S if miss else 0) + STARTUP_S) / 60, evals
 
 
 def named_step(chain, name):
@@ -212,8 +214,10 @@ def main(argv=None):
                   f"on the CPU first (~{MISS_S / 60:.0f} min); ahead of it: .venv/Scripts/python -m tools.ops.baselines --run")
         else:
             print(f"baseline cache: hit (simulator version {version})")
-    wall, evals = wall_minutes(info["minutes"], info["every"], bool(missing))
+    exam = int("exam" in profiles.parse(info["profile"], profiles.TEST5, profiles.TEST5_ALIASES))
+    wall, evals = wall_minutes(info["minutes"], info["every"], bool(missing), exam)
     print(f"expected wall time ~{wall:.0f} min: {info['minutes']:g} min training + {evals} evaluations x ~{EVAL_S / 60:.1f} min"
+          + (f" + the exam's proxy ~{EXAM_S / 60:.0f} min" if exam else "")
           + (f" + ~{MISS_S / 60:.0f} min of script references" if missing else ""))
     if args.write:
         path = Path(args.write)

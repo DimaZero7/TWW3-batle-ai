@@ -102,6 +102,18 @@ class TestPool:
         assert again.top(1)[0][0] == "v2.pt" or again.find(tmp_path / "v2.pt")["added"] == 2
         assert "pool 3 versions (clock 2)" in again.text()
 
+    def test_new_pools_in_other_folders_draw_other_versions_and_one_folder_the_same(self, tmp_path):
+        vs = files(tmp_path, 4)
+
+        def draws(folder):
+            pool = league.Pool(folder, size=8, seed=0)          # a new pool (no q.json): the clock 0, no entries
+            for p in vs:
+                pool.add(p)
+            return [pool.sample()[0].name for _ in range(12)]
+        a = draws(tmp_path / "runs" / "test5_a" / "pool")
+        assert draws(tmp_path / "runs" / "test5_b" / "pool") != a     # every step of a chain: its own draws
+        assert draws(tmp_path / "runs" / "test5_a" / "pool") == a     # the same folder: the same draws
+
 
 class TestSlots:
     """rollout.Battles' past slots: a battle keeps its slot's version from its start."""
@@ -160,6 +172,43 @@ class TestSlots:
         slot = env.battle_slot[env.rows_past % env.B]
         want = torch.where(slot == 0, O.HOLD, O.MOVE)[:, None].expand_as(orders.kind)
         assert bool((orders.kind[ctrl] == want[ctrl]).all())
+
+    @pytest.mark.parametrize("share", [0.0, 1.0])
+    def test_a_pinned_slot_takes_its_share_of_the_starting_past_battles(self, share):
+        lay = league.layout(4, 1, {"past": 1.0})
+        env = rollout.Battles(lay, MIRROR, params=rollout.params_with_limit(4.0), spread=randomise.NONE, past_slots=2,
+                              compile=False)
+        env.set_past(self.forced(O.HOLD, 1), slot=0)
+        env.pin_slot(1, self.forced(O.MOVE, 2), share, seed=3)
+        want = 4 if share else 0
+        assert int((env.battle_slot == 1).sum()) == want            # the battles that start now draw too
+        learner, crit = nets()
+        for _ in range(14):                                          # the 4 s limit: every battle ends and starts again
+            env.step(learner, crit)
+        assert int((env.battle_slot == 1).sum()) == want
+        counts = env.slot_counts()
+        assert counts[1] == want and 1 in env.slot_used                 # the pinned slot always computes
+        a, frame, _ = env.cur
+        orders, _ = env._act_past(a, frame)
+        ctrl = rollout.rows_of(a, env.rows_past)["ctrl"]
+        assert bool((orders.kind[ctrl] == (O.MOVE if share else O.HOLD)).all())
+        stats = env.take_stats()
+        n = {who: sum(stats.get(f"{who}/{r}", (0,))[0] for r in ("attack", "defend")) for who in ("past", "pinned")}
+        assert n["pinned" if share else "past"] >= 4 and n["past" if share else "pinned"] == 0
+        g = env.take_slot_stats()
+        assert g[1, 0] == n["pinned"] and g[0, 0] == n["past"]
+        with pytest.raises(ValueError):
+            env.activate(1)                                          # the pool never takes the pinned slot
+        with pytest.raises(ValueError):
+            env.pin_slot(0, self.forced(O.MOVE, 2), 0.5)             # the active slot cannot be pinned
+
+    def test_the_pinned_share_of_many_starting_battles(self):
+        env = rollout.Battles(league.layout(200, 1, {"past": 0.5, "nearest": 0.5}), MIRROR, past_slots=2,
+                              compile=False)
+        env.set_past(nets(1)[0], slot=0)
+        env.pin_slot(1, nets(2)[0], 0.65, seed=1)
+        share = float((env.battle_slot[env.is_past] == 1).float().mean())
+        assert 0.5 < share < 0.8 and bool(env.slot_pinned[1]) and not bool(env.slot_pinned[0])
 
     def test_one_slot_is_the_old_single_version(self):
         env = rollout.Battles(league.layout(4, 1, {"past": 0.5, "nearest": 0.5}), MIRROR, compile=False)
@@ -225,6 +274,31 @@ class TestResume:
         assert 0.003 <= rows2[0]["entropy_weight"] < rows[-1]["entropy_weight"] < 0.01   # the decay went on
         assert rows2[0]["grad_norm"] > 0                                # no warm-up: Adam and the critic go on
         assert checkpoint.train_state(out2 / "latest.pt")["state"]["chain_updates"] == 8
+
+
+    def test_a_pinned_past_version_plays_outside_the_pool(self, tmp_path, monkeypatch):
+        from tools.nn.train import run
+        actor, crit = nets()
+        init = checkpoint.save(tmp_path / "init.pt", actor, crit)
+        pin = checkpoint.save(tmp_path / "pin.pt", *nets(7))
+        monkeypatch.setattr(checkpoint, "DIR", tmp_path)
+        monkeypatch.setattr(checkpoint, "RANDOM", checkpoint.save(tmp_path / "random.pt", *nets(3)))
+        args = ["--name", "pin", "--init", str(init), "--battles", "8", "--steps", "4", "--updates", "4", "--minutes",
+                "3", "--device", "cpu", "--no-eval", "--mix", '{"past": 0.5, "nearest": 0.5}', "--limit", "6",
+                "--bank", "8", "--max-units", "4", "--past-pin", str(pin), "--past-pin-share", "1.0", "--critic-warmup", "0"]
+        _, _, out = run.train(run.parser().parse_args(args))
+        q = json.loads((out / "pool" / "q.json").read_text(encoding="utf-8"))
+        assert not any(e["path"].endswith("pin.pt") for e in q["entries"])          # not in the pool
+        assert sum(e["games"] for e in q["entries"]) == 0      # share 1: every past battle the pinned one's, no q changes
+        games = {}
+        for line in (out / "log.jsonl").read_text(encoding="utf-8").splitlines():
+            for k, g in json.loads(line)["games"].items():
+                games[k] = games.get(k, 0) + g
+        assert games.get("pinned/attack", 0) + games.get("pinned/defend", 0) > 0
+        assert not any(k.startswith("past/") for k in games) and any(k.startswith("nearest/") for k in games)
+        with pytest.raises(SystemExit):                                              # no past battles: nothing to pin
+            run.train(run.parser().parse_args(["pin2" if a == "pin" else '{"nearest": 1.0}' if a.startswith('{"past"')
+                                               else a for a in args]))
 
 
 class TestEntropyDecay:

@@ -32,7 +32,7 @@ DRILL_FILES = "tools/nn/train/drills"
 # previous step's last evaluation as its "before" only when these are the same too.
 EVAL_FILES = ("tools/nn/train/evaluate.py", "tools/nn/train/rollout.py", "tools/nn/train/behaviour.py",
               "tools/nn/train/skill.py", "tools/nn/train/matchups.py", "tools/nn/train/profiles.py",
-              "tools/nn/train/cadence.py", "tools/nn/train/league.py")
+              "tools/nn/train/cadence.py", "tools/nn/train/league.py", "tools/nn/train/exam_sim.py")
 # The baseline document's battle fields (evaluate.script_battles): lists over the pairs, in seed order.
 FIELDS = ("seed", "winner", "lost", "start", "budget", "factions", "attacker")
 

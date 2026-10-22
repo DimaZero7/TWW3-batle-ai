@@ -81,7 +81,7 @@ def combined(opponents, per_scene, n_scenes, scene_attacker=None, attack_only=()
 def play(actor, opponents=OPPONENTS, per_scene=512, past=None, device="cpu", limit_s=3600.0, greedy=False,
          seed=1, scene_list=scenes.SCENES, compile=None, hold_defend=False, generated=None, max_units=19, small=None,
          together=False, paired=True, baseline=False, compact=True, cuda_graph=True, cadence=None, measure=None,
-         fighters=None):
+         fighters=None, seeds=None, armies="v1", defend=False):
     """-> {"by_opponent": {name: {games, wins, win_rate, seconds, hp_own_lost, hp_enemy_lost, timeouts,
     gold_destroyed, gold_lost (mean gold a battle, reward.gold_sides at the end), gold_ratio (their sums'
     ratio), gold_trade (mean (destroyed - lost) / budget),
@@ -123,20 +123,30 @@ def play(actor, opponents=OPPONENTS, per_scene=512, past=None, device="cpu", lim
 
     fighters: () -> tools/nn/train/men.Men - the battles with the fighters lab's men (run.py --fighters; the hook
     installed), no CUDA graph (the lab's step has eager parts); None: the plain simulator. The baselines stay the plain
-    simulator's."""
+    simulator's.
+
+    Generated battles of other seeds and armies (the exam's proxy, tools/nn/train/exam_sim.py): seeds - the bank's seeds
+    in order instead of EVAL_SEEDS' first ones (a seed may repeat; at least as many as the battles need); armies - the
+    generator's scheme (tools/nn/armies/generate.py ARMIES; default v1, as the baselines); defend - the learner always on
+    the defender's side (as the game's exam, nn-arena; generated, not paired: scenes.Generated alternates the attacker
+    by the bank's place, so a seed twice in a row gives our network that seed's two armies, both defending). The script
+    baselines only for EVAL_SEEDS and armies v1."""
+    if defend and (paired or not generated):
+        raise ValueError("defend: generated battles, not paired (the learner's side follows the bank's attacker)")
     out = {"by_opponent": {}, "by_scene": {}, "limit_s": limit_s, "greedy": greedy, "per_scene": per_scene,
            "battles": {}, "transfer": {}}
     only = () if hold_defend else league.ATTACK_ONLY
     groups = [tuple(opponents)] if together else [(n,) for n in opponents]
     for names in groups:
         res = _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, scene_list, compile, only,
-                         generated, max_units, small, paired, compact, cuda_graph, cadence, measure, fighters)
+                         generated, max_units, small, paired, compact, cuda_graph, cadence, measure, fighters,
+                         seeds, armies, defend)
         for name, (mine, rows, per) in ((k, v) for k, v in res.items() if k != _TRANSFER):
             out["by_opponent"][name] = mine
             out["by_scene"][name] = rows
             out["battles"][name] = per
         out["transfer"] = merge_transfer(out["transfer"], res.get(_TRANSFER, {}))
-    if baseline and generated and paired and small is None:
+    if baseline and generated and paired and small is None and seeds is None and armies == "v1":
         base = baselines([n for n in opponents if n in scripts.SCRIPTS], pair_count(generated), max_units, limit_s,
                          device, compile)
         for name, b in base.items():
@@ -191,14 +201,19 @@ def _summary(sel, won, t, hp_own, hp_enemy, limit_s, lord_own=None, lord_enemy=N
     return out
 
 
-def generated_layout(source, opponent, attack_only=league.ATTACK_ONLY, rows=None):
+def generated_layout(source, opponent, attack_only=league.ATTACK_ONLY, rows=None, defend=False):
     """Battle b = bank battle b; the learner's side alternates every two battles (the bank alternates
     who attacks), so both roles and both sides come up; an attack_only opponent only defends.
-    rows: the bank rows of this opponent's battles (default: all)."""
+    rows: the bank rows of this opponent's battles (default: all). defend: the learner always on the
+    defender's side (play(defend=True))."""
     rows = np.arange(source.bank.M) if rows is None else np.asarray(rows)
     n = len(rows)
     side = 1 + (np.arange(n) // 2) % 2
-    if opponent in attack_only:
+    if defend:
+        if opponent in attack_only:
+            raise ValueError(f"defend: {opponent} only defends")
+        side = 3 - source.bank.attacker.cpu().numpy()[rows]
+    elif opponent in attack_only:
         side = source.bank.attacker.cpu().numpy()[rows]
     return league.Layout(np.zeros(n, dtype=int), side, np.full(n, league.CODE[opponent]))
 
@@ -213,6 +228,16 @@ def eval_seeds(n):
     """The first n seeds of the generator's EVAL_SEEDS."""
     from tools.nn.armies import generate
     return list(range(generate.EVAL_SEEDS.start, generate.EVAL_SEEDS.start + n))
+
+
+def seeds_of(n, seeds=None):
+    """The first n seeds of `seeds` (play(seeds=...)), else of EVAL_SEEDS."""
+    if seeds is None:
+        return eval_seeds(n)
+    seeds = [int(s) for s in seeds]
+    if len(seeds) < n:
+        raise ValueError(f"seeds: {len(seeds)} given, the battles need {n}")
+    return seeds[:n]
 
 
 def paired_order(n_pairs, n_opponents):
@@ -447,26 +472,27 @@ class Graphed:
 
 def _play_many(actor, names, per_scene, past, device, limit_s, greedy, seed, scene_list, compile, attack_only,
                generated=None, max_units=19, small=None, paired=True, compact=True, cuda_graph=True, cadence=None,
-               measure=None, fighters=None):
+               measure=None, fighters=None, seeds=None, armies="v1", defend=False):
     """{name: (result, rows by scene, per-battle lists)} of the opponents `names`, played in one batch.
-    measure, fighters: as play()'s."""
+    measure, fighters, seeds, armies, defend: as play()'s."""
     cuda_graph = cuda_graph and fighters is None
     params = rollout.params_with_limit(limit_s)
     if generated and paired:
         n_pairs = pair_count(generated)
         opp_i, pair, side_b, seed_i = paired_order(n_pairs, len(names))
-        seeds_b = np.array(eval_seeds(n_pairs))[seed_i]
+        seeds_b = np.array(seeds_of(n_pairs, seeds))[seed_i]
         source = scenes.Generated(padded(seeds_b.tolist(), small), max_units, params, device, sequential=True,
-                                  small=small)
+                                  small=small, armies=armies)
         only = np.isin(np.array(names)[opp_i], list(attack_only))
         side_b = np.where(only, source.bank.attacker.cpu().numpy()[:len(side_b)], side_b)
         pair = np.where(only, -1, pair)                                # an attack-only opponent: no pairs
         lay = league.Layout(np.zeros(len(opp_i), dtype=int), side_b,
                             np.array([league.CODE[n] for n in names])[opp_i])
     elif generated:
-        seeds = eval_seeds(generated)
-        source = scenes.Generated(seeds * len(names), max_units, params, device, sequential=True, small=small)
-        lays = [generated_layout(source, n, attack_only, range(i * generated, (i + 1) * generated))
+        seeds = seeds_of(generated, seeds)
+        source = scenes.Generated(seeds * len(names), max_units, params, device, sequential=True, small=small,
+                                  armies=armies)
+        lays = [generated_layout(source, n, attack_only, range(i * generated, (i + 1) * generated), defend=defend)
                 for i, n in enumerate(names)]
         lay = league.Layout(*(np.concatenate([getattr(x, k) for x in lays]) for k in ("scene", "learner", "opponent")))
         seeds_b = np.array(seeds * len(names))

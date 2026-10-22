@@ -711,7 +711,7 @@ def _train(args, every=None, teacher=None, normal=None):
     if args.kite_share and not kitesp.rows_of(lay).any():
         raise SystemExit("--kite-share: the run has no self / past battles (--mix)")
     env = (kitesp.KiteBattles if args.kite_share else rollout.Battles)(lay, scenes.SCENES, device, params, randomise.Spread(), weights, seed=args.seed,
-                          source=source(), cadence=cadence, past_slots=slots,
+                          source=source(), cadence=cadence, past_slots=slots + bool(args.past_pin),
                           teach=drills.load(list(teach0)) if teach0 else None,
                           teach_normal={n: loaded_normal[n] for n in normal_names} if normal_names else None,
                           attack_only=defend_only, dr=dr_cfg, men=fighters_men(args))
@@ -823,6 +823,19 @@ def _train(args, every=None, teacher=None, normal=None):
         load_slot(k, path, untrained, p)
         env.activate(k)
 
+    if args.past_pin:
+        # --past-pin: a fixed past version in a slot of its own (past slot `slots`), apart from the pool: a past battle
+        # that starts takes it with probability --past-pin-share (rollout.Battles.pin_slot)
+        past_share = float(np.mean(lay.opponent == league.CODE["past"]))
+        if not past_share:
+            raise SystemExit("--past-pin: the run has no past battles (--mix)")
+        data = checkpoint.read(args.past_pin, device)
+        pinned = checkpoint.actor_of(data).to(device).eval()
+        pinned.load_state_dict(data["actor"])
+        env.pin_slot(slots, pinned, args.past_pin_share, args.seed)
+        print(f"past pinned: {Path(args.past_pin).name} in slot {slots}, apart from the pool; {args.past_pin_share:g} of "
+              f"the past battles (~{args.past_pin_share * past_share:.0%} of all), counted as pinned/attack|defend",
+              flush=True)
     pick_past()
     dlearn = None                                 # --general-distinct: the classifier (distinct.Learner)
     d_updates0 = int(carried.get("general_distinct_updates", 0))
@@ -1090,8 +1103,9 @@ def _train(args, every=None, teacher=None, normal=None):
             next_keep += args.keep_every
         decisions += env.B * args.steps
         stats = env.take_stats()
-        # the learner's results against each slot's version -> the pool's quality scores (before a slot changes)
-        for k, (g, w) in enumerate(env.take_slot_stats()):
+        # the learner's results against each slot's version -> the pool's quality scores (before a slot changes); the
+        # pinned slot (--past-pin, the last one) stays out of the pool
+        for k, (g, w) in enumerate(env.take_slot_stats()[:slots]):
             if g and slot_path[k] is not None:
                 pool.result(slot_path[k], g, w, slot_p[k])
         pool.tick()
@@ -1403,6 +1417,12 @@ def parser():
     ap.add_argument("--past-slots", type=int, default=3,
                     help="past versions playing at once, each battle keeps the one it began with (1: one version, "
                          "changed in the running battles with their memory afresh, the old way)")
+    ap.add_argument("--past-pin", help="a fixed past opponent (a checkpoint) in a slot of its own, apart from the pool "
+                                       "(no quality score, never replaced): it takes --past-pin-share of the past "
+                                       "battles; its results in the log as pinned/attack|defend (rollout.Battles.pin_slot)")
+    ap.add_argument("--past-pin-share", type=float, default=0.65,
+                    help="--past-pin: the share of the starting past battles that take the pinned version (0.65 of "
+                         "past 0.38 / 0.80 of the mix ~ 31 %% of all battles)")
     ap.add_argument("--past-every", type=int, default=6,
                     help="updates between draws of the past version for the battles that start next (6 ~ a battle)")
     ap.add_argument("--no-resume", dest="resume", action="store_false",
