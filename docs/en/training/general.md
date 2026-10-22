@@ -811,6 +811,21 @@ the options. The points g1–g8 (before the units' positions, the coarse targets
 today's code (another shape of the general): a new line starts from the unit network (`build/v2/itS27_4.pt`) — a fresh
 general, the executor = S27 + the task input at zero.
 
+**Only the general learns** (`--general-only 1`, default 0; on a step — `--set general-only=1`). For the experiment
+"the executor fixed, the general learns on its own". Everything outside the general's module (`general.*`) is frozen:
+the executor (the unit network and its task input `task_in`) and the unit critic — they get no gradient, Adam does not
+move them (test: after the updates they equal the start to the bit), their Adam moments go into the new points as they
+were — a later step without the flag resumes them. Not computed: the executor's PPO, the critic's training, the heads'
+entropy and the tuning of its weights, the ability branches with their critic (turned off by themselves, their saved
+state goes into the new points as it was), the executor's bonus for carrying out missions, the observation
+(`--observe-dir`), the critic's warm-up. Working as usual: the general's plan PPO (the advantage from the frozen
+critic's values), the teacher's imitation, the outcome Q, the mission branches; the collection, the pool, the pinned
+opponent and the evaluation do not change. The price: the general loses its second source of gradient — the
+executor's loss through the task cards (it reached the councils and the army readers); it learns from its own plan PPO
+only (and the imitation, the Q). Without a general (no `--general`, and none in `--init`) the run stops with an error.
+At the start the log has the line `general only: N weights frozen, M trainable (general)` (on point g26: 6,609,897 and
+1,012,486); the log's rows have no executor's `policy_loss`, `entropy`, `kl` (`nan` in the printout), `minibatches` 0.
+
 ## Tried and rejected
 
 The module atlas at the point g17r m10 (`build/diag_atlas2/atlas.md`, 1536 battles a mode): the general added nothing

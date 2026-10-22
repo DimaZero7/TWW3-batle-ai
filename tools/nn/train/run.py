@@ -381,6 +381,30 @@ def with_general(actor, args):
     return actor, cfg
 
 
+def general_only_args(args):
+    """--general-only 1: (a copy of the options without what trains only the executor, [what was turned off]) - the
+    ability branches (their replays, the ability critic, the ability head's own signal and its extra passes: the
+    executor's ability head; their saved state goes through to the run's checkpoints as --init had it), the
+    demonstrations (--observe-dir: an executor's term) and the critic's warm-up (the critic is frozen too). The caller's
+    options stay as they were."""
+    off, names = {}, []
+    if args.ability_branch:
+        off.update(ability_branch=0.0, ability_critic=False, ability_own_signal=False, ability_epochs=1,
+                   ability_price="auto")
+        names.append("--ability-branch (its critic, own signal and epochs)")
+    if args.observe_dir:
+        off["observe_dir"] = None
+        names.append("--observe-dir")
+    if args.critic_warmup:
+        off["critic_warmup"] = 0
+        names.append("--critic-warmup")
+    return argparse.Namespace(**{**vars(args), **off}), names
+
+
+# the ability branches' state in a checkpoint's "train" (blob): under --general-only it goes through as --init had it
+ABILITY_STATE = ("ability_critic", "ability_critic_openloop", "ability_critic_kind", "ability_norm")
+
+
 def general_brancher(args, glearn_cfg, device):
     """The mission branches (tools/nn/general/branch.py) of --general-branches P > 0, else None (nothing changes)."""
     if glearn_cfg is None or not glearn_cfg.branches:
@@ -523,6 +547,12 @@ def _train(args, every=None, teacher=None, normal=None):
     teach_auto.prior) - the hook may change its shares (Auto.observe), read before every update. normal: with
     an adaptive --teach-normal, the teacher in normal battles (teach_auto.Transfer; default: one with the init
     checkpoint's last transfer numbers), likewise."""
+    # --general-only 1: only the general learns; the executor (the unit network inside the network) and the critic are
+    # frozen (executor.freeze_but_general), their own terms are not computed (ppo.update's executor False)
+    general_only = bool(getattr(args, "general_only", 0))
+    turned_off = []
+    if general_only:
+        args, turned_off = general_only_args(args)
     if args.ability_critic and not args.ability_branch:
         raise SystemExit("--ability-critic needs --ability-branch")
     own = bool(getattr(args, "ability_own_signal", False))
@@ -553,6 +583,8 @@ def _train(args, every=None, teacher=None, normal=None):
     actor, critic = networks(args.preset, device, args.init, args.critic_init)
     actor = with_grid(actor, args.grid)
     actor, glearn_cfg = with_general(actor, args)
+    if general_only and glearn_cfg is None:
+        raise SystemExit("--general-only 1 needs a general to learn: --general (or an --init with a general)")
     # --reset-heads: those heads start again as a new network's, the rest as loaded (head_reset.py); the KL anchors'
     # frozen networks below get the same fresh heads, Adam's moments of them are dropped
     reset_params = head_reset.reset(actor, head_reset.parse(args.reset_heads), args.seed)
@@ -584,6 +616,11 @@ def _train(args, every=None, teacher=None, normal=None):
                         epochs=args.epochs, minibatch=args.minibatch,
                         entropy=args.entropy, anchor=args.anchor, adv_norm=args.adv_norm, eyes=args.eyes_weight)
     width = actor.cfg.d / model_config.SMALL.d
+    if general_only:
+        from tools.nn.general.executor import freeze_but_general
+        frozen, trainable = freeze_but_general(actor, critic)
+        print(f"general only: {frozen} weights frozen, {trainable} trainable (general)"
+              + (f"; turned off: {', '.join(turned_off)}" if turned_off else ""), flush=True)
     # (v2 is trained from scratch, not widened from a small network: no lr / width on the stream's readers)
     opt = optimizer(actor, critic, cfg.lr, 1.0 if actor.cfg.sectors else width, ab_lr,
                     float(getattr(args, "general_lr_mult", 1.0)) if glearn_cfg is not None else 1.0,
@@ -948,11 +985,16 @@ def _train(args, every=None, teacher=None, normal=None):
               + f"; weights from {head_w} within [{args.head_entropy_start:g}, {args.head_entropy_max:g}] "
               f"x {args.entropy_rate:g} an update", flush=True)
 
+    # --general-only: the ability branches' state of --init goes through untouched (they are off: general_only_args)
+    passed = ({k: v for k, v in (checkpoint.train_state(args.init) or {}).items() if k in ABILITY_STATE}
+              if general_only and args.init and args.resume else {})
+
     def blob():
         """What --init needs to go on seamlessly from a checkpoint (checkpoint.py "train")."""
         trained = time.time() - t0 - paused
         return {"optim": opt.state_dict(),
-                "state": {"floor_w": floor_w, "head_w": head_w, "entropy_decay_s": decay_s0 + (trained if args.entropy_decay else 0.0),
+                "state": {"floor_w": floor_w, "head_w": head_w,
+                          "entropy_decay_s": decay_s0 + (trained if args.entropy_decay and not general_only else 0.0),
                           "chain_s": chain_s0 + trained, "chain_updates": chain_u0 + update,
                           "ability_updates": ab_updates0 + (update if args.ability_branch else 0),
                           "observe_updates": observe.updates if observe is not None
@@ -961,7 +1003,7 @@ def _train(args, every=None, teacher=None, normal=None):
                           "general_exec_updates": e_updates0 + (update if glearn_cfg is not None else 0),
                           "general_imitate_updates": i_updates0 + (update if glearn_cfg is not None else 0),
                           **({"general_imitate_min": glearn_cfg.imitate_min} if glearn_cfg is not None else {})},
-                **({"general_distinct": dlearn.state()} if dlearn is not None else {}),
+                **({"general_distinct": dlearn.state()} if dlearn is not None else {}), **passed,
                 **({"ability_critic": env.brancher.critic.state(),
                     "ability_critic_openloop": bool(env.brancher.cfg.openloop),
                     "ability_critic_kind": env.brancher.price_kind()}
@@ -1044,7 +1086,7 @@ def _train(args, every=None, teacher=None, normal=None):
             glearn_cfg.imitate, glearn_cfg.imitate_decay, i_updates0 + update, glearn_cfg.imitate_min))
                  if glearn_cfg is not None else None)
         st = ppo.update(actor, critic, opt, batch, u_cfg, train_policy=trains, reference=reference, teach=teach_w,
-                        observe=observe, general=g_cfg)
+                        observe=observe, general=g_cfg, executor=not general_only)
         taught = st.pop("teach", None)
         observed = st.pop("observe", None)
         if dlearn is not None:
@@ -1057,10 +1099,10 @@ def _train(args, every=None, teacher=None, normal=None):
             st["general_distinct_scale"] = dlearn.scale
         if start is not None:
             st["start_kl"] = ppo.distance(actor, start, batch, u_cfg.minibatch)
-        if args.entropy_target and trains:
+        if args.entropy_target and trains and not general_only:     # (--general-only: no executor's entropy)
             floor_w = ppo.entropy_weight(floor_w, st["entropy"], args.entropy_target, scheduled,
                                          max(scheduled, args.entropy_max), args.entropy_rate)
-        if head_targets and trains:
+        if head_targets and trains and not general_only:
             head_w = head_entropy.next_weights(head_w, {h: st.get(f"head_share_{h}") for h in head_targets},
                                                head_targets, args.head_entropy_start, args.head_entropy_max,
                                                args.entropy_rate)
@@ -1154,10 +1196,11 @@ def _train(args, every=None, teacher=None, normal=None):
         log.write(json.dumps(row) + "\n")
         log.flush()
         if update % args.print_every == 0:
+            sv = (lambda k: st.get(k, float("nan")))      # (--general-only: the executor's stats are not computed)
             print(f"u{update:4d} {row['seconds']:6.0f}s battles {env.battles:6d} (timeouts {env.timeouts:5d}) "
-                  f"{row['battle_steps_per_s']:6d} st/s ({row['battle_seconds_per_s']} battle-s/s) pl {st['policy_loss']:+.3f} vl {st['value_loss']:.4f} "
-                  f"ent {st['entropy']:.2f}/{st['entropy_all']:.2f} kl {st['kl']:.3f} R {st['reward']:+.3f} "
-                  f"anchor {st['anchor_kl']:.3f} start {st.get('start_kl', 0.0):.3f} orders/min {row['orders_per_minute']:5.1f} "
+                  f"{row['battle_steps_per_s']:6d} st/s ({row['battle_seconds_per_s']} battle-s/s) pl {sv('policy_loss'):+.3f} vl {st['value_loss']:.4f} "
+                  f"ent {sv('entropy'):.2f}/{sv('entropy_all'):.2f} kl {sv('kl'):.3f} R {st['reward']:+.3f} "
+                  f"anchor {sv('anchor_kl'):.3f} start {st.get('start_kl', 0.0):.3f} orders/min {row['orders_per_minute']:5.1f} "
                   f"lords dead own {lords['own']:.2f} enemy {lords['enemy']:.2f} abil {row['abilities_per_battle']:.1f} "
                   f"kinds " + " ".join(f"{k[:2]} {v:.2f}" for k, v in row["kinds"].items()), flush=True)
             print(f"      ev {st.get('ev', 0):.3f} (attack {st.get('ev_attack', 0):.3f} defend {st.get('ev_defend', 0):.3f}) "
@@ -1709,6 +1752,11 @@ def parser():
     ap.add_argument("--general-minibatch", type=int, default=512, help="general: plans a minibatch")
     ap.add_argument("--general-value", type=float, default=0.5, help="general: the plan value's loss weight")
     ap.add_argument("--general-lr-mult", type=float, default=1.0, help="general: its network learns at --lr x this")
+    ap.add_argument("--general-only", type=int, default=0, choices=(0, 1),
+                    help="general: 1 - only the general learns (its plan PPO, the imitation, the kind Q); the executor "
+                         "(the unit network, its task input) and the critic are frozen bit for bit, their terms not "
+                         "computed (the executor's PPO, the critic, the heads' entropy, the ability branches and "
+                         "critic, the mission bonus, the demonstrations); needs a general (--general)")
     ap.add_argument("--general-return", default="span", choices=("span", "td", "critic"),
                     help="general: a plan's return - span: the reward from its decision to the next plan or the end "
                          "(the design); td: that + the next plan's discounted value (the value then of the battle's "

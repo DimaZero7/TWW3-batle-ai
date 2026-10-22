@@ -128,3 +128,20 @@ def general_params(actor):
     """[parameters] of the general's network (their own Adam group: run.py --general-lr-mult; the task input learns
     at the executor's rate)."""
     return [p for n, p in actor.named_parameters() if n.startswith("general.")]
+
+
+def freeze_but_general(actor, critic):
+    """run.py --general-only 1: every parameter but the general's (general_params) - the executor's (the unit network
+    and its task input) and the critic's - requires no gradient and has none, so no loss reaches it and Adam (which
+    skips a parameter without a gradient) never moves it; the optimizer keeps all the parameters in their order, their
+    moments untouched (a later step without the flag resumes them). -> (frozen, trainable) weights."""
+    gen = {id(p) for p in general_params(actor)}
+    frozen = trainable = 0
+    for p in list(actor.parameters()) + list(critic.parameters()):
+        if id(p) in gen:
+            trainable += p.numel()
+        else:
+            p.requires_grad_(False)
+            p.grad = None
+            frozen += p.numel()
+    return frozen, trainable

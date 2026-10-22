@@ -487,12 +487,28 @@ def critic_stats(batch, adv, ret):
     return out
 
 
+def frozen_stats(batch, cfg=PPOConfig()):
+    """The stats of an update without the unit network's epochs (update's executor False): the rollout's reward, values
+    and returns, the critic's quality on them (critic_stats; the advantage's spread: --general-distinct's scale) and the
+    value loss of the values the batch was collected with. The policy's (loss, entropy, KL, clip, the heads' spread)
+    are not computed: not in the stats."""
+    adv, ret = gae(batch["reward"], batch["value"], batch["done"], batch["last_value"], cfg.gamma, cfg.lam)
+    out = {"value_loss": float(((batch["value"].float() - ret) ** 2).mean()), "minibatches": 0, "skipped": 0.0,
+           "reward": float(batch["reward"].sum(0).mean()), "value_mean": float(batch["value"].mean()),
+           "return_mean": float(ret.mean())}
+    out.update(critic_stats(batch, adv, ret))
+    return out
+
+
 def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, reference=None, teach=None, observe=None,
-           general=None):
+           general=None, executor=True):
     """Some epochs of minibatch updates on one rollout (batch from rollout.collect). -> stats (_update). Under the
     ability head's own signal (cfg.ability_own) the gradient through the ability head's input is x
     cfg.ability_body_grad (AbilityInputGrad). general: the general's LearnConfig (tools/nn/general/learn.py): its PPO
-    steps on the batch's ended plans before the unit network's epochs (module doc); None: none."""
+    steps on the batch's ended plans before the unit network's epochs (module doc); None: none. executor False (run.py
+    --general-only 1): the general's steps only - the unit network's epochs (its PPO, the critic's regression, the
+    heads' entropy, the ability term, the teachers, the observation, the anchor, the mission bonus) are not run, and
+    so the executor's loss does not reach the general's cards either; the stats are the rollout's (frozen_stats)."""
     extra = (cfg.ability_epochs > 1 and train_policy and bool(cfg.ability) and batch.get("abil_branch") is not None
              and batch["action"].ability is not None)
     ready = (batch.get("general") or {}).get("ready")
@@ -508,6 +524,10 @@ def update(actor, critic, opt, batch, cfg=PPOConfig(), train_policy=True, refere
         # (--general-kind-critic: the kind critic's estimate of the ended plans' groups)
         g_out = glearn.update(actor, opt, ready, general, branch=batch["general"].get("branch"),
                               teach=batch["general"].get("teach"), kind_q=batch["general"].get("kind_q"))
+    if not executor:
+        out = frozen_stats(batch, cfg)
+        out.update(g_out)
+        return out
     with AbilityInputGrad(actor, cfg.ability_body_grad if cfg.ability_own else 1.0), ThoughtTap(actor, extra) as tap:
         out = _update(actor, critic, opt, batch, cfg, train_policy, reference, teach, observe, tap if tap.on else None)
     out.update(g_out)
