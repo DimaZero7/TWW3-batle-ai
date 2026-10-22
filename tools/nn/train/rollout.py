@@ -90,6 +90,7 @@ from tools.nn.sim import battle
 from tools.nn.sim import magic as sim_magic
 from tools.nn.sim import orders as O
 from tools.nn.sim import state as S
+from tools.nn.sim.compiled import compiled
 from tools.nn.sim.params import load
 from tools.nn.train import drills, league, opponents, randomise, reward, scenes
 from tools.nn.train import dr as uncertain
@@ -115,14 +116,14 @@ _FAST = {}
 
 
 def fast(fn, use):
-    """fn compiled by torch.compile (one graph per batch shape) when use, else fn itself. The
-    bookkeeping of a decision (the scripts, rewards, counters) is hundreds of small operations on
+    """fn compiled by torch.compile (one graph per batch shape; the eager numbers: tools/nn/sim/compiled.py) when use,
+    else fn itself. The bookkeeping of a decision (the scripts, rewards, counters) is hundreds of small operations on
     [B, N] tensors: on the GPU their launches, not the work, took most of the time."""
     if not use:
         return fn
     if fn not in _FAST:
         torch._dynamo.config.recompile_limit = max(64, torch._dynamo.config.recompile_limit)
-        _FAST[fn] = torch.compile(fn, dynamic=False)
+        _FAST[fn] = compiled(fn)
     return _FAST[fn]
 
 
@@ -135,7 +136,7 @@ def observer(device, compile=None):
     if "f" not in _OBSERVE:
         # One graph per batch shape and view (actor, critic): evaluation builds batches of new sizes.
         torch._dynamo.config.recompile_limit = max(64, torch._dynamo.config.recompile_limit)
-        _OBSERVE["f"] = torch.compile(ob.observe, dynamic=False)
+        _OBSERVE["f"] = compiled(ob.observe)
     return _OBSERVE["f"]
 
 

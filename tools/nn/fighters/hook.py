@@ -31,6 +31,7 @@ from pathlib import Path
 import torch
 
 from tools.nn.fighters import cells, knock as FK, melee as FM, missile as FS, move as MV, scans as SC, state as S
+from tools.nn.sim.compiled import compiled
 
 LAB = json.loads((Path(__file__).with_name("lab.json")).read_text(encoding="utf-8"))
 COMPILE_MEN = 100_000        # Hook._runner: the batch's men (battles x places) from which the step is compiled
@@ -217,7 +218,7 @@ class Hook:
         if not use:
             return self._inner
         if self.compiled is None:
-            self.compiled = torch.compile(self._inner, dynamic=False)
+            self.compiled = compiled(self._inner)
         return self.compiled
 
     def _shape(self, st, F=None):
@@ -236,7 +237,7 @@ class Hook:
             return
         if self.shape_fn is None:
             use = self.compile if self.compile is not None else torch.device(st.device).type == "cuda"
-            self.shape_fn = torch.compile(shape_of, dynamic=False) if use else shape_of
+            self.shape_fn = compiled(shape_of) if use else shape_of
         fn = self.shape_fn if F.B * F.M >= COMPILE_MEN else shape_of
         st.u["shape"], st.u["shape_ok"] = fn(st.u, F)
 
@@ -248,7 +249,7 @@ class Hook:
         if self.adopt_built or not use:
             return self.orig["step"]
         if self.plain is None:
-            self.plain = torch.compile(self.orig["step"], dynamic=False)
+            self.plain = compiled(self.orig["step"])
         return self.plain
 
     def step(self, st, orders, params=None, dt=None):

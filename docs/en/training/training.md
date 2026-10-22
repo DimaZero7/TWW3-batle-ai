@@ -1556,6 +1556,11 @@ RTX 5070 Ti, 1024 battles, up to 19 units a side, 64 decisions an update, at the
   GRU run on all 64 steps at once, only the cell steps one by one; `unbind` instead of `x[t]`.
 - **The attention bias** is made once, aligned for the attention kernel.
 - **The observation** is compiled (8 ms → 0.6 ms for 1024 battles).
+- **The compile computes as the eager code** (`tools/nn/sim/compiled.py`: the exact float32 division, as the companion's in
+  the game; [compiled and eager step](simulator.md#compiled-and-eager-step)). With Triton's approximate division the
+  observation's damage timers came on at the first decision of every battle: the networks trained with it learned with
+  those timers (in the game they are off until the first hit) and on the GPU were more careful than in the game and
+  eager (g22 m30: the army by 60 s 68 m against 101 m).
 - **The compile cache:** `tools/nn/dock.sh` keeps `torch.compile`'s kernels in the Docker volume
   `tww3-torch-cache`.
 - **One decision a second** plays two simulator steps for one observation and one network pass

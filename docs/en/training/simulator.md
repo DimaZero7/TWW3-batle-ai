@@ -2236,6 +2236,28 @@ A battle here is the Empire-Skaven battle (40 slots) to its end, 430–620 s of 
 the step is compiled by `torch.compile` (about 10× faster); the container has no C++ compiler for
 compiling on the CPU.
 
+### Compiled and eager step
+
+On the GPU everything is compiled: the step (`battle.stepper`), the observation and a decision's bookkeeping
+(`rollout.observer`, `rollout.fast`), the fighters lab (`fighters/hook.py`). All of them go through
+`tools/nn/sim/compiled.py`: a compile with the exact division (`torch._inductor.config.eager_numerics.division_rounding`),
+as the eager code on the GPU and on the CPU — the companion's in the game. Without it Triton divides float32
+approximately (`div.full`, up to 2 units of the last digit): a whole unit's `hp = hp_abs / hp0` came out 0.99999994
+(4068 / 4068; so for 2672 of the integers 1–20 000), the first step "took" health and the observation's damage timers
+(`observation.TIMERS`: "we dealt damage", "the enemy dealt", seconds since) came on at the first decision of every
+battle — in the game they come on at the first real hit. A network with such timers is more careful: g22 m30 on the
+exam's proxy (plain simulator, 48 battles, `build/diag_obs_compile`) compiled moved its army 68 m by 60 s, under a hold
+mission 200–250 m from the enemy it moved 38 % of the time, attack was 30 % of its new orders; with the exact division
+101 m, 77 %, 55 % (eager 102 m, 78 %, 53 %; the game 107 m, 77 %, 60 %). The speed did not change (a step of 512
+battles 6.8–7.3 ms against 7.2–9.8 ms, the observation 2.1–2.5 against 2.3–3.0 ms).
+
+What still differs is the last digit: a multiply and add in one operation, the order of a sum, functions such as `exp`.
+The state falls apart on it only at exact ties: the charge's run-up (`runup`) of a unit accelerating exactly through
+75 % of its run speed (the network does not see it), and a shot at the very edge of range ("under fire", and morale
+with it). On the same battles with the same orders the compiled and the eager observation agree (difference < 1e-5)
+until the first such tie (52 s in the measurement on 12 battles); after it the battles drift apart each its own way, with
+no common shift. Check: `tests/tools/test_nn_compiled_torch.py` (GPU only).
+
 ## Pending changes
 
 Measured, ready as a switch, not in `config/nn/sim.json`: none now.

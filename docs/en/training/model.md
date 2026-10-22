@@ -120,7 +120,10 @@ keeps the previous health (`Memory.prev_hp`) and the time of each side's last da
 (`Memory.hit_t`), so the simulator, recorded battles (per-second samples) and the companion
 (the states the game sends) are measured by one rule. In training it is the reward's attacker
 damage (`reward.struck`, `rollout.Battles.last_hit`: the defender's health fell in the step):
-the attacker sees it as "we dealt", the defender as "the enemy dealt".
+the attacker sees it as "we dealt", the defender as "the enemy dealt". The rule catches any fall of `hp`, so the compiled
+simulator divides exactly, as the eager one (`tools/nn/sim/compiled.py`): with the approximate division a whole unit got
+`hp` 0.99999994 and the timers came on at the first decision of every battle
+([compiled and eager step](simulator.md#compiled-and-eager-step)).
 
 The attacker's progress (`observation.PROGRESS`) is the clock of the reward's idle cost with
 `--idle-rate` ([training](training.md)), so the actor and the critic see the state that cost

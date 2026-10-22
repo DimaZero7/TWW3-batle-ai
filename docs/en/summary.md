@@ -72,7 +72,10 @@ The loop's scripts live in `build/` (not in Git). Battles against the game's AI 
 
 **What it does.** Each unit is one object (men, health, place, facing, morale, fatigue, ammunition),
 not each soldier. Step 0.5 s (the game's morale tick). A battle ends when a side has no standing units;
-after 60 minutes the defender wins. ~590 battles a second on an RTX 5070 Ti (4096 at once).
+after 60 minutes the defender wins. ~590 battles a second on an RTX 5070 Ti (4096 at once). On the GPU the step,
+the observation and the bookkeeping are compiled with the exact division, as the companion's eager code in the game
+(`tools/nn/sim/compiled.py`): with the approximate division the damage timers came on from the battle's first second and
+the network in the simulator was more careful than in the game ([details](training/simulator.md#compiled-and-eager-step)).
 
 **Where the numbers come from.** The game's database (`config/nn/game_rules.json`, passports
 `units.json`, effects `effects.json`, abilities `abilities.json`), community formulas, measurements of

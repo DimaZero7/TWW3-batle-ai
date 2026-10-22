@@ -1307,12 +1307,14 @@ _COMPILED = {}
 
 def stepper(device, compile=None):
     """The step function to use: compiled by torch.compile on CUDA (about 10x faster on the GPU;
-    the container has no C++ compiler for the CPU), plain elsewhere or when compile is False."""
+    the container has no C++ compiler for the CPU; with the eager numbers, tools/nn/sim/compiled.py), plain elsewhere or
+    when compile is False."""
     use = compile if compile is not None else torch.device(device).type == "cuda"
     if not use:
         return step
     if "step" not in _COMPILED:
-        _COMPILED["step"] = torch.compile(step, dynamic=False)
+        from tools.nn.sim.compiled import compiled
+        _COMPILED["step"] = compiled(step)
     return _COMPILED["step"]
 
 
