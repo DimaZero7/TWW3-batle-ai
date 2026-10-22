@@ -59,6 +59,17 @@ def test_the_distinct_weight_decays_linearly_to_zero():
     assert signal.distinct_weight(0.02, 0, 10 ** 6) == pytest.approx(0.02)          # no decay
 
 
+def test_the_imitation_decays_to_its_floor_not_to_zero():
+    assert signal.imitate_weight(0.3, 300, 0, 0.15) == pytest.approx(0.3)
+    assert signal.imitate_weight(0.3, 300, 150, 0.15) == pytest.approx(0.225)
+    assert signal.imitate_weight(0.3, 300, 300, 0.15) == pytest.approx(0.15)
+    assert signal.imitate_weight(0.3, 300, 10 ** 6, 0.15) == pytest.approx(0.15)      # stays on the floor
+    assert signal.imitate_weight(0.3, 300, 300, 0.0) == 0.0                           # floor 0: the old decay to 0
+    assert signal.imitate_weight(0.3, 0, 10 ** 6, 0.15) == pytest.approx(0.3)         # no decay
+    assert signal.imitate_weight(0.0, 300, 0, 0.15) == 0.0                            # off: the floor does not turn it on
+    assert signal.imitate_weight(0.1, 300, 10 ** 6, 0.15) == pytest.approx(0.1)       # a floor above W: W stays
+
+
 def test_the_distinct_scale_follows_the_executors_advantage_std():
     """The bonus is in the executor's advantage's units: its scale is a running mean of the advantage's std (ppo's
     adv_std_*), kept when the update logs none, never below the floor."""

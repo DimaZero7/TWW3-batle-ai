@@ -277,7 +277,7 @@ executor is paid for carrying out its mission (a measure 0…1 every decision fr
 the bonus W × (measure − the kind's mean) goes into the unit's advantage only, not the reward: the critic and the
 general's return do not see it; `--general-exec`, default 1); a teacher general (`--general-teacher P`, default 0)
 gives the missions by rules in a share of the battles, the general learns to imitate it (`--general-imitate 0.3`, down
-to 0 over 300 updates); the general gets a small bonus for missions carried out (`--general-exec-general 0.2`, centred
+to the floor `--general-imitate-min 0.15` over 300 updates: without the support g20–g21 lost rating); the general gets a small bonus for missions carried out (`--general-exec-general 0.2`, centred
 by kind), and in a re-plan a group's last kind gets +1 on its logit (`--general-kind-stick`). The mission **limits** the
 executor (`--general-task-mask 1`, `taskmask.py`), by default only its movement: under "withdraw" the sectors away from the enemy, under "attack X" the sectors no farther
 from X, under "hold" the sectors near the point, under "screen" near the segment to the enemy; the general gives
@@ -288,7 +288,8 @@ with the group; the teacher waits first (holds its tile while the enemy is farth
 fired less than 30 s). Line g1–g8 on the former design (262 target candidates, two
 targets, no unit positions, abstract kinds) stayed uniformly random; by flags, the plan's advantage by the unit critic (`--general-return critic`) and the executor's bonus for
 missions that tell apart (`--general-distinct`, in units of the executor's advantage spread), the mission branches — a copy of the
-battle with another mission kind for one group, the exchange's difference is the kind choice's price
+battle with another mission kind for one group, the exchange's difference is the kind choice's price; the other
+kind is the teacher's by default (`--general-branch-alt teacher`: "my choice against the teacher's")
 (`--general-branches P`, an estimated +12–17 % to the step at 60 s). The whole loop is built as a skeleton, in the simulator, flag `run.py
 --general` (the chain's step `general`); simplifications: tiles = the 16 × 16 sectors, zero effects, small widths
 (card 128, 1.14 million weights), the zone = `place.py`'s area. In the game a checkpoint with a general plays through

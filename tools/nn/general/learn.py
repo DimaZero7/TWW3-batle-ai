@@ -19,8 +19,8 @@
   executor's bonus for it (LearnConfig.exec, run.py --general-exec W) goes into the units' own advantage only
   (ppo.update), so the general gains nothing by picking easy missions. The teacher's plans (LearnConfig.teacher) are
   not among the ended plans: their PPO is the general's own choices only.
-* The teacher's imitation (LearnConfig.imitate W, run.py --general-imitate; down to 0 over --general-imitate-decay
-  updates): the teacher's ended plans (runtime: batch["general"]["teach"], their inputs, the network's groups and the
+* The teacher's imitation (LearnConfig.imitate W, run.py --general-imitate; down to the floor --general-imitate-min M
+  over --general-imitate-decay updates, signal.imitate_weight): the teacher's ended plans (runtime: batch["general"]["teach"], their inputs, the network's groups and the
   rule's kind and target where it gave one, "use") add W x the mean negative log-probability of the teacher's kind
   and target (the target's under the teacher's kind) over those groups to every minibatch step (imitate_term) - only
   the general's weights (its network alone; the executor is not in it). Logged before the steps: imitate_nll,
@@ -72,7 +72,8 @@ class LearnConfig:
     exec_decay: int = 0        # ... down to 0 linearly over this many updates of the chain (0: no decay)
     teacher: float = 0.0       # the share of the learner's battles whose missions the teacher gives (teacher.py)
     imitate: float = 0.0       # the teacher's imitation: its term's weight W now (run.py passes W after the decay; 0: off)
-    imitate_decay: int = 0     # ... W down to 0 linearly over this many updates of the chain (run.py; 0: no decay)
+    imitate_decay: int = 0     # ... W down to imitate_min linearly over this many updates of the chain (run.py; 0: none)
+    imitate_min: float = 0.0   # ... the floor M of the decay (run.py --general-imitate-min; saved in the checkpoint)
     exec_general: float = 0.0  # the general's bonus for its groups' centred measure: S (in adv sd units; 0: off)
     exec_kind: str = "withdraw=2,screen=2"   # the executor's bonus x a kind's weight ("name=w,..."; others 1)
     teacher_hold_m: float = 250.0   # the teacher's groups hold while the nearest enemy is farther than this (teacher.py)
@@ -95,10 +96,16 @@ class LearnConfig:
             raise ValueError(f"--general-kl {self.kl!r}: 'k1' or 'k3'")
         if self.teacher_hold_m < 0 or self.teacher_fire_s < 0:
             raise ValueError("--general-teacher-hold-m and --general-teacher-fire-s are >= 0")
+<<<<<<< ours
         if self.flank_measure not in ("contact", "angle"):
             raise ValueError(f"--general-flank-measure {self.flank_measure!r}: 'contact' or 'angle'")
         if self.imitate < 0 or self.imitate_decay < 0 or self.exec_general < 0:
             raise ValueError("--general-imitate, --general-imitate-decay and --general-exec-general are >= 0")
+=======
+        if self.imitate < 0 or self.imitate_decay < 0 or self.exec_general < 0 or self.imitate_min < 0:
+            raise ValueError("--general-imitate, --general-imitate-decay, --general-imitate-min and "
+                             "--general-exec-general are >= 0")
+>>>>>>> theirs
 
 
 def exec_kinds(spec, kinds=None):
