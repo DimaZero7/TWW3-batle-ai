@@ -264,7 +264,7 @@ tile's, its centre. near(d, R) = 1 within R, linearly to 0 at 3R.
 |---|---|---|
 | `attack` | an enemy group | 1 — in melee with a unit of the target (the state's `m` and `target`); else 0.5 × (1 − d / 300 m) to its **centre** (not to its nearest unit: a straggler running off is not the group; the measure by the nearest unit paid two units and the lord for chasing one crossbow 700 m off, `build/diag_skv`) |
 | `hold` | a tile, our group | near(d to the target point, R): a tile's R is half its side (200 m: the tile itself), a group's 100 m around its centre |
-| `flank` | an enemy group | as `attack` (closing on the centre), but only while the unit stands off the front of the target's unit it fights (or the nearest): more than 45° from its facing — the struck unit's sides as in the simulator (`config/nn/sim.json` contact.front_deg 45: CA's front ±45°) |
+| `flank` | an enemy group | as `attack` (closing on the centre), but only a blow off the target's front counts. In melee (`--general-flank-measure contact`, the default) — by the side the unit's contact with a unit of the target group **began** on: the state's field `hit_sec` (the same that gives the simulator's morale 'attacked in the flank / rear'): flank or rear — 1, front — 0. The angle now does not do for this: the struck unit turns to its attacker, and a good flank blow looks like 'into the front' a couple of seconds later. No contact side (the field 0 or absent — so in the game, where the measures are not computed), `angle`, and before melee — by the angle: the unit stands more than 45° from the facing of the target's unit it fights (or the nearest) — the struck unit's sides as in the simulator (`config/nn/sim.json` contact.front_deg 45: CA's front ±45°) |
 | `screen` | our group | on the segment from the target's centre to the standing enemy nearest to it (projection 0…1 of the way) × near(the distance off the segment, 50 m) |
 | `shoot` | an enemy group | a shooter (range and ammunition): 0 in melee, 1 shooting at a unit of the target, 0.5 the target within its range, else 0; no missiles: 0 in melee, 1 at 50–250 m of the target's nearest unit |
 | `withdraw` | a tile, our group | 0 in melee, else 0.5 × near(d to the target point, R) + 0.5 × (distance to the nearest standing enemy / 300 m, at most 1) |
@@ -414,7 +414,18 @@ units), later over earlier:
   re-plan (every 30 s or on an event);
 - a group of mostly shooters (range and ammunition) — `shoot` the nearest enemy group;
 - one group — not shooters, without the lord, nearest to our largest shooting group — `screen` it;
-- the lord's group, with a standing enemy within 150 m of the lord — `withdraw` to our largest other group.
+- the lord's group, with a standing enemy within 150 m of the lord — `withdraw` to our largest other group;
+- **the flank** (`--general-teacher-flank 1`, the default): (1) where two or more of our (not fast) groups attack one
+  enemy group, the one nearest to the point in front of the target (100 m ahead of its centre along its units' mean
+  facing) attacks (pins it), the others get `flank` of the same group if it is within 300 m of their centre; (2) a fast
+  group (the role "fast" of `groups.py`: cavalry, chariots, a run of 7 m/s; not a shooting one) instead of
+  `attack`/`withdraw` gets `flank` of the enemy group nearest to it that one of our non-fast, non-shooting groups pins:
+  attacks it or holds (`hold`/`screen`) with its centre within 150 m of its centre. On the 32 generated check battles
+  (teacher 1.0) neither side has cavalry, rule (2) never fires; `flank` is in 2.3 % of the teacher's plans (2.9 % of
+  the plans with three or more groups), the `flank` measure 0.20. Without this rule the teacher never gave `flank`, the general
+  picked it for 1–2 % of groups (and for ones that never reach the fight), the `flank` measure was 0.00
+  (`build/diag_flank`); with `flank` forced the measure is 0.20–0.30 and blows from the side and rear are twice as
+  frequent as under `attack` — the executor can flank, it lacked examples.
 
 No enemy group — the network's choice stays. Every teacher's pair is one the general may choose itself (the target's
 type by the kind; `shoot` only for a group at least half of shooters; `hold` a tile that is there), so the imitation never meets a
@@ -616,7 +627,8 @@ carrying missions out (`--general-exec 1` — the option's default; stronger: `-
 `--set general-teacher=0.3`; with the teacher the general imitates it, `--general-imitate 0.3` down to 0 over 300 updates
 — the default; the general's small bonus `--general-exec-general 0.2` and the kind's inertia `--general-kind-stick 1` —
 the defaults; the task masks `--general-task-mask 1`, the kinds' weights on the bonus `--general-exec-kind
-withdraw=2,screen=2`, the teacher's waiting `--general-teacher-hold-m 250 --general-teacher-fire-s 30` — defaults too). The points g1–g9 (10 abstract kinds) do not load with today's code (6 kinds): a new line
+withdraw=2,screen=2`, the teacher's waiting `--general-teacher-hold-m 250 --general-teacher-fire-s 30`, the teacher's flank
+`--general-teacher-flank 1` and the flank measure by the contact's side `--general-flank-measure contact` — defaults too). The points g1–g9 (10 abstract kinds) do not load with today's code (6 kinds): a new line
 starts from `build/v2/itS27_4.pt`. The bonus for missions that tell apart goes over the step: `--set general-distinct=1` (W 1 down to 0 over 600 updates). Its scale:
 ~20 plans a battle × ~4 groups × the classifier's gain × W × σ — at a gain of 0.3 and σ 0.06 that is ~1.4 a battle
 against the battle return's spread of ~0.8, and ~0.3σ a group at the plan's last decision; watch `distinct_bonus` and
@@ -850,12 +862,15 @@ Tests at build time (group 1 of the design's "Checks" pages):
 - `test_general_mission_torch.py` — the measures on hand-made states: `attack` (melee with the target — 1, with
   another group — less, far — half the closeness to the target's centre), the cohesion (225 m from its group's centre —
   the measure × 0.5, 350 m — 0), `flank` (the target's front — 0, its side — 1, its rear far — half
-  the closeness), `hold` (a tile and a group, a tile outside the map is not counted), `screen` (on the segment — 1,
+  the closeness; in melee by the side the contact began on, `hit_sec`: flank and rear — 1, front — 0 whatever the angle
+  now, a contact with another group does not count, no field — by the angle), `hold` (a tile and a group, a tile outside the map is not counted), `screen` (on the segment — 1,
   behind — 0, aside — the fall-off), `shoot` (shooting at the target, in range, in melee, no missiles — the distance),
   `withdraw`, a target with no standing unit is not counted; the teacher: attack the nearest group, shooters shoot,
   one group screens the shooters, a threatened lord withdraws; every pair of the teacher is allowed by the mask; the
   waiting: the groups hold their tile (shooters shoot) while the enemy is farther than 250 m and the shooters have not
-  fired 30 s, then attack.
+  fired 30 s, then attack; the flank: of two groups on one target the one nearer to its front attacks (with the target's
+  facing and without it), the other gets `flank`, beyond 300 m — attacks; the flag 0 — both attack; a fast group flanks
+  the enemy group our infantry attacks, without it — attacks.
 - `test_general_taskmask_torch.py` — the task masks on hand-made observations: `withdraw` (the attack and "keep" of an
   attack closed, the sectors towards the enemy closed, those back open), `shoot` (no missiles — no attack, a shooter —
   the group's targets), `attack` (targets — group X, sectors no farther from X; X not seen — a fall-back), `hold`

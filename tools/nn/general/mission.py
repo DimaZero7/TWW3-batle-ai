@@ -10,8 +10,13 @@ measures (d: metres; near(d, R) = 1 within R, down to 0 at 3 R):
     attack    1 in melee with a unit of the target group (the state's m and target), else 0.5 x (1 - d / NEAR_M) to its
               centre: "close on it and fight it" (the centre, not its nearest unit: a straggler running off is not the
               group - the nearest unit paid a chase of one crossbow 700 m off, build/diag_skv)
-    flank     as attack, counted only where the unit stands off the front of the target's unit it fights (else the
-              nearest one): more than FLANK_DEG from that unit's facing - the sides of a struck unit the simulator uses
+    flank     as attack, counted only off the front of the target: in melee (flank_by "contact", run.py
+              --general-flank-measure, the default) by the side its contact with a unit of the target group BEGAN on
+              (the state's hit_sec, the simulator's morale.attacked_first 'attacked in the flank / rear': flank or rear
+              -> 1, front -> 0; the struck unit turns to face its attacker, so the angle now says 'front' after a good
+              flank charge); where no contact side is held (hit_sec absent or 0 - the game's state, the rule off) and
+              under "angle", and before melee: where the unit stands seen from the target's unit it fights (else the
+              nearest one) - more than FLANK_DEG off that unit's facing, the sides of a struck unit the simulator uses
               (config/nn/sim.json contact.front_deg 45: CA's front +-45)
     hold      near(d to the target point, the reach): a tile's half side (the tile itself), GROUP_M around a group
     screen    on the segment from the target group's centre to the standing enemy unit nearest to it (its projection
@@ -54,12 +59,16 @@ def _gather(x, idx):
     return x.gather(1, idx.reshape(R, -1)).reshape(idx.shape)
 
 
-def measure(u, b, s, main, kind, target, tgt, acting, G, C, tile_half, cfg):
+FLANK_BY = ("contact", "angle")   # run.py --general-flank-measure
+
+
+def measure(u, b, s, main, kind, target, tgt, acting, G, C, tile_half, cfg, flank_by="contact"):
     """-> (m [R, N] 0..1, ok [R, N] the units counted, k [R, N] each unit's mission kind) of rows [R] (b their battles,
     s their sides 1 / 2) on the simulator's state u ([B, N] fields): main [R, N] the plan's group numbers (ours
     0..G-1, theirs G..2G-1, -1 none), kind / target [R, G] our groups' missions, tgt [R, G, 2] a tile target's world
     point (NaN else), acting [R, N] (the plan in force and the unit deciding), C coarse tiles, tile_half (m) their
-    half side, cfg the GeneralConfig (its kinds)."""
+    half side, cfg the GeneralConfig (its kinds); flank_by: the flank's melee part by the contact's side ("contact")
+    or the angle now ("angle")."""
     f = (lambda k: u[k][b])
     x, z = f("x").float(), f("z").float()
     side = f("side")
@@ -98,6 +107,15 @@ def measure(u, b, s, main, kind, target, tgt, acting, G, C, tile_half, cfg):
     bj = _gather(f("b").float(), j) * (math.pi / 180.0)
     cos = (vx * torch.sin(bj) + vz * torch.cos(bj)) / (vx * vx + vz * vz).sqrt().clamp(min=1e-3)
     off = cos < math.cos(FLANK_DEG * math.pi / 180.0)
+    if flank_by == "contact" and "hit_sec" in u:
+        # the side of the target's unit our unit's contact began on (u hit_sec [B, N * N]: row the attacker, column the
+        # struck unit; 1 front, 2 flank, 3 rear, 0 none), the worst over the target group's units it touches
+        R, N = x.shape
+        hs = u["hit_sec"][b].reshape(R, N, N)
+        began = torch.where(member, hs, torch.zeros_like(hs)).amax(-1)              # [R, N (i)]
+        off = torch.where(engaged & (began > 0), began >= 2, off)
+    elif flank_by not in FLANK_BY:
+        raise ValueError(f"flank_by {flank_by!r}: one of {FLANK_BY}")
     flank = torch.where(engaged, off.float(), 0.5 * close * off.float())
     hold = near(dP, reach)
     # screen: between the target group's centre A and the standing enemy nearest to it

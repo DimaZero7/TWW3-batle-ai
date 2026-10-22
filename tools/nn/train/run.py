@@ -364,6 +364,7 @@ def with_general(actor, args):
                              imitate=args.general_imitate, imitate_decay=args.general_imitate_decay,
                              exec_general=args.general_exec_general, exec_kind=args.general_exec_kind,
                              teacher_hold_m=args.general_teacher_hold_m, teacher_fire_s=args.general_teacher_fire_s,
+                             teacher_flank=bool(args.general_teacher_flank), flank_measure=args.general_flank_measure,
                              kl=args.general_kl)
     print(f"general: {actor.gcfg}; learning {cfg}; return {args.general_return}; lr x {args.general_lr_mult:g}",
           flush=True)
@@ -801,6 +802,8 @@ def _train(args, every=None, teacher=None, normal=None):
             env.general_rt.set_teacher(glearn_cfg.teacher)
             env.general_rt.teach_hold_m = glearn_cfg.teacher_hold_m
             env.general_rt.teach_fire_s = glearn_cfg.teacher_fire_s
+            env.general_rt.teach_flank = glearn_cfg.teacher_flank
+            env.general_rt.flank_measure = glearn_cfg.flank_measure
             from tools.nn.general.learn import exec_kinds
             env.general_rt.exec_kind = torch.tensor(exec_kinds(glearn_cfg.exec_kind, env.general_rt.gcfg.kinds),
                                                     device=env.general_rt.dev)
@@ -1647,6 +1650,13 @@ def parser():
                          "this (m) ...")
     ap.add_argument("--general-teacher-fire-s", type=float, default=30.0,
                     help="general: ... and until our shooters have been firing this long (s); then they attack")
+    ap.add_argument("--general-teacher-flank", type=int, default=1, choices=(0, 1),
+                    help="general: 1 - where two or more of the teacher's groups attack one enemy group, the one nearest "
+                         "to the target's front pins it (attack), the others flank it (teacher.py); 0 - all attack")
+    ap.add_argument("--general-flank-measure", default="contact", choices=("contact", "angle"),
+                    help="general: the flank mission's measure in melee - 'contact': the side of the target the "
+                         "contact began on (the simulator's hit_sec, morale 'attacked in the flank / rear'); 'angle': "
+                         "where the unit stands now off the target unit's facing (mission.py)")
     ap.add_argument("--general-exec-kind", default="withdraw=2,screen=2",
                     help="general: the executor's mission bonus x each kind's weight, 'name=w,...' (kinds not named: 1)")
     ap.add_argument("--general-imitate", type=float, default=0.3,

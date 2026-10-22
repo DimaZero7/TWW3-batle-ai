@@ -151,7 +151,7 @@ def test_the_teacher_gives_meaningful_missions():
     a threatened lord withdraws to the largest other group."""
     N = 8
     # ours: 0 lord (g0), 1-2 spears (g1), 3-4 archers (g2), 5 spear (g3); theirs: 6 (e0 near g1), 7 (e1 far)
-    x = torch.tensor([[0.0, 0, 10, 100, 110, 300, 0, 900]])
+    x = torch.tensor([[0.0, 0, 10, 100, 110, 250, 0, 900]])
     z = torch.tensor([[-100.0, 0, 0, -50, -50, 0, 100, 900]])
     main = torch.tensor([[0, 1, 1, 2, 2, 3, G, G + 1]])
     active = torch.zeros(1, 2 * G, dtype=torch.bool)
@@ -164,17 +164,23 @@ def test_the_teacher_gives_meaningful_missions():
     assert use[0, :4].all() and not use[0, 4:].any()
     assert int(kind[0, 1]) == K["screen"] and int(target[0, 1]) == 2     # the nearest non-shooters screen the archers
     assert int(kind[0, 2]) == K["shoot"] and int(target[0, 2]) == G      # archers shoot the nearest enemy group
-    assert int(kind[0, 3]) == K["attack"] and int(target[0, 3]) == G
+    # g0 and g3 both attack e0: g0 (200 m from e0's centre) pins it, g3 (269 m, within 300) flanks it (the flank rule)
+    assert int(kind[0, 3]) == K["flank"] and int(target[0, 3]) == G
     assert int(kind[0, 0]) == K["attack"]                                # the lord is 200 m from e0: not threatened
+    kind_nf, _, _ = teacher.choose(main, active, x, z, own, standing, shooter, lord, G, CFG.kinds, flank=False)
+    assert int(kind_nf[0, 3]) == K["attack"]                             # the rule off: both attack
+    kind1, target1 = kind, target
     z2 = z.clone()
     z2[0, 6] = -50.0                                                     # e0 within 150 m of the lord now
     kind, target, _ = teacher.choose(main, active, x, z2, own, standing, shooter, lord, G, CFG.kinds)
     assert int(kind[0, 0]) == K["withdraw"] and int(target[0, 0]) in (1, 2)   # to a largest other group (2 units)
+    assert int(kind[0, 3]) == K["attack"]                                # the only attacker of e0 now
     # every pair the teacher gives is one the general may choose (the kind takes the target's type)
-    for g in range(4):
-        t = int(target[0, g])
-        tt = "own" if t < G else "enemy" if t < 2 * G else "tile"
-        assert tt in gconfig.MISSION_KINDS[int(kind[0, g])].targets
+    for kd, tg in ((kind, target), (kind1, target1)):
+        for g in range(4):
+            t = int(tg[0, g])
+            tt = "own" if t < G else "enemy" if t < 2 * G else "tile"
+            assert tt in gconfig.MISSION_KINDS[int(kd[0, g])].targets
     assert math.isfinite(teacher.THREAT_M)
 
 
@@ -214,3 +220,107 @@ def test_the_teacher_waits_on_its_tiles_until_the_enemy_is_near_or_our_shooters_
         tt = "own" if t < G else "enemy" if t < 2 * G else "tile"
         assert tt in gconfig.MISSION_KINDS[int(kind[0, g])].targets
     assert teacher.HOLD_M == 250.0 and teacher.FIRE_S == 30.0
+
+
+def test_the_teacher_flanks_with_the_group_off_the_targets_front():
+    """Two groups attack one enemy group: the one nearest to its front point (FRONT_M ahead of its centre along its
+    facing) pins it, the other flanks; a group attacking another enemy group alone keeps attacking."""
+    N = 6
+    # ours: g0 (unit 0) 150 m north of e0, g1 (unit 1) 120 m east of e0, g2 (unit 2) near e1; theirs: 3 e0, 4-5 e1
+    x = torch.tensor([[0.0, 120, 1000, 0, 1000, 1010]])
+    z = torch.tensor([[150.0, 0, 150, 0, 0, 0]])
+    main = torch.tensor([[0, 1, 2, G, G + 1, G + 1]])
+    active = torch.zeros(1, 2 * G, dtype=torch.bool)
+    active[0, [0, 1, 2, G, G + 1]] = True
+    own = torch.tensor([[True] * 3 + [False] * 3])
+    standing = torch.ones(1, N, dtype=torch.bool)
+    no = torch.zeros(1, N, dtype=torch.bool)
+    args = (main, active, x, z, own, standing, no, no, G, CFG.kinds)
+    # e0 faces north (b 0): g0 stands at its front and pins it, g1 (nearer to its centre) flanks
+    kind, target, use = teacher.choose(*args, facing=torch.zeros(1, N))
+    assert int(kind[0, 0]) == K["attack"] and int(kind[0, 1]) == K["flank"]
+    assert int(target[0, 0]) == G and int(target[0, 1]) == G and bool(use[0, :3].all())
+    assert int(kind[0, 2]) == K["attack"] and int(target[0, 2]) == G + 1
+    # e0 faces east (b 90): g1 is at its front now - g1 pins, g0 flanks
+    kind, _, _ = teacher.choose(*args, facing=torch.tensor([[0.0, 0, 0, 90, 0, 0]]))
+    assert int(kind[0, 1]) == K["attack"] and int(kind[0, 0]) == K["flank"]
+    # without facings: by the centres - g1 (120 m) pins, g0 (150 m) flanks
+    kind, _, _ = teacher.choose(*args)
+    assert int(kind[0, 1]) == K["attack"] and int(kind[0, 0]) == K["flank"]
+    assert teacher.FRONT_M == 100.0
+    # the second attacker farther than NEAR_FLANK_M from the target: it attacks
+    x_far = x.clone()
+    x_far[0, 1] = 400.0                                              # g1 400 m east of e0
+    kind, _, _ = teacher.choose(main, active, x_far, z, own, standing, no, no, G, CFG.kinds, facing=torch.zeros(1, N))
+    assert int(kind[0, 0]) == K["attack"] and int(kind[0, 1]) == K["attack"]
+    assert teacher.NEAR_FLANK_M == 300.0
+
+
+def test_a_fast_group_flanks_the_enemy_group_our_melee_pins():
+    """A fast group (role "fast") told attack flanks the enemy group nearest to it that one of our non-fast groups
+    attacks; with no enemy group pinned (or no fast units known) it attacks as before."""
+    N = 4
+    # ours: g0 melee (unit 0) 100 m north of e0, g1 fast (unit 1) 200 m from e1, 500 m from e0; theirs: 2 e0, 3 e1
+    x = torch.tensor([[0.0, 400, 0, 600]])
+    z = torch.tensor([[100.0, 300, 0, 300]])
+    main = torch.tensor([[0, 1, G, G + 1]])
+    active = torch.zeros(1, 2 * G, dtype=torch.bool)
+    active[0, [0, 1, G, G + 1]] = True
+    own = torch.tensor([[True, True, False, False]])
+    standing = torch.ones(1, N, dtype=torch.bool)
+    no = torch.zeros(1, N, dtype=torch.bool)
+    fast = torch.tensor([[False, True, False, False]])
+    args = (main, active, x, z, own, standing, no, no, G, CFG.kinds)
+    kind, target, use = teacher.choose(*args, fast=fast)
+    assert int(kind[0, 0]) == K["attack"] and int(target[0, 0]) == G
+    assert int(kind[0, 1]) == K["flank"] and int(target[0, 1]) == G and bool(use[0, 1])
+    kind, target, _ = teacher.choose(*args)                          # no fast units known
+    assert int(kind[0, 1]) == K["attack"] and int(target[0, 1]) == G + 1
+    kind, target, _ = teacher.choose(*args, fast=fast, flank=False)
+    assert int(kind[0, 1]) == K["attack"]
+    act2 = active.clone()
+    act2[0, 0] = False                                               # no melee group: nothing pinned
+    kind, target, _ = teacher.choose(main, act2, x, z, own, standing, no, no, G, CFG.kinds, fast=fast)
+    assert int(kind[0, 1]) == K["attack"] and int(target[0, 1]) == G + 1
+    # the fast group is the only one attacking e0: it does not pin for itself
+    x3 = x.clone()
+    x3[0, 1] = 50.0
+    kind, _, _ = teacher.choose(main, act2, x3, z, own, standing, no, no, G, CFG.kinds, fast=fast)
+    assert int(kind[0, 1]) == K["attack"]
+    assert teacher.PIN_M == 150.0
+
+
+def _flank_m(u, flank_by="contact"):
+    kind = torch.zeros(1, G, dtype=torch.long)
+    target = torch.full((1, G), 2 * G, dtype=torch.long)
+    kind[0, 0], target[0, 0] = K["flank"], G
+    m, _, _ = mission.measure(u, torch.tensor([0]), torch.tensor([1]), torch.tensor([MAIN]), kind, target,
+                              torch.full((1, G, 2), float("nan")), torch.ones(1, 6, dtype=torch.bool), G, C, HALF, CFG,
+                              flank_by=flank_by)
+    return float(m[0, 0])
+
+
+def test_flank_in_melee_counts_by_the_side_the_contact_began_on():
+    """flank_by "contact": in melee the side of the target the contact began on (hit_sec: row the attacker, column the
+    struck unit; 2 flank, 3 rear -> 1, 1 front -> 0), whatever the angle now; no side held: the angle; "angle": the
+    angle always."""
+    # unit 0 fights unit 3 from its front now (unit 3 turned to face it)
+    u = state([(0, 20), (0, 100), (500, 0), (0, 0), (300, 300), (900, 900)], SIDE,
+              m=[True, False, False, True, False, False], target=[3, -1, -1, 0, -1, -1])
+    for began, want in ((2.0, 1.0), (3.0, 1.0), (1.0, 0.0)):        # flank, rear: a flank; front: not
+        hs = torch.zeros(1, 36)
+        hs[0, 0 * 6 + 3] = began
+        u["hit_sec"] = hs
+        assert _flank_m(u) == pytest.approx(want)
+        assert _flank_m(u, "angle") == pytest.approx(0.0)            # the angle now: its front
+    # a flank contact with a unit of another group, or 3 striking 0's rear: no side held with e0 - the angle (front)
+    hs = torch.zeros(1, 36)
+    hs[0, 0 * 6 + 5] = 2.0
+    hs[0, 3 * 6 + 0] = 3.0
+    u["hit_sec"] = hs
+    assert _flank_m(u) == pytest.approx(0.0)
+    # without the field (the game's state): the angle, no error
+    u.pop("hit_sec")
+    assert _flank_m(u) == pytest.approx(0.0)
+    with pytest.raises(ValueError):
+        _flank_m(u, "side")

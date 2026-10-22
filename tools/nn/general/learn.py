@@ -77,6 +77,9 @@ class LearnConfig:
     exec_kind: str = "withdraw=2,screen=2"   # the executor's bonus x a kind's weight ("name=w,..."; others 1)
     teacher_hold_m: float = 250.0   # the teacher's groups hold while the nearest enemy is farther than this (teacher.py)
     teacher_fire_s: float = 30.0    # ... and until our shooters have been firing this long
+    teacher_flank: bool = True      # the teacher's flank rule: two groups attack one enemy group - the second flanks
+    flank_measure: str = "contact"  # the flank measure in melee: the side the contact began on ("contact") or the
+    #                                 angle now ("angle"; mission.py)
 
     def __post_init__(self):
         if not 0.0 <= self.branches <= 1.0 or self.branch_weight < 0:
@@ -92,6 +95,8 @@ class LearnConfig:
             raise ValueError(f"--general-kl {self.kl!r}: 'k1' or 'k3'")
         if self.teacher_hold_m < 0 or self.teacher_fire_s < 0:
             raise ValueError("--general-teacher-hold-m and --general-teacher-fire-s are >= 0")
+        if self.flank_measure not in ("contact", "angle"):
+            raise ValueError(f"--general-flank-measure {self.flank_measure!r}: 'contact' or 'angle'")
         if self.imitate < 0 or self.imitate_decay < 0 or self.exec_general < 0:
             raise ValueError("--general-imitate, --general-imitate-decay and --general-exec-general are >= 0")
 

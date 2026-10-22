@@ -11,7 +11,16 @@ The rule (on the groups' standing units, the state's truth), later rules over ea
                   orders in the first 100 s against the general's 8, build/diag_skv);
   shooters        a group whose units are mostly shooters (range and ammunition): shoot the nearest enemy group;
   one screen      the non-shooting group without the lord nearest to our largest shooting group screens it;
-  the lord        his group, with a standing enemy unit within THREAT_M of him: withdraw to our largest other group.
+  the lord        his group, with a standing enemy unit within THREAT_M of him: withdraw to our largest other group;
+  the flank       (flank=True, run.py --general-teacher-flank 1; build/diag_flank: the teacher never gave flank, the
+                  general picked it for 1-2 % of groups and the measure stayed 0):
+                  - two or more of our non-fast groups attack one enemy group X within NEAR_FLANK_M of them: the one
+                    nearest to X's front point (FRONT_M ahead of its centre along its units' mean facing; without
+                    facings - its centre) attacks and pins it, the others flank X;
+                  - a fast group (most units of the role "fast", groups.roles: cavalry, chariots, a run of 7 m/s; not a
+                    shooting one) told attack or withdraw flanks the enemy group X nearest to it that one of our
+                    non-fast, non-shooting groups pins: attacks X, or holds / screens with its centre within PIN_M of
+                    X's centre (the pinning group's nearest enemy group).
 Where no enemy group stands the network's choice stays. Every pair is one the general may choose (its kind takes the
 target's type; shoot only a group with a shooter - GeneralConfig.task_mask's rule; hold a tile there is), so the
 general's imitation of the teacher (learn.py) never meets a masked pair.
@@ -24,16 +33,21 @@ THREAT_M = 150.0         # the lord is threatened by a standing enemy unit this 
 HOLD_M = 250.0           # a group holds while the nearest standing enemy unit is farther than this (run.py
 #                          --general-teacher-hold-m) ...
 FIRE_S = 30.0            # ... and until our shooters have been firing this long (--general-teacher-fire-s)
+FRONT_M = 100.0          # the flank rule: the target's front point this far ahead of its centre (the pinning group is
+#                          the nearest to it; my rule - a line of 3-4 units is ~150 m wide)
+NEAR_FLANK_M = 300.0     # ... a second attacker flanks an enemy group whose centre is within this of its own
+PIN_M = 150.0            # ... a holding / screening group pins its nearest enemy group within this (centre to centre)
 INDEX = {k.name: k.index for k in gconfig.MISSION_KINDS}
 
 
 def choose(main, active, x, z, own, standing, shooter, lord, G, kinds, tiles=None, tiles_ok=None, engage=None,
-           hold_m=HOLD_M):
+           hold_m=HOLD_M, facing=None, flank=True, fast=None):
     """-> (kind [M, G], target [M, G], use [M, G]: our groups the rule gives a mission) of plans [M]: main [M, N] the
     plan's group numbers, active [M, 2G], the units' x, z, own, standing, shooter, lord [M, N]; kinds: the network's
     number of kinds (a rule whose kind is beyond it is not used); tiles [M, C, 2] the coarse tiles' world centres,
     tiles_ok [M, C] those that may be targets, engage [M] our shooters have fired FIRE_S (None: no waiting - every
-    group attacks)."""
+    group attacks); facing [M, N] the units' facings (degrees, the state's b; None: the flank rule by the centres),
+    flank: the flank rule on, fast [M, N] the units of the role "fast" (groups.roles; None: no fast groups)."""
     M, N = main.shape
     dev = main.device
     ar = torch.arange(2 * G, device=dev)
@@ -95,4 +109,44 @@ def choose(main, active, x, z, own, standing, shooter, lord, G, kinds, tiles=Non
     kind = torch.where(wd, torch.full_like(kind, k_of("withdraw")), kind)
     target = torch.where(wd, o_idx, target)
     use = use | wd
+    # the flank
+    if flank and on("flank"):
+        fast_g = torch.zeros_like(own_g)
+        if fast is not None:
+            fs = torch.einsum("mng,mn->mg", mem[:, :, :G].float(), fast.float()) / n[:, :G].clamp(min=1)
+            fast_g = own_g & (fs > 0.5) & ~shooters
+        tix = (target - G).clamp(0, G - 1)
+        d_t = d.gather(-1, tix[..., None])[..., 0]                                  # to its target's centre
+        # (b) two or more non-fast groups attack one enemy group near them: the nearest to its front pins, others flank
+        att = use & (kind == k_of("attack")) & ~fast_g                              # [M, G]
+        front = cent[:, G:]                                                         # [M, G (enemy), 2]
+        if facing is not None:
+            rad = torch.deg2rad(facing.float())
+            dirs = torch.stack([torch.sin(rad), torch.cos(rad)], -1)                # (x, z) of the facing b
+            md = torch.einsum("mng,mnc->mgc", mem[:, :, G:].float(), dirs)
+            md = md / md.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+            front = front + FRONT_M * md
+        fp = front.gather(1, tix[..., None].expand(-1, -1, 2))                      # [M, G, 2] of each group's target
+        dfp = (cent[:, :G] - fp).norm(dim=-1).masked_fill(~att, float("inf"))
+        same = (tix[:, :, None] == tix[:, None, :]) & att[:, :, None] & att[:, None, :]          # [M, G, G]
+        ar_g = torch.arange(G, device=dev)
+        # another attacker of the same target is nearer to its front (ties: the lower number pins)
+        before = same & ((dfp[:, None, :] < dfp[:, :, None])
+                         | ((dfp[:, None, :] == dfp[:, :, None]) & (ar_g[None, None, :] < ar_g[None, :, None])))
+        fl = att & before.any(-1) & (d_t < NEAR_FLANK_M)
+        kind = torch.where(fl, torch.full_like(kind, k_of("flank")), kind)
+        # (a) a fast group flanks the nearest enemy group one of our non-fast, non-shooting groups pins
+        pinner = own_g & use & ~fast_g & ~shooters
+        pin_att = pinner & (kind == k_of("attack"))
+        d_near = d.min(-1).values
+        pin_hold = pinner & ((kind == k_of("hold")) | (kind == k_of("screen"))) & (d_near < PIN_M)
+        x_att = torch.where(pin_att, tix, torch.full_like(tix, -1))
+        x_hold = torch.where(pin_hold, near_e - G, torch.full_like(tix, -1))
+        ar_e = torch.arange(G, device=dev)
+        pinned = ((x_att[..., None] == ar_e) | (x_hold[..., None] == ar_e)).any(1) & foe_g        # [M, G (enemy)]
+        dp = d.masked_fill(~pinned[:, None, :], float("inf"))                       # [M, G (ours), G (enemy)]
+        px = dp.argmin(-1)
+        fa = fast_g & use & ((kind == k_of("attack")) | (kind == k_of("withdraw"))) & pinned.any(-1, keepdim=True)
+        kind = torch.where(fa, torch.full_like(kind, k_of("flank")), kind)
+        target = torch.where(fa, G + px, target)
     return kind, target, use

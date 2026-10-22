@@ -55,6 +55,7 @@ import numpy as np
 import torch
 
 from tools.nn.general import deploy as gdeploy
+from tools.nn.general import groups as ggroups
 from tools.nn.general import mission as gmission
 from tools.nn.general import signal as gsignal
 from tools.nn.general import taskmask as gtaskmask
@@ -176,6 +177,8 @@ class Runtime:
         self.teach_gen = None
         self.teach_hold_m = gteacher.HOLD_M       # --general-teacher-hold-m: the groups hold while the enemy is farther
         self.teach_fire_s = gteacher.FIRE_S       # --general-teacher-fire-s: ... and our shooters fired less than this
+        self.teach_flank = True                   # --general-teacher-flank: two groups on one target - the second flanks
+        self.flank_measure = "contact"            # --general-flank-measure: flank's melee part by the contact's side
 
     # --- storage ------------------------------------------------------------------------------------------------
     def _rows(self, R):
@@ -437,7 +440,9 @@ class Runtime:
         kind, target, use = gteacher.choose(c["main"], c["active"], f("x"), f("z"), side == s[:, None], standing,
                                             (f("range") > 0) & (f("a") > 0), f("lord"), self.G, self.gcfg.kinds,
                                             tiles=tiles, tiles_ok=c["coarse_ok"], engage=engage,
-                                            hold_m=self.teach_hold_m)
+                                            hold_m=self.teach_hold_m, facing=f("b"), flank=self.teach_flank,
+                                            fast=ggroups.roles(self.b["num"][b], self.b["lab"][b])
+                                            == ggroups.ROLES.index("fast"))
         use = use & self.b["teach"][b][:, None]
         return dict(d, kind=torch.where(use, kind, d["kind"]), target=torch.where(use, target, d["target"]),
                     teach_use=use)
@@ -787,7 +792,8 @@ class Runtime:
         C = self.gcfg.target_grid ** 2
         half = self.mcfg.grid_half / self.gcfg.target_grid             # a coarse tile's half side, m
         m, ok, k = gmission.measure(env.st.u, rows % B, rows // B + 1, r["main"][rows], r["kind"][rows],
-                                    r["target"][rows], r["tgt"][rows], acting & has[:, None], G, C, half, self.gcfg)
+                                    r["target"][rows], r["tgt"][rows], acting & has[:, None], G, C, half, self.gcfg,
+                                    flank_by=self.flank_measure)
         K = self.gcfg.kinds
         okf = ok.to(torch.float64)
         kk = k.clamp(0, K - 1).reshape(-1)
