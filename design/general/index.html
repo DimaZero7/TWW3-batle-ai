@@ -791,7 +791,7 @@ a{color:inherit}
   // --- PPO исполнителя (teacher): the unit network's PPO; advantage by the unit critic + the execution bonus; the ability head has its own term
   var ZL=ZR,ZLW=ZRW,zl="";
   zl+='<path d="M'+(ZL+70)+' '+(ZB4+30)+'a32 28 0 1 1 0 48" fill="none" stroke="'+TCH+'" stroke-width="2"/><path d="M'+(ZL+70)+' '+(ZB4+78)+'l8 -6 0 10z" fill="'+TCH+'"/>';
-  zl+=tline(ZL+120,ZB4+40,"преимущество:",9)+tline(ZL+120,ZB4+54,"критик отрядов",9)+tline(ZL+120,ZB4+68,"+ доплата",9)+tteach(ZL,ZB4+108,ZLW,"учит: Исполнителя");
+  zl+=tline(ZL+120,ZB4+40,"преимущество:",9)+tline(ZL+120,ZB4+54,"критик отрядов",9)+tline(ZL+120,ZB4+68,"+ доплата",9)+tteach(ZL,ZB4+108,ZLW,"учит: Исполнителя (без головы способностей)");
   h+=G("training","t-teach",[ZL,ZB4,ZLW,ZB4H],"PPO исполнителя","учитель",zl);
   // --- Соперники (environment): who the plan is played against
   var ZE=ZG,ZEW=ZGW,ze="";
@@ -827,7 +827,7 @@ a{color:inherit}
   var ZAB=ZG,ZABW=ZGW,zab="";
   zab+='<circle cx="'+(ZAB+24)+'" cy="'+(ZB5+40)+'" r="5" fill="var(--open)"/>';
   [[-16,"нажал",1],[16,"не нажал: те же приказы",0]].forEach(function(q){zab+='<path d="M'+(ZAB+29)+' '+(ZB5+40)+'C'+(ZAB+60)+' '+(ZB5+40)+' '+(ZAB+66)+' '+(ZB5+40+q[0])+' '+(ZAB+100)+' '+(ZB5+40+q[0])+'" fill="none" stroke="'+(q[2]?'var(--open)':'var(--muted)')+'" stroke-width="'+(q[2]?2:1.4)+'"'+(q[2]?'':' stroke-dasharray="4 3"')+'/>'+tline(ZAB+104,ZB5+44+q[0],q[1],9);});
-  zab+=tline(ZAB+16,ZB5+80,"+ критик способностей · свой сигнал головы",9)+tteach(ZAB,ZB5+108,ZABW,"учит: Исполнителя (способности)");
+  zab+=tline(ZAB+16,ZB5+80,"+ критик способностей · свой сигнал головы",9)+tteach(ZAB,ZB5+108,ZABW,"учит: только голову способностей");
   h+=G("abilteach","t-teach",[ZAB,ZB5,ZABW,ZB5H],"Учитель способностей","учитель",zab);
   // ===== lines =====
   var zl2="";
