@@ -8,7 +8,7 @@ from tools.nn.general import army_input as ai                  # noqa: E402
 from tools.nn.general import config as gconfig                 # noqa: E402
 from tools.nn.general import net as gnet                       # noqa: E402
 
-CFG = gconfig.GeneralConfig(card=32, reader_hidden=32, council_heads=4)
+CFG = gconfig.GeneralConfig(card=32, reader_hidden=32, council_heads=4, groups="net")   # the learned collection's tests
 SECT = 4                                                       # 4 x 4 tiles: small tests
 G, S = CFG.places, SECT * SECT
 
@@ -91,7 +91,7 @@ def test_a_fresh_generals_groups_are_sharp_and_differ(seed):
     inp["prev"] = torch.zeros(8, 2 * G, 64, dtype=torch.float64)
     sel = inp["own"] & inp["free"]
     torch.manual_seed(seed)
-    m = gnet.General(gconfig.GeneralConfig(card=64, reader_hidden=64), SECT).double().eval()
+    m = gnet.General(gconfig.GeneralConfig(card=64, reader_hidden=64, groups="net"), SECT).double().eval()
     with torch.no_grad():
         c = m.cards(inp)
     share = float(c["shares"][..., :G].max(-1).values[sel].mean())
@@ -104,7 +104,7 @@ def test_a_fresh_generals_groups_are_sharp_and_differ(seed):
     size = float(sel.sum()) / float(act.sum())
     assert size >= 1.5, size                       # (random units, all unlike; real armies: ~3.6, build/gfix)
     torch.manual_seed(seed)
-    plain = gnet.General(gconfig.GeneralConfig(card=64, reader_hidden=64, sharp=0.0), SECT).double().eval()
+    plain = gnet.General(gconfig.GeneralConfig(card=64, reader_hidden=64, sharp=0.0, groups="net"), SECT).double().eval()
     assert plain.groups.log_sharp is None and m.groups.log_sharp is not None
     with torch.no_grad():
         sp = plain.cards(inp)["shares"][..., :G].max(-1).values[sel].mean()
@@ -296,7 +296,12 @@ def test_the_log_probability_under_the_choices_made_is_the_sampled_ones():
 
 
 def test_the_unit_cards_carry_the_gradient_to_the_group_collection_and_the_readers():
-    m, inp = model(), inputs()
+    """(One kind table and the group card in the task: GeneralConfig.split_kinds 0, task_group 1 - an older
+    checkpoint's behaviour; the new default cuts this path: test_general_repairs_torch.py.)"""
+    import dataclasses
+    torch.manual_seed(0)
+    m = gnet.General(dataclasses.replace(CFG, split_kinds=False, task_group=True), SECT).double().eval()
+    inp = inputs()
     c, d = m(inp)
     mix, kc = m.unit_cards(c, d["kind"], c["main"])
     assert torch.all(mix[~(inp["own"] & inp["free"])] == 0) and torch.all(kc[~(inp["own"] & inp["free"])] == 0)

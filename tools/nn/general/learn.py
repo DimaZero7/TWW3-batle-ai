@@ -60,6 +60,9 @@ class LearnConfig:
     max_grad: float = 0.5
     target_kl: float = 0.03    # the epochs stop when a minibatch's mean KL per group (against the policy at the
     #                            update's start) passes this (0: never)
+    kl: str = "k3"             # the KL's estimate on the choices made: "k3" (r - 1) - log r, never below 0 (r = the
+    #                            probability now / at the update's start); "k1" the mean log r, which went below 0
+    #                            when the policy sharpened and the stop never came (the atlas: -0.40)
     branches: float = 0.0      # the mission branches: the share of the plans replayed with another kind (0: off)
     branch_weight: float = 1.0  # ... their term's weight in the general's loss
     distinct: float = 0.0      # the executor's bonus for missions that tell apart: its weight W (0: off; distinct.py)
@@ -85,6 +88,8 @@ class LearnConfig:
         if not 0.0 <= self.teacher <= 1.0:
             raise ValueError("--general-teacher is a share in [0, 1]")
         exec_kinds(self.exec_kind)                 # (a bad "name=w" stops the run here)
+        if self.kl not in ("k1", "k3"):
+            raise ValueError(f"--general-kl {self.kl!r}: 'k1' or 'k3'")
         if self.teacher_hold_m < 0 or self.teacher_fire_s < 0:
             raise ValueError("--general-teacher-hold-m and --general-teacher-fire-s are >= 0")
         if self.imitate < 0 or self.imitate_decay < 0 or self.exec_general < 0:
@@ -122,7 +127,16 @@ def task_for(actor, table, obs):
     uniq, inv = torch.unique(flat.clamp(min=0), return_inverse=True)
     rec = {k: v[uniq] for k, v in table.items()}
     gen = actor.general
-    c = gen.cards(rec)
+    if getattr(gen.cfg, "split_kinds", False):
+        # the executor's own kind table (GeneralConfig.split_kinds): its gradient reaches no part of the general's
+        # choice - the group cards (when the task carries them) are computed without it
+        if getattr(gen.cfg, "task_group", True):
+            with torch.no_grad():
+                c = gen.cards(rec)
+        else:
+            c = None
+    else:
+        c = gen.cards(rec)
     mix, kc = gen.unit_cards(c, rec["kind"], rec["main"])
     cards = torch.cat([mix, kc], -1)[inv]                                      # [T * P, N, 2D]
     N = cards.shape[1]
@@ -130,6 +144,15 @@ def task_for(actor, table, obs):
     on = obs["task_on"] & ok.reshape(T, P, 1)
     geo = obs["task_geo"].to(cards.dtype)
     return torch.cat([cards, geo], -1) * on[..., None].to(cards.dtype), on
+
+
+def kl_est(lp_ref, lp, how="k3"):
+    """The KL(ref || now) estimate a choice from its log-probabilities under the reference (the sampling policy) and
+    now: "k1" lp_ref - lp; "k3" (r - 1) - log r with r = exp(lp - lp_ref), >= 0 (Schulman's estimator)."""
+    if how == "k1":
+        return lp_ref - lp
+    lr = (lp - lp_ref).clamp(-20.0, 20.0)
+    return torch.expm1(lr) - lr
 
 
 def _rows(d, idx):
@@ -286,7 +309,7 @@ def update(actor, opt, ready, cfg=LearnConfig(), branch=None, teach=None):
             loss = (pl - cfg.entropy_kind * parts[0] - cfg.entropy_target * parts[1] - cfg.entropy_place * parts[2]
                     + cfg.value * vl)
             with torch.no_grad():
-                kl = float(((lp0[mb] - d["lp"]) * m).sum() / cnt)
+                kl = float((kl_est(lp0[mb], d["lp"], cfg.kl) * m).sum() / cnt)
             if cfg.target_kl and kl > cfg.target_kl and n:
                 stop = True                          # (a minibatch past the KL: no step on it, no more epochs)
                 break

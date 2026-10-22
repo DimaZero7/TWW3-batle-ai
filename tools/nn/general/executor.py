@@ -90,6 +90,11 @@ class GeneralActor(model_policy.ActorV2):
         bad = [k for k in missing if not k.startswith(model_policy.FRESH_PARAMS + FRESH)] + list(unexpected)
         if strict and bad:
             raise RuntimeError(f"actor state does not match: {bad[:5]}")
+        if "general.exec_kinds" in missing and "general.kinds" in state_dict:
+            # a checkpoint from before the executor's own kind table (GeneralConfig.split_kinds): it starts as the
+            # general's table (the executor reads the kinds it was trained on)
+            with torch.no_grad():
+                self.general.exec_kinds.copy_(self.general.kinds)
         return missing, unexpected
 
 

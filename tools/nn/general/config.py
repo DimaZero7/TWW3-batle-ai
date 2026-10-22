@@ -112,6 +112,28 @@ class GeneralConfig:
     # --- the executor's task input ("Задание отряда") ---
     dist_m: float = 100.0      # a target's distance from the unit / this ...
     dist_cap: float = 20.0     # ... at most this
+    # --- the architecture's repairs after the module atlas of g17r (build/diag_atlas2; docs "Tried and rejected") ---
+    groups: str = "rule"       # the group collection: "rule" (groups.py: roles - shooters, melee, lord and heroes, fast -
+    #                            then clusters by place within a role, at most `places` a side, both sides alike; the
+    #                            slot attention's keys and queries take no part and learn nothing) or "net" (the learned
+    #                            slot attention: the atlas found it degenerate - one group at the first plan, cards alike)
+    group_r: float = 100.0     # ... "rule": units of a role join while their clusters' centres are closer than this, m
+    lord_join_m: float = 60.0  # ... "rule": a lone lord (or hero) joins the nearest melee group whose centre is closer
+    group_centre: bool = True  # ... "rule": a group card reads its units' values less their side's mean (how the group
+    #                            differs from its army: the council's unit cards share a large common part)
+    split_kinds: bool = True   # the executor's own mission kind table (exec_kinds; the group card detached): the
+    #                            executor's epochs no longer move the general's kind choice (the atlas: -0.21 of the
+    #                            withdraw share an update through the shared table); False: one table for both
+    tile_feats: str = "v2"     # the tiles' numbers: "v1" the unit network's 8 sector numbers; "v2" the three always
+    #                            zero in the simulator (the enemy seen earlier, own and enemy routs) replaced by own
+    #                            shooters', the enemy's shooters' and the enemy's fast units' strength (tiles.extra)
+    tile_norm: bool = True     # the tiles' numbers standardised per map (each number less its mean over the map's
+    #                            tiles, / its spread, within +-5): the raw ones hardly move (spread 0.03-0.11)
+    threat: bool = True        # the group's threat numbers (net.threat: the nearest enemy group's distance, the
+    #                            strength ratio, both shooter shares, the share in contact) added to its card before
+    #                            the kind and target choices (a linear layer from zero)
+    task_group: bool = False   # the executor's task input carries the group card (the atlas: ignored, KL 0.003);
+    #                            False: those columns are zeros (the input's width kept: older checkpoints load)
 
     def __post_init__(self):
         if self.tiles != "sectors":
@@ -131,6 +153,12 @@ class GeneralConfig:
             raise ValueError(f"general shoot_share {self.shoot_share}: a share in [0, 1]")
         if self.target_grid < 1:
             raise ValueError(f"general target_grid {self.target_grid}: >= 1")
+        if self.groups not in ("rule", "net"):
+            raise ValueError(f"general groups {self.groups!r}: 'rule' or 'net'")
+        if self.tile_feats not in ("v1", "v2"):
+            raise ValueError(f"general tile_feats {self.tile_feats!r}: 'v1' or 'v2'")
+        if self.group_r <= 0 or self.lord_join_m < 0:
+            raise ValueError("general group_r > 0, lord_join_m >= 0")
 
     @property
     def task_dim(self):
@@ -143,7 +171,26 @@ def to_dict(cfg):
     return asdict(cfg)
 
 
-def of_dict(d):
-    """A GeneralConfig of a checkpoint's dict (unknown fields ignored, missing ones default)."""
+# a checkpoint saved before the atlas's repairs has none of these fields: it plays as it was trained (these values);
+# the run's options switch them (run.general_config: they are rules, not the shape - the new weights load fresh)
+LEGACY = {"groups": "net", "split_kinds": False, "tile_feats": "v1", "tile_norm": False, "threat": False,
+          "task_group": True}
+
+
+_WARNED = []
+
+
+def of_dict(d, warn=True):
+    """A GeneralConfig of a checkpoint's dict (unknown fields ignored, missing ones default; a saved general without
+    the atlas's repairs keeps its old behaviour: LEGACY, with a warning)."""
     names = {f.name for f in fields(GeneralConfig)}
-    return GeneralConfig(**{k: v for k, v in (d or {}).items() if k in names})
+    d = dict(d or {})
+    old = [k for k in LEGACY if d and k not in d]
+    for k in old:
+        d[k] = LEGACY[k]
+    if old and warn and not _WARNED:
+        _WARNED.append(1)
+        print("general: a checkpoint saved before the atlas's repairs - its old behaviour kept ("
+              + ", ".join(f"{k}={LEGACY[k]}" for k in old) + "); the options --general-groups, --general-split-kinds, "
+              "--general-tile-feats, --general-tile-norm, --general-threat, --general-task-group switch them", flush=True)
+    return GeneralConfig(**{k: v for k, v in d.items() if k in names})

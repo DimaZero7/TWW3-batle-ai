@@ -51,6 +51,43 @@ def core(cfg, pos_m, own, attend, seen, vis, cost, hp, rout, cells_in):
                         (per[..., 6] > 0).to(f), cells_in.to(f).mean(-1)], -1)
 
 
+# GeneralConfig.tile_feats "v2": the sector numbers that are always zero in the simulator (it hides nobody, and a
+# plan's tiles hardly ever hold a rout: the atlas of g17r, their spread 0.000) give their columns to these, on the same
+# scale as the strengths (log1p(strength / STRENGTH) / log1p(40)): own shooters' strength, the enemy's shooters' (seen
+# now), the enemy's fast units' (seen now; groups.roles "fast")
+EXTRA = {4: "own_shooters", 5: "enemy_shooters", 6: "enemy_fast"}
+
+
+def extra(cfg, pos_m, own, alive, vis, cost, hp, shooter, fast):
+    """[R, S, 3] the v2 numbers (EXTRA) of plain tensors [R, N] (pos_m [R, N, 2]: forward, lateral in m)."""
+    n, s = cfg.sectors, msectors.step(cfg)
+    ij = torch.floor((pos_m + cfg.grid_half) / s).long()
+    on = (ij >= 0).all(-1) & (ij < n).all(-1)
+    idx = ij[..., 0].clamp(0, n - 1) * n + ij[..., 1].clamp(0, n - 1)
+    mine = own & alive & on
+    enemy = ~own & alive & on & vis
+    strength = (cost * hp).float()
+    one = msectors.one_hot(cfg, idx, pos_m.dtype)
+    cols = torch.stack([strength * (mine & shooter), strength * (enemy & shooter), strength * (enemy & fast)], -1)
+    per = torch.einsum("bns,bnf->bsf", one, cols.to(pos_m.dtype))
+    return torch.log1p(per / msectors.STRENGTH) / math.log1p(40.0)
+
+
+def with_extra(cfg, tiles, u, own, alive, vis, num, lab, frame):
+    """tiles [R, S, 8] with EXTRA's columns of the rows' state u [R, N] (x, z, cost, hp), own / alive / vis [R, N],
+    the slots' numbers num and labels lab (units.py: the missile range, the role) and the rows' frame."""
+    from tools.nn.general import army_input as ai
+    from tools.nn.general import groups as ggroups
+    f, l = frame.point(u["x"].float(), u["z"].float())
+    pos = torch.nan_to_num(torch.stack([f, l], -1))
+    shooter = num[..., ai.INDEX["range"]] > 0
+    fast = ggroups.roles(num, lab) == ggroups.ROLES.index("fast")
+    ex = extra(cfg, pos, own, alive, vis, u["cost"].float(), u["hp"].float(), shooter, fast)
+    out = tiles.clone()
+    out[..., list(EXTRA)] = ex.to(out.dtype)
+    return out
+
+
 def from_state(cfg, u, cost, side, frame, cells_in):
     """[R, S, 8] of the battles' state for rows of side `side` [R] (1 or 2): u the state's fields of the rows' battles
     [R, N] (x, z, side, men, hp, r, gone), cost [R, N] (multiplayer gold), frame: the rows' Frame, cells_in [R, S, k2].

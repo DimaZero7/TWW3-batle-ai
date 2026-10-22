@@ -8,9 +8,14 @@ Capture (rollout.Battles.step -> Brancher.capture, after the decision's networks
 learner's plans made for this decision (Runtime marks them "fresh": a re-plan of this step, a deployment at the end of
 the step before) are taken with the chance `share`, within `cap` an update spread over the chunk's decisions and over
 the battle kinds' slots of the branch batch (the ability branches' way: ability_branch.composition). Of a taken plan
-one of its own groups is drawn (uniformly), and for every copy c another kind b_c that takes the group's target (its
-type: config.MISSION_KINDS - an enemy group: attack, flank, shoot; our group: hold, screen, withdraw; a tile: hold,
-withdraw), `alt`: "uniform" over those, or "policy": by the general's probabilities among them. The snapshot is ability_branch.snapshot
+one of its own groups is drawn (uniformly), and for every copy c another kind b_c, `alt`: "uniform" over the
+candidates, or "policy": by the general's probabilities among them. The candidates (Config.kinds): "all" - every kind
+the general could give the group at the plan (its kind_logp not masked), each with its own target: the group's target
+when the kind takes it, else the natural one of its types (alt_targets: attack / flank / shoot the nearest enemy group,
+hold the coarse tile the group stands on, screen our nearest other group, withdraw to our nearest other group or else
+the tile nearest the point WITHDRAW_M behind it); "target" - only the kinds that take the group's target as it is
+(config.MISSION_KINDS - an enemy group: attack, flank, shoot; our group: hold, screen, withdraw; a tile: hold,
+withdraw): the atlas of g17r found it biased - withdraw was compared only with hold and screen, never with attack. The snapshot is ability_branch.snapshot
 (the battle before the decision's simulator steps, the networks' memories after it, the decision's orders, the
 general's plans in force); the plan's record (Runtime.record) and the kind's log-probability go with it.
 
@@ -47,6 +52,8 @@ from tools.nn.train import ability_branch as ab
 from tools.nn.train import reward
 
 ALTS = ("uniform", "policy")
+KINDS = ("all", "target")
+WITHDRAW_M = 300.0          # a withdraw without another group of ours: to the tile nearest this far behind the group
 PRICES = ("trade", "reward")
 ZERO = ab.ZERO              # a price within this share of the budget either way is "even" (the log's better / worse)
 ADV_FLOOR = ab.ADV_FLOOR    # the weighted prices' root mean square at least this (budget share)
@@ -63,6 +70,7 @@ class Config:
     alt: str = "uniform"        # the other kind: "uniform" over the K - 1 others, "policy" by the general without a
     price: str = "trade"        # "trade": the gold exchange at the horizon; "reward": the side's reward over it
     greedy: bool = False        # the branches' networks take their most likely action, not a sample
+    kinds: str = "all"          # the other kinds: "all" (each with its own target) or "target" (those taking the target)
     seed: int = 0
 
     def __post_init__(self):
@@ -70,6 +78,8 @@ class Config:
             raise ValueError(f"general branches: share {self.share} not in (0, 1]")
         if self.alt not in ALTS:
             raise ValueError(f"general branches: alt {self.alt!r} not one of {ALTS}")
+        if self.kinds not in KINDS:
+            raise ValueError(f"general branches: kinds {self.kinds!r} not one of {KINDS}")
         if self.price not in PRICES:
             raise ValueError(f"general branches: price {self.price!r} not one of {PRICES}")
         if self.copies < 1 or self.horizon_s <= 0 or self.batch < 1 or self.cap < 0:
@@ -100,27 +110,93 @@ def side_reward(env, r, side):
     return torch.where(p >= 0, r[p.clamp(min=0)], torch.zeros_like(p, dtype=r.dtype))
 
 
-def swap_kind(env, actor, side, group, alt):
+def swap_kind(env, actor, side, group, alt, target=None, tgt=None):
     """A branch env's plans with one group's mission kind changed: battle j's side side[j], its group group[j] (our
-    place index; -1: none) gets kind alt[j] (-1: none) - the kind card of the group's units = the general's
-    kinds[alt]."""
+    place index; -1: none) gets kind alt[j] (-1: none) - the kind card of the group's units = the executor's table's
+    row alt (General.exec_table) - and, given, the target target[j] (-1: kept) with its world point tgt[j] (NaN for a
+    group)."""
     rt = env.general_rt
     n = len(side)
     row = (side - 1) * n + torch.arange(n, device=side.device)
     ok = (group >= 0) & (alt >= 0)
     main = rt.r["main"][row]
     hit = (main == group[:, None]) & ok[:, None]                                    # [n, N]
-    card = actor.general.kinds.detach()[alt.clamp(min=0)].to(rt.r["kc"].dtype)      # [n, D]
+    card = actor.general.exec_table().detach()[alt.clamp(min=0)].to(rt.r["kc"].dtype)     # [n, D]
     rt.r["kc"][row] = torch.where(hit[..., None], card[:, None, :], rt.r["kc"][row])
     # (the kind itself too: the task's masks follow it, taskmask.py)
     G = rt.r["kind"].shape[1]
     gk = (torch.arange(G, device=side.device) == group[:, None]) & ok[:, None]      # [n, G]
     rt.r["kind"][row] = torch.where(gk, alt[:, None].clamp(min=0), rt.r["kind"][row])
+    if target is not None:
+        gt = gk & (target >= 0)[:, None]
+        rt.r["target"][row] = torch.where(gt, target[:, None].clamp(min=0), rt.r["target"][row])
+        rt.r["tgt"][row] = torch.where(gt[..., None], tgt[:, None, :].to(rt.r["tgt"].dtype), rt.r["tgt"][row])
 
 
-def play_kinds(template, actor, snap, side, group, alt, copies, decisions, seed, price="trade", greedy=False):
+def alt_targets(rt, rows, group, alt):
+    """(target [k, C], tgt [k, C, 2]) of the other kinds alt [k, C] of the plans of rows [k] and their group [k]
+    (Config.kinds "all", module doc): the group's own target where the kind takes it, else the natural one of the
+    kind's types; tgt the world point of a coarse tile (NaN for a group)."""
+    r, G = rt.r, rt.G
+    gen = rt.learner.general
+    C = gen.C
+    dev = rows.device
+    k = len(rows)
+    ar = torch.arange(k, device=dev)
+    main = r["main"][rows]
+    pos = r["in/pos"][rows].float()
+    known = r["in/on"][rows] & (r["in/own"][rows] | (pos[..., -1] > 0.5))
+    xy = pos[..., :2] * 500.0                                                       # net.POS_M: the side's frame, m
+    mem = ((main[..., None] == torch.arange(2 * G, device=dev)) & known[..., None]).float()
+    n = mem.sum(1)
+    cent = torch.einsum("kng,knc->kgc", mem, xy) / n.clamp(min=1)[..., None]       # [k, 2G, 2]
+    active = r["active"][rows] & (n > 0)
+    from tools.nn.general import tiles as gtiles
+    tc = gtiles.coarse_centres(rt.mcfg, gen.cfg.target_grid, dev)                   # [C, 2] frame, m
+    cidx = gtiles.coarse_index(rt.mcfg.sectors, gen.cfg.target_grid, dev)
+    c_ok = torch.zeros(k, C, device=dev).index_add_(1, cidx, r["in/tile_ok"][rows].float()) > 0
+    me = cent[ar, group]                                                            # [k, 2]
+    not_me = torch.ones(k, 2 * G, dtype=torch.bool, device=dev)
+    not_me[ar, group] = False
+    inf = float("inf")
+    d_g = (cent - me[:, None]).norm(dim=-1).masked_fill(~(active & not_me), inf)  # [k, 2G]
+    d_own, d_foe = d_g[:, :G], d_g[:, G:]
+    near_own, near_foe = d_own.argmin(-1), G + d_foe.argmin(-1)
+    has_own, has_foe = torch.isfinite(d_own.min(-1).values), torch.isfinite(d_foe.min(-1).values)
+    d_t = (tc[None] - me[:, None]).norm(dim=-1).masked_fill(~c_ok, inf)           # [k, C]
+    here = 2 * G + d_t.argmin(-1)
+    back = me.clone()
+    back[:, 0] = back[:, 0] - WITHDRAW_M
+    behind = 2 * G + (tc[None] - back[:, None]).norm(dim=-1).masked_fill(~c_ok, inf).argmin(-1)
+    from tools.nn.general.config import MISSION_KINDS
+    by = {m.name: m.index for m in MISSION_KINDS}
+    nat = torch.full((k, gen.cfg.kinds), -1, dtype=torch.long, device=dev)          # each kind's natural target
+    for name in ("attack", "flank", "shoot"):
+        if by[name] < gen.cfg.kinds:
+            nat[:, by[name]] = torch.where(has_foe, near_foe, torch.full_like(near_foe, -1))
+    if by["hold"] < gen.cfg.kinds:
+        nat[:, by["hold"]] = here
+    if by["screen"] < gen.cfg.kinds:
+        nat[:, by["screen"]] = torch.where(has_own, near_own, torch.full_like(near_own, -1))
+    if by["withdraw"] < gen.cfg.kinds:
+        nat[:, by["withdraw"]] = torch.where(has_own, near_own, behind)
+    cur = r["target"][rows].gather(1, group[:, None])[:, 0]                         # [k]
+    pair = gen.pair_ok.to(dev)                                                      # [K, 2G + C]
+    keep = pair[alt.clamp(min=0), cur[:, None].expand_as(alt)]                       # [k, C]
+    target = torch.where(keep, cur[:, None].expand_as(alt), nat.gather(1, alt.clamp(min=0)))
+    ti = target - 2 * G
+    is_t = (ti >= 0) & (ti < C)
+    tw = r["tile_w"][rows]                                                          # [k, C', 2] world
+    w = tw.gather(1, ti.clamp(0, C - 1)[..., None].expand(-1, -1, 2))
+    tgt = torch.where(is_t[..., None], w, torch.full_like(w, float("nan")))
+    return target, tgt
+
+
+def play_kinds(template, actor, snap, side, group, alt, copies, decisions, seed, price="trade", greedy=False,
+               alt_t=None, alt_w=None):
     """The two branches of each snapshot battle (snap: b battles; side, group [b]: the plan's side and group, alt
-    [b, copies]: copy c's other kind), `decisions` decisions (the snapshot's own first). -> (diff [b, copies]: price
+    [b, copies]: copy c's other kind; alt_t [b, copies], alt_w [b, copies, 2]: its target and the target's world point,
+    None: the target kept), `decisions` decisions (the snapshot's own first). -> (diff [b, copies]: price
     "chosen" - "other" (module doc), budget [b, copies] gold)."""
     b = len(snap["keys"])
     dev = template.device
@@ -133,7 +209,8 @@ def play_kinds(template, actor, snap, side, group, alt, copies, decisions, seed,
     for name in ("chosen", "other"):
         env, parts, scripted = ab.branch_env(template, big)
         if name == "other":
-            swap_kind(env, actor, s_rep, group[rep], alt.reshape(-1))
+            swap_kind(env, actor, s_rep, group[rep], alt.reshape(-1),
+                      None if alt_t is None else alt_t.reshape(-1), None if alt_w is None else alt_w.reshape(-1, 2))
         if greedy:
             env._act = ab._greedy_act(env)
         envs[name] = (env, parts, scripted)
@@ -254,9 +331,13 @@ class Brancher:
                 return
             nz = nz[torch.tensor(keep, dtype=torch.long, device=nz.device)]
         K = r["kind_logp"].shape[-1]
-        # the kinds that take each group's target (its type; config.MISSION_KINDS): the swap keeps the target
-        pair = rt.learner.general.pair_ok.to(env.device)                                # [K, 2G + C]
-        valid = pair[:, r["target"][nz]].permute(1, 2, 0)                                # [k, G, K]
+        if self.cfg.kinds == "all":
+            # every kind the general could give the group at the plan (not masked), each with its own target
+            valid = r["kind_logp"][nz] > -1e6                                           # [k, G, K]
+        else:
+            # the kinds that take each group's target (its type; config.MISSION_KINDS): the swap keeps the target
+            pair = rt.learner.general.pair_ok.to(env.device)                            # [K, 2G + C]
+            valid = pair[:, r["target"][nz]].permute(1, 2, 0)                            # [k, G, K]
         chosen = torch.nn.functional.one_hot(r["kind"][nz], K).bool()
         can = r["active"][nz, :G] & (valid & ~chosen).any(-1)                            # a group with another kind
         keep = can.any(-1)
@@ -270,12 +351,18 @@ class Brancher:
         logp = r["kind_logp"][nz].gather(1, g[:, None, None].expand(-1, 1, K))[:, 0]       # [k, K]
         lp = logp.gather(1, kind[:, None])[:, 0]
         alt, w = self.alternatives(logp, kind, valid.gather(1, g[:, None, None].expand(-1, 1, K))[:, 0])
+        if self.cfg.kinds == "all":
+            alt_t, alt_w = alt_targets(rt, nz, g, alt)
+        else:
+            alt_t = torch.full_like(alt, -1)
+            alt_w = torch.full(alt.shape + (2,), float("nan"), device=alt.device)
         b = nz % B
         ub, inv = torch.unique(b, return_inverse=True)
         c.snaps.append(ab.snapshot(env, ub, info))
         c.recs.append(rt.record(nz))
         c.entries.append({"t": torch.full_like(nz, t), "side": nz // B + 1, "group": g, "kind": kind, "lp": lp,
-                          "alt": alt, "w": w.float(), "at": c.n_battles + inv, "new": r["new"][nz].clone()})
+                          "alt": alt, "w": w.float(), "at": c.n_battles + inv, "new": r["new"][nz].clone(),
+                          "alt_t": alt_t, "alt_w": alt_w.float()})
         c.n_battles += len(ub)
         c.taken += len(nz)
 
@@ -345,15 +432,18 @@ class Brancher:
             ix = torch.tensor(part, dtype=torch.long, device=dev)
             sub = ab.select(snap, at[ix])
             side, group, alt = e["side"][ix], e["group"][ix], e["alt"][ix]
+            alt_t, alt_w = e["alt_t"][ix], e["alt_w"][ix]
             if fill:
                 ps, _, pside, _ = ab.pad_snap(env, sub, 0, fill)
                 sub = ab.concat([sub, ps])
                 side = torch.cat([side, pside])
                 group = torch.cat([group, torch.full_like(pside, -1)])
                 alt = torch.cat([alt, torch.full((len(fill), K), -1, dtype=alt.dtype, device=dev)])
+                alt_t = torch.cat([alt_t, torch.full((len(fill), K), -1, dtype=alt_t.dtype, device=dev)])
+                alt_w = torch.cat([alt_w, torch.full((len(fill), K, 2), float("nan"), device=dev)])
             self.calls += 1
             d, bg = play_kinds(env, actor, sub, side, group, alt, K, decisions, cfg.seed + self.calls, cfg.price,
-                               cfg.greedy)
+                               cfg.greedy, alt_t, alt_w)
             diff[ix] = d[:len(part)]
             budget[ix] = bg[:len(part)]
             played += 2 * K * (len(part) + len(fill))

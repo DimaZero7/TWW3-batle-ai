@@ -53,6 +53,13 @@ from tools.nn.general.config import MISSION_KINDS
 from tools.nn.model.encoder import Block
 
 NEG = -1e9
+# a group's threat numbers (General.threat; GeneralConfig.threat): the nearest enemy group's distance (/ THREAT_D m,
+# at most 3), log of the strength ratio own : that group's (cost x health come, within +-3), the shooters' share in the
+# group and in that group, the share of the group's units with an enemy unit closer than CONTACT_M (in contact), an
+# enemy group there is
+THREAT = ("enemy_dist", "strength_ratio", "own_shooters", "enemy_shooters", "contact", "has_enemy")
+THREAT_D = 500.0
+CONTACT_M = 40.0
 INPUTS = ("num", "lab", "pos", "on", "own", "free", "tiles", "tile_ok", "zone", "deploy", "prev", "has_prev",
           "prev_main", "prev_kind")
 CHOICES = ("kind", "target", "place")
@@ -141,6 +148,32 @@ class SlotGroups(nn.Module):
             attn = torch.softmax(logits.masked_fill(~ok, NEG), -1) * keep
             w = attn / (attn.sum(1, keepdim=True) + 1e-6)
             upd = torch.einsum("png,pnd->pgd", w, v)
+            slots = self.gru(upd.reshape(-1, d), slots.reshape(-1, d)).reshape(P, -1, d)
+            slots = slots + self.ff(slots)
+        return attn, slots
+
+    def fixed(self, u, main, prev=None, has_prev=None, own=None):
+        """The places' cards of a membership given (GeneralConfig.groups "rule": main [P, N] each unit's group number,
+        -1 none), the groups in their numbers' order: each place starts from its learned card (or, in a re-plan, the
+        last plan's card of that number) and takes the mean of its units' values through the rounds' GRU and
+        feed-forward - the attention's keys, queries, sharpness, centring and stick take no part. -> (shares [P, N, 2G]:
+        the membership one-hot, place cards [P, 2G, D])."""
+        P, N, d = u.shape
+        slots = self.start[None].expand(P, -1, -1)
+        if prev is not None:
+            slots = torch.where(has_prev.reshape(-1, 1, 1), prev.to(slots.dtype), slots)
+        v = self.v(self.norm_in(u))
+        attn = (main[..., None] == torch.arange(2 * self.G, device=u.device)).to(u.dtype)
+        if own is not None:
+            # (GeneralConfig.group_centre) each side's mean value over its grouped units taken off
+            ing = main >= 0
+            for side in (own, ~own):
+                w = (ing & side).to(v.dtype)[..., None]
+                mean = (v * w).sum(1, keepdim=True) / w.sum(1, keepdim=True).clamp(min=1.0)
+                v = torch.where(side[..., None], v - mean, v)
+        w = attn / (attn.sum(1, keepdim=True) + 1e-6)
+        upd = torch.einsum("png,pnd->pgd", w, v)
+        for _ in range(self.rounds):
             slots = self.gru(upd.reshape(-1, d), slots.reshape(-1, d)).reshape(P, -1, d)
             slots = slots + self.ff(slots)
         return attn, slots
@@ -277,6 +310,13 @@ class General(nn.Module):
         self.place_q = mlp(2 * d, 2 * d, d)
         self.place_k = nn.Linear(d, d)
         self.value = mlp(4 * d + 1, d, 1)
+        # (after every older part: an older checkpoint's parameters keep their order, these load fresh)
+        # the executor's own mission kind table (GeneralConfig.split_kinds; a copy of the general's at the start - an
+        # older checkpoint's too, executor.load_state_dict) and the groups' threat numbers' layer (from zero)
+        self.exec_kinds = nn.Parameter(self.kinds.detach().clone())
+        self.threat_in = nn.Linear(len(THREAT), d)
+        nn.init.zeros_(self.threat_in.weight)
+        nn.init.zeros_(self.threat_in.bias)
 
     # --- the cards ---------------------------------------------------------------------------------------------
     def coarse_tiles(self, tiles, tile_ok):
@@ -300,8 +340,8 @@ class General(nn.Module):
         u = self.reader(inp["num"], inp["lab"], ~on)
         pos = inp["pos"].to(u.dtype) * on[..., None].to(u.dtype)
         u = u + (self.label((~own).long()) + self.pos_in(pos)) * on[..., None].to(u.dtype)
-        t = (self.tile_in(inp["tiles"].to(u.dtype)) + self.tile_place + self.label.weight[2]
-             + self.pos_in(self.tile_pos.to(u.dtype)))
+        t = (self.tile_in(self.tile_numbers(inp["tiles"].to(u.dtype), inp["tile_ok"])) + self.tile_place
+             + self.label.weight[2] + self.pos_in(self.tile_pos.to(u.dtype)))
         x = self.norm_in(torch.cat([u, t], 1))
         ok = torch.cat([on, inp["tile_ok"]], 1)
         bias = key_bias(ok, self.cfg.council_heads).to(x.dtype)
@@ -309,9 +349,23 @@ class General(nn.Module):
             x = block(x, bias)
         x = self.norm_out(x)
         units, tiles = x[:, :N], x[:, N:]
+        free = inp["free"]
+        if getattr(self.cfg, "groups", "net") == "rule":
+            # the groups by the rule (groups.py), numbered by their units (match_groups); the cards of that membership
+            if inp.get("main") is not None:
+                main, perm = inp["main"], inp["perm"]
+            else:
+                from tools.nn.general import groups as ggroups
+                raw = ggroups.collect(inp["num"], inp["lab"], inp["pos"], own, free, G, self.cfg.group_r,
+                                      self.cfg.lord_join_m)
+                prev_main = inp.get("prev_main")
+                perm = match_groups(raw, torch.full_like(raw, -1) if prev_main is None else prev_main, G)
+                main = renumber(perm, raw)
+            shares, places = self.groups.fixed(units, main, inp.get("prev"), inp.get("has_prev"),
+                                               own if getattr(self.cfg, "group_centre", False) else None)
+            return self._after_groups(inp, tiles, shares, places, main, perm, units)
         shares, places = self.groups(units, own, inp["free"], inp.get("prev"), inp.get("has_prev"), pos,
                                      inp.get("prev_main"))
-        free = inp["free"]
         if inp.get("main") is not None:
             # the plan's own membership and numbering, locked (a re-computation of a plan made: the update, the
             # refresh); the shares and cards are computed again (the gradient's path)
@@ -323,6 +377,22 @@ class General(nn.Module):
             main = renumber(perm, raw)
         shares = shares.gather(2, perm[:, None, :].expand(-1, N, -1))
         places = places.gather(1, perm[..., None].expand(-1, -1, places.shape[-1]))
+        return self._after_groups(inp, tiles, shares, places, main, perm, units)
+
+    def tile_numbers(self, tiles, tile_ok):
+        """The tiles' numbers as the network reads them: with GeneralConfig.tile_norm each number less its mean over
+        the map's tiles (tile_ok), / its spread there (+ a floor), within +-5 - the raw numbers hardly move (the atlas:
+        spread 0.03-0.11, the tiles' input 2 % of their token); else as they are."""
+        if not getattr(self.cfg, "tile_norm", False):
+            return tiles
+        w = tile_ok.to(tiles.dtype)[..., None]
+        n = w.sum(1, keepdim=True).clamp(min=1.0)
+        mean = (tiles * w).sum(1, keepdim=True) / n
+        var = (((tiles - mean) ** 2) * w).sum(1, keepdim=True) / n
+        return (((tiles - mean) / torch.sqrt(var + 1e-4)).clamp(-5.0, 5.0)) * w
+
+    def _after_groups(self, inp, tiles, shares, places, main, perm, units=None):
+        G = self.cfg.places
         hit = main[..., None] == torch.arange(2 * G, device=main.device)
         active = hit.any(1)
         keys = torch.cat([tiles, places], 1)
@@ -349,6 +419,9 @@ class General(nn.Module):
         G = self.cfg.places
         g, tiles, active = c["groups"], c["tiles"], c["active"]
         d = g.shape[-1]
+        if getattr(self.cfg, "threat", False):
+            # the groups' threat numbers on our groups' cards (GeneralConfig.threat)
+            g = torch.cat([g[:, :G] + self.threat_in(self.threat(inp, c).to(g.dtype)), g[:, G:]], 1)
         mine = active[:, :G]                                                  # [P, G] our groups choose
         act = act or {}
         cand_ok = torch.cat([active, c["coarse_ok"]], 1)                      # [P, 2G + C]
@@ -416,6 +489,41 @@ class General(nn.Module):
         out[..., shoot] = (n_sh > 0) & (n_sh >= share * n)                               # [P, G]
         return out
 
+    def threat(self, inp, c):
+        """[P, G, len(THREAT)] our groups' threat numbers (THREAT) on the plan's input (the units taking part, inp "on";
+        an enemy unit only where known - its place's flag) and membership c["main"]; zeros for a place that is not a
+        group, the enemy's numbers zeros where no enemy group is."""
+        from tools.nn.general import army_input as ai
+        G = self.cfg.places
+        main, on, own = c["main"], inp["on"], inp["own"]
+        pos = inp["pos"].float()
+        known = on & (own | (pos[..., -1] > 0.5))
+        xy = pos[..., :2] * POS_M
+        mem = (main[..., None] == torch.arange(2 * G, device=main.device)) & known[..., None]    # [P, N, 2G]
+        mf = mem.float()
+        n = mf.sum(1)                                                                            # [P, 2G]
+        cent = torch.einsum("png,pnc->pgc", mf, xy) / n.clamp(min=1)[..., None]
+        num = inp["num"].float()
+        cost = torch.expm1(num[..., ai.INDEX["cost"]] * math.log1p(5000.0)) * num[..., ai.INDEX["hp_come"]]
+        strength = torch.einsum("png,pn->pg", mf, cost)
+        shooter = (num[..., ai.INDEX["range"]] > 0).float()
+        sh = torch.einsum("png,pn->pg", mf, shooter) / n.clamp(min=1)
+        own_g, foe_g = n[:, :G] > 0, n[:, G:] > 0
+        dg = (cent[:, :G, None] - cent[:, None, G:]).norm(dim=-1).masked_fill(~foe_g[:, None, :], float("inf"))
+        dmin, near = dg.min(-1)                                                                  # [P, G]
+        has_e = foe_g.any(-1, keepdim=True).expand_as(dmin) & own_g
+        fz = torch.zeros_like(dmin)
+        dist = torch.where(has_e, (dmin / THREAT_D).clamp(max=3.0), fz)
+        s_e = strength[:, G:].gather(1, near)
+        ratio = torch.where(has_e, torch.log((strength[:, :G] + 1.0) / (s_e + 1.0)).clamp(-3.0, 3.0), fz)
+        sh_e = torch.where(has_e, sh[:, G:].gather(1, near), fz)
+        foe_u = known & ~own
+        du = (xy[:, :, None] - xy[:, None, :]).norm(dim=-1).masked_fill(~foe_u[:, None, :], float("inf"))
+        touch = ((du.min(-1).values < CONTACT_M) & own & known).float()                           # [P, N]
+        contact = torch.einsum("png,pn->pg", mf[..., :G], touch) / n[:, :G].clamp(min=1)
+        out = torch.stack([dist, ratio, sh[:, :G], sh_e, contact, has_e.float()], -1)
+        return out * own_g[..., None].float()
+
     def kind_bonus(self, inp, c, k_logits):
         """[P, G, K] the kind's inertia of a re-plan (GeneralConfig.kind_stick B): + B on a group's logit of the kind its
         number had in the last plan (inp prev_kind [P, G], -1 none), when the group kept some of that number's units
@@ -438,13 +546,26 @@ class General(nn.Module):
         return c, self.decide(inp, c, act, greedy)
 
     # --- the executor's cards ----------------------------------------------------------------------------------
+    def exec_table(self):
+        """The mission kind table the executor reads (GeneralConfig.split_kinds: its own, exec_kinds; else the
+        general's, kinds)."""
+        return self.exec_kinds if getattr(self.cfg, "split_kinds", False) else self.kinds
+
     def unit_cards(self, c, kind, main):
         """The task's cards of every unit ("Задание отряда"): (its group card = the mix of our places' cards by its
-        shares [P, N, D] - so the executor's gradient reaches the group collection -, its group's mission kind
-        card [P, N, D]; zeros for a unit without a group). kind [P, G], main [P, N] (the plan's, locked)."""
+        shares [P, N, D] - so the executor's gradient reaches the group collection; detached with
+        GeneralConfig.split_kinds; zeros without GeneralConfig.task_group or without c -, its group's mission kind
+        card [P, N, D] of exec_table(); zeros for a unit without a group). kind [P, G], main [P, N] (the plan's,
+        locked)."""
         G = self.cfg.places
-        mix = torch.einsum("png,pgd->pnd", c["shares"][..., :G], c["groups"][:, :G])
-        kc = self.kinds[kind]                                                 # [P, G, D]
+        D = self.kinds.shape[1]
+        if c is None or not getattr(self.cfg, "task_group", True):
+            mix = self.kinds.new_zeros(main.shape + (D,))
+        else:
+            mix = torch.einsum("png,pgd->pnd", c["shares"][..., :G], c["groups"][:, :G])
+            if getattr(self.cfg, "split_kinds", False):
+                mix = mix.detach()
+        kc = self.exec_table()[kind]                                          # [P, G, D]
         has = (main >= 0) & (main < G)
         idx = main.clamp(0, G - 1)
         kcu = kc.gather(1, idx[..., None].expand(-1, -1, kc.shape[-1]))

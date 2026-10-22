@@ -186,6 +186,7 @@ class Runtime:
              "main": z(R, N, dt=L) - 1, "perm": z(R, 2 * G, dt=L) + torch.arange(2 * G, device=dev),
              "kind": z(R, G, dt=L), "target": z(R, G, dt=L),
              "place": z(R, G, dt=L) - 1, "tgt": z(R, G, 2), "mix": z(R, N, D), "kc": z(R, N, D),
+             "tile_w": z(R, self.gcfg.target_grid ** 2, 2),
              "places": z(R, 2 * G, D), "members": z(R, G), "lords": z(R, 2, dt=Bo), "r_sum": z(R),
              "n_replan": z(R, dt=L), "lp": z(R, G), "value": z(R), "active": z(R, 2 * G, dt=Bo),
              "r_disc": z(R), "v_start": z(R) + float("nan"),
@@ -270,6 +271,10 @@ class Runtime:
             o = {k: obs[k][rows] for k in ("tokens", "own", "attend", "pos")}
             tiles = gtiles.from_obs(self.mcfg, o, cells_in)
             pos = self.pos_of_obs(o)
+        if getattr(self.gcfg, "tile_feats", "v1") == "v2":
+            # the three numbers always zero in the simulator replaced (GeneralConfig.tile_feats; tiles.extra)
+            vis = present if deploy else (u["vis"] & present)
+            tiles = gtiles.with_extra(self.mcfg, tiles, u, own, alive & present, vis, num, self.b["lab"][b], frame)
         tile_ok = cells_in.any(-1)
         if deploy and self.gcfg.deploy == "net":
             valid = self.zone.valid(u, s)
@@ -363,6 +368,7 @@ class Runtime:
         for k, v in inp.items():
             r["in/" + k][rows] = v.to(r["in/" + k].dtype)
         r["tgt"][rows] = tgt
+        r["tile_w"][rows] = tile_w.to(r["tile_w"].dtype)          # the coarse tiles' world points (branch.alt_targets)
         r["members"][rows] = members
         r["lords"][rows] = torch.stack([own_alive, foe_alive], -1)
         r["t_plan"][rows] = env.st.t[b].float()

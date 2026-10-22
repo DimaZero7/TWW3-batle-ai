@@ -254,14 +254,14 @@ def test_a_plan_keeps_the_log_probability_it_was_made_with():
     actor, crit = nets()
     env.step(actor, crit)
     rt = env.general_rt
-    lp0, mix0 = rt.r["lp"].clone(), rt.r["mix"].clone()
+    lp0, mix0 = rt.r["lp"].clone(), rt.r["places"].clone()     # (the places' cards: the task's group card is 0)
     with torch.no_grad():
         for p in actor.general.parameters():
             p.add_(torch.randn_like(p) * 0.05)
     rt.learner = actor
     rt.begin_chunk(env)
     assert torch.equal(rt.r["lp"], lp0)
-    assert not torch.allclose(rt.r["mix"], mix0)
+    assert not torch.allclose(rt.r["places"], mix0)
     t = rt.end_chunk()["table"]
     mine = (rt.r["has"] & (rt.r["owner"] == 0)).nonzero().squeeze(1)
     torch.testing.assert_close(t["lp"], lp0[mine], rtol=0, atol=0)

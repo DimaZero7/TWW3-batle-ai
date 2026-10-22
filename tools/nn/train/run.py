@@ -295,7 +295,11 @@ GENERAL_FLAGS = {"card": "general_card", "reader_hidden": "general_hidden", "cou
                  "task_mask_parts": "general_task_mask_parts",
                  "shoot_share": "general_shoot_share",
                  "tiles": "general_tiles", "effects": "general_effects", "zone": "general_zone",
-                 "deploy": "general_deploy", "replan_s": "general_replan_s", "replan_min_s": "general_replan_min_s"}
+                 "deploy": "general_deploy", "replan_s": "general_replan_s", "replan_min_s": "general_replan_min_s",
+                 "groups": "general_groups", "group_r": "general_group_r", "lord_join_m": "general_lord_join_m",
+                 "group_centre": "general_group_centre",
+                 "split_kinds": "general_split_kinds", "tile_feats": "general_tile_feats",
+                 "tile_norm": "general_tile_norm", "threat": "general_threat", "task_group": "general_task_group"}
 # the fields that make the network's shape (the saved weights fit only them; center: 0 has no weight, any other value
 # is only the learned share's start - the saved weight is the share): an option cannot change them on an --init's general
 GENERAL_SHAPE = ("card", "reader_hidden", "council_layers", "council_heads", "group_layers", "places", "kinds",
@@ -358,7 +362,8 @@ def with_general(actor, args):
                              exec=args.general_exec, exec_decay=args.general_exec_decay, teacher=args.general_teacher,
                              imitate=args.general_imitate, imitate_decay=args.general_imitate_decay,
                              exec_general=args.general_exec_general, exec_kind=args.general_exec_kind,
-                             teacher_hold_m=args.general_teacher_hold_m, teacher_fire_s=args.general_teacher_fire_s)
+                             teacher_hold_m=args.general_teacher_hold_m, teacher_fire_s=args.general_teacher_fire_s,
+                             kl=args.general_kl)
     print(f"general: {actor.gcfg}; learning {cfg}; return {args.general_return}; lr x {args.general_lr_mult:g}",
           flush=True)
     return actor, cfg
@@ -372,7 +377,8 @@ def general_brancher(args, glearn_cfg, device):
     return gbranch.Brancher(gbranch.Config(
         share=glearn_cfg.branches, copies=args.general_branch_copies, horizon_s=args.general_branch_horizon,
         cap=args.general_branch_cap, batch=args.general_branch_batch, alt=args.general_branch_alt,
-        price=args.general_branch_price, greedy=args.general_branch_greedy, seed=args.seed), device)
+        price=args.general_branch_price, greedy=args.general_branch_greedy, kinds=args.general_branch_kinds,
+        seed=args.seed), device)
 
 
 MISSION_NAMES = {k.name for k in MISSION_KINDS}
@@ -1517,6 +1523,36 @@ def parser():
     ap.add_argument("--general-shoot-share", type=float, default=0.5,
                     help="general: with --general-task-mask 1, 'shoot' only for a group whose shooters (a missile range "
                          "on the card) are at least this share of its units (a rule, saved with the checkpoint)")
+    ap.add_argument("--general-groups", default="rule", choices=("rule", "net"),
+                    help="general: the group collection - 'rule' (tools/nn/general/groups.py: roles, then clusters by "
+                         "place, both sides alike; the attention's collection learns nothing) or 'net' (the learned slot "
+                         "attention; the atlas of g17r: degenerate). Saved with the checkpoint (an older one: net)")
+    ap.add_argument("--general-group-r", type=float, default=100.0,
+                    help="general: with --general-groups rule, units of a role join while their clusters' centres are "
+                         "closer than this (m)")
+    ap.add_argument("--general-lord-join-m", type=float, default=60.0,
+                    help="general: with --general-groups rule, a lone lord or hero joins the nearest melee group within "
+                         "this (m)")
+    ap.add_argument("--general-group-centre", type=lambda v: bool(int(v)), default=True,
+                    help="general: with --general-groups rule, 1 a group card reads its units' values less their side's "
+                         "mean (how the group differs from its army)")
+    ap.add_argument("--general-split-kinds", type=lambda v: bool(int(v)), default=True,
+                    help="general: 1 the executor reads its own mission kind table (the group card detached): its epochs "
+                         "do not move the general's choice; 0: one table (an older checkpoint: 0)")
+    ap.add_argument("--general-tile-feats", default="v2", choices=("v1", "v2"),
+                    help="general: the tiles' numbers - v2: the three always zero in the simulator replaced by own and "
+                         "enemy shooters' and enemy fast units' strength; v1: the sectors' 8 (an older checkpoint: v1)")
+    ap.add_argument("--general-tile-norm", type=lambda v: bool(int(v)), default=True,
+                    help="general: 1 the tiles' numbers standardised over the map (an older checkpoint: 0)")
+    ap.add_argument("--general-threat", type=lambda v: bool(int(v)), default=True,
+                    help="general: 1 the groups' threat numbers (nearest enemy group's distance, strength ratio, "
+                         "shooter shares, contact) on their cards before the kind and target (an older checkpoint: 0)")
+    ap.add_argument("--general-task-group", type=lambda v: bool(int(v)), default=False,
+                    help="general: 1 the executor's task carries the group card; 0 zeros there (the width kept; an "
+                         "older checkpoint: 1)")
+    ap.add_argument("--general-kl", default="k3", choices=("k1", "k3"),
+                    help="general: the KL stop's estimate - k3 (r - 1) - log r >= 0; k1 the mean log-ratio (went below "
+                         "0 as the policy sharpened: no stop)")
     ap.add_argument("--general-stick", type=float, default=1.0,
                     help="general: a re-plan's bonus on a unit's logit of its last group in the group collection (a "
                          "learned value, starts here; the groups' inertia - 0: none)")
@@ -1569,6 +1605,9 @@ def parser():
                          "probabilities without the chosen one (the price then x (1 - pi(chosen)))")
     ap.add_argument("--general-branch-price", default="trade", choices=("trade", "reward"),
                     help="general branches: the price - the gold exchange at the horizon, or the side's reward over it")
+    ap.add_argument("--general-branch-kinds", default="all", choices=("all", "target"),
+                    help="general branches: the other kinds - all (every kind the group could take, each with its own "
+                         "target) or target (only those taking the group's target: biased, withdraw never met attack)")
     ap.add_argument("--general-branch-greedy", action="store_true",
                     help="general branches: the networks in the branches take their most likely action")
     ap.add_argument("--general-branch-weight", type=float, default=1.0,
